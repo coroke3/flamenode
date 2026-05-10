@@ -1,0 +1,58 @@
+@charset "utf-8";
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300&display=swap");
+
+.levent {
+  width: 80%;
+  margin: auto;
+}
+.eventList {
+  width: 100%;
+  height: auto;
+  display: flex;
+  flex-wrap: wrap;
+}
+.samune {
+  width: 100%;
+  height: auto;
+}
+.eventItem {
+  width: 48%;
+  margin: 0 auto 100px auto;
+}
+.eventtitle {
+  display: flex;
+  justify-content: space-between;
+  height: 40px;
+  margin: 10px 0;
+}
+
+.eventList h3 {
+  margin: auto 0;
+}
+.icon {
+  height: 100%;
+  width: auto;
+  border-radius: 50%;
+  margin: auto 0;
+}
+
+@keyframes scroll {
+  0% {
+    transform: translateX(100%);
+  }
+  100% {
+    transform: translateX(-100%);
+  }
+}
+@media screen and (max-width: 1550px) {
+}
+@media screen and (max-width: 1230px) {
+}
+@media screen and (max-width: 900px) {
+}
+@media screen and (max-width: 800px) {
+}
+@media screen and (min-width: 1150px) {
+  @media (min-aspect-ratio: 16 / 9) {
+  }
+}

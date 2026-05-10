@@ -1,0 +1,16 @@
+# Auth.js
+AUTH_SECRET="please-generate-a-strong-random-string"
+AUTH_TRUST_HOST="true"
+
+# Discord OAuth
+AUTH_DISCORD_ID=""
+AUTH_DISCORD_SECRET=""
+DISCORD_GUILD_ID=""
+DISCORD_BOT_TOKEN=""
+
+# YouTube Data API
+YOUTUBE_API_KEY=""
+
+# 公開設定
+NEXT_PUBLIC_SITE_URL="http://localhost:3000"
+NEXT_PUBLIC_SITE_NAME="FlameNode"

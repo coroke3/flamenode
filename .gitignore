@@ -1,0 +1,15 @@
+node_modules/
+.next/
+.vercel/
+.wrangler/
+out/
+dist/
+.env
+.env.local
+.dev.vars
+*.log
+.DS_Store
+.idea/
+.vscode/
+coverage/
+.cache/

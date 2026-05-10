@@ -1,0 +1,664 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300&display=swap');
+
+.filteroptions {
+	width: auto;
+	margin: auto;
+	opacity: 0;
+	display: flex;
+	justify-content: center;
+	transition: all 0.5s;
+	transition-delay: 1s;
+	position: relative;
+	top: -50px;
+
+}
+
+.filteroptions:hover {
+	opacity: 1;
+}
+
+/* ホームページ全体のスタイル */
+.homeContainer {
+	width: 100%;
+	max-width: 1400px;
+	margin: 0 auto;
+	padding: 0 1rem;
+}
+
+/* ヒーローセクション */
+.heroSection {
+	padding: 4rem 1rem;
+	text-align: center;
+	background: linear-gradient(135deg, var(--background), var(--background-secondary));
+	border-radius: 12px;
+	margin: 2rem 0;
+}
+
+.heroContent h1 {
+	font-size: 3rem;
+	margin-bottom: 1rem;
+}
+
+.heroContent p {
+	font-size: 1.2rem;
+	max-width: 600px;
+	margin: 0 auto;
+	color: var(--text-secondary);
+}
+
+/* セクションコンテナ */
+.sectionContainer {
+	margin: 3rem 0;
+}
+
+.sectionHeader {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: 1.5rem;
+}
+
+.sectionHeader h2 {
+	font-size: 1.8rem;
+	font-weight: 600;
+	margin: 10px auto 10px auto;
+
+}
+
+.viewMoreLink {
+	display: flex;
+	position: absolute;
+	right: calc(50vw - 700px);
+	margin-top: 40px;
+	align-items: center;
+	gap: 0.5rem;
+	color: var(--accent);
+	text-decoration: none;
+	font-weight: 500;
+	transition: color 0.2s;
+}
+
+.viewMoreLink:hover {
+	color: var(--accent-hover);
+}
+
+/* 水平スクロール */
+.horizontalScroll {
+	display: flex;
+	overflow-x: auto;
+	gap: 1.5rem;
+	padding: 0.5rem 0;
+	-webkit-overflow-scrolling: touch;
+	scrollbar-width: thin;
+}
+
+.horizontalScroll::-webkit-scrollbar {
+	height: 6px;
+}
+
+.horizontalScroll::-webkit-scrollbar-track {
+	background: var(--background-secondary);
+	border-radius: 10px;
+}
+
+.horizontalScroll::-webkit-scrollbar-thumb {
+	background: var(--foreground-secondary);
+	border-radius: 10px;
+}
+
+/* ビデオカード */
+.videoCard {
+	flex: 0 0 auto;
+	width: 280px;
+	border-radius: 8px;
+	overflow: hidden;
+	transition: transform 0.2s;
+}
+
+.videoCard:hover {
+	transform: translateY(-5px);
+}
+
+.thumbnailContainer {
+	position: relative;
+	width: 100%;
+	aspect-ratio: 16/9;
+	overflow: hidden;
+	border-radius: 8px;
+}
+
+.thumbnail {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	transition: transform 0.3s;
+}
+
+.videoCard:hover .thumbnail {
+	transform: scale(1.05);
+}
+
+.videoInfo {
+	padding: 0.8rem 0;
+	color: var(--foreground);
+}
+
+.videoTitle {
+	font-size: 1rem;
+	font-weight: 500;
+	margin: 0 0 0.5rem 0;
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+	color: var(--foreground);
+}
+
+.creatorInfo {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.creatorIcon {
+	width: 24px;
+	height: 24px;
+	border-radius: 50%;
+	object-fit: cover;
+}
+
+.creatorName {
+	font-size: 0.9rem;
+	color: var(--text-secondary);
+}
+
+/* クリエイターカード */
+.creatorCard {
+	flex: 0 0 auto;
+	width: 180px;
+	text-align: center;
+	transition: transform 0.2s;
+}
+
+.creatorCard:hover {
+	transform: translateY(-5px);
+}
+
+.creatorIconLarge {
+	width: 80px;
+	height: 80px;
+	margin: 0 auto 0.8rem;
+	border-radius: 50%;
+	overflow: hidden;
+}
+
+.creatorAvatar {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.placeholderIcon {
+	width: 100%;
+	height: 100%;
+	background-color: var(--background-secondary);
+	border-radius: 50%;
+}
+
+.creatorDetails {
+	padding: 0 0.5rem;
+}
+
+.creatorTitle {
+	font-size: 1rem;
+	font-weight: 500;
+	margin: 0 0 0.3rem 0;
+	white-space: nowrap;
+	overflow: hidden;
+	color: var(--foreground);
+	text-overflow: ellipsis;
+}
+
+.videoCount {
+	font-size: 0.8rem;
+	color: var(--text-secondary);
+	margin: 0;
+}
+
+/* イベントグリッド */
+.eventsGrid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+	gap: 2rem;
+}
+
+.eventSection {
+	border-radius: 12px;
+	overflow: hidden;
+	background: var(--background-secondary);
+	padding: 1.5rem;
+}
+
+.eventHeader {
+	margin-bottom: 1.2rem;
+}
+
+.eventTitleLink {
+	display: flex;
+	align-items: center;
+	gap: 1rem;
+	text-decoration: none;
+	color: inherit;
+}
+
+.eventIcon {
+	border-radius: 50%;
+	object-fit: cover;
+}
+
+.eventTitle {
+	font-size: 1.4rem;
+	font-weight: 600;
+	margin: 0;
+	height: auto;
+}
+
+.eventVideosGrid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+	gap: 1rem;
+}
+
+.eventVideoCard {
+	border-radius: 8px;
+	overflow: hidden;
+	transition: transform 0.2s;
+}
+
+.eventVideoCard:hover {
+	transform: translateY(-3px);
+}
+
+.eventThumbnailContainer {
+	position: relative;
+	width: 100%;
+	aspect-ratio: 16/9;
+	overflow: hidden;
+	border-radius: 8px;
+}
+
+.eventThumbnail {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	transition: transform 0.3s;
+}
+
+.eventVideoCard:hover .eventThumbnail {
+	transform: scale(1.05);
+}
+
+.eventVideoInfo {
+	padding: 0.6rem 0;
+}
+
+.eventVideoTitle {
+	font-size: 0.9rem;
+	font-weight: 500;
+	margin: 0 0 0.3rem 0;
+	display: -webkit-box;
+	color: var(--foreground);
+	-webkit-line-clamp: 2;
+	line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+
+.eventVideoCreator {
+	font-size: 0.8rem;
+	color: var(--text-secondary);
+	margin: 0;
+	white-space: nowrap;
+	color: var(--foreground);
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* レスポンシブ対応 */
+@media (max-width: 768px) {
+	.heroContent h1 {
+		font-size: 2.2rem;
+	}
+
+	.heroContent p {
+		font-size: 1rem;
+	}
+
+	.sectionHeader h2 {
+		font-size: 1.5rem;
+	}
+
+	.eventsGrid {
+		grid-template-columns: 1fr;
+	}
+
+	.eventVideosGrid {
+		grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+	}
+
+	.eventTitle {
+		font-size: 1.2rem;
+	}
+
+	.viewMoreLink {
+		font-size: 0.8rem;
+	}
+
+	.sectionContainer {
+		margin: 1rem auto;
+	}
+
+	.eventVideoTitle {
+		font-size: 0.75rem;
+	}
+
+	.eventVideoCreator {
+		font-size: 0.6rem;
+	}
+}
+
+@media (max-width: 480px) {
+	.videoCard {
+		width: 220px;
+	}
+
+	.creatorCard {
+		width: 140px;
+	}
+
+	.creatorIconLarge {
+		width: 60px;
+		height: 60px;
+	}
+
+	.eventVideosGrid {
+		grid-template-columns: repeat(2, 1fr);
+	}
+}
+
+@keyframes scroll {
+	0% {
+		transform: translateX(100%);
+	}
+
+	100% {
+		transform: translateX(-100%);
+	}
+}
+
+@media screen and (max-width:1490px) {
+	.viewMoreLink {
+		right: calc(3%);
+
+	}
+
+}
+
+@media screen and (max-width:1230px) {}
+
+@media screen and (max-width:900px) {}
+
+@media screen and (max-width:800px) {}
+
+@media screen and (min-width: 1150px) {
+	@media (min-aspect-ratio: 16 / 9) {}
+}
+
+/* スクロールコンテナ */
+.scrollContainer {
+	display: flex;
+	gap: 1.5rem;
+	overflow-x: auto;
+	scroll-behavior: auto;
+	scrollbar-width: none;
+	-ms-overflow-style: none;
+	padding: 1rem calc((100vw - 1400px) / 2);
+	width: 100%;
+}
+
+.scrollContainer::-webkit-scrollbar {
+	display: none;
+}
+
+.scrollWrapper {
+	position: relative;
+	width: 99vw;
+	margin-left: calc(-50vw + 50%);
+	margin-right: calc(-50vw + 50%);
+	padding: 0;
+	overflow: hidden;
+}
+
+/* グラデーションオーバーレイ */
+.scrollWrapper::before,
+.scrollWrapper::after {
+	content: '';
+	position: absolute;
+	top: 0;
+	width: 100px;
+	height: 100%;
+	z-index: 1;
+	pointer-events: none;
+}
+
+.scrollWrapper::before {
+	left: 0;
+	background: linear-gradient(to right, var(--background) 0%, transparent 100%);
+}
+
+.scrollWrapper::after {
+	right: 0;
+	background: linear-gradient(to left, var(--background) 0%, transparent 100%);
+}
+
+/* スクロールボタン */
+.scrollButton {
+	position: absolute;
+	top: 50%;
+	transform: translateY(-50%);
+	width: 48px;
+	height: 48px;
+	border-radius: 50%;
+	background: var(--background-secondary);
+	border: none;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 2;
+	transition: all 0.2s;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+	opacity: 0.9;
+}
+
+.scrollButton:not(:disabled):hover {
+	background: var(--background-hover);
+	transform: translateY(-50%) scale(1.1);
+	opacity: 1;
+}
+
+.scrollButton:disabled {
+	cursor: not-allowed;
+	opacity: 0.5;
+}
+
+.scrollButtonLeft {
+	left: 80px;
+	/* グラデーションの内側に配置 */
+}
+
+.scrollButtonRight {
+	right: 80px;
+	/* グラデーションの内側に配置 */
+}
+
+/* ボタンアイコン */
+.scrollButton svg {
+	width: 20px;
+	height: 20px;
+	color: var(--foreground);
+}
+
+/* レスポンシブ対応 */
+@media (max-width: 1400px) {
+	.scrollContainer {
+		padding: 1rem 120px;
+		/* ボタンの余白を確保 */
+	}
+
+	.scrollWrapper {
+		width: 99vw;
+		margin-left: calc(-50vw + 50%);
+		margin-right: calc(-50vw + 50%);
+
+	}
+
+	.sectionContainer {
+		margin: 3rem auto;
+		width: 96%;
+	}
+
+	.homeContainer {
+		padding: 0;
+	}
+}
+
+@media (max-width: 768px) {
+
+	.scrollWrapper::before,
+	.scrollWrapper::after {
+		width: 0px;
+	}
+
+	.scrollButtonLeft {
+		left: 20px;
+	}
+
+	.scrollButtonRight {
+		right: 20px;
+	}
+
+	.scrollContainer {
+		display: grid;
+		grid-auto-flow: column;
+		grid-template-rows: repeat(2, auto);
+		gap: 0.5rem;
+		padding: 1rem 60px;
+		overflow-x: auto;
+		scroll-snap-type: x mandatory;
+	}
+
+	/* 2行目を0.5枠分ずらす */
+	.scrollContainer>*:nth-child(2n) {
+		transform: translateX(50%);
+	}
+
+	.creatorIcon {
+		width: 15px;
+		height: 15px;
+	}
+
+	.creatorName {
+		font-size: 0.6rem;
+	}
+
+	.creatorTitle {
+		font-size: 0.7rem;
+	}
+
+	.videoCard {
+		width: 150px;
+		margin-bottom: 1rem;
+	}
+
+	.videoTitle {
+		font-size: 0.8rem;
+		margin: 0 0 0.4rem 0;
+		line-height: 0.8rem;
+		height: auto;
+	}
+
+	.scrollContainer {
+		gap: 0.5rem;
+	}
+
+	.scrollButton {
+		width: 30px;
+		height: 30px;
+	}
+
+	.creatorCard {
+		width: 100px;
+		margin-bottom: 1rem;
+	}
+}
+
+/* トレンド関連のスタイル */
+.sectionIcon {
+	margin-right: 0.5rem;
+	color: var(--primary-color, #ff6b6b);
+}
+
+.trendingBadge {
+	position: absolute;
+	top: 8px;
+	right: 8px;
+	background: linear-gradient(135deg, #ff6b6b, #ff8e53);
+	color: white;
+	padding: 4px 8px;
+	border-radius: 16px;
+	font-size: 0.7rem;
+	font-weight: 600;
+	display: flex;
+	align-items: center;
+	gap: 0.3rem;
+	box-shadow: 0 2px 4px rgba(255, 107, 107, 0.3);
+	backdrop-filter: blur(4px);
+	border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.trendingBadge svg {
+	font-size: 0.6rem;
+	animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+
+	0%,
+	100% {
+		opacity: 1;
+		transform: scale(1);
+	}
+
+	50% {
+		opacity: 0.8;
+		transform: scale(1.1);
+	}
+}
+
+/* ダークモード対応 */
+[data-theme="dark"] .trendingBadge {
+	background: linear-gradient(135deg, #e74c3c, #f39c12);
+	box-shadow: 0 2px 4px rgba(231, 76, 60, 0.4);
+}
+
+/* レスポンシブ対応 */
+@media (max-width: 768px) {
+	.trendingBadge {
+		font-size: 0.6rem;
+		padding: 3px 6px;
+		top: 6px;
+		right: 6px;
+	}
+}

@@ -1,0 +1,36 @@
+.page {
+  padding-bottom: 64px;
+}
+
+.section {
+  margin-top: 40px;
+}
+
+.eventList {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  width: min(98%, var(--content-max));
+  margin: 16px auto 0;
+}
+
+.center {
+  text-align: center;
+  margin-top: 16px;
+}
+
+.empty {
+  width: min(96%, var(--content-max));
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+.shelfBox {
+  margin-top: 16px;
+}
+
+@media (min-width: 768px) {
+  .section {
+    margin-top: 56px;
+  }
+}

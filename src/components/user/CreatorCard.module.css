@@ -1,0 +1,65 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 140px;
+  text-align: center;
+}
+
+.iconWrap {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  background-color: var(--bg-elevated);
+  transition: transform 0.18s ease, border-color 0.15s ease;
+}
+
+.card:hover .iconWrap {
+  transform: scale(1.04);
+  border-color: var(--accent-primary);
+}
+
+.icon {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.iconFallback {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: var(--text-muted);
+}
+
+.name {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  max-width: 100%;
+  padding: 0 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.15s ease;
+}
+
+.card:hover .name {
+  color: var(--accent-primary);
+}
+
+.hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+@media (min-width: 768px) {
+  .card { width: 180px; }
+  .iconWrap { width: 80px; height: 80px; }
+  .name { font-size: 13px; }
+}

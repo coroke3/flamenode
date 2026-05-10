@@ -1,0 +1,237 @@
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300&display=swap");
+
+.userlist {
+  width: 90%;
+  margin: auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.users {
+  width: 250px;
+  margin: 10px;
+  background-color: var(--background-secondary);
+  padding: 25px 20px;
+  border-radius: 10px;
+}
+
+.userbox {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.users a {
+  text-decoration: none;
+  color: var(--foreground);
+}
+
+.users p {
+  margin: 0;
+}
+
+.iconuse {
+  width: 50px;
+  height: 50px;
+  border-radius: 50px;
+}
+
+.samune {
+  width: 100%;
+  aspect-ratio: 16/9;
+  height: auto;
+}
+
+.works p {
+  margin: auto 10px;
+}
+
+.subtitle {
+  margin: auto 5px;
+  display: flex;
+  justify-self: start;
+}
+
+.private {
+  opacity: 0.5;
+  /* 薄く表示する */
+}
+
+.namebox h4 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--foreground);
+}
+
+.namebox p {
+  margin: 5px 0 0 0;
+  font-size: 12px;
+}
+
+.countb {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 15px;
+  gap: 10px;
+}
+
+.counts {
+  text-align: center;
+  flex: 1;
+}
+
+.counts p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--foreground-secondary);
+  font-weight: 500;
+}
+
+.entitle {
+  font-size: 48px;
+  font-weight: 300;
+  color: var(--foreground);
+  text-align: center;
+  margin: 20px 0;
+}
+
+.jatitle {
+  font-size: 24px;
+  font-weight: 300;
+  color: var(--foreground);
+  text-align: center;
+  margin: 0 0 30px 0;
+}
+
+.select {
+  margin: 0 calc(50% - 47px);
+  text-align: center;
+}
+
+/* 並び替えUIのスタイル */
+.sortContainer {
+  display: flex;
+  justify-content: center;
+  margin: 20px 0 30px 0;
+}
+
+.sortButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  max-width: 600px;
+}
+
+.sortButton {
+  padding: 10px 18px;
+  border: 2px solid var(--border);
+  border-radius: 20px;
+  background-color: var(--background);
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 120px;
+  text-align: center;
+}
+
+.sortButton:hover {
+  background-color: var(--background-secondary);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.sortButtonActive {
+  background-color: var(--accent);
+  color: var(--background);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.sortButtonActive:hover {
+  background-color: var(--accent);
+  color: var(--background);
+  transform: translateY(-1px);
+}
+
+/* ダークモード対応 */
+@media (prefers-color-scheme: dark) {
+  .sortButton {
+    background-color: #1a1a1a;
+    color: #ffffff;
+    border-color: #333333;
+  }
+
+  .sortButton:hover {
+    background-color: #2a2a2a;
+    border-color: #4a9eff;
+  }
+
+  .sortButtonActive {
+    background-color: #4a9eff;
+    color: #ffffff;
+    border-color: #4a9eff;
+  }
+
+  .sortButtonActive:hover {
+    background-color: #4a9eff;
+    color: #ffffff;
+  }
+}
+
+@keyframes scroll {
+  0% {
+    transform: translateX(100%);
+  }
+
+  100% {
+    transform: translateX(-100%);
+  }
+}
+
+/* レスポンシブデザイン */
+@media screen and (max-width: 768px) {
+  .sortButtons {
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    gap: 6px;
+  }
+
+  .sortButton {
+    width: 200px;
+    min-width: unset;
+    padding: 12px 18px;
+  }
+
+  .sortContainer {
+    margin: 15px 0 25px 0;
+  }
+}
+
+@media screen and (max-width: 480px) {
+  .sortButton {
+    width: 180px;
+    padding: 10px 16px;
+    font-size: 13px;
+  }
+
+  .sortContainer {
+    margin: 10px 0 20px 0;
+  }
+}
+
+@media screen and (max-width: 1550px) {}
+
+@media screen and (max-width: 1230px) {}
+
+@media screen and (max-width: 900px) {}
+
+@media screen and (max-width: 800px) {}
+
+@media screen and (min-width: 1150px) {
+  @media (min-aspect-ratio: 16 / 9) {}
+}

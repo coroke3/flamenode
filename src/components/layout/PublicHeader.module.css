@@ -1,0 +1,150 @@
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background-color: var(--bg-overlay);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: min(96%, var(--content-max));
+  margin: 0 auto;
+  height: 56px;
+  padding: 0 16px;
+}
+
+.logoLink {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.nav {
+  display: none;
+  align-items: flex-end;
+  gap: 4px;
+  flex: 1;
+}
+
+.navLink {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.navLink:hover,
+.navLink:focus-visible {
+  color: var(--text-primary);
+  background-color: var(--accent-primary-soft);
+}
+
+.navLinkPrimary {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  line-height: 1;
+}
+
+.navLinkSub {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 3px;
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+
+.right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dashLink {
+  display: none;
+}
+
+.menuToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.menuToggle:hover {
+  color: var(--text-primary);
+  background-color: var(--bg-elevated);
+}
+
+.mobile {
+  border-top: 1px solid var(--border-subtle);
+  background-color: var(--bg-surface);
+}
+
+.mobileNav {
+  display: flex;
+  flex-direction: column;
+  width: min(96%, var(--content-max));
+  margin: 0 auto;
+  padding: 8px 16px 12px;
+}
+
+.mobileItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 4px;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.mobileItem:last-of-type {
+  border-bottom: 0;
+}
+
+.mobileItemPrimary {
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.mobileItemSub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.mobileCta {
+  margin-top: 8px;
+  width: 100%;
+}
+
+@media (min-width: 768px) {
+  .bar {
+    height: 64px;
+    padding: 0 28px;
+    gap: 28px;
+  }
+
+  .nav {
+    display: flex;
+  }
+
+  .dashLink {
+    display: inline-flex;
+  }
+
+  .menuToggle {
+    display: none;
+  }
+}

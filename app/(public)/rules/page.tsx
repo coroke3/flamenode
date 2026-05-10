@@ -1,0 +1,161 @@
+import * as React from "react";
+import type { Metadata } from "next";
+import { eq } from "drizzle-orm";
+import { getDatabase } from "@/lib/cloudflare";
+import { termsVersions } from "@/lib/db/schema";
+import { Icon } from "@/components/ui/Icon";
+import { formatUnix } from "@/lib/utils/format";
+
+export const metadata: Metadata = { title: "利用規約" };
+export const dynamic = "force-dynamic";
+
+const FALLBACK = `# FlameNode 利用規約 (暫定)
+
+FlameNode は YouTube 埋め込みを利用した動画プラットフォームです。
+本サイトを利用される前に、以下の項目に同意の上、ご利用ください。
+
+## 1. アカウント
+
+* Discord 認証を介したアカウントを利用します。
+* X (Twitter) アカウントは X ID として連携でき、作者・参加者の主体として表示されます。
+
+## 2. 投稿
+
+* YouTube に公開された動画のみを取り扱います。動画ファイル本体は本サービスにアップロードされません。
+* 著作権・肖像権など第三者の権利を侵害する動画の登録は禁止します。
+
+## 3. イベント
+
+* 第三者主催のイベントは、運営の承認のもと開催できます。
+* イベント運営は、参加者の作品情報を必要な範囲で閲覧・編集できます。
+
+## 4. 禁止事項
+
+* 他者への迷惑行為、プラットフォームの安定運用を妨げる行為。
+* 不正な情報の登録、なりすまし、悪意あるリンク投稿。
+
+## 5. 免責
+
+* 本サービスは無料で提供されます。可用性・継続性を保証するものではありません。
+* 公開状態の管理は投稿者の責任で行ってください。
+
+## 6. 変更
+
+* 本規約は予告なく変更される場合があります。重要な変更があった場合は、次回投稿時に再同意を求めます。
+
+更新日: 2026-05-01`;
+
+function renderMarkdown(md: string): string {
+  // 軽量 Markdown ライク変換 (見出し・リスト・段落のみ)
+  const lines = md.split(/\r?\n/);
+  const out: string[] = [];
+  let inList = false;
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    if (line.startsWith("# ")) {
+      if (inList) { out.push("</ul>"); inList = false; }
+      out.push(`<h2>${escape(line.slice(2))}</h2>`);
+    } else if (line.startsWith("## ")) {
+      if (inList) { out.push("</ul>"); inList = false; }
+      out.push(`<h3>${escape(line.slice(3))}</h3>`);
+    } else if (line.startsWith("* ") || line.startsWith("- ")) {
+      if (!inList) { out.push("<ul>"); inList = true; }
+      out.push(`<li>${escape(line.slice(2))}</li>`);
+    } else if (line === "") {
+      if (inList) { out.push("</ul>"); inList = false; }
+      out.push("");
+    } else {
+      if (inList) { out.push("</ul>"); inList = false; }
+      out.push(`<p>${escape(line)}</p>`);
+    }
+  }
+  if (inList) out.push("</ul>");
+  return out.join("\n");
+}
+
+function escape(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+export default async function RulesPage(): Promise<React.ReactElement> {
+  const db = getDatabase();
+  let body = FALLBACK;
+  let updatedAt: number | null = null;
+  let versionLabel = "draft-2026-05";
+  if (db) {
+    try {
+      const rows = await db
+        .select()
+        .from(termsVersions)
+        .where(eq(termsVersions.status, "published"))
+        .limit(1);
+      if (rows[0]) {
+        body = rows[0].body_markdown;
+        updatedAt = rows[0].published_at ?? rows[0].updated_at;
+        versionLabel = rows[0].version_label;
+      }
+    } catch (e) {
+      console.error("[RulesPage] fetch failed", e);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        width: "min(96%, 880px)",
+        margin: "0 auto",
+        padding: "32px 16px 64px",
+      }}
+    >
+      <header style={{ marginBottom: 18, display: "flex", flexDirection: "column", gap: 4 }}>
+        <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: "0.04em" }}>
+          利用規約
+        </h1>
+        <p style={{ color: "var(--text-muted)", fontSize: 13 }}>
+          バージョン: {versionLabel}
+          {updatedAt ? ` (更新: ${formatUnix(updatedAt, { dateOnly: true })})` : ""}
+        </p>
+      </header>
+      <article
+        style={{
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border-subtle)",
+          borderRadius: "var(--radius-md)",
+          padding: 28,
+          fontSize: 14,
+          lineHeight: 1.8,
+        }}
+        dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }}
+      />
+      <section
+        id="event-host"
+        style={{
+          marginTop: 28,
+          padding: 22,
+          border: "1px solid var(--border-subtle)",
+          background: "var(--bg-surface)",
+          borderRadius: "var(--radius-md)",
+        }}
+      >
+        <h2
+          style={{
+            fontSize: 18,
+            fontWeight: 700,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <Icon name="calendar" size={16} aria-hidden /> イベント開催相談
+        </h2>
+        <p style={{ marginTop: 10, fontSize: 13, color: "var(--text-secondary)" }}>
+          第三者主催イベントを開催したい場合は、Discord またはお問い合わせから運営にご連絡ください。
+          管理者が承認した X ID にイベント編集許可者ロールを付与します。
+        </p>
+      </section>
+    </div>
+  );
+}

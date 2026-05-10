@@ -1,0 +1,178 @@
+.card {
+  display: block;
+  width: 200px;
+  transition: transform 0.18s ease;
+}
+
+.card:hover {
+  transform: translateY(-4px);
+}
+
+.card:hover .thumb {
+  transform: scale(1.04);
+}
+
+.thumbWrap {
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background-color: var(--bg-elevated);
+  position: relative;
+}
+
+.thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.25s ease;
+}
+
+.thumbFallback {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: var(--text-muted);
+}
+
+.title {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--text-primary);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  transition: color 0.15s ease;
+}
+
+.card:hover .title {
+  color: var(--accent-primary);
+}
+
+.author {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  color: var(--text-muted);
+}
+
+.authorIcon,
+.authorIconFallback {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.authorIcon {
+  object-fit: cover;
+  background-color: var(--bg-elevated);
+}
+
+.authorIconFallback {
+  background-color: var(--bg-elevated);
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+}
+
+.authorName {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (min-width: 700px) {
+  .card { width: 240px; }
+  .title { font-size: 14px; }
+  .authorName { font-size: 12px; }
+}
+
+@media (min-width: 1024px) {
+  .card { width: 280px; }
+  .title { font-size: 15px; }
+}
+
+/* compact (棚内ネスト用 / クリエイターのおすすめなど) */
+.card.compact { width: 200px; }
+@media (min-width: 700px) { .card.compact { width: 220px; } }
+@media (min-width: 1024px) { .card.compact { width: 220px; } }
+
+/* list 行 (関連動画レール) */
+.list {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 6px 4px;
+  border-radius: var(--radius-sm);
+  transition: background-color 0.15s ease;
+}
+
+.list:hover {
+  background-color: var(--bg-elevated);
+}
+
+.list:hover .listTitle {
+  color: var(--accent-primary);
+}
+
+.listThumb {
+  width: 160px;
+  flex-shrink: 0;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-elevated);
+}
+
+.listThumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.25s ease;
+}
+
+.list:hover .listThumb img {
+  transform: scale(1.04);
+}
+
+.listBody {
+  flex: 1;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.listTitle {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--text-primary);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  transition: color 0.15s ease;
+}
+
+.listAuthor {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statusBadge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+}

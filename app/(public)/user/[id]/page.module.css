@@ -1,0 +1,98 @@
+.page {
+  width: min(96%, var(--content-max));
+  margin: 0 auto;
+  padding: 32px 16px 64px;
+}
+
+.profile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 14px;
+  padding: 32px 24px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.avatar,
+.avatarFb {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  border: 2px solid var(--border-subtle);
+}
+
+.avatar {
+  object-fit: cover;
+  background-color: var(--bg-elevated);
+}
+
+.avatarFb {
+  background-color: var(--bg-elevated);
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+}
+
+.name {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.handle {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.bio {
+  max-width: 600px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
+.links {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.section {
+  margin-top: 36px;
+}
+
+.sectionTitle {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-bottom: 14px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+@media (min-width: 700px) {
+  .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (min-width: 1024px) {
+  .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+.grid > div { width: 100%; }
+
+@media (min-width: 768px) {
+  .profile {
+    flex-direction: row;
+    text-align: left;
+    align-items: flex-start;
+  }
+}

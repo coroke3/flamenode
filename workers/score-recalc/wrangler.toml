@@ -1,0 +1,12 @@
+name = "flamenode-score-recalc"
+main = "index.ts"
+compatibility_date = "2026-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[triggers]
+crons = ["30 */3 * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "flamenode_db"
+database_id = "00000000-0000-0000-0000-000000000000"

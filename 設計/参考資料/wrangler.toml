@@ -1,0 +1,17 @@
+name = "pvsf-system"
+compatibility_date = "2024-04-03"
+pages_build_output_dir = ".next"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "pvsf_db"
+database_id = "636fce42-59b7-4833-9c28-d957b949966a"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "pvsf-storage"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "33f5822dc413445eafe0c1d7fa2aa841"

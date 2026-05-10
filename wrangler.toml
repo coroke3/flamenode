@@ -1,0 +1,36 @@
+name = "flamenode"
+compatibility_date = "2026-01-01"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = ".next"
+
+# Cloudflare Pages (Next.js) で使う環境変数の例
+[vars]
+NEXT_PUBLIC_SITE_NAME = "FlameNode"
+NEXT_PUBLIC_SITE_DESCRIPTION = "映像（フレーム）の結節点（ノード）。YouTube埋め込みを利用した動画プラットフォーム。"
+
+# D1 (SQL DB)
+[[d1_databases]]
+binding = "DB"
+database_name = "flamenode_db"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+# R2 (Object Storage)
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "flamenode-storage"
+
+# KV (cache / cost guard flags)
+[[kv_namespaces]]
+binding = "KV"
+id = "00000000000000000000000000000000"
+
+# Durable Object - 閲覧数集約
+[[durable_objects.bindings]]
+name = "VIEW_AGGREGATOR"
+class_name = "ViewAggregator"
+script_name = "flamenode"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["ViewAggregator"]
