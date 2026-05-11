@@ -36,14 +36,39 @@ declare global {
 }
 
 const YT_API_SRC = "https://www.youtube.com/iframe_api";
+const QUALITY_ORDER = [
+  "highres",
+  "hd2160",
+  "hd1440",
+  "hd1080",
+  "hd720",
+  "large",
+  "medium",
+  "small",
+  "tiny",
+];
 
-/**
- * 独自プレイヤー: YouTube iframe を FlameNode の独自コントロール層で包む。
- *  - 再生 / 一時停止 / シーク / 1/30秒コマ送り / 音量 / 全画面 / YouTube で開く
- *  - チャプターマーカーをシークバー上に小さな点として表示
- *  - マウス停止 or 領域外移動でオーバーレイを即座に非表示
- *  - キーボード: Space (再生/停止), 左右 (5秒シーク), `,` `.` (1/30秒コマ送り)
- */
+function pickBestQuality(levels: string[] | undefined): string {
+  if (!levels || levels.length === 0) return "hd2160";
+  return QUALITY_ORDER.find((q) => levels.includes(q)) ?? levels[0] ?? "hd2160";
+}
+
+function qualityLabel(q: string | null): string {
+  const labels: Record<string, string> = {
+    highres: "MAX",
+    hd2160: "4K",
+    hd1440: "1440p",
+    hd1080: "1080p",
+    hd720: "720p",
+    large: "480p",
+    medium: "360p",
+    small: "240p",
+    tiny: "144p",
+    auto: "AUTO",
+  };
+  return labels[q ?? ""] ?? "MAX";
+}
+
 export function YoutubePlayer({
   youtubeId,
   title,
@@ -59,10 +84,24 @@ export function YoutubePlayer({
   const [currentTime, setCurrentTime] = React.useState(0);
   const [duration, setDuration] = React.useState(0);
   const [muted, setMuted] = React.useState(false);
+  const [volume, setVolume] = React.useState(100);
+  const [quality, setQuality] = React.useState<string | null>(null);
   const [overlayVisible, setOverlayVisible] = React.useState(true);
   const hideTimer = React.useRef<number | null>(null);
 
-  const accent = accentColor || undefined;
+  const requestBestQuality = React.useCallback(() => {
+    const p = playerRef.current;
+    if (!p) return;
+    try {
+      const levels = p.getAvailableQualityLevels?.() as string[] | undefined;
+      const best = pickBestQuality(levels);
+      p.setPlaybackQualityRange?.(best, best);
+      p.setPlaybackQuality?.(best);
+      setQuality(best);
+    } catch {
+      /* YouTube may ignore quality requests for some videos/devices. */
+    }
+  }, []);
 
   React.useEffect(() => {
     let disposed = false;
@@ -72,6 +111,7 @@ export function YoutubePlayer({
       const YT = window.YT;
       if (!YT?.Player) return;
       playerRef.current = new YT.Player(containerId, {
+        host: "https://www.youtube-nocookie.com",
         videoId: youtubeId,
         playerVars: {
           rel: 0,
@@ -80,25 +120,37 @@ export function YoutubePlayer({
           controls: 0,
           disablekb: 1,
           fs: 0,
+          iv_load_policy: 3,
+          cc_load_policy: 0,
           enablejsapi: 1,
+          vq: "hd2160",
+          origin: window.location.origin,
         },
         events: {
           onReady: () => {
             if (disposed) return;
+            const p = playerRef.current;
             setReady(true);
-            setDuration(playerRef.current?.getDuration?.() ?? 0);
+            setDuration(p?.getDuration?.() ?? 0);
+            setVolume(p?.getVolume?.() ?? 100);
+            setMuted(p?.isMuted?.() ?? false);
+            requestBestQuality();
           },
           onStateChange: (e: any) => {
             const state = e?.data;
-            if (state === YT.PlayerState.PLAYING) setPlaying(true);
-            else if (
+            if (state === YT.PlayerState.PLAYING) {
+              setPlaying(true);
+              setDuration(playerRef.current?.getDuration?.() ?? 0);
+              requestBestQuality();
+            } else if (
               state === YT.PlayerState.PAUSED ||
               state === YT.PlayerState.ENDED
-            )
+            ) {
               setPlaying(false);
-            if (state === YT.PlayerState.PLAYING && playerRef.current) {
-              setDuration(playerRef.current.getDuration?.() ?? 0);
             }
+          },
+          onPlaybackQualityChange: (e: any) => {
+            if (typeof e?.data === "string") setQuality(e.data);
           },
         },
       });
@@ -123,20 +175,23 @@ export function YoutubePlayer({
 
     return () => {
       disposed = true;
+      if (hideTimer.current) window.clearTimeout(hideTimer.current);
       try {
         playerRef.current?.destroy?.();
       } catch {
         /* noop */
       }
     };
-  }, [youtubeId, containerId]);
+  }, [youtubeId, containerId, requestBestQuality]);
 
   React.useEffect(() => {
     if (!ready) return;
     const id = window.setInterval(() => {
       try {
-        const t = playerRef.current?.getCurrentTime?.();
+        const p = playerRef.current;
+        const t = p?.getCurrentTime?.();
         if (typeof t === "number") setCurrentTime(t);
+        setMuted(p?.isMuted?.() ?? false);
       } catch {
         /* noop */
       }
@@ -144,12 +199,34 @@ export function YoutubePlayer({
     return () => window.clearInterval(id);
   }, [ready]);
 
+  React.useEffect(() => {
+    if (!ready) return;
+    const id = window.setInterval(requestBestQuality, 3500);
+    return () => window.clearInterval(id);
+  }, [ready, requestBestQuality]);
+
   const showOverlay = React.useCallback(() => {
     setOverlayVisible(true);
     if (hideTimer.current) window.clearTimeout(hideTimer.current);
     hideTimer.current = window.setTimeout(() => setOverlayVisible(false), 2400);
   }, []);
+
   const hideOverlay = () => setOverlayVisible(false);
+
+  const setPlayerVolume = React.useCallback((next: number) => {
+    const value = Math.max(0, Math.min(100, Math.round(next)));
+    const p = playerRef.current;
+    setVolume(value);
+    if (!p) return;
+    p.setVolume?.(value);
+    if (value === 0) {
+      p.mute?.();
+      setMuted(true);
+    } else {
+      p.unMute?.();
+      setMuted(false);
+    }
+  }, []);
 
   React.useEffect(() => {
     if (!ready) return;
@@ -172,6 +249,14 @@ export function YoutubePlayer({
         case "ArrowLeft":
           p.seekTo?.(Math.max(0, p.getCurrentTime?.() - 5), true);
           break;
+        case "ArrowUp":
+          ev.preventDefault();
+          setPlayerVolume(volume + 5);
+          break;
+        case "ArrowDown":
+          ev.preventDefault();
+          setPlayerVolume(volume - 5);
+          break;
         case ",":
           p.pauseVideo?.();
           p.seekTo?.(Math.max(0, p.getCurrentTime?.() - 1 / 30), true);
@@ -191,7 +276,7 @@ export function YoutubePlayer({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, playing]);
+  }, [ready, playing, volume, setPlayerVolume]);
 
   const togglePlay = () => {
     const p = playerRef.current;
@@ -199,20 +284,26 @@ export function YoutubePlayer({
     if (playing) p.pauseVideo?.();
     else p.playVideo?.();
   };
+
   const seekTo = (sec: number) => {
     playerRef.current?.seekTo?.(Math.max(0, Math.min(duration, sec)), true);
   };
+
   const toggleMute = () => {
     const p = playerRef.current;
     if (!p) return;
     if (muted) {
+      const restored = volume === 0 ? 40 : volume;
       p.unMute?.();
+      p.setVolume?.(restored);
+      setVolume(restored);
       setMuted(false);
     } else {
       p.mute?.();
       setMuted(true);
     }
   };
+
   const requestFullscreen = () => {
     const el = wrapperRef.current;
     if (!el) return;
@@ -222,6 +313,7 @@ export function YoutubePlayer({
       el.requestFullscreen?.();
     }
   };
+
   const handleSeekBar = (ev: React.MouseEvent<HTMLDivElement>) => {
     if (!duration) return;
     const rect = ev.currentTarget.getBoundingClientRect();
@@ -235,9 +327,9 @@ export function YoutubePlayer({
       (c.visibility === "public" || c.is_owner || c.marker_kind === "chapter"),
   );
 
-  const accentStyle = accent
+  const accentStyle = accentColor
     ? ({
-        ["--accent-primary" as never]: accent,
+        ["--accent-primary" as never]: accentColor,
       } as React.CSSProperties)
     : undefined;
 
@@ -264,10 +356,11 @@ export function YoutubePlayer({
         <Icon name={playing ? "pause" : "play"} size={28} />
       </button>
 
-      <div
-        className={cn(styles.topBar, !overlayVisible && styles.hidden)}
-      >
+      <div className={cn(styles.topBar, !overlayVisible && styles.hidden)}>
         <h2 className={styles.titleText}>{title}</h2>
+        <span className={styles.qualityBadge} title="最高画質を優先">
+          {qualityLabel(quality)}
+        </span>
         <a
           href={youtubeWatchUrl(youtubeId)}
           target="_blank"
@@ -279,9 +372,7 @@ export function YoutubePlayer({
         </a>
       </div>
 
-      <div
-        className={cn(styles.bottomBar, !overlayVisible && styles.hidden)}
-      >
+      <div className={cn(styles.bottomBar, !overlayVisible && styles.hidden)}>
         <div
           className={styles.seekBar}
           onClick={handleSeekBar}
@@ -334,7 +425,7 @@ export function YoutubePlayer({
           <button
             type="button"
             onClick={() => seekTo(currentTime - 1 / 30)}
-            aria-label="1コマ戻る"
+            aria-label="1フレーム戻る"
             title="1/30秒戻る (,)"
             className={styles.iconBtn}
           >
@@ -343,7 +434,7 @@ export function YoutubePlayer({
           <button
             type="button"
             onClick={() => seekTo(currentTime + 1 / 30)}
-            aria-label="1コマ進む"
+            aria-label="1フレーム進む"
             title="1/30秒進む (.)"
             className={styles.iconBtn}
           >
@@ -353,14 +444,25 @@ export function YoutubePlayer({
             {formatDuration(currentTime)} / {formatDuration(duration)}
           </span>
           <span className={styles.spacer} />
-          <button
-            type="button"
-            onClick={toggleMute}
-            aria-label={muted ? "ミュート解除" : "ミュート"}
-            className={styles.iconBtn}
-          >
-            <Icon name={muted ? "mute" : "volume"} size={14} />
-          </button>
+          <div className={styles.volumeGroup}>
+            <button
+              type="button"
+              onClick={toggleMute}
+              aria-label={muted ? "ミュート解除" : "ミュート"}
+              className={styles.iconBtn}
+            >
+              <Icon name={muted || volume === 0 ? "mute" : "volume"} size={14} />
+            </button>
+            <input
+              aria-label="音量"
+              className={styles.volumeSlider}
+              type="range"
+              min={0}
+              max={100}
+              value={muted ? 0 : volume}
+              onChange={(e) => setPlayerVolume(Number(e.target.value))}
+            />
+          </div>
           <button
             type="button"
             onClick={requestFullscreen}

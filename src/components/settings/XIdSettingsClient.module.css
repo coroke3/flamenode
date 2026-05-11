@@ -1,0 +1,52 @@
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.input {
+  flex: 1 1 200px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px var(--accent-primary-soft);
+}
+
+.msgOk {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.msgErr {
+  margin: 0;
+  font-size: 13px;
+  color: var(--accent-danger);
+}
+
+.pendingList {
+  margin: 0;
+  padding-left: 1.1em;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.pendingList li {
+  margin-bottom: 4px;
+}

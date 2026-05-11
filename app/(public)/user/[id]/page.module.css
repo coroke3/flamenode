@@ -16,6 +16,19 @@
   border-radius: var(--radius-md);
 }
 
+.profileBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.eyebrow {
+  margin-bottom: 2px;
+  color: var(--accent-primary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+
 .avatar,
 .avatarFb {
   width: 96px;
@@ -49,6 +62,7 @@
 
 .bio {
   max-width: 600px;
+  margin-top: 10px;
   line-height: 1.7;
   color: var(--text-secondary);
   font-size: 13px;
@@ -60,6 +74,7 @@
   gap: 8px;
   flex-wrap: wrap;
   justify-content: center;
+  margin-top: 14px;
 }
 
 .section {

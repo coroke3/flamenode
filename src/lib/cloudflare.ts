@@ -26,14 +26,35 @@ let memoizedDb: { ref: D1Database | null; db: DB | null } = {
 };
 
 export function getEnv(): FlameNodeEnv {
-  // Cloudflare Pages ランタイム
-  const ctx = (globalThis as Record<string | symbol, unknown>)[
-    Symbol.for("__cloudflare-request-context__")
-  ] as { env?: FlameNodeEnv } | undefined;
+  const g = globalThis as Record<string | symbol, unknown>;
+
+  // 1) Cloudflare Pages ランタイム
+  const ctx = g[Symbol.for("__cloudflare-request-context__")] as
+    | { env?: FlameNodeEnv }
+    | undefined;
   if (ctx?.env) return ctx.env as FlameNodeEnv;
 
-  // process.env から擬似的に組み立てる (next dev 等)
-  const env = (process.env as unknown) as Partial<FlameNodeEnv>;
+  // 2) instrumentation.ts で初期化された Miniflare バインディング
+  const local = g.__FLAMENODE_LOCAL_BINDINGS as
+    | { DB: D1Database; BUCKET: R2Bucket; KV: KVNamespace }
+    | undefined;
+  if (local) {
+    return {
+      DB: local.DB,
+      BUCKET: local.BUCKET,
+      KV: local.KV,
+      AUTH_SECRET: process.env.AUTH_SECRET,
+      AUTH_DISCORD_ID: process.env.AUTH_DISCORD_ID,
+      AUTH_DISCORD_SECRET: process.env.AUTH_DISCORD_SECRET,
+      DISCORD_GUILD_ID: process.env.DISCORD_GUILD_ID,
+      DISCORD_BOT_TOKEN: process.env.DISCORD_BOT_TOKEN,
+      YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY,
+      NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
+    };
+  }
+
+  // 3) process.env から擬似的に組み立てる (どちらも無いとき: D1/R2/KV は使えない)
+  const env = process.env as unknown as Partial<FlameNodeEnv>;
   return {
     DB: env.DB as D1Database,
     BUCKET: env.BUCKET as R2Bucket,

@@ -10,6 +10,8 @@ const nextConfig = {
       { protocol: "https", hostname: "pbs.twimg.com" },
     ],
   },
+  // Miniflare は Next.js の RSC/Edge bundle に入れない (Node.js 側でだけ動かす)
+  serverExternalPackages: ["miniflare", "@cloudflare/workerd"],
   experimental: {
     serverActions: {
       bodySizeLimit: "8mb",

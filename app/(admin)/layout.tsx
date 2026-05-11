@@ -9,6 +9,7 @@ import { Icon } from "@/components/ui/Icon";
 const ADMIN_NAV: { href: string; label: string; icon: React.ReactNode }[] = [
   { href: "/admin", label: "総合ダッシュボード", icon: <Icon name="grid" size={14} /> },
   { href: "/admin/users", label: "ユーザー", icon: <Icon name="users" size={14} /> },
+  { href: "/admin/x-link-requests", label: "X 連携申請", icon: <Icon name="user" size={14} /> },
   { href: "/admin/videos", label: "作品", icon: <Icon name="youtube" size={14} /> },
   { href: "/admin/events", label: "イベント", icon: <Icon name="calendar" size={14} /> },
   { href: "/admin/announcements", label: "お知らせ", icon: <Icon name="alert" size={14} /> },

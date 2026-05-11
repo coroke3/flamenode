@@ -1,7 +1,8 @@
 name = "flamenode"
 compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
-pages_build_output_dir = ".next"
+# next-on-pages が出力する静的アセット先
+pages_build_output_dir = ".vercel/output/static"
 
 # Cloudflare Pages (Next.js) で使う環境変数の例
 [vars]

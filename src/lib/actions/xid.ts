@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import {
@@ -17,18 +17,14 @@ export interface XIdActionResult {
   message?: string;
 }
 
-/**
- * アクティブ X ID を切り替える。
- * 承認済 (`approved`) かつ自分の Discord に紐づく X ID にのみ切り替えできる。
- */
 export async function setActiveXId(
   formData: FormData,
 ): Promise<XIdActionResult> {
   const session = await auth().catch(() => null);
   const u = session?.user as { id?: string } | undefined;
-  if (!u?.id) return { ok: false, message: "認証が必要です。" };
+  if (!u?.id) return { ok: false, message: "ログインが必要です。" };
 
-  const xUserId = String(formData.get("x_user_id") ?? "");
+  const xUserId = String(formData.get("x_user_id") ?? "").trim();
   if (!xUserId) return { ok: false, message: "X ID が指定されていません。" };
 
   const db = getDatabase();
@@ -39,10 +35,16 @@ export async function setActiveXId(
   )[0];
   if (!xRow) return { ok: false, message: "X ID が見つかりません。" };
   if (xRow.linked_discord_user_id !== u.id) {
-    return { ok: false, message: "この X ID はこのアカウントに紐づいていません。" };
+    return {
+      ok: false,
+      message: "この X ID は現在のアカウントに紐づいていません。",
+    };
   }
   if (xRow.approval_status !== "approved") {
-    return { ok: false, message: "承認待ちまたは却下中の X ID です。" };
+    return {
+      ok: false,
+      message: "承認済みの X ID だけをアクティブにできます。",
+    };
   }
 
   const now = Math.floor(Date.now() / 1000);
@@ -61,28 +63,29 @@ export async function setActiveXId(
     created_at: now,
   });
 
+  revalidatePath("/");
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/settings");
-  return { ok: true };
+  return { ok: true, message: "アクティブ X ID を切り替えました。" };
 }
 
-/**
- * X ID 連携リクエストを作成する。
- * 設計: x_account_link_requests に `pending` で投入し、管理者または運営の承認を待つ。
- */
 export async function requestXIdLink(
   formData: FormData,
 ): Promise<XIdActionResult> {
   const session = await auth().catch(() => null);
   const u = session?.user as { id?: string } | undefined;
-  if (!u?.id) return { ok: false, message: "認証が必要です。" };
+  if (!u?.id) return { ok: false, message: "ログインが必要です。" };
 
   const requestedXId = String(formData.get("x_id") ?? "")
     .trim()
-    .replace(/^@/, "");
+    .replace(/^@+/, "");
   if (!requestedXId || !/^[A-Za-z0-9_]{1,20}$/.test(requestedXId)) {
-    return { ok: false, message: "X ID の形式が正しくありません。" };
+    return {
+      ok: false,
+      message: "X ID は英数字とアンダースコア 1 から 20 文字で入力してください。",
+    };
   }
+
   const linkType = String(formData.get("link_type") ?? "new") as
     | "new"
     | "merge"
@@ -90,6 +93,45 @@ export async function requestXIdLink(
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
+
+  const existingUser = (
+    await db.select().from(xUsers).where(eq(xUsers.id, requestedXId)).limit(1)
+  )[0];
+  if (existingUser?.linked_discord_user_id === u.id) {
+    return {
+      ok: false,
+      message: "この X ID はすでに現在のアカウントに紐づいています。",
+    };
+  }
+  if (
+    existingUser?.linked_discord_user_id &&
+    existingUser.linked_discord_user_id !== u.id
+  ) {
+    return {
+      ok: false,
+      message: "この X ID は別の Discord アカウントに紐づいています。",
+    };
+  }
+
+  const dupPending = (
+    await db
+      .select()
+      .from(xAccountLinkRequests)
+      .where(
+        and(
+          eq(xAccountLinkRequests.discord_user_id, u.id),
+          eq(xAccountLinkRequests.requested_x_id, requestedXId),
+          eq(xAccountLinkRequests.status, "pending"),
+        )!,
+      )
+      .limit(1)
+  )[0];
+  if (dupPending) {
+    return {
+      ok: true,
+      message: "同じ X ID の連携申請がすでに承認待ちです。",
+    };
+  }
 
   const now = Math.floor(Date.now() / 1000);
   const id = generateId("xreq");
@@ -114,5 +156,8 @@ export async function requestXIdLink(
   });
 
   revalidatePath("/dashboard/settings");
-  return { ok: true };
+  return {
+    ok: true,
+    message: "連携申請を受け付けました。承認後、一覧に表示されます。",
+  };
 }

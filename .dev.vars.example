@@ -1,6 +1,9 @@
 # Auth.js
 AUTH_SECRET="please-generate-a-strong-random-string"
 AUTH_TRUST_HOST="true"
+# OAuth のリダイレクト組み立てに必須 (未設定だと signIn で Invalid URL)
+# ポートを変えた場合はここも合わせる (例: http://localhost:3001)
+AUTH_URL="http://localhost:3000"
 
 # Discord OAuth
 AUTH_DISCORD_ID=""

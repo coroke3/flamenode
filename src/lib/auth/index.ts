@@ -6,6 +6,30 @@ import { getDatabase } from "@/lib/cloudflare";
 import { accounts, sessions, users, verificationTokens } from "@/lib/db/schema";
 
 /**
+ * Auth.js v5 は OAuth 認可 URL 組み立てに `AUTH_URL`（または `NEXTAUTH_URL`）を参照する。
+ * 未設定だと `new URL(undefined)` となり `Configuration` / `Invalid URL` になる。
+ * ローカルでは `NEXT_PUBLIC_SITE_URL` を既定のベース URL に使う。
+ */
+function ensureAuthBaseUrlEnv(): void {
+  if (process.env.AUTH_URL || process.env.NEXTAUTH_URL) return;
+  const fromPublic = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  const vercel = process.env.VERCEL_URL?.trim();
+  const fromVercel =
+    vercel && !/^https?:\/\//i.test(vercel) ? `https://${vercel}` : vercel;
+  const candidate = (fromPublic || fromVercel || "http://localhost:3000").trim();
+  try {
+    const origin = new URL(candidate).origin;
+    process.env.AUTH_URL = origin;
+    process.env.NEXTAUTH_URL = origin;
+  } catch {
+    process.env.AUTH_URL = "http://localhost:3000";
+    process.env.NEXTAUTH_URL = "http://localhost:3000";
+  }
+}
+
+ensureAuthBaseUrlEnv();
+
+/**
  * NextAuth v5 (Auth.js) の設定。
  *
  * Cloudflare Pages のランタイムでは D1 が getRequestContext から渡るため、
@@ -20,7 +44,10 @@ export function buildAuthConfig(): NextAuthConfig {
       Discord({
         clientId: process.env.AUTH_DISCORD_ID,
         clientSecret: process.env.AUTH_DISCORD_SECRET,
+        // `authorization` だけ `params` を渡すとデフォルトの `url` が消え、
+        // Auth.js が OIDC discovery へ落ちて `new URL(undefined)` → Invalid URL になる。
         authorization: {
+          url: "https://discord.com/api/oauth2/authorize",
           params: { scope: "identify email guilds" },
         },
       }),

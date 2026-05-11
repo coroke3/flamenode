@@ -1,11 +1,19 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
-import { xUsers as xUsersTable } from "@/lib/db/schema";
+import {
+  xAccountLinkRequests as linkReqTable,
+  xUsers as xUsersTable,
+} from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth/guard";
 import { Icon } from "@/components/ui/Icon";
+import {
+  SetActiveXButton,
+  XIdLinkForm,
+} from "@/components/settings/XIdSettingsClient";
+import { formatUnix } from "@/lib/utils/format";
 
 export const metadata: Metadata = { title: "設定" };
 export const dynamic = "force-dynamic";
@@ -21,6 +29,19 @@ export default async function SettingsPage(): Promise<React.ReactElement> {
         .select()
         .from(xUsersTable)
         .where(eq(xUsersTable.linked_discord_user_id, user.id))
+    : [];
+
+  const pendingLinkRequests = db
+    ? await db
+        .select()
+        .from(linkReqTable)
+        .where(
+          and(
+            eq(linkReqTable.discord_user_id, user.id),
+            eq(linkReqTable.status, "pending"),
+          )!,
+        )
+        .orderBy(desc(linkReqTable.requested_at))
     : [];
 
   return (
@@ -81,18 +102,58 @@ export default async function SettingsPage(): Promise<React.ReactElement> {
       </section>
 
       <section className="fn-card">
-        <div className="fn-card-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div className="fn-card-header">
           <h2 className="fn-card-title">連携 X ID</h2>
-          <button type="button" className="fn-btn fn-btn-primary fn-btn-sm">
-            <Icon name="plus" size={12} aria-hidden /> X ID を追加
-          </button>
         </div>
         <div className="fn-card-body">
+          <XIdLinkForm />
+          <p className="fn-muted fn-text-sm" style={{ marginTop: 12 }}>
+            申請後は運営（管理者）の承認が必要です。管理者の方は{" "}
+            <Link href="/admin/x-link-requests">X 連携申請</Link> から承認できます。
+          </p>
+
+          {pendingLinkRequests.length > 0 ? (
+            <div style={{ marginTop: 20 }}>
+              <h3
+                className="fn-text-sm"
+                style={{
+                  margin: "0 0 8px",
+                  fontWeight: 700,
+                  color: "var(--text-secondary)",
+                }}
+              >
+                承認待ちの申請
+              </h3>
+              <ul
+                style={{
+                  margin: 0,
+                  paddingLeft: "1.1em",
+                  fontSize: 13,
+                  color: "var(--text-muted)",
+                }}
+              >
+                {pendingLinkRequests.map((r) => (
+                  <li key={r.id}>
+                    @{r.requested_x_id}
+                    <span style={{ opacity: 0.75 }}>
+                      {" "}
+                      · {formatUnix(r.requested_at, { dateOnly: true })}{" "}
+                      {formatUnix(r.requested_at, { timeOnly: true })}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           {xIds.length === 0 ? (
-            <p className="fn-muted fn-text-sm">
-              X ID がまだ連携されていません。
+            <p
+              className="fn-muted fn-text-sm"
+              style={{ marginTop: pendingLinkRequests.length ? 16 : 20 }}
+            >
+              承認済みの X ID はまだありません。
               <br />
-              X ID を追加すると、作品の投稿や合作メンバー指定ができるようになります。
+              上のフォームから連携を申請するか、運営の承認をお待ちください。
             </p>
           ) : (
             <table className="fn-table">
@@ -122,10 +183,10 @@ export default async function SettingsPage(): Promise<React.ReactElement> {
                     <td>
                       {x.id === user.active_x_user_id ? (
                         <Icon name="check" size={14} aria-label="アクティブ" />
+                      ) : x.approval_status === "approved" ? (
+                        <SetActiveXButton xUserId={x.id} />
                       ) : (
-                        <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm">
-                          切替
-                        </button>
+                        <span className="fn-muted fn-text-sm">—</span>
                       )}
                     </td>
                     <td>

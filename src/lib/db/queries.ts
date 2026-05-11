@@ -160,21 +160,23 @@ export async function fetchVideoMembers(db: DB, videoId: string) {
 
 /** ピックアップクリエイター候補 (個人作1件以上 or 合作参加2件以上)。 */
 export async function fetchPickupCreators(db: DB, limit = 40) {
-  // 集計: 個人作品数 + 合作参加数 で N 以上のクリエイターを抽出
+  // 集計: 個人作品数 + 合作参加数で絞る。
+  // Drizzle の sql 断片内で ${xUsers.id} 等を埋め込むと D1 が `id` だけに展開し
+  // 「ambiguous column name: id」になることがあるため、相関は生 SQL で明示する。
   return db
     .select({
       id: xUsers.id,
       x_name: xUsers.x_name,
       icon_url: xUsers.icon_url,
       video_count: sql<number>`(
-        SELECT COUNT(DISTINCT v.id) FROM videos v
-        WHERE v.creator_id = ${xUsers.id}
+        SELECT COUNT(DISTINCT v.id) FROM videos AS v
+        WHERE v.creator_id = "x_users"."id"
           AND v.status = 'public' AND v.is_deleted = 0
       )`,
       collab_count: sql<number>`(
-        SELECT COUNT(DISTINCT vm.video_id) FROM video_members vm
-        JOIN videos v ON v.id = vm.video_id
-        WHERE vm.x_user_id = ${xUsers.id}
+        SELECT COUNT(DISTINCT vm.video_id) FROM video_members AS vm
+        INNER JOIN videos AS v ON v.id = vm.video_id
+        WHERE vm.x_user_id = "x_users"."id"
           AND v.status = 'public' AND v.is_deleted = 0
       )`,
     })

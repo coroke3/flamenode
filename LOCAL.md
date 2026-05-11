@@ -3,6 +3,37 @@
 このドキュメントは、FlameNode を **手元の PC で動かして動作確認する**ための手順をまとめたものです。
 本番デプロイ手順は `DEPLOY.md` を参照してください。ここではローカルで完結する作業だけを扱います。
 
+> **このリポジトリでの実施状況 (自動セットアップ済み)**
+>
+> - [x] `npm install` 完了
+> - [x] `.dev.vars` を作成、`AUTH_SECRET` 自動生成済み
+> - [x] Git for Windows (bash 同梱) を `winget install` で導入
+> - [x] `@cloudflare/next-on-pages` を試したが Windows で不安定なため **Miniflare 内蔵モード**に切替
+> - [x] `instrumentation.ts` を追加し、`next dev` 起動時に Miniflare で D1/R2/KV を自動起動
+> - [x] 起動時にローカル D1 へマイグレーションを冪等 apply、`system_settings` も自動シード
+> - [x] `npm run dev:local` で起動できる状態 (http://localhost:3000/、`/list`, `/event`, `/api/videos`, `/api/auth/providers` すべて 200 で応答することを確認済み)
+> - [ ] **要対応**: Discord Developer Portal でアプリを作り、`.dev.vars` の `AUTH_DISCORD_ID` / `AUTH_DISCORD_SECRET` を埋める
+> - [ ] **要対応**: ログイン後、自分を `role='admin'` に SQL で昇格 (`/admin` を確認したい場合のみ)
+>
+> 残作業はこの 2 つだけです。詳細は本書の §5 と §6 を参照してください。
+
+---
+
+## ⭐ いま動かす最短手順
+
+開発サーバはすでにバックグラウンドで起動済みです。停止したい/再起動したい場合は次のコマンドを使ってください。
+
+```powershell
+# 動作中のサーバを止める
+Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match "next.*dev|load-dev-vars" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+
+# 改めて起動 (Miniflare の D1/R2/KV が自動で立ち上がり、migrations も冪等に当たる)
+npm run dev:local
+```
+
+ブラウザで http://localhost:3000/ にアクセスすると、トップ・一覧・イベント・規約・メンテナンスがすべて表示されます。
+データはまだ空なので、ログインしてから `/dashboard/post` で投稿するとリアルタイムにトップへ反映されます。
+
 > **想定環境**: Windows (PowerShell 7+) / macOS / Linux。Node.js 20 LTS 以上。
 > ローカル動作モードは目的に応じて 2 種類あります。
 >
@@ -32,11 +63,26 @@
 
 ### 2-1. クローンと依存導入
 
+> **すでに手元にこのリポジトリがある場合 (Cursor で開いている場合など) はこの節をスキップ**してください。
+> 確認方法: 作業ディレクトリで `Test-Path package.json` が `True`、かつ `Test-Path .git` が `True` ならクローン済みです。
+
 ```powershell
+# まだクローンしていない場合のみ:
 git clone https://github.com/<your-org>/flamenode.git
 cd flamenode
 npm install
 ```
+
+> Windows で `git : 用語 'git' は…認識されません` と出る場合、Git が PATH に無いだけです。
+> ローカルで動かす目的だけなら **Git の追加導入は必須ではありません** (Cursor が Git 操作を担当します)。
+> CLI から Git を使いたい場合は次のいずれかで導入できます。
+> ```powershell
+> winget install --id Git.Git -e
+> # または https://git-scm.com/download/win から MSI を取得
+> ```
+>
+> `npm install` を一度実行済みであれば `node_modules` フォルダが作られています (`Test-Path node_modules` が `True`)。
+> その場合は再実行不要です。
 
 ### 2-2. ローカル用環境変数 (`.dev.vars`) の作成
 
@@ -59,6 +105,9 @@ AUTH_TRUST_HOST="true"
 
 AUTH_DISCORD_ID="<Discord Developer Portal の Client ID>"
 AUTH_DISCORD_SECRET="<Discord Developer Portal の Client Secret>"
+
+# OAuth のリダイレクト組み立てに必須。`npm run dev:local` でポートを変えたらここも合わせる
+AUTH_URL="http://localhost:3000"
 
 NEXT_PUBLIC_SITE_URL="http://localhost:3000"
 NEXT_PUBLIC_SITE_NAME="FlameNode"
@@ -300,7 +349,8 @@ npx wrangler d1 migrations apply flamenode_db --local
 | --- | --- |
 | `npm run dev` で「DB に接続できません」 | 想定どおり。D1 を使うならモード B (`npm run pages:dev`) を使う |
 | `npm run pages:dev` 起動時に `D1_ERROR: no such table` | ローカル D1 にマイグレーションがあたっていない。`npx wrangler d1 migrations apply flamenode_db --local` を実行 |
-| Discord ログインで `redirect_uri_mismatch` | Discord Developer Portal の Redirect に `http://localhost:8788/api/auth/callback/discord` が無い |
+| Discord ログインで `redirect_uri_mismatch` | Discord Developer Portal の Redirect に `http://localhost:3000/api/auth/callback/discord` が無い |
+| `/entry?error=Configuration` と `Invalid URL` (auth) | `AUTH_URL` または `NEXTAUTH_URL` が未設定。`.dev.vars` に `AUTH_URL="http://localhost:3000"` を追加するか、`NEXT_PUBLIC_SITE_URL` を正しい絶対 URL にする（コード側でも `NEXT_PUBLIC_SITE_URL` から自動補完する） |
 | ログイン後に `/dashboard` で 500 | `user` テーブルにカラムが足りていない可能性。`.wrangler` を消して再マイグレーション |
 | `/admin` に弾かれる | `role` が `user` のまま。SQL で自分を `admin` にする (4-4 参照) |
 | Cookie がブラウザに残ってログイン状態が変 | DevTools → Application → Cookies で `localhost:8788` を全削除して再試行 |

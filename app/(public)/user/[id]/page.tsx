@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { and, desc, eq, or } from "drizzle-orm";
+import { and, desc, eq, ne } from "drizzle-orm";
 import styles from "./page.module.css";
 import { getDatabase } from "@/lib/cloudflare";
 import { videos, videoMembers, xUsers } from "@/lib/db/schema";
@@ -42,6 +42,12 @@ export default async function UserPage({
   const user = userRow[0];
   if (!user) notFound();
 
+  const publicVideoBase = and(
+    eq(videos.status, "public"),
+    eq(videos.is_deleted, 0),
+    eq(videos.is_manual_hidden, 0),
+  );
+
   const ownVideos = (await db
     .select({
       id: videos.id,
@@ -55,14 +61,7 @@ export default async function UserPage({
       status: videos.status,
     })
     .from(videos)
-    .where(
-      and(
-        eq(videos.creator_id, id),
-        eq(videos.status, "public"),
-        eq(videos.is_deleted, 0),
-        eq(videos.is_manual_hidden, 0),
-      )!,
-    )
+    .where(and(publicVideoBase, eq(videos.creator_id, id))!)
     .orderBy(desc(videos.scheduled_time))) as VideoCardData[];
 
   const collabVideos = (await db
@@ -81,9 +80,9 @@ export default async function UserPage({
     .innerJoin(videoMembers, eq(videos.id, videoMembers.video_id))
     .where(
       and(
+        publicVideoBase,
         eq(videoMembers.x_user_id, id),
-        eq(videos.status, "public"),
-        eq(videos.is_deleted, 0),
+        ne(videos.creator_id, id),
       )!,
     )
     .orderBy(desc(videos.scheduled_time))
@@ -100,21 +99,20 @@ export default async function UserPage({
             <Icon name="user" size={36} aria-hidden />
           </span>
         )}
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div className={styles.profileBody}>
+          <p className={styles.eyebrow}>CREATOR</p>
           <h1 className={styles.name}>{user.x_name}</h1>
           <p className={styles.handle}>@{user.id}</p>
           {user.profile_text ? (
-            <p className={styles.bio} style={{ marginTop: 10 }}>
-              {user.profile_text}
-            </p>
+            <p className={styles.bio}>{user.profile_text}</p>
           ) : null}
-          <div className={styles.links} style={{ marginTop: 14 }}>
+          <div className={styles.links}>
             <a
               href={`https://x.com/${user.id}`}
               target="_blank"
               rel="noopener noreferrer"
               className="fn-btn fn-btn-ghost fn-btn-sm"
-              aria-label={`X (Twitter) のプロフィール @${user.id} を開く`}
+              aria-label={`X のプロフィール @${user.id} を開く`}
             >
               <Icon name="external" size={12} aria-hidden />X
             </a>
@@ -140,9 +138,7 @@ export default async function UserPage({
       </section>
 
       <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>
-          作品 ({ownVideos.length})
-        </h2>
+        <h2 className={styles.sectionTitle}>作品 ({ownVideos.length})</h2>
         {ownVideos.length === 0 ? (
           <div className="fn-empty">
             <Icon name="info" size={20} aria-hidden />
@@ -163,7 +159,7 @@ export default async function UserPage({
 
       {collabVideos.length > 0 ? (
         <section className={styles.section}>
-          <h2 className={styles.sectionTitle}>合作参加</h2>
+          <h2 className={styles.sectionTitle}>参加作品</h2>
           <div className={styles.grid}>
             {collabVideos.map((v) => (
               <div key={v.id}>

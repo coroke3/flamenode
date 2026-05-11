@@ -21,10 +21,6 @@ interface XIdSwitcherProps {
   onSwitch?: (xUserId: string) => void;
 }
 
-/**
- * 上部メニューバーに常駐するアクティブ X ID スイッチャー。
- * 即時切替の誤操作を防ぐため、クリックでポップオーバーを開いて選ぶ。
- */
 export function XIdSwitcher({
   entries,
   discordName,
@@ -32,27 +28,78 @@ export function XIdSwitcher({
 }: XIdSwitcherProps): React.ReactElement {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [activeId, setActiveId] = React.useState(
+    entries.find((e) => e.is_active)?.x_user_id ?? null,
+  );
   const [pending, startTransition] = React.useTransition();
   const ref = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
+    setActiveId(entries.find((e) => e.is_active)?.x_user_id ?? null);
+  }, [entries]);
+
+  React.useEffect(() => {
     if (!open) return;
-    const handler = (e: MouseEvent) => {
+    const onMouseDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
         setOpen(false);
       }
     };
-    window.addEventListener("mousedown", handler);
-    return () => window.removeEventListener("mousedown", handler);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
   }, [open]);
-
-  const active = entries.find((e) => e.is_active) ?? entries[0];
 
   const order = (s: XIdEntry["approval_status"]) =>
     s === "approved" ? 0 : s === "pending" ? 1 : 2;
-  const sorted = [...entries].sort(
-    (a, b) => order(a.approval_status) - order(b.approval_status),
-  );
+
+  const sorted = [...entries].sort((a, b) => {
+    if (a.x_user_id === activeId) return -1;
+    if (b.x_user_id === activeId) return 1;
+    return order(a.approval_status) - order(b.approval_status) ||
+      a.x_name.localeCompare(b.x_name, "ja");
+  });
+
+  const active =
+    entries.find((e) => e.x_user_id === activeId) ??
+    entries.find((e) => e.approval_status === "approved") ??
+    entries[0];
+
+  const switchTo = (entry: XIdEntry) => {
+    setError(null);
+    if (entry.x_user_id === activeId) {
+      setOpen(false);
+      return;
+    }
+    if (entry.approval_status !== "approved") {
+      setError("承認済みの X ID だけをアクティブにできます。");
+      return;
+    }
+
+    const prev = activeId;
+    setActiveId(entry.x_user_id);
+    const fd = new FormData();
+    fd.set("x_user_id", entry.x_user_id);
+
+    startTransition(async () => {
+      const res = await setActiveXId(fd);
+      if (res.ok) {
+        onSwitch?.(entry.x_user_id);
+        router.refresh();
+        setOpen(false);
+      } else {
+        setActiveId(prev);
+        setError(res.message ?? "X ID の切り替えに失敗しました。");
+      }
+    });
+  };
 
   return (
     <div ref={ref} className={styles.root}>
@@ -60,7 +107,11 @@ export function XIdSwitcher({
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
+        aria-label="アクティブ X ID を切り替え"
+        onClick={() => {
+          setError(null);
+          setOpen((v) => !v);
+        }}
         className={styles.trigger}
       >
         {active?.icon_url ? (
@@ -72,7 +123,7 @@ export function XIdSwitcher({
           </span>
         )}
         <span className={styles.triggerName}>
-          {active?.x_name ?? "未設定"}
+          {active?.x_name ?? "X ID 未設定"}
         </span>
         <Icon name="chevron-down" size={12} aria-hidden />
       </button>
@@ -82,71 +133,58 @@ export function XIdSwitcher({
           <div className={styles.popoverHeader}>
             {discordName} に紐づく X ID
           </div>
+          {error ? <div className={styles.error}>{error}</div> : null}
           {sorted.length === 0 ? (
             <div className={styles.popoverEmpty}>
               X ID が連携されていません。
               <br />
-              設定画面から追加してください。
+              設定画面から申請できます。
             </div>
           ) : (
-            sorted.map((entry) => (
-              <button
-                key={entry.x_user_id}
-                role="option"
-                aria-selected={entry.is_active}
-                disabled={pending || entry.approval_status !== "approved"}
-                onClick={() => {
-                  if (entry.is_active) {
-                    setOpen(false);
-                    return;
-                  }
-                  if (entry.approval_status !== "approved") {
-                    return;
-                  }
-                  const fd = new FormData();
-                  fd.set("x_user_id", entry.x_user_id);
-                  startTransition(async () => {
-                    const res = await setActiveXId(fd);
-                    if (res.ok) {
-                      onSwitch?.(entry.x_user_id);
-                      router.refresh();
-                    }
-                    setOpen(false);
-                  });
-                }}
-                className={styles.option}
-              >
-                {entry.icon_url ? (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img
-                    src={entry.icon_url}
-                    alt=""
-                    className={styles.optionIcon}
-                  />
-                ) : (
-                  <span className={styles.optionIconFallback}>
-                    <Icon name="user" size={14} aria-hidden />
+            sorted.map((entry) => {
+              const selected = entry.x_user_id === activeId;
+              return (
+                <button
+                  key={entry.x_user_id}
+                  role="option"
+                  aria-selected={selected}
+                  disabled={pending || entry.approval_status !== "approved"}
+                  onClick={() => switchTo(entry)}
+                  className={styles.option}
+                  type="button"
+                >
+                  {entry.icon_url ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={entry.icon_url}
+                      alt=""
+                      className={styles.optionIcon}
+                    />
+                  ) : (
+                    <span className={styles.optionIconFallback}>
+                      <Icon name="user" size={14} aria-hidden />
+                    </span>
+                  )}
+                  <span className={styles.optionBody}>
+                    <span className={styles.optionName}>{entry.x_name}</span>
+                    <span className={styles.optionId}>@{entry.x_user_id}</span>
                   </span>
-                )}
-                <span className={styles.optionBody}>
-                  <span className={styles.optionName}>{entry.x_name}</span>
-                  <span className={styles.optionId}>@{entry.x_user_id}</span>
-                </span>
-                <ApprovalBadge status={entry.approval_status} />
-                {entry.is_active ? (
-                  <Icon
-                    name="check"
-                    size={14}
-                    className={styles.optionCheck}
-                    title="現在のアクティブ X ID"
-                  />
-                ) : null}
-              </button>
-            ))
+                  <ApprovalBadge status={entry.approval_status} />
+                  {selected ? (
+                    <Icon
+                      name="check"
+                      size={14}
+                      className={styles.optionCheck}
+                      title="現在のアクティブ X ID"
+                    />
+                  ) : null}
+                </button>
+              );
+            })
           )}
           <div className={styles.divider} />
           <Link href="/dashboard/settings" className={styles.footerLink}>
-            X ID 連携を管理…
+            X ID 連携を管理
           </Link>
         </div>
       ) : null}
@@ -163,5 +201,5 @@ function ApprovalBadge({
   if (status === "pending") {
     return <span className="fn-badge fn-badge-warning">承認待ち</span>;
   }
-  return <span className="fn-badge fn-badge-danger">再申請</span>;
+  return <span className="fn-badge fn-badge-danger">却下</span>;
 }

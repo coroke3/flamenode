@@ -8,6 +8,8 @@
 
 .icon {
   flex-shrink: 0;
+  object-fit: contain;
+  border-radius: 4px;
 }
 
 .text {
@@ -25,7 +27,7 @@
 
 .sub {
   font-size: 9px;
-  letter-spacing: 0.22em;
+  letter-spacing: 0.12em;
   color: var(--text-muted);
   text-transform: uppercase;
   line-height: 1;

@@ -21,15 +21,13 @@ interface PublicHeaderProps {
 
 const NAV_ITEMS = [
   { href: "/", primary: "TOP", sub: "トップ" },
-  { href: "/list", primary: "LIST", sub: "一覧から探す" },
+  { href: "/list", primary: "LIST", sub: "作品一覧" },
+  { href: "/user", primary: "CREATOR", sub: "クリエイター" },
   { href: "/event", primary: "EVENT", sub: "イベント" },
   { href: "/recommend", primary: "PICK", sub: "おすすめ" },
   { href: "/search", primary: "SEARCH", sub: "検索" },
 ];
 
-/**
- * 旧 EventArchives 風のヘッダー (英字大ラベル + 日本語小補助)。
- */
 export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
   const [mobileOpen, setMobileOpen] = React.useState(false);
 
@@ -101,7 +99,16 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
                 <Icon name="discord" size={14} aria-hidden />
                 Discord でログイン
               </Link>
-            ) : null}
+            ) : (
+              <Link
+                href="/dashboard"
+                className={`fn-btn fn-btn-ghost ${styles.mobileCta}`}
+                onClick={() => setMobileOpen(false)}
+              >
+                <Icon name="user" size={14} aria-hidden />
+                ダッシュボード
+              </Link>
+            )}
           </nav>
         </div>
       ) : null}

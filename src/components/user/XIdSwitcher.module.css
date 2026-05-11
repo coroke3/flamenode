@@ -74,6 +74,16 @@
   line-height: 1.5;
 }
 
+.error {
+  margin: 4px 6px 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background-color: var(--accent-danger-soft);
+  color: var(--accent-danger);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .option {
   display: flex;
   align-items: center;
@@ -88,6 +98,15 @@
 
 .option:hover {
   background-color: var(--accent-primary-soft);
+}
+
+.option:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.option:disabled:hover {
+  background-color: transparent;
 }
 
 .optionIcon {

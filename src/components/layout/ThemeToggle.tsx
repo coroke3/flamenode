@@ -3,11 +3,32 @@
 import * as React from "react";
 import styles from "./ThemeToggle.module.css";
 import { Icon } from "@/components/ui/Icon";
-import { cn } from "@/lib/utils/cn";
 
 type Mode = "light" | "dark" | "system";
 
 const STORAGE_KEY = "fn-theme";
+const MODES: Mode[] = ["system", "light", "dark"];
+
+const MODE_META: Record<
+  Mode,
+  { icon: "system" | "sun" | "moon"; label: string; nextLabel: string }
+> = {
+  system: {
+    icon: "system",
+    label: "テーマ: システム",
+    nextLabel: "ライトへ切り替え",
+  },
+  light: {
+    icon: "sun",
+    label: "テーマ: ライト",
+    nextLabel: "ダークへ切り替え",
+  },
+  dark: {
+    icon: "moon",
+    label: "テーマ: ダーク",
+    nextLabel: "システムへ切り替え",
+  },
+};
 
 function applyTheme(mode: Mode) {
   const html = document.documentElement;
@@ -23,10 +44,6 @@ function applyTheme(mode: Mode) {
   }
 }
 
-/**
- * ライト / ダーク / システムを切り替えるコンパクトなピル UI。
- * 黄色アクセントでアクティブを示す。
- */
 export function ThemeToggle(): React.ReactElement {
   const [mode, setMode] = React.useState<Mode>("system");
 
@@ -42,43 +59,25 @@ export function ThemeToggle(): React.ReactElement {
     applyTheme(saved);
   }, []);
 
-  const change = (next: Mode) => {
+  const cycle = () => {
+    const currentIndex = MODES.indexOf(mode);
+    const next = MODES[(currentIndex + 1) % MODES.length] ?? "system";
     setMode(next);
     applyTheme(next);
   };
 
+  const meta = MODE_META[mode];
+
   return (
-    <div role="radiogroup" aria-label="テーマ切替" className={styles.root}>
-      <button
-        type="button"
-        role="radio"
-        aria-checked={mode === "light"}
-        aria-label="ライトモード"
-        onClick={() => change("light")}
-        className={cn(styles.button, mode === "light" && styles.active)}
-      >
-        <Icon name="sun" size={14} />
-      </button>
-      <button
-        type="button"
-        role="radio"
-        aria-checked={mode === "system"}
-        aria-label="システム追従"
-        onClick={() => change("system")}
-        className={cn(styles.button, mode === "system" && styles.active)}
-      >
-        <Icon name="system" size={14} />
-      </button>
-      <button
-        type="button"
-        role="radio"
-        aria-checked={mode === "dark"}
-        aria-label="ダークモード"
-        onClick={() => change("dark")}
-        className={cn(styles.button, mode === "dark" && styles.active)}
-      >
-        <Icon name="moon" size={14} />
-      </button>
-    </div>
+    <button
+      type="button"
+      aria-label={`${meta.label}。${meta.nextLabel}`}
+      title={`${meta.label} / ${meta.nextLabel}`}
+      className={styles.button}
+      onClick={cycle}
+    >
+      <Icon name={meta.icon} size={15} />
+      <span className={styles.dot} aria-hidden />
+    </button>
   );
 }

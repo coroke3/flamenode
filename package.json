@@ -9,9 +9,14 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
+    "dev:local": "node -r ./scripts/load-dev-vars.js node_modules/next/dist/bin/next dev",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
+    "db:local-apply": "wrangler d1 migrations apply flamenode_db --local",
+    "grant-admin": "node scripts/grant-admin.cjs",
+    "pages:build": "next-on-pages",
+    "pages:dev": "next-on-pages && wrangler pages dev .vercel/output/static --compatibility-flag=nodejs_compat --d1=DB --r2=BUCKET --kv=KV",
     "preview": "wrangler pages dev"
   },
   "dependencies": {
@@ -24,6 +29,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@cloudflare/next-on-pages": "^1.13.16",
     "@cloudflare/workers-types": "^4.20250109.0",
     "@types/node": "^22.10.5",
     "@types/react": "^19.0.4",

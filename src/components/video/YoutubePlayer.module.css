@@ -16,6 +16,10 @@
   height: 100%;
 }
 
+.iframeBox iframe {
+  pointer-events: none;
+}
+
 .centerBtn {
   position: absolute;
   inset: 0;
@@ -93,6 +97,19 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.qualityBadge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background-color: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
 }
 
 .iconBtn {
@@ -191,6 +208,27 @@
 
 .spacer {
   flex: 1;
+}
+
+.volumeGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.volumeSlider {
+  width: 86px;
+  accent-color: var(--accent-primary);
+}
+
+@media (max-width: 560px) {
+  .volumeSlider {
+    width: 62px;
+  }
+
+  .timeText {
+    margin: 0 4px;
+  }
 }
 
 .fallbackThumb {
