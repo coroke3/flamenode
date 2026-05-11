@@ -18,8 +18,8 @@ export default async function AdminImportPage({
     <div>
       <h1 style={{ fontSize: 22, fontWeight: 700 }}>レガシーデータ・インポート</h1>
       <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
-        旧 EventArchives の JSON エクスポート（<code>eventinfo.json</code> / <code>video.json</code>）
-        から、イベント本体・運営メンバー・作品・合作メンバー・X ID プレースホルダーを取り込みます。
+        旧 EventArchives の <code>eventinfo.json</code> / <code>video.json</code> / ヘッダー付き CSV
+        から、イベント・運営メンバー・作品・合作メンバー・X ID を取り込みます。
       </p>
 
       {notice ? (
@@ -29,7 +29,7 @@ export default async function AdminImportPage({
             marginTop: 16,
             padding: "12px 14px",
             borderRadius: "var(--radius-sm)",
-            border: "1px solid var(--border-default)",
+            border: "1px solid var(--border-subtle)",
             background: "var(--bg-elevated)",
             fontSize: 13,
             color: "var(--text-secondary)",
@@ -39,15 +39,7 @@ export default async function AdminImportPage({
         </div>
       ) : null}
 
-      <section
-        style={{
-          marginTop: 22,
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-md)",
-          padding: 22,
-        }}
-      >
+      <section className="fn-card" style={{ marginTop: 22 }}>
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>手順</h2>
         <ol
           style={{
@@ -57,58 +49,21 @@ export default async function AdminImportPage({
             lineHeight: 1.8,
           }}
         >
-          <li>
-            <strong>アップロード</strong>: <code>eventinfo.json</code> と <code>video.json</code>
-            を投入。複数同時可。両方ある場合はイベントを先に取り込みます。
-          </li>
-          <li>
-            <strong>ドライラン</strong>: 既存 ID との衝突件数、警告、文字化け疑い、X ID プレースホルダー候補を確認。
-          </li>
-          <li>
-            <strong>衝突戦略</strong>: イベント / 動画それぞれに{" "}
-            <code>skip</code>（既存保護）/ <code>update</code>（全置換）/ <code>merge</code>
-            （空き埋め）を指定。
-          </li>
-          <li>
-            <strong>取り込み</strong>: 行ごとに try/catch でロールバックし、結果は{" "}
-            <code>history_logs</code> に <code>retention_class=&apos;long_audit&apos;</code> で記録。
-          </li>
+          <li>JSON または CSV を投入します。複数ファイルを同時に扱えます。</li>
+          <li>まずドライランで件数・衝突・文字化け疑いを確認します。</li>
+          <li>衝突時の方針を skip / update / merge から選んで取り込みます。</li>
+          <li>取り込み結果は監査ログに残ります。</li>
         </ol>
-        <p
-          style={{
-            marginTop: 12,
-            fontSize: 12,
-            color: "var(--text-muted)",
-            lineHeight: 1.7,
-          }}
-        >
-          ※ 旧データの X ID は未承認プレースホルダー (<code>x_users.approval_status = &apos;pending&apos;</code>) で登録します。
-          本人による Discord 連携後に <code>x_account_link_requests</code> から承認してください。
-          外部画像 URL (Gyazo / pbs.twimg.com など) は R2 に再保存せず参照のまま保持し、Google Drive URL のみ直リンクに正規化します。
+        <p className="fn-help">
+          旧データ由来の X ID は公開プロフィールとして扱い、Discord 連携の本人確認は別途 X ID 申請で行います。
         </p>
       </section>
 
-      <section
-        style={{
-          marginTop: 22,
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-md)",
-          padding: 22,
-        }}
-      >
+      <section className="fn-card" style={{ marginTop: 22 }}>
         <LegacyImportClient />
       </section>
 
-      <details
-        style={{
-          marginTop: 22,
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-md)",
-          padding: 16,
-        }}
-      >
+      <details className="fn-card" style={{ marginTop: 22 }}>
         <summary
           style={{
             cursor: "pointer",
@@ -117,7 +72,7 @@ export default async function AdminImportPage({
             color: "var(--text-secondary)",
           }}
         >
-          互換フォーム（単一ファイル / form-urlencoded 用フォールバック）
+          シンプルフォーム
         </summary>
         <form
           action="/api/admin/legacy-import"
@@ -130,24 +85,19 @@ export default async function AdminImportPage({
             gap: 12,
           }}
         >
-          <label className="fn-label">JSON ファイル</label>
+          <label className="fn-label">JSON / CSV ファイル</label>
           <input
             type="file"
             name="file"
-            accept="application/json"
+            accept="application/json,text/csv,.json,.csv"
             className="fn-input"
           />
           <div style={{ display: "flex", gap: 8 }}>
-            <button
-              type="submit"
-              name="dry_run"
-              value="1"
-              className="fn-btn fn-btn-ghost"
-            >
+            <button type="submit" name="dry_run" value="1" className="fn-btn fn-btn-ghost">
               <Icon name="info" size={12} aria-hidden /> ドライラン
             </button>
             <button type="submit" className="fn-btn fn-btn-primary">
-              <Icon name="upload" size={12} aria-hidden /> 取り込み (skip 既定)
+              <Icon name="upload" size={12} aria-hidden /> 取り込み
             </button>
           </div>
         </form>

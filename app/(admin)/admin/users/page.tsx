@@ -1,7 +1,7 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { desc, eq, like, or } from "drizzle-orm";
+import { and, desc, eq, like, or } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { users as usersTable, xUsers as xUsersTable } from "@/lib/db/schema";
 import { formatRelative } from "@/lib/utils/format";
@@ -9,6 +9,19 @@ import { Icon } from "@/components/ui/Icon";
 
 export const metadata: Metadata = { title: "ユーザー管理" };
 export const dynamic = "force-dynamic";
+
+type AdminUserRow = {
+  id: string;
+  name: string | null;
+  email: string | null;
+  image: string | null;
+  role: "user" | "admin" | "moderator" | null;
+  is_banned: number | null;
+  active_x_user_id: string | null;
+  active_x_name: string | null;
+  active_x_icon_url: string | null;
+  created_at: number;
+};
 
 export default async function AdminUsersPage({
   searchParams,
@@ -18,22 +31,47 @@ export default async function AdminUsersPage({
   const { q = "", status = "" } = await searchParams;
   const db = getDatabase();
 
-  let userRows: (typeof usersTable.$inferSelect)[] = [];
+  let userRows: AdminUserRow[] = [];
   if (db) {
     try {
-      const filters = q
-        ? [
-            or(
-              like(usersTable.name, `%${q}%`),
-              like(usersTable.email, `%${q}%`),
-              eq(usersTable.id, q),
-            ),
-          ]
-        : [];
+      const term = `%${q}%`;
+      const queryFilter = q
+        ? or(
+            like(usersTable.name, term),
+            like(usersTable.email, term),
+            eq(usersTable.id, q),
+            like(xUsersTable.id, term),
+            like(xUsersTable.x_name, term),
+          )
+        : undefined;
+      const statusFilter =
+        status === "banned"
+          ? eq(usersTable.is_banned, 1)
+          : status === "admin"
+            ? eq(usersTable.role, "admin")
+            : status === "active"
+              ? eq(usersTable.is_banned, 0)
+              : undefined;
+      const where =
+        queryFilter && statusFilter
+          ? and(queryFilter, statusFilter)
+          : (queryFilter ?? statusFilter);
       userRows = await db
-        .select()
+        .select({
+          id: usersTable.id,
+          name: usersTable.name,
+          email: usersTable.email,
+          image: usersTable.image,
+          role: usersTable.role,
+          is_banned: usersTable.is_banned,
+          active_x_user_id: usersTable.active_x_user_id,
+          active_x_name: xUsersTable.x_name,
+          active_x_icon_url: xUsersTable.icon_url,
+          created_at: usersTable.created_at,
+        })
         .from(usersTable)
-        .where(filters[0])
+        .leftJoin(xUsersTable, eq(xUsersTable.id, usersTable.active_x_user_id))
+        .where(where)
         .orderBy(desc(usersTable.created_at))
         .limit(80);
     } catch (e) {
@@ -91,10 +129,10 @@ export default async function AdminUsersPage({
             <tr key={u.id}>
               <td>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  {u.image ? (
+                  {u.image ?? u.active_x_icon_url ? (
                     /* eslint-disable-next-line @next/next/no-img-element */
                     <img
-                      src={u.image}
+                      src={u.image ?? u.active_x_icon_url ?? ""}
                       alt=""
                       width={28}
                       height={28}
@@ -123,7 +161,26 @@ export default async function AdminUsersPage({
                   </div>
                 </div>
               </td>
-              <td>{u.active_x_user_id ? `@${u.active_x_user_id}` : "—"}</td>
+              <td>
+                {u.active_x_user_id ? (
+                  <span>
+                    <span style={{ fontWeight: 600 }}>
+                      {u.active_x_name ?? `@${u.active_x_user_id}`}
+                    </span>
+                    <span
+                      style={{
+                        display: "block",
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                      }}
+                    >
+                      @{u.active_x_user_id}
+                    </span>
+                  </span>
+                ) : (
+                  "—"
+                )}
+              </td>
               <td>
                 {u.is_banned === 1 ? (
                   <span className="fn-badge fn-badge-danger">BAN</span>

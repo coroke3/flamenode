@@ -1,0 +1,187 @@
+import * as React from "react";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import type { Metadata } from "next";
+import { desc, eq, sql } from "drizzle-orm";
+import { withDatabase } from "@/lib/cloudflare";
+import {
+  events as eventsTable,
+  slots as slotsTable,
+  videos as videosTable,
+  videoEvents,
+  xUsers as xUsersTable,
+} from "@/lib/db/schema";
+import { Icon } from "@/components/ui/Icon";
+import { formatUnix } from "@/lib/utils/format";
+
+export const metadata: Metadata = { title: "イベント詳細" };
+export const dynamic = "force-dynamic";
+
+interface Props {
+  params: Promise<{ id: string }>;
+}
+
+export default async function AdminEventDetailPage({
+  params,
+}: Props): Promise<React.ReactElement> {
+  const { id } = await params;
+
+  const bundle = await withDatabase(async (db) => {
+    const event = (
+      await db.select().from(eventsTable).where(eq(eventsTable.id, id)).limit(1)
+    )[0];
+    if (!event) return null;
+
+    const slots = await db
+      .select()
+      .from(slotsTable)
+      .where(eq(slotsTable.event_id, id))
+      .orderBy(slotsTable.sort_order);
+
+    const evVideos = await db
+      .select({
+        id: videosTable.id,
+        title: videosTable.title,
+        status: videosTable.status,
+        display_name: sql<string>`COALESCE(${xUsersTable.x_name}, ${videosTable.display_name}, ${videosTable.contact_x_id})`,
+      })
+      .from(videosTable)
+      .innerJoin(videoEvents, eq(videosTable.id, videoEvents.video_id))
+      .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id))
+      .where(eq(videoEvents.event_id, id))
+      .orderBy(desc(videosTable.created_at))
+      .limit(60);
+
+    return { event, slots, evVideos };
+  });
+
+  if (!bundle) notFound();
+  const { event, slots, evVideos } = bundle;
+
+  return (
+    <div>
+      <p className="fn-muted fn-text-xs fn-bold">EVENT</p>
+      <h1 style={{ fontSize: 24, fontWeight: 700 }}>{event.title}</h1>
+      <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
+        ID: {event.id}
+      </p>
+
+      <section className="fn-card" style={{ marginTop: 18 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <span
+            className={`fn-badge ${
+              event.is_active === 1
+                ? "fn-badge-accent"
+                : event.is_archived === 1
+                  ? "fn-badge-neutral"
+                  : "fn-badge-soft"
+            }`}
+          >
+            状態:{" "}
+            {event.is_active === 1
+              ? "開催中"
+              : event.is_archived === 1
+                ? "アーカイブ"
+                : "下書き"}
+          </span>
+          <span className="fn-badge fn-badge-soft">
+            受付: {event.is_entry_open === 1 ? "OPEN" : "CLOSED"}
+          </span>
+          <span className="fn-badge fn-badge-soft">タイプ: {event.event_type}</span>
+        </div>
+        <dl
+          style={{
+            marginTop: 14,
+            display: "grid",
+            gridTemplateColumns: "auto 1fr",
+            gap: "6px 12px",
+            fontSize: 13,
+          }}
+        >
+          <dt className="fn-muted">期間</dt>
+          <dd>
+            {formatUnix(event.start_time, { dateOnly: true })}
+            {event.end_time ? ` - ${formatUnix(event.end_time, { dateOnly: true })}` : ""}
+          </dd>
+          <dt className="fn-muted">説明</dt>
+          <dd style={{ whiteSpace: "pre-wrap" }}>{event.explanation ?? "-"}</dd>
+          <dt className="fn-muted">アクセントカラー</dt>
+          <dd>{event.accent_color ?? "-"}</dd>
+          <dt className="fn-muted">連続取得上限</dt>
+          <dd>{event.max_consecutive_slots_per_entry}</dd>
+        </dl>
+      </section>
+
+      <section style={{ marginTop: 22 }}>
+        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
+          枠 ({slots.length})
+        </h2>
+        {slots.length === 0 ? (
+          <p className="fn-muted fn-text-sm">枠はまだありません。</p>
+        ) : (
+          <table className="fn-table">
+            <thead>
+              <tr>
+                <th>日付</th>
+                <th>時間</th>
+                <th>取得者</th>
+                <th>状態</th>
+              </tr>
+            </thead>
+            <tbody>
+              {slots.map((s) => (
+                <tr key={s.id}>
+                  <td>{s.start_time ? formatUnix(s.start_time, { dateOnly: true }) : (s.slot_label ?? "-")}</td>
+                  <td>{s.start_time ? formatUnix(s.start_time, { timeOnly: true }) : "-"}</td>
+                  <td>{s.display_name ?? s.x_user_id ?? "-"}</td>
+                  <td><span className="fn-badge fn-badge-soft">{s.status}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section style={{ marginTop: 22 }}>
+        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
+          所属作品 ({evVideos.length})
+        </h2>
+        {evVideos.length === 0 ? (
+          <p className="fn-muted fn-text-sm">作品はまだありません。</p>
+        ) : (
+          <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none" }}>
+            {evVideos.map((v) => (
+              <li
+                key={v.id}
+                style={{
+                  display: "flex",
+                  gap: 12,
+                  alignItems: "center",
+                  padding: "6px 0",
+                  borderBottom: "1px solid var(--border-subtle)",
+                }}
+              >
+                <span className="fn-badge fn-badge-soft">{v.status}</span>
+                <Link href={`/admin/videos/${v.id}`} style={{ flex: 1, color: "var(--text-primary)" }}>
+                  {v.title}
+                </Link>
+                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                  {v.display_name}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <p style={{ marginTop: 24, display: "flex", gap: 8 }}>
+        <Link href="/admin/events" className="fn-btn fn-btn-ghost">
+          <Icon name="chevron-left" size={12} aria-hidden /> イベント管理へ戻る
+        </Link>
+        <Link href={`/event/${event.id}`} className="fn-btn fn-btn-ghost" target="_blank" rel="noopener noreferrer">
+          <Icon name="external" size={12} aria-hidden /> 公開ページ
+        </Link>
+      </p>
+    </div>
+  );
+}

@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import styles from "./page.module.css";
 import { getDatabase } from "@/lib/cloudflare";
 import {
@@ -10,6 +10,7 @@ import {
   slots as slotsTable,
   videos,
   videoEvents,
+  xUsers,
 } from "@/lib/db/schema";
 import { fetchEventWithEditors } from "@/lib/db/queries";
 import { Icon } from "@/components/ui/Icon";
@@ -51,8 +52,10 @@ export default async function EventDetailPage({
       id: videos.id,
       title: videos.title,
       youtube_video_id: videos.youtube_video_id,
-      display_name: videos.display_name,
-      icon_url: videos.icon_url,
+      display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
+      icon_url: sql<
+        string | null
+      >`COALESCE(${videos.icon_url}, ${xUsers.icon_url})`,
       creator_id: videos.creator_id,
       primary_event_id: videos.primary_event_id,
       scheduled_time: videos.scheduled_time,
@@ -60,6 +63,7 @@ export default async function EventDetailPage({
     })
     .from(videos)
     .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
+    .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
     .where(
       and(
         eq(videoEvents.event_id, id),

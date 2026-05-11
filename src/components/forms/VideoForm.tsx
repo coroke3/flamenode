@@ -12,6 +12,7 @@ import {
 import {
   createFreeVideo,
   submitSlotVideo,
+  updateVideo,
   type VideoActionResult,
 } from "@/lib/actions/video";
 
@@ -60,11 +61,18 @@ export function VideoForm({
     setResult(null);
     startTransition(async () => {
       const action =
-        mode === "slot" ? submitSlotVideo : createFreeVideo;
+        mode === "slot"
+          ? submitSlotVideo
+          : mode === "edit"
+            ? updateVideo
+            : createFreeVideo;
       const r = await action(formData);
       setResult(r);
-      if (r.ok && r.videoId) {
+      if (r.ok && r.videoId && mode !== "edit") {
         router.push(`/dashboard/edit/${r.videoId}`);
+      }
+      if (r.ok && mode === "edit") {
+        router.refresh();
       }
     });
   };

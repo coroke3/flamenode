@@ -117,7 +117,12 @@ export function LegacyImportClient(): React.ReactElement {
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   const addFiles = React.useCallback(async (list: FileList | File[]) => {
-    const arr = Array.from(list).filter((f) => /\.json$/i.test(f.name) || f.type.includes("json"));
+    const arr = Array.from(list).filter(
+      (f) =>
+        /\.(json|csv)$/i.test(f.name) ||
+        f.type.includes("json") ||
+        f.type.includes("csv"),
+    );
     const next: PendingFile[] = [];
     for (const f of arr) {
       const decoded = await readTextSmart(f);
@@ -235,15 +240,15 @@ export function LegacyImportClient(): React.ReactElement {
         tabIndex={0}
       >
         <div className={styles.dropzoneTitle}>
-          <Icon name="upload" size={14} aria-hidden /> JSON をドラッグ & ドロップ
+          <Icon name="upload" size={14} aria-hidden /> JSON / CSV をドラッグ & ドロップ
         </div>
         <div className={styles.dropzoneHint}>
-          eventinfo.json / video.json を複数同時に投入できます。UTF-8 と Shift_JIS 系を自動判定します。
+          eventinfo.json / video.json / ヘッダー付き CSV を複数同時に投入できます。UTF-8 と Shift_JIS 系を自動判定します。
         </div>
         <input
           ref={inputRef}
           type="file"
-          accept="application/json,.json"
+          accept="application/json,text/csv,.json,.csv"
           multiple
           hidden
           onChange={(e) => {

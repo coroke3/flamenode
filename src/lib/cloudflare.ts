@@ -25,6 +25,57 @@ let memoizedDb: { ref: D1Database | null; db: DB | null } = {
   db: null,
 };
 
+/** ローカル Miniflare / リモート D1 接続の瞬断で付きやすいコード・メッセージ */
+const TRANSIENT_DB_MARKERS = /ECONNRESET|ECONNREFUSED|ETIMEDOUT|fetch failed|UND_ERR_SOCKET|socket hang up/i;
+
+function isTransientDbError(err: unknown): boolean {
+  let cur: unknown = err;
+  const seen = new Set<unknown>();
+  for (let depth = 0; depth < 6 && cur != null; depth++) {
+    if (seen.has(cur)) break;
+    seen.add(cur);
+    if (typeof cur === "object") {
+      const o = cur as { code?: string; message?: string; cause?: unknown };
+      if (o.code === "ECONNRESET" || o.code === "ECONNREFUSED" || o.code === "ETIMEDOUT")
+        return true;
+      if (typeof o.message === "string" && TRANSIENT_DB_MARKERS.test(o.message))
+        return true;
+      cur = o.cause;
+      continue;
+    }
+    break;
+  }
+  return false;
+}
+
+function clearDatabaseMemo(): void {
+  memoizedDb = { ref: null, db: null };
+}
+
+/**
+ * D1 クエリの一時的な接続切断（Miniflare workerd 等）に対して数回リトライする。
+ * 同一 Drizzle インスタンスが腐っている場合に備え、失敗時はメモを捨てて作り直す。
+ */
+export async function withDatabase<T>(fn: (db: DB) => Promise<T>): Promise<T | null> {
+  const maxAttempts = 4;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const db = getDatabase();
+    if (!db) return null;
+    try {
+      return await fn(db);
+    } catch (e) {
+      lastError = e;
+      if (!isTransientDbError(e) || attempt >= maxAttempts - 1) {
+        throw e;
+      }
+      clearDatabaseMemo();
+      await new Promise((r) => setTimeout(r, 30 * 2 ** attempt));
+    }
+  }
+  throw lastError;
+}
+
 export function getEnv(): FlameNodeEnv {
   const g = globalThis as Record<string | symbol, unknown>;
 

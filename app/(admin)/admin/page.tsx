@@ -68,9 +68,10 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
             id: videosTable.id,
             title: videosTable.title,
             created_at: videosTable.created_at,
-            display_name: videosTable.display_name,
+            display_name: sql<string>`COALESCE(${xUsersTable.x_name}, ${videosTable.display_name}, ${videosTable.contact_x_id})`,
           })
           .from(videosTable)
+          .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id))
           .where(eq(videosTable.status, "pending"))
           .orderBy(desc(videosTable.created_at))
           .limit(8),

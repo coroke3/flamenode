@@ -1,4 +1,4 @@
-import { and, desc, eq, ne, or } from "drizzle-orm";
+import { and, asc, desc, eq, ne, or, sql } from "drizzle-orm";
 import {
   events,
   videoChapters,
@@ -140,19 +140,24 @@ export async function fetchRelatedVideos(
     ne(videos.id, current.id),
   );
 
+  const iconExpr = sql<
+    string | null
+  >`COALESCE(${videos.icon_url}, ${xUsers.icon_url})`;
+
   const sameCreator = current.creator_id
     ? await db
         .select({
           id: videos.id,
           title: videos.title,
           youtube_video_id: videos.youtube_video_id,
-          display_name: videos.display_name,
-          icon_url: videos.icon_url,
+          display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
+          icon_url: iconExpr,
           creator_id: videos.creator_id,
           primary_event_id: videos.primary_event_id,
           scheduled_time: videos.scheduled_time,
         })
         .from(videos)
+        .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
         .where(and(baseWhere, eq(videos.creator_id, current.creator_id))!)
         .orderBy(desc(videos.scheduled_time))
         .limit(4)
@@ -164,13 +169,14 @@ export async function fetchRelatedVideos(
           id: videos.id,
           title: videos.title,
           youtube_video_id: videos.youtube_video_id,
-          display_name: videos.display_name,
-          icon_url: videos.icon_url,
+          display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
+          icon_url: iconExpr,
           creator_id: videos.creator_id,
           primary_event_id: videos.primary_event_id,
           scheduled_time: videos.scheduled_time,
         })
         .from(videos)
+        .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
         .where(
           and(baseWhere, eq(videos.primary_event_id, current.primary_event_id))!,
         )
@@ -183,13 +189,14 @@ export async function fetchRelatedVideos(
       id: videos.id,
       title: videos.title,
       youtube_video_id: videos.youtube_video_id,
-      display_name: videos.display_name,
-      icon_url: videos.icon_url,
+      display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
+      icon_url: iconExpr,
       creator_id: videos.creator_id,
       primary_event_id: videos.primary_event_id,
       scheduled_time: videos.scheduled_time,
     })
     .from(videos)
+    .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
     .where(baseWhere)
     .orderBy(desc(videos.video_score))
     .limit(20);
@@ -201,4 +208,36 @@ export async function fetchRelatedVideos(
     if (map.size >= limit) break;
   }
   return Array.from(map.values()).slice(0, limit);
+}
+
+/**
+ * 同一イベントの上映順 (scheduled_time 昇順) 全件を返す。
+ * 再生リスト UI のソース。`primary_event_id` を主軸にする。
+ */
+export async function fetchEventPlaylistVideos(
+  db: DB,
+  eventId: string,
+  limit = 50,
+) {
+  return db
+    .select({
+      id: videos.id,
+      title: videos.title,
+      youtube_video_id: videos.youtube_video_id,
+      display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
+      scheduled_time: videos.scheduled_time,
+    })
+    .from(videos)
+    .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
+    .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+    .where(
+      and(
+        eq(videoEvents.event_id, eventId),
+        eq(videos.status, "public"),
+        eq(videos.is_deleted, 0),
+        eq(videos.is_manual_hidden, 0),
+      )!,
+    )
+    .orderBy(asc(videos.scheduled_time))
+    .limit(limit);
 }

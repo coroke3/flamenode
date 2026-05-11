@@ -142,11 +142,20 @@ export function YoutubePlayer({
               setPlaying(true);
               setDuration(playerRef.current?.getDuration?.() ?? 0);
               requestBestQuality();
-            } else if (
-              state === YT.PlayerState.PAUSED ||
-              state === YT.PlayerState.ENDED
-            ) {
+            } else if (state === YT.PlayerState.PAUSED) {
               setPlaying(false);
+            } else if (state === YT.PlayerState.ENDED) {
+              setPlaying(false);
+              // PlaylistRail などへ再生終了を通知 (自動再生切替時に次動画へ進める)
+              try {
+                window.dispatchEvent(
+                  new CustomEvent("flamenode:video-ended", {
+                    detail: { youtubeId },
+                  }),
+                );
+              } catch {
+                /* noop */
+              }
             }
           },
           onPlaybackQualityChange: (e: any) => {
@@ -285,6 +294,27 @@ export function YoutubePlayer({
     else p.playVideo?.();
   };
 
+  // クリックシールド: シングルクリックは少し遅延させて、
+  // ダブルクリック (フルスクリーン) と二重発火しないようにする。
+  const clickShieldTimer = React.useRef<number | null>(null);
+  const handleShieldClick = () => {
+    if (clickShieldTimer.current) {
+      window.clearTimeout(clickShieldTimer.current);
+      clickShieldTimer.current = null;
+    }
+    clickShieldTimer.current = window.setTimeout(() => {
+      clickShieldTimer.current = null;
+      togglePlay();
+    }, 220);
+  };
+  const handleShieldDoubleClick = () => {
+    if (clickShieldTimer.current) {
+      window.clearTimeout(clickShieldTimer.current);
+      clickShieldTimer.current = null;
+    }
+    requestFullscreen();
+  };
+
   const seekTo = (sec: number) => {
     playerRef.current?.seekTo?.(Math.max(0, Math.min(duration, sec)), true);
   };
@@ -343,6 +373,16 @@ export function YoutubePlayer({
       style={accentStyle}
     >
       <div id={containerId} className={styles.iframeBox} />
+
+      {/* YouTube 側のクリック領域を独自プレイヤーに置き換えるためのシールド。
+          バー類が非表示でもクリックは独自プレイヤーが処理する。 */}
+      <div
+        className={styles.clickShield}
+        onClick={handleShieldClick}
+        onDoubleClick={handleShieldDoubleClick}
+        role="presentation"
+        aria-hidden="true"
+      />
 
       <button
         type="button"

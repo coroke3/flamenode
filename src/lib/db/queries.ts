@@ -28,14 +28,17 @@ export async function fetchRecommendedVideos(db: DB, limit = 40) {
       id: videos.id,
       title: videos.title,
       youtube_video_id: videos.youtube_video_id,
-      display_name: videos.display_name,
-      icon_url: videos.icon_url,
+      display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
+      icon_url: sql<
+        string | null
+      >`COALESCE(${videos.icon_url}, ${xUsers.icon_url})`,
       creator_id: videos.creator_id,
       primary_event_id: videos.primary_event_id,
       scheduled_time: videos.scheduled_time,
       video_score: videos.video_score,
     })
     .from(videos)
+    .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
     .where(publicVideoCondition)
     .orderBy(desc(videos.video_score), desc(videos.scheduled_time))
     .limit(limit);
@@ -48,13 +51,16 @@ export async function fetchLatestVideos(db: DB, limit = 30) {
       id: videos.id,
       title: videos.title,
       youtube_video_id: videos.youtube_video_id,
-      display_name: videos.display_name,
-      icon_url: videos.icon_url,
+      display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
+      icon_url: sql<
+        string | null
+      >`COALESCE(${videos.icon_url}, ${xUsers.icon_url})`,
       creator_id: videos.creator_id,
       primary_event_id: videos.primary_event_id,
       scheduled_time: videos.scheduled_time,
     })
     .from(videos)
+    .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
     .where(publicVideoCondition)
     .orderBy(desc(videos.scheduled_time))
     .limit(limit);
@@ -81,13 +87,16 @@ export async function fetchVideosForEvent(
       id: videos.id,
       title: videos.title,
       youtube_video_id: videos.youtube_video_id,
-      display_name: videos.display_name,
-      icon_url: videos.icon_url,
+      display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
+      icon_url: sql<
+        string | null
+      >`COALESCE(${videos.icon_url}, ${xUsers.icon_url})`,
       creator_id: videos.creator_id,
       scheduled_time: videos.scheduled_time,
     })
     .from(videos)
     .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
+    .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
     .where(and(publicVideoCondition, eq(videoEvents.event_id, eventId))!)
     .orderBy(desc(videos.scheduled_time))
     .limit(limit);
@@ -171,17 +180,17 @@ export async function fetchPickupCreators(db: DB, limit = 40) {
       video_count: sql<number>`(
         SELECT COUNT(DISTINCT v.id) FROM videos AS v
         WHERE v.creator_id = "x_users"."id"
-          AND v.status = 'public' AND v.is_deleted = 0
+          AND v.status = 'public' AND v.is_deleted = 0 AND v.is_manual_hidden = 0
       )`,
       collab_count: sql<number>`(
         SELECT COUNT(DISTINCT vm.video_id) FROM video_members AS vm
         INNER JOIN videos AS v ON v.id = vm.video_id
         WHERE vm.x_user_id = "x_users"."id"
-          AND v.status = 'public' AND v.is_deleted = 0
+          AND v.status = 'public' AND v.is_deleted = 0 AND v.is_manual_hidden = 0
       )`,
     })
     .from(xUsers)
-    .where(eq(xUsers.approval_status, "approved"))
+    .where(or(eq(xUsers.approval_status, "approved"), eq(xUsers.approval_status, "pending"))!)
     .limit(limit * 2)
     .then((rows) =>
       rows

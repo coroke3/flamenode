@@ -1,15 +1,24 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq, like } from "drizzle-orm";
+import { and, desc, eq, like, or, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
-import { videos as videosTable } from "@/lib/db/schema";
+import { videos as videosTable, xUsers as xUsersTable } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { formatRelative } from "@/lib/utils/format";
 import { youtubeThumbUrl } from "@/lib/youtube/id";
 
 export const metadata: Metadata = { title: "作品管理" };
 export const dynamic = "force-dynamic";
+
+type AdminVideoRow = {
+  id: string;
+  title: string;
+  youtube_video_id: string | null;
+  display_name: string;
+  status: string;
+  created_at: number;
+};
 
 export default async function AdminVideosPage({
   searchParams,
@@ -19,16 +28,38 @@ export default async function AdminVideosPage({
   const { q = "", status = "" } = await searchParams;
 
   const db = getDatabase();
-  let rows: (typeof videosTable.$inferSelect)[] = [];
+  let rows: AdminVideoRow[] = [];
   if (db) {
     try {
-      const filters = [];
-      if (q) filters.push(like(videosTable.title, `%${q}%`));
-      if (status) filters.push(eq(videosTable.status, status as never));
+      const term = `%${q}%`;
+      const queryFilter = q
+        ? or(
+            like(videosTable.title, term),
+            like(videosTable.display_name, term),
+            like(videosTable.contact_x_id, term),
+            like(xUsersTable.x_name, term),
+            like(xUsersTable.id, term),
+          )
+        : undefined;
+      const statusFilter = status
+        ? eq(videosTable.status, status as never)
+        : undefined;
+      const where =
+        queryFilter && statusFilter
+          ? and(queryFilter, statusFilter)
+          : (queryFilter ?? statusFilter);
       rows = await db
-        .select()
+        .select({
+          id: videosTable.id,
+          title: videosTable.title,
+          youtube_video_id: videosTable.youtube_video_id,
+          display_name: sql<string>`COALESCE(${xUsersTable.x_name}, ${videosTable.display_name}, ${videosTable.contact_x_id})`,
+          status: videosTable.status,
+          created_at: videosTable.created_at,
+        })
         .from(videosTable)
-        .where(filters.length ? and(...filters) : undefined)
+        .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id))
+        .where(where)
         .orderBy(desc(videosTable.created_at))
         .limit(60);
     } catch (e) {

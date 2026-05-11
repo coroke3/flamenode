@@ -358,7 +358,7 @@ export async function applyLegacyImport(
             id: x.id,
             x_name: x.x_name,
             youtube_channel_url: x.youtube_channel_url ?? null,
-            approval_status: "pending",
+            approval_status: "approved",
             approval_requested_at: now,
           });
           counts.xUsers.create += 1;

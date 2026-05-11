@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { and, desc, eq, ne } from "drizzle-orm";
+import { and, desc, eq, ne, or, sql } from "drizzle-orm";
 import styles from "./page.module.css";
 import { getDatabase } from "@/lib/cloudflare";
 import { videos, videoMembers, xUsers } from "@/lib/db/schema";
@@ -15,6 +15,14 @@ interface Props {
   params: Promise<{ id: string }>;
 }
 
+interface ProfileUser {
+  id: string;
+  x_name: string;
+  icon_url: string | null;
+  profile_text: string | null;
+  youtube_channel_url: string | null;
+}
+
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
   const db = getDatabase();
@@ -24,7 +32,22 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     .from(xUsers)
     .where(eq(xUsers.id, id))
     .limit(1);
-  return { title: u[0]?.x_name ?? id };
+  if (u[0]) return { title: u[0].x_name };
+
+  const fallback = await db
+    .select({ name: sql<string>`COALESCE(${videos.display_name}, ${videos.contact_x_id})` })
+    .from(videos)
+    .where(
+      and(
+        eq(videos.status, "public"),
+        eq(videos.is_deleted, 0),
+        eq(videos.is_manual_hidden, 0),
+        or(eq(videos.creator_id, id), eq(videos.contact_x_id, id))!,
+      )!,
+    )
+    .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
+    .limit(1);
+  return { title: fallback[0]?.name ?? id };
 }
 
 export default async function UserPage({
@@ -39,16 +62,44 @@ export default async function UserPage({
     .from(xUsers)
     .where(eq(xUsers.id, id))
     .limit(1);
-  const user = userRow[0];
-  if (!user) notFound();
-
   const publicVideoBase = and(
     eq(videos.status, "public"),
     eq(videos.is_deleted, 0),
     eq(videos.is_manual_hidden, 0),
   );
 
-  const ownVideos = (await db
+  const fallbackUserRows = userRow[0]
+    ? []
+    : await db
+        .select({
+          id: videos.contact_x_id,
+          x_name: sql<string>`COALESCE(${videos.display_name}, ${videos.contact_x_id})`,
+          icon_url: videos.icon_url,
+          profile_text: sql<string | null>`NULL`,
+          youtube_channel_url: sql<string | null>`NULL`,
+        })
+        .from(videos)
+        .where(
+          and(
+            publicVideoBase,
+            or(eq(videos.creator_id, id), eq(videos.contact_x_id, id))!,
+          )!,
+        )
+        .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
+        .limit(1);
+
+  const user: ProfileUser | null = userRow[0]
+    ? {
+        id: userRow[0].id,
+        x_name: userRow[0].x_name,
+        icon_url: userRow[0].icon_url,
+        profile_text: userRow[0].profile_text,
+        youtube_channel_url: userRow[0].youtube_channel_url,
+      }
+    : (fallbackUserRows[0] ?? null);
+  if (!user) notFound();
+
+  const ownVideosRaw = await db
     .select({
       id: videos.id,
       title: videos.title,
@@ -61,16 +112,30 @@ export default async function UserPage({
       status: videos.status,
     })
     .from(videos)
-    .where(and(publicVideoBase, eq(videos.creator_id, id))!)
-    .orderBy(desc(videos.scheduled_time))) as VideoCardData[];
+    .where(
+      and(
+        publicVideoBase,
+        or(eq(videos.creator_id, id), eq(videos.contact_x_id, id))!,
+      )!,
+    )
+    .orderBy(desc(videos.scheduled_time));
+
+  // 作品の icon_url が空の場合は作者本人のアイコンへフォールバック。
+  const ownVideos = ownVideosRaw.map((v) => ({
+    ...v,
+    display_name: user.x_name || v.display_name || user.id,
+    icon_url: v.icon_url ?? user.icon_url,
+  })) as VideoCardData[];
 
   const collabVideos = (await db
     .select({
       id: videos.id,
       title: videos.title,
       youtube_video_id: videos.youtube_video_id,
-      display_name: videos.display_name,
-      icon_url: videos.icon_url,
+      display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
+      icon_url: sql<
+        string | null
+      >`COALESCE(${videos.icon_url}, ${xUsers.icon_url})`,
       creator_id: videos.creator_id,
       primary_event_id: videos.primary_event_id,
       scheduled_time: videos.scheduled_time,
@@ -78,6 +143,7 @@ export default async function UserPage({
     })
     .from(videos)
     .innerJoin(videoMembers, eq(videos.id, videoMembers.video_id))
+    .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
     .where(
       and(
         publicVideoBase,
@@ -88,12 +154,15 @@ export default async function UserPage({
     .orderBy(desc(videos.scheduled_time))
     .limit(40)) as VideoCardData[];
 
+  const profileName = user.x_name || ownVideos[0]?.display_name || `@${user.id}`;
+  const profileIcon = user.icon_url ?? ownVideos.find((v) => v.icon_url)?.icon_url ?? null;
+
   return (
     <div className={styles.page}>
       <section className={styles.profile}>
-        {user.icon_url ? (
+        {profileIcon ? (
           /* eslint-disable-next-line @next/next/no-img-element */
-          <img src={user.icon_url} alt="" className={styles.avatar} />
+          <img src={profileIcon} alt="" className={styles.avatar} />
         ) : (
           <span className={styles.avatarFb}>
             <Icon name="user" size={36} aria-hidden />
@@ -101,7 +170,7 @@ export default async function UserPage({
         )}
         <div className={styles.profileBody}>
           <p className={styles.eyebrow}>CREATOR</p>
-          <h1 className={styles.name}>{user.x_name}</h1>
+          <h1 className={styles.name}>{profileName}</h1>
           <p className={styles.handle}>@{user.id}</p>
           {user.profile_text ? (
             <p className={styles.bio}>{user.profile_text}</p>
@@ -128,7 +197,7 @@ export default async function UserPage({
               </a>
             ) : null}
             <Link
-              href={`/list?q=${encodeURIComponent(user.x_name)}`}
+              href={`/list?q=${encodeURIComponent(profileName)}`}
               className="fn-btn fn-btn-ghost fn-btn-sm"
             >
               関連作品

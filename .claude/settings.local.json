@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(timeout 180 npx next build)",
+      "Bash(powershell -NoProfile -Command \"Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'\")",
+      "Bash(mkdir -p c:/Users/beeyu/Documents/GitHub/flamenode/app/\\\\\\(admin\\\\\\)/admin/videos/\\\\[id\\\\])"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\beeyu\\Documents\\GitHub\\flamenode\\app\\(admin)\\admin\\videos"
+    ]
+  }
+}

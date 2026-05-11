@@ -42,14 +42,17 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           id: videosTable.id,
           title: videosTable.title,
           youtube_video_id: videosTable.youtube_video_id,
-          display_name: videosTable.display_name,
-          icon_url: videosTable.icon_url,
+          display_name: sql<string>`COALESCE(${xUsersTable.x_name}, ${videosTable.display_name}, ${videosTable.contact_x_id})`,
+          icon_url: sql<
+            string | null
+          >`COALESCE(${videosTable.icon_url}, ${xUsersTable.icon_url})`,
           creator_id: videosTable.creator_id,
           primary_event_id: videosTable.primary_event_id,
           scheduled_time: videosTable.scheduled_time,
           status: videosTable.status,
         })
         .from(videosTable)
+        .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id))
         .where(
           and(
             eq(videosTable.owner_discord_user_id, user.id),

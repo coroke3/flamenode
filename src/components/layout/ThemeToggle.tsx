@@ -4,39 +4,19 @@ import * as React from "react";
 import styles from "./ThemeToggle.module.css";
 import { Icon } from "@/components/ui/Icon";
 
-type Mode = "light" | "dark" | "system";
+type Mode = "light" | "dark";
 
 const STORAGE_KEY = "fn-theme";
-const MODES: Mode[] = ["system", "light", "dark"];
 
-const MODE_META: Record<
-  Mode,
-  { icon: "system" | "sun" | "moon"; label: string; nextLabel: string }
-> = {
-  system: {
-    icon: "system",
-    label: "テーマ: システム",
-    nextLabel: "ライトへ切り替え",
-  },
-  light: {
-    icon: "sun",
-    label: "テーマ: ライト",
-    nextLabel: "ダークへ切り替え",
-  },
-  dark: {
-    icon: "moon",
-    label: "テーマ: ダーク",
-    nextLabel: "システムへ切り替え",
-  },
-};
+function getDeviceMode(): Mode {
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+}
 
-function applyTheme(mode: Mode) {
-  const html = document.documentElement;
-  if (mode === "system") {
-    html.removeAttribute("data-theme");
-  } else {
-    html.setAttribute("data-theme", mode);
-  }
+function applyTheme(mode: Mode, persist = true) {
+  document.documentElement.setAttribute("data-theme", mode);
+  if (!persist) return;
   try {
     localStorage.setItem(STORAGE_KEY, mode);
   } catch {
@@ -45,38 +25,38 @@ function applyTheme(mode: Mode) {
 }
 
 export function ThemeToggle(): React.ReactElement {
-  const [mode, setMode] = React.useState<Mode>("system");
+  const [mode, setMode] = React.useState<Mode>("light");
 
   React.useEffect(() => {
-    let saved: Mode = "system";
+    let initial: Mode = getDeviceMode();
     try {
-      const v = localStorage.getItem(STORAGE_KEY) as Mode | null;
-      if (v === "light" || v === "dark" || v === "system") saved = v;
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved === "light" || saved === "dark") initial = saved;
     } catch {
       /* noop */
     }
-    setMode(saved);
-    applyTheme(saved);
+    setMode(initial);
+    applyTheme(initial, false);
   }, []);
 
-  const cycle = () => {
-    const currentIndex = MODES.indexOf(mode);
-    const next = MODES[(currentIndex + 1) % MODES.length] ?? "system";
-    setMode(next);
-    applyTheme(next);
-  };
-
-  const meta = MODE_META[mode];
+  const next = mode === "dark" ? "light" : "dark";
+  const label =
+    mode === "dark"
+      ? "現在はダークモード。ライトモードへ切り替え"
+      : "現在はライトモード。ダークモードへ切り替え";
 
   return (
     <button
       type="button"
-      aria-label={`${meta.label}。${meta.nextLabel}`}
-      title={`${meta.label} / ${meta.nextLabel}`}
+      aria-label={label}
+      title={label}
       className={styles.button}
-      onClick={cycle}
+      onClick={() => {
+        setMode(next);
+        applyTheme(next);
+      }}
     >
-      <Icon name={meta.icon} size={15} />
+      <Icon name={mode === "dark" ? "moon" : "sun"} size={15} />
       <span className={styles.dot} aria-hidden />
     </button>
   );

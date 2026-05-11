@@ -18,6 +18,21 @@
 
 .iframeBox iframe {
   pointer-events: none;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+/**
+ * クリックシールド: iframe 上で発生するクリックを独自プレイヤー側に受け止め、
+ * YouTube 側オーバーレイ（タイトル・ロゴ・「YouTubeで視聴」リンク等）にユーザーが
+ * アクセスできないようにする。透過させて video そのものは見える状態にする。
+ */
+.clickShield {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  z-index: 1;
 }
 
 .centerBtn {
@@ -35,6 +50,7 @@
   border: 1px solid rgba(255, 255, 255, 0.2);
   cursor: pointer;
   transition: opacity 0.2s ease, transform 0.15s ease;
+  z-index: 3;
 }
 
 .centerBtn:hover {
@@ -63,6 +79,7 @@
   color: #fff;
   transition: opacity 0.2s ease;
   pointer-events: none;
+  z-index: 2;
 }
 
 .topBar > *,
@@ -238,6 +255,7 @@
   place-items: center;
   background-color: rgba(0, 0, 0, 0.8);
   color: #fff;
+  z-index: 4;
 }
 
 .fallbackThumb img {

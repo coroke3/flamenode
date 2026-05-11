@@ -1,10 +1,10 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, eq, like, or, sql } from "drizzle-orm";
+import { and, eq, isNull, like, ne, or, sql } from "drizzle-orm";
 import styles from "./page.module.css";
 import { getDatabase } from "@/lib/cloudflare";
-import { xUsers } from "@/lib/db/schema";
+import { videos, xUsers } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 
 export const metadata: Metadata = {
@@ -44,7 +44,9 @@ export default async function UserListPage({
 
   if (db) {
     const keyword = q.trim();
-    const filters = [eq(xUsers.approval_status, "approved")];
+    const filters = [
+      or(eq(xUsers.approval_status, "approved"), eq(xUsers.approval_status, "pending"))!,
+    ];
     if (keyword) {
       const term = `%${keyword.replace(/[%_]/g, (m) => `\\${m}`)}%`;
       filters.push(or(like(xUsers.x_name, term), like(xUsers.id, term))!);
@@ -53,8 +55,26 @@ export default async function UserListPage({
     const rows = await db
       .select({
         id: xUsers.id,
-        x_name: xUsers.x_name,
-        icon_url: xUsers.icon_url,
+        x_name: sql<string>`COALESCE(
+          ${xUsers.x_name},
+          (SELECT v.display_name FROM videos AS v
+           WHERE v.creator_id = "x_users"."id"
+             AND v.status = 'public'
+             AND v.is_deleted = 0
+             AND v.is_manual_hidden = 0
+           ORDER BY v.scheduled_time DESC LIMIT 1),
+          "x_users"."id"
+        )`,
+        icon_url: sql<string | null>`COALESCE(
+          ${xUsers.icon_url},
+          (SELECT v.icon_url FROM videos AS v
+           WHERE v.creator_id = "x_users"."id"
+             AND v.icon_url IS NOT NULL
+             AND v.status = 'public'
+             AND v.is_deleted = 0
+             AND v.is_manual_hidden = 0
+           ORDER BY v.scheduled_time DESC LIMIT 1)
+        )`,
         profile_text: xUsers.profile_text,
         youtube_channel_url: xUsers.youtube_channel_url,
         own_count: sql<number>`(
@@ -87,7 +107,57 @@ export default async function UserListPage({
       .from(xUsers)
       .where(and(...filters)!);
 
-    creators = rows
+    const orphanFilters = [
+      eq(videos.status, "public"),
+      eq(videos.is_deleted, 0),
+      eq(videos.is_manual_hidden, 0),
+      ne(videos.contact_x_id, "anonymous"),
+      isNull(xUsers.id),
+    ];
+    if (keyword) {
+      const term = `%${keyword.replace(/[%_]/g, (m) => `\\${m}`)}%`;
+      orphanFilters.push(
+        or(
+          like(videos.display_name, term),
+          like(videos.contact_x_id, term),
+          like(videos.title, term),
+        )!,
+      );
+    }
+
+    const orphanRows = await db
+      .select({
+        id: videos.contact_x_id,
+        x_name: sql<string>`COALESCE(
+          (SELECT v.display_name FROM videos AS v
+           WHERE v.contact_x_id = ${videos.contact_x_id}
+             AND v.status = 'public'
+             AND v.is_deleted = 0
+             AND v.is_manual_hidden = 0
+           ORDER BY v.scheduled_time DESC, v.created_at DESC LIMIT 1),
+          ${videos.contact_x_id}
+        )`,
+        icon_url: sql<string | null>`(
+          SELECT v.icon_url FROM videos AS v
+          WHERE v.contact_x_id = ${videos.contact_x_id}
+            AND v.icon_url IS NOT NULL
+            AND v.status = 'public'
+            AND v.is_deleted = 0
+            AND v.is_manual_hidden = 0
+          ORDER BY v.scheduled_time DESC, v.created_at DESC LIMIT 1
+        )`,
+        profile_text: sql<string | null>`NULL`,
+        youtube_channel_url: sql<string | null>`NULL`,
+        own_count: sql<number>`COUNT(DISTINCT ${videos.id})`,
+        collab_count: sql<number>`0`,
+        total_count: sql<number>`COUNT(DISTINCT ${videos.id})`,
+      })
+      .from(videos)
+      .leftJoin(xUsers, eq(xUsers.id, videos.contact_x_id))
+      .where(and(...orphanFilters)!)
+      .groupBy(videos.contact_x_id);
+
+    creators = [...rows, ...orphanRows]
       .map((row) => ({
         ...row,
         own_count: Number(row.own_count) || 0,

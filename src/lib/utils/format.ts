@@ -1,5 +1,3 @@
-/** 日時文字列・各種フォーマッタ。 */
-
 const fullFormatter = new Intl.DateTimeFormat("ja-JP", {
   timeZone: "Asia/Tokyo",
   year: "numeric",
@@ -22,16 +20,17 @@ const timeOnlyFormatter = new Intl.DateTimeFormat("ja-JP", {
   minute: "2-digit",
 });
 
-/** UNIX 秒 (number) を JST 表記の文字列にする。 */
-export function formatUnix(unixSec: number | null | undefined, opts: { dateOnly?: boolean; timeOnly?: boolean } = {}): string {
-  if (unixSec == null) return "—";
+export function formatUnix(
+  unixSec: number | null | undefined,
+  opts: { dateOnly?: boolean; timeOnly?: boolean } = {},
+): string {
+  if (unixSec == null) return "-";
   const d = new Date(unixSec * 1000);
   if (opts.dateOnly) return dateOnlyFormatter.format(d);
   if (opts.timeOnly) return timeOnlyFormatter.format(d);
   return fullFormatter.format(d);
 }
 
-/** 「3 日前」「1 時間前」風の相対表記 (簡易版)。 */
 export function formatRelative(unixSec: number | null | undefined): string {
   if (unixSec == null) return "";
   const diff = Date.now() / 1000 - unixSec;
@@ -43,7 +42,6 @@ export function formatRelative(unixSec: number | null | undefined): string {
   return `${Math.floor(diff / 31536000)}年前`;
 }
 
-/** 秒 → "1:23:45" / "12:34" 表記。 */
 export function formatDuration(sec: number): string {
   const total = Math.max(0, Math.floor(sec));
   const h = Math.floor(total / 3600);
@@ -54,7 +52,6 @@ export function formatDuration(sec: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
-/** 数値を 1.2k / 12k / 1.2M 形式で省略する。 */
 export function formatCount(n: number | null | undefined): string {
   if (n == null) return "0";
   if (n < 1000) return String(n);

@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, like, or, sql } from "drizzle-orm";
-import { videos, videoEvents } from "./schema";
+import { videos, videoEvents, xUsers } from "./schema";
 import type { DB } from "./client";
 
 export interface ListVideoParams {
@@ -47,8 +47,10 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
         id: videos.id,
         title: videos.title,
         youtube_video_id: videos.youtube_video_id,
-        display_name: videos.display_name,
-        icon_url: videos.icon_url,
+        display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
+        icon_url: sql<
+          string | null
+        >`COALESCE(${videos.icon_url}, ${xUsers.icon_url})`,
         creator_id: videos.creator_id,
         primary_event_id: videos.primary_event_id,
         scheduled_time: videos.scheduled_time,
@@ -56,6 +58,7 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
       })
       .from(videos)
       .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
+      .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
       .where(and(...filters, eq(videoEvents.event_id, eventId))!)
       .orderBy(orderBy)
       .limit(limit)
@@ -67,14 +70,17 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
       id: videos.id,
       title: videos.title,
       youtube_video_id: videos.youtube_video_id,
-      display_name: videos.display_name,
-      icon_url: videos.icon_url,
+      display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
+      icon_url: sql<
+        string | null
+      >`COALESCE(${videos.icon_url}, ${xUsers.icon_url})`,
       creator_id: videos.creator_id,
       primary_event_id: videos.primary_event_id,
       scheduled_time: videos.scheduled_time,
       status: videos.status,
     })
     .from(videos)
+    .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
     .where(and(...filters)!)
     .orderBy(orderBy)
     .limit(limit)

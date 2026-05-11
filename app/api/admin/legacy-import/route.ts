@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { getDatabase } from "@/lib/cloudflare";
+import { systemSettings } from "@/lib/db/schema";
 import {
   analyzeLegacyPayload,
   applyLegacyImport,
@@ -79,6 +81,9 @@ async function handleJson(req: Request, operatorId: string): Promise<Response> {
     }
 
     if (action === "apply") {
+      const blocked = await getImportWriteBlockReason();
+      if (blocked) return jsonErrorResult(blocked, 423, ["cost-guard"]);
+
       const result = await applyLegacyImport(
         merged.payload,
         {
@@ -105,16 +110,16 @@ async function handleForm(req: Request, operatorId: string): Promise<Response> {
   const base = new URL("/admin/import", req.url);
 
   if (!(file instanceof File) || file.size === 0) {
-    base.searchParams.set("notice", "JSON ファイルを選択してください。");
+    base.searchParams.set("notice", "JSON または CSV ファイルを選択してください。");
     return NextResponse.redirect(base, { status: 303 });
   }
 
   const text = await file.text();
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text) as unknown;
+    parsed = /\.csv$/i.test(file.name) ? parseCsv(text) : (JSON.parse(text) as unknown);
   } catch {
-    base.searchParams.set("notice", "JSON の形式が正しくありません。");
+    base.searchParams.set("notice", "ファイル形式が正しくありません。JSON または CSV を指定してください。");
     return NextResponse.redirect(base, { status: 303 });
   }
 
@@ -134,6 +139,12 @@ async function handleForm(req: Request, operatorId: string): Promise<Response> {
     return NextResponse.redirect(base, { status: 303 });
   }
 
+  const blocked = await getImportWriteBlockReason();
+  if (blocked) {
+    base.searchParams.set("notice", blocked);
+    return NextResponse.redirect(base, { status: 303 });
+  }
+
   try {
     const r = await applyLegacyImport(parsed, { events: "skip", videos: "skip" }, operatorId);
     base.searchParams.set(
@@ -147,6 +158,21 @@ async function handleForm(req: Request, operatorId: string): Promise<Response> {
     base.searchParams.set("notice", `取り込み失敗: ${msg}`);
   }
   return NextResponse.redirect(base, { status: 303 });
+}
+
+async function getImportWriteBlockReason(): Promise<string | null> {
+  const db = getDatabase();
+  if (!db) return null;
+  const rows = await db.select().from(systemSettings).limit(1);
+  const mode = rows[0]?.cost_guard_mode ?? "normal";
+  const isMaintenance = rows[0]?.is_maintenance_mode === 1;
+  if (isMaintenance || mode === "maintenance") {
+    return "現在はメンテナンスモードのため、インポート実行は停止中です。ドライランのみ利用できます。";
+  }
+  if (mode === "read_only" || mode === "static_only") {
+    return `現在は ${mode} モードのため、インポート実行は停止中です。ドライランのみ利用できます。`;
+  }
+  return null;
 }
 
 interface MergeResult {
@@ -163,11 +189,13 @@ function mergeFiles(files: { name?: string; content?: string }[]): MergeResult {
     if (!f?.content) continue;
     let parsed: unknown;
     try {
-      parsed = JSON.parse(f.content);
+      parsed = /\.csv$/i.test(f.name ?? "")
+        ? parseCsv(f.content)
+        : JSON.parse(f.content);
     } catch {
       return {
         ok: false,
-        message: `${f.name ?? "(無名ファイル)"} の JSON 形式が不正です。`,
+        message: `${f.name ?? "(無名ファイル)"} の形式を解析できませんでした。JSON またはヘッダー付き CSV を指定してください。`,
         payload: null,
       };
     }
@@ -177,4 +205,57 @@ function mergeFiles(files: { name?: string; content?: string }[]): MergeResult {
   }
 
   return { ok: true, payload: { events: allEvents, videos: allVideos } };
+}
+
+function parseCsv(text: string): Record<string, string>[] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let quoted = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    const next = text[i + 1];
+
+    if (quoted) {
+      if (ch === '"' && next === '"') {
+        field += '"';
+        i += 1;
+      } else if (ch === '"') {
+        quoted = false;
+      } else {
+        field += ch;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      quoted = true;
+    } else if (ch === ",") {
+      row.push(field);
+      field = "";
+    } else if (ch === "\n") {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+    } else if (ch !== "\r") {
+      field += ch;
+    }
+  }
+  row.push(field);
+  rows.push(row);
+
+  const [headerRow, ...bodyRows] = rows.filter((r) => r.some((c) => c.trim()));
+  if (!headerRow) return [];
+  const headers = headerRow.map((h, index) =>
+    (index === 0 ? h.replace(/^\uFEFF/, "") : h).trim(),
+  );
+  return bodyRows.map((cells) => {
+    const obj: Record<string, string> = {};
+    headers.forEach((header, index) => {
+      if (header) obj[header] = (cells[index] ?? "").trim();
+    });
+    return obj;
+  });
 }
