@@ -7,6 +7,8 @@ import {
   videoMembers,
   xUsers,
 } from "./schema";
+import { creatorIconExpr, creatorNameExpr } from "./displayExpr";
+import { resolveMissingIcons } from "./iconResolution";
 import type { DB } from "./client";
 
 /**
@@ -23,15 +25,13 @@ export const publicVideoCondition = and(
 
 /** トップページのおすすめ作品候補 (video_score 上位 N 件)。 */
 export async function fetchRecommendedVideos(db: DB, limit = 40) {
-  return db
+  const rows = await db
     .select({
       id: videos.id,
       title: videos.title,
       youtube_video_id: videos.youtube_video_id,
-      display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
-      icon_url: sql<
-        string | null
-      >`COALESCE(${videos.icon_url}, ${xUsers.icon_url})`,
+      display_name: creatorNameExpr,
+      icon_url: creatorIconExpr,
       creator_id: videos.creator_id,
       primary_event_id: videos.primary_event_id,
       scheduled_time: videos.scheduled_time,
@@ -42,19 +42,18 @@ export async function fetchRecommendedVideos(db: DB, limit = 40) {
     .where(publicVideoCondition)
     .orderBy(desc(videos.video_score), desc(videos.scheduled_time))
     .limit(limit);
+  return resolveMissingIcons(db, rows);
 }
 
 /** 最新作品 (scheduled_time 降順)。 */
 export async function fetchLatestVideos(db: DB, limit = 30) {
-  return db
+  const rows = await db
     .select({
       id: videos.id,
       title: videos.title,
       youtube_video_id: videos.youtube_video_id,
-      display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
-      icon_url: sql<
-        string | null
-      >`COALESCE(${videos.icon_url}, ${xUsers.icon_url})`,
+      display_name: creatorNameExpr,
+      icon_url: creatorIconExpr,
       creator_id: videos.creator_id,
       primary_event_id: videos.primary_event_id,
       scheduled_time: videos.scheduled_time,
@@ -64,6 +63,7 @@ export async function fetchLatestVideos(db: DB, limit = 30) {
     .where(publicVideoCondition)
     .orderBy(desc(videos.scheduled_time))
     .limit(limit);
+  return resolveMissingIcons(db, rows);
 }
 
 /** 直近 N 件のイベント。 */
@@ -82,15 +82,13 @@ export async function fetchVideosForEvent(
   eventId: string,
   limit = 8,
 ) {
-  return db
+  const rows = await db
     .select({
       id: videos.id,
       title: videos.title,
       youtube_video_id: videos.youtube_video_id,
-      display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
-      icon_url: sql<
-        string | null
-      >`COALESCE(${videos.icon_url}, ${xUsers.icon_url})`,
+      display_name: creatorNameExpr,
+      icon_url: creatorIconExpr,
       creator_id: videos.creator_id,
       scheduled_time: videos.scheduled_time,
     })
@@ -100,6 +98,7 @@ export async function fetchVideosForEvent(
     .where(and(publicVideoCondition, eq(videoEvents.event_id, eventId))!)
     .orderBy(desc(videos.scheduled_time))
     .limit(limit);
+  return resolveMissingIcons(db, rows);
 }
 
 /** 開催中イベント (is_active=1)。 */

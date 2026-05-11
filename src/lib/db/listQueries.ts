@@ -1,5 +1,7 @@
 import { and, asc, desc, eq, like, or, sql } from "drizzle-orm";
 import { videos, videoEvents, xUsers } from "./schema";
+import { creatorIconExpr, creatorNameExpr } from "./displayExpr";
+import { resolveMissingIcons } from "./iconResolution";
 import type { DB } from "./client";
 
 export interface ListVideoParams {
@@ -42,15 +44,13 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
         : desc(videos.scheduled_time);
 
   if (eventId) {
-    return db
+    const rows = await db
       .select({
         id: videos.id,
         title: videos.title,
         youtube_video_id: videos.youtube_video_id,
-        display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
-        icon_url: sql<
-          string | null
-        >`COALESCE(${videos.icon_url}, ${xUsers.icon_url})`,
+        display_name: creatorNameExpr,
+        icon_url: creatorIconExpr,
         creator_id: videos.creator_id,
         primary_event_id: videos.primary_event_id,
         scheduled_time: videos.scheduled_time,
@@ -63,17 +63,16 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
       .orderBy(orderBy)
       .limit(limit)
       .offset(offset);
+    return resolveMissingIcons(db, rows);
   }
 
-  return db
+  const rows = await db
     .select({
       id: videos.id,
       title: videos.title,
       youtube_video_id: videos.youtube_video_id,
-      display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
-      icon_url: sql<
-        string | null
-      >`COALESCE(${videos.icon_url}, ${xUsers.icon_url})`,
+      display_name: creatorNameExpr,
+      icon_url: creatorIconExpr,
       creator_id: videos.creator_id,
       primary_event_id: videos.primary_event_id,
       scheduled_time: videos.scheduled_time,
@@ -85,6 +84,7 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
     .orderBy(orderBy)
     .limit(limit)
     .offset(offset);
+  return resolveMissingIcons(db, rows);
 }
 
 /** 公開作品の総数 (ページング用)。 */

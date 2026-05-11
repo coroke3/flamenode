@@ -78,8 +78,8 @@ export function XIdSwitcher({
       setOpen(false);
       return;
     }
-    if (entry.approval_status !== "approved") {
-      setError("承認済みの X ID だけをアクティブにできます。");
+    if (entry.approval_status === "rejected") {
+      setError("却下された X ID はアクティブにできません。");
       return;
     }
 
@@ -148,7 +148,7 @@ export function XIdSwitcher({
                   key={entry.x_user_id}
                   role="option"
                   aria-selected={selected}
-                  disabled={pending || entry.approval_status !== "approved"}
+                  disabled={pending || entry.approval_status === "rejected"}
                   onClick={() => switchTo(entry)}
                   className={styles.option}
                   type="button"

@@ -174,14 +174,44 @@ export default async function AdminEventDetailPage({
         )}
       </section>
 
-      <p style={{ marginTop: 24, display: "flex", gap: 8 }}>
-        <Link href="/admin/events" className="fn-btn fn-btn-ghost">
-          <Icon name="chevron-left" size={12} aria-hidden /> イベント管理へ戻る
+      <nav
+        style={{
+          marginTop: 24,
+          display: "flex",
+          gap: 8,
+          flexWrap: "wrap",
+        }}
+      >
+        <Link
+          href={`/admin/events/${event.id}/edit`}
+          className="fn-btn fn-btn-primary fn-btn-sm"
+        >
+          <Icon name="edit" size={12} aria-hidden /> 設定編集
         </Link>
-        <Link href={`/event/${event.id}`} className="fn-btn fn-btn-ghost" target="_blank" rel="noopener noreferrer">
+        <Link
+          href={`/admin/events/${event.id}/slots`}
+          className="fn-btn fn-btn-ghost fn-btn-sm"
+        >
+          <Icon name="clock" size={12} aria-hidden /> 枠管理
+        </Link>
+        <Link
+          href={`/admin/events/${event.id}/staff`}
+          className="fn-btn fn-btn-ghost fn-btn-sm"
+        >
+          <Icon name="users" size={12} aria-hidden /> 運営・協力者
+        </Link>
+        <Link
+          href={`/event/${event.id}`}
+          className="fn-btn fn-btn-ghost fn-btn-sm"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
           <Icon name="external" size={12} aria-hidden /> 公開ページ
         </Link>
-      </p>
+        <Link href="/admin/events" className="fn-btn fn-btn-ghost fn-btn-sm">
+          <Icon name="chevron-left" size={12} aria-hidden /> 一覧
+        </Link>
+      </nav>
     </div>
   );
 }

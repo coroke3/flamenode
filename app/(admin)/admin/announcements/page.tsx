@@ -1,4 +1,5 @@
 import * as React from "react";
+import Link from "next/link";
 import type { Metadata } from "next";
 import { desc } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
@@ -29,9 +30,9 @@ export default async function AdminAnnouncementsPage(): Promise<React.ReactEleme
         }}
       >
         <h1 style={{ fontSize: 22, fontWeight: 700 }}>お知らせ管理</h1>
-        <button type="button" className="fn-btn fn-btn-primary fn-btn-sm">
+        <Link href="/admin/announcements/new" className="fn-btn fn-btn-primary fn-btn-sm">
           <Icon name="plus" size={12} aria-hidden /> 新規お知らせ
-        </button>
+        </Link>
       </header>
 
       <table className="fn-table" style={{ marginTop: 18 }}>
@@ -41,6 +42,7 @@ export default async function AdminAnnouncementsPage(): Promise<React.ReactEleme
             <th>公開状態</th>
             <th>掲載期間</th>
             <th>更新</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -65,11 +67,19 @@ export default async function AdminAnnouncementsPage(): Promise<React.ReactEleme
                 {a.expire_at ? formatUnix(a.expire_at, { dateOnly: true }) : "—"}
               </td>
               <td>{formatUnix(a.updated_at)}</td>
+              <td>
+                <Link
+                  href={`/admin/announcements/${a.id}/edit`}
+                  className="fn-btn fn-btn-ghost fn-btn-sm"
+                >
+                  編集
+                </Link>
+              </td>
             </tr>
           ))}
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={4}>
+              <td colSpan={5}>
                 <p
                   className="fn-empty-message"
                   style={{ padding: 16, textAlign: "center" }}

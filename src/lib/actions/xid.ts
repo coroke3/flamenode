@@ -40,10 +40,10 @@ export async function setActiveXId(
       message: "この X ID は現在のアカウントに紐づいていません。",
     };
   }
-  if (xRow.approval_status !== "approved") {
+  if (xRow.approval_status === "rejected") {
     return {
       ok: false,
-      message: "承認済みの X ID だけをアクティブにできます。",
+      message: "却下された X ID はアクティブにできません。",
     };
   }
 

@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { getDatabase } from "@/lib/cloudflare";
 import { systemSettings } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
+import { CostGuardForm } from "@/components/admin/CostGuardForm";
 
 export const metadata: Metadata = { title: "コストガード" };
 export const dynamic = "force-dynamic";
@@ -45,17 +46,28 @@ const MODES: Array<{
   },
 ];
 
+type CostGuardMode =
+  | "normal"
+  | "economy"
+  | "read_only"
+  | "static_only"
+  | "maintenance";
+
 export default async function AdminCostGuardPage(): Promise<React.ReactElement> {
   const db = getDatabase();
-  let mode = "normal";
+  let mode: CostGuardMode = "normal";
   let isMaintenance = 0;
+  let autoEnabled = 1;
+  let reason: string | null = null;
   let updatedAt: number | null = null;
   if (db) {
     try {
       const rows = await db.select().from(systemSettings).limit(1);
       if (rows[0]) {
-        mode = rows[0].cost_guard_mode ?? "normal";
+        mode = (rows[0].cost_guard_mode ?? "normal") as CostGuardMode;
         isMaintenance = rows[0].is_maintenance_mode ?? 0;
+        autoEnabled = rows[0].auto_cost_guard_enabled ?? 1;
+        reason = rows[0].cost_guard_reason;
         updatedAt = rows[0].cost_guard_updated_at ?? null;
       }
     } catch (e) {
@@ -111,42 +123,32 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
             marginBottom: 12,
           }}
         >
-          モード選択
+          設定
         </h2>
-        <div style={{ display: "grid", gap: 12, gridTemplateColumns: "1fr" }}>
-          {MODES.map((m) => (
-            <form
-              key={m.value}
-              method="post"
-              action="/api/admin/cost-guard"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "auto 1fr auto",
-                gap: 16,
-                alignItems: "center",
-                padding: "16px 18px",
-                background: "var(--bg-surface)",
-                border: "1px solid var(--border-subtle)",
-                borderRadius: "var(--radius-md)",
-              }}
-            >
-              <span className={`fn-badge ${m.badge}`}>{m.label}</span>
-              <div>
-                <strong style={{ fontSize: 14 }}>{m.value}</strong>
-                <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                  {m.description}
-                </div>
-              </div>
-              <input type="hidden" name="mode" value={m.value} />
-              <button
-                type="submit"
-                disabled={mode === m.value}
-                className={`fn-btn fn-btn-${m.value === "maintenance" ? "danger" : "primary"} fn-btn-sm`}
-              >
-                {mode === m.value ? "適用中" : "切替"}
-              </button>
-            </form>
-          ))}
+        <div
+          style={{
+            padding: "16px 18px",
+            background: "var(--bg-surface)",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: "var(--radius-md)",
+          }}
+        >
+          <CostGuardForm
+            mode={mode}
+            reason={reason}
+            isMaintenance={isMaintenance}
+            autoEnabled={autoEnabled}
+          />
+        </div>
+        <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-muted)" }}>
+          モードの説明:
+          <ul style={{ marginTop: 6, paddingLeft: 16 }}>
+            {MODES.map((m) => (
+              <li key={m.value} style={{ marginBottom: 4 }}>
+                <strong>{m.label}</strong> ({m.value}) — {m.description}
+              </li>
+            ))}
+          </ul>
         </div>
       </section>
 

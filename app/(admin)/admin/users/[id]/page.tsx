@@ -159,9 +159,15 @@ export default async function AdminUserDetailPage({
         )}
       </section>
 
-      <p style={{ marginTop: 24 }}>
+      <p style={{ marginTop: 24, display: "flex", gap: 8 }}>
         <Link href="/admin/users" className="fn-btn fn-btn-ghost">
           <Icon name="chevron-left" size={12} aria-hidden /> ユーザー管理へ戻る
+        </Link>
+        <Link
+          href={`/admin/users/${user.id}/edit`}
+          className="fn-btn fn-btn-primary"
+        >
+          <Icon name="edit" size={12} aria-hidden /> 編集
         </Link>
       </p>
     </div>

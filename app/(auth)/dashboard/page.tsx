@@ -1,7 +1,7 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import styles from "./page.module.css";
 import { getDatabase } from "@/lib/cloudflare";
 import {
@@ -11,6 +11,7 @@ import {
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth/guard";
+import { getApprovedXIds } from "@/lib/auth/ownership";
 import { Icon } from "@/components/ui/Icon";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
@@ -37,30 +38,35 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
         .from(xUsersTable)
         .where(eq(xUsersTable.linked_discord_user_id, user.id));
 
-      myVideos = (await db
-        .select({
-          id: videosTable.id,
-          title: videosTable.title,
-          youtube_video_id: videosTable.youtube_video_id,
-          display_name: sql<string>`COALESCE(${xUsersTable.x_name}, ${videosTable.display_name}, ${videosTable.contact_x_id})`,
-          icon_url: sql<
-            string | null
-          >`COALESCE(${videosTable.icon_url}, ${xUsersTable.icon_url})`,
-          creator_id: videosTable.creator_id,
-          primary_event_id: videosTable.primary_event_id,
-          scheduled_time: videosTable.scheduled_time,
-          status: videosTable.status,
-        })
-        .from(videosTable)
-        .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id))
-        .where(
-          and(
-            eq(videosTable.owner_discord_user_id, user.id),
-            eq(videosTable.is_deleted, 0),
-          )!,
-        )
-        .orderBy(desc(videosTable.created_at))
-        .limit(12)) as VideoCardData[];
+      // 「自分の作品」= 承認済み X ID の creator_id に一致する作品のみ。
+      // owner_discord_user_id 単独一致は legacy import 混入を避けるため判定対象外にする。
+      const approvedXIds = await getApprovedXIds(db, user.id);
+      if (approvedXIds.length > 0) {
+        myVideos = (await db
+          .select({
+            id: videosTable.id,
+            title: videosTable.title,
+            youtube_video_id: videosTable.youtube_video_id,
+            display_name: sql<string>`COALESCE(${videosTable.display_name}, ${xUsersTable.x_name}, '@' || ${videosTable.contact_x_id})`,
+            icon_url: sql<
+              string | null
+            >`COALESCE(${videosTable.icon_url}, ${xUsersTable.icon_url})`,
+            creator_id: videosTable.creator_id,
+            primary_event_id: videosTable.primary_event_id,
+            scheduled_time: videosTable.scheduled_time,
+            status: videosTable.status,
+          })
+          .from(videosTable)
+          .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id))
+          .where(
+            and(
+              inArray(videosTable.creator_id, approvedXIds),
+              eq(videosTable.is_deleted, 0),
+            )!,
+          )
+          .orderBy(desc(videosTable.created_at))
+          .limit(12)) as VideoCardData[];
+      }
 
       // 直近のアクティブスロット (reserved or x_reapply_required)
       const slotRows = await db
@@ -80,26 +86,28 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
       }
 
       // 集計
-      const aggRows = await db
-        .select({
-          likes: sql<number>`COALESCE(SUM(${videosTable.like_count}),0)`,
-          views: sql<number>`COALESCE(SUM(${videosTable.youtube_view_count}),0)`,
-          c: sql<number>`COUNT(*)`,
-          ec: sql<number>`COUNT(${videosTable.primary_event_id})`,
-        })
-        .from(videosTable)
-        .where(
-          and(
-            eq(videosTable.owner_discord_user_id, user.id),
-            eq(videosTable.is_deleted, 0),
-          )!,
-        );
-      stats = {
-        likes: Number(aggRows[0]?.likes ?? 0),
-        views: Number(aggRows[0]?.views ?? 0),
-        video_count: Number(aggRows[0]?.c ?? 0),
-        event_count: Number(aggRows[0]?.ec ?? 0),
-      };
+      if (approvedXIds.length > 0) {
+        const aggRows = await db
+          .select({
+            likes: sql<number>`COALESCE(SUM(${videosTable.like_count}),0)`,
+            views: sql<number>`COALESCE(SUM(${videosTable.youtube_view_count}),0)`,
+            c: sql<number>`COUNT(*)`,
+            ec: sql<number>`COUNT(${videosTable.primary_event_id})`,
+          })
+          .from(videosTable)
+          .where(
+            and(
+              inArray(videosTable.creator_id, approvedXIds),
+              eq(videosTable.is_deleted, 0),
+            )!,
+          );
+        stats = {
+          likes: Number(aggRows[0]?.likes ?? 0),
+          views: Number(aggRows[0]?.views ?? 0),
+          video_count: Number(aggRows[0]?.c ?? 0),
+          event_count: Number(aggRows[0]?.ec ?? 0),
+        };
+      }
     } catch (e) {
       console.error("[DashboardPage] fetch failed", e);
     }

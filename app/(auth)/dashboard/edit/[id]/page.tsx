@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { videos as videosTable } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth/guard";
+import { canEditVideo } from "@/lib/auth/ownership";
 import { VideoForm } from "@/components/forms/VideoForm";
 import { Icon } from "@/components/ui/Icon";
 import { youtubeWatchUrl } from "@/lib/youtube/id";
@@ -34,7 +35,40 @@ export default async function EditVideoPage({
     .limit(1);
   const video = rows[0];
   if (!video) notFound();
-  if (video.owner_discord_user_id !== user.id && user.role !== "admin") notFound();
+  const canEdit = await canEditVideo({ db, user, video });
+  if (!canEdit) {
+    return (
+      <div
+        style={{
+          width: "min(96%, 720px)",
+          margin: "60px auto",
+          padding: "48px 28px",
+          background: "var(--bg-surface)",
+          border: "1px solid var(--accent-warning)",
+          borderRadius: "var(--radius-md)",
+          textAlign: "center",
+        }}
+      >
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: "var(--accent-warning)" }}>
+          編集権限がありません
+        </h1>
+        <p style={{ marginTop: 12, color: "var(--text-secondary)" }}>
+          この作品の作者本人、または担当イベントの運営のみが編集できます。
+        </p>
+        <div style={{ marginTop: 18, display: "flex", justifyContent: "center", gap: 8 }}>
+          <Link href="/dashboard" className="fn-btn fn-btn-ghost">
+            ダッシュボードへ
+          </Link>
+          <Link
+            href={`/${video.youtube_video_id ?? video.id}`}
+            className="fn-btn fn-btn-primary"
+          >
+            公開ページを見る
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

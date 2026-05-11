@@ -1,4 +1,5 @@
 import * as React from "react";
+import Link from "next/link";
 import type { Metadata } from "next";
 import { desc } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
@@ -29,9 +30,12 @@ export default async function AdminRulesPage(): Promise<React.ReactElement> {
         }}
       >
         <h1 style={{ fontSize: 22, fontWeight: 700 }}>利用規約</h1>
-        <button type="button" className="fn-btn fn-btn-primary fn-btn-sm">
+        <Link
+          href="/admin/rules/new"
+          className="fn-btn fn-btn-primary fn-btn-sm"
+        >
           <Icon name="plus" size={12} aria-hidden /> 新規バージョン
-        </button>
+        </Link>
       </header>
 
       <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
@@ -46,6 +50,7 @@ export default async function AdminRulesPage(): Promise<React.ReactElement> {
             <th>影響度</th>
             <th>公開日</th>
             <th>更新</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -72,11 +77,19 @@ export default async function AdminRulesPage(): Promise<React.ReactElement> {
               </td>
               <td>{t.published_at ? formatUnix(t.published_at, { dateOnly: true }) : "—"}</td>
               <td>{formatUnix(t.updated_at)}</td>
+              <td>
+                <Link
+                  href={`/admin/rules/${t.id}/edit`}
+                  className="fn-btn fn-btn-ghost fn-btn-sm"
+                >
+                  編集
+                </Link>
+              </td>
             </tr>
           ))}
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={5}>
+              <td colSpan={6}>
                 <p
                   className="fn-empty-message"
                   style={{ padding: 16, textAlign: "center" }}

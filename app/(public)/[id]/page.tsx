@@ -6,7 +6,7 @@ import { and, eq } from "drizzle-orm";
 import styles from "./page.module.css";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
-import { videoInteractions } from "@/lib/db/schema";
+import { videoInteractions, xUsers } from "@/lib/db/schema";
 import {
   fetchEventPlaylistVideos,
   fetchRelatedVideos,
@@ -15,6 +15,8 @@ import {
 import { extractYoutubeId } from "@/lib/youtube/id";
 import { YoutubePlayer } from "@/components/video/YoutubePlayer";
 import { ChapterTabs } from "@/components/video/ChapterTabs";
+import { ChapterComposer } from "@/components/video/ChapterComposer";
+import { CommentComposer } from "@/components/video/CommentComposer";
 import { PlaylistRail } from "@/components/video/PlaylistRail";
 import { InteractionButton } from "@/components/video/InteractionButton";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
@@ -112,6 +114,7 @@ export default async function VideoDetailPage({
   const viewerActiveX = viewerUser?.active_x_user_id ?? null;
   let likeActive = false;
   let bookmarkActive = false;
+  let viewerXApproved = false;
   if (viewerActiveX) {
     const interactions = await db
       .select()
@@ -124,6 +127,16 @@ export default async function VideoDetailPage({
       );
     likeActive = interactions.some((i) => i.interaction_type === "like");
     bookmarkActive = interactions.some((i) => i.interaction_type === "bookmark");
+
+    // チャプター/コメント投稿許可は「承認済 X ID」必須
+    const xRow = (
+      await db
+        .select({ approval_status: xUsers.approval_status })
+        .from(xUsers)
+        .where(eq(xUsers.id, viewerActiveX))
+        .limit(1)
+    )[0];
+    viewerXApproved = xRow?.approval_status === "approved";
   }
 
   let playlistId = playlist || video.primary_event_id || "";
@@ -368,6 +381,21 @@ export default async function VideoDetailPage({
               author_icon: c.author_icon,
             }))}
           />
+
+          {viewerUser?.id ? (
+            <>
+              <ChapterComposer videoId={video.id} canPost={viewerXApproved} />
+              <CommentComposer
+                videoId={video.id}
+                canPost={viewerXApproved}
+                chapterOptions={chapters.map((c) => ({
+                  id: c.id,
+                  chapter_time: c.chapter_time,
+                  chapter_label: c.chapter_label,
+                }))}
+              />
+            </>
+          ) : null}
 
           <div>
             <h3 className={styles.relatedHeading}>関連動画</h3>

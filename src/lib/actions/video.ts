@@ -5,6 +5,7 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
+import { canEditVideo } from "@/lib/auth/ownership";
 import {
   historyLogs,
   slots,
@@ -267,7 +268,7 @@ export async function updateVideo(
 ): Promise<VideoActionResult> {
   const session = await auth().catch(() => null);
   const sessionUser = session?.user as
-    | { id?: string; role?: string }
+    | { id?: string; role?: string; active_x_user_id?: string | null }
     | undefined;
   if (!sessionUser?.id)
     return { ok: false, message: "認証が必要です。" };
@@ -292,10 +293,13 @@ export async function updateVideo(
     await db.select().from(videos).where(eq(videos.id, videoId)).limit(1)
   )[0];
   if (!target) return { ok: false, message: "対象作品が見つかりません。" };
-  if (
-    target.owner_discord_user_id !== sessionUser.id &&
-    sessionUser.role !== "admin"
-  ) {
+
+  const canEdit = await canEditVideo({
+    db,
+    user: { id: sessionUser.id, role: sessionUser.role ?? null },
+    video: target,
+  });
+  if (!canEdit) {
     return { ok: false, message: "編集権限がありません。" };
   }
 

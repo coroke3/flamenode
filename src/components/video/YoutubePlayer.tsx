@@ -214,6 +214,27 @@ export function YoutubePlayer({
     return () => window.clearInterval(id);
   }, [ready, requestBestQuality]);
 
+  // PlayerBridge: ChapterComposer などからの「現在時刻ください」要求に応える。
+  React.useEffect(() => {
+    const onRequest = () => {
+      try {
+        const t = playerRef.current?.getCurrentTime?.() ?? 0;
+        window.dispatchEvent(
+          new CustomEvent("flamenode:current-time", {
+            detail: { time: typeof t === "number" ? t : 0 },
+          }),
+        );
+      } catch {
+        window.dispatchEvent(
+          new CustomEvent("flamenode:current-time", { detail: { time: 0 } }),
+        );
+      }
+    };
+    window.addEventListener("flamenode:request-time", onRequest);
+    return () =>
+      window.removeEventListener("flamenode:request-time", onRequest);
+  }, []);
+
   const showOverlay = React.useCallback(() => {
     setOverlayVisible(true);
     if (hideTimer.current) window.clearTimeout(hideTimer.current);
