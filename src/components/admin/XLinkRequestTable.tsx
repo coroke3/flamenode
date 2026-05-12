@@ -4,11 +4,14 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { approveXIdLinkRequest, rejectXIdLinkRequest } from "@/lib/actions/xid-admin";
 import { formatUnix } from "@/lib/utils/format";
+import { Icon } from "@/components/ui/Icon";
 
 export interface XLinkRequestRow {
   id: string;
   requested_x_id: string;
   discord_user_id: string;
+  discord_name: string | null;
+  discord_image: string | null;
   requested_at: number;
 }
 
@@ -21,13 +24,16 @@ export function XLinkRequestTable({
   const [pending, startTransition] = React.useTransition();
   const [msg, setMsg] = React.useState<string | null>(null);
 
-  const run = (fn: (fd: FormData) => Promise<{ ok: boolean; message?: string }>, requestId: string) => {
+  const run = (
+    fn: (fd: FormData) => Promise<{ ok: boolean; message?: string }>,
+    requestId: string,
+  ) => {
     setMsg(null);
     const fd = new FormData();
     fd.set("request_id", requestId);
     startTransition(async () => {
       const r = await fn(fd);
-      setMsg(r.message ?? (r.ok ? "完了しました。" : "失敗しました。"));
+      setMsg(r.message ?? (r.ok ? "処理しました。" : "処理に失敗しました。"));
       if (r.ok) router.refresh();
     });
   };
@@ -59,7 +65,7 @@ export function XLinkRequestTable({
           <tr>
             <th>申請 ID</th>
             <th>X ID</th>
-            <th>ユーザー (内部 ID)</th>
+            <th>申請者 Discord</th>
             <th>申請日時</th>
             <th></th>
           </tr>
@@ -71,7 +77,46 @@ export function XLinkRequestTable({
               <td>
                 <strong>@{r.requested_x_id}</strong>
               </td>
-              <td style={{ fontSize: 12 }}>{r.discord_user_id}</td>
+              <td>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  {r.discord_image ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={r.discord_image}
+                      alt=""
+                      width={32}
+                      height={32}
+                      style={{ borderRadius: 999, objectFit: "cover" }}
+                    />
+                  ) : (
+                    <span
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 999,
+                        display: "grid",
+                        placeItems: "center",
+                        background: "var(--bg-elevated)",
+                        color: "var(--text-muted)",
+                      }}
+                    >
+                      <Icon name="discord" size={14} aria-hidden />
+                    </span>
+                  )}
+                  <span>
+                    <strong>{r.discord_name ?? "Discord user"}</strong>
+                    <span
+                      style={{
+                        display: "block",
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                      }}
+                    >
+                      {r.discord_user_id}
+                    </span>
+                  </span>
+                </div>
+              </td>
               <td style={{ fontSize: 12 }}>
                 {formatUnix(r.requested_at, { dateOnly: true })}{" "}
                 {formatUnix(r.requested_at, { timeOnly: true })}

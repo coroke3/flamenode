@@ -25,7 +25,7 @@ const NAV_ITEMS = [
   { href: "/user", primary: "CREATOR", sub: "クリエイター" },
   { href: "/event", primary: "EVENT", sub: "イベント" },
   { href: "/recommend", primary: "PICK", sub: "おすすめ" },
-  { href: "/search", primary: "SEARCH", sub: "検索" },
+  { href: "/about", primary: "ABOUT", sub: "FlameNode" },
 ];
 
 export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
@@ -48,6 +48,25 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
         </nav>
 
         <div className={styles.right}>
+          <form
+            action="/list"
+            method="get"
+            className={styles.searchForm}
+            role="search"
+            aria-label="サイト内検索"
+          >
+            <Icon name="search" size={13} aria-hidden />
+            <label htmlFor="header-search" className="fn-sr-only">
+              検索
+            </label>
+            <input
+              id="header-search"
+              type="search"
+              name="q"
+              placeholder="作品・作者・イベント"
+              autoComplete="off"
+            />
+          </form>
           <ThemeToggle />
           {user ? (
             <>
@@ -58,7 +77,10 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
               <XIdSwitcher entries={user.xIds} discordName={user.name} />
             </>
           ) : (
-            <Link href="/entry" className="fn-btn fn-btn-primary fn-btn-sm">
+            <Link
+              href="/api/auth/signin/discord?callbackUrl=/dashboard"
+              className="fn-btn fn-btn-primary fn-btn-sm"
+            >
               <Icon name="discord" size={13} aria-hidden />
               ログイン
             </Link>
@@ -92,7 +114,7 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
             ))}
             {!user ? (
               <Link
-                href="/entry"
+                href="/api/auth/signin/discord?callbackUrl=/dashboard"
                 className={`fn-btn fn-btn-primary ${styles.mobileCta}`}
                 onClick={() => setMobileOpen(false)}
               >

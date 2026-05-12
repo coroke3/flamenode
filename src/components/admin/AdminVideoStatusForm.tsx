@@ -4,21 +4,32 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { setVideoStatus } from "@/lib/actions/admin";
+import {
+  VIDEO_STATUS_LABELS,
+  VOID_REASON_LABELS,
+} from "@/lib/constants/collaborator-permissions";
 
 interface AdminVideoStatusFormProps {
   videoId: string;
   currentStatus: string;
 }
 
-const STATUS_OPTIONS = [
-  { value: "draft", label: "下書き" },
-  { value: "pending", label: "審査待ち" },
-  { value: "public", label: "公開" },
-  { value: "unlisted", label: "限定公開" },
-  { value: "private", label: "非公開" },
-  { value: "x_reapply_required", label: "X ID 再確認待ち" },
-  { value: "voided", label: "無効化" },
-];
+const STATUS_VALUES = [
+  "draft",
+  "pending",
+  "public",
+  "unlisted",
+  "private",
+  "x_reapply_required",
+  "voided",
+] as const;
+const REASON_CATEGORIES = [
+  "x_id_invalid",
+  "duplicate",
+  "withdrawn_by_creator",
+  "operator_decision",
+  "expired",
+] as const;
 
 export function AdminVideoStatusForm({
   videoId,
@@ -27,6 +38,7 @@ export function AdminVideoStatusForm({
   const router = useRouter();
   const [status, setStatus] = React.useState(currentStatus);
   const [reason, setReason] = React.useState("");
+  const [reasonCategory, setReasonCategory] = React.useState<string>("operator_decision");
   const [pending, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState(false);
@@ -49,6 +61,9 @@ export function AdminVideoStatusForm({
     fd.set("video_id", videoId);
     fd.set("status", status);
     fd.set("reason", reason);
+    if (status === "voided") {
+      fd.set("void_reason_category", reasonCategory);
+    }
     startTransition(async () => {
       const r = await setVideoStatus(fd);
       if (!r.ok) {
@@ -73,20 +88,43 @@ export function AdminVideoStatusForm({
         onChange={(e) => setStatus(e.target.value)}
         disabled={pending}
       >
-        {STATUS_OPTIONS.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.value} ({opt.label})
-          </option>
-        ))}
+        {STATUS_VALUES.map((value) => {
+          const meta = VIDEO_STATUS_LABELS[value];
+          return (
+            <option key={value} value={value}>
+              {meta.label} ({value}) — {meta.description}
+            </option>
+          );
+        })}
       </select>
+      {status === "voided" ? (
+        <>
+          <label className="fn-label" htmlFor="admin-void-category">
+            無効化カテゴリ
+          </label>
+          <select
+            id="admin-void-category"
+            className="fn-select"
+            value={reasonCategory}
+            onChange={(e) => setReasonCategory(e.target.value)}
+            disabled={pending}
+          >
+            {REASON_CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {VOID_REASON_LABELS[c]} ({c})
+              </option>
+            ))}
+          </select>
+        </>
+      ) : null}
       {requiresReason ? (
         <>
           <label className="fn-label" htmlFor="admin-video-reason">
-            理由
+            理由 (必須)
           </label>
           <textarea
             id="admin-video-reason"
-            className="fn-textarea"
+            className="fn-input"
             rows={3}
             placeholder="例: 重複投稿のため無効化 / X ID の本人確認が必要"
             value={reason}

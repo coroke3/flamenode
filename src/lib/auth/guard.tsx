@@ -1,6 +1,6 @@
 import * as React from "react";
 import Link from "next/link";
-import { auth } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth/currentUser";
 
 export interface AuthSessionUser {
   id: string;
@@ -23,31 +23,14 @@ export async function requireSession(): Promise<
   | { ok: true; user: AuthSessionUser }
   | { ok: false; element: React.ReactElement }
 > {
-  let session;
-  try {
-    session = await auth();
-  } catch {
-    session = null;
-  }
-  if (!session?.user) {
-    return { ok: false, element: <RequireAuthRedirect /> };
-  }
-  const u = session.user as Partial<AuthSessionUser> & { id?: string };
-  if (!u.id) return { ok: false, element: <RequireAuthRedirect /> };
+  const u = await getCurrentUser();
+  if (!u) return { ok: false, element: <RequireAuthRedirect /> };
   if (u.is_banned === 1) {
     return { ok: false, element: <BannedNotice /> };
   }
   return {
     ok: true,
-    user: {
-      id: u.id,
-      name: u.name ?? "ゲスト",
-      email: (u as { email?: string | null }).email ?? null,
-      image: u.image ?? null,
-      is_banned: u.is_banned ?? 0,
-      role: (u.role ?? "user") as "user" | "admin" | "moderator",
-      active_x_user_id: u.active_x_user_id ?? null,
-    },
+    user: u,
   };
 }
 
@@ -68,8 +51,11 @@ function RequireAuthRedirect(): React.ReactElement {
       <p style={{ marginTop: 12, color: "var(--text-secondary)" }}>
         この画面はログイン後にご利用いただけます。
       </p>
-      <Link href="/entry" className="fn-btn fn-btn-primary fn-mt-md">
-        ログインへ
+      <Link
+        href="/api/auth/signin/discord?callbackUrl=/dashboard"
+        className="fn-btn fn-btn-primary fn-mt-md"
+      >
+        Discord でログイン
       </Link>
     </div>
   );

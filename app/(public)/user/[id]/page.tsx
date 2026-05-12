@@ -5,9 +5,10 @@ import { notFound } from "next/navigation";
 import { and, desc, eq, ne, or, sql } from "drizzle-orm";
 import styles from "./page.module.css";
 import { getDatabase } from "@/lib/cloudflare";
-import { videos, videoMembers, xUsers } from "@/lib/db/schema";
+import { customPages, videos, videoMembers, xUsers } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
+import { normalizeXId } from "@/lib/utils/xid";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,7 @@ interface ProfileUser {
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const { id } = await params;
+  const id = normalizeXId((await params).id);
   const db = getDatabase();
   if (!db) return { title: id };
   const u = await db
@@ -53,7 +54,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function UserPage({
   params,
 }: Props): Promise<React.ReactElement> {
-  const { id } = await params;
+  const id = normalizeXId((await params).id);
   const db = getDatabase();
   if (!db) notFound();
 
@@ -156,6 +157,13 @@ export default async function UserPage({
 
   const profileName = user.x_name || ownVideos[0]?.display_name || `@${user.id}`;
   const profileIcon = user.icon_url ?? ownVideos.find((v) => v.icon_url)?.icon_url ?? null;
+  const portfolio = (
+    await db
+      .select({ id: customPages.id })
+      .from(customPages)
+      .where(and(eq(customPages.x_user_id, user.id), eq(customPages.is_published, 1))!)
+      .limit(1)
+  )[0];
 
   return (
     <div className={styles.page}>
@@ -195,6 +203,15 @@ export default async function UserPage({
                 <Icon name="youtube" size={12} aria-hidden />
                 YouTube
               </a>
+            ) : null}
+            {portfolio ? (
+              <Link
+                href={`/user/${user.id}/portfolio`}
+                className="fn-btn fn-btn-primary fn-btn-sm"
+              >
+                <Icon name="grid" size={12} aria-hidden />
+                Portfolio
+              </Link>
             ) : null}
             <Link
               href={`/list?q=${encodeURIComponent(profileName)}`}

@@ -10,7 +10,10 @@ import {
   upsertCollaborator,
   removeCollaborator,
 } from "@/lib/actions/event-staff-admin";
-import { COLLABORATOR_PERMISSION_KEYS } from "@/lib/constants/collaborator-permissions";
+import {
+  COLLABORATOR_PERMISSION_KEYS,
+  COLLABORATOR_PERMISSION_LABELS,
+} from "@/lib/constants/collaborator-permissions";
 
 export interface EditorRow {
   x_user_id: string;
@@ -32,10 +35,45 @@ export interface CollaboratorRow {
   permission_keys: string[];
 }
 
+type CollaboratorCsvRow = {
+  display_name: string;
+  x_user_id: string;
+  discord_user_id: string;
+  permission_keys: string[];
+  is_public_staff: string;
+  public_role_label: string;
+};
+
 interface EventStaffManagerProps {
   eventId: string;
   editors: EditorRow[];
   collaborators: CollaboratorRow[];
+}
+
+function parseCollaboratorCsv(raw: string): CollaboratorCsvRow[] {
+  return raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, index) => {
+      const cols = line.includes("\t")
+        ? line.split("\t")
+        : line.split(",").map((c) => c.trim());
+      const [displayName = "", xUserId = "", discordUserId = "", permissionKeys = "", isPublic = "0", roleLabel = ""] =
+        cols;
+      return {
+        display_name: displayName.trim() || `CSV collaborator ${index + 1}`,
+        x_user_id: xUserId.replace(/^@/, "").trim(),
+        discord_user_id: discordUserId.trim(),
+        permission_keys: permissionKeys
+          .split(/[|;]/)
+          .map((k) => k.trim())
+          .filter(Boolean),
+        is_public_staff: isPublic.trim() === "1" ? "1" : "0",
+        public_role_label: roleLabel.trim(),
+      };
+    })
+    .filter((row) => row.permission_keys.length > 0);
 }
 
 export function EventStaffManager({
@@ -59,6 +97,41 @@ export function EventStaffManager({
     });
   };
 
+  const runCollaboratorCsvImport = (rows: CollaboratorCsvRow[]) => {
+    if (rows.length === 0) {
+      setError("取り込める CSV 行がありません。permission_key を含めてください。");
+      return;
+    }
+    setError(null);
+    startTransition(async () => {
+      for (const row of rows) {
+        const invalid = row.permission_keys.find(
+          (key) => !COLLABORATOR_PERMISSION_KEYS.includes(
+            key as (typeof COLLABORATOR_PERMISSION_KEYS)[number],
+          ),
+        );
+        if (invalid) {
+          setError(`不正な permission_key: ${invalid}`);
+          return;
+        }
+        const fd = new FormData();
+        fd.set("event_id", eventId);
+        fd.set("display_name", row.display_name);
+        fd.set("x_user_id", row.x_user_id);
+        fd.set("discord_user_id", row.discord_user_id);
+        fd.set("permission_keys", row.permission_keys.join(","));
+        fd.set("is_public_staff", row.is_public_staff);
+        fd.set("public_role_label", row.public_role_label);
+        const r = await upsertCollaborator(fd);
+        if (!r.ok) {
+          setError(r.message ?? `${row.display_name} の取り込みに失敗しました。`);
+          return;
+        }
+      }
+      router.refresh();
+    });
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
       {error ? (
@@ -69,10 +142,10 @@ export function EventStaffManager({
 
       <section>
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
-          イベント編集者 ({editors.length})
+          管理者・運営編集者 ({editors.length})
         </h2>
         <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
-          編集者は、担当イベントの基本情報・枠・運営メンバー・所属作品を全て編集できます。
+          ここに追加した X ID は、担当イベントの基本情報・枠・権限・所属作品を広く編集できます。
         </p>
         {editors.length === 0 ? (
           <p className="fn-muted fn-text-sm">未登録です。</p>
@@ -203,11 +276,11 @@ export function EventStaffManager({
 
       <section>
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
-          協力者 (permission_key 細粒度許可) ({collaborators.length})
+          一般ユーザー向け編集権限 ({collaborators.length})
         </h2>
         <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
-          協力者は permission_key 単位で操作を許可されます。
-          複数の権限はカンマ区切りで指定し、既存の許可は上書きされます。
+          管理者や運営編集者ではない一般ユーザーにも、permission_key 単位で必要な編集だけを許可できます。
+          X ID または Discord User ID を指定し、既存の許可は選択した権限で上書きします。
         </p>
         {collaborators.length === 0 ? (
           <p className="fn-muted fn-text-sm">未登録です。</p>
@@ -261,6 +334,7 @@ export function EventStaffManager({
           eventId={eventId}
           busy={busy}
           onSubmit={(fd) => runAction(fd, upsertCollaborator)}
+          onImport={runCollaboratorCsvImport}
         />
       </section>
     </div>
@@ -271,16 +345,32 @@ function CollaboratorForm({
   eventId,
   busy,
   onSubmit,
+  onImport,
 }: {
   eventId: string;
   busy: boolean;
   onSubmit: (fd: FormData) => void;
+  onImport: (rows: CollaboratorCsvRow[]) => void;
 }): React.ReactElement {
   const [permKeys, setPermKeys] = React.useState<string[]>([]);
+  const [csvText, setCsvText] = React.useState("");
+  const [copied, setCopied] = React.useState(false);
   const toggle = (k: string) => {
     setPermKeys((prev) =>
       prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k],
     );
+  };
+  const copyCsvPrompt = async () => {
+    const prompt = [
+      "次の情報を FlameNode のイベント協力者権限 CSV に整形してください。",
+      "出力は CSV 本文のみ。列は display_name,x_user_id,discord_user_id,permission_keys,is_public_staff,public_role_label の6列。",
+      "permission_keys は | 区切りで複数指定できます。",
+      `permission_key は次から選んでください: ${COLLABORATOR_PERMISSION_KEYS.join(",")}`,
+      "x_user_id は @ なし、discord_user_id が不明なら空欄、公開スタッフなら is_public_staff を 1、それ以外は 0 にしてください。",
+    ].join("\n");
+    await navigator.clipboard.writeText(prompt);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
   };
   return (
     <form
@@ -301,7 +391,7 @@ function CollaboratorForm({
       }}
     >
       <p style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>
-        協力者を追加・更新
+        一般ユーザーの編集権限を追加・更新
       </p>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
         <input
@@ -340,32 +430,69 @@ function CollaboratorForm({
           style={{ width: 140 }}
         />
       </div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-        {COLLABORATOR_PERMISSION_KEYS.map((k) => (
-          <label
-            key={k}
-            style={{
-              display: "inline-flex",
-              gap: 4,
-              fontSize: 11,
-              alignItems: "center",
-              cursor: "pointer",
-              padding: "2px 6px",
-              border: "1px solid var(--border-subtle)",
-              borderRadius: "var(--radius-sm)",
-              background: permKeys.includes(k)
-                ? "var(--accent-primary-soft)"
-                : "transparent",
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={permKeys.includes(k)}
-              onChange={() => toggle(k)}
-            />
-            {k}
-          </label>
-        ))}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+          gap: 8,
+          marginBottom: 8,
+        }}
+      >
+        {COLLABORATOR_PERMISSION_KEYS.map((k) => {
+          const meta = COLLABORATOR_PERMISSION_LABELS[k];
+          const checked = permKeys.includes(k);
+          return (
+            <label
+              key={k}
+              style={{
+                display: "flex",
+                gap: 6,
+                fontSize: 12,
+                alignItems: "flex-start",
+                cursor: "pointer",
+                padding: "8px 10px",
+                border: "1px solid var(--border-subtle)",
+                borderRadius: "var(--radius-sm)",
+                background: checked
+                  ? "var(--accent-primary-soft)"
+                  : "transparent",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => toggle(k)}
+                style={{ marginTop: 2 }}
+              />
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <strong style={{ display: "block", fontSize: 12 }}>
+                  {meta.label}
+                </strong>
+                <span
+                  style={{
+                    display: "block",
+                    fontSize: 10.5,
+                    color: "var(--text-muted)",
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {meta.description}
+                </span>
+                <code
+                  style={{
+                    display: "block",
+                    fontSize: 9.5,
+                    color: "var(--text-muted)",
+                    marginTop: 2,
+                    opacity: 0.7,
+                  }}
+                >
+                  {k}
+                </code>
+              </span>
+            </label>
+          );
+        })}
       </div>
       <button
         type="submit"
@@ -374,6 +501,42 @@ function CollaboratorForm({
       >
         <Icon name="check" size={11} aria-hidden /> 追加・更新
       </button>
+      <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
+        <label className="fn-label" htmlFor="collaborator_csv">
+          CSV でまとめて追加
+        </label>
+        <textarea
+          id="collaborator_csv"
+          className="fn-input"
+          rows={5}
+          value={csvText}
+          onChange={(e) => setCsvText(e.target.value)}
+          placeholder="display_name,x_user_id,discord_user_id,permission_keys,is_public_staff,public_role_label"
+        />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+            onClick={copyCsvPrompt}
+            disabled={busy}
+          >
+            <Icon name="copy" size={11} aria-hidden />
+            {copied ? "コピーしました" : "CSV作成プロンプトをコピー"}
+          </button>
+          <button
+            type="button"
+            className="fn-btn fn-btn-primary fn-btn-sm"
+            onClick={() => {
+              const rows = parseCollaboratorCsv(csvText);
+              onImport(rows);
+              if (rows.length > 0) setCsvText("");
+            }}
+            disabled={busy || csvText.trim().length === 0}
+          >
+            <Icon name="upload" size={11} aria-hidden /> CSVを取り込む
+          </button>
+        </div>
+      </div>
     </form>
   );
 }

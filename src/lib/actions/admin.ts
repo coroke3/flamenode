@@ -66,6 +66,22 @@ export async function setVideoStatus(
     patch.voided_by_user_id = u.id;
     patch.voided_at = now;
     patch.void_reason = reason;
+    const cat = String(formData.get("void_reason_category") ?? "").trim();
+    const validCats = new Set([
+      "x_id_invalid",
+      "duplicate",
+      "withdrawn_by_creator",
+      "operator_decision",
+      "expired",
+    ]);
+    if (cat && validCats.has(cat)) {
+      patch.void_reason_category = cat as
+        | "x_id_invalid"
+        | "duplicate"
+        | "withdrawn_by_creator"
+        | "operator_decision"
+        | "expired";
+    }
   } else if (prevStatus === "voided" && status !== "voided") {
     patch.is_deleted = 0;
     patch.void_restored_by_user_id = u.id;

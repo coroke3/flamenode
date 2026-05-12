@@ -125,6 +125,21 @@ export function XIdSwitcher({
         <span className={styles.triggerName}>
           {active?.x_name ?? "X ID 未設定"}
         </span>
+        {active?.approval_status === "pending" ? (
+          <span
+            className="fn-badge fn-badge-warning"
+            style={{ fontSize: 9, padding: "1px 6px" }}
+          >
+            承認待ち
+          </span>
+        ) : active?.approval_status === "rejected" ? (
+          <span
+            className="fn-badge fn-badge-danger"
+            style={{ fontSize: 9, padding: "1px 6px" }}
+          >
+            却下
+          </span>
+        ) : null}
         <Icon name="chevron-down" size={12} aria-hidden />
       </button>
 

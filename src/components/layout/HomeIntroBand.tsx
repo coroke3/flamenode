@@ -3,6 +3,7 @@ import Link from "next/link";
 import styles from "./HomeIntroBand.module.css";
 import { Icon } from "@/components/ui/Icon";
 import type { events } from "@/lib/db/schema";
+import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 
 type EventRow = typeof events.$inferSelect;
 
@@ -19,7 +20,7 @@ export function HomeIntroBand({
   activeEvents,
 }: HomeIntroBandProps): React.ReactElement {
   const featured =
-    activeEvents.find((e) => e.is_entry_open === 1) ?? activeEvents[0];
+    activeEvents.find((e) => isAcceptingEntries(e)) ?? activeEvents[0];
 
   return (
     <section className={styles.band} aria-label="FlameNode について">
@@ -44,10 +45,6 @@ export function HomeIntroBand({
                 <Icon name="heart" size={14} aria-hidden />
                 おすすめ
               </Link>
-              <Link href="/search" className="fn-btn fn-btn-ghost">
-                <Icon name="search" size={14} aria-hidden />
-                検索
-              </Link>
             </div>
           ) : null}
         </div>
@@ -56,7 +53,7 @@ export function HomeIntroBand({
           <div className={styles.eventBox}>
             <span className={styles.eventLabel}>
               <Icon name="alert" size={12} aria-hidden />
-              開催中イベント
+              {isAcceptingEntries(featured) ? "募集中イベント" : "開催中イベント"}
             </span>
             <Link
               href={`/event/${featured.id}`}
@@ -68,7 +65,7 @@ export function HomeIntroBand({
               <p className={styles.eventExplain}>{featured.explanation}</p>
             ) : null}
             <div className={styles.eventActions}>
-              {featured.is_entry_open === 1 ? (
+              {isAcceptingEntries(featured) ? (
                 <Link
                   href={`/entry?event=${featured.id}`}
                   className="fn-btn fn-btn-primary fn-btn-sm"

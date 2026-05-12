@@ -15,8 +15,19 @@ import {
   updateVideo,
   type VideoActionResult,
 } from "@/lib/actions/video";
+import {
+  VideoMembersField,
+  type VideoMemberInput,
+  type VideoMemberSuggestion,
+} from "@/components/forms/VideoMembersField";
 
 export interface VideoFormInitialValues {
+  display_name?: string;
+  contact_x_id?: string;
+  icon_url?: string;
+  profile_text?: string;
+  youtube_channel_url?: string;
+  other_social_links?: string;
   title?: string;
   youtube_url?: string;
   music?: string;
@@ -27,6 +38,7 @@ export interface VideoFormInitialValues {
   production_story?: string;
   closing_comment?: string;
   is_collab?: boolean;
+  members?: VideoMemberInput[];
 }
 
 interface VideoFormProps {
@@ -34,6 +46,7 @@ interface VideoFormProps {
   initial?: VideoFormInitialValues;
   slotId?: string;
   videoId?: string;
+  memberSuggestions?: VideoMemberSuggestion[];
 }
 
 /**
@@ -46,6 +59,7 @@ export function VideoForm({
   initial = {},
   slotId,
   videoId,
+  memberSuggestions = [],
 }: VideoFormProps): React.ReactElement {
   const router = useRouter();
   const [youtubeUrl, setYoutubeUrl] = React.useState(initial.youtube_url ?? "");
@@ -82,6 +96,101 @@ export function VideoForm({
       {slotId ? <input type="hidden" name="slot_id" value={slotId} /> : null}
       {videoId ? <input type="hidden" name="video_id" value={videoId} /> : null}
       <input type="hidden" name="mode" value={mode} />
+
+      <section className={styles.section}>
+        <h2 className={styles.sectionTitle}>
+          <Icon name="user" size={14} aria-hidden /> 提出者情報
+        </h2>
+        <p className={styles.help}>
+          この作品で表示する X ID、活動名、団体名を確認してください。X ID 設定の既定値を使いつつ、作品ごとに上書きできます。
+        </p>
+        <div className={`${styles.row} cols-2`}>
+          <div className={styles.field}>
+            <label className={`${styles.label} ${styles.required}`} htmlFor="contact_x_id">
+              提出主体 X ID
+            </label>
+            <input
+              id="contact_x_id"
+              name="contact_x_id"
+              type="text"
+              defaultValue={initial.contact_x_id}
+              className="fn-input"
+              placeholder="your_x_id"
+              pattern="[A-Za-z0-9_]{1,32}"
+              required
+            />
+          </div>
+          <div className={styles.field}>
+            <label className={`${styles.label} ${styles.required}`} htmlFor="display_name">
+              表示名 / 活動名 / 団体名
+            </label>
+            <input
+              id="display_name"
+              name="display_name"
+              type="text"
+              defaultValue={initial.display_name}
+              className="fn-input"
+              maxLength={80}
+              required
+            />
+          </div>
+        </div>
+        <div className={styles.field}>
+          <label className={styles.label} htmlFor="icon_url">
+            アイコン URL
+          </label>
+          <input
+            id="icon_url"
+            name="icon_url"
+            type="url"
+            defaultValue={initial.icon_url}
+            className="fn-input"
+            placeholder="https://..."
+          />
+        </div>
+        <div className={styles.field}>
+          <label className={styles.label} htmlFor="profile_text">
+            自分・団体の概要
+          </label>
+          <textarea
+            id="profile_text"
+            name="profile_text"
+            defaultValue={initial.profile_text}
+            className="fn-input"
+            rows={3}
+            maxLength={1000}
+          />
+        </div>
+        <div className={`${styles.row} cols-2`}>
+          <div className={styles.field}>
+            <label className={styles.label} htmlFor="youtube_channel_url">
+              YouTube チャンネル URL
+            </label>
+            <input
+              id="youtube_channel_url"
+              name="youtube_channel_url"
+              type="url"
+              defaultValue={initial.youtube_channel_url}
+              className="fn-input"
+              placeholder="https://www.youtube.com/@..."
+            />
+          </div>
+          <div className={styles.field}>
+            <label className={styles.label} htmlFor="other_social_links">
+              SNS 一覧
+            </label>
+            <input
+              id="other_social_links"
+              name="other_social_links"
+              type="text"
+              defaultValue={initial.other_social_links}
+              className="fn-input"
+              placeholder="X=https://x.com/... / niconico=..."
+              maxLength={1000}
+            />
+          </div>
+        </div>
+      </section>
 
       <section className={styles.section}>
         <h2 className={styles.sectionTitle}>
@@ -279,11 +388,15 @@ export function VideoForm({
           合作作品として登録する
         </label>
         {isCollab ? (
-          <p className={styles.help} style={{ marginTop: 12 }}>
-            合作メンバーは X ID または非アカウント (例:
-            <code>X-account-{`{表示名}`}</code>
-            ) で表記します。詳細な担当行は提出後に編集画面で追加できます。
-          </p>
+          <div style={{ marginTop: 12 }}>
+            <VideoMembersField
+              initialMembers={initial.members}
+              suggestions={memberSuggestions}
+            />
+            <p className={styles.help} style={{ marginTop: 8 }}>
+              X ID 欄は @ 抜きで入力します。未承認 X ID も受け付け、後で本人連携時に紐付け可能です。
+            </p>
+          </div>
         ) : null}
       </section>
 

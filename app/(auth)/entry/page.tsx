@@ -1,20 +1,54 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
+import { eq, sql } from "drizzle-orm";
 import styles from "./page.module.css";
 import { auth, signIn } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import { fetchActiveEvents } from "@/lib/db/queries";
+import { slots as slotsTable } from "@/lib/db/schema";
+import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 
 export const metadata: Metadata = { title: "エントリー" };
 export const dynamic = "force-dynamic";
 
+interface SessionUserShape {
+  id?: string;
+  name?: string | null;
+  active_x_user_id?: string | null;
+}
+
 export default async function EntryPage(): Promise<React.ReactElement> {
-  const session = await auth().catch(() => null);
+  // session 取得は失敗時にエラーログだけ残し、null として扱う。
+  // 「user.id」が存在するときだけログイン済として判定する (空セッション拒否)。
+  let session: { user?: SessionUserShape | null } | null = null;
+  try {
+    const r = await auth();
+    session = r as unknown as { user?: SessionUserShape | null } | null;
+  } catch (e) {
+    console.error("[EntryPage] auth() failed:", e);
+  }
+  const sessionUser = (session?.user ?? null) as SessionUserShape | null;
+  const isLoggedIn = !!sessionUser?.id;
+
   const db = getDatabase();
-  const activeEvents = db ? await fetchActiveEvents(db).catch(() => []) : [];
+  const activeEventsRaw = db ? await fetchActiveEvents(db).catch(() => []) : [];
+  // 開催前でも受付 OPEN のイベントは募集対象にする。
+  const activeEvents = activeEventsRaw.filter((ev) => isAcceptingEntries(ev));
+  const slotCounts = new Map<string, number>();
+  if (db && activeEvents.length > 0) {
+    const rows = await db
+      .select({
+        event_id: slotsTable.event_id,
+        count: sql<number>`COUNT(*)`,
+      })
+      .from(slotsTable)
+      .where(eq(slotsTable.status, "available"))
+      .groupBy(slotsTable.event_id);
+    rows.forEach((row) => slotCounts.set(row.event_id, Number(row.count ?? 0)));
+  }
 
   return (
     <div className={styles.page}>
@@ -26,7 +60,7 @@ export default async function EntryPage(): Promise<React.ReactElement> {
       </header>
 
       <div className={styles.layout}>
-        {!session?.user ? (
+        {!isLoggedIn ? (
           <section className={styles.card} aria-labelledby="login-card">
             <h2 id="login-card" className={styles.cardTitle}>
               ログイン
@@ -61,7 +95,7 @@ export default async function EntryPage(): Promise<React.ReactElement> {
         ) : (
           <section className={styles.card} aria-labelledby="welcome-card">
             <h2 id="welcome-card" className={styles.cardTitle}>
-              ようこそ {session.user.name ?? "ゲスト"} さん
+              ようこそ {sessionUser?.name ?? "ゲスト"} さん
             </h2>
             <p className={styles.cardLead}>
               すでにログイン済みです。下の導線から、ダッシュボードや投稿画面に移動できます。
@@ -107,11 +141,15 @@ export default async function EntryPage(): Promise<React.ReactElement> {
                 >
                   <span className={styles.eventCardTitle}>{ev.title}</span>
                   <span className={styles.eventCardMeta}>
+                    残り {slotCounts.get(ev.id) ?? 0} 枠
+                    {ev.explanation ? ` / ${ev.explanation.slice(0, 80)}` : ""}
+                  </span>
+                  <span className={styles.eventCardMeta}>
                     {formatUnix(ev.start_time, { dateOnly: true })}
                     {ev.end_time
                       ? ` 〜 ${formatUnix(ev.end_time, { dateOnly: true })}`
                       : ""}
-                    {ev.is_entry_open === 1 ? " · 受付中" : ""}
+                    {isAcceptingEntries(ev) ? " · 受付中" : ""}
                   </span>
                 </Link>
               ))

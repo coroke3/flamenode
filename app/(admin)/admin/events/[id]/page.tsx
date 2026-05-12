@@ -13,6 +13,12 @@ import {
 } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
+import {
+  computeEventStatus,
+  eventStatusBadgeClass,
+  eventStatusLabel,
+  isAcceptingEntries,
+} from "@/lib/utils/eventStatus";
 
 export const metadata: Metadata = { title: "イベント詳細" };
 export const dynamic = "force-dynamic";
@@ -57,6 +63,8 @@ export default async function AdminEventDetailPage({
 
   if (!bundle) notFound();
   const { event, slots, evVideos } = bundle;
+  const status = computeEventStatus(event);
+  const accepting = isAcceptingEntries(event);
 
   return (
     <div>
@@ -66,27 +74,56 @@ export default async function AdminEventDetailPage({
         ID: {event.id}
       </p>
 
+      <nav
+        style={{
+          marginTop: 16,
+          display: "flex",
+          gap: 8,
+          flexWrap: "wrap",
+        }}
+      >
+        <Link
+          href={`/admin/events/${event.id}/edit`}
+          className="fn-btn fn-btn-primary fn-btn-sm"
+        >
+          <Icon name="edit" size={12} aria-hidden /> 設定編集
+        </Link>
+        <Link
+          href={`/admin/events/${event.id}/slots`}
+          className="fn-btn fn-btn-ghost fn-btn-sm"
+        >
+          <Icon name="clock" size={12} aria-hidden /> 枠管理
+        </Link>
+        <Link
+          href={`/admin/events/${event.id}/staff`}
+          className="fn-btn fn-btn-ghost fn-btn-sm"
+        >
+          <Icon name="users" size={12} aria-hidden /> 編集権限
+        </Link>
+        <Link
+          href={`/event/${event.id}`}
+          className="fn-btn fn-btn-ghost fn-btn-sm"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <Icon name="external" size={12} aria-hidden /> 公開ページ
+        </Link>
+        <Link href="/admin/events" className="fn-btn fn-btn-ghost fn-btn-sm">
+          <Icon name="chevron-left" size={12} aria-hidden /> 一覧
+        </Link>
+      </nav>
+
       <section className="fn-card" style={{ marginTop: 18 }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <span
-            className={`fn-badge ${
-              event.is_active === 1
-                ? "fn-badge-accent"
-                : event.is_archived === 1
-                  ? "fn-badge-neutral"
-                  : "fn-badge-soft"
-            }`}
-          >
-            状態:{" "}
-            {event.is_active === 1
-              ? "開催中"
-              : event.is_archived === 1
-                ? "アーカイブ"
-                : "下書き"}
+          <span className={`fn-badge ${eventStatusBadgeClass(status)}`}>
+            状態: {eventStatusLabel(status)}
           </span>
           <span className="fn-badge fn-badge-soft">
             受付: {event.is_entry_open === 1 ? "OPEN" : "CLOSED"}
           </span>
+          {accepting ? (
+            <span className="fn-badge fn-badge-accent">募集中</span>
+          ) : null}
           <span className="fn-badge fn-badge-soft">タイプ: {event.event_type}</span>
         </div>
         <dl
@@ -133,7 +170,20 @@ export default async function AdminEventDetailPage({
                 <tr key={s.id}>
                   <td>{s.start_time ? formatUnix(s.start_time, { dateOnly: true }) : (s.slot_label ?? "-")}</td>
                   <td>{s.start_time ? formatUnix(s.start_time, { timeOnly: true }) : "-"}</td>
-                  <td>{s.display_name ?? s.x_user_id ?? "-"}</td>
+                  <td>
+                    {s.display_name || s.x_user_id ? (
+                      <span>
+                        <strong>{s.display_name ?? `@${s.x_user_id}`}</strong>
+                        {s.x_user_id ? (
+                          <span style={{ display: "block", fontSize: 11, color: "var(--text-muted)" }}>
+                            @{s.x_user_id}
+                          </span>
+                        ) : null}
+                      </span>
+                    ) : (
+                      "-"
+                    )}
+                  </td>
                   <td><span className="fn-badge fn-badge-soft">{s.status}</span></td>
                 </tr>
               ))}
@@ -174,44 +224,6 @@ export default async function AdminEventDetailPage({
         )}
       </section>
 
-      <nav
-        style={{
-          marginTop: 24,
-          display: "flex",
-          gap: 8,
-          flexWrap: "wrap",
-        }}
-      >
-        <Link
-          href={`/admin/events/${event.id}/edit`}
-          className="fn-btn fn-btn-primary fn-btn-sm"
-        >
-          <Icon name="edit" size={12} aria-hidden /> 設定編集
-        </Link>
-        <Link
-          href={`/admin/events/${event.id}/slots`}
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-        >
-          <Icon name="clock" size={12} aria-hidden /> 枠管理
-        </Link>
-        <Link
-          href={`/admin/events/${event.id}/staff`}
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-        >
-          <Icon name="users" size={12} aria-hidden /> 運営・協力者
-        </Link>
-        <Link
-          href={`/event/${event.id}`}
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Icon name="external" size={12} aria-hidden /> 公開ページ
-        </Link>
-        <Link href="/admin/events" className="fn-btn fn-btn-ghost fn-btn-sm">
-          <Icon name="chevron-left" size={12} aria-hidden /> 一覧
-        </Link>
-      </nav>
     </div>
   );
 }

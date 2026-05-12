@@ -12,12 +12,6 @@ interface ChapterComposerProps {
   canPost: boolean;
 }
 
-const MARKER_OPTIONS = [
-  { value: "chapter", label: "チャプター (再生バー点表示)" },
-  { value: "comment", label: "コメント (時間軸メモ)" },
-  { value: "review", label: "振り返り" },
-] as const;
-
 function parseTimeInput(raw: string): number {
   const s = raw.trim();
   if (!s) return 0;
@@ -56,8 +50,6 @@ export function ChapterComposer({
   const [timeStr, setTimeStr] = React.useState("0:00");
   const [label, setLabel] = React.useState("");
   const [note, setNote] = React.useState("");
-  const [markerKind, setMarkerKind] =
-    React.useState<(typeof MARKER_OPTIONS)[number]["value"]>("chapter");
   const [isPublic, setIsPublic] = React.useState(true);
   const [showOnBar, setShowOnBar] = React.useState(true);
   const [busy, startTransition] = React.useTransition();
@@ -86,7 +78,7 @@ export function ChapterComposer({
     fd.set("chapter_label", label.trim());
     fd.set("note", note.trim());
     fd.set("visibility", isPublic ? "public" : "private");
-    fd.set("marker_kind", markerKind);
+    fd.set("marker_kind", "chapter");
     fd.set("show_on_player_bar", showOnBar ? "1" : "0");
     startTransition(async () => {
       const r = await createChapter(fd);
@@ -137,7 +129,7 @@ export function ChapterComposer({
         }}
       >
         <strong style={{ fontSize: 12, letterSpacing: "0.08em" }}>
-          チャプター投稿
+          チャプターコメント投稿
         </strong>
         <button
           type="button"
@@ -171,22 +163,7 @@ export function ChapterComposer({
             >
               <Icon name="clock" size={11} aria-hidden /> 現在時刻
             </button>
-            <select
-              className="fn-select"
-              value={markerKind}
-              onChange={(e) =>
-                setMarkerKind(
-                  e.target.value as (typeof MARKER_OPTIONS)[number]["value"],
-                )
-              }
-              style={{ flex: 1 }}
-            >
-              {MARKER_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
+            <span className="fn-badge fn-badge-neutral">チャプターコメント</span>
           </div>
           <input
             type="text"

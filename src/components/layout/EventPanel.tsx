@@ -4,6 +4,11 @@ import styles from "./EventPanel.module.css";
 import { Icon } from "@/components/ui/Icon";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 import { formatUnix } from "@/lib/utils/format";
+import {
+  computeEventStatus,
+  eventStatusBadgeClass,
+  eventStatusLabel,
+} from "@/lib/utils/eventStatus";
 import { cn } from "@/lib/utils/cn";
 
 interface EventPanelProps {
@@ -16,6 +21,7 @@ interface EventPanelProps {
     end_time?: number | null;
     is_active?: number | null;
     is_archived?: number | null;
+    is_entry_open?: number | null;
     explanation?: string | null;
   };
   videos: VideoCardData[];
@@ -57,11 +63,25 @@ export function EventPanel({
                   ? ` 〜 ${formatUnix(event.end_time, { dateOnly: true })}`
                   : ""}
               </span>
-              {event.is_active === 1 ? (
-                <span className={styles.activeBadge}>開催中</span>
-              ) : event.is_archived === 1 ? (
-                <span className={styles.archivedBadge}>アーカイブ</span>
-              ) : null}
+              <span
+                className={`fn-badge ${eventStatusBadgeClass(computeEventStatus({
+                  is_active: event.is_active ?? 0,
+                  is_archived: event.is_archived ?? 0,
+                  is_entry_open: event.is_entry_open ?? 0,
+                  start_time: event.start_time ?? null,
+                  end_time: event.end_time ?? null,
+                }))}`}
+              >
+                {eventStatusLabel(
+                  computeEventStatus({
+                    is_active: event.is_active ?? 0,
+                    is_archived: event.is_archived ?? 0,
+                    is_entry_open: event.is_entry_open ?? 0,
+                    start_time: event.start_time ?? null,
+                    end_time: event.end_time ?? null,
+                  }),
+                )}
+              </span>
             </p>
           </div>
         </Link>

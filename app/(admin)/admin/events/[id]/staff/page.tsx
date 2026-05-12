@@ -16,7 +16,7 @@ import {
   type CollaboratorRow,
 } from "@/components/admin/EventStaffManager";
 
-export const metadata: Metadata = { title: "運営メンバー管理" };
+export const metadata: Metadata = { title: "編集権限管理" };
 export const dynamic = "force-dynamic";
 
 interface Props {
@@ -75,7 +75,7 @@ export default async function AdminEventStaffPage({
 
   return (
     <div>
-      <p className="fn-muted fn-text-xs fn-bold">EVENT STAFF</p>
+      <p className="fn-muted fn-text-xs fn-bold">EVENT PERMISSIONS</p>
       <h1 style={{ fontSize: 24, fontWeight: 700 }}>{ev.title}</h1>
 
       <nav style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -98,7 +98,7 @@ export default async function AdminEventStaffPage({
           href={`/admin/events/${ev.id}/staff`}
           className="fn-btn fn-btn-primary fn-btn-sm"
         >
-          <Icon name="users" size={12} aria-hidden /> 運営・協力者
+          <Icon name="users" size={12} aria-hidden /> 編集権限
         </Link>
       </nav>
 

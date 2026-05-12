@@ -151,3 +151,23 @@
 .slotTable {
   overflow-x: auto;
 }
+
+.slotLayout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+@media (min-width: 1024px) {
+  .slotLayout {
+    grid-template-columns: minmax(0, 1fr) 320px;
+  }
+}
+
+.slotMain {
+  min-width: 0;
+}
+
+.slotAside {
+  min-width: 0;
+}

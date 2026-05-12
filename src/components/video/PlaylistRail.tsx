@@ -22,7 +22,21 @@ interface PlaylistRailProps {
   playlistId?: string;
 }
 
-const STORAGE_KEY = "fn-playlist-autonext";
+const AUTO_NEXT_KEY = "fn-playlist-autonext";
+const orderStorageKey = (playlistId: string) => `fn-playlist-order:${playlistId}`;
+
+function applySavedOrder(
+  items: PlaylistEntry[],
+  savedOrder: string[],
+): PlaylistEntry[] {
+  if (savedOrder.length === 0) return items;
+  const byId = new Map(items.map((item) => [item.id, item]));
+  const ordered = savedOrder
+    .map((id) => byId.get(id))
+    .filter((item): item is PlaylistEntry => Boolean(item));
+  const remaining = items.filter((item) => !savedOrder.includes(item.id));
+  return [...ordered, ...remaining];
+}
 
 export function PlaylistRail({
   label = "再生リスト",
@@ -33,35 +47,59 @@ export function PlaylistRail({
   const router = useRouter();
   const [autoNext, setAutoNext] = React.useState(false);
   const [hydrated, setHydrated] = React.useState(false);
+  const [order, setOrder] = React.useState<string[]>([]);
+
+  const orderKey = playlistId ? orderStorageKey(playlistId) : null;
 
   React.useEffect(() => {
     try {
-      setAutoNext(localStorage.getItem(STORAGE_KEY) === "1");
+      setAutoNext(localStorage.getItem(AUTO_NEXT_KEY) === "1");
+      if (orderKey) {
+        const raw = localStorage.getItem(orderKey);
+        const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+        if (Array.isArray(parsed)) {
+          setOrder(parsed.filter((id): id is string => typeof id === "string"));
+        }
+      }
     } catch {
       /* noop */
     }
     setHydrated(true);
-  }, []);
+  }, [orderKey]);
 
   React.useEffect(() => {
     if (!hydrated) return;
     try {
-      localStorage.setItem(STORAGE_KEY, autoNext ? "1" : "0");
+      localStorage.setItem(AUTO_NEXT_KEY, autoNext ? "1" : "0");
     } catch {
       /* noop */
     }
   }, [autoNext, hydrated]);
 
-  const currentIndex = React.useMemo(
-    () =>
-      items.findIndex(
-        (v) => v.id === currentId || v.youtube_video_id === currentId,
-      ),
-    [items, currentId],
+  React.useEffect(() => {
+    if (!hydrated || !orderKey) return;
+    try {
+      localStorage.setItem(orderKey, JSON.stringify(order));
+    } catch {
+      /* noop */
+    }
+  }, [hydrated, order, orderKey]);
+
+  const orderedItems = React.useMemo(
+    () => applySavedOrder(items, order),
+    [items, order],
   );
 
-  const nextItem = currentIndex >= 0 ? items[currentIndex + 1] : null;
-  const prevItem = currentIndex > 0 ? items[currentIndex - 1] : null;
+  const currentIndex = React.useMemo(
+    () =>
+      orderedItems.findIndex(
+        (v) => v.id === currentId || v.youtube_video_id === currentId,
+      ),
+    [orderedItems, currentId],
+  );
+
+  const nextItem = currentIndex >= 0 ? orderedItems[currentIndex + 1] : null;
+  const prevItem = currentIndex > 0 ? orderedItems[currentIndex - 1] : null;
 
   const makeHref = React.useCallback(
     (item: PlaylistEntry) => {
@@ -72,6 +110,23 @@ export function PlaylistRail({
     },
     [playlistId],
   );
+
+  const moveItem = React.useCallback(
+    (itemId: string, direction: -1 | 1) => {
+      const currentOrder = orderedItems.map((item) => item.id);
+      const from = currentOrder.indexOf(itemId);
+      const to = from + direction;
+      if (from < 0 || to < 0 || to >= currentOrder.length) return;
+      const next = [...currentOrder];
+      [next[from], next[to]] = [next[to], next[from]];
+      setOrder(next);
+    },
+    [orderedItems],
+  );
+
+  const resetOrder = React.useCallback(() => {
+    setOrder([]);
+  }, []);
 
   React.useEffect(() => {
     if (!autoNext || !nextItem) return;
@@ -92,19 +147,31 @@ export function PlaylistRail({
           <h3 className={styles.title}>{label}</h3>
           <p className={styles.meta}>
             {currentIndex >= 0
-              ? `${currentIndex + 1} / ${items.length}`
-              : `${items.length} 本`}
+              ? `${currentIndex + 1} / ${orderedItems.length}`
+              : `${orderedItems.length} 本`}
           </p>
         </div>
-        <label className={styles.toggle}>
-          <input
-            type="checkbox"
-            checked={autoNext}
-            onChange={(e) => setAutoNext(e.target.checked)}
-            aria-label="次の動画を自動再生"
-          />
-          <span>自動再生</span>
-        </label>
+        <div className={styles.headerControls}>
+          <button
+            type="button"
+            className={styles.iconButton}
+            onClick={resetOrder}
+            title="並び順を初期化"
+            aria-label="並び順を初期化"
+            disabled={order.length === 0}
+          >
+            <Icon name="refresh" size={13} aria-hidden />
+          </button>
+          <label className={styles.toggle}>
+            <input
+              type="checkbox"
+              checked={autoNext}
+              onChange={(e) => setAutoNext(e.target.checked)}
+              aria-label="次の動画を自動再生"
+            />
+            <span>自動再生</span>
+          </label>
+        </div>
       </header>
 
       <div className={styles.actions}>
@@ -114,11 +181,13 @@ export function PlaylistRail({
             className="fn-btn fn-btn-ghost fn-btn-sm"
             prefetch={false}
           >
-            <Icon name="prev" size={12} aria-hidden />前へ
+            <Icon name="prev" size={12} aria-hidden />
+            前へ
           </Link>
         ) : (
           <span className={styles.actionDisabled}>
-            <Icon name="prev" size={12} aria-hidden />前へ
+            <Icon name="prev" size={12} aria-hidden />
+            前へ
           </span>
         )}
         {nextItem ? (
@@ -139,10 +208,32 @@ export function PlaylistRail({
       </div>
 
       <ol className={styles.list}>
-        {items.map((v, i) => {
+        {orderedItems.map((v, i) => {
           const active = i === currentIndex;
           return (
-            <li key={v.id}>
+            <li key={v.id} className={styles.row}>
+              <div className={styles.reorderControls}>
+                <button
+                  type="button"
+                  className={styles.iconButton}
+                  onClick={() => moveItem(v.id, -1)}
+                  disabled={i === 0}
+                  title="上へ"
+                  aria-label={`${v.title}を上へ移動`}
+                >
+                  <Icon name="chevron-up" size={12} aria-hidden />
+                </button>
+                <button
+                  type="button"
+                  className={styles.iconButton}
+                  onClick={() => moveItem(v.id, 1)}
+                  disabled={i === orderedItems.length - 1}
+                  title="下へ"
+                  aria-label={`${v.title}を下へ移動`}
+                >
+                  <Icon name="chevron-down" size={12} aria-hidden />
+                </button>
+              </div>
               <Link
                 href={makeHref(v)}
                 className={cn(styles.item, active && styles.itemActive)}

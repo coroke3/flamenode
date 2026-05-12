@@ -7,6 +7,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import {
   events as eventsTable,
   slots as slotsTable,
+  videoChapters as videoChaptersTable,
   videos as videosTable,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
@@ -29,6 +30,16 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
   let myVideos: VideoCardData[] = [];
   let mySlot: typeof slotsTable.$inferSelect | null = null;
   let mySlotEvent: typeof eventsTable.$inferSelect | null = null;
+  let myChapters: {
+    id: string;
+    video_id: string;
+    youtube_video_id: string | null;
+    video_title: string | null;
+    chapter_time: number;
+    chapter_label: string;
+    visibility: "private" | "public" | null;
+    created_at: number;
+  }[] = [];
   let stats = { likes: 0, views: 0, video_count: 0, event_count: 0 };
 
   if (db) {
@@ -64,8 +75,24 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
               eq(videosTable.is_deleted, 0),
             )!,
           )
-          .orderBy(desc(videosTable.created_at))
-          .limit(12)) as VideoCardData[];
+          .orderBy(desc(videosTable.created_at))) as VideoCardData[];
+
+        myChapters = await db
+          .select({
+            id: videoChaptersTable.id,
+            video_id: videoChaptersTable.video_id,
+            youtube_video_id: videosTable.youtube_video_id,
+            video_title: videosTable.title,
+            chapter_time: videoChaptersTable.chapter_time,
+            chapter_label: videoChaptersTable.chapter_label,
+            visibility: videoChaptersTable.visibility,
+            created_at: videoChaptersTable.created_at,
+          })
+          .from(videoChaptersTable)
+          .leftJoin(videosTable, eq(videosTable.id, videoChaptersTable.video_id))
+          .where(inArray(videoChaptersTable.x_user_id, approvedXIds))
+          .orderBy(desc(videoChaptersTable.created_at))
+          .limit(80);
       }
 
       // 直近のアクティブスロット (reserved or x_reapply_required)
@@ -121,6 +148,21 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           {user.name} としてサインイン中。X ID 連携、作品投稿、イベント参加状況を一覧できます。
         </p>
       </header>
+
+      <nav style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
+        <Link href="/dashboard/post" className="fn-btn fn-btn-primary fn-btn-sm">
+          <Icon name="edit" size={12} aria-hidden /> 作品を投稿
+        </Link>
+        <Link href="/dashboard/library" className="fn-btn fn-btn-ghost fn-btn-sm">
+          <Icon name="bookmark" size={12} aria-hidden /> ライブラリ
+        </Link>
+        <Link href="/entry" className="fn-btn fn-btn-ghost fn-btn-sm">
+          <Icon name="calendar" size={12} aria-hidden /> エントリー
+        </Link>
+        <Link href="/dashboard/settings" className="fn-btn fn-btn-ghost fn-btn-sm">
+          <Icon name="settings" size={12} aria-hidden /> 設定
+        </Link>
+      </nav>
 
       <HeroCard slot={mySlot} event={mySlotEvent} />
 
@@ -196,6 +238,41 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
               <div key={v.id}>
                 <VideoCard video={v} href={`/dashboard/edit/${v.id}`} />
               </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className={styles.section}>
+        <h2 className={styles.sectionTitle}>自分のチャプターコメント</h2>
+        {myChapters.length === 0 ? (
+          <div className="fn-empty">
+            <Icon name="chapter" size={20} aria-hidden />
+            <p className="fn-empty-message">
+              まだ投稿したチャプターコメントはありません。
+            </p>
+          </div>
+        ) : (
+          <div style={{ display: "grid", gap: 8 }}>
+            {myChapters.map((chapter) => (
+              <Link
+                key={chapter.id}
+                href={`/${chapter.youtube_video_id ?? chapter.video_id}`}
+                className="fn-card"
+                style={{ padding: 12, textDecoration: "none" }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                  <strong style={{ color: "var(--text-primary)" }}>
+                    {chapter.chapter_label}
+                  </strong>
+                  <span className={`fn-badge ${chapter.visibility === "private" ? "fn-badge-warning" : "fn-badge-accent"}`}>
+                    {chapter.visibility === "private" ? "非公開" : "公開"}
+                  </span>
+                </div>
+                <div style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 12 }}>
+                  {chapter.video_title ?? chapter.video_id} / {Math.floor(chapter.chapter_time)}秒 / {formatRelative(chapter.created_at)}
+                </div>
+              </Link>
             ))}
           </div>
         )}

@@ -6,6 +6,7 @@ import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import { historyLogs, users, videos, xUsers } from "@/lib/db/schema";
+import { normalizeXId } from "@/lib/utils/xid";
 
 export interface UserAdminResult {
   ok: boolean;
@@ -178,7 +179,7 @@ export async function refreshXUserIcon(
 ): Promise<UserAdminResult> {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.result;
-  const xUserId = String(formData.get("x_user_id") ?? "").trim();
+  const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   if (!xUserId) return { ok: false, message: "x_user_id が必要です。" };
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };

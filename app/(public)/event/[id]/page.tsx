@@ -12,9 +12,18 @@ import {
   videoEvents,
   xUsers,
 } from "@/lib/db/schema";
+import { getCurrentUser } from "@/lib/auth/currentUser";
 import { fetchEventWithEditors } from "@/lib/db/queries";
+import {
+  computeEventStatus,
+  eventStatusBadgeClass,
+  eventStatusLabel,
+  isAcceptingEntries,
+} from "@/lib/utils/eventStatus";
 import { Icon } from "@/components/ui/Icon";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
+import { SlotGrid, type SlotRow } from "@/components/event/SlotGrid";
+import { SlotStatusBoard } from "@/components/event/SlotStatusBoard";
 import { formatUnix } from "@/lib/utils/format";
 
 export const dynamic = "force-dynamic";
@@ -90,6 +99,23 @@ export default async function EventDetailPage({
     ? ({ ["--event-accent" as never]: event.accent_color } as React.CSSProperties)
     : undefined;
   const publicEditors = editors.filter((e) => e.is_public === 1);
+  const status = computeEventStatus(event);
+  const accepting = isAcceptingEntries(event);
+
+  const viewer = await getCurrentUser();
+
+  const slotRowsForGrid: SlotRow[] = slotRows.map((s) => ({
+    id: s.id,
+    slot_kind: (s.slot_kind ?? "time") as "time" | "count",
+    slot_label: s.slot_label,
+    start_time: s.start_time,
+    end_time: s.end_time,
+    sort_order: s.sort_order,
+    status: s.status,
+    display_name: s.display_name,
+    x_user_id: s.x_user_id,
+    discord_user_id: s.discord_user_id,
+  }));
 
   return (
     <div className={styles.page} style={accentVar}>
@@ -100,10 +126,11 @@ export default async function EventDetailPage({
         />
         <div className={styles.heroBody}>
           <div className={styles.heroMeta}>
-            {event.is_active === 1 ? (
-              <span className="fn-badge fn-badge-accent">開催中</span>
-            ) : event.is_archived === 1 ? (
-              <span className="fn-badge fn-badge-neutral">アーカイブ</span>
+            <span className={`fn-badge ${eventStatusBadgeClass(status)}`}>
+              {eventStatusLabel(status)}
+            </span>
+            {accepting ? (
+              <span className="fn-badge fn-badge-soft">受付中</span>
             ) : null}
             <span>
               {formatUnix(event.start_time, { dateOnly: true })}
@@ -117,19 +144,10 @@ export default async function EventDetailPage({
             <p className={styles.heroExplain}>{event.explanation}</p>
           ) : null}
           <div className={styles.heroActions}>
-            {event.is_entry_open === 1 ? (
-              <Link
-                href={`/entry?event=${event.id}`}
-                className="fn-btn fn-btn-primary"
-              >
-                <Icon name="calendar" size={14} aria-hidden />
-                スロットを確保する
-              </Link>
-            ) : null}
             {visibleVideos.length > 0 ? (
               <Link
                 href={`/${visibleVideos[0]?.youtube_video_id ?? visibleVideos[0]?.id}?playlist=${event.id}`}
-                className="fn-btn fn-btn-ghost"
+                className="fn-btn fn-btn-primary"
               >
                 <Icon name="play" size={14} aria-hidden />
                 全作品を連続再生
@@ -177,63 +195,57 @@ export default async function EventDetailPage({
         </section>
       ) : null}
 
-      {slotRows.length > 0 ? (
+      {slotRows.length > 0 || accepting ? (
         <section className={styles.section}>
           <h2 className={styles.sectionTitle}>
             <Icon name="clock" size={16} aria-hidden />
             予約枠
           </h2>
-          <div className={styles.slotTable}>
-            <table className="fn-table">
-              <thead>
-                <tr>
-                  <th>日付</th>
-                  <th>時間</th>
-                  <th>取得者</th>
-                  <th>状態</th>
-                </tr>
-              </thead>
-              <tbody>
-                {slotRows.map((slot) => (
-                  <tr key={slot.id}>
-                    <td>
-                      {slot.start_time
-                        ? formatUnix(slot.start_time, { dateOnly: true })
-                        : slot.slot_label || "—"}
-                    </td>
-                    <td>
-                      {slot.start_time
-                        ? formatUnix(slot.start_time, { timeOnly: true })
-                        : "—"}
-                    </td>
-                    <td>
-                      {slot.x_user_id ? (
-                        <Link href={`/user/${slot.x_user_id}`}>
-                          {slot.display_name ?? slot.x_user_id}
-                        </Link>
-                      ) : (
-                        <span className="fn-muted">—</span>
-                      )}
-                    </td>
-                    <td>
-                      {slot.status === "available" ? (
-                        slot.priority_reclaim_until ? (
-                          <span className="fn-badge fn-badge-neutral">
-                            確保処理中
-                          </span>
-                        ) : (
-                          <span className="fn-badge fn-badge-soft">空き</span>
-                        )
-                      ) : slot.status === "submitted" ? (
-                        <span className="fn-badge fn-badge-accent">提出済</span>
-                      ) : (
-                        <span className="fn-badge fn-badge-warning">確保済</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className={styles.slotLayout}>
+            <div className={styles.slotMain}>
+              <SlotGrid
+                slots={slotRowsForGrid}
+                viewerDiscordId={viewer?.id ?? null}
+                canReserve={accepting}
+                slotKind={(event.slot_type ?? "time") as "time" | "count"}
+                maxConsecutiveSlots={event.max_consecutive_slots_per_entry ?? 1}
+              />
+              {!accepting ? (
+                <p
+                  className="fn-muted fn-text-sm"
+                  style={{ marginTop: 8 }}
+                >
+                  <Icon name="info" size={12} aria-hidden />{" "}
+                  {status === "ended"
+                    ? "終了済みのため新規確保はできません。"
+                    : status === "scheduled"
+                      ? "受付開始までお待ちください。"
+                      : "現在は受付停止中です。"}
+                </p>
+              ) : !viewer?.id ? (
+                <p
+                  className="fn-muted fn-text-sm"
+                  style={{ marginTop: 8 }}
+                >
+                  <Icon name="info" size={12} aria-hidden /> 確保には{" "}
+                  <Link href="/api/auth/signin/discord?callbackUrl=/dashboard">
+                    ログイン
+                  </Link>{" "}
+                  と承認済 X ID が必要です。
+                </p>
+              ) : !viewer.active_x_user_id ? (
+                <p
+                  className="fn-muted fn-text-sm"
+                  style={{ marginTop: 8 }}
+                >
+                  <Icon name="info" size={12} aria-hidden /> アクティブ X ID を選択してください ({" "}
+                  <Link href="/dashboard/settings">設定</Link> )。
+                </p>
+              ) : null}
+            </div>
+            <aside className={styles.slotAside}>
+              <SlotStatusBoard slots={slotRowsForGrid} />
+            </aside>
           </div>
         </section>
       ) : null}

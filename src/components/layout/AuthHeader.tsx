@@ -37,12 +37,31 @@ export function AuthHeader({ user }: AuthHeaderProps): React.ReactElement {
             <Icon name="calendar" size={13} aria-hidden />
             エントリー
           </Link>
+          <Link href="/dashboard/library">
+            <Icon name="bookmark" size={13} aria-hidden />
+            ライブラリ
+          </Link>
           <Link href="/dashboard/settings">
             <Icon name="settings" size={13} aria-hidden />
             設定
           </Link>
         </nav>
         <div className={styles.right}>
+          <form
+            action="/list"
+            method="get"
+            role="search"
+            aria-label="サイト内検索"
+            className={styles.searchForm}
+          >
+            <Icon name="search" size={13} aria-hidden />
+            <input
+              type="search"
+              name="q"
+              placeholder="検索"
+              autoComplete="off"
+            />
+          </form>
           <ThemeToggle />
           <span className={styles.divider} />
           <XIdSwitcher entries={user.xIds} discordName={user.name} />

@@ -49,6 +49,36 @@
   accent-color: var(--accent-primary);
 }
 
+.headerControls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.iconButton {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.iconButton:hover:not(:disabled),
+.iconButton:focus-visible:not(:disabled) {
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.iconButton:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
 .actions {
   display: flex;
   gap: 8px;
@@ -77,6 +107,23 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 4px;
+  align-items: stretch;
+}
+
+.reorderControls {
+  display: grid;
+  gap: 2px;
+}
+
+.reorderControls .iconButton {
+  width: 24px;
+  height: 22px;
 }
 
 .item {
@@ -166,4 +213,22 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  .header {
+    flex-direction: column;
+  }
+
+  .actions {
+    flex-wrap: wrap;
+  }
+
+  .row {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+
+  .itemThumb {
+    width: 54px;
+  }
 }

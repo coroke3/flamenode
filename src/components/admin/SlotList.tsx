@@ -15,6 +15,7 @@ export interface SlotRowLite {
   status: "available" | "reserved" | "submitted";
   display_name: string | null;
   x_user_id: string | null;
+  discord_user_id?: string | null;
 }
 
 interface SlotListProps {
@@ -87,7 +88,26 @@ export function SlotList({ slots }: SlotListProps): React.ReactElement {
                   ? `${formatUnix(s.start_time, { dateOnly: true })} ${formatUnix(s.start_time, { timeOnly: true })}`
                   : (s.slot_label ?? "-")}
               </td>
-              <td>{s.display_name ?? s.x_user_id ?? "-"}</td>
+              <td>
+                {s.display_name || s.x_user_id ? (
+                  <span>
+                    <strong>{s.display_name ?? `@${s.x_user_id}`}</strong>
+                    {s.x_user_id ? (
+                      <span
+                        style={{
+                          display: "block",
+                          fontSize: 11,
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        @{s.x_user_id}
+                      </span>
+                    ) : null}
+                  </span>
+                ) : (
+                  "-"
+                )}
+              </td>
               <td>
                 <span
                   className={`fn-badge ${

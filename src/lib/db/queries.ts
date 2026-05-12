@@ -101,12 +101,13 @@ export async function fetchVideosForEvent(
   return resolveMissingIcons(db, rows);
 }
 
-/** 開催中イベント (is_active=1)。 */
+/** 開催中イベント (is_active=1 かつ期間内かつ非アーカイブ)。 */
 export async function fetchActiveEvents(db: DB) {
+  const { activeEventWhere } = await import("@/lib/utils/eventStatus");
   return db
     .select()
     .from(events)
-    .where(eq(events.is_active, 1))
+    .where(activeEventWhere())
     .orderBy(desc(events.start_time));
 }
 
@@ -171,7 +172,7 @@ export async function fetchPickupCreators(db: DB, limit = 40) {
   // 集計: 個人作品数 + 合作参加数で絞る。
   // Drizzle の sql 断片内で ${xUsers.id} 等を埋め込むと D1 が `id` だけに展開し
   // 「ambiguous column name: id」になることがあるため、相関は生 SQL で明示する。
-  return db
+  const rows = await db
     .select({
       id: xUsers.id,
       x_name: xUsers.x_name,
@@ -190,12 +191,16 @@ export async function fetchPickupCreators(db: DB, limit = 40) {
     })
     .from(xUsers)
     .where(or(eq(xUsers.approval_status, "approved"), eq(xUsers.approval_status, "pending"))!)
-    .limit(limit * 2)
-    .then((rows) =>
-      rows
-        .filter(
-          (r) => (r.video_count ?? 0) >= 1 || (r.collab_count ?? 0) >= 2,
-        )
-        .slice(0, limit),
-    );
+    .limit(limit * 2);
+  const picked = rows
+    .filter((r) => (r.video_count ?? 0) >= 1 || (r.collab_count ?? 0) >= 2)
+    .slice(0, limit);
+  const withIcons = await resolveMissingIcons(
+    db,
+    picked.map((row) => ({
+      ...row,
+      creator_id: row.id,
+    })),
+  );
+  return withIcons.map(({ creator_id: _creatorId, ...row }) => row);
 }

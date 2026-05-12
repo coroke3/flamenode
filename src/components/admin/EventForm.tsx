@@ -203,7 +203,7 @@ export function EventForm({
             className="fn-select"
           >
             <option value="0">下書き</option>
-            <option value="1">開催中</option>
+            <option value="1">公開</option>
           </select>
         </div>
         <div>

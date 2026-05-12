@@ -2,9 +2,9 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
-import { videos as videosTable } from "@/lib/db/schema";
+import { videoMembers, videos as videosTable, xUsers as xUsersTable } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth/guard";
 import { canEditVideo } from "@/lib/auth/ownership";
 import { VideoForm } from "@/components/forms/VideoForm";
@@ -35,6 +35,40 @@ export default async function EditVideoPage({
     .limit(1);
   const video = rows[0];
   if (!video) notFound();
+
+  const memberRows = await db
+    .select({
+      x_user_id: videoMembers.x_user_id,
+      name: videoMembers.name,
+      role: videoMembers.role,
+      comment: videoMembers.comment,
+      order_index: videoMembers.order_index,
+    })
+    .from(videoMembers)
+    .where(eq(videoMembers.video_id, video.id))
+    .orderBy(videoMembers.order_index);
+  const initialMembers = memberRows.map((m) => ({
+    name: m.name,
+    x_user_id: m.x_user_id ?? "",
+    role: m.role ?? "",
+    comment: m.comment ?? "",
+  }));
+  const creatorX = video.contact_x_id || video.creator_id;
+  const xRow = creatorX
+    ? (
+        await db
+          .select()
+          .from(xUsersTable)
+          .where(eq(xUsersTable.id, creatorX))
+          .limit(1)
+      )[0]
+    : null;
+  const memberSuggestions = await db
+    .select({ name: xUsersTable.x_name, x_user_id: xUsersTable.id })
+    .from(xUsersTable)
+    .orderBy(asc(xUsersTable.x_name))
+    .limit(200);
+
   const canEdit = await canEditVideo({ db, user, video });
   if (!canEdit) {
     return (
@@ -117,6 +151,12 @@ export default async function EditVideoPage({
         mode="edit"
         videoId={video.id}
         initial={{
+          display_name: video.display_name,
+          contact_x_id: video.contact_x_id,
+          icon_url: video.icon_url ?? undefined,
+          profile_text: xRow?.profile_text ?? undefined,
+          youtube_channel_url: xRow?.youtube_channel_url ?? undefined,
+          other_social_links: xRow?.other_social_links ?? undefined,
           title: video.title,
           youtube_url: video.youtube_video_id
             ? youtubeWatchUrl(video.youtube_video_id)
@@ -129,7 +169,9 @@ export default async function EditVideoPage({
           production_story: video.production_story ?? undefined,
           closing_comment: video.closing_comment ?? undefined,
           is_collab: video.submission_type === "collab",
+          members: initialMembers,
         }}
+        memberSuggestions={memberSuggestions}
       />
 
       <p

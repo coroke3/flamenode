@@ -21,13 +21,16 @@ export function PublicFooter(): React.ReactElement {
             { label: "作品一覧", href: "/list" },
             { label: "イベント", href: "/event" },
             { label: "クリエイター", href: "/recommend" },
-            { label: "検索", href: "/search" },
+            { label: "FlameNode について", href: "/about" },
           ]}
         />
         <FooterColumn
           title="アカウント"
           items={[
-            { label: "ログイン / 新規登録", href: "/entry" },
+            {
+              label: "ログイン / 新規登録",
+              href: "/api/auth/signin/discord?callbackUrl=/dashboard",
+            },
             { label: "ダッシュボード", href: "/dashboard" },
             { label: "X ID 連携", href: "/dashboard/settings" },
           ]}

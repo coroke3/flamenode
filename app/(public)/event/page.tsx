@@ -6,6 +6,11 @@ import { desc } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { events as eventsTable } from "@/lib/db/schema";
 import { formatUnix } from "@/lib/utils/format";
+import {
+  computeEventStatus,
+  eventStatusBadgeClass,
+  eventStatusLabel,
+} from "@/lib/utils/eventStatus";
 import { Icon } from "@/components/ui/Icon";
 
 export const metadata: Metadata = { title: "イベント" };
@@ -13,17 +18,13 @@ export const dynamic = "force-dynamic";
 
 type EventRow = typeof eventsTable.$inferSelect;
 
-function statusBadge(ev: EventRow): React.ReactElement | null {
-  if (ev.is_active === 1) {
-    return <span className="fn-badge fn-badge-accent">開催中</span>;
-  }
-  if (ev.is_archived === 1) {
-    return <span className="fn-badge fn-badge-neutral">アーカイブ</span>;
-  }
-  if (ev.start_time && ev.start_time * 1000 > Date.now()) {
-    return <span className="fn-badge fn-badge-warning">募集前</span>;
-  }
-  return null;
+function statusBadge(ev: EventRow): React.ReactElement {
+  const status = computeEventStatus(ev);
+  return (
+    <span className={`fn-badge ${eventStatusBadgeClass(status)}`}>
+      {eventStatusLabel(status)}
+    </span>
+  );
 }
 
 export default async function EventListPage(): Promise<React.ReactElement> {

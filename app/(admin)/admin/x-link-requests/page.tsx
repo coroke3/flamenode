@@ -2,7 +2,7 @@ import * as React from "react";
 import type { Metadata } from "next";
 import { desc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
-import { xAccountLinkRequests } from "@/lib/db/schema";
+import { users, xAccountLinkRequests } from "@/lib/db/schema";
 import { XLinkRequestTable } from "@/components/admin/XLinkRequestTable";
 
 export const metadata: Metadata = { title: "X ID 連携申請" };
@@ -16,9 +16,12 @@ export default async function AdminXLinkRequestsPage(): Promise<React.ReactEleme
           id: xAccountLinkRequests.id,
           requested_x_id: xAccountLinkRequests.requested_x_id,
           discord_user_id: xAccountLinkRequests.discord_user_id,
+          discord_name: users.name,
+          discord_image: users.image,
           requested_at: xAccountLinkRequests.requested_at,
         })
         .from(xAccountLinkRequests)
+        .leftJoin(users, eq(users.id, xAccountLinkRequests.discord_user_id))
         .where(eq(xAccountLinkRequests.status, "pending"))
         .orderBy(desc(xAccountLinkRequests.requested_at))
     : [];

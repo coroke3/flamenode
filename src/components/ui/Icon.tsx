@@ -51,7 +51,8 @@ export type IconName =
   | "fast-forward"
   | "plus"
   | "upload"
-  | "download";
+  | "download"
+  | "copy";
 
 interface IconProps extends React.SVGProps<SVGSVGElement> {
   name: IconName;
@@ -353,6 +354,12 @@ const ICON_PATHS: Record<IconName, React.ReactNode> = {
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
       <polyline points="7 10 12 15 17 10" />
       <line x1="12" y1="15" x2="12" y2="3" />
+    </>
+  ),
+  copy: (
+    <>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
     </>
   ),
 };

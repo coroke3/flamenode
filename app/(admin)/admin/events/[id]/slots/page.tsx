@@ -40,6 +40,7 @@ export default async function AdminEventSlotsPage({
       status: slotsTable.status,
       display_name: slotsTable.display_name,
       x_user_id: slotsTable.x_user_id,
+      discord_user_id: slotsTable.discord_user_id,
     })
     .from(slotsTable)
     .where(eq(slotsTable.event_id, id))
@@ -73,7 +74,7 @@ export default async function AdminEventSlotsPage({
           href={`/admin/events/${ev.id}/staff`}
           className="fn-btn fn-btn-ghost fn-btn-sm"
         >
-          <Icon name="users" size={12} aria-hidden /> 運営・協力者
+          <Icon name="users" size={12} aria-hidden /> 編集権限
         </Link>
       </nav>
 

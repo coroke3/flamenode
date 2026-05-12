@@ -196,8 +196,13 @@
   }
 }
 
-@media (min-width: 1800px) {
+@media (min-width: 2200px) and (min-aspect-ratio: 21 / 9) {
+  .page {
+    width: min(94%, 1960px);
+  }
+
   .layout {
-    grid-template-columns: 380px minmax(0, 1fr) 380px;
+    grid-template-columns: minmax(0, 1fr) 420px;
+    gap: 48px;
   }
 }

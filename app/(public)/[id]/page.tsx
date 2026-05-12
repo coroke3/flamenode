@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import styles from "./page.module.css";
-import { auth } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth/currentUser";
 import { getDatabase } from "@/lib/cloudflare";
 import { videoInteractions, xUsers } from "@/lib/db/schema";
 import {
@@ -16,12 +16,17 @@ import { extractYoutubeId } from "@/lib/youtube/id";
 import { YoutubePlayer } from "@/components/video/YoutubePlayer";
 import { ChapterTabs } from "@/components/video/ChapterTabs";
 import { ChapterComposer } from "@/components/video/ChapterComposer";
-import { CommentComposer } from "@/components/video/CommentComposer";
 import { PlaylistRail } from "@/components/video/PlaylistRail";
 import { InteractionButton } from "@/components/video/InteractionButton";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
+import {
+  computeEventStatus,
+  eventStatusBadgeClass,
+  eventStatusLabel,
+  isAcceptingEntries,
+} from "@/lib/utils/eventStatus";
 
 export const dynamic = "force-dynamic";
 
@@ -57,7 +62,7 @@ export default async function VideoDetailPage({
 
   const detail = await fetchVideoDetail(db, rawId);
   if (!detail) notFound();
-  const { video, creator, events, members, chapters, comments } = detail;
+  const { video, creator, events, members, chapters } = detail;
 
   if (
     video.youtube_video_id &&
@@ -77,6 +82,7 @@ export default async function VideoDetailPage({
 
   const youtubeId = video.youtube_video_id ?? extractYoutubeId(rawId) ?? null;
   const primaryEvent = events.find((e) => e.id === video.primary_event_id) ?? events[0];
+  const primaryEventStatus = primaryEvent ? computeEventStatus(primaryEvent) : null;
   const accentColor = primaryEvent?.accent_color ?? null;
   const accentVar = accentColor
     ? ({ ["--event-accent" as never]: accentColor } as React.CSSProperties)
@@ -107,10 +113,7 @@ export default async function VideoDetailPage({
     primary_event_id: video.primary_event_id,
   })) as VideoCardData[];
 
-  const session = await auth().catch(() => null);
-  const viewerUser = session?.user as
-    | { id?: string; active_x_user_id?: string | null }
-    | undefined;
+  const viewerUser = await getCurrentUser();
   const viewerActiveX = viewerUser?.active_x_user_id ?? null;
   let likeActive = false;
   let bookmarkActive = false;
@@ -139,7 +142,8 @@ export default async function VideoDetailPage({
     viewerXApproved = xRow?.approval_status === "approved";
   }
 
-  let playlistId = playlist || video.primary_event_id || "";
+  // 再生リスト表示は「`?playlist=...` クエリ付きでアクセスしたとき」だけ。
+  // primary_event_id の自動展開は廃止 (ユーザー要望)。
   let playlistLabel = "再生リスト";
   let playlistItems: {
     id: string;
@@ -148,40 +152,64 @@ export default async function VideoDetailPage({
     display_name: string;
   }[] = [];
 
-  if (playlistId) {
-    const evVideos = await fetchEventPlaylistVideos(db, playlistId);
-    if (evVideos.length > 1) {
-      const eventTitle =
-        events.find((e) => e.id === playlistId)?.title ??
-        primaryEvent?.title ??
-        "イベント";
-      playlistLabel = `${eventTitle} 上映順`;
-      playlistItems = evVideos.map((v) => ({
-        id: v.id,
-        title: v.title,
-        youtube_video_id: v.youtube_video_id,
-        display_name: v.display_name,
-      }));
+  if (playlist) {
+    if (playlist === "lib-like" || playlist === "lib-bookmark") {
+      // 自分のライブラリ (要ログイン + active X ID)
+      if (viewerActiveX) {
+        const kind = playlist === "lib-like" ? "like" : "bookmark";
+        const myInteractions = await db
+          .select({ video_id: videoInteractions.video_id })
+          .from(videoInteractions)
+          .where(
+            and(
+              eq(videoInteractions.x_user_id, viewerActiveX),
+              eq(videoInteractions.interaction_type, kind),
+            )!,
+          );
+        const ids = myInteractions.map((r) => r.video_id);
+        if (ids.length > 0) {
+          const { videos: videosTable } = await import("@/lib/db/schema");
+          const { inArray } = await import("drizzle-orm");
+          const rows = await db
+            .select({
+              id: videosTable.id,
+              title: videosTable.title,
+              youtube_video_id: videosTable.youtube_video_id,
+              display_name: videosTable.display_name,
+            })
+            .from(videosTable)
+            .where(
+              and(
+                inArray(videosTable.id, ids),
+                eq(videosTable.is_deleted, 0),
+              )!,
+            );
+          playlistLabel = kind === "like" ? "いいねした作品" : "セーブした作品";
+          playlistItems = rows.map((v) => ({
+            id: v.id,
+            title: v.title,
+            youtube_video_id: v.youtube_video_id,
+            display_name: v.display_name,
+          }));
+        }
+      }
+    } else {
+      // イベント ID として解釈
+      const evVideos = await fetchEventPlaylistVideos(db, playlist);
+      if (evVideos.length > 1) {
+        const eventTitle =
+          events.find((e) => e.id === playlist)?.title ??
+          primaryEvent?.title ??
+          "イベント";
+        playlistLabel = `${eventTitle} 上映順`;
+        playlistItems = evVideos.map((v) => ({
+          id: v.id,
+          title: v.title,
+          youtube_video_id: v.youtube_video_id,
+          display_name: v.display_name,
+        }));
+      }
     }
-  }
-
-  if (playlistItems.length === 0 && related.length > 0) {
-    playlistId = "";
-    playlistLabel = "おすすめ再生リスト";
-    playlistItems = [
-      {
-        id: video.id,
-        title: video.title,
-        youtube_video_id: video.youtube_video_id,
-        display_name: creatorName,
-      },
-      ...related.slice(0, 12).map((v) => ({
-        id: v.id,
-        title: v.title,
-        youtube_video_id: v.youtube_video_id,
-        display_name: v.display_name,
-      })),
-    ];
   }
 
   const authorBlock = (
@@ -290,10 +318,15 @@ export default async function VideoDetailPage({
               <Link href={`/event/${primaryEvent.id}`} className={styles.eventBoxTitle}>
                 {primaryEvent.title}
               </Link>
-              {primaryEvent.is_active === 1 ? (
-                <span className="fn-badge fn-badge-accent">開催中</span>
-              ) : primaryEvent.is_archived === 1 ? (
-                <span className="fn-badge fn-badge-neutral">アーカイブ</span>
+              {primaryEventStatus ? (
+                <span
+                  className={`fn-badge ${eventStatusBadgeClass(primaryEventStatus)}`}
+                >
+                  {eventStatusLabel(primaryEventStatus)}
+                </span>
+              ) : null}
+              {isAcceptingEntries(primaryEvent) ? (
+                <span className="fn-badge fn-badge-soft">受付中</span>
               ) : null}
             </div>
           ) : null}
@@ -347,12 +380,12 @@ export default async function VideoDetailPage({
         </article>
 
         <aside className={styles.aside}>
-          {playlistItems.length > 1 ? (
+          {playlist && playlistItems.length > 0 ? (
             <PlaylistRail
               label={playlistLabel}
               items={playlistItems}
               currentId={rawId}
-              playlistId={playlistId || undefined}
+              playlistId={playlist || undefined}
             />
           ) : null}
 
@@ -371,29 +404,11 @@ export default async function VideoDetailPage({
               author_name: c.author_name,
               author_icon: c.author_icon,
             }))}
-            comments={comments.map((c) => ({
-              id: c.id,
-              body: c.body,
-              created_at: c.created_at,
-              chapter_time: c.chapter_time,
-              chapter_label: c.chapter_label,
-              author_name: c.author_name,
-              author_icon: c.author_icon,
-            }))}
           />
 
           {viewerUser?.id ? (
             <>
               <ChapterComposer videoId={video.id} canPost={viewerXApproved} />
-              <CommentComposer
-                videoId={video.id}
-                canPost={viewerXApproved}
-                chapterOptions={chapters.map((c) => ({
-                  id: c.id,
-                  chapter_time: c.chapter_time,
-                  chapter_label: c.chapter_label,
-                }))}
-              />
             </>
           ) : null}
 

@@ -13,6 +13,7 @@ import {
   xUsers,
 } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
+import { normalizeXId } from "@/lib/utils/xid";
 
 export interface ChapterActionResult {
   ok: boolean;
@@ -28,7 +29,8 @@ const createSchema = z.object({
   visibility: z.enum(["public", "private"]).default("public"),
   marker_kind: z
     .enum(["chapter", "comment", "review", "system"])
-    .default("chapter"),
+    .default("chapter")
+    .transform(() => "chapter" as const),
   show_on_player_bar: z.coerce.number().min(0).max(1).default(1),
 });
 
@@ -44,7 +46,7 @@ export async function createChapter(
     | { id?: string; active_x_user_id?: string | null }
     | undefined;
   if (!sUser?.id) return { ok: false, message: "ログインが必要です。" };
-  const activeX = sUser.active_x_user_id;
+  const activeX = normalizeXId(sUser.active_x_user_id);
   if (!activeX) {
     return { ok: false, message: "X ID を選択してから操作してください。" };
   }
@@ -146,7 +148,8 @@ export async function updateChapter(
   if (!existing) return { ok: false, message: "チャプターが見つかりません。" };
 
   // 編集権限: 作成者本人 or 動画オーナー (canEditVideo) or admin
-  let canMod = sUser.role === "admin" || existing.x_user_id === sUser.active_x_user_id;
+  const activeX = normalizeXId(sUser.active_x_user_id);
+  let canMod = sUser.role === "admin" || existing.x_user_id === activeX;
   if (!canMod) {
     const targetVideo = (
       await db.select().from(videos).where(eq(videos.id, existing.video_id)).limit(1)
@@ -206,7 +209,8 @@ export async function deleteChapter(
   )[0];
   if (!existing) return { ok: false, message: "チャプターが見つかりません。" };
 
-  let canMod = sUser.role === "admin" || existing.x_user_id === sUser.active_x_user_id;
+  const activeX = normalizeXId(sUser.active_x_user_id);
+  let canMod = sUser.role === "admin" || existing.x_user_id === activeX;
   if (!canMod) {
     const targetVideo = (
       await db.select().from(videos).where(eq(videos.id, existing.video_id)).limit(1)

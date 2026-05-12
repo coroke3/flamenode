@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth/currentUser";
 import { getDatabase } from "@/lib/cloudflare";
 import { canEditVideo } from "@/lib/auth/ownership";
 import {
@@ -11,12 +11,20 @@ import {
   slots,
   videos,
   videoInteractions,
+  videoMembers,
   xUsers,
 } from "@/lib/db/schema";
 import { extractYoutubeId } from "@/lib/youtube/id";
 import { generateId } from "@/lib/utils/id";
+import { normalizeXId } from "@/lib/utils/xid";
 
 const videoFormSchema = z.object({
+  display_name: z.string().trim().min(1).max(80),
+  contact_x_id: z.string().trim().min(1).max(32),
+  icon_url: z.string().trim().max(500).optional().nullable(),
+  profile_text: z.string().trim().max(1000).optional().nullable(),
+  youtube_channel_url: z.string().trim().max(500).optional().nullable(),
+  other_social_links: z.string().trim().max(1000).optional().nullable(),
   title: z.string().trim().min(1).max(120),
   youtube_url: z.string().trim().url(),
   music: z.string().trim().max(200).optional().nullable(),
@@ -38,6 +46,116 @@ export interface VideoActionResult {
   videoId?: string;
 }
 
+interface MemberInput {
+  name: string;
+  x_user_id: string;
+  role: string;
+  comment: string;
+}
+
+function parseMembersJson(raw: FormDataEntryValue | null): MemberInput[] {
+  if (typeof raw !== "string" || !raw.trim()) return [];
+  try {
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data)) return [];
+    const out: MemberInput[] = [];
+    for (const item of data) {
+      if (typeof item !== "object" || item === null) continue;
+      const o = item as Record<string, unknown>;
+      const name = String(o.name ?? "").trim();
+      const xid = normalizeXId(String(o.x_user_id ?? ""));
+      const role = String(o.role ?? "").trim();
+      const comment = String(o.comment ?? "").trim();
+      if (!name && !xid) continue;
+      out.push({ name: name || `@${xid}`, x_user_id: xid, role, comment });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+async function ensureSubmissionXUser(
+  db: NonNullable<ReturnType<typeof getDatabase>>,
+  args: {
+    xId: string;
+    displayName: string;
+    iconUrl?: string | null;
+    profileText?: string | null;
+    youtubeChannelUrl?: string | null;
+    socialLinks?: string | null;
+  },
+): Promise<void> {
+  if (!args.xId) return;
+  const now = Math.floor(Date.now() / 1000);
+  const existing = (
+    await db.select().from(xUsers).where(eq(xUsers.id, args.xId)).limit(1)
+  )[0];
+  if (!existing) {
+    await db.insert(xUsers).values({
+      id: args.xId,
+      x_name: args.displayName || `@${args.xId}`,
+      icon_url: args.iconUrl || null,
+      profile_text: args.profileText || null,
+      youtube_channel_url: args.youtubeChannelUrl || null,
+      other_social_links: args.socialLinks || null,
+      approval_status: "pending",
+      approval_requested_at: now,
+    });
+    return;
+  }
+  await db
+    .update(xUsers)
+    .set({
+      x_name: args.displayName || existing.x_name,
+      icon_url: args.iconUrl || existing.icon_url,
+      profile_text: args.profileText ?? existing.profile_text,
+      youtube_channel_url: args.youtubeChannelUrl ?? existing.youtube_channel_url,
+      other_social_links: args.socialLinks ?? existing.other_social_links,
+    })
+    .where(eq(xUsers.id, args.xId));
+}
+
+/**
+ * 作品の合作メンバーを総入れ替えする。
+ * X ID が指定されているが xUsers に存在しない場合は pending で自動作成。
+ */
+async function replaceVideoMembers(
+  db: NonNullable<ReturnType<typeof getDatabase>>,
+  videoId: string,
+  members: MemberInput[],
+): Promise<void> {
+  await db.delete(videoMembers).where(eq(videoMembers.video_id, videoId));
+  if (members.length === 0) return;
+  const now = Math.floor(Date.now() / 1000);
+  for (let i = 0; i < members.length; i++) {
+    const m = members[i];
+    const xid = m.x_user_id || null;
+    if (xid) {
+      const existing = (
+        await db.select().from(xUsers).where(eq(xUsers.id, xid)).limit(1)
+      )[0];
+      if (!existing) {
+        await db.insert(xUsers).values({
+          id: xid,
+          x_name: m.name || `@${xid}`,
+          approval_status: "pending",
+          approval_requested_at: now,
+        });
+      }
+    }
+    await db.insert(videoMembers).values({
+      id: generateId("vm"),
+      video_id: videoId,
+      x_user_id: xid,
+      name: m.name,
+      role: m.role || null,
+      comment: m.comment || null,
+      order_index: i,
+    });
+  }
+}
+
 /**
  * 自由投稿: イベントに紐づかない作品を新規登録する。
  * 設計の post/page.md および post/slotted/page.md に基づく簡易版。
@@ -45,16 +163,12 @@ export interface VideoActionResult {
 export async function createFreeVideo(
   formData: FormData,
 ): Promise<VideoActionResult> {
-  const session = await auth().catch(() => null);
-  if (!session?.user) return { ok: false, message: "認証が必要です。" };
-  const sessionUser = session.user as {
-    id?: string;
-    name?: string | null;
-    image?: string | null;
-    active_x_user_id?: string | null;
-  };
+  const sessionUser = await getCurrentUser();
+  if (!sessionUser) return { ok: false, message: "認証が必要です。" };
+  if (sessionUser.is_banned === 1) {
+    return { ok: false, message: "現在、このアカウントは利用停止中です。" };
+  }
   const userId = sessionUser.id;
-  if (!userId) return { ok: false, message: "ユーザー ID を取得できません。" };
 
   const parsed = videoFormSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
@@ -70,22 +184,17 @@ export async function createFreeVideo(
 
   const id = generateId("v");
   const now = Math.floor(Date.now() / 1000);
-  const activeX = sessionUser.active_x_user_id ?? "";
-
-  // 表示名・アイコンの決定ロジック:
-  // 1. アクティブな X ID があれば、x_users.x_name / icon_url を最優先
-  // 2. 無ければ Discord のセッション情報をフォールバック
-  let displayName = sessionUser.name ?? "anonymous";
-  let iconUrl: string | null = sessionUser.image ?? null;
-  if (activeX) {
-    const xRow = (
-      await db.select().from(xUsers).where(eq(xUsers.id, activeX)).limit(1)
-    )[0];
-    if (xRow) {
-      displayName = xRow.x_name || displayName;
-      iconUrl = xRow.icon_url ?? iconUrl;
-    }
-  }
+  const activeX = normalizeXId(parsed.data.contact_x_id || sessionUser.active_x_user_id);
+  const displayName = parsed.data.display_name;
+  const iconUrl = parsed.data.icon_url || sessionUser.image || null;
+  await ensureSubmissionXUser(db, {
+    xId: activeX,
+    displayName,
+    iconUrl,
+    profileText: parsed.data.profile_text ?? null,
+    youtubeChannelUrl: parsed.data.youtube_channel_url ?? null,
+    socialLinks: parsed.data.other_social_links ?? null,
+  });
 
   await db.insert(videos).values({
     id,
@@ -116,6 +225,11 @@ export async function createFreeVideo(
     updated_at: now,
   });
 
+  const members = parsed.data.is_collab
+    ? parseMembersJson(formData.get("members_json"))
+    : [];
+  await replaceVideoMembers(db, id, members);
+
   await db.insert(historyLogs).values({
     table_name: "videos",
     record_id: id,
@@ -138,16 +252,12 @@ export async function createFreeVideo(
 export async function submitSlotVideo(
   formData: FormData,
 ): Promise<VideoActionResult> {
-  const session = await auth().catch(() => null);
-  if (!session?.user) return { ok: false, message: "認証が必要です。" };
-  const sessionUser = session.user as {
-    id?: string;
-    name?: string | null;
-    image?: string | null;
-    active_x_user_id?: string | null;
-  };
+  const sessionUser = await getCurrentUser();
+  if (!sessionUser) return { ok: false, message: "認証が必要です。" };
+  if (sessionUser.is_banned === 1) {
+    return { ok: false, message: "現在、このアカウントは利用停止中です。" };
+  }
   const userId = sessionUser.id;
-  if (!userId) return { ok: false, message: "ユーザー ID を取得できません。" };
 
   const slotId = String(formData.get("slot_id") ?? "");
   if (!slotId) return { ok: false, message: "スロット ID がありません。" };
@@ -174,7 +284,17 @@ export async function submitSlotVideo(
   const now = Math.floor(Date.now() / 1000);
   const videoId = slotRow.video_id ?? generateId("v");
   const exists = !!slotRow.video_id;
-  const activeX = sessionUser.active_x_user_id ?? slotRow.x_user_id ?? "";
+  const activeX = normalizeXId(
+    parsed.data.contact_x_id || sessionUser.active_x_user_id || slotRow.x_user_id,
+  );
+  await ensureSubmissionXUser(db, {
+    xId: activeX,
+    displayName: parsed.data.display_name,
+    iconUrl: parsed.data.icon_url || sessionUser.image || null,
+    profileText: parsed.data.profile_text ?? null,
+    youtubeChannelUrl: parsed.data.youtube_channel_url ?? null,
+    socialLinks: parsed.data.other_social_links ?? null,
+  });
 
   if (exists) {
     await db
@@ -182,6 +302,10 @@ export async function submitSlotVideo(
       .set({
         title: parsed.data.title,
         youtube_video_id: youtubeId,
+        creator_id: activeX || null,
+        contact_x_id: activeX || "anonymous",
+        display_name: parsed.data.display_name,
+        icon_url: parsed.data.icon_url || null,
         music: parsed.data.music ?? null,
         credit: parsed.data.credit ?? null,
         intro_comment: parsed.data.intro_comment ?? null,
@@ -194,8 +318,8 @@ export async function submitSlotVideo(
       })
       .where(eq(videos.id, videoId));
   } else {
-    let displayName = slotRow.display_name ?? sessionUser.name ?? "anonymous";
-    let iconUrl: string | null = sessionUser.image ?? null;
+    let displayName = parsed.data.display_name || slotRow.display_name || sessionUser.name || "anonymous";
+    let iconUrl: string | null = parsed.data.icon_url || sessionUser.image || null;
     if (activeX) {
       const xRow = (
         await db.select().from(xUsers).where(eq(xUsers.id, activeX)).limit(1)
@@ -238,10 +362,21 @@ export async function submitSlotVideo(
     });
   }
 
+  const members = parsed.data.is_collab
+    ? parseMembersJson(formData.get("members_json"))
+    : [];
+  await replaceVideoMembers(db, videoId, members);
+
+  const slotUpdateWhere = slotRow.reservation_group_id
+    ? and(
+        eq(slots.reservation_group_id, slotRow.reservation_group_id),
+        eq(slots.discord_user_id, userId),
+      )!
+    : eq(slots.id, slotRow.id);
   await db
     .update(slots)
     .set({ status: "submitted", video_id: videoId, updated_at: now })
-    .where(eq(slots.id, slotRow.id));
+    .where(slotUpdateWhere);
 
   await db.insert(historyLogs).values({
     table_name: "slots",
@@ -266,11 +401,8 @@ export async function submitSlotVideo(
 export async function updateVideo(
   formData: FormData,
 ): Promise<VideoActionResult> {
-  const session = await auth().catch(() => null);
-  const sessionUser = session?.user as
-    | { id?: string; role?: string; active_x_user_id?: string | null }
-    | undefined;
-  if (!sessionUser?.id)
+  const sessionUser = await getCurrentUser();
+  if (!sessionUser)
     return { ok: false, message: "認証が必要です。" };
 
   const videoId = String(formData.get("video_id") ?? "").trim();
@@ -304,11 +436,24 @@ export async function updateVideo(
   }
 
   const now = Math.floor(Date.now() / 1000);
+  const nextCreatorX = normalizeXId(parsed.data.contact_x_id);
+  await ensureSubmissionXUser(db, {
+    xId: nextCreatorX,
+    displayName: parsed.data.display_name,
+    iconUrl: parsed.data.icon_url ?? null,
+    profileText: parsed.data.profile_text ?? null,
+    youtubeChannelUrl: parsed.data.youtube_channel_url ?? null,
+    socialLinks: parsed.data.other_social_links ?? null,
+  });
   await db
     .update(videos)
     .set({
       title: parsed.data.title,
       youtube_video_id: youtubeId,
+      creator_id: nextCreatorX || null,
+      contact_x_id: nextCreatorX || "anonymous",
+      display_name: parsed.data.display_name,
+      icon_url: parsed.data.icon_url || null,
       music: parsed.data.music ?? null,
       credit: parsed.data.credit ?? null,
       intro_comment: parsed.data.intro_comment ?? null,
@@ -320,6 +465,11 @@ export async function updateVideo(
       updated_at: now,
     })
     .where(eq(videos.id, videoId));
+
+  const members = parsed.data.is_collab
+    ? parseMembersJson(formData.get("members_json"))
+    : [];
+  await replaceVideoMembers(db, videoId, members);
 
   await db.insert(historyLogs).values({
     table_name: "videos",
@@ -349,13 +499,10 @@ export async function updateVideo(
 export async function toggleVideoInteraction(
   formData: FormData,
 ): Promise<VideoActionResult & { active?: boolean }> {
-  const session = await auth().catch(() => null);
-  const sessionUser = session?.user as
-    | { id?: string; active_x_user_id?: string | null }
-    | undefined;
-  if (!sessionUser?.id)
+  const sessionUser = await getCurrentUser();
+  if (!sessionUser)
     return { ok: false, message: "ログインが必要です。" };
-  const activeX = sessionUser.active_x_user_id;
+  const activeX = normalizeXId(sessionUser.active_x_user_id);
   if (!activeX) {
     return {
       ok: false,
@@ -411,14 +558,18 @@ export async function toggleVideoInteraction(
     return { ok: true, active: false, videoId };
   }
 
-  await db.insert(videoInteractions).values({
-    id: generateId("vi"),
-    x_user_id: activeX,
-    video_id: videoId,
-    interaction_type: kind,
-    source: "app",
-    created_at: now,
-  });
+  try {
+    await db.insert(videoInteractions).values({
+      id: generateId("vi"),
+      x_user_id: activeX,
+      video_id: videoId,
+      interaction_type: kind,
+      source: "app",
+      created_at: now,
+    });
+  } catch {
+    return { ok: true, active: true, videoId };
+  }
   if (kind === "like") {
     await db
       .update(videos)

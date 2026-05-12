@@ -10,6 +10,7 @@ import {
   xAccountLinkRequests,
   xUsers,
 } from "@/lib/db/schema";
+import { normalizeXId } from "@/lib/utils/xid";
 
 export interface XIdAdminResult {
   ok: boolean;
@@ -50,7 +51,7 @@ export async function approveXIdLinkRequest(
     return { ok: false, message: "すでに処理済みの申請です。" };
   }
 
-  const xid = reqRow.requested_x_id;
+  const xid = normalizeXId(reqRow.requested_x_id);
   const discordUserId = reqRow.discord_user_id;
 
   const existing = (

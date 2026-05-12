@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { AuthHeader } from "@/components/layout/AuthHeader";
 import { PublicHeader } from "@/components/layout/PublicHeader";
 import { PublicFooter } from "@/components/layout/PublicFooter";
+import { buildHeaderUser, type HeaderUser } from "@/lib/auth/headerUser";
 
 /**
  * 認証エリア共通レイアウト。
@@ -15,23 +16,11 @@ export default async function AuthLayout({
 }: {
   children: React.ReactNode;
 }): Promise<React.ReactElement> {
-  let user: {
-    id: string;
-    name: string;
-    image: string | null;
-    xIds: never[];
-  } | null = null;
+  let user: HeaderUser | null = null;
 
   try {
     const session = await auth();
-    if (session?.user) {
-      user = {
-        id: (session.user as { id?: string }).id ?? "",
-        name: session.user.name ?? "ゲスト",
-        image: session.user.image ?? null,
-        xIds: [],
-      };
-    }
+    user = await buildHeaderUser(session?.user);
   } catch {
     user = null;
   }

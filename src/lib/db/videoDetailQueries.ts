@@ -2,13 +2,13 @@ import { and, asc, desc, eq, ne, or, sql } from "drizzle-orm";
 import {
   events,
   videoChapters,
-  videoComments,
   videoEvents,
   videoMembers,
   videos,
   xUsers,
 } from "./schema";
 import type { DB } from "./client";
+import { resolveMissingIcons } from "./iconResolution";
 
 /**
  * 作品詳細関連の集約クエリ。
@@ -38,7 +38,13 @@ export async function fetchVideoDetail(db: DB, idOrYoutube: string) {
         .where(eq(xUsers.id, video.creator_id))
         .limit(1)
     : [];
-  const creator = creatorRows[0] ?? null;
+  let creator = creatorRows[0] ?? null;
+  if (creator && !creator.icon_url) {
+    const resolved = await resolveMissingIcons(db, [
+      { creator_id: creator.id, icon_url: creator.icon_url },
+    ]);
+    creator = { ...creator, icon_url: resolved[0]?.icon_url ?? null };
+  }
 
   // 3) 所属イベント
   const eventRows = await db
@@ -50,6 +56,7 @@ export async function fetchVideoDetail(db: DB, idOrYoutube: string) {
       start_time: events.start_time,
       end_time: events.end_time,
       is_active: events.is_active,
+      is_entry_open: events.is_entry_open,
       is_archived: events.is_archived,
     })
     .from(videoEvents)
@@ -97,31 +104,7 @@ export async function fetchVideoDetail(db: DB, idOrYoutube: string) {
     )
     .orderBy(videoChapters.chapter_time);
 
-  // 6) コメント (チャプターと結合)
-  const comments = await db
-    .select({
-      id: videoComments.id,
-      body: videoComments.body,
-      created_at: videoComments.created_at,
-      chapter_id: videoComments.chapter_id,
-      chapter_time: videoChapters.chapter_time,
-      chapter_label: videoChapters.chapter_label,
-      author_name: xUsers.x_name,
-      author_icon: xUsers.icon_url,
-    })
-    .from(videoComments)
-    .leftJoin(videoChapters, eq(videoChapters.id, videoComments.chapter_id))
-    .leftJoin(xUsers, eq(xUsers.id, videoComments.x_user_id))
-    .where(
-      and(
-        eq(videoComments.video_id, video.id),
-        eq(videoComments.visibility, "public"),
-      )!,
-    )
-    .orderBy(desc(videoComments.created_at))
-    .limit(50);
-
-  return { video, creator, events: eventRows, members, chapters, comments };
+  return { video, creator, events: eventRows, members, chapters };
 }
 
 /**

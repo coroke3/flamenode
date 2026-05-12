@@ -68,7 +68,7 @@ export default async function AdminEventEditPage({
           href={`/admin/events/${ev.id}/staff`}
           className="fn-btn fn-btn-ghost fn-btn-sm"
         >
-          <Icon name="users" size={12} aria-hidden /> 運営・協力者
+          <Icon name="users" size={12} aria-hidden /> 編集権限
         </Link>
       </nav>
 

@@ -10,8 +10,10 @@ import {
 import { requireSession } from "@/lib/auth/guard";
 import { Icon } from "@/components/ui/Icon";
 import {
+  DeleteXIdForm,
   SetActiveXButton,
   XIdLinkForm,
+  XIdProfileForm,
 } from "@/components/settings/XIdSettingsClient";
 import { formatUnix } from "@/lib/utils/format";
 
@@ -202,6 +204,32 @@ export default async function SettingsPage(): Promise<React.ReactElement> {
               </tbody>
             </table>
           )}
+          {xIds.length > 0 ? (
+            <div style={{ marginTop: 24, display: "grid", gap: 16 }}>
+              {xIds.map((x) => (
+                <section key={`profile-${x.id}`} className="fn-card">
+                  <div className="fn-card-header">
+                    <h3 className="fn-card-title">@{x.id} のプロフィール既定値</h3>
+                  </div>
+                  <div className="fn-card-body">
+                    <XIdProfileForm
+                      x={{
+                        id: x.id,
+                        x_name: x.x_name,
+                        icon_url: x.icon_url,
+                        profile_text: x.profile_text,
+                        youtube_channel_url: x.youtube_channel_url,
+                        other_social_links: x.other_social_links,
+                      }}
+                    />
+                    <div style={{ marginTop: 12 }}>
+                      <DeleteXIdForm xUserId={x.id} />
+                    </div>
+                  </div>
+                </section>
+              ))}
+            </div>
+          ) : null}
         </div>
       </section>
     </div>

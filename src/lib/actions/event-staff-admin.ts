@@ -17,6 +17,7 @@ import {
   COLLABORATOR_PERMISSION_KEYS,
   type CollaboratorPermissionKey,
 } from "@/lib/constants/collaborator-permissions";
+import { normalizeXId } from "@/lib/utils/xid";
 
 export interface StaffActionResult {
   ok: boolean;
@@ -80,6 +81,7 @@ export async function addEventEditor(
     };
   }
   const data = parsed.data;
+  data.x_user_id = normalizeXId(data.x_user_id);
   const guard = await ensureAdminFor(data.event_id);
   if (!guard.ok) return guard.result;
   const db = getDatabase();
@@ -145,7 +147,7 @@ export async function removeEventEditor(
   formData: FormData,
 ): Promise<StaffActionResult> {
   const eventId = String(formData.get("event_id") ?? "").trim();
-  const xUserId = String(formData.get("x_user_id") ?? "").trim();
+  const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   if (!eventId || !xUserId)
     return { ok: false, message: "event_id と x_user_id が必要です。" };
   const guard = await ensureAdminFor(eventId);
@@ -191,6 +193,8 @@ export async function updateEventEditor(
     };
   }
   const data = parsed.data;
+  if (data.x_user_id) data.x_user_id = normalizeXId(data.x_user_id);
+  if (data.x_user_id) data.x_user_id = normalizeXId(data.x_user_id);
   const guard = await ensureAdminFor(data.event_id);
   if (!guard.ok) return guard.result;
   const db = getDatabase();
@@ -259,6 +263,7 @@ export async function upsertCollaborator(
     };
   }
   const data = parsed.data;
+  if (data.x_user_id) data.x_user_id = normalizeXId(data.x_user_id);
   if (!data.x_user_id && !data.discord_user_id) {
     return {
       ok: false,

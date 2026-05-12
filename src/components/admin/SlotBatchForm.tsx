@@ -58,12 +58,25 @@ export function SlotBatchForm({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ display: "flex", gap: 6 }}>
+      <div
+        style={{
+          display: "inline-flex",
+          gap: 4,
+          padding: 4,
+          border: "1px solid var(--border-subtle)",
+          borderRadius: "var(--radius-sm)",
+          background: "var(--bg-base)",
+          width: "fit-content",
+          maxWidth: "100%",
+          flexWrap: "wrap",
+        }}
+      >
         <button
           type="button"
           onClick={() => setMode("time")}
           className={`fn-btn fn-btn-sm ${mode === "time" ? "fn-btn-primary" : "fn-btn-ghost"}`}
         >
+          <Icon name="clock" size={11} aria-hidden />
           時間付き
         </button>
         <button
@@ -71,6 +84,7 @@ export function SlotBatchForm({
           onClick={() => setMode("count")}
           className={`fn-btn fn-btn-sm ${mode === "count" ? "fn-btn-primary" : "fn-btn-ghost"}`}
         >
+          <Icon name="list" size={11} aria-hidden />
           時間なし
         </button>
       </div>
@@ -80,7 +94,7 @@ export function SlotBatchForm({
       >
         {mode === "time" ? (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
               <div>
                 <label className="fn-label">開始日時 *</label>
                 <input
@@ -100,7 +114,7 @@ export function SlotBatchForm({
                 />
               </div>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
               <div>
                 <label className="fn-label">間隔 (分) *</label>
                 <input
@@ -129,7 +143,7 @@ export function SlotBatchForm({
           </>
         ) : (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
               <div>
                 <label className="fn-label">作成枠数 *</label>
                 <input
@@ -178,7 +192,7 @@ export function SlotBatchForm({
           </p>
         ) : null}
 
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button type="submit" className="fn-btn fn-btn-primary" disabled={busy}>
             <Icon name="plus" size={12} aria-hidden />
             {busy ? "生成中…" : "一括生成"}
