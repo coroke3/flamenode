@@ -2,43 +2,86 @@
 
 作成日: 2026-05-15
 対象リポジトリ: `coroke3/flamenode`
-関連正本: `claude-code-subagent-assignment.md`
+関連正本: `CLAUDE.md` / `claude-code-subagent-assignment.md` / `.claude/flamenode/README.md`
 
-このファイルは、Claude Codeを使ったことがない人が、ターミナルでFlameNode修正作業を始められるようにするための実行手順である。
+このファイルは、Claude Codeを使ったことがない人でも、ターミナルからFlameNode修正作業を安全に始められるようにするための実行手順である。
+
+今回のFlameNode修正では、命令ファイルをClaude Codeが読みやすいように分割している。作業者はこのガイドに沿って、まず調査、次に計画、最後に小さなPR単位で実装する。
 
 ---
 
-## 0. 先に読むもの
+## 0. 今回の命令ファイル構成
 
-作業前に、リポジトリ内の次のファイルを確認する。
+Claude Codeは、リポジトリ内の以下のファイルを使って作業する。
 
-```sh
-cat claude-code-subagent-assignment.md
-cat .claude/flamenode-subagent-routing.yaml
+```text
+CLAUDE.md
+claude-code-subagent-assignment.md
+claude-code-terminal-guide.md
+.claude/flamenode/README.md
+.claude/flamenode/requirements-map.md
+.claude/flamenode/source/
+.claude/flamenode/phases/
+.claude/agents/
+.claude/commands/
 ```
 
-- `claude-code-subagent-assignment.md`: 実装仕様・作業順序・禁止事項の正本
-- `.claude/flamenode-subagent-routing.yaml`: モデル割当・フェーズ・PR分割の機械参照用サマリ
+それぞれの役割:
 
-仕様が衝突した場合は、`claude-code-subagent-assignment.md` を優先する。
+| ファイル/ディレクトリ | 役割 |
+|---|---|
+| `CLAUDE.md` | Claude Codeが最初に読むプロジェクト指示 |
+| `claude-code-subagent-assignment.md` | 全体仕様・モデル割当・禁止事項の正本 |
+| `.claude/flamenode/README.md` | 分割命令セットの入口 |
+| `.claude/flamenode/requirements-map.md` | 4原典の要求ID A〜Q を実装照合しやすくした表 |
+| `.claude/flamenode/source/` | 4原典のうち詳細設計・チェックリスト・矛盾精査の原典コピー |
+| `.claude/flamenode/phases/` | Phase 0〜9の実行単位ごとの命令 |
+| `.claude/agents/` | Claude Codeのプロジェクト用サブエージェント定義 |
+| `.claude/commands/` | `/flamenode-plan` や `/flamenode-review` などのプロジェクト用コマンド |
+
+作業時の基本入口は次の3つ。
+
+```sh
+cat CLAUDE.md
+cat .claude/flamenode/README.md
+cat .claude/flamenode/requirements-map.md
+```
 
 ---
 
-## 1. 前提環境
+## 1. 公式仕様上の前提
 
-Claude Codeの公式要件は以下。
+Claude Codeでは、プロジェクト用のカスタムコマンドを `.claude/commands/` に置ける。今回のリポジトリでは、`/flamenode-plan` と `/flamenode-review` を用意している。
 
-- macOS 10.15以上、Ubuntu 20.04以上 / Debian 10以上、または Windows 10以上
-- Windowsの場合はWSL、またはGit for Windowsを使用
+また、プロジェクト用サブエージェントは `.claude/agents/` に置ける。今回のリポジトリでは、調査用・実装用・上級レビュー用のエージェントを用意している。
+
+今回追加済みの主なClaude Code用ファイル:
+
+```text
+.claude/commands/flamenode-plan.md
+.claude/commands/flamenode-review.md
+.claude/agents/flamenode-repo-cartographer.md
+.claude/agents/flamenode-implementation-agent.md
+.claude/agents/flamenode-architecture-reviewer.md
+```
+
+---
+
+## 2. 前提環境
+
+Claude Codeの利用には、基本的に以下が必要。
+
 - Node.js 18以上
+- npm
+- Git
 - インターネット接続
-- Bash / Zsh / Fish が推奨
+- macOS / Linux / Windowsの場合はWSLなどのターミナル環境
 
-Mac利用者は、通常は標準のターミナルまたはVS Codeのターミナルでよい。
+Mac利用者は、標準のターミナル、iTerm2、VS Codeのターミナルのどれでもよい。
 
 ---
 
-## 2. Node.js と npm の確認
+## 3. Node.js と npm の確認
 
 まずターミナルを開く。
 
@@ -79,7 +122,7 @@ npm --version
 
 ---
 
-## 3. Claude Code のインストール
+## 4. Claude Code のインストール
 
 標準インストール:
 
@@ -87,13 +130,7 @@ npm --version
 npm install -g @anthropic-ai/claude-code
 ```
 
-注意:
-
-```sh
-sudo npm install -g @anthropic-ai/claude-code
-```
-
-は使わない。権限トラブルの原因になる。
+`sudo npm install -g ...` は避ける。権限トラブルの原因になりやすい。
 
 インストール確認:
 
@@ -107,6 +144,8 @@ claude --version
 claude doctor
 ```
 
+Claude Code内でも `/doctor` を使える。
+
 アップデート:
 
 ```sh
@@ -115,7 +154,7 @@ claude update
 
 ---
 
-## 4. Claude Code にログインする
+## 5. Claude Code にログインする
 
 初回起動:
 
@@ -123,13 +162,25 @@ claude update
 claude
 ```
 
-ブラウザ認証を求められたら、表示されたURLまたは案内に従ってログインする。
+ブラウザ認証を求められたら、画面の案内に従ってログインする。
 
 ログイン後、ターミナルに戻ってClaude Codeが起動すればOK。
 
+Claude Code内で状態を確認したい場合:
+
+```text
+/status
+```
+
+アカウントを切り替える場合:
+
+```text
+/login
+```
+
 ---
 
-## 5. FlameNode リポジトリを取得する
+## 6. FlameNode リポジトリを取得する
 
 任意の作業ディレクトリへ移動する。
 
@@ -152,6 +203,7 @@ cd flamenode
 
 ```sh
 cd ~/Documents/projects/flamenode
+git checkout main
 git pull origin main
 ```
 
@@ -162,11 +214,11 @@ pwd
 ls
 ```
 
-`package.json`、`README.md`、`claude-code-subagent-assignment.md` が見えればOK。
+`package.json`、`README.md`、`CLAUDE.md`、`claude-code-subagent-assignment.md`、`.claude/` が見えればOK。
 
 ---
 
-## 6. FlameNode の依存関係を入れる
+## 7. FlameNode の依存関係を入れる
 
 ```sh
 npm install
@@ -182,14 +234,21 @@ cp .dev.vars.example .dev.vars
 
 ---
 
-## 7. 作業ブランチを作る
+## 8. 作業ブランチを作る
 
 いきなり `main` で作業しない。
+
+まず最新化する。
 
 ```sh
 git checkout main
 git pull origin main
-git checkout -b docs/claude-code-test-run
+```
+
+最初は調査用ブランチで試す。
+
+```sh
+git checkout -b docs/claude-code-plan
 ```
 
 実装PRの場合の例:
@@ -198,11 +257,11 @@ git checkout -b docs/claude-code-test-run
 git checkout -b auth/id-write-guard
 ```
 
-推奨PR分割は `claude-code-subagent-assignment.md` の `PR分割推奨` を参照する。
+推奨PR分割は `.claude/flamenode/README.md` と `claude-code-subagent-assignment.md` に書いてある。
 
 ---
 
-## 8. Claude Code をプロジェクトで起動する
+## 9. Claude Code をプロジェクトで起動する
 
 リポジトリのルートで起動する。
 
@@ -210,61 +269,81 @@ git checkout -b auth/id-write-guard
 claude
 ```
 
-起動後、最初にClaude Codeへ貼るプロンプト:
+最初に、Claude Codeがリポジトリの指示を読める状態か確認する。
+
+Claude Code内で次を入力する。
 
 ```text
-あなたは FlameNode のメイン実装エージェントです。
+/status
+```
 
-まずルート直下の claude-code-subagent-assignment.md を読み、作業をフェーズ分割してください。このファイルは自己完結版であり、外部の4つの修正指示ファイルがなくても実装可能な正本です。
+必要なら、現在のモデルを確認・変更する。
 
-必要に応じて .claude/flamenode-subagent-routing.yaml も参照してください。ただし仕様詳細が衝突した場合は claude-code-subagent-assignment.md を優先してください。
-
-モデル運用:
-- 基本は Sonnet。
-- 本当に簡単な探索・文言・要約のみ Haiku。
-- ID/権限/DB/連続枠/security/公開API漏洩/仕様衝突は Opus またはメインエージェント判断。
-
-最初に行うこと:
-1. README と設計ディレクトリと現行コードを確認する。
-2. 本ファイルに対応する現行コードの所在を調査する。
-3. Phase 0 のファイル地図を作る。
-4. いきなり実装せず、PR分割案を出す。
-5. 最初の実装PRは ID/権限/共通書き込みガードから始める。
-
-禁止:
-- Haikuに仕様判断をさせない。
-- フロントだけで権限修正を済ませない。
-- deprecated項目を新規利用しない。
-- 連続枠を表示だけでごまかさない。
+```text
+/model
 ```
 
 ---
 
-## 9. 最初にClaude Codeへやらせる安全な作業
+## 10. まず `/flamenode-plan` を実行する
 
-初心者は、いきなり実装させず、まず調査だけにする。
+今回の構成では、初心者は手入力プロンプトよりもプロジェクト用コマンドを使う方が安全。
 
-Claude Codeに貼る:
+Claude Code内で次を入力する。
 
 ```text
-まずコード変更はしないでください。
-claude-code-subagent-assignment.md の Phase 0 に従って、ID/権限、投稿、スロット、部番号、いいね/セーブ/ライブラリ、チャプターコメント、公開API、health/security に関係するファイルを探してください。
-
-出力は以下の形式にしてください。
-1. 領域名
-2. 関連ファイル
-3. そのファイルが担っていそうな責務
-4. このファイルとのズレの可能性
-5. Haikuで触ってよいか、Sonnet以上が必要か
+/flamenode-plan
 ```
 
-これで、作業範囲の地図を作らせる。
+このコマンドは、以下を読ませるためのコマンドである。
+
+- `CLAUDE.md`
+- `claude-code-subagent-assignment.md`
+- `.claude/flamenode/README.md`
+- `.claude/flamenode/requirements-map.md`
+- `.claude/flamenode/phases/00-repo-cartography.md`
+- `.claude/flamenode/source/flamenode_final_detailed_design.md`
+- `.claude/flamenode/source/flamenode_final_implementation_checklist.md`
+- `.claude/flamenode/source/flamenode_final_consistency_audit.md`
+
+`/flamenode-plan` では、**コード変更はさせない**。
+
+期待する出力:
+
+- 読んだファイル一覧
+- 関連ファイル地図
+- 4原典カバレッジ確認
+- 推奨PR分割
+- 最初のPR
+- Opus判断が必要な箇所
+- コード変更していないことの確認
 
 ---
 
-## 10. 実装に入る前の確認コマンド
+## 11. `/flamenode-plan` が使えない場合の手入力プロンプト
 
-Claude Codeに作業させる前に、現在の状態を確認する。
+Claude Code内でカスタムコマンドが見つからない場合は、次を貼る。
+
+```text
+コード変更はまだしないでください。
+CLAUDE.md、claude-code-subagent-assignment.md、.claude/flamenode/README.md、.claude/flamenode/source/、.claude/flamenode/requirements-map.md を読んでください。
+4つの原典の要求が抜け漏れなく反映されているか確認し、Phase 0として関連ファイル地図とPR分割案を出してください。
+
+出力には必ず以下を含めてください。
+1. 読んだファイル一覧
+2. 関連ファイル地図
+3. 4原典カバレッジ確認
+4. 推奨PR分割
+5. 最初のPR
+6. Opus判断が必要な箇所
+7. コード変更していないことの確認
+```
+
+---
+
+## 12. 実装に入る前の確認コマンド
+
+Claude Codeに作業させる前に、ターミナルで現在の状態を確認する。
 
 ```sh
 git status
@@ -282,35 +361,87 @@ npm run build
 
 ---
 
-## 11. 実装を依頼する例
+## 13. 最初に着手するPR
 
-### ID・権限・共通ガードから始める場合
+最初の実装PRは、原則として次にする。
+
+```sh
+git checkout main
+git pull origin main
+git checkout -b auth/id-write-guard
+```
+
+Claude Codeに依頼する内容:
 
 ```text
-claude-code-subagent-assignment.md の Phase 1 に従って、ID・権限・共通書き込みガードの実装計画を作ってください。
-
+.claude/flamenode/phases/01-id-auth-write-guard.md に従って、ID・権限・共通書き込みガードの実装計画を作ってください。
 まだコード変更はしないでください。
-まず以下を出してください。
-1. 変更対象ファイル
-2. 追加するガード関数案
-3. 投稿・編集・いいね・セーブ・ライブラリ・チャプターコメント・枠提出のどこに通すか
-4. テスト方針
-5. Opus判断が必要そうな箇所
+
+出力には必ず以下を含めてください。
+1. 対象フェーズ
+2. 対応要求ID
+3. 変更対象ファイル
+4. 変更内容
+5. サーバー側権限チェック
+6. UI側変更
+7. DB変更の有無
+8. Opus判断が必要な箇所
+9. テスト計画
 ```
 
 計画を確認してから、実装させる。
 
 ```text
-上の計画で、まず最小差分で実装してください。
-ただし、UIだけでなくServer Action / Route Handler 側でも必ず拒否してください。
-実装後、変更ファイル一覧とテスト結果を出してください。
+上の計画のうち、auth/id-write-guard PRに必要な最小差分だけ実装してください。
+UIだけでなく、Server Action / Route Handler 側でも必ず拒否してください。
+実装後、変更ファイル一覧、対応要求ID、実行したコマンド、テスト結果、残課題を出してください。
 ```
 
 ---
 
-## 12. Claude Codeが勝手に大きく変えそうな時の止め方
+## 14. サブエージェントを使う目安
 
-Claude Codeが大規模に触りそうなときは、こう言う。
+Claude Code内で `/agents` を開くと、利用可能なサブエージェントを管理できる。
+
+今回のリポジトリには、以下のプロジェクト用サブエージェントを用意している。
+
+```text
+flamenode-repo-cartographer
+flamenode-implementation-agent
+flamenode-architecture-reviewer
+```
+
+使い分け:
+
+| エージェント | モデル | 用途 |
+|---|---|---|
+| `flamenode-repo-cartographer` | Haiku | Phase 0の調査。コード変更禁止。 |
+| `flamenode-implementation-agent` | Sonnet | 通常実装。実装計画を出してから変更。 |
+| `flamenode-architecture-reviewer` | Opus | 権限、DB、連続枠、security、公開API、最終レビュー。 |
+
+初心者は、まずClaude Codeにこう言う。
+
+```text
+flamenode-repo-cartographer を使って Phase 0 の調査だけ行ってください。コード変更はしないでください。
+```
+
+実装時:
+
+```text
+flamenode-implementation-agent を使って、Phase 1 の実装計画を出してください。まだコード変更はしないでください。
+```
+
+レビュー時:
+
+```text
+flamenode-architecture-reviewer を使って、現在の差分を4原典と requirements-map.md に照らしてレビューしてください。
+```
+
+---
+
+## 15. Claude Codeが勝手に大きく変えそうな時の止め方
+
+変更範囲が広がりそうなときは、すぐ止める。
 
 ```text
 変更範囲が大きすぎます。
@@ -318,16 +449,17 @@ Claude Codeが大規模に触りそうなときは、こう言う。
 UI全面改修、DB整理、スロットロジック修正は別PRに分けてください。
 ```
 
-または:
+仕様判断を含む場合:
 
 ```text
 その変更は仕様判断を含みます。
 実装せず、まず選択肢・メリット・リスク・推奨案を出してください。
+Opus判断が必要なら、flamenode-architecture-reviewer に渡してください。
 ```
 
 ---
 
-## 13. 差分確認
+## 16. 差分確認
 
 Claude Codeが変更した後、ターミナルで確認する。
 
@@ -357,7 +489,7 @@ git restore .
 
 ---
 
-## 14. テスト・ビルド
+## 17. テスト・ビルド
 
 最低限:
 
@@ -383,7 +515,86 @@ npm run db:migrate
 
 ---
 
-## 15. コミット
+## 18. 実装後は `/flamenode-review` を実行する
+
+Claude Code内で次を入力する。
+
+```text
+/flamenode-review
+```
+
+このコマンドは、現在の差分を4原典、`requirements-map.md`、最終チェックリストに照らしてレビューするためのもの。
+
+期待する出力:
+
+- マージ可 / 要修正 / 追加調査
+- 実行コマンド
+- 4原典カバレッジ
+- 要求IDカバレッジ
+- ブロッカー
+- 非ブロッカー
+- 次PRへ回してよい項目
+- 修正指示
+
+`/flamenode-review` が使えない場合は、次を貼る。
+
+```text
+.claude/flamenode/phases/09-final-review.md に従って、現在の差分を4原典と requirements-map.md に照らしてレビューしてください。
+必ず npm run typecheck と npm run build の結果も確認してください。
+結論は、マージ可 / 要修正 / 追加調査 のいずれかで出してください。
+```
+
+---
+
+## 19. PR本文テンプレート
+
+PR本文には、要求IDカバレッジを必ず入れる。
+
+```md
+## 目的
+
+## 変更内容
+
+## 対応した要求ID
+- 例: B-1, B-6, E-1, E-3, E-4
+
+## 対応しない要求ID
+- 今回のPR範囲外: ...
+
+## Opus判断が必要な要求ID
+- なし / あり: ...
+
+## DB変更
+- なし / あり
+
+## 権限変更
+- なし / あり
+
+## UI変更
+- なし / あり
+
+## 破壊的変更
+- なし / あり
+
+## 4原典の反映確認
+- [ ] flamenode_final_detailed_design.md
+- [ ] flamenode_final_implementation_checklist.md
+- [ ] flamenode_final_consistency_audit.md
+- [ ] flamenode_revision_instructions_answered.md / requirements-map.md
+
+## 確認したこと
+- [ ] npm run typecheck
+- [ ] npm run build
+- [ ] 権限なしユーザーでAPI直叩きテスト
+- [ ] X ID切替テスト
+- [ ] 公開APIの漏洩チェック
+
+## 残課題
+```
+
+---
+
+## 20. コミット
 
 変更確認:
 
@@ -395,13 +606,7 @@ git diff --stat
 ステージング:
 
 ```sh
-git add claude-code-subagent-assignment.md .claude/flamenode-subagent-routing.yaml
-```
-
-通常の実装なら、変更したファイルを指定する。
-
-```sh
-git add app src workers migrations 設計
+git add .
 ```
 
 コミット:
@@ -418,7 +623,7 @@ git commit -m "docs: update Claude Code implementation guide"
 
 ---
 
-## 16. push とPR作成
+## 21. push とPR作成
 
 ```sh
 git push origin auth/id-write-guard
@@ -427,46 +632,14 @@ git push origin auth/id-write-guard
 GitHub CLIがある場合:
 
 ```sh
-gh pr create --base main --head auth/id-write-guard --title "feat: add shared write guard" --body "See claude-code-subagent-assignment.md for implementation checklist."
+gh pr create --base main --head auth/id-write-guard --title "feat: add shared write guard" --body-file pr-body.md
 ```
 
 GitHub CLIがない場合は、GitHubの画面に表示される `Compare & pull request` からPRを作る。
 
 ---
 
-## 17. PR本文テンプレート
-
-```md
-## 目的
-
-## 変更内容
-
-## DB変更
-- なし / あり
-
-## 権限変更
-- なし / あり
-
-## UI変更
-- なし / あり
-
-## 破壊的変更
-- なし / あり
-
-## 確認したこと
-- [ ] npm run typecheck
-- [ ] npm run build
-- [ ] 権限なしユーザーでAPI直叩きテスト
-- [ ] X ID切替テスト
-- [ ] 公開APIの漏洩チェック
-
-## 残課題
-
-```
-
----
-
-## 18. よくあるトラブル
+## 22. よくあるトラブル
 
 ### `claude: command not found`
 
@@ -509,6 +682,47 @@ source ~/.zshrc
 npm install -g @anthropic-ai/claude-code
 ```
 
+### `/flamenode-plan` が出てこない
+
+まず、リポジトリのルートにいるか確認。
+
+```sh
+pwd
+ls .claude/commands
+```
+
+`flamenode-plan.md` が見えるか確認。
+
+```sh
+cat .claude/commands/flamenode-plan.md
+```
+
+Claude Codeを再起動。
+
+```text
+/clear
+```
+
+または一度終了して再度起動。
+
+```sh
+claude
+```
+
+### サブエージェントが見つからない
+
+Claude Code内で確認。
+
+```text
+/agents
+```
+
+ターミナル側でも確認。
+
+```sh
+ls .claude/agents
+```
+
 ### `npm run build` が失敗する
 
 Claude Codeにこう投げる。
@@ -535,20 +749,22 @@ Claude Codeにこう投げる。
 
 ---
 
-## 19. 初心者向けの安全な進め方
+## 23. 初心者向けの安全な進め方
 
-1. `git checkout -b docs/test-claude-code`
+1. `git checkout -b docs/claude-code-plan`
 2. `claude` を起動
-3. まず Phase 0 の調査だけをさせる
+3. `/flamenode-plan` を実行
 4. `git diff` で変更がないことを確認
 5. 実装PRは `auth/id-write-guard` から始める
-6. 1PRで1テーマだけ触る
-7. 毎回 `npm run typecheck` と `npm run build`
-8. 不安な判断は Opus に上げる
+6. 実装前に必ず計画だけ出させる
+7. 1PRで1テーマだけ触る
+8. 毎回 `npm run typecheck` と `npm run build`
+9. 実装後に `/flamenode-review`
+10. 不安な判断は `flamenode-architecture-reviewer` に上げる
 
 ---
 
-## 20. 最低限これだけ覚える
+## 24. 最低限これだけ覚える
 
 ```sh
 # インストール
@@ -564,18 +780,55 @@ cd flamenode
 # 依存関係
 npm install
 
-# 作業ブランチ
-git checkout -b auth/id-write-guard
+# 最新化
+git checkout main
+git pull origin main
+
+# 調査ブランチ
+git checkout -b docs/claude-code-plan
 
 # Claude Code起動
 claude
+```
 
-# 確認
+Claude Code内:
+
+```text
+/flamenode-plan
+```
+
+実装に入るなら:
+
+```sh
+git checkout main
+git pull origin main
+git checkout -b auth/id-write-guard
+claude
+```
+
+Claude Code内:
+
+```text
+.claude/flamenode/phases/01-id-auth-write-guard.md に従って、まず実装計画だけ出してください。まだコード変更はしないでください。
+```
+
+確認:
+
+```sh
 npm run typecheck
 npm run build
 git diff --stat
+```
 
-# コミット・push
+レビュー:
+
+```text
+/flamenode-review
+```
+
+コミット・push:
+
+```sh
 git add .
 git commit -m "feat: add shared write guard"
 git push origin auth/id-write-guard
