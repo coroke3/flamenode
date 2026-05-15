@@ -1,7 +1,7 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import styles from "./page.module.css";
 import { getDatabase } from "@/lib/cloudflare";
 import {
@@ -12,7 +12,11 @@ import {
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth/guard";
-import { getApprovedXIds } from "@/lib/auth/ownership";
+import {
+  collapseReservationGroups,
+  sortSlotsChronologically,
+  type SlotBase,
+} from "@/lib/utils/slotGrouping";
 import { Icon } from "@/components/ui/Icon";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
@@ -25,6 +29,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
   if (!guard.ok) return guard.element;
   const user = guard.user;
   const db = getDatabase();
+  const activeX = user.active_x_user_id ?? null;
 
   let xIds: (typeof xUsersTable.$inferSelect)[] = [];
   let myVideos: VideoCardData[] = [];
@@ -51,8 +56,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
 
       // 「自分の作品」= 承認済み X ID の creator_id に一致する作品のみ。
       // owner_discord_user_id 単独一致は legacy import 混入を避けるため判定対象外にする。
-      const approvedXIds = await getApprovedXIds(db, user.id);
-      if (approvedXIds.length > 0) {
+      if (activeX) {
         myVideos = (await db
           .select({
             id: videosTable.id,
@@ -71,7 +75,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id))
           .where(
             and(
-              inArray(videosTable.creator_id, approvedXIds),
+              eq(videosTable.creator_id, activeX),
               eq(videosTable.is_deleted, 0),
             )!,
           )
@@ -90,19 +94,31 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           })
           .from(videoChaptersTable)
           .leftJoin(videosTable, eq(videosTable.id, videoChaptersTable.video_id))
-          .where(inArray(videoChaptersTable.x_user_id, approvedXIds))
+          .where(eq(videoChaptersTable.x_user_id, activeX))
           .orderBy(desc(videoChaptersTable.created_at))
           .limit(80);
       }
 
       // 直近のアクティブスロット (reserved or x_reapply_required)
+      const slotOwnerWhere = activeX
+        ? or(
+            eq(slotsTable.x_user_id, activeX),
+            and(isNull(slotsTable.x_user_id), eq(slotsTable.discord_user_id, user.id))!,
+          )
+        : eq(slotsTable.discord_user_id, user.id);
       const slotRows = await db
         .select()
         .from(slotsTable)
-        .where(eq(slotsTable.discord_user_id, user.id))
-        .orderBy(desc(slotsTable.updated_at))
-        .limit(1);
-      mySlot = slotRows[0] ?? null;
+        .where(
+          and(
+            slotOwnerWhere,
+            or(eq(slotsTable.status, "reserved"), eq(slotsTable.status, "submitted"))!,
+          )!,
+        )
+        .limit(50);
+      const groupedSlots = collapseReservationGroups(slotRows as SlotBase[]);
+      const sortedSlots = sortSlotsChronologically(groupedSlots);
+      mySlot = sortedSlots[0] ?? null;
       if (mySlot) {
         const ev = await db
           .select()
@@ -113,7 +129,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
       }
 
       // 集計
-      if (approvedXIds.length > 0) {
+      if (activeX) {
         const aggRows = await db
           .select({
             likes: sql<number>`COALESCE(SUM(${videosTable.like_count}),0)`,
@@ -124,7 +140,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           .from(videosTable)
           .where(
             and(
-              inArray(videosTable.creator_id, approvedXIds),
+              eq(videosTable.creator_id, activeX),
               eq(videosTable.is_deleted, 0),
             )!,
           );
@@ -327,6 +343,8 @@ function HeroCard({
       : slot.priority_reclaim_until
         ? "fn-card-warning"
         : "";
+  const slotEnd = slot.end_time ?? slot.start_time;
+  const groupMeta = slot as typeof slot & { is_group?: boolean; group_size?: number };
 
   return (
     <section
@@ -361,10 +379,11 @@ function HeroCard({
               ? `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(
                   slot.start_time,
                   { timeOnly: true },
-                )}`
+                )}${slotEnd ? ` - ${formatUnix(slotEnd, { timeOnly: true })}` : ""}`
               : (slot.slot_label ?? "未指定")}
             {" · "}
             <span>状態: {slot.status}</span>
+            {groupMeta.is_group ? ` · ${groupMeta.group_size ?? 0}連続` : ""}
             {slot.priority_reclaim_until
               ? ` · 確保期限 ${formatRelative(slot.priority_reclaim_until)}`
               : ""}

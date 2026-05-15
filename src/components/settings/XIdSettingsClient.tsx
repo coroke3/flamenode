@@ -8,7 +8,9 @@ import {
   deleteLinkedXId,
   enablePortfolio,
   requestXIdLink,
+  setXIdIcon,
   setActiveXId,
+  uploadXIdIcon,
   updateXIdProfile,
 } from "@/lib/actions/xid";
 
@@ -140,6 +142,7 @@ export function SetActiveXButton({
 
 export function XIdProfileForm({
   x,
+  iconCandidates,
 }: {
   x: {
     id: string;
@@ -149,6 +152,7 @@ export function XIdProfileForm({
     youtube_channel_url: string | null;
     other_social_links: string | null;
   };
+  iconCandidates: string[];
 }): React.ReactElement {
   const router = useRouter();
   const [pending, startTransition] = React.useTransition();
@@ -183,6 +187,14 @@ export function XIdProfileForm({
       }}
     >
       <input type="hidden" name="x_user_id" value={x.id} />
+      <div className={styles.stack}>
+        <label className="fn-label" style={{ fontSize: 12 }}>アイコン</label>
+        <XIdIconPicker
+          xUserId={x.id}
+          currentIconUrl={x.icon_url}
+          candidates={iconCandidates}
+        />
+      </div>
       <div className={styles.row}>
         <input
           name="x_name"
@@ -191,12 +203,6 @@ export function XIdProfileForm({
           placeholder="表示名 / 活動名"
           maxLength={80}
           required
-        />
-        <input
-          name="icon_url"
-          className={styles.input}
-          defaultValue={x.icon_url ?? ""}
-          placeholder="アイコンURL"
         />
       </div>
       <textarea
@@ -237,6 +243,98 @@ export function XIdProfileForm({
       {message ? <p className={styles.msgOk}>{message}</p> : null}
       {error ? <p className={styles.msgErr}>{error}</p> : null}
     </form>
+  );
+}
+
+function XIdIconPicker({
+  xUserId,
+  currentIconUrl,
+  candidates,
+}: {
+  xUserId: string;
+  currentIconUrl: string | null;
+  candidates: string[];
+}): React.ReactElement {
+  const router = useRouter();
+  const [pending, startTransition] = React.useTransition();
+  const [error, setError] = React.useState<string | null>(null);
+  const [message, setMessage] = React.useState<string | null>(null);
+
+  const onSelect = (iconUrl: string) => {
+    setError(null);
+    setMessage(null);
+    const fd = new FormData();
+    fd.set("x_user_id", xUserId);
+    fd.set("icon_url", iconUrl);
+    startTransition(async () => {
+      const r = await setXIdIcon(fd);
+      if (!r.ok) {
+        setError(r.message ?? "アイコンの更新に失敗しました。");
+        return;
+      }
+      setMessage(r.message ?? "アイコンを更新しました。");
+      router.refresh();
+    });
+  };
+
+  const onUpload = (file: File | null) => {
+    if (!file) return;
+    setError(null);
+    setMessage(null);
+    const fd = new FormData();
+    fd.set("x_user_id", xUserId);
+    fd.set("icon_file", file);
+    startTransition(async () => {
+      const r = await uploadXIdIcon(fd);
+      if (!r.ok) {
+        setError(r.message ?? "アップロードに失敗しました。");
+        return;
+      }
+      setMessage(r.message ?? "アイコンをアップロードしました。");
+      router.refresh();
+    });
+  };
+
+  return (
+    <div className={styles.iconPicker}>
+      <div className={styles.iconGrid}>
+        {candidates.length === 0 ? (
+          <p className="fn-muted fn-text-sm">
+            まだ候補がありません。新しくアップロードするか、作品に設定したアイコンが候補になります。
+          </p>
+        ) : (
+          candidates.map((url) => (
+            <button
+              key={url}
+              type="button"
+              onClick={() => onSelect(url)}
+              className={`${styles.iconButton} ${url === currentIconUrl ? styles.iconButtonActive : ""}`}
+              disabled={pending}
+              aria-pressed={url === currentIconUrl}
+              aria-label="アイコンを選択"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={url} alt="" className={styles.iconThumb} />
+            </button>
+          ))
+        )}
+      </div>
+      <div className={styles.iconActions}>
+        <label className="fn-btn fn-btn-ghost fn-btn-sm">
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            onChange={(ev) => onUpload(ev.currentTarget.files?.[0] ?? null)}
+            style={{ display: "none" }}
+            disabled={pending}
+          />
+          <Icon name="upload" size={12} aria-hidden /> 画像をアップロード
+        </label>
+        <span className={styles.iconHint}>250x250 推奨 / 2MB まで</span>
+      </div>
+      {message ? <p className={styles.msgOk}>{message}</p> : null}
+      {error ? <p className={styles.msgErr}>{error}</p> : null}
+    </div>
   );
 }
 

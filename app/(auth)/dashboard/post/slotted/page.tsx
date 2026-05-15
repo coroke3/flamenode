@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull, or } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   events as eventsTable,
@@ -32,12 +32,17 @@ export default async function SlottedPostPage({
   const db = getDatabase();
   if (!db) notFound();
   if (!slotId) redirect("/dashboard/post");
+  const activeXId = user.active_x_user_id ?? null;
+  const slotOwnerWhere = activeXId
+    ? or(
+        eq(slotsTable.x_user_id, activeXId),
+        and(isNull(slotsTable.x_user_id), eq(slotsTable.discord_user_id, user.id))!,
+      )
+    : eq(slotsTable.discord_user_id, user.id);
   const rows = await db
     .select()
     .from(slotsTable)
-    .where(
-      and(eq(slotsTable.id, slotId), eq(slotsTable.discord_user_id, user.id))!,
-    )
+    .where(and(eq(slotsTable.id, slotId), slotOwnerWhere)!)
     .limit(1);
   const slot = rows[0];
   if (!slot) notFound();
@@ -45,6 +50,9 @@ export default async function SlottedPostPage({
     redirect(`/dashboard/edit/${slot.video_id}`);
   }
   if (slot.status !== "reserved") redirect("/dashboard/post");
+  if (slot.x_user_id && activeXId && slot.x_user_id !== activeXId) {
+    redirect("/dashboard/post");
+  }
   const ev = (
     await db
       .select()
@@ -53,7 +61,27 @@ export default async function SlottedPostPage({
       .limit(1)
   )[0];
   if (!ev) notFound();
-  const activeX = slot.x_user_id ?? user.active_x_user_id;
+  let slotStart = slot.start_time;
+  let slotEnd = slot.end_time;
+  let groupSize = 1;
+  if (slot.reservation_group_id) {
+    const groupRows = await db
+      .select({ start_time: slotsTable.start_time, end_time: slotsTable.end_time })
+      .from(slotsTable)
+      .where(eq(slotsTable.reservation_group_id, slot.reservation_group_id));
+    if (groupRows.length > 0) {
+      groupSize = groupRows.length;
+      const starts = groupRows
+        .map((r) => r.start_time)
+        .filter((v): v is number => typeof v === "number");
+      const ends = groupRows
+        .map((r) => r.end_time ?? r.start_time)
+        .filter((v): v is number => typeof v === "number");
+      if (starts.length > 0) slotStart = Math.min(...starts);
+      if (ends.length > 0) slotEnd = Math.max(...ends);
+    }
+  }
+  const activeX = slot.x_user_id ?? activeXId;
   const xRow = activeX
     ? (
         await db
@@ -63,6 +91,16 @@ export default async function SlottedPostPage({
           .limit(1)
       )[0]
     : null;
+  const xIdOptions = await db
+    .select({ id: xUsersTable.id, x_name: xUsersTable.x_name })
+    .from(xUsersTable)
+    .where(
+      and(
+        eq(xUsersTable.linked_discord_user_id, user.id),
+        eq(xUsersTable.approval_status, "approved"),
+      )!,
+    )
+    .orderBy(asc(xUsersTable.x_name));
   const memberSuggestions = await db
     .select({ name: xUsersTable.x_name, x_user_id: xUsersTable.id })
     .from(xUsersTable)
@@ -114,11 +152,11 @@ export default async function SlottedPostPage({
             RESERVED SLOT
           </p>
           <h2 style={{ fontSize: 24, fontWeight: 800, marginTop: 6 }}>
-            {slot.start_time ? (
+            {slotStart ? (
               <>
-                {formatUnix(slot.start_time, { dateOnly: true })}{" "}
-                {formatUnix(slot.start_time, { timeOnly: true })}
-                {slot.end_time ? ` - ${formatUnix(slot.end_time, { timeOnly: true })}` : ""}
+                {formatUnix(slotStart, { dateOnly: true })}{" "}
+                {formatUnix(slotStart, { timeOnly: true })}
+                {slotEnd ? ` - ${formatUnix(slotEnd, { timeOnly: true })}` : ""}
               </>
             ) : (
               slot.slot_label ?? "時間指定なし枠"
@@ -131,7 +169,7 @@ export default async function SlottedPostPage({
           </p>
           {slot.reservation_group_id ? (
             <p className="fn-muted fn-text-sm" style={{ marginTop: 6 }}>
-              この枠は連続取得グループに含まれます。提出すると同じ連続枠に同じ作品が紐づきます。
+              この枠は連続取得グループ ({groupSize}連続) に含まれます。提出すると同じ連続枠に同じ作品が紐づきます。
             </p>
           ) : null}
         </div>
@@ -140,6 +178,8 @@ export default async function SlottedPostPage({
       <VideoForm
         mode="slot"
         slotId={slot.id}
+        xIdOptions={xIdOptions}
+        activeXId={activeX ?? undefined}
         initial={{
           contact_x_id: activeX ?? undefined,
           display_name: slot.display_name ?? xRow?.x_name ?? user.name,

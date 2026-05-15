@@ -1,7 +1,7 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { requireSession } from "@/lib/auth/guard";
 import { getDatabase } from "@/lib/cloudflare";
 import { xUsers as xUsersTable } from "@/lib/db/schema";
@@ -27,6 +27,18 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
             .limit(1)
         )[0]
       : null;
+  const xIdOptions = db
+    ? await db
+        .select({ id: xUsersTable.id, x_name: xUsersTable.x_name })
+        .from(xUsersTable)
+        .where(
+          and(
+            eq(xUsersTable.linked_discord_user_id, user.id),
+            eq(xUsersTable.approval_status, "approved"),
+          )!,
+        )
+        .orderBy(asc(xUsersTable.x_name))
+    : [];
   const memberSuggestions = db
     ? await db
         .select({ name: xUsersTable.x_name, x_user_id: xUsersTable.id })
@@ -65,6 +77,8 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
       </header>
       <VideoForm
         mode="free"
+        xIdOptions={xIdOptions}
+        activeXId={activeX ?? undefined}
         initial={{
           contact_x_id: activeX ?? undefined,
           display_name: xRow?.x_name ?? user.name,

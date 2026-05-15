@@ -1,5 +1,6 @@
 import * as React from "react";
 import type { SlotRow } from "./SlotGrid";
+import { buildSlotParts, formatSlotPartLabel } from "@/lib/utils/slotGrouping";
 
 interface SlotStatusBoardProps {
   slots: SlotRow[];
@@ -17,47 +18,13 @@ interface PartStat {
 export function SlotStatusBoard({
   slots,
 }: SlotStatusBoardProps): React.ReactElement {
-  // 30 分以上空白で部分割 (SlotGrid.partitionByPart と整合)
   const partitioned = React.useMemo(() => {
     if (slots.length === 0) return [] as PartStat[];
-    const sorted = [...slots]
-      .filter((r) => r.start_time != null)
-      .sort((a, b) => (a.start_time ?? 0) - (b.start_time ?? 0));
-    const rest = slots.filter((r) => r.start_time == null);
-    const groups: PartStat[] = [];
-    let current: SlotRow[] = [];
-    let prevEnd = 0;
-    const GAP = 30 * 60;
-    for (const r of sorted) {
-      if (current.length === 0 || (r.start_time ?? 0) - prevEnd > GAP) {
-        if (current.length > 0)
-          groups.push({
-            label: "",
-            total: current.length,
-            filled: current.filter((s) => s.status !== "available").length,
-          });
-        current = [];
-      }
-      current.push(r);
-      prevEnd = r.end_time ?? r.start_time ?? prevEnd;
-    }
-    if (current.length > 0)
-      groups.push({
-        label: "",
-        total: current.length,
-        filled: current.filter((s) => s.status !== "available").length,
-      });
-    if (rest.length > 0) {
-      groups.push({
-        label: "時間なし枠",
-        total: rest.length,
-        filled: rest.filter((s) => s.status !== "available").length,
-      });
-    }
-    groups.forEach((g, i) => {
-      if (!g.label) g.label = `第${i + 1}部`;
-    });
-    return groups;
+    return buildSlotParts(slots).map((part) => ({
+      label: formatSlotPartLabel(part, "short"),
+      total: part.rows.length,
+      filled: part.rows.filter((s) => s.status !== "available").length,
+    }));
   }, [slots]);
 
   const total = slots.length;

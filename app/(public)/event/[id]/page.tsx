@@ -93,7 +93,7 @@ export default async function EventDetailPage({
     .select()
     .from(slotsTable)
     .where(eq(slotsTable.event_id, id))
-    .orderBy(asc(slotsTable.start_time), asc(slotsTable.sort_order));
+    .orderBy(asc(slotsTable.start_time), asc(slotsTable.end_time), asc(slotsTable.sort_order));
 
   const accentVar = event.accent_color
     ? ({ ["--event-accent" as never]: event.accent_color } as React.CSSProperties)
@@ -115,6 +115,7 @@ export default async function EventDetailPage({
     display_name: s.display_name,
     x_user_id: s.x_user_id,
     discord_user_id: s.discord_user_id,
+    reservation_group_id: s.reservation_group_id,
   }));
 
   return (
@@ -205,6 +206,7 @@ export default async function EventDetailPage({
             <div className={styles.slotMain}>
               <SlotGrid
                 slots={slotRowsForGrid}
+                viewerXId={viewer?.active_x_user_id ?? null}
                 viewerDiscordId={viewer?.id ?? null}
                 canReserve={accepting}
                 slotKind={(event.slot_type ?? "time") as "time" | "count"}

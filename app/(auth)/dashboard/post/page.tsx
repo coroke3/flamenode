@@ -1,12 +1,13 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { events as eventsTable, slots as slotsTable } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth/guard";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
+import { collapseReservationGroups, type SlotBase } from "@/lib/utils/slotGrouping";
 
 export const metadata: Metadata = { title: "投稿方法を選択" };
 export const dynamic = "force-dynamic";
@@ -35,9 +36,16 @@ export default async function PostChooserPage(): Promise<React.ReactElement> {
   const guard = await requireSession();
   if (!guard.ok) return guard.element;
   const db = getDatabase();
+  const activeX = guard.user.active_x_user_id ?? null;
   let reservedSlots: ReservedSlot[] = [];
 
   if (db) {
+    const ownerWhere = activeX
+      ? or(
+          eq(slotsTable.x_user_id, activeX),
+          and(isNull(slotsTable.x_user_id), eq(slotsTable.discord_user_id, guard.user.id))!,
+        )
+      : eq(slotsTable.discord_user_id, guard.user.id);
     reservedSlots = await db
       .select({
         id: slotsTable.id,
@@ -62,13 +70,15 @@ export default async function PostChooserPage(): Promise<React.ReactElement> {
       .leftJoin(eventsTable, eq(eventsTable.id, slotsTable.event_id))
       .where(
         and(
-          eq(slotsTable.discord_user_id, guard.user.id),
+          ownerWhere,
           eq(slotsTable.status, "reserved"),
         )!,
       )
-      .orderBy(desc(slotsTable.updated_at))
+      .orderBy(slotsTable.start_time, slotsTable.end_time, slotsTable.sort_order)
       .limit(12);
   }
+
+  const displaySlots = collapseReservationGroups(reservedSlots as SlotBase[]);
 
   return (
     <div
@@ -99,7 +109,7 @@ export default async function PostChooserPage(): Promise<React.ReactElement> {
             <p className="fn-muted fn-text-sm" style={{ marginTop: 6 }}>
               確保済みのイベント枠に作品情報を紐付けます。
             </p>
-            {reservedSlots.length === 0 ? (
+            {displaySlots.length === 0 ? (
               <div style={{ marginTop: 14 }}>
                 <p className="fn-muted fn-text-sm">
                   現在、未提出の確保済み枠はありません。
@@ -110,7 +120,7 @@ export default async function PostChooserPage(): Promise<React.ReactElement> {
               </div>
             ) : (
               <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
-                {reservedSlots.map((slot) => (
+                {displaySlots.map((slot) => (
                   <Link
                     key={slot.id}
                     href={`/dashboard/post/slotted?slot=${slot.id}`}
@@ -133,8 +143,9 @@ export default async function PostChooserPage(): Promise<React.ReactElement> {
                         }}
                       >
                         {slot.start_time
-                          ? `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(slot.start_time, { timeOnly: true })}`
+                          ? `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(slot.start_time, { timeOnly: true })}${slot.end_time ? ` - ${formatUnix(slot.end_time, { timeOnly: true })}` : ""}`
                           : (slot.slot_label ?? "時間なし枠")}
+                        {slot.is_group ? ` / ${slot.group_size}連続` : ""}
                       </span>
                     </span>
                     <Icon name="chevron-right" size={13} aria-hidden />

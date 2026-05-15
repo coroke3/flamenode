@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import styles from "./VideoForm.module.css";
 import { Icon } from "@/components/ui/Icon";
@@ -20,6 +21,7 @@ import {
   type VideoMemberInput,
   type VideoMemberSuggestion,
 } from "@/components/forms/VideoMembersField";
+import { normalizeXId } from "@/lib/utils/xid";
 
 export interface VideoFormInitialValues {
   display_name?: string;
@@ -41,12 +43,19 @@ export interface VideoFormInitialValues {
   members?: VideoMemberInput[];
 }
 
+export interface XIdOption {
+  id: string;
+  x_name: string;
+}
+
 interface VideoFormProps {
   mode: "free" | "slot" | "edit";
   initial?: VideoFormInitialValues;
   slotId?: string;
   videoId?: string;
   memberSuggestions?: VideoMemberSuggestion[];
+  xIdOptions?: XIdOption[];
+  activeXId?: string | null;
 }
 
 /**
@@ -60,12 +69,25 @@ export function VideoForm({
   slotId,
   videoId,
   memberSuggestions = [],
+  xIdOptions = [],
+  activeXId,
 }: VideoFormProps): React.ReactElement {
   const router = useRouter();
   const [youtubeUrl, setYoutubeUrl] = React.useState(initial.youtube_url ?? "");
   const [isCollab, setIsCollab] = React.useState(!!initial.is_collab);
   const [pending, startTransition] = React.useTransition();
   const [result, setResult] = React.useState<VideoActionResult | null>(null);
+
+  const normalizedInitialXId = normalizeXId(initial.contact_x_id || activeXId || "");
+  const hasSelectableXIds = xIdOptions.length > 0;
+  const initialIsSelectable = xIdOptions.some(
+    (opt) => normalizeXId(opt.id) === normalizedInitialXId,
+  );
+  const selectedDefault =
+    (initialIsSelectable && normalizedInitialXId) ||
+    (xIdOptions[0] ? normalizeXId(xIdOptions[0].id) : "");
+  const canSubmit =
+    hasSelectableXIds || (mode === "edit" && !!normalizedInitialXId);
 
   const youtubeId = extractYoutubeId(youtubeUrl);
 
@@ -109,16 +131,37 @@ export function VideoForm({
             <label className={`${styles.label} ${styles.required}`} htmlFor="contact_x_id">
               提出主体 X ID
             </label>
-            <input
-              id="contact_x_id"
-              name="contact_x_id"
-              type="text"
-              defaultValue={initial.contact_x_id}
-              className="fn-input"
-              placeholder="your_x_id"
-              pattern="[A-Za-z0-9_]{1,32}"
-              required
-            />
+            {hasSelectableXIds ? (
+              <select
+                id="contact_x_id"
+                name="contact_x_id"
+                className="fn-select"
+                defaultValue={selectedDefault}
+                required
+              >
+                {xIdOptions.map((opt) => (
+                  <option key={opt.id} value={normalizeXId(opt.id)}>
+                    @{opt.id} ({opt.x_name})
+                  </option>
+                ))}
+              </select>
+            ) : mode === "edit" && normalizedInitialXId ? (
+              <input
+                id="contact_x_id"
+                name="contact_x_id"
+                type="text"
+                defaultValue={normalizedInitialXId}
+                className="fn-input"
+                readOnly
+              />
+            ) : (
+              <div className="fn-muted fn-text-sm">
+                承認済み X ID がありません。
+                <Link href="/dashboard/settings" style={{ marginLeft: 6 }}>
+                  設定で連携
+                </Link>
+              </div>
+            )}
           </div>
           <div className={styles.field}>
             <label className={`${styles.label} ${styles.required}`} htmlFor="display_name">
@@ -441,7 +484,7 @@ export function VideoForm({
         <button
           type="submit"
           className="fn-btn fn-btn-primary"
-          disabled={pending}
+          disabled={pending || !canSubmit}
           aria-busy={pending}
         >
           <Icon name="upload" size={14} aria-hidden />

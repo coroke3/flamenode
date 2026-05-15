@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { videoMembers, videos as videosTable, xUsers as xUsersTable } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth/guard";
@@ -68,6 +68,16 @@ export default async function EditVideoPage({
     .from(xUsersTable)
     .orderBy(asc(xUsersTable.x_name))
     .limit(200);
+  const xIdOptions = await db
+    .select({ id: xUsersTable.id, x_name: xUsersTable.x_name })
+    .from(xUsersTable)
+    .where(
+      and(
+        eq(xUsersTable.linked_discord_user_id, user.id),
+        eq(xUsersTable.approval_status, "approved"),
+      )!,
+    )
+    .orderBy(asc(xUsersTable.x_name));
 
   const canEdit = await canEditVideo({ db, user, video });
   if (!canEdit) {
@@ -150,6 +160,8 @@ export default async function EditVideoPage({
       <VideoForm
         mode="edit"
         videoId={video.id}
+        xIdOptions={xIdOptions}
+        activeXId={user.active_x_user_id ?? undefined}
         initial={{
           display_name: video.display_name,
           contact_x_id: video.contact_x_id,

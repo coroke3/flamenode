@@ -37,14 +37,16 @@ export default async function AdminEventSlotsPage({
       slot_label: slotsTable.slot_label,
       start_time: slotsTable.start_time,
       end_time: slotsTable.end_time,
+      sort_order: slotsTable.sort_order,
       status: slotsTable.status,
       display_name: slotsTable.display_name,
       x_user_id: slotsTable.x_user_id,
       discord_user_id: slotsTable.discord_user_id,
+      reservation_group_id: slotsTable.reservation_group_id,
     })
     .from(slotsTable)
     .where(eq(slotsTable.event_id, id))
-    .orderBy(slotsTable.sort_order, slotsTable.start_time);
+    .orderBy(slotsTable.start_time, slotsTable.end_time, slotsTable.sort_order);
 
   return (
     <div>

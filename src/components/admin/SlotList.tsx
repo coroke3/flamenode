@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { deleteSlot, releaseSlot } from "@/lib/actions/slot-admin";
 import { formatUnix } from "@/lib/utils/format";
+import { collapseReservationGroups, type SlotBase } from "@/lib/utils/slotGrouping";
 
 export interface SlotRowLite {
   id: string;
@@ -12,10 +13,12 @@ export interface SlotRowLite {
   slot_label: string | null;
   start_time: number | null;
   end_time: number | null;
+  sort_order?: number | null;
   status: "available" | "reserved" | "submitted";
   display_name: string | null;
   x_user_id: string | null;
   discord_user_id?: string | null;
+  reservation_group_id?: string | null;
 }
 
 interface SlotListProps {
@@ -26,6 +29,10 @@ export function SlotList({ slots }: SlotListProps): React.ReactElement {
   const router = useRouter();
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const displayRows = React.useMemo(
+    () => collapseReservationGroups(slots as SlotBase[]),
+    [slots],
+  );
 
   const runRelease = (slotId: string) => {
     if (
@@ -81,12 +88,17 @@ export function SlotList({ slots }: SlotListProps): React.ReactElement {
           </tr>
         </thead>
         <tbody>
-          {slots.map((s) => (
+          {displayRows.map((s) => (
             <tr key={s.id}>
               <td>
                 {s.start_time
-                  ? `${formatUnix(s.start_time, { dateOnly: true })} ${formatUnix(s.start_time, { timeOnly: true })}`
+                  ? `${formatUnix(s.start_time, { dateOnly: true })} ${formatUnix(s.start_time, { timeOnly: true })}${s.end_time ? ` - ${formatUnix(s.end_time, { timeOnly: true })}` : ""}`
                   : (s.slot_label ?? "-")}
+                {s.is_group ? (
+                  <span className="fn-badge fn-badge-soft" style={{ marginLeft: 6 }}>
+                    {s.group_size}連続
+                  </span>
+                ) : null}
               </td>
               <td>
                 {s.display_name || s.x_user_id ? (

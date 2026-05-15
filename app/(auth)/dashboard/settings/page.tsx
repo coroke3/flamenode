@@ -1,11 +1,13 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNotNull, or } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   xAccountLinkRequests as linkReqTable,
   xUsers as xUsersTable,
+  xUserIcons as xUserIconsTable,
+  videos as videosTable,
 } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth/guard";
 import { Icon } from "@/components/ui/Icon";
@@ -45,6 +47,41 @@ export default async function SettingsPage(): Promise<React.ReactElement> {
         )
         .orderBy(desc(linkReqTable.requested_at))
     : [];
+
+  const iconCandidatesById: Record<string, string[]> = {};
+  if (db && xIds.length > 0) {
+    for (const x of xIds) {
+      const candidates = new Set<string>();
+      if (x.icon_url) candidates.add(x.icon_url);
+      const iconRows = await db
+        .select({ icon_url: xUserIconsTable.icon_url })
+        .from(xUserIconsTable)
+        .where(eq(xUserIconsTable.x_user_id, x.id))
+        .orderBy(desc(xUserIconsTable.created_at))
+        .limit(12);
+      iconRows.forEach((r) => candidates.add(r.icon_url));
+
+      const videoRows = await db
+        .select({ icon_url: videosTable.icon_url })
+        .from(videosTable)
+        .where(
+          and(
+            or(
+              eq(videosTable.creator_id, x.id),
+              eq(videosTable.contact_x_id, x.id),
+            )!,
+            isNotNull(videosTable.icon_url),
+          )!,
+        )
+        .orderBy(desc(videosTable.created_at))
+        .limit(12);
+      videoRows.forEach((r) => {
+        if (r.icon_url) candidates.add(r.icon_url);
+      });
+
+      iconCandidatesById[x.id] = Array.from(candidates).slice(0, 12);
+    }
+  }
 
   return (
     <div
@@ -221,6 +258,7 @@ export default async function SettingsPage(): Promise<React.ReactElement> {
                         youtube_channel_url: x.youtube_channel_url,
                         other_social_links: x.other_social_links,
                       }}
+                      iconCandidates={iconCandidatesById[x.id] ?? []}
                     />
                     <div style={{ marginTop: 12 }}>
                       <DeleteXIdForm xUserId={x.id} />

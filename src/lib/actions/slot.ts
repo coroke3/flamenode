@@ -51,8 +51,8 @@ export async function reserveSlot(
     await db.select().from(xUsers).where(eq(xUsers.id, activeX)).limit(1)
   )[0];
   if (!xRow) return { ok: false, message: "X ID が見つかりません。" };
-  if (xRow.approval_status === "rejected") {
-    return { ok: false, message: "却下された X ID では枠を確保できません。" };
+  if (xRow.approval_status !== "approved") {
+    return { ok: false, message: "承認済みの X ID が必要です。" };
   }
 
   const slotRow = (
@@ -97,6 +97,31 @@ export async function reserveSlot(
         ok: false,
         message: "連続枠を確保できませんでした。途中に取得済みの枠があります。",
       };
+    }
+    if (slotRow.slot_kind === "time") {
+      for (let i = 1; i < candidates.length; i += 1) {
+        const prev = candidates[i - 1];
+        const next = candidates[i];
+        const prevEnd = prev.end_time ?? prev.start_time;
+        const nextStart = next.start_time;
+        if (!prevEnd || !nextStart || Math.abs(nextStart - prevEnd) > 60) {
+          return {
+            ok: false,
+            message: "連続枠を確保できませんでした。時間が連続していません。",
+          };
+        }
+      }
+    } else {
+      for (let i = 1; i < candidates.length; i += 1) {
+        const prevOrder = candidates[i - 1]?.sort_order ?? null;
+        const nextOrder = candidates[i]?.sort_order ?? null;
+        if (prevOrder == null || nextOrder == null || nextOrder !== prevOrder + 1) {
+          return {
+            ok: false,
+            message: "連続枠を確保できませんでした。枠番号が連続していません。",
+          };
+        }
+      }
     }
     targetSlots.splice(0, targetSlots.length, ...candidates);
   }
@@ -155,6 +180,11 @@ export async function releaseOwnSlot(
   const user = await getCurrentUser();
   if (!user) return { ok: false, message: "ログインが必要です。" };
 
+  const activeX = normalizeXId(user.active_x_user_id);
+  if (!activeX) {
+    return { ok: false, message: "X ID を選択してから解放してください。" };
+  }
+
   const slotId = String(formData.get("slot_id") ?? "").trim();
   if (!slotId) return { ok: false, message: "slot_id が必要です。" };
 
@@ -165,7 +195,10 @@ export async function releaseOwnSlot(
     await db.select().from(slots).where(eq(slots.id, slotId)).limit(1)
   )[0];
   if (!slotRow) return { ok: false, message: "スロットが見つかりません。" };
-  if (slotRow.discord_user_id !== user.id) {
+  const isOwner = slotRow.x_user_id
+    ? slotRow.x_user_id === activeX
+    : slotRow.discord_user_id === user.id;
+  if (!isOwner) {
     return { ok: false, message: "自分が確保した枠のみ解放できます。" };
   }
   if (slotRow.status !== "reserved") {
@@ -176,23 +209,58 @@ export async function releaseOwnSlot(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  await db
-    .update(slots)
-    .set({
-      discord_user_id: null,
-      x_user_id: null,
-      display_name: null,
-      reservation_group_id: null,
-      status: "available",
-      updated_at: now,
-    })
-    .where(eq(slots.id, slotId));
+  const groupId = slotRow.reservation_group_id;
+  let releasedIds = [slotId];
+  if (groupId) {
+    const groupWhere = slotRow.x_user_id
+      ? and(eq(slots.reservation_group_id, groupId), eq(slots.x_user_id, activeX))!
+      : and(eq(slots.reservation_group_id, groupId), eq(slots.discord_user_id, user.id))!;
+    const groupRows = await db
+      .select({ id: slots.id, status: slots.status })
+      .from(slots)
+      .where(groupWhere);
+    if (groupRows.some((r) => r.status !== "reserved")) {
+      return {
+        ok: false,
+        message: "提出済みの枠は解放できません。先に作品取り下げを相談してください。",
+      };
+    }
+    await db
+      .update(slots)
+      .set({
+        discord_user_id: null,
+        x_user_id: null,
+        display_name: null,
+        reservation_group_id: null,
+        status: "available",
+        updated_at: now,
+      })
+      .where(groupWhere);
+    releasedIds = groupRows.map((r) => r.id);
+  } else {
+    await db
+      .update(slots)
+      .set({
+        discord_user_id: null,
+        x_user_id: null,
+        display_name: null,
+        reservation_group_id: null,
+        status: "available",
+        updated_at: now,
+      })
+      .where(eq(slots.id, slotId));
+  }
 
   await db.insert(historyLogs).values({
     table_name: "slots",
     record_id: slotId,
     action: "UPDATE",
-    after_data: JSON.stringify({ status: "available", released_by: "owner" }),
+    after_data: JSON.stringify({
+      status: "available",
+      released_by: "owner",
+      slot_ids: releasedIds,
+      reservation_group_id: groupId ?? null,
+    }),
     operator_discord_id: user.id,
     retention_class: "normal",
     created_at: now,

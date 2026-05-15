@@ -13,6 +13,7 @@ import {
 } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
+import { collapseReservationGroups, type SlotBase } from "@/lib/utils/slotGrouping";
 import {
   computeEventStatus,
   eventStatusBadgeClass,
@@ -42,7 +43,7 @@ export default async function AdminEventDetailPage({
       .select()
       .from(slotsTable)
       .where(eq(slotsTable.event_id, id))
-      .orderBy(slotsTable.sort_order);
+      .orderBy(slotsTable.start_time, slotsTable.end_time, slotsTable.sort_order);
 
     const evVideos = await db
       .select({
@@ -63,6 +64,7 @@ export default async function AdminEventDetailPage({
 
   if (!bundle) notFound();
   const { event, slots, evVideos } = bundle;
+  const displaySlots = collapseReservationGroups(slots as SlotBase[]);
   const status = computeEventStatus(event);
   const accepting = isAcceptingEntries(event);
 
@@ -151,9 +153,9 @@ export default async function AdminEventDetailPage({
 
       <section style={{ marginTop: 22 }}>
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
-          枠 ({slots.length})
+          枠 ({displaySlots.length})
         </h2>
-        {slots.length === 0 ? (
+        {displaySlots.length === 0 ? (
           <p className="fn-muted fn-text-sm">枠はまだありません。</p>
         ) : (
           <table className="fn-table">
@@ -166,10 +168,19 @@ export default async function AdminEventDetailPage({
               </tr>
             </thead>
             <tbody>
-              {slots.map((s) => (
+              {displaySlots.map((s) => (
                 <tr key={s.id}>
                   <td>{s.start_time ? formatUnix(s.start_time, { dateOnly: true }) : (s.slot_label ?? "-")}</td>
-                  <td>{s.start_time ? formatUnix(s.start_time, { timeOnly: true }) : "-"}</td>
+                  <td>
+                    {s.start_time
+                      ? `${formatUnix(s.start_time, { timeOnly: true })}${s.end_time ? ` - ${formatUnix(s.end_time, { timeOnly: true })}` : ""}`
+                      : "-"}
+                    {s.is_group ? (
+                      <span className="fn-badge fn-badge-soft" style={{ marginLeft: 6 }}>
+                        {s.group_size}連続
+                      </span>
+                    ) : null}
+                  </td>
                   <td>
                     {s.display_name || s.x_user_id ? (
                       <span>

@@ -2,10 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { getDatabase } from "@/lib/cloudflare";
-import { canEditVideo } from "@/lib/auth/ownership";
+import { canEditVideo, getApprovedXIds } from "@/lib/auth/ownership";
 import {
   historyLogs,
   slots,
@@ -84,6 +84,7 @@ async function ensureSubmissionXUser(
     profileText?: string | null;
     youtubeChannelUrl?: string | null;
     socialLinks?: string | null;
+    allowProfileUpdate?: boolean;
   },
 ): Promise<void> {
   if (!args.xId) return;
@@ -92,6 +93,7 @@ async function ensureSubmissionXUser(
     await db.select().from(xUsers).where(eq(xUsers.id, args.xId)).limit(1)
   )[0];
   if (!existing) {
+    if (args.allowProfileUpdate === false) return;
     await db.insert(xUsers).values({
       id: args.xId,
       x_name: args.displayName || `@${args.xId}`,
@@ -104,6 +106,7 @@ async function ensureSubmissionXUser(
     });
     return;
   }
+  if (args.allowProfileUpdate === false) return;
   await db
     .update(xUsers)
     .set({
@@ -184,7 +187,11 @@ export async function createFreeVideo(
 
   const id = generateId("v");
   const now = Math.floor(Date.now() / 1000);
+  const approvedXIds = await getApprovedXIds(db, userId);
   const activeX = normalizeXId(parsed.data.contact_x_id || sessionUser.active_x_user_id);
+  if (!activeX || !approvedXIds.includes(activeX)) {
+    return { ok: false, message: "承認済みの X ID を選択してください。" };
+  }
   const displayName = parsed.data.display_name;
   const iconUrl = parsed.data.icon_url || sessionUser.image || null;
   await ensureSubmissionXUser(db, {
@@ -194,6 +201,7 @@ export async function createFreeVideo(
     profileText: parsed.data.profile_text ?? null,
     youtubeChannelUrl: parsed.data.youtube_channel_url ?? null,
     socialLinks: parsed.data.other_social_links ?? null,
+    allowProfileUpdate: true,
   });
 
   await db.insert(videos).values({
@@ -272,11 +280,20 @@ export async function submitSlotVideo(
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
 
+  const requestedX = normalizeXId(
+    parsed.data.contact_x_id || sessionUser.active_x_user_id,
+  );
+  const slotOwnerWhere = requestedX
+    ? or(
+        eq(slots.x_user_id, requestedX),
+        and(eq(slots.discord_user_id, userId), isNull(slots.x_user_id))!,
+      )
+    : eq(slots.discord_user_id, userId);
   const slotRow = (
     await db
       .select()
       .from(slots)
-      .where(and(eq(slots.id, slotId), eq(slots.discord_user_id, userId))!)
+      .where(and(eq(slots.id, slotId), slotOwnerWhere)!)
       .limit(1)
   )[0];
   if (!slotRow) return { ok: false, message: "スロットが見つかりません。" };
@@ -284,9 +301,22 @@ export async function submitSlotVideo(
   const now = Math.floor(Date.now() / 1000);
   const videoId = slotRow.video_id ?? generateId("v");
   const exists = !!slotRow.video_id;
-  const activeX = normalizeXId(
-    parsed.data.contact_x_id || sessionUser.active_x_user_id || slotRow.x_user_id,
-  );
+  const approvedXIds = await getApprovedXIds(db, userId);
+  const slotX = normalizeXId(slotRow.x_user_id);
+  const finalRequestedX = normalizeXId(requestedX || slotRow.x_user_id);
+  if (!finalRequestedX) {
+    return { ok: false, message: "承認済みの X ID を選択してください。" };
+  }
+  if (slotX && slotX !== finalRequestedX) {
+    return {
+      ok: false,
+      message: "提出主体の X ID は確保時の ID に固定されます。",
+    };
+  }
+  const activeX = slotX || finalRequestedX;
+  if (!approvedXIds.includes(activeX)) {
+    return { ok: false, message: "承認済みの X ID を選択してください。" };
+  }
   await ensureSubmissionXUser(db, {
     xId: activeX,
     displayName: parsed.data.display_name,
@@ -294,6 +324,7 @@ export async function submitSlotVideo(
     profileText: parsed.data.profile_text ?? null,
     youtubeChannelUrl: parsed.data.youtube_channel_url ?? null,
     socialLinks: parsed.data.other_social_links ?? null,
+    allowProfileUpdate: true,
   });
 
   if (exists) {
@@ -436,7 +467,20 @@ export async function updateVideo(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const nextCreatorX = normalizeXId(parsed.data.contact_x_id);
+  const approvedXIds = await getApprovedXIds(db, sessionUser.id);
+  const requestedX = normalizeXId(parsed.data.contact_x_id);
+  const existingX = normalizeXId(target.contact_x_id || target.creator_id);
+  let nextCreatorX = existingX || requestedX;
+  if (requestedX && requestedX !== existingX) {
+    if (sessionUser.role === "admin" || approvedXIds.includes(requestedX)) {
+      nextCreatorX = requestedX;
+    } else {
+      return { ok: false, message: "提出主体の X ID を変更する権限がありません。" };
+    }
+  }
+  if (!nextCreatorX) {
+    return { ok: false, message: "提出主体 X ID が必要です。" };
+  }
   await ensureSubmissionXUser(db, {
     xId: nextCreatorX,
     displayName: parsed.data.display_name,
@@ -444,6 +488,8 @@ export async function updateVideo(
     profileText: parsed.data.profile_text ?? null,
     youtubeChannelUrl: parsed.data.youtube_channel_url ?? null,
     socialLinks: parsed.data.other_social_links ?? null,
+    allowProfileUpdate:
+      sessionUser.role === "admin" || approvedXIds.includes(nextCreatorX),
   });
   await db
     .update(videos)

@@ -9,7 +9,6 @@ import {
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth/guard";
-import { getApprovedXIds } from "@/lib/auth/ownership";
 import { creatorIconExpr, creatorNameExpr } from "@/lib/db/displayExpr";
 import { resolveMissingIcons } from "@/lib/db/iconResolution";
 import { Icon } from "@/components/ui/Icon";
@@ -38,8 +37,8 @@ export default async function DashboardLibraryPage({
   let hasOtherTabHits = false;
 
   if (db) {
-    const myXIds = await getApprovedXIds(db, user.id);
-    if (myXIds.length > 0) {
+    const activeX = user.active_x_user_id;
+    if (activeX) {
       const myInteractions = await db
         .select({
           video_id: videoInteractions.video_id,
@@ -47,7 +46,7 @@ export default async function DashboardLibraryPage({
           created_at: videoInteractions.created_at,
         })
         .from(videoInteractions)
-        .where(inArray(videoInteractions.x_user_id, myXIds));
+        .where(eq(videoInteractions.x_user_id, activeX));
 
       const likeIds = myInteractions
         .filter((r) => r.interaction_type === "like")

@@ -7,6 +7,13 @@ import { Icon } from "@/components/ui/Icon";
 import { releaseOwnSlot, reserveSlot } from "@/lib/actions/slot";
 import { formatUnix } from "@/lib/utils/format";
 import { cn } from "@/lib/utils/cn";
+import {
+  buildSlotParts,
+  collapseReservationGroups,
+  formatSlotPartLabel,
+  type SlotBase,
+  type SlotGroupRow,
+} from "@/lib/utils/slotGrouping";
 import styles from "./SlotGrid.module.css";
 
 export interface SlotRow {
@@ -20,11 +27,13 @@ export interface SlotRow {
   display_name: string | null;
   x_user_id: string | null;
   discord_user_id: string | null;
+  reservation_group_id?: string | null;
 }
 
 export interface SlotGridProps {
   slots: SlotRow[];
-  viewerDiscordId: string | null;
+  viewerXId: string | null;
+  viewerDiscordId?: string | null;
   canReserve: boolean;
   slotKind: "time" | "count";
   maxConsecutiveSlots?: number;
@@ -32,51 +41,13 @@ export interface SlotGridProps {
 
 interface SlotGroup {
   label: string;
-  rows: SlotRow[];
-}
-
-function partitionByPart(rows: SlotRow[]): SlotGroup[] {
-  if (rows.length === 0) return [];
-  if (rows.every((r) => r.start_time == null)) {
-    return [{ label: "枠", rows }];
-  }
-
-  const sorted = [...rows]
-    .filter((r) => r.start_time != null)
-    .sort((a, b) => (a.start_time ?? 0) - (b.start_time ?? 0));
-  const groups: SlotGroup[] = [];
-  let current: SlotRow[] = [];
-  let prevEnd = 0;
-  const gapSec = 30 * 60;
-
-  for (const row of sorted) {
-    if (current.length === 0 || (row.start_time ?? 0) - prevEnd > gapSec) {
-      if (current.length > 0) groups.push({ label: "", rows: current });
-      current = [];
-    }
-    current.push(row);
-    prevEnd = row.end_time ?? row.start_time ?? prevEnd;
-  }
-  if (current.length > 0) groups.push({ label: "", rows: current });
-
-  groups.forEach((group, index) => {
-    const start = group.rows[0]?.start_time;
-    const end =
-      group.rows[group.rows.length - 1]?.end_time ??
-      group.rows[group.rows.length - 1]?.start_time;
-    const date = start ? formatUnix(start, { dateOnly: true }) : "";
-    const range =
-      start && end
-        ? `${formatUnix(start, { timeOnly: true })} - ${formatUnix(end, { timeOnly: true })}`
-        : "";
-    group.label = range ? `${date}  第${index + 1}部  ${range}` : `第${index + 1}部`;
-  });
-  return groups;
+  rows: SlotGroupRow[];
 }
 
 export function SlotGrid({
   slots,
-  viewerDiscordId,
+  viewerXId,
+  viewerDiscordId = null,
   canReserve,
   slotKind,
   maxConsecutiveSlots = 1,
@@ -86,11 +57,21 @@ export function SlotGrid({
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
   const [reservedSlotId, setReservedSlotId] = React.useState<string | null>(null);
-
-  const groups = React.useMemo(
-    () => (slotKind === "time" ? partitionByPart(slots) : [{ label: "枠", rows: slots }]),
-    [slots, slotKind],
+  const displayRows = React.useMemo(
+    () => collapseReservationGroups(slots as SlotBase[]),
+    [slots],
   );
+
+  const groups = React.useMemo<SlotGroup[]>(() => {
+    if (slotKind !== "time") return [{ label: "枠", rows: displayRows }];
+    const parts = buildSlotParts(displayRows);
+    return parts.map((part) => ({
+      label: formatSlotPartLabel(part, "full"),
+      rows: part.rows,
+    }));
+  }, [displayRows, slotKind]);
+
+  const canTakeSlot = canReserve && !!viewerXId;
 
   const onReserve = (slotId: string, form: HTMLFormElement) => {
     setError(null);
@@ -171,8 +152,8 @@ export function SlotGrid({
               <tbody>
                 {group.rows.map((slot) => {
                   const isMine =
-                    viewerDiscordId !== null &&
-                    slot.discord_user_id === viewerDiscordId;
+                    (!!viewerXId && slot.x_user_id === viewerXId) ||
+                    (!slot.x_user_id && !!viewerDiscordId && slot.discord_user_id === viewerDiscordId);
                   const filled = slot.status !== "available";
                   return (
                     <tr
@@ -187,7 +168,12 @@ export function SlotGrid({
                         {slot.start_time ? (
                           <span className={styles.timeStack}>
                             <span>{formatUnix(slot.start_time, { dateOnly: true })}</span>
-                            <strong>{formatUnix(slot.start_time, { timeOnly: true })}</strong>
+                            <strong>
+                              {formatUnix(slot.start_time, { timeOnly: true })}
+                              {slot.end_time
+                                ? ` - ${formatUnix(slot.end_time, { timeOnly: true })}`
+                                : ""}
+                            </strong>
                           </span>
                         ) : (
                           (slot.slot_label ?? `#${slot.sort_order ?? "?"}`)
@@ -204,9 +190,9 @@ export function SlotGrid({
                               {slot.x_user_id ? (
                                 <span className={styles.slotId}>@{slot.x_user_id}</span>
                               ) : null}
-                              {slot.discord_user_id ? (
-                                <span className={styles.slotId}>
-                                  Discord: {slot.discord_user_id}
+                              {slot.is_group ? (
+                                <span className="fn-badge fn-badge-soft">
+                                  {slot.group_size}連続
                                 </span>
                               ) : null}
                             </div>
@@ -236,7 +222,7 @@ export function SlotGrid({
                               ) : null}
                             </div>
                           </div>
-                        ) : canReserve && viewerDiscordId ? (
+                        ) : canTakeSlot ? (
                           <form
                             className={styles.reserveForm}
                             onSubmit={(ev) => {
@@ -280,7 +266,9 @@ export function SlotGrid({
                             </button>
                           </form>
                         ) : canReserve ? (
-                          <span className={styles.emptySlot}>空き (要ログイン)</span>
+                          <span className={styles.emptySlot}>
+                            {viewerDiscordId ? "空き (X ID 未選択)" : "空き (要ログイン)"}
+                          </span>
                         ) : (
                           <span className={styles.emptySlot}>空き</span>
                         )}

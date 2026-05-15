@@ -219,24 +219,56 @@ export async function releaseSlot(formData: FormData): Promise<SlotActionResult>
   if (!guard.ok) return guard.result;
 
   const now = Math.floor(Date.now() / 1000);
-  await db
-    .update(slots)
-    .set({
-      status: "available",
-      discord_user_id: null,
-      x_user_id: null,
-      display_name: null,
-      reservation_group_id: null,
-      updated_at: now,
-    })
-    .where(eq(slots.id, slotId));
+  const groupId = row.reservation_group_id;
+  let targetIds = [slotId];
+  if (groupId) {
+    const groupRows = await db
+      .select({ id: slots.id, status: slots.status })
+      .from(slots)
+      .where(eq(slots.reservation_group_id, groupId));
+    if (groupRows.some((r) => r.status !== "reserved")) {
+      return {
+        ok: false,
+        message: "提出済みの枠は解放できません。先に作品取り下げを相談してください。",
+      };
+    }
+    await db
+      .update(slots)
+      .set({
+        status: "available",
+        discord_user_id: null,
+        x_user_id: null,
+        display_name: null,
+        reservation_group_id: null,
+        updated_at: now,
+      })
+      .where(eq(slots.reservation_group_id, groupId));
+    targetIds = groupRows.map((r) => r.id);
+  } else {
+    await db
+      .update(slots)
+      .set({
+        status: "available",
+        discord_user_id: null,
+        x_user_id: null,
+        display_name: null,
+        reservation_group_id: null,
+        updated_at: now,
+      })
+      .where(eq(slots.id, slotId));
+  }
 
   await db.insert(historyLogs).values({
     table_name: "slots",
     record_id: slotId,
     action: "UPDATE",
     before_data: JSON.stringify({ status: row.status, x_user_id: row.x_user_id }),
-    after_data: JSON.stringify({ status: "available", forced_release: true }),
+    after_data: JSON.stringify({
+      status: "available",
+      forced_release: true,
+      slot_ids: targetIds,
+      reservation_group_id: groupId ?? null,
+    }),
     operator_discord_id: guard.userId,
     retention_class: "long_audit",
     created_at: now,
