@@ -1,0 +1,116 @@
+version: 1
+name: flamenode-subagent-routing
+updated: "2026-05-15"
+repository: coroke3/flamenode
+canonical_spec: claude-code-subagent-assignment.md
+
+purpose: >-
+  Routing summary for Claude Code. This file is intentionally brief.
+  The full self-contained implementation specification is in the canonical Markdown file.
+
+priority:
+  - claude-code-subagent-assignment.md
+  - current repository code
+  - README.md
+  - 設計 directory
+
+model_policy:
+  default: sonnet
+  simple: haiku
+  hard: opus
+  haiku_use:
+    - file discovery
+    - candidate list creation
+    - checklist formatting
+    - command output summary
+    - simple copy suggestions
+  sonnet_use:
+    - normal implementation
+    - UI implementation
+    - server action updates
+    - route handler updates
+    - tests
+  opus_use:
+    - main agent judgement
+    - architecture review
+    - identity and permission boundaries
+    - database migration review
+    - slot group consistency review
+    - public API review
+    - final review
+
+escalation:
+  to_opus_when:
+    - repository code conflicts with canonical spec
+    - identity subjects overlap
+    - permissions may broaden
+    - database changes are risky
+    - slot group behavior is unclear
+    - public API shape changes
+    - sonnet fails twice
+    - subagents disagree
+
+phases:
+  - id: 0
+    name: repo-cartography
+    model: haiku_or_sonnet
+    code_changes: false
+    goal: find related files and map responsibilities
+  - id: 1
+    name: id-auth-write-guard
+    model: sonnet
+    escalate: opus_for_boundary_decisions
+    pr: auth/id-write-guard
+  - id: 2
+    name: posting-youtube-id
+    model: sonnet
+    pr: posting/youtube-id-and-active-x
+  - id: 3
+    name: slots-and-part-numbering
+    model: sonnet
+    escalate: opus_for_complex_slot_or_migration_decisions
+    pr:
+      - slots/reservation-groups
+      - slots/part-numbering
+  - id: 4
+    name: x-id-interactions-library
+    model: sonnet
+    pr: interactions/x-id-library
+  - id: 5
+    name: chapter-comments-only
+    model: sonnet
+    pr: comments/chapter-comments-only
+  - id: 6
+    name: public-api-health-security
+    model: sonnet
+    escalate: opus_for_final_review
+    pr:
+      - api/public-whitelist
+      - admin/health-security
+  - id: 7
+    name: ui-ux-forms-copy
+    model: sonnet
+    simple_parts_model: haiku
+    pr: ui/navigation-entry-forms
+  - id: 8
+    name: db-cleanup-legacy-import
+    model: sonnet
+    escalate: opus_for_risky_database_changes
+    pr: db/cleanup-legacy-import
+  - id: 9
+    name: test-build-final-review
+    model: haiku_for_summary_sonnet_for_fixes_opus_for_final_review
+    goal: run checks and review against canonical spec
+
+required_final_checks:
+  - typecheck
+  - build
+  - local database migration check
+  - permission bypass check
+  - active X ID switching check
+  - consecutive slot release check
+  - consecutive slot extension check
+  - part numbering check
+  - chapter comment check
+  - public API field review
+  - health and security check
