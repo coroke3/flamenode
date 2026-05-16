@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import {
   events,
   videoChapters,
@@ -15,7 +15,22 @@ import { resolveMissingIcons } from "./iconResolution";
  * Cloudflare D1 (SQLite) はネスト集約や CTE が制限的なので、複数クエリに分けてアプリ側で結合する。
  */
 
-export async function fetchVideoDetail(db: DB, idOrYoutube: string) {
+export interface VideoDetailViewer {
+  /** Discord ID。未ログインなら null。 */
+  id: string | null;
+  /** role === "admin" は private チャプターも全件閲覧可。 */
+  role: string | null;
+  /** 自分が linked + approved な X ID 一覧。private チャプターの自己投稿判定に使う。 */
+  approvedXIds: string[];
+  /** 動画オーナー or chapter_admin 権限保持者は private チャプターを全件閲覧可。 */
+  canEditChapters: boolean;
+}
+
+export async function fetchVideoDetail(
+  db: DB,
+  idOrYoutube: string,
+  viewer?: VideoDetailViewer,
+) {
   // 1) 作品本体 (UUID または YouTubeID)
   const rows = await db
     .select()
@@ -81,6 +96,25 @@ export async function fetchVideoDetail(db: DB, idOrYoutube: string) {
     .orderBy(videoMembers.order_index);
 
   // 5) チャプター (再生バー点表示の元データ)
+  // 可視性ポリシー: public は全員可。private は admin / 動画オーナー (canEditChapters) /
+  //                 投稿者本人 (approvedXIds に c.x_user_id を含む) のみ。
+  const canSeeAllPrivate =
+    viewer?.role === "admin" || viewer?.canEditChapters === true;
+  const selfXIds = viewer?.approvedXIds ?? [];
+  let chapterVisibilityCond;
+  if (canSeeAllPrivate) {
+    chapterVisibilityCond = undefined;
+  } else if (selfXIds.length > 0) {
+    chapterVisibilityCond = or(
+      eq(videoChapters.visibility, "public"),
+      and(
+        eq(videoChapters.visibility, "private"),
+        inArray(videoChapters.x_user_id, selfXIds),
+      ),
+    )!;
+  } else {
+    chapterVisibilityCond = eq(videoChapters.visibility, "public");
+  }
   const chapters = await db
     .select({
       id: videoChapters.id,
@@ -97,10 +131,9 @@ export async function fetchVideoDetail(db: DB, idOrYoutube: string) {
     .from(videoChapters)
     .leftJoin(xUsers, eq(xUsers.id, videoChapters.x_user_id))
     .where(
-      and(
-        eq(videoChapters.video_id, video.id),
-        eq(videoChapters.visibility, "public"),
-      )!,
+      chapterVisibilityCond
+        ? and(eq(videoChapters.video_id, video.id), chapterVisibilityCond)!
+        : eq(videoChapters.video_id, video.id),
     )
     .orderBy(videoChapters.chapter_time);
 

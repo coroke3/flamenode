@@ -8,7 +8,6 @@ import { canEditVideo } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { historyLogs, videoChapters, videos } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
-import { normalizeXId } from "@/lib/utils/xid";
 
 export interface ChapterActionResult {
   ok: boolean;
@@ -123,6 +122,7 @@ export async function updateChapter(
   const guard = await writeGuard({ feature: "chapter_comment" });
   if (!guard.ok) return { ok: false, message: guard.message };
   const sUser = guard.user;
+  const approvedXIds = guard.approvedXIds;
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
@@ -145,9 +145,13 @@ export async function updateChapter(
   )[0];
   if (!existing) return { ok: false, message: "チャプターが見つかりません。" };
 
-  // 編集権限: 作成者本人 or 動画オーナー (canEditVideo) or admin
-  const activeX = normalizeXId(sUser.active_x_user_id);
-  let canMod = sUser.role === "admin" || existing.x_user_id === activeX;
+  // 編集権限: 作成者本人 (Active X 切替後でも approvedXIds 経由で本人判定する) or
+  // 動画オーナー (canEditVideo) or admin。
+  // approvedXIds.includes(existing.x_user_id) でチェックすることで、
+  // 過去に別 X ID で投稿したコメントを Active 切替後にも本人として扱える。
+  let canMod =
+    sUser.role === "admin" ||
+    (existing.x_user_id != null && approvedXIds.includes(existing.x_user_id));
   if (!canMod) {
     const targetVideo = (
       await db.select().from(videos).where(eq(videos.id, existing.video_id)).limit(1)
@@ -190,6 +194,7 @@ export async function deleteChapter(
   const guard = await writeGuard({ feature: "chapter_comment" });
   if (!guard.ok) return { ok: false, message: guard.message };
   const sUser = guard.user;
+  const approvedXIds = guard.approvedXIds;
 
   const chapterId = String(formData.get("chapter_id") ?? "").trim();
   if (!chapterId) return { ok: false, message: "chapter_id が必要です。" };
@@ -206,8 +211,11 @@ export async function deleteChapter(
   )[0];
   if (!existing) return { ok: false, message: "チャプターが見つかりません。" };
 
-  const activeX = normalizeXId(sUser.active_x_user_id);
-  let canMod = sUser.role === "admin" || existing.x_user_id === activeX;
+  // 削除権限: 作成者本人 (Active X 切替後でも approvedXIds 経由で本人判定する) or
+  // 動画オーナー (canEditVideo) or admin。
+  let canMod =
+    sUser.role === "admin" ||
+    (existing.x_user_id != null && approvedXIds.includes(existing.x_user_id));
   if (!canMod) {
     const targetVideo = (
       await db.select().from(videos).where(eq(videos.id, existing.video_id)).limit(1)

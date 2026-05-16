@@ -5,8 +5,9 @@ import { notFound, redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import styles from "./page.module.css";
 import { getCurrentUser } from "@/lib/auth/currentUser";
+import { getApprovedXIds, canEditVideo } from "@/lib/auth/ownership";
 import { getDatabase } from "@/lib/cloudflare";
-import { videoInteractions, xUsers } from "@/lib/db/schema";
+import { videoInteractions, videos as videosTable, xUsers } from "@/lib/db/schema";
 import {
   fetchEventPlaylistVideos,
   fetchRelatedVideos,
@@ -60,7 +61,44 @@ export default async function VideoDetailPage({
   const db = getDatabase();
   if (!db) notFound();
 
-  const detail = await fetchVideoDetail(db, rawId);
+  // viewer 情報を先に解決して、private チャプター可視性に反映する。
+  const viewerUser = await getCurrentUser();
+  const viewerApprovedXIds = viewerUser
+    ? await getApprovedXIds(db, viewerUser.id)
+    : [];
+
+  // canEditChapters 判定: 動画は idOrYoutube で引かないと参照できないので、
+  // 軽量に target video を先に引いて canEditVideo にかける。
+  // 取れない場合は private 可視を false で続行する (fetchVideoDetail 側で notFound 判定する)。
+  let viewerCanEditChapters = false;
+  if (viewerUser) {
+    const probe = (
+      await db
+        .select()
+        .from(videosTable)
+        .where(
+          rawId.length === 11
+            ? eq(videosTable.youtube_video_id, rawId)
+            : eq(videosTable.id, rawId),
+        )
+        .limit(1)
+    )[0];
+    if (probe) {
+      viewerCanEditChapters = await canEditVideo({
+        db,
+        user: { id: viewerUser.id, role: viewerUser.role ?? null },
+        video: probe,
+        requiredKey: "video.chapter_admin",
+      });
+    }
+  }
+
+  const detail = await fetchVideoDetail(db, rawId, {
+    id: viewerUser?.id ?? null,
+    role: viewerUser?.role ?? null,
+    approvedXIds: viewerApprovedXIds,
+    canEditChapters: viewerCanEditChapters,
+  });
   if (!detail) notFound();
   const { video, creator, events, members, chapters } = detail;
 
@@ -113,7 +151,6 @@ export default async function VideoDetailPage({
     primary_event_id: video.primary_event_id,
   })) as VideoCardData[];
 
-  const viewerUser = await getCurrentUser();
   const viewerActiveX = viewerUser?.active_x_user_id ?? null;
   let likeActive = false;
   let bookmarkActive = false;
