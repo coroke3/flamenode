@@ -12,6 +12,13 @@ export type SlotBase = {
   x_user_id: string | null;
   discord_user_id?: string | null;
   reservation_group_id?: string | null;
+  /** slots PR 移行前の互換フィールド。SlotGroupRow でも透過的に参照できるようにする。 */
+  event_id?: string | null;
+  event_title?: string | null;
+  video_id?: string | null;
+  updated_at?: number | null;
+  priority_reclaim_video_id?: string | null;
+  priority_reclaim_until?: number | null;
 };
 
 export type SlotPart<T extends { start_time: number | null; end_time: number | null }> = {

@@ -3,9 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { and, eq, isNull, or } from "drizzle-orm";
-import { getCurrentUser } from "@/lib/auth/currentUser";
 import { getDatabase } from "@/lib/cloudflare";
-import { canEditVideo, getApprovedXIds } from "@/lib/auth/ownership";
+import { canEditVideo } from "@/lib/auth/ownership";
+import { writeGuard } from "@/lib/auth/writeGuard";
 import {
   historyLogs,
   slots,
@@ -166,12 +166,14 @@ async function replaceVideoMembers(
 export async function createFreeVideo(
   formData: FormData,
 ): Promise<VideoActionResult> {
-  const sessionUser = await getCurrentUser();
-  if (!sessionUser) return { ok: false, message: "認証が必要です。" };
-  if (sessionUser.is_banned === 1) {
-    return { ok: false, message: "現在、このアカウントは利用停止中です。" };
-  }
+  const guard = await writeGuard({
+    requireApprovedActiveXId: true,
+    feature: "post_video_unslotted",
+  });
+  if (!guard.ok) return { ok: false, message: guard.message };
+  const sessionUser = guard.user;
   const userId = sessionUser.id;
+  const approvedXIds = guard.approvedXIds;
 
   const parsed = videoFormSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
@@ -187,7 +189,6 @@ export async function createFreeVideo(
 
   const id = generateId("v");
   const now = Math.floor(Date.now() / 1000);
-  const approvedXIds = await getApprovedXIds(db, userId);
   const activeX = normalizeXId(parsed.data.contact_x_id || sessionUser.active_x_user_id);
   if (!activeX || !approvedXIds.includes(activeX)) {
     return { ok: false, message: "承認済みの X ID を選択してください。" };
@@ -260,12 +261,14 @@ export async function createFreeVideo(
 export async function submitSlotVideo(
   formData: FormData,
 ): Promise<VideoActionResult> {
-  const sessionUser = await getCurrentUser();
-  if (!sessionUser) return { ok: false, message: "認証が必要です。" };
-  if (sessionUser.is_banned === 1) {
-    return { ok: false, message: "現在、このアカウントは利用停止中です。" };
-  }
+  const guard = await writeGuard({
+    requireApprovedActiveXId: true,
+    feature: "post_video_slotted",
+  });
+  if (!guard.ok) return { ok: false, message: guard.message };
+  const sessionUser = guard.user;
   const userId = sessionUser.id;
+  const approvedXIds = guard.approvedXIds;
 
   const slotId = String(formData.get("slot_id") ?? "");
   if (!slotId) return { ok: false, message: "スロット ID がありません。" };
@@ -301,7 +304,6 @@ export async function submitSlotVideo(
   const now = Math.floor(Date.now() / 1000);
   const videoId = slotRow.video_id ?? generateId("v");
   const exists = !!slotRow.video_id;
-  const approvedXIds = await getApprovedXIds(db, userId);
   const slotX = normalizeXId(slotRow.x_user_id);
   const finalRequestedX = normalizeXId(requestedX || slotRow.x_user_id);
   if (!finalRequestedX) {
@@ -428,13 +430,18 @@ export async function submitSlotVideo(
 /**
  * 既存作品の編集保存。作者本人または管理者のみ可。
  * VideoForm の `mode = "edit"` 経由で呼ばれる。
+ *
+ * writeGuard では Active X ID を強制しない (admin が他者作品を編集する場合に
+ * 自分の active X が無くてもよい)。実際の編集権限は canEditVideo で section
+ * 別に判定する。
  */
 export async function updateVideo(
   formData: FormData,
 ): Promise<VideoActionResult> {
-  const sessionUser = await getCurrentUser();
-  if (!sessionUser)
-    return { ok: false, message: "認証が必要です。" };
+  const guard = await writeGuard({ feature: "edit_video" });
+  if (!guard.ok) return { ok: false, message: guard.message };
+  const sessionUser = guard.user;
+  const approvedXIds = guard.approvedXIds;
 
   const videoId = String(formData.get("video_id") ?? "").trim();
   if (!videoId) return { ok: false, message: "video_id が空です。" };
@@ -457,17 +464,18 @@ export async function updateVideo(
   )[0];
   if (!target) return { ok: false, message: "対象作品が見つかりません。" };
 
+  // Batch A 暫定: section 分割は次PR。requiredKey は "video.basics" 一本で運用する。
   const canEdit = await canEditVideo({
     db,
     user: { id: sessionUser.id, role: sessionUser.role ?? null },
     video: target,
+    requiredKey: "video.basics",
   });
   if (!canEdit) {
     return { ok: false, message: "編集権限がありません。" };
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const approvedXIds = await getApprovedXIds(db, sessionUser.id);
   const requestedX = normalizeXId(parsed.data.contact_x_id);
   const existingX = normalizeXId(target.contact_x_id || target.creator_id);
   let nextCreatorX = existingX || requestedX;
@@ -540,20 +548,20 @@ export async function updateVideo(
 /**
  * 作品にいいね or ブックマークを toggle する。
  * 既存の interaction があれば削除、無ければ追加する (TOGGLE 動作)。
- * 主体は `user.active_x_user_id`。未設定なら拒否する。
+ * 主体は writeGuard が保証する承認済み Active X ID。
+ * 未承認 X ID で許可されるのは枠確保のみ、という方針に従い approved を必須とする。
  */
 export async function toggleVideoInteraction(
   formData: FormData,
 ): Promise<VideoActionResult & { active?: boolean }> {
-  const sessionUser = await getCurrentUser();
-  if (!sessionUser)
-    return { ok: false, message: "ログインが必要です。" };
-  const activeX = normalizeXId(sessionUser.active_x_user_id);
+  const guard = await writeGuard({
+    requireApprovedActiveXId: true,
+    feature: "like_or_bookmark",
+  });
+  if (!guard.ok) return { ok: false, message: guard.message };
+  const activeX = guard.activeXId;
   if (!activeX) {
-    return {
-      ok: false,
-      message: "X ID を選択してから操作してください。",
-    };
+    return { ok: false, message: "X ID を選択してから操作してください。" };
   }
 
   const videoId = String(formData.get("video_id") ?? "").trim();

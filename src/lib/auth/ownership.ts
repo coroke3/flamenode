@@ -8,6 +8,10 @@ import {
   xUsers,
   type videos,
 } from "@/lib/db/schema";
+import type {
+  CollaboratorPermissionKey,
+  VideoEditSectionKey,
+} from "./videoEditSections";
 
 /**
  * オーナーシップ判定ヘルパー。
@@ -92,20 +96,28 @@ export async function getCollaboratorPermissions(
  * イベント編集権限の判定。
  * - admin → true
  * - 当該イベントの event_editors → true
- * - 当該イベントの collaborator で permission_key が一致 (省略時は何らか1つでも持っていれば true)
+ * - 当該イベントの collaborator で permission_key が一致
+ *
+ * `requiredKey` は必須。省略可にすると「permission を1個でも持つ collaborator」が
+ * 別領域 (例: event.members) を持っているだけで他領域 (例: event.slots) を触れる
+ * 抜け穴になるため。consistency audit 4-3 参照。
+ *
+ * VideoEditSectionKey も受ける: canEditVideo が下層で canEditEvent を呼ぶときに
+ * `video.basics` 等の section key をそのまま collaborator permission として
+ * 照会するため (event_collaborator_permissions.permission_key は text 列で
+ * 自由な文字列を入れられる)。
  */
 export async function canEditEvent(
   db: DB,
   user: SessionUserLike,
   eventId: string,
-  requiredKey?: string,
+  requiredKey: CollaboratorPermissionKey,
 ): Promise<boolean> {
   if (user.role === "admin") return true;
   const editorIds = await getEditableEventIds(db, user.id);
   if (editorIds.includes(eventId)) return true;
   const keys = await getCollaboratorPermissions(db, user.id, eventId);
-  if (requiredKey) return keys.has(requiredKey);
-  return keys.size > 0;
+  return keys.has(requiredKey);
 }
 
 /** assert 版: 権限がなければエラー throw。 */
@@ -113,15 +125,11 @@ export async function assertCanEditEvent(
   db: DB,
   user: SessionUserLike,
   eventId: string,
-  requiredKey?: string,
+  requiredKey: CollaboratorPermissionKey,
 ): Promise<void> {
   const ok = await canEditEvent(db, user, eventId, requiredKey);
   if (!ok) {
-    throw new Error(
-      requiredKey
-        ? `権限が不足しています (${requiredKey})`
-        : "権限が不足しています",
-    );
+    throw new Error(`権限が不足しています (${requiredKey})`);
   }
 }
 
@@ -131,16 +139,23 @@ export async function assertCanEditEvent(
  * 優先順位:
  * 1. admin → true
  * 2. video.creator_id が「自分の承認済み X ID」 → true
- * 3. video.primary_event_id の event-editor / collaborator → true
- *    (collaborator は permission_key に応じて細粒度判定。requiredKey 省略時は何かしら権限があれば許可)
+ * 3. video.primary_event_id / video_events で canEditEvent(requiredKey) → true
  *
- * `owner_discord_user_id` 単独は判定対象外 (legacy import 由来の混入を防ぐため)。
+ * `owner_discord_user_id` 単独は判定対象外 (legacy import 由来の混入を防ぐため。
+ * 禁止事項: owner_discord_user_id だけで作品編集を許可しない)。
+ *
+ * `requiredKey` は必須。section 別の編集権限を明示することで、collaborator が
+ * 持っていない section を触れないよう保証する。Batch A 時点では updateVideo は
+ * 暫定で `video.basics` を渡す (本格的な section 分割は posting PR 以降)。
  */
 export async function canEditVideo(args: {
   db: DB;
   user: SessionUserLike;
-  video: Pick<VideoRow, "creator_id" | "primary_event_id" | "id" | "owner_discord_user_id">;
-  requiredKey?: string;
+  video: Pick<
+    VideoRow,
+    "creator_id" | "primary_event_id" | "id" | "owner_discord_user_id"
+  >;
+  requiredKey: VideoEditSectionKey;
 }): Promise<boolean> {
   const { db, user, video, requiredKey } = args;
   if (user.role === "admin") return true;
