@@ -23,8 +23,8 @@
 
 ### 注意点
 
-- `notification_outbox` は Drizzle ORM スキーマ上に定義済みだが、`workers/notification-dispatcher/index.ts` は現在 `notifications` テーブルを直接 SQL で参照している (スキーマ名の乖離あり)。
-- Worker は `notification_outbox` ではなく `notifications` テーブルを参照しており、実際の稼働テーブルと ORM 定義の間に不整合がある。
+- 2026-05-17 修正: `workers/notification-dispatcher/index.ts` を `notification_outbox` の実カラムに整合済み。スキーマ乖離は解消。
+- 旧 Worker は `notifications` テーブルを叩いていたが、`migrations/0000_brave_iceman.sql` には `notification_outbox` しか定義されていないため、旧 Worker は実質ノーオペレーションだった。
 
 ---
 
@@ -53,25 +53,26 @@
 
 ## 3. リトライ仕様
 
-根拠ファイル: `workers/notification-dispatcher/index.ts` (L12-L51)
+根拠ファイル: `workers/notification-dispatcher/index.ts`
 
 ```
 MAX_RETRIES = 3
+BACKOFF_BASE_SEC = 60   // 指数バックオフ基数
 ```
 
-- Cron 起動ごとに `status = 'pending' AND retry_count < 3` のレコードを最大 50 件取得。
-- `deliver()` が成功: `status = 'sent'`, `sent_at` を記録。
-- `deliver()` が失敗:
-  - `retry_count += 1`
-  - `retry_count >= MAX_RETRIES` なら `status = 'failed'`, それ以外は `status = 'pending'` のまま。
-- 指数バックオフ・遅延再試行ロジックは未実装 (次回 Cron まで待つ形)。
+- Cron 起動ごとに `status = 'pending' AND attempt_count < 3 AND (next_attempt_at IS NULL OR next_attempt_at <= now)` のレコードを最大 50 件取得。
+- 処理開始時に `status = 'processing'` で排他し、`deliver()` 成功で `status = 'sent'`。
+- 失敗時:
+  - `attempt_count += 1`
+  - `attempt_count >= MAX_RETRIES` なら `status = 'failed'` + `last_error`
+  - それ以外は `next_attempt_at = now + 60 * 2^(attempt_count-1)` で指数バックオフ。
 
 ### チャネル対応状況
 
 | チャネル | 実装状況 |
 |---|---|
 | `discord_webhook` | 実装済み (`DISCORD_WEBHOOK_URL` が設定されている場合のみ稼働) |
-| `discord_dm` | 未実装 (`DISCORD_BOT_TOKEN` 未使用) |
+| `discord_dm` | 実装済み (`DISCORD_BOT_TOKEN` 必須。`/users/@me/channels` で DM チャネル作成後にメッセージ送信) |
 
 ---
 
@@ -82,13 +83,13 @@ MAX_RETRIES = 3
 ```sql
 -- 失敗レコード確認
 SELECT id, type, attempt_count, last_error, created_at
-FROM notifications
+FROM notification_outbox
 WHERE status = 'failed'
 ORDER BY created_at DESC LIMIT 20;
 
 -- 処理待ちキュー確認
 SELECT status, COUNT(*) AS cnt
-FROM notifications
+FROM notification_outbox
 GROUP BY status;
 ```
 
@@ -102,23 +103,20 @@ GROUP BY status;
 
 ## 5. 既知の制限
 
-### 5-1. スキーマ乖離 (要修正)
+### 5-1. スキーマ乖離 (解消済み 2026-05-17)
 
-- ORM 定義: `notification_outbox` テーブル (`src/lib/db/schema.ts`)
-- Worker 参照: `notifications` テーブル (`workers/notification-dispatcher/index.ts`)
-- Worker が ORM スキーマ外のテーブルを参照しているため、Drizzle から通知レコードを操作できない。
-- 修正方針: Worker 側を `notification_outbox` に合わせるか、ORM 側テーブル名を `notifications` に変更するかを Opus 判断で決める必要がある。
+- Worker を `notification_outbox` に整合させる修正で解消。
+- 旧 Worker が叩いていた `notifications` テーブルはそもそも存在せず、稼働していなかった (失敗を出していた可能性あり)。
 
-### 5-2. 指数バックオフ未実装
+### 5-2. 指数バックオフ (実装済み 2026-05-17)
 
-- 現在は Cron 周期 (5 分) ごとにリトライする。
-- 大量失敗時に同じ宛先へ集中投下するリスクがある。
-- `next_attempt_at` カラムは ORM 定義に存在するが Worker では未使用。
+- `next_attempt_at = now + 60 * 2^(attempt_count - 1)` で 60s → 120s → 240s の遅延再試行を実装。
+- Cron 周期 5 分よりも長いバックオフは次々回以降の Cron で再評価される。
 
-### 5-3. Discord DM 未実装
+### 5-3. Discord DM (実装済み 2026-05-17)
 
-- `DISCORD_BOT_TOKEN` は Env 型に定義されているが、DM 送信ロジックがない。
-- Discord Webhook のみで稼働中。
+- `DISCORD_BOT_TOKEN` を使って `/users/@me/channels` で DM チャネルを作成し、`/channels/{id}/messages` でメッセージ送信。
+- `payload_json` をそのまま POST body として使う設計のため、payload 構築側でメッセージ仕様を満たすこと。
 
 ### 5-4. サイト内通知未実装
 
@@ -140,10 +138,10 @@ GROUP BY status;
 | Worker Cron (5 分間隔) | 実装済み |
 | Discord Webhook 送信 | 実装済み |
 | 最大 3 回リトライ | 実装済み |
-| Discord DM 送信 | 未実装 |
-| 指数バックオフ | 未実装 |
-| next_attempt_at 活用 | 未実装 |
+| Discord DM 送信 | 実装済み (2026-05-17) |
+| 指数バックオフ | 実装済み (2026-05-17) |
+| next_attempt_at 活用 | 実装済み (2026-05-17) |
 | サイト内通知チャネル | 未実装 |
-| Worker と ORM スキーマの一致 | 不整合あり (要修正) |
-| 通知失敗履歴の管理画面表示 | 未実装 |
+| Worker と ORM スキーマの一致 | 解消済み (2026-05-17) |
+| 通知失敗履歴の管理画面表示 | 未実装 (`/admin/audit` で history_logs は閲覧可) |
 
