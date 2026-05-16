@@ -8,6 +8,7 @@ import {
   setCostGuardMode,
   setMaintenanceMode,
 } from "@/lib/actions/cost-guard";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 interface CostGuardFormProps {
   mode: "normal" | "economy" | "read_only" | "static_only" | "maintenance";
@@ -31,6 +32,7 @@ export function CostGuardForm(props: CostGuardFormProps): React.ReactElement {
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
+  const [maintenanceConfirmOpen, setMaintenanceConfirmOpen] = React.useState(false);
 
   const run = (
     fd: FormData,
@@ -120,11 +122,10 @@ export function CostGuardForm(props: CostGuardFormProps): React.ReactElement {
           disabled={busy}
           onClick={() => {
             const next = props.isMaintenance === 1 ? 0 : 1;
-            if (
-              next === 1 &&
-              !confirm("メンテナンスモードを ON にすると一般ユーザーは閲覧不可になります。続行?")
-            )
+            if (next === 1) {
+              setMaintenanceConfirmOpen(true);
               return;
+            }
             const fd = new FormData();
             fd.set("is_maintenance_mode", String(next));
             run(fd, setMaintenanceMode, "メンテナンス状態を更新しました。");
@@ -155,6 +156,21 @@ export function CostGuardForm(props: CostGuardFormProps): React.ReactElement {
           {props.autoEnabled === 1 ? "無効化" : "有効化"}
         </button>
       </section>
+      <ConfirmDialog
+        open={maintenanceConfirmOpen}
+        title="メンテナンスモードを ON にする"
+        message="メンテナンスモードを ON にすると一般ユーザーは閲覧不可になります。続行しますか?"
+        confirmLabel="ON にする"
+        cancelLabel="キャンセル"
+        tone="danger"
+        onConfirm={() => {
+          setMaintenanceConfirmOpen(false);
+          const fd = new FormData();
+          fd.set("is_maintenance_mode", "1");
+          run(fd, setMaintenanceMode, "メンテナンス状態を更新しました。");
+        }}
+        onCancel={() => setMaintenanceConfirmOpen(false)}
+      />
     </div>
   );
 }

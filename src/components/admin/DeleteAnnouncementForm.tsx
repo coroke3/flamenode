@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { deleteAnnouncement } from "@/lib/actions/announcement";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 export function DeleteAnnouncementForm({
   id,
@@ -13,9 +14,10 @@ export function DeleteAnnouncementForm({
   const router = useRouter();
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = React.useState(false);
 
-  const onClick = () => {
-    if (!confirm("このお知らせを削除します。")) return;
+  const handleConfirm = () => {
+    setConfirmOpen(false);
     setError(null);
     const fd = new FormData();
     fd.set("id", id);
@@ -35,7 +37,7 @@ export function DeleteAnnouncementForm({
         type="button"
         className="fn-btn fn-btn-danger fn-btn-sm"
         disabled={busy}
-        onClick={onClick}
+        onClick={() => setConfirmOpen(true)}
       >
         <Icon name="trash" size={12} aria-hidden />
         {busy ? "削除中…" : "削除"}
@@ -45,6 +47,16 @@ export function DeleteAnnouncementForm({
           {error}
         </p>
       ) : null}
+      <ConfirmDialog
+        open={confirmOpen}
+        title="お知らせを削除"
+        message="このお知らせを削除します。この操作は取り消せません。"
+        confirmLabel="削除"
+        cancelLabel="キャンセル"
+        tone="danger"
+        onConfirm={handleConfirm}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </div>
   );
 }

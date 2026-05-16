@@ -9,6 +9,7 @@ import {
   publishTermsVersion,
   updateTermsVersion,
 } from "@/lib/actions/rules";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 export interface TermsInitial {
   id?: string;
@@ -28,6 +29,7 @@ export function TermsForm({ mode, initial = {} }: Props): React.ReactElement {
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
+  const [confirmKind, setConfirmKind] = React.useState<"publish" | "archive" | null>(null);
   const readOnly = mode === "edit" && initial.status !== "draft";
 
   const handle = (fd: FormData, fn: typeof createTermsVersion, ok: string) => {
@@ -60,28 +62,32 @@ export function TermsForm({ mode, initial = {} }: Props): React.ReactElement {
 
   const onPublish = () => {
     if (!initial.id) return;
-    if (
-      !confirm(
-        initial.severity === "major"
-          ? "major リリースとして公開します。全ユーザーに再同意を要求します。"
-          : "minor リリースとして公開します。",
-      )
-    )
-      return;
+    setConfirmKind("publish");
+  };
+
+  const onArchive = () => {
+    if (!initial.id) return;
+    setConfirmKind("archive");
+  };
+
+  const handlePublishConfirm = () => {
+    if (!initial.id) return;
+    setConfirmKind(null);
     const fd = new FormData();
     fd.set("id", initial.id);
     handle(fd, publishTermsVersion, "公開しました。");
   };
 
-  const onArchive = () => {
+  const handleArchiveConfirm = () => {
     if (!initial.id) return;
-    if (!confirm("このバージョンを archived にします。")) return;
+    setConfirmKind(null);
     const fd = new FormData();
     fd.set("id", initial.id);
     handle(fd, archiveTermsVersion, "アーカイブしました。");
   };
 
   return (
+    <>
     <form
       onSubmit={onSubmit}
       style={{ display: "flex", flexDirection: "column", gap: 12 }}
@@ -177,5 +183,30 @@ export function TermsForm({ mode, initial = {} }: Props): React.ReactElement {
         ) : null}
       </div>
     </form>
+    <ConfirmDialog
+      open={confirmKind === "publish"}
+      title="利用規約を公開"
+      message={
+        initial.severity === "major"
+          ? "major リリースとして公開します。全ユーザーに再同意を要求します。"
+          : "minor リリースとして公開します。"
+      }
+      confirmLabel="公開する"
+      cancelLabel="キャンセル"
+      tone={initial.severity === "major" ? "danger" : "default"}
+      onConfirm={handlePublishConfirm}
+      onCancel={() => setConfirmKind(null)}
+    />
+    <ConfirmDialog
+      open={confirmKind === "archive"}
+      title="バージョンをアーカイブ"
+      message="このバージョンを archived にします。この操作は取り消せません。"
+      confirmLabel="アーカイブ"
+      cancelLabel="キャンセル"
+      tone="danger"
+      onConfirm={handleArchiveConfirm}
+      onCancel={() => setConfirmKind(null)}
+    />
+    </>
   );
 }

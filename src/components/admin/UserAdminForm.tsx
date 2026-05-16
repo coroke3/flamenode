@@ -9,6 +9,7 @@ import {
   setUserNotifications,
   setUserRole,
 } from "@/lib/actions/user-admin";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 interface UserAdminFormProps {
   user: {
@@ -29,6 +30,7 @@ export function UserAdminForm({
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
   const [banReason, setBanReason] = React.useState("");
+  const [banConfirmOpen, setBanConfirmOpen] = React.useState(false);
 
   const run = (fd: FormData, action: (fd: FormData) => Promise<{ ok: boolean; message?: string }>, okMsg: string) => {
     setError(null);
@@ -115,14 +117,7 @@ export function UserAdminForm({
               type="button"
               className="fn-btn fn-btn-danger fn-btn-sm"
               disabled={busy || !banReason.trim()}
-              onClick={() => {
-                if (!confirm(`このユーザーを BAN します。\n理由: ${banReason}`)) return;
-                const fd = new FormData();
-                fd.set("user_id", user.id);
-                fd.set("is_banned", "1");
-                fd.set("reason", banReason);
-                run(fd, setUserBanned, "BAN しました。");
-              }}
+              onClick={() => setBanConfirmOpen(true)}
             >
               BAN
             </button>
@@ -179,6 +174,23 @@ export function UserAdminForm({
           </div>
         )}
       </section>
+      <ConfirmDialog
+        open={banConfirmOpen}
+        title="ユーザーを BAN"
+        message={`このユーザーを BAN します。\n理由: ${banReason}`}
+        confirmLabel="BAN する"
+        cancelLabel="キャンセル"
+        tone="danger"
+        onConfirm={() => {
+          setBanConfirmOpen(false);
+          const fd = new FormData();
+          fd.set("user_id", user.id);
+          fd.set("is_banned", "1");
+          fd.set("reason", banReason);
+          run(fd, setUserBanned, "BAN しました。");
+        }}
+        onCancel={() => setBanConfirmOpen(false)}
+      />
     </div>
   );
 }
