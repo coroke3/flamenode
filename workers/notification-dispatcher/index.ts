@@ -1,13 +1,12 @@
 /**
  * 通知ディスパッチャー。
  * notification_outbox テーブルから未送信レコードを取り、Discord DM や Webhook に投げる。
- * 失敗時はリトライ最大3回でステータスを更新する。
+ * 失敗時はリトライ最大 MAX_RETRIES 回でステータスを更新する。
  *
- * Opus判断候補: notification_outbox のカラム構成 (discord_user_id, type, payload_json,
- * status, attempt_count, next_attempt_at, last_error) は Worker が想定していた
- * (channel, payload, retry_count, sent_at) と大きく異なる。
- * 実クエリの修正は Opus レビュー後に行うこと。現在は SELECT/UPDATE クエリをコメントアウトし
- * ディスパッチ処理をスキップする安全実装にしてある。
+ * カラム: id, discord_user_id, type, payload_json, status, attempt_count,
+ *         next_attempt_at, last_error, created_at
+ * status enum: 'pending' | 'processing' | 'sent' | 'failed'
+ * 時刻: Unix integer (Math.floor(Date.now() / 1000))
  */
 export interface Env {
   DB: D1Database;
@@ -16,6 +15,16 @@ export interface Env {
 }
 
 const MAX_RETRIES = 3;
+/** 指数バックオフ基数 (秒)。attempt_count=0 の初回失敗で 60 秒後にリトライ */
+const BACKOFF_BASE_SEC = 60;
+
+type OutboxRow = {
+  id: string;
+  discord_user_id: string;
+  type: string;
+  payload_json: string;
+  attempt_count: number;
+};
 
 export default {
   async scheduled(_evt: ScheduledEvent, env: Env, ctx: ExecutionContext) {
@@ -27,35 +36,110 @@ export default {
 };
 
 async function dispatch(env: Env): Promise<void> {
-  // Opus判断候補: notification_outbox のカラム (discord_user_id, type, payload_json,
-  // status, attempt_count, next_attempt_at, last_error) に合わせてクエリを再設計すること。
-  // 旧カラム名 (channel, payload, retry_count, sent_at) は存在しないため、
-  // クエリを実行すると実行時エラーになる。修正完了まで dispatch をスキップする。
-  //
-  // 旧クエリ (参考):
-  // SELECT id, channel, payload, retry_count
-  //   FROM notification_outbox   -- テーブル名修正済み (旧: notifications)
-  //   WHERE status = 'pending' AND retry_count < ?1
-  //   ORDER BY created_at ASC LIMIT 50
-  //
-  // UPDATE notification_outbox SET status = 'sent', sent_at = ?1, updated_at = ?1 WHERE id = ?2
-  // UPDATE notification_outbox SET retry_count = ?1, status = ?2, updated_at = ?3 WHERE id = ?4
-  //
-  // 上記 SQL はカラム名不一致のため無効。Opus レビュー後に実装すること。
-  void env; // lint: unused variable suppression
+  const now = Math.floor(Date.now() / 1000);
+
+  const selectStmt = env.DB.prepare(
+    `SELECT id, discord_user_id, type, payload_json, attempt_count
+       FROM notification_outbox
+      WHERE status = 'pending'
+        AND attempt_count < ?1
+        AND (next_attempt_at IS NULL OR next_attempt_at <= ?2)
+      ORDER BY created_at ASC
+      LIMIT 50`,
+  );
+
+  const result = await selectStmt.bind(MAX_RETRIES, now).all<OutboxRow>();
+  const rows = result.results ?? [];
+
+  const markProcessingStmt = env.DB.prepare(
+    `UPDATE notification_outbox SET status = 'processing' WHERE id = ?1`,
+  );
+  const markSentStmt = env.DB.prepare(
+    `UPDATE notification_outbox SET status = 'sent' WHERE id = ?1`,
+  );
+  const markRetryStmt = env.DB.prepare(
+    `UPDATE notification_outbox
+        SET attempt_count = ?1,
+            status = 'pending',
+            last_error = ?2,
+            next_attempt_at = ?3
+      WHERE id = ?4`,
+  );
+  const markFailedStmt = env.DB.prepare(
+    `UPDATE notification_outbox
+        SET status = 'failed',
+            attempt_count = ?1,
+            last_error = ?2
+      WHERE id = ?3`,
+  );
+
+  for (const row of rows) {
+    await markProcessingStmt.bind(row.id).run();
+
+    let ok = false;
+    let errorMsg = "";
+    try {
+      ok = await deliver(
+        { type: row.type, payload_json: row.payload_json, discord_user_id: row.discord_user_id },
+        env,
+      );
+    } catch (e) {
+      errorMsg = e instanceof Error ? e.message : String(e);
+    }
+
+    if (ok) {
+      await markSentStmt.bind(row.id).run();
+    } else {
+      const nextCount = row.attempt_count + 1;
+      if (nextCount >= MAX_RETRIES) {
+        await markFailedStmt.bind(nextCount, errorMsg || "delivery failed", row.id).run();
+      } else {
+        const backoffSec = BACKOFF_BASE_SEC * Math.pow(2, row.attempt_count);
+        const nextAttemptAt = Math.floor(Date.now() / 1000) + backoffSec;
+        await markRetryStmt
+          .bind(nextCount, errorMsg || "delivery failed", nextAttemptAt, row.id)
+          .run();
+      }
+    }
+  }
 }
 
 async function deliver(
-  row: { channel: string; payload: string },
+  row: { type: string; payload_json: string; discord_user_id: string },
   env: Env,
 ): Promise<boolean> {
-  if (row.channel === "discord_webhook" && env.DISCORD_WEBHOOK_URL) {
+  if (row.type === "discord_webhook" && env.DISCORD_WEBHOOK_URL) {
     const res = await fetch(env.DISCORD_WEBHOOK_URL, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: row.payload,
+      body: row.payload_json,
     });
     return res.ok;
   }
+
+  if (row.type === "discord_dm" && env.DISCORD_BOT_TOKEN) {
+    // Discord DM: まずチャンネルを作成してからメッセージを送信する
+    const dmChannelRes = await fetch("https://discord.com/api/v10/users/@me/channels", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bot ${env.DISCORD_BOT_TOKEN}`,
+      },
+      body: JSON.stringify({ recipient_id: row.discord_user_id }),
+    });
+    if (!dmChannelRes.ok) return false;
+
+    const dmChannel = await dmChannelRes.json<{ id: string }>();
+    const msgRes = await fetch(`https://discord.com/api/v10/channels/${dmChannel.id}/messages`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bot ${env.DISCORD_BOT_TOKEN}`,
+      },
+      body: row.payload_json,
+    });
+    return msgRes.ok;
+  }
+
   return false;
 }
