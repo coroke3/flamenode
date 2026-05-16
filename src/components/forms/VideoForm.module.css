@@ -97,3 +97,40 @@
   color: var(--text-secondary);
   line-height: 1.6;
 }
+
+/* ---- section disabled ---- */
+
+.sectionDisabled {
+  opacity: 0.55;
+  pointer-events: none;
+  position: relative;
+}
+
+.sectionDisabledBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  vertical-align: middle;
+}
+
+/* ---- editable field hover hint ---- */
+
+.editableField input:not([disabled]):hover,
+.editableField textarea:not([disabled]):hover,
+.editableField select:not([disabled]):hover {
+  border-color: var(--accent-primary, #4f8ef7);
+  outline: none;
+}
+
+.editableField input:not([disabled]):focus,
+.editableField textarea:not([disabled]):focus,
+.editableField select:not([disabled]):focus {
+  border-color: var(--accent-primary, #4f8ef7);
+  box-shadow: 0 0 0 2px var(--accent-primary-soft, rgba(79, 142, 247, 0.18));
+}

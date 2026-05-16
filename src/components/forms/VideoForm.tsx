@@ -56,6 +56,32 @@ interface VideoFormProps {
   memberSuggestions?: VideoMemberSuggestion[];
   xIdOptions?: XIdOption[];
   activeXId?: string | null;
+  /**
+   * 編集権限がない section の key 一覧。
+   * 指定された section は opacity / pointer-events で不活性化され、
+   * 内部の input 類に disabled 属性が付与される。
+   *
+   * 取りうる値: "submitter" | "video" | "descriptions" | "members"
+   *
+   * 省略時はすべて編集可能 (既存動作を維持)。
+   *
+   * 注意: これはフロント表示の補助のみ。
+   * サーバー側権限チェック (updateVideo Server Action) は独立して実行される。
+   */
+  disabledSections?: string[];
+}
+
+/** section key が disabledSections に含まれているか確認する小関数。 */
+function isSectionDisabled(
+  disabledSections: string[] | undefined,
+  key: string,
+): boolean {
+  return Array.isArray(disabledSections) && disabledSections.includes(key);
+}
+
+/** CSS クラス名を条件結合する軽量ヘルパー。外部依存不要。 */
+function cx(...classes: (string | false | null | undefined)[]): string {
+  return classes.filter(Boolean).join(" ");
 }
 
 /**
@@ -71,6 +97,7 @@ export function VideoForm({
   memberSuggestions = [],
   xIdOptions = [],
   activeXId,
+  disabledSections,
 }: VideoFormProps): React.ReactElement {
   const router = useRouter();
   const [youtubeUrl, setYoutubeUrl] = React.useState(initial.youtube_url ?? "");
@@ -124,15 +151,26 @@ export function VideoForm({
       {videoId ? <input type="hidden" name="video_id" value={videoId} /> : null}
       <input type="hidden" name="mode" value={mode} />
 
-      <section className={styles.section}>
+      <section
+        className={cx(
+          styles.section,
+          isSectionDisabled(disabledSections, "submitter") && styles.sectionDisabled,
+        )}
+        data-disabled={isSectionDisabled(disabledSections, "submitter") || undefined}
+      >
         <h2 className={styles.sectionTitle}>
           <Icon name="user" size={14} aria-hidden /> 提出者情報
+          {isSectionDisabled(disabledSections, "submitter") ? (
+            <span className={styles.sectionDisabledBadge} aria-label="編集不可">
+              <Icon name="alert" size={11} aria-hidden /> 編集権限なし
+            </span>
+          ) : null}
         </h2>
         <p className={styles.help}>
           この作品で表示する X ID、活動名、団体名を確認してください。X ID 設定の既定値を使いつつ、作品ごとに上書きできます。
         </p>
         <div className={`${styles.row} cols-2`}>
-          <div className={styles.field}>
+          <div className={cx(styles.field, styles.editableField)}>
             <label className={`${styles.label} ${styles.required}`} htmlFor="contact_x_id">
               提出主体 X ID
             </label>
@@ -148,6 +186,7 @@ export function VideoForm({
                     readOnly
                     className="fn-input"
                     aria-readonly="true"
+                    disabled={isSectionDisabled(disabledSections, "submitter")}
                     style={{ opacity: 0.75, cursor: "default" }}
                   />
                   <p className={styles.help} style={{ marginTop: 4 }}>
@@ -172,6 +211,7 @@ export function VideoForm({
                     className="fn-select"
                     defaultValue={selectedDefault}
                     required
+                    disabled={isSectionDisabled(disabledSections, "submitter")}
                   >
                     {xIdOptions.map((opt) => (
                       <option key={opt.id} value={normalizeXId(opt.id)}>
@@ -192,6 +232,7 @@ export function VideoForm({
                   className="fn-input"
                   readOnly
                   aria-readonly="true"
+                  disabled={isSectionDisabled(disabledSections, "submitter")}
                   style={{ opacity: 0.75, cursor: "default" }}
                 />
               ) : (
@@ -201,7 +242,7 @@ export function VideoForm({
               )
             ) : null}
           </div>
-          <div className={styles.field}>
+          <div className={cx(styles.field, styles.editableField)}>
             <label className={`${styles.label} ${styles.required}`} htmlFor="display_name">
               表示名 / 活動名 / 団体名
             </label>
@@ -213,10 +254,11 @@ export function VideoForm({
               className="fn-input"
               maxLength={80}
               required
+              disabled={isSectionDisabled(disabledSections, "submitter")}
             />
           </div>
         </div>
-        <div className={styles.field}>
+        <div className={cx(styles.field, styles.editableField)}>
           <label className={styles.label} htmlFor="icon_url">
             アイコン URL
           </label>
@@ -227,9 +269,10 @@ export function VideoForm({
             defaultValue={initial.icon_url}
             className="fn-input"
             placeholder="https://..."
+            disabled={isSectionDisabled(disabledSections, "submitter")}
           />
         </div>
-        <div className={styles.field}>
+        <div className={cx(styles.field, styles.editableField)}>
           <label className={styles.label} htmlFor="profile_text">
             自分・団体の概要
           </label>
@@ -240,10 +283,11 @@ export function VideoForm({
             className="fn-input"
             rows={3}
             maxLength={1000}
+            disabled={isSectionDisabled(disabledSections, "submitter")}
           />
         </div>
         <div className={`${styles.row} cols-2`}>
-          <div className={styles.field}>
+          <div className={cx(styles.field, styles.editableField)}>
             <label className={styles.label} htmlFor="youtube_channel_url">
               YouTube チャンネル URL
             </label>
@@ -254,9 +298,10 @@ export function VideoForm({
               defaultValue={initial.youtube_channel_url}
               className="fn-input"
               placeholder="https://www.youtube.com/@..."
+              disabled={isSectionDisabled(disabledSections, "submitter")}
             />
           </div>
-          <div className={styles.field}>
+          <div className={cx(styles.field, styles.editableField)}>
             <label className={styles.label} htmlFor="other_social_links">
               SNS 一覧
             </label>
@@ -268,17 +313,29 @@ export function VideoForm({
               className="fn-input"
               placeholder="X=https://x.com/... / niconico=..."
               maxLength={1000}
+              disabled={isSectionDisabled(disabledSections, "submitter")}
             />
           </div>
         </div>
       </section>
 
-      <section className={styles.section}>
+      <section
+        className={cx(
+          styles.section,
+          isSectionDisabled(disabledSections, "video") && styles.sectionDisabled,
+        )}
+        data-disabled={isSectionDisabled(disabledSections, "video") || undefined}
+      >
         <h2 className={styles.sectionTitle}>
           <Icon name="youtube" size={14} aria-hidden /> 動画と基本情報
+          {isSectionDisabled(disabledSections, "video") ? (
+            <span className={styles.sectionDisabledBadge} aria-label="編集不可">
+              <Icon name="alert" size={11} aria-hidden /> 編集権限なし
+            </span>
+          ) : null}
         </h2>
 
-        <div className={styles.field}>
+        <div className={cx(styles.field, styles.editableField)}>
           <label className={`${styles.label} ${styles.required}`} htmlFor="title">
             作品タイトル
           </label>
@@ -291,10 +348,11 @@ export function VideoForm({
             placeholder="例: First Light - 春の輪"
             maxLength={120}
             required
+            disabled={isSectionDisabled(disabledSections, "video")}
           />
         </div>
 
-        <div className={styles.field}>
+        <div className={cx(styles.field, styles.editableField)}>
           <label
             className={`${styles.label} ${styles.required}`}
             htmlFor="youtube_url"
@@ -310,6 +368,7 @@ export function VideoForm({
             className="fn-input"
             placeholder="https://www.youtube.com/watch?v=..."
             required
+            disabled={isSectionDisabled(disabledSections, "video")}
           />
           <p className={styles.help}>
             限定公開でも登録可能ですが、編集時の動画 ID 変更は管理者の事前承認が必要です。
@@ -338,7 +397,7 @@ export function VideoForm({
         </div>
 
         <div className={`${styles.row} cols-2`}>
-          <div className={styles.field}>
+          <div className={cx(styles.field, styles.editableField)}>
             <label className={styles.label} htmlFor="music">
               使用楽曲
             </label>
@@ -350,9 +409,10 @@ export function VideoForm({
               className="fn-input"
               placeholder="アーティスト名 - 曲名"
               maxLength={200}
+              disabled={isSectionDisabled(disabledSections, "video")}
             />
           </div>
-          <div className={styles.field}>
+          <div className={cx(styles.field, styles.editableField)}>
             <label className={styles.label} htmlFor="credit">
               クレジット
             </label>
@@ -364,17 +424,29 @@ export function VideoForm({
               className="fn-input"
               placeholder="提供 / 作詞作曲 など"
               maxLength={200}
+              disabled={isSectionDisabled(disabledSections, "video")}
             />
           </div>
         </div>
       </section>
 
-      <section className={styles.section}>
+      <section
+        className={cx(
+          styles.section,
+          isSectionDisabled(disabledSections, "descriptions") && styles.sectionDisabled,
+        )}
+        data-disabled={isSectionDisabled(disabledSections, "descriptions") || undefined}
+      >
         <h2 className={styles.sectionTitle}>
           <Icon name="edit" size={14} aria-hidden /> 紹介文
+          {isSectionDisabled(disabledSections, "descriptions") ? (
+            <span className={styles.sectionDisabledBadge} aria-label="編集不可">
+              <Icon name="alert" size={11} aria-hidden /> 編集権限なし
+            </span>
+          ) : null}
         </h2>
 
-        <div className={styles.field}>
+        <div className={cx(styles.field, styles.editableField)}>
           <label className={styles.label} htmlFor="intro_comment">
             紹介コメント
           </label>
@@ -386,10 +458,11 @@ export function VideoForm({
             rows={3}
             maxLength={500}
             placeholder="作品の見どころを 1〜2 行で。"
+            disabled={isSectionDisabled(disabledSections, "descriptions")}
           />
         </div>
 
-        <div className={styles.field}>
+        <div className={cx(styles.field, styles.editableField)}>
           <label className={styles.label} htmlFor="highlights">
             みどころ
           </label>
@@ -400,10 +473,11 @@ export function VideoForm({
             className="fn-input"
             rows={4}
             maxLength={1000}
+            disabled={isSectionDisabled(disabledSections, "descriptions")}
           />
         </div>
 
-        <div className={styles.field}>
+        <div className={cx(styles.field, styles.editableField)}>
           <label className={styles.label} htmlFor="production_story">
             制作エピソード
           </label>
@@ -414,10 +488,11 @@ export function VideoForm({
             className="fn-input"
             rows={4}
             maxLength={1000}
+            disabled={isSectionDisabled(disabledSections, "descriptions")}
           />
         </div>
 
-        <div className={styles.field}>
+        <div className={cx(styles.field, styles.editableField)}>
           <label className={styles.label} htmlFor="used_software">
             使用ソフト
           </label>
@@ -429,10 +504,11 @@ export function VideoForm({
             className="fn-input"
             maxLength={200}
             placeholder="AviUtl, After Effects, Vegas など"
+            disabled={isSectionDisabled(disabledSections, "descriptions")}
           />
         </div>
 
-        <div className={styles.field}>
+        <div className={cx(styles.field, styles.editableField)}>
           <label className={styles.label} htmlFor="closing_comment">
             あとがき
           </label>
@@ -443,20 +519,32 @@ export function VideoForm({
             className="fn-input"
             rows={3}
             maxLength={500}
+            disabled={isSectionDisabled(disabledSections, "descriptions")}
           />
         </div>
       </section>
 
-      <section className={styles.section}>
+      <section
+        className={cx(
+          styles.section,
+          isSectionDisabled(disabledSections, "members") && styles.sectionDisabled,
+        )}
+        data-disabled={isSectionDisabled(disabledSections, "members") || undefined}
+      >
         <h2 className={styles.sectionTitle}>
           <Icon name="users" size={14} aria-hidden /> 合作メンバー
+          {isSectionDisabled(disabledSections, "members") ? (
+            <span className={styles.sectionDisabledBadge} aria-label="編集不可">
+              <Icon name="alert" size={11} aria-hidden /> 編集権限なし
+            </span>
+          ) : null}
         </h2>
         <label
           style={{
             display: "inline-flex",
             alignItems: "center",
             gap: 8,
-            cursor: "pointer",
+            cursor: isSectionDisabled(disabledSections, "members") ? "default" : "pointer",
             fontSize: 13,
           }}
         >
@@ -465,6 +553,7 @@ export function VideoForm({
             name="is_collab"
             checked={isCollab}
             onChange={(e) => setIsCollab(e.target.checked)}
+            disabled={isSectionDisabled(disabledSections, "members")}
           />
           合作作品として登録する
         </label>
