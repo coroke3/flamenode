@@ -1,12 +1,13 @@
 import "server-only";
 
-import { and, eq, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
+import { and, eq, gte, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import {
   events as eventsTable,
   slots as slotsTable,
   systemSettings,
   videoEvents as videoEventsTable,
+  videoInteractions as videoInteractionsTable,
   videos as videosTable,
 } from "@/lib/db/schema";
 
@@ -223,10 +224,148 @@ async function checkVoidedVideoVisible(db: AnyDb): Promise<HealthCheckResult> {
   };
 }
 
+/** slot 時間重複チェック (同一 event 内で slot_kind=time かつ start_time/end_time が重複) */
+async function checkSlotTimeOverlap(db: AnyDb): Promise<HealthCheckResult> {
+  // slot_kind=time かつ start_time/end_time が両方 non-null のスロットを取得
+  const rows = await db
+    .select({
+      id: slotsTable.id,
+      event_id: slotsTable.event_id,
+      start_time: slotsTable.start_time,
+      end_time: slotsTable.end_time,
+      reservation_group_id: slotsTable.reservation_group_id,
+    })
+    .from(slotsTable)
+    .where(
+      and(
+        eq(slotsTable.slot_kind, "time"),
+        isNotNull(slotsTable.start_time),
+        isNotNull(slotsTable.end_time),
+      ),
+    );
+
+  // event_id ごとにグループ化
+  const byEvent = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const key = row.event_id;
+    let list = byEvent.get(key);
+    if (!list) {
+      list = [];
+      byEvent.set(key, list);
+    }
+    list.push(row);
+  }
+
+  const overlapSamples: string[] = [];
+  let overlapCount = 0;
+
+  for (const [, slotList] of byEvent) {
+    // start_time 昇順ソート
+    slotList.sort((a, b) => (a.start_time ?? 0) - (b.start_time ?? 0));
+
+    for (let i = 0; i < slotList.length - 1; i++) {
+      const cur = slotList[i];
+      const next = slotList[i + 1];
+
+      // reservation_group_id が同じペアは連続枠として除外
+      if (
+        cur.reservation_group_id != null &&
+        cur.reservation_group_id === next.reservation_group_id
+      ) {
+        continue;
+      }
+
+      const curEnd = cur.end_time ?? 0;
+      const nextStart = next.start_time ?? 0;
+
+      // cur の end_time が next の start_time より大きければ重複
+      if (curEnd > nextStart) {
+        overlapCount++;
+        if (overlapSamples.length < 5) {
+          overlapSamples.push(`${cur.id} / ${next.id}`);
+        }
+      }
+    }
+  }
+
+  return {
+    id: "slot_time_overlap",
+    label: "スロット時間重複 (slot_kind=time)",
+    status: overlapCount === 0 ? "ok" : "warn",
+    count: overlapCount,
+    samples: overlapSamples,
+    note:
+      overlapCount > 0
+        ? "同一 event 内で時間が重複しているスロットペアがあります。reservation_group_id が異なるペアのみ検出。"
+        : undefined,
+  };
+}
+
+/** like_count 実数差分チェック */
+const LIKE_COUNT_DRIFT_THRESHOLD = 5;
+
+async function checkLikeCountDrift(db: AnyDb): Promise<HealthCheckResult> {
+  // like_count >= 1 の videos を取得
+  const videoRows = await db
+    .select({ id: videosTable.id, like_count: videosTable.like_count })
+    .from(videosTable)
+    .where(gte(videosTable.like_count, 1));
+
+  if (videoRows.length === 0) {
+    return {
+      id: "like_count_drift",
+      label: "like_count 実数差分 (閾値 ±5)",
+      status: "ok",
+      count: 0,
+      samples: [],
+    };
+  }
+
+  // video_interactions から like 件数を group by video_id で取得
+  const interactionRows = await db
+    .select({
+      video_id: videoInteractionsTable.video_id,
+      cnt: sql<number>`COUNT(*)`,
+    })
+    .from(videoInteractionsTable)
+    .where(eq(videoInteractionsTable.interaction_type, "like"))
+    .groupBy(videoInteractionsTable.video_id);
+
+  // JS 側で video_id -> count のマップを作成
+  const interactionMap = new Map<string, number>();
+  for (const r of interactionRows) {
+    interactionMap.set(r.video_id, Number(r.cnt));
+  }
+
+  const driftSamples: string[] = [];
+  let driftCount = 0;
+
+  for (const video of videoRows) {
+    const actual = interactionMap.get(video.id) ?? 0;
+    const stored = video.like_count ?? 0;
+    if (Math.abs(stored - actual) >= LIKE_COUNT_DRIFT_THRESHOLD) {
+      driftCount++;
+      if (driftSamples.length < 5) {
+        driftSamples.push(`video:${video.id} stored:${stored} actual:${actual}`);
+      }
+    }
+  }
+
+  return {
+    id: "like_count_drift",
+    label: `like_count 実数差分 (閾値 ±${LIKE_COUNT_DRIFT_THRESHOLD})`,
+    status: driftCount === 0 ? "ok" : "warn",
+    count: driftCount,
+    samples: driftSamples,
+    note:
+      driftCount > 0
+        ? "videos.like_count と video_interactions の実数が大きくズレている作品があります。"
+        : undefined,
+  };
+}
+
 export async function runHealthChecks(db: AnyDb): Promise<HealthCheckResult[]> {
-  // Opus判断候補: like_count 実数差分チェック (集計負荷・閾値設定要)
   // Opus判断候補: deprecated 項目への新規データ検出 (何を deprecated 扱いするか仕様確定要)
-  // Opus判断候補: slot 時間重複チェック (連続枠の複雑な判断が必要)
   return Promise.all([
     checkSystemSettingsSingleRow(db),
     checkPrimaryEventSync(db),
@@ -237,5 +376,7 @@ export async function runHealthChecks(db: AnyDb): Promise<HealthCheckResult[]> {
     checkReservationGroupUserMix(db),
     checkPublicVideoWithoutYoutubeId(db),
     checkVoidedVideoVisible(db),
+    checkSlotTimeOverlap(db),
+    checkLikeCountDrift(db),
   ]);
 }
