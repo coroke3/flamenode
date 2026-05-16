@@ -105,7 +105,7 @@ export default async function SlottedPostPage({
     .select({ name: xUsersTable.x_name, x_user_id: xUsersTable.id })
     .from(xUsersTable)
     .orderBy(asc(xUsersTable.x_name))
-    .limit(200);
+    .limit(2000);
 
   return (
     <div
