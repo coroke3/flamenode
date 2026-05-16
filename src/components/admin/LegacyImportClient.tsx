@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import styles from "./LegacyImportClient.module.css";
 import { Icon } from "@/components/ui/Icon";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 interface PreviewRow {
   kind: "event" | "video";
@@ -114,6 +115,7 @@ export function LegacyImportClient(): React.ReactElement {
   const [analysis, setAnalysis] = React.useState<ImportResult | null>(null);
   const [applyResult, setApplyResult] = React.useState<ImportResult | null>(null);
   const [pending, setPending] = React.useState<"analyze" | "apply" | null>(null);
+  const [confirmApply, setConfirmApply] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   const addFiles = React.useCallback(async (list: FileList | File[]) => {
@@ -183,12 +185,7 @@ export function LegacyImportClient(): React.ReactElement {
     }
   };
 
-  const runApply = async () => {
-    if (files.length === 0) return;
-    const confirmed = window.confirm(
-      `インポートを実行します。\n\nイベント衝突: ${eventStrategy}\n動画衝突: ${videoStrategy}\n既存 X ID 更新: ${updateXUsers ? "する" : "しない"}\n\n続行しますか?`,
-    );
-    if (!confirmed) return;
+  const doApply = async () => {
     setPending("apply");
     try {
       const res = await fetch("/api/admin/legacy-import", {
@@ -218,6 +215,11 @@ export function LegacyImportClient(): React.ReactElement {
     } finally {
       setPending(null);
     }
+  };
+
+  const runApply = () => {
+    if (files.length === 0) return;
+    setConfirmApply(true);
   };
 
   const totalSize = files.reduce((acc, f) => acc + f.size, 0);
@@ -432,6 +434,19 @@ export function LegacyImportClient(): React.ReactElement {
           ) : null}
         </>
       ) : null}
+
+      <ConfirmDialog
+        open={confirmApply}
+        title="インポートを実行しますか?"
+        message={`インポートを実行します。\n\nイベント衝突: ${eventStrategy}\n動画衝突: ${videoStrategy}\n既存 X ID 更新: ${updateXUsers ? "する" : "しない"}\n\n続行しますか?`}
+        confirmLabel="取り込む"
+        tone="danger"
+        onConfirm={() => {
+          setConfirmApply(false);
+          void doApply();
+        }}
+        onCancel={() => setConfirmApply(false)}
+      />
     </div>
   );
 }

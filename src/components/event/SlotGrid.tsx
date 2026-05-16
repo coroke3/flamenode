@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { releaseOwnSlot, reserveSlot } from "@/lib/actions/slot";
 import { formatUnix } from "@/lib/utils/format";
 import { cn } from "@/lib/utils/cn";
@@ -57,6 +58,7 @@ export function SlotGrid({
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
   const [reservedSlotId, setReservedSlotId] = React.useState<string | null>(null);
+  const [confirmReleaseId, setConfirmReleaseId] = React.useState<string | null>(null);
   const displayRows = React.useMemo(
     () => collapseReservationGroups(slots as SlotBase[]),
     [slots],
@@ -91,7 +93,6 @@ export function SlotGrid({
   };
 
   const onRelease = (slotId: string) => {
-    if (!confirm("この枠を解放します。よろしいですか?")) return;
     setError(null);
     setSuccess(null);
     const fd = new FormData();
@@ -214,7 +215,7 @@ export function SlotGrid({
                                     type="button"
                                     className="fn-btn fn-btn-ghost fn-btn-sm"
                                     disabled={busy}
-                                    onClick={() => onRelease(slot.id)}
+                                    onClick={() => setConfirmReleaseId(slot.id)}
                                   >
                                     <Icon name="trash" size={10} aria-hidden /> 解放
                                   </button>
@@ -281,6 +282,20 @@ export function SlotGrid({
           </section>
         ))}
       </div>
+
+      <ConfirmDialog
+        open={confirmReleaseId !== null}
+        title="枠を解放しますか?"
+        message="この枠を解放します。よろしいですか?"
+        confirmLabel="解放する"
+        tone="danger"
+        onConfirm={() => {
+          const id = confirmReleaseId;
+          setConfirmReleaseId(null);
+          if (id) onRelease(id);
+        }}
+        onCancel={() => setConfirmReleaseId(null)}
+      />
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { deleteSlot, releaseSlot } from "@/lib/actions/slot-admin";
 import { formatUnix } from "@/lib/utils/format";
 import {
@@ -33,6 +34,11 @@ export function SlotList({ slots }: SlotListProps): React.ReactElement {
   const router = useRouter();
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [confirm, setConfirm] = React.useState<
+    | { kind: "release"; id: string }
+    | { kind: "delete"; id: string }
+    | null
+  >(null);
   const displayRows = React.useMemo(
     () => collapseReservationGroups(slots as SlotBase[]),
     [slots],
@@ -56,10 +62,6 @@ export function SlotList({ slots }: SlotListProps): React.ReactElement {
   }, [slots]);
 
   const runRelease = (slotId: string) => {
-    if (
-      !confirm("この枠を強制的に解放します。確保者には通知が必要な場合があります。続行しますか?")
-    )
-      return;
     setBusyId(slotId);
     setError(null);
     const fd = new FormData();
@@ -73,7 +75,6 @@ export function SlotList({ slots }: SlotListProps): React.ReactElement {
   };
 
   const runDelete = (slotId: string) => {
-    if (!confirm("この空き枠を削除します。")) return;
     setBusyId(slotId);
     setError(null);
     const fd = new FormData();
@@ -176,7 +177,7 @@ export function SlotList({ slots }: SlotListProps): React.ReactElement {
                       type="button"
                       className="fn-btn fn-btn-ghost fn-btn-sm"
                       disabled={busyId === s.id}
-                      onClick={() => runRelease(s.id)}
+                      onClick={() => setConfirm({ kind: "release", id: s.id })}
                     >
                       解放
                     </button>
@@ -185,7 +186,7 @@ export function SlotList({ slots }: SlotListProps): React.ReactElement {
                       type="button"
                       className="fn-btn fn-btn-ghost fn-btn-sm"
                       disabled={busyId === s.id}
-                      onClick={() => runDelete(s.id)}
+                      onClick={() => setConfirm({ kind: "delete", id: s.id })}
                     >
                       削除
                     </button>
@@ -196,6 +197,25 @@ export function SlotList({ slots }: SlotListProps): React.ReactElement {
           })}
         </tbody>
       </table>
+      <ConfirmDialog
+        open={confirm !== null}
+        title={confirm?.kind === "release" ? "枠を強制解放しますか?" : "空き枠を削除しますか?"}
+        message={
+          confirm?.kind === "release"
+            ? "この枠を強制的に解放します。確保者には通知が必要な場合があります。続行しますか?"
+            : "この空き枠を削除します。"
+        }
+        confirmLabel={confirm?.kind === "release" ? "解放する" : "削除する"}
+        tone="danger"
+        onConfirm={() => {
+          if (!confirm) return;
+          const { kind, id } = confirm;
+          setConfirm(null);
+          if (kind === "release") runRelease(id);
+          else runDelete(id);
+        }}
+        onCancel={() => setConfirm(null)}
+      />
     </div>
   );
 }

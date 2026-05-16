@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import styles from "./XIdSettingsClient.module.css";
 import { Icon } from "@/components/ui/Icon";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   deleteLinkedXId,
   enablePortfolio,
@@ -342,28 +343,26 @@ export function DeleteXIdForm({ xUserId }: { xUserId: string }): React.ReactElem
   const router = useRouter();
   const [pending, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = React.useState(false);
+  const formRef = React.useRef<HTMLFormElement>(null);
+
+  const doDelete = () => {
+    if (!formRef.current) return;
+    const fd = new FormData(formRef.current);
+    fd.set("x_user_id", xUserId);
+    setError(null);
+    startTransition(async () => {
+      const result = await deleteLinkedXId(fd);
+      if (!result.ok) {
+        setError(result.message ?? "削除に失敗しました。");
+        return;
+      }
+      router.refresh();
+    });
+  };
+
   return (
-    <form
-      className={styles.stack}
-      onSubmit={(ev) => {
-        ev.preventDefault();
-        if (!confirm("この X ID 連携を削除します。作品や履歴は残ります。続行しますか?")) {
-          return;
-        }
-        if (!confirm("アクティブ X ID からも外れます。本当に削除しますか?")) return;
-        const fd = new FormData(ev.currentTarget);
-        fd.set("x_user_id", xUserId);
-        setError(null);
-        startTransition(async () => {
-          const result = await deleteLinkedXId(fd);
-          if (!result.ok) {
-            setError(result.message ?? "削除に失敗しました。");
-            return;
-          }
-          router.refresh();
-        });
-      }}
-    >
+    <form ref={formRef} className={styles.stack} onSubmit={(ev) => ev.preventDefault()}>
       <input type="hidden" name="x_user_id" value={xUserId} />
       <label className="fn-label">連携削除の確認</label>
       <input
@@ -371,10 +370,28 @@ export function DeleteXIdForm({ xUserId }: { xUserId: string }): React.ReactElem
         className="fn-input"
         placeholder={`DELETE ${xUserId}`}
       />
-      <button type="submit" className="fn-btn fn-btn-ghost fn-btn-sm" disabled={pending}>
+      <button
+        type="button"
+        className="fn-btn fn-btn-ghost fn-btn-sm"
+        disabled={pending}
+        onClick={() => setConfirmOpen(true)}
+      >
         <Icon name="trash" size={12} aria-hidden /> X ID連携を削除
       </button>
       {error ? <p className={styles.msgErr}>{error}</p> : null}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        title="X ID 連携を削除しますか?"
+        message="この X ID 連携を削除します。作品や履歴は残ります。アクティブ X ID からも外れます。本当に削除しますか?"
+        confirmLabel="削除する"
+        tone="danger"
+        onConfirm={() => {
+          setConfirmOpen(false);
+          doDelete();
+        }}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </form>
   );
 }

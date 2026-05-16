@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   addEventEditor,
   removeEventEditor,
@@ -84,6 +85,11 @@ export function EventStaffManager({
   const router = useRouter();
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
+  const [confirm, setConfirm] = React.useState<
+    | { kind: "editor"; xUserId: string }
+    | { kind: "collaborator"; displayName: string; xUserId: string | null; discordId: string | null }
+    | null
+  >(null);
 
   const runAction = (fd: FormData, action: (fd: FormData) => Promise<{ ok: boolean; message?: string }>) => {
     setError(null);
@@ -212,13 +218,7 @@ export function EventStaffManager({
                       type="button"
                       className="fn-btn fn-btn-ghost fn-btn-sm"
                       disabled={busy}
-                      onClick={() => {
-                        if (!confirm(`@${e.x_user_id} を編集者から外しますか?`)) return;
-                        const fd = new FormData();
-                        fd.set("event_id", eventId);
-                        fd.set("x_user_id", e.x_user_id);
-                        runAction(fd, removeEventEditor);
-                      }}
+                      onClick={() => setConfirm({ kind: "editor", xUserId: e.x_user_id })}
                     >
                       <Icon name="trash" size={11} aria-hidden />
                     </button>
@@ -312,14 +312,14 @@ export function EventStaffManager({
                       type="button"
                       className="fn-btn fn-btn-ghost fn-btn-sm"
                       disabled={busy}
-                      onClick={() => {
-                        if (!confirm(`${c.display_name} を協力者から外しますか?`)) return;
-                        const fd = new FormData();
-                        fd.set("event_id", eventId);
-                        if (c.x_user_id) fd.set("x_user_id", c.x_user_id);
-                        if (c.discord_user_id) fd.set("discord_user_id", c.discord_user_id);
-                        runAction(fd, removeCollaborator);
-                      }}
+                      onClick={() =>
+                        setConfirm({
+                          kind: "collaborator",
+                          displayName: c.display_name,
+                          xUserId: c.x_user_id,
+                          discordId: c.discord_user_id,
+                        })
+                      }
                     >
                       <Icon name="trash" size={11} aria-hidden />
                     </button>

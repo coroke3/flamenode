@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   deleteAvailableSlots,
   generateSlotsBatch,
@@ -20,6 +21,7 @@ export function SlotBatchForm({
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = React.useState(false);
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -40,7 +42,6 @@ export function SlotBatchForm({
   };
 
   const onClearAvailable = () => {
-    if (!confirm("空き枠 (available) を全て削除します。よろしいですか?")) return;
     setError(null);
     setSuccess(null);
     const fd = new FormData();
@@ -200,13 +201,25 @@ export function SlotBatchForm({
           <button
             type="button"
             className="fn-btn fn-btn-ghost"
-            onClick={onClearAvailable}
+            onClick={() => setConfirmClear(true)}
             disabled={busy}
           >
             <Icon name="trash" size={12} aria-hidden /> 空き枠を全削除
           </button>
         </div>
       </form>
+      <ConfirmDialog
+        open={confirmClear}
+        title="空き枠を全削除しますか?"
+        message="空き枠 (available) を全て削除します。よろしいですか?"
+        confirmLabel="全削除する"
+        tone="danger"
+        onConfirm={() => {
+          setConfirmClear(false);
+          onClearAvailable();
+        }}
+        onCancel={() => setConfirmClear(false)}
+      />
     </div>
   );
 }
