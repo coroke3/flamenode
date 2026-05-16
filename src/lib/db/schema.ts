@@ -172,6 +172,8 @@ export const events = sqliteTable("events", {
   }).default("public_name"),
   start_time: integer("start_time"),
   end_time: integer("end_time"),
+  entry_start_time: integer("entry_start_time"),
+  entry_end_time: integer("entry_end_time"),
   created_at: integer("created_at")
     .notNull()
     .default(sql`(unixepoch())`),

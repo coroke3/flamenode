@@ -90,7 +90,22 @@ export function HomeIntroBand({
                     <Icon name="clock" size={11} aria-hidden />
                     募集
                   </dt>
-                  <dd>受付中</dd>
+                  <dd>
+                    {featured.entry_start_time != null || featured.entry_end_time != null ? (
+                      <>
+                        募集期間:{" "}
+                        {featured.entry_start_time != null
+                          ? formatUnix(featured.entry_start_time)
+                          : ""}
+                        {" 〜 "}
+                        {featured.entry_end_time != null
+                          ? formatUnix(featured.entry_end_time)
+                          : ""}
+                      </>
+                    ) : (
+                      "受付中"
+                    )}
+                  </dd>
                 </div>
               ) : null}
               {availableSlots !== null ? (

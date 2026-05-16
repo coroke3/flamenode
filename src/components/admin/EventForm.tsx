@@ -15,6 +15,8 @@ export interface EventFormInitial {
   accent_color?: string | null;
   start_time?: number | null;
   end_time?: number | null;
+  entry_start_time?: number | null;
+  entry_end_time?: number | null;
   is_active?: number;
   is_entry_open?: number;
   is_archived?: number;
@@ -177,6 +179,27 @@ export function EventForm({
             name="end_time"
             type="datetime-local"
             defaultValue={unixToInputDateTime(initial.end_time)}
+            className="fn-input"
+          />
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div>
+          <label className="fn-label">募集開始日時</label>
+          <input
+            name="entry_start_time"
+            type="datetime-local"
+            defaultValue={unixToInputDateTime(initial.entry_start_time)}
+            className="fn-input"
+          />
+        </div>
+        <div>
+          <label className="fn-label">募集終了日時</label>
+          <input
+            name="entry_end_time"
+            type="datetime-local"
+            defaultValue={unixToInputDateTime(initial.entry_end_time)}
             className="fn-input"
           />
         </div>

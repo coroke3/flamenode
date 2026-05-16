@@ -97,6 +97,8 @@ export default async function AdminEventEditPage({
             accent_color: ev.accent_color,
             start_time: ev.start_time,
             end_time: ev.end_time,
+            entry_start_time: ev.entry_start_time,
+            entry_end_time: ev.entry_end_time,
             is_active: ev.is_active,
             is_entry_open: ev.is_entry_open,
             is_archived: ev.is_archived,

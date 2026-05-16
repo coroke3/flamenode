@@ -15,6 +15,8 @@ export interface EventStatusInput {
   is_entry_open?: number | null;
   start_time: number | null;
   end_time: number | null;
+  entry_start_time?: number | null;
+  entry_end_time?: number | null;
 }
 
 export function computeEventStatus(
@@ -66,10 +68,21 @@ export function isAcceptingEntries(
   now: number = Math.floor(Date.now() / 1000),
 ): boolean {
   const status = computeEventStatus(ev, now);
-  return (
-    ev.is_entry_open === 1 &&
-    (status === "active" || status === "scheduled" || status === "published")
-  );
+  if (
+    !(
+      ev.is_entry_open === 1 &&
+      (status === "active" || status === "scheduled" || status === "published")
+    )
+  ) {
+    return false;
+  }
+  // 募集期間が設定されている場合は時刻範囲も確認する。
+  // entry_start_time のみ: 開始前は false。
+  // entry_end_time のみ: 終了後は false。
+  // 両方 null: 従来どおり is_entry_open のみで判定。
+  if (ev.entry_start_time != null && now < ev.entry_start_time) return false;
+  if (ev.entry_end_time != null && now > ev.entry_end_time) return false;
+  return true;
 }
 
 export function activeEventWhere(now: number = Math.floor(Date.now() / 1000)) {
