@@ -2,16 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { canEditVideo } from "@/lib/auth/ownership";
-import {
-  historyLogs,
-  videoChapters,
-  videos,
-  xUsers,
-} from "@/lib/db/schema";
+import { writeGuard } from "@/lib/auth/writeGuard";
+import { historyLogs, videoChapters, videos } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
 import { normalizeXId } from "@/lib/utils/xid";
 
@@ -37,32 +32,24 @@ const createSchema = z.object({
 /**
  * チャプター (動画マーカー) を作成する。
  * 主体 = `user.active_x_user_id` で `approval_status === 'approved'` を要求。
+ * 対象動画は FlameNode 内 public または unlisted のみ投稿可。
  */
 export async function createChapter(
   formData: FormData,
 ): Promise<ChapterActionResult> {
-  const session = await auth().catch(() => null);
-  const sUser = session?.user as
-    | { id?: string; active_x_user_id?: string | null }
-    | undefined;
-  if (!sUser?.id) return { ok: false, message: "ログインが必要です。" };
-  const activeX = normalizeXId(sUser.active_x_user_id);
+  const guard = await writeGuard({
+    requireApprovedActiveXId: true,
+    feature: "chapter_comment",
+  });
+  if (!guard.ok) return { ok: false, message: guard.message };
+  const sUser = guard.user;
+  const activeX = guard.activeXId;
   if (!activeX) {
     return { ok: false, message: "X ID を選択してから操作してください。" };
   }
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
-
-  const x = (
-    await db.select().from(xUsers).where(eq(xUsers.id, activeX)).limit(1)
-  )[0];
-  if (!x || x.approval_status !== "approved") {
-    return {
-      ok: false,
-      message: "承認済みの X ID でのみチャプターを投稿できます。",
-    };
-  }
 
   const parsed = createSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
@@ -77,6 +64,16 @@ export async function createChapter(
     await db.select().from(videos).where(eq(videos.id, data.video_id)).limit(1)
   )[0];
   if (!target) return { ok: false, message: "動画が見つかりません。" };
+
+  // 対象動画状態チェック (Batch A 最小実装)。
+  // FlameNode 内 public / unlisted のみ投稿可。
+  // (YouTube 側 unlisted で FlameNode 内 public のケースも status === 'public' で吸収される)。
+  if (target.status !== "public" && target.status !== "unlisted") {
+    return {
+      ok: false,
+      message: "この動画にはチャプターコメントを投稿できません。",
+    };
+  }
 
   const id = generateId("ch");
   const now = Math.floor(Date.now() / 1000);
@@ -121,11 +118,12 @@ const updateSchema = createSchema.extend({
 export async function updateChapter(
   formData: FormData,
 ): Promise<ChapterActionResult> {
-  const session = await auth().catch(() => null);
-  const sUser = session?.user as
-    | { id?: string; role?: string; active_x_user_id?: string | null }
-    | undefined;
-  if (!sUser?.id) return { ok: false, message: "ログインが必要です。" };
+  // 編集は admin / 動画オーナー / 本人いずれも通る可能性があるため
+  // writeGuard では Active X を強制しない。BAN/TOS/CostGuard だけ集約する。
+  const guard = await writeGuard({ feature: "chapter_comment" });
+  if (!guard.ok) return { ok: false, message: guard.message };
+  const sUser = guard.user;
+
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
 
@@ -159,6 +157,7 @@ export async function updateChapter(
         db,
         user: { id: sUser.id, role: sUser.role ?? null },
         video: targetVideo,
+        requiredKey: "video.chapter_admin",
       });
     }
   }
@@ -188,11 +187,9 @@ export async function updateChapter(
 export async function deleteChapter(
   formData: FormData,
 ): Promise<ChapterActionResult> {
-  const session = await auth().catch(() => null);
-  const sUser = session?.user as
-    | { id?: string; role?: string; active_x_user_id?: string | null }
-    | undefined;
-  if (!sUser?.id) return { ok: false, message: "ログインが必要です。" };
+  const guard = await writeGuard({ feature: "chapter_comment" });
+  if (!guard.ok) return { ok: false, message: guard.message };
+  const sUser = guard.user;
 
   const chapterId = String(formData.get("chapter_id") ?? "").trim();
   if (!chapterId) return { ok: false, message: "chapter_id が必要です。" };
@@ -220,6 +217,7 @@ export async function deleteChapter(
         db,
         user: { id: sUser.id, role: sUser.role ?? null },
         video: targetVideo,
+        requiredKey: "video.chapter_admin",
       });
     }
   }

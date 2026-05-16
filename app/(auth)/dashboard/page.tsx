@@ -16,6 +16,7 @@ import {
   collapseReservationGroups,
   sortSlotsChronologically,
   type SlotBase,
+  type SlotGroupRow,
 } from "@/lib/utils/slotGrouping";
 import { Icon } from "@/components/ui/Icon";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
@@ -33,7 +34,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
 
   let xIds: (typeof xUsersTable.$inferSelect)[] = [];
   let myVideos: VideoCardData[] = [];
-  let mySlot: typeof slotsTable.$inferSelect | null = null;
+  let mySlot: SlotGroupRow | null = null;
   let mySlotEvent: typeof eventsTable.$inferSelect | null = null;
   let myChapters: {
     id: string;
@@ -119,7 +120,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
       const groupedSlots = collapseReservationGroups(slotRows as SlotBase[]);
       const sortedSlots = sortSlotsChronologically(groupedSlots);
       mySlot = sortedSlots[0] ?? null;
-      if (mySlot) {
+      if (mySlot && mySlot.event_id) {
         const ev = await db
           .select()
           .from(eventsTable)
@@ -316,7 +317,7 @@ function HeroCard({
   slot,
   event,
 }: {
-  slot: typeof slotsTable.$inferSelect | null;
+  slot: SlotGroupRow | null;
   event: typeof eventsTable.$inferSelect | null;
 }): React.ReactElement {
   if (!slot || !event) {

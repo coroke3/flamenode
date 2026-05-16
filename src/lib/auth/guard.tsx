@@ -10,6 +10,9 @@ export interface AuthSessionUser {
   is_banned: number;
   role: "user" | "admin" | "moderator";
   active_x_user_id: string | null;
+  is_tos_accepted: number;
+  accepted_terms_version_id: string | null;
+  terms_reaccept_required: number;
 }
 
 /** 管理者かどうか。 */

@@ -79,7 +79,12 @@ export default async function EditVideoPage({
     )
     .orderBy(asc(xUsersTable.x_name));
 
-  const canEdit = await canEditVideo({ db, user, video });
+  const canEdit = await canEditVideo({
+    db,
+    user,
+    video,
+    requiredKey: "video.basics",
+  });
   if (!canEdit) {
     return (
       <div

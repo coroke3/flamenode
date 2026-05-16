@@ -2,13 +2,14 @@ import { getEnv } from "@/lib/cloudflare";
 
 export async function GET(
   _req: Request,
-  { params }: { params: { key?: string[] } },
+  { params }: { params: Promise<{ key?: string[] }> },
 ): Promise<Response> {
   const env = getEnv();
   if (!env.BUCKET) {
     return new Response("Bucket not configured", { status: 500 });
   }
-  const rawKey = params.key?.join("/") ?? "";
+  const { key } = await params;
+  const rawKey = key?.join("/") ?? "";
   if (!rawKey || rawKey.includes("..")) {
     return new Response("Not found", { status: 404 });
   }
