@@ -5,7 +5,11 @@ import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { deleteSlot, releaseSlot } from "@/lib/actions/slot-admin";
 import { formatUnix } from "@/lib/utils/format";
-import { collapseReservationGroups, type SlotBase } from "@/lib/utils/slotGrouping";
+import {
+  buildSlotParts,
+  collapseReservationGroups,
+  type SlotBase,
+} from "@/lib/utils/slotGrouping";
 
 export interface SlotRowLite {
   id: string;
@@ -33,6 +37,23 @@ export function SlotList({ slots }: SlotListProps): React.ReactElement {
     () => collapseReservationGroups(slots as SlotBase[]),
     [slots],
   );
+
+  /**
+   * 各スロット id が属する「第N部」インデックスを引くマップ。
+   * buildSlotParts は元スロット全件を時系列で部分割するので、
+   * 折り畳み後の displayRows の先頭 id からも部番号を解決できる。
+   */
+  const partLabelMap = React.useMemo(() => {
+    const parts = buildSlotParts(slots as SlotBase[]);
+    const map = new Map<string, string>();
+    for (const part of parts) {
+      const label = part.is_timeless ? "時間なし" : `第${part.index}部`;
+      for (const row of part.rows) {
+        map.set(row.id, label);
+      }
+    }
+    return map;
+  }, [slots]);
 
   const runRelease = (slotId: string) => {
     if (
@@ -82,80 +103,97 @@ export function SlotList({ slots }: SlotListProps): React.ReactElement {
         <thead>
           <tr>
             <th>日時 / ラベル</th>
+            <th>部</th>
             <th>取得者</th>
             <th>状態</th>
             <th>操作</th>
           </tr>
         </thead>
         <tbody>
-          {displayRows.map((s) => (
-            <tr key={s.id}>
-              <td>
-                {s.start_time
-                  ? `${formatUnix(s.start_time, { dateOnly: true })} ${formatUnix(s.start_time, { timeOnly: true })}${s.end_time ? ` - ${formatUnix(s.end_time, { timeOnly: true })}` : ""}`
-                  : (s.slot_label ?? "-")}
-                {s.is_group ? (
-                  <span className="fn-badge fn-badge-soft" style={{ marginLeft: 6 }}>
-                    {s.group_size}連続
-                  </span>
-                ) : null}
-              </td>
-              <td>
-                {s.display_name || s.x_user_id ? (
-                  <span>
-                    <strong>{s.display_name ?? `@${s.x_user_id}`}</strong>
-                    {s.x_user_id ? (
-                      <span
-                        style={{
-                          display: "block",
-                          fontSize: 11,
-                          color: "var(--text-muted)",
-                        }}
-                      >
-                        @{s.x_user_id}
-                      </span>
-                    ) : null}
-                  </span>
-                ) : (
-                  "-"
-                )}
-              </td>
-              <td>
-                <span
-                  className={`fn-badge ${
-                    s.status === "submitted"
-                      ? "fn-badge-accent"
-                      : s.status === "reserved"
-                        ? "fn-badge-warning"
-                        : "fn-badge-soft"
-                  }`}
-                >
-                  {s.status}
-                </span>
-              </td>
-              <td style={{ display: "flex", gap: 6 }}>
-                {s.status !== "available" ? (
-                  <button
-                    type="button"
-                    className="fn-btn fn-btn-ghost fn-btn-sm"
-                    disabled={busyId === s.id}
-                    onClick={() => runRelease(s.id)}
+          {displayRows.map((s) => {
+            // グループ折り畳み行では s.id が先頭スロットの id。
+            // slot_ids の先頭からでも同じ値を参照できる。
+            const partLabel = partLabelMap.get(s.id) ?? "-";
+            return (
+              <tr key={s.id}>
+                <td>
+                  {s.start_time
+                    ? `${formatUnix(s.start_time, { dateOnly: true })} ${formatUnix(s.start_time, { timeOnly: true })}${s.end_time ? ` - ${formatUnix(s.end_time, { timeOnly: true })}` : ""}`
+                    : (s.slot_label ?? "-")}
+                  {s.is_group ? (
+                    <span className="fn-badge fn-badge-soft" style={{ marginLeft: 6 }}>
+                      {s.group_size}連続
+                    </span>
+                  ) : null}
+                </td>
+                <td>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: "var(--text-muted)",
+                      whiteSpace: "nowrap",
+                    }}
                   >
-                    解放
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="fn-btn fn-btn-ghost fn-btn-sm"
-                    disabled={busyId === s.id}
-                    onClick={() => runDelete(s.id)}
+                    {partLabel}
+                  </span>
+                </td>
+                <td>
+                  {s.display_name || s.x_user_id ? (
+                    <span>
+                      <strong>{s.display_name ?? `@${s.x_user_id}`}</strong>
+                      {s.x_user_id ? (
+                        <span
+                          style={{
+                            display: "block",
+                            fontSize: 11,
+                            color: "var(--text-muted)",
+                          }}
+                        >
+                          @{s.x_user_id}
+                        </span>
+                      ) : null}
+                    </span>
+                  ) : (
+                    "-"
+                  )}
+                </td>
+                <td>
+                  <span
+                    className={`fn-badge ${
+                      s.status === "submitted"
+                        ? "fn-badge-accent"
+                        : s.status === "reserved"
+                          ? "fn-badge-warning"
+                          : "fn-badge-soft"
+                    }`}
                   >
-                    削除
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
+                    {s.status}
+                  </span>
+                </td>
+                <td style={{ display: "flex", gap: 6 }}>
+                  {s.status !== "available" ? (
+                    <button
+                      type="button"
+                      className="fn-btn fn-btn-ghost fn-btn-sm"
+                      disabled={busyId === s.id}
+                      onClick={() => runRelease(s.id)}
+                    >
+                      解放
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="fn-btn fn-btn-ghost fn-btn-sm"
+                      disabled={busyId === s.id}
+                      onClick={() => runDelete(s.id)}
+                    >
+                      削除
+                    </button>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
