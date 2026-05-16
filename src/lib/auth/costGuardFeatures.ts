@@ -4,15 +4,20 @@ import type { DB } from "@/lib/db/client";
 import { systemSettings } from "@/lib/db/schema";
 
 /**
- * CostGuard の機能キー。Batch A の最小集合。
- * `reserve_slot` / `release_slot` は slots PR で追加する。
+ * CostGuard の機能キー。
+ * slot 系は reserve / release / split / extend / merge の 5 種類を区別する。
  */
 export type CostGuardFeatureKey =
   | "post_video_unslotted"
   | "post_video_slotted"
   | "edit_video"
   | "like_or_bookmark"
-  | "chapter_comment";
+  | "chapter_comment"
+  | "reserve_slot"
+  | "release_slot"
+  | "split_slot_group"
+  | "extend_slot_group"
+  | "merge_slot_groups";
 
 export type CostGuardCheckResult =
   | { blocked: false }

@@ -1,7 +1,15 @@
 import { formatUnix } from "@/lib/utils/format";
 
+/**
+ * slots テーブルを横断的に扱うための正式型。
+ *
+ * - スキーマ準拠フィールド (notNull) は必須にする
+ * - 集計や join 由来の補助情報 (event_title) のみ optional
+ * - reservation_group_id / discord_user_id / x_user_id は schema 上 nullable なので null 許容
+ */
 export type SlotBase = {
   id: string;
+  event_id: string;
   slot_kind: "time" | "count" | null;
   slot_label: string | null;
   start_time: number | null;
@@ -10,15 +18,14 @@ export type SlotBase = {
   status: "available" | "reserved" | "submitted";
   display_name: string | null;
   x_user_id: string | null;
-  discord_user_id?: string | null;
-  reservation_group_id?: string | null;
-  /** slots PR 移行前の互換フィールド。SlotGroupRow でも透過的に参照できるようにする。 */
-  event_id?: string | null;
+  discord_user_id: string | null;
+  reservation_group_id: string | null;
+  video_id: string | null;
+  updated_at: number;
+  priority_reclaim_video_id: string | null;
+  priority_reclaim_until: number | null;
+  /** join 由来の補助情報。集計表示で利用するため optional のまま。 */
   event_title?: string | null;
-  video_id?: string | null;
-  updated_at?: number | null;
-  priority_reclaim_video_id?: string | null;
-  priority_reclaim_until?: number | null;
 };
 
 export type SlotPart<T extends { start_time: number | null; end_time: number | null }> = {
