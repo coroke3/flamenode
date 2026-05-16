@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { releaseOwnSlot, reserveSlot } from "@/lib/actions/slot";
+import { releaseOwnSlot, reserveSlot, extendOwnSlotGroup, mergeOwnSlotGroups } from "@/lib/actions/slot";
 import { formatUnix } from "@/lib/utils/format";
 import { cn } from "@/lib/utils/cn";
 import {
@@ -35,6 +35,7 @@ export interface SlotGridProps {
   slots: SlotRow[];
   viewerXId: string | null;
   viewerDiscordId?: string | null;
+  viewerActiveX?: string | null;
   canReserve: boolean;
   slotKind: "time" | "count";
   maxConsecutiveSlots?: number;
@@ -45,10 +46,21 @@ interface SlotGroup {
   rows: SlotGroupRow[];
 }
 
+interface ConfirmExtend {
+  slotId: string;
+  direction: "forward" | "backward";
+}
+
+interface ConfirmMerge {
+  gapSlotId: string;
+  defaultName: string;
+}
+
 export function SlotGrid({
   slots,
   viewerXId,
   viewerDiscordId = null,
+  viewerActiveX = null,
   canReserve,
   slotKind,
   maxConsecutiveSlots = 1,
@@ -59,6 +71,9 @@ export function SlotGrid({
   const [success, setSuccess] = React.useState<string | null>(null);
   const [reservedSlotId, setReservedSlotId] = React.useState<string | null>(null);
   const [confirmReleaseId, setConfirmReleaseId] = React.useState<string | null>(null);
+  const [confirmExtend, setConfirmExtend] = React.useState<ConfirmExtend | null>(null);
+  const [confirmMerge, setConfirmMerge] = React.useState<ConfirmMerge | null>(null);
+  const [mergeDisplayName, setMergeDisplayName] = React.useState<string>("");
   const displayRows = React.useMemo(
     () => collapseReservationGroups(slots as SlotBase[]),
     [slots],
@@ -108,6 +123,87 @@ export function SlotGrid({
       router.refresh();
     });
   };
+
+  const onExtend = (slotId: string, direction: "forward" | "backward") => {
+    setError(null);
+    setSuccess(null);
+    const fd = new FormData();
+    fd.set("slot_id", slotId);
+    fd.set("direction", direction);
+    startTransition(async () => {
+      const result = await extendOwnSlotGroup(fd);
+      if (!result.ok) {
+        setError(result.message ?? "枠の拡張に失敗しました。");
+        return;
+      }
+      setSuccess("枠を拡張しました。");
+      router.refresh();
+    });
+  };
+
+  const onMerge = (gapSlotId: string, displayName: string) => {
+    setError(null);
+    setSuccess(null);
+    const fd = new FormData();
+    fd.set("gap_slot_id", gapSlotId);
+    fd.set("display_name", displayName);
+    startTransition(async () => {
+      const result = await mergeOwnSlotGroups(fd);
+      if (!result.ok) {
+        setError(result.message ?? "枠の結合に失敗しました。");
+        return;
+      }
+      setSuccess("枠を結合しました。");
+      router.refresh();
+    });
+  };
+
+  /**
+   * available 枠の直前・直後が同じ viewerActiveX の reserved 枠かどうかを
+   * 元の slots 配列 (collapsed 前) で確認する。
+   */
+  const isMergeTarget = React.useCallback(
+    (gapSlot: SlotGroupRow): boolean => {
+      if (!viewerActiveX) return false;
+      if (gapSlot.status !== "available") return false;
+      const sorted = [...slots].sort((a, b) => {
+        const aKey = a.sort_order ?? a.start_time ?? 0;
+        const bKey = b.sort_order ?? b.start_time ?? 0;
+        return aKey - bKey;
+      });
+      const idx = sorted.findIndex((s) => s.id === gapSlot.id);
+      if (idx < 0) return false;
+      const left = sorted[idx - 1];
+      const right = sorted[idx + 1];
+      if (!left || !right) return false;
+      return (
+        left.status === "reserved" &&
+        left.x_user_id === viewerActiveX &&
+        right.status === "reserved" &&
+        right.x_user_id === viewerActiveX
+      );
+    },
+    [slots, viewerActiveX],
+  );
+
+  /**
+   * merge ボタン押下時に使う display_name のデフォルト値を
+   * 隣接 reserved 枠から取得する。
+   */
+  const getMergeDefaultName = React.useCallback(
+    (gapSlot: SlotGroupRow): string => {
+      const sorted = [...slots].sort((a, b) => {
+        const aKey = a.sort_order ?? a.start_time ?? 0;
+        const bKey = b.sort_order ?? b.start_time ?? 0;
+        return aKey - bKey;
+      });
+      const idx = sorted.findIndex((s) => s.id === gapSlot.id);
+      if (idx < 0) return "";
+      const left = sorted[idx - 1];
+      return left?.display_name ?? "";
+    },
+    [slots],
+  );
 
   if (slots.length === 0) {
     return (
@@ -219,9 +315,57 @@ export function SlotGrid({
                                   >
                                     <Icon name="trash" size={10} aria-hidden /> 解放
                                   </button>
+                                  {viewerActiveX ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="fn-btn fn-btn-secondary fn-btn-sm"
+                                        disabled={busy || slot.group_size >= maxConsecutiveSlots}
+                                        title={slot.group_size >= maxConsecutiveSlots ? "連続枠の上限に達しています" : "前に 1 枠追加"}
+                                        onClick={() =>
+                                          setConfirmExtend({
+                                            slotId: slot.slot_ids[0] ?? slot.id,
+                                            direction: "backward",
+                                          })
+                                        }
+                                      >
+                                        前を追加
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="fn-btn fn-btn-secondary fn-btn-sm"
+                                        disabled={busy || slot.group_size >= maxConsecutiveSlots}
+                                        title={slot.group_size >= maxConsecutiveSlots ? "連続枠の上限に達しています" : "後ろに 1 枠追加"}
+                                        onClick={() =>
+                                          setConfirmExtend({
+                                            slotId: slot.slot_ids[slot.slot_ids.length - 1] ?? slot.id,
+                                            direction: "forward",
+                                          })
+                                        }
+                                      >
+                                        後を追加
+                                      </button>
+                                    </>
+                                  ) : null}
                                 </>
                               ) : null}
                             </div>
+                          </div>
+                        ) : isMergeTarget(slot) ? (
+                          <div className={styles.mergeRow}>
+                            <span className={styles.emptySlot}>空き</span>
+                            <button
+                              type="button"
+                              className="fn-btn fn-btn-secondary fn-btn-sm"
+                              disabled={busy}
+                              onClick={() => {
+                                const defaultName = getMergeDefaultName(slot);
+                                setMergeDisplayName(defaultName);
+                                setConfirmMerge({ gapSlotId: slot.id, defaultName });
+                              }}
+                            >
+                              ここを埋めて結合
+                            </button>
                           </div>
                         ) : canTakeSlot ? (
                           <form
@@ -296,6 +440,81 @@ export function SlotGrid({
         }}
         onCancel={() => setConfirmReleaseId(null)}
       />
+
+      <ConfirmDialog
+        open={confirmExtend !== null}
+        title={confirmExtend?.direction === "backward" ? "前の枠を追加しますか?" : "後ろの枠を追加しますか?"}
+        message={
+          confirmExtend?.direction === "backward"
+            ? "自分のグループに前方の空き枠を 1 つ追加します。"
+            : "自分のグループに後方の空き枠を 1 つ追加します。"
+        }
+        confirmLabel="追加する"
+        tone="default"
+        onConfirm={() => {
+          const info = confirmExtend;
+          setConfirmExtend(null);
+          if (info) onExtend(info.slotId, info.direction);
+        }}
+        onCancel={() => setConfirmExtend(null)}
+      />
+
+      {confirmMerge !== null ? (
+        <div
+          className={styles.mergeDialogBackdrop}
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setConfirmMerge(null);
+          }}
+        >
+          <div
+            className={styles.mergeDialog}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="merge-dialog-title"
+          >
+            <p id="merge-dialog-title" className={styles.mergeDialogTitle}>
+              ここを埋めて結合しますか?
+            </p>
+            <p className={styles.mergeDialogMessage}>
+              空き枠を確保して左右の枠を 1 グループに結合します。
+              表示名を確認してください。
+            </p>
+            <input
+              type="text"
+              className="fn-input"
+              value={mergeDisplayName}
+              onChange={(e) => setMergeDisplayName(e.target.value)}
+              maxLength={80}
+              placeholder="表示名・団体名"
+              aria-label="表示名"
+            />
+            <div className={styles.mergeDialogFooter}>
+              <button
+                type="button"
+                className="fn-btn fn-btn-ghost"
+                onClick={() => setConfirmMerge(null)}
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                className="fn-btn fn-btn-primary"
+                disabled={busy || mergeDisplayName.trim().length === 0}
+                onClick={() => {
+                  const info = confirmMerge;
+                  setConfirmMerge(null);
+                  if (info) onMerge(info.gapSlotId, mergeDisplayName.trim());
+                }}
+                // eslint-disable-next-line jsx-a11y/no-autofocus
+                autoFocus
+              >
+                結合する
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
