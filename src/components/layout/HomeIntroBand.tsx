@@ -4,11 +4,14 @@ import styles from "./HomeIntroBand.module.css";
 import { Icon } from "@/components/ui/Icon";
 import type { events } from "@/lib/db/schema";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
+import { formatUnix } from "@/lib/utils/format";
 
 type EventRow = typeof events.$inferSelect;
 
 interface HomeIntroBandProps {
   activeEvents: EventRow[];
+  /** event_id -> available スロット件数 */
+  slotCounts?: Map<string, number>;
 }
 
 /**
@@ -18,9 +21,11 @@ interface HomeIntroBandProps {
  */
 export function HomeIntroBand({
   activeEvents,
+  slotCounts,
 }: HomeIntroBandProps): React.ReactElement {
   const featured =
     activeEvents.find((e) => isAcceptingEntries(e)) ?? activeEvents[0];
+  const availableSlots = featured ? (slotCounts?.get(featured.id) ?? null) : null;
 
   return (
     <section className={styles.band} aria-label="FlameNode について">
@@ -64,10 +69,50 @@ export function HomeIntroBand({
             {featured.explanation ? (
               <p className={styles.eventExplain}>{featured.explanation}</p>
             ) : null}
+            <dl className={styles.eventMeta}>
+              {featured.start_time ? (
+                <div className={styles.eventMetaItem}>
+                  <dt>
+                    <Icon name="calendar" size={11} aria-hidden />
+                    開催日時
+                  </dt>
+                  <dd>
+                    {formatUnix(featured.start_time)}
+                    {featured.end_time
+                      ? ` 〜 ${formatUnix(featured.end_time)}`
+                      : ""}
+                  </dd>
+                </div>
+              ) : null}
+              {isAcceptingEntries(featured) ? (
+                <div className={styles.eventMetaItem}>
+                  <dt>
+                    <Icon name="clock" size={11} aria-hidden />
+                    募集
+                  </dt>
+                  <dd>受付中</dd>
+                </div>
+              ) : null}
+              {availableSlots !== null ? (
+                <div className={styles.eventMetaItem}>
+                  <dt>
+                    <Icon name="list" size={11} aria-hidden />
+                    残り枠
+                  </dt>
+                  <dd>{availableSlots} 枠</dd>
+                </div>
+              ) : null}
+            </dl>
+            <p className={styles.howToJoin}>
+              参加するには Discord でログインし、スロットを確保してください。
+              <Link href="/entry" className={styles.howToJoinLink}>
+                参加方法を見る
+              </Link>
+            </p>
             <div className={styles.eventActions}>
               {isAcceptingEntries(featured) ? (
                 <Link
-                  href={`/entry?event=${featured.id}`}
+                  href={`/event/${featured.id}#slot`}
                   className="fn-btn fn-btn-primary fn-btn-sm"
                 >
                   <Icon name="calendar" size={12} aria-hidden />

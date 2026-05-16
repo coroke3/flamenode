@@ -53,72 +53,49 @@ export default async function EntryPage(): Promise<React.ReactElement> {
   return (
     <div className={styles.page}>
       <header className={styles.heading}>
-        <h1 className={styles.title}>FlameNode へようこそ</h1>
+        <h1 className={styles.title}>FlameNode に参加する</h1>
         <p className={styles.lead}>
-          Discord でログインして、作品の投稿、いいね、ブックマーク、コメント、イベント参加ができます。
+          イベントへの参加、または過去の自分の作品を投稿できます。
         </p>
       </header>
 
-      <div className={styles.layout}>
-        {!isLoggedIn ? (
-          <section className={styles.card} aria-labelledby="login-card">
-            <h2 id="login-card" className={styles.cardTitle}>
-              ログイン
-            </h2>
-            <p className={styles.cardLead}>
-              Discord アカウントで認証します。連携時に取得した
-              <code> access_token </code>
-              は保存しないため、必要なときに毎回 OAuth が走ります。
-            </p>
-            <form
-              action={async () => {
-                "use server";
-                await signIn("discord", { redirectTo: "/dashboard" });
-              }}
-              className={styles.btnRow}
-            >
-              <button type="submit" className="fn-btn fn-btn-primary">
-                <Icon name="discord" size={14} aria-hidden />
-                Discord でログイン
-              </button>
-            </form>
-            <p
-              style={{
-                marginTop: 14,
-                color: "var(--text-muted)",
-                fontSize: 11.5,
-              }}
-            >
-              ログインすることで、最新の <Link href="/rules">利用規約</Link>に同意したものとみなされます。
-            </p>
-          </section>
-        ) : (
-          <section className={styles.card} aria-labelledby="welcome-card">
-            <h2 id="welcome-card" className={styles.cardTitle}>
-              ようこそ {sessionUser?.name ?? "ゲスト"} さん
-            </h2>
-            <p className={styles.cardLead}>
-              すでにログイン済みです。下の導線から、ダッシュボードや投稿画面に移動できます。
-            </p>
-            <div className={styles.btnRow}>
-              <Link href="/dashboard" className="fn-btn fn-btn-primary">
-                <Icon name="grid" size={14} aria-hidden />
-                ダッシュボード
-              </Link>
-              <Link href="/dashboard/post" className="fn-btn fn-btn-ghost">
-                <Icon name="edit" size={14} aria-hidden />
-                作品を投稿する
-              </Link>
-            </div>
-          </section>
-        )}
-
-        <section className={styles.card} aria-labelledby="event-card">
-          <h2 id="event-card" className={styles.cardTitle}>
-            参加可能なイベント
+      {!isLoggedIn ? (
+        <section className={styles.loginSection} aria-labelledby="login-card">
+          <h2 id="login-card" className={styles.cardTitle}>
+            まず Discord でログインしてください
           </h2>
           <p className={styles.cardLead}>
-            応募受付中のイベントは、ログイン後にスロットを確保できます。
+            参加・投稿にはログインが必要です。連携時に取得した
+            <code> access_token </code>
+            は保存しません。
+          </p>
+          <form
+            action={async () => {
+              "use server";
+              await signIn("discord", { redirectTo: "/entry" });
+            }}
+            className={styles.btnRow}
+          >
+            <button type="submit" className="fn-btn fn-btn-primary">
+              <Icon name="discord" size={14} aria-hidden />
+              Discord でログイン
+            </button>
+          </form>
+          <p className={styles.tosNote}>
+            ログインすることで、最新の <Link href="/rules">利用規約</Link>に同意したものとみなされます。
+          </p>
+        </section>
+      ) : null}
+
+      <div className={styles.layout}>
+        {/* カード1: イベントに参加する */}
+        <section className={styles.card} aria-labelledby="join-event-card">
+          <h2 id="join-event-card" className={styles.cardTitle}>
+            <Icon name="calendar" size={16} aria-hidden />
+            イベントに参加する
+          </h2>
+          <p className={styles.cardLead}>
+            開催中のイベントのスロットを確保して、作品を投稿できます。
           </p>
           <div className={styles.eventList}>
             {activeEvents.length === 0 ? (
@@ -129,7 +106,7 @@ export default async function EntryPage(): Promise<React.ReactElement> {
               activeEvents.map((ev) => (
                 <Link
                   key={ev.id}
-                  href={`/event/${ev.id}`}
+                  href={`/event/${ev.id}#slot`}
                   className={styles.eventCard}
                   style={
                     ev.accent_color
@@ -142,7 +119,7 @@ export default async function EntryPage(): Promise<React.ReactElement> {
                   <span className={styles.eventCardTitle}>{ev.title}</span>
                   <span className={styles.eventCardMeta}>
                     残り {slotCounts.get(ev.id) ?? 0} 枠
-                    {ev.explanation ? ` / ${ev.explanation.slice(0, 80)}` : ""}
+                    {ev.explanation ? ` / ${ev.explanation.slice(0, 60)}` : ""}
                   </span>
                   <span className={styles.eventCardMeta}>
                     {formatUnix(ev.start_time, { dateOnly: true })}
@@ -155,6 +132,38 @@ export default async function EntryPage(): Promise<React.ReactElement> {
               ))
             )}
           </div>
+          {isLoggedIn && activeEvents.length > 0 ? (
+            <div className={styles.btnRow} style={{ marginTop: 12 }}>
+              <Link href={`/event/${activeEvents[0].id}#slot`} className="fn-btn fn-btn-primary">
+                <Icon name="calendar" size={14} aria-hidden />
+                スロットを確保する
+              </Link>
+            </div>
+          ) : null}
+        </section>
+
+        {/* カード2: 過去の作品を投稿する */}
+        <section className={styles.card} aria-labelledby="post-unslotted-card">
+          <h2 id="post-unslotted-card" className={styles.cardTitle}>
+            <Icon name="edit" size={16} aria-hidden />
+            過去の自分の作品を投稿する
+          </h2>
+          <p className={styles.cardLead}>
+            イベントの枠に関係なく、既存の作品をFlameNodeに登録できます。
+            投稿には承認済みのX IDが必要です。
+          </p>
+          {isLoggedIn ? (
+            <div className={styles.btnRow}>
+              <Link href="/dashboard/post/unslotted" className="fn-btn fn-btn-ghost">
+                <Icon name="edit" size={14} aria-hidden />
+                作品を投稿する
+              </Link>
+            </div>
+          ) : (
+            <p style={{ color: "var(--text-muted)", fontSize: 12 }}>
+              ログイン後に投稿できます。
+            </p>
+          )}
         </section>
       </div>
     </div>

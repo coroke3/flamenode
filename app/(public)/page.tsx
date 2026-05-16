@@ -1,6 +1,7 @@
 import * as React from "react";
 import Link from "next/link";
 import styles from "./page.module.css";
+import { eq, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   fetchActiveEvents,
@@ -10,6 +11,7 @@ import {
   fetchRecommendedVideos,
   fetchVideosForEvent,
 } from "@/lib/db/queries";
+import { slots as slotsTable } from "@/lib/db/schema";
 import { HomeIntroBand } from "@/components/layout/HomeIntroBand";
 import { Shelf } from "@/components/layout/Shelf";
 import { SectionHeader } from "@/components/layout/SectionHeader";
@@ -39,6 +41,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
   let creators: Awaited<ReturnType<typeof fetchPickupCreators>> = [];
   let latestEvents: Awaited<ReturnType<typeof fetchLatestEvents>> = [];
   let videosByEvent: Record<string, VideoCardData[]> = {};
+  let topSlotCounts = new Map<string, number>();
 
   if (db) {
     try {
@@ -58,6 +61,21 @@ export default async function TopPage(): Promise<React.ReactElement> {
         }),
       );
       videosByEvent = Object.fromEntries(eventVideoEntries);
+
+      // activeEventsの残り枠数を取得 (トップページのイベントバンド用)
+      if (activeEvents.length > 0) {
+        const slotRows = await db
+          .select({
+            event_id: slotsTable.event_id,
+            count: sql<number>`COUNT(*)`,
+          })
+          .from(slotsTable)
+          .where(eq(slotsTable.status, "available"))
+          .groupBy(slotsTable.event_id);
+        slotRows.forEach((row) =>
+          topSlotCounts.set(row.event_id, Number(row.count ?? 0)),
+        );
+      }
     } catch (e) {
       console.error("[TopPage] DB query failed", e);
     }
@@ -65,7 +83,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
 
   return (
     <div className={styles.page}>
-      <HomeIntroBand activeEvents={activeEvents} />
+      <HomeIntroBand activeEvents={activeEvents} slotCounts={topSlotCounts} />
 
       <section className={styles.section} aria-labelledby="sec-recommend">
         <SectionHeader title="おすすめ" moreHref="/recommend" />

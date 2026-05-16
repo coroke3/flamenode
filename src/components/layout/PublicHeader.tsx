@@ -19,14 +19,8 @@ interface PublicHeaderProps {
   user: PublicHeaderUser | null;
 }
 
-const NAV_ITEMS = [
-  { href: "/", primary: "TOP", sub: "トップ" },
-  { href: "/list", primary: "LIST", sub: "作品一覧" },
-  { href: "/user", primary: "CREATOR", sub: "クリエイター" },
-  { href: "/event", primary: "EVENT", sub: "イベント" },
-  { href: "/recommend", primary: "PICK", sub: "おすすめ" },
-  { href: "/about", primary: "ABOUT", sub: "FlameNode" },
-];
+// 上部バーの常時ナビは最小化。作品一覧・イベント・クリエイター・おすすめ・ABOUTは除去。
+// 各ページは /list /event /recommend /about として存続するが、ナビには表示しない。
 
 export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
   const [mobileOpen, setMobileOpen] = React.useState(false);
@@ -37,15 +31,6 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
         <Link href="/" className={styles.logoLink} aria-label="FlameNode トップへ">
           <Logo />
         </Link>
-
-        <nav className={styles.nav} aria-label="グローバルナビゲーション">
-          {NAV_ITEMS.map((item) => (
-            <Link key={item.href} href={item.href} className={styles.navLink}>
-              <span className={styles.navLinkPrimary}>{item.primary}</span>
-              <span className={styles.navLinkSub}>{item.sub}</span>
-            </Link>
-          ))}
-        </nav>
 
         <div className={styles.right}>
           <form
@@ -101,17 +86,6 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
       {mobileOpen ? (
         <div className={styles.mobile}>
           <nav className={styles.mobileNav} aria-label="モバイルナビゲーション">
-            {NAV_ITEMS.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={styles.mobileItem}
-                onClick={() => setMobileOpen(false)}
-              >
-                <span className={styles.mobileItemPrimary}>{item.primary}</span>
-                <span className={styles.mobileItemSub}>{item.sub}</span>
-              </Link>
-            ))}
             {!user ? (
               <Link
                 href="/api/auth/signin/discord?callbackUrl=/dashboard"

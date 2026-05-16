@@ -95,6 +95,47 @@
   overflow: hidden;
 }
 
+.eventMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-top: 6px;
+}
+
+.eventMetaItem {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.eventMetaItem dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.eventMetaItem dd {
+  color: var(--text-primary);
+}
+
+.howToJoin {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+.howToJoinLink {
+  margin-left: 6px;
+  color: var(--accent-primary-strong);
+  font-weight: 600;
+  text-decoration: underline;
+}
+
 .eventActions {
   display: flex;
   flex-wrap: wrap;
