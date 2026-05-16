@@ -79,6 +79,7 @@ export function VideoForm({
   const [result, setResult] = React.useState<VideoActionResult | null>(null);
 
   const normalizedInitialXId = normalizeXId(initial.contact_x_id || activeXId || "");
+  const normalizedActiveXId = normalizeXId(activeXId || "");
   const hasSelectableXIds = xIdOptions.length > 0;
   const initialIsSelectable = xIdOptions.some(
     (opt) => normalizeXId(opt.id) === normalizedInitialXId,
@@ -86,8 +87,12 @@ export function VideoForm({
   const selectedDefault =
     (initialIsSelectable && normalizedInitialXId) ||
     (xIdOptions[0] ? normalizeXId(xIdOptions[0].id) : "");
+  // free/slot モードでは Active X ID が投稿主体に固定される。
+  // edit モードでは admin のみ変更可。
+  const isActiveXFixed = mode === "free" || mode === "slot";
   const canSubmit =
-    hasSelectableXIds || (mode === "edit" && !!normalizedInitialXId);
+    (isActiveXFixed && !!normalizedActiveXId) ||
+    (!isActiveXFixed && (hasSelectableXIds || !!normalizedInitialXId));
 
   const youtubeId = extractYoutubeId(youtubeUrl);
 
@@ -131,37 +136,70 @@ export function VideoForm({
             <label className={`${styles.label} ${styles.required}`} htmlFor="contact_x_id">
               提出主体 X ID
             </label>
-            {hasSelectableXIds ? (
-              <select
-                id="contact_x_id"
-                name="contact_x_id"
-                className="fn-select"
-                defaultValue={selectedDefault}
-                required
-              >
-                {xIdOptions.map((opt) => (
-                  <option key={opt.id} value={normalizeXId(opt.id)}>
-                    @{opt.id} ({opt.x_name})
-                  </option>
-                ))}
-              </select>
-            ) : mode === "edit" && normalizedInitialXId ? (
-              <input
-                id="contact_x_id"
-                name="contact_x_id"
-                type="text"
-                defaultValue={normalizedInitialXId}
-                className="fn-input"
-                readOnly
-              />
-            ) : (
-              <div className="fn-muted fn-text-sm">
-                承認済み X ID がありません。
-                <Link href="/dashboard/settings" style={{ marginLeft: 6 }}>
-                  設定で連携
-                </Link>
-              </div>
-            )}
+            {isActiveXFixed ? (
+              // free / slot モード: Active X ID に固定。変更不可。
+              normalizedActiveXId ? (
+                <>
+                  <input
+                    id="contact_x_id"
+                    name="contact_x_id"
+                    type="text"
+                    value={normalizedActiveXId}
+                    readOnly
+                    className="fn-input"
+                    aria-readonly="true"
+                    style={{ opacity: 0.75, cursor: "default" }}
+                  />
+                  <p className={styles.help} style={{ marginTop: 4 }}>
+                    提出主体は現在の Active X ID に固定されます。変更する場合は上部バーから X ID を切り替えてください。
+                  </p>
+                </>
+              ) : (
+                <div className="fn-muted fn-text-sm">
+                  承認済み X ID がありません。
+                  <Link href="/dashboard/settings" style={{ marginLeft: 6 }}>
+                    設定で連携
+                  </Link>
+                </div>
+              )
+            ) : mode === "edit" ? (
+              // edit モード: admin は選択可、一般ユーザーは既存値を読み取り専用で表示。
+              hasSelectableXIds ? (
+                <>
+                  <select
+                    id="contact_x_id"
+                    name="contact_x_id"
+                    className="fn-select"
+                    defaultValue={selectedDefault}
+                    required
+                  >
+                    {xIdOptions.map((opt) => (
+                      <option key={opt.id} value={normalizeXId(opt.id)}>
+                        @{opt.id} ({opt.x_name})
+                      </option>
+                    ))}
+                  </select>
+                  <p className={styles.help} style={{ marginTop: 4 }}>
+                    提出主体を変更できるのは管理者のみです。サーバー側でも検証されます。
+                  </p>
+                </>
+              ) : normalizedInitialXId ? (
+                <input
+                  id="contact_x_id"
+                  name="contact_x_id"
+                  type="text"
+                  defaultValue={normalizedInitialXId}
+                  className="fn-input"
+                  readOnly
+                  aria-readonly="true"
+                  style={{ opacity: 0.75, cursor: "default" }}
+                />
+              ) : (
+                <div className="fn-muted fn-text-sm">
+                  提出主体 X ID が設定されていません。
+                </div>
+              )
+            ) : null}
           </div>
           <div className={styles.field}>
             <label className={`${styles.label} ${styles.required}`} htmlFor="display_name">
