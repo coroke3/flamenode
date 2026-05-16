@@ -6,6 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { customPages, xUsers } from "@/lib/db/schema";
 import { normalizeXId } from "@/lib/utils/xid";
+import { sanitizeUserHtml } from "@/lib/utils/sanitizeUserHtml";
 
 export const metadata: Metadata = { title: "Portfolio" };
 export const dynamic = "force-dynamic";
@@ -45,8 +46,14 @@ export default async function PortfolioPage({
           padding: 24,
         }}
       >
-        {page.css ? <style>{page.css}</style> : null}
-        <div dangerouslySetInnerHTML={{ __html: page.html ?? `<h1>${x.x_name}</h1>` }} />
+        {page.css ? <style>{sanitizeUserHtml(page.css)}</style> : null}
+        <div
+          dangerouslySetInnerHTML={{
+            __html: sanitizeUserHtml(
+              page.html ?? `<h1>${x.x_name ?? ""}</h1>`,
+            ),
+          }}
+        />
       </article>
     </main>
   );

@@ -6,6 +6,7 @@ import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import {
   accounts as accountsTable,
+  customPages as customPagesTable,
   users as usersTable,
   videos as videosTable,
   xUsers as xUsersTable,
@@ -201,6 +202,33 @@ function checkNotificationTableMismatch(): SecurityCheckResult {
   }
 }
 
+/** custom_pages.html の中で危険HTMLが残っていないか静的検出 */
+async function checkCustomPageDangerousHtml(
+  db: AnyDb,
+): Promise<SecurityCheckResult> {
+  const rows = await db
+    .select({
+      id: customPagesTable.id,
+      html: customPagesTable.html,
+    })
+    .from(customPagesTable)
+    .where(eq(customPagesTable.is_published, 1));
+  const dangerousRe =
+    /<\s*(script|iframe|object|embed|form|meta|base|link|style)\b|\son[a-z]+\s*=|javascript\s*:/i;
+  const flagged = rows.filter((r) => r.html && dangerousRe.test(r.html));
+  return {
+    id: "custom_page_dangerous_html",
+    label: "公開中 custom_page に危険HTML",
+    status: flagged.length === 0 ? "ok" : "warn",
+    count: flagged.length,
+    samples: flagged.slice(0, 5).map((r) => `page:${r.id}`),
+    note:
+      flagged.length > 0
+        ? "サニタイザは適用済みだが、保存時の入力にも危険タグが含まれているレコードがあります。"
+        : undefined,
+  };
+}
+
 export async function runSecurityChecks(
   db: AnyDb,
 ): Promise<SecurityCheckResult[]> {
@@ -210,12 +238,14 @@ export async function runSecurityChecks(
     unapprovedCreator,
     bannedUser,
     tosNotAccepted,
+    customPageDanger,
   ] = await Promise.all([
     checkAccessTokenNotNull(db),
     checkRejectedXIdActive(db),
     checkUnapprovedCreatorVideos(db),
     checkBannedUserVideos(db),
     checkTosNotAcceptedUserVideos(db),
+    checkCustomPageDangerousHtml(db),
   ]);
   return [
     accessToken,
@@ -223,6 +253,7 @@ export async function runSecurityChecks(
     unapprovedCreator,
     bannedUser,
     tosNotAccepted,
+    customPageDanger,
     checkPublicApiLeak(),
     checkNotificationTableMismatch(),
   ];
