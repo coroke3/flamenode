@@ -207,6 +207,7 @@ export default async function EventDetailPage({
               <SlotGrid
                 slots={slotRowsForGrid}
                 viewerXId={viewer?.active_x_user_id ?? null}
+                viewerActiveX={viewer?.active_x_user_id ?? null}
                 viewerDiscordId={viewer?.id ?? null}
                 canReserve={accepting}
                 slotKind={(event.slot_type ?? "time") as "time" | "count"}
