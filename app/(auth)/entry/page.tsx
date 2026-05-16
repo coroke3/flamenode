@@ -36,7 +36,15 @@ export default async function EntryPage(): Promise<React.ReactElement> {
   const db = getDatabase();
   const activeEventsRaw = db ? await fetchActiveEvents(db).catch(() => []) : [];
   // 開催前でも受付 OPEN のイベントは募集対象にする。
-  const activeEvents = activeEventsRaw.filter((ev) => isAcceptingEntries(ev));
+  // 複数並走時の優先度: 募集終了が近いものを先頭に、未設定は最後尾に回し、その中で start_time 昇順。
+  const activeEvents = activeEventsRaw
+    .filter((ev) => isAcceptingEntries(ev))
+    .sort((a, b) => {
+      const aEnd = a.entry_end_time ?? Number.POSITIVE_INFINITY;
+      const bEnd = b.entry_end_time ?? Number.POSITIVE_INFINITY;
+      if (aEnd !== bEnd) return aEnd - bEnd;
+      return (a.start_time ?? 0) - (b.start_time ?? 0);
+    });
   const slotCounts = new Map<string, number>();
   if (db && activeEvents.length > 0) {
     const rows = await db
@@ -132,13 +140,23 @@ export default async function EntryPage(): Promise<React.ReactElement> {
               ))
             )}
           </div>
-          {isLoggedIn && activeEvents.length > 0 ? (
+          {isLoggedIn && activeEvents.length === 1 ? (
             <div className={styles.btnRow} style={{ marginTop: 12 }}>
               <Link href={`/event/${activeEvents[0].id}#slot`} className="fn-btn fn-btn-primary">
                 <Icon name="calendar" size={14} aria-hidden />
                 スロットを確保する
               </Link>
             </div>
+          ) : isLoggedIn && activeEvents.length > 1 ? (
+            <p
+              style={{
+                color: "var(--text-muted)",
+                fontSize: 12,
+                marginTop: 12,
+              }}
+            >
+              参加するイベントを上の一覧から選択してください (募集終了が近い順)。
+            </p>
           ) : null}
         </section>
 
