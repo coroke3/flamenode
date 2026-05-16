@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, eq, isNull, ne, or } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { canEditVideo } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
@@ -18,9 +18,12 @@ import { extractYoutubeId } from "@/lib/youtube/id";
 import { generateId } from "@/lib/utils/id";
 import { normalizeXId } from "@/lib/utils/xid";
 
+// posting/youtube-id-and-active-x:
+// contact_x_id は server 側では Active X ID から導出するため、
+// form 入力は optional として受け取り、投稿主体としては信頼しない。
 const videoFormSchema = z.object({
   display_name: z.string().trim().min(1).max(80),
-  contact_x_id: z.string().trim().min(1).max(32),
+  contact_x_id: z.string().trim().max(32).optional().nullable(),
   icon_url: z.string().trim().max(500).optional().nullable(),
   profile_text: z.string().trim().max(1000).optional().nullable(),
   youtube_channel_url: z.string().trim().max(500).optional().nullable(),
@@ -189,12 +192,35 @@ export async function createFreeVideo(
 
   const id = generateId("v");
   const now = Math.floor(Date.now() / 1000);
-  const activeX = normalizeXId(parsed.data.contact_x_id || sessionUser.active_x_user_id);
+  // posting/youtube-id-and-active-x: 投稿主体は Active X ID のみ。
+  // form 入力の contact_x_id は信頼せず、セッションの active_x_user_id だけを使う。
+  const activeX = normalizeXId(sessionUser.active_x_user_id);
   if (!activeX || !approvedXIds.includes(activeX)) {
     return { ok: false, message: "承認済みの X ID を選択してください。" };
   }
+
+  // YouTube ID 重複チェック: 同じ youtube_video_id を持つ非削除・非 voided な動画が
+  // 既に存在する場合は拒否する。
+  const duplicateVideo = (
+    await db
+      .select({ id: videos.id })
+      .from(videos)
+      .where(
+        and(
+          eq(videos.youtube_video_id, youtubeId),
+          eq(videos.is_deleted, 0),
+          ne(videos.status, "voided"),
+        ),
+      )
+      .limit(1)
+  )[0];
+  if (duplicateVideo) {
+    return { ok: false, message: "この YouTube 動画は既に登録されています。" };
+  }
+
   const displayName = parsed.data.display_name;
   const iconUrl = parsed.data.icon_url || sessionUser.image || null;
+  // ensureSubmissionXUser に渡す X ID は必ず承認済み (approvedXIds に含まれる) であること。
   await ensureSubmissionXUser(db, {
     xId: activeX,
     displayName,
@@ -283,9 +309,9 @@ export async function submitSlotVideo(
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
 
-  const requestedX = normalizeXId(
-    parsed.data.contact_x_id || sessionUser.active_x_user_id,
-  );
+  // posting/youtube-id-and-active-x: 提出主体は Active X ID のみ。
+  // form 入力の contact_x_id は信頼せず、セッションの active_x_user_id だけを使う。
+  const requestedX = normalizeXId(sessionUser.active_x_user_id);
   const slotOwnerWhere = requestedX
     ? or(
         eq(slots.x_user_id, requestedX),
@@ -319,6 +345,33 @@ export async function submitSlotVideo(
   if (!approvedXIds.includes(activeX)) {
     return { ok: false, message: "承認済みの X ID を選択してください。" };
   }
+
+  // YouTube ID 重複チェック: 同じ youtube_video_id を持つ非削除・非 voided な動画が
+  // 既に存在する場合は拒否する。update 経路では現在の video 自身を除外する。
+  const youtubeIdDuplicateWhere = exists
+    ? and(
+        eq(videos.youtube_video_id, youtubeId),
+        eq(videos.is_deleted, 0),
+        ne(videos.status, "voided"),
+        ne(videos.id, videoId),
+      )
+    : and(
+        eq(videos.youtube_video_id, youtubeId),
+        eq(videos.is_deleted, 0),
+        ne(videos.status, "voided"),
+      );
+  const duplicateSlotVideo = (
+    await db
+      .select({ id: videos.id })
+      .from(videos)
+      .where(youtubeIdDuplicateWhere)
+      .limit(1)
+  )[0];
+  if (duplicateSlotVideo) {
+    return { ok: false, message: "この YouTube 動画は既に登録されています。" };
+  }
+
+  // ensureSubmissionXUser に渡す X ID は必ず承認済み (approvedXIds に含まれる) であること。
   await ensureSubmissionXUser(db, {
     xId: activeX,
     displayName: parsed.data.display_name,
@@ -476,19 +529,40 @@ export async function updateVideo(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const requestedX = normalizeXId(parsed.data.contact_x_id);
-  const existingX = normalizeXId(target.contact_x_id || target.creator_id);
-  let nextCreatorX = existingX || requestedX;
-  if (requestedX && requestedX !== existingX) {
-    if (sessionUser.role === "admin" || approvedXIds.includes(requestedX)) {
-      nextCreatorX = requestedX;
-    } else {
-      return { ok: false, message: "提出主体の X ID を変更する権限がありません。" };
-    }
+  const existingX = normalizeXId(target.creator_id || target.contact_x_id);
+  let nextCreatorX: string;
+  if (sessionUser.role === "admin") {
+    // admin は form 入力の contact_x_id で変更可。未指定の場合は既存を維持。
+    const requestedX = normalizeXId(parsed.data.contact_x_id);
+    nextCreatorX = requestedX || existingX || "";
+  } else {
+    // 非 admin: 投稿主体の変更を許可しない。既存の creator_id / contact_x_id を維持する。
+    nextCreatorX = existingX || "";
   }
   if (!nextCreatorX) {
     return { ok: false, message: "提出主体 X ID が必要です。" };
   }
+
+  // YouTube ID 重複チェック: 自身を除いた非削除・非 voided な動画に同じ ID が存在したら拒否。
+  const duplicateUpdateVideo = (
+    await db
+      .select({ id: videos.id })
+      .from(videos)
+      .where(
+        and(
+          eq(videos.youtube_video_id, youtubeId),
+          eq(videos.is_deleted, 0),
+          ne(videos.status, "voided"),
+          ne(videos.id, videoId),
+        ),
+      )
+      .limit(1)
+  )[0];
+  if (duplicateUpdateVideo) {
+    return { ok: false, message: "この YouTube 動画は既に登録されています。" };
+  }
+
+  // ensureSubmissionXUser に渡す X ID は必ず承認済みか admin 操作であること。
   await ensureSubmissionXUser(db, {
     xId: nextCreatorX,
     displayName: parsed.data.display_name,

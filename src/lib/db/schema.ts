@@ -295,6 +295,11 @@ export const videos = sqliteTable("videos", {
     enum: ["pending", "synced", "failed"],
   }).default("pending"),
   validation_errors: text("validation_errors"),
+  // NOTE (posting/youtube-id-and-active-x):
+  //   "unlisted" は FlameNode 内部の限定公開状態 (URL 知っている人のみ閲覧可) を指す。
+  //   YouTube 側の "限定公開 (unlisted)" とは別概念。
+  //   YouTube 側が限定公開であっても FlameNode 側 status が "public" なら通常公開扱い。
+  //   YouTube 側の privacy 状態は将来 youtube_privacy_status カラムで管理予定 (未実装)。
   status: text("status", {
     enum: [
       "draft",
