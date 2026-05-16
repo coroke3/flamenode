@@ -4,6 +4,12 @@ import {
   fetchPublicVideos,
 } from "@/lib/db/listQueries";
 import { getDatabase } from "@/lib/cloudflare";
+import {
+  MAX_PUBLIC_LIST_LIMIT,
+  PUBLIC_VIDEO_KEYS,
+  PublicVideoDto,
+  pickKeys,
+} from "@/lib/api/publicDto";
 
 /** 作品一覧の JSON API。`/list` などの軽量クライアント側ロード用。 */
 export async function GET(req: Request): Promise<Response> {
@@ -11,8 +17,11 @@ export async function GET(req: Request): Promise<Response> {
   const q = url.searchParams.get("q") ?? "";
   const sort = url.searchParams.get("sort") ?? "new";
   const eventId = url.searchParams.get("event") ?? "";
-  const page = parseInt(url.searchParams.get("page") ?? "1", 10) || 1;
-  const limit = Math.min(48, parseInt(url.searchParams.get("limit") ?? "24", 10) || 24);
+  const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
+  const limit = Math.min(
+    MAX_PUBLIC_LIST_LIMIT,
+    Math.max(1, parseInt(url.searchParams.get("limit") ?? "24", 10) || 24),
+  );
 
   const db = getDatabase();
   if (!db) {
@@ -20,9 +29,24 @@ export async function GET(req: Request): Promise<Response> {
   }
 
   const params = { q, sort: sort as "new" | "old" | "score", eventId: eventId || undefined };
-  const [items, total] = await Promise.all([
+  const [rows, total] = await Promise.all([
     fetchPublicVideos(db, { ...params, limit, offset: (page - 1) * limit }),
     countPublicVideos(db, params),
   ]);
-  return NextResponse.json({ items, total, page, limit });
+  // fetchPublicVideos は PUBLIC_VIDEO_KEYS と同列を select 済みだが、
+  // ルート層でも明示的に pickKeys を通してホワイトリスト外フィールドを排除する。
+  // status は eq(videos.status, "public") でフィルタ済みのため "public" キャストは安全。
+  const items: PublicVideoDto[] = rows.map((row) => ({
+    ...pickKeys(row, PUBLIC_VIDEO_KEYS),
+    status: "public" as const,
+  }));
+  return NextResponse.json(
+    { items, total, page, limit },
+    {
+      headers: {
+        "Cache-Control":
+          "public, max-age=30, s-maxage=60, stale-while-revalidate=120",
+      },
+    },
+  );
 }
