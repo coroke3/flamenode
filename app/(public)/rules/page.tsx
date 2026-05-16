@@ -5,6 +5,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { termsVersions } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
+import { sanitizeUserHtml } from "@/lib/utils/sanitizeUserHtml";
 
 export const metadata: Metadata = { title: "利用規約" };
 export const dynamic = "force-dynamic";
@@ -128,7 +129,7 @@ export default async function RulesPage(): Promise<React.ReactElement> {
           fontSize: 14,
           lineHeight: 1.8,
         }}
-        dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }}
+        dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(renderMarkdown(body)) }}
       />
       <section
         id="event-host"
