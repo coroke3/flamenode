@@ -20,6 +20,8 @@ const ADMIN_NAV: { href: string; label: string; icon: React.ReactNode }[] = [
   { href: "/admin/rules", label: "規約", icon: <Icon name="info" size={14} /> },
   { href: "/admin/history", label: "履歴", icon: <Icon name="clock" size={14} /> },
   { href: "/admin/cost-guard", label: "コストガード", icon: <Icon name="warning" size={14} /> },
+  { href: "/admin/health", label: "ヘルスチェック", icon: <Icon name="check" size={14} /> },
+  { href: "/admin/security", label: "セキュリティ", icon: <Icon name="settings" size={14} /> },
   { href: "/admin/import", label: "インポート", icon: <Icon name="upload" size={14} /> },
 ];
 
