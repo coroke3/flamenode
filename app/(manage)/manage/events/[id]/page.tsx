@@ -318,6 +318,12 @@ export default async function ManageEventPage({
           <Icon name="users" size={11} aria-hidden /> 運営メンバー
         </Link>
         <Link
+          href={`/manage/events/${id}/audience`}
+          className="fn-btn fn-btn-ghost fn-btn-sm"
+        >
+          <Icon name="user" size={11} aria-hidden /> 登録者プレビュー
+        </Link>
+        <Link
           href={`/event/${id}`}
           className="fn-btn fn-btn-ghost fn-btn-sm"
         >
