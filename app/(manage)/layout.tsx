@@ -4,12 +4,13 @@ import { AuthHeader } from "@/components/layout/AuthHeader";
 import { PublicHeader } from "@/components/layout/PublicHeader";
 import { PublicFooter } from "@/components/layout/PublicFooter";
 import { CostGuardBanner } from "@/components/layout/CostGuardBanner";
+import { ManageSidebar } from "@/components/layout/ManageSidebar";
 import { buildHeaderUser, type HeaderUser } from "@/lib/auth/headerUser";
 
 /**
  * イベント運営者エリア共通レイアウト。
- * 管理者と異なり、サイドバーは持たず本文を広く使う。
- * 認可は各ページが行う (eventEditors に該当行があるか)。
+ * 担当イベントがあれば左にサイドバー (クイックナビ) を表示する。
+ * 認可は各ページで判定する (eventEditors に該当行があるか)。
  */
 export default async function ManageLayout({
   children,
@@ -28,16 +29,20 @@ export default async function ManageLayout({
     <>
       <CostGuardBanner />
       {user ? <AuthHeader user={user} /> : <PublicHeader user={null} />}
-      <main
+      <div
         style={{
           flex: 1,
-          width: "min(96%, 1100px)",
+          width: "min(96%, 1300px)",
           margin: "0 auto",
           padding: "20px 16px 64px",
+          display: "flex",
+          gap: 24,
+          alignItems: "flex-start",
         }}
       >
-        {children}
-      </main>
+        <ManageSidebar />
+        <main style={{ flex: 1, minWidth: 0 }}>{children}</main>
+      </div>
       <PublicFooter />
     </>
   );
