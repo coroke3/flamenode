@@ -38,6 +38,15 @@
   color: var(--text-muted);
 }
 
+.entryPeriod {
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px dashed var(--border-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
 .heroTitle {
   font-size: 26px;
   font-weight: 800;

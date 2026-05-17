@@ -101,6 +101,17 @@ export default async function EventDetailPage({
   const publicEditors = editors.filter((e) => e.is_public === 1);
   const status = computeEventStatus(event);
   const accepting = isAcceptingEntries(event);
+  const now = Math.floor(Date.now() / 1000);
+  const entryNotStartedYet =
+    !accepting &&
+    event.is_entry_open === 1 &&
+    event.entry_start_time != null &&
+    now < event.entry_start_time;
+  const entryClosed =
+    !accepting &&
+    event.is_entry_open === 1 &&
+    event.entry_end_time != null &&
+    now > event.entry_end_time;
 
   const viewer = await getCurrentUser();
 
@@ -132,6 +143,10 @@ export default async function EventDetailPage({
             </span>
             {accepting ? (
               <span className="fn-badge fn-badge-soft">受付中</span>
+            ) : entryNotStartedYet ? (
+              <span className="fn-badge fn-badge-warning">募集開始前</span>
+            ) : entryClosed ? (
+              <span className="fn-badge fn-badge-neutral">募集終了</span>
             ) : null}
             <span>
               {formatUnix(event.start_time, { dateOnly: true })}
@@ -139,6 +154,18 @@ export default async function EventDetailPage({
                 ? ` 〜 ${formatUnix(event.end_time, { dateOnly: true })}`
                 : ""}
             </span>
+            {(event.entry_start_time != null || event.entry_end_time != null) ? (
+              <span className={styles.entryPeriod}>
+                募集:{" "}
+                {event.entry_start_time != null
+                  ? formatUnix(event.entry_start_time)
+                  : "—"}
+                {" 〜 "}
+                {event.entry_end_time != null
+                  ? formatUnix(event.entry_end_time)
+                  : "—"}
+              </span>
+            ) : null}
           </div>
           <h1 className={styles.heroTitle}>{event.title}</h1>
           {event.explanation ? (
