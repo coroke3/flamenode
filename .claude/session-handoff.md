@@ -68,6 +68,7 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 54 | enqueueNotification ヘルパー + X ID 承認/却下通知 | bdcfe91 |
 | 55 | video status 変更時に投稿主へ通知発火 (event-scoped) | 5e71ff1 |
 | 56 | cleanup retention 純粋関数化 + 単体テスト追加 | 69466ea |
+| 57 | /admin/users/[id] にユーザー固有 history_logs 表示 | 81afeb8 |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
