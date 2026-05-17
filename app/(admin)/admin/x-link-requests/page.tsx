@@ -12,8 +12,25 @@ export const dynamic = "force-dynamic";
 
 const RECENT_HISTORY_LIMIT = 30;
 
-export default async function AdminXLinkRequestsPage(): Promise<React.ReactElement> {
+interface Props {
+  searchParams?: Promise<{ type?: string }>;
+}
+
+export default async function AdminXLinkRequestsPage({
+  searchParams,
+}: Props): Promise<React.ReactElement> {
+  const sp = (await searchParams) ?? {};
+  const linkTypeFilter =
+    sp.type === "new" || sp.type === "merge" || sp.type === "alias" ? sp.type : "all";
+
   const db = getDatabase();
+  const pendingWhere =
+    linkTypeFilter === "all"
+      ? eq(xAccountLinkRequests.status, "pending")
+      : and(
+          eq(xAccountLinkRequests.status, "pending"),
+          eq(xAccountLinkRequests.link_type, linkTypeFilter),
+        )!;
   const pending = db
     ? await db
         .select({
@@ -28,7 +45,7 @@ export default async function AdminXLinkRequestsPage(): Promise<React.ReactEleme
         })
         .from(xAccountLinkRequests)
         .leftJoin(users, eq(users.id, xAccountLinkRequests.discord_user_id))
-        .where(eq(xAccountLinkRequests.status, "pending"))
+        .where(pendingWhere)
         .orderBy(desc(xAccountLinkRequests.requested_at))
     : [];
 
@@ -76,6 +93,33 @@ export default async function AdminXLinkRequestsPage(): Promise<React.ReactEleme
           にレコードが作成されダッシュボードの一覧に表示されます。
         </p>
       </header>
+      <nav
+        aria-label="link_type フィルタ"
+        style={{
+          marginTop: 12,
+          display: "flex",
+          gap: 6,
+          flexWrap: "wrap",
+        }}
+      >
+        {(
+          [
+            ["all", "すべて"],
+            ["new", "new"],
+            ["merge", "merge"],
+            ["alias", "alias"],
+          ] as const
+        ).map(([key, label]) => (
+          <Link
+            key={key}
+            href={key === "all" ? "/admin/x-link-requests" : `/admin/x-link-requests?type=${key}`}
+            className={`fn-btn fn-btn-sm ${linkTypeFilter === key ? "fn-btn-primary" : "fn-btn-ghost"}`}
+          >
+            {label}
+          </Link>
+        ))}
+      </nav>
+
       <XLinkRequestTable rows={pending} />
 
       {recentRejected.length > 0 ? (
