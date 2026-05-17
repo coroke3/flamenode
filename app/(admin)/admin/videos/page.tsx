@@ -205,12 +205,21 @@ export default async function AdminVideosPage({
               </td>
               <td>{formatRelative(v.created_at)}</td>
               <td>
-                <Link
-                  href={`/admin/videos/${v.id}`}
-                  className="fn-btn fn-btn-ghost fn-btn-sm"
-                >
-                  詳細
-                </Link>
+                <div style={{ display: "inline-flex", gap: 4 }}>
+                  <Link
+                    href={`/admin/videos/${v.id}`}
+                    className="fn-btn fn-btn-ghost fn-btn-sm"
+                  >
+                    詳細
+                  </Link>
+                  <Link
+                    href={`/admin/audit?table=videos&record=${encodeURIComponent(v.id)}`}
+                    className="fn-btn fn-btn-ghost fn-btn-sm"
+                    title="この作品の監査ログ"
+                  >
+                    監査
+                  </Link>
+                </div>
               </td>
             </tr>
           ))}
