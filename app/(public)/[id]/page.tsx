@@ -377,6 +377,22 @@ export default async function VideoDetailPage({
             {video.closing_comment ? <MetaItem title="あとがき" body={video.closing_comment} /> : null}
           </div>
 
+          {/* モバイル: メタの後・メンバー前に関連動画を出す (下部に押し込みすぎない) */}
+          <aside className={styles.relatedMobile} aria-label="関連動画 (モバイル表示)">
+            <h3 className={styles.relatedHeading}>関連動画</h3>
+            <div className={styles.relatedList}>
+              {related.length === 0 ? (
+                <p className="fn-empty-message" style={{ padding: 8 }}>
+                  関連動画はまだありません。
+                </p>
+              ) : (
+                related.slice(0, 6).map((v) => (
+                  <VideoCard key={v.id} video={v} size="list" />
+                ))
+              )}
+            </div>
+          </aside>
+
           {members.length > 0 ? (
             <section className={styles.section}>
               <h2 className={styles.sectionTitle}>参加メンバー ({members.length})</h2>
@@ -449,7 +465,7 @@ export default async function VideoDetailPage({
             </>
           ) : null}
 
-          <div>
+          <div className={styles.relatedDesktop}>
             <h3 className={styles.relatedHeading}>関連動画</h3>
             <div className={styles.relatedList}>
               {related.length === 0 ? (

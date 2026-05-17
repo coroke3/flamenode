@@ -186,6 +186,18 @@
   gap: 4px;
 }
 
+/* モバイル: メイン記事内に出すミニ関連 (デスクトップは aside に出す) */
+.relatedMobile {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px dashed var(--border-subtle);
+  display: block;
+}
+
+.relatedDesktop {
+  display: block;
+}
+
 @media (min-width: 1024px) {
   .layout {
     grid-template-columns: minmax(0, 1fr) 360px;
@@ -193,6 +205,17 @@
   }
   .title {
     font-size: 30px;
+  }
+  /* デスクトップでは aside の方を使う */
+  .relatedMobile {
+    display: none;
+  }
+}
+
+@media (max-width: 1023px) {
+  /* モバイル/タブレットでは aside の関連を非表示にしてミニ関連を本文側に出す */
+  .relatedDesktop {
+    display: none;
   }
 }
 
