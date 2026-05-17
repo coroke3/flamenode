@@ -8,6 +8,7 @@ import { canEditVideo } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { historyLogs, videoChapters, videos } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
+import { enqueueNotification } from "@/lib/notifications/enqueue";
 
 export interface ChapterActionResult {
   ok: boolean;
@@ -105,6 +106,28 @@ export async function createChapter(
     retention_class: "normal",
     created_at: now,
   });
+
+  // 通知: 動画オーナーに新しい public チャプターコメントが付いたことを伝える。
+  // 投稿者本人 (Active X の Discord 紐付け) なら通知しない。
+  // (private チャプターはオーナーには不要 - 投稿者本人にしか見えないため)
+  if (
+    data.visibility === "public" &&
+    target.owner_discord_user_id &&
+    target.owner_discord_user_id !== sUser.id
+  ) {
+    await enqueueNotification(db, {
+      discordUserId: target.owner_discord_user_id,
+      type: "chapter_comment_added",
+      payload: {
+        content: `作品「${target.title}」に新しいチャプターコメント「${data.chapter_label}」が追加されました。`,
+        video_id: data.video_id,
+        chapter_id: id,
+        chapter_time: data.chapter_time,
+        author_x_user_id: activeX,
+      },
+      eventId: target.primary_event_id ?? null,
+    });
+  }
 
   revalidatePath(`/${target.youtube_video_id ?? data.video_id}`);
   return { ok: true, chapterId: id };
