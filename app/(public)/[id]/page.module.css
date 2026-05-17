@@ -164,6 +164,43 @@
   overflow-x: auto;
 }
 
+/* モバイル: 表をカード状に積み上げる */
+@media (max-width: 640px) {
+  .memberTable table,
+  .memberTable thead,
+  .memberTable tbody,
+  .memberTable tr,
+  .memberTable th,
+  .memberTable td {
+    display: block;
+    width: 100%;
+  }
+
+  .memberTable thead {
+    display: none;
+  }
+
+  .memberTable tr {
+    padding: 10px 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    margin-bottom: 8px;
+    background: var(--bg-surface);
+  }
+
+  .memberTable td {
+    border: 0;
+    padding: 2px 0;
+    font-size: 12.5px;
+  }
+
+  .memberTable td:first-child {
+    font-size: 10px;
+    color: var(--text-muted);
+    letter-spacing: 0.1em;
+  }
+}
+
 .aside {
   display: flex;
   flex-direction: column;
