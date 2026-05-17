@@ -6,6 +6,8 @@ import {
   events as eventsTable,
   slots as slotsTable,
   systemSettings,
+  videoChapters as videoChaptersTable,
+  videoComments as videoCommentsTable,
   videoEvents as videoEventsTable,
   videoInteractions as videoInteractionsTable,
   videos as videosTable,
@@ -14,7 +16,7 @@ import {
 export type HealthCheckResult = {
   id: string;
   label: string;
-  status: "ok" | "warn";
+  status: "ok" | "warn" | "info";
   count: number;
   samples: string[];
   note?: string;
@@ -366,8 +368,79 @@ async function checkLikeCountDrift(db: AnyDb): Promise<HealthCheckResult> {
   };
 }
 
+/** deprecated: video_comments テーブルに新規データが入っていないか */
+async function checkVideoCommentsLegacyRows(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const rows = await db
+    .select({ c: sql<number>`COUNT(*)` })
+    .from(videoCommentsTable);
+  const count = Number(rows[0]?.c ?? 0);
+  return {
+    id: "video_comments_legacy_rows",
+    label: "video_comments 行数 (deprecated)",
+    status: count === 0 ? "ok" : "warn",
+    count,
+    samples: [],
+    note:
+      count > 0
+        ? "video_comments は deprecated。新規利用は禁止。残行があれば移行/削除候補。"
+        : undefined,
+  };
+}
+
+/** deprecated: videos.outro_comment が non-null (closing_comment に統一済み) */
+async function checkVideosOutroComment(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const rows = await db
+    .select({ id: videosTable.id })
+    .from(videosTable)
+    .where(isNotNull(videosTable.outro_comment))
+    .limit(10);
+  const count = rows.length;
+  return {
+    id: "videos_outro_comment_legacy",
+    label: "videos.outro_comment 残存行 (deprecated)",
+    status: count === 0 ? "ok" : "info",
+    count,
+    samples: rows.slice(0, 5).map((r) => r.id),
+    note:
+      count > 0
+        ? "outro_comment は closing_comment に統一済み。旧データは表示のみで、新規書き込みは行わない。"
+        : undefined,
+  };
+}
+
+/** deprecated: video_chapters.marker_kind != 'chapter' (MVPでは chapter 固定) */
+async function checkChapterNonChapterMarker(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const rows = await db
+    .select({ id: videoChaptersTable.id, marker_kind: videoChaptersTable.marker_kind })
+    .from(videoChaptersTable)
+    .where(
+      and(
+        isNotNull(videoChaptersTable.marker_kind),
+        ne(videoChaptersTable.marker_kind, "chapter"),
+      ),
+    )
+    .limit(10);
+  const count = rows.length;
+  return {
+    id: "chapter_non_chapter_marker",
+    label: "video_chapters.marker_kind != 'chapter' (旧データ)",
+    status: count === 0 ? "ok" : "info",
+    count,
+    samples: rows.slice(0, 5).map((r) => `${r.id} (${r.marker_kind ?? "?"})`),
+    note:
+      count > 0
+        ? "MVP は marker_kind=chapter 固定運用。旧データの comment/review/system は表示のみで、新規書き込みは chapter のみ。"
+        : undefined,
+  };
+}
+
 export async function runHealthChecks(db: AnyDb): Promise<HealthCheckResult[]> {
-  // Opus判断候補: deprecated 項目への新規データ検出 (何を deprecated 扱いするか仕様確定要)
   return Promise.all([
     checkSystemSettingsSingleRow(db),
     checkPrimaryEventSync(db),
@@ -380,5 +453,8 @@ export async function runHealthChecks(db: AnyDb): Promise<HealthCheckResult[]> {
     checkVoidedVideoVisible(db),
     checkSlotTimeOverlap(db),
     checkLikeCountDrift(db),
+    checkVideoCommentsLegacyRows(db),
+    checkVideosOutroComment(db),
+    checkChapterNonChapterMarker(db),
   ]);
 }

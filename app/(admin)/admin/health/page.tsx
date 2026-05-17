@@ -71,9 +71,19 @@ export default async function AdminHealthPage(): Promise<React.ReactElement> {
                   </td>
                   <td>
                     <span
-                      className={`fn-badge ${r.status === "ok" ? "fn-badge-accent" : "fn-badge-warning"}`}
+                      className={`fn-badge ${
+                        r.status === "ok"
+                          ? "fn-badge-accent"
+                          : r.status === "info"
+                            ? "fn-badge-neutral"
+                            : "fn-badge-warning"
+                      }`}
                     >
-                      {r.status === "ok" ? "OK" : "WARN"}
+                      {r.status === "ok"
+                        ? "OK"
+                        : r.status === "info"
+                          ? "INFO"
+                          : "WARN"}
                     </span>
                   </td>
                   <td style={{ fontVariantNumeric: "tabular-nums" }}>{r.count}</td>
