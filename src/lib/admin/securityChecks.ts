@@ -2,7 +2,7 @@ import "server-only";
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import {
   accounts as accountsTable,
@@ -202,6 +202,69 @@ function checkNotificationTableMismatch(): SecurityCheckResult {
   }
 }
 
+/** banned ユーザーがチャプターコメントを投稿していないか (BAN 後の投稿検出) */
+async function checkBannedUserChapters(
+  db: AnyDb,
+): Promise<SecurityCheckResult> {
+  // x_users.linked_discord_user_id 経由で banned ユーザーが投稿した video_chapters を検出
+  const rows = await db
+    .select({
+      id: sql<string>`vc.id`,
+      x_user_id: sql<string>`vc.x_user_id`,
+    })
+    .from(sql`video_chapters AS vc`)
+    .innerJoin(
+      sql`x_users AS xu`,
+      sql`xu.id = vc.x_user_id`,
+    )
+    .innerJoin(
+      sql`users AS u`,
+      sql`u.id = xu.linked_discord_user_id`,
+    )
+    .where(sql`u.is_banned = 1`)
+    .limit(10);
+  const count = rows.length;
+  return {
+    id: "banned_user_chapters",
+    label: "BAN ユーザーが投稿したチャプターコメント",
+    status: count === 0 ? "ok" : "warn",
+    count,
+    samples: rows.slice(0, 5).map((r) => `chapter:${r.id} x:${r.x_user_id}`),
+    note:
+      count > 0
+        ? "BAN 後にチャプターコメントが残存しています。writeGuard 漏れの可能性。"
+        : undefined,
+  };
+}
+
+/** approved な X ID が存在するのに linked_discord_user_id が NULL (孤立) */
+async function checkOrphanApprovedXId(
+  db: AnyDb,
+): Promise<SecurityCheckResult> {
+  const rows = await db
+    .select({ id: xUsersTable.id })
+    .from(xUsersTable)
+    .where(
+      and(
+        eq(xUsersTable.approval_status, "approved"),
+        isNull(xUsersTable.linked_discord_user_id),
+      ),
+    )
+    .limit(10);
+  const count = rows.length;
+  return {
+    id: "orphan_approved_xid",
+    label: "approved な X ID で linked_discord_user_id が NULL",
+    status: count === 0 ? "ok" : "info",
+    count,
+    samples: rows.slice(0, 5).map((r) => `x:${r.id}`),
+    note:
+      count > 0
+        ? "Discord 紐付けが失われた approved X ID。legacy import 由来の可能性、または手動で承認したケース。"
+        : undefined,
+  };
+}
+
 /** custom_pages.html の中で危険HTMLが残っていないか静的検出 */
 async function checkCustomPageDangerousHtml(
   db: AnyDb,
@@ -239,6 +302,8 @@ export async function runSecurityChecks(
     bannedUser,
     tosNotAccepted,
     customPageDanger,
+    bannedChapters,
+    orphanApprovedX,
   ] = await Promise.all([
     checkAccessTokenNotNull(db),
     checkRejectedXIdActive(db),
@@ -246,6 +311,8 @@ export async function runSecurityChecks(
     checkBannedUserVideos(db),
     checkTosNotAcceptedUserVideos(db),
     checkCustomPageDangerousHtml(db),
+    checkBannedUserChapters(db),
+    checkOrphanApprovedXId(db),
   ]);
   return [
     accessToken,
@@ -254,6 +321,8 @@ export async function runSecurityChecks(
     bannedUser,
     tosNotAccepted,
     customPageDanger,
+    bannedChapters,
+    orphanApprovedX,
     checkPublicApiLeak(),
     checkNotificationTableMismatch(),
   ];
