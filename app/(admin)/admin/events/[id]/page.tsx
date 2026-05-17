@@ -68,6 +68,20 @@ export default async function AdminEventDetailPage({
   const status = computeEventStatus(event);
   const accepting = isAcceptingEntries(event);
 
+  // 集計サマリ
+  const slotStats = {
+    total: slots.length,
+    available: slots.filter((s) => s.status === "available").length,
+    reserved: slots.filter((s) => s.status === "reserved").length,
+    submitted: slots.filter((s) => s.status === "submitted").length,
+  };
+  const videoStats = {
+    total: evVideos.length,
+    public: evVideos.filter((v) => v.status === "public").length,
+    pending: evVideos.filter((v) => v.status === "pending").length,
+    voided: evVideos.filter((v) => v.status === "voided").length,
+  };
+
   return (
     <div>
       <p className="fn-muted fn-text-xs fn-bold">EVENT</p>
@@ -114,6 +128,24 @@ export default async function AdminEventDetailPage({
           <Icon name="chevron-left" size={12} aria-hidden /> 一覧
         </Link>
       </nav>
+
+      <section
+        style={{
+          marginTop: 16,
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+          gap: 8,
+        }}
+      >
+        <StatBox label="枠合計" value={slotStats.total} />
+        <StatBox label="空き枠" value={slotStats.available} />
+        <StatBox label="確保済" value={slotStats.reserved} />
+        <StatBox label="提出済" value={slotStats.submitted} />
+        <StatBox label="作品" value={videoStats.total} />
+        <StatBox label="公開済" value={videoStats.public} />
+        <StatBox label="審査待ち" value={videoStats.pending} accent />
+        <StatBox label="無効" value={videoStats.voided} />
+      </section>
 
       <section className="fn-card" style={{ marginTop: 18 }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -235,6 +267,38 @@ export default async function AdminEventDetailPage({
         )}
       </section>
 
+    </div>
+  );
+}
+
+function StatBox({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: number;
+  accent?: boolean;
+}): React.ReactElement {
+  return (
+    <div
+      className={`fn-card ${accent && value > 0 ? "fn-card-accent" : ""}`}
+      style={{ padding: "10px 14px" }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: "0.16em",
+          color: "var(--text-muted)",
+          textTransform: "uppercase",
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ fontSize: 18, fontWeight: 800, marginTop: 2 }}>
+        {value.toLocaleString()}
+      </div>
     </div>
   );
 }
