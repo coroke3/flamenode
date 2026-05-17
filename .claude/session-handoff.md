@@ -100,6 +100,8 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 86 | video_members.name_for_sort 追加+書き込み時同期 (migration 0004) | 68de4a0 |
 | 87 | docs/ops に未適用 migration 0001-0004 適用手順 | c086877 |
 | 88 | security: banned 投稿チャプター/孤立 approved X ID 検出 | dd17cef |
+| 89 | notification_outbox に (status,created_at)/(event_id) インデックス (migration 0005) | a856c67 |
+| 90 | /admin/users/[id] に email認証/TOS/再同意要求ステータス表示 | a6a53a6 |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
@@ -116,6 +118,7 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 - migration `0002_hot_colleen_wing.sql` (notification_outbox.event_id) は本番 D1 へ未適用。
 - migration `0003_loose_whiplash.sql` (video_members インデックス) は本番 D1 へ未適用。
 - migration `0004_tough_kronos.sql` (name_for_sort + バックフィル) は本番 D1 へ未適用。
+- migration `0005_curvy_karnak.sql` (notification_outbox インデックス) は本番 D1 へ未適用。
 - 本番 deploy も未実施。
 
 ## 次に着手しやすい小粒 Batch 候補
