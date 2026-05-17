@@ -104,6 +104,13 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 90 | /admin/users/[id] に email認証/TOS/再同意要求ステータス表示 | a6a53a6 |
 | 91 | health: orphan video_member / name_for_sort NULL 検出 | 675f5ee |
 | 92 | check-public-api-leaks に offset/limit バリエーション追加 | df34f3e |
+| 93 | /admin/announcements に audience/status フィルタ | 6730e1f |
+| 94 | /admin/rules に状態フィルタ (published/draft/archived) | bde23f7 |
+| 95 | cn ユーティリティのテスト 5件 (累計 119件) | 2cfb458 |
+| 96 | id ユーティリティのテスト 6件 (累計 125件) | e0c5430 |
+| 97 | /admin/health に WARN サマリパネル | 4aaae3f |
+| 98 | /admin/security に WARN サマリパネル | 2fbcc4c |
+| 99 | /admin トップ「今日やること」にヘルス/セキュリティWARN件数 | 85d8576 |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
