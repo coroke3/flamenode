@@ -5,6 +5,7 @@ import type { Metadata } from "next";
 import { desc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
+  historyLogs as historyLogsTable,
   users as usersTable,
   videos as videosTable,
   xUsers as xUsersTable,
@@ -47,6 +48,21 @@ export default async function AdminUserDetailPage({
     .where(eq(videosTable.owner_discord_user_id, user.id))
     .orderBy(desc(videosTable.created_at))
     .limit(20);
+
+  // 当該ユーザーが操作した管理アクション + 当該ユーザーに対する管理アクション
+  // operator_discord_id か record_id が user.id に一致するものを取得
+  const recentByOperator = await db
+    .select()
+    .from(historyLogsTable)
+    .where(eq(historyLogsTable.operator_discord_id, user.id))
+    .orderBy(desc(historyLogsTable.created_at))
+    .limit(15);
+  const recentOnUser = await db
+    .select()
+    .from(historyLogsTable)
+    .where(eq(historyLogsTable.record_id, user.id))
+    .orderBy(desc(historyLogsTable.created_at))
+    .limit(15);
 
   return (
     <div>
@@ -159,6 +175,100 @@ export default async function AdminUserDetailPage({
         )}
       </section>
 
+      <section className="fn-card" style={{ marginTop: 22 }}>
+        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
+          このユーザーへの管理操作 (record_id 一致)
+        </h2>
+        {recentOnUser.length === 0 ? (
+          <p className="fn-muted fn-text-sm">該当する履歴はありません。</p>
+        ) : (
+          <table className="fn-table">
+            <thead>
+              <tr>
+                <th>日時</th>
+                <th>テーブル</th>
+                <th>操作</th>
+                <th>実行者</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentOnUser.map((h) => (
+                <tr key={h.id}>
+                  <td className="fn-muted" style={{ whiteSpace: "nowrap" }}>
+                    {formatRelative(h.created_at)}
+                  </td>
+                  <td style={{ fontFamily: "monospace", fontSize: 11 }}>{h.table_name}</td>
+                  <td>
+                    <span
+                      className={`fn-badge ${
+                        h.action === "DELETE"
+                          ? "fn-badge-danger"
+                          : h.action === "CREATE"
+                            ? "fn-badge-accent"
+                            : "fn-badge-soft"
+                      }`}
+                    >
+                      {h.action}
+                    </span>
+                  </td>
+                  <td style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                    {h.operator_discord_id ?? "-"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section className="fn-card" style={{ marginTop: 22 }}>
+        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
+          このユーザーが実行した管理操作 (operator 一致)
+        </h2>
+        {recentByOperator.length === 0 ? (
+          <p className="fn-muted fn-text-sm">該当する履歴はありません。</p>
+        ) : (
+          <table className="fn-table">
+            <thead>
+              <tr>
+                <th>日時</th>
+                <th>テーブル</th>
+                <th>操作</th>
+                <th>レコード</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentByOperator.map((h) => (
+                <tr key={h.id}>
+                  <td className="fn-muted" style={{ whiteSpace: "nowrap" }}>
+                    {formatRelative(h.created_at)}
+                  </td>
+                  <td style={{ fontFamily: "monospace", fontSize: 11 }}>{h.table_name}</td>
+                  <td>
+                    <span
+                      className={`fn-badge ${
+                        h.action === "DELETE"
+                          ? "fn-badge-danger"
+                          : h.action === "CREATE"
+                            ? "fn-badge-accent"
+                            : "fn-badge-soft"
+                      }`}
+                    >
+                      {h.action}
+                    </span>
+                  </td>
+                  <td style={{ fontFamily: "monospace", fontSize: 11, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <Link href={`/admin/audit?record=${encodeURIComponent(h.record_id)}`}>
+                      {h.record_id}
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
       <p style={{ marginTop: 24, display: "flex", gap: 8 }}>
         <Link href="/admin/users" className="fn-btn fn-btn-ghost">
           <Icon name="chevron-left" size={12} aria-hidden /> ユーザー管理へ戻る
@@ -168,6 +278,12 @@ export default async function AdminUserDetailPage({
           className="fn-btn fn-btn-primary"
         >
           <Icon name="edit" size={12} aria-hidden /> 編集
+        </Link>
+        <Link
+          href={`/admin/audit?operator=${encodeURIComponent(user.id)}`}
+          className="fn-btn fn-btn-ghost"
+        >
+          すべての操作履歴
         </Link>
       </p>
     </div>
