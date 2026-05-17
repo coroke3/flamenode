@@ -10,6 +10,7 @@ import { notificationOutbox } from "@/lib/db/schema";
 import { formatRelative } from "@/lib/utils/format";
 import { NotificationRetryButton } from "@/components/admin/NotificationRetryButton";
 import { NotificationPayloadButton } from "@/components/admin/NotificationPayloadButton";
+import { NotificationBulkRetryButton } from "@/components/admin/NotificationBulkRetryButton";
 
 export const metadata: Metadata = { title: "通知配信状況" };
 export const dynamic = "force-dynamic";
@@ -130,10 +131,17 @@ export default async function AdminNotificationsPage({
             borderRadius: "var(--radius-md)",
             color: "var(--accent-danger, #991b1b)",
             fontSize: 13,
+            display: "flex",
+            gap: 12,
+            alignItems: "center",
+            flexWrap: "wrap",
           }}
         >
-          <strong>failed {counts.failed} 件</strong>
-          {" "}— Worker が諦めた通知です。手動リトライまたは Discord 側の状態確認を検討してください。
+          <span>
+            <strong>failed {counts.failed} 件</strong>
+            {" "}— Worker が諦めた通知です。手動リトライまたは Discord 側の状態確認を検討してください。
+          </span>
+          <NotificationBulkRetryButton />
         </div>
       ) : counts.pending > 0 ? (
         <div
