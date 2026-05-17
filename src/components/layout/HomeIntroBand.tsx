@@ -26,6 +26,28 @@ export function HomeIntroBand({
   const featured =
     activeEvents.find((e) => isAcceptingEntries(e)) ?? activeEvents[0];
   const availableSlots = featured ? (slotCounts?.get(featured.id) ?? null) : null;
+  const now = Math.floor(Date.now() / 1000);
+  const accepting = featured ? isAcceptingEntries(featured) : false;
+  const entryNotStartedYet =
+    !!featured &&
+    !accepting &&
+    featured.is_entry_open === 1 &&
+    featured.entry_start_time != null &&
+    now < featured.entry_start_time;
+  const entryClosed =
+    !!featured &&
+    !accepting &&
+    featured.is_entry_open === 1 &&
+    featured.entry_end_time != null &&
+    now > featured.entry_end_time;
+
+  const eventLabel = accepting
+    ? "募集中イベント"
+    : entryNotStartedYet
+      ? "募集開始前のイベント"
+      : entryClosed
+        ? "募集終了済みイベント"
+        : "開催中イベント";
 
   return (
     <section className={styles.band} aria-label="FlameNode について">
@@ -58,7 +80,7 @@ export function HomeIntroBand({
           <div className={styles.eventBox}>
             <span className={styles.eventLabel}>
               <Icon name="alert" size={12} aria-hidden />
-              {isAcceptingEntries(featured) ? "募集中イベント" : "開催中イベント"}
+              {eventLabel}
             </span>
             <Link
               href={`/event/${featured.id}`}
