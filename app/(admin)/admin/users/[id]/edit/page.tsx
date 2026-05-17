@@ -69,6 +69,12 @@ export default async function AdminUserEditPage({
         <Link href="/admin/users" className="fn-btn fn-btn-ghost">
           ユーザー管理へ
         </Link>
+        <Link
+          href={`/admin/audit?record=${encodeURIComponent(user.id)}`}
+          className="fn-btn fn-btn-ghost"
+        >
+          このユーザーの監査ログ
+        </Link>
       </p>
     </div>
   );
