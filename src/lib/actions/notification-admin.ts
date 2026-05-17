@@ -47,12 +47,15 @@ export async function retryFailedNotification(
   }
 
   const now = Math.floor(Date.now() / 1000);
+  // Worker は attempt_count < MAX_RETRIES のみ拾うため、手動リトライでは
+  // attempt_count を 0 にリセットしないと再試行が走らない。
+  // 履歴に直前の attempt_count を残して状況把握できるようにする。
+  const prevAttempt = target.attempt_count ?? 0;
   await db
     .update(notificationOutbox)
     .set({
       status: "pending",
-      // attempt_count はそのまま保持する。
-      // 過去の失敗回数は次のリトライ管理 (MAX_RETRIES) で再評価される。
+      attempt_count: 0,
       next_attempt_at: now,
       last_error: null,
     })
@@ -62,8 +65,18 @@ export async function retryFailedNotification(
     table_name: "notification_outbox",
     record_id: id,
     action: "UPDATE",
-    before_data: JSON.stringify({ status: "failed" }),
-    after_data: JSON.stringify({ status: "pending", manual_retry: true }),
+    before_data: JSON.stringify({
+      status: "failed",
+      attempt_count: prevAttempt,
+      last_error: target.last_error,
+    }),
+    after_data: JSON.stringify({
+      status: "pending",
+      attempt_count: 0,
+      manual_retry: true,
+      retried_by: u.id,
+      retried_at: now,
+    }),
     operator_discord_id: u.id,
     retention_class: "normal",
     created_at: now,
