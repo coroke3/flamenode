@@ -175,7 +175,10 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
                       flexWrap: "wrap",
                     }}
                   >
-                    <Link href={`/event/${ev.id}`} style={{ fontWeight: 700 }}>
+                    <Link
+                      href={`/manage/events/${ev.id}`}
+                      style={{ fontWeight: 700 }}
+                    >
                       {ev.title}
                     </Link>
                     <span className={`fn-badge ${eventStatusBadgeClass(status)}`}>

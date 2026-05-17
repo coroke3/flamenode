@@ -1,0 +1,377 @@
+import * as React from "react";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import type { Metadata } from "next";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { getDatabase } from "@/lib/cloudflare";
+import { requireSession } from "@/lib/auth/guard";
+import {
+  events as eventsTable,
+  eventEditors as eventEditorsTable,
+  historyLogs as historyLogsTable,
+  slots as slotsTable,
+  videos as videosTable,
+  videoEvents as videoEventsTable,
+  xUsers as xUsersTable,
+} from "@/lib/db/schema";
+import { Icon } from "@/components/ui/Icon";
+import {
+  computeEventStatus,
+  eventStatusBadgeClass,
+  eventStatusLabel,
+  isAcceptingEntries,
+} from "@/lib/utils/eventStatus";
+import { formatUnix, formatRelative } from "@/lib/utils/format";
+
+export const dynamic = "force-dynamic";
+
+interface Props {
+  params: Promise<{ id: string }>;
+}
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { id } = await params;
+  const db = getDatabase();
+  if (!db) return { title: id };
+  const ev = await db
+    .select({ title: eventsTable.title })
+    .from(eventsTable)
+    .where(eq(eventsTable.id, id))
+    .limit(1);
+  return ev[0]?.title
+    ? { title: `${ev[0].title} 運営` }
+    : { title: "イベント運営" };
+}
+
+export default async function ManageEventPage({
+  params,
+}: Props): Promise<React.ReactElement> {
+  const { id } = await params;
+  const guard = await requireSession();
+  if (!guard.ok) return guard.element;
+  const user = guard.user;
+
+  const db = getDatabase();
+  if (!db) notFound();
+
+  const ev = (
+    await db.select().from(eventsTable).where(eq(eventsTable.id, id)).limit(1)
+  )[0];
+  if (!ev) notFound();
+
+  // 運営者チェック
+  const activeX = user.active_x_user_id;
+  const isAdmin = user.role === "admin";
+  let editorRole: "representative" | "editor" | null = null;
+  if (activeX) {
+    const editor = (
+      await db
+        .select()
+        .from(eventEditorsTable)
+        .where(
+          and(
+            eq(eventEditorsTable.event_id, id),
+            eq(eventEditorsTable.x_user_id, activeX),
+          )!,
+        )
+        .limit(1)
+    )[0];
+    if (editor) {
+      editorRole = (editor.role ?? "editor") as "representative" | "editor";
+    }
+  }
+  if (!editorRole && !isAdmin) notFound();
+
+  // 集計
+  const [pendingCount, publicCount, slotCounts] = await Promise.all([
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(videosTable)
+      .innerJoin(videoEventsTable, eq(videoEventsTable.video_id, videosTable.id))
+      .where(
+        and(
+          eq(videoEventsTable.event_id, id),
+          eq(videosTable.status, "pending"),
+        )!,
+      ),
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(videosTable)
+      .innerJoin(videoEventsTable, eq(videoEventsTable.video_id, videosTable.id))
+      .where(
+        and(
+          eq(videoEventsTable.event_id, id),
+          eq(videosTable.status, "public"),
+        )!,
+      ),
+    db
+      .select({
+        status: slotsTable.status,
+        c: sql<number>`COUNT(*)`,
+      })
+      .from(slotsTable)
+      .where(eq(slotsTable.event_id, id))
+      .groupBy(slotsTable.status),
+  ]);
+
+  const slotStatusMap: Record<string, number> = {};
+  for (const r of slotCounts) {
+    slotStatusMap[r.status] = Number(r.c ?? 0);
+  }
+  const totalSlots = Object.values(slotStatusMap).reduce((a, b) => a + b, 0);
+  const availableSlots = slotStatusMap.available ?? 0;
+  const reservedSlots = slotStatusMap.reserved ?? 0;
+  const submittedSlots = slotStatusMap.submitted ?? 0;
+
+  // 直近の審査待ち作品
+  const pendingVideos = await db
+    .select({
+      id: videosTable.id,
+      title: videosTable.title,
+      display_name: sql<string>`COALESCE(${xUsersTable.x_name}, ${videosTable.display_name}, ${videosTable.contact_x_id})`,
+      created_at: videosTable.created_at,
+    })
+    .from(videosTable)
+    .innerJoin(videoEventsTable, eq(videoEventsTable.video_id, videosTable.id))
+    .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id))
+    .where(
+      and(
+        eq(videoEventsTable.event_id, id),
+        eq(videosTable.status, "pending"),
+      )!,
+    )
+    .orderBy(desc(videosTable.created_at))
+    .limit(10);
+
+  // 当該イベントの直近 history_logs (events / video_events / slots すべて)
+  const historyEv = await db
+    .select()
+    .from(historyLogsTable)
+    .where(
+      and(
+        eq(historyLogsTable.table_name, "events"),
+        eq(historyLogsTable.record_id, id),
+      )!,
+    )
+    .orderBy(desc(historyLogsTable.created_at))
+    .limit(15);
+
+  const status = computeEventStatus(ev);
+  const accepting = isAcceptingEntries(ev);
+
+  return (
+    <div>
+      <p style={{ marginBottom: 8, fontSize: 12 }}>
+        <Link href="/manage">← 担当イベント一覧へ</Link>
+      </p>
+      <header style={{ marginBottom: 18 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+          <h1 style={{ fontSize: 22, fontWeight: 700 }}>{ev.title}</h1>
+          <span className={`fn-badge ${eventStatusBadgeClass(status)}`}>
+            {eventStatusLabel(status)}
+          </span>
+          {accepting ? (
+            <span className="fn-badge fn-badge-soft">受付中</span>
+          ) : null}
+          <span className="fn-badge fn-badge-soft">
+            {editorRole === "representative"
+              ? "代表"
+              : editorRole === "editor"
+                ? "運営"
+                : "管理者"}
+          </span>
+        </div>
+        <p style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>
+          {ev.start_time ? formatUnix(ev.start_time, { dateOnly: true }) : "—"}
+          {ev.end_time
+            ? ` 〜 ${formatUnix(ev.end_time, { dateOnly: true })}`
+            : ""}
+          {ev.entry_start_time != null || ev.entry_end_time != null ? (
+            <span style={{ marginLeft: 8 }}>
+              · 募集{" "}
+              {ev.entry_start_time != null
+                ? formatUnix(ev.entry_start_time)
+                : "—"}
+              {" 〜 "}
+              {ev.entry_end_time != null ? formatUnix(ev.entry_end_time) : "—"}
+            </span>
+          ) : null}
+        </p>
+      </header>
+
+      <section
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+          gap: 10,
+        }}
+      >
+        <Stat label="審査待ち" value={Number(pendingCount[0]?.c ?? 0)} accent />
+        <Stat label="公開済み" value={Number(publicCount[0]?.c ?? 0)} />
+        <Stat label="枠合計" value={totalSlots} />
+        <Stat label="空き枠" value={availableSlots} />
+        <Stat label="確保済" value={reservedSlots} />
+        <Stat label="提出済" value={submittedSlots} />
+      </section>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16 }}>
+        <Link
+          href={`/admin/videos?event=${encodeURIComponent(id)}&status=pending`}
+          className="fn-btn fn-btn-primary fn-btn-sm"
+        >
+          <Icon name="check" size={11} aria-hidden /> 審査キューを開く
+        </Link>
+        <Link
+          href={`/event/${id}`}
+          className="fn-btn fn-btn-ghost fn-btn-sm"
+        >
+          公開ページを見る
+        </Link>
+        {isAdmin ? (
+          <Link
+            href={`/admin/events/${id}`}
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+          >
+            <Icon name="settings" size={11} aria-hidden /> 管理者編集
+          </Link>
+        ) : null}
+      </div>
+
+      <section style={{ marginTop: 28 }}>
+        <h2
+          style={{
+            fontSize: 13,
+            fontWeight: 700,
+            letterSpacing: "0.18em",
+            color: "var(--text-muted)",
+            textTransform: "uppercase",
+            marginBottom: 10,
+          }}
+        >
+          直近の審査待ち作品
+        </h2>
+        {pendingVideos.length === 0 ? (
+          <p className="fn-muted fn-text-sm">
+            <Icon name="check" size={12} aria-hidden /> 審査待ちはありません。
+          </p>
+        ) : (
+          <table className="fn-table">
+            <thead>
+              <tr>
+                <th>タイトル</th>
+                <th>作者</th>
+                <th>登録</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {pendingVideos.map((v) => (
+                <tr key={v.id}>
+                  <td>{v.title}</td>
+                  <td>{v.display_name}</td>
+                  <td className="fn-muted">{formatRelative(v.created_at)}</td>
+                  <td>
+                    <Link
+                      href={`/admin/videos/${v.id}`}
+                      className="fn-btn fn-btn-primary fn-btn-sm"
+                    >
+                      審査
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section style={{ marginTop: 28 }}>
+        <h2
+          style={{
+            fontSize: 13,
+            fontWeight: 700,
+            letterSpacing: "0.18em",
+            color: "var(--text-muted)",
+            textTransform: "uppercase",
+            marginBottom: 10,
+          }}
+        >
+          イベント更新履歴
+        </h2>
+        {historyEv.length === 0 ? (
+          <p className="fn-muted fn-text-sm">直近の更新はありません。</p>
+        ) : (
+          <table className="fn-table">
+            <thead>
+              <tr>
+                <th>日時</th>
+                <th>操作</th>
+                <th>実行者</th>
+              </tr>
+            </thead>
+            <tbody>
+              {historyEv.map((h) => (
+                <tr key={h.id}>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    <div>{formatUnix(h.created_at)}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                      {formatRelative(h.created_at)}
+                    </div>
+                  </td>
+                  <td>
+                    <span
+                      className={`fn-badge ${
+                        h.action === "DELETE"
+                          ? "fn-badge-danger"
+                          : h.action === "CREATE"
+                            ? "fn-badge-accent"
+                            : "fn-badge-soft"
+                      }`}
+                    >
+                      {h.action}
+                    </span>
+                  </td>
+                  <td style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                    {h.operator_discord_id ?? "-"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: number;
+  accent?: boolean;
+}): React.ReactElement {
+  return (
+    <div
+      className={`fn-card ${accent && value > 0 ? "fn-card-accent" : ""}`}
+      style={{ padding: "12px 14px" }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: "0.16em",
+          color: "var(--text-muted)",
+          textTransform: "uppercase",
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ fontSize: 20, fontWeight: 800, marginTop: 4 }}>
+        {value.toLocaleString()}
+      </div>
+    </div>
+  );
+}
