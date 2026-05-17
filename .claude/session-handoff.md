@@ -144,6 +144,9 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 130 | like_count drift をハイブリッド閾値 max(±5, ±5%) に変更 (Opus #1) | 86ffebd |
 | 131 | format 不正入力 (NaN/Infinity/文字列) 安全処理 + テスト追加 (127件) | 6b3846a |
 | 132 | ログイン導線を /entry に統一 + ローカル AUTH_SECRET / .dev.vars 自動解決 | fda4d3b |
+| 133 | session-handoff Batch 130-132 追記 | 687c290 |
+| 134 | /admin/notifications に bulk_retry 履歴クイックリンク | 80dc80b |
+| 135 | /manage/events/[id]/audience 登録者プレビュー追加 | 38a82e5 |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
