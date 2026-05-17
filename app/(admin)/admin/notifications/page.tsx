@@ -8,6 +8,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { notificationOutbox } from "@/lib/db/schema";
 import { formatRelative } from "@/lib/utils/format";
+import { NotificationRetryButton } from "@/components/admin/NotificationRetryButton";
 
 export const metadata: Metadata = { title: "通知配信状況" };
 export const dynamic = "force-dynamic";
@@ -199,12 +200,13 @@ export default async function AdminNotificationsPage({
                 <th>次試行</th>
                 <th>登録</th>
                 <th>last_error</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ padding: 16, textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
+                  <td colSpan={8} style={{ padding: 16, textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
                     該当する通知はありません。
                   </td>
                 </tr>
@@ -241,6 +243,11 @@ export default async function AdminNotificationsPage({
                       ) : (
                         "—"
                       )}
+                    </td>
+                    <td>
+                      {r.status === "failed" ? (
+                        <NotificationRetryButton id={r.id} />
+                      ) : null}
                     </td>
                   </tr>
                 ))
