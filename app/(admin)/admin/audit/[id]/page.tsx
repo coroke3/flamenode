@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { eq } from "drizzle-orm";
+import { and, asc, desc, eq, gt, lt } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { historyLogs } from "@/lib/db/schema";
@@ -37,6 +37,26 @@ export default async function AdminAuditDetailPage({
   const before = formatJson(row.before_data);
   const after = formatJson(row.after_data);
 
+  // 同一 record_id の前後ナビ
+  const [prevRow, nextRow] = await Promise.all([
+    db
+      .select({ id: historyLogs.id })
+      .from(historyLogs)
+      .where(
+        and(eq(historyLogs.record_id, row.record_id), lt(historyLogs.id, row.id))!,
+      )
+      .orderBy(desc(historyLogs.id))
+      .limit(1),
+    db
+      .select({ id: historyLogs.id })
+      .from(historyLogs)
+      .where(
+        and(eq(historyLogs.record_id, row.record_id), gt(historyLogs.id, row.id))!,
+      )
+      .orderBy(asc(historyLogs.id))
+      .limit(1),
+  ]);
+
   return (
     <div>
       <p style={{ marginBottom: 8, fontSize: 12 }}>
@@ -48,6 +68,34 @@ export default async function AdminAuditDetailPage({
       <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 12 }}>
         {formatUnix(row.created_at)} ({formatRelative(row.created_at)})
       </p>
+
+      <nav
+        aria-label="同 record_id の前後遷移"
+        style={{
+          marginTop: 10,
+          display: "flex",
+          gap: 6,
+          flexWrap: "wrap",
+          fontSize: 12,
+        }}
+      >
+        {prevRow[0] ? (
+          <Link
+            href={`/admin/audit/${prevRow[0].id}`}
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+          >
+            <Icon name="chevron-left" size={11} aria-hidden /> 前 (#{prevRow[0].id})
+          </Link>
+        ) : null}
+        {nextRow[0] ? (
+          <Link
+            href={`/admin/audit/${nextRow[0].id}`}
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+          >
+            次 (#{nextRow[0].id}) <Icon name="chevron-right" size={11} aria-hidden />
+          </Link>
+        ) : null}
+      </nav>
 
       <section style={{ marginTop: 20, display: "grid", gap: 10 }}>
         <Meta label="テーブル" value={row.table_name} mono />
