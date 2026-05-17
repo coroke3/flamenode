@@ -106,6 +106,42 @@ export default async function AdminHealthPage({
           エラー: {error}
         </div>
       ) : (
+        <>
+          {counts.warn > 0 ? (
+            <div
+              role="status"
+              style={{
+                marginTop: 14,
+                padding: "10px 14px",
+                background: "var(--accent-warning-soft, #fef3c7)",
+                border: "1px solid var(--accent-warning, #d97706)",
+                borderRadius: "var(--radius-md)",
+                color: "var(--accent-warning, #92400e)",
+                fontSize: 13,
+              }}
+            >
+              <strong>WARN {counts.warn} 件</strong>
+              {" "}が検出されています。一覧から確認してください。
+            </div>
+          ) : (
+            <div
+              role="status"
+              style={{
+                marginTop: 14,
+                padding: "10px 14px",
+                background: "var(--accent-success-soft, #dcfce7)",
+                border: "1px solid var(--accent-success, #16a34a)",
+                borderRadius: "var(--radius-md)",
+                color: "var(--accent-success, #166534)",
+                fontSize: 13,
+              }}
+            >
+              現在 WARN はありません ({counts.ok} 件 OK, {counts.info} 件 INFO)。
+            </div>
+          )}
+        </>
+      )}
+      {!error ? (
         <section style={{ marginTop: 22 }}>
           <table className="fn-table">
             <thead>
@@ -169,7 +205,7 @@ export default async function AdminHealthPage({
             </tbody>
           </table>
         </section>
-      )}
+      ) : null}
     </div>
   );
 }
