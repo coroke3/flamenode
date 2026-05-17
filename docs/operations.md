@@ -48,6 +48,29 @@ wrangler d1 migrations apply flamenode_db --remote
 - 本番停止時間帯か / 影響範囲を確認
 - migration が単方向 (DROP / ALTER COLUMN など) なら 2-3 の rollback を先に検討
 
+#### 現在未適用の migration (本番)
+
+`.claude/session-handoff.md` の「既知の未適用」セクションも参照。
+
+| migration | 内容 | 安全性 |
+|---|---|---|
+| `0001_young_fat_cobra.sql` | events.entry_start_time / entry_end_time 追加 | nullable 列追加のみ、ロールバック不要 |
+| `0002_hot_colleen_wing.sql` | notification_outbox.event_id 追加 | nullable 列追加のみ、ロールバック不要 |
+| `0003_loose_whiplash.sql` | video_members に order_index / name インデックス | CREATE INDEX のみ、ロールバック不要 |
+| `0004_tough_kronos.sql` | video_members.name_for_sort 追加 + バックフィル + index | nullable 列 + UPDATE。バックフィル時間に注意 |
+
+推奨適用順:
+
+```sh
+# 1. 本番 dump
+wrangler d1 export flamenode_db --remote --output backup-$(date +%Y%m%d).sql
+
+# 2. 適用 (4 件まとめて)
+wrangler d1 migrations apply flamenode_db --remote
+```
+
+適用後は `/admin/health` を開き warn の数が増えていないことを確認する。
+
 ### 1-4. 既存 migration 一覧
 
 | ファイル | 内容 |
