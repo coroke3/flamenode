@@ -11,7 +11,11 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runCleanup, readHistoryRetentionDays } from "./index.ts";
+import {
+  runCleanup,
+  runCleanupWithRetry,
+  readHistoryRetentionDays,
+} from "./index.ts";
 
 /** D1PreparedStatement モック。bind/all/first/run を全て記録する。 */
 function makePreparedMock(sql, recorder, firstReturn) {
@@ -169,6 +173,61 @@ test("readHistoryRetentionDays: first() が throw してもデフォルトにフ
   const r = await readHistoryRetentionDays(env);
   assert.equal(r.normalDays, 90);
   assert.equal(r.longAuditDays, 365);
+});
+
+test("runCleanupWithRetry: 一時エラーはリトライして最終的に成功すれば throw しない", async () => {
+  // 1 回目は first() で throw、2 回目は成功する DB を作る
+  let firstCallCount = 0;
+  const env = {
+    DB: {
+      prepare(sql) {
+        return {
+          bind() {
+            return this;
+          },
+          async first() {
+            firstCallCount += 1;
+            if (firstCallCount === 1) {
+              throw new Error("Too many requests");
+            }
+            return null;
+          },
+          async run() {
+            return { success: true };
+          },
+        };
+      },
+    },
+  };
+  // runCleanupWithRetry は throw せず completes
+  await runCleanupWithRetry(env);
+  // 1 回目は throw → 2 回目は成功
+  assert.ok(firstCallCount >= 1, "first が呼ばれること");
+});
+
+test("runCleanupWithRetry: スキーマエラーは即諦める", async () => {
+  let firstCallCount = 0;
+  const env = {
+    DB: {
+      prepare() {
+        return {
+          bind() {
+            return this;
+          },
+          async first() {
+            firstCallCount += 1;
+            throw new Error("no such column: bogus");
+          },
+          async run() {
+            return { success: true };
+          },
+        };
+      },
+    },
+  };
+  await runCleanupWithRetry(env);
+  // 1 回だけで止まる (リトライしない)
+  assert.equal(firstCallCount, 1);
 });
 
 test("runCleanup: 各 UPDATE/DELETE の bind に now が含まれる", async () => {

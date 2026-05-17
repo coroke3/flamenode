@@ -71,6 +71,8 @@ L-1 (Worker 実装状況のMarkdown明記) に対応。
 - `notification_outbox.status = 'failed'` の TTL 削除 (30 日)
 - `history_logs` TTL 削除 (`normal` は system_settings.history_retention_days を参照、デフォルト 90 日 / `long_audit` は normal*4 と 365 日の大きい方)
 - voided 動画の論理削除タイマー (voided_at から 30 日後に is_deleted=1)
+- 一時エラー (Throttle/Network/Timeout) を最大 3 回までウォーム内即時リトライ (`runCleanupWithRetry`)
+- スキーマエラーはリトライせず即諦める (`shouldRetryCleanupError`)
 
 ### 未実装
 - voided 動画の R2 サムネ R2 オブジェクト掃除

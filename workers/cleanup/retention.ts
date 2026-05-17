@@ -77,3 +77,48 @@ export const VOIDED_VIDEO_HIDE_TTL_SEC = 30 * 24 * 60 * 60;
 export function computeVoidedVideoHideCutoff(now: number): number {
   return now - VOIDED_VIDEO_HIDE_TTL_SEC;
 }
+
+/**
+ * cleanup ジョブ全体のリトライ判定。
+ * D1 の一時的エラー (ネットワーク / Throttle) は次回 cron を待たず即リトライしてよい。
+ * - 試行回数が MAX_RETRIES 未満なら true
+ * - throttle っぽいエラー (Too many / 429 / network) は true
+ * - スキーマエラー (no such column 等) は false (リトライしても直らない)
+ */
+export const CLEANUP_MAX_RETRIES = 3;
+
+export interface RetryDecision {
+  shouldRetry: boolean;
+  reason: string;
+}
+
+export function shouldRetryCleanupError(
+  attemptCount: number,
+  error: unknown,
+): RetryDecision {
+  if (attemptCount >= CLEANUP_MAX_RETRIES) {
+    return { shouldRetry: false, reason: "max_retries_reached" };
+  }
+  const msg = String((error as { message?: unknown })?.message ?? error ?? "").toLowerCase();
+  // スキーマ起因はリトライ不可
+  if (
+    msg.includes("no such column") ||
+    msg.includes("no such table") ||
+    msg.includes("syntax error")
+  ) {
+    return { shouldRetry: false, reason: "schema_error" };
+  }
+  // よく見る一時エラー
+  if (
+    msg.includes("too many") ||
+    msg.includes("rate") ||
+    msg.includes("timeout") ||
+    msg.includes("network") ||
+    msg.includes("429") ||
+    msg.includes("503")
+  ) {
+    return { shouldRetry: true, reason: "transient_error" };
+  }
+  // 不明エラーも一旦リトライ (max を超えれば諦める)
+  return { shouldRetry: true, reason: "unknown_error" };
+}

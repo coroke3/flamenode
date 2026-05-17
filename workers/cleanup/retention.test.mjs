@@ -16,6 +16,8 @@ import {
   computeNotificationCutoffs,
   computeHistoryCutoffs,
   computeVoidedVideoHideCutoff,
+  shouldRetryCleanupError,
+  CLEANUP_MAX_RETRIES,
   HISTORY_NORMAL_DAYS_DEFAULT,
   HISTORY_LONG_AUDIT_DAYS_DEFAULT,
   MIN_HISTORY_DAYS,
@@ -92,4 +94,44 @@ test("computeVoidedVideoHideCutoff: 30日前", () => {
   const now = 2_000_000_000;
   assert.equal(computeVoidedVideoHideCutoff(now), now - VOIDED_VIDEO_HIDE_TTL_SEC);
   assert.equal(VOIDED_VIDEO_HIDE_TTL_SEC, 30 * 24 * 60 * 60);
+});
+
+test("shouldRetryCleanupError: max 到達なら false", () => {
+  const r = shouldRetryCleanupError(CLEANUP_MAX_RETRIES, new Error("anything"));
+  assert.equal(r.shouldRetry, false);
+  assert.equal(r.reason, "max_retries_reached");
+});
+
+test("shouldRetryCleanupError: スキーマエラーは即諦める", () => {
+  for (const msg of ["no such column: foo", "no such table: bar", "syntax error near WHERE"]) {
+    const r = shouldRetryCleanupError(0, new Error(msg));
+    assert.equal(r.shouldRetry, false, msg);
+    assert.equal(r.reason, "schema_error");
+  }
+});
+
+test("shouldRetryCleanupError: 一時エラーはリトライ", () => {
+  for (const msg of [
+    "Too many requests",
+    "Rate limit exceeded",
+    "Connection timeout",
+    "Network error",
+    "HTTP 429",
+    "HTTP 503 Service Unavailable",
+  ]) {
+    const r = shouldRetryCleanupError(0, new Error(msg));
+    assert.equal(r.shouldRetry, true, msg);
+    assert.equal(r.reason, "transient_error");
+  }
+});
+
+test("shouldRetryCleanupError: 不明エラーもリトライ (max 未満)", () => {
+  const r = shouldRetryCleanupError(1, new Error("totally weird"));
+  assert.equal(r.shouldRetry, true);
+  assert.equal(r.reason, "unknown_error");
+});
+
+test("shouldRetryCleanupError: error が null でも落ちない", () => {
+  const r = shouldRetryCleanupError(0, null);
+  assert.equal(r.shouldRetry, true);
 });
