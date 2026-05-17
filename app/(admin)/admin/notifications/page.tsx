@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, like, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
@@ -17,7 +17,12 @@ export const dynamic = "force-dynamic";
 type StatusFilter = "all" | "pending" | "processing" | "sent" | "failed";
 
 interface Props {
-  searchParams?: Promise<{ status?: string; type?: string; event?: string }>;
+  searchParams?: Promise<{
+    status?: string;
+    type?: string;
+    event?: string;
+    q?: string;
+  }>;
 }
 
 export default async function AdminNotificationsPage({
@@ -40,6 +45,7 @@ export default async function AdminNotificationsPage({
   })();
   const typeFilter = (sp.type ?? "").trim();
   const eventFilter = (sp.event ?? "").trim();
+  const qFilter = (sp.q ?? "").trim().slice(0, 100);
 
   const db = getDatabase();
   let rows: (typeof notificationOutbox.$inferSelect)[] = [];
@@ -57,6 +63,9 @@ export default async function AdminNotificationsPage({
       }
       if (eventFilter) {
         conds.push(eq(notificationOutbox.event_id, eventFilter));
+      }
+      if (qFilter) {
+        conds.push(like(notificationOutbox.payload_json, `%${qFilter}%`));
       }
       const where = conds.length === 0 ? undefined : conds.length === 1 ? conds[0] : and(...conds);
 
@@ -180,6 +189,7 @@ export default async function AdminNotificationsPage({
           if (key !== "all") params.set("status", key);
           if (typeFilter) params.set("type", typeFilter);
           if (eventFilter) params.set("event", eventFilter);
+          if (qFilter) params.set("q", qFilter);
           const qs = params.toString();
           const href = qs ? `/admin/notifications?${qs}` : "/admin/notifications";
           return (
@@ -221,10 +231,17 @@ export default async function AdminNotificationsPage({
           className="fn-input fn-input-sm"
           style={{ minWidth: 200 }}
         />
+        <input
+          name="q"
+          defaultValue={qFilter}
+          placeholder="payload LIKE 検索"
+          className="fn-input fn-input-sm"
+          style={{ minWidth: 200 }}
+        />
         <button type="submit" className="fn-btn fn-btn-ghost fn-btn-sm">
           絞り込み
         </button>
-        {typeFilter || eventFilter ? (
+        {typeFilter || eventFilter || qFilter ? (
           <Link
             href={status === "all" ? "/admin/notifications" : `/admin/notifications?status=${status}`}
             className="fn-btn fn-btn-ghost fn-btn-sm"
