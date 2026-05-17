@@ -12,7 +12,7 @@ import {
   HISTORY_NORMAL_DAYS_DEFAULT,
   HISTORY_LONG_AUDIT_DAYS_DEFAULT,
   type RetentionDays,
-} from "./retention";
+} from "./retention.ts";
 
 export interface Env {
   DB: D1Database;
@@ -27,7 +27,7 @@ export default {
   },
 };
 
-async function readHistoryRetentionDays(env: Env): Promise<RetentionDays> {
+export async function readHistoryRetentionDays(env: Env): Promise<RetentionDays> {
   try {
     const row = await env.DB.prepare(
       `SELECT history_retention_days FROM system_settings LIMIT 1`,
@@ -41,7 +41,7 @@ async function readHistoryRetentionDays(env: Env): Promise<RetentionDays> {
   }
 }
 
-async function runCleanup(env: Env): Promise<void> {
+export async function runCleanup(env: Env): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
   const retentionDays = await readHistoryRetentionDays(env);
   const { sentCutoff, failedCutoff } = computeNotificationCutoffs(now);
