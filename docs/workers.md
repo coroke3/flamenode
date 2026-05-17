@@ -36,8 +36,10 @@ L-1 (Worker 実装状況のMarkdown明記) に対応。
 
 ### 未実装
 - サイト内通知 (`notification_outbox.type` に site/in_app 系チャネルが未整備)
-- 通知失敗履歴の専用管理画面 (`/admin/audit` で history_logs として参照のみ可)
 - イベント運営者向け受信箱 (K-5)
+
+### 部分実装
+- 通知失敗履歴の管理画面 (`/admin/notifications` で notification_outbox を直接閲覧可。リトライ手動トリガはまだない)
 
 ---
 
@@ -114,7 +116,7 @@ L-1 (Worker 実装状況のMarkdown明記) に対応。
 | 運営者受信箱 | K-5 | 未実装 |
 | 静的 JSON フル生成 | L-2 | 部分実装 |
 | 期限切れ処理 (cleanup 拡張) | L-5 | 最小実装 |
-| 通知失敗履歴の管理画面 | K-4 | 未実装 (history_logs から推論のみ) |
+| 通知失敗履歴の管理画面 | K-4 | 部分実装 (`/admin/notifications` で閲覧可。手動リトライ未実装) |
 
 ---
 
