@@ -174,9 +174,15 @@ export default async function AdminVideoDetailPage({
         </aside>
       </div>
 
-      <p style={{ marginTop: 24 }}>
+      <p style={{ marginTop: 24, display: "flex", gap: 8, flexWrap: "wrap" }}>
         <Link href="/admin/videos" className="fn-btn fn-btn-ghost">
           <Icon name="chevron-left" size={12} aria-hidden /> 作品管理へ戻る
+        </Link>
+        <Link
+          href={`/admin/audit?table=videos&record=${encodeURIComponent(video.id)}`}
+          className="fn-btn fn-btn-ghost"
+        >
+          この作品の監査ログ
         </Link>
       </p>
     </div>
