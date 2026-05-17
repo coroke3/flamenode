@@ -105,7 +105,41 @@ export default async function AdminSecurityPage({
         >
           エラー: {error}
         </div>
-      ) : (
+      ) : null}
+      {!error ? (
+        counts.warn > 0 ? (
+          <div
+            role="status"
+            style={{
+              marginTop: 14,
+              padding: "10px 14px",
+              background: "var(--accent-danger-soft, #fee2e2)",
+              border: "1px solid var(--accent-danger, #dc2626)",
+              borderRadius: "var(--radius-md)",
+              color: "var(--accent-danger, #991b1b)",
+              fontSize: 13,
+            }}
+          >
+            <strong>セキュリティ WARN {counts.warn} 件</strong> — 漏洩・権限矛盾の可能性。一覧を確認してください。
+          </div>
+        ) : (
+          <div
+            role="status"
+            style={{
+              marginTop: 14,
+              padding: "10px 14px",
+              background: "var(--accent-success-soft, #dcfce7)",
+              border: "1px solid var(--accent-success, #16a34a)",
+              borderRadius: "var(--radius-md)",
+              color: "var(--accent-success, #166534)",
+              fontSize: 13,
+            }}
+          >
+            セキュリティ WARN はありません ({counts.ok} 件 OK, {counts.info} 件 INFO)。
+          </div>
+        )
+      ) : null}
+      {!error ? (
         <section style={{ marginTop: 22 }}>
           <table className="fn-table">
             <thead>
@@ -160,7 +194,7 @@ export default async function AdminSecurityPage({
             </tbody>
           </table>
         </section>
-      )}
+      ) : null}
     </div>
   );
 }
