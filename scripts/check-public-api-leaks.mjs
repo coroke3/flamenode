@@ -87,7 +87,9 @@ async function checkEndpoint(url) {
 
 const endpoints = [
   `${baseUrl}/api/videos?limit=5`,
+  `${baseUrl}/api/videos?limit=5&offset=0`,
   `${baseUrl}/api/events?limit=5`,
+  `${baseUrl}/api/events?limit=1`,
 ];
 
 let hasError = false;
