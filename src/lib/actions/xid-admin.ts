@@ -11,6 +11,7 @@ import {
   xUsers,
 } from "@/lib/db/schema";
 import { normalizeXId } from "@/lib/utils/xid";
+import { enqueueNotification } from "@/lib/notifications/enqueue";
 
 export interface XIdAdminResult {
   ok: boolean;
@@ -113,6 +114,16 @@ export async function approveXIdLinkRequest(
     created_at: now,
   });
 
+  await enqueueNotification(db, {
+    discordUserId: discordUserId,
+    type: "x_id_approved",
+    payload: {
+      content: `X ID @${xid} の連携申請が承認されました。`,
+      x_user_id: xid,
+      request_id: requestId,
+    },
+  });
+
   revalidatePath("/dashboard/settings");
   revalidatePath("/admin/x-link-requests");
   revalidatePath("/dashboard");
@@ -160,6 +171,16 @@ export async function rejectXIdLinkRequest(
     operator_discord_id: adminId,
     retention_class: "long_audit",
     created_at: now,
+  });
+
+  await enqueueNotification(db, {
+    discordUserId: reqRow.discord_user_id,
+    type: "x_id_rejected",
+    payload: {
+      content: `X ID @${reqRow.requested_x_id} の連携申請が却下されました。`,
+      requested_x_id: reqRow.requested_x_id,
+      request_id: requestId,
+    },
   });
 
   revalidatePath("/dashboard/settings");
