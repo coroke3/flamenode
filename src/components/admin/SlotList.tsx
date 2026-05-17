@@ -28,9 +28,14 @@ export interface SlotRowLite {
 
 interface SlotListProps {
   slots: SlotRowLite[];
+  /** 「部」分割閾値 (秒)。未指定で 30 分。 */
+  slotPartGapSec?: number;
 }
 
-export function SlotList({ slots }: SlotListProps): React.ReactElement {
+export function SlotList({
+  slots,
+  slotPartGapSec,
+}: SlotListProps): React.ReactElement {
   const router = useRouter();
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -50,7 +55,7 @@ export function SlotList({ slots }: SlotListProps): React.ReactElement {
    * 折り畳み後の displayRows の先頭 id からも部番号を解決できる。
    */
   const partLabelMap = React.useMemo(() => {
-    const parts = buildSlotParts(slots as SlotBase[]);
+    const parts = buildSlotParts(slots as SlotBase[], slotPartGapSec);
     const map = new Map<string, string>();
     for (const part of parts) {
       const label = part.is_timeless ? "時間なし" : `第${part.index}部`;
@@ -59,7 +64,7 @@ export function SlotList({ slots }: SlotListProps): React.ReactElement {
       }
     }
     return map;
-  }, [slots]);
+  }, [slots, slotPartGapSec]);
 
   const runRelease = (slotId: string) => {
     setBusyId(slotId);

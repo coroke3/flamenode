@@ -1,0 +1,1 @@
+ALTER TABLE `events` ADD `slot_part_gap_minutes` integer DEFAULT 30;

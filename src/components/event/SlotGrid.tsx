@@ -39,6 +39,8 @@ export interface SlotGridProps {
   canReserve: boolean;
   slotKind: "time" | "count";
   maxConsecutiveSlots?: number;
+  /** 「部」分割閾値 (秒)。events.slot_part_gap_minutes から派生。未指定で 30 分。 */
+  slotPartGapSec?: number;
 }
 
 interface SlotGroup {
@@ -64,6 +66,7 @@ export function SlotGrid({
   canReserve,
   slotKind,
   maxConsecutiveSlots = 1,
+  slotPartGapSec,
 }: SlotGridProps): React.ReactElement {
   const router = useRouter();
   const [busy, startTransition] = React.useTransition();
@@ -91,12 +94,12 @@ export function SlotGrid({
 
   const groups = React.useMemo<SlotGroup[]>(() => {
     if (slotKind !== "time") return [{ label: "枠", rows: displayRows }];
-    const parts = buildSlotParts(displayRows);
+    const parts = buildSlotParts(displayRows, slotPartGapSec);
     return parts.map((part) => ({
       label: formatSlotPartLabel(part, "full"),
       rows: part.rows,
     }));
-  }, [displayRows, slotKind]);
+  }, [displayRows, slotKind, slotPartGapSec]);
 
   const canTakeSlot = canReserve && !!viewerXId;
 

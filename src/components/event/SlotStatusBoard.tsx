@@ -4,6 +4,8 @@ import { buildSlotParts, formatSlotPartLabel } from "@/lib/utils/slotGrouping";
 
 interface SlotStatusBoardProps {
   slots: SlotRow[];
+  /** 「部」分割閾値 (秒)。未指定で 30 分。 */
+  slotPartGapSec?: number;
 }
 
 interface PartStat {
@@ -17,15 +19,16 @@ interface PartStat {
  */
 export function SlotStatusBoard({
   slots,
+  slotPartGapSec,
 }: SlotStatusBoardProps): React.ReactElement {
   const partitioned = React.useMemo(() => {
     if (slots.length === 0) return [] as PartStat[];
-    return buildSlotParts(slots).map((part) => ({
+    return buildSlotParts(slots, slotPartGapSec).map((part) => ({
       label: formatSlotPartLabel(part, "short"),
       total: part.rows.length,
       filled: part.rows.filter((s) => s.status !== "available").length,
     }));
-  }, [slots]);
+  }, [slots, slotPartGapSec]);
 
   const total = slots.length;
   const filled = slots.filter((s) => s.status !== "available").length;

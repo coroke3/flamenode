@@ -43,6 +43,13 @@
       "when": 1779021094249,
       "tag": "0005_curvy_karnak",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1779035416622,
+      "tag": "0006_fearless_captain_america",
+      "breakpoints": true
     }
   ]
 }

@@ -188,6 +188,8 @@ export const events = sqliteTable("events", {
   review_settings: text("review_settings"),
   editable_fields: text("editable_fields"),
   repeat_rules: text("repeat_rules"),
+  /** スロット表示で「部」を分ける間隔の閾値 (分)。null/未設定なら 30 分。 */
+  slot_part_gap_minutes: integer("slot_part_gap_minutes").default(30),
 });
 
 export const eventEditors = sqliteTable(

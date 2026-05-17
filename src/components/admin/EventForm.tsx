@@ -24,6 +24,7 @@ export interface EventFormInitial {
   max_consecutive_slots_per_entry?: number;
   slot_type?: "time" | "count";
   slot_visibility_mode?: "public_name" | "anonymous" | "hidden";
+  slot_part_gap_minutes?: number | null;
 }
 
 interface EventFormProps {
@@ -273,6 +274,19 @@ export function EventForm({
             min={1}
             max={20}
             defaultValue={initial.max_consecutive_slots_per_entry ?? 3}
+            className="fn-input"
+          />
+        </div>
+        <div>
+          <label className="fn-label">
+            部の分割閾値 (分) <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>デフォルト 30</span>
+          </label>
+          <input
+            name="slot_part_gap_minutes"
+            type="number"
+            min={1}
+            max={1440}
+            defaultValue={initial.slot_part_gap_minutes ?? 30}
             className="fn-input"
           />
         </div>

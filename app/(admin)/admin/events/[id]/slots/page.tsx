@@ -107,7 +107,10 @@ export default async function AdminEventSlotsPage({
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
           枠一覧 ({rows.length})
         </h2>
-        <SlotList slots={rows} />
+        <SlotList
+          slots={rows}
+          slotPartGapSec={(ev.slot_part_gap_minutes ?? 30) * 60}
+        />
       </section>
     </div>
   );

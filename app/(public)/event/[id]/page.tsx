@@ -239,6 +239,7 @@ export default async function EventDetailPage({
                 canReserve={accepting}
                 slotKind={(event.slot_type ?? "time") as "time" | "count"}
                 maxConsecutiveSlots={event.max_consecutive_slots_per_entry ?? 1}
+                slotPartGapSec={(event.slot_part_gap_minutes ?? 30) * 60}
               />
               {!accepting ? (
                 <p
@@ -274,7 +275,10 @@ export default async function EventDetailPage({
               ) : null}
             </div>
             <aside className={styles.slotAside}>
-              <SlotStatusBoard slots={slotRowsForGrid} />
+              <SlotStatusBoard
+                slots={slotRowsForGrid}
+                slotPartGapSec={(event.slot_part_gap_minutes ?? 30) * 60}
+              />
             </aside>
           </div>
         </section>

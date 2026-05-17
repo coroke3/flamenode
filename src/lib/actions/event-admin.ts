@@ -34,6 +34,7 @@ const eventSchema = z.object({
   is_archived: z.coerce.number().min(0).max(1).default(0),
   max_slots_per_video: z.coerce.number().min(1).max(20).default(1),
   max_consecutive_slots_per_entry: z.coerce.number().min(1).max(20).default(3),
+  slot_part_gap_minutes: z.coerce.number().min(1).max(1440).default(30),
   slot_type: z.enum(["time", "count"]).default("time"),
   slot_visibility_mode: z
     .enum(["public_name", "anonymous", "hidden"])
@@ -100,6 +101,7 @@ export async function createEvent(
     entry_end_time: parseDateInput(data.entry_end_time),
     max_slots_per_video: data.max_slots_per_video,
     max_consecutive_slots_per_entry: data.max_consecutive_slots_per_entry,
+    slot_part_gap_minutes: data.slot_part_gap_minutes,
     slot_type: data.slot_type,
     slot_visibility_mode: data.slot_visibility_mode,
     created_at: now,
@@ -172,6 +174,7 @@ export async function updateEvent(
       entry_end_time: parseDateInput(data.entry_end_time),
       max_slots_per_video: data.max_slots_per_video,
       max_consecutive_slots_per_entry: data.max_consecutive_slots_per_entry,
+      slot_part_gap_minutes: data.slot_part_gap_minutes,
       slot_type: data.slot_type,
       slot_visibility_mode: data.slot_visibility_mode,
       updated_at: now,
