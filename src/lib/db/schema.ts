@@ -381,6 +381,8 @@ export const videoMembers = sqliteTable(
     role: text("role"),
     comment: text("comment"),
     order_index: integer("order_index").notNull().default(0),
+    /** name を小文字化したサーバ側ソート用キャッシュ。書き込み時に同期する。 */
+    name_for_sort: text("name_for_sort"),
   },
   (t) => ({
     // 表示順 (デフォルト) + 名前ソート (MemberTable の列ソート) を高速化する。
@@ -391,6 +393,10 @@ export const videoMembers = sqliteTable(
     byVideoName: index("video_members_video_name_idx").on(
       t.video_id,
       t.name,
+    ),
+    byVideoNameForSort: index("video_members_video_name_for_sort_idx").on(
+      t.video_id,
+      t.name_for_sort,
     ),
   }),
 );

@@ -155,6 +155,7 @@ async function replaceVideoMembers(
       video_id: videoId,
       x_user_id: xid,
       name: m.name,
+      name_for_sort: m.name?.toLowerCase() ?? null,
       role: m.role || null,
       comment: m.comment || null,
       order_index: i,
