@@ -404,12 +404,21 @@ export default async function AdminUsersPage({
               </td>
               <td>{formatRelative(u.created_at)}</td>
               <td>
-                <Link
-                  href={`/admin/users/${u.id}`}
-                  className="fn-btn fn-btn-ghost fn-btn-sm"
-                >
-                  詳細
-                </Link>
+                <div style={{ display: "inline-flex", gap: 4 }}>
+                  <Link
+                    href={`/admin/users/${u.id}`}
+                    className="fn-btn fn-btn-ghost fn-btn-sm"
+                  >
+                    詳細
+                  </Link>
+                  <Link
+                    href={`/admin/audit?operator=${encodeURIComponent(u.id)}`}
+                    className="fn-btn fn-btn-ghost fn-btn-sm"
+                    title="このユーザーが実行した管理操作の監査ログ"
+                  >
+                    監査
+                  </Link>
+                </div>
               </td>
             </tr>
           ))}
