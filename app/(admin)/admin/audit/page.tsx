@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
+import Link from "next/link";
 import { historyLogs } from "@/lib/db/schema";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { AuditDiffDetail } from "@/components/admin/AuditDiffDetail";
@@ -202,7 +203,12 @@ export default async function AdminAuditPage({
             return (
               <tr key={h.id}>
                 <td>
-                  <div style={{ whiteSpace: "nowrap" }}>{formatUnix(h.created_at)}</div>
+                  <Link
+                    href={`/admin/audit/${h.id}`}
+                    style={{ whiteSpace: "nowrap" }}
+                  >
+                    {formatUnix(h.created_at)}
+                  </Link>
                   <div style={{ fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap" }}>
                     {formatRelative(h.created_at)}
                   </div>
