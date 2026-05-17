@@ -117,6 +117,7 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 103 | /admin/events/[id] にスロット/動画状態の集計バッジ | 6fac2ff |
 | 104 | /admin/audit/[id] に同 record_id の前後ナビ | 1c047c6 |
 | 105 | /admin/users/[id] にメール認証日時表示 | ddceae4 |
+| 106 | /admin/notifications に payload LIKE 検索追加 | 4567dcb |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
