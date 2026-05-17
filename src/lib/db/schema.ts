@@ -558,23 +558,35 @@ export const xIdMergeReverts = sqliteTable("x_id_merge_reverts", {
   updated_at: integer("updated_at").notNull(),
 });
 
-export const notificationOutbox = sqliteTable("notification_outbox", {
-  id: text("id").primaryKey(),
-  discord_user_id: text("discord_user_id").notNull(),
-  type: text("type").notNull(),
-  payload_json: text("payload_json").notNull(),
-  status: text("status", {
-    enum: ["pending", "processing", "sent", "failed"],
-  }).default("pending"),
-  attempt_count: integer("attempt_count").default(0),
-  next_attempt_at: integer("next_attempt_at"),
-  last_error: text("last_error"),
-  /** event-scoped 通知 (運営者受信箱用)。null は全体通知。 */
-  event_id: text("event_id"),
-  created_at: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-});
+export const notificationOutbox = sqliteTable(
+  "notification_outbox",
+  {
+    id: text("id").primaryKey(),
+    discord_user_id: text("discord_user_id").notNull(),
+    type: text("type").notNull(),
+    payload_json: text("payload_json").notNull(),
+    status: text("status", {
+      enum: ["pending", "processing", "sent", "failed"],
+    }).default("pending"),
+    attempt_count: integer("attempt_count").default(0),
+    next_attempt_at: integer("next_attempt_at"),
+    last_error: text("last_error"),
+    /** event-scoped 通知 (運営者受信箱用)。null は全体通知。 */
+    event_id: text("event_id"),
+    created_at: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    // Worker が status='pending' を 5 分ごとに引く + /admin/notifications の絞り込み高速化
+    byStatusCreated: index("notification_outbox_status_created_idx").on(
+      t.status,
+      t.created_at,
+    ),
+    // /manage/events/[id] が event_id で絞り込むため
+    byEvent: index("notification_outbox_event_idx").on(t.event_id),
+  }),
+);
 
 export const announcements = sqliteTable("announcements", {
   id: text("id").primaryKey(),

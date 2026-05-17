@@ -1,0 +1,2 @@
+CREATE INDEX `notification_outbox_status_created_idx` ON `notification_outbox` (`status`,`created_at`);--> statement-breakpoint
+CREATE INDEX `notification_outbox_event_idx` ON `notification_outbox` (`event_id`);
