@@ -82,6 +82,9 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 68 | X ID 連携申請の却下理由入力 (履歴+通知に反映) | 90f7486 |
 | 69 | /admin/audit/[id] 詳細ページ | 8a42552 |
 | 70 | /manage/events/[id]/slots スロット運営一覧 | bda4f57 |
+| 71 | /manage/events/[id]/staff 運営メンバー一覧 | 90fa914 |
+| 72 | docs/operations.md に単体テスト実行手順追記 | 47dd346 |
+| 73 | publicDto テスト 11件 (pickKeys / assertNoForbiddenKeys) | 10c08db |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
