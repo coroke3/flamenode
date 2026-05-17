@@ -65,6 +65,9 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 51 | HomeIntroBand に募集締切/開始カウントダウン | d7d7bcc |
 | 52 | docs/operations.md に migration 0002 追記 | 32f3dfa |
 | 53 | /admin/events に並び替え/フィルタ/検索 | 6ac98cc |
+| 54 | enqueueNotification ヘルパー + X ID 承認/却下通知 | bdcfe91 |
+| 55 | video status 変更時に投稿主へ通知発火 (event-scoped) | 5e71ff1 |
+| 56 | cleanup retention 純粋関数化 + 単体テスト追加 | 69466ea |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
@@ -83,12 +86,12 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 
 ## 次に着手しやすい小粒 Batch 候補
 
-1. notification 送信側コードに event_id を載せる (chapter / video のイベント参加通知から)
-2. cleanup Worker の単体テスト
-3. メンバー表の column フィルタ・並び替え
-4. /manage のサイドバー化 (event 一覧のクイックナビ)
+1. slot voided/release 時の通知発火 (slot-admin.ts)
+2. chapter 投稿時のイベント運営者通知 (event-scoped)
+3. /manage のサイドバー化 (event 一覧のクイックナビ)
+4. メンバー表の column フィルタ・並び替え
 5. SlotGrid の連続枠選択時に表示名を自動先頭枠から継承
-6. /admin/events に並び替え/フィルタ追加
+6. /admin/users/[id] にユーザー固有 history_logs 表示
 
 ## 進め方ルール
 
@@ -104,4 +107,5 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 ```sh
 npm run check:db-legacy            # deprecated DB 書き込みの静的検出
 npm run check:public-api-leaks     # 公開 API 漏洩検査 (dev server 必須)
+npm run test:workers               # Worker 純粋関数の単体テスト (node:test)
 ```
