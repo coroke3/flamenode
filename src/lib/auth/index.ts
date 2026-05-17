@@ -2,8 +2,55 @@ import "server-only";
 import NextAuth, { type NextAuthConfig } from "next-auth";
 import Discord from "next-auth/providers/discord";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
-import { getDatabase } from "@/lib/cloudflare";
+import { getDatabase, getEnv } from "@/lib/cloudflare";
 import { accounts, sessions, users, verificationTokens } from "@/lib/db/schema";
+
+const LOCAL_DEV_AUTH_SECRET = "flamenode-local-development-auth-secret";
+
+function loadLocalDevVarsIfNeeded(): void {
+  if (process.env.NODE_ENV === "production") return;
+  if (process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET) return;
+
+  try {
+    const req = eval("require") as NodeRequire;
+    const fs = req("node:fs") as typeof import("node:fs");
+    const path = req("node:path") as typeof import("node:path");
+    const file = path.join(process.cwd(), ".dev.vars");
+    if (!fs.existsSync(file)) return;
+
+    const content = fs.readFileSync(file, "utf8");
+    for (const raw of content.split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line || line.startsWith("#")) continue;
+      const eq = line.indexOf("=");
+      if (eq <= 0) continue;
+      const key = line.slice(0, eq).trim();
+      let value = line.slice(eq + 1).trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      if (process.env[key] === undefined || process.env[key] === "") {
+        process.env[key] = value;
+      }
+    }
+  } catch {
+    // The package script already preloads .dev.vars; this is only a fallback.
+  }
+}
+
+loadLocalDevVarsIfNeeded();
+
+function ensureAuthSecretEnv(): void {
+  if (process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET) return;
+  if (process.env.NODE_ENV !== "production") {
+    process.env.AUTH_SECRET = LOCAL_DEV_AUTH_SECRET;
+  }
+}
+
+ensureAuthSecretEnv();
 
 /**
  * Auth.js v5 は OAuth 認可 URL 組み立てに `AUTH_URL`（または `NEXTAUTH_URL`）を参照する。
@@ -29,6 +76,11 @@ function ensureAuthBaseUrlEnv(): void {
 
 ensureAuthBaseUrlEnv();
 
+function envValue(value: string | null | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 /**
  * NextAuth v5 (Auth.js) の設定。
  *
@@ -36,14 +88,26 @@ ensureAuthBaseUrlEnv();
  * 設定ファクトリで遅延的にアダプタを作る。
  */
 export function buildAuthConfig(): NextAuthConfig {
+  const env = getEnv();
   const db = getDatabase();
+  const authSecret =
+    envValue(process.env.AUTH_SECRET) ??
+    envValue(process.env.NEXTAUTH_SECRET) ??
+    envValue(env.AUTH_SECRET) ??
+    (process.env.NODE_ENV !== "production" ? LOCAL_DEV_AUTH_SECRET : undefined);
+  const discordClientId =
+    envValue(process.env.AUTH_DISCORD_ID) ?? envValue(env.AUTH_DISCORD_ID);
+  const discordClientSecret =
+    envValue(process.env.AUTH_DISCORD_SECRET) ??
+    envValue(env.AUTH_DISCORD_SECRET);
   const baseConfig: NextAuthConfig = {
+    secret: authSecret,
     trustHost: true,
     session: { strategy: "database" },
     providers: [
       Discord({
-        clientId: process.env.AUTH_DISCORD_ID,
-        clientSecret: process.env.AUTH_DISCORD_SECRET,
+        clientId: discordClientId,
+        clientSecret: discordClientSecret,
         // `authorization` だけ `params` を渡すとデフォルトの `url` が消え、
         // Auth.js が OIDC discovery へ落ちて `new URL(undefined)` → Invalid URL になる。
         authorization: {
@@ -103,4 +167,6 @@ export function buildAuthConfig(): NextAuthConfig {
   return baseConfig;
 }
 
-export const { handlers, auth, signIn, signOut } = NextAuth(buildAuthConfig());
+export const { handlers, auth, signIn, signOut } = NextAuth(() =>
+  buildAuthConfig(),
+);

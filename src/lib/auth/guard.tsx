@@ -54,10 +54,7 @@ function RequireAuthRedirect(): React.ReactElement {
       <p style={{ marginTop: 12, color: "var(--text-secondary)" }}>
         この画面はログイン後にご利用いただけます。
       </p>
-      <Link
-        href="/api/auth/signin/discord?callbackUrl=/dashboard"
-        className="fn-btn fn-btn-primary fn-mt-md"
-      >
+      <Link href="/entry" className="fn-btn fn-btn-primary fn-mt-md">
         Discord でログイン
       </Link>
     </div>

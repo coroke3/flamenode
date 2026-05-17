@@ -29,7 +29,7 @@ export function PublicFooter(): React.ReactElement {
           items={[
             {
               label: "ログイン / 新規登録",
-              href: "/api/auth/signin/discord?callbackUrl=/dashboard",
+              href: "/entry",
             },
             { label: "ダッシュボード", href: "/dashboard" },
             { label: "X ID 連携", href: "/dashboard/settings" },

@@ -62,10 +62,7 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
               <XIdSwitcher entries={user.xIds} discordName={user.name} />
             </>
           ) : (
-            <Link
-              href="/api/auth/signin/discord?callbackUrl=/dashboard"
-              className="fn-btn fn-btn-primary fn-btn-sm"
-            >
+            <Link href="/entry" className="fn-btn fn-btn-primary fn-btn-sm">
               <Icon name="discord" size={13} aria-hidden />
               ログイン
             </Link>
@@ -88,7 +85,7 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
           <nav className={styles.mobileNav} aria-label="モバイルナビゲーション">
             {!user ? (
               <Link
-                href="/api/auth/signin/discord?callbackUrl=/dashboard"
+                href="/entry"
                 className={`fn-btn fn-btn-primary ${styles.mobileCta}`}
                 onClick={() => setMobileOpen(false)}
               >

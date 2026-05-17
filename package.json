@@ -4,7 +4,7 @@
   "private": true,
   "description": "FlameNode - 映像（フレーム）の結節点（ノード）。YouTube埋め込みを利用した動画プラットフォーム。",
   "scripts": {
-    "dev": "next dev",
+    "dev": "node -r ./scripts/load-dev-vars.js node_modules/next/dist/bin/next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",

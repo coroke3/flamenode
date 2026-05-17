@@ -258,7 +258,7 @@ export default async function EventDetailPage({
                   style={{ marginTop: 8 }}
                 >
                   <Icon name="info" size={12} aria-hidden /> 確保には{" "}
-                  <Link href="/api/auth/signin/discord?callbackUrl=/dashboard">
+                  <Link href="/entry">
                     ログイン
                   </Link>{" "}
                   と承認済 X ID が必要です。
