@@ -231,6 +231,12 @@ export default async function ManageEventPage({
           <Icon name="check" size={11} aria-hidden /> 審査キューを開く
         </Link>
         <Link
+          href={`/manage/events/${id}/slots`}
+          className="fn-btn fn-btn-ghost fn-btn-sm"
+        >
+          <Icon name="calendar" size={11} aria-hidden /> スロット一覧
+        </Link>
+        <Link
           href={`/event/${id}`}
           className="fn-btn fn-btn-ghost fn-btn-sm"
         >
