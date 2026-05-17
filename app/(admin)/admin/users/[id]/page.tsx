@@ -8,6 +8,7 @@ import {
   historyLogs as historyLogsTable,
   users as usersTable,
   videos as videosTable,
+  xAccountLinkRequests as xAccountLinkRequestsTable,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
@@ -63,6 +64,21 @@ export default async function AdminUserDetailPage({
     .where(eq(historyLogsTable.record_id, user.id))
     .orderBy(desc(historyLogsTable.created_at))
     .limit(15);
+
+  // X ID 連携申請履歴 (このユーザーが申請したもの)
+  const linkRequests = await db
+    .select({
+      id: xAccountLinkRequestsTable.id,
+      requested_x_id: xAccountLinkRequestsTable.requested_x_id,
+      link_type: xAccountLinkRequestsTable.link_type,
+      target_x_user_id: xAccountLinkRequestsTable.target_x_user_id,
+      status: xAccountLinkRequestsTable.status,
+      requested_at: xAccountLinkRequestsTable.requested_at,
+    })
+    .from(xAccountLinkRequestsTable)
+    .where(eq(xAccountLinkRequestsTable.discord_user_id, user.id))
+    .orderBy(desc(xAccountLinkRequestsTable.requested_at))
+    .limit(10);
 
   return (
     <div>
@@ -190,6 +206,66 @@ export default async function AdminUserDetailPage({
               </li>
             ))}
           </ul>
+        )}
+      </section>
+
+      <section className="fn-card" style={{ marginTop: 22 }}>
+        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
+          X ID 連携申請履歴 ({linkRequests.length})
+        </h2>
+        {linkRequests.length === 0 ? (
+          <p className="fn-muted fn-text-sm">申請はありません。</p>
+        ) : (
+          <table className="fn-table">
+            <thead>
+              <tr>
+                <th>申請 X ID</th>
+                <th>種別</th>
+                <th>target</th>
+                <th>状態</th>
+                <th>申請日時</th>
+              </tr>
+            </thead>
+            <tbody>
+              {linkRequests.map((r) => (
+                <tr key={r.id}>
+                  <td>@{r.requested_x_id}</td>
+                  <td>
+                    <span
+                      className={`fn-badge ${
+                        r.link_type === "merge"
+                          ? "fn-badge-danger"
+                          : r.link_type === "alias"
+                            ? "fn-badge-warning"
+                            : "fn-badge-soft"
+                      }`}
+                    >
+                      {r.link_type ?? "new"}
+                    </span>
+                  </td>
+                  <td style={{ fontFamily: "monospace", fontSize: 11 }}>
+                    {r.target_x_user_id ?? "—"}
+                  </td>
+                  <td>
+                    <span
+                      className={`fn-badge ${
+                        r.status === "approved"
+                          ? "fn-badge-accent"
+                          : r.status === "rejected"
+                            ? "fn-badge-danger"
+                            : "fn-badge-warning"
+                      }`}
+                    >
+                      {r.status ?? "pending"}
+                    </span>
+                  </td>
+                  <td className="fn-muted" style={{ fontSize: 11 }}>
+                    {formatRelative(r.requested_at)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </section>
 
