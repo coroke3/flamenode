@@ -306,7 +306,8 @@ async function checkSlotTimeOverlap(db: AnyDb): Promise<HealthCheckResult> {
 }
 
 /** like_count 実数差分チェック */
-const LIKE_COUNT_DRIFT_THRESHOLD = 5;
+const LIKE_COUNT_DRIFT_ABS = 5;
+const LIKE_COUNT_DRIFT_RATIO = 0.05;
 
 async function checkLikeCountDrift(db: AnyDb): Promise<HealthCheckResult> {
   // like_count >= 1 の videos を取得
@@ -318,7 +319,7 @@ async function checkLikeCountDrift(db: AnyDb): Promise<HealthCheckResult> {
   if (videoRows.length === 0) {
     return {
       id: "like_count_drift",
-      label: "like_count 実数差分 (閾値 ±5)",
+      label: "like_count 実数差分 (閾値 max(±5, ±5%))",
       status: "ok",
       count: 0,
       samples: [],
@@ -347,17 +348,25 @@ async function checkLikeCountDrift(db: AnyDb): Promise<HealthCheckResult> {
   for (const video of videoRows) {
     const actual = interactionMap.get(video.id) ?? 0;
     const stored = video.like_count ?? 0;
-    if (Math.abs(stored - actual) >= LIKE_COUNT_DRIFT_THRESHOLD) {
+    const absThreshold = LIKE_COUNT_DRIFT_ABS;
+    const ratioThreshold = Math.ceil(actual * LIKE_COUNT_DRIFT_RATIO);
+    const threshold = Math.max(absThreshold, ratioThreshold);
+    const diff = Math.abs(stored - actual);
+    if (diff >= threshold) {
       driftCount++;
       if (driftSamples.length < 5) {
-        driftSamples.push(`video:${video.id} stored:${stored} actual:${actual}`);
+        const triggeredBy =
+          ratioThreshold >= absThreshold ? `ratio(${ratioThreshold})` : `abs(${absThreshold})`;
+        driftSamples.push(
+          `video:${video.id} stored:${stored} actual:${actual} diff:${diff} threshold:${threshold} [${triggeredBy}]`,
+        );
       }
     }
   }
 
   return {
     id: "like_count_drift",
-    label: `like_count 実数差分 (閾値 ±${LIKE_COUNT_DRIFT_THRESHOLD})`,
+    label: "like_count 実数差分 (閾値 max(±5, ±5%))",
     status: driftCount === 0 ? "ok" : "warn",
     count: driftCount,
     samples: driftSamples,
