@@ -1,9 +1,9 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { desc } from "drizzle-orm";
+import { desc, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
-import { termsVersions } from "@/lib/db/schema";
+import { termsVersions, users as usersTable } from "@/lib/db/schema";
 import { formatUnix } from "@/lib/utils/format";
 import { Icon } from "@/components/ui/Icon";
 
@@ -19,6 +19,17 @@ export default async function AdminRulesPage(): Promise<React.ReactElement> {
         .orderBy(desc(termsVersions.updated_at))
         .limit(20)
     : [];
+
+  // dry-run: major 公開時に再同意が必要になるユーザー数
+  let userCount = 0;
+  if (db) {
+    try {
+      const r = await db.select({ c: sql<number>`COUNT(*)` }).from(usersTable);
+      userCount = Number(r[0]?.c ?? 0);
+    } catch (e) {
+      console.error("[AdminRulesPage] user count failed", e);
+    }
+  }
 
   return (
     <div>
@@ -41,6 +52,35 @@ export default async function AdminRulesPage(): Promise<React.ReactElement> {
       <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
         変更があった場合、影響度に応じて「再同意必須」を設定すると、次回投稿時にユーザーに同意導線を表示します。
       </p>
+
+      <section
+        style={{
+          marginTop: 16,
+          padding: "12px 14px",
+          background: "var(--bg-surface)",
+          border: "1px dashed var(--border-subtle)",
+          borderRadius: "var(--radius-md)",
+          fontSize: 12,
+          color: "var(--text-secondary)",
+        }}
+      >
+        <strong style={{ color: "var(--text-primary)" }}>
+          major 公開時の影響範囲 (dry-run)
+        </strong>
+        <ul style={{ margin: "6px 0 0", paddingLeft: 18, lineHeight: 1.7 }}>
+          <li>
+            <code>terms_reaccept_required = 1</code> が立つユーザー: 約{" "}
+            <strong>{userCount.toLocaleString()}</strong> 件 (全ユーザー)
+          </li>
+          <li>
+            通知 enqueue: <strong>0 件</strong> (Opus 判断候補のため未実装)
+          </li>
+        </ul>
+        <p style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
+          注意: major 公開時の Discord 通知 enqueue は notification_outbox の容量と
+          Discord Webhook rate-limit を考慮してから実装します。現状はサイト内表示のみ。
+        </p>
+      </section>
 
       <table className="fn-table" style={{ marginTop: 18 }}>
         <thead>
