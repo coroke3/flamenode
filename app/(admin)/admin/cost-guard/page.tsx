@@ -217,7 +217,15 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
                       </div>
                     </td>
                     <td style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                      {h.operator_discord_id ?? "-"}
+                      {h.operator_discord_id ? (
+                        <Link
+                          href={`/admin/users/${encodeURIComponent(h.operator_discord_id)}`}
+                        >
+                          {h.operator_discord_id}
+                        </Link>
+                      ) : (
+                        "-"
+                      )}
                     </td>
                     <td style={{ fontSize: 11, fontFamily: "monospace", color: "var(--text-secondary)", wordBreak: "break-all" }}>
                       {changed.length === 0 ? (
