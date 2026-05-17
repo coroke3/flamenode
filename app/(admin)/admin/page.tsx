@@ -5,6 +5,7 @@ import { desc, eq, gte, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   events as eventsTable,
+  historyLogs as historyLogsTable,
   notificationOutbox as notificationOutboxTable,
   systemSettings,
   users as usersTable,
@@ -32,6 +33,14 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
   let pendingVideos: { id: string; title: string; created_at: number; display_name: string }[] = [];
   let pendingXIds: { id: string; x_name: string | null; requested_at: number | null }[] = [];
   let notificationFailedCount = 0;
+  let recentActivity: {
+    id: number;
+    table_name: string;
+    record_id: string;
+    action: "CREATE" | "UPDATE" | "DELETE";
+    operator_discord_id: string | null;
+    created_at: number;
+  }[] = [];
 
   if (db) {
     try {
@@ -48,6 +57,7 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
         pendList,
         pendXList,
         notifFailed,
+        recentLogs,
       ] = await Promise.all([
         db.select({ c: sql<number>`COUNT(*)` }).from(usersTable),
         db
@@ -94,6 +104,18 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
           .select({ c: sql<number>`COUNT(*)` })
           .from(notificationOutboxTable)
           .where(eq(notificationOutboxTable.status, "failed")),
+        db
+          .select({
+            id: historyLogsTable.id,
+            table_name: historyLogsTable.table_name,
+            record_id: historyLogsTable.record_id,
+            action: historyLogsTable.action,
+            operator_discord_id: historyLogsTable.operator_discord_id,
+            created_at: historyLogsTable.created_at,
+          })
+          .from(historyLogsTable)
+          .orderBy(desc(historyLogsTable.created_at))
+          .limit(5),
       ]);
 
       stats = {
@@ -109,6 +131,7 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
       pendingVideos = pendList;
       pendingXIds = pendXList;
       notificationFailedCount = Number(notifFailed[0]?.c ?? 0);
+      recentActivity = recentLogs;
     } catch (err) {
       console.error("[AdminTopPage] fetch failed", err);
     }
@@ -333,6 +356,88 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
                     >
                       確認
                     </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section
+        style={{
+          marginTop: 28,
+          padding: "20px 22px",
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border-subtle)",
+          borderRadius: "var(--radius-md)",
+        }}
+      >
+        <header
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 12,
+          }}
+        >
+          <h2
+            style={{
+              fontSize: 14,
+              fontWeight: 700,
+              letterSpacing: "0.18em",
+              color: "var(--text-muted)",
+              textTransform: "uppercase",
+            }}
+          >
+            直近の管理操作
+          </h2>
+          <Link href="/admin/audit" className="fn-btn fn-btn-ghost fn-btn-sm">
+            すべて →
+          </Link>
+        </header>
+        {recentActivity.length === 0 ? (
+          <p className="fn-muted fn-text-sm">
+            <Icon name="check" size={12} aria-hidden /> 履歴はまだありません。
+          </p>
+        ) : (
+          <table className="fn-table">
+            <thead>
+              <tr>
+                <th>日時</th>
+                <th>テーブル</th>
+                <th>操作</th>
+                <th>レコード</th>
+                <th>実行者</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentActivity.map((h) => (
+                <tr key={h.id}>
+                  <td className="fn-muted" style={{ whiteSpace: "nowrap" }}>
+                    {formatRelative(h.created_at)}
+                  </td>
+                  <td style={{ fontFamily: "monospace", fontSize: 11 }}>{h.table_name}</td>
+                  <td>
+                    <span
+                      className={`fn-badge ${
+                        h.action === "DELETE"
+                          ? "fn-badge-danger"
+                          : h.action === "CREATE"
+                            ? "fn-badge-accent"
+                            : "fn-badge-soft"
+                      }`}
+                    >
+                      {h.action}
+                    </span>
+                  </td>
+                  <td style={{ fontFamily: "monospace", fontSize: 11, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <Link href={`/admin/audit?record=${encodeURIComponent(h.record_id)}`}>
+                      {h.record_id}
+                    </Link>
+                  </td>
+                  <td style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                    {h.operator_discord_id ?? "-"}
                   </td>
                 </tr>
               ))}
