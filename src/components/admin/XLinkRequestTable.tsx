@@ -23,18 +23,26 @@ export function XLinkRequestTable({
   const router = useRouter();
   const [pending, startTransition] = React.useTransition();
   const [msg, setMsg] = React.useState<string | null>(null);
+  const [rejectingId, setRejectingId] = React.useState<string | null>(null);
+  const [rejectReason, setRejectReason] = React.useState<string>("");
 
   const run = (
     fn: (fd: FormData) => Promise<{ ok: boolean; message?: string }>,
     requestId: string,
+    reason?: string,
   ) => {
     setMsg(null);
     const fd = new FormData();
     fd.set("request_id", requestId);
+    if (reason) fd.set("reason", reason);
     startTransition(async () => {
       const r = await fn(fd);
       setMsg(r.message ?? (r.ok ? "処理しました。" : "処理に失敗しました。"));
-      if (r.ok) router.refresh();
+      if (r.ok) {
+        setRejectingId(null);
+        setRejectReason("");
+        router.refresh();
+      }
     });
   };
 
@@ -135,11 +143,54 @@ export function XLinkRequestTable({
                     type="button"
                     className="fn-btn fn-btn-ghost fn-btn-sm"
                     disabled={pending}
-                    onClick={() => run(rejectXIdLinkRequest, r.id)}
+                    onClick={() => {
+                      setRejectingId((cur) => (cur === r.id ? null : r.id));
+                      setRejectReason("");
+                    }}
                   >
                     却下
                   </button>
                 </div>
+                {rejectingId === r.id ? (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 6,
+                      maxWidth: 280,
+                    }}
+                  >
+                    <textarea
+                      className="fn-input"
+                      placeholder="却下理由 (任意・履歴に残る)"
+                      rows={2}
+                      maxLength={500}
+                      value={rejectReason}
+                      onChange={(e) => setRejectReason(e.target.value)}
+                    />
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button
+                        type="button"
+                        className="fn-btn fn-btn-danger fn-btn-sm"
+                        disabled={pending}
+                        onClick={() => run(rejectXIdLinkRequest, r.id, rejectReason.trim())}
+                      >
+                        理由を添えて却下
+                      </button>
+                      <button
+                        type="button"
+                        className="fn-btn fn-btn-ghost fn-btn-sm"
+                        onClick={() => {
+                          setRejectingId(null);
+                          setRejectReason("");
+                        }}
+                      >
+                        キャンセル
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </td>
             </tr>
           ))}

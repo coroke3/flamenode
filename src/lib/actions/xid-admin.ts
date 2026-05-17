@@ -141,6 +141,7 @@ export async function rejectXIdLinkRequest(
 
   const requestId = String(formData.get("request_id") ?? "").trim();
   if (!requestId) return { ok: false, message: "申請 ID がありません。" };
+  const reason = String(formData.get("reason") ?? "").trim().slice(0, 500);
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
@@ -167,7 +168,10 @@ export async function rejectXIdLinkRequest(
     table_name: "x_account_link_requests",
     record_id: requestId,
     action: "UPDATE",
-    after_data: JSON.stringify({ status: "rejected" }),
+    after_data: JSON.stringify({
+      status: "rejected",
+      reason: reason || null,
+    }),
     operator_discord_id: adminId,
     retention_class: "long_audit",
     created_at: now,
@@ -177,9 +181,12 @@ export async function rejectXIdLinkRequest(
     discordUserId: reqRow.discord_user_id,
     type: "x_id_rejected",
     payload: {
-      content: `X ID @${reqRow.requested_x_id} の連携申請が却下されました。`,
+      content: reason
+        ? `X ID @${reqRow.requested_x_id} の連携申請が却下されました。理由: ${reason}`
+        : `X ID @${reqRow.requested_x_id} の連携申請が却下されました。`,
       requested_x_id: reqRow.requested_x_id,
       request_id: requestId,
+      reason: reason || null,
     },
   });
 
