@@ -121,6 +121,7 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 107 | /admin/audit に日付範囲フィルタ (since/until, JST境界) | 9a984d0 |
 | 108 | /admin/notifications に failed 一括リトライボタン (上限 50) | 28d76a6 |
 | 109 | /admin/users 一覧から監査ログへのクイックリンク | d291ee9 |
+| 110 | /admin/users/[id] に X ID 連携申請履歴セクション | 1fb6d4b |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
