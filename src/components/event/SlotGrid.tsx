@@ -213,6 +213,12 @@ export function SlotGrid({
     );
   }
 
+  const hasMineSlot =
+    !!viewerActiveX &&
+    slots.some(
+      (s) => s.status === "reserved" && s.x_user_id === viewerActiveX,
+    );
+
   return (
     <div className={styles.wrap}>
       {error ? (
@@ -232,6 +238,16 @@ export function SlotGrid({
               <Icon name="chevron-right" size={11} aria-hidden />
             </Link>
           ) : null}
+        </p>
+      ) : null}
+
+      {hasMineSlot && maxConsecutiveSlots > 1 ? (
+        <p className={styles.ownerHelp}>
+          <strong>連続枠の操作:</strong>{" "}
+          自分の枠の右側にある「<strong>前を追加</strong>」「<strong>後を追加</strong>」で
+          隣接する空き枠を 1 つずつ取り込めます。
+          自分の枠で挟まれた空き枠には「<strong>ここを埋めて結合</strong>」が表示され、
+          1 グループにまとめられます。連続上限は {maxConsecutiveSlots} 枠です。
         </p>
       ) : null}
 

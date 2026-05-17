@@ -36,6 +36,22 @@
   text-underline-offset: 3px;
 }
 
+.ownerHelp {
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  border: 1px dashed var(--border-subtle);
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.55;
+}
+
+.ownerHelp strong {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
 .partsRow {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
