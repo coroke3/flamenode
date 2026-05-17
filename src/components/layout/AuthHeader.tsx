@@ -41,6 +41,10 @@ export function AuthHeader({ user }: AuthHeaderProps): React.ReactElement {
             <Icon name="bookmark" size={13} aria-hidden />
             ライブラリ
           </Link>
+          <Link href="/manage">
+            <Icon name="users" size={13} aria-hidden />
+            運営
+          </Link>
           <Link href="/dashboard/settings">
             <Icon name="settings" size={13} aria-hidden />
             設定
