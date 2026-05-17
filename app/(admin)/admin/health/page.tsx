@@ -1,4 +1,5 @@
 import * as React from "react";
+import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getDatabase } from "@/lib/cloudflare";
@@ -8,9 +9,29 @@ import { runHealthChecks, type HealthCheckResult } from "@/lib/admin/healthCheck
 export const metadata: Metadata = { title: "DB ヘルスチェック" };
 export const dynamic = "force-dynamic";
 
-export default async function AdminHealthPage(): Promise<React.ReactElement> {
+type StatusFilter = "all" | "warn" | "info" | "ok";
+
+interface Props {
+  searchParams?: Promise<{ status?: string }>;
+}
+
+export default async function AdminHealthPage({
+  searchParams,
+}: Props): Promise<React.ReactElement> {
   const user = await getCurrentUser();
   if (!user || user.role !== "admin") notFound();
+
+  const sp = (await searchParams) ?? {};
+  const filter: StatusFilter = (() => {
+    switch (sp.status) {
+      case "warn":
+      case "info":
+      case "ok":
+        return sp.status;
+      default:
+        return "all";
+    }
+  })();
 
   const db = getDatabase();
   let results: HealthCheckResult[] = [];
@@ -26,12 +47,49 @@ export default async function AdminHealthPage(): Promise<React.ReactElement> {
     error = "DB に接続できませんでした。";
   }
 
+  const counts = {
+    all: results.length,
+    warn: results.filter((r) => r.status === "warn").length,
+    info: results.filter((r) => r.status === "info").length,
+    ok: results.filter((r) => r.status === "ok").length,
+  };
+
+  const visible =
+    filter === "all" ? results : results.filter((r) => r.status === filter);
+
   return (
     <div>
       <h1 style={{ fontSize: 22, fontWeight: 700 }}>DB ヘルスチェック</h1>
       <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
         データベースの整合性を読み取り専用で点検します。修復操作はありません。
       </p>
+
+      <nav
+        aria-label="状態フィルタ"
+        style={{
+          marginTop: 16,
+          display: "flex",
+          gap: 6,
+          flexWrap: "wrap",
+        }}
+      >
+        {(
+          [
+            ["all", "すべて"],
+            ["warn", "WARN"],
+            ["info", "INFO"],
+            ["ok", "OK"],
+          ] as const
+        ).map(([key, label]) => (
+          <Link
+            key={key}
+            href={key === "all" ? "/admin/health" : `/admin/health?status=${key}`}
+            className={`fn-btn fn-btn-sm ${filter === key ? "fn-btn-primary" : "fn-btn-ghost"}`}
+          >
+            {label} ({counts[key]})
+          </Link>
+        ))}
+      </nav>
 
       {error ? (
         <div
@@ -59,7 +117,14 @@ export default async function AdminHealthPage(): Promise<React.ReactElement> {
               </tr>
             </thead>
             <tbody>
-              {results.map((r) => (
+              {visible.length === 0 ? (
+                <tr>
+                  <td colSpan={4} style={{ padding: 16, textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
+                    フィルタ条件に該当する項目はありません。
+                  </td>
+                </tr>
+              ) : null}
+              {visible.map((r) => (
                 <tr key={r.id}>
                   <td>
                     <div style={{ fontWeight: 600, fontSize: 13 }}>{r.label}</div>
