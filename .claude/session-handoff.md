@@ -40,6 +40,9 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 26 | /admin/health に状態フィルタ | fa433fe |
 | 27 | /admin/notifications で notification_outbox 一覧表示 (K-4) | 4ba342c |
 | 28 | docs/workers.md に /admin/notifications を反映 | 8c91d47 |
+| 29 | /admin/notifications に failed の手動リトライ | 97db6e6 |
+| 30 | /admin/notifications に payload整形モーダル | 4d2aae4 |
+| 31 | モバイル関連動画位置改善 (本文側に出して下部押し込み解消) | bc48c8a |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
@@ -57,13 +60,13 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 
 ## 次に着手しやすい小粒 Batch 候補
 
-1. 関連動画の mobile での位置改善 (article 内に挿入)
-2. 入力 UI 改善 (時刻ピッカー、候補ボタン)
-3. notification 手動リトライボタン (`/admin/notifications` から failed を pending に戻す)
-4. /admin/notifications 詳細モーダル (payload_json 整形表示)
-5. イベント運営者向け受信箱 (K-5)
-6. history_logs アーカイブ (cleanup Worker 拡張)
-7. voided 動画の論理削除タイマー
+1. 入力 UI 改善 (時刻ピッカー、候補ボタン)
+2. イベント運営者向け受信箱 (K-5)
+3. history_logs アーカイブ (cleanup Worker 拡張)
+4. voided 動画の論理削除タイマー
+5. メンバー表の mobile スクロール最適化
+6. /admin/audit の差分表示 (P-5 完全化)
+7. cleanup Worker の単体テスト追加
 
 ## 進め方ルール
 
