@@ -106,6 +106,35 @@ export default async function AdminAuditDetailPage({
           mono
           link={`/admin/audit?record=${encodeURIComponent(row.record_id)}`}
         />
+        {(() => {
+          // 表別に詳細ページへのジャンプリンクを出す
+          const adminLink = (() => {
+            switch (row.table_name) {
+              case "videos":
+                return `/admin/videos/${encodeURIComponent(row.record_id)}`;
+              case "events":
+                return `/admin/events/${encodeURIComponent(row.record_id)}`;
+              case "users":
+                return `/admin/users/${encodeURIComponent(row.record_id)}`;
+              case "x_account_link_requests":
+                return `/admin/x-link-requests`;
+              case "notification_outbox":
+                return `/admin/notifications?status=failed`;
+              case "system_settings":
+                return `/admin/cost-guard`;
+              default:
+                return null;
+            }
+          })();
+          if (!adminLink) return null;
+          return (
+            <Meta
+              label="詳細ページ"
+              value="開く"
+              link={adminLink}
+            />
+          );
+        })()}
         <Meta
           label="実行者 (Discord)"
           value={row.operator_discord_id ?? "—"}
