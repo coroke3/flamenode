@@ -110,6 +110,54 @@ export default async function AdminNotificationsPage({
         notification_outbox の直近 100 件を表示します。Worker (notification-dispatcher) が 5 分間隔で送信し、失敗は最大 3 回まで指数バックオフで再試行します。
       </p>
 
+      {counts.failed > 0 ? (
+        <div
+          role="status"
+          style={{
+            marginTop: 14,
+            padding: "10px 14px",
+            background: "var(--accent-danger-soft, #fee2e2)",
+            border: "1px solid var(--accent-danger, #dc2626)",
+            borderRadius: "var(--radius-md)",
+            color: "var(--accent-danger, #991b1b)",
+            fontSize: 13,
+          }}
+        >
+          <strong>failed {counts.failed} 件</strong>
+          {" "}— Worker が諦めた通知です。手動リトライまたは Discord 側の状態確認を検討してください。
+        </div>
+      ) : counts.pending > 0 ? (
+        <div
+          role="status"
+          style={{
+            marginTop: 14,
+            padding: "10px 14px",
+            background: "var(--accent-warning-soft, #fef3c7)",
+            border: "1px solid var(--accent-warning, #d97706)",
+            borderRadius: "var(--radius-md)",
+            color: "var(--accent-warning, #92400e)",
+            fontSize: 13,
+          }}
+        >
+          配信待ち <strong>{counts.pending} 件</strong> あります (次の cron で処理されます)。
+        </div>
+      ) : counts.sent > 0 ? (
+        <div
+          role="status"
+          style={{
+            marginTop: 14,
+            padding: "10px 14px",
+            background: "var(--accent-success-soft, #dcfce7)",
+            border: "1px solid var(--accent-success, #16a34a)",
+            borderRadius: "var(--radius-md)",
+            color: "var(--accent-success, #166534)",
+            fontSize: 13,
+          }}
+        >
+          失敗・滞留はありません ({counts.sent} 件 sent)。
+        </div>
+      ) : null}
+
       <nav
         aria-label="ステータスフィルタ"
         style={{
