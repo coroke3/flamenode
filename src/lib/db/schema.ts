@@ -549,6 +549,8 @@ export const notificationOutbox = sqliteTable("notification_outbox", {
   attempt_count: integer("attempt_count").default(0),
   next_attempt_at: integer("next_attempt_at"),
   last_error: text("last_error"),
+  /** event-scoped 通知 (運営者受信箱用)。null は全体通知。 */
+  event_id: text("event_id"),
   created_at: integer("created_at")
     .notNull()
     .default(sql`(unixepoch())`),

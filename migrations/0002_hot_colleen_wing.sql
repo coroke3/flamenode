@@ -1,0 +1,1 @@
+ALTER TABLE `notification_outbox` ADD `event_id` text;

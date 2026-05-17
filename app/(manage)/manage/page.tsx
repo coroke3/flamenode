@@ -8,6 +8,7 @@ import {
   events as eventsTable,
   eventEditors as eventEditorsTable,
   historyLogs as historyLogsTable,
+  notificationOutbox as notificationOutboxTable,
   videos as videosTable,
   videoEvents as videoEventsTable,
 } from "@/lib/db/schema";
@@ -101,6 +102,16 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
           )!,
         )
         .orderBy(desc(historyLogsTable.created_at))
+        .limit(20)
+    : [];
+
+  // event-scoped 通知 (notification_outbox.event_id が担当イベントに該当するもの)
+  const eventNotifications = eventIds.length > 0
+    ? await db
+        .select()
+        .from(notificationOutboxTable)
+        .where(inArray(notificationOutboxTable.event_id, eventIds))
+        .orderBy(desc(notificationOutboxTable.created_at))
         .limit(20)
     : [];
 
@@ -227,6 +238,73 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
           })}
         </div>
       </section>
+
+      {eventNotifications.length > 0 ? (
+        <section style={{ marginTop: 28 }}>
+          <h2
+            style={{
+              fontSize: 13,
+              fontWeight: 700,
+              letterSpacing: "0.18em",
+              color: "var(--text-muted)",
+              textTransform: "uppercase",
+              marginBottom: 10,
+            }}
+          >
+            イベント通知
+          </h2>
+          <table className="fn-table">
+            <thead>
+              <tr>
+                <th>日時</th>
+                <th>イベント</th>
+                <th>type</th>
+                <th>状態</th>
+              </tr>
+            </thead>
+            <tbody>
+              {eventNotifications.map((n) => {
+                const ev = eventRows.find((e) => e.id === n.event_id);
+                return (
+                  <tr key={n.id}>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <div>{formatUnix(n.created_at)}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                        {formatRelative(n.created_at)}
+                      </div>
+                    </td>
+                    <td>
+                      {ev ? (
+                        <Link href={`/manage/events/${ev.id}`}>{ev.title}</Link>
+                      ) : (
+                        <span style={{ fontFamily: "monospace", fontSize: 11 }}>
+                          {n.event_id ?? "—"}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ fontFamily: "monospace", fontSize: 11 }}>
+                      {n.type}
+                    </td>
+                    <td>
+                      <span
+                        className={`fn-badge ${
+                          n.status === "sent"
+                            ? "fn-badge-accent"
+                            : n.status === "failed"
+                              ? "fn-badge-danger"
+                              : "fn-badge-soft"
+                        }`}
+                      >
+                        {n.status ?? "?"}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </section>
+      ) : null}
 
       <section style={{ marginTop: 28 }}>
         <h2
