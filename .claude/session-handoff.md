@@ -78,6 +78,10 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 64 | YouTube ID / URL ユーティリティのテスト 13件 | e6a9acc |
 | 65 | X ID 正規化テスト 5件 | aa05ea4 |
 | 66 | slot grouping core 切り出し + テスト 9件 | eb69dda |
+| 67 | format ユーティリティのテスト 17件 | dc0d6e1 |
+| 68 | X ID 連携申請の却下理由入力 (履歴+通知に反映) | 90f7486 |
+| 69 | /admin/audit/[id] 詳細ページ | 8a42552 |
+| 70 | /manage/events/[id]/slots スロット運営一覧 | bda4f57 |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
@@ -97,11 +101,11 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 ## 次に着手しやすい小粒 Batch 候補
 
 1. メンバー表の column フィルタ・並び替え (要 client 化)
-2. /manage/events/[id]/slots スロット管理タブ
-3. /admin/audit/[id] 詳細ページ (1 行の前後 JSON フル表示)
-4. format ユーティリティのテスト追加 (formatUnix / formatRelative)
-5. /admin/x-link-requests に却下理由入力 (現状 reason カラム未使用)
-6. cleanup Worker テストで Worker 経由クエリの mock 実行
+2. cleanup Worker テストで Worker 経由クエリの mock 実行
+3. /admin/x-link-requests に承認時の merge / alias フロー実装 (現状 link_type 未活用)
+4. /manage/events/[id]/staff 運営メンバー一覧
+5. terms_versions の publish 通知 (broadcast の最小実装)
+6. /admin/announcements 公開時に全ユーザーへ通知
 
 ## 進め方ルール
 
