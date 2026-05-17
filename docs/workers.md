@@ -69,11 +69,10 @@ L-1 (Worker 実装状況のMarkdown明記) に対応。
 - `slots.x_reapply_required` 期限切れ → `voided`
 - `notification_outbox.status = 'sent'` の TTL 削除 (14 日)
 - `notification_outbox.status = 'failed'` の TTL 削除 (30 日)
-- `history_logs` TTL 削除 (`normal` 90 日 / `long_audit` 365 日)
+- `history_logs` TTL 削除 (`normal` は system_settings.history_retention_days を参照、デフォルト 90 日 / `long_audit` は normal*4 と 365 日の大きい方)
 - voided 動画の論理削除タイマー (voided_at から 30 日後に is_deleted=1)
 
 ### 未実装
-- `system_settings.history_retention_days` を Worker 側で読み込む拡張
 - voided 動画の R2 サムネ R2 オブジェクト掃除
 
 ---

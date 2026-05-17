@@ -11,10 +11,12 @@ export interface Env {
 const SENT_TTL_SEC = 14 * 24 * 60 * 60;
 const FAILED_TTL_SEC = 30 * 24 * 60 * 60;
 
-// history_logs: retention_class=normal は 90 日、long_audit は 365 日で削除。
-// system_settings.history_retention_days で 90 を上書きしたい場合は将来拡張。
-const HISTORY_NORMAL_TTL_SEC = 90 * 24 * 60 * 60;
-const HISTORY_LONG_AUDIT_TTL_SEC = 365 * 24 * 60 * 60;
+// history_logs: retention_class=normal は system_settings.history_retention_days を参照 (デフォルト 90 日)。
+// long_audit は normal の 4 倍を基準 (デフォルト 365 日) とする。
+const HISTORY_NORMAL_DAYS_DEFAULT = 90;
+const HISTORY_LONG_AUDIT_DAYS_DEFAULT = 365;
+const MIN_HISTORY_DAYS = 7;
+const MAX_HISTORY_DAYS = 3650;
 
 // voided 状態の動画は 30 日後に is_deleted を 1 に統一する (論理削除の整合化)。
 // 物理削除は行わず、操作した admin が決めた void_reason などのフィールドはそのまま保持する。
@@ -29,8 +31,31 @@ export default {
   },
 };
 
+async function readHistoryRetentionDays(env: Env): Promise<{
+  normalDays: number;
+  longAuditDays: number;
+}> {
+  try {
+    const row = await env.DB.prepare(
+      `SELECT history_retention_days FROM system_settings LIMIT 1`,
+    ).first<{ history_retention_days: number | null }>();
+    const raw = Number(row?.history_retention_days ?? HISTORY_NORMAL_DAYS_DEFAULT);
+    const safe = Number.isFinite(raw) && raw > 0 ? raw : HISTORY_NORMAL_DAYS_DEFAULT;
+    const normalDays = Math.min(Math.max(Math.floor(safe), MIN_HISTORY_DAYS), MAX_HISTORY_DAYS);
+    // long_audit はデフォルト値以上を保証 (運用調査に必要なため normal より短くしない)。
+    const longAuditDays = Math.max(normalDays * 4, HISTORY_LONG_AUDIT_DAYS_DEFAULT);
+    return { normalDays, longAuditDays };
+  } catch {
+    return {
+      normalDays: HISTORY_NORMAL_DAYS_DEFAULT,
+      longAuditDays: HISTORY_LONG_AUDIT_DAYS_DEFAULT,
+    };
+  }
+}
+
 async function runCleanup(env: Env): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
+  const { normalDays, longAuditDays } = await readHistoryRetentionDays(env);
 
   // 期限切れの slot.priority_reclaim_until を解放
   await env.DB.prepare(
@@ -68,7 +93,7 @@ async function runCleanup(env: Env): Promise<void> {
     .run();
 
   // history_logs: retention_class ごとに TTL 削除
-  const historyNormalCutoff = now - HISTORY_NORMAL_TTL_SEC;
+  const historyNormalCutoff = now - normalDays * 24 * 60 * 60;
   await env.DB.prepare(
     `DELETE FROM history_logs
      WHERE (retention_class IS NULL OR retention_class = 'normal')
@@ -77,7 +102,7 @@ async function runCleanup(env: Env): Promise<void> {
     .bind(historyNormalCutoff)
     .run();
 
-  const historyAuditCutoff = now - HISTORY_LONG_AUDIT_TTL_SEC;
+  const historyAuditCutoff = now - longAuditDays * 24 * 60 * 60;
   await env.DB.prepare(
     `DELETE FROM history_logs
      WHERE retention_class = 'long_audit'
