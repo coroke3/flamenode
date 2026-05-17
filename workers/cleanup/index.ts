@@ -16,6 +16,10 @@ const FAILED_TTL_SEC = 30 * 24 * 60 * 60;
 const HISTORY_NORMAL_TTL_SEC = 90 * 24 * 60 * 60;
 const HISTORY_LONG_AUDIT_TTL_SEC = 365 * 24 * 60 * 60;
 
+// voided 状態の動画は 30 日後に is_deleted を 1 に統一する (論理削除の整合化)。
+// 物理削除は行わず、操作した admin が決めた void_reason などのフィールドはそのまま保持する。
+const VOIDED_VIDEO_HIDE_TTL_SEC = 30 * 24 * 60 * 60;
+
 export default {
   async scheduled(_evt: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(runCleanup(env));
@@ -80,5 +84,19 @@ async function runCleanup(env: Env): Promise<void> {
        AND created_at < ?1`,
   )
     .bind(historyAuditCutoff)
+    .run();
+
+  // voided 動画: voided_at から 30 日経過していたら is_deleted=1 を補正する。
+  // setVideoStatus は voided 時点で is_deleted=1 を立てているが、過去データの整合化を兼ねる。
+  const voidedHideCutoff = now - VOIDED_VIDEO_HIDE_TTL_SEC;
+  await env.DB.prepare(
+    `UPDATE videos
+     SET is_deleted = 1, updated_at = ?1
+     WHERE status = 'voided'
+       AND is_deleted = 0
+       AND voided_at IS NOT NULL
+       AND voided_at < ?2`,
+  )
+    .bind(now, voidedHideCutoff)
     .run();
 }
