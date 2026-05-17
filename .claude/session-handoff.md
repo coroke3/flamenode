@@ -141,6 +141,9 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 127 | /admin/videos/[id] に作品監査ログリンク | b5c3108 |
 | 128 | /admin/cost-guard 履歴の operator をユーザー詳細にリンク化 | ac2144f |
 | 129 | x-link-requests 履歴の operator をユーザー詳細にリンク化 | 45752d0 |
+| 130 | like_count drift をハイブリッド閾値 max(±5, ±5%) に変更 (Opus #1) | 86ffebd |
+| 131 | format 不正入力 (NaN/Infinity/文字列) 安全処理 + テスト追加 (127件) | 6b3846a |
+| 132 | ログイン導線を /entry に統一 + ローカル AUTH_SECRET / .dev.vars 自動解決 | fda4d3b |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
