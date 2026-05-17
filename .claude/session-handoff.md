@@ -87,6 +87,9 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 73 | publicDto テスト 11件 (pickKeys / assertNoForbiddenKeys) | 10c08db |
 | 74 | eventStatus core 分離 + テスト 14件 (累計 87件) | d25d7ce |
 | 75 | sanitizeUserHtml テスト 15件 (累計 102件) | 5e8f9c7 |
+| 76 | cleanup Worker runCleanup を D1 モックで実行 (5件、累計 107件) | c6739d4 |
+| 77 | メンバー表 client 化 + 列ソート対応 | 3c5f95f |
+| 78 | X ID 連携申請 merge/alias 分岐 (alias は x_user_aliases、merge は拒否) | ffde0ed |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
@@ -105,12 +108,12 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 
 ## 次に着手しやすい小粒 Batch 候補
 
-1. メンバー表の column フィルタ・並び替え (要 client 化)
-2. cleanup Worker テストで Worker 経由クエリの mock 実行
-3. /admin/x-link-requests に承認時の merge / alias フロー実装 (現状 link_type 未活用)
-4. /manage/events/[id]/staff 運営メンバー一覧
-5. terms_versions の publish 通知 (broadcast の最小実装)
-6. /admin/announcements 公開時に全ユーザーへ通知
+1. merge フロー設計 (Opus 判断候補。投稿者付け替え/履歴/権限の影響範囲が大きい)
+2. /admin/announcements 公開時の通知 (broadcast の最小実装)
+3. terms_versions の publish 通知
+4. /manage/events/[id]/inbox の type 別フィルタ
+5. videoMembers DB スキーマ拡張で column ソート用キャッシュ
+6. cleanup Worker のリトライ機構 (現状 throw すると次回 cron 待ち)
 
 ## 進め方ルール
 
