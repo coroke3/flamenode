@@ -160,12 +160,21 @@ export default async function AdminRulesPage({
               <td>{t.published_at ? formatUnix(t.published_at, { dateOnly: true }) : "—"}</td>
               <td>{formatUnix(t.updated_at)}</td>
               <td>
-                <Link
-                  href={`/admin/rules/${t.id}/edit`}
-                  className="fn-btn fn-btn-ghost fn-btn-sm"
-                >
-                  編集
-                </Link>
+                <div style={{ display: "inline-flex", gap: 4 }}>
+                  <Link
+                    href={`/admin/rules/${t.id}/edit`}
+                    className="fn-btn fn-btn-ghost fn-btn-sm"
+                  >
+                    編集
+                  </Link>
+                  <Link
+                    href={`/admin/audit?table=terms_versions&record=${encodeURIComponent(t.id)}`}
+                    className="fn-btn fn-btn-ghost fn-btn-sm"
+                    title="この規約バージョンの監査ログ"
+                  >
+                    監査
+                  </Link>
+                </div>
               </td>
             </tr>
           ))}
