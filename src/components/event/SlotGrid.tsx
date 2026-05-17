@@ -74,6 +74,16 @@ export function SlotGrid({
   const [confirmExtend, setConfirmExtend] = React.useState<ConfirmExtend | null>(null);
   const [confirmMerge, setConfirmMerge] = React.useState<ConfirmMerge | null>(null);
   const [mergeDisplayName, setMergeDisplayName] = React.useState<string>("");
+  const [savedName, setSavedName] = React.useState<string>("");
+  React.useEffect(() => {
+    try {
+      const v = window.localStorage.getItem("fn:lastSlotDisplayName");
+      if (v) setSavedName(v);
+    } catch {
+      // localStorage 利用不可な環境では何もしない
+    }
+  }, []);
+  const reserveFormRef = React.useRef<HTMLFormElement | null>(null);
   const displayRows = React.useMemo(
     () => collapseReservationGroups(slots as SlotBase[]),
     [slots],
@@ -95,6 +105,15 @@ export function SlotGrid({
     setSuccess(null);
     const fd = new FormData(form);
     fd.set("slot_id", slotId);
+    const dn = String(fd.get("display_name") ?? "").trim();
+    if (dn) {
+      try {
+        window.localStorage.setItem("fn:lastSlotDisplayName", dn);
+        setSavedName(dn);
+      } catch {
+        // localStorage 利用不可な環境では何もしない
+      }
+    }
     startTransition(async () => {
       const result = await reserveSlot(fd);
       if (!result.ok) {
@@ -385,6 +404,7 @@ export function SlotGrid({
                           </div>
                         ) : canTakeSlot ? (
                           <form
+                            ref={reserveFormRef}
                             className={styles.reserveForm}
                             onSubmit={(ev) => {
                               ev.preventDefault();
@@ -396,6 +416,7 @@ export function SlotGrid({
                               type="text"
                               className="fn-input"
                               placeholder="表示名・団体名"
+                              defaultValue={savedName}
                               maxLength={80}
                               required
                             />
