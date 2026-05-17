@@ -149,14 +149,23 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 135 | /manage/events/[id]/audience 登録者プレビュー追加 | 38a82e5 |
 | 136 | events.slot_part_gap_minutes 設定化 (Opus #4, migration 0006) | 88d94e2 |
 
-## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
+## 残る Opus判断候補
 
-- like_count 実数差分の閾値再評価 (現状 5)
-- イベントごとの slot 部区切り `gapSec` を events テーブル設定可に拡張
-- メンバー候補検索の本格 API 化 (2000 上限の更なるスケール)
-- 募集期間自動切替 cron (現状はリアルタイム判定で動作)
-- 関連動画 UI の mobile 位置最適化
-- メンバー表 / 関連動画の mobile レイアウト改善
+### 解決済み (このセッションで判断完了)
+
+- ✅ like_count 実数差分の閾値再評価 → Batch 130 でハイブリッド max(±5, ±5%) 採用
+- ✅ slot 部区切り gapSec を events テーブル設定可に拡張 → Batch 136 で migration 0006 追加
+- ✅ 関連動画 UI の mobile 位置最適化 → Batch 31 で実装済み
+- ✅ メンバー表 / 関連動画の mobile レイアウト改善 → Batch 23/77 で実装済み
+- ✅ 募集期間自動切替 cron → 不要 (isAcceptingEntries がリアルタイム判定)
+
+### 残 (Opus 判断必要、リスク高)
+
+- merge フロー完全実装: 投稿者付け替え / 履歴継承 / 権限影響大、設計書要
+- announcement / terms 本格 broadcast enqueue: 大量 enqueue + Discord rate-limit、段階実行要
+- cleanup Worker Durable Object 永続化: 設計が重い、本当に必要か要判断
+- legacy/normalize pure function core 切り出し: Shift_JIS mojibake 文字化けリスク高
+- メンバー候補検索の本格 API 化: 検索 endpoint + debounce UI の中規模実装
 
 ## 既知の未適用
 
