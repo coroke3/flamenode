@@ -332,6 +332,13 @@ export default async function AdminNotificationsPage({
                     <td>
                       <div style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
                         <NotificationPayloadButton payload={r.payload_json} />
+                        <Link
+                          href={`/admin/audit?table=notification_outbox&record=${encodeURIComponent(r.id)}`}
+                          className="fn-btn fn-btn-ghost fn-btn-sm"
+                          title="この通知の監査ログ"
+                        >
+                          監査
+                        </Link>
                         {r.status === "failed" ? (
                           <NotificationRetryButton id={r.id} />
                         ) : null}
