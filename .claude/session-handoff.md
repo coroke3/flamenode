@@ -43,6 +43,9 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 29 | /admin/notifications に failed の手動リトライ | 97db6e6 |
 | 30 | /admin/notifications に payload整形モーダル | 4d2aae4 |
 | 31 | モバイル関連動画位置改善 (本文側に出して下部押し込み解消) | bc48c8a |
+| 32 | cleanup Worker に history_logs TTL削除 (normal 90d / long_audit 365d) | 569fd3d |
+| 33 | /admin/audit に行ごと差分詳細パネル (P-5) | 3acac66 |
+| 34 | メンバー表をモバイルでカード積み上げに改善 | f9bf453 |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
@@ -62,11 +65,11 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 
 1. 入力 UI 改善 (時刻ピッカー、候補ボタン)
 2. イベント運営者向け受信箱 (K-5)
-3. history_logs アーカイブ (cleanup Worker 拡張)
-4. voided 動画の論理削除タイマー
-5. メンバー表の mobile スクロール最適化
-6. /admin/audit の差分表示 (P-5 完全化)
-7. cleanup Worker の単体テスト追加
+3. voided 動画の論理削除タイマー
+4. cleanup Worker の単体テスト追加
+5. `system_settings.history_retention_days` を cleanup Worker が読む拡張
+6. /admin/x-link-requests の差分/承認履歴の前後比較
+7. メンバー表の column フィルタ・並び替え
 
 ## 進め方ルール
 
