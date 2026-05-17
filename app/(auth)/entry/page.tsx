@@ -136,6 +136,11 @@ export default async function EntryPage(): Promise<React.ReactElement> {
                       : ""}
                     {isAcceptingEntries(ev) ? " · 受付中" : ""}
                   </span>
+                  {ev.entry_end_time != null ? (
+                    <span className={styles.eventCardMeta}>
+                      募集終了: {formatUnix(ev.entry_end_time)}
+                    </span>
+                  ) : null}
                 </Link>
               ))
             )}
