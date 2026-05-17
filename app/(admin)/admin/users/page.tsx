@@ -1,7 +1,7 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq, like, or } from "drizzle-orm";
+import { and, desc, eq, isNull, like, or } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   users as usersTable,
@@ -95,9 +95,15 @@ export default async function AdminUsersPage({
           ? eq(usersTable.is_banned, 1)
           : status === "admin"
             ? eq(usersTable.role, "admin")
-            : status === "active"
-              ? eq(usersTable.is_banned, 0)
-              : undefined;
+            : status === "moderator"
+              ? eq(usersTable.role, "moderator")
+              : status === "active"
+                ? eq(usersTable.is_banned, 0)
+                : status === "tos_not_accepted"
+                  ? eq(usersTable.is_tos_accepted, 0)
+                  : status === "no_active_x"
+                    ? isNull(usersTable.active_x_user_id)
+                    : undefined;
       const where =
         queryFilter && statusFilter
           ? and(queryFilter, statusFilter)
@@ -277,9 +283,12 @@ export default async function AdminUsersPage({
         />
         <select name="status" className="fn-select" defaultValue={status}>
           <option value="">すべて</option>
-          <option value="active">通常</option>
+          <option value="active">通常 (BAN 解除済)</option>
           <option value="banned">BAN</option>
           <option value="admin">管理者</option>
+          <option value="moderator">モデレーター</option>
+          <option value="tos_not_accepted">TOS 未同意</option>
+          <option value="no_active_x">active X ID 未設定</option>
         </select>
         <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm">
           検索
