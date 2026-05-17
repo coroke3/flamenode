@@ -37,6 +37,12 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
   let notificationFailedCount = 0;
   let healthWarnCount = 0;
   let securityWarnCount = 0;
+  let recentFailedNotifs: {
+    id: string;
+    type: string;
+    last_error: string | null;
+    created_at: number;
+  }[] = [];
   let recentActivity: {
     id: number;
     table_name: string;
@@ -147,6 +153,23 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
         securityWarnCount = sr.filter((r) => r.status === "warn").length;
       } catch (e) {
         console.error("[AdminTopPage] health/security check failed", e);
+      }
+
+      // 直近の失敗通知 3件
+      try {
+        recentFailedNotifs = await db
+          .select({
+            id: notificationOutboxTable.id,
+            type: notificationOutboxTable.type,
+            last_error: notificationOutboxTable.last_error,
+            created_at: notificationOutboxTable.created_at,
+          })
+          .from(notificationOutboxTable)
+          .where(eq(notificationOutboxTable.status, "failed"))
+          .orderBy(desc(notificationOutboxTable.created_at))
+          .limit(3);
+      } catch (e) {
+        console.error("[AdminTopPage] recent failed notif fetch failed", e);
       }
     } catch (err) {
       console.error("[AdminTopPage] fetch failed", err);
@@ -381,6 +404,74 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
           </table>
         )}
       </section>
+
+      {recentFailedNotifs.length > 0 ? (
+        <section
+          style={{
+            marginTop: 28,
+            padding: "20px 22px",
+            background: "var(--bg-surface)",
+            border: "1px solid var(--accent-danger, #dc2626)",
+            borderRadius: "var(--radius-md)",
+          }}
+        >
+          <header
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 12,
+            }}
+          >
+            <h2
+              style={{
+                fontSize: 14,
+                fontWeight: 700,
+                letterSpacing: "0.18em",
+                color: "var(--accent-danger, #dc2626)",
+                textTransform: "uppercase",
+              }}
+            >
+              直近の失敗通知
+            </h2>
+            <Link
+              href="/admin/notifications?status=failed"
+              className="fn-btn fn-btn-ghost fn-btn-sm"
+            >
+              すべて →
+            </Link>
+          </header>
+          <table className="fn-table">
+            <thead>
+              <tr>
+                <th>日時</th>
+                <th>type</th>
+                <th>last_error</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentFailedNotifs.map((n) => (
+                <tr key={n.id}>
+                  <td className="fn-muted" style={{ whiteSpace: "nowrap" }}>
+                    {formatRelative(n.created_at)}
+                  </td>
+                  <td style={{ fontFamily: "monospace", fontSize: 11 }}>{n.type}</td>
+                  <td
+                    style={{
+                      fontSize: 11,
+                      color: "var(--text-secondary)",
+                      maxWidth: 360,
+                      wordBreak: "break-all",
+                    }}
+                  >
+                    {n.last_error ?? "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      ) : null}
 
       <section
         style={{
