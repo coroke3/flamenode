@@ -148,6 +148,8 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 134 | /admin/notifications に bulk_retry 履歴クイックリンク | 80dc80b |
 | 135 | /manage/events/[id]/audience 登録者プレビュー追加 | 38a82e5 |
 | 136 | events.slot_part_gap_minutes 設定化 (Opus #4, migration 0006) | 88d94e2 |
+| 137 | Opus 候補リスト整理 (5件解決、5件残) | cef58e5 |
+| 138 | /api/internal/x-users/search 追加 (Opus #5 最小実装) | 8f9abef |
 
 ## 残る Opus判断候補
 
@@ -165,7 +167,7 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 - announcement / terms 本格 broadcast enqueue: 大量 enqueue + Discord rate-limit、段階実行要
 - cleanup Worker Durable Object 永続化: 設計が重い、本当に必要か要判断
 - legacy/normalize pure function core 切り出し: Shift_JIS mojibake 文字化けリスク高
-- メンバー候補検索の本格 API 化: 検索 endpoint + debounce UI の中規模実装
+- メンバー候補検索の本格 API 化: ✅ endpoint 追加済 (Batch 138)。残: 既存 page を debounce UI 化する作業 (中規模、後続)
 
 ## 既知の未適用
 
