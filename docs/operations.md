@@ -199,11 +199,34 @@ allowlist (許可される定義/参照ファイル):
 
 ### 5-1. ランタイム検査
 
-`/admin/health` に以下の deprecated チェックが追加されている。
+`/admin/health` (ヘルス) に追加されている主要チェック:
 
-- `video_comments_legacy_rows` — `video_comments` の残行 (>0 で WARN)
-- `videos_outro_comment_legacy` — `videos.outro_comment IS NOT NULL` (>0 で INFO)
-- `chapter_non_chapter_marker` — `video_chapters.marker_kind != 'chapter'` (>0 で INFO)
+- `system_settings_single_row` — system_settings は global 1 行のみ
+- `primary_event_sync` — primary_event_id と video_events の同期
+- `orphan_event_ref` / `orphan_video_ref` — 外部キー orphan
+- `available_slot_with_video` / `submitted_slot_without_video` — slot 状態整合
+- `reservation_group_user_mix` — 連続枠ユーザー混在
+- `public_video_without_youtube_id` — 公開動画の YT ID 欠落
+- `voided_video_visible` — voided なのに is_deleted=0
+- `slot_time_overlap` — 同イベント内の時間重複 (スイープ全ペア)
+- `like_count_drift` — likes_count vs video_interactions 集計差 (±5 閾値)
+- `video_comments_legacy_rows` — `video_comments` 残行 (>0 で WARN)
+- `videos_outro_comment_legacy` — `outro_comment` 残行 (>0 で INFO)
+- `chapter_non_chapter_marker` — `marker_kind != 'chapter'` (>0 で INFO)
+- `orphan_video_member` — video_members の orphan
+- `video_members_name_for_sort_null` — migration 0004 未適用 検出
+
+`/admin/security` (セキュリティ) に追加されている主要チェック:
+
+- `access_token_not_null` — accounts.access_token 残存検出
+- `rejected_xid_active` — rejected な X ID が active 化されていないか
+- `unapproved_creator_videos` — 未承認 creator_id の動画
+- `banned_user_videos` / `tos_not_accepted_user_videos` — 書き込み権限漏れ
+- `custom_page_dangerous_html` — sanitizer 漏れ
+- `banned_user_chapters` — banned ユーザーがチャプター投稿
+- `orphan_approved_xid` — approved X ID で discord 紐付け欠落
+- `public_api_leak` (whitelist enforced)
+- `notification_table_mismatch` (静的解析)
 
 ---
 
