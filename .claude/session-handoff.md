@@ -85,6 +85,7 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 71 | /manage/events/[id]/staff 運営メンバー一覧 | 90fa914 |
 | 72 | docs/operations.md に単体テスト実行手順追記 | 47dd346 |
 | 73 | publicDto テスト 11件 (pickKeys / assertNoForbiddenKeys) | 10c08db |
+| 74 | eventStatus core 分離 + テスト 14件 (累計 87件) | d25d7ce |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
