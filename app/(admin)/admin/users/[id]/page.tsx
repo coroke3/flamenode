@@ -2,11 +2,12 @@ import * as React from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   historyLogs as historyLogsTable,
   users as usersTable,
+  videoInteractions as videoInteractionsTable,
   videos as videosTable,
   xAccountLinkRequests as xAccountLinkRequestsTable,
   xUsers as xUsersTable,
@@ -64,6 +65,26 @@ export default async function AdminUserDetailPage({
     .where(eq(historyLogsTable.record_id, user.id))
     .orderBy(desc(historyLogsTable.created_at))
     .limit(15);
+
+  // Active X ID のライブラリ件数 (like/bookmark)
+  let likeCount = 0;
+  let bookmarkCount = 0;
+  if (user.active_x_user_id) {
+    const rows = await db
+      .select({
+        interaction_type: videoInteractionsTable.interaction_type,
+        c: sql<number>`COUNT(*)`,
+      })
+      .from(videoInteractionsTable)
+      .where(eq(videoInteractionsTable.x_user_id, user.active_x_user_id))
+      .groupBy(videoInteractionsTable.interaction_type);
+    for (const r of rows) {
+      const c = Number(r.c ?? 0);
+      if (r.interaction_type === "like") likeCount = c;
+      if (r.interaction_type === "bookmark") bookmarkCount = c;
+    }
+  }
+  void and; // unused 警告抑止 (将来用)
 
   // X ID 連携申請履歴 (このユーザーが申請したもの)
   const linkRequests = await db
@@ -131,6 +152,16 @@ export default async function AdminUserDetailPage({
           </span>
           {user.terms_reaccept_required === 1 ? (
             <span className="fn-badge fn-badge-warning">再同意要求中</span>
+          ) : null}
+          {user.active_x_user_id ? (
+            <>
+              <span className="fn-badge fn-badge-soft">
+                Active X ライク: {likeCount}
+              </span>
+              <span className="fn-badge fn-badge-soft">
+                Active X ブックマーク: {bookmarkCount}
+              </span>
+            </>
           ) : null}
         </div>
       </section>
