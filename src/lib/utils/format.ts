@@ -20,20 +20,35 @@ const timeOnlyFormatter = new Intl.DateTimeFormat("ja-JP", {
   minute: "2-digit",
 });
 
+function toValidUnixSec(value: unknown): number | null {
+  if (value == null) return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const numeric = Number(trimmed);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+  return null;
+}
+
 export function formatUnix(
-  unixSec: number | null | undefined,
+  unixSec: unknown,
   opts: { dateOnly?: boolean; timeOnly?: boolean } = {},
 ): string {
-  if (unixSec == null) return "-";
-  const d = new Date(unixSec * 1000);
+  const validUnixSec = toValidUnixSec(unixSec);
+  if (validUnixSec == null) return "-";
+  const d = new Date(validUnixSec * 1000);
+  if (Number.isNaN(d.getTime())) return "-";
   if (opts.dateOnly) return dateOnlyFormatter.format(d);
   if (opts.timeOnly) return timeOnlyFormatter.format(d);
   return fullFormatter.format(d);
 }
 
-export function formatRelative(unixSec: number | null | undefined): string {
-  if (unixSec == null) return "";
-  const diff = Date.now() / 1000 - unixSec;
+export function formatRelative(unixSec: unknown): string {
+  const validUnixSec = toValidUnixSec(unixSec);
+  if (validUnixSec == null) return "";
+  const diff = Date.now() / 1000 - validUnixSec;
   if (diff < 60) return "今";
   if (diff < 3600) return `${Math.floor(diff / 60)}分前`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}時間前`;

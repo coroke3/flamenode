@@ -18,6 +18,12 @@ test("formatUnix: null/undefined はハイフン", () => {
   assert.equal(formatUnix(undefined), "-");
 });
 
+test("formatUnix: invalid inputs return hyphen", () => {
+  assert.equal(formatUnix(Number.NaN), "-");
+  assert.equal(formatUnix(Infinity), "-");
+  assert.equal(formatUnix("not-a-date"), "-");
+});
+
 test("formatUnix: 1700000000 (2023-11-14T22:13:20Z = JST 2023/11/15 07:13)", () => {
   const s = formatUnix(1700000000);
   // 日本語ロケール / Asia/Tokyo
@@ -41,6 +47,10 @@ test("formatUnix timeOnly: 時刻のみ", () => {
 test("formatRelative: null は空文字", () => {
   assert.equal(formatRelative(null), "");
   assert.equal(formatRelative(undefined), "");
+});
+
+test("formatRelative: invalid inputs return empty string", () => {
+  assert.equal(formatRelative(Number.NaN), "");
 });
 
 test("formatRelative: 30秒前は「今」", () => {
