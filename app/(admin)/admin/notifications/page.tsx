@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
 type StatusFilter = "all" | "pending" | "processing" | "sent" | "failed";
 
 interface Props {
-  searchParams?: Promise<{ status?: string; type?: string }>;
+  searchParams?: Promise<{ status?: string; type?: string; event?: string }>;
 }
 
 export default async function AdminNotificationsPage({
@@ -39,6 +39,7 @@ export default async function AdminNotificationsPage({
     }
   })();
   const typeFilter = (sp.type ?? "").trim();
+  const eventFilter = (sp.event ?? "").trim();
 
   const db = getDatabase();
   let rows: (typeof notificationOutbox.$inferSelect)[] = [];
@@ -53,6 +54,9 @@ export default async function AdminNotificationsPage({
       }
       if (typeFilter) {
         conds.push(eq(notificationOutbox.type, typeFilter));
+      }
+      if (eventFilter) {
+        conds.push(eq(notificationOutbox.event_id, eventFilter));
       }
       const where = conds.length === 0 ? undefined : conds.length === 1 ? conds[0] : and(...conds);
 
@@ -124,12 +128,12 @@ export default async function AdminNotificationsPage({
             ["failed", "failed"],
           ] as const
         ).map(([key, label]) => {
-          const href =
-            key === "all"
-              ? typeFilter
-                ? `/admin/notifications?type=${encodeURIComponent(typeFilter)}`
-                : "/admin/notifications"
-              : `/admin/notifications?status=${key}${typeFilter ? `&type=${encodeURIComponent(typeFilter)}` : ""}`;
+          const params = new URLSearchParams();
+          if (key !== "all") params.set("status", key);
+          if (typeFilter) params.set("type", typeFilter);
+          if (eventFilter) params.set("event", eventFilter);
+          const qs = params.toString();
+          const href = qs ? `/admin/notifications?${qs}` : "/admin/notifications";
           return (
             <Link
               key={key}
@@ -160,17 +164,24 @@ export default async function AdminNotificationsPage({
           defaultValue={typeFilter}
           placeholder="type 完全一致 (例: x_id_approved)"
           className="fn-input fn-input-sm"
-          style={{ minWidth: 240 }}
+          style={{ minWidth: 220 }}
+        />
+        <input
+          name="event"
+          defaultValue={eventFilter}
+          placeholder="event_id 完全一致"
+          className="fn-input fn-input-sm"
+          style={{ minWidth: 200 }}
         />
         <button type="submit" className="fn-btn fn-btn-ghost fn-btn-sm">
           絞り込み
         </button>
-        {typeFilter ? (
+        {typeFilter || eventFilter ? (
           <Link
             href={status === "all" ? "/admin/notifications" : `/admin/notifications?status=${status}`}
             className="fn-btn fn-btn-ghost fn-btn-sm"
           >
-            type クリア
+            クリア
           </Link>
         ) : null}
       </form>
