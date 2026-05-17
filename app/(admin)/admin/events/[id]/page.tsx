@@ -124,6 +124,18 @@ export default async function AdminEventDetailPage({
         >
           <Icon name="external" size={12} aria-hidden /> 公開ページ
         </Link>
+        <Link
+          href={`/manage/events/${event.id}`}
+          className="fn-btn fn-btn-ghost fn-btn-sm"
+        >
+          <Icon name="users" size={12} aria-hidden /> 運営ビュー
+        </Link>
+        <Link
+          href={`/admin/audit?table=events&record=${encodeURIComponent(event.id)}`}
+          className="fn-btn fn-btn-ghost fn-btn-sm"
+        >
+          <Icon name="clock" size={12} aria-hidden /> 監査ログ
+        </Link>
         <Link href="/admin/events" className="fn-btn fn-btn-ghost fn-btn-sm">
           <Icon name="chevron-left" size={12} aria-hidden /> 一覧
         </Link>
