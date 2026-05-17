@@ -185,12 +185,21 @@ export default async function AdminAnnouncementsPage({
               </td>
               <td>{formatUnix(a.updated_at)}</td>
               <td>
-                <Link
-                  href={`/admin/announcements/${a.id}/edit`}
-                  className="fn-btn fn-btn-ghost fn-btn-sm"
-                >
-                  編集
-                </Link>
+                <div style={{ display: "inline-flex", gap: 4 }}>
+                  <Link
+                    href={`/admin/announcements/${a.id}/edit`}
+                    className="fn-btn fn-btn-ghost fn-btn-sm"
+                  >
+                    編集
+                  </Link>
+                  <Link
+                    href={`/admin/audit?table=announcements&record=${encodeURIComponent(a.id)}`}
+                    className="fn-btn fn-btn-ghost fn-btn-sm"
+                    title="このお知らせの監査ログ"
+                  >
+                    監査
+                  </Link>
+                </div>
               </td>
             </tr>
           ))}
