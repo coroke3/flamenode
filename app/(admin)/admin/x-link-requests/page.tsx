@@ -23,6 +23,8 @@ export default async function AdminXLinkRequestsPage(): Promise<React.ReactEleme
           discord_name: users.name,
           discord_image: users.image,
           requested_at: xAccountLinkRequests.requested_at,
+          link_type: xAccountLinkRequests.link_type,
+          target_x_user_id: xAccountLinkRequests.target_x_user_id,
         })
         .from(xAccountLinkRequests)
         .leftJoin(users, eq(users.id, xAccountLinkRequests.discord_user_id))

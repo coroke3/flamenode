@@ -8,6 +8,7 @@ import {
   historyLogs,
   users,
   xAccountLinkRequests,
+  xUserAliases,
   xUsers,
 } from "@/lib/db/schema";
 import { normalizeXId } from "@/lib/utils/xid";
@@ -54,7 +55,93 @@ export async function approveXIdLinkRequest(
 
   const xid = normalizeXId(reqRow.requested_x_id);
   const discordUserId = reqRow.discord_user_id;
+  const now = Math.floor(Date.now() / 1000);
+  const linkType = reqRow.link_type ?? "new";
 
+  // ============================
+  // link_type === "alias": x_user_aliases に行追加して終了。
+  // 既存の target_x_user_id を主、申請された requested_x_id を別名として登録する。
+  // x_users への新規行は作らない。投稿主体権限は target_x_user_id 側のまま。
+  // ============================
+  if (linkType === "alias") {
+    const targetXId = reqRow.target_x_user_id
+      ? normalizeXId(reqRow.target_x_user_id)
+      : null;
+    if (!targetXId) {
+      return { ok: false, message: "alias 申請には target_x_user_id が必要です。" };
+    }
+    const targetRow = (
+      await db.select().from(xUsers).where(eq(xUsers.id, targetXId)).limit(1)
+    )[0];
+    if (!targetRow) {
+      return { ok: false, message: "target_x_user_id が見つかりません。" };
+    }
+    if (
+      targetRow.linked_discord_user_id &&
+      targetRow.linked_discord_user_id !== discordUserId
+    ) {
+      return {
+        ok: false,
+        message: "target_x_user_id が別の Discord ユーザーに紐づいているため alias 追加できません。",
+      };
+    }
+    // 既存 alias の重複は composite PK で防がれる
+    await db
+      .insert(xUserAliases)
+      .values({ x_user_id: targetXId, alias_x_id: xid })
+      .onConflictDoNothing();
+
+    await db
+      .update(xAccountLinkRequests)
+      .set({ status: "approved" })
+      .where(eq(xAccountLinkRequests.id, requestId));
+
+    await db.insert(historyLogs).values({
+      table_name: "x_account_link_requests",
+      record_id: requestId,
+      action: "UPDATE",
+      after_data: JSON.stringify({
+        status: "approved",
+        link_type: "alias",
+        target_x_user_id: targetXId,
+        alias_x_id: xid,
+      }),
+      operator_discord_id: adminId,
+      retention_class: "long_audit",
+      created_at: now,
+    });
+
+    await enqueueNotification(db, {
+      discordUserId,
+      type: "x_id_alias_approved",
+      payload: {
+        content: `X ID @${xid} を @${targetXId} の別名として承認しました。`,
+        x_user_id: targetXId,
+        alias_x_id: xid,
+        request_id: requestId,
+      },
+    });
+
+    revalidatePath("/dashboard/settings");
+    revalidatePath("/admin/x-link-requests");
+    return { ok: true, message: "alias として承認しました。" };
+  }
+
+  // ============================
+  // link_type === "merge": 自動マージは危険操作のため拒否。手動対応を促す。
+  // (Opus 判断候補: 旧データ吸収 / 投稿者付け替え / アイコン継承)
+  // ============================
+  if (linkType === "merge") {
+    return {
+      ok: false,
+      message:
+        "merge 申請は自動承認の対象外です。/admin/audit に履歴を残してから手動で対応してください。",
+    };
+  }
+
+  // ============================
+  // link_type === "new": 既存実装どおり (x_users 行作成 or 既存行へ linked_discord_user_id 更新)
+  // ============================
   const existing = (
     await db.select().from(xUsers).where(eq(xUsers.id, xid)).limit(1)
   )[0];
@@ -67,8 +154,6 @@ export async function approveXIdLinkRequest(
       message: "この X ID は別ユーザーに紐づいているため承認できません。",
     };
   }
-
-  const now = Math.floor(Date.now() / 1000);
 
   if (!existing) {
     await db.insert(xUsers).values({
@@ -108,7 +193,11 @@ export async function approveXIdLinkRequest(
     table_name: "x_account_link_requests",
     record_id: requestId,
     action: "UPDATE",
-    after_data: JSON.stringify({ status: "approved", x_user_id: xid }),
+    after_data: JSON.stringify({
+      status: "approved",
+      link_type: "new",
+      x_user_id: xid,
+    }),
     operator_discord_id: adminId,
     retention_class: "long_audit",
     created_at: now,

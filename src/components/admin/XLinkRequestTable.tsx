@@ -13,6 +13,8 @@ export interface XLinkRequestRow {
   discord_name: string | null;
   discord_image: string | null;
   requested_at: number;
+  link_type?: "new" | "merge" | "alias" | null;
+  target_x_user_id?: string | null;
 }
 
 export function XLinkRequestTable({
@@ -73,6 +75,7 @@ export function XLinkRequestTable({
           <tr>
             <th>申請 ID</th>
             <th>X ID</th>
+            <th>種別</th>
             <th>申請者 Discord</th>
             <th>申請日時</th>
             <th></th>
@@ -84,6 +87,24 @@ export function XLinkRequestTable({
               <td style={{ fontSize: 11, color: "var(--text-muted)" }}>{r.id}</td>
               <td>
                 <strong>@{r.requested_x_id}</strong>
+              </td>
+              <td>
+                <span
+                  className={`fn-badge ${
+                    r.link_type === "merge"
+                      ? "fn-badge-danger"
+                      : r.link_type === "alias"
+                        ? "fn-badge-warning"
+                        : "fn-badge-soft"
+                  }`}
+                >
+                  {r.link_type ?? "new"}
+                </span>
+                {r.target_x_user_id ? (
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>
+                    target: @{r.target_x_user_id}
+                  </div>
+                ) : null}
               </td>
               <td>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
