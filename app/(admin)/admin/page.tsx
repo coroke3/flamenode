@@ -375,7 +375,7 @@ function TodoBoard({
   if (notificationFailed > 0) {
     items.push({
       label: "通知配信失敗",
-      href: "/admin/audit?table=notification_outbox",
+      href: "/admin/notifications?status=failed",
       count: notificationFailed,
       tone: "danger",
     });
