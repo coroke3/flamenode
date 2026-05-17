@@ -11,6 +11,11 @@ export interface Env {
 const SENT_TTL_SEC = 14 * 24 * 60 * 60;
 const FAILED_TTL_SEC = 30 * 24 * 60 * 60;
 
+// history_logs: retention_class=normal は 90 日、long_audit は 365 日で削除。
+// system_settings.history_retention_days で 90 を上書きしたい場合は将来拡張。
+const HISTORY_NORMAL_TTL_SEC = 90 * 24 * 60 * 60;
+const HISTORY_LONG_AUDIT_TTL_SEC = 365 * 24 * 60 * 60;
+
 export default {
   async scheduled(_evt: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(runCleanup(env));
@@ -56,5 +61,24 @@ async function runCleanup(env: Env): Promise<void> {
      WHERE status = 'failed' AND created_at IS NOT NULL AND created_at < ?1`,
   )
     .bind(failedCutoff)
+    .run();
+
+  // history_logs: retention_class ごとに TTL 削除
+  const historyNormalCutoff = now - HISTORY_NORMAL_TTL_SEC;
+  await env.DB.prepare(
+    `DELETE FROM history_logs
+     WHERE (retention_class IS NULL OR retention_class = 'normal')
+       AND created_at < ?1`,
+  )
+    .bind(historyNormalCutoff)
+    .run();
+
+  const historyAuditCutoff = now - HISTORY_LONG_AUDIT_TTL_SEC;
+  await env.DB.prepare(
+    `DELETE FROM history_logs
+     WHERE retention_class = 'long_audit'
+       AND created_at < ?1`,
+  )
+    .bind(historyAuditCutoff)
     .run();
 }
