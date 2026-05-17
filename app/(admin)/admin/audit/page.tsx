@@ -18,6 +18,7 @@ interface Props {
     table?: string;
     action?: string;
     operator?: string;
+    record?: string;
     limit?: string;
   }>;
 }
@@ -68,6 +69,7 @@ export default async function AdminAuditPage({
   const tableFilter = (sp.table ?? "").trim();
   const actionFilter = (sp.action ?? "").trim().toUpperCase();
   const operatorFilter = (sp.operator ?? "").trim();
+  const recordFilter = (sp.record ?? "").trim();
   const limitRaw = Number(sp.limit ?? "");
   const limit =
     Number.isFinite(limitRaw) && limitRaw > 0
@@ -84,6 +86,7 @@ export default async function AdminAuditPage({
       conds.push(eq(historyLogs.action, actionFilter));
     }
     if (operatorFilter) conds.push(eq(historyLogs.operator_discord_id, operatorFilter));
+    if (recordFilter) conds.push(eq(historyLogs.record_id, recordFilter));
 
     rows = await db
       .select()
@@ -149,6 +152,16 @@ export default async function AdminAuditPage({
             defaultValue={operatorFilter}
             className="fn-input"
             placeholder="discord_id"
+          />
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", fontSize: 11 }}>
+          <span style={{ color: "var(--text-muted)" }}>レコード ID</span>
+          <input
+            type="text"
+            name="record"
+            defaultValue={recordFilter}
+            className="fn-input"
+            placeholder="record_id 完全一致"
           />
         </label>
         <label style={{ display: "flex", flexDirection: "column", fontSize: 11 }}>
