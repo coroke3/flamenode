@@ -1,7 +1,7 @@
 import * as React from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { desc } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { historyLogs } from "@/lib/db/schema";
@@ -12,7 +12,18 @@ export const dynamic = "force-dynamic";
 
 type HistoryRow = typeof historyLogs.$inferSelect;
 
-/** JSON 文字列をオブジェクトへパースする。失敗時は null を返す */
+interface Props {
+  searchParams?: Promise<{
+    table?: string;
+    action?: string;
+    operator?: string;
+    limit?: string;
+  }>;
+}
+
+const MAX_LIMIT = 500;
+const DEFAULT_LIMIT = 100;
+
 function parseJson(value: string | null): Record<string, unknown> | null {
   if (!value) return null;
   try {
@@ -25,10 +36,6 @@ function parseJson(value: string | null): Record<string, unknown> | null {
   }
 }
 
-/**
- * before / after の JSON を比較し、変更されたキー一覧と件数を返す。
- * フル diff ライブラリは使わず、トップレベルキーの値比較のみ行う。
- */
 function diffSummary(row: HistoryRow): { keys: string[]; count: number } {
   const before = parseJson(row.before_data);
   const after = parseJson(row.after_data);
@@ -50,27 +57,121 @@ function diffSummary(row: HistoryRow): { keys: string[]; count: number } {
   return { keys: changed, count: changed.length };
 }
 
-export default async function AdminAuditPage(): Promise<React.ReactElement> {
+export default async function AdminAuditPage({
+  searchParams,
+}: Props): Promise<React.ReactElement> {
   const user = await getCurrentUser();
   if (!user || user.role !== "admin") notFound();
 
+  const sp = (await searchParams) ?? {};
+  const tableFilter = (sp.table ?? "").trim();
+  const actionFilter = (sp.action ?? "").trim().toUpperCase();
+  const operatorFilter = (sp.operator ?? "").trim();
+  const limitRaw = Number(sp.limit ?? "");
+  const limit =
+    Number.isFinite(limitRaw) && limitRaw > 0
+      ? Math.min(Math.floor(limitRaw), MAX_LIMIT)
+      : DEFAULT_LIMIT;
+
   const db = getDatabase();
-  const rows = db
-    ? await db
-        .select()
-        .from(historyLogs)
-        .orderBy(desc(historyLogs.created_at))
-        .limit(100)
-    : [];
+  let rows: HistoryRow[] = [];
+  let distinctTables: string[] = [];
+  if (db) {
+    const conds = [];
+    if (tableFilter) conds.push(eq(historyLogs.table_name, tableFilter));
+    if (actionFilter === "CREATE" || actionFilter === "UPDATE" || actionFilter === "DELETE") {
+      conds.push(eq(historyLogs.action, actionFilter));
+    }
+    if (operatorFilter) conds.push(eq(historyLogs.operator_discord_id, operatorFilter));
+
+    rows = await db
+      .select()
+      .from(historyLogs)
+      .where(conds.length > 0 ? and(...conds) : undefined)
+      .orderBy(desc(historyLogs.created_at))
+      .limit(limit);
+
+    const tableRows = await db
+      .select({ name: historyLogs.table_name })
+      .from(historyLogs)
+      .groupBy(historyLogs.table_name)
+      .orderBy(sql`${historyLogs.table_name} ASC`);
+    distinctTables = tableRows.map((r) => r.name);
+  }
 
   return (
     <div>
       <h1 style={{ fontSize: 22, fontWeight: 700 }}>監査ログ</h1>
       <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
-        管理操作の直近 100 件を表示します。before / after の変更キーをサマリとして確認できます。
+        管理操作を新しい順に表示します。before / after の変更キーをサマリで確認できます。
       </p>
 
-      <table className="fn-table" style={{ marginTop: 18 }}>
+      <form
+        method="get"
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 12,
+          alignItems: "flex-end",
+          marginTop: 16,
+          padding: 12,
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border-subtle)",
+          borderRadius: "var(--radius-md)",
+        }}
+      >
+        <label style={{ display: "flex", flexDirection: "column", fontSize: 11 }}>
+          <span style={{ color: "var(--text-muted)" }}>テーブル</span>
+          <select name="table" defaultValue={tableFilter} className="fn-input">
+            <option value="">すべて</option>
+            {distinctTables.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", fontSize: 11 }}>
+          <span style={{ color: "var(--text-muted)" }}>操作</span>
+          <select name="action" defaultValue={actionFilter} className="fn-input">
+            <option value="">すべて</option>
+            <option value="CREATE">CREATE</option>
+            <option value="UPDATE">UPDATE</option>
+            <option value="DELETE">DELETE</option>
+          </select>
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", fontSize: 11 }}>
+          <span style={{ color: "var(--text-muted)" }}>実行者 Discord ID</span>
+          <input
+            type="text"
+            name="operator"
+            defaultValue={operatorFilter}
+            className="fn-input"
+            placeholder="discord_id"
+          />
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", fontSize: 11 }}>
+          <span style={{ color: "var(--text-muted)" }}>件数 (最大 {MAX_LIMIT})</span>
+          <input
+            type="number"
+            name="limit"
+            defaultValue={limit}
+            min={1}
+            max={MAX_LIMIT}
+            className="fn-input"
+            style={{ width: 100 }}
+          />
+        </label>
+        <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm">
+          絞り込む
+        </button>
+      </form>
+
+      <p style={{ marginTop: 12, color: "var(--text-muted)", fontSize: 12 }}>
+        {rows.length} 件表示中 (上限 {limit})
+      </p>
+
+      <table className="fn-table" style={{ marginTop: 8 }}>
         <thead>
           <tr>
             <th>日時</th>
@@ -151,7 +252,7 @@ export default async function AdminAuditPage(): Promise<React.ReactElement> {
                   className="fn-empty-message"
                   style={{ padding: 16, textAlign: "center" }}
                 >
-                  監査ログはまだありません。
+                  該当する監査ログはありません。
                 </p>
               </td>
             </tr>
