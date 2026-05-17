@@ -3,7 +3,12 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { and, desc, eq, like, or, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
-import { videos as videosTable, xUsers as xUsersTable } from "@/lib/db/schema";
+import {
+  events as eventsTable,
+  videoEvents as videoEventsTable,
+  videos as videosTable,
+  xUsers as xUsersTable,
+} from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { formatRelative } from "@/lib/utils/format";
 import { youtubeThumbUrl } from "@/lib/youtube/id";
@@ -23,12 +28,13 @@ type AdminVideoRow = {
 export default async function AdminVideosPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; status?: string }>;
+  searchParams: Promise<{ q?: string; status?: string; event?: string }>;
 }): Promise<React.ReactElement> {
-  const { q = "", status = "" } = await searchParams;
+  const { q = "", status = "", event = "" } = await searchParams;
 
   const db = getDatabase();
   let rows: AdminVideoRow[] = [];
+  let events: { id: string; title: string }[] = [];
   if (db) {
     try {
       const term = `%${q}%`;
@@ -44,11 +50,19 @@ export default async function AdminVideosPage({
       const statusFilter = status
         ? eq(videosTable.status, status as never)
         : undefined;
+      const eventFilter = event
+        ? eq(videoEventsTable.event_id, event)
+        : undefined;
+      const conds = [queryFilter, statusFilter, eventFilter].filter(
+        (c): c is NonNullable<typeof c> => c !== undefined,
+      );
       const where =
-        queryFilter && statusFilter
-          ? and(queryFilter, statusFilter)
-          : (queryFilter ?? statusFilter);
-      rows = await db
+        conds.length === 0
+          ? undefined
+          : conds.length === 1
+            ? conds[0]
+            : and(...conds);
+      const base = db
         .select({
           id: videosTable.id,
           title: videosTable.title,
@@ -58,10 +72,25 @@ export default async function AdminVideosPage({
           created_at: videosTable.created_at,
         })
         .from(videosTable)
-        .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id))
+        .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id));
+      const withEventJoin = event
+        ? base.innerJoin(
+            videoEventsTable,
+            eq(videoEventsTable.video_id, videosTable.id),
+          )
+        : base;
+      rows = await withEventJoin
         .where(where)
         .orderBy(desc(videosTable.created_at))
         .limit(60);
+
+      // event 候補 (active なもののみ)
+      events = await db
+        .select({ id: eventsTable.id, title: eventsTable.title })
+        .from(eventsTable)
+        .where(eq(eventsTable.is_archived, 0))
+        .orderBy(desc(eventsTable.start_time))
+        .limit(50);
     } catch (e) {
       console.error("[AdminVideosPage] fetch failed", e);
     }
@@ -95,6 +124,14 @@ export default async function AdminVideosPage({
           <option value="x_reapply_required">調整中</option>
           <option value="unlisted">限定公開</option>
           <option value="voided">不備</option>
+        </select>
+        <select name="event" className="fn-select" defaultValue={event}>
+          <option value="">全イベント</option>
+          {events.map((ev) => (
+            <option key={ev.id} value={ev.id}>
+              {ev.title}
+            </option>
+          ))}
         </select>
         <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm">
           検索
