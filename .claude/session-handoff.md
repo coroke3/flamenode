@@ -90,6 +90,11 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 76 | cleanup Worker runCleanup を D1 モックで実行 (5件、累計 107件) | c6739d4 |
 | 77 | メンバー表 client 化 + 列ソート対応 | 3c5f95f |
 | 78 | X ID 連携申請 merge/alias 分岐 (alias は x_user_aliases、merge は拒否) | ffde0ed |
+| 79 | イベント運営ページの通知に type 別カテゴリフィルタ | 8ca432a |
+| 80 | video_members に order_index / name インデックス (migration 0003) | 06961f3 |
+| 81 | cleanup ウォーム内即時リトライ (transient 最大3回、テスト 7件、累計 114件) | c6c6729 |
+| 82 | /admin/announcements に通知対象件数 dry-run プレビュー | 6261605 |
+| 83 | /admin/rules に major 公開時の影響範囲 dry-run プレビュー | 2a65540 |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
@@ -104,16 +109,17 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 
 - migration `0001_young_fat_cobra.sql` (entry_start_time / entry_end_time) は本番 D1 へ未適用。
 - migration `0002_hot_colleen_wing.sql` (notification_outbox.event_id) は本番 D1 へ未適用。
+- migration `0003_loose_whiplash.sql` (video_members インデックス) は本番 D1 へ未適用。
 - 本番 deploy も未実施。
 
 ## 次に着手しやすい小粒 Batch 候補
 
-1. merge フロー設計 (Opus 判断候補。投稿者付け替え/履歴/権限の影響範囲が大きい)
-2. /admin/announcements 公開時の通知 (broadcast の最小実装)
-3. terms_versions の publish 通知
-4. /manage/events/[id]/inbox の type 別フィルタ
-5. videoMembers DB スキーマ拡張で column ソート用キャッシュ
-6. cleanup Worker のリトライ機構 (現状 throw すると次回 cron 待ち)
+1. merge フロー完全実装 (Opus 判断候補)
+2. announcement / terms 本格 enqueue 戦略 (Opus 判断候補。dry-run は実装済み)
+3. cleanup Worker の永続化キュー (現状はウォーム内リトライのみ。テスト Worker の Durable Object 検討)
+4. /manage/events/[id]/inbox の DB 直接フィルタ (現状はクライアントフィルタ)
+5. videoMembers の name_for_sort 列追加 (現状はインデックスのみ)
+6. /admin/users 一覧で role / banned のフィルタ追加
 
 ## 進め方ルール
 
