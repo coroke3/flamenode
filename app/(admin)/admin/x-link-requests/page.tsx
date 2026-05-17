@@ -32,6 +32,22 @@ export default async function AdminXLinkRequestsPage(): Promise<React.ReactEleme
         .orderBy(desc(xAccountLinkRequests.requested_at))
     : [];
 
+  // 直近の却下リクエスト (履歴の参照用)
+  const recentRejected = db
+    ? await db
+        .select({
+          id: xAccountLinkRequests.id,
+          requested_x_id: xAccountLinkRequests.requested_x_id,
+          discord_user_id: xAccountLinkRequests.discord_user_id,
+          link_type: xAccountLinkRequests.link_type,
+          requested_at: xAccountLinkRequests.requested_at,
+        })
+        .from(xAccountLinkRequests)
+        .where(eq(xAccountLinkRequests.status, "rejected"))
+        .orderBy(desc(xAccountLinkRequests.requested_at))
+        .limit(10)
+    : [];
+
   // 直近の承認/却下履歴を history_logs (table_name 'x_account_link_requests' / 'x_users') から取得
   const recentHistory = db
     ? await db
@@ -61,6 +77,49 @@ export default async function AdminXLinkRequestsPage(): Promise<React.ReactEleme
         </p>
       </header>
       <XLinkRequestTable rows={pending} />
+
+      {recentRejected.length > 0 ? (
+        <section style={{ marginTop: 28 }}>
+          <h2
+            style={{
+              fontSize: 13,
+              fontWeight: 700,
+              letterSpacing: "0.18em",
+              color: "var(--text-muted)",
+              textTransform: "uppercase",
+              marginBottom: 8,
+            }}
+          >
+            直近の却下リクエスト (上限 10)
+          </h2>
+          <table className="fn-table">
+            <thead>
+              <tr>
+                <th>申請 X ID</th>
+                <th>種別</th>
+                <th>申請者 Discord</th>
+                <th>申請日時</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentRejected.map((r) => (
+                <tr key={r.id}>
+                  <td>@{r.requested_x_id}</td>
+                  <td>
+                    <span className="fn-badge fn-badge-soft">{r.link_type ?? "new"}</span>
+                  </td>
+                  <td style={{ fontFamily: "monospace", fontSize: 11 }}>
+                    {r.discord_user_id}
+                  </td>
+                  <td className="fn-muted">
+                    {formatRelative(r.requested_at)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      ) : null}
 
       <section style={{ marginTop: 28 }}>
         <h2 style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.18em", color: "var(--text-muted)", textTransform: "uppercase" }}>
