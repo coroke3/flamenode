@@ -49,6 +49,8 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 35 | slot 表示名 localStorage 記憶 (次回確保時の既定値) | 9320e66 |
 | 36 | HomeIntroBand に募集開始前/募集終了ラベル | 54163ad |
 | 37 | cleanup Worker に voided 動画の論理削除タイマー (30日) | 3d5b905 |
+| 38 | /admin/audit に record_id 完全一致フィルタ | e861d0d |
+| 39 | cost_guard_mode 非 normal 時の上部バナー (E-5) | d456349 |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
