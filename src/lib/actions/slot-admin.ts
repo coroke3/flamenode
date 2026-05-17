@@ -8,6 +8,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { assertCanEditEvent } from "@/lib/auth/ownership";
 import { historyLogs, slots } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
+import { enqueueNotification } from "@/lib/notifications/enqueue";
 
 export interface SlotActionResult {
   ok: boolean;
@@ -273,6 +274,21 @@ export async function releaseSlot(formData: FormData): Promise<SlotActionResult>
     retention_class: "long_audit",
     created_at: now,
   });
+
+  // 通知: スロット所有者 (Discord) に強制解放を伝える。
+  if (row.discord_user_id) {
+    await enqueueNotification(db, {
+      discordUserId: row.discord_user_id,
+      type: "slot_force_released",
+      payload: {
+        content: `運営によりイベント枠 (${targetIds.length}枠) が解放されました。`,
+        slot_ids: targetIds,
+        event_id: row.event_id,
+        reservation_group_id: groupId ?? null,
+      },
+      eventId: row.event_id,
+    });
+  }
 
   revalidatePath(`/admin/events/${row.event_id}/slots`);
   revalidatePath(`/admin/events/${row.event_id}`);
