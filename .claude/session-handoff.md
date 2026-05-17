@@ -114,6 +114,7 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 100 | /admin/x-link-requests に直近の却下リクエスト一覧 | 826622c |
 | 101 | /admin トップに直近の失敗通知 3件パネル | 850b441 |
 | 102 | /admin/notifications に状態サマリパネル | c8b4049 |
+| 103 | /admin/events/[id] にスロット/動画状態の集計バッジ | 6fac2ff |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
