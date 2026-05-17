@@ -122,6 +122,14 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 108 | /admin/notifications に failed 一括リトライボタン (上限 50) | 28d76a6 |
 | 109 | /admin/users 一覧から監査ログへのクイックリンク | d291ee9 |
 | 110 | /admin/users/[id] に X ID 連携申請履歴セクション | 1fb6d4b |
+| 111 | /admin/x-link-requests に link_type フィルタ | 178aed8 |
+| 112 | /admin/notifications 各行から監査ログ直リンク | a0375b4 |
+| 113 | /admin/videos 一覧から監査ログクイックリンク | 730072e |
+| 114 | /admin/events 一覧から監査ログクイックリンク | 9950419 |
+| 115 | /manage トップに担当イベントの failed 通知バナー | f2f8821 |
+| 116 | /admin/users 一覧の Active X ID をプロフィールリンク化 | 23c5edf |
+| 117 | /admin/audit/[id] に table 別 詳細ページジャンプリンク | d095322 |
+| 118 | /manage/events/[id]/staff に個別編集権限テーブル追加 | 595f0ca |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
