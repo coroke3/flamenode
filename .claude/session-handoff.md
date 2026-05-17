@@ -130,6 +130,12 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 116 | /admin/users 一覧の Active X ID をプロフィールリンク化 | 23c5edf |
 | 117 | /admin/audit/[id] に table 別 詳細ページジャンプリンク | d095322 |
 | 118 | /manage/events/[id]/staff に個別編集権限テーブル追加 | 595f0ca |
+| 119 | /admin/announcements 一覧から監査ログクイックリンク | bf76871 |
+| 120 | /admin/rules 一覧から監査ログクイックリンク | 00d0d6f |
+| 121 | docs/operations.md に health/security チェック一覧反映 | 42d79d7 |
+| 122 | /admin/users/[id] に active X ID ライブラリ件数表示 | 4862081 |
+| 123 | /manage staff の approved_by を admin 限定でリンク化 | a225c69 |
+| 124 | /admin/events/[id] に運営ビュー/監査ログリンク | e8fe8d6 |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
