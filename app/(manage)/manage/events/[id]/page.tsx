@@ -237,12 +237,20 @@ export default async function ManageEventPage({
           公開ページを見る
         </Link>
         {isAdmin ? (
-          <Link
-            href={`/admin/events/${id}`}
-            className="fn-btn fn-btn-ghost fn-btn-sm"
-          >
-            <Icon name="settings" size={11} aria-hidden /> 管理者編集
-          </Link>
+          <>
+            <Link
+              href={`/admin/events/${id}`}
+              className="fn-btn fn-btn-ghost fn-btn-sm"
+            >
+              <Icon name="settings" size={11} aria-hidden /> 管理者編集
+            </Link>
+            <Link
+              href={`/admin/notifications?event=${encodeURIComponent(id)}`}
+              className="fn-btn fn-btn-ghost fn-btn-sm"
+            >
+              <Icon name="alert" size={11} aria-hidden /> 通知ログ
+            </Link>
+          </>
         ) : null}
       </div>
 
