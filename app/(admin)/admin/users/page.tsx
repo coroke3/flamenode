@@ -355,7 +355,8 @@ export default async function AdminUsersPage({
                     <span style={{ fontWeight: 600 }}>
                       {u.active_x_name ?? `@${u.active_x_user_id}`}
                     </span>
-                    <span
+                    <Link
+                      href={`/user/${u.active_x_user_id}`}
                       style={{
                         display: "block",
                         fontSize: 11,
@@ -363,7 +364,7 @@ export default async function AdminUsersPage({
                       }}
                     >
                       @{u.active_x_user_id}
-                    </span>
+                    </Link>
                   </span>
                 ) : (
                   "—"
