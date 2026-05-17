@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, like, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
 import {
@@ -179,34 +179,66 @@ export default async function ManageEventPage({
     .orderBy(desc(historyLogsTable.created_at))
     .limit(15);
 
-  // event-scoped 通知 (直近 100 件まで取得し、UI 側でカテゴリフィルタを適用する)
-  const allEventNotifications = await db
-    .select()
+  // event-scoped 通知: カテゴリ別件数は DB の GROUP BY で集計し、
+  // 一覧は対象カテゴリだけ where 句で絞り込んで取得する (クライアントフィルタを廃止)。
+  const categoryWhere = (cat: NotifCategory) => {
+    if (cat === "all") return eq(notificationOutboxTable.event_id, id);
+    if (cat === "system") {
+      // video_/x_id_/slot_/chapter_ 以外
+      return and(
+        eq(notificationOutboxTable.event_id, id),
+        sql`${notificationOutboxTable.type} NOT LIKE 'video_%'`,
+        sql`${notificationOutboxTable.type} NOT LIKE 'x_id_%'`,
+        sql`${notificationOutboxTable.type} NOT LIKE 'slot_%'`,
+        sql`${notificationOutboxTable.type} NOT LIKE 'chapter_%'`,
+      )!;
+    }
+    const prefix =
+      cat === "video"
+        ? "video_%"
+        : cat === "x_id"
+          ? "x_id_%"
+          : cat === "slot"
+            ? "slot_%"
+            : "chapter_%";
+    return and(
+      eq(notificationOutboxTable.event_id, id),
+      like(notificationOutboxTable.type, prefix),
+    )!;
+  };
+
+  // カテゴリ別件数集計 (GROUP BY で 1 クエリ)
+  const typeCountRows = await db
+    .select({
+      type: notificationOutboxTable.type,
+      c: sql<number>`COUNT(*)`,
+    })
     .from(notificationOutboxTable)
     .where(eq(notificationOutboxTable.event_id, id))
-    .orderBy(desc(notificationOutboxTable.created_at))
-    .limit(100);
-
-  // カテゴリ別件数集計
+    .groupBy(notificationOutboxTable.type);
   const notifCounts: Record<NotifCategory, number> = {
-    all: allEventNotifications.length,
+    all: 0,
     video: 0,
     x_id: 0,
     slot: 0,
     chapter: 0,
     system: 0,
   };
-  for (const n of allEventNotifications) {
-    const c = categorizeNotificationType(n.type);
-    notifCounts[c] += 1;
+  for (const r of typeCountRows) {
+    const c = Number(r.c ?? 0);
+    notifCounts.all += c;
+    notifCounts[categorizeNotificationType(r.type)] += c;
   }
 
-  const eventNotifications =
-    notifCategory === "all"
-      ? allEventNotifications.slice(0, 20)
-      : allEventNotifications
-          .filter((n) => categorizeNotificationType(n.type) === notifCategory)
-          .slice(0, 20);
+  const eventNotifications = await db
+    .select()
+    .from(notificationOutboxTable)
+    .where(categoryWhere(notifCategory))
+    .orderBy(desc(notificationOutboxTable.created_at))
+    .limit(20);
+
+  // UI 互換用 (allEventNotifications がフィルタ UI の表示判定に使われていた)
+  const allEventNotifications = notifCounts.all > 0 ? eventNotifications : [];
 
   const status = computeEventStatus(ev);
   const accepting = isAcceptingEntries(ev);
