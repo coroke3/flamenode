@@ -28,6 +28,7 @@ export const dynamic = "force-dynamic";
 
 interface Props {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ notif?: string }>;
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -44,10 +45,31 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     : { title: "イベント運営" };
 }
 
+type NotifCategory = "all" | "video" | "x_id" | "slot" | "chapter" | "system";
+
+/** type 文字列をカテゴリへ分類する。enqueueNotification で使う type に合わせる。 */
+function categorizeNotificationType(type: string): NotifCategory {
+  if (type.startsWith("video_")) return "video";
+  if (type.startsWith("x_id_")) return "x_id";
+  if (type.startsWith("slot_")) return "slot";
+  if (type.startsWith("chapter_")) return "chapter";
+  return "system";
+}
+
 export default async function ManageEventPage({
   params,
+  searchParams,
 }: Props): Promise<React.ReactElement> {
   const { id } = await params;
+  const sp = (await searchParams) ?? {};
+  const notifCategory: NotifCategory =
+    sp.notif === "video" ||
+    sp.notif === "x_id" ||
+    sp.notif === "slot" ||
+    sp.notif === "chapter" ||
+    sp.notif === "system"
+      ? sp.notif
+      : "all";
   const guard = await requireSession();
   if (!guard.ok) return guard.element;
   const user = guard.user;
@@ -157,13 +179,34 @@ export default async function ManageEventPage({
     .orderBy(desc(historyLogsTable.created_at))
     .limit(15);
 
-  // event-scoped 通知
-  const eventNotifications = await db
+  // event-scoped 通知 (直近 100 件まで取得し、UI 側でカテゴリフィルタを適用する)
+  const allEventNotifications = await db
     .select()
     .from(notificationOutboxTable)
     .where(eq(notificationOutboxTable.event_id, id))
     .orderBy(desc(notificationOutboxTable.created_at))
-    .limit(20);
+    .limit(100);
+
+  // カテゴリ別件数集計
+  const notifCounts: Record<NotifCategory, number> = {
+    all: allEventNotifications.length,
+    video: 0,
+    x_id: 0,
+    slot: 0,
+    chapter: 0,
+    system: 0,
+  };
+  for (const n of allEventNotifications) {
+    const c = categorizeNotificationType(n.type);
+    notifCounts[c] += 1;
+  }
+
+  const eventNotifications =
+    notifCategory === "all"
+      ? allEventNotifications.slice(0, 20)
+      : allEventNotifications
+          .filter((n) => categorizeNotificationType(n.type) === notifCategory)
+          .slice(0, 20);
 
   const status = computeEventStatus(ev);
   const accepting = isAcceptingEntries(ev);
@@ -314,7 +357,7 @@ export default async function ManageEventPage({
         )}
       </section>
 
-      {eventNotifications.length > 0 ? (
+      {allEventNotifications.length > 0 ? (
         <section style={{ marginTop: 28 }}>
           <h2
             style={{
@@ -328,6 +371,43 @@ export default async function ManageEventPage({
           >
             イベント通知 (notification_outbox)
           </h2>
+          <nav
+            aria-label="通知カテゴリフィルタ"
+            style={{
+              display: "flex",
+              gap: 6,
+              flexWrap: "wrap",
+              marginBottom: 10,
+            }}
+          >
+            {(
+              [
+                ["all", "すべて"],
+                ["video", "動画"],
+                ["x_id", "X ID"],
+                ["slot", "スロット"],
+                ["chapter", "チャプター"],
+                ["system", "その他"],
+              ] as const
+            ).map(([key, label]) => {
+              const href =
+                key === "all"
+                  ? `/manage/events/${id}`
+                  : `/manage/events/${id}?notif=${key}`;
+              return (
+                <Link
+                  key={key}
+                  href={href}
+                  className={`fn-btn fn-btn-sm ${notifCategory === key ? "fn-btn-primary" : "fn-btn-ghost"}`}
+                >
+                  {label} ({notifCounts[key]})
+                </Link>
+              );
+            })}
+          </nav>
+          {eventNotifications.length === 0 ? (
+            <p className="fn-muted fn-text-sm">該当する通知はありません。</p>
+          ) : null}
           <table className="fn-table">
             <thead>
               <tr>
