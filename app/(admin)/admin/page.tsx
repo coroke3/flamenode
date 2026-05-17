@@ -5,6 +5,7 @@ import { desc, eq, gte, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   events as eventsTable,
+  notificationOutbox as notificationOutboxTable,
   systemSettings,
   users as usersTable,
   videos as videosTable,
@@ -29,6 +30,8 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
   let mode: string = "normal";
   let isMaintenance = 0;
   let pendingVideos: { id: string; title: string; created_at: number; display_name: string }[] = [];
+  let pendingXIds: { id: string; x_name: string | null; requested_at: number | null }[] = [];
+  let notificationFailedCount = 0;
 
   if (db) {
     try {
@@ -43,6 +46,8 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
         last24,
         sys,
         pendList,
+        pendXList,
+        notifFailed,
       ] = await Promise.all([
         db.select({ c: sql<number>`COUNT(*)` }).from(usersTable),
         db
@@ -75,6 +80,20 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
           .where(eq(videosTable.status, "pending"))
           .orderBy(desc(videosTable.created_at))
           .limit(8),
+        db
+          .select({
+            id: xUsersTable.id,
+            x_name: xUsersTable.x_name,
+            requested_at: xUsersTable.approval_requested_at,
+          })
+          .from(xUsersTable)
+          .where(eq(xUsersTable.approval_status, "pending"))
+          .orderBy(desc(xUsersTable.approval_requested_at))
+          .limit(8),
+        db
+          .select({ c: sql<number>`COUNT(*)` })
+          .from(notificationOutboxTable)
+          .where(eq(notificationOutboxTable.status, "failed")),
       ]);
 
       stats = {
@@ -88,6 +107,8 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
       mode = sys[0]?.cost_guard_mode ?? "normal";
       isMaintenance = sys[0]?.is_maintenance_mode ?? 0;
       pendingVideos = pendList;
+      pendingXIds = pendXList;
+      notificationFailedCount = Number(notifFailed[0]?.c ?? 0);
     } catch (err) {
       console.error("[AdminTopPage] fetch failed", err);
     }
@@ -101,6 +122,13 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
       <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
         プラットフォームの稼働状況・要対応タスク・コストガード状態を一覧します。
       </p>
+
+      <TodoBoard
+        pendingVideos={stats.pending}
+        pendingXIds={stats.pendingX}
+        notificationFailed={notificationFailedCount}
+        maintenance={isMaintenance === 1}
+      />
 
       <section
         style={{
@@ -243,7 +271,191 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
           </table>
         )}
       </section>
+
+      <section
+        style={{
+          marginTop: 28,
+          padding: "20px 22px",
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border-subtle)",
+          borderRadius: "var(--radius-md)",
+        }}
+      >
+        <header
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 12,
+          }}
+        >
+          <h2
+            style={{
+              fontSize: 14,
+              fontWeight: 700,
+              letterSpacing: "0.18em",
+              color: "var(--text-muted)",
+              textTransform: "uppercase",
+            }}
+          >
+            X ID 承認待ち
+          </h2>
+          <Link href="/admin/x-link-requests" className="fn-btn fn-btn-ghost fn-btn-sm">
+            すべて →
+          </Link>
+        </header>
+        {pendingXIds.length === 0 ? (
+          <p className="fn-muted fn-text-sm">
+            <Icon name="check" size={12} aria-hidden /> 現在、X ID 承認待ちはありません。
+          </p>
+        ) : (
+          <table className="fn-table">
+            <thead>
+              <tr>
+                <th>X ID</th>
+                <th>名前</th>
+                <th>申請</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {pendingXIds.map((x) => (
+                <tr key={x.id}>
+                  <td>@{x.id}</td>
+                  <td>{x.x_name ?? "—"}</td>
+                  <td className="fn-muted">
+                    {x.requested_at ? formatRelative(x.requested_at) : "—"}
+                  </td>
+                  <td>
+                    <Link
+                      href={`/admin/x-link-requests`}
+                      className="fn-btn fn-btn-primary fn-btn-sm"
+                    >
+                      確認
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
     </div>
+  );
+}
+
+function TodoBoard({
+  pendingVideos,
+  pendingXIds,
+  notificationFailed,
+  maintenance,
+}: {
+  pendingVideos: number;
+  pendingXIds: number;
+  notificationFailed: number;
+  maintenance: boolean;
+}): React.ReactElement | null {
+  const items: { label: string; href: string; count: number; tone: "warn" | "danger" }[] = [];
+  if (pendingVideos > 0) {
+    items.push({
+      label: "審査待ち作品",
+      href: "/admin/videos?status=pending",
+      count: pendingVideos,
+      tone: "warn",
+    });
+  }
+  if (pendingXIds > 0) {
+    items.push({
+      label: "X ID 承認待ち",
+      href: "/admin/x-link-requests",
+      count: pendingXIds,
+      tone: "warn",
+    });
+  }
+  if (notificationFailed > 0) {
+    items.push({
+      label: "通知配信失敗",
+      href: "/admin/audit?table=notification_outbox",
+      count: notificationFailed,
+      tone: "danger",
+    });
+  }
+  if (maintenance) {
+    items.push({
+      label: "メンテナンスモード ON",
+      href: "/admin/cost-guard",
+      count: 1,
+      tone: "danger",
+    });
+  }
+
+  if (items.length === 0) {
+    return (
+      <section
+        style={{
+          marginTop: 22,
+          padding: "14px 18px",
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border-subtle)",
+          borderRadius: "var(--radius-md)",
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          fontSize: 13,
+          color: "var(--text-secondary)",
+        }}
+      >
+        <Icon name="check" size={14} aria-hidden /> 今日対応すべき要対応タスクはありません。
+      </section>
+    );
+  }
+
+  return (
+    <section
+      style={{
+        marginTop: 22,
+        padding: "18px 22px",
+        background: "var(--bg-surface)",
+        border: "1px solid var(--border-subtle)",
+        borderRadius: "var(--radius-md)",
+      }}
+    >
+      <h2
+        style={{
+          fontSize: 14,
+          fontWeight: 700,
+          letterSpacing: "0.18em",
+          color: "var(--text-muted)",
+          textTransform: "uppercase",
+          marginBottom: 12,
+        }}
+      >
+        今日やること
+      </h2>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+        {items.map((it) => (
+          <Link
+            key={it.href}
+            href={it.href}
+            className={`fn-badge ${
+              it.tone === "danger" ? "fn-badge-danger" : "fn-badge-warning"
+            }`}
+            style={{
+              padding: "6px 12px",
+              fontSize: 12,
+              textDecoration: "none",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            {it.label}
+            <strong style={{ fontVariantNumeric: "tabular-nums" }}>{it.count}</strong>
+            <Icon name="chevron-right" size={11} aria-hidden />
+          </Link>
+        ))}
+      </div>
+    </section>
   );
 }
 
