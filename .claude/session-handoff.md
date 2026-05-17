@@ -147,6 +147,7 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 133 | session-handoff Batch 130-132 追記 | 687c290 |
 | 134 | /admin/notifications に bulk_retry 履歴クイックリンク | 80dc80b |
 | 135 | /manage/events/[id]/audience 登録者プレビュー追加 | 38a82e5 |
+| 136 | events.slot_part_gap_minutes 設定化 (Opus #4, migration 0006) | 88d94e2 |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
@@ -164,6 +165,7 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 - migration `0003_loose_whiplash.sql` (video_members インデックス) は本番 D1 へ未適用。
 - migration `0004_tough_kronos.sql` (name_for_sort + バックフィル) は本番 D1 へ未適用。
 - migration `0005_curvy_karnak.sql` (notification_outbox インデックス) は本番 D1 へ未適用。
+- migration `0006_fearless_captain_america.sql` (events.slot_part_gap_minutes) は本番 D1 へ未適用。
 - 本番 deploy も未実施。
 
 ## 次に着手しやすい小粒 Batch 候補

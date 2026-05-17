@@ -59,6 +59,7 @@ wrangler d1 migrations apply flamenode_db --remote
 | `0003_loose_whiplash.sql` | video_members に order_index / name インデックス | CREATE INDEX のみ、ロールバック不要 |
 | `0004_tough_kronos.sql` | video_members.name_for_sort 追加 + バックフィル + index | nullable 列 + UPDATE。バックフィル時間に注意 |
 | `0005_curvy_karnak.sql` | notification_outbox に status/event_id インデックス | CREATE INDEX のみ、ロールバック不要 |
+| `0006_fearless_captain_america.sql` | events.slot_part_gap_minutes (default 30) 追加 | nullable 列追加のみ、ロールバック不要 |
 
 推奨適用順:
 
@@ -82,6 +83,7 @@ wrangler d1 migrations apply flamenode_db --remote
 | `migrations/0003_loose_whiplash.sql` | `video_members` に `(video_id, order_index)` / `(video_id, name)` インデックス追加 (列ソート高速化) |
 | `migrations/0004_tough_kronos.sql` | `video_members.name_for_sort` (lower(name) キャッシュ) 追加 + 既存行バックフィル + index |
 | `migrations/0005_curvy_karnak.sql` | `notification_outbox` に `(status, created_at)` / `(event_id)` インデックス追加 |
+| `migrations/0006_fearless_captain_america.sql` | `events.slot_part_gap_minutes` (default 30) 追加 |
 
 ---
 
