@@ -9,6 +9,7 @@ import {
   events as eventsTable,
   eventEditors as eventEditorsTable,
   historyLogs as historyLogsTable,
+  notificationOutbox as notificationOutboxTable,
   slots as slotsTable,
   videos as videosTable,
   videoEvents as videoEventsTable,
@@ -156,6 +157,14 @@ export default async function ManageEventPage({
     .orderBy(desc(historyLogsTable.created_at))
     .limit(15);
 
+  // event-scoped 通知
+  const eventNotifications = await db
+    .select()
+    .from(notificationOutboxTable)
+    .where(eq(notificationOutboxTable.event_id, id))
+    .orderBy(desc(notificationOutboxTable.created_at))
+    .limit(20);
+
   const status = computeEventStatus(ev);
   const accepting = isAcceptingEntries(ev);
 
@@ -284,6 +293,64 @@ export default async function ManageEventPage({
           </table>
         )}
       </section>
+
+      {eventNotifications.length > 0 ? (
+        <section style={{ marginTop: 28 }}>
+          <h2
+            style={{
+              fontSize: 13,
+              fontWeight: 700,
+              letterSpacing: "0.18em",
+              color: "var(--text-muted)",
+              textTransform: "uppercase",
+              marginBottom: 10,
+            }}
+          >
+            イベント通知 (notification_outbox)
+          </h2>
+          <table className="fn-table">
+            <thead>
+              <tr>
+                <th>日時</th>
+                <th>type</th>
+                <th>状態</th>
+                <th>試行</th>
+              </tr>
+            </thead>
+            <tbody>
+              {eventNotifications.map((n) => (
+                <tr key={n.id}>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    <div>{formatUnix(n.created_at)}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                      {formatRelative(n.created_at)}
+                    </div>
+                  </td>
+                  <td style={{ fontFamily: "monospace", fontSize: 11 }}>
+                    {n.type}
+                  </td>
+                  <td>
+                    <span
+                      className={`fn-badge ${
+                        n.status === "sent"
+                          ? "fn-badge-accent"
+                          : n.status === "failed"
+                            ? "fn-badge-danger"
+                            : "fn-badge-soft"
+                      }`}
+                    >
+                      {n.status ?? "?"}
+                    </span>
+                  </td>
+                  <td style={{ fontVariantNumeric: "tabular-nums" }}>
+                    {n.attempt_count ?? 0}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      ) : null}
 
       <section style={{ marginTop: 28 }}>
         <h2
