@@ -260,26 +260,28 @@ async function checkSlotTimeOverlap(db: AnyDb): Promise<HealthCheckResult> {
   let overlapCount = 0;
 
   for (const [, slotList] of byEvent) {
-    // start_time 昇順ソート
+    // start_time 昇順ソート (区間スイープラインで全ペア検出)
     slotList.sort((a, b) => (a.start_time ?? 0) - (b.start_time ?? 0));
 
-    for (let i = 0; i < slotList.length - 1; i++) {
+    for (let i = 0; i < slotList.length; i++) {
       const cur = slotList[i];
-      const next = slotList[i + 1];
-
-      // reservation_group_id が同じペアは連続枠として除外
-      if (
-        cur.reservation_group_id != null &&
-        cur.reservation_group_id === next.reservation_group_id
-      ) {
-        continue;
-      }
-
       const curEnd = cur.end_time ?? 0;
-      const nextStart = next.start_time ?? 0;
+      // cur.end_time より start_time が小さい後続スロットすべてと比較する。
+      // 隣接比較だけだと「長い枠が後続の複数枠を覆う」ケースを取りこぼすので、
+      // start_time が cur.end_time 以上になるまでループを進める。
+      for (let j = i + 1; j < slotList.length; j++) {
+        const next = slotList[j];
+        const nextStart = next.start_time ?? 0;
+        if (nextStart >= curEnd) break;
 
-      // cur の end_time が next の start_time より大きければ重複
-      if (curEnd > nextStart) {
+        // reservation_group_id が同じペアは連続枠として除外
+        if (
+          cur.reservation_group_id != null &&
+          cur.reservation_group_id === next.reservation_group_id
+        ) {
+          continue;
+        }
+
         overlapCount++;
         if (overlapSamples.length < 5) {
           overlapSamples.push(`${cur.id} / ${next.id}`);
