@@ -166,21 +166,6 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
         </p>
       </header>
 
-      <nav style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
-        <Link href="/dashboard/post" className="fn-btn fn-btn-primary fn-btn-sm">
-          <Icon name="edit" size={12} aria-hidden /> 作品を投稿
-        </Link>
-        <Link href="/dashboard/library" className="fn-btn fn-btn-ghost fn-btn-sm">
-          <Icon name="bookmark" size={12} aria-hidden /> ライブラリ
-        </Link>
-        <Link href="/entry" className="fn-btn fn-btn-ghost fn-btn-sm">
-          <Icon name="calendar" size={12} aria-hidden /> エントリー
-        </Link>
-        <Link href="/dashboard/settings" className="fn-btn fn-btn-ghost fn-btn-sm">
-          <Icon name="settings" size={12} aria-hidden /> 設定
-        </Link>
-      </nav>
-
       <HeroCard slot={mySlot} event={mySlotEvent} />
 
       <section className={styles.statsGrid}>
