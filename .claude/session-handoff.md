@@ -60,6 +60,10 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 46 | /admin/videos に event フィルタ追加 | e56c592 |
 | 47 | /manage/events/[id] イベント個別運営ページ | 28a7515 |
 | 48 | 手動リトライ時の attempt_count リセット (fix) + 履歴拡充 | 7157797 |
+| 49 | notification_outbox.event_id 追加 (migration 0002) + /manage で event 通知表示 | 7d76c47 |
+| 50 | /manage/events/[id] にも event-scoped 通知一覧 | e27df67 |
+| 51 | HomeIntroBand に募集締切/開始カウントダウン | d7d7bcc |
+| 52 | docs/operations.md に migration 0002 追記 | (this) |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
@@ -73,16 +77,17 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 ## 既知の未適用
 
 - migration `0001_young_fat_cobra.sql` (entry_start_time / entry_end_time) は本番 D1 へ未適用。
+- migration `0002_hot_colleen_wing.sql` (notification_outbox.event_id) は本番 D1 へ未適用。
 - 本番 deploy も未実施。
 
 ## 次に着手しやすい小粒 Batch 候補
 
-1. notification_outbox に event_id カラム追加で event-scoped 通知 (migration 0002)
+1. notification 送信側コードに event_id を載せる (chapter / video のイベント参加通知から)
 2. cleanup Worker の単体テスト
 3. メンバー表の column フィルタ・並び替え
 4. /manage のサイドバー化 (event 一覧のクイックナビ)
-5. /admin/users に最終ログイン時刻表示
-6. SlotGrid の連続枠選択時に表示名を自動先頭枠から継承
+5. SlotGrid の連続枠選択時に表示名を自動先頭枠から継承
+6. /admin/events に並び替え/フィルタ追加
 
 ## 進め方ルール
 

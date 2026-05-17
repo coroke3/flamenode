@@ -54,6 +54,7 @@ wrangler d1 migrations apply flamenode_db --remote
 |---|---|
 | `migrations/0000_brave_iceman.sql` | 初期スキーマ |
 | `migrations/0001_young_fat_cobra.sql` | `events.entry_start_time` / `events.entry_end_time` 追加 |
+| `migrations/0002_hot_colleen_wing.sql` | `notification_outbox.event_id` 追加 (event-scoped 通知用) |
 
 ---
 
