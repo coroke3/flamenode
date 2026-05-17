@@ -51,6 +51,12 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 37 | cleanup Worker に voided 動画の論理削除タイマー (30日) | 3d5b905 |
 | 38 | /admin/audit に record_id 完全一致フィルタ | e861d0d |
 | 39 | cost_guard_mode 非 normal 時の上部バナー (E-5) | d456349 |
+| 40 | cleanup Worker が system_settings.history_retention_days を読む | a7d646c |
+| 41 | /admin/x-link-requests に直近の承認/却下履歴 | 4161fc0 |
+| 42 | /admin トップに直近の管理操作 5件 | 979c98a |
+| 43 | /admin/cost-guard に変更履歴 (system_settings) | 025552e |
+| 44 | /manage 受信箱トップ (K-5最小) | 768cb09 |
+| 45 | AuthHeader に /manage リンク | b7027b8 |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
@@ -68,13 +74,12 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 
 ## 次に着手しやすい小粒 Batch 候補
 
-1. イベント運営者向け受信箱 (K-5) — `/manage` 配下の新規ページ + 通知絞り込み
-2. cleanup Worker の単体テスト追加
-3. `system_settings.history_retention_days` を cleanup Worker が読む拡張
-4. /admin/x-link-requests の差分/承認履歴の前後比較
-5. メンバー表の column フィルタ・並び替え
-6. voided 動画の R2 サムネ掃除
-7. /admin/notifications の手動リトライ後のステータス追跡 (どの admin が再試行したか)
+1. /manage/events/[id] イベント個別運営ページ (slots / videos / 編集)
+2. notification_outbox に event_id カラム追加で event-scoped 通知 (migration 0002)
+3. cleanup Worker の単体テスト
+4. メンバー表の column フィルタ・並び替え
+5. /admin/notifications の手動リトライ後のステータス追跡
+6. /admin/videos に event フィルタ追加
 
 ## 進め方ルール
 
