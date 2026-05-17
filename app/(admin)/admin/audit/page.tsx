@@ -6,6 +6,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { historyLogs } from "@/lib/db/schema";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
+import { AuditDiffDetail } from "@/components/admin/AuditDiffDetail";
 
 export const metadata: Metadata = { title: "監査ログ" };
 export const dynamic = "force-dynamic";
@@ -235,6 +236,11 @@ export default async function AdminAuditPage({
                         {diff.keys.slice(0, 6).join(", ")}
                         {diff.keys.length > 6 ? ` ほか ${diff.keys.length - 6} 件` : ""}
                       </span>
+                      <AuditDiffDetail
+                        before={h.before_data}
+                        after={h.after_data}
+                        changedKeys={diff.keys}
+                      />
                     </>
                   ) : h.action === "CREATE" ? (
                     <span style={{ color: "var(--text-muted)" }}>新規作成</span>
