@@ -136,6 +136,11 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 122 | /admin/users/[id] に active X ID ライブラリ件数表示 | 4862081 |
 | 123 | /manage staff の approved_by を admin 限定でリンク化 | a225c69 |
 | 124 | /admin/events/[id] に運営ビュー/監査ログリンク | e8fe8d6 |
+| 125 | session-handoff Batch 119-124 追記 | 0fe7526 |
+| 126 | /admin/users/[id]/edit に監査ログリンク | dacd469 |
+| 127 | /admin/videos/[id] に作品監査ログリンク | b5c3108 |
+| 128 | /admin/cost-guard 履歴の operator をユーザー詳細にリンク化 | ac2144f |
+| 129 | x-link-requests 履歴の operator をユーザー詳細にリンク化 | 45752d0 |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
