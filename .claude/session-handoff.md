@@ -69,6 +69,15 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 55 | video status 変更時に投稿主へ通知発火 (event-scoped) | 5e71ff1 |
 | 56 | cleanup retention 純粋関数化 + 単体テスト追加 | 69466ea |
 | 57 | /admin/users/[id] にユーザー固有 history_logs 表示 | 81afeb8 |
+| 58 | slot 強制解放時に枠所有者へ通知 (event-scoped) | b335131 |
+| 59 | public チャプター追加時に動画オーナーへ通知 | d1ce698 |
+| 60 | /manage 配下に担当イベント一覧サイドバー | d20704f |
+| 61 | /admin/notifications に event_id フィルタ | 1fb84f4 |
+| 62 | manage→admin 通知ログリンク追加 | 9e80cb4 |
+| 63 | enqueue payload バリデーション + テスト 10件 | 0b07d53 |
+| 64 | YouTube ID / URL ユーティリティのテスト 13件 | e6a9acc |
+| 65 | X ID 正規化テスト 5件 | aa05ea4 |
+| 66 | slot grouping core 切り出し + テスト 9件 | eb69dda |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
@@ -87,12 +96,12 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 
 ## 次に着手しやすい小粒 Batch 候補
 
-1. slot voided/release 時の通知発火 (slot-admin.ts)
-2. chapter 投稿時のイベント運営者通知 (event-scoped)
-3. /manage のサイドバー化 (event 一覧のクイックナビ)
-4. メンバー表の column フィルタ・並び替え
-5. SlotGrid の連続枠選択時に表示名を自動先頭枠から継承
-6. /admin/users/[id] にユーザー固有 history_logs 表示
+1. メンバー表の column フィルタ・並び替え (要 client 化)
+2. /manage/events/[id]/slots スロット管理タブ
+3. /admin/audit/[id] 詳細ページ (1 行の前後 JSON フル表示)
+4. format ユーティリティのテスト追加 (formatUnix / formatRelative)
+5. /admin/x-link-requests に却下理由入力 (現状 reason カラム未使用)
+6. cleanup Worker テストで Worker 経由クエリの mock 実行
 
 ## 進め方ルール
 
