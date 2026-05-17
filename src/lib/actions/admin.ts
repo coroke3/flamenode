@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import { historyLogs, videos } from "@/lib/db/schema";
+import { enqueueNotification } from "@/lib/notifications/enqueue";
 
 export interface AdminActionResult {
   ok: boolean;
@@ -109,6 +110,33 @@ export async function setVideoStatus(
         : "normal",
     created_at: now,
   });
+
+  // 通知 enqueue: 投稿主に状態変化を伝える。
+  // owner_discord_user_id を宛先とし、event-scoped なら primary_event_id を載せる。
+  if (target.owner_discord_user_id && prevStatus !== status) {
+    const typeMap: Record<string, string> = {
+      public: "video_approved",
+      pending: "video_pending",
+      voided: "video_voided",
+      x_reapply_required: "video_x_reapply_required",
+      unlisted: "video_unlisted",
+      private: "video_private",
+      draft: "video_draft",
+    };
+    const notifType = typeMap[status] ?? "video_status_changed";
+    await enqueueNotification(db, {
+      discordUserId: target.owner_discord_user_id,
+      type: notifType,
+      payload: {
+        content: `作品「${target.title}」のステータスが ${prevStatus} → ${status} に変更されました。`,
+        video_id: videoId,
+        prev_status: prevStatus,
+        next_status: status,
+        reason: reason || undefined,
+      },
+      eventId: target.primary_event_id ?? null,
+    });
+  }
 
   revalidatePath(`/admin/videos/${videoId}`);
   revalidatePath("/admin/videos");
