@@ -225,7 +225,15 @@ export default async function AdminXLinkRequestsPage({
                       <Link href={`/admin/audit?record=${encodeURIComponent(h.record_id)}`}>{h.record_id}</Link>
                     </td>
                     <td style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                      {h.operator_discord_id ?? "-"}
+                      {h.operator_discord_id ? (
+                        <Link
+                          href={`/admin/users/${encodeURIComponent(h.operator_discord_id)}`}
+                        >
+                          {h.operator_discord_id}
+                        </Link>
+                      ) : (
+                        "-"
+                      )}
                     </td>
                     <td style={{ fontSize: 11, fontFamily: "monospace", color: "var(--text-secondary)", wordBreak: "break-all" }}>
                       {changed.slice(0, 6).join(", ")}
