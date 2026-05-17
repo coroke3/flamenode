@@ -115,6 +115,8 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 101 | /admin トップに直近の失敗通知 3件パネル | 850b441 |
 | 102 | /admin/notifications に状態サマリパネル | c8b4049 |
 | 103 | /admin/events/[id] にスロット/動画状態の集計バッジ | 6fac2ff |
+| 104 | /admin/audit/[id] に同 record_id の前後ナビ | 1c047c6 |
+| 105 | /admin/users/[id] にメール認証日時表示 | ddceae4 |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
@@ -138,10 +140,11 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 
 1. merge フロー完全実装 (Opus 判断候補)
 2. announcement / terms 本格 enqueue 戦略 (Opus 判断候補。dry-run 実装済み)
-3. cleanup Worker の Durable Object 永続化 (Opus 判断候補。ウォーム内リトライは実装済み)
-4. videoDetailQueries で name_for_sort を実際にソート列として使う (現状は order_index のまま)
-5. /admin/users にメール認証フラグ表示
-6. notification_outbox.event_id を index 化 (現状フルスキャン)
+3. cleanup Worker の Durable Object 永続化 (Opus 判断候補。ウォーム内リトライ実装済み)
+4. legacy/normalize の pure 関数を core 切り出し + テスト
+5. /manage/events/[id]/audience プレビュー (event の登録者リスト)
+6. /admin/events/[id]/edit のフォーム小改善 (entry_start/end の datepicker)
+7. /admin/notifications の payload search (LIKE)
 
 ## 進め方ルール
 
