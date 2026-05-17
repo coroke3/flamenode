@@ -26,14 +26,23 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 12 | slot重複/like差分チェックと通知テーブル名統一 | be44b7b |
 | 13 | admin 系 4 ファイルの window.confirm を ConfirmDialog に置換 | cfaa012 |
 | 14 | SlotList に slot part 番号表示 | ca032e8 |
+| 15 | health: deprecated項目検出 (video_comments / outro_comment / marker_kind) | c9ce62b |
+| 16 | scripts/check-db-legacy.mjs (静的 deprecated 書き込み検出) | 7adfe04 |
+| 17 | docs/operations.md (migration/rollback/Worker/leak check/管理者操作) | 64e4e79 |
+| 18 | SlotGrid に連続枠 owner 向け extend/merge ヘルプ表示 | 876d255 |
+| 19 | イベント詳細に募集開始前/募集終了/募集期間を表示 | b5a065f |
+| 20 | docs/workers.md (Worker実装状況 L-1) | ef19351 |
+| 21 | ダッシュボード上部バー重複ナビ削除 (C-1/C-2 整合) | b6b1098 |
+| 22 | エントリーカードに募集終了時刻を表示 | fed5635 |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
 - like_count 実数差分の閾値再評価 (現状 5)
 - イベントごとの slot 部区切り `gapSec` を events テーブル設定可に拡張
-- ダッシュボードの重複ナビ整理 (上部バーとの整合)
 - メンバー候補検索の本格 API 化 (2000 上限の更なるスケール)
-- 募集期間中のみ受付バッジを自動 ON にする cron / リアルタイム判定
+- 募集期間自動切替 cron (現状はリアルタイム判定で動作)
+- 関連動画 UI の mobile 位置最適化
+- メンバー表 / 関連動画の mobile レイアウト改善
 
 ## 既知の未適用
 
@@ -42,12 +51,12 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 
 ## 次に着手しやすい小粒 Batch 候補
 
-1. dashboard ナビ整理 (上部バーとの重複解消)
-2. slot 時間重複検査の精度向上 (現状は隣接ペアのみ比較)
-3. /admin/audit の検索 / フィルタ追加
-4. 関連動画 UI の改善 (下部押し込みすぎ問題)
-5. メンバー表 / 関連動画の位置調整 (mobile)
-6. 入力 UI 改善 (時刻ピッカー、候補ボタン)
+1. 関連動画の mobile での位置改善 (article 内に挿入)
+2. /admin/security のフィルタ追加
+3. 入力 UI 改善 (時刻ピッカー、候補ボタン)
+4. /admin の「今日やること」(Q-1) 表示
+5. notification 失敗履歴の専用管理画面 (K-4)
+6. cleanup Worker の TTL 削除 (sent/failed)
 
 ## 進め方ルール
 
@@ -57,3 +66,10 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 - typecheck / build / commit / push まで自走
 - deploy / 本番 migration 適用だけは 1 行ログ
 - 確認待ちはしない
+
+## ops 関連スクリプト
+
+```sh
+npm run check:db-legacy            # deprecated DB 書き込みの静的検出
+npm run check:public-api-leaks     # 公開 API 漏洩検査 (dev server 必須)
+```
