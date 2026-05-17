@@ -98,6 +98,19 @@ export default async function AdminUserDetailPage({
           <span className="fn-badge fn-badge-soft">
             Active X: {user.active_x_user_id ? `@${user.active_x_user_id}` : "-"}
           </span>
+          <span
+            className={`fn-badge ${user.emailVerified ? "fn-badge-accent" : "fn-badge-warning"}`}
+          >
+            email 認証: {user.emailVerified ? "済" : "未"}
+          </span>
+          <span
+            className={`fn-badge ${user.is_tos_accepted === 1 ? "fn-badge-accent" : "fn-badge-danger"}`}
+          >
+            TOS: {user.is_tos_accepted === 1 ? "同意済" : "未同意"}
+          </span>
+          {user.terms_reaccept_required === 1 ? (
+            <span className="fn-badge fn-badge-warning">再同意要求中</span>
+          ) : null}
         </div>
       </section>
 
