@@ -9,6 +9,7 @@ import { getCurrentUser } from "@/lib/auth/currentUser";
 import { notificationOutbox } from "@/lib/db/schema";
 import { formatRelative } from "@/lib/utils/format";
 import { NotificationRetryButton } from "@/components/admin/NotificationRetryButton";
+import { NotificationPayloadButton } from "@/components/admin/NotificationPayloadButton";
 
 export const metadata: Metadata = { title: "通知配信状況" };
 export const dynamic = "force-dynamic";
@@ -245,9 +246,12 @@ export default async function AdminNotificationsPage({
                       )}
                     </td>
                     <td>
-                      {r.status === "failed" ? (
-                        <NotificationRetryButton id={r.id} />
-                      ) : null}
+                      <div style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
+                        <NotificationPayloadButton payload={r.payload_json} />
+                        {r.status === "failed" ? (
+                          <NotificationRetryButton id={r.id} />
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 ))
