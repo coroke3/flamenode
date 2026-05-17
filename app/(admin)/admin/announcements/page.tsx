@@ -1,7 +1,7 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { desc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { announcements, users as usersTable, xUsers as xUsersTable } from "@/lib/db/schema";
 import { formatUnix } from "@/lib/utils/format";
@@ -10,14 +10,46 @@ import { Icon } from "@/components/ui/Icon";
 export const metadata: Metadata = { title: "お知らせ管理" };
 export const dynamic = "force-dynamic";
 
-export default async function AdminAnnouncementsPage(): Promise<React.ReactElement> {
+interface Props {
+  searchParams?: Promise<{ audience?: string; status?: string }>;
+}
+
+export default async function AdminAnnouncementsPage({
+  searchParams,
+}: Props): Promise<React.ReactElement> {
+  const sp = (await searchParams) ?? {};
+  const audienceFilter =
+    sp.audience === "all" || sp.audience === "creators" || sp.audience === "admins"
+      ? sp.audience
+      : "any";
+  const statusFilter =
+    sp.status === "published" || sp.status === "draft" ? sp.status : "any";
+
   const db = getDatabase();
+  const conds = [
+    audienceFilter !== "any"
+      ? eq(announcements.target_audience, audienceFilter)
+      : undefined,
+    statusFilter === "published"
+      ? eq(announcements.is_published, 1)
+      : statusFilter === "draft"
+        ? eq(announcements.is_published, 0)
+        : undefined,
+  ].filter((c): c is NonNullable<typeof c> => c !== undefined);
+  const where = conds.length === 0 ? undefined : conds.length === 1 ? conds[0] : and(...conds);
   const rows = db
-    ? await db
-        .select()
-        .from(announcements)
-        .orderBy(desc(announcements.created_at))
-        .limit(50)
+    ? await (where
+        ? db
+            .select()
+            .from(announcements)
+            .where(where)
+            .orderBy(desc(announcements.created_at))
+            .limit(50)
+        : db
+            .select()
+            .from(announcements)
+            .orderBy(desc(announcements.created_at))
+            .limit(50))
     : [];
 
   // 通知対象件数の dry-run (実 enqueue はしない、ただし運用者に規模感を見せる)
@@ -62,6 +94,32 @@ export default async function AdminAnnouncementsPage(): Promise<React.ReactEleme
           <Icon name="plus" size={12} aria-hidden /> 新規お知らせ
         </Link>
       </header>
+
+      <form
+        method="get"
+        style={{
+          marginTop: 14,
+          display: "flex",
+          gap: 6,
+          flexWrap: "wrap",
+          alignItems: "center",
+        }}
+      >
+        <select name="audience" className="fn-select" defaultValue={audienceFilter}>
+          <option value="any">対象すべて</option>
+          <option value="all">all</option>
+          <option value="creators">creators</option>
+          <option value="admins">admins</option>
+        </select>
+        <select name="status" className="fn-select" defaultValue={statusFilter}>
+          <option value="any">公開状態すべて</option>
+          <option value="published">公開のみ</option>
+          <option value="draft">下書きのみ</option>
+        </select>
+        <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm">
+          絞り込み
+        </button>
+      </form>
 
       <section
         style={{
