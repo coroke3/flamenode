@@ -3,6 +3,7 @@ import "server-only";
 import { sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { notificationOutbox } from "@/lib/db/schema";
+import { validateNotificationPayload } from "./format";
 
 type AnyDb = LibSQLDatabase<any>;
 
@@ -30,6 +31,15 @@ export async function enqueueNotification(
   db: AnyDb,
   input: EnqueueNotificationInput,
 ): Promise<void> {
+  const check = validateNotificationPayload(input.type, input.payload);
+  if (!check.ok) {
+    console.error("[enqueueNotification] invalid payload:", check.reason, input);
+    return;
+  }
+  if (!input.discordUserId) {
+    console.error("[enqueueNotification] discordUserId が空のため skip");
+    return;
+  }
   try {
     await db.insert(notificationOutbox).values({
       id: randomId(),

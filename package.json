@@ -18,6 +18,8 @@
     "check:db-legacy": "node scripts/check-db-legacy.mjs",
     "check:public-api-leaks": "node scripts/check-public-api-leaks.mjs",
     "test:workers": "node --test --experimental-strip-types workers/**/*.test.mjs",
+    "test:notif": "node --test --experimental-strip-types src/lib/notifications/format.test.mjs",
+    "test:unit": "node --test --experimental-strip-types workers/**/*.test.mjs src/lib/notifications/format.test.mjs",
     "pages:build": "next-on-pages",
     "pages:dev": "next-on-pages && wrangler pages dev .vercel/output/static --compatibility-flag=nodejs_compat --d1=DB --r2=BUCKET --kv=KV",
     "preview": "wrangler pages dev"
