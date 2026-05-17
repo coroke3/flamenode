@@ -86,6 +86,7 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 72 | docs/operations.md に単体テスト実行手順追記 | 47dd346 |
 | 73 | publicDto テスト 11件 (pickKeys / assertNoForbiddenKeys) | 10c08db |
 | 74 | eventStatus core 分離 + テスト 14件 (累計 87件) | d25d7ce |
+| 75 | sanitizeUserHtml テスト 15件 (累計 102件) | 5e8f9c7 |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
@@ -125,5 +126,8 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 ```sh
 npm run check:db-legacy            # deprecated DB 書き込みの静的検出
 npm run check:public-api-leaks     # 公開 API 漏洩検査 (dev server 必須)
-npm run test:workers               # Worker 純粋関数の単体テスト (node:test)
+npm run test:unit                  # 全単体テスト (累計 102件、node:test)
+npm run test:workers               # Worker 純粋関数のみ
+npm run test:notif                 # 通知 payload バリデーションのみ
+npm run test:youtube               # YouTube ID 抽出/URL のみ
 ```
