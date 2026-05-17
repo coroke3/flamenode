@@ -440,6 +440,50 @@ async function checkChapterNonChapterMarker(
   };
 }
 
+/** video_members.video_id が videos に存在するか (orphan) */
+async function checkOrphanVideoMember(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const rows = await db
+    .select({ id: sql<string>`vm.id`, video_id: sql<string>`vm.video_id` })
+    .from(sql`video_members AS vm`)
+    .where(
+      sql`NOT EXISTS (SELECT 1 FROM videos v WHERE v.id = vm.video_id)`,
+    )
+    .limit(10);
+  const count = rows.length;
+  return {
+    id: "orphan_video_member",
+    label: "video_members.video_id に対応する videos が無い (orphan)",
+    status: count === 0 ? "ok" : "warn",
+    count,
+    samples: rows.slice(0, 5).map((r) => `vm:${r.id} video:${r.video_id}`),
+    note: count > 0 ? "video 削除時に video_members を残しています。" : undefined,
+  };
+}
+
+/** video_members.name_for_sort が NULL の行 (migration 0004 適用後はバックフィルされる) */
+async function checkVideoMembersNameForSortNull(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const rows = await db
+    .select({ c: sql<number>`COUNT(*)` })
+    .from(sql`video_members`)
+    .where(sql`name_for_sort IS NULL`);
+  const count = Number(rows[0]?.c ?? 0);
+  return {
+    id: "video_members_name_for_sort_null",
+    label: "video_members.name_for_sort が NULL の行",
+    status: count === 0 ? "ok" : "info",
+    count,
+    samples: [],
+    note:
+      count > 0
+        ? "migration 0004 未適用 or 書き込み経路の漏れ。本番適用時にバックフィル UPDATE が走ります。"
+        : undefined,
+  };
+}
+
 export async function runHealthChecks(db: AnyDb): Promise<HealthCheckResult[]> {
   return Promise.all([
     checkSystemSettingsSingleRow(db),
@@ -456,5 +500,7 @@ export async function runHealthChecks(db: AnyDb): Promise<HealthCheckResult[]> {
     checkVideoCommentsLegacyRows(db),
     checkVideosOutroComment(db),
     checkChapterNonChapterMarker(db),
+    checkOrphanVideoMember(db),
+    checkVideoMembersNameForSortNull(db),
   ]);
 }
