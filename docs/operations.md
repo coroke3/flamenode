@@ -180,6 +180,22 @@ allowlist (許可される定義/参照ファイル):
 
 ---
 
+## 5-2. 単体テスト (node:test)
+
+純粋関数の単体テストは Node 標準 `node:test` で実行する。Node 22+ の `--experimental-strip-types` で TS をそのまま読み込む。
+
+```sh
+npm run test:unit        # 全テスト (cleanup retention / notif format / youtube / xid / slot grouping / format)
+npm run test:workers     # Worker 関連のみ
+npm run test:notif       # notification format のみ
+npm run test:youtube     # youtube/id ユーティリティのみ
+```
+
+テスト追加対象は path alias (`@/`) に依存しない pure 関数に限定する。
+alias 依存があるロジックは `*Core.ts` に切り出してからテストする (例: `slotGroupingCore.ts`)。
+
+---
+
 ## 6. 管理者向け操作メモ
 
 ### 6-1. 管理者付与
