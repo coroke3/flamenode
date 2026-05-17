@@ -1,7 +1,7 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { desc, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { termsVersions, users as usersTable } from "@/lib/db/schema";
 import { formatUnix } from "@/lib/utils/format";
@@ -10,14 +10,35 @@ import { Icon } from "@/components/ui/Icon";
 export const metadata: Metadata = { title: "規約管理" };
 export const dynamic = "force-dynamic";
 
-export default async function AdminRulesPage(): Promise<React.ReactElement> {
+interface Props {
+  searchParams?: Promise<{ status?: string }>;
+}
+
+export default async function AdminRulesPage({
+  searchParams,
+}: Props): Promise<React.ReactElement> {
+  const sp = (await searchParams) ?? {};
+  const statusFilter =
+    sp.status === "published" ||
+    sp.status === "draft" ||
+    sp.status === "archived"
+      ? sp.status
+      : "any";
+
   const db = getDatabase();
   const rows = db
-    ? await db
-        .select()
-        .from(termsVersions)
-        .orderBy(desc(termsVersions.updated_at))
-        .limit(20)
+    ? await (statusFilter === "any"
+        ? db
+            .select()
+            .from(termsVersions)
+            .orderBy(desc(termsVersions.updated_at))
+            .limit(20)
+        : db
+            .select()
+            .from(termsVersions)
+            .where(eq(termsVersions.status, statusFilter))
+            .orderBy(desc(termsVersions.updated_at))
+            .limit(20))
     : [];
 
   // dry-run: major 公開時に再同意が必要になるユーザー数
@@ -52,6 +73,27 @@ export default async function AdminRulesPage(): Promise<React.ReactElement> {
       <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
         変更があった場合、影響度に応じて「再同意必須」を設定すると、次回投稿時にユーザーに同意導線を表示します。
       </p>
+
+      <form
+        method="get"
+        style={{
+          marginTop: 12,
+          display: "flex",
+          gap: 6,
+          flexWrap: "wrap",
+          alignItems: "center",
+        }}
+      >
+        <select name="status" className="fn-select" defaultValue={statusFilter}>
+          <option value="any">全状態</option>
+          <option value="published">公開中</option>
+          <option value="draft">下書き</option>
+          <option value="archived">アーカイブ</option>
+        </select>
+        <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm">
+          絞り込み
+        </button>
+      </form>
 
       <section
         style={{
