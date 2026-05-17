@@ -71,6 +71,11 @@ export default async function AdminUserDetailPage({
       <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
         ID: {user.id} / {user.email ?? "email 未取得"} / 登録{" "}
         {formatRelative(user.created_at)}
+        {user.emailVerified ? (
+          <>
+            {" "}/ email認証 {formatRelative(Math.floor((user.emailVerified as Date).getTime() / 1000))}
+          </>
+        ) : null}
       </p>
 
       <section className="fn-card" style={{ marginTop: 20 }}>
