@@ -115,6 +115,9 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
         .limit(20)
     : [];
 
+  // failed 件数集計 (担当イベント分のみ)
+  const failedCount = eventNotifications.filter((n) => n.status === "failed").length;
+
   if (myEditorRows.length === 0) {
     return (
       <div>
@@ -144,6 +147,24 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
           あなたが担当するイベントの状態・審査待ち・関連履歴を表示します。
         </p>
       </header>
+
+      {failedCount > 0 ? (
+        <div
+          role="status"
+          style={{
+            marginBottom: 14,
+            padding: "10px 14px",
+            background: "var(--accent-danger-soft, #fee2e2)",
+            border: "1px solid var(--accent-danger, #dc2626)",
+            borderRadius: "var(--radius-md)",
+            color: "var(--accent-danger, #991b1b)",
+            fontSize: 13,
+          }}
+        >
+          <strong>担当イベントに失敗通知が {failedCount} 件</strong>
+          {" "}あります。下の「イベント通知」セクションを確認してください。
+        </div>
+      ) : null}
 
       <section style={{ marginTop: 16 }}>
         <h2
