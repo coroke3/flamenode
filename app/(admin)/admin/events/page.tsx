@@ -171,6 +171,13 @@ export default async function AdminEventsPage({
                     >
                       権限
                     </Link>
+                    <Link
+                      href={`/admin/audit?table=events&record=${encodeURIComponent(ev.id)}`}
+                      className="fn-btn fn-btn-ghost fn-btn-sm"
+                      title="このイベントの監査ログ"
+                    >
+                      監査
+                    </Link>
                   </div>
                 </td>
               </tr>
