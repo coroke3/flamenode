@@ -195,7 +195,16 @@ export default async function ManageEventStaffPage({
                       <div>{formatUnix(s.approved_at, { dateOnly: true })}</div>
                       {s.approved_by_user_id ? (
                         <div style={{ color: "var(--text-muted)" }}>
-                          by {s.approved_by_user_id}
+                          by{" "}
+                          {isAdmin ? (
+                            <Link
+                              href={`/admin/users/${encodeURIComponent(s.approved_by_user_id)}`}
+                            >
+                              {s.approved_by_user_id}
+                            </Link>
+                          ) : (
+                            s.approved_by_user_id
+                          )}
                         </div>
                       ) : null}
                     </>
