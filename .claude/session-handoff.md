@@ -34,6 +34,12 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 20 | docs/workers.md (Worker実装状況 L-1) | ef19351 |
 | 21 | ダッシュボード上部バー重複ナビ削除 (C-1/C-2 整合) | b6b1098 |
 | 22 | エントリーカードに募集終了時刻を表示 | fed5635 |
+| 23 | cleanup Worker に notification_outbox TTL削除 (sent 14d / failed 30d) | 12e24af |
+| 24 | /admin トップに「今日やること」+ X ID 承認待ち | 2b07160 |
+| 25 | /admin/security に状態フィルタ | ca2301b |
+| 26 | /admin/health に状態フィルタ | fa433fe |
+| 27 | /admin/notifications で notification_outbox 一覧表示 (K-4) | 4ba342c |
+| 28 | docs/workers.md に /admin/notifications を反映 | 8c91d47 |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
@@ -52,11 +58,12 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 ## 次に着手しやすい小粒 Batch 候補
 
 1. 関連動画の mobile での位置改善 (article 内に挿入)
-2. /admin/security のフィルタ追加
-3. 入力 UI 改善 (時刻ピッカー、候補ボタン)
-4. /admin の「今日やること」(Q-1) 表示
-5. notification 失敗履歴の専用管理画面 (K-4)
-6. cleanup Worker の TTL 削除 (sent/failed)
+2. 入力 UI 改善 (時刻ピッカー、候補ボタン)
+3. notification 手動リトライボタン (`/admin/notifications` から failed を pending に戻す)
+4. /admin/notifications 詳細モーダル (payload_json 整形表示)
+5. イベント運営者向け受信箱 (K-5)
+6. history_logs アーカイブ (cleanup Worker 拡張)
+7. voided 動画の論理削除タイマー
 
 ## 進め方ルール
 
