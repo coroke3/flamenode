@@ -57,6 +57,9 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 43 | /admin/cost-guard に変更履歴 (system_settings) | 025552e |
 | 44 | /manage 受信箱トップ (K-5最小) | 768cb09 |
 | 45 | AuthHeader に /manage リンク | b7027b8 |
+| 46 | /admin/videos に event フィルタ追加 | e56c592 |
+| 47 | /manage/events/[id] イベント個別運営ページ | 28a7515 |
+| 48 | 手動リトライ時の attempt_count リセット (fix) + 履歴拡充 | 7157797 |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
@@ -74,12 +77,12 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 
 ## 次に着手しやすい小粒 Batch 候補
 
-1. /manage/events/[id] イベント個別運営ページ (slots / videos / 編集)
-2. notification_outbox に event_id カラム追加で event-scoped 通知 (migration 0002)
-3. cleanup Worker の単体テスト
-4. メンバー表の column フィルタ・並び替え
-5. /admin/notifications の手動リトライ後のステータス追跡
-6. /admin/videos に event フィルタ追加
+1. notification_outbox に event_id カラム追加で event-scoped 通知 (migration 0002)
+2. cleanup Worker の単体テスト
+3. メンバー表の column フィルタ・並び替え
+4. /manage のサイドバー化 (event 一覧のクイックナビ)
+5. /admin/users に最終ログイン時刻表示
+6. SlotGrid の連続枠選択時に表示名を自動先頭枠から継承
 
 ## 進め方ルール
 
