@@ -120,6 +120,7 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 106 | /admin/notifications に payload LIKE 検索追加 | 4567dcb |
 | 107 | /admin/audit に日付範囲フィルタ (since/until, JST境界) | 9a984d0 |
 | 108 | /admin/notifications に failed 一括リトライボタン (上限 50) | 28d76a6 |
+| 109 | /admin/users 一覧から監査ログへのクイックリンク | d291ee9 |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
@@ -144,10 +145,10 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 1. merge フロー完全実装 (Opus 判断候補)
 2. announcement / terms 本格 enqueue 戦略 (Opus 判断候補。dry-run 実装済み)
 3. cleanup Worker の Durable Object 永続化 (Opus 判断候補。ウォーム内リトライ実装済み)
-4. legacy/normalize の pure 関数を core 切り出し + テスト
+4. legacy/normalize の pure 関数を core 切り出し (Opus 判断候補。Shift_JIS mojibake トークン埋め込みで文字化けリスク高)
 5. /manage/events/[id]/audience プレビュー (event の登録者リスト)
 6. /admin/events/[id]/edit のフォーム小改善 (entry_start/end の datepicker)
-7. /admin/notifications の payload search (LIKE)
+7. /admin/notifications の bulk retry 履歴可視化 (bulk_retry record_id のフィルタ)
 
 ## 進め方ルール
 
