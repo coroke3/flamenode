@@ -1,7 +1,7 @@
 import * as React from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import Link from "next/link";
@@ -21,6 +21,8 @@ interface Props {
     operator?: string;
     record?: string;
     limit?: string;
+    since?: string;
+    until?: string;
   }>;
 }
 
@@ -71,6 +73,17 @@ export default async function AdminAuditPage({
   const actionFilter = (sp.action ?? "").trim().toUpperCase();
   const operatorFilter = (sp.operator ?? "").trim();
   const recordFilter = (sp.record ?? "").trim();
+  const sinceFilter = (sp.since ?? "").trim();
+  const untilFilter = (sp.until ?? "").trim();
+  // YYYY-MM-DD を JST 0:00 / 24:00 として Unix 秒に変換 (failure 時は null)
+  const parseDateBoundary = (s: string, end: boolean): number | null => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+    const suffix = end ? "T23:59:59+09:00" : "T00:00:00+09:00";
+    const t = Date.parse(`${s}${suffix}`);
+    return Number.isNaN(t) ? null : Math.floor(t / 1000);
+  };
+  const sinceUnix = sinceFilter ? parseDateBoundary(sinceFilter, false) : null;
+  const untilUnix = untilFilter ? parseDateBoundary(untilFilter, true) : null;
   const limitRaw = Number(sp.limit ?? "");
   const limit =
     Number.isFinite(limitRaw) && limitRaw > 0
@@ -88,6 +101,8 @@ export default async function AdminAuditPage({
     }
     if (operatorFilter) conds.push(eq(historyLogs.operator_discord_id, operatorFilter));
     if (recordFilter) conds.push(eq(historyLogs.record_id, recordFilter));
+    if (sinceUnix != null) conds.push(gte(historyLogs.created_at, sinceUnix));
+    if (untilUnix != null) conds.push(lte(historyLogs.created_at, untilUnix));
 
     rows = await db
       .select()
@@ -175,6 +190,24 @@ export default async function AdminAuditPage({
             max={MAX_LIMIT}
             className="fn-input"
             style={{ width: 100 }}
+          />
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", fontSize: 11 }}>
+          <span style={{ color: "var(--text-muted)" }}>since (YYYY-MM-DD, JST)</span>
+          <input
+            type="date"
+            name="since"
+            defaultValue={sinceFilter}
+            className="fn-input"
+          />
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", fontSize: 11 }}>
+          <span style={{ color: "var(--text-muted)" }}>until (YYYY-MM-DD, JST)</span>
+          <input
+            type="date"
+            name="until"
+            defaultValue={untilFilter}
+            className="fn-input"
           />
         </label>
         <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm">
