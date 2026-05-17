@@ -123,10 +123,25 @@ export function HomeIntroBand({
                         {featured.entry_end_time != null
                           ? formatUnix(featured.entry_end_time)
                           : ""}
+                        {featured.entry_end_time != null && featured.entry_end_time > now ? (
+                          <span style={{ marginLeft: 8, fontWeight: 700 }}>
+                            ({formatCountdown(featured.entry_end_time - now)}残)
+                          </span>
+                        ) : null}
                       </>
                     ) : (
                       "受付中"
                     )}
+                  </dd>
+                </div>
+              ) : entryNotStartedYet && featured.entry_start_time != null ? (
+                <div className={styles.eventMetaItem}>
+                  <dt>
+                    <Icon name="clock" size={11} aria-hidden />
+                    募集開始まで
+                  </dt>
+                  <dd>
+                    {formatCountdown(featured.entry_start_time - now)}
                   </dd>
                 </div>
               ) : null}
@@ -169,4 +184,15 @@ export function HomeIntroBand({
       </div>
     </section>
   );
+}
+
+/** 秒数を「○日○時間」「○時間○分」「○分」の形に整形する。 */
+function formatCountdown(seconds: number): string {
+  if (seconds <= 0) return "0分";
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (days >= 1) return `${days}日${hours}時間`;
+  if (hours >= 1) return `${hours}時間${minutes}分`;
+  return `${minutes}分`;
 }
