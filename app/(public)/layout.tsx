@@ -2,6 +2,7 @@ import * as React from "react";
 import { auth } from "@/lib/auth";
 import { PublicHeader, type PublicHeaderUser } from "@/components/layout/PublicHeader";
 import { PublicFooter } from "@/components/layout/PublicFooter";
+import { CostGuardBanner } from "@/components/layout/CostGuardBanner";
 import { buildHeaderUser } from "@/lib/auth/headerUser";
 
 export default async function PublicLayout({
@@ -20,6 +21,7 @@ export default async function PublicLayout({
 
   return (
     <>
+      <CostGuardBanner />
       <PublicHeader user={headerUser} />
       <main className="flex-1 w-full">{children}</main>
       <PublicFooter />

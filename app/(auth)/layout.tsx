@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { AuthHeader } from "@/components/layout/AuthHeader";
 import { PublicHeader } from "@/components/layout/PublicHeader";
 import { PublicFooter } from "@/components/layout/PublicFooter";
+import { CostGuardBanner } from "@/components/layout/CostGuardBanner";
 import { buildHeaderUser, type HeaderUser } from "@/lib/auth/headerUser";
 
 /**
@@ -27,6 +28,7 @@ export default async function AuthLayout({
 
   return (
     <>
+      <CostGuardBanner />
       {user ? (
         <AuthHeader user={user} />
       ) : (
