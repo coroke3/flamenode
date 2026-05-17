@@ -371,15 +371,29 @@ export const videoEvents = sqliteTable(
   (t) => ({ pk: primaryKey({ columns: [t.video_id, t.event_id] }) }),
 );
 
-export const videoMembers = sqliteTable("video_members", {
-  id: text("id").primaryKey(),
-  video_id: text("video_id").notNull(),
-  x_user_id: text("x_user_id"),
-  name: text("name").notNull(),
-  role: text("role"),
-  comment: text("comment"),
-  order_index: integer("order_index").notNull().default(0),
-});
+export const videoMembers = sqliteTable(
+  "video_members",
+  {
+    id: text("id").primaryKey(),
+    video_id: text("video_id").notNull(),
+    x_user_id: text("x_user_id"),
+    name: text("name").notNull(),
+    role: text("role"),
+    comment: text("comment"),
+    order_index: integer("order_index").notNull().default(0),
+  },
+  (t) => ({
+    // 表示順 (デフォルト) + 名前ソート (MemberTable の列ソート) を高速化する。
+    byVideo: index("video_members_video_order_idx").on(
+      t.video_id,
+      t.order_index,
+    ),
+    byVideoName: index("video_members_video_name_idx").on(
+      t.video_id,
+      t.name,
+    ),
+  }),
+);
 
 export const videoChapters = sqliteTable("video_chapters", {
   id: text("id").primaryKey(),
