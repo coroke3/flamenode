@@ -20,6 +20,7 @@ import { ChapterComposer } from "@/components/video/ChapterComposer";
 import { PlaylistRail } from "@/components/video/PlaylistRail";
 import { InteractionButton } from "@/components/video/InteractionButton";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
+import { MemberTable } from "@/components/video/MemberTable";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 import {
@@ -397,36 +398,7 @@ export default async function VideoDetailPage({
             <section className={styles.section}>
               <h2 className={styles.sectionTitle}>参加メンバー ({members.length})</h2>
               <div className={styles.memberTable}>
-                <table className="fn-table">
-                  <thead>
-                    <tr>
-                      <th>No</th>
-                      <th>Name</th>
-                      <th>ID</th>
-                      <th>担当 / コメント</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {members.map((m, i) => (
-                      <tr key={m.id}>
-                        <td>{i + 1}</td>
-                        <td>{m.x_name ?? m.name}</td>
-                        <td>
-                          {m.x_user_id ? (
-                            <Link href={`/user/${m.x_user_id}`}>@{m.x_user_id}</Link>
-                          ) : (
-                            <span className="fn-muted">-</span>
-                          )}
-                        </td>
-                        <td>
-                          {m.role ? <strong>{m.role}</strong> : null}
-                          {m.role && m.comment ? " / " : ""}
-                          {m.comment ?? ""}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <MemberTable members={members} />
               </div>
             </section>
           ) : null}
