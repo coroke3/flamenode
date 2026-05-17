@@ -102,6 +102,8 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 88 | security: banned 投稿チャプター/孤立 approved X ID 検出 | dd17cef |
 | 89 | notification_outbox に (status,created_at)/(event_id) インデックス (migration 0005) | a856c67 |
 | 90 | /admin/users/[id] に email認証/TOS/再同意要求ステータス表示 | a6a53a6 |
+| 91 | health: orphan video_member / name_for_sort NULL 検出 | 675f5ee |
+| 92 | check-public-api-leaks に offset/limit バリエーション追加 | df34f3e |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
