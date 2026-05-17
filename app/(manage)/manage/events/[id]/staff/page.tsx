@@ -8,6 +8,7 @@ import { requireSession } from "@/lib/auth/guard";
 import {
   events as eventsTable,
   eventEditors as eventEditorsTable,
+  eventCollaboratorPermissions as eventCollaboratorPermissionsTable,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
@@ -59,6 +60,12 @@ export default async function ManageEventStaffPage({
   } else if (!isAdmin) {
     notFound();
   }
+
+  const permissions = await db
+    .select()
+    .from(eventCollaboratorPermissionsTable)
+    .where(eq(eventCollaboratorPermissionsTable.event_id, id))
+    .orderBy(eventCollaboratorPermissionsTable.display_name);
 
   const staff = await db
     .select({
@@ -204,6 +211,68 @@ export default async function ManageEventStaffPage({
           )}
         </tbody>
       </table>
+
+      {permissions.length > 0 ? (
+        <section style={{ marginTop: 28 }}>
+          <h2
+            style={{
+              fontSize: 13,
+              fontWeight: 700,
+              letterSpacing: "0.18em",
+              color: "var(--text-muted)",
+              textTransform: "uppercase",
+              marginBottom: 10,
+            }}
+          >
+            個別編集権限 ({permissions.length})
+          </h2>
+          <table className="fn-table">
+            <thead>
+              <tr>
+                <th>display_name</th>
+                <th>X / Discord</th>
+                <th>permission_key</th>
+                <th>allowed</th>
+                <th>公開</th>
+              </tr>
+            </thead>
+            <tbody>
+              {permissions.map((p) => (
+                <tr key={p.id}>
+                  <td>{p.display_name}</td>
+                  <td style={{ fontFamily: "monospace", fontSize: 11 }}>
+                    {p.x_user_id ? `@${p.x_user_id}` : null}
+                    {p.x_user_id && p.discord_user_id ? " / " : ""}
+                    {p.discord_user_id ?? null}
+                  </td>
+                  <td style={{ fontFamily: "monospace", fontSize: 11 }}>
+                    {p.permission_key}
+                  </td>
+                  <td>
+                    <span
+                      className={`fn-badge ${p.allowed === 1 ? "fn-badge-accent" : "fn-badge-soft"}`}
+                    >
+                      {p.allowed === 1 ? "ON" : "OFF"}
+                    </span>
+                  </td>
+                  <td>
+                    {p.is_public_staff === 1 ? (
+                      <span className="fn-badge fn-badge-soft">公開</span>
+                    ) : (
+                      <span className="fn-badge fn-badge-neutral">非公開</span>
+                    )}
+                    {p.public_role_label ? (
+                      <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>
+                        {p.public_role_label}
+                      </div>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      ) : null}
     </div>
   );
 }
