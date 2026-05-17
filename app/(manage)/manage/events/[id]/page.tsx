@@ -237,6 +237,12 @@ export default async function ManageEventPage({
           <Icon name="calendar" size={11} aria-hidden /> スロット一覧
         </Link>
         <Link
+          href={`/manage/events/${id}/staff`}
+          className="fn-btn fn-btn-ghost fn-btn-sm"
+        >
+          <Icon name="users" size={11} aria-hidden /> 運営メンバー
+        </Link>
+        <Link
           href={`/event/${id}`}
           className="fn-btn fn-btn-ghost fn-btn-sm"
         >
