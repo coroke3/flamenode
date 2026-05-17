@@ -14,6 +14,8 @@ import {
 } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { formatRelative } from "@/lib/utils/format";
+import { runHealthChecks } from "@/lib/admin/healthChecks";
+import { runSecurityChecks } from "@/lib/admin/securityChecks";
 
 export const metadata: Metadata = { title: "管理ダッシュボード" };
 export const dynamic = "force-dynamic";
@@ -33,6 +35,8 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
   let pendingVideos: { id: string; title: string; created_at: number; display_name: string }[] = [];
   let pendingXIds: { id: string; x_name: string | null; requested_at: number | null }[] = [];
   let notificationFailedCount = 0;
+  let healthWarnCount = 0;
+  let securityWarnCount = 0;
   let recentActivity: {
     id: number;
     table_name: string;
@@ -132,6 +136,18 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
       pendingXIds = pendXList;
       notificationFailedCount = Number(notifFailed[0]?.c ?? 0);
       recentActivity = recentLogs;
+
+      // health/security WARN 件数を独立して取得 (失敗してもページ自体は表示する)
+      try {
+        const [hr, sr] = await Promise.all([
+          runHealthChecks(db),
+          runSecurityChecks(db),
+        ]);
+        healthWarnCount = hr.filter((r) => r.status === "warn").length;
+        securityWarnCount = sr.filter((r) => r.status === "warn").length;
+      } catch (e) {
+        console.error("[AdminTopPage] health/security check failed", e);
+      }
     } catch (err) {
       console.error("[AdminTopPage] fetch failed", err);
     }
@@ -151,6 +167,8 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
         pendingXIds={stats.pendingX}
         notificationFailed={notificationFailedCount}
         maintenance={isMaintenance === 1}
+        healthWarn={healthWarnCount}
+        securityWarn={securityWarnCount}
       />
 
       <section
@@ -454,11 +472,15 @@ function TodoBoard({
   pendingXIds,
   notificationFailed,
   maintenance,
+  healthWarn,
+  securityWarn,
 }: {
   pendingVideos: number;
   pendingXIds: number;
   notificationFailed: number;
   maintenance: boolean;
+  healthWarn: number;
+  securityWarn: number;
 }): React.ReactElement | null {
   const items: { label: string; href: string; count: number; tone: "warn" | "danger" }[] = [];
   if (pendingVideos > 0) {
@@ -491,6 +513,22 @@ function TodoBoard({
       href: "/admin/cost-guard",
       count: 1,
       tone: "danger",
+    });
+  }
+  if (securityWarn > 0) {
+    items.push({
+      label: "セキュリティ WARN",
+      href: "/admin/security?status=warn",
+      count: securityWarn,
+      tone: "danger",
+    });
+  }
+  if (healthWarn > 0) {
+    items.push({
+      label: "ヘルス WARN",
+      href: "/admin/health?status=warn",
+      count: healthWarn,
+      tone: "warn",
     });
   }
 
