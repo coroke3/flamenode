@@ -111,6 +111,9 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 97 | /admin/health に WARN サマリパネル | 4aaae3f |
 | 98 | /admin/security に WARN サマリパネル | 2fbcc4c |
 | 99 | /admin トップ「今日やること」にヘルス/セキュリティWARN件数 | 85d8576 |
+| 100 | /admin/x-link-requests に直近の却下リクエスト一覧 | 826622c |
+| 101 | /admin トップに直近の失敗通知 3件パネル | 850b441 |
+| 102 | /admin/notifications に状態サマリパネル | c8b4049 |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
