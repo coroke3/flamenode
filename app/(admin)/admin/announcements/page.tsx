@@ -1,9 +1,9 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { desc } from "drizzle-orm";
+import { desc, eq, isNotNull, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
-import { announcements } from "@/lib/db/schema";
+import { announcements, users as usersTable, xUsers as xUsersTable } from "@/lib/db/schema";
 import { formatUnix } from "@/lib/utils/format";
 import { Icon } from "@/components/ui/Icon";
 
@@ -20,6 +20,34 @@ export default async function AdminAnnouncementsPage(): Promise<React.ReactEleme
         .limit(50)
     : [];
 
+  // 通知対象件数の dry-run (実 enqueue はしない、ただし運用者に規模感を見せる)
+  let audienceCounts = { all: 0, creators: 0, admins: 0 };
+  if (db) {
+    try {
+      const [allRows, creatorRows, adminRows] = await Promise.all([
+        db.select({ c: sql<number>`COUNT(*)` }).from(usersTable),
+        // approved な X ID を持つユーザー (creators 想定)
+        db
+          .select({ c: sql<number>`COUNT(DISTINCT ${xUsersTable.linked_discord_user_id})` })
+          .from(xUsersTable)
+          .where(eq(xUsersTable.approval_status, "approved")),
+        db
+          .select({ c: sql<number>`COUNT(*)` })
+          .from(usersTable)
+          .where(eq(usersTable.role, "admin")),
+      ]);
+      audienceCounts = {
+        all: Number(allRows[0]?.c ?? 0),
+        creators: Number(creatorRows[0]?.c ?? 0),
+        admins: Number(adminRows[0]?.c ?? 0),
+      };
+    } catch (e) {
+      console.error("[AdminAnnouncementsPage] audience count failed", e);
+    }
+  }
+  // 値を使うための副作用呼び出し抑止 (lint 対策)
+  void isNotNull;
+
   return (
     <div>
       <header
@@ -34,6 +62,37 @@ export default async function AdminAnnouncementsPage(): Promise<React.ReactEleme
           <Icon name="plus" size={12} aria-hidden /> 新規お知らせ
         </Link>
       </header>
+
+      <section
+        style={{
+          marginTop: 16,
+          padding: "12px 14px",
+          background: "var(--bg-surface)",
+          border: "1px dashed var(--border-subtle)",
+          borderRadius: "var(--radius-md)",
+          fontSize: 12,
+          color: "var(--text-secondary)",
+        }}
+      >
+        <strong style={{ color: "var(--text-primary)" }}>
+          通知対象件数 (dry-run / 実 enqueue はまだ未実装)
+        </strong>
+        <ul style={{ margin: "6px 0 0", paddingLeft: 18, lineHeight: 1.7 }}>
+          <li>
+            target_audience=<code>all</code>: 約 <strong>{audienceCounts.all.toLocaleString()}</strong> 件
+          </li>
+          <li>
+            target_audience=<code>creators</code>: 約 <strong>{audienceCounts.creators.toLocaleString()}</strong> 件 (approved X ID 持ちの distinct discord_user_id)
+          </li>
+          <li>
+            target_audience=<code>admins</code>: 約 <strong>{audienceCounts.admins.toLocaleString()}</strong> 件
+          </li>
+        </ul>
+        <p style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
+          注意: 公開ボタンを押しても現状は notification_outbox に enqueue されません。
+          大量 enqueue は Opus 判断候補としてキューイング戦略を確定してから実装します。
+        </p>
+      </section>
 
       <table className="fn-table" style={{ marginTop: 18 }}>
         <thead>
