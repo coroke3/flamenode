@@ -118,6 +118,8 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 104 | /admin/audit/[id] に同 record_id の前後ナビ | 1c047c6 |
 | 105 | /admin/users/[id] にメール認証日時表示 | ddceae4 |
 | 106 | /admin/notifications に payload LIKE 検索追加 | 4567dcb |
+| 107 | /admin/audit に日付範囲フィルタ (since/until, JST境界) | 9a984d0 |
+| 108 | /admin/notifications に failed 一括リトライボタン (上限 50) | 28d76a6 |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
