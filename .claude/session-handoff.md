@@ -63,7 +63,8 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 49 | notification_outbox.event_id 追加 (migration 0002) + /manage で event 通知表示 | 7d76c47 |
 | 50 | /manage/events/[id] にも event-scoped 通知一覧 | e27df67 |
 | 51 | HomeIntroBand に募集締切/開始カウントダウン | d7d7bcc |
-| 52 | docs/operations.md に migration 0002 追記 | (this) |
+| 52 | docs/operations.md に migration 0002 追記 | 32f3dfa |
+| 53 | /admin/events に並び替え/フィルタ/検索 | 6ac98cc |
 
 ## 残る Opus判断候補 (Sonnet で対応可能なものも含む)
 
