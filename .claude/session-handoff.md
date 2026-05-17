@@ -9,6 +9,9 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 
 | # | Batch | Commit |
 |---|---|---|
+| 0a | /admin/audit にテーブル/操作/実行者/件数フィルタ追加 | de0d40d |
+| 0b | slot時間重複検査をスイープラインに変更し全ペア検出 | d2af936 |
+| 0c | session-handoff.md 追加 | fa86ea7 |
 | 1 | rules ページ renderMarkdown も sanitizeUserHtml 経由で多重防御 | 174acdc |
 | 2 | custom_pages HTMLサニタイザ + security check 追加 (XSS修正) | b693341 |
 | 3 | 複数イベント並走時の entry CTA 優先度 (entry_end_time近い順) | 4ea5a8b |
