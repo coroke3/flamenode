@@ -6,6 +6,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { announcements, users as usersTable, xUsers as xUsersTable } from "@/lib/db/schema";
 import { formatUnix } from "@/lib/utils/format";
 import { Icon } from "@/components/ui/Icon";
+import { AnnouncementBroadcastButton } from "@/components/admin/AnnouncementBroadcastButton";
 
 export const metadata: Metadata = { title: "お知らせ管理" };
 export const dynamic = "force-dynamic";
@@ -185,13 +186,22 @@ export default async function AdminAnnouncementsPage({
               </td>
               <td>{formatUnix(a.updated_at)}</td>
               <td>
-                <div style={{ display: "inline-flex", gap: 4 }}>
+                <div style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
                   <Link
                     href={`/admin/announcements/${a.id}/edit`}
                     className="fn-btn fn-btn-ghost fn-btn-sm"
                   >
                     編集
                   </Link>
+                  {a.is_published === 1 ? (
+                    <AnnouncementBroadcastButton
+                      announcementId={a.id}
+                      defaultContent={`${a.title}\n\n${a.body.slice(0, 800)}`}
+                      defaultAudience={
+                        (a.target_audience as "all" | "creators" | "admins") ?? "creators"
+                      }
+                    />
+                  ) : null}
                   <Link
                     href={`/admin/audit?table=announcements&record=${encodeURIComponent(a.id)}`}
                     className="fn-btn fn-btn-ghost fn-btn-sm"
