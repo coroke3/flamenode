@@ -275,6 +275,47 @@ node scripts/grant-admin.cjs <discord_id>
 
 ---
 
+## 6-6. broadcast 通知の手動段階実行手順
+
+`/admin/announcements` / `/admin/rules (major)` の本格 enqueue は未実装 (Opus 判断候補)。
+緊急時に手動で段階配信する場合の安全手順:
+
+```sql
+-- 1. 対象件数を必ず確認 (/admin/announcements の dry-run プレビューと一致するか)
+SELECT COUNT(*) FROM users;                                       -- target_audience=all
+SELECT COUNT(DISTINCT linked_discord_user_id)
+  FROM x_users WHERE approval_status='approved';                  -- target_audience=creators
+SELECT COUNT(*) FROM users WHERE role='admin';                    -- target_audience=admins
+
+-- 2. 50 件ずつバッチ enqueue (Discord rate-limit 5req/s 想定で安全マージン)
+--    type は site-internal 用に "announcement_broadcast" などを使い、
+--    Worker 側でチャネル別に配信制御する。
+INSERT INTO notification_outbox (id, discord_user_id, type, payload_json, status, attempt_count, created_at)
+SELECT
+  lower(hex(randomblob(16))),
+  id,
+  'announcement_broadcast',
+  json_object('content', '...', 'announcement_id', '...'),
+  'pending',
+  0,
+  unixepoch()
+FROM users
+ORDER BY created_at DESC
+LIMIT 50 OFFSET 0;  -- OFFSET を増やしながら 50 件ずつ
+
+-- 3. 各バッチ投入後、Worker (5分 cron) が処理し終わるのを待つ
+--    notification_outbox.status='pending' が 0 になったら次バッチ
+SELECT status, COUNT(*) FROM notification_outbox
+  WHERE created_at >= unixepoch() - 600 GROUP BY status;
+```
+
+⚠️ **危険性**:
+- 一括 `INSERT ... SELECT FROM users` で全件 enqueue は厳禁 (10000 件 / 5req/s = 33 分のロック、失敗時の運用負荷大)
+- Worker の `MAX_RETRIES=3` に到達した failed は手動リトライが必要
+- 一度走らせる前に必ず staging で 1 ユーザー (自分) だけテスト配信する
+
+---
+
 ## 7. 関連ドキュメント
 
 - 設計正本: `.claude/flamenode/source/flamenode_final_detailed_design.md`
