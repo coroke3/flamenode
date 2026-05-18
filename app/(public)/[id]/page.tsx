@@ -265,17 +265,7 @@ export default async function VideoDetailPage({
         <span className={styles.authorName}>{creatorName}</span>
         <span className={styles.authorMeta}>
           {creatorId && creatorId !== "anonymous" ? (
-            <>
-              <span>@{creatorId}</span>
-              <a
-                href={`https://x.com/${creatorId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={`X (@${creatorId}) を開く`}
-              >
-                <Icon name="external" size={11} aria-hidden />
-              </a>
-            </>
+            <span>@{creatorId}</span>
           ) : null}
           {video.scheduled_time ? (
             <span>
@@ -286,6 +276,22 @@ export default async function VideoDetailPage({
       </span>
     </span>
   );
+
+  // X プロフィールへの外部リンクは authorBlock の外側に出す。
+  // 親 <Link>(/user/[id]) で authorBlock を包むので、内部に別 <a target=_blank> を
+  // 置くと <a> ネストになり hydration エラー (a cannot be a descendant of a) になる。
+  const xProfileLink =
+    creatorId && creatorId !== "anonymous" ? (
+      <a
+        href={`https://x.com/${creatorId}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={`X (@${creatorId}) を開く`}
+        className={styles.authorXLink}
+      >
+        <Icon name="external" size={11} aria-hidden />
+      </a>
+    ) : null;
 
   return (
     <div className={styles.page} style={accentVar}>
@@ -315,6 +321,7 @@ export default async function VideoDetailPage({
             ) : (
               authorBlock
             )}
+            {xProfileLink}
             <div className={styles.authorActions}>
               <InteractionButton
                 videoId={video.id}

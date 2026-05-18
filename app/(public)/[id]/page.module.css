@@ -76,6 +76,12 @@
   margin-left: auto;
 }
 
+.authorXLink {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+}
+
 .warningBar {
   margin-top: 14px;
   padding: 10px 14px;
