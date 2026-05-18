@@ -150,24 +150,32 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 136 | events.slot_part_gap_minutes 設定化 (Opus #4, migration 0006) | 88d94e2 |
 | 137 | Opus 候補リスト整理 (5件解決、5件残) | cef58e5 |
 | 138 | /api/internal/x-users/search 追加 (Opus #5 最小実装) | 8f9abef |
+| 139 | VideoMembersField に debounce 検索 (Opus #5 UI 完了) | 558b8ec |
+| 140 | docs/operations.md に broadcast 手動段階実行手順 (Opus #7 安全策) | e84626e |
+| 141 | docs/workers.md に Durable Object 不要判断記録 (Opus #6 クローズ) | 648762f |
+| 142 | docs/merge-flow-design.md 追加 (Opus #8 段階実装案) | 0cd4fd2 |
+| 143 | scripts/merge-dry-run.mjs 追加 (Opus #8 Phase A、書き換えなし) | 98c4e6a |
 
-## 残る Opus判断候補
+## Opus判断候補 進捗
 
-### 解決済み (このセッションで判断完了)
+### 全件完了 (このセッションで判断完了、コードまたは docs に反映済)
 
-- ✅ like_count 実数差分の閾値再評価 → Batch 130 でハイブリッド max(±5, ±5%) 採用
-- ✅ slot 部区切り gapSec を events テーブル設定可に拡張 → Batch 136 で migration 0006 追加
-- ✅ 関連動画 UI の mobile 位置最適化 → Batch 31 で実装済み
-- ✅ メンバー表 / 関連動画の mobile レイアウト改善 → Batch 23/77 で実装済み
-- ✅ 募集期間自動切替 cron → 不要 (isAcceptingEntries がリアルタイム判定)
+- ✅ #1 like_count 実数差分の閾値再評価 → Batch 130 でハイブリッド max(±5, ±5%) 採用
+- ✅ #2 関連動画 UI の mobile 位置最適化 → Batch 31 で実装済み
+- ✅ #3 メンバー表 / 関連動画の mobile レイアウト改善 → Batch 23/77 で実装済み
+- ✅ #4 slot 部区切り gapSec を events テーブル設定可に拡張 → Batch 136 で migration 0006 追加
+- ✅ #5 メンバー候補検索の本格 API 化 → Batch 138 で endpoint 追加 + Batch 139 で UI debounce 完了
+- ✅ #6 cleanup Worker Durable Object 永続化 → Batch 141 で不要判断、docs/workers.md に記録
+- ✅ #7 announcement / terms 本格 broadcast enqueue → Batch 140 で docs/operations.md に手動段階実行手順 (本格 UI は危険性高くスキップ)
+- ✅ #8 merge フロー完全実装 → Batch 142 で設計書、Batch 143 で Phase A (dry-run) 実装。Phase B/C は実運用後に Opus 設計
+- ✅ #9 legacy/normalize pure function core 切り出し → 文字化けリスクで保留、handoff に判断記録のみ
+- ✅ #10 募集期間自動切替 cron → 不要 (isAcceptingEntries がリアルタイム判定)
 
-### 残 (Opus 判断必要、リスク高)
+### 完全未着手の残作業 (要 Opus 設計、別セッションで)
 
-- merge フロー完全実装: 投稿者付け替え / 履歴継承 / 権限影響大、設計書要
-- announcement / terms 本格 broadcast enqueue: 大量 enqueue + Discord rate-limit、段階実行要
-- cleanup Worker Durable Object 永続化: 設計が重い、本当に必要か要判断
-- legacy/normalize pure function core 切り出し: Shift_JIS mojibake 文字化けリスク高
-- メンバー候補検索の本格 API 化: ✅ endpoint 追加済 (Batch 138)。残: 既存 page を debounce UI 化する作業 (中規模、後続)
+- merge Phase B (mergeXIds Server Action) / Phase C (admin UI 実装)
+- broadcast の本格 enqueue UI (50件バッチ + Worker 側 rate-limit 制御)
+- legacy/normalize core (alias 解決方式の確立後)
 
 ## 既知の未適用
 
