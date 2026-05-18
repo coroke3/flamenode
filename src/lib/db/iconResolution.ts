@@ -28,42 +28,46 @@ export async function resolveMissingIcons<
   );
   if (creatorIds.length === 0) return rows;
 
-  // 個人作 → 合作の順で取得し、Map<creatorId, iconUrl> を作る。
-  const individualRows = await db
-    .select({
-      creator_id: videos.creator_id,
-      icon_url: videos.icon_url,
-      created_at: videos.created_at,
-    })
-    .from(videos)
-    .where(
-      and(
-        inArray(videos.creator_id, creatorIds),
-        isNotNull(videos.icon_url),
-        eq(videos.submission_type, "individual"),
-        eq(videos.is_deleted, 0),
-        ne(videos.status, "voided"),
-      )!,
-    )
-    .orderBy(desc(videos.created_at));
+  // D1 (SQLite) は 1 statement あたりの bind 変数に上限があるため
+  // creator_id を chunk 化して問い合わせる。creatorIds は dedup 済みで
+  // chunk 間で creator_id が重複しないので、結果のマージ順は問わない。
+  const CHUNK_SIZE = 50;
+  type IconRow = {
+    creator_id: string | null;
+    icon_url: string | null;
+    created_at: number | null;
+  };
+  async function fetchByType(
+    submissionType: "individual" | "collab",
+  ): Promise<IconRow[]> {
+    const out: IconRow[] = [];
+    for (let i = 0; i < creatorIds.length; i += CHUNK_SIZE) {
+      const chunk = creatorIds.slice(i, i + CHUNK_SIZE);
+      const rows = await db
+        .select({
+          creator_id: videos.creator_id,
+          icon_url: videos.icon_url,
+          created_at: videos.created_at,
+        })
+        .from(videos)
+        .where(
+          and(
+            inArray(videos.creator_id, chunk),
+            isNotNull(videos.icon_url),
+            eq(videos.submission_type, submissionType),
+            eq(videos.is_deleted, 0),
+            ne(videos.status, "voided"),
+          )!,
+        )
+        .orderBy(desc(videos.created_at));
+      out.push(...rows);
+    }
+    return out;
+  }
 
-  const collabRows = await db
-    .select({
-      creator_id: videos.creator_id,
-      icon_url: videos.icon_url,
-      created_at: videos.created_at,
-    })
-    .from(videos)
-    .where(
-      and(
-        inArray(videos.creator_id, creatorIds),
-        isNotNull(videos.icon_url),
-        eq(videos.submission_type, "collab"),
-        eq(videos.is_deleted, 0),
-        ne(videos.status, "voided"),
-      )!,
-    )
-    .orderBy(desc(videos.created_at));
+  // 個人作 → 合作の順で取得し、Map<creatorId, iconUrl> を作る。
+  const individualRows = await fetchByType("individual");
+  const collabRows = await fetchByType("collab");
 
   const icons = new Map<string, string>();
   // 個人作を先に登録 (最新の方が優先)

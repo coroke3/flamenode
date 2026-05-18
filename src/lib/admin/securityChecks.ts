@@ -8,6 +8,7 @@ import {
   accounts as accountsTable,
   customPages as customPagesTable,
   users as usersTable,
+  videoChapters as videoChaptersTable,
   videos as videosTable,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
@@ -212,22 +213,24 @@ function checkNotificationTableMismatch(): SecurityCheckResult {
 async function checkBannedUserChapters(
   db: AnyDb,
 ): Promise<SecurityCheckResult> {
-  // x_users.linked_discord_user_id 経由で banned ユーザーが投稿した video_chapters を検出
+  // x_users.linked_discord_user_id 経由で banned ユーザーが投稿した video_chapters を検出。
+  // raw SQL で `users AS u` を書くと、schema 上 `user` (singular) にマップされている関係で
+  // 実行時に "no such table: users" が出るため drizzle ORM で組む。
   const rows = await db
     .select({
-      id: sql<string>`vc.id`,
-      x_user_id: sql<string>`vc.x_user_id`,
+      id: videoChaptersTable.id,
+      x_user_id: videoChaptersTable.x_user_id,
     })
-    .from(sql`video_chapters AS vc`)
+    .from(videoChaptersTable)
     .innerJoin(
-      sql`x_users AS xu`,
-      sql`xu.id = vc.x_user_id`,
+      xUsersTable,
+      eq(xUsersTable.id, videoChaptersTable.x_user_id),
     )
     .innerJoin(
-      sql`users AS u`,
-      sql`u.id = xu.linked_discord_user_id`,
+      usersTable,
+      eq(usersTable.id, xUsersTable.linked_discord_user_id!),
     )
-    .where(sql`u.is_banned = 1`)
+    .where(eq(usersTable.is_banned, 1))
     .limit(10);
   const count = rows.length;
   return {
