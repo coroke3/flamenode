@@ -162,6 +162,24 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 148 | session-handoff に Batch 144-147 追記 | da0dc65 |
 | 149 | merge UI 統合 (Opus #8 Phase C 完了) | d01da0a |
 | 150 | broadcast 段階 enqueue UI 完了 (Opus #7 完了) | 7153da6 |
+| 151 | notify: Discord ID 解決を enqueue 統合 + broadcast を enqueue 経由に統一 | 865ac2c |
+| 152 | auth: manage 系 layout に明示的なアクセスゲート + ヘッダー導線出し分け | 864d79f |
+| 153 | video: private チャプター表示を player 単体経路でも防御強化 | 4a7d465 |
+| 154 | video: 作品編集を section 単位の権限判定へ + フォーム disabled 配線 | 746298c |
+| 155 | form: 投稿フォームに使用ソフト候補 (既存データの datalist) | 21c7a66 |
+| 156 | event: SlotGrid 空き枠選択モーダル + 連続取得数選択 + 枠生成候補ボタン | 9e9d7c1 |
+| 157 | settings: X ID 連携 UI カード型 + アイコン候補/アップロード 2 択 + 24件上限 | e30cfff |
+| 158 | api: /api/internal/x-users/search に offset / hasMore / nextOffset | 6717f68 |
+| 159 | admin: ユーザー詳細 ID 主体カード + manage event_id 未適用 fallback + 公開文言 | 9182f52 |
+| 160 | docs: claude-code-subagent-implementation-report.md (Batch 151-159 実装確認) | d07b763 |
+
+## Opus 判断ログ (2026-05-18 セッション)
+
+| Batch / 対象 | Opus 判断結果 | 主な指摘 |
+|---|---|---|
+| Batch 151-160 コミット前差分レビュー | commit OK | CLAUDE.md 禁止 11 項目・Opus 領域 10 条件への違反なし。Batch 152 manage gate も page 側に既存 requireSession + eventEditors 検査あり、layout は防御線として OK |
+| migration 0001-0006 本番適用前 | 条件付き適用 OK | 6 件全て nullable 列追加 + CREATE INDEX のみ。0003 のみ `IF NOT EXISTS` 無し (instrumentation が既に index 作っていれば停止リスク)。事前に PRAGMA index_list で要確認 |
+| Batch 151-160 本番 deploy 前 | 条件付き deploy OK | Pages deploy → D1 migration の順を推奨 (fallback 完備のため Pages 先行で安全)。旧 outbox の discord_user_id バックフィル / Worker per-recipient throttle / internal API rate limit は follow-up batch 候補 |
 
 ## Opus判断候補 進捗
 
@@ -195,22 +213,23 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 
 ## 次に着手しやすい小粒 Batch 候補
 
-1. merge フロー完全実装 (Opus 判断候補)
-2. announcement / terms 本格 enqueue 戦略 (Opus 判断候補。dry-run 実装済み)
-3. cleanup Worker の Durable Object 永続化 (Opus 判断候補。ウォーム内リトライ実装済み)
-4. legacy/normalize の pure 関数を core 切り出し (Opus 判断候補。Shift_JIS mojibake トークン埋め込みで文字化けリスク高)
-5. /manage/events/[id]/audience プレビュー (event の登録者リスト)
+1. 旧 notification_outbox の discord_user_id (users.id 形式) を新 enqueue 規約へバックフィルする admin スクリプト (Opus pre-deploy 指摘)
+2. workers/notification-dispatcher に per-recipient backoff (同一 discord_user_id への連続 DM throttle)
+3. /api/internal/x-users/search に user 単位 rate limit (例 60req/min)
+4. migration 0003 を CREATE INDEX IF NOT EXISTS に揃える冪等化パッチ (本番未適用なら無害)
+5. manual icon の論理削除導線 (24 件上限導入後の既存超過分整理)
 6. /admin/events/[id]/edit のフォーム小改善 (entry_start/end の datepicker)
 7. /admin/notifications の bulk retry 履歴可視化 (bulk_retry record_id のフィルタ)
 
-## 進め方ルール
+## 進め方ルール (2026-05-18 更新: Opus 併用モード)
 
 - 調査: flamenode-repo-cartographer (Haiku)
-- 実装: flamenode-implementation-agent (Sonnet)
-- Opus は使わない
-- typecheck / build / commit / push まで自走
-- deploy / 本番 migration 適用だけは 1 行ログ
+- 通常実装: flamenode-implementation-agent (Sonnet)
+- Opus 判断: DB/権限/X ID/大量通知/Worker 設計/migration/deploy/public API/security/health 閾値、または 5 Batch 以上連続後の差分レビュー
+- typecheck / build / lint / test:unit / commit / push まで自走
+- deploy / 本番 migration 適用だけは user 操作 (1 行ログ)
 - 確認待ちはしない
+- tsconfig.tsbuildinfo / .claude/settings.local.json はコミット対象外
 
 ## ops 関連スクリプト
 
