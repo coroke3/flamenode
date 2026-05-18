@@ -7,6 +7,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { xUsers as xUsersTable } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { VideoForm } from "@/components/forms/VideoForm";
+import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
 
 export const metadata: Metadata = { title: "枠なし投稿" };
 export const dynamic = "force-dynamic";
@@ -46,6 +47,7 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
         .orderBy(asc(xUsersTable.x_name))
         .limit(2000)
     : [];
+  const softwareSuggestions = db ? await getUsedSoftwareSuggestions(db) : [];
 
   return (
     <div
@@ -88,6 +90,7 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
           other_social_links: xRow?.other_social_links ?? undefined,
         }}
         memberSuggestions={memberSuggestions}
+        softwareSuggestions={softwareSuggestions}
       />
       <p
         style={{

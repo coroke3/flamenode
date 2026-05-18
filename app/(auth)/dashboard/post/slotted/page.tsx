@@ -13,6 +13,7 @@ import { requireSession } from "@/lib/auth/guard";
 import { VideoForm } from "@/components/forms/VideoForm";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
+import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
 
 export const metadata: Metadata = { title: "スロット提出" };
 export const dynamic = "force-dynamic";
@@ -106,6 +107,7 @@ export default async function SlottedPostPage({
     .from(xUsersTable)
     .orderBy(asc(xUsersTable.x_name))
     .limit(2000);
+  const softwareSuggestions = await getUsedSoftwareSuggestions(db);
 
   return (
     <div
@@ -189,6 +191,7 @@ export default async function SlottedPostPage({
           other_social_links: xRow?.other_social_links ?? undefined,
         }}
         memberSuggestions={memberSuggestions}
+        softwareSuggestions={softwareSuggestions}
       />
 
       <p
