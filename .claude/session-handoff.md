@@ -155,6 +155,10 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 141 | docs/workers.md に Durable Object 不要判断記録 (Opus #6 クローズ) | 648762f |
 | 142 | docs/merge-flow-design.md 追加 (Opus #8 段階実装案) | 0cd4fd2 |
 | 143 | scripts/merge-dry-run.mjs 追加 (Opus #8 Phase A、書き換えなし) | 98c4e6a |
+| 144 | Opus 候補リスト整理 (10/10 処理完了) | cff71dd |
+| 145 | normalizeCore.ts 切り出し + テスト 27件 (Opus #9 完了) | e6eb854 |
+| 146 | mergeXIds Server Action 追加 (Opus #8 Phase B) | dddaad9 |
+| 147 | 周辺改善 (slot guard 撤廃 / health/security 改善 / slotGrouping JST+slot_kind 分割) | 7ed7ed7 |
 
 ## Opus判断候補 進捗
 
@@ -167,15 +171,14 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 - ✅ #5 メンバー候補検索の本格 API 化 → Batch 138 で endpoint 追加 + Batch 139 で UI debounce 完了
 - ✅ #6 cleanup Worker Durable Object 永続化 → Batch 141 で不要判断、docs/workers.md に記録
 - ✅ #7 announcement / terms 本格 broadcast enqueue → Batch 140 で docs/operations.md に手動段階実行手順 (本格 UI は危険性高くスキップ)
-- ✅ #8 merge フロー完全実装 → Batch 142 で設計書、Batch 143 で Phase A (dry-run) 実装。Phase B/C は実運用後に Opus 設計
-- ✅ #9 legacy/normalize pure function core 切り出し → 文字化けリスクで保留、handoff に判断記録のみ
+- ✅ #8 merge フロー完全実装 → Batch 142 設計書、143 Phase A dry-run、146 Phase B mergeXIds action 完了。Phase C UI 統合のみ残
+- ✅ #9 legacy/normalize pure function core 切り出し → Batch 145 で codepoint 構築 + テスト 27件 で完了
 - ✅ #10 募集期間自動切替 cron → 不要 (isAcceptingEntries がリアルタイム判定)
 
-### 完全未着手の残作業 (要 Opus 設計、別セッションで)
+### 完全未着手の残作業 (任意、実運用後に必要なら)
 
-- merge Phase B (mergeXIds Server Action) / Phase C (admin UI 実装)
+- merge Phase C (admin UI: x-link-requests から merge 申請承認ボタン)
 - broadcast の本格 enqueue UI (50件バッチ + Worker 側 rate-limit 制御)
-- legacy/normalize core (alias 解決方式の確立後)
 
 ## 既知の未適用
 
