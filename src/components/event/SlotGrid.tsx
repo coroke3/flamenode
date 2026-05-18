@@ -58,6 +58,11 @@ interface ConfirmMerge {
   defaultName: string;
 }
 
+interface ReserveTarget {
+  slot: SlotGroupRow;
+  label: string;
+}
+
 export function SlotGrid({
   slots,
   viewerXId,
@@ -76,7 +81,10 @@ export function SlotGrid({
   const [confirmReleaseId, setConfirmReleaseId] = React.useState<string | null>(null);
   const [confirmExtend, setConfirmExtend] = React.useState<ConfirmExtend | null>(null);
   const [confirmMerge, setConfirmMerge] = React.useState<ConfirmMerge | null>(null);
+  const [reserveTarget, setReserveTarget] = React.useState<ReserveTarget | null>(null);
   const [mergeDisplayName, setMergeDisplayName] = React.useState<string>("");
+  const [reserveDisplayName, setReserveDisplayName] = React.useState<string>("");
+  const [reserveCount, setReserveCount] = React.useState("1");
   const [savedName, setSavedName] = React.useState<string>("");
   React.useEffect(() => {
     try {
@@ -86,7 +94,6 @@ export function SlotGrid({
       // localStorage 利用不可な環境では何もしない
     }
   }, []);
-  const reserveFormRef = React.useRef<HTMLFormElement | null>(null);
   const displayRows = React.useMemo(
     () => collapseReservationGroups(slots as SlotBase[]),
     [slots],
@@ -103,12 +110,33 @@ export function SlotGrid({
 
   const canTakeSlot = canReserve && !!viewerXId;
 
-  const onReserve = (slotId: string, form: HTMLFormElement) => {
+  const formatSlotLabel = (slot: SlotGroupRow): string => {
+    if (slot.start_time) {
+      return `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(slot.start_time, { timeOnly: true })}${slot.end_time ? ` - ${formatUnix(slot.end_time, { timeOnly: true })}` : ""}`;
+    }
+    return slot.slot_label ?? `#${slot.sort_order ?? "?"}`;
+  };
+
+  const openReserveDialog = (slot: SlotGroupRow) => {
     setError(null);
     setSuccess(null);
-    const fd = new FormData(form);
+    setReserveTarget({ slot, label: formatSlotLabel(slot) });
+    setReserveDisplayName(savedName);
+    setReserveCount("1");
+  };
+
+  const onReserve = (
+    slotId: string,
+    displayName: string,
+    consecutiveCount: string,
+  ) => {
+    setError(null);
+    setSuccess(null);
+    const fd = new FormData();
     fd.set("slot_id", slotId);
-    const dn = String(fd.get("display_name") ?? "").trim();
+    fd.set("display_name", displayName);
+    fd.set("consecutive_count", consecutiveCount);
+    const dn = displayName.trim();
     if (dn) {
       try {
         window.localStorage.setItem("fn:lastSlotDisplayName", dn);
@@ -125,6 +153,7 @@ export function SlotGrid({
       }
       setSuccess("枠を確保しました。続けて作品情報を登録できます。");
       setReservedSlotId(result.slotId ?? slotId);
+      setReserveTarget(null);
       router.refresh();
     });
   };
@@ -406,50 +435,17 @@ export function SlotGrid({
                             </button>
                           </div>
                         ) : canTakeSlot ? (
-                          <form
-                            ref={reserveFormRef}
-                            className={styles.reserveForm}
-                            onSubmit={(ev) => {
-                              ev.preventDefault();
-                              onReserve(slot.id, ev.currentTarget);
-                            }}
+                          <button
+                            type="button"
+                            className={styles.emptySlotButton}
+                            disabled={busy}
+                            onClick={() => openReserveDialog(slot)}
+                            aria-label={`${formatSlotLabel(slot)} を確保`}
                           >
-                            <input
-                              name="display_name"
-                              type="text"
-                              className="fn-input"
-                              placeholder="表示名・団体名"
-                              defaultValue={savedName}
-                              maxLength={80}
-                              required
-                            />
-                            {maxConsecutiveSlots > 1 ? (
-                              <select
-                                name="consecutive_count"
-                                className="fn-select"
-                                defaultValue="1"
-                                aria-label="連続取得数"
-                              >
-                                {Array.from(
-                                  { length: Math.min(maxConsecutiveSlots, 6) },
-                                  (_, i) => i + 1,
-                                ).map((n) => (
-                                  <option key={n} value={n}>
-                                    {n === 1 ? "単枠" : `${n}連続`}
-                                  </option>
-                                ))}
-                              </select>
-                            ) : (
-                              <input type="hidden" name="consecutive_count" value="1" />
-                            )}
-                            <button
-                              type="submit"
-                              className={cn("fn-btn", "fn-btn-primary", "fn-btn-sm", styles.reserveBtn)}
-                              disabled={busy}
-                            >
-                              <Icon name="plus" size={11} aria-hidden /> 確保
-                            </button>
-                          </form>
+                            <span className={styles.emptyCircle} aria-hidden>○</span>
+                            <span className={styles.emptySlotButtonText}>空き枠</span>
+                            <Icon name="plus" size={11} aria-hidden />
+                          </button>
                         ) : canReserve ? (
                           <span className={styles.emptySlot}>
                             {viewerDiscordId ? "空き (X ID 未選択)" : "空き (要ログイン)"}
@@ -553,6 +549,107 @@ export function SlotGrid({
               </button>
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {reserveTarget !== null ? (
+        <div
+          className={styles.reserveDialogBackdrop}
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setReserveTarget(null);
+          }}
+        >
+          <form
+            className={styles.reserveDialog}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reserve-dialog-title"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const name = reserveDisplayName.trim();
+              if (!name) {
+                setError("表示名・団体名を入力してください。");
+                return;
+              }
+              onReserve(reserveTarget.slot.id, name, reserveCount);
+            }}
+          >
+            <div>
+              <p id="reserve-dialog-title" className={styles.reserveDialogTitle}>
+                枠を確保
+              </p>
+              <p className={styles.reserveDialogMessage}>
+                {reserveTarget.label}
+              </p>
+            </div>
+            <div className={styles.reserveDialogField}>
+              <label className="fn-label" htmlFor="reserve-display-name">
+                表示名・団体名
+              </label>
+              <input
+                id="reserve-display-name"
+                type="text"
+                className="fn-input"
+                value={reserveDisplayName}
+                onChange={(e) => setReserveDisplayName(e.target.value)}
+                maxLength={80}
+                placeholder="例: FlameNode制作部"
+                required
+                // eslint-disable-next-line jsx-a11y/no-autofocus
+                autoFocus
+              />
+            </div>
+            <div className={styles.reserveDialogField}>
+              <label className="fn-label" htmlFor="reserve-count">
+                取得する枠数
+              </label>
+              <select
+                id="reserve-count"
+                className="fn-select"
+                value={reserveCount}
+                onChange={(e) => setReserveCount(e.target.value)}
+              >
+                {Array.from(
+                  { length: Math.min(Math.max(maxConsecutiveSlots, 1), 6) },
+                  (_, i) => i + 1,
+                ).map((n) => (
+                  <option key={n} value={n}>
+                    {n === 1 ? "単枠で確保" : `${n}連続で確保`}
+                  </option>
+                ))}
+              </select>
+              {maxConsecutiveSlots > 1 ? (
+                <p className={styles.reserveDialogHint}>
+                  連続枠は空きが隣接している場合だけまとめて確保されます。上限は {maxConsecutiveSlots} 枠です。
+                </p>
+              ) : null}
+            </div>
+            {viewerActiveX ? (
+              <p className={styles.reserveDialogHint}>
+                提出主体: <strong>@{viewerActiveX}</strong>
+              </p>
+            ) : null}
+            <div className={styles.reserveDialogFooter}>
+              <button
+                type="button"
+                className="fn-btn fn-btn-ghost"
+                onClick={() => setReserveTarget(null)}
+                disabled={busy}
+              >
+                キャンセル
+              </button>
+              <button
+                type="submit"
+                className="fn-btn fn-btn-primary"
+                disabled={busy || reserveDisplayName.trim().length === 0}
+                aria-busy={busy}
+              >
+                <Icon name="plus" size={12} aria-hidden />
+                {busy ? "確保中..." : "確保する"}
+              </button>
+            </div>
+          </form>
         </div>
       ) : null}
     </div>

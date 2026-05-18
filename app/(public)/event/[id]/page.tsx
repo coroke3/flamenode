@@ -224,7 +224,7 @@ export default async function EventDetailPage({
       ) : null}
 
       {slotRows.length > 0 || accepting ? (
-        <section className={styles.section}>
+        <section id="slot" className={styles.section}>
           <h2 className={styles.sectionTitle}>
             <Icon name="clock" size={16} aria-hidden />
             予約枠

@@ -184,6 +184,49 @@
   color: var(--text-muted);
 }
 
+.emptySlotButton {
+  width: 100%;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px dashed var(--border-strong, var(--border-subtle));
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.emptySlotButton:hover:not(:disabled),
+.emptySlotButton:focus-visible {
+  border-color: var(--accent-primary);
+  background: var(--accent-primary-soft);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.emptySlotButton:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.emptyCircle {
+  font-size: 18px;
+  line-height: 1;
+  color: var(--accent-primary);
+}
+
+.emptySlotButtonText {
+  min-width: 0;
+}
+
 .mergeRow {
   display: flex;
   align-items: center;
@@ -230,6 +273,66 @@
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.reserveDialogBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 110;
+  padding: 18px;
+}
+
+.reserveDialog {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  width: min(92vw, 420px);
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: var(--shadow-lg, 0 20px 60px rgba(0, 0, 0, 0.22));
+}
+
+.reserveDialogTitle {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.reserveDialogMessage {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.reserveDialogField {
+  display: grid;
+  gap: 6px;
+}
+
+.reserveDialogHint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.reserveDialogHint strong {
+  color: var(--text-primary);
+}
+
+.reserveDialogFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .reserveBtn {
