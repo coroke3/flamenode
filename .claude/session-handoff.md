@@ -159,6 +159,9 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 145 | normalizeCore.ts 切り出し + テスト 27件 (Opus #9 完了) | e6eb854 |
 | 146 | mergeXIds Server Action 追加 (Opus #8 Phase B) | dddaad9 |
 | 147 | 周辺改善 (slot guard 撤廃 / health/security 改善 / slotGrouping JST+slot_kind 分割) | 7ed7ed7 |
+| 148 | session-handoff に Batch 144-147 追記 | da0dc65 |
+| 149 | merge UI 統合 (Opus #8 Phase C 完了) | d01da0a |
+| 150 | broadcast 段階 enqueue UI 完了 (Opus #7 完了) | 7153da6 |
 
 ## Opus判断候補 進捗
 
@@ -170,15 +173,15 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 - ✅ #4 slot 部区切り gapSec を events テーブル設定可に拡張 → Batch 136 で migration 0006 追加
 - ✅ #5 メンバー候補検索の本格 API 化 → Batch 138 で endpoint 追加 + Batch 139 で UI debounce 完了
 - ✅ #6 cleanup Worker Durable Object 永続化 → Batch 141 で不要判断、docs/workers.md に記録
-- ✅ #7 announcement / terms 本格 broadcast enqueue → Batch 140 で docs/operations.md に手動段階実行手順 (本格 UI は危険性高くスキップ)
-- ✅ #8 merge フロー完全実装 → Batch 142 設計書、143 Phase A dry-run、146 Phase B mergeXIds action 完了。Phase C UI 統合のみ残
+- ✅ #7 announcement / terms 本格 broadcast enqueue → Batch 140 docs (手動 SQL 手順) + Batch 150 段階 broadcast UI 完了 (50件バッチ + cursor + 'BROADCAST' 確認)
+- ✅ #8 merge フロー完全実装 → Batch 142 設計書、143 Phase A、146 Phase B mergeXIds、149 Phase C UI 統合 で完全完了
 - ✅ #9 legacy/normalize pure function core 切り出し → Batch 145 で codepoint 構築 + テスト 27件 で完了
 - ✅ #10 募集期間自動切替 cron → 不要 (isAcceptingEntries がリアルタイム判定)
 
-### 完全未着手の残作業 (任意、実運用後に必要なら)
+### 全 Opus 候補 完全完了 🎉
 
-- merge Phase C (admin UI: x-link-requests から merge 申請承認ボタン)
-- broadcast の本格 enqueue UI (50件バッチ + Worker 側 rate-limit 制御)
+10/10 すべて Opus 判断 + 実装/docs 完了。残作業なし。
+今後の機能追加・運用改善は通常 Batch (Sonnet) で進められる。
 
 ## 既知の未適用
 
