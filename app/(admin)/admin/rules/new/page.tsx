@@ -5,6 +5,7 @@ import { Icon } from "@/components/ui/Icon";
 import { TermsForm } from "@/components/admin/TermsForm";
 
 export const metadata: Metadata = { title: "新規利用規約バージョン" };
+export const dynamic = "force-dynamic";
 
 export default function AdminRulesNewPage(): React.ReactElement {
   return (

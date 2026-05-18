@@ -113,21 +113,28 @@ export function YoutubePlayer({
       if (disposed || !wrapperRef.current) return;
       const YT = window.YT;
       if (!YT?.Player) return;
+      // YouTube 標準 UI を公式パラメータの範囲で最大限抑制し、
+      // FlameNode 側の自前操作 UI を表示する。
+      // ただし YouTube 埋め込み仕様上、ロゴ・右クリックメニュー・
+      // 一部の一時停止時オーバーレイ・エンドカード等は完全消去を保証できない。
       playerRef.current = new YT.Player(containerId, {
         host: "https://www.youtube-nocookie.com",
         videoId: youtubeId,
         playerVars: {
-          rel: 0,
-          modestbranding: 1,
-          playsinline: 1,
+          autoplay: 0,
           controls: 0,
           disablekb: 1,
           fs: 0,
           iv_load_policy: 3,
+          rel: 0,
+          playsinline: 1,
+          enablejsapi: 1,
+          // modestbranding は現在の YouTube 仕様では非推奨寄りだが、副作用は無いため残す
+          modestbranding: 1,
+          // cc_load_policy=0 は「字幕を強制表示しない」程度であり、完全無効化ではない
           cc_load_policy: 0,
           // showinfo は新仕様では非推奨だが、古いクライアント向けにタイトル抑止として残す
           showinfo: 0,
-          enablejsapi: 1,
           vq: "hd2160",
           origin: window.location.origin,
         },
@@ -135,6 +142,17 @@ export function YoutubePlayer({
           onReady: () => {
             if (disposed) return;
             const p = playerRef.current;
+
+            // 字幕モジュールの unload を試行する。
+            // cc_load_policy=0 だけでは環境や動画設定によって字幕が出る場合があるため、
+            // IFrame API 経由でも抑制を試みる。ただし完全な字幕無効化は保証できない。
+            try {
+              p?.unloadModule?.("captions");
+              p?.unloadModule?.("cc");
+            } catch {
+              /* 環境によっては unloadModule が無効な場合がある — noop */
+            }
+
             setReady(true);
             setDuration(p?.getDuration?.() ?? 0);
             setVolume(p?.getVolume?.() ?? 100);

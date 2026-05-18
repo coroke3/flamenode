@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import styles from "./page.module.css";
-import { getDatabase } from "@/lib/cloudflare";
+import { getDatabase, withDatabase } from "@/lib/cloudflare";
 import {
   countPublicVideos,
   fetchPublicVideos,
@@ -34,28 +34,24 @@ export default async function ListPage({
   const pageNum = Math.max(1, parseInt(page, 10) || 1);
   const offset = (pageNum - 1) * PAGE_SIZE;
 
-  const db = getDatabase();
-  let videos: VideoCardData[] = [];
-  let total = 0;
-  if (db) {
-    try {
-      [videos, total] = await Promise.all([
-        fetchPublicVideos(db, {
-          q,
-          sort: sort as "new" | "old" | "score",
-          eventId: event || undefined,
-          limit: PAGE_SIZE,
-          offset,
-        }),
-        countPublicVideos(db, {
-          q,
-          eventId: event || undefined,
-        }),
-      ]);
-    } catch (e) {
-      console.error("[ListPage] fetch failed", e);
-    }
-  }
+  const data = await withDatabase(async (db) => {
+    const [videos, total] = await Promise.all([
+      fetchPublicVideos(db, {
+        q,
+        sort: sort as "new" | "old" | "score",
+        eventId: event || undefined,
+        limit: PAGE_SIZE,
+        offset,
+      }),
+      countPublicVideos(db, {
+        q,
+        eventId: event || undefined,
+      }),
+    ]);
+    return { videos, total };
+  });
+
+  const { videos = [], total = 0 } = data ?? {};
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const params = (override: Partial<SearchParams> = {}) => {

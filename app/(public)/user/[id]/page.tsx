@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { and, desc, eq, ne, or, sql } from "drizzle-orm";
 import styles from "./page.module.css";
-import { getDatabase } from "@/lib/cloudflare";
+import { getDatabase, withDatabase } from "@/lib/cloudflare";
 import { customPages, videos, videoMembers, xUsers } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
@@ -26,9 +26,7 @@ interface ProfileUser {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const id = normalizeXId((await params).id);
-  const db = getDatabase();
-  if (!db) return { title: id };
-  try {
+  const data = await withDatabase(async (db) => {
     const u = await db
       .select()
       .from(xUsers)
@@ -50,125 +48,129 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
       .limit(1);
     return { title: fallback[0]?.name ?? id };
-  } catch {
-    // Miniflare D1 が稀に transient エラーを返すため metadata で 500 を出さない
-    return { title: id };
-  }
+  });
+  return data ?? { title: id };
 }
 
 export default async function UserPage({
   params,
 }: Props): Promise<React.ReactElement> {
   const id = normalizeXId((await params).id);
-  const db = getDatabase();
-  if (!db) notFound();
 
-  const userRow = await db
-    .select()
-    .from(xUsers)
-    .where(eq(xUsers.id, id))
-    .limit(1);
-  const publicVideoBase = and(
-    eq(videos.status, "public"),
-    eq(videos.is_deleted, 0),
-    eq(videos.is_manual_hidden, 0),
-  );
+  const bundle = await withDatabase(async (db) => {
+    const userRow = await db
+      .select()
+      .from(xUsers)
+      .where(eq(xUsers.id, id))
+      .limit(1);
+    const publicVideoBase = and(
+      eq(videos.status, "public"),
+      eq(videos.is_deleted, 0),
+      eq(videos.is_manual_hidden, 0),
+    );
 
-  const fallbackUserRows = userRow[0]
-    ? []
-    : await db
-        .select({
-          id: videos.contact_x_id,
-          x_name: sql<string>`COALESCE(${videos.display_name}, ${videos.contact_x_id})`,
-          icon_url: videos.icon_url,
-          profile_text: sql<string | null>`NULL`,
-          youtube_channel_url: sql<string | null>`NULL`,
-        })
-        .from(videos)
-        .where(
-          and(
-            publicVideoBase,
-            or(eq(videos.creator_id, id), eq(videos.contact_x_id, id))!,
-          )!,
-        )
-        .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
-        .limit(1);
+    const fallbackUserRows = userRow[0]
+      ? []
+      : await db
+          .select({
+            id: videos.contact_x_id,
+            x_name: sql<string>`COALESCE(${videos.display_name}, ${videos.contact_x_id})`,
+            icon_url: videos.icon_url,
+            profile_text: sql<string | null>`NULL`,
+            youtube_channel_url: sql<string | null>`NULL`,
+          })
+          .from(videos)
+          .where(
+            and(
+              publicVideoBase,
+              or(eq(videos.creator_id, id), eq(videos.contact_x_id, id))!,
+            )!,
+          )
+          .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
+          .limit(1);
 
-  const user: ProfileUser | null = userRow[0]
-    ? {
-        id: userRow[0].id,
-        x_name: userRow[0].x_name,
-        icon_url: userRow[0].icon_url,
-        profile_text: userRow[0].profile_text,
-        youtube_channel_url: userRow[0].youtube_channel_url,
-      }
-    : (fallbackUserRows[0] ?? null);
-  if (!user) notFound();
+    const user: ProfileUser | null = userRow[0]
+      ? {
+          id: userRow[0].id,
+          x_name: userRow[0].x_name,
+          icon_url: userRow[0].icon_url,
+          profile_text: userRow[0].profile_text,
+          youtube_channel_url: userRow[0].youtube_channel_url,
+        }
+      : (fallbackUserRows[0] ?? null);
+    if (!user) return null;
 
-  const ownVideosRaw = await db
-    .select({
-      id: videos.id,
-      title: videos.title,
-      youtube_video_id: videos.youtube_video_id,
-      display_name: videos.display_name,
-      icon_url: videos.icon_url,
-      creator_id: videos.creator_id,
-      primary_event_id: videos.primary_event_id,
-      scheduled_time: videos.scheduled_time,
-      status: videos.status,
-    })
-    .from(videos)
-    .where(
-      and(
-        publicVideoBase,
-        or(eq(videos.creator_id, id), eq(videos.contact_x_id, id))!,
-      )!,
-    )
-    .orderBy(desc(videos.scheduled_time));
+    const ownVideosRaw = await db
+      .select({
+        id: videos.id,
+        title: videos.title,
+        youtube_video_id: videos.youtube_video_id,
+        display_name: videos.display_name,
+        icon_url: videos.icon_url,
+        creator_id: videos.creator_id,
+        primary_event_id: videos.primary_event_id,
+        scheduled_time: videos.scheduled_time,
+        status: videos.status,
+      })
+      .from(videos)
+      .where(
+        and(
+          publicVideoBase,
+          or(eq(videos.creator_id, id), eq(videos.contact_x_id, id))!,
+        )!,
+      )
+      .orderBy(desc(videos.scheduled_time));
 
-  // 作品の icon_url が空の場合は作者本人のアイコンへフォールバック。
-  const ownVideos = ownVideosRaw.map((v) => ({
-    ...v,
-    display_name: user.x_name || v.display_name || user.id,
-    icon_url: v.icon_url ?? user.icon_url,
-  })) as VideoCardData[];
+    const ownVideos = ownVideosRaw.map((v) => ({
+      ...v,
+      display_name: user.x_name || v.display_name || user.id,
+      icon_url: v.icon_url ?? user.icon_url,
+    })) as VideoCardData[];
 
-  const collabVideos = (await db
-    .select({
-      id: videos.id,
-      title: videos.title,
-      youtube_video_id: videos.youtube_video_id,
-      display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
-      icon_url: sql<
-        string | null
-      >`COALESCE(${videos.icon_url}, ${xUsers.icon_url})`,
-      creator_id: videos.creator_id,
-      primary_event_id: videos.primary_event_id,
-      scheduled_time: videos.scheduled_time,
-      status: videos.status,
-    })
-    .from(videos)
-    .innerJoin(videoMembers, eq(videos.id, videoMembers.video_id))
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
-    .where(
-      and(
-        publicVideoBase,
-        eq(videoMembers.x_user_id, id),
-        ne(videos.creator_id, id),
-      )!,
-    )
-    .orderBy(desc(videos.scheduled_time))
-    .limit(40)) as VideoCardData[];
+    const collabVideos = (await db
+      .select({
+        id: videos.id,
+        title: videos.title,
+        youtube_video_id: videos.youtube_video_id,
+        display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
+        icon_url: sql<
+          string | null
+        >`COALESCE(${videos.icon_url}, ${xUsers.icon_url})`,
+        creator_id: videos.creator_id,
+        primary_event_id: videos.primary_event_id,
+        scheduled_time: videos.scheduled_time,
+        status: videos.status,
+      })
+      .from(videos)
+      .innerJoin(videoMembers, eq(videos.id, videoMembers.video_id))
+      .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+      .where(
+        and(
+          publicVideoBase,
+          eq(videoMembers.x_user_id, id),
+          ne(videos.creator_id, id),
+        )!,
+      )
+      .orderBy(desc(videos.scheduled_time))
+      .limit(40)) as VideoCardData[];
 
-  const profileName = user.x_name || ownVideos[0]?.display_name || `@${user.id}`;
-  const profileIcon = user.icon_url ?? ownVideos.find((v) => v.icon_url)?.icon_url ?? null;
-  const portfolio = (
-    await db
-      .select({ id: customPages.id })
-      .from(customPages)
-      .where(and(eq(customPages.x_user_id, user.id), eq(customPages.is_published, 1))!)
-      .limit(1)
-  )[0];
+    const portfolio = (
+      await db
+        .select({ id: customPages.id })
+        .from(customPages)
+        .where(and(eq(customPages.x_user_id, user.id), eq(customPages.is_published, 1))!)
+        .limit(1)
+    )[0];
+
+    return { user, ownVideos, collabVideos, portfolio };
+  });
+
+  if (!bundle) notFound();
+  const { user, ownVideos, collabVideos, portfolio } = bundle;
+
+  // 派生情報 (withDatabase closure 外で表示用に整形)
+  const profileIcon = user.icon_url ?? null;
+  const profileName = user.x_name || user.id;
 
   return (
     <div className={styles.page}>

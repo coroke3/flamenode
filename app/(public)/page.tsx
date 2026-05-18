@@ -1,8 +1,8 @@
 import * as React from "react";
 import Link from "next/link";
 import styles from "./page.module.css";
-import { eq, sql } from "drizzle-orm";
-import { getDatabase } from "@/lib/cloudflare";
+import { sql } from "drizzle-orm";
+import { withDatabase } from "@/lib/cloudflare";
 import {
   fetchActiveEvents,
   fetchLatestEvents,
@@ -12,7 +12,10 @@ import {
   fetchVideosForEvent,
 } from "@/lib/db/queries";
 import { slots as slotsTable } from "@/lib/db/schema";
-import { HomeIntroBand } from "@/components/layout/HomeIntroBand";
+import {
+  HomeIntroBand,
+  type HomeIntroSlotStat,
+} from "@/components/layout/HomeIntroBand";
 import { Shelf } from "@/components/layout/Shelf";
 import { SectionHeader } from "@/components/layout/SectionHeader";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
@@ -33,57 +36,66 @@ function shuffle<T>(arr: T[]): T[] {
 }
 
 export default async function TopPage(): Promise<React.ReactElement> {
-  const db = getDatabase();
+  const data = await withDatabase(async (db) => {
+    const [activeEvents, recommendedRaw, latest, creators, latestEvents] =
+      await Promise.all([
+        fetchActiveEvents(db),
+        fetchRecommendedVideos(db, 40).then((rs) => shuffle(rs).slice(0, 30)),
+        fetchLatestVideos(db, 30),
+        fetchPickupCreators(db, 30),
+        fetchLatestEvents(db, 3),
+      ]);
 
-  let activeEvents: Awaited<ReturnType<typeof fetchActiveEvents>> = [];
-  let recommended: VideoCardData[] = [];
-  let latest: VideoCardData[] = [];
-  let creators: Awaited<ReturnType<typeof fetchPickupCreators>> = [];
-  let latestEvents: Awaited<ReturnType<typeof fetchLatestEvents>> = [];
-  let videosByEvent: Record<string, VideoCardData[]> = {};
-  let topSlotCounts = new Map<string, number>();
+    const eventVideoEntries = await Promise.all(
+      latestEvents.map(async (ev) => {
+        const vs = await fetchVideosForEvent(db, ev.id, 8);
+        return [ev.id, vs] as const;
+      }),
+    );
+    const videosByEvent = Object.fromEntries(eventVideoEntries);
 
-  if (db) {
-    try {
-      [activeEvents, recommended, latest, creators, latestEvents] =
-        await Promise.all([
-          fetchActiveEvents(db),
-          fetchRecommendedVideos(db, 40).then((rs) => shuffle(rs).slice(0, 30)),
-          fetchLatestVideos(db, 30),
-          fetchPickupCreators(db, 30),
-          fetchLatestEvents(db, 3),
-        ]);
-
-      const eventVideoEntries = await Promise.all(
-        latestEvents.map(async (ev) => {
-          const vs = await fetchVideosForEvent(db, ev.id, 8);
-          return [ev.id, vs] as const;
+    const topSlotStats = new Map<string, HomeIntroSlotStat>();
+    if (activeEvents.length > 0) {
+      const slotRows = await db
+        .select({
+          event_id: slotsTable.event_id,
+          available: sql<number>`SUM(CASE WHEN ${slotsTable.status} = 'available' THEN 1 ELSE 0 END)`,
+          total: sql<number>`COUNT(*)`,
+        })
+        .from(slotsTable)
+        .groupBy(slotsTable.event_id);
+      slotRows.forEach((row) =>
+        topSlotStats.set(row.event_id, {
+          available: Number(row.available ?? 0),
+          total: Number(row.total ?? 0),
         }),
       );
-      videosByEvent = Object.fromEntries(eventVideoEntries);
-
-      // activeEventsの残り枠数を取得 (トップページのイベントバンド用)
-      if (activeEvents.length > 0) {
-        const slotRows = await db
-          .select({
-            event_id: slotsTable.event_id,
-            count: sql<number>`COUNT(*)`,
-          })
-          .from(slotsTable)
-          .where(eq(slotsTable.status, "available"))
-          .groupBy(slotsTable.event_id);
-        slotRows.forEach((row) =>
-          topSlotCounts.set(row.event_id, Number(row.count ?? 0)),
-        );
-      }
-    } catch (e) {
-      console.error("[TopPage] DB query failed", e);
     }
-  }
+
+    return {
+      activeEvents,
+      recommended: recommendedRaw,
+      latest,
+      creators,
+      latestEvents,
+      videosByEvent,
+      topSlotStats,
+    };
+  });
+
+  const {
+    activeEvents = [],
+    recommended = [],
+    latest = [],
+    creators = [],
+    latestEvents = [],
+    videosByEvent = {},
+    topSlotStats = new Map<string, HomeIntroSlotStat>(),
+  } = data ?? {};
 
   return (
     <div className={styles.page}>
-      <HomeIntroBand activeEvents={activeEvents} slotCounts={topSlotCounts} />
+      <HomeIntroBand activeEvents={activeEvents} slotStats={topSlotStats} />
 
       <section className={styles.section} aria-labelledby="sec-recommend">
         <SectionHeader title="おすすめ" moreHref="/recommend" />

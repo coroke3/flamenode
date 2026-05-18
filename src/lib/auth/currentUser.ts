@@ -2,7 +2,7 @@ import "server-only";
 
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
-import { getDatabase } from "@/lib/cloudflare";
+import { getDatabase, withDatabase } from "@/lib/cloudflare";
 import { users } from "@/lib/db/schema";
 import { normalizeXId } from "@/lib/utils/xid";
 
@@ -36,10 +36,12 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     | undefined;
 
   if (!sessionUser?.id) return null;
+  // closure 内に narrowing が伝わらないため string に束縛し直す。
+  const userId: string = sessionUser.id;
 
   // DB 読めない fallback は TOS 未同意扱い (fail-closed)。
   const fallback: CurrentUser = {
-    id: sessionUser.id,
+    id: userId,
     name: sessionUser.name ?? "ゲスト",
     email: sessionUser.email ?? null,
     image: sessionUser.image ?? null,
@@ -54,11 +56,8 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     terms_reaccept_required: 0,
   };
 
-  const db = getDatabase();
-  if (!db) return fallback;
-
-  const row = (
-    await db
+  const row = await withDatabase(async (db) => {
+    const res = await db
       .select({
         id: users.id,
         name: users.name,
@@ -72,9 +71,10 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
         terms_reaccept_required: users.terms_reaccept_required,
       })
       .from(users)
-      .where(eq(users.id, sessionUser.id))
-      .limit(1)
-  )[0];
+      .where(eq(users.id, userId))
+      .limit(1);
+    return res[0] ?? null;
+  });
 
   if (!row) return fallback;
 

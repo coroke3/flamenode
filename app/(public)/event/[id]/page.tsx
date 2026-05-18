@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import styles from "./page.module.css";
-import { getDatabase } from "@/lib/cloudflare";
+import { getDatabase, withDatabase } from "@/lib/cloudflare";
 import {
   events as eventsTable,
   slots as slotsTable,
@@ -34,58 +34,64 @@ interface Props {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
-  const db = getDatabase();
-  if (!db) return { title: id };
-  try {
-    const ev = await db
+  const ev = await withDatabase(async (db) => {
+    const res = await db
       .select()
       .from(eventsTable)
       .where(eq(eventsTable.id, id))
       .limit(1);
-    return ev[0]?.title ? { title: ev[0].title } : { title: "イベント" };
-  } catch {
-    // Miniflare ローカル D1 が稀に ECONNRESET 等を返すことがあるが、
-    // metadata 失敗でページ全体を 500 にしない (本体側で notFound を判定する)
-    return { title: id };
-  }
+    return res[0] ?? null;
+  });
+  return ev?.title ? { title: ev.title } : { title: id };
 }
 
 export default async function EventDetailPage({
   params,
 }: Props): Promise<React.ReactElement> {
   const { id } = await params;
-  const db = getDatabase();
-  if (!db) notFound();
 
-  const data = await fetchEventWithEditors(db, id);
-  if (!data) notFound();
-  const { event, editors } = data;
+  const bundle = await withDatabase(async (db) => {
+    const data = await fetchEventWithEditors(db, id);
+    if (!data) return null;
 
-  // 作品取得 (上映順 = scheduled_time 昇順)
-  const eventVideos = (await db
-    .select({
-      id: videos.id,
-      title: videos.title,
-      youtube_video_id: videos.youtube_video_id,
-      display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
-      icon_url: sql<
-        string | null
-      >`COALESCE(${videos.icon_url}, ${xUsers.icon_url})`,
-      creator_id: videos.creator_id,
-      primary_event_id: videos.primary_event_id,
-      scheduled_time: videos.scheduled_time,
-      status: videos.status,
-    })
-    .from(videos)
-    .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
-    .where(
-      and(
-        eq(videoEvents.event_id, id),
-        eq(videos.is_deleted, 0),
-      )!,
-    )
-    .orderBy(asc(videos.scheduled_time))) as VideoCardData[];
+    // 作品取得 (上映順 = scheduled_time 昇順)
+    const eventVideos = (await db
+      .select({
+        id: videos.id,
+        title: videos.title,
+        youtube_video_id: videos.youtube_video_id,
+        display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
+        icon_url: sql<
+          string | null
+        >`COALESCE(${videos.icon_url}, ${xUsers.icon_url})`,
+        creator_id: videos.creator_id,
+        primary_event_id: videos.primary_event_id,
+        scheduled_time: videos.scheduled_time,
+        status: videos.status,
+      })
+      .from(videos)
+      .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
+      .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+      .where(
+        and(
+          eq(videoEvents.event_id, id),
+          eq(videos.is_deleted, 0),
+        )!,
+      )
+      .orderBy(asc(videos.scheduled_time))) as VideoCardData[];
+
+    // スロット
+    const slotRows = await db
+      .select()
+      .from(slotsTable)
+      .where(eq(slotsTable.event_id, id))
+      .orderBy(asc(slotsTable.start_time), asc(slotsTable.end_time), asc(slotsTable.sort_order));
+
+    return { data, eventVideos, slotRows };
+  });
+
+  if (!bundle) notFound();
+  const { data: { event, editors }, eventVideos, slotRows } = bundle;
 
   const visibleVideos = eventVideos.filter(
     (v) =>
@@ -93,13 +99,6 @@ export default async function EventDetailPage({
       v.status === "x_reapply_required" ||
       v.status === "unlisted",
   );
-
-  // スロット
-  const slotRows = await db
-    .select()
-    .from(slotsTable)
-    .where(eq(slotsTable.event_id, id))
-    .orderBy(asc(slotsTable.start_time), asc(slotsTable.end_time), asc(slotsTable.sort_order));
 
   const accentVar = event.accent_color
     ? ({ ["--event-accent" as never]: event.accent_color } as React.CSSProperties)

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { and, eq } from "drizzle-orm";
-import { getDatabase } from "@/lib/cloudflare";
+import { getDatabase, withDatabase } from "@/lib/cloudflare";
 import { customPages, xUsers } from "@/lib/db/schema";
 import { normalizeXId } from "@/lib/utils/xid";
 import { sanitizeUserHtml } from "@/lib/utils/sanitizeUserHtml";
@@ -19,18 +19,21 @@ export default async function PortfolioPage({
   params,
 }: Props): Promise<React.ReactElement> {
   const id = normalizeXId((await params).id);
-  const db = getDatabase();
-  if (!db) notFound();
-  const x = (await db.select().from(xUsers).where(eq(xUsers.id, id)).limit(1))[0];
-  if (!x) notFound();
-  const page = (
-    await db
-      .select()
-      .from(customPages)
-      .where(and(eq(customPages.x_user_id, id), eq(customPages.is_published, 1))!)
-      .limit(1)
-  )[0];
-  if (!page) notFound();
+  const bundle = await withDatabase(async (db) => {
+    const x = (await db.select().from(xUsers).where(eq(xUsers.id, id)).limit(1))[0];
+    if (!x) return null;
+    const page = (
+      await db
+        .select()
+        .from(customPages)
+        .where(and(eq(customPages.x_user_id, id), eq(customPages.is_published, 1))!)
+        .limit(1)
+    )[0];
+    if (!page) return null;
+    return { x, page };
+  });
+  if (!bundle) notFound();
+  const { x, page } = bundle;
 
   return (
     <main style={{ width: "min(96%, 960px)", margin: "0 auto", padding: "32px 16px 72px" }}>

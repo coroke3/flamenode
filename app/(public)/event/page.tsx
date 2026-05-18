@@ -3,7 +3,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import styles from "./page.module.css";
 import { desc } from "drizzle-orm";
-import { getDatabase } from "@/lib/cloudflare";
+import { getDatabase, withDatabase } from "@/lib/cloudflare";
 import { events as eventsTable } from "@/lib/db/schema";
 import { formatUnix } from "@/lib/utils/format";
 import {
@@ -28,18 +28,9 @@ function statusBadge(ev: EventRow): React.ReactElement {
 }
 
 export default async function EventListPage(): Promise<React.ReactElement> {
-  const db = getDatabase();
-  let events: EventRow[] = [];
-  if (db) {
-    try {
-      events = await db
-        .select()
-        .from(eventsTable)
-        .orderBy(desc(eventsTable.start_time));
-    } catch (e) {
-      console.error("[EventListPage] fetch failed", e);
-    }
-  }
+  const events = (await withDatabase(async (db) => {
+    return db.select().from(eventsTable).orderBy(desc(eventsTable.start_time));
+  })) ?? [];
 
   return (
     <div className={styles.page}>

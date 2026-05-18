@@ -6,19 +6,22 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px 4px 4px;
+  padding: 4px 8px 4px 4px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--border-subtle);
-  background-color: var(--accent-primary-soft);
+  background-color: var(--bg-surface);
   color: var(--text-primary);
   font-size: 12px;
   font-weight: 600;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease;
   cursor: pointer;
 }
 
 .trigger:hover {
-  border-color: var(--accent-primary);
+  border-color: var(--border-muted);
+  background-color: var(--bg-elevated);
 }
 
 .triggerIcon {
@@ -40,7 +43,7 @@
 }
 
 .triggerName {
-  max-width: 130px;
+  max-width: 90px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -50,11 +53,11 @@
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  width: 300px;
+  width: 280px;
   background-color: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-soft);
+  border-radius: var(--radius-md, 12px);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2);
   padding: 6px;
   z-index: 40;
 }
@@ -94,10 +97,12 @@
   text-align: left;
   transition: background-color 0.15s ease;
   cursor: pointer;
+  background: transparent;
+  border: 0;
 }
 
 .option:hover {
-  background-color: var(--accent-primary-soft);
+  background-color: var(--bg-elevated);
 }
 
 .option:disabled {
@@ -110,8 +115,8 @@
 }
 
 .optionIcon {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   object-fit: cover;
   flex-shrink: 0;
@@ -119,8 +124,8 @@
 }
 
 .optionIconFallback {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   background-color: var(--bg-elevated);
   display: grid;
@@ -170,9 +175,10 @@
   font-size: 12px;
   color: var(--text-secondary);
   border-radius: var(--radius-sm);
+  text-decoration: none;
 }
 
 .footerLink:hover {
-  background-color: var(--accent-primary-soft);
+  background-color: var(--bg-elevated);
   color: var(--text-primary);
 }

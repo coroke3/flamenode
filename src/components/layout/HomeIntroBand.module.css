@@ -4,6 +4,19 @@
   margin: 24px auto 0;
 }
 
+/* featured イベントがある時のラッパー。EventRecruitCard を全幅で表示する。 */
+.heroWrap {
+  position: relative;
+  width: min(96%, var(--content-max));
+  margin: 24px auto 0;
+}
+
+@media (min-width: 768px) {
+  .heroWrap {
+    margin-top: 28px;
+  }
+}
+
 .inner {
   position: relative;
   display: flex;

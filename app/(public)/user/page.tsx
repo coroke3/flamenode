@@ -3,7 +3,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { and, eq, isNull, like, ne, or, sql } from "drizzle-orm";
 import styles from "./page.module.css";
-import { getDatabase } from "@/lib/cloudflare";
+import { getDatabase, withDatabase } from "@/lib/cloudflare";
 import { videos, xUsers } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 
@@ -39,10 +39,8 @@ export default async function UserListPage({
 }): Promise<React.ReactElement> {
   const { q = "", sort = "score", page = "1" } = await searchParams;
   const pageNum = Math.max(1, Number.parseInt(page, 10) || 1);
-  const db = getDatabase();
-  let creators: CreatorListRow[] = [];
 
-  if (db) {
+  const creators = (await withDatabase(async (db) => {
     const keyword = q.trim();
     const filters = [
       or(eq(xUsers.approval_status, "approved"), eq(xUsers.approval_status, "pending"))!,
@@ -157,7 +155,7 @@ export default async function UserListPage({
       .where(and(...orphanFilters)!)
       .groupBy(videos.contact_x_id);
 
-    creators = [...rows, ...orphanRows]
+    return [...rows, ...orphanRows]
       .map((row) => ({
         ...row,
         own_count: Number(row.own_count) || 0,
@@ -165,7 +163,7 @@ export default async function UserListPage({
         total_count: Number(row.total_count) || 0,
       }))
       .filter((row) => row.total_count > 0 || row.profile_text || row.youtube_channel_url);
-  }
+  })) ?? [];
 
   creators.sort((a, b) => {
     if (sort === "name") return a.x_name.localeCompare(b.x_name, "ja");

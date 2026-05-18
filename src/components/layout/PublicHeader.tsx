@@ -7,6 +7,7 @@ import { Logo } from "@/components/ui/Logo";
 import { Icon } from "@/components/ui/Icon";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { XIdSwitcher, type XIdEntry } from "@/components/user/XIdSwitcher";
+import { AccountMenu } from "@/components/user/AccountMenu";
 import type { HeaderUser } from "@/lib/auth/headerUser";
 
 export type PublicHeaderUser = Pick<
@@ -20,11 +21,10 @@ interface PublicHeaderProps {
   user: PublicHeaderUser | null;
 }
 
-// 上部バーの常時ナビは最小化。作品一覧・イベント・クリエイター・おすすめ・ABOUTは除去。
-// 各ページは /list /event /recommend /about として存続するが、ナビには表示しない。
-
 export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
   const [mobileOpen, setMobileOpen] = React.useState(false);
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
+
   const managementLink = user?.management.canAccessAdmin
     ? { href: "/admin", label: "管理", icon: "settings" as const }
     : user?.management.canAccessManage
@@ -34,7 +34,11 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
   return (
     <header className={styles.header}>
       <div className={styles.bar}>
-        <Link href="/" className={styles.logoLink} aria-label="FlameNode トップへ">
+        <Link
+          href="/"
+          className={styles.logoLink}
+          aria-label="FlameNode トップへ"
+        >
           <Logo />
         </Link>
 
@@ -45,42 +49,45 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
             className={styles.searchForm}
             role="search"
             aria-label="サイト内検索"
+            onClick={() => searchInputRef.current?.focus()}
           >
-            <Icon name="search" size={13} aria-hidden />
+            <span className={styles.searchIcon}>
+              <Icon name="search" size={14} aria-hidden />
+            </span>
             <label htmlFor="header-search" className="fn-sr-only">
               検索
             </label>
             <input
               id="header-search"
+              ref={searchInputRef}
               type="search"
               name="q"
-              placeholder="作品・作者・イベント"
+              placeholder="作品を検索"
               autoComplete="off"
             />
           </form>
-          <ThemeToggle />
+
           {user ? (
-            <>
+            <div className={styles.actionNav}>
+              <Link href="/dashboard/post" className={styles.postBtn}>
+                <Icon name="edit" size={13} aria-hidden />
+                投稿
+              </Link>
               {managementLink ? (
-                <Link
-                  href={managementLink.href}
-                  className={`fn-btn fn-btn-ghost fn-btn-sm ${styles.dashLink}`}
-                >
+                <Link href={managementLink.href} className={styles.ghostBtn}>
                   <Icon name={managementLink.icon} size={13} aria-hidden />
                   {managementLink.label}
                 </Link>
               ) : null}
-              <Link href="/dashboard" className={`fn-btn fn-btn-ghost fn-btn-sm ${styles.dashLink}`}>
-                <Icon name="user" size={13} aria-hidden />
-                ダッシュボード
-              </Link>
-              <XIdSwitcher entries={user.xIds} discordName={user.name} />
-            </>
+              <AccountMenu user={user} />
+            </div>
           ) : (
-            <Link href="/entry" className="fn-btn fn-btn-primary fn-btn-sm">
-              <Icon name="discord" size={13} aria-hidden />
-              ログイン
-            </Link>
+            <div className={styles.actionNav}>
+              <Link href="/entry" className="fn-btn fn-btn-primary fn-btn-sm">
+                <Icon name="discord" size={13} aria-hidden />
+                ログイン
+              </Link>
+            </div>
           )}
 
           <button
@@ -98,35 +105,125 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
       {mobileOpen ? (
         <div className={styles.mobile}>
           <nav className={styles.mobileNav} aria-label="モバイルナビゲーション">
+            <form
+              action="/list"
+              method="get"
+              className={styles.mobileSearch}
+              role="search"
+              aria-label="サイト内検索"
+            >
+              <Icon name="search" size={14} aria-hidden />
+              <input
+                type="search"
+                name="q"
+                placeholder="作品を検索"
+                autoComplete="off"
+              />
+            </form>
+
             {!user ? (
-              <Link
-                href="/entry"
-                className={`fn-btn fn-btn-primary ${styles.mobileCta}`}
-                onClick={() => setMobileOpen(false)}
-              >
-                <Icon name="discord" size={14} aria-hidden />
-                Discord でログイン
-              </Link>
-            ) : (
-              <>
-                {managementLink ? (
-                  <Link
-                    href={managementLink.href}
-                    className={`fn-btn fn-btn-ghost ${styles.mobileCta}`}
-                    onClick={() => setMobileOpen(false)}
-                  >
-                    <Icon name={managementLink.icon} size={14} aria-hidden />
-                    {managementLink.label}
-                  </Link>
-                ) : null}
+              <div className={styles.mobileSection}>
                 <Link
-                  href="/dashboard"
-                  className={`fn-btn fn-btn-ghost ${styles.mobileCta}`}
+                  href="/entry"
+                  className={styles.mobileLink}
                   onClick={() => setMobileOpen(false)}
                 >
-                  <Icon name="user" size={14} aria-hidden />
-                  ダッシュボード
+                  <Icon name="discord" size={16} aria-hidden /> ログイン
                 </Link>
+                <Link
+                  href="/list"
+                  className={styles.mobileLink}
+                  onClick={() => setMobileOpen(false)}
+                >
+                  <Icon name="grid" size={16} aria-hidden /> 作品を見る
+                </Link>
+                <Link
+                  href="/event"
+                  className={styles.mobileLink}
+                  onClick={() => setMobileOpen(false)}
+                >
+                  <Icon name="calendar" size={16} aria-hidden /> イベントを見る
+                </Link>
+              </div>
+            ) : (
+              <>
+                <div className={styles.mobileSection}>
+                  <Link
+                    href="/dashboard/post"
+                    className={styles.mobileLink}
+                    onClick={() => setMobileOpen(false)}
+                  >
+                    <Icon name="edit" size={16} aria-hidden /> 投稿する
+                  </Link>
+                  <Link
+                    href="/dashboard"
+                    className={styles.mobileLink}
+                    onClick={() => setMobileOpen(false)}
+                  >
+                    <Icon name="grid" size={16} aria-hidden /> ダッシュボード
+                  </Link>
+                  <Link
+                    href="/dashboard/library"
+                    className={styles.mobileLink}
+                    onClick={() => setMobileOpen(false)}
+                  >
+                    <Icon name="bookmark" size={16} aria-hidden /> ライブラリ
+                  </Link>
+                  <Link
+                    href="/dashboard/settings"
+                    className={styles.mobileLink}
+                    onClick={() => setMobileOpen(false)}
+                  >
+                    <Icon name="settings" size={16} aria-hidden /> 設定
+                  </Link>
+                </div>
+
+                {managementLink ? (
+                  <>
+                    <div className={styles.mobileDivider} />
+                    <div className={styles.mobileSection}>
+                      <Link
+                        href={managementLink.href}
+                        className={styles.mobileLink}
+                        onClick={() => setMobileOpen(false)}
+                      >
+                        <Icon
+                          name={managementLink.icon}
+                          size={16}
+                          aria-hidden
+                        />{" "}
+                        {managementLink.label}
+                      </Link>
+                    </div>
+                  </>
+                ) : null}
+
+                <div className={styles.mobileDivider} />
+                <div className={styles.mobileSection}>
+                  <div className={styles.mobileSectionTitle}>X ID切替</div>
+                  <div className={styles.mobileXIdContainer}>
+                    <XIdSwitcher entries={user.xIds} discordName={user.name} />
+                  </div>
+                </div>
+
+                <div className={styles.mobileDivider} />
+                <div className={styles.mobileSection}>
+                  <div className={styles.mobileSectionTitle}>テーマ</div>
+                  <div style={{ padding: "0 12px" }}>
+                    <ThemeToggle />
+                  </div>
+                </div>
+
+                <div className={styles.mobileDivider} />
+                <div className={styles.mobileSection}>
+                  <Link
+                    href="/api/auth/signout"
+                    className={`${styles.mobileLink} ${styles.mobileLinkDanger}`}
+                    onClick={() => setMobileOpen(false)}
+                  >
+                    <Icon name="logout" size={16} aria-hidden /> ログアウト
+                  </Link>
+                </div>
               </>
             )}
           </nav>

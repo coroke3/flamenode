@@ -4,50 +4,47 @@ import styles from "./HomeIntroBand.module.css";
 import { Icon } from "@/components/ui/Icon";
 import type { events } from "@/lib/db/schema";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
-import { formatUnix } from "@/lib/utils/format";
+import { EventRecruitCard } from "./EventRecruitCard";
 
 type EventRow = typeof events.$inferSelect;
 
+export interface HomeIntroSlotStat {
+  available: number;
+  total: number;
+}
+
 interface HomeIntroBandProps {
   activeEvents: EventRow[];
-  /** event_id -> available スロット件数 */
-  slotCounts?: Map<string, number>;
+  /** event_id -> { available, total } の集計。available 単独で欲しい従来用途は available のみ参照される。 */
+  slotStats?: Map<string, HomeIntroSlotStat>;
 }
 
 /**
- * トップ最上部の短い導入帯。
- * 巨大ヒーローにせず、募集中イベントがあれば参加導線、なければ短いブランド帯を出す。
- * 高さはデスクトップ 180-250px、モバイル 150px 前後。
+ * トップ最上部の導入ブロック。
+ * - 募集中 / 開催中などの featured イベントがある → 募集カード (EventRecruitCard) を主役として全幅表示
+ * - 何もない → FlameNode のブランド帯 (作品一覧 / おすすめ 導線)
+ *
+ * 仕様: 募集カードは黒ベース + 黄色アクセントの「主役級UI」。
  */
 export function HomeIntroBand({
   activeEvents,
-  slotCounts,
+  slotStats,
 }: HomeIntroBandProps): React.ReactElement {
   const featured =
     activeEvents.find((e) => isAcceptingEntries(e)) ?? activeEvents[0];
-  const availableSlots = featured ? (slotCounts?.get(featured.id) ?? null) : null;
-  const now = Math.floor(Date.now() / 1000);
-  const accepting = featured ? isAcceptingEntries(featured) : false;
-  const entryNotStartedYet =
-    !!featured &&
-    !accepting &&
-    featured.is_entry_open === 1 &&
-    featured.entry_start_time != null &&
-    now < featured.entry_start_time;
-  const entryClosed =
-    !!featured &&
-    !accepting &&
-    featured.is_entry_open === 1 &&
-    featured.entry_end_time != null &&
-    now > featured.entry_end_time;
 
-  const eventLabel = accepting
-    ? "募集中イベント"
-    : entryNotStartedYet
-      ? "募集開始前のイベント"
-      : entryClosed
-        ? "募集終了済みイベント"
-        : "開催中イベント";
+  if (featured) {
+    const stat = slotStats?.get(featured.id);
+    return (
+      <section className={styles.heroWrap} aria-label="現在のイベント募集">
+        <EventRecruitCard
+          event={featured}
+          available={stat ? stat.available : null}
+          total={stat ? stat.total : null}
+        />
+      </section>
+    );
+  }
 
   return (
     <section className={styles.band} aria-label="FlameNode について">
@@ -61,138 +58,18 @@ export function HomeIntroBand({
               作品 · 作者 · イベント · 視聴者の接点を継続的につなぐ動画プラットフォーム。
             </span>
           </p>
-
-          {!featured ? (
-            <div className={styles.actions}>
-              <Link href="/list" className="fn-btn fn-btn-primary">
-                <Icon name="list" size={14} aria-hidden />
-                作品一覧から探す
-              </Link>
-              <Link href="/recommend" className="fn-btn fn-btn-ghost">
-                <Icon name="heart" size={14} aria-hidden />
-                おすすめ
-              </Link>
-            </div>
-          ) : null}
-        </div>
-
-        {featured ? (
-          <div className={styles.eventBox}>
-            <span className={styles.eventLabel}>
-              <Icon name="alert" size={12} aria-hidden />
-              {eventLabel}
-            </span>
-            <Link
-              href={`/event/${featured.id}`}
-              className={styles.eventTitle}
-            >
-              {featured.title}
+          <div className={styles.actions}>
+            <Link href="/list" className="fn-btn fn-btn-primary">
+              <Icon name="list" size={14} aria-hidden />
+              作品一覧から探す
             </Link>
-            {featured.explanation ? (
-              <p className={styles.eventExplain}>{featured.explanation}</p>
-            ) : null}
-            <dl className={styles.eventMeta}>
-              {featured.start_time ? (
-                <div className={styles.eventMetaItem}>
-                  <dt>
-                    <Icon name="calendar" size={11} aria-hidden />
-                    開催日時
-                  </dt>
-                  <dd>
-                    {formatUnix(featured.start_time)}
-                    {featured.end_time
-                      ? ` 〜 ${formatUnix(featured.end_time)}`
-                      : ""}
-                  </dd>
-                </div>
-              ) : null}
-              {isAcceptingEntries(featured) ? (
-                <div className={styles.eventMetaItem}>
-                  <dt>
-                    <Icon name="clock" size={11} aria-hidden />
-                    募集
-                  </dt>
-                  <dd>
-                    {featured.entry_start_time != null || featured.entry_end_time != null ? (
-                      <>
-                        募集期間:{" "}
-                        {featured.entry_start_time != null
-                          ? formatUnix(featured.entry_start_time)
-                          : ""}
-                        {" 〜 "}
-                        {featured.entry_end_time != null
-                          ? formatUnix(featured.entry_end_time)
-                          : ""}
-                        {featured.entry_end_time != null && featured.entry_end_time > now ? (
-                          <span style={{ marginLeft: 8, fontWeight: 700 }}>
-                            ({formatCountdown(featured.entry_end_time - now)}残)
-                          </span>
-                        ) : null}
-                      </>
-                    ) : (
-                      "受付中"
-                    )}
-                  </dd>
-                </div>
-              ) : entryNotStartedYet && featured.entry_start_time != null ? (
-                <div className={styles.eventMetaItem}>
-                  <dt>
-                    <Icon name="clock" size={11} aria-hidden />
-                    募集開始まで
-                  </dt>
-                  <dd>
-                    {formatCountdown(featured.entry_start_time - now)}
-                  </dd>
-                </div>
-              ) : null}
-              {availableSlots !== null ? (
-                <div className={styles.eventMetaItem}>
-                  <dt>
-                    <Icon name="list" size={11} aria-hidden />
-                    残り枠
-                  </dt>
-                  <dd>{availableSlots} 枠</dd>
-                </div>
-              ) : null}
-            </dl>
-            <p className={styles.howToJoin}>
-              参加するには Discord でログインし、スロットを確保してください。
-              <Link href="/entry" className={styles.howToJoinLink}>
-                参加方法を見る
-              </Link>
-            </p>
-            <div className={styles.eventActions}>
-              {isAcceptingEntries(featured) ? (
-                <Link
-                  href={`/event/${featured.id}#slot`}
-                  className="fn-btn fn-btn-primary fn-btn-sm"
-                >
-                  <Icon name="calendar" size={12} aria-hidden />
-                  スロットを確保する
-                </Link>
-              ) : null}
-              <Link
-                href={`/event/${featured.id}`}
-                className="fn-btn fn-btn-ghost fn-btn-sm"
-              >
-                イベントを見る
-                <Icon name="chevron-right" size={12} aria-hidden />
-              </Link>
-            </div>
+            <Link href="/recommend" className="fn-btn fn-btn-ghost">
+              <Icon name="heart" size={14} aria-hidden />
+              おすすめ
+            </Link>
           </div>
-        ) : null}
+        </div>
       </div>
     </section>
   );
-}
-
-/** 秒数を「○日○時間」「○時間○分」「○分」の形に整形する。 */
-function formatCountdown(seconds: number): string {
-  if (seconds <= 0) return "0分";
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  if (days >= 1) return `${days}日${hours}時間`;
-  if (hours >= 1) return `${hours}時間${minutes}分`;
-  return `${minutes}分`;
 }

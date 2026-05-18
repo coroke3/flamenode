@@ -63,8 +63,10 @@ export function XIdSwitcher({
   const sorted = [...entries].sort((a, b) => {
     if (a.x_user_id === activeId) return -1;
     if (b.x_user_id === activeId) return 1;
-    return order(a.approval_status) - order(b.approval_status) ||
-      a.x_name.localeCompare(b.x_name, "ja");
+    return (
+      order(a.approval_status) - order(b.approval_status) ||
+      a.x_name.localeCompare(b.x_name, "ja")
+    );
   });
 
   const active =
@@ -123,21 +125,23 @@ export function XIdSwitcher({
           </span>
         )}
         <span className={styles.triggerName}>
-          {active?.x_name ?? "X ID 未設定"}
+          {active ? `@${active.x_user_id}` : "未設定"}
         </span>
         {active?.approval_status === "pending" ? (
           <span
             className="fn-badge fn-badge-warning"
-            style={{ fontSize: 9, padding: "1px 6px" }}
+            style={{ fontSize: 9, padding: "1px 4px" }}
+            title="承認待ち"
           >
-            承認待ち
+            待
           </span>
         ) : active?.approval_status === "rejected" ? (
           <span
             className="fn-badge fn-badge-danger"
-            style={{ fontSize: 9, padding: "1px 6px" }}
+            style={{ fontSize: 9, padding: "1px 4px" }}
+            title="却下"
           >
-            却下
+            却
           </span>
         ) : null}
         <Icon name="chevron-down" size={12} aria-hidden />
@@ -214,7 +218,7 @@ function ApprovalBadge({
 }): React.ReactElement | null {
   if (status === "approved") return null;
   if (status === "pending") {
-    return <span className="fn-badge fn-badge-warning">承認待ち</span>;
+    return <span className="fn-badge fn-badge-warning" style={{ fontSize: 10, padding: "2px 6px" }}>承認待ち</span>;
   }
-  return <span className="fn-badge fn-badge-danger">却下</span>;
+  return <span className="fn-badge fn-badge-danger" style={{ fontSize: 10, padding: "2px 6px" }}>却下</span>;
 }

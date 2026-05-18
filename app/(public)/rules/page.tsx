@@ -1,7 +1,7 @@
 import * as React from "react";
 import type { Metadata } from "next";
 import { eq } from "drizzle-orm";
-import { getDatabase } from "@/lib/cloudflare";
+import { getDatabase, withDatabase } from "@/lib/cloudflare";
 import { termsVersions } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
@@ -82,26 +82,25 @@ function escape(s: string): string {
 }
 
 export default async function RulesPage(): Promise<React.ReactElement> {
-  const db = getDatabase();
-  let body = FALLBACK;
-  let updatedAt: number | null = null;
-  let versionLabel = "draft-2026-05";
-  if (db) {
-    try {
-      const rows = await db
-        .select()
-        .from(termsVersions)
-        .where(eq(termsVersions.status, "published"))
-        .limit(1);
-      if (rows[0]) {
-        body = rows[0].body_markdown;
-        updatedAt = rows[0].published_at ?? rows[0].updated_at;
-        versionLabel = rows[0].version_label;
-      }
-    } catch (e) {
-      console.error("[RulesPage] fetch failed", e);
+  const data = await withDatabase(async (db) => {
+    const rows = await db
+      .select()
+      .from(termsVersions)
+      .where(eq(termsVersions.status, "published"))
+      .limit(1);
+    if (rows[0]) {
+      return {
+        body: rows[0].body_markdown,
+        updatedAt: rows[0].published_at ?? rows[0].updated_at,
+        versionLabel: rows[0].version_label,
+      };
     }
-  }
+    return null;
+  });
+
+  const body = data?.body ?? FALLBACK;
+  const updatedAt = data?.updatedAt ?? null;
+  const versionLabel = data?.versionLabel ?? "draft-2026-05";
 
   return (
     <div

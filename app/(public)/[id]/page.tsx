@@ -6,7 +6,7 @@ import { and, eq } from "drizzle-orm";
 import styles from "./page.module.css";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { getApprovedXIds, canEditVideo } from "@/lib/auth/ownership";
-import { getDatabase } from "@/lib/cloudflare";
+import { getDatabase, withDatabase } from "@/lib/cloudflare";
 import { videoInteractions, videos as videosTable, xUsers } from "@/lib/db/schema";
 import {
   fetchEventPlaylistVideos,
@@ -39,23 +39,18 @@ interface Props {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
-  const db = getDatabase();
-  if (!db) return { title: id };
-  try {
-    const detail = await fetchVideoDetail(db, id);
-    if (!detail) return { title: id };
-    return {
-      title: `${detail.video.title} - ${detail.video.display_name}`,
-      openGraph: {
-        images: detail.video.youtube_video_id
-          ? [`https://i.ytimg.com/vi/${detail.video.youtube_video_id}/maxresdefault.jpg`]
-          : undefined,
-      },
-    };
-  } catch {
-    // Miniflare D1 が稀に transient エラーを返すため metadata で 500 を出さない
-    return { title: id };
-  }
+  const detail = await withDatabase(async (db) => {
+    return fetchVideoDetail(db, id);
+  });
+  if (!detail) return { title: id };
+  return {
+    title: `${detail.video.title} - ${detail.video.display_name}`,
+    openGraph: {
+      images: detail.video.youtube_video_id
+        ? [`https://i.ytimg.com/vi/${detail.video.youtube_video_id}/maxresdefault.jpg`]
+        : undefined,
+    },
+  };
 }
 
 export default async function VideoDetailPage({
@@ -64,172 +59,135 @@ export default async function VideoDetailPage({
 }: Props): Promise<React.ReactElement> {
   const { id: rawId } = await params;
   const { playlist = "" } = (await searchParams) ?? {};
-  const db = getDatabase();
-  if (!db) notFound();
 
-  // viewer 情報を先に解決して、private チャプター可視性に反映する。
   const viewerUser = await getCurrentUser();
-  const viewerApprovedXIds = viewerUser
-    ? await getApprovedXIds(db, viewerUser.id)
-    : [];
-
-  // canEditChapters 判定: 動画は idOrYoutube で引かないと参照できないので、
-  // 軽量に target video を先に引いて canEditVideo にかける。
-  // 取れない場合は private 可視を false で続行する (fetchVideoDetail 側で notFound 判定する)。
-  let viewerCanEditChapters = false;
-  if (viewerUser) {
-    const probe = (
-      await db
-        .select()
-        .from(videosTable)
-        .where(
-          rawId.length === 11
-            ? eq(videosTable.youtube_video_id, rawId)
-            : eq(videosTable.id, rawId),
-        )
-        .limit(1)
-    )[0];
-    if (probe) {
-      viewerCanEditChapters = await canEditVideo({
-        db,
-        user: { id: viewerUser.id, role: viewerUser.role ?? null },
-        video: probe,
-        requiredKey: "video.chapter_admin",
-      });
-    }
-  }
-
-  const detail = await fetchVideoDetail(db, rawId, {
-    id: viewerUser?.id ?? null,
-    role: viewerUser?.role ?? null,
-    approvedXIds: viewerApprovedXIds,
-    canEditChapters: viewerCanEditChapters,
-  });
-  if (!detail) notFound();
-  const { video, creator, events, members, chapters } = detail;
-
-  if (
-    video.youtube_video_id &&
-    rawId !== video.youtube_video_id &&
-    rawId === video.id
-  ) {
-    redirect(`/${video.youtube_video_id}${playlist ? `?playlist=${encodeURIComponent(playlist)}` : ""}`);
-  }
-
-  if (
-    video.status !== "public" &&
-    video.status !== "x_reapply_required" &&
-    video.status !== "unlisted"
-  ) {
-    notFound();
-  }
-
-  const youtubeId = video.youtube_video_id ?? extractYoutubeId(rawId) ?? null;
-  const primaryEvent = events.find((e) => e.id === video.primary_event_id) ?? events[0];
-  const primaryEventStatus = primaryEvent ? computeEventStatus(primaryEvent) : null;
-  const accentColor = primaryEvent?.accent_color ?? null;
-  const accentVar = accentColor
-    ? ({ ["--event-accent" as never]: accentColor } as React.CSSProperties)
-    : undefined;
-
-  const creatorId = creator?.id ?? video.creator_id ?? video.contact_x_id;
-  const creatorName = creator?.x_name ?? video.display_name ?? creatorId;
-  const creatorIcon = creator?.icon_url ?? video.icon_url ?? null;
-  const creatorHref = creatorId && creatorId !== "anonymous" ? `/user/${creatorId}` : null;
-
-  const chapterMarkers = chapters
-    .filter((c) => c.show_on_player_bar === 1 || c.marker_kind === "chapter")
-    .map((c) => ({
-      id: c.id,
-      time: c.chapter_time,
-      label: c.chapter_label,
-      visibility: (c.visibility ?? "public") as "public" | "private",
-      marker_kind: (c.marker_kind ?? "comment") as
-        | "comment"
-        | "chapter"
-        | "review"
-        | "system",
-      is_owner: c.visibility === "private",
-    }));
-
-  const related = (await fetchRelatedVideos(db, {
-    id: video.id,
-    creator_id: video.creator_id,
-    primary_event_id: video.primary_event_id,
-  })) as VideoCardData[];
-
   const viewerActiveX = viewerUser?.active_x_user_id ?? null;
-  let likeActive = false;
-  let bookmarkActive = false;
-  let viewerXApproved = false;
-  if (viewerActiveX) {
-    const interactions = await db
-      .select()
-      .from(videoInteractions)
-      .where(
-        and(
-          eq(videoInteractions.x_user_id, viewerActiveX),
-          eq(videoInteractions.video_id, video.id),
-        )!,
-      );
-    likeActive = interactions.some((i) => i.interaction_type === "like");
-    bookmarkActive = interactions.some((i) => i.interaction_type === "bookmark");
 
-    // チャプター/コメント投稿許可は「承認済 X ID」必須
-    const xRow = (
-      await db
-        .select({ approval_status: xUsers.approval_status })
-        .from(xUsers)
-        .where(eq(xUsers.id, viewerActiveX))
-        .limit(1)
-    )[0];
-    viewerXApproved = xRow?.approval_status === "approved";
-  }
+  const bundle = await withDatabase(async (db) => {
+    const viewerApprovedXIds = viewerUser
+      ? await getApprovedXIds(db, viewerUser.id)
+      : [];
 
-  // 再生リスト表示は「`?playlist=...` クエリ付きでアクセスしたとき」だけ。
-  // primary_event_id の自動展開は廃止 (ユーザー要望)。
-  let playlistLabel = "再生リスト";
-  let playlistItems: {
-    id: string;
-    title: string;
-    youtube_video_id: string | null;
-    display_name: string;
-  }[] = [];
-
-  if (playlist) {
-    if (playlist === "lib-like" || playlist === "lib-bookmark") {
-      // 自分のライブラリ (要ログイン + active X ID)
-      if (viewerActiveX) {
-        const kind = playlist === "lib-like" ? "like" : "bookmark";
-        const myInteractions = await db
-          .select({ video_id: videoInteractions.video_id })
-          .from(videoInteractions)
+    let viewerCanEditChapters = false;
+    if (viewerUser) {
+      const probe = (
+        await db
+          .select()
+          .from(videosTable)
           .where(
-            and(
-              eq(videoInteractions.x_user_id, viewerActiveX),
-              eq(videoInteractions.interaction_type, kind),
-            )!,
-          );
-        const ids = myInteractions.map((r) => r.video_id);
-        if (ids.length > 0) {
-          const { videos: videosTable } = await import("@/lib/db/schema");
-          const { inArray } = await import("drizzle-orm");
-          const rows = await db
-            .select({
-              id: videosTable.id,
-              title: videosTable.title,
-              youtube_video_id: videosTable.youtube_video_id,
-              display_name: videosTable.display_name,
-            })
-            .from(videosTable)
+            rawId.length === 11
+              ? eq(videosTable.youtube_video_id, rawId)
+              : eq(videosTable.id, rawId),
+          )
+          .limit(1)
+      )[0];
+      if (probe) {
+        viewerCanEditChapters = await canEditVideo({
+          db,
+          user: { id: viewerUser.id, role: viewerUser.role ?? null },
+          video: probe,
+          requiredKey: "video.chapter_admin",
+        });
+      }
+    }
+
+    const detail = await fetchVideoDetail(db, rawId, {
+      id: viewerUser?.id ?? null,
+      role: viewerUser?.role ?? null,
+      approvedXIds: viewerApprovedXIds,
+      canEditChapters: viewerCanEditChapters,
+    });
+    if (!detail) return null;
+
+    const related = (await fetchRelatedVideos(db, {
+      id: detail.video.id,
+      creator_id: detail.video.creator_id,
+      primary_event_id: detail.video.primary_event_id,
+    })) as VideoCardData[];
+
+    let likeActive = false;
+    let bookmarkActive = false;
+    let viewerXApproved = false;
+    if (viewerActiveX) {
+      const interactions = await db
+        .select()
+        .from(videoInteractions)
+        .where(
+          and(
+            eq(videoInteractions.x_user_id, viewerActiveX),
+            eq(videoInteractions.video_id, detail.video.id),
+          )!,
+        );
+      likeActive = interactions.some((i) => i.interaction_type === "like");
+      bookmarkActive = interactions.some((i) => i.interaction_type === "bookmark");
+
+      const xRow = (
+        await db
+          .select({ approval_status: xUsers.approval_status })
+          .from(xUsers)
+          .where(eq(xUsers.id, viewerActiveX))
+          .limit(1)
+      )[0];
+      viewerXApproved = xRow?.approval_status === "approved";
+    }
+
+    let playlistLabel = "再生リスト";
+    let playlistItems: {
+      id: string;
+      title: string;
+      youtube_video_id: string | null;
+      display_name: string;
+    }[] = [];
+
+    if (playlist) {
+      if (playlist === "lib-like" || playlist === "lib-bookmark") {
+        if (viewerActiveX) {
+          const kind = playlist === "lib-like" ? "like" : "bookmark";
+          const myInteractions = await db
+            .select({ video_id: videoInteractions.video_id })
+            .from(videoInteractions)
             .where(
               and(
-                inArray(videosTable.id, ids),
-                eq(videosTable.is_deleted, 0),
+                eq(videoInteractions.x_user_id, viewerActiveX),
+                eq(videoInteractions.interaction_type, kind),
               )!,
             );
-          playlistLabel = kind === "like" ? "いいねした作品" : "セーブした作品";
-          playlistItems = rows.map((v) => ({
+          const ids = myInteractions.map((r) => r.video_id);
+          if (ids.length > 0) {
+            const { videos: videosTable } = await import("@/lib/db/schema");
+            const { inArray } = await import("drizzle-orm");
+            const rows = await db
+              .select({
+                id: videosTable.id,
+                title: videosTable.title,
+                youtube_video_id: videosTable.youtube_video_id,
+                display_name: videosTable.display_name,
+              })
+              .from(videosTable)
+              .where(
+                and(
+                  inArray(videosTable.id, ids),
+                  eq(videosTable.is_deleted, 0),
+                )!,
+              );
+            playlistLabel = kind === "like" ? "いいねした作品" : "セーブした作品";
+            playlistItems = rows.map((v) => ({
+              id: v.id,
+              title: v.title,
+              youtube_video_id: v.youtube_video_id,
+              display_name: v.display_name,
+            }));
+          }
+        }
+      } else {
+        const evVideos = await fetchEventPlaylistVideos(db, playlist);
+        if (evVideos.length > 1) {
+          const eventTitle =
+            detail.events.find((e) => e.id === playlist)?.title ??
+            detail.events.find((e) => e.id === detail.video.primary_event_id)?.title ??
+            "イベント";
+          playlistLabel = `${eventTitle} 上映順`;
+          playlistItems = evVideos.map((v) => ({
             id: v.id,
             title: v.title,
             youtube_video_id: v.youtube_video_id,
@@ -237,24 +195,53 @@ export default async function VideoDetailPage({
           }));
         }
       }
-    } else {
-      // イベント ID として解釈
-      const evVideos = await fetchEventPlaylistVideos(db, playlist);
-      if (evVideos.length > 1) {
-        const eventTitle =
-          events.find((e) => e.id === playlist)?.title ??
-          primaryEvent?.title ??
-          "イベント";
-        playlistLabel = `${eventTitle} 上映順`;
-        playlistItems = evVideos.map((v) => ({
-          id: v.id,
-          title: v.title,
-          youtube_video_id: v.youtube_video_id,
-          display_name: v.display_name,
-        }));
-      }
     }
-  }
+
+    return {
+      detail,
+      related,
+      likeActive,
+      bookmarkActive,
+      viewerXApproved,
+      playlistLabel,
+      playlistItems,
+    };
+  });
+
+  if (!bundle) notFound();
+  const {
+    detail: { video, creator, events, members, chapters },
+    related,
+    likeActive,
+    bookmarkActive,
+    viewerXApproved,
+    playlistLabel,
+    playlistItems,
+  } = bundle;
+
+  const creatorIcon = creator?.icon_url ?? video.icon_url ?? null;
+  const creatorName = creator?.x_name ?? video.display_name ?? "作者未設定";
+  const creatorId = creator?.id ?? video.contact_x_id ?? "anonymous";
+  const creatorHref = creator?.id && creator.id !== "anonymous" ? `/user/${creator.id}` : null;
+  const youtubeId = video.youtube_video_id ? extractYoutubeId(video.youtube_video_id) : null;
+
+  const primaryEvent = events.find((e) => e.id === video.primary_event_id) ?? events[0] ?? null;
+  const primaryEventStatus = primaryEvent ? computeEventStatus(primaryEvent) : null;
+  const accentColor = primaryEvent?.accent_color ?? "#ffd100";
+  const accentVar = primaryEvent?.accent_color
+    ? ({ ["--event-accent" as never]: primaryEvent.accent_color } as React.CSSProperties)
+    : undefined;
+
+  const chapterMarkers = chapters.map((c) => ({
+    id: c.id,
+    time: c.chapter_time,
+    label: c.chapter_label,
+    visibility: (c.visibility ?? "public") as "public" | "private",
+    marker_kind: (c.marker_kind ?? "comment") as "comment" | "chapter" | "review" | "system",
+    note: c.note,
+    author_name: c.author_name,
+    author_icon: c.author_icon,
+  }));
 
   const authorBlock = (
     <span style={{ display: "flex", alignItems: "center", gap: 10 }}>

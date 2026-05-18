@@ -357,6 +357,8 @@ npx wrangler d1 migrations apply flamenode_db --local
 | `pages:dev` のビルドが遅い | 初回のみ `@cloudflare/next-on-pages` が依存解析するため。2 回目以降は数秒〜十数秒で起動 |
 | `.dev.vars` を編集しても反映されない | `pages:dev` を Ctrl+C で止めて再起動が必要 |
 | Windows で `&&` が使えない | PowerShell では `;` で繋ぐか、コマンドを 1 行ずつ実行 |
+| `Cannot find module './vendor-chunks/...'` エラー | 本番ビルド (`npm run build`) と開発モードのキャッシュ競合。`npm run clean:next` または `npm run dev:clean` を実行して `.next` キャッシュを削除 |
+
 
 ---
 

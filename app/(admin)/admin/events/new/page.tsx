@@ -5,6 +5,7 @@ import { Icon } from "@/components/ui/Icon";
 import { EventForm } from "@/components/admin/EventForm";
 
 export const metadata: Metadata = { title: "新規イベント作成" };
+export const dynamic = "force-dynamic";
 
 export default function AdminNewEventPage(): React.ReactElement {
   return (

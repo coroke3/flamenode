@@ -1,7 +1,7 @@
 import * as React from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { getDatabase } from "@/lib/cloudflare";
+import { getDatabase, withDatabase } from "@/lib/cloudflare";
 import {
   fetchLatestVideos,
   fetchPickupCreators,
@@ -17,23 +17,16 @@ export const metadata: Metadata = { title: "おすすめ" };
 export const dynamic = "force-dynamic";
 
 export default async function RecommendPage(): Promise<React.ReactElement> {
-  const db = getDatabase();
+  const data = await withDatabase(async (db) => {
+    const [recommended, latest, creators] = await Promise.all([
+      fetchRecommendedVideos(db, 60),
+      fetchLatestVideos(db, 30),
+      fetchPickupCreators(db, 40),
+    ]);
+    return { recommended, latest, creators };
+  });
 
-  let recommended: VideoCardData[] = [];
-  let latest: VideoCardData[] = [];
-  let creators: Awaited<ReturnType<typeof fetchPickupCreators>> = [];
-
-  if (db) {
-    try {
-      [recommended, latest, creators] = await Promise.all([
-        fetchRecommendedVideos(db, 60),
-        fetchLatestVideos(db, 30),
-        fetchPickupCreators(db, 40),
-      ]);
-    } catch (e) {
-      console.error("[RecommendPage] fetch failed", e);
-    }
-  }
+  const { recommended = [], latest = [], creators = [] } = data ?? {};
 
   const lead = recommended.slice(0, 3);
   const rest = recommended.slice(3);

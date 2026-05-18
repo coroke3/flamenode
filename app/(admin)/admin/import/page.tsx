@@ -4,6 +4,7 @@ import { Icon } from "@/components/ui/Icon";
 import { LegacyImportClient } from "@/components/admin/LegacyImportClient";
 
 export const metadata: Metadata = { title: "レガシーインポート" };
+export const dynamic = "force-dynamic";
 
 interface Props {
   searchParams: Promise<{ notice?: string }>;

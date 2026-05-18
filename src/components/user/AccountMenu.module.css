@@ -1,0 +1,349 @@
+.root {
+  position: relative;
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px 3px 3px;
+  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  background-color: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  height: 32px;
+}
+
+.trigger:hover,
+.triggerActive {
+  background-color: var(--bg-elevated);
+  border-color: var(--border-subtle);
+}
+
+.triggerAvatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  object-fit: cover;
+  background-color: var(--bg-elevated);
+  flex-shrink: 0;
+}
+
+.triggerAvatarFallback {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background-color: var(--bg-elevated);
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.triggerName {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badgeWarning {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--accent-warning);
+  flex-shrink: 0;
+}
+
+.badgeDanger {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--accent-danger);
+  flex-shrink: 0;
+}
+
+.popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 310px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg, 16px);
+  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.25);
+  padding: 12px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sectionTitle {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  padding: 0 8px 4px;
+}
+
+.headerInfo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  background-color: var(--bg-elevated);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+}
+
+.headerAvatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.headerAvatarFallback {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background-color: var(--bg-surface);
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.headerBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.headerName {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.headerId {
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statusNotice {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.noticeWarning {
+  background-color: var(--accent-warning-soft);
+  color: var(--accent-warning);
+  border: 1px solid var(--accent-warning);
+}
+
+.noticeDanger {
+  background-color: var(--accent-danger-soft);
+  color: var(--accent-danger);
+  border: 1px solid var(--accent-danger);
+}
+
+.noticeInfo {
+  background-color: var(--accent-primary-soft);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+  cursor: pointer;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  text-decoration: none;
+}
+
+.menuItem:hover {
+  color: var(--text-primary);
+  background-color: var(--bg-elevated);
+}
+
+.menuItemActive {
+  color: var(--accent-primary);
+  background-color: var(--accent-primary-soft);
+}
+
+.menuItemDisabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.menuItemDanger {
+  color: var(--accent-danger);
+}
+
+.menuItemDanger:hover {
+  background-color: var(--accent-danger-soft);
+  color: var(--accent-danger);
+}
+
+.xidOption {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  transition: background-color 0.15s ease;
+  cursor: pointer;
+  text-align: left;
+  background: transparent;
+  border: 0;
+}
+
+.xidOption:hover {
+  background-color: var(--bg-elevated);
+}
+
+.xidOptionActive {
+  background-color: var(--accent-primary-soft);
+}
+
+.xidOptionDisabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.xidAvatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.xidAvatarFallback {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background-color: var(--bg-elevated);
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.xidBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.xidName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.xidId {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkIcon {
+  color: var(--accent-primary);
+  flex-shrink: 0;
+}
+
+.divider {
+  height: 1px;
+  background-color: var(--border-subtle);
+  margin: 2px 0;
+}
+
+.themeGroup {
+  display: flex;
+  align-items: center;
+  background-color: var(--bg-elevated);
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+}
+
+.themeBtn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-radius: calc(var(--radius-sm) - 2px);
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.themeBtn:hover {
+  color: var(--text-primary);
+}
+
+.themeBtnActive {
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.error {
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background-color: var(--accent-danger-soft);
+  color: var(--accent-danger);
+  font-size: 12px;
+  line-height: 1.4;
+}

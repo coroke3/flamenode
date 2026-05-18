@@ -55,6 +55,7 @@ export async function buildHeaderUser(
   sessionUser: SessionUserLike | null | undefined,
 ): Promise<HeaderUser | null> {
   if (!sessionUser?.id) return null;
+  const userId: string = sessionUser.id;
 
   const db = getDatabase();
   let activeXId = normalizeXId(sessionUser.active_x_user_id) || null;
@@ -70,7 +71,7 @@ export async function buildHeaderUser(
           role: users.role,
         })
         .from(users)
-        .where(eq(users.id, sessionUser.id))
+        .where(eq(users.id, userId))
         .limit(1)
     )[0];
     activeXId = normalizeXId(userRow?.active_x_user_id) || activeXId;
@@ -84,7 +85,7 @@ export async function buildHeaderUser(
         approval_status: xUsers.approval_status,
       })
       .from(xUsers)
-      .where(eq(xUsers.linked_discord_user_id, sessionUser.id));
+      .where(eq(xUsers.linked_discord_user_id, userId));
 
     const withIconFallback = await resolveMissingIcons(
       db,

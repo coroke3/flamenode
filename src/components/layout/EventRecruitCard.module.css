@@ -1,0 +1,488 @@
+/*
+ * トップページ募集欄のメインヒーロー。
+ * 黒〜濃紺の深いベースに黄色アクセント。横長カード、左に情報、右に残り日数 / 残り枠 / CTA。
+ * 本セクションは theme に依存せず常に dark base で表示する。
+ */
+
+.card {
+  position: relative;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+  padding: 22px 22px;
+  border-radius: 16px;
+  background:
+    radial-gradient(120% 60% at 90% 0%, rgba(255, 212, 0, 0.08), transparent 60%),
+    linear-gradient(135deg, #0c0f14 0%, #141822 55%, #0c0f14 100%);
+  border: 1px solid rgba(255, 212, 0, 0.28);
+  color: #f8fafc;
+  overflow: hidden;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 8px 28px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(255, 212, 0, 0.04);
+  isolation: isolate;
+}
+
+.glow {
+  position: absolute;
+  inset: -40% -10% auto auto;
+  width: 60%;
+  height: 80%;
+  background: radial-gradient(closest-side, rgba(255, 212, 0, 0.18), transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.left,
+.right {
+  position: relative;
+  z-index: 1;
+}
+
+.left {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.right {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: stretch;
+}
+
+/* header */
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #ffd400;
+}
+
+.title {
+  display: inline-block;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  color: #f8fafc;
+  line-height: 1.1;
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.title:hover,
+.title:focus-visible {
+  color: #ffd400;
+}
+
+.stateBadge {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  background: rgba(255, 212, 0, 0.14);
+  border: 1px solid rgba(255, 212, 0, 0.4);
+  color: #ffd400;
+}
+
+.stateBadgePost {
+  background: rgba(96, 165, 250, 0.12);
+  border-color: rgba(96, 165, 250, 0.42);
+  color: #93c5fd;
+}
+
+.stateBadgeSoon {
+  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #fca5a5;
+}
+
+.stateBadgeFull {
+  background: rgba(248, 113, 113, 0.16);
+  border-color: rgba(248, 113, 113, 0.55);
+  color: #f87171;
+}
+
+.stateBadgeEnded,
+.stateBadgeBefore,
+.stateBadgeOngoing {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #cbd5e1;
+}
+
+/* timeline */
+
+.timeline {
+  position: relative;
+  margin-top: 4px;
+  padding-bottom: 32px;
+}
+
+.timelineTrack {
+  position: relative;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 9999px;
+  overflow: visible;
+}
+
+.timelineEntryRange {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 212, 0, 0.55),
+    rgba(255, 212, 0, 0.95)
+  );
+  border-radius: 9999px;
+  box-shadow: 0 0 12px rgba(255, 212, 0, 0.3);
+}
+
+.timelinePostRange {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(147, 197, 253, 0.45) 0,
+    rgba(147, 197, 253, 0.45) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+  border-radius: 9999px;
+}
+
+.timelineMilestone {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 12px;
+  background: rgba(255, 255, 255, 0.35);
+  transform: translateX(-1px);
+  border-radius: 1px;
+}
+
+.timelineMilestoneEmph {
+  background: rgba(255, 212, 0, 0.85);
+  box-shadow: 0 0 6px rgba(255, 212, 0, 0.5);
+}
+
+.timelineNow {
+  position: absolute;
+  top: -6px;
+  width: 3px;
+  height: 18px;
+  background: #ffd400;
+  border-radius: 2px;
+  transform: translateX(-1.5px);
+  box-shadow:
+    0 0 0 2px rgba(255, 212, 0, 0.18),
+    0 0 12px rgba(255, 212, 0, 0.7);
+}
+
+.timelineLabels {
+  position: relative;
+  height: 26px;
+  margin-top: 8px;
+}
+
+.timelineLabel {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.timelineLabelName {
+  font-size: 9px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+  letter-spacing: 0.06em;
+}
+
+.timelineLabelDate {
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(248, 250, 252, 0.85);
+}
+
+/* periods */
+
+.periods {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+
+.periodItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.periodItem dt {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.periodItem dd {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f8fafc;
+  font-variant-numeric: tabular-nums;
+}
+
+/* right column */
+
+.countdown {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: rgba(255, 212, 0, 0.06);
+  border: 1px solid rgba(255, 212, 0, 0.18);
+}
+
+.countdownLabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 212, 0, 0.85);
+}
+
+.countdownValueWrap {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  line-height: 1;
+}
+
+.countdownValue {
+  font-size: 48px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #ffd400;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 24px rgba(255, 212, 0, 0.35);
+}
+
+.countdownUnit {
+  font-size: 18px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+/* slots */
+
+.slots {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.slotsLow {
+  background: rgba(255, 176, 0, 0.08);
+  border-color: rgba(255, 176, 0, 0.4);
+}
+
+.slotsFull {
+  background: rgba(248, 113, 113, 0.1);
+  border-color: rgba(248, 113, 113, 0.45);
+}
+
+.slotsLabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.slotsValueWrap {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.slotsValue {
+  font-size: 24px;
+  font-weight: 800;
+  color: #f8fafc;
+}
+
+.slotsTotal {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.55);
+  font-weight: 600;
+}
+
+.slotsUnit {
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.7);
+  margin-left: 2px;
+}
+
+.slotsLow .slotsValue {
+  color: #ffb000;
+}
+
+.slotsFull .slotsValue {
+  color: #f87171;
+}
+
+.slotsHint {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.slotsLow .slotsHint {
+  color: #ffb000;
+}
+
+.slotsFull .slotsHint {
+  color: #f87171;
+}
+
+/* CTA */
+
+.cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 20px;
+  background: #ffd400;
+  color: #0c0f14;
+  border-radius: 9999px;
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  text-decoration: none;
+  box-shadow:
+    0 2px 14px rgba(255, 212, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.cta:hover {
+  transform: translateY(-1px);
+  background: #ffdf33;
+  box-shadow:
+    0 4px 18px rgba(255, 212, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.cta:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* desktop layout */
+
+@media (min-width: 768px) {
+  .card {
+    grid-template-columns: minmax(0, 1fr) 240px;
+    gap: 32px;
+    padding: 28px 32px;
+  }
+
+  .title {
+    font-size: 32px;
+  }
+
+  .right {
+    align-items: stretch;
+  }
+
+  .countdownValue {
+    font-size: 56px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .card {
+    grid-template-columns: minmax(0, 1fr) 280px;
+    padding: 32px 36px;
+  }
+
+  .title {
+    font-size: 36px;
+  }
+
+  .countdownValue {
+    font-size: 64px;
+  }
+}
+
+/* mobile fine-tune */
+
+@media (max-width: 480px) {
+  .card {
+    padding: 18px 16px;
+    border-radius: 14px;
+  }
+
+  .title {
+    font-size: 20px;
+  }
+
+  .countdown {
+    padding: 12px 14px;
+  }
+
+  .countdownValue {
+    font-size: 42px;
+  }
+
+  .timelineLabelName {
+    font-size: 8px;
+  }
+
+  .timelineLabelDate {
+    font-size: 9px;
+  }
+}

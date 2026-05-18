@@ -5,6 +5,7 @@ import { Icon } from "@/components/ui/Icon";
 import { AnnouncementForm } from "@/components/admin/AnnouncementForm";
 
 export const metadata: Metadata = { title: "新規お知らせ" };
+export const dynamic = "force-dynamic";
 
 export default function AdminAnnouncementNewPage(): React.ReactElement {
   return (
