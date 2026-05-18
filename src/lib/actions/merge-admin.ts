@@ -12,6 +12,7 @@ import {
   videoInteractions,
   videoMembers,
   videos,
+  xAccountLinkRequests,
   xUserAliases,
   xUsers,
 } from "@/lib/db/schema";
@@ -165,6 +166,17 @@ export async function mergeXIds(
     .update(xUsers)
     .set({ linked_discord_user_id: null })
     .where(and(eq(xUsers.id, fromXId))!);
+
+  // pending 状態の x_account_link_requests (link_type=merge, requested_x_id=fromXId, target_x_user_id=toXId)
+  // を一括で approved にする (UI からの承認ボタンを兼ねる)
+  await db.run(sql`
+    UPDATE x_account_link_requests
+    SET status = 'approved'
+    WHERE status = 'pending'
+      AND link_type = 'merge'
+      AND requested_x_id = ${fromXId}
+      AND target_x_user_id = ${toXId}
+  `);
 
   // 監査ログ (long_audit)
   await db.insert(historyLogs).values({

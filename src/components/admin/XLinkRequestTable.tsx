@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { approveXIdLinkRequest, rejectXIdLinkRequest } from "@/lib/actions/xid-admin";
+import { MergeRequestButton } from "@/components/admin/MergeRequestButton";
 import { formatUnix } from "@/lib/utils/format";
 import { Icon } from "@/components/ui/Icon";
 
@@ -152,14 +153,21 @@ export function XLinkRequestTable({
               </td>
               <td>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    className="fn-btn fn-btn-primary fn-btn-sm"
-                    disabled={pending}
-                    onClick={() => run(approveXIdLinkRequest, r.id)}
-                  >
-                    承認
-                  </button>
+                  {r.link_type === "merge" ? (
+                    <MergeRequestButton
+                      fromXId={r.requested_x_id}
+                      toXId={r.target_x_user_id ?? null}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className="fn-btn fn-btn-primary fn-btn-sm"
+                      disabled={pending}
+                      onClick={() => run(approveXIdLinkRequest, r.id)}
+                    >
+                      承認
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="fn-btn fn-btn-ghost fn-btn-sm"
