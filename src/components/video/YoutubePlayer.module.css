@@ -256,6 +256,12 @@
   background-color: rgba(0, 0, 0, 0.8);
   color: #fff;
   z-index: 4;
+  /* button タグ向けのリセット (初回再生まで iframe を完全に覆うために button 化している) */
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  appearance: none;
+  font: inherit;
 }
 
 .fallbackThumb img {

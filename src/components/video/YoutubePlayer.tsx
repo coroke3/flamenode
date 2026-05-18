@@ -87,6 +87,9 @@ export function YoutubePlayer({
   const [volume, setVolume] = React.useState(100);
   const [quality, setQuality] = React.useState<string | null>(null);
   const [overlayVisible, setOverlayVisible] = React.useState(true);
+  // 初回再生開始までは fallbackThumb で iframe を完全に覆い、
+  // YouTube 側のタイトル / 大きな ▶ などの UI を表に出さない。
+  const [hasInitiallyPlayed, setHasInitiallyPlayed] = React.useState(false);
   const hideTimer = React.useRef<number | null>(null);
 
   const requestBestQuality = React.useCallback(() => {
@@ -122,6 +125,8 @@ export function YoutubePlayer({
           fs: 0,
           iv_load_policy: 3,
           cc_load_policy: 0,
+          // showinfo は新仕様では非推奨だが、古いクライアント向けにタイトル抑止として残す
+          showinfo: 0,
           enablejsapi: 1,
           vq: "hd2160",
           origin: window.location.origin,
@@ -140,6 +145,7 @@ export function YoutubePlayer({
             const state = e?.data;
             if (state === YT.PlayerState.PLAYING) {
               setPlaying(true);
+              setHasInitiallyPlayed(true);
               setDuration(playerRef.current?.getDuration?.() ?? 0);
               requestBestQuality();
             } else if (state === YT.PlayerState.PAUSED) {
@@ -535,12 +541,24 @@ export function YoutubePlayer({
         </div>
       </div>
 
-      {!ready ? (
-        <div className={styles.fallbackThumb}>
+      {!ready || !hasInitiallyPlayed ? (
+        <button
+          type="button"
+          className={styles.fallbackThumb}
+          aria-label={ready ? "再生" : "読み込み中"}
+          onClick={() => {
+            if (!ready) return;
+            try {
+              playerRef.current?.playVideo?.();
+            } catch {
+              /* noop */
+            }
+          }}
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={youtubeThumbUrl(youtubeId, "maxresdefault")} alt="" />
           <Icon name="play" size={36} />
-        </div>
+        </button>
       ) : null}
 
       <noscript>
