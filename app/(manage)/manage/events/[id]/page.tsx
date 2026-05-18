@@ -35,14 +35,19 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
   const db = getDatabase();
   if (!db) return { title: id };
-  const ev = await db
-    .select({ title: eventsTable.title })
-    .from(eventsTable)
-    .where(eq(eventsTable.id, id))
-    .limit(1);
-  return ev[0]?.title
-    ? { title: `${ev[0].title} 運営` }
-    : { title: "イベント運営" };
+  try {
+    const ev = await db
+      .select({ title: eventsTable.title })
+      .from(eventsTable)
+      .where(eq(eventsTable.id, id))
+      .limit(1);
+    return ev[0]?.title
+      ? { title: `${ev[0].title} 運営` }
+      : { title: "イベント運営" };
+  } catch {
+    // Miniflare D1 が稀に transient エラーを返すため metadata で 500 を出さない
+    return { title: id };
+  }
 }
 
 type NotifCategory = "all" | "video" | "x_id" | "slot" | "chapter" | "system";

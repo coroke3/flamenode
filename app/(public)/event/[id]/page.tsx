@@ -36,12 +36,18 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
   const db = getDatabase();
   if (!db) return { title: id };
-  const ev = await db
-    .select()
-    .from(eventsTable)
-    .where(eq(eventsTable.id, id))
-    .limit(1);
-  return ev[0]?.title ? { title: ev[0].title } : { title: "イベント" };
+  try {
+    const ev = await db
+      .select()
+      .from(eventsTable)
+      .where(eq(eventsTable.id, id))
+      .limit(1);
+    return ev[0]?.title ? { title: ev[0].title } : { title: "イベント" };
+  } catch {
+    // Miniflare ローカル D1 が稀に ECONNRESET 等を返すことがあるが、
+    // metadata 失敗でページ全体を 500 にしない (本体側で notFound を判定する)
+    return { title: id };
+  }
 }
 
 export default async function EventDetailPage({

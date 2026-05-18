@@ -28,27 +28,32 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const id = normalizeXId((await params).id);
   const db = getDatabase();
   if (!db) return { title: id };
-  const u = await db
-    .select()
-    .from(xUsers)
-    .where(eq(xUsers.id, id))
-    .limit(1);
-  if (u[0]) return { title: u[0].x_name };
+  try {
+    const u = await db
+      .select()
+      .from(xUsers)
+      .where(eq(xUsers.id, id))
+      .limit(1);
+    if (u[0]) return { title: u[0].x_name };
 
-  const fallback = await db
-    .select({ name: sql<string>`COALESCE(${videos.display_name}, ${videos.contact_x_id})` })
-    .from(videos)
-    .where(
-      and(
-        eq(videos.status, "public"),
-        eq(videos.is_deleted, 0),
-        eq(videos.is_manual_hidden, 0),
-        or(eq(videos.creator_id, id), eq(videos.contact_x_id, id))!,
-      )!,
-    )
-    .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
-    .limit(1);
-  return { title: fallback[0]?.name ?? id };
+    const fallback = await db
+      .select({ name: sql<string>`COALESCE(${videos.display_name}, ${videos.contact_x_id})` })
+      .from(videos)
+      .where(
+        and(
+          eq(videos.status, "public"),
+          eq(videos.is_deleted, 0),
+          eq(videos.is_manual_hidden, 0),
+          or(eq(videos.creator_id, id), eq(videos.contact_x_id, id))!,
+        )!,
+      )
+      .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
+      .limit(1);
+    return { title: fallback[0]?.name ?? id };
+  } catch {
+    // Miniflare D1 が稀に transient エラーを返すため metadata で 500 を出さない
+    return { title: id };
+  }
 }
 
 export default async function UserPage({

@@ -41,16 +41,21 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
   const db = getDatabase();
   if (!db) return { title: id };
-  const detail = await fetchVideoDetail(db, id);
-  if (!detail) return { title: id };
-  return {
-    title: `${detail.video.title} - ${detail.video.display_name}`,
-    openGraph: {
-      images: detail.video.youtube_video_id
-        ? [`https://i.ytimg.com/vi/${detail.video.youtube_video_id}/maxresdefault.jpg`]
-        : undefined,
-    },
-  };
+  try {
+    const detail = await fetchVideoDetail(db, id);
+    if (!detail) return { title: id };
+    return {
+      title: `${detail.video.title} - ${detail.video.display_name}`,
+      openGraph: {
+        images: detail.video.youtube_video_id
+          ? [`https://i.ytimg.com/vi/${detail.video.youtube_video_id}/maxresdefault.jpg`]
+          : undefined,
+      },
+    };
+  } catch {
+    // Miniflare D1 が稀に transient エラーを返すため metadata で 500 を出さない
+    return { title: id };
+  }
 }
 
 export default async function VideoDetailPage({
