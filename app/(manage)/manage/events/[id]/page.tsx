@@ -207,15 +207,6 @@ export default async function ManageEventPage({
     )!;
   };
 
-  // カテゴリ別件数集計 (GROUP BY で 1 クエリ)
-  const typeCountRows = await db
-    .select({
-      type: notificationOutboxTable.type,
-      c: sql<number>`COUNT(*)`,
-    })
-    .from(notificationOutboxTable)
-    .where(eq(notificationOutboxTable.event_id, id))
-    .groupBy(notificationOutboxTable.type);
   const notifCounts: Record<NotifCategory, number> = {
     all: 0,
     video: 0,
@@ -224,21 +215,40 @@ export default async function ManageEventPage({
     chapter: 0,
     system: 0,
   };
-  for (const r of typeCountRows) {
-    const c = Number(r.c ?? 0);
-    notifCounts.all += c;
-    notifCounts[categorizeNotificationType(r.type)] += c;
+  let eventNotifications: (typeof notificationOutboxTable.$inferSelect)[] = [];
+  let eventNotificationSchemaMissing = false;
+  try {
+    // カテゴリ別件数集計 (GROUP BY で 1 クエリ)
+    const typeCountRows = await db
+      .select({
+        type: notificationOutboxTable.type,
+        c: sql<number>`COUNT(*)`,
+      })
+      .from(notificationOutboxTable)
+      .where(eq(notificationOutboxTable.event_id, id))
+      .groupBy(notificationOutboxTable.type);
+    for (const r of typeCountRows) {
+      const c = Number(r.c ?? 0);
+      notifCounts.all += c;
+      notifCounts[categorizeNotificationType(r.type)] += c;
+    }
+
+    eventNotifications = await db
+      .select()
+      .from(notificationOutboxTable)
+      .where(categoryWhere(notifCategory))
+      .orderBy(desc(notificationOutboxTable.created_at))
+      .limit(20);
+  } catch (e) {
+    eventNotificationSchemaMissing = true;
+    console.warn("[ManageEventPage] notification_outbox.event_id unavailable", e);
   }
 
-  const eventNotifications = await db
-    .select()
-    .from(notificationOutboxTable)
-    .where(categoryWhere(notifCategory))
-    .orderBy(desc(notificationOutboxTable.created_at))
-    .limit(20);
-
   // UI 互換用 (allEventNotifications がフィルタ UI の表示判定に使われていた)
-  const allEventNotifications = notifCounts.all > 0 ? eventNotifications : [];
+  const allEventNotifications =
+    !eventNotificationSchemaMissing && notifCounts.all > 0
+      ? eventNotifications
+      : [];
 
   const status = computeEventStatus(ev);
   const accepting = isAcceptingEntries(ev);
@@ -346,6 +356,24 @@ export default async function ManageEventPage({
           </>
         ) : null}
       </div>
+
+      {eventNotificationSchemaMissing ? (
+        <div
+          role="status"
+          style={{
+            marginTop: 18,
+            padding: "10px 14px",
+            background: "var(--accent-warning-soft, #fef3c7)",
+            border: "1px solid var(--accent-warning, #d97706)",
+            borderRadius: "var(--radius-md)",
+            color: "var(--text-primary)",
+            fontSize: 13,
+          }}
+        >
+          イベント通知の絞り込みに必要な DB migration が未適用です。
+          ローカルでは `npm.cmd run db:local-apply` を実行してください。
+        </div>
+      ) : null}
 
       <section style={{ marginTop: 28 }}>
         <h2

@@ -60,7 +60,7 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
             lineHeight: 1.8,
           }}
         >
-          スコア、最近の動き、クリエイターの投稿量を手がかりに、トップページとは違う切り口で作品を並べています。
+          最近の動きやクリエイターの投稿量を手がかりに、トップページとは違う切り口で作品を並べています。
         </p>
       </header>
 
@@ -122,12 +122,12 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
       )}
 
       <section style={{ marginTop: 42 }}>
-        <SectionHeader title="スコアから見る" />
+        <SectionHeader title="おすすめを見る" />
         <div style={{ marginTop: 16 }}>
           {rest.length === 0 ? (
             <p className="fn-muted fn-text-sm">追加のおすすめ作品はありません。</p>
           ) : (
-            <Shelf ariaLabel="スコア上位の作品">
+            <Shelf ariaLabel="おすすめ作品">
               {rest.map((v) => (
                 <VideoCard key={v.id} video={v} />
               ))}

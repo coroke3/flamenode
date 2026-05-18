@@ -106,14 +106,22 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
     : [];
 
   // event-scoped 通知 (notification_outbox.event_id が担当イベントに該当するもの)
-  const eventNotifications = eventIds.length > 0
-    ? await db
+  // 古いローカル D1 では event_id migration 未適用のことがあるため、ページ全体は落とさない。
+  let eventNotifications: (typeof notificationOutboxTable.$inferSelect)[] = [];
+  let eventNotificationSchemaMissing = false;
+  if (eventIds.length > 0) {
+    try {
+      eventNotifications = await db
         .select()
         .from(notificationOutboxTable)
         .where(inArray(notificationOutboxTable.event_id, eventIds))
         .orderBy(desc(notificationOutboxTable.created_at))
-        .limit(20)
-    : [];
+        .limit(20);
+    } catch (e) {
+      eventNotificationSchemaMissing = true;
+      console.warn("[ManageTopPage] notification_outbox.event_id unavailable", e);
+    }
+  }
 
   // failed 件数集計 (担当イベント分のみ)
   const failedCount = eventNotifications.filter((n) => n.status === "failed").length;
@@ -163,6 +171,24 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
         >
           <strong>担当イベントに失敗通知が {failedCount} 件</strong>
           {" "}あります。下の「イベント通知」セクションを確認してください。
+        </div>
+      ) : null}
+
+      {eventNotificationSchemaMissing ? (
+        <div
+          role="status"
+          style={{
+            marginBottom: 14,
+            padding: "10px 14px",
+            background: "var(--accent-warning-soft, #fef3c7)",
+            border: "1px solid var(--accent-warning, #d97706)",
+            borderRadius: "var(--radius-md)",
+            color: "var(--text-primary)",
+            fontSize: 13,
+          }}
+        >
+          イベント通知の絞り込みに必要な DB migration が未適用です。
+          ローカルでは `npm.cmd run db:local-apply` を実行してください。
         </div>
       ) : null}
 

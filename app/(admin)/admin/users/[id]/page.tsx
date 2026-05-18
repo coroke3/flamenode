@@ -117,6 +117,53 @@ export default async function AdminUserDetailPage({
 
       <section className="fn-card" style={{ marginTop: 20 }}>
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
+          IDの主体整理
+        </h2>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
+            gap: 12,
+          }}
+        >
+          <div>
+            <p className="fn-muted fn-text-xs fn-bold" style={{ margin: 0 }}>
+              Discord / Auth 主体
+            </p>
+            <p style={{ margin: "6px 0 0", fontFamily: "monospace", fontSize: 12 }}>
+              {user.discord_id ?? user.id}
+            </p>
+            <p className="fn-muted fn-text-sm" style={{ margin: "6px 0 0" }}>
+              ログイン、BAN、TOS、通知、管理権限の主体。
+            </p>
+          </div>
+          <div>
+            <p className="fn-muted fn-text-xs fn-bold" style={{ margin: 0 }}>
+              Active X ID
+            </p>
+            <p style={{ margin: "6px 0 0", fontFamily: "monospace", fontSize: 12 }}>
+              {user.active_x_user_id ? `@${user.active_x_user_id}` : "未設定"}
+            </p>
+            <p className="fn-muted fn-text-sm" style={{ margin: "6px 0 0" }}>
+              作品一覧、いいね、セーブ、ライブラリの現在の操作主体。
+            </p>
+          </div>
+          <div>
+            <p className="fn-muted fn-text-xs fn-bold" style={{ margin: 0 }}>
+              紐づく X ID
+            </p>
+            <p style={{ margin: "6px 0 0", fontWeight: 700 }}>
+              {xIds.length} 件
+            </p>
+            <p className="fn-muted fn-text-sm" style={{ margin: "6px 0 0" }}>
+              作者、プロフィール、アイコン、公開表示の主体。
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section className="fn-card" style={{ marginTop: 20 }}>
+        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
           権限と状態
         </h2>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -173,21 +220,36 @@ export default async function AdminUserDetailPage({
         {xIds.length === 0 ? (
           <p className="fn-muted fn-text-sm">未連携です。</p>
         ) : (
-          <table className="fn-table">
-            <thead>
-              <tr>
-                <th>名前</th>
-                <th>X ID</th>
-                <th>状態</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {xIds.map((x) => (
-                <tr key={x.id}>
-                  <td>{x.x_name}</td>
-                  <td>@{x.id}</td>
-                  <td>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 240px), 1fr))",
+              gap: 10,
+            }}
+          >
+            {xIds.map((x) => (
+              <section
+                key={x.id}
+                style={{
+                  display: "grid",
+                  gap: 8,
+                  padding: 12,
+                  border: "1px solid var(--border-subtle)",
+                  borderRadius: "var(--radius-sm)",
+                  background:
+                    x.id === user.active_x_user_id
+                      ? "var(--accent-primary-soft)"
+                      : "var(--bg-base)",
+                }}
+              >
+                <div>
+                  <strong>{x.x_name}</strong>
+                  <div className="fn-muted fn-text-sm">@{x.id}</div>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {x.id === user.active_x_user_id ? (
+                    <span className="fn-badge fn-badge-soft">Active</span>
+                  ) : null}
                     {x.approval_status === "approved" ? (
                       <span className="fn-badge fn-badge-accent">承認</span>
                     ) : x.approval_status === "pending" ? (
@@ -195,16 +257,13 @@ export default async function AdminUserDetailPage({
                     ) : (
                       <span className="fn-badge fn-badge-danger">却下</span>
                     )}
-                  </td>
-                  <td>
-                    <Link href={`/user/${x.id}`} className="fn-btn fn-btn-ghost fn-btn-sm">
-                      プロフィール
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                </div>
+                <Link href={`/user/${x.id}`} className="fn-btn fn-btn-ghost fn-btn-sm">
+                  Xプロフィールを確認
+                </Link>
+              </section>
+            ))}
+          </div>
         )}
       </section>
 
