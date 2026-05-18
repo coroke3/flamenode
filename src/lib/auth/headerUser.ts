@@ -5,6 +5,11 @@ import { getDatabase } from "@/lib/cloudflare";
 import { users, xUsers } from "@/lib/db/schema";
 import { resolveMissingIcons } from "@/lib/db/iconResolution";
 import { normalizeXId } from "@/lib/utils/xid";
+import {
+  emptyManagementAccess,
+  getManagementAccess,
+  type ManagementAccess,
+} from "./managementAccess";
 
 export type HeaderXIdEntry = {
   x_user_id: string;
@@ -18,13 +23,19 @@ export type HeaderUser = {
   id: string;
   name: string;
   image: string | null;
+  role: "user" | "admin" | "moderator";
   xIds: HeaderXIdEntry[];
+  management: Pick<
+    ManagementAccess,
+    "canAccessAdmin" | "canAccessManage" | "manageableEventCount"
+  >;
 };
 
 type SessionUserLike = {
   id?: string | null;
   name?: string | null;
   image?: string | null;
+  role?: string | null;
   active_x_user_id?: string | null;
 };
 
@@ -34,6 +45,12 @@ function normalizeApprovalStatus(
   return status === "approved" || status === "rejected" ? status : "pending";
 }
 
+function normalizeRole(
+  role: string | null | undefined,
+): HeaderUser["role"] {
+  return role === "admin" || role === "moderator" ? role : "user";
+}
+
 export async function buildHeaderUser(
   sessionUser: SessionUserLike | null | undefined,
 ): Promise<HeaderUser | null> {
@@ -41,17 +58,23 @@ export async function buildHeaderUser(
 
   const db = getDatabase();
   let activeXId = normalizeXId(sessionUser.active_x_user_id) || null;
+  let role = normalizeRole(sessionUser.role);
+  let management = emptyManagementAccess();
   const xIds: HeaderXIdEntry[] = [];
 
   if (db) {
     const userRow = (
       await db
-        .select({ active_x_user_id: users.active_x_user_id })
+        .select({
+          active_x_user_id: users.active_x_user_id,
+          role: users.role,
+        })
         .from(users)
         .where(eq(users.id, sessionUser.id))
         .limit(1)
     )[0];
     activeXId = normalizeXId(userRow?.active_x_user_id) || activeXId;
+    role = normalizeRole(userRow?.role ?? sessionUser.role);
 
     const rows = await db
       .select({
@@ -87,10 +110,18 @@ export async function buildHeaderUser(
     );
   }
 
+  management = await getManagementAccess({ id: sessionUser.id, role });
+
   return {
     id: sessionUser.id,
     name: sessionUser.name ?? "ゲスト",
     image: sessionUser.image ?? null,
+    role,
     xIds,
+    management: {
+      canAccessAdmin: management.canAccessAdmin,
+      canAccessManage: management.canAccessManage,
+      manageableEventCount: management.manageableEventCount,
+    },
   };
 }

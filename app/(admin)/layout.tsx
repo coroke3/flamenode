@@ -32,27 +32,13 @@ export default async function AdminLayout({
 }: {
   children: React.ReactNode;
 }): Promise<React.ReactElement> {
-  type AdminUser = {
-    id: string;
-    name: string;
-    image: string | null;
-    role: string;
-    xIds: HeaderUser["xIds"];
-  };
-  let user: AdminUser | null = null;
+  let user: HeaderUser | null = null;
 
   try {
     const session = await auth();
     if (session?.user) {
-      const u = session.user as { id?: string; role?: string };
       const headerUser = await buildHeaderUser(session.user);
-      if (headerUser) {
-        user = {
-          ...headerUser,
-          id: u.id ?? headerUser.id,
-          role: u.role ?? "user",
-        };
-      }
+      if (headerUser) user = headerUser;
     }
   } catch {
     user = null;

@@ -1,7 +1,7 @@
 import * as React from "react";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { AuthHeader } from "@/components/layout/AuthHeader";
-import { PublicHeader } from "@/components/layout/PublicHeader";
 import { PublicFooter } from "@/components/layout/PublicFooter";
 import { CostGuardBanner } from "@/components/layout/CostGuardBanner";
 import { ManageSidebar } from "@/components/layout/ManageSidebar";
@@ -25,10 +25,15 @@ export default async function ManageLayout({
     user = null;
   }
 
+  if (!user) redirect("/entry");
+  if (!user.management.canAccessAdmin && !user.management.canAccessManage) {
+    redirect("/dashboard");
+  }
+
   return (
     <>
       <CostGuardBanner />
-      {user ? <AuthHeader user={user} /> : <PublicHeader user={null} />}
+      <AuthHeader user={user} />
       <div
         style={{
           flex: 1,

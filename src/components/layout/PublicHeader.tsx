@@ -7,13 +7,14 @@ import { Logo } from "@/components/ui/Logo";
 import { Icon } from "@/components/ui/Icon";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { XIdSwitcher, type XIdEntry } from "@/components/user/XIdSwitcher";
+import type { HeaderUser } from "@/lib/auth/headerUser";
 
-export interface PublicHeaderUser {
-  id: string;
-  name: string;
-  image: string | null;
+export type PublicHeaderUser = Pick<
+  HeaderUser,
+  "id" | "name" | "image" | "role" | "management"
+> & {
   xIds: XIdEntry[];
-}
+};
 
 interface PublicHeaderProps {
   user: PublicHeaderUser | null;
@@ -24,6 +25,11 @@ interface PublicHeaderProps {
 
 export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
   const [mobileOpen, setMobileOpen] = React.useState(false);
+  const managementLink = user?.management.canAccessAdmin
+    ? { href: "/admin", label: "管理", icon: "settings" as const }
+    : user?.management.canAccessManage
+      ? { href: "/manage", label: "運営", icon: "users" as const }
+      : null;
 
   return (
     <header className={styles.header}>
@@ -55,6 +61,15 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
           <ThemeToggle />
           {user ? (
             <>
+              {managementLink ? (
+                <Link
+                  href={managementLink.href}
+                  className={`fn-btn fn-btn-ghost fn-btn-sm ${styles.dashLink}`}
+                >
+                  <Icon name={managementLink.icon} size={13} aria-hidden />
+                  {managementLink.label}
+                </Link>
+              ) : null}
               <Link href="/dashboard" className={`fn-btn fn-btn-ghost fn-btn-sm ${styles.dashLink}`}>
                 <Icon name="user" size={13} aria-hidden />
                 ダッシュボード
@@ -93,14 +108,26 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
                 Discord でログイン
               </Link>
             ) : (
-              <Link
-                href="/dashboard"
-                className={`fn-btn fn-btn-ghost ${styles.mobileCta}`}
-                onClick={() => setMobileOpen(false)}
-              >
-                <Icon name="user" size={14} aria-hidden />
-                ダッシュボード
-              </Link>
+              <>
+                {managementLink ? (
+                  <Link
+                    href={managementLink.href}
+                    className={`fn-btn fn-btn-ghost ${styles.mobileCta}`}
+                    onClick={() => setMobileOpen(false)}
+                  >
+                    <Icon name={managementLink.icon} size={14} aria-hidden />
+                    {managementLink.label}
+                  </Link>
+                ) : null}
+                <Link
+                  href="/dashboard"
+                  className={`fn-btn fn-btn-ghost ${styles.mobileCta}`}
+                  onClick={() => setMobileOpen(false)}
+                >
+                  <Icon name="user" size={14} aria-hidden />
+                  ダッシュボード
+                </Link>
+              </>
             )}
           </nav>
         </div>
