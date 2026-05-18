@@ -77,6 +77,18 @@ L-1 (Worker 実装状況のMarkdown明記) に対応。
 ### 未実装
 - voided 動画の R2 サムネ R2 オブジェクト掃除
 
+### 設計判断: Durable Object 永続化は不要 (Opus #6)
+
+cleanup ジョブは以下の特性により Durable Object 永続化は **不要**:
+
+- **冪等**: TTL 削除 / status 更新は何度実行しても同じ最終状態
+- **軽量**: SELECT/UPDATE/DELETE が数本、cron 1 回あたり数秒
+- **復帰可能**: 失敗しても次の 1 時間後 cron で同じ処理が再実行される
+- **ウォーム内即時リトライ済み**: transient エラーは Batch 81 で対応済み (最大 3 回)
+
+Durable Object 導入の追加コスト (料金 / 設定 / 分散ロック実装) が、得られる利益 (中断耐性) を上回るため採用しない。
+将来 Worker が状態を持つ処理 (例: rate-limited な broadcast キュー) を追加する場合に再検討。
+
 ---
 
 ## 4. youtube-sync (実装済み)
