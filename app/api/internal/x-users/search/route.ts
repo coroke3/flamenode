@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
  *
  * - 認証必須 (ログイン無しは 401)
  * - 公開フィールドのみ返す (id, x_name, icon_url, approval_status)
- * - 検索パラメータ: ?q=foo&limit=20&onlyApproved=1
+ * - 検索パラメータ: ?q=foo&limit=20&offset=0&onlyApproved=1
  * - q 未指定または空: 直近作成順 (created_at 不在のため id 順) 20 件
  *
  * 公開 API でないため scripts/check-public-api-leaks.mjs の対象には含めない。
@@ -20,6 +20,7 @@ export const dynamic = "force-dynamic";
  */
 const MAX_LIMIT = 50;
 const DEFAULT_LIMIT = 20;
+const MAX_OFFSET = 5000;
 const MAX_QUERY_LENGTH = 64;
 
 export async function GET(request: Request): Promise<Response> {
@@ -42,6 +43,11 @@ export async function GET(request: Request): Promise<Response> {
     Number.isFinite(limitRaw) && limitRaw > 0
       ? Math.min(Math.floor(limitRaw), MAX_LIMIT)
       : DEFAULT_LIMIT;
+  const offsetRaw = Number(url.searchParams.get("offset") ?? "");
+  const offset =
+    Number.isFinite(offsetRaw) && offsetRaw > 0
+      ? Math.min(Math.floor(offsetRaw), MAX_OFFSET)
+      : 0;
 
   // SQL ワイルドカード (% _) はそのまま使えるよう trim のみ。LIKE 検索の前後に % を付与。
   const conds: SQL<unknown>[] = [];
@@ -67,15 +73,21 @@ export async function GET(request: Request): Promise<Response> {
     .from(xUsers);
   const rows = await (where ? base.where(where) : base)
     .orderBy(asc(xUsers.id))
-    .limit(limit);
+    .limit(limit + 1)
+    .offset(offset);
+  const hasMore = rows.length > limit;
+  const items = rows.slice(0, limit);
 
   return NextResponse.json(
     {
-      items: rows,
+      items,
       query: rawQ,
       limit,
+      offset,
+      nextOffset: hasMore ? offset + items.length : null,
+      hasMore,
       hint:
-        rows.length === limit
+        hasMore
           ? "結果が上限件数に達しています。q を絞り込んでください。"
           : null,
     },
