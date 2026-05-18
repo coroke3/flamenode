@@ -1,15 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   historyLogs,
-  notificationOutbox,
   users as usersTable,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
+import { enqueueNotification } from "@/lib/notifications/enqueue";
 
 export interface BroadcastResult {
   ok: boolean;
@@ -104,31 +104,21 @@ export async function broadcastAnnouncement(
     };
   }
 
-  // バッチで notification_outbox に挿入
-  const payload = JSON.stringify({
-    content,
-    announcement_id: announcementId,
-    broadcast: true,
-  });
   let enqueued = 0;
   for (const t of targets) {
     if (!t.discord_user_id) continue;
-    try {
-      await db.insert(notificationOutbox).values({
-        id: crypto.randomUUID(),
-        discord_user_id: t.discord_user_id,
-        type: "announcement_broadcast",
-        payload_json: payload,
-        status: "pending",
-        attempt_count: 0,
-        next_attempt_at: null,
-        last_error: null,
-        event_id: null,
-        created_at: sql`(unixepoch())` as unknown as number,
-      });
+    const ok = await enqueueNotification(db, {
+      discordUserId: t.discord_user_id,
+      type: "announcement_broadcast",
+      payload: {
+        content,
+        announcement_id: announcementId,
+        broadcast: true,
+      },
+      eventId: null,
+    });
+    if (ok) {
       enqueued += 1;
-    } catch (e) {
-      console.error("[broadcastAnnouncement] insert failed", t.discord_user_id, e);
     }
   }
 

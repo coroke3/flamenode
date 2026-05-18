@@ -1,11 +1,12 @@
 import "server-only";
 
-import { sql } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
-import { notificationOutbox } from "@/lib/db/schema";
+import { accounts, notificationOutbox, users } from "@/lib/db/schema";
 import { validateNotificationPayload } from "./format";
 
 type AnyDb = LibSQLDatabase<any>;
+const DISCORD_SNOWFLAKE_RE = /^\d{15,22}$/;
 
 export interface EnqueueNotificationInput {
   /** 送信先 Discord ユーザー ID (notification_outbox.discord_user_id) */
@@ -23,6 +24,34 @@ function randomId(): string {
   return crypto.randomUUID();
 }
 
+async function resolveDiscordRecipientId(
+  db: AnyDb,
+  candidate: string,
+): Promise<string | null> {
+  const rows = await db
+    .select({
+      discord_id: users.discord_id,
+      provider_account_id: accounts.providerAccountId,
+    })
+    .from(users)
+    .leftJoin(
+      accounts,
+      and(eq(accounts.userId, users.id), eq(accounts.provider, "discord"))!,
+    )
+    .where(
+      or(
+        eq(users.id, candidate),
+        eq(users.discord_id, candidate),
+        eq(accounts.providerAccountId, candidate),
+      )!,
+    )
+    .limit(1);
+  const row = rows[0];
+  return row?.provider_account_id ??
+    row?.discord_id ??
+    (DISCORD_SNOWFLAKE_RE.test(candidate) ? candidate : null);
+}
+
 /**
  * notification_outbox に 1 件 enqueue する。
  * 失敗してもアプリ操作は止めない (例外を呼び元に投げない)。
@@ -30,20 +59,28 @@ function randomId(): string {
 export async function enqueueNotification(
   db: AnyDb,
   input: EnqueueNotificationInput,
-): Promise<void> {
+): Promise<boolean> {
   const check = validateNotificationPayload(input.type, input.payload);
   if (!check.ok) {
     console.error("[enqueueNotification] invalid payload:", check.reason, input);
-    return;
+    return false;
   }
   if (!input.discordUserId) {
     console.error("[enqueueNotification] discordUserId が空のため skip");
-    return;
+    return false;
   }
   try {
+    const discordRecipientId = await resolveDiscordRecipientId(
+      db,
+      input.discordUserId,
+    );
+    if (!discordRecipientId) {
+      console.error("[enqueueNotification] Discord recipient ID を解決できないため skip");
+      return false;
+    }
     await db.insert(notificationOutbox).values({
       id: randomId(),
-      discord_user_id: input.discordUserId,
+      discord_user_id: discordRecipientId,
       type: input.type,
       payload_json: JSON.stringify(input.payload),
       status: "pending",
@@ -53,7 +90,9 @@ export async function enqueueNotification(
       event_id: input.eventId ?? null,
       created_at: sql`(unixepoch())` as unknown as number,
     });
+    return true;
   } catch (e) {
     console.error("[enqueueNotification] failed", e);
+    return false;
   }
 }

@@ -2,6 +2,7 @@ import "server-only";
 import NextAuth, { type NextAuthConfig } from "next-auth";
 import Discord from "next-auth/providers/discord";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
+import { and, eq } from "drizzle-orm";
 import { getDatabase, getEnv } from "@/lib/cloudflare";
 import { accounts, sessions, users, verificationTokens } from "@/lib/db/schema";
 
@@ -144,11 +145,31 @@ export function buildAuthConfig(): NextAuthConfig {
       },
     },
     events: {
-      async linkAccount({ account }) {
+      async linkAccount({ account, user }) {
         // セキュリティ: アクセストークンは保持しない (refresh のみ)
         // account はビルド時に readonly 推論されるが、実体は mutable なので as 経由でクリア
         const a = account as unknown as Record<string, unknown> | null;
         if (a?.access_token) a.access_token = null;
+        if (
+          account.provider === "discord" &&
+          account.providerAccountId &&
+          user.id
+        ) {
+          const eventDb = getDatabase();
+          await eventDb
+            ?.update(users)
+            .set({ discord_id: account.providerAccountId })
+            .where(eq(users.id, user.id));
+          await eventDb
+            ?.update(accounts)
+            .set({ access_token: null })
+            .where(
+              and(
+                eq(accounts.provider, account.provider),
+                eq(accounts.providerAccountId, account.providerAccountId),
+              )!,
+            );
+        }
       },
     },
   };

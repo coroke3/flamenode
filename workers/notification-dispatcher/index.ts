@@ -104,7 +104,7 @@ async function dispatch(env: Env): Promise<void> {
   }
 }
 
-async function deliver(
+export async function deliver(
   row: { type: string; payload_json: string; discord_user_id: string },
   env: Env,
 ): Promise<boolean> {
@@ -116,8 +116,9 @@ async function deliver(
     });
     return res.ok;
   }
+  if (row.type === "discord_webhook") return false;
 
-  if (row.type === "discord_dm" && env.DISCORD_BOT_TOKEN) {
+  if (env.DISCORD_BOT_TOKEN) {
     // Discord DM: まずチャンネルを作成してからメッセージを送信する
     const dmChannelRes = await fetch("https://discord.com/api/v10/users/@me/channels", {
       method: "POST",
