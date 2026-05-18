@@ -71,9 +71,6 @@ export async function reserveSlot(
   if (!activeX) {
     return { ok: false, message: "X ID を選択してから枠を確保してください。" };
   }
-  if (!guard.approvedXIds.includes(activeX)) {
-    return { ok: false, message: "承認済みの X ID が必要です。" };
-  }
 
   const parsed = reserveSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
@@ -396,9 +393,6 @@ export async function extendOwnSlotGroup(
   if (!activeX) {
     return { ok: false, message: "X ID を選択してから操作してください。" };
   }
-  if (!guard.approvedXIds.includes(activeX)) {
-    return { ok: false, message: "承認済みの X ID が必要です。" };
-  }
 
   const parsed = extendSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
@@ -550,9 +544,6 @@ export async function mergeOwnSlotGroups(
   const activeX = guard.activeXId;
   if (!activeX) {
     return { ok: false, message: "X ID を選択してから操作してください。" };
-  }
-  if (!guard.approvedXIds.includes(activeX)) {
-    return { ok: false, message: "承認済みの X ID が必要です。" };
   }
 
   const parsed = mergeSchema.safeParse(Object.fromEntries(formData));

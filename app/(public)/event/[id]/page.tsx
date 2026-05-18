@@ -262,7 +262,7 @@ export default async function EventDetailPage({
                   <Link href="/entry">
                     ログイン
                   </Link>{" "}
-                  と承認済 X ID が必要です。
+                  とアクティブ X ID が必要です。
                 </p>
               ) : !viewer.active_x_user_id ? (
                 <p

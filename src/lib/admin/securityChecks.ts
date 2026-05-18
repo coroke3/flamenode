@@ -2,7 +2,7 @@ import "server-only";
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { and, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import {
   accounts as accountsTable,
@@ -97,7 +97,10 @@ async function checkBannedUserVideos(db: AnyDb): Promise<SecurityCheckResult> {
     .from(videosTable)
     .innerJoin(
       usersTable,
-      eq(usersTable.discord_id, videosTable.owner_discord_user_id),
+      or(
+        eq(usersTable.id, videosTable.owner_discord_user_id),
+        eq(usersTable.discord_id, videosTable.owner_discord_user_id),
+      )!,
     )
     .where(eq(usersTable.is_banned, 1))
     .limit(10);
@@ -120,7 +123,10 @@ async function checkTosNotAcceptedUserVideos(
     .from(videosTable)
     .innerJoin(
       usersTable,
-      eq(usersTable.discord_id, videosTable.owner_discord_user_id),
+      or(
+        eq(usersTable.id, videosTable.owner_discord_user_id),
+        eq(usersTable.discord_id, videosTable.owner_discord_user_id),
+      )!,
     )
     .where(ne(usersTable.is_tos_accepted, 1))
     .limit(10);

@@ -154,13 +154,16 @@ async function checkSubmittedSlotWithoutVideo(
 async function checkReservationGroupUserMix(
   db: AnyDb,
 ): Promise<HealthCheckResult> {
-  // 同一 reservation_group_id に x_user_id が複数いるグループ
+  // 同一 reservation_group_id に Discord user または X ID が複数いるグループ
   const rows = await db
     .select({ reservation_group_id: slotsTable.reservation_group_id })
     .from(slotsTable)
     .where(isNotNull(slotsTable.reservation_group_id))
     .groupBy(slotsTable.reservation_group_id)
-    .having(sql`COUNT(DISTINCT ${slotsTable.x_user_id}) > 1`)
+    .having(sql`
+      COUNT(DISTINCT ${slotsTable.discord_user_id}) > 1
+      OR COUNT(DISTINCT ${slotsTable.x_user_id}) > 1
+    `)
     .limit(10);
   const count = rows.length;
   return {

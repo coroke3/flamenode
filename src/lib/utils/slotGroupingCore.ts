@@ -38,8 +38,20 @@ export type SlotGroupRow = SlotBase & {
   is_group: boolean;
 };
 
+const JST_OFFSET_SEC = 9 * 60 * 60;
+
+function jstDayBucket(unixSec: number | null): number | null {
+  if (unixSec == null || !Number.isFinite(unixSec)) return null;
+  return Math.floor((unixSec + JST_OFFSET_SEC) / (24 * 60 * 60));
+}
+
 export function sortSlotsChronologically<
-  T extends { start_time: number | null; end_time: number | null; sort_order?: number | null },
+  T extends {
+    id?: string | null;
+    start_time: number | null;
+    end_time: number | null;
+    sort_order?: number | null;
+  },
 >(rows: T[]): T[] {
   return [...rows].sort((a, b) => {
     const aTimed = a.start_time != null;
@@ -51,22 +63,36 @@ export function sortSlotsChronologically<
     const aEnd = a.end_time ?? aStart;
     const bEnd = b.end_time ?? bStart;
     if (aEnd !== bEnd) return aEnd - bEnd;
-    return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+    const sortDiff = (a.sort_order ?? 0) - (b.sort_order ?? 0);
+    if (sortDiff !== 0) return sortDiff;
+    return (a.id ?? "").localeCompare(b.id ?? "");
   });
 }
 
 export function buildSlotParts<
-  T extends { start_time: number | null; end_time: number | null },
+  T extends {
+    start_time: number | null;
+    end_time: number | null;
+    slot_kind?: string | null;
+  },
 >(rows: T[], gapSec = 30 * 60): SlotPart<T>[] {
   if (rows.length === 0) return [];
   const timed = sortSlotsChronologically(rows.filter((r) => r.start_time != null));
   const timeless = rows.filter((r) => r.start_time == null);
+  const effectiveGapSec =
+    Number.isFinite(gapSec) && gapSec >= 0 ? gapSec : 30 * 60;
   const parts: SlotPart<T>[] = [];
   let current: T[] = [];
   let prevEnd = 0;
   for (const row of timed) {
     const start = row.start_time ?? 0;
-    if (current.length === 0 || start - prevEnd > gapSec) {
+    const prev = current[current.length - 1];
+    const startsNewPart =
+      current.length === 0 ||
+      start - prevEnd > effectiveGapSec ||
+      (prev != null && (prev.slot_kind ?? null) !== (row.slot_kind ?? null)) ||
+      (prev != null && jstDayBucket(prev.start_time) !== jstDayBucket(row.start_time));
+    if (startsNewPart) {
       if (current.length > 0) {
         parts.push({
           index: parts.length + 1,

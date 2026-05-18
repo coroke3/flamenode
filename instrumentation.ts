@@ -65,16 +65,27 @@ export async function register(): Promise<void> {
 
 /**
  * Miniflare のローカル D1 にマイグレーションを冪等に当てる。
- * `user` テーブルが既に存在すれば何もしない。
+ * `user` テーブルが既に存在しても、後続 migration の追加列/index は補修する。
  */
-async function applyMigrationsIfNeeded(
-  DB: { prepare: (sql: string) => { first: () => Promise<unknown>; run: () => Promise<unknown> }; exec: (sql: string) => Promise<unknown> },
-): Promise<void> {
+type LocalD1Statement = {
+  first: () => Promise<unknown>;
+  run: () => Promise<unknown>;
+};
+
+type LocalD1Database = {
+  prepare: (sql: string) => LocalD1Statement;
+  exec: (sql: string) => Promise<unknown>;
+};
+
+async function applyMigrationsIfNeeded(DB: LocalD1Database): Promise<void> {
   try {
     const existing = await DB.prepare(
       "SELECT name FROM sqlite_master WHERE type='table' AND name='user' LIMIT 1",
     ).first();
-    if (existing) return;
+    if (existing) {
+      await repairLocalSchemaDrift(DB);
+      return;
+    }
   } catch {
     // sqlite_master が無いことは無いが、安全側に倒して続行
   }
@@ -122,4 +133,141 @@ async function applyMigrationsIfNeeded(
   } catch {
     /* noop */
   }
+
+  await repairLocalSchemaDrift(DB);
+}
+
+async function repairLocalSchemaDrift(DB: LocalD1Database): Promise<void> {
+  if (await tableExists(DB, "events")) {
+    await ensureColumn(
+      DB,
+      "events",
+      "entry_start_time",
+      "ALTER TABLE `events` ADD `entry_start_time` integer",
+    );
+    await ensureColumn(
+      DB,
+      "events",
+      "entry_end_time",
+      "ALTER TABLE `events` ADD `entry_end_time` integer",
+    );
+  }
+
+  if (await tableExists(DB, "notification_outbox")) {
+    await ensureColumn(
+      DB,
+      "notification_outbox",
+      "event_id",
+      "ALTER TABLE `notification_outbox` ADD `event_id` text",
+    );
+    await ensureIndex(
+      DB,
+      "CREATE INDEX IF NOT EXISTS `notification_outbox_status_created_idx` ON `notification_outbox` (`status`,`created_at`)",
+      "notification_outbox_status_created_idx",
+    );
+    await ensureIndex(
+      DB,
+      "CREATE INDEX IF NOT EXISTS `notification_outbox_event_idx` ON `notification_outbox` (`event_id`)",
+      "notification_outbox_event_idx",
+    );
+  }
+
+  if (await tableExists(DB, "video_members")) {
+    await ensureIndex(
+      DB,
+      "CREATE INDEX IF NOT EXISTS `video_members_video_order_idx` ON `video_members` (`video_id`,`order_index`)",
+      "video_members_video_order_idx",
+    );
+    await ensureIndex(
+      DB,
+      "CREATE INDEX IF NOT EXISTS `video_members_video_name_idx` ON `video_members` (`video_id`,`name`)",
+      "video_members_video_name_idx",
+    );
+    await ensureColumn(
+      DB,
+      "video_members",
+      "name_for_sort",
+      "ALTER TABLE `video_members` ADD `name_for_sort` text",
+    );
+    await ensureIndex(
+      DB,
+      "CREATE INDEX IF NOT EXISTS `video_members_video_name_for_sort_idx` ON `video_members` (`video_id`,`name_for_sort`)",
+      "video_members_video_name_for_sort_idx",
+    );
+    try {
+      await DB.prepare(
+        "UPDATE `video_members` SET `name_for_sort` = lower(`name`) WHERE `name_for_sort` IS NULL",
+      ).run();
+    } catch (e) {
+      console.warn(
+        "[instrumentation] Failed to backfill video_members.name_for_sort:",
+        errorMessage(e),
+      );
+    }
+  }
+}
+
+async function tableExists(
+  DB: LocalD1Database,
+  tableName: string,
+): Promise<boolean> {
+  const safeTableName = tableName.replace(/'/g, "''");
+  try {
+    const existing = await DB.prepare(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='${safeTableName}' LIMIT 1`,
+    ).first();
+    return Boolean(existing);
+  } catch {
+    return false;
+  }
+}
+
+async function ensureColumn(
+  DB: LocalD1Database,
+  tableName: string,
+  columnName: string,
+  alterSql: string,
+): Promise<void> {
+  try {
+    await DB.prepare(
+      `SELECT \`${columnName}\` FROM \`${tableName}\` LIMIT 1`,
+    ).first();
+    return;
+  } catch {
+    // Missing columns are repaired below. Other local D1 drift is reported by ALTER.
+  }
+
+  try {
+    await DB.prepare(alterSql).run();
+    console.log(
+      `[instrumentation] Added missing local column: ${tableName}.${columnName}`,
+    );
+  } catch (e) {
+    const message = errorMessage(e);
+    if (!/duplicate column|already exists/i.test(message)) {
+      console.warn(
+        `[instrumentation] Failed to add local column ${tableName}.${columnName}:`,
+        message,
+      );
+    }
+  }
+}
+
+async function ensureIndex(
+  DB: LocalD1Database,
+  sql: string,
+  indexName: string,
+): Promise<void> {
+  try {
+    await DB.prepare(sql).run();
+  } catch (e) {
+    console.warn(
+      `[instrumentation] Failed to ensure local index ${indexName}:`,
+      errorMessage(e),
+    );
+  }
+}
+
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }

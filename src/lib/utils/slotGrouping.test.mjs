@@ -44,6 +44,15 @@ test("sortSlotsChronologically: 同時刻は sort_order で安定化", () => {
   assert.deepEqual(r.map((x) => x.id), ["b", "a"]);
 });
 
+test("sortSlotsChronologically: id is the final tie-breaker", () => {
+  const r = sortSlotsChronologically([
+    { id: "c", start_time: 100, end_time: 200, sort_order: 1 },
+    { id: "a", start_time: 100, end_time: 200, sort_order: 1 },
+    { id: "b", start_time: 100, end_time: 200, sort_order: 1 },
+  ]);
+  assert.deepEqual(r.map((x) => x.id), ["a", "b", "c"]);
+});
+
 test("buildSlotParts: 連続する枠は1パート、ギャップで分割", () => {
   const slots = [
     { start_time: 100, end_time: 200 },
@@ -65,6 +74,26 @@ test("buildSlotParts: gapSec 内ならまとめる", () => {
   // gapSec=1000 ならまとまる、gapSec=500 なら分かれる
   assert.equal(buildSlotParts(slots, 1000).length, 1);
   assert.equal(buildSlotParts(slots, 500).length, 2);
+});
+
+test("buildSlotParts: JST date change starts a new part", () => {
+  const may18LateJst = Math.floor(Date.UTC(2026, 4, 18, 14, 55) / 1000);
+  const may19StartJst = Math.floor(Date.UTC(2026, 4, 18, 15, 0) / 1000);
+  const slots = [
+    { start_time: may18LateJst, end_time: may19StartJst, slot_kind: "time" },
+    { start_time: may19StartJst, end_time: may19StartJst + 300, slot_kind: "time" },
+  ];
+  const parts = buildSlotParts(slots, 30 * 60);
+  assert.equal(parts.length, 2);
+});
+
+test("buildSlotParts: slot_kind change starts a new part", () => {
+  const slots = [
+    { start_time: 100, end_time: 200, slot_kind: "time" },
+    { start_time: 200, end_time: 300, slot_kind: "count" },
+  ];
+  const parts = buildSlotParts(slots, 30 * 60);
+  assert.equal(parts.length, 2);
 });
 
 test("buildSlotParts: 時間なし枠は最後に独立部として追加", () => {
