@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, desc, eq, isNotNull, or } from "drizzle-orm";
+import { and, desc, eq, isNotNull, or, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase, getEnv } from "@/lib/cloudflare";
 import {
@@ -366,6 +366,8 @@ export async function setXIdIcon(
   });
 
   revalidatePath("/dashboard/settings");
+  revalidatePath("/dashboard");
+  revalidatePath("/");
   revalidatePath(`/user/${xUserId}`);
   return { ok: true, message: "アイコンを更新しました。" };
 }
@@ -399,6 +401,23 @@ export async function uploadXIdIcon(
   }
   if (file.size > 2 * 1024 * 1024) {
     return { ok: false, message: "2MB 以内の画像を選んでください。" };
+  }
+
+  const manualIconCount = await db
+    .select({ count: sql<number>`COUNT(*)` })
+    .from(xUserIcons)
+    .where(
+      and(
+        eq(xUserIcons.x_user_id, xUserId),
+        eq(xUserIcons.source_type, "manual"),
+      )!,
+    );
+  if (Number(manualIconCount[0]?.count ?? 0) >= 24) {
+    return {
+      ok: false,
+      message:
+        "手動アップロードの候補が上限に達しています。既存候補から選択してください。",
+    };
   }
 
   const env = getEnv();
@@ -439,6 +458,8 @@ export async function uploadXIdIcon(
   });
 
   revalidatePath("/dashboard/settings");
+  revalidatePath("/dashboard");
+  revalidatePath("/");
   revalidatePath(`/user/${xUserId}`);
   return { ok: true, message: "アイコンをアップロードしました。", iconUrl };
 }

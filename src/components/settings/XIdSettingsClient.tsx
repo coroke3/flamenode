@@ -260,6 +260,17 @@ function XIdIconPicker({
   const [pending, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
   const [message, setMessage] = React.useState<string | null>(null);
+  const [mode, setMode] = React.useState<"select" | "upload">(
+    candidates.length > 0 ? "select" : "upload",
+  );
+  const [uploadPreview, setUploadPreview] = React.useState<string | null>(null);
+  const [uploadFileName, setUploadFileName] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      if (uploadPreview) window.URL.revokeObjectURL(uploadPreview);
+    };
+  }, [uploadPreview]);
 
   const onSelect = (iconUrl: string) => {
     setError(null);
@@ -296,43 +307,99 @@ function XIdIconPicker({
     });
   };
 
+  const onPickUploadFile = (file: File | null) => {
+    if (uploadPreview) window.URL.revokeObjectURL(uploadPreview);
+    setUploadPreview(file ? window.URL.createObjectURL(file) : null);
+    setUploadFileName(file?.name ?? null);
+    onUpload(file);
+  };
+
   return (
     <div className={styles.iconPicker}>
-      <div className={styles.iconGrid}>
-        {candidates.length === 0 ? (
-          <p className="fn-muted fn-text-sm">
-            まだ候補がありません。新しくアップロードするか、作品に設定したアイコンが候補になります。
-          </p>
-        ) : (
-          candidates.map((url) => (
-            <button
-              key={url}
-              type="button"
-              onClick={() => onSelect(url)}
-              className={`${styles.iconButton} ${url === currentIconUrl ? styles.iconButtonActive : ""}`}
-              disabled={pending}
-              aria-pressed={url === currentIconUrl}
-              aria-label="アイコンを選択"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={url} alt="" className={styles.iconThumb} />
-            </button>
-          ))
-        )}
+      <div className={styles.iconModeSwitch} role="tablist" aria-label="アイコン設定方法">
+        <button
+          type="button"
+          className={`${styles.iconModeButton} ${mode === "select" ? styles.iconModeButtonActive : ""}`}
+          onClick={() => setMode("select")}
+          disabled={pending || candidates.length === 0}
+          aria-selected={mode === "select"}
+          role="tab"
+        >
+          候補から選ぶ
+        </button>
+        <button
+          type="button"
+          className={`${styles.iconModeButton} ${mode === "upload" ? styles.iconModeButtonActive : ""}`}
+          onClick={() => setMode("upload")}
+          disabled={pending}
+          aria-selected={mode === "upload"}
+          role="tab"
+        >
+          新規アップロード
+        </button>
       </div>
-      <div className={styles.iconActions}>
-        <label className="fn-btn fn-btn-ghost fn-btn-sm">
-          <input
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            onChange={(ev) => onUpload(ev.currentTarget.files?.[0] ?? null)}
-            style={{ display: "none" }}
-            disabled={pending}
-          />
-          <Icon name="upload" size={12} aria-hidden /> 画像をアップロード
-        </label>
-        <span className={styles.iconHint}>250x250 推奨 / 2MB まで</span>
-      </div>
+      {mode === "select" ? (
+        <div className={styles.iconGrid}>
+          {candidates.length === 0 ? (
+            <p className="fn-muted fn-text-sm">
+              まだ候補がありません。新しくアップロードするか、作品に設定したアイコンが候補になります。
+            </p>
+          ) : (
+            candidates.map((url) => (
+              <button
+                key={url}
+                type="button"
+                onClick={() => onSelect(url)}
+                className={`${styles.iconButton} ${url === currentIconUrl ? styles.iconButtonActive : ""}`}
+                disabled={pending}
+                aria-pressed={url === currentIconUrl}
+                aria-label="アイコンを選択"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={url} alt="" className={styles.iconThumb} />
+                {url === currentIconUrl ? (
+                  <span className={styles.iconSelectedMark}>
+                    <Icon name="check" size={12} aria-hidden />
+                  </span>
+                ) : null}
+              </button>
+            ))
+          )}
+        </div>
+      ) : (
+        <div className={styles.uploadPanel}>
+          <div className={styles.uploadPreview}>
+            {uploadPreview ?? currentIconUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={uploadPreview ?? currentIconUrl ?? ""}
+                alt=""
+                className={styles.uploadPreviewImage}
+              />
+            ) : (
+              <Icon name="upload" size={22} aria-hidden />
+            )}
+          </div>
+          <div className={styles.uploadBody}>
+            <label className="fn-btn fn-btn-ghost fn-btn-sm">
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                onChange={(ev) => onPickUploadFile(ev.currentTarget.files?.[0] ?? null)}
+                style={{ display: "none" }}
+                disabled={pending}
+              />
+              <Icon name="upload" size={12} aria-hidden /> 画像を選ぶ
+            </label>
+            <span className={styles.iconHint}>
+              250x250 程度の正方形推奨 / PNG・JPEG・WEBP / 2MB まで
+            </span>
+            {uploadFileName ? (
+              <span className={styles.iconHint}>選択中: {uploadFileName}</span>
+            ) : null}
+          </div>
+        </div>
+      )}
       {message ? <p className={styles.msgOk}>{message}</p> : null}
       {error ? <p className={styles.msgErr}>{error}</p> : null}
     </div>

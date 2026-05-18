@@ -195,51 +195,100 @@ export default async function SettingsPage(): Promise<React.ReactElement> {
               上のフォームから連携を申請するか、運営の承認をお待ちください。
             </p>
           ) : (
-            <table className="fn-table">
-              <thead>
-                <tr>
-                  <th>名前</th>
-                  <th>@ID</th>
-                  <th>状態</th>
-                  <th>アクティブ</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {xIds.map((x) => (
-                  <tr key={x.id}>
-                    <td>{x.x_name}</td>
-                    <td>@{x.id}</td>
-                    <td>
-                      {x.approval_status === "approved" ? (
-                        <span className="fn-badge fn-badge-accent">承認済</span>
-                      ) : x.approval_status === "pending" ? (
-                        <span className="fn-badge fn-badge-warning">承認待ち</span>
-                      ) : (
-                        <span className="fn-badge fn-badge-danger">再申請</span>
-                      )}
-                    </td>
-                    <td>
-                      {x.id === user.active_x_user_id ? (
-                        <Icon name="check" size={14} aria-label="アクティブ" />
-                      ) : x.approval_status === "approved" ? (
-                        <SetActiveXButton xUserId={x.id} />
-                      ) : (
-                        <span className="fn-muted fn-text-sm">—</span>
-                      )}
-                    </td>
-                    <td>
-                      <Link
-                        href={`/user/${x.id}`}
-                        className="fn-btn fn-btn-ghost fn-btn-sm"
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 240px), 1fr))",
+                gap: 12,
+                marginTop: 18,
+              }}
+            >
+              {xIds.map((x) => {
+                const active = x.id === user.active_x_user_id;
+                const approved = x.approval_status === "approved";
+                return (
+                  <section
+                    key={x.id}
+                    aria-label={`@${x.id} の選択カード`}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "44px 1fr",
+                      gap: 12,
+                      alignItems: "center",
+                      padding: "14px 14px",
+                      border: active
+                        ? "1px solid var(--accent-primary)"
+                        : "1px solid var(--border-subtle)",
+                      borderRadius: "var(--radius-sm)",
+                      background: active
+                        ? "var(--accent-primary-soft)"
+                        : "var(--bg-base)",
+                    }}
+                  >
+                    {x.icon_url ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        src={x.icon_url}
+                        alt=""
+                        width={44}
+                        height={44}
+                        style={{
+                          borderRadius: 999,
+                          objectFit: "cover",
+                          background: "var(--bg-elevated)",
+                        }}
+                      />
+                    ) : (
+                      <span
+                        style={{
+                          width: 44,
+                          height: 44,
+                          borderRadius: 999,
+                          background: "var(--bg-elevated)",
+                          display: "grid",
+                          placeItems: "center",
+                          color: "var(--text-muted)",
+                        }}
                       >
-                        プロフィール
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                        <Icon name="user" size={18} aria-hidden />
+                      </span>
+                    )}
+                    <div style={{ minWidth: 0, display: "grid", gap: 8 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {x.x_name}
+                        </div>
+                        <div style={{ color: "var(--text-muted)", fontSize: 12 }}>
+                          @{x.id}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                        {approved ? (
+                          <span className="fn-badge fn-badge-accent">承認済</span>
+                        ) : x.approval_status === "pending" ? (
+                          <span className="fn-badge fn-badge-warning">承認待ち</span>
+                        ) : (
+                          <span className="fn-badge fn-badge-danger">再申請</span>
+                        )}
+                        {active ? (
+                          <span className="fn-badge fn-badge-soft">
+                            <Icon name="check" size={11} aria-hidden /> アクティブ
+                          </span>
+                        ) : approved ? (
+                          <SetActiveXButton xUserId={x.id} />
+                        ) : null}
+                        <Link
+                          href={`/user/${x.id}`}
+                          className="fn-btn fn-btn-ghost fn-btn-sm"
+                        >
+                          プロフィール
+                        </Link>
+                      </div>
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
           )}
           {xIds.length > 0 ? (
             <div style={{ marginTop: 24, display: "grid", gap: 16 }}>
