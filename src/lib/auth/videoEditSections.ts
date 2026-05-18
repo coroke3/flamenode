@@ -11,8 +11,19 @@ export type VideoEditSectionKey =
   | "video.identity"
   | "video.descriptions"
   | "video.credits"
+  | "video.members"
+  | "video.youtube_id"
+  | "video.primary_event"
   | "video.status"
-  | "video.chapter_admin";
+  | "video.chapter_admin"
+  // Legacy / admin UI permission keys. Keep these accepted so
+  // event_collaborator_permissions created before the section-key cleanup still work.
+  | "videos.title"
+  | "videos.music_credit"
+  | "videos.members"
+  | "videos.review_data"
+  | "videos.youtube_id"
+  | "videos.primary_event";
 
 export type EventEditSectionKey =
   | "event.basic"

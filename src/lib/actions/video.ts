@@ -500,7 +500,42 @@ export async function updateVideo(
   const videoId = String(formData.get("video_id") ?? "").trim();
   if (!videoId) return { ok: false, message: "video_id が空です。" };
 
-  const parsed = videoFormSchema.safeParse(Object.fromEntries(formData));
+  const db = getDatabase();
+  if (!db) return { ok: false, message: "DB に接続できません。" };
+
+  const target = (
+    await db.select().from(videos).where(eq(videos.id, videoId)).limit(1)
+  )[0];
+  if (!target) return { ok: false, message: "対象作品が見つかりません。" };
+
+  const raw = Object.fromEntries(formData);
+  const setDefault = (key: string, value: string | null | undefined) => {
+    if (!Object.prototype.hasOwnProperty.call(raw, key)) {
+      raw[key] = value ?? "";
+    }
+  };
+  setDefault(
+    "display_name",
+    target.display_name ?? target.contact_x_id ?? target.creator_id ?? "anonymous",
+  );
+  setDefault("title", target.title);
+  if (!Object.prototype.hasOwnProperty.call(raw, "youtube_url") && target.youtube_video_id) {
+    raw.youtube_url = `https://youtu.be/${target.youtube_video_id}`;
+  }
+  setDefault("contact_x_id", target.creator_id ?? target.contact_x_id);
+  setDefault("icon_url", target.icon_url);
+  setDefault("music", target.music);
+  setDefault("credit", target.credit);
+  setDefault("intro_comment", target.intro_comment);
+  setDefault("highlights", target.highlights);
+  setDefault("production_story", target.production_story);
+  setDefault("used_software", target.used_software);
+  setDefault("closing_comment", target.closing_comment);
+  if (!Object.prototype.hasOwnProperty.call(raw, "is_collab")) {
+    raw.is_collab = target.submission_type === "collab" ? "true" : "false";
+  }
+
+  const parsed = videoFormSchema.safeParse(raw);
   if (!parsed.success) {
     return {
       ok: false,
@@ -510,29 +545,37 @@ export async function updateVideo(
   const youtubeId = extractYoutubeId(parsed.data.youtube_url);
   if (!youtubeId) return { ok: false, message: "YouTube URL が解析できません。" };
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
-
-  const target = (
-    await db.select().from(videos).where(eq(videos.id, videoId)).limit(1)
-  )[0];
-  if (!target) return { ok: false, message: "対象作品が見つかりません。" };
-
-  // Batch A 暫定: section 分割は次PR。requiredKey は "video.basics" 一本で運用する。
-  const canEdit = await canEditVideo({
-    db,
-    user: { id: sessionUser.id, role: sessionUser.role ?? null },
-    video: target,
-    requiredKey: "video.basics",
-  });
-  if (!canEdit) {
+  const editUser = { id: sessionUser.id, role: sessionUser.role ?? null };
+  const [
+    canEditIdentity,
+    canEditBasics,
+    canEditYoutube,
+    canEditCredits,
+    canEditDescriptions,
+    canEditMembers,
+  ] = await Promise.all([
+    canEditVideo({ db, user: editUser, video: target, requiredKey: "video.identity" }),
+    canEditVideo({ db, user: editUser, video: target, requiredKey: "video.basics" }),
+    canEditVideo({ db, user: editUser, video: target, requiredKey: "video.youtube_id" }),
+    canEditVideo({ db, user: editUser, video: target, requiredKey: "video.credits" }),
+    canEditVideo({ db, user: editUser, video: target, requiredKey: "video.descriptions" }),
+    canEditVideo({ db, user: editUser, video: target, requiredKey: "video.members" }),
+  ]);
+  if (
+    !canEditIdentity &&
+    !canEditBasics &&
+    !canEditYoutube &&
+    !canEditCredits &&
+    !canEditDescriptions &&
+    !canEditMembers
+  ) {
     return { ok: false, message: "編集権限がありません。" };
   }
 
   const now = Math.floor(Date.now() / 1000);
   const existingX = normalizeXId(target.creator_id || target.contact_x_id);
   let nextCreatorX: string;
-  if (sessionUser.role === "admin") {
+  if (canEditIdentity && sessionUser.role === "admin") {
     // admin は form 入力の contact_x_id で変更可。未指定の場合は既存を維持。
     const requestedX = normalizeXId(parsed.data.contact_x_id);
     nextCreatorX = requestedX || existingX || "";
@@ -543,79 +586,146 @@ export async function updateVideo(
   if (!nextCreatorX) {
     return { ok: false, message: "提出主体 X ID が必要です。" };
   }
+  const requestedX = normalizeXId(parsed.data.contact_x_id);
+  const changed = (a: string | null | undefined, b: string | null | undefined) =>
+    (a || null) !== (b || null);
+
+  if (
+    !canEditIdentity &&
+    ((requestedX && requestedX !== existingX) ||
+      changed(parsed.data.display_name, target.display_name) ||
+      changed(parsed.data.icon_url, target.icon_url))
+  ) {
+    return { ok: false, message: "提出者情報を編集する権限がありません。" };
+  }
+  if (!canEditBasics && parsed.data.title !== target.title) {
+    return { ok: false, message: "作品タイトルを編集する権限がありません。" };
+  }
+  const youtubeChanged = youtubeId !== (target.youtube_video_id ?? "");
+  if (!canEditYoutube && youtubeChanged) {
+    return { ok: false, message: "YouTube ID を編集する権限がありません。" };
+  }
+  if (
+    !canEditCredits &&
+    (changed(parsed.data.music, target.music) || changed(parsed.data.credit, target.credit))
+  ) {
+    return { ok: false, message: "楽曲・クレジットを編集する権限がありません。" };
+  }
+  if (
+    !canEditDescriptions &&
+    (changed(parsed.data.intro_comment, target.intro_comment) ||
+      changed(parsed.data.highlights, target.highlights) ||
+      changed(parsed.data.production_story, target.production_story) ||
+      changed(parsed.data.used_software, target.used_software) ||
+      changed(parsed.data.closing_comment, target.closing_comment))
+  ) {
+    return { ok: false, message: "紹介文・振り返り項目を編集する権限がありません。" };
+  }
+  if (
+    !canEditMembers &&
+    parsed.data.is_collab !== (target.submission_type === "collab")
+  ) {
+    return { ok: false, message: "合作メンバーを編集する権限がありません。" };
+  }
 
   // YouTube ID 重複チェック: 自身を除いた非削除・非 voided な動画に同じ ID が存在したら拒否。
-  const duplicateUpdateVideo = (
-    await db
-      .select({ id: videos.id })
-      .from(videos)
-      .where(
-        and(
-          eq(videos.youtube_video_id, youtubeId),
-          eq(videos.is_deleted, 0),
-          ne(videos.status, "voided"),
-          ne(videos.id, videoId),
-        ),
-      )
-      .limit(1)
-  )[0];
-  if (duplicateUpdateVideo) {
-    return { ok: false, message: "この YouTube 動画は既に登録されています。" };
+  if (canEditYoutube && youtubeChanged) {
+    const duplicateUpdateVideo = (
+      await db
+        .select({ id: videos.id })
+        .from(videos)
+        .where(
+          and(
+            eq(videos.youtube_video_id, youtubeId),
+            eq(videos.is_deleted, 0),
+            ne(videos.status, "voided"),
+            ne(videos.id, videoId),
+          ),
+        )
+        .limit(1)
+    )[0];
+    if (duplicateUpdateVideo) {
+      return { ok: false, message: "この YouTube 動画は既に登録されています。" };
+    }
   }
 
   // ensureSubmissionXUser に渡す X ID は必ず承認済みか admin 操作であること。
-  await ensureSubmissionXUser(db, {
-    xId: nextCreatorX,
-    displayName: parsed.data.display_name,
-    iconUrl: parsed.data.icon_url ?? null,
-    profileText: parsed.data.profile_text ?? null,
-    youtubeChannelUrl: parsed.data.youtube_channel_url ?? null,
-    socialLinks: parsed.data.other_social_links ?? null,
-    allowProfileUpdate:
-      sessionUser.role === "admin" || approvedXIds.includes(nextCreatorX),
-  });
+  if (canEditIdentity) {
+    await ensureSubmissionXUser(db, {
+      xId: nextCreatorX,
+      displayName: parsed.data.display_name,
+      iconUrl: parsed.data.icon_url ?? null,
+      profileText: parsed.data.profile_text ?? null,
+      youtubeChannelUrl: parsed.data.youtube_channel_url ?? null,
+      socialLinks: parsed.data.other_social_links ?? null,
+      allowProfileUpdate:
+        sessionUser.role === "admin" || approvedXIds.includes(nextCreatorX),
+    });
+  }
   await db
     .update(videos)
     .set({
-      title: parsed.data.title,
-      youtube_video_id: youtubeId,
-      creator_id: nextCreatorX || null,
-      contact_x_id: nextCreatorX || "anonymous",
-      display_name: parsed.data.display_name,
-      icon_url: parsed.data.icon_url || null,
-      music: parsed.data.music ?? null,
-      credit: parsed.data.credit ?? null,
-      intro_comment: parsed.data.intro_comment ?? null,
-      highlights: parsed.data.highlights ?? null,
-      production_story: parsed.data.production_story ?? null,
-      used_software: parsed.data.used_software ?? null,
-      closing_comment: parsed.data.closing_comment ?? null,
-      submission_type: parsed.data.is_collab ? "collab" : "individual",
+      title: canEditBasics ? parsed.data.title : target.title,
+      youtube_video_id: canEditYoutube ? youtubeId : target.youtube_video_id,
+      creator_id: canEditIdentity ? nextCreatorX || null : target.creator_id,
+      contact_x_id: canEditIdentity ? nextCreatorX || "anonymous" : target.contact_x_id,
+      display_name: canEditIdentity ? parsed.data.display_name : target.display_name,
+      icon_url: canEditIdentity ? parsed.data.icon_url || null : target.icon_url,
+      music: canEditCredits ? parsed.data.music ?? null : target.music,
+      credit: canEditCredits ? parsed.data.credit ?? null : target.credit,
+      intro_comment: canEditDescriptions
+        ? parsed.data.intro_comment ?? null
+        : target.intro_comment,
+      highlights: canEditDescriptions ? parsed.data.highlights ?? null : target.highlights,
+      production_story: canEditDescriptions
+        ? parsed.data.production_story ?? null
+        : target.production_story,
+      used_software: canEditDescriptions
+        ? parsed.data.used_software ?? null
+        : target.used_software,
+      closing_comment: canEditDescriptions
+        ? parsed.data.closing_comment ?? null
+        : target.closing_comment,
+      submission_type: canEditMembers
+        ? parsed.data.is_collab
+          ? "collab"
+          : "individual"
+        : target.submission_type,
       updated_at: now,
     })
     .where(eq(videos.id, videoId));
 
-  const members = parsed.data.is_collab
-    ? parseMembersJson(formData.get("members_json"))
-    : [];
-  await replaceVideoMembers(db, videoId, members);
+  if (canEditMembers) {
+    const members = parsed.data.is_collab
+      ? parseMembersJson(formData.get("members_json"))
+      : [];
+    await replaceVideoMembers(db, videoId, members);
+  }
 
   await db.insert(historyLogs).values({
-    table_name: "videos",
-    record_id: videoId,
-    action: "UPDATE",
-    after_data: JSON.stringify({
-      title: parsed.data.title,
-      youtube_video_id: youtubeId,
-    }),
-    operator_discord_id: sessionUser.id,
-    retention_class: "normal",
+      table_name: "videos",
+      record_id: videoId,
+      action: "UPDATE",
+      after_data: JSON.stringify({
+        sections: {
+          identity: canEditIdentity,
+          basics: canEditBasics,
+          youtube: canEditYoutube,
+          credits: canEditCredits,
+          descriptions: canEditDescriptions,
+          members: canEditMembers,
+        },
+        title: canEditBasics ? parsed.data.title : target.title,
+        youtube_video_id: canEditYoutube ? youtubeId : target.youtube_video_id,
+      }),
+      operator_discord_id: sessionUser.id,
+      retention_class: "normal",
     created_at: now,
   });
 
   revalidatePath("/");
   revalidatePath(`/${target.youtube_video_id ?? videoId}`);
-  revalidatePath(`/${youtubeId}`);
+  if (canEditYoutube) revalidatePath(`/${youtubeId}`);
   revalidatePath("/dashboard");
   return { ok: true, videoId };
 }

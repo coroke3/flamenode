@@ -20,6 +20,7 @@ interface VideoMembersFieldProps {
   initialMembers?: VideoMemberInput[];
   suggestions?: VideoMemberSuggestion[];
   hiddenName?: string;
+  disabled?: boolean;
 }
 
 const EMPTY_ROW: VideoMemberInput = {
@@ -33,6 +34,7 @@ export function VideoMembersField({
   initialMembers = [],
   suggestions = [],
   hiddenName = "members_json",
+  disabled = false,
 }: VideoMembersFieldProps): React.ReactElement {
   const [rows, setRows] = React.useState<VideoMemberInput[]>(() =>
     initialMembers.length > 0 ? initialMembers : [{ ...EMPTY_ROW }],
@@ -42,37 +44,80 @@ export function VideoMembersField({
   // /api/internal/x-users/search からの追加候補 (debounce 検索)
   const [fetched, setFetched] = React.useState<VideoMemberSuggestion[]>([]);
   const [searchQuery, setSearchQuery] = React.useState("");
-  React.useEffect(() => {
-    const q = searchQuery.trim();
-    if (q.length < 2) {
-      setFetched([]);
-      return;
-    }
-    const controller = new AbortController();
-    const t = window.setTimeout(async () => {
+  const [searchStatus, setSearchStatus] = React.useState<
+    "idle" | "loading" | "done" | "error"
+  >("idle");
+  const [searchHint, setSearchHint] = React.useState<string | null>(null);
+  const [searchHasMore, setSearchHasMore] = React.useState(false);
+  const [nextOffset, setNextOffset] = React.useState<number | null>(null);
+
+  const fetchSuggestions = React.useCallback(
+    async (q: string, offset: number, signal?: AbortSignal) => {
+      if (disabled) return;
+      setSearchStatus("loading");
+      setSearchHint(null);
       try {
         const res = await fetch(
-          `/api/internal/x-users/search?q=${encodeURIComponent(q)}&limit=20`,
-          { signal: controller.signal, cache: "no-store" },
+          `/api/internal/x-users/search?q=${encodeURIComponent(q)}&limit=20&offset=${offset}`,
+          { signal, cache: "no-store" },
         );
-        if (!res.ok) return;
+        if (!res.ok) throw new Error("search_failed");
         const json = (await res.json()) as {
           items?: { id: string; x_name: string | null }[];
+          hasMore?: boolean;
+          nextOffset?: number | null;
+          hint?: string | null;
         };
         const items = (json.items ?? []).map((r) => ({
           name: r.x_name ?? r.id,
           x_user_id: r.id,
         }));
-        setFetched(items);
-      } catch {
-        // abort or network error は無視
+        setFetched((prev) => {
+          const map = new Map<string, VideoMemberSuggestion>();
+          if (offset > 0) {
+            for (const s of prev) map.set(normalizeXId(s.x_user_id), s);
+          }
+          for (const s of items) map.set(normalizeXId(s.x_user_id), s);
+          return Array.from(map.values());
+        });
+        setSearchHasMore(Boolean(json.hasMore));
+        setNextOffset(
+          typeof json.nextOffset === "number" ? json.nextOffset : null,
+        );
+        setSearchHint(
+          items.length === 0 && offset === 0
+            ? "候補が見つかりません。X ID の表記や文字数を確認してください。"
+            : (json.hint ?? null),
+        );
+        setSearchStatus("done");
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        setSearchStatus("error");
+        setSearchHint("候補の取得に失敗しました。少し待って再入力してください。");
       }
+    },
+    [disabled],
+  );
+
+  React.useEffect(() => {
+    const q = searchQuery.trim();
+    if (disabled || q.length < 2) {
+      setFetched([]);
+      setSearchStatus("idle");
+      setSearchHint(q.length === 1 ? "2文字以上で候補を検索します。" : null);
+      setSearchHasMore(false);
+      setNextOffset(null);
+      return;
+    }
+    const controller = new AbortController();
+    const t = window.setTimeout(() => {
+      void fetchSuggestions(q, 0, controller.signal);
     }, 250);
     return () => {
       controller.abort();
       window.clearTimeout(t);
     };
-  }, [searchQuery]);
+  }, [disabled, fetchSuggestions, searchQuery]);
 
   // props + fetched を id ベースで重複排除して 1 つの suggestion 配列にまとめる
   const mergedSuggestions = React.useMemo(() => {
@@ -101,10 +146,12 @@ export function VideoMembersField({
   }, [mergedSuggestions]);
 
   const update = (i: number, patch: Partial<VideoMemberInput>) => {
+    if (disabled) return;
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   };
 
   const fillFromName = (i: number, name: string) => {
+    if (disabled) return;
     const hit = suggestionsByName.get(name.trim().toLowerCase());
     if (!hit) return;
     setRows((prev) =>
@@ -117,6 +164,7 @@ export function VideoMembersField({
   };
 
   const fillFromXId = (i: number, xid: string) => {
+    if (disabled) return;
     const hit = suggestionsById.get(normalizeXId(xid));
     if (!hit) return;
     setRows((prev) =>
@@ -130,9 +178,12 @@ export function VideoMembersField({
     );
   };
 
-  const add = () => setRows((prev) => [...prev, { ...EMPTY_ROW }]);
+  const add = () => {
+    if (disabled) return;
+    setRows((prev) => [...prev, { ...EMPTY_ROW }]);
+  };
   const remove = (i: number) =>
-    setRows((prev) => prev.filter((_, idx) => idx !== i));
+    !disabled && setRows((prev) => prev.filter((_, idx) => idx !== i));
 
   const copyCsvPrompt = async () => {
     const prompt = [
@@ -147,6 +198,7 @@ export function VideoMembersField({
   };
 
   const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (disabled) return;
     const text = e.clipboardData.getData("text");
     if (!text || !/[\n,]/.test(text)) return;
     e.preventDefault();
@@ -206,6 +258,13 @@ export function VideoMembersField({
       <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
         名前または XID を入力すると、既存のクリエイター情報からもう片方を提案します。作品ごとに表示名は変更できます。
       </p>
+      {searchQuery.trim().length > 0 ? (
+        <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>
+          {searchStatus === "loading"
+            ? "候補を検索中..."
+            : (searchHint ?? `${mergedSuggestions.length}件の候補を表示しています。`)}
+        </p>
+      ) : null}
       <div
         style={{
           display: "grid",
@@ -244,6 +303,7 @@ export function VideoMembersField({
             className="fn-input"
             maxLength={80}
             list="member-name-suggestions"
+            disabled={disabled}
           />
           <input
             type="text"
@@ -258,6 +318,7 @@ export function VideoMembersField({
             maxLength={32}
             pattern="[A-Za-z0-9_]*"
             list="member-xid-suggestions"
+            disabled={disabled}
           />
           <input
             type="text"
@@ -266,6 +327,7 @@ export function VideoMembersField({
             placeholder="作画 / 編集 / 音響など"
             className="fn-input"
             maxLength={40}
+            disabled={disabled}
           />
           <input
             type="text"
@@ -274,12 +336,14 @@ export function VideoMembersField({
             placeholder="任意コメント"
             className="fn-input"
             maxLength={200}
+            disabled={disabled}
           />
           <button
             type="button"
             className="fn-btn fn-btn-ghost fn-btn-sm"
             onClick={() => remove(i)}
             aria-label="この行を削除"
+            disabled={disabled}
           >
             <Icon name="trash" size={11} aria-hidden />
           </button>
@@ -290,9 +354,20 @@ export function VideoMembersField({
           type="button"
           className="fn-btn fn-btn-ghost fn-btn-sm"
           onClick={add}
+          disabled={disabled}
         >
           <Icon name="plus" size={11} aria-hidden /> 行を追加
         </button>
+        {searchHasMore && nextOffset !== null ? (
+          <button
+            type="button"
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+            onClick={() => void fetchSuggestions(searchQuery.trim(), nextOffset)}
+            disabled={disabled || searchStatus === "loading"}
+          >
+            候補をさらに読み込む
+          </button>
+        ) : null}
       </div>
       <details style={{ marginTop: 6 }}>
         <summary
@@ -310,12 +385,14 @@ export function VideoMembersField({
           style={{ marginTop: 6, fontFamily: "monospace", fontSize: 12 }}
           placeholder={"例:\n田中,tanaka,作画,よろしく\n佐藤,sato_design,音響,"}
           onPaste={onPaste}
+          disabled={disabled}
         />
         <button
           type="button"
           className="fn-btn fn-btn-ghost fn-btn-sm"
           onClick={copyCsvPrompt}
           style={{ marginTop: 8 }}
+          disabled={disabled}
         >
           <Icon name="copy" size={11} aria-hidden />
           {copied ? "コピーしました" : "CSV作成プロンプトをコピー"}

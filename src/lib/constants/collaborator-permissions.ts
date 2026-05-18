@@ -13,6 +13,7 @@ export const COLLABORATOR_PERMISSION_KEYS = [
   "videos.review_data",
   "videos.youtube_id",
   "videos.primary_event",
+  "video.chapter_admin",
 ] as const;
 
 export type CollaboratorPermissionKey =
@@ -68,6 +69,11 @@ export const COLLABORATOR_PERMISSION_LABELS: Record<
     label: "作品の所属イベント変更",
     description:
       "primary_event_id を変更できます (担当外イベントへの変更は管理者確認が必要)。",
+  },
+  "video.chapter_admin": {
+    label: "チャプターコメントの管理",
+    description:
+      "イベント所属作品のチャプターコメントを運営権限で編集・削除できます。",
   },
 };
 

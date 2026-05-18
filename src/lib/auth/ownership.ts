@@ -31,6 +31,24 @@ export type SessionUserLike = {
 
 export type VideoRow = typeof videos.$inferSelect;
 
+const VIDEO_PERMISSION_ALIASES: Record<VideoEditSectionKey, readonly string[]> = {
+  "video.basics": ["video.basics", "videos.title"],
+  "video.identity": ["video.identity", "videos.title"],
+  "video.descriptions": ["video.descriptions", "videos.review_data"],
+  "video.credits": ["video.credits", "videos.music_credit"],
+  "video.members": ["video.members", "videos.members"],
+  "video.youtube_id": ["video.youtube_id", "videos.youtube_id"],
+  "video.primary_event": ["video.primary_event", "videos.primary_event"],
+  "video.status": ["video.status"],
+  "video.chapter_admin": ["video.chapter_admin"],
+  "videos.title": ["videos.title", "video.basics", "video.identity"],
+  "videos.music_credit": ["videos.music_credit", "video.credits"],
+  "videos.members": ["videos.members", "video.members"],
+  "videos.review_data": ["videos.review_data", "video.descriptions"],
+  "videos.youtube_id": ["videos.youtube_id", "video.youtube_id"],
+  "videos.primary_event": ["videos.primary_event", "video.primary_event"],
+};
+
 /** 自分の承認済 X ID 一覧 (active_x_user_id とは独立に全部返す)。 */
 export async function getApprovedXIds(
   db: DB,
@@ -173,8 +191,13 @@ export async function canEditVideo(args: {
   evRows.forEach((r) => eventIds.add(r.event_id));
 
   if (eventIds.size === 0) return false;
+  const aliases = VIDEO_PERMISSION_ALIASES[requiredKey] ?? [requiredKey];
   for (const eId of eventIds) {
-    if (await canEditEvent(db, user, eId, requiredKey)) return true;
+    for (const key of aliases) {
+      if (await canEditEvent(db, user, eId, key as CollaboratorPermissionKey)) {
+        return true;
+      }
+    }
   }
   return false;
 }

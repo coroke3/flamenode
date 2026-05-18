@@ -10,6 +10,7 @@ import { canEditVideo } from "@/lib/auth/ownership";
 import { VideoForm } from "@/components/forms/VideoForm";
 import { Icon } from "@/components/ui/Icon";
 import { youtubeWatchUrl } from "@/lib/youtube/id";
+import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
 
 export const metadata: Metadata = { title: "作品を編集" };
 export const dynamic = "force-dynamic";
@@ -68,6 +69,7 @@ export default async function EditVideoPage({
     .from(xUsersTable)
     .orderBy(asc(xUsersTable.x_name))
     .limit(2000);
+  const softwareSuggestions = await getUsedSoftwareSuggestions(db);
   const xIdOptions = await db
     .select({ id: xUsersTable.id, x_name: xUsersTable.x_name })
     .from(xUsersTable)
@@ -79,13 +81,30 @@ export default async function EditVideoPage({
     )
     .orderBy(asc(xUsersTable.x_name));
 
-  const canEdit = await canEditVideo({
-    db,
-    user,
-    video,
-    requiredKey: "video.basics",
-  });
-  if (!canEdit) {
+  const editUser = { id: user.id, role: user.role ?? null };
+  const [
+    canEditIdentity,
+    canEditBasics,
+    canEditYoutube,
+    canEditCredits,
+    canEditDescriptions,
+    canEditMembers,
+  ] = await Promise.all([
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.identity" }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.basics" }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.youtube_id" }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.credits" }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.descriptions" }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.members" }),
+  ]);
+  const canEditAnySection =
+    canEditIdentity ||
+    canEditBasics ||
+    canEditYoutube ||
+    canEditCredits ||
+    canEditDescriptions ||
+    canEditMembers;
+  if (!canEditAnySection) {
     return (
       <div
         style={{
@@ -118,6 +137,23 @@ export default async function EditVideoPage({
       </div>
     );
   }
+  const disabledSections = [
+    !canEditIdentity ? "submitter" : null,
+    !canEditBasics && !canEditYoutube && !canEditCredits ? "video" : null,
+    !canEditDescriptions ? "descriptions" : null,
+    !canEditMembers ? "members" : null,
+  ].filter((v): v is string => Boolean(v));
+  const disabledFields = [
+    !canEditIdentity ? "submitter.display_name" : null,
+    !canEditIdentity ? "submitter.icon_url" : null,
+    !canEditIdentity ? "submitter.profile_text" : null,
+    !canEditIdentity ? "submitter.youtube_channel_url" : null,
+    !canEditIdentity ? "submitter.other_social_links" : null,
+    !canEditBasics ? "video.title" : null,
+    !canEditYoutube ? "video.youtube_url" : null,
+    !canEditCredits ? "video.music" : null,
+    !canEditCredits ? "video.credit" : null,
+  ].filter((v): v is string => Boolean(v));
 
   return (
     <div
@@ -167,6 +203,8 @@ export default async function EditVideoPage({
         videoId={video.id}
         xIdOptions={xIdOptions}
         activeXId={user.active_x_user_id ?? undefined}
+        disabledSections={disabledSections}
+        disabledFields={disabledFields}
         initial={{
           display_name: video.display_name,
           contact_x_id: video.contact_x_id,
@@ -189,6 +227,7 @@ export default async function EditVideoPage({
           members: initialMembers,
         }}
         memberSuggestions={memberSuggestions}
+        softwareSuggestions={softwareSuggestions}
       />
 
       <p
