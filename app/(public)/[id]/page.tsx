@@ -144,6 +144,7 @@ export default async function VideoDetailPage({
         | "chapter"
         | "review"
         | "system",
+      is_owner: c.visibility === "private",
     }));
 
   const related = (await fetchRelatedVideos(db, {

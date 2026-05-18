@@ -375,7 +375,7 @@ export function YoutubePlayer({
   const visibleChapters = chapters.filter(
     (c) =>
       c.time <= duration &&
-      (c.visibility === "public" || c.is_owner || c.marker_kind === "chapter"),
+      (c.visibility === "public" || c.is_owner),
   );
 
   const accentStyle = accentColor
