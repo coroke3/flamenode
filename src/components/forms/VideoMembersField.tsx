@@ -39,20 +39,66 @@ export function VideoMembersField({
   );
   const [copied, setCopied] = React.useState(false);
 
-  const suggestionsById = React.useMemo(() => {
+  // /api/internal/x-users/search からの追加候補 (debounce 検索)
+  const [fetched, setFetched] = React.useState<VideoMemberSuggestion[]>([]);
+  const [searchQuery, setSearchQuery] = React.useState("");
+  React.useEffect(() => {
+    const q = searchQuery.trim();
+    if (q.length < 2) {
+      setFetched([]);
+      return;
+    }
+    const controller = new AbortController();
+    const t = window.setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `/api/internal/x-users/search?q=${encodeURIComponent(q)}&limit=20`,
+          { signal: controller.signal, cache: "no-store" },
+        );
+        if (!res.ok) return;
+        const json = (await res.json()) as {
+          items?: { id: string; x_name: string | null }[];
+        };
+        const items = (json.items ?? []).map((r) => ({
+          name: r.x_name ?? r.id,
+          x_user_id: r.id,
+        }));
+        setFetched(items);
+      } catch {
+        // abort or network error は無視
+      }
+    }, 250);
+    return () => {
+      controller.abort();
+      window.clearTimeout(t);
+    };
+  }, [searchQuery]);
+
+  // props + fetched を id ベースで重複排除して 1 つの suggestion 配列にまとめる
+  const mergedSuggestions = React.useMemo(() => {
     const map = new Map<string, VideoMemberSuggestion>();
     for (const s of suggestions) map.set(normalizeXId(s.x_user_id), s);
+    for (const s of fetched) {
+      const key = normalizeXId(s.x_user_id);
+      if (!map.has(key)) map.set(key, s);
+    }
+    return Array.from(map.values());
+  }, [suggestions, fetched]);
+
+  const suggestionsById = React.useMemo(() => {
+    const map = new Map<string, VideoMemberSuggestion>();
+    for (const s of mergedSuggestions) map.set(normalizeXId(s.x_user_id), s);
     return map;
-  }, [suggestions]);
+  }, [mergedSuggestions]);
 
   const suggestionsByName = React.useMemo(() => {
     const map = new Map<string, VideoMemberSuggestion>();
-    for (const s of suggestions) {
+    for (const s of mergedSuggestions) {
       const key = s.name.trim().toLowerCase();
       if (key && !map.has(key)) map.set(key, s);
     }
     return map;
-  }, [suggestions]);
+  }, [mergedSuggestions]);
 
   const update = (i: number, patch: Partial<VideoMemberInput>) => {
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
@@ -143,14 +189,14 @@ export function VideoMembersField({
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <input type="hidden" name={hiddenName} value={payload} />
       <datalist id="member-name-suggestions">
-        {suggestions.map((s) => (
+        {mergedSuggestions.map((s) => (
           <option key={`${s.x_user_id}-name`} value={s.name}>
             @{s.x_user_id}
           </option>
         ))}
       </datalist>
       <datalist id="member-xid-suggestions">
-        {suggestions.map((s) => (
+        {mergedSuggestions.map((s) => (
           <option key={`${s.x_user_id}-xid`} value={s.x_user_id}>
             {s.name}
           </option>
@@ -189,7 +235,10 @@ export function VideoMembersField({
           <input
             type="text"
             value={r.name}
-            onChange={(e) => update(i, { name: e.target.value })}
+            onChange={(e) => {
+              update(i, { name: e.target.value });
+              setSearchQuery(e.target.value);
+            }}
             onBlur={(e) => fillFromName(i, e.target.value)}
             placeholder="表示名"
             className="fn-input"
@@ -199,7 +248,10 @@ export function VideoMembersField({
           <input
             type="text"
             value={r.x_user_id}
-            onChange={(e) => update(i, { x_user_id: e.target.value })}
+            onChange={(e) => {
+              update(i, { x_user_id: e.target.value });
+              setSearchQuery(e.target.value);
+            }}
             onBlur={(e) => fillFromXId(i, e.target.value)}
             placeholder="@なし"
             className="fn-input"
