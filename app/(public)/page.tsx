@@ -105,8 +105,8 @@ export default async function TopPage(): Promise<React.ReactElement> {
             <EmptyShelf message="まだおすすめできる作品がありません。" />
           ) : (
             <Shelf ariaLabel="今日見るべき作品">
-              {recommended.map((v) => (
-                <VideoCard key={v.id} video={v} />
+              {recommended.map((v, index) => (
+                <VideoCard key={`${v.id}-recommended-${index}`} video={v} />
               ))}
             </Shelf>
           )}
@@ -120,8 +120,8 @@ export default async function TopPage(): Promise<React.ReactElement> {
             <EmptyShelf message="まだ公開作品がありません。" />
           ) : (
             <Shelf ariaLabel="新着作品">
-              {latest.map((v) => (
-                <VideoCard key={v.id} video={v} />
+              {latest.map((v, index) => (
+                <VideoCard key={`${v.id}-latest-${index}`} video={v} />
               ))}
             </Shelf>
           )}
@@ -129,15 +129,15 @@ export default async function TopPage(): Promise<React.ReactElement> {
       </section>
 
       <section className={styles.section} aria-labelledby="sec-creators">
-        <SectionHeader title="クリエイター" moreHref="/recommend#creators" />
+        <SectionHeader title="クリエイター" moreHref="/user" />
         <div className={styles.shelfBox}>
           {creators.length === 0 ? (
             <EmptyShelf message="該当するクリエイターがまだいません。" />
           ) : (
             <Shelf ariaLabel="ピックアップクリエイター">
-              {creators.map((c) => (
+              {creators.map((c, index) => (
                 <CreatorCard
-                  key={c.id}
+                  key={`${c.id}-creator-${index}`}
                   data={{
                     id: c.id,
                     x_name: c.x_name,

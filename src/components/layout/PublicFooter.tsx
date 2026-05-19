@@ -20,7 +20,7 @@ export function PublicFooter(): React.ReactElement {
           items={[
             { label: "作品一覧", href: "/list" },
             { label: "イベント", href: "/event" },
-            { label: "クリエイター", href: "/recommend" },
+            { label: "クリエイター", href: "/user" },
             { label: "FlameNode について", href: "/about" },
           ]}
         />
