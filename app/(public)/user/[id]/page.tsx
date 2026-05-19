@@ -9,6 +9,7 @@ import { customPages, videos, videoMembers, xUsers } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 import { normalizeXId } from "@/lib/utils/xid";
+import { resolveXUserIcon } from "@/lib/db/xIconResolution";
 
 export const dynamic = "force-dynamic";
 
@@ -105,6 +106,12 @@ export default async function UserPage({
         }
       : (fallbackUserRows[0] ?? null);
     if (!user) return null;
+    // x_users.icon_url が null のとき、過去作品アイコンから補完する。
+    // (ユーザー既定アイコンが未設定でも、その X ID の作品アイコンが残っていれば表示する)
+    if (!user.icon_url) {
+      const resolved = await resolveXUserIcon(db, user.id);
+      if (resolved) user.icon_url = resolved;
+    }
 
     const ownVideosRaw = await db
       .select({
@@ -250,8 +257,8 @@ export default async function UserPage({
           </div>
         ) : (
           <div className={styles.grid}>
-            {ownVideos.map((v) => (
-              <div key={v.id}>
+            {ownVideos.map((v, index) => (
+              <div key={`${v.id}-own-${index}`}>
                 <VideoCard video={v} />
               </div>
             ))}
@@ -263,8 +270,8 @@ export default async function UserPage({
         <section className={styles.section}>
           <h2 className={styles.sectionTitle}>参加作品</h2>
           <div className={styles.grid}>
-            {collabVideos.map((v) => (
-              <div key={v.id}>
+            {collabVideos.map((v, index) => (
+              <div key={`${v.id}-collab-${index}`}>
                 <VideoCard video={v} />
               </div>
             ))}

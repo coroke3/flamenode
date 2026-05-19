@@ -21,6 +21,7 @@ import {
   type VideoMemberInput,
   type VideoMemberSuggestion,
 } from "@/components/forms/VideoMembersField";
+import { VideoIconPicker } from "@/components/forms/VideoIconPicker";
 import { normalizeXId } from "@/lib/utils/xid";
 
 export interface VideoFormInitialValues {
@@ -71,6 +72,17 @@ interface VideoFormProps {
    */
   disabledSections?: string[];
   disabledFields?: string[];
+  /**
+   * 投稿ボタンを押せないようにする理由文。
+   * 未承認 Active X ID など、サーバー側 writeGuard で必ず弾かれる状態のとき、
+   * 「押せるけど失敗する」UX を避けるためにフォーム側で表示・無効化する。
+   */
+  submitBlockedReason?: string;
+  /**
+   * 作品アイコンの候補リスト。サーバー側で `getXIconCandidates(db, xId)` から取得する。
+   * x_users.icon_url / x_user_icons / 同 X ID の過去 videos.icon_url を新しい順で含む。
+   */
+  iconCandidates?: string[];
 }
 
 /** section key が disabledSections に含まれているか確認する小関数。 */
@@ -109,6 +121,8 @@ export function VideoForm({
   activeXId,
   disabledSections,
   disabledFields,
+  submitBlockedReason,
+  iconCandidates = [],
 }: VideoFormProps): React.ReactElement {
   const router = useRouter();
   const [youtubeUrl, setYoutubeUrl] = React.useState(initial.youtube_url ?? "");
@@ -129,8 +143,9 @@ export function VideoForm({
   // edit モードでは admin のみ変更可。
   const isActiveXFixed = mode === "free" || mode === "slot";
   const canSubmit =
-    (isActiveXFixed && !!normalizedActiveXId) ||
-    (!isActiveXFixed && (hasSelectableXIds || !!normalizedInitialXId));
+    !submitBlockedReason &&
+    ((isActiveXFixed && !!normalizedActiveXId) ||
+      (!isActiveXFixed && (hasSelectableXIds || !!normalizedInitialXId)));
 
   const youtubeId = extractYoutubeId(youtubeUrl);
   const submitterDisabled = isSectionDisabled(disabledSections, "submitter");
@@ -144,6 +159,35 @@ export function VideoForm({
     (key.startsWith("descriptions.") && descriptionsDisabled) ||
     (key.startsWith("members.") && membersDisabled);
 
+  const redirectForGuardReason = React.useCallback(
+    (reason?: string): boolean => {
+      if (typeof window === "undefined") return false;
+      const next = `${window.location.pathname}${window.location.search}`;
+
+      if (reason === "tos_required" || reason === "tos_reaccept_required") {
+        router.push(`/rules?next=${encodeURIComponent(next)}`);
+        return true;
+      }
+
+      if (reason === "unauthenticated") {
+        router.push(`/entry?next=${encodeURIComponent(next)}`);
+        return true;
+      }
+
+      if (
+        reason === "active_x_required" ||
+        reason === "active_x_rejected" ||
+        reason === "active_x_not_approved"
+      ) {
+        router.push(`/dashboard/settings?next=${encodeURIComponent(next)}`);
+        return true;
+      }
+
+      return false;
+    },
+    [router],
+  );
+
   const handleSubmit = (ev: React.FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
     const formData = new FormData(ev.currentTarget);
@@ -156,6 +200,9 @@ export function VideoForm({
             ? updateVideo
             : createFreeVideo;
       const r = await action(formData);
+      if (!r.ok && redirectForGuardReason(r.reason)) {
+        return;
+      }
       setResult(r);
       if (r.ok && r.videoId && mode !== "edit") {
         router.push(`/dashboard/edit/${r.videoId}`);
@@ -289,16 +336,13 @@ export function VideoForm({
           </div>
         </div>
         <div className={cx(styles.field, styles.editableField)}>
-          <label className={styles.label} htmlFor="icon_url">
-            アイコン URL
-          </label>
-          <input
-            id="icon_url"
-            name="icon_url"
-            type="url"
-            defaultValue={initial.icon_url}
-            className="fn-input"
-            placeholder="https://..."
+          <label className={styles.label}>作品アイコン</label>
+          <p className={styles.help}>
+            この作品で表示するアイコンを選択します。X ID 既定アイコンは変更されません。
+          </p>
+          <VideoIconPicker
+            candidates={iconCandidates}
+            initialIconUrl={initial.icon_url}
             disabled={fieldDisabled("submitter.icon_url")}
           />
         </div>
@@ -641,14 +685,27 @@ export function VideoForm({
           <Icon name="check" size={13} aria-hidden /> 提出が完了しました。続けて詳細編集画面へ移動します。
         </div>
       ) : null}
-      <div className={styles.actions}>
-        <button
-          type="button"
-          className="fn-btn fn-btn-ghost"
-          disabled={pending}
+      {submitBlockedReason ? (
+        <div
+          role="alert"
+          style={{
+            padding: "12px 14px",
+            border: "1px solid var(--accent-warning, #c08a00)",
+            borderRadius: "var(--radius-sm)",
+            background: "var(--accent-warning-soft, rgba(255, 200, 0, 0.08))",
+            color: "var(--text-primary)",
+            fontSize: 13,
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 8,
+          }}
         >
-          下書き保存
-        </button>
+          <Icon name="warning" size={13} aria-hidden />
+          <span>{submitBlockedReason}</span>
+        </div>
+      ) : null}
+      <div className={styles.actions}>
+        
         <button
           type="submit"
           className="fn-btn fn-btn-primary"

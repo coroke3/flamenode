@@ -9,6 +9,8 @@ import {
 } from "./schema";
 import type { DB } from "./client";
 import { resolveMissingIcons } from "./iconResolution";
+import { resolveMemberIcons } from "./xIconResolution";
+import { uniqueBy } from "@/lib/utils/unique";
 
 /**
  * 作品詳細関連の集約クエリ。
@@ -79,7 +81,10 @@ export async function fetchVideoDetail(
     .where(eq(videoEvents.video_id, video.id));
 
   // 4) 合作メンバー
-  const members = await db
+  // icon_url は xUsers.icon_url を 1 段目として取得し、null の場合は
+  // resolveMemberIcons で「そのメンバー X ID の過去作品アイコン」から補完する。
+  // (CLAUDE.md 方針: 作品アイコンとユーザー既定アイコンを完全分離する)
+  const membersRaw = await db
     .select({
       id: videoMembers.id,
       x_user_id: videoMembers.x_user_id,
@@ -94,6 +99,7 @@ export async function fetchVideoDetail(
     .leftJoin(xUsers, eq(xUsers.id, videoMembers.x_user_id))
     .where(eq(videoMembers.video_id, video.id))
     .orderBy(videoMembers.order_index);
+  const members = await resolveMemberIcons(db, membersRaw);
 
   // 5) チャプター (再生バー点表示の元データ)
   // 可視性ポリシー: public は全員可。private は admin / 動画オーナー (canEditChapters) /
@@ -223,7 +229,7 @@ export async function fetchRelatedVideos(
     if (!map.has(v.id)) map.set(v.id, v);
     if (map.size >= limit) break;
   }
-  return Array.from(map.values()).slice(0, limit);
+  return uniqueBy(Array.from(map.values()), (row) => row.id).slice(0, limit);
 }
 
 /**
@@ -235,7 +241,7 @@ export async function fetchEventPlaylistVideos(
   eventId: string,
   limit = 50,
 ) {
-  return db
+  const rows = await db
     .select({
       id: videos.id,
       title: videos.title,
@@ -256,4 +262,5 @@ export async function fetchEventPlaylistVideos(
     )
     .orderBy(asc(videos.scheduled_time))
     .limit(limit);
+  return uniqueBy(rows, (row) => row.id);
 }

@@ -3,9 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { and, eq, isNull, ne, or, sql } from "drizzle-orm";
-import { getDatabase } from "@/lib/cloudflare";
+import { getDatabase, getEnv } from "@/lib/cloudflare";
 import { canEditVideo } from "@/lib/auth/ownership";
-import { writeGuard } from "@/lib/auth/writeGuard";
+import { writeGuard, type WriteGuardDenyReason } from "@/lib/auth/writeGuard";
 import {
   historyLogs,
   slots,
@@ -14,10 +14,30 @@ import {
   videoInteractions,
   videoMembers,
   xUsers,
+  xUserIcons,
 } from "@/lib/db/schema";
 import { extractYoutubeId } from "@/lib/youtube/id";
 import { generateId } from "@/lib/utils/id";
 import { normalizeXId } from "@/lib/utils/xid";
+import { normalizeHttpUrl } from "@/lib/utils/url";
+
+/**
+ * 作品アイコン URL の正規化。
+ *
+ * 受け入れる:
+ *   - http/https な URL (外部画像)
+ *   - 内部アップロード URL `/api/media/...` (uploadVideoIconCandidate の返却値)
+ *
+ * 上記以外は null。
+ */
+function normalizeIconUrl(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const s = raw.trim();
+  if (!s) return null;
+  if (s.length > 500) return null;
+  if (s.startsWith("/api/media/")) return s;
+  return normalizeHttpUrl(s, { maxLength: 500 });
+}
 
 // posting/youtube-id-and-active-x:
 // contact_x_id は server 側では Active X ID から導出するため、
@@ -25,12 +45,21 @@ import { normalizeXId } from "@/lib/utils/xid";
 const videoFormSchema = z.object({
   display_name: z.string().trim().min(1).max(80),
   contact_x_id: z.string().trim().max(32).optional().nullable(),
-  icon_url: z.string().trim().max(500).optional().nullable(),
+  icon_url: z.preprocess(
+    (val) => normalizeIconUrl(val),
+    z.string().trim().max(500).optional().nullable(),
+  ),
   profile_text: z.string().trim().max(1000).optional().nullable(),
-  youtube_channel_url: z.string().trim().max(500).optional().nullable(),
+  youtube_channel_url: z.preprocess(
+    (val) => (typeof val === "string" ? normalizeHttpUrl(val, { maxLength: 500 }) : val),
+    z.string().trim().max(500).optional().nullable(),
+  ),
   other_social_links: z.string().trim().max(1000).optional().nullable(),
   title: z.string().trim().min(1).max(120),
-  youtube_url: z.string().trim().url(),
+  youtube_url: z.preprocess(
+    (val) => (typeof val === "string" ? normalizeHttpUrl(val, { maxLength: 500 }) ?? val : val),
+    z.string().trim().url(),
+  ),
   music: z.string().trim().max(200).optional().nullable(),
   credit: z.string().trim().max(200).optional().nullable(),
   intro_comment: z.string().trim().max(500).optional().nullable(),
@@ -48,6 +77,7 @@ export interface VideoActionResult {
   ok: boolean;
   message?: string;
   videoId?: string;
+  reason?: WriteGuardDenyReason;
 }
 
 /**
@@ -93,12 +123,23 @@ function parseMembersJson(raw: FormDataEntryValue | null): MemberInput[] {
   }
 }
 
+/**
+ * 提出時の X ID プロフィール upsert。
+ *
+ * 注意: ここでは `x_users.icon_url` を**変更しない**。
+ * 作品ごとのアイコンは `videos.icon_url` に保存し、ユーザー既定アイコン
+ * (`x_users.icon_url`) は設定画面の `setXIdIcon` / `uploadXIdIcon` でのみ更新する。
+ * 投稿フォームから渡されたアイコンが X ID 全体のアイコンを書き換える、という
+ * 旧挙動 (作品アイコンを変えたつもりが全作品のアイコンに反映される) を防ぐ。
+ *
+ * 新規 xUsers レコードでも icon_url は null 固定にする。表示側では
+ * `videos.icon_url` または過去作品からのフォールバックで解決される。
+ */
 async function ensureSubmissionXUser(
   db: NonNullable<ReturnType<typeof getDatabase>>,
   args: {
     xId: string;
     displayName: string;
-    iconUrl?: string | null;
     profileText?: string | null;
     youtubeChannelUrl?: string | null;
     socialLinks?: string | null;
@@ -115,7 +156,7 @@ async function ensureSubmissionXUser(
     await db.insert(xUsers).values({
       id: args.xId,
       x_name: args.displayName || `@${args.xId}`,
-      icon_url: args.iconUrl || null,
+      icon_url: null,
       profile_text: args.profileText || null,
       youtube_channel_url: args.youtubeChannelUrl || null,
       other_social_links: args.socialLinks || null,
@@ -129,7 +170,6 @@ async function ensureSubmissionXUser(
     .update(xUsers)
     .set({
       x_name: args.displayName || existing.x_name,
-      icon_url: args.iconUrl || existing.icon_url,
       profile_text: args.profileText ?? existing.profile_text,
       youtube_channel_url: args.youtubeChannelUrl ?? existing.youtube_channel_url,
       other_social_links: args.socialLinks ?? existing.other_social_links,
@@ -179,6 +219,41 @@ async function replaceVideoMembers(
 }
 
 /**
+ * 作品保存時に videos.icon_url を x_user_icons の候補として記録する。
+ *
+ * 表示時のフォールバック (resolveXUserIcon / resolveMemberIcons) も同じ X ID の
+ * 過去作品アイコンを使うが、本関数は明示的に「設定画面の候補リスト」に登録する。
+ * これにより、別の作品を投稿するときに過去作品のアイコンを素早く再利用できる。
+ *
+ * 注意:
+ *   - x_users.icon_url (ユーザー既定アイコン) は変更しない。
+ *   - 同 X ID で同 URL の候補が既にあれば onConflictDoNothing。
+ *     (x_user_icons_user_url_uniq に依存)
+ */
+async function recordXIconCandidateFromVideo(
+  db: NonNullable<ReturnType<typeof getDatabase>>,
+  args: {
+    xUserId: string;
+    iconUrl: string | null | undefined;
+    videoId: string;
+  },
+): Promise<void> {
+  if (!args.xUserId || !args.iconUrl) return;
+  const now = Math.floor(Date.now() / 1000);
+  await db
+    .insert(xUserIcons)
+    .values({
+      id: generateId("xicon"),
+      x_user_id: args.xUserId,
+      icon_url: args.iconUrl,
+      source_video_id: args.videoId,
+      source_type: "video",
+      created_at: now,
+    })
+    .onConflictDoNothing();
+}
+
+/**
  * 自由投稿: イベントに紐づかない作品を新規登録する。
  * 設計の post/page.md および post/slotted/page.md に基づく簡易版。
  */
@@ -189,7 +264,7 @@ export async function createFreeVideo(
     requireApprovedActiveXId: true,
     feature: "post_video_unslotted",
   });
-  if (!guard.ok) return { ok: false, message: guard.message };
+  if (!guard.ok) return { ok: false, reason: guard.reason, message: guard.message };
   const sessionUser = guard.user;
   const userId = sessionUser.id;
   const approvedXIds = guard.approvedXIds;
@@ -235,12 +310,13 @@ export async function createFreeVideo(
   }
 
   const displayName = parsed.data.display_name;
-  const iconUrl = parsed.data.icon_url || sessionUser.image || null;
-  // ensureSubmissionXUser に渡す X ID は必ず承認済み (approvedXIds に含まれる) であること。
+  // 作品ごとアイコンは form 入力のみを採用する。
+  // sessionUser.image (Discord アバター) や x_users.icon_url にはフォールバックさせない。
+  // 表示側 (resolveVideoDisplayIcons など) が x_users.icon_url や過去作品から補完する。
+  const iconUrl = parsed.data.icon_url || null;
   await ensureSubmissionXUser(db, {
     xId: activeX,
     displayName,
-    iconUrl,
     profileText: parsed.data.profile_text ?? null,
     youtubeChannelUrl: parsed.data.youtube_channel_url ?? null,
     socialLinks: parsed.data.other_social_links ?? null,
@@ -288,6 +364,14 @@ export async function createFreeVideo(
     : [];
   await replaceVideoMembers(db, id, members);
 
+  // 投稿主体 X ID の作品アイコン候補に追加する (今回の作品アイコンが空でなければ)。
+  // x_users.icon_url は変更しない。
+  await recordXIconCandidateFromVideo(db, {
+    xUserId: activeX,
+    iconUrl,
+    videoId: id,
+  });
+
   await db.insert(historyLogs).values({
     table_name: "videos",
     record_id: id,
@@ -314,7 +398,7 @@ export async function submitSlotVideo(
     requireApprovedActiveXId: true,
     feature: "post_video_slotted",
   });
-  if (!guard.ok) return { ok: false, message: guard.message };
+  if (!guard.ok) return { ok: false, reason: guard.reason, message: guard.message };
   const sessionUser = guard.user;
   const userId = sessionUser.id;
   const approvedXIds = guard.approvedXIds;
@@ -394,11 +478,9 @@ export async function submitSlotVideo(
     return { ok: false, message: "この YouTube 動画は既に登録されています。" };
   }
 
-  // ensureSubmissionXUser に渡す X ID は必ず承認済み (approvedXIds に含まれる) であること。
   await ensureSubmissionXUser(db, {
     xId: activeX,
     displayName: parsed.data.display_name,
-    iconUrl: parsed.data.icon_url || sessionUser.image || null,
     profileText: parsed.data.profile_text ?? null,
     youtubeChannelUrl: parsed.data.youtube_channel_url ?? null,
     socialLinks: parsed.data.other_social_links ?? null,
@@ -429,7 +511,11 @@ export async function submitSlotVideo(
         .where(eq(videos.id, videoId));
     } else {
       let displayName = parsed.data.display_name || slotRow.display_name || sessionUser.name || "anonymous";
-      let iconUrl: string | null = parsed.data.icon_url || sessionUser.image || null;
+      // 作品ごとアイコンは form 入力のみを採用する。
+      // 旧コードは xRow.icon_url で上書きしていたため、ユーザー既定アイコンが
+      // 作品ごとの選択を打ち消してしまう問題があった。
+      // 表示時に x_users.icon_url や過去作品から補完するのは表示側の責務。
+      const iconUrl: string | null = parsed.data.icon_url || null;
       if (activeX) {
         const xRow = (
           await db.select().from(xUsers).where(eq(xUsers.id, activeX)).limit(1)
@@ -437,7 +523,6 @@ export async function submitSlotVideo(
         if (xRow) {
           // スロットの display_name が空なら X の表示名で補完
           if (!slotRow.display_name) displayName = xRow.x_name || displayName;
-          iconUrl = xRow.icon_url ?? iconUrl;
         }
       }
 
@@ -492,6 +577,14 @@ export async function submitSlotVideo(
     : [];
   await replaceVideoMembers(db, videoId, members);
 
+  // 投稿主体 X ID の作品アイコン候補に追加する (今回の作品アイコンが空でなければ)。
+  // x_users.icon_url は変更しない。
+  await recordXIconCandidateFromVideo(db, {
+    xUserId: activeX,
+    iconUrl: parsed.data.icon_url ?? null,
+    videoId,
+  });
+
   const slotUpdateWhere = slotRow.reservation_group_id
     ? and(
         eq(slots.reservation_group_id, slotRow.reservation_group_id),
@@ -531,7 +624,7 @@ export async function updateVideo(
   formData: FormData,
 ): Promise<VideoActionResult> {
   const guard = await writeGuard({ feature: "edit_video" });
-  if (!guard.ok) return { ok: false, message: guard.message };
+  if (!guard.ok) return { ok: false, reason: guard.reason, message: guard.message };
   const sessionUser = guard.user;
   const approvedXIds = guard.approvedXIds;
 
@@ -688,11 +781,12 @@ export async function updateVideo(
   }
 
   // ensureSubmissionXUser に渡す X ID は必ず承認済みか admin 操作であること。
+  // 作品ごとアイコンは下の videos.update で parsed.data.icon_url を直接保存する。
+  // ここでは x_users.icon_url を変更しない。
   if (canEditIdentity) {
     await ensureSubmissionXUser(db, {
       xId: nextCreatorX,
       displayName: parsed.data.display_name,
-      iconUrl: parsed.data.icon_url ?? null,
       profileText: parsed.data.profile_text ?? null,
       youtubeChannelUrl: parsed.data.youtube_channel_url ?? null,
       socialLinks: parsed.data.other_social_links ?? null,
@@ -745,6 +839,16 @@ export async function updateVideo(
       ? parseMembersJson(formData.get("members_json"))
       : [];
     await replaceVideoMembers(db, videoId, members);
+  }
+
+  // identity を編集できた場合、作品アイコン候補に追加する。
+  // (x_users.icon_url 自体は ensureSubmissionXUser でも変更しない方針)
+  if (canEditIdentity) {
+    await recordXIconCandidateFromVideo(db, {
+      xUserId: nextCreatorX,
+      iconUrl: parsed.data.icon_url ?? null,
+      videoId,
+    });
   }
 
   await db.insert(historyLogs).values({
@@ -874,4 +978,108 @@ export async function toggleVideoInteraction(
   }
   revalidatePath(`/${target.youtube_video_id ?? videoId}`);
   return { ok: true, active: true, videoId };
+}
+
+/**
+ * 作品ごとアイコン用のアップロード Action。
+ *
+ * 設定画面の `uploadXIdIcon` と異なり、**`x_users.icon_url` を変更しない**。
+ * 投稿フォームから呼ばれた場合、アップロードされたファイルは R2 に保存され、
+ * `/api/media/...` URL が返却される。呼び出し側はこの URL を `videos.icon_url` の
+ * 値としてフォームに反映する想定。同時に `x_user_icons` に source_type="manual"
+ * の候補として保存し、次回以降の作品投稿時に再利用できるようにする。
+ *
+ * 認可:
+ *   - writeGuard で承認済み Active X ID を要求する。
+ *   - 対象 X ID は session の active_x_user_id (= 投稿主体) に固定。
+ *     これにより、他人の X ID 候補に勝手に画像を流し込めない。
+ */
+export async function uploadVideoIconCandidate(
+  formData: FormData,
+): Promise<VideoActionResult & { iconUrl?: string }> {
+  const guard = await writeGuard({
+    requireApprovedActiveXId: true,
+    feature: "post_video_unslotted",
+  });
+  if (!guard.ok) return { ok: false, reason: guard.reason, message: guard.message };
+  const sessionUser = guard.user;
+  const activeX = normalizeXId(sessionUser.active_x_user_id);
+  if (!activeX || !guard.approvedXIds.includes(activeX)) {
+    return { ok: false, message: "承認済みの X ID を選択してください。" };
+  }
+
+  const file = formData.get("icon_file");
+  if (!(file instanceof File)) {
+    return { ok: false, message: "画像ファイルが必要です。" };
+  }
+  const contentType = file.type || "image/png";
+  const allowedTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
+  if (!allowedTypes.has(contentType)) {
+    return { ok: false, message: "PNG/JPEG/WEBP のみアップロードできます。" };
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    return { ok: false, message: "2MB 以内の画像を選んでください。" };
+  }
+
+  const db = getDatabase();
+  if (!db) return { ok: false, message: "DB に接続できません。" };
+
+  // 候補上限: 同 X ID 当たり manual ソース 24 枚 (設定画面と同じ)。
+  const manualIconCount = await db
+    .select({ count: sql<number>`COUNT(*)` })
+    .from(xUserIcons)
+    .where(
+      and(
+        eq(xUserIcons.x_user_id, activeX),
+        eq(xUserIcons.source_type, "manual"),
+      )!,
+    );
+  if (Number(manualIconCount[0]?.count ?? 0) >= 24) {
+    return {
+      ok: false,
+      message:
+        "手動アップロードの候補が上限に達しています。既存候補から選択してください。",
+    };
+  }
+
+  const env = getEnv();
+  if (!env.BUCKET) {
+    return { ok: false, message: "ストレージが利用できません。" };
+  }
+
+  const ext =
+    contentType === "image/png"
+      ? "png"
+      : contentType === "image/webp"
+        ? "webp"
+        : "jpg";
+  const key = `video-icons/${activeX}/${generateId("vicon")}.${ext}`;
+  const buf = await file.arrayBuffer();
+  await env.BUCKET.put(key, buf, { httpMetadata: { contentType } });
+  const iconUrl = `/api/media/${key}`;
+
+  const now = Math.floor(Date.now() / 1000);
+  await db
+    .insert(xUserIcons)
+    .values({
+      id: generateId("xicon"),
+      x_user_id: activeX,
+      icon_url: iconUrl,
+      source_video_id: null,
+      source_type: "manual",
+      created_at: now,
+    })
+    .onConflictDoNothing();
+
+  await db.insert(historyLogs).values({
+    table_name: "x_user_icons",
+    record_id: activeX,
+    action: "CREATE",
+    after_data: JSON.stringify({ icon_url: iconUrl, source: "video_upload" }),
+    operator_discord_id: sessionUser.id,
+    retention_class: "normal",
+    created_at: now,
+  });
+
+  return { ok: true, message: "アップロードしました。", iconUrl };
 }

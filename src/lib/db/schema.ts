@@ -123,16 +123,28 @@ export const xAccountLinkRequests = sqliteTable("x_account_link_requests", {
   requested_at: integer("requested_at").notNull(),
 });
 
-export const xUserIcons = sqliteTable("x_user_icons", {
-  id: text("id").primaryKey(),
-  x_user_id: text("x_user_id").notNull(),
-  icon_url: text("icon_url").notNull(),
-  source_video_id: text("source_video_id"),
-  source_type: text("source_type", {
-    enum: ["video", "manual", "legacy"],
-  }).default("video"),
-  created_at: integer("created_at").notNull(),
-});
+export const xUserIcons = sqliteTable(
+  "x_user_icons",
+  {
+    id: text("id").primaryKey(),
+    x_user_id: text("x_user_id").notNull(),
+    icon_url: text("icon_url").notNull(),
+    source_video_id: text("source_video_id"),
+    source_type: text("source_type", {
+      enum: ["video", "manual", "legacy"],
+    }).default("video"),
+    created_at: integer("created_at").notNull(),
+  },
+  (t) => ({
+    // 同じ X ID で同じ icon_url を二重登録しないための unique 制約。
+    // recordXIconCandidateFromVideo (作品保存時の候補記録) や
+    // uploadVideoIconCandidate (作品向けアップロード) を onConflictDoNothing で書けるようにする。
+    userUrlUnique: uniqueIndex("x_user_icons_user_url_uniq").on(
+      t.x_user_id,
+      t.icon_url,
+    ),
+  }),
+);
 
 // ============================================================
 // イベント / スロット

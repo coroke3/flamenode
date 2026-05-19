@@ -14,6 +14,7 @@ import { VideoForm } from "@/components/forms/VideoForm";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
+import { getXIconCandidates } from "@/lib/db/xIconResolution";
 import { AppShell } from "@/components/ui/AppShell";
 import { PageHero } from "@/components/ui/PageHero";
 import { StatusPanel } from "@/components/ui/StatusPanel";
@@ -28,10 +29,14 @@ interface Props {
 export default async function SlottedPostPage({
   searchParams,
 }: Props): Promise<React.ReactElement> {
-  const guard = await requireSession();
+  const { slot: slotId = "" } = await searchParams;
+  // ログイン誘導後に slot 付きの URL に戻れるように next を組み立てる。
+  const nextPath = slotId
+    ? `/dashboard/post/slotted?slot=${encodeURIComponent(slotId)}`
+    : "/dashboard/post/slotted";
+  const guard = await requireSession({ next: nextPath });
   if (!guard.ok) return guard.element;
   const user = guard.user;
-  const { slot: slotId = "" } = await searchParams;
 
   const db = getDatabase();
   if (!db) notFound();
@@ -111,6 +116,23 @@ export default async function SlottedPostPage({
     .orderBy(asc(xUsersTable.x_name))
     .limit(2000);
   const softwareSuggestions = await getUsedSoftwareSuggestions(db);
+  const iconCandidates = activeX ? await getXIconCandidates(db, activeX) : [];
+
+  // 投稿は writeGuard で active_x_user_id が approved であることを要求するため、
+  // フォーム送信前に同じ条件を判定して「押せるけど失敗する」状態を防ぐ。
+  // 注: writeGuard は session の active_x_user_id を見るため、ここでは activeXId
+  // (= user.active_x_user_id) の有無もブロック条件にする (slot.x_user_id だけでは不可)。
+  const activeXApprovalStatus = xRow?.approval_status ?? null;
+  const submitBlockedReason: string | undefined = !activeXId
+    ? "投稿にはActive X IDの選択が必要です。設定画面から連携・選択してください。"
+    : activeXApprovalStatus === "pending"
+      ? "選択中のActive X IDは承認待ちです。承認後に投稿できます。"
+      : activeXApprovalStatus === "rejected"
+        ? "選択中のActive X IDは却下されています。設定画面で別のX IDを選択してください。"
+        : activeXApprovalStatus !== "approved"
+          ? "投稿には承認済みのActive X IDが必要です。設定画面で承認状態を確認してください。"
+          : undefined;
+  const canPost = !submitBlockedReason;
 
   return (
     <AppShell size="default">
@@ -125,9 +147,20 @@ export default async function SlottedPostPage({
         }
       />
 
-      <StatusPanel title="投稿前チェック" tone="success">
-        イベント: {ev.title} / 投稿者X ID: @{activeX ?? "未設定"} / 連続枠:{" "}
-        {groupSize}
+      <StatusPanel
+        title={canPost ? "投稿前チェック" : "まだ投稿できません"}
+        tone={canPost ? "success" : "warning"}
+        action={
+          !canPost ? (
+            <Link href="/dashboard/settings" className="fn-btn fn-btn-primary">
+              X ID設定を確認
+            </Link>
+          ) : null
+        }
+      >
+        {canPost
+          ? `イベント: ${ev.title} / 投稿者X ID: @${activeX ?? "未設定"} / 連続枠: ${groupSize}`
+          : submitBlockedReason}
       </StatusPanel>
 
       <section
@@ -177,6 +210,8 @@ export default async function SlottedPostPage({
         }}
         memberSuggestions={memberSuggestions}
         softwareSuggestions={softwareSuggestions}
+        submitBlockedReason={submitBlockedReason}
+        iconCandidates={iconCandidates}
       />
 
       <p

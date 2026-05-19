@@ -10,9 +10,16 @@ import { videos, xUsers } from "./schema";
 export const creatorNameExpr = sql<string>`COALESCE(${videos.display_name}, ${xUsers.x_name}, '@' || ${videos.contact_x_id})`;
 
 /**
- * 1段目のアイコンフォールバック (DB 単発で済む)。
- * `video.icon_url` → `x_users.icon_url` → null。
- * NULL のまま残った行は `resolveMissingIcons` で過去作品から穴埋めする。
+ * 作品カード用のアイコン解決 (1段目、DB 単発で済む)。
+ *
+ * 優先順位:
+ *   1. videos.icon_url (作品ごとに指定されたアイコン)
+ *   2. x_users.icon_url (X ID 既定アイコン)
+ *   3. null (アプリ側で resolveMissingIcons により過去作品から穴埋め)
+ *
+ * 注意: ここでは `videos.icon_url` が最優先。投稿フォームから登録された
+ * 作品アイコンが、ユーザー既定アイコンによって上書きされないようにする。
+ * 単一 X ID のアイコンが欲しい場合は `xIconResolution.resolveXUserIcon` を使う。
  */
 export const creatorIconExpr = sql<
   string | null

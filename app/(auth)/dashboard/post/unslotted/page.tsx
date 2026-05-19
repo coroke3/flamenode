@@ -8,6 +8,7 @@ import { xUsers as xUsersTable } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { VideoForm } from "@/components/forms/VideoForm";
 import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
+import { getXIconCandidates } from "@/lib/db/xIconResolution";
 import { AppShell } from "@/components/ui/AppShell";
 import { PageHero } from "@/components/ui/PageHero";
 import { StatusPanel } from "@/components/ui/StatusPanel";
@@ -16,7 +17,7 @@ export const metadata: Metadata = { title: "枠なし投稿" };
 export const dynamic = "force-dynamic";
 
 export default async function UnslottedPostPage(): Promise<React.ReactElement> {
-  const guard = await requireSession();
+  const guard = await requireSession({ next: "/dashboard/post/unslotted" });
   if (!guard.ok) return guard.element;
   const user = guard.user;
   const db = getDatabase();
@@ -51,6 +52,22 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
         .limit(2000)
     : [];
   const softwareSuggestions = db ? await getUsedSoftwareSuggestions(db) : [];
+  const iconCandidates =
+    db && activeX ? await getXIconCandidates(db, activeX) : [];
+
+  // 投稿は writeGuard で active_x_user_id が approved であることを要求するため、
+  // フォーム送信前に同じ条件を判定して「押せるけど失敗する」状態を防ぐ。
+  const activeXApprovalStatus = xRow?.approval_status ?? null;
+  const submitBlockedReason: string | undefined = !activeX
+    ? "投稿にはActive X IDの選択が必要です。設定画面から連携・選択してください。"
+    : activeXApprovalStatus === "pending"
+      ? "選択中のActive X IDは承認待ちです。承認後に投稿できます。"
+      : activeXApprovalStatus === "rejected"
+        ? "選択中のActive X IDは却下されています。設定画面で別のX IDを選択してください。"
+        : activeXApprovalStatus !== "approved"
+          ? "投稿には承認済みのActive X IDが必要です。設定画面で承認状態を確認してください。"
+          : undefined;
+  const canPost = !submitBlockedReason;
 
   return (
     <AppShell size="default">
@@ -66,19 +83,19 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
       />
 
       <StatusPanel
-        title={activeX ? "投稿前チェック" : "まだ投稿できません"}
-        tone={activeX ? "success" : "warning"}
+        title={canPost ? "投稿前チェック" : "まだ投稿できません"}
+        tone={canPost ? "success" : "warning"}
         action={
-          !activeX ? (
+          !canPost ? (
             <Link href="/dashboard/settings" className="fn-btn fn-btn-primary">
-              X IDを設定
+              X ID設定を確認
             </Link>
           ) : null
         }
       >
-        {activeX
+        {canPost
           ? `投稿者X ID: @${activeX} / 表示名: ${xRow?.x_name ?? user.name ?? "未設定"}`
-          : "投稿には承認済みのActive X IDが必要です。"}
+          : submitBlockedReason}
       </StatusPanel>
       <VideoForm
         mode="free"
@@ -94,6 +111,8 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
         }}
         memberSuggestions={memberSuggestions}
         softwareSuggestions={softwareSuggestions}
+        submitBlockedReason={submitBlockedReason}
+        iconCandidates={iconCandidates}
       />
       <p
         style={{

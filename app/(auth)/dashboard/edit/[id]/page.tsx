@@ -11,6 +11,7 @@ import { VideoForm } from "@/components/forms/VideoForm";
 import { Icon } from "@/components/ui/Icon";
 import { youtubeWatchUrl } from "@/lib/youtube/id";
 import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
+import { getXIconCandidates } from "@/lib/db/xIconResolution";
 
 export const metadata: Metadata = { title: "作品を編集" };
 export const dynamic = "force-dynamic";
@@ -22,10 +23,12 @@ interface Props {
 export default async function EditVideoPage({
   params,
 }: Props): Promise<React.ReactElement> {
-  const guard = await requireSession();
+  const { id } = await params;
+  const guard = await requireSession({
+    next: `/dashboard/edit/${encodeURIComponent(id)}`,
+  });
   if (!guard.ok) return guard.element;
   const user = guard.user;
-  const { id } = await params;
 
   const db = getDatabase();
   if (!db) notFound();
@@ -70,6 +73,9 @@ export default async function EditVideoPage({
     .orderBy(asc(xUsersTable.x_name))
     .limit(2000);
   const softwareSuggestions = await getUsedSoftwareSuggestions(db);
+  // 編集対象作品の主体 X ID に紐づく候補を出す。
+  // admin が他者作品を編集する場合も creator/contact 由来の候補が出る。
+  const iconCandidates = creatorX ? await getXIconCandidates(db, creatorX) : [];
   const xIdOptions = await db
     .select({ id: xUsersTable.id, x_name: xUsersTable.x_name })
     .from(xUsersTable)
@@ -228,6 +234,7 @@ export default async function EditVideoPage({
         }}
         memberSuggestions={memberSuggestions}
         softwareSuggestions={softwareSuggestions}
+        iconCandidates={iconCandidates}
       />
 
       <p

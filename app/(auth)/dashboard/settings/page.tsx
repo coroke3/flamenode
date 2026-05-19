@@ -1,13 +1,11 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq, isNotNull, or } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   xAccountLinkRequests as linkReqTable,
   xUsers as xUsersTable,
-  xUserIcons as xUserIconsTable,
-  videos as videosTable,
 } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth/guard";
 import { Icon } from "@/components/ui/Icon";
@@ -18,12 +16,28 @@ import {
   XIdProfileForm,
 } from "@/components/settings/XIdSettingsClient";
 import { formatUnix } from "@/lib/utils/format";
+import { sanitizeNextPath } from "@/lib/utils/next";
+import { getXIconCandidates } from "@/lib/db/xIconResolution";
 
 export const metadata: Metadata = { title: "設定" };
 export const dynamic = "force-dynamic";
 
-export default async function SettingsPage(): Promise<React.ReactElement> {
-  const guard = await requireSession();
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ next?: string }>;
+}): Promise<React.ReactElement> {
+  const params = await searchParams;
+  // next 未指定なら null として扱う (戻るボタンを出さない)。
+  // 指定があれば sanitize した上で /dashboard/settings 自身に戻らないように補正する。
+  const rawNext = params?.next?.trim();
+  const next =
+    rawNext && rawNext !== "/dashboard/settings"
+      ? sanitizeNextPath(rawNext, "/dashboard")
+      : null;
+  const guard = await requireSession({
+    next: next ?? "/dashboard/settings",
+  });
   if (!guard.ok) return guard.element;
   const user = guard.user;
 
@@ -48,38 +62,13 @@ export default async function SettingsPage(): Promise<React.ReactElement> {
         .orderBy(desc(linkReqTable.requested_at))
     : [];
 
+  // X ID ごとのアイコン候補を共通関数で取得する。
+  // (旧コードはページ内で xUserIcons / videos.icon_url を直接 select していたが、
+  //  投稿フォーム側でも同じ候補ロジックを使うため `getXIconCandidates` に集約した)
   const iconCandidatesById: Record<string, string[]> = {};
   if (db && xIds.length > 0) {
     for (const x of xIds) {
-      const candidates = new Set<string>();
-      if (x.icon_url) candidates.add(x.icon_url);
-      const iconRows = await db
-        .select({ icon_url: xUserIconsTable.icon_url })
-        .from(xUserIconsTable)
-        .where(eq(xUserIconsTable.x_user_id, x.id))
-        .orderBy(desc(xUserIconsTable.created_at))
-        .limit(12);
-      iconRows.forEach((r) => candidates.add(r.icon_url));
-
-      const videoRows = await db
-        .select({ icon_url: videosTable.icon_url })
-        .from(videosTable)
-        .where(
-          and(
-            or(
-              eq(videosTable.creator_id, x.id),
-              eq(videosTable.contact_x_id, x.id),
-            )!,
-            isNotNull(videosTable.icon_url),
-          )!,
-        )
-        .orderBy(desc(videosTable.created_at))
-        .limit(12);
-      videoRows.forEach((r) => {
-        if (r.icon_url) candidates.add(r.icon_url);
-      });
-
-      iconCandidatesById[x.id] = Array.from(candidates).slice(0, 12);
+      iconCandidatesById[x.id] = await getXIconCandidates(db, x.id, 12);
     }
   }
 
@@ -98,6 +87,13 @@ export default async function SettingsPage(): Promise<React.ReactElement> {
         <p style={{ marginTop: 6, color: "var(--text-muted)", fontSize: 13 }}>
           X ID 連携、アクティブ X ID の切替、Discord アカウント情報を管理します。
         </p>
+        {next ? (
+          <div style={{ marginTop: 14 }}>
+            <Link href={next} className="fn-btn fn-btn-primary">
+              <Icon name="chevron-right" size={13} aria-hidden /> 元の画面へ戻る
+            </Link>
+          </div>
+        ) : null}
       </header>
 
       <section className="fn-card fn-mb-lg">
