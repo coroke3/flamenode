@@ -14,6 +14,7 @@ import {
 } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 
 export const metadata: Metadata = { title: "ユーザー詳細" };
 export const dynamic = "force-dynamic";
@@ -103,17 +104,33 @@ export default async function AdminUserDetailPage({
 
   return (
     <div>
-      <p className="fn-muted fn-text-xs fn-bold">USER</p>
-      <h1 style={{ fontSize: 24, fontWeight: 700 }}>{user.name ?? user.id}</h1>
-      <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
-        ID: {user.id} / {user.email ?? "email 未取得"} / 登録{" "}
-        {formatRelative(user.created_at)}
-        {user.emailVerified ? (
-          <>
-            {" "}/ email認証 {formatRelative(Math.floor((user.emailVerified as Date).getTime() / 1000))}
-          </>
-        ) : null}
-      </p>
+      <AdminPageHeader
+        title={user.name ?? user.id}
+        description={`ID: ${user.id} / ${user.email ?? "email 未取得"} / 登録 ${formatRelative(user.created_at)}`}
+        backHref="/admin/users"
+        backLabel="ユーザー管理へ"
+        actions={[
+          {
+            href: `/admin/users/${user.id}/edit`,
+            label: "編集",
+            icon: <Icon name="edit" size={12} aria-hidden />,
+            variant: "primary",
+          },
+          {
+            href: `/admin/audit?operator=${encodeURIComponent(user.id)}`,
+            label: "操作履歴",
+            icon: <Icon name="clock" size={12} aria-hidden />,
+          },
+        ]}
+      />
+      {user.emailVerified ? (
+        <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 12 }}>
+          email認証{" "}
+          {formatRelative(
+            Math.floor((user.emailVerified as Date).getTime() / 1000),
+          )}
+        </p>
+      ) : null}
 
       <section className="fn-card" style={{ marginTop: 20 }}>
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
@@ -227,9 +244,9 @@ export default async function AdminUserDetailPage({
               gap: 10,
             }}
           >
-            {xIds.map((x) => (
+            {xIds.map((x, index) => (
               <section
-                key={x.id}
+                key={`${x.id}-user-xid-${index}`}
                 style={{
                   display: "grid",
                   gap: 8,
@@ -275,9 +292,9 @@ export default async function AdminUserDetailPage({
           <p className="fn-muted fn-text-sm">投稿はありません。</p>
         ) : (
           <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none" }}>
-            {recentVideos.map((v) => (
+            {recentVideos.map((v, index) => (
               <li
-                key={v.id}
+                key={`${v.id}-recent-video-${index}`}
                 style={{
                   display: "flex",
                   gap: 12,
@@ -453,23 +470,6 @@ export default async function AdminUserDetailPage({
         )}
       </section>
 
-      <p style={{ marginTop: 24, display: "flex", gap: 8 }}>
-        <Link href="/admin/users" className="fn-btn fn-btn-ghost">
-          <Icon name="chevron-left" size={12} aria-hidden /> ユーザー管理へ戻る
-        </Link>
-        <Link
-          href={`/admin/users/${user.id}/edit`}
-          className="fn-btn fn-btn-primary"
-        >
-          <Icon name="edit" size={12} aria-hidden /> 編集
-        </Link>
-        <Link
-          href={`/admin/audit?operator=${encodeURIComponent(user.id)}`}
-          className="fn-btn fn-btn-ghost"
-        >
-          すべての操作履歴
-        </Link>
-      </p>
     </div>
   );
 }

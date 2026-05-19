@@ -6,6 +6,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { termsVersions, users as usersTable } from "@/lib/db/schema";
 import { formatUnix } from "@/lib/utils/format";
 import { Icon } from "@/components/ui/Icon";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 
 export const metadata: Metadata = { title: "規約管理" };
 export const dynamic = "force-dynamic";
@@ -54,25 +55,18 @@ export default async function AdminRulesPage({
 
   return (
     <div>
-      <header
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}
-      >
-        <h1 style={{ fontSize: 22, fontWeight: 700 }}>利用規約</h1>
-        <Link
-          href="/admin/rules/new"
-          className="fn-btn fn-btn-primary fn-btn-sm"
-        >
-          <Icon name="plus" size={12} aria-hidden /> 新規バージョン
-        </Link>
-      </header>
-
-      <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
-        変更があった場合、影響度に応じて「再同意必須」を設定すると、次回投稿時にユーザーに同意導線を表示します。
-      </p>
+      <AdminPageHeader
+        title="規約管理"
+        description="変更があった場合、影響度に応じて「再同意必須」を設定すると、次回投稿時にユーザーに同意導線を表示します。"
+        actions={[
+          {
+            href: "/admin/rules/new",
+            label: "新規バージョン",
+            icon: <Icon name="plus" size={12} aria-hidden />,
+            variant: "primary",
+          },
+        ]}
+      />
 
       <form
         method="get"

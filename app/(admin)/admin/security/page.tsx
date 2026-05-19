@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { runSecurityChecks, type SecurityCheckResult } from "@/lib/admin/securityChecks";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 
 export const metadata: Metadata = { title: "セキュリティチェック" };
 export const dynamic = "force-dynamic";
@@ -59,10 +60,10 @@ export default async function AdminSecurityPage({
 
   return (
     <div>
-      <h1 style={{ fontSize: 22, fontWeight: 700 }}>セキュリティチェック</h1>
-      <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
-        権限・認証状態の整合性を読み取り専用で点検します。修復操作はありません。
-      </p>
+      <AdminPageHeader
+        title="セキュリティチェック"
+        description="権限・認証状態の整合性を読み取り専用で点検します。修復操作はありません。"
+      />
 
       <nav
         aria-label="状態フィルタ"

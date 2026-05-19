@@ -8,6 +8,7 @@ import Link from "next/link";
 import { historyLogs } from "@/lib/db/schema";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { AuditDiffDetail } from "@/components/admin/AuditDiffDetail";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 
 export const metadata: Metadata = { title: "監査ログ" };
 export const dynamic = "force-dynamic";
@@ -121,10 +122,10 @@ export default async function AdminAuditPage({
 
   return (
     <div>
-      <h1 style={{ fontSize: 22, fontWeight: 700 }}>監査ログ</h1>
-      <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
-        管理操作を新しい順に表示します。before / after の変更キーをサマリで確認できます。
-      </p>
+      <AdminPageHeader
+        title="監査ログ"
+        description="管理操作を新しい順に表示します。before / after の変更キーをサマリで確認できます。"
+      />
 
       <form
         method="get"

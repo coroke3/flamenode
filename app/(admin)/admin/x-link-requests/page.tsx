@@ -6,6 +6,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { historyLogs, users, xAccountLinkRequests } from "@/lib/db/schema";
 import { XLinkRequestTable } from "@/components/admin/XLinkRequestTable";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 
 export const metadata: Metadata = { title: "X ID 連携申請" };
 export const dynamic = "force-dynamic";
@@ -85,14 +86,10 @@ export default async function AdminXLinkRequestsPage({
 
   return (
     <div>
-      <header style={{ marginBottom: 22 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700 }}>X ID 連携申請</h1>
-        <p className="fn-muted fn-text-sm" style={{ marginTop: 6 }}>
-          ユーザーが設定画面から送った連携申請を承認すると、
-          <code> x_users </code>
-          にレコードが作成されダッシュボードの一覧に表示されます。
-        </p>
-      </header>
+      <AdminPageHeader
+        title="X ID 連携申請"
+        description="ユーザーが設定画面から送った連携申請を確認・承認します。承認すると x_users が approved 状態に更新されます。"
+      />
       <nav
         aria-label="link_type フィルタ"
         style={{

@@ -8,6 +8,7 @@ import { getCurrentUser } from "@/lib/auth/currentUser";
 import { historyLogs } from "@/lib/db/schema";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { Icon } from "@/components/ui/Icon";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 
 export const metadata: Metadata = { title: "監査ログ詳細" };
 export const dynamic = "force-dynamic";
@@ -59,15 +60,12 @@ export default async function AdminAuditDetailPage({
 
   return (
     <div>
-      <p style={{ marginBottom: 8, fontSize: 12 }}>
-        <Link href="/admin/audit">
-          <Icon name="chevron-left" size={12} aria-hidden /> 監査ログ一覧へ
-        </Link>
-      </p>
-      <h1 style={{ fontSize: 22, fontWeight: 700 }}>監査ログ #{row.id}</h1>
-      <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 12 }}>
-        {formatUnix(row.created_at)} ({formatRelative(row.created_at)})
-      </p>
+      <AdminPageHeader
+        title={`監査ログ #${row.id}`}
+        description={`${formatUnix(row.created_at)} (${formatRelative(row.created_at)})`}
+        backHref="/admin/audit"
+        backLabel="監査ログ一覧へ"
+      />
 
       <nav
         aria-label="同 record_id の前後遷移"

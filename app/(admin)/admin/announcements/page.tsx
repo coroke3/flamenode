@@ -7,6 +7,7 @@ import { announcements, users as usersTable, xUsers as xUsersTable } from "@/lib
 import { formatUnix } from "@/lib/utils/format";
 import { Icon } from "@/components/ui/Icon";
 import { AnnouncementBroadcastButton } from "@/components/admin/AnnouncementBroadcastButton";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 
 export const metadata: Metadata = { title: "お知らせ管理" };
 export const dynamic = "force-dynamic";
@@ -83,18 +84,18 @@ export default async function AdminAnnouncementsPage({
 
   return (
     <div>
-      <header
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}
-      >
-        <h1 style={{ fontSize: 22, fontWeight: 700 }}>お知らせ管理</h1>
-        <Link href="/admin/announcements/new" className="fn-btn fn-btn-primary fn-btn-sm">
-          <Icon name="plus" size={12} aria-hidden /> 新規お知らせ
-        </Link>
-      </header>
+      <AdminPageHeader
+        title="お知らせ管理"
+        description="ユーザー向けお知らせの作成・配信・状態管理を行います。"
+        actions={[
+          {
+            href: "/admin/announcements/new",
+            label: "新規お知らせ",
+            icon: <Icon name="plus" size={12} aria-hidden />,
+            variant: "primary",
+          },
+        ]}
+      />
 
       <form
         method="get"

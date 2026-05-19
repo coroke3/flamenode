@@ -11,6 +11,7 @@ import { formatRelative } from "@/lib/utils/format";
 import { NotificationRetryButton } from "@/components/admin/NotificationRetryButton";
 import { NotificationPayloadButton } from "@/components/admin/NotificationPayloadButton";
 import { NotificationBulkRetryButton } from "@/components/admin/NotificationBulkRetryButton";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 
 export const metadata: Metadata = { title: "通知配信状況" };
 export const dynamic = "force-dynamic";
@@ -115,10 +116,10 @@ export default async function AdminNotificationsPage({
 
   return (
     <div>
-      <h1 style={{ fontSize: 22, fontWeight: 700 }}>通知配信状況</h1>
-      <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
-        notification_outbox の直近 100 件を表示します。Worker (notification-dispatcher) が 5 分間隔で送信し、失敗は最大 3 回まで指数バックオフで再試行します。
-      </p>
+      <AdminPageHeader
+        title="通知配信状況"
+        description="notification_outbox の直近 100 件を表示します。Worker (notification-dispatcher) が 5 分間隔で送信し、失敗は最大 3 回まで指数バックオフで再試行します。"
+      />
       <p style={{ marginTop: 6, fontSize: 11 }}>
         <Link href="/admin/audit?table=notification_outbox&record=bulk_retry">
           直近の bulk_retry 履歴を見る →

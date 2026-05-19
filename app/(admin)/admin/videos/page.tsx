@@ -12,6 +12,7 @@ import {
 import { Icon } from "@/components/ui/Icon";
 import { formatRelative } from "@/lib/utils/format";
 import { youtubeThumbUrl } from "@/lib/youtube/id";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 
 export const metadata: Metadata = { title: "作品管理" };
 export const dynamic = "force-dynamic";
@@ -98,7 +99,10 @@ export default async function AdminVideosPage({
 
   return (
     <div>
-      <h1 style={{ fontSize: 22, fontWeight: 700 }}>作品管理</h1>
+      <AdminPageHeader
+        title="作品管理"
+        description="登録された作品の検索・状態管理・詳細確認を行います。"
+      />
       <form
         method="get"
         style={{
@@ -149,8 +153,8 @@ export default async function AdminVideosPage({
           </tr>
         </thead>
         <tbody>
-          {rows.map((v) => (
-            <tr key={v.id}>
+          {rows.map((v, index) => (
+            <tr key={`${v.id}-admin-video-${index}`}>
               <td>
                 <div
                   style={{

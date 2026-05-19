@@ -1,5 +1,4 @@
 import * as React from "react";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { eq } from "drizzle-orm";
@@ -8,9 +7,9 @@ import {
   events as eventsTable,
   slots as slotsTable,
 } from "@/lib/db/schema";
-import { Icon } from "@/components/ui/Icon";
 import { SlotBatchForm } from "@/components/admin/SlotBatchForm";
 import { SlotList } from "@/components/admin/SlotList";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 
 export const metadata: Metadata = { title: "枠管理" };
 export const dynamic = "force-dynamic";
@@ -50,35 +49,12 @@ export default async function AdminEventSlotsPage({
 
   return (
     <div>
-      <p className="fn-muted fn-text-xs fn-bold">EVENT SLOTS</p>
-      <h1 style={{ fontSize: 24, fontWeight: 700 }}>{ev.title}</h1>
-      <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
-        ID: {ev.id}
-      </p>
-
-      <nav style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <Link href={`/admin/events/${ev.id}`} className="fn-btn fn-btn-ghost fn-btn-sm">
-          <Icon name="grid" size={12} aria-hidden /> 概要
-        </Link>
-        <Link
-          href={`/admin/events/${ev.id}/edit`}
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-        >
-          <Icon name="edit" size={12} aria-hidden /> 設定編集
-        </Link>
-        <Link
-          href={`/admin/events/${ev.id}/slots`}
-          className="fn-btn fn-btn-primary fn-btn-sm"
-        >
-          <Icon name="clock" size={12} aria-hidden /> 枠管理
-        </Link>
-        <Link
-          href={`/admin/events/${ev.id}/staff`}
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-        >
-          <Icon name="users" size={12} aria-hidden /> 編集権限
-        </Link>
-      </nav>
+      <AdminPageHeader
+        title={`${ev.title} の枠管理`}
+        description={`ID: ${ev.id}`}
+        backHref={`/admin/events/${ev.id}`}
+        backLabel="イベント詳細へ"
+      />
 
       <section
         style={{

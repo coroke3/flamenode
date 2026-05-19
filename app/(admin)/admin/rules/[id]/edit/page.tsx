@@ -1,12 +1,11 @@
 import * as React from "react";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { termsVersions } from "@/lib/db/schema";
-import { Icon } from "@/components/ui/Icon";
 import { TermsForm } from "@/components/admin/TermsForm";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 
 export const metadata: Metadata = { title: "利用規約バージョン編集" };
 export const dynamic = "force-dynamic";
@@ -28,8 +27,11 @@ export default async function AdminRulesEditPage({
 
   return (
     <div>
-      <p className="fn-muted fn-text-xs fn-bold">RULES EDIT</p>
-      <h1 style={{ fontSize: 24, fontWeight: 700 }}>{row.version_label}</h1>
+      <AdminPageHeader
+        title={`${row.version_label} を編集`}
+        backHref="/admin/rules"
+        backLabel="規約一覧へ"
+      />
       <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
         状態:{" "}
         <span
@@ -71,11 +73,6 @@ export default async function AdminRulesEditPage({
         />
       </section>
 
-      <p style={{ marginTop: 22 }}>
-        <Link href="/admin/rules" className="fn-btn fn-btn-ghost">
-          <Icon name="chevron-left" size={12} aria-hidden /> 一覧へ戻る
-        </Link>
-      </p>
     </div>
   );
 }

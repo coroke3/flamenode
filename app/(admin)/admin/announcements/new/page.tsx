@@ -1,8 +1,7 @@
 import * as React from "react";
-import Link from "next/link";
 import type { Metadata } from "next";
-import { Icon } from "@/components/ui/Icon";
 import { AnnouncementForm } from "@/components/admin/AnnouncementForm";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 
 export const metadata: Metadata = { title: "新規お知らせ" };
 export const dynamic = "force-dynamic";
@@ -10,8 +9,11 @@ export const dynamic = "force-dynamic";
 export default function AdminAnnouncementNewPage(): React.ReactElement {
   return (
     <div>
-      <p className="fn-muted fn-text-xs fn-bold">ANNOUNCEMENT NEW</p>
-      <h1 style={{ fontSize: 24, fontWeight: 700 }}>新規お知らせ</h1>
+      <AdminPageHeader
+        title="新規お知らせ"
+        backHref="/admin/announcements"
+        backLabel="お知らせ一覧へ"
+      />
 
       <section
         style={{
@@ -24,12 +26,6 @@ export default function AdminAnnouncementNewPage(): React.ReactElement {
       >
         <AnnouncementForm mode="create" />
       </section>
-
-      <p style={{ marginTop: 22 }}>
-        <Link href="/admin/announcements" className="fn-btn fn-btn-ghost">
-          <Icon name="chevron-left" size={12} aria-hidden /> 一覧へ戻る
-        </Link>
-      </p>
     </div>
   );
 }

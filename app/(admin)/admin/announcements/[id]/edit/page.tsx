@@ -1,5 +1,4 @@
 import * as React from "react";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { eq } from "drizzle-orm";
@@ -8,6 +7,7 @@ import { announcements } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { AnnouncementForm } from "@/components/admin/AnnouncementForm";
 import { DeleteAnnouncementForm } from "@/components/admin/DeleteAnnouncementForm";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 
 export const metadata: Metadata = { title: "お知らせ編集" };
 export const dynamic = "force-dynamic";
@@ -29,8 +29,18 @@ export default async function AdminAnnouncementEditPage({
 
   return (
     <div>
-      <p className="fn-muted fn-text-xs fn-bold">ANNOUNCEMENT EDIT</p>
-      <h1 style={{ fontSize: 24, fontWeight: 700 }}>{row.title}</h1>
+      <AdminPageHeader
+        title={`${row.title} を編集`}
+        backHref="/admin/announcements"
+        backLabel="お知らせ一覧へ"
+        actions={[
+          {
+            href: `/admin/audit?table=announcements&record=${encodeURIComponent(row.id)}`,
+            label: "監査ログ",
+            icon: <Icon name="clock" size={12} aria-hidden />,
+          },
+        ]}
+      />
 
       <section
         style={{
@@ -74,11 +84,6 @@ export default async function AdminAnnouncementEditPage({
         <DeleteAnnouncementForm id={row.id} />
       </section>
 
-      <p style={{ marginTop: 22 }}>
-        <Link href="/admin/announcements" className="fn-btn fn-btn-ghost">
-          <Icon name="chevron-left" size={12} aria-hidden /> 一覧へ戻る
-        </Link>
-      </p>
     </div>
   );
 }

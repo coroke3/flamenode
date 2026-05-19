@@ -20,6 +20,7 @@ import {
   eventStatusLabel,
   isAcceptingEntries,
 } from "@/lib/utils/eventStatus";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 
 export const metadata: Metadata = { title: "イベント詳細" };
 export const dynamic = "force-dynamic";
@@ -84,62 +85,35 @@ export default async function AdminEventDetailPage({
 
   return (
     <div>
-      <p className="fn-muted fn-text-xs fn-bold">EVENT</p>
-      <h1 style={{ fontSize: 24, fontWeight: 700 }}>{event.title}</h1>
-      <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
-        ID: {event.id}
-      </p>
-
-      <nav
-        style={{
-          marginTop: 16,
-          display: "flex",
-          gap: 8,
-          flexWrap: "wrap",
-        }}
-      >
-        <Link
-          href={`/admin/events/${event.id}/edit`}
-          className="fn-btn fn-btn-primary fn-btn-sm"
-        >
-          <Icon name="edit" size={12} aria-hidden /> 設定編集
-        </Link>
-        <Link
-          href={`/admin/events/${event.id}/slots`}
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-        >
-          <Icon name="clock" size={12} aria-hidden /> 枠管理
-        </Link>
-        <Link
-          href={`/admin/events/${event.id}/staff`}
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-        >
-          <Icon name="users" size={12} aria-hidden /> 編集権限
-        </Link>
-        <Link
-          href={`/event/${event.id}`}
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Icon name="external" size={12} aria-hidden /> 公開ページ
-        </Link>
-        <Link
-          href={`/manage/events/${event.id}`}
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-        >
-          <Icon name="users" size={12} aria-hidden /> 運営ビュー
-        </Link>
-        <Link
-          href={`/admin/audit?table=events&record=${encodeURIComponent(event.id)}`}
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-        >
-          <Icon name="clock" size={12} aria-hidden /> 監査ログ
-        </Link>
-        <Link href="/admin/events" className="fn-btn fn-btn-ghost fn-btn-sm">
-          <Icon name="chevron-left" size={12} aria-hidden /> 一覧
-        </Link>
-      </nav>
+      <AdminPageHeader
+        title={event.title}
+        description={`ID: ${event.id}`}
+        backHref="/admin/events"
+        backLabel="イベント一覧へ"
+        actions={[
+          {
+            href: `/admin/events/${event.id}/edit`,
+            label: "設定編集",
+            icon: <Icon name="edit" size={12} aria-hidden />,
+            variant: "primary",
+          },
+          {
+            href: `/admin/events/${event.id}/slots`,
+            label: "枠管理",
+            icon: <Icon name="clock" size={12} aria-hidden />,
+          },
+          {
+            href: `/admin/events/${event.id}/staff`,
+            label: "編集権限",
+            icon: <Icon name="users" size={12} aria-hidden />,
+          },
+          {
+            href: `/admin/audit?table=events&record=${encodeURIComponent(event.id)}`,
+            label: "監査ログ",
+            icon: <Icon name="clock" size={12} aria-hidden />,
+          },
+        ]}
+      />
 
       <section
         style={{
@@ -255,9 +229,9 @@ export default async function AdminEventDetailPage({
           <p className="fn-muted fn-text-sm">作品はまだありません。</p>
         ) : (
           <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none" }}>
-            {evVideos.map((v) => (
+            {evVideos.map((v, index) => (
               <li
-                key={v.id}
+                key={`${v.id}-event-admin-video-${index}`}
                 style={{
                   display: "flex",
                   gap: 12,

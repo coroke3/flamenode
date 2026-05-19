@@ -7,6 +7,7 @@ import { historyLogs, systemSettings } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { CostGuardForm } from "@/components/admin/CostGuardForm";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 
 export const metadata: Metadata = { title: "コストガード" };
 export const dynamic = "force-dynamic";
@@ -92,10 +93,10 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
 
   return (
     <div>
-      <h1 style={{ fontSize: 22, fontWeight: 700 }}>コストガード</h1>
-      <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
-        Cloudflare 無料枠の使用状況に応じて、機能の段階停止モードを切り替えます。
-      </p>
+      <AdminPageHeader
+        title="コストガード"
+        description="Cloudflare 無料枠の使用状況に応じて、機能の段階停止モードを切り替えます。"
+      />
 
       <section
         style={{

@@ -14,6 +14,7 @@ import { Icon } from "@/components/ui/Icon";
 import { resolveMissingIcons } from "@/lib/db/iconResolution";
 import { normalizeXId } from "@/lib/utils/xid";
 import { updateGlobalEditableFields } from "@/lib/actions/permissions-admin";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 
 export const metadata: Metadata = { title: "ユーザー管理" };
 export const dynamic = "force-dynamic";
@@ -248,10 +249,10 @@ export default async function AdminUsersPage({
 
   return (
     <div>
-      <h1 style={{ fontSize: 22, fontWeight: 700 }}>ユーザー管理</h1>
-      <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
-        Discord アカウントを軸に、X ID 連携・BAN 状態・管理権限を管理します。
-      </p>
+      <AdminPageHeader
+        title="ユーザー管理"
+        description="Discord アカウントを軸に、X ID 連携・BAN 状態・管理権限を管理します。"
+      />
 
       <nav style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 16 }}>
         {[
@@ -474,8 +475,8 @@ function XIdTable({
         </tr>
       </thead>
       <tbody>
-        {rows.map((x) => (
-          <tr key={x.id}>
+        {rows.map((x, index) => (
+          <tr key={`${x.id}-x-row-${index}`}>
             <td>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 {x.icon_url ? (

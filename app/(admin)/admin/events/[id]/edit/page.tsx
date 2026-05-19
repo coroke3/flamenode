@@ -5,9 +5,10 @@ import type { Metadata } from "next";
 import { eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { events as eventsTable } from "@/lib/db/schema";
-import { Icon } from "@/components/ui/Icon";
 import { EventForm } from "@/components/admin/EventForm";
 import { DeleteEventForm } from "@/components/admin/DeleteEventForm";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { Icon } from "@/components/ui/Icon";
 
 export const metadata: Metadata = { title: "イベント編集" };
 export const dynamic = "force-dynamic";
@@ -29,48 +30,12 @@ export default async function AdminEventEditPage({
 
   return (
     <div>
-      <p
-        style={{
-          color: "var(--text-muted)",
-          fontSize: 11,
-          fontWeight: 700,
-          letterSpacing: "0.18em",
-          textTransform: "uppercase",
-        }}
-      >
-        EVENT EDIT
-      </p>
-      <h1 style={{ fontSize: 24, fontWeight: 700 }}>{ev.title}</h1>
-      <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
-        ID: {ev.id}
-      </p>
-
-      <nav style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <Link
-          href={`/admin/events/${ev.id}`}
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-        >
-          <Icon name="grid" size={12} aria-hidden /> 概要
-        </Link>
-        <Link
-          href={`/admin/events/${ev.id}/edit`}
-          className="fn-btn fn-btn-primary fn-btn-sm"
-        >
-          <Icon name="edit" size={12} aria-hidden /> 設定編集
-        </Link>
-        <Link
-          href={`/admin/events/${ev.id}/slots`}
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-        >
-          <Icon name="clock" size={12} aria-hidden /> 枠管理
-        </Link>
-        <Link
-          href={`/admin/events/${ev.id}/staff`}
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-        >
-          <Icon name="users" size={12} aria-hidden /> 編集権限
-        </Link>
-      </nav>
+      <AdminPageHeader
+        title={`${ev.title} を編集`}
+        description={`ID: ${ev.id}`}
+        backHref={`/admin/events/${ev.id}`}
+        backLabel="イベント詳細へ"
+      />
 
       <section
         style={{

@@ -17,6 +17,7 @@ import { Icon } from "@/components/ui/Icon";
 import { formatRelative } from "@/lib/utils/format";
 import { runHealthChecks } from "@/lib/admin/healthChecks";
 import { runSecurityChecks } from "@/lib/admin/securityChecks";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 
 export const metadata: Metadata = { title: "管理ダッシュボード" };
 export const dynamic = "force-dynamic";
@@ -186,12 +187,10 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
 
   return (
     <div>
-      <h1 style={{ fontSize: 24, fontWeight: 700, letterSpacing: "0.04em" }}>
-        管理ダッシュボード
-      </h1>
-      <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
-        プラットフォームの稼働状況・要対応タスク・コストガード状態を一覧します。
-      </p>
+      <AdminPageHeader
+        title="管理ダッシュボード"
+        description="プラットフォームの稼働状況・要対応タスク・コストガード状態を一覧します。"
+      />
 
       <TodoBoard
         pendingVideos={stats.pending}
@@ -324,8 +323,8 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
               </tr>
             </thead>
             <tbody>
-              {pendingVideos.map((v) => (
-                <tr key={v.id}>
+              {pendingVideos.map((v, index) => (
+                <tr key={`${v.id}-pending-${index}`}>
                   <td>{v.title}</td>
                   <td>{v.display_name}</td>
                   <td className="fn-muted">{formatRelative(v.created_at)}</td>

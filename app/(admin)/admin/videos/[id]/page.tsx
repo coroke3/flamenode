@@ -9,6 +9,7 @@ import { Icon } from "@/components/ui/Icon";
 import { youtubeThumbUrl, youtubeWatchUrl } from "@/lib/youtube/id";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { AdminVideoStatusForm } from "@/components/admin/AdminVideoStatusForm";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 
 export const metadata: Metadata = { title: "作品詳細" };
 export const dynamic = "force-dynamic";
@@ -50,12 +51,19 @@ export default async function AdminVideoDetailPage({
 
   return (
     <div>
-      <p className="fn-muted fn-text-xs fn-bold">REVIEW</p>
-      <h1 style={{ fontSize: 24, fontWeight: 700 }}>{video.title}</h1>
-      <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
-        作者: {video.creator_name} (@{video.contact_x_id}) / 登録:{" "}
-        {formatUnix(video.created_at)} ({formatRelative(video.created_at)})
-      </p>
+      <AdminPageHeader
+        title={video.title}
+        description={`作者: ${video.creator_name} (@${video.contact_x_id}) / 登録: ${formatUnix(video.created_at)} (${formatRelative(video.created_at)})`}
+        backHref="/admin/videos"
+        backLabel="作品一覧へ"
+        actions={[
+          {
+            href: `/admin/audit?table=videos&record=${encodeURIComponent(video.id)}`,
+            label: "監査ログ",
+            icon: <Icon name="clock" size={12} aria-hidden />,
+          },
+        ]}
+      />
 
       <div
         style={{

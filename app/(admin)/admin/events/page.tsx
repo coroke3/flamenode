@@ -12,6 +12,7 @@ import {
   eventStatusLabel,
   isAcceptingEntries,
 } from "@/lib/utils/eventStatus";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 
 export const metadata: Metadata = { title: "イベント管理" };
 export const dynamic = "force-dynamic";
@@ -64,20 +65,18 @@ export default async function AdminEventsPage({
 
   return (
     <div>
-      <header
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 8,
-          flexWrap: "wrap",
-        }}
-      >
-        <h1 style={{ fontSize: 22, fontWeight: 700 }}>イベント管理</h1>
-        <Link href="/admin/events/new" className="fn-btn fn-btn-primary fn-btn-sm">
-          <Icon name="plus" size={12} aria-hidden /> 新規イベント
-        </Link>
-      </header>
+      <AdminPageHeader
+        title="イベント管理"
+        description="イベントの作成・公開設定・運営メンバー管理を行います。"
+        actions={[
+          {
+            href: "/admin/events/new",
+            label: "新規イベント",
+            icon: <Icon name="plus" size={12} aria-hidden />,
+            variant: "primary",
+          },
+        ]}
+      />
 
       <form
         method="get"

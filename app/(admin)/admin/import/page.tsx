@@ -2,6 +2,7 @@ import * as React from "react";
 import type { Metadata } from "next";
 import { Icon } from "@/components/ui/Icon";
 import { LegacyImportClient } from "@/components/admin/LegacyImportClient";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 
 export const metadata: Metadata = { title: "レガシーインポート" };
 export const dynamic = "force-dynamic";
@@ -17,12 +18,10 @@ export default async function AdminImportPage({
 
   return (
     <div>
-      <h1 style={{ fontSize: 22, fontWeight: 700 }}>レガシーデータ・インポート</h1>
-      <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
-        旧 EventArchives の <code>eventinfo.json</code> / <code>video.json</code> / ヘッダー付き CSV
-        から、イベント・運営メンバー・作品・合作メンバー・X ID を取り込みます。
-      </p>
-
+      <AdminPageHeader
+        title="レガシーデータ・インポート"
+        description="旧 EventArchives の eventinfo.json / video.json / ヘッダー付き CSV から、イベント・運営メンバー・作品・合作メンバー・X ID を取り込みます。"
+      />
       {notice ? (
         <div
           role="status"

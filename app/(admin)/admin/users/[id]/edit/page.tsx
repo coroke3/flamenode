@@ -1,5 +1,4 @@
 import * as React from "react";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { eq } from "drizzle-orm";
@@ -7,6 +6,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { users as usersTable, xUsers as xUsersTable } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { UserAdminForm } from "@/components/admin/UserAdminForm";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 
 export const metadata: Metadata = { title: "ユーザー編集" };
 export const dynamic = "force-dynamic";
@@ -33,11 +33,19 @@ export default async function AdminUserEditPage({
 
   return (
     <div>
-      <p className="fn-muted fn-text-xs fn-bold">USER EDIT</p>
-      <h1 style={{ fontSize: 24, fontWeight: 700 }}>{user.name ?? user.id}</h1>
-      <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
-        ID: {user.id}
-      </p>
+      <AdminPageHeader
+        title={`${user.name ?? user.id} を編集`}
+        description={`ID: ${user.id}`}
+        backHref={`/admin/users/${user.id}`}
+        backLabel="ユーザー詳細へ"
+        actions={[
+          {
+            href: `/admin/audit?record=${encodeURIComponent(user.id)}`,
+            label: "監査ログ",
+            icon: <Icon name="clock" size={12} aria-hidden />,
+          },
+        ]}
+      />
 
       <section
         style={{
@@ -59,23 +67,6 @@ export default async function AdminUserEditPage({
         />
       </section>
 
-      <p style={{ marginTop: 22, display: "flex", gap: 8 }}>
-        <Link
-          href={`/admin/users/${user.id}`}
-          className="fn-btn fn-btn-ghost"
-        >
-          <Icon name="chevron-left" size={12} aria-hidden /> 詳細へ戻る
-        </Link>
-        <Link href="/admin/users" className="fn-btn fn-btn-ghost">
-          ユーザー管理へ
-        </Link>
-        <Link
-          href={`/admin/audit?record=${encodeURIComponent(user.id)}`}
-          className="fn-btn fn-btn-ghost"
-        >
-          このユーザーの監査ログ
-        </Link>
-      </p>
     </div>
   );
 }

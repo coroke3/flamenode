@@ -1,53 +1,55 @@
 import * as React from "react";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { AuthHeader } from "@/components/layout/AuthHeader";
 import { PublicFooter } from "@/components/layout/PublicFooter";
 import { Icon } from "@/components/ui/Icon";
 import { buildHeaderUser, type HeaderUser } from "@/lib/auth/headerUser";
+import {
+  AdminSidebarNav,
+  type AdminSidebarGroup,
+} from "@/components/admin/AdminSidebarNav";
 import styles from "./AdminLayout.module.css";
 
-const ADMIN_NAV_GROUPS: {
-  title: string;
-  items: { href: string; label: string; icon: React.ReactNode }[];
-}[] = [
+const ADMIN_NAV_GROUPS: AdminSidebarGroup[] = [
   {
-    title: "Overview",
-    items: [{ href: "/admin", label: "Dashboard", icon: <Icon name="grid" size={14} /> }],
-  },
-  {
-    title: "Today",
+    title: "概要",
     items: [
-      { href: "/admin/videos?status=pending", label: "Pending videos", icon: <Icon name="youtube" size={14} /> },
-      { href: "/admin/x-link-requests", label: "X ID requests", icon: <Icon name="user" size={14} /> },
-      { href: "/admin/notifications?status=failed", label: "Failed notices", icon: <Icon name="alert" size={14} /> },
+      { href: "/admin", label: "ダッシュボード", icon: <Icon name="grid" size={14} /> },
     ],
   },
   {
-    title: "Content",
+    title: "対応待ち",
     items: [
-      { href: "/admin/videos", label: "Videos", icon: <Icon name="youtube" size={14} /> },
-      { href: "/admin/events", label: "Events", icon: <Icon name="calendar" size={14} /> },
-      { href: "/admin/announcements", label: "Announcements", icon: <Icon name="alert" size={14} /> },
+      { href: "/admin/videos?status=pending", label: "承認待ち作品", icon: <Icon name="youtube" size={14} /> },
+      { href: "/admin/x-link-requests", label: "X ID連携申請", icon: <Icon name="user" size={14} /> },
+      { href: "/admin/notifications?status=failed", label: "通知失敗", icon: <Icon name="alert" size={14} /> },
     ],
   },
   {
-    title: "Users",
+    title: "コンテンツ",
     items: [
-      { href: "/admin/users", label: "Users / X ID", icon: <Icon name="users" size={14} /> },
-      { href: "/admin/users?view=permissions", label: "Permissions", icon: <Icon name="settings" size={14} /> },
+      { href: "/admin/videos", label: "作品管理", icon: <Icon name="youtube" size={14} /> },
+      { href: "/admin/events", label: "イベント管理", icon: <Icon name="calendar" size={14} /> },
+      { href: "/admin/announcements", label: "お知らせ管理", icon: <Icon name="alert" size={14} /> },
     ],
   },
   {
-    title: "System",
+    title: "ユーザー",
     items: [
-      { href: "/admin/rules", label: "Terms", icon: <Icon name="info" size={14} /> },
-      { href: "/admin/audit", label: "Audit log", icon: <Icon name="clock" size={14} /> },
-      { href: "/admin/cost-guard", label: "Cost guard", icon: <Icon name="warning" size={14} /> },
-      { href: "/admin/health", label: "Health", icon: <Icon name="check" size={14} /> },
-      { href: "/admin/security", label: "Security", icon: <Icon name="settings" size={14} /> },
-      { href: "/admin/import", label: "Import", icon: <Icon name="upload" size={14} /> },
+      { href: "/admin/users", label: "ユーザー / X ID", icon: <Icon name="users" size={14} /> },
+      { href: "/admin/users?view=permissions", label: "権限管理", icon: <Icon name="settings" size={14} /> },
+    ],
+  },
+  {
+    title: "システム",
+    items: [
+      { href: "/admin/rules", label: "規約管理", icon: <Icon name="info" size={14} /> },
+      { href: "/admin/audit", label: "監査ログ", icon: <Icon name="clock" size={14} /> },
+      { href: "/admin/cost-guard", label: "コストガード", icon: <Icon name="warning" size={14} /> },
+      { href: "/admin/health", label: "ヘルスチェック", icon: <Icon name="check" size={14} /> },
+      { href: "/admin/security", label: "セキュリティ", icon: <Icon name="settings" size={14} /> },
+      { href: "/admin/import", label: "インポート", icon: <Icon name="upload" size={14} /> },
     ],
   },
 ];
@@ -79,23 +81,7 @@ export default async function AdminLayout({
         <div className={styles.frame}>
           <aside className={styles.sidebar}>
             <p className={styles.eyebrow}>ADMIN</p>
-            <nav className={styles.nav}>
-              {ADMIN_NAV_GROUPS.map((group) => (
-                <section key={group.title} className={styles.navGroup}>
-                  <h2 className={styles.navGroupTitle}>{group.title}</h2>
-                  {group.items.map((item) => (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      className={styles.navLink}
-                    >
-                      {item.icon}
-                      {item.label}
-                    </Link>
-                  ))}
-                </section>
-              ))}
-            </nav>
+            <AdminSidebarNav groups={ADMIN_NAV_GROUPS} />
           </aside>
           <main className={styles.main}>{children}</main>
         </div>
