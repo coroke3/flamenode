@@ -3,7 +3,7 @@ import NextAuth, { type NextAuthConfig } from "next-auth";
 import Discord from "next-auth/providers/discord";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { and, eq } from "drizzle-orm";
-import { getDatabase, getEnv } from "@/lib/cloudflare";
+import { getDatabase, getDatabaseAsync, getEnv, waitForLocalBindings } from "@/lib/cloudflare";
 import { accounts, sessions, users, verificationTokens } from "@/lib/db/schema";
 
 const LOCAL_DEV_AUTH_SECRET = "flamenode-local-development-auth-secret";
@@ -88,9 +88,10 @@ function envValue(value: string | null | undefined): string | undefined {
  * Cloudflare Pages のランタイムでは D1 が getRequestContext から渡るため、
  * 設定ファクトリで遅延的にアダプタを作る。
  */
-export function buildAuthConfig(): NextAuthConfig {
+export async function buildAuthConfig(): Promise<NextAuthConfig> {
+  await waitForLocalBindings();
   const env = getEnv();
-  const db = getDatabase();
+  const db = await getDatabaseAsync();
   const authSecret =
     envValue(process.env.AUTH_SECRET) ??
     envValue(process.env.NEXTAUTH_SECRET) ??
@@ -188,6 +189,6 @@ export function buildAuthConfig(): NextAuthConfig {
   return baseConfig;
 }
 
-export const { handlers, auth, signIn, signOut } = NextAuth(() =>
-  buildAuthConfig(),
+export const { handlers, auth, signIn, signOut } = NextAuth(async () =>
+  await buildAuthConfig(),
 );

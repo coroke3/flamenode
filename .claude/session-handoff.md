@@ -172,6 +172,7 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 | 158 | api: /api/internal/x-users/search に offset / hasMore / nextOffset | 6717f68 |
 | 159 | admin: ユーザー詳細 ID 主体カード + manage event_id 未適用 fallback + 公開文言 | 9182f52 |
 | 160 | docs: claude-code-subagent-implementation-report.md (Batch 151-159 実装確認) | d07b763 |
+| 161 | auth: NextAuth (Auth.js) v5 DrizzleAdapter 設定に Miniflare 非同期初期化待機 (waitForLocalBindings) 配線し MissingAdapter を解消 | pending |
 
 ## Opus 判断ログ (2026-05-18 セッション)
 
@@ -189,7 +190,266 @@ Opus は未使用。Sonnet (flamenode-implementation-agent) / Haiku (flamenode-r
 - ✅ #2 関連動画 UI の mobile 位置最適化 → Batch 31 で実装済み
 - ✅ #3 メンバー表 / 関連動画の mobile レイアウト改善 → Batch 23/77 で実装済み
 - ✅ #4 slot 部区切り gapSec を events テーブル設定可に拡張 → Batch 136 で migration 0006 追加
-- ✅ #5 メンバー候補検索の本格 API 化 → Batch 138 で endpoint 追加 + Batch 139 で UI debounce 完了
+[AdminUsersPage] fetch failed Error: D1_ERROR: too many SQL variables at offset 393: SQLITE_ERROR
+    at async resolveMissingIcons (src\lib\db\iconResolution.ts:32:25)
+    at async AdminUsersPage (app\(admin)\admin\users\page.tsx:166:29)
+  30 |
+  31 |   // 個人作 → 合作の順で取得し、Map<creatorId, iconUrl> を作る。
+> 32 |   const individualRows = await db
+     |                         ^
+  33 |     .select({
+  34 |       creator_id: videos.creator_id,
+  35 |       icon_url: videos.icon_url, {
+  [cause]: Error: too many SQL variables at offset 393: SQLITE_ERROR
+      at D1DatabaseSessionAlwaysPrimary._sendOrThrow (cloudflare-internal:d1-api:126:24)
+      at async D1PreparedStatement.raw (cloudflare-internal:d1-api:313:32)
+}
+ GET /admin/users?view=permissions 200 in 1217ms
+[AdminUsersPage] fetch failed Error: D1_ERROR: too many SQL variables at offset 393: SQLITE_ERROR
+    at async resolveMissingIcons (src\lib\db\iconResolution.ts:32:25)
+    at async AdminUsersPage (app\(admin)\admin\users\page.tsx:166:29)
+  30 |
+  31 |   // 個人作 → 合作の順で取得し、Map<creatorId, iconUrl> を作る。
+> 32 |   const individualRows = await db
+     |                         ^
+  33 |     .select({
+  34 |       creator_id: videos.creator_id,
+  35 |       icon_url: videos.icon_url, {
+  [cause]: Error: too many SQL variables at offset 393: SQLITE_ERROR
+      at D1DatabaseSessionAlwaysPrimary._sendOrThrow (cloudflare-internal:d1-api:126:24)
+      at async D1PreparedStatement.raw (cloudflare-internal:d1-api:313:32)
+}
+ GET /admin/users 200 in 90ms
+[AdminUsersPage] fetch failed Error: D1_ERROR: too many SQL variables at offset 393: SQLITE_ERROR
+    at async resolveMissingIcons (src\lib\db\iconResolution.ts:32:25)
+    at async AdminUsersPage (app\(admin)\admin\users\page.tsx:166:29)
+  30 |
+  31 |   // 個人作 → 合作の順で取得し、Map<creatorId, iconUrl> を作る。
+> 32 |   const individualRows = await db
+     |                         ^
+  33 |     .select({
+  34 |       creator_id: videos.creator_id,
+  35 |       icon_url: videos.icon_url, {
+  [cause]: Error: too many SQL variables at offset 393: SQLITE_ERROR
+      at D1DatabaseSessionAlwaysPrimary._sendOrThrow (cloudflare-internal:d1-api:126:24)
+      at async D1PreparedStatement.raw (cloudflare-internal:d1-api:313:32)
+}
+ GET /admin/users?view=xid 200 in 104ms
+[AdminUsersPage] fetch failed Error: D1_ERROR: too many SQL variables at offset 393: SQLITE_ERROR
+    at async resolveMissingIcons (src\lib\db\iconResolution.ts:32:25)
+    at async AdminUsersPage (app\(admin)\admin\users\page.tsx:166:29)
+  30 |
+  31 |   // 個人作 → 合作の順で取得し、Map<creatorId, iconUrl> を作る。
+> 32 |   const individualRows = await db
+     |                         ^
+  33 |     .select({
+  34 |       creator_id: videos.creator_id,
+  35 |       icon_url: videos.icon_url, {
+  [cause]: Error: too many SQL variables at offset 393: SQLITE_ERROR
+      at D1DatabaseSessionAlwaysPrimary._sendOrThrow (cloudflare-internal:d1-api:126:24)
+      at async D1PreparedStatement.raw (cloudflare-internal:d1-api:313:32)
+}
+ GET /admin/users?view=links 200 in 94ms
+[AdminUsersPage] fetch failed Error: D1_ERROR: too many SQL variables at offset 393: SQLITE_ERROR
+    at async resolveMissingIcons (src\lib\db\iconResolution.ts:32:25)
+    at async AdminUsersPage (app\(admin)\admin\users\page.tsx:166:29)
+  30 |
+  31 |   // 個人作 → 合作の順で取得し、Map<creatorId, iconUrl> を作る。
+> 32 |   const individualRows = await db
+     |                         ^
+  33 |     .select({
+  34 |       creator_id: videos.creator_id,
+  35 |       icon_url: videos.icon_url, {
+  [cause]: Error: too many SQL variables at offset 393: SQLITE_ERROR
+      at D1DatabaseSessionAlwaysPrimary._sendOrThrow (cloudflare-internal:d1-api:126:24)
+      at async D1PreparedStatement.raw (cloudflare-internal:d1-api:313:32)
+}
+ GET /admin/users?view=discord 200 in 70ms
+[AdminUsersPage] fetch failed Error: D1_ERROR: too many SQL variables at offset 393: SQLITE_ERROR
+    at async resolveMissingIcons (src\lib\db\iconResolution.ts:32:25)
+    at async AdminUsersPage (app\(admin)\admin\users\page.tsx:166:29)
+  30 |
+  31 |   // 個人作 → 合作の順で取得し、Map<creatorId, iconUrl> を作る。
+> 32 |   const individualRows = await db
+     |                         ^
+  33 |     .select({
+  34 |       creator_id: videos.creator_id,
+  35 |       icon_url: videos.icon_url, {
+  [cause]: Error: too many SQL variables at offset 393: SQLITE_ERROR
+      at D1DatabaseSessionAlwaysPrimary._sendOrThrow (cloudflare-internal:d1-api:126:24)
+      at async D1PreparedStatement.raw (cloudflare-internal:d1-api:313:32)
+}
+ GET /admin/users?view=xid 200 in 92ms
+[AdminUsersPage] fetch failed Error: D1_ERROR: too many SQL variables at offset 393: SQLITE_ERROR
+    at async resolveMissingIcons (src\lib\db\iconResolution.ts:32:25)
+    at async AdminUsersPage (app\(admin)\admin\users\page.tsx:166:29)
+  30 |
+  31 |   // 個人作 → 合作の順で取得し、Map<creatorId, iconUrl> を作る。
+> 32 |   const individualRows = await db
+     |                         ^
+  33 |     .select({
+  34 |       creator_id: videos.creator_id,
+  35 |       icon_url: videos.icon_url, {
+  [cause]: Error: too many SQL variables at offset 393: SQLITE_ERROR
+      at D1DatabaseSessionAlwaysPrimary._sendOrThrow (cloudflare-internal:d1-api:126:24)
+      at async D1PreparedStatement.raw (cloudflare-internal:d1-api:313:32)
+}
+ GET /admin/users?view=permissions 200 in 71ms
+[AdminUsersPage] fetch failed Error: D1_ERROR: too many SQL variables at offset 393: SQLITE_ERROR
+    at async resolveMissingIcons (src\lib\db\iconResolution.ts:32:25)
+    at async AdminUsersPage (app\(admin)\admin\users\page.tsx:166:29)
+  30 |
+  31 |   // 個人作 → 合作の順で取得し、Map<creatorId, iconUrl> を作る。
+> 32 |   const individualRows = await db
+     |                         ^
+  33 |     .select({
+  34 |       creator_id: videos.creator_id,
+  35 |       icon_url: videos.icon_url, {
+  [cause]: Error: too many SQL variables at offset 393: SQLITE_ERROR
+      at D1DatabaseSessionAlwaysPrimary._sendOrThrow (cloudflare-internal:d1-api:126:24)
+      at async D1PreparedStatement.raw (cloudflare-internal:d1-api:313:32)
+}
+ GET /admin/users?view=links 200 in 67ms
+[AdminUsersPage] fetch failed Error: D1_ERROR: too many SQL variables at offset 393: SQLITE_ERROR
+    at async resolveMissingIcons (src\lib\db\iconResolution.ts:32:25)
+    at async AdminUsersPage (app\(admin)\admin\users\page.tsx:166:29)
+  30 |
+  31 |   // 個人作 → 合作の順で取得し、Map<creatorId, iconUrl> を作る。
+> 32 |   const individualRows = await db
+     |                         ^
+  33 |     .select({
+  34 |       creator_id: videos.creator_id,
+  35 |       icon_url: videos.icon_url, {
+  [cause]: Error: too many SQL variables at offset 393: SQLITE_ERROR
+      at D1DatabaseSessionAlwaysPrimary._sendOrThrow (cloudflare-internal:d1-api:126:24)
+      at async D1PreparedStatement.raw (cloudflare-internal:d1-api:313:32)
+}
+ GET /admin/users?view=xid 200 in 83ms
+[AdminUsersPage] fetch failed Error: D1_ERROR: too many SQL variables at offset 393: SQLITE_ERROR
+    at async resolveMissingIcons (src\lib\db\iconResolution.ts:32:25)
+    at async AdminUsersPage (app\(admin)\admin\users\page.tsx:166:29)
+  30 |
+  31 |   // 個人作 → 合作の順で取得し、Map<creatorId, iconUrl> を作る。
+> 32 |   const individualRows = await db
+     |                         ^
+  33 |     .select({
+  34 |       creator_id: videos.creator_id,
+  35 |       icon_url: videos.icon_url, {
+  [cause]: Error: too many SQL variables at offset 393: SQLITE_ERROR
+      at D1DatabaseSessionAlwaysPrimary._sendOrThrow (cloudflare-internal:d1-api:126:24)
+      at async D1PreparedStatement.raw (cloudflare-internal:d1-api:313:32)
+}
+ GET /admin/users?view=discord 200 in 65ms
+[AdminUsersPage] fetch failed Error: D1_ERROR: too many SQL variables at offset 393: SQLITE_ERROR
+    at async resolveMissingIcons (src\lib\db\iconResolution.ts:32:25)
+    at async AdminUsersPage (app\(admin)\admin\users\page.tsx:166:29)
+  30 |
+  31 |   // 個人作 → 合作の順で取得し、Map<creatorId, iconUrl> を作る。
+> 32 |   const individualRows = await db
+     |                         ^
+  33 |     .select({
+  34 |       creator_id: videos.creator_id,
+  35 |       icon_url: videos.icon_url, {
+  [cause]: Error: too many SQL variables at offset 393: SQLITE_ERROR
+      at D1DatabaseSessionAlwaysPrimary._sendOrThrow (cloudflare-internal:d1-api:126:24)
+      at async D1PreparedStatement.raw (cloudflare-internal:d1-api:313:32)
+}
+ GET /admin/users?view=links 200 in 62ms
+[AdminUsersPage] fetch failed Error: D1_ERROR: too many SQL variables at offset 393: SQLITE_ERROR
+    at async resolveMissingIcons (src\lib\db\iconResolution.ts:32:25)
+    at async AdminUsersPage (app\(admin)\admin\users\page.tsx:166:29)
+  30 |
+  31 |   // 個人作 → 合作の順で取得し、Map<creatorId, iconUrl> を作る。
+> 32 |   const individualRows = await db
+     |                         ^
+  33 |     .select({
+  34 |       creator_id: videos.creator_id,
+  35 |       icon_url: videos.icon_url, {
+  [cause]: Error: too many SQL variables at offset 393: SQLITE_ERROR
+      at D1DatabaseSessionAlwaysPrimary._sendOrThrow (cloudflare-internal:d1-api:126:24)
+      at async D1PreparedStatement.raw (cloudflare-internal:d1-api:313:32)
+}
+ GET /admin/users?view=discord 200 in 61ms
+[AdminUsersPage] fetch failed Error: D1_ERROR: too many SQL variables at offset 393: SQLITE_ERROR
+    at async resolveMissingIcons (src\lib\db\iconResolution.ts:32:25)
+    at async AdminUsersPage (app\(admin)\admin\users\page.tsx:166:29)
+  30 |
+  31 |   // 個人作 → 合作の順で取得し、Map<creatorId, iconUrl> を作る。
+> 32 |   const individualRows = await db
+     |                         ^
+  33 |     .select({
+  34 |       creator_id: videos.creator_id,
+  35 |       icon_url: videos.icon_url, {
+  [cause]: Error: too many SQL variables at offset 393: SQLITE_ERROR
+      at D1DatabaseSessionAlwaysPrimary._sendOrThrow (cloudflare-internal:d1-api:126:24)
+      at async D1PreparedStatement.raw (cloudflare-internal:d1-api:313:32)
+}
+ GET /admin/users 200 in 60ms
+[AdminTopPage] health/security check failed Error: D1_ERROR: no such table: users: SQLITE_ERROR
+    at async checkBannedUserChapters (src\lib\admin\securityChecks.ts:216:15)
+    at async runSecurityChecks (src\lib\admin\securityChecks.ts:313:6)
+    at async AdminTopPage (app\(admin)\admin\page.tsx:148:25)
+  214 | ): Promise<SecurityCheckResult> {
+  215 |   // x_users.linked_discord_user_id 経由で banned ユーザーが投稿した video_chapters を検出
+> 216 |   const rows = await db
+      |               ^
+  217 |     .select({
+  218 |       id: sql<string>`vc.id`,
+  219 |       x_user_id: sql<string>`vc.x_user_id`, {
+  [cause]: Error: no such table: users: SQLITE_ERROR
+      at D1DatabaseSessionAlwaysPrimary._sendOrThrow (cloudflare-internal:d1-api:126:24)
+      at async D1PreparedStatement.raw (cloudflare-internal:d1-api:313:32)
+}
+ GET /admin 200 in 282ms
+[AdminUsersPage] fetch failed Error: D1_ERROR: too many SQL variables at offset 393: SQLITE_ERROR
+    at async resolveMissingIcons (src\lib\db\iconResolution.ts:32:25)
+    at async AdminUsersPage (app\(admin)\admin\users\page.tsx:166:29)
+  30 |
+  31 |   // 個人作 → 合作の順で取得し、Map<creatorId, iconUrl> を作る。
+> 32 |   const individualRows = await db
+     |                         ^
+  33 |     .select({
+  34 |       creator_id: videos.creator_id,
+  35 |       icon_url: videos.icon_url, {
+  [cause]: Error: too many SQL variables at offset 393: SQLITE_ERROR
+      at D1DatabaseSessionAlwaysPrimary._sendOrThrow (cloudflare-internal:d1-api:126:24)
+      at async D1PreparedStatement.raw (cloudflare-internal:d1-api:313:32)
+}
+ GET /admin/users?view=xid 200 in 92ms
+[AdminUsersPage] fetch failed Error: D1_ERROR: too many SQL variables at offset 393: SQLITE_ERROR
+    at async resolveMissingIcons (src\lib\db\iconResolution.ts:32:25)
+    at async AdminUsersPage (app\(admin)\admin\users\page.tsx:166:29)
+  30 |
+  31 |   // 個人作 → 合作の順で取得し、Map<creatorId, iconUrl> を作る。
+> 32 |   const individualRows = await db
+     |                         ^
+  33 |     .select({
+  34 |       creator_id: videos.creator_id,
+  35 |       icon_url: videos.icon_url, {
+  [cause]: Error: too many SQL variables at offset 393: SQLITE_ERROR
+      at D1DatabaseSessionAlwaysPrimary._sendOrThrow (cloudflare-internal:d1-api:126:24)
+      at async D1PreparedStatement.raw (cloudflare-internal:d1-api:313:32)
+}
+ GET /admin/users?view=permissions 200 in 68ms
+ ✓ Compiled /admin/videos in 505ms (1554 modules)
+ GET /admin/videos 200 in 746ms
+ ○ Compiling /admin/videos/[id] ...
+ ✓ Compiled /admin/videos/[id] in 548ms (1568 modules)
+[load-dev-vars] Loaded .dev.vars into process.env
+ ⨯ TypeError: fetch failed
+    at async AdminVideoDetailPage (app\(admin)\admin\videos\[id]\page.tsx:28:4)
+  26 |
+  27 |   const video = (
+> 28 |     await db
+     |    ^
+  29 |       .select({
+  30 |         id: videosTable.id,
+  31 |         title: videosTable.title, {
+  digest: '4282723753',
+  [cause]: [Error: read ECONNRESET] {
+    errno: -4077,
+    code: 'ECONNRESET',
+    syscall: 'read'- ✅ #5 メンバー候補検索の本格 API 化 → Batch 138 で endpoint 追加 + Batch 139 で UI debounce 完了
 - ✅ #6 cleanup Worker Durable Object 永続化 → Batch 141 で不要判断、docs/workers.md に記録
 - ✅ #7 announcement / terms 本格 broadcast enqueue → Batch 140 docs (手動 SQL 手順) + Batch 150 段階 broadcast UI 完了 (50件バッチ + cursor + 'BROADCAST' 確認)
 - ✅ #8 merge フロー完全実装 → Batch 142 設計書、143 Phase A、146 Phase B mergeXIds、149 Phase C UI 統合 で完全完了

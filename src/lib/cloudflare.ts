@@ -76,6 +76,17 @@ export async function withDatabase<T>(fn: (db: DB) => Promise<T>): Promise<T | n
   throw lastError;
 }
 
+export async function waitForLocalBindings(): Promise<void> {
+  const g = globalThis as Record<string | symbol, unknown>;
+  if (g.__FLAMENODE_LOCAL_BINDINGS_PROMISE) {
+    try {
+      await g.__FLAMENODE_LOCAL_BINDINGS_PROMISE;
+    } catch {
+      // ignore
+    }
+  }
+}
+
 export function getEnv(): FlameNodeEnv {
   const g = globalThis as Record<string | symbol, unknown>;
 
@@ -127,4 +138,9 @@ export function getDatabase(): DB | null {
     memoizedDb = { ref: env.DB, db: getDb(env.DB) };
   }
   return memoizedDb.db;
+}
+
+export async function getDatabaseAsync(): Promise<DB | null> {
+  await waitForLocalBindings();
+  return getDatabase();
 }

@@ -19,48 +19,56 @@ import type { Miniflare as MiniflareType } from "miniflare";
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   if (process.env.LOCAL_BINDINGS === "0") return;
+  if (
+    process.argv.some((arg) => arg.includes("build")) ||
+    process.env.npm_lifecycle_event === "build"
+  ) return;
 
   const g = globalThis as Record<string | symbol, unknown>;
   if (g.__FLAMENODE_LOCAL_BINDINGS_READY) return;
   g.__FLAMENODE_LOCAL_BINDINGS_READY = true;
 
-  try {
-    // Webpack の静的解析を避けるための動的 require
-    const req = eval("require") as NodeRequire;
-    const { Miniflare } = req("miniflare") as {
-      Miniflare: new (opts: Record<string, unknown>) => MiniflareType;
-    };
+  const initPromise = (async () => {
+    try {
+      // Webpack の静的解析を避けるための動的 require
+      const req = eval("require") as NodeRequire;
+      const { Miniflare } = req("miniflare") as {
+        Miniflare: new (opts: Record<string, unknown>) => MiniflareType;
+      };
 
-    const mf = new Miniflare({
-      modules: true,
-      script: "export default { fetch() { return new Response('ok'); } }",
-      d1Databases: { DB: "flamenode_db" },
-      r2Buckets: { BUCKET: "flamenode-storage" },
-      kvNamespaces: { KV: "FLAMENODE_KV" },
-      // wrangler --local が使う persist 先と揃える
-      d1Persist: ".wrangler/state/v3/d1",
-      r2Persist: ".wrangler/state/v3/r2",
-      kvPersist: ".wrangler/state/v3/kv",
-    });
+      const mf = new Miniflare({
+        modules: true,
+        script: "export default { fetch() { return new Response('ok'); } }",
+        d1Databases: { DB: "flamenode_db" },
+        r2Buckets: { BUCKET: "flamenode-storage" },
+        kvNamespaces: { KV: "FLAMENODE_KV" },
+        // wrangler --local が使う persist 先と揃える
+        d1Persist: ".wrangler/state/v3/d1",
+        r2Persist: ".wrangler/state/v3/r2",
+        kvPersist: ".wrangler/state/v3/kv",
+      });
 
-    const [DB, BUCKET, KV] = await Promise.all([
-      mf.getD1Database("DB"),
-      mf.getR2Bucket("BUCKET"),
-      mf.getKVNamespace("KV"),
-    ]);
+      const [DB, BUCKET, KV] = await Promise.all([
+        mf.getD1Database("DB"),
+        mf.getR2Bucket("BUCKET"),
+        mf.getKVNamespace("KV"),
+      ]);
 
-    // 必要に応じてマイグレーションを apply (テーブルが無い場合のみ)
-    await applyMigrationsIfNeeded(DB);
+      // 必要に応じてマイグレーションを apply (テーブルが無い場合のみ)
+      await applyMigrationsIfNeeded(DB);
 
-    g.__FLAMENODE_LOCAL_BINDINGS = { DB, BUCKET, KV };
-    g.__FLAMENODE_LOCAL_MINIFLARE = mf;
-    console.log(
-      "[instrumentation] Local bindings ready: DB, BUCKET, KV (Miniflare)",
-    );
-  } catch (e) {
-    g.__FLAMENODE_LOCAL_BINDINGS_READY = false;
-    console.error("[instrumentation] Failed to initialize Miniflare:", e);
-  }
+      g.__FLAMENODE_LOCAL_BINDINGS = { DB, BUCKET, KV };
+      g.__FLAMENODE_LOCAL_MINIFLARE = mf;
+      console.log(
+        "[instrumentation] Local bindings ready: DB, BUCKET, KV (Miniflare)",
+      );
+    } catch (e) {
+      g.__FLAMENODE_LOCAL_BINDINGS_READY = false;
+      console.error("[instrumentation] Failed to initialize Miniflare:", e);
+    }
+  })();
+  g.__FLAMENODE_LOCAL_BINDINGS_PROMISE = initPromise;
+  await initPromise;
 }
 
 /**
