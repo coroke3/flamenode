@@ -30,7 +30,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     const u = await db
       .select()
       .from(xUsers)
-      .where(eq(xUsers.id, id))
+      .where(sql`lower(${xUsers.id}) = ${id}`)
       .limit(1);
     if (u[0]) return { title: u[0].x_name };
 
@@ -42,7 +42,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
           eq(videos.status, "public"),
           eq(videos.is_deleted, 0),
           eq(videos.is_manual_hidden, 0),
-          or(eq(videos.creator_id, id), eq(videos.contact_x_id, id))!,
+          or(
+            sql`lower(${videos.creator_id}) = ${id}`,
+            sql`lower(${videos.contact_x_id}) = ${id}`,
+          )!,
         )!,
       )
       .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
@@ -61,7 +64,7 @@ export default async function UserPage({
     const userRow = await db
       .select()
       .from(xUsers)
-      .where(eq(xUsers.id, id))
+      .where(sql`lower(${xUsers.id}) = ${id}`)
       .limit(1);
     const publicVideoBase = and(
       eq(videos.status, "public"),
@@ -83,7 +86,10 @@ export default async function UserPage({
           .where(
             and(
               publicVideoBase,
-              or(eq(videos.creator_id, id), eq(videos.contact_x_id, id))!,
+              or(
+                sql`lower(${videos.creator_id}) = ${id}`,
+                sql`lower(${videos.contact_x_id}) = ${id}`,
+              )!,
             )!,
           )
           .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
@@ -116,7 +122,10 @@ export default async function UserPage({
       .where(
         and(
           publicVideoBase,
-          or(eq(videos.creator_id, id), eq(videos.contact_x_id, id))!,
+          or(
+            sql`lower(${videos.creator_id}) = ${id}`,
+            sql`lower(${videos.contact_x_id}) = ${id}`,
+          )!,
         )!,
       )
       .orderBy(desc(videos.scheduled_time));
@@ -143,7 +152,7 @@ export default async function UserPage({
       })
       .from(videos)
       .innerJoin(videoMembers, eq(videos.id, videoMembers.video_id))
-      .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+      .leftJoin(xUsers, sql`lower(${xUsers.id}) = lower(${videos.creator_id})`)
       .where(
         and(
           publicVideoBase,

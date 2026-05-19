@@ -95,7 +95,8 @@ test("normalizeIconUrl: 空/null", () => {
 test("normalizeXIdLegacy: 通常", () => {
   assert.equal(normalizeXIdLegacy("@tanaka"), "tanaka");
   assert.equal(normalizeXIdLegacy("foo_bar"), "foo_bar");
-  assert.equal(normalizeXIdLegacy("@@@FOO"), "FOO"); // legacy は大文字を保つ
+  assert.equal(normalizeXIdLegacy("@@@FOO"), "foo");
+  assert.equal(normalizeXIdLegacy("Foo_Bar"), "foo_bar");
 });
 
 test("normalizeXIdLegacy: スペースをアンダースコアに", () => {

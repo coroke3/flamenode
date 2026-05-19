@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { and, eq, isNull, ne, or } from "drizzle-orm";
+import { and, eq, isNull, ne, or, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { canEditVideo } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
@@ -10,6 +10,7 @@ import {
   historyLogs,
   slots,
   videos,
+  videoEvents,
   videoInteractions,
   videoMembers,
   xUsers,
@@ -47,6 +48,20 @@ export interface VideoActionResult {
   ok: boolean;
   message?: string;
   videoId?: string;
+}
+
+/**
+ * D1 (SQLite) の unique constraint 違反かを判定する。
+ * partial unique index `videos_youtube_id_active_uniq` 等で投稿レースを検出するために使う。
+ */
+function isYoutubeIdUniqueConstraintError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  if (!message) return false;
+  if (!/UNIQUE constraint failed/i.test(message)) return false;
+  return (
+    /videos\.youtube_video_id/i.test(message) ||
+    /videos_youtube_id_active_uniq/i.test(message)
+  );
 }
 
 interface MemberInput {
@@ -232,34 +247,41 @@ export async function createFreeVideo(
     allowProfileUpdate: true,
   });
 
-  await db.insert(videos).values({
-    id,
-    owner_discord_user_id: userId,
-    creator_id: activeX || null,
-    submission_type: parsed.data.is_collab ? "collab" : "individual",
-    display_name: displayName,
-    contact_x_id: activeX || "anonymous",
-    title: parsed.data.title,
-    youtube_video_id: youtubeId,
-    icon_url: iconUrl,
-    status: "public",
-    music: parsed.data.music ?? null,
-    credit: parsed.data.credit ?? null,
-    intro_comment: parsed.data.intro_comment ?? null,
-    highlights: parsed.data.highlights ?? null,
-    production_story: parsed.data.production_story ?? null,
-    used_software: parsed.data.used_software ?? null,
-    closing_comment: parsed.data.closing_comment ?? null,
-    is_deleted: 0,
-    is_manual_hidden: 0,
-    like_count: 0,
-    youtube_view_count: 0,
-    video_score: 0,
-    scheduling_type: "manual",
-    scheduled_time: now,
-    created_at: now,
-    updated_at: now,
-  });
+  try {
+    await db.insert(videos).values({
+      id,
+      owner_discord_user_id: userId,
+      creator_id: activeX || null,
+      submission_type: parsed.data.is_collab ? "collab" : "individual",
+      display_name: displayName,
+      contact_x_id: activeX || "anonymous",
+      title: parsed.data.title,
+      youtube_video_id: youtubeId,
+      icon_url: iconUrl,
+      status: "public",
+      music: parsed.data.music ?? null,
+      credit: parsed.data.credit ?? null,
+      intro_comment: parsed.data.intro_comment ?? null,
+      highlights: parsed.data.highlights ?? null,
+      production_story: parsed.data.production_story ?? null,
+      used_software: parsed.data.used_software ?? null,
+      closing_comment: parsed.data.closing_comment ?? null,
+      is_deleted: 0,
+      is_manual_hidden: 0,
+      like_count: 0,
+      youtube_view_count: 0,
+      video_score: 0,
+      scheduling_type: "manual",
+      scheduled_time: now,
+      created_at: now,
+      updated_at: now,
+    });
+  } catch (err) {
+    if (isYoutubeIdUniqueConstraintError(err)) {
+      return { ok: false, message: "この YouTube 動画は既に登録されています。" };
+    }
+    throw err;
+  }
 
   const members = parsed.data.is_collab
     ? parseMembersJson(formData.get("members_json"))
@@ -383,16 +405,56 @@ export async function submitSlotVideo(
     allowProfileUpdate: true,
   });
 
-  if (exists) {
-    await db
-      .update(videos)
-      .set({
+  try {
+    if (exists) {
+      await db
+        .update(videos)
+        .set({
+          title: parsed.data.title,
+          youtube_video_id: youtubeId,
+          creator_id: activeX || null,
+          contact_x_id: activeX || "anonymous",
+          display_name: parsed.data.display_name,
+          icon_url: parsed.data.icon_url || null,
+          music: parsed.data.music ?? null,
+          credit: parsed.data.credit ?? null,
+          intro_comment: parsed.data.intro_comment ?? null,
+          highlights: parsed.data.highlights ?? null,
+          production_story: parsed.data.production_story ?? null,
+          used_software: parsed.data.used_software ?? null,
+          closing_comment: parsed.data.closing_comment ?? null,
+          submission_type: parsed.data.is_collab ? "collab" : "individual",
+          updated_at: now,
+        })
+        .where(eq(videos.id, videoId));
+    } else {
+      let displayName = parsed.data.display_name || slotRow.display_name || sessionUser.name || "anonymous";
+      let iconUrl: string | null = parsed.data.icon_url || sessionUser.image || null;
+      if (activeX) {
+        const xRow = (
+          await db.select().from(xUsers).where(eq(xUsers.id, activeX)).limit(1)
+        )[0];
+        if (xRow) {
+          // スロットの display_name が空なら X の表示名で補完
+          if (!slotRow.display_name) displayName = xRow.x_name || displayName;
+          iconUrl = xRow.icon_url ?? iconUrl;
+        }
+      }
+
+      await db.insert(videos).values({
+        id: videoId,
+        owner_discord_user_id: userId,
+        creator_id: activeX || null,
+        submission_type: parsed.data.is_collab ? "collab" : "individual",
+        display_name: displayName,
+        contact_x_id: activeX || "anonymous",
         title: parsed.data.title,
         youtube_video_id: youtubeId,
-        creator_id: activeX || null,
-        contact_x_id: activeX || "anonymous",
-        display_name: parsed.data.display_name,
-        icon_url: parsed.data.icon_url || null,
+        icon_url: iconUrl,
+        status: "pending",
+        primary_event_id: slotRow.event_id,
+        scheduling_type: "slotted",
+        scheduled_time: slotRow.start_time ?? now,
         music: parsed.data.music ?? null,
         credit: parsed.data.credit ?? null,
         intro_comment: parsed.data.intro_comment ?? null,
@@ -400,54 +462,30 @@ export async function submitSlotVideo(
         production_story: parsed.data.production_story ?? null,
         used_software: parsed.data.used_software ?? null,
         closing_comment: parsed.data.closing_comment ?? null,
-        submission_type: parsed.data.is_collab ? "collab" : "individual",
+        is_deleted: 0,
+        is_manual_hidden: 0,
+        like_count: 0,
+        youtube_view_count: 0,
+        video_score: 0,
+        created_at: now,
         updated_at: now,
-      })
-      .where(eq(videos.id, videoId));
-  } else {
-    let displayName = parsed.data.display_name || slotRow.display_name || sessionUser.name || "anonymous";
-    let iconUrl: string | null = parsed.data.icon_url || sessionUser.image || null;
-    if (activeX) {
-      const xRow = (
-        await db.select().from(xUsers).where(eq(xUsers.id, activeX)).limit(1)
-      )[0];
-      if (xRow) {
-        // スロットの display_name が空なら X の表示名で補完
-        if (!slotRow.display_name) displayName = xRow.x_name || displayName;
-        iconUrl = xRow.icon_url ?? iconUrl;
-      }
+      });
     }
-
-    await db.insert(videos).values({
-      id: videoId,
-      owner_discord_user_id: userId,
-      creator_id: activeX || null,
-      submission_type: parsed.data.is_collab ? "collab" : "individual",
-      display_name: displayName,
-      contact_x_id: activeX || "anonymous",
-      title: parsed.data.title,
-      youtube_video_id: youtubeId,
-      icon_url: iconUrl,
-      status: "pending",
-      primary_event_id: slotRow.event_id,
-      scheduling_type: "slotted",
-      scheduled_time: slotRow.start_time ?? now,
-      music: parsed.data.music ?? null,
-      credit: parsed.data.credit ?? null,
-      intro_comment: parsed.data.intro_comment ?? null,
-      highlights: parsed.data.highlights ?? null,
-      production_story: parsed.data.production_story ?? null,
-      used_software: parsed.data.used_software ?? null,
-      closing_comment: parsed.data.closing_comment ?? null,
-      is_deleted: 0,
-      is_manual_hidden: 0,
-      like_count: 0,
-      youtube_view_count: 0,
-      video_score: 0,
-      created_at: now,
-      updated_at: now,
-    });
+  } catch (err) {
+    if (isYoutubeIdUniqueConstraintError(err)) {
+      return { ok: false, message: "この YouTube 動画は既に登録されています。" };
+    }
+    throw err;
   }
+
+  // posting/slot-event-link:
+  //   イベント詳細・一覧は video_events を innerJoin して取得するため、
+  //   slot 経由の投稿でも primary_event_id だけでなく video_events を必ず生成する。
+  //   再提出 (exists=true) でも m:n 行が欠けていれば補修できるよう onConflictDoNothing。
+  await db
+    .insert(videoEvents)
+    .values({ video_id: videoId, event_id: slotRow.event_id })
+    .onConflictDoNothing();
 
   const members = parsed.data.is_collab
     ? parseMembersJson(formData.get("members_json"))
@@ -662,38 +700,45 @@ export async function updateVideo(
         sessionUser.role === "admin" || approvedXIds.includes(nextCreatorX),
     });
   }
-  await db
-    .update(videos)
-    .set({
-      title: canEditBasics ? parsed.data.title : target.title,
-      youtube_video_id: canEditYoutube ? youtubeId : target.youtube_video_id,
-      creator_id: canEditIdentity ? nextCreatorX || null : target.creator_id,
-      contact_x_id: canEditIdentity ? nextCreatorX || "anonymous" : target.contact_x_id,
-      display_name: canEditIdentity ? parsed.data.display_name : target.display_name,
-      icon_url: canEditIdentity ? parsed.data.icon_url || null : target.icon_url,
-      music: canEditCredits ? parsed.data.music ?? null : target.music,
-      credit: canEditCredits ? parsed.data.credit ?? null : target.credit,
-      intro_comment: canEditDescriptions
-        ? parsed.data.intro_comment ?? null
-        : target.intro_comment,
-      highlights: canEditDescriptions ? parsed.data.highlights ?? null : target.highlights,
-      production_story: canEditDescriptions
-        ? parsed.data.production_story ?? null
-        : target.production_story,
-      used_software: canEditDescriptions
-        ? parsed.data.used_software ?? null
-        : target.used_software,
-      closing_comment: canEditDescriptions
-        ? parsed.data.closing_comment ?? null
-        : target.closing_comment,
-      submission_type: canEditMembers
-        ? parsed.data.is_collab
-          ? "collab"
-          : "individual"
-        : target.submission_type,
-      updated_at: now,
-    })
-    .where(eq(videos.id, videoId));
+  try {
+    await db
+      .update(videos)
+      .set({
+        title: canEditBasics ? parsed.data.title : target.title,
+        youtube_video_id: canEditYoutube ? youtubeId : target.youtube_video_id,
+        creator_id: canEditIdentity ? nextCreatorX || null : target.creator_id,
+        contact_x_id: canEditIdentity ? nextCreatorX || "anonymous" : target.contact_x_id,
+        display_name: canEditIdentity ? parsed.data.display_name : target.display_name,
+        icon_url: canEditIdentity ? parsed.data.icon_url || null : target.icon_url,
+        music: canEditCredits ? parsed.data.music ?? null : target.music,
+        credit: canEditCredits ? parsed.data.credit ?? null : target.credit,
+        intro_comment: canEditDescriptions
+          ? parsed.data.intro_comment ?? null
+          : target.intro_comment,
+        highlights: canEditDescriptions ? parsed.data.highlights ?? null : target.highlights,
+        production_story: canEditDescriptions
+          ? parsed.data.production_story ?? null
+          : target.production_story,
+        used_software: canEditDescriptions
+          ? parsed.data.used_software ?? null
+          : target.used_software,
+        closing_comment: canEditDescriptions
+          ? parsed.data.closing_comment ?? null
+          : target.closing_comment,
+        submission_type: canEditMembers
+          ? parsed.data.is_collab
+            ? "collab"
+            : "individual"
+          : target.submission_type,
+        updated_at: now,
+      })
+      .where(eq(videos.id, videoId));
+  } catch (err) {
+    if (isYoutubeIdUniqueConstraintError(err)) {
+      return { ok: false, message: "この YouTube 動画は既に登録されています。" };
+    }
+    throw err;
+  }
 
   if (canEditMembers) {
     const members = parsed.data.is_collab
@@ -785,10 +830,12 @@ export async function toggleVideoInteraction(
       .delete(videoInteractions)
       .where(eq(videoInteractions.id, existing.id));
     if (kind === "like") {
+      // 同時いいね・解除のレースを避けるため DB 側で atomic に減算する。
+      // max(0, ...) で 0 未満に下がらないようにし、初期 NULL も coalesce で吸収する。
       await db
         .update(videos)
         .set({
-          like_count: Math.max(0, (target.like_count ?? 0) - 1),
+          like_count: sql<number>`max(0, coalesce(${videos.like_count}, 0) - 1)`,
           updated_at: now,
         })
         .where(eq(videos.id, videoId));
@@ -806,14 +853,21 @@ export async function toggleVideoInteraction(
       source: "app",
       created_at: now,
     });
-  } catch {
-    return { ok: true, active: true, videoId };
+  } catch (err) {
+    // 二重いいね (video_interactions_uniq) のみ既存扱いで成功とする。
+    // 他の DB エラーは握り潰さず失敗にする (UI に異常を見せた方が安全)。
+    const message = err instanceof Error ? err.message : String(err);
+    if (/UNIQUE constraint failed/i.test(message)) {
+      return { ok: true, active: true, videoId };
+    }
+    return { ok: false, message: "操作に失敗しました。時間をおいて再試行してください。" };
   }
   if (kind === "like") {
+    // 同時いいねのレースを避けるため DB 側で atomic に加算する。
     await db
       .update(videos)
       .set({
-        like_count: (target.like_count ?? 0) + 1,
+        like_count: sql<number>`coalesce(${videos.like_count}, 0) + 1`,
         updated_at: now,
       })
       .where(eq(videos.id, videoId));

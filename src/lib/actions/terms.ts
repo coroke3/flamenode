@@ -1,9 +1,10 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { desc, eq } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth/currentUser";
-import { getDatabase } from "@/lib/cloudflare";
+import { getDatabaseAsync } from "@/lib/cloudflare";
 import {
   termsVersions,
   userTosConsents,
@@ -11,11 +12,18 @@ import {
 } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
 
+const FALLBACK_TERMS_VERSION_ID = "fallback-current";
+
 function sanitizeNextPath(next: string | null): string {
   if (!next) return "/dashboard";
   if (!next.startsWith("/")) return "/dashboard";
   if (next.startsWith("//")) return "/dashboard";
   return next;
+}
+
+function revalidateSafePath(next: string): void {
+  const path = next.split(/[?#]/, 1)[0] || "/dashboard";
+  revalidatePath(path);
 }
 
 export async function acceptLatestTerms(formData: FormData): Promise<void> {
@@ -26,7 +34,7 @@ export async function acceptLatestTerms(formData: FormData): Promise<void> {
     redirect(`/entry?next=${encodeURIComponent(next)}`);
   }
 
-  const db = getDatabase();
+  const db = await getDatabaseAsync();
   if (!db) {
     redirect(`/rules?next=${encodeURIComponent(next)}`);
   }
@@ -40,16 +48,13 @@ export async function acceptLatestTerms(formData: FormData): Promise<void> {
       .limit(1)
   )[0];
 
-  if (!latest) {
-    redirect(`/rules?next=${encodeURIComponent(next)}`);
-  }
-
   const now = Math.floor(Date.now() / 1000);
+  const termsVersionId = latest?.id ?? FALLBACK_TERMS_VERSION_ID;
 
   await db.insert(userTosConsents).values({
     id: generateId("tos"),
     user_id: user.id,
-    terms_version_id: latest.id,
+    terms_version_id: termsVersionId,
     consented_at: now,
     consent_context: "entry",
   });
@@ -58,10 +63,13 @@ export async function acceptLatestTerms(formData: FormData): Promise<void> {
     .update(users)
     .set({
       is_tos_accepted: 1,
-      accepted_terms_version_id: latest.id,
+      accepted_terms_version_id: termsVersionId,
       terms_reaccept_required: 0,
     })
     .where(eq(users.id, user.id));
 
+  revalidatePath("/rules");
+  revalidatePath("/dashboard");
+  revalidateSafePath(next);
   redirect(next);
 }

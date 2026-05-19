@@ -10,6 +10,7 @@ import {
   systemSettings,
   users as usersTable,
   videos as videosTable,
+  xAccountLinkRequests as xAccountLinkRequestsTable,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
@@ -33,7 +34,12 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
   let mode: string = "normal";
   let isMaintenance = 0;
   let pendingVideos: { id: string; title: string; created_at: number; display_name: string }[] = [];
-  let pendingXIds: { id: string; x_name: string | null; requested_at: number | null }[] = [];
+  let pendingXIds: {
+    request_id: string;
+    id: string;
+    x_name: string | null;
+    requested_at: number | null;
+  }[] = [];
   let notificationFailedCount = 0;
   let healthWarnCount = 0;
   let securityWarnCount = 0;
@@ -81,8 +87,8 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
           .where(eq(videosTable.status, "pending")),
         db
           .select({ c: sql<number>`COUNT(*)` })
-          .from(xUsersTable)
-          .where(eq(xUsersTable.approval_status, "pending")),
+          .from(xAccountLinkRequestsTable)
+          .where(eq(xAccountLinkRequestsTable.status, "pending")),
         db
           .select({ c: sql<number>`COUNT(*)` })
           .from(videosTable)
@@ -102,13 +108,15 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
           .limit(8),
         db
           .select({
-            id: xUsersTable.id,
-            x_name: xUsersTable.x_name,
-            requested_at: xUsersTable.approval_requested_at,
+            request_id: xAccountLinkRequestsTable.id,
+            id: xAccountLinkRequestsTable.requested_x_id,
+            x_name: usersTable.name,
+            requested_at: xAccountLinkRequestsTable.requested_at,
           })
-          .from(xUsersTable)
-          .where(eq(xUsersTable.approval_status, "pending"))
-          .orderBy(desc(xUsersTable.approval_requested_at))
+          .from(xAccountLinkRequestsTable)
+          .leftJoin(usersTable, eq(usersTable.id, xAccountLinkRequestsTable.discord_user_id))
+          .where(eq(xAccountLinkRequestsTable.status, "pending"))
+          .orderBy(desc(xAccountLinkRequestsTable.requested_at))
           .limit(8),
         db
           .select({ c: sql<number>`COUNT(*)` })
@@ -377,14 +385,14 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
             <thead>
               <tr>
                 <th>X ID</th>
-                <th>名前</th>
+                <th>申請者</th>
                 <th>申請</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {pendingXIds.map((x) => (
-                <tr key={x.id}>
+                <tr key={x.request_id}>
                   <td>@{x.id}</td>
                   <td>{x.x_name ?? "—"}</td>
                   <td className="fn-muted">

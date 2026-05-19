@@ -30,7 +30,22 @@
 .nav {
   display: flex;
   flex-direction: column;
+  gap: 16px;
+}
+
+.navGroup {
+  display: grid;
   gap: 2px;
+}
+
+.navGroupTitle {
+  margin: 0 0 6px;
+  padding: 0 10px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
 .navLink {
@@ -69,6 +84,14 @@
     flex-direction: row;
     overflow-x: auto;
     padding-bottom: 4px;
+  }
+
+  .navGroup {
+    display: contents;
+  }
+
+  .navGroupTitle {
+    display: none;
   }
 
   .navLink {

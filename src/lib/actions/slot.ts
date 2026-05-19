@@ -8,7 +8,7 @@ import {
   type WriteGuardDenyReason,
 } from "@/lib/auth/writeGuard";
 import { getDatabase } from "@/lib/cloudflare";
-import { events, historyLogs, slots } from "@/lib/db/schema";
+import { events, historyLogs, slots, xUsers } from "@/lib/db/schema";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { generateId } from "@/lib/utils/id";
 
@@ -218,9 +218,31 @@ export async function releaseOwnSlot(
     await db.select().from(slots).where(eq(slots.id, slotId)).limit(1)
   )[0];
   if (!slotRow) return { ok: false, message: "スロットが見つかりません。" };
-  const isOwner = slotRow.x_user_id
-    ? slotRow.x_user_id === activeX
-    : slotRow.discord_user_id === user.id;
+  // slot owner 判定: 現在 active な X ID 一致が原則だが、確保時の X が linked された
+  // ままで active から外れているだけのケースを救済する。
+  // xUsers.linked_discord_user_id === user.id なら自分の枠とみなす。
+  let isOwner = false;
+  if (slotRow.x_user_id) {
+    if (slotRow.x_user_id === activeX) {
+      isOwner = true;
+    } else {
+      const linkedXOwner = (
+        await db
+          .select({ id: xUsers.id })
+          .from(xUsers)
+          .where(
+            and(
+              eq(xUsers.id, slotRow.x_user_id),
+              eq(xUsers.linked_discord_user_id, user.id),
+            )!,
+          )
+          .limit(1)
+      )[0];
+      if (linkedXOwner) isOwner = true;
+    }
+  } else {
+    isOwner = slotRow.discord_user_id === user.id;
+  }
   if (!isOwner) {
     return { ok: false, message: "自分が確保した枠のみ解放できます。" };
   }
@@ -295,6 +317,15 @@ export async function releaseOwnSlot(
   }
 
   const targetIdx = groupRows.findIndex((r) => r.id === slotId);
+  if (targetIdx < 0) {
+    // 直前で slotRow.reservation_group_id が一致しているはずだが、レース等で
+    // グループから外れていた場合 split 計算が暴発するため明示的に拒否する。
+    return {
+      ok: false,
+      message:
+        "スロットグループの整合性に問題があります。管理者に連絡してください。",
+    };
+  }
   const isEdge =
     targetIdx === 0 || targetIdx === groupRows.length - 1 || groupRows.length <= 2;
 

@@ -362,6 +362,17 @@ export const videos = sqliteTable("videos", {
   ownerIdx: index("videos_owner_idx").on(t.owner_discord_user_id),
   creatorIdx: index("videos_creator_idx").on(t.creator_id),
   youtubeIdIdx: index("videos_youtube_id_idx").on(t.youtube_video_id),
+  // posting/youtube-id-and-active-x:
+  //   同時投稿レース対策。createFreeVideo / submitSlotVideo / updateVideo は
+  //   SELECT で重複確認してから insert/update しているが、その間に他クライアントが
+  //   同じ youtube_video_id を投稿し得る。voided / 削除済みは別作品扱いなので
+  //   partial unique index で active な行のみ制約する。
+  //   migration: 0007_dapper_slot_events.sql
+  youtubeIdActiveUniq: uniqueIndex("videos_youtube_id_active_uniq")
+    .on(t.youtube_video_id)
+    .where(
+      sql`youtube_video_id IS NOT NULL AND youtube_video_id <> '' AND is_deleted = 0 AND status <> 'voided'`,
+    ),
 }));
 
 export const videoEvents = sqliteTable(

@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getDatabase, withDatabase } from "@/lib/cloudflare";
 import { customPages, xUsers } from "@/lib/db/schema";
 import { normalizeXId } from "@/lib/utils/xid";
@@ -20,13 +20,13 @@ export default async function PortfolioPage({
 }: Props): Promise<React.ReactElement> {
   const id = normalizeXId((await params).id);
   const bundle = await withDatabase(async (db) => {
-    const x = (await db.select().from(xUsers).where(eq(xUsers.id, id)).limit(1))[0];
+    const x = (await db.select().from(xUsers).where(sql`lower(${xUsers.id}) = ${id}`).limit(1))[0];
     if (!x) return null;
     const page = (
       await db
         .select()
         .from(customPages)
-        .where(and(eq(customPages.x_user_id, id), eq(customPages.is_published, 1))!)
+        .where(and(sql`lower(${customPages.x_user_id}) = ${id}`, eq(customPages.is_published, 1))!)
         .limit(1)
     )[0];
     if (!page) return null;

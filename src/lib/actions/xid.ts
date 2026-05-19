@@ -1,4 +1,4 @@
-"use server";
+﻿"use server";
 
 import { revalidatePath } from "next/cache";
 import { and, desc, eq, isNotNull, or, sql } from "drizzle-orm";
@@ -21,6 +21,10 @@ export interface XIdActionResult {
   message?: string;
 }
 
+function xUserIdMatches(xUserId: string) {
+  return sql`lower(${xUsers.id}) = ${normalizeXId(xUserId)}`;
+}
+
 export async function setActiveXId(
   formData: FormData,
 ): Promise<XIdActionResult> {
@@ -35,7 +39,7 @@ export async function setActiveXId(
   if (!db) return { ok: false, message: "DB に接続できません。" };
 
   const xRow = (
-    await db.select().from(xUsers).where(eq(xUsers.id, xUserId)).limit(1)
+    await db.select().from(xUsers).where(xUserIdMatches(xUserId)).limit(1)
   )[0];
   if (!xRow) return { ok: false, message: "X ID が見つかりません。" };
   if (xRow.linked_discord_user_id !== u.id) {
@@ -97,7 +101,7 @@ export async function requestXIdLink(
   if (!db) return { ok: false, message: "DB に接続できません。" };
 
   const existingUser = (
-    await db.select().from(xUsers).where(eq(xUsers.id, requestedXId)).limit(1)
+    await db.select().from(xUsers).where(xUserIdMatches(requestedXId)).limit(1)
   )[0];
   if (existingUser?.linked_discord_user_id === u.id) {
     return {
@@ -122,7 +126,7 @@ export async function requestXIdLink(
       .where(
         and(
           eq(xAccountLinkRequests.discord_user_id, u.id),
-          eq(xAccountLinkRequests.requested_x_id, requestedXId),
+          sql`lower(${xAccountLinkRequests.requested_x_id}) = ${requestedXId}`,
           eq(xAccountLinkRequests.status, "pending"),
         )!,
       )
@@ -183,7 +187,7 @@ export async function updateXIdProfile(
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
   const row = (
-    await db.select().from(xUsers).where(eq(xUsers.id, xUserId)).limit(1)
+    await db.select().from(xUsers).where(xUserIdMatches(xUserId)).limit(1)
   )[0];
   if (!row || row.linked_discord_user_id !== u.id) {
     return { ok: false, message: "この X ID を編集する権限がありません。" };
@@ -197,7 +201,7 @@ export async function updateXIdProfile(
       youtube_channel_url: youtubeChannelUrl || null,
       other_social_links: otherSocialLinks || null,
     })
-    .where(eq(xUsers.id, xUserId));
+    .where(xUserIdMatches(xUserId));
 
   const now = Math.floor(Date.now() / 1000);
   await db.insert(historyLogs).values({
@@ -225,7 +229,7 @@ export async function enablePortfolio(
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
   const row = (
-    await db.select().from(xUsers).where(eq(xUsers.id, xUserId)).limit(1)
+    await db.select().from(xUsers).where(xUserIdMatches(xUserId)).limit(1)
   )[0];
   if (!row || row.linked_discord_user_id !== u.id) {
     return { ok: false, message: "この X ID のポートフォリオを編集できません。" };
@@ -270,7 +274,7 @@ export async function deleteLinkedXId(
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
   const row = (
-    await db.select().from(xUsers).where(eq(xUsers.id, xUserId)).limit(1)
+    await db.select().from(xUsers).where(xUserIdMatches(xUserId)).limit(1)
   )[0];
   if (!row || row.linked_discord_user_id !== u.id) {
     return { ok: false, message: "この X ID の連携を削除できません。" };
@@ -278,11 +282,11 @@ export async function deleteLinkedXId(
   await db
     .update(xUsers)
     .set({ linked_discord_user_id: null, approval_status: "pending" })
-    .where(eq(xUsers.id, xUserId));
+    .where(xUserIdMatches(xUserId));
   await db
     .update(users)
     .set({ active_x_user_id: null })
-    .where(and(eq(users.id, u.id), eq(users.active_x_user_id, xUserId))!);
+    .where(and(eq(users.id, u.id), sql`lower(${users.active_x_user_id}) = ${xUserId}`)!);
   const now = Math.floor(Date.now() / 1000);
   await db.insert(historyLogs).values({
     table_name: "x_users",
@@ -314,7 +318,7 @@ export async function setXIdIcon(
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
   const row = (
-    await db.select().from(xUsers).where(eq(xUsers.id, xUserId)).limit(1)
+    await db.select().from(xUsers).where(xUserIdMatches(xUserId)).limit(1)
   )[0];
   if (!row || row.linked_discord_user_id !== u.id) {
     return { ok: false, message: "この X ID を編集する権限がありません。" };
@@ -325,7 +329,7 @@ export async function setXIdIcon(
   const iconRows = await db
     .select({ icon_url: xUserIcons.icon_url })
     .from(xUserIcons)
-    .where(eq(xUserIcons.x_user_id, xUserId))
+    .where(sql`lower(${xUserIcons.x_user_id}) = ${xUserId}`)
     .orderBy(desc(xUserIcons.created_at))
     .limit(40);
   iconRows.forEach((r) => candidates.add(r.icon_url));
@@ -335,7 +339,10 @@ export async function setXIdIcon(
     .from(videos)
     .where(
       and(
-        or(eq(videos.creator_id, xUserId), eq(videos.contact_x_id, xUserId))!,
+        or(
+          sql`lower(${videos.creator_id}) = ${xUserId}`,
+          sql`lower(${videos.contact_x_id}) = ${xUserId}`,
+        )!,
         isNotNull(videos.icon_url),
       )!,
     )
@@ -352,7 +359,7 @@ export async function setXIdIcon(
   await db
     .update(xUsers)
     .set({ icon_url: iconUrl })
-    .where(eq(xUsers.id, xUserId));
+    .where(xUserIdMatches(xUserId));
 
   const now = Math.floor(Date.now() / 1000);
   await db.insert(historyLogs).values({
@@ -388,7 +395,7 @@ export async function uploadXIdIcon(
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
   const row = (
-    await db.select().from(xUsers).where(eq(xUsers.id, xUserId)).limit(1)
+    await db.select().from(xUsers).where(xUserIdMatches(xUserId)).limit(1)
   )[0];
   if (!row || row.linked_discord_user_id !== u.id) {
     return { ok: false, message: "この X ID を編集する権限がありません。" };
@@ -408,7 +415,7 @@ export async function uploadXIdIcon(
     .from(xUserIcons)
     .where(
       and(
-        eq(xUserIcons.x_user_id, xUserId),
+        sql`lower(${xUserIcons.x_user_id}) = ${xUserId}`,
         eq(xUserIcons.source_type, "manual"),
       )!,
     );
@@ -445,7 +452,7 @@ export async function uploadXIdIcon(
   await db
     .update(xUsers)
     .set({ icon_url: iconUrl })
-    .where(eq(xUsers.id, xUserId));
+    .where(xUserIdMatches(xUserId));
 
   await db.insert(historyLogs).values({
     table_name: "x_users",

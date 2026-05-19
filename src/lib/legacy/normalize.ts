@@ -29,7 +29,7 @@ export function normalizeXId(raw: string | null | undefined): string | null {
   if (!s) return null;
   if (!/^[A-Za-z0-9_]+$/.test(s)) return null;
   if (s.length > X_ID_MAX_LEN) s = s.slice(0, X_ID_MAX_LEN);
-  return s;
+  return s.toLowerCase();
 }
 
 export function splitCsvString(s: string | null | undefined): string[] {

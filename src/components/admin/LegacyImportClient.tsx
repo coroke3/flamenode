@@ -121,9 +121,10 @@ export function LegacyImportClient(): React.ReactElement {
   const addFiles = React.useCallback(async (list: FileList | File[]) => {
     const arr = Array.from(list).filter(
       (f) =>
-        /\.(json|csv)$/i.test(f.name) ||
+        /\.(json|csv|tsv)$/i.test(f.name) ||
         f.type.includes("json") ||
-        f.type.includes("csv"),
+        f.type.includes("csv") ||
+        f.type.includes("tab-separated-values"),
     );
     const next: PendingFile[] = [];
     for (const f of arr) {
@@ -250,7 +251,7 @@ export function LegacyImportClient(): React.ReactElement {
         <input
           ref={inputRef}
           type="file"
-          accept="application/json,text/csv,.json,.csv"
+          accept="application/json,text/csv,text/tab-separated-values,.json,.csv,.tsv"
           multiple
           hidden
           onChange={(e) => {

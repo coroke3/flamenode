@@ -1,7 +1,7 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq, isNull, like, or } from "drizzle-orm";
+import { and, desc, eq, isNull, like, or, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   users as usersTable,
@@ -80,14 +80,18 @@ export default async function AdminUsersPage({
   };
   if (db) {
     try {
-      const term = `%${q}%`;
+      const rawQuery = q.trim();
+      const term = `%${rawQuery}%`;
+      const lowerTerm = `%${rawQuery.toLowerCase()}%`;
+      const normalizedXQuery = normalizeXId(rawQuery);
+      const xTerm = `%${(normalizedXQuery || rawQuery).toLowerCase()}%`;
       const queryFilter = q
         ? or(
-            like(usersTable.name, term),
-            like(usersTable.email, term),
+            like(sql<string>`lower(${usersTable.name})`, lowerTerm),
+            like(sql<string>`lower(${usersTable.email})`, lowerTerm),
             eq(usersTable.id, q),
-            like(xUsersTable.id, term),
-            like(xUsersTable.x_name, term),
+            like(sql<string>`lower(${xUsersTable.id})`, xTerm),
+            like(sql<string>`lower(${xUsersTable.x_name})`, lowerTerm),
           )
         : undefined;
       const statusFilter =
@@ -122,7 +126,10 @@ export default async function AdminUsersPage({
           created_at: usersTable.created_at,
         })
         .from(usersTable)
-        .leftJoin(xUsersTable, eq(xUsersTable.id, usersTable.active_x_user_id))
+        .leftJoin(
+          xUsersTable,
+          sql`lower(${xUsersTable.id}) = lower(${usersTable.active_x_user_id})`,
+        )
         .where(where)
         .orderBy(desc(usersTable.created_at))
         .limit(80);
@@ -141,9 +148,9 @@ export default async function AdminUsersPage({
 
       const xFilter = q
         ? or(
-            like(xUsersTable.id, term),
-            like(xUsersTable.x_name, term),
-            like(usersTable.name, term),
+            like(sql<string>`lower(${xUsersTable.id})`, xTerm),
+            like(sql<string>`lower(${xUsersTable.x_name})`, lowerTerm),
+            like(sql<string>`lower(${usersTable.name})`, lowerTerm),
             eq(xUsersTable.linked_discord_user_id, q),
           )
         : undefined;
@@ -175,9 +182,9 @@ export default async function AdminUsersPage({
 
       const requestFilter = q
         ? or(
-            like(xAccountLinkRequests.requested_x_id, term),
+            like(sql<string>`lower(${xAccountLinkRequests.requested_x_id})`, xTerm),
             like(xAccountLinkRequests.discord_user_id, term),
-            like(usersTable.name, term),
+            like(sql<string>`lower(${usersTable.name})`, lowerTerm),
           )
         : undefined;
       linkRows = await db
@@ -521,9 +528,9 @@ function XIdTable({
             </td>
             <td>
               <span className={`fn-badge ${x.approval_status === "approved" ? "fn-badge-accent" : x.approval_status === "rejected" ? "fn-badge-danger" : "fn-badge-warning"}`}>
-                {x.approval_status ?? "pending"}
+                {approvalStatusLabel(x.approval_status)}
               </span>
-              {x.active_holder_id === x.id ? (
+              {normalizeXId(x.active_holder_id) === normalizeXId(x.id) ? (
                 <span className="fn-badge fn-badge-soft" style={{ marginLeft: 6 }}>active</span>
               ) : null}
             </td>
@@ -544,6 +551,14 @@ function XIdTable({
       </tbody>
     </table>
   );
+}
+
+function approvalStatusLabel(
+  status: AdminXUserRow["approval_status"] | LinkRequestRow["status"],
+): string {
+  if (status === "approved") return "承認済み";
+  if (status === "rejected") return "却下";
+  return "承認待ち";
 }
 
 function LinkRequestTable({ rows }: { rows: LinkRequestRow[] }): React.ReactElement {
@@ -579,7 +594,7 @@ function LinkRequestTable({ rows }: { rows: LinkRequestRow[] }): React.ReactElem
             <td>{r.link_type}</td>
             <td>
               <span className={`fn-badge ${r.status === "approved" ? "fn-badge-accent" : r.status === "rejected" ? "fn-badge-danger" : "fn-badge-warning"}`}>
-                {r.status ?? "pending"}
+                {approvalStatusLabel(r.status)}
               </span>
             </td>
             <td>{formatRelative(r.requested_at)}</td>

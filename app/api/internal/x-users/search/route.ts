@@ -4,6 +4,7 @@ import type { SQL } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import { xUsers } from "@/lib/db/schema";
+import { normalizeXId } from "@/lib/utils/xid";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const url = new URL(request.url);
   const rawQ = (url.searchParams.get("q") ?? "").trim().slice(0, MAX_QUERY_LENGTH);
+  const normalizedQ = normalizeXId(rawQ);
   const onlyApproved = url.searchParams.get("onlyApproved") === "1";
   const limitRaw = Number(url.searchParams.get("limit") ?? "");
   const limit =
@@ -52,9 +54,13 @@ export async function GET(request: Request): Promise<Response> {
   // SQL ワイルドカード (% _) はそのまま使えるよう trim のみ。LIKE 検索の前後に % を付与。
   const conds: SQL<unknown>[] = [];
   if (rawQ) {
-    const term = `%${rawQ}%`;
+    const term = `%${rawQ.toLowerCase()}%`;
+    const xTerm = `%${(normalizedQ || rawQ).toLowerCase()}%`;
     conds.push(
-      or(like(xUsers.id, term), like(xUsers.x_name, term))!,
+      or(
+        like(sql<string>`lower(${xUsers.id})`, xTerm),
+        like(sql<string>`lower(${xUsers.x_name})`, term),
+      )!,
     );
   }
   if (onlyApproved) {

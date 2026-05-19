@@ -10,7 +10,7 @@
  * `{ events: [...], videos: [...] }` のラッパ形式や、種別混在配列もサポートする。
  */
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   events,
@@ -208,8 +208,8 @@ export async function analyzeLegacyPayload(
       const rows = await db
         .select({ id: xUsers.id })
         .from(xUsers)
-        .where(inArray(xUsers.id, batch));
-      rows.forEach((r) => existingXIds.add(r.id));
+        .where(inArray(sql<string>`lower(${xUsers.id})`, batch));
+      rows.forEach((r) => existingXIds.add(r.id.toLowerCase()));
     }
   }
 
@@ -339,8 +339,8 @@ export async function applyLegacyImport(
     const existRows = await db
       .select({ id: xUsers.id })
       .from(xUsers)
-      .where(inArray(xUsers.id, ids));
-    const existSet = new Set(existRows.map((r) => r.id));
+      .where(inArray(sql<string>`lower(${xUsers.id})`, ids));
+    const existSet = new Set(existRows.map((r) => r.id.toLowerCase()));
     for (const x of chunk) {
       try {
         if (existSet.has(x.id)) {
@@ -350,7 +350,10 @@ export async function applyLegacyImport(
             if (x.youtube_channel_url) {
               patch.youtube_channel_url = x.youtube_channel_url;
             }
-            await db.update(xUsers).set(patch).where(eq(xUsers.id, x.id));
+            await db
+              .update(xUsers)
+              .set(patch)
+              .where(sql`lower(${xUsers.id}) = ${x.id}`);
             counts.xUsers.update += 1;
           }
         } else {

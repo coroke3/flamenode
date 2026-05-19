@@ -64,7 +64,7 @@ export function normalizeXIdLegacy(
   if (!s) return null;
   if (!/^[A-Za-z0-9_]+$/.test(s)) return null;
   if (s.length > X_ID_MAX_LEN) s = s.slice(0, X_ID_MAX_LEN);
-  return s;
+  return s.toLowerCase();
 }
 
 // Match split chars: ASCII comma and JP comma (U+3001)

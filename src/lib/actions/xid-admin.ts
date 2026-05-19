@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import {
@@ -24,6 +24,10 @@ async function getAdminUserId(): Promise<string | null> {
   const u = session?.user as { id?: string; role?: string } | undefined;
   if (!u?.id || u.role !== "admin") return null;
   return u.id;
+}
+
+function xUserIdMatches(xUserId: string) {
+  return sql`lower(${xUsers.id}) = ${normalizeXId(xUserId)}`;
 }
 
 /**
@@ -71,7 +75,7 @@ export async function approveXIdLinkRequest(
       return { ok: false, message: "alias 申請には target_x_user_id が必要です。" };
     }
     const targetRow = (
-      await db.select().from(xUsers).where(eq(xUsers.id, targetXId)).limit(1)
+      await db.select().from(xUsers).where(xUserIdMatches(targetXId)).limit(1)
     )[0];
     if (!targetRow) {
       return { ok: false, message: "target_x_user_id が見つかりません。" };
@@ -143,7 +147,7 @@ export async function approveXIdLinkRequest(
   // link_type === "new": 既存実装どおり (x_users 行作成 or 既存行へ linked_discord_user_id 更新)
   // ============================
   const existing = (
-    await db.select().from(xUsers).where(eq(xUsers.id, xid)).limit(1)
+    await db.select().from(xUsers).where(xUserIdMatches(xid)).limit(1)
   )[0];
   if (
     existing?.linked_discord_user_id &&
@@ -171,7 +175,7 @@ export async function approveXIdLinkRequest(
         approval_status: "approved",
         approval_requested_at: now,
       })
-      .where(eq(xUsers.id, xid));
+      .where(xUserIdMatches(xid));
   }
 
   await db
