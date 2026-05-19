@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { createChapter } from "@/lib/actions/chapter";
@@ -8,8 +9,14 @@ import { requestCurrentTime } from "./playerBridge";
 
 interface ChapterComposerProps {
   videoId: string;
-  /** active_x_user_id が承認済か。false なら disabled ボタンと案内のみ。 */
+  /** active_x_user_id が承認済か。false なら disabled 案内のみ。 */
   canPost: boolean;
+  /**
+   * `canPost = false` のときに「X ID設定へ」リンクとして使う URL。
+   * 未指定なら CTA は出さず案内文だけ表示する。
+   * 呼び出し側で `/dashboard/settings?next=...` を組み立てて渡す。
+   */
+  settingsHref?: string;
 }
 
 function parseTimeInput(raw: string): number {
@@ -44,6 +51,7 @@ function formatTime(sec: number): string {
 export function ChapterComposer({
   videoId,
   canPost,
+  settingsHref,
 }: ChapterComposerProps): React.ReactElement {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
@@ -103,10 +111,24 @@ export function ChapterComposer({
           padding: 12,
           fontSize: 12,
           color: "var(--text-muted)",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          flexWrap: "wrap",
         }}
       >
-        <Icon name="info" size={12} aria-hidden /> 承認済み X ID を選択すると
-        チャプターを投稿できます。
+        <span>
+          <Icon name="info" size={12} aria-hidden /> 承認済み X ID を選択すると
+          チャプターを投稿できます。
+        </span>
+        {settingsHref ? (
+          <Link
+            href={settingsHref}
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+          >
+            X ID設定へ
+          </Link>
+        ) : null}
       </section>
     );
   }

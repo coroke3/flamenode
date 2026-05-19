@@ -100,11 +100,17 @@ export function XIdLinkForm(): React.ReactElement {
   );
 }
 
-/** 承認済み X ID をアクティブにする (Server Action `setActiveXId`)。 */
+/**
+ * 承認済み X ID をアクティブにする (Server Action `setActiveXId`)。
+ * `next` が指定されている場合は切替成功後にそのパスへ自動遷移する
+ * (例: 投稿フォーム経由で設定画面に来たユーザーをそのまま投稿画面へ戻す)。
+ */
 export function SetActiveXButton({
   xUserId,
+  next,
 }: {
   xUserId: string;
+  next?: string | null;
 }): React.ReactElement {
   const router = useRouter();
   const [pending, startTransition] = React.useTransition();
@@ -116,8 +122,12 @@ export function SetActiveXButton({
     fd.set("x_user_id", xUserId);
     startTransition(async () => {
       const r = await setActiveXId(fd);
-      if (r.ok) router.refresh();
-      else setErrMsg(r.message ?? "切替に失敗しました。");
+      if (r.ok) {
+        if (next) router.push(next);
+        else router.refresh();
+      } else {
+        setErrMsg(r.message ?? "切替に失敗しました。");
+      }
     });
   };
 

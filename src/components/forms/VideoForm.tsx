@@ -129,6 +129,22 @@ export function VideoForm({
   const [isCollab, setIsCollab] = React.useState(!!initial.is_collab);
   const [pending, startTransition] = React.useTransition();
   const [result, setResult] = React.useState<VideoActionResult | null>(null);
+  // 未保存変更がある状態でブラウザを離れようとしたときに警告を出すための dirty 判定。
+  // 入力長文 (紹介文・メンバー編集・アイコン選択) を持つフォームなので、
+  // 誤ってリロード / タブ閉じが起きると入力が失われる事故を避ける。
+  const [dirty, setDirty] = React.useState(false);
+
+  React.useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      // 送信中・送信完了直後・dirty でない場合は警告しない。
+      if (!dirty || pending) return;
+      e.preventDefault();
+      // Chrome 系では returnValue を空文字でも default 警告を出す。
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [dirty, pending]);
 
   const normalizedInitialXId = normalizeXId(initial.contact_x_id || activeXId || "");
   const normalizedActiveXId = normalizeXId(activeXId || "");
@@ -201,12 +217,18 @@ export function VideoForm({
             : createFreeVideo;
       const r = await action(formData);
       if (!r.ok && redirectForGuardReason(r.reason)) {
+        // リダイレクトで離脱するので dirty 警告は不要にする。
+        setDirty(false);
         return;
       }
       setResult(r);
-      if (r.ok && r.videoId && mode !== "edit") {
-        router.push(`/dashboard/edit/${r.videoId}`);
+      if (r.ok) {
+        // 保存成功時は dirty を解除し、編集画面遷移時の警告を抑制する。
+        setDirty(false);
       }
+      // 新規投稿後は自動遷移をやめて成功 CTA (公開ページ / イベント / 編集を続ける) を出す。
+      // 「投稿できた → 公開ページ確認したい」「→ イベントに戻りたい」を選べるようにする。
+      // 編集モードはその場に留まり、router.refresh で最新値を反映する。
       if (r.ok && mode === "edit") {
         router.refresh();
       }
@@ -214,14 +236,20 @@ export function VideoForm({
   };
 
   return (
-    <form className={styles.form} onSubmit={handleSubmit}>
+    <form
+      className={styles.form}
+      onSubmit={handleSubmit}
+      onChange={() => {
+        if (!dirty) setDirty(true);
+      }}
+    >
       {slotId ? <input type="hidden" name="slot_id" value={slotId} /> : null}
       {videoId ? <input type="hidden" name="video_id" value={videoId} /> : null}
       <input type="hidden" name="mode" value={mode} />
       {softwareSuggestions.length > 0 ? (
         <datalist id="used-software-suggestions">
-          {softwareSuggestions.map((name) => (
-            <option key={name} value={name} />
+          {softwareSuggestions.map((name, index) => (
+            <option key={`${name}-software-${index}`} value={name} />
           ))}
         </datalist>
       ) : null}
@@ -288,8 +316,11 @@ export function VideoForm({
                     required
                     disabled={fieldDisabled("submitter.contact_x_id")}
                   >
-                    {xIdOptions.map((opt) => (
-                      <option key={opt.id} value={normalizeXId(opt.id)}>
+                    {xIdOptions.map((opt, index) => (
+                      <option
+                        key={`${opt.id}-xid-option-${index}`}
+                        value={normalizeXId(opt.id)}
+                      >
                         @{opt.id} ({opt.x_name})
                       </option>
                     ))}
@@ -680,9 +711,42 @@ export function VideoForm({
             background: "var(--accent-primary-soft)",
             color: "var(--text-primary)",
             fontSize: 13,
+            display: "grid",
+            gap: 10,
           }}
         >
-          <Icon name="check" size={13} aria-hidden /> 提出が完了しました。続けて詳細編集画面へ移動します。
+          <div>
+            <Icon name="check" size={13} aria-hidden />{" "}
+            {mode === "edit"
+              ? "保存しました。"
+              : "提出が完了しました。続けて以下から進めてください。"}
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {result.youtubeVideoId || result.videoId ? (
+              <Link
+                href={`/${result.youtubeVideoId ?? result.videoId}`}
+                className="fn-btn fn-btn-primary fn-btn-sm"
+              >
+                <Icon name="external" size={12} aria-hidden /> 公開ページを見る
+              </Link>
+            ) : null}
+            {result.eventId ? (
+              <Link
+                href={`/event/${result.eventId}`}
+                className="fn-btn fn-btn-ghost fn-btn-sm"
+              >
+                <Icon name="calendar" size={12} aria-hidden /> イベントへ戻る
+              </Link>
+            ) : null}
+            {mode !== "edit" && result.videoId ? (
+              <Link
+                href={`/dashboard/edit/${result.videoId}`}
+                className="fn-btn fn-btn-ghost fn-btn-sm"
+              >
+                <Icon name="edit" size={12} aria-hidden /> 編集を続ける
+              </Link>
+            ) : null}
+          </div>
         </div>
       ) : null}
       {submitBlockedReason ? (
@@ -705,7 +769,6 @@ export function VideoForm({
         </div>
       ) : null}
       <div className={styles.actions}>
-        
         <button
           type="submit"
           className="fn-btn fn-btn-primary"

@@ -2,6 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { getApprovedXIds } from "@/lib/auth/ownership";
 import styles from "./page.module.css";
 import { getDatabase } from "@/lib/cloudflare";
 import {
@@ -55,9 +56,13 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
         .from(xUsersTable)
         .where(eq(xUsersTable.linked_discord_user_id, user.id));
 
-      // 「自分の作品」= 承認済み X ID の creator_id に一致する作品のみ。
-      // owner_discord_user_id 単独一致は legacy import 混入を避けるため判定対象外にする。
-      if (activeX) {
+      // 「自分の作品」「自分のチャプター」は active X ID 単体ではなく、
+      // 承認済み X ID 全件で集約する。複数 X ID を連携している場合に、
+      // Active を切り替えた瞬間に「前の作品が消えた」ように見える事故を避ける。
+      // 投稿主体 (creator_id) の厳密性は writeGuard 側で担保されているので、
+      // ここの表示は「自分の資産の全体ビュー」として広く拾う。
+      const approvedXIds = await getApprovedXIds(db, user.id);
+      if (approvedXIds.length > 0) {
         myVideos = (await db
           .select({
             id: videosTable.id,
@@ -76,7 +81,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id))
           .where(
             and(
-              eq(videosTable.creator_id, activeX),
+              inArray(videosTable.creator_id, approvedXIds),
               eq(videosTable.is_deleted, 0),
             )!,
           )
@@ -95,7 +100,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           })
           .from(videoChaptersTable)
           .leftJoin(videosTable, eq(videosTable.id, videoChaptersTable.video_id))
-          .where(eq(videoChaptersTable.x_user_id, activeX))
+          .where(inArray(videoChaptersTable.x_user_id, approvedXIds))
           .orderBy(desc(videoChaptersTable.created_at))
           .limit(80);
       }
@@ -129,8 +134,8 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
         mySlotEvent = ev[0] ?? null;
       }
 
-      // 集計
-      if (activeX) {
+      // 集計 (承認済み X ID 全件横断)
+      if (approvedXIds.length > 0) {
         const aggRows = await db
           .select({
             likes: sql<number>`COALESCE(SUM(${videosTable.like_count}),0)`,
@@ -141,7 +146,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           .from(videosTable)
           .where(
             and(
-              eq(videosTable.creator_id, activeX),
+              inArray(videosTable.creator_id, approvedXIds),
               eq(videosTable.is_deleted, 0),
             )!,
           );

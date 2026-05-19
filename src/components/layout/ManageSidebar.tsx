@@ -1,9 +1,9 @@
 import * as React from "react";
 import Link from "next/link";
-import { eq } from "drizzle-orm";
 import { inArray } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
+import { getApprovedXIds } from "@/lib/auth/ownership";
 import {
   events as eventsTable,
   eventEditors as eventEditorsTable,
@@ -12,27 +12,45 @@ import { Icon } from "@/components/ui/Icon";
 
 /**
  * /manage 配下のクイックナビ。担当イベント一覧を左サイドに表示する。
- * 該当イベントが無い (運営者でない) 場合は何も描画しない。
+ *
+ * 担当判定は user.active_x_user_id 単体ではなく、Discord ユーザーに紐づく
+ * 承認済み X ID 全件 (`getApprovedXIds`) で `event_editors.x_user_id` を一致させる。
+ *
+ * これにより、運営権限を持つ X ID が active になっていない場合や、Discord に
+ * 複数の運営 X ID が紐づいている場合でも、サイドバーで担当イベントを確認できる。
+ * (旧コードは active X 不一致で空表示になり、ManageLayout が入場を許可しても
+ *  サイドバーが空、という権限まわりの UX 不整合が起きていた)
  */
 export async function ManageSidebar(): Promise<React.ReactElement | null> {
   const u = await getCurrentUser();
   if (!u) return null;
   const db = getDatabase();
   if (!db) return null;
-  const activeX = u.active_x_user_id;
-  if (!activeX) return null;
+
+  const approvedXIds = await getApprovedXIds(db, u.id);
+  if (approvedXIds.length === 0) return null;
 
   const editorRows = await db
-    .select({ event_id: eventEditorsTable.event_id })
+    .select({
+      event_id: eventEditorsTable.event_id,
+      x_user_id: eventEditorsTable.x_user_id,
+    })
     .from(eventEditorsTable)
-    .where(eq(eventEditorsTable.x_user_id, activeX));
-  const eventIds = editorRows.map((r) => r.event_id);
+    .where(inArray(eventEditorsTable.x_user_id, approvedXIds));
+  const eventIds = Array.from(new Set(editorRows.map((r) => r.event_id)));
   if (eventIds.length === 0) return null;
 
   const events = await db
     .select({ id: eventsTable.id, title: eventsTable.title })
     .from(eventsTable)
     .where(inArray(eventsTable.id, eventIds));
+
+  // 運営権限のある X ID と現在の Active X ID がズレていないか確認する。
+  // ズレている場合は「投稿主体 = Active X ID」「運営主体 = 承認済み X ID のどれか」が
+  // 不一致なので、サイドバー上部に注意書きを出す。
+  const activeX = u.active_x_user_id;
+  const editorXIds = new Set(editorRows.map((r) => r.x_user_id));
+  const activeMatchesEditor = activeX ? editorXIds.has(activeX) : false;
 
   return (
     <aside
@@ -61,6 +79,24 @@ export async function ManageSidebar(): Promise<React.ReactElement | null> {
       >
         MANAGE
       </p>
+      {!activeMatchesEditor ? (
+        <p
+          style={{
+            margin: "0 0 8px",
+            padding: "6px 8px",
+            fontSize: 11,
+            color: "var(--text-secondary)",
+            background: "var(--accent-warning-soft, rgba(255,200,0,0.08))",
+            border: "1px solid var(--accent-warning, #c08a00)",
+            borderRadius: "var(--radius-sm)",
+            lineHeight: 1.4,
+          }}
+        >
+          運営操作は可能ですが、投稿・表示主体は現在の Active X ID
+          {activeX ? ` (@${activeX})` : ""}
+          に依存します。
+        </p>
+      ) : null}
       <nav
         style={{
           display: "flex",

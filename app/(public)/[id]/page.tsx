@@ -315,19 +315,53 @@ export default async function VideoDetailPage({
             )}
             {xProfileLink}
             <div className={styles.authorActions}>
-              <InteractionButton
-                videoId={video.id}
-                kind="like"
-                initialActive={likeActive}
-                count={video.like_count ?? 0}
-                canInteract={!!viewerActiveX}
-              />
-              <InteractionButton
-                videoId={video.id}
-                kind="bookmark"
-                initialActive={bookmarkActive}
-                canInteract={!!viewerActiveX}
-              />
+              {(() => {
+                // いいね・セーブの実行可否はサーバー側 writeGuard と合わせて
+                // viewerXApproved (承認済み Active X ID) を基準にする。
+                // 未ログイン・未選択・未承認それぞれに合わせた CTA を出して、
+                // 「押せるけど失敗する」を避ける。
+                const currentPath = `/${rawId}`;
+                const interactionGate: {
+                  canInteract: boolean;
+                  disabledReason?: string;
+                  actionHref?: string;
+                } = !viewerUser?.id
+                  ? {
+                      canInteract: false,
+                      disabledReason: "ログインするといいねできます。",
+                      actionHref: `/entry?next=${encodeURIComponent(currentPath)}`,
+                    }
+                  : !viewerActiveX
+                    ? {
+                        canInteract: false,
+                        disabledReason: "X IDを選択するといいねできます。",
+                        actionHref: `/dashboard/settings?next=${encodeURIComponent(currentPath)}`,
+                      }
+                    : !viewerXApproved
+                      ? {
+                          canInteract: false,
+                          disabledReason: "承認済みX IDが必要です。",
+                          actionHref: `/dashboard/settings?next=${encodeURIComponent(currentPath)}`,
+                        }
+                      : { canInteract: true };
+                return (
+                  <>
+                    <InteractionButton
+                      videoId={video.id}
+                      kind="like"
+                      initialActive={likeActive}
+                      count={video.like_count ?? 0}
+                      {...interactionGate}
+                    />
+                    <InteractionButton
+                      videoId={video.id}
+                      kind="bookmark"
+                      initialActive={bookmarkActive}
+                      {...interactionGate}
+                    />
+                  </>
+                );
+              })()}
             </div>
           </div>
 
@@ -387,8 +421,8 @@ export default async function VideoDetailPage({
                   関連動画はまだありません。
                 </p>
               ) : (
-                related.slice(0, 6).map((v) => (
-                  <VideoCard key={v.id} video={v} size="list" />
+                related.slice(0, 6).map((v, index) => (
+                  <VideoCard key={`${v.id}-mobile-related-${index}`} video={v} size="list" />
                 ))
               )}
             </div>
@@ -432,10 +466,38 @@ export default async function VideoDetailPage({
           />
 
           {viewerUser?.id ? (
-            <>
-              <ChapterComposer videoId={video.id} canPost={viewerXApproved} />
-            </>
-          ) : null}
+            <ChapterComposer
+              videoId={video.id}
+              canPost={viewerXApproved}
+              settingsHref={`/dashboard/settings?next=${encodeURIComponent(`/${rawId}`)}`}
+            />
+          ) : (
+            <section
+              style={{
+                border: "1px solid var(--border-subtle)",
+                background: "var(--bg-card)",
+                borderRadius: "var(--radius-md)",
+                padding: 12,
+                fontSize: 12,
+                color: "var(--text-muted)",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                flexWrap: "wrap",
+              }}
+            >
+              <span>
+                <Icon name="info" size={12} aria-hidden />{" "}
+                ログインするとチャプターコメントを投稿できます。
+              </span>
+              <Link
+                href={`/entry?next=${encodeURIComponent(`/${rawId}`)}`}
+                className="fn-btn fn-btn-ghost fn-btn-sm"
+              >
+                ログイン
+              </Link>
+            </section>
+          )}
 
           <div className={styles.relatedDesktop}>
             <h3 className={styles.relatedHeading}>関連動画</h3>
@@ -445,7 +507,9 @@ export default async function VideoDetailPage({
                   関連動画はまだありません。
                 </p>
               ) : (
-                related.map((v) => <VideoCard key={v.id} video={v} size="list" />)
+                related.map((v, index) => (
+                  <VideoCard key={`${v.id}-desktop-related-${index}`} video={v} size="list" />
+                ))
               )}
             </div>
           </div>

@@ -186,6 +186,15 @@ export default async function EventDetailPage({
                 全作品を連続再生
               </Link>
             ) : null}
+            {visibleVideos.length > 0 ? (
+              <Link
+                href={`/list?event=${event.id}`}
+                className="fn-btn fn-btn-ghost"
+              >
+                <Icon name="grid" size={14} aria-hidden />
+                このイベントの作品を一覧で見る
+              </Link>
+            ) : null}
             <Link href="/event" className="fn-btn fn-btn-ghost">
               一覧へ戻る
             </Link>
@@ -310,8 +319,8 @@ export default async function EventDetailPage({
           </div>
         ) : (
           <div className={styles.videoGrid}>
-            {visibleVideos.map((v) => (
-              <div key={v.id}>
+            {visibleVideos.map((v, index) => (
+              <div key={`${v.id}-event-video-${index}`}>
                 <VideoCard video={v} />
               </div>
             ))}

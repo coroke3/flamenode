@@ -1,12 +1,14 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
+import { eq } from "drizzle-orm";
 import styles from "./page.module.css";
-import { getDatabase, withDatabase } from "@/lib/cloudflare";
+import { withDatabase } from "@/lib/cloudflare";
 import {
   countPublicVideos,
   fetchPublicVideos,
 } from "@/lib/db/listQueries";
+import { events as eventsTable } from "@/lib/db/schema";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 import { Icon } from "@/components/ui/Icon";
 
@@ -35,7 +37,7 @@ export default async function ListPage({
   const offset = (pageNum - 1) * PAGE_SIZE;
 
   const data = await withDatabase(async (db) => {
-    const [videos, total] = await Promise.all([
+    const [videos, total, eventInfo] = await Promise.all([
       fetchPublicVideos(db, {
         q,
         sort: sort as "new" | "old" | "score",
@@ -47,11 +49,23 @@ export default async function ListPage({
         q,
         eventId: event || undefined,
       }),
+      // event 絞り込みのチップ表示に使うイベント情報。空なら null。
+      event
+        ? db
+            .select({
+              id: eventsTable.id,
+              title: eventsTable.title,
+            })
+            .from(eventsTable)
+            .where(eq(eventsTable.id, event))
+            .limit(1)
+            .then((rows) => rows[0] ?? null)
+        : Promise.resolve(null),
     ]);
-    return { videos, total };
+    return { videos, total, eventInfo };
   });
 
-  const { videos = [], total = 0 } = data ?? {};
+  const { videos = [], total = 0, eventInfo = null } = data ?? {};
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const params = (override: Partial<SearchParams> = {}) => {
@@ -104,6 +118,40 @@ export default async function ListPage({
         ) : null}
       </form>
 
+      {event ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexWrap: "wrap",
+            marginTop: 8,
+            fontSize: 13,
+          }}
+          aria-label="現在のフィルター"
+        >
+          <span className="fn-badge fn-badge-soft">
+            イベント:{" "}
+            {eventInfo ? (
+              <Link
+                href={`/event/${eventInfo.id}`}
+                style={{ textDecoration: "underline" }}
+              >
+                {eventInfo.title}
+              </Link>
+            ) : (
+              event
+            )}
+          </span>
+          <Link
+            href={`/list?${params({ event: "", page: "1" })}`}
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+          >
+            イベント絞り込みを解除
+          </Link>
+        </div>
+      ) : null}
+
       {videos.length === 0 ? (
         <div className="fn-empty">
           <Icon name="info" size={24} aria-hidden />
@@ -114,8 +162,8 @@ export default async function ListPage({
       ) : (
         <>
           <div className={styles.grid}>
-            {videos.map((v) => (
-              <div key={v.id} className={styles.gridItem}>
+            {videos.map((v, index) => (
+              <div key={`${v.id}-list-${index}`} className={styles.gridItem}>
                 <VideoCard video={v} />
               </div>
             ))}

@@ -77,6 +77,10 @@ export interface VideoActionResult {
   ok: boolean;
   message?: string;
   videoId?: string;
+  /** 公開ページへの遷移用 (YouTube video id があれば優先される)。 */
+  youtubeVideoId?: string;
+  /** イベントへ戻る用 (slotted 提出の場合に slot.event_id をセット)。 */
+  eventId?: string;
   reason?: WriteGuardDenyReason;
 }
 
@@ -385,7 +389,7 @@ export async function createFreeVideo(
   revalidatePath("/");
   revalidatePath("/list");
   revalidatePath("/dashboard");
-  return { ok: true, videoId: id };
+  return { ok: true, videoId: id, youtubeVideoId: youtubeId };
 }
 
 /**
@@ -609,7 +613,12 @@ export async function submitSlotVideo(
   revalidatePath("/");
   revalidatePath(`/event/${slotRow.event_id}`);
   revalidatePath("/dashboard");
-  return { ok: true, videoId };
+  return {
+    ok: true,
+    videoId,
+    youtubeVideoId: youtubeId,
+    eventId: slotRow.event_id,
+  };
 }
 
 /**
@@ -876,7 +885,12 @@ export async function updateVideo(
   revalidatePath(`/${target.youtube_video_id ?? videoId}`);
   if (canEditYoutube) revalidatePath(`/${youtubeId}`);
   revalidatePath("/dashboard");
-  return { ok: true, videoId };
+  return {
+    ok: true,
+    videoId,
+    youtubeVideoId: canEditYoutube ? youtubeId : (target.youtube_video_id ?? undefined),
+    eventId: target.primary_event_id ?? undefined,
+  };
 }
 
 /**

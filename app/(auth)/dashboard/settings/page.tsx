@@ -199,12 +199,12 @@ export default async function SettingsPage({
                 marginTop: 18,
               }}
             >
-              {xIds.map((x) => {
+              {xIds.map((x, index) => {
                 const active = x.id === user.active_x_user_id;
                 const approved = x.approval_status === "approved";
                 return (
                   <section
-                    key={x.id}
+                    key={`${x.id}-settings-${index}`}
                     aria-label={`@${x.id} の選択カード`}
                     style={{
                       display: "grid",
@@ -271,7 +271,7 @@ export default async function SettingsPage({
                             <Icon name="check" size={11} aria-hidden /> アクティブ
                           </span>
                         ) : approved ? (
-                          <SetActiveXButton xUserId={x.id} />
+                          <SetActiveXButton xUserId={x.id} next={next} />
                         ) : null}
                         <Link
                           href={`/user/${x.id}`}
@@ -288,8 +288,8 @@ export default async function SettingsPage({
           )}
           {xIds.length > 0 ? (
             <div style={{ marginTop: 24, display: "grid", gap: 16 }}>
-              {xIds.map((x) => (
-                <section key={`profile-${x.id}`} className="fn-card">
+              {xIds.map((x, index) => (
+                <section key={`profile-${x.id}-${index}`} className="fn-card">
                   <div className="fn-card-header">
                     <h3 className="fn-card-title">@{x.id} のプロフィール既定値</h3>
                   </div>

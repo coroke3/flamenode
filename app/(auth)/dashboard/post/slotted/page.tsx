@@ -152,7 +152,10 @@ export default async function SlottedPostPage({
         tone={canPost ? "success" : "warning"}
         action={
           !canPost ? (
-            <Link href="/dashboard/settings" className="fn-btn fn-btn-primary">
+            <Link
+              href={`/dashboard/settings?next=${encodeURIComponent(nextPath)}`}
+              className="fn-btn fn-btn-primary"
+            >
               X ID設定を確認
             </Link>
           ) : null

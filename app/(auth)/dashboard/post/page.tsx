@@ -132,7 +132,10 @@ export default async function PostChooserPage(): Promise<React.ReactElement> {
         tone={checkTone}
         action={
           !canPost ? (
-            <Link href="/dashboard/settings" className="fn-btn fn-btn-primary">
+            <Link
+              href={`/dashboard/settings?next=${encodeURIComponent("/dashboard/post")}`}
+              className="fn-btn fn-btn-primary"
+            >
               X ID設定を確認
             </Link>
           ) : null
