@@ -26,7 +26,7 @@ export const metadata: Metadata = { title: "ダッシュボード" };
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage(): Promise<React.ReactElement> {
-  const guard = await requireSession();
+  const guard = await requireSession({ next: "/dashboard" });
   if (!guard.ok) return guard.element;
   const user = guard.user;
   const db = getDatabase();
@@ -192,8 +192,8 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           </div>
         ) : (
           <div className={styles.xidList}>
-            {xIds.map((x) => (
-              <div key={x.id} className={styles.xidCard}>
+            {xIds.map((x, index) => (
+              <div key={`${x.id}-xid-${index}`} className={styles.xidCard}>
                 {x.icon_url ? (
                   /* eslint-disable-next-line @next/next/no-img-element */
                   <img src={x.icon_url} alt="" className={styles.xidIcon} />
@@ -236,8 +236,8 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           </div>
         ) : (
           <div className={styles.galleryGrid}>
-            {myVideos.map((v) => (
-              <div key={v.id}>
+            {myVideos.map((v, index) => (
+              <div key={`${v.id}-video-${index}`}>
                 <VideoCard video={v} href={`/dashboard/edit/${v.id}`} />
               </div>
             ))}

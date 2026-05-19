@@ -39,7 +39,9 @@ export default async function ManageEventSlotsPage({
       ? sp.status
       : "all";
 
-  const guard = await requireSession();
+  const guard = await requireSession({
+    next: `/manage/events/${encodeURIComponent(id)}/slots`,
+  });
   if (!guard.ok) return guard.element;
   const user = guard.user;
 

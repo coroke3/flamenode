@@ -26,7 +26,7 @@ type Tab = "like" | "bookmark";
 export default async function DashboardLibraryPage({
   searchParams,
 }: Props): Promise<React.ReactElement> {
-  const guard = await requireSession();
+  const guard = await requireSession({ next: "/dashboard/library" });
   if (!guard.ok) return guard.element;
   const user = guard.user;
   const { tab: rawTab = "like" } = await searchParams;
@@ -184,8 +184,8 @@ export default async function DashboardLibraryPage({
               gap: 16,
             }}
           >
-            {videos.map((v) => (
-              <div key={v.id}>
+            {videos.map((v, index) => (
+              <div key={`${v.id}-library-${index}`}>
                 <VideoCard video={v} />
               </div>
             ))}

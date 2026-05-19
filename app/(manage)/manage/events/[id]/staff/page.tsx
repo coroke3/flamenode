@@ -29,7 +29,9 @@ export default async function ManageEventStaffPage({
   params,
 }: Props): Promise<React.ReactElement> {
   const { id } = await params;
-  const guard = await requireSession();
+  const guard = await requireSession({
+    next: `/manage/events/${encodeURIComponent(id)}/staff`,
+  });
   if (!guard.ok) return guard.element;
   const user = guard.user;
 

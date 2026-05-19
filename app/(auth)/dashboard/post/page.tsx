@@ -3,7 +3,11 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
-import { events as eventsTable, slots as slotsTable } from "@/lib/db/schema";
+import {
+  events as eventsTable,
+  slots as slotsTable,
+  xUsers as xUsersTable,
+} from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth/guard";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
@@ -12,6 +16,7 @@ import { AppShell } from "@/components/ui/AppShell";
 import { PageHero } from "@/components/ui/PageHero";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { StatusPanel } from "@/components/ui/StatusPanel";
 
 export const metadata: Metadata = { title: "投稿方法を選択" };
 export const dynamic = "force-dynamic";
@@ -37,11 +42,25 @@ type ReservedSlot = {
 };
 
 export default async function PostChooserPage(): Promise<React.ReactElement> {
-  const guard = await requireSession();
+  const guard = await requireSession({ next: "/dashboard/post" });
   if (!guard.ok) return guard.element;
   const db = getDatabase();
   const activeX = guard.user.active_x_user_id ?? null;
   let reservedSlots: ReservedSlot[] = [];
+  // Active X の承認状態。投稿 (枠あり/枠なしどちらも) は writeGuard で
+  // requireApprovedActiveXId のため、ここでも同じ条件で前置きチェックする。
+  // 注: 枠確保のみは未承認 X でも可能なので、文言で区別する。
+  let activeXApprovalStatus: "approved" | "pending" | "rejected" | null = null;
+  if (db && activeX) {
+    const xRow = (
+      await db
+        .select({ approval_status: xUsersTable.approval_status })
+        .from(xUsersTable)
+        .where(eq(xUsersTable.id, activeX))
+        .limit(1)
+    )[0];
+    activeXApprovalStatus = xRow?.approval_status ?? null;
+  }
 
   if (db) {
     const ownerWhere = activeX
@@ -83,6 +102,22 @@ export default async function PostChooserPage(): Promise<React.ReactElement> {
   }
 
   const displaySlots = collapseReservationGroups(reservedSlots as SlotBase[]);
+  // 投稿前チェックの判定:
+  // - activeX 未選択: 投稿不可。枠確保は可能だが、リンクは設定へ誘導。
+  // - approved: 投稿可。
+  // - pending/rejected/未approved: 投稿不可。
+  const canPost = activeXApprovalStatus === "approved";
+  const checkTone: "success" | "warning" = canPost ? "success" : "warning";
+  const checkTitle = canPost ? "投稿前チェック" : "投稿には追加設定が必要です";
+  const checkMessage = !activeX
+    ? "投稿にはActive X IDの選択が必要です。設定画面から連携・選択してください。"
+    : activeXApprovalStatus === "pending"
+      ? "選択中のActive X IDは承認待ちです。承認後に投稿できます (枠の確保は可能)。"
+      : activeXApprovalStatus === "rejected"
+        ? "選択中のActive X IDは却下されています。設定画面で別のX IDを選択してください。"
+        : activeXApprovalStatus === "approved"
+          ? `投稿者X ID: @${activeX} (承認済) で投稿できます。`
+          : "投稿には承認済みのActive X IDが必要です。設定画面で承認状態を確認してください。";
 
   return (
     <AppShell size="default">
@@ -91,6 +126,20 @@ export default async function PostChooserPage(): Promise<React.ReactElement> {
         title="投稿方法を選択"
         description="イベント枠を確保している作品は枠あり提出から、通常の作品は枠なし投稿から進めます。"
       />
+
+      <StatusPanel
+        title={checkTitle}
+        tone={checkTone}
+        action={
+          !canPost ? (
+            <Link href="/dashboard/settings" className="fn-btn fn-btn-primary">
+              X ID設定を確認
+            </Link>
+          ) : null
+        }
+      >
+        {checkMessage}
+      </StatusPanel>
 
       <div
         style={{

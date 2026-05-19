@@ -7,6 +7,7 @@ import { acceptLatestTerms } from "@/lib/actions/terms";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 import { sanitizeUserHtml } from "@/lib/utils/sanitizeUserHtml";
+import { sanitizeNextPath } from "@/lib/utils/next";
 
 export const metadata: Metadata = { title: "利用規約" };
 export const dynamic = "force-dynamic";
@@ -80,13 +81,6 @@ function escape(s: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
-}
-
-function sanitizeNextPath(next: string | undefined): string {
-  if (!next) return "/dashboard";
-  if (!next.startsWith("/")) return "/dashboard";
-  if (next.startsWith("//")) return "/dashboard";
-  return next;
 }
 
 export default async function RulesPage({

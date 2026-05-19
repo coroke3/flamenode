@@ -264,7 +264,9 @@ export default async function EventDetailPage({
                   style={{ marginTop: 8 }}
                 >
                   <Icon name="info" size={12} aria-hidden /> 確保には{" "}
-                  <Link href="/entry">
+                  <Link
+                    href={`/entry?next=${encodeURIComponent(`/event/${event.id}#slot`)}`}
+                  >
                     ログイン
                   </Link>{" "}
                   とアクティブ X ID が必要です。
@@ -275,7 +277,12 @@ export default async function EventDetailPage({
                   style={{ marginTop: 8 }}
                 >
                   <Icon name="info" size={12} aria-hidden /> アクティブ X ID を選択してください ({" "}
-                  <Link href="/dashboard/settings">設定</Link> )。
+                  <Link
+                    href={`/dashboard/settings?next=${encodeURIComponent(`/event/${event.id}#slot`)}`}
+                  >
+                    設定
+                  </Link>{" "}
+                  )。
                 </p>
               ) : null}
             </div>

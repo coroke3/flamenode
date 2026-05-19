@@ -75,7 +75,9 @@ export default async function ManageEventPage({
     sp.notif === "system"
       ? sp.notif
       : "all";
-  const guard = await requireSession();
+  const guard = await requireSession({
+    next: `/manage/events/${encodeURIComponent(id)}`,
+  });
   if (!guard.ok) return guard.element;
   const user = guard.user;
 

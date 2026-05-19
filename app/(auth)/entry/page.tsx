@@ -3,7 +3,8 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { eq, sql } from "drizzle-orm";
 import styles from "./page.module.css";
-import { auth, signIn } from "@/lib/auth";
+import { signIn } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth/currentUser";
 import { getDatabase } from "@/lib/cloudflare";
 import { fetchActiveEvents } from "@/lib/db/queries";
 import { slots as slotsTable } from "@/lib/db/schema";
@@ -13,22 +14,10 @@ import { formatUnix } from "@/lib/utils/format";
 import { AppShell } from "@/components/ui/AppShell";
 import { PageHero } from "@/components/ui/PageHero";
 import { StatusPanel } from "@/components/ui/StatusPanel";
+import { sanitizeNextPath } from "@/lib/utils/next";
 
 export const metadata: Metadata = { title: "エントリー" };
 export const dynamic = "force-dynamic";
-
-interface SessionUserShape {
-  id?: string;
-  name?: string | null;
-  active_x_user_id?: string | null;
-}
-
-function sanitizeNextPath(next: string | undefined): string {
-  if (!next) return "/entry";
-  if (!next.startsWith("/")) return "/entry";
-  if (next.startsWith("//")) return "/entry";
-  return next;
-}
 
 export default async function EntryPage({
   searchParams,
@@ -36,18 +25,17 @@ export default async function EntryPage({
   searchParams?: Promise<{ next?: string }>;
 }): Promise<React.ReactElement> {
   const params = await searchParams;
-  const next = sanitizeNextPath(params?.next);
-  // session 取得は失敗時にエラーログだけ残し、null として扱う。
-  // 「user.id」が存在するときだけログイン済として判定する (空セッション拒否)。
-  let session: { user?: SessionUserShape | null } | null = null;
-  try {
-    const r = await auth();
-    session = r as unknown as { user?: SessionUserShape | null } | null;
-  } catch (e) {
-    console.error("[EntryPage] auth() failed:", e);
-  }
-  const sessionUser = (session?.user ?? null) as SessionUserShape | null;
+  const next = sanitizeNextPath(params?.next, "/entry");
+  // 失敗時は null として扱う。getCurrentUser は内部で auth().catch を行うため
+  // ここで try/catch する必要はない。
+  const sessionUser = await getCurrentUser();
   const isLoggedIn = !!sessionUser?.id;
+  // 書き込みガードは is_tos_accepted !== 1 (および terms_reaccept_required === 1) で
+  // tos_required / tos_reaccept_required を返す。ここでも同じ条件を見て CTA 出す。
+  const needsTosAccept =
+    !!sessionUser &&
+    (sessionUser.is_tos_accepted !== 1 ||
+      sessionUser.terms_reaccept_required === 1);
 
   const db = getDatabase();
   const activeEventsRaw = db ? await fetchActiveEvents(db).catch(() => []) : [];
@@ -110,9 +98,31 @@ export default async function EntryPage({
             </p>
           ) : null}
           <p className={styles.tosNote}>
-            ログインすることで、最新の <Link href="/rules">利用規約</Link>に同意したものとみなされます。
+            ログイン後、枠確保や投稿などの書き込み操作を行う前に、
+            最新の <Link href="/rules">利用規約</Link>への同意をお願いする場合があります。
           </p>
         </section>
+      ) : needsTosAccept ? (
+        <StatusPanel
+          title={
+            sessionUser?.terms_reaccept_required === 1
+              ? "利用規約の再同意が必要です"
+              : "利用規約への同意が必要です"
+          }
+          tone="warning"
+          action={
+            <Link
+              href={`/rules?next=${encodeURIComponent(next)}`}
+              className="fn-btn fn-btn-primary"
+            >
+              利用規約を確認する
+            </Link>
+          }
+        >
+          {sessionUser?.terms_reaccept_required === 1
+            ? "利用規約の改訂がありました。書き込み操作の前に最新の規約に再同意してください。"
+            : "書き込み操作 (枠確保・投稿・いいね等) の前に、最新の利用規約への同意が必要です。"}
+        </StatusPanel>
       ) : (
         <StatusPanel title="現在の操作状態" tone="success">
           ログイン済み

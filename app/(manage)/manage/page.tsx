@@ -24,7 +24,7 @@ export const metadata: Metadata = { title: "イベント運営" };
 export const dynamic = "force-dynamic";
 
 export default async function ManageTopPage(): Promise<React.ReactElement> {
-  const guard = await requireSession();
+  const guard = await requireSession({ next: "/manage" });
   if (!guard.ok) return guard.element;
   const user = guard.user;
 

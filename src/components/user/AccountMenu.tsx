@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import styles from "./AccountMenu.module.css";
 import { Icon } from "@/components/ui/Icon";
 import { setActiveXId } from "@/lib/actions/xid";
+import { normalizeXId } from "@/lib/utils/xid";
 
 export interface XIdEntry {
   x_user_id: string;
@@ -36,6 +37,18 @@ interface AccountMenuProps {
 type Mode = "light" | "dark";
 const STORAGE_KEY = "fn-theme";
 
+function dedupeXIds(entries: readonly XIdEntry[]): XIdEntry[] {
+  const seen = new Set<string>();
+  const out: XIdEntry[] = [];
+  for (const entry of entries) {
+    const normalized = normalizeXId(entry.x_user_id);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push({ ...entry, x_user_id: normalized });
+  }
+  return out;
+}
+
 function getDeviceMode(): Mode {
   if (typeof window === "undefined") return "light";
   return window.matchMedia?.("(prefers-color-scheme: dark)").matches
@@ -59,18 +72,19 @@ export function AccountMenu({
   onSwitch,
 }: AccountMenuProps): React.ReactElement {
   const router = useRouter();
+  const xIds = React.useMemo(() => dedupeXIds(user.xIds), [user.xIds]);
   const [open, setOpen] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [activeId, setActiveId] = React.useState(
-    user.xIds.find((e) => e.is_active)?.x_user_id ?? null,
+    xIds.find((e) => e.is_active)?.x_user_id ?? null,
   );
   const [pending, startTransition] = React.useTransition();
   const [themeMode, setThemeMode] = React.useState<Mode>("light");
   const ref = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
-    setActiveId(user.xIds.find((e) => e.is_active)?.x_user_id ?? null);
-  }, [user.xIds]);
+    setActiveId(xIds.find((e) => e.is_active)?.x_user_id ?? null);
+  }, [xIds]);
 
   React.useEffect(() => {
     let initial: Mode = getDeviceMode();
@@ -101,10 +115,11 @@ export function AccountMenu({
     };
   }, [open]);
 
+  // activeId に一致する entry のみを「現在のアクティブ」とみなす。
+  // approved への暗黙フォールバックは、未選択なのにヘッダーで承認済み X ID が
+  // アクティブに見える UX 不整合を生むため行わない。
   const activeEntry =
-    user.xIds.find((e) => e.x_user_id === activeId) ??
-    user.xIds.find((e) => e.approval_status === "approved") ??
-    null;
+    xIds.find((e) => e.x_user_id === activeId) ?? null;
 
   const switchTo = (entry: XIdEntry) => {
     setError(null);
@@ -143,7 +158,7 @@ export function AccountMenu({
   const order = (s: XIdEntry["approval_status"]) =>
     s === "approved" ? 0 : s === "pending" ? 1 : 2;
 
-  const sortedXIds = [...user.xIds].sort((a, b) => {
+  const sortedXIds = [...xIds].sort((a, b) => {
     if (a.x_user_id === activeId) return -1;
     if (b.x_user_id === activeId) return 1;
     return (
@@ -255,11 +270,11 @@ export function AccountMenu({
                 連携済みの X ID がありません。
               </div>
             ) : (
-              sortedXIds.map((entry) => {
+              sortedXIds.map((entry, index) => {
                 const isSelected = entry.x_user_id === activeId;
                 return (
                   <button
-                    key={entry.x_user_id}
+                    key={`${entry.x_user_id}-account-${index}`}
                     type="button"
                     role="menuitem"
                     disabled={pending || entry.approval_status === "rejected"}

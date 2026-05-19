@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import styles from "./XIdSwitcher.module.css";
 import { Icon } from "@/components/ui/Icon";
 import { setActiveXId } from "@/lib/actions/xid";
+import { normalizeXId } from "@/lib/utils/xid";
 
 export interface XIdEntry {
   x_user_id: string;
@@ -21,23 +22,36 @@ interface XIdSwitcherProps {
   onSwitch?: (xUserId: string) => void;
 }
 
+function dedupeEntries(entries: readonly XIdEntry[]): XIdEntry[] {
+  const seen = new Set<string>();
+  const out: XIdEntry[] = [];
+  for (const entry of entries) {
+    const normalized = normalizeXId(entry.x_user_id);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push({ ...entry, x_user_id: normalized });
+  }
+  return out;
+}
+
 export function XIdSwitcher({
   entries,
   discordName,
   onSwitch,
 }: XIdSwitcherProps): React.ReactElement {
   const router = useRouter();
+  const normalizedEntries = React.useMemo(() => dedupeEntries(entries), [entries]);
   const [open, setOpen] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [activeId, setActiveId] = React.useState(
-    entries.find((e) => e.is_active)?.x_user_id ?? null,
+    normalizedEntries.find((e) => e.is_active)?.x_user_id ?? null,
   );
   const [pending, startTransition] = React.useTransition();
   const ref = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
-    setActiveId(entries.find((e) => e.is_active)?.x_user_id ?? null);
-  }, [entries]);
+    setActiveId(normalizedEntries.find((e) => e.is_active)?.x_user_id ?? null);
+  }, [normalizedEntries]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -60,7 +74,7 @@ export function XIdSwitcher({
   const order = (s: XIdEntry["approval_status"]) =>
     s === "approved" ? 0 : s === "pending" ? 1 : 2;
 
-  const sorted = [...entries].sort((a, b) => {
+  const sorted = [...normalizedEntries].sort((a, b) => {
     if (a.x_user_id === activeId) return -1;
     if (b.x_user_id === activeId) return 1;
     return (
@@ -69,10 +83,9 @@ export function XIdSwitcher({
     );
   });
 
-  const active =
-    entries.find((e) => e.x_user_id === activeId) ??
-    entries.find((e) => e.approval_status === "approved") ??
-    entries[0];
+  // activeId に一致する entry のみを「現在のアクティブ」とみなす。
+  // approved / entries[0] へのフォールバックは「未選択なのに選択済みに見える」UX 不整合を生むため行わない。
+  const active = normalizedEntries.find((e) => e.x_user_id === activeId) ?? null;
 
   const switchTo = (entry: XIdEntry) => {
     setError(null);
@@ -125,7 +138,7 @@ export function XIdSwitcher({
           </span>
         )}
         <span className={styles.triggerName}>
-          {active ? `@${active.x_user_id}` : "未設定"}
+          {active ? `@${active.x_user_id}` : "X ID未選択"}
         </span>
         {active?.approval_status === "pending" ? (
           <span
@@ -160,11 +173,11 @@ export function XIdSwitcher({
               設定画面から申請できます。
             </div>
           ) : (
-            sorted.map((entry) => {
+            sorted.map((entry, index) => {
               const selected = entry.x_user_id === activeId;
               return (
                 <button
-                  key={entry.x_user_id}
+                  key={`${entry.x_user_id}-switch-${index}`}
                   role="option"
                   aria-selected={selected}
                   disabled={pending || entry.approval_status === "rejected"}

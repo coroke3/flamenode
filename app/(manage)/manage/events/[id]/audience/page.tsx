@@ -30,7 +30,9 @@ export default async function ManageEventAudiencePage({
   params,
 }: Props): Promise<React.ReactElement> {
   const { id } = await params;
-  const guard = await requireSession();
+  const guard = await requireSession({
+    next: `/manage/events/${encodeURIComponent(id)}/audience`,
+  });
   if (!guard.ok) return guard.element;
   const user = guard.user;
 
