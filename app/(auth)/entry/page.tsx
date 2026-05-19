@@ -10,6 +10,9 @@ import { slots as slotsTable } from "@/lib/db/schema";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
+import { AppShell } from "@/components/ui/AppShell";
+import { PageHero } from "@/components/ui/PageHero";
+import { StatusPanel } from "@/components/ui/StatusPanel";
 
 export const metadata: Metadata = { title: "エントリー" };
 export const dynamic = "force-dynamic";
@@ -20,7 +23,20 @@ interface SessionUserShape {
   active_x_user_id?: string | null;
 }
 
-export default async function EntryPage(): Promise<React.ReactElement> {
+function sanitizeNextPath(next: string | undefined): string {
+  if (!next) return "/entry";
+  if (!next.startsWith("/")) return "/entry";
+  if (next.startsWith("//")) return "/entry";
+  return next;
+}
+
+export default async function EntryPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ next?: string }>;
+}): Promise<React.ReactElement> {
+  const params = await searchParams;
+  const next = sanitizeNextPath(params?.next);
   // session 取得は失敗時にエラーログだけ残し、null として扱う。
   // 「user.id」が存在するときだけログイン済として判定する (空セッション拒否)。
   let session: { user?: SessionUserShape | null } | null = null;
@@ -59,13 +75,12 @@ export default async function EntryPage(): Promise<React.ReactElement> {
   }
 
   return (
-    <div className={styles.page}>
-      <header className={styles.heading}>
-        <h1 className={styles.title}>FlameNode に参加する</h1>
-        <p className={styles.lead}>
-          イベントへの参加、または過去の自分の作品を投稿できます。
-        </p>
-      </header>
+    <AppShell size="default">
+      <PageHero
+        eyebrow="Entry"
+        title="何をしますか？"
+        description="イベント参加か、過去作品の投稿を選んでください。"
+      />
 
       {!isLoggedIn ? (
         <section className={styles.loginSection} aria-labelledby="login-card">
@@ -80,7 +95,7 @@ export default async function EntryPage(): Promise<React.ReactElement> {
           <form
             action={async () => {
               "use server";
-              await signIn("discord", { redirectTo: "/entry" });
+              await signIn("discord", { redirectTo: next });
             }}
             className={styles.btnRow}
           >
@@ -89,15 +104,27 @@ export default async function EntryPage(): Promise<React.ReactElement> {
               Discord でログイン
             </button>
           </form>
+          {next !== "/entry" ? (
+            <p className={styles.tosNote}>
+              ログイン後、元のページへ戻ります。
+            </p>
+          ) : null}
           <p className={styles.tosNote}>
             ログインすることで、最新の <Link href="/rules">利用規約</Link>に同意したものとみなされます。
           </p>
         </section>
-      ) : null}
+      ) : (
+        <StatusPanel title="現在の操作状態" tone="success">
+          ログイン済み
+          {sessionUser?.active_x_user_id
+            ? ` / Active X ID: @${sessionUser.active_x_user_id}`
+            : " / Active X ID未選択"}
+        </StatusPanel>
+      )}
 
-      <div className={styles.layout}>
+      <div className={styles.choiceGrid}>
         {/* カード1: イベントに参加する */}
-        <section className={styles.card} aria-labelledby="join-event-card">
+        <section className={styles.choiceCard} aria-labelledby="join-event-card">
           <h2 id="join-event-card" className={styles.cardTitle}>
             <Icon name="calendar" size={16} aria-hidden />
             イベントに参加する
@@ -166,7 +193,10 @@ export default async function EntryPage(): Promise<React.ReactElement> {
         </section>
 
         {/* カード2: 過去の作品を投稿する */}
-        <section className={styles.card} aria-labelledby="post-unslotted-card">
+        <section
+          className={styles.choiceCard}
+          aria-labelledby="post-unslotted-card"
+        >
           <h2 id="post-unslotted-card" className={styles.cardTitle}>
             <Icon name="edit" size={16} aria-hidden />
             過去の自分の作品を投稿する
@@ -189,6 +219,6 @@ export default async function EntryPage(): Promise<React.ReactElement> {
           )}
         </section>
       </div>
-    </div>
+    </AppShell>
   );
 }

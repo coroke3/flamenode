@@ -1,0 +1,32 @@
+.card {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  background: var(--bg-surface);
+  box-shadow: 0 18px 54px rgba(0, 0, 0, 0.08);
+}
+
+.default {
+  padding: 22px;
+}
+
+.dark {
+  padding: 24px;
+  color: #fff;
+  background:
+    radial-gradient(
+      circle at 16% 12%,
+      rgba(255, 225, 0, 0.14),
+      transparent 28%
+    ),
+    linear-gradient(135deg, #050505, #161616);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 32px 90px rgba(0, 0, 0, 0.32);
+}
+
+.accent {
+  padding: 22px;
+  background:
+    linear-gradient(135deg, rgba(255, 225, 0, 0.12), transparent),
+    var(--bg-surface);
+  border-color: rgba(255, 225, 0, 0.34);
+}

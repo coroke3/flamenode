@@ -31,7 +31,7 @@ export async function resolveMissingIcons<
   // D1 (SQLite) は 1 statement あたりの bind 変数に上限があるため
   // creator_id を chunk 化して問い合わせる。creatorIds は dedup 済みで
   // chunk 間で creator_id が重複しないので、結果のマージ順は問わない。
-  const CHUNK_SIZE = 50;
+  const CHUNK_SIZE = 25;
   type IconRow = {
     creator_id: string | null;
     icon_url: string | null;

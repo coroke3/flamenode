@@ -463,9 +463,9 @@ function MetaItem({
   body: string;
 }): React.ReactElement {
   return (
-    <div className={styles.metaItem}>
-      <h3>{title}</h3>
+    <details className={styles.metaItem}>
+      <summary>{title}</summary>
       <p>{body}</p>
-    </div>
+    </details>
   );
 }

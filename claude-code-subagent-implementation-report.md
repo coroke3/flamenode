@@ -320,3 +320,67 @@
 - `git diff --check`
   - PASS
   - Git の CRLF 変換 warning と global ignore permission warning は出たが、whitespace error はなし。
+## 2026-05-19 追加実装: TOS遷移修正とUI基盤整備
+
+### 対応概要
+
+- スロット確保系Server Actionの`writeGuard()`失敗理由をクライアントへ返すようにし、TOS未同意・再同意要求時にイベント画面でエラー文言だけを出して止まらないようにした。
+- `/rules?next=<元ページ>`で利用規約同意後に元ページへ戻れる導線を追加した。
+- `/entry?next=<元ページ>`で未ログイン時も元ページへ戻れるようにした。
+- UI共通部品として`AppShell`、`PageHero`、`GlassCard`、`StatusPanel`、`MetricTile`、`EmptyState`、`DangerActionPanel`を追加した。
+- トップページの表示順を「募集カード -> 今日見るべき作品 -> 新着作品 -> クリエイター -> イベント」に整理した。
+- エントリーページをイベント参加/過去作品投稿の2択中心に再構成した。
+- 投稿導線に投稿前チェックの`StatusPanel`を追加し、Active X IDや投稿可否の見え方を整理した。
+- スロット表示を部ごとのカードUIとして見やすくなるようCSSを強化した。
+- 作品詳細のメタ情報を`details/summary`ベースの折りたたみに変更した。
+- `/admin/users`で発生しうるD1 SQL変数上限を避けるため、アイコン解決クエリのチャンクサイズを小さくした。
+
+### 変更ファイル
+
+- `src/lib/actions/slot.ts`
+- `src/lib/actions/terms.ts`
+- `src/components/event/SlotGrid.tsx`
+- `src/components/event/SlotGrid.module.css`
+- `app/(public)/rules/page.tsx`
+- `app/(auth)/entry/page.tsx`
+- `app/(auth)/entry/page.module.css`
+- `app/(public)/page.tsx`
+- `app/(public)/page.module.css`
+- `app/(auth)/dashboard/post/page.tsx`
+- `app/(auth)/dashboard/post/unslotted/page.tsx`
+- `app/(auth)/dashboard/post/slotted/page.tsx`
+- `app/(public)/[id]/page.tsx`
+- `app/(public)/[id]/page.module.css`
+- `src/lib/db/iconResolution.ts`
+- `src/components/ui/*`
+
+### 検証
+
+- `npm.cmd run typecheck`: PASS
+- `npm.cmd run lint`: PASS
+- `npm.cmd run test:unit`: PASS, 160 tests
+- `npm.cmd run build`: PASS
+- `git diff --check`: PASS
+
+### 注意
+
+- `tsconfig.tsbuildinfo`は`typecheck/build`実行により更新されている。コミット対象から外す場合は別途整理が必要。
+- ローカルブラウザでの見た目確認は未実施。次の作業では`npm run dev:local`起動後にトップ、エントリー、スロット、作品詳細を確認する。
+## 2026-05-19 追加検証: dev:local HTTP確認
+
+### 実行内容
+
+- `npm.cmd run dev:local -- -p 3102`を一時Jobで起動し、確認後に停止した。
+- `.dev.vars`読み込み、Miniflare binding準備、Next.js dev server Readyまで到達することを確認した。
+
+### HTTP確認結果
+
+- `GET /`: 200
+- `GET /entry`: 200
+- `GET /rules?next=%2Fevent`: 200
+- `GET /dashboard/post`: 200
+
+### 補足
+
+- 永続バックグラウンド起動はこの環境では即終了したため、最終確認は一時Job方式で実施した。
+- `MissingSecret`はこの確認経路では再発していない。

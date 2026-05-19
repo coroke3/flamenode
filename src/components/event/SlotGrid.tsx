@@ -86,6 +86,24 @@ export function SlotGrid({
   const [reserveDisplayName, setReserveDisplayName] = React.useState<string>("");
   const [reserveCount, setReserveCount] = React.useState("1");
   const [savedName, setSavedName] = React.useState<string>("");
+
+  const redirectForGuardReason = React.useCallback(
+    (reason?: string): boolean => {
+      if (typeof window === "undefined") return false;
+      const next = `${window.location.pathname}${window.location.search}`;
+      if (reason === "tos_required" || reason === "tos_reaccept_required") {
+        router.push(`/rules?next=${encodeURIComponent(next)}`);
+        return true;
+      }
+      if (reason === "unauthenticated") {
+        router.push(`/entry?next=${encodeURIComponent(next)}`);
+        return true;
+      }
+      return false;
+    },
+    [router],
+  );
+
   React.useEffect(() => {
     try {
       const v = window.localStorage.getItem("fn:lastSlotDisplayName");
@@ -148,6 +166,7 @@ export function SlotGrid({
     startTransition(async () => {
       const result = await reserveSlot(fd);
       if (!result.ok) {
+        if (redirectForGuardReason(result.reason)) return;
         setError(result.message ?? "枠の確保に失敗しました。");
         return;
       }
@@ -166,6 +185,7 @@ export function SlotGrid({
     startTransition(async () => {
       const result = await releaseOwnSlot(fd);
       if (!result.ok) {
+        if (redirectForGuardReason(result.reason)) return;
         setError(result.message ?? "枠の解放に失敗しました。");
         return;
       }
@@ -184,6 +204,7 @@ export function SlotGrid({
     startTransition(async () => {
       const result = await extendOwnSlotGroup(fd);
       if (!result.ok) {
+        if (redirectForGuardReason(result.reason)) return;
         setError(result.message ?? "枠の拡張に失敗しました。");
         return;
       }
@@ -201,6 +222,7 @@ export function SlotGrid({
     startTransition(async () => {
       const result = await mergeOwnSlotGroups(fd);
       if (!result.ok) {
+        if (redirectForGuardReason(result.reason)) return;
         setError(result.message ?? "枠の結合に失敗しました。");
         return;
       }

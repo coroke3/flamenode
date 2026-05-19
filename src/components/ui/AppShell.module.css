@@ -1,0 +1,32 @@
+.shell {
+  width: min(100% - 32px, 1120px);
+  margin: 0 auto;
+  padding: 32px 0 72px;
+}
+
+.narrow {
+  width: min(100% - 32px, 760px);
+}
+
+.default {
+  width: min(100% - 32px, 1120px);
+}
+
+.wide {
+  width: min(100% - 32px, 1360px);
+}
+
+.full {
+  width: min(100% - 24px, 1600px);
+}
+
+.dark {
+  color: #fff;
+}
+
+@media (max-width: 640px) {
+  .shell {
+    width: min(100% - 20px, 100%);
+    padding: 22px 0 56px;
+  }
+}

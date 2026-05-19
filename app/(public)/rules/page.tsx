@@ -1,8 +1,9 @@
 import * as React from "react";
 import type { Metadata } from "next";
 import { eq } from "drizzle-orm";
-import { getDatabase, withDatabase } from "@/lib/cloudflare";
+import { withDatabase } from "@/lib/cloudflare";
 import { termsVersions } from "@/lib/db/schema";
+import { acceptLatestTerms } from "@/lib/actions/terms";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 import { sanitizeUserHtml } from "@/lib/utils/sanitizeUserHtml";
@@ -81,7 +82,20 @@ function escape(s: string): string {
     .replace(/>/g, "&gt;");
 }
 
-export default async function RulesPage(): Promise<React.ReactElement> {
+function sanitizeNextPath(next: string | undefined): string {
+  if (!next) return "/dashboard";
+  if (!next.startsWith("/")) return "/dashboard";
+  if (next.startsWith("//")) return "/dashboard";
+  return next;
+}
+
+export default async function RulesPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ next?: string }>;
+}): Promise<React.ReactElement> {
+  const params = await searchParams;
+  const next = sanitizeNextPath(params?.next);
   const data = await withDatabase(async (db) => {
     const rows = await db
       .select()
@@ -130,6 +144,29 @@ export default async function RulesPage(): Promise<React.ReactElement> {
         }}
         dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(renderMarkdown(body)) }}
       />
+      <section
+        style={{
+          marginTop: 24,
+          padding: 22,
+          border: "1px solid var(--border-subtle)",
+          background: "var(--bg-surface)",
+          borderRadius: "var(--radius-md)",
+        }}
+      >
+        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>
+          利用規約への同意
+        </h2>
+        <p style={{ marginTop: 10, fontSize: 13, color: "var(--text-secondary)" }}>
+          枠確保、投稿、いいね、セーブなどの書き込み操作には利用規約への同意が必要です。
+          {next !== "/dashboard" ? " 同意後、元のページへ戻ります。" : ""}
+        </p>
+        <form action={acceptLatestTerms} style={{ marginTop: 18 }}>
+          <input type="hidden" name="next" value={next} />
+          <button type="submit" className="fn-btn fn-btn-primary">
+            利用規約に同意して戻る
+          </button>
+        </form>
+      </section>
       <section
         id="event-host"
         style={{

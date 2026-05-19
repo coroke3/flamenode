@@ -1,36 +1,37 @@
 .page {
-  padding-bottom: 64px;
+  padding-bottom: 72px;
 }
 
 .section {
-  margin-top: 40px;
+  width: min(100% - 32px, 1320px);
+  margin: 0 auto;
+  padding: clamp(28px, 6vw, 72px) 0 0;
 }
 
 .eventList {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 16px;
-  width: min(98%, var(--content-max));
-  margin: 16px auto 0;
+  gap: 18px;
+  margin-top: 18px;
 }
 
 .center {
-  text-align: center;
-  margin-top: 16px;
+  display: flex;
+  justify-content: center;
+  margin-top: 24px;
 }
 
 .empty {
-  width: min(96%, var(--content-max));
-  margin: 0 auto;
-  padding: 0 16px;
+  padding: 22px;
 }
 
 .shelfBox {
-  margin-top: 16px;
+  margin-top: 18px;
 }
 
-@media (min-width: 768px) {
+@media (max-width: 640px) {
   .section {
-    margin-top: 56px;
+    width: min(100% - 20px, 100%);
+    padding-top: 42px;
   }
 }

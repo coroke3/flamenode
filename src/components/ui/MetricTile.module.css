@@ -1,0 +1,49 @@
+.tile {
+  min-width: 136px;
+  padding: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.label {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.valueRow {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.valueRow strong {
+  font-size: clamp(28px, 5vw, 46px);
+  font-variant-numeric: tabular-nums;
+  line-height: 0.9;
+}
+
+.valueRow span {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.tile p {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.accent strong {
+  color: var(--accent-primary);
+}
+
+.warning {
+  border-color: rgba(255, 225, 0, 0.44);
+}
+
+.danger {
+  border-color: rgba(255, 70, 70, 0.46);
+}

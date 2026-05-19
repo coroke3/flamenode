@@ -1,30 +1,7 @@
-.page {
-  width: min(96%, 1100px);
-  margin: 0 auto;
-  padding: 32px 16px 64px;
-}
-
-.heading {
-  text-align: center;
-  margin-bottom: 28px;
-}
-
-.title {
-  font-size: 28px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-}
-
-.lead {
-  color: var(--text-secondary);
-  font-size: 13px;
-  margin-top: 6px;
-}
-
 .loginSection {
   background-color: var(--bg-surface);
   border: 1px solid var(--accent-primary);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-xl);
   padding: 24px;
   margin-bottom: 28px;
 }
@@ -35,17 +12,31 @@
   font-size: 11.5px;
 }
 
-.layout {
+.choiceGrid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 28px;
+  gap: 18px;
+  margin-top: 22px;
 }
 
-.card {
+.choiceCard {
+  min-height: 220px;
   background-color: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: 24px;
+  border-radius: var(--radius-xl);
+  padding: 26px;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.choiceCard:hover {
+  transform: translateY(-3px);
+  border-color: rgba(255, 225, 0, 0.48);
+  background:
+    linear-gradient(135deg, rgba(255, 225, 0, 0.06), transparent),
+    var(--bg-surface);
 }
 
 .cardTitle {
@@ -105,8 +96,7 @@
 }
 
 @media (min-width: 768px) {
-  .layout {
+  .choiceGrid {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 32px;
   }
 }

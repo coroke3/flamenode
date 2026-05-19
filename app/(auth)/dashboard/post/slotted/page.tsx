@@ -14,6 +14,9 @@ import { VideoForm } from "@/components/forms/VideoForm";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
+import { AppShell } from "@/components/ui/AppShell";
+import { PageHero } from "@/components/ui/PageHero";
+import { StatusPanel } from "@/components/ui/StatusPanel";
 
 export const metadata: Metadata = { title: "スロット提出" };
 export const dynamic = "force-dynamic";
@@ -110,40 +113,22 @@ export default async function SlottedPostPage({
   const softwareSuggestions = await getUsedSoftwareSuggestions(db);
 
   return (
-    <div
-      style={{
-        width: "min(96%, 960px)",
-        margin: "0 auto",
-        padding: "28px 16px 64px",
-      }}
-    >
-      <header style={{ marginBottom: 22 }}>
-        <p
-          style={{
-            color: "var(--text-muted)",
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: "0.18em",
-            textTransform: "uppercase",
-          }}
-        >
-          SLOT POST
-        </p>
-        <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "0.04em" }}>
-          スロット提出
-        </h1>
-        <p style={{ marginTop: 6, color: "var(--text-muted)", fontSize: 13 }}>
-          イベント:
-          <Link href={`/event/${ev.id}`}>{ev.title}</Link>
-          {slot.start_time ? (
-            <>
-              {" · "}
-              {formatUnix(slot.start_time, { dateOnly: true })}{" "}
-              {formatUnix(slot.start_time, { timeOnly: true })}
-            </>
-          ) : null}
-        </p>
-      </header>
+    <AppShell size="default">
+      <PageHero
+        eyebrow="Slot Post"
+        title="スロットに作品を提出"
+        description="確保済みのイベント枠に作品情報を紐づけます。連続枠の場合も1つの提出として扱います。"
+        actions={
+          <Link href={`/event/${ev.id}`} className="fn-btn fn-btn-ghost">
+            イベントを見る
+          </Link>
+        }
+      />
+
+      <StatusPanel title="投稿前チェック" tone="success">
+        イベント: {ev.title} / 投稿者X ID: @{activeX ?? "未設定"} / 連続枠:{" "}
+        {groupSize}
+      </StatusPanel>
 
       <section
         className="fn-card fn-mb-lg"
@@ -207,6 +192,6 @@ export default async function SlottedPostPage({
         <Icon name="info" size={12} aria-hidden /> 提出した動画は、イベントの
         承認設定によって公開タイミングが変わります。
       </p>
-    </div>
+    </AppShell>
   );
 }

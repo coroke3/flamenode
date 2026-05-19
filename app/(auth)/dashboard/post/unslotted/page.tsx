@@ -8,6 +8,9 @@ import { xUsers as xUsersTable } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { VideoForm } from "@/components/forms/VideoForm";
 import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
+import { AppShell } from "@/components/ui/AppShell";
+import { PageHero } from "@/components/ui/PageHero";
+import { StatusPanel } from "@/components/ui/StatusPanel";
 
 export const metadata: Metadata = { title: "枠なし投稿" };
 export const dynamic = "force-dynamic";
@@ -50,33 +53,33 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
   const softwareSuggestions = db ? await getUsedSoftwareSuggestions(db) : [];
 
   return (
-    <div
-      style={{
-        width: "min(96%, 960px)",
-        margin: "0 auto",
-        padding: "28px 16px 64px",
-      }}
-    >
-      <header style={{ marginBottom: 22 }}>
-        <p
-          style={{
-            color: "var(--text-muted)",
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: "0.18em",
-            textTransform: "uppercase",
-          }}
-        >
-          UNSLOTTED POST
-        </p>
-        <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "0.04em" }}>
-          枠なしで作品を投稿
-        </h1>
-        <p style={{ marginTop: 6, color: "var(--text-muted)", fontSize: 13 }}>
-          イベント枠に紐づかない通常投稿です。枠を確保済みの場合は{" "}
-          <Link href="/dashboard/post">投稿方法の選択</Link> から枠あり提出を選んでください。
-        </p>
-      </header>
+    <AppShell size="default">
+      <PageHero
+        eyebrow="Unslotted Post"
+        title="作品を投稿する"
+        description="イベント枠に紐づかない通常投稿です。投稿者X IDとYouTube IDを確認してから公開します。"
+        actions={
+          <Link href="/dashboard/post" className="fn-btn fn-btn-ghost">
+            投稿方法を選択
+          </Link>
+        }
+      />
+
+      <StatusPanel
+        title={activeX ? "投稿前チェック" : "まだ投稿できません"}
+        tone={activeX ? "success" : "warning"}
+        action={
+          !activeX ? (
+            <Link href="/dashboard/settings" className="fn-btn fn-btn-primary">
+              X IDを設定
+            </Link>
+          ) : null
+        }
+      >
+        {activeX
+          ? `投稿者X ID: @${activeX} / 表示名: ${xRow?.x_name ?? user.name ?? "未設定"}`
+          : "投稿には承認済みのActive X IDが必要です。"}
+      </StatusPanel>
       <VideoForm
         mode="free"
         xIdOptions={xIdOptions}
@@ -105,6 +108,6 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
         <Icon name="info" size={12} aria-hidden />
         利用規約への再同意は提出時に確認します。
       </p>
-    </div>
+    </AppShell>
   );
 }

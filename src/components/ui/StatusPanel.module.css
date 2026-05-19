@@ -1,0 +1,62 @@
+.panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 20px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+}
+
+.text {
+  min-width: 0;
+}
+
+.panel h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.body {
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.info {
+  border-color: rgba(120, 150, 255, 0.28);
+}
+
+.success {
+  border-color: rgba(70, 200, 120, 0.34);
+}
+
+.warning {
+  border-color: rgba(255, 225, 0, 0.45);
+  background:
+    linear-gradient(90deg, rgba(255, 225, 0, 0.12), transparent),
+    var(--bg-surface);
+}
+
+.danger {
+  border-color: rgba(255, 70, 70, 0.46);
+  background:
+    linear-gradient(90deg, rgba(255, 70, 70, 0.12), transparent),
+    var(--bg-surface);
+}
+
+.action {
+  flex-shrink: 0;
+}
+
+@media (max-width: 640px) {
+  .panel {
+    display: block;
+  }
+
+  .action {
+    margin-top: 14px;
+  }
+}

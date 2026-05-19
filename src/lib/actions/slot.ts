@@ -3,7 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { and, asc, eq, inArray } from "drizzle-orm";
-import { writeGuard } from "@/lib/auth/writeGuard";
+import {
+  writeGuard,
+  type WriteGuardDenyReason,
+} from "@/lib/auth/writeGuard";
 import { getDatabase } from "@/lib/cloudflare";
 import { events, historyLogs, slots } from "@/lib/db/schema";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
@@ -13,6 +16,7 @@ export interface SlotReserveResult {
   ok: boolean;
   message?: string;
   slotId?: string;
+  reason?: WriteGuardDenyReason;
 }
 
 const reserveSchema = z.object({
@@ -65,7 +69,9 @@ export async function reserveSlot(
     requireApprovedActiveXId: false,
     feature: "reserve_slot",
   });
-  if (!guard.ok) return { ok: false, message: guard.message };
+  if (!guard.ok) {
+    return { ok: false, reason: guard.reason, message: guard.message };
+  }
   const user = guard.user;
   const activeX = guard.activeXId;
   if (!activeX) {
@@ -196,7 +202,9 @@ export async function releaseOwnSlot(
   formData: FormData,
 ): Promise<SlotReserveResult> {
   const guard = await writeGuard({ feature: "release_slot" });
-  if (!guard.ok) return { ok: false, message: guard.message };
+  if (!guard.ok) {
+    return { ok: false, reason: guard.reason, message: guard.message };
+  }
   const user = guard.user;
   const activeX = guard.activeXId;
 
@@ -387,7 +395,9 @@ export async function extendOwnSlotGroup(
     requireApprovedActiveXId: false,
     feature: "extend_slot_group",
   });
-  if (!guard.ok) return { ok: false, message: guard.message };
+  if (!guard.ok) {
+    return { ok: false, reason: guard.reason, message: guard.message };
+  }
   const user = guard.user;
   const activeX = guard.activeXId;
   if (!activeX) {
@@ -539,7 +549,9 @@ export async function mergeOwnSlotGroups(
     requireApprovedActiveXId: false,
     feature: "merge_slot_groups",
   });
-  if (!guard.ok) return { ok: false, message: guard.message };
+  if (!guard.ok) {
+    return { ok: false, reason: guard.reason, message: guard.message };
+  }
   const user = guard.user;
   const activeX = guard.activeXId;
   if (!activeX) {

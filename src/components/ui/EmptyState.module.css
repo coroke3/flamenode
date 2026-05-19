@@ -1,0 +1,32 @@
+.empty {
+  display: grid;
+  place-items: center;
+  min-height: 220px;
+  padding: 32px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-xl);
+  background: rgba(255, 255, 255, 0.035);
+  text-align: center;
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  color: #050505;
+  background: var(--accent-primary);
+}
+
+.empty h2 {
+  margin: 16px 0 0;
+  font-size: 20px;
+}
+
+.empty p {
+  max-width: 440px;
+  margin: 10px 0 0;
+  color: var(--text-secondary);
+  line-height: 1.8;
+}

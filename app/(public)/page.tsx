@@ -22,6 +22,7 @@ import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 import { CreatorCard } from "@/components/user/CreatorCard";
 import { EventPanel } from "@/components/layout/EventPanel";
 import { Icon } from "@/components/ui/Icon";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 export const dynamic = "force-dynamic";
 
@@ -98,13 +99,28 @@ export default async function TopPage(): Promise<React.ReactElement> {
       <HomeIntroBand activeEvents={activeEvents} slotStats={topSlotStats} />
 
       <section className={styles.section} aria-labelledby="sec-recommend">
-        <SectionHeader title="おすすめ" moreHref="/recommend" />
+        <SectionHeader title="今日見るべき作品" moreHref="/recommend" />
         <div className={styles.shelfBox}>
           {recommended.length === 0 ? (
             <EmptyShelf message="まだおすすめできる作品がありません。" />
           ) : (
-            <Shelf ariaLabel="おすすめ作品">
+            <Shelf ariaLabel="今日見るべき作品">
               {recommended.map((v) => (
+                <VideoCard key={v.id} video={v} />
+              ))}
+            </Shelf>
+          )}
+        </div>
+      </section>
+
+      <section className={styles.section} aria-labelledby="sec-latest">
+        <SectionHeader title="新着作品" moreHref="/list" />
+        <div className={styles.shelfBox}>
+          {latest.length === 0 ? (
+            <EmptyShelf message="まだ公開作品がありません。" />
+          ) : (
+            <Shelf ariaLabel="新着作品">
+              {latest.map((v) => (
                 <VideoCard key={v.id} video={v} />
               ))}
             </Shelf>
@@ -137,31 +153,11 @@ export default async function TopPage(): Promise<React.ReactElement> {
         </div>
       </section>
 
-      <section className={styles.section} aria-labelledby="sec-latest">
-        <SectionHeader title="最新の作品" moreHref="/list" />
-        <div className={styles.shelfBox}>
-          {latest.length === 0 ? (
-            <EmptyShelf message="まだ公開作品がありません。" />
-          ) : (
-            <Shelf ariaLabel="最新作品">
-              {latest.map((v) => (
-                <VideoCard key={v.id} video={v} />
-              ))}
-            </Shelf>
-          )}
-        </div>
-      </section>
-
       <section className={styles.section} aria-labelledby="sec-events">
         <SectionHeader title="イベント" moreHref="/event" />
         <div className={styles.eventList}>
           {latestEvents.length === 0 ? (
-            <p
-              className="fn-empty-message"
-              style={{ textAlign: "center", padding: "24px 0" }}
-            >
-              まだ公開中のイベントがありません。
-            </p>
+            <EmptyShelf message="まだ公開中のイベントがありません。" />
           ) : (
             latestEvents.map((ev) => (
               <EventPanel
@@ -186,10 +182,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
 function EmptyShelf({ message }: { message: string }): React.ReactElement {
   return (
     <div className={styles.empty}>
-      <div className="fn-empty">
-        <Icon name="info" size={24} aria-hidden />
-        <p className="fn-empty-message">{message}</p>
-      </div>
+      <EmptyState title="まだ準備中です" description={message} />
     </div>
   );
 }
