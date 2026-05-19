@@ -60,11 +60,15 @@ export function VideoIconPicker({
     });
   };
 
+  // React は同じ要素の inline style で shorthand (border) と longhand (borderColor) を
+  // 混在させた状態で再 render すると警告を出すため、border 系は longhand 3 つに統一する。
   const buttonStyle: React.CSSProperties = {
     position: "relative",
     aspectRatio: "1 / 1",
     minWidth: 0,
-    border: "1px solid var(--border-subtle)",
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--border-subtle)",
     borderRadius: "var(--radius-sm)",
     background: "var(--bg-base)",
     cursor: disabled ? "not-allowed" : "pointer",
