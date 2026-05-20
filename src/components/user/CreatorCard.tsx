@@ -34,11 +34,13 @@ export function CreatorCard({
         )}
       </div>
       <span className={styles.name}>{data.x_name}</span>
-      {data.hint ? (
-        <span className={styles.hint}>{data.hint}</span>
-      ) : data.video_count !== undefined ? (
-        <span className={styles.hint}>{data.video_count} 作品</span>
-      ) : null}
+      <span className={styles.hint}>
+        {data.hint
+          ? data.hint
+          : data.video_count !== undefined
+            ? `@${data.id} · ${data.video_count} 作品`
+            : `@${data.id}`}
+      </span>
     </Link>
   );
 }

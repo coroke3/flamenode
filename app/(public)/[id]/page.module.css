@@ -28,11 +28,28 @@
 .author {
   display: flex;
   align-items: center;
-  gap: 10px;
+  /* スマホで投稿者情報・リンク群・操作ボタンが重ならないよう、行間 gap を確保する */
+  gap: 10px 14px;
   flex-wrap: wrap;
   margin-top: 12px;
   padding-bottom: 16px;
   border-bottom: 1px solid var(--border-subtle);
+}
+
+/* スマホ幅では投稿者リンク群・操作ボタンをフルキャパで折り返す */
+@media (max-width: 560px) {
+  .author {
+    gap: 8px;
+  }
+  .authorActions {
+    /* スマホでは margin-left:auto をやめて自然な折り返し位置に */
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .authorLinkGroup {
+    flex-wrap: wrap;
+  }
 }
 
 .authorIcon,
@@ -347,15 +364,27 @@
 
 @media (min-width: 1024px) {
   .layout {
+    /* 1024-1280px 帯で本文が窮屈に見えていたので、サイドバー幅を 320px に絞る。
+       1440px 以上で 360px に戻す。 */
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 28px;
+  }
+  .title {
+    font-size: 28px;
+  }
+  /* デスクトップでは aside の方を使う */
+  .relatedMobile {
+    display: none;
+  }
+}
+
+@media (min-width: 1280px) {
+  .layout {
     grid-template-columns: minmax(0, 1fr) 360px;
     gap: 36px;
   }
   .title {
     font-size: 30px;
-  }
-  /* デスクトップでは aside の方を使う */
-  .relatedMobile {
-    display: none;
   }
 }
 

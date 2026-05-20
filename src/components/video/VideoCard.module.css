@@ -1,15 +1,16 @@
 .card {
   display: block;
   width: 200px;
-  transition: transform 0.18s ease;
+  transition: transform 0.2s ease;
 }
 
+/* hover の浮きは 2px 程度に弱める (派手すぎを避ける) */
 .card:hover {
-  transform: translateY(-4px);
+  transform: translateY(-2px);
 }
 
 .card:hover .thumb {
-  transform: scale(1.04);
+  transform: scale(1.02);
 }
 
 .thumbWrap {
@@ -39,7 +40,7 @@
   margin-top: 8px;
   font-size: 13px;
   font-weight: 600;
-  line-height: 1.45;
+  line-height: 1.5;
   color: var(--text-primary);
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -47,6 +48,7 @@
   line-clamp: 2;
   overflow: hidden;
   transition: color 0.15s ease;
+  letter-spacing: 0.005em;
 }
 
 .card:hover .title {
@@ -104,14 +106,16 @@
 @media (min-width: 700px) { .card.compact { width: 220px; } }
 @media (min-width: 1024px) { .card.compact { width: 220px; } }
 
-/* list 行 (関連動画レール) */
+/* list 行 (関連動画レール). サイドバーの密度を下げ気味に。 */
 .list {
   display: flex;
   gap: 10px;
   align-items: flex-start;
-  padding: 6px 4px;
+  padding: 8px 6px;
   border-radius: var(--radius-sm);
   transition: background-color 0.15s ease;
+  text-decoration: none;
+  color: inherit;
 }
 
 .list:hover {
@@ -123,7 +127,8 @@
 }
 
 .listThumb {
-  width: 160px;
+  /* サイドバー幅に対して 144px がバランス良い (旧 160px は窮屈) */
+  width: 144px;
   flex-shrink: 0;
   aspect-ratio: 16 / 9;
   overflow: hidden;

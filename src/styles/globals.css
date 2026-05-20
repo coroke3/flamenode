@@ -39,7 +39,23 @@
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 12px;
+  --radius-xl: 20px;
   --radius-pill: 9999px;
+
+  /* タイポグラフィ token (PR46): フルードな clamp で 1 軸に絞る。
+     既存のページ別 font-size と併存させ、徐々に置き換える。 */
+  --text-display: clamp(24px, 3.4vw, 32px);
+  --text-h1: clamp(20px, 2.6vw, 26px);
+  --text-h2: clamp(16px, 1.8vw, 19px);
+  --text-h3: 14px;
+  --text-body: 14px;
+  --text-meta: 12px;
+  --text-micro: 11px;
+
+  /* 影の段階 token (PR46): 主役だけに使う。カード hover では --shadow-1 まで。 */
+  --shadow-1: 0 1px 0 rgba(0, 0, 0, 0.04), 0 4px 12px -8px rgba(0, 0, 0, 0.18);
+  --shadow-2: 0 1px 0 rgba(0, 0, 0, 0.04), 0 10px 24px -14px rgba(0, 0, 0, 0.22);
+  --shadow-hero: 0 1px 0 rgba(0, 0, 0, 0.04), 0 24px 60px -32px rgba(0, 0, 0, 0.32);
 
   --content-max: 1400px;
 }
@@ -857,4 +873,31 @@ select {
   -webkit-line-clamp: 3;
   line-clamp: 3;
   overflow: hidden;
+}
+
+/* ----------------------------------------------------------
+ * a11y / motion (PR50)
+ *
+ * - キーボード focus を分かりやすくする統一スタイル。
+ *   .fn-icon-btn は個別 outline を持つので除外。
+ * - prefers-reduced-motion を尊重し、ホバー時の浮き・サムネ拡大を抑制する。
+ * ---------------------------------------------------------- */
+
+a:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
