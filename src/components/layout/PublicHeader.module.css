@@ -28,6 +28,44 @@
   text-decoration: none;
 }
 
+/* デスクトップ用主要ナビ。logo の右、search/postBtn の左に置く。
+   モバイルでは display:none で隠す (mobileNav に同等項目が出る)。 */
+.desktopNav {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  margin-left: 12px;
+}
+
+@media (min-width: 768px) {
+  .desktopNav {
+    display: inline-flex;
+  }
+}
+
+.desktopNavLink {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.desktopNavLink:hover {
+  color: var(--text-primary);
+  background-color: var(--bg-elevated);
+}
+
+.desktopNavLinkActive {
+  color: var(--text-primary);
+  background-color: var(--accent-primary-soft);
+  font-weight: 700;
+}
+
 .right {
   margin-left: auto;
   display: flex;

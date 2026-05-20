@@ -1,7 +1,7 @@
 .page {
-  width: min(96%, var(--content-max));
-  margin: 0 auto;
-  padding: 28px 16px 64px;
+  /* 水平余白は fn-public-container に任せる。上下だけ clamp で統一。 */
+  padding-top: clamp(20px, 4vw, 32px);
+  padding-bottom: clamp(40px, 6vw, 80px);
 }
 
 .header {

@@ -1,32 +1,37 @@
+/* 公開ページ空状態 (PR55):
+   - dashed border をやめ、薄い背景面だけで「ここに何かが入る予定」を示す。
+   - 文章短め推奨。次の行動を 1 つだけ置く運用。
+   - アイコン丸の黄色面塗りも控えめにし、accent-soft へ。 */
 .empty {
   display: grid;
   place-items: center;
-  min-height: 220px;
-  padding: 32px;
-  border: 1px dashed var(--border-subtle);
-  border-radius: var(--radius-xl);
-  background: rgba(255, 255, 255, 0.035);
+  min-height: 180px;
+  padding: clamp(20px, 3vw, 28px);
+  border-radius: var(--radius-lg);
+  background-color: var(--bg-surface);
   text-align: center;
 }
 
 .icon {
   display: grid;
   place-items: center;
-  width: 42px;
-  height: 42px;
+  width: 36px;
+  height: 36px;
   border-radius: 999px;
-  color: #050505;
-  background: var(--accent-primary);
+  color: var(--accent-primary-strong, var(--accent-primary));
+  background: var(--accent-primary-soft);
 }
 
 .empty h2 {
-  margin: 16px 0 0;
-  font-size: 20px;
+  margin: 12px 0 0;
+  font-size: 16px;
+  font-weight: 700;
 }
 
 .empty p {
   max-width: 440px;
-  margin: 10px 0 0;
+  margin: 6px 0 12px;
   color: var(--text-secondary);
-  line-height: 1.8;
+  font-size: 13px;
+  line-height: 1.7;
 }

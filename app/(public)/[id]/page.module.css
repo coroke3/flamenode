@@ -136,25 +136,34 @@
   color: var(--text-primary);
 }
 
-/* 詳細コメント (みどころ + 制作エピソード + あとがき) を 1 つにまとめた details。 */
+/* 詳細コメント (みどころ + 制作エピソード + あとがき) を 1 つにまとめた details。
+ * 「閉じていても存在が分かる」ように、summary を pill 状の背景面にして
+ * クリックできることが視覚的に明確になるようにする。 */
 .detailComments {
-  margin-top: clamp(12px, 2vw, 18px);
-  padding: 12px 0;
-  border-top: 1px solid var(--border-subtle);
+  margin-top: clamp(14px, 2vw, 20px);
 }
 
 .detailComments > summary {
   list-style: none;
   cursor: pointer;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--text-muted);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-elevated);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
   user-select: none;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.detailComments > summary:hover,
+.detailComments[open] > summary {
+  background: var(--accent-primary-soft);
+  color: var(--text-primary);
 }
 
 .detailComments > summary::-webkit-details-marker {
@@ -165,16 +174,20 @@
   content: "▸";
   display: inline-block;
   transition: transform 0.15s ease;
+  font-size: 10px;
+  color: var(--text-muted);
 }
 
 .detailComments[open] > summary::before {
   transform: rotate(90deg);
+  color: var(--accent-primary-strong, var(--accent-primary));
 }
 
 .detailCommentsBody {
   display: grid;
-  gap: 14px;
-  margin-top: 12px;
+  gap: clamp(14px, 2vw, 18px);
+  margin-top: clamp(12px, 2vw, 16px);
+  padding-left: clamp(0px, 1vw, 8px);
 }
 
 .warningBar {

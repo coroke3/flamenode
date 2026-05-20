@@ -33,7 +33,7 @@ export default async function EventListPage(): Promise<React.ReactElement> {
   })) ?? [];
 
   return (
-    <div className={styles.page}>
+    <div className={`fn-public-container ${styles.page}`}>
       <header>
         <h1 className={styles.title}>イベント</h1>
         <p className={styles.lead}>

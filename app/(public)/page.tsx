@@ -104,11 +104,22 @@ export default async function TopPage(): Promise<React.ReactElement> {
           {recommended.length === 0 ? (
             <EmptyShelf message="まだおすすめできる作品がありません。" />
           ) : (
-            <Shelf ariaLabel="今日見るべき作品">
-              {recommended.map((v, index) => (
-                <VideoCard key={`${v.id}-recommended-${index}`} video={v} />
-              ))}
-            </Shelf>
+            <>
+              {/* 先頭 1 件は少し大きめに見せて棚との単調感を避ける。
+                  2 件目以降は通常の横棚で並べる。 */}
+              {recommended[0] ? (
+                <div className={styles.featuredRecommend}>
+                  <VideoCard video={recommended[0]} />
+                </div>
+              ) : null}
+              {recommended.length > 1 ? (
+                <Shelf ariaLabel="今日見るべき作品 (続き)">
+                  {recommended.slice(1).map((v, index) => (
+                    <VideoCard key={`${v.id}-recommended-${index}`} video={v} />
+                  ))}
+                </Shelf>
+              ) : null}
+            </>
           )}
         </div>
       </section>

@@ -789,6 +789,29 @@ select {
   padding-right: clamp(12px, 4vw, 24px);
 }
 
+/* 公開ページのセクション。連続するときに自然なリズムが出る上下余白。 */
+.fn-public-section {
+  margin-top: clamp(28px, 4vw, 44px);
+}
+
+.fn-public-section:first-child {
+  margin-top: 0;
+}
+
+/* 公開ページの縦積みスタック (フィールドや行のリスト用)。 */
+.fn-public-stack {
+  display: grid;
+  gap: clamp(10px, 2vw, 18px);
+}
+
+/* 公開ページのコンテンツ surface。`fn-card` のような枠線を持たず、
+ * 薄い背景面と内部余白だけで「ここはひとかたまり」を示す。 */
+.fn-public-surface {
+  background-color: var(--bg-surface);
+  border-radius: var(--radius-md);
+  padding: clamp(14px, 2.6vw, 22px);
+}
+
 /* 公開ページのセクション区切り。控えめな下線+余白だけ */
 .fn-section-heading {
   display: flex;

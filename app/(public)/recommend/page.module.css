@@ -37,13 +37,31 @@
   margin: clamp(12px, 2vw, 18px) 0;
 }
 
-/* Hero */
+/* Hero
+ * 「いま見るなら」の代表 1 件をやや大きく見せる。
+ * VideoCard の幅は固定なので、Hero コンテナを surface + 中央寄せにし、
+ * 内側で広めに表示する。 */
 .hero {
-  margin: clamp(16px, 3vw, 24px) 0 clamp(16px, 3vw, 24px);
+  margin: clamp(20px, 3vw, 32px) 0 clamp(20px, 3vw, 32px);
+  padding: clamp(16px, 2.6vw, 24px);
+  background-color: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
 }
 
 .heroCard {
-  max-width: 720px;
+  display: flex;
+  justify-content: center;
+}
+
+.heroCard > * {
+  width: min(100%, 560px);
+}
+
+@media (min-width: 768px) {
+  .heroCard > * {
+    width: min(100%, 640px);
+  }
 }
 
 /* セクション */

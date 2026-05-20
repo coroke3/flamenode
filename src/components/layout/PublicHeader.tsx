@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import styles from "./PublicHeader.module.css";
 import { Logo } from "@/components/ui/Logo";
 import { Icon } from "@/components/ui/Icon";
@@ -9,6 +10,24 @@ import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { XIdSwitcher, type XIdEntry } from "@/components/user/XIdSwitcher";
 import { AccountMenu } from "@/components/user/AccountMenu";
 import type { HeaderUser } from "@/lib/auth/headerUser";
+
+/**
+ * 公開ナビ。デスクトップでは横並び、モバイルではドロワー内に出る。
+ * 現在地は `usePathname` から判定し、サブツリー一致でハイライトする。
+ */
+const PUBLIC_NAV_ITEMS: { href: string; label: string; iconName: "grid" | "calendar" | "users" | "heart" }[] = [
+  { href: "/list", label: "作品", iconName: "grid" },
+  { href: "/event", label: "イベント", iconName: "calendar" },
+  { href: "/user", label: "クリエイター", iconName: "users" },
+  { href: "/recommend", label: "おすすめ", iconName: "heart" },
+];
+
+function isPathActive(pathname: string | null, href: string): boolean {
+  if (!pathname) return false;
+  // /event は /event/[id] でも active 扱い。/ は完全一致のみ。
+  if (href === "/") return pathname === "/";
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
 
 export type PublicHeaderUser = Pick<
   HeaderUser,
@@ -24,6 +43,7 @@ interface PublicHeaderProps {
 export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
+  const pathname = usePathname();
 
   const managementLink = user?.management.canAccessAdmin
     ? { href: "/admin", label: "管理", icon: "settings" as const }
@@ -41,6 +61,23 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
         >
           <Logo />
         </Link>
+
+        {/* デスクトップ用主要ナビ。usePathname でサブツリー一致をハイライト。 */}
+        <nav className={styles.desktopNav} aria-label="公開ナビゲーション">
+          {PUBLIC_NAV_ITEMS.map((item) => {
+            const active = isPathActive(pathname, item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`${styles.desktopNavLink} ${active ? styles.desktopNavLinkActive : ""}`}
+                aria-current={active ? "page" : undefined}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
 
         <div className={styles.right}>
           <form
@@ -125,25 +162,26 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
               <div className={styles.mobileSection}>
                 <Link
                   href="/entry"
-                  className={styles.mobileLink}
+                  className={`${styles.mobileLink} ${isPathActive(pathname, "/entry") ? styles.mobileLinkActive : ""}`}
                   onClick={() => setMobileOpen(false)}
+                  aria-current={isPathActive(pathname, "/entry") ? "page" : undefined}
                 >
                   <Icon name="discord" size={16} aria-hidden /> ログイン
                 </Link>
-                <Link
-                  href="/list"
-                  className={styles.mobileLink}
-                  onClick={() => setMobileOpen(false)}
-                >
-                  <Icon name="grid" size={16} aria-hidden /> 作品を見る
-                </Link>
-                <Link
-                  href="/event"
-                  className={styles.mobileLink}
-                  onClick={() => setMobileOpen(false)}
-                >
-                  <Icon name="calendar" size={16} aria-hidden /> イベントを見る
-                </Link>
+                {PUBLIC_NAV_ITEMS.map((item) => {
+                  const active = isPathActive(pathname, item.href);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={`${styles.mobileLink} ${active ? styles.mobileLinkActive : ""}`}
+                      onClick={() => setMobileOpen(false)}
+                      aria-current={active ? "page" : undefined}
+                    >
+                      <Icon name={item.iconName} size={16} aria-hidden /> {item.label}
+                    </Link>
+                  );
+                })}
               </div>
             ) : (
               <>

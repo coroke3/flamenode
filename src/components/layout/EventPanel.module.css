@@ -1,8 +1,9 @@
 .panel {
+  /* 枠線で囲うだけの見た目をやめ、薄背景面 + 余白で「ひとかたまり」を示す。
+     event accent_color は title 下線とホバーだけで使い、面塗りには使わない。 */
   background-color: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  padding: 20px 22px;
+  padding: clamp(16px, 2.6vw, 22px);
 }
 
 .head {
@@ -74,9 +75,12 @@
 }
 
 .activeBadge {
-  background-color: var(--event-accent, var(--accent-primary));
-  color: #1a1606;
-  padding: 2px 8px;
+  /* 黄色面塗りをやめ、accent ボーダー + アクセント文字に変更。
+     event accent_color は文字側に使い、面塗り面積を増やさない。 */
+  background-color: transparent;
+  color: var(--event-accent, var(--accent-primary-strong));
+  border: 1px solid color-mix(in srgb, var(--event-accent, var(--accent-primary)) 60%, transparent);
+  padding: 1px 8px;
   border-radius: var(--radius-pill);
   font-size: 10px;
   font-weight: 700;

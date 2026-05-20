@@ -187,7 +187,7 @@ export default async function UserListPage({
   };
 
   return (
-    <div className={styles.page}>
+    <div className={`fn-public-container ${styles.page}`}>
       <header className={styles.header}>
         <div>
           <p className={styles.eyebrow}>CREATOR</p>
@@ -239,9 +239,9 @@ export default async function UserListPage({
         <>
           <div className={styles.meta}>{total} 件</div>
           <div className={styles.grid}>
-            {current.map((creator) => (
+            {current.map((creator, index) => (
               <Link
-                key={creator.id}
+                key={`${creator.id}-creator-${index}`}
                 href={`/user/${creator.id}`}
                 className={styles.card}
                 prefetch={false}
