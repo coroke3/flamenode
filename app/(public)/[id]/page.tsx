@@ -404,7 +404,27 @@ export default async function VideoDetailPage({
           ) : null}
 
           <div className={styles.metaSection}>
-            {video.music ? <MetaItem title="楽曲" body={`${video.music}${video.credit ? ` / ${video.credit}` : ""}`} /> : null}
+            {video.music ? (
+              <MetaItem
+                title="楽曲"
+                body={
+                  <>
+                    {video.music_reference_url ? (
+                      <a
+                        href={video.music_reference_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        {video.music}
+                      </a>
+                    ) : (
+                      video.music
+                    )}
+                    {video.credit ? ` / ${video.credit}` : ""}
+                  </>
+                }
+              />
+            ) : null}
             {video.intro_comment ? <MetaItem title="紹介コメント" body={video.intro_comment} /> : null}
             {video.highlights ? <MetaItem title="みどころ" body={video.highlights} /> : null}
             {video.production_story ? <MetaItem title="制作エピソード" body={video.production_story} /> : null}
@@ -524,7 +544,7 @@ function MetaItem({
   body,
 }: {
   title: string;
-  body: string;
+  body: React.ReactNode;
 }): React.ReactElement {
   return (
     <details className={styles.metaItem}>

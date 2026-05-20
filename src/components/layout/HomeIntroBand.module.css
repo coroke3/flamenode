@@ -17,6 +17,18 @@
   }
 }
 
+/* 複数の募集中イベントを縦に積むラッパー。 */
+.recruitStack {
+  display: grid;
+  gap: 14px;
+}
+
+.recruitMore {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+}
+
 .inner {
   position: relative;
   display: flex;

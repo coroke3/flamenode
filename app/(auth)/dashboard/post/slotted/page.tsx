@@ -15,6 +15,7 @@ import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
+import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { AppShell } from "@/components/ui/AppShell";
 import { PageHero } from "@/components/ui/PageHero";
 import { StatusPanel } from "@/components/ui/StatusPanel";
@@ -117,6 +118,21 @@ export default async function SlottedPostPage({
     .limit(2000);
   const softwareSuggestions = await getUsedSoftwareSuggestions(db);
   const iconCandidates = activeX ? await getXIconCandidates(db, activeX) : [];
+  // 所属イベント候補: 受付中のイベント + 当該スロットのイベント自体 (常時固定)。
+  const acceptingEvents = await db
+    .select()
+    .from(eventsTable)
+    .where(eq(eventsTable.is_archived, 0))
+    .then((rows) =>
+      rows
+        .filter((event) => isAcceptingEntries(event))
+        .map((event) => ({ id: event.id, title: event.title })),
+    );
+  const slotEventOption = { id: ev.id, title: ev.title };
+  const eventOptions = acceptingEvents.some((o) => o.id === ev.id)
+    ? acceptingEvents
+    : [slotEventOption, ...acceptingEvents];
+  const initialEventIds = [ev.id];
 
   // 投稿は writeGuard で active_x_user_id が approved であることを要求するため、
   // フォーム送信前に同じ条件を判定して「押せるけど失敗する」状態を防ぐ。
@@ -210,11 +226,13 @@ export default async function SlottedPostPage({
           profile_text: xRow?.profile_text ?? undefined,
           youtube_channel_url: xRow?.youtube_channel_url ?? undefined,
           other_social_links: xRow?.other_social_links ?? undefined,
+          event_ids: initialEventIds,
         }}
         memberSuggestions={memberSuggestions}
         softwareSuggestions={softwareSuggestions}
         submitBlockedReason={submitBlockedReason}
         iconCandidates={iconCandidates}
+        eventOptions={eventOptions}
       />
 
       <p

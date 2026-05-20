@@ -4,7 +4,11 @@ import type { Metadata } from "next";
 import { and, asc, eq } from "drizzle-orm";
 import { requireSession } from "@/lib/auth/guard";
 import { getDatabase } from "@/lib/cloudflare";
-import { xUsers as xUsersTable } from "@/lib/db/schema";
+import {
+  events as eventsTable,
+  xUsers as xUsersTable,
+} from "@/lib/db/schema";
+import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { Icon } from "@/components/ui/Icon";
 import { VideoForm } from "@/components/forms/VideoForm";
 import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
@@ -52,6 +56,18 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
         .limit(2000)
     : [];
   const softwareSuggestions = db ? await getUsedSoftwareSuggestions(db) : [];
+  // 所属イベント候補: 受付中のイベントのみ。投稿者が能動的に複数所属を選べるようにする。
+  const eventOptions = db
+    ? await db
+        .select()
+        .from(eventsTable)
+        .where(eq(eventsTable.is_archived, 0))
+        .then((rows) =>
+          rows
+            .filter((ev) => isAcceptingEntries(ev))
+            .map((ev) => ({ id: ev.id, title: ev.title })),
+        )
+    : [];
   const iconCandidates =
     db && activeX ? await getXIconCandidates(db, activeX) : [];
 
@@ -116,6 +132,7 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
         softwareSuggestions={softwareSuggestions}
         submitBlockedReason={submitBlockedReason}
         iconCandidates={iconCandidates}
+        eventOptions={eventOptions}
       />
       <p
         style={{

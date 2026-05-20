@@ -4,7 +4,15 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { and, asc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
-import { videoMembers, videos as videosTable, xUsers as xUsersTable } from "@/lib/db/schema";
+import {
+  events as eventsTable,
+  videoEvents as videoEventsTable,
+  videoMembers,
+  videos as videosTable,
+  xUsers as xUsersTable,
+} from "@/lib/db/schema";
+import { inArray } from "drizzle-orm";
+import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { requireSession } from "@/lib/auth/guard";
 import { canEditVideo } from "@/lib/auth/ownership";
 import { VideoForm } from "@/components/forms/VideoForm";
@@ -76,6 +84,37 @@ export default async function EditVideoPage({
   // 編集対象作品の主体 X ID に紐づく候補を出す。
   // admin が他者作品を編集する場合も creator/contact 由来の候補が出る。
   const iconCandidates = creatorX ? await getXIconCandidates(db, creatorX) : [];
+
+  // 所属イベント (video_events 経由) を取得 + 候補リストを組み立てる。
+  // 候補 = (受付中のイベント) ∪ (既に紐付いているイベント) ∪ (primary_event_id)。
+  // 既存所属を外せないわけではないが、UI には現状を維持できるように両方並べる。
+  const currentVideoEvents = await db
+    .select({ event_id: videoEventsTable.event_id })
+    .from(videoEventsTable)
+    .where(eq(videoEventsTable.video_id, video.id));
+  const currentEventIds = currentVideoEvents.map((r) => r.event_id);
+  if (video.primary_event_id && !currentEventIds.includes(video.primary_event_id)) {
+    currentEventIds.push(video.primary_event_id);
+  }
+  const allEventRows = await db
+    .select()
+    .from(eventsTable)
+    .where(eq(eventsTable.is_archived, 0));
+  const acceptingEventMap = new Map<string, { id: string; title: string }>();
+  for (const ev of allEventRows) {
+    if (isAcceptingEntries(ev)) {
+      acceptingEventMap.set(ev.id, { id: ev.id, title: ev.title });
+    }
+  }
+  // 現在紐付いているイベントは受付状態を問わず候補に含める
+  if (currentEventIds.length > 0) {
+    const attached = await db
+      .select({ id: eventsTable.id, title: eventsTable.title })
+      .from(eventsTable)
+      .where(inArray(eventsTable.id, currentEventIds));
+    for (const ev of attached) acceptingEventMap.set(ev.id, ev);
+  }
+  const eventOptions = Array.from(acceptingEventMap.values());
   const xIdOptions = await db
     .select({ id: xUsersTable.id, x_name: xUsersTable.x_name })
     .from(xUsersTable)
@@ -223,6 +262,7 @@ export default async function EditVideoPage({
             ? youtubeWatchUrl(video.youtube_video_id)
             : undefined,
           music: video.music ?? undefined,
+          music_reference_url: video.music_reference_url ?? undefined,
           credit: video.credit ?? undefined,
           intro_comment: video.intro_comment ?? undefined,
           used_software: video.used_software ?? undefined,
@@ -231,9 +271,12 @@ export default async function EditVideoPage({
           closing_comment: video.closing_comment ?? undefined,
           is_collab: video.submission_type === "collab",
           members: initialMembers,
+          event_ids: currentEventIds,
         }}
         memberSuggestions={memberSuggestions}
         softwareSuggestions={softwareSuggestions}
+        eventOptions={eventOptions}
+        canEditEvents={canEditIdentity}
         iconCandidates={iconCandidates}
       />
 

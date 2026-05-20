@@ -289,7 +289,7 @@ export function EventStaffManager({
             <thead>
               <tr>
                 <th>表示名 / ID</th>
-                <th>付与 permission_key</th>
+                <th>付与権限</th>
                 <th>公開</th>
                 <th></th>
               </tr>
@@ -305,7 +305,38 @@ export function EventStaffManager({
                       {c.discord_user_id ? ` discord:${c.discord_user_id.slice(0, 10)}…` : ""}
                     </span>
                   </td>
-                  <td style={{ fontSize: 11 }}>{c.permission_keys.join(", ")}</td>
+                  <td style={{ fontSize: 11 }}>
+                    {/* permission_keys を日本語ラベルのバッジ列にして、
+                        非エンジニアでも何が許可されているか即座に分かるようにする。 */}
+                    <div
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: 4,
+                      }}
+                    >
+                      {c.permission_keys.length === 0 ? (
+                        <span className="fn-muted">(なし)</span>
+                      ) : (
+                        c.permission_keys.map((k) => {
+                          const meta =
+                            COLLABORATOR_PERMISSION_LABELS[
+                              k as keyof typeof COLLABORATOR_PERMISSION_LABELS
+                            ];
+                          return (
+                            <span
+                              key={k}
+                              className="fn-badge fn-badge-soft"
+                              title={meta?.description ?? k}
+                              style={{ fontSize: 10 }}
+                            >
+                              {meta?.label ?? k}
+                            </span>
+                          );
+                        })
+                      )}
+                    </div>
+                  </td>
                   <td>{c.is_public_staff === 1 ? "公開" : "非公開"}</td>
                   <td>
                     <button

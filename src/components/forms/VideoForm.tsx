@@ -34,6 +34,7 @@ export interface VideoFormInitialValues {
   title?: string;
   youtube_url?: string;
   music?: string;
+  music_reference_url?: string;
   credit?: string;
   intro_comment?: string;
   used_software?: string;
@@ -42,6 +43,14 @@ export interface VideoFormInitialValues {
   closing_comment?: string;
   is_collab?: boolean;
   members?: VideoMemberInput[];
+  /** この作品が所属するイベント ID 一覧 (video_events 経由)。 */
+  event_ids?: string[];
+}
+
+/** VideoForm のイベント選択肢。 */
+export interface EventOption {
+  id: string;
+  title: string;
 }
 
 export interface XIdOption {
@@ -83,6 +92,17 @@ interface VideoFormProps {
    * x_users.icon_url / x_user_icons / 同 X ID の過去 videos.icon_url を新しい順で含む。
    */
   iconCandidates?: string[];
+  /**
+   * 所属イベントの選択肢 (受付中のイベント等)。複数チェック可能で、
+   * 出力は hidden input `event_ids` (改行区切り) で渡される。
+   * 未指定なら所属イベント選択 UI は表示しない (現在の挙動互換)。
+   */
+  eventOptions?: EventOption[];
+  /**
+   * 所属イベントの編集権限。false なら表示のみ (チェックボックス操作不可)。
+   * デフォルト true。slot モードでは slot.event_id は固定で含まれる。
+   */
+  canEditEvents?: boolean;
 }
 
 /** section key が disabledSections に含まれているか確認する小関数。 */
@@ -123,10 +143,17 @@ export function VideoForm({
   disabledFields,
   submitBlockedReason,
   iconCandidates = [],
+  eventOptions = [],
+  canEditEvents = true,
 }: VideoFormProps): React.ReactElement {
   const router = useRouter();
   const [youtubeUrl, setYoutubeUrl] = React.useState(initial.youtube_url ?? "");
   const [isCollab, setIsCollab] = React.useState(!!initial.is_collab);
+  // 所属イベントの選択状態。slot モードでは slot.event_id が initial.event_ids
+  // に含まれている前提で、固定として扱う (UI でも変更不可)。
+  const [selectedEventIds, setSelectedEventIds] = React.useState<string[]>(
+    initial.event_ids ?? [],
+  );
   const [pending, startTransition] = React.useTransition();
   const [result, setResult] = React.useState<VideoActionResult | null>(null);
   // 未保存変更がある状態でブラウザを離れようとしたときに警告を出すための dirty 判定。
@@ -520,6 +547,20 @@ export function VideoForm({
               maxLength={200}
               disabled={fieldDisabled("video.music")}
             />
+            <input
+              id="music_reference_url"
+              name="music_reference_url"
+              type="url"
+              defaultValue={initial.music_reference_url}
+              className="fn-input"
+              placeholder="楽曲リンク URL (任意, https://...)"
+              maxLength={500}
+              disabled={fieldDisabled("video.music")}
+              style={{ marginTop: 6 }}
+            />
+            <p className={styles.help}>
+              楽曲ページ・ニコニコ動画・YouTube などのリンクを入れると、視聴者に楽曲ページへ飛んでもらえます。
+            </p>
           </div>
           <div className={cx(styles.field, styles.editableField)}>
             <label className={styles.label} htmlFor="credit">
@@ -537,6 +578,80 @@ export function VideoForm({
             />
           </div>
         </div>
+
+        {eventOptions.length > 0 ? (
+          <div className={cx(styles.field, styles.editableField)}>
+            <label className={styles.label}>所属イベント</label>
+            <p className={styles.help}>
+              この作品を関連付けるイベントを選択します。複数選択可。
+              {slotId ? " 確保したスロットのイベントは固定で含まれます。" : ""}
+            </p>
+            <input
+              type="hidden"
+              name="event_ids"
+              value={selectedEventIds.join(",")}
+            />
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+                gap: 6,
+              }}
+            >
+              {eventOptions.map((ev) => {
+                const checked = selectedEventIds.includes(ev.id);
+                // slot モードでは slot.event_id を固定で含めるため、編集者でも外せない。
+                const locked =
+                  !canEditEvents ||
+                  (mode === "slot" &&
+                    !!initial.event_ids?.includes(ev.id) &&
+                    initial.event_ids.length === 1);
+                return (
+                  <label
+                    key={ev.id}
+                    style={{
+                      display: "flex",
+                      gap: 6,
+                      alignItems: "center",
+                      padding: "6px 8px",
+                      border: "1px solid var(--border-subtle)",
+                      borderRadius: "var(--radius-sm)",
+                      background: checked
+                        ? "var(--accent-primary-soft)"
+                        : "transparent",
+                      cursor: locked ? "not-allowed" : "pointer",
+                      fontSize: 12,
+                      opacity: locked && !checked ? 0.55 : 1,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={locked}
+                      onChange={(e) => {
+                        if (locked) return;
+                        setSelectedEventIds((prev) =>
+                          e.target.checked
+                            ? Array.from(new Set([...prev, ev.id]))
+                            : prev.filter((id) => id !== ev.id),
+                        );
+                      }}
+                    />
+                    <span style={{ flex: 1, minWidth: 0 }}>{ev.title}</span>
+                    {locked ? (
+                      <Icon
+                        name="alert"
+                        size={11}
+                        aria-hidden
+                        title="このイベントは固定です"
+                      />
+                    ) : null}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <section

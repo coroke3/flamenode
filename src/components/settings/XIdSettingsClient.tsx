@@ -4,7 +4,6 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import styles from "./XIdSettingsClient.module.css";
 import { Icon } from "@/components/ui/Icon";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   deleteLinkedXId,
   enablePortfolio,
@@ -14,6 +13,7 @@ import {
   uploadXIdIcon,
   updateXIdProfile,
 } from "@/lib/actions/xid";
+import { ConfirmTextDialog } from "@/components/ui/ConfirmTextDialog";
 
 /** X ID 連携申請フォーム (Server Action `requestXIdLink`)。 */
 export function XIdLinkForm(): React.ReactElement {
@@ -416,17 +416,21 @@ function XIdIconPicker({
   );
 }
 
-export function DeleteXIdForm({ xUserId }: { xUserId: string }): React.ReactElement {
+export function DeleteXIdForm({
+  xUserId,
+}: {
+  xUserId: string;
+}): React.ReactElement {
   const router = useRouter();
   const [pending, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
-  const formRef = React.useRef<HTMLFormElement>(null);
+  const expected = `DELETE ${xUserId}`;
 
   const doDelete = () => {
-    if (!formRef.current) return;
-    const fd = new FormData(formRef.current);
+    const fd = new FormData();
     fd.set("x_user_id", xUserId);
+    fd.set("confirm", expected);
     setError(null);
     startTransition(async () => {
       const result = await deleteLinkedXId(fd);
@@ -439,14 +443,7 @@ export function DeleteXIdForm({ xUserId }: { xUserId: string }): React.ReactElem
   };
 
   return (
-    <form ref={formRef} className={styles.stack} onSubmit={(ev) => ev.preventDefault()}>
-      <input type="hidden" name="x_user_id" value={xUserId} />
-      <label className="fn-label">連携削除の確認</label>
-      <input
-        name="confirm"
-        className="fn-input"
-        placeholder={`DELETE ${xUserId}`}
-      />
+    <div className={styles.stack}>
       <button
         type="button"
         className="fn-btn fn-btn-ghost fn-btn-sm"
@@ -457,11 +454,30 @@ export function DeleteXIdForm({ xUserId }: { xUserId: string }): React.ReactElem
       </button>
       {error ? <p className={styles.msgErr}>{error}</p> : null}
 
-      <ConfirmDialog
+      <ConfirmTextDialog
         open={confirmOpen}
         title="X ID 連携を削除しますか?"
-        message="この X ID 連携を削除します。作品や履歴は残ります。アクティブ X ID からも外れます。本当に削除しますか?"
-        confirmLabel="削除する"
+        description={
+          <>
+            <p style={{ margin: 0 }}>
+              この X ID <strong>@{xUserId}</strong> と Discord アカウントの紐付けを解除します。
+            </p>
+            <ul
+              style={{
+                margin: "8px 0 0",
+                paddingLeft: "1.2em",
+                fontSize: 12,
+                color: "var(--text-secondary)",
+              }}
+            >
+              <li>X ID 自体・過去の作品・履歴は削除されません。</li>
+              <li>この Discord アカウントからは編集できなくなります。</li>
+              <li>同じ X ID を再連携すれば編集権限は戻ります。</li>
+            </ul>
+          </>
+        }
+        expectedText={expected}
+        confirmLabel="連携を削除する"
         tone="danger"
         onConfirm={() => {
           setConfirmOpen(false);
@@ -469,6 +485,6 @@ export function DeleteXIdForm({ xUserId }: { xUserId: string }): React.ReactElem
         }}
         onCancel={() => setConfirmOpen(false)}
       />
-    </form>
+    </div>
   );
 }

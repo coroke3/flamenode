@@ -98,11 +98,17 @@
   line-height: 1.6;
 }
 
-/* ---- section disabled ---- */
+/* ---- section disabled ----
+ *
+ * 旧コードは pointer-events: none と opacity: 0.55 でセクション全体を不活性化していたが、
+ * これだとリンク・説明文も読めなくなり、なぜ触れないのか分かりにくかった。
+ * 新ルールでは:
+ *   - input/textarea/select は readOnly/aria-readonly で「見える + コピー可 + 編集不可」
+ *   - 背景を薄く + cursor: not-allowed + 鍵アイコンバッジで「編集権限なし」を明示
+ *   - 説明文・ラベルは通常通り読める
+ */
 
 .sectionDisabled {
-  opacity: 0.55;
-  pointer-events: none;
   position: relative;
 }
 
@@ -111,12 +117,45 @@
   align-items: center;
   gap: 4px;
   margin-left: 8px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-muted);
   vertical-align: middle;
+}
+
+.sectionDisabled .editableField input[readonly],
+.sectionDisabled .editableField textarea[readonly],
+.sectionDisabled .editableField input[disabled],
+.sectionDisabled .editableField textarea[disabled],
+.sectionDisabled .editableField select[disabled] {
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: not-allowed;
+}
+
+.lockedField input[readonly],
+.lockedField textarea[readonly],
+.lockedField input[disabled],
+.lockedField textarea[disabled],
+.lockedField select[disabled] {
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: not-allowed;
+}
+
+.lockedFieldHint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
 }
 
 /* ---- editable field hover hint ---- */

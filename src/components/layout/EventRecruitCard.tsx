@@ -158,19 +158,47 @@ interface TimelinePoint {
 }
 
 function buildTimeline(event: EventRow, now: number) {
-  const points: Array<{ name: string; time: number; emphasized?: boolean }> = [];
+  const rawPoints: Array<{ name: string; time: number; emphasized?: boolean }> =
+    [];
   if (event.entry_start_time != null)
-    points.push({ name: "募集開始", time: event.entry_start_time });
+    rawPoints.push({ name: "募集開始", time: event.entry_start_time });
   if (event.entry_end_time != null)
-    points.push({
+    rawPoints.push({
       name: "募集終了",
       time: event.entry_end_time,
       emphasized: true,
     });
   if (event.start_time != null)
-    points.push({ name: "開催", time: event.start_time, emphasized: true });
+    rawPoints.push({ name: "開催", time: event.start_time, emphasized: true });
   if (event.end_time != null && event.end_time !== event.start_time)
-    points.push({ name: "終了", time: event.end_time });
+    rawPoints.push({ name: "終了", time: event.end_time });
+
+  // 同時刻のマイルストーンはラベルを「募集終了 / 開催」のように結合する。
+  // これがないと CSS の left:% 配置で位置が重なってラベルが読めなくなる。
+  const merged = new Map<
+    number,
+    { names: string[]; emphasized: boolean; time: number }
+  >();
+  for (const p of rawPoints) {
+    const existing = merged.get(p.time);
+    if (existing) {
+      existing.names.push(p.name);
+      existing.emphasized = existing.emphasized || !!p.emphasized;
+    } else {
+      merged.set(p.time, {
+        names: [p.name],
+        emphasized: !!p.emphasized,
+        time: p.time,
+      });
+    }
+  }
+  const points = Array.from(merged.values())
+    .map((m) => ({
+      name: m.names.join(" / "),
+      time: m.time,
+      emphasized: m.emphasized,
+    }))
+    .sort((a, b) => a.time - b.time);
 
   if (points.length < 2) return null;
 

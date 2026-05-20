@@ -26,22 +26,67 @@ interface HomeIntroBandProps {
  *
  * 仕様: 募集カードは黒ベース + 黄色アクセントの「主役級UI」。
  */
+const MAX_RECRUIT_CARDS = 3;
+
 export function HomeIntroBand({
   activeEvents,
   slotStats,
 }: HomeIntroBandProps): React.ReactElement {
-  const featured =
-    activeEvents.find((e) => isAcceptingEntries(e)) ?? activeEvents[0];
+  // 募集中イベントを募集締切が近い順で複数表示する。
+  // 締切未設定は最後尾。同点なら開催日 (effective start) で並べる。
+  const acceptingEvents = activeEvents
+    .filter((e) => isAcceptingEntries(e))
+    .sort((a, b) => {
+      const aEnd = a.entry_end_time ?? Number.POSITIVE_INFINITY;
+      const bEnd = b.entry_end_time ?? Number.POSITIVE_INFINITY;
+      if (aEnd !== bEnd) return aEnd - bEnd;
+      const aStart = a.start_time ?? Number.POSITIVE_INFINITY;
+      const bStart = b.start_time ?? Number.POSITIVE_INFINITY;
+      return aStart - bStart;
+    });
 
-  if (featured) {
-    const stat = slotStats?.get(featured.id);
+  if (acceptingEvents.length === 0) {
+    // 募集中が無い場合は最も近い 1 件を fallback として表示 (旧挙動互換)。
+    const fallback = activeEvents[0];
+    if (fallback) {
+      const stat = slotStats?.get(fallback.id);
+      return (
+        <section className={styles.heroWrap} aria-label="現在のイベント募集">
+          <EventRecruitCard
+            event={fallback}
+            available={stat ? stat.available : null}
+            total={stat ? stat.total : null}
+          />
+        </section>
+      );
+    }
+  }
+
+  if (acceptingEvents.length > 0) {
+    const shown = acceptingEvents.slice(0, MAX_RECRUIT_CARDS);
+    const hasMore = acceptingEvents.length > MAX_RECRUIT_CARDS;
     return (
       <section className={styles.heroWrap} aria-label="現在のイベント募集">
-        <EventRecruitCard
-          event={featured}
-          available={stat ? stat.available : null}
-          total={stat ? stat.total : null}
-        />
+        <div className={styles.recruitStack}>
+          {shown.map((ev) => {
+            const stat = slotStats?.get(ev.id);
+            return (
+              <EventRecruitCard
+                key={ev.id}
+                event={ev}
+                available={stat ? stat.available : null}
+                total={stat ? stat.total : null}
+              />
+            );
+          })}
+        </div>
+        {hasMore ? (
+          <div className={styles.recruitMore}>
+            <Link href="/event" className="fn-btn fn-btn-ghost fn-btn-sm">
+              <Icon name="calendar" size={12} aria-hidden /> 募集中イベントをすべて見る ({acceptingEvents.length}件)
+            </Link>
+          </div>
+        ) : null}
       </section>
     );
   }

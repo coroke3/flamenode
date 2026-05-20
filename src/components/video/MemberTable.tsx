@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { Icon } from "@/components/ui/Icon";
 
 export interface MemberRow {
   id: string;
@@ -111,24 +112,67 @@ export function MemberTable({
         </tr>
       </thead>
       <tbody>
-        {sorted.map((m, i) => (
-          <tr key={m.id}>
-            <td>{sortKey === "default" ? i + 1 : "—"}</td>
-            <td>{m.x_name ?? m.name}</td>
-            <td>
-              {m.x_user_id ? (
-                <Link href={`/user/${m.x_user_id}`}>@{m.x_user_id}</Link>
-              ) : (
-                <span className="fn-muted">-</span>
-              )}
-            </td>
-            <td>
-              {m.role ? <strong>{m.role}</strong> : null}
-              {m.role && m.comment ? " / " : ""}
-              {m.comment ?? ""}
-            </td>
-          </tr>
-        ))}
+        {sorted.map((m, i) => {
+          // icon_url は fetchVideoDetail 側で resolveMemberIcons により
+          // x_users.icon_url → そのメンバーの過去作品アイコン → null の順で解決済み。
+          const displayName = m.x_name ?? m.name;
+          return (
+            <tr key={m.id}>
+              <td>{sortKey === "default" ? i + 1 : "—"}</td>
+              <td>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  {m.icon_url ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={m.icon_url}
+                      alt=""
+                      width={28}
+                      height={28}
+                      style={{
+                        borderRadius: 999,
+                        objectFit: "cover",
+                        background: "var(--bg-elevated)",
+                      }}
+                    />
+                  ) : (
+                    <span
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: 999,
+                        background: "var(--bg-elevated)",
+                        color: "var(--text-muted)",
+                        display: "grid",
+                        placeItems: "center",
+                      }}
+                    >
+                      <Icon name="user" size={14} aria-hidden />
+                    </span>
+                  )}
+                  <span>{displayName}</span>
+                </span>
+              </td>
+              <td>
+                {m.x_user_id ? (
+                  <Link href={`/user/${m.x_user_id}`}>@{m.x_user_id}</Link>
+                ) : (
+                  <span className="fn-muted">-</span>
+                )}
+              </td>
+              <td>
+                {m.role ? <strong>{m.role}</strong> : null}
+                {m.role && m.comment ? " / " : ""}
+                {m.comment ?? ""}
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );
