@@ -79,7 +79,7 @@ export default async function ListPage({
   };
 
   return (
-    <div className={styles.page}>
+    <div className={`fn-public-container ${styles.page}`}>
       <header className={styles.header}>
         <h1 className={styles.title}>作品一覧</h1>
         <p className={styles.lead}>

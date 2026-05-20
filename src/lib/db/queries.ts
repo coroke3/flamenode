@@ -10,6 +10,7 @@ import {
 import { creatorIconExpr, creatorNameExpr } from "./displayExpr";
 import { resolveMissingIcons } from "./iconResolution";
 import type { DB } from "./client";
+import { uniqueBy } from "@/lib/utils/unique";
 
 /**
  * 公開済みかつ表示対象の作品を絞り込む共通条件。
@@ -42,7 +43,45 @@ export async function fetchRecommendedVideos(db: DB, limit = 40) {
     .where(publicVideoCondition)
     .orderBy(desc(videos.video_score), desc(videos.scheduled_time))
     .limit(limit);
-  return resolveMissingIcons(db, rows);
+  return resolveMissingIcons(db, uniqueBy(rows, (row) => row.id));
+}
+
+/**
+ * 「見逃されている」候補。
+ *
+ * 単純に video_score 上位だけだと毎回同じ作品が顔を出すため、
+ * 公開作品のうち「score が極端に低くない範囲」で `scheduled_time` 降順に並べる。
+ * 呼び出し側 (`/recommend`) で `limitByCreatorAndEvent` を通して、作者・
+ * イベントの偏りを抑えて 6 件程度に絞る前提の候補プール。
+ *
+ * 真のパーソナライズではないが、毎日同じ顔を見せない最低限の rotation には
+ * なる。将来的に signals が揃ったら別関数に置き換える。
+ */
+export async function fetchUnderratedVideos(db: DB, limit = 60) {
+  const rows = await db
+    .select({
+      id: videos.id,
+      title: videos.title,
+      youtube_video_id: videos.youtube_video_id,
+      display_name: creatorNameExpr,
+      icon_url: creatorIconExpr,
+      creator_id: videos.creator_id,
+      primary_event_id: videos.primary_event_id,
+      scheduled_time: videos.scheduled_time,
+      video_score: videos.video_score,
+    })
+    .from(videos)
+    .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+    .where(
+      and(
+        publicVideoCondition,
+        // 「極端に score が低い」作品 (=スパム的) を除く軽い下限。0 や負を除外。
+        gte(videos.video_score, 1),
+      )!,
+    )
+    .orderBy(desc(videos.scheduled_time), desc(videos.video_score))
+    .limit(limit);
+  return resolveMissingIcons(db, uniqueBy(rows, (row) => row.id));
 }
 
 /** 最新作品 (scheduled_time 降順)。 */
@@ -63,7 +102,7 @@ export async function fetchLatestVideos(db: DB, limit = 30) {
     .where(publicVideoCondition)
     .orderBy(desc(videos.scheduled_time))
     .limit(limit);
-  return resolveMissingIcons(db, rows);
+  return resolveMissingIcons(db, uniqueBy(rows, (row) => row.id));
 }
 
 /** 直近 N 件のイベント。 */
@@ -98,7 +137,7 @@ export async function fetchVideosForEvent(
     .where(and(publicVideoCondition, eq(videoEvents.event_id, eventId))!)
     .orderBy(desc(videos.scheduled_time))
     .limit(limit);
-  return resolveMissingIcons(db, rows);
+  return resolveMissingIcons(db, uniqueBy(rows, (row) => row.id));
 }
 
 /** 開催中イベント (is_active=1 かつ期間内かつ非アーカイブ)。 */

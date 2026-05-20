@@ -12,17 +12,76 @@
   gap: 20px;
   padding: 22px 22px;
   border-radius: 16px;
+  /* 黄色アクセントを背景全面に出すのをやめ、左上の薄い光だけにする。
+     枠線も黄色から白の細い線に変更して落ち着いた印象に。 */
   background:
-    radial-gradient(120% 60% at 90% 0%, rgba(255, 212, 0, 0.08), transparent 60%),
+    radial-gradient(100% 50% at 88% 0%, rgba(255, 212, 0, 0.05), transparent 60%),
     linear-gradient(135deg, #0c0f14 0%, #141822 55%, #0c0f14 100%);
-  border: 1px solid rgba(255, 212, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   color: #f8fafc;
   overflow: hidden;
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.04) inset,
-    0 8px 28px rgba(0, 0, 0, 0.35),
-    0 0 0 1px rgba(255, 212, 0, 0.04);
+    0 8px 28px rgba(0, 0, 0, 0.35);
   isolation: isolate;
+}
+
+/* compact variant: 副イベント (2枚目以降) を縦に薄く積む用。
+   情報量を絞り、タイムライン非表示・countdown 小型化する。 */
+.cardCompact {
+  padding: 14px 16px;
+  gap: 12px;
+  border-radius: 14px;
+}
+
+.cardCompact .timeline,
+.cardCompact .periods {
+  display: none;
+}
+
+.cardCompact .left {
+  gap: 10px;
+}
+
+.cardCompact .title {
+  font-size: 16px;
+}
+
+.cardCompact .countdown {
+  padding: 10px 12px;
+}
+
+.cardCompact .countdownValue {
+  font-size: 28px;
+}
+
+.cardCompact .slots {
+  padding: 8px 12px;
+}
+
+.cardCompact .slotsValue {
+  font-size: 18px;
+}
+
+.cardCompact .cta {
+  padding: 8px 16px;
+  font-size: 12px;
+}
+
+@media (min-width: 768px) {
+  .cardCompact {
+    grid-template-columns: minmax(0, 1fr) 180px;
+    gap: 18px;
+    padding: 16px 18px;
+  }
+
+  .cardCompact .title {
+    font-size: 18px;
+  }
+
+  .cardCompact .countdownValue {
+    font-size: 32px;
+  }
 }
 
 .glow {
@@ -30,7 +89,7 @@
   inset: -40% -10% auto auto;
   width: 60%;
   height: 80%;
-  background: radial-gradient(closest-side, rgba(255, 212, 0, 0.18), transparent 70%);
+  background: radial-gradient(closest-side, rgba(255, 212, 0, 0.1), transparent 70%);
   pointer-events: none;
   z-index: 0;
 }

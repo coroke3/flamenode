@@ -147,89 +147,230 @@ export async function fetchVideoDetail(
 }
 
 /**
- * 関連動画の取得 (簡易版): 同一作者 / 同一イベント / score 上位を混合。
- * 厳密な優先度付けと文脈近さ60% / score 40% の混合は将来 Worker で事前生成する。
+ * 関連動画の取得 (bucket 混合版)。
+ *
+ * 旧版は同一作者最大4件 / 同一イベント最大6件 / score上位20件を順に詰める
+ * だけで、結果として「毎回同じ作者・同じイベント・上位スコア」が顔を出していた。
+ * これを以下の bucket に分け、各 bucket の最大件数を絞ったうえで偏らないように
+ * インタリーブする。reason は将来用に内部 result に持つが、動画詳細 UI には
+ * 表示しない (公開ページの「枠線で囲まれたタグ」が増えるのを避ける)。
+ *
+ *   - sameCreator: 同一 creator_id (max 2)
+ *   - sameEvent: 同一 primary_event_id (max 3)
+ *   - sharedMembers: video_members.x_user_id が現在動画のメンバーと一致 (max 2)
+ *   - nearDate: scheduled_time が近い順 (max 3)
+ *   - topScore: video_score 上位 (max 3)
+ *   - discovery: 中位スコアからの日替わり seed 混合 (max 2)
+ *
+ * discovery は完全ランダムではなく、`current.id + YYYY-MM-DD` を seed にして
+ * 1 日内では安定するようにする。1 日経つと組み合わせが入れ替わる。
+ *
+ * 並び順は creator 連続を避けるため round-robin で interleave する。
  */
+export type RelatedReason =
+  | "same_creator"
+  | "same_event"
+  | "shared_member"
+  | "near_date"
+  | "top_score"
+  | "discovery";
+
+export interface RelatedVideoCardData {
+  id: string;
+  title: string;
+  youtube_video_id: string | null;
+  display_name: string;
+  icon_url: string | null;
+  creator_id: string | null;
+  primary_event_id: string | null;
+  scheduled_time: number | null;
+  reason: RelatedReason;
+}
+
+function hashStringToInt(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function todayDateUtc(): string {
+  const d = new Date();
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export async function fetchRelatedVideos(
   db: DB,
-  current: { id: string; creator_id: string | null; primary_event_id: string | null },
+  current: {
+    id: string;
+    creator_id: string | null;
+    primary_event_id: string | null;
+    scheduled_time?: number | null;
+  },
   limit = 15,
-) {
+): Promise<RelatedVideoCardData[]> {
   const baseWhere = and(
     eq(videos.status, "public"),
     eq(videos.is_deleted, 0),
     eq(videos.is_manual_hidden, 0),
     ne(videos.id, current.id),
   );
-
   const iconExpr = sql<
     string | null
   >`COALESCE(${videos.icon_url}, ${xUsers.icon_url})`;
+  const baseSelect = {
+    id: videos.id,
+    title: videos.title,
+    youtube_video_id: videos.youtube_video_id,
+    display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
+    icon_url: iconExpr,
+    creator_id: videos.creator_id,
+    primary_event_id: videos.primary_event_id,
+    scheduled_time: videos.scheduled_time,
+  } as const;
+  type Row = {
+    id: string;
+    title: string;
+    youtube_video_id: string | null;
+    display_name: string;
+    icon_url: string | null;
+    creator_id: string | null;
+    primary_event_id: string | null;
+    scheduled_time: number | null;
+  };
 
-  const sameCreator = current.creator_id
+  // sameCreator: 同一 creator_id (新しい順、最大 2)
+  const sameCreator: Row[] = current.creator_id
     ? await db
-        .select({
-          id: videos.id,
-          title: videos.title,
-          youtube_video_id: videos.youtube_video_id,
-          display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
-          icon_url: iconExpr,
-          creator_id: videos.creator_id,
-          primary_event_id: videos.primary_event_id,
-          scheduled_time: videos.scheduled_time,
-        })
+        .select(baseSelect)
         .from(videos)
         .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
         .where(and(baseWhere, eq(videos.creator_id, current.creator_id))!)
         .orderBy(desc(videos.scheduled_time))
-        .limit(4)
+        .limit(2)
     : [];
 
-  const sameEvent = current.primary_event_id
+  // sameEvent: 同一 primary_event_id (新しい順、最大 3)
+  const sameEvent: Row[] = current.primary_event_id
     ? await db
-        .select({
-          id: videos.id,
-          title: videos.title,
-          youtube_video_id: videos.youtube_video_id,
-          display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
-          icon_url: iconExpr,
-          creator_id: videos.creator_id,
-          primary_event_id: videos.primary_event_id,
-          scheduled_time: videos.scheduled_time,
-        })
+        .select(baseSelect)
         .from(videos)
         .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
         .where(
           and(baseWhere, eq(videos.primary_event_id, current.primary_event_id))!,
         )
         .orderBy(desc(videos.scheduled_time))
-        .limit(6)
+        .limit(3)
     : [];
 
-  const topScore = await db
-    .select({
-      id: videos.id,
-      title: videos.title,
-      youtube_video_id: videos.youtube_video_id,
-      display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
-      icon_url: iconExpr,
-      creator_id: videos.creator_id,
-      primary_event_id: videos.primary_event_id,
-      scheduled_time: videos.scheduled_time,
-    })
+  // sharedMembers: 現在動画の合作メンバー X ID と一致する creator_id を持つ作品 (最大 2)
+  // 自分自身の作品との重複は uniqueBy で後段で除去。
+  const memberXIds = (
+    await db
+      .select({ x: videoMembers.x_user_id })
+      .from(videoMembers)
+      .where(eq(videoMembers.video_id, current.id))
+  )
+    .map((r) => r.x)
+    .filter((s): s is string => !!s);
+  const sharedMembers: Row[] =
+    memberXIds.length > 0
+      ? await db
+          .select(baseSelect)
+          .from(videos)
+          .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+          .where(and(baseWhere, inArray(videos.creator_id, memberXIds))!)
+          .orderBy(desc(videos.scheduled_time))
+          .limit(8)
+      : [];
+
+  // nearDate: scheduled_time が近い順 (最大 3)
+  // current.scheduled_time が無い場合は全体の新しい順 fallback。
+  let nearDate: Row[] = [];
+  if (current.scheduled_time != null) {
+    // |scheduled_time - current| が小さい順。SQLite には ABS があるので使う。
+    const ord = sql`ABS(${videos.scheduled_time} - ${current.scheduled_time})`;
+    nearDate = await db
+      .select(baseSelect)
+      .from(videos)
+      .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+      .where(baseWhere)
+      .orderBy(ord)
+      .limit(8);
+  }
+
+  // topScore: video_score 上位 (最大 3)
+  const topScore: Row[] = await db
+    .select(baseSelect)
     .from(videos)
     .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
     .where(baseWhere)
     .orderBy(desc(videos.video_score))
     .limit(20);
 
-  // 重複排除
-  const map = new Map<string, (typeof topScore)[number]>();
-  for (const v of [...sameCreator, ...sameEvent, ...topScore]) {
-    if (!map.has(v.id)) map.set(v.id, v);
-    if (map.size >= limit) break;
+  // discovery: 中位スコアからの日替わり seed 混合 (最大 2)
+  // topScore の下位帯から、current.id + 日付で安定な擬似ランダムで 2 件選ぶ。
+  const seedBase = hashStringToInt(`${current.id}|${todayDateUtc()}`);
+  const discoveryPool = topScore.slice(8);
+  const discovery: Row[] = [];
+  if (discoveryPool.length > 0) {
+    const indexA = seedBase % discoveryPool.length;
+    const indexB =
+      ((seedBase >>> 8) ^ 0x9e3779b1) % Math.max(1, discoveryPool.length);
+    discovery.push(discoveryPool[indexA]);
+    if (discoveryPool[indexB] && discoveryPool[indexB].id !== discoveryPool[indexA].id) {
+      discovery.push(discoveryPool[indexB]);
+    }
   }
-  return uniqueBy(Array.from(map.values()), (row) => row.id).slice(0, limit);
+
+  // 各 bucket に reason を付けて、creator 連続を避けつつ interleave する。
+  const tagged: { row: Row; reason: RelatedReason; budget: number }[] = [];
+  const push = (rows: Row[], reason: RelatedReason, max: number) => {
+    for (const r of rows.slice(0, max)) {
+      tagged.push({ row: r, reason, budget: max });
+    }
+  };
+  push(sameCreator, "same_creator", 2);
+  push(sameEvent, "same_event", 3);
+  push(sharedMembers, "shared_member", 2);
+  push(nearDate, "near_date", 3);
+  push(topScore.slice(0, 8), "top_score", 3);
+  push(discovery, "discovery", 2);
+
+  // 重複排除 (id) + 連続する creator を避ける軽い後処理。
+  const seen = new Set<string>();
+  const result: RelatedVideoCardData[] = [];
+  let lastCreator: string | null = null;
+  let deferred: { row: Row; reason: RelatedReason }[] = [];
+  for (const t of tagged) {
+    if (seen.has(t.row.id)) continue;
+    if (
+      t.row.creator_id &&
+      t.row.creator_id === lastCreator &&
+      result.length > 0
+    ) {
+      // 直前と同じ creator は一旦保留して、別 creator を挟む
+      deferred.push({ row: t.row, reason: t.reason });
+      continue;
+    }
+    seen.add(t.row.id);
+    result.push({ ...t.row, reason: t.reason });
+    lastCreator = t.row.creator_id;
+    if (result.length >= limit) break;
+  }
+  // 保留分を末尾に流す
+  for (const d of deferred) {
+    if (result.length >= limit) break;
+    if (seen.has(d.row.id)) continue;
+    seen.add(d.row.id);
+    result.push({ ...d.row, reason: d.reason });
+  }
+  return result.slice(0, limit);
 }
 
 /**

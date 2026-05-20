@@ -17,10 +17,11 @@ import { extractYoutubeId } from "@/lib/youtube/id";
 import { YoutubePlayer } from "@/components/video/YoutubePlayer";
 import { ChapterTabs } from "@/components/video/ChapterTabs";
 import { ChapterComposer } from "@/components/video/ChapterComposer";
+import { IntroCommentBlock } from "@/components/video/IntroCommentBlock";
 import { PlaylistRail } from "@/components/video/PlaylistRail";
 import { InteractionButton } from "@/components/video/InteractionButton";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
-import { MemberTable } from "@/components/video/MemberTable";
+import { MemberList } from "@/components/video/MemberList";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 import {
@@ -269,20 +270,62 @@ export default async function VideoDetailPage({
     </span>
   );
 
-  // X プロフィールへの外部リンクは authorBlock の外側に出す。
-  // 親 <Link>(/user/[id]) で authorBlock を包むので、内部に別 <a target=_blank> を
-  // 置くと <a> ネストになり hydration エラー (a cannot be a descendant of a) になる。
-  const xProfileLink =
-    creatorId && creatorId !== "anonymous" ? (
+  // 投稿者行のリンク群: FlameNode / X / YouTube。
+  // すべて authorBlock の外側に出して a タグのネストを避ける。
+  // 投稿者名 / @id は authorBlock 全体を包む内部 Link で /user/[id] に飛ばす。
+  // - FlameNode プロフィール: creatorHref があるときだけ表示 (内部リンク)
+  // - X 外部リンク: creatorId が anonymous でないときだけ表示 (外部リンク)
+  // - YouTube リンク: creator.youtube_channel_url があるときだけ表示 (外部リンク)
+  // 黄色 CTA は使わず、丸い fn-icon-btn で控えめに並べる。
+  const authorIconLinks: React.ReactNode[] = [];
+  if (creatorHref) {
+    authorIconLinks.push(
+      <Link
+        key="flamenode"
+        href={creatorHref}
+        className="fn-icon-btn"
+        aria-label="FlameNode のプロフィールを開く"
+        title="FlameNode のプロフィール"
+      >
+        <Icon name="user" size={13} aria-hidden />
+      </Link>,
+    );
+  }
+  if (creatorId && creatorId !== "anonymous") {
+    authorIconLinks.push(
       <a
+        key="x"
         href={`https://x.com/${creatorId}`}
         target="_blank"
         rel="noopener noreferrer"
+        className="fn-icon-btn"
         aria-label={`X (@${creatorId}) を開く`}
-        className={styles.authorXLink}
+        title={`X (@${creatorId})`}
       >
-        <Icon name="external" size={11} aria-hidden />
-      </a>
+        <Icon name="x" size={13} aria-hidden />
+      </a>,
+    );
+  }
+  if (creator?.youtube_channel_url) {
+    authorIconLinks.push(
+      <a
+        key="youtube"
+        href={creator.youtube_channel_url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="fn-icon-btn"
+        aria-label="YouTube チャンネルを開く"
+        title="YouTube チャンネル"
+      >
+        <Icon name="youtube" size={13} aria-hidden />
+      </a>,
+    );
+  }
+  const authorLinkGroup =
+    authorIconLinks.length > 0 ? (
+      <div className={styles.authorLinkGroup} aria-label="投稿者へのリンク">
+        {authorIconLinks}
+      </div>
     ) : null;
 
   return (
@@ -313,7 +356,7 @@ export default async function VideoDetailPage({
             ) : (
               authorBlock
             )}
-            {xProfileLink}
+            {authorLinkGroup}
             <div className={styles.authorActions}>
               {(() => {
                 // いいね・セーブの実行可否はサーバー側 writeGuard と合わせて
@@ -435,43 +478,77 @@ export default async function VideoDetailPage({
 
           <div className={styles.metaSection}>
             {video.music ? (
-              <MetaItem
-                title="楽曲"
-                body={
-                  video.music_reference_url ? (
-                    // music_reference_url がある場合は「楽曲名 / 作曲者」全体を 1 つの
-                    // 外部リンクとして包み、外部リンクアイコンを末尾に添える。
-                    // 楽曲名と作曲者は同じ参照先 (楽曲ページ) を指すので分けない。
-                    <a
-                      href={video.music_reference_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 4,
-                      }}
-                    >
-                      <span>
-                        {video.music}
-                        {video.credit ? ` / ${video.credit}` : ""}
-                      </span>
-                      <Icon name="external" size={12} aria-hidden />
-                    </a>
-                  ) : (
-                    <>
+              <InlineMetaItem title="楽曲">
+                {video.music_reference_url ? (
+                  // music_reference_url がある場合は「楽曲名 / 作曲者」全体を 1 つの
+                  // 外部リンクとして包み、外部リンクアイコンを末尾に添える。
+                  <a
+                    href={video.music_reference_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
+                    <span>
                       {video.music}
                       {video.credit ? ` / ${video.credit}` : ""}
-                    </>
-                  )
-                }
-              />
+                    </span>
+                    <Icon name="external" size={12} aria-hidden />
+                  </a>
+                ) : (
+                  <>
+                    {video.music}
+                    {video.credit ? ` / ${video.credit}` : ""}
+                  </>
+                )}
+              </InlineMetaItem>
             ) : null}
-            {video.intro_comment ? <MetaItem title="紹介コメント" body={video.intro_comment} /> : null}
-            {video.highlights ? <MetaItem title="みどころ" body={video.highlights} /> : null}
-            {video.production_story ? <MetaItem title="制作エピソード" body={video.production_story} /> : null}
-            {video.used_software ? <MetaItem title="使用ソフト" body={video.used_software} /> : null}
-            {video.closing_comment ? <MetaItem title="あとがき" body={video.closing_comment} /> : null}
+            {video.intro_comment ? (
+              <InlineMetaItem title="紹介コメント">
+                <IntroCommentBlock text={video.intro_comment} />
+              </InlineMetaItem>
+            ) : null}
+            {video.used_software ? (
+              <InlineMetaItem title="使用ソフト">
+                {video.used_software}
+              </InlineMetaItem>
+            ) : null}
+            {/* みどころ / 制作エピソード / あとがき を 1 つの「詳細コメント」開閉エリアにまとめる。
+                どれか 1 つでもあれば表示。初期状態は閉じる。 */}
+            {video.highlights || video.production_story || video.closing_comment ? (
+              <details className={styles.detailComments}>
+                <summary>詳細コメント</summary>
+                <div className={styles.detailCommentsBody}>
+                  {video.highlights ? (
+                    <section>
+                      <h4 className={styles.inlineMetaTitle}>みどころ</h4>
+                      <p style={{ margin: "4px 0 0", lineHeight: 1.7 }}>
+                        {video.highlights}
+                      </p>
+                    </section>
+                  ) : null}
+                  {video.production_story ? (
+                    <section>
+                      <h4 className={styles.inlineMetaTitle}>制作エピソード</h4>
+                      <p style={{ margin: "4px 0 0", lineHeight: 1.7 }}>
+                        {video.production_story}
+                      </p>
+                    </section>
+                  ) : null}
+                  {video.closing_comment ? (
+                    <section>
+                      <h4 className={styles.inlineMetaTitle}>あとがき</h4>
+                      <p style={{ margin: "4px 0 0", lineHeight: 1.7 }}>
+                        {video.closing_comment}
+                      </p>
+                    </section>
+                  ) : null}
+                </div>
+              </details>
+            ) : null}
           </div>
 
           {/* モバイル: メタの後・メンバー前に関連動画を出す (下部に押し込みすぎない) */}
@@ -493,9 +570,7 @@ export default async function VideoDetailPage({
           {members.length > 0 ? (
             <section className={styles.section}>
               <h2 className={styles.sectionTitle}>参加メンバー ({members.length})</h2>
-              <div className={styles.memberTable}>
-                <MemberTable members={members} />
-              </div>
+              <MemberList members={members} />
             </section>
           ) : null}
         </article>
@@ -593,5 +668,25 @@ function MetaItem({
       <summary>{title}</summary>
       <p>{body}</p>
     </details>
+  );
+}
+
+/**
+ * InlineMetaItem: 開閉なしの常時表示メタ項目。
+ * 楽曲・クレジット・紹介コメント・使用ソフトのように、ページを開いた瞬間に
+ * 見えていてほしいメタ情報用。
+ */
+function InlineMetaItem({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <div className={styles.inlineMetaItem}>
+      <h3 className={styles.inlineMetaTitle}>{title}</h3>
+      <div className={styles.inlineMetaBody}>{children}</div>
+    </div>
   );
 }

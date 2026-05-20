@@ -45,41 +45,36 @@ export function HomeIntroBand({
       return aStart - bStart;
     });
 
-  if (acceptingEvents.length === 0) {
-    // 募集中が無い場合は最も近い 1 件を fallback として表示 (旧挙動互換)。
-    const fallback = activeEvents[0];
-    if (fallback) {
-      const stat = slotStats?.get(fallback.id);
-      return (
-        <section className={styles.heroWrap} aria-label="現在のイベント募集">
-          <EventRecruitCard
-            event={fallback}
-            available={stat ? stat.available : null}
-            total={stat ? stat.total : null}
-          />
-        </section>
-      );
-    }
-  }
-
   if (acceptingEvents.length > 0) {
-    const shown = acceptingEvents.slice(0, MAX_RECRUIT_CARDS);
+    const [primary, ...rest] = acceptingEvents.slice(0, MAX_RECRUIT_CARDS);
     const hasMore = acceptingEvents.length > MAX_RECRUIT_CARDS;
+    const primaryStat = slotStats?.get(primary.id);
     return (
       <section className={styles.heroWrap} aria-label="現在のイベント募集">
-        <div className={styles.recruitStack}>
-          {shown.map((ev) => {
-            const stat = slotStats?.get(ev.id);
-            return (
-              <EventRecruitCard
-                key={ev.id}
-                event={ev}
-                available={stat ? stat.available : null}
-                total={stat ? stat.total : null}
-              />
-            );
-          })}
-        </div>
+        {/* 主役カード: フル表示で 1 件だけ大きく見せる */}
+        <EventRecruitCard
+          event={primary}
+          available={primaryStat ? primaryStat.available : null}
+          total={primaryStat ? primaryStat.total : null}
+          variant="primary"
+        />
+        {/* 副カード: compact variant でコンパクトに 2 件まで横並び (スマホは縦積み) */}
+        {rest.length > 0 ? (
+          <div className={styles.recruitCompactRow}>
+            {rest.map((ev) => {
+              const stat = slotStats?.get(ev.id);
+              return (
+                <EventRecruitCard
+                  key={ev.id}
+                  event={ev}
+                  available={stat ? stat.available : null}
+                  total={stat ? stat.total : null}
+                  variant="compact"
+                />
+              );
+            })}
+          </div>
+        ) : null}
         {hasMore ? (
           <div className={styles.recruitMore}>
             <Link href="/event" className="fn-btn fn-btn-ghost fn-btn-sm">
@@ -87,6 +82,24 @@ export function HomeIntroBand({
             </Link>
           </div>
         ) : null}
+        <QuickLinks />
+      </section>
+    );
+  }
+
+  // 募集中なし: 注目作品 (= activeEvents[0] fallback) または FlameNode ブランド帯
+  const fallback = activeEvents[0];
+  if (fallback) {
+    const stat = slotStats?.get(fallback.id);
+    return (
+      <section className={styles.heroWrap} aria-label="現在のイベント募集">
+        <EventRecruitCard
+          event={fallback}
+          available={stat ? stat.available : null}
+          total={stat ? stat.total : null}
+          variant="primary"
+        />
+        <QuickLinks />
       </section>
     );
   }
@@ -116,5 +129,41 @@ export function HomeIntroBand({
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * Hero 下のクイック導線。
+ * 主要な遷移 (作品 / 募集中イベント / クリエイター / 新着) をフラットに並べる。
+ * 黄色 CTA は使わず、薄い soft ボタンで「導線多めだけど主役を食わない」ようにする。
+ */
+function QuickLinks(): React.ReactElement {
+  return (
+    <nav className={styles.quickLinks} aria-label="トップのクイック導線">
+      <Link
+        href="/list"
+        className="fn-btn fn-btn-ghost fn-btn-soft-outline fn-btn-sm"
+      >
+        <Icon name="grid" size={12} aria-hidden /> 作品を見る
+      </Link>
+      <Link
+        href="/event"
+        className="fn-btn fn-btn-ghost fn-btn-soft-outline fn-btn-sm"
+      >
+        <Icon name="calendar" size={12} aria-hidden /> 募集中イベント
+      </Link>
+      <Link
+        href="/user"
+        className="fn-btn fn-btn-ghost fn-btn-soft-outline fn-btn-sm"
+      >
+        <Icon name="users" size={12} aria-hidden /> クリエイター
+      </Link>
+      <Link
+        href="/recommend"
+        className="fn-btn fn-btn-ghost fn-btn-soft-outline fn-btn-sm"
+      >
+        <Icon name="heart" size={12} aria-hidden /> おすすめ
+      </Link>
+    </nav>
   );
 }

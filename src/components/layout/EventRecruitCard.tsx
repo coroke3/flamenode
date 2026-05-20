@@ -13,6 +13,12 @@ interface EventRecruitCardProps {
   available: number | null;
   /** event_id に紐づくスロット総数。null は未取得 / 未対応。 */
   total: number | null;
+  /**
+   * 表示バリアント。
+   * - primary (既定): フル表示。トップの主役カード用。
+   * - compact: タイムライン非表示・countdown 小型化。副イベント (2枚目以降) 用。
+   */
+  variant?: "primary" | "compact";
 }
 
 type RecruitState =
@@ -244,13 +250,15 @@ export function EventRecruitCard({
   event,
   available,
   total,
+  variant = "primary",
 }: EventRecruitCardProps): React.ReactElement {
   const now = Math.floor(Date.now() / 1000);
   const state = resolveState(event, available, now);
   const countdown = resolveCountdown(event, state, now);
   const cta = resolveCta(event, state);
   const countdownDisplay = formatRemainingForHero(countdown.seconds);
-  const timeline = buildTimeline(event, now);
+  // compact variant ではタイムラインを描画しない (CSS で display:none 済み + 計算スキップ)。
+  const timeline = variant === "compact" ? null : buildTimeline(event, now);
 
   // 残り枠の警告レベル
   const slotsLow =
@@ -258,7 +266,10 @@ export function EventRecruitCard({
   const slotsFull = available != null && available === 0;
 
   return (
-    <article className={styles.card} aria-labelledby={`recruit-${event.id}-title`}>
+    <article
+      className={`${styles.card} ${variant === "compact" ? styles.cardCompact : ""}`}
+      aria-labelledby={`recruit-${event.id}-title`}
+    >
       <div className={styles.glow} aria-hidden />
 
       <div className={styles.left}>
