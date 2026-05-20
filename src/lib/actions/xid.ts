@@ -1,6 +1,7 @@
-﻿"use server";
+"use server";
 
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { and, desc, eq, isNotNull, or, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase, getEnv } from "@/lib/cloudflare";
@@ -92,10 +93,17 @@ export async function requestXIdLink(
     };
   }
 
-  const linkType = String(formData.get("link_type") ?? "new") as
-    | "new"
-    | "merge"
-    | "alias";
+  const linkTypeSchema = z.enum(["new", "merge", "alias"]);
+  const parsedLinkType = linkTypeSchema.safeParse(
+    String(formData.get("link_type") ?? "new"),
+  );
+  if (!parsedLinkType.success) {
+    return {
+      ok: false,
+      message: "不正な連携種別です。",
+    };
+  }
+  const linkType = parsedLinkType.data;
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
@@ -279,9 +287,13 @@ export async function deleteLinkedXId(
   if (!row || row.linked_discord_user_id !== u.id) {
     return { ok: false, message: "この X ID の連携を削除できません。" };
   }
+  // X ID の連携解除は「Discord ユーザーとのリンクだけを切る」操作。
+  // approval_status はそのまま維持する。再連携時に再申請を強いると復旧の手間が
+  // 増え、過去作品の編集権限復活も遅れるため (旧コードは "pending" に戻していた)。
+  // 作品の creator_id / contact_x_id は触らない。表示・URL も維持する。
   await db
     .update(xUsers)
-    .set({ linked_discord_user_id: null, approval_status: "pending" })
+    .set({ linked_discord_user_id: null })
     .where(xUserIdMatches(xUserId));
   await db
     .update(users)
@@ -297,8 +309,12 @@ export async function deleteLinkedXId(
     retention_class: "long_audit",
     created_at: now,
   });
+  // 連携解除は表示にも影響する (ヘッダーの X ID リスト・ユーザーページ等)。
+  // 関連パスを広めに revalidate して即時反映する。
   revalidatePath("/dashboard/settings");
   revalidatePath("/dashboard");
+  revalidatePath("/");
+  revalidatePath(`/user/${xUserId}`);
   return { ok: true, message: "X ID 連携を削除しました。" };
 }
 

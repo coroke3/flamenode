@@ -244,6 +244,38 @@ export const eventCollaboratorPermissions = sqliteTable(
   },
 );
 
+/**
+ * 作品 (video) 単位の参加者編集権限。
+ *
+ * 合作作品で「主となるユーザーが各参加者に編集権限を付与」できるようにする
+ * (event_collaborator_permissions はイベント単位なので作品ごとには粗い)。
+ *
+ * permission_key は VideoEditSectionKey と整合させる:
+ *   - video.basics / video.credits / video.descriptions / video.members / video.youtube_id
+ *
+ * X ID 未連携のメンバーにも先に権限を付与しておけて、後で Discord 連携された
+ * 時に有効化される (`x_user_id` 一致による解決)。
+ */
+export const videoCollaboratorPermissions = sqliteTable(
+  "video_collaborator_permissions",
+  {
+    id: text("id").primaryKey(),
+    video_id: text("video_id").notNull(),
+    x_user_id: text("x_user_id"),
+    discord_user_id: text("discord_user_id"),
+    display_name: text("display_name").notNull(),
+    permission_key: text("permission_key").notNull(),
+    allowed: integer("allowed").notNull().default(1),
+    granted_by_user_id: text("granted_by_user_id").notNull(),
+    created_at: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updated_at: integer("updated_at")
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+);
+
 export const slots = sqliteTable("slots", {
   id: text("id").primaryKey(),
   event_id: text("event_id").notNull(),

@@ -61,6 +61,11 @@ const videoFormSchema = z.object({
     z.string().trim().url(),
   ),
   music: z.string().trim().max(200).optional().nullable(),
+  // 楽曲リンク URL。空文字は null として扱い、http/https 以外は弾く。
+  music_reference_url: z.preprocess(
+    (val) => (typeof val === "string" ? normalizeHttpUrl(val, { maxLength: 500 }) : val),
+    z.string().trim().max(500).optional().nullable(),
+  ),
   credit: z.string().trim().max(200).optional().nullable(),
   intro_comment: z.string().trim().max(500).optional().nullable(),
   highlights: z.string().trim().max(1000).optional().nullable(),
@@ -179,6 +184,66 @@ async function ensureSubmissionXUser(
       other_social_links: args.socialLinks ?? existing.other_social_links,
     })
     .where(eq(xUsers.id, args.xId));
+}
+
+/**
+ * formData から `event_ids` (カンマ区切り) を取り出し、有効な event_id 配列を返す。
+ * 空文字 / 重複 / 不正値は除去する (実在チェックは syncVideoEvents 側ではしない)。
+ */
+function parseEventIdsFromForm(formData: FormData): string[] {
+  const raw = formData.get("event_ids");
+  if (typeof raw !== "string") return [];
+  return Array.from(
+    new Set(
+      raw
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0 && s.length <= 64),
+    ),
+  );
+}
+
+/**
+ * `video_events` を differential に同期する。
+ *
+ * - `alwaysInclude`: スロット提出時の slot.event_id 等、UI で外せないイベント。
+ * - `requested`: ユーザーが選択したイベント。
+ * - 合算した集合を target として、現在の所属イベントとの差分で
+ *   不要行を delete、未追加行を insert する。
+ */
+async function syncVideoEvents(
+  db: NonNullable<ReturnType<typeof getDatabase>>,
+  videoId: string,
+  requested: string[],
+  alwaysInclude: string[] = [],
+): Promise<void> {
+  const target = Array.from(new Set([...alwaysInclude, ...requested]));
+  const current = await db
+    .select({ event_id: videoEvents.event_id })
+    .from(videoEvents)
+    .where(eq(videoEvents.video_id, videoId));
+  const currentSet = new Set(current.map((r) => r.event_id));
+  const targetSet = new Set(target);
+  for (const r of current) {
+    if (!targetSet.has(r.event_id)) {
+      await db
+        .delete(videoEvents)
+        .where(
+          and(
+            eq(videoEvents.video_id, videoId),
+            eq(videoEvents.event_id, r.event_id),
+          )!,
+        );
+    }
+  }
+  for (const eventId of target) {
+    if (!currentSet.has(eventId)) {
+      await db
+        .insert(videoEvents)
+        .values({ video_id: videoId, event_id: eventId })
+        .onConflictDoNothing();
+    }
+  }
 }
 
 /**
@@ -340,6 +405,7 @@ export async function createFreeVideo(
       icon_url: iconUrl,
       status: "public",
       music: parsed.data.music ?? null,
+      music_reference_url: parsed.data.music_reference_url ?? null,
       credit: parsed.data.credit ?? null,
       intro_comment: parsed.data.intro_comment ?? null,
       highlights: parsed.data.highlights ?? null,
@@ -367,6 +433,11 @@ export async function createFreeVideo(
     ? parseMembersJson(formData.get("members_json"))
     : [];
   await replaceVideoMembers(db, id, members);
+
+  // 所属イベント (video_events) を differential に同期する。
+  // free 投稿でも複数イベントに紐付けできる。primary_event_id は別途扱う。
+  const requestedEventIds = parseEventIdsFromForm(formData);
+  await syncVideoEvents(db, id, requestedEventIds);
 
   // 投稿主体 X ID の作品アイコン候補に追加する (今回の作品アイコンが空でなければ)。
   // x_users.icon_url は変更しない。
@@ -503,6 +574,7 @@ export async function submitSlotVideo(
           display_name: parsed.data.display_name,
           icon_url: parsed.data.icon_url || null,
           music: parsed.data.music ?? null,
+          music_reference_url: parsed.data.music_reference_url ?? null,
           credit: parsed.data.credit ?? null,
           intro_comment: parsed.data.intro_comment ?? null,
           highlights: parsed.data.highlights ?? null,
@@ -567,14 +639,10 @@ export async function submitSlotVideo(
     throw err;
   }
 
-  // posting/slot-event-link:
-  //   イベント詳細・一覧は video_events を innerJoin して取得するため、
-  //   slot 経由の投稿でも primary_event_id だけでなく video_events を必ず生成する。
-  //   再提出 (exists=true) でも m:n 行が欠けていれば補修できるよう onConflictDoNothing。
-  await db
-    .insert(videoEvents)
-    .values({ video_id: videoId, event_id: slotRow.event_id })
-    .onConflictDoNothing();
+  // 所属イベントを同期する。スロットのイベントは alwaysInclude として固定。
+  // フォームから event_ids が空で送られても slot.event_id は外れない。
+  const requestedEventIds = parseEventIdsFromForm(formData);
+  await syncVideoEvents(db, videoId, requestedEventIds, [slotRow.event_id]);
 
   const members = parsed.data.is_collab
     ? parseMembersJson(formData.get("members_json"))
@@ -665,6 +733,7 @@ export async function updateVideo(
   setDefault("contact_x_id", target.creator_id ?? target.contact_x_id);
   setDefault("icon_url", target.icon_url);
   setDefault("music", target.music);
+  setDefault("music_reference_url", target.music_reference_url);
   setDefault("credit", target.credit);
   setDefault("intro_comment", target.intro_comment);
   setDefault("highlights", target.highlights);
@@ -747,7 +816,9 @@ export async function updateVideo(
   }
   if (
     !canEditCredits &&
-    (changed(parsed.data.music, target.music) || changed(parsed.data.credit, target.credit))
+    (changed(parsed.data.music, target.music) ||
+      changed(parsed.data.credit, target.credit) ||
+      changed(parsed.data.music_reference_url, target.music_reference_url))
   ) {
     return { ok: false, message: "楽曲・クレジットを編集する権限がありません。" };
   }
@@ -814,6 +885,9 @@ export async function updateVideo(
         display_name: canEditIdentity ? parsed.data.display_name : target.display_name,
         icon_url: canEditIdentity ? parsed.data.icon_url || null : target.icon_url,
         music: canEditCredits ? parsed.data.music ?? null : target.music,
+        music_reference_url: canEditCredits
+          ? parsed.data.music_reference_url ?? null
+          : target.music_reference_url,
         credit: canEditCredits ? parsed.data.credit ?? null : target.credit,
         intro_comment: canEditDescriptions
           ? parsed.data.intro_comment ?? null
@@ -848,6 +922,15 @@ export async function updateVideo(
       ? parseMembersJson(formData.get("members_json"))
       : [];
     await replaceVideoMembers(db, videoId, members);
+  }
+
+  // 所属イベント (video_events) の編集。primary_event_id を変えられる権限と同じ
+  // canEditPrimaryEvent (= videos.primary_event 相当) で制御するのが本来だが、
+  // 当面は canEditIdentity で代用する。primary_event_id は alwaysInclude として固定。
+  if (canEditIdentity && formData.has("event_ids")) {
+    const requestedEventIds = parseEventIdsFromForm(formData);
+    const alwaysInclude = target.primary_event_id ? [target.primary_event_id] : [];
+    await syncVideoEvents(db, videoId, requestedEventIds, alwaysInclude);
   }
 
   // identity を編集できた場合、作品アイコン候補に追加する。
