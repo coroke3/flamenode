@@ -8,38 +8,26 @@ import { writeGuard } from "@/lib/auth/writeGuard";
 import { canEditVideo } from "@/lib/auth/ownership";
 import {
   historyLogs,
-  videoCollaboratorPermissions,
+  videoCollaborators,
   videos,
 } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
 import { normalizeXId } from "@/lib/utils/xid";
 
 /**
- * 作品単位の参加者編集権限を管理する Server Action 群。
+ * 作品単位の合作メンバー編集権限 (`video_collaborators`) を管理する Server Action 群。
  *
- * 認可:
- *   - 操作者は writeGuard を通過していること。
- *   - 当該作品に対して `video.identity` の編集権限を持つこと
- *     (= 作者本人 / admin / event 側で identity 編集権限を持つ運営)。
- *     これは「主となるユーザーが参加者に権限を付与する」用途と整合する。
+ * 仕様:
+ *   - 粒度は can_edit ON/OFF のみ。section 別判定は持たない。
+ *   - 操作者は `video.identity` 権限を持つ必要がある (作者本人 / admin /
+ *     イベント運営の identity 権限保持者)。
+ *   - subject は X ID (連携前でも先付与可) または discord_user_id のいずれかで指定。
  */
 
-export interface VideoCollabPermResult {
+export interface VideoCollabResult {
   ok: boolean;
   message?: string;
 }
-
-// permission_key は VideoEditSectionKey と整合させる。
-// admin 側 / イベント側の包括的なキー (video.identity, videos.*) は
-// この作品単位フローでは扱わない (合作メンバー向け 5 プリセットに絞る)。
-const ALLOWED_KEYS = [
-  "video.basics",
-  "video.credits",
-  "video.descriptions",
-  "video.members",
-  "video.youtube_id",
-] as const;
-type VideoCollabPermKey = (typeof ALLOWED_KEYS)[number];
 
 const upsertSchema = z.object({
   video_id: z.string().trim().min(1).max(64),
@@ -51,14 +39,25 @@ const upsertSchema = z.object({
     .transform((s) => normalizeXId(s ?? "")),
   discord_user_id: z.string().trim().max(64).optional().nullable(),
   display_name: z.string().trim().min(1).max(80),
-  permission_keys: z.string().trim().max(500),
+  can_edit: z
+    .union([z.literal("1"), z.literal("0"), z.literal("true"), z.literal("false")])
+    .optional()
+    .transform((v) => v === "1" || v === "true" || v === undefined),
 });
 
 async function loadEditableVideo(
   db: NonNullable<ReturnType<typeof getDatabase>>,
   user: { id: string; role?: string | null },
   videoId: string,
-): Promise<{ id: string; primary_event_id: string | null; creator_id: string | null; owner_discord_user_id: string | null } | null> {
+): Promise<
+  | {
+      id: string;
+      primary_event_id: string | null;
+      creator_id: string | null;
+      owner_discord_user_id: string | null;
+    }
+  | null
+> {
   const row = (
     await db
       .select({
@@ -83,116 +82,90 @@ async function loadEditableVideo(
 }
 
 /**
- * 参加者編集権限を upsert する。
- *
- * `permission_keys` はカンマ区切り (UI 側のチェックボックス選択結果を結合)。
- * 既存の (video_id, subject, permission_key) 行は allowed=1 のまま更新、
- * 未指定だった key は削除して「チェックボックスの最新状態 = DB 行」に揃える。
- *
- * subject は X ID (連携前でも先付与可) または discord_user_id のいずれか。
- * 両方欠ければ何もしない。
+ * 合作メンバーの編集権限を upsert する。
+ * 既存行があれば can_edit と display_name を更新、無ければ追加する。
  */
-export async function upsertVideoCollaboratorPermissions(
+export async function upsertVideoCollaborator(
   formData: FormData,
-): Promise<VideoCollabPermResult> {
+): Promise<VideoCollabResult> {
   const guard = await writeGuard({ feature: "edit_video" });
   if (!guard.ok) return { ok: false, message: guard.message };
   const user = { id: guard.user.id, role: guard.user.role ?? null };
 
   const parsed = upsertSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
-    return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
+    return {
+      ok: false,
+      message: parsed.error.issues[0]?.message ?? "入力エラー",
+    };
   }
   const xUserId = parsed.data.x_user_id || null;
   const discordUserId = parsed.data.discord_user_id?.trim() || null;
   if (!xUserId && !discordUserId) {
-    return { ok: false, message: "X ID か Discord User ID のいずれかを指定してください。" };
+    return {
+      ok: false,
+      message: "X ID か Discord User ID のいずれかを指定してください。",
+    };
   }
-
-  const keys = parsed.data.permission_keys
-    .split(",")
-    .map((k) => k.trim())
-    .filter((k): k is VideoCollabPermKey =>
-      (ALLOWED_KEYS as readonly string[]).includes(k),
-    );
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
 
   const video = await loadEditableVideo(db, user, parsed.data.video_id);
   if (!video) {
-    return { ok: false, message: "対象作品が見つからない、または権限がありません。" };
+    return {
+      ok: false,
+      message: "対象作品が見つからない、または権限がありません。",
+    };
   }
 
-  // 既存の subject 行を取得 (どちらの ID で照合するかで where が変わる)。
   const subjectWhere = xUserId
     ? and(
-        eq(videoCollaboratorPermissions.video_id, video.id),
-        eq(videoCollaboratorPermissions.x_user_id, xUserId),
+        eq(videoCollaborators.video_id, video.id),
+        eq(videoCollaborators.x_user_id, xUserId),
       )!
     : and(
-        eq(videoCollaboratorPermissions.video_id, video.id),
-        eq(videoCollaboratorPermissions.discord_user_id, discordUserId!),
+        eq(videoCollaborators.video_id, video.id),
+        eq(videoCollaborators.discord_user_id, discordUserId!),
       )!;
-  const existing = await db
-    .select()
-    .from(videoCollaboratorPermissions)
-    .where(subjectWhere);
-  const existingByKey = new Map(existing.map((r) => [r.permission_key, r]));
+  const existing = (
+    await db.select().from(videoCollaborators).where(subjectWhere).limit(1)
+  )[0];
 
   const now = Math.floor(Date.now() / 1000);
+  const canEditValue = parsed.data.can_edit ? 1 : 0;
 
-  // チェック ON の key は upsert
-  for (const key of keys) {
-    const row = existingByKey.get(key);
-    if (row) {
-      if (
-        row.allowed !== 1 ||
-        row.display_name !== parsed.data.display_name
-      ) {
-        await db
-          .update(videoCollaboratorPermissions)
-          .set({
-            allowed: 1,
-            display_name: parsed.data.display_name,
-            updated_at: now,
-          })
-          .where(eq(videoCollaboratorPermissions.id, row.id));
-      }
-    } else {
-      await db.insert(videoCollaboratorPermissions).values({
-        id: generateId("vcp"),
-        video_id: video.id,
-        x_user_id: xUserId,
-        discord_user_id: discordUserId,
+  if (existing) {
+    await db
+      .update(videoCollaborators)
+      .set({
         display_name: parsed.data.display_name,
-        permission_key: key,
-        allowed: 1,
-        granted_by_user_id: user.id,
-        created_at: now,
+        can_edit: canEditValue,
         updated_at: now,
-      });
-    }
-  }
-
-  // チェック OFF にされた key は削除 (allowed: 0 にせず物理削除して履歴は historyLogs に残す)
-  const targetSet = new Set<string>(keys);
-  for (const row of existing) {
-    if (!targetSet.has(row.permission_key)) {
-      await db
-        .delete(videoCollaboratorPermissions)
-        .where(eq(videoCollaboratorPermissions.id, row.id));
-    }
+      })
+      .where(eq(videoCollaborators.id, existing.id));
+  } else {
+    await db.insert(videoCollaborators).values({
+      id: generateId("vco"),
+      video_id: video.id,
+      x_user_id: xUserId,
+      discord_user_id: discordUserId,
+      display_name: parsed.data.display_name,
+      can_edit: canEditValue,
+      granted_by_user_id: user.id,
+      created_at: now,
+      updated_at: now,
+    });
   }
 
   await db.insert(historyLogs).values({
-    table_name: "video_collaborator_permissions",
+    table_name: "video_collaborators",
     record_id: video.id,
-    action: "UPDATE",
+    action: existing ? "UPDATE" : "CREATE",
     after_data: JSON.stringify({
       subject: xUserId ? `x:${xUserId}` : `discord:${discordUserId}`,
       display_name: parsed.data.display_name,
-      keys,
+      can_edit: canEditValue,
     }),
     operator_discord_id: user.id,
     retention_class: "long_audit",
@@ -200,23 +173,28 @@ export async function upsertVideoCollaboratorPermissions(
   });
 
   revalidatePath(`/dashboard/edit/${video.id}`);
-  return { ok: true, message: "参加者の編集権限を更新しました。" };
+  return {
+    ok: true,
+    message: canEditValue
+      ? "編集権限を付与しました。"
+      : "編集権限を無効化しました。",
+  };
 }
 
 /**
- * 参加者の編集権限をまとめて削除する (subject 単位)。
- * x_user_id か discord_user_id のいずれかで対象 subject を特定する。
+ * 合作メンバーの編集権限行を削除する (subject 単位)。
  */
-export async function deleteVideoCollaboratorPermissions(
+export async function deleteVideoCollaborator(
   formData: FormData,
-): Promise<VideoCollabPermResult> {
+): Promise<VideoCollabResult> {
   const guard = await writeGuard({ feature: "edit_video" });
   if (!guard.ok) return { ok: false, message: guard.message };
   const user = { id: guard.user.id, role: guard.user.role ?? null };
 
   const videoId = String(formData.get("video_id") ?? "").trim();
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
-  const discordUserId = String(formData.get("discord_user_id") ?? "").trim() || null;
+  const discordUserId =
+    String(formData.get("discord_user_id") ?? "").trim() || null;
   if (!videoId) return { ok: false, message: "video_id がありません。" };
   if (!xUserId && !discordUserId) {
     return { ok: false, message: "対象 subject が指定されていません。" };
@@ -227,25 +205,28 @@ export async function deleteVideoCollaboratorPermissions(
 
   const video = await loadEditableVideo(db, user, videoId);
   if (!video) {
-    return { ok: false, message: "対象作品が見つからない、または権限がありません。" };
+    return {
+      ok: false,
+      message: "対象作品が見つからない、または権限がありません。",
+    };
   }
 
   const subjectWhere = xUserId
     ? and(
-        eq(videoCollaboratorPermissions.video_id, video.id),
-        eq(videoCollaboratorPermissions.x_user_id, xUserId),
-        isNotNull(videoCollaboratorPermissions.x_user_id),
+        eq(videoCollaborators.video_id, video.id),
+        eq(videoCollaborators.x_user_id, xUserId),
+        isNotNull(videoCollaborators.x_user_id),
       )!
     : and(
-        eq(videoCollaboratorPermissions.video_id, video.id),
-        eq(videoCollaboratorPermissions.discord_user_id, discordUserId!),
-        isNull(videoCollaboratorPermissions.x_user_id),
+        eq(videoCollaborators.video_id, video.id),
+        eq(videoCollaborators.discord_user_id, discordUserId!),
+        isNull(videoCollaborators.x_user_id),
       )!;
-  await db.delete(videoCollaboratorPermissions).where(subjectWhere);
+  await db.delete(videoCollaborators).where(subjectWhere);
 
   const now = Math.floor(Date.now() / 1000);
   await db.insert(historyLogs).values({
-    table_name: "video_collaborator_permissions",
+    table_name: "video_collaborators",
     record_id: video.id,
     action: "DELETE",
     after_data: JSON.stringify({

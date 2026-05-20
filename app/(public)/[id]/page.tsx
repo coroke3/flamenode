@@ -438,20 +438,32 @@ export default async function VideoDetailPage({
               <MetaItem
                 title="楽曲"
                 body={
-                  <>
-                    {video.music_reference_url ? (
-                      <a
-                        href={video.music_reference_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
+                  video.music_reference_url ? (
+                    // music_reference_url がある場合は「楽曲名 / 作曲者」全体を 1 つの
+                    // 外部リンクとして包み、外部リンクアイコンを末尾に添える。
+                    // 楽曲名と作曲者は同じ参照先 (楽曲ページ) を指すので分けない。
+                    <a
+                      href={video.music_reference_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                      }}
+                    >
+                      <span>
                         {video.music}
-                      </a>
-                    ) : (
-                      video.music
-                    )}
-                    {video.credit ? ` / ${video.credit}` : ""}
-                  </>
+                        {video.credit ? ` / ${video.credit}` : ""}
+                      </span>
+                      <Icon name="external" size={12} aria-hidden />
+                    </a>
+                  ) : (
+                    <>
+                      {video.music}
+                      {video.credit ? ` / ${video.credit}` : ""}
+                    </>
+                  )
                 }
               />
             ) : null}

@@ -8,6 +8,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { assertCanEditEvent } from "@/lib/auth/ownership";
 import { events, historyLogs } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
+import { normalizeHttpUrl } from "@/lib/utils/url";
 
 export interface EventActionResult {
   ok: boolean;
@@ -22,8 +23,14 @@ const eventSchema = z.object({
     .enum(["event", "collabo", "type", "other"])
     .default("event"),
   explanation: z.string().trim().max(4000).optional().nullable(),
-  icon_url: z.string().trim().max(500).optional().nullable(),
-  img_url: z.string().trim().max(500).optional().nullable(),
+  icon_url: z.preprocess(
+    (val) => (typeof val === "string" ? normalizeHttpUrl(val, { maxLength: 500 }) : val),
+    z.string().trim().max(500).optional().nullable(),
+  ),
+  img_url: z.preprocess(
+    (val) => (typeof val === "string" ? normalizeHttpUrl(val, { maxLength: 500 }) : val),
+    z.string().trim().max(500).optional().nullable(),
+  ),
   accent_color: z.string().trim().max(20).optional().nullable(),
   start_time: z.string().trim().optional().nullable(),
   end_time: z.string().trim().optional().nullable(),
@@ -32,6 +39,7 @@ const eventSchema = z.object({
   is_active: z.coerce.number().min(0).max(1).default(0),
   is_entry_open: z.coerce.number().min(0).max(1).default(0),
   is_archived: z.coerce.number().min(0).max(1).default(0),
+  allow_user_video_event_links: z.coerce.number().min(0).max(1).default(0),
   max_slots_per_video: z.coerce.number().min(1).max(20).default(1),
   max_consecutive_slots_per_entry: z.coerce.number().min(1).max(20).default(3),
   slot_part_gap_minutes: z.coerce.number().min(1).max(1440).default(30),
@@ -45,9 +53,26 @@ function parseDateInput(raw: string | null | undefined): number | null {
   if (!raw) return null;
   const s = raw.trim();
   if (!s) return null;
-  const t = Date.parse(s);
-  if (Number.isNaN(t)) return null;
-  return Math.floor(t / 1000);
+
+  // "2026-05-19T12:00" を JST として扱う
+  const m = s.match(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/
+  );
+  if (!m) {
+    const t = Date.parse(s);
+    return Number.isNaN(t) ? null : Math.floor(t / 1000);
+  }
+
+  const [, y, mo, d, h, mi, sec = "0"] = m;
+  const utcMs = Date.UTC(
+    Number(y),
+    Number(mo) - 1,
+    Number(d),
+    Number(h) - 9,
+    Number(mi),
+    Number(sec),
+  );
+  return Math.floor(utcMs / 1000);
 }
 
 async function requireAdmin(): Promise<
@@ -95,6 +120,7 @@ export async function createEvent(
     is_active: data.is_active,
     is_entry_open: data.is_entry_open,
     is_archived: data.is_archived,
+    allow_user_video_event_links: data.allow_user_video_event_links,
     start_time: parseDateInput(data.start_time),
     end_time: parseDateInput(data.end_time),
     entry_start_time: parseDateInput(data.entry_start_time),
@@ -218,18 +244,29 @@ export async function deleteEvent(
   if (!db) return { ok: false, message: "DB に接続できません。" };
 
   const now = Math.floor(Date.now() / 1000);
-  await db.delete(events).where(eq(events.id, eventId));
+  await db
+    .update(events)
+    .set({
+      is_active: 0,
+      is_entry_open: 0,
+      is_archived: 1,
+      updated_at: now,
+    })
+    .where(eq(events.id, eventId));
 
   await db.insert(historyLogs).values({
     table_name: "events",
     record_id: eventId,
-    action: "DELETE",
+    action: "UPDATE",
+    after_data: JSON.stringify({ archived_by_delete_action: true }),
     operator_discord_id: guard.userId,
     retention_class: "long_audit",
     created_at: now,
   });
 
   revalidatePath("/admin/events");
+  revalidatePath(`/admin/events/${eventId}`);
   revalidatePath("/event");
+  revalidatePath(`/event/${eventId}`);
   return { ok: true };
 }

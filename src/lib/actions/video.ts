@@ -7,6 +7,7 @@ import { getDatabase, getEnv } from "@/lib/cloudflare";
 import { canEditVideo } from "@/lib/auth/ownership";
 import { writeGuard, type WriteGuardDenyReason } from "@/lib/auth/writeGuard";
 import {
+  events as eventsTable,
   historyLogs,
   slots,
   videos,
@@ -16,6 +17,8 @@ import {
   xUsers,
   xUserIcons,
 } from "@/lib/db/schema";
+import { getEditableEventIds } from "@/lib/auth/ownership";
+import { inArray } from "drizzle-orm";
 import { extractYoutubeId } from "@/lib/youtube/id";
 import { generateId } from "@/lib/utils/id";
 import { normalizeXId } from "@/lib/utils/xid";
@@ -204,43 +207,100 @@ function parseEventIdsFromForm(formData: FormData): string[] {
 }
 
 /**
- * `video_events` を differential に同期する。
+ * `video_events` を policy 適用 + differential 同期する。
  *
- * - `alwaysInclude`: スロット提出時の slot.event_id 等、UI で外せないイベント。
- * - `requested`: ユーザーが選択したイベント。
- * - 合算した集合を target として、現在の所属イベントとの差分で
- *   不要行を delete、未追加行を insert する。
+ * 入力:
+ *   - `alwaysInclude`: 外せないイベント (slot.event_id / primary_event_id 等)。
+ *   - `requested`: 投稿者が UI で選択したイベント。
+ *
+ * Policy:
+ *   - admin → すべての requested を許可。
+ *   - 非 admin → 各イベントが以下のいずれかを満たす場合のみ追加・削除可:
+ *       (a) `events.allow_user_video_event_links = 1`、または
+ *       (b) ユーザーが当該イベントの event_editor (getEditableEventIds)。
+ *   - ポリシー外で既に紐付いているイベントは「ロック扱い」で保持する
+ *     (UI で外せないので削除されない)。
+ *
+ * 計算した target に基づき、video_events を delete / insert で差分同期する。
  */
 async function syncVideoEvents(
   db: NonNullable<ReturnType<typeof getDatabase>>,
   videoId: string,
-  requested: string[],
-  alwaysInclude: string[] = [],
+  args: {
+    requested: string[];
+    alwaysInclude?: string[];
+    user: { id: string; role?: string | null };
+  },
 ): Promise<void> {
-  const target = Array.from(new Set([...alwaysInclude, ...requested]));
+  const requested = args.requested;
+  const alwaysInclude = args.alwaysInclude ?? [];
+  const user = args.user;
+
   const current = await db
     .select({ event_id: videoEvents.event_id })
     .from(videoEvents)
     .where(eq(videoEvents.video_id, videoId));
-  const currentSet = new Set(current.map((r) => r.event_id));
+  const currentIds = current.map((r) => r.event_id);
+
+  // 非 admin の場合のみ、イベント単位のポリシー判定を行う。
+  let target: string[];
+  if (user.role === "admin") {
+    target = Array.from(new Set([...alwaysInclude, ...requested]));
+  } else {
+    const universe = Array.from(
+      new Set([...currentIds, ...requested, ...alwaysInclude]),
+    );
+    const allowMap = new Map<string, number>();
+    if (universe.length > 0) {
+      const rows = await db
+        .select({
+          id: eventsTable.id,
+          allow: eventsTable.allow_user_video_event_links,
+        })
+        .from(eventsTable)
+        .where(inArray(eventsTable.id, universe));
+      for (const r of rows) allowMap.set(r.id, r.allow);
+    }
+    const editableEventIds = new Set(await getEditableEventIds(db, user.id));
+    const userCanModify = (id: string) =>
+      allowMap.get(id) === 1 || editableEventIds.has(id);
+
+    const targetSet = new Set<string>(alwaysInclude);
+    // 現在紐付いているもの: 操作権限が無ければロックして残す。
+    //                     権限があれば requested に含まれていれば残し、無ければ外す。
+    for (const id of currentIds) {
+      if (!userCanModify(id)) {
+        targetSet.add(id);
+      } else if (requested.includes(id)) {
+        targetSet.add(id);
+      }
+    }
+    // 追加要求: 操作権限があるイベントだけ採用 (policy 外は silent drop)。
+    for (const id of requested) {
+      if (userCanModify(id)) targetSet.add(id);
+    }
+    target = Array.from(targetSet);
+  }
+
+  const currentSet = new Set(currentIds);
   const targetSet = new Set(target);
-  for (const r of current) {
-    if (!targetSet.has(r.event_id)) {
+  for (const id of currentIds) {
+    if (!targetSet.has(id)) {
       await db
         .delete(videoEvents)
         .where(
           and(
             eq(videoEvents.video_id, videoId),
-            eq(videoEvents.event_id, r.event_id),
+            eq(videoEvents.event_id, id),
           )!,
         );
     }
   }
-  for (const eventId of target) {
-    if (!currentSet.has(eventId)) {
+  for (const id of target) {
+    if (!currentSet.has(id)) {
       await db
         .insert(videoEvents)
-        .values({ video_id: videoId, event_id: eventId })
+        .values({ video_id: videoId, event_id: id })
         .onConflictDoNothing();
     }
   }
@@ -437,7 +497,10 @@ export async function createFreeVideo(
   // 所属イベント (video_events) を differential に同期する。
   // free 投稿でも複数イベントに紐付けできる。primary_event_id は別途扱う。
   const requestedEventIds = parseEventIdsFromForm(formData);
-  await syncVideoEvents(db, id, requestedEventIds);
+  await syncVideoEvents(db, id, {
+    requested: requestedEventIds,
+    user: { id: userId, role: sessionUser.role ?? null },
+  });
 
   // 投稿主体 X ID の作品アイコン候補に追加する (今回の作品アイコンが空でなければ)。
   // x_users.icon_url は変更しない。
@@ -642,7 +705,11 @@ export async function submitSlotVideo(
   // 所属イベントを同期する。スロットのイベントは alwaysInclude として固定。
   // フォームから event_ids が空で送られても slot.event_id は外れない。
   const requestedEventIds = parseEventIdsFromForm(formData);
-  await syncVideoEvents(db, videoId, requestedEventIds, [slotRow.event_id]);
+  await syncVideoEvents(db, videoId, {
+    requested: requestedEventIds,
+    alwaysInclude: [slotRow.event_id],
+    user: { id: userId, role: sessionUser.role ?? null },
+  });
 
   const members = parsed.data.is_collab
     ? parseMembersJson(formData.get("members_json"))
@@ -930,7 +997,11 @@ export async function updateVideo(
   if (canEditIdentity && formData.has("event_ids")) {
     const requestedEventIds = parseEventIdsFromForm(formData);
     const alwaysInclude = target.primary_event_id ? [target.primary_event_id] : [];
-    await syncVideoEvents(db, videoId, requestedEventIds, alwaysInclude);
+    await syncVideoEvents(db, videoId, {
+      requested: requestedEventIds,
+      alwaysInclude,
+      user: { id: sessionUser.id, role: sessionUser.role ?? null },
+    });
   }
 
   // identity を編集できた場合、作品アイコン候補に追加する。

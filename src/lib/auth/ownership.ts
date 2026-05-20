@@ -4,7 +4,7 @@ import type { DB } from "@/lib/db/client";
 import {
   eventCollaboratorPermissions,
   eventEditors,
-  videoCollaboratorPermissions,
+  videoCollaborators,
   videoEvents,
   xUsers,
   type videos,
@@ -182,35 +182,34 @@ export async function canEditVideo(args: {
   const approved = await getApprovedXIds(db, user.id);
   if (video.creator_id && approved.includes(video.creator_id)) return true;
 
-  // 作品単位の参加者編集権限 (video_collaborator_permissions)。
-  // 主となるユーザー (creator_id 一致者) が合作メンバーに付与した細粒度権限を見る。
-  // x_user_id (承認済み一覧 approved) または discord_user_id 一致のいずれかで判定。
-  const aliases = VIDEO_PERMISSION_ALIASES[requiredKey] ?? [requiredKey];
+  // 作品単位の合作メンバー編集権限 (video_collaborators)。
+  // 主となるユーザー (creator_id 一致者 / admin / 運営) が「この合作作品の編集者
+  // として参加できるか」を ON/OFF で許可するゲート。許可されている場合は、
+  // 操作者が他の手段 (admin / event editor 等) で持っている権限の範囲で編集できる
+  // と解釈する (細粒度 section 判定は持たない)。
+  //
+  // が、ここで can_edit=1 だけでは「creator でも event editor でもないが合作
+  // メンバーとして編集できる」状態を許容したいので、true を返す。
+  // 範囲は呼び出し側の section 別 disable/permission_keys 判定で担保される。
   const collabSubjectCond =
     approved.length > 0
       ? or(
-          eq(videoCollaboratorPermissions.discord_user_id, user.id),
-          inArray(videoCollaboratorPermissions.x_user_id, approved),
+          eq(videoCollaborators.discord_user_id, user.id),
+          inArray(videoCollaborators.x_user_id, approved),
         )!
-      : eq(videoCollaboratorPermissions.discord_user_id, user.id);
-  const videoCollabRows = await db
-    .select({
-      permission_key: videoCollaboratorPermissions.permission_key,
-    })
-    .from(videoCollaboratorPermissions)
+      : eq(videoCollaborators.discord_user_id, user.id);
+  const collabRows = await db
+    .select({ can_edit: videoCollaborators.can_edit })
+    .from(videoCollaborators)
     .where(
       and(
-        eq(videoCollaboratorPermissions.video_id, video.id),
-        eq(videoCollaboratorPermissions.allowed, 1),
+        eq(videoCollaborators.video_id, video.id),
+        eq(videoCollaborators.can_edit, 1),
         collabSubjectCond,
       )!,
-    );
-  if (videoCollabRows.length > 0) {
-    const granted = new Set(videoCollabRows.map((r) => r.permission_key));
-    for (const key of aliases) {
-      if (granted.has(key)) return true;
-    }
-  }
+    )
+    .limit(1);
+  if (collabRows.length > 0) return true;
 
   // 動画が属するイベント (primary または video_events 経由) で編集者か?
   const eventIds = new Set<string>();
@@ -222,6 +221,7 @@ export async function canEditVideo(args: {
   evRows.forEach((r) => eventIds.add(r.event_id));
 
   if (eventIds.size === 0) return false;
+  const aliases = VIDEO_PERMISSION_ALIASES[requiredKey] ?? [requiredKey];
   for (const eId of eventIds) {
     for (const key of aliases) {
       if (await canEditEvent(db, user, eId, key as CollaboratorPermissionKey)) {

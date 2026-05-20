@@ -56,7 +56,10 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
         .limit(2000)
     : [];
   const softwareSuggestions = db ? await getUsedSoftwareSuggestions(db) : [];
-  // 所属イベント候補: 受付中のイベントのみ。投稿者が能動的に複数所属を選べるようにする。
+  // 所属イベント候補: 受付中かつ「一般ユーザーの追加紐付け = 許可」のイベントのみ。
+  // 投稿者が能動的に複数所属を選べるように。
+  // admin / event_editor は本ピッカー経由でなく admin / manage UI から追加するため、
+  // ここではフラグでフィルタする (シンプル化)。
   const eventOptions = db
     ? await db
         .select()
@@ -64,7 +67,10 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
         .where(eq(eventsTable.is_archived, 0))
         .then((rows) =>
           rows
-            .filter((ev) => isAcceptingEntries(ev))
+            .filter(
+              (ev) =>
+                isAcceptingEntries(ev) && ev.allow_user_video_event_links === 1,
+            )
             .map((ev) => ({ id: ev.id, title: ev.title })),
         )
     : [];

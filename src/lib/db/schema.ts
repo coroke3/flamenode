@@ -177,6 +177,16 @@ export const events = sqliteTable("events", {
   is_active: integer("is_active").notNull().default(0),
   is_entry_open: integer("is_entry_open").notNull().default(0),
   is_archived: integer("is_archived").notNull().default(0),
+  /**
+   * 一般ユーザー (作品投稿者) が、このイベントを既存作品の追加所属イベントとして
+   * 紐付けてよいか。
+   *   0 = 不許可。イベント運営・管理者のみが video_events を追加できる
+   *   1 = 許可。作品投稿者・編集者が「所属イベント」チェックボックスから選べる
+   * デフォルト 0 (運営承認制) で、緩めたいイベントだけ 1 にする。
+   */
+  allow_user_video_event_links: integer("allow_user_video_event_links")
+    .notNull()
+    .default(0),
   event_group_id: text("event_group_id"),
   slot_type: text("slot_type", { enum: ["time", "count"] }).default("time"),
   slot_visibility_mode: text("slot_visibility_mode", {
@@ -245,36 +255,32 @@ export const eventCollaboratorPermissions = sqliteTable(
 );
 
 /**
- * 作品 (video) 単位の参加者編集権限。
+ * 作品 (video) 単位の合作メンバー編集権限。
  *
- * 合作作品で「主となるユーザーが各参加者に編集権限を付与」できるようにする
- * (event_collaborator_permissions はイベント単位なので作品ごとには粗い)。
+ * 「主となるユーザー (作者 / admin / イベント運営の identity 編集権限保持者) が、
+ * 合作メンバーに編集権限を渡す」用途の単純なゲートテーブル。
  *
- * permission_key は VideoEditSectionKey と整合させる:
- *   - video.basics / video.credits / video.descriptions / video.members / video.youtube_id
+ * 粒度は can_edit ON/OFF のみ。編集可能範囲は、そのユーザーが持つ全体権限・
+ * イベント編集権限に従う (細粒度の section 別判定は持たない)。
  *
- * X ID 未連携のメンバーにも先に権限を付与しておけて、後で Discord 連携された
- * 時に有効化される (`x_user_id` 一致による解決)。
+ * X ID 未連携のメンバーにも先に権限を付与しておけて、後で Discord 連携・
+ * 承認された時に getApprovedXIds 経由で有効化される。
  */
-export const videoCollaboratorPermissions = sqliteTable(
-  "video_collaborator_permissions",
-  {
-    id: text("id").primaryKey(),
-    video_id: text("video_id").notNull(),
-    x_user_id: text("x_user_id"),
-    discord_user_id: text("discord_user_id"),
-    display_name: text("display_name").notNull(),
-    permission_key: text("permission_key").notNull(),
-    allowed: integer("allowed").notNull().default(1),
-    granted_by_user_id: text("granted_by_user_id").notNull(),
-    created_at: integer("created_at")
-      .notNull()
-      .default(sql`(unixepoch())`),
-    updated_at: integer("updated_at")
-      .notNull()
-      .default(sql`(unixepoch())`),
-  },
-);
+export const videoCollaborators = sqliteTable("video_collaborators", {
+  id: text("id").primaryKey(),
+  video_id: text("video_id").notNull(),
+  x_user_id: text("x_user_id"),
+  discord_user_id: text("discord_user_id"),
+  display_name: text("display_name").notNull(),
+  can_edit: integer("can_edit").notNull().default(1),
+  granted_by_user_id: text("granted_by_user_id").notNull(),
+  created_at: integer("created_at")
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updated_at: integer("updated_at")
+    .notNull()
+    .default(sql`(unixepoch())`),
+});
 
 export const slots = sqliteTable("slots", {
   id: text("id").primaryKey(),

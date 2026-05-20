@@ -118,14 +118,18 @@ export default async function SlottedPostPage({
     .limit(2000);
   const softwareSuggestions = await getUsedSoftwareSuggestions(db);
   const iconCandidates = activeX ? await getXIconCandidates(db, activeX) : [];
-  // 所属イベント候補: 受付中のイベント + 当該スロットのイベント自体 (常時固定)。
+  // 所属イベント候補: 「許可フラグ付き」かつ受付中のイベント + スロットのイベント (常時固定)。
   const acceptingEvents = await db
     .select()
     .from(eventsTable)
     .where(eq(eventsTable.is_archived, 0))
     .then((rows) =>
       rows
-        .filter((event) => isAcceptingEntries(event))
+        .filter(
+          (event) =>
+            isAcceptingEntries(event) &&
+            event.allow_user_video_event_links === 1,
+        )
         .map((event) => ({ id: event.id, title: event.title })),
     );
   const slotEventOption = { id: ev.id, title: ev.title };

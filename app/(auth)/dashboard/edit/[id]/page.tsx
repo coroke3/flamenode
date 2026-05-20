@@ -6,7 +6,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   events as eventsTable,
-  videoCollaboratorPermissions as videoCollabPermsTable,
+  videoCollaborators as videoCollabTable,
   videoEvents as videoEventsTable,
   videoMembers,
   videos as videosTable,
@@ -16,7 +16,7 @@ import { inArray } from "drizzle-orm";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 import {
   VideoCollabPermsManager,
-  type VideoCollabPermSubject,
+  type VideoCollabSubject,
 } from "@/components/admin/VideoCollabPermsManager";
 import { requireSession } from "@/lib/auth/guard";
 import { canEditVideo } from "@/lib/auth/ownership";
@@ -107,7 +107,9 @@ export default async function EditVideoPage({
     .where(eq(eventsTable.is_archived, 0));
   const acceptingEventMap = new Map<string, { id: string; title: string }>();
   for (const ev of allEventRows) {
-    if (isAcceptingEntries(ev)) {
+    // 受付中 + 「一般ユーザーの追加紐付け = 許可」のイベントを候補に出す。
+    // 既に紐付いているイベントは下の attached 補完で必ず候補に含まれる。
+    if (isAcceptingEntries(ev) && ev.allow_user_video_event_links === 1) {
       acceptingEventMap.set(ev.id, { id: ev.id, title: ev.title });
     }
   }
@@ -121,30 +123,23 @@ export default async function EditVideoPage({
   }
   const eventOptions = Array.from(acceptingEventMap.values());
 
-  // 作品単位の参加者編集権限を subject 単位にまとめる。
-  // 同じ X ID/Discord ID 内の複数 permission_key を 1 行に集約して UI に渡す。
-  const videoCollabRows = await db
-    .select()
-    .from(videoCollabPermsTable)
-    .where(eq(videoCollabPermsTable.video_id, video.id));
-  const subjectMap = new Map<string, VideoCollabPermSubject>();
-  for (const row of videoCollabRows) {
-    const key = row.x_user_id
-      ? `x:${row.x_user_id}`
-      : `d:${row.discord_user_id ?? ""}`;
-    const existing = subjectMap.get(key);
-    if (existing) {
-      existing.permission_keys.push(row.permission_key);
-    } else {
-      subjectMap.set(key, {
-        x_user_id: row.x_user_id,
-        discord_user_id: row.discord_user_id,
-        display_name: row.display_name,
-        permission_keys: [row.permission_key],
-      });
-    }
-  }
-  const videoCollabSubjects = Array.from(subjectMap.values());
+  // 作品単位の合作メンバー編集権限。subject ごと 1 行 (can_edit ON/OFF)。
+  const videoCollabSubjects: VideoCollabSubject[] = (
+    await db
+      .select({
+        x_user_id: videoCollabTable.x_user_id,
+        discord_user_id: videoCollabTable.discord_user_id,
+        display_name: videoCollabTable.display_name,
+        can_edit: videoCollabTable.can_edit,
+      })
+      .from(videoCollabTable)
+      .where(eq(videoCollabTable.video_id, video.id))
+  ).map((row) => ({
+    x_user_id: row.x_user_id,
+    discord_user_id: row.discord_user_id,
+    display_name: row.display_name,
+    can_edit: row.can_edit,
+  }));
 
   const xIdOptions = await db
     .select({ id: xUsersTable.id, x_name: xUsersTable.x_name })

@@ -20,6 +20,7 @@ export interface EventFormInitial {
   is_active?: number;
   is_entry_open?: number;
   is_archived?: number;
+  allow_user_video_event_links?: number;
   max_slots_per_video?: number;
   max_consecutive_slots_per_entry?: number;
   slot_type?: "time" | "count";
@@ -250,6 +251,22 @@ export function EventForm({
           >
             <option value="0">通常</option>
             <option value="1">アーカイブ</option>
+          </select>
+        </div>
+        <div>
+          <label
+            className="fn-label"
+            title="作品投稿者が VideoForm の所属イベント選択でこのイベントを追加できるかどうか"
+          >
+            一般ユーザーの追加紐付け
+          </label>
+          <select
+            name="allow_user_video_event_links"
+            defaultValue={String(initial.allow_user_video_event_links ?? 0)}
+            className="fn-select"
+          >
+            <option value="0">運営承認制 (既定)</option>
+            <option value="1">許可</option>
           </select>
         </div>
       </div>

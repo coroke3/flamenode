@@ -287,13 +287,16 @@ export async function deleteLinkedXId(
   if (!row || row.linked_discord_user_id !== u.id) {
     return { ok: false, message: "この X ID の連携を削除できません。" };
   }
-  // X ID の連携解除は「Discord ユーザーとのリンクだけを切る」操作。
-  // approval_status はそのまま維持する。再連携時に再申請を強いると復旧の手間が
-  // 増え、過去作品の編集権限復活も遅れるため (旧コードは "pending" に戻していた)。
-  // 作品の creator_id / contact_x_id は触らない。表示・URL も維持する。
+  // X ID 連携解除の方針:
+  //   - linked_discord_user_id を null にして Discord アカウントとのリンクを切る。
+  //   - approval_status は "pending" に戻す。再連携 → 再承認 のフローを徹底し、
+  //     乗っ取りや成りすましリスクを抑える。
+  //   - 同じ X ID を同じ Discord で再連携・再承認すれば、過去作品の編集権限は
+  //     canEditVideo の `approved` 一覧経由で復活する (creator_id / contact_x_id
+  //     は触らないため作品自体は浮かない)。
   await db
     .update(xUsers)
-    .set({ linked_discord_user_id: null })
+    .set({ linked_discord_user_id: null, approval_status: "pending" })
     .where(xUserIdMatches(xUserId));
   await db
     .update(users)
