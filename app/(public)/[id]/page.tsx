@@ -402,6 +402,36 @@ export default async function VideoDetailPage({
               ) : null}
             </div>
           ) : null}
+          {/* primary 以外の所属イベントもチップで表示する。
+              video_events 経由で複数イベントに紐付けされた作品は、ここで
+              「他にも参加しているイベント」が一目で見えるようにする。 */}
+          {events.length > 1 ? (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "center",
+                gap: 6,
+                marginTop: 4,
+                fontSize: 12,
+              }}
+              aria-label="その他の所属イベント"
+            >
+              <span style={{ color: "var(--text-muted)" }}>他の所属:</span>
+              {events
+                .filter((e) => !primaryEvent || e.id !== primaryEvent.id)
+                .map((e) => (
+                  <Link
+                    key={e.id}
+                    href={`/event/${e.id}`}
+                    className="fn-badge fn-badge-soft"
+                    style={{ textDecoration: "none" }}
+                  >
+                    {e.title}
+                  </Link>
+                ))}
+            </div>
+          ) : null}
 
           <div className={styles.metaSection}>
             {video.music ? (

@@ -6,6 +6,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   events as eventsTable,
+  videoCollaboratorPermissions as videoCollabPermsTable,
   videoEvents as videoEventsTable,
   videoMembers,
   videos as videosTable,
@@ -13,6 +14,10 @@ import {
 } from "@/lib/db/schema";
 import { inArray } from "drizzle-orm";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
+import {
+  VideoCollabPermsManager,
+  type VideoCollabPermSubject,
+} from "@/components/admin/VideoCollabPermsManager";
 import { requireSession } from "@/lib/auth/guard";
 import { canEditVideo } from "@/lib/auth/ownership";
 import { VideoForm } from "@/components/forms/VideoForm";
@@ -115,6 +120,32 @@ export default async function EditVideoPage({
     for (const ev of attached) acceptingEventMap.set(ev.id, ev);
   }
   const eventOptions = Array.from(acceptingEventMap.values());
+
+  // 作品単位の参加者編集権限を subject 単位にまとめる。
+  // 同じ X ID/Discord ID 内の複数 permission_key を 1 行に集約して UI に渡す。
+  const videoCollabRows = await db
+    .select()
+    .from(videoCollabPermsTable)
+    .where(eq(videoCollabPermsTable.video_id, video.id));
+  const subjectMap = new Map<string, VideoCollabPermSubject>();
+  for (const row of videoCollabRows) {
+    const key = row.x_user_id
+      ? `x:${row.x_user_id}`
+      : `d:${row.discord_user_id ?? ""}`;
+    const existing = subjectMap.get(key);
+    if (existing) {
+      existing.permission_keys.push(row.permission_key);
+    } else {
+      subjectMap.set(key, {
+        x_user_id: row.x_user_id,
+        discord_user_id: row.discord_user_id,
+        display_name: row.display_name,
+        permission_keys: [row.permission_key],
+      });
+    }
+  }
+  const videoCollabSubjects = Array.from(subjectMap.values());
+
   const xIdOptions = await db
     .select({ id: xUsersTable.id, x_name: xUsersTable.x_name })
     .from(xUsersTable)
@@ -293,6 +324,20 @@ export default async function EditVideoPage({
         <Icon name="info" size={12} aria-hidden /> 編集権限はこの作品の作者と
         管理者にのみ付与されます。イベント運営は許可された項目のみ編集可能です。
       </p>
+
+      {canEditIdentity ? (
+        <section className="fn-card" style={{ marginTop: 24 }}>
+          <div className="fn-card-header">
+            <h2 className="fn-card-title">参加者の編集権限</h2>
+          </div>
+          <div className="fn-card-body">
+            <VideoCollabPermsManager
+              videoId={video.id}
+              subjects={videoCollabSubjects}
+            />
+          </div>
+        </section>
+      ) : null}
 
       <div style={{ marginTop: 24 }}>
         <Link href="/dashboard" className="fn-btn fn-btn-ghost">
