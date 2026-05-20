@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { and, asc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
+import { isMissingDbObjectError } from "@/lib/db/optionalObjects";
 import {
   events as eventsTable,
   videoCollaborators as videoCollabTable,
@@ -31,6 +32,38 @@ export const dynamic = "force-dynamic";
 
 interface Props {
   params: Promise<{ id: string }>;
+}
+
+async function loadVideoCollabSubjects(
+  db: NonNullable<ReturnType<typeof getDatabase>>,
+  videoId: string,
+): Promise<{ subjects: VideoCollabSubject[]; tableAvailable: boolean }> {
+  try {
+    const rows = await db
+      .select({
+        x_user_id: videoCollabTable.x_user_id,
+        discord_user_id: videoCollabTable.discord_user_id,
+        display_name: videoCollabTable.display_name,
+        can_edit: videoCollabTable.can_edit,
+      })
+      .from(videoCollabTable)
+      .where(eq(videoCollabTable.video_id, videoId));
+
+    return {
+      tableAvailable: true,
+      subjects: rows.map((row) => ({
+        x_user_id: row.x_user_id,
+        discord_user_id: row.discord_user_id,
+        display_name: row.display_name,
+        can_edit: row.can_edit,
+      })),
+    };
+  } catch (error) {
+    if (isMissingDbObjectError(error, "video_collaborators")) {
+      return { subjects: [], tableAvailable: false };
+    }
+    throw error;
+  }
 }
 
 export default async function EditVideoPage({
@@ -124,22 +157,8 @@ export default async function EditVideoPage({
   const eventOptions = Array.from(acceptingEventMap.values());
 
   // 作品単位の合作メンバー編集権限。subject ごと 1 行 (can_edit ON/OFF)。
-  const videoCollabSubjects: VideoCollabSubject[] = (
-    await db
-      .select({
-        x_user_id: videoCollabTable.x_user_id,
-        discord_user_id: videoCollabTable.discord_user_id,
-        display_name: videoCollabTable.display_name,
-        can_edit: videoCollabTable.can_edit,
-      })
-      .from(videoCollabTable)
-      .where(eq(videoCollabTable.video_id, video.id))
-  ).map((row) => ({
-    x_user_id: row.x_user_id,
-    discord_user_id: row.discord_user_id,
-    display_name: row.display_name,
-    can_edit: row.can_edit,
-  }));
+  const { subjects: videoCollabSubjects, tableAvailable: videoCollabTableAvailable } =
+    await loadVideoCollabSubjects(db, video.id);
 
   const xIdOptions = await db
     .select({ id: xUsersTable.id, x_name: xUsersTable.x_name })
@@ -320,7 +339,25 @@ export default async function EditVideoPage({
         管理者にのみ付与されます。イベント運営は許可された項目のみ編集可能です。
       </p>
 
-      {canEditIdentity ? (
+      {canEditIdentity && !videoCollabTableAvailable ? (
+        <section className="fn-card" style={{ marginTop: 24 }}>
+          <div className="fn-card-header">
+            <h2 className="fn-card-title">合作メンバー編集権限は準備中です</h2>
+          </div>
+          <div className="fn-card-body">
+            <p style={{ color: "var(--text-muted)", lineHeight: 1.8, margin: 0 }}>
+              ローカルDBに video_collaborators テーブルがまだありません。
+              npm.cmd run db:local-apply で migration を適用すると、この管理欄を使えます。
+            </p>
+          </div>
+        </section>
+      ) : null}
+
+      {canEditIdentity &&
+      videoCollabTableAvailable &&
+      // 個人作品 (submission_type !== "collab") では合作メンバー編集権限の概念が不要。
+      // 既に collab 権限行があるレガシー作品もありうるため、その場合は引き続き表示する。
+      (video.submission_type === "collab" || videoCollabSubjects.length > 0) ? (
         <section className="fn-card" style={{ marginTop: 24 }}>
           <div className="fn-card-header">
             <h2 className="fn-card-title">参加者の編集権限</h2>
