@@ -187,6 +187,23 @@ export const events = sqliteTable("events", {
   allow_user_video_event_links: integer("allow_user_video_event_links")
     .notNull()
     .default(0),
+  /**
+   * このイベントに紐付いた作品について、一般ユーザー (作品オーナーや合作メンバー
+   * 以外) にもイベント単位で編集権限を委譲するか。
+   *   0 = 委譲しない (既定)。動画オーナー / 合作メンバー / イベント運営のみ編集可。
+   *   1 = 委譲する。`user_video_edit_permission_keys_json` で許可キーを限定する。
+   */
+  allow_user_video_edits: integer("allow_user_video_edits")
+    .notNull()
+    .default(0),
+  /**
+   * `allow_user_video_edits = 1` の場合に、ユーザーへ委譲する section_key 一覧。
+   * JSON 配列を文字列で保持する (D1 に JSON 型がないため)。
+   * 例: `["videos.title","videos.music_credit","videos.members","videos.review_data"]`
+   * 危険キー (videos.youtube_id / videos.primary_event / video.identity) は
+   * サーバー側で除外して読み込む。
+   */
+  user_video_edit_permission_keys_json: text("user_video_edit_permission_keys_json"),
   event_group_id: text("event_group_id"),
   slot_type: text("slot_type", { enum: ["time", "count"] }).default("time"),
   slot_visibility_mode: text("slot_visibility_mode", {
@@ -343,6 +360,9 @@ export const videos = sqliteTable("videos", {
   view_count: integer("view_count").default(0),
   like_count: integer("like_count").default(0),
   youtube_view_count: integer("youtube_view_count").default(0),
+  youtube_synced_at: integer("youtube_synced_at"),
+  youtube_status: text("youtube_status"),
+  youtube_duration_seconds: integer("youtube_duration_seconds"),
   trending_view_count_24h: integer("trending_view_count_24h").default(0),
   video_score: real("video_score").default(0),
   youtube_sync_status: text("youtube_sync_status", {
@@ -468,6 +488,11 @@ export const videoChapters = sqliteTable("video_chapters", {
   id: text("id").primaryKey(),
   video_id: text("video_id").notNull(),
   x_user_id: text("x_user_id").notNull(),
+  /**
+   * 合作メンバー (video_members.id) との紐付け。NULL = 通常チャプター。
+   * MemberSection の「担当チャプター」表示で video_member_id ごとにグループ化する。
+   */
+  video_member_id: text("video_member_id"),
   chapter_time: real("chapter_time").notNull(),
   chapter_label: text("chapter_label").notNull(),
   note: text("note"),
@@ -529,6 +554,12 @@ export const historyLogs = sqliteTable("history_logs", {
   before_data: text("before_data"),
   after_data: text("after_data"),
   operator_discord_id: text("operator_discord_id"),
+  /**
+   * 監査ログ表示用の actor スナップショット (Discord 名 / X 名 / アイコン)。
+   * Discord/X のユーザー情報は後から変更されうるため、当時の表示用に固定して持つ。
+   * JSON 文字列で `{ discord_user_id, discord_name, x_user_id, x_name, icon_url }`。
+   */
+  operator_snapshot_json: text("operator_snapshot_json"),
   retention_class: text("retention_class", {
     enum: ["normal", "long_audit"],
   }).default("normal"),
@@ -632,6 +663,7 @@ export const notificationOutbox = sqliteTable(
       enum: ["pending", "processing", "sent", "failed"],
     }).default("pending"),
     attempt_count: integer("attempt_count").default(0),
+    processing_started_at: integer("processing_started_at"),
     next_attempt_at: integer("next_attempt_at"),
     last_error: text("last_error"),
     /** event-scoped 通知 (運営者受信箱用)。null は全体通知。 */
@@ -645,6 +677,10 @@ export const notificationOutbox = sqliteTable(
     byStatusCreated: index("notification_outbox_status_created_idx").on(
       t.status,
       t.created_at,
+    ),
+    byProcessingStarted: index("notification_outbox_processing_started_idx").on(
+      t.status,
+      t.processing_started_at,
     ),
     // /manage/events/[id] が event_id で絞り込むため
     byEvent: index("notification_outbox_event_idx").on(t.event_id),

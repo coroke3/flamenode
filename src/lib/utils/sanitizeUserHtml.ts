@@ -42,6 +42,11 @@ export function sanitizeUserHtml(input: string | null | undefined): string {
   html = html.replace(/\son[a-z]+\s*=\s*'[^']*'/gi, "");
   html = html.replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, "");
 
+  // style 属性を削除
+  html = html.replace(/\sstyle\s*=\s*"[^"]*"/gi, "");
+  html = html.replace(/\sstyle\s*=\s*'[^']*'/gi, "");
+  html = html.replace(/\sstyle\s*=\s*[^\s>]+/gi, "");
+
   // javascript: スキーム
   html = html.replace(
     /(href|src|xlink:href|formaction)\s*=\s*(["'])\s*javascript:[^"']*\2/gi,
@@ -49,9 +54,9 @@ export function sanitizeUserHtml(input: string | null | undefined): string {
   );
   html = html.replace(/(href|src|formaction)\s*=\s*javascript:[^\s>]+/gi, "$1=#");
 
-  // data: URL は image/* 以外をブロック (簡易: image/png|jpeg|gif|webp|svg+xml のみ通す)
+  // data: URL は png/jpeg/gif/webp のみに限定 (svg+xml は除外)
   html = html.replace(
-    /(href|src)\s*=\s*(["'])\s*data:(?!image\/(png|jpeg|gif|webp|svg\+xml))[^"']*\2/gi,
+    /(href|src)\s*=\s*(["'])\s*data:(?!image\/(png|jpeg|gif|webp)\b)[^"']*\2/gi,
     "$1=$2#$2",
   );
 

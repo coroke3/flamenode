@@ -21,6 +21,7 @@ import { getEditableEventIds } from "@/lib/auth/ownership";
 import { inArray } from "drizzle-orm";
 import { extractYoutubeId } from "@/lib/youtube/id";
 import { generateId } from "@/lib/utils/id";
+import { detectSupportedImageUpload } from "@/lib/utils/imageUpload";
 import { normalizeXId } from "@/lib/utils/xid";
 import { normalizeHttpUrl } from "@/lib/utils/url";
 
@@ -680,6 +681,7 @@ export async function submitSlotVideo(
         scheduling_type: "slotted",
         scheduled_time: slotRow.start_time ?? now,
         music: parsed.data.music ?? null,
+        music_reference_url: parsed.data.music_reference_url ?? null,
         credit: parsed.data.credit ?? null,
         intro_comment: parsed.data.intro_comment ?? null,
         highlights: parsed.data.highlights ?? null,
@@ -727,7 +729,11 @@ export async function submitSlotVideo(
   const slotUpdateWhere = slotRow.reservation_group_id
     ? and(
         eq(slots.reservation_group_id, slotRow.reservation_group_id),
+        eq(slots.event_id, slotRow.event_id),
         eq(slots.discord_user_id, userId),
+        slotRow.x_user_id
+          ? eq(slots.x_user_id, slotRow.x_user_id)
+          : isNull(slots.x_user_id),
       )!
     : eq(slots.id, slotRow.id);
   await db
@@ -822,6 +828,15 @@ export async function updateVideo(
   if (!youtubeId) return { ok: false, message: "YouTube URL が解析できません。" };
 
   const editUser = { id: sessionUser.id, role: sessionUser.role ?? null };
+  // クライアントが送ってきた privilegeMode を検証。不正値は "normal" にフォールバック。
+  // admin モードを要求できるのは role === "admin" のみ (URL 直叩き対策)。
+  const rawPrivilegeMode = String(formData.get("edit_privilege_mode") ?? "").trim();
+  let privilegeMode: "normal" | "admin" | "event" = "normal";
+  if (rawPrivilegeMode === "admin" && sessionUser.role === "admin") {
+    privilegeMode = "admin";
+  } else if (rawPrivilegeMode === "event") {
+    privilegeMode = "event";
+  }
   const [
     canEditIdentity,
     canEditBasics,
@@ -829,13 +844,15 @@ export async function updateVideo(
     canEditCredits,
     canEditDescriptions,
     canEditMembers,
+    canEditPrimaryEvent,
   ] = await Promise.all([
-    canEditVideo({ db, user: editUser, video: target, requiredKey: "video.identity" }),
-    canEditVideo({ db, user: editUser, video: target, requiredKey: "video.basics" }),
-    canEditVideo({ db, user: editUser, video: target, requiredKey: "video.youtube_id" }),
-    canEditVideo({ db, user: editUser, video: target, requiredKey: "video.credits" }),
-    canEditVideo({ db, user: editUser, video: target, requiredKey: "video.descriptions" }),
-    canEditVideo({ db, user: editUser, video: target, requiredKey: "video.members" }),
+    canEditVideo({ db, user: editUser, video: target, requiredKey: "video.identity", privilegeMode }),
+    canEditVideo({ db, user: editUser, video: target, requiredKey: "video.basics", privilegeMode }),
+    canEditVideo({ db, user: editUser, video: target, requiredKey: "video.youtube_id", privilegeMode }),
+    canEditVideo({ db, user: editUser, video: target, requiredKey: "video.credits", privilegeMode }),
+    canEditVideo({ db, user: editUser, video: target, requiredKey: "video.descriptions", privilegeMode }),
+    canEditVideo({ db, user: editUser, video: target, requiredKey: "video.members", privilegeMode }),
+    canEditVideo({ db, user: editUser, video: target, requiredKey: "video.primary_event", privilegeMode }),
   ]);
   if (
     !canEditIdentity &&
@@ -850,29 +867,52 @@ export async function updateVideo(
 
   const now = Math.floor(Date.now() / 1000);
   const existingX = normalizeXId(target.creator_id || target.contact_x_id);
+
+  // 提出主体 X ID の変更は三重ゲート。サーバー側で明示的に解錠されない限り、
+  // form 入力の contact_x_id は完全に無視して既存値を維持する。
+  // 解錠条件:
+  //   1) sessionUser.role === "admin"
+  //   2) privilegeMode === "admin" (URL に ?privileged=admin が付いた状態で開いた編集)
+  //   3) form に `allow_submitter_change=1` が含まれている (UI で明示チェック)
+  //   4) canEditIdentity
+  // CLAUDE.md 方針: フロントだけで権限を守らない / 提出主体は creator_id ベース。
+  const submitterChangeRequested =
+    String(formData.get("allow_submitter_change") ?? "").trim() === "1";
+  const allowSubmitterChange =
+    submitterChangeRequested &&
+    sessionUser.role === "admin" &&
+    privilegeMode === "admin" &&
+    canEditIdentity;
+  const requestedX = normalizeXId(parsed.data.contact_x_id);
+
   let nextCreatorX: string;
-  if (canEditIdentity && sessionUser.role === "admin") {
-    // admin は form 入力の contact_x_id で変更可。未指定の場合は既存を維持。
-    const requestedX = normalizeXId(parsed.data.contact_x_id);
+  if (allowSubmitterChange) {
+    // admin 解錠時のみ form 入力を採用。空文字なら既存を維持。
     nextCreatorX = requestedX || existingX || "";
   } else {
-    // 非 admin: 投稿主体の変更を許可しない。既存の creator_id / contact_x_id を維持する。
+    // それ以外は既存値を絶対に書き換えない (form 値は無視)。
     nextCreatorX = existingX || "";
   }
   if (!nextCreatorX) {
     return { ok: false, message: "提出主体 X ID が必要です。" };
   }
-  const requestedX = normalizeXId(parsed.data.contact_x_id);
   const changed = (a: string | null | undefined, b: string | null | undefined) =>
     (a || null) !== (b || null);
 
   if (
     !canEditIdentity &&
-    ((requestedX && requestedX !== existingX) ||
-      changed(parsed.data.display_name, target.display_name) ||
+    (changed(parsed.data.display_name, target.display_name) ||
       changed(parsed.data.icon_url, target.icon_url))
   ) {
     return { ok: false, message: "提出者情報を編集する権限がありません。" };
+  }
+  // 提出主体変更要求があるが解錠条件を満たさない場合は明示エラー (黙って無視するより
+  // フィードバック性が高い)。
+  if (submitterChangeRequested && !allowSubmitterChange) {
+    return {
+      ok: false,
+      message: "提出主体 X ID の変更には管理者権限が必要です。",
+    };
   }
   if (!canEditBasics && parsed.data.title !== target.title) {
     return { ok: false, message: "作品タイトルを編集する権限がありません。" };
@@ -947,8 +987,14 @@ export async function updateVideo(
       .set({
         title: canEditBasics ? parsed.data.title : target.title,
         youtube_video_id: canEditYoutube ? youtubeId : target.youtube_video_id,
-        creator_id: canEditIdentity ? nextCreatorX || null : target.creator_id,
-        contact_x_id: canEditIdentity ? nextCreatorX || "anonymous" : target.contact_x_id,
+        // creator_id / contact_x_id は allowSubmitterChange を満たした場合のみ書き換える。
+        // 通常編集 (admin であっても unlock していない場合) では既存値を保持する。
+        creator_id: allowSubmitterChange
+          ? nextCreatorX || null
+          : target.creator_id,
+        contact_x_id: allowSubmitterChange
+          ? nextCreatorX || "anonymous"
+          : target.contact_x_id,
         display_name: canEditIdentity ? parsed.data.display_name : target.display_name,
         icon_url: canEditIdentity ? parsed.data.icon_url || null : target.icon_url,
         music: canEditCredits ? parsed.data.music ?? null : target.music,
@@ -991,10 +1037,9 @@ export async function updateVideo(
     await replaceVideoMembers(db, videoId, members);
   }
 
-  // 所属イベント (video_events) の編集。primary_event_id を変えられる権限と同じ
-  // canEditPrimaryEvent (= videos.primary_event 相当) で制御するのが本来だが、
-  // 当面は canEditIdentity で代用する。primary_event_id は alwaysInclude として固定。
-  if (canEditIdentity && formData.has("event_ids")) {
+  // 所属イベント (video_events) の編集は canEditPrimaryEvent で制御。
+  // primary_event_id 自体は alwaysInclude として固定し、追加 / 削除のみ制御。
+  if (canEditPrimaryEvent && formData.has("event_ids")) {
     const requestedEventIds = parseEventIdsFromForm(formData);
     const alwaysInclude = target.primary_event_id ? [target.primary_event_id] : [];
     await syncVideoEvents(db, videoId, {
@@ -1014,10 +1059,73 @@ export async function updateVideo(
     });
   }
 
+  // 監査ログには before/after の主要フィールドを両方残す。
+  // - before: 更新前のスナップショット (target)
+  // - after: 更新後のスナップショット (実際に書き込まれた値)
+  // 差分表示 (AuditDiffDetail) で「どのキーが変わったか」を一目で出すために必要。
+  const auditPick = (
+    v: typeof target,
+    overrides?: Partial<typeof target>,
+  ) => {
+    const src = overrides ? { ...v, ...overrides } : v;
+    return {
+      title: src.title,
+      youtube_video_id: src.youtube_video_id,
+      creator_id: src.creator_id,
+      contact_x_id: src.contact_x_id,
+      display_name: src.display_name,
+      icon_url: src.icon_url,
+      music: src.music,
+      music_reference_url: src.music_reference_url,
+      credit: src.credit,
+      intro_comment: src.intro_comment,
+      highlights: src.highlights,
+      production_story: src.production_story,
+      used_software: src.used_software,
+      closing_comment: src.closing_comment,
+      submission_type: src.submission_type,
+    };
+  };
+  const afterSnapshot = auditPick(target, {
+    title: canEditBasics ? parsed.data.title : target.title,
+    youtube_video_id: canEditYoutube ? youtubeId : target.youtube_video_id,
+    creator_id: allowSubmitterChange ? nextCreatorX || null : target.creator_id,
+    contact_x_id: allowSubmitterChange
+      ? nextCreatorX || "anonymous"
+      : target.contact_x_id,
+    display_name: canEditIdentity ? parsed.data.display_name : target.display_name,
+    icon_url: canEditIdentity ? parsed.data.icon_url || null : target.icon_url,
+    music: canEditCredits ? parsed.data.music ?? null : target.music,
+    music_reference_url: canEditCredits
+      ? parsed.data.music_reference_url ?? null
+      : target.music_reference_url,
+    credit: canEditCredits ? parsed.data.credit ?? null : target.credit,
+    intro_comment: canEditDescriptions
+      ? parsed.data.intro_comment ?? null
+      : target.intro_comment,
+    highlights: canEditDescriptions
+      ? parsed.data.highlights ?? null
+      : target.highlights,
+    production_story: canEditDescriptions
+      ? parsed.data.production_story ?? null
+      : target.production_story,
+    used_software: canEditDescriptions
+      ? parsed.data.used_software ?? null
+      : target.used_software,
+    closing_comment: canEditDescriptions
+      ? parsed.data.closing_comment ?? null
+      : target.closing_comment,
+    submission_type: canEditMembers
+      ? parsed.data.is_collab
+        ? "collab"
+        : "individual"
+      : target.submission_type,
+  });
   await db.insert(historyLogs).values({
       table_name: "videos",
       record_id: videoId,
       action: "UPDATE",
+      before_data: JSON.stringify(auditPick(target)),
       after_data: JSON.stringify({
         sections: {
           identity: canEditIdentity,
@@ -1027,8 +1135,9 @@ export async function updateVideo(
           descriptions: canEditDescriptions,
           members: canEditMembers,
         },
-        title: canEditBasics ? parsed.data.title : target.title,
-        youtube_video_id: canEditYoutube ? youtubeId : target.youtube_video_id,
+        privilege_mode: privilegeMode,
+        allow_submitter_change: allowSubmitterChange,
+        ...afterSnapshot,
       }),
       operator_discord_id: sessionUser.id,
       retention_class: "normal",
@@ -1038,6 +1147,8 @@ export async function updateVideo(
   revalidatePath("/");
   revalidatePath(`/${target.youtube_video_id ?? videoId}`);
   if (canEditYoutube) revalidatePath(`/${youtubeId}`);
+  revalidatePath("/list");
+  if (target.primary_event_id) revalidatePath(`/event/${target.primary_event_id}`);
   revalidatePath("/dashboard");
   return {
     ok: true,
@@ -1180,11 +1291,6 @@ export async function uploadVideoIconCandidate(
   if (!(file instanceof File)) {
     return { ok: false, message: "画像ファイルが必要です。" };
   }
-  const contentType = file.type || "image/png";
-  const allowedTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
-  if (!allowedTypes.has(contentType)) {
-    return { ok: false, message: "PNG/JPEG/WEBP のみアップロードできます。" };
-  }
   if (file.size > 2 * 1024 * 1024) {
     return { ok: false, message: "2MB 以内の画像を選んでください。" };
   }
@@ -1215,15 +1321,15 @@ export async function uploadVideoIconCandidate(
     return { ok: false, message: "ストレージが利用できません。" };
   }
 
-  const ext =
-    contentType === "image/png"
-      ? "png"
-      : contentType === "image/webp"
-        ? "webp"
-        : "jpg";
-  const key = `video-icons/${activeX}/${generateId("vicon")}.${ext}`;
   const buf = await file.arrayBuffer();
-  await env.BUCKET.put(key, buf, { httpMetadata: { contentType } });
+  const image = detectSupportedImageUpload(buf);
+  if (!image) {
+    return { ok: false, message: "PNG/JPEG/WEBP 画像ファイルのみアップロードできます。" };
+  }
+  const key = `video-icons/${activeX}/${generateId("vicon")}.${image.ext}`;
+  await env.BUCKET.put(key, buf, {
+    httpMetadata: { contentType: image.contentType },
+  });
   const iconUrl = `/api/media/${key}`;
 
   const now = Math.floor(Date.now() / 1000);

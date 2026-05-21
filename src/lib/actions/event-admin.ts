@@ -7,6 +7,7 @@ import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import { assertCanEditEvent } from "@/lib/auth/ownership";
 import { events, historyLogs } from "@/lib/db/schema";
+import { parseJstDatetimeLocal } from "@/lib/utils/dateInput";
 import { generateId } from "@/lib/utils/id";
 import { normalizeHttpUrl } from "@/lib/utils/url";
 
@@ -40,6 +41,13 @@ const eventSchema = z.object({
   is_entry_open: z.coerce.number().min(0).max(1).default(0),
   is_archived: z.coerce.number().min(0).max(1).default(0),
   allow_user_video_event_links: z.coerce.number().min(0).max(1).default(0),
+  allow_user_video_edits: z.coerce.number().min(0).max(1).default(0),
+  user_video_edit_permission_keys_json: z
+    .string()
+    .trim()
+    .max(2000)
+    .optional()
+    .nullable(),
   max_slots_per_video: z.coerce.number().min(1).max(20).default(1),
   max_consecutive_slots_per_entry: z.coerce.number().min(1).max(20).default(3),
   slot_part_gap_minutes: z.coerce.number().min(1).max(1440).default(30),
@@ -50,29 +58,7 @@ const eventSchema = z.object({
 });
 
 function parseDateInput(raw: string | null | undefined): number | null {
-  if (!raw) return null;
-  const s = raw.trim();
-  if (!s) return null;
-
-  // "2026-05-19T12:00" を JST として扱う
-  const m = s.match(
-    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/
-  );
-  if (!m) {
-    const t = Date.parse(s);
-    return Number.isNaN(t) ? null : Math.floor(t / 1000);
-  }
-
-  const [, y, mo, d, h, mi, sec = "0"] = m;
-  const utcMs = Date.UTC(
-    Number(y),
-    Number(mo) - 1,
-    Number(d),
-    Number(h) - 9,
-    Number(mi),
-    Number(sec),
-  );
-  return Math.floor(utcMs / 1000);
+  return parseJstDatetimeLocal(raw);
 }
 
 async function requireAdmin(): Promise<
@@ -121,6 +107,9 @@ export async function createEvent(
     is_entry_open: data.is_entry_open,
     is_archived: data.is_archived,
     allow_user_video_event_links: data.allow_user_video_event_links,
+    allow_user_video_edits: data.allow_user_video_edits,
+    user_video_edit_permission_keys_json:
+      data.user_video_edit_permission_keys_json ?? null,
     start_time: parseDateInput(data.start_time),
     end_time: parseDateInput(data.end_time),
     entry_start_time: parseDateInput(data.entry_start_time),
@@ -194,6 +183,10 @@ export async function updateEvent(
       is_active: data.is_active,
       is_entry_open: data.is_entry_open,
       is_archived: data.is_archived,
+      allow_user_video_event_links: data.allow_user_video_event_links,
+    allow_user_video_edits: data.allow_user_video_edits,
+    user_video_edit_permission_keys_json:
+      data.user_video_edit_permission_keys_json ?? null,
       start_time: parseDateInput(data.start_time),
       end_time: parseDateInput(data.end_time),
       entry_start_time: parseDateInput(data.entry_start_time),

@@ -51,6 +51,10 @@ function normalizeRole(
   return role === "admin" || role === "moderator" ? role : "user";
 }
 
+function approvalRank(status: HeaderXIdEntry["approval_status"]): number {
+  return status === "approved" ? 0 : status === "pending" ? 1 : 2;
+}
+
 export async function buildHeaderUser(
   sessionUser: SessionUserLike | null | undefined,
 ): Promise<HeaderUser | null> {
@@ -95,20 +99,31 @@ export async function buildHeaderUser(
       })),
     );
 
-    xIds.push(
-      ...withIconFallback.map((row) => {
-        const approvalStatus = normalizeApprovalStatus(row.approval_status);
-        return {
-          x_user_id: row.x_user_id,
-          x_name: row.x_name,
-          icon_url: row.icon_url,
-          approval_status: approvalStatus,
-          is_active:
-            approvalStatus !== "rejected" &&
-            normalizeXId(row.x_user_id) === activeXId,
-        };
-      }),
-    );
+    const byNormalizedXId = new Map<string, HeaderXIdEntry>();
+    for (const row of withIconFallback) {
+      const normalizedId = normalizeXId(row.x_user_id);
+      if (!normalizedId) continue;
+      const approvalStatus = normalizeApprovalStatus(row.approval_status);
+      const entry: HeaderXIdEntry = {
+        x_user_id: normalizedId,
+        x_name: row.x_name,
+        icon_url: row.icon_url,
+        approval_status: approvalStatus,
+        is_active:
+          approvalStatus !== "rejected" &&
+          normalizedId === activeXId,
+      };
+      const existing = byNormalizedXId.get(normalizedId);
+      if (
+        !existing ||
+        entry.is_active ||
+        approvalRank(entry.approval_status) < approvalRank(existing.approval_status)
+      ) {
+        byNormalizedXId.set(normalizedId, entry);
+      }
+    }
+
+    xIds.push(...Array.from(byNormalizedXId.values()));
   }
 
   management = await getManagementAccess({ id: sessionUser.id, role });

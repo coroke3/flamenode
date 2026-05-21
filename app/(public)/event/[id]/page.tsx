@@ -54,7 +54,10 @@ export default async function EventDetailPage({
     const data = await fetchEventWithEditors(db, id);
     if (!data) return null;
 
-    // 作品取得 (上映順 = scheduled_time 昇順)
+    // 作品取得 (上映順 = scheduled_time 昇順)。
+    // イベントが大きくなりすぎたとき詳細ページが重くなるのを避けるため、
+    // 48 件で頭打ち。「すべて見る」は /list?event=... へ誘導 (DB側ページング済み)。
+    const EVENT_PREVIEW_LIMIT = 48;
     const eventVideos = (await db
       .select({
         id: videos.id,
@@ -78,7 +81,18 @@ export default async function EventDetailPage({
           eq(videos.is_deleted, 0),
         )!,
       )
-      .orderBy(asc(videos.scheduled_time))) as VideoCardData[];
+      .orderBy(asc(videos.scheduled_time))
+      .limit(EVENT_PREVIEW_LIMIT)) as VideoCardData[];
+
+    const eventVideoCountRow = (
+      await db
+        .select({ c: sql<number>`COUNT(*)` })
+        .from(videos)
+        .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
+        .where(and(eq(videoEvents.event_id, id), eq(videos.is_deleted, 0))!)
+        .limit(1)
+    )[0];
+    const eventVideoTotal = Number(eventVideoCountRow?.c ?? 0);
 
     // スロット
     const slotRows = await db
@@ -87,11 +101,17 @@ export default async function EventDetailPage({
       .where(eq(slotsTable.event_id, id))
       .orderBy(asc(slotsTable.start_time), asc(slotsTable.end_time), asc(slotsTable.sort_order));
 
-    return { data, eventVideos, slotRows };
+    return { data, eventVideos, slotRows, eventVideoTotal };
   });
 
   if (!bundle) notFound();
-  const { data: { event, editors }, eventVideos, slotRows } = bundle;
+  const {
+    data: { event, editors },
+    eventVideos,
+    slotRows,
+    eventVideoTotal,
+  } = bundle;
+  const eventVideoHidden = Math.max(0, eventVideoTotal - eventVideos.length);
 
   const visibleVideos = eventVideos.filter(
     (v) =>
@@ -308,7 +328,16 @@ export default async function EventDetailPage({
       <section className={styles.section}>
         <h2 className={styles.sectionTitle}>
           <Icon name="grid" size={16} aria-hidden />
-          作品 ({visibleVideos.length})
+          作品 ({eventVideoTotal})
+          {eventVideoHidden > 0 ? (
+            <Link
+              href={`/list?event=${event.id}`}
+              className="fn-btn fn-btn-ghost fn-btn-sm"
+              style={{ marginLeft: 8 }}
+            >
+              すべて見る ({eventVideoTotal} 件)
+            </Link>
+          ) : null}
         </h2>
         {visibleVideos.length === 0 ? (
           <div className="fn-empty">

@@ -82,7 +82,6 @@ export function HomeIntroBand({
             </Link>
           </div>
         ) : null}
-        <QuickLinks />
       </section>
     );
   }
@@ -99,7 +98,6 @@ export function HomeIntroBand({
           total={stat ? stat.total : null}
           variant="primary"
         />
-        <QuickLinks />
       </section>
     );
   }
@@ -132,38 +130,3 @@ export function HomeIntroBand({
   );
 }
 
-/**
- * Hero 下のクイック導線。
- * 主要な遷移 (作品 / 募集中イベント / クリエイター / 新着) をフラットに並べる。
- * 黄色 CTA は使わず、薄い soft ボタンで「導線多めだけど主役を食わない」ようにする。
- */
-function QuickLinks(): React.ReactElement {
-  return (
-    <nav className={styles.quickLinks} aria-label="トップのクイック導線">
-      <Link
-        href="/list"
-        className="fn-btn fn-btn-ghost fn-btn-soft-outline fn-btn-sm"
-      >
-        <Icon name="grid" size={12} aria-hidden /> 作品を見る
-      </Link>
-      <Link
-        href="/event"
-        className="fn-btn fn-btn-ghost fn-btn-soft-outline fn-btn-sm"
-      >
-        <Icon name="calendar" size={12} aria-hidden /> 募集中イベント
-      </Link>
-      <Link
-        href="/user"
-        className="fn-btn fn-btn-ghost fn-btn-soft-outline fn-btn-sm"
-      >
-        <Icon name="users" size={12} aria-hidden /> クリエイター
-      </Link>
-      <Link
-        href="/recommend"
-        className="fn-btn fn-btn-ghost fn-btn-soft-outline fn-btn-sm"
-      >
-        <Icon name="heart" size={12} aria-hidden /> おすすめ
-      </Link>
-    </nav>
-  );
-}

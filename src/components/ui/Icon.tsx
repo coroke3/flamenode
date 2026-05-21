@@ -185,9 +185,13 @@ const ICON_PATHS: Record<IconName, React.ReactNode> = {
     </>
   ),
   x: (
-    <>
-      <path d="M4 4l16 16M20 4L4 20" />
-    </>
+    // Font Awesome Brands "X Twitter" 相当の SVG パス。
+    // currentColor で塗りつぶし、stroke は使わない。viewBox は 24x24 共通。
+    <path
+      fill="currentColor"
+      stroke="none"
+      d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24h-6.657l-5.214-6.817-5.965 6.817H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231 5.45-6.231Zm-1.161 17.52h1.833L7.084 4.126H5.117L17.083 19.77Z"
+    />
   ),
   discord: (
     <>

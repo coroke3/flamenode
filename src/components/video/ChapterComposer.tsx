@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
-import { createChapter } from "@/lib/actions/chapter";
+import { createChapter, createChaptersBulk } from "@/lib/actions/chapter";
 import { requestCurrentTime } from "./playerBridge";
 
 interface ChapterComposerProps {
@@ -17,6 +17,8 @@ interface ChapterComposerProps {
    * 呼び出し側で `/dashboard/settings?next=...` を組み立てて渡す。
    */
   settingsHref?: string;
+  /** 動画オーナー / admin のみ CSV 一括登録 UI を出す。 */
+  canBulk?: boolean;
 }
 
 function parseTimeInput(raw: string): number {
@@ -52,6 +54,7 @@ export function ChapterComposer({
   videoId,
   canPost,
   settingsHref,
+  canBulk = false,
 }: ChapterComposerProps): React.ReactElement {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
@@ -62,6 +65,34 @@ export function ChapterComposer({
   const [showOnBar, setShowOnBar] = React.useState(true);
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
+
+  const [bulkOpen, setBulkOpen] = React.useState(false);
+  const [bulkCsv, setBulkCsv] = React.useState("");
+  const [bulkBusy, startBulkTransition] = React.useTransition();
+  const [bulkMessage, setBulkMessage] = React.useState<string | null>(null);
+  const [bulkErrors, setBulkErrors] = React.useState<string[]>([]);
+
+  const submitBulk = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setBulkMessage(null);
+    setBulkErrors([]);
+    if (!bulkCsv.trim()) {
+      setBulkMessage("CSV を貼り付けてください。");
+      return;
+    }
+    const fd = new FormData();
+    fd.set("video_id", videoId);
+    fd.set("csv", bulkCsv);
+    startBulkTransition(async () => {
+      const r = await createChaptersBulk(fd);
+      setBulkMessage(r.message ?? null);
+      setBulkErrors(r.errors ?? []);
+      if (r.ok && (r.inserted ?? 0) > 0) {
+        setBulkCsv("");
+        router.refresh();
+      }
+    });
+  };
 
   const fillCurrentTime = async () => {
     const t = await requestCurrentTime();
@@ -261,6 +292,92 @@ export function ChapterComposer({
             {busy ? "送信中…" : "投稿"}
           </button>
         </form>
+      ) : null}
+
+      {canBulk ? (
+        <details
+          style={{
+            marginTop: open ? 12 : 8,
+            borderTop: "1px solid var(--border-subtle)",
+            paddingTop: 8,
+          }}
+          open={bulkOpen}
+          onToggle={(e) => setBulkOpen((e.target as HTMLDetailsElement).open)}
+        >
+          <summary
+            style={{
+              fontSize: 11.5,
+              color: "var(--text-muted)",
+              cursor: "pointer",
+              fontWeight: 600,
+            }}
+          >
+            <Icon name="upload" size={11} aria-hidden /> CSV で一括登録 (動画オーナーのみ)
+          </summary>
+          <form
+            onSubmit={submitBulk}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+              marginTop: 8,
+            }}
+          >
+            <p style={{ fontSize: 11, color: "var(--text-muted)", margin: 0 }}>
+              列: <code>time,label,note,visibility,member</code> /
+              time は <code>mm:ss</code> または <code>hh:mm:ss</code> /
+              member は X ID または名前で video_members と一致した場合のみ紐付け。
+            </p>
+            <textarea
+              className="fn-input"
+              rows={5}
+              style={{ fontFamily: "monospace", fontSize: 12 }}
+              placeholder={"0:30,オープニング,,public,\n1:45,Aパート,音響担当,public,sato_design"}
+              value={bulkCsv}
+              onChange={(e) => setBulkCsv(e.target.value)}
+              disabled={bulkBusy}
+            />
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button
+                type="submit"
+                className="fn-btn fn-btn-primary fn-btn-sm"
+                disabled={bulkBusy}
+              >
+                <Icon name="plus" size={11} aria-hidden />
+                {bulkBusy ? "登録中…" : "一括登録"}
+              </button>
+              {bulkMessage ? (
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: bulkErrors.length > 0
+                      ? "var(--accent-danger)"
+                      : "var(--text-secondary)",
+                  }}
+                >
+                  {bulkMessage}
+                </span>
+              ) : null}
+            </div>
+            {bulkErrors.length > 0 ? (
+              <ul
+                style={{
+                  margin: 0,
+                  paddingLeft: 18,
+                  fontSize: 11,
+                  color: "var(--accent-danger)",
+                }}
+              >
+                {bulkErrors.slice(0, 8).map((er, i) => (
+                  <li key={i}>{er}</li>
+                ))}
+                {bulkErrors.length > 8 ? (
+                  <li>...他 {bulkErrors.length - 8} 件</li>
+                ) : null}
+              </ul>
+            ) : null}
+          </form>
+        </details>
       ) : null}
     </section>
   );

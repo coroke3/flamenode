@@ -15,6 +15,8 @@ import {
   videos,
 } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
+import { detectSupportedImageUpload } from "@/lib/utils/imageUpload";
+import { normalizeHttpUrl } from "@/lib/utils/url";
 import { normalizeXId } from "@/lib/utils/xid";
 
 export interface XIdActionResult {
@@ -24,6 +26,32 @@ export interface XIdActionResult {
 
 function xUserIdMatches(xUserId: string) {
   return sql`lower(${xUsers.id}) = ${normalizeXId(xUserId)}`;
+}
+
+function sanitizeSocialLinks(raw: string): string | null {
+  const value = raw.trim();
+  if (!value) return null;
+  if (/\b(?:javascript|vbscript|data):/i.test(value)) return null;
+  return value;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => {
+    switch (char) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      case "'":
+        return "&#39;";
+      default:
+        return char;
+    }
+  });
 }
 
 export async function setActiveXId(
@@ -147,6 +175,22 @@ export async function requestXIdLink(
     };
   }
 
+  const pendingCountRows = await db
+    .select({ count: sql<number>`COUNT(*)` })
+    .from(xAccountLinkRequests)
+    .where(
+      and(
+        eq(xAccountLinkRequests.discord_user_id, u.id),
+        eq(xAccountLinkRequests.status, "pending"),
+      )!,
+    );
+  if (Number(pendingCountRows[0]?.count ?? 0) >= 5) {
+    return {
+      ok: false,
+      message: "未処理の X ID 申請が多すぎます。承認または却下を待ってから再申請してください。",
+    };
+  }
+
   const now = Math.floor(Date.now() / 1000);
   const id = generateId("xreq");
 
@@ -186,10 +230,26 @@ export async function updateXIdProfile(
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   const xName = String(formData.get("x_name") ?? "").trim();
   const profileText = String(formData.get("profile_text") ?? "").trim();
-  const youtubeChannelUrl = String(formData.get("youtube_channel_url") ?? "").trim();
-  const otherSocialLinks = String(formData.get("other_social_links") ?? "").trim();
+  const youtubeChannelRaw = String(formData.get("youtube_channel_url") ?? "").trim();
+  const otherSocialLinksRaw = String(formData.get("other_social_links") ?? "").trim();
+  const youtubeChannelUrl = youtubeChannelRaw
+    ? normalizeHttpUrl(youtubeChannelRaw, { maxLength: 500 })
+    : null;
+  const otherSocialLinks = sanitizeSocialLinks(otherSocialLinksRaw);
   if (!xUserId || !xName) {
     return { ok: false, message: "X ID と表示名が必要です。" };
+  }
+  if (youtubeChannelRaw && !youtubeChannelUrl) {
+    return {
+      ok: false,
+      message: "YouTube チャンネル URL は http/https の有効な URL を入力してください。",
+    };
+  }
+  if (otherSocialLinksRaw && !otherSocialLinks) {
+    return {
+      ok: false,
+      message: "SNS リンクに利用できない URL スキームが含まれています。",
+    };
   }
 
   const db = getDatabase();
@@ -206,8 +266,8 @@ export async function updateXIdProfile(
     .set({
       x_name: xName,
       profile_text: profileText || null,
-      youtube_channel_url: youtubeChannelUrl || null,
-      other_social_links: otherSocialLinks || null,
+      youtube_channel_url: youtubeChannelUrl,
+      other_social_links: otherSocialLinks,
     })
     .where(xUserIdMatches(xUserId));
 
@@ -246,7 +306,7 @@ export async function enablePortfolio(
   const existing = (
     await db.select().from(customPages).where(eq(customPages.x_user_id, xUserId)).limit(1)
   )[0];
-  const html = `<h1>${row.x_name}</h1><p>${row.profile_text ?? ""}</p>`;
+  const html = `<h1>${escapeHtml(row.x_name)}</h1><p>${escapeHtml(row.profile_text ?? "")}</p>`;
   if (existing) {
     await db
       .update(customPages)
@@ -420,11 +480,6 @@ export async function uploadXIdIcon(
     return { ok: false, message: "この X ID を編集する権限がありません。" };
   }
 
-  const contentType = file.type || "image/png";
-  const allowedTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
-  if (!allowedTypes.has(contentType)) {
-    return { ok: false, message: "PNG/JPEG/WEBP のみアップロードできます。" };
-  }
   if (file.size > 2 * 1024 * 1024) {
     return { ok: false, message: "2MB 以内の画像を選んでください。" };
   }
@@ -451,11 +506,14 @@ export async function uploadXIdIcon(
     return { ok: false, message: "ストレージが利用できません。" };
   }
 
-  const ext = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
-  const key = `xicons/${xUserId}/${generateId("xicon")}.${ext}`;
   const buf = await file.arrayBuffer();
+  const image = detectSupportedImageUpload(buf);
+  if (!image) {
+    return { ok: false, message: "PNG/JPEG/WEBP 画像ファイルのみアップロードできます。" };
+  }
+  const key = `xicons/${xUserId}/${generateId("xicon")}.${image.ext}`;
   await env.BUCKET.put(key, buf, {
-    httpMetadata: { contentType },
+    httpMetadata: { contentType: image.contentType },
   });
   const iconUrl = `/api/media/${key}`;
 

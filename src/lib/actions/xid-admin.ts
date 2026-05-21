@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import {
@@ -95,10 +95,19 @@ export async function approveXIdLinkRequest(
       .values({ x_user_id: targetXId, alias_x_id: xid })
       .onConflictDoNothing();
 
-    await db
+    const approvedRows = await db
       .update(xAccountLinkRequests)
       .set({ status: "approved" })
-      .where(eq(xAccountLinkRequests.id, requestId));
+      .where(
+        and(
+          eq(xAccountLinkRequests.id, requestId),
+          eq(xAccountLinkRequests.status, "pending"),
+        )!,
+      )
+      .returning({ id: xAccountLinkRequests.id });
+    if (approvedRows.length === 0) {
+      return { ok: false, message: "すでに処理済みの申請です。" };
+    }
 
     await db.insert(historyLogs).values({
       table_name: "x_account_link_requests",
@@ -178,10 +187,19 @@ export async function approveXIdLinkRequest(
       .where(xUserIdMatches(xid));
   }
 
-  await db
+  const approvedRows = await db
     .update(xAccountLinkRequests)
     .set({ status: "approved" })
-    .where(eq(xAccountLinkRequests.id, requestId));
+    .where(
+      and(
+        eq(xAccountLinkRequests.id, requestId),
+        eq(xAccountLinkRequests.status, "pending"),
+      )!,
+    )
+    .returning({ id: xAccountLinkRequests.id });
+  if (approvedRows.length === 0) {
+    return { ok: false, message: "すでに処理済みの申請です。" };
+  }
 
   const userRow = (
     await db.select().from(users).where(eq(users.id, discordUserId)).limit(1)

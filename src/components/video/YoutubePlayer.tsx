@@ -477,9 +477,9 @@ export function YoutubePlayer({
               width: `${(currentTime / Math.max(duration, 1)) * 100}%`,
             }}
           />
-          {visibleChapters.map((c) => (
+          {visibleChapters.map((c, index) => (
             <button
-              key={c.id}
+              key={`${c.id}-marker-${index}`}
               type="button"
               aria-label={`${formatDuration(c.time)} ${c.label}`}
               title={`${formatDuration(c.time)} ${c.label}`}

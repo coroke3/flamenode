@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import {
   writeGuard,
   type WriteGuardDenyReason,
@@ -59,6 +59,17 @@ function isAdjacent(prev: SlotRow, next: SlotRow): boolean {
   const nextOrder = next.sort_order;
   if (prevOrder == null || nextOrder == null) return false;
   return nextOrder === prevOrder + 1;
+}
+
+function reservationGroupScope(groupId: string, row: SlotRow) {
+  return and(
+    eq(slots.reservation_group_id, groupId),
+    eq(slots.event_id, row.event_id),
+    row.discord_user_id
+      ? eq(slots.discord_user_id, row.discord_user_id)
+      : isNull(slots.discord_user_id),
+    row.x_user_id ? eq(slots.x_user_id, row.x_user_id) : isNull(slots.x_user_id),
+  )!;
 }
 
 export async function reserveSlot(
@@ -292,7 +303,7 @@ export async function releaseOwnSlot(
   const groupRows = await db
     .select()
     .from(slots)
-    .where(eq(slots.reservation_group_id, groupId))
+    .where(reservationGroupScope(groupId, slotRow))
     .orderBy(asc(slots.sort_order), asc(slots.start_time));
 
   if (groupRows.some((r) => r.status === "submitted")) {
@@ -470,7 +481,7 @@ export async function extendOwnSlotGroup(
     ? await db
         .select()
         .from(slots)
-        .where(eq(slots.reservation_group_id, groupId))
+        .where(reservationGroupScope(groupId, anchor))
         .orderBy(asc(slots.sort_order), asc(slots.start_time))
     : [anchor];
 
@@ -660,13 +671,13 @@ export async function mergeOwnSlotGroups(
     ? await db
         .select()
         .from(slots)
-        .where(eq(slots.reservation_group_id, leftGroupId))
+        .where(reservationGroupScope(leftGroupId, leftNeighbor))
     : [leftNeighbor];
   const rightGroup = rightGroupId
     ? await db
         .select()
         .from(slots)
-        .where(eq(slots.reservation_group_id, rightGroupId))
+        .where(reservationGroupScope(rightGroupId, rightNeighbor))
     : [rightNeighbor];
 
   for (const r of [...leftGroup, ...rightGroup]) {

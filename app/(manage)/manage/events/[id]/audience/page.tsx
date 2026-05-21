@@ -180,8 +180,8 @@ export default async function ManageEventAudiencePage({
             </tr>
           </thead>
           <tbody>
-            {audience.map((a) => (
-              <tr key={a.x_user_id}>
+            {audience.map((a, index) => (
+              <tr key={`${a.x_user_id}-audience-${index}`}>
                 <td>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     {a.icon_url ? (

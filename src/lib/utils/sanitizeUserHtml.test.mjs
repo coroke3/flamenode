@@ -74,11 +74,24 @@ test("data:image/png URL は通過", () => {
   assert.ok(out.includes("data:image/png"));
 });
 
+test("data:image/svg+xml URL はブロック", () => {
+  const out = sanitizeUserHtml(
+    '<img src="data:image/svg+xml;base64,PHN2Zz4...">',
+  );
+  assert.equal(out.includes("data:image/svg+xml"), false);
+});
+
 test("data:text/html URL はブロック", () => {
   const out = sanitizeUserHtml(
     '<a href="data:text/html,<script>alert(1)</script>">x</a>',
   );
   assert.equal(out.includes("data:text/html"), false);
+});
+
+test("style 属性を除去する", () => {
+  const out = sanitizeUserHtml('<p style="color: red; font-size: 20px;">hello</p>');
+  assert.equal(out.includes("style="), false);
+  assert.equal(out.includes("color: red"), false);
 });
 
 test("通常の安全な HTML は保持", () => {

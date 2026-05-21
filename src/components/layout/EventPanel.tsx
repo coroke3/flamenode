@@ -94,8 +94,8 @@ export function EventPanel({
         <p className={styles.empty}>作品はまだ登録されていません。</p>
       ) : (
         <div className={styles.grid}>
-          {videos.slice(0, 8).map((v) => (
-            <VideoCard key={v.id} video={v} size="compact" />
+          {videos.slice(0, 8).map((v, index) => (
+            <VideoCard key={`${v.id}-event-panel-${index}`} video={v} size="compact" />
           ))}
         </div>
       )}

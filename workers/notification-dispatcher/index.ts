@@ -4,7 +4,7 @@
  * 失敗時はリトライ最大 MAX_RETRIES 回でステータスを更新する。
  *
  * カラム: id, discord_user_id, type, payload_json, status, attempt_count,
- *         next_attempt_at, last_error, created_at
+ *         processing_started_at, next_attempt_at, last_error, created_at
  * status enum: 'pending' | 'processing' | 'sent' | 'failed'
  * 時刻: Unix integer (Math.floor(Date.now() / 1000))
  */
@@ -15,6 +15,7 @@ export interface Env {
 }
 
 const MAX_RETRIES = 3;
+const PROCESSING_STALE_SEC = 600;
 /** 指数バックオフ基数 (秒)。attempt_count=0 の初回失敗で 60 秒後にリトライ */
 const BACKOFF_BASE_SEC = 60;
 
@@ -38,6 +39,19 @@ export default {
 async function dispatch(env: Env): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
 
+  await env.DB.prepare(
+    `UPDATE notification_outbox
+        SET status = 'pending',
+            processing_started_at = NULL,
+            last_error = COALESCE(last_error, 'processing timeout rescue')
+      WHERE status = 'processing'
+        AND processing_started_at IS NOT NULL
+        AND processing_started_at < ?1
+        AND attempt_count < ?2`,
+  )
+    .bind(now - PROCESSING_STALE_SEC, MAX_RETRIES)
+    .run();
+
   const selectStmt = env.DB.prepare(
     `SELECT id, discord_user_id, type, payload_json, attempt_count
        FROM notification_outbox
@@ -52,15 +66,24 @@ async function dispatch(env: Env): Promise<void> {
   const rows = result.results ?? [];
 
   const markProcessingStmt = env.DB.prepare(
-    `UPDATE notification_outbox SET status = 'processing' WHERE id = ?1`,
+    `UPDATE notification_outbox
+        SET status = 'processing',
+            processing_started_at = ?1
+      WHERE id = ?2
+        AND status = 'pending'`,
   );
   const markSentStmt = env.DB.prepare(
-    `UPDATE notification_outbox SET status = 'sent' WHERE id = ?1`,
+    `UPDATE notification_outbox
+        SET status = 'sent',
+            processing_started_at = NULL
+      WHERE id = ?1
+        AND status = 'processing'`,
   );
   const markRetryStmt = env.DB.prepare(
     `UPDATE notification_outbox
         SET attempt_count = ?1,
             status = 'pending',
+            processing_started_at = NULL,
             last_error = ?2,
             next_attempt_at = ?3
       WHERE id = ?4`,
@@ -68,13 +91,15 @@ async function dispatch(env: Env): Promise<void> {
   const markFailedStmt = env.DB.prepare(
     `UPDATE notification_outbox
         SET status = 'failed',
+            processing_started_at = NULL,
             attempt_count = ?1,
             last_error = ?2
       WHERE id = ?3`,
   );
 
   for (const row of rows) {
-    await markProcessingStmt.bind(row.id).run();
+    const claimed = await markProcessingStmt.bind(now, row.id).run();
+    if ((claimed.meta?.changes ?? 0) === 0) continue;
 
     let ok = false;
     let errorMsg = "";

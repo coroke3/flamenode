@@ -7,6 +7,7 @@ import styles from "./PlaylistRail.module.css";
 import { Icon } from "@/components/ui/Icon";
 import { youtubeThumbUrl } from "@/lib/youtube/id";
 import { cn } from "@/lib/utils/cn";
+import { uniqueBy } from "@/lib/utils/unique";
 
 export interface PlaylistEntry {
   id: string;
@@ -29,12 +30,13 @@ function applySavedOrder(
   items: PlaylistEntry[],
   savedOrder: string[],
 ): PlaylistEntry[] {
-  if (savedOrder.length === 0) return items;
-  const byId = new Map(items.map((item) => [item.id, item]));
+  const uniqueItems = uniqueBy(items, (item) => item.id);
+  if (savedOrder.length === 0) return uniqueItems;
+  const byId = new Map(uniqueItems.map((item) => [item.id, item]));
   const ordered = savedOrder
     .map((id) => byId.get(id))
     .filter((item): item is PlaylistEntry => Boolean(item));
-  const remaining = items.filter((item) => !savedOrder.includes(item.id));
+  const remaining = uniqueItems.filter((item) => !savedOrder.includes(item.id));
   return [...ordered, ...remaining];
 }
 
@@ -211,7 +213,7 @@ export function PlaylistRail({
         {orderedItems.map((v, i) => {
           const active = i === currentIndex;
           return (
-            <li key={v.id} className={styles.row}>
+            <li key={`${v.id}-${i}`} className={styles.row}>
               <div className={styles.reorderControls}>
                 <button
                   type="button"

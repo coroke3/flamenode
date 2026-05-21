@@ -17,6 +17,7 @@ export interface EnqueueNotificationInput {
   payload: Record<string, unknown>;
   /** event-scoped 通知なら event_id を渡す (運営者受信箱で参照) */
   eventId?: string | null;
+  force?: boolean;
 }
 
 function randomId(): string {
@@ -27,11 +28,13 @@ function randomId(): string {
 async function resolveDiscordRecipientId(
   db: AnyDb,
   candidate: string,
+  force = false,
 ): Promise<string | null> {
   const rows = await db
     .select({
       discord_id: users.discord_id,
       provider_account_id: accounts.providerAccountId,
+      is_notification_enabled: users.is_notification_enabled,
     })
     .from(users)
     .leftJoin(
@@ -47,6 +50,7 @@ async function resolveDiscordRecipientId(
     )
     .limit(1);
   const row = rows[0];
+  if (!force && row?.is_notification_enabled === 0) return null;
   return row?.provider_account_id ??
     row?.discord_id ??
     (DISCORD_SNOWFLAKE_RE.test(candidate) ? candidate : null);
@@ -73,6 +77,7 @@ export async function enqueueNotification(
     const discordRecipientId = await resolveDiscordRecipientId(
       db,
       input.discordUserId,
+      input.force ?? false,
     );
     if (!discordRecipientId) {
       console.error("[enqueueNotification] Discord recipient ID を解決できないため skip");
@@ -85,6 +90,7 @@ export async function enqueueNotification(
       payload_json: JSON.stringify(input.payload),
       status: "pending",
       attempt_count: 0,
+      processing_started_at: null,
       next_attempt_at: null,
       last_error: null,
       event_id: input.eventId ?? null,

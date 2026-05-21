@@ -257,15 +257,29 @@
 }
 
 .eventBox {
+  position: relative;
   margin-top: 22px;
   padding: 14px 18px;
-  background-color: var(--bg-surface);
+  background:
+    radial-gradient(
+      100% 80% at 90% 0%,
+      var(--event-accent-soft, color-mix(in srgb, var(--accent-primary) 12%, transparent)),
+      transparent 60%
+    ),
+    var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 10px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.eventBox:hover {
+  border-color: var(--event-accent-ring, var(--accent-primary));
+  box-shadow:
+    0 0 0 1px var(--event-accent-ring, var(--accent-primary));
 }
 
 .eventBoxLabel {
@@ -291,12 +305,31 @@
 }
 
 .sectionTitle {
+  position: relative;
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--text-muted);
   margin-bottom: 12px;
+  padding-bottom: 8px;
+}
+
+.sectionTitle::after {
+  content: "";
+  display: block;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    var(--event-accent, var(--accent-primary)),
+    transparent
+  );
+  opacity: 0.7;
 }
 
 .memberTable {
@@ -361,6 +394,36 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.relatedMore {
+  margin-top: 6px;
+}
+
+.relatedMore summary {
+  min-height: 34px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  list-style: none;
+}
+
+.relatedMore summary::-webkit-details-marker {
+  display: none;
+}
+
+.relatedMore summary:hover {
+  color: var(--text-primary);
+  border-color: var(--event-accent, var(--accent-primary));
+}
+
+.relatedMore[open] summary {
+  margin-bottom: 6px;
 }
 
 /* モバイル: メイン記事内に出すミニ関連 (デスクトップは aside に出す) */

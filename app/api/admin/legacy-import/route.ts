@@ -9,6 +9,7 @@ import {
   type ConflictStrategy,
   type LegacyImportResult,
 } from "@/lib/legacy/import";
+import { parseLegacyImportText } from "@/lib/legacy/parse";
 
 const MAX_IMPORT_FILES = 12;
 const MAX_IMPORT_TOTAL_BYTES = 6 * 1024 * 1024;
@@ -215,9 +216,7 @@ function mergeFiles(files: { name?: string; content?: string }[]): MergeResult {
     if (!f?.content) continue;
     let parsed: unknown;
     try {
-      parsed = /\.(csv|tsv)$/i.test(f.name ?? "")
-        ? parseCsv(f.content)
-        : JSON.parse(f.content);
+      parsed = parseLegacyImportText(f.name, f.content);
     } catch {
       return {
         ok: false,
@@ -260,65 +259,4 @@ function validateFormFiles(files: File[]): string | null {
     return "Import files are too large in total.";
   }
   return null;
-}
-
-function parseCsv(text: string): Record<string, string>[] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = "";
-  let quoted = false;
-  const delimiter = detectDelimiter(text);
-
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    const next = text[i + 1];
-
-    if (quoted) {
-      if (ch === '"' && next === '"') {
-        field += '"';
-        i += 1;
-      } else if (ch === '"') {
-        quoted = false;
-      } else {
-        field += ch;
-      }
-      continue;
-    }
-
-    if (ch === '"') {
-      quoted = true;
-    } else if (ch === delimiter) {
-      row.push(field);
-      field = "";
-    } else if (ch === "\n") {
-      row.push(field);
-      rows.push(row);
-      row = [];
-      field = "";
-    } else if (ch !== "\r") {
-      field += ch;
-    }
-  }
-  row.push(field);
-  rows.push(row);
-
-  const [headerRow, ...bodyRows] = rows.filter((r) => r.some((c) => c.trim()));
-  if (!headerRow) return [];
-  const headers = headerRow.map((h, index) =>
-    (index === 0 ? h.replace(/^\uFEFF/, "") : h).trim(),
-  );
-  return bodyRows.map((cells) => {
-    const obj: Record<string, string> = {};
-    headers.forEach((header, index) => {
-      if (header) obj[header] = (cells[index] ?? "").trim();
-    });
-    return obj;
-  });
-}
-
-function detectDelimiter(text: string): "," | "\t" {
-  const firstLine = text.split(/\r?\n/, 1)[0] ?? "";
-  const commaCount = (firstLine.match(/,/g) ?? []).length;
-  const tabCount = (firstLine.match(/\t/g) ?? []).length;
-  return tabCount > commaCount ? "\t" : ",";
 }

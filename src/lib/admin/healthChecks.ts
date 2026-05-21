@@ -44,67 +44,85 @@ async function checkSystemSettingsSingleRow(
 /** videos.primary_event_id が video_events に対応行を持つか */
 async function checkPrimaryEventSync(db: AnyDb): Promise<HealthCheckResult> {
   // primary_event_id が設定されているが video_events に存在しない
-  const missingRows = await db
-    .select({ id: videosTable.id })
-    .from(videosTable)
-    .leftJoin(
-      videoEventsTable,
-      and(
-        eq(videoEventsTable.video_id, videosTable.id),
-        eq(videoEventsTable.event_id, videosTable.primary_event_id!),
-      ),
-    )
-    .where(
-      and(
-        isNotNull(videosTable.primary_event_id),
-        isNull(videoEventsTable.video_id),
-      ),
-    )
-    .limit(10);
-
-  const count = missingRows.length;
+  // count は実数を返したいので COUNT(*) と LIMIT サンプルを分離する。
+  const where = and(
+    isNotNull(videosTable.primary_event_id),
+    isNull(videoEventsTable.video_id),
+  );
+  const join = and(
+    eq(videoEventsTable.video_id, videosTable.id),
+    eq(videoEventsTable.event_id, videosTable.primary_event_id!),
+  );
+  const [countRows, sampleRows] = await Promise.all([
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(videosTable)
+      .leftJoin(videoEventsTable, join)
+      .where(where),
+    db
+      .select({ id: videosTable.id })
+      .from(videosTable)
+      .leftJoin(videoEventsTable, join)
+      .where(where)
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
   return {
     id: "primary_event_sync",
     label: "primary_event_id / video_events 同期",
     status: count === 0 ? "ok" : "warn",
     count,
-    samples: missingRows.slice(0, 5).map((r) => r.id),
+    samples: sampleRows.slice(0, 5).map((r) => r.id),
   };
 }
 
 /** video_events の event_id が events に存在するか */
 async function checkOrphanEventRef(db: AnyDb): Promise<HealthCheckResult> {
-  const rows = await db
-    .select({ video_id: videoEventsTable.video_id })
-    .from(videoEventsTable)
-    .leftJoin(eventsTable, eq(eventsTable.id, videoEventsTable.event_id))
-    .where(isNull(eventsTable.id))
-    .limit(10);
-  const count = rows.length;
+  const [countRows, sampleRows] = await Promise.all([
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(videoEventsTable)
+      .leftJoin(eventsTable, eq(eventsTable.id, videoEventsTable.event_id))
+      .where(isNull(eventsTable.id)),
+    db
+      .select({ video_id: videoEventsTable.video_id })
+      .from(videoEventsTable)
+      .leftJoin(eventsTable, eq(eventsTable.id, videoEventsTable.event_id))
+      .where(isNull(eventsTable.id))
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
   return {
     id: "orphan_event_ref",
     label: "video_events.event_id 参照整合性",
     status: count === 0 ? "ok" : "warn",
     count,
-    samples: rows.slice(0, 5).map((r) => r.video_id),
+    samples: sampleRows.slice(0, 5).map((r) => r.video_id),
   };
 }
 
 /** video_events の video_id が videos に存在するか */
 async function checkOrphanVideoRef(db: AnyDb): Promise<HealthCheckResult> {
-  const rows = await db
-    .select({ video_id: videoEventsTable.video_id })
-    .from(videoEventsTable)
-    .leftJoin(videosTable, eq(videosTable.id, videoEventsTable.video_id))
-    .where(isNull(videosTable.id))
-    .limit(10);
-  const count = rows.length;
+  const [countRows, sampleRows] = await Promise.all([
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(videoEventsTable)
+      .leftJoin(videosTable, eq(videosTable.id, videoEventsTable.video_id))
+      .where(isNull(videosTable.id)),
+    db
+      .select({ video_id: videoEventsTable.video_id })
+      .from(videoEventsTable)
+      .leftJoin(videosTable, eq(videosTable.id, videoEventsTable.video_id))
+      .where(isNull(videosTable.id))
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
   return {
     id: "orphan_video_ref",
     label: "video_events.video_id 参照整合性",
     status: count === 0 ? "ok" : "warn",
     count,
-    samples: rows.slice(0, 5).map((r) => r.video_id),
+    samples: sampleRows.slice(0, 5).map((r) => r.video_id),
   };
 }
 
@@ -112,20 +130,21 @@ async function checkOrphanVideoRef(db: AnyDb): Promise<HealthCheckResult> {
 async function checkAvailableSlotWithVideo(
   db: AnyDb,
 ): Promise<HealthCheckResult> {
-  const rows = await db
-    .select({ id: slotsTable.id })
-    .from(slotsTable)
-    .where(
-      and(eq(slotsTable.status, "available"), isNotNull(slotsTable.video_id)),
-    )
-    .limit(10);
-  const count = rows.length;
+  const where = and(
+    eq(slotsTable.status, "available"),
+    isNotNull(slotsTable.video_id),
+  );
+  const [countRows, sampleRows] = await Promise.all([
+    db.select({ c: sql<number>`COUNT(*)` }).from(slotsTable).where(where),
+    db.select({ id: slotsTable.id }).from(slotsTable).where(where).limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
   return {
     id: "available_slot_with_video",
     label: "available スロットに video_id あり",
     status: count === 0 ? "ok" : "warn",
     count,
-    samples: rows.slice(0, 5).map((r) => r.id),
+    samples: sampleRows.slice(0, 5).map((r) => r.id),
   };
 }
 
@@ -133,20 +152,21 @@ async function checkAvailableSlotWithVideo(
 async function checkSubmittedSlotWithoutVideo(
   db: AnyDb,
 ): Promise<HealthCheckResult> {
-  const rows = await db
-    .select({ id: slotsTable.id })
-    .from(slotsTable)
-    .where(
-      and(eq(slotsTable.status, "submitted"), isNull(slotsTable.video_id)),
-    )
-    .limit(10);
-  const count = rows.length;
+  const where = and(
+    eq(slotsTable.status, "submitted"),
+    isNull(slotsTable.video_id),
+  );
+  const [countRows, sampleRows] = await Promise.all([
+    db.select({ c: sql<number>`COUNT(*)` }).from(slotsTable).where(where),
+    db.select({ id: slotsTable.id }).from(slotsTable).where(where).limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
   return {
     id: "submitted_slot_without_video",
     label: "submitted スロットに video_id なし",
     status: count === 0 ? "ok" : "warn",
     count,
-    samples: rows.slice(0, 5).map((r) => r.id),
+    samples: sampleRows.slice(0, 5).map((r) => r.id),
   };
 }
 
@@ -154,7 +174,10 @@ async function checkSubmittedSlotWithoutVideo(
 async function checkReservationGroupUserMix(
   db: AnyDb,
 ): Promise<HealthCheckResult> {
-  // 同一 reservation_group_id に Discord user または X ID が複数いるグループ
+  // 同一 reservation_group_id に Discord user または X ID が複数いるグループ。
+  // count は混在グループの実数を返したいので、ノーリミットの中間結果から長さを取る。
+  // (groupBy + HAVING を COUNT(*) でラップするには subquery が必要だが、混在は実運用で
+  //  数十件以下に収まる想定のため、サンプル取得とは分けても合算でも変わらない。)
   const rows = await db
     .select({ reservation_group_id: slotsTable.reservation_group_id })
     .from(slotsTable)
@@ -163,8 +186,7 @@ async function checkReservationGroupUserMix(
     .having(sql`
       COUNT(DISTINCT ${slotsTable.discord_user_id}) > 1
       OR COUNT(DISTINCT ${slotsTable.x_user_id}) > 1
-    `)
-    .limit(10);
+    `);
   const count = rows.length;
   return {
     id: "reservation_group_user_mix",
@@ -181,49 +203,45 @@ async function checkReservationGroupUserMix(
 async function checkPublicVideoWithoutYoutubeId(
   db: AnyDb,
 ): Promise<HealthCheckResult> {
-  const rows = await db
-    .select({ id: videosTable.id })
-    .from(videosTable)
-    .where(
-      and(
-        eq(videosTable.status, "public"),
-        or(
-          isNull(videosTable.youtube_video_id),
-          eq(videosTable.youtube_video_id, ""),
-        ),
-      ),
-    )
-    .limit(10);
-  const count = rows.length;
+  const where = and(
+    eq(videosTable.status, "public"),
+    or(
+      isNull(videosTable.youtube_video_id),
+      eq(videosTable.youtube_video_id, ""),
+    ),
+  );
+  const [countRows, sampleRows] = await Promise.all([
+    db.select({ c: sql<number>`COUNT(*)` }).from(videosTable).where(where),
+    db.select({ id: videosTable.id }).from(videosTable).where(where).limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
   return {
     id: "public_video_without_youtube_id",
     label: "public 動画に youtube_video_id なし",
     status: count === 0 ? "ok" : "warn",
     count,
-    samples: rows.slice(0, 5).map((r) => r.id),
+    samples: sampleRows.slice(0, 5).map((r) => r.id),
   };
 }
 
 /** voided 動画が非削除・非非表示 */
 async function checkVoidedVideoVisible(db: AnyDb): Promise<HealthCheckResult> {
-  const rows = await db
-    .select({ id: videosTable.id })
-    .from(videosTable)
-    .where(
-      and(
-        eq(videosTable.status, "voided"),
-        eq(videosTable.is_deleted, 0),
-        eq(videosTable.is_manual_hidden, 0),
-      ),
-    )
-    .limit(10);
-  const count = rows.length;
+  const where = and(
+    eq(videosTable.status, "voided"),
+    eq(videosTable.is_deleted, 0),
+    eq(videosTable.is_manual_hidden, 0),
+  );
+  const [countRows, sampleRows] = await Promise.all([
+    db.select({ c: sql<number>`COUNT(*)` }).from(videosTable).where(where),
+    db.select({ id: videosTable.id }).from(videosTable).where(where).limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
   return {
     id: "voided_video_visible",
     label: "voided 動画が is_deleted=0 かつ is_manual_hidden=0",
     status: count === 0 ? "ok" : "warn",
     count,
-    samples: rows.slice(0, 5).map((r) => r.id),
+    samples: sampleRows.slice(0, 5).map((r) => r.id),
     note:
       "voided でも is_deleted/is_manual_hidden が立っていない行。表示制御を確認してください。",
   };
@@ -405,18 +423,18 @@ async function checkVideoCommentsLegacyRows(
 async function checkVideosOutroComment(
   db: AnyDb,
 ): Promise<HealthCheckResult> {
-  const rows = await db
-    .select({ id: videosTable.id })
-    .from(videosTable)
-    .where(isNotNull(videosTable.outro_comment))
-    .limit(10);
-  const count = rows.length;
+  const where = isNotNull(videosTable.outro_comment);
+  const [countRows, sampleRows] = await Promise.all([
+    db.select({ c: sql<number>`COUNT(*)` }).from(videosTable).where(where),
+    db.select({ id: videosTable.id }).from(videosTable).where(where).limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
   return {
     id: "videos_outro_comment_legacy",
     label: "videos.outro_comment 残存行 (deprecated)",
     status: count === 0 ? "ok" : "info",
     count,
-    samples: rows.slice(0, 5).map((r) => r.id),
+    samples: sampleRows.slice(0, 5).map((r) => r.id),
     note:
       count > 0
         ? "outro_comment は closing_comment に統一済み。旧データは表示のみで、新規書き込みは行わない。"
@@ -428,23 +446,33 @@ async function checkVideosOutroComment(
 async function checkChapterNonChapterMarker(
   db: AnyDb,
 ): Promise<HealthCheckResult> {
-  const rows = await db
-    .select({ id: videoChaptersTable.id, marker_kind: videoChaptersTable.marker_kind })
-    .from(videoChaptersTable)
-    .where(
-      and(
-        isNotNull(videoChaptersTable.marker_kind),
-        ne(videoChaptersTable.marker_kind, "chapter"),
-      ),
-    )
-    .limit(10);
-  const count = rows.length;
+  const where = and(
+    isNotNull(videoChaptersTable.marker_kind),
+    ne(videoChaptersTable.marker_kind, "chapter"),
+  );
+  const [countRows, sampleRows] = await Promise.all([
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(videoChaptersTable)
+      .where(where),
+    db
+      .select({
+        id: videoChaptersTable.id,
+        marker_kind: videoChaptersTable.marker_kind,
+      })
+      .from(videoChaptersTable)
+      .where(where)
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
   return {
     id: "chapter_non_chapter_marker",
     label: "video_chapters.marker_kind != 'chapter' (旧データ)",
     status: count === 0 ? "ok" : "info",
     count,
-    samples: rows.slice(0, 5).map((r) => `${r.id} (${r.marker_kind ?? "?"})`),
+    samples: sampleRows
+      .slice(0, 5)
+      .map((r) => `${r.id} (${r.marker_kind ?? "?"})`),
     note:
       count > 0
         ? "MVP は marker_kind=chapter 固定運用。旧データの comment/review/system は表示のみで、新規書き込みは chapter のみ。"
@@ -456,20 +484,24 @@ async function checkChapterNonChapterMarker(
 async function checkOrphanVideoMember(
   db: AnyDb,
 ): Promise<HealthCheckResult> {
-  const rows = await db
-    .select({ id: sql<string>`vm.id`, video_id: sql<string>`vm.video_id` })
-    .from(sql`video_members AS vm`)
-    .where(
-      sql`NOT EXISTS (SELECT 1 FROM videos v WHERE v.id = vm.video_id)`,
-    )
-    .limit(10);
-  const count = rows.length;
+  const [countRows, sampleRows] = await Promise.all([
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(sql`video_members AS vm`)
+      .where(sql`NOT EXISTS (SELECT 1 FROM videos v WHERE v.id = vm.video_id)`),
+    db
+      .select({ id: sql<string>`vm.id`, video_id: sql<string>`vm.video_id` })
+      .from(sql`video_members AS vm`)
+      .where(sql`NOT EXISTS (SELECT 1 FROM videos v WHERE v.id = vm.video_id)`)
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
   return {
     id: "orphan_video_member",
     label: "video_members.video_id に対応する videos が無い (orphan)",
     status: count === 0 ? "ok" : "warn",
     count,
-    samples: rows.slice(0, 5).map((r) => `vm:${r.id} video:${r.video_id}`),
+    samples: sampleRows.slice(0, 5).map((r) => `vm:${r.id} video:${r.video_id}`),
     note: count > 0 ? "video 削除時に video_members を残しています。" : undefined,
   };
 }

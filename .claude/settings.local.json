@@ -5,7 +5,14 @@
       "Bash(timeout 180 npx next build)",
       "Bash(powershell -NoProfile -Command \"Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'\")",
       "Bash(mkdir -p c:/Users/beeyu/Documents/GitHub/flamenode/app/\\\\\\(admin\\\\\\)/admin/videos/\\\\[id\\\\])",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(node --test src/lib/utils/eventStatus.test.mjs)",
+      "PowerShell(Get-Process *)",
+      "Bash(grep 0012\\\\\\\\\\\\|0013)",
+      "Bash(npx wrangler *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\beeyu\\Documents\\GitHub\\flamenode\\app\\(admin)\\admin\\videos"

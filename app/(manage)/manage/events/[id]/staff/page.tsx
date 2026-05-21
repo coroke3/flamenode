@@ -127,8 +127,8 @@ export default async function ManageEventStaffPage({
               </td>
             </tr>
           ) : (
-            staff.map((s) => (
-              <tr key={s.x_user_id}>
+            staff.map((s, index) => (
+              <tr key={`${s.x_user_id}-staff-${index}`}>
                 <td>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     {s.icon_url ? (

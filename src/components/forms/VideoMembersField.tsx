@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Icon } from "@/components/ui/Icon";
 import { normalizeXId } from "@/lib/utils/xid";
+import { parseCsv } from "@/lib/utils/csv";
 
 export interface VideoMemberInput {
   name: string;
@@ -202,21 +203,29 @@ export function VideoMembersField({
     const text = e.clipboardData.getData("text");
     if (!text || !/[\n,]/.test(text)) return;
     e.preventDefault();
-    const parsed = text
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line): VideoMemberInput => {
-        const cols = line.split(/,|\t/).map((c) => c.trim());
+    let rowsRaw = parseCsv(text);
+    if (rowsRaw.length === 0) return;
+    // 1行目がヘッダー (name/x_user_id を含む) ならスキップ
+    const firstLower = rowsRaw[0]!.map((c) => c.trim().toLowerCase());
+    if (
+      firstLower.includes("name") ||
+      firstLower.includes("x_user_id") ||
+      firstLower.includes("xid")
+    ) {
+      rowsRaw = rowsRaw.slice(1);
+    }
+    const parsed = rowsRaw
+      .map((cols): VideoMemberInput => {
         const xid = normalizeXId(cols[1] ?? "");
         const hit = xid ? suggestionsById.get(xid) : null;
         return {
-          name: cols[0] || hit?.name || "",
+          name: (cols[0] ?? "").trim() || hit?.name || "",
           x_user_id: xid,
-          role: cols[2] ?? "",
-          comment: cols[3] ?? "",
+          role: (cols[2] ?? "").trim(),
+          comment: (cols[3] ?? "").trim(),
         };
-      });
+      })
+      .filter((r) => r.name || r.x_user_id);
     if (parsed.length > 0) {
       setRows((prev) => [
         ...prev.filter((r) => r.name || r.x_user_id),

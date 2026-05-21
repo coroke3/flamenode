@@ -6,8 +6,14 @@ import { eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { canEditVideo } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
-import { historyLogs, videoChapters, videos } from "@/lib/db/schema";
+import {
+  historyLogs,
+  videoChapters,
+  videoMembers,
+  videos,
+} from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
+import { parseCsv } from "@/lib/utils/csv";
 import { enqueueNotification } from "@/lib/notifications/enqueue";
 
 export interface ChapterActionResult {
@@ -276,4 +282,226 @@ export async function deleteChapter(
   )[0];
   revalidatePath(`/${target?.youtube_video_id ?? existing.video_id}`);
   return { ok: true };
+}
+
+/**
+ * CSV からチャプターを一括投稿する。
+ *
+ * 入力 CSV のフォーマット (ヘッダー任意):
+ *   `time,label,note,visibility,member_name_or_xid`
+ *   - `time`: `mm:ss` または `hh:mm:ss` または秒数 (例: 90, 1:30, 0:01:30)
+ *   - `label`: 必須。1〜120 文字。
+ *   - `note`: 任意。0〜1000 文字。
+ *   - `visibility`: 任意 (public / private)。省略時は public。
+ *   - `member_name_or_xid`: 任意。マッチした video_members.id を video_member_id に紐付け。
+ *      "name" カラムが分離している場合に備え、name / x_user_id どちらでも一致探索する。
+ *
+ * 権限:
+ *   - 動画オーナー (canEditVideo, requiredKey = video.chapter_admin) または admin のみ。
+ *   - フロントだけの判定にはしない (CLAUDE.md 方針)。
+ *   - 主体 X ID は active_x_user_id を使う (writeGuard で approved 必須)。
+ */
+const bulkSchema = z.object({
+  video_id: z.string().trim().min(1),
+  csv: z.string().min(1).max(64 * 1024),
+});
+
+export interface BulkChapterActionResult extends ChapterActionResult {
+  inserted?: number;
+  skipped?: number;
+  errors?: string[];
+}
+
+export async function createChaptersBulk(
+  formData: FormData,
+): Promise<BulkChapterActionResult> {
+  const guard = await writeGuard({
+    requireApprovedActiveXId: true,
+    feature: "chapter_comment",
+  });
+  if (!guard.ok) return { ok: false, message: guard.message };
+  const sUser = guard.user;
+  const activeX = guard.activeXId;
+  if (!activeX) {
+    return { ok: false, message: "X ID を選択してから操作してください。" };
+  }
+
+  const db = getDatabase();
+  if (!db) return { ok: false, message: "DB に接続できません。" };
+
+  const parsed = bulkSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: parsed.error.issues[0]?.message ?? "入力エラー",
+    };
+  }
+  const { video_id, csv } = parsed.data;
+
+  const target = (
+    await db.select().from(videos).where(eq(videos.id, video_id)).limit(1)
+  )[0];
+  if (!target) return { ok: false, message: "動画が見つかりません。" };
+
+  // 編集権限: 動画オーナー or admin。バルクは個別投稿よりも強い権限を要求。
+  const canMod =
+    sUser.role === "admin" ||
+    (await canEditVideo({
+      db,
+      user: { id: sUser.id, role: sUser.role ?? null },
+      video: target,
+      requiredKey: "video.chapter_admin",
+    }));
+  if (!canMod) {
+    return { ok: false, message: "この動画のチャプター一括登録権限がありません。" };
+  }
+  if (target.status !== "public" && target.status !== "unlisted") {
+    return {
+      ok: false,
+      message: "この動画にはチャプターコメントを投稿できません。",
+    };
+  }
+
+  // メンバー解決マップ
+  const members = await db
+    .select({
+      id: videoMembers.id,
+      x_user_id: videoMembers.x_user_id,
+      name: videoMembers.name,
+    })
+    .from(videoMembers)
+    .where(eq(videoMembers.video_id, video_id));
+  const memberByXid = new Map<string, string>();
+  const memberByName = new Map<string, string>();
+  for (const m of members) {
+    if (m.x_user_id) memberByXid.set(m.x_user_id.toLowerCase(), m.id);
+    if (m.name) memberByName.set(m.name.trim().toLowerCase(), m.id);
+  }
+
+  let rowsRaw = parseCsv(csv);
+  if (rowsRaw.length === 0) {
+    return { ok: false, message: "CSV にデータがありません。" };
+  }
+  // ヘッダー行スキップ (1列目が time/label でなく、name/label/time キーワードを含む場合)
+  const firstLower = rowsRaw[0]!.map((c) => c.trim().toLowerCase());
+  if (
+    firstLower.includes("time") ||
+    firstLower.includes("label") ||
+    firstLower.includes("visibility")
+  ) {
+    rowsRaw = rowsRaw.slice(1);
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const errors: string[] = [];
+  let inserted = 0;
+  let skipped = 0;
+
+  for (let i = 0; i < rowsRaw.length; i++) {
+    const cols = rowsRaw[i]!;
+    const rawTime = (cols[0] ?? "").trim();
+    const rawLabel = (cols[1] ?? "").trim();
+    const rawNote = (cols[2] ?? "").trim();
+    const rawVisibility = (cols[3] ?? "").trim().toLowerCase();
+    const rawMember = (cols[4] ?? "").trim();
+
+    if (!rawTime && !rawLabel) {
+      skipped += 1;
+      continue;
+    }
+    const time = parseChapterTime(rawTime);
+    if (time === null) {
+      errors.push(`行 ${i + 1}: 時刻の形式が不正です ("${rawTime}")`);
+      skipped += 1;
+      continue;
+    }
+    if (rawLabel.length === 0 || rawLabel.length > 120) {
+      errors.push(`行 ${i + 1}: ラベルが必須 (1〜120文字)`);
+      skipped += 1;
+      continue;
+    }
+    if (rawNote.length > 1000) {
+      errors.push(`行 ${i + 1}: コメントが 1000 文字を超えています`);
+      skipped += 1;
+      continue;
+    }
+    const visibility: "public" | "private" =
+      rawVisibility === "private" ? "private" : "public";
+    let videoMemberId: string | null = null;
+    if (rawMember) {
+      const normalized = rawMember.replace(/^@+/, "").toLowerCase();
+      videoMemberId =
+        memberByXid.get(normalized) ?? memberByName.get(normalized) ?? null;
+    }
+
+    const id = generateId("ch");
+    await db.insert(videoChapters).values({
+      id,
+      video_id,
+      x_user_id: activeX,
+      video_member_id: videoMemberId,
+      chapter_time: time,
+      chapter_label: rawLabel,
+      note: rawNote || null,
+      visibility,
+      marker_kind: "chapter",
+      show_on_player_bar: 1,
+      created_at: now,
+      updated_at: now,
+    });
+    inserted += 1;
+  }
+
+  if (inserted > 0) {
+    await db.insert(historyLogs).values({
+      table_name: "video_chapters",
+      record_id: video_id,
+      action: "CREATE",
+      after_data: JSON.stringify({
+        bulk: true,
+        video_id,
+        inserted,
+        skipped,
+      }),
+      operator_discord_id: sUser.id,
+      retention_class: "normal",
+      created_at: now,
+    });
+  }
+
+  revalidatePath(`/${target.youtube_video_id ?? video_id}`);
+  return {
+    ok: inserted > 0,
+    message:
+      inserted > 0
+        ? `${inserted} 件追加 / ${skipped} 件スキップ`
+        : "登録できる行がありませんでした。",
+    inserted,
+    skipped,
+    errors,
+  };
+}
+
+/**
+ * "1:30" / "0:01:30" / "90" などのチャプター時刻文字列を秒数に変換する。
+ * 不正なら null。負数や 24h 超は拒否する。
+ */
+function parseChapterTime(raw: string): number | null {
+  const s = raw.trim();
+  if (!s) return null;
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const n = Number(s);
+    return n >= 0 && n <= 60 * 60 * 24 ? n : null;
+  }
+  const parts = s.split(":").map((p) => p.trim());
+  if (parts.length < 2 || parts.length > 3) return null;
+  if (!parts.every((p) => /^\d+(\.\d+)?$/.test(p))) return null;
+  const nums = parts.map(Number);
+  let total = 0;
+  if (nums.length === 2) {
+    total = nums[0]! * 60 + nums[1]!;
+  } else {
+    total = nums[0]! * 3600 + nums[1]! * 60 + nums[2]!;
+  }
+  return total >= 0 && total <= 60 * 60 * 24 ? total : null;
 }

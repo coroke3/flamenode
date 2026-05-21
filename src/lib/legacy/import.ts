@@ -169,11 +169,12 @@ export async function analyzeLegacyPayload(
 
   if (db) {
     const eventIds = [
-      ...new Set(
-        normalizedEvents
+      ...new Set([
+        ...normalizedEvents
           .map((e) => e.event?.id)
           .filter((s): s is string => !!s),
-      ),
+        ...normalizedVideos.flatMap((v) => v.eventIds),
+      ]),
     ];
     const videoIds = [
       ...new Set(
@@ -440,6 +441,7 @@ export async function applyLegacyImport(
       if (exists) {
         if (strategyVideos === "skip") {
           counts.videos.skip += 1;
+          continue;
         } else {
           const patch: Partial<typeof vi> & { updated_at?: number } = {
             ...vi,
@@ -483,13 +485,16 @@ export async function applyLegacyImport(
         await insertVideoMembers(db, vi.id, v.members);
       }
 
-      // video_events (m:n)
-      if (v.eventId) {
+      // video_events (m:n): legacy eventid may contain multiple comma-separated ids.
+      // The first id is stored as videos.primary_event_id; all ids are linked here.
+      if (exists && strategyVideos === "update") {
+        await db.delete(videoEvents).where(eq(videoEvents.video_id, vi.id));
+      }
+      for (const eventId of v.eventIds) {
         await db
           .insert(videoEvents)
-          .values({ video_id: vi.id, event_id: v.eventId })
+          .values({ video_id: vi.id, event_id: eventId })
           .onConflictDoNothing();
-        counts.members += 0; // noop, but signals
       }
       counts.members += v.members.length;
     } catch (err) {
@@ -615,6 +620,7 @@ async function insertVideoMembers(
         video_id: videoId,
         x_user_id: m.x_user_id,
         name: m.name,
+        name_for_sort: m.name.toLowerCase(),
         role: m.role,
         order_index: m.order_index,
       });

@@ -15,6 +15,12 @@ import { resolveMissingIcons } from "@/lib/db/iconResolution";
 import { normalizeXId } from "@/lib/utils/xid";
 import { updateGlobalEditableFields } from "@/lib/actions/permissions-admin";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { Pagination } from "@/components/ui/Pagination";
+import { FilterChips, type FilterChip } from "@/components/ui/FilterChips";
+import { clampPaging, escapeLike, totalPagesFor } from "@/lib/utils/sql";
+import { inArray } from "drizzle-orm";
+
+const USERS_PAGE_SIZE = 50;
 
 export const metadata: Metadata = { title: "ユーザー管理" };
 export const dynamic = "force-dynamic";
@@ -63,12 +69,28 @@ type PermissionSettings = {
 export default async function AdminUsersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; status?: string; view?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    status?: string;
+    view?: string;
+    page?: string;
+  }>;
 }): Promise<React.ReactElement> {
-  const { q = "", status = "", view = "discord" } = await searchParams;
+  const {
+    q = "",
+    status = "",
+    view = "discord",
+    page: pageRaw = "1",
+  } = await searchParams;
   const activeView = ["discord", "xid", "links", "permissions"].includes(view)
     ? view
     : "discord";
+  const { page, pageSize, offset } = clampPaging({
+    page: pageRaw,
+    pageSize: USERS_PAGE_SIZE,
+    defaultPageSize: USERS_PAGE_SIZE,
+    maxPageSize: USERS_PAGE_SIZE,
+  });
   const db = getDatabase();
 
   let userRows: AdminUserRow[] = [];
@@ -79,13 +101,18 @@ export default async function AdminUsersPage({
     default_editable_fields: null,
     upcoming_editable_fields: null,
   };
+  let totalUsers = 0;
+  let totalXUsers = 0;
+  let totalLinks = 0;
   if (db) {
     try {
       const rawQuery = q.trim();
-      const term = `%${rawQuery}%`;
-      const lowerTerm = `%${rawQuery.toLowerCase()}%`;
+      const escapedRaw = escapeLike(rawQuery);
+      const term = `%${escapedRaw}%`;
+      const lowerTerm = `%${escapedRaw.toLowerCase()}%`;
       const normalizedXQuery = normalizeXId(rawQuery);
-      const xTerm = `%${(normalizedXQuery || rawQuery).toLowerCase()}%`;
+      const escapedX = escapeLike(normalizedXQuery || rawQuery);
+      const xTerm = `%${escapedX.toLowerCase()}%`;
       const queryFilter = q
         ? or(
             like(sql<string>`lower(${usersTable.name})`, lowerTerm),
@@ -113,6 +140,11 @@ export default async function AdminUsersPage({
         queryFilter && statusFilter
           ? and(queryFilter, statusFilter)
           : (queryFilter ?? statusFilter);
+      const userOffset = activeView === "discord" ? offset : 0;
+      const userLimit =
+        activeView === "discord" || activeView === "permissions"
+          ? pageSize
+          : USERS_PAGE_SIZE;
       userRows = await db
         .select({
           id: usersTable.id,
@@ -133,7 +165,22 @@ export default async function AdminUsersPage({
         )
         .where(where)
         .orderBy(desc(usersTable.created_at))
-        .limit(80);
+        .limit(userLimit)
+        .offset(userOffset);
+      if (activeView === "discord" || activeView === "permissions") {
+        const countRow = (
+          await db
+            .select({ c: sql<number>`COUNT(DISTINCT ${usersTable.id})` })
+            .from(usersTable)
+            .leftJoin(
+              xUsersTable,
+              sql`lower(${xUsersTable.id}) = lower(${usersTable.active_x_user_id})`,
+            )
+            .where(where)
+            .limit(1)
+        )[0];
+        totalUsers = Number(countRow?.c ?? 0);
+      }
       const userRowsWithIcons = await resolveMissingIcons(
         db,
         userRows.map((u) => ({
@@ -155,6 +202,8 @@ export default async function AdminUsersPage({
             eq(xUsersTable.linked_discord_user_id, q),
           )
         : undefined;
+      const xLimit = activeView === "xid" ? pageSize : USERS_PAGE_SIZE * 2;
+      const xOffset = activeView === "xid" ? offset : 0;
       xRows = await db
         .select({
           id: xUsersTable.id,
@@ -170,7 +219,19 @@ export default async function AdminUsersPage({
         .leftJoin(usersTable, eq(usersTable.id, xUsersTable.linked_discord_user_id))
         .where(xFilter)
         .orderBy(xUsersTable.id)
-        .limit(120);
+        .limit(xLimit)
+        .offset(xOffset);
+      if (activeView === "xid") {
+        const countRow = (
+          await db
+            .select({ c: sql<number>`COUNT(*)` })
+            .from(xUsersTable)
+            .leftJoin(usersTable, eq(usersTable.id, xUsersTable.linked_discord_user_id))
+            .where(xFilter)
+            .limit(1)
+        )[0];
+        totalXUsers = Number(countRow?.c ?? 0);
+      }
       const xRowsWithIcons = await resolveMissingIcons(
         db,
         xRows.map((x) => ({
@@ -188,6 +249,8 @@ export default async function AdminUsersPage({
             like(sql<string>`lower(${usersTable.name})`, lowerTerm),
           )
         : undefined;
+      const linkLimit = activeView === "links" ? pageSize : USERS_PAGE_SIZE * 2;
+      const linkOffset = activeView === "links" ? offset : 0;
       linkRows = await db
         .select({
           id: xAccountLinkRequests.id,
@@ -204,25 +267,50 @@ export default async function AdminUsersPage({
         .leftJoin(usersTable, eq(usersTable.id, xAccountLinkRequests.discord_user_id))
         .where(requestFilter)
         .orderBy(desc(xAccountLinkRequests.requested_at))
-        .limit(120);
+        .limit(linkLimit)
+        .offset(linkOffset);
+      if (activeView === "links") {
+        const countRow = (
+          await db
+            .select({ c: sql<number>`COUNT(*)` })
+            .from(xAccountLinkRequests)
+            .leftJoin(usersTable, eq(usersTable.id, xAccountLinkRequests.discord_user_id))
+            .where(requestFilter)
+            .limit(1)
+        )[0];
+        totalLinks = Number(countRow?.c ?? 0);
+      }
 
-      approvedLinkRows = await db
-        .select({
-          id: xAccountLinkRequests.id,
-          discord_user_id: xAccountLinkRequests.discord_user_id,
-          discord_name: usersTable.name,
-          discord_image: usersTable.image,
-          requested_x_id: xAccountLinkRequests.requested_x_id,
-          link_type: xAccountLinkRequests.link_type,
-          target_x_user_id: xAccountLinkRequests.target_x_user_id,
-          status: xAccountLinkRequests.status,
-          requested_at: xAccountLinkRequests.requested_at,
-        })
-        .from(xAccountLinkRequests)
-        .leftJoin(usersTable, eq(usersTable.id, xAccountLinkRequests.discord_user_id))
-        .where(eq(xAccountLinkRequests.status, "approved"))
-        .orderBy(desc(xAccountLinkRequests.requested_at))
-        .limit(500);
+      // approvedLinkRows は「現在の Discord ビューに出ているユーザー」だけに絞る。
+      // 旧コードの limit(500) 全件取りをやめ、ページ上に必要な分のみ JOIN 経由で取得。
+      const visibleDiscordIds = userRows.map((u) => u.id);
+      approvedLinkRows =
+        visibleDiscordIds.length > 0
+          ? await db
+              .select({
+                id: xAccountLinkRequests.id,
+                discord_user_id: xAccountLinkRequests.discord_user_id,
+                discord_name: usersTable.name,
+                discord_image: usersTable.image,
+                requested_x_id: xAccountLinkRequests.requested_x_id,
+                link_type: xAccountLinkRequests.link_type,
+                target_x_user_id: xAccountLinkRequests.target_x_user_id,
+                status: xAccountLinkRequests.status,
+                requested_at: xAccountLinkRequests.requested_at,
+              })
+              .from(xAccountLinkRequests)
+              .leftJoin(
+                usersTable,
+                eq(usersTable.id, xAccountLinkRequests.discord_user_id),
+              )
+              .where(
+                and(
+                  eq(xAccountLinkRequests.status, "approved"),
+                  inArray(xAccountLinkRequests.discord_user_id, visibleDiscordIds),
+                )!,
+              )
+              .orderBy(desc(xAccountLinkRequests.requested_at))
+          : [];
 
       permissionSettings =
         (
@@ -302,6 +390,58 @@ export default async function AdminUsersPage({
           検索
         </button>
       </form>
+
+      {(() => {
+        const buildHref = (p: number) => {
+          const sp = new URLSearchParams();
+          sp.set("view", activeView);
+          if (q) sp.set("q", q);
+          if (status) sp.set("status", status);
+          sp.set("page", String(p));
+          return `/admin/users?${sp.toString()}`;
+        };
+        const counts: Record<string, number> = {
+          discord: totalUsers,
+          xid: totalXUsers,
+          links: totalLinks,
+          permissions: totalUsers,
+        };
+        const total = counts[activeView] ?? 0;
+        const totalPages = totalPagesFor(total, pageSize);
+
+        const hrefWithout = (drop: "q" | "status") => {
+          const sp = new URLSearchParams();
+          sp.set("view", activeView);
+          if (q && drop !== "q") sp.set("q", q);
+          if (status && drop !== "status") sp.set("status", status);
+          return `/admin/users?${sp.toString()}`;
+        };
+        const chips: FilterChip[] = [];
+        if (q)
+          chips.push({ label: `検索: ${q}`, removeHref: hrefWithout("q") });
+        if (status)
+          chips.push({
+            label: `状態: ${status}`,
+            removeHref: hrefWithout("status"),
+          });
+
+        return (
+          <>
+            <FilterChips
+              chips={chips}
+              clearAllHref={`/admin/users?view=${activeView}`}
+            />
+            <Pagination
+              currentPage={page}
+              totalPages={totalPages}
+              total={total}
+              pageSize={pageSize}
+              buildHref={buildHref}
+              unitLabel="件"
+            />
+          </>
+        );
+      })()}
 
       {activeView === "xid" ? (
         <XIdTable rows={xRows} links={approvedLinkRows} />

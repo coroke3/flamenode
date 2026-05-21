@@ -1,3 +1,4 @@
+import { normalizeHttpUrl } from "@/lib/utils/url";
 import { extractYoutubeId } from "@/lib/youtube/id";
 
 const MOJIBAKE_TOKENS = ["�", "縺", "繧", "荳", "譁", "邵", "陞", "陷", "闕", "隴"];
@@ -20,7 +21,29 @@ export function normalizeIconUrl(
     u.match(/drive\.google\.com\/file\/d\/([A-Za-z0-9_-]+)/) ||
     u.match(/drive\.google\.com\/thumbnail\?id=([A-Za-z0-9_-]+)/);
   if (m?.[1]) return `https://lh3.googleusercontent.com/d/${m[1]}`;
-  return u;
+  if (u.startsWith("/api/media/")) return u;
+  return normalizeHttpUrl(u, { maxLength: 1000 });
+}
+
+export function cleanLegacyString(
+  value: unknown,
+  options: { maxLength?: number } = {},
+): string | null {
+  if (value == null) return null;
+  const cleaned = String(value)
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, "")
+    .trim();
+  if (!cleaned) return null;
+  const maxLength = options.maxLength;
+  if (maxLength && cleaned.length > maxLength) return cleaned.slice(0, maxLength);
+  return cleaned;
+}
+
+export function normalizeLegacyUrl(
+  value: string | null | undefined,
+): string | null {
+  return normalizeHttpUrl(cleanLegacyString(value), { maxLength: 1000 });
 }
 
 export function normalizeXId(raw: string | null | undefined): string | null {
@@ -33,11 +56,33 @@ export function normalizeXId(raw: string | null | undefined): string | null {
 }
 
 export function splitCsvString(s: string | null | undefined): string[] {
+  return splitCsvStringPreserveEmpty(s).filter(Boolean);
+}
+
+export function splitCsvStringPreserveEmpty(
+  s: string | null | undefined,
+): string[] {
   if (!s) return [];
-  return String(s)
+  const parts = String(s)
     .split(/[,\u3001]/)
-    .map((x) => x.trim())
-    .filter(Boolean);
+    .map((x) => x.trim());
+  while (parts.length > 0 && parts[parts.length - 1] === "") {
+    parts.pop();
+  }
+  return parts;
+}
+
+export function splitLegacyEventIds(
+  raw: string | null | undefined,
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const id of splitCsvString(raw).map((s) => s.replace(/^@+/, ""))) {
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
 }
 
 export function toUnixSec(
@@ -175,7 +220,7 @@ export function normalizeEventInfo(
     return { ok: false, warnings: ["eventid が空です。"], editors: [], xUsers: [] };
   }
 
-  const title = (input.eventname ?? "").toString().trim();
+  const title = cleanLegacyString(input.eventname) ?? "";
   if (!title) warnings.push("eventname が空です。");
   if (looksLikeMojibake(title)) warnings.push("eventname に文字化けの疑いがあります。");
 
@@ -186,9 +231,9 @@ export function normalizeEventInfo(
     warnings.push("end を日時として解析できませんでした。");
   }
 
-  const names = splitCsvString(input.member);
-  const ids = splitCsvString(input.memberid);
-  const posts = splitCsvString(input.memberpost ?? input.menberpost);
+  const names = splitCsvStringPreserveEmpty(input.member);
+  const ids = splitCsvStringPreserveEmpty(input.memberid);
+  const posts = splitCsvStringPreserveEmpty(input.memberpost ?? input.menberpost);
   const len = Math.max(names.length, ids.length, posts.length);
 
   const editors: LegacyEventEditor[] = [];
@@ -196,9 +241,9 @@ export function normalizeEventInfo(
   let representativeId: string | null = null;
 
   for (let i = 0; i < len; i++) {
-    const name = names[i] ?? "";
+    const name = cleanLegacyString(names[i]) ?? "";
     const rawId = ids[i] ?? "";
-    const post = posts[i] ?? "";
+    const post = cleanLegacyString(posts[i]) ?? "";
     const xid = normalizeXId(rawId);
     if (!xid) {
       if (rawId) warnings.push(`memberid「${rawId}」を X ID として解析できませんでした。`);
@@ -229,7 +274,7 @@ export function normalizeEventInfo(
       id: eventid,
       title: title || eventid,
       event_type: normalizeEventType(input.type),
-      explanation: input.explanation ? String(input.explanation) : null,
+      explanation: cleanLegacyString(input.explanation),
       icon_url: normalizeIconUrl(input.icon),
       img_url: normalizeIconUrl(input.img),
       start_time: startTime,
@@ -317,6 +362,7 @@ export interface LegacyVideoResult {
   members: LegacyVideoMember[];
   xUsers: LegacyXUserRow[];
   eventId: string | null;
+  eventIds: string[];
 }
 
 export function normalizeLegacyVideo(
@@ -325,8 +371,8 @@ export function normalizeLegacyVideo(
   const warnings: string[] = [];
   const looseRow = input as Record<string, unknown>;
 
-  const title = (input.title ?? "").toString().trim();
-  const creator = (input.creator ?? "").toString().trim();
+  const title = cleanLegacyString(input.title) ?? "";
+  const creator = cleanLegacyString(input.creator) ?? "";
   const tlink = normalizeXId(input.tlink);
   if (!tlink) warnings.push(`tlink「${input.tlink ?? ""}」が空、または不正な X ID です。`);
   if (looksLikeMojibake(title)) warnings.push("title に文字化けの疑いがあります。");
@@ -342,20 +388,23 @@ export function normalizeLegacyVideo(
   const scheduled = toUnixSec(input.time ?? input.data ?? null, eventStartYear, input.time);
   const created = toUnixSec(input.timestamp ?? null);
 
-  let intro = (input.comment ?? "").toString().trim();
-  if (!intro && input.beforecomment) intro = input.beforecomment.toString();
+  let intro = cleanLegacyString(input.comment) ?? "";
+  if (!intro && input.beforecomment) intro = cleanLegacyString(input.beforecomment) ?? "";
 
   const highlightsParts = [
-    input.hitokoto?.toString().trim(),
-    input.ycomment?.toString().trim(),
+    cleanLegacyString(input.hitokoto),
+    cleanLegacyString(input.ycomment),
   ].filter((s): s is string => !!s);
   const highlights = highlightsParts.length > 0 ? highlightsParts.join("\n") : null;
 
   const customObj: Record<string, string> = {};
-  if (input.toudan) customObj.toudan = String(input.toudan);
-  if (input.othersns) customObj.othersns = String(input.othersns);
+  const toudan = cleanLegacyString(input.toudan);
+  const otherSns = normalizeLegacyUrl(input.othersns) ?? cleanLegacyString(input.othersns);
+  if (toudan) customObj.toudan = toudan;
+  if (otherSns) customObj.othersns = otherSns;
   if ("" in looseRow && looseRow[""] != null && String(looseRow[""]).trim() !== "") {
-    customObj.legacy_export_meta = String(looseRow[""]);
+    const meta = cleanLegacyString(looseRow[""]);
+    if (meta) customObj.legacy_export_meta = meta;
   }
   const custom_answers = Object.keys(customObj).length > 0 ? JSON.stringify(customObj) : null;
 
@@ -365,24 +414,28 @@ export function normalizeLegacyVideo(
     type1: input.type1,
   });
 
-  const names = splitCsvString(input.member);
-  const ids = splitCsvString(input.memberid);
+  const names = splitCsvStringPreserveEmpty(input.member);
+  const ids = splitCsvStringPreserveEmpty(input.memberid);
   const memberCount = Math.max(names.length, ids.length);
   const members: LegacyVideoMember[] = [];
   const xUsersMap = new Map<string, LegacyXUserRow>();
-  const ychTrim = input.ychlink ? String(input.ychlink).trim() : "";
+  const youtubeChannelUrl = normalizeLegacyUrl(input.ychlink);
 
   if (tlink) {
     xUsersMap.set(tlink, {
       id: tlink,
       x_name: creator || `@${tlink}`,
-      youtube_channel_url: ychTrim || null,
+      youtube_channel_url: youtubeChannelUrl,
     });
   }
 
   for (let i = 0; i < memberCount; i++) {
-    const name = (names[i] ?? "").trim();
-    const xid = normalizeXId(ids[i]);
+    const name = cleanLegacyString(names[i]) ?? "";
+    const rawId = (ids[i] ?? "").trim();
+    const xid = normalizeXId(rawId);
+    if (rawId && !xid) {
+      warnings.push(`memberid「${rawId}」を X ID として解釈できませんでした。`);
+    }
     if (!name && !xid) continue;
     members.push({
       x_user_id: xid,
@@ -404,11 +457,15 @@ export function normalizeLegacyVideo(
   }
 
   if (!tlink && !title) {
-    return { ok: false, warnings, members: [], xUsers: [], eventId: null };
+    return { ok: false, warnings, members: [], xUsers: [], eventId: null, eventIds: [] };
   }
 
   const id = youtubeId ? `legacy_${youtubeId}` : `legacy_${randomId()}`;
-  const eventId = (input.eventid ?? "").toString().trim() || null;
+  const eventIds = splitLegacyEventIds(input.eventid);
+  const eventId = eventIds[0] ?? null;
+  if ((input.eventid ?? "").toString().trim() && eventIds.length === 0) {
+    warnings.push("eventid をイベントIDとして解釈できませんでした。");
+  }
 
   return {
     ok: true,
@@ -417,22 +474,22 @@ export function normalizeLegacyVideo(
       id,
       title: title || `(無題) ${youtubeId ?? id}`,
       display_name: creator || (tlink ? `@${tlink}` : "anonymous"),
-      display_name_yomi: input.yomi ? String(input.yomi) : null,
+      display_name_yomi: cleanLegacyString(input.yomi),
       contact_x_id: tlink ?? "anonymous",
       creator_id: tlink,
       icon_url: normalizeIconUrl(input.icon),
       youtube_video_id: youtubeId,
-      music: input.music ? String(input.music) : null,
-      credit: input.credit ? String(input.credit) : null,
-      music_reference_url: input.ymulink ? String(input.ymulink) : null,
+      music: cleanLegacyString(input.music),
+      credit: cleanLegacyString(input.credit),
+      music_reference_url: normalizeLegacyUrl(input.ymulink),
       intro_comment: intro || null,
-      closing_comment: input.aftercomment ? String(input.aftercomment) : null,
-      used_software: input.soft ? String(input.soft) : null,
+      closing_comment: cleanLegacyString(input.aftercomment),
+      used_software: cleanLegacyString(input.soft),
       highlights,
       custom_answers,
-      stage_permission: input.righttype ? String(input.righttype) : null,
+      stage_permission: cleanLegacyString(input.righttype),
       submission_type,
-      declared_experience: input.movieyear ? String(input.movieyear) : null,
+      declared_experience: cleanLegacyString(input.movieyear),
       primary_event_id: eventId,
       scheduling_type: "manual",
       scheduled_time: scheduled,
@@ -442,6 +499,7 @@ export function normalizeLegacyVideo(
     members,
     xUsers: Array.from(xUsersMap.values()),
     eventId,
+    eventIds,
   };
 }
 

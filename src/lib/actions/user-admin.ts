@@ -150,6 +150,13 @@ export async function setUserNotifications(
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
 
+  const target = (
+    await db.select().from(users).where(eq(users.id, user_id)).limit(1)
+  )[0];
+  if (!target) {
+    return { ok: false, message: "対象ユーザーが見つかりません。" };
+  }
+
   const now = Math.floor(Date.now() / 1000);
   await db
     .update(users)
@@ -160,6 +167,7 @@ export async function setUserNotifications(
     table_name: "user",
     record_id: user_id,
     action: "UPDATE",
+    before_data: JSON.stringify({ is_notification_enabled: target.is_notification_enabled }),
     after_data: JSON.stringify({ is_notification_enabled }),
     operator_discord_id: guard.userId,
     retention_class: "normal",

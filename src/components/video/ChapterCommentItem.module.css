@@ -1,0 +1,115 @@
+.item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  transition: background-color 0.15s ease;
+  width: 100%;
+  text-align: left;
+}
+
+.item:last-child {
+  border-bottom: 0;
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+.clickable:hover {
+  background-color: var(--accent-primary-soft);
+}
+
+.clickable:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: -2px;
+}
+
+.outOfRange {
+  opacity: 0.55;
+}
+
+.timeBadge {
+  flex-shrink: 0;
+  margin-top: 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--event-accent, var(--accent-primary));
+  background-color: var(--accent-primary-soft);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  border-color: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 35%, transparent);
+}
+
+.body {
+  flex: 1;
+  min-width: 0;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.note {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+}
+
+.authorRow {
+  margin-top: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.authorIcon {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  object-fit: cover;
+  background-color: var(--bg-elevated);
+}
+
+.authorIconFallback {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background-color: var(--bg-elevated);
+  display: inline-grid;
+  place-items: center;
+  color: var(--text-muted);
+}
+
+.authorName {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+}

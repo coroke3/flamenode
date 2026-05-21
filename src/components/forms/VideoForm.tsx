@@ -103,6 +103,18 @@ interface VideoFormProps {
    * デフォルト true。slot モードでは slot.event_id は固定で含まれる。
    */
   canEditEvents?: boolean;
+  /**
+   * 提出主体 X ID を変更できるか。デフォルト false。
+   * true でも UI は「解除チェックボックス → <select>」の二段階で、
+   * 解除した時のみ hidden `allow_submitter_change=1` が送信される。
+   * サーバー側でも `role === "admin"` を再検証するため、UI 操作だけでは突破できない。
+   */
+  canChangeSubmitter?: boolean;
+  /**
+   * 編集モード時のクライアント側 privilegeMode。サーバー側 hidden として
+   * `edit_privilege_mode` で送信される。サーバーは別途 URL/セッションから再検証する。
+   */
+  editPrivilegeMode?: "normal" | "admin" | "event";
 }
 
 /** section key が disabledSections に含まれているか確認する小関数。 */
@@ -145,6 +157,8 @@ export function VideoForm({
   iconCandidates = [],
   eventOptions = [],
   canEditEvents = true,
+  canChangeSubmitter = false,
+  editPrivilegeMode,
 }: VideoFormProps): React.ReactElement {
   const router = useRouter();
   const [youtubeUrl, setYoutubeUrl] = React.useState(initial.youtube_url ?? "");
@@ -273,6 +287,13 @@ export function VideoForm({
       {slotId ? <input type="hidden" name="slot_id" value={slotId} /> : null}
       {videoId ? <input type="hidden" name="video_id" value={videoId} /> : null}
       <input type="hidden" name="mode" value={mode} />
+      {mode === "edit" && editPrivilegeMode ? (
+        <input
+          type="hidden"
+          name="edit_privilege_mode"
+          value={editPrivilegeMode}
+        />
+      ) : null}
       {softwareSuggestions.length > 0 ? (
         <datalist id="used-software-suggestions">
           {softwareSuggestions.map((name, index) => (
@@ -332,47 +353,19 @@ export function VideoForm({
                 </div>
               )
             ) : mode === "edit" ? (
-              // edit モード: admin は選択可、一般ユーザーは既存値を読み取り専用で表示。
-              hasSelectableXIds ? (
-                <>
-                  <select
-                    id="contact_x_id"
-                    name="contact_x_id"
-                    className="fn-select"
-                    defaultValue={selectedDefault}
-                    required
-                    disabled={fieldDisabled("submitter.contact_x_id")}
-                  >
-                    {xIdOptions.map((opt, index) => (
-                      <option
-                        key={`${opt.id}-xid-option-${index}`}
-                        value={normalizeXId(opt.id)}
-                      >
-                        @{opt.id} ({opt.x_name})
-                      </option>
-                    ))}
-                  </select>
-                  <p className={styles.help} style={{ marginTop: 4 }}>
-                    提出主体を変更できるのは管理者のみです。サーバー側でも検証されます。
-                  </p>
-                </>
-              ) : normalizedInitialXId ? (
-                <input
-                  id="contact_x_id"
-                  name="contact_x_id"
-                  type="text"
-                  defaultValue={normalizedInitialXId}
-                  className="fn-input"
-                  readOnly
-                  aria-readonly="true"
-                  disabled={isSectionDisabled(disabledSections, "submitter")}
-                  style={{ opacity: 0.75, cursor: "default" }}
-                />
-              ) : (
-                <div className="fn-muted fn-text-sm">
-                  提出主体 X ID が設定されていません。
-                </div>
-              )
+              // edit モード: 既定では readOnly で表示し、admin が明示的に解錠した場合のみ
+              // <select> を出して提出主体 X ID を変更できる。
+              // 解錠時は allow_submitter_change=1 を hidden で送り、サーバー側でも
+              // role==="admin" と二重ゲートで検証する。
+              <EditSubmitterField
+                initialXId={normalizedInitialXId}
+                xIdOptions={xIdOptions}
+                hasSelectableXIds={hasSelectableXIds}
+                selectedDefault={selectedDefault}
+                disabled={fieldDisabled("submitter.contact_x_id")}
+                sectionDisabled={isSectionDisabled(disabledSections, "submitter")}
+                canChangeSubmitter={canChangeSubmitter}
+              />
             ) : null}
           </div>
           <div className={cx(styles.field, styles.editableField)}>
@@ -895,5 +888,136 @@ export function VideoForm({
         </button>
       </div>
     </form>
+  );
+}
+
+/**
+ * 編集モードの提出主体 X ID フィールド。
+ *
+ * 既定状態:
+ *   - 既存の creator_id / contact_x_id を **readOnly** で表示。
+ *   - 一切送信されない (hidden name="contact_x_id" を出さない) わけにはいかない
+ *     ので、視覚的に readOnly な input を出しつつサーバー側が現在値を維持する。
+ *
+ * 解錠 (admin がチェックボックスを ON):
+ *   - <select> に切り替えて xIdOptions から選択させる。
+ *   - hidden `allow_submitter_change=1` を一緒に送る。サーバー側は
+ *     `role === "admin"` と二重ゲートで検証するので、UI 操作だけでは突破できない。
+ *
+ * 操作可能な admin がいないケース (xIdOptions が空) では unlock UI 自体を出さない。
+ */
+function EditSubmitterField({
+  initialXId,
+  xIdOptions,
+  hasSelectableXIds,
+  selectedDefault,
+  disabled,
+  sectionDisabled,
+  canChangeSubmitter,
+}: {
+  initialXId: string;
+  xIdOptions: readonly XIdOption[];
+  hasSelectableXIds: boolean;
+  selectedDefault: string;
+  disabled: boolean;
+  sectionDisabled: boolean;
+  canChangeSubmitter: boolean;
+}): React.ReactElement {
+  const [unlocked, setUnlocked] = React.useState(false);
+
+  if (!initialXId && !hasSelectableXIds) {
+    return (
+      <div className="fn-muted fn-text-sm">提出主体 X ID が設定されていません。</div>
+    );
+  }
+
+  // 非 admin (canChangeSubmitter === false) は unlock UI を一切出さず、
+  // 既存の提出主体 X ID を読み取り専用で表示するだけ。
+  if (!unlocked) {
+    return (
+      <>
+        <input
+          id="contact_x_id"
+          name="contact_x_id"
+          type="text"
+          defaultValue={initialXId}
+          className="fn-input"
+          readOnly
+          aria-readonly="true"
+          disabled={sectionDisabled}
+          style={{ opacity: 0.75, cursor: "default" }}
+        />
+        {canChangeSubmitter && hasSelectableXIds ? (
+          <label
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              marginTop: 6,
+              fontSize: 11,
+              color: "var(--text-muted)",
+              cursor: "pointer",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={false}
+              onChange={() => setUnlocked(true)}
+              disabled={disabled || sectionDisabled}
+            />
+            提出主体 X ID を変更する (管理者のみ)
+          </label>
+        ) : (
+          <p className="fn-text-sm" style={{ marginTop: 4, color: "var(--text-muted)" }}>
+            提出主体 X ID は変更できません。
+          </p>
+        )}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <input type="hidden" name="allow_submitter_change" value="1" />
+      <select
+        id="contact_x_id"
+        name="contact_x_id"
+        className="fn-select"
+        defaultValue={selectedDefault}
+        required
+        disabled={disabled}
+      >
+        {xIdOptions.map((opt, index) => (
+          <option
+            key={`${opt.id}-xid-option-${index}`}
+            value={normalizeXId(opt.id)}
+          >
+            @{opt.id} ({opt.x_name})
+          </option>
+        ))}
+      </select>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginTop: 6,
+          flexWrap: "wrap",
+          fontSize: 11,
+          color: "var(--accent-danger, #b91c1c)",
+        }}
+      >
+        <Icon name="alert" size={11} aria-hidden />
+        提出主体 X ID を変更しようとしています。サーバー側でも管理者権限を再検証します。
+        <button
+          type="button"
+          className="fn-btn fn-btn-ghost fn-btn-sm"
+          onClick={() => setUnlocked(false)}
+          style={{ marginLeft: "auto" }}
+        >
+          キャンセル
+        </button>
+      </div>
+    </>
   );
 }

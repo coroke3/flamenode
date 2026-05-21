@@ -410,8 +410,8 @@ export default async function ManageEventPage({
               </tr>
             </thead>
             <tbody>
-              {pendingVideos.map((v) => (
-                <tr key={v.id}>
+              {pendingVideos.map((v, index) => (
+                <tr key={`${v.id}-pending-${index}`}>
                   <td>{v.title}</td>
                   <td>{v.display_name}</td>
                   <td className="fn-muted">{formatRelative(v.created_at)}</td>

@@ -2,11 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import { assertCanEditEvent } from "@/lib/auth/ownership";
 import { historyLogs, slots } from "@/lib/db/schema";
+import { parseJstDatetimeLocal } from "@/lib/utils/dateInput";
 import { generateId } from "@/lib/utils/id";
 import { enqueueNotification } from "@/lib/notifications/enqueue";
 
@@ -23,16 +24,13 @@ const batchSchema = z.object({
   end_at: z.string().optional().nullable(),
   interval_minutes: z.coerce.number().min(1).max(60 * 24).default(5),
   duration_minutes: z.coerce.number().min(1).max(60 * 24).default(5),
-  count: z.coerce.number().min(0).max(500).default(0),
+  count: z.coerce.number().min(1).max(500).default(1),
   label_prefix: z.string().trim().max(40).optional().nullable(),
   start_index: z.coerce.number().min(0).max(9999).default(1),
 });
 
 function parseDateInput(raw: string | null | undefined): number | null {
-  if (!raw) return null;
-  const t = Date.parse(raw);
-  if (Number.isNaN(t)) return null;
-  return Math.floor(t / 1000);
+  return parseJstDatetimeLocal(raw);
 }
 
 async function ensureCanEditSlots(eventId: string): Promise<
@@ -94,6 +92,12 @@ export async function generateSlotsBatch(
   const created: { id: string }[] = [];
 
   if (data.mode === "time") {
+    if (data.duration_minutes > data.interval_minutes) {
+      return {
+        ok: false,
+        message: "枠の長さは間隔以下にしてください。重複枠を作る場合は個別作成で対応してください。",
+      };
+    }
     const startTs = parseDateInput(data.start_at);
     const endTs = parseDateInput(data.end_at);
     if (!startTs || !endTs) {
@@ -125,7 +129,10 @@ export async function generateSlotsBatch(
     }
   } else {
     // count モード
-    const cnt = Math.max(1, data.count);
+    if (data.count < 1) {
+      return { ok: false, message: "作成数は 1 以上で指定してください。" };
+    }
+    const cnt = data.count;
     if (cnt > 500) {
       return { ok: false, message: "一度に作成できるのは 500 枠までです。" };
     }
@@ -226,7 +233,16 @@ export async function releaseSlot(formData: FormData): Promise<SlotActionResult>
     const groupRows = await db
       .select({ id: slots.id, status: slots.status })
       .from(slots)
-      .where(eq(slots.reservation_group_id, groupId));
+      .where(
+        and(
+          eq(slots.reservation_group_id, groupId),
+          eq(slots.event_id, row.event_id),
+          row.discord_user_id
+            ? eq(slots.discord_user_id, row.discord_user_id)
+            : isNull(slots.discord_user_id),
+          row.x_user_id ? eq(slots.x_user_id, row.x_user_id) : isNull(slots.x_user_id),
+        )!,
+      );
     if (groupRows.some((r) => r.status !== "reserved")) {
       return {
         ok: false,
@@ -241,9 +257,19 @@ export async function releaseSlot(formData: FormData): Promise<SlotActionResult>
         x_user_id: null,
         display_name: null,
         reservation_group_id: null,
+        video_id: null,
         updated_at: now,
       })
-      .where(eq(slots.reservation_group_id, groupId));
+      .where(
+        and(
+          eq(slots.reservation_group_id, groupId),
+          eq(slots.event_id, row.event_id),
+          row.discord_user_id
+            ? eq(slots.discord_user_id, row.discord_user_id)
+            : isNull(slots.discord_user_id),
+          row.x_user_id ? eq(slots.x_user_id, row.x_user_id) : isNull(slots.x_user_id),
+        )!,
+      );
     targetIds = groupRows.map((r) => r.id);
   } else {
     await db
@@ -254,6 +280,7 @@ export async function releaseSlot(formData: FormData): Promise<SlotActionResult>
         x_user_id: null,
         display_name: null,
         reservation_group_id: null,
+        video_id: null,
         updated_at: now,
       })
       .where(eq(slots.id, slotId));

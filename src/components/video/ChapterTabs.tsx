@@ -3,8 +3,8 @@
 import * as React from "react";
 import styles from "./ChapterTabs.module.css";
 import { Icon } from "@/components/ui/Icon";
-import { formatDuration } from "@/lib/utils/format";
 import { cn } from "@/lib/utils/cn";
+import { ChapterCommentItem } from "./ChapterCommentItem";
 
 export interface ChapterEntry {
   id: string;
@@ -15,6 +15,7 @@ export interface ChapterEntry {
   note?: string | null;
   author_name?: string | null;
   author_icon?: string | null;
+  video_member_id?: string | null;
 }
 
 interface ChapterTabsProps {
@@ -37,57 +38,23 @@ export function ChapterTabs({
           count={chapters.length}
         />
       </div>
-      <ul className={styles.list}>
+      <div className={styles.list}>
         {chapters.length === 0 ? (
-          <li className={styles.listEmpty}>
+          <div className={styles.listEmpty}>
             チャプターコメントはまだありません。
-          </li>
+          </div>
         ) : (
-          chapters.map((c) => {
-            const outOfRange = duration ? c.chapter_time > duration : false;
-            return (
-              <li
-                key={c.id}
-                className={cn(
-                  styles.itemChapter,
-                  outOfRange && styles.outOfRange,
-                )}
-                onClick={() => !outOfRange && onSeek?.(c.chapter_time)}
-              >
-                <span className={styles.timeBadge}>
-                  {formatDuration(c.chapter_time)}
-                </span>
-                <div className={styles.chapterBody}>
-                  <div className={styles.chapterRow}>
-                    <Icon
-                      name="chapter"
-                      size={11}
-                      className={styles.chapterIcon}
-                      aria-hidden
-                    />
-                    <span className={styles.chapterTitle}>
-                      {c.chapter_label}
-                    </span>
-                    {c.visibility === "private" ? (
-                      <span className="fn-badge fn-badge-neutral">
-                        非公開
-                      </span>
-                    ) : null}
-                    {outOfRange ? (
-                      <span className="fn-badge fn-badge-neutral">
-                        範囲外
-                      </span>
-                    ) : null}
-                  </div>
-                  {c.note ? (
-                    <p className={styles.chapterNote}>{c.note}</p>
-                  ) : null}
-                </div>
-              </li>
-            );
-          })
+          chapters.map((c, index) => (
+            <ChapterCommentItem
+              key={`${c.id}-chapter-${index}`}
+              chapter={c}
+              duration={duration}
+              showAuthor
+              onSeek={onSeek}
+            />
+          ))
         )}
-      </ul>
+      </div>
     </div>
   );
 }

@@ -1,8 +1,9 @@
-import { and, asc, desc, eq, like, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, or, sql } from "drizzle-orm";
 import { videos, videoEvents, xUsers } from "./schema";
 import { creatorIconExpr, creatorNameExpr } from "./displayExpr";
 import { resolveMissingIcons } from "./iconResolution";
 import type { DB } from "./client";
+import { uniqueBy } from "@/lib/utils/unique";
 
 export interface ListVideoParams {
   q?: string;
@@ -10,6 +11,15 @@ export interface ListVideoParams {
   eventId?: string;
   limit?: number;
   offset?: number;
+}
+
+/**
+ * SQLite の LIKE で `%` / `_` を ESCAPE '\' 経由でリテラル扱いするための前処理。
+ * バックスラッシュ自体も二重化しないと "\X" の X を escape 対象として食ってしまうので
+ * `\\` を最初にエスケープする。
+ */
+function escapeLikeTerm(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&");
 }
 
 /**
@@ -26,12 +36,12 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
 
   const filters = [baseWhere];
   if (q && q.trim()) {
-    const term = `%${q.trim().replace(/[%_]/g, (m) => "\\" + m)}%`;
+    const term = `%${escapeLikeTerm(q.trim())}%`;
     filters.push(
       or(
-        like(videos.title, term),
-        like(videos.display_name, term),
-        like(videos.music, term),
+        sql`${videos.title} LIKE ${term} ESCAPE '\\'`,
+        sql`${videos.display_name} LIKE ${term} ESCAPE '\\'`,
+        sql`${videos.music} LIKE ${term} ESCAPE '\\'`,
       )!,
     );
   }
@@ -63,7 +73,7 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
       .orderBy(orderBy)
       .limit(limit)
       .offset(offset);
-    return resolveMissingIcons(db, rows);
+    return resolveMissingIcons(db, uniqueBy(rows, (row) => row.id));
   }
 
   const rows = await db
@@ -84,7 +94,7 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
     .orderBy(orderBy)
     .limit(limit)
     .offset(offset);
-  return resolveMissingIcons(db, rows);
+  return resolveMissingIcons(db, uniqueBy(rows, (row) => row.id));
 }
 
 /** 公開作品の総数 (ページング用)。 */
@@ -97,18 +107,18 @@ export async function countPublicVideos(db: DB, params: ListVideoParams) {
   );
   const filters = [baseWhere];
   if (q && q.trim()) {
-    const term = `%${q.trim().replace(/[%_]/g, (m) => "\\" + m)}%`;
+    const term = `%${escapeLikeTerm(q.trim())}%`;
     filters.push(
       or(
-        like(videos.title, term),
-        like(videos.display_name, term),
-        like(videos.music, term),
+        sql`${videos.title} LIKE ${term} ESCAPE '\\'`,
+        sql`${videos.display_name} LIKE ${term} ESCAPE '\\'`,
+        sql`${videos.music} LIKE ${term} ESCAPE '\\'`,
       )!,
     );
   }
   if (eventId) {
     const rows = await db
-      .select({ c: sql<number>`count(*)` })
+      .select({ c: sql<number>`count(DISTINCT ${videos.id})` })
       .from(videos)
       .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
       .where(and(...filters, eq(videoEvents.event_id, eventId))!);

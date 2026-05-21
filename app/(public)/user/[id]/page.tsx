@@ -10,11 +10,17 @@ import { Icon } from "@/components/ui/Icon";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 import { normalizeXId } from "@/lib/utils/xid";
 import { resolveXUserIcon } from "@/lib/db/xIconResolution";
+import { Pagination } from "@/components/ui/Pagination";
+import { clampPaging, totalPagesFor } from "@/lib/utils/sql";
 
 export const dynamic = "force-dynamic";
 
+const WORKS_PAGE_SIZE = 24;
+const COLLAB_PAGE_SIZE = 24;
+
 interface Props {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ worksPage?: string; collabPage?: string }>;
 }
 
 interface ProfileUser {
@@ -58,8 +64,22 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function UserPage({
   params,
+  searchParams,
 }: Props): Promise<React.ReactElement> {
   const id = normalizeXId((await params).id);
+  const sp = (await searchParams) ?? {};
+  const worksPaging = clampPaging({
+    page: sp.worksPage,
+    pageSize: WORKS_PAGE_SIZE,
+    defaultPageSize: WORKS_PAGE_SIZE,
+    maxPageSize: WORKS_PAGE_SIZE,
+  });
+  const collabPaging = clampPaging({
+    page: sp.collabPage,
+    pageSize: COLLAB_PAGE_SIZE,
+    defaultPageSize: COLLAB_PAGE_SIZE,
+    maxPageSize: COLLAB_PAGE_SIZE,
+  });
 
   const bundle = await withDatabase(async (db) => {
     const userRow = await db
@@ -113,6 +133,13 @@ export default async function UserPage({
       if (resolved) user.icon_url = resolved;
     }
 
+    const ownWhere = and(
+      publicVideoBase,
+      or(
+        sql`lower(${videos.creator_id}) = ${id}`,
+        sql`lower(${videos.contact_x_id}) = ${id}`,
+      )!,
+    )!;
     const ownVideosRaw = await db
       .select({
         id: videos.id,
@@ -126,16 +153,18 @@ export default async function UserPage({
         status: videos.status,
       })
       .from(videos)
-      .where(
-        and(
-          publicVideoBase,
-          or(
-            sql`lower(${videos.creator_id}) = ${id}`,
-            sql`lower(${videos.contact_x_id}) = ${id}`,
-          )!,
-        )!,
-      )
-      .orderBy(desc(videos.scheduled_time));
+      .where(ownWhere)
+      .orderBy(desc(videos.scheduled_time))
+      .limit(worksPaging.pageSize)
+      .offset(worksPaging.offset);
+    const ownCountRow = (
+      await db
+        .select({ c: sql<number>`COUNT(*)` })
+        .from(videos)
+        .where(ownWhere)
+        .limit(1)
+    )[0];
+    const ownTotal = Number(ownCountRow?.c ?? 0);
 
     const ownVideos = ownVideosRaw.map((v) => ({
       ...v,
@@ -143,6 +172,11 @@ export default async function UserPage({
       icon_url: v.icon_url ?? user.icon_url,
     })) as VideoCardData[];
 
+    const collabWhere = and(
+      publicVideoBase,
+      eq(videoMembers.x_user_id, id),
+      ne(videos.creator_id, id),
+    )!;
     const collabVideos = (await db
       .select({
         id: videos.id,
@@ -160,15 +194,19 @@ export default async function UserPage({
       .from(videos)
       .innerJoin(videoMembers, eq(videos.id, videoMembers.video_id))
       .leftJoin(xUsers, sql`lower(${xUsers.id}) = lower(${videos.creator_id})`)
-      .where(
-        and(
-          publicVideoBase,
-          eq(videoMembers.x_user_id, id),
-          ne(videos.creator_id, id),
-        )!,
-      )
+      .where(collabWhere)
       .orderBy(desc(videos.scheduled_time))
-      .limit(40)) as VideoCardData[];
+      .limit(collabPaging.pageSize)
+      .offset(collabPaging.offset)) as VideoCardData[];
+    const collabCountRow = (
+      await db
+        .select({ c: sql<number>`COUNT(*)` })
+        .from(videos)
+        .innerJoin(videoMembers, eq(videos.id, videoMembers.video_id))
+        .where(collabWhere)
+        .limit(1)
+    )[0];
+    const collabTotal = Number(collabCountRow?.c ?? 0);
 
     const portfolio = (
       await db
@@ -178,11 +216,33 @@ export default async function UserPage({
         .limit(1)
     )[0];
 
-    return { user, ownVideos, collabVideos, portfolio };
+    return {
+      user,
+      ownVideos,
+      ownTotal,
+      collabVideos,
+      collabTotal,
+      portfolio,
+    };
   });
 
   if (!bundle) notFound();
-  const { user, ownVideos, collabVideos, portfolio } = bundle;
+  const { user, ownVideos, ownTotal, collabVideos, collabTotal, portfolio } =
+    bundle;
+  const ownTotalPages = totalPagesFor(ownTotal, worksPaging.pageSize);
+  const collabTotalPages = totalPagesFor(collabTotal, collabPaging.pageSize);
+  const buildOwnHref = (p: number) => {
+    const usp = new URLSearchParams();
+    usp.set("worksPage", String(p));
+    if (collabPaging.page > 1) usp.set("collabPage", String(collabPaging.page));
+    return `/user/${encodeURIComponent(user.id)}?${usp.toString()}`;
+  };
+  const buildCollabHref = (p: number) => {
+    const usp = new URLSearchParams();
+    if (worksPaging.page > 1) usp.set("worksPage", String(worksPaging.page));
+    usp.set("collabPage", String(p));
+    return `/user/${encodeURIComponent(user.id)}?${usp.toString()}`;
+  };
 
   // 派生情報 (withDatabase closure 外で表示用に整形)
   const profileIcon = user.icon_url ?? null;
@@ -247,7 +307,7 @@ export default async function UserPage({
       </section>
 
       <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>作品 ({ownVideos.length})</h2>
+        <h2 className={styles.sectionTitle}>作品 ({ownTotal})</h2>
         {ownVideos.length === 0 ? (
           <div className="fn-empty">
             <Icon name="info" size={20} aria-hidden />
@@ -256,19 +316,29 @@ export default async function UserPage({
             </p>
           </div>
         ) : (
-          <div className={styles.grid}>
-            {ownVideos.map((v, index) => (
-              <div key={`${v.id}-own-${index}`}>
-                <VideoCard video={v} />
-              </div>
-            ))}
-          </div>
+          <>
+            <div className={styles.grid}>
+              {ownVideos.map((v, index) => (
+                <div key={`${v.id}-own-${index}`}>
+                  <VideoCard video={v} />
+                </div>
+              ))}
+            </div>
+            <Pagination
+              currentPage={worksPaging.page}
+              totalPages={ownTotalPages}
+              total={ownTotal}
+              pageSize={worksPaging.pageSize}
+              buildHref={buildOwnHref}
+              unitLabel="件"
+            />
+          </>
         )}
       </section>
 
-      {collabVideos.length > 0 ? (
+      {collabTotal > 0 ? (
         <section className={styles.section}>
-          <h2 className={styles.sectionTitle}>参加作品</h2>
+          <h2 className={styles.sectionTitle}>参加作品 ({collabTotal})</h2>
           <div className={styles.grid}>
             {collabVideos.map((v, index) => (
               <div key={`${v.id}-collab-${index}`}>
@@ -276,6 +346,14 @@ export default async function UserPage({
               </div>
             ))}
           </div>
+          <Pagination
+            currentPage={collabPaging.page}
+            totalPages={collabTotalPages}
+            total={collabTotal}
+            pageSize={collabPaging.pageSize}
+            buildHref={buildCollabHref}
+            unitLabel="件"
+          />
         </section>
       ) : null}
     </div>

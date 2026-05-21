@@ -7,6 +7,7 @@ import { getDatabase, withDatabase } from "@/lib/cloudflare";
 import { customPages, xUsers } from "@/lib/db/schema";
 import { normalizeXId } from "@/lib/utils/xid";
 import { sanitizeUserHtml } from "@/lib/utils/sanitizeUserHtml";
+import { sanitizeUserCss } from "@/lib/utils/sanitizeUserCss";
 
 export const metadata: Metadata = { title: "Portfolio" };
 export const dynamic = "force-dynamic";
@@ -43,13 +44,14 @@ export default async function PortfolioPage({
         </Link>
       </div>
       <article
+        className="fn-custom-page"
         style={{
           background: "var(--bg-surface)",
           border: "1px solid var(--border-subtle)",
           padding: 24,
         }}
       >
-        {page.css ? <style>{sanitizeUserHtml(page.css)}</style> : null}
+        {page.css ? <style>{sanitizeUserCss(page.css)}</style> : null}
         <div
           dangerouslySetInnerHTML={{
             __html: sanitizeUserHtml(

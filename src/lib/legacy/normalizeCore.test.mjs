@@ -2,9 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   looksLikeMojibake,
+  cleanLegacyString,
   normalizeIconUrl,
+  normalizeLegacyUrl,
   normalizeXIdLegacy,
+  splitCsvStringPreserveEmpty,
   splitCsvString,
+  splitLegacyEventIds,
   toUnixSec,
   normalizeEventType,
   normalizeSubmissionType,
@@ -92,6 +96,18 @@ test("normalizeIconUrl: 空/null", () => {
   assert.equal(normalizeIconUrl("   "), null);
 });
 
+test("normalizeIconUrl: legacy relative paths are dropped", () => {
+  assert.equal(normalizeIconUrl("hqdefault.jpg"), null);
+  assert.equal(normalizeIconUrl("IMG_1409 - sample.jpeg"), null);
+});
+
+test("normalizeIconUrl: app media paths are preserved", () => {
+  assert.equal(
+    normalizeIconUrl("/api/media/xicons/sample.png"),
+    "/api/media/xicons/sample.png",
+  );
+});
+
 test("normalizeXIdLegacy: 通常", () => {
   assert.equal(normalizeXIdLegacy("@tanaka"), "tanaka");
   assert.equal(normalizeXIdLegacy("foo_bar"), "foo_bar");
@@ -115,6 +131,18 @@ test("normalizeXIdLegacy: 64 文字でクリップ", () => {
   assert.equal(normalizeXIdLegacy(long).length, 64);
 });
 
+test("cleanLegacyString: trims, normalizes line endings, and drops controls", () => {
+  assert.equal(cleanLegacyString(" \r\nA\u0000B\r\n "), "AB");
+  assert.equal(cleanLegacyString("   "), null);
+  assert.equal(cleanLegacyString("abcdef", { maxLength: 3 }), "abc");
+});
+
+test("normalizeLegacyUrl: accepts http(s), rejects relative or non-http", () => {
+  assert.equal(normalizeLegacyUrl(" https://example.com/a "), "https://example.com/a");
+  assert.equal(normalizeLegacyUrl("ftp://example.com/a"), null);
+  assert.equal(normalizeLegacyUrl("relative/path"), null);
+});
+
 test("splitCsvString: ASCII comma + JP comma (U+3001) で分割", () => {
   assert.deepEqual(splitCsvString("a,b,c"), ["a", "b", "c"]);
   assert.deepEqual(
@@ -124,6 +152,20 @@ test("splitCsvString: ASCII comma + JP comma (U+3001) で分割", () => {
   assert.deepEqual(splitCsvString(""), []);
   assert.deepEqual(splitCsvString(null), []);
   assert.deepEqual(splitCsvString(" a , b , "), ["a", "b"]);
+});
+
+test("splitCsvStringPreserveEmpty: member/memberid の 1:1 対応用に空要素を保持", () => {
+  assert.deepEqual(splitCsvStringPreserveEmpty("a,,c"), ["a", "", "c"]);
+  assert.deepEqual(splitCsvStringPreserveEmpty(" a , b , "), ["a", "b"]);
+  assert.deepEqual(splitCsvStringPreserveEmpty(",b"), ["", "b"]);
+});
+
+test("splitLegacyEventIds: comma-separated eventid を順序維持で dedupe", () => {
+  assert.deepEqual(
+    splitLegacyEventIds("PVSF2026Sp, PVSF2025S, PVSF2026Sp"),
+    ["PVSF2026Sp", "PVSF2025S"],
+  );
+  assert.deepEqual(splitLegacyEventIds("@PVSF2024GW"), ["PVSF2024GW"]);
 });
 
 test("toUnixSec: null/empty", () => {

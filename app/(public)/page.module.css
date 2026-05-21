@@ -29,28 +29,6 @@
   margin-top: 18px;
 }
 
-/* 「今日見るべき作品」の先頭 1 件用 (PR58)。
-   VideoCard 自体は固定幅なので、背面 surface でひとまわり広く見せる。 */
-.featuredRecommend {
-  margin-bottom: clamp(14px, 2vw, 22px);
-  padding: clamp(12px, 2vw, 18px);
-  background-color: var(--bg-surface);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-1);
-  display: flex;
-  justify-content: center;
-}
-
-.featuredRecommend > * {
-  width: min(100%, 520px);
-}
-
-@media (min-width: 768px) {
-  .featuredRecommend > * {
-    width: min(100%, 600px);
-  }
-}
-
 @media (max-width: 640px) {
   .section {
     width: min(100% - 20px, 100%);

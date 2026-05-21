@@ -1,9 +1,10 @@
 .panel {
   /* 枠線で囲うだけの見た目をやめ、薄背景面 + 余白で「ひとかたまり」を示す。
-     event accent_color は title 下線とホバーだけで使い、面塗りには使わない。 */
+     event accent_color は title 下線/ボーダー左/ホバーで使い、面塗りには使わない。 */
   background-color: var(--bg-surface);
   border-radius: var(--radius-md);
   padding: clamp(16px, 2.6vw, 22px);
+  border-left: 3px solid var(--event-accent, var(--accent-primary));
 }
 
 .head {

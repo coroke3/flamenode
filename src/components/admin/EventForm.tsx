@@ -21,6 +21,8 @@ export interface EventFormInitial {
   is_entry_open?: number;
   is_archived?: number;
   allow_user_video_event_links?: number;
+  allow_user_video_edits?: number;
+  user_video_edit_permission_keys_json?: string | null;
   max_slots_per_video?: number;
   max_consecutive_slots_per_entry?: number;
   slot_type?: "time" | "count";
@@ -270,6 +272,72 @@ export function EventForm({
           </select>
         </div>
       </div>
+
+      {/*
+        作品編集の「ユーザー権限上書き」: イベント単位で section_key を委譲する。
+        - 既定は無効。有効にしたイベントだけ permission_keys_json で section を絞る。
+        - 危険キー (videos.youtube_id / videos.primary_event / video.identity) は
+          サーバー側 ownership.ts で除外する (許可リスト方式)。
+      */}
+      <fieldset
+        style={{
+          marginTop: 16,
+          padding: "12px 14px",
+          border: "1px solid var(--border-subtle)",
+          borderRadius: "var(--radius-md)",
+          display: "grid",
+          gap: 10,
+        }}
+      >
+        <legend
+          style={{
+            padding: "0 6px",
+            fontSize: 12,
+            fontWeight: 700,
+            color: "var(--text-muted)",
+          }}
+        >
+          一般ユーザー向け作品編集の許可 (イベント単位)
+        </legend>
+        <div>
+          <label
+            className="fn-label"
+            title="このイベントに紐づく作品について、作品オーナー以外にも一部編集権限を与えるか"
+          >
+            一般ユーザーの作品編集を許可
+          </label>
+          <select
+            name="allow_user_video_edits"
+            defaultValue={String(initial.allow_user_video_edits ?? 0)}
+            className="fn-select"
+          >
+            <option value="0">無効 (既定。動画オーナー / 合作 / 運営のみ)</option>
+            <option value="1">有効 (下記 JSON の section_key を委譲)</option>
+          </select>
+        </div>
+        <div>
+          <label className="fn-label">
+            委譲する section_key (JSON 配列)
+          </label>
+          <textarea
+            name="user_video_edit_permission_keys_json"
+            className="fn-input"
+            rows={3}
+            placeholder='["videos.title","videos.music_credit","videos.members","videos.review_data"]'
+            defaultValue={initial.user_video_edit_permission_keys_json ?? ""}
+            style={{ fontFamily: "monospace", fontSize: 12 }}
+          />
+          <p
+            className="fn-help"
+            style={{ marginTop: 4, fontSize: 11, color: "var(--text-muted)" }}
+          >
+            利用可能な key: videos.title / videos.music_credit / videos.members /
+            videos.review_data / video.descriptions / video.credits / video.members。
+            危険キー (videos.youtube_id / videos.primary_event / video.identity)
+            はサーバー側で除外されます。
+          </p>
+        </div>
+      </fieldset>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
         <div>

@@ -159,6 +159,18 @@ async function repairLocalSchemaDrift(DB: LocalD1Database): Promise<void> {
       "entry_end_time",
       "ALTER TABLE `events` ADD `entry_end_time` integer",
     );
+    await ensureColumn(
+      DB,
+      "events",
+      "allow_user_video_edits",
+      "ALTER TABLE `events` ADD `allow_user_video_edits` integer NOT NULL DEFAULT 0",
+    );
+    await ensureColumn(
+      DB,
+      "events",
+      "user_video_edit_permission_keys_json",
+      "ALTER TABLE `events` ADD `user_video_edit_permission_keys_json` text",
+    );
   }
 
   if (await tableExists(DB, "notification_outbox")) {
@@ -177,6 +189,29 @@ async function repairLocalSchemaDrift(DB: LocalD1Database): Promise<void> {
       DB,
       "CREATE INDEX IF NOT EXISTS `notification_outbox_event_idx` ON `notification_outbox` (`event_id`)",
       "notification_outbox_event_idx",
+    );
+  }
+
+  if (await tableExists(DB, "video_chapters")) {
+    await ensureColumn(
+      DB,
+      "video_chapters",
+      "video_member_id",
+      "ALTER TABLE `video_chapters` ADD `video_member_id` text",
+    );
+    await ensureIndex(
+      DB,
+      "CREATE INDEX IF NOT EXISTS `video_chapters_video_member_idx` ON `video_chapters` (`video_member_id`)",
+      "video_chapters_video_member_idx",
+    );
+  }
+
+  if (await tableExists(DB, "history_logs")) {
+    await ensureColumn(
+      DB,
+      "history_logs",
+      "operator_snapshot_json",
+      "ALTER TABLE `history_logs` ADD `operator_snapshot_json` text",
     );
   }
 

@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
+import { buildAccentVars } from "@/lib/theme/accent";
 import styles from "./page.module.css";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { getApprovedXIds, canEditVideo } from "@/lib/auth/ownership";
@@ -21,7 +22,7 @@ import { IntroCommentBlock } from "@/components/video/IntroCommentBlock";
 import { PlaylistRail } from "@/components/video/PlaylistRail";
 import { InteractionButton } from "@/components/video/InteractionButton";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
-import { MemberList } from "@/components/video/MemberList";
+import { MemberSection } from "@/components/video/MemberSection";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 import {
@@ -104,7 +105,9 @@ export default async function VideoDetailPage({
       id: detail.video.id,
       creator_id: detail.video.creator_id,
       primary_event_id: detail.video.primary_event_id,
-    })) as VideoCardData[];
+      scheduled_time: detail.video.scheduled_time,
+      eventIds: detail.events.map((event) => event.id),
+    }, 30)) as VideoCardData[];
 
     let likeActive = false;
     let bookmarkActive = false;
@@ -204,6 +207,7 @@ export default async function VideoDetailPage({
       likeActive,
       bookmarkActive,
       viewerXApproved,
+      viewerCanEditChapters,
       playlistLabel,
       playlistItems,
     };
@@ -216,6 +220,7 @@ export default async function VideoDetailPage({
     likeActive,
     bookmarkActive,
     viewerXApproved,
+    viewerCanEditChapters,
     playlistLabel,
     playlistItems,
   } = bundle;
@@ -229,8 +234,14 @@ export default async function VideoDetailPage({
   const primaryEvent = events.find((e) => e.id === video.primary_event_id) ?? events[0] ?? null;
   const primaryEventStatus = primaryEvent ? computeEventStatus(primaryEvent) : null;
   const accentColor = primaryEvent?.accent_color ?? "#ffd100";
+  // accent_color (hex) を HSL クランプして 5 種の CSS 変数にする。
+  // - event_accent: 本体色
+  // - event_accent_strong: ホバー強調
+  // - event_accent_soft: 背面グロー (半透明)
+  // - event_accent_text: アクセント面に乗せる文字色
+  // - event_accent_ring: 枠線 / フォーカス
   const accentVar = primaryEvent?.accent_color
-    ? ({ ["--event-accent" as never]: primaryEvent.accent_color } as React.CSSProperties)
+    ? buildAccentVars(primaryEvent.accent_color, "dark")
     : undefined;
 
   const chapterMarkers = chapters.map((c) => ({
@@ -425,7 +436,7 @@ export default async function VideoDetailPage({
               className={styles.eventBox}
               style={
                 primaryEvent.accent_color
-                  ? ({ ["--event-accent" as never]: primaryEvent.accent_color } as React.CSSProperties)
+                  ? buildAccentVars(primaryEvent.accent_color, "dark")
                   : undefined
               }
             >
@@ -560,9 +571,25 @@ export default async function VideoDetailPage({
                   関連動画はまだありません。
                 </p>
               ) : (
-                related.slice(0, 6).map((v, index) => (
-                  <VideoCard key={`${v.id}-mobile-related-${index}`} video={v} size="list" />
-                ))
+                <>
+                  {related.slice(0, 8).map((v) => (
+                    <VideoCard key={`${v.id}-mobile-related`} video={v} size="list" />
+                  ))}
+                  {related.length > 8 ? (
+                    <details className={styles.relatedMore}>
+                      <summary>さらに表示</summary>
+                      <div className={styles.relatedList}>
+                        {related.slice(8, 30).map((v) => (
+                          <VideoCard
+                            key={`${v.id}-mobile-related-more`}
+                            video={v}
+                            size="list"
+                          />
+                        ))}
+                      </div>
+                    </details>
+                  ) : null}
+                </>
               )}
             </div>
           </aside>
@@ -570,7 +597,19 @@ export default async function VideoDetailPage({
           {members.length > 0 ? (
             <section className={styles.section}>
               <h2 className={styles.sectionTitle}>参加メンバー ({members.length})</h2>
-              <MemberList members={members} />
+              <MemberSection
+                members={members}
+                chapters={chapters.map((c) => ({
+                  id: c.id,
+                  chapter_time: c.chapter_time,
+                  chapter_label: c.chapter_label,
+                  visibility: (c.visibility ?? "public") as "public" | "private",
+                  note: c.note,
+                  author_name: c.author_name,
+                  author_icon: c.author_icon,
+                  video_member_id: c.video_member_id ?? null,
+                }))}
+              />
             </section>
           ) : null}
         </article>
@@ -599,6 +638,7 @@ export default async function VideoDetailPage({
               note: c.note,
               author_name: c.author_name,
               author_icon: c.author_icon,
+              video_member_id: c.video_member_id ?? null,
             }))}
           />
 
@@ -606,6 +646,7 @@ export default async function VideoDetailPage({
             <ChapterComposer
               videoId={video.id}
               canPost={viewerXApproved}
+              canBulk={viewerCanEditChapters}
               settingsHref={`/dashboard/settings?next=${encodeURIComponent(`/${rawId}`)}`}
             />
           ) : (
@@ -644,9 +685,25 @@ export default async function VideoDetailPage({
                   関連動画はまだありません。
                 </p>
               ) : (
-                related.map((v, index) => (
-                  <VideoCard key={`${v.id}-desktop-related-${index}`} video={v} size="list" />
-                ))
+                <>
+                  {related.slice(0, 18).map((v) => (
+                    <VideoCard key={`${v.id}-desktop-related`} video={v} size="list" />
+                  ))}
+                  {related.length > 18 ? (
+                    <details className={styles.relatedMore}>
+                      <summary>さらに表示</summary>
+                      <div className={styles.relatedList}>
+                        {related.slice(18, 30).map((v) => (
+                          <VideoCard
+                            key={`${v.id}-desktop-related-more`}
+                            video={v}
+                            size="list"
+                          />
+                        ))}
+                      </div>
+                    </details>
+                  ) : null}
+                </>
               )}
             </div>
           </div>

@@ -1,4 +1,16 @@
-import { and, asc, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  lt,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import {
   events,
   videoChapters,
@@ -11,6 +23,19 @@ import type { DB } from "./client";
 import { resolveMissingIcons } from "./iconResolution";
 import { resolveMemberIcons } from "./xIconResolution";
 import { uniqueBy } from "@/lib/utils/unique";
+import { normalizeXId } from "@/lib/utils/xid";
+import {
+  clampRelatedLimit,
+  enforceDiversity,
+  fillToMinimum,
+  hashStringToInt,
+  interleaveBuckets,
+  perMemberLimit,
+  seededShuffle,
+  todayDateUtc,
+  uniqueByVideoId,
+  type RelatedReason,
+} from "./recommendation";
 
 /**
  * 作品詳細関連の集約クエリ。
@@ -131,6 +156,7 @@ export async function fetchVideoDetail(
       show_on_player_bar: videoChapters.show_on_player_bar,
       note: videoChapters.note,
       x_user_id: videoChapters.x_user_id,
+      video_member_id: videoChapters.video_member_id,
       author_name: xUsers.x_name,
       author_icon: xUsers.icon_url,
     })
@@ -167,14 +193,6 @@ export async function fetchVideoDetail(
  *
  * 並び順は creator 連続を避けるため round-robin で interleave する。
  */
-export type RelatedReason =
-  | "same_creator"
-  | "same_event"
-  | "shared_member"
-  | "near_date"
-  | "top_score"
-  | "discovery";
-
 export interface RelatedVideoCardData {
   id: string;
   title: string;
@@ -187,24 +205,276 @@ export interface RelatedVideoCardData {
   reason: RelatedReason;
 }
 
-function hashStringToInt(s: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
-
-function todayDateUtc(): string {
-  const d = new Date();
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(d.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 export async function fetchRelatedVideos(
+  db: DB,
+  current: {
+    id: string;
+    creator_id: string | null;
+    primary_event_id: string | null;
+    scheduled_time?: number | null;
+    eventIds?: string[];
+  },
+  limit = 18,
+): Promise<RelatedVideoCardData[]> {
+  const relatedLimit = clampRelatedLimit(limit);
+  const minTarget = Math.min(15, relatedLimit);
+  const sameEventLimit = relatedLimit >= 30 ? 6 : 4;
+  const sameCreatorLimit = relatedLimit >= 30 ? 4 : 3;
+  const nearDateLimit = relatedLimit >= 30 ? 5 : 3;
+  const topScoreLimit = relatedLimit >= 30 ? 5 : 4;
+  const discoveryLimit = relatedLimit >= 30 ? 4 : 2;
+  const sharedLimit = relatedLimit >= 30 ? 10 : 6;
+
+  const baseWhere = and(
+    eq(videos.status, "public"),
+    eq(videos.is_deleted, 0),
+    eq(videos.is_manual_hidden, 0),
+    ne(videos.id, current.id),
+  );
+  const iconExpr = sql<
+    string | null
+  >`COALESCE(${videos.icon_url}, ${xUsers.icon_url})`;
+  const baseSelect = {
+    id: videos.id,
+    title: videos.title,
+    youtube_video_id: videos.youtube_video_id,
+    display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
+    icon_url: iconExpr,
+    creator_id: videos.creator_id,
+    primary_event_id: videos.primary_event_id,
+    scheduled_time: videos.scheduled_time,
+    video_score: videos.video_score,
+  } as const;
+  type Row = {
+    id: string;
+    title: string;
+    youtube_video_id: string | null;
+    display_name: string;
+    icon_url: string | null;
+    creator_id: string | null;
+    primary_event_id: string | null;
+    scheduled_time: number | null;
+    video_score: number | null;
+  };
+
+  const toRelated = (
+    candidate: { row: Row; reason: RelatedReason },
+  ): RelatedVideoCardData => ({
+    id: candidate.row.id,
+    title: candidate.row.title,
+    youtube_video_id: candidate.row.youtube_video_id,
+    display_name: candidate.row.display_name,
+    icon_url: candidate.row.icon_url,
+    creator_id: candidate.row.creator_id,
+    primary_event_id: candidate.row.primary_event_id,
+    scheduled_time: candidate.row.scheduled_time,
+    reason: candidate.reason,
+  });
+
+  const temporalPrevious: Row[] =
+    current.scheduled_time != null
+      ? await db
+          .select(baseSelect)
+          .from(videos)
+          .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+          .where(
+            and(
+              baseWhere,
+              isNotNull(videos.scheduled_time),
+              lt(videos.scheduled_time, current.scheduled_time),
+            )!,
+          )
+          .orderBy(desc(videos.scheduled_time), desc(videos.video_score))
+          .limit(3)
+      : [];
+
+  const temporalNext: Row[] =
+    current.scheduled_time != null
+      ? await db
+          .select(baseSelect)
+          .from(videos)
+          .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+          .where(
+            and(
+              baseWhere,
+              isNotNull(videos.scheduled_time),
+              gt(videos.scheduled_time, current.scheduled_time),
+            )!,
+          )
+          .orderBy(asc(videos.scheduled_time), desc(videos.video_score))
+          .limit(3)
+      : [];
+
+  const eventIds = Array.from(
+    new Set(
+      [...(current.eventIds ?? []), current.primary_event_id].filter(
+        (id): id is string => Boolean(id),
+      ),
+    ),
+  );
+
+  const sameEvent: Row[] =
+    eventIds.length > 0
+      ? uniqueByVideoId(
+          await db
+            .select(baseSelect)
+            .from(videos)
+            .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
+            .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+            .where(and(baseWhere, inArray(videoEvents.event_id, eventIds))!)
+            .orderBy(desc(videos.scheduled_time), desc(videos.video_score))
+            .limit(Math.min(24, sameEventLimit * 4)),
+        )
+      : [];
+
+  const sameCreator: Row[] = current.creator_id
+    ? await db
+        .select(baseSelect)
+        .from(videos)
+        .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+        .where(and(baseWhere, eq(videos.creator_id, current.creator_id))!)
+        .orderBy(desc(videos.scheduled_time), desc(videos.video_score))
+        .limit(sameCreatorLimit)
+    : [];
+
+  const memberXIds = (
+    await db
+      .select({ x: videoMembers.x_user_id })
+      .from(videoMembers)
+      .where(eq(videoMembers.video_id, current.id))
+  )
+    .map((row) => normalizeXId(row.x))
+    .filter((id): id is string => Boolean(id));
+  const uniqueMemberXIds = Array.from(new Set(memberXIds));
+  const memberLimit = perMemberLimit(uniqueMemberXIds.length);
+  const sharedMembers: Row[] =
+    uniqueMemberXIds.length > 0
+      ? await db
+          .select({
+            ...baseSelect,
+            member_x_user_id: videoMembers.x_user_id,
+          })
+          .from(videoMembers)
+          .innerJoin(videos, eq(videos.id, videoMembers.video_id))
+          .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+          .where(
+            and(
+              baseWhere,
+              isNotNull(videoMembers.x_user_id),
+              inArray(
+                sql<string>`LOWER(${videoMembers.x_user_id})`,
+                uniqueMemberXIds,
+              ),
+            )!,
+          )
+          .orderBy(desc(videos.scheduled_time), desc(videos.video_score))
+          .limit(30)
+          .then((rows) => {
+            const byMember = new Map<string, (Row & { member_x_user_id: string | null })[]>();
+            for (const row of rows) {
+              const key = normalizeXId(row.member_x_user_id);
+              if (!key) continue;
+              const bucket = byMember.get(key) ?? [];
+              if (!bucket.some((item) => item.id === row.id)) bucket.push(row);
+              byMember.set(key, bucket);
+            }
+
+            const mixed: Row[] = [];
+            const seen = new Set<string>();
+            for (let i = 0; i < memberLimit; i++) {
+              for (const memberId of uniqueMemberXIds) {
+                const row = byMember.get(memberId)?.[i];
+                if (!row || seen.has(row.id)) continue;
+                seen.add(row.id);
+                mixed.push(row);
+                if (mixed.length >= 30) return mixed;
+              }
+            }
+            return mixed;
+          })
+      : [];
+
+  const nearDate: Row[] =
+    current.scheduled_time != null
+      ? await db
+          .select(baseSelect)
+          .from(videos)
+          .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+          .where(and(baseWhere, isNotNull(videos.scheduled_time))!)
+          .orderBy(
+            sql`ABS(${videos.scheduled_time} - ${current.scheduled_time})`,
+            desc(videos.video_score),
+          )
+          .limit(Math.min(16, nearDateLimit * 3))
+      : await db
+          .select(baseSelect)
+          .from(videos)
+          .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+          .where(baseWhere)
+          .orderBy(desc(videos.scheduled_time), desc(videos.video_score))
+          .limit(Math.min(16, nearDateLimit * 3));
+
+  const topScore: Row[] = await db
+    .select(baseSelect)
+    .from(videos)
+    .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+    .where(baseWhere)
+    .orderBy(desc(videos.video_score), desc(videos.scheduled_time))
+    .limit(Math.min(40, Math.max(20, topScoreLimit * 5)));
+
+  const discovery = seededShuffle(
+    topScore.slice(Math.min(8, Math.floor(topScore.length / 2))),
+    `${current.id}|${todayDateUtc()}`,
+  ).slice(0, discoveryLimit);
+
+  const initialCandidates = interleaveBuckets<Row>([
+    { reason: "previous_date", rows: temporalPrevious },
+    { reason: "next_date", rows: temporalNext },
+    { reason: "shared_member", rows: sharedMembers.slice(0, sharedLimit) },
+    { reason: "same_event", rows: sameEvent.slice(0, sameEventLimit) },
+    { reason: "same_creator", rows: sameCreator.slice(0, sameCreatorLimit) },
+    { reason: "near_date", rows: nearDate.slice(0, nearDateLimit) },
+    { reason: "top_score", rows: topScore.slice(0, topScoreLimit) },
+    { reason: "discovery", rows: discovery },
+  ]);
+
+  let selected = enforceDiversity(initialCandidates, {
+    limit: relatedLimit,
+    minTarget,
+  });
+
+  if (selected.length < minTarget) {
+    const latestFallback = await db
+      .select(baseSelect)
+      .from(videos)
+      .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+      .where(baseWhere)
+      .orderBy(desc(videos.scheduled_time), desc(videos.video_score))
+      .limit(relatedLimit);
+    selected = fillToMinimum(selected, latestFallback, "latest_fallback", {
+      limit: relatedLimit,
+      minTarget,
+    });
+  }
+
+  if (selected.length < minTarget) {
+    const broadFallback = await db
+      .select(baseSelect)
+      .from(videos)
+      .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+      .where(baseWhere)
+      .orderBy(desc(videos.video_score), desc(videos.scheduled_time))
+      .limit(relatedLimit);
+    selected = fillToMinimum(selected, broadFallback, "broad_fallback", {
+      limit: relatedLimit,
+      minTarget,
+    });
+  }
+
+  return selected.map(toRelated).slice(0, relatedLimit);
+}
+
+async function fetchRelatedVideosLegacy(
   db: DB,
   current: {
     id: string;

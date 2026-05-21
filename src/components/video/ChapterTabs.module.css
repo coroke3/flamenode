@@ -33,7 +33,7 @@
 
 .tabActive {
   color: var(--text-primary);
-  border-bottom-color: var(--accent-primary);
+  border-bottom-color: var(--event-accent, var(--accent-primary));
 }
 
 .tabCount {
@@ -79,7 +79,7 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-variant-numeric: tabular-nums;
   font-size: 11px;
-  color: var(--accent-primary);
+  color: var(--event-accent, var(--accent-primary));
   background-color: var(--accent-primary-soft);
   padding: 2px 6px;
   border-radius: var(--radius-sm);

@@ -53,7 +53,44 @@ export function normalizeIconUrl(
     u.match(/drive\.google\.com\/file\/d\/([A-Za-z0-9_-]+)/) ||
     u.match(/drive\.google\.com\/thumbnail\?id=([A-Za-z0-9_-]+)/);
   if (m?.[1]) return `https://lh3.googleusercontent.com/d/${m[1]}`;
-  return u;
+  if (u.startsWith("/api/media/")) return u;
+  return normalizeHttpUrlCore(u);
+}
+
+export function cleanLegacyString(
+  value: unknown,
+  options: { maxLength?: number } = {},
+): string | null {
+  if (value == null) return null;
+  const cleaned = String(value)
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, "")
+    .trim();
+  if (!cleaned) return null;
+  const maxLength = options.maxLength;
+  if (maxLength && cleaned.length > maxLength) return cleaned.slice(0, maxLength);
+  return cleaned;
+}
+
+export function normalizeLegacyUrl(
+  value: string | null | undefined,
+): string | null {
+  return normalizeHttpUrlCore(cleanLegacyString(value), 1000);
+}
+
+function normalizeHttpUrlCore(
+  raw: string | null | undefined,
+  maxLength = 1000,
+): string | null {
+  const s = String(raw ?? "").trim();
+  if (!s || s.length > maxLength) return null;
+  try {
+    const url = new URL(s);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 export function normalizeXIdLegacy(
@@ -71,11 +108,33 @@ export function normalizeXIdLegacy(
 const CSV_SPLIT_RE = new RegExp(`[,${String.fromCodePoint(0x3001)}]`);
 
 export function splitCsvString(s: string | null | undefined): string[] {
+  return splitCsvStringPreserveEmpty(s).filter(Boolean);
+}
+
+export function splitCsvStringPreserveEmpty(
+  s: string | null | undefined,
+): string[] {
   if (!s) return [];
-  return String(s)
+  const parts = String(s)
     .split(CSV_SPLIT_RE)
-    .map((x) => x.trim())
-    .filter(Boolean);
+    .map((x) => x.trim());
+  while (parts.length > 0 && parts[parts.length - 1] === "") {
+    parts.pop();
+  }
+  return parts;
+}
+
+export function splitLegacyEventIds(
+  raw: string | null | undefined,
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const id of splitCsvString(raw).map((s) => s.replace(/^@+/, ""))) {
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
 }
 
 export function toUnixSec(

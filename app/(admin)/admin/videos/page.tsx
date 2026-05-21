@@ -13,9 +13,15 @@ import { Icon } from "@/components/ui/Icon";
 import { formatRelative } from "@/lib/utils/format";
 import { youtubeThumbUrl } from "@/lib/youtube/id";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { Pagination } from "@/components/ui/Pagination";
+import { FilterChips, type FilterChip } from "@/components/ui/FilterChips";
+import { clampPaging, escapeLike, totalPagesFor } from "@/lib/utils/sql";
 
 export const metadata: Metadata = { title: "作品管理" };
 export const dynamic = "force-dynamic";
+
+const VIDEO_PAGE_SIZE = 50;
+const EVENT_OPTIONS_LIMIT = 200;
 
 type AdminVideoRow = {
   id: string;
@@ -29,16 +35,30 @@ type AdminVideoRow = {
 export default async function AdminVideosPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; status?: string; event?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    status?: string;
+    event?: string;
+    page?: string;
+  }>;
 }): Promise<React.ReactElement> {
-  const { q = "", status = "", event = "" } = await searchParams;
+  const { q = "", status = "", event = "", page: pageRaw = "1" } =
+    await searchParams;
+  const { page, pageSize, offset } = clampPaging({
+    page: pageRaw,
+    pageSize: VIDEO_PAGE_SIZE,
+    defaultPageSize: VIDEO_PAGE_SIZE,
+    maxPageSize: VIDEO_PAGE_SIZE,
+  });
 
   const db = getDatabase();
   let rows: AdminVideoRow[] = [];
   let events: { id: string; title: string }[] = [];
+  let total = 0;
   if (db) {
     try {
-      const term = `%${q}%`;
+      const escaped = escapeLike(q);
+      const term = `%${escaped}%`;
       const queryFilter = q
         ? or(
             like(videosTable.title, term),
@@ -63,6 +83,7 @@ export default async function AdminVideosPage({
           : conds.length === 1
             ? conds[0]
             : and(...conds);
+
       const base = db
         .select({
           id: videosTable.id,
@@ -83,19 +104,63 @@ export default async function AdminVideosPage({
       rows = await withEventJoin
         .where(where)
         .orderBy(desc(videosTable.created_at))
-        .limit(60);
+        .limit(pageSize)
+        .offset(offset);
 
-      // event 候補 (active なもののみ)
+      // count クエリは join 構成を一致させる必要があるため別途構築。
+      const countBase = db
+        .select({ c: sql<number>`COUNT(*)` })
+        .from(videosTable)
+        .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id));
+      const countWithJoin = event
+        ? countBase.innerJoin(
+            videoEventsTable,
+            eq(videoEventsTable.video_id, videosTable.id),
+          )
+        : countBase;
+      const countRow = (await countWithJoin.where(where).limit(1))[0];
+      total = Number(countRow?.c ?? 0);
+
+      // event 候補 (アーカイブ以外。上限を引き上げ)
       events = await db
         .select({ id: eventsTable.id, title: eventsTable.title })
         .from(eventsTable)
         .where(eq(eventsTable.is_archived, 0))
         .orderBy(desc(eventsTable.start_time))
-        .limit(50);
+        .limit(EVENT_OPTIONS_LIMIT);
     } catch (e) {
       console.error("[AdminVideosPage] fetch failed", e);
     }
   }
+
+  const totalPages = totalPagesFor(total, pageSize);
+  const buildHref = (p: number) => {
+    const sp = new URLSearchParams();
+    if (q) sp.set("q", q);
+    if (status) sp.set("status", status);
+    if (event) sp.set("event", event);
+    sp.set("page", String(p));
+    return `/admin/videos?${sp.toString()}`;
+  };
+
+  // 現在の絞り込み条件をチップ化。各チップは「自分の条件だけ抜いた URL」を持つ。
+  const eventLabel = events.find((ev) => ev.id === event)?.title;
+  const chips: FilterChip[] = [];
+  const hrefWithout = (drop: "q" | "status" | "event") => {
+    const sp = new URLSearchParams();
+    if (q && drop !== "q") sp.set("q", q);
+    if (status && drop !== "status") sp.set("status", status);
+    if (event && drop !== "event") sp.set("event", event);
+    return sp.size > 0 ? `/admin/videos?${sp.toString()}` : "/admin/videos";
+  };
+  if (q) chips.push({ label: `検索: ${q}`, removeHref: hrefWithout("q") });
+  if (status)
+    chips.push({ label: `状態: ${status}`, removeHref: hrefWithout("status") });
+  if (event)
+    chips.push({
+      label: `イベント: ${eventLabel ?? event}`,
+      removeHref: hrefWithout("event"),
+    });
 
   return (
     <div>
@@ -137,10 +202,13 @@ export default async function AdminVideosPage({
             </option>
           ))}
         </select>
+        {/* 検索条件を変えたときは page=1 にリセット (hidden で送らない) */}
         <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm">
           検索
         </button>
       </form>
+
+      <FilterChips chips={chips} clearAllHref="/admin/videos" />
 
       <table className="fn-table" style={{ marginTop: 18 }}>
         <thead>
@@ -241,6 +309,15 @@ export default async function AdminVideosPage({
           ) : null}
         </tbody>
       </table>
+
+      <Pagination
+        currentPage={page}
+        totalPages={totalPages}
+        total={total}
+        pageSize={pageSize}
+        buildHref={buildHref}
+        unitLabel="件"
+      />
     </div>
   );
 }

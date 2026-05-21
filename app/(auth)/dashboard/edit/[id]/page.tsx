@@ -32,6 +32,129 @@ export const dynamic = "force-dynamic";
 
 interface Props {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ privileged?: string }>;
+}
+
+type PrivilegeMode = "normal" | "admin" | "event";
+
+function normalizePrivilegeMode(raw: string | undefined): PrivilegeMode {
+  return raw === "admin" || raw === "event" ? raw : "normal";
+}
+
+/**
+ * 編集ページの上部に出す「現在の権限モード」バナー + 切替リンク。
+ * 通常モードでは目立たないが、admin/event モード時には強めの色味で警告する。
+ * モード切替は ?privileged= の URL 書き換えだけで完結する (サーバー側で再検証)。
+ */
+function PrivilegeModeBanner({
+  mode,
+  isAdmin,
+  videoId,
+}: {
+  mode: PrivilegeMode;
+  isAdmin: boolean;
+  videoId: string;
+}): React.ReactElement {
+  const base = `/dashboard/edit/${encodeURIComponent(videoId)}`;
+  if (mode === "admin") {
+    return (
+      <div
+        role="status"
+        style={{
+          marginTop: 10,
+          padding: "8px 12px",
+          border: "1px solid var(--accent-danger, #b91c1c)",
+          background:
+            "color-mix(in srgb, var(--accent-danger, #b91c1c) 10%, transparent)",
+          color: "var(--accent-danger, #b91c1c)",
+          borderRadius: "var(--radius-sm)",
+          fontSize: 12,
+          fontWeight: 600,
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: 8,
+        }}
+      >
+        <Icon name="alert" size={12} aria-hidden />
+        管理者権限で編集中。提出主体や所属イベントの変更が可能です。
+        <Link href={base} className="fn-btn fn-btn-ghost fn-btn-sm" style={{ marginLeft: "auto" }}>
+          通常モードへ戻る
+        </Link>
+      </div>
+    );
+  }
+  if (mode === "event") {
+    return (
+      <div
+        role="status"
+        style={{
+          marginTop: 10,
+          padding: "8px 12px",
+          border: "1px solid var(--event-accent, var(--accent-primary))",
+          background: "var(--bg-surface)",
+          borderRadius: "var(--radius-sm)",
+          fontSize: 12,
+          fontWeight: 600,
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: 8,
+        }}
+      >
+        <Icon name="users" size={12} aria-hidden />
+        イベント運営権限で編集中。
+        <Link href={base} className="fn-btn fn-btn-ghost fn-btn-sm" style={{ marginLeft: "auto" }}>
+          通常モードへ戻る
+        </Link>
+      </div>
+    );
+  }
+  // normal: 切替ボタンを表示する (admin/event editor のみ)。
+  return (
+    <div
+      style={{
+        marginTop: 10,
+        padding: "6px 10px",
+        border: "1px dashed var(--border-subtle)",
+        background: "var(--bg-surface)",
+        borderRadius: "var(--radius-sm)",
+        fontSize: 11.5,
+        color: "var(--text-muted)",
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "center",
+        gap: 8,
+      }}
+    >
+      <Icon name="info" size={11} aria-hidden /> 通常編集モード (作品オーナー / 合作メンバー の権限のみ)
+      {isAdmin ? (
+        <Link
+          href={`${base}?privileged=admin`}
+          className="fn-btn fn-btn-ghost fn-btn-sm"
+          style={{ marginLeft: "auto" }}
+        >
+          管理者権限で編集
+        </Link>
+      ) : null}
+      {!isAdmin ? (
+        <Link
+          href={`${base}?privileged=event`}
+          className="fn-btn fn-btn-ghost fn-btn-sm"
+          style={{ marginLeft: "auto" }}
+        >
+          イベント運営権限で編集
+        </Link>
+      ) : (
+        <Link
+          href={`${base}?privileged=event`}
+          className="fn-btn fn-btn-ghost fn-btn-sm"
+        >
+          イベント運営権限で編集
+        </Link>
+      )}
+    </div>
+  );
 }
 
 async function loadVideoCollabSubjects(
@@ -68,13 +191,25 @@ async function loadVideoCollabSubjects(
 
 export default async function EditVideoPage({
   params,
+  searchParams,
 }: Props): Promise<React.ReactElement> {
   const { id } = await params;
+  const sp = (await searchParams) ?? {};
+  const requestedMode = normalizePrivilegeMode(sp.privileged);
   const guard = await requireSession({
     next: `/dashboard/edit/${encodeURIComponent(id)}`,
   });
   if (!guard.ok) return guard.element;
   const user = guard.user;
+  // 管理者/イベント編集者でないユーザーが ?privileged=admin を付けても normal にフォールバック。
+  // 「URL を弄れば全部編集できる」抜け穴を作らないため。canEditVideo 側でも再検証される。
+  let privilegeMode: PrivilegeMode = "normal";
+  if (requestedMode === "admin" && user.role === "admin") {
+    privilegeMode = "admin";
+  } else if (requestedMode === "event") {
+    // event モードの利用可否は canEditVideo に委ねるが、UI上は許可しておく。
+    privilegeMode = "event";
+  }
 
   const db = getDatabase();
   if (!db) notFound();
@@ -180,12 +315,12 @@ export default async function EditVideoPage({
     canEditDescriptions,
     canEditMembers,
   ] = await Promise.all([
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.identity" }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.basics" }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.youtube_id" }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.credits" }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.descriptions" }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.members" }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.identity", privilegeMode }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.basics", privilegeMode }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.youtube_id", privilegeMode }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.credits", privilegeMode }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.descriptions", privilegeMode }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.members", privilegeMode }),
   ]);
   const canEditAnySection =
     canEditIdentity ||
@@ -268,24 +403,43 @@ export default async function EditVideoPage({
         <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "0.04em" }}>
           {video.title}
         </h1>
-        <p style={{ marginTop: 6, color: "var(--text-muted)", fontSize: 13 }}>
+        <p
+          style={{
+            marginTop: 6,
+            color: "var(--text-muted)",
+            fontSize: 13,
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
           現在の状態:
-          <span className="fn-badge fn-badge-soft" style={{ marginLeft: 6 }}>
-            {video.status}
-          </span>
+          <span className="fn-badge fn-badge-soft">{video.status}</span>
           {video.youtube_video_id ? (
-            <>
-              {" · "}
-              <a
-                href={youtubeWatchUrl(video.youtube_video_id)}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                YouTube で確認 →
-              </a>
-            </>
+            <a
+              href={youtubeWatchUrl(video.youtube_video_id)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="fn-btn fn-btn-ghost fn-btn-sm"
+            >
+              <Icon name="external" size={12} aria-hidden />
+              YouTube で確認
+            </a>
           ) : null}
+          <Link
+            href={`/${video.youtube_video_id ?? video.id}`}
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+          >
+            <Icon name="external" size={12} aria-hidden />
+            FlameNode で見る
+          </Link>
         </p>
+        <PrivilegeModeBanner
+          mode={privilegeMode}
+          isAdmin={user.role === "admin"}
+          videoId={id}
+        />
       </header>
 
       <VideoForm
@@ -296,7 +450,10 @@ export default async function EditVideoPage({
         disabledSections={disabledSections}
         disabledFields={disabledFields}
         initial={{
-          display_name: video.display_name,
+          // 表示名: 既存 video.display_name を優先、空ならその X ID の x_name にフォールバック。
+          // 紹介文 / YouTube / SNS は videos には保存されておらず x_users 側 (xRow) のみが正本。
+          display_name:
+            video.display_name ?? xRow?.x_name ?? user.name ?? undefined,
           contact_x_id: video.contact_x_id,
           icon_url: video.icon_url ?? undefined,
           profile_text: xRow?.profile_text ?? undefined,
@@ -322,7 +479,9 @@ export default async function EditVideoPage({
         softwareSuggestions={softwareSuggestions}
         eventOptions={eventOptions}
         canEditEvents={canEditIdentity}
+        canChangeSubmitter={privilegeMode === "admin" && user.role === "admin"}
         iconCandidates={iconCandidates}
+        editPrivilegeMode={privilegeMode}
       />
 
       <p
