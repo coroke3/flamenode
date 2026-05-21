@@ -2,9 +2,9 @@ import * as React from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import styles from "./page.module.css";
-import { getDatabase, withDatabase } from "@/lib/cloudflare";
+import { withDatabase } from "@/lib/cloudflare";
 import {
   events as eventsTable,
   slots as slotsTable,
@@ -34,15 +34,15 @@ interface Props {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
-  const ev = await withDatabase(async (db) => {
-    const res = await db
+  const event = await withDatabase(async (db) => {
+    const rows = await db
       .select()
       .from(eventsTable)
       .where(eq(eventsTable.id, id))
       .limit(1);
-    return res[0] ?? null;
+    return rows[0] ?? null;
   });
-  return ev?.title ? { title: ev.title } : { title: id };
+  return event?.title ? { title: event.title } : { title: id };
 }
 
 export default async function EventDetailPage({
@@ -54,10 +54,6 @@ export default async function EventDetailPage({
     const data = await fetchEventWithEditors(db, id);
     if (!data) return null;
 
-    // 作品取得 (上映順 = scheduled_time 昇順)。
-    // イベントが大きくなりすぎたとき詳細ページが重くなるのを避けるため、
-    // 48 件で頭打ち。「すべて見る」は /list?event=... へ誘導 (DB側ページング済み)。
-    const EVENT_PREVIEW_LIMIT = 48;
     const eventVideos = (await db
       .select({
         id: videos.id,
@@ -79,51 +75,60 @@ export default async function EventDetailPage({
         and(
           eq(videoEvents.event_id, id),
           eq(videos.is_deleted, 0),
+          eq(videos.is_manual_hidden, 0),
         )!,
       )
-      .orderBy(asc(videos.scheduled_time))
-      .limit(EVENT_PREVIEW_LIMIT)) as VideoCardData[];
+      .orderBy(asc(videos.scheduled_time), asc(videos.id))) as VideoCardData[];
 
     const eventVideoCountRow = (
       await db
         .select({ c: sql<number>`COUNT(*)` })
         .from(videos)
         .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
-        .where(and(eq(videoEvents.event_id, id), eq(videos.is_deleted, 0))!)
+        .where(
+          and(
+            eq(videoEvents.event_id, id),
+            eq(videos.is_deleted, 0),
+            eq(videos.is_manual_hidden, 0),
+          )!,
+        )
         .limit(1)
     )[0];
     const eventVideoTotal = Number(eventVideoCountRow?.c ?? 0);
 
-    // スロット
     const slotRows = await db
       .select()
       .from(slotsTable)
       .where(eq(slotsTable.event_id, id))
-      .orderBy(asc(slotsTable.start_time), asc(slotsTable.end_time), asc(slotsTable.sort_order));
+      .orderBy(
+        asc(slotsTable.start_time),
+        asc(slotsTable.end_time),
+        asc(slotsTable.sort_order),
+      );
 
     return { data, eventVideos, slotRows, eventVideoTotal };
   });
 
   if (!bundle) notFound();
+
   const {
     data: { event, editors },
     eventVideos,
     slotRows,
     eventVideoTotal,
   } = bundle;
-  const eventVideoHidden = Math.max(0, eventVideoTotal - eventVideos.length);
 
   const visibleVideos = eventVideos.filter(
-    (v) =>
-      v.status === "public" ||
-      v.status === "x_reapply_required" ||
-      v.status === "unlisted",
+    (video) =>
+      video.status === "public" ||
+      video.status === "x_reapply_required" ||
+      video.status === "unlisted",
   );
 
-  const accentVar = event.accent_color
-    ? ({ ["--event-accent" as never]: event.accent_color } as React.CSSProperties)
-    : undefined;
-  const publicEditors = editors.filter((e) => e.is_public === 1);
+  const accentVar = {
+    "--event-accent": event.accent_color ?? "#ffd400",
+  } as React.CSSProperties;
+  const publicEditors = editors.filter((editor) => editor.is_public === 1);
   const status = computeEventStatus(event);
   const accepting = isAcceptingEntries(event);
   const now = Math.floor(Date.now() / 1000);
@@ -140,26 +145,48 @@ export default async function EventDetailPage({
 
   const viewer = await getCurrentUser();
 
-  const slotRowsForGrid: SlotRow[] = slotRows.map((s) => ({
-    id: s.id,
-    slot_kind: (s.slot_kind ?? "time") as "time" | "count",
-    slot_label: s.slot_label,
-    start_time: s.start_time,
-    end_time: s.end_time,
-    sort_order: s.sort_order,
-    status: s.status,
-    display_name: s.display_name,
-    x_user_id: s.x_user_id,
-    discord_user_id: s.discord_user_id,
-    reservation_group_id: s.reservation_group_id,
+  const slotRowsForGrid: SlotRow[] = slotRows.map((slot) => ({
+    id: slot.id,
+    slot_kind: (slot.slot_kind ?? "time") as "time" | "count",
+    slot_label: slot.slot_label,
+    start_time: slot.start_time,
+    end_time: slot.end_time,
+    sort_order: slot.sort_order,
+    status: slot.status,
+    display_name: slot.display_name,
+    x_user_id: slot.x_user_id,
+    discord_user_id: slot.discord_user_id,
+    reservation_group_id: slot.reservation_group_id,
   }));
+
+  const slotTotal = slotRows.length;
+  const availableSlots = slotRows.filter(
+    (slot) => slot.status === "available",
+  ).length;
+  const filledSlots =
+    slotTotal > 0 ? Math.max(0, slotTotal - availableSlots) : null;
+  const slotFillRatio =
+    filledSlots != null && slotTotal > 0
+      ? Math.min(100, Math.round((filledSlots / slotTotal) * 100))
+      : null;
+  const infoItems = [
+    event.start_time != null ? `開催 ${formatUnix(event.start_time)}` : null,
+    event.entry_end_time != null
+      ? `募集締切 ${formatUnix(event.entry_end_time)}`
+      : null,
+    slotTotal > 0 ? `残り枠 ${availableSlots} / ${slotTotal}` : null,
+    `投稿数 ${eventVideoTotal}`,
+    accepting ? "エントリー受付中" : eventStatusLabel(status),
+  ].filter(Boolean) as string[];
 
   return (
     <div className={styles.page} style={accentVar}>
       <section className={styles.hero}>
         <div
           className={styles.heroBanner}
-          style={event.img_url ? { backgroundImage: `url(${event.img_url})` } : undefined}
+          style={
+            event.img_url ? { backgroundImage: `url(${event.img_url})` } : undefined
+          }
         />
         <div className={styles.heroBody}>
           <div className={styles.heroMeta}>
@@ -176,26 +203,28 @@ export default async function EventDetailPage({
             <span>
               {formatUnix(event.start_time, { dateOnly: true })}
               {event.end_time
-                ? ` 〜 ${formatUnix(event.end_time, { dateOnly: true })}`
+                ? ` - ${formatUnix(event.end_time, { dateOnly: true })}`
                 : ""}
             </span>
-            {(event.entry_start_time != null || event.entry_end_time != null) ? (
+            {event.entry_start_time != null || event.entry_end_time != null ? (
               <span className={styles.entryPeriod}>
                 募集:{" "}
                 {event.entry_start_time != null
                   ? formatUnix(event.entry_start_time)
-                  : "—"}
-                {" 〜 "}
+                  : "-"}
+                {" - "}
                 {event.entry_end_time != null
                   ? formatUnix(event.entry_end_time)
-                  : "—"}
+                  : "-"}
               </span>
             ) : null}
           </div>
+
           <h1 className={styles.heroTitle}>{event.title}</h1>
           {event.explanation ? (
             <p className={styles.heroExplain}>{event.explanation}</p>
           ) : null}
+
           <div className={styles.heroActions}>
             {visibleVideos.length > 0 ? (
               <Link
@@ -203,24 +232,48 @@ export default async function EventDetailPage({
                 className="fn-btn fn-btn-primary"
               >
                 <Icon name="play" size={14} aria-hidden />
-                全作品を連続再生
+                作品を見る
               </Link>
             ) : null}
-            {visibleVideos.length > 0 ? (
-              <Link
-                href={`/list?event=${event.id}`}
-                className="fn-btn fn-btn-ghost"
-              >
-                <Icon name="grid" size={14} aria-hidden />
-                このイベントの作品を一覧で見る
+            {accepting ? (
+              <Link href="#slot" className="fn-btn fn-btn-primary">
+                <Icon name="calendar" size={14} aria-hidden />
+                エントリーする
               </Link>
             ) : null}
             <Link href="/event" className="fn-btn fn-btn-ghost">
-              一覧へ戻る
+              イベント一覧へ
             </Link>
           </div>
+
+          {slotFillRatio != null && filledSlots != null ? (
+            <div className={styles.heroSlotMeter}>
+              <div className={styles.heroSlotMeterHead}>
+                <span>参加枠 {filledSlots} / {slotTotal}</span>
+                <span>{slotFillRatio}% 埋まり</span>
+              </div>
+              <span className={styles.heroSlotMeterTrack}>
+                <span
+                  className={styles.heroSlotMeterFill}
+                  style={{ width: `${slotFillRatio}%` }}
+                />
+              </span>
+            </div>
+          ) : null}
         </div>
       </section>
+
+      {infoItems.length > 0 ? (
+        <section className={styles.infoTicker} aria-label="イベント情報">
+          <div className={styles.infoTickerTrack}>
+            {[...infoItems, ...infoItems].map((item, index) => (
+              <span key={`${item}-${index}`} className={styles.infoTickerItem}>
+                {item}
+              </span>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {publicEditors.length > 0 ? (
         <section className={styles.section}>
@@ -229,15 +282,19 @@ export default async function EventDetailPage({
             運営メンバー
           </h2>
           <div className={styles.staffList}>
-            {publicEditors.map((m) => (
+            {publicEditors.map((member) => (
               <Link
-                key={`${m.x_user_id}-${m.role}`}
-                href={`/user/${m.x_user_id}`}
+                key={`${member.x_user_id}-${member.role}`}
+                href={`/user/${member.x_user_id}`}
                 className={styles.staff}
               >
-                {m.icon_url ? (
+                {member.icon_url ? (
                   /* eslint-disable-next-line @next/next/no-img-element */
-                  <img src={m.icon_url} alt="" className={styles.staffIcon} />
+                  <img
+                    src={member.icon_url}
+                    alt=""
+                    className={styles.staffIcon}
+                  />
                 ) : (
                   <span className={styles.staffIconFb}>
                     <Icon name="user" size={14} aria-hidden />
@@ -245,10 +302,11 @@ export default async function EventDetailPage({
                 )}
                 <div className={styles.staffBody}>
                   <span className={styles.staffName}>
-                    {m.x_name ?? m.x_user_id}
+                    {member.x_name ?? member.x_user_id}
                   </span>
                   <span className={styles.staffRole}>
-                    {m.public_role_label ?? (m.role === "representative" ? "代表" : "運営")}
+                    {member.public_role_label ??
+                      (member.role === "representative" ? "代表" : "運営")}
                   </span>
                 </div>
               </Link>
@@ -276,10 +334,7 @@ export default async function EventDetailPage({
                 slotPartGapSec={(event.slot_part_gap_minutes ?? 30) * 60}
               />
               {!accepting ? (
-                <p
-                  className="fn-muted fn-text-sm"
-                  style={{ marginTop: 8 }}
-                >
+                <p className="fn-muted fn-text-sm" style={{ marginTop: 8 }}>
                   <Icon name="info" size={12} aria-hidden />{" "}
                   {status === "ended"
                     ? "終了済みのため新規確保はできません。"
@@ -288,10 +343,7 @@ export default async function EventDetailPage({
                       : "現在は受付停止中です。"}
                 </p>
               ) : !viewer?.id ? (
-                <p
-                  className="fn-muted fn-text-sm"
-                  style={{ marginTop: 8 }}
-                >
+                <p className="fn-muted fn-text-sm" style={{ marginTop: 8 }}>
                   <Icon name="info" size={12} aria-hidden /> 確保には{" "}
                   <Link
                     href={`/entry?next=${encodeURIComponent(`/event/${event.id}#slot`)}`}
@@ -301,11 +353,9 @@ export default async function EventDetailPage({
                   とアクティブ X ID が必要です。
                 </p>
               ) : !viewer.active_x_user_id ? (
-                <p
-                  className="fn-muted fn-text-sm"
-                  style={{ marginTop: 8 }}
-                >
-                  <Icon name="info" size={12} aria-hidden /> アクティブ X ID を選択してください ({" "}
+                <p className="fn-muted fn-text-sm" style={{ marginTop: 8 }}>
+                  <Icon name="info" size={12} aria-hidden /> アクティブ X ID
+                  を選択してください ({" "}
                   <Link
                     href={`/dashboard/settings?next=${encodeURIComponent(`/event/${event.id}#slot`)}`}
                   >
@@ -329,15 +379,6 @@ export default async function EventDetailPage({
         <h2 className={styles.sectionTitle}>
           <Icon name="grid" size={16} aria-hidden />
           作品 ({eventVideoTotal})
-          {eventVideoHidden > 0 ? (
-            <Link
-              href={`/list?event=${event.id}`}
-              className="fn-btn fn-btn-ghost fn-btn-sm"
-              style={{ marginLeft: 8 }}
-            >
-              すべて見る ({eventVideoTotal} 件)
-            </Link>
-          ) : null}
         </h2>
         {visibleVideos.length === 0 ? (
           <div className="fn-empty">
@@ -348,9 +389,12 @@ export default async function EventDetailPage({
           </div>
         ) : (
           <div className={styles.videoGrid}>
-            {visibleVideos.map((v, index) => (
-              <div key={`${v.id}-event-video-${index}`}>
-                <VideoCard video={v} />
+            {visibleVideos.map((video, index) => (
+              <div key={`${video.id}-event-video-${index}`}>
+                <VideoCard
+                  video={video}
+                  href={`/${video.youtube_video_id ?? video.id}?playlist=${event.id}`}
+                />
               </div>
             ))}
           </div>

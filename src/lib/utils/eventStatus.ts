@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull, or } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { events } from "@/lib/db/schema";
 import {
   computeEventStatus,
@@ -18,9 +18,17 @@ export {
 export type { EventDisplayStatus, EventStatusInput };
 
 export function activeEventWhere(now: number = Math.floor(Date.now() / 1000)) {
+  const effectiveEnd = sql`
+    CASE
+      WHEN ${events.end_time} IS NOT NULL THEN ${events.end_time}
+      WHEN ${events.start_time} IS NOT NULL THEN ${events.start_time}
+      ELSE NULL
+    END
+  `;
+
   return and(
     eq(events.is_active, 1),
     eq(events.is_archived, 0),
-    or(isNull(events.end_time), gt(events.end_time, now))!,
+    sql`((${effectiveEnd}) IS NULL OR (${effectiveEnd}) > ${now})`,
   );
 }

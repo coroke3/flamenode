@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { createEvent, updateEvent } from "@/lib/actions/event-admin";
+import { PermissionKeysField } from "@/components/admin/PermissionKeysField";
 
 export interface EventFormInitial {
   id?: string;
@@ -319,23 +320,10 @@ export function EventForm({
           <label className="fn-label">
             委譲する section_key (JSON 配列)
           </label>
-          <textarea
+          <PermissionKeysField
             name="user_video_edit_permission_keys_json"
-            className="fn-input"
-            rows={3}
-            placeholder='["videos.title","videos.music_credit","videos.members","videos.review_data"]'
-            defaultValue={initial.user_video_edit_permission_keys_json ?? ""}
-            style={{ fontFamily: "monospace", fontSize: 12 }}
+            defaultValue={initial.user_video_edit_permission_keys_json}
           />
-          <p
-            className="fn-help"
-            style={{ marginTop: 4, fontSize: 11, color: "var(--text-muted)" }}
-          >
-            利用可能な key: videos.title / videos.music_credit / videos.members /
-            videos.review_data / video.descriptions / video.credits / video.members。
-            危険キー (videos.youtube_id / videos.primary_event / video.identity)
-            はサーバー側で除外されます。
-          </p>
         </div>
       </fieldset>
 

@@ -571,7 +571,6 @@ function groupByDay(rows: HistoryRow[]): [string, HistoryRow[]][] {
 
 function TimelineView({
   rows,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   operatorMap,
 }: {
   rows: HistoryRow[];
@@ -681,7 +680,6 @@ function TimelineView({
 
 function CardsView({
   rows,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   operatorMap,
 }: {
   rows: HistoryRow[];

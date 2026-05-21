@@ -18,7 +18,7 @@ import {
 } from "@/components/layout/HomeIntroBand";
 import { Shelf } from "@/components/layout/Shelf";
 import { SectionHeader } from "@/components/layout/SectionHeader";
-import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
+import { VideoCard } from "@/components/video/VideoCard";
 import { CreatorCard } from "@/components/user/CreatorCard";
 import { EventPanel } from "@/components/layout/EventPanel";
 import { Icon } from "@/components/ui/Icon";
@@ -26,14 +26,13 @@ import { EmptyState } from "@/components/ui/EmptyState";
 
 export const dynamic = "force-dynamic";
 
-/** Fisher-Yates シャッフル。 */
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
+function shuffle<T>(items: T[]): T[] {
+  const copied = [...items];
+  for (let i = copied.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
+    [copied[i], copied[j]] = [copied[j], copied[i]];
   }
-  return a;
+  return copied;
 }
 
 export default async function TopPage(): Promise<React.ReactElement> {
@@ -41,16 +40,18 @@ export default async function TopPage(): Promise<React.ReactElement> {
     const [activeEvents, recommendedRaw, latest, creators, latestEvents] =
       await Promise.all([
         fetchActiveEvents(db),
-        fetchRecommendedVideos(db, 40).then((rs) => shuffle(rs).slice(0, 30)),
+        fetchRecommendedVideos(db, 40).then((rows) =>
+          shuffle(rows).slice(0, 30),
+        ),
         fetchLatestVideos(db, 30),
         fetchPickupCreators(db, 30),
         fetchLatestEvents(db, 3),
       ]);
 
     const eventVideoEntries = await Promise.all(
-      latestEvents.map(async (ev) => {
-        const vs = await fetchVideosForEvent(db, ev.id, 8);
-        return [ev.id, vs] as const;
+      latestEvents.map(async (event) => {
+        const videos = await fetchVideosForEvent(db, event.id, 8);
+        return [event.id, videos] as const;
       }),
     );
     const videosByEvent = Object.fromEntries(eventVideoEntries);
@@ -65,6 +66,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
         })
         .from(slotsTable)
         .groupBy(slotsTable.event_id);
+
       slotRows.forEach((row) =>
         topSlotStats.set(row.event_id, {
           available: Number(row.available ?? 0),
@@ -98,28 +100,67 @@ export default async function TopPage(): Promise<React.ReactElement> {
     <div className={styles.page}>
       <HomeIntroBand activeEvents={activeEvents} slotStats={topSlotStats} />
 
+      <section className={styles.quickSection} aria-label="作品を見る導線">
+        <div className={styles.watchBand}>
+          <div>
+            <p className={styles.watchEyebrow}>Watch FlameNode</p>
+            <h2 className={styles.watchTitle}>まずは作品を見る</h2>
+            <p className={styles.watchText}>
+              イベントの熱量はそのままに、作品棚から気になる映像へすぐ入れます。
+            </p>
+          </div>
+          <div className={styles.watchActions}>
+            <Link href="/list" className="fn-btn fn-btn-primary">
+              <Icon name="play" size={14} aria-hidden />
+              作品を見る
+            </Link>
+            <Link href="/event" className="fn-btn fn-btn-ghost">
+              <Icon name="calendar" size={14} aria-hidden />
+              エントリーする
+            </Link>
+          </div>
+        </div>
+      </section>
+
       <section className={styles.section} aria-labelledby="sec-recommend">
-        <SectionHeader title="今日見るべき作品" moreHref="/recommend" />
+        <SectionHeader title="人気作品" moreHref="/recommend" />
         <div className={styles.shelfBox}>
           {recommended.length === 0 ? (
             <EmptyShelf message="まだおすすめできる作品がありません。" />
           ) : (
-            <>
-              {/* 先頭 1 件は少し大きめに見せて棚との単調感を避ける。
-                  2 件目以降は通常の横棚で並べる。 */}
-              {recommended[0] ? (
-                <div className={styles.featuredRecommend}>
-                  <VideoCard video={recommended[0]} />
-                </div>
-              ) : null}
-              {recommended.length > 1 ? (
-                <Shelf ariaLabel="今日見るべき作品 (続き)">
-                  {recommended.slice(1).map((v, index) => (
-                    <VideoCard key={`${v.id}-recommended-${index}`} video={v} />
-                  ))}
-                </Shelf>
-              ) : null}
-            </>
+            <Shelf ariaLabel="人気作品">
+              {recommended.map((video, index) => (
+                <VideoCard
+                  key={`${video.id}-recommended-${index}`}
+                  video={video}
+                />
+              ))}
+            </Shelf>
+          )}
+        </div>
+      </section>
+
+      <section className={styles.section} aria-labelledby="sec-creators">
+        <SectionHeader title="注目クリエイター" moreHref="/user" />
+        <div className={styles.shelfBox}>
+          {creators.length === 0 ? (
+            <EmptyShelf message="該当するクリエイターがまだいません。" />
+          ) : (
+            <Shelf ariaLabel="注目クリエイター">
+              {creators.map((creator, index) => (
+                <CreatorCard
+                  key={`${creator.id}-creator-${index}`}
+                  data={{
+                    id: creator.id,
+                    x_name: creator.x_name,
+                    icon_url: creator.icon_url,
+                    video_count:
+                      (Number(creator.video_count) || 0) +
+                      (Number(creator.collab_count) || 0),
+                  }}
+                />
+              ))}
+            </Shelf>
           )}
         </div>
       </section>
@@ -131,33 +172,8 @@ export default async function TopPage(): Promise<React.ReactElement> {
             <EmptyShelf message="まだ公開作品がありません。" />
           ) : (
             <Shelf ariaLabel="新着作品">
-              {latest.map((v, index) => (
-                <VideoCard key={`${v.id}-latest-${index}`} video={v} />
-              ))}
-            </Shelf>
-          )}
-        </div>
-      </section>
-
-      <section className={styles.section} aria-labelledby="sec-creators">
-        <SectionHeader title="クリエイター" moreHref="/user" />
-        <div className={styles.shelfBox}>
-          {creators.length === 0 ? (
-            <EmptyShelf message="該当するクリエイターがまだいません。" />
-          ) : (
-            <Shelf ariaLabel="ピックアップクリエイター">
-              {creators.map((c, index) => (
-                <CreatorCard
-                  key={`${c.id}-creator-${index}`}
-                  data={{
-                    id: c.id,
-                    x_name: c.x_name,
-                    icon_url: c.icon_url,
-                    video_count:
-                      (Number(c.video_count) || 0) +
-                      (Number(c.collab_count) || 0),
-                  }}
-                />
+              {latest.map((video, index) => (
+                <VideoCard key={`${video.id}-latest-${index}`} video={video} />
               ))}
             </Shelf>
           )}
@@ -170,18 +186,17 @@ export default async function TopPage(): Promise<React.ReactElement> {
           {latestEvents.length === 0 ? (
             <EmptyShelf message="まだ公開中のイベントがありません。" />
           ) : (
-            latestEvents.map((ev) => (
+            latestEvents.map((event) => (
               <EventPanel
-                key={ev.id}
-                event={ev}
-                videos={videosByEvent[ev.id] ?? []}
+                key={event.id}
+                event={event}
+                videos={videosByEvent[event.id] ?? []}
               />
             ))
           )}
         </div>
         <div className={styles.center}>
           <Link href="/event" className="fn-btn fn-btn-ghost">
-            <Icon name="calendar" size={14} aria-hidden />
             すべてのイベントを見る
           </Link>
         </div>

@@ -19,6 +19,11 @@ interface ChapterComposerProps {
   settingsHref?: string;
   /** 動画オーナー / admin のみ CSV 一括登録 UI を出す。 */
   canBulk?: boolean;
+  /**
+   * true のとき、単発投稿フォームを描画せず CSV 一括登録 UI だけ表示する。
+   * 編集ページ側のチャプター一括登録パネル用。動画詳細ページからは false (既定)。
+   */
+  bulkOnly?: boolean;
 }
 
 function parseTimeInput(raw: string): number {
@@ -55,6 +60,7 @@ export function ChapterComposer({
   canPost,
   settingsHref,
   canBulk = false,
+  bulkOnly = false,
 }: ChapterComposerProps): React.ReactElement {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
@@ -132,7 +138,9 @@ export function ChapterComposer({
     });
   };
 
-  if (!canPost) {
+  // 単発フォームを使わない bulkOnly モードでは、canPost ガード (X ID 設定への案内) を
+  // 出さない。CSV 一括登録 UI も canBulk が false なら何も描画しない。
+  if (!canPost && !bulkOnly) {
     return (
       <section
         style={{
@@ -163,6 +171,9 @@ export function ChapterComposer({
       </section>
     );
   }
+  if (bulkOnly && !canBulk) {
+    return <></>;
+  }
 
   return (
     <section
@@ -173,26 +184,34 @@ export function ChapterComposer({
         padding: 12,
       }}
     >
-      <header
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: open ? 10 : 0,
-        }}
-      >
-        <strong style={{ fontSize: 12, letterSpacing: "0.08em" }}>
-          チャプターコメント投稿
-        </strong>
-        <button
-          type="button"
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-          onClick={() => setOpen((v) => !v)}
+      {!bulkOnly ? (
+        <header
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: open ? 10 : 0,
+          }}
         >
-          {open ? "閉じる" : "開く"}
-        </button>
-      </header>
-      {open ? (
+          <strong style={{ fontSize: 12, letterSpacing: "0.08em" }}>
+            チャプターコメント投稿
+          </strong>
+          <button
+            type="button"
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+            onClick={() => setOpen((v) => !v)}
+          >
+            {open ? "閉じる" : "開く"}
+          </button>
+        </header>
+      ) : (
+        <header style={{ marginBottom: 6 }}>
+          <strong style={{ fontSize: 12, letterSpacing: "0.08em" }}>
+            チャプターコメント CSV 一括登録
+          </strong>
+        </header>
+      )}
+      {open && !bulkOnly ? (
         <form
           onSubmit={onSubmit}
           style={{ display: "flex", flexDirection: "column", gap: 8 }}
@@ -297,11 +316,13 @@ export function ChapterComposer({
       {canBulk ? (
         <details
           style={{
-            marginTop: open ? 12 : 8,
-            borderTop: "1px solid var(--border-subtle)",
-            paddingTop: 8,
+            // bulkOnly のときは独立カードとして使うので、上区切り線は不要。
+            marginTop: bulkOnly ? 0 : open ? 12 : 8,
+            borderTop: bulkOnly ? undefined : "1px solid var(--border-subtle)",
+            paddingTop: bulkOnly ? 0 : 8,
           }}
-          open={bulkOpen}
+          // bulkOnly 時は最初から開いた状態にする (専用パネルとして利用される文脈)
+          open={bulkOnly || bulkOpen}
           onToggle={(e) => setBulkOpen((e.target as HTMLDetailsElement).open)}
         >
           <summary

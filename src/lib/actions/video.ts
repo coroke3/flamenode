@@ -13,10 +13,12 @@ import {
   videos,
   videoEvents,
   videoInteractions,
+  videoMemberChapters,
   videoMembers,
   xUsers,
   xUserIcons,
 } from "@/lib/db/schema";
+import { parseChapterTime } from "@/lib/utils/chapterTime";
 import { getEditableEventIds } from "@/lib/auth/ownership";
 import { inArray } from "drizzle-orm";
 import { extractYoutubeId } from "@/lib/youtube/id";
@@ -107,11 +109,18 @@ function isYoutubeIdUniqueConstraintError(err: unknown): boolean {
   );
 }
 
+interface MemberChapterInput {
+  time: string;
+  label: string;
+  note: string;
+}
+
 interface MemberInput {
   name: string;
   x_user_id: string;
   role: string;
   comment: string;
+  chapters: MemberChapterInput[];
 }
 
 function parseMembersJson(raw: FormDataEntryValue | null): MemberInput[] {
@@ -128,7 +137,28 @@ function parseMembersJson(raw: FormDataEntryValue | null): MemberInput[] {
       const role = String(o.role ?? "").trim();
       const comment = String(o.comment ?? "").trim();
       if (!name && !xid) continue;
-      out.push({ name: name || `@${xid}`, x_user_id: xid, role, comment });
+      // chapters: VideoMembersField から渡される { time, label, note }[]
+      let chapters: MemberChapterInput[] = [];
+      if (Array.isArray(o.chapters)) {
+        chapters = (o.chapters as unknown[])
+          .map((c): MemberChapterInput | null => {
+            if (typeof c !== "object" || c === null) return null;
+            const cc = c as Record<string, unknown>;
+            const time = String(cc.time ?? "").trim();
+            const label = String(cc.label ?? "").trim();
+            const note = String(cc.note ?? "").trim();
+            if (!time || !label) return null;
+            return { time, label, note };
+          })
+          .filter((c): c is MemberChapterInput => c !== null);
+      }
+      out.push({
+        name: name || `@${xid}`,
+        x_user_id: xid,
+        role,
+        comment,
+        chapters,
+      });
     }
     return out;
   } catch {
@@ -308,7 +338,17 @@ async function syncVideoEvents(
 }
 
 /**
- * 作品の合作メンバーを総入れ替えする。
+ * 作品の **公開メンバー** (is_public_member = 1) のみを差し替える。
+ *
+ * 重要 (video_collaborators 統合に伴う安全策):
+ *   - is_public_member = 0 の非公開編集者 (can_edit=1 の権限保有者) は **削除しない**。
+ *     フォームから送られていないだけで「権限だけ持つ非公開メンバー」を消さない。
+ *   - 既存 video_members の中で x_user_id が同じ行があれば、
+ *     `can_edit / discord_user_id / edit_granted_by_user_id / edit_granted_at /
+ *      edit_updated_at` を引き継ぐ。
+ *   - x_user_id が空のメンバーは、行ごとの引き継ぎが難しいので新規行扱い
+ *     (can_edit = 0)。権限が欲しければ専用 UI で再付与する。
+ *
  * X ID が指定されているが xUsers に存在しない場合は pending で自動作成。
  */
 async function replaceVideoMembers(
@@ -316,17 +356,56 @@ async function replaceVideoMembers(
   videoId: string,
   members: MemberInput[],
 ): Promise<void> {
-  await db.delete(videoMembers).where(eq(videoMembers.video_id, videoId));
+  // 既存の video_members を取得
+  const existing = await db
+    .select()
+    .from(videoMembers)
+    .where(eq(videoMembers.video_id, videoId));
+
+  // is_public_member = 1 だけ削除対象。0 の非公開編集者は触らない。
+  const publicExisting = existing.filter((m) => m.is_public_member === 1);
+  // x_user_id (normalize) で既存の引き継ぎ情報を引ける Map を作る。
+  // 同じ x_user_id を持つ既存行があれば、編集権限 / discord_user_id を引き継ぐ。
+  const carryByXid = new Map<string, (typeof existing)[number]>();
+  for (const row of existing) {
+    if (row.x_user_id) {
+      const key = normalizeXId(row.x_user_id);
+      if (key && !carryByXid.has(key)) carryByXid.set(key, row);
+    }
+  }
+
+  // 削除対象の video_members 行に紐づく video_member_chapters を先に削除する。
+  // 非公開編集者の video_member_chapters は元から無いはずだが、関係構造を維持するため
+  // 「これから削除する member 行に紐づくチャプター」だけを掃除する。
+  const publicExistingIds = publicExisting.map((m) => m.id);
+  if (publicExistingIds.length > 0) {
+    await db
+      .delete(videoMemberChapters)
+      .where(inArray(videoMemberChapters.video_member_id, publicExistingIds));
+  }
+
+  // 公開行だけ DELETE。非公開編集者は残す。
+  if (publicExisting.length > 0) {
+    await db
+      .delete(videoMembers)
+      .where(
+        and(
+          eq(videoMembers.video_id, videoId),
+          eq(videoMembers.is_public_member, 1),
+        )!,
+      );
+  }
   if (members.length === 0) return;
+
   const now = Math.floor(Date.now() / 1000);
   for (let i = 0; i < members.length; i++) {
     const m = members[i];
     const xid = m.x_user_id || null;
     if (xid) {
-      const existing = (
+      const existingXUser = (
         await db.select().from(xUsers).where(eq(xUsers.id, xid)).limit(1)
       )[0];
-      if (!existing) {
+      if (!existingXUser) {
         await db.insert(xUsers).values({
           id: xid,
           x_name: m.name || `@${xid}`,
@@ -335,8 +414,10 @@ async function replaceVideoMembers(
         });
       }
     }
+    const carry = xid ? carryByXid.get(normalizeXId(xid)) : undefined;
+    const newMemberId = generateId("vm");
     await db.insert(videoMembers).values({
-      id: generateId("vm"),
+      id: newMemberId,
       video_id: videoId,
       x_user_id: xid,
       name: m.name,
@@ -344,7 +425,39 @@ async function replaceVideoMembers(
       role: m.role || null,
       comment: m.comment || null,
       order_index: i,
+      // 公開メンバー欄からの入力は is_public_member = 1。
+      is_public_member: 1,
+      // 引き継ぎ: x_user_id 一致なら旧 row の権限情報を維持。
+      can_edit: carry?.can_edit ?? 0,
+      discord_user_id: carry?.discord_user_id ?? null,
+      edit_granted_by_user_id: carry?.edit_granted_by_user_id ?? null,
+      edit_granted_at: carry?.edit_granted_at ?? null,
+      edit_updated_at: carry?.edit_updated_at ?? null,
     });
+
+    // メンバーチャプターを保存。time が不正 (parseChapterTime null) なものはスキップ。
+    if (m.chapters && m.chapters.length > 0) {
+      for (let j = 0; j < m.chapters.length; j++) {
+        const ch = m.chapters[j];
+        const sec = parseChapterTime(ch.time);
+        if (sec === null) continue;
+        const label = ch.label.trim();
+        if (!label || label.length > 120) continue;
+        const note = ch.note.trim();
+        if (note.length > 1000) continue;
+        await db.insert(videoMemberChapters).values({
+          id: generateId("vmc"),
+          video_id: videoId,
+          video_member_id: newMemberId,
+          chapter_time: sec,
+          chapter_label: label,
+          note: note || null,
+          order_index: j,
+          created_at: now,
+          updated_at: now,
+        });
+      }
+    }
   }
 }
 

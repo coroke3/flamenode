@@ -9,15 +9,8 @@ type EventRow = typeof eventsTable.$inferSelect;
 
 interface EventRecruitCardProps {
   event: EventRow;
-  /** event_id に紐づく available スロット件数。null は未取得 / 未対応。 */
   available: number | null;
-  /** event_id に紐づくスロット総数。null は未取得 / 未対応。 */
   total: number | null;
-  /**
-   * 表示バリアント。
-   * - primary (既定): フル表示。トップの主役カード用。
-   * - compact: タイムライン非表示・countdown 小型化。副イベント (2枚目以降) 用。
-   */
   variant?: "primary" | "compact";
 }
 
@@ -30,15 +23,45 @@ type RecruitState =
   | "ended"
   | "full";
 
-const STATE_LABEL: Record<RecruitState, string> = {
-  before_entry: "募集開始前",
-  accepting: "募集期間中",
-  after_entry: "投稿期間中",
-  soon: "開催間近",
-  ongoing: "開催中",
-  ended: "受付終了",
-  full: "満枠",
-};
+interface TimelinePoint {
+  name: string;
+  time: number;
+  pos: number;
+  emphasized?: boolean;
+}
+
+function stateLabel(state: RecruitState): string {
+  switch (state) {
+    case "before_entry":
+      return "募集開始前";
+    case "accepting":
+      return "エントリー受付中";
+    case "after_entry":
+      return "投稿期間中";
+    case "soon":
+      return "開催間近";
+    case "ongoing":
+      return "開催中";
+    case "ended":
+      return "終了";
+    case "full":
+      return "満枠";
+  }
+}
+
+function ctaLabel(state: RecruitState, fallback: string): string {
+  if (state === "accepting") return "エントリーする";
+  if (
+    state === "before_entry" ||
+    state === "soon" ||
+    state === "ongoing" ||
+    state === "ended" ||
+    state === "full"
+  ) {
+    return "イベント詳細を見る";
+  }
+  return fallback;
+}
 
 function resolveState(
   event: EventRow,
@@ -46,7 +69,8 @@ function resolveState(
   now: number,
 ): RecruitState {
   if (event.is_archived === 1) return "ended";
-  if (event.end_time != null && now > event.end_time) return "ended";
+  const effectiveEnd = event.end_time ?? event.start_time;
+  if (effectiveEnd != null && now >= effectiveEnd) return "ended";
   if (event.start_time != null && now >= event.start_time) return "ongoing";
   if (
     event.entry_end_time != null &&
@@ -54,8 +78,7 @@ function resolveState(
     event.start_time != null
   ) {
     const daysToStart = (event.start_time - now) / 86400;
-    if (daysToStart <= 3) return "soon";
-    return "after_entry";
+    return daysToStart <= 3 ? "soon" : "after_entry";
   }
   if (
     event.is_entry_open === 1 &&
@@ -71,7 +94,6 @@ function resolveState(
   return "accepting";
 }
 
-/** 残り秒数 -> { value, unit } の整形。日が 1 以上なら日単位、それ未満は時間。 */
 function formatRemainingForHero(seconds: number | null): {
   value: string;
   unit: string;
@@ -129,7 +151,7 @@ function resolveCta(
     case "accepting":
       return {
         href: `/event/${event.id}#slot`,
-        label: "参加する",
+        label: "エントリーする",
         iconName: "calendar",
       };
     case "after_entry":
@@ -139,111 +161,116 @@ function resolveCta(
         iconName: "edit",
       };
     case "before_entry":
-      return {
-        href: `/event/${event.id}`,
-        label: "詳細ページへ",
-        iconName: "chevron-right",
-      };
     case "soon":
     case "ongoing":
     case "ended":
     case "full":
       return {
         href: `/event/${event.id}`,
-        label: "詳細を見る",
+        label: "イベント詳細を見る",
         iconName: "chevron-right",
       };
   }
 }
 
-interface TimelinePoint {
-  name: string;
-  time: number;
-  pos: number;
-  emphasized?: boolean;
-}
-
-function buildTimeline(event: EventRow, now: number) {
+function buildTimeline(event: EventRow, now: number): {
+  milestones: TimelinePoint[];
+  entryRange?: { left: number; width: number };
+  postRange?: { left: number; width: number };
+  nowPos?: number;
+} {
   const rawPoints: Array<{ name: string; time: number; emphasized?: boolean }> =
     [];
-  if (event.entry_start_time != null)
+  if (event.entry_start_time != null) {
     rawPoints.push({ name: "募集開始", time: event.entry_start_time });
-  if (event.entry_end_time != null)
+  }
+  if (event.entry_end_time != null) {
     rawPoints.push({
       name: "募集終了",
       time: event.entry_end_time,
       emphasized: true,
     });
-  if (event.start_time != null)
+  }
+  if (event.start_time != null) {
     rawPoints.push({ name: "開催", time: event.start_time, emphasized: true });
-  if (event.end_time != null && event.end_time !== event.start_time)
+  }
+  if (event.end_time != null && event.end_time !== event.start_time) {
     rawPoints.push({ name: "終了", time: event.end_time });
+  }
 
-  // 同時刻のマイルストーンはラベルを「募集終了 / 開催」のように結合する。
-  // これがないと CSS の left:% 配置で位置が重なってラベルが読めなくなる。
   const merged = new Map<
     number,
     { names: string[]; emphasized: boolean; time: number }
   >();
-  for (const p of rawPoints) {
-    const existing = merged.get(p.time);
+  for (const point of rawPoints) {
+    const existing = merged.get(point.time);
     if (existing) {
-      existing.names.push(p.name);
-      existing.emphasized = existing.emphasized || !!p.emphasized;
+      existing.names.push(point.name);
+      existing.emphasized = existing.emphasized || !!point.emphasized;
     } else {
-      merged.set(p.time, {
-        names: [p.name],
-        emphasized: !!p.emphasized,
-        time: p.time,
+      merged.set(point.time, {
+        names: [point.name],
+        emphasized: !!point.emphasized,
+        time: point.time,
       });
     }
   }
-  const points = Array.from(merged.values())
-    .map((m) => ({
-      name: m.names.join(" / "),
-      time: m.time,
-      emphasized: m.emphasized,
-    }))
-    .sort((a, b) => a.time - b.time);
 
-  if (points.length < 2) return null;
+  const points = Array.from(merged.values()).sort((a, b) => a.time - b.time);
+  if (points.length < 2) return { milestones: [] };
 
-  // padding for visual breathing room: extend range by 5% before first / after last
-  const min = Math.min(...points.map((p) => p.time));
-  const max = Math.max(...points.map((p) => p.time));
-  const rawRange = max - min;
-  if (rawRange <= 0) return null;
-  const pad = rawRange * 0.05;
-  const lo = min - pad;
-  const hi = max + pad;
-  const range = hi - lo;
+  const min = points[0].time;
+  const max = points[points.length - 1].time;
+  const span = Math.max(1, max - min);
+  const toPos = (time: number) =>
+    Math.max(0, Math.min(100, ((time - min) / span) * 100));
 
-  const milestones: TimelinePoint[] = points.map((p) => ({
-    name: p.name,
-    time: p.time,
-    pos: ((p.time - lo) / range) * 100,
-    emphasized: p.emphasized,
+  const milestones = points.map((point) => ({
+    name: point.names.join(" / "),
+    time: point.time,
+    pos: toPos(point.time),
+    emphasized: point.emphasized,
   }));
 
-  const nowPos = Math.max(0, Math.min(100, ((now - lo) / range) * 100));
-
-  // 募集期間 / 投稿期間のレンジを計算
   const entryRange =
     event.entry_start_time != null && event.entry_end_time != null
       ? {
-          start: ((event.entry_start_time - lo) / range) * 100,
-          end: ((event.entry_end_time - lo) / range) * 100,
+          left: toPos(event.entry_start_time),
+          width: Math.max(1, toPos(event.entry_end_time) - toPos(event.entry_start_time)),
         }
-      : null;
+      : undefined;
   const postRange =
     event.entry_end_time != null && event.start_time != null
       ? {
-          start: ((event.entry_end_time - lo) / range) * 100,
-          end: ((event.start_time - lo) / range) * 100,
+          left: toPos(event.entry_end_time),
+          width: Math.max(1, toPos(event.start_time) - toPos(event.entry_end_time)),
         }
-      : null;
+      : undefined;
+  const nowPos = now >= min && now <= max ? toPos(now) : undefined;
 
-  return { milestones, nowPos, entryRange, postRange };
+  return { milestones, entryRange, postRange, nowPos };
+}
+
+function stateBadgeClass(
+  state: RecruitState,
+  classMap: Record<string, string>,
+): string {
+  switch (state) {
+    case "accepting":
+      return classMap.stateBadgeAccept ?? "";
+    case "after_entry":
+      return classMap.stateBadgePost ?? "";
+    case "soon":
+      return classMap.stateBadgeSoon ?? "";
+    case "full":
+      return classMap.stateBadgeFull ?? "";
+    case "ended":
+      return classMap.stateBadgeEnded ?? "";
+    case "before_entry":
+      return classMap.stateBadgeBefore ?? "";
+    case "ongoing":
+      return classMap.stateBadgeOngoing ?? "";
+  }
 }
 
 export function EventRecruitCard({
@@ -255,89 +282,98 @@ export function EventRecruitCard({
   const now = Math.floor(Date.now() / 1000);
   const state = resolveState(event, available, now);
   const countdown = resolveCountdown(event, state, now);
-  const cta = resolveCta(event, state);
   const countdownDisplay = formatRemainingForHero(countdown.seconds);
-  // compact variant ではタイムラインを描画しない (CSS で display:none 済み + 計算スキップ)。
-  const timeline = variant === "compact" ? null : buildTimeline(event, now);
-
-  // 残り枠の警告レベル
-  const slotsLow =
-    available != null && total != null && total > 0 && available <= Math.max(3, Math.floor(total * 0.1));
-  const slotsFull = available != null && available === 0;
+  const cta = resolveCta(event, state);
+  const timeline = buildTimeline(event, now);
+  const slotsFull = available != null && available <= 0;
+  const slotsLow = available != null && available > 0 && available <= 3;
+  const filledSlots =
+    available != null && total != null && total > 0
+      ? Math.max(0, total - available)
+      : null;
+  const fillRatio =
+    filledSlots != null && total != null && total > 0
+      ? Math.min(100, Math.round((filledSlots / total) * 100))
+      : null;
+  const accentStyle = {
+    "--event-accent": event.accent_color ?? "#ffd400",
+  } as React.CSSProperties;
 
   return (
     <article
-      className={`${styles.card} ${variant === "compact" ? styles.cardCompact : ""}`}
-      aria-labelledby={`recruit-${event.id}-title`}
+      className={[
+        styles.card,
+        variant === "compact" ? styles.cardCompact : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      style={accentStyle}
     >
       <div className={styles.glow} aria-hidden />
-
       <div className={styles.left}>
         <header className={styles.header}>
-          <span className={styles.eyebrow}>
-            <Icon name="alert" size={11} aria-hidden />
-            FlameNode Event
-          </span>
-          <Link
-            id={`recruit-${event.id}-title`}
-            href={`/event/${event.id}`}
-            className={styles.title}
-          >
+          <span className={styles.eyebrow}>FlameNode Event</span>
+          <Link href={`/event/${event.id}`} className={styles.title}>
             {event.title}
           </Link>
           <span
             className={`${styles.stateBadge} ${stateBadgeClass(state, styles)}`}
-            data-state={state}
           >
-            {STATE_LABEL[state]}
+            {stateLabel(state)}
           </span>
         </header>
 
-        {timeline ? (
-          <div className={styles.timeline}>
-            <div className={styles.timelineTrack} aria-hidden>
+        {timeline.milestones.length > 0 ? (
+          <div className={styles.timeline} aria-label="イベントの進行">
+            <div className={styles.timelineTrack}>
               {timeline.entryRange ? (
                 <span
                   className={styles.timelineEntryRange}
                   style={{
-                    left: `${timeline.entryRange.start}%`,
-                    width: `${Math.max(0, timeline.entryRange.end - timeline.entryRange.start)}%`,
+                    left: `${timeline.entryRange.left}%`,
+                    width: `${timeline.entryRange.width}%`,
                   }}
+                  aria-hidden
                 />
               ) : null}
               {timeline.postRange ? (
                 <span
                   className={styles.timelinePostRange}
                   style={{
-                    left: `${timeline.postRange.start}%`,
-                    width: `${Math.max(0, timeline.postRange.end - timeline.postRange.start)}%`,
+                    left: `${timeline.postRange.left}%`,
+                    width: `${timeline.postRange.width}%`,
                   }}
+                  aria-hidden
                 />
               ) : null}
-              {timeline.milestones.map((m) => (
+              {timeline.milestones.map((point) => (
                 <span
-                  key={m.name}
-                  className={`${styles.timelineMilestone} ${m.emphasized ? styles.timelineMilestoneEmph : ""}`}
-                  style={{ left: `${m.pos}%` }}
-                  title={`${m.name} ${formatUnix(m.time, { dateOnly: true })}`}
+                  key={`${point.name}-${point.time}`}
+                  className={`${styles.timelineMilestone} ${
+                    point.emphasized ? styles.timelineMilestoneEmph : ""
+                  }`}
+                  style={{ left: `${point.pos}%` }}
+                  aria-hidden
                 />
               ))}
-              <span
-                className={styles.timelineNow}
-                style={{ left: `${timeline.nowPos}%` }}
-                aria-hidden
-              />
+              {timeline.nowPos != null ? (
+                <span
+                  className={styles.timelineNow}
+                  style={{ left: `${timeline.nowPos}%` }}
+                  aria-hidden
+                />
+              ) : null}
             </div>
             <div className={styles.timelineLabels} aria-hidden>
-              {timeline.milestones.map((m) => (
+              {timeline.milestones.map((point) => (
                 <span
-                  key={`label-${m.name}`}
+                  key={`label-${point.name}-${point.time}`}
                   className={styles.timelineLabel}
-                  style={{ left: `${m.pos}%` }}
+                  style={{ left: `${point.pos}%` }}
                 >
-                  <span className={styles.timelineLabelName}>{m.name}</span>
+                  <span className={styles.timelineLabelName}>{point.name}</span>
                   <span className={styles.timelineLabelDate}>
-                    {formatUnix(m.time, { dateOnly: true })}
+                    {formatUnix(point.time, { dateOnly: true })}
                   </span>
                 </span>
               ))}
@@ -350,7 +386,7 @@ export function EventRecruitCard({
             <div className={styles.periodItem}>
               <dt>募集期間</dt>
               <dd>
-                {formatUnix(event.entry_start_time, { dateOnly: true })} 〜{" "}
+                {formatUnix(event.entry_start_time, { dateOnly: true })} -{" "}
                 {formatUnix(event.entry_end_time, { dateOnly: true })}
               </dd>
             </div>
@@ -359,7 +395,7 @@ export function EventRecruitCard({
             <div className={styles.periodItem}>
               <dt>投稿期間</dt>
               <dd>
-                {formatUnix(event.entry_end_time, { dateOnly: true })} 〜{" "}
+                {formatUnix(event.entry_end_time, { dateOnly: true })} -{" "}
                 {formatUnix(event.start_time, { dateOnly: true })}
               </dd>
             </div>
@@ -374,9 +410,9 @@ export function EventRecruitCard({
       </div>
 
       <aside className={styles.right}>
-        {countdownDisplay ? (
-          <div className={styles.countdown}>
-            <span className={styles.countdownLabel}>{countdown.label}</span>
+        <div className={styles.countdown}>
+          <span className={styles.countdownLabel}>{countdown.label}</span>
+          {countdownDisplay ? (
             <div className={styles.countdownValueWrap}>
               <span className={styles.countdownValue}>
                 {countdownDisplay.value}
@@ -385,15 +421,13 @@ export function EventRecruitCard({
                 {countdownDisplay.unit}
               </span>
             </div>
-          </div>
-        ) : (
-          <div className={styles.countdown}>
-            <span className={styles.countdownLabel}>{countdown.label}</span>
-          </div>
-        )}
+          ) : null}
+        </div>
 
         <div
-          className={`${styles.slots} ${slotsFull ? styles.slotsFull : ""} ${slotsLow && !slotsFull ? styles.slotsLow : ""}`}
+          className={`${styles.slots} ${slotsFull ? styles.slotsFull : ""} ${
+            slotsLow && !slotsFull ? styles.slotsLow : ""
+          }`}
         >
           <span className={styles.slotsLabel}>残り枠</span>
           {available != null ? (
@@ -406,7 +440,7 @@ export function EventRecruitCard({
             </span>
           ) : (
             <span className={styles.slotsValueWrap}>
-              <span className={styles.slotsUnit}>—</span>
+              <span className={styles.slotsUnit}>未集計</span>
             </span>
           )}
           {slotsFull ? (
@@ -414,35 +448,29 @@ export function EventRecruitCard({
           ) : slotsLow ? (
             <span className={styles.slotsHint}>残りわずか</span>
           ) : null}
+          {fillRatio != null && filledSlots != null && total != null ? (
+            <div
+              className={styles.slotGauge}
+              aria-label={`参加枠 ${filledSlots} / ${total}`}
+            >
+              <span className={styles.slotGaugeTrack}>
+                <span
+                  className={styles.slotGaugeFill}
+                  style={{ width: `${fillRatio}%` }}
+                />
+              </span>
+              <span className={styles.slotGaugeText}>
+                参加枠 {filledSlots} / {total}・{fillRatio}% 埋まり
+              </span>
+            </div>
+          ) : null}
         </div>
 
         <Link href={cta.href} className={styles.cta}>
           <Icon name={cta.iconName} size={14} aria-hidden />
-          {cta.label}
+          {ctaLabel(state, cta.label)}
         </Link>
       </aside>
     </article>
   );
-}
-
-function stateBadgeClass(
-  s: RecruitState,
-  styles: Record<string, string>,
-): string {
-  switch (s) {
-    case "accepting":
-      return styles.stateBadgeAccept ?? "";
-    case "after_entry":
-      return styles.stateBadgePost ?? "";
-    case "soon":
-      return styles.stateBadgeSoon ?? "";
-    case "full":
-      return styles.stateBadgeFull ?? "";
-    case "ended":
-      return styles.stateBadgeEnded ?? "";
-    case "before_entry":
-      return styles.stateBadgeBefore ?? "";
-    case "ongoing":
-      return styles.stateBadgeOngoing ?? "";
-  }
 }

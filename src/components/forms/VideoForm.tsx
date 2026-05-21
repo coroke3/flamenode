@@ -23,6 +23,7 @@ import {
 } from "@/components/forms/VideoMembersField";
 import { VideoIconPicker } from "@/components/forms/VideoIconPicker";
 import { normalizeXId } from "@/lib/utils/xid";
+import { ErrorCallout } from "@/components/ui/ErrorCallout";
 
 export interface VideoFormInitialValues {
   display_name?: string;
@@ -795,19 +796,10 @@ export function VideoForm({
       </section>
 
       {result && !result.ok ? (
-        <div
-          role="alert"
-          style={{
-            padding: "12px 14px",
-            border: "1px solid var(--accent-danger)",
-            borderRadius: "var(--radius-sm)",
-            background: "var(--accent-danger-soft, rgba(255,0,0,0.08))",
-            color: "var(--accent-danger)",
-            fontSize: 13,
-          }}
-        >
-          <Icon name="warning" size={13} aria-hidden /> {result.message ?? "提出に失敗しました。"}
-        </div>
+        <ErrorCallout
+          reason={result.reason}
+          message={result.message ?? "提出に失敗しました。"}
+        />
       ) : null}
       {result && result.ok ? (
         <div

@@ -15,7 +15,6 @@ export interface ChapterEntry {
   note?: string | null;
   author_name?: string | null;
   author_icon?: string | null;
-  video_member_id?: string | null;
 }
 
 interface ChapterTabsProps {

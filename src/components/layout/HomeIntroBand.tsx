@@ -3,7 +3,7 @@ import Link from "next/link";
 import styles from "./HomeIntroBand.module.css";
 import { Icon } from "@/components/ui/Icon";
 import type { events } from "@/lib/db/schema";
-import { isAcceptingEntries } from "@/lib/utils/eventStatus";
+import { computeEventStatus, isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { EventRecruitCard } from "./EventRecruitCard";
 
 type EventRow = typeof events.$inferSelect;
@@ -15,58 +15,68 @@ export interface HomeIntroSlotStat {
 
 interface HomeIntroBandProps {
   activeEvents: EventRow[];
-  /** event_id -> { available, total } の集計。available 単独で欲しい従来用途は available のみ参照される。 */
   slotStats?: Map<string, HomeIntroSlotStat>;
 }
 
-/**
- * トップ最上部の導入ブロック。
- * - 募集中 / 開催中などの featured イベントがある → 募集カード (EventRecruitCard) を主役として全幅表示
- * - 何もない → FlameNode のブランド帯 (作品一覧 / おすすめ 導線)
- *
- * 仕様: 募集カードは黒ベース + 黄色アクセントの「主役級UI」。
- */
 const MAX_RECRUIT_CARDS = 3;
+
+function isHeroCandidate(event: EventRow, now: number): boolean {
+  const status = computeEventStatus(event, now);
+  return status !== "draft" && status !== "ended" && status !== "archived";
+}
+
+function eventHeroRank(event: EventRow, now: number): number {
+  const acceptingBonus = isAcceptingEntries(event) ? -10_000_000 : 0;
+  const start =
+    event.start_time ??
+    event.end_time ??
+    event.entry_start_time ??
+    event.created_at ??
+    now;
+  if (start >= now) return acceptingBonus + (start - now);
+  if (event.end_time != null && event.end_time >= now) {
+    return acceptingBonus - 5_000_000;
+  }
+  return acceptingBonus + 100_000_000 + Math.abs(start - now);
+}
 
 export function HomeIntroBand({
   activeEvents,
   slotStats,
 }: HomeIntroBandProps): React.ReactElement {
-  // 募集中イベントを募集締切が近い順で複数表示する。
-  // 締切未設定は最後尾。同点なら開催日 (effective start) で並べる。
-  const acceptingEvents = activeEvents
-    .filter((e) => isAcceptingEntries(e))
+  const now = Math.floor(Date.now() / 1000);
+  const heroEvents = activeEvents
+    .filter((event) => isHeroCandidate(event, now))
     .sort((a, b) => {
-      const aEnd = a.entry_end_time ?? Number.POSITIVE_INFINITY;
-      const bEnd = b.entry_end_time ?? Number.POSITIVE_INFINITY;
-      if (aEnd !== bEnd) return aEnd - bEnd;
+      const rankDiff = eventHeroRank(a, now) - eventHeroRank(b, now);
+      if (rankDiff !== 0) return rankDiff;
       const aStart = a.start_time ?? Number.POSITIVE_INFINITY;
       const bStart = b.start_time ?? Number.POSITIVE_INFINITY;
       return aStart - bStart;
     });
 
-  if (acceptingEvents.length > 0) {
-    const [primary, ...rest] = acceptingEvents.slice(0, MAX_RECRUIT_CARDS);
-    const hasMore = acceptingEvents.length > MAX_RECRUIT_CARDS;
+  if (heroEvents.length > 0) {
+    const [primary, ...rest] = heroEvents.slice(0, MAX_RECRUIT_CARDS);
+    const hasMore = heroEvents.length > MAX_RECRUIT_CARDS;
     const primaryStat = slotStats?.get(primary.id);
+
     return (
-      <section className={styles.heroWrap} aria-label="現在のイベント募集">
-        {/* 主役カード: フル表示で 1 件だけ大きく見せる */}
+      <section className={styles.heroWrap} aria-label="注目イベント">
         <EventRecruitCard
           event={primary}
           available={primaryStat ? primaryStat.available : null}
           total={primaryStat ? primaryStat.total : null}
           variant="primary"
         />
-        {/* 副カード: compact variant でコンパクトに 2 件まで横並び (スマホは縦積み) */}
+
         {rest.length > 0 ? (
           <div className={styles.recruitCompactRow}>
-            {rest.map((ev) => {
-              const stat = slotStats?.get(ev.id);
+            {rest.map((event) => {
+              const stat = slotStats?.get(event.id);
               return (
                 <EventRecruitCard
-                  key={ev.id}
-                  event={ev}
+                  key={event.id}
+                  event={event}
                   available={stat ? stat.available : null}
                   total={stat ? stat.total : null}
                   variant="compact"
@@ -75,10 +85,12 @@ export function HomeIntroBand({
             })}
           </div>
         ) : null}
+
         {hasMore ? (
           <div className={styles.recruitMore}>
             <Link href="/event" className="fn-btn fn-btn-ghost fn-btn-sm">
-              <Icon name="calendar" size={12} aria-hidden /> 募集中イベントをすべて見る ({acceptingEvents.length}件)
+              <Icon name="calendar" size={12} aria-hidden />
+              すべてのイベントを見る ({heroEvents.length}件)
             </Link>
           </div>
         ) : null}
@@ -86,12 +98,11 @@ export function HomeIntroBand({
     );
   }
 
-  // 募集中なし: 注目作品 (= activeEvents[0] fallback) または FlameNode ブランド帯
   const fallback = activeEvents[0];
   if (fallback) {
     const stat = slotStats?.get(fallback.id);
     return (
-      <section className={styles.heroWrap} aria-label="現在のイベント募集">
+      <section className={styles.heroWrap} aria-label="注目イベント">
         <EventRecruitCard
           event={fallback}
           available={stat ? stat.available : null}
@@ -108,20 +119,20 @@ export function HomeIntroBand({
         <div className={styles.brand}>
           <h1 className={styles.title}>FlameNode</h1>
           <p className={styles.lead}>
-            映像（フレーム）の結節点（ノード）。
+            映像作品とイベント参加をつなぐ場所。
             <span className={styles.leadDesktop}>
               {" "}
-              作品 · 作者 · イベント · 視聴者の接点を継続的につなぐ動画プラットフォーム。
+              作品、クリエイター、イベントを気持ちよく行き来できます。
             </span>
           </p>
           <div className={styles.actions}>
             <Link href="/list" className="fn-btn fn-btn-primary">
               <Icon name="list" size={14} aria-hidden />
-              作品一覧から探す
+              作品を見る
             </Link>
             <Link href="/recommend" className="fn-btn fn-btn-ghost">
               <Icon name="heart" size={14} aria-hidden />
-              おすすめ
+              おすすめを見る
             </Link>
           </div>
         </div>
@@ -129,4 +140,3 @@ export function HomeIntroBand({
     </section>
   );
 }
-

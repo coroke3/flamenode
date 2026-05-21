@@ -215,7 +215,7 @@ export default async function VideoDetailPage({
 
   if (!bundle) notFound();
   const {
-    detail: { video, creator, events, members, chapters },
+    detail: { video, creator, events, members, chapters, memberChapters },
     related,
     likeActive,
     bookmarkActive,
@@ -599,15 +599,12 @@ export default async function VideoDetailPage({
               <h2 className={styles.sectionTitle}>参加メンバー ({members.length})</h2>
               <MemberSection
                 members={members}
-                chapters={chapters.map((c) => ({
+                memberChapters={memberChapters.map((c) => ({
                   id: c.id,
                   chapter_time: c.chapter_time,
                   chapter_label: c.chapter_label,
-                  visibility: (c.visibility ?? "public") as "public" | "private",
                   note: c.note,
-                  author_name: c.author_name,
-                  author_icon: c.author_icon,
-                  video_member_id: c.video_member_id ?? null,
+                  video_member_id: c.video_member_id,
                 }))}
               />
             </section>
@@ -638,15 +635,23 @@ export default async function VideoDetailPage({
               note: c.note,
               author_name: c.author_name,
               author_icon: c.author_icon,
-              video_member_id: c.video_member_id ?? null,
             }))}
           />
 
+          {/*
+            通常のチャプターコメントは動画詳細ページから投稿する仕様に戻す。
+            メンバーチャプターは編集ページ側の VideoMembersField で管理するため
+            ここには出さない。
+          */}
           {viewerUser?.id ? (
             <ChapterComposer
               videoId={video.id}
               canPost={viewerXApproved}
-              canBulk={viewerCanEditChapters}
+              /*
+                CSV 一括登録は動画編集ページ専用に移設したため、動画詳細ページ
+                からは出さない。ここではログイン済みユーザーの単発投稿のみ提供する。
+              */
+              canBulk={false}
               settingsHref={`/dashboard/settings?next=${encodeURIComponent(`/${rawId}`)}`}
             />
           ) : (

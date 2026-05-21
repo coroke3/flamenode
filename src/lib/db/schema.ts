@@ -466,6 +466,28 @@ export const videoMembers = sqliteTable(
     order_index: integer("order_index").notNull().default(0),
     /** name を小文字化したサーバ側ソート用キャッシュ。書き込み時に同期する。 */
     name_for_sort: text("name_for_sort"),
+    /**
+     * X ID 未連携の Discord ユーザーにも先に編集権限を付与できるよう保持する。
+     * 連携後は x_user_id 側でも判定できるが、両方残しておくと履歴が辿りやすい。
+     */
+    discord_user_id: text("discord_user_id"),
+    /**
+     * 1 = この video_member は作品単位の共同編集者として扱う (can_edit ON)。
+     * 範囲は `COLLABORATOR_VIDEO_EDIT_KEYS` で制限される (危険キーは触れない)。
+     * 0 = 表示・担当メンバーではあるが編集権限は無い。
+     */
+    can_edit: integer("can_edit").notNull().default(0),
+    /**
+     * 1 = 公開ページのメンバー欄に表示する。
+     * 0 = 編集権限・チャプター担当用の非公開メンバー。公開メンバー欄には出さない。
+     */
+    is_public_member: integer("is_public_member").notNull().default(1),
+    /** 編集権限を付与した Discord ユーザー ID (history_logs の operator と一致)。 */
+    edit_granted_by_user_id: text("edit_granted_by_user_id"),
+    /** 編集権限が初めて付与された時刻 (unixepoch)。 */
+    edit_granted_at: integer("edit_granted_at"),
+    /** can_edit が最後に変更された時刻 (unixepoch)。 */
+    edit_updated_at: integer("edit_updated_at"),
   },
   (t) => ({
     // 表示順 (デフォルト) + 名前ソート (MemberTable の列ソート) を高速化する。
@@ -484,13 +506,45 @@ export const videoMembers = sqliteTable(
   }),
 );
 
+/**
+ * メンバーチャプター。
+ * 通常のチャプターコメント (video_chapters) とは別データ・別UI・別保存処理として扱う。
+ * 作品編集ページの VideoMembersField でメンバー行ごとに編集される。
+ * 公開動画詳細ページの MemberSection に「メンバーチャプター」タブで表示される。
+ */
+export const videoMemberChapters = sqliteTable(
+  "video_member_chapters",
+  {
+    id: text("id").primaryKey(),
+    video_id: text("video_id").notNull(),
+    video_member_id: text("video_member_id").notNull(),
+    chapter_time: real("chapter_time").notNull(),
+    chapter_label: text("chapter_label").notNull(),
+    note: text("note"),
+    order_index: integer("order_index").default(0),
+    created_at: integer("created_at").notNull(),
+    updated_at: integer("updated_at").notNull(),
+  },
+  (t) => ({
+    byVideo: index("video_member_chapters_video_idx").on(
+      t.video_id,
+      t.chapter_time,
+    ),
+    byMember: index("video_member_chapters_member_idx").on(
+      t.video_member_id,
+      t.chapter_time,
+    ),
+  }),
+);
+
 export const videoChapters = sqliteTable("video_chapters", {
   id: text("id").primaryKey(),
   video_id: text("video_id").notNull(),
   x_user_id: text("x_user_id").notNull(),
   /**
-   * 合作メンバー (video_members.id) との紐付け。NULL = 通常チャプター。
-   * MemberSection の「担当チャプター」表示で video_member_id ごとにグループ化する。
+   * @deprecated 旧仕様: メンバーチャプターを video_chapters に混在させていた頃の列。
+   * 新仕様では `video_member_chapters` に分離している。読み取り・書き込みで使わない。
+   * migration 0017 で既存データは新テーブルへ移行済み。
    */
   video_member_id: text("video_member_id"),
   chapter_time: real("chapter_time").notNull(),

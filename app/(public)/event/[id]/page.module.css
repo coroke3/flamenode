@@ -70,6 +70,94 @@
   margin-top: 12px;
 }
 
+.heroSlotMeter {
+  display: grid;
+  gap: 7px;
+  width: min(100%, 520px);
+  margin-top: 12px;
+}
+
+.heroSlotMeterHead {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.heroSlotMeterTrack {
+  display: block;
+  height: 7px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+}
+
+.heroSlotMeterFill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--event-accent, #ffd400) 65%, #ffffff),
+    var(--event-accent, #ffd400)
+  );
+}
+
+.infoTicker {
+  width: min(98%, calc(var(--content-max) + 200px));
+  margin: -8px auto 28px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+}
+
+.infoTickerTrack {
+  display: flex;
+  width: max-content;
+  gap: 10px;
+  padding: 8px 10px;
+  animation: eventTicker 34s linear infinite;
+}
+
+.infoTickerItem {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  padding: 5px 12px;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  background: color-mix(
+    in srgb,
+    var(--event-accent, #ffd400) 9%,
+    var(--bg-elevated)
+  );
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@keyframes eventTicker {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .infoTickerTrack {
+    width: auto;
+    flex-wrap: wrap;
+    animation: none;
+  }
+}
+
 .section {
   margin-top: 36px;
 }

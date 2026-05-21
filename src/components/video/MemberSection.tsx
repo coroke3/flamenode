@@ -5,8 +5,8 @@ import Link from "next/link";
 import styles from "./MemberSection.module.css";
 import { Icon } from "@/components/ui/Icon";
 import { cn } from "@/lib/utils/cn";
-import { ChapterCommentItem } from "./ChapterCommentItem";
-import type { ChapterCommentItemEntry } from "./ChapterCommentItem";
+import { MemberChapterItem } from "./MemberChapterItem";
+import type { MemberChapterItemEntry } from "./MemberChapterItem";
 
 /**
  * 動画詳細ページ「参加メンバー」セクション。
@@ -32,14 +32,17 @@ export interface MemberSectionMember {
   icon_url: string | null;
 }
 
-export interface MemberSectionChapter extends ChapterCommentItemEntry {
-  video_member_id: string | null;
+export interface MemberSectionChapter extends MemberChapterItemEntry {
+  video_member_id: string;
 }
 
 interface MemberSectionProps {
   members: readonly MemberSectionMember[];
-  /** chapters モード用。未指定なら chapters タブを描画しない。 */
-  chapters?: readonly MemberSectionChapter[];
+  /**
+   * メンバーチャプター一覧。`video_member_id` で各メンバーにグループ化する。
+   * 通常のチャプターコメントとは別データなので、ここには混入させない。
+   */
+  memberChapters?: readonly MemberSectionChapter[];
   duration?: number | null;
   onSeek?: (time: number) => void;
 }
@@ -48,12 +51,13 @@ type ViewMode = "cards" | "table" | "chapters";
 
 export function MemberSection({
   members,
-  chapters,
+  memberChapters,
   duration,
   onSeek,
 }: MemberSectionProps): React.ReactElement | null {
   const [mode, setMode] = React.useState<ViewMode>("cards");
-  const hasChapters = Array.isArray(chapters) && chapters.length > 0;
+  const hasMemberChapters =
+    Array.isArray(memberChapters) && memberChapters.length > 0;
 
   if (members.length === 0) return null;
 
@@ -72,10 +76,10 @@ export function MemberSection({
           active={mode === "table"}
           onClick={() => setMode("table")}
         />
-        {hasChapters ? (
+        {hasMemberChapters ? (
           <TabButton
             icon="chapter"
-            label="担当チャプター"
+            label="メンバーチャプター"
             active={mode === "chapters"}
             onClick={() => setMode("chapters")}
           />
@@ -84,10 +88,10 @@ export function MemberSection({
 
       {mode === "cards" ? <CardsView members={members} /> : null}
       {mode === "table" ? <TableView members={members} /> : null}
-      {mode === "chapters" && hasChapters ? (
+      {mode === "chapters" && hasMemberChapters ? (
         <ChaptersView
           members={members}
-          chapters={chapters ?? []}
+          chapters={memberChapters ?? []}
           duration={duration}
           onSeek={onSeek}
         />
@@ -281,10 +285,12 @@ function ChaptersView({
   onSeek?: (time: number) => void;
 }): React.ReactElement {
   // video_member_id -> chapters の Map
+  // メンバーチャプターは必ず video_member_id を持つので "__unassigned__" は出ない設計だが、
+  // 万一データ不整合があった場合にも備えて末尾グループとして残す。
   const grouped = React.useMemo(() => {
     const map = new Map<string, MemberSectionChapter[]>();
     for (const c of chapters) {
-      const key = c.video_member_id ?? "__unassigned__";
+      const key = c.video_member_id || "__unassigned__";
       const arr = map.get(key) ?? [];
       arr.push(c);
       map.set(key, arr);
@@ -301,7 +307,12 @@ function ChaptersView({
     <div className={styles.chaptersWrap}>
       {members.map((m) => {
         const list = grouped.get(m.id) ?? [];
-        const displayName = m.x_name ?? m.name ?? "anonymous";
+        // 表示は「活動名(@id)」固定。x_name (X 上の名前) ではなく作品ごとの活動名
+        // (video_members.name) を優先する。
+        const displayName = m.name ?? m.x_name ?? "anonymous";
+        const headerLabel = m.x_user_id
+          ? `${displayName}(@${m.x_user_id})`
+          : displayName;
         return (
           <section key={m.id} className={styles.chapterGroup}>
             <header className={styles.chapterGroupHead}>
@@ -313,18 +324,20 @@ function ChaptersView({
                   <Icon name="user" size={11} aria-hidden />
                 )}
               </span>
-              <span className={styles.chapterGroupName}>{displayName}</span>
+              <span className={styles.chapterGroupName}>{headerLabel}</span>
               {m.role ? (
                 <span className={styles.chapterGroupRole}>{m.role}</span>
               ) : null}
               <span className={styles.chapterGroupCount}>{list.length}</span>
             </header>
             {list.length === 0 ? (
-              <div className={styles.chapterGroupEmpty}>担当チャプターなし</div>
+              <div className={styles.chapterGroupEmpty}>
+                メンバーチャプターなし
+              </div>
             ) : (
               <div className={styles.chapterGroupList}>
                 {list.map((c, i) => (
-                  <ChapterCommentItem
+                  <MemberChapterItem
                     key={`${c.id}-mem-${i}`}
                     chapter={c}
                     duration={duration}
@@ -342,18 +355,17 @@ function ChaptersView({
             <span className={styles.avatarSmall} aria-hidden>
               <Icon name="user" size={11} aria-hidden />
             </span>
-            <span className={styles.chapterGroupName}>担当未割当</span>
+            <span className={styles.chapterGroupName}>未割当</span>
             <span className={styles.chapterGroupCount}>
               {unassigned.length}
             </span>
           </header>
           <div className={styles.chapterGroupList}>
             {unassigned.map((c, i) => (
-              <ChapterCommentItem
+              <MemberChapterItem
                 key={`${c.id}-un-${i}`}
                 chapter={c}
                 duration={duration}
-                showAuthor
                 onSeek={onSeek}
               />
             ))}

@@ -12,6 +12,7 @@ export type VideoEditSectionKey =
   | "video.descriptions"
   | "video.credits"
   | "video.members"
+  | "video.member_chapters"
   | "video.youtube_id"
   | "video.primary_event"
   | "video.status"

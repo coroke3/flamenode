@@ -6,7 +6,7 @@ import {
   eventCollaboratorPermissions,
   eventEditors,
   events as eventsTable,
-  videoCollaborators,
+  videoMembers,
   videoEvents,
   xUsers,
   type videos,
@@ -40,6 +40,7 @@ const VIDEO_PERMISSION_ALIASES: Record<VideoEditSectionKey, readonly string[]> =
   "video.descriptions": ["video.descriptions", "videos.review_data"],
   "video.credits": ["video.credits", "videos.music_credit"],
   "video.members": ["video.members", "videos.members"],
+  "video.member_chapters": ["video.member_chapters", "video.members", "videos.members"],
   "video.youtube_id": ["video.youtube_id", "videos.youtube_id"],
   "video.primary_event": ["video.primary_event", "videos.primary_event"],
   "video.status": ["video.status"],
@@ -51,6 +52,51 @@ const VIDEO_PERMISSION_ALIASES: Record<VideoEditSectionKey, readonly string[]> =
   "videos.youtube_id": ["videos.youtube_id", "video.youtube_id"],
   "videos.primary_event": ["videos.primary_event", "video.primary_event"],
 };
+
+/**
+ * 通常編集モード (privilegeMode = "normal") で許可する section key の許可リスト。
+ *
+ * 設計意図 (新仕様):
+ *   - 管理者ユーザーも、通常モードでは「一般ユーザーが自分の作品で触れる範囲」だけ
+ *     編集できる。提出主体や YouTube ID 等の危険操作は privilegeMode = "admin" 時のみ。
+ *   - イベント管理者ユーザーも、自分が管理するイベント所属作品に対して同じ範囲のみ。
+ *   - 作品オーナーは privilegeMode を問わず全権 (オーナーチェックは前段で済む)。
+ */
+const NORMAL_SAFE_VIDEO_EDIT_KEYS = new Set<VideoEditSectionKey>([
+  "video.basics",
+  "video.descriptions",
+  "video.credits",
+  "video.members",
+  "video.member_chapters",
+  "videos.title",
+  "videos.review_data",
+  "videos.music_credit",
+  "videos.members",
+]);
+
+/**
+ * privilegeMode = "admin" 時にだけ解放される危険キー。
+ * 提出主体変更 / YouTube ID 差し替え / 所属イベント変更 / 公開状態 / チャプター運営。
+ */
+const DANGEROUS_ADMIN_VIDEO_EDIT_KEYS = new Set<VideoEditSectionKey>([
+  "video.identity",
+  "video.youtube_id",
+  "video.primary_event",
+  "video.status",
+  "video.chapter_admin",
+  "videos.youtube_id",
+  "videos.primary_event",
+]);
+
+export function isSafeNormalVideoEditKey(key: VideoEditSectionKey): boolean {
+  return NORMAL_SAFE_VIDEO_EDIT_KEYS.has(key);
+}
+
+export function isDangerousAdminVideoEditKey(
+  key: VideoEditSectionKey,
+): boolean {
+  return DANGEROUS_ADMIN_VIDEO_EDIT_KEYS.has(key);
+}
 
 /**
  * video_collaborators.can_edit が許可する section の許可リスト (ホワイトリスト方式)。
@@ -186,18 +232,20 @@ export async function assertCanEditEvent(
  * 動画編集権限の判定モード。
  *
  * - `normal`: 作品オーナー (creator_id ∈ approvedXIds) と
- *   合作メンバー (video_collaborators.can_edit) だけを許可する。
+ *   合作メンバー (video_collaborators.can_edit) **のみ**。
  *   admin / event editor / event collaborator の特権は **一切使わない**。
- *   「管理者が誤って通常編集モードで触ると壊れる」事故を避けるためのモード。
+ *   `allow_user_video_edits` (イベント単位の権限拡張) も collaborator 専用の
+ *   修飾子として働くだけで、関係ないログインユーザーには適用しない。
  *   /dashboard/edit/[id] の既定モードはこれ (URL に ?privileged= が無い場合)。
  *
- * - `admin`: admin だけが全権を持つ。event 経由の権限は使わない。
+ * - `admin`: admin role だけが全権を持つ。event 経由の権限は使わない。
  *
- * - `event`: event editor / event_collaborator_permissions だけが効く。
+ * - `event`: event editor / event_collaborator_permissions が効く。
  *   admin 特権は使わない (役割を切り分けるため)。
+ *   イベント運営者は自分がオーナーでなくても、そのイベント所属作品を編集できる。
  *
- * - `any` (default): 後方互換。admin / event editor / collaborator / owner
- *   いずれかが許可されれば true。明示的にモードを渡さない既存呼び出しはこれを使う。
+ * - `any` (default): 後方互換。admin / event / owner / collaborator のいずれか
+ *   で許可されれば true。明示的にモードを渡さない既存呼び出しはこれを使う。
  *   将来的には呼び出し側で常に明示するのが望ましい。
  *
  * 作品オーナーは privilegeMode に関わらず常に編集可能。
@@ -227,7 +275,8 @@ export async function canEditVideo(args: {
   const { db, user, video, requiredKey } = args;
   const privilegeMode: CanEditVideoPrivilegeMode = args.privilegeMode ?? "any";
 
-  // admin role を許容するのは "admin" / "any" のみ。
+  // admin role の全権許容は "admin" / "any" のみ。
+  // "normal" モードでは admin role でも safe key だけが通る (後段で判定)。
   if (
     (privilegeMode === "admin" || privilegeMode === "any") &&
     user.role === "admin"
@@ -239,44 +288,59 @@ export async function canEditVideo(args: {
   // 作品オーナーは常に編集可。(privilegeMode に依存しない)
   if (video.creator_id && approved.includes(video.creator_id)) return true;
 
-  // 作品単位の合作メンバー編集権限 (video_collaborators)。
-  // 主となるユーザー (creator_id 一致者 / admin / 運営) が「この合作作品の編集者
-  // として参加できるか」を ON/OFF で許可するゲート。許可されている場合は、
-  // 操作者が他の手段 (admin / event editor 等) で持っている権限の範囲で編集できる
-  // と解釈する (細粒度 section 判定は持たない)。
-  //
-  // が、ここで can_edit=1 だけでは「creator でも event editor でもないが合作
-  // メンバーとして編集できる」状態を許容したいので、true を返す。
-  // 範囲は呼び出し側の section 別 disable/permission_keys 判定で担保される。
-  const collabSubjectCond =
+  // 通常モード (normal) の特例:
+  //   - admin role が safe key を要求している場合は、全作品で許可。
+  //     ただし danger key は不可。「管理者権限を使う」(?privileged=admin) が必須。
+  //   - イベント管理者が safe key を要求していて、その作品が自分の管理イベントに
+  //     属していれば許可。
+  if (privilegeMode === "normal" && isSafeNormalVideoEditKey(requiredKey)) {
+    if (user.role === "admin") return true;
+    // イベント管理者: 自分が編集できるイベントに、この作品が属しているか
+    const editableEventIds = await getEditableEventIds(db, user.id);
+    if (editableEventIds.length > 0) {
+      const videoEventIds = new Set<string>();
+      if (video.primary_event_id) videoEventIds.add(video.primary_event_id);
+      const evRows = await db
+        .select({ event_id: videoEvents.event_id })
+        .from(videoEvents)
+        .where(eq(videoEvents.video_id, video.id));
+      for (const r of evRows) videoEventIds.add(r.event_id);
+      for (const eid of editableEventIds) {
+        if (videoEventIds.has(eid)) return true;
+      }
+    }
+  }
+
+  // 作品単位の合作メンバー編集権限 (video_members.can_edit)。
+  // video_collaborators 廃止に伴い、表示メンバー・チャプター担当・共同編集権限を
+  // 1 テーブルで管理する設計に統一。`can_edit=1` の video_member は作品単位の共同
+  // 編集者として扱う。範囲は COLLABORATOR_VIDEO_EDIT_KEYS で制限される。
+  const memberSubjectCond =
     approved.length > 0
       ? or(
-          eq(videoCollaborators.discord_user_id, user.id),
-          inArray(videoCollaborators.x_user_id, approved),
+          eq(videoMembers.discord_user_id, user.id),
+          inArray(videoMembers.x_user_id, approved),
         )!
-      : eq(videoCollaborators.discord_user_id, user.id);
-  const collabRows = await db
-    .select({ can_edit: videoCollaborators.can_edit })
-    .from(videoCollaborators)
+      : eq(videoMembers.discord_user_id, user.id);
+  const editableMemberRows = await db
+    .select({ can_edit: videoMembers.can_edit })
+    .from(videoMembers)
     .where(
       and(
-        eq(videoCollaborators.video_id, video.id),
-        eq(videoCollaborators.can_edit, 1),
-        collabSubjectCond,
+        eq(videoMembers.video_id, video.id),
+        eq(videoMembers.can_edit, 1),
+        memberSubjectCond,
       )!,
     )
     .limit(1)
     .catch((error: unknown) => {
-      if (isMissingDbObjectError(error, "video_collaborators")) {
+      // 旧 D1 で can_edit 列がまだ無いケース等に備えて握り潰す (instrumentation で補修される)
+      if (isMissingDbObjectError(error, "video_members")) {
         return [];
       }
       throw error;
     });
-  if (collabRows.length > 0) {
-    // Current video_collaborators only has a broad can_edit flag. Keep it scoped
-    // to collaborative content sections until a future permission_key column exists.
-    return COLLABORATOR_VIDEO_EDIT_KEYS.has(requiredKey);
-  }
+  const isCollaborator = editableMemberRows.length > 0;
 
   // この時点で eventIds を確定させる (allow_user_video_edits の判定にも使う)。
   const eventIds = new Set<string>();
@@ -287,30 +351,35 @@ export async function canEditVideo(args: {
     .where(eq(videoEvents.video_id, video.id));
   evRows.forEach((r) => eventIds.add(r.event_id));
 
-  // イベント単位の「一般ユーザーへの編集権委譲」チェック。
-  // 危険キーは委譲できない (videos.youtube_id / videos.primary_event / video.identity)。
-  // privilegeMode に依存せず、TOS 同意済みのログインユーザーであれば適用される。
-  if (eventIds.size > 0 && isUserDelegatableKey(requiredKey)) {
-    const evs = await db
-      .select({
-        id: eventsTable.id,
-        allow: eventsTable.allow_user_video_edits,
-        json: eventsTable.user_video_edit_permission_keys_json,
-      })
-      .from(eventsTable)
-      .where(inArray(eventsTable.id, Array.from(eventIds)));
-    for (const e of evs) {
-      if (e.allow !== 1) continue;
-      const keys = parseDelegatablePermissionKeys(e.json);
-      if (keys.has(requiredKey)) return true;
+  if (isCollaborator) {
+    // (a) collaborator のデフォルト許可キー (合作コンテンツ系) は無条件で OK。
+    if (COLLABORATOR_VIDEO_EDIT_KEYS.has(requiredKey)) return true;
+    // (b) それ以外は、イベント単位の `allow_user_video_edits` で許可キーが
+    //     明示的に拡張されている場合のみ OK。
+    //     `allow_user_video_edits` は「ログインユーザー全員に解放する」機能では
+    //     なく、**既に通常編集できる人 (owner / collaborator) が触れるキーを
+    //     イベント側で増減できる**修飾子として扱う。
+    //     owner は元々全権なのでここに来ない。実質 collaborator 専用の拡張。
+    if (
+      eventIds.size > 0 &&
+      isUserDelegatableKey(requiredKey) &&
+      (await isEventDelegationGranted(db, eventIds, requiredKey))
+    ) {
+      return true;
     }
+    return false;
   }
 
   // privilegeMode === "normal" / "admin" では event 経由の権限を使わない。
   // - normal: 「管理者・運営の特権を一切信用しない」モード。owner / collaborator 限定。
   // - admin: admin 特権チェックは前段で済んでいる。ここに来た時点で event 経由は不要。
+  // 重要: `allow_user_video_edits` も owner / collaborator 以外には適用しない。
+  //       一般ログインユーザーが他人の作品を編集できる経路を作らないため。
   if (privilegeMode === "normal" || privilegeMode === "admin") return false;
 
+  // privilegeMode === "event" / "any": イベント運営権限のチェック。
+  // event_editors / event_collaborator_permissions により、自分がオーナーでなくても
+  // イベント所属作品を編集できる。
   if (eventIds.size === 0) return false;
   const aliases = VIDEO_PERMISSION_ALIASES[requiredKey] ?? [requiredKey];
   for (const eId of eventIds) {
@@ -324,8 +393,42 @@ export async function canEditVideo(args: {
 }
 
 /**
- * `allow_user_video_edits` でユーザーに委譲してよい section key の許可リスト。
- * 危険キーはここに入れない (永久に管理者・オーナー専用)。
+ * 対象イベントのうち、 `allow_user_video_edits === 1` かつ
+ * `user_video_edit_permission_keys_json` に `requiredKey` が含まれているものが 1 つでも
+ * あれば true を返す。
+ */
+async function isEventDelegationGranted(
+  db: DB,
+  eventIds: Set<string>,
+  requiredKey: VideoEditSectionKey,
+): Promise<boolean> {
+  const evs = await db
+    .select({
+      id: eventsTable.id,
+      allow: eventsTable.allow_user_video_edits,
+      json: eventsTable.user_video_edit_permission_keys_json,
+    })
+    .from(eventsTable)
+    .where(inArray(eventsTable.id, Array.from(eventIds)));
+  for (const e of evs) {
+    if (e.allow !== 1) continue;
+    const keys = parseDelegatablePermissionKeys(e.json);
+    if (keys.has(requiredKey)) return true;
+  }
+  return false;
+}
+
+/**
+ * `allow_user_video_edits` で **collaborator が触れるキーを拡張する** ときに
+ * 許可してよい section key のホワイトリスト。
+ *
+ * 設計意図:
+ *   - 一般ログインユーザーやイベント参加者に編集権を配るためのものではない。
+ *   - 既に `video_collaborators.can_edit=1` で作品に紐付いている合作メンバーが、
+ *     `COLLABORATOR_VIDEO_EDIT_KEYS` のデフォルト範囲を超えて触れるキーを、
+ *     イベント単位で増減するための拡張テーブル。
+ *   - 危険キー (videos.youtube_id / videos.primary_event / video.identity 等) は
+ *     ここに入れない (永久に管理者専用)。
  */
 const USER_DELEGATABLE_KEYS = new Set<string>([
   "videos.title",

@@ -438,6 +438,38 @@
   font-weight: 700;
 }
 
+.slotGauge {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.slotGaugeTrack {
+  display: block;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.slotGaugeFill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--event-accent, #ffd400) 72%, #ffffff),
+    var(--event-accent, #ffd400)
+  );
+}
+
+.slotGaugeText {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
 .slotsLow .slotsHint {
   color: #ffb000;
 }

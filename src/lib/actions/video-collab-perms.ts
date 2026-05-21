@@ -2,26 +2,37 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { canEditVideo } from "@/lib/auth/ownership";
 import {
   historyLogs,
-  videoCollaborators,
+  videoMembers,
   videos,
+  xUsers,
 } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
 import { normalizeXId } from "@/lib/utils/xid";
 
 /**
- * 作品単位の合作メンバー編集権限 (`video_collaborators`) を管理する Server Action 群。
+ * 作品単位の共同編集者権限を管理する Server Action 群。
+ *
+ * 旧テーブル `video_collaborators` は廃止 (第1段階で残置、参照しない)。
+ * 正本は `video_members.can_edit = 1` の行。これにより表示メンバー・チャプター担当・
+ * 共同編集者を 1 テーブルで管理する。
  *
  * 仕様:
- *   - 粒度は can_edit ON/OFF のみ。section 別判定は持たない。
- *   - 操作者は `video.identity` 権限を持つ必要がある (作者本人 / admin /
- *     イベント運営の identity 権限保持者)。
- *   - subject は X ID (連携前でも先付与可) または discord_user_id のいずれかで指定。
+ *   - 粒度は can_edit ON/OFF のみ。範囲は COLLABORATOR_VIDEO_EDIT_KEYS で制限される。
+ *   - 操作者は `video.identity` 権限を持つ必要がある (作者本人 / admin / event
+ *     identity 権限保持者)。
+ *   - subject は X ID (連携前でも先付与可) または discord_user_id で指定。
+ *   - 既存の表示メンバーに subject が含まれていれば、その行に can_edit を立てる。
+ *     含まれていなければ非公開メンバー (is_public_member = 0) として新規追加。
+ *   - 監査ログは history_logs に retention_class=long_audit で記録。
+ *
+ * 関数名は旧テーブル時代の名前 (`upsertVideoCollaborator` 等) を一旦維持。
+ * UI / import 側を書き換えるタイミングで `*VideoMemberPerm` 系へ改名する想定。
  */
 
 export interface VideoCollabResult {
@@ -81,9 +92,49 @@ async function loadEditableVideo(
   return row;
 }
 
+/** 既存の video_members 行を「同じ subject (x_user_id or discord_user_id)」で検索する。 */
+async function findMemberRowForSubject(
+  db: NonNullable<ReturnType<typeof getDatabase>>,
+  videoId: string,
+  xUserId: string | null,
+  discordUserId: string | null,
+): Promise<typeof videoMembers.$inferSelect | null> {
+  if (xUserId) {
+    const rows = await db
+      .select()
+      .from(videoMembers)
+      .where(
+        and(
+          eq(videoMembers.video_id, videoId),
+          isNotNull(videoMembers.x_user_id),
+          sql`lower(${videoMembers.x_user_id}) = ${xUserId.toLowerCase()}`,
+        )!,
+      )
+      .limit(1);
+    if (rows[0]) return rows[0];
+  }
+  if (discordUserId) {
+    const rows = await db
+      .select()
+      .from(videoMembers)
+      .where(
+        and(
+          eq(videoMembers.video_id, videoId),
+          eq(videoMembers.discord_user_id, discordUserId),
+        )!,
+      )
+      .limit(1);
+    if (rows[0]) return rows[0];
+  }
+  return null;
+}
+
 /**
- * 合作メンバーの編集権限を upsert する。
- * 既存行があれば can_edit と display_name を更新、無ければ追加する。
+ * 共同編集者の権限を upsert する。
+ *
+ * - 既存の video_members 行が同じ subject にあれば、その行の can_edit と
+ *   表示名・discord_user_id・edit_* タイムスタンプを更新する。
+ * - 無ければ新規 video_members 行を **is_public_member = 0** で追加 (非公開編集者)。
  */
 export async function upsertVideoCollaborator(
   formData: FormData,
@@ -119,53 +170,84 @@ export async function upsertVideoCollaborator(
     };
   }
 
-  const subjectWhere = xUserId
-    ? and(
-        eq(videoCollaborators.video_id, video.id),
-        eq(videoCollaborators.x_user_id, xUserId),
-      )!
-    : and(
-        eq(videoCollaborators.video_id, video.id),
-        eq(videoCollaborators.discord_user_id, discordUserId!),
-      )!;
-  const existing = (
-    await db.select().from(videoCollaborators).where(subjectWhere).limit(1)
-  )[0];
-
   const now = Math.floor(Date.now() / 1000);
   const canEditValue = parsed.data.can_edit ? 1 : 0;
+  const existing = await findMemberRowForSubject(
+    db,
+    video.id,
+    xUserId,
+    discordUserId,
+  );
+
+  // X ID 指定があれば xUsers に pending で先行作成 (UI で「未承認 X ID への先付与」)
+  if (xUserId) {
+    const xRow = (
+      await db.select().from(xUsers).where(eq(xUsers.id, xUserId)).limit(1)
+    )[0];
+    if (!xRow) {
+      await db.insert(xUsers).values({
+        id: xUserId,
+        x_name: parsed.data.display_name || `@${xUserId}`,
+        approval_status: "pending",
+        approval_requested_at: now,
+      });
+    }
+  }
 
   if (existing) {
     await db
-      .update(videoCollaborators)
+      .update(videoMembers)
       .set({
-        display_name: parsed.data.display_name,
+        name: parsed.data.display_name,
+        name_for_sort: parsed.data.display_name.toLowerCase(),
         can_edit: canEditValue,
-        updated_at: now,
+        discord_user_id: discordUserId ?? existing.discord_user_id ?? null,
+        edit_granted_by_user_id:
+          canEditValue === 1 ? user.id : existing.edit_granted_by_user_id,
+        edit_granted_at:
+          canEditValue === 1 && existing.edit_granted_at == null
+            ? now
+            : existing.edit_granted_at,
+        edit_updated_at: now,
       })
-      .where(eq(videoCollaborators.id, existing.id));
+      .where(eq(videoMembers.id, existing.id));
   } else {
-    await db.insert(videoCollaborators).values({
-      id: generateId("vco"),
+    // 末尾に追加 (order_index は 9999 -> 表示順は後で並べ替え可能)
+    await db.insert(videoMembers).values({
+      id: generateId("vm"),
       video_id: video.id,
       x_user_id: xUserId,
       discord_user_id: discordUserId,
-      display_name: parsed.data.display_name,
+      name: parsed.data.display_name,
+      name_for_sort: parsed.data.display_name.toLowerCase(),
+      role: null,
+      comment: null,
+      order_index: 9999,
       can_edit: canEditValue,
-      granted_by_user_id: user.id,
-      created_at: now,
-      updated_at: now,
+      // 「表示しないが編集権限だけ持つ人」を表現する。公開メンバー欄には出さない。
+      is_public_member: 0,
+      edit_granted_by_user_id: canEditValue === 1 ? user.id : null,
+      edit_granted_at: canEditValue === 1 ? now : null,
+      edit_updated_at: now,
     });
   }
 
   await db.insert(historyLogs).values({
-    table_name: "video_collaborators",
-    record_id: video.id,
+    table_name: "video_members",
+    record_id: existing?.id ?? video.id,
     action: existing ? "UPDATE" : "CREATE",
+    before_data: existing
+      ? JSON.stringify({
+          can_edit: existing.can_edit,
+          name: existing.name,
+          is_public_member: existing.is_public_member,
+        })
+      : null,
     after_data: JSON.stringify({
       subject: xUserId ? `x:${xUserId}` : `discord:${discordUserId}`,
       display_name: parsed.data.display_name,
       can_edit: canEditValue,
+      is_public_member: existing?.is_public_member ?? 0,
     }),
     operator_discord_id: user.id,
     retention_class: "long_audit",
@@ -182,7 +264,12 @@ export async function upsertVideoCollaborator(
 }
 
 /**
- * 合作メンバーの編集権限行を削除する (subject 単位)。
+ * 共同編集者の編集権限を解除する。
+ *
+ * - 対象が非公開メンバー (is_public_member = 0) の場合は **行ごと削除** する。
+ *   非公開メンバーは「権限のためだけにあった行」なので、権限を外したら残す意味がない。
+ * - 公開メンバー (is_public_member = 1) の場合は **can_edit = 0 にするだけ** で
+ *   行は残す (表示・チャプター担当には引き続き必要なため)。
  */
 export async function deleteVideoCollaborator(
   formData: FormData,
@@ -211,26 +298,43 @@ export async function deleteVideoCollaborator(
     };
   }
 
-  const subjectWhere = xUserId
-    ? and(
-        eq(videoCollaborators.video_id, video.id),
-        eq(videoCollaborators.x_user_id, xUserId),
-        isNotNull(videoCollaborators.x_user_id),
-      )!
-    : and(
-        eq(videoCollaborators.video_id, video.id),
-        eq(videoCollaborators.discord_user_id, discordUserId!),
-        isNull(videoCollaborators.x_user_id),
-      )!;
-  await db.delete(videoCollaborators).where(subjectWhere);
+  const existing = await findMemberRowForSubject(
+    db,
+    video.id,
+    xUserId || null,
+    discordUserId,
+  );
+  if (!existing) {
+    return { ok: true, message: "該当する権限行はすでにありません。" };
+  }
 
   const now = Math.floor(Date.now() / 1000);
+  if (existing.is_public_member === 0) {
+    // 非公開メンバー: 行ごと削除
+    await db.delete(videoMembers).where(eq(videoMembers.id, existing.id));
+  } else {
+    // 公開メンバー: 行は残し can_edit のみ落とす
+    await db
+      .update(videoMembers)
+      .set({
+        can_edit: 0,
+        edit_updated_at: now,
+      })
+      .where(eq(videoMembers.id, existing.id));
+  }
+
   await db.insert(historyLogs).values({
-    table_name: "video_collaborators",
-    record_id: video.id,
-    action: "DELETE",
+    table_name: "video_members",
+    record_id: existing.id,
+    action: existing.is_public_member === 0 ? "DELETE" : "UPDATE",
+    before_data: JSON.stringify({
+      can_edit: existing.can_edit,
+      name: existing.name,
+      is_public_member: existing.is_public_member,
+    }),
     after_data: JSON.stringify({
       subject: xUserId ? `x:${xUserId}` : `discord:${discordUserId}`,
+      action: "revoke_can_edit",
     }),
     operator_discord_id: user.id,
     retention_class: "long_audit",
@@ -240,3 +344,6 @@ export async function deleteVideoCollaborator(
   revalidatePath(`/dashboard/edit/${video.id}`);
   return { ok: true, message: "参加者の編集権限を解除しました。" };
 }
+
+// isNull/isNotNull は subject 検索で使うため re-export 用に残す (削除すると import 漏れの恐れあり)
+export const __unused_isNullIsNotNull = { isNull, isNotNull };

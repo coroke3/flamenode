@@ -206,6 +206,42 @@ async function repairLocalSchemaDrift(DB: LocalD1Database): Promise<void> {
     );
   }
 
+  // メンバーチャプター (migration 0017): video_member_chapters テーブル。
+  // テーブルが無ければ作成 (instrumentation の補修ルートは「テーブル無し」ケースを
+  // 通常 ensureColumn では拾えないので CREATE TABLE IF NOT EXISTS で対処する)
+  await DB.prepare(
+    `CREATE TABLE IF NOT EXISTS video_member_chapters (
+      id TEXT PRIMARY KEY,
+      video_id TEXT NOT NULL,
+      video_member_id TEXT NOT NULL,
+      chapter_time REAL NOT NULL,
+      chapter_label TEXT NOT NULL,
+      note TEXT,
+      order_index INTEGER DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`,
+  )
+    .run()
+    .catch((e: unknown) => {
+      console.warn(
+        "[instrumentation] Failed to ensure video_member_chapters:",
+        errorMessage(e),
+      );
+    });
+  if (await tableExists(DB, "video_member_chapters")) {
+    await ensureIndex(
+      DB,
+      "CREATE INDEX IF NOT EXISTS `video_member_chapters_video_idx` ON `video_member_chapters` (`video_id`,`chapter_time`)",
+      "video_member_chapters_video_idx",
+    );
+    await ensureIndex(
+      DB,
+      "CREATE INDEX IF NOT EXISTS `video_member_chapters_member_idx` ON `video_member_chapters` (`video_member_id`,`chapter_time`)",
+      "video_member_chapters_member_idx",
+    );
+  }
+
   if (await tableExists(DB, "history_logs")) {
     await ensureColumn(
       DB,
@@ -231,6 +267,53 @@ async function repairLocalSchemaDrift(DB: LocalD1Database): Promise<void> {
       "video_members",
       "name_for_sort",
       "ALTER TABLE `video_members` ADD `name_for_sort` text",
+    );
+    // Phase A (0016): 共同編集者カラム
+    await ensureColumn(
+      DB,
+      "video_members",
+      "discord_user_id",
+      "ALTER TABLE `video_members` ADD `discord_user_id` text",
+    );
+    await ensureColumn(
+      DB,
+      "video_members",
+      "can_edit",
+      "ALTER TABLE `video_members` ADD `can_edit` integer NOT NULL DEFAULT 0",
+    );
+    await ensureColumn(
+      DB,
+      "video_members",
+      "is_public_member",
+      "ALTER TABLE `video_members` ADD `is_public_member` integer NOT NULL DEFAULT 1",
+    );
+    await ensureColumn(
+      DB,
+      "video_members",
+      "edit_granted_by_user_id",
+      "ALTER TABLE `video_members` ADD `edit_granted_by_user_id` text",
+    );
+    await ensureColumn(
+      DB,
+      "video_members",
+      "edit_granted_at",
+      "ALTER TABLE `video_members` ADD `edit_granted_at` integer",
+    );
+    await ensureColumn(
+      DB,
+      "video_members",
+      "edit_updated_at",
+      "ALTER TABLE `video_members` ADD `edit_updated_at` integer",
+    );
+    await ensureIndex(
+      DB,
+      "CREATE INDEX IF NOT EXISTS `video_members_video_can_edit_idx` ON `video_members` (`video_id`,`can_edit`)",
+      "video_members_video_can_edit_idx",
+    );
+    await ensureIndex(
+      DB,
+      "CREATE INDEX IF NOT EXISTS `video_members_discord_idx` ON `video_members` (`discord_user_id`)",
+      "video_members_discord_idx",
     );
     await ensureIndex(
       DB,

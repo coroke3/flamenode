@@ -38,11 +38,11 @@ export function formatUnix(
 ): string {
   const validUnixSec = toValidUnixSec(unixSec);
   if (validUnixSec == null) return "-";
-  const d = new Date(validUnixSec * 1000);
-  if (Number.isNaN(d.getTime())) return "-";
-  if (opts.dateOnly) return dateOnlyFormatter.format(d);
-  if (opts.timeOnly) return timeOnlyFormatter.format(d);
-  return fullFormatter.format(d);
+  const date = new Date(validUnixSec * 1000);
+  if (Number.isNaN(date.getTime())) return "-";
+  if (opts.dateOnly) return dateOnlyFormatter.format(date);
+  if (opts.timeOnly) return timeOnlyFormatter.format(date);
+  return fullFormatter.format(date);
 }
 
 export function formatRelative(unixSec: unknown): string {

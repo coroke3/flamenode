@@ -2,18 +2,18 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { canEditVideo } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import {
   historyLogs,
   videoChapters,
-  videoMembers,
   videos,
 } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
 import { parseCsv } from "@/lib/utils/csv";
+import { parseChapterTime } from "@/lib/utils/chapterTime";
 import { enqueueNotification } from "@/lib/notifications/enqueue";
 
 export interface ChapterActionResult {
@@ -27,6 +27,8 @@ const createSchema = z.object({
   chapter_time: z.coerce.number().min(0).max(60 * 60 * 24),
   chapter_label: z.string().trim().min(1).max(120),
   note: z.string().trim().max(1000).optional().nullable(),
+  // 旧仕様の video_member_id は chapter.ts では扱わない (メンバーチャプターは
+  // video_member_chapters テーブル + replaceVideoMembers 経路で管理)。
   visibility: z.enum(["public", "private"]).default("public"),
   marker_kind: z
     .enum(["chapter", "comment", "review", "system"])
@@ -196,6 +198,7 @@ export async function updateChapter(
   }
   if (!canMod) return { ok: false, message: "編集権限がありません。" };
 
+  // updateChapter は通常チャプターコメント専用。video_member_id は触らない。
   const now = Math.floor(Date.now() / 1000);
   await db
     .update(videoChapters)
@@ -362,21 +365,8 @@ export async function createChaptersBulk(
     };
   }
 
-  // メンバー解決マップ
-  const members = await db
-    .select({
-      id: videoMembers.id,
-      x_user_id: videoMembers.x_user_id,
-      name: videoMembers.name,
-    })
-    .from(videoMembers)
-    .where(eq(videoMembers.video_id, video_id));
-  const memberByXid = new Map<string, string>();
-  const memberByName = new Map<string, string>();
-  for (const m of members) {
-    if (m.x_user_id) memberByXid.set(m.x_user_id.toLowerCase(), m.id);
-    if (m.name) memberByName.set(m.name.trim().toLowerCase(), m.id);
-  }
+  // createChaptersBulk は通常チャプターコメント専用なので、メンバー解決マップは不要。
+  // メンバーチャプターは VideoMembersField + replaceVideoMembers 経路で別途扱う。
 
   let rowsRaw = parseCsv(csv);
   if (rowsRaw.length === 0) {
@@ -427,19 +417,16 @@ export async function createChaptersBulk(
     }
     const visibility: "public" | "private" =
       rawVisibility === "private" ? "private" : "public";
-    let videoMemberId: string | null = null;
-    if (rawMember) {
-      const normalized = rawMember.replace(/^@+/, "").toLowerCase();
-      videoMemberId =
-        memberByXid.get(normalized) ?? memberByName.get(normalized) ?? null;
-    }
+    // 5 列目 (rawMember) は旧仕様で「担当メンバー名/XID」だったが、メンバーチャプター
+    // 分離に伴い無視する。互換のため CSV としては受け付けるが、video_chapters には
+    // 反映しない。
+    void rawMember;
 
     const id = generateId("ch");
     await db.insert(videoChapters).values({
       id,
       video_id,
       x_user_id: activeX,
-      video_member_id: videoMemberId,
       chapter_time: time,
       chapter_label: rawLabel,
       note: rawNote || null,
@@ -486,22 +473,4 @@ export async function createChaptersBulk(
  * "1:30" / "0:01:30" / "90" などのチャプター時刻文字列を秒数に変換する。
  * 不正なら null。負数や 24h 超は拒否する。
  */
-function parseChapterTime(raw: string): number | null {
-  const s = raw.trim();
-  if (!s) return null;
-  if (/^\d+(\.\d+)?$/.test(s)) {
-    const n = Number(s);
-    return n >= 0 && n <= 60 * 60 * 24 ? n : null;
-  }
-  const parts = s.split(":").map((p) => p.trim());
-  if (parts.length < 2 || parts.length > 3) return null;
-  if (!parts.every((p) => /^\d+(\.\d+)?$/.test(p))) return null;
-  const nums = parts.map(Number);
-  let total = 0;
-  if (nums.length === 2) {
-    total = nums[0]! * 60 + nums[1]!;
-  } else {
-    total = nums[0]! * 3600 + nums[1]! * 60 + nums[2]!;
-  }
-  return total >= 0 && total <= 60 * 60 * 24 ? total : null;
-}
+// parseChapterTime は src/lib/utils/chapterTime.ts に共通化済み。

@@ -7,7 +7,8 @@ import { getDatabase } from "@/lib/cloudflare";
 import { isMissingDbObjectError } from "@/lib/db/optionalObjects";
 import {
   events as eventsTable,
-  videoCollaborators as videoCollabTable,
+  // 旧 videoCollaborators テーブルは廃止 (移行先 = video_members.can_edit)。
+  // 互換のため import は維持しない。
   videoEvents as videoEventsTable,
   videoMembers,
   videos as videosTable,
@@ -22,6 +23,7 @@ import {
 import { requireSession } from "@/lib/auth/guard";
 import { canEditVideo } from "@/lib/auth/ownership";
 import { VideoForm } from "@/components/forms/VideoForm";
+import { ChapterComposer } from "@/components/video/ChapterComposer";
 import { Icon } from "@/components/ui/Icon";
 import { youtubeWatchUrl } from "@/lib/youtube/id";
 import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
@@ -49,10 +51,13 @@ function normalizePrivilegeMode(raw: string | undefined): PrivilegeMode {
 function PrivilegeModeBanner({
   mode,
   isAdmin,
+  canOfferEventMode,
   videoId,
 }: {
   mode: PrivilegeMode;
   isAdmin: boolean;
+  /** event モードで何らかの section が編集可能になる場合のみ true。 */
+  canOfferEventMode: boolean;
   videoId: string;
 }): React.ReactElement {
   const base = `/dashboard/edit/${encodeURIComponent(videoId)}`;
@@ -78,6 +83,14 @@ function PrivilegeModeBanner({
       >
         <Icon name="alert" size={12} aria-hidden />
         管理者権限で編集中。提出主体や所属イベントの変更が可能です。
+        {canOfferEventMode ? (
+          <Link
+            href={`${base}?privileged=event`}
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+          >
+            イベント運営権限で編集
+          </Link>
+        ) : null}
         <Link href={base} className="fn-btn fn-btn-ghost fn-btn-sm" style={{ marginLeft: "auto" }}>
           通常モードへ戻る
         </Link>
@@ -104,13 +117,23 @@ function PrivilegeModeBanner({
       >
         <Icon name="users" size={12} aria-hidden />
         イベント運営権限で編集中。
+        {isAdmin ? (
+          <Link
+            href={`${base}?privileged=admin`}
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+          >
+            管理者権限で編集
+          </Link>
+        ) : null}
         <Link href={base} className="fn-btn fn-btn-ghost fn-btn-sm" style={{ marginLeft: "auto" }}>
           通常モードへ戻る
         </Link>
       </div>
     );
   }
-  // normal: 切替ボタンを表示する (admin/event editor のみ)。
+  // normal: 切替ボタンを表示する (admin / event editor のみ)。
+  // admin と canOfferEventMode が両立する場合は両方表示。どちらもない場合は
+  // 上位で早期 return されるためここには来ない。
   return (
     <div
       style={{
@@ -128,31 +151,24 @@ function PrivilegeModeBanner({
       }}
     >
       <Icon name="info" size={11} aria-hidden /> 通常編集モード (作品オーナー / 合作メンバー の権限のみ)
-      {isAdmin ? (
-        <Link
-          href={`${base}?privileged=admin`}
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-          style={{ marginLeft: "auto" }}
-        >
-          管理者権限で編集
-        </Link>
-      ) : null}
-      {!isAdmin ? (
-        <Link
-          href={`${base}?privileged=event`}
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-          style={{ marginLeft: "auto" }}
-        >
-          イベント運営権限で編集
-        </Link>
-      ) : (
-        <Link
-          href={`${base}?privileged=event`}
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-        >
-          イベント運営権限で編集
-        </Link>
-      )}
+      <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+        {isAdmin ? (
+          <Link
+            href={`${base}?privileged=admin`}
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+          >
+            管理者権限で編集
+          </Link>
+        ) : null}
+        {canOfferEventMode ? (
+          <Link
+            href={`${base}?privileged=event`}
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+          >
+            イベント運営権限で編集
+          </Link>
+        ) : null}
+      </span>
     </div>
   );
 }
@@ -161,28 +177,35 @@ async function loadVideoCollabSubjects(
   db: NonNullable<ReturnType<typeof getDatabase>>,
   videoId: string,
 ): Promise<{ subjects: VideoCollabSubject[]; tableAvailable: boolean }> {
+  // video_collaborators 廃止に伴い、video_members.can_edit を正本として読む。
+  // (旧テーブルは migration 0016 でデータ移行済み)
   try {
     const rows = await db
       .select({
-        x_user_id: videoCollabTable.x_user_id,
-        discord_user_id: videoCollabTable.discord_user_id,
-        display_name: videoCollabTable.display_name,
-        can_edit: videoCollabTable.can_edit,
+        x_user_id: videoMembers.x_user_id,
+        discord_user_id: videoMembers.discord_user_id,
+        display_name: videoMembers.name,
+        can_edit: videoMembers.can_edit,
+        is_public_member: videoMembers.is_public_member,
       })
-      .from(videoCollabTable)
-      .where(eq(videoCollabTable.video_id, videoId));
+      .from(videoMembers)
+      .where(eq(videoMembers.video_id, videoId));
 
     return {
       tableAvailable: true,
-      subjects: rows.map((row) => ({
-        x_user_id: row.x_user_id,
-        discord_user_id: row.discord_user_id,
-        display_name: row.display_name,
-        can_edit: row.can_edit,
-      })),
+      subjects: rows
+        // can_edit=1 (共同編集者) または非公開メンバーだけを「権限管理対象」として返す。
+        // 表示専用メンバー (is_public_member=1 かつ can_edit=0) は権限 UI で個別管理しない。
+        .filter((row) => row.can_edit === 1 || row.is_public_member === 0)
+        .map((row) => ({
+          x_user_id: row.x_user_id,
+          discord_user_id: row.discord_user_id,
+          display_name: row.display_name,
+          can_edit: row.can_edit,
+        })),
     };
   } catch (error) {
-    if (isMissingDbObjectError(error, "video_collaborators")) {
+    if (isMissingDbObjectError(error, "video_members")) {
       return { subjects: [], tableAvailable: false };
     }
     throw error;
@@ -295,6 +318,29 @@ export default async function EditVideoPage({
   const { subjects: videoCollabSubjects, tableAvailable: videoCollabTableAvailable } =
     await loadVideoCollabSubjects(db, video.id);
 
+  // 通常チャプターコメントの投稿は公開動画詳細ページに戻したが、CSV 一括登録だけは
+  // 編集権限を持つユーザー向けにこの編集ページから行う。
+  // 投稿主体は active X ID なので、ChapterComposer 内部の writeGuard と同じ条件で
+  // X 承認状態を計算する。
+  let viewerXApproved = false;
+  if (user.active_x_user_id) {
+    const xRow = (
+      await db
+        .select({ approval_status: xUsersTable.approval_status })
+        .from(xUsersTable)
+        .where(eq(xUsersTable.id, user.active_x_user_id))
+        .limit(1)
+    )[0];
+    viewerXApproved = xRow?.approval_status === "approved";
+  }
+  const canManageChapters = await canEditVideo({
+    db,
+    user: { id: user.id, role: user.role ?? null },
+    video,
+    requiredKey: "video.chapter_admin",
+    privilegeMode,
+  });
+
   const xIdOptions = await db
     .select({ id: xUsersTable.id, x_name: xUsersTable.x_name })
     .from(xUsersTable)
@@ -329,7 +375,36 @@ export default async function EditVideoPage({
     canEditCredits ||
     canEditDescriptions ||
     canEditMembers;
-  if (!canEditAnySection) {
+
+  // モード切替バナーで「管理者権限で編集」「イベント運営権限で編集」を出すかの判定。
+  //
+  // - canOfferAdminMode: admin role を持っていて、まだ admin モードに入っていない場合。
+  //   admin モード時には別の切替先 (event / normal) を出すため除外。
+  // - canOfferEventMode: privilegeMode==="normal" で canEditAnySection===false の場合だけ、
+  //   event モード試算をして 1 つでも編集可能セクションがあれば true。
+  //   admin モード中 (canEditAnySection===true) は試算しないが、admin role でない
+  //   ユーザーが ?privileged=event を提示できるよう、一覧化された
+  //   event モードでの section 結果を保持する。
+  const canOfferAdminMode =
+    user.role === "admin" && privilegeMode !== "admin";
+
+  let canOfferEventMode = false;
+  if (privilegeMode === "normal" && !canEditAnySection) {
+    const eventProbe = await Promise.all([
+      canEditVideo({ db, user: editUser, video, requiredKey: "video.identity", privilegeMode: "event" }),
+      canEditVideo({ db, user: editUser, video, requiredKey: "video.basics", privilegeMode: "event" }),
+      canEditVideo({ db, user: editUser, video, requiredKey: "video.youtube_id", privilegeMode: "event" }),
+      canEditVideo({ db, user: editUser, video, requiredKey: "video.credits", privilegeMode: "event" }),
+      canEditVideo({ db, user: editUser, video, requiredKey: "video.descriptions", privilegeMode: "event" }),
+      canEditVideo({ db, user: editUser, video, requiredKey: "video.members", privilegeMode: "event" }),
+    ]);
+    canOfferEventMode = eventProbe.some((v) => v === true);
+  }
+
+  const canShowPrivilegeSwitchOnly =
+    !canEditAnySection && (canOfferAdminMode || canOfferEventMode);
+
+  if (!canEditAnySection && !canShowPrivilegeSwitchOnly) {
     return (
       <div
         style={{
@@ -362,6 +437,19 @@ export default async function EditVideoPage({
       </div>
     );
   }
+
+  // canEditAnySection===false でも、モード切替で編集可能になる可能性があれば
+  // フォーム自体は表示し、保存ボタンを submitBlockedReason で塞ぐ。
+  // CLAUDE.md 方針:
+  //   - 自動的に admin モードに昇格しない (URL 明示が必要)
+  //   - 全 section が disabled になるだけで権限ロジックは canEditVideo 任せ
+  const submitBlockedReason = !canEditAnySection
+    ? canOfferAdminMode
+      ? "通常編集モードでは編集できる項目がありません。上部の「管理者権限で編集」から明示的に権限を切り替えてください。"
+      : canOfferEventMode
+        ? "通常編集モードでは編集できる項目がありません。上部の「イベント運営権限で編集」から明示的に権限を切り替えてください。"
+        : undefined
+    : undefined;
   const disabledSections = [
     !canEditIdentity ? "submitter" : null,
     !canEditBasics && !canEditYoutube && !canEditCredits ? "video" : null,
@@ -438,6 +526,7 @@ export default async function EditVideoPage({
         <PrivilegeModeBanner
           mode={privilegeMode}
           isAdmin={user.role === "admin"}
+          canOfferEventMode={canOfferEventMode}
           videoId={id}
         />
       </header>
@@ -482,6 +571,7 @@ export default async function EditVideoPage({
         canChangeSubmitter={privilegeMode === "admin" && user.role === "admin"}
         iconCandidates={iconCandidates}
         editPrivilegeMode={privilegeMode}
+        submitBlockedReason={submitBlockedReason}
       />
 
       <p
@@ -529,6 +619,9 @@ export default async function EditVideoPage({
           </div>
         </section>
       ) : null}
+
+      {/* 通常チャプターコメントの投稿は公開動画詳細ページに戻された。
+          メンバーチャプターは VideoMembersField で扱う (将来の Phase 5)。 */}
 
       <div style={{ marginTop: 24 }}>
         <Link href="/dashboard" className="fn-btn fn-btn-ghost">

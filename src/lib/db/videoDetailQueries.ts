@@ -15,6 +15,7 @@ import {
   events,
   videoChapters,
   videoEvents,
+  videoMemberChapters,
   videoMembers,
   videos,
   xUsers,
@@ -122,7 +123,14 @@ export async function fetchVideoDetail(
     })
     .from(videoMembers)
     .leftJoin(xUsers, eq(xUsers.id, videoMembers.x_user_id))
-    .where(eq(videoMembers.video_id, video.id))
+    .where(
+      and(
+        eq(videoMembers.video_id, video.id),
+        // 公開ページでは is_public_member = 1 のメンバーのみ表示する。
+        // 非公開編集者 (can_edit のためだけの video_members 行) は出さない。
+        eq(videoMembers.is_public_member, 1),
+      )!,
+    )
     .orderBy(videoMembers.order_index);
   const members = await resolveMemberIcons(db, membersRaw);
 
@@ -146,6 +154,10 @@ export async function fetchVideoDetail(
   } else {
     chapterVisibilityCond = eq(videoChapters.visibility, "public");
   }
+  // 通常チャプターコメントは video_chapters から取得。
+  // 旧仕様で混在していた video_member_id 付き行は migration 0017 で
+  // video_member_chapters に移行済み + 元行は削除済み。念のため video_member_id IS NULL
+  // 条件を入れて、互換期間中に残った旧データが通常チャプターに紛れ込まないようガードする。
   const chapters = await db
     .select({
       id: videoChapters.id,
@@ -156,20 +168,46 @@ export async function fetchVideoDetail(
       show_on_player_bar: videoChapters.show_on_player_bar,
       note: videoChapters.note,
       x_user_id: videoChapters.x_user_id,
-      video_member_id: videoChapters.video_member_id,
       author_name: xUsers.x_name,
       author_icon: xUsers.icon_url,
     })
     .from(videoChapters)
     .leftJoin(xUsers, eq(xUsers.id, videoChapters.x_user_id))
     .where(
-      chapterVisibilityCond
-        ? and(eq(videoChapters.video_id, video.id), chapterVisibilityCond)!
-        : eq(videoChapters.video_id, video.id),
+      and(
+        eq(videoChapters.video_id, video.id),
+        sql`${videoChapters.video_member_id} IS NULL`,
+        chapterVisibilityCond ? chapterVisibilityCond : sql`1=1`,
+      )!,
     )
     .orderBy(videoChapters.chapter_time);
 
-  return { video, creator, events: eventRows, members, chapters };
+  // メンバーチャプターは別テーブル video_member_chapters。通常チャプターとは別 prop で
+  // MemberSection に渡す。
+  const memberChapters = await db
+    .select({
+      id: videoMemberChapters.id,
+      video_member_id: videoMemberChapters.video_member_id,
+      chapter_time: videoMemberChapters.chapter_time,
+      chapter_label: videoMemberChapters.chapter_label,
+      note: videoMemberChapters.note,
+      order_index: videoMemberChapters.order_index,
+    })
+    .from(videoMemberChapters)
+    .where(eq(videoMemberChapters.video_id, video.id))
+    .orderBy(
+      videoMemberChapters.video_member_id,
+      videoMemberChapters.chapter_time,
+    );
+
+  return {
+    video,
+    creator,
+    events: eventRows,
+    members,
+    chapters,
+    memberChapters,
+  };
 }
 
 /**
@@ -341,7 +379,14 @@ export async function fetchRelatedVideos(
     await db
       .select({ x: videoMembers.x_user_id })
       .from(videoMembers)
-      .where(eq(videoMembers.video_id, current.id))
+      .where(
+        and(
+          eq(videoMembers.video_id, current.id),
+          // 関連動画判定でも非公開編集者 (is_public_member=0) は除外する。
+          // 非公開編集者は「メンバーが共通」概念には含めない。
+          eq(videoMembers.is_public_member, 1),
+        )!,
+      )
   )
     .map((row) => normalizeXId(row.x))
     .filter((id): id is string => Boolean(id));
@@ -540,11 +585,17 @@ async function fetchRelatedVideosLegacy(
 
   // sharedMembers: 現在動画の合作メンバー X ID と一致する creator_id を持つ作品 (最大 2)
   // 自分自身の作品との重複は uniqueBy で後段で除去。
+  // 非公開編集者 (is_public_member = 0) は対象外。
   const memberXIds = (
     await db
       .select({ x: videoMembers.x_user_id })
       .from(videoMembers)
-      .where(eq(videoMembers.video_id, current.id))
+      .where(
+        and(
+          eq(videoMembers.video_id, current.id),
+          eq(videoMembers.is_public_member, 1),
+        )!,
+      )
   )
     .map((r) => r.x)
     .filter((s): s is string => !!s);

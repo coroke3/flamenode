@@ -8,6 +8,57 @@
   padding: clamp(28px, 6vw, 72px) 0 0;
 }
 
+.quickSection {
+  width: min(100% - 32px, 1320px);
+  margin: 0 auto;
+  padding: clamp(24px, 4vw, 42px) 0 0;
+}
+
+.watchBand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 20px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-primary) 10%, transparent), transparent 72%),
+    var(--bg-surface);
+}
+
+.watchEyebrow {
+  margin: 0 0 4px;
+  color: var(--accent-primary-strong);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.watchTitle {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: clamp(20px, 3vw, 28px);
+  font-weight: 800;
+}
+
+.watchText {
+  max-width: 620px;
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.watchActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .eventList {
   display: grid;
   grid-template-columns: 1fr;
@@ -33,5 +84,18 @@
   .section {
     width: min(100% - 20px, 100%);
     padding-top: 42px;
+  }
+
+  .quickSection {
+    width: min(100% - 20px, 100%);
+  }
+
+  .watchBand {
+    display: block;
+  }
+
+  .watchActions {
+    justify-content: flex-start;
+    margin-top: 14px;
   }
 }

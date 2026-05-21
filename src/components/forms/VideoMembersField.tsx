@@ -5,11 +5,22 @@ import { Icon } from "@/components/ui/Icon";
 import { normalizeXId } from "@/lib/utils/xid";
 import { parseCsv } from "@/lib/utils/csv";
 
+export interface VideoMemberChapterInput {
+  time: string;
+  label: string;
+  note: string;
+}
+
 export interface VideoMemberInput {
   name: string;
   x_user_id: string;
   role: string;
   comment: string;
+  /**
+   * メンバーチャプター。time / label / note の組を 0 件以上持つ。
+   * サーバー側 (replaceVideoMembers) で video_member_chapters に保存される。
+   */
+  chapters?: VideoMemberChapterInput[];
 }
 
 export interface VideoMemberSuggestion {
@@ -29,7 +40,57 @@ const EMPTY_ROW: VideoMemberInput = {
   x_user_id: "",
   role: "",
   comment: "",
+  chapters: [],
 };
+
+/** メンバーキー (CSV 差分追加用)。X ID 優先、なければ名前 (lowercase trim)。 */
+function memberKey(m: VideoMemberInput): string {
+  const xid = normalizeXId(m.x_user_id);
+  if (xid) return `x:${xid}`;
+  return `n:${m.name.trim().toLowerCase()}`;
+}
+
+/** チャプター重複キー: `${memberKey}:${秒切り捨て}:${labelLower}` */
+function chapterKey(mk: string, ch: VideoMemberChapterInput): string {
+  const secFloor = (() => {
+    const t = ch.time.trim();
+    if (/^\d+(\.\d+)?$/.test(t)) return Math.floor(Number(t));
+    const parts = t.split(":").map((p) => Number(p));
+    if (parts.length === 2) return parts[0]! * 60 + Math.floor(parts[1]!);
+    if (parts.length === 3) {
+      return parts[0]! * 3600 + parts[1]! * 60 + Math.floor(parts[2]!);
+    }
+    return Number.NaN;
+  })();
+  return `${mk}:${secFloor}:${ch.label.trim().toLowerCase()}`;
+}
+
+/** CSV chapters セル "time|label|note;time|label|note" をパースする。 */
+function parseChaptersCell(cell: string): VideoMemberChapterInput[] {
+  const out: VideoMemberChapterInput[] = [];
+  for (const raw of cell.split(";")) {
+    const t = raw.trim();
+    if (!t) continue;
+    const cols = t.split("|");
+    const time = (cols[0] ?? "").trim();
+    const label = (cols[1] ?? "").trim();
+    const note = (cols[2] ?? "").trim();
+    if (!time || !label) continue;
+    out.push({ time, label, note });
+  }
+  return out;
+}
+
+/** chapters の配列を CSV セル形式 "time|label|note;..." に直列化する。 */
+function serializeChaptersCell(chapters: VideoMemberChapterInput[]): string {
+  return chapters
+    .filter((c) => c.time.trim() && c.label.trim())
+    .map((c) => {
+      const note = c.note.trim();
+      return note ? `${c.time}|${c.label}|${note}` : `${c.time}|${c.label}`;
+    })
+    .join(";");
+}
 
 export function VideoMembersField({
   initialMembers = [],
@@ -187,13 +248,45 @@ export function VideoMembersField({
     !disabled && setRows((prev) => prev.filter((_, idx) => idx !== i));
 
   const copyCsvPrompt = async () => {
-    const prompt = [
+    // 既存メンバーを 5 列 CSV に直列化 (空メンバーは除外)
+    const existing = rows
+      .filter((r) => r.name.trim() || r.x_user_id.trim())
+      .map((r) => {
+        const chapters = serializeChaptersCell(r.chapters ?? []);
+        const cells = [
+          r.name.trim(),
+          normalizeXId(r.x_user_id),
+          r.role.trim(),
+          r.comment.trim(),
+          chapters,
+        ].map((c) => {
+          // CSV 内に , か " か改行があれば quote
+          if (/[",\n]/.test(c)) return `"${c.replace(/"/g, '""')}"`;
+          return c;
+        });
+        return cells.join(",");
+      })
+      .join("\n");
+
+    const hasExisting = existing.length > 0;
+    const lines = [
       "次の情報を FlameNode の合作メンバー CSV に整形してください。",
-      "出力は CSV 本文のみ。列は name,x_user_id,role,comment の4列。",
-      "x_user_id は @ を外し、不明なら空欄。1行目にヘッダーは入れない。",
-      "例: 田中,tanaka,作画,よろしくお願いします",
-    ].join("\n");
-    await navigator.clipboard.writeText(prompt);
+      "",
+      "出力は CSV 本文のみ。",
+      "列は name,x_user_id,role,comment,chapters の5列です。",
+      "x_user_id は @ を外してください。不明なら空欄にしてください。",
+      "chapters は time|label|note を ; 区切りで複数指定してください (例: 0:12|登場|表情差分;1:05|見せ場|背景)。",
+      "既存データと重複する項目は出力せず、追加・修正が必要な差分だけを出力してください。",
+      "",
+      hasExisting ? "既存データ:" : "既存データ (空):",
+      "name,x_user_id,role,comment,chapters",
+    ];
+    if (hasExisting) lines.push(existing);
+    lines.push("");
+    lines.push("追加したい情報:");
+    lines.push("(ここに貼り付けてください)");
+
+    await navigator.clipboard.writeText(lines.join("\n"));
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1800);
   };
@@ -205,33 +298,70 @@ export function VideoMembersField({
     e.preventDefault();
     let rowsRaw = parseCsv(text);
     if (rowsRaw.length === 0) return;
-    // 1行目がヘッダー (name/x_user_id を含む) ならスキップ
+    // 1行目がヘッダー (name/x_user_id/chapters のいずれかを含む) ならスキップ
     const firstLower = rowsRaw[0]!.map((c) => c.trim().toLowerCase());
     if (
       firstLower.includes("name") ||
       firstLower.includes("x_user_id") ||
-      firstLower.includes("xid")
+      firstLower.includes("xid") ||
+      firstLower.includes("chapters")
     ) {
       rowsRaw = rowsRaw.slice(1);
     }
+
+    // CSV 1 行 → VideoMemberInput (5 列目があれば chapters を読む)
     const parsed = rowsRaw
       .map((cols): VideoMemberInput => {
         const xid = normalizeXId(cols[1] ?? "");
         const hit = xid ? suggestionsById.get(xid) : null;
+        const chapters = parseChaptersCell(cols[4] ?? "");
         return {
           name: (cols[0] ?? "").trim() || hit?.name || "",
           x_user_id: xid,
           role: (cols[2] ?? "").trim(),
           comment: (cols[3] ?? "").trim(),
+          chapters,
         };
       })
       .filter((r) => r.name || r.x_user_id);
-    if (parsed.length > 0) {
-      setRows((prev) => [
-        ...prev.filter((r) => r.name || r.x_user_id),
-        ...parsed,
-      ]);
-    }
+    if (parsed.length === 0) return;
+
+    // 差分追加: 既存メンバーと同じキーなら、空欄でない role / comment / chapters を補完。
+    // チャプターは重複キー (memberKey:sec:labelLower) を避けて追加する。
+    setRows((prev) => {
+      const next = prev.map((p) => ({ ...p, chapters: [...(p.chapters ?? [])] }));
+      const idx = new Map<string, number>();
+      next.forEach((r, i) => idx.set(memberKey(r), i));
+      for (const p of parsed) {
+        const k = memberKey(p);
+        const existIdx = idx.get(k);
+        if (existIdx === undefined) {
+          // 新規メンバー追加 (chapters は必ず配列に正規化)
+          next.push({ ...p, chapters: p.chapters ?? [] });
+          idx.set(k, next.length - 1);
+        } else {
+          // 既存メンバー: 空欄でないフィールドだけ補完
+          const target = next[existIdx]!;
+          if (!target.role && p.role) target.role = p.role;
+          if (!target.comment && p.comment) target.comment = p.comment;
+          if (!target.name && p.name) target.name = p.name;
+          // チャプターは重複キーを除いてマージ
+          const targetChapters = target.chapters ?? [];
+          const knownKeys = new Set<string>(
+            targetChapters.map((c) => chapterKey(k, c)),
+          );
+          for (const ch of p.chapters ?? []) {
+            const key = chapterKey(k, ch);
+            if (knownKeys.has(key)) continue;
+            knownKeys.add(key);
+            targetChapters.push(ch);
+          }
+          target.chapters = targetChapters;
+        }
+      }
+      // 空行 (name/x_user_id どちらも空) は除去
+      return next.filter((r) => r.name || r.x_user_id);
+    });
   };
 
   const payload = React.useMemo(() => {
@@ -241,10 +371,67 @@ export function VideoMembersField({
         x_user_id: normalizeXId(r.x_user_id),
         role: r.role.trim(),
         comment: r.comment.trim(),
+        chapters: (r.chapters ?? [])
+          .map((c) => ({
+            time: c.time.trim(),
+            label: c.label.trim(),
+            note: c.note.trim(),
+          }))
+          .filter((c) => c.time && c.label),
       }))
       .filter((r) => r.name || r.x_user_id);
     return JSON.stringify(cleaned);
   }, [rows]);
+
+  // メンバー行ごとのチャプター行を編集するヘルパー
+  const addChapter = (i: number) => {
+    if (disabled) return;
+    setRows((prev) =>
+      prev.map((r, idx) =>
+        idx === i
+          ? {
+              ...r,
+              chapters: [
+                ...(r.chapters ?? []),
+                { time: "", label: "", note: "" },
+              ],
+            }
+          : r,
+      ),
+    );
+  };
+  const updateChapter = (
+    i: number,
+    j: number,
+    patch: Partial<VideoMemberChapterInput>,
+  ) => {
+    if (disabled) return;
+    setRows((prev) =>
+      prev.map((r, idx) =>
+        idx === i
+          ? {
+              ...r,
+              chapters: (r.chapters ?? []).map((c, jdx) =>
+                jdx === j ? { ...c, ...patch } : c,
+              ),
+            }
+          : r,
+      ),
+    );
+  };
+  const removeChapter = (i: number, j: number) => {
+    if (disabled) return;
+    setRows((prev) =>
+      prev.map((r, idx) =>
+        idx === i
+          ? {
+              ...r,
+              chapters: (r.chapters ?? []).filter((_, jdx) => jdx !== j),
+            }
+          : r,
+      ),
+    );
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -356,6 +543,95 @@ export function VideoMembersField({
           >
             <Icon name="trash" size={11} aria-hidden />
           </button>
+          {/* メンバーチャプター編集 (details で折りたたみ) */}
+          <details
+            style={{
+              gridColumn: "1 / -1",
+              marginTop: 2,
+              padding: "4px 6px",
+              borderRadius: "var(--radius-sm)",
+              background: "var(--bg-surface)",
+              fontSize: 11,
+              opacity: disabled ? 0.6 : 1,
+            }}
+          >
+            <summary
+              style={{
+                cursor: disabled ? "default" : "pointer",
+                color: "var(--text-muted)",
+              }}
+            >
+              <Icon name="chapter" size={11} aria-hidden /> メンバーチャプター
+              {r.chapters && r.chapters.length > 0
+                ? ` (${r.chapters.length} 件)`
+                : null}
+            </summary>
+            <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
+              {(r.chapters ?? []).map((ch, j) => (
+                <div
+                  key={`mc-${i}-${j}`}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "70px 1fr 1fr auto",
+                    gap: 4,
+                    alignItems: "center",
+                  }}
+                >
+                  <input
+                    type="text"
+                    value={ch.time}
+                    onChange={(e) =>
+                      updateChapter(i, j, { time: e.target.value })
+                    }
+                    placeholder="mm:ss"
+                    className="fn-input"
+                    disabled={disabled}
+                    maxLength={10}
+                  />
+                  <input
+                    type="text"
+                    value={ch.label}
+                    onChange={(e) =>
+                      updateChapter(i, j, { label: e.target.value })
+                    }
+                    placeholder="ラベル"
+                    className="fn-input"
+                    disabled={disabled}
+                    maxLength={120}
+                  />
+                  <input
+                    type="text"
+                    value={ch.note}
+                    onChange={(e) =>
+                      updateChapter(i, j, { note: e.target.value })
+                    }
+                    placeholder="メモ (任意)"
+                    className="fn-input"
+                    disabled={disabled}
+                    maxLength={400}
+                  />
+                  <button
+                    type="button"
+                    className="fn-btn fn-btn-ghost fn-btn-sm"
+                    onClick={() => removeChapter(i, j)}
+                    aria-label="このチャプターを削除"
+                    disabled={disabled}
+                  >
+                    <Icon name="trash" size={10} aria-hidden />
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                className="fn-btn fn-btn-ghost fn-btn-sm"
+                onClick={() => addChapter(i)}
+                disabled={disabled}
+                style={{ alignSelf: "flex-start" }}
+              >
+                <Icon name="plus" size={10} aria-hidden /> チャプターを追加
+              </button>
+            </div>
+          </details>
         </div>
       ))}
       <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
