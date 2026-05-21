@@ -8,20 +8,6 @@ import { cn } from "@/lib/utils/cn";
 import { MemberChapterItem } from "./MemberChapterItem";
 import type { MemberChapterItemEntry } from "./MemberChapterItem";
 
-/**
- * 動画詳細ページ「参加メンバー」セクション。
- * 旧 MemberList を以下 3 モードで切り替え可能に拡張する。
- *   - cards: 丸アイコン + 名前 + 役割の縦カード (デフォルト, 旧表示)
- *   - table: シンプルなテーブル風 (fn-table は使わない — CLAUDE.md 方針)
- *   - chapters: メンバーごとに video_chapters.video_member_id でグループ化したチャプター表示
- *
- * 仕様メモ:
- *   - 表示モードはクライアント状態 (URLに永続化しない) — 1作品内の一時切替なので state で十分。
- *   - chapters モードは「担当チャプターが 1 件もないメンバーも全員表示する」。空の場合は "担当チャプターなし" を出す。
- *   - chapters モードで video_member_id が NULL のチャプターは "担当未割当" グループにまとめる。
- *   - クリックで onSeek を呼ぶことで動画シークと連携できる (省略時は静的表示)。
- */
-
 export interface MemberSectionMember {
   id: string;
   x_user_id: string | null;
@@ -38,16 +24,76 @@ export interface MemberSectionChapter extends MemberChapterItemEntry {
 
 interface MemberSectionProps {
   members: readonly MemberSectionMember[];
-  /**
-   * メンバーチャプター一覧。`video_member_id` で各メンバーにグループ化する。
-   * 通常のチャプターコメントとは別データなので、ここには混入させない。
-   */
   memberChapters?: readonly MemberSectionChapter[];
   duration?: number | null;
   onSeek?: (time: number) => void;
 }
 
 type ViewMode = "cards" | "table" | "chapters";
+type SortKey = "order" | "name" | "handle" | "role" | "chapters";
+type SortDirection = "asc" | "desc";
+
+interface SortState {
+  key: SortKey;
+  direction: SortDirection;
+}
+
+function memberDisplayName(member: MemberSectionMember): string {
+  return member.name ?? member.x_name ?? "anonymous";
+}
+
+function memberHandle(member: MemberSectionMember): string {
+  return member.x_user_id ?? "";
+}
+
+function chapterCountMap(
+  chapters: readonly MemberSectionChapter[],
+): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const chapter of chapters) {
+    if (!chapter.video_member_id) continue;
+    map.set(
+      chapter.video_member_id,
+      (map.get(chapter.video_member_id) ?? 0) + 1,
+    );
+  }
+  return map;
+}
+
+function compareText(a: string | null, b: string | null): number {
+  return (a ?? "").localeCompare(b ?? "", "ja", {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function sortMembers(
+  members: readonly MemberSectionMember[],
+  sort: SortState | null,
+  counts: Map<string, number>,
+): MemberSectionMember[] {
+  const withIndex = members.map((member, index) => ({ member, index }));
+  if (!sort) return withIndex.map((entry) => entry.member);
+
+  const direction = sort.direction === "asc" ? 1 : -1;
+  withIndex.sort((a, b) => {
+    let result = 0;
+    if (sort.key === "order") {
+      result = a.index - b.index;
+    } else if (sort.key === "name") {
+      result = compareText(memberDisplayName(a.member), memberDisplayName(b.member));
+    } else if (sort.key === "handle") {
+      result = compareText(memberHandle(a.member), memberHandle(b.member));
+    } else if (sort.key === "role") {
+      result = compareText(a.member.role, b.member.role);
+    } else {
+      result = (counts.get(a.member.id) ?? 0) - (counts.get(b.member.id) ?? 0);
+    }
+    return result === 0 ? a.index - b.index : result * direction;
+  });
+
+  return withIndex.map((entry) => entry.member);
+}
 
 export function MemberSection({
   members,
@@ -56,8 +102,8 @@ export function MemberSection({
   onSeek,
 }: MemberSectionProps): React.ReactElement | null {
   const [mode, setMode] = React.useState<ViewMode>("cards");
-  const hasMemberChapters =
-    Array.isArray(memberChapters) && memberChapters.length > 0;
+  const chapters = memberChapters ?? [];
+  const hasMemberChapters = chapters.length > 0;
 
   if (members.length === 0) return null;
 
@@ -87,11 +133,13 @@ export function MemberSection({
       </div>
 
       {mode === "cards" ? <CardsView members={members} /> : null}
-      {mode === "table" ? <TableView members={members} /> : null}
+      {mode === "table" ? (
+        <TableView members={members} memberChapters={chapters} />
+      ) : null}
       {mode === "chapters" && hasMemberChapters ? (
         <ChaptersView
           members={members}
-          chapters={memberChapters ?? []}
+          chapters={chapters}
           duration={duration}
           onSeek={onSeek}
         />
@@ -132,9 +180,9 @@ function CardsView({
 }): React.ReactElement {
   return (
     <ul className={styles.cardGrid}>
-      {members.map((m) => (
-        <li key={m.id}>
-          <MemberCard member={m} />
+      {members.map((member) => (
+        <li key={member.id}>
+          <MemberCard member={member} />
         </li>
       ))}
     </ul>
@@ -149,7 +197,7 @@ function MemberCard({
   const displayName = member.x_name ?? member.name ?? "anonymous";
   const internalHref = member.x_user_id ? `/user/${member.x_user_id}` : null;
   const xExternal = member.x_user_id
-    ? `https://x.com/${member.x_user_id}`
+    ? `https://x.com/${encodeURIComponent(member.x_user_id)}`
     : null;
 
   const avatar = (
@@ -210,61 +258,184 @@ function MemberCard({
   );
 }
 
+function SortHeader({
+  label,
+  sortKey,
+  activeSort,
+  onSort,
+  className,
+}: {
+  label: string;
+  sortKey: SortKey;
+  activeSort: SortState | null;
+  onSort: (key: SortKey) => void;
+  className: string;
+}): React.ReactElement {
+  const active = activeSort?.key === sortKey;
+  const ariaSort = active
+    ? activeSort.direction === "asc"
+      ? "ascending"
+      : "descending"
+    : "none";
+
+  return (
+    <span role="columnheader" aria-sort={ariaSort} className={className}>
+      <button
+        type="button"
+        className={styles.sortButton}
+        onClick={() => onSort(sortKey)}
+      >
+        <span>{label}</span>
+        <span className={styles.sortMark} aria-hidden>
+          {active ? (activeSort.direction === "asc" ? "↑" : "↓") : "↕"}
+        </span>
+      </button>
+    </span>
+  );
+}
+
 function TableView({
   members,
+  memberChapters,
 }: {
   members: readonly MemberSectionMember[];
+  memberChapters: readonly MemberSectionChapter[];
 }): React.ReactElement {
+  const [sort, setSort] = React.useState<SortState | null>(null);
+  const counts = React.useMemo(
+    () => chapterCountMap(memberChapters),
+    [memberChapters],
+  );
+  const sortedMembers = React.useMemo(
+    () => sortMembers(members, sort, counts),
+    [members, sort, counts],
+  );
+  const orderById = React.useMemo(
+    () => new Map(members.map((member, index) => [member.id, index + 1])),
+    [members],
+  );
+
+  const handleSort = React.useCallback((key: SortKey) => {
+    setSort((current) => {
+      if (!current || current.key !== key) return { key, direction: "asc" };
+      if (current.direction === "asc") return { key, direction: "desc" };
+      return null;
+    });
+  }, []);
+
   return (
-    <div className={styles.tableWrap} role="table">
+    <div className={styles.tableWrap} role="table" aria-label="参加メンバー">
       <div className={styles.tableHeader} role="row">
-        <span role="columnheader" className={styles.tColMember}>
-          メンバー
-        </span>
-        <span role="columnheader" className={styles.tColRole}>
-          役割
-        </span>
+        <SortHeader
+          label="No."
+          sortKey="order"
+          activeSort={sort}
+          onSort={handleSort}
+          className={styles.tColNo}
+        />
+        <SortHeader
+          label="活動名"
+          sortKey="name"
+          activeSort={sort}
+          onSort={handleSort}
+          className={styles.tColName}
+        />
+        <SortHeader
+          label="@id"
+          sortKey="handle"
+          activeSort={sort}
+          onSort={handleSort}
+          className={styles.tColHandle}
+        />
+        <SortHeader
+          label="役割"
+          sortKey="role"
+          activeSort={sort}
+          onSort={handleSort}
+          className={styles.tColRole}
+        />
         <span role="columnheader" className={styles.tColComment}>
           コメント
         </span>
+        <SortHeader
+          label="チャプター"
+          sortKey="chapters"
+          activeSort={sort}
+          onSort={handleSort}
+          className={styles.tColChapters}
+        />
       </div>
-      {members.map((m) => {
-        const displayName = m.x_name ?? m.name ?? "anonymous";
-        const internalHref = m.x_user_id ? `/user/${m.x_user_id}` : null;
+      {sortedMembers.map((member) => {
+        const displayOrder = orderById.get(member.id) ?? 0;
+        const displayName = memberDisplayName(member);
+        const internalHref = member.x_user_id ? `/user/${member.x_user_id}` : null;
+        const externalHref = member.x_user_id
+          ? `https://x.com/${encodeURIComponent(member.x_user_id)}`
+          : null;
+        const chapterCount = counts.get(member.id) ?? 0;
+
         return (
-          <div role="row" key={m.id} className={styles.tableRow}>
-            <span role="cell" className={styles.tColMember}>
-              {internalHref ? (
-                <Link href={internalHref} className={styles.tNameLink}>
-                  <span className={styles.tAvatar} aria-hidden>
-                    {m.icon_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={m.icon_url} alt="" width={24} height={24} />
-                    ) : (
-                      <Icon name="user" size={11} aria-hidden />
-                    )}
-                  </span>
-                  <span className={styles.tName}>{displayName}</span>
-                </Link>
-              ) : (
-                <span className={styles.tNameLink}>
-                  <span className={styles.tAvatar} aria-hidden>
-                    {m.icon_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={m.icon_url} alt="" width={24} height={24} />
-                    ) : (
-                      <Icon name="user" size={11} aria-hidden />
-                    )}
-                  </span>
-                  <span className={styles.tName}>{displayName}</span>
+          <div role="row" key={member.id} className={styles.tableRow}>
+            <span role="cell" className={styles.tColNo} data-label="No.">
+              {displayOrder}
+            </span>
+            <span role="cell" className={styles.tColName} data-label="活動名">
+              <span className={styles.tNameCell}>
+                <span className={styles.tAvatar} aria-hidden>
+                  {member.icon_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={member.icon_url} alt="" width={24} height={24} />
+                  ) : (
+                    <Icon name="user" size={11} aria-hidden />
+                  )}
                 </span>
+                {internalHref ? (
+                  <Link href={internalHref} className={styles.tNameLink}>
+                    <span className={styles.tName}>{displayName}</span>
+                  </Link>
+                ) : (
+                  <span className={styles.tName}>{displayName}</span>
+                )}
+              </span>
+            </span>
+            <span role="cell" className={styles.tColHandle} data-label="@id">
+              {externalHref ? (
+                <a
+                  href={externalHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={styles.tHandleLink}
+                >
+                  @{member.x_user_id}
+                  <Icon name="external" size={10} aria-hidden />
+                </a>
+              ) : (
+                <span className={styles.tMuted}>—</span>
               )}
             </span>
-            <span role="cell" className={styles.tColRole}>
-              {m.role ?? ""}
+            <span role="cell" className={styles.tColRole} data-label="役割">
+              {member.role ?? <span className={styles.tMuted}>—</span>}
             </span>
-            <span role="cell" className={styles.tColComment}>
-              {m.comment ?? ""}
+            <span
+              role="cell"
+              className={styles.tColComment}
+              data-label="コメント"
+            >
+              {member.comment ?? <span className={styles.tMuted}>—</span>}
+            </span>
+            <span
+              role="cell"
+              className={styles.tColChapters}
+              data-label="メンバーチャプター"
+            >
+              {chapterCount > 0 ? (
+                <span className={styles.chapterCountBadge}>
+                  <Icon name="chapter" size={11} aria-hidden />
+                  {chapterCount}
+                </span>
+              ) : (
+                <span className={styles.tMuted}>—</span>
+              )}
             </span>
           </div>
         );
@@ -284,19 +455,16 @@ function ChaptersView({
   duration?: number | null;
   onSeek?: (time: number) => void;
 }): React.ReactElement {
-  // video_member_id -> chapters の Map
-  // メンバーチャプターは必ず video_member_id を持つので "__unassigned__" は出ない設計だが、
-  // 万一データ不整合があった場合にも備えて末尾グループとして残す。
   const grouped = React.useMemo(() => {
     const map = new Map<string, MemberSectionChapter[]>();
-    for (const c of chapters) {
-      const key = c.video_member_id || "__unassigned__";
-      const arr = map.get(key) ?? [];
-      arr.push(c);
-      map.set(key, arr);
+    for (const chapter of chapters) {
+      const key = chapter.video_member_id || "__unassigned__";
+      const list = map.get(key) ?? [];
+      list.push(chapter);
+      map.set(key, list);
     }
-    for (const arr of map.values()) {
-      arr.sort((a, b) => a.chapter_time - b.chapter_time);
+    for (const list of map.values()) {
+      list.sort((a, b) => a.chapter_time - b.chapter_time);
     }
     return map;
   }, [chapters]);
@@ -305,28 +473,27 @@ function ChaptersView({
 
   return (
     <div className={styles.chaptersWrap}>
-      {members.map((m) => {
-        const list = grouped.get(m.id) ?? [];
-        // 表示は「活動名(@id)」固定。x_name (X 上の名前) ではなく作品ごとの活動名
-        // (video_members.name) を優先する。
-        const displayName = m.name ?? m.x_name ?? "anonymous";
-        const headerLabel = m.x_user_id
-          ? `${displayName}(@${m.x_user_id})`
+      {members.map((member) => {
+        const list = grouped.get(member.id) ?? [];
+        const displayName = memberDisplayName(member);
+        const headerLabel = member.x_user_id
+          ? `${displayName}(@${member.x_user_id})`
           : displayName;
+
         return (
-          <section key={m.id} className={styles.chapterGroup}>
+          <section key={member.id} className={styles.chapterGroup}>
             <header className={styles.chapterGroupHead}>
               <span className={styles.avatarSmall} aria-hidden>
-                {m.icon_url ? (
+                {member.icon_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={m.icon_url} alt="" width={24} height={24} />
+                  <img src={member.icon_url} alt="" width={24} height={24} />
                 ) : (
                   <Icon name="user" size={11} aria-hidden />
                 )}
               </span>
               <span className={styles.chapterGroupName}>{headerLabel}</span>
-              {m.role ? (
-                <span className={styles.chapterGroupRole}>{m.role}</span>
+              {member.role ? (
+                <span className={styles.chapterGroupRole}>{member.role}</span>
               ) : null}
               <span className={styles.chapterGroupCount}>{list.length}</span>
             </header>
@@ -336,10 +503,10 @@ function ChaptersView({
               </div>
             ) : (
               <div className={styles.chapterGroupList}>
-                {list.map((c, i) => (
+                {list.map((chapter, index) => (
                   <MemberChapterItem
-                    key={`${c.id}-mem-${i}`}
-                    chapter={c}
+                    key={`${chapter.id}-member-${index}`}
+                    chapter={chapter}
                     duration={duration}
                     onSeek={onSeek}
                   />
@@ -361,10 +528,10 @@ function ChaptersView({
             </span>
           </header>
           <div className={styles.chapterGroupList}>
-            {unassigned.map((c, i) => (
+            {unassigned.map((chapter, index) => (
               <MemberChapterItem
-                key={`${c.id}-un-${i}`}
-                chapter={c}
+                key={`${chapter.id}-unassigned-${index}`}
+                chapter={chapter}
                 duration={duration}
                 onSeek={onSeek}
               />
