@@ -1,5 +1,4 @@
 import * as React from "react";
-import Link from "next/link";
 import styles from "./page.module.css";
 import { sql } from "drizzle-orm";
 import { withDatabase } from "@/lib/cloudflare";
@@ -10,19 +9,31 @@ import {
   fetchPickupCreators,
   fetchRecommendedVideos,
   fetchVideosForEvent,
+  publicVideoCondition,
 } from "@/lib/db/queries";
-import { slots as slotsTable } from "@/lib/db/schema";
+import {
+  slots as slotsTable,
+  videos as videosTable,
+  xUsers as xUsersTable,
+} from "@/lib/db/schema";
 import {
   HomeIntroBand,
   type HomeIntroSlotStat,
 } from "@/components/layout/HomeIntroBand";
+import { HomeEditorialHero } from "@/components/layout/HomeEditorialHero";
+import { HomeMoodRail } from "@/components/layout/HomeMoodRail";
+import { HomeClosingCta } from "@/components/layout/HomeClosingCta";
 import { Shelf } from "@/components/layout/Shelf";
 import { SectionHeader } from "@/components/layout/SectionHeader";
 import { VideoCard } from "@/components/video/VideoCard";
 import { CreatorCard } from "@/components/user/CreatorCard";
 import { EventPanel } from "@/components/layout/EventPanel";
-import { Icon } from "@/components/ui/Icon";
 import { EmptyState } from "@/components/ui/EmptyState";
+import {
+  type HomeFeatureVideo,
+  type HomeStats,
+  uniqueHomeVideos,
+} from "@/components/layout/homeVisuals";
 
 export const dynamic = "force-dynamic";
 
@@ -48,13 +59,25 @@ export default async function TopPage(): Promise<React.ReactElement> {
         fetchLatestEvents(db, 3),
       ]);
 
-    const eventVideoEntries = await Promise.all(
-      latestEvents.map(async (event) => {
-        const videos = await fetchVideosForEvent(db, event.id, 8);
-        return [event.id, videos] as const;
-      }),
+    const [videoCountRows, creatorCountRows] = await Promise.all([
+      db
+        .select({ count: sql<number>`COUNT(*)` })
+        .from(videosTable)
+        .where(publicVideoCondition),
+      db
+        .select({ count: sql<number>`COUNT(*)` })
+        .from(xUsersTable)
+        .where(sql`${xUsersTable.approval_status} IN ('approved', 'pending')`),
+    ]);
+
+    const videosByEvent = Object.fromEntries(
+      await Promise.all(
+        latestEvents.map(async (event) => {
+          const videos = await fetchVideosForEvent(db, event.id, 8);
+          return [event.id, videos] as const;
+        }),
+      ),
     );
-    const videosByEvent = Object.fromEntries(eventVideoEntries);
 
     const topSlotStats = new Map<string, HomeIntroSlotStat>();
     if (activeEvents.length > 0) {
@@ -83,6 +106,11 @@ export default async function TopPage(): Promise<React.ReactElement> {
       latestEvents,
       videosByEvent,
       topSlotStats,
+      stats: {
+        publicVideos: Number(videoCountRows[0]?.count ?? latest.length),
+        activeEvents: activeEvents.length,
+        creators: Number(creatorCountRows[0]?.count ?? creators.length),
+      } satisfies HomeStats,
     };
   });
 
@@ -94,41 +122,31 @@ export default async function TopPage(): Promise<React.ReactElement> {
     latestEvents = [],
     videosByEvent = {},
     topSlotStats = new Map<string, HomeIntroSlotStat>(),
+    stats = {
+      publicVideos: latest.length,
+      activeEvents: activeEvents.length,
+      creators: creators.length,
+    },
   } = data ?? {};
+
+  const heroVideos = uniqueHomeVideos([
+    ...(recommended as HomeFeatureVideo[]),
+    ...(latest as HomeFeatureVideo[]),
+  ]).slice(0, 5);
 
   return (
     <div className={styles.page}>
+      <HomeEditorialHero stats={stats} videos={heroVideos} />
       <HomeIntroBand activeEvents={activeEvents} slotStats={topSlotStats} />
-
-      <section className={styles.quickSection} aria-label="作品を見る導線">
-        <div className={styles.watchBand}>
-          <div>
-            <p className={styles.watchEyebrow}>Watch FlameNode</p>
-            <h2 className={styles.watchTitle}>まずは作品を見る</h2>
-            <p className={styles.watchText}>
-              イベントの熱量はそのままに、作品棚から気になる映像へすぐ入れます。
-            </p>
-          </div>
-          <div className={styles.watchActions}>
-            <Link href="/list" className="fn-btn fn-btn-primary">
-              <Icon name="play" size={14} aria-hidden />
-              作品を見る
-            </Link>
-            <Link href="/event" className="fn-btn fn-btn-ghost">
-              <Icon name="calendar" size={14} aria-hidden />
-              エントリーする
-            </Link>
-          </div>
-        </div>
-      </section>
+      <HomeMoodRail videos={heroVideos} />
 
       <section className={styles.section} aria-labelledby="sec-recommend">
-        <SectionHeader title="人気作品" moreHref="/recommend" />
+        <SectionHeader title="今週のピックアップ" moreHref="/recommend" moreLabel="一覧を見る" />
         <div className={styles.shelfBox}>
           {recommended.length === 0 ? (
-            <EmptyShelf message="まだおすすめできる作品がありません。" />
+            <EmptyShelf message="おすすめできる作品を準備しています。" />
           ) : (
-            <Shelf ariaLabel="人気作品">
+            <Shelf ariaLabel="今週のピックアップ">
               {recommended.map((video, index) => (
                 <VideoCard
                   key={`${video.id}-recommended-${index}`}
@@ -141,10 +159,10 @@ export default async function TopPage(): Promise<React.ReactElement> {
       </section>
 
       <section className={styles.section} aria-labelledby="sec-creators">
-        <SectionHeader title="注目クリエイター" moreHref="/user" />
+        <SectionHeader title="注目クリエイター" moreHref="/user" moreLabel="もっと見る" />
         <div className={styles.shelfBox}>
           {creators.length === 0 ? (
-            <EmptyShelf message="該当するクリエイターがまだいません。" />
+            <EmptyShelf message="紹介できるクリエイターを準備しています。" />
           ) : (
             <Shelf ariaLabel="注目クリエイター">
               {creators.map((creator, index) => (
@@ -166,12 +184,12 @@ export default async function TopPage(): Promise<React.ReactElement> {
       </section>
 
       <section className={styles.section} aria-labelledby="sec-latest">
-        <SectionHeader title="新着作品" moreHref="/list" />
+        <SectionHeader title="新着アップロード" moreHref="/list" moreLabel="すべて見る" />
         <div className={styles.shelfBox}>
           {latest.length === 0 ? (
-            <EmptyShelf message="まだ公開作品がありません。" />
+            <EmptyShelf message="公開作品を準備しています。" />
           ) : (
-            <Shelf ariaLabel="新着作品">
+            <Shelf ariaLabel="新着アップロード">
               {latest.map((video, index) => (
                 <VideoCard key={`${video.id}-latest-${index}`} video={video} />
               ))}
@@ -181,10 +199,10 @@ export default async function TopPage(): Promise<React.ReactElement> {
       </section>
 
       <section className={styles.section} aria-labelledby="sec-events">
-        <SectionHeader title="イベント" moreHref="/event" />
+        <SectionHeader title="募集中のイベント" moreHref="/event" moreLabel="すべて見る" />
         <div className={styles.eventList}>
           {latestEvents.length === 0 ? (
-            <EmptyShelf message="まだ公開中のイベントがありません。" />
+            <EmptyShelf message="公開中のイベントを準備しています。" />
           ) : (
             latestEvents.map((event) => (
               <EventPanel
@@ -195,12 +213,9 @@ export default async function TopPage(): Promise<React.ReactElement> {
             ))
           )}
         </div>
-        <div className={styles.center}>
-          <Link href="/event" className="fn-btn fn-btn-ghost">
-            すべてのイベントを見る
-          </Link>
-        </div>
       </section>
+
+      <HomeClosingCta />
     </div>
   );
 }
@@ -208,7 +223,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
 function EmptyShelf({ message }: { message: string }): React.ReactElement {
   return (
     <div className={styles.empty}>
-      <EmptyState title="まだ準備中です" description={message} />
+      <EmptyState title="準備中です" description={message} />
     </div>
   );
 }

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Icon } from "@/components/ui/Icon";
 import type { events as eventsTable } from "@/lib/db/schema";
 import { formatUnix } from "@/lib/utils/format";
+import { computeEventStatus, isAcceptingEntries } from "@/lib/utils/eventStatus";
 import styles from "./EventRecruitCard.module.css";
 
 type EventRow = typeof eventsTable.$inferSelect;
@@ -51,15 +52,7 @@ function stateLabel(state: RecruitState): string {
 
 function ctaLabel(state: RecruitState, fallback: string): string {
   if (state === "accepting") return "エントリーする";
-  if (
-    state === "before_entry" ||
-    state === "soon" ||
-    state === "ongoing" ||
-    state === "ended" ||
-    state === "full"
-  ) {
-    return "イベント詳細を見る";
-  }
+  if (state === "after_entry") return "作品を投稿する";
   return fallback;
 }
 
@@ -68,30 +61,27 @@ function resolveState(
   available: number | null,
   now: number,
 ): RecruitState {
-  if (event.is_archived === 1) return "ended";
-  const effectiveEnd = event.end_time ?? event.start_time;
-  if (effectiveEnd != null && now >= effectiveEnd) return "ended";
-  if (event.start_time != null && now >= event.start_time) return "ongoing";
-  if (
-    event.entry_end_time != null &&
-    now > event.entry_end_time &&
-    event.start_time != null
-  ) {
-    const daysToStart = (event.start_time - now) / 86400;
-    return daysToStart <= 3 ? "soon" : "after_entry";
-  }
-  if (
-    event.is_entry_open === 1 &&
-    (event.entry_start_time == null || now >= event.entry_start_time) &&
-    (event.entry_end_time == null || now <= event.entry_end_time)
-  ) {
+  const status = computeEventStatus(event, now);
+  if (status === "archived" || status === "ended") return "ended";
+  if (isAcceptingEntries(event, now)) {
     if (available != null && available === 0) return "full";
     return "accepting";
   }
+
+  const eventPoint = event.start_time ?? event.end_time;
+  if (
+    event.entry_end_time != null &&
+    now > event.entry_end_time &&
+    eventPoint != null
+  ) {
+    const daysToStart = (eventPoint - now) / 86400;
+    return daysToStart <= 3 ? "soon" : "after_entry";
+  }
+  if (status === "active") return "ongoing";
   if (event.entry_start_time != null && now < event.entry_start_time) {
     return "before_entry";
   }
-  return "accepting";
+  return "before_entry";
 }
 
 function formatRemainingForHero(seconds: number | null): {
@@ -236,7 +226,10 @@ function buildTimeline(event: EventRow, now: number): {
     event.entry_start_time != null && event.entry_end_time != null
       ? {
           left: toPos(event.entry_start_time),
-          width: Math.max(1, toPos(event.entry_end_time) - toPos(event.entry_start_time)),
+          width: Math.max(
+            1,
+            toPos(event.entry_end_time) - toPos(event.entry_start_time),
+          ),
         }
       : undefined;
   const postRange =
@@ -296,7 +289,7 @@ export function EventRecruitCard({
       ? Math.min(100, Math.round((filledSlots / total) * 100))
       : null;
   const accentStyle = {
-    "--event-accent": event.accent_color ?? "#ffd400",
+    "--event-accent": event.accent_color ?? "var(--accent-primary)",
   } as React.CSSProperties;
 
   return (

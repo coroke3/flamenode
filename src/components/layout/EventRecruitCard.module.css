@@ -11,11 +11,11 @@
   grid-template-columns: 1fr;
   gap: 20px;
   padding: 22px 22px;
-  border-radius: 16px;
+  border-radius: 8px;
   /* 黄色アクセントを背景全面に出すのをやめ、左上の薄い光だけにする。
      枠線も黄色から白の細い線に変更して落ち着いた印象に。 */
   background:
-    radial-gradient(100% 50% at 88% 0%, rgba(255, 212, 0, 0.05), transparent 60%),
+    radial-gradient(100% 50% at 88% 0%, color-mix(in srgb, var(--event-accent, var(--accent-primary)) 10%, transparent), transparent 60%),
     linear-gradient(135deg, #0c0f14 0%, #141822 55%, #0c0f14 100%);
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: #f8fafc;
@@ -31,7 +31,7 @@
 .cardCompact {
   padding: 14px 16px;
   gap: 12px;
-  border-radius: 14px;
+  border-radius: 8px;
 }
 
 .cardCompact .timeline,
@@ -89,7 +89,7 @@
   inset: -40% -10% auto auto;
   width: 60%;
   height: 80%;
-  background: radial-gradient(closest-side, rgba(255, 212, 0, 0.1), transparent 70%);
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--event-accent, var(--accent-primary)) 16%, transparent), transparent 70%);
   pointer-events: none;
   z-index: 0;
 }
@@ -128,16 +128,16 @@
   gap: 6px;
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.18em;
+  letter-spacing: 0;
   text-transform: uppercase;
-  color: #ffd400;
+  color: var(--event-accent, var(--accent-primary));
 }
 
 .title {
   display: inline-block;
   font-size: 24px;
   font-weight: 800;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
   color: #f8fafc;
   line-height: 1.1;
   text-decoration: none;
@@ -146,7 +146,7 @@
 
 .title:hover,
 .title:focus-visible {
-  color: #ffd400;
+  color: var(--event-accent, var(--accent-primary));
 }
 
 .stateBadge {
@@ -158,10 +158,10 @@
   border-radius: 9999px;
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.1em;
-  background: rgba(255, 212, 0, 0.14);
-  border: 1px solid rgba(255, 212, 0, 0.4);
-  color: #ffd400;
+  letter-spacing: 0;
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--event-accent, var(--accent-primary)) 42%, transparent);
+  color: var(--event-accent, var(--accent-primary));
 }
 
 .stateBadgePost {
@@ -212,11 +212,11 @@
   bottom: 0;
   background: linear-gradient(
     90deg,
-    rgba(255, 212, 0, 0.55),
-    rgba(255, 212, 0, 0.95)
+    color-mix(in srgb, var(--event-accent, var(--accent-primary)) 56%, transparent),
+    var(--event-accent, var(--accent-primary))
   );
   border-radius: 9999px;
-  box-shadow: 0 0 12px rgba(255, 212, 0, 0.3);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--event-accent, var(--accent-primary)) 30%, transparent);
 }
 
 .timelinePostRange {
@@ -244,8 +244,8 @@
 }
 
 .timelineMilestoneEmph {
-  background: rgba(255, 212, 0, 0.85);
-  box-shadow: 0 0 6px rgba(255, 212, 0, 0.5);
+  background: var(--event-accent, var(--accent-primary));
+  box-shadow: 0 0 6px color-mix(in srgb, var(--event-accent, var(--accent-primary)) 50%, transparent);
 }
 
 .timelineNow {
@@ -253,12 +253,12 @@
   top: -6px;
   width: 3px;
   height: 18px;
-  background: #ffd400;
+  background: var(--event-accent, var(--accent-primary));
   border-radius: 2px;
   transform: translateX(-1.5px);
   box-shadow:
-    0 0 0 2px rgba(255, 212, 0, 0.18),
-    0 0 12px rgba(255, 212, 0, 0.7);
+    0 0 0 2px color-mix(in srgb, var(--event-accent, var(--accent-primary)) 20%, transparent),
+    0 0 12px color-mix(in srgb, var(--event-accent, var(--accent-primary)) 70%, transparent);
 }
 
 .timelineLabels {
@@ -284,7 +284,7 @@
   font-size: 9px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.5);
-  letter-spacing: 0.06em;
+  letter-spacing: 0;
 }
 
 .timelineLabelDate {
@@ -315,7 +315,7 @@
 .periodItem dt {
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.45);
 }
@@ -334,17 +334,17 @@
   flex-direction: column;
   gap: 6px;
   padding: 14px 16px;
-  border-radius: 12px;
-  background: rgba(255, 212, 0, 0.06);
-  border: 1px solid rgba(255, 212, 0, 0.18);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--event-accent, var(--accent-primary)) 20%, transparent);
 }
 
 .countdownLabel {
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0;
   text-transform: uppercase;
-  color: rgba(255, 212, 0, 0.85);
+  color: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 84%, #ffffff);
 }
 
 .countdownValueWrap {
@@ -357,10 +357,10 @@
 .countdownValue {
   font-size: 48px;
   font-weight: 800;
-  letter-spacing: -0.02em;
-  color: #ffd400;
+  letter-spacing: 0;
+  color: var(--event-accent, var(--accent-primary));
   font-variant-numeric: tabular-nums;
-  text-shadow: 0 0 24px rgba(255, 212, 0, 0.35);
+  text-shadow: 0 0 24px color-mix(in srgb, var(--event-accent, var(--accent-primary)) 35%, transparent);
 }
 
 .countdownUnit {
@@ -376,14 +376,14 @@
   flex-direction: column;
   gap: 4px;
   padding: 12px 16px;
-  border-radius: 12px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .slotsLow {
-  background: rgba(255, 176, 0, 0.08);
-  border-color: rgba(255, 176, 0, 0.4);
+  background: rgba(255, 111, 95, 0.1);
+  border-color: rgba(255, 111, 95, 0.42);
 }
 
 .slotsFull {
@@ -394,7 +394,7 @@
 .slotsLabel {
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.5);
 }
@@ -426,7 +426,7 @@
 }
 
 .slotsLow .slotsValue {
-  color: #ffb000;
+  color: #ff8a79;
 }
 
 .slotsFull .slotsValue {
@@ -458,8 +458,8 @@
   border-radius: inherit;
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--event-accent, #ffd400) 72%, #ffffff),
-    var(--event-accent, #ffd400)
+    color-mix(in srgb, var(--event-accent, var(--accent-primary)) 72%, #ffffff),
+    var(--event-accent, var(--accent-primary))
   );
 }
 
@@ -471,7 +471,7 @@
 }
 
 .slotsLow .slotsHint {
-  color: #ffb000;
+  color: #ff8a79;
 }
 
 .slotsFull .slotsHint {
@@ -486,24 +486,24 @@
   justify-content: center;
   gap: 8px;
   padding: 12px 20px;
-  background: #ffd400;
+  background: var(--event-accent, var(--accent-primary));
   color: #0c0f14;
   border-radius: 9999px;
   font-weight: 800;
   font-size: 14px;
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
   text-decoration: none;
   box-shadow:
-    0 2px 14px rgba(255, 212, 0, 0.3),
+    0 2px 14px color-mix(in srgb, var(--event-accent, var(--accent-primary)) 30%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.4);
   transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
 
 .cta:hover {
   transform: translateY(-1px);
-  background: #ffdf33;
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 86%, #ffffff);
   box-shadow:
-    0 4px 18px rgba(255, 212, 0, 0.45),
+    0 4px 18px color-mix(in srgb, var(--event-accent, var(--accent-primary)) 45%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.5);
 }
 
@@ -554,7 +554,7 @@
 @media (max-width: 480px) {
   .card {
     padding: 18px 16px;
-    border-radius: 14px;
+    border-radius: 8px;
   }
 
   .title {

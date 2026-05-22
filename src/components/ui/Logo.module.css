@@ -21,13 +21,14 @@
 .title {
   font-size: 18px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
   line-height: 1;
 }
 
 .sub {
+  display: none;
   font-size: 9px;
-  letter-spacing: 0.12em;
+  letter-spacing: 0;
   color: var(--text-muted);
   text-transform: uppercase;
   line-height: 1;

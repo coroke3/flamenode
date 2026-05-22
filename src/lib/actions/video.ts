@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { and, eq, isNull, ne, or, sql } from "drizzle-orm";
 import { getDatabase, getEnv } from "@/lib/cloudflare";
+import { getCurrentUser } from "@/lib/auth/currentUser";
 import { canEditVideo } from "@/lib/auth/ownership";
 import { writeGuard, type WriteGuardDenyReason } from "@/lib/auth/writeGuard";
 import {
@@ -1277,6 +1278,78 @@ export async function updateVideo(
  * 主体は writeGuard が保証する承認済み Active X ID。
  * 未承認 X ID で許可されるのは枠確保のみ、という方針に従い approved を必須とする。
  */
+function formDataBoolean(formData: FormData, name: string): boolean {
+  return formData
+    .getAll(name)
+    .some((value) => value === "on" || value === "true");
+}
+
+export async function updateVideoMembersAdmin(
+  formData: FormData,
+): Promise<VideoActionResult> {
+  const user = await getCurrentUser();
+  if (!user || user.role !== "admin") {
+    return { ok: false, message: "管理者権限が必要です。" };
+  }
+
+  const db = getDatabase();
+  if (!db) return { ok: false, message: "DB に接続できません。" };
+
+  const videoId = String(formData.get("video_id") ?? "").trim();
+  if (!videoId) return { ok: false, message: "対象作品が指定されていません。" };
+
+  const target = (
+    await db.select().from(videos).where(eq(videos.id, videoId)).limit(1)
+  )[0];
+  if (!target) return { ok: false, message: "作品が見つかりません。" };
+
+  const isCollab = formDataBoolean(formData, "is_collab");
+  const members = isCollab ? parseMembersJson(formData.get("members_json")) : [];
+  const nextSubmissionType = members.length > 0 || isCollab ? "collab" : "individual";
+  const now = Math.floor(Date.now() / 1000);
+
+  await db
+    .update(videos)
+    .set({
+      submission_type: nextSubmissionType,
+      updated_at: now,
+    })
+    .where(eq(videos.id, videoId));
+  await replaceVideoMembers(db, videoId, members);
+
+  await db.insert(historyLogs).values({
+    table_name: "videos",
+    record_id: videoId,
+    action: "UPDATE",
+    before_data: JSON.stringify({
+      submission_type: target.submission_type,
+    }),
+    after_data: JSON.stringify({
+      submission_type: nextSubmissionType,
+      member_count: members.length,
+      source: "admin_video_members",
+    }),
+    operator_discord_id: user.id,
+    retention_class: "normal",
+    created_at: now,
+  });
+
+  revalidatePath(`/admin/videos/${videoId}`);
+  revalidatePath(`/admin/videos/${videoId}/members`);
+  revalidatePath(`/dashboard/edit/${videoId}`);
+  revalidatePath(`/${target.youtube_video_id ?? videoId}`);
+  revalidatePath("/list");
+  if (target.primary_event_id) revalidatePath(`/event/${target.primary_event_id}`);
+
+  return {
+    ok: true,
+    message: "参加者設定を保存しました。",
+    videoId,
+    youtubeVideoId: target.youtube_video_id ?? undefined,
+    eventId: target.primary_event_id ?? undefined,
+  };
+}
+
 export async function toggleVideoInteraction(
   formData: FormData,
 ): Promise<VideoActionResult & { active?: boolean }> {

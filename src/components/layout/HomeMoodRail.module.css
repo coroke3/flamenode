@@ -1,0 +1,138 @@
+.moodSection {
+  margin-top: 24px;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05), transparent 48%),
+    #11120f;
+  color: #f8fafc;
+}
+
+.moodInner {
+  width: min(100% - 28px, 1320px);
+  margin: 0 auto;
+  padding: 34px 0 38px;
+}
+
+.moodHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 22px;
+}
+
+.moodHeader h2 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 28px;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.moodHeader p {
+  margin: 4px 0 0;
+  color: rgba(248, 250, 252, 0.72);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.moodMore {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #f8fafc;
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.moodMore:hover {
+  color: var(--accent-primary);
+}
+
+.moodGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.moodCard {
+  position: relative;
+  display: block;
+  min-height: 170px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.03)),
+    #20211c;
+  color: #ffffff;
+  text-decoration: none;
+  isolation: isolate;
+}
+
+.moodCard img {
+  width: 100%;
+  height: 100%;
+  min-height: 170px;
+  object-fit: cover;
+  filter: saturate(0.78) contrast(1.05);
+  transition: transform 0.25s ease;
+}
+
+.moodCard:hover img {
+  transform: scale(1.03);
+}
+
+.moodShade {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(180deg, transparent 22%, rgba(0, 0, 0, 0.72)),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.34), transparent);
+}
+
+.moodLabel,
+.moodMeta {
+  position: absolute;
+  left: 18px;
+  z-index: 2;
+}
+
+.moodLabel {
+  bottom: 42px;
+  font-size: 21px;
+  font-weight: 900;
+}
+
+.moodMeta {
+  right: 18px;
+  bottom: 20px;
+  color: rgba(248, 250, 252, 0.82);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (min-width: 760px) {
+  .moodGrid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .moodInner {
+    width: min(100% - 20px, 100%);
+  }
+
+  .moodHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .moodHeader h2 {
+    font-size: 24px;
+  }
+}

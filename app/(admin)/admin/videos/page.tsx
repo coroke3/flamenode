@@ -14,7 +14,6 @@ import { formatRelative } from "@/lib/utils/format";
 import { youtubeThumbUrl } from "@/lib/youtube/id";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { Pagination } from "@/components/ui/Pagination";
-import { FilterChips, type FilterChip } from "@/components/ui/FilterChips";
 import { clampPaging, escapeLike, totalPagesFor } from "@/lib/utils/sql";
 
 export const metadata: Metadata = { title: "作品管理" };
@@ -68,12 +67,8 @@ export default async function AdminVideosPage({
             like(xUsersTable.id, term),
           )
         : undefined;
-      const statusFilter = status
-        ? eq(videosTable.status, status as never)
-        : undefined;
-      const eventFilter = event
-        ? eq(videoEventsTable.event_id, event)
-        : undefined;
+      const statusFilter = status ? eq(videosTable.status, status as never) : undefined;
+      const eventFilter = event ? eq(videoEventsTable.event_id, event) : undefined;
       const conds = [queryFilter, statusFilter, eventFilter].filter(
         (c): c is NonNullable<typeof c> => c !== undefined,
       );
@@ -96,10 +91,7 @@ export default async function AdminVideosPage({
         .from(videosTable)
         .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id));
       const withEventJoin = event
-        ? base.innerJoin(
-            videoEventsTable,
-            eq(videoEventsTable.video_id, videosTable.id),
-          )
+        ? base.innerJoin(videoEventsTable, eq(videoEventsTable.video_id, videosTable.id))
         : base;
       rows = await withEventJoin
         .where(where)
@@ -107,21 +99,16 @@ export default async function AdminVideosPage({
         .limit(pageSize)
         .offset(offset);
 
-      // count クエリは join 構成を一致させる必要があるため別途構築。
       const countBase = db
         .select({ c: sql<number>`COUNT(*)` })
         .from(videosTable)
         .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id));
       const countWithJoin = event
-        ? countBase.innerJoin(
-            videoEventsTable,
-            eq(videoEventsTable.video_id, videosTable.id),
-          )
+        ? countBase.innerJoin(videoEventsTable, eq(videoEventsTable.video_id, videosTable.id))
         : countBase;
       const countRow = (await countWithJoin.where(where).limit(1))[0];
       total = Number(countRow?.c ?? 0);
 
-      // event 候補 (アーカイブ以外。上限を引き上げ)
       events = await db
         .select({ id: eventsTable.id, title: eventsTable.title })
         .from(eventsTable)
@@ -143,78 +130,56 @@ export default async function AdminVideosPage({
     return `/admin/videos?${sp.toString()}`;
   };
 
-  // 現在の絞り込み条件をチップ化。各チップは「自分の条件だけ抜いた URL」を持つ。
-  const eventLabel = events.find((ev) => ev.id === event)?.title;
-  const chips: FilterChip[] = [];
-  const hrefWithout = (drop: "q" | "status" | "event") => {
-    const sp = new URLSearchParams();
-    if (q && drop !== "q") sp.set("q", q);
-    if (status && drop !== "status") sp.set("status", status);
-    if (event && drop !== "event") sp.set("event", event);
-    return sp.size > 0 ? `/admin/videos?${sp.toString()}` : "/admin/videos";
-  };
-  if (q) chips.push({ label: `検索: ${q}`, removeHref: hrefWithout("q") });
-  if (status)
-    chips.push({ label: `状態: ${status}`, removeHref: hrefWithout("status") });
-  if (event)
-    chips.push({
-      label: `イベント: ${eventLabel ?? event}`,
-      removeHref: hrefWithout("event"),
-    });
-
   return (
     <div>
       <AdminPageHeader
         title="作品管理"
-        description="登録された作品の検索・状態管理・詳細確認を行います。"
+        description="作品の状態確認、監査ログ、参加者設定を行います。"
       />
+
       <form
-        method="get"
-        style={{
-          marginTop: 12,
-          display: "flex",
-          gap: 8,
-          alignItems: "center",
-          flexWrap: "wrap",
-        }}
+        action="/admin/videos"
+        style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16 }}
       >
         <input
-          type="search"
+          className="fn-input"
           name="q"
           defaultValue={q}
-          placeholder="タイトル / 作者で検索"
-          className="fn-input"
-          style={{ maxWidth: 320 }}
+          placeholder="タイトル / 作者 / X ID"
+          style={{ minWidth: 240 }}
         />
-        <select name="status" className="fn-select" defaultValue={status}>
-          <option value="">すべて</option>
-          <option value="public">公開</option>
-          <option value="pending">審査待ち</option>
-          <option value="x_reapply_required">調整中</option>
-          <option value="unlisted">限定公開</option>
-          <option value="voided">不備</option>
+        <select className="fn-select" name="status" defaultValue={status}>
+          <option value="">すべての状態</option>
+          {["draft", "pending", "public", "unlisted", "private", "voided"].map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
         </select>
-        <select name="event" className="fn-select" defaultValue={event}>
-          <option value="">全イベント</option>
+        <select className="fn-select" name="event" defaultValue={event}>
+          <option value="">すべてのイベント</option>
           {events.map((ev) => (
             <option key={ev.id} value={ev.id}>
               {ev.title}
             </option>
           ))}
         </select>
-        {/* 検索条件を変えたときは page=1 にリセット (hidden で送らない) */}
-        <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm">
-          検索
+        <button type="submit" className="fn-btn fn-btn-primary">
+          <Icon name="search" size={12} aria-hidden />
+          絞り込み
         </button>
+        {(q || status || event) ? (
+          <Link href="/admin/videos" className="fn-btn fn-btn-ghost">
+            解除
+          </Link>
+        ) : null}
       </form>
-
-      <FilterChips chips={chips} clearAllHref="/admin/videos" />
 
       <table className="fn-table" style={{ marginTop: 18 }}>
         <thead>
           <tr>
-            <th>サムネ</th>
-            <th>タイトル / 作者</th>
+            <th>サムネイル</th>
+            <th>作品</th>
             <th>状態</th>
             <th>登録</th>
             <th></th>
@@ -234,7 +199,7 @@ export default async function AdminVideosPage({
                   }}
                 >
                   {v.youtube_video_id ? (
-                    /* eslint-disable-next-line @next/next/no-img-element */
+                    // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={youtubeThumbUrl(v.youtube_video_id, "default") ?? ""}
                       alt=""
@@ -277,12 +242,18 @@ export default async function AdminVideosPage({
               </td>
               <td>{formatRelative(v.created_at)}</td>
               <td>
-                <div style={{ display: "inline-flex", gap: 4 }}>
+                <div style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
                   <Link
                     href={`/admin/videos/${v.id}`}
                     className="fn-btn fn-btn-ghost fn-btn-sm"
                   >
                     詳細
+                  </Link>
+                  <Link
+                    href={`/admin/videos/${v.id}/members`}
+                    className="fn-btn fn-btn-ghost fn-btn-sm"
+                  >
+                    参加者
                   </Link>
                   <Link
                     href={`/admin/audit?table=videos&record=${encodeURIComponent(v.id)}`}
@@ -298,11 +269,8 @@ export default async function AdminVideosPage({
           {rows.length === 0 ? (
             <tr>
               <td colSpan={5}>
-                <p
-                  className="fn-empty-message"
-                  style={{ padding: 16, textAlign: "center" }}
-                >
-                  対象作品が見つかりません。
+                <p className="fn-empty-message" style={{ padding: 16, textAlign: "center" }}>
+                  条件に合う作品がありません。
                 </p>
               </td>
             </tr>
@@ -315,8 +283,8 @@ export default async function AdminVideosPage({
         totalPages={totalPages}
         total={total}
         pageSize={pageSize}
-        buildHref={buildHref}
         unitLabel="件"
+        buildHref={buildHref}
       />
     </div>
   );

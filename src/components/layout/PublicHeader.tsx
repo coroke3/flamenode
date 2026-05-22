@@ -5,26 +5,21 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import styles from "./PublicHeader.module.css";
 import { Logo } from "@/components/ui/Logo";
-import { Icon } from "@/components/ui/Icon";
+import { Icon, type IconName } from "@/components/ui/Icon";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { XIdSwitcher, type XIdEntry } from "@/components/user/XIdSwitcher";
 import { AccountMenu } from "@/components/user/AccountMenu";
 import type { HeaderUser } from "@/lib/auth/headerUser";
 
-/**
- * 公開ナビ。デスクトップでは横並び、モバイルではドロワー内に出る。
- * 現在地は `usePathname` から判定し、サブツリー一致でハイライトする。
- */
-const PUBLIC_NAV_ITEMS: { href: string; label: string; iconName: "grid" | "calendar" | "users" | "heart" }[] = [
+const PUBLIC_NAV_ITEMS: { href: string; label: string; iconName: IconName }[] = [
   { href: "/list", label: "作品", iconName: "grid" },
   { href: "/event", label: "イベント", iconName: "calendar" },
   { href: "/user", label: "クリエイター", iconName: "users" },
-  { href: "/recommend", label: "おすすめ", iconName: "heart" },
+  { href: "/entry", label: "募集", iconName: "edit" },
 ];
 
 function isPathActive(pathname: string | null, href: string): boolean {
   if (!pathname) return false;
-  // /event は /event/[id] でも active 扱い。/ は完全一致のみ。
   if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(`${href}/`);
 }
@@ -54,15 +49,10 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
   return (
     <header className={styles.header}>
       <div className={styles.bar}>
-        <Link
-          href="/"
-          className={styles.logoLink}
-          aria-label="FlameNode トップへ"
-        >
+        <Link href="/" className={styles.logoLink} aria-label="FlameNode トップへ">
           <Logo />
         </Link>
 
-        {/* デスクトップ用主要ナビ。usePathname でサブツリー一致をハイライト。 */}
         <nav className={styles.desktopNav} aria-label="公開ナビゲーション">
           {PUBLIC_NAV_ITEMS.map((item) => {
             const active = isPathActive(pathname, item.href);
@@ -85,7 +75,7 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
             method="get"
             className={styles.searchForm}
             role="search"
-            aria-label="サイト内検索"
+            aria-label="作品検索"
             onClick={() => searchInputRef.current?.focus()}
           >
             <span className={styles.searchIcon}>
@@ -120,8 +110,7 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
             </div>
           ) : (
             <div className={styles.actionNav}>
-              <Link href="/entry" className="fn-btn fn-btn-primary fn-btn-sm">
-                <Icon name="discord" size={13} aria-hidden />
+              <Link href="/entry" className={styles.loginBtn}>
                 ログイン
               </Link>
             </div>
@@ -147,7 +136,7 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
               method="get"
               className={styles.mobileSearch}
               role="search"
-              aria-label="サイト内検索"
+              aria-label="作品検索"
             >
               <Icon name="search" size={14} aria-hidden />
               <input
@@ -166,7 +155,7 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
                   onClick={() => setMobileOpen(false)}
                   aria-current={isPathActive(pathname, "/entry") ? "page" : undefined}
                 >
-                  <Icon name="discord" size={16} aria-hidden /> ログイン
+                  <Icon name="login" size={16} aria-hidden /> ログイン
                 </Link>
                 {PUBLIC_NAV_ITEMS.map((item) => {
                   const active = isPathActive(pathname, item.href);
@@ -247,7 +236,7 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
                 <div className={styles.mobileDivider} />
                 <div className={styles.mobileSection}>
                   <div className={styles.mobileSectionTitle}>テーマ</div>
-                  <div style={{ padding: "0 12px" }}>
+                  <div className={styles.themeSlot}>
                     <ThemeToggle />
                   </div>
                 </div>

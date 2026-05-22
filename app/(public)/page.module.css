@@ -1,62 +1,44 @@
 .page {
   padding-bottom: 72px;
+  background:
+    radial-gradient(circle at 88% 8%, var(--accent-primary-soft), transparent 22rem),
+    var(--bg-base);
 }
 
 .section {
-  width: min(100% - 32px, 1320px);
+  width: min(100% - 28px, 1320px);
   margin: 0 auto;
-  padding: clamp(28px, 6vw, 72px) 0 0;
+  padding: 34px 0 0;
 }
 
-.quickSection {
-  width: min(100% - 32px, 1320px);
-  margin: 0 auto;
-  padding: clamp(24px, 4vw, 42px) 0 0;
-}
-
-.watchBand {
-  display: flex;
+.page :global(.fn-section-header) {
   align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 18px 20px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-primary) 10%, transparent), transparent 72%),
-    var(--bg-surface);
+  padding: 0;
 }
 
-.watchEyebrow {
-  margin: 0 0 4px;
-  color: var(--accent-primary-strong);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+.page :global(.fn-section-header-center) {
+  text-align: left;
 }
 
-.watchTitle {
+.page :global(.fn-section-title) {
   margin: 0;
-  color: var(--text-primary);
-  font-size: clamp(20px, 3vw, 28px);
-  font-weight: 800;
+  font-size: 24px;
+  font-weight: 900;
+  letter-spacing: 0;
 }
 
-.watchText {
-  max-width: 620px;
-  margin: 6px 0 0;
-  color: var(--text-secondary);
-  font-size: 13px;
-  line-height: 1.75;
+.page :global(.fn-section-title::after) {
+  display: none;
 }
 
-.watchActions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+.page :global(.fn-section-more) {
+  display: inline-flex;
+  align-items: center;
   gap: 8px;
-  flex-shrink: 0;
+  padding: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .eventList {
@@ -64,12 +46,6 @@
   grid-template-columns: 1fr;
   gap: 18px;
   margin-top: 18px;
-}
-
-.center {
-  display: flex;
-  justify-content: center;
-  margin-top: 24px;
 }
 
 .empty {
@@ -83,19 +59,10 @@
 @media (max-width: 640px) {
   .section {
     width: min(100% - 20px, 100%);
-    padding-top: 42px;
   }
 
-  .quickSection {
-    width: min(100% - 20px, 100%);
-  }
-
-  .watchBand {
-    display: block;
-  }
-
-  .watchActions {
-    justify-content: flex-start;
-    margin-top: 14px;
+  .page :global(.fn-section-header) {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

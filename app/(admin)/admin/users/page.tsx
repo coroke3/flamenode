@@ -1,7 +1,7 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq, isNull, like, or, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, like, or, sql, inArray } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   users as usersTable,
@@ -16,9 +16,7 @@ import { normalizeXId } from "@/lib/utils/xid";
 import { updateGlobalEditableFields } from "@/lib/actions/permissions-admin";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { Pagination } from "@/components/ui/Pagination";
-import { FilterChips, type FilterChip } from "@/components/ui/FilterChips";
 import { clampPaging, escapeLike, totalPagesFor } from "@/lib/utils/sql";
-import { inArray } from "drizzle-orm";
 
 const USERS_PAGE_SIZE = 50;
 
@@ -61,10 +59,38 @@ type LinkRequestRow = {
   requested_at: number;
 };
 
+type CurrentLinkedXRow = {
+  discord_user_id: string | null;
+  x_user_id: string;
+  x_name: string | null;
+  icon_url: string | null;
+  approval_status: string | null;
+};
+
 type PermissionSettings = {
   default_editable_fields: string | null;
   upcoming_editable_fields: string | null;
 };
+
+const EDITABLE_FIELD_OPTIONS = [
+  ["title", "タイトル"],
+  ["display_name", "表示名"],
+  ["icon_url", "アイコン"],
+  ["music", "楽曲"],
+  ["credit", "クレジット"],
+  ["intro_comment", "紹介コメント"],
+  ["used_software", "使用ソフト"],
+  ["highlights", "見どころ"],
+  ["production_story", "制作エピソード"],
+  ["closing_comment", "締めコメント"],
+  ["members", "メンバー"],
+  ["chapters", "チャプター"],
+] as const;
+
+async function updateGlobalEditableFieldsAction(formData: FormData): Promise<void> {
+  "use server";
+  await updateGlobalEditableFields(formData);
+}
 
 export default async function AdminUsersPage({
   searchParams,
@@ -91,12 +117,13 @@ export default async function AdminUsersPage({
     defaultPageSize: USERS_PAGE_SIZE,
     maxPageSize: USERS_PAGE_SIZE,
   });
-  const db = getDatabase();
 
+  const db = getDatabase();
   let userRows: AdminUserRow[] = [];
   let xRows: AdminXUserRow[] = [];
   let linkRows: LinkRequestRow[] = [];
   let approvedLinkRows: LinkRequestRow[] = [];
+  let linkedXRows: CurrentLinkedXRow[] = [];
   let permissionSettings: PermissionSettings = {
     default_editable_fields: null,
     upcoming_editable_fields: null,
@@ -104,6 +131,7 @@ export default async function AdminUsersPage({
   let totalUsers = 0;
   let totalXUsers = 0;
   let totalLinks = 0;
+
   if (db) {
     try {
       const rawQuery = q.trim();
@@ -113,6 +141,12 @@ export default async function AdminUsersPage({
       const normalizedXQuery = normalizeXId(rawQuery);
       const escapedX = escapeLike(normalizedXQuery || rawQuery);
       const xTerm = `%${escapedX.toLowerCase()}%`;
+      const activeXJoin = and(
+        sql`lower(${xUsersTable.id}) = lower(${usersTable.active_x_user_id})`,
+        eq(xUsersTable.linked_discord_user_id, usersTable.id),
+        eq(xUsersTable.approval_status, "approved"),
+      )!;
+
       const queryFilter = q
         ? or(
             like(sql<string>`lower(${usersTable.name})`, lowerTerm),
@@ -145,6 +179,7 @@ export default async function AdminUsersPage({
         activeView === "discord" || activeView === "permissions"
           ? pageSize
           : USERS_PAGE_SIZE;
+
       userRows = await db
         .select({
           id: usersTable.id,
@@ -159,28 +194,24 @@ export default async function AdminUsersPage({
           created_at: usersTable.created_at,
         })
         .from(usersTable)
-        .leftJoin(
-          xUsersTable,
-          sql`lower(${xUsersTable.id}) = lower(${usersTable.active_x_user_id})`,
-        )
+        .leftJoin(xUsersTable, activeXJoin)
         .where(where)
         .orderBy(desc(usersTable.created_at))
         .limit(userLimit)
         .offset(userOffset);
+
       if (activeView === "discord" || activeView === "permissions") {
         const countRow = (
           await db
             .select({ c: sql<number>`COUNT(DISTINCT ${usersTable.id})` })
             .from(usersTable)
-            .leftJoin(
-              xUsersTable,
-              sql`lower(${xUsersTable.id}) = lower(${usersTable.active_x_user_id})`,
-            )
+            .leftJoin(xUsersTable, activeXJoin)
             .where(where)
             .limit(1)
         )[0];
         totalUsers = Number(countRow?.c ?? 0);
       }
+
       const userRowsWithIcons = await resolveMissingIcons(
         db,
         userRows.map((u) => ({
@@ -232,6 +263,7 @@ export default async function AdminUsersPage({
         )[0];
         totalXUsers = Number(countRow?.c ?? 0);
       }
+
       const xRowsWithIcons = await resolveMissingIcons(
         db,
         xRows.map((x) => ({
@@ -281,9 +313,27 @@ export default async function AdminUsersPage({
         totalLinks = Number(countRow?.c ?? 0);
       }
 
-      // approvedLinkRows は「現在の Discord ビューに出ているユーザー」だけに絞る。
-      // 旧コードの limit(500) 全件取りをやめ、ページ上に必要な分のみ JOIN 経由で取得。
       const visibleDiscordIds = userRows.map((u) => u.id);
+      linkedXRows =
+        visibleDiscordIds.length > 0
+          ? await db
+              .select({
+                discord_user_id: xUsersTable.linked_discord_user_id,
+                x_user_id: xUsersTable.id,
+                x_name: xUsersTable.x_name,
+                icon_url: xUsersTable.icon_url,
+                approval_status: xUsersTable.approval_status,
+              })
+              .from(xUsersTable)
+              .where(
+                and(
+                  inArray(xUsersTable.linked_discord_user_id, visibleDiscordIds),
+                  eq(xUsersTable.approval_status, "approved"),
+                )!,
+              )
+              .orderBy(xUsersTable.id)
+          : [];
+
       approvedLinkRows =
         visibleDiscordIds.length > 0
           ? await db
@@ -299,10 +349,7 @@ export default async function AdminUsersPage({
                 requested_at: xAccountLinkRequests.requested_at,
               })
               .from(xAccountLinkRequests)
-              .leftJoin(
-                usersTable,
-                eq(usersTable.id, xAccountLinkRequests.discord_user_id),
-              )
+              .leftJoin(usersTable, eq(usersTable.id, xAccountLinkRequests.discord_user_id))
               .where(
                 and(
                   eq(xAccountLinkRequests.status, "approved"),
@@ -328,18 +375,31 @@ export default async function AdminUsersPage({
     }
   }
 
-  const approvedByDiscord = new Map<string, LinkRequestRow[]>();
-  for (const link of approvedLinkRows) {
-    const rows = approvedByDiscord.get(link.discord_user_id) ?? [];
-    rows.push(link);
-    approvedByDiscord.set(link.discord_user_id, rows);
+  const linkedXByDiscord = new Map<string, CurrentLinkedXRow[]>();
+  for (const row of linkedXRows) {
+    if (!row.discord_user_id) continue;
+    const rows = linkedXByDiscord.get(row.discord_user_id) ?? [];
+    rows.push(row);
+    linkedXByDiscord.set(row.discord_user_id, rows);
   }
+
+  const currentTotal =
+    activeView === "xid" ? totalXUsers : activeView === "links" ? totalLinks : totalUsers;
+  const totalPages = totalPagesFor(currentTotal, pageSize);
+  const buildHref = (p: number) => {
+    const sp = new URLSearchParams();
+    sp.set("view", activeView);
+    if (q) sp.set("q", q);
+    if (status) sp.set("status", status);
+    sp.set("page", String(p));
+    return `/admin/users?${sp.toString()}`;
+  };
 
   return (
     <div>
       <AdminPageHeader
         title="ユーザー管理"
-        description="Discord アカウントを軸に、X ID 連携・BAN 状態・管理権限を管理します。"
+        description="Discord と X ID の現在の紐付け、連携申請、編集権限を管理します。"
       />
 
       <nav style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 16 }}>
@@ -360,115 +420,235 @@ export default async function AdminUsersPage({
       </nav>
 
       <form
-        method="get"
-        style={{
-          marginTop: 18,
-          display: "flex",
-          gap: 8,
-          alignItems: "center",
-        }}
+        action="/admin/users"
+        style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16 }}
       >
         <input type="hidden" name="view" value={activeView} />
         <input
+          className="fn-input"
           type="search"
           name="q"
           defaultValue={q}
-          placeholder="名前 / メール / ID で検索"
-          className="fn-input"
-          style={{ maxWidth: 320 }}
+          placeholder="Discord / X ID / 名前"
+          style={{ minWidth: 240 }}
         />
-        <select name="status" className="fn-select" defaultValue={status}>
-          <option value="">すべて</option>
-          <option value="active">通常 (BAN 解除済)</option>
-          <option value="banned">BAN</option>
-          <option value="admin">管理者</option>
-          <option value="moderator">モデレーター</option>
-          <option value="tos_not_accepted">TOS 未同意</option>
-          <option value="no_active_x">active X ID 未設定</option>
-        </select>
-        <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm">
+        {activeView === "discord" || activeView === "permissions" ? (
+          <select className="fn-select" name="status" defaultValue={status}>
+            <option value="">すべて</option>
+            <option value="active">有効</option>
+            <option value="banned">BAN</option>
+            <option value="admin">admin</option>
+            <option value="moderator">moderator</option>
+            <option value="tos_not_accepted">TOS未同意</option>
+            <option value="no_active_x">active Xなし</option>
+          </select>
+        ) : null}
+        <button type="submit" className="fn-btn fn-btn-primary">
+          <Icon name="search" size={12} aria-hidden />
           検索
         </button>
+        {(q || status) ? (
+          <Link href={`/admin/users?view=${activeView}`} className="fn-btn fn-btn-ghost">
+            解除
+          </Link>
+        ) : null}
       </form>
 
-      {(() => {
-        const buildHref = (p: number) => {
-          const sp = new URLSearchParams();
-          sp.set("view", activeView);
-          if (q) sp.set("q", q);
-          if (status) sp.set("status", status);
-          sp.set("page", String(p));
-          return `/admin/users?${sp.toString()}`;
-        };
-        const counts: Record<string, number> = {
-          discord: totalUsers,
-          xid: totalXUsers,
-          links: totalLinks,
-          permissions: totalUsers,
-        };
-        const total = counts[activeView] ?? 0;
-        const totalPages = totalPagesFor(total, pageSize);
-
-        const hrefWithout = (drop: "q" | "status") => {
-          const sp = new URLSearchParams();
-          sp.set("view", activeView);
-          if (q && drop !== "q") sp.set("q", q);
-          if (status && drop !== "status") sp.set("status", status);
-          return `/admin/users?${sp.toString()}`;
-        };
-        const chips: FilterChip[] = [];
-        if (q)
-          chips.push({ label: `検索: ${q}`, removeHref: hrefWithout("q") });
-        if (status)
-          chips.push({
-            label: `状態: ${status}`,
-            removeHref: hrefWithout("status"),
-          });
-
-        return (
-          <>
-            <FilterChips
-              chips={chips}
-              clearAllHref={`/admin/users?view=${activeView}`}
-            />
-            <Pagination
-              currentPage={page}
-              totalPages={totalPages}
-              total={total}
-              pageSize={pageSize}
-              buildHref={buildHref}
-              unitLabel="件"
-            />
-          </>
-        );
-      })()}
-
-      {activeView === "xid" ? (
+      {activeView === "discord" ? (
+        <DiscordTable rows={userRows} linkedXByDiscord={linkedXByDiscord} />
+      ) : activeView === "xid" ? (
         <XIdTable rows={xRows} links={approvedLinkRows} />
       ) : activeView === "links" ? (
         <LinkRequestTable rows={linkRows} />
-      ) : activeView === "permissions" ? (
-        <PermissionsTable rows={userRows} settings={permissionSettings} />
       ) : (
-      <table className="fn-table" style={{ marginTop: 18 }}>
-        <thead>
-          <tr>
-            <th>ユーザー</th>
-            <th>X ID</th>
-            <th>権限</th>
-            <th>登録日</th>
-            <th></th>
+        <PermissionsPanel settings={permissionSettings} />
+      )}
+
+      {activeView !== "permissions" ? (
+        <Pagination
+          currentPage={page}
+          totalPages={totalPages}
+          total={currentTotal}
+          pageSize={pageSize}
+          unitLabel="件"
+          buildHref={buildHref}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function DiscordTable({
+  rows,
+  linkedXByDiscord,
+}: {
+  rows: AdminUserRow[];
+  linkedXByDiscord: Map<string, CurrentLinkedXRow[]>;
+}): React.ReactElement {
+  return (
+    <table className="fn-table" style={{ marginTop: 18 }}>
+      <thead>
+        <tr>
+          <th>Discord</th>
+          <th>Active X ID</th>
+          <th>ロール</th>
+          <th>登録</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((u) => (
+          <tr key={u.id}>
+            <td>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                {u.image ?? u.active_x_icon_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={u.image ?? u.active_x_icon_url ?? ""}
+                    alt=""
+                    width={28}
+                    height={28}
+                    style={{ borderRadius: 999, objectFit: "cover" }}
+                  />
+                ) : (
+                  <span
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 999,
+                      display: "grid",
+                      placeItems: "center",
+                      background: "var(--bg-elevated)",
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    <Icon name="user" size={12} aria-hidden />
+                  </span>
+                )}
+                <div>
+                  <div>{u.name ?? "-"}</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                    {u.id.slice(0, 12)}...
+                  </div>
+                </div>
+              </div>
+            </td>
+            <td>
+              {u.active_x_user_id ? (
+                <span>
+                  <span style={{ fontWeight: 600 }}>
+                    {u.active_x_name ?? `@${u.active_x_user_id}`}
+                  </span>
+                  <Link
+                    href={`/user/${u.active_x_user_id}`}
+                    style={{
+                      display: "block",
+                      fontSize: 11,
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    @{u.active_x_user_id}
+                  </Link>
+                </span>
+              ) : (
+                "-"
+              )}
+              {(() => {
+                const links = linkedXByDiscord.get(u.id) ?? [];
+                const xids = Array.from(
+                  new Set(links.map((link) => normalizeXId(link.x_user_id)).filter(Boolean)),
+                );
+                if (xids.length === 0) return null;
+                return (
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>
+                    {xids.map((xid) => (
+                      <span key={xid} className="fn-badge fn-badge-soft">
+                        @{xid}
+                      </span>
+                    ))}
+                  </div>
+                );
+              })()}
+            </td>
+            <td>
+              {u.is_banned === 1 ? (
+                <span className="fn-badge fn-badge-danger">BAN</span>
+              ) : u.role === "admin" ? (
+                <span className="fn-badge fn-badge-accent">ADMIN</span>
+              ) : u.role === "moderator" ? (
+                <span className="fn-badge fn-badge-warning">MOD</span>
+              ) : (
+                <span className="fn-badge fn-badge-soft">USER</span>
+              )}
+            </td>
+            <td>{formatRelative(u.created_at)}</td>
+            <td>
+              <div style={{ display: "inline-flex", gap: 4 }}>
+                <Link href={`/admin/users/${u.id}`} className="fn-btn fn-btn-ghost fn-btn-sm">
+                  詳細
+                </Link>
+                <Link
+                  href={`/admin/audit?operator=${encodeURIComponent(u.id)}`}
+                  className="fn-btn fn-btn-ghost fn-btn-sm"
+                  title="このユーザーが実行した管理操作の監査ログ"
+                >
+                  監査
+                </Link>
+              </div>
+            </td>
           </tr>
-        </thead>
-        <tbody>
-          {userRows.map((u) => (
-            <tr key={u.id}>
+        ))}
+        {rows.length === 0 ? (
+          <tr>
+            <td colSpan={5}>
+              <p className="fn-empty-message" style={{ padding: 16, textAlign: "center" }}>
+                対象ユーザーが見つかりません。
+              </p>
+            </td>
+          </tr>
+        ) : null}
+      </tbody>
+    </table>
+  );
+}
+
+function XIdTable({
+  rows,
+  links,
+}: {
+  rows: AdminXUserRow[];
+  links: LinkRequestRow[];
+}): React.ReactElement {
+  const linksForXid = (x: AdminXUserRow) =>
+    x.linked_discord_user_id
+      ? links.filter(
+          (link) =>
+            link.discord_user_id === x.linked_discord_user_id &&
+            normalizeXId(link.target_x_user_id ?? link.requested_x_id) === normalizeXId(x.id),
+        )
+      : [];
+
+  return (
+    <table className="fn-table" style={{ marginTop: 18 }}>
+      <thead>
+        <tr>
+          <th>X ID</th>
+          <th>Discord連携</th>
+          <th>状態</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((x, index) => {
+          const linkedRequests = linksForXid(x);
+          return (
+            <tr key={`${x.id}-x-row-${index}`}>
               <td>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  {u.image ?? u.active_x_icon_url ? (
-                    /* eslint-disable-next-line @next/next/no-img-element */
+                  {x.icon_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={u.image ?? u.active_x_icon_url ?? ""}
+                      src={x.icon_url}
                       alt=""
                       width={28}
                       height={28}
@@ -489,217 +669,102 @@ export default async function AdminUsersPage({
                       <Icon name="user" size={12} aria-hidden />
                     </span>
                   )}
-                  <div>
-                    <div>{u.name ?? "—"}</div>
-                    <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                      {u.id.slice(0, 12)}…
-                    </div>
-                  </div>
+                  <span>
+                    <strong>{x.x_name}</strong>
+                    <span style={{ display: "block", fontSize: 11, color: "var(--text-muted)" }}>
+                      @{x.id}
+                    </span>
+                  </span>
                 </div>
               </td>
               <td>
-                {u.active_x_user_id ? (
+                {x.linked_discord_user_id ? (
                   <span>
-                    <span style={{ fontWeight: 600 }}>
-                      {u.active_x_name ?? `@${u.active_x_user_id}`}
+                    <strong>{x.linked_discord_name ?? "Discord user"}</strong>
+                    <span style={{ display: "block", fontSize: 11, color: "var(--text-muted)" }}>
+                      {x.linked_discord_user_id.slice(0, 14)}...
                     </span>
-                    <Link
-                      href={`/user/${u.active_x_user_id}`}
-                      style={{
-                        display: "block",
-                        fontSize: 11,
-                        color: "var(--text-muted)",
-                      }}
-                    >
-                      @{u.active_x_user_id}
-                    </Link>
                   </span>
                 ) : (
-                  "—"
+                  <span className="fn-badge fn-badge-warning">Discord未連携</span>
                 )}
-                {(() => {
-                  const links = approvedByDiscord.get(u.id) ?? [];
-                  const xids = Array.from(
-                    new Set(
-                      links
-                        .map((link) =>
-                          normalizeXId(link.target_x_user_id ?? link.requested_x_id),
-                        )
-                        .filter(Boolean),
-                    ),
-                  );
-                  if (xids.length === 0) return null;
-                  return (
-                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>
-                      {xids.map((xid) => (
-                        <span key={xid} className="fn-badge fn-badge-soft">
-                          @{xid}
+                {linkedRequests.length > 0 ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
+                    {linkedRequests.map((link) => (
+                      <span key={link.id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        {link.discord_image ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={link.discord_image}
+                            alt=""
+                            width={22}
+                            height={22}
+                            style={{ borderRadius: 999, objectFit: "cover" }}
+                          />
+                        ) : (
+                          <span
+                            style={{
+                              width: 22,
+                              height: 22,
+                              borderRadius: 999,
+                              display: "grid",
+                              placeItems: "center",
+                              background: "var(--bg-elevated)",
+                              color: "var(--text-muted)",
+                            }}
+                          >
+                            <Icon name="discord" size={10} aria-hidden />
+                          </span>
+                        )}
+                        <span>
+                          <strong>{link.discord_name ?? "Discord user"}</strong>
+                          <span style={{ display: "block", fontSize: 11, color: "var(--text-muted)" }}>
+                            {link.discord_user_id.slice(0, 14)}...
+                          </span>
                         </span>
-                      ))}
-                    </div>
-                  );
-                })()}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
               </td>
               <td>
-                {u.is_banned === 1 ? (
-                  <span className="fn-badge fn-badge-danger">BAN</span>
-                ) : u.role === "admin" ? (
-                  <span className="fn-badge fn-badge-accent">ADMIN</span>
-                ) : u.role === "moderator" ? (
-                  <span className="fn-badge fn-badge-warning">MOD</span>
-                ) : (
-                  <span className="fn-badge fn-badge-soft">USER</span>
-                )}
+                <span
+                  className={`fn-badge ${
+                    x.approval_status === "approved"
+                      ? "fn-badge-accent"
+                      : x.approval_status === "rejected"
+                        ? "fn-badge-danger"
+                        : "fn-badge-warning"
+                  }`}
+                >
+                  {approvalStatusLabel(x.approval_status)}
+                </span>
+                {normalizeXId(x.active_holder_id) === normalizeXId(x.id) ? (
+                  <span className="fn-badge fn-badge-soft" style={{ marginLeft: 6 }}>
+                    active
+                  </span>
+                ) : null}
               </td>
-              <td>{formatRelative(u.created_at)}</td>
               <td>
-                <div style={{ display: "inline-flex", gap: 4 }}>
+                {x.linked_discord_user_id ? (
                   <Link
-                    href={`/admin/users/${u.id}`}
+                    href={`/admin/users/${x.linked_discord_user_id}`}
                     className="fn-btn fn-btn-ghost fn-btn-sm"
                   >
                     詳細
                   </Link>
-                  <Link
-                    href={`/admin/audit?operator=${encodeURIComponent(u.id)}`}
-                    className="fn-btn fn-btn-ghost fn-btn-sm"
-                    title="このユーザーが実行した管理操作の監査ログ"
-                  >
-                    監査
-                  </Link>
-                </div>
-              </td>
-            </tr>
-          ))}
-          {userRows.length === 0 ? (
-            <tr>
-              <td colSpan={5}>
-                <p
-                  className="fn-empty-message"
-                  style={{ padding: 16, textAlign: "center" }}
-                >
-                  対象ユーザーが見つかりません。
-                </p>
-              </td>
-            </tr>
-          ) : null}
-        </tbody>
-      </table>
-      )}
-    </div>
-  );
-}
-
-function XIdTable({
-  rows,
-  links,
-}: {
-  rows: AdminXUserRow[];
-  links: LinkRequestRow[];
-}): React.ReactElement {
-  const linksForXid = (xid: string) =>
-    links.filter(
-      (link) =>
-        normalizeXId(link.target_x_user_id ?? link.requested_x_id) ===
-        normalizeXId(xid),
-    );
-
-  return (
-    <table className="fn-table" style={{ marginTop: 18 }}>
-      <thead>
-        <tr>
-          <th>X ID</th>
-          <th>Discord 連携</th>
-          <th>状態</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((x, index) => (
-          <tr key={`${x.id}-x-row-${index}`}>
-            <td>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                {x.icon_url ? (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img src={x.icon_url} alt="" width={28} height={28} style={{ borderRadius: 999, objectFit: "cover" }} />
                 ) : (
-                  <span style={{ width: 28, height: 28, borderRadius: 999, display: "grid", placeItems: "center", background: "var(--bg-elevated)", color: "var(--text-muted)" }}>
-                    <Icon name="user" size={12} aria-hidden />
-                  </span>
+                  <Link href="/admin/x-link-requests" className="fn-btn fn-btn-ghost fn-btn-sm">
+                    申請を見る
+                  </Link>
                 )}
-                <span>
-                  <strong>{x.x_name}</strong>
-                  <span style={{ display: "block", fontSize: 11, color: "var(--text-muted)" }}>@{x.id}</span>
-                </span>
-              </div>
-            </td>
-            <td>
-              {x.linked_discord_user_id ? (
-                <span>
-                  <strong>{x.linked_discord_name ?? "Discord user"}</strong>
-                  <span style={{ display: "block", fontSize: 11, color: "var(--text-muted)" }}>
-                    {x.linked_discord_user_id.slice(0, 14)}…
-                  </span>
-                </span>
-              ) : (
-                <span className="fn-badge fn-badge-warning">Discord未連携</span>
-              )}
-              {linksForXid(x.id).length > 0 ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
-                  {linksForXid(x.id).map((link) => (
-                    <span key={link.id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      {link.discord_image ? (
-                        /* eslint-disable-next-line @next/next/no-img-element */
-                        <img src={link.discord_image} alt="" width={22} height={22} style={{ borderRadius: 999, objectFit: "cover" }} />
-                      ) : (
-                        <span style={{ width: 22, height: 22, borderRadius: 999, display: "grid", placeItems: "center", background: "var(--bg-elevated)", color: "var(--text-muted)" }}>
-                          <Icon name="discord" size={10} aria-hidden />
-                        </span>
-                      )}
-                      <span>
-                        <strong>{link.discord_name ?? "Discord user"}</strong>
-                        <span style={{ display: "block", fontSize: 10, color: "var(--text-muted)" }}>
-                          {link.discord_user_id}
-                        </span>
-                      </span>
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-            </td>
-            <td>
-              <span className={`fn-badge ${x.approval_status === "approved" ? "fn-badge-accent" : x.approval_status === "rejected" ? "fn-badge-danger" : "fn-badge-warning"}`}>
-                {approvalStatusLabel(x.approval_status)}
-              </span>
-              {normalizeXId(x.active_holder_id) === normalizeXId(x.id) ? (
-                <span className="fn-badge fn-badge-soft" style={{ marginLeft: 6 }}>active</span>
-              ) : null}
-            </td>
-            <td>
-              {x.linked_discord_user_id ? (
-                <Link href={`/admin/users/${x.linked_discord_user_id}`} className="fn-btn fn-btn-ghost fn-btn-sm">
-                  詳細
-                </Link>
-              ) : (
-                <Link href="/admin/x-link-requests" className="fn-btn fn-btn-ghost fn-btn-sm">
-                  申請を見る
-                </Link>
-              )}
-            </td>
-          </tr>
-        ))}
-        {rows.length === 0 ? <EmptyRow colSpan={4} /> : null}
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );
-}
-
-function approvalStatusLabel(
-  status: AdminXUserRow["approval_status"] | LinkRequestRow["status"],
-): string {
-  if (status === "approved") return "承認済み";
-  if (status === "rejected") return "却下";
-  return "承認待ち";
 }
 
 function LinkRequestTable({ rows }: { rows: LinkRequestRow[] }): React.ReactElement {
@@ -708,11 +773,10 @@ function LinkRequestTable({ rows }: { rows: LinkRequestRow[] }): React.ReactElem
       <thead>
         <tr>
           <th>Discord</th>
-          <th>申請 X ID</th>
+          <th>X ID</th>
           <th>種別</th>
           <th>状態</th>
-          <th>申請日</th>
-          <th></th>
+          <th>申請</th>
         </tr>
       </thead>
       <tbody>
@@ -721,166 +785,98 @@ function LinkRequestTable({ rows }: { rows: LinkRequestRow[] }): React.ReactElem
             <td>
               <strong>{r.discord_name ?? "Discord user"}</strong>
               <span style={{ display: "block", fontSize: 11, color: "var(--text-muted)" }}>
-                {r.discord_user_id.slice(0, 14)}…
+                {r.discord_user_id}
               </span>
             </td>
-            <td>
-              <strong>@{r.requested_x_id}</strong>
-              {r.target_x_user_id ? (
-                <span style={{ display: "block", fontSize: 11, color: "var(--text-muted)" }}>
-                  target @{r.target_x_user_id}
-                </span>
-              ) : null}
-            </td>
+            <td>@{normalizeXId(r.target_x_user_id ?? r.requested_x_id)}</td>
             <td>{r.link_type}</td>
             <td>
-              <span className={`fn-badge ${r.status === "approved" ? "fn-badge-accent" : r.status === "rejected" ? "fn-badge-danger" : "fn-badge-warning"}`}>
+              <span
+                className={`fn-badge ${
+                  r.status === "approved"
+                    ? "fn-badge-accent"
+                    : r.status === "rejected"
+                      ? "fn-badge-danger"
+                      : "fn-badge-warning"
+                }`}
+              >
                 {approvalStatusLabel(r.status)}
               </span>
             </td>
             <td>{formatRelative(r.requested_at)}</td>
-            <td>
-              <Link href="/admin/x-link-requests" className="fn-btn fn-btn-ghost fn-btn-sm">
-                処理
-              </Link>
-            </td>
           </tr>
         ))}
-        {rows.length === 0 ? <EmptyRow colSpan={6} /> : null}
+        {rows.length === 0 ? (
+          <tr>
+            <td colSpan={5}>
+              <p className="fn-empty-message" style={{ padding: 16, textAlign: "center" }}>
+                連携申請が見つかりません。
+              </p>
+            </td>
+          </tr>
+        ) : null}
       </tbody>
     </table>
   );
 }
 
-const EDITABLE_FIELD_OPTIONS = [
-  ["title", "タイトル"],
-  ["display_name", "表示名"],
-  ["icon_url", "アイコン"],
-  ["music", "使用楽曲"],
-  ["credit", "クレジット"],
-  ["intro_comment", "投稿コメント"],
-  ["used_software", "使用ソフト"],
-  ["highlights", "見どころ"],
-  ["production_story", "制作メモ"],
-  ["closing_comment", "締めコメント"],
-  ["members", "合作メンバー"],
-  ["chapters", "チャプターコメント"],
-] as const;
-
-function parseFieldSet(value: string | null): Set<string> {
-  return new Set(
-    (value ?? "")
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean),
-  );
-}
-
-function PermissionsTable({
-  rows,
+function PermissionsPanel({
   settings,
 }: {
-  rows: AdminUserRow[];
   settings: PermissionSettings;
 }): React.ReactElement {
-  const defaultSet = parseFieldSet(settings.default_editable_fields);
-  const upcomingSet = parseFieldSet(settings.upcoming_editable_fields);
+  const defaultSet = new Set((settings.default_editable_fields ?? "").split(",").filter(Boolean));
+  const upcomingSet = new Set((settings.upcoming_editable_fields ?? "").split(",").filter(Boolean));
   return (
-    <>
-    <section className="fn-card" style={{ marginTop: 18, padding: 16 }}>
-      <h2 style={{ fontSize: 16, fontWeight: 700 }}>@everyone の作品編集許可</h2>
-      <p className="fn-muted fn-text-sm" style={{ marginTop: 4 }}>
-        個別のイベント権限がない一般ユーザーに、どの作品情報の編集を許可するかを保存します。イベント側の許可がある場合は、全体設定との和集合で扱う前提です。
+    <section className="fn-card" style={{ marginTop: 18 }}>
+      <h2 style={{ marginTop: 0 }}>一般ユーザー編集権限</h2>
+      <p className="fn-muted">
+        通常作品と近日公開作品で一般ユーザーが編集できる項目を管理します。
       </p>
-      <form
-        action={async (formData) => {
-          "use server";
-          await updateGlobalEditableFields(formData);
-        }}
-        style={{ marginTop: 14, display: "grid", gap: 14 }}
-      >
-        <fieldset style={{ border: "1px solid var(--border-subtle)", padding: 12 }}>
-          <legend style={{ padding: "0 6px", fontWeight: 700 }}>全体の既定</legend>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
-            {EDITABLE_FIELD_OPTIONS.map(([value, label]) => (
-              <label key={`default-${value}`} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 }}>
-                <input
-                  type="checkbox"
-                  name="default_editable_fields"
-                  value={value}
-                  defaultChecked={defaultSet.has(value)}
-                />
-                {label}
-              </label>
-            ))}
-          </div>
-        </fieldset>
-        <fieldset style={{ border: "1px solid var(--border-subtle)", padding: 12 }}>
-          <legend style={{ padding: "0 6px", fontWeight: 700 }}>開催前・募集中イベント用</legend>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
-            {EDITABLE_FIELD_OPTIONS.map(([value, label]) => (
-              <label key={`upcoming-${value}`} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 }}>
-                <input
-                  type="checkbox"
-                  name="upcoming_editable_fields"
-                  value={value}
-                  defaultChecked={upcomingSet.has(value)}
-                />
-                {label}
-              </label>
-            ))}
-          </div>
-        </fieldset>
-        <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm">
+      <form action={updateGlobalEditableFieldsAction} style={{ display: "grid", gap: 18 }}>
+        <Fieldset title="通常作品" name="default_editable_fields" selected={defaultSet} />
+        <Fieldset title="近日公開作品" name="upcoming_editable_fields" selected={upcomingSet} />
+        <button type="submit" className="fn-btn fn-btn-primary" style={{ justifySelf: "start" }}>
           保存
         </button>
       </form>
     </section>
-
-    <table className="fn-table" style={{ marginTop: 18 }}>
-      <thead>
-        <tr>
-          <th>ユーザー</th>
-          <th>一般権限</th>
-          <th>状態</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((u) => (
-          <tr key={u.id}>
-            <td>
-              <strong>{u.name ?? "—"}</strong>
-              <span style={{ display: "block", fontSize: 11, color: "var(--text-muted)" }}>{u.id.slice(0, 14)}…</span>
-            </td>
-            <td>
-              <span className={`fn-badge ${u.role === "admin" ? "fn-badge-accent" : u.role === "moderator" ? "fn-badge-warning" : "fn-badge-soft"}`}>
-                {u.role ?? "user"}
-              </span>
-            </td>
-            <td>{u.is_banned === 1 ? <span className="fn-badge fn-badge-danger">BAN</span> : <span className="fn-badge fn-badge-soft">通常</span>}</td>
-            <td>
-              <Link href={`/admin/users/${u.id}/edit`} className="fn-btn fn-btn-primary fn-btn-sm">
-                権限変更
-              </Link>
-            </td>
-          </tr>
-        ))}
-        {rows.length === 0 ? <EmptyRow colSpan={4} /> : null}
-      </tbody>
-    </table>
-    </>
   );
 }
 
-function EmptyRow({ colSpan }: { colSpan: number }): React.ReactElement {
+function Fieldset({
+  title,
+  name,
+  selected,
+}: {
+  title: string;
+  name: string;
+  selected: Set<string>;
+}): React.ReactElement {
   return (
-    <tr>
-      <td colSpan={colSpan}>
-        <p className="fn-empty-message" style={{ padding: 16, textAlign: "center" }}>
-          対象が見つかりません。
-        </p>
-      </td>
-    </tr>
+    <fieldset style={{ border: "1px solid var(--border-subtle)", borderRadius: 12, padding: 12 }}>
+      <legend style={{ padding: "0 6px", fontWeight: 700 }}>{title}</legend>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {EDITABLE_FIELD_OPTIONS.map(([value, label]) => (
+          <label key={`${name}-${value}`} style={{ display: "inline-flex", gap: 6 }}>
+            <input type="checkbox" name={name} value={value} defaultChecked={selected.has(value)} />
+            {label}
+          </label>
+        ))}
+      </div>
+    </fieldset>
   );
+}
+
+function approvalStatusLabel(status: string | null): string {
+  switch (status) {
+    case "approved":
+      return "承認済み";
+    case "rejected":
+      return "却下";
+    case "pending":
+      return "承認待ち";
+    default:
+      return "未設定";
+  }
 }

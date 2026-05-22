@@ -163,7 +163,9 @@ export function VideoForm({
 }: VideoFormProps): React.ReactElement {
   const router = useRouter();
   const [youtubeUrl, setYoutubeUrl] = React.useState(initial.youtube_url ?? "");
-  const [isCollab, setIsCollab] = React.useState(!!initial.is_collab);
+  const [isCollab, setIsCollab] = React.useState(
+    Boolean(initial.is_collab || (initial.members?.length ?? 0) > 0),
+  );
   // 所属イベントの選択状態。slot モードでは slot.event_id が initial.event_ids
   // に含まれている前提で、固定として扱う (UI でも変更不可)。
   const [selectedEventIds, setSelectedEventIds] = React.useState<string[]>(
@@ -772,9 +774,11 @@ export function VideoForm({
             fontSize: 13,
           }}
         >
+          <input type="hidden" name="is_collab" value="false" />
           <input
             type="checkbox"
             name="is_collab"
+            value="true"
             checked={isCollab}
             onChange={(e) => setIsCollab(e.target.checked)}
             disabled={membersDisabled}

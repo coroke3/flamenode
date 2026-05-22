@@ -488,7 +488,7 @@ export function normalizeLegacyVideo(
       highlights,
       custom_answers,
       stage_permission: cleanLegacyString(input.righttype),
-      submission_type,
+      submission_type: members.length > 0 ? "collab" : submission_type,
       declared_experience: cleanLegacyString(input.movieyear),
       primary_event_id: eventId,
       scheduling_type: "manual",

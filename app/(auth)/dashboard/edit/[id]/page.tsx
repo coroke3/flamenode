@@ -560,7 +560,7 @@ export default async function EditVideoPage({
           highlights: video.highlights ?? undefined,
           production_story: video.production_story ?? undefined,
           closing_comment: video.closing_comment ?? undefined,
-          is_collab: video.submission_type === "collab",
+          is_collab: video.submission_type === "collab" || initialMembers.length > 0,
           members: initialMembers,
           event_ids: currentEventIds,
         }}

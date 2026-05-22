@@ -58,6 +58,12 @@ export default async function AdminVideoDetailPage({
         backLabel="作品一覧へ"
         actions={[
           {
+            href: `/admin/videos/${video.id}/members`,
+            label: "参加者設定",
+            icon: <Icon name="users" size={12} aria-hidden />,
+            variant: "primary",
+          },
+          {
             href: `/admin/audit?table=videos&record=${encodeURIComponent(video.id)}`,
             label: "監査ログ",
             icon: <Icon name="clock" size={12} aria-hidden />,
@@ -84,7 +90,7 @@ export default async function AdminVideoDetailPage({
             }}
           >
             {video.youtube_video_id ? (
-              /* eslint-disable-next-line @next/next/no-img-element */
+              // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={youtubeThumbUrl(video.youtube_video_id, "maxresdefault") ?? ""}
                 alt=""
@@ -135,7 +141,7 @@ export default async function AdminVideoDetailPage({
             <dd>{video.used_software ?? "-"}</dd>
             <dt className="fn-muted">紹介コメント</dt>
             <dd style={{ whiteSpace: "pre-wrap" }}>{video.intro_comment ?? "-"}</dd>
-            <dt className="fn-muted">みどころ</dt>
+            <dt className="fn-muted">見どころ</dt>
             <dd style={{ whiteSpace: "pre-wrap" }}>{video.highlights ?? "-"}</dd>
             <dt className="fn-muted">制作エピソード</dt>
             <dd style={{ whiteSpace: "pre-wrap" }}>{video.production_story ?? "-"}</dd>
@@ -178,21 +184,12 @@ export default async function AdminVideoDetailPage({
             <Link href={`/dashboard/edit/${video.id}`} className="fn-btn fn-btn-ghost">
               <Icon name="edit" size={12} aria-hidden /> 編集画面
             </Link>
+            <Link href={`/admin/videos/${video.id}/members`} className="fn-btn fn-btn-ghost">
+              <Icon name="users" size={12} aria-hidden /> 参加者設定
+            </Link>
           </div>
         </aside>
       </div>
-
-      <p style={{ marginTop: 24, display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <Link href="/admin/videos" className="fn-btn fn-btn-ghost">
-          <Icon name="chevron-left" size={12} aria-hidden /> 作品管理へ戻る
-        </Link>
-        <Link
-          href={`/admin/audit?table=videos&record=${encodeURIComponent(video.id)}`}
-          className="fn-btn fn-btn-ghost"
-        >
-          この作品の監査ログ
-        </Link>
-      </p>
     </div>
   );
 }

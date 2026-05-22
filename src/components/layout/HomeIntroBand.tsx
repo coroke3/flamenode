@@ -43,7 +43,7 @@ function eventHeroRank(event: EventRow, now: number): number {
 export function HomeIntroBand({
   activeEvents,
   slotStats,
-}: HomeIntroBandProps): React.ReactElement {
+}: HomeIntroBandProps): React.ReactElement | null {
   const now = Math.floor(Date.now() / 1000);
   const heroEvents = activeEvents
     .filter((event) => isHeroCandidate(event, now))
@@ -55,88 +55,46 @@ export function HomeIntroBand({
       return aStart - bStart;
     });
 
-  if (heroEvents.length > 0) {
-    const [primary, ...rest] = heroEvents.slice(0, MAX_RECRUIT_CARDS);
-    const hasMore = heroEvents.length > MAX_RECRUIT_CARDS;
-    const primaryStat = slotStats?.get(primary.id);
+  if (heroEvents.length === 0) return null;
 
-    return (
-      <section className={styles.heroWrap} aria-label="注目イベント">
-        <EventRecruitCard
-          event={primary}
-          available={primaryStat ? primaryStat.available : null}
-          total={primaryStat ? primaryStat.total : null}
-          variant="primary"
-        />
-
-        {rest.length > 0 ? (
-          <div className={styles.recruitCompactRow}>
-            {rest.map((event) => {
-              const stat = slotStats?.get(event.id);
-              return (
-                <EventRecruitCard
-                  key={event.id}
-                  event={event}
-                  available={stat ? stat.available : null}
-                  total={stat ? stat.total : null}
-                  variant="compact"
-                />
-              );
-            })}
-          </div>
-        ) : null}
-
-        {hasMore ? (
-          <div className={styles.recruitMore}>
-            <Link href="/event" className="fn-btn fn-btn-ghost fn-btn-sm">
-              <Icon name="calendar" size={12} aria-hidden />
-              すべてのイベントを見る ({heroEvents.length}件)
-            </Link>
-          </div>
-        ) : null}
-      </section>
-    );
-  }
-
-  const fallback = activeEvents[0];
-  if (fallback) {
-    const stat = slotStats?.get(fallback.id);
-    return (
-      <section className={styles.heroWrap} aria-label="注目イベント">
-        <EventRecruitCard
-          event={fallback}
-          available={stat ? stat.available : null}
-          total={stat ? stat.total : null}
-          variant="primary"
-        />
-      </section>
-    );
-  }
+  const [primary, ...rest] = heroEvents.slice(0, MAX_RECRUIT_CARDS);
+  const hasMore = heroEvents.length > MAX_RECRUIT_CARDS;
+  const primaryStat = slotStats?.get(primary.id);
 
   return (
-    <section className={styles.band} aria-label="FlameNode について">
-      <div className={styles.inner}>
-        <div className={styles.brand}>
-          <h1 className={styles.title}>FlameNode</h1>
-          <p className={styles.lead}>
-            映像作品とイベント参加をつなぐ場所。
-            <span className={styles.leadDesktop}>
-              {" "}
-              作品、クリエイター、イベントを気持ちよく行き来できます。
-            </span>
-          </p>
-          <div className={styles.actions}>
-            <Link href="/list" className="fn-btn fn-btn-primary">
-              <Icon name="list" size={14} aria-hidden />
-              作品を見る
-            </Link>
-            <Link href="/recommend" className="fn-btn fn-btn-ghost">
-              <Icon name="heart" size={14} aria-hidden />
-              おすすめを見る
-            </Link>
-          </div>
+    <section className={styles.heroWrap} aria-label="注目イベント">
+      <EventRecruitCard
+        event={primary}
+        available={primaryStat ? primaryStat.available : null}
+        total={primaryStat ? primaryStat.total : null}
+        variant="primary"
+      />
+
+      {rest.length > 0 ? (
+        <div className={styles.recruitCompactRow}>
+          {rest.map((event) => {
+            const stat = slotStats?.get(event.id);
+            return (
+              <EventRecruitCard
+                key={event.id}
+                event={event}
+                available={stat ? stat.available : null}
+                total={stat ? stat.total : null}
+                variant="compact"
+              />
+            );
+          })}
         </div>
-      </div>
+      ) : null}
+
+      {hasMore ? (
+        <div className={styles.recruitMore}>
+          <Link href="/event" className="fn-btn fn-btn-ghost fn-btn-sm">
+            <Icon name="calendar" size={12} aria-hidden />
+            すべてのイベントを見る ({heroEvents.length}件)
+          </Link>
+        </div>
+      ) : null}
     </section>
   );
 }

@@ -1,0 +1,64 @@
+.closingCta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  width: min(100% - 28px, 1320px);
+  margin: 44px auto 0;
+  padding: 30px 36px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 88% 48%, color-mix(in srgb, #ff6f5f 28%, transparent), transparent 14rem),
+    radial-gradient(circle at 75% 48%, var(--accent-primary-soft), transparent 13rem),
+    var(--bg-surface);
+}
+
+.closingCta p,
+.closingCta h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 34px;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1.18;
+}
+
+.closingCta p {
+  color: var(--text-secondary);
+}
+
+.closingCta p::after {
+  content: "出会い";
+  color: var(--accent-primary-strong);
+  margin-left: 0.2em;
+}
+
+.closingActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+@media (max-width: 900px) {
+  .closingCta {
+    display: grid;
+    padding: 24px;
+  }
+
+  .closingActions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .closingCta {
+    width: min(100% - 20px, 100%);
+  }
+
+  .closingCta p,
+  .closingCta h2 {
+    font-size: 28px;
+  }
+}

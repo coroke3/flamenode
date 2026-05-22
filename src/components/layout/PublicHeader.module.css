@@ -2,68 +2,75 @@
   position: sticky;
   top: 0;
   z-index: 30;
-  background-color: var(--bg-overlay);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--border-subtle);
+  background:
+    linear-gradient(180deg, var(--bg-overlay), color-mix(in srgb, var(--bg-overlay) 78%, transparent));
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 70%, transparent);
   transition:
     background-color 0.2s ease,
     border-color 0.2s ease;
 }
 
 .bar {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
-  gap: 16px;
-  width: min(96%, var(--content-max));
+  gap: 18px;
+  width: min(100% - 32px, 1320px);
+  height: 64px;
   margin: 0 auto;
-  height: 54px;
-  padding: 0 16px;
 }
 
 .logoLink {
   display: flex;
   align-items: center;
-  flex-shrink: 0;
+  min-width: 0;
   text-decoration: none;
 }
 
-/* デスクトップ用主要ナビ。logo の右、search/postBtn の左に置く。
-   モバイルでは display:none で隠す (mobileNav に同等項目が出る)。 */
 .desktopNav {
   display: none;
   align-items: center;
-  gap: 4px;
-  margin-left: 12px;
-}
-
-@media (min-width: 768px) {
-  .desktopNav {
-    display: inline-flex;
-  }
+  justify-content: center;
+  gap: 34px;
 }
 
 .desktopNavLink {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  padding: 6px 10px;
-  border-radius: var(--radius-pill);
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  text-decoration: none;
-  transition: color 0.15s ease, background-color 0.15s ease;
-}
-
-.desktopNavLink:hover {
+  min-height: 36px;
   color: var(--text-primary);
-  background-color: var(--bg-elevated);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-decoration: none;
+  transition: color 0.15s ease;
 }
 
+.desktopNavLink::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 4px;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent-primary);
+  opacity: 0;
+  transform: translateX(-50%);
+  transition: opacity 0.15s ease;
+}
+
+.desktopNavLink:hover,
 .desktopNavLinkActive {
   color: var(--text-primary);
-  background-color: var(--accent-primary-soft);
-  font-weight: 700;
+}
+
+.desktopNavLink:hover::after,
+.desktopNavLinkActive::after {
+  opacity: 1;
 }
 
 .right {
@@ -71,175 +78,109 @@
   display: flex;
   align-items: center;
   gap: 10px;
-}
-
-.searchContainer {
-  position: relative;
-  display: flex;
-  align-items: center;
+  min-width: 0;
 }
 
 .searchForm {
   display: none;
 }
 
-@media (min-width: 768px) {
-  .searchForm {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px;
-    border: 1px solid transparent;
-    border-radius: var(--radius-pill);
-    background: transparent;
-    width: 32px;
-    height: 32px;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    cursor: pointer;
-    overflow: hidden;
-  }
-
-  .searchForm:hover {
-    background: var(--bg-elevated);
-  }
-
-  .searchForm:focus-within {
-    width: 180px;
-    padding: 4px 12px 4px 8px;
-    border-color: var(--border-subtle);
-    background-color: var(--bg-surface);
-    box-shadow: var(--shadow-sm);
-    cursor: text;
-  }
-
-  .searchIcon {
-    color: var(--text-secondary);
-    flex-shrink: 0;
-    width: 24px;
-    height: 24px;
-    display: grid;
-    place-items: center;
-    border-radius: 50%;
-  }
-
-  .searchForm:focus-within .searchIcon {
-    color: var(--accent-primary);
-  }
-
-  .searchForm input {
-    flex: 1;
-    background: transparent;
-    border: 0;
-    outline: 0;
-    font-size: 13px;
-    color: var(--text-primary);
-    min-width: 0;
-    opacity: 0;
-    transition: opacity 0.2s ease;
-  }
-
-  .searchForm:focus-within input {
-    opacity: 1;
-  }
-
-  .searchForm input::placeholder {
-    color: var(--text-muted);
-  }
+.searchIcon {
+  color: var(--text-secondary);
 }
 
 .actionNav {
   display: none;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
-@media (min-width: 768px) {
-  .actionNav {
-    display: flex;
-  }
+.postBtn,
+.ghostBtn,
+.loginBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 16px;
+  border-radius: var(--radius-pill);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-decoration: none;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    transform 0.15s ease;
 }
 
 .postBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 0 14px;
-  height: 32px;
-  border-radius: var(--radius-pill);
-  font-size: 13px;
-  font-weight: 700;
-  color: #111;
-  background-color: var(--accent-primary, #ffd100);
-  text-decoration: none;
-  box-shadow: 0 2px 8px rgba(255, 209, 0, 0.25);
-  transition: all 0.2s ease;
+  color: #10120a;
+  background: var(--accent-primary);
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--accent-primary) 28%, transparent);
 }
 
 .postBtn:hover {
+  color: #10120a;
+  background: var(--accent-primary-strong);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(255, 209, 0, 0.4);
-  filter: brightness(1.05);
-}
-
-.postBtn:active {
-  transform: translateY(0);
 }
 
 .ghostBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 0 10px;
-  height: 32px;
-  border-radius: var(--radius-pill);
-  font-size: 13px;
-  font-weight: 600;
   color: var(--text-secondary);
-  background-color: transparent;
-  text-decoration: none;
-  border: 1px solid transparent;
-  transition: all 0.2s ease;
+  border: 1px solid var(--border-subtle);
+  background: transparent;
 }
 
 .ghostBtn:hover {
   color: var(--text-primary);
-  background-color: var(--bg-elevated);
+  border-color: var(--border-strong);
+  background: var(--bg-elevated);
+}
+
+.loginBtn {
+  min-width: 96px;
+  color: #ffffff;
+  background: #101113;
+  border: 1px solid #101113;
+}
+
+.loginBtn:hover {
+  color: #ffffff;
+  background: #1b1d20;
+  border-color: #1b1d20;
+  transform: translateY(-1px);
 }
 
 .menuToggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
   border-radius: var(--radius-pill);
-  color: var(--text-secondary);
-  background: transparent;
-  border: 0;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
+  border: 1px solid var(--border-subtle);
   cursor: pointer;
   transition:
     background-color 0.15s ease,
+    border-color 0.15s ease,
     color 0.15s ease;
 }
 
 .menuToggle:hover {
-  color: var(--text-primary);
-  background-color: var(--bg-elevated);
+  color: #10120a;
+  border-color: var(--accent-primary);
+  background: var(--accent-primary);
 }
 
-@media (min-width: 768px) {
-  .menuToggle {
-    display: none;
-  }
-}
-
-/* モバイルドロワー */
 .mobile {
   border-top: 1px solid var(--border-subtle);
   background-color: var(--bg-surface);
-  max-height: calc(100vh - 56px);
+  max-height: calc(100vh - 64px);
   overflow-y: auto;
 }
 
@@ -247,30 +188,30 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  width: min(96%, var(--content-max));
+  width: min(100% - 32px, 1320px);
   margin: 0 auto;
-  padding: 16px;
+  padding: 16px 0 18px;
 }
 
 .mobileSearch {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px;
+  width: 100%;
+  padding: 8px 12px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-pill);
   background: var(--bg-elevated);
-  width: 100%;
 }
 
 .mobileSearch input {
   flex: 1;
-  background: transparent;
+  min-width: 0;
   border: 0;
   outline: 0;
-  font-size: 14px;
+  background: transparent;
   color: var(--text-primary);
-  min-width: 0;
+  font-size: 14px;
 }
 
 .mobileSearch input::placeholder {
@@ -284,11 +225,11 @@
 }
 
 .mobileSectionTitle {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-muted);
-  letter-spacing: 0.05em;
   padding: 0 8px 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
 }
 
 .mobileLink {
@@ -296,10 +237,10 @@
   align-items: center;
   gap: 12px;
   padding: 10px 12px;
-  border-radius: var(--radius-sm);
-  font-size: 14px;
-  font-weight: 600;
+  border-radius: 8px;
   color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 800;
   text-decoration: none;
   transition:
     background-color 0.15s ease,
@@ -312,8 +253,12 @@
 }
 
 .mobileLinkActive {
-  color: var(--accent-primary);
+  color: var(--text-primary);
   background-color: var(--accent-primary-soft);
+}
+
+.mobileLinkActive svg {
+  color: var(--accent-primary-strong);
 }
 
 .mobileLinkDanger {
@@ -321,16 +266,99 @@
 }
 
 .mobileLinkDanger:hover {
-  background-color: var(--accent-danger-soft);
   color: var(--accent-danger);
+  background-color: var(--accent-danger-soft);
 }
 
 .mobileDivider {
   height: 1px;
-  background-color: var(--border-subtle);
   margin: 4px 0;
+  background-color: var(--border-subtle);
 }
 
 .mobileXIdContainer {
   padding: 0 4px;
+}
+
+.themeSlot {
+  padding: 0 8px;
+}
+
+@media (min-width: 768px) {
+  .desktopNav,
+  .actionNav {
+    display: flex;
+  }
+
+  .menuToggle {
+    display: none;
+  }
+}
+
+@media (min-width: 1024px) {
+  .searchForm {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 36px;
+    height: 36px;
+    padding: 0 10px;
+    overflow: hidden;
+    border: 1px solid transparent;
+    border-radius: var(--radius-pill);
+    background: transparent;
+    cursor: pointer;
+    transition:
+      width 0.25s ease,
+      background-color 0.15s ease,
+      border-color 0.15s ease;
+  }
+
+  .searchForm:hover {
+    background: var(--bg-elevated);
+  }
+
+  .searchForm:focus-within {
+    width: 190px;
+    justify-content: flex-start;
+    border-color: var(--border-subtle);
+    background: var(--bg-surface);
+    cursor: text;
+  }
+
+  .searchForm:focus-within .searchIcon {
+    color: var(--accent-primary-strong);
+  }
+
+  .searchForm input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    opacity: 0;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 13px;
+    transition: opacity 0.15s ease;
+  }
+
+  .searchForm:focus-within input {
+    opacity: 1;
+  }
+
+  .searchForm input::placeholder {
+    color: var(--text-muted);
+  }
+}
+
+@media (max-width: 900px) {
+  .bar {
+    width: min(100% - 22px, 1320px);
+    height: 58px;
+  }
+
+  .desktopNav {
+    gap: 18px;
+  }
 }
