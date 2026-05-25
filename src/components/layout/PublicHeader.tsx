@@ -57,14 +57,14 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
           {PUBLIC_NAV_ITEMS.map((item) => {
             const active = isPathActive(pathname, item.href);
             return (
-              <Link
+              <a
                 key={item.href}
                 href={item.href}
                 className={`${styles.desktopNavLink} ${active ? styles.desktopNavLinkActive : ""}`}
                 aria-current={active ? "page" : undefined}
               >
                 {item.label}
-              </Link>
+              </a>
             );
           })}
         </nav>
@@ -160,7 +160,7 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
                 {PUBLIC_NAV_ITEMS.map((item) => {
                   const active = isPathActive(pathname, item.href);
                   return (
-                    <Link
+                    <a
                       key={item.href}
                       href={item.href}
                       className={`${styles.mobileLink} ${active ? styles.mobileLinkActive : ""}`}
@@ -168,7 +168,7 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
                       aria-current={active ? "page" : undefined}
                     >
                       <Icon name={item.iconName} size={16} aria-hidden /> {item.label}
-                    </Link>
+                    </a>
                   );
                 })}
               </div>

@@ -17,7 +17,7 @@ export const PUBLIC_VIDEO_KEYS = [
   "youtube_video_id",
   "display_name",
   "icon_url",
-  "creator_id",
+  "creator_x_user_id",
   "primary_event_id",
   "scheduled_time",
   "status",
@@ -33,7 +33,7 @@ export interface PublicVideoDto {
   youtube_video_id: string | null;
   display_name: string | null;
   icon_url: string | null;
-  creator_id: string | null;
+  creator_x_user_id: string | null;
   primary_event_id: string | null;
   scheduled_time: number | null;
   /** 常に "public"。FlameNode 内の公開状態のみを返す。 */
@@ -90,12 +90,11 @@ export interface PublicEventDto {
  */
 export const FORBIDDEN_PUBLIC_KEYS: ReadonlySet<string> = new Set([
   // 個人特定 ID
-  "owner_discord_user_id",
+  "submitted_by_discord_user_id",
   "discord_user_id",
   "discord_id",
   "linked_discord_user_id",
   "active_x_user_id",
-  "contact_x_id",
   // 認証関連
   "email",
   "email_verified",

@@ -68,6 +68,10 @@ export default async function AdminEventEditPage({
             is_entry_open: ev.is_entry_open,
             is_archived: ev.is_archived,
             allow_user_video_event_links: ev.allow_user_video_event_links,
+            allow_user_video_edits: ev.allow_user_video_edits,
+            user_video_edit_permission_keys_json:
+              ev.user_video_edit_permission_keys_json,
+            video_form_settings_json: ev.video_form_settings_json,
             max_slots_per_video: ev.max_slots_per_video,
             max_consecutive_slots_per_entry: ev.max_consecutive_slots_per_entry,
             slot_part_gap_minutes: ev.slot_part_gap_minutes,
@@ -93,7 +97,7 @@ export default async function AdminEventEditPage({
           危険操作
         </h2>
         <p style={{ marginTop: 6, fontSize: 12, color: "var(--text-secondary)" }}>
-          イベントを削除すると、紐づく枠 / 編集者 / 協力者設定が解除されます。
+          イベントを削除すると、紐づく枠 / イベント管理者設定が解除されます。
           作品本体は残ります (primary_event_id が空になる場合があります)。
         </p>
         <DeleteEventForm eventId={ev.id} />

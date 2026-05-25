@@ -95,7 +95,7 @@ export async function buildHeaderUser(
       db,
       rows.map((row) => ({
         ...row,
-        creator_id: row.x_user_id,
+        creator_x_user_id: row.x_user_id,
       })),
     );
 

@@ -1,5 +1,4 @@
 import * as React from "react";
-import Link from "next/link";
 
 interface SectionHeaderProps {
   title: string;
@@ -23,9 +22,9 @@ export function SectionHeader({
         ) : null}
       </div>
       {moreHref ? (
-        <Link href={moreHref} className="fn-section-more">
+        <a href={moreHref} className="fn-section-more">
           {moreLabel} →
-        </Link>
+        </a>
       ) : null}
     </div>
   );

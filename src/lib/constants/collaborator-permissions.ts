@@ -1,8 +1,4 @@
-/**
- * イベント協力者の permission_key 許可値（設計 FlameNode-Legacy-Data-Compatibility と整合）。
- * Client / Server 双方から import 可（"use server" モジュールに置かない）。
- */
-export const COLLABORATOR_PERMISSION_KEYS = [
+﻿export const COLLABORATOR_PERMISSION_KEYS = [
   "event.basic",
   "event.slots",
   "event.members",
@@ -19,107 +15,111 @@ export const COLLABORATOR_PERMISSION_KEYS = [
 export type CollaboratorPermissionKey =
   (typeof COLLABORATOR_PERMISSION_KEYS)[number];
 
-/** 各 permission_key の日本語ラベルと説明文 (管理 UI 用)。 */
 export const COLLABORATOR_PERMISSION_LABELS: Record<
   CollaboratorPermissionKey,
   { label: string; description: string }
 > = {
   "event.basic": {
     label: "イベント基本情報の編集",
-    description:
-      "タイトル、説明、画像、開催期間、受付状態などを変更できます。",
+    description: "タイトル、説明、画像、開催期間、受付状態などを変更できます。",
   },
   "event.slots": {
-    label: "スロット (枠) の作成・編集",
-    description:
-      "枠の一括生成、確保済み枠の解放、ラベルや時刻の修正が行えます。",
+    label: "スロット管理",
+    description: "枠の作成、編集、開放、時刻やラベルの変更ができます。",
   },
   "event.members": {
-    label: "運営メンバーの管理",
-    description:
-      "公開/非公開の運営メンバー、役職ラベル、代表者候補を編集できます。",
+    label: "イベント管理者を登録/編集",
+    description: "公開メンバー、内部メンバー、役職ラベル、権限を管理できます。",
   },
   "event.questions": {
-    label: "提出フォームの設問編集",
-    description:
-      "イベント固有のカスタム質問、編集可能フィールド設定を変更できます。",
+    label: "投稿フォーム・一般作品権限(イベント毎)",
+    description: "イベント固有の投稿フォーム項目と、投稿後に直せる作品項目を変更できます。",
   },
   "videos.title": {
-    label: "作品のタイトル編集",
-    description: "イベント所属作品のタイトル・表示名・読み方を変更できます。",
+    label: "作品タイトル編集",
+    description: "イベント所属作品のタイトルと表示名を変更できます。",
   },
   "videos.music_credit": {
-    label: "作品の楽曲・クレジット編集",
-    description: "楽曲名、クレジット、楽曲参考 URL を変更できます。",
+    label: "楽曲・クレジット編集",
+    description: "楽曲名、クレジット、楽曲参照 URL を変更できます。",
   },
   "videos.members": {
-    label: "作品の合作メンバー編集",
-    description: "メンバー名・X ID・役割・コメント・並び順を編集できます。",
+    label: "作品メンバー編集",
+    description: "メンバー名、X ID、役割、コメント、担当チャプターを変更できます。",
   },
   "videos.review_data": {
-    label: "振り返り上映用データの編集",
-    description:
-      "制作エピソード、使用ソフト、カスタム回答、見どころ等を編集できます。",
+    label: "作品説明・振り返り編集",
+    description: "紹介文、制作エピソード、使用ソフト、見どころを変更できます。",
   },
   "videos.youtube_id": {
-    label: "作品の YouTube ID 編集",
-    description: "YouTube 動画 URL / ID の差し替えができます (重複登録には注意)。",
+    label: "YouTube ID 編集",
+    description: "YouTube URL / ID を変更できます。重複確認が必要です。",
   },
   "videos.primary_event": {
-    label: "作品の所属イベント変更",
-    description:
-      "primary_event_id を変更できます (担当外イベントへの変更は管理者確認が必要)。",
+    label: "所属イベント変更",
+    description: "primary_event_id や追加所属イベントを変更できます。",
   },
   "video.chapter_admin": {
-    label: "チャプターコメントの管理",
-    description:
-      "イベント所属作品のチャプターコメントを運営権限で編集・削除できます。",
+    label: "チャプター管理",
+    description: "イベント所属作品のチャプターコメントを編集・削除できます。",
   },
 };
 
-/** 動画ステータスの日本語ラベル。 */
-export const VIDEO_STATUS_LABELS: Record<
+export type VideoVisibilityStatus =
   | "draft"
   | "pending"
-  | "x_reapply_required"
   | "public"
-  | "unlisted"
+  | "limited"
   | "private"
-  | "voided",
+  | "hidden"
+  | "archived"
+  | "voided";
+
+export const VIDEO_STATUS_LABELS: Record<
+  VideoVisibilityStatus,
   { label: string; description: string }
 > = {
-  draft: { label: "下書き", description: "投稿者本人だけが見られる作業中状態。" },
+  draft: {
+    label: "下書き",
+    description: "投稿者本人だけが見られる作業中の状態です。",
+  },
   pending: {
-    label: "審査待ち",
-    description: "提出済みで運営の確認・YouTube 同期待ち。",
+    label: "公開待ち",
+    description: "提出済みで運営確認や公開処理を待っている状態です。",
   },
-  x_reapply_required: {
-    label: "X ID 再申請待ち",
-    description: "X ID 却下後、本人による再申請を待つ調整中の状態。",
+  public: {
+    label: "公開",
+    description: "一覧やイベントページから閲覧できる通常公開です。",
   },
-  public: { label: "公開", description: "通常公開。一覧やイベントから閲覧可。" },
-  unlisted: {
+  limited: {
     label: "限定公開",
-    description: "直リンクからのみ閲覧可。一覧には出ない。",
+    description: "直接 URL からのみ閲覧でき、公開一覧には出ない状態です。",
   },
   private: {
     label: "非公開",
-    description: "投稿者本人と管理者だけが閲覧できる。",
+    description: "投稿者本人と管理者だけが閲覧できる状態です。",
+  },
+  hidden: {
+    label: "手動非表示",
+    description: "運営判断で通常導線から隠している状態です。",
+  },
+  archived: {
+    label: "アーカイブ",
+    description: "論理削除され、通常導線から除外された状態です。",
   },
   voided: {
     label: "無効化",
-    description: "公開・上映・統計から除外する論理削除。物理削除ではない。",
+    description: "重複、権利確認、取り下げなどで無効化された状態です。",
   },
 };
 
-/** void_reason_category の日本語ラベル。 */
 export const VOID_REASON_LABELS: Record<
   "x_id_invalid" | "duplicate" | "withdrawn_by_creator" | "operator_decision" | "expired",
   string
 > = {
-  x_id_invalid: "X ID 不備",
+  x_id_invalid: "X ID 不正",
   duplicate: "重複投稿",
-  withdrawn_by_creator: "投稿者都合",
+  withdrawn_by_creator: "投稿者による取り下げ",
   operator_decision: "運営判断",
   expired: "期限切れ",
 };

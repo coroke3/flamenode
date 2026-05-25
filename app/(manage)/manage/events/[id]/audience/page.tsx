@@ -7,13 +7,13 @@ import { getDatabase } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
 import {
   events as eventsTable,
-  eventEditors as eventEditorsTable,
   slots as slotsTable,
   videos as videosTable,
   videoEvents as videoEventsTable,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
+import { getCollaboratorPermissions } from "@/lib/auth/ownership";
 
 export const dynamic = "force-dynamic";
 
@@ -44,25 +44,11 @@ export default async function ManageEventAudiencePage({
   )[0];
   if (!ev) notFound();
 
-  const activeX = user.active_x_user_id;
   const isAdmin = user.role === "admin";
-  if (activeX) {
-    const editor = (
-      await db
-        .select()
-        .from(eventEditorsTable)
-        .where(
-          and(
-            eq(eventEditorsTable.event_id, id),
-            eq(eventEditorsTable.x_user_id, activeX),
-          )!,
-        )
-        .limit(1)
-    )[0];
-    if (!editor && !isAdmin) notFound();
-  } else if (!isAdmin) {
-    notFound();
-  }
+  const permissions = isAdmin
+    ? new Set<string>()
+    : await getCollaboratorPermissions(db, user.id, id);
+  if (!isAdmin && permissions.size === 0) notFound();
 
   // slot を確保した X ID (distinct)
   const slotXIds = await db
@@ -86,21 +72,21 @@ export default async function ManageEventAudiencePage({
   // 動画提出者 (slot 経由ではない creator も拾う)
   const submitters = await db
     .select({
-      x_user_id: videosTable.creator_id,
+      x_user_id: videosTable.creator_x_user_id,
       x_name: xUsersTable.x_name,
       icon_url: xUsersTable.icon_url,
       video_count: sql<number>`COUNT(*)`,
     })
     .from(videosTable)
     .innerJoin(videoEventsTable, eq(videoEventsTable.video_id, videosTable.id))
-    .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id))
+    .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id))
     .where(
       and(
         eq(videoEventsTable.event_id, id),
-        isNotNull(videosTable.creator_id),
+        isNotNull(videosTable.creator_x_user_id),
       )!,
     )
-    .groupBy(videosTable.creator_id);
+    .groupBy(videosTable.creator_x_user_id);
 
   // X ID 単位で merge して 1 行 / unique にする
   const audienceMap = new Map<

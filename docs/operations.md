@@ -57,7 +57,9 @@ wrangler d1 migrations apply flamenode_db --remote
 | `0001_young_fat_cobra.sql` | events.entry_start_time / entry_end_time 追加 | nullable 列追加のみ、ロールバック不要 |
 | `0002_hot_colleen_wing.sql` | notification_outbox.event_id 追加 | nullable 列追加のみ、ロールバック不要 |
 | `0003_loose_whiplash.sql` | video_members に order_index / name インデックス | CREATE INDEX のみ、ロールバック不要 |
-| `0004_tough_kronos.sql` | video_members.name_for_sort 追加 + バックフィル + index | nullable 列 + UPDATE。バックフィル時間に注意 |
+| `0018_simplify_video_schema.sql` | video_members.chapters_json へメンバー担当チャプター統合、name_for_sort 廃止 | 本番前 clean schema 用の破壊的整理 |
+| `0019_clean_staff_software_and_disabled_features.sql` | event_staff / event_staff_permissions、software 正本化、初期無効化 feature の整理 | 本番前 clean schema 用の破壊的整理 |
+| `0020_split_video_core_metadata_stats.sql` | videos 本体を細くし、video_youtube_metadata / video_stats / video_moderation_cases へ責務分離 | 本番前 clean schema 用の破壊的整理 |
 | `0005_curvy_karnak.sql` | notification_outbox に status/event_id インデックス | CREATE INDEX のみ、ロールバック不要 |
 | `0006_fearless_captain_america.sql` | events.slot_part_gap_minutes (default 30) 追加 | nullable 列追加のみ、ロールバック不要 |
 
@@ -81,7 +83,9 @@ wrangler d1 migrations apply flamenode_db --remote
 | `migrations/0001_young_fat_cobra.sql` | `events.entry_start_time` / `events.entry_end_time` 追加 |
 | `migrations/0002_hot_colleen_wing.sql` | `notification_outbox.event_id` 追加 (event-scoped 通知用) |
 | `migrations/0003_loose_whiplash.sql` | `video_members` に `(video_id, order_index)` / `(video_id, name)` インデックス追加 (列ソート高速化) |
-| `migrations/0004_tough_kronos.sql` | `video_members.name_for_sort` (lower(name) キャッシュ) 追加 + 既存行バックフィル + index |
+| `migrations/0018_simplify_video_schema.sql` | `video_members.chapters_json` 追加、`video_member_chapters` / `name_for_sort` 廃止 |
+| `migrations/0019_clean_staff_software_and_disabled_features.sql` | `event_staff` / `event_staff_permissions`、`video_softwares`、disabled features を整理 |
+| `migrations/0020_split_video_core_metadata_stats.sql` | `videos` の旧互換列を整理し、YouTube メタデータと統計を別テーブルへ移行 |
 | `migrations/0005_curvy_karnak.sql` | `notification_outbox` に `(status, created_at)` / `(event_id)` インデックス追加 |
 | `migrations/0006_fearless_captain_america.sql` | `events.slot_part_gap_minutes` (default 30) 追加 |
 
@@ -131,7 +135,7 @@ git push origin main
 | `json-generator` | `*/10 * * * *` | `top.json` / `event/{id}.json` を R2 に出力 | (R2 / KV bind) |
 | `cleanup` | `0 */1 * * *` | 期限切れ slot 解放 / 古い通知削除 | なし |
 | `youtube-sync` | `0 */6 * * *` | YouTube 再生数・サムネ等の同期 | `YOUTUBE_API_KEY` |
-| `score-recalc` | `30 */3 * * *` | `videos.video_score` 再計算 | なし |
+| `score-recalc` | `30 */3 * * *` | `video_stats.score` 再計算 | なし |
 
 ### 3-1. デプロイ
 
@@ -209,20 +213,20 @@ allowlist (許可される定義/参照ファイル):
 - `available_slot_with_video` / `submitted_slot_without_video` — slot 状態整合
 - `reservation_group_user_mix` — 連続枠ユーザー混在
 - `public_video_without_youtube_id` — 公開動画の YT ID 欠落
-- `voided_video_visible` — voided なのに is_deleted=0
+- `voided_video_visible` — `visibility_status='voided'` の動画状態確認
 - `slot_time_overlap` — 同イベント内の時間重複 (スイープ全ペア)
-- `like_count_drift` — likes_count vs video_interactions 集計差 (±5 閾値)
+- `like_count_drift` — `video_stats.app_like_count` vs video_interactions 集計差 (±5 閾値)
 - `video_comments_legacy_rows` — `video_comments` 残行 (>0 で WARN)
-- `videos_outro_comment_legacy` — `outro_comment` 残行 (>0 で INFO)
+- `videos_outro_comment_legacy` — clean schema では常に 0 件になる削除済み確認
 - `chapter_non_chapter_marker` — `marker_kind != 'chapter'` (>0 で INFO)
 - `orphan_video_member` — video_members の orphan
-- `video_members_name_for_sort_null` — migration 0004 未適用 検出
+- `video_members_chapters_json_invalid` — メンバー担当チャプター JSON の形式不正検出
 
 `/admin/security` (セキュリティ) に追加されている主要チェック:
 
 - `access_token_not_null` — accounts.access_token 残存検出
 - `rejected_xid_active` — rejected な X ID が active 化されていないか
-- `unapproved_creator_videos` — 未承認 creator_id の動画
+- `unapproved_creator_videos` — 未承認 `creator_x_user_id` の動画
 - `banned_user_videos` / `tos_not_accepted_user_videos` — 書き込み権限漏れ
 - `custom_page_dangerous_html` — sanitizer 漏れ
 - `banned_user_chapters` — banned ユーザーがチャプター投稿
@@ -266,7 +270,7 @@ node scripts/grant-admin.cjs <discord_id>
 
 ### 6-4. セキュリティ検査
 
-`/admin/security` で `access_token` 残存、rejected X ID active、未承認投稿、BAN/TOS 未同意の書き込み、custom_pages 危険 HTML を検出。
+`/admin/security` で `access_token` 残存、rejected X ID active、未承認投稿、BAN/TOS 未同意の書き込み、custom_pages/custom_themes 無効化状態を検出。
 
 ### 6-5. 危険操作
 

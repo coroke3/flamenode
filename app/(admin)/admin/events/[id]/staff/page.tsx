@@ -1,11 +1,11 @@
 import * as React from "react";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
-  eventCollaboratorPermissions,
-  eventEditors,
+  eventStaff,
+  eventStaffPermissions,
   events as eventsTable,
   xUsers,
 } from "@/lib/db/schema";
@@ -15,7 +15,7 @@ import {
 } from "@/components/admin/EventStaffManager";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 
-export const metadata: Metadata = { title: "編集権限管理" };
+export const metadata: Metadata = { title: "イベント管理者を登録/編集" };
 export const dynamic = "force-dynamic";
 
 interface Props {
@@ -35,39 +35,56 @@ export default async function AdminEventStaffPage({
 
   const editors = await db
     .select({
-      x_user_id: eventEditors.x_user_id,
-      role: eventEditors.role,
-      is_public: eventEditors.is_public,
-      public_role_label: eventEditors.public_role_label,
-      internal_note: eventEditors.internal_note,
+      x_user_id: eventStaff.x_user_id,
+      role: eventStaff.role,
+      is_public: eventStaff.is_public,
+      public_role_label: eventStaff.public_role_label,
+      internal_note: eventStaff.internal_note,
       x_name: xUsers.x_name,
       icon_url: xUsers.icon_url,
     })
-    .from(eventEditors)
-    .leftJoin(xUsers, eq(xUsers.id, eventEditors.x_user_id))
-    .where(eq(eventEditors.event_id, id));
+    .from(eventStaff)
+    .leftJoin(xUsers, eq(xUsers.id, eventStaff.x_user_id))
+    .where(
+      and(
+        eq(eventStaff.event_id, id),
+        inArray(eventStaff.role, ["editor", "representative"]),
+      )!,
+    );
 
-  // 協力者は1人につき複数 permission_key を持つので、subject (x_user or discord_user) でまとめる。
-  const collabRows = await db
-    .select()
-    .from(eventCollaboratorPermissions)
-    .where(eq(eventCollaboratorPermissions.event_id, id));
+  const permissionRows = await db
+    .select({
+      staff_id: eventStaff.id,
+      x_user_id: eventStaff.x_user_id,
+      discord_user_id: eventStaff.discord_user_id,
+      display_name: eventStaff.display_name,
+      is_public_staff: eventStaff.is_public,
+      public_role_label: eventStaff.public_role_label,
+      permission_key: eventStaffPermissions.permission_key,
+    })
+    .from(eventStaff)
+    .innerJoin(
+      eventStaffPermissions,
+      eq(eventStaffPermissions.event_staff_id, eventStaff.id),
+    )
+    .where(
+      and(eq(eventStaff.event_id, id), eq(eventStaffPermissions.allowed, 1))!,
+    );
 
   const collabMap = new Map<string, CollaboratorRow>();
-  for (const c of collabRows) {
-    const key = `${c.x_user_id ?? ""}::${c.discord_user_id ?? ""}`;
-    const existing = collabMap.get(key);
+  for (const row of permissionRows) {
+    const existing = collabMap.get(row.staff_id);
     if (existing) {
-      existing.permission_keys.push(c.permission_key);
+      existing.permission_keys.push(row.permission_key);
     } else {
-      collabMap.set(key, {
-        key,
-        x_user_id: c.x_user_id,
-        discord_user_id: c.discord_user_id,
-        display_name: c.display_name,
-        is_public_staff: c.is_public_staff,
-        public_role_label: c.public_role_label,
-        permission_keys: [c.permission_key],
+      collabMap.set(row.staff_id, {
+        key: row.staff_id,
+        x_user_id: row.x_user_id,
+        discord_user_id: row.discord_user_id,
+        display_name: row.display_name,
+        is_public_staff: row.is_public_staff,
+        public_role_label: row.public_role_label,
+        permission_keys: [row.permission_key],
       });
     }
   }
@@ -75,7 +92,7 @@ export default async function AdminEventStaffPage({
   return (
     <div>
       <AdminPageHeader
-        title={`${ev.title} の編集権限`}
+        title={`${ev.title} のイベント管理者を登録/編集`}
         description={`ID: ${ev.id}`}
         backHref={`/admin/events/${ev.id}`}
         backLabel="イベント詳細へ"
@@ -92,15 +109,17 @@ export default async function AdminEventStaffPage({
       >
         <EventStaffManager
           eventId={ev.id}
-          editors={editors.map((e) => ({
-            x_user_id: e.x_user_id,
-            role: (e.role ?? "editor") as "editor" | "representative",
-            is_public: e.is_public,
-            public_role_label: e.public_role_label,
-            internal_note: e.internal_note,
-            x_name: e.x_name,
-            icon_url: e.icon_url,
-          }))}
+          editors={editors
+            .filter((e) => e.x_user_id)
+            .map((e) => ({
+              x_user_id: e.x_user_id ?? "",
+              role: (e.role ?? "editor") as "editor" | "representative",
+              is_public: e.is_public,
+              public_role_label: e.public_role_label,
+              internal_note: e.internal_note,
+              x_name: e.x_name,
+              icon_url: e.icon_url,
+            }))}
           collaborators={Array.from(collabMap.values())}
         />
       </section>

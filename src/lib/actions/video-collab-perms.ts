@@ -18,7 +18,7 @@ import { normalizeXId } from "@/lib/utils/xid";
 /**
  * 作品単位の共同編集者権限を管理する Server Action 群。
  *
- * 旧テーブル `video_collaborators` は廃止 (第1段階で残置、参照しない)。
+ * 旧テーブル `video_collaborators` は廃止済み。
  * 正本は `video_members.can_edit = 1` の行。これにより表示メンバー・チャプター担当・
  * 共同編集者を 1 テーブルで管理する。
  *
@@ -64,8 +64,8 @@ async function loadEditableVideo(
   | {
       id: string;
       primary_event_id: string | null;
-      creator_id: string | null;
-      owner_discord_user_id: string | null;
+      creator_x_user_id: string | null;
+      submitted_by_discord_user_id: string | null;
     }
   | null
 > {
@@ -74,8 +74,8 @@ async function loadEditableVideo(
       .select({
         id: videos.id,
         primary_event_id: videos.primary_event_id,
-        creator_id: videos.creator_id,
-        owner_discord_user_id: videos.owner_discord_user_id,
+        creator_x_user_id: videos.creator_x_user_id,
+        submitted_by_discord_user_id: videos.submitted_by_discord_user_id,
       })
       .from(videos)
       .where(eq(videos.id, videoId))
@@ -199,7 +199,6 @@ export async function upsertVideoCollaborator(
       .update(videoMembers)
       .set({
         name: parsed.data.display_name,
-        name_for_sort: parsed.data.display_name.toLowerCase(),
         can_edit: canEditValue,
         discord_user_id: discordUserId ?? existing.discord_user_id ?? null,
         edit_granted_by_user_id:
@@ -219,7 +218,6 @@ export async function upsertVideoCollaborator(
       x_user_id: xUserId,
       discord_user_id: discordUserId,
       name: parsed.data.display_name,
-      name_for_sort: parsed.data.display_name.toLowerCase(),
       role: null,
       comment: null,
       order_index: 9999,

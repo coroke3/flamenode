@@ -103,7 +103,7 @@ export function MergeRequestButton({ fromXId, toXId }: Props): React.ReactElemen
               <strong>@{toXId}</strong> に統合します。
               この操作は <strong>取り消し不可</strong> です。
               videos / video_chapters / video_members / slots / video_interactions /
-              event_editors の x_user_id が付け替えられ、旧 ID の Discord 紐付けは解除されます。
+              event_staff の x_user_id が付け替えられ、旧 ID の Discord 紐付けは解除されます。
             </p>
             <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>
               事前に <code>npm run merge:dry-run -- --from @{fromXId} --to @{toXId}</code> で

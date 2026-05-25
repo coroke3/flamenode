@@ -16,7 +16,7 @@ interface AdminVideoMembersFormProps {
     id: string;
     title: string;
     youtube_video_id: string | null;
-    submission_type: string | null;
+    collaboration_type: string | null;
   };
   initialMembers: VideoMemberInput[];
   memberSuggestions: VideoMemberSuggestion[];
@@ -29,7 +29,7 @@ export function AdminVideoMembersForm({
 }: AdminVideoMembersFormProps): React.ReactElement {
   const router = useRouter();
   const [isCollab, setIsCollab] = React.useState(
-    video.submission_type === "collab" || initialMembers.length > 0,
+    video.collaboration_type === "collab" || initialMembers.length > 0,
   );
   const [pending, startTransition] = React.useTransition();
   const [result, setResult] = React.useState<VideoActionResult | null>(null);

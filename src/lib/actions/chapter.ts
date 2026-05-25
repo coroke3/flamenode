@@ -28,7 +28,7 @@ const createSchema = z.object({
   chapter_label: z.string().trim().min(1).max(120),
   note: z.string().trim().max(1000).optional().nullable(),
   // 旧仕様の video_member_id は chapter.ts では扱わない (メンバーチャプターは
-  // video_member_chapters テーブル + replaceVideoMembers 経路で管理)。
+  // video_members.chapters_json + replaceVideoMembers 経路で管理)。
   visibility: z.enum(["public", "private"]).default("public"),
   marker_kind: z
     .enum(["chapter", "comment", "review", "system"])
@@ -76,7 +76,7 @@ export async function createChapter(
   // 対象動画状態チェック (Batch A 最小実装)。
   // FlameNode 内 public / unlisted のみ投稿可。
   // (YouTube 側 unlisted で FlameNode 内 public のケースも status === 'public' で吸収される)。
-  if (target.status !== "public" && target.status !== "unlisted") {
+  if (target.visibility_status !== "public" && target.visibility_status !== "limited") {
     return {
       ok: false,
       message: "この動画にはチャプターコメントを投稿できません。",
@@ -120,11 +120,11 @@ export async function createChapter(
   // (private チャプターはオーナーには不要 - 投稿者本人にしか見えないため)
   if (
     data.visibility === "public" &&
-    target.owner_discord_user_id &&
-    target.owner_discord_user_id !== sUser.id
+    target.submitted_by_discord_user_id &&
+    target.submitted_by_discord_user_id !== sUser.id
   ) {
     await enqueueNotification(db, {
-      discordUserId: target.owner_discord_user_id,
+      discordUserId: target.submitted_by_discord_user_id,
       type: "chapter_comment_added",
       payload: {
         content: `作品「${target.title}」に新しいチャプターコメント「${data.chapter_label}」が追加されました。`,
@@ -358,7 +358,7 @@ export async function createChaptersBulk(
   if (!canMod) {
     return { ok: false, message: "この動画のチャプター一括登録権限がありません。" };
   }
-  if (target.status !== "public" && target.status !== "unlisted") {
+  if (target.visibility_status !== "public" && target.visibility_status !== "limited") {
     return {
       ok: false,
       message: "この動画にはチャプターコメントを投稿できません。",

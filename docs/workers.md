@@ -15,8 +15,8 @@ L-1 (Worker 実装状況のMarkdown明記) に対応。
 | `notification-dispatcher` | `*/5 * * * *` | 実装済み | `notification_outbox` SELECT/UPDATE | Discord Webhook + Discord Bot DM |
 | `json-generator` | `*/10 * * * *` | 実装済み (簡易) | `videos` SELECT | R2 / KV 書き込み |
 | `cleanup` | `0 */1 * * *` | 実装済み (最小) | `slots` UPDATE | なし |
-| `youtube-sync` | `0 */6 * * *` | 実装済み | `videos` SELECT/UPDATE | YouTube Data API v3 |
-| `score-recalc` | `30 */3 * * *` | 実装済み (簡易) | `videos` UPDATE | なし |
+| `youtube-sync` | `0 */6 * * *` | 実装済み | `videos` SELECT + `video_youtube_metadata` UPSERT | YouTube Data API v3 |
+| `score-recalc` | `30 */3 * * *` | 実装済み (簡易) | `video_stats` UPSERT | なし |
 
 ---
 
@@ -70,7 +70,7 @@ L-1 (Worker 実装状況のMarkdown明記) に対応。
 - `notification_outbox.status = 'sent'` の TTL 削除 (14 日)
 - `notification_outbox.status = 'failed'` の TTL 削除 (30 日)
 - `history_logs` TTL 削除 (`normal` は system_settings.history_retention_days を参照、デフォルト 90 日 / `long_audit` は normal*4 と 365 日の大きい方)
-- voided 動画の論理削除タイマー (voided_at から 30 日後に is_deleted=1)
+- voided 動画の後処理タイマーは D1 動画行への直接 UPDATE を行わない
 - 一時エラー (Throttle/Network/Timeout) を最大 3 回までウォーム内即時リトライ (`runCleanupWithRetry`)
 - スキーマエラーはリトライせず即諦める (`shouldRetryCleanupError`)
 
@@ -99,7 +99,7 @@ Durable Object 導入の追加コスト (料金 / 設定 / 分散ロック実装
 - 公開済み動画の youtube_video_id を 50 件単位で同期
 - YouTube Data API v3 の videos.list 呼び出し
 - 削除/限定公開検出
-- `youtube_synced_at` を更新
+- `video_youtube_metadata.synced_at` / `sync_status` / `duration_seconds` / `view_count` を更新
 
 ### 未実装
 - API クォータ枯渇時の自動バックオフ
@@ -113,8 +113,8 @@ Durable Object 導入の追加コスト (料金 / 設定 / 分散ロック実装
 - 根拠: `workers/score-recalc/index.ts`, `wrangler.toml`
 
 ### 実装済み
-- `videos.video_score = views * 1 + likes * 5 - 経過日数 * 0.1`
-- 3 時間ごと全件更新 (status=public, is_deleted=0)
+- `video_stats.score = app_view_count * 1 + app_like_count * 5 + YouTube 補助値 - 経過日数 * 0.1`
+- 3 時間ごと全件更新 (visibility_status='public')
 
 ### 未実装 (設計のみ)
 - イベント別重み・新着重み

@@ -90,22 +90,20 @@ interface CustomQuestion {
 
 ## 2. videos.custom_answers
 
-`events.custom_questions` の回答をキーバリューペアで保存。
+`events.custom_questions` の回答を、イベント ID をキーにした JSON で保存する。
+複数イベントに所属する作品でも回答が混ざらないよう、イベント由来の回答は `custom_answers[event_id]` に、イベント不明・自由投稿共通の回答は `custom_answers.global` に入れる。
 
 ### スキーマ定義
 
 ```typescript
+type CustomAnswerValue = string | string[] | number | boolean | null;
+
+interface EventScopedCustomAnswers {
+  [questionId: string]: CustomAnswerValue;
+}
+
 interface CustomAnswers {
-  /**
-   * キーは custom_questions[].id と完全に一致する。
-   * 値は質問タイプに応じて型が異なる：
-   * - text/textarea: string
-   * - select: string
-   * - multi-select: string[]
-   * - number: number | string
-   * - date: string (ISO 8601)
-   */
-  [questionId: string]: string | string[] | number;
+  [eventIdOrGlobal: string]: EventScopedCustomAnswers;
 }
 ```
 
@@ -113,19 +111,26 @@ interface CustomAnswers {
 
 ```json
 {
-  "software": "Blender",
-  "genre": "Music Video",
-  "collab_note": "ダンス動画とのクロスオーバー合作",
-  "production_days": 30
+  "PVSF2026Sp": {
+    "software": "Blender",
+    "genre": "Music Video",
+    "declared_experience": "個人制作3年"
+  },
+  "global": {
+    "collab_note": "ダンス動画とのクロスオーバー合作",
+    "production_days": 30
+  }
 }
 ```
 
 ### バリデーションルール
 
-1. **キー一致**: `custom_answers` のキーは `custom_questions[].id` と完全に一致する必要がある
-2. **必須チェック**: `required: true` の質問に回答がない場合、サーバーサイドでバリデーションエラーを返す
-3. **後方互換性**: 質問構造はイベント作成時に変更可能。既存の回答は破棄されない
-4. **型チェック**: 入力タイプに応じた型の値が保存される
+1. **イベントスコープ**: イベント由来の回答は `custom_answers[event_id][question_id]` に保存する。
+2. **global スコープ**: イベント不明、または自由投稿共通の回答は `custom_answers.global[question_id]` に保存する。
+3. **キー一致**: 各スコープ内のキーは `custom_questions[].id` と完全に一致する必要がある。
+4. **必須チェック**: `required: true` の質問に回答がない場合、サーバーサイドでバリデーションエラーを返す。
+5. **後方互換性**: 旧形式 `{ "question_id": "answer" }` は読み取り時に `global` へ寄せ、保存時は新形式へ正規化する。
+6. **型チェック**: 入力タイプに応じた型の値が保存される。
 
 ---
 
@@ -209,18 +214,65 @@ interface EditableFieldsConfig {
 
 ---
 
-## 5. event_collaborator_permissions.permission_key
+## 5. events.video_form_settings_json
 
-イベントごとの協力者に付与する編集権限キー。協力者は全体ロールでも作品単位ロールでもなく、対象イベントの中で許可された権限キーだけを操作できる。
+イベントごとの動画投稿フォーム設定。標準項目のうち、イベント単位で聞く/聞かないを切り替える設定を JSON で保持する。
+現在は `stage_permission` を正式項目として扱う。
+
+### スキーマ定義
+
+```typescript
+interface StagePermissionFieldSettings {
+  enabled: boolean;
+  required: boolean;
+  label: string;
+  description?: string;
+  placeholder?: string;
+}
+
+interface VideoFormSettings {
+  stage_permission?: StagePermissionFieldSettings;
+}
+```
+
+### JSON 構造例
+
+```json
+{
+  "stage_permission": {
+    "enabled": true,
+    "required": false,
+    "label": "ステージ・素材・権利まわりの使用許可",
+    "description": "ステージ、モデル、素材、その他権利確認が必要なものについて記入してください。",
+    "placeholder": "例：自作ステージ / 利用規約確認済み / 権利者許可済み など"
+  }
+}
+```
+
+### 表示・保存ルール
+
+1. スロット投稿では `slot.event_id` の `events.video_form_settings_json` を参照する。
+2. 自由投稿では選択された `event_ids` のうち1つでも `stage_permission.enabled = true` なら表示する。
+3. 複数イベントのうち1つでも `stage_permission.required = true` なら必須にする。
+4. 非表示の場合は `videos.stage_permission` に新規値を書き込まない。
+5. サーバー側でも同じ required 判定を行い、UIだけに依存しない。
+
+---
+
+## 6. event_staff_permissions.permission_key
+
+イベントごとのスタッフに付与する操作権限キー。表示用スタッフ情報は `event_staff`、実際の操作許可は `event_staff_permissions` を正本にする。
+スタッフは全体ロールでも作品単位ロールでもなく、対象イベントの中で許可された権限キーだけを操作できる。
 
 ### 設計ルール
 
-- `event_collaborator_permissions` は1権限1行で保持する。
-- 同じ協力者へ複数権限を付与する場合は、同じ `event_id` と同じユーザーに対して `permission_key` の異なる行を複数作成する。
+- `event_staff` は人物・表示・内部メモを保持し、`event_staff_permissions` は1権限1行で保持する。
+- 同じスタッフへ複数権限を付与する場合は、同じ `event_staff_id` に対して `permission_key` の異なる行を複数作成する。
+- 同一 `event_staff_id` と `permission_key` は重複登録しない。
 - 本人承認は不要。管理者または当該イベントのイベント編集許可者が追加した時点で有効にする。
 - イベント側の `events.editable_fields` で禁止された作品項目は、協力者側に対応する `permission_key` があっても編集不可にする。
-- `videos.youtube_id`、`videos.primary_event` のような高リスク操作は、通常フィールドとは別の権限キーとして明示する。
-- `collaborators.manage` はイベント協力者には付与しない。協力者の追加・削除・権限変更はイベント編集許可者以上に限定する。
+- `videos.youtube_id`、`videos.primary_event`、`videos.creator_x_user_id` のような高リスク操作は、通常フィールドとは別の権限キーとして明示する。
+- `collaborators.manage` は通常スタッフには付与しない。スタッフの追加・削除・権限変更は管理者または明示的な管理権限保持者に限定する。
 
 ### 権限キー一覧
 
@@ -236,19 +288,19 @@ interface EditableFieldsConfig {
 | `videos.review_data` | イベント内作品 | 振り返り上映用データ、制作コメント、使用ソフト、カスタム回答の編集 |
 | `videos.youtube_id` | イベント内作品 | YouTube URL / ID の登録・差し替え |
 | `videos.primary_event` | イベント内作品 | `primary_event_id` の変更 |
-| `collaborators.manage` | イベント協力者 | イベント協力者には付与しない。イベント編集許可者以上の管理操作として扱う |
+| `collaborators.manage` | イベントスタッフ | 通常スタッフには付与しない。管理者または明示的な管理権限保持者の操作として扱う |
 
 ### レコード例
 
-| event_id | x_user_id | display_name | permission_key | allowed |
-| :--- | :--- | :--- | :--- | :---: |
-| `PVSF2026Sp` | `coroke3` | `Mochi` | `event.slots` | 1 |
-| `PVSF2026Sp` | `coroke3` | `Mochi` | `videos.review_data` | 1 |
-| `PVSF2026Sp` | `KenEizo` | `KEN` | `videos.music_credit` | 1 |
+| event_staff_id | event_id | x_user_id | display_name | permission_key | allowed |
+| :--- | :--- | :--- | :--- | :--- | :---: |
+| `staff_01HY...` | `PVSF2026Sp` | `coroke3` | `Mochi` | `event.slots` | 1 |
+| `staff_01HY...` | `PVSF2026Sp` | `coroke3` | `Mochi` | `videos.review_data` | 1 |
+| `staff_01HZ...` | `PVSF2026Sp` | `KenEizo` | `KEN` | `videos.music_credit` | 1 |
 
 ---
 
-## 6. CSV インポート設定
+## 7. CSV インポート設定
 
 CSV 入力欄ごとに列名、必須列、サジェスト対象、既定反映方法を定義する。
 
@@ -259,7 +311,7 @@ CSV 入力欄ごとに列名、必須列、サジェスト対象、既定反映�
 
 ---
 
-## 7. events.repeat_rules
+## 8. events.repeat_rules
 
 スロットのリピート生成ルール。
 
@@ -327,7 +379,7 @@ interface RepeatRulesConfig {
 
 ---
 
-## 8. system_settings.default_editable_fields
+## 9. system_settings.default_editable_fields
 
 システム全体のデフォルト編集可能フィールド設定。
 
@@ -343,9 +395,10 @@ interface RepeatRulesConfig {
 
 ---
 
-## 9. videos.validation_errors
+## 10. history_logs.validation_result
 
-動画のバリデーションエラーリスト。
+動画投稿・更新時の検証エラー退避先。`videos.validation_errors` は clean schema から削除し、一時的な検証結果は作品本体に持たない。
+移行時に旧 `videos.validation_errors` に値がある場合は、`history_logs` に検証ログとして退避する。
 
 ### JSON 構造例
 
@@ -369,7 +422,7 @@ interface RepeatRulesConfig {
 
 ---
 
-## 10. 使用編集ソフト
+## 11. 使用編集ソフト
 
 汎用分類ラベルは採用しない。使用編集ソフトのみ、表記ゆれ対策のため辞書と別名を持つチップ型入力として扱う。
 
@@ -412,7 +465,7 @@ interface RepeatRulesConfig {
 
 ---
 
-## 11. video_chapters
+## 12. video_chapters
 
 動画詳細ページの時間付き反応、チャプター点、振り返り用マーカーを扱う。独自プレイヤーの再生バーに点表示する情報も、このデータを正とする。
 
@@ -451,67 +504,112 @@ interface RepeatRulesConfig {
 - 自分の非公開マーカーは本人の再生バーにのみ控えめな点として表示してよい。
 - 点のホバー、タップ長押し、キーボードフォーカスでは、時刻、ラベル、種別を表示する。
 - フレーム画像プレビューは必須にしない。Cloudflare/R2 にプレビュー画像を保存せず、必要な場合でも YouTube 由来で低コストに取得できる範囲に留める。
+- `video_members.chapters_json` の担当チャプターとは混ぜない。`video_chapters` は通常の動画チャプター・コメント・レビュー用マーカーだけを扱う。
 
 ---
 
-## 12. videos.status_lifecycle
+## 13. video_members.chapters_json
+
+公開メンバーや共同編集者ごとの担当範囲を表すチャプター配列。独立テーブル `video_member_chapters` は廃止し、メンバー属性として `video_members.chapters_json` に保持する。
+
+### スキーマ定義
+
+```typescript
+interface VideoMemberChapter {
+  time_seconds: number;
+  label: string;
+  note?: string;
+}
+
+type VideoMemberChaptersJson = VideoMemberChapter[];
+```
+
+### JSON 構造例
+
+```json
+[
+  {
+    "time_seconds": 12.5,
+    "label": "イントロ担当",
+    "note": "冒頭演出"
+  },
+  {
+    "time_seconds": 48,
+    "label": "サビ背景",
+    "note": ""
+  }
+]
+```
+
+### 設計ルール
+
+- メンバー担当チャプターは、通常の `video_chapters` とは別物として扱う。
+- `VideoMembersField` / `replaceVideoMembers` は、メンバー配列と一緒に `chapters_json` を読み書きする。
+- 公開動画詳細ページのメンバー担当表示は `chapters_json` から生成する。
+- 空配列または `null` は担当チャプターなしとして扱う。
+
+---
+
+## 14. videos.status_lifecycle
 
 作品状態、X ID 再申請、枠取り直し、無効化の状態遷移を UI と管理画面で共通に扱うための補助構造。
+状態の正本は `videos.visibility_status` と `video_moderation_cases` に分ける。
 
 ### 状態定義
 
 ```typescript
-type VideoStatus =
+type VideoVisibilityStatus =
   | "draft"
   | "pending"
-  | "x_reapply_required"
   | "public"
-  | "unlisted"
+  | "limited"
   | "private"
+  | "hidden"
+  | "archived"
   | "voided";
 
-interface XReapplyState {
-  status: "not_required" | "required" | "reapplied" | "approved" | "expired";
-  rejected_x_user_id?: string;
-  reapply_request_id?: string;
-  display_name: string;
-  public_reason?: string;
-  started_at?: number;
-  due_at?: number;
-  slot_reclaim_priority_until?: number;
-  attempt_count?: number;
-  locked_until?: number;
-  reminder_3days_sent_at?: number;
-  reminder_24h_sent_at?: number;
-  admin_extended_until?: number;
-}
+type VideoModerationCaseType =
+  | "x_reapply"
+  | "void"
+  | "duplicate"
+  | "rights"
+  | "operator";
 
-interface VoidedState {
-  is_voided: boolean;
-  display_label: "不備";
-  reason_category?: "x_id_invalid" | "duplicate" | "withdrawn_by_creator" | "operator_decision" | "expired";
-  private_detail?: string;
-  voided_by_user_id?: string;
-  voided_at?: number;
-  physical_delete_candidate_at?: number;
-  restored_by_user_id?: string;
-  restored_at?: number;
-  two_step_confirmed: boolean;
-  confirm_input?: string;
+type VideoModerationCaseStatus =
+  | "open"
+  | "resolved"
+  | "rejected"
+  | "expired"
+  | "cancelled";
+
+interface VideoModerationCase {
+  id: string;
+  video_id: string;
+  case_type: VideoModerationCaseType;
+  status: VideoModerationCaseStatus;
+  public_reason?: string | null;
+  private_note?: string | null;
+  due_at?: number | null;
+  locked_until?: number | null;
+  attempt_count?: number;
+  related_x_user_id?: string | null;
+  created_by_user_id?: string | null;
+  resolved_by_user_id?: string | null;
+  created_at: number;
+  resolved_at?: number | null;
 }
 ```
 
 ### 設計ルール
 
-- `x_reapply_required` は7日以内に対応する。期限切れ、または受付終了までに枠取り直しが完了しない場合は `voided` にする。
-- 期限切れの3日前と24時間前にリマインドし、最終確認通知は送らない。管理者は最大 +7日、合計14日まで個別延長できる。
-- 再申請が連続3回却下された場合は一時ロックし、管理者への問い合わせを促す。
-- 再申請中の主表示は X ID 文字列ではなく名義にする。
-- 再申請承認と枠取り直しが完了したら、自動的に `pending` へ戻す。
-- `voided` は物理削除ではなく論理無効化であり、公開・一覧・旧形式エクスポート・スコア計算・ランキングから除外する。
-- `voided` は本人の通常ダッシュボード一覧から除外し、通知からのみ「不備」として確認させる。
+- `public` は公開一覧に出す。
+- `limited` は直接 URL で見られるが公開一覧には出さない。旧 `unlisted` 相当。
+- `hidden` は管理上の手動非表示。旧 `is_manual_hidden` 相当。
+- `archived` は論理削除・通常導線から除外。旧 `is_deleted` 相当。
+- `voided` は無効化。重複、X ID 不正、投稿取り下げ、運営判断などに使う。
+- X ID 再申請や無効化の理由・期限・試行回数・内部メモは `video_moderation_cases` に残す。
+- YouTube ID 重複チェックは `visibility_status NOT IN ('archived', 'voided')` を対象にする。
 - `voided` 作品の YouTube ID は重複判定から外し、同じ動画の再投稿は別作品として扱う。
 - コメント、チャプター、いいね、ブックマークはカスケード無効化で非表示保持するが、再登録作品へは引き継がない。
 - `voided` 操作は確認文字列付き二段階確認必須とし、管理者統計ではイベント別・理由カテゴリ別に通常作品と分けて件数を表示する。
-- `voided` 復旧は管理者専用。180日経過後は物理削除候補にできる。
 - X ID 却下、枠解放、作品状態変更、通知送信、枠取り直し完了は `history_logs` に別イベントとして残す。

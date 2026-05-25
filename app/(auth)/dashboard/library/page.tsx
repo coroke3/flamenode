@@ -1,7 +1,7 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   videoInteractions,
@@ -65,17 +65,17 @@ export default async function DashboardLibraryPage({
             youtube_video_id: videosTable.youtube_video_id,
             display_name: creatorNameExpr,
             icon_url: creatorIconExpr,
-            creator_id: videosTable.creator_id,
+            creator_x_user_id: videosTable.creator_x_user_id,
             primary_event_id: videosTable.primary_event_id,
             scheduled_time: videosTable.scheduled_time,
-            status: videosTable.status,
+            status: videosTable.visibility_status,
           })
           .from(videosTable)
-          .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id))
+          .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id))
           .where(
             and(
               inArray(videosTable.id, targetIds),
-              eq(videosTable.is_deleted, 0),
+              ne(videosTable.visibility_status, "archived"),
             )!,
           )
           .orderBy(desc(videosTable.scheduled_time));

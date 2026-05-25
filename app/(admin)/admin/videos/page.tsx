@@ -61,13 +61,13 @@ export default async function AdminVideosPage({
       const queryFilter = q
         ? or(
             like(videosTable.title, term),
-            like(videosTable.display_name, term),
-            like(videosTable.contact_x_id, term),
+            like(videosTable.creator_display_name, term),
+            like(videosTable.creator_x_user_id, term),
             like(xUsersTable.x_name, term),
             like(xUsersTable.id, term),
           )
         : undefined;
-      const statusFilter = status ? eq(videosTable.status, status as never) : undefined;
+      const statusFilter = status ? eq(videosTable.visibility_status, status as never) : undefined;
       const eventFilter = event ? eq(videoEventsTable.event_id, event) : undefined;
       const conds = [queryFilter, statusFilter, eventFilter].filter(
         (c): c is NonNullable<typeof c> => c !== undefined,
@@ -84,12 +84,12 @@ export default async function AdminVideosPage({
           id: videosTable.id,
           title: videosTable.title,
           youtube_video_id: videosTable.youtube_video_id,
-          display_name: sql<string>`COALESCE(${xUsersTable.x_name}, ${videosTable.display_name}, ${videosTable.contact_x_id})`,
-          status: videosTable.status,
+          display_name: sql<string>`COALESCE(${xUsersTable.x_name}, ${videosTable.creator_display_name}, ${videosTable.creator_x_user_id})`,
+          status: videosTable.visibility_status,
           created_at: videosTable.created_at,
         })
         .from(videosTable)
-        .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id));
+        .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id));
       const withEventJoin = event
         ? base.innerJoin(videoEventsTable, eq(videoEventsTable.video_id, videosTable.id))
         : base;
@@ -102,7 +102,7 @@ export default async function AdminVideosPage({
       const countBase = db
         .select({ c: sql<number>`COUNT(*)` })
         .from(videosTable)
-        .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id));
+        .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id));
       const countWithJoin = event
         ? countBase.innerJoin(videoEventsTable, eq(videoEventsTable.video_id, videosTable.id))
         : countBase;
@@ -150,7 +150,7 @@ export default async function AdminVideosPage({
         />
         <select className="fn-select" name="status" defaultValue={status}>
           <option value="">すべての状態</option>
-          {["draft", "pending", "public", "unlisted", "private", "voided"].map((s) => (
+          {["draft", "pending", "public", "limited", "private", "hidden", "archived", "voided"].map((s) => (
             <option key={s} value={s}>
               {s}
             </option>

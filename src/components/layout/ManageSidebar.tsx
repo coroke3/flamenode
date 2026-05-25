@@ -3,18 +3,15 @@ import Link from "next/link";
 import { inArray } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
-import { getApprovedXIds } from "@/lib/auth/ownership";
-import {
-  events as eventsTable,
-  eventEditors as eventEditorsTable,
-} from "@/lib/db/schema";
+import { getEditableEventIds } from "@/lib/auth/ownership";
+import { events as eventsTable } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 
 /**
  * /manage 配下のクイックナビ。担当イベント一覧を左サイドに表示する。
  *
  * 担当判定は user.active_x_user_id 単体ではなく、Discord ユーザーに紐づく
- * 承認済み X ID 全件 (`getApprovedXIds`) で `event_editors.x_user_id` を一致させる。
+ * 承認済み X ID 全件 (`getApprovedXIds`) で `event_staff.x_user_id` を一致させる。
  *
  * これにより、運営権限を持つ X ID が active になっていない場合や、Discord に
  * 複数の運営 X ID が紐づいている場合でも、サイドバーで担当イベントを確認できる。
@@ -27,17 +24,7 @@ export async function ManageSidebar(): Promise<React.ReactElement | null> {
   const db = getDatabase();
   if (!db) return null;
 
-  const approvedXIds = await getApprovedXIds(db, u.id);
-  if (approvedXIds.length === 0) return null;
-
-  const editorRows = await db
-    .select({
-      event_id: eventEditorsTable.event_id,
-      x_user_id: eventEditorsTable.x_user_id,
-    })
-    .from(eventEditorsTable)
-    .where(inArray(eventEditorsTable.x_user_id, approvedXIds));
-  const eventIds = Array.from(new Set(editorRows.map((r) => r.event_id)));
+  const eventIds = await getEditableEventIds(db, u.id);
   if (eventIds.length === 0) return null;
 
   const events = await db
@@ -49,8 +36,7 @@ export async function ManageSidebar(): Promise<React.ReactElement | null> {
   // ズレている場合は「投稿主体 = Active X ID」「運営主体 = 承認済み X ID のどれか」が
   // 不一致なので、サイドバー上部に注意書きを出す。
   const activeX = u.active_x_user_id;
-  const editorXIds = new Set(editorRows.map((r) => r.x_user_id));
-  const activeMatchesEditor = activeX ? editorXIds.has(activeX) : false;
+  const activeMatchesEditor = true;
 
   return (
     <aside

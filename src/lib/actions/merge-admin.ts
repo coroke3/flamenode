@@ -5,7 +5,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import {
-  eventEditors,
+  eventStaff,
   historyLogs,
   slots,
   videoChapters,
@@ -82,7 +82,7 @@ export async function mergeXIds(
     db
       .select({ c: sql<number>`COUNT(*)` })
       .from(videos)
-      .where(eq(videos.creator_id, fromXId)),
+      .where(eq(videos.creator_x_user_id, fromXId)),
     db
       .select({ c: sql<number>`COUNT(*)` })
       .from(videoChapters)
@@ -101,8 +101,8 @@ export async function mergeXIds(
       .where(eq(videoInteractions.x_user_id, fromXId)),
     db
       .select({ c: sql<number>`COUNT(*)` })
-      .from(eventEditors)
-      .where(eq(eventEditors.x_user_id, fromXId)),
+      .from(eventStaff)
+      .where(eq(eventStaff.x_user_id, fromXId)),
   ]);
   const counts = {
     videos: Number(vc[0]?.c ?? 0),
@@ -110,7 +110,7 @@ export async function mergeXIds(
     video_members: Number(mc[0]?.c ?? 0),
     slots: Number(sc[0]?.c ?? 0),
     video_interactions: Number(ic[0]?.c ?? 0),
-    event_editors: Number(ec[0]?.c ?? 0),
+    event_staff: Number(ec[0]?.c ?? 0),
   };
 
   // video_interactions UNIQUE 衝突対策: 旧 ID の (video_id, interaction_type) が
@@ -126,19 +126,19 @@ export async function mergeXIds(
       )
   `);
 
-  // event_editors の UNIQUE PK (event_id, x_user_id) 衝突対策: 旧側 (旧 ID + 同 event) を削除
+  // event_staff の UNIQUE 制約 (event_id, x_user_id) 衝突対策: 旧側 (旧 ID + 同 event) を削除
   await db.run(sql`
-    DELETE FROM event_editors
+    DELETE FROM event_staff
     WHERE x_user_id = ${fromXId}
       AND EXISTS (
-        SELECT 1 FROM event_editors b
+        SELECT 1 FROM event_staff b
         WHERE b.x_user_id = ${toXId}
-          AND b.event_id = event_editors.event_id
+          AND b.event_id = event_staff.event_id
       )
   `);
 
-  // 各テーブルで x_user_id / creator_id を付け替え
-  await db.update(videos).set({ creator_id: toXId }).where(eq(videos.creator_id, fromXId));
+  // 各テーブルで x_user_id / creator_x_user_id を付け替え
+  await db.update(videos).set({ creator_x_user_id: toXId }).where(eq(videos.creator_x_user_id, fromXId));
   await db.update(videoChapters).set({ x_user_id: toXId }).where(eq(videoChapters.x_user_id, fromXId));
   await db.update(videoMembers).set({ x_user_id: toXId }).where(eq(videoMembers.x_user_id, fromXId));
   await db.update(slots).set({ x_user_id: toXId }).where(eq(slots.x_user_id, fromXId));
@@ -147,9 +147,9 @@ export async function mergeXIds(
     .set({ x_user_id: toXId })
     .where(eq(videoInteractions.x_user_id, fromXId));
   await db
-    .update(eventEditors)
+    .update(eventStaff)
     .set({ x_user_id: toXId })
-    .where(eq(eventEditors.x_user_id, fromXId));
+    .where(eq(eventStaff.x_user_id, fromXId));
 
   // x_user_aliases に旧 ID を新 ID の別名として記録 (重複は ON CONFLICT で無視)
   try {

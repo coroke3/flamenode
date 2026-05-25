@@ -23,7 +23,7 @@
 ### Phase B: 単一 X ID merge Server Action (危険度: 中)
 - `mergeXIds(fromXId, toXId)` action を追加
 - トランザクション内で以下を実行:
-  - `videos.creator_id = toXId WHERE creator_id = fromXId`
+  - `videos.creator_x_user_id = toXId WHERE creator_x_user_id = fromXId`
   - `video_chapters.x_user_id = toXId WHERE x_user_id = fromXId`
   - `video_members.x_user_id = toXId WHERE x_user_id = fromXId`
   - `slots.x_user_id = toXId WHERE x_user_id = fromXId`

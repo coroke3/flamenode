@@ -338,8 +338,7 @@ export interface LegacyVideoResult {
     title: string;
     display_name: string;
     display_name_yomi: string | null;
-    contact_x_id: string;
-    creator_id: string | null;
+    creator_x_user_id: string | null;
     icon_url: string | null;
     youtube_video_id: string | null;
     music: string | null;
@@ -475,8 +474,7 @@ export function normalizeLegacyVideo(
       title: title || `(無題) ${youtubeId ?? id}`,
       display_name: creator || (tlink ? `@${tlink}` : "anonymous"),
       display_name_yomi: cleanLegacyString(input.yomi),
-      contact_x_id: tlink ?? "anonymous",
-      creator_id: tlink,
+      creator_x_user_id: tlink,
       icon_url: normalizeIconUrl(input.icon),
       youtube_video_id: youtubeId,
       music: cleanLegacyString(input.music),

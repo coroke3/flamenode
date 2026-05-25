@@ -5,6 +5,10 @@ import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { createEvent, updateEvent } from "@/lib/actions/event-admin";
 import { PermissionKeysField } from "@/components/admin/PermissionKeysField";
+import {
+  DEFAULT_STAGE_PERMISSION_FIELD,
+  parseVideoFormSettings,
+} from "@/lib/video/formSettings";
 
 export interface EventFormInitial {
   id?: string;
@@ -24,6 +28,7 @@ export interface EventFormInitial {
   allow_user_video_event_links?: number;
   allow_user_video_edits?: number;
   user_video_edit_permission_keys_json?: string | null;
+  video_form_settings_json?: string | null;
   max_slots_per_video?: number;
   max_consecutive_slots_per_entry?: number;
   slot_type?: "time" | "count";
@@ -51,6 +56,9 @@ export function EventForm({
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
+  const stagePermissionSettings =
+    parseVideoFormSettings(initial.video_form_settings_json).stage_permission ??
+    {};
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -274,55 +282,123 @@ export function EventForm({
         </div>
       </div>
 
-      {/*
-        作品編集の「ユーザー権限上書き」: イベント単位で section_key を委譲する。
-        - 既定は無効。有効にしたイベントだけ permission_keys_json で section を絞る。
-        - 危険キー (videos.youtube_id / videos.primary_event / video.identity) は
-          サーバー側 ownership.ts で除外する (許可リスト方式)。
-      */}
       <fieldset
         style={{
           marginTop: 16,
-          padding: "12px 14px",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-md)",
+          padding: "14px 0 0",
+          border: 0,
+          borderTop: "1px solid var(--border-subtle)",
           display: "grid",
-          gap: 10,
+          gap: 12,
         }}
       >
         <legend
           style={{
-            padding: "0 6px",
-            fontSize: 12,
-            fontWeight: 700,
-            color: "var(--text-muted)",
+            padding: "0 10px 0 0",
+            fontSize: 13,
+            fontWeight: 800,
+            color: "var(--text-primary)",
           }}
         >
-          一般ユーザー向け作品編集の許可 (イベント単位)
+          一般作品権限(イベント毎)
         </legend>
         <div>
-          <label
-            className="fn-label"
-            title="このイベントに紐づく作品について、作品オーナー以外にも一部編集権限を与えるか"
-          >
-            一般ユーザーの作品編集を許可
-          </label>
+          <label className="fn-label">編集できる人</label>
           <select
             name="allow_user_video_edits"
             defaultValue={String(initial.allow_user_video_edits ?? 0)}
             className="fn-select"
           >
-            <option value="0">無効 (既定。動画オーナー / 合作 / 運営のみ)</option>
-            <option value="1">有効 (下記 JSON の section_key を委譲)</option>
+            <option value="0">運営だけが変更する</option>
+            <option value="1">投稿者・共同編集者にも一部変更を許可</option>
           </select>
         </div>
         <div>
-          <label className="fn-label">
-            委譲する section_key (JSON 配列)
-          </label>
+          <label className="fn-label">許可する編集内容</label>
           <PermissionKeysField
             name="user_video_edit_permission_keys_json"
             defaultValue={initial.user_video_edit_permission_keys_json}
+          />
+        </div>
+      </fieldset>
+
+      <fieldset
+        style={{
+          marginTop: 16,
+          padding: "14px 0 0",
+          border: 0,
+          borderTop: "1px solid var(--border-subtle)",
+          display: "grid",
+          gap: 12,
+        }}
+      >
+        <legend
+          style={{
+            padding: "0 10px 0 0",
+            fontSize: 13,
+            fontWeight: 800,
+            color: "var(--text-primary)",
+          }}
+        >
+          投稿フォームの追加質問
+        </legend>
+        <input type="hidden" name="stage_permission_enabled" value="0" />
+        <input type="hidden" name="stage_permission_required" value="0" />
+        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="checkbox"
+            name="stage_permission_enabled"
+            value="1"
+            defaultChecked={stagePermissionSettings.enabled === true}
+          />
+          権利・素材の確認欄を出す
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="checkbox"
+            name="stage_permission_required"
+            value="1"
+            defaultChecked={stagePermissionSettings.required === true}
+          />
+          入力必須にする
+        </label>
+        <div>
+          <label className="fn-label">質問名</label>
+          <input
+            name="stage_permission_label"
+            type="text"
+            defaultValue={
+              stagePermissionSettings.label ??
+              DEFAULT_STAGE_PERMISSION_FIELD.label
+            }
+            className="fn-input"
+            maxLength={120}
+          />
+        </div>
+        <div>
+          <label className="fn-label">補足文</label>
+          <textarea
+            name="stage_permission_description"
+            defaultValue={
+              stagePermissionSettings.description ??
+              DEFAULT_STAGE_PERMISSION_FIELD.description
+            }
+            className="fn-input"
+            rows={3}
+            maxLength={1000}
+          />
+        </div>
+        <div>
+          <label className="fn-label">入力例</label>
+          <input
+            name="stage_permission_placeholder"
+            type="text"
+            defaultValue={
+              stagePermissionSettings.placeholder ??
+              DEFAULT_STAGE_PERMISSION_FIELD.placeholder
+            }
+            className="fn-input"
+            maxLength={500}
           />
         </div>
       </fieldset>

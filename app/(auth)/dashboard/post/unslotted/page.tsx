@@ -71,7 +71,11 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
               (ev) =>
                 isAcceptingEntries(ev) && ev.allow_user_video_event_links === 1,
             )
-            .map((ev) => ({ id: ev.id, title: ev.title })),
+            .map((ev) => ({
+              id: ev.id,
+              title: ev.title,
+              video_form_settings_json: ev.video_form_settings_json,
+            })),
         )
     : [];
   const iconCandidates =
@@ -127,7 +131,7 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
         xIdOptions={xIdOptions}
         activeXId={activeX ?? undefined}
         initial={{
-          contact_x_id: activeX ?? undefined,
+          creator_x_user_id: activeX ?? undefined,
           display_name: xRow?.x_name ?? user.name,
           icon_url: xRow?.icon_url ?? user.image ?? undefined,
           profile_text: xRow?.profile_text ?? undefined,

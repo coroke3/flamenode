@@ -55,22 +55,18 @@ export default async function UserListPage({
         id: xUsers.id,
         x_name: sql<string>`COALESCE(
           ${xUsers.x_name},
-          (SELECT v.display_name FROM videos AS v
-           WHERE v.creator_id = "x_users"."id"
-             AND v.status = 'public'
-             AND v.is_deleted = 0
-             AND v.is_manual_hidden = 0
+          (SELECT v.creator_display_name FROM videos AS v
+           WHERE v.creator_x_user_id = "x_users"."id"
+             AND v.visibility_status = 'public'
            ORDER BY v.scheduled_time DESC LIMIT 1),
           "x_users"."id"
         )`,
         icon_url: sql<string | null>`COALESCE(
           ${xUsers.icon_url},
-          (SELECT v.icon_url FROM videos AS v
-           WHERE v.creator_id = "x_users"."id"
-             AND v.icon_url IS NOT NULL
-             AND v.status = 'public'
-             AND v.is_deleted = 0
-             AND v.is_manual_hidden = 0
+          (SELECT v.creator_icon_url FROM videos AS v
+           WHERE v.creator_x_user_id = "x_users"."id"
+             AND v.creator_icon_url IS NOT NULL
+             AND v.visibility_status = 'public'
            ORDER BY v.scheduled_time DESC LIMIT 1)
         )`,
         profile_text: xUsers.profile_text,
@@ -78,46 +74,38 @@ export default async function UserListPage({
         own_count: sql<number>`(
           SELECT COUNT(DISTINCT v.id)
           FROM videos AS v
-          WHERE v.creator_id = "x_users"."id"
-            AND v.status = 'public'
-            AND v.is_deleted = 0
-            AND v.is_manual_hidden = 0
+          WHERE v.creator_x_user_id = "x_users"."id"
+            AND v.visibility_status = 'public'
         )`,
         collab_count: sql<number>`(
           SELECT COUNT(DISTINCT vm.video_id)
           FROM video_members AS vm
           INNER JOIN videos AS v ON v.id = vm.video_id
           WHERE vm.x_user_id = "x_users"."id"
-            AND v.status = 'public'
-            AND v.is_deleted = 0
-            AND v.is_manual_hidden = 0
+            AND v.visibility_status = 'public'
         )`,
         total_count: sql<number>`(
           SELECT COUNT(DISTINCT v.id)
           FROM videos AS v
           LEFT JOIN video_members AS vm ON vm.video_id = v.id
-          WHERE (v.creator_id = "x_users"."id" OR vm.x_user_id = "x_users"."id")
-            AND v.status = 'public'
-            AND v.is_deleted = 0
-            AND v.is_manual_hidden = 0
+          WHERE (v.creator_x_user_id = "x_users"."id" OR vm.x_user_id = "x_users"."id")
+            AND v.visibility_status = 'public'
         )`,
       })
       .from(xUsers)
       .where(and(...filters)!);
 
     const orphanFilters = [
-      eq(videos.status, "public"),
-      eq(videos.is_deleted, 0),
-      eq(videos.is_manual_hidden, 0),
-      ne(videos.contact_x_id, "anonymous"),
+      eq(videos.visibility_status, "public"),
+      ne(videos.creator_x_user_id, "anonymous"),
       isNull(xUsers.id),
     ];
     if (keyword) {
       const term = `%${keyword.replace(/[%_]/g, (m) => `\\${m}`)}%`;
       orphanFilters.push(
         or(
-          like(videos.display_name, term),
-          like(videos.contact_x_id, term),
+          like(videos.creator_display_name, term),
+          like(videos.creator_x_user_id, term),
           like(videos.title, term),
         )!,
       );
@@ -125,23 +113,19 @@ export default async function UserListPage({
 
     const orphanRows = await db
       .select({
-        id: videos.contact_x_id,
+        id: videos.creator_x_user_id,
         x_name: sql<string>`COALESCE(
-          (SELECT v.display_name FROM videos AS v
-           WHERE v.contact_x_id = ${videos.contact_x_id}
-             AND v.status = 'public'
-             AND v.is_deleted = 0
-             AND v.is_manual_hidden = 0
+          (SELECT v.creator_display_name FROM videos AS v
+           WHERE v.creator_x_user_id = ${videos.creator_x_user_id}
+             AND v.visibility_status = 'public'
            ORDER BY v.scheduled_time DESC, v.created_at DESC LIMIT 1),
-          ${videos.contact_x_id}
+          ${videos.creator_x_user_id}
         )`,
         icon_url: sql<string | null>`(
-          SELECT v.icon_url FROM videos AS v
-          WHERE v.contact_x_id = ${videos.contact_x_id}
-            AND v.icon_url IS NOT NULL
-            AND v.status = 'public'
-            AND v.is_deleted = 0
-            AND v.is_manual_hidden = 0
+          SELECT v.creator_icon_url FROM videos AS v
+          WHERE v.creator_x_user_id = ${videos.creator_x_user_id}
+            AND v.creator_icon_url IS NOT NULL
+            AND v.visibility_status = 'public'
           ORDER BY v.scheduled_time DESC, v.created_at DESC LIMIT 1
         )`,
         profile_text: sql<string | null>`NULL`,
@@ -151,9 +135,9 @@ export default async function UserListPage({
         total_count: sql<number>`COUNT(DISTINCT ${videos.id})`,
       })
       .from(videos)
-      .leftJoin(xUsers, eq(xUsers.id, videos.contact_x_id))
+      .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
       .where(and(...orphanFilters)!)
-      .groupBy(videos.contact_x_id);
+      .groupBy(videos.creator_x_user_id);
 
     return [...rows, ...orphanRows]
       .map((row) => ({

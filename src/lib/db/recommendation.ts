@@ -22,7 +22,7 @@ export type RelatedCandidate<T> = {
 
 type DiversityRow = {
   id: string;
-  creator_id: string | null;
+  creator_x_user_id: string | null;
   primary_event_id: string | null;
 };
 
@@ -131,7 +131,7 @@ export function enforceDiversity<T extends DiversityRow>(
 
     if (!relaxed) {
       const last = selected[selected.length - 1]?.row;
-      if (row.creator_id && last?.creator_id === row.creator_id) return false;
+      if (row.creator_x_user_id && last?.creator_x_user_id === row.creator_x_user_id) return false;
 
       if (
         reason === "same_creator" &&
@@ -162,8 +162,8 @@ export function enforceDiversity<T extends DiversityRow>(
       }
     }
 
-    if (row.creator_id && !relaxed) {
-      const count = creatorCounts.get(row.creator_id) ?? 0;
+    if (row.creator_x_user_id && !relaxed) {
+      const count = creatorCounts.get(row.creator_x_user_id) ?? 0;
       if (count >= maxCreator) return false;
     }
     if (row.primary_event_id && !relaxed) {
@@ -177,8 +177,8 @@ export function enforceDiversity<T extends DiversityRow>(
   const take = (candidate: RelatedCandidate<T>) => {
     const { row, reason } = candidate;
     seen.add(row.id);
-    if (row.creator_id) {
-      creatorCounts.set(row.creator_id, (creatorCounts.get(row.creator_id) ?? 0) + 1);
+    if (row.creator_x_user_id) {
+      creatorCounts.set(row.creator_x_user_id, (creatorCounts.get(row.creator_x_user_id) ?? 0) + 1);
     }
     if (row.primary_event_id) {
       eventCounts.set(

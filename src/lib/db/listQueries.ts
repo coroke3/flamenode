@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, or, sql } from "drizzle-orm";
-import { videos, videoEvents, xUsers } from "./schema";
+import { videos, videoEvents, videoStats, xUsers } from "./schema";
 import { creatorIconExpr, creatorNameExpr } from "./displayExpr";
 import { resolveMissingIcons } from "./iconResolution";
 import type { DB } from "./client";
@@ -29,9 +29,7 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
   const { q, sort = "new", eventId, limit = 24, offset = 0 } = params;
 
   const baseWhere = and(
-    eq(videos.status, "public"),
-    eq(videos.is_deleted, 0),
-    eq(videos.is_manual_hidden, 0),
+    eq(videos.visibility_status, "public"),
   );
 
   const filters = [baseWhere];
@@ -40,7 +38,7 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
     filters.push(
       or(
         sql`${videos.title} LIKE ${term} ESCAPE '\\'`,
-        sql`${videos.display_name} LIKE ${term} ESCAPE '\\'`,
+        sql`${videos.creator_display_name} LIKE ${term} ESCAPE '\\'`,
         sql`${videos.music} LIKE ${term} ESCAPE '\\'`,
       )!,
     );
@@ -50,7 +48,7 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
     sort === "old"
       ? asc(videos.scheduled_time)
       : sort === "score"
-        ? desc(videos.video_score)
+        ? desc(videoStats.score)
         : desc(videos.scheduled_time);
 
   if (eventId) {
@@ -61,14 +59,15 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
         youtube_video_id: videos.youtube_video_id,
         display_name: creatorNameExpr,
         icon_url: creatorIconExpr,
-        creator_id: videos.creator_id,
+        creator_x_user_id: videos.creator_x_user_id,
         primary_event_id: videos.primary_event_id,
         scheduled_time: videos.scheduled_time,
-        status: videos.status,
+        status: videos.visibility_status,
       })
       .from(videos)
       .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
-      .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+      .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
+      .leftJoin(videoStats, eq(videoStats.video_id, videos.id))
       .where(and(...filters, eq(videoEvents.event_id, eventId))!)
       .orderBy(orderBy)
       .limit(limit)
@@ -83,13 +82,14 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
       youtube_video_id: videos.youtube_video_id,
       display_name: creatorNameExpr,
       icon_url: creatorIconExpr,
-      creator_id: videos.creator_id,
+      creator_x_user_id: videos.creator_x_user_id,
       primary_event_id: videos.primary_event_id,
       scheduled_time: videos.scheduled_time,
-      status: videos.status,
+      status: videos.visibility_status,
     })
     .from(videos)
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
+    .leftJoin(videoStats, eq(videoStats.video_id, videos.id))
     .where(and(...filters)!)
     .orderBy(orderBy)
     .limit(limit)
@@ -101,9 +101,7 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
 export async function countPublicVideos(db: DB, params: ListVideoParams) {
   const { q, eventId } = params;
   const baseWhere = and(
-    eq(videos.status, "public"),
-    eq(videos.is_deleted, 0),
-    eq(videos.is_manual_hidden, 0),
+    eq(videos.visibility_status, "public"),
   );
   const filters = [baseWhere];
   if (q && q.trim()) {
@@ -111,7 +109,7 @@ export async function countPublicVideos(db: DB, params: ListVideoParams) {
     filters.push(
       or(
         sql`${videos.title} LIKE ${term} ESCAPE '\\'`,
-        sql`${videos.display_name} LIKE ${term} ESCAPE '\\'`,
+        sql`${videos.creator_display_name} LIKE ${term} ESCAPE '\\'`,
         sql`${videos.music} LIKE ${term} ESCAPE '\\'`,
       )!,
     );

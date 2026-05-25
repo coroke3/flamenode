@@ -80,12 +80,12 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
         db
           .select({ c: sql<number>`COUNT(*)` })
           .from(videosTable)
-          .where(eq(videosTable.status, "public")),
+          .where(eq(videosTable.visibility_status, "public")),
         db.select({ c: sql<number>`COUNT(*)` }).from(eventsTable),
         db
           .select({ c: sql<number>`COUNT(*)` })
           .from(videosTable)
-          .where(eq(videosTable.status, "pending")),
+          .where(eq(videosTable.visibility_status, "pending")),
         db
           .select({ c: sql<number>`COUNT(*)` })
           .from(xAccountLinkRequestsTable)
@@ -100,11 +100,11 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
             id: videosTable.id,
             title: videosTable.title,
             created_at: videosTable.created_at,
-            display_name: sql<string>`COALESCE(${xUsersTable.x_name}, ${videosTable.display_name}, ${videosTable.contact_x_id})`,
+            display_name: sql<string>`COALESCE(${xUsersTable.x_name}, ${videosTable.creator_display_name}, ${videosTable.creator_x_user_id})`,
           })
           .from(videosTable)
-          .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id))
-          .where(eq(videosTable.status, "pending"))
+          .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id))
+          .where(eq(videosTable.visibility_status, "pending"))
           .orderBy(desc(videosTable.created_at))
           .limit(8),
         db

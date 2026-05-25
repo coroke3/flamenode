@@ -1,6 +1,6 @@
 /**
  * 作品編集・イベント編集の section permission key。
- * `eventCollaboratorPermissions.permission_key` に格納される文字列の取りうる値を
+ * `eventStaffPermissions.permission_key` に格納される文字列の取りうる値を
  * 型で固定するためのリテラル union。
  *
  * canEditVideo / canEditEvent の requiredKey はこの型を必須に取り、
@@ -18,7 +18,7 @@ export type VideoEditSectionKey =
   | "video.status"
   | "video.chapter_admin"
   // Legacy / admin UI permission keys. Keep these accepted so
-  // event_collaborator_permissions created before the section-key cleanup still work.
+  // Old permission keys are still accepted so migrated event_staff_permissions keep working.
   | "videos.title"
   | "videos.music_credit"
   | "videos.members"

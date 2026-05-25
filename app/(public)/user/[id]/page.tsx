@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { and, desc, eq, ne, or, sql } from "drizzle-orm";
 import styles from "./page.module.css";
 import { getDatabase, withDatabase } from "@/lib/cloudflare";
-import { customPages, videos, videoMembers, xUsers } from "@/lib/db/schema";
+import { videos, videoMembers, xUsers } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 import { normalizeXId } from "@/lib/utils/xid";
@@ -42,16 +42,14 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     if (u[0]) return { title: u[0].x_name };
 
     const fallback = await db
-      .select({ name: sql<string>`COALESCE(${videos.display_name}, ${videos.contact_x_id})` })
+      .select({ name: sql<string>`COALESCE(${videos.creator_display_name}, ${videos.creator_x_user_id})` })
       .from(videos)
       .where(
         and(
-          eq(videos.status, "public"),
-          eq(videos.is_deleted, 0),
-          eq(videos.is_manual_hidden, 0),
+          eq(videos.visibility_status, "public"),
           or(
-            sql`lower(${videos.creator_id}) = ${id}`,
-            sql`lower(${videos.contact_x_id}) = ${id}`,
+            sql`lower(${videos.creator_x_user_id}) = ${id}`,
+            sql`lower(${videos.creator_x_user_id}) = ${id}`,
           )!,
         )!,
       )
@@ -88,18 +86,16 @@ export default async function UserPage({
       .where(sql`lower(${xUsers.id}) = ${id}`)
       .limit(1);
     const publicVideoBase = and(
-      eq(videos.status, "public"),
-      eq(videos.is_deleted, 0),
-      eq(videos.is_manual_hidden, 0),
+      eq(videos.visibility_status, "public"),
     );
 
     const fallbackUserRows = userRow[0]
       ? []
       : await db
           .select({
-            id: videos.contact_x_id,
-            x_name: sql<string>`COALESCE(${videos.display_name}, ${videos.contact_x_id})`,
-            icon_url: videos.icon_url,
+            id: sql<string>`${videos.creator_x_user_id}`,
+            x_name: sql<string>`COALESCE(${videos.creator_display_name}, ${videos.creator_x_user_id})`,
+            icon_url: videos.creator_icon_url,
             profile_text: sql<string | null>`NULL`,
             youtube_channel_url: sql<string | null>`NULL`,
           })
@@ -108,8 +104,8 @@ export default async function UserPage({
             and(
               publicVideoBase,
               or(
-                sql`lower(${videos.creator_id}) = ${id}`,
-                sql`lower(${videos.contact_x_id}) = ${id}`,
+                sql`lower(${videos.creator_x_user_id}) = ${id}`,
+                sql`lower(${videos.creator_x_user_id}) = ${id}`,
               )!,
             )!,
           )
@@ -136,8 +132,8 @@ export default async function UserPage({
     const ownWhere = and(
       publicVideoBase,
       or(
-        sql`lower(${videos.creator_id}) = ${id}`,
-        sql`lower(${videos.contact_x_id}) = ${id}`,
+        sql`lower(${videos.creator_x_user_id}) = ${id}`,
+        sql`lower(${videos.creator_x_user_id}) = ${id}`,
       )!,
     )!;
     const ownVideosRaw = await db
@@ -145,12 +141,12 @@ export default async function UserPage({
         id: videos.id,
         title: videos.title,
         youtube_video_id: videos.youtube_video_id,
-        display_name: videos.display_name,
-        icon_url: videos.icon_url,
-        creator_id: videos.creator_id,
+        display_name: videos.creator_display_name,
+        icon_url: videos.creator_icon_url,
+        creator_x_user_id: videos.creator_x_user_id,
         primary_event_id: videos.primary_event_id,
         scheduled_time: videos.scheduled_time,
-        status: videos.status,
+        status: videos.visibility_status,
       })
       .from(videos)
       .where(ownWhere)
@@ -175,25 +171,25 @@ export default async function UserPage({
     const collabWhere = and(
       publicVideoBase,
       eq(videoMembers.x_user_id, id),
-      ne(videos.creator_id, id),
+      ne(videos.creator_x_user_id, id),
     )!;
     const collabVideos = (await db
       .select({
         id: videos.id,
         title: videos.title,
         youtube_video_id: videos.youtube_video_id,
-        display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
+        display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.creator_display_name}, ${videos.creator_x_user_id})`,
         icon_url: sql<
           string | null
-        >`COALESCE(${videos.icon_url}, ${xUsers.icon_url})`,
-        creator_id: videos.creator_id,
+        >`COALESCE(${videos.creator_icon_url}, ${xUsers.icon_url})`,
+        creator_x_user_id: videos.creator_x_user_id,
         primary_event_id: videos.primary_event_id,
         scheduled_time: videos.scheduled_time,
-        status: videos.status,
+        status: videos.visibility_status,
       })
       .from(videos)
       .innerJoin(videoMembers, eq(videos.id, videoMembers.video_id))
-      .leftJoin(xUsers, sql`lower(${xUsers.id}) = lower(${videos.creator_id})`)
+      .leftJoin(xUsers, sql`lower(${xUsers.id}) = lower(${videos.creator_x_user_id})`)
       .where(collabWhere)
       .orderBy(desc(videos.scheduled_time))
       .limit(collabPaging.pageSize)
@@ -208,26 +204,17 @@ export default async function UserPage({
     )[0];
     const collabTotal = Number(collabCountRow?.c ?? 0);
 
-    const portfolio = (
-      await db
-        .select({ id: customPages.id })
-        .from(customPages)
-        .where(and(eq(customPages.x_user_id, user.id), eq(customPages.is_published, 1))!)
-        .limit(1)
-    )[0];
-
     return {
       user,
       ownVideos,
       ownTotal,
       collabVideos,
       collabTotal,
-      portfolio,
     };
   });
 
   if (!bundle) notFound();
-  const { user, ownVideos, ownTotal, collabVideos, collabTotal, portfolio } =
+  const { user, ownVideos, ownTotal, collabVideos, collabTotal } =
     bundle;
   const ownTotalPages = totalPagesFor(ownTotal, worksPaging.pageSize);
   const collabTotalPages = totalPagesFor(collabTotal, collabPaging.pageSize);
@@ -287,21 +274,12 @@ export default async function UserPage({
                 YouTube
               </a>
             ) : null}
-            {portfolio ? (
-              <Link
-                href={`/user/${user.id}/portfolio`}
-                className="fn-btn fn-btn-primary fn-btn-sm"
-              >
-                <Icon name="grid" size={12} aria-hidden />
-                Portfolio
-              </Link>
-            ) : null}
-            <Link
+            <a
               href={`/list?q=${encodeURIComponent(profileName)}`}
               className="fn-btn fn-btn-ghost fn-btn-sm"
             >
               関連作品
-            </Link>
+            </a>
           </div>
         </div>
       </section>

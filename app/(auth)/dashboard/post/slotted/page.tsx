@@ -130,9 +130,17 @@ export default async function SlottedPostPage({
             isAcceptingEntries(event) &&
             event.allow_user_video_event_links === 1,
         )
-        .map((event) => ({ id: event.id, title: event.title })),
+        .map((event) => ({
+          id: event.id,
+          title: event.title,
+          video_form_settings_json: event.video_form_settings_json,
+        })),
     );
-  const slotEventOption = { id: ev.id, title: ev.title };
+  const slotEventOption = {
+    id: ev.id,
+    title: ev.title,
+    video_form_settings_json: ev.video_form_settings_json,
+  };
   const eventOptions = acceptingEvents.some((o) => o.id === ev.id)
     ? acceptingEvents
     : [slotEventOption, ...acceptingEvents];
@@ -224,7 +232,7 @@ export default async function SlottedPostPage({
         xIdOptions={xIdOptions}
         activeXId={activeX ?? undefined}
         initial={{
-          contact_x_id: activeX ?? undefined,
+          creator_x_user_id: activeX ?? undefined,
           display_name: slot.display_name ?? xRow?.x_name ?? user.name,
           icon_url: xRow?.icon_url ?? user.image ?? undefined,
           profile_text: xRow?.profile_text ?? undefined,

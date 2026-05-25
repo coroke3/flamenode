@@ -14,8 +14,9 @@ import {
   videos,
   videoEvents,
   videoInteractions,
-  videoMemberChapters,
   videoMembers,
+  videoStats,
+  videoYoutubeMetadata,
   xUsers,
   xUserIcons,
 } from "@/lib/db/schema";
@@ -27,6 +28,11 @@ import { generateId } from "@/lib/utils/id";
 import { detectSupportedImageUpload } from "@/lib/utils/imageUpload";
 import { normalizeXId } from "@/lib/utils/xid";
 import { normalizeHttpUrl } from "@/lib/utils/url";
+import { resolveStagePermissionFieldFromJson } from "@/lib/video/formSettings";
+import {
+  getVideoSoftwareLabel,
+  replaceVideoSoftwareLabels,
+} from "@/lib/db/software";
 
 /**
  * 作品アイコン URL の正規化。
@@ -47,11 +53,11 @@ function normalizeIconUrl(raw: unknown): string | null {
 }
 
 // posting/youtube-id-and-active-x:
-// contact_x_id は server 側では Active X ID から導出するため、
+// creator_x_user_id は server 側では Active X ID から導出するため、
 // form 入力は optional として受け取り、投稿主体としては信頼しない。
 const videoFormSchema = z.object({
   display_name: z.string().trim().min(1).max(80),
-  contact_x_id: z.string().trim().max(32).optional().nullable(),
+  creator_x_user_id: z.string().trim().max(32).optional().nullable(),
   icon_url: z.preprocess(
     (val) => normalizeIconUrl(val),
     z.string().trim().max(500).optional().nullable(),
@@ -78,6 +84,7 @@ const videoFormSchema = z.object({
   highlights: z.string().trim().max(1000).optional().nullable(),
   production_story: z.string().trim().max(1000).optional().nullable(),
   used_software: z.string().trim().max(200).optional().nullable(),
+  stage_permission: z.string().trim().max(1000).optional().nullable(),
   closing_comment: z.string().trim().max(500).optional().nullable(),
   is_collab: z
     .union([z.literal("on"), z.literal("true"), z.literal("false"), z.boolean()])
@@ -171,13 +178,13 @@ function parseMembersJson(raw: FormDataEntryValue | null): MemberInput[] {
  * 提出時の X ID プロフィール upsert。
  *
  * 注意: ここでは `x_users.icon_url` を**変更しない**。
- * 作品ごとのアイコンは `videos.icon_url` に保存し、ユーザー既定アイコン
+ * 作品ごとのアイコンは `videos.creator_icon_url` に保存し、ユーザー既定アイコン
  * (`x_users.icon_url`) は設定画面の `setXIdIcon` / `uploadXIdIcon` でのみ更新する。
  * 投稿フォームから渡されたアイコンが X ID 全体のアイコンを書き換える、という
  * 旧挙動 (作品アイコンを変えたつもりが全作品のアイコンに反映される) を防ぐ。
  *
  * 新規 xUsers レコードでも icon_url は null 固定にする。表示側では
- * `videos.icon_url` または過去作品からのフォールバックで解決される。
+ * `videos.creator_icon_url` または過去作品からのフォールバックで解決される。
  */
 async function ensureSubmissionXUser(
   db: NonNullable<ReturnType<typeof getDatabase>>,
@@ -236,6 +243,72 @@ function parseEventIdsFromForm(formData: FormData): string[] {
         .filter((s) => s.length > 0 && s.length <= 64),
     ),
   );
+}
+
+async function getStagePermissionFieldForEvents(
+  db: NonNullable<ReturnType<typeof getDatabase>>,
+  eventIds: readonly string[],
+) {
+  const ids = Array.from(new Set(eventIds.filter(Boolean)));
+  if (ids.length === 0) return null;
+  const rows = await db
+    .select({ video_form_settings_json: eventsTable.video_form_settings_json })
+    .from(eventsTable)
+    .where(inArray(eventsTable.id, ids));
+  return resolveStagePermissionFieldFromJson(
+    rows.map((row) => row.video_form_settings_json),
+  );
+}
+
+function validateStagePermission(
+  raw: string | null | undefined,
+  field: Awaited<ReturnType<typeof getStagePermissionFieldForEvents>>,
+): string | null {
+  if (!field) return null;
+  const value = (raw ?? "").trim();
+  if (field.required && !value) return "";
+  return value || null;
+}
+
+async function ensureVideoDerivedRows(
+  db: NonNullable<ReturnType<typeof getDatabase>>,
+  args: {
+    videoId: string;
+    youtubeVideoId: string | null;
+    now: number;
+  },
+): Promise<void> {
+  await db
+    .insert(videoStats)
+    .values({
+      video_id: args.videoId,
+      app_view_count: 0,
+      app_like_count: 0,
+      trending_view_count_24h: 0,
+      score: 0,
+      updated_at: args.now,
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(videoYoutubeMetadata)
+    .values({
+      video_id: args.videoId,
+      youtube_video_id: args.youtubeVideoId,
+      sync_status: "pending",
+      view_count: 0,
+      updated_at: args.now,
+    })
+    .onConflictDoNothing();
+
+  await db
+    .update(videoYoutubeMetadata)
+    .set({
+      youtube_video_id: args.youtubeVideoId,
+      sync_status: "pending",
+      updated_at: args.now,
+    })
+    .where(eq(videoYoutubeMetadata.video_id, args.videoId));
 }
 
 /**
@@ -341,7 +414,7 @@ async function syncVideoEvents(
 /**
  * 作品の **公開メンバー** (is_public_member = 1) のみを差し替える。
  *
- * 重要 (video_collaborators 統合に伴う安全策):
+ * 重要 (video_members.can_edit 統合に伴う安全策):
  *   - is_public_member = 0 の非公開編集者 (can_edit=1 の権限保有者) は **削除しない**。
  *     フォームから送られていないだけで「権限だけ持つ非公開メンバー」を消さない。
  *   - 既存 video_members の中で x_user_id が同じ行があれば、
@@ -375,16 +448,8 @@ async function replaceVideoMembers(
     }
   }
 
-  // 削除対象の video_members 行に紐づく video_member_chapters を先に削除する。
-  // 非公開編集者の video_member_chapters は元から無いはずだが、関係構造を維持するため
-  // 「これから削除する member 行に紐づくチャプター」だけを掃除する。
-  const publicExistingIds = publicExisting.map((m) => m.id);
-  if (publicExistingIds.length > 0) {
-    await db
-      .delete(videoMemberChapters)
-      .where(inArray(videoMemberChapters.video_member_id, publicExistingIds));
-  }
-
+  // メンバーチャプターは各 video_members.chapters_json に同居している。
+  // 公開メンバー行を差し替えると、その行の担当チャプターも一緒に差し替わる。
   // 公開行だけ DELETE。非公開編集者は残す。
   if (publicExisting.length > 0) {
     await db
@@ -417,12 +482,32 @@ async function replaceVideoMembers(
     }
     const carry = xid ? carryByXid.get(normalizeXId(xid)) : undefined;
     const newMemberId = generateId("vm");
+    const chapters = (m.chapters ?? [])
+      .map((ch, order) => {
+        const sec = parseChapterTime(ch.time);
+        if (sec === null) return null;
+        const label = ch.label.trim();
+        if (!label || label.length > 120) return null;
+        const note = ch.note.trim();
+        if (note.length > 1000) return null;
+        return { time_seconds: sec, label, note, order_index: order };
+      })
+      .filter(
+        (
+          ch,
+        ): ch is {
+          time_seconds: number;
+          label: string;
+          note: string;
+          order_index: number;
+        } => ch !== null,
+      );
     await db.insert(videoMembers).values({
       id: newMemberId,
       video_id: videoId,
       x_user_id: xid,
       name: m.name,
-      name_for_sort: m.name?.toLowerCase() ?? null,
+      chapters_json: chapters.length > 0 ? JSON.stringify(chapters) : null,
       role: m.role || null,
       comment: m.comment || null,
       order_index: i,
@@ -437,33 +522,11 @@ async function replaceVideoMembers(
     });
 
     // メンバーチャプターを保存。time が不正 (parseChapterTime null) なものはスキップ。
-    if (m.chapters && m.chapters.length > 0) {
-      for (let j = 0; j < m.chapters.length; j++) {
-        const ch = m.chapters[j];
-        const sec = parseChapterTime(ch.time);
-        if (sec === null) continue;
-        const label = ch.label.trim();
-        if (!label || label.length > 120) continue;
-        const note = ch.note.trim();
-        if (note.length > 1000) continue;
-        await db.insert(videoMemberChapters).values({
-          id: generateId("vmc"),
-          video_id: videoId,
-          video_member_id: newMemberId,
-          chapter_time: sec,
-          chapter_label: label,
-          note: note || null,
-          order_index: j,
-          created_at: now,
-          updated_at: now,
-        });
-      }
-    }
   }
 }
 
 /**
- * 作品保存時に videos.icon_url を x_user_icons の候補として記録する。
+ * 作品保存時に videos.creator_icon_url を x_user_icons の候補として記録する。
  *
  * 表示時のフォールバック (resolveXUserIcon / resolveMemberIcons) も同じ X ID の
  * 過去作品アイコンを使うが、本関数は明示的に「設定画面の候補リスト」に登録する。
@@ -528,10 +591,20 @@ export async function createFreeVideo(
   const id = generateId("v");
   const now = Math.floor(Date.now() / 1000);
   // posting/youtube-id-and-active-x: 投稿主体は Active X ID のみ。
-  // form 入力の contact_x_id は信頼せず、セッションの active_x_user_id だけを使う。
+  // form 入力の creator_x_user_id は信頼せず、セッションの active_x_user_id だけを使う。
   const activeX = normalizeXId(sessionUser.active_x_user_id);
   if (!activeX || !approvedXIds.includes(activeX)) {
     return { ok: false, message: "承認済みの X ID を選択してください。" };
+  }
+
+  const requestedEventIds = parseEventIdsFromForm(formData);
+  const stageField = await getStagePermissionFieldForEvents(db, requestedEventIds);
+  const stagePermission = validateStagePermission(
+    parsed.data.stage_permission,
+    stageField,
+  );
+  if (stageField?.required && stagePermission === '') {
+    return { ok: false, message: 'stage_permission is required.' };
   }
 
   // YouTube ID 重複チェック: 同じ youtube_video_id を持つ非削除・非 voided な動画が
@@ -543,8 +616,7 @@ export async function createFreeVideo(
       .where(
         and(
           eq(videos.youtube_video_id, youtubeId),
-          eq(videos.is_deleted, 0),
-          ne(videos.status, "voided"),
+          sql`${videos.visibility_status} NOT IN ('archived', 'voided')`,
         ),
       )
       .limit(1)
@@ -570,28 +642,23 @@ export async function createFreeVideo(
   try {
     await db.insert(videos).values({
       id,
-      owner_discord_user_id: userId,
-      creator_id: activeX || null,
-      submission_type: parsed.data.is_collab ? "collab" : "individual",
-      display_name: displayName,
-      contact_x_id: activeX || "anonymous",
+      submitted_by_discord_user_id: userId,
+      creator_x_user_id: activeX || null,
+      collaboration_type: parsed.data.is_collab ? "collab" : "individual",
+      source_type: "youtube",
+      creator_display_name: displayName,
       title: parsed.data.title,
       youtube_video_id: youtubeId,
-      icon_url: iconUrl,
-      status: "public",
+      creator_icon_url: iconUrl,
+      visibility_status: "public",
+      stage_permission: stagePermission,
       music: parsed.data.music ?? null,
       music_reference_url: parsed.data.music_reference_url ?? null,
       credit: parsed.data.credit ?? null,
       intro_comment: parsed.data.intro_comment ?? null,
       highlights: parsed.data.highlights ?? null,
       production_story: parsed.data.production_story ?? null,
-      used_software: parsed.data.used_software ?? null,
       closing_comment: parsed.data.closing_comment ?? null,
-      is_deleted: 0,
-      is_manual_hidden: 0,
-      like_count: 0,
-      youtube_view_count: 0,
-      video_score: 0,
       scheduling_type: "manual",
       scheduled_time: now,
       created_at: now,
@@ -604,14 +671,20 @@ export async function createFreeVideo(
     throw err;
   }
 
+  await ensureVideoDerivedRows(db, {
+    videoId: id,
+    youtubeVideoId: youtubeId,
+    now,
+  });
+
   const members = parsed.data.is_collab
     ? parseMembersJson(formData.get("members_json"))
     : [];
   await replaceVideoMembers(db, id, members);
+  await replaceVideoSoftwareLabels(db, id, parsed.data.used_software ?? null);
 
   // 所属イベント (video_events) を differential に同期する。
   // free 投稿でも複数イベントに紐付けできる。primary_event_id は別途扱う。
-  const requestedEventIds = parseEventIdsFromForm(formData);
   await syncVideoEvents(db, id, {
     requested: requestedEventIds,
     user: { id: userId, role: sessionUser.role ?? null },
@@ -670,7 +743,7 @@ export async function submitSlotVideo(
   if (!db) return { ok: false, message: "DB に接続できません。" };
 
   // posting/youtube-id-and-active-x: 提出主体は Active X ID のみ。
-  // form 入力の contact_x_id は信頼せず、セッションの active_x_user_id だけを使う。
+  // form 入力の creator_x_user_id は信頼せず、セッションの active_x_user_id だけを使う。
   const requestedX = normalizeXId(sessionUser.active_x_user_id);
   const slotOwnerWhere = requestedX
     ? or(
@@ -706,19 +779,28 @@ export async function submitSlotVideo(
     return { ok: false, message: "承認済みの X ID を選択してください。" };
   }
 
+  const slotStageField = await getStagePermissionFieldForEvents(db, [
+    slotRow.event_id,
+  ]);
+  const stagePermission = validateStagePermission(
+    parsed.data.stage_permission,
+    slotStageField,
+  );
+  if (slotStageField?.required && stagePermission === "") {
+    return { ok: false, message: "stage_permission is required." };
+  }
+
   // YouTube ID 重複チェック: 同じ youtube_video_id を持つ非削除・非 voided な動画が
   // 既に存在する場合は拒否する。update 経路では現在の video 自身を除外する。
   const youtubeIdDuplicateWhere = exists
     ? and(
         eq(videos.youtube_video_id, youtubeId),
-        eq(videos.is_deleted, 0),
-        ne(videos.status, "voided"),
+        sql`${videos.visibility_status} NOT IN ('archived', 'voided')`,
         ne(videos.id, videoId),
       )
     : and(
         eq(videos.youtube_video_id, youtubeId),
-        eq(videos.is_deleted, 0),
-        ne(videos.status, "voided"),
+        sql`${videos.visibility_status} NOT IN ('archived', 'voided')`,
       );
   const duplicateSlotVideo = (
     await db
@@ -747,19 +829,18 @@ export async function submitSlotVideo(
         .set({
           title: parsed.data.title,
           youtube_video_id: youtubeId,
-          creator_id: activeX || null,
-          contact_x_id: activeX || "anonymous",
-          display_name: parsed.data.display_name,
-          icon_url: parsed.data.icon_url || null,
+          creator_x_user_id: activeX || null,
+          creator_display_name: parsed.data.display_name,
+          creator_icon_url: parsed.data.icon_url || null,
+          stage_permission: stagePermission,
           music: parsed.data.music ?? null,
           music_reference_url: parsed.data.music_reference_url ?? null,
           credit: parsed.data.credit ?? null,
           intro_comment: parsed.data.intro_comment ?? null,
           highlights: parsed.data.highlights ?? null,
           production_story: parsed.data.production_story ?? null,
-          used_software: parsed.data.used_software ?? null,
           closing_comment: parsed.data.closing_comment ?? null,
-          submission_type: parsed.data.is_collab ? "collab" : "individual",
+          collaboration_type: parsed.data.is_collab ? "collab" : "individual",
           updated_at: now,
         })
         .where(eq(videos.id, videoId));
@@ -782,15 +863,16 @@ export async function submitSlotVideo(
 
       await db.insert(videos).values({
         id: videoId,
-        owner_discord_user_id: userId,
-        creator_id: activeX || null,
-        submission_type: parsed.data.is_collab ? "collab" : "individual",
-        display_name: displayName,
-        contact_x_id: activeX || "anonymous",
+        submitted_by_discord_user_id: userId,
+        creator_x_user_id: activeX || null,
+        collaboration_type: parsed.data.is_collab ? "collab" : "individual",
+        source_type: "youtube",
+        creator_display_name: displayName,
         title: parsed.data.title,
         youtube_video_id: youtubeId,
-        icon_url: iconUrl,
-        status: "pending",
+        creator_icon_url: iconUrl,
+        visibility_status: "pending",
+        stage_permission: stagePermission,
         primary_event_id: slotRow.event_id,
         scheduling_type: "slotted",
         scheduled_time: slotRow.start_time ?? now,
@@ -800,13 +882,7 @@ export async function submitSlotVideo(
         intro_comment: parsed.data.intro_comment ?? null,
         highlights: parsed.data.highlights ?? null,
         production_story: parsed.data.production_story ?? null,
-        used_software: parsed.data.used_software ?? null,
         closing_comment: parsed.data.closing_comment ?? null,
-        is_deleted: 0,
-        is_manual_hidden: 0,
-        like_count: 0,
-        youtube_view_count: 0,
-        video_score: 0,
         created_at: now,
         updated_at: now,
       });
@@ -821,6 +897,12 @@ export async function submitSlotVideo(
   // 所属イベントを同期する。スロットのイベントは alwaysInclude として固定。
   // フォームから event_ids が空で送られても slot.event_id は外れない。
   const requestedEventIds = parseEventIdsFromForm(formData);
+  await ensureVideoDerivedRows(db, {
+    videoId,
+    youtubeVideoId: youtubeId,
+    now,
+  });
+  await replaceVideoSoftwareLabels(db, videoId, parsed.data.used_software ?? null);
   await syncVideoEvents(db, videoId, {
     requested: requestedEventIds,
     alwaysInclude: [slotRow.event_id],
@@ -867,6 +949,7 @@ export async function submitSlotVideo(
 
   revalidatePath("/");
   revalidatePath(`/event/${slotRow.event_id}`);
+  revalidatePath(`/event/${slotRow.event_id}/slots`);
   revalidatePath("/dashboard");
   return {
     ok: true,
@@ -903,6 +986,7 @@ export async function updateVideo(
   )[0];
   if (!target) return { ok: false, message: "対象作品が見つかりません。" };
 
+  const targetSoftwareLabel = await getVideoSoftwareLabel(db, videoId);
   const raw = Object.fromEntries(formData);
   const setDefault = (key: string, value: string | null | undefined) => {
     if (!Object.prototype.hasOwnProperty.call(raw, key)) {
@@ -911,24 +995,25 @@ export async function updateVideo(
   };
   setDefault(
     "display_name",
-    target.display_name ?? target.contact_x_id ?? target.creator_id ?? "anonymous",
+    target.creator_display_name ?? target.creator_x_user_id ?? "anonymous",
   );
   setDefault("title", target.title);
   if (!Object.prototype.hasOwnProperty.call(raw, "youtube_url") && target.youtube_video_id) {
     raw.youtube_url = `https://youtu.be/${target.youtube_video_id}`;
   }
-  setDefault("contact_x_id", target.creator_id ?? target.contact_x_id);
-  setDefault("icon_url", target.icon_url);
+  setDefault("creator_x_user_id", target.creator_x_user_id);
+  setDefault("icon_url", target.creator_icon_url);
   setDefault("music", target.music);
   setDefault("music_reference_url", target.music_reference_url);
   setDefault("credit", target.credit);
   setDefault("intro_comment", target.intro_comment);
   setDefault("highlights", target.highlights);
   setDefault("production_story", target.production_story);
-  setDefault("used_software", target.used_software);
+  setDefault("used_software", targetSoftwareLabel);
+  setDefault("stage_permission", target.stage_permission);
   setDefault("closing_comment", target.closing_comment);
   if (!Object.prototype.hasOwnProperty.call(raw, "is_collab")) {
-    raw.is_collab = target.submission_type === "collab" ? "true" : "false";
+    raw.is_collab = target.collaboration_type === "collab" ? "true" : "false";
   }
 
   const parsed = videoFormSchema.safeParse(raw);
@@ -940,6 +1025,19 @@ export async function updateVideo(
   }
   const youtubeId = extractYoutubeId(parsed.data.youtube_url);
   if (!youtubeId) return { ok: false, message: "YouTube URL が解析できません。" };
+
+  const stageEventIds = parseEventIdsFromForm(formData);
+  if (target.primary_event_id && !stageEventIds.includes(target.primary_event_id)) {
+    stageEventIds.push(target.primary_event_id);
+  }
+  const editStageField = await getStagePermissionFieldForEvents(db, stageEventIds);
+  const nextStagePermission = validateStagePermission(
+    parsed.data.stage_permission,
+    editStageField,
+  );
+  if (editStageField?.required && nextStagePermission === "") {
+    return { ok: false, message: "stage_permission is required." };
+  }
 
   const editUser = { id: sessionUser.id, role: sessionUser.role ?? null };
   // クライアントが送ってきた privilegeMode を検証。不正値は "normal" にフォールバック。
@@ -980,16 +1078,16 @@ export async function updateVideo(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const existingX = normalizeXId(target.creator_id || target.contact_x_id);
+  const existingX = normalizeXId(target.creator_x_user_id);
 
   // 提出主体 X ID の変更は三重ゲート。サーバー側で明示的に解錠されない限り、
-  // form 入力の contact_x_id は完全に無視して既存値を維持する。
+  // form 入力の creator_x_user_id は完全に無視して既存値を維持する。
   // 解錠条件:
   //   1) sessionUser.role === "admin"
   //   2) privilegeMode === "admin" (URL に ?privileged=admin が付いた状態で開いた編集)
   //   3) form に `allow_submitter_change=1` が含まれている (UI で明示チェック)
   //   4) canEditIdentity
-  // CLAUDE.md 方針: フロントだけで権限を守らない / 提出主体は creator_id ベース。
+  // CLAUDE.md 方針: フロントだけで権限を守らない / 提出主体は creator_x_user_id ベース。
   const submitterChangeRequested =
     String(formData.get("allow_submitter_change") ?? "").trim() === "1";
   const allowSubmitterChange =
@@ -997,7 +1095,7 @@ export async function updateVideo(
     sessionUser.role === "admin" &&
     privilegeMode === "admin" &&
     canEditIdentity;
-  const requestedX = normalizeXId(parsed.data.contact_x_id);
+  const requestedX = normalizeXId(parsed.data.creator_x_user_id);
 
   let nextCreatorX: string;
   if (allowSubmitterChange) {
@@ -1015,8 +1113,8 @@ export async function updateVideo(
 
   if (
     !canEditIdentity &&
-    (changed(parsed.data.display_name, target.display_name) ||
-      changed(parsed.data.icon_url, target.icon_url))
+    (changed(parsed.data.display_name, target.creator_display_name) ||
+      changed(parsed.data.icon_url, target.creator_icon_url))
   ) {
     return { ok: false, message: "提出者情報を編集する権限がありません。" };
   }
@@ -1048,14 +1146,15 @@ export async function updateVideo(
     (changed(parsed.data.intro_comment, target.intro_comment) ||
       changed(parsed.data.highlights, target.highlights) ||
       changed(parsed.data.production_story, target.production_story) ||
-      changed(parsed.data.used_software, target.used_software) ||
+      changed(parsed.data.used_software, targetSoftwareLabel) ||
+      changed(parsed.data.stage_permission, target.stage_permission) ||
       changed(parsed.data.closing_comment, target.closing_comment))
   ) {
     return { ok: false, message: "紹介文・振り返り項目を編集する権限がありません。" };
   }
   if (
     !canEditMembers &&
-    parsed.data.is_collab !== (target.submission_type === "collab")
+    parsed.data.is_collab !== (target.collaboration_type === "collab")
   ) {
     return { ok: false, message: "合作メンバーを編集する権限がありません。" };
   }
@@ -1069,8 +1168,7 @@ export async function updateVideo(
         .where(
           and(
             eq(videos.youtube_video_id, youtubeId),
-            eq(videos.is_deleted, 0),
-            ne(videos.status, "voided"),
+            sql`${videos.visibility_status} NOT IN ('archived', 'voided')`,
             ne(videos.id, videoId),
           ),
         )
@@ -1101,16 +1199,17 @@ export async function updateVideo(
       .set({
         title: canEditBasics ? parsed.data.title : target.title,
         youtube_video_id: canEditYoutube ? youtubeId : target.youtube_video_id,
-        // creator_id / contact_x_id は allowSubmitterChange を満たした場合のみ書き換える。
+        // creator_x_user_id / creator_x_user_id は allowSubmitterChange を満たした場合のみ書き換える。
         // 通常編集 (admin であっても unlock していない場合) では既存値を保持する。
-        creator_id: allowSubmitterChange
+        creator_x_user_id: allowSubmitterChange
           ? nextCreatorX || null
-          : target.creator_id,
-        contact_x_id: allowSubmitterChange
-          ? nextCreatorX || "anonymous"
-          : target.contact_x_id,
-        display_name: canEditIdentity ? parsed.data.display_name : target.display_name,
-        icon_url: canEditIdentity ? parsed.data.icon_url || null : target.icon_url,
+          : target.creator_x_user_id,
+        creator_display_name: canEditIdentity
+          ? parsed.data.display_name
+          : target.creator_display_name,
+        creator_icon_url: canEditIdentity
+          ? parsed.data.icon_url || null
+          : target.creator_icon_url,
         music: canEditCredits ? parsed.data.music ?? null : target.music,
         music_reference_url: canEditCredits
           ? parsed.data.music_reference_url ?? null
@@ -1123,17 +1222,17 @@ export async function updateVideo(
         production_story: canEditDescriptions
           ? parsed.data.production_story ?? null
           : target.production_story,
-        used_software: canEditDescriptions
-          ? parsed.data.used_software ?? null
-          : target.used_software,
+        stage_permission: canEditDescriptions
+          ? nextStagePermission
+          : target.stage_permission,
         closing_comment: canEditDescriptions
           ? parsed.data.closing_comment ?? null
           : target.closing_comment,
-        submission_type: canEditMembers
+        collaboration_type: canEditMembers
           ? parsed.data.is_collab
             ? "collab"
             : "individual"
-          : target.submission_type,
+          : target.collaboration_type,
         updated_at: now,
       })
       .where(eq(videos.id, videoId));
@@ -1142,6 +1241,18 @@ export async function updateVideo(
       return { ok: false, message: "この YouTube 動画は既に登録されています。" };
     }
     throw err;
+  }
+
+  if (canEditYoutube) {
+    await ensureVideoDerivedRows(db, {
+      videoId,
+      youtubeVideoId: youtubeId,
+      now,
+    });
+  }
+
+  if (canEditDescriptions) {
+    await replaceVideoSoftwareLabels(db, videoId, parsed.data.used_software ?? null);
   }
 
   if (canEditMembers) {
@@ -1179,36 +1290,39 @@ export async function updateVideo(
   // 差分表示 (AuditDiffDetail) で「どのキーが変わったか」を一目で出すために必要。
   const auditPick = (
     v: typeof target,
-    overrides?: Partial<typeof target>,
+    overrides?: Partial<typeof target> & { used_software?: string | null },
   ) => {
-    const src = overrides ? { ...v, ...overrides } : v;
+    const src = (overrides ? { ...v, ...overrides } : v) as typeof target & {
+      used_software?: string | null;
+    };
     return {
       title: src.title,
       youtube_video_id: src.youtube_video_id,
-      creator_id: src.creator_id,
-      contact_x_id: src.contact_x_id,
-      display_name: src.display_name,
-      icon_url: src.icon_url,
+      creator_x_user_id: src.creator_x_user_id,
+      display_name: src.creator_display_name,
+      icon_url: src.creator_icon_url,
       music: src.music,
       music_reference_url: src.music_reference_url,
       credit: src.credit,
       intro_comment: src.intro_comment,
       highlights: src.highlights,
       production_story: src.production_story,
-      used_software: src.used_software,
+      used_software: targetSoftwareLabel,
+      stage_permission: src.stage_permission,
       closing_comment: src.closing_comment,
-      submission_type: src.submission_type,
+      collaboration_type: src.collaboration_type,
     };
   };
   const afterSnapshot = auditPick(target, {
     title: canEditBasics ? parsed.data.title : target.title,
     youtube_video_id: canEditYoutube ? youtubeId : target.youtube_video_id,
-    creator_id: allowSubmitterChange ? nextCreatorX || null : target.creator_id,
-    contact_x_id: allowSubmitterChange
-      ? nextCreatorX || "anonymous"
-      : target.contact_x_id,
-    display_name: canEditIdentity ? parsed.data.display_name : target.display_name,
-    icon_url: canEditIdentity ? parsed.data.icon_url || null : target.icon_url,
+    creator_x_user_id: allowSubmitterChange ? nextCreatorX || null : target.creator_x_user_id,
+    creator_display_name: canEditIdentity
+      ? parsed.data.display_name
+      : target.creator_display_name,
+    creator_icon_url: canEditIdentity
+      ? parsed.data.icon_url || null
+      : target.creator_icon_url,
     music: canEditCredits ? parsed.data.music ?? null : target.music,
     music_reference_url: canEditCredits
       ? parsed.data.music_reference_url ?? null
@@ -1225,15 +1339,18 @@ export async function updateVideo(
       : target.production_story,
     used_software: canEditDescriptions
       ? parsed.data.used_software ?? null
-      : target.used_software,
+      : targetSoftwareLabel,
+    stage_permission: canEditDescriptions
+      ? nextStagePermission
+      : target.stage_permission,
     closing_comment: canEditDescriptions
       ? parsed.data.closing_comment ?? null
       : target.closing_comment,
-    submission_type: canEditMembers
+    collaboration_type: canEditMembers
       ? parsed.data.is_collab
         ? "collab"
         : "individual"
-      : target.submission_type,
+      : target.collaboration_type,
   });
   await db.insert(historyLogs).values({
       table_name: "videos",
@@ -1262,7 +1379,10 @@ export async function updateVideo(
   revalidatePath(`/${target.youtube_video_id ?? videoId}`);
   if (canEditYoutube) revalidatePath(`/${youtubeId}`);
   revalidatePath("/list");
-  if (target.primary_event_id) revalidatePath(`/event/${target.primary_event_id}`);
+  if (target.primary_event_id) {
+    revalidatePath(`/event/${target.primary_event_id}`);
+    revalidatePath(`/event/${target.primary_event_id}/slots`);
+  }
   revalidatePath("/dashboard");
   return {
     ok: true,
@@ -1305,13 +1425,13 @@ export async function updateVideoMembersAdmin(
 
   const isCollab = formDataBoolean(formData, "is_collab");
   const members = isCollab ? parseMembersJson(formData.get("members_json")) : [];
-  const nextSubmissionType = members.length > 0 || isCollab ? "collab" : "individual";
+  const nextCollaborationType = members.length > 0 || isCollab ? "collab" : "individual";
   const now = Math.floor(Date.now() / 1000);
 
   await db
     .update(videos)
     .set({
-      submission_type: nextSubmissionType,
+      collaboration_type: nextCollaborationType,
       updated_at: now,
     })
     .where(eq(videos.id, videoId));
@@ -1322,10 +1442,10 @@ export async function updateVideoMembersAdmin(
     record_id: videoId,
     action: "UPDATE",
     before_data: JSON.stringify({
-      submission_type: target.submission_type,
+      collaboration_type: target.collaboration_type,
     }),
     after_data: JSON.stringify({
-      submission_type: nextSubmissionType,
+      collaboration_type: nextCollaborationType,
       member_count: members.length,
       source: "admin_video_members",
     }),
@@ -1339,7 +1459,10 @@ export async function updateVideoMembersAdmin(
   revalidatePath(`/dashboard/edit/${videoId}`);
   revalidatePath(`/${target.youtube_video_id ?? videoId}`);
   revalidatePath("/list");
-  if (target.primary_event_id) revalidatePath(`/event/${target.primary_event_id}`);
+  if (target.primary_event_id) {
+    revalidatePath(`/event/${target.primary_event_id}`);
+    revalidatePath(`/event/${target.primary_event_id}/slots`);
+  }
 
   return {
     ok: true,
@@ -1402,12 +1525,12 @@ export async function toggleVideoInteraction(
       // 同時いいね・解除のレースを避けるため DB 側で atomic に減算する。
       // max(0, ...) で 0 未満に下がらないようにし、初期 NULL も coalesce で吸収する。
       await db
-        .update(videos)
+        .update(videoStats)
         .set({
-          like_count: sql<number>`max(0, coalesce(${videos.like_count}, 0) - 1)`,
+          app_like_count: sql<number>`max(0, coalesce(${videoStats.app_like_count}, 0) - 1)`,
           updated_at: now,
         })
-        .where(eq(videos.id, videoId));
+        .where(eq(videoStats.video_id, videoId));
     }
     revalidatePath(`/${target.youtube_video_id ?? videoId}`);
     return { ok: true, active: false, videoId };
@@ -1434,12 +1557,12 @@ export async function toggleVideoInteraction(
   if (kind === "like") {
     // 同時いいねのレースを避けるため DB 側で atomic に加算する。
     await db
-      .update(videos)
+      .update(videoStats)
       .set({
-        like_count: sql<number>`coalesce(${videos.like_count}, 0) + 1`,
+        app_like_count: sql<number>`coalesce(${videoStats.app_like_count}, 0) + 1`,
         updated_at: now,
       })
-      .where(eq(videos.id, videoId));
+      .where(eq(videoStats.video_id, videoId));
   }
   revalidatePath(`/${target.youtube_video_id ?? videoId}`);
   return { ok: true, active: true, videoId };
@@ -1450,7 +1573,7 @@ export async function toggleVideoInteraction(
  *
  * 設定画面の `uploadXIdIcon` と異なり、**`x_users.icon_url` を変更しない**。
  * 投稿フォームから呼ばれた場合、アップロードされたファイルは R2 に保存され、
- * `/api/media/...` URL が返却される。呼び出し側はこの URL を `videos.icon_url` の
+ * `/api/media/...` URL が返却される。呼び出し側はこの URL を `videos.creator_icon_url` の
  * 値としてフォームに反映する想定。同時に `x_user_icons` に source_type="manual"
  * の候補として保存し、次回以降の作品投稿時に再利用できるようにする。
  *

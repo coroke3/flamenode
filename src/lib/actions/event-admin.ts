@@ -10,6 +10,7 @@ import { events, historyLogs } from "@/lib/db/schema";
 import { parseJstDatetimeLocal } from "@/lib/utils/dateInput";
 import { generateId } from "@/lib/utils/id";
 import { normalizeHttpUrl } from "@/lib/utils/url";
+import { DEFAULT_STAGE_PERMISSION_FIELD } from "@/lib/video/formSettings";
 
 export interface EventActionResult {
   ok: boolean;
@@ -48,6 +49,11 @@ const eventSchema = z.object({
     .max(2000)
     .optional()
     .nullable(),
+  stage_permission_enabled: z.coerce.number().min(0).max(1).default(0),
+  stage_permission_required: z.coerce.number().min(0).max(1).default(0),
+  stage_permission_label: z.string().trim().max(120).optional().nullable(),
+  stage_permission_description: z.string().trim().max(1000).optional().nullable(),
+  stage_permission_placeholder: z.string().trim().max(500).optional().nullable(),
   max_slots_per_video: z.coerce.number().min(1).max(20).default(1),
   max_consecutive_slots_per_entry: z.coerce.number().min(1).max(20).default(3),
   slot_part_gap_minutes: z.coerce.number().min(1).max(1440).default(30),
@@ -59,6 +65,24 @@ const eventSchema = z.object({
 
 function parseDateInput(raw: string | null | undefined): number | null {
   return parseJstDatetimeLocal(raw);
+}
+
+function buildVideoFormSettingsJson(data: z.infer<typeof eventSchema>): string {
+  return JSON.stringify({
+    stage_permission: {
+      enabled: data.stage_permission_enabled === 1,
+      required: data.stage_permission_required === 1,
+      label:
+        data.stage_permission_label?.trim() ||
+        DEFAULT_STAGE_PERMISSION_FIELD.label,
+      description:
+        data.stage_permission_description?.trim() ||
+        DEFAULT_STAGE_PERMISSION_FIELD.description,
+      placeholder:
+        data.stage_permission_placeholder?.trim() ||
+        DEFAULT_STAGE_PERMISSION_FIELD.placeholder,
+    },
+  });
 }
 
 async function requireAdmin(): Promise<
@@ -110,6 +134,7 @@ export async function createEvent(
     allow_user_video_edits: data.allow_user_video_edits,
     user_video_edit_permission_keys_json:
       data.user_video_edit_permission_keys_json ?? null,
+    video_form_settings_json: buildVideoFormSettingsJson(data),
     start_time: parseDateInput(data.start_time),
     end_time: parseDateInput(data.end_time),
     entry_start_time: parseDateInput(data.entry_start_time),
@@ -184,9 +209,10 @@ export async function updateEvent(
       is_entry_open: data.is_entry_open,
       is_archived: data.is_archived,
       allow_user_video_event_links: data.allow_user_video_event_links,
-    allow_user_video_edits: data.allow_user_video_edits,
+      allow_user_video_edits: data.allow_user_video_edits,
     user_video_edit_permission_keys_json:
       data.user_video_edit_permission_keys_json ?? null,
+      video_form_settings_json: buildVideoFormSettingsJson(data),
       start_time: parseDateInput(data.start_time),
       end_time: parseDateInput(data.end_time),
       entry_start_time: parseDateInput(data.entry_start_time),

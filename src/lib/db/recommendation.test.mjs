@@ -10,8 +10,8 @@ import {
   uniqueByVideoId,
 } from "./recommendation.ts";
 
-function row(id, creator_id = null, primary_event_id = null) {
-  return { id, creator_id, primary_event_id };
+function row(id, creator_x_user_id = null, primary_event_id = null) {
+  return { id, creator_x_user_id, primary_event_id };
 }
 
 test("clampRelatedLimit clamps to 15-30 with default 18", () => {

@@ -18,9 +18,10 @@ const STATUS_VALUES = [
   "draft",
   "pending",
   "public",
-  "unlisted",
+  "limited",
   "private",
-  "x_reapply_required",
+  "hidden",
+  "archived",
   "voided",
 ] as const;
 const REASON_CATEGORIES = [
@@ -43,7 +44,7 @@ export function AdminVideoStatusForm({
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState(false);
 
-  const requiresReason = status === "voided" || status === "x_reapply_required";
+  const requiresReason = status === "voided";
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();

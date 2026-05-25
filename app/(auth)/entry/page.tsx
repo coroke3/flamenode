@@ -151,7 +151,7 @@ export default async function EntryPage({
               activeEvents.map((ev) => (
                 <Link
                   key={ev.id}
-                  href={`/event/${ev.id}#slot`}
+                  href={`/event/${ev.id}/slots`}
                   className={styles.eventCard}
                   style={
                     ev.accent_color
@@ -184,7 +184,7 @@ export default async function EntryPage({
           </div>
           {isLoggedIn && activeEvents.length === 1 ? (
             <div className={styles.btnRow} style={{ marginTop: 12 }}>
-              <Link href={`/event/${activeEvents[0].id}#slot`} className="fn-btn fn-btn-primary">
+              <Link href={`/event/${activeEvents[0].id}/slots`} className="fn-btn fn-btn-primary">
                 <Icon name="calendar" size={14} aria-hidden />
                 スロットを確保する
               </Link>

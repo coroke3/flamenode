@@ -27,6 +27,7 @@ import { ChapterComposer } from "@/components/video/ChapterComposer";
 import { Icon } from "@/components/ui/Icon";
 import { youtubeWatchUrl } from "@/lib/youtube/id";
 import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
+import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
 
 export const metadata: Metadata = { title: "作品を編集" };
@@ -261,7 +262,7 @@ export default async function EditVideoPage({
     role: m.role ?? "",
     comment: m.comment ?? "",
   }));
-  const creatorX = video.contact_x_id || video.creator_id;
+  const creatorX = video.creator_x_user_id || video.creator_x_user_id;
   const xRow = creatorX
     ? (
         await db
@@ -277,6 +278,7 @@ export default async function EditVideoPage({
     .orderBy(asc(xUsersTable.x_name))
     .limit(2000);
   const softwareSuggestions = await getUsedSoftwareSuggestions(db);
+  const softwareLabel = await getVideoSoftwareLabel(db, video.id);
   // 編集対象作品の主体 X ID に紐づく候補を出す。
   // admin が他者作品を編集する場合も creator/contact 由来の候補が出る。
   const iconCandidates = creatorX ? await getXIconCandidates(db, creatorX) : [];
@@ -296,18 +298,29 @@ export default async function EditVideoPage({
     .select()
     .from(eventsTable)
     .where(eq(eventsTable.is_archived, 0));
-  const acceptingEventMap = new Map<string, { id: string; title: string }>();
+  const acceptingEventMap = new Map<
+    string,
+    { id: string; title: string; video_form_settings_json?: string | null }
+  >();
   for (const ev of allEventRows) {
     // 受付中 + 「一般ユーザーの追加紐付け = 許可」のイベントを候補に出す。
     // 既に紐付いているイベントは下の attached 補完で必ず候補に含まれる。
     if (isAcceptingEntries(ev) && ev.allow_user_video_event_links === 1) {
-      acceptingEventMap.set(ev.id, { id: ev.id, title: ev.title });
+      acceptingEventMap.set(ev.id, {
+        id: ev.id,
+        title: ev.title,
+        video_form_settings_json: ev.video_form_settings_json,
+      });
     }
   }
   // 現在紐付いているイベントは受付状態を問わず候補に含める
   if (currentEventIds.length > 0) {
     const attached = await db
-      .select({ id: eventsTable.id, title: eventsTable.title })
+      .select({
+        id: eventsTable.id,
+        title: eventsTable.title,
+        video_form_settings_json: eventsTable.video_form_settings_json,
+      })
       .from(eventsTable)
       .where(inArray(eventsTable.id, currentEventIds));
     for (const ev of attached) acceptingEventMap.set(ev.id, ev);
@@ -503,7 +516,7 @@ export default async function EditVideoPage({
           }}
         >
           現在の状態:
-          <span className="fn-badge fn-badge-soft">{video.status}</span>
+          <span className="fn-badge fn-badge-soft">{video.visibility_status}</span>
           {video.youtube_video_id ? (
             <a
               href={youtubeWatchUrl(video.youtube_video_id)}
@@ -539,12 +552,12 @@ export default async function EditVideoPage({
         disabledSections={disabledSections}
         disabledFields={disabledFields}
         initial={{
-          // 表示名: 既存 video.display_name を優先、空ならその X ID の x_name にフォールバック。
+          // 表示名: 既存 video.creator_display_name を優先、空ならその X ID の x_name にフォールバック。
           // 紹介文 / YouTube / SNS は videos には保存されておらず x_users 側 (xRow) のみが正本。
           display_name:
-            video.display_name ?? xRow?.x_name ?? user.name ?? undefined,
-          contact_x_id: video.contact_x_id,
-          icon_url: video.icon_url ?? undefined,
+            video.creator_display_name ?? xRow?.x_name ?? user.name ?? undefined,
+          creator_x_user_id: video.creator_x_user_id ?? undefined,
+          icon_url: video.creator_icon_url ?? undefined,
           profile_text: xRow?.profile_text ?? undefined,
           youtube_channel_url: xRow?.youtube_channel_url ?? undefined,
           other_social_links: xRow?.other_social_links ?? undefined,
@@ -556,11 +569,12 @@ export default async function EditVideoPage({
           music_reference_url: video.music_reference_url ?? undefined,
           credit: video.credit ?? undefined,
           intro_comment: video.intro_comment ?? undefined,
-          used_software: video.used_software ?? undefined,
+          used_software: softwareLabel ?? undefined,
+          stage_permission: video.stage_permission ?? undefined,
           highlights: video.highlights ?? undefined,
           production_story: video.production_story ?? undefined,
           closing_comment: video.closing_comment ?? undefined,
-          is_collab: video.submission_type === "collab" || initialMembers.length > 0,
+          is_collab: video.collaboration_type === "collab" || initialMembers.length > 0,
           members: initialMembers,
           event_ids: currentEventIds,
         }}
@@ -595,7 +609,7 @@ export default async function EditVideoPage({
           </div>
           <div className="fn-card-body">
             <p style={{ color: "var(--text-muted)", lineHeight: 1.8, margin: 0 }}>
-              ローカルDBに video_collaborators テーブルがまだありません。
+              ローカルDBに video_members.can_edit がまだありません。
               npm.cmd run db:local-apply で migration を適用すると、この管理欄を使えます。
             </p>
           </div>
@@ -604,9 +618,9 @@ export default async function EditVideoPage({
 
       {canEditIdentity &&
       videoCollabTableAvailable &&
-      // 個人作品 (submission_type !== "collab") では合作メンバー編集権限の概念が不要。
+      // 個人作品 (collaboration_type !== "collab") では合作メンバー編集権限の概念が不要。
       // 既に collab 権限行があるレガシー作品もありうるため、その場合は引き続き表示する。
-      (video.submission_type === "collab" || videoCollabSubjects.length > 0) ? (
+      (video.collaboration_type === "collab" || videoCollabSubjects.length > 0) ? (
         <section className="fn-card" style={{ marginTop: 24 }}>
           <div className="fn-card-header">
             <h2 className="fn-card-title">参加者の編集権限</h2>

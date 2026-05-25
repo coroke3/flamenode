@@ -14,13 +14,18 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   events,
-  eventEditors,
+  eventStaff,
+  eventStaffPermissions,
   historyLogs,
   videoEvents,
   videoMembers,
+  videoStats,
+  videoYoutubeMetadata,
   videos,
   xUsers,
 } from "@/lib/db/schema";
+import { COLLABORATOR_PERMISSION_KEYS } from "@/lib/constants/collaborator-permissions";
+import { replaceVideoSoftwareLabels } from "@/lib/db/software";
 import {
   detectLegacyKind,
   normalizeEventInfo,
@@ -86,6 +91,112 @@ function emptyCounts(): LegacyImportResult["counts"] {
  * `IN (...)` は小さめのチャンクに分割する。
  */
 export const SQLITE_IN_CLAUSE_MAX = 32;
+
+type LegacyNormalizedVideo = NonNullable<LegacyVideoResult["video"]>;
+type VideoInsert = typeof videos.$inferInsert;
+
+function normalizeLegacyImportCustomAnswers(
+  raw: string | null,
+  declaredExperience: string | null,
+  primaryEventId: string | null,
+): string | null {
+  const scope = primaryEventId || "global";
+  const scoped: Record<string, Record<string, unknown>> = {};
+  let answers: Record<string, unknown> = {};
+
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        answers = parsed as Record<string, unknown>;
+      }
+    } catch {
+      answers.legacy_raw = raw;
+    }
+  }
+
+  if (declaredExperience) {
+    answers.declared_experience = declaredExperience;
+  }
+
+  if (Object.keys(answers).length === 0) return null;
+  scoped[scope] = answers;
+  return JSON.stringify(scoped);
+}
+
+function toVideoInsertValues(
+  vi: LegacyNormalizedVideo,
+  operatorDiscordId: string,
+  now: number,
+): VideoInsert {
+  return {
+    id: vi.id,
+    title: vi.title,
+    submitted_by_discord_user_id: operatorDiscordId,
+    creator_x_user_id: vi.creator_x_user_id,
+    creator_display_name: vi.display_name,
+    creator_display_name_yomi: vi.display_name_yomi,
+    creator_icon_url: vi.icon_url,
+    collaboration_type: vi.submission_type,
+    source_type: "youtube",
+    youtube_video_id: vi.youtube_video_id,
+    music: vi.music,
+    credit: vi.credit,
+    music_reference_url: vi.music_reference_url,
+    intro_comment: vi.intro_comment,
+    closing_comment: vi.closing_comment,
+    highlights: vi.highlights,
+    custom_answers: normalizeLegacyImportCustomAnswers(
+      vi.custom_answers,
+      vi.declared_experience,
+      vi.primary_event_id,
+    ),
+    stage_permission: vi.stage_permission,
+    primary_event_id: vi.primary_event_id,
+    scheduling_type: vi.scheduling_type,
+    scheduled_time: vi.scheduled_time,
+    visibility_status: vi.status,
+    created_at: vi.created_at ?? now,
+    updated_at: now,
+  };
+}
+
+async function ensureImportedVideoDerivedRows(
+  db: NonNullable<ReturnType<typeof getDatabase>>,
+  vi: LegacyNormalizedVideo,
+  now: number,
+): Promise<void> {
+  await db
+    .insert(videoStats)
+    .values({
+      video_id: vi.id,
+      app_view_count: 0,
+      app_like_count: 0,
+      trending_view_count_24h: 0,
+      score: 0,
+      updated_at: now,
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(videoYoutubeMetadata)
+    .values({
+      video_id: vi.id,
+      youtube_video_id: vi.youtube_video_id,
+      sync_status: "pending",
+      view_count: 0,
+      updated_at: now,
+    })
+    .onConflictDoNothing();
+
+  await db
+    .update(videoYoutubeMetadata)
+    .set({
+      youtube_video_id: vi.youtube_video_id,
+      updated_at: now,
+    })
+    .where(eq(videoYoutubeMetadata.video_id, vi.id));
+}
 
 // ============================================================
 // 入力分解
@@ -436,6 +547,8 @@ export async function applyLegacyImport(
     const exists = (
       await db.select({ id: videos.id }).from(videos).where(eq(videos.id, vi.id)).limit(1)
     )[0];
+    const usedSoftware = vi.used_software;
+    const videoValues = toVideoInsertValues(vi, operatorDiscordId, now);
 
     try {
       if (exists) {
@@ -443,8 +556,8 @@ export async function applyLegacyImport(
           counts.videos.skip += 1;
           continue;
         } else {
-          const patch: Partial<typeof vi> & { updated_at?: number } = {
-            ...vi,
+          const patch: Partial<typeof videoValues> & { updated_at?: number } = {
+            ...videoValues,
             updated_at: now,
           };
           if (strategyVideos === "merge") {
@@ -452,10 +565,10 @@ export async function applyLegacyImport(
               if (patch[k] == null || patch[k] === "") delete patch[k];
             }
           } else {
-            // update でも notNull カラム (created_at, contact_x_id 等) の null は除外
+            // update でも notNull カラム (created_at, creator_x_user_id 等) の null は除外
             if (patch.created_at == null) delete patch.created_at;
-            if (!patch.contact_x_id) delete patch.contact_x_id;
-            if (!patch.display_name) delete patch.display_name;
+            if (!patch.creator_x_user_id) delete patch.creator_x_user_id;
+            if (!patch.creator_display_name) delete patch.creator_display_name;
             if (!patch.title) delete patch.title;
           }
           await db
@@ -473,17 +586,19 @@ export async function applyLegacyImport(
         }
       } else {
         await db.insert(videos).values({
-          ...vi,
-          // owner_discord_user_id は notNull だが旧データには存在しない。
+          ...videoValues,
+          // submitted_by_discord_user_id は notNull だが旧データには存在しない。
           // 取り込みオペレータを暫定 owner として記録し、所有者本人の Discord 連携時に
           // x_account_link_requests / x_id_merge_requests で付け替える運用とする。
-          owner_discord_user_id: operatorDiscordId,
+          submitted_by_discord_user_id: operatorDiscordId,
           created_at: vi.created_at ?? now,
           updated_at: now,
         });
         counts.videos.create += 1;
         await insertVideoMembers(db, vi.id, v.members);
       }
+      await ensureImportedVideoDerivedRows(db, vi, now);
+      await replaceVideoSoftwareLabels(db, vi.id, usedSoftware);
 
       // video_events (m:n): legacy eventid may contain multiple comma-separated ids.
       // The first id is stored as videos.primary_event_id; all ids are linked here.
@@ -570,20 +685,27 @@ async function upsertEventEditors(
   if (editors.length === 0) return;
 
   if (mode === "update") {
-    await db.delete(eventEditors).where(eq(eventEditors.event_id, eventId));
+    await db.run(sql`
+      DELETE FROM event_staff_permissions
+      WHERE event_staff_id IN (
+        SELECT id FROM event_staff WHERE event_id = ${eventId}
+      )
+    `);
+    await db.delete(eventStaff).where(eq(eventStaff.event_id, eventId));
   }
 
   for (const ed of editors) {
+    const staffId = `legacy_es_${eventId}_${ed.x_user_id}`;
     try {
       const existing = mode === "merge"
         ? (
             await db
-              .select({ event_id: eventEditors.event_id })
-              .from(eventEditors)
+              .select({ id: eventStaff.id })
+              .from(eventStaff)
               .where(
                 and(
-                  eq(eventEditors.event_id, eventId),
-                  eq(eventEditors.x_user_id, ed.x_user_id),
+                  eq(eventStaff.event_id, eventId),
+                  eq(eventStaff.x_user_id, ed.x_user_id),
                 )!,
               )
               .limit(1)
@@ -592,15 +714,32 @@ async function upsertEventEditors(
       if (existing) continue;
 
       await db
-        .insert(eventEditors)
+        .insert(eventStaff)
         .values({
+          id: staffId,
           event_id: eventId,
           x_user_id: ed.x_user_id,
+          discord_user_id: null,
+          display_name: ed.x_name ?? `@${ed.x_user_id}`,
           role: ed.is_representative_candidate ? "representative" : "editor",
           is_public: ed.is_public,
           public_role_label: ed.public_role_label,
+          internal_note: null,
+          approved_by_user_id: null,
+          approved_at: null,
         })
         .onConflictDoNothing();
+      for (const key of COLLABORATOR_PERMISSION_KEYS) {
+        await db
+          .insert(eventStaffPermissions)
+          .values({
+            id: `legacy_esp_${eventId}_${ed.x_user_id}_${key}`,
+            event_staff_id: staffId,
+            permission_key: key,
+            allowed: 1,
+          })
+          .onConflictDoNothing();
+      }
     } catch {
       // 個別失敗は警告対象だが、ここで全体を倒さない
     }
@@ -620,7 +759,6 @@ async function insertVideoMembers(
         video_id: videoId,
         x_user_id: m.x_user_id,
         name: m.name,
-        name_for_sort: m.name.toLowerCase(),
         role: m.role,
         order_index: m.order_index,
       });

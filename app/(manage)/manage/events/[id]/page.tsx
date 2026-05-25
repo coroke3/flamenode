@@ -2,12 +2,13 @@ import * as React from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { and, desc, eq, like, sql } from "drizzle-orm";
+import { and, desc, eq, like, or, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
 import {
   events as eventsTable,
-  eventEditors as eventEditorsTable,
+  eventStaff as eventStaffTable,
+  eventStaffPermissions as eventStaffPermissionsTable,
   historyLogs as historyLogsTable,
   notificationOutbox as notificationOutboxTable,
   slots as slotsTable,
@@ -93,21 +94,33 @@ export default async function ManageEventPage({
   const activeX = user.active_x_user_id;
   const isAdmin = user.role === "admin";
   let editorRole: "representative" | "editor" | null = null;
-  if (activeX) {
-    const editor = (
+  if (!isAdmin) {
+    const subjectCondition = activeX
+      ? or(
+          eq(eventStaffTable.x_user_id, activeX),
+          eq(eventStaffTable.discord_user_id, user.id),
+        )!
+      : eq(eventStaffTable.discord_user_id, user.id);
+    const staff = (
       await db
-        .select()
-        .from(eventEditorsTable)
+        .select({ role: eventStaffTable.role })
+        .from(eventStaffTable)
+        .innerJoin(
+          eventStaffPermissionsTable,
+          eq(eventStaffPermissionsTable.event_staff_id, eventStaffTable.id),
+        )
         .where(
           and(
-            eq(eventEditorsTable.event_id, id),
-            eq(eventEditorsTable.x_user_id, activeX),
+            eq(eventStaffTable.event_id, id),
+            eq(eventStaffPermissionsTable.allowed, 1),
+            subjectCondition,
           )!,
         )
         .limit(1)
     )[0];
-    if (editor) {
-      editorRole = (editor.role ?? "editor") as "representative" | "editor";
+    if (staff) {
+      editorRole =
+        staff.role === "representative" ? "representative" : "editor";
     }
   }
   if (!editorRole && !isAdmin) notFound();
@@ -121,7 +134,7 @@ export default async function ManageEventPage({
       .where(
         and(
           eq(videoEventsTable.event_id, id),
-          eq(videosTable.status, "pending"),
+          eq(videosTable.visibility_status, "pending"),
         )!,
       ),
     db
@@ -131,7 +144,7 @@ export default async function ManageEventPage({
       .where(
         and(
           eq(videoEventsTable.event_id, id),
-          eq(videosTable.status, "public"),
+          eq(videosTable.visibility_status, "public"),
         )!,
       ),
     db
@@ -158,16 +171,16 @@ export default async function ManageEventPage({
     .select({
       id: videosTable.id,
       title: videosTable.title,
-      display_name: sql<string>`COALESCE(${xUsersTable.x_name}, ${videosTable.display_name}, ${videosTable.contact_x_id})`,
+      display_name: sql<string>`COALESCE(${xUsersTable.x_name}, ${videosTable.creator_display_name}, ${videosTable.creator_x_user_id})`,
       created_at: videosTable.created_at,
     })
     .from(videosTable)
     .innerJoin(videoEventsTable, eq(videoEventsTable.video_id, videosTable.id))
-    .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id))
+    .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id))
     .where(
       and(
         eq(videoEventsTable.event_id, id),
-        eq(videosTable.status, "pending"),
+        eq(videosTable.visibility_status, "pending"),
       )!,
     )
     .orderBy(desc(videosTable.created_at))

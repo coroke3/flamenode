@@ -1,6 +1,5 @@
 import * as React from "react";
 import type { Metadata } from "next";
-import Link from "next/link";
 import { withDatabase } from "@/lib/cloudflare";
 import {
   fetchLatestVideos,
@@ -17,33 +16,71 @@ import styles from "./page.module.css";
 export const metadata: Metadata = { title: "おすすめ" };
 export const dynamic = "force-dynamic";
 
+const LIST_HREF = "/list";
+
 /**
- * 1ページ内で同一作者・同一イベントが出すぎないように制限する diversity フィルタ。
+ * 1ページ内で同一作者・同一イベントが出すぎないようにする soft diversity フィルタ。
  *
- * - 各 creator は最大 `maxPerCreator` 件、各 primary_event は最大 `maxPerEvent` 件まで。
- * - 順序は維持し、超過した行は削除する。
+ * まず偏りを抑えて選び、件数が足りなければ元の順序から補充する。
+ * primary_event_id が null の作品は「同一イベント」として数えない。
  */
-function limitByCreatorAndEvent<
-  T extends { creator_id: string | null; primary_event_id: string | null },
+function pickDiverseVideos<
+  T extends { id: string; creator_x_user_id?: string | null; primary_event_id?: string | null },
 >(
   rows: readonly T[],
-  options: { maxPerCreator?: number; maxPerEvent?: number } = {},
+  options: { target: number; maxPerCreator?: number; maxPerEvent?: number },
 ): T[] {
-  const maxPerCreator = options.maxPerCreator ?? 2;
-  const maxPerEvent = options.maxPerEvent ?? 3;
+  const target = Math.max(0, options.target);
+  const maxPerCreator = options.maxPerCreator ?? 3;
+  const maxPerEvent = options.maxPerEvent ?? 5;
   const creatorCounts = new Map<string, number>();
   const eventCounts = new Map<string, number>();
   const out: T[] = [];
+  const skipped: T[] = [];
+  const seen = new Set<string>();
+
   for (const r of rows) {
-    const c = r.creator_id ?? "_anon";
-    const e = r.primary_event_id ?? "_no_event";
-    if ((creatorCounts.get(c) ?? 0) >= maxPerCreator) continue;
-    if ((eventCounts.get(e) ?? 0) >= maxPerEvent) continue;
-    creatorCounts.set(c, (creatorCounts.get(c) ?? 0) + 1);
-    eventCounts.set(e, (eventCounts.get(e) ?? 0) + 1);
+    if (seen.has(r.id)) continue;
+    const c = r.creator_x_user_id;
+    const e = r.primary_event_id;
+    if (c && (creatorCounts.get(c) ?? 0) >= maxPerCreator) {
+      skipped.push(r);
+      continue;
+    }
+    if (e && (eventCounts.get(e) ?? 0) >= maxPerEvent) {
+      skipped.push(r);
+      continue;
+    }
+    seen.add(r.id);
+    if (c) creatorCounts.set(c, (creatorCounts.get(c) ?? 0) + 1);
+    if (e) eventCounts.set(e, (eventCounts.get(e) ?? 0) + 1);
+    out.push(r);
+    if (out.length >= target) return out;
+  }
+
+  for (const r of skipped) {
+    if (out.length >= target) break;
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
     out.push(r);
   }
+
   return out;
+}
+
+function uniqueVideos<T extends { id: string }>(rows: readonly T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const row of rows) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    out.push(row);
+  }
+  return out;
+}
+
+function withoutVideo<T extends { id: string }>(rows: readonly T[], id?: string): T[] {
+  return id ? rows.filter((row) => row.id !== id) : [...rows];
 }
 
 interface FilterChip {
@@ -57,15 +94,16 @@ const FILTER_CHIPS: FilterChip[] = [
   { href: "#rail-fresh", label: "新着", icon: <Icon name="clock" size={11} aria-hidden /> },
   { href: "#rail-underrated", label: "見逃されている", icon: <Icon name="info" size={11} aria-hidden /> },
   { href: "#rail-events", label: "イベント", icon: <Icon name="calendar" size={11} aria-hidden /> },
+  { href: "#rail-more", label: "まとめて見る", icon: <Icon name="grid" size={11} aria-hidden /> },
   { href: "#rail-creators", label: "クリエイター", icon: <Icon name="users" size={11} aria-hidden /> },
 ];
 
 export default async function RecommendPage(): Promise<React.ReactElement> {
   const data = await withDatabase(async (db) => {
     const [recommended, latest, underrated, creators] = await Promise.all([
-      fetchRecommendedVideos(db, 60),
-      fetchLatestVideos(db, 30),
-      fetchUnderratedVideos(db, 60),
+      fetchRecommendedVideos(db, 120),
+      fetchLatestVideos(db, 80),
+      fetchUnderratedVideos(db, 80),
       fetchPickupCreators(db, 40),
     ]);
     return { recommended, latest, underrated, creators };
@@ -78,42 +116,69 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
     creators = [],
   } = data ?? {};
 
+  const allCandidates = uniqueVideos([
+    ...(recommended as VideoCardData[]),
+    ...(latest as VideoCardData[]),
+    ...(underratedPool as VideoCardData[]),
+  ]);
+
   // Hero: 代表作品 1 件
-  const hero = recommended[0];
+  const hero = recommended[0] ?? latest[0] ?? underratedPool[0];
+  const nonHeroRecommended = withoutVideo(recommended, hero?.id);
+  const nonHeroLatest = withoutVideo(latest, hero?.id);
+  const nonHeroUnderrated = withoutVideo(underratedPool, hero?.id);
 
   // Mix rails (PR38 時点では既存データを diversity フィルタで切り分けるだけの軽実装。
   // 真のロジック分離は PR44 で fetchRecommendedVideos を rail 別に作る予定):
-  // - hot: video_score 上位 (recommended の先頭) を creator/event diversity 制限で 8 件
-  // - fresh: latest を diversity 制限で 8 件
-  // - underrated: recommended の後半 (上位ではない) から diversity 制限で 6 件
+  // - hot: video_stats.score 上位を creator/event diversity 制限で 12 件
+  // - fresh: latest を diversity 制限で 12 件
+  // - underrated: 低スコア/新しめの候補を diversity 制限で 10 件
   // - events: primary_event_id が同じものを 1 件ずつ拾う
+  // - more: 各候補を混ぜ、表示件数不足を防ぐ探索棚
   // - creators: 既存の pickup creators
-  const hot = limitByCreatorAndEvent(recommended.slice(0, 24), {
-    maxPerCreator: 2,
-    maxPerEvent: 3,
-  }).slice(0, 8) as VideoCardData[];
+  const hot = pickDiverseVideos(nonHeroRecommended, {
+    target: 12,
+    maxPerCreator: 3,
+    maxPerEvent: 5,
+  }) as VideoCardData[];
 
-  const fresh = limitByCreatorAndEvent(latest, {
-    maxPerCreator: 2,
-    maxPerEvent: 3,
-  }).slice(0, 8) as VideoCardData[];
+  const fresh = pickDiverseVideos(nonHeroLatest, {
+    target: 12,
+    maxPerCreator: 3,
+    maxPerEvent: 5,
+  }) as VideoCardData[];
 
-  // 「見逃されている」: fetchUnderratedVideos の候補プールから diversity を強めて 6 件。
+  // 「見逃されている」: fetchUnderratedVideos の候補プールから diversity をやや強めて 10 件。
   // 投稿日順で並ぶプールに対し creator/event 制限をかけて、同じ顔ぶれを避ける。
-  const underrated = limitByCreatorAndEvent(underratedPool, {
-    maxPerCreator: 1,
-    maxPerEvent: 2,
-  }).slice(0, 6) as VideoCardData[];
+  const underrated = pickDiverseVideos(nonHeroUnderrated, {
+    target: 10,
+    maxPerCreator: 2,
+    maxPerEvent: 4,
+  }) as VideoCardData[];
 
   // 「イベントから見る」: primary_event_id が異なる作品を 1 件ずつ拾う。
   const eventsRail: VideoCardData[] = [];
   const seenEvents = new Set<string>();
-  for (const v of recommended) {
+  for (const v of allCandidates) {
     if (!v.primary_event_id || seenEvents.has(v.primary_event_id)) continue;
     seenEvents.add(v.primary_event_id);
     eventsRail.push(v as VideoCardData);
-    if (eventsRail.length >= 8) break;
+    if (eventsRail.length >= 12) break;
   }
+
+  const shown = new Set([
+    hero?.id,
+    ...hot.map((v) => v.id),
+    ...fresh.map((v) => v.id),
+    ...underrated.map((v) => v.id),
+    ...eventsRail.map((v) => v.id),
+  ].filter(Boolean));
+  const morePool = allCandidates.filter((v) => !shown.has(v.id));
+  const more = pickDiverseVideos(morePool.length > 0 ? morePool : withoutVideo(allCandidates, hero?.id), {
+    target: 24,
+    maxPerCreator: 4,
+    maxPerEvent: 8,
+  }) as VideoCardData[];
 
   return (
     <div className={`fn-public-container ${styles.page}`}>
@@ -129,14 +194,14 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
       {/* フィルターチップ: 各棚へのアンカー導線。黄色は使わず薄ボタンで控えめに */}
       <nav className={styles.chips} aria-label="表示カテゴリ">
         {FILTER_CHIPS.map((c) => (
-          <Link
+          <a
             key={c.href}
             href={c.href}
             className="fn-btn fn-btn-ghost fn-btn-soft-outline fn-btn-sm"
           >
             {c.icon}
             {c.label}
-          </Link>
+          </a>
         ))}
       </nav>
 
@@ -187,6 +252,15 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
         moreHref="/event"
       />
 
+      <Rail
+        id="rail-more"
+        title="まとめて見る"
+        subtitle="カテゴリに入りきらなかった公開作品も含めて広めに並べています"
+        items={more}
+        ariaLabel="さらに探す作品"
+        moreHref="/list"
+      />
+
       <section id="rail-creators" className={styles.section}>
         <SectionTitle
           title="クリエイター発見"
@@ -217,9 +291,9 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
       </section>
 
       <div className={styles.footerCta}>
-        <Link href="/list" className="fn-btn fn-btn-primary">
+        <a href={LIST_HREF} className="fn-btn fn-btn-primary">
           <Icon name="grid" size={14} aria-hidden /> 一覧でさらに探す
-        </Link>
+        </a>
       </div>
     </div>
   );
@@ -245,9 +319,9 @@ function SectionTitle({
         ) : null}
       </div>
       {moreHref ? (
-        <Link href={moreHref} className="fn-section-more">
+        <a href={moreHref} className="fn-section-more">
           すべて見る →
-        </Link>
+        </a>
       ) : null}
     </div>
   );

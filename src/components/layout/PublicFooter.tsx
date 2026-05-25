@@ -1,5 +1,4 @@
 import * as React from "react";
-import Link from "next/link";
 import styles from "./PublicFooter.module.css";
 import { Logo } from "@/components/ui/Logo";
 
@@ -68,7 +67,7 @@ function FooterColumn({
       <ul className={styles.list}>
         {items.map((item) => (
           <li key={item.href}>
-            <Link href={item.href}>{item.label}</Link>
+            <a href={item.href}>{item.label}</a>
           </li>
         ))}
       </ul>

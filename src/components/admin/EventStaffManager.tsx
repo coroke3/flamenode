@@ -105,7 +105,7 @@ export function EventStaffManager({
 
   const runCollaboratorCsvImport = (rows: CollaboratorCsvRow[]) => {
     if (rows.length === 0) {
-      setError("取り込める CSV 行がありません。permission_key を含めてください。");
+      setError("取り込める CSV 行がありません。権限を含めてください。");
       return;
     }
     setError(null);
@@ -117,7 +117,7 @@ export function EventStaffManager({
           ),
         );
         if (invalid) {
-          setError(`不正な permission_key: ${invalid}`);
+          setError(`選べない権限が含まれています: ${invalid}`);
           return;
         }
         const fd = new FormData();
@@ -148,10 +148,10 @@ export function EventStaffManager({
 
       <section>
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
-          管理者・運営編集者 ({editors.length})
+          イベント管理者を登録/編集 (全体権限) ({editors.length})
         </h2>
         <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
-          ここに追加した X ID は、担当イベントの基本情報・枠・権限・所属作品を広く編集できます。
+          イベントの基本情報、予約枠、投稿フォーム、所属作品の運用設定を任せる人を登録します。
         </p>
         {editors.length === 0 ? (
           <p className="fn-muted fn-text-sm">未登録です。</p>
@@ -269,17 +269,17 @@ export function EventStaffManager({
             className="fn-btn fn-btn-primary fn-btn-sm"
             disabled={busy}
           >
-            <Icon name="plus" size={11} aria-hidden /> 編集者追加
+            <Icon name="plus" size={11} aria-hidden /> イベント管理者を登録
           </button>
         </form>
       </section>
 
       <section>
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
-          一般ユーザー向け編集権限 ({collaborators.length})
+          イベント管理者を登録/編集 (権限を選ぶ) ({collaborators.length})
         </h2>
         <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
-          管理者や運営編集者ではない一般ユーザーにも、permission_key 単位で必要な編集だけを許可できます。
+          FlameNode全体の管理者ではない人にも、必要なイベント管理だけを許可できます。
           X ID または Discord User ID を指定し、既存の許可は選択した権限で上書きします。
         </p>
         {collaborators.length === 0 ? (
@@ -306,8 +306,6 @@ export function EventStaffManager({
                     </span>
                   </td>
                   <td style={{ fontSize: 11 }}>
-                    {/* permission_keys を日本語ラベルのバッジ列にして、
-                        非エンジニアでも何が許可されているか即座に分かるようにする。 */}
                     <div
                       style={{
                         display: "flex",
@@ -393,11 +391,11 @@ function CollaboratorForm({
   };
   const copyCsvPrompt = async () => {
     const prompt = [
-      "次の情報を FlameNode のイベント協力者権限 CSV に整形してください。",
-      "出力は CSV 本文のみ。列は display_name,x_user_id,discord_user_id,permission_keys,is_public_staff,public_role_label の6列。",
-      "permission_keys は | 区切りで複数指定できます。",
-      `permission_key は次から選んでください: ${COLLABORATOR_PERMISSION_KEYS.join(",")}`,
-      "x_user_id は @ なし、discord_user_id が不明なら空欄、公開スタッフなら is_public_staff を 1、それ以外は 0 にしてください。",
+      "次の情報を FlameNode のイベント管理者 CSV に整形してください。",
+      "出力は CSV 本文のみ。列順は 表示名,X ID,Discord User ID,権限,公開フラグ,公開ラベル の6列。",
+      "権限は | 区切りで複数指定できます。",
+      `権限は次から選んでください: ${COLLABORATOR_PERMISSION_KEYS.join(",")}`,
+      "X ID は @ なし、Discord User ID が不明なら空欄、公開するなら5列目を 1、それ以外は 0 にしてください。",
     ].join("\n");
     await navigator.clipboard.writeText(prompt);
     setCopied(true);
@@ -422,7 +420,7 @@ function CollaboratorForm({
       }}
     >
       <p style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>
-        一般ユーザーの編集権限を追加・更新
+        イベント管理者を追加・更新
       </p>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
         <input
@@ -509,17 +507,6 @@ function CollaboratorForm({
                 >
                   {meta.description}
                 </span>
-                <code
-                  style={{
-                    display: "block",
-                    fontSize: 9.5,
-                    color: "var(--text-muted)",
-                    marginTop: 2,
-                    opacity: 0.7,
-                  }}
-                >
-                  {k}
-                </code>
               </span>
             </label>
           );
@@ -542,7 +529,7 @@ function CollaboratorForm({
           rows={5}
           value={csvText}
           onChange={(e) => setCsvText(e.target.value)}
-          placeholder="display_name,x_user_id,discord_user_id,permission_keys,is_public_staff,public_role_label"
+          placeholder="例: 進行担当,yamada,,event.basic|event.slots,1,進行"
         />
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button

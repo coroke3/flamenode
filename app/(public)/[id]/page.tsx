@@ -2,18 +2,24 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { buildAccentVars } from "@/lib/theme/accent";
 import styles from "./page.module.css";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { getApprovedXIds, canEditVideo } from "@/lib/auth/ownership";
 import { getDatabase, withDatabase } from "@/lib/cloudflare";
-import { videoInteractions, videos as videosTable, xUsers } from "@/lib/db/schema";
+import {
+  videoInteractions,
+  videos as videosTable,
+  videoStats,
+  xUsers,
+} from "@/lib/db/schema";
 import {
   fetchEventPlaylistVideos,
   fetchRelatedVideos,
   fetchVideoDetail,
 } from "@/lib/db/videoDetailQueries";
+import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { extractYoutubeId } from "@/lib/youtube/id";
 import { YoutubePlayer } from "@/components/video/YoutubePlayer";
 import { ChapterTabs } from "@/components/video/ChapterTabs";
@@ -46,7 +52,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   });
   if (!detail) return { title: id };
   return {
-    title: `${detail.video.title} - ${detail.video.display_name}`,
+    title: `${detail.video.title} - ${detail.video.creator_display_name}`,
     openGraph: {
       images: detail.video.youtube_video_id
         ? [`https://i.ytimg.com/vi/${detail.video.youtube_video_id}/maxresdefault.jpg`]
@@ -100,10 +106,19 @@ export default async function VideoDetailPage({
       canEditChapters: viewerCanEditChapters,
     });
     if (!detail) return null;
+    const softwareLabel = await getVideoSoftwareLabel(db, detail.video.id);
+    const statsRow =
+      (
+        await db
+          .select()
+          .from(videoStats)
+          .where(eq(videoStats.video_id, detail.video.id))
+          .limit(1)
+      )[0] ?? null;
 
     const related = (await fetchRelatedVideos(db, {
       id: detail.video.id,
-      creator_id: detail.video.creator_id,
+      creator_x_user_id: detail.video.creator_x_user_id,
       primary_event_id: detail.video.primary_event_id,
       scheduled_time: detail.video.scheduled_time,
       eventIds: detail.events.map((event) => event.id),
@@ -165,13 +180,13 @@ export default async function VideoDetailPage({
                 id: videosTable.id,
                 title: videosTable.title,
                 youtube_video_id: videosTable.youtube_video_id,
-                display_name: videosTable.display_name,
+                display_name: videosTable.creator_display_name,
               })
               .from(videosTable)
               .where(
                 and(
                   inArray(videosTable.id, ids),
-                  eq(videosTable.is_deleted, 0),
+                  ne(videosTable.visibility_status, "archived"),
                 )!,
               );
             playlistLabel = kind === "like" ? "いいねした作品" : "セーブした作品";
@@ -208,6 +223,8 @@ export default async function VideoDetailPage({
       bookmarkActive,
       viewerXApproved,
       viewerCanEditChapters,
+      softwareLabel,
+      stats: statsRow,
       playlistLabel,
       playlistItems,
     };
@@ -221,13 +238,16 @@ export default async function VideoDetailPage({
     bookmarkActive,
     viewerXApproved,
     viewerCanEditChapters,
+    softwareLabel,
+    stats,
     playlistLabel,
     playlistItems,
   } = bundle;
 
-  const creatorIcon = creator?.icon_url ?? video.icon_url ?? null;
-  const creatorName = creator?.x_name ?? video.display_name ?? "作者未設定";
-  const creatorId = creator?.id ?? video.contact_x_id ?? "anonymous";
+  const creatorIcon = creator?.icon_url ?? video.creator_icon_url ?? null;
+  const creatorName =
+    creator?.x_name ?? video.creator_display_name ?? "作者未設定";
+  const creatorId = creator?.id ?? video.creator_x_user_id ?? "anonymous";
   const creatorHref = creator?.id && creator.id !== "anonymous" ? `/user/${creator.id}` : null;
   const youtubeId = video.youtube_video_id ? extractYoutubeId(video.youtube_video_id) : null;
 
@@ -404,7 +424,7 @@ export default async function VideoDetailPage({
                       videoId={video.id}
                       kind="like"
                       initialActive={likeActive}
-                      count={video.like_count ?? 0}
+                      count={stats?.app_like_count ?? 0}
                       {...interactionGate}
                     />
                     <InteractionButton
@@ -419,12 +439,12 @@ export default async function VideoDetailPage({
             </div>
           </div>
 
-          {video.status === "x_reapply_required" ? (
+          {video.visibility_status === "voided" ? (
             <div className={styles.warningBar}>
               <Icon name="warning" size={14} aria-hidden />
               <span>この作品は現在「調整中」です。投稿者本人と運営による確認後に公開状態が更新されます。</span>
             </div>
-          ) : video.status === "unlisted" ? (
+          ) : video.visibility_status === "limited" ? (
             <div className={styles.warningBar}>
               <Icon name="info" size={14} aria-hidden />
               <span>限定公開作品です。リンクを知っている人のみ閲覧できます。</span>
@@ -522,9 +542,9 @@ export default async function VideoDetailPage({
                 <IntroCommentBlock text={video.intro_comment} />
               </InlineMetaItem>
             ) : null}
-            {video.used_software ? (
+            {softwareLabel ? (
               <InlineMetaItem title="使用ソフト">
-                {video.used_software}
+                {softwareLabel}
               </InlineMetaItem>
             ) : null}
             {/* みどころ / 制作エピソード / あとがき を 1 つの「詳細コメント」開閉エリアにまとめる。

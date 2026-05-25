@@ -10,6 +10,7 @@ import {
   videoComments as videoCommentsTable,
   videoEvents as videoEventsTable,
   videoInteractions as videoInteractionsTable,
+  videoStats,
   videos as videosTable,
 } from "@/lib/db/schema";
 
@@ -204,7 +205,7 @@ async function checkPublicVideoWithoutYoutubeId(
   db: AnyDb,
 ): Promise<HealthCheckResult> {
   const where = and(
-    eq(videosTable.status, "public"),
+    eq(videosTable.visibility_status, "public"),
     or(
       isNull(videosTable.youtube_video_id),
       eq(videosTable.youtube_video_id, ""),
@@ -226,11 +227,7 @@ async function checkPublicVideoWithoutYoutubeId(
 
 /** voided 動画が非削除・非非表示 */
 async function checkVoidedVideoVisible(db: AnyDb): Promise<HealthCheckResult> {
-  const where = and(
-    eq(videosTable.status, "voided"),
-    eq(videosTable.is_deleted, 0),
-    eq(videosTable.is_manual_hidden, 0),
-  );
+  const where = eq(videosTable.visibility_status, "voided");
   const [countRows, sampleRows] = await Promise.all([
     db.select({ c: sql<number>`COUNT(*)` }).from(videosTable).where(where),
     db.select({ id: videosTable.id }).from(videosTable).where(where).limit(10),
@@ -238,12 +235,12 @@ async function checkVoidedVideoVisible(db: AnyDb): Promise<HealthCheckResult> {
   const count = Number(countRows[0]?.c ?? 0);
   return {
     id: "voided_video_visible",
-    label: "voided 動画が is_deleted=0 かつ is_manual_hidden=0",
+    label: "voided videos (visibility_status=voided)",
     status: count === 0 ? "ok" : "warn",
     count,
     samples: sampleRows.slice(0, 5).map((r) => r.id),
     note:
-      "voided でも is_deleted/is_manual_hidden が立っていない行。表示制御を確認してください。",
+      "visibility_status=voided の動画です。公開導線から除外されているか確認してください。",
   };
 }
 
@@ -333,9 +330,9 @@ const LIKE_COUNT_DRIFT_RATIO = 0.05;
 async function checkLikeCountDrift(db: AnyDb): Promise<HealthCheckResult> {
   // like_count >= 1 の videos を取得
   const videoRows = await db
-    .select({ id: videosTable.id, like_count: videosTable.like_count })
-    .from(videosTable)
-    .where(gte(videosTable.like_count, 1));
+    .select({ id: videoStats.video_id, like_count: videoStats.app_like_count })
+    .from(videoStats)
+    .where(gte(videoStats.app_like_count, 1));
 
   if (videoRows.length === 0) {
     return {
@@ -393,7 +390,7 @@ async function checkLikeCountDrift(db: AnyDb): Promise<HealthCheckResult> {
     samples: driftSamples,
     note:
       driftCount > 0
-        ? "videos.like_count と video_interactions の実数が大きくズレている作品があります。"
+        ? "video_stats.app_like_count と video_interactions の実数が大きくズレている作品があります。"
         : undefined,
   };
 }
@@ -419,11 +416,11 @@ async function checkVideoCommentsLegacyRows(
   };
 }
 
-/** deprecated: videos.outro_comment が non-null (closing_comment に統一済み) */
+/** deprecated: outro_comment は clean schema から削除済み */
 async function checkVideosOutroComment(
   db: AnyDb,
 ): Promise<HealthCheckResult> {
-  const where = isNotNull(videosTable.outro_comment);
+  const where = sql`0 = 1`;
   const [countRows, sampleRows] = await Promise.all([
     db.select({ c: sql<number>`COUNT(*)` }).from(videosTable).where(where),
     db.select({ id: videosTable.id }).from(videosTable).where(where).limit(10),
@@ -431,7 +428,7 @@ async function checkVideosOutroComment(
   const count = Number(countRows[0]?.c ?? 0);
   return {
     id: "videos_outro_comment_legacy",
-    label: "videos.outro_comment 残存行 (deprecated)",
+    label: "outro_comment 削除済み確認",
     status: count === 0 ? "ok" : "info",
     count,
     samples: sampleRows.slice(0, 5).map((r) => r.id),
@@ -506,24 +503,29 @@ async function checkOrphanVideoMember(
   };
 }
 
-/** video_members.name_for_sort が NULL の行 (migration 0004 適用後はバックフィルされる) */
-async function checkVideoMembersNameForSortNull(
+/** video_members.chapters_json が valid JSON として保存されているか */
+async function checkVideoMembersChaptersJsonInvalid(
   db: AnyDb,
 ): Promise<HealthCheckResult> {
-  const rows = await db
-    .select({ c: sql<number>`COUNT(*)` })
-    .from(sql`video_members`)
-    .where(sql`name_for_sort IS NULL`);
-  const count = Number(rows[0]?.c ?? 0);
+  const where = sql`chapters_json IS NOT NULL AND trim(chapters_json) <> '' AND json_valid(chapters_json) = 0`;
+  const [countRows, sampleRows] = await Promise.all([
+    db.select({ c: sql<number>`COUNT(*)` }).from(sql`video_members`).where(where),
+    db
+      .select({ id: sql<string>`id` })
+      .from(sql`video_members`)
+      .where(where)
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
   return {
-    id: "video_members_name_for_sort_null",
-    label: "video_members.name_for_sort が NULL の行",
-    status: count === 0 ? "ok" : "info",
+    id: "video_members_chapters_json_invalid",
+    label: "video_members.chapters_json invalid JSON",
+    status: count === 0 ? "ok" : "warn",
     count,
-    samples: [],
+    samples: sampleRows.slice(0, 5).map((r) => r.id),
     note:
       count > 0
-        ? "migration 0004 未適用 or 書き込み経路の漏れ。本番適用時にバックフィル UPDATE が走ります。"
+        ? "メンバー担当チャプターは video_members.chapters_json から生成します。JSON 形式を確認してください。"
         : undefined,
   };
 }
@@ -545,6 +547,6 @@ export async function runHealthChecks(db: AnyDb): Promise<HealthCheckResult[]> {
     checkVideosOutroComment(db),
     checkChapterNonChapterMarker(db),
     checkOrphanVideoMember(db),
-    checkVideoMembersNameForSortNull(db),
+    checkVideoMembersChaptersJsonInvalid(db),
   ]);
 }

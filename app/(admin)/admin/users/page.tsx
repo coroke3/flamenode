@@ -216,7 +216,7 @@ export default async function AdminUsersPage({
         db,
         userRows.map((u) => ({
           ...u,
-          creator_id: u.active_x_user_id,
+          creator_x_user_id: u.active_x_user_id,
           icon_url: u.active_x_icon_url,
         })),
       );
@@ -268,7 +268,7 @@ export default async function AdminUsersPage({
         db,
         xRows.map((x) => ({
           ...x,
-          creator_id: x.id,
+          creator_x_user_id: x.id,
           icon_url: x.icon_url,
         })),
       );

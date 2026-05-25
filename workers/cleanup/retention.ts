@@ -70,7 +70,7 @@ export function computeHistoryCutoffs(
 }
 
 /**
- * voided 動画の論理削除 cutoff 秒。voided_at がこれより前なら is_deleted=1 を補正する。
+ * voided 動画の後処理 cutoff 秒。現在は D1 への動画状態 UPDATE は行わない。
  */
 export const VOIDED_VIDEO_HIDE_TTL_SEC = 30 * 24 * 60 * 60;
 

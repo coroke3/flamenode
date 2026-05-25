@@ -15,7 +15,6 @@ import {
   events,
   videoChapters,
   videoEvents,
-  videoMemberChapters,
   videoMembers,
   videos,
   xUsers,
@@ -37,6 +36,58 @@ import {
   uniqueByVideoId,
   type RelatedReason,
 } from "./recommendation";
+
+const videoScoreExpr = sql<number>`COALESCE((SELECT score FROM video_stats WHERE video_id = ${videos.id}), 0)`;
+
+function memberChaptersFromJson(
+  memberId: string,
+  raw: string | null,
+): {
+  id: string;
+  video_member_id: string;
+  chapter_time: number;
+  chapter_label: string;
+  note: string | null;
+  order_index: number;
+}[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item, index) => {
+        if (!item || typeof item !== "object") return null;
+        const row = item as Record<string, unknown>;
+        const time = Number(row.time_seconds ?? row.time ?? row.chapter_time);
+        const label = String(row.label ?? row.chapter_label ?? "").trim();
+        if (!Number.isFinite(time) || !label) return null;
+        const note = String(row.note ?? "").trim();
+        return {
+          id: `${memberId}:${index}`,
+          video_member_id: memberId,
+          chapter_time: time,
+          chapter_label: label,
+          note: note || null,
+          order_index:
+            typeof row.order_index === "number" ? row.order_index : index,
+        };
+      })
+      .filter(
+        (
+          row,
+        ): row is {
+          id: string;
+          video_member_id: string;
+          chapter_time: number;
+          chapter_label: string;
+          note: string | null;
+          order_index: number;
+        } => row !== null,
+      );
+  } catch {
+    return [];
+  }
+}
 
 /**
  * 作品詳細関連の集約クエリ。
@@ -74,17 +125,17 @@ export async function fetchVideoDetail(
   if (!video) return null;
 
   // 2) 作者
-  const creatorRows = video.creator_id
+  const creatorRows = video.creator_x_user_id
     ? await db
         .select()
         .from(xUsers)
-        .where(eq(xUsers.id, video.creator_id))
+        .where(eq(xUsers.id, video.creator_x_user_id))
         .limit(1)
     : [];
   let creator = creatorRows[0] ?? null;
   if (creator && !creator.icon_url) {
     const resolved = await resolveMissingIcons(db, [
-      { creator_id: creator.id, icon_url: creator.icon_url },
+      { creator_x_user_id: creator.id, icon_url: creator.icon_url },
     ]);
     creator = { ...creator, icon_url: resolved[0]?.icon_url ?? null };
   }
@@ -118,6 +169,7 @@ export async function fetchVideoDetail(
       role: videoMembers.role,
       comment: videoMembers.comment,
       order_index: videoMembers.order_index,
+      chapters_json: videoMembers.chapters_json,
       x_name: xUsers.x_name,
       icon_url: xUsers.icon_url,
     })
@@ -155,8 +207,8 @@ export async function fetchVideoDetail(
     chapterVisibilityCond = eq(videoChapters.visibility, "public");
   }
   // 通常チャプターコメントは video_chapters から取得。
-  // 旧仕様で混在していた video_member_id 付き行は migration 0017 で
-  // video_member_chapters に移行済み + 元行は削除済み。念のため video_member_id IS NULL
+  // 旧仕様で混在していた video_member_id 付き行は移行済み。
+  // 念のため video_member_id IS NULL
   // 条件を入れて、互換期間中に残った旧データが通常チャプターに紛れ込まないようガードする。
   const chapters = await db
     .select({
@@ -182,22 +234,14 @@ export async function fetchVideoDetail(
     )
     .orderBy(videoChapters.chapter_time);
 
-  // メンバーチャプターは別テーブル video_member_chapters。通常チャプターとは別 prop で
+  // メンバーチャプターは video_members.chapters_json から生成し、通常チャプターとは別 prop で
   // MemberSection に渡す。
-  const memberChapters = await db
-    .select({
-      id: videoMemberChapters.id,
-      video_member_id: videoMemberChapters.video_member_id,
-      chapter_time: videoMemberChapters.chapter_time,
-      chapter_label: videoMemberChapters.chapter_label,
-      note: videoMemberChapters.note,
-      order_index: videoMemberChapters.order_index,
-    })
-    .from(videoMemberChapters)
-    .where(eq(videoMemberChapters.video_id, video.id))
-    .orderBy(
-      videoMemberChapters.video_member_id,
-      videoMemberChapters.chapter_time,
+  const memberChapters = membersRaw
+    .flatMap((member) => memberChaptersFromJson(member.id, member.chapters_json))
+    .sort(
+      (a, b) =>
+        a.chapter_time - b.chapter_time ||
+        a.video_member_id.localeCompare(b.video_member_id),
     );
 
   return {
@@ -219,11 +263,11 @@ export async function fetchVideoDetail(
  * インタリーブする。reason は将来用に内部 result に持つが、動画詳細 UI には
  * 表示しない (公開ページの「枠線で囲まれたタグ」が増えるのを避ける)。
  *
- *   - sameCreator: 同一 creator_id (max 2)
+ *   - sameCreator: 同一 creator_x_user_id (max 2)
  *   - sameEvent: 同一 primary_event_id (max 3)
  *   - sharedMembers: video_members.x_user_id が現在動画のメンバーと一致 (max 2)
  *   - nearDate: scheduled_time が近い順 (max 3)
- *   - topScore: video_score 上位 (max 3)
+ *   - topScore: video_stats.score 上位 (max 3)
  *   - discovery: 中位スコアからの日替わり seed 混合 (max 2)
  *
  * discovery は完全ランダムではなく、`current.id + YYYY-MM-DD` を seed にして
@@ -237,7 +281,7 @@ export interface RelatedVideoCardData {
   youtube_video_id: string | null;
   display_name: string;
   icon_url: string | null;
-  creator_id: string | null;
+  creator_x_user_id: string | null;
   primary_event_id: string | null;
   scheduled_time: number | null;
   reason: RelatedReason;
@@ -247,7 +291,7 @@ export async function fetchRelatedVideos(
   db: DB,
   current: {
     id: string;
-    creator_id: string | null;
+    creator_x_user_id: string | null;
     primary_event_id: string | null;
     scheduled_time?: number | null;
     eventIds?: string[];
@@ -264,24 +308,22 @@ export async function fetchRelatedVideos(
   const sharedLimit = relatedLimit >= 30 ? 10 : 6;
 
   const baseWhere = and(
-    eq(videos.status, "public"),
-    eq(videos.is_deleted, 0),
-    eq(videos.is_manual_hidden, 0),
+    eq(videos.visibility_status, "public"),
     ne(videos.id, current.id),
   );
   const iconExpr = sql<
     string | null
-  >`COALESCE(${videos.icon_url}, ${xUsers.icon_url})`;
+  >`COALESCE(${videos.creator_icon_url}, ${xUsers.icon_url})`;
   const baseSelect = {
     id: videos.id,
     title: videos.title,
     youtube_video_id: videos.youtube_video_id,
-    display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
+    display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.creator_display_name}, ${videos.creator_x_user_id})`,
     icon_url: iconExpr,
-    creator_id: videos.creator_id,
+    creator_x_user_id: videos.creator_x_user_id,
     primary_event_id: videos.primary_event_id,
     scheduled_time: videos.scheduled_time,
-    video_score: videos.video_score,
+    video_score: videoScoreExpr,
   } as const;
   type Row = {
     id: string;
@@ -289,7 +331,7 @@ export async function fetchRelatedVideos(
     youtube_video_id: string | null;
     display_name: string;
     icon_url: string | null;
-    creator_id: string | null;
+    creator_x_user_id: string | null;
     primary_event_id: string | null;
     scheduled_time: number | null;
     video_score: number | null;
@@ -303,7 +345,7 @@ export async function fetchRelatedVideos(
     youtube_video_id: candidate.row.youtube_video_id,
     display_name: candidate.row.display_name,
     icon_url: candidate.row.icon_url,
-    creator_id: candidate.row.creator_id,
+    creator_x_user_id: candidate.row.creator_x_user_id,
     primary_event_id: candidate.row.primary_event_id,
     scheduled_time: candidate.row.scheduled_time,
     reason: candidate.reason,
@@ -314,7 +356,7 @@ export async function fetchRelatedVideos(
       ? await db
           .select(baseSelect)
           .from(videos)
-          .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+          .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
           .where(
             and(
               baseWhere,
@@ -322,7 +364,7 @@ export async function fetchRelatedVideos(
               lt(videos.scheduled_time, current.scheduled_time),
             )!,
           )
-          .orderBy(desc(videos.scheduled_time), desc(videos.video_score))
+          .orderBy(desc(videos.scheduled_time), desc(videoScoreExpr))
           .limit(3)
       : [];
 
@@ -331,7 +373,7 @@ export async function fetchRelatedVideos(
       ? await db
           .select(baseSelect)
           .from(videos)
-          .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+          .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
           .where(
             and(
               baseWhere,
@@ -339,7 +381,7 @@ export async function fetchRelatedVideos(
               gt(videos.scheduled_time, current.scheduled_time),
             )!,
           )
-          .orderBy(asc(videos.scheduled_time), desc(videos.video_score))
+          .orderBy(asc(videos.scheduled_time), desc(videoScoreExpr))
           .limit(3)
       : [];
 
@@ -358,20 +400,20 @@ export async function fetchRelatedVideos(
             .select(baseSelect)
             .from(videos)
             .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
-            .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+            .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
             .where(and(baseWhere, inArray(videoEvents.event_id, eventIds))!)
-            .orderBy(desc(videos.scheduled_time), desc(videos.video_score))
+            .orderBy(desc(videos.scheduled_time), desc(videoScoreExpr))
             .limit(Math.min(24, sameEventLimit * 4)),
         )
       : [];
 
-  const sameCreator: Row[] = current.creator_id
+  const sameCreator: Row[] = current.creator_x_user_id
     ? await db
         .select(baseSelect)
         .from(videos)
-        .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
-        .where(and(baseWhere, eq(videos.creator_id, current.creator_id))!)
-        .orderBy(desc(videos.scheduled_time), desc(videos.video_score))
+        .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
+        .where(and(baseWhere, eq(videos.creator_x_user_id, current.creator_x_user_id))!)
+        .orderBy(desc(videos.scheduled_time), desc(videoScoreExpr))
         .limit(sameCreatorLimit)
     : [];
 
@@ -401,7 +443,7 @@ export async function fetchRelatedVideos(
           })
           .from(videoMembers)
           .innerJoin(videos, eq(videos.id, videoMembers.video_id))
-          .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+          .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
           .where(
             and(
               baseWhere,
@@ -412,7 +454,7 @@ export async function fetchRelatedVideos(
               ),
             )!,
           )
-          .orderBy(desc(videos.scheduled_time), desc(videos.video_score))
+          .orderBy(desc(videos.scheduled_time), desc(videoScoreExpr))
           .limit(30)
           .then((rows) => {
             const byMember = new Map<string, (Row & { member_x_user_id: string | null })[]>();
@@ -444,27 +486,27 @@ export async function fetchRelatedVideos(
       ? await db
           .select(baseSelect)
           .from(videos)
-          .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+          .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
           .where(and(baseWhere, isNotNull(videos.scheduled_time))!)
           .orderBy(
             sql`ABS(${videos.scheduled_time} - ${current.scheduled_time})`,
-            desc(videos.video_score),
+            desc(videoScoreExpr),
           )
           .limit(Math.min(16, nearDateLimit * 3))
       : await db
           .select(baseSelect)
           .from(videos)
-          .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+          .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
           .where(baseWhere)
-          .orderBy(desc(videos.scheduled_time), desc(videos.video_score))
+          .orderBy(desc(videos.scheduled_time), desc(videoScoreExpr))
           .limit(Math.min(16, nearDateLimit * 3));
 
   const topScore: Row[] = await db
     .select(baseSelect)
     .from(videos)
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
     .where(baseWhere)
-    .orderBy(desc(videos.video_score), desc(videos.scheduled_time))
+    .orderBy(desc(videoScoreExpr), desc(videos.scheduled_time))
     .limit(Math.min(40, Math.max(20, topScoreLimit * 5)));
 
   const discovery = seededShuffle(
@@ -492,9 +534,9 @@ export async function fetchRelatedVideos(
     const latestFallback = await db
       .select(baseSelect)
       .from(videos)
-      .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+      .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
       .where(baseWhere)
-      .orderBy(desc(videos.scheduled_time), desc(videos.video_score))
+      .orderBy(desc(videos.scheduled_time), desc(videoScoreExpr))
       .limit(relatedLimit);
     selected = fillToMinimum(selected, latestFallback, "latest_fallback", {
       limit: relatedLimit,
@@ -506,9 +548,9 @@ export async function fetchRelatedVideos(
     const broadFallback = await db
       .select(baseSelect)
       .from(videos)
-      .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+      .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
       .where(baseWhere)
-      .orderBy(desc(videos.video_score), desc(videos.scheduled_time))
+      .orderBy(desc(videoScoreExpr), desc(videos.scheduled_time))
       .limit(relatedLimit);
     selected = fillToMinimum(selected, broadFallback, "broad_fallback", {
       limit: relatedLimit,
@@ -523,28 +565,26 @@ async function fetchRelatedVideosLegacy(
   db: DB,
   current: {
     id: string;
-    creator_id: string | null;
+    creator_x_user_id: string | null;
     primary_event_id: string | null;
     scheduled_time?: number | null;
   },
   limit = 15,
 ): Promise<RelatedVideoCardData[]> {
   const baseWhere = and(
-    eq(videos.status, "public"),
-    eq(videos.is_deleted, 0),
-    eq(videos.is_manual_hidden, 0),
+    eq(videos.visibility_status, "public"),
     ne(videos.id, current.id),
   );
   const iconExpr = sql<
     string | null
-  >`COALESCE(${videos.icon_url}, ${xUsers.icon_url})`;
+  >`COALESCE(${videos.creator_icon_url}, ${xUsers.icon_url})`;
   const baseSelect = {
     id: videos.id,
     title: videos.title,
     youtube_video_id: videos.youtube_video_id,
-    display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
+    display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.creator_display_name}, ${videos.creator_x_user_id})`,
     icon_url: iconExpr,
-    creator_id: videos.creator_id,
+    creator_x_user_id: videos.creator_x_user_id,
     primary_event_id: videos.primary_event_id,
     scheduled_time: videos.scheduled_time,
   } as const;
@@ -554,18 +594,18 @@ async function fetchRelatedVideosLegacy(
     youtube_video_id: string | null;
     display_name: string;
     icon_url: string | null;
-    creator_id: string | null;
+    creator_x_user_id: string | null;
     primary_event_id: string | null;
     scheduled_time: number | null;
   };
 
-  // sameCreator: 同一 creator_id (新しい順、最大 2)
-  const sameCreator: Row[] = current.creator_id
+  // sameCreator: 同一 creator_x_user_id (新しい順、最大 2)
+  const sameCreator: Row[] = current.creator_x_user_id
     ? await db
         .select(baseSelect)
         .from(videos)
-        .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
-        .where(and(baseWhere, eq(videos.creator_id, current.creator_id))!)
+        .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
+        .where(and(baseWhere, eq(videos.creator_x_user_id, current.creator_x_user_id))!)
         .orderBy(desc(videos.scheduled_time))
         .limit(2)
     : [];
@@ -575,7 +615,7 @@ async function fetchRelatedVideosLegacy(
     ? await db
         .select(baseSelect)
         .from(videos)
-        .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+        .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
         .where(
           and(baseWhere, eq(videos.primary_event_id, current.primary_event_id))!,
         )
@@ -583,7 +623,7 @@ async function fetchRelatedVideosLegacy(
         .limit(3)
     : [];
 
-  // sharedMembers: 現在動画の合作メンバー X ID と一致する creator_id を持つ作品 (最大 2)
+  // sharedMembers: 現在動画の合作メンバー X ID と一致する creator_x_user_id を持つ作品 (最大 2)
   // 自分自身の作品との重複は uniqueBy で後段で除去。
   // 非公開編集者 (is_public_member = 0) は対象外。
   const memberXIds = (
@@ -604,8 +644,8 @@ async function fetchRelatedVideosLegacy(
       ? await db
           .select(baseSelect)
           .from(videos)
-          .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
-          .where(and(baseWhere, inArray(videos.creator_id, memberXIds))!)
+          .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
+          .where(and(baseWhere, inArray(videos.creator_x_user_id, memberXIds))!)
           .orderBy(desc(videos.scheduled_time))
           .limit(8)
       : [];
@@ -619,19 +659,19 @@ async function fetchRelatedVideosLegacy(
     nearDate = await db
       .select(baseSelect)
       .from(videos)
-      .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+      .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
       .where(baseWhere)
       .orderBy(ord)
       .limit(8);
   }
 
-  // topScore: video_score 上位 (最大 3)
+  // topScore: video_stats.score 上位 (最大 3)
   const topScore: Row[] = await db
     .select(baseSelect)
     .from(videos)
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
     .where(baseWhere)
-    .orderBy(desc(videos.video_score))
+    .orderBy(desc(videoScoreExpr))
     .limit(20);
 
   // discovery: 中位スコアからの日替わり seed 混合 (最大 2)
@@ -671,8 +711,8 @@ async function fetchRelatedVideosLegacy(
   for (const t of tagged) {
     if (seen.has(t.row.id)) continue;
     if (
-      t.row.creator_id &&
-      t.row.creator_id === lastCreator &&
+      t.row.creator_x_user_id &&
+      t.row.creator_x_user_id === lastCreator &&
       result.length > 0
     ) {
       // 直前と同じ creator は一旦保留して、別 creator を挟む
@@ -681,7 +721,7 @@ async function fetchRelatedVideosLegacy(
     }
     seen.add(t.row.id);
     result.push({ ...t.row, reason: t.reason });
-    lastCreator = t.row.creator_id;
+    lastCreator = t.row.creator_x_user_id;
     if (result.length >= limit) break;
   }
   // 保留分を末尾に流す
@@ -708,18 +748,16 @@ export async function fetchEventPlaylistVideos(
       id: videos.id,
       title: videos.title,
       youtube_video_id: videos.youtube_video_id,
-      display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
+      display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.creator_display_name}, ${videos.creator_x_user_id})`,
       scheduled_time: videos.scheduled_time,
     })
     .from(videos)
     .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
     .where(
       and(
         eq(videoEvents.event_id, eventId),
-        eq(videos.status, "public"),
-        eq(videos.is_deleted, 0),
-        eq(videos.is_manual_hidden, 0),
+        eq(videos.visibility_status, "public"),
       )!,
     )
     .orderBy(asc(videos.scheduled_time))

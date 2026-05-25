@@ -148,7 +148,7 @@ export function UserAdminForm({
           連携 X ID のアイコン再計算
         </h2>
         <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
-          各 X ID について、同 creator_id の最新作品の icon_url から `x_users.icon_url` を再設定します。
+          各 X ID について、同 creator_x_user_id の最新作品の icon_url から `x_users.icon_url` を再設定します。
         </p>
         {xUserIds.length === 0 ? (
           <p className="fn-muted fn-text-sm" style={{ marginTop: 6 }}>

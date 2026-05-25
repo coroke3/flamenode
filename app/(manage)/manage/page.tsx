@@ -1,12 +1,13 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
 import {
   events as eventsTable,
-  eventEditors as eventEditorsTable,
+  eventStaff as eventStaffTable,
+  eventStaffPermissions as eventStaffPermissionsTable,
   historyLogs as historyLogsTable,
   notificationOutbox as notificationOutboxTable,
   videos as videosTable,
@@ -42,18 +43,29 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
 
   const activeX = user.active_x_user_id;
 
-  // event_editors を活性 X ID で参照。X ID 未選択時は空配列を返す。
+  // event_staff / event_staff_permissions を活性 X ID で参照。X ID 未選択時は空配列を返す。
   // ただし管理者は全イベントを操作可なので、active X が無くても見える状態にする。
-  const myEditorRows = activeX
-    ? await db
-        .select({
-          event_id: eventEditorsTable.event_id,
-          role: eventEditorsTable.role,
-          approved_at: eventEditorsTable.approved_at,
-        })
-        .from(eventEditorsTable)
-        .where(eq(eventEditorsTable.x_user_id, activeX))
-    : [];
+  const subjectCondition = activeX
+    ? or(
+        eq(eventStaffTable.x_user_id, activeX),
+        eq(eventStaffTable.discord_user_id, user.id),
+      )!
+    : eq(eventStaffTable.discord_user_id, user.id);
+  const staffPermissionRows = await db
+    .select({
+      event_id: eventStaffTable.event_id,
+      role: eventStaffTable.role,
+      approved_at: eventStaffTable.approved_at,
+    })
+    .from(eventStaffTable)
+    .innerJoin(
+      eventStaffPermissionsTable,
+      eq(eventStaffPermissionsTable.event_staff_id, eventStaffTable.id),
+    )
+    .where(and(subjectCondition, eq(eventStaffPermissionsTable.allowed, 1))!);
+  const myEditorRows = Array.from(
+    new Map(staffPermissionRows.map((row) => [row.event_id, row])).values(),
+  );
 
   const eventIds = myEditorRows.map((r) => r.event_id);
   const isAdmin = user.role === "admin";
@@ -81,7 +93,7 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
       .where(
         and(
           inArray(videoEventsTable.event_id, eventIds),
-          eq(videosTable.status, "pending"),
+          eq(videosTable.visibility_status, "pending"),
         )!,
       )
       .groupBy(videoEventsTable.event_id);

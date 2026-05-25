@@ -3,8 +3,8 @@ import "server-only";
 import { and, eq, inArray, or } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
-  eventCollaboratorPermissions,
-  eventEditors,
+  eventStaff,
+  eventStaffPermissions,
 } from "@/lib/db/schema";
 import { getApprovedXIds } from "./ownership";
 
@@ -43,32 +43,28 @@ export async function getManagementAccess(user: {
   const approvedXIds = await getApprovedXIds(db, user.id);
   const eventIds = new Set<string>();
 
-  if (approvedXIds.length > 0) {
-    const editorRows = await db
-      .select({ event_id: eventEditors.event_id })
-      .from(eventEditors)
-      .where(inArray(eventEditors.x_user_id, approvedXIds));
-    editorRows.forEach((row) => eventIds.add(row.event_id));
-  }
-
   const subjectCondition =
     approvedXIds.length > 0
       ? or(
-          eq(eventCollaboratorPermissions.discord_user_id, user.id),
-          inArray(eventCollaboratorPermissions.x_user_id, approvedXIds),
+          eq(eventStaff.discord_user_id, user.id),
+          inArray(eventStaff.x_user_id, approvedXIds),
         )!
-      : eq(eventCollaboratorPermissions.discord_user_id, user.id);
+      : eq(eventStaff.discord_user_id, user.id);
 
-  const collaboratorRows = await db
-    .select({ event_id: eventCollaboratorPermissions.event_id })
-    .from(eventCollaboratorPermissions)
+  const staffRows = await db
+    .select({ event_id: eventStaff.event_id })
+    .from(eventStaff)
+    .innerJoin(
+      eventStaffPermissions,
+      eq(eventStaffPermissions.event_staff_id, eventStaff.id),
+    )
     .where(
       and(
-        eq(eventCollaboratorPermissions.allowed, 1),
+        eq(eventStaffPermissions.allowed, 1),
         subjectCondition,
       )!,
     );
-  collaboratorRows.forEach((row) => eventIds.add(row.event_id));
+  staffRows.forEach((row) => eventIds.add(row.event_id));
 
   const manageableEventIds = [...eventIds].sort();
   return {

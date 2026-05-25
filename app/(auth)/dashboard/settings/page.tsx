@@ -63,7 +63,7 @@ export default async function SettingsPage({
     : [];
 
   // X ID ごとのアイコン候補を共通関数で取得する。
-  // (旧コードはページ内で xUserIcons / videos.icon_url を直接 select していたが、
+  // (旧コードはページ内で xUserIcons / videos.creator_icon_url を直接 select していたが、
   //  投稿フォーム側でも同じ候補ロジックを使うため `getXIconCandidates` に集約した)
   const iconCandidatesById: Record<string, string[]> = {};
   if (db && xIds.length > 0) {

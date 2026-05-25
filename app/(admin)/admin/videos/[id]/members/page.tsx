@@ -1,10 +1,9 @@
 import * as React from "react";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
-  videoMemberChapters,
   videoMembers,
   videos as videosTable,
   xUsers,
@@ -31,6 +30,30 @@ function formatChapterTime(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+function parseMemberChapters(raw: string | null): VideoMemberInput["chapters"] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const row = item as Record<string, unknown>;
+        const time = Number(row.time_seconds ?? row.time ?? row.chapter_time);
+        const label = String(row.label ?? row.chapter_label ?? "").trim();
+        if (!Number.isFinite(time) || !label) return null;
+        return {
+          time: formatChapterTime(time),
+          label,
+          note: String(row.note ?? ""),
+        };
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null);
+  } catch {
+    return [];
+  }
+}
+
 export default async function AdminVideoMembersPage({
   params,
 }: Props): Promise<React.ReactElement> {
@@ -44,7 +67,7 @@ export default async function AdminVideoMembersPage({
         id: videosTable.id,
         title: videosTable.title,
         youtube_video_id: videosTable.youtube_video_id,
-        submission_type: videosTable.submission_type,
+        collaboration_type: videosTable.collaboration_type,
       })
       .from(videosTable)
       .where(eq(videosTable.id, id))
@@ -59,49 +82,19 @@ export default async function AdminVideoMembersPage({
       x_user_id: videoMembers.x_user_id,
       role: videoMembers.role,
       comment: videoMembers.comment,
+      chapters_json: videoMembers.chapters_json,
       order_index: videoMembers.order_index,
     })
     .from(videoMembers)
     .where(eq(videoMembers.video_id, video.id))
     .orderBy(videoMembers.order_index, videoMembers.name);
 
-  const memberIds = memberRows.map((m) => m.id);
-  const chapterRows =
-    memberIds.length > 0
-      ? await db
-          .select({
-            video_member_id: videoMemberChapters.video_member_id,
-            chapter_time: videoMemberChapters.chapter_time,
-            chapter_label: videoMemberChapters.chapter_label,
-            note: videoMemberChapters.note,
-            order_index: videoMemberChapters.order_index,
-          })
-          .from(videoMemberChapters)
-          .where(inArray(videoMemberChapters.video_member_id, memberIds))
-          .orderBy(
-            videoMemberChapters.video_member_id,
-            videoMemberChapters.order_index,
-            videoMemberChapters.chapter_time,
-          )
-      : [];
-
-  const chaptersByMember = new Map<string, VideoMemberInput["chapters"]>();
-  for (const chapter of chapterRows) {
-    const rows = chaptersByMember.get(chapter.video_member_id) ?? [];
-    rows.push({
-      time: formatChapterTime(Number(chapter.chapter_time)),
-      label: chapter.chapter_label,
-      note: chapter.note ?? "",
-    });
-    chaptersByMember.set(chapter.video_member_id, rows);
-  }
-
   const initialMembers: VideoMemberInput[] = memberRows.map((member) => ({
     name: member.name,
     x_user_id: member.x_user_id ?? "",
     role: member.role ?? "",
     comment: member.comment ?? "",
-    chapters: chaptersByMember.get(member.id) ?? [],
+    chapters: parseMemberChapters(member.chapters_json),
   }));
 
   const suggestionRows = await db

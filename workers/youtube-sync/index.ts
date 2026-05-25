@@ -23,9 +23,12 @@ export default {
 async function syncBatch(env: Env): Promise<void> {
   if (!env.YOUTUBE_API_KEY) return;
   const rows = await env.DB.prepare(
-    `SELECT id, youtube_video_id FROM videos
-     WHERE youtube_video_id IS NOT NULL AND is_deleted = 0
-     ORDER BY youtube_synced_at ASC NULLS FIRST LIMIT ?1`,
+    `SELECT v.id, v.youtube_video_id
+     FROM videos v
+     LEFT JOIN video_youtube_metadata ym ON ym.video_id = v.id
+     WHERE v.youtube_video_id IS NOT NULL
+       AND v.visibility_status NOT IN ('archived', 'voided')
+     ORDER BY ym.synced_at ASC NULLS FIRST LIMIT ?1`,
   )
     .bind(BATCH)
     .all<{ id: string; youtube_video_id: string }>();
@@ -52,10 +55,24 @@ async function syncBatch(env: Env): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
   for (const item of data.items ?? []) {
     await env.DB.prepare(
-      `UPDATE videos
-       SET youtube_view_count = ?1, youtube_status = ?2, youtube_duration_seconds = ?3,
-           youtube_synced_at = ?4, updated_at = ?4
-       WHERE youtube_video_id = ?5`,
+      `INSERT INTO video_youtube_metadata (
+         video_id, youtube_video_id, youtube_privacy_status,
+         youtube_availability_status, duration_seconds, view_count,
+         synced_at, sync_status, updated_at
+       )
+       SELECT id, youtube_video_id, ?2, ?2, ?3, ?1, ?4, 'synced', ?4
+       FROM videos
+       WHERE youtube_video_id = ?5
+       ON CONFLICT(video_id) DO UPDATE SET
+         youtube_video_id = excluded.youtube_video_id,
+         youtube_privacy_status = excluded.youtube_privacy_status,
+         youtube_availability_status = excluded.youtube_availability_status,
+         duration_seconds = excluded.duration_seconds,
+         view_count = excluded.view_count,
+         synced_at = excluded.synced_at,
+         sync_status = 'synced',
+         sync_error = NULL,
+         updated_at = excluded.updated_at`,
     )
       .bind(
         Number(item.statistics?.viewCount ?? 0),

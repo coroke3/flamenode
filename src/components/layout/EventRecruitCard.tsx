@@ -51,7 +51,7 @@ function stateLabel(state: RecruitState): string {
 }
 
 function ctaLabel(state: RecruitState, fallback: string): string {
-  if (state === "accepting") return "エントリーする";
+  if (state === "accepting") return "枠を確保する";
   if (state === "after_entry") return "作品を投稿する";
   return fallback;
 }
@@ -140,8 +140,8 @@ function resolveCta(
   switch (state) {
     case "accepting":
       return {
-        href: `/event/${event.id}#slot`,
-        label: "エントリーする",
+        href: `/event/${event.id}/slots`,
+        label: "枠を確保する",
         iconName: "calendar",
       };
     case "after_entry":

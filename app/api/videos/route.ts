@@ -35,7 +35,7 @@ export async function GET(req: Request): Promise<Response> {
   ]);
   // fetchPublicVideos は PUBLIC_VIDEO_KEYS と同列を select 済みだが、
   // ルート層でも明示的に pickKeys を通してホワイトリスト外フィールドを排除する。
-  // status は eq(videos.status, "public") でフィルタ済みのため "public" キャストは安全。
+  // visibility_status は public でフィルタ済みのため "public" キャストは安全。
   const items: PublicVideoDto[] = rows.map((row) => ({
     ...pickKeys(row, PUBLIC_VIDEO_KEYS),
     status: "public" as const,

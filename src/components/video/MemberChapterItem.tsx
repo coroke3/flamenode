@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils/cn";
  * メンバーチャプター 1 件の表示。
  *
  * ChapterCommentItem と見た目は近いが、通常チャプターコメントとは別データ・別用途。
- *   - メンバーチャプターは visibility や投稿者表示を持たない (内部は video_member_chapters)
+ *   - メンバーチャプターは visibility や投稿者表示を持たない (内部は video_members.chapters_json)
  *   - 公開ページの MemberSection 内でメンバー別グループの中に並ぶ
  *   - クリックで onSeek(chapter_time) を発火し、動画をシークする
  *

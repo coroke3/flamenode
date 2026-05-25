@@ -24,10 +24,11 @@ import {
 import { VideoIconPicker } from "@/components/forms/VideoIconPicker";
 import { normalizeXId } from "@/lib/utils/xid";
 import { ErrorCallout } from "@/components/ui/ErrorCallout";
+import { resolveStagePermissionFieldFromJson } from "@/lib/video/formSettings";
 
 export interface VideoFormInitialValues {
   display_name?: string;
-  contact_x_id?: string;
+  creator_x_user_id?: string;
   icon_url?: string;
   profile_text?: string;
   youtube_channel_url?: string;
@@ -39,6 +40,7 @@ export interface VideoFormInitialValues {
   credit?: string;
   intro_comment?: string;
   used_software?: string;
+  stage_permission?: string;
   highlights?: string;
   production_story?: string;
   closing_comment?: string;
@@ -52,6 +54,7 @@ export interface VideoFormInitialValues {
 export interface EventOption {
   id: string;
   title: string;
+  video_form_settings_json?: string | null;
 }
 
 export interface XIdOption {
@@ -90,7 +93,7 @@ interface VideoFormProps {
   submitBlockedReason?: string;
   /**
    * 作品アイコンの候補リスト。サーバー側で `getXIconCandidates(db, xId)` から取得する。
-   * x_users.icon_url / x_user_icons / 同 X ID の過去 videos.icon_url を新しい順で含む。
+   * x_users.icon_url / x_user_icons / 同 X ID の過去 videos.creator_icon_url を新しい順で含む。
    */
   iconCandidates?: string[];
   /**
@@ -171,6 +174,15 @@ export function VideoForm({
   const [selectedEventIds, setSelectedEventIds] = React.useState<string[]>(
     initial.event_ids ?? [],
   );
+  const selectedStagePermissionField = React.useMemo(
+    () =>
+      resolveStagePermissionFieldFromJson(
+        eventOptions
+          .filter((event) => selectedEventIds.includes(event.id))
+          .map((event) => event.video_form_settings_json),
+      ),
+    [eventOptions, selectedEventIds],
+  );
   const [pending, startTransition] = React.useTransition();
   const [result, setResult] = React.useState<VideoActionResult | null>(null);
   // 未保存変更がある状態でブラウザを離れようとしたときに警告を出すための dirty 判定。
@@ -190,7 +202,7 @@ export function VideoForm({
     return () => window.removeEventListener("beforeunload", handler);
   }, [dirty, pending]);
 
-  const normalizedInitialXId = normalizeXId(initial.contact_x_id || activeXId || "");
+  const normalizedInitialXId = normalizeXId(initial.creator_x_user_id || activeXId || "");
   const normalizedActiveXId = normalizeXId(activeXId || "");
   const hasSelectableXIds = xIdOptions.length > 0;
   const initialIsSelectable = xIdOptions.some(
@@ -325,7 +337,7 @@ export function VideoForm({
         </p>
         <div className={`${styles.row} cols-2`}>
           <div className={cx(styles.field, styles.editableField)}>
-            <label className={`${styles.label} ${styles.required}`} htmlFor="contact_x_id">
+            <label className={`${styles.label} ${styles.required}`} htmlFor="creator_x_user_id">
               提出主体 X ID
             </label>
             {isActiveXFixed ? (
@@ -333,14 +345,14 @@ export function VideoForm({
               normalizedActiveXId ? (
                 <>
                   <input
-                    id="contact_x_id"
-                    name="contact_x_id"
+                    id="creator_x_user_id"
+                    name="creator_x_user_id"
                     type="text"
                     value={normalizedActiveXId}
                     readOnly
                     className="fn-input"
                     aria-readonly="true"
-                    disabled={fieldDisabled("submitter.contact_x_id")}
+                    disabled={fieldDisabled("submitter.creator_x_user_id")}
                     style={{ opacity: 0.75, cursor: "default" }}
                   />
                   <p className={styles.help} style={{ marginTop: 4 }}>
@@ -365,7 +377,7 @@ export function VideoForm({
                 xIdOptions={xIdOptions}
                 hasSelectableXIds={hasSelectableXIds}
                 selectedDefault={selectedDefault}
-                disabled={fieldDisabled("submitter.contact_x_id")}
+                disabled={fieldDisabled("submitter.creator_x_user_id")}
                 sectionDisabled={isSectionDisabled(disabledSections, "submitter")}
                 canChangeSubmitter={canChangeSubmitter}
               />
@@ -734,6 +746,33 @@ export function VideoForm({
           ) : null}
         </div>
 
+        {selectedStagePermissionField ? (
+          <div className={cx(styles.field, styles.editableField)}>
+            <label
+              className={`${styles.label} ${
+                selectedStagePermissionField.required ? styles.required : ""
+              }`}
+              htmlFor="stage_permission"
+            >
+              {selectedStagePermissionField.label}
+            </label>
+            {selectedStagePermissionField.description ? (
+              <p className={styles.help}>{selectedStagePermissionField.description}</p>
+            ) : null}
+            <textarea
+              id="stage_permission"
+              name="stage_permission"
+              defaultValue={initial.stage_permission}
+              className="fn-input"
+              rows={3}
+              maxLength={1000}
+              required={selectedStagePermissionField.required}
+              placeholder={selectedStagePermissionField.placeholder}
+              disabled={fieldDisabled("descriptions.stage_permission")}
+            />
+          </div>
+        ) : null}
+
         <div className={cx(styles.field, styles.editableField)}>
           <label className={styles.label} htmlFor="closing_comment">
             あとがき
@@ -891,8 +930,8 @@ export function VideoForm({
  * 編集モードの提出主体 X ID フィールド。
  *
  * 既定状態:
- *   - 既存の creator_id / contact_x_id を **readOnly** で表示。
- *   - 一切送信されない (hidden name="contact_x_id" を出さない) わけにはいかない
+ *   - 既存の creator_x_user_id / creator_x_user_id を **readOnly** で表示。
+ *   - 一切送信されない (hidden name="creator_x_user_id" を出さない) わけにはいかない
  *     ので、視覚的に readOnly な input を出しつつサーバー側が現在値を維持する。
  *
  * 解錠 (admin がチェックボックスを ON):
@@ -933,8 +972,8 @@ function EditSubmitterField({
     return (
       <>
         <input
-          id="contact_x_id"
-          name="contact_x_id"
+          id="creator_x_user_id"
+          name="creator_x_user_id"
           type="text"
           defaultValue={initialXId}
           className="fn-input"
@@ -976,8 +1015,8 @@ function EditSubmitterField({
     <>
       <input type="hidden" name="allow_submitter_change" value="1" />
       <select
-        id="contact_x_id"
-        name="contact_x_id"
+        id="creator_x_user_id"
+        name="creator_x_user_id"
         className="fn-select"
         defaultValue={selectedDefault}
         required

@@ -1,21 +1,20 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { z } from "zod";
-import { and, desc, eq, isNotNull, or, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase, getEnv } from "@/lib/cloudflare";
 import {
   historyLogs,
   users,
-  customPages,
-  xAccountLinkRequests,
-  xUsers,
-  xUserIcons,
   videos,
+  xAccountLinkRequests,
+  xUserIcons,
+  xUsers,
 } from "@/lib/db/schema";
-import { generateId } from "@/lib/utils/id";
 import { detectSupportedImageUpload } from "@/lib/utils/imageUpload";
+import { generateId } from "@/lib/utils/id";
 import { normalizeHttpUrl } from "@/lib/utils/url";
 import { normalizeXId } from "@/lib/utils/xid";
 
@@ -24,42 +23,41 @@ export interface XIdActionResult {
   message?: string;
 }
 
+function nowUnix(): number {
+  return Math.floor(Date.now() / 1000);
+}
+
 function xUserIdMatches(xUserId: string) {
   return sql`lower(${xUsers.id}) = ${normalizeXId(xUserId)}`;
+}
+
+async function getSessionUserId(): Promise<string | null> {
+  const session = await auth().catch(() => null);
+  const user = session?.user as { id?: string } | undefined;
+  return user?.id ?? null;
 }
 
 function sanitizeSocialLinks(raw: string): string | null {
   const value = raw.trim();
   if (!value) return null;
+  if (value.length > 2000) return null;
   if (/\b(?:javascript|vbscript|data):/i.test(value)) return null;
   return value;
 }
 
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (char) => {
-    switch (char) {
-      case "&":
-        return "&amp;";
-      case "<":
-        return "&lt;";
-      case ">":
-        return "&gt;";
-      case '"':
-        return "&quot;";
-      case "'":
-        return "&#39;";
-      default:
-        return char;
-    }
-  });
+async function assertLinkedXUser(db: NonNullable<ReturnType<typeof getDatabase>>, xUserId: string, userId: string) {
+  const row = (
+    await db.select().from(xUsers).where(xUserIdMatches(xUserId)).limit(1)
+  )[0];
+  if (!row || row.linked_discord_user_id !== userId) return null;
+  return row;
 }
 
 export async function setActiveXId(
   formData: FormData,
 ): Promise<XIdActionResult> {
-  const session = await auth().catch(() => null);
-  const u = session?.user as { id?: string } | undefined;
-  if (!u?.id) return { ok: false, message: "ログインが必要です。" };
+  const userId = await getSessionUserId();
+  if (!userId) return { ok: false, message: "ログインが必要です。" };
 
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   if (!xUserId) return { ok: false, message: "X ID が指定されていません。" };
@@ -67,11 +65,8 @@ export async function setActiveXId(
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
 
-  const xRow = (
-    await db.select().from(xUsers).where(xUserIdMatches(xUserId)).limit(1)
-  )[0];
-  if (!xRow) return { ok: false, message: "X ID が見つかりません。" };
-  if (xRow.linked_discord_user_id !== u.id) {
+  const xRow = await assertLinkedXUser(db, xUserId, userId);
+  if (!xRow) {
     return {
       ok: false,
       message: "この X ID は現在のアカウントに紐づいていません。",
@@ -84,18 +79,18 @@ export async function setActiveXId(
     };
   }
 
-  const now = Math.floor(Date.now() / 1000);
+  const now = nowUnix();
   await db
     .update(users)
     .set({ active_x_user_id: xUserId })
-    .where(eq(users.id, u.id));
+    .where(eq(users.id, userId));
 
   await db.insert(historyLogs).values({
     table_name: "user",
-    record_id: u.id,
+    record_id: userId,
     action: "UPDATE",
     after_data: JSON.stringify({ active_x_user_id: xUserId }),
-    operator_discord_id: u.id,
+    operator_discord_id: userId,
     retention_class: "normal",
     created_at: now,
   });
@@ -109,9 +104,8 @@ export async function setActiveXId(
 export async function requestXIdLink(
   formData: FormData,
 ): Promise<XIdActionResult> {
-  const session = await auth().catch(() => null);
-  const u = session?.user as { id?: string } | undefined;
-  if (!u?.id) return { ok: false, message: "ログインが必要です。" };
+  const userId = await getSessionUserId();
+  if (!userId) return { ok: false, message: "ログインが必要です。" };
 
   const requestedXId = normalizeXId(String(formData.get("x_id") ?? ""));
   if (!requestedXId || !/^[a-z0-9_]{1,20}$/.test(requestedXId)) {
@@ -121,17 +115,16 @@ export async function requestXIdLink(
     };
   }
 
-  const linkTypeSchema = z.enum(["new", "merge", "alias"]);
-  const parsedLinkType = linkTypeSchema.safeParse(
-    String(formData.get("link_type") ?? "new"),
-  );
+  const parsedLinkType = z
+    .enum(["new", "merge", "alias"])
+    .safeParse(String(formData.get("link_type") ?? "new"));
   if (!parsedLinkType.success) {
-    return {
-      ok: false,
-      message: "不正な連携種別です。",
-    };
+    return { ok: false, message: "不正な連携種別です。" };
   }
   const linkType = parsedLinkType.data;
+  const targetXUserId = normalizeXId(
+    String(formData.get("target_x_user_id") ?? ""),
+  );
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
@@ -139,7 +132,7 @@ export async function requestXIdLink(
   const existingUser = (
     await db.select().from(xUsers).where(xUserIdMatches(requestedXId)).limit(1)
   )[0];
-  if (existingUser?.linked_discord_user_id === u.id) {
+  if (existingUser?.linked_discord_user_id === userId) {
     return {
       ok: false,
       message: "この X ID はすでに現在のアカウントに紐づいています。",
@@ -147,11 +140,12 @@ export async function requestXIdLink(
   }
   if (
     existingUser?.linked_discord_user_id &&
-    existingUser.linked_discord_user_id !== u.id
+    existingUser.linked_discord_user_id !== userId &&
+    linkType !== "merge"
   ) {
     return {
       ok: false,
-      message: "この X ID は別の Discord アカウントに紐づいています。",
+      message: "この X ID は別の Discord アカウントに紐づいています。統合申請を選んでください。",
     };
   }
 
@@ -161,7 +155,7 @@ export async function requestXIdLink(
       .from(xAccountLinkRequests)
       .where(
         and(
-          eq(xAccountLinkRequests.discord_user_id, u.id),
+          eq(xAccountLinkRequests.discord_user_id, userId),
           sql`lower(${xAccountLinkRequests.requested_x_id}) = ${requestedXId}`,
           eq(xAccountLinkRequests.status, "pending"),
         )!,
@@ -180,7 +174,7 @@ export async function requestXIdLink(
     .from(xAccountLinkRequests)
     .where(
       and(
-        eq(xAccountLinkRequests.discord_user_id, u.id),
+        eq(xAccountLinkRequests.discord_user_id, userId),
         eq(xAccountLinkRequests.status, "pending"),
       )!,
     );
@@ -191,14 +185,14 @@ export async function requestXIdLink(
     };
   }
 
-  const now = Math.floor(Date.now() / 1000);
+  const now = nowUnix();
   const id = generateId("xreq");
-
   await db.insert(xAccountLinkRequests).values({
     id,
-    discord_user_id: u.id,
+    discord_user_id: userId,
     requested_x_id: requestedXId,
     link_type: linkType,
+    target_x_user_id: targetXUserId || null,
     status: "pending",
     requested_at: now,
   });
@@ -207,8 +201,12 @@ export async function requestXIdLink(
     table_name: "x_account_link_requests",
     record_id: id,
     action: "CREATE",
-    after_data: JSON.stringify({ requested_x_id: requestedXId, link_type: linkType }),
-    operator_discord_id: u.id,
+    after_data: JSON.stringify({
+      requested_x_id: requestedXId,
+      link_type: linkType,
+      target_x_user_id: targetXUserId || null,
+    }),
+    operator_discord_id: userId,
     retention_class: "long_audit",
     created_at: now,
   });
@@ -223,19 +221,23 @@ export async function requestXIdLink(
 export async function updateXIdProfile(
   formData: FormData,
 ): Promise<XIdActionResult> {
-  const session = await auth().catch(() => null);
-  const u = session?.user as { id?: string } | undefined;
-  if (!u?.id) return { ok: false, message: "ログインが必要です。" };
+  const userId = await getSessionUserId();
+  if (!userId) return { ok: false, message: "ログインが必要です。" };
 
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   const xName = String(formData.get("x_name") ?? "").trim();
   const profileText = String(formData.get("profile_text") ?? "").trim();
-  const youtubeChannelRaw = String(formData.get("youtube_channel_url") ?? "").trim();
-  const otherSocialLinksRaw = String(formData.get("other_social_links") ?? "").trim();
+  const youtubeChannelRaw = String(
+    formData.get("youtube_channel_url") ?? "",
+  ).trim();
+  const otherSocialLinksRaw = String(
+    formData.get("other_social_links") ?? "",
+  ).trim();
   const youtubeChannelUrl = youtubeChannelRaw
     ? normalizeHttpUrl(youtubeChannelRaw, { maxLength: 500 })
     : null;
   const otherSocialLinks = sanitizeSocialLinks(otherSocialLinksRaw);
+
   if (!xUserId || !xName) {
     return { ok: false, message: "X ID と表示名が必要です。" };
   }
@@ -254,10 +256,8 @@ export async function updateXIdProfile(
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
-  const row = (
-    await db.select().from(xUsers).where(xUserIdMatches(xUserId)).limit(1)
-  )[0];
-  if (!row || row.linked_discord_user_id !== u.id) {
+  const row = await assertLinkedXUser(db, xUserId, userId);
+  if (!row) {
     return { ok: false, message: "この X ID を編集する権限がありません。" };
   }
 
@@ -271,13 +271,18 @@ export async function updateXIdProfile(
     })
     .where(xUserIdMatches(xUserId));
 
-  const now = Math.floor(Date.now() / 1000);
+  const now = nowUnix();
   await db.insert(historyLogs).values({
     table_name: "x_users",
     record_id: xUserId,
     action: "UPDATE",
-    after_data: JSON.stringify({ x_name: xName }),
-    operator_discord_id: u.id,
+    after_data: JSON.stringify({
+      x_name: xName,
+      profile_text: profileText || null,
+      youtube_channel_url: youtubeChannelUrl,
+      other_social_links: otherSocialLinks,
+    }),
+    operator_discord_id: userId,
     retention_class: "long_audit",
     created_at: now,
   });
@@ -288,72 +293,37 @@ export async function updateXIdProfile(
 }
 
 export async function enablePortfolio(
-  formData: FormData,
+  _formData: FormData,
 ): Promise<XIdActionResult> {
-  const session = await auth().catch(() => null);
-  const u = session?.user as { id?: string } | undefined;
-  if (!u?.id) return { ok: false, message: "ログインが必要です。" };
-  const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
-  const row = (
-    await db.select().from(xUsers).where(xUserIdMatches(xUserId)).limit(1)
-  )[0];
-  if (!row || row.linked_discord_user_id !== u.id) {
-    return { ok: false, message: "この X ID のポートフォリオを編集できません。" };
-  }
-  const now = Math.floor(Date.now() / 1000);
-  const existing = (
-    await db.select().from(customPages).where(eq(customPages.x_user_id, xUserId)).limit(1)
-  )[0];
-  const html = `<h1>${escapeHtml(row.x_name)}</h1><p>${escapeHtml(row.profile_text ?? "")}</p>`;
-  if (existing) {
-    await db
-      .update(customPages)
-      .set({ is_published: 1, updated_at: now })
-      .where(eq(customPages.id, existing.id));
-  } else {
-    await db.insert(customPages).values({
-      id: generateId("page"),
-      x_user_id: xUserId,
-      html,
-      css: "",
-      is_published: 1,
-      updated_at: now,
-    });
-  }
-  revalidatePath("/dashboard/settings");
-  revalidatePath(`/user/${xUserId}`);
-  revalidatePath(`/user/${xUserId}/portfolio`);
-  return { ok: true, message: "ポートフォリオを有効化しました。" };
+  void _formData;
+  return {
+    ok: false,
+    message: "Portfolio/custom_pages は初期本番では準備中です。",
+  };
 }
 
 export async function deleteLinkedXId(
   formData: FormData,
 ): Promise<XIdActionResult> {
-  const session = await auth().catch(() => null);
-  const u = session?.user as { id?: string } | undefined;
-  if (!u?.id) return { ok: false, message: "ログインが必要です。" };
+  const userId = await getSessionUserId();
+  if (!userId) return { ok: false, message: "ログインが必要です。" };
+
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   const confirm = String(formData.get("confirm") ?? "").trim();
-  if (confirm !== `DELETE ${xUserId}`) {
-    return { ok: false, message: `確認のため DELETE ${xUserId} と入力してください。` };
+  if (!xUserId || confirm !== `DELETE ${xUserId}`) {
+    return {
+      ok: false,
+      message: `確認のため DELETE ${xUserId} と入力してください。`,
+    };
   }
+
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
-  const row = (
-    await db.select().from(xUsers).where(xUserIdMatches(xUserId)).limit(1)
-  )[0];
-  if (!row || row.linked_discord_user_id !== u.id) {
+  const row = await assertLinkedXUser(db, xUserId, userId);
+  if (!row) {
     return { ok: false, message: "この X ID の連携を削除できません。" };
   }
-  // X ID 連携解除の方針:
-  //   - linked_discord_user_id を null にして Discord アカウントとのリンクを切る。
-  //   - approval_status は "pending" に戻す。再連携 → 再承認 のフローを徹底し、
-  //     乗っ取りや成りすましリスクを抑える。
-  //   - 同じ X ID を同じ Discord で再連携・再承認すれば、過去作品の編集権限は
-  //     canEditVideo の `approved` 一覧経由で復活する (creator_id / contact_x_id
-  //     は触らないため作品自体は浮かない)。
+
   await db
     .update(xUsers)
     .set({ linked_discord_user_id: null, approval_status: "pending" })
@@ -361,19 +331,21 @@ export async function deleteLinkedXId(
   await db
     .update(users)
     .set({ active_x_user_id: null })
-    .where(and(eq(users.id, u.id), sql`lower(${users.active_x_user_id}) = ${xUserId}`)!);
-  const now = Math.floor(Date.now() / 1000);
+    .where(
+      and(eq(users.id, userId), sql`lower(${users.active_x_user_id}) = ${xUserId}`)!,
+    );
+
+  const now = nowUnix();
   await db.insert(historyLogs).values({
     table_name: "x_users",
     record_id: xUserId,
     action: "UPDATE",
     after_data: JSON.stringify({ linked_discord_user_id: null }),
-    operator_discord_id: u.id,
+    operator_discord_id: userId,
     retention_class: "long_audit",
     created_at: now,
   });
-  // 連携解除は表示にも影響する (ヘッダーの X ID リスト・ユーザーページ等)。
-  // 関連パスを広めに revalidate して即時反映する。
+
   revalidatePath("/dashboard/settings");
   revalidatePath("/dashboard");
   revalidatePath("/");
@@ -384,9 +356,8 @@ export async function deleteLinkedXId(
 export async function setXIdIcon(
   formData: FormData,
 ): Promise<XIdActionResult> {
-  const session = await auth().catch(() => null);
-  const u = session?.user as { id?: string } | undefined;
-  if (!u?.id) return { ok: false, message: "ログインが必要です。" };
+  const userId = await getSessionUserId();
+  if (!userId) return { ok: false, message: "ログインが必要です。" };
 
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   const iconUrl = String(formData.get("icon_url") ?? "").trim();
@@ -396,15 +367,14 @@ export async function setXIdIcon(
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
-  const row = (
-    await db.select().from(xUsers).where(xUserIdMatches(xUserId)).limit(1)
-  )[0];
-  if (!row || row.linked_discord_user_id !== u.id) {
+  const row = await assertLinkedXUser(db, xUserId, userId);
+  if (!row) {
     return { ok: false, message: "この X ID を編集する権限がありません。" };
   }
 
   const candidates = new Set<string>();
   if (row.icon_url) candidates.add(row.icon_url);
+
   const iconRows = await db
     .select({ icon_url: xUserIcons.icon_url })
     .from(xUserIcons)
@@ -414,15 +384,12 @@ export async function setXIdIcon(
   iconRows.forEach((r) => candidates.add(r.icon_url));
 
   const videoRows = await db
-    .select({ icon_url: videos.icon_url })
+    .select({ icon_url: videos.creator_icon_url })
     .from(videos)
     .where(
       and(
-        or(
-          sql`lower(${videos.creator_id}) = ${xUserId}`,
-          sql`lower(${videos.contact_x_id}) = ${xUserId}`,
-        )!,
-        isNotNull(videos.icon_url),
+        sql`lower(${videos.creator_x_user_id}) = ${xUserId}`,
+        isNotNull(videos.creator_icon_url),
       )!,
     )
     .orderBy(desc(videos.created_at))
@@ -435,18 +402,15 @@ export async function setXIdIcon(
     return { ok: false, message: "選択できないアイコンです。" };
   }
 
-  await db
-    .update(xUsers)
-    .set({ icon_url: iconUrl })
-    .where(xUserIdMatches(xUserId));
+  await db.update(xUsers).set({ icon_url: iconUrl }).where(xUserIdMatches(xUserId));
 
-  const now = Math.floor(Date.now() / 1000);
+  const now = nowUnix();
   await db.insert(historyLogs).values({
     table_name: "x_users",
     record_id: xUserId,
     action: "UPDATE",
     after_data: JSON.stringify({ icon_url: iconUrl, source: "select" }),
-    operator_discord_id: u.id,
+    operator_discord_id: userId,
     retention_class: "long_audit",
     created_at: now,
   });
@@ -461,9 +425,8 @@ export async function setXIdIcon(
 export async function uploadXIdIcon(
   formData: FormData,
 ): Promise<XIdActionResult & { iconUrl?: string }> {
-  const session = await auth().catch(() => null);
-  const u = session?.user as { id?: string } | undefined;
-  if (!u?.id) return { ok: false, message: "ログインが必要です。" };
+  const userId = await getSessionUserId();
+  if (!userId) return { ok: false, message: "ログインが必要です。" };
 
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   const file = formData.get("icon_file");
@@ -473,10 +436,8 @@ export async function uploadXIdIcon(
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
-  const row = (
-    await db.select().from(xUsers).where(xUserIdMatches(xUserId)).limit(1)
-  )[0];
-  if (!row || row.linked_discord_user_id !== u.id) {
+  const row = await assertLinkedXUser(db, xUserId, userId);
+  if (!row) {
     return { ok: false, message: "この X ID を編集する権限がありません。" };
   }
 
@@ -496,8 +457,7 @@ export async function uploadXIdIcon(
   if (Number(manualIconCount[0]?.count ?? 0) >= 24) {
     return {
       ok: false,
-      message:
-        "手動アップロードの候補が上限に達しています。既存候補から選択してください。",
+      message: "手動アップロードの候補が上限に達しています。既存候補から選択してください。",
     };
   }
 
@@ -506,18 +466,22 @@ export async function uploadXIdIcon(
     return { ok: false, message: "ストレージが利用できません。" };
   }
 
-  const buf = await file.arrayBuffer();
-  const image = detectSupportedImageUpload(buf);
+  const buffer = await file.arrayBuffer();
+  const image = detectSupportedImageUpload(buffer);
   if (!image) {
-    return { ok: false, message: "PNG/JPEG/WEBP 画像ファイルのみアップロードできます。" };
+    return {
+      ok: false,
+      message: "PNG/JPEG/WEBP 画像ファイルのみアップロードできます。",
+    };
   }
+
   const key = `xicons/${xUserId}/${generateId("xicon")}.${image.ext}`;
-  await env.BUCKET.put(key, buf, {
+  await env.BUCKET.put(key, buffer, {
     httpMetadata: { contentType: image.contentType },
   });
   const iconUrl = `/api/media/${key}`;
 
-  const now = Math.floor(Date.now() / 1000);
+  const now = nowUnix();
   await db.insert(xUserIcons).values({
     id: generateId("xicon"),
     x_user_id: xUserId,
@@ -526,17 +490,14 @@ export async function uploadXIdIcon(
     source_type: "manual",
     created_at: now,
   });
-  await db
-    .update(xUsers)
-    .set({ icon_url: iconUrl })
-    .where(xUserIdMatches(xUserId));
+  await db.update(xUsers).set({ icon_url: iconUrl }).where(xUserIdMatches(xUserId));
 
   await db.insert(historyLogs).values({
     table_name: "x_users",
     record_id: xUserId,
     action: "UPDATE",
     after_data: JSON.stringify({ icon_url: iconUrl, source: "upload" }),
-    operator_discord_id: u.id,
+    operator_discord_id: userId,
     retention_class: "long_audit",
     created_at: now,
   });
@@ -545,5 +506,9 @@ export async function uploadXIdIcon(
   revalidatePath("/dashboard");
   revalidatePath("/");
   revalidatePath(`/user/${xUserId}`);
-  return { ok: true, message: "アイコンをアップロードしました。", iconUrl };
+  return {
+    ok: true,
+    message: "アイコンをアップロードしました。",
+    iconUrl,
+  };
 }

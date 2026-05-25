@@ -115,22 +115,7 @@ async function applyMigrationsIfNeeded(DB: LocalD1Database): Promise<void> {
     .sort();
 
   for (const file of files) {
-    const sqlText = fs.readFileSync(path.join(dir, file), "utf8");
-    const statements = sqlText
-      .split(/-->\s*statement-breakpoint\s*/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-    for (const stmt of statements) {
-      try {
-        await DB.prepare(stmt).run();
-      } catch (e) {
-        console.error(
-          `[instrumentation] migration error in ${file}:`,
-          (e as Error).message,
-        );
-      }
-    }
-    console.log(`[instrumentation] Applied migration: ${file}`);
+    await applyMigrationFile(DB, file);
   }
 
   // 初期 system_settings
@@ -145,7 +130,70 @@ async function applyMigrationsIfNeeded(DB: LocalD1Database): Promise<void> {
   await repairLocalSchemaDrift(DB);
 }
 
+async function applyMigrationFile(
+  DB: LocalD1Database,
+  file: string,
+): Promise<void> {
+  const req = eval("require") as NodeRequire;
+  const fs = req("node:fs") as typeof import("node:fs");
+  const path = req("node:path") as typeof import("node:path");
+  const fullPath = path.join(process.cwd(), "migrations", file);
+  if (!fs.existsSync(fullPath)) {
+    console.warn(`[instrumentation] migration file not found: ${file}`);
+    return;
+  }
+
+  const sqlText = fs.readFileSync(fullPath, "utf8");
+  const statements = sqlText
+    .split(/-->\s*statement-breakpoint\s*/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (const stmt of statements) {
+    try {
+      await DB.prepare(stmt).run();
+    } catch (e) {
+      console.error(
+        `[instrumentation] migration error in ${file}:`,
+        (e as Error).message,
+      );
+    }
+  }
+  console.log(`[instrumentation] Applied migration: ${file}`);
+}
+
 async function repairLocalSchemaDrift(DB: LocalD1Database): Promise<void> {
+  if (
+    (await tableExists(DB, "videos")) &&
+    !(await columnExists(DB, "videos", "creator_x_user_id"))
+  ) {
+    console.log("[instrumentation] Repairing local videos schema with 0018");
+    await applyMigrationFile(DB, "0018_simplify_video_schema.sql");
+  }
+
+  if (
+    (await tableExists(DB, "videos")) &&
+    ((await columnExists(DB, "videos", "used_software")) ||
+      !(await tableExists(DB, "video_softwares")) ||
+      !(await tableExists(DB, "event_staff")))
+  ) {
+    console.log("[instrumentation] Repairing local staff/software schema with 0019");
+    await applyMigrationFile(
+      DB,
+      "0019_clean_staff_software_and_disabled_features.sql",
+    );
+  }
+
+  if (
+    (await tableExists(DB, "videos")) &&
+    (!(await columnExists(DB, "videos", "collaboration_type")) ||
+      (await columnExists(DB, "videos", "view_count")) ||
+      !(await tableExists(DB, "video_stats")) ||
+      !(await tableExists(DB, "video_youtube_metadata")))
+  ) {
+    console.log("[instrumentation] Repairing local slim video schema with 0020");
+    await applyMigrationFile(DB, "0020_split_video_core_metadata_stats.sql");
+  }
+
   if (await tableExists(DB, "events")) {
     await ensureColumn(
       DB,
@@ -170,6 +218,12 @@ async function repairLocalSchemaDrift(DB: LocalD1Database): Promise<void> {
       "events",
       "user_video_edit_permission_keys_json",
       "ALTER TABLE `events` ADD `user_video_edit_permission_keys_json` text",
+    );
+    await ensureColumn(
+      DB,
+      "events",
+      "video_form_settings_json",
+      "ALTER TABLE `events` ADD `video_form_settings_json` text",
     );
   }
 
@@ -206,42 +260,7 @@ async function repairLocalSchemaDrift(DB: LocalD1Database): Promise<void> {
     );
   }
 
-  // メンバーチャプター (migration 0017): video_member_chapters テーブル。
-  // テーブルが無ければ作成 (instrumentation の補修ルートは「テーブル無し」ケースを
-  // 通常 ensureColumn では拾えないので CREATE TABLE IF NOT EXISTS で対処する)
-  await DB.prepare(
-    `CREATE TABLE IF NOT EXISTS video_member_chapters (
-      id TEXT PRIMARY KEY,
-      video_id TEXT NOT NULL,
-      video_member_id TEXT NOT NULL,
-      chapter_time REAL NOT NULL,
-      chapter_label TEXT NOT NULL,
-      note TEXT,
-      order_index INTEGER DEFAULT 0,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    )`,
-  )
-    .run()
-    .catch((e: unknown) => {
-      console.warn(
-        "[instrumentation] Failed to ensure video_member_chapters:",
-        errorMessage(e),
-      );
-    });
-  if (await tableExists(DB, "video_member_chapters")) {
-    await ensureIndex(
-      DB,
-      "CREATE INDEX IF NOT EXISTS `video_member_chapters_video_idx` ON `video_member_chapters` (`video_id`,`chapter_time`)",
-      "video_member_chapters_video_idx",
-    );
-    await ensureIndex(
-      DB,
-      "CREATE INDEX IF NOT EXISTS `video_member_chapters_member_idx` ON `video_member_chapters` (`video_member_id`,`chapter_time`)",
-      "video_member_chapters_member_idx",
-    );
-  }
-
+  // メンバーチャプターは video_members.chapters_json が正本。
   if (await tableExists(DB, "history_logs")) {
     await ensureColumn(
       DB,
@@ -265,8 +284,8 @@ async function repairLocalSchemaDrift(DB: LocalD1Database): Promise<void> {
     await ensureColumn(
       DB,
       "video_members",
-      "name_for_sort",
-      "ALTER TABLE `video_members` ADD `name_for_sort` text",
+      "chapters_json",
+      "ALTER TABLE `video_members` ADD `chapters_json` text",
     );
     // Phase A (0016): 共同編集者カラム
     await ensureColumn(
@@ -315,21 +334,6 @@ async function repairLocalSchemaDrift(DB: LocalD1Database): Promise<void> {
       "CREATE INDEX IF NOT EXISTS `video_members_discord_idx` ON `video_members` (`discord_user_id`)",
       "video_members_discord_idx",
     );
-    await ensureIndex(
-      DB,
-      "CREATE INDEX IF NOT EXISTS `video_members_video_name_for_sort_idx` ON `video_members` (`video_id`,`name_for_sort`)",
-      "video_members_video_name_for_sort_idx",
-    );
-    try {
-      await DB.prepare(
-        "UPDATE `video_members` SET `name_for_sort` = lower(`name`) WHERE `name_for_sort` IS NULL",
-      ).run();
-    } catch (e) {
-      console.warn(
-        "[instrumentation] Failed to backfill video_members.name_for_sort:",
-        errorMessage(e),
-      );
-    }
   }
 }
 
@@ -343,6 +347,21 @@ async function tableExists(
       `SELECT name FROM sqlite_master WHERE type='table' AND name='${safeTableName}' LIMIT 1`,
     ).first();
     return Boolean(existing);
+  } catch {
+    return false;
+  }
+}
+
+async function columnExists(
+  DB: LocalD1Database,
+  tableName: string,
+  columnName: string,
+): Promise<boolean> {
+  try {
+    await DB.prepare(
+      `SELECT \`${columnName}\` FROM \`${tableName}\` LIMIT 1`,
+    ).first();
+    return true;
   } catch {
     return false;
   }

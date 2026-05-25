@@ -6,7 +6,7 @@ export type HomeFeatureVideo = {
   youtube_video_id: string | null;
   display_name: string;
   icon_url?: string | null;
-  creator_id?: string | null;
+  creator_x_user_id?: string | null;
   primary_event_id?: string | null;
   scheduled_time?: number | null;
   status?: string | null;

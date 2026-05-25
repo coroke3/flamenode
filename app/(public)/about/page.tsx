@@ -33,6 +33,8 @@ const FLOW = [
   "公開後に再生リストや個人ページからたどる",
 ];
 
+const LIST_HREF = "/list";
+
 export default function AboutPage(): React.ReactElement {
   return (
     <div className={styles.page}>
@@ -51,9 +53,9 @@ export default function AboutPage(): React.ReactElement {
             作品を見つける人にも、投稿する人にも、運営する人にも、同じ情報が同じ意味で届くことを目指しています。
           </p>
           <div className={styles.actions}>
-            <Link href="/list" className="fn-btn fn-btn-primary">
+            <a href={LIST_HREF} className="fn-btn fn-btn-primary">
               <Icon name="play" size={14} aria-hidden /> 作品を見る
-            </Link>
+            </a>
             <Link href="/entry" className="fn-btn fn-btn-ghost">
               <Icon name="calendar" size={14} aria-hidden /> 参加できるイベント
             </Link>

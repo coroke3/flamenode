@@ -21,7 +21,6 @@ import {
   type HomeIntroSlotStat,
 } from "@/components/layout/HomeIntroBand";
 import { HomeEditorialHero } from "@/components/layout/HomeEditorialHero";
-import { HomeMoodRail } from "@/components/layout/HomeMoodRail";
 import { HomeClosingCta } from "@/components/layout/HomeClosingCta";
 import { Shelf } from "@/components/layout/Shelf";
 import { SectionHeader } from "@/components/layout/SectionHeader";
@@ -138,7 +137,6 @@ export default async function TopPage(): Promise<React.ReactElement> {
     <div className={styles.page}>
       <HomeEditorialHero stats={stats} videos={heroVideos} />
       <HomeIntroBand activeEvents={activeEvents} slotStats={topSlotStats} />
-      <HomeMoodRail videos={heroVideos} />
 
       <section className={styles.section} aria-labelledby="sec-recommend">
         <SectionHeader title="今週のピックアップ" moreHref="/recommend" moreLabel="一覧を見る" />

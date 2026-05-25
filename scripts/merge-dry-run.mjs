@@ -72,12 +72,12 @@ console.log(`\nMerge dry-run: @${fromXId} → @${toXId} (${remote ? "REMOTE D1" 
 console.log("=".repeat(60));
 
 const targets = [
-  { name: "videos.creator_id", sql: `SELECT COUNT(*) AS c FROM videos WHERE creator_id = '${fromXId}'` },
+  { name: "videos.creator_x_user_id", sql: `SELECT COUNT(*) AS c FROM videos WHERE creator_x_user_id = '${fromXId}'` },
   { name: "video_chapters.x_user_id", sql: `SELECT COUNT(*) AS c FROM video_chapters WHERE x_user_id = '${fromXId}'` },
   { name: "video_members.x_user_id", sql: `SELECT COUNT(*) AS c FROM video_members WHERE x_user_id = '${fromXId}'` },
   { name: "slots.x_user_id", sql: `SELECT COUNT(*) AS c FROM slots WHERE x_user_id = '${fromXId}'` },
   { name: "video_interactions.x_user_id", sql: `SELECT COUNT(*) AS c FROM video_interactions WHERE x_user_id = '${fromXId}'` },
-  { name: "event_editors.x_user_id", sql: `SELECT COUNT(*) AS c FROM event_editors WHERE x_user_id = '${fromXId}'` },
+  { name: "event_staff.x_user_id", sql: `SELECT COUNT(*) AS c FROM event_staff WHERE x_user_id = '${fromXId}'` },
 ];
 
 let totalRows = 0;

@@ -18,7 +18,7 @@ export interface VideoMemberInput {
   comment: string;
   /**
    * メンバーチャプター。time / label / note の組を 0 件以上持つ。
-   * サーバー側 (replaceVideoMembers) で video_member_chapters に保存される。
+   * サーバー側 (replaceVideoMembers) で video_members.chapters_json に保存される。
    */
   chapters?: VideoMemberChapterInput[];
 }

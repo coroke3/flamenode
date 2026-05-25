@@ -27,8 +27,13 @@ export default {
 async function rebuildStaticJson(env: Env): Promise<void> {
   // 例: top.json
   const topRows = await env.DB.prepare(
-    `SELECT id, title, youtube_video_id, display_name, icon_url
-     FROM videos WHERE status = 'public' AND is_deleted = 0 AND is_manual_hidden = 0
+    `SELECT
+       id,
+       title,
+       youtube_video_id,
+       creator_display_name AS display_name,
+       creator_icon_url AS icon_url
+     FROM videos WHERE visibility_status = 'public'
      ORDER BY scheduled_time DESC LIMIT 60`,
   ).all();
   await env.R2.put(

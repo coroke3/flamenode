@@ -7,10 +7,10 @@ import { getDatabase } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
 import {
   events as eventsTable,
-  eventEditors as eventEditorsTable,
   slots as slotsTable,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
+import { canEditEvent } from "@/lib/auth/ownership";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 
@@ -53,25 +53,14 @@ export default async function ManageEventSlotsPage({
   )[0];
   if (!ev) notFound();
 
-  const activeX = user.active_x_user_id;
   const isAdmin = user.role === "admin";
-  if (activeX) {
-    const editor = (
-      await db
-        .select()
-        .from(eventEditorsTable)
-        .where(
-          and(
-            eq(eventEditorsTable.event_id, id),
-            eq(eventEditorsTable.x_user_id, activeX),
-          )!,
-        )
-        .limit(1)
-    )[0];
-    if (!editor && !isAdmin) notFound();
-  } else if (!isAdmin) {
-    notFound();
-  }
+  const canManageSlots = await canEditEvent(
+    db,
+    { id: user.id, role: user.role ?? null },
+    id,
+    "event.slots",
+  );
+  if (!canManageSlots && !isAdmin) notFound();
 
   const where =
     statusFilter === "all"

@@ -131,15 +131,6 @@ export async function runCleanup(env: Env): Promise<void> {
     .bind(longAuditCutoff)
     .run();
 
-  // voided 動画: voided_at から 30 日経過していたら is_deleted=1 を補正する。
-  await env.DB.prepare(
-    `UPDATE videos
-     SET is_deleted = 1, updated_at = ?1
-     WHERE status = 'voided'
-       AND is_deleted = 0
-       AND voided_at IS NOT NULL
-       AND voided_at < ?2`,
-  )
-    .bind(now, voidedHideCutoff)
-    .run();
+  // voided 動画: 無料枠防衛のため、ここでは D1 への動画状態 UPDATE を行わない。
+  voidedHideCutoff;
 }

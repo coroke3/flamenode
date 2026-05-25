@@ -14,9 +14,7 @@ interface PartStat {
   filled: number;
 }
 
-/**
- * 設計画像の「残枠状況」サイドバー。部別 + 合計を表示する。
- */
+/** 予約枠の埋まり具合を部別 + 合計で表示する。 */
 export function SlotStatusBoard({
   slots,
   slotPartGapSec,
@@ -39,18 +37,15 @@ export function SlotStatusBoard({
   return (
     <section
       style={{
-        border: "1px solid var(--border-subtle)",
-        borderRadius: "var(--radius-md)",
-        background: "var(--bg-surface)",
-        overflow: "hidden",
+        display: "grid",
+        gap: 10,
       }}
     >
       <header
         style={{
-          padding: "10px 14px",
-          background: "var(--bg-elevated)",
+          padding: 0,
           fontSize: 13,
-          fontWeight: 700,
+          fontWeight: 800,
         }}
       >
         残枠状況

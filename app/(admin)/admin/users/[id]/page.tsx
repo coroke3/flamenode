@@ -44,11 +44,11 @@ export default async function AdminUserDetailPage({
     .select({
       id: videosTable.id,
       title: videosTable.title,
-      status: videosTable.status,
+      status: videosTable.visibility_status,
       created_at: videosTable.created_at,
     })
     .from(videosTable)
-    .where(eq(videosTable.owner_discord_user_id, user.id))
+    .where(eq(videosTable.submitted_by_discord_user_id, user.id))
     .orderBy(desc(videosTable.created_at))
     .limit(20);
 

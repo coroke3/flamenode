@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { and, desc, eq, isNotNull } from "drizzle-orm";
+import { and, desc, eq, isNotNull, ne } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import { historyLogs, users, videos, xUsers } from "@/lib/db/schema";
@@ -179,7 +179,7 @@ export async function setUserNotifications(
 }
 
 /**
- * X user のアイコンを「同 creator_id の最新作品の icon_url」から再計算して反映する。
+ * X user のアイコンを「同 creator_x_user_id の最新作品の icon_url」から再計算して反映する。
  * legacy import 由来の `x_users.icon_url = NULL` を救済する管理者操作。
  */
 export async function refreshXUserIcon(
@@ -197,14 +197,14 @@ export async function refreshXUserIcon(
     submissionType: "individual" | "collab",
   ): Promise<string | null> => {
     const rows = await db
-      .select({ icon_url: videos.icon_url })
+      .select({ icon_url: videos.creator_icon_url })
       .from(videos)
       .where(
         and(
-          eq(videos.creator_id, xUserId),
-          isNotNull(videos.icon_url),
-          eq(videos.submission_type, submissionType),
-          eq(videos.is_deleted, 0),
+          eq(videos.creator_x_user_id, xUserId),
+          isNotNull(videos.creator_icon_url),
+          eq(videos.collaboration_type, submissionType),
+          ne(videos.visibility_status, "archived"),
         )!,
       )
       .orderBy(desc(videos.created_at))

@@ -10,7 +10,7 @@ import { buildHeaderUser, type HeaderUser } from "@/lib/auth/headerUser";
 /**
  * イベント運営者エリア共通レイアウト。
  * 担当イベントがあれば左にサイドバー (クイックナビ) を表示する。
- * 認可は各ページで判定する (eventEditors に該当行があるか)。
+ * 認可は各ページで判定する (event_staff_permissions に明示許可があるか)。
  */
 export default async function ManageLayout({
   children,

@@ -1,10 +1,11 @@
-import { and, desc, eq, gte, isNotNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, or, sql } from "drizzle-orm";
 import {
   events,
-  eventEditors,
+  eventStaff,
   videos,
   videoEvents,
   videoMembers,
+  videoStats,
   xUsers,
 } from "./schema";
 import { creatorIconExpr, creatorNameExpr } from "./displayExpr";
@@ -14,17 +15,12 @@ import { uniqueBy } from "@/lib/utils/unique";
 
 /**
  * 公開済みかつ表示対象の作品を絞り込む共通条件。
- *  - status == "public"
- *  - is_deleted = 0
- *  - is_manual_hidden = 0
+ *  - visibility_status == "public"
  */
-export const publicVideoCondition = and(
-  eq(videos.status, "public"),
-  eq(videos.is_deleted, 0),
-  eq(videos.is_manual_hidden, 0),
-);
+export const publicVideoCondition = eq(videos.visibility_status, "public");
+export const directVideoCondition = sql`${videos.visibility_status} IN ('public', 'limited')`;
 
-/** トップページのおすすめ作品候補 (video_score 上位 N 件)。 */
+/** トップページのおすすめ作品候補 (video_stats.score 上位 N 件)。 */
 export async function fetchRecommendedVideos(db: DB, limit = 40) {
   const rows = await db
     .select({
@@ -33,15 +29,16 @@ export async function fetchRecommendedVideos(db: DB, limit = 40) {
       youtube_video_id: videos.youtube_video_id,
       display_name: creatorNameExpr,
       icon_url: creatorIconExpr,
-      creator_id: videos.creator_id,
+      creator_x_user_id: videos.creator_x_user_id,
       primary_event_id: videos.primary_event_id,
       scheduled_time: videos.scheduled_time,
-      video_score: videos.video_score,
+      video_score: sql<number>`COALESCE(${videoStats.score}, 0)`,
     })
     .from(videos)
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
+    .leftJoin(videoStats, eq(videoStats.video_id, videos.id))
     .where(publicVideoCondition)
-    .orderBy(desc(videos.video_score), desc(videos.scheduled_time))
+    .orderBy(desc(videoStats.score), desc(videos.scheduled_time))
     .limit(limit);
   return resolveMissingIcons(db, uniqueBy(rows, (row) => row.id));
 }
@@ -49,8 +46,9 @@ export async function fetchRecommendedVideos(db: DB, limit = 40) {
 /**
  * 「見逃されている」候補。
  *
- * 単純に video_score 上位だけだと毎回同じ作品が顔を出すため、
- * 公開作品のうち「score が極端に低くない範囲」で `scheduled_time` 降順に並べる。
+ * 単純に score 上位だけだと毎回同じ作品が顔を出すため、
+ * 公開作品のうち score が低めの候補を新しい順で混ぜる。
+ * video_stats が未集計で 0 の作品も初期本番では自然に露出させる。
  * 呼び出し側 (`/recommend`) で `limitByCreatorAndEvent` を通して、作者・
  * イベントの偏りを抑えて 6 件程度に絞る前提の候補プール。
  *
@@ -65,21 +63,16 @@ export async function fetchUnderratedVideos(db: DB, limit = 60) {
       youtube_video_id: videos.youtube_video_id,
       display_name: creatorNameExpr,
       icon_url: creatorIconExpr,
-      creator_id: videos.creator_id,
+      creator_x_user_id: videos.creator_x_user_id,
       primary_event_id: videos.primary_event_id,
       scheduled_time: videos.scheduled_time,
-      video_score: videos.video_score,
+      video_score: sql<number>`COALESCE(${videoStats.score}, 0)`,
     })
     .from(videos)
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
-    .where(
-      and(
-        publicVideoCondition,
-        // 「極端に score が低い」作品 (=スパム的) を除く軽い下限。0 や負を除外。
-        gte(videos.video_score, 1),
-      )!,
-    )
-    .orderBy(desc(videos.scheduled_time), desc(videos.video_score))
+    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
+    .leftJoin(videoStats, eq(videoStats.video_id, videos.id))
+    .where(publicVideoCondition)
+    .orderBy(asc(sql<number>`COALESCE(${videoStats.score}, 0)`), desc(videos.scheduled_time))
     .limit(limit);
   return resolveMissingIcons(db, uniqueBy(rows, (row) => row.id));
 }
@@ -93,12 +86,12 @@ export async function fetchLatestVideos(db: DB, limit = 30) {
       youtube_video_id: videos.youtube_video_id,
       display_name: creatorNameExpr,
       icon_url: creatorIconExpr,
-      creator_id: videos.creator_id,
+      creator_x_user_id: videos.creator_x_user_id,
       primary_event_id: videos.primary_event_id,
       scheduled_time: videos.scheduled_time,
     })
     .from(videos)
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
     .where(publicVideoCondition)
     .orderBy(desc(videos.scheduled_time))
     .limit(limit);
@@ -128,12 +121,12 @@ export async function fetchVideosForEvent(
       youtube_video_id: videos.youtube_video_id,
       display_name: creatorNameExpr,
       icon_url: creatorIconExpr,
-      creator_id: videos.creator_id,
+      creator_x_user_id: videos.creator_x_user_id,
       scheduled_time: videos.scheduled_time,
     })
     .from(videos)
     .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
     .where(and(publicVideoCondition, eq(videoEvents.event_id, eventId))!)
     .orderBy(desc(videos.scheduled_time))
     .limit(limit);
@@ -158,7 +151,7 @@ export async function fetchVideoByIdOrYoutube(db: DB, idOrYoutube: string) {
     .where(
       and(
         or(eq(videos.id, idOrYoutube), eq(videos.youtube_video_id, idOrYoutube))!,
-        ne(videos.status, "voided"),
+        directVideoCondition,
       ),
     )
     .limit(1);
@@ -174,16 +167,16 @@ export async function fetchEventWithEditors(db: DB, eventId: string) {
   if (!ev[0]) return null;
   const editors = await db
     .select({
-      x_user_id: eventEditors.x_user_id,
-      role: eventEditors.role,
-      is_public: eventEditors.is_public,
-      public_role_label: eventEditors.public_role_label,
+      x_user_id: eventStaff.x_user_id,
+      role: eventStaff.role,
+      is_public: eventStaff.is_public,
+      public_role_label: eventStaff.public_role_label,
       x_name: xUsers.x_name,
       icon_url: xUsers.icon_url,
     })
-    .from(eventEditors)
-    .leftJoin(xUsers, eq(xUsers.id, eventEditors.x_user_id))
-    .where(eq(eventEditors.event_id, eventId));
+    .from(eventStaff)
+    .leftJoin(xUsers, eq(xUsers.id, eventStaff.x_user_id))
+    .where(eq(eventStaff.event_id, eventId));
   return { event: ev[0], editors };
 }
 
@@ -218,14 +211,14 @@ export async function fetchPickupCreators(db: DB, limit = 40) {
       icon_url: xUsers.icon_url,
       video_count: sql<number>`(
         SELECT COUNT(DISTINCT v.id) FROM videos AS v
-        WHERE v.creator_id = "x_users"."id"
-          AND v.status = 'public' AND v.is_deleted = 0 AND v.is_manual_hidden = 0
+        WHERE v.creator_x_user_id = "x_users"."id"
+          AND v.visibility_status = 'public'
       )`,
       collab_count: sql<number>`(
         SELECT COUNT(DISTINCT vm.video_id) FROM video_members AS vm
         INNER JOIN videos AS v ON v.id = vm.video_id
         WHERE vm.x_user_id = "x_users"."id"
-          AND v.status = 'public' AND v.is_deleted = 0 AND v.is_manual_hidden = 0
+          AND v.visibility_status = 'public'
       )`,
     })
     .from(xUsers)
@@ -238,8 +231,8 @@ export async function fetchPickupCreators(db: DB, limit = 40) {
     db,
     picked.map((row) => ({
       ...row,
-      creator_id: row.id,
+      creator_x_user_id: row.id,
     })),
   );
-  return withIcons.map(({ creator_id: _creatorId, ...row }) => row);
+  return withIcons.map(({ creator_x_user_id: _creatorId, ...row }) => row);
 }

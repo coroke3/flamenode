@@ -1,7 +1,7 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { getApprovedXIds } from "@/lib/auth/ownership";
 import styles from "./page.module.css";
 import { getDatabase } from "@/lib/cloudflare";
@@ -9,6 +9,8 @@ import {
   events as eventsTable,
   slots as slotsTable,
   videoChapters as videoChaptersTable,
+  videoStats,
+  videoYoutubeMetadata,
   videos as videosTable,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
@@ -59,7 +61,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
       // 「自分の作品」「自分のチャプター」は active X ID 単体ではなく、
       // 承認済み X ID 全件で集約する。複数 X ID を連携している場合に、
       // Active を切り替えた瞬間に「前の作品が消えた」ように見える事故を避ける。
-      // 投稿主体 (creator_id) の厳密性は writeGuard 側で担保されているので、
+      // 投稿主体 (creator_x_user_id) の厳密性は writeGuard 側で担保されているので、
       // ここの表示は「自分の資産の全体ビュー」として広く拾う。
       const approvedXIds = await getApprovedXIds(db, user.id);
       if (approvedXIds.length > 0) {
@@ -68,21 +70,21 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
             id: videosTable.id,
             title: videosTable.title,
             youtube_video_id: videosTable.youtube_video_id,
-            display_name: sql<string>`COALESCE(${videosTable.display_name}, ${xUsersTable.x_name}, '@' || ${videosTable.contact_x_id})`,
+            display_name: sql<string>`COALESCE(${videosTable.creator_display_name}, ${xUsersTable.x_name}, '@' || ${videosTable.creator_x_user_id})`,
             icon_url: sql<
               string | null
-            >`COALESCE(${videosTable.icon_url}, ${xUsersTable.icon_url})`,
-            creator_id: videosTable.creator_id,
+            >`COALESCE(${videosTable.creator_icon_url}, ${xUsersTable.icon_url})`,
+            creator_x_user_id: videosTable.creator_x_user_id,
             primary_event_id: videosTable.primary_event_id,
             scheduled_time: videosTable.scheduled_time,
-            status: videosTable.status,
+            status: videosTable.visibility_status,
           })
           .from(videosTable)
-          .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id))
+          .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id))
           .where(
             and(
-              inArray(videosTable.creator_id, approvedXIds),
-              eq(videosTable.is_deleted, 0),
+              inArray(videosTable.creator_x_user_id, approvedXIds),
+              ne(videosTable.visibility_status, "archived"),
             )!,
           )
           .orderBy(desc(videosTable.created_at))) as VideoCardData[];
@@ -138,16 +140,21 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
       if (approvedXIds.length > 0) {
         const aggRows = await db
           .select({
-            likes: sql<number>`COALESCE(SUM(${videosTable.like_count}),0)`,
-            views: sql<number>`COALESCE(SUM(${videosTable.youtube_view_count}),0)`,
+            likes: sql<number>`COALESCE(SUM(${videoStats.app_like_count}),0)`,
+            views: sql<number>`COALESCE(SUM(${videoYoutubeMetadata.view_count}),0)`,
             c: sql<number>`COUNT(*)`,
             ec: sql<number>`COUNT(${videosTable.primary_event_id})`,
           })
           .from(videosTable)
+          .leftJoin(videoStats, eq(videoStats.video_id, videosTable.id))
+          .leftJoin(
+            videoYoutubeMetadata,
+            eq(videoYoutubeMetadata.video_id, videosTable.id),
+          )
           .where(
             and(
-              inArray(videosTable.creator_id, approvedXIds),
-              eq(videosTable.is_deleted, 0),
+              inArray(videosTable.creator_x_user_id, approvedXIds),
+              ne(videosTable.visibility_status, "archived"),
             )!,
           );
         stats = {

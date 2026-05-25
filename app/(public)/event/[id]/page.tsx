@@ -12,7 +12,6 @@ import {
   videoEvents,
   xUsers,
 } from "@/lib/db/schema";
-import { getCurrentUser } from "@/lib/auth/currentUser";
 import { fetchEventWithEditors } from "@/lib/db/queries";
 import {
   computeEventStatus,
@@ -22,8 +21,6 @@ import {
 } from "@/lib/utils/eventStatus";
 import { Icon } from "@/components/ui/Icon";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
-import { SlotGrid, type SlotRow } from "@/components/event/SlotGrid";
-import { SlotStatusBoard } from "@/components/event/SlotStatusBoard";
 import { formatUnix } from "@/lib/utils/format";
 
 export const dynamic = "force-dynamic";
@@ -59,23 +56,22 @@ export default async function EventDetailPage({
         id: videos.id,
         title: videos.title,
         youtube_video_id: videos.youtube_video_id,
-        display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.display_name}, ${videos.contact_x_id})`,
+        display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.creator_display_name}, ${videos.creator_x_user_id})`,
         icon_url: sql<
           string | null
-        >`COALESCE(${videos.icon_url}, ${xUsers.icon_url})`,
-        creator_id: videos.creator_id,
+        >`COALESCE(${videos.creator_icon_url}, ${xUsers.icon_url})`,
+        creator_x_user_id: videos.creator_x_user_id,
         primary_event_id: videos.primary_event_id,
         scheduled_time: videos.scheduled_time,
-        status: videos.status,
+        status: videos.visibility_status,
       })
       .from(videos)
       .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
-      .leftJoin(xUsers, eq(xUsers.id, videos.creator_id))
+      .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
       .where(
         and(
           eq(videoEvents.event_id, id),
-          eq(videos.is_deleted, 0),
-          eq(videos.is_manual_hidden, 0),
+          eq(videos.visibility_status, "public"),
         )!,
       )
       .orderBy(asc(videos.scheduled_time), asc(videos.id))) as VideoCardData[];
@@ -88,8 +84,7 @@ export default async function EventDetailPage({
         .where(
           and(
             eq(videoEvents.event_id, id),
-            eq(videos.is_deleted, 0),
-            eq(videos.is_manual_hidden, 0),
+            eq(videos.visibility_status, "public"),
           )!,
         )
         .limit(1)
@@ -120,9 +115,7 @@ export default async function EventDetailPage({
 
   const visibleVideos = eventVideos.filter(
     (video) =>
-      video.status === "public" ||
-      video.status === "x_reapply_required" ||
-      video.status === "unlisted",
+      video.status === "public",
   );
 
   const accentVar = {
@@ -142,22 +135,6 @@ export default async function EventDetailPage({
     event.is_entry_open === 1 &&
     event.entry_end_time != null &&
     now > event.entry_end_time;
-
-  const viewer = await getCurrentUser();
-
-  const slotRowsForGrid: SlotRow[] = slotRows.map((slot) => ({
-    id: slot.id,
-    slot_kind: (slot.slot_kind ?? "time") as "time" | "count",
-    slot_label: slot.slot_label,
-    start_time: slot.start_time,
-    end_time: slot.end_time,
-    sort_order: slot.sort_order,
-    status: slot.status,
-    display_name: slot.display_name,
-    x_user_id: slot.x_user_id,
-    discord_user_id: slot.discord_user_id,
-    reservation_group_id: slot.reservation_group_id,
-  }));
 
   const slotTotal = slotRows.length;
   const availableSlots = slotRows.filter(
@@ -236,9 +213,9 @@ export default async function EventDetailPage({
               </Link>
             ) : null}
             {accepting ? (
-              <Link href="#slot" className="fn-btn fn-btn-primary">
+              <Link href={`/event/${event.id}/slots`} className="fn-btn fn-btn-primary">
                 <Icon name="calendar" size={14} aria-hidden />
-                エントリーする
+                枠を確保する
               </Link>
             ) : null}
             <Link href="/event" className="fn-btn fn-btn-ghost">
@@ -264,10 +241,10 @@ export default async function EventDetailPage({
       </section>
 
       {infoItems.length > 0 ? (
-        <section className={styles.infoTicker} aria-label="イベント情報">
-          <div className={styles.infoTickerTrack}>
-            {[...infoItems, ...infoItems].map((item, index) => (
-              <span key={`${item}-${index}`} className={styles.infoTickerItem}>
+        <section className={styles.infoStrip} aria-label="イベント情報">
+          <div className={styles.infoStripTrack}>
+            {infoItems.map((item) => (
+              <span key={item} className={styles.infoStripItem}>
                 {item}
               </span>
             ))}
@@ -316,61 +293,26 @@ export default async function EventDetailPage({
       ) : null}
 
       {slotRows.length > 0 || accepting ? (
-        <section id="slot" className={styles.section}>
+        <section className={styles.section}>
           <h2 className={styles.sectionTitle}>
             <Icon name="clock" size={16} aria-hidden />
             予約枠
           </h2>
-          <div className={styles.slotLayout}>
-            <div className={styles.slotMain}>
-              <SlotGrid
-                slots={slotRowsForGrid}
-                viewerXId={viewer?.active_x_user_id ?? null}
-                viewerActiveX={viewer?.active_x_user_id ?? null}
-                viewerDiscordId={viewer?.id ?? null}
-                canReserve={accepting}
-                slotKind={(event.slot_type ?? "time") as "time" | "count"}
-                maxConsecutiveSlots={event.max_consecutive_slots_per_entry ?? 1}
-                slotPartGapSec={(event.slot_part_gap_minutes ?? 30) * 60}
-              />
-              {!accepting ? (
-                <p className="fn-muted fn-text-sm" style={{ marginTop: 8 }}>
-                  <Icon name="info" size={12} aria-hidden />{" "}
-                  {status === "ended"
-                    ? "終了済みのため新規確保はできません。"
-                    : status === "scheduled"
-                      ? "受付開始までお待ちください。"
-                      : "現在は受付停止中です。"}
-                </p>
-              ) : !viewer?.id ? (
-                <p className="fn-muted fn-text-sm" style={{ marginTop: 8 }}>
-                  <Icon name="info" size={12} aria-hidden /> 確保には{" "}
-                  <Link
-                    href={`/entry?next=${encodeURIComponent(`/event/${event.id}#slot`)}`}
-                  >
-                    ログイン
-                  </Link>{" "}
-                  とアクティブ X ID が必要です。
-                </p>
-              ) : !viewer.active_x_user_id ? (
-                <p className="fn-muted fn-text-sm" style={{ marginTop: 8 }}>
-                  <Icon name="info" size={12} aria-hidden /> アクティブ X ID
-                  を選択してください ({" "}
-                  <Link
-                    href={`/dashboard/settings?next=${encodeURIComponent(`/event/${event.id}#slot`)}`}
-                  >
-                    設定
-                  </Link>{" "}
-                  )。
-                </p>
-              ) : null}
+          <div className={styles.slotSummary}>
+            <div>
+              <p className={styles.slotSummaryLead}>
+                枠の確保・解放・連続枠の操作は専用ページで行います。
+              </p>
+              <div className={styles.slotSummaryStats}>
+                <span>残り {availableSlots} / {slotTotal} 枠</span>
+                {slotFillRatio != null ? <span>{slotFillRatio}% 埋まり</span> : null}
+                <span>{accepting ? "受付中" : eventStatusLabel(status)}</span>
+              </div>
             </div>
-            <aside className={styles.slotAside}>
-              <SlotStatusBoard
-                slots={slotRowsForGrid}
-                slotPartGapSec={(event.slot_part_gap_minutes ?? 30) * 60}
-              />
-            </aside>
+            <Link href={`/event/${event.id}/slots`} className="fn-btn fn-btn-primary">
+              <Icon name="calendar" size={14} aria-hidden />
+              枠確保ページへ
+            </Link>
           </div>
         </section>
       ) : null}

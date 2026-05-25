@@ -10,6 +10,7 @@ import { youtubeThumbUrl, youtubeWatchUrl } from "@/lib/youtube/id";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { AdminVideoStatusForm } from "@/components/admin/AdminVideoStatusForm";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { getVideoSoftwareLabel } from "@/lib/db/software";
 
 export const metadata: Metadata = { title: "作品詳細" };
 export const dynamic = "force-dynamic";
@@ -30,30 +31,30 @@ export default async function AdminVideoDetailPage({
       .select({
         id: videosTable.id,
         title: videosTable.title,
-        creator_name: sql<string>`COALESCE(${xUsersTable.x_name}, ${videosTable.display_name}, ${videosTable.contact_x_id})`,
-        contact_x_id: videosTable.contact_x_id,
+        creator_name: sql<string>`COALESCE(${xUsersTable.x_name}, ${videosTable.creator_display_name}, ${videosTable.creator_x_user_id})`,
+        creator_x_user_id: videosTable.creator_x_user_id,
         created_at: videosTable.created_at,
         youtube_video_id: videosTable.youtube_video_id,
         music: videosTable.music,
         credit: videosTable.credit,
-        used_software: videosTable.used_software,
         intro_comment: videosTable.intro_comment,
         highlights: videosTable.highlights,
         production_story: videosTable.production_story,
-        status: videosTable.status,
+        status: videosTable.visibility_status,
       })
       .from(videosTable)
-      .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id))
+      .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id))
       .where(eq(videosTable.id, id))
       .limit(1)
   )[0];
   if (!video) notFound();
+  const softwareLabel = await getVideoSoftwareLabel(db, video.id);
 
   return (
     <div>
       <AdminPageHeader
         title={video.title}
-        description={`作者: ${video.creator_name} (@${video.contact_x_id}) / 登録: ${formatUnix(video.created_at)} (${formatRelative(video.created_at)})`}
+        description={`作者: ${video.creator_name} (@${video.creator_x_user_id}) / 登録: ${formatUnix(video.created_at)} (${formatRelative(video.created_at)})`}
         backHref="/admin/videos"
         backLabel="作品一覧へ"
         actions={[
@@ -138,7 +139,7 @@ export default async function AdminVideoDetailPage({
             <dt className="fn-muted">クレジット</dt>
             <dd>{video.credit ?? "-"}</dd>
             <dt className="fn-muted">使用ソフト</dt>
-            <dd>{video.used_software ?? "-"}</dd>
+            <dd>{softwareLabel ?? "-"}</dd>
             <dt className="fn-muted">紹介コメント</dt>
             <dd style={{ whiteSpace: "pre-wrap" }}>{video.intro_comment ?? "-"}</dd>
             <dt className="fn-muted">見どころ</dt>

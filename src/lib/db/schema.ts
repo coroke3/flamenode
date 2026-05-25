@@ -143,6 +143,10 @@ export const xUserIcons = sqliteTable(
       t.x_user_id,
       t.icon_url,
     ),
+    byUserCreated: index("x_user_icons_user_created_idx").on(
+      t.x_user_id,
+      t.created_at,
+    ),
   }),
 );
 
@@ -204,6 +208,11 @@ export const events = sqliteTable("events", {
    * サーバー側で除外して読み込む。
    */
   user_video_edit_permission_keys_json: text("user_video_edit_permission_keys_json"),
+  /**
+   * JSON settings for event-scoped video submission fields.
+   * Currently formalizes the optional/required stage_permission field.
+   */
+  video_form_settings_json: text("video_form_settings_json"),
   event_group_id: text("event_group_id"),
   slot_type: text("slot_type", { enum: ["time", "count"] }).default("time"),
   slot_visibility_mode: text("slot_visibility_mode", {
@@ -231,37 +240,22 @@ export const events = sqliteTable("events", {
   slot_part_gap_minutes: integer("slot_part_gap_minutes").default(30),
 });
 
-export const eventEditors = sqliteTable(
-  "event_editors",
-  {
-    event_id: text("event_id").notNull(),
-    x_user_id: text("x_user_id").notNull(),
-    role: text("role", { enum: ["representative", "editor"] }).default(
-      "editor",
-    ),
-    is_public: integer("is_public").default(1),
-    public_role_label: text("public_role_label"),
-    operation_scope_json: text("operation_scope_json"),
-    internal_note: text("internal_note"),
-    approved_by_user_id: text("approved_by_user_id"),
-    approved_at: integer("approved_at"),
-  },
-  (t) => ({ pk: primaryKey({ columns: [t.event_id, t.x_user_id] }) }),
-);
-
-export const eventCollaboratorPermissions = sqliteTable(
-  "event_collaborator_permissions",
+export const eventStaff = sqliteTable(
+  "event_staff",
   {
     id: text("id").primaryKey(),
     event_id: text("event_id").notNull(),
     x_user_id: text("x_user_id"),
     discord_user_id: text("discord_user_id"),
     display_name: text("display_name").notNull(),
-    permission_key: text("permission_key").notNull(),
-    allowed: integer("allowed").notNull().default(1),
-    is_public_staff: integer("is_public_staff").default(0),
+    role: text("role", { enum: ["representative", "editor", "staff"] })
+      .notNull()
+      .default("staff"),
+    is_public: integer("is_public").notNull().default(0),
     public_role_label: text("public_role_label"),
-    granted_by_user_id: text("granted_by_user_id").notNull(),
+    internal_note: text("internal_note"),
+    approved_by_user_id: text("approved_by_user_id"),
+    approved_at: integer("approved_at"),
     created_at: integer("created_at")
       .notNull()
       .default(sql`(unixepoch())`),
@@ -269,6 +263,41 @@ export const eventCollaboratorPermissions = sqliteTable(
       .notNull()
       .default(sql`(unixepoch())`),
   },
+  (t) => ({
+    eventXUniq: uniqueIndex("event_staff_event_x_uniq").on(
+      t.event_id,
+      t.x_user_id,
+    ),
+    eventDiscordUniq: uniqueIndex("event_staff_event_discord_uniq").on(
+      t.event_id,
+      t.discord_user_id,
+    ),
+    byEvent: index("event_staff_event_idx").on(t.event_id),
+  }),
+);
+
+export const eventStaffPermissions = sqliteTable(
+  "event_staff_permissions",
+  {
+    id: text("id").primaryKey(),
+    event_staff_id: text("event_staff_id").notNull(),
+    permission_key: text("permission_key").notNull(),
+    allowed: integer("allowed").notNull().default(1),
+    created_at: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updated_at: integer("updated_at")
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    staffPermissionUniq: uniqueIndex("event_staff_permissions_staff_key_uniq")
+      .on(t.event_staff_id, t.permission_key),
+    byPermission: index("event_staff_permissions_key_allowed_idx").on(
+      t.permission_key,
+      t.allowed,
+    ),
+  }),
 );
 
 /**
@@ -283,22 +312,6 @@ export const eventCollaboratorPermissions = sqliteTable(
  * X ID 未連携のメンバーにも先に権限を付与しておけて、後で Discord 連携・
  * 承認された時に getApprovedXIds 経由で有効化される。
  */
-export const videoCollaborators = sqliteTable("video_collaborators", {
-  id: text("id").primaryKey(),
-  video_id: text("video_id").notNull(),
-  x_user_id: text("x_user_id"),
-  discord_user_id: text("discord_user_id"),
-  display_name: text("display_name").notNull(),
-  can_edit: integer("can_edit").notNull().default(1),
-  granted_by_user_id: text("granted_by_user_id").notNull(),
-  created_at: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updated_at: integer("updated_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-});
-
 export const slots = sqliteTable("slots", {
   id: text("id").primaryKey(),
   event_id: text("event_id").notNull(),
@@ -333,17 +346,26 @@ export const slots = sqliteTable("slots", {
 
 export const videos = sqliteTable("videos", {
   id: text("id").primaryKey(),
+  // identity / owner
   primary_event_id: text("primary_event_id"),
-  creator_id: text("creator_id"),
-  owner_discord_user_id: text("owner_discord_user_id").notNull(),
-  submission_type: text("submission_type", {
-    enum: ["individual", "collab", "youtube"],
-  }).notNull(),
-  display_name: text("display_name").notNull(),
-  display_name_yomi: text("display_name_yomi"),
-  contact_x_id: text("contact_x_id").notNull(),
-  icon_url: text("icon_url"),
-  declared_experience: text("declared_experience"),
+  creator_x_user_id: text("creator_x_user_id"),
+  submitted_by_discord_user_id: text("submitted_by_discord_user_id").notNull(),
+  // classification
+  collaboration_type: text("collaboration_type", {
+    enum: ["individual", "collab"],
+  })
+    .notNull()
+    .default("individual"),
+  source_type: text("source_type", {
+    enum: ["youtube", "manual", "external"],
+  })
+    .notNull()
+    .default("youtube"),
+  // creator display snapshot
+  creator_display_name: text("creator_display_name").notNull(),
+  creator_display_name_yomi: text("creator_display_name_yomi"),
+  creator_icon_url: text("creator_icon_url"),
+  // basic content
   title: text("title").notNull(),
   music: text("music"),
   credit: text("credit"),
@@ -352,72 +374,34 @@ export const videos = sqliteTable("videos", {
   youtube_video_id: text("youtube_video_id"),
   stage_permission: text("stage_permission"),
   intro_comment: text("intro_comment"),
-  outro_comment: text("outro_comment"),
   highlights: text("highlights"),
   production_story: text("production_story"),
-  used_software: text("used_software"),
   custom_answers: text("custom_answers"),
-  view_count: integer("view_count").default(0),
-  like_count: integer("like_count").default(0),
-  youtube_view_count: integer("youtube_view_count").default(0),
-  youtube_synced_at: integer("youtube_synced_at"),
-  youtube_status: text("youtube_status"),
-  youtube_duration_seconds: integer("youtube_duration_seconds"),
-  trending_view_count_24h: integer("trending_view_count_24h").default(0),
-  video_score: real("video_score").default(0),
-  youtube_sync_status: text("youtube_sync_status", {
-    enum: ["pending", "synced", "failed"],
-  }).default("pending"),
-  validation_errors: text("validation_errors"),
   // NOTE (posting/youtube-id-and-active-x):
   //   "unlisted" は FlameNode 内部の限定公開状態 (URL 知っている人のみ閲覧可) を指す。
   //   YouTube 側の "限定公開 (unlisted)" とは別概念。
   //   YouTube 側が限定公開であっても FlameNode 側 status が "public" なら通常公開扱い。
   //   YouTube 側の privacy 状態は将来 youtube_privacy_status カラムで管理予定 (未実装)。
-  status: text("status", {
+  visibility_status: text("visibility_status", {
     enum: [
       "draft",
       "pending",
-      "x_reapply_required",
       "public",
-      "unlisted",
+      "limited",
       "private",
+      "hidden",
+      "archived",
       "voided",
     ],
   })
     .notNull()
     .default("draft"),
-  is_manual_hidden: integer("is_manual_hidden").default(0),
-  is_deleted: integer("is_deleted").default(0),
-  x_reapply_request_id: text("x_reapply_request_id"),
-  x_reapply_started_at: integer("x_reapply_started_at"),
-  x_reapply_due_at: integer("x_reapply_due_at"),
-  x_reapply_rejected_x_user_id: text("x_reapply_rejected_x_user_id"),
-  x_reapply_public_reason: text("x_reapply_public_reason"),
-  x_reapply_attempt_count: integer("x_reapply_attempt_count").default(0),
-  x_reapply_locked_until: integer("x_reapply_locked_until"),
-  voided_by_user_id: text("voided_by_user_id"),
-  voided_at: integer("voided_at"),
-  void_reason: text("void_reason"),
-  void_reason_category: text("void_reason_category", {
-    enum: [
-      "x_id_invalid",
-      "duplicate",
-      "withdrawn_by_creator",
-      "operator_decision",
-      "expired",
-    ],
-  }),
-  void_detail_private: text("void_detail_private"),
-  void_physical_delete_candidate_at: integer(
-    "void_physical_delete_candidate_at",
-  ),
-  void_restored_by_user_id: text("void_restored_by_user_id"),
-  void_restored_at: integer("void_restored_at"),
+  // scheduling
   scheduling_type: text("scheduling_type", {
     enum: ["slotted", "manual"],
   }).default("slotted"),
   scheduled_time: integer("scheduled_time"),
+  // timestamps
   created_at: integer("created_at")
     .notNull()
     .default(sql`(unixepoch())`),
@@ -425,12 +409,11 @@ export const videos = sqliteTable("videos", {
     .notNull()
     .default(sql`(unixepoch())`),
 }, (t) => ({
-  statusIdx: index("videos_status_idx").on(t.status),
+  visibilityStatusIdx: index("videos_visibility_status_idx").on(t.visibility_status),
   scheduledIdx: index("videos_scheduled_idx").on(t.scheduled_time),
-  scoreIdx: index("videos_score_idx").on(t.video_score),
   primaryEventIdx: index("videos_primary_event_idx").on(t.primary_event_id),
-  ownerIdx: index("videos_owner_idx").on(t.owner_discord_user_id),
-  creatorIdx: index("videos_creator_idx").on(t.creator_id),
+  submittedByIdx: index("videos_submitted_by_idx").on(t.submitted_by_discord_user_id),
+  creatorXIdx: index("videos_creator_x_idx").on(t.creator_x_user_id),
   youtubeIdIdx: index("videos_youtube_id_idx").on(t.youtube_video_id),
   // posting/youtube-id-and-active-x:
   //   同時投稿レース対策。createFreeVideo / submitSlotVideo / updateVideo は
@@ -441,8 +424,72 @@ export const videos = sqliteTable("videos", {
   youtubeIdActiveUniq: uniqueIndex("videos_youtube_id_active_uniq")
     .on(t.youtube_video_id)
     .where(
-      sql`youtube_video_id IS NOT NULL AND youtube_video_id <> '' AND is_deleted = 0 AND status <> 'voided'`,
+      sql`youtube_video_id IS NOT NULL AND youtube_video_id <> '' AND visibility_status NOT IN ('archived', 'voided')`,
     ),
+}));
+
+export const videoYoutubeMetadata = sqliteTable("video_youtube_metadata", {
+  video_id: text("video_id").primaryKey(),
+  youtube_video_id: text("youtube_video_id"),
+  youtube_privacy_status: text("youtube_privacy_status"),
+  youtube_availability_status: text("youtube_availability_status"),
+  duration_seconds: integer("duration_seconds"),
+  view_count: integer("view_count").notNull().default(0),
+  synced_at: integer("synced_at"),
+  sync_status: text("sync_status", {
+    enum: ["pending", "synced", "failed"],
+  })
+    .notNull()
+    .default("pending"),
+  sync_error: text("sync_error"),
+  updated_at: integer("updated_at").notNull(),
+}, (t) => ({
+  byYoutubeId: index("video_youtube_metadata_youtube_idx").on(t.youtube_video_id),
+  bySync: index("video_youtube_metadata_sync_idx").on(
+    t.sync_status,
+    t.synced_at,
+  ),
+}));
+
+export const videoStats = sqliteTable("video_stats", {
+  video_id: text("video_id").primaryKey(),
+  app_view_count: integer("app_view_count").notNull().default(0),
+  app_like_count: integer("app_like_count").notNull().default(0),
+  trending_view_count_24h: integer("trending_view_count_24h").notNull().default(0),
+  score: real("score").notNull().default(0),
+  updated_at: integer("updated_at").notNull(),
+}, (t) => ({
+  byScore: index("video_stats_score_idx").on(t.score),
+  byTrending: index("video_stats_trending_idx").on(t.trending_view_count_24h),
+}));
+
+export const videoModerationCases = sqliteTable("video_moderation_cases", {
+  id: text("id").primaryKey(),
+  video_id: text("video_id").notNull(),
+  case_type: text("case_type", {
+    enum: ["x_reapply", "void", "duplicate", "rights", "operator"],
+  }).notNull(),
+  status: text("status", {
+    enum: ["open", "resolved", "rejected", "expired", "cancelled"],
+  })
+    .notNull()
+    .default("open"),
+  public_reason: text("public_reason"),
+  private_note: text("private_note"),
+  due_at: integer("due_at"),
+  locked_until: integer("locked_until"),
+  attempt_count: integer("attempt_count").notNull().default(0),
+  related_x_user_id: text("related_x_user_id"),
+  created_by_user_id: text("created_by_user_id"),
+  resolved_by_user_id: text("resolved_by_user_id"),
+  created_at: integer("created_at").notNull(),
+  resolved_at: integer("resolved_at"),
+}, (t) => ({
+  byVideo: index("video_moderation_cases_video_idx").on(t.video_id, t.created_at),
+  byTypeStatus: index("video_moderation_cases_type_status_idx").on(
+    t.case_type,
+    t.status,
+  ),
 }));
 
 export const videoEvents = sqliteTable(
@@ -451,7 +498,13 @@ export const videoEvents = sqliteTable(
     video_id: text("video_id").notNull(),
     event_id: text("event_id").notNull(),
   },
-  (t) => ({ pk: primaryKey({ columns: [t.video_id, t.event_id] }) }),
+  (t) => ({
+    pk: primaryKey({ columns: [t.video_id, t.event_id] }),
+    byEventVideo: index("video_events_event_video_idx").on(
+      t.event_id,
+      t.video_id,
+    ),
+  }),
 );
 
 export const videoMembers = sqliteTable(
@@ -464,8 +517,12 @@ export const videoMembers = sqliteTable(
     role: text("role"),
     comment: text("comment"),
     order_index: integer("order_index").notNull().default(0),
-    /** name を小文字化したサーバ側ソート用キャッシュ。書き込み時に同期する。 */
-    name_for_sort: text("name_for_sort"),
+    /**
+     * Per-member assignment chapters.
+     * video_members intentionally owns public members, private collaborators,
+     * member assignment chapters, and collaborator edit grants.
+     */
+    chapters_json: text("chapters_json"),
     /**
      * X ID 未連携の Discord ユーザーにも先に編集権限を付与できるよう保持する。
      * 連携後は x_user_id 側でも判定できるが、両方残しておくと履歴が辿りやすい。
@@ -499,10 +556,6 @@ export const videoMembers = sqliteTable(
       t.video_id,
       t.name,
     ),
-    byVideoNameForSort: index("video_members_video_name_for_sort_idx").on(
-      t.video_id,
-      t.name_for_sort,
-    ),
   }),
 );
 
@@ -512,39 +565,13 @@ export const videoMembers = sqliteTable(
  * 作品編集ページの VideoMembersField でメンバー行ごとに編集される。
  * 公開動画詳細ページの MemberSection に「メンバーチャプター」タブで表示される。
  */
-export const videoMemberChapters = sqliteTable(
-  "video_member_chapters",
-  {
-    id: text("id").primaryKey(),
-    video_id: text("video_id").notNull(),
-    video_member_id: text("video_member_id").notNull(),
-    chapter_time: real("chapter_time").notNull(),
-    chapter_label: text("chapter_label").notNull(),
-    note: text("note"),
-    order_index: integer("order_index").default(0),
-    created_at: integer("created_at").notNull(),
-    updated_at: integer("updated_at").notNull(),
-  },
-  (t) => ({
-    byVideo: index("video_member_chapters_video_idx").on(
-      t.video_id,
-      t.chapter_time,
-    ),
-    byMember: index("video_member_chapters_member_idx").on(
-      t.video_member_id,
-      t.chapter_time,
-    ),
-  }),
-);
-
 export const videoChapters = sqliteTable("video_chapters", {
   id: text("id").primaryKey(),
   video_id: text("video_id").notNull(),
   x_user_id: text("x_user_id").notNull(),
   /**
    * @deprecated 旧仕様: メンバーチャプターを video_chapters に混在させていた頃の列。
-   * 新仕様では `video_member_chapters` に分離している。読み取り・書き込みで使わない。
-   * migration 0017 で既存データは新テーブルへ移行済み。
+   * 新仕様では `video_members.chapters_json` が正本。読み取り・書き込みで使わない。
    */
   video_member_id: text("video_member_id"),
   chapter_time: real("chapter_time").notNull(),
@@ -560,7 +587,12 @@ export const videoChapters = sqliteTable("video_chapters", {
   order_index: integer("order_index").default(0),
   created_at: integer("created_at").notNull(),
   updated_at: integer("updated_at").notNull(),
-});
+}, (t) => ({
+  byVideoTime: index("video_chapters_video_time_idx").on(
+    t.video_id,
+    t.chapter_time,
+  ),
+}));
 
 export const videoComments = sqliteTable("video_comments", {
   id: text("id").primaryKey(),
@@ -572,7 +604,13 @@ export const videoComments = sqliteTable("video_comments", {
     "public",
   ),
   created_at: integer("created_at").notNull(),
-});
+}, (t) => ({
+  byVideoCreated: index("video_comments_video_created_idx").on(
+    t.video_id,
+    t.created_at,
+  ),
+  byChapter: index("video_comments_chapter_idx").on(t.chapter_id),
+}));
 
 export const videoInteractions = sqliteTable(
   "video_interactions",
@@ -646,39 +684,6 @@ export const apiEndpoints = sqliteTable("api_endpoints", {
   event_id: text("event_id").notNull(),
   is_active: integer("is_active").default(1),
   created_at: integer("created_at").notNull(),
-});
-
-export const customPages = sqliteTable("custom_pages", {
-  id: text("id").primaryKey(),
-  x_user_id: text("x_user_id").notNull(),
-  html: text("html"),
-  css: text("css"),
-  theme_id: text("theme_id"),
-  shortcode_version: text("shortcode_version"),
-  is_published: integer("is_published").default(0),
-  updated_at: integer("updated_at").notNull(),
-});
-
-export const customThemes = sqliteTable("custom_themes", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  author: text("author"),
-  description: text("description"),
-  preview_image: text("preview_image"),
-  template_html: text("template_html"),
-  template_css: text("template_css"),
-  created_at: integer("created_at").notNull(),
-  is_default: integer("is_default").default(0),
-});
-
-export const recommendationSignals = sqliteTable("recommendation_signals", {
-  id: text("id").primaryKey(),
-  x_user_id: text("x_user_id").notNull(),
-  video_id: text("video_id").notNull(),
-  watch_seconds: real("watch_seconds").default(0),
-  like_score: real("like_score").default(0),
-  bookmark_score: real("bookmark_score").default(0),
-  updated_at: integer("updated_at").notNull(),
 });
 
 export const xIdMergeRequests = sqliteTable("x_id_merge_requests", {
@@ -855,6 +860,27 @@ export const softwareAliases = sqliteTable(
     uniq: uniqueIndex("software_aliases_uniq").on(
       t.software_id,
       t.normalized_alias,
+    ),
+  }),
+);
+
+export const videoSoftwares = sqliteTable(
+  "video_softwares",
+  {
+    video_id: text("video_id").notNull(),
+    software_id: text("software_id").notNull(),
+    raw_label: text("raw_label").notNull(),
+    order_index: integer("order_index").notNull().default(0),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.video_id, t.software_id] }),
+    bySoftware: index("video_softwares_software_video_idx").on(
+      t.software_id,
+      t.video_id,
+    ),
+    byVideoOrder: index("video_softwares_video_order_idx").on(
+      t.video_id,
+      t.order_index,
     ),
   }),
 );

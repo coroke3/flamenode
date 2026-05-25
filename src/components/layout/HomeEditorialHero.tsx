@@ -16,6 +16,8 @@ interface HomeEditorialHeroProps {
   videos: HomeFeatureVideo[];
 }
 
+const LIST_HREF = "/list";
+
 export function HomeEditorialHero({
   stats,
   videos,
@@ -65,10 +67,10 @@ export function HomeEditorialHero({
         </dl>
 
         <div className={styles.heroActions}>
-          <Link href="/list" className="fn-btn fn-btn-primary fn-btn-lg">
+          <a href={LIST_HREF} className="fn-btn fn-btn-primary fn-btn-lg">
             作品を見にいく
             <Icon name="chevron-right" size={15} aria-hidden />
-          </Link>
+          </a>
           <Link href="/event" className="fn-btn fn-btn-ghost fn-btn-lg">
             イベントを探す
           </Link>

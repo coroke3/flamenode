@@ -26,6 +26,7 @@ interface SearchParams {
 }
 
 const PAGE_SIZE = 24;
+const LIST_HREF = "/list";
 
 export default async function ListPage({
   searchParams,
@@ -112,9 +113,9 @@ export default async function ListPage({
           適用
         </button>
         {q || sort !== "new" || event ? (
-          <Link href="/list" className="fn-btn fn-btn-ghost">
+          <a href={LIST_HREF} className="fn-btn fn-btn-ghost">
             リセット
-          </Link>
+          </a>
         ) : null}
       </form>
 
@@ -143,12 +144,12 @@ export default async function ListPage({
               event
             )}
           </span>
-          <Link
+          <a
             href={`/list?${params({ event: "", page: "1" })}`}
             className="fn-btn fn-btn-ghost fn-btn-sm"
           >
             イベント絞り込みを解除
-          </Link>
+          </a>
         </div>
       ) : null}
 
@@ -170,25 +171,25 @@ export default async function ListPage({
           </div>
           <nav className={styles.pagination} aria-label="ページネーション">
             {pageNum > 1 ? (
-              <Link
+              <a
                 href={`/list?${params({ page: String(pageNum - 1) })}`}
                 className="fn-btn fn-btn-ghost fn-btn-sm"
               >
                 <Icon name="chevron-left" size={12} aria-hidden />
                 前へ
-              </Link>
+              </a>
             ) : null}
             <span className={styles.pageBadge}>
               {pageNum} / {totalPages} ページ ({total} 件)
             </span>
             {pageNum < totalPages ? (
-              <Link
+              <a
                 href={`/list?${params({ page: String(pageNum + 1) })}`}
                 className="fn-btn fn-btn-ghost fn-btn-sm"
               >
                 次へ
                 <Icon name="chevron-right" size={12} aria-hidden />
-              </Link>
+              </a>
             ) : null}
           </nav>
         </>

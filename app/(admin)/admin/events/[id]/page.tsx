@@ -50,12 +50,12 @@ export default async function AdminEventDetailPage({
       .select({
         id: videosTable.id,
         title: videosTable.title,
-        status: videosTable.status,
-        display_name: sql<string>`COALESCE(${xUsersTable.x_name}, ${videosTable.display_name}, ${videosTable.contact_x_id})`,
+        status: videosTable.visibility_status,
+        display_name: sql<string>`COALESCE(${xUsersTable.x_name}, ${videosTable.creator_display_name}, ${videosTable.creator_x_user_id})`,
       })
       .from(videosTable)
       .innerJoin(videoEvents, eq(videosTable.id, videoEvents.video_id))
-      .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id))
+      .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id))
       .where(eq(videoEvents.event_id, id))
       .orderBy(desc(videosTable.created_at))
       .limit(60);
@@ -104,7 +104,7 @@ export default async function AdminEventDetailPage({
           },
           {
             href: `/admin/events/${event.id}/staff`,
-            label: "編集権限",
+            label: "イベント管理者",
             icon: <Icon name="users" size={12} aria-hidden />,
           },
           {

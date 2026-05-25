@@ -10,7 +10,7 @@ import { uploadVideoIconCandidate } from "@/lib/actions/video";
  *
  * ユーザー既定アイコン (`x_users.icon_url`) を変更しない点が `XIdIconPicker` と異なる。
  * 出力は `<input type="hidden" name="icon_url">` のみで、作品保存時に
- * `videos.icon_url` へそのまま入る。空文字なら null として保存される。
+ * `videos.creator_icon_url` へそのまま入る。空文字なら null として保存される。
  *
  * 候補は server 側で `getXIconCandidates(db, xId)` から取得する。
  * 「アイコンなし」を明示的に選べるよう、最後に空選択ボタンを置く。

@@ -13,7 +13,7 @@ export default function AdminNewEventPage(): React.ReactElement {
     <div>
       <AdminPageHeader
         title="新規イベント作成"
-        description="イベント本体を作成します。スロット、運営メンバー、協力者は作成後の編集ページから追加します。"
+        description="イベント本体を作成します。スロットとイベント管理者は作成後に追加します。"
         backHref="/admin/events"
         backLabel="イベント一覧へ"
       />

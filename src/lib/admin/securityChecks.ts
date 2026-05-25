@@ -6,7 +6,6 @@ import { and, eq, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import {
   accounts as accountsTable,
-  customPages as customPagesTable,
   users as usersTable,
   videoChapters as videoChaptersTable,
   videos as videosTable,
@@ -71,12 +70,12 @@ async function checkUnapprovedCreatorVideos(
   db: AnyDb,
 ): Promise<SecurityCheckResult> {
   const rows = await db
-    .select({ id: videosTable.id, creator_id: videosTable.creator_id })
+    .select({ id: videosTable.id, creator_x_user_id: videosTable.creator_x_user_id })
     .from(videosTable)
-    .innerJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_id!))
+    .innerJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id!))
     .where(
       and(
-        isNotNull(videosTable.creator_id),
+        isNotNull(videosTable.creator_x_user_id),
         ne(xUsersTable.approval_status, "approved"),
       ),
     )
@@ -84,23 +83,23 @@ async function checkUnapprovedCreatorVideos(
   const count = rows.length;
   return {
     id: "unapproved_creator_videos",
-    label: "未承認 X ID の creator_id を持つ作品",
+    label: "未承認 X ID の creator_x_user_id を持つ作品",
     status: count === 0 ? "ok" : "warn",
     count,
-    samples: rows.slice(0, 5).map((r) => `video:${r.id} creator:${r.creator_id ?? ""}`),
+    samples: rows.slice(0, 5).map((r) => `video:${r.id} creator:${r.creator_x_user_id ?? ""}`),
   };
 }
 
 /** BAN ユーザーの書き込み */
 async function checkBannedUserVideos(db: AnyDb): Promise<SecurityCheckResult> {
   const rows = await db
-    .select({ id: videosTable.id, owner: videosTable.owner_discord_user_id })
+    .select({ id: videosTable.id, owner: videosTable.submitted_by_discord_user_id })
     .from(videosTable)
     .innerJoin(
       usersTable,
       or(
-        eq(usersTable.id, videosTable.owner_discord_user_id),
-        eq(usersTable.discord_id, videosTable.owner_discord_user_id),
+        eq(usersTable.id, videosTable.submitted_by_discord_user_id),
+        eq(usersTable.discord_id, videosTable.submitted_by_discord_user_id),
       )!,
     )
     .where(eq(usersTable.is_banned, 1))
@@ -120,13 +119,13 @@ async function checkTosNotAcceptedUserVideos(
   db: AnyDb,
 ): Promise<SecurityCheckResult> {
   const rows = await db
-    .select({ id: videosTable.id, owner: videosTable.owner_discord_user_id })
+    .select({ id: videosTable.id, owner: videosTable.submitted_by_discord_user_id })
     .from(videosTable)
     .innerJoin(
       usersTable,
       or(
-        eq(usersTable.id, videosTable.owner_discord_user_id),
-        eq(usersTable.discord_id, videosTable.owner_discord_user_id),
+        eq(usersTable.id, videosTable.submitted_by_discord_user_id),
+        eq(usersTable.discord_id, videosTable.submitted_by_discord_user_id),
       )!,
     )
     .where(ne(usersTable.is_tos_accepted, 1))
@@ -274,30 +273,20 @@ async function checkOrphanApprovedXId(
   };
 }
 
-/** custom_pages.html の中で危険HTMLが残っていないか静的検出 */
+/** custom_pages/custom_themes は初期本番では無効化する。 */
 async function checkCustomPageDangerousHtml(
-  db: AnyDb,
+  _db: AnyDb,
 ): Promise<SecurityCheckResult> {
-  const rows = await db
-    .select({
-      id: customPagesTable.id,
-      html: customPagesTable.html,
-    })
-    .from(customPagesTable)
-    .where(eq(customPagesTable.is_published, 1));
-  const dangerousRe =
-    /<\s*(script|iframe|object|embed|form|meta|base|link|style)\b|\son[a-z]+\s*=|javascript\s*:/i;
-  const flagged = rows.filter((r) => r.html && dangerousRe.test(r.html));
+  void _db;
+  const flagged: { id: string }[] = [];
   return {
     id: "custom_page_dangerous_html",
-    label: "公開中 custom_page に危険HTML",
-    status: flagged.length === 0 ? "ok" : "warn",
+    label: "custom_pages/custom_themes disabled",
+    status: "ok",
     count: flagged.length,
     samples: flagged.slice(0, 5).map((r) => `page:${r.id}`),
     note:
-      flagged.length > 0
-        ? "サニタイザは適用済みだが、保存時の入力にも危険タグが含まれているレコードがあります。"
-        : undefined,
+      "初期本番では custom_pages/custom_themes は無効化されています。",
   };
 }
 

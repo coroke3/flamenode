@@ -41,11 +41,11 @@ const TABLE_LINKS: Record<
   }),
   video_chapters: () => ({}),
   video_members: () => ({}),
-  video_collaborators: () => ({}),
   slots: (id) => ({
     adminHref: `/admin/audit?table=slots&record=${encodeURIComponent(id)}`,
   }),
-  event_collaborator_permissions: () => ({}),
+  event_staff: () => ({}),
+  event_staff_permissions: () => ({}),
   notification_outbox: () => ({}),
   x_account_link_requests: (id) => ({
     adminHref: `/admin/users?view=links&q=${encodeURIComponent(id)}`,

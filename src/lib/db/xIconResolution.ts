@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, ne, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { videos, xUsers, xUserIcons } from "./schema";
 import type { DB } from "./client";
 
@@ -7,7 +7,7 @@ import type { DB } from "./client";
  *
  * 優先順位:
  *   1. x_users.icon_url
- *   2. 同 X ID の非削除・非 voided な作品の videos.icon_url
+ *   2. 同 X ID の非削除・非 voided な作品の videos.creator_icon_url
  *      (個人作 → 合作、新しい順)
  *   3. null
  *
@@ -34,15 +34,14 @@ export async function resolveXUserIcon(
   ): Promise<string | null> => {
     const row = (
       await db
-        .select({ icon_url: videos.icon_url })
+        .select({ icon_url: videos.creator_icon_url })
         .from(videos)
         .where(
           and(
-            or(eq(videos.creator_id, xId), eq(videos.contact_x_id, xId))!,
-            isNotNull(videos.icon_url),
-            eq(videos.submission_type, submissionType),
-            eq(videos.is_deleted, 0),
-            ne(videos.status, "voided"),
+            eq(videos.creator_x_user_id, xId),
+            isNotNull(videos.creator_icon_url),
+            eq(videos.collaboration_type, submissionType),
+            sql`${videos.visibility_status} NOT IN ('archived', 'voided')`,
           )!,
         )
         .orderBy(desc(videos.created_at))
@@ -87,17 +86,16 @@ export async function resolveMemberIcons<
       const chunk = xIds.slice(i, i + CHUNK_SIZE);
       const rows = await db
         .select({
-          x_id: videos.creator_id,
-          icon_url: videos.icon_url,
+          x_id: videos.creator_x_user_id,
+          icon_url: videos.creator_icon_url,
         })
         .from(videos)
         .where(
           and(
-            inArray(videos.creator_id, chunk),
-            isNotNull(videos.icon_url),
-            eq(videos.submission_type, submissionType),
-            eq(videos.is_deleted, 0),
-            ne(videos.status, "voided"),
+            inArray(videos.creator_x_user_id, chunk),
+            isNotNull(videos.creator_icon_url),
+            eq(videos.collaboration_type, submissionType),
+            sql`${videos.visibility_status} NOT IN ('archived', 'voided')`,
           )!,
         )
         .orderBy(desc(videos.created_at));
@@ -132,7 +130,7 @@ export async function resolveMemberIcons<
  * 候補ソース (新しい順、重複除去):
  *   1. x_users.icon_url (ユーザー既定アイコン)
  *   2. x_user_icons.icon_url (手動アップロード履歴、過去作品由来候補)
- *   3. videos.icon_url (creator_id または contact_x_id がこの X ID の作品)
+ *   3. videos.creator_icon_url (creator_x_user_id または creator_x_user_id がこの X ID の作品)
  *
  * 設定画面の `setXIdIcon` の許可候補チェックや、
  * 投稿フォームのアイコンピッカーで共通利用する。
@@ -174,12 +172,12 @@ export async function getXIconCandidates(
   }
 
   const videoRows = await db
-    .select({ icon_url: videos.icon_url })
+    .select({ icon_url: videos.creator_icon_url })
     .from(videos)
     .where(
       and(
-        or(eq(videos.creator_id, xId), eq(videos.contact_x_id, xId))!,
-        isNotNull(videos.icon_url),
+        eq(videos.creator_x_user_id, xId),
+        isNotNull(videos.creator_icon_url),
       )!,
     )
     .orderBy(desc(videos.created_at))

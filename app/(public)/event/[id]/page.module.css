@@ -8,15 +8,16 @@
   position: relative;
   width: min(98%, calc(var(--content-max) + 200px));
   margin: 16px auto 24px;
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  border: 1px solid var(--border-subtle);
-  background-color: var(--bg-surface);
+  border-radius: 0;
+  overflow: visible;
+  border: 0;
+  background-color: transparent;
 }
 
 .heroBanner {
   width: 100%;
   aspect-ratio: 16 / 5;
+  border-radius: var(--radius-md);
   background-color: var(--bg-elevated);
   background-size: cover;
   background-position: center;
@@ -26,7 +27,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 22px 28px 26px;
+  padding: 22px 0 4px;
 }
 
 .heroMeta {
@@ -107,55 +108,28 @@
   );
 }
 
-.infoTicker {
+.infoStrip {
   width: min(98%, calc(var(--content-max) + 200px));
-  margin: -8px auto 28px;
-  overflow: hidden;
-  border: 1px solid var(--border-subtle);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  margin: 4px auto 28px;
 }
 
-.infoTickerTrack {
+.infoStripTrack {
   display: flex;
-  width: max-content;
-  gap: 10px;
-  padding: 8px 10px;
-  animation: eventTicker 34s linear infinite;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
 }
 
-.infoTickerItem {
+.infoStripItem {
   display: inline-flex;
   align-items: center;
   white-space: nowrap;
-  padding: 5px 12px;
-  border-radius: 999px;
+  min-height: 26px;
+  padding-left: 10px;
+  border-left: 3px solid var(--event-accent, #ffd400);
   color: var(--text-secondary);
-  background: color-mix(
-    in srgb,
-    var(--event-accent, #ffd400) 9%,
-    var(--bg-elevated)
-  );
   font-size: 12px;
   font-weight: 700;
-}
-
-@keyframes eventTicker {
-  from {
-    transform: translateX(0);
-  }
-
-  to {
-    transform: translateX(-50%);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .infoTickerTrack {
-    width: auto;
-    flex-wrap: wrap;
-    animation: none;
-  }
 }
 
 .section {
@@ -182,10 +156,8 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
-  background-color: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  padding: 6px 0 10px;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .staffIcon,
@@ -245,26 +217,35 @@
   width: 100%;
 }
 
-.slotTable {
-  overflow-x: auto;
-}
-
-.slotLayout {
-  display: grid;
-  grid-template-columns: 1fr;
+.slotSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
 }
 
-@media (min-width: 1024px) {
-  .slotLayout {
-    grid-template-columns: minmax(0, 1fr) 320px;
+.slotSummaryLead {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.slotSummaryStats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@media (max-width: 640px) {
+  .slotSummary {
+    align-items: flex-start;
+    flex-direction: column;
   }
-}
-
-.slotMain {
-  min-width: 0;
-}
-
-.slotAside {
-  min-width: 0;
 }

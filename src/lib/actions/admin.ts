@@ -4,8 +4,9 @@ import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
-import { historyLogs, videos } from "@/lib/db/schema";
+import { historyLogs, videoModerationCases, videos } from "@/lib/db/schema";
 import { enqueueNotification } from "@/lib/notifications/enqueue";
+import { generateId } from "@/lib/utils/id";
 
 export interface AdminActionResult {
   ok: boolean;
@@ -15,10 +16,11 @@ export interface AdminActionResult {
 const VALID_STATUS = new Set([
   "draft",
   "pending",
-  "x_reapply_required",
   "public",
-  "unlisted",
+  "limited",
   "private",
+  "hidden",
+  "archived",
   "voided",
 ]);
 
@@ -39,7 +41,7 @@ export async function setVideoStatus(
     return { ok: false, message: "不正なステータスです。" };
   }
 
-  if ((status === "voided" || status === "x_reapply_required") && !reason) {
+  if (status === "voided" && !reason) {
     return {
       ok: false,
       message: `${status} へ変更するには理由が必要です。`,
@@ -53,20 +55,16 @@ export async function setVideoStatus(
     await db.select().from(videos).where(eq(videos.id, videoId)).limit(1)
   )[0];
   if (!target) return { ok: false, message: "対象作品が見つかりません。" };
-  const prevStatus = target.status;
+  const prevStatus = target.visibility_status;
 
   const now = Math.floor(Date.now() / 1000);
   type VideoUpdate = Partial<typeof videos.$inferInsert>;
   const patch: VideoUpdate = {
-    status: status as VideoUpdate["status"],
+    visibility_status: status as VideoUpdate["visibility_status"],
     updated_at: now,
   };
 
   if (status === "voided") {
-    patch.is_deleted = 1;
-    patch.voided_by_user_id = u.id;
-    patch.voided_at = now;
-    patch.void_reason = reason;
     const cat = String(formData.get("void_reason_category") ?? "").trim();
     const validCats = new Set([
       "x_id_invalid",
@@ -75,24 +73,37 @@ export async function setVideoStatus(
       "operator_decision",
       "expired",
     ]);
-    if (cat && validCats.has(cat)) {
-      patch.void_reason_category = cat as
-        | "x_id_invalid"
-        | "duplicate"
-        | "withdrawn_by_creator"
-        | "operator_decision"
-        | "expired";
-    }
+    await db.insert(videoModerationCases).values({
+      id: generateId("vmc"),
+      video_id: videoId,
+      case_type: validCats.has(cat)
+        ? cat === "duplicate"
+          ? "duplicate"
+          : cat === "x_id_invalid"
+            ? "x_reapply"
+            : "void"
+        : "void",
+      status: "open",
+      public_reason: reason || null,
+      private_note: cat || null,
+      attempt_count: 0,
+      created_by_user_id: u.id,
+      created_at: now,
+    });
   } else if (prevStatus === "voided" && status !== "voided") {
-    patch.is_deleted = 0;
-    patch.void_restored_by_user_id = u.id;
-    patch.void_restored_at = now;
-  }
-
-  if (status === "x_reapply_required") {
-    patch.x_reapply_started_at = now;
-    patch.x_reapply_due_at = now + 7 * 24 * 3600;
-    patch.x_reapply_public_reason = reason;
+    await db.insert(videoModerationCases).values({
+      id: generateId("vmc"),
+      video_id: videoId,
+      case_type: "void",
+      status: "resolved",
+      public_reason: reason || null,
+      private_note: "restored",
+      attempt_count: 0,
+      created_by_user_id: u.id,
+      resolved_by_user_id: u.id,
+      created_at: now,
+      resolved_at: now,
+    });
   }
 
   await db.update(videos).set(patch).where(eq(videos.id, videoId));
@@ -101,31 +112,32 @@ export async function setVideoStatus(
     table_name: "videos",
     record_id: videoId,
     action: "UPDATE",
-    before_data: JSON.stringify({ status: prevStatus }),
-    after_data: JSON.stringify({ status, reason: reason || null }),
+      before_data: JSON.stringify({ visibility_status: prevStatus }),
+    after_data: JSON.stringify({ visibility_status: status, reason: reason || null }),
     operator_discord_id: u.id,
     retention_class:
-      status === "voided" || status === "x_reapply_required"
+      status === "voided"
         ? "long_audit"
         : "normal",
     created_at: now,
   });
 
   // 通知 enqueue: 投稿主に状態変化を伝える。
-  // owner_discord_user_id を宛先とし、event-scoped なら primary_event_id を載せる。
-  if (target.owner_discord_user_id && prevStatus !== status) {
+  // submitted_by_discord_user_id を宛先とし、event-scoped なら primary_event_id を載せる。
+  if (target.submitted_by_discord_user_id && prevStatus !== status) {
     const typeMap: Record<string, string> = {
       public: "video_approved",
       pending: "video_pending",
       voided: "video_voided",
-      x_reapply_required: "video_x_reapply_required",
-      unlisted: "video_unlisted",
+      limited: "video_limited",
       private: "video_private",
+      hidden: "video_hidden",
+      archived: "video_archived",
       draft: "video_draft",
     };
     const notifType = typeMap[status] ?? "video_status_changed";
     await enqueueNotification(db, {
-      discordUserId: target.owner_discord_user_id,
+      discordUserId: target.submitted_by_discord_user_id,
       type: notifType,
       payload: {
         content: `作品「${target.title}」のステータスが ${prevStatus} → ${status} に変更されました。`,

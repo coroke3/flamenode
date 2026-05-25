@@ -3,8 +3,8 @@ import { and, eq, inArray, or } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import { isMissingDbObjectError } from "@/lib/db/optionalObjects";
 import {
-  eventCollaboratorPermissions,
-  eventEditors,
+  eventStaff,
+  eventStaffPermissions,
   events as eventsTable,
   videoMembers,
   videoEvents,
@@ -21,9 +21,8 @@ import type {
  *
  * 設計の RBAC (§2-21) を実装する:
  * - admin: すべて操作可
- * - video の creator_id が「自分の承認済み X ID」: 編集可
- * - event_editors に登録済み: 担当イベントの作品を編集可
- * - event_collaborator_permissions: permission_key に応じた細粒度許可
+ * - video の creator_x_user_id が「自分の承認済み X ID」: 編集可
+ * - event_staff_permissions: permission_key に応じた細粒度許可
  */
 
 export type SessionUserLike = {
@@ -99,7 +98,7 @@ export function isDangerousAdminVideoEditKey(
 }
 
 /**
- * video_collaborators.can_edit が許可する section の許可リスト (ホワイトリスト方式)。
+ * video_members.can_edit が許可する section の許可リスト (ホワイトリスト方式)。
  *
  * 重要: ここに列挙されていないキーは、合作メンバー編集権限 (can_edit) では絶対に
  * 通らない。特に下記は **永久に絶対許可しない**:
@@ -108,9 +107,9 @@ export function isDangerousAdminVideoEditKey(
  *   - "videos.primary_event" / "video.primary_event" (所属イベント変更)
  *   - "video.status" / "video.chapter_admin" (公開状態 / チャプター運用)
  *
- * 現在の video_collaborators には粗い can_edit フラグしかないため、
+ * 現在の video_members には粗い can_edit フラグしかないため、
  * 合作コンテンツ系 (説明文・メンバー欄・振り返り) のみホワイトリストで許可する。
- * 将来 video_collaborator_permissions テーブルで section ごとに細分化したい。
+ * 将来必要なら作品単位の権限テーブルで section ごとに細分化する。
  */
 const COLLABORATOR_VIDEO_EDIT_KEYS = new Set<VideoEditSectionKey>([
   "video.descriptions",
@@ -144,11 +143,18 @@ export async function getEditableEventIds(
   userId: string,
 ): Promise<string[]> {
   const xIds = await getApprovedXIds(db, userId);
-  if (xIds.length === 0) return [];
+  const subjectCond =
+    xIds.length > 0
+      ? or(eq(eventStaff.discord_user_id, userId), inArray(eventStaff.x_user_id, xIds))!
+      : eq(eventStaff.discord_user_id, userId);
   const rows = await db
-    .select({ event_id: eventEditors.event_id })
-    .from(eventEditors)
-    .where(inArray(eventEditors.x_user_id, xIds));
+    .select({ event_id: eventStaff.event_id })
+    .from(eventStaff)
+    .innerJoin(
+      eventStaffPermissions,
+      eq(eventStaffPermissions.event_staff_id, eventStaff.id),
+    )
+    .where(and(subjectCond, eq(eventStaffPermissions.allowed, 1))!);
   return Array.from(new Set(rows.map((r) => r.event_id)));
 }
 
@@ -165,17 +171,18 @@ export async function getCollaboratorPermissions(
   const subjectCond =
     xIds.length > 0
       ? or(
-          eq(eventCollaboratorPermissions.discord_user_id, userId),
-          inArray(eventCollaboratorPermissions.x_user_id, xIds),
+          eq(eventStaff.discord_user_id, userId),
+          inArray(eventStaff.x_user_id, xIds),
         )!
-      : eq(eventCollaboratorPermissions.discord_user_id, userId);
+      : eq(eventStaff.discord_user_id, userId);
   const rows = await db
-    .select({ permission_key: eventCollaboratorPermissions.permission_key })
-    .from(eventCollaboratorPermissions)
+    .select({ permission_key: eventStaffPermissions.permission_key })
+    .from(eventStaffPermissions)
+    .innerJoin(eventStaff, eq(eventStaff.id, eventStaffPermissions.event_staff_id))
     .where(
       and(
-        eq(eventCollaboratorPermissions.event_id, eventId),
-        eq(eventCollaboratorPermissions.allowed, 1),
+        eq(eventStaff.event_id, eventId),
+        eq(eventStaffPermissions.allowed, 1),
         subjectCond,
       )!,
     );
@@ -185,14 +192,11 @@ export async function getCollaboratorPermissions(
 /**
  * イベント編集権限の判定。
  *
- * 旧仕様では「event_editors に登録されていれば requiredKey によらず全許可」だったが、
+ * 旧仕様では「スタッフ登録だけで requiredKey によらず全許可」だったが、
  * これだと閲覧目的のスタッフ枠が全権を持ってしまう。新仕様では以下の優先順位:
  *
  * 1. admin → true
- * 2. event_collaborator_permissions の permission_key が一致 → true
- * 3. event_editors に representative として登録 → true (代表は全権付与)
- * 4. event_editors に editor として登録 (legacy) → 既存互換のため一旦許可
- *    (将来的に event_collaborator_permissions だけを正本にする)
+ * 2. event_staff_permissions の permission_key が一致 → true
  *
  * `requiredKey` は必須。省略可にすると「permission を1個でも持つ collaborator」が
  * 別領域 (例: event.members) を持っているだけで他領域 (例: event.slots) を触れる
@@ -208,10 +212,6 @@ export async function canEditEvent(
   // collaborator 権限が明示されていれば最優先で許可。
   const keys = await getCollaboratorPermissions(db, user.id, eventId);
   if (keys.has(requiredKey)) return true;
-  // 後方互換: event_editors への登録は legacy データ向けに依然有効。
-  // TODO: event_editors を「役職表示用」に縮退させ、permission_key だけを権限正本にする。
-  const editorIds = await getEditableEventIds(db, user.id);
-  if (editorIds.includes(eventId)) return true;
   return false;
 }
 
@@ -231,8 +231,8 @@ export async function assertCanEditEvent(
 /**
  * 動画編集権限の判定モード。
  *
- * - `normal`: 作品オーナー (creator_id ∈ approvedXIds) と
- *   合作メンバー (video_collaborators.can_edit) **のみ**。
+ * - `normal`: 作品オーナー (creator_x_user_id ∈ approvedXIds) と
+ *   合作メンバー (video_members.can_edit) **のみ**。
  *   admin / event editor / event collaborator の特権は **一切使わない**。
  *   `allow_user_video_edits` (イベント単位の権限拡張) も collaborator 専用の
  *   修飾子として働くだけで、関係ないログインユーザーには適用しない。
@@ -240,7 +240,7 @@ export async function assertCanEditEvent(
  *
  * - `admin`: admin role だけが全権を持つ。event 経由の権限は使わない。
  *
- * - `event`: event editor / event_collaborator_permissions が効く。
+ * - `event`: event_staff_permissions が効く。
  *   admin 特権は使わない (役割を切り分けるため)。
  *   イベント運営者は自分がオーナーでなくても、そのイベント所属作品を編集できる。
  *
@@ -255,8 +255,8 @@ export type CanEditVideoPrivilegeMode = "normal" | "admin" | "event" | "any";
 /**
  * 動画編集権限の判定。`privilegeMode` で評価する権限ソースを切り替える。
  *
- * `owner_discord_user_id` 単独は判定対象外 (legacy import 由来の混入を防ぐため。
- * 禁止事項: owner_discord_user_id だけで作品編集を許可しない)。
+ * `submitted_by_discord_user_id` 単独は判定対象外 (legacy import 由来の混入を防ぐため。
+ * 禁止事項: submitted_by_discord_user_id だけで作品編集を許可しない)。
  *
  * `requiredKey` は必須。section 別の編集権限を明示することで、collaborator が
  * 持っていない section を触れないよう保証する。
@@ -266,7 +266,7 @@ export async function canEditVideo(args: {
   user: SessionUserLike;
   video: Pick<
     VideoRow,
-    "creator_id" | "primary_event_id" | "id" | "owner_discord_user_id"
+    "creator_x_user_id" | "primary_event_id" | "id" | "submitted_by_discord_user_id"
   >;
   requiredKey: VideoEditSectionKey;
   /** 既定 "any"。詳細は CanEditVideoPrivilegeMode を参照。 */
@@ -286,7 +286,7 @@ export async function canEditVideo(args: {
 
   const approved = await getApprovedXIds(db, user.id);
   // 作品オーナーは常に編集可。(privilegeMode に依存しない)
-  if (video.creator_id && approved.includes(video.creator_id)) return true;
+  if (video.creator_x_user_id && approved.includes(video.creator_x_user_id)) return true;
 
   // 通常モード (normal) の特例:
   //   - admin role が safe key を要求している場合は、全作品で許可。
@@ -312,7 +312,7 @@ export async function canEditVideo(args: {
   }
 
   // 作品単位の合作メンバー編集権限 (video_members.can_edit)。
-  // video_collaborators 廃止に伴い、表示メンバー・チャプター担当・共同編集権限を
+  // 表示メンバー・チャプター担当・共同編集権限を
   // 1 テーブルで管理する設計に統一。`can_edit=1` の video_member は作品単位の共同
   // 編集者として扱う。範囲は COLLABORATOR_VIDEO_EDIT_KEYS で制限される。
   const memberSubjectCond =
@@ -378,7 +378,7 @@ export async function canEditVideo(args: {
   if (privilegeMode === "normal" || privilegeMode === "admin") return false;
 
   // privilegeMode === "event" / "any": イベント運営権限のチェック。
-  // event_editors / event_collaborator_permissions により、自分がオーナーでなくても
+  // event_staff_permissions により、自分がオーナーでなくても
   // イベント所属作品を編集できる。
   if (eventIds.size === 0) return false;
   const aliases = VIDEO_PERMISSION_ALIASES[requiredKey] ?? [requiredKey];
@@ -424,7 +424,7 @@ async function isEventDelegationGranted(
  *
  * 設計意図:
  *   - 一般ログインユーザーやイベント参加者に編集権を配るためのものではない。
- *   - 既に `video_collaborators.can_edit=1` で作品に紐付いている合作メンバーが、
+ *   - 既に `video_members.can_edit=1` で作品に紐付いている合作メンバーが、
  *     `COLLABORATOR_VIDEO_EDIT_KEYS` のデフォルト範囲を超えて触れるキーを、
  *     イベント単位で増減するための拡張テーブル。
  *   - 危険キー (videos.youtube_id / videos.primary_event / video.identity 等) は
