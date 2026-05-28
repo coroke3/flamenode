@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Icon } from "@/components/ui/Icon";
+import { Icon, type IconName } from "@/components/ui/Icon";
 
 type PermissionChoiceId = "basic" | "credits" | "descriptions" | "members";
 
@@ -9,30 +9,35 @@ const CHOICES: Array<{
   id: PermissionChoiceId;
   label: string;
   summary: string;
+  icon: IconName;
   keys: string[];
 }> = [
   {
     id: "basic",
     label: "タイトルと基本情報",
-    summary: "作品タイトルなど、作品ページの見出しに出る情報",
+    summary: "タイトル、表示名、作品アイコンなど",
+    icon: "edit",
     keys: ["video.basics", "videos.title"],
   },
   {
     id: "credits",
     label: "楽曲・クレジット",
     summary: "楽曲名、楽曲URL、クレジット表記",
+    icon: "bookmark",
     keys: ["video.credits", "videos.music_credit"],
   },
   {
     id: "descriptions",
     label: "紹介文・制作コメント",
-    summary: "冒頭コメント、見どころ、制作裏話、権利確認欄",
+    summary: "紹介コメント、見どころ、制作エピソード、締めコメント",
+    icon: "comment",
     keys: ["video.descriptions", "videos.review_data"],
   },
   {
     id: "members",
     label: "合作メンバー",
-    summary: "メンバー、担当範囲、メンバーコメント",
+    summary: "メンバー、担当チャプター、メンバーコメント",
+    icon: "users",
     keys: ["video.members", "video.member_chapters", "videos.members"],
   },
 ];
@@ -82,15 +87,21 @@ export function PermissionKeysField({
 
   const value = buildPermissionJson(selected);
   const allSelected = selected.size === CHOICES.length;
+  const selectedLabel =
+    selected.size === 0
+      ? "このイベントでは追加で編集できる項目はありません"
+      : allSelected
+        ? "すべての項目を編集できます"
+        : `${selected.size}項目を編集できます`;
 
   return (
-    <div style={{ display: "grid", gap: 10 }}>
+    <div style={{ display: "grid", gap: 12 }}>
       <input type="hidden" name={name} value={value} />
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
-          gap: 8,
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: 10,
         }}
       >
         {CHOICES.map((choice) => {
@@ -100,15 +111,19 @@ export function PermissionKeysField({
               key={choice.id}
               style={{
                 display: "grid",
-                gridTemplateColumns: "auto 1fr",
-                gap: 9,
+                gridTemplateColumns: "auto minmax(0, 1fr)",
+                gap: 10,
                 alignItems: "flex-start",
-                padding: "10px 11px",
-                border: `1px solid ${checked ? "var(--accent-primary)" : "var(--border-subtle)"}`,
-                borderRadius: "var(--radius-sm)",
+                minHeight: 92,
+                padding: "12px 13px",
+                border: `1px solid ${
+                  checked ? "var(--accent-primary)" : "var(--border-subtle)"
+                }`,
+                borderRadius: 10,
                 background: checked
-                  ? "var(--accent-primary-soft)"
+                  ? "linear-gradient(135deg, var(--accent-primary-soft), var(--bg-surface))"
                   : "var(--bg-surface)",
+                boxShadow: checked ? "0 0 0 1px var(--accent-primary-soft) inset" : "none",
                 cursor: "pointer",
               }}
             >
@@ -116,15 +131,34 @@ export function PermissionKeysField({
                 type="checkbox"
                 checked={checked}
                 onChange={() => toggle(choice.id)}
-                style={{ marginTop: 3 }}
+                style={{
+                  width: 18,
+                  height: 18,
+                  marginTop: 2,
+                  accentColor: "var(--accent-primary)",
+                }}
               />
               <span style={{ minWidth: 0 }}>
                 <span
                   style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    marginBottom: 6,
+                    color: checked ? "var(--accent-primary)" : "var(--text-muted)",
+                    fontSize: 11,
+                    fontWeight: 800,
+                  }}
+                >
+                  <Icon name={choice.icon} size={12} aria-hidden />
+                  {checked ? "許可中" : "未許可"}
+                </span>
+                <span
+                  style={{
                     display: "block",
                     color: "var(--text-primary)",
-                    fontSize: 13,
-                    fontWeight: 700,
+                    fontSize: 13.5,
+                    fontWeight: 800,
                   }}
                 >
                   {choice.label}
@@ -132,9 +166,9 @@ export function PermissionKeysField({
                 <span
                   style={{
                     display: "block",
-                    marginTop: 2,
+                    marginTop: 4,
                     color: "var(--text-muted)",
-                    fontSize: 11.5,
+                    fontSize: 12,
                     lineHeight: 1.5,
                   }}
                 >
@@ -145,35 +179,41 @@ export function PermissionKeysField({
           );
         })}
       </div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button
-          type="button"
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-          onClick={() => setSelected(new Set(CHOICES.map((choice) => choice.id)))}
-        >
-          <Icon name="check" size={11} aria-hidden />
-          すべて選ぶ
-        </button>
-        <button
-          type="button"
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-          onClick={() => setSelected(new Set())}
-        >
-          <Icon name="x" size={11} aria-hidden />
-          すべて外す
-        </button>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 10,
+          flexWrap: "wrap",
+        }}
+      >
         <span
           style={{
-            alignSelf: "center",
             color: "var(--text-muted)",
-            fontSize: 11.5,
+            fontSize: 12,
+            fontWeight: 700,
           }}
         >
-          {selected.size === 0
-            ? "追加で編集できる項目はありません"
-            : allSelected
-              ? "すべての安全な項目を編集できます"
-              : `${selected.size} 項目を編集できます`}
+          {selectedLabel}
+        </span>
+        <span style={{ display: "inline-flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+            onClick={() => setSelected(new Set(CHOICES.map((choice) => choice.id)))}
+          >
+            <Icon name="check" size={11} aria-hidden />
+            すべて選択
+          </button>
+          <button
+            type="button"
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+            onClick={() => setSelected(new Set())}
+          >
+            <Icon name="x" size={11} aria-hidden />
+            すべて解除
+          </button>
         </span>
       </div>
     </div>

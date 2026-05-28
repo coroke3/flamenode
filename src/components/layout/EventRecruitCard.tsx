@@ -358,18 +358,43 @@ export function EventRecruitCard({
               ) : null}
             </div>
             <div className={styles.timelineLabels} aria-hidden>
-              {timeline.milestones.map((point) => (
-                <span
-                  key={`label-${point.name}-${point.time}`}
-                  className={styles.timelineLabel}
-                  style={{ left: `${point.pos}%` }}
-                >
-                  <span className={styles.timelineLabelName}>{point.name}</span>
-                  <span className={styles.timelineLabelDate}>
-                    {formatUnix(point.time, { dateOnly: true })}
+              {timeline.milestones.map((point, index) => {
+                const isLeftEdge = point.pos <= 8;
+                const isRightEdge = point.pos >= 92;
+                const transform = isLeftEdge
+                  ? "translateX(0%)"
+                  : isRightEdge
+                    ? "translateX(-100%)"
+                    : "translateX(-50%)";
+                const textAlign: React.CSSProperties["textAlign"] = isLeftEdge
+                  ? "left"
+                  : isRightEdge
+                    ? "right"
+                    : "center";
+                return (
+                  <span
+                    key={`label-${point.name}-${point.time}`}
+                    className={`${styles.timelineLabel} ${
+                      index % 2 === 1 ? styles.timelineLabelStagger : ""
+                    }`}
+                    style={{
+                      left: `${point.pos}%`,
+                      transform,
+                      textAlign,
+                      alignItems: isLeftEdge
+                        ? "flex-start"
+                        : isRightEdge
+                          ? "flex-end"
+                          : "center",
+                    }}
+                  >
+                    <span className={styles.timelineLabelName}>{point.name}</span>
+                    <span className={styles.timelineLabelDate}>
+                      {formatUnix(point.time, { dateOnly: true })}
+                    </span>
                   </span>
-                </span>
-              ))}
+                );
+              })}
             </div>
           </div>
         ) : null}

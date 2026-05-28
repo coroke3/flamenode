@@ -48,6 +48,8 @@ export interface VideoFormInitialValues {
   members?: VideoMemberInput[];
   /** この作品が所属するイベント ID 一覧 (video_events 経由)。 */
   event_ids?: string[];
+  /** 作品が選択した「部」(events.parts_json の候補から)。未設定なら null/空文字。 */
+  part?: string | null;
 }
 
 /** VideoForm のイベント選択肢。 */
@@ -55,6 +57,19 @@ export interface EventOption {
   id: string;
   title: string;
   video_form_settings_json?: string | null;
+  /** イベントに設定された「部」候補 (JSON 文字列)。null/空配列なら部 UI を出さない。 */
+  parts_json?: string | null;
+}
+
+function parsePartsJson(value: string | null | undefined): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+  } catch {
+    return [];
+  }
 }
 
 export interface XIdOption {
@@ -174,6 +189,31 @@ export function VideoForm({
   const [selectedEventIds, setSelectedEventIds] = React.useState<string[]>(
     initial.event_ids ?? [],
   );
+  // 部 (作品の分類)。所属イベントの parts_json から選ぶ。
+  const [selectedPart, setSelectedPart] = React.useState<string>(
+    initial.part ?? "",
+  );
+  // 所属イベントの parts_json から、選択可能な部の候補 (重複排除) を作る。
+  const availableParts = React.useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const event of eventOptions) {
+      if (!selectedEventIds.includes(event.id)) continue;
+      for (const part of parsePartsJson(event.parts_json)) {
+        if (seen.has(part)) continue;
+        seen.add(part);
+        out.push(part);
+      }
+    }
+    return out;
+  }, [eventOptions, selectedEventIds]);
+  // 選択中の部が、現在の候補に含まれていない場合は自動でクリアする。
+  // (イベント所属を外したときに古い値が残らないようにする)
+  React.useEffect(() => {
+    if (selectedPart && !availableParts.includes(selectedPart)) {
+      setSelectedPart("");
+    }
+  }, [availableParts, selectedPart]);
   const selectedStagePermissionField = React.useMemo(
     () =>
       resolveStagePermissionFieldFromJson(
@@ -660,6 +700,39 @@ export function VideoForm({
             </div>
           </div>
         ) : null}
+
+        {availableParts.length > 0 ? (
+          <div className={cx(styles.field, styles.editableField)}>
+            <label className={styles.label} htmlFor="part">
+              部
+            </label>
+            <p className={styles.help}>
+              所属イベントで設定された「部」(セクション/カテゴリ) から 1 つ選択します。
+              未選択でも投稿できます。
+            </p>
+            <select
+              id="part"
+              name="part"
+              className="fn-select"
+              value={selectedPart}
+              onChange={(e) => {
+                setSelectedPart(e.target.value);
+                setDirty(true);
+              }}
+              disabled={fieldDisabled("video.part")}
+            >
+              <option value="">(未設定)</option>
+              {availableParts.map((part) => (
+                <option key={part} value={part}>
+                  {part}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          // フォーム送信時に常に part キーを含めるため、UI 非表示時も hidden で送る。
+          <input type="hidden" name="part" value="" />
+        )}
       </section>
 
       <section

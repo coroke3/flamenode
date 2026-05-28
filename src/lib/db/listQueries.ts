@@ -63,6 +63,7 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
         primary_event_id: videos.primary_event_id,
         scheduled_time: videos.scheduled_time,
         status: videos.visibility_status,
+        part: videos.part,
       })
       .from(videos)
       .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
@@ -86,6 +87,7 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
       primary_event_id: videos.primary_event_id,
       scheduled_time: videos.scheduled_time,
       status: videos.visibility_status,
+      part: videos.part,
     })
     .from(videos)
     .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))

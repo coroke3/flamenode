@@ -80,6 +80,7 @@ export default async function AdminEventEditPage({
               | "public_name"
               | "anonymous"
               | "hidden",
+            parts_json: ev.parts_json,
           }}
         />
       </section>

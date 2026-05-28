@@ -3,6 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { Icon } from "@/components/ui/Icon";
+import { formatDuration } from "@/lib/utils/format";
 
 export interface MemberRow {
   id: string;
@@ -13,16 +14,18 @@ export interface MemberRow {
   order_index: number | null;
   x_name: string | null;
   icon_url: string | null;
+  chapters?: { chapter_time: number }[];
 }
 
-type SortKey = "default" | "name" | "id" | "role";
+type SortKey = "default" | "name" | "id" | "chapters" | "role" | "comment";
 type SortDir = "asc" | "desc";
 
 const HEADERS: { key: SortKey; label: string; minWidth?: number }[] = [
-  { key: "default", label: "No" },
-  { key: "name", label: "Name" },
+  { key: "name", label: "活動名" },
   { key: "id", label: "ID" },
-  { key: "role", label: "担当 / コメント" },
+  { key: "chapters", label: "チャプター" },
+  { key: "role", label: "役割" },
+  { key: "comment", label: "コメント" },
 ];
 
 function compareString(a: string | null, b: string | null, dir: SortDir): number {
@@ -46,6 +49,14 @@ function sortMembers(rows: MemberRow[], key: SortKey, dir: SortDir): MemberRow[]
     }
     if (key === "role") {
       return compareString(a.role, b.role, dir);
+    }
+    if (key === "chapters") {
+      const av = a.chapters?.[0]?.chapter_time ?? Number.POSITIVE_INFINITY;
+      const bv = b.chapters?.[0]?.chapter_time ?? Number.POSITIVE_INFINITY;
+      return dir === "asc" ? av - bv : bv - av;
+    }
+    if (key === "comment") {
+      return compareString(a.comment, b.comment, dir);
     }
     return 0;
   });
@@ -112,13 +123,12 @@ export function MemberTable({
         </tr>
       </thead>
       <tbody>
-        {sorted.map((m, i) => {
+        {sorted.map((m) => {
           // icon_url は fetchVideoDetail 側で resolveMemberIcons により
           // x_users.icon_url → そのメンバーの過去作品アイコン → null の順で解決済み。
           const displayName = m.x_name ?? m.name;
           return (
             <tr key={m.id}>
-              <td>{sortKey === "default" ? i + 1 : "—"}</td>
               <td>
                 <span
                   style={{
@@ -166,9 +176,19 @@ export function MemberTable({
                 )}
               </td>
               <td>
-                {m.role ? <strong>{m.role}</strong> : null}
-                {m.role && m.comment ? " / " : ""}
-                {m.comment ?? ""}
+                {m.chapters && m.chapters.length > 0 ? (
+                  m.chapters
+                    .map((chapter) => formatDuration(chapter.chapter_time))
+                    .join(" / ")
+                ) : (
+                  <span className="fn-muted">-</span>
+                )}
+              </td>
+              <td>
+                {m.role ? <strong>{m.role}</strong> : <span className="fn-muted">-</span>}
+              </td>
+              <td>
+                {m.comment ?? <span className="fn-muted">-</span>}
               </td>
             </tr>
           );

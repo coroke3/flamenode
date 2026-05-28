@@ -41,7 +41,7 @@ function parseMemberChapters(raw: string | null): VideoMemberInput["chapters"] {
         const row = item as Record<string, unknown>;
         const time = Number(row.time_seconds ?? row.time ?? row.chapter_time);
         const label = String(row.label ?? row.chapter_label ?? "").trim();
-        if (!Number.isFinite(time) || !label) return null;
+        if (!Number.isFinite(time)) return null;
         return {
           time: formatChapterTime(time),
           label,

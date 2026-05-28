@@ -134,12 +134,14 @@ export default async function SlottedPostPage({
           id: event.id,
           title: event.title,
           video_form_settings_json: event.video_form_settings_json,
+          parts_json: event.parts_json,
         })),
     );
   const slotEventOption = {
     id: ev.id,
     title: ev.title,
     video_form_settings_json: ev.video_form_settings_json,
+    parts_json: ev.parts_json,
   };
   const eventOptions = acceptingEvents.some((o) => o.id === ev.id)
     ? acceptingEvents

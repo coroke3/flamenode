@@ -50,46 +50,77 @@ function memberKey(m: VideoMemberInput): string {
   return `n:${m.name.trim().toLowerCase()}`;
 }
 
-/** チャプター重複キー: `${memberKey}:${秒切り捨て}:${labelLower}` */
+/** チャプター重複キー: `${memberKey}:${mm:ss}` */
 function chapterKey(mk: string, ch: VideoMemberChapterInput): string {
-  const secFloor = (() => {
-    const t = ch.time.trim();
-    if (/^\d+(\.\d+)?$/.test(t)) return Math.floor(Number(t));
-    const parts = t.split(":").map((p) => Number(p));
-    if (parts.length === 2) return parts[0]! * 60 + Math.floor(parts[1]!);
-    if (parts.length === 3) {
-      return parts[0]! * 3600 + parts[1]! * 60 + Math.floor(parts[2]!);
-    }
-    return Number.NaN;
-  })();
-  return `${mk}:${secFloor}:${ch.label.trim().toLowerCase()}`;
+  return `${mk}:${normalizeMemberChapterTime(ch.time) ?? ch.time.trim()}`;
 }
 
-/** CSV chapters セル "time|label|note;time|label|note" をパースする。 */
+function normalizeMemberChapterTime(raw: string): string | null {
+  const match = raw.trim().match(/^(\d{1,4}):([0-5]?\d)$/);
+  if (!match) return null;
+  const minutes = Number(match[1]);
+  const seconds = Number(match[2]);
+  if (!Number.isFinite(minutes) || !Number.isFinite(seconds) || seconds > 59) {
+    return null;
+  }
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function splitChapterTimes(raw: string): string[] {
+  return raw
+    .split(/[;\s,、]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function looksLikeChapterCell(raw: string | undefined): boolean {
+  if (!raw) return false;
+  if (raw.includes("|")) return true;
+  return splitChapterTimes(raw).some((part) => normalizeMemberChapterTime(part));
+}
+
+/** CSV chapters セル。新形式は "0:12;1:05"、旧形式 "time|label|note" も読む。 */
 function parseChaptersCell(cell: string): VideoMemberChapterInput[] {
   const out: VideoMemberChapterInput[] = [];
-  for (const raw of cell.split(";")) {
+  for (const raw of cell.split(/[;\n]/)) {
     const t = raw.trim();
     if (!t) continue;
+    if (!t.includes("|")) {
+      for (const timeRaw of splitChapterTimes(t)) {
+        const time = normalizeMemberChapterTime(timeRaw) ?? timeRaw;
+        out.push({ time, label: "", note: "" });
+      }
+      continue;
+    }
     const cols = t.split("|");
-    const time = (cols[0] ?? "").trim();
+    const time = normalizeMemberChapterTime(cols[0] ?? "") ?? (cols[0] ?? "").trim();
     const label = (cols[1] ?? "").trim();
     const note = (cols[2] ?? "").trim();
-    if (!time || !label) continue;
+    if (!time) continue;
     out.push({ time, label, note });
   }
   return out;
 }
 
-/** chapters の配列を CSV セル形式 "time|label|note;..." に直列化する。 */
+/** chapters の配列を CSV セル形式 "0:12;1:05" に直列化する。 */
 function serializeChaptersCell(chapters: VideoMemberChapterInput[]): string {
   return chapters
-    .filter((c) => c.time.trim() && c.label.trim())
-    .map((c) => {
-      const note = c.note.trim();
-      return note ? `${c.time}|${c.label}|${note}` : `${c.time}|${c.label}`;
-    })
+    .map((c) => normalizeMemberChapterTime(c.time) ?? c.time.trim())
+    .filter(Boolean)
     .join(";");
+}
+
+function headerIndex(headers: string[], aliases: string[]): number | null {
+  const normalizedAliases = aliases.map((a) => a.trim().toLowerCase());
+  const index = headers.findIndex((header) =>
+    normalizedAliases.includes(header.trim().toLowerCase()),
+  );
+  return index >= 0 ? index : null;
+}
+
+function chapterLabelForMember(member: VideoMemberInput): string {
+  const xid = normalizeXId(member.x_user_id);
+  return member.role.trim() || member.name.trim() || (xid ? `@${xid}` : "担当");
 }
 
 export function VideoMembersField({
@@ -256,9 +287,9 @@ export function VideoMembersField({
         const cells = [
           r.name.trim(),
           normalizeXId(r.x_user_id),
+          chapters,
           r.role.trim(),
           r.comment.trim(),
-          chapters,
         ].map((c) => {
           // CSV 内に , か " か改行があれば quote
           if (/[",\n]/.test(c)) return `"${c.replace(/"/g, '""')}"`;
@@ -273,13 +304,13 @@ export function VideoMembersField({
       "次の情報を FlameNode の合作メンバー CSV に整形してください。",
       "",
       "出力は CSV 本文のみ。",
-      "列は name,x_user_id,role,comment,chapters の5列です。",
+      "列は 活動名,ID,チャプター,役割,コメント の5列です。",
       "x_user_id は @ を外してください。不明なら空欄にしてください。",
-      "chapters は time|label|note を ; 区切りで複数指定してください (例: 0:12|登場|表情差分;1:05|見せ場|背景)。",
+      "チャプターは mm:ss だけを入力してください。複数ある場合は ; 区切りで指定できます (例: 0:12;1:05)。",
       "既存データと重複する項目は出力せず、追加・修正が必要な差分だけを出力してください。",
       "",
       hasExisting ? "既存データ:" : "既存データ (空):",
-      "name,x_user_id,role,comment,chapters",
+      "活動名,ID,チャプター,役割,コメント",
     ];
     if (hasExisting) lines.push(existing);
     lines.push("");
@@ -300,26 +331,50 @@ export function VideoMembersField({
     if (rowsRaw.length === 0) return;
     // 1行目がヘッダー (name/x_user_id/chapters のいずれかを含む) ならスキップ
     const firstLower = rowsRaw[0]!.map((c) => c.trim().toLowerCase());
-    if (
-      firstLower.includes("name") ||
-      firstLower.includes("x_user_id") ||
-      firstLower.includes("xid") ||
-      firstLower.includes("chapters")
-    ) {
+    const header = {
+      name: headerIndex(firstLower, ["活動名", "name", "display_name"]),
+      xid: headerIndex(firstLower, ["id", "x id", "x_id", "x_user_id", "xid"]),
+      chapters: headerIndex(firstLower, ["チャプター", "chapter", "chapters"]),
+      role: headerIndex(firstLower, ["役割", "role"]),
+      comment: headerIndex(firstLower, ["コメント", "comment"]),
+    };
+    const hasHeader = Object.values(header).some((index) => index !== null);
+    if (hasHeader) {
       rowsRaw = rowsRaw.slice(1);
     }
 
     // CSV 1 行 → VideoMemberInput (5 列目があれば chapters を読む)
     const parsed = rowsRaw
       .map((cols): VideoMemberInput => {
-        const xid = normalizeXId(cols[1] ?? "");
+        const oldOrder =
+          !hasHeader &&
+          looksLikeChapterCell(cols[4]) &&
+          !looksLikeChapterCell(cols[2]);
+        const nameRaw = cols[header.name ?? 0] ?? "";
+        const xidRaw = cols[header.xid ?? 1] ?? "";
+        const chaptersRaw = hasHeader
+          ? (cols[header.chapters ?? 2] ?? "")
+          : oldOrder
+            ? (cols[4] ?? "")
+            : (cols[2] ?? "");
+        const roleRaw = hasHeader
+          ? (cols[header.role ?? 3] ?? "")
+          : oldOrder
+            ? (cols[2] ?? "")
+            : (cols[3] ?? "");
+        const commentRaw = hasHeader
+          ? (cols[header.comment ?? 4] ?? "")
+          : oldOrder
+            ? (cols[3] ?? "")
+            : (cols[4] ?? "");
+        const xid = normalizeXId(xidRaw);
         const hit = xid ? suggestionsById.get(xid) : null;
-        const chapters = parseChaptersCell(cols[4] ?? "");
+        const chapters = parseChaptersCell(chaptersRaw);
         return {
-          name: (cols[0] ?? "").trim() || hit?.name || "",
+          name: nameRaw.trim() || hit?.name || "",
           x_user_id: xid,
-          role: (cols[2] ?? "").trim(),
-          comment: (cols[3] ?? "").trim(),
+          role: roleRaw.trim(),
+          comment: commentRaw.trim(),
           chapters,
         };
       })
@@ -372,62 +427,33 @@ export function VideoMembersField({
         role: r.role.trim(),
         comment: r.comment.trim(),
         chapters: (r.chapters ?? [])
-          .map((c) => ({
-            time: c.time.trim(),
-            label: c.label.trim(),
-            note: c.note.trim(),
-          }))
-          .filter((c) => c.time && c.label),
+          .map((c) => {
+            const time = normalizeMemberChapterTime(c.time);
+            if (!time) return null;
+            return {
+              time,
+              label: c.label.trim() || chapterLabelForMember(r),
+              note: c.note.trim(),
+            };
+          })
+          .filter((c): c is NonNullable<typeof c> => c !== null),
       }))
       .filter((r) => r.name || r.x_user_id);
     return JSON.stringify(cleaned);
   }, [rows]);
 
   // メンバー行ごとのチャプター行を編集するヘルパー
-  const addChapter = (i: number) => {
+  const updateChapterTimes = (i: number, raw: string) => {
     if (disabled) return;
+    const chapters = splitChapterTimes(raw).map((time) => ({
+      time,
+      label: "",
+      note: "",
+    }));
     setRows((prev) =>
       prev.map((r, idx) =>
         idx === i
-          ? {
-              ...r,
-              chapters: [
-                ...(r.chapters ?? []),
-                { time: "", label: "", note: "" },
-              ],
-            }
-          : r,
-      ),
-    );
-  };
-  const updateChapter = (
-    i: number,
-    j: number,
-    patch: Partial<VideoMemberChapterInput>,
-  ) => {
-    if (disabled) return;
-    setRows((prev) =>
-      prev.map((r, idx) =>
-        idx === i
-          ? {
-              ...r,
-              chapters: (r.chapters ?? []).map((c, jdx) =>
-                jdx === j ? { ...c, ...patch } : c,
-              ),
-            }
-          : r,
-      ),
-    );
-  };
-  const removeChapter = (i: number, j: number) => {
-    if (disabled) return;
-    setRows((prev) =>
-      prev.map((r, idx) =>
-        idx === i
-          ? {
-              ...r,
-              chapters: (r.chapters ?? []).filter((_, jdx) => jdx !== j),
-            }
+          ? { ...r, chapters }
           : r,
       ),
     );
@@ -464,15 +490,18 @@ export function VideoMembersField({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+          gridTemplateColumns:
+            "minmax(150px, 1.2fr) minmax(120px, 0.9fr) minmax(118px, 0.8fr) minmax(120px, 0.85fr) minmax(160px, 1.2fr) auto",
           gap: 6,
           alignItems: "center",
           fontSize: 11,
           color: "var(--text-muted)",
+          minWidth: 820,
         }}
       >
-        <span>名前</span>
+        <span>活動名</span>
         <span>X ID</span>
+        <span>チャプター</span>
         <span>役割</span>
         <span>コメント</span>
         <span></span>
@@ -482,9 +511,11 @@ export function VideoMembersField({
           key={i}
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+            gridTemplateColumns:
+              "minmax(150px, 1.2fr) minmax(120px, 0.9fr) minmax(118px, 0.8fr) minmax(120px, 0.85fr) minmax(160px, 1.2fr) auto",
             gap: 6,
             alignItems: "center",
+            minWidth: 820,
           }}
         >
           <input
@@ -518,6 +549,16 @@ export function VideoMembersField({
           />
           <input
             type="text"
+            value={serializeChaptersCell(r.chapters ?? [])}
+            onChange={(e) => updateChapterTimes(i, e.target.value)}
+            placeholder="0:12;1:05"
+            title="mm:ss 形式。複数ある場合は ; 区切り"
+            className="fn-input"
+            maxLength={80}
+            disabled={disabled}
+          />
+          <input
+            type="text"
             value={r.role}
             onChange={(e) => update(i, { role: e.target.value })}
             placeholder="作画 / 編集 / 音響など"
@@ -543,95 +584,6 @@ export function VideoMembersField({
           >
             <Icon name="trash" size={11} aria-hidden />
           </button>
-          {/* メンバーチャプター編集 (details で折りたたみ) */}
-          <details
-            style={{
-              gridColumn: "1 / -1",
-              marginTop: 2,
-              padding: "4px 6px",
-              borderRadius: "var(--radius-sm)",
-              background: "var(--bg-surface)",
-              fontSize: 11,
-              opacity: disabled ? 0.6 : 1,
-            }}
-          >
-            <summary
-              style={{
-                cursor: disabled ? "default" : "pointer",
-                color: "var(--text-muted)",
-              }}
-            >
-              <Icon name="chapter" size={11} aria-hidden /> メンバーチャプター
-              {r.chapters && r.chapters.length > 0
-                ? ` (${r.chapters.length} 件)`
-                : null}
-            </summary>
-            <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
-              {(r.chapters ?? []).map((ch, j) => (
-                <div
-                  key={`mc-${i}-${j}`}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "70px 1fr 1fr auto",
-                    gap: 4,
-                    alignItems: "center",
-                  }}
-                >
-                  <input
-                    type="text"
-                    value={ch.time}
-                    onChange={(e) =>
-                      updateChapter(i, j, { time: e.target.value })
-                    }
-                    placeholder="mm:ss"
-                    className="fn-input"
-                    disabled={disabled}
-                    maxLength={10}
-                  />
-                  <input
-                    type="text"
-                    value={ch.label}
-                    onChange={(e) =>
-                      updateChapter(i, j, { label: e.target.value })
-                    }
-                    placeholder="ラベル"
-                    className="fn-input"
-                    disabled={disabled}
-                    maxLength={120}
-                  />
-                  <input
-                    type="text"
-                    value={ch.note}
-                    onChange={(e) =>
-                      updateChapter(i, j, { note: e.target.value })
-                    }
-                    placeholder="メモ (任意)"
-                    className="fn-input"
-                    disabled={disabled}
-                    maxLength={400}
-                  />
-                  <button
-                    type="button"
-                    className="fn-btn fn-btn-ghost fn-btn-sm"
-                    onClick={() => removeChapter(i, j)}
-                    aria-label="このチャプターを削除"
-                    disabled={disabled}
-                  >
-                    <Icon name="trash" size={10} aria-hidden />
-                  </button>
-                </div>
-              ))}
-              <button
-                type="button"
-                className="fn-btn fn-btn-ghost fn-btn-sm"
-                onClick={() => addChapter(i)}
-                disabled={disabled}
-                style={{ alignSelf: "flex-start" }}
-              >
-                <Icon name="plus" size={10} aria-hidden /> チャプターを追加
-              </button>
-            </div>
-          </details>
         </div>
       ))}
       <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
@@ -668,7 +620,7 @@ export function VideoMembersField({
           className="fn-input"
           rows={4}
           style={{ marginTop: 6, fontFamily: "monospace", fontSize: 12 }}
-          placeholder={"例:\n田中,tanaka,作画,よろしく\n佐藤,sato_design,音響,"}
+          placeholder={"例:\n田中,tanaka,0:12,作画,よろしく\n佐藤,sato_design,1:05;1:42,音響,"}
           onPaste={onPaste}
           disabled={disabled}
         />

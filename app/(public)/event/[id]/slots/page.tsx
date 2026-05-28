@@ -101,7 +101,7 @@ export default async function EventSlotsPage({
   const filledSlots = Math.max(0, slotTotal - availableSlots);
   const fillRatio =
     slotTotal > 0 ? Math.min(100, Math.round((filledSlots / slotTotal) * 100)) : 0;
-  const slotPartGapSec = (event.slot_part_gap_minutes ?? 30) * 60;
+  const slotPartGapSec = (event.slot_part_gap_minutes ?? 15) * 60;
 
   return (
     <div

@@ -148,13 +148,12 @@
 .tableRow {
   display: grid;
   grid-template-columns:
-    52px
     minmax(190px, 1.25fr)
     minmax(120px, 0.9fr)
+    minmax(120px, 0.8fr)
     minmax(86px, 0.75fr)
-    minmax(160px, 1.4fr)
-    minmax(92px, 0.7fr);
-  min-width: 780px;
+    minmax(160px, 1.4fr);
+  min-width: 680px;
   background: var(--bg-surface);
 }
 
@@ -278,6 +277,13 @@
   font-variant-numeric: tabular-nums;
 }
 
+.chapterTimes {
+  color: var(--event-accent, var(--accent-primary));
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
 .chaptersWrap {
   display: grid;
   gap: 12px;
@@ -346,13 +352,12 @@
   .tableRow {
     display: grid;
     grid-template-columns:
-      44px
       minmax(170px, 1.2fr)
       minmax(112px, 0.9fr)
+      minmax(104px, 0.8fr)
       minmax(78px, 0.7fr)
-      minmax(146px, 1.35fr)
-      minmax(84px, 0.65fr);
-    min-width: 700px;
+      minmax(146px, 1.35fr);
+    min-width: 620px;
   }
 
   .tableRow > span {

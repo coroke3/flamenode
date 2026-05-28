@@ -1,0 +1,407 @@
+.root {
+  display: grid;
+  gap: 16px;
+}
+
+.lede {
+  margin: 0;
+  padding: 12px 14px;
+  border-left: 3px solid var(--accent-primary);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: color-mix(in srgb, var(--accent-primary) 6%, transparent);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.summaryBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+}
+
+.summaryLabel {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.summaryCount {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.summaryCount strong {
+  color: var(--accent-primary-strong);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.summarySpacer {
+  flex: 1;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.row:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-1);
+}
+
+.rowActive {
+  border-left-color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 3%, var(--bg-surface));
+}
+
+.rowInactive {
+  border-left-color: var(--border-strong);
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.rowActive .avatar {
+  background: color-mix(in srgb, var(--accent-primary) 22%, var(--bg-elevated));
+  color: var(--text-primary);
+}
+
+.identity {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.handle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.handleMuted {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.statusBadgeActive {
+  background: color-mix(in srgb, var(--accent-primary) 28%, transparent);
+  color: var(--accent-primary-strong);
+}
+
+.statusBadgeInactive {
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+/* ----------------------------------------------------------
+ * カスタムトグル
+ * ---------------------------------------------------------- */
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle[data-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.toggleInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.toggleSwitch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  transition: background-color 0.15s ease;
+  flex: 0 0 auto;
+}
+
+.toggleSwitch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.18s ease;
+}
+
+.toggleInput:checked + .toggleSwitch {
+  background: var(--accent-primary);
+}
+
+.toggleInput:checked + .toggleSwitch::after {
+  transform: translateX(16px);
+}
+
+.toggleInput:focus-visible + .toggleSwitch {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.toggleLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.removeBtn {
+  flex: 0 0 auto;
+}
+
+/* ----------------------------------------------------------
+ * 空状態
+ * ---------------------------------------------------------- */
+
+.empty {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  padding: 28px 16px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.emptyIcon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+.emptyTitle {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.emptyHint {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+/* ----------------------------------------------------------
+ * 追加フォーム
+ * ---------------------------------------------------------- */
+
+.addToggle {
+  align-self: flex-start;
+}
+
+.addForm {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--accent-primary);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent-primary) 4%, var(--bg-surface));
+}
+
+.addFormHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.addFields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+@media (max-width: 520px) {
+  .addFields {
+    grid-template-columns: 1fr;
+  }
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+}
+
+.fieldLabel {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+}
+
+.fieldHint {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.addActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* ----------------------------------------------------------
+ * フィードバック
+ * ---------------------------------------------------------- */
+
+.feedback {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.feedbackOk {
+  background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
+  color: var(--accent-primary-strong);
+}
+
+.feedbackError {
+  background: var(--accent-danger-soft);
+  color: var(--accent-danger);
+}
+
+@media (max-width: 520px) {
+  .row {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      "avatar identity"
+      "toggle toggle"
+      "remove remove";
+    row-gap: 10px;
+  }
+
+  .avatar {
+    grid-area: avatar;
+  }
+
+  .identity {
+    grid-area: identity;
+  }
+
+  .toggle {
+    grid-area: toggle;
+    justify-self: start;
+    padding: 6px 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--bg-elevated);
+  }
+
+  .removeBtn {
+    grid-area: remove;
+    justify-self: end;
+  }
+}

@@ -73,8 +73,7 @@ function parseCollaboratorCsv(raw: string): CollaboratorCsvRow[] {
         is_public_staff: isPublic.trim() === "1" ? "1" : "0",
         public_role_label: roleLabel.trim(),
       };
-    })
-    .filter((row) => row.permission_keys.length > 0);
+    });
 }
 
 export function EventStaffManager({
@@ -105,7 +104,7 @@ export function EventStaffManager({
 
   const runCollaboratorCsvImport = (rows: CollaboratorCsvRow[]) => {
     if (rows.length === 0) {
-      setError("取り込める CSV 行がありません。権限を含めてください。");
+      setError("取り込める CSV 行がありません。");
       return;
     }
     setError(null);
@@ -281,6 +280,7 @@ export function EventStaffManager({
         <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
           FlameNode全体の管理者ではない人にも、必要なイベント管理だけを許可できます。
           X ID または Discord User ID を指定し、既存の許可は選択した権限で上書きします。
+          権限を 1 つも選ばずに登録すると、名前だけイベントスタッフ欄に掲載され、管理権限は付与されません。
         </p>
         {collaborators.length === 0 ? (
           <p className="fn-muted fn-text-sm">未登録です。</p>
@@ -515,10 +515,15 @@ function CollaboratorForm({
       <button
         type="submit"
         className="fn-btn fn-btn-primary fn-btn-sm"
-        disabled={busy || permKeys.length === 0}
+        disabled={busy}
       >
         <Icon name="check" size={11} aria-hidden /> 追加・更新
       </button>
+      {permKeys.length === 0 ? (
+        <p style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
+          ※ 権限を選んでいないため、名前だけイベントスタッフ欄に掲載されます (管理権限なし)。
+        </p>
+      ) : null}
       <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
         <label className="fn-label" htmlFor="collaborator_csv">
           CSV でまとめて追加

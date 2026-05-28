@@ -39,7 +39,7 @@ export interface SlotGridProps {
   canReserve: boolean;
   slotKind: "time" | "count";
   maxConsecutiveSlots?: number;
-  /** 「部」分割閾値 (秒)。events.slot_part_gap_minutes から派生。未指定で 30 分。 */
+  /** 「部」分割閾値 (秒)。events.slot_part_gap_minutes から派生。未指定で 15 分。 */
   slotPartGapSec?: number;
 }
 

@@ -230,21 +230,25 @@ export default async function UserListPage({
                 className={styles.card}
                 prefetch={false}
               >
-                {creator.icon_url ? (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img
-                    src={creator.icon_url}
-                    alt=""
-                    className={styles.avatar}
-                    loading="lazy"
-                  />
-                ) : (
-                  <span className={styles.avatarFallback}>
-                    <Icon name="user" size={28} aria-hidden />
+                <span className={styles.profile}>
+                  {creator.icon_url ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={creator.icon_url}
+                      alt=""
+                      className={styles.avatar}
+                      loading="lazy"
+                    />
+                  ) : (
+                    <span className={styles.avatarFallback}>
+                      <Icon name="user" size={20} aria-hidden />
+                    </span>
+                  )}
+                  <span className={styles.identity}>
+                    <span className={styles.name}>{creator.x_name}</span>
+                    <span className={styles.handle}>@{creator.id}</span>
                   </span>
-                )}
-                <span className={styles.name}>{creator.x_name}</span>
-                <span className={styles.handle}>@{creator.id}</span>
+                </span>
                 <span className={styles.counts}>
                   {creator.total_count} 作品
                   <small>

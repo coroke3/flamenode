@@ -15,6 +15,8 @@ export interface VideoCardData {
   primary_event_id?: string | null;
   scheduled_time?: number | null;
   status?: string | null;
+  /** 作品が選択した「部」(events.parts_json から)。サムネ右上に小さくバッジ表示する。 */
+  part?: string | null;
 }
 
 interface VideoCardProps {
@@ -80,6 +82,11 @@ export function VideoCard({
             className={cn("fn-badge", "fn-badge-warning", styles.statusBadge)}
           >
             調整中
+          </span>
+        ) : null}
+        {video.part ? (
+          <span className={cn("fn-badge", "fn-badge-soft", styles.partBadge)}>
+            {video.part}
           </span>
         ) : null}
       </div>

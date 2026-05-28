@@ -300,7 +300,12 @@ export default async function EditVideoPage({
     .where(eq(eventsTable.is_archived, 0));
   const acceptingEventMap = new Map<
     string,
-    { id: string; title: string; video_form_settings_json?: string | null }
+    {
+      id: string;
+      title: string;
+      video_form_settings_json?: string | null;
+      parts_json?: string | null;
+    }
   >();
   for (const ev of allEventRows) {
     // 受付中 + 「一般ユーザーの追加紐付け = 許可」のイベントを候補に出す。
@@ -310,6 +315,7 @@ export default async function EditVideoPage({
         id: ev.id,
         title: ev.title,
         video_form_settings_json: ev.video_form_settings_json,
+        parts_json: ev.parts_json,
       });
     }
   }
@@ -320,6 +326,7 @@ export default async function EditVideoPage({
         id: eventsTable.id,
         title: eventsTable.title,
         video_form_settings_json: eventsTable.video_form_settings_json,
+        parts_json: eventsTable.parts_json,
       })
       .from(eventsTable)
       .where(inArray(eventsTable.id, currentEventIds));
@@ -577,6 +584,7 @@ export default async function EditVideoPage({
           is_collab: video.collaboration_type === "collab" || initialMembers.length > 0,
           members: initialMembers,
           event_ids: currentEventIds,
+          part: video.part ?? undefined,
         }}
         memberSuggestions={memberSuggestions}
         softwareSuggestions={softwareSuggestions}

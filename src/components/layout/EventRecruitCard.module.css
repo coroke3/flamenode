@@ -195,7 +195,7 @@
 .timeline {
   position: relative;
   margin-top: 4px;
-  padding-bottom: 32px;
+  padding-bottom: 56px;
 }
 
 .timelineTrack {
@@ -263,21 +263,25 @@
 
 .timelineLabels {
   position: relative;
-  height: 26px;
+  height: 60px;
   margin-top: 8px;
 }
 
 .timelineLabel {
   position: absolute;
   top: 0;
-  transform: translateX(-50%);
+  /* transform/text-align/align-items は JSX 側で position に応じて設定 (端で見切れない) */
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 1px;
-  white-space: nowrap;
+  max-width: min(110px, 30vw);
   font-variant-numeric: tabular-nums;
   pointer-events: none;
+}
+
+/* 隣り合うラベルが重ならないよう、奇数番目を 1 段下に置く */
+.timelineLabelStagger {
+  top: 28px;
 }
 
 .timelineLabelName {
@@ -285,12 +289,17 @@
   font-weight: 600;
   color: rgba(255, 255, 255, 0.5);
   letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
 }
 
 .timelineLabelDate {
   font-size: 10px;
   font-weight: 700;
   color: rgba(248, 250, 252, 0.85);
+  white-space: nowrap;
 }
 
 /* periods */

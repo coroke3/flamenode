@@ -85,7 +85,7 @@ export default async function AdminEventSlotsPage({
         </h2>
         <SlotList
           slots={rows}
-          slotPartGapSec={(ev.slot_part_gap_minutes ?? 30) * 60}
+          slotPartGapSec={(ev.slot_part_gap_minutes ?? 15) * 60}
         />
       </section>
     </div>

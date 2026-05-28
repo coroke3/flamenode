@@ -5,6 +5,7 @@ import Link from "next/link";
 import styles from "./MemberSection.module.css";
 import { Icon } from "@/components/ui/Icon";
 import { cn } from "@/lib/utils/cn";
+import { formatDuration } from "@/lib/utils/format";
 import { MemberChapterItem } from "./MemberChapterItem";
 import type { MemberChapterItemEntry } from "./MemberChapterItem";
 
@@ -58,6 +59,24 @@ function chapterCountMap(
     );
   }
   return map;
+}
+
+function chapterTimesMap(
+  chapters: readonly MemberSectionChapter[],
+): Map<string, string[]> {
+  const map = new Map<string, number[]>();
+  for (const chapter of chapters) {
+    if (!chapter.video_member_id) continue;
+    const list = map.get(chapter.video_member_id) ?? [];
+    list.push(chapter.chapter_time);
+    map.set(chapter.video_member_id, list);
+  }
+  return new Map(
+    Array.from(map.entries()).map(([id, times]) => [
+      id,
+      times.sort((a, b) => a - b).map((time) => formatDuration(time)),
+    ]),
+  );
 }
 
 function compareText(a: string | null, b: string | null): number {
@@ -306,13 +325,13 @@ function TableView({
     () => chapterCountMap(memberChapters),
     [memberChapters],
   );
+  const chapterTimes = React.useMemo(
+    () => chapterTimesMap(memberChapters),
+    [memberChapters],
+  );
   const sortedMembers = React.useMemo(
     () => sortMembers(members, sort, counts),
     [members, sort, counts],
-  );
-  const orderById = React.useMemo(
-    () => new Map(members.map((member, index) => [member.id, index + 1])),
-    [members],
   );
 
   const handleSort = React.useCallback((key: SortKey) => {
@@ -327,13 +346,6 @@ function TableView({
     <div className={styles.tableWrap} role="table" aria-label="参加メンバー">
       <div className={styles.tableHeader} role="row">
         <SortHeader
-          label="No."
-          sortKey="order"
-          activeSort={sort}
-          onSort={handleSort}
-          className={styles.tColNo}
-        />
-        <SortHeader
           label="活動名"
           sortKey="name"
           activeSort={sort}
@@ -341,11 +353,18 @@ function TableView({
           className={styles.tColName}
         />
         <SortHeader
-          label="@id"
+          label="ID"
           sortKey="handle"
           activeSort={sort}
           onSort={handleSort}
           className={styles.tColHandle}
+        />
+        <SortHeader
+          label="チャプター"
+          sortKey="chapters"
+          activeSort={sort}
+          onSort={handleSort}
+          className={styles.tColChapters}
         />
         <SortHeader
           label="役割"
@@ -357,28 +376,17 @@ function TableView({
         <span role="columnheader" className={styles.tColComment}>
           コメント
         </span>
-        <SortHeader
-          label="チャプター"
-          sortKey="chapters"
-          activeSort={sort}
-          onSort={handleSort}
-          className={styles.tColChapters}
-        />
       </div>
       {sortedMembers.map((member) => {
-        const displayOrder = orderById.get(member.id) ?? 0;
         const displayName = memberDisplayName(member);
         const internalHref = member.x_user_id ? `/user/${member.x_user_id}` : null;
         const externalHref = member.x_user_id
           ? `https://x.com/${encodeURIComponent(member.x_user_id)}`
           : null;
-        const chapterCount = counts.get(member.id) ?? 0;
+        const times = chapterTimes.get(member.id) ?? [];
 
         return (
           <div role="row" key={member.id} className={styles.tableRow}>
-            <span role="cell" className={styles.tColNo} data-label="No.">
-              {displayOrder}
-            </span>
             <span role="cell" className={styles.tColName} data-label="活動名">
               <span className={styles.tNameCell}>
                 <span className={styles.tAvatar} aria-hidden>
@@ -398,7 +406,7 @@ function TableView({
                 )}
               </span>
             </span>
-            <span role="cell" className={styles.tColHandle} data-label="@id">
+            <span role="cell" className={styles.tColHandle} data-label="ID">
               {externalHref ? (
                 <a
                   href={externalHref}
@@ -413,6 +421,17 @@ function TableView({
                 <span className={styles.tMuted}>—</span>
               )}
             </span>
+            <span
+              role="cell"
+              className={styles.tColChapters}
+              data-label="チャプター"
+            >
+              {times.length > 0 ? (
+                <span className={styles.chapterTimes}>{times.join(" / ")}</span>
+              ) : (
+                <span className={styles.tMuted}>—</span>
+              )}
+            </span>
             <span role="cell" className={styles.tColRole} data-label="役割">
               {member.role ?? <span className={styles.tMuted}>—</span>}
             </span>
@@ -422,20 +441,6 @@ function TableView({
               data-label="コメント"
             >
               {member.comment ?? <span className={styles.tMuted}>—</span>}
-            </span>
-            <span
-              role="cell"
-              className={styles.tColChapters}
-              data-label="メンバーチャプター"
-            >
-              {chapterCount > 0 ? (
-                <span className={styles.chapterCountBadge}>
-                  <Icon name="chapter" size={11} aria-hidden />
-                  {chapterCount}
-                </span>
-              ) : (
-                <span className={styles.tMuted}>—</span>
-              )}
             </span>
           </div>
         );

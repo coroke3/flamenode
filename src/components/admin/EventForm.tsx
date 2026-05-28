@@ -34,6 +34,22 @@ export interface EventFormInitial {
   slot_type?: "time" | "count";
   slot_visibility_mode?: "public_name" | "anonymous" | "hidden";
   slot_part_gap_minutes?: number | null;
+  parts_json?: string | null;
+}
+
+function partsJsonToText(value: string | null | undefined): string {
+  if (!value) return "";
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return "";
+    return parsed
+      .filter((v): v is string => typeof v === "string")
+      .map((v) => v.trim())
+      .filter(Boolean)
+      .join("\n");
+  } catch {
+    return "";
+  }
 }
 
 interface EventFormProps {
@@ -309,17 +325,80 @@ export function EventForm({
             defaultValue={String(initial.allow_user_video_edits ?? 0)}
             className="fn-select"
           >
-            <option value="0">運営だけが変更する</option>
+            <option value="0">設定しない (通常権限を採用)</option>
             <option value="1">投稿者・共同編集者にも一部変更を許可</option>
           </select>
+          <p
+            style={{
+              marginTop: 4,
+              fontSize: 11.5,
+              color: "var(--text-muted)",
+              lineHeight: 1.5,
+            }}
+          >
+            「設定しない」を選んだ場合、イベント毎の上書きを行わず、ユーザー管理 &gt; 権限
+            タブで設定した通常権限（一般作品権限(イベント毎)）が採用されます。
+          </p>
         </div>
         <div>
           <label className="fn-label">許可する編集内容</label>
+          <p
+            style={{
+              marginTop: 0,
+              marginBottom: 6,
+              fontSize: 11.5,
+              color: "var(--text-muted)",
+              lineHeight: 1.5,
+            }}
+          >
+            「投稿者・共同編集者にも一部変更を許可」を選んだときのみ有効です。
+          </p>
           <PermissionKeysField
             name="user_video_edit_permission_keys_json"
             defaultValue={initial.user_video_edit_permission_keys_json}
           />
         </div>
+      </fieldset>
+
+      <fieldset
+        style={{
+          marginTop: 16,
+          padding: "14px 0 0",
+          border: 0,
+          borderTop: "1px solid var(--border-subtle)",
+          display: "grid",
+          gap: 8,
+        }}
+      >
+        <legend
+          style={{
+            padding: "0 10px 0 0",
+            fontSize: 13,
+            fontWeight: 800,
+            color: "var(--text-primary)",
+          }}
+        >
+          部 (作品の分類)
+        </legend>
+        <p
+          style={{
+            margin: 0,
+            fontSize: 11.5,
+            color: "var(--text-muted)",
+            lineHeight: 1.5,
+          }}
+        >
+          このイベントで作品が選択できる「部」を 1 行に 1 件ずつ入力します
+          (例: 1部 / 2部 / 演出部門 など)。空欄なら作品フォームに「部」項目を出しません。
+          旧データの type に相当する分類項目です。
+        </p>
+        <textarea
+          name="parts_text"
+          defaultValue={partsJsonToText(initial.parts_json)}
+          className="fn-input"
+          rows={4}
+          placeholder={"1部\n2部"}
+        />
       </fieldset>
 
       <fieldset
@@ -428,14 +507,14 @@ export function EventForm({
         </div>
         <div>
           <label className="fn-label">
-            部の分割閾値 (分) <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>デフォルト 30</span>
+            部の分割閾値 (分) <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>デフォルト 15</span>
           </label>
           <input
             name="slot_part_gap_minutes"
             type="number"
             min={1}
             max={1440}
-            defaultValue={initial.slot_part_gap_minutes ?? 30}
+            defaultValue={initial.slot_part_gap_minutes ?? 15}
             className="fn-input"
           />
         </div>

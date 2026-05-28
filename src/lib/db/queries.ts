@@ -32,6 +32,7 @@ export async function fetchRecommendedVideos(db: DB, limit = 40) {
       creator_x_user_id: videos.creator_x_user_id,
       primary_event_id: videos.primary_event_id,
       scheduled_time: videos.scheduled_time,
+      part: videos.part,
       video_score: sql<number>`COALESCE(${videoStats.score}, 0)`,
     })
     .from(videos)
@@ -66,6 +67,7 @@ export async function fetchUnderratedVideos(db: DB, limit = 60) {
       creator_x_user_id: videos.creator_x_user_id,
       primary_event_id: videos.primary_event_id,
       scheduled_time: videos.scheduled_time,
+      part: videos.part,
       video_score: sql<number>`COALESCE(${videoStats.score}, 0)`,
     })
     .from(videos)
@@ -89,6 +91,7 @@ export async function fetchLatestVideos(db: DB, limit = 30) {
       creator_x_user_id: videos.creator_x_user_id,
       primary_event_id: videos.primary_event_id,
       scheduled_time: videos.scheduled_time,
+      part: videos.part,
     })
     .from(videos)
     .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
@@ -123,6 +126,7 @@ export async function fetchVideosForEvent(
       icon_url: creatorIconExpr,
       creator_x_user_id: videos.creator_x_user_id,
       scheduled_time: videos.scheduled_time,
+      part: videos.part,
     })
     .from(videos)
     .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))

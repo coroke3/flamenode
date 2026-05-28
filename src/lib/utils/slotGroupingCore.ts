@@ -75,12 +75,12 @@ export function buildSlotParts<
     end_time: number | null;
     slot_kind?: string | null;
   },
->(rows: T[], gapSec = 30 * 60): SlotPart<T>[] {
+>(rows: T[], gapSec = 15 * 60): SlotPart<T>[] {
   if (rows.length === 0) return [];
   const timed = sortSlotsChronologically(rows.filter((r) => r.start_time != null));
   const timeless = rows.filter((r) => r.start_time == null);
   const effectiveGapSec =
-    Number.isFinite(gapSec) && gapSec >= 0 ? gapSec : 30 * 60;
+    Number.isFinite(gapSec) && gapSec >= 0 ? gapSec : 15 * 60;
   const parts: SlotPart<T>[] = [];
   let current: T[] = [];
   let prevEnd = 0;

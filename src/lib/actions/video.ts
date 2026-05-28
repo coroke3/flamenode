@@ -20,7 +20,6 @@ import {
   xUsers,
   xUserIcons,
 } from "@/lib/db/schema";
-import { parseChapterTime } from "@/lib/utils/chapterTime";
 import { getEditableEventIds } from "@/lib/auth/ownership";
 import { inArray } from "drizzle-orm";
 import { extractYoutubeId } from "@/lib/youtube/id";
@@ -90,6 +89,10 @@ const videoFormSchema = z.object({
     .union([z.literal("on"), z.literal("true"), z.literal("false"), z.boolean()])
     .optional()
     .transform((v) => v === true || v === "on" || v === "true"),
+  // events.parts_json から選んだ「部」名。null/空文字なら未設定。
+  // サーバー側では、保存時に video_events で紐付くイベントの parts_json と
+  // 突き合わせて妥当性を検証する (許可外の値はクリアする)。
+  part: z.string().trim().max(40).optional().nullable(),
 });
 
 export interface VideoActionResult {
@@ -131,6 +134,17 @@ interface MemberInput {
   chapters: MemberChapterInput[];
 }
 
+function parseMemberChapterTime(raw: string | null | undefined): number | null {
+  const match = String(raw ?? "").trim().match(/^(\d{1,4}):([0-5]?\d)$/);
+  if (!match) return null;
+  const minutes = Number(match[1]);
+  const seconds = Number(match[2]);
+  if (!Number.isFinite(minutes) || !Number.isFinite(seconds) || seconds > 59) {
+    return null;
+  }
+  return minutes * 60 + seconds;
+}
+
 function parseMembersJson(raw: FormDataEntryValue | null): MemberInput[] {
   if (typeof raw !== "string" || !raw.trim()) return [];
   try {
@@ -155,7 +169,7 @@ function parseMembersJson(raw: FormDataEntryValue | null): MemberInput[] {
             const time = String(cc.time ?? "").trim();
             const label = String(cc.label ?? "").trim();
             const note = String(cc.note ?? "").trim();
-            if (!time || !label) return null;
+            if (!time) return null;
             return { time, label, note };
           })
           .filter((c): c is MemberChapterInput => c !== null);
@@ -482,12 +496,14 @@ async function replaceVideoMembers(
     }
     const carry = xid ? carryByXid.get(normalizeXId(xid)) : undefined;
     const newMemberId = generateId("vm");
+    const fallbackChapterLabel =
+      m.role || m.name || (xid ? `@${xid}` : "担当");
     const chapters = (m.chapters ?? [])
       .map((ch, order) => {
-        const sec = parseChapterTime(ch.time);
+        const sec = parseMemberChapterTime(ch.time);
         if (sec === null) return null;
-        const label = ch.label.trim();
-        if (!label || label.length > 120) return null;
+        const label = ch.label.trim() || fallbackChapterLabel;
+        if (label.length > 120) return null;
         const note = ch.note.trim();
         if (note.length > 1000) return null;
         return { time_seconds: sec, label, note, order_index: order };
@@ -521,7 +537,7 @@ async function replaceVideoMembers(
       edit_updated_at: carry?.edit_updated_at ?? null,
     });
 
-    // メンバーチャプターを保存。time が不正 (parseChapterTime null) なものはスキップ。
+    // メンバーチャプターを保存。mm:ss 以外はスキップ。
   }
 }
 
@@ -659,6 +675,7 @@ export async function createFreeVideo(
       highlights: parsed.data.highlights ?? null,
       production_story: parsed.data.production_story ?? null,
       closing_comment: parsed.data.closing_comment ?? null,
+      part: parsed.data.part?.trim() || null,
       scheduling_type: "manual",
       scheduled_time: now,
       created_at: now,
@@ -841,6 +858,7 @@ export async function submitSlotVideo(
           production_story: parsed.data.production_story ?? null,
           closing_comment: parsed.data.closing_comment ?? null,
           collaboration_type: parsed.data.is_collab ? "collab" : "individual",
+          part: parsed.data.part?.trim() || null,
           updated_at: now,
         })
         .where(eq(videos.id, videoId));
@@ -883,6 +901,7 @@ export async function submitSlotVideo(
         highlights: parsed.data.highlights ?? null,
         production_story: parsed.data.production_story ?? null,
         closing_comment: parsed.data.closing_comment ?? null,
+        part: parsed.data.part?.trim() || null,
         created_at: now,
         updated_at: now,
       });
@@ -1233,6 +1252,9 @@ export async function updateVideo(
             ? "collab"
             : "individual"
           : target.collaboration_type,
+        part: canEditBasics
+          ? (parsed.data.part?.trim() || null)
+          : target.part,
         updated_at: now,
       })
       .where(eq(videos.id, videoId));
@@ -1311,6 +1333,7 @@ export async function updateVideo(
       stage_permission: src.stage_permission,
       closing_comment: src.closing_comment,
       collaboration_type: src.collaboration_type,
+      part: src.part,
     };
   };
   const afterSnapshot = auditPick(target, {
@@ -1351,6 +1374,9 @@ export async function updateVideo(
         ? "collab"
         : "individual"
       : target.collaboration_type,
+    part: canEditBasics
+      ? (parsed.data.part?.trim() || null)
+      : target.part,
   });
   await db.insert(historyLogs).values({
       table_name: "videos",

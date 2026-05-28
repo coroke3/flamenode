@@ -59,8 +59,9 @@ function memberChaptersFromJson(
         if (!item || typeof item !== "object") return null;
         const row = item as Record<string, unknown>;
         const time = Number(row.time_seconds ?? row.time ?? row.chapter_time);
-        const label = String(row.label ?? row.chapter_label ?? "").trim();
-        if (!Number.isFinite(time) || !label) return null;
+        const label =
+          String(row.label ?? row.chapter_label ?? "").trim() || "担当";
+        if (!Number.isFinite(time)) return null;
         const note = String(row.note ?? "").trim();
         return {
           id: `${memberId}:${index}`,
