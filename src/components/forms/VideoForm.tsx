@@ -25,6 +25,7 @@ import { VideoIconPicker } from "@/components/forms/VideoIconPicker";
 import { normalizeXId } from "@/lib/utils/xid";
 import { ErrorCallout } from "@/components/ui/ErrorCallout";
 import { resolveStagePermissionFieldFromJson } from "@/lib/video/formSettings";
+import { redirectForGuardReason } from "@/lib/client/guardRedirect";
 
 export interface VideoFormInitialValues {
   display_name?: string;
@@ -271,35 +272,6 @@ export function VideoForm({
     (key.startsWith("descriptions.") && descriptionsDisabled) ||
     (key.startsWith("members.") && membersDisabled);
 
-  const redirectForGuardReason = React.useCallback(
-    (reason?: string): boolean => {
-      if (typeof window === "undefined") return false;
-      const next = `${window.location.pathname}${window.location.search}`;
-
-      if (reason === "tos_required" || reason === "tos_reaccept_required") {
-        router.push(`/rules?next=${encodeURIComponent(next)}`);
-        return true;
-      }
-
-      if (reason === "unauthenticated") {
-        router.push(`/entry?next=${encodeURIComponent(next)}`);
-        return true;
-      }
-
-      if (
-        reason === "active_x_required" ||
-        reason === "active_x_rejected" ||
-        reason === "active_x_not_approved"
-      ) {
-        router.push(`/dashboard/settings?next=${encodeURIComponent(next)}`);
-        return true;
-      }
-
-      return false;
-    },
-    [router],
-  );
-
   const handleSubmit = (ev: React.FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
     const formData = new FormData(ev.currentTarget);
@@ -312,7 +284,11 @@ export function VideoForm({
             ? updateVideo
             : createFreeVideo;
       const r = await action(formData);
-      if (!r.ok && redirectForGuardReason(r.reason)) {
+      const currentPath =
+        typeof window === "undefined"
+          ? "/"
+          : `${window.location.pathname}${window.location.search}`;
+      if (!r.ok && redirectForGuardReason(router, r.reason, currentPath)) {
         // リダイレクトで離脱するので dirty 警告は不要にする。
         setDirty(false);
         return;
