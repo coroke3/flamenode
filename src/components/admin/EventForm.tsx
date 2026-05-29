@@ -6,6 +6,10 @@ import { Icon } from "@/components/ui/Icon";
 import { createEvent, updateEvent } from "@/lib/actions/event-admin";
 import { PermissionKeysField } from "@/components/admin/PermissionKeysField";
 import {
+  EventSettingsPreview,
+  type EventSettingsPreviewValue,
+} from "@/components/admin/EventSettingsPreview";
+import {
   DEFAULT_STAGE_PERMISSION_FIELD,
   parseVideoFormSettings,
 } from "@/lib/video/formSettings";
@@ -35,6 +39,8 @@ export interface EventFormInitial {
   slot_visibility_mode?: "public_name" | "anonymous" | "hidden";
   slot_part_gap_minutes?: number | null;
   parts_json?: string | null;
+  editable_fields?: string | null;
+  review_settings?: string | null;
 }
 
 function partsJsonToText(value: string | null | undefined): string {
@@ -64,6 +70,104 @@ function unixToInputDateTime(ts: number | null | undefined): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+function hasCheckedValue(fd: FormData, name: string): boolean {
+  return fd.getAll(name).some((v) => String(v) === "1");
+}
+
+function textValue(fd: FormData, name: string): string {
+  const value = fd.get(name);
+  return typeof value === "string" ? value : "";
+}
+
+function buildPreviewFormSettings(fd: FormData): string {
+  return JSON.stringify({
+    stage_permission: {
+      enabled: hasCheckedValue(fd, "stage_permission_enabled"),
+      required: hasCheckedValue(fd, "stage_permission_required"),
+      label:
+        textValue(fd, "stage_permission_label").trim() ||
+        DEFAULT_STAGE_PERMISSION_FIELD.label,
+      description:
+        textValue(fd, "stage_permission_description").trim() ||
+        DEFAULT_STAGE_PERMISSION_FIELD.description,
+      placeholder:
+        textValue(fd, "stage_permission_placeholder").trim() ||
+        DEFAULT_STAGE_PERMISSION_FIELD.placeholder,
+    },
+  });
+}
+
+function buildInitialPreview(initial: EventFormInitial): EventSettingsPreviewValue {
+  return {
+    title: initial.title,
+    event_type: initial.event_type ?? "event",
+    explanation: initial.explanation,
+    icon_url: initial.icon_url,
+    img_url: initial.img_url,
+    accent_color: initial.accent_color,
+    start_time: initial.start_time,
+    end_time: initial.end_time,
+    entry_start_time: initial.entry_start_time,
+    entry_end_time: initial.entry_end_time,
+    is_active: initial.is_active ?? 0,
+    is_entry_open: initial.is_entry_open ?? 0,
+    is_archived: initial.is_archived ?? 0,
+    allow_user_video_event_links: initial.allow_user_video_event_links ?? 0,
+    allow_user_video_edits: initial.allow_user_video_edits ?? 0,
+    user_video_edit_permission_keys_json:
+      initial.user_video_edit_permission_keys_json,
+    video_form_settings_json: initial.video_form_settings_json,
+    max_slots_per_video: initial.max_slots_per_video ?? 1,
+    max_consecutive_slots_per_entry:
+      initial.max_consecutive_slots_per_entry ?? 3,
+    slot_type: initial.slot_type ?? "time",
+    slot_visibility_mode: initial.slot_visibility_mode ?? "public_name",
+    slot_part_gap_minutes: initial.slot_part_gap_minutes ?? 15,
+    parts_text: partsJsonToText(initial.parts_json),
+    parts_json: initial.parts_json,
+    editable_fields: initial.editable_fields,
+    review_settings: initial.review_settings,
+  };
+}
+
+function buildPreviewFromForm(
+  fd: FormData,
+  initial: EventFormInitial,
+): EventSettingsPreviewValue {
+  return {
+    title: textValue(fd, "title"),
+    event_type: textValue(fd, "event_type") || "event",
+    explanation: textValue(fd, "explanation"),
+    icon_url: textValue(fd, "icon_url"),
+    img_url: textValue(fd, "img_url"),
+    accent_color: textValue(fd, "accent_color"),
+    start_time: textValue(fd, "start_time"),
+    end_time: textValue(fd, "end_time"),
+    entry_start_time: textValue(fd, "entry_start_time"),
+    entry_end_time: textValue(fd, "entry_end_time"),
+    is_active: textValue(fd, "is_active") || "0",
+    is_entry_open: textValue(fd, "is_entry_open") || "0",
+    is_archived: textValue(fd, "is_archived") || "0",
+    allow_user_video_event_links:
+      textValue(fd, "allow_user_video_event_links") || "0",
+    allow_user_video_edits: textValue(fd, "allow_user_video_edits") || "0",
+    user_video_edit_permission_keys_json: textValue(
+      fd,
+      "user_video_edit_permission_keys_json",
+    ),
+    video_form_settings_json: buildPreviewFormSettings(fd),
+    max_slots_per_video: textValue(fd, "max_slots_per_video") || "1",
+    max_consecutive_slots_per_entry:
+      textValue(fd, "max_consecutive_slots_per_entry") || "3",
+    slot_type: textValue(fd, "slot_type") || "time",
+    slot_visibility_mode: textValue(fd, "slot_visibility_mode") || "public_name",
+    slot_part_gap_minutes: textValue(fd, "slot_part_gap_minutes") || "15",
+    parts_text: textValue(fd, "parts_text"),
+    editable_fields: initial.editable_fields,
+    review_settings: initial.review_settings,
+  };
+}
+
 export function EventForm({
   mode,
   initial = {},
@@ -72,6 +176,9 @@ export function EventForm({
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
+  const [preview, setPreview] = React.useState<EventSettingsPreviewValue>(() =>
+    buildInitialPreview(initial),
+  );
   const stagePermissionSettings =
     parseVideoFormSettings(initial.video_form_settings_json).stage_permission ??
     {};
@@ -99,6 +206,9 @@ export function EventForm({
   return (
     <form
       onSubmit={onSubmit}
+      onChange={(e) => {
+        setPreview(buildPreviewFromForm(new FormData(e.currentTarget), initial));
+      }}
       style={{ display: "flex", flexDirection: "column", gap: 12 }}
     >
       {mode === "edit" && initial.id ? (
@@ -531,6 +641,8 @@ export function EventForm({
           </select>
         </div>
       </div>
+
+      <EventSettingsPreview event={preview} />
 
       {error ? (
         <p role="alert" style={{ color: "var(--accent-danger)", fontSize: 13 }}>

@@ -81,6 +81,8 @@ export default async function AdminEventEditPage({
               | "anonymous"
               | "hidden",
             parts_json: ev.parts_json,
+            editable_fields: ev.editable_fields,
+            review_settings: ev.review_settings,
           }}
         />
       </section>
