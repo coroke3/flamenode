@@ -15,6 +15,7 @@ import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { AuditDiffDetail } from "@/components/admin/AuditDiffDetail";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { AuditTargetLink } from "@/components/admin/AuditTargetLink";
+import { parseAuditDiff } from "@/lib/audit/diff";
 
 export const metadata: Metadata = { title: "監査ログ" };
 export const dynamic = "force-dynamic";
@@ -43,37 +44,9 @@ function normalizeViewMode(raw: string | undefined): ViewMode {
 const MAX_LIMIT = 500;
 const DEFAULT_LIMIT = 100;
 
-function parseJson(value: string | null): Record<string, unknown> | null {
-  if (!value) return null;
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 function diffSummary(row: HistoryRow): { keys: string[]; count: number } {
-  const before = parseJson(row.before_data);
-  const after = parseJson(row.after_data);
-
-  if (!before && !after) return { keys: [], count: 0 };
-  if (!before) {
-    const keys = Object.keys(after ?? {});
-    return { keys, count: keys.length };
-  }
-  if (!after) {
-    const keys = Object.keys(before);
-    return { keys, count: keys.length };
-  }
-
-  const allKeys = new Set([...Object.keys(before), ...Object.keys(after)]);
-  const changed = Array.from(allKeys).filter(
-    (k) => JSON.stringify(before[k] ?? null) !== JSON.stringify(after[k] ?? null),
-  );
-  return { keys: changed, count: changed.length };
+  const diff = parseAuditDiff(row.before_data, row.after_data);
+  return { keys: diff.changedKeys, count: diff.changedKeys.length };
 }
 
 export default async function AdminAuditPage({

@@ -9,6 +9,7 @@ import { historyLogs } from "@/lib/db/schema";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { Icon } from "@/components/ui/Icon";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { AuditDiffDetail } from "@/components/admin/AuditDiffDetail";
 
 export const metadata: Metadata = { title: "監査ログ詳細" };
 export const dynamic = "force-dynamic";
@@ -143,6 +144,22 @@ export default async function AdminAuditDetailPage({
           }
         />
         <Meta label="retention_class" value={row.retention_class ?? "normal"} />
+      </section>
+
+      <section style={{ marginTop: 28 }}>
+        <h2
+          style={{
+            fontSize: 13,
+            fontWeight: 700,
+            letterSpacing: "0.18em",
+            color: "var(--text-muted)",
+            textTransform: "uppercase",
+            marginBottom: 8,
+          }}
+        >
+          差分
+        </h2>
+        <AuditDiffDetail before={row.before_data} after={row.after_data} />
       </section>
 
       <section style={{ marginTop: 28 }}>
