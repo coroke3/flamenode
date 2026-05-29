@@ -84,6 +84,8 @@ export default async function AdminVideoMembersPage({
       comment: videoMembers.comment,
       chapters_json: videoMembers.chapters_json,
       order_index: videoMembers.order_index,
+      can_edit: videoMembers.can_edit,
+      is_public_member: videoMembers.is_public_member,
     })
     .from(videoMembers)
     .where(eq(videoMembers.video_id, video.id))
@@ -95,6 +97,9 @@ export default async function AdminVideoMembersPage({
     role: member.role ?? "",
     comment: member.comment ?? "",
     chapters: parseMemberChapters(member.chapters_json),
+    order_index: member.order_index,
+    can_edit: member.can_edit,
+    is_public_member: member.is_public_member,
   }));
 
   const suggestionRows = await db

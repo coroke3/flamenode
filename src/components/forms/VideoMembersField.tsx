@@ -3,30 +3,22 @@
 import * as React from "react";
 import { Icon } from "@/components/ui/Icon";
 import { normalizeXId } from "@/lib/utils/xid";
-import { parseCsv } from "@/lib/utils/csv";
+import {
+  chapterKey,
+  memberKey,
+  normalizeMemberChapterTime,
+  parseVideoMemberCsv,
+  serializeChaptersCell,
+  splitChapterTimes,
+  type VideoMemberInput,
+  type VideoMemberSuggestion,
+} from "@/lib/video/memberInput";
 
-export interface VideoMemberChapterInput {
-  time: string;
-  label: string;
-  note: string;
-}
-
-export interface VideoMemberInput {
-  name: string;
-  x_user_id: string;
-  role: string;
-  comment: string;
-  /**
-   * メンバーチャプター。time / label / note の組を 0 件以上持つ。
-   * サーバー側 (replaceVideoMembers) で video_members.chapters_json に保存される。
-   */
-  chapters?: VideoMemberChapterInput[];
-}
-
-export interface VideoMemberSuggestion {
-  name: string;
-  x_user_id: string;
-}
+export type {
+  VideoMemberChapterInput,
+  VideoMemberInput,
+  VideoMemberSuggestion,
+} from "@/lib/video/memberInput";
 
 interface VideoMembersFieldProps {
   initialMembers?: VideoMemberInput[];
@@ -43,81 +35,6 @@ const EMPTY_ROW: VideoMemberInput = {
   chapters: [],
 };
 
-/** メンバーキー (CSV 差分追加用)。X ID 優先、なければ名前 (lowercase trim)。 */
-function memberKey(m: VideoMemberInput): string {
-  const xid = normalizeXId(m.x_user_id);
-  if (xid) return `x:${xid}`;
-  return `n:${m.name.trim().toLowerCase()}`;
-}
-
-/** チャプター重複キー: `${memberKey}:${mm:ss}` */
-function chapterKey(mk: string, ch: VideoMemberChapterInput): string {
-  return `${mk}:${normalizeMemberChapterTime(ch.time) ?? ch.time.trim()}`;
-}
-
-function normalizeMemberChapterTime(raw: string): string | null {
-  const match = raw.trim().match(/^(\d{1,4}):([0-5]?\d)$/);
-  if (!match) return null;
-  const minutes = Number(match[1]);
-  const seconds = Number(match[2]);
-  if (!Number.isFinite(minutes) || !Number.isFinite(seconds) || seconds > 59) {
-    return null;
-  }
-  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-}
-
-function splitChapterTimes(raw: string): string[] {
-  return raw
-    .split(/[;\s,、]+/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-}
-
-function looksLikeChapterCell(raw: string | undefined): boolean {
-  if (!raw) return false;
-  if (raw.includes("|")) return true;
-  return splitChapterTimes(raw).some((part) => normalizeMemberChapterTime(part));
-}
-
-/** CSV chapters セル。新形式は "0:12;1:05"、旧形式 "time|label|note" も読む。 */
-function parseChaptersCell(cell: string): VideoMemberChapterInput[] {
-  const out: VideoMemberChapterInput[] = [];
-  for (const raw of cell.split(/[;\n]/)) {
-    const t = raw.trim();
-    if (!t) continue;
-    if (!t.includes("|")) {
-      for (const timeRaw of splitChapterTimes(t)) {
-        const time = normalizeMemberChapterTime(timeRaw) ?? timeRaw;
-        out.push({ time, label: "", note: "" });
-      }
-      continue;
-    }
-    const cols = t.split("|");
-    const time = normalizeMemberChapterTime(cols[0] ?? "") ?? (cols[0] ?? "").trim();
-    const label = (cols[1] ?? "").trim();
-    const note = (cols[2] ?? "").trim();
-    if (!time) continue;
-    out.push({ time, label, note });
-  }
-  return out;
-}
-
-/** chapters の配列を CSV セル形式 "0:12;1:05" に直列化する。 */
-function serializeChaptersCell(chapters: VideoMemberChapterInput[]): string {
-  return chapters
-    .map((c) => normalizeMemberChapterTime(c.time) ?? c.time.trim())
-    .filter(Boolean)
-    .join(";");
-}
-
-function headerIndex(headers: string[], aliases: string[]): number | null {
-  const normalizedAliases = aliases.map((a) => a.trim().toLowerCase());
-  const index = headers.findIndex((header) =>
-    normalizedAliases.includes(header.trim().toLowerCase()),
-  );
-  return index >= 0 ? index : null;
-}
-
 function chapterLabelForMember(member: VideoMemberInput): string {
   const xid = normalizeXId(member.x_user_id);
   return member.role.trim() || member.name.trim() || (xid ? `@${xid}` : "担当");
@@ -132,7 +49,11 @@ export function VideoMembersField({
   const [rows, setRows] = React.useState<VideoMemberInput[]>(() =>
     initialMembers.length > 0 ? initialMembers : [{ ...EMPTY_ROW }],
   );
+  const [viewMode, setViewMode] = React.useState<"card" | "table">(() =>
+    initialMembers.length >= 8 ? "table" : "card",
+  );
   const [copied, setCopied] = React.useState(false);
+  const [csvWarning, setCsvWarning] = React.useState<string | null>(null);
 
   // /api/internal/x-users/search からの追加候補 (debounce 検索)
   const [fetched, setFetched] = React.useState<VideoMemberSuggestion[]>([]);
@@ -277,6 +198,18 @@ export function VideoMembersField({
   };
   const remove = (i: number) =>
     !disabled && setRows((prev) => prev.filter((_, idx) => idx !== i));
+  const move = (i: number, direction: -1 | 1) => {
+    if (disabled) return;
+    setRows((prev) => {
+      const nextIndex = i + direction;
+      if (nextIndex < 0 || nextIndex >= prev.length) return prev;
+      const next = [...prev];
+      const current = next[i]!;
+      next[i] = next[nextIndex]!;
+      next[nextIndex] = current;
+      return next;
+    });
+  };
 
   const copyCsvPrompt = async () => {
     // 既存メンバーを 5 列 CSV に直列化 (空メンバーは除外)
@@ -327,58 +260,12 @@ export function VideoMembersField({
     const text = e.clipboardData.getData("text");
     if (!text || !/[\n,]/.test(text)) return;
     e.preventDefault();
-    let rowsRaw = parseCsv(text);
-    if (rowsRaw.length === 0) return;
-    // 1行目がヘッダー (name/x_user_id/chapters のいずれかを含む) ならスキップ
-    const firstLower = rowsRaw[0]!.map((c) => c.trim().toLowerCase());
-    const header = {
-      name: headerIndex(firstLower, ["活動名", "name", "display_name"]),
-      xid: headerIndex(firstLower, ["id", "x id", "x_id", "x_user_id", "xid"]),
-      chapters: headerIndex(firstLower, ["チャプター", "chapter", "chapters"]),
-      role: headerIndex(firstLower, ["役割", "role"]),
-      comment: headerIndex(firstLower, ["コメント", "comment"]),
-    };
-    const hasHeader = Object.values(header).some((index) => index !== null);
-    if (hasHeader) {
-      rowsRaw = rowsRaw.slice(1);
-    }
-
-    // CSV 1 行 → VideoMemberInput (5 列目があれば chapters を読む)
-    const parsed = rowsRaw
-      .map((cols): VideoMemberInput => {
-        const oldOrder =
-          !hasHeader &&
-          looksLikeChapterCell(cols[4]) &&
-          !looksLikeChapterCell(cols[2]);
-        const nameRaw = cols[header.name ?? 0] ?? "";
-        const xidRaw = cols[header.xid ?? 1] ?? "";
-        const chaptersRaw = hasHeader
-          ? (cols[header.chapters ?? 2] ?? "")
-          : oldOrder
-            ? (cols[4] ?? "")
-            : (cols[2] ?? "");
-        const roleRaw = hasHeader
-          ? (cols[header.role ?? 3] ?? "")
-          : oldOrder
-            ? (cols[2] ?? "")
-            : (cols[3] ?? "");
-        const commentRaw = hasHeader
-          ? (cols[header.comment ?? 4] ?? "")
-          : oldOrder
-            ? (cols[3] ?? "")
-            : (cols[4] ?? "");
-        const xid = normalizeXId(xidRaw);
-        const hit = xid ? suggestionsById.get(xid) : null;
-        const chapters = parseChaptersCell(chaptersRaw);
-        return {
-          name: nameRaw.trim() || hit?.name || "",
-          x_user_id: xid,
-          role: roleRaw.trim(),
-          comment: commentRaw.trim(),
-          chapters,
-        };
-      })
-      .filter((r) => r.name || r.x_user_id);
+    const csv = parseVideoMemberCsv(text, {
+      suggestions: mergedSuggestions,
+      existingMembers: rows,
+    });
+    const parsed = csv.members;
+    setCsvWarning(csv.warnings.length > 0 ? csv.warnings.join(" / ") : null);
     if (parsed.length === 0) return;
 
     // 差分追加: 既存メンバーと同じキーなら、空欄でない role / comment / chapters を補完。
@@ -488,104 +375,315 @@ export function VideoMembersField({
         </p>
       ) : null}
       <div
+        role="group"
+        aria-label="メンバー編集の表示モード"
         style={{
-          display: "grid",
-          gridTemplateColumns:
-            "minmax(150px, 1.2fr) minmax(120px, 0.9fr) minmax(118px, 0.8fr) minmax(120px, 0.85fr) minmax(160px, 1.2fr) auto",
-          gap: 6,
-          alignItems: "center",
-          fontSize: 11,
-          color: "var(--text-muted)",
-          minWidth: 820,
+          display: "inline-flex",
+          gap: 4,
+          padding: 2,
+          background: "var(--bg-elevated)",
+          border: "1px solid var(--border-subtle)",
+          borderRadius: "var(--radius-pill)",
+          alignSelf: "flex-start",
         }}
       >
-        <span>活動名</span>
-        <span>X ID</span>
-        <span>チャプター</span>
-        <span>役割</span>
-        <span>コメント</span>
-        <span></span>
+        <button
+          type="button"
+          className={`fn-btn fn-btn-sm ${viewMode === "card" ? "fn-btn-primary" : "fn-btn-ghost"}`}
+          aria-pressed={viewMode === "card"}
+          onClick={() => setViewMode("card")}
+        >
+          カード
+        </button>
+        <button
+          type="button"
+          className={`fn-btn fn-btn-sm ${viewMode === "table" ? "fn-btn-primary" : "fn-btn-ghost"}`}
+          aria-pressed={viewMode === "table"}
+          onClick={() => setViewMode("table")}
+        >
+          表
+        </button>
       </div>
-      {rows.map((r, i) => (
+      {viewMode === "table" ? (
         <div
-          key={i}
           style={{
-            display: "grid",
-            gridTemplateColumns:
-              "minmax(150px, 1.2fr) minmax(120px, 0.9fr) minmax(118px, 0.8fr) minmax(120px, 0.85fr) minmax(160px, 1.2fr) auto",
-            gap: 6,
-            alignItems: "center",
-            minWidth: 820,
+            overflowX: "auto",
           }}
         >
-          <input
-            type="text"
-            value={r.name}
-            onChange={(e) => {
-              update(i, { name: e.target.value });
-              setSearchQuery(e.target.value);
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns:
+                "48px minmax(150px, 1.1fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr) minmax(160px, 1fr) 90px 82px 82px 132px",
+              gap: 6,
+              alignItems: "center",
+              fontSize: 11,
+              color: "var(--text-muted)",
+              minWidth: 1080,
+              paddingBottom: 4,
             }}
-            onBlur={(e) => fillFromName(i, e.target.value)}
-            placeholder="表示名"
-            className="fn-input"
-            maxLength={80}
-            list="member-name-suggestions"
-            disabled={disabled}
-          />
-          <input
-            type="text"
-            value={r.x_user_id}
-            onChange={(e) => {
-              update(i, { x_user_id: e.target.value });
-              setSearchQuery(e.target.value);
-            }}
-            onBlur={(e) => fillFromXId(i, e.target.value)}
-            placeholder="@なし"
-            className="fn-input"
-            maxLength={32}
-            pattern="[A-Za-z0-9_]*"
-            list="member-xid-suggestions"
-            disabled={disabled}
-          />
-          <input
-            type="text"
-            value={serializeChaptersCell(r.chapters ?? [])}
-            onChange={(e) => updateChapterTimes(i, e.target.value)}
-            placeholder="0:12;1:05"
-            title="mm:ss 形式。複数ある場合は ; 区切り"
-            className="fn-input"
-            maxLength={80}
-            disabled={disabled}
-          />
-          <input
-            type="text"
-            value={r.role}
-            onChange={(e) => update(i, { role: e.target.value })}
-            placeholder="作画 / 編集 / 音響など"
-            className="fn-input"
-            maxLength={40}
-            disabled={disabled}
-          />
-          <input
-            type="text"
-            value={r.comment}
-            onChange={(e) => update(i, { comment: e.target.value })}
-            placeholder="任意コメント"
-            className="fn-input"
-            maxLength={200}
-            disabled={disabled}
-          />
-          <button
-            type="button"
-            className="fn-btn fn-btn-ghost fn-btn-sm"
-            onClick={() => remove(i)}
-            aria-label="この行を削除"
-            disabled={disabled}
           >
-            <Icon name="trash" size={11} aria-hidden />
-          </button>
+            <span>順</span>
+            <span>名前</span>
+            <span>X ID</span>
+            <span>役割</span>
+            <span>コメント</span>
+            <span>チャプター</span>
+            <span>編集権限</span>
+            <span>公開</span>
+            <span>操作</span>
+          </div>
+          {rows.map((r, i) => {
+            const canEdit = r.can_edit === true || r.can_edit === 1;
+            const isPublic = r.is_public_member !== false && r.is_public_member !== 0;
+            return (
+              <div
+                key={i}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns:
+                    "48px minmax(150px, 1.1fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr) minmax(160px, 1fr) 90px 82px 82px 132px",
+                  gap: 6,
+                  alignItems: "center",
+                  minWidth: 1080,
+                  marginTop: 6,
+                }}
+              >
+                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                  {i + 1}
+                </span>
+                <input
+                  type="text"
+                  value={r.name}
+                  onChange={(e) => {
+                    update(i, { name: e.target.value });
+                    setSearchQuery(e.target.value);
+                  }}
+                  onBlur={(e) => fillFromName(i, e.target.value)}
+                  placeholder="表示名"
+                  className="fn-input"
+                  maxLength={80}
+                  list="member-name-suggestions"
+                  disabled={disabled}
+                />
+                <input
+                  type="text"
+                  value={r.x_user_id}
+                  onChange={(e) => {
+                    update(i, { x_user_id: e.target.value });
+                    setSearchQuery(e.target.value);
+                  }}
+                  onBlur={(e) => fillFromXId(i, e.target.value)}
+                  placeholder="@なし"
+                  className="fn-input"
+                  maxLength={32}
+                  pattern="[A-Za-z0-9_]*"
+                  list="member-xid-suggestions"
+                  disabled={disabled}
+                />
+                <input
+                  type="text"
+                  value={r.role}
+                  onChange={(e) => update(i, { role: e.target.value })}
+                  placeholder="作画 / 編集"
+                  className="fn-input"
+                  maxLength={40}
+                  disabled={disabled}
+                />
+                <input
+                  type="text"
+                  value={r.comment}
+                  onChange={(e) => update(i, { comment: e.target.value })}
+                  placeholder="任意コメント"
+                  className="fn-input"
+                  maxLength={200}
+                  disabled={disabled}
+                />
+                <input
+                  type="text"
+                  value={serializeChaptersCell(r.chapters ?? [])}
+                  onChange={(e) => updateChapterTimes(i, e.target.value)}
+                  placeholder="0:12;1:05"
+                  title="mm:ss 形式。複数ある場合は ; 区切り"
+                  className="fn-input"
+                  maxLength={80}
+                  disabled={disabled}
+                />
+                <span className={`fn-badge ${canEdit ? "fn-badge-warning" : "fn-badge-soft"}`}>
+                  {canEdit ? "あり" : "なし"}
+                </span>
+                <span className={`fn-badge ${isPublic ? "fn-badge-accent" : "fn-badge-soft"}`}>
+                  {isPublic ? "公開" : "非公開"}
+                </span>
+                <span style={{ display: "inline-flex", gap: 4 }}>
+                  <button
+                    type="button"
+                    className="fn-btn fn-btn-ghost fn-btn-sm"
+                    onClick={() => move(i, -1)}
+                    aria-label={`${i + 1}行目を上へ移動`}
+                    disabled={disabled || i === 0}
+                  >
+                    <Icon name="chevron-up" size={11} aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    className="fn-btn fn-btn-ghost fn-btn-sm"
+                    onClick={() => move(i, 1)}
+                    aria-label={`${i + 1}行目を下へ移動`}
+                    disabled={disabled || i === rows.length - 1}
+                  >
+                    <Icon name="chevron-down" size={11} aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    className="fn-btn fn-btn-ghost fn-btn-sm"
+                    onClick={() => remove(i)}
+                    aria-label={`${i + 1}行目を削除`}
+                    disabled={disabled}
+                  >
+                    <Icon name="trash" size={11} aria-hidden />
+                  </button>
+                </span>
+              </div>
+            );
+          })}
         </div>
-      ))}
+      ) : (
+        <div style={{ display: "grid", gap: 10 }}>
+          {rows.map((r, i) => (
+            <section
+              key={i}
+              className="fn-card"
+              style={{ padding: 12, display: "grid", gap: 10 }}
+            >
+              <header style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span className="fn-badge fn-badge-soft">{i + 1}</span>
+                <strong style={{ fontSize: 13, flex: 1 }}>
+                  {r.name || r.x_user_id || "新しいメンバー"}
+                </strong>
+                <button
+                  type="button"
+                  className="fn-btn fn-btn-ghost fn-btn-sm"
+                  onClick={() => move(i, -1)}
+                  aria-label={`${i + 1}人目を上へ移動`}
+                  disabled={disabled || i === 0}
+                >
+                  <Icon name="chevron-up" size={11} aria-hidden />
+                </button>
+                <button
+                  type="button"
+                  className="fn-btn fn-btn-ghost fn-btn-sm"
+                  onClick={() => move(i, 1)}
+                  aria-label={`${i + 1}人目を下へ移動`}
+                  disabled={disabled || i === rows.length - 1}
+                >
+                  <Icon name="chevron-down" size={11} aria-hidden />
+                </button>
+                <button
+                  type="button"
+                  className="fn-btn fn-btn-ghost fn-btn-sm"
+                  onClick={() => remove(i)}
+                  aria-label={`${i + 1}人目を削除`}
+                  disabled={disabled}
+                >
+                  <Icon name="trash" size={11} aria-hidden />
+                </button>
+              </header>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                  gap: 8,
+                }}
+              >
+                <label>
+                  <span className="fn-label">名前</span>
+                  <input
+                    type="text"
+                    value={r.name}
+                    onChange={(e) => {
+                      update(i, { name: e.target.value });
+                      setSearchQuery(e.target.value);
+                    }}
+                    onBlur={(e) => fillFromName(i, e.target.value)}
+                    placeholder="表示名"
+                    className="fn-input"
+                    maxLength={80}
+                    list="member-name-suggestions"
+                    disabled={disabled}
+                  />
+                </label>
+                <label>
+                  <span className="fn-label">X ID</span>
+                  <input
+                    type="text"
+                    value={r.x_user_id}
+                    onChange={(e) => {
+                      update(i, { x_user_id: e.target.value });
+                      setSearchQuery(e.target.value);
+                    }}
+                    onBlur={(e) => fillFromXId(i, e.target.value)}
+                    placeholder="@なし"
+                    className="fn-input"
+                    maxLength={32}
+                    pattern="[A-Za-z0-9_]*"
+                    list="member-xid-suggestions"
+                    disabled={disabled}
+                  />
+                </label>
+                <label>
+                  <span className="fn-label">役割</span>
+                  <input
+                    type="text"
+                    value={r.role}
+                    onChange={(e) => update(i, { role: e.target.value })}
+                    placeholder="作画 / 編集 / 音響など"
+                    className="fn-input"
+                    maxLength={40}
+                    disabled={disabled}
+                  />
+                </label>
+                <label>
+                  <span className="fn-label">チャプター</span>
+                  <input
+                    type="text"
+                    value={serializeChaptersCell(r.chapters ?? [])}
+                    onChange={(e) => updateChapterTimes(i, e.target.value)}
+                    placeholder="0:12;1:05"
+                    title="mm:ss 形式。複数ある場合は ; 区切り"
+                    className="fn-input"
+                    maxLength={80}
+                    disabled={disabled}
+                  />
+                </label>
+              </div>
+              <label>
+                <span className="fn-label">コメント</span>
+                <input
+                  type="text"
+                  value={r.comment}
+                  onChange={(e) => update(i, { comment: e.target.value })}
+                  placeholder="任意コメント"
+                  className="fn-input"
+                  maxLength={200}
+                  disabled={disabled}
+                />
+              </label>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <span className={`fn-badge ${r.can_edit === true || r.can_edit === 1 ? "fn-badge-warning" : "fn-badge-soft"}`}>
+                  編集権限 {r.can_edit === true || r.can_edit === 1 ? "あり" : "なし"}
+                </span>
+                <span className={`fn-badge ${r.is_public_member === false || r.is_public_member === 0 ? "fn-badge-soft" : "fn-badge-accent"}`}>
+                  {r.is_public_member === false || r.is_public_member === 0 ? "非公開" : "公開メンバー"}
+                </span>
+                <span className="fn-badge fn-badge-soft">
+                  チャプター {r.chapters?.length ?? 0} 件
+                </span>
+              </div>
+            </section>
+          ))}
+        </div>
+      )}
       <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
         <button
           type="button"
@@ -606,6 +704,11 @@ export function VideoMembersField({
           </button>
         ) : null}
       </div>
+      {csvWarning ? (
+        <p role="alert" style={{ margin: 0, fontSize: 12, color: "var(--accent-warning)" }}>
+          {csvWarning}
+        </p>
+      ) : null}
       <details style={{ marginTop: 6 }}>
         <summary
           style={{
@@ -620,7 +723,7 @@ export function VideoMembersField({
           className="fn-input"
           rows={4}
           style={{ marginTop: 6, fontFamily: "monospace", fontSize: 12 }}
-          placeholder={"例:\n田中,tanaka,0:12,作画,よろしく\n佐藤,sato_design,1:05;1:42,音響,"}
+          placeholder={"例:\nname,x_user_id,role,comment\n田中,tanaka,作画,よろしく\n佐藤,sato_design,音響,\"コメントに,を含められます\""}
           onPaste={onPaste}
           disabled={disabled}
         />
