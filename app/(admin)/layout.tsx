@@ -30,6 +30,7 @@ const ADMIN_NAV_GROUPS: AdminSidebarGroup[] = [
     title: "コンテンツ",
     items: [
       { href: "/admin/videos", label: "作品管理", icon: <Icon name="youtube" size={14} /> },
+      { href: "/admin/youtube-sync", label: "YouTube同期状態", icon: <Icon name="refresh" size={14} /> },
       { href: "/admin/events", label: "イベント管理", icon: <Icon name="calendar" size={14} /> },
       { href: "/admin/announcements", label: "お知らせ管理", icon: <Icon name="alert" size={14} /> },
     ],
@@ -48,6 +49,7 @@ const ADMIN_NAV_GROUPS: AdminSidebarGroup[] = [
       { href: "/admin/audit", label: "監査ログ", icon: <Icon name="clock" size={14} /> },
       { href: "/admin/cost-guard", label: "コストガード", icon: <Icon name="warning" size={14} /> },
       { href: "/admin/health", label: "ヘルスチェック", icon: <Icon name="check" size={14} /> },
+      { href: "/admin/health/integrity", label: "DB整合性チェック", icon: <Icon name="list" size={14} /> },
       { href: "/admin/security", label: "セキュリティ", icon: <Icon name="settings" size={14} /> },
       { href: "/admin/import", label: "インポート", icon: <Icon name="upload" size={14} /> },
     ],
