@@ -17,6 +17,12 @@ const modeSchema = z.object({
   reason: z.string().trim().max(500).optional().nullable(),
 });
 
+const advancedSettingsSchema = z.object({
+  thresholds_json: z.string().trim().max(4000).optional().nullable(),
+  exception_until: z.string().trim().optional().nullable(),
+  exception_features_json: z.string().trim().max(2000).optional().nullable(),
+});
+
 async function requireAdmin(): Promise<
   { ok: true; userId: string } | { ok: false; result: CostGuardResult }
 > {
@@ -138,4 +144,70 @@ export async function setAutoCostGuard(
   });
   revalidatePath("/admin/cost-guard");
   return { ok: true };
+}
+
+export async function setCostGuardAdvancedSettings(
+  formData: FormData,
+): Promise<CostGuardResult> {
+  const guard = await requireAdmin();
+  if (!guard.ok) return guard.result;
+  const parsed = advancedSettingsSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: parsed.error.issues[0]?.message ?? "入力エラー",
+    };
+  }
+  const db = getDatabase();
+  if (!db) return { ok: false, message: "DB に接続できません。" };
+
+  const thresholdsJson = normalizeJsonString(parsed.data.thresholds_json, "閾値JSON");
+  if (!thresholdsJson.ok) return { ok: false, message: thresholdsJson.message };
+  const exceptionFeaturesJson = normalizeJsonString(
+    parsed.data.exception_features_json,
+    "例外機能JSON",
+  );
+  if (!exceptionFeaturesJson.ok) {
+    return { ok: false, message: exceptionFeaturesJson.message };
+  }
+  const exceptionUntil = parseDateTime(parsed.data.exception_until);
+  const now = Math.floor(Date.now() / 1000);
+  const patch = {
+    cost_guard_thresholds_json: thresholdsJson.value,
+    cost_guard_exception_until: exceptionUntil,
+    cost_guard_exception_features_json: exceptionFeaturesJson.value,
+  };
+  await upsertGlobal(db, patch);
+  await db.insert(historyLogs).values({
+    table_name: "system_settings",
+    record_id: "global",
+    action: "UPDATE",
+    after_data: JSON.stringify(patch),
+    operator_discord_id: guard.userId,
+    retention_class: "long_audit",
+    created_at: now,
+  });
+  revalidatePath("/admin/cost-guard");
+  return { ok: true, message: "詳細設定を更新しました。" };
+}
+
+function normalizeJsonString(
+  value: string | null | undefined,
+  label: string,
+): { ok: true; value: string | null } | { ok: false; message: string } {
+  const trimmed = (value ?? "").trim();
+  if (!trimmed) return { ok: true, value: null };
+  try {
+    JSON.parse(trimmed);
+    return { ok: true, value: trimmed };
+  } catch {
+    return { ok: false, message: `${label} を解析できません。` };
+  }
+}
+
+function parseDateTime(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms)) return null;
+  return Math.floor(ms / 1000);
 }

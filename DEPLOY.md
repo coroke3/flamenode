@@ -163,6 +163,8 @@ wrangler d1 migrations apply flamenode_db --remote
 wrangler d1 migrations apply flamenode_db --local
 ```
 
+本番前MVPでは、`video_comments` と `dashboard_metrics_cache` は `0021_slim_mvp_drop_unused_tables.sql` で削除します。管理トップは対応待ち件数だけを軽量クエリで表示し、公開API・お知らせ・YouTube同期・score再計算は短期キャッシュ/低頻度更新を前提にしてください。
+
 ### 3-3. (任意) 旧データの取り込み
 
 旧 EventArchives の CSV / JSON を取り込む場合は、ログイン後に `/admin/import` から実行できます。
@@ -289,10 +291,10 @@ cd workers/notification-dispatcher ; wrangler deploy ; cd ../..
 
 | Worker | Cron | 役割 |
 | --- | --- | --- |
-| `flamenode-json-generator` | `*/10 * * * *` | トップ・一覧・推薦の静的 JSON を R2 / KV に書き出す |
+| `flamenode-json-generator` | `*/15 * * * *` | トップ・一覧・推薦の静的 JSON を R2 / KV に書き出す |
 | `flamenode-cleanup` | `0 */1 * * *` | 期限切れスロット解放 / 古い通知削除 |
-| `flamenode-youtube-sync` | `0 */6 * * *` | YouTube 視聴数 / 公開状態の同期 |
-| `flamenode-score-recalc` | `30 */3 * * *` | `video_score` 再計算 |
+| `flamenode-youtube-sync` | `0 */12 * * *` | YouTube 視聴数 / 公開状態の低頻度同期 |
+| `flamenode-score-recalc` | `30 */12 * * *` | `video_stats.score` 低頻度再計算 |
 | `flamenode-notification-dispatcher` | `*/5 * * * *` | Discord Webhook などへの通知ディスパッチ |
 
 > Cron 起動を手元から検証するには、Dashboard → **Workers → 各 Worker → Triggers → Send test event** で `scheduled` を選んで実行できます。
@@ -336,7 +338,7 @@ wrangler d1 execute flamenode_db --remote --command "INSERT OR REPLACE INTO syst
 - [ ] `/admin` (管理者ロール) に入れて、コストガード状態が `normal` と表示される
 - [ ] `/admin/cost-guard` から `economy` → `normal` の切替ができる
 - [ ] `wrangler tail` で Pages のリクエストログが出る
-- [ ] `wrangler tail flamenode-json-generator` で 10 分以内に Cron 起動ログが出る
+- [ ] `wrangler tail flamenode-json-generator` で 15 分以内に Cron 起動ログが出る
 - [ ] `https://<本番ドメイン>/maintenance` が表示できる
 
 ---

@@ -14,6 +14,7 @@ import {
   videos,
   xAccountLinkRequests,
   xUserAliases,
+  xUserIcons,
   xUsers,
 } from "@/lib/db/schema";
 import { normalizeXId } from "@/lib/utils/xid";
@@ -78,7 +79,7 @@ export async function mergeXIds(
   const now = Math.floor(Date.now() / 1000);
 
   // 影響件数を事前集計
-  const [vc, cc, mc, sc, ic, ec] = await Promise.all([
+  const [vc, cc, mc, sc, ic, ec, iconc, aliasOwnerc, aliasRefc] = await Promise.all([
     db
       .select({ c: sql<number>`COUNT(*)` })
       .from(videos)
@@ -103,6 +104,18 @@ export async function mergeXIds(
       .select({ c: sql<number>`COUNT(*)` })
       .from(eventStaff)
       .where(eq(eventStaff.x_user_id, fromXId)),
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(xUserIcons)
+      .where(eq(xUserIcons.x_user_id, fromXId)),
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(xUserAliases)
+      .where(eq(xUserAliases.x_user_id, fromXId)),
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(xUserAliases)
+      .where(eq(xUserAliases.alias_x_id, fromXId)),
   ]);
   const counts = {
     videos: Number(vc[0]?.c ?? 0),
@@ -111,6 +124,9 @@ export async function mergeXIds(
     slots: Number(sc[0]?.c ?? 0),
     video_interactions: Number(ic[0]?.c ?? 0),
     event_staff: Number(ec[0]?.c ?? 0),
+    x_user_icons: Number(iconc[0]?.c ?? 0),
+    x_user_aliases_owner: Number(aliasOwnerc[0]?.c ?? 0),
+    x_user_aliases_ref: Number(aliasRefc[0]?.c ?? 0),
   };
 
   // video_interactions UNIQUE 衝突対策: 旧 ID の (video_id, interaction_type) が
@@ -137,6 +153,33 @@ export async function mergeXIds(
       )
   `);
 
+  // x_user_icons の UNIQUE 制約 (x_user_id, icon_url) 衝突対策。
+  await db.run(sql`
+    DELETE FROM x_user_icons
+    WHERE x_user_id = ${fromXId}
+      AND EXISTS (
+        SELECT 1 FROM x_user_icons b
+        WHERE b.x_user_id = ${toXId}
+          AND b.icon_url = x_user_icons.icon_url
+      )
+  `);
+
+  // x_user_aliases の owner 側を付け替える前に同一 alias の衝突を除去。
+  await db.run(sql`
+    DELETE FROM x_user_aliases
+    WHERE x_user_id = ${fromXId}
+      AND EXISTS (
+        SELECT 1 FROM x_user_aliases b
+        WHERE b.x_user_id = ${toXId}
+          AND b.alias_x_id = x_user_aliases.alias_x_id
+      )
+  `);
+
+  // 旧 ID 自身を alias として追加するため、旧 ID を alias 側に持つ行は重複元として削除。
+  await db
+    .delete(xUserAliases)
+    .where(eq(xUserAliases.alias_x_id, fromXId));
+
   // 各テーブルで x_user_id / creator_x_user_id を付け替え
   await db.update(videos).set({ creator_x_user_id: toXId }).where(eq(videos.creator_x_user_id, fromXId));
   await db.update(videoChapters).set({ x_user_id: toXId }).where(eq(videoChapters.x_user_id, fromXId));
@@ -150,6 +193,14 @@ export async function mergeXIds(
     .update(eventStaff)
     .set({ x_user_id: toXId })
     .where(eq(eventStaff.x_user_id, fromXId));
+  await db
+    .update(xUserIcons)
+    .set({ x_user_id: toXId })
+    .where(eq(xUserIcons.x_user_id, fromXId));
+  await db
+    .update(xUserAliases)
+    .set({ x_user_id: toXId })
+    .where(eq(xUserAliases.x_user_id, fromXId));
 
   // x_user_aliases に旧 ID を新 ID の別名として記録 (重複は ON CONFLICT で無視)
   try {

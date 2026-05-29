@@ -53,7 +53,8 @@ test("runCleanup: expected cleanup SQL is issued without video writes", async ()
   const sqls = recorder.map((r) => r.sql);
   assert.ok(sqls.some((s) => s.includes("history_retention_days") && s.includes("SELECT")));
   assert.ok(sqls.some((s) => s.includes("UPDATE slots") && s.includes("priority_reclaim_until")));
-  assert.ok(sqls.some((s) => s.includes("UPDATE slots") && s.includes("x_reapply_required")));
+  assert.equal(sqls.some((s) => s.includes("x_reapply_required")), false);
+  assert.equal(sqls.some((s) => s.includes("deadline_at")), false);
   assert.ok(sqls.some((s) => s.includes("DELETE FROM notification_outbox") && s.includes("'sent'")));
   assert.ok(sqls.some((s) => s.includes("DELETE FROM notification_outbox") && s.includes("'failed'")));
   assert.ok(sqls.some((s) => s.includes("DELETE FROM history_logs") && s.includes("retention_class = 'normal'")));

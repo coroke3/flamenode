@@ -23,6 +23,8 @@ const ADMIN_NAV_GROUPS: AdminSidebarGroup[] = [
     items: [
       { href: "/admin/videos?status=pending", label: "承認待ち作品", icon: <Icon name="youtube" size={14} /> },
       { href: "/admin/x-link-requests", label: "X ID連携申請", icon: <Icon name="user" size={14} /> },
+      { href: "/admin/x-id-merges", label: "X ID統合申請", icon: <Icon name="users" size={14} /> },
+      { href: "/admin/moderation?status=open", label: "モデレーション", icon: <Icon name="warning" size={14} /> },
       { href: "/admin/notifications?status=failed", label: "通知失敗", icon: <Icon name="alert" size={14} /> },
     ],
   },
@@ -32,6 +34,7 @@ const ADMIN_NAV_GROUPS: AdminSidebarGroup[] = [
       { href: "/admin/videos", label: "作品管理", icon: <Icon name="youtube" size={14} /> },
       { href: "/admin/youtube-sync", label: "YouTube同期状態", icon: <Icon name="refresh" size={14} /> },
       { href: "/admin/events", label: "イベント管理", icon: <Icon name="calendar" size={14} /> },
+      { href: "/admin/api-endpoints", label: "公開API管理", icon: <Icon name="external" size={14} /> },
       { href: "/admin/announcements", label: "お知らせ管理", icon: <Icon name="alert" size={14} /> },
     ],
   },

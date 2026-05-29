@@ -3,11 +3,15 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { and, desc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
-import { historyLogs, systemSettings } from "@/lib/db/schema";
+import { costUsageSnapshots, historyLogs, systemSettings } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { CostGuardForm } from "@/components/admin/CostGuardForm";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import {
+  parseCostGuardThresholds,
+  recommendCostGuardMode,
+} from "@/lib/admin/costGuardPolicy";
 
 export const metadata: Metadata = { title: "コストガード" };
 export const dynamic = "force-dynamic";
@@ -64,6 +68,10 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
   let autoEnabled = 1;
   let reason: string | null = null;
   let updatedAt: number | null = null;
+  let thresholdsJson: string | null = null;
+  let exceptionUntil: number | null = null;
+  let exceptionFeaturesJson: string | null = null;
+  let latestSnapshot: (typeof costUsageSnapshots.$inferSelect) | null = null;
   let history: (typeof historyLogs.$inferSelect)[] = [];
   if (db) {
     try {
@@ -74,7 +82,17 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
         autoEnabled = rows[0].auto_cost_guard_enabled ?? 1;
         reason = rows[0].cost_guard_reason;
         updatedAt = rows[0].cost_guard_updated_at ?? null;
+        thresholdsJson = rows[0].cost_guard_thresholds_json;
+        exceptionUntil = rows[0].cost_guard_exception_until ?? null;
+        exceptionFeaturesJson = rows[0].cost_guard_exception_features_json;
       }
+      latestSnapshot = (
+        await db
+          .select()
+          .from(costUsageSnapshots)
+          .orderBy(desc(costUsageSnapshots.captured_at))
+          .limit(1)
+      )[0] ?? null;
       history = await db
         .select()
         .from(historyLogs)
@@ -88,8 +106,12 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
         .limit(20);
     } catch (e) {
       console.error("[AdminCostGuardPage]", e);
-    }
+      }
   }
+  const recommendation = recommendCostGuardMode(
+    latestSnapshot,
+    parseCostGuardThresholds(thresholdsJson),
+  );
 
   return (
     <div>
@@ -154,6 +176,9 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
             reason={reason}
             isMaintenance={isMaintenance}
             autoEnabled={autoEnabled}
+            thresholdsJson={thresholdsJson}
+            exceptionUntil={exceptionUntil}
+            exceptionFeaturesJson={exceptionFeaturesJson}
           />
         </div>
         <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-muted)" }}>
@@ -165,6 +190,73 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
               </li>
             ))}
           </ul>
+        </div>
+      </section>
+
+      <section style={{ marginTop: 28 }}>
+        <h2
+          style={{
+            fontSize: 13,
+            fontWeight: 700,
+            letterSpacing: "0.18em",
+            color: "var(--text-muted)",
+            textTransform: "uppercase",
+            marginBottom: 12,
+          }}
+        >
+          最新 snapshot
+        </h2>
+        <div
+          style={{
+            padding: "16px 18px",
+            background: "var(--bg-surface)",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: "var(--radius-md)",
+          }}
+        >
+          {latestSnapshot ? (
+            <>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                <span className="fn-badge fn-badge-soft">
+                  source: {latestSnapshot.source ?? "unknown"}
+                </span>
+                <span className="fn-badge fn-badge-soft">
+                  captured: {formatRelative(latestSnapshot.captured_at)}
+                </span>
+                <span
+                  className={`fn-badge ${
+                    recommendation.mode === "normal"
+                      ? "fn-badge-accent"
+                      : recommendation.mode === "economy"
+                        ? "fn-badge-warning"
+                        : "fn-badge-danger"
+                  }`}
+                >
+                  推奨: {recommendation.mode}
+                </span>
+              </div>
+              <table className="fn-table">
+                <tbody>
+                  <SnapshotRow label="Workers requests" value={latestSnapshot.workers_requests_today} />
+                  <SnapshotRow label="Pages Functions" value={latestSnapshot.pages_functions_requests_today} />
+                  <SnapshotRow label="D1 rows read" value={latestSnapshot.d1_rows_read_today} />
+                  <SnapshotRow label="D1 rows written" value={latestSnapshot.d1_rows_written_today} />
+                  <SnapshotRow label="R2 class A" value={latestSnapshot.r2_class_a_month} />
+                  <SnapshotRow label="R2 class B" value={latestSnapshot.r2_class_b_month} />
+                  <SnapshotRow label="KV writes" value={latestSnapshot.kv_writes_today} />
+                </tbody>
+              </table>
+              {recommendation.reasons.length > 0 ? (
+                <p className="fn-muted fn-text-sm" style={{ marginTop: 10 }}>
+                  閾値接近: {recommendation.reasons.join(", ")}
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <p className="fn-muted fn-text-sm">
+              まだ cost_usage_snapshots はありません。Cloudflare API 連携前は estimated_local を低頻度に保存してください。
+            </p>
+          )}
         </div>
       </section>
 
@@ -296,4 +388,21 @@ function parseKeys(value: string | null): string[] {
     // ignore
   }
   return [];
+}
+
+function SnapshotRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: number | null | undefined;
+}): React.ReactElement {
+  return (
+    <tr>
+      <th style={{ width: 220 }}>{label}</th>
+      <td style={{ fontVariantNumeric: "tabular-nums" }}>
+        {Number(value ?? 0).toLocaleString()}
+      </td>
+    </tr>
+  );
 }

@@ -1,5 +1,5 @@
 /**
- * deprecated DB 利用検査 (静的ソース解析、DB 不要)。
+ * legacy / deleted DB 利用検査 (静的ソース解析、DB 不要)。
  *
  * Usage:
  *   node scripts/check-db-legacy.mjs
@@ -7,12 +7,12 @@
  * exit 0 = OK, exit 1 = 違反検出
  *
  * 検出するもの:
- *   - 新規コードでの `videoComments` 利用 (insert/update/delete/select すべて禁止)
+ *   - 削除済み `video_comments` / `videoComments` 利用
  *   - 新規コードでの `outro_comment` 書き込み (closing_comment に統一)
  *   - 新規コードでの `marker_kind` が "chapter" 以外 (MVPは chapter 固定)
  *
  * allowlist:
- *   - schema 定義 / 旧データ normalize / 表示専用 / health check は許容。
+ *   - 旧データ normalize / この検査スクリプト自身は許容。
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -24,12 +24,8 @@ const SCAN_EXT = new Set([".ts", ".tsx", ".mjs", ".cjs", ".js"]);
 
 /** ファイル全体を許可するパス (POSIX 形式で比較) */
 const FULL_ALLOW = new Set([
-  // schema 定義はテーブル/カラム定義そのものなので許可
-  "src/lib/db/schema.ts",
   // 旧データ正規化 (legacy import) は outro/closing 含めて許容
   "src/lib/legacy/normalize.ts",
-  // health check は deprecated 行検出のために参照する
-  "src/lib/admin/healthChecks.ts",
   // この検査スクリプト自身
   "scripts/check-db-legacy.mjs",
 ]);
@@ -38,7 +34,7 @@ const FULL_ALLOW = new Set([
 const RULES = [
   {
     id: "video-comments-usage",
-    label: "video_comments / videoComments 利用",
+    label: "削除済み video_comments / videoComments 利用",
     pattern: /\b(videoComments|video_comments)\b/g,
   },
   {

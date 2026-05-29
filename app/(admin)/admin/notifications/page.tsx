@@ -2,13 +2,14 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { and, desc, eq, like, sql } from "drizzle-orm";
+import { and, desc, eq, like, lt, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { notificationOutbox } from "@/lib/db/schema";
 import { formatRelative } from "@/lib/utils/format";
 import { NotificationRetryButton } from "@/components/admin/NotificationRetryButton";
+import { NotificationCancelButton } from "@/components/admin/NotificationCancelButton";
 import { NotificationPayloadButton } from "@/components/admin/NotificationPayloadButton";
 import { NotificationBulkRetryButton } from "@/components/admin/NotificationBulkRetryButton";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
@@ -16,7 +17,7 @@ import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 export const metadata: Metadata = { title: "通知配信状況" };
 export const dynamic = "force-dynamic";
 
-type StatusFilter = "all" | "pending" | "processing" | "sent" | "failed";
+type StatusFilter = "all" | "pending" | "processing" | "sent" | "failed" | "cancelled";
 
 interface Props {
   searchParams?: Promise<{
@@ -40,6 +41,7 @@ export default async function AdminNotificationsPage({
       case "processing":
       case "sent":
       case "failed":
+      case "cancelled":
         return sp.status;
       default:
         return "all";
@@ -51,7 +53,8 @@ export default async function AdminNotificationsPage({
 
   const db = getDatabase();
   let rows: (typeof notificationOutbox.$inferSelect)[] = [];
-  let counts = { all: 0, pending: 0, processing: 0, sent: 0, failed: 0 };
+  let counts = { all: 0, pending: 0, processing: 0, sent: 0, failed: 0, cancelled: 0 };
+  let stuckProcessingCount = 0;
   let error: string | null = null;
 
   if (db) {
@@ -71,7 +74,8 @@ export default async function AdminNotificationsPage({
       }
       const where = conds.length === 0 ? undefined : conds.length === 1 ? conds[0] : and(...conds);
 
-      const [list, counted] = await Promise.all([
+      const now = Math.floor(Date.now() / 1000);
+      const [list, counted, stuckRows] = await Promise.all([
         (where
           ? db
               .select()
@@ -91,6 +95,15 @@ export default async function AdminNotificationsPage({
           })
           .from(notificationOutbox)
           .groupBy(notificationOutbox.status),
+        db
+          .select({ c: sql<number>`COUNT(*)` })
+          .from(notificationOutbox)
+          .where(
+            and(
+              eq(notificationOutbox.status, "processing"),
+              lt(notificationOutbox.processing_started_at, now - 15 * 60),
+            ),
+          ),
       ]);
       rows = list;
       const map: Record<string, number> = {};
@@ -106,7 +119,9 @@ export default async function AdminNotificationsPage({
         processing: map.processing ?? 0,
         sent: map.sent ?? 0,
         failed: map.failed ?? 0,
+        cancelled: map.cancelled ?? 0,
       };
+      stuckProcessingCount = Number(stuckRows[0]?.c ?? 0);
     } catch (e) {
       error = String(e);
     }
@@ -126,7 +141,23 @@ export default async function AdminNotificationsPage({
         </Link>
       </p>
 
-      {counts.failed > 0 ? (
+      {stuckProcessingCount > 0 ? (
+        <div
+          role="status"
+          style={{
+            marginTop: 14,
+            padding: "10px 14px",
+            background: "var(--accent-danger-soft, #fee2e2)",
+            border: "1px solid var(--accent-danger, #dc2626)",
+            borderRadius: "var(--radius-md)",
+            color: "var(--accent-danger, #991b1b)",
+            fontSize: 13,
+          }}
+        >
+          <strong>processing 固着 {stuckProcessingCount} 件</strong>
+          {" "}— 15分以上 processing のままです。手動キャンセルまたは Worker の rescue を確認してください。
+        </div>
+      ) : counts.failed > 0 ? (
         <div
           role="status"
           style={{
@@ -197,6 +228,7 @@ export default async function AdminNotificationsPage({
             ["processing", "processing"],
             ["sent", "sent"],
             ["failed", "failed"],
+            ["cancelled", "cancelled"],
           ] as const
         ).map(([key, label]) => {
           const params = new URLSearchParams();
@@ -347,6 +379,11 @@ export default async function AdminNotificationsPage({
                         </Link>
                         {r.status === "failed" ? (
                           <NotificationRetryButton id={r.id} />
+                        ) : null}
+                        {r.status === "pending" ||
+                        r.status === "processing" ||
+                        r.status === "failed" ? (
+                          <NotificationCancelButton id={r.id} />
                         ) : null}
                       </div>
                     </td>

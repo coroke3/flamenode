@@ -258,6 +258,7 @@ npx wrangler d1 execute flamenode_db --local --command "UPDATE system_settings S
 ```
 
 管理者でログインしている場合は `/admin/cost-guard` から UI で操作できます。
+`/admin/cost-guard` では最新 `cost_usage_snapshots`、推奨 mode、`cost_guard_thresholds_json`、一時例外期限も確認・編集できます。
 
 ---
 
@@ -270,9 +271,11 @@ npx wrangler d1 execute flamenode_db --local --command "UPDATE system_settings S
 cd workers/json-generator
 npx wrangler dev --test-scheduled --local
 # 別ターミナルで
-curl "http://127.0.0.1:8787/__scheduled?cron=*/10+*+*+*+*"
+curl "http://127.0.0.1:8787/__scheduled?cron=*/15+*+*+*+*"
 cd ../..
 ```
+
+本番MVPの実スケジュールは、JSON生成が15分ごと、YouTube同期とscore再計算が12時間ごとです。ローカルで `__scheduled` を叩く場合は、確認対象 Worker の `wrangler.toml` に書かれた cron 文字列に合わせてください。
 
 ローカル D1 / KV を共有させるには、`workers/<name>/wrangler.toml` の `database_id` / KV `id` をそのままにしておけば、Pages 側と同じ Miniflare ストレージ (`.wrangler/state`) を使います。
 

@@ -90,14 +90,8 @@ export async function runCleanup(env: Env): Promise<void> {
     .bind(now)
     .run();
 
-  // 期限切れ x_reapply_required スロットを voided へ
-  await env.DB.prepare(
-    `UPDATE slots
-     SET status = 'voided', updated_at = ?1
-     WHERE status = 'x_reapply_required' AND deadline_at IS NOT NULL AND deadline_at < ?1`,
-  )
-    .bind(now)
-    .run();
+  // X ID 再申請や void 対応は video_moderation_cases に寄せる。
+  // slots には deadline_at / x_reapply_required / voided を持たないため、cleanup では触らない。
 
   // notification_outbox: 完了済みを TTL に従って削除
   await env.DB.prepare(

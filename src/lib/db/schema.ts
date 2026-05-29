@@ -606,24 +606,6 @@ export const videoChapters = sqliteTable("video_chapters", {
   ),
 }));
 
-export const videoComments = sqliteTable("video_comments", {
-  id: text("id").primaryKey(),
-  video_id: text("video_id").notNull(),
-  x_user_id: text("x_user_id").notNull(),
-  chapter_id: text("chapter_id"),
-  body: text("body").notNull(),
-  visibility: text("visibility", { enum: ["private", "public"] }).default(
-    "public",
-  ),
-  created_at: integer("created_at").notNull(),
-}, (t) => ({
-  byVideoCreated: index("video_comments_video_created_idx").on(
-    t.video_id,
-    t.created_at,
-  ),
-  byChapter: index("video_comments_chapter_idx").on(t.chapter_id),
-}));
-
 export const videoInteractions = sqliteTable(
   "video_interactions",
   {
@@ -731,7 +713,7 @@ export const notificationOutbox = sqliteTable(
     type: text("type").notNull(),
     payload_json: text("payload_json").notNull(),
     status: text("status", {
-      enum: ["pending", "processing", "sent", "failed"],
+      enum: ["pending", "processing", "sent", "failed", "cancelled"],
     }).default("pending"),
     attempt_count: integer("attempt_count").default(0),
     processing_started_at: integer("processing_started_at"),
@@ -778,15 +760,6 @@ export const announcements = sqliteTable("announcements", {
   updated_at: integer("updated_at")
     .notNull()
     .default(sql`(unixepoch())`),
-});
-
-export const dashboardMetricsCache = sqliteTable("dashboard_metrics_cache", {
-  id: text("id").primaryKey(),
-  total_users: integer("total_users").default(0),
-  total_videos: integer("total_videos").default(0),
-  active_users_last_5m: integer("active_users_last_5m").default(0),
-  new_videos_last_24h: integer("new_videos_last_24h").default(0),
-  updated_at: integer("updated_at").notNull(),
 });
 
 export const costUsageSnapshots = sqliteTable("cost_usage_snapshots", {

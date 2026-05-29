@@ -86,6 +86,7 @@ wrangler d1 migrations apply flamenode_db --remote
 | `migrations/0018_simplify_video_schema.sql` | `video_members.chapters_json` 追加、`video_member_chapters` / `name_for_sort` 廃止 |
 | `migrations/0019_clean_staff_software_and_disabled_features.sql` | `event_staff` / `event_staff_permissions`、`video_softwares`、disabled features を整理 |
 | `migrations/0020_split_video_core_metadata_stats.sql` | `videos` の旧互換列を整理し、YouTube メタデータと統計を別テーブルへ移行 |
+| `migrations/0021_slim_mvp_drop_unused_tables.sql` | `video_comments` / `dashboard_metrics_cache` を削除し、MVP の D1 書き込み対象を整理 |
 | `migrations/0005_curvy_karnak.sql` | `notification_outbox` に `(status, created_at)` / `(event_id)` インデックス追加 |
 | `migrations/0006_fearless_captain_america.sql` | `events.slot_part_gap_minutes` (default 30) 追加 |
 
@@ -132,10 +133,10 @@ git push origin main
 | Worker | cron | 用途 | 必須環境変数 |
 |---|---|---|---|
 | `notification-dispatcher` | `*/5 * * * *` | `notification_outbox` を読み Discord 配信 | `DISCORD_WEBHOOK_URL`, `DISCORD_BOT_TOKEN` |
-| `json-generator` | `*/10 * * * *` | `top.json` / `event/{id}.json` を R2 に出力 | (R2 / KV bind) |
+| `json-generator` | `*/15 * * * *` | `top.json` / `event/{id}.json` を R2 に出力 | (R2 / KV bind) |
 | `cleanup` | `0 */1 * * *` | 期限切れ slot 解放 / 古い通知削除 | なし |
-| `youtube-sync` | `0 */6 * * *` | YouTube 再生数・サムネ等の同期 | `YOUTUBE_API_KEY` |
-| `score-recalc` | `30 */3 * * *` | `video_stats.score` 再計算 | なし |
+| `youtube-sync` | `0 */12 * * *` | YouTube 再生数・公開状態の低頻度同期 | `YOUTUBE_API_KEY` |
+| `score-recalc` | `30 */12 * * *` | `video_stats.score` 低頻度再計算 | なし |
 
 ### 3-1. デプロイ
 
@@ -152,6 +153,15 @@ wrangler deploy
 - `json-generator` の R2 書き込み失敗
 
 詳細は `.claude/flamenode/source/ops-notifications-workers-audit.md` を参照。
+
+### 3-4. Cloudflare無料枠MVP方針
+
+- `video_comments` は削除済み。通常コメントは持たず、チャプター/メンバー担当は `video_chapters` と `video_members.chapters_json` に寄せる。
+- `dashboard_metrics_cache` は削除済み。管理トップは承認待ち・通知失敗・YouTube同期失敗などの対応待ち件数だけを軽量クエリで表示する。
+- 公開APIは `/admin/api-endpoints` でイベント単位に有効化し、`/api/event-endpoints/[id]` は公開作品の最小フィールドだけを返す。レスポンスは 5〜10分キャッシュ前提。
+- お知らせの公開側取得は `target_audience=all`、公開中かつ期限内、最大3件に制限する。
+- `video_stats.app_view_count` は閲覧ごとに更新しない。like/bookmark と低頻度 score 再計算に限定する。
+- `cost_usage_snapshots` は高頻度保存しない。`/admin/cost-guard` で最新 snapshot と推奨 mode を確認し、閾値は `system_settings.cost_guard_thresholds_json` で管理する。
 
 ### 3-3. 通知失敗の調査クエリ
 
@@ -193,15 +203,14 @@ npm run check:db-legacy
 
 検出対象:
 
-- `videoComments` / `video_comments` の新規利用 (J-1: deprecated)
+- 削除済み `videoComments` / `video_comments` の再利用
 - `outro_comment` への書き込み (J-3: `closing_comment` に統一)
 - `marker_kind` に `"chapter"` 以外を値として代入 (J-2: MVP は chapter 固定)
 
 allowlist (許可される定義/参照ファイル):
 
-- `src/lib/db/schema.ts` — スキーマ定義そのもの
 - `src/lib/legacy/normalize.ts` — 旧データ正規化
-- `src/lib/admin/healthChecks.ts` — deprecated 行検出
+- `scripts/check-db-legacy.mjs` — 検査スクリプト自身
 
 ### 5-1. ランタイム検査
 
@@ -216,7 +225,13 @@ allowlist (許可される定義/参照ファイル):
 - `voided_video_visible` — `visibility_status='voided'` の動画状態確認
 - `slot_time_overlap` — 同イベント内の時間重複 (スイープ全ペア)
 - `like_count_drift` — `video_stats.app_like_count` vs video_interactions 集計差 (±5 閾値)
-- `video_comments_legacy_rows` — `video_comments` 残行 (>0 で WARN)
+- `missing_video_stats` / `missing_video_youtube_metadata` — 派生行不足
+- `notification_processing_stuck` / `notification_failed_volume` — 通知 outbox の滞留・失敗
+- `cost_usage_snapshot_freshness` — usage snapshot の鮮度
+- `open_moderation_cases_overdue` — 期限切れモデレーション case
+- `active_api_endpoints_orphan_event` — 公開 API endpoint の event 参照
+- `x_id_merge_pending_stale` — X ID 統合申請の放置
+- `history_logs_retention_candidates` — normal 監査ログの削除候補
 - `videos_outro_comment_legacy` — clean schema では常に 0 件になる削除済み確認
 - `chapter_non_chapter_marker` — `marker_kind != 'chapter'` (>0 で INFO)
 - `orphan_video_member` — video_members の orphan

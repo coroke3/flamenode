@@ -1,17 +1,23 @@
 import "server-only";
 
-import { and, eq, gte, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import {
+  apiEndpoints as apiEndpointsTable,
+  costUsageSnapshots as costUsageSnapshotsTable,
   events as eventsTable,
+  historyLogs as historyLogsTable,
+  notificationOutbox as notificationOutboxTable,
   slots as slotsTable,
   systemSettings,
   videoChapters as videoChaptersTable,
-  videoComments as videoCommentsTable,
   videoEvents as videoEventsTable,
   videoInteractions as videoInteractionsTable,
+  videoModerationCases as videoModerationCasesTable,
   videoStats,
+  videoYoutubeMetadata as videoYoutubeMetadataTable,
   videos as videosTable,
+  xIdMergeRequests as xIdMergeRequestsTable,
 } from "@/lib/db/schema";
 
 export type HealthCheckResult = {
@@ -395,23 +401,72 @@ async function checkLikeCountDrift(db: AnyDb): Promise<HealthCheckResult> {
   };
 }
 
-/** deprecated: video_comments テーブルに新規データが入っていないか */
-async function checkVideoCommentsLegacyRows(
+/** videos に対応する video_stats が存在するか */
+async function checkMissingVideoStats(
   db: AnyDb,
 ): Promise<HealthCheckResult> {
-  const rows = await db
-    .select({ c: sql<number>`COUNT(*)` })
-    .from(videoCommentsTable);
-  const count = Number(rows[0]?.c ?? 0);
+  const where = isNull(videoStats.video_id);
+  const [countRows, sampleRows] = await Promise.all([
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(videosTable)
+      .leftJoin(videoStats, eq(videoStats.video_id, videosTable.id))
+      .where(where),
+    db
+      .select({ id: videosTable.id })
+      .from(videosTable)
+      .leftJoin(videoStats, eq(videoStats.video_id, videosTable.id))
+      .where(where)
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
   return {
-    id: "video_comments_legacy_rows",
-    label: "video_comments 行数 (deprecated)",
+    id: "missing_video_stats",
+    label: "video_stats 派生行不足",
     status: count === 0 ? "ok" : "warn",
     count,
-    samples: [],
+    samples: sampleRows.slice(0, 5).map((r) => r.id),
     note:
       count > 0
-        ? "video_comments は deprecated。新規利用は禁止。残行があれば移行/削除候補。"
+        ? "動画保存時の派生行作成漏れの可能性があります。ensureVideoDerivedRows 相当の処理で補完してください。"
+        : undefined,
+  };
+}
+
+/** videos に対応する video_youtube_metadata が存在するか */
+async function checkMissingVideoYoutubeMetadata(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const where = isNull(videoYoutubeMetadataTable.video_id);
+  const [countRows, sampleRows] = await Promise.all([
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(videosTable)
+      .leftJoin(
+        videoYoutubeMetadataTable,
+        eq(videoYoutubeMetadataTable.video_id, videosTable.id),
+      )
+      .where(where),
+    db
+      .select({ id: videosTable.id })
+      .from(videosTable)
+      .leftJoin(
+        videoYoutubeMetadataTable,
+        eq(videoYoutubeMetadataTable.video_id, videosTable.id),
+      )
+      .where(where)
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
+  return {
+    id: "missing_video_youtube_metadata",
+    label: "video_youtube_metadata 派生行不足",
+    status: count === 0 ? "ok" : "warn",
+    count,
+    samples: sampleRows.slice(0, 5).map((r) => r.id),
+    note:
+      count > 0
+        ? "YouTube 同期状態の初期行がない作品があります。ensureVideoDerivedRows 相当の処理で pending 行を作成してください。"
         : undefined,
   };
 }
@@ -530,6 +585,261 @@ async function checkVideoMembersChaptersJsonInvalid(
   };
 }
 
+/** notification_outbox の processing が固着していないか */
+async function checkNotificationProcessingStuck(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const now = Math.floor(Date.now() / 1000);
+  const cutoff = now - 15 * 60;
+  const where = and(
+    eq(notificationOutboxTable.status, "processing"),
+    isNotNull(notificationOutboxTable.processing_started_at),
+    lt(notificationOutboxTable.processing_started_at, cutoff),
+  );
+  const [countRows, sampleRows] = await Promise.all([
+    db.select({ c: sql<number>`COUNT(*)` }).from(notificationOutboxTable).where(where),
+    db
+      .select({
+        id: notificationOutboxTable.id,
+        processing_started_at: notificationOutboxTable.processing_started_at,
+      })
+      .from(notificationOutboxTable)
+      .where(where)
+      .orderBy(notificationOutboxTable.processing_started_at)
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
+  return {
+    id: "notification_processing_stuck",
+    label: "notification_outbox processing 固着",
+    status: count === 0 ? "ok" : "warn",
+    count,
+    samples: sampleRows
+      .slice(0, 5)
+      .map((r) => `${r.id} (${r.processing_started_at ?? "?"})`),
+    note:
+      count > 0
+        ? "Worker が処理中のまま戻せていない通知です。再送制御または手動キャンセルを確認してください。"
+        : undefined,
+  };
+}
+
+/** notification_outbox の failed が多すぎないか */
+async function checkNotificationFailedVolume(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const [countRows, sampleRows] = await Promise.all([
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(notificationOutboxTable)
+      .where(eq(notificationOutboxTable.status, "failed")),
+    db
+      .select({ id: notificationOutboxTable.id, type: notificationOutboxTable.type })
+      .from(notificationOutboxTable)
+      .where(eq(notificationOutboxTable.status, "failed"))
+      .orderBy(desc(notificationOutboxTable.created_at))
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
+  return {
+    id: "notification_failed_volume",
+    label: "notification_outbox failed 件数",
+    status: count >= 20 ? "warn" : count > 0 ? "info" : "ok",
+    count,
+    samples: sampleRows.slice(0, 5).map((r) => `${r.id} (${r.type})`),
+    note:
+      count > 0
+        ? "失敗通知は手動再送またはキャンセルし、古い failed は cleanup の TTL で削除します。"
+        : undefined,
+  };
+}
+
+/** cost_usage_snapshots の最新値が古すぎないか */
+async function checkCostUsageSnapshotFreshness(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const latest = (
+    await db
+      .select({
+        id: costUsageSnapshotsTable.id,
+        captured_at: costUsageSnapshotsTable.captured_at,
+        source: costUsageSnapshotsTable.source,
+      })
+      .from(costUsageSnapshotsTable)
+      .orderBy(desc(costUsageSnapshotsTable.captured_at))
+      .limit(1)
+  )[0];
+  if (!latest) {
+    return {
+      id: "cost_usage_snapshot_freshness",
+      label: "cost_usage_snapshots 最新 snapshot",
+      status: "info",
+      count: 0,
+      samples: [],
+      note:
+        "まだ usage snapshot がありません。Cloudflare API 未連携の場合は estimated_local の低頻度 snapshot から開始してください。",
+    };
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const ageSec = now - latest.captured_at;
+  return {
+    id: "cost_usage_snapshot_freshness",
+    label: "cost_usage_snapshots 最新 snapshot",
+    status: ageSec > 24 * 3600 ? "warn" : ageSec > 6 * 3600 ? "info" : "ok",
+    count: ageSec,
+    samples: [`${latest.id} (${latest.source ?? "unknown"})`],
+    note:
+      ageSec > 6 * 3600
+        ? "最新 snapshot が古くなっています。高頻度書き込みは避けつつ、1〜6時間程度の低頻度取得を推奨します。"
+        : undefined,
+  };
+}
+
+/** open の video_moderation_cases が期限切れになっていないか */
+async function checkOpenModerationCasesOverdue(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const now = Math.floor(Date.now() / 1000);
+  const where = and(
+    eq(videoModerationCasesTable.status, "open"),
+    isNotNull(videoModerationCasesTable.due_at),
+    lt(videoModerationCasesTable.due_at, now),
+  );
+  const [countRows, sampleRows] = await Promise.all([
+    db.select({ c: sql<number>`COUNT(*)` }).from(videoModerationCasesTable).where(where),
+    db
+      .select({
+        id: videoModerationCasesTable.id,
+        video_id: videoModerationCasesTable.video_id,
+        due_at: videoModerationCasesTable.due_at,
+      })
+      .from(videoModerationCasesTable)
+      .where(where)
+      .orderBy(videoModerationCasesTable.due_at)
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
+  return {
+    id: "open_moderation_cases_overdue",
+    label: "未解決モデレーション期限切れ",
+    status: count === 0 ? "ok" : "warn",
+    count,
+    samples: sampleRows.slice(0, 5).map((r) => `${r.id} video:${r.video_id}`),
+    note:
+      count > 0
+        ? "期限切れの open case です。/admin/moderation で解決・却下・キャンセルしてください。"
+        : undefined,
+  };
+}
+
+/** 有効な api_endpoints が存在しない event を参照していないか */
+async function checkActiveApiEndpointsOrphanEvent(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const where = and(eq(apiEndpointsTable.is_active, 1), isNull(eventsTable.id));
+  const [countRows, sampleRows] = await Promise.all([
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(apiEndpointsTable)
+      .leftJoin(eventsTable, eq(eventsTable.id, apiEndpointsTable.event_id))
+      .where(where),
+    db
+      .select({ id: apiEndpointsTable.id, event_id: apiEndpointsTable.event_id })
+      .from(apiEndpointsTable)
+      .leftJoin(eventsTable, eq(eventsTable.id, apiEndpointsTable.event_id))
+      .where(where)
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
+  return {
+    id: "active_api_endpoints_orphan_event",
+    label: "api_endpoints 有効 endpoint の event 参照",
+    status: count === 0 ? "ok" : "warn",
+    count,
+    samples: sampleRows.slice(0, 5).map((r) => `${r.id} event:${r.event_id}`),
+    note:
+      count > 0
+        ? "存在しない event を公開 API として有効化しています。無効化するか event_id を修正してください。"
+        : undefined,
+  };
+}
+
+/** x_id_merge_requests の pending が放置されていないか */
+async function checkXIdMergePendingStale(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const cutoff = Math.floor(Date.now() / 1000) - 7 * 86400;
+  const where = and(
+    eq(xIdMergeRequestsTable.status, "pending"),
+    lt(xIdMergeRequestsTable.created_at, cutoff),
+  );
+  const [countRows, sampleRows] = await Promise.all([
+    db.select({ c: sql<number>`COUNT(*)` }).from(xIdMergeRequestsTable).where(where),
+    db
+      .select({
+        id: xIdMergeRequestsTable.id,
+        from_x_user_id: xIdMergeRequestsTable.from_x_user_id,
+        to_x_user_id: xIdMergeRequestsTable.to_x_user_id,
+      })
+      .from(xIdMergeRequestsTable)
+      .where(where)
+      .orderBy(xIdMergeRequestsTable.created_at)
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
+  return {
+    id: "x_id_merge_pending_stale",
+    label: "X ID 統合申請 pending 放置",
+    status: count === 0 ? "ok" : "warn",
+    count,
+    samples: sampleRows
+      .slice(0, 5)
+      .map((r) => `${r.id} @${r.from_x_user_id} -> @${r.to_x_user_id}`),
+    note:
+      count > 0
+        ? "危険操作のため自動実行せず、影響範囲を確認して承認・却下してください。"
+        : undefined,
+  };
+}
+
+/** history_logs の normal retention 対象件数 */
+async function checkHistoryLogsRetentionCandidates(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const settings = await db.select().from(systemSettings).limit(1);
+  const days = Math.max(7, Number(settings[0]?.history_retention_days ?? 90) || 90);
+  const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
+  const where = and(
+    or(isNull(historyLogsTable.retention_class), eq(historyLogsTable.retention_class, "normal")),
+    lt(historyLogsTable.created_at, cutoff),
+  );
+  const [countRows, sampleRows] = await Promise.all([
+    db.select({ c: sql<number>`COUNT(*)` }).from(historyLogsTable).where(where),
+    db
+      .select({
+        id: historyLogsTable.id,
+        table_name: historyLogsTable.table_name,
+        created_at: historyLogsTable.created_at,
+      })
+      .from(historyLogsTable)
+      .where(where)
+      .orderBy(historyLogsTable.created_at)
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
+  return {
+    id: "history_logs_retention_candidates",
+    label: "history_logs normal retention 対象",
+    status: count === 0 ? "ok" : "info",
+    count,
+    samples: sampleRows.slice(0, 5).map((r) => `${r.id} ${r.table_name}`),
+    note:
+      count > 0
+        ? "normal 監査ログの削除候補です。cleanup Worker の retention 設定を確認してください。"
+        : undefined,
+  };
+}
+
 export async function runHealthChecks(db: AnyDb): Promise<HealthCheckResult[]> {
   return Promise.all([
     checkSystemSettingsSingleRow(db),
@@ -543,10 +853,18 @@ export async function runHealthChecks(db: AnyDb): Promise<HealthCheckResult[]> {
     checkVoidedVideoVisible(db),
     checkSlotTimeOverlap(db),
     checkLikeCountDrift(db),
-    checkVideoCommentsLegacyRows(db),
+    checkMissingVideoStats(db),
+    checkMissingVideoYoutubeMetadata(db),
     checkVideosOutroComment(db),
     checkChapterNonChapterMarker(db),
     checkOrphanVideoMember(db),
     checkVideoMembersChaptersJsonInvalid(db),
+    checkNotificationProcessingStuck(db),
+    checkNotificationFailedVolume(db),
+    checkCostUsageSnapshotFreshness(db),
+    checkOpenModerationCasesOverdue(db),
+    checkActiveApiEndpointsOrphanEvent(db),
+    checkXIdMergePendingStale(db),
+    checkHistoryLogsRetentionCandidates(db),
   ]);
 }

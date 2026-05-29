@@ -41,7 +41,7 @@ function normalizeViewMode(raw: string | undefined): ViewMode {
   return raw === "timeline" || raw === "cards" ? raw : "table";
 }
 
-const MAX_LIMIT = 500;
+const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 100;
 
 function diffSummary(row: HistoryRow): { keys: string[]; count: number } {

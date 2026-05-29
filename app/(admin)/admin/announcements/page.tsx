@@ -1,9 +1,9 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
-import { announcements, users as usersTable, xUsers as xUsersTable } from "@/lib/db/schema";
+import { announcements } from "@/lib/db/schema";
 import { formatUnix } from "@/lib/utils/format";
 import { Icon } from "@/components/ui/Icon";
 import { AnnouncementBroadcastButton } from "@/components/admin/AnnouncementBroadcastButton";
@@ -53,34 +53,6 @@ export default async function AdminAnnouncementsPage({
             .orderBy(desc(announcements.created_at))
             .limit(50))
     : [];
-
-  // 通知対象件数の dry-run (実 enqueue はしない、ただし運用者に規模感を見せる)
-  let audienceCounts = { all: 0, creators: 0, admins: 0 };
-  if (db) {
-    try {
-      const [allRows, creatorRows, adminRows] = await Promise.all([
-        db.select({ c: sql<number>`COUNT(*)` }).from(usersTable),
-        // approved な X ID を持つユーザー (creators 想定)
-        db
-          .select({ c: sql<number>`COUNT(DISTINCT ${xUsersTable.linked_discord_user_id})` })
-          .from(xUsersTable)
-          .where(eq(xUsersTable.approval_status, "approved")),
-        db
-          .select({ c: sql<number>`COUNT(*)` })
-          .from(usersTable)
-          .where(eq(usersTable.role, "admin")),
-      ]);
-      audienceCounts = {
-        all: Number(allRows[0]?.c ?? 0),
-        creators: Number(creatorRows[0]?.c ?? 0),
-        admins: Number(adminRows[0]?.c ?? 0),
-      };
-    } catch (e) {
-      console.error("[AdminAnnouncementsPage] audience count failed", e);
-    }
-  }
-  // 値を使うための副作用呼び出し抑止 (lint 対策)
-  void isNotNull;
 
   return (
     <div>
@@ -135,18 +107,12 @@ export default async function AdminAnnouncementsPage({
         }}
       >
         <strong style={{ color: "var(--text-primary)" }}>
-          通知対象件数 (dry-run / 実 enqueue はまだ未実装)
+          公開側の取得方針
         </strong>
         <ul style={{ margin: "6px 0 0", paddingLeft: 18, lineHeight: 1.7 }}>
-          <li>
-            target_audience=<code>all</code>: 約 <strong>{audienceCounts.all.toLocaleString()}</strong> 件
-          </li>
-          <li>
-            target_audience=<code>creators</code>: 約 <strong>{audienceCounts.creators.toLocaleString()}</strong> 件 (approved X ID 持ちの distinct discord_user_id)
-          </li>
-          <li>
-            target_audience=<code>admins</code>: 約 <strong>{audienceCounts.admins.toLocaleString()}</strong> 件
-          </li>
+          <li>公開側は <code>is_published=1</code> かつ掲載期間内の <code>target_audience=all</code> を最大3件だけ取得します。</li>
+          <li>Discord 配信は段階 enqueue のみで、1操作あたり最大50件です。</li>
+          <li>対象者数の全件 COUNT は無料枠保護のため管理トップでは実行しません。</li>
         </ul>
         <p style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
           注意: 公開ボタンを押しても現状は notification_outbox に enqueue されません。

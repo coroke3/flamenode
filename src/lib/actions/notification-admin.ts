@@ -87,6 +87,77 @@ export async function retryFailedNotification(
 }
 
 /**
+ * 未送信/失敗/固着通知を手動キャンセルする。
+ * レコードは残し、Worker が拾わない status=cancelled に変える。
+ */
+export async function cancelNotification(
+  formData: FormData,
+): Promise<NotificationAdminResult> {
+  const session = await auth().catch(() => null);
+  const u = session?.user as { id?: string; role?: string } | undefined;
+  if (!u?.id || u.role !== "admin") {
+    return { ok: false, message: "管理者のみ操作できます。" };
+  }
+
+  const id = String(formData.get("id") ?? "").trim();
+  const reason = String(formData.get("reason") ?? "").trim().slice(0, 500);
+  if (!id) return { ok: false, message: "id が必要です。" };
+
+  const db = getDatabase();
+  if (!db) return { ok: false, message: "DB に接続できません。" };
+
+  const target = (
+    await db
+      .select()
+      .from(notificationOutbox)
+      .where(eq(notificationOutbox.id, id))
+      .limit(1)
+  )[0];
+  if (!target) return { ok: false, message: "通知が見つかりません。" };
+  if (target.status === "sent" || target.status === "cancelled") {
+    return {
+      ok: false,
+      message: `status=${target.status} の通知はキャンセル対象外です。`,
+    };
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  await db
+    .update(notificationOutbox)
+    .set({
+      status: "cancelled",
+      processing_started_at: null,
+      next_attempt_at: null,
+      last_error: reason || "manual cancel",
+    })
+    .where(eq(notificationOutbox.id, id));
+
+  await db.insert(historyLogs).values({
+    table_name: "notification_outbox",
+    record_id: id,
+    action: "UPDATE",
+    before_data: JSON.stringify({
+      status: target.status,
+      attempt_count: target.attempt_count ?? 0,
+      last_error: target.last_error,
+    }),
+    after_data: JSON.stringify({
+      status: "cancelled",
+      manual_cancel: true,
+      reason: reason || null,
+      cancelled_by: u.id,
+      cancelled_at: now,
+    }),
+    operator_discord_id: u.id,
+    retention_class: "normal",
+    created_at: now,
+  });
+
+  revalidatePath("/admin/notifications");
+  return { ok: true, message: "通知をキャンセルしました。" };
+}
+
+/**
  * failed 通知の一括リトライ。
  * MAX 件数を上限 (50) で打ち切り、attempt_count を 0 に戻す。
  * 履歴には件数だけ残す (個々の id は残さない、ボリュームが大きいため)。

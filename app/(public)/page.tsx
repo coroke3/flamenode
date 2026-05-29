@@ -11,6 +11,7 @@ import {
   fetchVideosForEvent,
   publicVideoCondition,
 } from "@/lib/db/queries";
+import { fetchPublicAnnouncements } from "@/lib/db/announcementQueries";
 import {
   slots as slotsTable,
   videos as videosTable,
@@ -47,7 +48,7 @@ function shuffle<T>(items: T[]): T[] {
 
 export default async function TopPage(): Promise<React.ReactElement> {
   const data = await withDatabase(async (db) => {
-    const [activeEvents, recommendedRaw, latest, creators, latestEvents] =
+    const [activeEvents, recommendedRaw, latest, creators, latestEvents, announcements] =
       await Promise.all([
         fetchActiveEvents(db),
         fetchRecommendedVideos(db, 40).then((rows) =>
@@ -56,6 +57,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
         fetchLatestVideos(db, 30),
         fetchPickupCreators(db, 30),
         fetchLatestEvents(db, 3),
+        fetchPublicAnnouncements(db, "all", 3),
       ]);
 
     const [videoCountRows, creatorCountRows] = await Promise.all([
@@ -103,6 +105,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
       latest,
       creators,
       latestEvents,
+      announcements,
       videosByEvent,
       topSlotStats,
       stats: {
@@ -119,6 +122,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
     latest = [],
     creators = [],
     latestEvents = [],
+    announcements = [],
     videosByEvent = {},
     topSlotStats = new Map<string, HomeIntroSlotStat>(),
     stats = {
@@ -136,6 +140,40 @@ export default async function TopPage(): Promise<React.ReactElement> {
   return (
     <div className={styles.page}>
       <HomeEditorialHero stats={stats} videos={heroVideos} />
+      {announcements.length > 0 ? (
+        <section
+          className={styles.section}
+          aria-label="お知らせ"
+          style={{ paddingTop: 18, paddingBottom: 0 }}
+        >
+          <div
+            style={{
+              display: "grid",
+              gap: 8,
+            }}
+          >
+            {announcements.map((item) => (
+              <article
+                key={item.id}
+                style={{
+                  padding: "12px 14px",
+                  border: "1px solid var(--border-subtle)",
+                  borderRadius: "var(--radius-md)",
+                  background: "var(--bg-surface)",
+                }}
+              >
+                <strong>{item.title}</strong>
+                <p
+                  className="fn-muted fn-text-sm"
+                  style={{ marginTop: 4, whiteSpace: "pre-wrap" }}
+                >
+                  {item.body.length > 180 ? `${item.body.slice(0, 179)}…` : item.body}
+                </p>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
       <HomeIntroBand activeEvents={activeEvents} slotStats={topSlotStats} />
 
       <section className={styles.section} aria-labelledby="sec-recommend">
