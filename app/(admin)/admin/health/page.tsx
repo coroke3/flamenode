@@ -65,6 +65,28 @@ export default async function AdminHealthPage({
         description="データベースの整合性を読み取り専用で点検します。修復操作はありません。"
       />
 
+      <section
+        className="fn-card"
+        style={{
+          marginTop: 16,
+          display: "flex",
+          gap: 12,
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <strong>DB整合性チェック</strong>
+          <p className="fn-muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
+            参照切れ、派生行欠落、スロット状態矛盾をカード形式で確認できます。
+          </p>
+        </div>
+        <Link href="/admin/health/integrity" className="fn-btn fn-btn-primary">
+          DB整合性チェックへ
+        </Link>
+      </section>
+
       <nav
         aria-label="状態フィルタ"
         style={{
