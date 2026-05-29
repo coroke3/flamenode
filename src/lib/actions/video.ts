@@ -28,6 +28,7 @@ import { detectSupportedImageUpload } from "@/lib/utils/imageUpload";
 import { normalizeXId } from "@/lib/utils/xid";
 import { normalizeHttpUrl } from "@/lib/utils/url";
 import { resolveStagePermissionFieldFromJson } from "@/lib/video/formSettings";
+import { computeVideoEventSyncTarget } from "@/lib/video/eventSync";
 import {
   getVideoSoftwareLabel,
   replaceVideoSoftwareLabels,
@@ -364,7 +365,12 @@ async function syncVideoEvents(
   // 非 admin の場合のみ、イベント単位のポリシー判定を行う。
   let target: string[];
   if (user.role === "admin") {
-    target = Array.from(new Set([...alwaysInclude, ...requested]));
+    target = computeVideoEventSyncTarget({
+      current: currentIds,
+      requested,
+      alwaysInclude,
+      isAdmin: true,
+    });
   } else {
     const universe = Array.from(
       new Set([...currentIds, ...requested, ...alwaysInclude]),
@@ -383,22 +389,13 @@ async function syncVideoEvents(
     const editableEventIds = new Set(await getEditableEventIds(db, user.id));
     const userCanModify = (id: string) =>
       allowMap.get(id) === 1 || editableEventIds.has(id);
-
-    const targetSet = new Set<string>(alwaysInclude);
-    // 現在紐付いているもの: 操作権限が無ければロックして残す。
-    //                     権限があれば requested に含まれていれば残し、無ければ外す。
-    for (const id of currentIds) {
-      if (!userCanModify(id)) {
-        targetSet.add(id);
-      } else if (requested.includes(id)) {
-        targetSet.add(id);
-      }
-    }
-    // 追加要求: 操作権限があるイベントだけ採用 (policy 外は silent drop)。
-    for (const id of requested) {
-      if (userCanModify(id)) targetSet.add(id);
-    }
-    target = Array.from(targetSet);
+    target = computeVideoEventSyncTarget({
+      current: currentIds,
+      requested,
+      alwaysInclude,
+      isAdmin: false,
+      modifiableEventIds: universe.filter(userCanModify),
+    });
   }
 
   const currentSet = new Set(currentIds);
