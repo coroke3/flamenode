@@ -73,6 +73,9 @@ export function VideoCard({
             <Icon name="youtube" size={28} aria-hidden />
           </div>
         )}
+        <span className={styles.playMark} aria-hidden>
+          <Icon name="play" size={14} />
+        </span>
         {video.status === "limited" ? (
           <span className={cn("fn-badge", "fn-badge-soft", styles.statusBadge)}>
             限定公開

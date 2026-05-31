@@ -1,50 +1,18 @@
 .page {
   padding-bottom: 72px;
-  background:
-    radial-gradient(circle at 88% 8%, var(--accent-primary-soft), transparent 22rem),
-    var(--bg-base);
+  background: var(--bg-base);
 }
 
 .section {
-  width: min(100% - 28px, 1320px);
+  width: min(100% - 40px, 1360px);
   margin: 0 auto;
-  padding: 34px 0 0;
-}
-
-.page :global(.fn-section-header) {
-  align-items: center;
-  padding: 0;
-}
-
-.page :global(.fn-section-header-center) {
-  text-align: left;
-}
-
-.page :global(.fn-section-title) {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 900;
-  letter-spacing: 0;
-}
-
-.page :global(.fn-section-title::after) {
-  display: none;
-}
-
-.page :global(.fn-section-more) {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0;
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 800;
+  padding: 28px 0 0;
 }
 
 .eventList {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 18px;
+  gap: 14px;
   margin-top: 18px;
 }
 
@@ -59,10 +27,5 @@
 @media (max-width: 640px) {
   .section {
     width: min(100% - 20px, 100%);
-  }
-
-  .page :global(.fn-section-header) {
-    align-items: flex-start;
-    flex-direction: column;
   }
 }

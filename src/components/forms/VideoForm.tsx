@@ -182,6 +182,10 @@ export function VideoForm({
 }: VideoFormProps): React.ReactElement {
   const router = useRouter();
   const [youtubeUrl, setYoutubeUrl] = React.useState(initial.youtube_url ?? "");
+  const [titlePreview, setTitlePreview] = React.useState(initial.title ?? "");
+  const [displayNamePreview, setDisplayNamePreview] = React.useState(
+    initial.display_name ?? "",
+  );
   const [isCollab, setIsCollab] = React.useState(
     Boolean(initial.is_collab || (initial.members?.length ?? 0) > 0),
   );
@@ -261,6 +265,15 @@ export function VideoForm({
       (!isActiveXFixed && (hasSelectableXIds || !!normalizedInitialXId)));
 
   const youtubeId = extractYoutubeId(youtubeUrl);
+  const selectedEventLabels = eventOptions
+    .filter((event) => selectedEventIds.includes(event.id))
+    .map((event) => event.title);
+  const sidePreviewTitle = titlePreview.trim() || "作品タイトル未入力";
+  const sidePreviewName =
+    displayNamePreview.trim() ||
+    normalizedActiveXId ||
+    normalizedInitialXId ||
+    "提出者未設定";
   const submitterDisabled = isSectionDisabled(disabledSections, "submitter");
   const videoSectionDisabled = isSectionDisabled(disabledSections, "video");
   const descriptionsDisabled = isSectionDisabled(disabledSections, "descriptions");
@@ -333,6 +346,7 @@ export function VideoForm({
         </datalist>
       ) : null}
 
+      <div className={styles.formMain}>
       <section
         className={cx(
           styles.section,
@@ -351,7 +365,7 @@ export function VideoForm({
         <p className={styles.help}>
           この作品で表示する X ID、活動名、団体名を確認してください。X ID 設定の既定値を使いつつ、作品ごとに上書きできます。
         </p>
-        <div className={`${styles.row} cols-2`}>
+        <div className={`${styles.row} ${styles.cols2}`}>
           <div className={cx(styles.field, styles.editableField)}>
             <label className={`${styles.label} ${styles.required}`} htmlFor="creator_x_user_id">
               提出主体 X ID
@@ -411,6 +425,7 @@ export function VideoForm({
               className="fn-input"
               maxLength={80}
               required
+              onChange={(e) => setDisplayNamePreview(e.target.value)}
               readOnly={fieldDisabled("submitter.display_name")}
               aria-readonly={fieldDisabled("submitter.display_name") || undefined}
               style={fieldDisabled("submitter.display_name") ? { opacity: 0.65, cursor: "default" } : undefined}
@@ -442,7 +457,7 @@ export function VideoForm({
             disabled={fieldDisabled("submitter.profile_text")}
           />
         </div>
-        <div className={`${styles.row} cols-2`}>
+        <div className={`${styles.row} ${styles.cols2}`}>
           <div className={cx(styles.field, styles.editableField)}>
             <label className={styles.label} htmlFor="youtube_channel_url">
               YouTube チャンネル URL
@@ -504,6 +519,7 @@ export function VideoForm({
             placeholder="例: First Light - 春の輪"
             maxLength={120}
             required
+            onChange={(e) => setTitlePreview(e.target.value)}
             readOnly={fieldDisabled("video.title")}
             aria-readonly={fieldDisabled("video.title") || undefined}
             style={fieldDisabled("video.title") ? { opacity: 0.65, cursor: "default" } : undefined}
@@ -556,7 +572,7 @@ export function VideoForm({
           ) : null}
         </div>
 
-        <div className={`${styles.row} cols-2`}>
+        <div className={`${styles.row} ${styles.cols2}`}>
           <div className={cx(styles.field, styles.editableField)}>
             <label className={styles.label} htmlFor="music">
               使用楽曲
@@ -960,6 +976,75 @@ export function VideoForm({
           <span>{submitBlockedReason}</span>
         </div>
       ) : null}
+      </div>
+
+      <aside className={styles.sidePreview} aria-label="投稿内容プレビュー">
+        <span className={styles.sideEyebrow}>live preview</span>
+        <div className={styles.previewCard}>
+          <div className={styles.previewVisual}>
+            {youtubeId ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img src={youtubeThumbUrl(youtubeId, "hqdefault")} alt="" />
+            ) : null}
+            <span className={styles.previewCode}>
+              {youtubeId ? `yt / ${youtubeId}` : "youtube url"}
+            </span>
+            <span className={styles.previewPlay} aria-hidden>
+              <Icon name="play" size={18} />
+            </span>
+          </div>
+          <div className={styles.previewInfo}>
+            <h3>{sidePreviewTitle}</h3>
+            <p>{sidePreviewName}</p>
+            <span>{isCollab ? "合作作品" : "個人作品"}</span>
+          </div>
+        </div>
+        <dl className={styles.previewChecklist}>
+          <PreviewCheck ok={Boolean(youtubeId)} label="YouTube URL" />
+          <PreviewCheck ok={Boolean(titlePreview.trim())} label="作品タイトル" />
+          <PreviewCheck ok={Boolean(displayNamePreview.trim())} label="表示名" />
+          <PreviewCheck
+            ok={!selectedStagePermissionField?.required}
+            label={
+              selectedStagePermissionField?.required
+                ? "権利・素材確認は入力必須"
+                : "権利・素材確認は任意"
+            }
+            pending={Boolean(selectedStagePermissionField?.required)}
+          />
+          <PreviewCheck
+            ok={!isCollab || Boolean(initial.members?.length)}
+            label={isCollab ? "合作メンバーを確認" : "メンバー入力なし"}
+            pending={isCollab && !initial.members?.length}
+          />
+        </dl>
+        <div className={styles.saveId}>
+          <span className={styles.sideEyebrow}>保存名義 / active X ID</span>
+          <div className={styles.saveIdRow}>
+            <span className={styles.saveIdAvatar}>
+              {sidePreviewName.slice(0, 1).toLowerCase()}
+            </span>
+            <span>
+              <strong>{sidePreviewName}</strong>
+              <small>
+                @{normalizedActiveXId || normalizedInitialXId || "not-selected"}
+              </small>
+            </span>
+          </div>
+        </div>
+        {selectedEventLabels.length > 0 ? (
+          <div className={styles.previewEvents}>
+            <span className={styles.sideEyebrow}>events</span>
+            {selectedEventLabels.slice(0, 3).map((label) => (
+              <span key={label}>{label}</span>
+            ))}
+            {selectedEventLabels.length > 3 ? (
+              <span>ほか {selectedEventLabels.length - 3} 件</span>
+            ) : null}
+          </div>
+        ) : null}
+      </aside>
+
       <div className={styles.actions}>
         <button
           type="submit"
@@ -972,6 +1057,24 @@ export function VideoForm({
         </button>
       </div>
     </form>
+  );
+}
+
+function PreviewCheck({
+  ok,
+  pending = false,
+  label,
+}: {
+  ok: boolean;
+  pending?: boolean;
+  label: string;
+}): React.ReactElement {
+  const mark = ok ? "✓" : pending ? "!" : "·";
+  return (
+    <div className={ok ? styles.checkOk : pending ? styles.checkPending : styles.checkTodo}>
+      <dt>{mark}</dt>
+      <dd>{label}</dd>
+    </div>
   );
 }
 

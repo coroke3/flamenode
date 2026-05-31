@@ -117,9 +117,13 @@ export default async function EventDetailPage({
     (video) =>
       video.status === "public",
   );
+  const firstVisibleVideo = visibleVideos[0] ?? null;
+  const firstVisibleHref = firstVisibleVideo
+    ? `/${firstVisibleVideo.youtube_video_id ?? firstVisibleVideo.id}`
+    : null;
 
   const accentVar = {
-    "--event-accent": event.accent_color ?? "#ffd400",
+    "--event-accent": event.accent_color ?? "var(--accent-primary)",
   } as React.CSSProperties;
   const publicEditors = editors.filter((editor) => editor.is_public === 1);
   const status = computeEventStatus(event);
@@ -203,9 +207,9 @@ export default async function EventDetailPage({
           ) : null}
 
           <div className={styles.heroActions}>
-            {visibleVideos.length > 0 ? (
+            {firstVisibleHref ? (
               <Link
-                href={`/${visibleVideos[0]?.youtube_video_id ?? visibleVideos[0]?.id}?playlist=${event.id}`}
+                href={firstVisibleHref}
                 className="fn-btn fn-btn-primary"
               >
                 <Icon name="play" size={14} aria-hidden />
@@ -333,10 +337,7 @@ export default async function EventDetailPage({
           <div className={styles.videoGrid}>
             {visibleVideos.map((video, index) => (
               <div key={`${video.id}-event-video-${index}`}>
-                <VideoCard
-                  video={video}
-                  href={`/${video.youtube_video_id ?? video.id}?playlist=${event.id}`}
-                />
+                <VideoCard video={video} />
               </div>
             ))}
           </div>

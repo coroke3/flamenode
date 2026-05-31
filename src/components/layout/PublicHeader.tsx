@@ -70,6 +70,9 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
         </nav>
 
         <div className={styles.right}>
+          <div className={styles.themeButton}>
+            <ThemeToggle />
+          </div>
           <form
             action="/list"
             method="get"
@@ -128,6 +131,13 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
         </div>
       </div>
 
+      <div className={styles.tape} aria-hidden="true">
+        <span>flamenode / node.0426 / moving image archive</span>
+        <span>PVSF2025S / entry open</span>
+        <span>events / creators / video nodes</span>
+        <span>light and dark mode ready</span>
+      </div>
+
       {mobileOpen ? (
         <div className={styles.mobile}>
           <nav className={styles.mobileNav} aria-label="モバイルナビゲーション">
@@ -171,6 +181,10 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
                     </a>
                   );
                 })}
+                <div className={styles.mobileThemeRow}>
+                  <span>テーマ</span>
+                  <ThemeToggle />
+                </div>
               </div>
             ) : (
               <>

@@ -1,10 +1,3 @@
-.band {
-  position: relative;
-  width: min(96%, var(--content-max));
-  margin: 24px auto 0;
-}
-
-/* featured イベントがある時のラッパー。EventRecruitCard を全幅で表示する。 */
 .heroWrap {
   position: relative;
   width: min(96%, var(--content-max));
@@ -17,20 +10,12 @@
   }
 }
 
-/* 複数の募集中イベントを縦に積むラッパー (旧)。
-   新レイアウトでは primary + compact を分けて配置する。 */
-.recruitStack {
-  display: grid;
-  gap: 14px;
-}
-
 .recruitMore {
   margin-top: 10px;
   display: flex;
   justify-content: flex-end;
 }
 
-/* 副イベント (compact) を 2 件横に並べる。スマホでは縦積み。 */
 .recruitCompactRow {
   display: grid;
   grid-template-columns: 1fr;
@@ -42,193 +27,5 @@
   .recruitCompactRow {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 14px;
-  }
-}
-
-/* Hero 下のクイック導線 */
-.quickLinks {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: clamp(14px, 2vw, 20px);
-  justify-content: center;
-}
-
-@media (min-width: 768px) {
-  .quickLinks {
-    justify-content: flex-start;
-  }
-}
-
-.inner {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  min-height: 150px;
-  padding: 24px 22px;
-  background-color: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-}
-
-.brand {
-  flex: 1;
-  min-width: 0;
-}
-
-.title {
-  font-size: 26px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  color: var(--text-primary);
-  line-height: 1.05;
-}
-
-.lead {
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.leadDesktop {
-  display: none;
-}
-
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 14px;
-}
-
-.eventBox {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 16px 18px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--accent-primary);
-  background-color: var(--accent-primary-soft);
-}
-
-.eventLabel {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--accent-warning);
-}
-
-.eventTitle {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-primary);
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  overflow: hidden;
-  transition: color 0.15s ease;
-}
-
-.eventTitle:hover {
-  color: var(--accent-primary-strong);
-}
-
-.eventExplain {
-  font-size: 12px;
-  color: var(--text-secondary);
-  line-height: 1.55;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  overflow: hidden;
-}
-
-.eventMeta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 16px;
-  margin-top: 6px;
-}
-
-.eventMetaItem {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: var(--text-secondary);
-}
-
-.eventMetaItem dt {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-weight: 600;
-  color: var(--text-muted);
-}
-
-.eventMetaItem dd {
-  color: var(--text-primary);
-}
-
-.howToJoin {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-top: 4px;
-  line-height: 1.5;
-}
-
-.howToJoinLink {
-  margin-left: 6px;
-  color: var(--accent-primary-strong);
-  font-weight: 600;
-  text-decoration: underline;
-}
-
-.eventActions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 4px;
-}
-
-@media (min-width: 768px) {
-  .band {
-    margin-top: 28px;
-  }
-
-  .inner {
-    flex-direction: row;
-    align-items: center;
-    gap: 24px;
-    padding: 28px 36px;
-    min-height: 180px;
-  }
-
-  .title {
-    font-size: 34px;
-  }
-
-  .lead {
-    font-size: 13px;
-  }
-
-  .leadDesktop {
-    display: inline;
-  }
-
-  .eventBox {
-    width: 55%;
-  }
-
-  .eventTitle {
-    font-size: 18px;
   }
 }

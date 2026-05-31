@@ -1,6 +1,6 @@
 .footer {
   margin-top: 64px;
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--hairline);
   background-color: var(--bg-surface);
 }
 
@@ -8,7 +8,7 @@
   display: flex;
   flex-direction: column;
   gap: 28px;
-  width: min(96%, var(--content-max));
+  width: min(100% - 40px, var(--content-max));
   margin: 0 auto;
   padding: 36px 16px 28px;
 }
@@ -55,14 +55,14 @@
 }
 
 .legal {
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--hairline);
 }
 
 .legalInner {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  width: min(96%, var(--content-max));
+  width: min(100% - 40px, var(--content-max));
   margin: 0 auto;
   padding: 14px 16px;
   font-size: 11px;

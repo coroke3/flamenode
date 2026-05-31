@@ -3,7 +3,9 @@
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 20px 28px;
   align-items: end;
-  margin-bottom: 32px;
+  margin-bottom: 34px;
+  padding: 36px 0 22px;
+  border-bottom: 1px solid var(--hairline, var(--border-subtle));
 }
 
 .text {
@@ -11,23 +13,27 @@
 }
 
 .eyebrow {
-  margin: 0 0 10px;
-  color: var(--accent-primary);
-  font-size: 12px;
-  font-weight: 900;
-  letter-spacing: 0.14em;
+  margin: 0 0 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 
 .hero h1 {
   margin: 0;
-  font-size: clamp(32px, 6vw, 72px);
-  line-height: 0.96;
+  font-family: var(--font-display);
+  font-size: clamp(42px, 7vw, 88px);
+  font-weight: 800;
+  line-height: 0.92;
+  letter-spacing: -0.01em;
 }
 
 .description {
   max-width: 680px;
-  margin: 16px 0 0;
+  margin: 18px 0 0;
   color: var(--text-secondary);
   font-size: 15px;
   line-height: 1.9;
@@ -49,6 +55,7 @@
 @media (max-width: 760px) {
   .hero {
     display: block;
+    padding-top: 22px;
   }
 
   .actions {

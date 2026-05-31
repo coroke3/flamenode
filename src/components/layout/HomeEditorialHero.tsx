@@ -38,17 +38,17 @@ export function HomeEditorialHero({
       </div>
 
       <div className={styles.heroCopy}>
-        <p className={styles.heroEyebrow}>CREATIVE NETWORK / 2026</p>
+        <p className={styles.heroEyebrow}>CREATIVE ARCHIVE / 2026</p>
         <h1 className={styles.heroTitle}>
+          FlameNode
+          <br />
           つくる人が、
           <br />
-          つながる前に、
-          <br />
-          惹かれあう場所。
+          <span className={styles.heroAccent}>つながる場所。</span>
         </h1>
         <p className={styles.heroLead}>
-          映像を投稿する。イベントに出会う。仲間と混ざる。
-          FlameNodeは、創作のはじまりをデザインするプラットフォームです。
+          個人制作映像のアーカイブと、イベントを束ねるプラットフォーム。
+          作品、クリエイター、上映企画をひとつの流れでつなぎます。
         </p>
 
         <dl className={styles.heroStats}>

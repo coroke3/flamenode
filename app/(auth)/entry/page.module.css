@@ -1,102 +1,171 @@
 .loginSection {
-  background-color: var(--bg-surface);
-  border: 1px solid var(--accent-primary);
-  border-radius: var(--radius-xl);
-  padding: 24px;
-  margin-bottom: 28px;
+  display: grid;
+  gap: 12px;
+  padding: 20px 0 22px;
+  margin-bottom: 30px;
+  border-top: 1px solid var(--hairline, var(--border-subtle));
+  border-bottom: 1px solid var(--hairline, var(--border-subtle));
 }
 
 .tosNote {
-  margin-top: 14px;
+  margin: 0;
   color: var(--text-muted);
-  font-size: 11.5px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.tosNote a {
+  color: var(--accent-primary-strong);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .choiceGrid {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 18px;
-  margin-top: 22px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  margin-top: 24px;
 }
 
 .choiceCard {
-  min-height: 220px;
-  background-color: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-xl);
-  padding: 26px;
+  position: relative;
+  min-height: 230px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 24px 26px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent-primary) 5%, transparent), transparent 42%),
+    var(--bg-surface);
+  border: 1px solid var(--hairline, var(--border-subtle));
+  border-radius: 6px;
+  overflow: hidden;
   transition:
     transform 160ms ease,
     border-color 160ms ease,
     background 160ms ease;
 }
 
+.choiceCard::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 30px 30px;
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 .choiceCard:hover {
-  transform: translateY(-3px);
-  border-color: rgba(255, 225, 0, 0.48);
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent-primary) 48%, var(--border-subtle));
   background:
-    linear-gradient(135deg, rgba(255, 225, 0, 0.06), transparent),
+    linear-gradient(135deg, color-mix(in srgb, var(--accent-primary) 10%, transparent), transparent 48%),
     var(--bg-surface);
+}
+
+.choiceCard > * {
+  position: relative;
+  z-index: 1;
 }
 
 .cardTitle {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 16px;
-  font-weight: 700;
+  gap: 8px;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(22px, 3vw, 30px);
+  font-weight: 800;
+  line-height: 1;
   color: var(--text-primary);
-  margin-bottom: 8px;
 }
 
 .cardLead {
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.6;
-  margin-bottom: 14px;
+  max-width: 620px;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.75;
 }
 
 .btnRow {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 8px;
+  margin-top: auto;
 }
 
 .btnRow > a,
 .btnRow > button {
-  width: 100%;
   justify-content: center;
 }
 
 .eventList {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
+  margin-top: auto;
 }
 
 .eventCard {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 14px 16px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-subtle);
-  background-color: var(--bg-base);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: 4px 14px;
+  align-items: center;
+  padding: 12px 0;
+  border-top: 1px solid var(--hairline, var(--border-subtle));
+}
+
+.eventCard::after {
+  content: "→";
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  transition:
+    color 140ms ease,
+    transform 140ms ease;
+}
+
+.eventCard:hover::after {
+  color: var(--event-accent, var(--accent-primary));
+  transform: translateX(3px);
 }
 
 .eventCardTitle {
+  min-width: 0;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 800;
   color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .eventCardMeta {
-  font-size: 11px;
+  grid-column: 1;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
   color: var(--text-muted);
 }
 
-@media (min-width: 768px) {
+@media (min-width: 840px) {
   .choiceGrid {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .choiceCard {
+    min-height: 0;
+    padding: 20px;
+  }
+
+  .btnRow > a,
+  .btnRow > button {
+    width: 100%;
   }
 }

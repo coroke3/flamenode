@@ -5,10 +5,10 @@
   justify-content: center;
   width: 34px;
   height: 34px;
-  border: 1px solid var(--border-subtle);
-  background-color: var(--bg-surface);
+  border: 0;
+  background-color: var(--bg-elevated);
   color: var(--text-secondary);
-  border-radius: var(--radius-pill);
+  border-radius: 50%;
   transition:
     background-color 0.15s ease,
     border-color 0.15s ease,
@@ -17,9 +17,8 @@
 }
 
 .button:hover {
-  border-color: var(--accent-primary);
-  background-color: var(--accent-primary-soft);
-  color: var(--text-primary);
+  background-color: var(--accent-primary);
+  color: var(--accent-ink);
 }
 
 .button:active {
@@ -34,5 +33,5 @@
   height: 6px;
   border-radius: 50%;
   background-color: var(--accent-primary);
-  box-shadow: 0 0 0 2px var(--bg-surface);
+  box-shadow: 0 0 0 2px var(--bg-elevated);
 }

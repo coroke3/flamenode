@@ -96,6 +96,9 @@ const videoFormSchema = z.object({
   part: z.string().trim().max(40).optional().nullable(),
 });
 
+const STAGE_PERMISSION_REQUIRED_MESSAGE =
+  "ステージ・素材・権利まわりの確認欄を入力してください。";
+
 export interface VideoActionResult {
   ok: boolean;
   message?: string;
@@ -617,7 +620,7 @@ export async function createFreeVideo(
     stageField,
   );
   if (stageField?.required && stagePermission === '') {
-    return { ok: false, message: 'stage_permission is required.' };
+    return { ok: false, message: STAGE_PERMISSION_REQUIRED_MESSAGE };
   }
 
   // YouTube ID 重複チェック: 同じ youtube_video_id を持つ非削除・非 voided な動画が
@@ -801,7 +804,7 @@ export async function submitSlotVideo(
     slotStageField,
   );
   if (slotStageField?.required && stagePermission === "") {
-    return { ok: false, message: "stage_permission is required." };
+    return { ok: false, message: STAGE_PERMISSION_REQUIRED_MESSAGE };
   }
 
   // YouTube ID 重複チェック: 同じ youtube_video_id を持つ非削除・非 voided な動画が
@@ -1052,7 +1055,7 @@ export async function updateVideo(
     editStageField,
   );
   if (editStageField?.required && nextStagePermission === "") {
-    return { ok: false, message: "stage_permission is required." };
+    return { ok: false, message: STAGE_PERMISSION_REQUIRED_MESSAGE };
   }
 
   const editUser = { id: sessionUser.id, role: sessionUser.role ?? null };

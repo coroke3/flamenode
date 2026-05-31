@@ -363,6 +363,44 @@ export default async function VideoDetailPage({
     <div className={styles.page} style={accentVar}>
       <div className={styles.layout}>
         <article className={styles.main}>
+          <div className={styles.topStrip}>
+            <div className={styles.breadcrumb}>
+              <Link href="/list">archive</Link>
+              <span>/</span>
+              {primaryEvent ? (
+                <Link href={`/event/${primaryEvent.id}`}>
+                  {primaryEvent.id}
+                </Link>
+              ) : (
+                <span>no-event</span>
+              )}
+              <span>/</span>
+              <span className={styles.breadcrumbCurrent}>
+                {video.youtube_video_id ?? video.id}
+              </span>
+            </div>
+            <div className={styles.topActions}>
+              {primaryEvent ? (
+                <Link
+                  href={`/event/${primaryEvent.id}`}
+                  className="fn-btn fn-btn-ghost fn-btn-soft-outline fn-btn-sm"
+                >
+                  <Icon name="calendar" size={12} aria-hidden />
+                  イベント
+                </Link>
+              ) : null}
+              {viewerCanEditChapters ? (
+                <Link
+                  href={`/dashboard/edit/${video.id}`}
+                  className="fn-btn fn-btn-primary fn-btn-sm"
+                >
+                  <Icon name="edit" size={12} aria-hidden />
+                  編集
+                </Link>
+              ) : null}
+            </div>
+          </div>
+
           {youtubeId ? (
             <YoutubePlayer
               youtubeId={youtubeId}
@@ -738,26 +776,6 @@ export default async function VideoDetailPage({
   );
 }
 
-function MetaItem({
-  title,
-  body,
-}: {
-  title: string;
-  body: React.ReactNode;
-}): React.ReactElement {
-  return (
-    <details className={styles.metaItem}>
-      <summary>{title}</summary>
-      <p>{body}</p>
-    </details>
-  );
-}
-
-/**
- * InlineMetaItem: 開閉なしの常時表示メタ項目。
- * 楽曲・クレジット・紹介コメント・使用ソフトのように、ページを開いた瞬間に
- * 見えていてほしいメタ情報用。
- */
 function InlineMetaItem({
   title,
   children,

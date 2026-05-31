@@ -5,8 +5,9 @@
   background-color: #000;
   overflow: hidden;
   user-select: none;
-  border-radius: var(--radius-md);
+  border-radius: 0;
   isolation: isolate;
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .iframeBox {
@@ -39,15 +40,15 @@
   position: absolute;
   inset: 0;
   margin: auto;
-  width: 64px;
-  height: 64px;
+  width: 70px;
+  height: 70px;
   border-radius: 50%;
   display: grid;
   place-items: center;
   color: #fff;
-  background-color: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(4px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background-color: rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.28);
   cursor: pointer;
   transition: opacity 0.2s ease, transform 0.15s ease;
   z-index: 3;
@@ -55,7 +56,7 @@
 
 .centerBtn:hover {
   background-color: rgba(0, 0, 0, 0.55);
-  transform: scale(1.04);
+  transform: scale(1.03);
 }
 
 .centerBtnHidden {
@@ -65,8 +66,8 @@
 
 @media (min-width: 768px) {
   .centerBtn {
-    width: 80px;
-    height: 80px;
+    width: 84px;
+    height: 84px;
   }
 }
 
@@ -75,7 +76,7 @@
   position: absolute;
   left: 0;
   right: 0;
-  padding: 12px 16px;
+  padding: 14px 16px;
   color: #fff;
   transition: opacity 0.2s ease;
   pointer-events: none;
@@ -93,13 +94,13 @@
   align-items: center;
   gap: 8px;
   padding-bottom: 24px;
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), transparent);
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.62), transparent);
 }
 
 .bottomBar {
   bottom: 0;
-  padding-top: 24px;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.7), transparent);
+  padding-top: 28px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.72), transparent);
 }
 
 .hidden {
@@ -121,7 +122,7 @@
   align-items: center;
   height: 22px;
   padding: 0 8px;
-  border-radius: var(--radius-pill);
+  border-radius: 3px;
   background-color: rgba(255, 255, 255, 0.12);
   color: rgba(255, 255, 255, 0.9);
   font-size: 10px;
@@ -136,7 +137,7 @@
   align-items: center;
   justify-content: center;
   color: rgba(255, 255, 255, 0.85);
-  border-radius: var(--radius-sm);
+  border-radius: 4px;
   transition: color 0.15s ease, background-color 0.15s ease;
 }
 
@@ -156,24 +157,24 @@
   inset-inline: 0;
   top: 50%;
   transform: translateY(-50%);
-  height: 4px;
+  height: 3px;
   background-color: rgba(255, 255, 255, 0.25);
-  border-radius: var(--radius-pill);
+  border-radius: 0;
 }
 
 .seekProgress {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  height: 4px;
-  border-radius: var(--radius-pill);
-  background-color: var(--accent-primary);
+  height: 3px;
+  border-radius: 0;
+  background-color: var(--event-accent, var(--accent-primary));
   transition: width 0.1s linear;
 }
 
 .seekBar:hover .seekTrack,
 .seekBar:hover .seekProgress {
-  height: 6px;
+  height: 5px;
 }
 
 .chapterDot {
@@ -194,7 +195,7 @@
   height: 7px;
   width: 7px;
   border-radius: 50%;
-  background-color: var(--accent-primary);
+  background-color: var(--event-accent, var(--accent-primary));
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.4);
   transition: transform 0.15s ease;
 }
@@ -235,7 +236,7 @@
 
 .volumeSlider {
   width: 86px;
-  accent-color: var(--accent-primary);
+  accent-color: var(--event-accent, var(--accent-primary));
 }
 
 @media (max-width: 560px) {

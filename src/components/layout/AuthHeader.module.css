@@ -35,12 +35,6 @@
   gap: 10px;
 }
 
-.searchContainer {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
 .searchForm {
   display: none;
 }
@@ -271,11 +265,6 @@
 .mobileLink:hover {
   color: var(--text-primary);
   background-color: var(--bg-elevated);
-}
-
-.mobileLinkActive {
-  color: var(--accent-primary);
-  background-color: var(--accent-primary-soft);
 }
 
 .mobileLinkDanger {

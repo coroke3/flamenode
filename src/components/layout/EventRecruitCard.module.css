@@ -1,9 +1,3 @@
-/*
- * トップページ募集欄のメインヒーロー。
- * 黒〜濃紺の深いベースに黄色アクセント。横長カード、左に情報、右に残り日数 / 残り枠 / CTA。
- * 本セクションは theme に依存せず常に dark base で表示する。
- */
-
 .card {
   position: relative;
   width: 100%;
@@ -12,8 +6,6 @@
   gap: 20px;
   padding: 22px 22px;
   border-radius: 8px;
-  /* 黄色アクセントを背景全面に出すのをやめ、左上の薄い光だけにする。
-     枠線も黄色から白の細い線に変更して落ち着いた印象に。 */
   background:
     radial-gradient(100% 50% at 88% 0%, color-mix(in srgb, var(--event-accent, var(--accent-primary)) 10%, transparent), transparent 60%),
     linear-gradient(135deg, #0c0f14 0%, #141822 55%, #0c0f14 100%);
@@ -26,8 +18,6 @@
   isolation: isolate;
 }
 
-/* compact variant: 副イベント (2枚目以降) を縦に薄く積む用。
-   情報量を絞り、タイムライン非表示・countdown 小型化する。 */
 .cardCompact {
   padding: 14px 16px;
   gap: 12px;
@@ -114,8 +104,6 @@
   align-items: stretch;
 }
 
-/* header */
-
 .header {
   display: flex;
   flex-direction: column;
@@ -189,8 +177,6 @@
   border-color: rgba(255, 255, 255, 0.18);
   color: #cbd5e1;
 }
-
-/* timeline */
 
 .timeline {
   position: relative;
@@ -270,7 +256,6 @@
 .timelineLabel {
   position: absolute;
   top: 0;
-  /* transform/text-align/align-items は JSX 側で position に応じて設定 (端で見切れない) */
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -279,7 +264,6 @@
   pointer-events: none;
 }
 
-/* 隣り合うラベルが重ならないよう、奇数番目を 1 段下に置く */
 .timelineLabelStagger {
   top: 28px;
 }
@@ -301,8 +285,6 @@
   color: rgba(248, 250, 252, 0.85);
   white-space: nowrap;
 }
-
-/* periods */
 
 .periods {
   display: grid;
@@ -335,8 +317,6 @@
   color: #f8fafc;
   font-variant-numeric: tabular-nums;
 }
-
-/* right column */
 
 .countdown {
   display: flex;
@@ -377,8 +357,6 @@
   font-weight: 700;
   color: #f8fafc;
 }
-
-/* slots */
 
 .slots {
   display: flex;
@@ -487,8 +465,6 @@
   color: #f87171;
 }
 
-/* CTA */
-
 .cta {
   display: inline-flex;
   align-items: center;
@@ -520,8 +496,6 @@
   outline: 2px solid #fff;
   outline-offset: 2px;
 }
-
-/* desktop layout */
 
 @media (min-width: 768px) {
   .card {
@@ -557,8 +531,6 @@
     font-size: 64px;
   }
 }
-
-/* mobile fine-tune */
 
 @media (max-width: 480px) {
   .card {

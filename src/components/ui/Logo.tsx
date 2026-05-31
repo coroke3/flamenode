@@ -27,7 +27,7 @@ export function Logo({
       {showText ? (
         <span className={styles.text}>
           <span className={styles.title}>FlameNode</span>
-          <span className={styles.sub}>Frame + Node</span>
+          <span className={styles.sub}>NODE.0426</span>
         </span>
       ) : null}
     </span>

@@ -533,24 +533,69 @@ export function EventForm({
         </legend>
         <input type="hidden" name="stage_permission_enabled" value="0" />
         <input type="hidden" name="stage_permission_required" value="0" />
-        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <input
-            type="checkbox"
-            name="stage_permission_enabled"
-            value="1"
-            defaultChecked={stagePermissionSettings.enabled === true}
-          />
-          権利・素材の確認欄を出す
-        </label>
-        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <input
-            type="checkbox"
-            name="stage_permission_required"
-            value="1"
-            defaultChecked={stagePermissionSettings.required === true}
-          />
-          入力必須にする
-        </label>
+        <p className="fn-muted" style={{ margin: "0 0 2px", fontSize: 12, lineHeight: 1.6 }}>
+          投稿者に、ステージ・素材・権利まわりの確認内容を入力してもらうための欄です。
+        </p>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: 10,
+          }}
+        >
+          <label
+            style={{
+              display: "grid",
+              gridTemplateColumns: "auto minmax(0, 1fr)",
+              gap: 10,
+              alignItems: "flex-start",
+              padding: 12,
+              border: "1px solid var(--border-subtle)",
+              borderRadius: 10,
+              background: "var(--bg-surface)",
+            }}
+          >
+            <input
+              type="checkbox"
+              name="stage_permission_enabled"
+              value="1"
+              defaultChecked={stagePermissionSettings.enabled === true}
+              style={{ width: 18, height: 18, accentColor: "var(--accent-primary)" }}
+            />
+            <span>
+              <strong style={{ display: "block", fontSize: 13 }}>確認欄を表示する</strong>
+              <span className="fn-muted" style={{ display: "block", marginTop: 3, fontSize: 11.5 }}>
+                投稿フォームに権利・素材確認の入力欄を追加します。
+              </span>
+            </span>
+          </label>
+          <label
+            style={{
+              display: "grid",
+              gridTemplateColumns: "auto minmax(0, 1fr)",
+              gap: 10,
+              alignItems: "flex-start",
+              padding: 12,
+              border: "1px solid var(--border-subtle)",
+              borderRadius: 10,
+              background: "var(--bg-surface)",
+            }}
+          >
+            <input
+              type="checkbox"
+              name="stage_permission_required"
+              value="1"
+              defaultChecked={stagePermissionSettings.required === true}
+              style={{ width: 18, height: 18, accentColor: "var(--accent-primary)" }}
+            />
+            <span>
+              <strong style={{ display: "block", fontSize: 13 }}>入力必須にする</strong>
+              <span className="fn-muted" style={{ display: "block", marginTop: 3, fontSize: 11.5 }}>
+                空欄のまま投稿・更新できないようにします。
+              </span>
+            </span>
+          </label>
+        </div>
         <div>
           <label className="fn-label">質問名</label>
           <input

@@ -48,17 +48,21 @@ function shuffle<T>(items: T[]): T[] {
 
 export default async function TopPage(): Promise<React.ReactElement> {
   const data = await withDatabase(async (db) => {
-    const [activeEvents, recommendedRaw, latest, creators, latestEvents, announcements] =
-      await Promise.all([
-        fetchActiveEvents(db),
-        fetchRecommendedVideos(db, 40).then((rows) =>
-          shuffle(rows).slice(0, 30),
-        ),
-        fetchLatestVideos(db, 30),
-        fetchPickupCreators(db, 30),
-        fetchLatestEvents(db, 3),
-        fetchPublicAnnouncements(db, "all", 3),
-      ]);
+    const [
+      activeEvents,
+      recommendedRaw,
+      latest,
+      creators,
+      latestEvents,
+      announcements,
+    ] = await Promise.all([
+      fetchActiveEvents(db),
+      fetchRecommendedVideos(db, 40).then((rows) => shuffle(rows).slice(0, 30)),
+      fetchLatestVideos(db, 30),
+      fetchPickupCreators(db, 30),
+      fetchLatestEvents(db, 3),
+      fetchPublicAnnouncements(db, "all", 3),
+    ]);
 
     const [videoCountRows, creatorCountRows] = await Promise.all([
       db
@@ -146,12 +150,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
           aria-label="お知らせ"
           style={{ paddingTop: 18, paddingBottom: 0 }}
         >
-          <div
-            style={{
-              display: "grid",
-              gap: 8,
-            }}
-          >
+          <div style={{ display: "grid", gap: 8 }}>
             {announcements.map((item) => (
               <article
                 key={item.id}
@@ -167,7 +166,9 @@ export default async function TopPage(): Promise<React.ReactElement> {
                   className="fn-muted fn-text-sm"
                   style={{ marginTop: 4, whiteSpace: "pre-wrap" }}
                 >
-                  {item.body.length > 180 ? `${item.body.slice(0, 179)}…` : item.body}
+                  {item.body.length > 180
+                    ? `${item.body.slice(0, 179)}...`
+                    : item.body}
                 </p>
               </article>
             ))}
@@ -177,7 +178,11 @@ export default async function TopPage(): Promise<React.ReactElement> {
       <HomeIntroBand activeEvents={activeEvents} slotStats={topSlotStats} />
 
       <section className={styles.section} aria-labelledby="sec-recommend">
-        <SectionHeader title="今週のピックアップ" moreHref="/recommend" moreLabel="一覧を見る" />
+        <SectionHeader
+          title="今週のピックアップ"
+          moreHref="/recommend"
+          moreLabel="一覧を見る"
+        />
         <div className={styles.shelfBox}>
           {recommended.length === 0 ? (
             <EmptyShelf message="おすすめできる作品を準備しています。" />
@@ -195,7 +200,11 @@ export default async function TopPage(): Promise<React.ReactElement> {
       </section>
 
       <section className={styles.section} aria-labelledby="sec-creators">
-        <SectionHeader title="注目クリエイター" moreHref="/user" moreLabel="もっと見る" />
+        <SectionHeader
+          title="注目クリエイター"
+          moreHref="/user"
+          moreLabel="もっと見る"
+        />
         <div className={styles.shelfBox}>
           {creators.length === 0 ? (
             <EmptyShelf message="紹介できるクリエイターを準備しています。" />
@@ -220,7 +229,11 @@ export default async function TopPage(): Promise<React.ReactElement> {
       </section>
 
       <section className={styles.section} aria-labelledby="sec-latest">
-        <SectionHeader title="新着アップロード" moreHref="/list" moreLabel="すべて見る" />
+        <SectionHeader
+          title="新着アップロード"
+          moreHref="/list"
+          moreLabel="すべて見る"
+        />
         <div className={styles.shelfBox}>
           {latest.length === 0 ? (
             <EmptyShelf message="公開作品を準備しています。" />
@@ -235,7 +248,11 @@ export default async function TopPage(): Promise<React.ReactElement> {
       </section>
 
       <section className={styles.section} aria-labelledby="sec-events">
-        <SectionHeader title="募集中のイベント" moreHref="/event" moreLabel="すべて見る" />
+        <SectionHeader
+          title="募集中のイベント"
+          moreHref="/event"
+          moreLabel="すべて見る"
+        />
         <div className={styles.eventList}>
           {latestEvents.length === 0 ? (
             <EmptyShelf message="公開中のイベントを準備しています。" />
@@ -259,7 +276,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
 function EmptyShelf({ message }: { message: string }): React.ReactElement {
   return (
     <div className={styles.empty}>
-      <EmptyState title="準備中です" description={message} />
+      <EmptyState title="準備中" description={message} />
     </div>
   );
 }

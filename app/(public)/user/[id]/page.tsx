@@ -234,9 +234,13 @@ export default async function UserPage({
   // 派生情報 (withDatabase closure 外で表示用に整形)
   const profileIcon = user.icon_url ?? null;
   const profileName = user.x_name || user.id;
+  const totalWorks = ownTotal + collabTotal;
 
   return (
     <div className={styles.page}>
+      <div className={styles.cover} aria-hidden>
+        <div className={styles.coverGrid} />
+      </div>
       <section className={styles.profile}>
         {profileIcon ? (
           /* eslint-disable-next-line @next/next/no-img-element */
@@ -282,10 +286,32 @@ export default async function UserPage({
             </a>
           </div>
         </div>
+        <div className={styles.profileAside}>
+          <dl className={styles.stats} aria-label="クリエイター統計">
+            <div>
+              <dt>Works</dt>
+              <dd>{ownTotal}</dd>
+            </div>
+            <div>
+              <dt>Collab</dt>
+              <dd>{collabTotal}</dd>
+            </div>
+            <div>
+              <dt>Total</dt>
+              <dd>{totalWorks}</dd>
+            </div>
+          </dl>
+        </div>
       </section>
 
       <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>作品 ({ownTotal})</h2>
+        <header className={styles.sectionHead}>
+          <div>
+            <p className={styles.sectionEyebrow}>Own works</p>
+            <h2 className={styles.sectionTitle}>作品</h2>
+          </div>
+          <span className={styles.sectionCount}>{ownTotal} works</span>
+        </header>
         {ownVideos.length === 0 ? (
           <div className="fn-empty">
             <Icon name="info" size={20} aria-hidden />
@@ -316,7 +342,13 @@ export default async function UserPage({
 
       {collabTotal > 0 ? (
         <section className={styles.section}>
-          <h2 className={styles.sectionTitle}>参加作品 ({collabTotal})</h2>
+          <header className={styles.sectionHead}>
+            <div>
+              <p className={styles.sectionEyebrow}>Collaborations</p>
+              <h2 className={styles.sectionTitle}>参加作品</h2>
+            </div>
+            <span className={styles.sectionCount}>{collabTotal} works</span>
+          </header>
           <div className={styles.grid}>
             {collabVideos.map((v, index) => (
               <div key={`${v.id}-collab-${index}`}>

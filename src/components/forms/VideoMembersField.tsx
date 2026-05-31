@@ -414,7 +414,7 @@ export function VideoMembersField({
             style={{
               display: "grid",
               gridTemplateColumns:
-                "48px minmax(150px, 1.1fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr) minmax(160px, 1fr) 90px 82px 82px 132px",
+                "48px minmax(150px, 1.05fr) minmax(120px, 0.8fr) minmax(110px, 0.7fr) minmax(120px, 0.8fr) minmax(160px, 1fr) 82px 82px 132px",
               gap: 6,
               alignItems: "center",
               fontSize: 11,
@@ -424,11 +424,11 @@ export function VideoMembersField({
             }}
           >
             <span>順</span>
-            <span>名前</span>
-            <span>X ID</span>
+            <span>活動名</span>
+            <span>ID</span>
+            <span>チャプター</span>
             <span>役割</span>
             <span>コメント</span>
-            <span>チャプター</span>
             <span>編集権限</span>
             <span>公開</span>
             <span>操作</span>
@@ -442,7 +442,7 @@ export function VideoMembersField({
                 style={{
                   display: "grid",
                   gridTemplateColumns:
-                    "48px minmax(150px, 1.1fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr) minmax(160px, 1fr) 90px 82px 82px 132px",
+                    "48px minmax(150px, 1.05fr) minmax(120px, 0.8fr) minmax(110px, 0.7fr) minmax(120px, 0.8fr) minmax(160px, 1fr) 82px 82px 132px",
                   gap: 6,
                   alignItems: "center",
                   minWidth: 1080,
@@ -483,6 +483,16 @@ export function VideoMembersField({
                 />
                 <input
                   type="text"
+                  value={serializeChaptersCell(r.chapters ?? [])}
+                  onChange={(e) => updateChapterTimes(i, e.target.value)}
+                  placeholder="0:12;1:05"
+                  title="mm:ss 形式。複数ある場合は ; 区切り"
+                  className="fn-input"
+                  maxLength={80}
+                  disabled={disabled}
+                />
+                <input
+                  type="text"
                   value={r.role}
                   onChange={(e) => update(i, { role: e.target.value })}
                   placeholder="作画 / 編集"
@@ -497,16 +507,6 @@ export function VideoMembersField({
                   placeholder="任意コメント"
                   className="fn-input"
                   maxLength={200}
-                  disabled={disabled}
-                />
-                <input
-                  type="text"
-                  value={serializeChaptersCell(r.chapters ?? [])}
-                  onChange={(e) => updateChapterTimes(i, e.target.value)}
-                  placeholder="0:12;1:05"
-                  title="mm:ss 形式。複数ある場合は ; 区切り"
-                  className="fn-input"
-                  maxLength={80}
                   disabled={disabled}
                 />
                 <span className={`fn-badge ${canEdit ? "fn-badge-warning" : "fn-badge-soft"}`}>
@@ -597,7 +597,7 @@ export function VideoMembersField({
                 }}
               >
                 <label>
-                  <span className="fn-label">名前</span>
+                  <span className="fn-label">活動名</span>
                   <input
                     type="text"
                     value={r.name}
@@ -614,7 +614,7 @@ export function VideoMembersField({
                   />
                 </label>
                 <label>
-                  <span className="fn-label">X ID</span>
+                  <span className="fn-label">ID</span>
                   <input
                     type="text"
                     value={r.x_user_id}
@@ -632,18 +632,6 @@ export function VideoMembersField({
                   />
                 </label>
                 <label>
-                  <span className="fn-label">役割</span>
-                  <input
-                    type="text"
-                    value={r.role}
-                    onChange={(e) => update(i, { role: e.target.value })}
-                    placeholder="作画 / 編集 / 音響など"
-                    className="fn-input"
-                    maxLength={40}
-                    disabled={disabled}
-                  />
-                </label>
-                <label>
                   <span className="fn-label">チャプター</span>
                   <input
                     type="text"
@@ -653,6 +641,18 @@ export function VideoMembersField({
                     title="mm:ss 形式。複数ある場合は ; 区切り"
                     className="fn-input"
                     maxLength={80}
+                    disabled={disabled}
+                  />
+                </label>
+                <label>
+                  <span className="fn-label">役割</span>
+                  <input
+                    type="text"
+                    value={r.role}
+                    onChange={(e) => update(i, { role: e.target.value })}
+                    placeholder="作画 / 編集 / 音響など"
+                    className="fn-input"
+                    maxLength={40}
                     disabled={disabled}
                   />
                 </label>
@@ -723,7 +723,7 @@ export function VideoMembersField({
           className="fn-input"
           rows={4}
           style={{ marginTop: 6, fontFamily: "monospace", fontSize: 12 }}
-          placeholder={"例:\nname,x_user_id,role,comment\n田中,tanaka,作画,よろしく\n佐藤,sato_design,音響,\"コメントに,を含められます\""}
+          placeholder={"例:\n活動名,ID,チャプター,役割,コメント\n田中,tanaka,0:12;1:05,作画,よろしく\n佐藤,sato_design,2:10,音響,\"コメントに,を含められます\""}
           onPaste={onPaste}
           disabled={disabled}
         />

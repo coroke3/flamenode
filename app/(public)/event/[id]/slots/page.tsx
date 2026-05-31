@@ -108,7 +108,7 @@ export default async function EventSlotsPage({
       className={styles.page}
       style={
         {
-          "--event-accent": event.accent_color ?? "#ffd400",
+          "--event-accent": event.accent_color ?? "var(--accent-primary)",
         } as React.CSSProperties
       }
     >

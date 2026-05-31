@@ -5,11 +5,12 @@
 .trigger {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px 4px 4px;
+  gap: 8px;
+  min-height: 34px;
+  padding: 4px 10px 4px 4px;
   border-radius: var(--radius-pill);
-  border: 1px solid var(--border-subtle);
-  background-color: var(--bg-surface);
+  border: 0;
+  background-color: var(--bg-elevated);
   color: var(--text-primary);
   font-size: 12px;
   font-weight: 600;
@@ -20,26 +21,27 @@
 }
 
 .trigger:hover {
-  border-color: var(--border-muted);
-  background-color: var(--bg-elevated);
+  background-color: color-mix(in srgb, var(--accent-primary) 12%, var(--bg-elevated));
 }
 
 .triggerIcon {
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   object-fit: cover;
+  flex-shrink: 0;
   background-color: var(--bg-elevated);
 }
 
 .triggerIconFallback {
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
-  background-color: var(--bg-elevated);
+  background-color: var(--accent-primary);
   display: grid;
   place-items: center;
-  color: var(--text-muted);
+  color: var(--accent-ink);
+  flex-shrink: 0;
 }
 
 .triggerName {
@@ -53,20 +55,24 @@
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  width: 280px;
-  background-color: var(--bg-surface);
+  width: min(300px, calc(100vw - 24px));
+  background-color: color-mix(in srgb, var(--bg-surface) 92%, transparent);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md, 12px);
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2);
+  border-radius: 12px;
+  box-shadow: var(--shadow-soft);
   padding: 6px;
   z-index: 40;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
 .popoverHeader {
-  padding: 8px 10px 6px;
-  font-size: 11px;
-  color: var(--text-muted);
-  letter-spacing: 0.04em;
+  padding: 8px 10px 7px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-faint, var(--text-muted));
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
 }
 
 .popoverEmpty {
@@ -88,12 +94,13 @@
 }
 
 .option {
-  display: flex;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) max-content max-content;
   align-items: center;
   gap: 10px;
   width: 100%;
   padding: 8px 10px;
-  border-radius: var(--radius-sm);
+  border-radius: 8px;
   text-align: left;
   transition: background-color 0.15s ease;
   cursor: pointer;
@@ -102,7 +109,7 @@
 }
 
 .option:hover {
-  background-color: var(--bg-elevated);
+  background-color: var(--accent-primary-soft);
 }
 
 .option:disabled {
@@ -143,7 +150,7 @@
 
 .optionName {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -151,6 +158,7 @@
 }
 
 .optionId {
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-muted);
   overflow: hidden;
@@ -159,13 +167,13 @@
 }
 
 .optionCheck {
-  color: var(--accent-primary);
+  color: var(--accent-primary-strong);
   flex-shrink: 0;
 }
 
 .divider {
   height: 1px;
-  background-color: var(--border-subtle);
+  background-color: var(--hairline, var(--border-subtle));
   margin: 6px 0;
 }
 
@@ -174,7 +182,7 @@
   padding: 8px 10px;
   font-size: 12px;
   color: var(--text-secondary);
-  border-radius: var(--radius-sm);
+  border-radius: 8px;
   text-decoration: none;
 }
 

@@ -87,10 +87,27 @@ const EDITABLE_FIELD_OPTIONS = [
   ["chapters", "チャプター"],
 ] as const;
 
+type EditableFieldKey = (typeof EDITABLE_FIELD_OPTIONS)[number][0];
+
+const EDITABLE_FIELD_HELP: Record<EditableFieldKey, string> = {
+  title: "作品タイトルを直せます",
+  display_name: "作品ごとの作者名を直せます",
+  icon_url: "作品ごとのアイコンを直せます",
+  music: "使用楽曲名を直せます",
+  credit: "クレジット表記を直せます",
+  intro_comment: "冒頭の紹介文を直せます",
+  used_software: "使用ソフト名を直せます",
+  highlights: "見どころ欄を直せます",
+  production_story: "制作エピソードを直せます",
+  closing_comment: "あとがきを直せます",
+  members: "合作メンバー一覧を直せます",
+  chapters: "通常チャプターを直せます",
+};
+
 const EDITABLE_FIELD_GROUPS: Array<{
   label: string;
   description: string;
-  fields: ReadonlyArray<readonly [string, string]>;
+  fields: ReadonlyArray<readonly [EditableFieldKey, string]>;
 }> = [
   {
     label: "基本情報",
@@ -1009,7 +1026,7 @@ function PermissionsPanel({
                         {label}
                       </span>
                       <span className="fn-muted" style={{ display: "block", fontSize: 11 }}>
-                        {value}
+                        {EDITABLE_FIELD_HELP[value]}
                       </span>
                     </div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1183,7 +1200,9 @@ function PermissionCheckbox({
         padding: "6px 9px",
         border: `1px solid ${checked ? accentColor : "var(--border-subtle)"}`,
         borderRadius: 999,
-        background: checked ? "var(--accent-primary-soft)" : "var(--bg-base)",
+        background: checked
+          ? `color-mix(in srgb, ${accentColor} 13%, var(--bg-surface))`
+          : "var(--bg-base)",
         color: checked ? "var(--text-primary)" : "var(--text-muted)",
         fontSize: 11,
         fontWeight: 800,

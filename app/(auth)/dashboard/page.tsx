@@ -169,13 +169,46 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
     }
   }
 
+  const activeXRow =
+    xIds.find((x) => x.id === user.active_x_user_id) ?? xIds[0] ?? null;
+  const dashboardName = activeXRow?.x_name ?? user.name ?? "FlameNode User";
+  const dashboardHandle = activeXRow
+    ? `@${activeXRow.id}`
+    : user.active_x_user_id
+      ? `@${user.active_x_user_id}`
+      : "X ID 未選択";
+  const dashboardIcon = activeXRow?.icon_url ?? user.image ?? null;
+  const dashboardInitial =
+    (dashboardName.trim().charAt(0) || user.name?.trim().charAt(0) || "F").toUpperCase();
+
   return (
     <div className={styles.page}>
-      <header className={styles.heading}>
-        <h1>ダッシュボード</h1>
-        <p>
-          {user.name} としてサインイン中。X ID 連携、作品投稿、イベント参加状況を一覧できます。
-        </p>
+      <header className={styles.accountHeader}>
+        <div className={styles.accountIdentity}>
+          {dashboardIcon ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src={dashboardIcon} alt="" className={styles.accountAvatar} />
+          ) : (
+            <span className={styles.accountAvatarFallback}>
+              {dashboardInitial}
+            </span>
+          )}
+          <div className={styles.accountText}>
+            <span className={styles.eyebrow}>my account</span>
+            <h1>{dashboardName}</h1>
+            <span className={styles.handle}>{dashboardHandle}</span>
+          </div>
+        </div>
+        <div className={styles.accountActions}>
+          <Link href="/dashboard/settings" className="fn-btn fn-btn-ghost fn-btn-sm">
+            <Icon name="settings" size={13} aria-hidden />
+            設定
+          </Link>
+          <Link href="/dashboard/post" className="fn-btn fn-btn-primary fn-btn-lg">
+            <Icon name="plus" size={14} aria-hidden />
+            新規投稿
+          </Link>
+        </div>
       </header>
 
       <HeroCard slot={mySlot} event={mySlotEvent} />

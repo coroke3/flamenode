@@ -1,58 +1,134 @@
 .page {
-  /* 水平余白は fn-public-container に任せる。上下だけ clamp で統一。 */
-  padding-top: clamp(20px, 4vw, 32px);
+  padding-top: clamp(34px, 5vw, 58px);
   padding-bottom: clamp(40px, 6vw, 80px);
 }
 
 .title {
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-family: var(--font-display);
+  font-size: clamp(48px, 7vw, 96px);
+  font-weight: 900;
+  letter-spacing: -0.015em;
+  line-height: 0.95;
 }
 
 .lead {
   color: var(--text-muted);
-  font-size: 13px;
-  margin-top: 4px;
+  font-size: 13.5px;
+  margin-top: 10px;
+}
+
+.sections {
+  display: grid;
+  gap: clamp(36px, 6vw, 58px);
+  margin-top: 42px;
+}
+
+.eventSection {
+  display: grid;
+  gap: 18px;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--hairline, var(--border-subtle));
+}
+
+.sectionTitleGroup {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(26px, 3vw, 38px);
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.sectionSub,
+.sectionCount {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .list {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  margin-top: 24px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 18px;
 }
 
 .eventCard {
-  display: grid;
-  grid-template-columns: 100%;
-  gap: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
   background-color: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   overflow: hidden;
-  transition: border-color 0.15s ease, transform 0.15s ease;
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
 }
 
 .eventCard:hover {
-  border-color: var(--event-accent, var(--accent-primary));
-  transform: translateY(-2px);
+  color: var(--text-primary);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-soft);
 }
 
 .eventBanner {
+  position: relative;
   width: 100%;
-  aspect-ratio: 16 / 6;
-  background-color: var(--bg-elevated);
+  aspect-ratio: 16 / 7;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--event-accent, var(--accent-primary)) 40%, #161b0e), #11140d);
   background-size: cover;
   background-position: center;
-  position: relative;
+  isolation: isolate;
+}
+
+.eventCode {
+  position: absolute;
+  z-index: 1;
+  top: 14px;
+  left: 16px;
+  max-width: calc(100% - 32px);
+  overflow: hidden;
+  color: #f8fafc;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.eventBanner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 30px 30px;
+  mix-blend-mode: overlay;
 }
 
 .eventBody {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 18px 22px 22px;
+  padding: 16px 18px 18px;
 }
 
 .eventMeta {
@@ -65,8 +141,10 @@
 }
 
 .eventTitle {
-  font-size: 20px;
-  font-weight: 700;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
   color: var(--text-primary);
 }
 
@@ -81,19 +159,12 @@
   line-height: 1.65;
 }
 
-@media (min-width: 768px) {
-  .eventCard {
-    grid-template-columns: 360px 1fr;
+@media (max-width: 640px) {
+  .sections {
+    margin-top: 34px;
   }
-  .eventBanner {
-    aspect-ratio: auto;
-    height: 100%;
-    min-height: 200px;
-  }
-  .eventBody {
-    padding: 22px 28px;
-  }
-  .eventTitle {
-    font-size: 24px;
+
+  .list {
+    grid-template-columns: 1fr;
   }
 }

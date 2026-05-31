@@ -40,17 +40,6 @@
   color: var(--accent-danger);
 }
 
-.pendingList {
-  margin: 0;
-  padding-left: 1.1em;
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-.pendingList li {
-  margin-bottom: 4px;
-}
-
 .iconPicker {
   display: grid;
   gap: 12px;

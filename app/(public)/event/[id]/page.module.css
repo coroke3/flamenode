@@ -1,13 +1,13 @@
 .page {
-  width: min(96%, var(--content-max));
+  width: min(100% - 32px, calc(var(--content-max) + 220px));
   margin: 0 auto;
-  padding: 0 16px 64px;
+  padding: 18px 0 72px;
 }
 
 .hero {
   position: relative;
-  width: min(98%, calc(var(--content-max) + 200px));
-  margin: 16px auto 24px;
+  width: 100%;
+  margin: 0 auto 26px;
   border-radius: 0;
   overflow: visible;
   border: 0;
@@ -16,66 +16,70 @@
 
 .heroBanner {
   width: 100%;
-  aspect-ratio: 16 / 5;
-  border-radius: var(--radius-md);
+  aspect-ratio: 16 / 4.8;
+  border-radius: 0;
   background-color: var(--bg-elevated);
   background-size: cover;
   background-position: center;
+  border: 1px solid var(--hairline, var(--border-subtle));
 }
 
 .heroBody {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 22px 0 4px;
+  gap: 12px;
+  padding: 24px 0 2px;
 }
 
 .heroMeta {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 8px 12px;
   align-items: center;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   color: var(--text-muted);
 }
 
 .entryPeriod {
   font-size: 11px;
   color: var(--text-secondary);
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px dashed var(--border-subtle);
   font-variant-numeric: tabular-nums;
 }
 
 .heroTitle {
-  font-size: 26px;
-  font-weight: 800;
-  letter-spacing: 0.02em;
+  max-width: 1060px;
+  font-family: var(--font-display);
+  font-size: clamp(44px, 7.2vw, 96px);
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 0.94;
   color: var(--text-primary);
 }
 
 .heroExplain {
-  margin-top: 8px;
-  font-size: 13.5px;
+  max-width: 860px;
+  margin-top: 2px;
+  font-size: 14.5px;
   color: var(--text-secondary);
-  line-height: 1.7;
+  line-height: 1.8;
   white-space: pre-wrap;
-  max-width: 920px;
 }
 
 .heroActions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 6px;
 }
 
 .heroSlotMeter {
   display: grid;
   gap: 7px;
-  width: min(100%, 520px);
-  margin-top: 12px;
+  width: min(100%, 560px);
+  margin-top: 8px;
 }
 
 .heroSlotMeterHead {
@@ -90,57 +94,63 @@
 
 .heroSlotMeterTrack {
   display: block;
-  height: 7px;
+  height: 4px;
   overflow: hidden;
   border: 1px solid var(--border-subtle);
-  border-radius: 999px;
+  border-radius: 0;
   background: var(--bg-elevated);
 }
 
 .heroSlotMeterFill {
   display: block;
   height: 100%;
-  border-radius: inherit;
+  border-radius: 0;
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--event-accent, #ffd400) 65%, #ffffff),
-    var(--event-accent, #ffd400)
+    color-mix(in srgb, var(--event-accent, var(--accent-primary)) 65%, #ffffff),
+    var(--event-accent, var(--accent-primary))
   );
 }
 
 .infoStrip {
-  width: min(98%, calc(var(--content-max) + 200px));
-  margin: 4px auto 28px;
+  width: 100%;
+  margin: 2px auto 32px;
+  border-top: 1px solid var(--hairline, var(--border-subtle));
+  border-bottom: 1px solid var(--hairline, var(--border-subtle));
 }
 
 .infoStripTrack {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 14px;
-  align-items: center;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0;
 }
 
 .infoStripItem {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  white-space: nowrap;
-  min-height: 26px;
-  padding-left: 10px;
-  border-left: 3px solid var(--event-accent, #ffd400);
+  min-height: 64px;
+  padding: 12px 18px 12px 0;
+  border-left: 0;
+  border-right: 1px solid var(--hairline, var(--border-subtle));
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 700;
 }
 
+.infoStripItem:last-child {
+  border-right: 0;
+}
+
 .section {
-  margin-top: 36px;
+  margin-top: 42px;
 }
 
 .sectionTitle {
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  margin-bottom: 14px;
+  font-family: var(--font-display);
+  font-size: clamp(24px, 3vw, 36px);
+  font-weight: 900;
+  letter-spacing: 0;
+  margin-bottom: 16px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -222,8 +232,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-subtle);
+  padding: 18px 0;
+  border-top: 1px solid var(--hairline, var(--border-subtle));
+  border-bottom: 1px solid var(--hairline, var(--border-subtle));
 }
 
 .slotSummaryLead {
@@ -244,6 +255,26 @@
 }
 
 @media (max-width: 640px) {
+  .page {
+    width: min(100% - 24px, calc(var(--content-max) + 220px));
+    padding-top: 12px;
+  }
+
+  .heroTitle {
+    font-size: clamp(38px, 14vw, 58px);
+  }
+
+  .infoStripItem {
+    min-height: 48px;
+    padding: 9px 10px 9px 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--hairline, var(--border-subtle));
+  }
+
+  .infoStripItem:last-child {
+    border-bottom: 0;
+  }
+
   .slotSummary {
     align-items: flex-start;
     flex-direction: column;

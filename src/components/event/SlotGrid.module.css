@@ -1,7 +1,7 @@
 .wrap {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
 }
 
 .errorBar {
@@ -63,16 +63,18 @@
 .partColumn {
   width: 100%;
   min-width: 0;
-  padding-top: 14px;
-  border-top: 1px solid var(--border-subtle);
+  padding-top: 18px;
+  border-top: 1px solid var(--hairline, var(--border-subtle));
   background: transparent;
   overflow: visible;
 }
 
 .partHeader {
-  padding: 0 0 10px;
-  font-size: 16px;
+  padding: 0 0 12px;
+  font-family: var(--font-display);
+  font-size: clamp(18px, 2vw, 24px);
   font-weight: 900;
+  letter-spacing: 0;
   color: var(--text-primary);
   background: transparent;
   border-bottom: 0;
@@ -82,20 +84,22 @@
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
+  border-top: 1px solid var(--hairline, var(--border-subtle));
 }
 
 .table th,
 .table td {
-  padding: 9px 0;
-  border-bottom: 1px dashed var(--border-subtle);
+  padding: 11px 10px 11px 0;
+  border-bottom: 1px solid var(--hairline, var(--border-subtle));
   text-align: left;
   vertical-align: top;
 }
 
 .table th {
+  height: 38px;
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-muted);
   background: transparent;
@@ -107,7 +111,7 @@
 }
 
 .row:hover {
-  background: rgba(255, 255, 255, 0.035);
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 7%, transparent);
 }
 
 .rowFilled {
@@ -115,8 +119,8 @@
 }
 
 .rowMine {
-  background: color-mix(in srgb, var(--accent-primary) 16%, transparent);
-  box-shadow: inset 3px 0 0 var(--accent-primary);
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 13%, transparent);
+  box-shadow: inset 3px 0 0 var(--event-accent, var(--accent-primary));
 }
 
 .cellTime {
@@ -150,8 +154,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  min-height: 64px;
-  padding: 10px 0;
+  min-height: 58px;
+  padding: 8px 0;
   min-width: 0;
 }
 
@@ -194,14 +198,14 @@
 
 .emptySlotButton {
   width: 100%;
-  min-height: 64px;
+  min-height: 58px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 7px;
-  border: 1px dashed var(--border-strong, var(--border-subtle));
-  border-radius: var(--radius-lg);
-  background: var(--bg-base);
+  border: 1px solid var(--hairline, var(--border-subtle));
+  border-radius: 6px;
+  background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
   font-size: 12px;
@@ -214,8 +218,8 @@
 
 .emptySlotButton:hover:not(:disabled),
 .emptySlotButton:focus-visible {
-  border-color: var(--accent-primary);
-  background: var(--accent-primary-soft);
+  border-color: var(--event-accent, var(--accent-primary));
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 13%, transparent);
   color: var(--text-primary);
   outline: none;
 }
@@ -234,7 +238,7 @@
   border-radius: 999px;
   font-size: 0;
   line-height: 1;
-  color: var(--accent-primary);
+  color: var(--event-accent, var(--accent-primary));
 }
 
 .emptyCircle::after {
@@ -364,18 +368,6 @@
   flex-wrap: wrap;
 }
 
-.reserveBtn {
-  padding: 2px 8px;
-  font-size: 11px;
-}
-
-.reserveForm {
-  display: grid;
-  grid-template-columns: minmax(130px, 1fr) auto auto;
-  gap: 6px;
-  align-items: center;
-}
-
 @media (max-width: 520px) {
   .partColumn {
     padding-top: 12px;
@@ -428,7 +420,4 @@
     justify-content: flex-start;
   }
 
-  .reserveForm {
-    grid-template-columns: 1fr;
-  }
 }

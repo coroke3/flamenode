@@ -1,43 +1,90 @@
 .page {
-  width: min(96%, calc(var(--content-max) + 200px));
+  width: min(100% - 32px, calc(var(--content-max) + 260px));
   margin: 0 auto;
-  padding: 16px 16px 64px;
+  padding: 18px 0 72px;
 }
 
 .layout {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 28px;
+  gap: 30px;
 }
 
 .main {
   min-width: 0;
 }
 
-.title {
-  font-size: 22px;
+.topStrip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 0 0 14px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--hairline, var(--border-subtle));
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
   font-weight: 700;
-  letter-spacing: 0.02em;
-  line-height: 1.35;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.breadcrumb a {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.breadcrumb a:hover,
+.breadcrumbCurrent {
   color: var(--text-primary);
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border-subtle);
-  margin-top: 16px;
+}
+
+.topActions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.title {
+  margin: 22px 0 0;
+  font-size: clamp(34px, 4.8vw, 62px);
+  font-family: var(--font-display);
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1.02;
+  color: var(--text-primary);
 }
 
 .author {
   display: flex;
   align-items: center;
-  /* スマホで投稿者情報・リンク群・操作ボタンが重ならないよう、行間 gap を確保する */
   gap: 10px 14px;
   flex-wrap: wrap;
-  margin-top: 12px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--border-subtle);
+  margin-top: 20px;
+  padding: 18px 0;
+  border-top: 1px solid var(--hairline, var(--border-subtle));
+  border-bottom: 1px solid var(--hairline, var(--border-subtle));
 }
 
 /* スマホ幅では投稿者リンク群・操作ボタンをフルキャパで折り返す */
 @media (max-width: 560px) {
+  .topStrip {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .author {
     gap: 8px;
   }
@@ -54,8 +101,8 @@
 
 .authorIcon,
 .authorIconFb {
-  width: 40px;
-  height: 40px;
+  width: 46px;
+  height: 46px;
   border-radius: 50%;
 }
 
@@ -65,15 +112,15 @@
 }
 
 .authorIconFb {
-  background-color: var(--bg-elevated);
+  background-color: var(--accent-primary);
   display: grid;
   place-items: center;
-  color: var(--text-muted);
+  color: var(--accent-ink);
 }
 
 .authorName {
-  font-size: 16px;
-  font-weight: 700;
+  font-size: 17px;
+  font-weight: 800;
   color: var(--text-primary);
 }
 
@@ -82,7 +129,8 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
   color: var(--text-muted);
 }
 
@@ -91,12 +139,6 @@
   align-items: center;
   gap: 6px;
   margin-left: auto;
-}
-
-.authorXLink {
-  display: inline-flex;
-  align-items: center;
-  color: var(--text-muted);
 }
 
 /* 投稿者リンク群 (FlameNode / X / YouTube). authorBlock の外側に置く。
@@ -114,7 +156,7 @@
   display: grid;
   grid-template-columns: 1fr;
   gap: 2px;
-  padding: 10px 0;
+  padding: 12px 0;
 }
 
 .inlineMetaItem + .inlineMetaItem {
@@ -131,7 +173,7 @@
 }
 
 .inlineMetaBody {
-  font-size: 14px;
+  font-size: 14.5px;
   line-height: 1.7;
   color: var(--text-primary);
 }
@@ -198,68 +240,25 @@
   gap: 10px;
   background-color: var(--accent-warning-soft);
   border: 1px solid var(--accent-warning);
-  border-radius: var(--radius-sm);
+  border-radius: 8px;
   color: var(--accent-warning);
   font-size: 12.5px;
   font-weight: 600;
 }
 
 .metaSection {
-  margin-top: 22px;
+  margin-top: 18px;
   display: grid;
   grid-template-columns: 1fr;
-  gap: 14px;
-}
-
-.metaItem {
-  padding: 14px 16px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--bg-surface);
-  font-size: 13.5px;
-  color: var(--text-secondary);
-  line-height: 1.7;
-}
-
-.metaItem summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  cursor: pointer;
-  list-style: none;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.metaItem summary::-webkit-details-marker {
-  display: none;
-}
-
-.metaItem summary::after {
-  content: "+";
-  color: var(--event-accent, var(--accent-primary));
-  font-size: 16px;
-  font-weight: 900;
-  line-height: 1;
-}
-
-.metaItem[open] summary::after {
-  content: "-";
-}
-
-.metaItem p {
-  margin-top: 10px;
-  white-space: pre-wrap;
+  gap: 0;
+  border-top: 1px solid var(--hairline, var(--border-subtle));
+  border-bottom: 1px solid var(--hairline, var(--border-subtle));
 }
 
 .eventBox {
   position: relative;
   margin-top: 22px;
-  padding: 14px 18px;
+  padding: 16px 18px;
   background:
     radial-gradient(
       100% 80% at 90% 0%,
@@ -268,7 +267,7 @@
     ),
     var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: 8px;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -301,18 +300,18 @@
 }
 
 .section {
-  margin-top: 28px;
+  margin-top: 34px;
 }
 
 .sectionTitle {
   position: relative;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  margin-bottom: 12px;
-  padding-bottom: 8px;
+  font-family: var(--font-display);
+  font-size: clamp(22px, 2.6vw, 32px);
+  font-weight: 900;
+  letter-spacing: 0;
+  color: var(--text-primary);
+  margin: 0 0 14px;
+  padding-bottom: 10px;
 }
 
 .sectionTitle::after {
@@ -332,48 +331,6 @@
   opacity: 0.7;
 }
 
-.memberTable {
-  width: 100%;
-  overflow-x: auto;
-}
-
-/* モバイル: 表をカード状に積み上げる */
-@media (max-width: 640px) {
-  .memberTable table,
-  .memberTable thead,
-  .memberTable tbody,
-  .memberTable tr,
-  .memberTable th,
-  .memberTable td {
-    display: block;
-    width: 100%;
-  }
-
-  .memberTable thead {
-    display: none;
-  }
-
-  .memberTable tr {
-    padding: 10px 12px;
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    margin-bottom: 8px;
-    background: var(--bg-surface);
-  }
-
-  .memberTable td {
-    border: 0;
-    padding: 2px 0;
-    font-size: 12.5px;
-  }
-
-  .memberTable td:first-child {
-    font-size: 10px;
-    color: var(--text-muted);
-    letter-spacing: 0.1em;
-  }
-}
-
 .aside {
   display: flex;
   flex-direction: column;
@@ -382,7 +339,8 @@
 }
 
 .relatedHeading {
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -440,15 +398,15 @@
 
 @media (min-width: 1024px) {
   .layout {
-    /* 1024-1280px 帯で本文が窮屈に見えていたので、サイドバー幅を 320px に絞る。
-       1440px 以上で 360px に戻す。 */
     grid-template-columns: minmax(0, 1fr) 320px;
     gap: 28px;
   }
-  .title {
-    font-size: 28px;
+
+  .aside {
+    position: sticky;
+    top: calc(var(--header-h, 64px) + 18px);
   }
-  /* デスクトップでは aside の方を使う */
+
   .relatedMobile {
     display: none;
   }
@@ -458,9 +416,6 @@
   .layout {
     grid-template-columns: minmax(0, 1fr) 360px;
     gap: 36px;
-  }
-  .title {
-    font-size: 30px;
   }
 }
 

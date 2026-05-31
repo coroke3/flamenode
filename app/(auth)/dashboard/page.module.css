@@ -1,70 +1,94 @@
 .page {
-  width: min(96%, var(--content-max));
+  width: min(100% - 32px, calc(var(--content-max) + 120px));
   margin: 0 auto;
-  padding: 28px 16px 64px;
+  padding: clamp(32px, 5vw, 58px) 0 72px;
 }
 
-.heading {
+.accountHeader {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 24px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-bottom: 30px;
+  padding-bottom: 28px;
+  border-bottom: 1px solid var(--hairline, var(--border-subtle));
 }
 
-.heading h1 {
-  font-size: 26px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+.accountIdentity {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
 }
 
-.heading p {
+.accountAvatar,
+.accountAvatarFallback {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.accountAvatar {
+  object-fit: cover;
+  background: var(--bg-elevated);
+}
+
+.accountAvatarFallback {
+  display: grid;
+  place-items: center;
+  background: var(--bg-elevated);
+  color: var(--accent-primary-strong);
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 900;
+}
+
+.accountText {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.eyebrow {
   color: var(--text-muted);
-  font-size: 13px;
-}
-
-.heroCard {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 22px 24px;
-  border-radius: var(--radius-md);
-  background-color: var(--accent-primary-soft);
-  border: 1px solid var(--accent-primary);
-  margin-bottom: 24px;
-}
-
-.heroCardLabel {
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
   font-weight: 700;
-  letter-spacing: 0.18em;
-  color: var(--accent-warning);
+  letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 
-.heroCardTitle {
-  font-size: 20px;
-  font-weight: 700;
+.accountText h1 {
+  font-family: var(--font-display);
+  font-size: clamp(32px, 5vw, 56px);
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1;
+  overflow-wrap: anywhere;
 }
 
-.heroCardLead {
-  color: var(--text-secondary);
-  font-size: 13px;
-  line-height: 1.6;
+.handle {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 
-.heroCardActions {
+.accountActions {
   display: flex;
+  align-items: center;
+  gap: 10px;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 6px;
 }
 
 .statsGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 28px;
+  gap: 0;
+  margin-bottom: 34px;
+  border-top: 1px solid var(--hairline, var(--border-subtle));
+  border-bottom: 1px solid var(--hairline, var(--border-subtle));
 }
 
 @media (min-width: 700px) {
@@ -74,10 +98,16 @@
 }
 
 .statCard {
-  background-color: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: 16px 18px;
+  min-height: 104px;
+  background-color: transparent;
+  border: 0;
+  border-right: 1px solid var(--hairline, var(--border-subtle));
+  border-radius: 0;
+  padding: 18px 20px 18px 0;
+}
+
+.statCard:last-child {
+  border-right: 0;
 }
 
 .statLabel {
@@ -90,29 +120,25 @@
 
 .statValue {
   margin-top: 4px;
-  font-size: 22px;
+  font-family: var(--font-display);
+  font-size: clamp(28px, 4vw, 44px);
   font-weight: 800;
   color: var(--text-primary);
-  letter-spacing: 0.02em;
-}
-
-.statValueSm {
-  margin-top: 4px;
-  font-size: 13px;
-  color: var(--text-secondary);
+  letter-spacing: 0;
+  line-height: 1;
 }
 
 .section {
-  margin-top: 28px;
+  margin-top: 38px;
 }
 
 .sectionTitle {
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  margin-bottom: 12px;
+  font-family: var(--font-display);
+  font-size: clamp(22px, 3vw, 34px);
+  font-weight: 900;
+  letter-spacing: 0;
+  color: var(--text-primary);
+  margin-bottom: 16px;
 }
 
 .galleryGrid {
@@ -143,10 +169,10 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 14px;
+  padding: 14px 16px;
   background-color: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--hairline, var(--border-subtle));
+  border-radius: 6px;
 }
 
 .xidIcon,
@@ -175,7 +201,7 @@
 }
 
 .xidName {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -183,9 +209,43 @@
 }
 
 .xidId {
+  margin-top: 2px;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .accountHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .accountActions {
+    justify-content: flex-start;
+  }
+
+  .accountAvatar,
+  .accountAvatarFallback {
+    width: 58px;
+    height: 58px;
+  }
+
+  .statsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .statCard {
+    min-height: 84px;
+    padding: 14px 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--hairline, var(--border-subtle));
+  }
+
+  .statCard:last-child {
+    border-bottom: 0;
+  }
 }
