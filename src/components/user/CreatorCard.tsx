@@ -38,7 +38,7 @@ export function CreatorCard({
         {data.hint
           ? data.hint
           : data.video_count !== undefined
-            ? `@${data.id} · ${data.video_count} 作品`
+            ? `@${data.id} · ${data.video_count}作品`
             : `@${data.id}`}
       </span>
     </Link>

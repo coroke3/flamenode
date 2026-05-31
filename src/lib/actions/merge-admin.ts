@@ -12,7 +12,6 @@ import {
   videoInteractions,
   videoMembers,
   videos,
-  xAccountLinkRequests,
   xUserAliases,
   xUserIcons,
   xUsers,

@@ -1,4 +1,5 @@
 import * as React from "react";
+import Link from "next/link";
 import type { Metadata } from "next";
 import { withDatabase } from "@/lib/cloudflare";
 import {
@@ -88,6 +89,18 @@ function withoutVideo<T extends { id: string }>(
   return id ? rows.filter((row) => row.id !== id) : [...rows];
 }
 
+function buildRail(
+  primary: readonly VideoCardData[],
+  fallback: readonly VideoCardData[],
+  target: number,
+  options: { maxPerCreator?: number; maxPerEvent?: number } = {},
+): VideoCardData[] {
+  return pickDiverseVideos(uniqueVideos([...primary, ...fallback]), {
+    target,
+    ...options,
+  }) as VideoCardData[];
+}
+
 interface FilterChip {
   href: string;
   label: string;
@@ -130,10 +143,10 @@ const FILTER_CHIPS: FilterChip[] = [
 export default async function RecommendPage(): Promise<React.ReactElement> {
   const data = await withDatabase(async (db) => {
     const [recommended, latest, underrated, creators] = await Promise.all([
-      fetchRecommendedVideos(db, 120),
-      fetchLatestVideos(db, 80),
-      fetchUnderratedVideos(db, 80),
-      fetchPickupCreators(db, 40),
+      fetchRecommendedVideos(db, 180),
+      fetchLatestVideos(db, 120),
+      fetchUnderratedVideos(db, 120),
+      fetchPickupCreators(db, 60),
     ]);
     return { recommended, latest, underrated, creators };
   });
@@ -152,37 +165,45 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
   ]);
 
   const hero = recommended[0] ?? latest[0] ?? underratedPool[0];
-  const nonHeroRecommended = withoutVideo(recommended, hero?.id);
-  const nonHeroLatest = withoutVideo(latest, hero?.id);
-  const nonHeroUnderrated = withoutVideo(underratedPool, hero?.id);
+  const allNonHero = withoutVideo(allCandidates, hero?.id);
+  const nonHeroRecommended = withoutVideo(recommended, hero?.id) as VideoCardData[];
+  const nonHeroLatest = withoutVideo(latest, hero?.id) as VideoCardData[];
+  const nonHeroUnderrated = withoutVideo(
+    underratedPool,
+    hero?.id,
+  ) as VideoCardData[];
 
-  const hot = pickDiverseVideos(nonHeroRecommended, {
-    target: 12,
+  const hot = buildRail(nonHeroRecommended, allNonHero, 18, {
     maxPerCreator: 3,
     maxPerEvent: 5,
-  }) as VideoCardData[];
+  });
 
-  const fresh = pickDiverseVideos(nonHeroLatest, {
-    target: 12,
+  const fresh = buildRail(nonHeroLatest, allNonHero, 18, {
     maxPerCreator: 3,
     maxPerEvent: 5,
-  }) as VideoCardData[];
+  });
 
-  const underrated = pickDiverseVideos(nonHeroUnderrated, {
-    target: 10,
+  const underrated = buildRail(nonHeroUnderrated, allNonHero, 14, {
     maxPerCreator: 2,
     maxPerEvent: 4,
-  }) as VideoCardData[];
+  });
 
   const eventsRail: VideoCardData[] = [];
   const seenEvents = new Set<string>();
-  for (const video of allCandidates) {
+  for (const video of allNonHero) {
     if (!video.primary_event_id || seenEvents.has(video.primary_event_id)) {
       continue;
     }
     seenEvents.add(video.primary_event_id);
     eventsRail.push(video as VideoCardData);
-    if (eventsRail.length >= 12) break;
+    if (eventsRail.length >= 16) break;
+  }
+  if (eventsRail.length < 12) {
+    eventsRail.push(
+      ...allNonHero
+        .filter((video) => !eventsRail.some((shown) => shown.id === video.id))
+        .slice(0, 16 - eventsRail.length),
+    );
   }
 
   const shown = new Set(
@@ -196,9 +217,9 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
   );
   const morePool = allCandidates.filter((video) => !shown.has(video.id));
   const more = pickDiverseVideos(
-    morePool.length > 0 ? morePool : withoutVideo(allCandidates, hero?.id),
+    morePool.length > 0 ? morePool : allNonHero,
     {
-      target: 24,
+      target: 36,
       maxPerCreator: 4,
       maxPerEvent: 8,
     },
@@ -211,7 +232,7 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
         <h1 className={styles.title}>次に見る作品を探す</h1>
         <p className={styles.lead}>
           最近の動き、新着、見落としがちな作品、イベント、クリエイター。
-          いくつかの切り口で、今見たい一本に出会えるように並べています。
+          いくつかの切り口から、今見たい一本に出会えるように並べています。
         </p>
       </header>
 
@@ -271,7 +292,7 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
       <Rail
         id="rail-events"
         title="イベントから見る"
-        subtitle="イベントごとに作品を拾って並べています"
+        subtitle="イベントごとの文脈が見える作品"
         items={eventsRail}
         ariaLabel="イベントごとの作品"
         moreHref="/event"
@@ -316,10 +337,10 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
       </section>
 
       <div className={styles.footerCta}>
-        <a href={LIST_HREF} className="fn-btn fn-btn-primary">
+        <Link href={LIST_HREF} className="fn-btn fn-btn-primary">
           <Icon name="grid" size={14} aria-hidden />
           一覧でさらに探す
-        </a>
+        </Link>
       </div>
     </div>
   );
@@ -345,9 +366,9 @@ function SectionTitle({
         ) : null}
       </div>
       {moreHref ? (
-        <a href={moreHref} className="fn-section-more">
-          すべて見る -&gt;
-        </a>
+        <Link href={moreHref} className="fn-section-more">
+          すべて見る →
+        </Link>
       ) : null}
     </div>
   );

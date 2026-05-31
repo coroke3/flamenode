@@ -260,10 +260,10 @@
   margin-top: 22px;
   padding: 16px 18px;
   background:
-    radial-gradient(
-      100% 80% at 90% 0%,
+    linear-gradient(
+      90deg,
       var(--event-accent-soft, color-mix(in srgb, var(--accent-primary) 12%, transparent)),
-      transparent 60%
+      transparent 42%
     ),
     var(--bg-surface);
   border: 1px solid var(--border-subtle);

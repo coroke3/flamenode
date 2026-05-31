@@ -57,14 +57,16 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
           {PUBLIC_NAV_ITEMS.map((item) => {
             const active = isPathActive(pathname, item.href);
             return (
-              <a
+              <Link
                 key={item.href}
                 href={item.href}
-                className={`${styles.desktopNavLink} ${active ? styles.desktopNavLinkActive : ""}`}
+                className={`${styles.desktopNavLink} ${
+                  active ? styles.desktopNavLinkActive : ""
+                }`}
                 aria-current={active ? "page" : undefined}
               >
                 {item.label}
-              </a>
+              </Link>
             );
           })}
         </nav>
@@ -101,7 +103,7 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
             <div className={styles.actionNav}>
               <Link href="/dashboard/post" className={styles.postBtn}>
                 <Icon name="edit" size={13} aria-hidden />
-                投稿
+                投稿する
               </Link>
               {managementLink ? (
                 <Link href={managementLink.href} className={styles.ghostBtn}>
@@ -161,7 +163,9 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
               <div className={styles.mobileSection}>
                 <Link
                   href="/entry"
-                  className={`${styles.mobileLink} ${isPathActive(pathname, "/entry") ? styles.mobileLinkActive : ""}`}
+                  className={`${styles.mobileLink} ${
+                    isPathActive(pathname, "/entry") ? styles.mobileLinkActive : ""
+                  }`}
                   onClick={() => setMobileOpen(false)}
                   aria-current={isPathActive(pathname, "/entry") ? "page" : undefined}
                 >
@@ -170,15 +174,17 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
                 {PUBLIC_NAV_ITEMS.map((item) => {
                   const active = isPathActive(pathname, item.href);
                   return (
-                    <a
+                    <Link
                       key={item.href}
                       href={item.href}
-                      className={`${styles.mobileLink} ${active ? styles.mobileLinkActive : ""}`}
+                      className={`${styles.mobileLink} ${
+                        active ? styles.mobileLinkActive : ""
+                      }`}
                       onClick={() => setMobileOpen(false)}
                       aria-current={active ? "page" : undefined}
                     >
                       <Icon name={item.iconName} size={16} aria-hidden /> {item.label}
-                    </a>
+                    </Link>
                   );
                 })}
                 <div className={styles.mobileThemeRow}>
@@ -201,7 +207,7 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
                     className={styles.mobileLink}
                     onClick={() => setMobileOpen(false)}
                   >
-                    <Icon name="grid" size={16} aria-hidden /> ダッシュボード
+                    <Icon name="grid" size={16} aria-hidden /> マイページ
                   </Link>
                   <Link
                     href="/dashboard/library"
@@ -228,11 +234,7 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
                         className={styles.mobileLink}
                         onClick={() => setMobileOpen(false)}
                       >
-                        <Icon
-                          name={managementLink.icon}
-                          size={16}
-                          aria-hidden
-                        />{" "}
+                        <Icon name={managementLink.icon} size={16} aria-hidden />{" "}
                         {managementLink.label}
                       </Link>
                     </div>

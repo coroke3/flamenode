@@ -1,10 +1,9 @@
 import * as React from "react";
-import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { and, desc, eq, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, ne, sql } from "drizzle-orm";
 import styles from "./page.module.css";
-import { getDatabase, withDatabase } from "@/lib/cloudflare";
+import { withDatabase } from "@/lib/cloudflare";
 import { videos, videoMembers, xUsers } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
@@ -42,15 +41,14 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     if (u[0]) return { title: u[0].x_name };
 
     const fallback = await db
-      .select({ name: sql<string>`COALESCE(${videos.creator_display_name}, ${videos.creator_x_user_id})` })
+      .select({
+        name: sql<string>`COALESCE(${videos.creator_display_name}, ${videos.creator_x_user_id})`,
+      })
       .from(videos)
       .where(
         and(
           eq(videos.visibility_status, "public"),
-          or(
-            sql`lower(${videos.creator_x_user_id}) = ${id}`,
-            sql`lower(${videos.creator_x_user_id}) = ${id}`,
-          )!,
+          sql`lower(${videos.creator_x_user_id}) = ${id}`,
         )!,
       )
       .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
@@ -85,9 +83,7 @@ export default async function UserPage({
       .from(xUsers)
       .where(sql`lower(${xUsers.id}) = ${id}`)
       .limit(1);
-    const publicVideoBase = and(
-      eq(videos.visibility_status, "public"),
-    );
+    const publicVideoBase = eq(videos.visibility_status, "public");
 
     const fallbackUserRows = userRow[0]
       ? []
@@ -100,15 +96,7 @@ export default async function UserPage({
             youtube_channel_url: sql<string | null>`NULL`,
           })
           .from(videos)
-          .where(
-            and(
-              publicVideoBase,
-              or(
-                sql`lower(${videos.creator_x_user_id}) = ${id}`,
-                sql`lower(${videos.creator_x_user_id}) = ${id}`,
-              )!,
-            )!,
-          )
+          .where(and(publicVideoBase, sql`lower(${videos.creator_x_user_id}) = ${id}`)!)
           .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
           .limit(1);
 
@@ -122,8 +110,7 @@ export default async function UserPage({
         }
       : (fallbackUserRows[0] ?? null);
     if (!user) return null;
-    // x_users.icon_url が null のとき、過去作品アイコンから補完する。
-    // (ユーザー既定アイコンが未設定でも、その X ID の作品アイコンが残っていれば表示する)
+
     if (!user.icon_url) {
       const resolved = await resolveXUserIcon(db, user.id);
       if (resolved) user.icon_url = resolved;
@@ -131,10 +118,7 @@ export default async function UserPage({
 
     const ownWhere = and(
       publicVideoBase,
-      or(
-        sql`lower(${videos.creator_x_user_id}) = ${id}`,
-        sql`lower(${videos.creator_x_user_id}) = ${id}`,
-      )!,
+      sql`lower(${videos.creator_x_user_id}) = ${id}`,
     )!;
     const ownVideosRaw = await db
       .select({
@@ -179,9 +163,7 @@ export default async function UserPage({
         title: videos.title,
         youtube_video_id: videos.youtube_video_id,
         display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.creator_display_name}, ${videos.creator_x_user_id})`,
-        icon_url: sql<
-          string | null
-        >`COALESCE(${videos.creator_icon_url}, ${xUsers.icon_url})`,
+        icon_url: sql<string | null>`COALESCE(${videos.creator_icon_url}, ${xUsers.icon_url})`,
         creator_x_user_id: videos.creator_x_user_id,
         primary_event_id: videos.primary_event_id,
         scheduled_time: videos.scheduled_time,
@@ -214,8 +196,7 @@ export default async function UserPage({
   });
 
   if (!bundle) notFound();
-  const { user, ownVideos, ownTotal, collabVideos, collabTotal } =
-    bundle;
+  const { user, ownVideos, ownTotal, collabVideos, collabTotal } = bundle;
   const ownTotalPages = totalPagesFor(ownTotal, worksPaging.pageSize);
   const collabTotalPages = totalPagesFor(collabTotal, collabPaging.pageSize);
   const buildOwnHref = (p: number) => {
@@ -231,7 +212,6 @@ export default async function UserPage({
     return `/user/${encodeURIComponent(user.id)}?${usp.toString()}`;
   };
 
-  // 派生情報 (withDatabase closure 外で表示用に整形)
   const profileIcon = user.icon_url ?? null;
   const profileName = user.x_name || user.id;
   const totalWorks = ownTotal + collabTotal;
@@ -254,9 +234,7 @@ export default async function UserPage({
           <p className={styles.eyebrow}>CREATOR</p>
           <h1 className={styles.name}>{profileName}</h1>
           <p className={styles.handle}>@{user.id}</p>
-          {user.profile_text ? (
-            <p className={styles.bio}>{user.profile_text}</p>
-          ) : null}
+          {user.profile_text ? <p className={styles.bio}>{user.profile_text}</p> : null}
           <div className={styles.links}>
             <a
               href={`https://x.com/${user.id}`}

@@ -24,11 +24,23 @@ type RecruitState =
   | "ended"
   | "full";
 
+interface TimelineRange {
+  left: number;
+  width: number;
+}
+
 interface TimelinePoint {
-  name: string;
+  label: string;
   time: number;
-  pos: number;
-  emphasized?: boolean;
+  position: number;
+  emphasis?: boolean;
+}
+
+interface TimelineModel {
+  entryRange: TimelineRange | null;
+  postRange: TimelineRange | null;
+  nowPosition: number;
+  points: TimelinePoint[];
 }
 
 function stateLabel(state: RecruitState): string {
@@ -36,11 +48,11 @@ function stateLabel(state: RecruitState): string {
     case "before_entry":
       return "募集開始前";
     case "accepting":
-      return "エントリー受付中";
+      return "募集期間中";
     case "after_entry":
-      return "投稿期間中";
+      return "公開前作品受付中";
     case "soon":
-      return "開催間近";
+      return "近日公開";
     case "ongoing":
       return "開催中";
     case "ended":
@@ -48,12 +60,6 @@ function stateLabel(state: RecruitState): string {
     case "full":
       return "満枠";
   }
-}
-
-function ctaLabel(state: RecruitState, fallback: string): string {
-  if (state === "accepting") return "枠を確保する";
-  if (state === "after_entry") return "作品を投稿する";
-  return fallback;
 }
 
 function resolveState(
@@ -84,7 +90,7 @@ function resolveState(
   return "before_entry";
 }
 
-function formatRemainingForHero(seconds: number | null): {
+function formatRemaining(seconds: number | null): {
   value: string;
   unit: string;
 } | null {
@@ -120,7 +126,7 @@ function resolveCountdown(
     case "after_entry":
     case "soon":
       return {
-        label: "開催まで",
+        label: "公開まで",
         seconds: event.start_time != null ? event.start_time - now : null,
       };
     case "ongoing":
@@ -163,85 +169,82 @@ function resolveCta(
   }
 }
 
-function buildTimeline(event: EventRow, now: number): {
-  milestones: TimelinePoint[];
-  entryRange?: { left: number; width: number };
-  postRange?: { left: number; width: number };
-  nowPos?: number;
-} {
-  const rawPoints: Array<{ name: string; time: number; emphasized?: boolean }> =
-    [];
-  if (event.entry_start_time != null) {
-    rawPoints.push({ name: "募集開始", time: event.entry_start_time });
-  }
-  if (event.entry_end_time != null) {
-    rawPoints.push({
-      name: "募集終了",
-      time: event.entry_end_time,
-      emphasized: true,
-    });
-  }
-  if (event.start_time != null) {
-    rawPoints.push({ name: "開催", time: event.start_time, emphasized: true });
-  }
-  if (event.end_time != null && event.end_time !== event.start_time) {
-    rawPoints.push({ name: "終了", time: event.end_time });
-  }
+function clampPercent(value: number): number {
+  return Math.max(0, Math.min(100, value));
+}
 
-  const merged = new Map<
-    number,
-    { names: string[]; emphasized: boolean; time: number }
-  >();
-  for (const point of rawPoints) {
-    const existing = merged.get(point.time);
-    if (existing) {
-      existing.names.push(point.name);
-      existing.emphasized = existing.emphasized || !!point.emphasized;
-    } else {
-      merged.set(point.time, {
-        names: [point.name],
-        emphasized: !!point.emphasized,
-        time: point.time,
-      });
-    }
-  }
+function rangeFromTimes(
+  start: number | null,
+  end: number | null,
+  min: number,
+  duration: number,
+): TimelineRange | null {
+  if (start == null || end == null || duration <= 0 || end <= start) return null;
+  const left = clampPercent(((start - min) / duration) * 100);
+  const right = clampPercent(((end - min) / duration) * 100);
+  return { left, width: Math.max(1, right - left) };
+}
 
-  const points = Array.from(merged.values()).sort((a, b) => a.time - b.time);
-  if (points.length < 2) return { milestones: [] };
+function buildTimeline(event: EventRow, now: number): TimelineModel | null {
+  const timelineTimes = [
+    event.entry_start_time,
+    event.entry_end_time,
+    event.start_time,
+    event.end_time,
+    now,
+  ].filter((value): value is number => value != null);
+  if (timelineTimes.length < 2) return null;
 
-  const min = points[0].time;
-  const max = points[points.length - 1].time;
-  const span = Math.max(1, max - min);
-  const toPos = (time: number) =>
-    Math.max(0, Math.min(100, ((time - min) / span) * 100));
+  const min = Math.min(...timelineTimes);
+  const max = Math.max(...timelineTimes);
+  const duration = max - min;
+  if (duration <= 0) return null;
 
-  const milestones = points.map((point) => ({
-    name: point.names.join(" / "),
-    time: point.time,
-    pos: toPos(point.time),
-    emphasized: point.emphasized,
-  }));
-
-  const entryRange =
-    event.entry_start_time != null && event.entry_end_time != null
+  const position = (time: number) => clampPercent(((time - min) / duration) * 100);
+  const points: TimelinePoint[] = [
+    event.entry_start_time != null
       ? {
-          left: toPos(event.entry_start_time),
-          width: Math.max(
-            1,
-            toPos(event.entry_end_time) - toPos(event.entry_start_time),
-          ),
+          label: "募集開始",
+          time: event.entry_start_time,
+          position: position(event.entry_start_time),
         }
-      : undefined;
-  const postRange =
-    event.entry_end_time != null && event.start_time != null
+      : null,
+    event.entry_end_time != null
       ? {
-          left: toPos(event.entry_end_time),
-          width: Math.max(1, toPos(event.start_time) - toPos(event.entry_end_time)),
+          label: "募集締切",
+          time: event.entry_end_time,
+          position: position(event.entry_end_time),
+          emphasis: true,
         }
-      : undefined;
-  const nowPos = now >= min && now <= max ? toPos(now) : undefined;
+      : null,
+    event.start_time != null
+      ? {
+          label: "公開",
+          time: event.start_time,
+          position: position(event.start_time),
+          emphasis: true,
+        }
+      : null,
+    event.end_time != null
+      ? {
+          label: "終了",
+          time: event.end_time,
+          position: position(event.end_time),
+        }
+      : null,
+  ].filter((point): point is TimelinePoint => point != null);
 
-  return { milestones, entryRange, postRange, nowPos };
+  return {
+    entryRange: rangeFromTimes(
+      event.entry_start_time,
+      event.entry_end_time,
+      min,
+      duration,
+    ),
+    postRange: rangeFromTimes(event.entry_end_time, event.start_time, min, duration),
+    nowPosition: position(now),
+    points,
+  };
 }
 
 function stateBadgeClass(
@@ -275,7 +278,7 @@ export function EventRecruitCard({
   const now = Math.floor(Date.now() / 1000);
   const state = resolveState(event, available, now);
   const countdown = resolveCountdown(event, state, now);
-  const countdownDisplay = formatRemainingForHero(countdown.seconds);
+  const countdownDisplay = formatRemaining(countdown.seconds);
   const cta = resolveCta(event, state);
   const timeline = buildTimeline(event, now);
   const slotsFull = available != null && available <= 0;
@@ -302,7 +305,6 @@ export function EventRecruitCard({
         .join(" ")}
       style={accentStyle}
     >
-      <div className={styles.glow} aria-hidden />
       <div className={styles.left}>
         <header className={styles.header}>
           <span className={styles.eyebrow}>FlameNode Event</span>
@@ -316,8 +318,8 @@ export function EventRecruitCard({
           </span>
         </header>
 
-        {timeline.milestones.length > 0 ? (
-          <div className={styles.timeline} aria-label="イベントの進行">
+        {timeline ? (
+          <div className={styles.timeline} aria-hidden>
             <div className={styles.timelineTrack}>
               {timeline.entryRange ? (
                 <span
@@ -326,7 +328,6 @@ export function EventRecruitCard({
                     left: `${timeline.entryRange.left}%`,
                     width: `${timeline.entryRange.width}%`,
                   }}
-                  aria-hidden
                 />
               ) : null}
               {timeline.postRange ? (
@@ -336,65 +337,37 @@ export function EventRecruitCard({
                     left: `${timeline.postRange.left}%`,
                     width: `${timeline.postRange.width}%`,
                   }}
-                  aria-hidden
                 />
               ) : null}
-              {timeline.milestones.map((point) => (
+              {timeline.points.map((point) => (
                 <span
-                  key={`${point.name}-${point.time}`}
+                  key={`${point.label}-${point.time}`}
                   className={`${styles.timelineMilestone} ${
-                    point.emphasized ? styles.timelineMilestoneEmph : ""
+                    point.emphasis ? styles.timelineMilestoneEmph : ""
                   }`}
-                  style={{ left: `${point.pos}%` }}
-                  aria-hidden
+                  style={{ left: `${point.position}%` }}
                 />
               ))}
-              {timeline.nowPos != null ? (
-                <span
-                  className={styles.timelineNow}
-                  style={{ left: `${timeline.nowPos}%` }}
-                  aria-hidden
-                />
-              ) : null}
+              <span
+                className={styles.timelineNow}
+                style={{ left: `${timeline.nowPosition}%` }}
+              />
             </div>
-            <div className={styles.timelineLabels} aria-hidden>
-              {timeline.milestones.map((point, index) => {
-                const isLeftEdge = point.pos <= 8;
-                const isRightEdge = point.pos >= 92;
-                const transform = isLeftEdge
-                  ? "translateX(0%)"
-                  : isRightEdge
-                    ? "translateX(-100%)"
-                    : "translateX(-50%)";
-                const textAlign: React.CSSProperties["textAlign"] = isLeftEdge
-                  ? "left"
-                  : isRightEdge
-                    ? "right"
-                    : "center";
-                return (
-                  <span
-                    key={`label-${point.name}-${point.time}`}
-                    className={`${styles.timelineLabel} ${
-                      index % 2 === 1 ? styles.timelineLabelStagger : ""
-                    }`}
-                    style={{
-                      left: `${point.pos}%`,
-                      transform,
-                      textAlign,
-                      alignItems: isLeftEdge
-                        ? "flex-start"
-                        : isRightEdge
-                          ? "flex-end"
-                          : "center",
-                    }}
-                  >
-                    <span className={styles.timelineLabelName}>{point.name}</span>
-                    <span className={styles.timelineLabelDate}>
-                      {formatUnix(point.time, { dateOnly: true })}
-                    </span>
+            <div className={styles.timelineLabels}>
+              {timeline.points.map((point, index) => (
+                <span
+                  key={`${point.label}-${point.time}-label`}
+                  className={`${styles.timelineLabel} ${
+                    index % 2 === 1 ? styles.timelineLabelStagger : ""
+                  }`}
+                  style={{ left: `${point.position}%` }}
+                >
+                  <span className={styles.timelineLabelName}>{point.label}</span>
+                  <span className={styles.timelineLabelDate}>
+                    {formatUnix(point.time, { dateOnly: true })}
                   </span>
-                );
-              })}
+                </span>
+              ))}
             </div>
           </div>
         ) : null}
@@ -411,7 +384,7 @@ export function EventRecruitCard({
           ) : null}
           {event.entry_end_time != null && event.start_time != null ? (
             <div className={styles.periodItem}>
-              <dt>投稿期間</dt>
+              <dt>公開前作品</dt>
               <dd>
                 {formatUnix(event.entry_end_time, { dateOnly: true })} -{" "}
                 {formatUnix(event.start_time, { dateOnly: true })}
@@ -486,7 +459,7 @@ export function EventRecruitCard({
 
         <Link href={cta.href} className={styles.cta}>
           <Icon name={cta.iconName} size={14} aria-hidden />
-          {ctaLabel(state, cta.label)}
+          {cta.label}
         </Link>
       </aside>
     </article>

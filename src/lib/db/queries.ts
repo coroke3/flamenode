@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNotNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, or, sql } from "drizzle-orm";
 import {
   events,
   eventStaff,

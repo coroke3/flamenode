@@ -27,10 +27,6 @@ interface EventPanelProps {
   videos: VideoCardData[];
 }
 
-/**
- * トップページのイベントセクションで使う、低い角丸パネルにイベント名 + 内部小型作品グリッド。
- * イベントアクセントカラーがあればホバー線・参加 CTA・タイトル下線にその色を使う。
- */
 export function EventPanel({
   event,
   videos,
@@ -39,6 +35,13 @@ export function EventPanel({
   const cssVars = accent
     ? ({ ["--event-accent" as never]: accent } as React.CSSProperties)
     : undefined;
+  const status = computeEventStatus({
+    is_active: event.is_active ?? 0,
+    is_archived: event.is_archived ?? 0,
+    is_entry_open: event.is_entry_open ?? 0,
+    start_time: event.start_time ?? null,
+    end_time: event.end_time ?? null,
+  });
 
   return (
     <section className={styles.panel} style={cssVars}>
@@ -60,33 +63,17 @@ export function EventPanel({
               <span>
                 {formatUnix(event.start_time, { dateOnly: true })}
                 {event.end_time
-                  ? ` 〜 ${formatUnix(event.end_time, { dateOnly: true })}`
+                  ? ` - ${formatUnix(event.end_time, { dateOnly: true })}`
                   : ""}
               </span>
-              <span
-                className={`fn-badge ${eventStatusBadgeClass(computeEventStatus({
-                  is_active: event.is_active ?? 0,
-                  is_archived: event.is_archived ?? 0,
-                  is_entry_open: event.is_entry_open ?? 0,
-                  start_time: event.start_time ?? null,
-                  end_time: event.end_time ?? null,
-                }))}`}
-              >
-                {eventStatusLabel(
-                  computeEventStatus({
-                    is_active: event.is_active ?? 0,
-                    is_archived: event.is_archived ?? 0,
-                    is_entry_open: event.is_entry_open ?? 0,
-                    start_time: event.start_time ?? null,
-                    end_time: event.end_time ?? null,
-                  }),
-                )}
+              <span className={`fn-badge ${eventStatusBadgeClass(status)}`}>
+                {eventStatusLabel(status)}
               </span>
             </p>
           </div>
         </Link>
         <Link href={`/event/${event.id}`} className={styles.detailsLink}>
-          詳細 →
+          詳細を見る
         </Link>
       </header>
 

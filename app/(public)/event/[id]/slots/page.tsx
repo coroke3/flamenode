@@ -97,7 +97,9 @@ export default async function EventSlotsPage({
   }));
 
   const slotTotal = slotRows.length;
-  const availableSlots = slotRows.filter((slot) => slot.status === "available").length;
+  const availableSlots = slotRows.filter(
+    (slot) => slot.status === "available",
+  ).length;
   const filledSlots = Math.max(0, slotTotal - availableSlots);
   const fillRatio =
     slotTotal > 0 ? Math.min(100, Math.round((filledSlots / slotTotal) * 100)) : 0;

@@ -15,7 +15,6 @@ export interface VideoCardData {
   primary_event_id?: string | null;
   scheduled_time?: number | null;
   status?: string | null;
-  /** 作品が選択した「部」(events.parts_json から)。サムネ右上に小さくバッジ表示する。 */
   part?: string | null;
 }
 
@@ -25,10 +24,6 @@ interface VideoCardProps {
   href?: string;
 }
 
-/**
- * 公開ページの作品カード。サムネ + 2行タイトル + 作者行に絞る。
- * カード背景は透明、サムネ角丸 8px、ホバーでサムネを 1.04 拡大する。
- */
 export function VideoCard({
   video,
   size = "default",

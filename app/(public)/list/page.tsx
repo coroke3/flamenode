@@ -90,7 +90,7 @@ export default async function ListPage({
       <header className={styles.header}>
         <h1 className={styles.title}>作品一覧</h1>
         <p className={styles.lead}>
-          FlameNode に投稿された公開作品を、タイトル・作者名・楽曲名から探せます。
+          FlameNode に投稿された公開作品を、タイトル・作者名・楽曲名から検索できます。
         </p>
       </header>
 
@@ -120,9 +120,9 @@ export default async function ListPage({
           適用
         </button>
         {q || sort !== "new" || event ? (
-          <a href={LIST_HREF} className="fn-btn fn-btn-ghost">
+          <Link href={LIST_HREF} className="fn-btn fn-btn-ghost">
             リセット
-          </a>
+          </Link>
         ) : null}
       </form>
 
@@ -170,12 +170,12 @@ export default async function ListPage({
               event
             )}
           </span>
-          <a
+          <Link
             href={`/list?${params({ event: "", page: "1" })}`}
             className="fn-btn fn-btn-ghost fn-btn-sm"
           >
             イベント絞り込みを解除
-          </a>
+          </Link>
         </div>
       ) : null}
 
@@ -239,25 +239,25 @@ export default async function ListPage({
           )}
           <nav className={styles.pagination} aria-label="ページネーション">
             {pageNum > 1 ? (
-              <a
+              <Link
                 href={`/list?${params({ page: String(pageNum - 1) })}`}
                 className="fn-btn fn-btn-ghost fn-btn-sm"
               >
                 <Icon name="chevron-left" size={12} aria-hidden />
                 前へ
-              </a>
+              </Link>
             ) : null}
             <span className={styles.pageBadge}>
               {pageNum} / {totalPages} ページ ({total} 件)
             </span>
             {pageNum < totalPages ? (
-              <a
+              <Link
                 href={`/list?${params({ page: String(pageNum + 1) })}`}
                 className="fn-btn fn-btn-ghost fn-btn-sm"
               >
                 次へ
                 <Icon name="chevron-right" size={12} aria-hidden />
-              </a>
+              </Link>
             ) : null}
           </nav>
         </>

@@ -2,7 +2,7 @@
   "name": "flamenode",
   "version": "0.1.0",
   "private": true,
-  "description": "FlameNode - 映像（フレーム）の結節点（ノード）。YouTube埋め込みを利用した動画プラットフォーム。",
+  "description": "FlameNode - 個人制作映像とイベントをつなぐ動画プラットフォーム。",
   "scripts": {
     "dev": "node -r ./scripts/load-dev-vars.js node_modules/next/dist/bin/next dev",
     "build": "next build",

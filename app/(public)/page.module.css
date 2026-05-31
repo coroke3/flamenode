@@ -24,6 +24,19 @@
   margin-top: 18px;
 }
 
+.announcementList {
+  display: grid;
+  gap: 8px;
+}
+
+.announcement {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  background: var(--bg-surface);
+  border-radius: var(--radius-md);
+}
+
 @media (max-width: 640px) {
   .section {
     width: min(100% - 20px, 100%);

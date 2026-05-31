@@ -3,7 +3,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { and, eq, isNull, like, ne, or, sql } from "drizzle-orm";
 import styles from "./page.module.css";
-import { getDatabase, withDatabase } from "@/lib/cloudflare";
+import { withDatabase } from "@/lib/cloudflare";
 import { videos, xUsers } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 
@@ -19,17 +19,6 @@ interface SearchParams {
   page?: string;
 }
 
-interface CreatorListRow {
-  id: string;
-  x_name: string;
-  icon_url: string | null;
-  profile_text: string | null;
-  youtube_channel_url: string | null;
-  own_count: number;
-  collab_count: number;
-  total_count: number;
-}
-
 const PAGE_SIZE = 48;
 
 export default async function UserListPage({
@@ -40,20 +29,24 @@ export default async function UserListPage({
   const { q = "", sort = "score", page = "1" } = await searchParams;
   const pageNum = Math.max(1, Number.parseInt(page, 10) || 1);
 
-  const creators = (await withDatabase(async (db) => {
-    const keyword = q.trim();
-    const filters = [
-      or(eq(xUsers.approval_status, "approved"), eq(xUsers.approval_status, "pending"))!,
-    ];
-    if (keyword) {
-      const term = `%${keyword.replace(/[%_]/g, (m) => `\\${m}`)}%`;
-      filters.push(or(like(xUsers.x_name, term), like(xUsers.id, term))!);
-    }
+  const creators =
+    (await withDatabase(async (db) => {
+      const keyword = q.trim();
+      const filters = [
+        or(
+          eq(xUsers.approval_status, "approved"),
+          eq(xUsers.approval_status, "pending"),
+        )!,
+      ];
+      if (keyword) {
+        const term = `%${keyword.replace(/[%_]/g, (m) => `\\${m}`)}%`;
+        filters.push(or(like(xUsers.x_name, term), like(xUsers.id, term))!);
+      }
 
-    const rows = await db
-      .select({
-        id: xUsers.id,
-        x_name: sql<string>`COALESCE(
+      const rows = await db
+        .select({
+          id: xUsers.id,
+          x_name: sql<string>`COALESCE(
           ${xUsers.x_name},
           (SELECT v.creator_display_name FROM videos AS v
            WHERE v.creator_x_user_id = "x_users"."id"
@@ -61,7 +54,7 @@ export default async function UserListPage({
            ORDER BY v.scheduled_time DESC LIMIT 1),
           "x_users"."id"
         )`,
-        icon_url: sql<string | null>`COALESCE(
+          icon_url: sql<string | null>`COALESCE(
           ${xUsers.icon_url},
           (SELECT v.creator_icon_url FROM videos AS v
            WHERE v.creator_x_user_id = "x_users"."id"
@@ -69,91 +62,99 @@ export default async function UserListPage({
              AND v.visibility_status = 'public'
            ORDER BY v.scheduled_time DESC LIMIT 1)
         )`,
-        profile_text: xUsers.profile_text,
-        youtube_channel_url: xUsers.youtube_channel_url,
-        own_count: sql<number>`(
+          profile_text: xUsers.profile_text,
+          youtube_channel_url: xUsers.youtube_channel_url,
+          own_count: sql<number>`(
           SELECT COUNT(DISTINCT v.id)
           FROM videos AS v
           WHERE v.creator_x_user_id = "x_users"."id"
             AND v.visibility_status = 'public'
         )`,
-        collab_count: sql<number>`(
+          collab_count: sql<number>`(
           SELECT COUNT(DISTINCT vm.video_id)
           FROM video_members AS vm
           INNER JOIN videos AS v ON v.id = vm.video_id
           WHERE vm.x_user_id = "x_users"."id"
             AND v.visibility_status = 'public'
         )`,
-        total_count: sql<number>`(
+          total_count: sql<number>`(
           SELECT COUNT(DISTINCT v.id)
           FROM videos AS v
           LEFT JOIN video_members AS vm ON vm.video_id = v.id
           WHERE (v.creator_x_user_id = "x_users"."id" OR vm.x_user_id = "x_users"."id")
             AND v.visibility_status = 'public'
         )`,
-      })
-      .from(xUsers)
-      .where(and(...filters)!);
+        })
+        .from(xUsers)
+        .where(and(...filters)!);
 
-    const orphanFilters = [
-      eq(videos.visibility_status, "public"),
-      ne(videos.creator_x_user_id, "anonymous"),
-      isNull(xUsers.id),
-    ];
-    if (keyword) {
-      const term = `%${keyword.replace(/[%_]/g, (m) => `\\${m}`)}%`;
-      orphanFilters.push(
-        or(
-          like(videos.creator_display_name, term),
-          like(videos.creator_x_user_id, term),
-          like(videos.title, term),
-        )!,
-      );
-    }
+      const orphanFilters = [
+        eq(videos.visibility_status, "public"),
+        ne(videos.creator_x_user_id, "anonymous"),
+        isNull(xUsers.id),
+      ];
+      if (keyword) {
+        const term = `%${keyword.replace(/[%_]/g, (m) => `\\${m}`)}%`;
+        orphanFilters.push(
+          or(
+            like(videos.creator_display_name, term),
+            like(videos.creator_x_user_id, term),
+            like(videos.title, term),
+          )!,
+        );
+      }
 
-    const orphanRows = await db
-      .select({
-        id: videos.creator_x_user_id,
-        x_name: sql<string>`COALESCE(
+      const orphanRows = await db
+        .select({
+          id: videos.creator_x_user_id,
+          x_name: sql<string>`COALESCE(
           (SELECT v.creator_display_name FROM videos AS v
            WHERE v.creator_x_user_id = ${videos.creator_x_user_id}
              AND v.visibility_status = 'public'
            ORDER BY v.scheduled_time DESC, v.created_at DESC LIMIT 1),
           ${videos.creator_x_user_id}
         )`,
-        icon_url: sql<string | null>`(
+          icon_url: sql<string | null>`(
           SELECT v.creator_icon_url FROM videos AS v
           WHERE v.creator_x_user_id = ${videos.creator_x_user_id}
             AND v.creator_icon_url IS NOT NULL
             AND v.visibility_status = 'public'
           ORDER BY v.scheduled_time DESC, v.created_at DESC LIMIT 1
         )`,
-        profile_text: sql<string | null>`NULL`,
-        youtube_channel_url: sql<string | null>`NULL`,
-        own_count: sql<number>`COUNT(DISTINCT ${videos.id})`,
-        collab_count: sql<number>`0`,
-        total_count: sql<number>`COUNT(DISTINCT ${videos.id})`,
-      })
-      .from(videos)
-      .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
-      .where(and(...orphanFilters)!)
-      .groupBy(videos.creator_x_user_id);
+          profile_text: sql<string | null>`NULL`,
+          youtube_channel_url: sql<string | null>`NULL`,
+          own_count: sql<number>`COUNT(DISTINCT ${videos.id})`,
+          collab_count: sql<number>`0`,
+          total_count: sql<number>`COUNT(DISTINCT ${videos.id})`,
+        })
+        .from(videos)
+        .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
+        .where(and(...orphanFilters)!)
+        .groupBy(videos.creator_x_user_id);
 
-    return [...rows, ...orphanRows]
-      .map((row) => ({
-        ...row,
-        own_count: Number(row.own_count) || 0,
-        collab_count: Number(row.collab_count) || 0,
-        total_count: Number(row.total_count) || 0,
-      }))
-      .filter((row) => row.total_count > 0 || row.profile_text || row.youtube_channel_url);
-  })) ?? [];
+      return [...rows, ...orphanRows]
+        .map((row) => ({
+          ...row,
+          own_count: Number(row.own_count) || 0,
+          collab_count: Number(row.collab_count) || 0,
+          total_count: Number(row.total_count) || 0,
+        }))
+        .filter(
+          (row) => row.total_count > 0 || row.profile_text || row.youtube_channel_url,
+        );
+    })) ?? [];
 
   creators.sort((a, b) => {
     if (sort === "name") return a.x_name.localeCompare(b.x_name, "ja");
-    if (sort === "works") return b.total_count - a.total_count || a.x_name.localeCompare(b.x_name, "ja");
-    return b.total_count * 2 + b.own_count - (a.total_count * 2 + a.own_count) ||
-      a.x_name.localeCompare(b.x_name, "ja");
+    if (sort === "works") {
+      return b.total_count - a.total_count || a.x_name.localeCompare(b.x_name, "ja");
+    }
+    return (
+      b.total_count * 2 +
+      b.own_count -
+      (a.total_count * 2 + a.own_count) ||
+      a.x_name.localeCompare(b.x_name, "ja")
+    );
   });
 
   const total = creators.length;

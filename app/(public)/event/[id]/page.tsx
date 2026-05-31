@@ -57,9 +57,7 @@ export default async function EventDetailPage({
         title: videos.title,
         youtube_video_id: videos.youtube_video_id,
         display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.creator_display_name}, ${videos.creator_x_user_id})`,
-        icon_url: sql<
-          string | null
-        >`COALESCE(${videos.creator_icon_url}, ${xUsers.icon_url})`,
+        icon_url: sql<string | null>`COALESCE(${videos.creator_icon_url}, ${xUsers.icon_url})`,
         creator_x_user_id: videos.creator_x_user_id,
         primary_event_id: videos.primary_event_id,
         scheduled_time: videos.scheduled_time,
@@ -69,10 +67,7 @@ export default async function EventDetailPage({
       .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
       .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
       .where(
-        and(
-          eq(videoEvents.event_id, id),
-          eq(videos.visibility_status, "public"),
-        )!,
+        and(eq(videoEvents.event_id, id), eq(videos.visibility_status, "public"))!,
       )
       .orderBy(asc(videos.scheduled_time), asc(videos.id))) as VideoCardData[];
 
@@ -82,10 +77,7 @@ export default async function EventDetailPage({
         .from(videos)
         .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
         .where(
-          and(
-            eq(videoEvents.event_id, id),
-            eq(videos.visibility_status, "public"),
-          )!,
+          and(eq(videoEvents.event_id, id), eq(videos.visibility_status, "public"))!,
         )
         .limit(1)
     )[0];
@@ -113,10 +105,7 @@ export default async function EventDetailPage({
     eventVideoTotal,
   } = bundle;
 
-  const visibleVideos = eventVideos.filter(
-    (video) =>
-      video.status === "public",
-  );
+  const visibleVideos = eventVideos.filter((video) => video.status === "public");
   const firstVisibleVideo = visibleVideos[0] ?? null;
   const firstVisibleHref = firstVisibleVideo
     ? `/${firstVisibleVideo.youtube_video_id ?? firstVisibleVideo.id}`
@@ -208,10 +197,7 @@ export default async function EventDetailPage({
 
           <div className={styles.heroActions}>
             {firstVisibleHref ? (
-              <Link
-                href={firstVisibleHref}
-                className="fn-btn fn-btn-primary"
-              >
+              <Link href={firstVisibleHref} className="fn-btn fn-btn-primary">
                 <Icon name="play" size={14} aria-hidden />
                 作品を見る
               </Link>
@@ -271,11 +257,7 @@ export default async function EventDetailPage({
               >
                 {member.icon_url ? (
                   /* eslint-disable-next-line @next/next/no-img-element */
-                  <img
-                    src={member.icon_url}
-                    alt=""
-                    className={styles.staffIcon}
-                  />
+                  <img src={member.icon_url} alt="" className={styles.staffIcon} />
                 ) : (
                   <span className={styles.staffIconFb}>
                     <Icon name="user" size={14} aria-hidden />

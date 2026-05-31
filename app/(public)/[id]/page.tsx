@@ -1,13 +1,13 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { and, eq, ne } from "drizzle-orm";
 import { buildAccentVars } from "@/lib/theme/accent";
 import styles from "./page.module.css";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { getApprovedXIds, canEditVideo } from "@/lib/auth/ownership";
-import { getDatabase, withDatabase } from "@/lib/cloudflare";
+import { withDatabase } from "@/lib/cloudflare";
 import {
   videoInteractions,
   videos as videosTable,
@@ -106,6 +106,7 @@ export default async function VideoDetailPage({
       canEditChapters: viewerCanEditChapters,
     });
     if (!detail) return null;
+
     const softwareLabel = await getVideoSoftwareLabel(db, detail.video.id);
     const statsRow =
       (
@@ -116,13 +117,17 @@ export default async function VideoDetailPage({
           .limit(1)
       )[0] ?? null;
 
-    const related = (await fetchRelatedVideos(db, {
-      id: detail.video.id,
-      creator_x_user_id: detail.video.creator_x_user_id,
-      primary_event_id: detail.video.primary_event_id,
-      scheduled_time: detail.video.scheduled_time,
-      eventIds: detail.events.map((event) => event.id),
-    }, 30)) as VideoCardData[];
+    const related = (await fetchRelatedVideos(
+      db,
+      {
+        id: detail.video.id,
+        creator_x_user_id: detail.video.creator_x_user_id,
+        primary_event_id: detail.video.primary_event_id,
+        scheduled_time: detail.video.scheduled_time,
+        eventIds: detail.events.map((event) => event.id),
+      },
+      30,
+    )) as VideoCardData[];
 
     let likeActive = false;
     let bookmarkActive = false;
@@ -138,7 +143,9 @@ export default async function VideoDetailPage({
           )!,
         );
       likeActive = interactions.some((i) => i.interaction_type === "like");
-      bookmarkActive = interactions.some((i) => i.interaction_type === "bookmark");
+      bookmarkActive = interactions.some(
+        (i) => i.interaction_type === "bookmark",
+      );
 
       const xRow = (
         await db
@@ -173,23 +180,24 @@ export default async function VideoDetailPage({
             );
           const ids = myInteractions.map((r) => r.video_id);
           if (ids.length > 0) {
-            const { videos: videosTable } = await import("@/lib/db/schema");
+            const { videos: importedVideos } = await import("@/lib/db/schema");
             const { inArray } = await import("drizzle-orm");
             const rows = await db
               .select({
-                id: videosTable.id,
-                title: videosTable.title,
-                youtube_video_id: videosTable.youtube_video_id,
-                display_name: videosTable.creator_display_name,
+                id: importedVideos.id,
+                title: importedVideos.title,
+                youtube_video_id: importedVideos.youtube_video_id,
+                display_name: importedVideos.creator_display_name,
               })
-              .from(videosTable)
+              .from(importedVideos)
               .where(
                 and(
-                  inArray(videosTable.id, ids),
-                  ne(videosTable.visibility_status, "archived"),
+                  inArray(importedVideos.id, ids),
+                  ne(importedVideos.visibility_status, "archived"),
                 )!,
               );
-            playlistLabel = kind === "like" ? "いいねした作品" : "セーブした作品";
+            playlistLabel =
+              kind === "like" ? "いいねした作品" : "セーブした作品";
             playlistItems = rows.map((v) => ({
               id: v.id,
               title: v.title,
@@ -203,7 +211,8 @@ export default async function VideoDetailPage({
         if (evVideos.length > 1) {
           const eventTitle =
             detail.events.find((e) => e.id === playlist)?.title ??
-            detail.events.find((e) => e.id === detail.video.primary_event_id)?.title ??
+            detail.events.find((e) => e.id === detail.video.primary_event_id)
+              ?.title ??
             "イベント";
           playlistLabel = `${eventTitle} 上映順`;
           playlistItems = evVideos.map((v) => ({
@@ -245,21 +254,18 @@ export default async function VideoDetailPage({
   } = bundle;
 
   const creatorIcon = creator?.icon_url ?? video.creator_icon_url ?? null;
-  const creatorName =
-    creator?.x_name ?? video.creator_display_name ?? "作者未設定";
+  const creatorName = creator?.x_name ?? video.creator_display_name ?? "作者未設定";
   const creatorId = creator?.id ?? video.creator_x_user_id ?? "anonymous";
-  const creatorHref = creator?.id && creator.id !== "anonymous" ? `/user/${creator.id}` : null;
-  const youtubeId = video.youtube_video_id ? extractYoutubeId(video.youtube_video_id) : null;
+  const creatorHref =
+    creator?.id && creator.id !== "anonymous" ? `/user/${creator.id}` : null;
+  const youtubeId = video.youtube_video_id
+    ? extractYoutubeId(video.youtube_video_id)
+    : null;
 
-  const primaryEvent = events.find((e) => e.id === video.primary_event_id) ?? events[0] ?? null;
+  const primaryEvent =
+    events.find((e) => e.id === video.primary_event_id) ?? events[0] ?? null;
   const primaryEventStatus = primaryEvent ? computeEventStatus(primaryEvent) : null;
   const accentColor = primaryEvent?.accent_color ?? "#ffd100";
-  // accent_color (hex) を HSL クランプして 5 種の CSS 変数にする。
-  // - event_accent: 本体色
-  // - event_accent_strong: ホバー強調
-  // - event_accent_soft: 背面グロー (半透明)
-  // - event_accent_text: アクセント面に乗せる文字色
-  // - event_accent_ring: 枠線 / フォーカス
   const accentVar = primaryEvent?.accent_color
     ? buildAccentVars(primaryEvent.accent_color, "dark")
     : undefined;
@@ -269,7 +275,11 @@ export default async function VideoDetailPage({
     time: c.chapter_time,
     label: c.chapter_label,
     visibility: (c.visibility ?? "public") as "public" | "private",
-    marker_kind: (c.marker_kind ?? "comment") as "comment" | "chapter" | "review" | "system",
+    marker_kind: (c.marker_kind ?? "comment") as
+      | "comment"
+      | "chapter"
+      | "review"
+      | "system",
     note: c.note,
     author_name: c.author_name,
     author_icon: c.author_icon,
@@ -301,13 +311,6 @@ export default async function VideoDetailPage({
     </span>
   );
 
-  // 投稿者行のリンク群: FlameNode / X / YouTube。
-  // すべて authorBlock の外側に出して a タグのネストを避ける。
-  // 投稿者名 / @id は authorBlock 全体を包む内部 Link で /user/[id] に飛ばす。
-  // - FlameNode プロフィール: creatorHref があるときだけ表示 (内部リンク)
-  // - X 外部リンク: creatorId が anonymous でないときだけ表示 (外部リンク)
-  // - YouTube リンク: creator.youtube_channel_url があるときだけ表示 (外部リンク)
-  // 黄色 CTA は使わず、丸い fn-icon-btn で控えめに並べる。
   const authorIconLinks: React.ReactNode[] = [];
   if (creatorHref) {
     authorIconLinks.push(
@@ -368,9 +371,7 @@ export default async function VideoDetailPage({
               <Link href="/list">archive</Link>
               <span>/</span>
               {primaryEvent ? (
-                <Link href={`/event/${primaryEvent.id}`}>
-                  {primaryEvent.id}
-                </Link>
+                <Link href={`/event/${primaryEvent.id}`}>{primaryEvent.id}</Link>
               ) : (
                 <span>no-event</span>
               )}
@@ -420,18 +421,10 @@ export default async function VideoDetailPage({
           <h1 className={styles.title}>{video.title}</h1>
 
           <div className={styles.author}>
-            {creatorHref ? (
-              <Link href={creatorHref}>{authorBlock}</Link>
-            ) : (
-              authorBlock
-            )}
+            {creatorHref ? <Link href={creatorHref}>{authorBlock}</Link> : authorBlock}
             {authorLinkGroup}
             <div className={styles.authorActions}>
               {(() => {
-                // いいね・セーブの実行可否はサーバー側 writeGuard と合わせて
-                // viewerXApproved (承認済み Active X ID) を基準にする。
-                // 未ログイン・未選択・未承認それぞれに合わせた CTA を出して、
-                // 「押せるけど失敗する」を避ける。
                 const currentPath = `/${rawId}`;
                 const interactionGate: {
                   canInteract: boolean;
@@ -480,7 +473,9 @@ export default async function VideoDetailPage({
           {video.visibility_status === "voided" ? (
             <div className={styles.warningBar}>
               <Icon name="warning" size={14} aria-hidden />
-              <span>この作品は現在「調整中」です。投稿者本人と運営による確認後に公開状態が更新されます。</span>
+              <span>
+                この作品は現在「調整中」です。投稿者本人と運営による確認後に公開状態が更新されます。
+              </span>
             </div>
           ) : video.visibility_status === "limited" ? (
             <div className={styles.warningBar}>
@@ -514,9 +509,7 @@ export default async function VideoDetailPage({
               ) : null}
             </div>
           ) : null}
-          {/* primary 以外の所属イベントもチップで表示する。
-              video_events 経由で複数イベントに紐付けされた作品は、ここで
-              「他にも参加しているイベント」が一目で見えるようにする。 */}
+
           {events.length > 1 ? (
             <div
               style={{
@@ -529,7 +522,7 @@ export default async function VideoDetailPage({
               }}
               aria-label="その他の所属イベント"
             >
-              <span style={{ color: "var(--text-muted)" }}>他の所属:</span>
+              <span style={{ color: "var(--text-muted)" }}>他の所属</span>
               {events
                 .filter((e) => !primaryEvent || e.id !== primaryEvent.id)
                 .map((e) => (
@@ -549,8 +542,6 @@ export default async function VideoDetailPage({
             {video.music ? (
               <InlineMetaItem title="楽曲">
                 {video.music_reference_url ? (
-                  // music_reference_url がある場合は「楽曲名 / 作曲者」全体を 1 つの
-                  // 外部リンクとして包み、外部リンクアイコンを末尾に添える。
                   <a
                     href={video.music_reference_url}
                     target="_blank"
@@ -581,12 +572,8 @@ export default async function VideoDetailPage({
               </InlineMetaItem>
             ) : null}
             {softwareLabel ? (
-              <InlineMetaItem title="使用ソフト">
-                {softwareLabel}
-              </InlineMetaItem>
+              <InlineMetaItem title="使用ソフト">{softwareLabel}</InlineMetaItem>
             ) : null}
-            {/* みどころ / 制作エピソード / あとがき を 1 つの「詳細コメント」開閉エリアにまとめる。
-                どれか 1 つでもあれば表示。初期状態は閉じる。 */}
             {video.highlights || video.production_story || video.closing_comment ? (
               <details className={styles.detailComments}>
                 <summary>詳細コメント</summary>
@@ -620,41 +607,16 @@ export default async function VideoDetailPage({
             ) : null}
           </div>
 
-          {/* モバイル: メタの後・メンバー前に関連動画を出す (下部に押し込みすぎない) */}
-          <aside className={styles.relatedMobile} aria-label="関連動画 (モバイル表示)">
+          <aside className={styles.relatedMobile} aria-label="関連動画">
             <h3 className={styles.relatedHeading}>関連動画</h3>
-            <div className={styles.relatedList}>
-              {related.length === 0 ? (
-                <p className="fn-empty-message" style={{ padding: 8 }}>
-                  関連動画はまだありません。
-                </p>
-              ) : (
-                <>
-                  {related.slice(0, 8).map((v) => (
-                    <VideoCard key={`${v.id}-mobile-related`} video={v} size="list" />
-                  ))}
-                  {related.length > 8 ? (
-                    <details className={styles.relatedMore}>
-                      <summary>さらに表示</summary>
-                      <div className={styles.relatedList}>
-                        {related.slice(8, 30).map((v) => (
-                          <VideoCard
-                            key={`${v.id}-mobile-related-more`}
-                            video={v}
-                            size="list"
-                          />
-                        ))}
-                      </div>
-                    </details>
-                  ) : null}
-                </>
-              )}
-            </div>
+            <RelatedList videos={related} firstCount={8} />
           </aside>
 
           {members.length > 0 ? (
             <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>参加メンバー ({members.length})</h2>
+              <h2 className={styles.sectionTitle}>
+                参加メンバー ({members.length})
+              </h2>
               <MemberSection
                 members={members}
                 memberChapters={memberChapters.map((c) => ({
@@ -696,19 +658,10 @@ export default async function VideoDetailPage({
             }))}
           />
 
-          {/*
-            通常のチャプターコメントは動画詳細ページから投稿する仕様に戻す。
-            メンバーチャプターは編集ページ側の VideoMembersField で管理するため
-            ここには出さない。
-          */}
           {viewerUser?.id ? (
             <ChapterComposer
               videoId={video.id}
               canPost={viewerXApproved}
-              /*
-                CSV 一括登録は動画編集ページ専用に移設したため、動画詳細ページ
-                からは出さない。ここではログイン済みユーザーの単発投稿のみ提供する。
-              */
               canBulk={false}
               settingsHref={`/dashboard/settings?next=${encodeURIComponent(`/${rawId}`)}`}
             />
@@ -728,8 +681,7 @@ export default async function VideoDetailPage({
               }}
             >
               <span>
-                <Icon name="info" size={12} aria-hidden />{" "}
-                ログインするとチャプターコメントを投稿できます。
+                <Icon name="info" size={12} aria-hidden /> ログインするとチャプターコメントを投稿できます。
               </span>
               <Link
                 href={`/entry?next=${encodeURIComponent(`/${rawId}`)}`}
@@ -742,36 +694,48 @@ export default async function VideoDetailPage({
 
           <div className={styles.relatedDesktop}>
             <h3 className={styles.relatedHeading}>関連動画</h3>
-            <div className={styles.relatedList}>
-              {related.length === 0 ? (
-                <p className="fn-empty-message" style={{ padding: 8 }}>
-                  関連動画はまだありません。
-                </p>
-              ) : (
-                <>
-                  {related.slice(0, 18).map((v) => (
-                    <VideoCard key={`${v.id}-desktop-related`} video={v} size="list" />
-                  ))}
-                  {related.length > 18 ? (
-                    <details className={styles.relatedMore}>
-                      <summary>さらに表示</summary>
-                      <div className={styles.relatedList}>
-                        {related.slice(18, 30).map((v) => (
-                          <VideoCard
-                            key={`${v.id}-desktop-related-more`}
-                            video={v}
-                            size="list"
-                          />
-                        ))}
-                      </div>
-                    </details>
-                  ) : null}
-                </>
-              )}
-            </div>
+            <RelatedList videos={related} firstCount={18} />
           </div>
         </aside>
       </div>
+    </div>
+  );
+}
+
+function RelatedList({
+  videos,
+  firstCount,
+}: {
+  videos: VideoCardData[];
+  firstCount: number;
+}): React.ReactElement {
+  return (
+    <div className={styles.relatedList}>
+      {videos.length === 0 ? (
+        <p className="fn-empty-message" style={{ padding: 8 }}>
+          関連動画はまだありません。
+        </p>
+      ) : (
+        <>
+          {videos.slice(0, firstCount).map((v) => (
+            <VideoCard key={`${v.id}-related-${firstCount}`} video={v} size="list" />
+          ))}
+          {videos.length > firstCount ? (
+            <details className={styles.relatedMore}>
+              <summary>さらに表示</summary>
+              <div className={styles.relatedList}>
+                {videos.slice(firstCount, 30).map((v) => (
+                  <VideoCard
+                    key={`${v.id}-related-more-${firstCount}`}
+                    video={v}
+                    size="list"
+                  />
+                ))}
+              </div>
+            </details>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }

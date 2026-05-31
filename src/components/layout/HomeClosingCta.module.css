@@ -9,8 +9,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   background:
-    radial-gradient(circle at 88% 48%, color-mix(in srgb, #ff6f5f 28%, transparent), transparent 14rem),
-    radial-gradient(circle at 75% 48%, var(--accent-primary-soft), transparent 13rem),
+    linear-gradient(90deg, var(--accent-primary-soft), transparent 48%),
     var(--bg-surface);
 }
 
@@ -26,12 +25,6 @@
 
 .closingCta p {
   color: var(--text-secondary);
-}
-
-.closingCta p::after {
-  content: "出会い";
-  color: var(--accent-primary-strong);
-  margin-left: 0.2em;
 }
 
 .closingActions {

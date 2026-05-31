@@ -10,8 +10,7 @@
   margin: 0 calc(50% - 50vw);
   overflow: hidden;
   background:
-    radial-gradient(circle at 74% 18%, color-mix(in srgb, var(--accent-primary) 18%, transparent), transparent 34%),
-    linear-gradient(120deg, #2a331c 0%, #161b0e 58%, var(--bg-base) 100%);
+    linear-gradient(120deg, color-mix(in srgb, var(--accent-primary) 18%, #2a331c) 0%, #161b0e 58%, var(--bg-base) 100%);
   isolation: isolate;
 }
 

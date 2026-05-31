@@ -23,7 +23,6 @@ import {
 import { requireSession } from "@/lib/auth/guard";
 import { canEditVideo } from "@/lib/auth/ownership";
 import { VideoForm } from "@/components/forms/VideoForm";
-import { ChapterComposer } from "@/components/video/ChapterComposer";
 import { Icon } from "@/components/ui/Icon";
 import { youtubeWatchUrl } from "@/lib/youtube/id";
 import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
@@ -262,7 +261,7 @@ export default async function EditVideoPage({
     role: m.role ?? "",
     comment: m.comment ?? "",
   }));
-  const creatorX = video.creator_x_user_id || video.creator_x_user_id;
+  const creatorX = video.creator_x_user_id;
   const xRow = creatorX
     ? (
         await db
@@ -342,25 +341,6 @@ export default async function EditVideoPage({
   // 編集権限を持つユーザー向けにこの編集ページから行う。
   // 投稿主体は active X ID なので、ChapterComposer 内部の writeGuard と同じ条件で
   // X 承認状態を計算する。
-  let viewerXApproved = false;
-  if (user.active_x_user_id) {
-    const xRow = (
-      await db
-        .select({ approval_status: xUsersTable.approval_status })
-        .from(xUsersTable)
-        .where(eq(xUsersTable.id, user.active_x_user_id))
-        .limit(1)
-    )[0];
-    viewerXApproved = xRow?.approval_status === "approved";
-  }
-  const canManageChapters = await canEditVideo({
-    db,
-    user: { id: user.id, role: user.role ?? null },
-    video,
-    requiredKey: "video.chapter_admin",
-    privilegeMode,
-  });
-
   const xIdOptions = await db
     .select({ id: xUsersTable.id, x_name: xUsersTable.x_name })
     .from(xUsersTable)

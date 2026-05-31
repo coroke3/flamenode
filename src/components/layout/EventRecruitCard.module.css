@@ -7,7 +7,7 @@
   padding: 22px 22px;
   border-radius: 8px;
   background:
-    radial-gradient(100% 50% at 88% 0%, color-mix(in srgb, var(--event-accent, var(--accent-primary)) 10%, transparent), transparent 60%),
+    linear-gradient(90deg, color-mix(in srgb, var(--event-accent, var(--accent-primary)) 12%, transparent), transparent 36%),
     linear-gradient(135deg, #0c0f14 0%, #141822 55%, #0c0f14 100%);
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: #f8fafc;
@@ -72,16 +72,6 @@
   .cardCompact .countdownValue {
     font-size: 32px;
   }
-}
-
-.glow {
-  position: absolute;
-  inset: -40% -10% auto auto;
-  width: 60%;
-  height: 80%;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--event-accent, var(--accent-primary)) 16%, transparent), transparent 70%);
-  pointer-events: none;
-  z-index: 0;
 }
 
 .left,

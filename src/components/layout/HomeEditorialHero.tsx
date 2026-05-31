@@ -5,6 +5,7 @@ import {
   formatHomeNumber,
   type HomeFeatureVideo,
   type HomeStats,
+  videoHref,
   videoThumb,
 } from "./homeVisuals";
 import styles from "./HomeEditorialHero.module.css";
@@ -22,10 +23,12 @@ export function HomeEditorialHero({
   stats,
   videos,
 }: HomeEditorialHeroProps): React.ReactElement {
-  const visualVideos = videos.slice(0, 3).map((video) => ({
+  const visualVideos = videos.slice(0, 4).map((video) => ({
     video,
     thumb: videoThumb(video),
   }));
+  const mainVisual = visualVideos[0] ?? null;
+  const supportVisuals = visualVideos.slice(1, 4);
 
   return (
     <section className={styles.editorialHero} aria-label="FlameNode">
@@ -36,14 +39,17 @@ export function HomeEditorialHero({
       </div>
 
       <div className={styles.heroCopy}>
-        <p className={styles.heroEyebrow}>flamenode / node.0426</p>
+        <p className={styles.heroEyebrow}>creative network / 2026</p>
         <h1 className={styles.heroTitle}>
-          Video
+          つくる人が、
           <br />
-          <span className={styles.heroAccent}>Nodes</span>
+          つながる前に、
+          <br />
+          <span className={styles.heroAccent}>惹かれあう場所。</span>
         </h1>
         <p className={styles.heroLead}>
-          映像の結節点。個人制作映像のアーカイブと、イベントを束ねるプラットフォーム。
+          映像を投稿する。イベントに出会う。仲間と混ざる。
+          FlameNodeは、創作のはじまりをデザインするプラットフォームです。
         </p>
 
         <dl className={styles.heroStats}>
@@ -62,24 +68,51 @@ export function HomeEditorialHero({
         </dl>
 
         <div className={styles.heroActions}>
-          <a href={LIST_HREF} className="fn-btn fn-btn-primary fn-btn-lg">
-            作品を見る
+          <Link href={LIST_HREF} className="fn-btn fn-btn-primary fn-btn-lg">
+            作品を見にいく
             <Icon name="chevron-right" size={15} aria-hidden />
-          </a>
+          </Link>
           <Link href="/event" className="fn-btn fn-btn-ghost fn-btn-lg">
             イベントを探す
           </Link>
         </div>
+      </div>
 
-        {visualVideos.length > 0 ? (
-          <div className={styles.heroPreviewGrid} aria-hidden>
-            {visualVideos.map(({ video, thumb }, index) => (
-              <div key={`${video.id}-hero-preview-${index}`} className={styles.heroPreview}>
-                {thumb ? <img src={thumb} alt="" /> : <span>FN</span>}
-              </div>
-            ))}
-          </div>
-        ) : null}
+      <div className={styles.heroVisual} aria-label="注目作品">
+        <div className={styles.visualBackplate} aria-hidden />
+        <Link
+          href={videoHref(mainVisual?.video)}
+          className={styles.visualMain}
+          prefetch={false}
+        >
+          {mainVisual?.thumb ? (
+            <img src={mainVisual.thumb} alt="" loading="eager" />
+          ) : (
+            <span>FlameNode</span>
+          )}
+          <span className={styles.visualPlay}>
+            <Icon name="play" size={18} aria-hidden />
+          </span>
+          <span className={styles.visualCaption}>
+            Play
+            <br />
+            Create
+            <br />
+            Connect
+          </span>
+        </Link>
+        <div className={styles.visualSide}>
+          {supportVisuals.map(({ video, thumb }, index) => (
+            <Link
+              key={`${video.id}-hero-side-${index}`}
+              href={videoHref(video)}
+              className={styles.visualThumb}
+              prefetch={false}
+            >
+              {thumb ? <img src={thumb} alt="" loading="lazy" /> : <span>FN</span>}
+            </Link>
+          ))}
+        </div>
       </div>
     </section>
   );

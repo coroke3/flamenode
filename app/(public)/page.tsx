@@ -150,22 +150,11 @@ export default async function TopPage(): Promise<React.ReactElement> {
           aria-label="お知らせ"
           style={{ paddingTop: 18, paddingBottom: 0 }}
         >
-          <div style={{ display: "grid", gap: 8 }}>
+          <div className={styles.announcementList}>
             {announcements.map((item) => (
-              <article
-                key={item.id}
-                style={{
-                  padding: "12px 14px",
-                  border: "1px solid var(--border-subtle)",
-                  borderRadius: "var(--radius-md)",
-                  background: "var(--bg-surface)",
-                }}
-              >
+              <article key={item.id} className={styles.announcement}>
                 <strong>{item.title}</strong>
-                <p
-                  className="fn-muted fn-text-sm"
-                  style={{ marginTop: 4, whiteSpace: "pre-wrap" }}
-                >
+                <p className="fn-muted fn-text-sm">
                   {item.body.length > 180
                     ? `${item.body.slice(0, 179)}...`
                     : item.body}
@@ -180,6 +169,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
       <section className={styles.section} aria-labelledby="sec-recommend">
         <SectionHeader
           title="今週のピックアップ"
+          description="Selected by editors"
           moreHref="/recommend"
           moreLabel="一覧を見る"
         />
@@ -189,10 +179,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
           ) : (
             <Shelf ariaLabel="今週のピックアップ">
               {recommended.map((video, index) => (
-                <VideoCard
-                  key={`${video.id}-recommended-${index}`}
-                  video={video}
-                />
+                <VideoCard key={`${video.id}-recommended-${index}`} video={video} />
               ))}
             </Shelf>
           )}
@@ -202,6 +189,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
       <section className={styles.section} aria-labelledby="sec-creators">
         <SectionHeader
           title="注目クリエイター"
+          description="Featured artists"
           moreHref="/user"
           moreLabel="もっと見る"
         />
@@ -231,6 +219,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
       <section className={styles.section} aria-labelledby="sec-latest">
         <SectionHeader
           title="新着アップロード"
+          description="Just dropped"
           moreHref="/list"
           moreLabel="すべて見る"
         />
@@ -250,6 +239,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
       <section className={styles.section} aria-labelledby="sec-events">
         <SectionHeader
           title="募集中のイベント"
+          description="Open for entry"
           moreHref="/event"
           moreLabel="すべて見る"
         />

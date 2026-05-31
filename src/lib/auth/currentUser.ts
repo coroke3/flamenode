@@ -2,7 +2,7 @@ import "server-only";
 
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
-import { getDatabase, withDatabase } from "@/lib/cloudflare";
+import { withDatabase } from "@/lib/cloudflare";
 import { users } from "@/lib/db/schema";
 import { normalizeXId } from "@/lib/utils/xid";
 

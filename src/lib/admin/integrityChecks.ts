@@ -43,10 +43,6 @@ function eventHref(id: string): string {
   return `/admin/events/${encodeURIComponent(id)}`;
 }
 
-function xUserHref(id: string): string {
-  return `/admin/users?view=xid&q=${encodeURIComponent(id)}`;
-}
-
 async function countRows(
   db: DB,
   from: SQL,

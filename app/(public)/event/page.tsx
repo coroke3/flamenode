@@ -61,7 +61,7 @@ export default async function EventListPage(): Promise<React.ReactElement> {
       <header>
         <h1 className={styles.title}>イベント</h1>
         <p className={styles.lead}>
-          FlameNode で開催されている企画と、参加できるイベントを時系列で見られます。
+          FlameNode で開催される上映フェス・企画・募集イベントを、状態ごとに確認できます。
         </p>
       </header>
 
@@ -69,7 +69,7 @@ export default async function EventListPage(): Promise<React.ReactElement> {
         <div className="fn-empty fn-mt-lg">
           <Icon name="calendar" size={24} aria-hidden />
           <p className="fn-empty-message">
-            まだ表示できるイベントがありません。
+            表示できるイベントがまだありません。
           </p>
         </div>
       ) : (

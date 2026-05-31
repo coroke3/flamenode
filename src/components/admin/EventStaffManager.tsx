@@ -3,13 +3,10 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   addEventEditor,
-  removeEventEditor,
   updateEventEditor,
   upsertCollaborator,
-  removeCollaborator,
 } from "@/lib/actions/event-staff-admin";
 import {
   COLLABORATOR_PERMISSION_KEYS,
@@ -84,7 +81,7 @@ export function EventStaffManager({
   const router = useRouter();
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
-  const [confirm, setConfirm] = React.useState<
+  const [, setConfirm] = React.useState<
     | { kind: "editor"; xUserId: string }
     | { kind: "collaborator"; displayName: string; xUserId: string | null; discordId: string | null }
     | null
