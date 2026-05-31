@@ -39,31 +39,29 @@ export function HomeEditorialHero({
       </div>
 
       <div className={styles.heroCopy}>
-        <p className={styles.heroEyebrow}>creative network / 2026</p>
+        <p className={styles.heroEyebrow}>flamenode / creative archive</p>
         <h1 className={styles.heroTitle}>
-          つくる人が、
+          Video
           <br />
-          つながる前に、
-          <br />
-          <span className={styles.heroAccent}>惹かれあう場所。</span>
+          <span className={styles.heroAccent}>Nodes</span>
         </h1>
         <p className={styles.heroLead}>
-          映像を投稿する。イベントに出会う。仲間と混ざる。
-          FlameNodeは、創作のはじまりをデザインするプラットフォームです。
+          個人制作映像のアーカイブと、イベントを束ねるプラットフォーム。
+          作品を見つける、参加する、次の制作へつなげる。
         </p>
 
         <dl className={styles.heroStats}>
           <div>
-            <dt>公開作品</dt>
+            <dt>作品</dt>
             <dd>{formatHomeNumber(stats.publicVideos)}</dd>
-          </div>
-          <div>
-            <dt>開催中イベント</dt>
-            <dd>{formatHomeNumber(stats.activeEvents)}</dd>
           </div>
           <div>
             <dt>クリエイター</dt>
             <dd>{formatHomeNumber(stats.creators)}</dd>
+          </div>
+          <div>
+            <dt>開催中イベント</dt>
+            <dd>{formatHomeNumber(stats.activeEvents)}</dd>
           </div>
         </dl>
 
@@ -80,6 +78,9 @@ export function HomeEditorialHero({
 
       <div className={styles.heroVisual} aria-label="注目作品">
         <div className={styles.visualBackplate} aria-hidden />
+        <div className={styles.visualTag} aria-hidden>
+          NODE.0426
+        </div>
         <Link
           href={videoHref(mainVisual?.video)}
           className={styles.visualMain}
@@ -101,6 +102,9 @@ export function HomeEditorialHero({
             Connect
           </span>
         </Link>
+        <p className={styles.visualNote}>
+          Selected moving images from the current archive.
+        </p>
         <div className={styles.visualSide}>
           {supportVisuals.map(({ video, thumb }, index) => (
             <Link

@@ -5,7 +5,7 @@
   background: color-mix(in srgb, var(--bg-base) 92%, transparent);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border-bottom: 0;
+  border-bottom: 1px solid var(--hairline);
   transition:
     background-color 0.2s ease,
     border-color 0.2s ease;
@@ -31,7 +31,7 @@
   color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: 10px;
-  letter-spacing: 0.18em;
+  letter-spacing: 0;
   text-transform: lowercase;
   white-space: nowrap;
 }
@@ -73,7 +73,7 @@
   border-radius: 9px;
   color: var(--text-secondary);
   font-size: 13.5px;
-  font-weight: 700;
+  font-weight: 600;
   text-decoration: none;
   transition:
     background-color 0.15s ease,
@@ -141,7 +141,7 @@
   padding: 0 16px;
   border-radius: 9px;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: 0;
   text-decoration: none;
   transition:
@@ -165,14 +165,14 @@
 
 .ghostBtn {
   color: var(--text-secondary);
-  border: 1px solid var(--border-subtle);
-  background: transparent;
+  border: 1px solid transparent;
+  background: var(--bg-elevated);
 }
 
 .ghostBtn:hover {
   color: var(--text-primary);
-  border-color: var(--border-strong);
-  background: var(--bg-elevated);
+  border-color: transparent;
+  background: var(--accent-primary-soft);
 }
 
 .loginBtn {
@@ -346,6 +346,12 @@
 
   .menuToggle {
     display: none;
+  }
+}
+
+@media (min-width: 1180px) {
+  .bar {
+    width: min(100% - 96px, 1360px);
   }
 }
 

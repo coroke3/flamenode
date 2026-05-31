@@ -3,28 +3,26 @@
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  width: min(100% - 28px, 1320px);
-  margin: 44px auto 0;
-  padding: 30px 36px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  background:
-    linear-gradient(90deg, var(--accent-primary-soft), transparent 48%),
-    var(--bg-surface);
+  width: min(100% - 40px, 1360px);
+  margin: 56px auto 0;
+  padding: 36px 0;
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
 }
 
 .closingCta p,
 .closingCta h2 {
   margin: 0;
   color: var(--text-primary);
-  font-size: 34px;
-  font-weight: 900;
+  font-family: var(--font-display);
+  font-size: clamp(36px, 6vw, 80px);
+  font-weight: 800;
   letter-spacing: 0;
-  line-height: 1.18;
+  line-height: 0.95;
 }
 
 .closingCta p {
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
 .closingActions {
@@ -37,7 +35,7 @@
 @media (max-width: 900px) {
   .closingCta {
     display: grid;
-    padding: 24px;
+    padding: 30px 0;
   }
 
   .closingActions {
@@ -47,11 +45,17 @@
 
 @media (max-width: 640px) {
   .closingCta {
-    width: min(100% - 20px, 100%);
+    width: min(100% - 40px, 100%);
   }
 
   .closingCta p,
   .closingCta h2 {
-    font-size: 28px;
+    font-size: 38px;
+  }
+}
+
+@media (min-width: 1180px) {
+  .closingCta {
+    width: min(100% - 96px, 1360px);
   }
 }

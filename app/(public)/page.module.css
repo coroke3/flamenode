@@ -12,7 +12,7 @@
 .eventList {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 14px;
+  gap: 0;
   margin-top: 18px;
 }
 
@@ -37,8 +37,14 @@
   border-radius: var(--radius-md);
 }
 
+@media (min-width: 1180px) {
+  .section {
+    width: min(100% - 96px, 1360px);
+  }
+}
+
 @media (max-width: 640px) {
   .section {
-    width: min(100% - 20px, 100%);
+    width: min(100% - 40px, 100%);
   }
 }
