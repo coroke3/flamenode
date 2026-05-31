@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   historyLogs as historyLogsTable,
@@ -85,8 +85,6 @@ export default async function AdminUserDetailPage({
       if (r.interaction_type === "bookmark") bookmarkCount = c;
     }
   }
-  void and; // unused 警告抑止 (将来用)
-
   // X ID 連携申請履歴 (このユーザーが申請したもの)
   const linkRequests = await db
     .select({

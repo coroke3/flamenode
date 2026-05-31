@@ -7,6 +7,7 @@ import { historyLogs, users, xAccountLinkRequests } from "@/lib/db/schema";
 import { XLinkRequestTable } from "@/components/admin/XLinkRequestTable";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { parseAuditDiff } from "@/lib/audit/diff";
 
 export const metadata: Metadata = { title: "X ID 連携申請" };
 export const dynamic = "force-dynamic";
@@ -187,19 +188,10 @@ export default async function AdminXLinkRequestsPage({
             </thead>
             <tbody>
               {recentHistory.map((h) => {
-                const beforeKeys = parseKeys(h.before_data);
-                const afterKeys = parseKeys(h.after_data);
-                const changed = Array.from(
-                  new Set([...beforeKeys, ...afterKeys]),
-                ).filter((k) => {
-                  try {
-                    const b = h.before_data ? JSON.parse(h.before_data) : {};
-                    const a = h.after_data ? JSON.parse(h.after_data) : {};
-                    return JSON.stringify(b[k] ?? null) !== JSON.stringify(a[k] ?? null);
-                  } catch {
-                    return true;
-                  }
-                });
+                const changed = parseAuditDiff(
+                  h.before_data,
+                  h.after_data,
+                ).changedKeys;
                 return (
                   <tr key={h.id}>
                     <td style={{ whiteSpace: "nowrap" }}>
@@ -245,17 +237,4 @@ export default async function AdminXLinkRequestsPage({
       </section>
     </div>
   );
-}
-
-function parseKeys(value: string | null): string[] {
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return Object.keys(parsed as Record<string, unknown>);
-    }
-  } catch {
-    // ignore
-  }
-  return [];
 }

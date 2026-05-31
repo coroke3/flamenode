@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { canEditVideo } from "@/lib/auth/ownership";
@@ -342,6 +342,3 @@ export async function deleteVideoCollaborator(
   revalidatePath(`/dashboard/edit/${video.id}`);
   return { ok: true, message: "参加者の編集権限を解除しました。" };
 }
-
-// isNull/isNotNull は subject 検索で使うため re-export 用に残す (削除すると import 漏れの恐れあり)
-export const __unused_isNullIsNotNull = { isNull, isNotNull };
