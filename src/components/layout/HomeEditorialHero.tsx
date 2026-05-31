@@ -22,12 +22,10 @@ export function HomeEditorialHero({
   stats,
   videos,
 }: HomeEditorialHeroProps): React.ReactElement {
-  const primaryVisual = videos[0];
-  const secondaryVisual = videos[1];
-  const thirdVisual = videos[2];
-  const primaryThumb = videoThumb(primaryVisual);
-  const secondaryThumb = videoThumb(secondaryVisual);
-  const thirdThumb = videoThumb(thirdVisual);
+  const visualVideos = videos.slice(0, 3).map((video) => ({
+    video,
+    thumb: videoThumb(video),
+  }));
 
   return (
     <section className={styles.editorialHero} aria-label="FlameNode">
@@ -38,17 +36,14 @@ export function HomeEditorialHero({
       </div>
 
       <div className={styles.heroCopy}>
-        <p className={styles.heroEyebrow}>CREATIVE ARCHIVE / 2026</p>
+        <p className={styles.heroEyebrow}>flamenode / node.0426</p>
         <h1 className={styles.heroTitle}>
-          FlameNode
+          Video
           <br />
-          つくる人が、
-          <br />
-          <span className={styles.heroAccent}>つながる場所。</span>
+          <span className={styles.heroAccent}>Nodes</span>
         </h1>
         <p className={styles.heroLead}>
-          個人制作映像のアーカイブと、イベントを束ねるプラットフォーム。
-          作品、クリエイター、上映企画をひとつの流れでつなぎます。
+          映像の結節点。個人制作映像のアーカイブと、イベントを束ねるプラットフォーム。
         </p>
 
         <dl className={styles.heroStats}>
@@ -68,36 +63,23 @@ export function HomeEditorialHero({
 
         <div className={styles.heroActions}>
           <a href={LIST_HREF} className="fn-btn fn-btn-primary fn-btn-lg">
-            作品を見にいく
+            作品を見る
             <Icon name="chevron-right" size={15} aria-hidden />
           </a>
           <Link href="/event" className="fn-btn fn-btn-ghost fn-btn-lg">
             イベントを探す
           </Link>
         </div>
-      </div>
 
-      <div className={styles.heroVisual} aria-hidden>
-        <div className={styles.visualBackdrop} />
-        <div className={styles.visualCard}>
-          {primaryThumb ? (
-            <img src={primaryThumb} alt="" />
-          ) : (
-            <span className={styles.visualFallback}>FlameNode</span>
-          )}
-        </div>
-        <div className={styles.visualPanel}>
-          <span>Play</span>
-          <span>Create</span>
-          <span>Connect</span>
-        </div>
-        <div className={styles.visualMini}>
-          {secondaryThumb ? <img src={secondaryThumb} alt="" /> : null}
-        </div>
-        <div className={styles.visualTile}>
-          {thirdThumb ? <img src={thirdThumb} alt="" /> : null}
-        </div>
-        <div className={styles.visualPulse} />
+        {visualVideos.length > 0 ? (
+          <div className={styles.heroPreviewGrid} aria-hidden>
+            {visualVideos.map(({ video, thumb }, index) => (
+              <div key={`${video.id}-hero-preview-${index}`} className={styles.heroPreview}>
+                {thumb ? <img src={thumb} alt="" /> : <span>FN</span>}
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
     </section>
   );

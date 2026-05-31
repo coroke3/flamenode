@@ -3,9 +3,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  padding: 18px 20px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
+  padding: 18px 20px 18px 18px;
+  border: 0;
+  border-left: 4px solid var(--accent-primary);
+  border-radius: 8px;
   background: var(--bg-surface);
 }
 
@@ -16,6 +17,7 @@
 .panel h2 {
   margin: 0;
   font-size: 15px;
+  font-weight: 900;
 }
 
 .body {
@@ -26,24 +28,24 @@
 }
 
 .info {
-  border-color: rgba(120, 150, 255, 0.28);
+  border-left-color: var(--text-muted);
 }
 
 .success {
-  border-color: rgba(70, 200, 120, 0.34);
+  border-left-color: var(--accent-success);
 }
 
 .warning {
-  border-color: rgba(255, 225, 0, 0.45);
+  border-left-color: var(--accent-warning);
   background:
-    linear-gradient(90deg, rgba(255, 225, 0, 0.12), transparent),
+    linear-gradient(90deg, var(--accent-warning-soft), transparent 58%),
     var(--bg-surface);
 }
 
 .danger {
-  border-color: rgba(255, 70, 70, 0.46);
+  border-left-color: var(--accent-danger);
   background:
-    linear-gradient(90deg, rgba(255, 70, 70, 0.12), transparent),
+    linear-gradient(90deg, var(--accent-danger-soft), transparent 58%),
     var(--bg-surface);
 }
 

@@ -1,12 +1,18 @@
 .heroWrap {
   position: relative;
-  width: min(96%, var(--content-max));
-  margin: 24px auto 0;
+  width: min(100% - 40px, var(--content-max));
+  margin: -18px auto 0;
 }
 
 @media (min-width: 768px) {
   .heroWrap {
-    margin-top: 28px;
+    margin-top: -24px;
+  }
+}
+
+@media (min-width: 1180px) {
+  .heroWrap {
+    width: min(100% - 96px, var(--content-max));
   }
 }
 

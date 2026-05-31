@@ -1,8 +1,8 @@
 .card {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-xl);
+  border: 0;
+  border-radius: 8px;
   background: var(--bg-surface);
-  box-shadow: 0 18px 54px rgba(0, 0, 0, 0.08);
+  box-shadow: none;
 }
 
 .default {
@@ -19,14 +19,12 @@
       transparent 28%
     ),
     linear-gradient(135deg, #050505, #161616);
-  border-color: rgba(255, 255, 255, 0.12);
-  box-shadow: 0 32px 90px rgba(0, 0, 0, 0.32);
+  box-shadow: none;
 }
 
 .accent {
   padding: 22px;
   background:
-    linear-gradient(135deg, rgba(255, 225, 0, 0.12), transparent),
+    linear-gradient(135deg, var(--accent-primary-soft), transparent 54%),
     var(--bg-surface);
-  border-color: rgba(255, 225, 0, 0.34);
 }

@@ -102,7 +102,7 @@
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-muted);
-  background: transparent;
+  background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
 }
 
 .row {
@@ -203,9 +203,9 @@
   align-items: center;
   justify-content: center;
   gap: 7px;
-  border: 1px solid var(--hairline, var(--border-subtle));
+  border: 0;
   border-radius: 6px;
-  background: transparent;
+  background: var(--bg-elevated);
   color: var(--text-secondary);
   cursor: pointer;
   font-size: 12px;
@@ -218,7 +218,6 @@
 
 .emptySlotButton:hover:not(:disabled),
 .emptySlotButton:focus-visible {
-  border-color: var(--event-accent, var(--accent-primary));
   background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 13%, transparent);
   color: var(--text-primary);
   outline: none;

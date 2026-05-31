@@ -1,7 +1,7 @@
 .form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
-  gap: 32px;
+  gap: 28px;
   align-items: start;
 }
 
@@ -14,23 +14,29 @@
 
 .section {
   background-color: var(--bg-surface);
-  border: 1px solid var(--hairline, var(--border-subtle));
+  border: 0;
+  border-left: 4px solid var(--hairline, var(--border-subtle));
   border-radius: 8px;
-  padding: 0 18px 18px;
+  padding: 16px 18px 18px;
   overflow: hidden;
 }
 
+.section:focus-within {
+  border-left-color: var(--accent-primary);
+}
+
 .sectionTitle {
-  font-size: 15px;
-  font-weight: 700;
+  font-family: var(--font-display);
+  font-size: clamp(17px, 2vw, 22px);
+  font-weight: 900;
   letter-spacing: 0;
-  margin: 0 -18px 16px;
-  padding: 12px 18px;
+  margin: 0 0 16px;
+  padding: 0 0 12px;
   display: flex;
   align-items: center;
   gap: 8px;
   border-bottom: 1px solid var(--hairline, var(--border-subtle));
-  background: var(--bg-elevated);
+  background: transparent;
 }
 
 .field {
@@ -43,9 +49,11 @@
 .field:last-child { margin-bottom: 0; }
 
 .label {
+  font-family: var(--font-mono);
   font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: var(--text-muted);
 }
 
@@ -87,9 +95,9 @@
   gap: 12px;
   align-items: flex-start;
   padding: 12px;
-  border-radius: var(--radius-sm);
-  background-color: var(--bg-base);
-  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background-color: var(--bg-elevated);
+  border: 0;
 }
 
 .previewThumb {
@@ -133,7 +141,7 @@
 .previewChecklist,
 .saveId,
 .previewEvents {
-  border: 1px solid var(--hairline, var(--border-subtle));
+  border: 0;
   border-radius: 8px;
   background: var(--bg-surface);
   overflow: hidden;
@@ -324,8 +332,9 @@
   display: inline-flex;
   align-self: flex-start;
   padding: 4px 8px;
-  border: 1px solid var(--border-subtle);
+  border: 0;
   border-radius: 999px;
+  background: var(--bg-elevated);
   color: var(--text-secondary);
   font-size: 11.5px;
   font-weight: 700;
