@@ -85,8 +85,8 @@ export default async function DashboardLibraryPage({
   }
 
   const firstVideo = videos[0];
-  const playAllHref = firstVideo
-    ? `/${firstVideo.youtube_video_id ?? firstVideo.id}?playlist=${tab === "like" ? "lib-like" : "lib-bookmark"}`
+  const firstVideoHref = firstVideo
+    ? `/${firstVideo.youtube_video_id ?? firstVideo.id}`
     : null;
 
   return (
@@ -113,7 +113,7 @@ export default async function DashboardLibraryPage({
           ライブラリ
         </h1>
         <p style={{ marginTop: 6, color: "var(--text-muted)", fontSize: 13 }}>
-          自分がいいね・セーブした作品を一覧表示し、連続再生できます。
+          自分がいいね・セーブした作品を一覧表示します。
         </p>
       </header>
 
@@ -167,13 +167,13 @@ export default async function DashboardLibraryPage({
         <>
           <div style={{ display: "flex", gap: 8, marginBottom: 14, alignItems: "center" }}>
             <span className="fn-muted fn-text-sm">{videos.length} 件</span>
-            {playAllHref ? (
+            {firstVideoHref ? (
               <Link
-                href={playAllHref}
+                href={firstVideoHref}
                 className="fn-btn fn-btn-primary fn-btn-sm"
                 style={{ marginLeft: "auto" }}
               >
-                <Icon name="play" size={12} aria-hidden /> すべて再生
+                <Icon name="play" size={12} aria-hidden /> 最初の作品を見る
               </Link>
             ) : null}
           </div>
