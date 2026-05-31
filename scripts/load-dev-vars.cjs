@@ -1,6 +1,6 @@
 /**
  * .dev.vars (wrangler 形式) を process.env に読み込む小さなローダー。
- * Node.js の `-r ./scripts/load-dev-vars.js` で起動時に読み込まれる。
+ * Node.js の `-r ./scripts/load-dev-vars.cjs` で起動時に読み込まれる。
  *
  * 既に値が定義されている環境変数は上書きしない (CI 等を尊重する)。
  */
