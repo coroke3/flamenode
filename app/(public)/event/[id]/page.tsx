@@ -150,9 +150,6 @@ export default async function EventDetailPage({
   const availableSlots = slotRows.filter(
     (slot) => slot.status === "available",
   ).length;
-  const reservedSlots = slotRows.filter((slot) => slot.status === "reserved").length;
-  const submittedSlots = slotRows.filter((slot) => slot.status === "submitted").length;
-  const usedSlots = Math.max(0, slotTotal - availableSlots);
   const dayMetric = getDayMetric(event, now);
   const timeline = getTimeline(event, now);
   const slotPreview = buildSlotPreview(slotRows);
@@ -190,7 +187,7 @@ export default async function EventDetailPage({
           label="SLOTS"
           value={
             <>
-              {usedSlots}
+              {availableSlots}
               <span>/{slotTotal}</span>
             </>
           }
@@ -257,9 +254,12 @@ export default async function EventDetailPage({
       {slotPreview ? (
         <section className={styles.section}>
           <div className={styles.sectionHead}>
-            <div>
+            <div className={styles.sectionTitleGroup}>
               <p className={styles.eyebrow}>SLOT TABLE - 上映枠</p>
-              <h2 className={styles.sectionTitle}>上映枠</h2>
+              <div className={styles.sectionTitleLine}>
+                <h2 className={styles.sectionTitle}>上映枠</h2>
+                <span>空き枠を選択して確保します。確保後、投稿期間内に作品を提出してください。</span>
+              </div>
             </div>
             <div className={styles.legend}>
               <span><i data-kind="available" />Available</span>
@@ -311,9 +311,11 @@ export default async function EventDetailPage({
       {publicEditors.length > 0 ? (
         <section className={styles.section}>
           <div className={styles.sectionHead}>
-            <div>
+            <div className={styles.sectionTitleGroup}>
               <p className={styles.eyebrow}>CREW - 運営メンバー</p>
-              <h2 className={styles.sectionTitle}>Crew</h2>
+              <div className={styles.sectionTitleLine}>
+                <h2 className={styles.sectionTitle}>Crew</h2>
+              </div>
             </div>
           </div>
           <div className={styles.crewGrid}>
@@ -348,9 +350,12 @@ export default async function EventDetailPage({
 
       <section className={styles.section}>
         <div className={styles.sectionHead}>
-          <div>
+          <div className={styles.sectionTitleGroup}>
             <p className={styles.eyebrow}>SUBMITTED - 提出済み</p>
-            <h2 className={styles.sectionTitle}>Submitted videos</h2>
+            <div className={styles.sectionTitleLine}>
+              <h2 className={styles.sectionTitle}>Submitted videos</h2>
+              <span>受付中の提出済み作品（{formatCount(eventVideoTotal)}件）</span>
+            </div>
           </div>
           {eventVideoTotal > eventVideos.length ? (
             <Link href={`/list?event=${encodeURIComponent(event.id)}`} className={styles.moreLink}>
@@ -487,7 +492,7 @@ function getTimeline(event: EventRow, now: number) {
     startLabel: monthLabel(start),
     midLabel: monthLabel(start + span / 2),
     endLabel: monthLabel(end),
-    markerLabel: formatMonthDay(now),
+    markerLabel: formatMonthDayCompact(now),
     markerPct,
     windowLeftPct,
     windowWidthPct: Math.max(2, windowRightPct - windowLeftPct),
@@ -498,6 +503,14 @@ function monthLabel(ts: number): string {
   return new Intl.DateTimeFormat("ja-JP", {
     timeZone: "Asia/Tokyo",
     month: "numeric",
+  }).format(new Date(ts * 1000));
+}
+
+function formatMonthDayCompact(ts: number): string {
+  return new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    month: "numeric",
+    day: "numeric",
   }).format(new Date(ts * 1000));
 }
 
@@ -571,5 +584,5 @@ function slotDisplayName(slot: SlotRow): string {
 function slotStatusLabel(status: SlotRow["status"]): string {
   if (status === "submitted") return "提出済";
   if (status === "reserved") return "確保済";
-  return "空き";
+  return "選択可";
 }
