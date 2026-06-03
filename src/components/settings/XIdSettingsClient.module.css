@@ -4,6 +4,13 @@
   gap: 12px;
 }
 
+.introNote {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
 .row {
   display: flex;
   flex-wrap: wrap;
@@ -11,21 +18,37 @@
   align-items: center;
 }
 
+.rowEnd {
+  justify-content: flex-end;
+}
+
 .input {
   flex: 1 1 200px;
   min-width: 0;
   padding: 10px 12px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
   color: var(--text-primary);
   font-size: 14px;
 }
 
 .input:focus {
   outline: none;
-  border-color: var(--accent-primary);
-  box-shadow: 0 0 0 2px var(--accent-primary-soft);
+  box-shadow: inset 0 0 0 1.5px var(--accent-primary);
+}
+
+.atMark {
+  color: var(--text-muted);
+  font-size: 14px;
+  user-select: none;
+}
+
+.compactLabel {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .msgOk {
@@ -40,6 +63,10 @@
   color: var(--accent-danger);
 }
 
+.msgGap {
+  margin-top: 6px;
+}
+
 .iconPicker {
   display: grid;
   gap: 12px;
@@ -50,15 +77,15 @@
   width: fit-content;
   max-width: 100%;
   padding: 3px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  border: 0;
+  border-radius: var(--radius-md);
   background: var(--bg-elevated);
   gap: 3px;
 }
 
 .iconModeButton {
   border: 0;
-  border-radius: calc(var(--radius-sm) - 2px);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
@@ -83,7 +110,7 @@
 .iconModeButtonActive {
   background: var(--bg-surface);
   color: var(--text-primary);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  box-shadow: none;
 }
 
 .iconGrid {
@@ -93,12 +120,24 @@
   max-width: 520px;
 }
 
+.iconRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.iconRow .iconButton {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+}
+
 .iconButton {
   position: relative;
   aspect-ratio: 1;
   min-width: 0;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline, var(--border-subtle));
+  border-radius: var(--radius-md);
   background: var(--bg-base);
   cursor: pointer;
   overflow: hidden;
@@ -150,8 +189,8 @@
   align-items: center;
   max-width: 540px;
   padding: 12px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline, var(--border-subtle));
+  border-radius: var(--radius-md);
   background: var(--bg-base);
 }
 
@@ -179,4 +218,8 @@
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.fileInputHidden {
+  display: none;
 }

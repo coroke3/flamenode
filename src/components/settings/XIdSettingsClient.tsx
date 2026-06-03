@@ -16,7 +16,11 @@ import {
 import { ConfirmTextDialog } from "@/components/ui/ConfirmTextDialog";
 
 /** X ID 連携申請フォーム (Server Action `requestXIdLink`)。 */
-export function XIdLinkForm(): React.ReactElement {
+export function XIdLinkForm({
+  compact = false,
+}: {
+  compact?: boolean;
+} = {}): React.ReactElement {
   const router = useRouter();
   const [pending, startTransition] = React.useTransition();
   const [okMsg, setOkMsg] = React.useState<string | null>(null);
@@ -45,20 +49,22 @@ export function XIdLinkForm(): React.ReactElement {
 
   return (
     <form className={styles.stack} onSubmit={onSubmit} aria-labelledby="xid-link-heading">
-      <p id="xid-link-heading" className="fn-muted fn-text-sm" style={{ margin: 0 }}>
-        @ を除いた X のユーザー名を入力し、連携申請を送ります。運営承認後に一覧に表示されます。
-      </p>
+      {!compact ? (
+        <p id="xid-link-heading" className={styles.introNote}>
+          @ を除いた X のユーザー名を入力し、連携申請を送ります。運営承認後に一覧に表示されます。
+        </p>
+      ) : (
+        <span id="xid-link-heading" className="fn-sr-only">
+          新しい X ID を申請
+        </span>
+      )}
       <div className={styles.row}>
         <label htmlFor="xid-input" className="fn-sr-only">
           X ID
         </label>
         <span
           aria-hidden
-          style={{
-            color: "var(--text-muted)",
-            fontSize: 14,
-            userSelect: "none",
-          }}
+          className={styles.atMark}
         >
           @
         </span>
@@ -108,9 +114,13 @@ export function XIdLinkForm(): React.ReactElement {
 export function SetActiveXButton({
   xUserId,
   next,
+  label = "アクティブに設定",
+  className,
 }: {
   xUserId: string;
   next?: string | null;
+  label?: string;
+  className?: string;
 }): React.ReactElement {
   const router = useRouter();
   const [pending, startTransition] = React.useTransition();
@@ -132,22 +142,122 @@ export function SetActiveXButton({
   };
 
   return (
-    <div>
+    <>
       <button
         type="button"
-        className="fn-btn fn-btn-ghost fn-btn-sm"
+        className={className ?? "fn-btn fn-btn-ghost fn-btn-sm"}
         disabled={pending}
         onClick={onClick}
         aria-busy={pending}
       >
-        {pending ? "切替中…" : "切替"}
+        {pending ? "設定中…" : label}
       </button>
       {errMsg ? (
-        <p className={styles.msgErr} role="alert" style={{ marginTop: 6 }}>
+        <p className={`${styles.msgErr} ${styles.msgGap}`} role="alert">
           {errMsg}
         </p>
       ) : null}
-    </div>
+    </>
+  );
+}
+
+/** 設定画面のインライン編集用（表示名 + アイコン候補）。 */
+export function XIdCompactProfileForm({
+  x,
+  iconCandidates,
+  onCancel,
+}: {
+  x: {
+    id: string;
+    x_name: string;
+    icon_url: string | null;
+    profile_text: string | null;
+    youtube_channel_url: string | null;
+    other_social_links: string | null;
+  };
+  iconCandidates: string[];
+  onCancel: () => void;
+}): React.ReactElement {
+  const router = useRouter();
+  const [pending, startTransition] = React.useTransition();
+  const [message, setMessage] = React.useState<string | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const onSubmit = (ev: React.FormEvent<HTMLFormElement>) => {
+    ev.preventDefault();
+    const fd = new FormData(ev.currentTarget);
+    fd.set("x_user_id", x.id);
+    setMessage(null);
+    setError(null);
+    startTransition(async () => {
+      const result = await updateXIdProfile(fd);
+      if (!result.ok) {
+        setError(result.message ?? "更新に失敗しました。");
+        return;
+      }
+      setMessage(result.message ?? "保存しました。");
+      router.refresh();
+      onCancel();
+    });
+  };
+
+  return (
+    <form className={styles.stack} onSubmit={onSubmit}>
+      <input type="hidden" name="x_user_id" value={x.id} />
+      <input type="hidden" name="profile_text" value={x.profile_text ?? ""} />
+      <input
+        type="hidden"
+        name="youtube_channel_url"
+        value={x.youtube_channel_url ?? ""}
+      />
+      <input
+        type="hidden"
+        name="other_social_links"
+        value={x.other_social_links ?? ""}
+      />
+      <label className={styles.compactLabel}>
+        表示名オーバーライド（空欄で @ハンドル表示）
+      </label>
+      <input
+        name="x_name"
+        className={styles.input}
+        defaultValue={x.x_name}
+        placeholder={`@${x.id}`}
+        maxLength={80}
+        required
+        disabled={pending}
+      />
+      <div className={styles.stack}>
+        <span className={styles.compactLabel}>
+          アイコン候補（作品サムネから自動取得）
+        </span>
+        <XIdIconPicker
+          xUserId={x.id}
+          currentIconUrl={x.icon_url}
+          candidates={iconCandidates}
+          compact
+        />
+      </div>
+      <div className={`${styles.row} ${styles.rowEnd}`}>
+        <button
+          type="button"
+          className="fn-btn fn-btn-ghost fn-btn-sm"
+          disabled={pending}
+          onClick={onCancel}
+        >
+          キャンセル
+        </button>
+        <button
+          type="submit"
+          className="fn-btn fn-btn-primary fn-btn-sm"
+          disabled={pending}
+        >
+          {pending ? "保存中…" : "保存"}
+        </button>
+      </div>
+      {message ? <p className={styles.msgOk}>{message}</p> : null}
+      {error ? <p className={styles.msgErr}>{error}</p> : null}
+    </form>
   );
 }
 
@@ -199,7 +309,7 @@ export function XIdProfileForm({
     >
       <input type="hidden" name="x_user_id" value={x.id} />
       <div className={styles.stack}>
-        <label className="fn-label" style={{ fontSize: 12 }}>アイコン</label>
+        <label className={styles.compactLabel}>アイコン</label>
         <XIdIconPicker
           xUserId={x.id}
           currentIconUrl={x.icon_url}
@@ -261,10 +371,12 @@ function XIdIconPicker({
   xUserId,
   currentIconUrl,
   candidates,
+  compact = false,
 }: {
   xUserId: string;
   currentIconUrl: string | null;
   candidates: string[];
+  compact?: boolean;
 }): React.ReactElement {
   const router = useRouter();
   const [pending, startTransition] = React.useTransition();
@@ -326,30 +438,32 @@ function XIdIconPicker({
 
   return (
     <div className={styles.iconPicker}>
-      <div className={styles.iconModeSwitch} role="tablist" aria-label="アイコン設定方法">
-        <button
-          type="button"
-          className={`${styles.iconModeButton} ${mode === "select" ? styles.iconModeButtonActive : ""}`}
-          onClick={() => setMode("select")}
-          disabled={pending || candidates.length === 0}
-          aria-selected={mode === "select"}
-          role="tab"
-        >
-          候補から選ぶ
-        </button>
-        <button
-          type="button"
-          className={`${styles.iconModeButton} ${mode === "upload" ? styles.iconModeButtonActive : ""}`}
-          onClick={() => setMode("upload")}
-          disabled={pending}
-          aria-selected={mode === "upload"}
-          role="tab"
-        >
-          新規アップロード
-        </button>
-      </div>
-      {mode === "select" ? (
-        <div className={styles.iconGrid}>
+      {!compact ? (
+        <div className={styles.iconModeSwitch} role="tablist" aria-label="アイコン設定方法">
+          <button
+            type="button"
+            className={`${styles.iconModeButton} ${mode === "select" ? styles.iconModeButtonActive : ""}`}
+            onClick={() => setMode("select")}
+            disabled={pending || candidates.length === 0}
+            aria-selected={mode === "select"}
+            role="tab"
+          >
+            候補から選ぶ
+          </button>
+          <button
+            type="button"
+            className={`${styles.iconModeButton} ${mode === "upload" ? styles.iconModeButtonActive : ""}`}
+            onClick={() => setMode("upload")}
+            disabled={pending}
+            aria-selected={mode === "upload"}
+            role="tab"
+          >
+            新規アップロード
+          </button>
+        </div>
+      ) : null}
+      {mode === "select" || compact ? (
+        <div className={compact ? styles.iconRow : styles.iconGrid}>
           {candidates.length === 0 ? (
             <p className="fn-muted fn-text-sm">
               まだ候補がありません。新しくアップロードするか、作品に設定したアイコンが候補になります。
@@ -376,7 +490,7 @@ function XIdIconPicker({
             ))
           )}
         </div>
-      ) : (
+      ) : !compact ? (
         <div className={styles.uploadPanel}>
           <div className={styles.uploadPreview}>
             {uploadPreview ?? currentIconUrl ? (
@@ -396,7 +510,7 @@ function XIdIconPicker({
                 type="file"
                 accept="image/png,image/jpeg,image/webp"
                 onChange={(ev) => onPickUploadFile(ev.currentTarget.files?.[0] ?? null)}
-                style={{ display: "none" }}
+                className={styles.fileInputHidden}
                 disabled={pending}
               />
               <Icon name="upload" size={12} aria-hidden /> 画像を選ぶ
@@ -409,7 +523,7 @@ function XIdIconPicker({
             ) : null}
           </div>
         </div>
-      )}
+      ) : null}
       {message ? <p className={styles.msgOk}>{message}</p> : null}
       {error ? <p className={styles.msgErr}>{error}</p> : null}
     </div>
@@ -418,8 +532,12 @@ function XIdIconPicker({
 
 export function DeleteXIdForm({
   xUserId,
+  label = "削除",
+  className,
 }: {
   xUserId: string;
+  label?: string;
+  className?: string;
 }): React.ReactElement {
   const router = useRouter();
   const [pending, startTransition] = React.useTransition();
@@ -443,14 +561,15 @@ export function DeleteXIdForm({
   };
 
   return (
-    <div className={styles.stack}>
+    <>
       <button
         type="button"
-        className="fn-btn fn-btn-ghost fn-btn-sm"
+        className={className ?? "fn-btn fn-btn-ghost fn-btn-sm"}
         disabled={pending}
         onClick={() => setConfirmOpen(true)}
       >
-        <Icon name="trash" size={12} aria-hidden /> X ID連携を削除
+        {label === "削除" ? null : <Icon name="trash" size={12} aria-hidden />}
+        {label}
       </button>
       {error ? <p className={styles.msgErr}>{error}</p> : null}
 
@@ -485,6 +604,6 @@ export function DeleteXIdForm({
         }}
         onCancel={() => setConfirmOpen(false)}
       />
-    </div>
+    </>
   );
 }
