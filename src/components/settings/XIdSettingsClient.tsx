@@ -224,7 +224,6 @@ export function XIdCompactProfileForm({
         defaultValue={x.x_name}
         placeholder={`@${x.id}`}
         maxLength={80}
-        required
         disabled={pending}
       />
       <div className={styles.stack}>
@@ -356,7 +355,10 @@ export function XIdProfileForm({
           type="button"
           className="fn-btn fn-btn-ghost fn-btn-sm"
           disabled={pending}
-          onClick={(ev) => run(ev.currentTarget.form!, enablePortfolio)}
+          onClick={(ev) => {
+            const form = ev.currentTarget.form;
+            if (form) run(form, enablePortfolio);
+          }}
         >
           <Icon name="grid" size={12} aria-hidden /> ポートフォリオを有効化
         </button>

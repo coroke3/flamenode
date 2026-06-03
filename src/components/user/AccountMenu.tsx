@@ -44,7 +44,11 @@ function dedupeXIds(entries: readonly XIdEntry[]): XIdEntry[] {
     const normalized = normalizeXId(entry.x_user_id);
     if (!normalized || seen.has(normalized)) continue;
     seen.add(normalized);
-    out.push({ ...entry, x_user_id: normalized });
+    out.push({
+      ...entry,
+      x_user_id: normalized,
+      x_name: entry.x_name?.trim() || `@${normalized}`,
+    });
   }
   return out;
 }
@@ -153,7 +157,7 @@ export function AccountMenu({
 
   // トリガー用のアイコンと名前
   const triggerIcon = activeEntry?.icon_url ?? user.image;
-  const triggerName = activeEntry ? activeEntry.x_name : user.name;
+  const triggerName = activeEntry ? activeEntry.x_name : user.name?.trim() || "guest";
 
   const order = (s: XIdEntry["approval_status"]) =>
     s === "approved" ? 0 : s === "pending" ? 1 : 2;

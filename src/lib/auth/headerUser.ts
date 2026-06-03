@@ -55,6 +55,10 @@ function approvalRank(status: HeaderXIdEntry["approval_status"]): number {
   return status === "approved" ? 0 : status === "pending" ? 1 : 2;
 }
 
+function fallbackName(value: string | null | undefined, fallback: string): string {
+  return value?.trim() || fallback;
+}
+
 export async function buildHeaderUser(
   sessionUser: SessionUserLike | null | undefined,
 ): Promise<HeaderUser | null> {
@@ -106,7 +110,7 @@ export async function buildHeaderUser(
       const approvalStatus = normalizeApprovalStatus(row.approval_status);
       const entry: HeaderXIdEntry = {
         x_user_id: normalizedId,
-        x_name: row.x_name,
+        x_name: fallbackName(row.x_name, `@${normalizedId}`),
         icon_url: row.icon_url,
         approval_status: approvalStatus,
         is_active:
@@ -130,7 +134,7 @@ export async function buildHeaderUser(
 
   return {
     id: sessionUser.id,
-    name: sessionUser.name ?? "ゲスト",
+    name: fallbackName(sessionUser.name, "guest"),
     image: sessionUser.image ?? null,
     role,
     xIds,

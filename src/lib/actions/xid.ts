@@ -225,7 +225,7 @@ export async function updateXIdProfile(
   if (!userId) return { ok: false, message: "ログインが必要です。" };
 
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
-  const xName = String(formData.get("x_name") ?? "").trim();
+  const xName = String(formData.get("x_name") ?? "").trim().slice(0, 80);
   const profileText = String(formData.get("profile_text") ?? "").trim();
   const youtubeChannelRaw = String(
     formData.get("youtube_channel_url") ?? "",
@@ -238,8 +238,8 @@ export async function updateXIdProfile(
     : null;
   const otherSocialLinks = sanitizeSocialLinks(otherSocialLinksRaw);
 
-  if (!xUserId || !xName) {
-    return { ok: false, message: "X ID と表示名が必要です。" };
+  if (!xUserId) {
+    return { ok: false, message: "X ID が必要です。" };
   }
   if (youtubeChannelRaw && !youtubeChannelUrl) {
     return {
@@ -260,11 +260,12 @@ export async function updateXIdProfile(
   if (!row) {
     return { ok: false, message: "この X ID を編集する権限がありません。" };
   }
+  const displayName = xName || String(row.x_name ?? "").trim() || xUserId;
 
   await db
     .update(xUsers)
     .set({
-      x_name: xName,
+      x_name: displayName,
       profile_text: profileText || null,
       youtube_channel_url: youtubeChannelUrl,
       other_social_links: otherSocialLinks,
@@ -277,7 +278,7 @@ export async function updateXIdProfile(
     record_id: xUserId,
     action: "UPDATE",
     after_data: JSON.stringify({
-      x_name: xName,
+      x_name: displayName,
       profile_text: profileText || null,
       youtube_channel_url: youtubeChannelUrl,
       other_social_links: otherSocialLinks,

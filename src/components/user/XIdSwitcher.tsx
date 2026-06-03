@@ -29,7 +29,11 @@ function dedupeEntries(entries: readonly XIdEntry[]): XIdEntry[] {
     const normalized = normalizeXId(entry.x_user_id);
     if (!normalized || seen.has(normalized)) continue;
     seen.add(normalized);
-    out.push({ ...entry, x_user_id: normalized });
+    out.push({
+      ...entry,
+      x_user_id: normalized,
+      x_name: entry.x_name?.trim() || `@${normalized}`,
+    });
   }
   return out;
 }
