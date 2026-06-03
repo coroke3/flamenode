@@ -105,7 +105,7 @@
   min-width: 0;
   padding: 14px 16px;
   background-color: var(--bg-surface);
-  border: 1px solid var(--hairline, var(--border-subtle));
+  border: 0;
   border-radius: 6px;
   transition:
     background-color 0.15s ease,
@@ -114,7 +114,6 @@
 }
 
 .card:hover {
-  border-color: var(--accent-primary);
   background-color: color-mix(in srgb, var(--accent-primary) 7%, var(--bg-surface));
   box-shadow: none;
   color: var(--text-primary);
@@ -133,7 +132,7 @@
   width: 48px;
   height: 48px;
   border-radius: 50%;
-  border: 1px solid var(--border-subtle);
+  border: 0;
   background-color: var(--bg-elevated);
   flex-shrink: 0;
 }
@@ -166,7 +165,7 @@
 }
 
 .handle {
-  color: var(--text-muted);
+  color: var(--text-faint, var(--text-muted));
   font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;

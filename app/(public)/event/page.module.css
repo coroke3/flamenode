@@ -76,13 +76,13 @@
   background-color: var(--bg-surface);
   border-radius: var(--radius-md);
   overflow: hidden;
-  transition: transform 0.16s ease, box-shadow 0.16s ease;
+  transition: transform 0.16s ease, background-color 0.16s ease;
 }
 
 .eventCard:hover {
   color: var(--text-primary);
   transform: translateY(-3px);
-  box-shadow: var(--shadow-soft);
+  background-color: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 5%, var(--bg-surface));
 }
 
 .eventBanner {
@@ -150,7 +150,7 @@
 
 .eventExplain {
   font-size: 13px;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;

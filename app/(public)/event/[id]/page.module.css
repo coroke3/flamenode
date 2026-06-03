@@ -21,7 +21,7 @@
   background-color: var(--bg-elevated);
   background-size: cover;
   background-position: center;
-  border: 1px solid var(--hairline, var(--border-subtle));
+  border: 0;
 }
 
 .heroBody {
@@ -40,7 +40,7 @@
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  color: var(--text-muted);
+  color: var(--text-faint, var(--text-muted));
 }
 
 .entryPeriod {
@@ -132,7 +132,7 @@
   padding: 12px 18px 12px 0;
   border-left: 0;
   border-right: 1px solid var(--hairline, var(--border-subtle));
-  color: var(--text-secondary);
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 700;
 }

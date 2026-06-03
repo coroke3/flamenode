@@ -4,15 +4,16 @@
   align-items: center;
   width: 100%;
   text-align: center;
-  padding: 12px 8px;
+  padding: 10px 8px 12px;
   border-radius: var(--radius-md);
-  transition: background-color 0.15s ease;
+  transition: background-color 0.15s ease, transform 0.15s ease;
   text-decoration: none;
   color: inherit;
 }
 
 .card:hover {
   background-color: var(--bg-elevated);
+  transform: translateY(-2px);
 }
 
 .iconWrap {
@@ -22,11 +23,12 @@
   overflow: hidden;
   background-color: var(--bg-elevated);
   box-shadow: none;
-  transition: box-shadow 0.15s ease;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
 }
 
 .card:hover .iconWrap {
   box-shadow: 0 0 0 1px var(--accent-primary);
+  transform: scale(1.02);
 }
 
 .icon {
@@ -62,7 +64,7 @@
 
 .hint {
   font-size: 10.5px;
-  color: var(--text-muted);
+  color: var(--text-faint, var(--text-muted));
   margin-top: 2px;
 }
 

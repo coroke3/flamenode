@@ -1,7 +1,7 @@
 .footer {
   margin-top: 64px;
   border-top: 1px solid var(--hairline);
-  background-color: var(--bg-surface);
+  background-color: transparent;
 }
 
 .main {
@@ -21,7 +21,7 @@
 .tagline {
   margin-top: 14px;
   font-size: 13px;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   line-height: 1.7;
 }
 
@@ -33,7 +33,7 @@
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.18em;
-  color: var(--text-muted);
+  color: var(--text-faint, var(--text-muted));
   text-transform: uppercase;
   margin-bottom: 12px;
 }
@@ -46,12 +46,12 @@
 
 .list a {
   font-size: 13px;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   transition: color 0.15s ease;
 }
 
 .list a:hover {
-  color: var(--accent-primary);
+  color: var(--accent-primary-strong);
 }
 
 .legal {

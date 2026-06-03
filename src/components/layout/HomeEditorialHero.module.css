@@ -100,7 +100,7 @@
   position: absolute;
   inset: 9% 0 auto 18%;
   height: 74%;
-  border: 1px solid var(--hairline, var(--border-subtle));
+  border: 0;
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--accent-primary) 14%, transparent), transparent 44%),
     var(--bg-surface);
@@ -119,6 +119,7 @@
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0;
+  border-radius: 2px;
 }
 
 .visualMain {
@@ -128,7 +129,7 @@
   overflow: hidden;
   border-radius: var(--r-card);
   background: var(--bg-elevated);
-  border: 1px solid var(--hairline, var(--border-subtle));
+  border: 0;
 }
 
 .visualMain img,
@@ -213,7 +214,7 @@
   overflow: hidden;
   border-radius: var(--r-card);
   background: var(--bg-elevated);
-  border: 1px solid var(--hairline, var(--border-subtle));
+  border: 0;
 }
 
 @media (min-width: 960px) {

@@ -8,7 +8,7 @@
 }
 
 .card:hover {
-  transform: translateY(-1px);
+  transform: translateY(-2px);
 }
 
 .card:hover .thumb {
@@ -18,7 +18,7 @@
 .thumbWrap {
   aspect-ratio: 16 / 9;
   overflow: hidden;
-  border: 1px solid var(--hairline, var(--border-subtle));
+  border: 0;
   border-radius: var(--r-card);
   background-color: var(--bg-elevated);
   position: relative;
@@ -56,7 +56,7 @@
 .title {
   margin: 0;
   font-size: 14.5px;
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.35;
   color: var(--text-primary);
   display: -webkit-box;
@@ -69,7 +69,7 @@
 }
 
 .card:hover .title {
-  color: var(--accent-primary-strong);
+  color: var(--accent-primary);
 }
 
 .author {
@@ -91,7 +91,7 @@
 .authorIcon {
   object-fit: cover;
   background-color: var(--bg-elevated);
-  border: 1px solid var(--hairline);
+  border: 0;
 }
 
 .authorIconFallback {
@@ -117,11 +117,11 @@
   inset: 0;
   z-index: 1;
   margin: auto;
-  width: 42px;
-  height: 42px;
+  width: 46px;
+  height: 46px;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.32);
+  border: 0;
   border-radius: 999px;
   color: #fff;
   background: rgba(0, 0, 0, 0.46);
@@ -151,7 +151,7 @@
   display: flex;
   gap: 10px;
   align-items: flex-start;
-  padding: 8px 6px;
+  padding: 8px;
   border-radius: var(--radius-md);
   transition: background-color 0.15s ease;
   text-decoration: none;
@@ -171,7 +171,7 @@
   flex-shrink: 0;
   aspect-ratio: 16 / 9;
   overflow: hidden;
-  border: 1px solid var(--hairline, var(--border-subtle));
+  border: 0;
   border-radius: var(--r-card);
   background-color: var(--bg-elevated);
 }
