@@ -1,7 +1,7 @@
 .wrap {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 
 .errorBar {
@@ -52,51 +52,111 @@
   font-weight: 700;
 }
 
-.partsRow {
+.legend {
   display: flex;
-  flex-direction: column;
-  gap: 22px;
-  align-items: flex-start;
-  padding-bottom: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend i {
+  width: 10px;
+  height: 10px;
+  display: inline-block;
+  border: 1px solid var(--border-strong);
+  font-style: normal;
+}
+
+.legendAvailable {
+  background: transparent;
+}
+
+.legendReserved {
+  border-color: var(--event-accent, var(--accent-primary)) !important;
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 75%, transparent);
+}
+
+.legendPriority {
+  background: repeating-linear-gradient(
+    45deg,
+    transparent 0,
+    transparent 4px,
+    color-mix(in srgb, var(--text-primary) 12%, transparent) 4px,
+    color-mix(in srgb, var(--text-primary) 12%, transparent) 8px
+  );
+}
+
+.partsRow {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(260px, 1fr);
+  gap: 0;
+  align-items: stretch;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  border: 1px solid var(--hairline, var(--border-subtle));
+  background: var(--bg-surface);
+  scrollbar-width: thin;
 }
 
 .partColumn {
   width: 100%;
   min-width: 0;
-  padding-top: 18px;
-  border-top: 1px solid var(--hairline, var(--border-subtle));
+  padding-top: 0;
+  border-top: 0;
+  border-right: 1px solid var(--hairline, var(--border-subtle));
   background: transparent;
   overflow: visible;
 }
 
+.partColumn:last-child {
+  border-right: 0;
+}
+
 .partHeader {
-  padding: 0 0 12px;
-  font-family: var(--font-display);
-  font-size: clamp(18px, 2vw, 24px);
-  font-weight: 900;
-  letter-spacing: 0;
-  color: var(--text-primary);
-  background: transparent;
-  border-bottom: 0;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--hairline, var(--border-subtle));
 }
 
 .table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
   font-size: 12px;
-  border-top: 1px solid var(--hairline, var(--border-subtle));
+  border-top: 0;
 }
 
 .table th,
 .table td {
-  padding: 11px 10px 11px 0;
+  padding: 0;
   border-bottom: 1px solid var(--hairline, var(--border-subtle));
   text-align: left;
-  vertical-align: top;
+  vertical-align: middle;
 }
 
 .table th {
-  height: 38px;
+  display: none;
+  height: 0;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -124,9 +184,11 @@
 }
 
 .cellTime {
-  width: 116px;
+  width: 70px;
+  padding: 12px 8px 12px 12px !important;
   font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-elevated) 64%, transparent);
 }
 
 .timeStack {
@@ -136,17 +198,19 @@
 }
 
 .timeStack span {
+  display: none;
   font-size: 10.5px;
   color: var(--text-muted);
 }
 
 .timeStack strong {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-primary);
 }
 
 .cellSlot {
   min-width: 0;
+  padding: 0 !important;
 }
 
 .slotTaken {
@@ -155,7 +219,7 @@
   justify-content: space-between;
   gap: 10px;
   min-height: 58px;
-  padding: 8px 0;
+  padding: 10px 10px;
   min-width: 0;
 }
 
@@ -186,12 +250,16 @@
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 5px;
   flex-wrap: wrap;
   flex-shrink: 0;
 }
 
 .emptySlot {
+  display: inline-flex;
+  min-height: 58px;
+  align-items: center;
+  padding: 10px 12px;
   font-size: 11px;
   color: var(--text-muted);
 }
@@ -201,11 +269,11 @@
   min-height: 58px;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 7px;
   border: 0;
   border-radius: 0;
-  background: var(--event-accent, var(--accent-primary));
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 92%, #ffffff);
   color: var(--accent-ink);
   cursor: pointer;
   font-size: 12px;
@@ -218,7 +286,7 @@
 
 .emptySlotButton:hover:not(:disabled),
 .emptySlotButton:focus-visible {
-  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 88%, #ffffff);
+  background: var(--event-accent, var(--accent-primary));
   color: var(--accent-ink);
   outline: none;
 }
@@ -369,44 +437,30 @@
 
 @media (max-width: 520px) {
   .partColumn {
-    padding-top: 12px;
+    padding-top: 0;
   }
 
   .partHeader {
-    padding: 0 0 10px;
-  }
-
-  .table,
-  .table thead,
-  .table tbody,
-  .table tr,
-  .table th,
-  .table td {
-    display: block;
-    width: 100%;
-  }
-
-  .table thead {
-    display: none;
+    padding: 9px 12px;
   }
 
   .table tr {
-    padding: 10px;
-    border-bottom: 1px dashed var(--border-subtle);
-  }
-
-  .table td {
     padding: 0;
     border-bottom: 0;
   }
 
+  .table td {
+    display: table-cell;
+    border-bottom: 1px solid var(--hairline, var(--border-subtle));
+  }
+
   .cellTime {
-    margin-bottom: 8px;
+    margin-bottom: 0;
   }
 
   .slotTaken {
-    align-items: flex-start;
-    flex-direction: column;
+    align-items: center;
+    flex-direction: row;
     min-height: 58px;
   }
 

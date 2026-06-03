@@ -121,7 +121,9 @@ export function SlotGrid({
     if (slotKind !== "time") return [{ label: "枠", rows: displayRows }];
     const parts = buildSlotParts(displayRows, slotPartGapSec);
     return parts.map((part) => ({
-      label: formatSlotPartLabel(part, "full"),
+      label: part.start_time
+        ? formatUnix(part.start_time, { dateOnly: true })
+        : formatSlotPartLabel(part, "short"),
       rows: part.rows,
     }));
   }, [displayRows, slotKind, slotPartGapSec]);
@@ -323,6 +325,12 @@ export function SlotGrid({
           1 グループにまとめられます。連続上限は {maxConsecutiveSlots} 枠です。
         </p>
       ) : null}
+
+      <div className={styles.legend} aria-label="枠の凡例">
+        <span><i className={styles.legendAvailable} />空き</span>
+        <span><i className={styles.legendReserved} />確保済</span>
+        <span><i className={styles.legendPriority} />優先再取得中</span>
+      </div>
 
       <div className={styles.partsRow}>
         {groups.map((group, index) => (

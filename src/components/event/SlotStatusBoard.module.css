@@ -1,0 +1,127 @@
+.board {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+  background: var(--bg-surface);
+  border: 1px solid var(--hairline, var(--border-subtle));
+  color: var(--text-primary);
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.selected {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  padding: 18px;
+  background: var(--bg-elevated);
+}
+
+.selected strong {
+  color: var(--accent-primary);
+  font-family: var(--font-display);
+  font-size: clamp(42px, 5vw, 54px);
+  font-weight: 900;
+  line-height: 0.9;
+  font-variant-numeric: tabular-nums;
+}
+
+.selected span {
+  align-self: end;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.selected small {
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.details {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.details div {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr);
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--hairline, var(--border-subtle));
+}
+
+.details dt,
+.details dd {
+  margin: 0;
+}
+
+.details dt {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.details dd {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.actionHint {
+  padding: 14px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.parts {
+  display: grid;
+  gap: 6px;
+}
+
+.partRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.partRow span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.partRow strong {
+  color: var(--accent-primary);
+  font-size: 12px;
+}
+
+.partRow em {
+  color: var(--text-faint, var(--text-muted));
+  font-style: normal;
+}
+
+@media (max-width: 1079px) {
+  .board {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

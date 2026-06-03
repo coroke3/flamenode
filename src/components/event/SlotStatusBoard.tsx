@@ -1,11 +1,15 @@
 import * as React from "react";
 import type { SlotRow } from "./SlotGrid";
 import { buildSlotParts, formatSlotPartLabel } from "@/lib/utils/slotGrouping";
+import { formatUnix } from "@/lib/utils/format";
+import styles from "./SlotStatusBoard.module.css";
 
 interface SlotStatusBoardProps {
   slots: SlotRow[];
-  /** 「部」分割閾値 (秒)。未指定で 30 分。 */
   slotPartGapSec?: number;
+  eventTitle?: string;
+  slotFormatLabel?: string;
+  deadlineLabel?: string | null;
 }
 
 interface PartStat {
@@ -14,10 +18,12 @@ interface PartStat {
   filled: number;
 }
 
-/** 予約枠の埋まり具合を部別 + 合計で表示する。 */
 export function SlotStatusBoard({
   slots,
   slotPartGapSec,
+  eventTitle,
+  slotFormatLabel,
+  deadlineLabel,
 }: SlotStatusBoardProps): React.ReactElement {
   const partitioned = React.useMemo(() => {
     if (slots.length === 0) return [] as PartStat[];
@@ -33,59 +39,75 @@ export function SlotStatusBoard({
   if (total === 0) return <></>;
 
   const pct = (n: number, d: number) => (d === 0 ? 0 : Math.round((n / d) * 100));
+  const available = total - filled;
+  const selected =
+    slots.find((slot) => slot.status === "available") ??
+    slots.find((slot) => slot.status === "reserved") ??
+    slots[0];
+  const selectedTime =
+    selected?.start_time != null
+      ? formatUnix(selected.start_time, { timeOnly: true })
+      : (selected?.slot_label ?? "-");
+  const selectedDate =
+    selected?.start_time != null
+      ? formatUnix(selected.start_time, { dateOnly: true })
+      : null;
+  const selectedStatus =
+    selected?.status === "available"
+      ? "選択可"
+      : selected?.status === "submitted"
+        ? "提出済み"
+        : "この枠は確保できません";
 
   return (
-    <section
-      style={{
-        display: "grid",
-        gap: 10,
-      }}
-    >
-      <header
-        style={{
-          padding: 0,
-          fontSize: 13,
-          fontWeight: 800,
-        }}
-      >
-        残枠状況
-      </header>
-      <table className="fn-table" style={{ fontSize: 12 }}>
-        <thead>
-          <tr>
-            <th>部</th>
-            <th>済 / 枠数</th>
-            <th>済率</th>
-            <th>残り</th>
-          </tr>
-        </thead>
-        <tbody>
-          {partitioned.map((p, i) => (
-            <tr key={i}>
-              <td>{p.label}</td>
-              <td>
-                {p.filled} / {p.total}
-              </td>
-              <td>{pct(p.filled, p.total)}%</td>
-              <td>
-                {p.total - p.filled === 0 ? (
-                  <span className="fn-badge fn-badge-neutral">残り 0 枠</span>
-                ) : (
-                  `残り ${p.total - p.filled} 枠`
-                )}
-              </td>
-            </tr>
-          ))}
-          <tr style={{ fontWeight: 700, background: "var(--bg-elevated)" }}>
-            <td>合計</td>
-            <td>
-              {filled} / {total}
-            </td>
-            <td>{pct(filled, total)}%</td>
-            <td>残り {total - filled} 枠</td>
-          </tr>
-        </tbody>
-      </table>
+    <section className={styles.board} aria-label="枠の状態">
+      <p className={styles.eyebrow}>選択中の枠</p>
+      <div className={styles.selected}>
+        <strong>{selectedTime}</strong>
+        {selectedDate ? <span>{selectedDate}</span> : null}
+        <small>{selectedStatus}</small>
+      </div>
+
+      <dl className={styles.details}>
+        {eventTitle ? (
+          <div>
+            <dt>イベント</dt>
+            <dd>{eventTitle}</dd>
+          </div>
+        ) : null}
+        {slotFormatLabel ? (
+          <div>
+            <dt>形式</dt>
+            <dd>{slotFormatLabel}</dd>
+          </div>
+        ) : null}
+        {deadlineLabel ? (
+          <div>
+            <dt>提出締切</dt>
+            <dd>{deadlineLabel}</dd>
+          </div>
+        ) : null}
+        <div>
+          <dt>残り枠</dt>
+          <dd>
+            {available} / {total}
+          </dd>
+        </div>
+      </dl>
+
+      <div className={styles.actionHint}>
+        枠確保後、投稿期間内に作品を提出してください。未提出の枠は自動解放されます。
+      </div>
+
+      <div className={styles.parts}>
+        {partitioned.map((p, i) => (
+          <div key={i} className={styles.partRow}>
+            <span>{p.label}</span>
+            <strong>{p.total - p.filled}</strong>
+            <em>{pct(p.filled, p.total)}%</em>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }

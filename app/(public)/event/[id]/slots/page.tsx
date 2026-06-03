@@ -145,9 +145,12 @@ export default async function EventSlotsPage({
         </div>
         <h1 className={styles.title}>{event.title} の枠確保</h1>
         <div className={styles.stats} aria-label="枠の状態">
-          <span>残り {availableSlots} / {slotTotal} 枠</span>
-          <span>{fillRatio}% 埋まり</span>
-          <span>{event.slot_type === "count" ? "番号枠" : "時間枠"}</span>
+          <strong>
+            {availableSlots}
+            <small>/{slotTotal}</small>
+          </strong>
+          <span>空き枠</span>
+          <em>{fillRatio}% 埋まり</em>
         </div>
       </header>
 
@@ -198,7 +201,19 @@ export default async function EventSlotsPage({
         </main>
         {slotRowsForGrid.length > 0 ? (
           <aside className={styles.aside}>
-            <SlotStatusBoard slots={slotRowsForGrid} slotPartGapSec={slotPartGapSec} />
+            <SlotStatusBoard
+              slots={slotRowsForGrid}
+              slotPartGapSec={slotPartGapSec}
+              eventTitle={event.title}
+              slotFormatLabel={
+                event.slot_type === "count" ? "番号枠" : "単枠 / 上映枠"
+              }
+              deadlineLabel={
+                event.entry_end_time != null
+                  ? formatUnix(event.entry_end_time)
+                  : null
+              }
+            />
           </aside>
         ) : null}
       </div>
