@@ -14,15 +14,14 @@
 
 .section {
   background-color: var(--bg-surface);
-  border: 0;
-  border-left: 4px solid var(--hairline, var(--border-subtle));
-  border-radius: 8px;
+  border: 1px solid var(--hairline, var(--border-subtle));
+  border-radius: 0;
   padding: 16px 18px 18px;
   overflow: hidden;
 }
 
 .section:focus-within {
-  border-left-color: var(--accent-primary);
+  border-color: var(--accent-primary);
 }
 
 .sectionTitle {
@@ -30,13 +29,13 @@
   font-size: clamp(17px, 2vw, 22px);
   font-weight: 900;
   letter-spacing: 0;
-  margin: 0 0 16px;
-  padding: 0 0 12px;
+  margin: -16px -18px 16px;
+  padding: 15px 18px 14px;
   display: flex;
   align-items: center;
   gap: 8px;
   border-bottom: 1px solid var(--hairline, var(--border-subtle));
-  background: transparent;
+  background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
 }
 
 .field {
@@ -95,9 +94,9 @@
   gap: 12px;
   align-items: flex-start;
   padding: 12px;
-  border-radius: 8px;
+  border-radius: 0;
   background-color: var(--bg-elevated);
-  border: 0;
+  border: 1px solid var(--hairline, var(--border-subtle));
 }
 
 .previewThumb {
@@ -141,8 +140,8 @@
 .previewChecklist,
 .saveId,
 .previewEvents {
-  border: 0;
-  border-radius: 8px;
+  border: 1px solid var(--hairline, var(--border-subtle));
+  border-radius: 0;
   background: var(--bg-surface);
   overflow: hidden;
 }
@@ -155,7 +154,7 @@
   place-items: center;
   overflow: hidden;
   background:
-    linear-gradient(135deg, rgba(200, 242, 31, 0.16), transparent 45%),
+    linear-gradient(135deg, rgba(200, 255, 18, 0.16), transparent 45%),
     linear-gradient(135deg, #2a331c, #161b0e);
 }
 
@@ -333,7 +332,7 @@
   align-self: flex-start;
   padding: 4px 8px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 0;
   background: var(--bg-elevated);
   color: var(--text-secondary);
   font-size: 11.5px;
@@ -394,7 +393,7 @@
 .editableField textarea:not([disabled]):focus,
 .editableField select:not([disabled]):focus {
   border-color: var(--accent-primary, #4f8ef7);
-  box-shadow: 0 0 0 2px var(--accent-primary-soft, rgba(79, 142, 247, 0.18));
+  box-shadow: none;
 }
 
 @media (max-width: 1040px) {

@@ -294,6 +294,8 @@ export function EventRecruitCard({
   const accentStyle = {
     "--event-accent": event.accent_color ?? "var(--accent-primary)",
   } as React.CSSProperties;
+  const titleLabel = variant === "primary" ? stateLabel(state) : event.title;
+  const badgeLabel = variant === "primary" ? event.title : stateLabel(state);
 
   return (
     <article
@@ -309,12 +311,12 @@ export function EventRecruitCard({
         <header className={styles.header}>
           <span className={styles.eyebrow}>FlameNode Event</span>
           <Link href={`/event/${event.id}`} className={styles.title}>
-            {event.title}
+            {titleLabel}
           </Link>
           <span
             className={`${styles.stateBadge} ${stateBadgeClass(state, styles)}`}
           >
-            {stateLabel(state)}
+            {badgeLabel}
           </span>
         </header>
 

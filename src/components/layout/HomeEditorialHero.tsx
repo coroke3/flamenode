@@ -41,9 +41,9 @@ export function HomeEditorialHero({
       <div className={styles.heroCopy}>
         <p className={styles.heroEyebrow}>flamenode / creative archive</p>
         <h1 className={styles.heroTitle}>
-          Video
+          映像の、
           <br />
-          <span className={styles.heroAccent}>Nodes</span>
+          <span className={styles.heroAccent}>結節点。</span>
         </h1>
         <p className={styles.heroLead}>
           個人制作映像のアーカイブと、イベントを束ねるプラットフォーム。

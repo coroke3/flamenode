@@ -152,12 +152,12 @@ export default async function EventDetailPage({
   return (
     <div className={styles.page} style={accentVar}>
       <section className={styles.hero}>
-        <div
-          className={styles.heroBanner}
-          style={
-            event.img_url ? { backgroundImage: `url(${event.img_url})` } : undefined
-          }
-        />
+        {event.img_url ? (
+          <div
+            className={styles.heroBanner}
+            style={{ backgroundImage: `url(${event.img_url})` }}
+          />
+        ) : null}
         <div className={styles.heroBody}>
           <div className={styles.heroMeta}>
             <span className={`fn-badge ${eventStatusBadgeClass(status)}`}>

@@ -115,11 +115,11 @@
 }
 
 .rowFilled {
-  background: transparent;
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 14%, transparent);
 }
 
 .rowMine {
-  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 13%, transparent);
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 22%, transparent);
   box-shadow: inset 3px 0 0 var(--event-accent, var(--accent-primary));
 }
 
@@ -204,9 +204,9 @@
   justify-content: center;
   gap: 7px;
   border: 0;
-  border-radius: 6px;
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
+  border-radius: 0;
+  background: var(--event-accent, var(--accent-primary));
+  color: var(--accent-ink);
   cursor: pointer;
   font-size: 12px;
   font-weight: 700;
@@ -218,8 +218,8 @@
 
 .emptySlotButton:hover:not(:disabled),
 .emptySlotButton:focus-visible {
-  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 13%, transparent);
-  color: var(--text-primary);
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 88%, #ffffff);
+  color: var(--accent-ink);
   outline: none;
 }
 
@@ -237,7 +237,7 @@
   border-radius: 999px;
   font-size: 0;
   line-height: 1;
-  color: var(--event-accent, var(--accent-primary));
+  color: currentColor;
 }
 
 .emptyCircle::after {

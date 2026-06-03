@@ -4,7 +4,7 @@
   display: grid;
   grid-template-columns: 1fr;
   gap: 20px;
-  padding: 22px 22px;
+  padding: 24px;
   border-radius: 8px;
   background:
     linear-gradient(90deg, color-mix(in srgb, var(--event-accent, var(--accent-primary)) 12%, transparent), transparent 36%),
@@ -111,11 +111,11 @@
 
 .title {
   display: inline-block;
-  font-size: 24px;
-  font-weight: 800;
+  font-size: clamp(42px, 6vw, 70px);
+  font-weight: 900;
   letter-spacing: 0;
-  color: var(--text-primary);
-  line-height: 1.1;
+  color: var(--event-accent, var(--accent-primary));
+  line-height: 0.9;
   text-decoration: none;
   transition: color 0.15s ease;
 }
@@ -280,7 +280,7 @@
   flex-direction: column;
   gap: 2px;
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: 0;
   background: var(--bg-elevated);
   border: 0;
 }
@@ -306,7 +306,7 @@
   gap: 6px;
   padding: 14px 16px;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 8%, transparent);
+  background: var(--event-accent, var(--accent-primary));
   border: 0;
 }
 
@@ -315,7 +315,7 @@
   font-weight: 700;
   letter-spacing: 0;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: color-mix(in srgb, var(--accent-ink) 70%, transparent);
 }
 
 .countdownValueWrap {
@@ -329,7 +329,7 @@
   font-size: 48px;
   font-weight: 800;
   letter-spacing: 0;
-  color: var(--event-accent, var(--accent-primary));
+  color: var(--accent-ink);
   font-variant-numeric: tabular-nums;
   text-shadow: none;
 }
@@ -337,7 +337,7 @@
 .countdownUnit {
   font-size: 18px;
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--accent-ink);
 }
 
 .slots {
@@ -453,7 +453,7 @@
   padding: 12px 20px;
   background: var(--event-accent, var(--accent-primary));
   color: var(--accent-ink);
-  border-radius: var(--radius-pill);
+  border-radius: 0;
   font-weight: 800;
   font-size: 14px;
   letter-spacing: 0;
@@ -476,11 +476,7 @@
   .card {
     grid-template-columns: minmax(0, 1fr) 240px;
     gap: 32px;
-    padding: 28px 32px;
-  }
-
-  .title {
-    font-size: 32px;
+    padding: 30px 36px;
   }
 
   .right {
@@ -495,11 +491,7 @@
 @media (min-width: 1024px) {
   .card {
     grid-template-columns: minmax(0, 1fr) 280px;
-    padding: 32px 36px;
-  }
-
-  .title {
-    font-size: 36px;
+    padding: 36px 40px;
   }
 
   .countdownValue {
