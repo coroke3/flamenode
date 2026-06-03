@@ -8,26 +8,41 @@ import { withDatabase } from "@/lib/cloudflare";
 import {
   events as eventsTable,
   slots as slotsTable,
-  videos,
   videoEvents,
+  videos,
+  videoStats,
+  videoYoutubeMetadata,
   xUsers,
 } from "@/lib/db/schema";
 import { fetchEventWithEditors } from "@/lib/db/queries";
 import {
   computeEventStatus,
-  eventStatusBadgeClass,
   eventStatusLabel,
   isAcceptingEntries,
 } from "@/lib/utils/eventStatus";
 import { Icon } from "@/components/ui/Icon";
-import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
-import { formatUnix } from "@/lib/utils/format";
+import { formatCount, formatDuration, formatUnix } from "@/lib/utils/format";
+import { youtubeThumbUrl } from "@/lib/youtube/id";
 
 export const dynamic = "force-dynamic";
 
 interface Props {
   params: Promise<{ id: string }>;
 }
+
+type EventRow = typeof eventsTable.$inferSelect;
+type SlotRow = typeof slotsTable.$inferSelect;
+
+type EventVideo = {
+  id: string;
+  title: string;
+  youtube_video_id: string | null;
+  display_name: string;
+  icon_url: string | null;
+  creator_x_user_id: string | null;
+  score: number;
+  duration_seconds: number | null;
+};
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
@@ -51,49 +66,67 @@ export default async function EventDetailPage({
     const data = await fetchEventWithEditors(db, id);
     if (!data) return null;
 
-    const eventVideos = (await db
-      .select({
-        id: videos.id,
-        title: videos.title,
-        youtube_video_id: videos.youtube_video_id,
-        display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.creator_display_name}, ${videos.creator_x_user_id})`,
-        icon_url: sql<string | null>`COALESCE(${videos.creator_icon_url}, ${xUsers.icon_url})`,
-        creator_x_user_id: videos.creator_x_user_id,
-        primary_event_id: videos.primary_event_id,
-        scheduled_time: videos.scheduled_time,
-        status: videos.visibility_status,
-      })
-      .from(videos)
-      .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
-      .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
-      .where(
-        and(eq(videoEvents.event_id, id), eq(videos.visibility_status, "public"))!,
-      )
-      .orderBy(asc(videos.scheduled_time), asc(videos.id))) as VideoCardData[];
+    const publicVideoWhere = and(
+      eq(videoEvents.event_id, id),
+      eq(videos.visibility_status, "public"),
+    )!;
 
-    const eventVideoCountRow = (
-      await db
-        .select({ c: sql<number>`COUNT(*)` })
-        .from(videos)
-        .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
-        .where(
-          and(eq(videoEvents.event_id, id), eq(videos.visibility_status, "public"))!,
-        )
-        .limit(1)
-    )[0];
-    const eventVideoTotal = Number(eventVideoCountRow?.c ?? 0);
+    const [eventVideos, eventVideoCountRow, creatorCountRow, slotRows] =
+      await Promise.all([
+        db
+          .select({
+            id: videos.id,
+            title: videos.title,
+            youtube_video_id: videos.youtube_video_id,
+            display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.creator_display_name}, ${videos.creator_x_user_id})`,
+            icon_url: sql<string | null>`COALESCE(${videos.creator_icon_url}, ${xUsers.icon_url})`,
+            creator_x_user_id: videos.creator_x_user_id,
+            score: sql<number>`COALESCE(${videoStats.score}, 0)`,
+            duration_seconds: videoYoutubeMetadata.duration_seconds,
+          })
+          .from(videos)
+          .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
+          .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
+          .leftJoin(videoStats, eq(videoStats.video_id, videos.id))
+          .leftJoin(
+            videoYoutubeMetadata,
+            eq(videoYoutubeMetadata.video_id, videos.id),
+          )
+          .where(publicVideoWhere)
+          .orderBy(asc(videos.scheduled_time), asc(videos.id))
+          .limit(8),
+        db
+          .select({ c: sql<number>`COUNT(*)` })
+          .from(videos)
+          .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
+          .where(publicVideoWhere)
+          .limit(1),
+        db
+          .select({
+            c: sql<number>`COUNT(DISTINCT ${videos.creator_x_user_id})`,
+          })
+          .from(videos)
+          .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
+          .where(publicVideoWhere)
+          .limit(1),
+        db
+          .select()
+          .from(slotsTable)
+          .where(eq(slotsTable.event_id, id))
+          .orderBy(
+            asc(slotsTable.start_time),
+            asc(slotsTable.end_time),
+            asc(slotsTable.sort_order),
+          ),
+      ]);
 
-    const slotRows = await db
-      .select()
-      .from(slotsTable)
-      .where(eq(slotsTable.event_id, id))
-      .orderBy(
-        asc(slotsTable.start_time),
-        asc(slotsTable.end_time),
-        asc(slotsTable.sort_order),
-      );
-
-    return { data, eventVideos, slotRows, eventVideoTotal };
+    return {
+      data,
+      eventVideos: eventVideos as EventVideo[],
+      eventVideoTotal: Number(eventVideoCountRow[0]?.c ?? 0),
+      creatorTotal: Number(creatorCountRow[0]?.c ?? 0),
+      slotRows,
+    };
   });
 
   if (!bundle) notFound();
@@ -101,230 +134,442 @@ export default async function EventDetailPage({
   const {
     data: { event, editors },
     eventVideos,
-    slotRows,
     eventVideoTotal,
+    creatorTotal,
+    slotRows,
   } = bundle;
-
-  const visibleVideos = eventVideos.filter((video) => video.status === "public");
-  const firstVisibleVideo = visibleVideos[0] ?? null;
-  const firstVisibleHref = firstVisibleVideo
-    ? `/${firstVisibleVideo.youtube_video_id ?? firstVisibleVideo.id}`
-    : null;
 
   const accentVar = {
     "--event-accent": event.accent_color ?? "var(--accent-primary)",
   } as React.CSSProperties;
-  const publicEditors = editors.filter((editor) => editor.is_public === 1);
   const status = computeEventStatus(event);
   const accepting = isAcceptingEntries(event);
+  const publicEditors = editors.filter((editor) => editor.is_public === 1);
   const now = Math.floor(Date.now() / 1000);
-  const entryNotStartedYet =
-    !accepting &&
-    event.is_entry_open === 1 &&
-    event.entry_start_time != null &&
-    now < event.entry_start_time;
-  const entryClosed =
-    !accepting &&
-    event.is_entry_open === 1 &&
-    event.entry_end_time != null &&
-    now > event.entry_end_time;
-
   const slotTotal = slotRows.length;
   const availableSlots = slotRows.filter(
     (slot) => slot.status === "available",
   ).length;
-  const filledSlots =
-    slotTotal > 0 ? Math.max(0, slotTotal - availableSlots) : null;
-  const slotFillRatio =
-    filledSlots != null && slotTotal > 0
-      ? Math.min(100, Math.round((filledSlots / slotTotal) * 100))
-      : null;
-  const infoItems = [
-    event.start_time != null ? `開催 ${formatUnix(event.start_time)}` : null,
-    event.entry_end_time != null
-      ? `募集締切 ${formatUnix(event.entry_end_time)}`
-      : null,
-    slotTotal > 0 ? `残り枠 ${availableSlots} / ${slotTotal}` : null,
-    `投稿数 ${eventVideoTotal}`,
-    accepting ? "エントリー受付中" : eventStatusLabel(status),
-  ].filter(Boolean) as string[];
+  const reservedSlots = slotRows.filter((slot) => slot.status === "reserved").length;
+  const submittedSlots = slotRows.filter((slot) => slot.status === "submitted").length;
+  const usedSlots = Math.max(0, slotTotal - availableSlots);
+  const dayMetric = getDayMetric(event, now);
+  const timeline = getTimeline(event, now);
+  const slotPreview = buildSlotPreview(slotRows);
+  const statusTitle = accepting ? "募集期間中" : eventStatusLabel(status);
 
   return (
     <div className={styles.page} style={accentVar}>
-      <section className={styles.hero}>
-        {event.img_url ? (
-          <div
-            className={styles.heroBanner}
-            style={{ backgroundImage: `url(${event.img_url})` }}
-          />
-        ) : null}
-        <div className={styles.heroBody}>
-          <div className={styles.heroMeta}>
-            <span className={`fn-badge ${eventStatusBadgeClass(status)}`}>
-              {eventStatusLabel(status)}
-            </span>
-            {accepting ? (
-              <span className="fn-badge fn-badge-soft">受付中</span>
-            ) : entryNotStartedYet ? (
-              <span className="fn-badge fn-badge-warning">募集開始前</span>
-            ) : entryClosed ? (
-              <span className="fn-badge fn-badge-neutral">募集終了</span>
-            ) : null}
-            <span>
-              {formatUnix(event.start_time, { dateOnly: true })}
-              {event.end_time
-                ? ` - ${formatUnix(event.end_time, { dateOnly: true })}`
-                : ""}
-            </span>
-            {event.entry_start_time != null || event.entry_end_time != null ? (
-              <span className={styles.entryPeriod}>
-                募集:{" "}
-                {event.entry_start_time != null
-                  ? formatUnix(event.entry_start_time)
-                  : "-"}
-                {" - "}
-                {event.entry_end_time != null
-                  ? formatUnix(event.entry_end_time)
-                  : "-"}
-              </span>
-            ) : null}
-          </div>
-
+      <header className={styles.hero}>
+        <div className={styles.heroCopy}>
+          <p className={styles.eyebrow}>EVENT</p>
           <h1 className={styles.heroTitle}>{event.title}</h1>
           {event.explanation ? (
-            <p className={styles.heroExplain}>{event.explanation}</p>
+            <p className={styles.heroLead}>{event.explanation}</p>
           ) : null}
-
-          <div className={styles.heroActions}>
-            {firstVisibleHref ? (
-              <Link href={firstVisibleHref} className="fn-btn fn-btn-primary">
-                <Icon name="play" size={14} aria-hidden />
-                作品を見る
-              </Link>
-            ) : null}
-            {accepting ? (
-              <Link href={`/event/${event.id}/slots`} className="fn-btn fn-btn-primary">
-                <Icon name="calendar" size={14} aria-hidden />
-                枠を確保する
-              </Link>
-            ) : null}
-            <Link href="/event" className="fn-btn fn-btn-ghost">
-              イベント一覧へ
+        </div>
+        <div className={styles.heroActions}>
+          <span className={styles.statusPill}>{statusTitle}</span>
+          {accepting ? (
+            <Link href={`/event/${event.id}/slots`} className={styles.reserveButton}>
+              枠を確保する <Icon name="chevron-right" size={14} aria-hidden />
             </Link>
-          </div>
-
-          {slotFillRatio != null && filledSlots != null ? (
-            <div className={styles.heroSlotMeter}>
-              <div className={styles.heroSlotMeterHead}>
-                <span>参加枠 {filledSlots} / {slotTotal}</span>
-                <span>{slotFillRatio}% 埋まり</span>
-              </div>
-              <span className={styles.heroSlotMeterTrack}>
-                <span
-                  className={styles.heroSlotMeterFill}
-                  style={{ width: `${slotFillRatio}%` }}
-                />
-              </span>
-            </div>
           ) : null}
+          <Link href="/rules" className={styles.guideLink}>
+            ガイドライン
+          </Link>
+        </div>
+      </header>
+
+      <section className={styles.statsGrid} aria-label="イベント概要">
+        <StatCard label="募集期間" value={formatRange(event.entry_start_time, event.entry_end_time)} />
+        <StatCard label="投稿期間" value={formatRange(event.start_time, event.end_time)} />
+        <StatCard label="ENTRIES" value={formatCount(eventVideoTotal)} />
+        <StatCard label="CREATORS" value={formatCount(creatorTotal)} />
+        <StatCard
+          label="SLOTS"
+          value={
+            <>
+              {usedSlots}
+              <span>/{slotTotal}</span>
+            </>
+          }
+        />
+        <StatCard
+          label={dayMetric.label}
+          value={
+            <>
+              {dayMetric.value}
+              <span>日</span>
+            </>
+          }
+        />
+      </section>
+
+      <section className={styles.recruitCard} aria-label="募集状況">
+        <div className={styles.recruitMain}>
+          <p className={styles.cardCode}>{event.id}</p>
+          <h2>{statusTitle}</h2>
+          <div className={styles.ruler}>
+            <span className={styles.monthStart}>{timeline.startLabel}</span>
+            <span className={styles.monthMid}>{timeline.midLabel}</span>
+            <span className={styles.monthEnd}>{timeline.endLabel}</span>
+            <span className={styles.rulerLine} />
+            <span
+              className={styles.rulerMarker}
+              style={{ left: `${timeline.markerPct}%` }}
+            >
+              {timeline.markerLabel}
+            </span>
+            <span
+              className={styles.rulerWindow}
+              style={{
+                left: `${timeline.windowLeftPct}%`,
+                width: `${timeline.windowWidthPct}%`,
+              }}
+            />
+          </div>
+          <div className={styles.recruitFacts}>
+            <MiniFact label="ENTRIES" value={formatCount(eventVideoTotal)} />
+            <MiniFact label="CREATORS" value={formatCount(creatorTotal)} />
+            <MiniFact
+              label="SLOTS LEFT"
+              value={`${availableSlots}/${slotTotal}`}
+            />
+            <MiniFact label="EVENT" value={event.title} wide />
+          </div>
+        </div>
+        <div className={styles.recruitAside}>
+          <Link href={`/event/${event.id}/slots`} className={styles.cardLink}>
+            詳細ページへ <Icon name="chevron-right" size={14} aria-hidden />
+          </Link>
+          <div className={styles.daysBox}>
+            <span>{dayMetric.label}</span>
+            <strong>
+              {dayMetric.value}
+              <small>日</small>
+            </strong>
+            <em>{dayMetric.caption}</em>
+          </div>
         </div>
       </section>
 
-      {infoItems.length > 0 ? (
-        <section className={styles.infoStrip} aria-label="イベント情報">
-          <div className={styles.infoStripTrack}>
-            {infoItems.map((item) => (
-              <span key={item} className={styles.infoStripItem}>
-                {item}
-              </span>
-            ))}
+      {slotPreview ? (
+        <section className={styles.section}>
+          <div className={styles.sectionHead}>
+            <div>
+              <p className={styles.eyebrow}>SLOT TABLE - 上映枠</p>
+              <h2 className={styles.sectionTitle}>上映枠</h2>
+            </div>
+            <div className={styles.legend}>
+              <span><i data-kind="available" />Available</span>
+              <span><i data-kind="reserved" />Reserved</span>
+              <span><i data-kind="submitted" />Submitted</span>
+              <span><i data-kind="priority" />優先再取得中</span>
+            </div>
+          </div>
+          <div className={styles.slotTableWrap}>
+            <table className={styles.slotTable}>
+              <thead>
+                <tr>
+                  <th />
+                  {slotPreview.dates.map((date) => (
+                    <th key={date.key}>{date.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {slotPreview.times.map((time) => (
+                  <tr key={time.key}>
+                    <th>{time.label}</th>
+                    {slotPreview.dates.map((date) => {
+                      const cell = slotPreview.cells.get(`${date.key}:${time.key}`);
+                      return (
+                        <td
+                          key={`${date.key}-${time.key}`}
+                          data-status={cell?.status ?? "empty"}
+                        >
+                          {cell ? (
+                            <>
+                              <span>{slotDisplayName(cell)}</span>
+                              <em>{slotStatusLabel(cell.status)}</em>
+                            </>
+                          ) : (
+                            <span>-</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </section>
       ) : null}
 
       {publicEditors.length > 0 ? (
         <section className={styles.section}>
-          <h2 className={styles.sectionTitle}>
-            <Icon name="users" size={16} aria-hidden />
-            運営メンバー
-          </h2>
-          <div className={styles.staffList}>
+          <div className={styles.sectionHead}>
+            <div>
+              <p className={styles.eyebrow}>CREW - 運営メンバー</p>
+              <h2 className={styles.sectionTitle}>Crew</h2>
+            </div>
+          </div>
+          <div className={styles.crewGrid}>
             {publicEditors.map((member) => (
               <Link
                 key={`${member.x_user_id}-${member.role}`}
                 href={`/user/${member.x_user_id}`}
-                className={styles.staff}
+                className={styles.crewCard}
               >
-                {member.icon_url ? (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img src={member.icon_url} alt="" className={styles.staffIcon} />
-                ) : (
-                  <span className={styles.staffIconFb}>
-                    <Icon name="user" size={14} aria-hidden />
-                  </span>
-                )}
-                <div className={styles.staffBody}>
-                  <span className={styles.staffName}>
-                    {member.x_name ?? member.x_user_id}
-                  </span>
-                  <span className={styles.staffRole}>
+                <div className={styles.crewTop}>
+                  {member.icon_url ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img src={member.icon_url} alt="" />
+                  ) : (
+                    <span>{getInitial(member.x_name ?? member.x_user_id)}</span>
+                  )}
+                  <em>
                     {member.public_role_label ??
-                      (member.role === "representative" ? "代表" : "運営")}
-                  </span>
+                      (member.role === "representative"
+                        ? "REPRESENTATIVE"
+                        : "EDITOR")}
+                  </em>
                 </div>
+                <strong>{member.x_name ?? member.x_user_id}</strong>
+                <small>X @ {member.x_user_id}</small>
+                <p>{member.role === "representative" ? "event - slots - members" : "event - questions"}</p>
               </Link>
             ))}
           </div>
         </section>
       ) : null}
 
-      {slotRows.length > 0 || accepting ? (
-        <section className={styles.section}>
-          <h2 className={styles.sectionTitle}>
-            <Icon name="clock" size={16} aria-hidden />
-            予約枠
-          </h2>
-          <div className={styles.slotSummary}>
-            <div>
-              <p className={styles.slotSummaryLead}>
-                枠の確保・解放・連続枠の操作は専用ページで行います。
-              </p>
-              <div className={styles.slotSummaryStats}>
-                <span>残り {availableSlots} / {slotTotal} 枠</span>
-                {slotFillRatio != null ? <span>{slotFillRatio}% 埋まり</span> : null}
-                <span>{accepting ? "受付中" : eventStatusLabel(status)}</span>
-              </div>
-            </div>
-            <Link href={`/event/${event.id}/slots`} className="fn-btn fn-btn-primary">
-              <Icon name="calendar" size={14} aria-hidden />
-              枠確保ページへ
-            </Link>
-          </div>
-        </section>
-      ) : null}
-
       <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>
-          <Icon name="grid" size={16} aria-hidden />
-          作品 ({eventVideoTotal})
-        </h2>
-        {visibleVideos.length === 0 ? (
-          <div className="fn-empty">
-            <Icon name="info" size={20} aria-hidden />
-            <p className="fn-empty-message">
-              まだこのイベントに作品が投稿されていません。
-            </p>
+        <div className={styles.sectionHead}>
+          <div>
+            <p className={styles.eyebrow}>SUBMITTED - 提出済み</p>
+            <h2 className={styles.sectionTitle}>Submitted videos</h2>
           </div>
+          {eventVideoTotal > eventVideos.length ? (
+            <Link href={`/list?event=${encodeURIComponent(event.id)}`} className={styles.moreLink}>
+              すべて見る <Icon name="chevron-right" size={13} aria-hidden />
+            </Link>
+          ) : null}
+        </div>
+        {eventVideos.length === 0 ? (
+          <p className={styles.emptyText}>
+            このイベントの提出済み作品はまだ表示できません。
+          </p>
         ) : (
           <div className={styles.videoGrid}>
-            {visibleVideos.map((video, index) => (
-              <div key={`${video.id}-event-video-${index}`}>
-                <VideoCard video={video} />
-              </div>
+            {eventVideos.map((video) => (
+              <EventVideoCard key={video.id} video={video} />
             ))}
           </div>
         )}
       </section>
     </div>
   );
+}
+
+function StatCard({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <div className={styles.statCard}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function MiniFact({
+  label,
+  value,
+  wide,
+}: {
+  label: string;
+  value: string;
+  wide?: boolean;
+}): React.ReactElement {
+  return (
+    <span className={wide ? styles.miniFactWide : styles.miniFact}>
+      <em>{label}</em>
+      <strong>{value}</strong>
+    </span>
+  );
+}
+
+function EventVideoCard({ video }: { video: EventVideo }): React.ReactElement {
+  const thumb = youtubeThumbUrl(video.youtube_video_id, "hqdefault");
+  return (
+    <Link
+      href={`/${video.youtube_video_id ?? video.id}`}
+      className={styles.videoCard}
+      prefetch={false}
+    >
+      <span className={styles.videoThumb}>
+        {thumb ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img src={thumb} alt="" loading="lazy" />
+        ) : null}
+        {video.duration_seconds ? (
+          <em>{formatDuration(video.duration_seconds)}</em>
+        ) : null}
+      </span>
+      <strong>{video.title}</strong>
+      <span className={styles.videoMeta}>
+        {video.icon_url ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img src={video.icon_url} alt="" loading="lazy" />
+        ) : (
+          <i>{getInitial(video.display_name)}</i>
+        )}
+        <span>{video.display_name}</span>
+        {video.score > 0 ? <small>{formatCount(video.score)}</small> : null}
+      </span>
+    </Link>
+  );
+}
+
+function formatRange(start: number | null, end: number | null): string {
+  if (start == null && end == null) return "-";
+  const s = start != null ? formatMonthDay(start) : "-";
+  const e = end != null ? formatMonthDay(end) : "-";
+  return `${s} - ${e}`;
+}
+
+function formatMonthDay(ts: number): string {
+  return new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(ts * 1000));
+}
+
+function getInitial(value: string | null | undefined): string {
+  const trimmed = (value ?? "").trim().replace(/^@/, "");
+  return trimmed.slice(0, 1).toLowerCase() || "?";
+}
+
+function getDayMetric(event: EventRow, now: number) {
+  const targets = [
+    { at: event.start_time, label: "投稿期間まで", caption: "投稿期間まで" },
+    { at: event.entry_end_time, label: "募集締切まで", caption: "募集締切まで" },
+    { at: event.end_time, label: "終了まで", caption: "イベント終了まで" },
+  ].filter((item): item is { at: number; label: string; caption: string } =>
+    typeof item.at === "number" && item.at > now,
+  );
+  const target = targets[0] ?? { at: now, label: "終了", caption: "終了済み" };
+  return {
+    label: target.label,
+    caption: target.caption,
+    value: Math.max(0, Math.ceil((target.at - now) / 86400)),
+  };
+}
+
+function getTimeline(event: EventRow, now: number) {
+  const start = event.entry_start_time ?? event.start_time ?? now;
+  const end = event.end_time ?? event.entry_end_time ?? start + 86400;
+  const span = Math.max(1, end - start);
+  const markerPct = clampPct(((now - start) / span) * 100);
+  const windowStart = event.start_time ?? start;
+  const windowEnd = event.end_time ?? end;
+  const windowLeftPct = clampPct(((windowStart - start) / span) * 100);
+  const windowRightPct = clampPct(((windowEnd - start) / span) * 100);
+  return {
+    startLabel: monthLabel(start),
+    midLabel: monthLabel(start + span / 2),
+    endLabel: monthLabel(end),
+    markerLabel: formatMonthDay(now),
+    markerPct,
+    windowLeftPct,
+    windowWidthPct: Math.max(2, windowRightPct - windowLeftPct),
+  };
+}
+
+function monthLabel(ts: number): string {
+  return new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    month: "numeric",
+  }).format(new Date(ts * 1000));
+}
+
+function clampPct(value: number): number {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function buildSlotPreview(slots: SlotRow[]) {
+  const timed = slots.filter((slot) => slot.start_time != null);
+  if (timed.length === 0) return null;
+  const dates = unique(timed.map((slot) => slotDateKey(slot.start_time ?? 0)))
+    .slice(0, 3)
+    .map((key) => ({ key, label: slotDateLabel(key) }));
+  const dateKeys = new Set(dates.map((date) => date.key));
+  const times = unique(
+    timed
+      .filter((slot) => dateKeys.has(slotDateKey(slot.start_time ?? 0)))
+      .map((slot) => slotTimeKey(slot.start_time ?? 0)),
+  )
+    .slice(0, 8)
+    .map((key) => ({ key, label: key }));
+  const cells = new Map<string, SlotRow>();
+  for (const slot of timed) {
+    const dateKey = slotDateKey(slot.start_time ?? 0);
+    const timeKey = slotTimeKey(slot.start_time ?? 0);
+    if (!dateKeys.has(dateKey) || !times.some((time) => time.key === timeKey)) {
+      continue;
+    }
+    cells.set(`${dateKey}:${timeKey}`, slot);
+  }
+  return { dates, times, cells };
+}
+
+function unique(values: string[]): string[] {
+  return Array.from(new Set(values));
+}
+
+function slotDateKey(ts: number): string {
+  return new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(ts * 1000));
+}
+
+function slotDateLabel(key: string): string {
+  const [year, month, day] = key.split("/");
+  const date = new Date(`${year}-${month}-${day}T00:00:00+09:00`);
+  const weekday = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Tokyo",
+    weekday: "short",
+  }).format(date);
+  return `${month}/${day} ${weekday}`;
+}
+
+function slotTimeKey(ts: number): string {
+  return new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(ts * 1000));
+}
+
+function slotDisplayName(slot: SlotRow): string {
+  if (slot.status === "available") return "空き枠";
+  return slot.display_name ?? slot.x_user_id ?? "確保済";
+}
+
+function slotStatusLabel(status: SlotRow["status"]): string {
+  if (status === "submitted") return "提出済";
+  if (status === "reserved") return "確保済";
+  return "空き";
 }
