@@ -42,6 +42,7 @@ type EventVideo = {
   score: number;
   duration_seconds: number | null;
 };
+type SlotVisualStatus = SlotRow["status"] | "priority";
 
 const JST = { timeZone: "Asia/Tokyo" } as const;
 const dateFormat = {
@@ -280,15 +281,16 @@ export default async function EventDetailPage({
                     <th>{time.label}</th>
                     {slotPreview.dates.map((date) => {
                       const cell = slotPreview.cells.get(`${date.key}:${time.key}`);
+                      const visualStatus = cell ? slotVisualStatus(cell, now) : null;
                       return (
                         <td
                           key={`${date.key}-${time.key}`}
-                          data-status={cell?.status ?? "empty"}
+                          data-status={visualStatus ?? "empty"}
                         >
-                          {cell ? (
+                          {cell && visualStatus ? (
                             <>
                               <span>{slotDisplayName(cell)}</span>
-                              <em>{slotStatusLabel(cell.status)}</em>
+                              <em>{slotStatusLabel(visualStatus)}</em>
                             </>
                           ) : (
                             <span>-</span>
@@ -569,7 +571,19 @@ function slotDisplayName(slot: SlotRow): string {
   return slot.display_name ?? slot.x_user_id ?? "確保済";
 }
 
-function slotStatusLabel(status: SlotRow["status"]): string {
+function slotVisualStatus(slot: SlotRow, now: number): SlotVisualStatus {
+  if (
+    slot.priority_reclaim_until != null &&
+    slot.priority_reclaim_until > now &&
+    slot.status !== "available"
+  ) {
+    return "priority";
+  }
+  return slot.status;
+}
+
+function slotStatusLabel(status: SlotVisualStatus): string {
+  if (status === "priority") return "再取得中";
   if (status === "submitted") return "提出済";
   if (status === "reserved") return "確保済";
   return "選択可";

@@ -1,11 +1,11 @@
 .page {
-  --event-panel: color-mix(in srgb, var(--bg-surface) 90%, var(--event-accent, var(--accent-primary)) 10%);
+  --event-panel: color-mix(in srgb, var(--bg-surface) 88%, var(--event-accent, var(--accent-primary)) 12%);
   --event-panel-soft: color-mix(in srgb, var(--bg-surface) 96%, var(--event-accent, var(--accent-primary)) 4%);
-  --event-slot-reserved: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 18%, var(--bg-surface));
-  --event-slot-open: color-mix(in srgb, var(--bg-base) 92%, var(--event-accent, var(--accent-primary)) 8%);
+  --event-slot-reserved: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 20%, var(--bg-surface));
+  --event-slot-open: color-mix(in srgb, var(--bg-base) 88%, var(--event-accent, var(--accent-primary)) 12%);
   width: min(100% - 96px, 1480px);
   margin: 0 auto;
-  padding: 56px 0 86px;
+  padding: 34px 0 86px;
   color: var(--text-primary);
 }
 
@@ -25,7 +25,7 @@
   grid-template-columns: minmax(0, 1fr) 230px;
   gap: 32px;
   align-items: start;
-  padding: 38px 0 28px;
+  padding: 34px 0 28px;
   border-bottom: 1px solid var(--hairline, var(--border-subtle));
 }
 
@@ -66,7 +66,7 @@
   white-space: nowrap;
 }
 
-.statusPill { min-height: 30px; padding: 0 14px; font-size: 12px; }
+.statusPill { min-height: 28px; padding: 0 14px; font-size: 12px; }
 .reserveButton, .cardLink { min-height: 48px; gap: 10px; padding: 0 26px; font-size: 14px; }
 .guideLink, .moreLink { display: inline-flex; align-items: center; gap: 6px; color: var(--text-primary); font-size: 13px; font-weight: 800; }
 
@@ -78,8 +78,8 @@
 }
 
 .statCard {
-  min-height: 86px;
-  padding: 18px 18px 16px;
+  min-height: 84px;
+  padding: 18px 16px 16px;
   background: var(--event-panel-soft);
   border: 1px solid var(--hairline, var(--border-subtle));
 }
@@ -95,11 +95,11 @@
 
 .recruitCard {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 330px;
-  gap: 30px;
+  grid-template-columns: minmax(0, 1fr) 310px;
+  gap: 34px;
   min-height: 340px;
   margin-top: 24px;
-  padding: 30px;
+  padding: 36px 40px 30px;
   background: var(--event-panel);
   border-radius: 12px;
 }
@@ -130,7 +130,9 @@
   inset: 48px 0 auto;
   height: 28px;
   border-block: 1px solid var(--hairline, var(--border-subtle));
-  background-image: repeating-linear-gradient(90deg, color-mix(in srgb, var(--text-primary) 22%, transparent) 0 1px, transparent 1px 18px);
+  background-image:
+    linear-gradient(90deg, transparent 14%, color-mix(in srgb, var(--text-primary) 24%, transparent) 14% calc(14% + 1px), transparent calc(14% + 1px) 50%, color-mix(in srgb, var(--text-primary) 24%, transparent) 50% calc(50% + 1px), transparent calc(50% + 1px) 86%, color-mix(in srgb, var(--text-primary) 24%, transparent) 86% calc(86% + 1px), transparent calc(86% + 1px)),
+    repeating-linear-gradient(90deg, color-mix(in srgb, var(--text-primary) 24%, transparent) 0 1px, transparent 1px 18px);
 }
 
 .rulerMarker {
@@ -245,7 +247,7 @@
 
 .slotTable th,
 .slotTable td {
-  height: 66px;
+  height: 64px;
   padding: 12px;
   border: 1px solid var(--hairline, var(--border-subtle));
   text-align: left;
@@ -266,9 +268,12 @@
 .slotTable td[data-status="available"] { background: var(--event-slot-open); color: var(--text-primary); }
 .slotTable td[data-status="reserved"] { background: var(--event-slot-reserved); color: var(--text-primary); }
 .slotTable td[data-status="submitted"] { background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 92%, #ffffff); color: var(--accent-ink); }
+.slotTable td[data-status="priority"] { background: repeating-linear-gradient(45deg, var(--bg-elevated) 0 8px, var(--bg-surface) 8px 14px); color: var(--text-muted); }
 .slotTable td[data-status="empty"] { background: var(--bg-base); color: var(--text-faint, var(--text-muted)); }
 .slotTable td span { display: block; overflow: hidden; color: inherit; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
 .slotTable td em { position: absolute; top: 8px; right: 10px; color: color-mix(in srgb, currentColor 70%, transparent); font-size: 10px; font-style: normal; font-weight: 800; }
+.slotTable td[data-status="reserved"] em { color: var(--event-accent, var(--accent-primary)); }
+.slotTable td[data-status="priority"] em { color: var(--text-faint, var(--text-muted)); }
 
 .crewGrid,
 .videoGrid {
@@ -283,7 +288,7 @@
   display: grid;
   gap: 10px;
   min-height: 160px;
-  padding: 18px;
+  padding: 18px 16px;
   background: var(--event-panel-soft);
 }
 
@@ -347,7 +352,7 @@
   .crewGrid, .videoGrid { grid-template-columns: 1fr; }
   .heroActions, .recruitAside { width: 100%; }
   .statCard { min-height: 70px; padding: 14px; }
-  .recruitCard { margin-inline: -12px; padding: 22px 18px; border-radius: 0; }
+  .recruitCard { margin-inline: -12px; padding: 24px 18px; border-radius: 0; }
   .recruitMain h2 { font-size: clamp(40px, 13vw, 58px); }
   .ruler { height: 86px; }
   .rulerLine { top: 42px; }
