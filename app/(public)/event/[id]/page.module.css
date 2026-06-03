@@ -69,6 +69,9 @@
 .statusPill { min-height: 28px; padding: 0 14px; font-size: 12px; }
 .reserveButton, .cardLink { min-height: 48px; gap: 10px; padding: 0 26px; font-size: 14px; }
 .guideLink, .moreLink { display: inline-flex; align-items: center; gap: 6px; color: var(--text-primary); font-size: 13px; font-weight: 800; }
+.reserveButton { width: 160px; }
+.cardLink { width: 180px; }
+.guideLink { align-self: center; min-height: 28px; }
 
 .statsGrid {
   display: grid;
@@ -78,6 +81,9 @@
 }
 
 .statCard {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   min-height: 84px;
   padding: 18px 16px 16px;
   background: var(--event-panel-soft);
@@ -190,6 +196,8 @@
 .daysBox {
   display: grid;
   gap: 8px;
+  box-sizing: border-box;
+  width: 270px;
   padding: 22px;
   background: var(--event-accent, var(--accent-primary));
   color: var(--accent-ink);
@@ -201,7 +209,7 @@
 .daysBox strong { font: 900 74px/0.82 var(--font-display); }
 .daysBox small { margin-left: 6px; font-size: 20px; }
 
-.section { margin-top: 68px; }
+.section { margin-top: 76px; }
 .sectionHead { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 18px; }
 .sectionTitleGroup { min-width: 0; }
 .sectionTitleLine {
@@ -283,8 +291,8 @@
   gap: 14px;
 }
 
-.crewGrid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
-.videoGrid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 24px; }
+.crewGrid { grid-template-columns: repeat(auto-fit, minmax(210px, 232px)); }
+.videoGrid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 26px 24px; }
 
 .crewCard {
   display: grid;
@@ -360,7 +368,7 @@
   .crewGrid, .videoGrid { grid-template-columns: 1fr; }
   .heroActions, .recruitAside { align-items: stretch; width: 100%; }
   .statusPill { align-self: flex-start; }
-  .guideLink { min-height: 36px; justify-content: center; border: 1px solid var(--hairline, var(--border-subtle)); }
+  .guideLink { align-self: stretch; min-height: 36px; justify-content: center; border: 1px solid var(--hairline, var(--border-subtle)); }
   .statCard { min-height: 76px; padding: 13px 12px; }
   .statCard strong { font-size: 24px; }
   .recruitCard {
@@ -376,7 +384,7 @@
   .rulerMarker { top: 26px; height: 54px; }
   .recruitFacts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 20px; }
   .miniFact, .miniFactWide { min-width: 0; }
-  .daysBox { box-sizing: border-box; width: 100%; }
+  .daysBox { width: 100%; }
   .daysBox strong { font-size: 58px; }
   .section { margin-top: 48px; }
   .sectionHead { align-items: flex-start; flex-direction: column; gap: 12px; margin-bottom: 14px; }
