@@ -231,9 +231,11 @@
 .legend i[data-kind="priority"] { background: repeating-linear-gradient(45deg, transparent 0 4px, var(--text-faint) 4px 6px); }
 
 .slotTableWrap {
+  position: relative;
   overflow-x: auto;
   border: 1px solid var(--hairline, var(--border-subtle));
   scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
 }
 
 .slotTable {
@@ -345,27 +347,51 @@
 }
 
 @media (max-width: 720px) {
-  .page { width: min(100% - 24px, 1480px); padding: 18px 0 64px; }
-  .hero { gap: 20px; padding-top: 22px; }
-  .heroTitle { font-size: clamp(48px, 16vw, 72px); }
+  .page { width: min(100% - 20px, 1480px); padding: 12px 0 58px; }
+  .hero { gap: 16px; padding: 18px 0 20px; }
+  .heroTitle {
+    margin-bottom: 14px;
+    font-size: clamp(42px, 14vw, 64px);
+    line-height: 0.9;
+    overflow-wrap: anywhere;
+  }
+  .heroLead { font-size: 13.5px; line-height: 1.7; }
   .statsGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .crewGrid, .videoGrid { grid-template-columns: 1fr; }
-  .heroActions, .recruitAside { width: 100%; }
-  .statCard { min-height: 70px; padding: 14px; }
-  .recruitCard { margin-inline: -12px; padding: 24px 18px; border-radius: 0; }
+  .heroActions, .recruitAside { align-items: stretch; width: 100%; }
+  .statusPill { align-self: flex-start; }
+  .guideLink { min-height: 36px; justify-content: center; border: 1px solid var(--hairline, var(--border-subtle)); }
+  .statCard { min-height: 76px; padding: 13px 12px; }
+  .statCard strong { font-size: 24px; }
+  .recruitCard {
+    gap: 22px;
+    min-height: auto;
+    margin: 18px -10px 0;
+    padding: 24px 18px;
+    border-radius: 0;
+  }
   .recruitMain h2 { font-size: clamp(40px, 13vw, 58px); }
   .ruler { height: 86px; }
   .rulerLine { top: 42px; }
   .rulerMarker { top: 26px; height: 54px; }
+  .recruitFacts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 20px; }
+  .miniFact, .miniFactWide { min-width: 0; }
+  .daysBox { box-sizing: border-box; width: 100%; }
   .daysBox strong { font-size: 58px; }
   .section { margin-top: 48px; }
-  .sectionHead { align-items: flex-start; flex-direction: column; }
-  .legend { justify-content: flex-start; }
+  .sectionHead { align-items: flex-start; flex-direction: column; gap: 12px; margin-bottom: 14px; }
+  .sectionTitleLine { gap: 8px; }
+  .sectionTitleLine span { font-size: 11.5px; }
+  .legend { justify-content: flex-start; gap: 8px 10px; }
   .slotTable { min-width: 760px; }
+  .slotTableWrap { margin-inline: -10px; }
   .reserveButton, .cardLink { width: 100%; }
+  .videoGrid { gap: 20px; }
+  .videoCard strong { white-space: normal; }
 }
 
-@media (max-width: 440px) {
+@media (max-width: 360px) {
   .statsGrid { grid-template-columns: 1fr; }
-  .sectionTitleLine { gap: 8px; }
+  .recruitFacts { grid-template-columns: 1fr; }
+  .slotTable { min-width: 700px; }
 }
