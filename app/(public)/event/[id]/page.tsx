@@ -21,7 +21,7 @@ import {
   isAcceptingEntries,
 } from "@/lib/utils/eventStatus";
 import { Icon } from "@/components/ui/Icon";
-import { formatCount, formatDuration, formatUnix } from "@/lib/utils/format";
+import { formatCount, formatDuration } from "@/lib/utils/format";
 import { youtubeThumbUrl } from "@/lib/youtube/id";
 
 export const dynamic = "force-dynamic";
@@ -39,9 +39,18 @@ type EventVideo = {
   youtube_video_id: string | null;
   display_name: string;
   icon_url: string | null;
-  creator_x_user_id: string | null;
   score: number;
   duration_seconds: number | null;
+};
+
+const JST = { timeZone: "Asia/Tokyo" } as const;
+const dateFormat = {
+  monthDay: new Intl.DateTimeFormat("ja-JP", { ...JST, month: "2-digit", day: "2-digit" }),
+  month: new Intl.DateTimeFormat("ja-JP", { ...JST, month: "numeric" }),
+  monthDayCompact: new Intl.DateTimeFormat("ja-JP", { ...JST, month: "numeric", day: "numeric" }),
+  slotDateKey: new Intl.DateTimeFormat("ja-JP", { ...JST, year: "numeric", month: "2-digit", day: "2-digit" }),
+  slotTime: new Intl.DateTimeFormat("ja-JP", { ...JST, hour: "2-digit", minute: "2-digit", hour12: false }),
+  weekday: new Intl.DateTimeFormat("en-US", { ...JST, weekday: "short" }),
 };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -80,7 +89,6 @@ export default async function EventDetailPage({
             youtube_video_id: videos.youtube_video_id,
             display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.creator_display_name}, ${videos.creator_x_user_id})`,
             icon_url: sql<string | null>`COALESCE(${videos.creator_icon_url}, ${xUsers.icon_url})`,
-            creator_x_user_id: videos.creator_x_user_id,
             score: sql<number>`COALESCE(${videoStats.score}, 0)`,
             duration_seconds: videoYoutubeMetadata.duration_seconds,
           })
@@ -185,21 +193,11 @@ export default async function EventDetailPage({
         <StatCard label="CREATORS" value={formatCount(creatorTotal)} />
         <StatCard
           label="SLOTS"
-          value={
-            <>
-              {availableSlots}
-              <span>/{slotTotal}</span>
-            </>
-          }
+          value={<>{availableSlots}<span>/{slotTotal}</span></>}
         />
         <StatCard
           label={dayMetric.label}
-          value={
-            <>
-              {dayMetric.value}
-              <span>日</span>
-            </>
-          }
+          value={<>{dayMetric.value}<span>日</span></>}
         />
       </section>
 
@@ -253,21 +251,19 @@ export default async function EventDetailPage({
 
       {slotPreview ? (
         <section className={styles.section}>
-          <div className={styles.sectionHead}>
-            <div className={styles.sectionTitleGroup}>
-              <p className={styles.eyebrow}>SLOT TABLE - 上映枠</p>
-              <div className={styles.sectionTitleLine}>
-                <h2 className={styles.sectionTitle}>上映枠</h2>
-                <span>空き枠を選択して確保します。確保後、投稿期間内に作品を提出してください。</span>
+          <SectionHeader
+            eyebrow="SLOT TABLE - 上映枠"
+            title="上映枠"
+            note="空き枠を選択して確保します。確保後、投稿期間内に作品を提出してください。"
+            action={
+              <div className={styles.legend}>
+                <span><i data-kind="available" />Available</span>
+                <span><i data-kind="reserved" />Reserved</span>
+                <span><i data-kind="submitted" />Submitted</span>
+                <span><i data-kind="priority" />優先再取得中</span>
               </div>
-            </div>
-            <div className={styles.legend}>
-              <span><i data-kind="available" />Available</span>
-              <span><i data-kind="reserved" />Reserved</span>
-              <span><i data-kind="submitted" />Submitted</span>
-              <span><i data-kind="priority" />優先再取得中</span>
-            </div>
-          </div>
+            }
+          />
           <div className={styles.slotTableWrap}>
             <table className={styles.slotTable}>
               <thead>
@@ -310,14 +306,7 @@ export default async function EventDetailPage({
 
       {publicEditors.length > 0 ? (
         <section className={styles.section}>
-          <div className={styles.sectionHead}>
-            <div className={styles.sectionTitleGroup}>
-              <p className={styles.eyebrow}>CREW - 運営メンバー</p>
-              <div className={styles.sectionTitleLine}>
-                <h2 className={styles.sectionTitle}>Crew</h2>
-              </div>
-            </div>
-          </div>
+          <SectionHeader eyebrow="CREW - 運営メンバー" title="Crew" />
           <div className={styles.crewGrid}>
             {publicEditors.map((member) => (
               <Link
@@ -349,20 +338,18 @@ export default async function EventDetailPage({
       ) : null}
 
       <section className={styles.section}>
-        <div className={styles.sectionHead}>
-          <div className={styles.sectionTitleGroup}>
-            <p className={styles.eyebrow}>SUBMITTED - 提出済み</p>
-            <div className={styles.sectionTitleLine}>
-              <h2 className={styles.sectionTitle}>Submitted videos</h2>
-              <span>受付中の提出済み作品（{formatCount(eventVideoTotal)}件）</span>
-            </div>
-          </div>
-          {eventVideoTotal > eventVideos.length ? (
-            <Link href={`/list?event=${encodeURIComponent(event.id)}`} className={styles.moreLink}>
-              すべて見る <Icon name="chevron-right" size={13} aria-hidden />
-            </Link>
-          ) : null}
-        </div>
+        <SectionHeader
+          eyebrow="SUBMITTED - 提出済み"
+          title="Submitted videos"
+          note={`受付中の提出済み作品（${formatCount(eventVideoTotal)}件）`}
+          action={
+            eventVideoTotal > eventVideos.length ? (
+              <Link href={`/list?event=${encodeURIComponent(event.id)}`} className={styles.moreLink}>
+                すべて見る <Icon name="chevron-right" size={13} aria-hidden />
+              </Link>
+            ) : null
+          }
+        />
         {eventVideos.length === 0 ? (
           <p className={styles.emptyText}>
             このイベントの提出済み作品はまだ表示できません。
@@ -375,6 +362,31 @@ export default async function EventDetailPage({
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+function SectionHeader({
+  eyebrow,
+  title,
+  note,
+  action,
+}: {
+  eyebrow: string;
+  title: string;
+  note?: string;
+  action?: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <div className={styles.sectionHead}>
+      <div className={styles.sectionTitleGroup}>
+        <p className={styles.eyebrow}>{eyebrow}</p>
+        <div className={styles.sectionTitleLine}>
+          <h2 className={styles.sectionTitle}>{title}</h2>
+          {note ? <span>{note}</span> : null}
+        </div>
+      </div>
+      {action}
     </div>
   );
 }
@@ -451,11 +463,7 @@ function formatRange(start: number | null, end: number | null): string {
 }
 
 function formatMonthDay(ts: number): string {
-  return new Intl.DateTimeFormat("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date(ts * 1000));
+  return dateFormat.monthDay.format(new Date(ts * 1000));
 }
 
 function getInitial(value: string | null | undefined): string {
@@ -500,18 +508,11 @@ function getTimeline(event: EventRow, now: number) {
 }
 
 function monthLabel(ts: number): string {
-  return new Intl.DateTimeFormat("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    month: "numeric",
-  }).format(new Date(ts * 1000));
+  return dateFormat.month.format(new Date(ts * 1000));
 }
 
 function formatMonthDayCompact(ts: number): string {
-  return new Intl.DateTimeFormat("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    month: "numeric",
-    day: "numeric",
-  }).format(new Date(ts * 1000));
+  return dateFormat.monthDayCompact.format(new Date(ts * 1000));
 }
 
 function clampPct(value: number): number {
@@ -530,18 +531,18 @@ function buildSlotPreview(slots: SlotRow[]) {
       .filter((slot) => dateKeys.has(slotDateKey(slot.start_time ?? 0)))
       .map((slot) => slotTimeKey(slot.start_time ?? 0)),
   )
-    .slice(0, 8)
-    .map((key) => ({ key, label: key }));
+    .slice(0, 8);
+  const timeKeys = new Set(times);
   const cells = new Map<string, SlotRow>();
   for (const slot of timed) {
     const dateKey = slotDateKey(slot.start_time ?? 0);
     const timeKey = slotTimeKey(slot.start_time ?? 0);
-    if (!dateKeys.has(dateKey) || !times.some((time) => time.key === timeKey)) {
+    if (!dateKeys.has(dateKey) || !timeKeys.has(timeKey)) {
       continue;
     }
     cells.set(`${dateKey}:${timeKey}`, slot);
   }
-  return { dates, times, cells };
+  return { dates, times: times.map((key) => ({ key, label: key })), cells };
 }
 
 function unique(values: string[]): string[] {
@@ -549,31 +550,18 @@ function unique(values: string[]): string[] {
 }
 
 function slotDateKey(ts: number): string {
-  return new Intl.DateTimeFormat("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date(ts * 1000));
+  return dateFormat.slotDateKey.format(new Date(ts * 1000));
 }
 
 function slotDateLabel(key: string): string {
   const [year, month, day] = key.split("/");
   const date = new Date(`${year}-${month}-${day}T00:00:00+09:00`);
-  const weekday = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Tokyo",
-    weekday: "short",
-  }).format(date);
+  const weekday = dateFormat.weekday.format(date);
   return `${month}/${day} ${weekday}`;
 }
 
 function slotTimeKey(ts: number): string {
-  return new Intl.DateTimeFormat("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date(ts * 1000));
+  return dateFormat.slotTime.format(new Date(ts * 1000));
 }
 
 function slotDisplayName(slot: SlotRow): string {
