@@ -28,14 +28,14 @@
   --border-default: var(--border-subtle);
   --border-muted: var(--border-subtle);
 
-  --accent-primary: #c8f21f;
-  --accent-primary-strong: #a8d80f;
-  --accent-primary-soft: rgba(200, 242, 31, 0.28);
+  --accent-primary: #c8ff12;
+  --accent-primary-strong: #b4f000;
+  --accent-primary-soft: rgba(200, 255, 18, 0.26);
   --accent-ink: #1a1f03;
   --accent: var(--accent-primary);
   --accent-strong: var(--accent-primary-strong);
   --accent-soft: var(--accent-primary-soft);
-  --accent-glow: rgba(200, 242, 31, 0.45);
+  --accent-glow: rgba(200, 255, 18, 0.42);
   --accent-warning: #ff6f5f;
   --accent-warning-soft: rgba(255, 111, 95, 0.16);
   --warn: var(--accent-warning);
@@ -87,42 +87,42 @@
 }
 
 [data-theme="dark"] {
-  --bg-base: #0e100d;
-  --bg-surface: #171a14;
-  --bg-elevated: #22251d;
-  --bg-overlay: rgba(14, 16, 13, 0.92);
-  --text-primary: #f4f6ee;
-  --text-secondary: #d0d5c5;
-  --text-muted: #9ca293;
-  --text-faint: #747b6e;
-  --border-subtle: rgba(244, 246, 238, 0.1);
-  --border-strong: rgba(244, 246, 238, 0.2);
-  --hairline: rgba(244, 246, 238, 0.07);
+  --bg-base: #070a07;
+  --bg-surface: #11150f;
+  --bg-elevated: #1c2317;
+  --bg-overlay: rgba(7, 10, 7, 0.92);
+  --text-primary: #f6f7ef;
+  --text-secondary: #d4dac8;
+  --text-muted: #98a28d;
+  --text-faint: #6f7b65;
+  --border-subtle: rgba(246, 247, 239, 0.1);
+  --border-strong: rgba(246, 247, 239, 0.2);
+  --hairline: rgba(246, 247, 239, 0.08);
   --shadow-soft: 0 18px 48px rgba(0, 0, 0, 0.36);
-  --accent-primary-soft: rgba(200, 242, 31, 0.16);
+  --accent-primary-soft: rgba(200, 255, 18, 0.16);
   --accent-soft: var(--accent-primary-soft);
-  --accent-glow: rgba(200, 242, 31, 0.32);
-  --shelf-fade-color: rgba(14, 16, 13, 0.95);
+  --accent-glow: rgba(200, 255, 18, 0.34);
+  --shelf-fade-color: rgba(7, 10, 7, 0.96);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]):not([data-theme="dark"]) {
-    --bg-base: #0e100d;
-    --bg-surface: #171a14;
-    --bg-elevated: #22251d;
-    --bg-overlay: rgba(14, 16, 13, 0.92);
-    --text-primary: #f4f6ee;
-    --text-secondary: #d0d5c5;
-    --text-muted: #9ca293;
-    --text-faint: #747b6e;
-    --border-subtle: rgba(244, 246, 238, 0.1);
-    --border-strong: rgba(244, 246, 238, 0.2);
-    --hairline: rgba(244, 246, 238, 0.07);
+    --bg-base: #070a07;
+    --bg-surface: #11150f;
+    --bg-elevated: #1c2317;
+    --bg-overlay: rgba(7, 10, 7, 0.92);
+    --text-primary: #f6f7ef;
+    --text-secondary: #d4dac8;
+    --text-muted: #98a28d;
+    --text-faint: #6f7b65;
+    --border-subtle: rgba(246, 247, 239, 0.1);
+    --border-strong: rgba(246, 247, 239, 0.2);
+    --hairline: rgba(246, 247, 239, 0.08);
     --shadow-soft: 0 18px 48px rgba(0, 0, 0, 0.36);
-    --accent-primary-soft: rgba(200, 242, 31, 0.16);
+    --accent-primary-soft: rgba(200, 255, 18, 0.16);
     --accent-soft: var(--accent-primary-soft);
-    --accent-glow: rgba(200, 242, 31, 0.32);
-    --shelf-fade-color: rgba(14, 16, 13, 0.95);
+    --accent-glow: rgba(200, 255, 18, 0.34);
+    --shelf-fade-color: rgba(7, 10, 7, 0.96);
   }
 }
 
@@ -431,6 +431,7 @@ select {
 .fn-btn-primary {
   background-color: var(--accent-primary);
   color: var(--accent-ink);
+  font-weight: 800;
 }
 
 .fn-btn-primary:hover:not(:disabled) {
@@ -536,7 +537,7 @@ select {
 
 .fn-card {
   background-color: var(--bg-surface);
-  border: 0;
+  border: 1px solid var(--hairline);
   border-radius: 8px;
   padding: 18px;
 }
@@ -551,8 +552,8 @@ select {
   width: 100%;
   padding: 9px 12px;
   border-radius: 8px;
-  border: 0;
-  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  background-color: color-mix(in srgb, var(--bg-base) 86%, var(--bg-elevated));
   color: var(--text-primary);
   font-size: 14px;
   transition: border-color 0.15s ease, background-color 0.15s ease;
@@ -561,14 +562,16 @@ select {
 .fn-input:hover,
 .fn-textarea:hover,
 .fn-select:hover {
-  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  border-color: var(--border-strong);
+  box-shadow: none;
 }
 
 .fn-input:focus,
 .fn-textarea:focus,
 .fn-select:focus {
   outline: none;
-  box-shadow: inset 0 0 0 1.5px var(--accent-primary);
+  border-color: var(--accent-primary);
+  box-shadow: none;
 }
 
 .fn-textarea {

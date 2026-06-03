@@ -2,10 +2,10 @@
   position: sticky;
   top: 0;
   z-index: 30;
-  background: color-mix(in srgb, var(--bg-base) 92%, transparent);
+  background: color-mix(in srgb, var(--bg-base) 96%, transparent);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border-bottom: 0;
+  border-bottom: 1px solid var(--hairline);
   transition:
     background-color 0.2s ease,
     border-color 0.2s ease;
@@ -17,7 +17,7 @@
   align-items: center;
   gap: 22px;
   width: min(100% - 40px, 1360px);
-  height: 64px;
+  height: 60px;
   margin: 0 auto;
 }
 
@@ -61,16 +61,16 @@
   display: none;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 10px;
 }
 
 .desktopNavLink {
   position: relative;
   display: inline-flex;
   align-items: center;
-  min-height: 34px;
-  padding: 8px 16px;
-  border-radius: 9px;
+  min-height: 32px;
+  padding: 7px 14px;
+  border-radius: 8px;
   color: var(--text-secondary);
   font-size: 13.5px;
   font-weight: 600;
@@ -81,27 +81,13 @@
 }
 
 .desktopNavLink::after {
-  content: "";
-  position: absolute;
-  left: 16px;
-  right: 16px;
-  bottom: 3px;
-  height: 2px;
-  background: var(--accent-primary);
-  border-radius: 0;
-  opacity: 0;
-  transition: opacity 0.15s ease;
+  content: none;
 }
 
 .desktopNavLink:hover,
 .desktopNavLinkActive {
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--bg-elevated) 86%, transparent);
-}
-
-.desktopNavLink:hover::after,
-.desktopNavLinkActive::after {
-  opacity: 1;
+  background: var(--bg-elevated);
 }
 
 .right {
@@ -152,6 +138,7 @@
 }
 
 .postBtn {
+  min-width: 88px;
   color: var(--accent-ink);
   background: var(--accent-primary);
   box-shadow: none;
@@ -337,7 +324,7 @@
   }
 
   .tape {
-    display: flex;
+    display: none;
   }
 
   .themeButton {
