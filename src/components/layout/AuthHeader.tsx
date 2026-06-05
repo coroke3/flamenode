@@ -2,13 +2,15 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import styles from "./AuthHeader.module.css";
 import { Logo } from "@/components/ui/Logo";
-import { Icon } from "@/components/ui/Icon";
+import { Icon, type IconName } from "@/components/ui/Icon";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { XIdSwitcher, type XIdEntry } from "@/components/user/XIdSwitcher";
 import { AccountMenu } from "@/components/user/AccountMenu";
 import type { HeaderUser } from "@/lib/auth/headerUser";
+import { PUBLIC_NAV_ITEMS } from "@/lib/navigation/publicNav";
 
 interface AuthHeaderProps {
   user: Pick<
@@ -19,28 +21,67 @@ interface AuthHeaderProps {
   };
 }
 
+type ManagementNavItem = {
+  href: string;
+  label: string;
+  icon: IconName;
+};
+
+function buildManagementNav(
+  management: HeaderUser["management"],
+): ManagementNavItem[] {
+  const items: ManagementNavItem[] = [];
+  if (management.canAccessManage) {
+    items.push({ href: "/manage", label: "運営", icon: "users" });
+  }
+  if (management.canAccessAdmin) {
+    items.push({ href: "/admin", label: "管理", icon: "settings" });
+  }
+  return items;
+}
+
+function isPathActive(pathname: string | null, href: string): boolean {
+  if (!pathname) return false;
+  if (href === "/") return pathname === "/";
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
 export function AuthHeader({ user }: AuthHeaderProps): React.ReactElement {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
-
-  const managementLink = user.management.canAccessAdmin
-    ? { href: "/admin", label: "管理", icon: "settings" as const }
-    : user.management.canAccessManage
-      ? { href: "/manage", label: "運営", icon: "users" as const }
-      : null;
+  const pathname = usePathname();
+  const managementNav = buildManagementNav(user.management);
 
   return (
-    <header className={styles.header}>
-      <div className={styles.bar}>
+    <header className={`fn-header ${styles.header}`}>
+      <div className={`fn-public-container fn-header-inner ${styles.bar}`}>
         <Link
           href="/"
-          className={styles.logoLink}
+          className={`fn-logo ${styles.logoLink}`}
           aria-label="FlameNode トップへ"
         >
           <Logo />
         </Link>
 
-        <div className={styles.right}>
+        <nav className={styles.desktopNav} aria-label="公開ナビゲーション">
+          {PUBLIC_NAV_ITEMS.map((item) => {
+            const active = isPathActive(pathname, item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`${styles.desktopNavLink} ${
+                  active ? styles.desktopNavLinkActive : ""
+                }`}
+                aria-current={active ? "page" : undefined}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
+
+        <div className={`fn-header-right ${styles.right}`}>
           <form
             action="/list"
             method="get"
@@ -66,16 +107,16 @@ export function AuthHeader({ user }: AuthHeaderProps): React.ReactElement {
           </form>
 
           <div className={styles.actionNav}>
-            <Link href="/dashboard/post" className={styles.postBtn}>
+            <Link href="/dashboard/post" className={`fn-btn fn-header-submit ${styles.postBtn}`}>
               <Icon name="edit" size={13} aria-hidden />
               投稿
             </Link>
-            {managementLink ? (
-              <Link href={managementLink.href} className={styles.ghostBtn}>
-                <Icon name={managementLink.icon} size={13} aria-hidden />
-                {managementLink.label}
+            {managementNav.map((item) => (
+              <Link key={item.href} href={item.href} className={styles.ghostBtn}>
+                <Icon name={item.icon} size={13} aria-hidden />
+                {item.label}
               </Link>
-            ) : null}
+            ))}
             <AccountMenu user={user} />
           </div>
 
@@ -93,7 +134,7 @@ export function AuthHeader({ user }: AuthHeaderProps): React.ReactElement {
 
       {mobileOpen ? (
         <div className={styles.mobile}>
-          <nav className={styles.mobileNav} aria-label="モバイルナビゲーション">
+          <nav className={`fn-public-container ${styles.mobileNav}`} aria-label="モバイルナビゲーション">
             <form
               action="/list"
               method="get"
@@ -111,12 +152,34 @@ export function AuthHeader({ user }: AuthHeaderProps): React.ReactElement {
             </form>
 
             <div className={styles.mobileSection}>
+              <div className={styles.mobileSectionTitle}>公開ページ</div>
+              {PUBLIC_NAV_ITEMS.map((item) => {
+                const active = isPathActive(pathname, item.href);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`${styles.mobileLink} ${
+                      active ? styles.mobileLinkActive : ""
+                    }`}
+                    onClick={() => setMobileOpen(false)}
+                    aria-current={active ? "page" : undefined}
+                  >
+                    <Icon name={item.iconName} size={16} aria-hidden /> {item.label}
+                  </Link>
+                );
+              })}
+            </div>
+
+            <div className={styles.mobileDivider} />
+            <div className={styles.mobileSection}>
+              <div className={styles.mobileSectionTitle}>マイページ</div>
               <Link
                 href="/dashboard/post"
                 className={styles.mobileLink}
                 onClick={() => setMobileOpen(false)}
               >
-                <Icon name="edit" size={16} aria-hidden /> 投稿する
+                <Icon name="edit" size={16} aria-hidden /> 新規投稿
               </Link>
               <Link
                 href="/dashboard"
@@ -141,18 +204,20 @@ export function AuthHeader({ user }: AuthHeaderProps): React.ReactElement {
               </Link>
             </div>
 
-            {managementLink ? (
+            {managementNav.length > 0 ? (
               <>
                 <div className={styles.mobileDivider} />
                 <div className={styles.mobileSection}>
-                  <Link
-                    href={managementLink.href}
-                    className={styles.mobileLink}
-                    onClick={() => setMobileOpen(false)}
-                  >
-                    <Icon name={managementLink.icon} size={16} aria-hidden />{" "}
-                    {managementLink.label}
-                  </Link>
+                  {managementNav.map((item) => (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={styles.mobileLink}
+                      onClick={() => setMobileOpen(false)}
+                    >
+                      <Icon name={item.icon} size={16} aria-hidden /> {item.label}
+                    </Link>
+                  ))}
                 </div>
               </>
             ) : null}

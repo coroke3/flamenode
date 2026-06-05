@@ -1,3 +1,5 @@
+import { normalizeXId } from "#utils/xid";
+
 export interface VideoMemberChapterInput {
   time: string;
   label: string;
@@ -23,13 +25,6 @@ export interface VideoMemberSuggestion {
 export interface ParsedVideoMemberCsv {
   members: VideoMemberInput[];
   warnings: string[];
-}
-
-function normalizeXIdLocal(value: string | null | undefined): string {
-  return String(value ?? "")
-    .trim()
-    .replace(/^@+/, "")
-    .toLowerCase();
 }
 
 export function parseMemberChapterTime(raw: string): number | null {
@@ -142,13 +137,22 @@ export function serializeChaptersCell(chapters: VideoMemberChapterInput[]): stri
 }
 
 export function memberKey(m: VideoMemberInput): string {
-  const xid = normalizeXIdLocal(m.x_user_id);
+  const xid = normalizeXId(m.x_user_id);
   if (xid) return `x:${xid}`;
   return `n:${m.name.trim().toLowerCase()}`;
 }
 
 export function chapterKey(mk: string, ch: VideoMemberChapterInput): string {
   return `${mk}:${normalizeMemberChapterTime(ch.time) ?? ch.time.trim()}`;
+}
+
+/** CSV「編集権」列: ON / OFF / true / false / 1 / 0 / 空欄 */
+export function parseMemberEditPermissionCell(raw: string | undefined): boolean | undefined {
+  const v = (raw ?? "").trim().toLowerCase();
+  if (!v) return undefined;
+  if (["on", "true", "1", "yes", "y", "はい"].includes(v)) return true;
+  if (["off", "false", "0", "no", "n", "いいえ"].includes(v)) return false;
+  return undefined;
 }
 
 function headerIndex(headers: string[], aliases: string[]): number | null {
@@ -179,6 +183,12 @@ export function parseVideoMemberCsv(
       chapters: headerIndex(firstLower, ["チャプター", "chapter", "chapters"]),
       role: headerIndex(firstLower, ["役割", "role"]),
       comment: headerIndex(firstLower, ["コメント", "comment"]),
+      canEdit: headerIndex(firstLower, [
+        "編集権",
+        "can_edit",
+        "edit",
+        "作品編集",
+      ]),
     };
     const headerHitCount = new Set(
       Object.values(header).filter((index): index is number => index !== null),
@@ -188,7 +198,7 @@ export function parseVideoMemberCsv(
 
     const suggestionsById = new Map<string, VideoMemberSuggestion>();
     for (const suggestion of options.suggestions ?? []) {
-      const key = normalizeXIdLocal(suggestion.x_user_id);
+      const key = normalizeXId(suggestion.x_user_id);
       if (key) suggestionsById.set(key, suggestion);
     }
 
@@ -224,15 +234,19 @@ export function parseVideoMemberCsv(
           : hasExplicitChapterColumn
             ? (cols[4] ?? "")
             : (cols[3] ?? "");
-      const xid = normalizeXIdLocal(xidRaw);
+      const canEditRaw = hasHeader && header.canEdit !== null ? cols[header.canEdit] : "";
+      const canEditParsed = parseMemberEditPermissionCell(canEditRaw);
+      const xid = normalizeXId(xidRaw);
       const hit = xid ? suggestionsById.get(xid) : null;
-      const member = {
+      const member: VideoMemberInput = {
         name: nameRaw.trim() || hit?.name || "",
         x_user_id: xid,
         role: roleRaw.trim(),
         comment: commentRaw.trim(),
         chapters: parseChaptersCell(chaptersRaw),
       };
+      if (canEditParsed === true) member.can_edit = 1;
+      if (canEditParsed === false) member.can_edit = 0;
       if (!member.name && !member.x_user_id) {
         warnings.push(`${rowIndex + (hasHeader ? 2 : 1)}行目は名前とX IDが空のため読み飛ばしました。`);
         return;
@@ -243,14 +257,14 @@ export function parseVideoMemberCsv(
     const pastedXids = new Set<string>();
     const duplicatedXids = new Set<string>();
     for (const member of members) {
-      const xid = normalizeXIdLocal(member.x_user_id);
+      const xid = normalizeXId(member.x_user_id);
       if (!xid) continue;
       if (pastedXids.has(xid)) duplicatedXids.add(xid);
       pastedXids.add(xid);
     }
     const existingXids = new Set(
       (options.existingMembers ?? [])
-        .map((m) => normalizeXIdLocal(m.x_user_id))
+        .map((m) => normalizeXId(m.x_user_id))
         .filter(Boolean),
     );
     for (const xid of pastedXids) {
@@ -261,6 +275,13 @@ export function parseVideoMemberCsv(
         `重複するX IDがあります: ${Array.from(duplicatedXids)
           .map((xid) => `@${xid}`)
           .join(", ")}`,
+      );
+    }
+
+    const editOnMembers = members.filter((m) => m.can_edit === 1 || m.can_edit === true);
+    if (editOnMembers.length > 0) {
+      warnings.push(
+        `編集権ONの行が ${editOnMembers.length} 件あります。メンバー欄への取り込み後、下の「編集できる人」から付与してください（CSV貼り付けだけでは編集権は付与されません）。`,
       );
     }
 

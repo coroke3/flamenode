@@ -17,7 +17,6 @@ import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { AppShell } from "@/components/ui/AppShell";
-import { PageHero } from "@/components/ui/PageHero";
 import { StatusPanel } from "@/components/ui/StatusPanel";
 
 export const metadata: Metadata = { title: "スロット提出" };
@@ -166,16 +165,20 @@ export default async function SlottedPostPage({
 
   return (
     <AppShell size="default">
-      <PageHero
-        eyebrow="Slot Post"
-        title="スロットに作品を提出"
-        description="確保済みのイベント枠に作品情報を紐づけます。連続枠の場合も1つの提出として扱います。"
-        actions={
+      <header className="fn-page-head fn-page-head--split">
+        <div className="fn-page-head-main">
+          <p className="fn-eyebrow">Slot Post</p>
+          <h1 className="fn-page-title fn-page-title--compact">スロットに作品を提出</h1>
+          <p className="fn-page-lead">
+            確保済みのイベント枠に作品情報を紐づけます。連続枠の場合も1つの提出として扱います。
+          </p>
+        </div>
+        <div className="fn-page-head-actions">
           <Link href={`/event/${ev.id}`} className="fn-btn fn-btn-ghost">
             イベントを見る
           </Link>
-        }
-      />
+        </div>
+      </header>
 
       <StatusPanel
         title={canPost ? "投稿前チェック" : "まだ投稿できません"}
@@ -196,15 +199,10 @@ export default async function SlottedPostPage({
           : submitBlockedReason}
       </StatusPanel>
 
-      <section
-        className="fn-card fn-mb-lg"
-        style={{ borderColor: "var(--accent-primary)" }}
-      >
+      <section className="fn-card fn-highlight-card fn-card-accent">
         <div className="fn-card-body">
-          <p className="fn-muted fn-text-xs fn-bold" style={{ letterSpacing: "0.14em" }}>
-            RESERVED SLOT
-          </p>
-          <h2 style={{ fontSize: 24, fontWeight: 800, marginTop: 6 }}>
+          <p className="fn-highlight-card-kicker">RESERVED SLOT</p>
+          <h2 className="fn-highlight-card-title">
             {slotStart ? (
               <>
                 {formatUnix(slotStart, { dateOnly: true })}{" "}
@@ -215,13 +213,13 @@ export default async function SlottedPostPage({
               slot.slot_label ?? "時間指定なし枠"
             )}
           </h2>
-          <p style={{ marginTop: 8, color: "var(--text-secondary)", fontSize: 13 }}>
+          <p className="fn-highlight-card-lead">
             確保名: <strong>{slot.display_name ?? xRow?.x_name ?? user.name}</strong>
             {" / "}
             提出主体: <strong>@{activeX ?? "未設定"}</strong>
           </p>
           {slot.reservation_group_id ? (
-            <p className="fn-muted fn-text-sm" style={{ marginTop: 6 }}>
+            <p className="fn-muted fn-text-sm fn-mt-12">
               この枠は連続取得グループ ({groupSize}連続) に含まれます。提出すると同じ連続枠に同じ作品が紐づきます。
             </p>
           ) : null}
@@ -249,16 +247,7 @@ export default async function SlottedPostPage({
         eventOptions={eventOptions}
       />
 
-      <p
-        style={{
-          marginTop: 18,
-          color: "var(--text-muted)",
-          fontSize: 12,
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 6,
-        }}
-      >
+      <p className="fn-page-footnote">
         <Icon name="info" size={12} aria-hidden /> 提出した動画は、イベントの
         承認設定によって公開タイミングが変わります。
       </p>

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { and, asc, eq, sql } from "drizzle-orm";
+import { coalescedVideoScore } from "@/lib/db/videoScoreSql";
 import styles from "./page.module.css";
 import { withDatabase } from "@/lib/cloudflare";
 import {
@@ -21,7 +22,9 @@ import {
   isAcceptingEntries,
 } from "@/lib/utils/eventStatus";
 import { Icon } from "@/components/ui/Icon";
+import { JsonLd } from "@/components/seo/JsonLd";
 import { formatCount, formatDuration } from "@/lib/utils/format";
+import { absoluteUrl, buildPageMetadata, compactText } from "@/lib/seo";
 import { youtubeThumbUrl } from "@/lib/youtube/id";
 
 export const dynamic = "force-dynamic";
@@ -64,7 +67,14 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       .limit(1);
     return rows[0] ?? null;
   });
-  return event?.title ? { title: event.title } : { title: id };
+  if (!event) return { title: id };
+  return buildPageMetadata({
+    title: event.title,
+    description: event.explanation,
+    path: `/event/${event.id}`,
+    image: event.img_url ?? event.icon_url,
+    noIndex: event.is_archived === 1,
+  });
 }
 
 export default async function EventDetailPage({
@@ -90,7 +100,7 @@ export default async function EventDetailPage({
             youtube_video_id: videos.youtube_video_id,
             display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.creator_display_name}, ${videos.creator_x_user_id})`,
             icon_url: sql<string | null>`COALESCE(${videos.creator_icon_url}, ${xUsers.icon_url})`,
-            score: sql<number>`COALESCE(${videoStats.score}, 0)`,
+            score: coalescedVideoScore,
             duration_seconds: videoYoutubeMetadata.duration_seconds,
           })
           .from(videos)
@@ -163,15 +173,49 @@ export default async function EventDetailPage({
   const timeline = getTimeline(event, now);
   const slotPreview = buildSlotPreview(slotRows);
   const statusTitle = accepting ? "募集期間中" : eventStatusLabel(status);
+  const inPostPeriod =
+    !accepting &&
+    event.entry_end_time != null &&
+    now > event.entry_end_time &&
+    event.start_time != null &&
+    now < event.start_time;
+  const eventJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Event",
+    name: event.title,
+    description: compactText(event.explanation),
+    url: absoluteUrl(`/event/${event.id}`),
+    image: event.img_url ? [absoluteUrl(event.img_url)] : undefined,
+    startDate: event.start_time
+      ? new Date(event.start_time * 1000).toISOString()
+      : undefined,
+    endDate: event.end_time
+      ? new Date(event.end_time * 1000).toISOString()
+      : undefined,
+    eventAttendanceMode: "https://schema.org/OnlineEventAttendanceMode",
+    location: {
+      "@type": "VirtualLocation",
+      url: absoluteUrl(`/event/${event.id}`),
+    },
+    organizer: {
+      "@type": "Organization",
+      name: "FlameNode",
+      url: absoluteUrl("/"),
+    },
+  };
 
   return (
-    <div className={styles.page} style={accentVar}>
-      <header className={styles.hero}>
+    <div
+      className={`fn-public-container fn-page ${styles.page}`}
+      style={accentVar}
+    >
+      <JsonLd data={eventJsonLd} />
+      <header className={`fn-page-head fn-event-hero ${styles.hero}`}>
         <div className={styles.heroCopy}>
-          <p className={styles.eyebrow}>EVENT</p>
-          <h1 className={styles.heroTitle}>{event.title}</h1>
+          <p className="fn-eyebrow">EVENT</p>
+          <h1 className={`fn-event-hero-title ${styles.heroTitle}`}>{event.title}</h1>
           {event.explanation ? (
-            <p className={styles.heroLead}>{event.explanation}</p>
+            <p className={`fn-event-hero-lead fn-jp ${styles.heroLead}`}>{event.explanation}</p>
           ) : null}
         </div>
         <div className={styles.heroActions}>
@@ -179,6 +223,13 @@ export default async function EventDetailPage({
           {accepting ? (
             <Link href={`/event/${event.id}/slots`} className={styles.reserveButton}>
               枠を確保する <Icon name="chevron-right" size={14} aria-hidden />
+            </Link>
+          ) : inPostPeriod ? (
+            <Link
+              href={`/dashboard/post?event=${encodeURIComponent(event.id)}`}
+              className={styles.reserveButton}
+            >
+              作品を提出する <Icon name="chevron-right" size={14} aria-hidden />
             </Link>
           ) : null}
           <Link href="/rules" className={styles.guideLink}>
@@ -236,9 +287,22 @@ export default async function EventDetailPage({
           </div>
         </div>
         <div className={styles.recruitAside}>
-          <Link href={`/event/${event.id}/slots`} className={styles.cardLink}>
-            詳細ページへ <Icon name="chevron-right" size={14} aria-hidden />
-          </Link>
+          {inPostPeriod ? (
+            <Link
+              href={`/dashboard/post?event=${encodeURIComponent(event.id)}`}
+              className={styles.cardLink}
+            >
+              ダッシュボードから提出 <Icon name="chevron-right" size={14} aria-hidden />
+            </Link>
+          ) : accepting ? (
+            <Link href={`/event/${event.id}/slots`} className={styles.cardLink}>
+              枠を確保する <Icon name="chevron-right" size={14} aria-hidden />
+            </Link>
+          ) : (
+            <Link href={`/event/${event.id}/slots`} className={styles.cardLink}>
+              枠・スロット表へ <Icon name="chevron-right" size={14} aria-hidden />
+            </Link>
+          )}
           <div className={styles.daysBox}>
             <span>{dayMetric.label}</span>
             <strong>
@@ -265,7 +329,7 @@ export default async function EventDetailPage({
               </div>
             }
           />
-          <div className={styles.slotTableWrap}>
+          <div className={`fn-table-scroll ${styles.slotTableWrap}`}>
             <table className={styles.slotTable}>
               <thead>
                 <tr>

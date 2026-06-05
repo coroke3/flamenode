@@ -18,7 +18,7 @@ import {
 } from "@/components/settings/XIdLinkedList";
 import { SettingsStatusPill } from "@/components/settings/SettingsStatusPill";
 import pageStyles from "@/components/settings/settings-page.module.css";
-import { sanitizeNextPath } from "@/lib/utils/next";
+import { sanitizeNextPath } from "#utils/next";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
 
 export const metadata: Metadata = { title: "設定" };
@@ -102,13 +102,13 @@ export default async function SettingsPage({
     activeX?.approval_status === "approved" ? activeX : null;
 
   return (
-    <div className={pageStyles.wrap}>
-      <header className={pageStyles.hd}>
+    <div className={`fn-public-container fn-page ${pageStyles.wrap}`}>
+      <header className={`fn-page-head ${pageStyles.hd}`}>
         <Link href="/dashboard" className={pageStyles.back}>
           ← ダッシュボード
         </Link>
-        <h1 className={pageStyles.title}>設定</h1>
-        <p className={pageStyles.lead}>
+        <h1 className="fn-display fn-page-title">設定</h1>
+        <p className="fn-page-lead">
           X ID 連携、アクティブ X ID の切替、Discord アカウント情報を管理します。
         </p>
         {next ? (

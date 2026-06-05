@@ -11,7 +11,7 @@ import {
   users,
 } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
-import { sanitizeNextPath } from "@/lib/utils/next";
+import { sanitizeNextPath } from "#utils/next";
 
 const FALLBACK_TERMS_VERSION_ID = "fallback-current";
 

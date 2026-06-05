@@ -39,25 +39,29 @@ export default async function AdminAuditDetailPage({
   const before = formatJson(row.before_data);
   const after = formatJson(row.after_data);
 
-  // 同一 record_id の前後ナビ
-  const [prevRow, nextRow] = await Promise.all([
-    db
-      .select({ id: historyLogs.id })
-      .from(historyLogs)
-      .where(
-        and(eq(historyLogs.record_id, row.record_id), lt(historyLogs.id, row.id))!,
-      )
-      .orderBy(desc(historyLogs.id))
-      .limit(1),
-    db
-      .select({ id: historyLogs.id })
-      .from(historyLogs)
-      .where(
-        and(eq(historyLogs.record_id, row.record_id), gt(historyLogs.id, row.id))!,
-      )
-      .orderBy(asc(historyLogs.id))
-      .limit(1),
-  ]);
+  const recordId = row.record_id;
+
+  // 同一 record_id の前後ナビ（record_id 未設定のログは対象外）
+  const [prevRow, nextRow] = recordId
+    ? await Promise.all([
+        db
+          .select({ id: historyLogs.id })
+          .from(historyLogs)
+          .where(
+            and(eq(historyLogs.record_id, recordId), lt(historyLogs.id, row.id))!,
+          )
+          .orderBy(desc(historyLogs.id))
+          .limit(1),
+        db
+          .select({ id: historyLogs.id })
+          .from(historyLogs)
+          .where(
+            and(eq(historyLogs.record_id, recordId), gt(historyLogs.id, row.id))!,
+          )
+          .orderBy(asc(historyLogs.id))
+          .limit(1),
+      ])
+    : [[], []];
 
   return (
     <div>
@@ -101,20 +105,25 @@ export default async function AdminAuditDetailPage({
         <Meta label="操作" value={row.action} />
         <Meta
           label="レコード ID"
-          value={row.record_id}
+          value={recordId ?? "—"}
           mono
-          link={`/admin/audit?record=${encodeURIComponent(row.record_id)}`}
+          link={
+            recordId
+              ? `/admin/audit?record=${encodeURIComponent(recordId)}`
+              : undefined
+          }
         />
         {(() => {
           // 表別に詳細ページへのジャンプリンクを出す
           const adminLink = (() => {
+            if (!recordId) return null;
             switch (row.table_name) {
               case "videos":
-                return `/admin/videos/${encodeURIComponent(row.record_id)}`;
+                return `/admin/videos/${encodeURIComponent(recordId)}`;
               case "events":
-                return `/admin/events/${encodeURIComponent(row.record_id)}`;
+                return `/admin/events/${encodeURIComponent(recordId)}`;
               case "users":
-                return `/admin/users/${encodeURIComponent(row.record_id)}`;
+                return `/admin/users/${encodeURIComponent(recordId)}`;
               case "x_account_link_requests":
                 return `/admin/x-link-requests`;
               case "notification_outbox":

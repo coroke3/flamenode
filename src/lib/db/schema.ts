@@ -244,6 +244,25 @@ export const events = sqliteTable("events", {
    * 旧データの type 列に相当する分類項目をイベント単位で定義できる。
    */
   parts_json: text("parts_json"),
+  /** 公開イベント API（旧 api_endpoints 代替）。管理者が ON にするまで 0 */
+  public_api_enabled: integer("public_api_enabled").notNull().default(0),
+  public_api_updated_at: integer("public_api_updated_at"),
+});
+
+/** イベント設定テンプレート（管理者のみ。枠・作品・スタッフは含まない） */
+export const eventTemplates = sqliteTable("event_templates", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  source_event_id: text("source_event_id"),
+  settings_json: text("settings_json").notNull(),
+  created_by_user_id: text("created_by_user_id").notNull(),
+  created_at: integer("created_at")
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updated_at: integer("updated_at")
+    .notNull()
+    .default(sql`(unixepoch())`),
 });
 
 export const eventStaff = sqliteTable(
@@ -262,6 +281,8 @@ export const eventStaff = sqliteTable(
     internal_note: text("internal_note"),
     approved_by_user_id: text("approved_by_user_id"),
     approved_at: integer("approved_at"),
+    /** event_staff_permissions 統合先（JSON 配列） */
+    permission_keys_json: text("permission_keys_json"),
     created_at: integer("created_at")
       .notNull()
       .default(sql`(unixepoch())`),
@@ -413,6 +434,13 @@ export const videos = sqliteTable("videos", {
     enum: ["slotted", "manual"],
   }).default("slotted"),
   scheduled_time: integer("scheduled_time"),
+  /** 旧 soft 列・レガシーインポート由来の使用ソフト（JSON） */
+  used_software_json: text("used_software_json"),
+  /** video_stats 統合先（Worker で score 再計算） */
+  app_like_count: integer("app_like_count").notNull().default(0),
+  score: real("score").notNull().default(0),
+  trending_view_count_24h: integer("trending_view_count_24h").notNull().default(0),
+  score_updated_at: integer("score_updated_at"),
   // timestamps
   created_at: integer("created_at")
     .notNull()
@@ -721,6 +749,8 @@ export const notificationOutbox = sqliteTable(
     last_error: text("last_error"),
     /** event-scoped 通知 (運営者受信箱用)。null は全体通知。 */
     event_id: text("event_id"),
+    /** 同一通知の重複 enqueue 防止 (pending/processing/sent で unique) */
+    dedupe_key: text("dedupe_key"),
     created_at: integer("created_at")
       .notNull()
       .default(sql`(unixepoch())`),
@@ -737,6 +767,11 @@ export const notificationOutbox = sqliteTable(
     ),
     // /manage/events/[id] が event_id で絞り込むため
     byEvent: index("notification_outbox_event_idx").on(t.event_id),
+    byDedupe: index("notification_outbox_dedupe_idx").on(t.dedupe_key),
+    byStatusDedupe: index("notification_outbox_status_dedupe_idx").on(
+      t.status,
+      t.dedupe_key,
+    ),
   }),
 );
 
@@ -866,6 +901,48 @@ export const videoSoftwares = sqliteTable(
     byVideoOrder: index("video_softwares_video_order_idx").on(
       t.video_id,
       t.order_index,
+    ),
+  }),
+);
+
+/** R2 公開用静的 JSON の再生成キュー（Next.js ビルドとは無関係） */
+export const staticRebuildQueue = sqliteTable(
+  "static_rebuild_queue",
+  {
+    id: text("id").primaryKey(),
+    target_type: text("target_type").notNull(),
+    target_id: text("target_id").notNull(),
+    reason: text("reason"),
+    priority: text("priority", { enum: ["high", "normal", "low"] })
+      .notNull()
+      .default("normal"),
+    status: text("status", {
+      enum: ["pending", "processing", "done", "failed"],
+    })
+      .notNull()
+      .default("pending"),
+    attempt_count: integer("attempt_count").notNull().default(0),
+    requested_by_user_id: text("requested_by_user_id"),
+    created_at: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updated_at: integer("updated_at")
+      .notNull()
+      .default(sql`(unixepoch())`),
+    processing_started_at: integer("processing_started_at"),
+    processed_at: integer("processed_at"),
+    next_retry_at: integer("next_retry_at"),
+    error: text("error"),
+  },
+  (t) => ({
+    statusPriorityIdx: index("static_rebuild_queue_status_priority_idx").on(
+      t.status,
+      t.priority,
+      t.created_at,
+    ),
+    nextRetryIdx: index("static_rebuild_queue_next_retry_idx").on(
+      t.status,
+      t.next_retry_at,
     ),
   }),
 );

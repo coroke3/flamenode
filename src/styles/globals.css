@@ -4,6 +4,11 @@
  * Tailwind は使わず、純粋な CSS で記述する。
  * ============================================================ */
 
+@import "./redesign-public.css";
+@import "./mobile-public.css";
+@import "./admin-manage.css";
+@import "./admin-mobile.css";
+
 /* ----------------------------------------------------------
  * テーマトークン (CSS Variables)
  * ---------------------------------------------------------- */
@@ -28,23 +33,23 @@
   --border-default: var(--border-subtle);
   --border-muted: var(--border-subtle);
 
-  --accent-primary: #c8ff12;
-  --accent-primary-strong: #b4f000;
-  --accent-primary-soft: rgba(200, 255, 18, 0.26);
+  --accent-primary: #c8f21f;
+  --accent-primary-strong: #a8d80f;
+  --accent-primary-soft: rgba(200, 242, 31, 0.26);
   --accent-ink: #1a1f03;
   --accent: var(--accent-primary);
   --accent-strong: var(--accent-primary-strong);
   --accent-soft: var(--accent-primary-soft);
-  --accent-glow: rgba(200, 255, 18, 0.42);
+  --accent-glow: rgba(200, 242, 31, 0.42);
   --accent-warning: #ff6f5f;
   --accent-warning-soft: rgba(255, 111, 95, 0.16);
   --warn: var(--accent-warning);
   --warn-soft: var(--accent-warning-soft);
-  --accent-danger: #dc2626;
-  --accent-danger-soft: rgba(220, 38, 38, 0.12);
-  --danger: var(--accent-danger);
-  --accent-success: #10b981;
-  --ok: var(--accent-success);
+  --accent-danger: #e25c5c;
+  --accent-danger-soft: rgba(226, 92, 92, 0.14);
+  --danger: #e25c5c;
+  --accent-success: #7bd89c;
+  --ok: #7bd89c;
 
   --event-accent: var(--accent-primary);
   --event-accent-strong: var(--accent-primary-strong);
@@ -52,9 +57,12 @@
 
   --shelf-fade-color: rgba(255, 255, 255, 0.95);
 
-  --font-display: "Hanken Grotesk", "Manrope", "Noto Sans JP", system-ui, sans-serif;
-  --font-body: "Manrope", "Noto Sans JP", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-display: var(--font-hanken), "Hanken Grotesk", var(--font-manrope), "Manrope",
+    var(--font-noto-jp), "Noto Sans JP", system-ui, sans-serif;
+  --font-body: var(--font-manrope), "Manrope", var(--font-noto-jp), "Noto Sans JP", system-ui,
+    sans-serif;
+  --font-mono: var(--font-jetbrains), "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo,
+    Consolas, monospace;
 
   --radius-sm: 4px;
   --radius-md: 6px;
@@ -64,8 +72,13 @@
   --r-card: var(--radius-md);
   --r-pill: var(--radius-pill);
   --r-block: var(--radius-lg);
-  --d-gap: 18px;
-  --header-h: 88px;
+  --d-row: 14px;
+  --d-pad: 22px;
+  --d-gap: 22px;
+  --header-h: 64px;
+  /* 横ガター（動画詳細ページ基準でやや贅沢に） */
+  --fn-page-gutter: clamp(24px, 5vw, 56px);
+  --font-jp: var(--font-noto-jp), "Noto Sans JP", system-ui, sans-serif;
 
   /* タイポグラフィ token (PR46): フルードな clamp で 1 軸に絞る。
      既存のページ別 font-size と併存させ、徐々に置き換える。 */
@@ -87,42 +100,45 @@
 }
 
 [data-theme="dark"] {
-  --bg-base: #070a07;
-  --bg-surface: #11150f;
-  --bg-elevated: #1c2317;
-  --bg-overlay: rgba(7, 10, 7, 0.92);
-  --text-primary: #f6f7ef;
-  --text-secondary: #d4dac8;
-  --text-muted: #98a28d;
-  --text-faint: #6f7b65;
-  --border-subtle: rgba(246, 247, 239, 0.1);
-  --border-strong: rgba(246, 247, 239, 0.2);
-  --hairline: rgba(246, 247, 239, 0.08);
+  /* Standalone プレビュー (#0B0D10) に寄せたダークベース */
+  --bg-base: #0e100d;
+  --bg-surface: #171a14;
+  --bg-elevated: #22251d;
+  --bg-inset: #0a0b08;
+  --bg-overlay: rgba(14, 16, 13, 0.92);
+  --text-primary: #f4f6ee;
+  --text-secondary: #d0d5c5;
+  --text-muted: #9ca293;
+  --text-faint: #686d5f;
+  --border-subtle: rgba(244, 246, 238, 0.1);
+  --border-strong: rgba(244, 246, 238, 0.2);
+  --hairline: rgba(244, 246, 238, 0.07);
   --shadow-soft: 0 18px 48px rgba(0, 0, 0, 0.36);
-  --accent-primary-soft: rgba(200, 255, 18, 0.16);
+  --accent-primary-soft: rgba(200, 242, 31, 0.16);
   --accent-soft: var(--accent-primary-soft);
-  --accent-glow: rgba(200, 255, 18, 0.34);
-  --shelf-fade-color: rgba(7, 10, 7, 0.96);
+  --accent-glow: rgba(200, 242, 31, 0.32);
+  --shelf-fade-color: rgba(14, 16, 13, 0.96);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]):not([data-theme="dark"]) {
-    --bg-base: #070a07;
-    --bg-surface: #11150f;
-    --bg-elevated: #1c2317;
-    --bg-overlay: rgba(7, 10, 7, 0.92);
-    --text-primary: #f6f7ef;
-    --text-secondary: #d4dac8;
-    --text-muted: #98a28d;
-    --text-faint: #6f7b65;
-    --border-subtle: rgba(246, 247, 239, 0.1);
-    --border-strong: rgba(246, 247, 239, 0.2);
-    --hairline: rgba(246, 247, 239, 0.08);
+    --bg-base: #0e100d;
+    --bg-surface: #171a14;
+    --bg-elevated: #22251d;
+    --bg-inset: #0a0b08;
+    --bg-overlay: rgba(14, 16, 13, 0.92);
+    --text-primary: #f4f6ee;
+    --text-secondary: #d0d5c5;
+    --text-muted: #9ca293;
+    --text-faint: #686d5f;
+    --border-subtle: rgba(244, 246, 238, 0.1);
+    --border-strong: rgba(244, 246, 238, 0.2);
+    --hairline: rgba(244, 246, 238, 0.07);
     --shadow-soft: 0 18px 48px rgba(0, 0, 0, 0.36);
-    --accent-primary-soft: rgba(200, 255, 18, 0.16);
+    --accent-primary-soft: rgba(200, 242, 31, 0.16);
     --accent-soft: var(--accent-primary-soft);
-    --accent-glow: rgba(200, 255, 18, 0.34);
-    --shelf-fade-color: rgba(7, 10, 7, 0.96);
+    --accent-glow: rgba(200, 242, 31, 0.32);
+    --shelf-fade-color: rgba(14, 16, 13, 0.96);
   }
 }
 
@@ -211,8 +227,8 @@ select {
 }
 
 ::selection {
-  background-color: var(--accent-primary-soft);
-  color: var(--text-primary);
+  background-color: var(--accent-primary);
+  color: var(--accent-ink);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -238,6 +254,44 @@ select {
   outline: 2px solid var(--accent-primary);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
+}
+
+.fn-display {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.fn-mono {
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum", "ss01";
+  letter-spacing: 0.01em;
+}
+
+.fn-jp {
+  font-family: var(--font-jp);
+}
+
+.fn-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.fn-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--d-row, 12px);
+}
+
+.fn-divider {
+  height: 1px;
+  background: var(--hairline);
+  border: 0;
+  margin: 0;
 }
 
 .fn-mt-sm { margin-top: 8px; }
@@ -608,6 +662,19 @@ select {
   margin-top: 4px;
 }
 
+/* 横スクロール可能なテーブルラッパ（スマホ） */
+.fn-table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+}
+
+.fn-admin-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+
 /* ----------------------------------------------------------
  * テーブル
  * ---------------------------------------------------------- */
@@ -707,12 +774,19 @@ select {
 }
 
 .fn-public-container {
+  box-sizing: border-box;
   width: 100%;
-  max-width: var(--content-max, 1200px);
+  max-width: var(--fn-page-max, var(--content-max, 1360px));
   margin-left: auto;
   margin-right: auto;
-  padding-left: clamp(12px, 4vw, 24px);
-  padding-right: clamp(12px, 4vw, 24px);
+  padding-left: var(--fn-page-gutter);
+  padding-right: var(--fn-page-gutter);
+}
+
+@media (max-width: 640px) {
+  :root {
+    --fn-page-gutter: clamp(18px, 5vw, 28px);
+  }
 }
 
 /* 公開ページのセクション区切り。控えめな下線+余白だけ */
@@ -721,7 +795,7 @@ select {
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  margin: clamp(20px, 4vw, 32px) 0 clamp(12px, 2vw, 16px);
+  margin: clamp(24px, 4.5vw, 40px) 0 clamp(16px, 2.5vw, 22px);
 }
 
 .fn-section-heading h2,

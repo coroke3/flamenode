@@ -15,15 +15,18 @@
 }
 
 .fn-intro-meta { display: flex; flex-direction: column; gap: 24px; }
-.fn-intro-title {
+
+/* Hero catchphrase */
+.fn-intro-hero { display: flex; align-items: flex-start; }
+.fn-intro-copy {
   margin: 0;
-  line-height: 0.88;
-  font-family: var(--font-display);
-  font-size: clamp(64px, 9vw, 124px);
+  font-size: clamp(52px, 7vw, 96px);
+  line-height: 1.05;
   letter-spacing: -0.02em;
-  font-weight: 800;
+  color: var(--text-primary);
 }
-.fn-intro-accent { color: var(--accent); }
+.fn-intro-copy-accent { color: var(--accent); }
+
 .fn-intro-lead {
   font-size: 15px;
   color: var(--text-secondary);
@@ -126,9 +129,9 @@
 .fn-archive-cta-label { font-size: 13px; color: var(--text-secondary); font-weight: 600; }
 
 /* Events list page */
-.fn-evlist-head { padding: 36px 0 8px; display: flex; flex-direction: column; gap: 6px; }
-.fn-evlist-title { font-size: clamp(40px, 6vw, 80px); margin: 0; line-height: 0.95; }
-.fn-evlist-sub { font-size: 13.5px; color: var(--text-muted); }
+.fn-evlist-head { padding: 40px 0 8px; display: flex; flex-direction: column; gap: 4px; }
+.fn-evlist-title { font-size: clamp(48px, 7vw, 96px); margin: 2px 0 0; line-height: 0.9; }
+.fn-evlist-sub { font-size: 13.5px; color: var(--text-muted); margin-top: 4px; }
 .fn-evlist-section { padding: 24px 0; }
 .fn-evlist-count { font-size: 13px; color: var(--text-faint); }
 
@@ -212,24 +215,6 @@
 }
 
 /* ─── VIDEO DETAIL ─────────────────────────────────────────────── */
-.fn-vd-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 0 12px;
-  border-bottom: 1px solid var(--hairline);
-  gap: 16px;
-}
-.fn-vd-breadcrumb {
-  font-size: 10.5px;
-  letter-spacing: 0.16em;
-  color: var(--text-muted);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.fn-vd-actions { display: flex; gap: 8px; }
-
 .fn-vd-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
@@ -340,6 +325,33 @@
 }
 .fn-vd-metabar-spacer { flex: 1; }
 .fn-vd-views { color: var(--text-muted); font-size: 11.5px; }
+.fn-vd-metabar-divider { width: 1px; height: 16px; background: var(--hairline); }
+.fn-vd-quickactions { display: flex; gap: 2px; }
+.fn-vd-qa {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 11px;
+  border-radius: var(--r-pill);
+  font-size: 12px; color: var(--text-secondary);
+  transition: background 120ms ease, color 120ms ease;
+}
+.fn-vd-qa i { font-size: 12px; }
+.fn-vd-qa:hover { background: var(--bg-elevated); color: var(--text-primary); }
+.fn-node .fn-vd-qa { border-radius: 4px; }
+@media (max-width: 560px) {
+  .fn-vd-qa span { display: none; }
+  .fn-vd-qa { padding: 0 9px; }
+}
+
+.fn-vd-pl-add {
+  width: 24px; height: 24px;
+  border-radius: var(--r-pill);
+  display: grid; place-items: center;
+  color: var(--text-muted); font-size: 11px;
+  border: 1px solid var(--hairline);
+  transition: all 120ms ease;
+}
+.fn-vd-pl-add:hover { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.fn-node .fn-vd-pl-add { border-radius: 4px; }
 
 .fn-vd-credits { border-top: 1px solid var(--hairline); padding-top: 16px; }
 .fn-vd-credtable {
@@ -672,37 +684,79 @@
 .fn-slot-panel-name { font-size: 13px; color: var(--text-muted); }
 .fn-slot-panel-right { display: flex; gap: 8px; align-items: center; }
 
-/* Crew table */
-.fn-ev-crew {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-  margin-top: 14px;
+/* Crew cards */
+.fn-crew-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+  margin-top: 4px;
 }
-.fn-ev-crew th, .fn-ev-crew td {
-  padding: 10px 14px;
-  text-align: left;
-  border-bottom: 1px solid var(--hairline);
+.fn-crew-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 16px;
+  background: var(--bg-surface);
+  border-radius: var(--r-card);
 }
-.fn-ev-crew th {
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.16em;
+.fn-crew-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.fn-crew-avatar {
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  display: grid; place-items: center;
+  font-family: var(--font-display);
+  font-size: 18px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.fn-crew-role {
+  font-size: 9.5px;
+  color: var(--accent-strong);
+  letter-spacing: 0.14em;
+}
+.fn-light .fn-crew-role { color: #6a8500; }
+.fn-crew-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fn-crew-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.fn-crew-handle {
+  font-size: 11.5px;
   color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
-.fn-ev-crew tbody tr:hover { background: var(--bg-elevated); }
+.fn-crew-handle i { font-size: 10px; }
+.fn-crew-scope {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  letter-spacing: 0.08em;
+  margin-top: 4px;
+}
 .fn-ev-crew-scope { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); letter-spacing: 0.02em; }
 
 /* ─── CREATOR LIST ────────────────────────────────────────────── */
 .fn-cr-head {
-  padding: 36px 0 18px;
+  padding: 40px 0 18px;
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
   gap: 24px;
   flex-wrap: wrap;
 }
-.fn-cr-title { margin: 4px 0 0; font-size: clamp(48px, 7vw, 96px); line-height: 0.9; }
+.fn-cr-title { margin: 2px 0 0; font-size: clamp(48px, 7vw, 96px); line-height: 0.9; }
 .fn-cr-sub { font-size: 13px; color: var(--text-muted); }
 .fn-cr-controls { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 .fn-cr-segment { display: flex; border: 1px solid var(--border-subtle); border-radius: var(--r-pill); overflow: hidden; }
@@ -846,3 +900,104 @@
 .fn-list-tbl tbody tr { cursor: pointer; transition: background 120ms ease; }
 .fn-list-tbl tbody tr:hover { background: var(--bg-elevated); }
 .fn-list-tbl tbody tr:hover td:last-child { color: var(--accent); }
+
+
+
+/* ─── VIDEO META (music / intro / detail comments) ───────────── */
+.fn-vd-meta { border-top: 1px solid var(--hairline); padding-top: 18px; margin-top: 2px; display: flex; flex-direction: column; gap: 16px; }
+.fn-vd-meta-item { display: flex; flex-direction: column; gap: 6px; }
+.fn-vd-meta-music {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 14px; color: var(--text-primary); width: fit-content;
+}
+.fn-vd-meta-music i { font-size: 11px; color: var(--text-muted); }
+.fn-vd-meta-music:hover { color: var(--accent); }
+.fn-vd-meta-music:hover i { color: var(--accent); }
+.fn-vd-meta-intro { margin: 0; font-size: 13.5px; line-height: 1.75; color: var(--text-secondary); }
+.fn-vd-details { border: 1px solid var(--hairline); border-radius: var(--r-card); overflow: hidden; }
+.fn-vd-details > summary {
+  list-style: none; cursor: pointer;
+  padding: 12px 16px; font-size: 13px; font-weight: 600;
+  display: flex; align-items: center; gap: 8px;
+  color: var(--text-primary);
+}
+.fn-vd-details > summary::-webkit-details-marker { display: none; }
+.fn-vd-details > summary::before { content: "＋"; font-family: var(--font-mono); color: var(--text-muted); }
+.fn-vd-details[open] > summary::before { content: "−"; }
+.fn-vd-details[open] > summary { border-bottom: 1px solid var(--hairline); }
+.fn-vd-details-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 16px; }
+.fn-vd-details-body section { display: flex; flex-direction: column; gap: 4px; }
+.fn-vd-details-h { margin: 0; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); font-weight: 500; }
+.fn-vd-details-body p { margin: 0; font-size: 13px; line-height: 1.7; color: var(--text-secondary); }
+.fn-vd-section-title { font-size: 16px; margin: 0 0 12px; font-weight: 700; display: flex; align-items: baseline; gap: 8px; }
+.fn-vd-section-count { font-size: 12px; color: var(--text-muted); font-weight: 400; }
+
+/* ─── CHAPTER COMMENTS (ChapterCommentItem) ──────────────────── */
+.fn-chapcom-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.fn-chapcom {
+  display: grid;
+  grid-template-columns: 54px 1fr;
+  gap: 12px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--hairline);
+  align-items: start;
+  transition: background 120ms ease;
+}
+.fn-chapcom.is-active .fn-chapcom-time { background: var(--accent); color: var(--accent-ink); }
+.fn-chapcom.is-private { opacity: 0.7; }
+.fn-chapcom.is-out-of-range { opacity: 0.55; }
+.fn-chapcom.is-preview { padding: 12px; border: 1px solid var(--hairline); border-radius: var(--r-card); background: var(--bg-elevated); border-bottom: 1px solid var(--hairline); }
+
+.fn-chapcom-time {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11.5px; letter-spacing: 0.04em;
+  height: 26px; min-width: 48px; padding: 0 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  transition: background 140ms, color 140ms;
+  cursor: pointer;
+}
+.fn-chapcom-time:not(:disabled):hover { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.fn-chapcom-time:disabled { cursor: default; }
+
+.fn-chapcom-body { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.fn-chapcom-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.fn-chapcom-label { font-size: 14px; font-weight: 600; line-height: 1.35; color: var(--text-primary); }
+.fn-chapcom.is-active .fn-chapcom-label { color: var(--accent); }
+.fn-light .fn-chapcom.is-active .fn-chapcom-label { color: #6a8500; }
+.fn-chapcom-badges { display: flex; gap: 5px; flex-shrink: 0; align-items: center; }
+.fn-chapcom-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 9.5px; letter-spacing: 0.08em;
+  padding: 2px 7px; border-radius: 3px;
+}
+.fn-chapcom-badge--private { background: rgba(255,255,255,0.08); color: var(--text-muted); border: 1px solid var(--hairline); }
+.fn-light .fn-chapcom-badge--private { background: rgba(0,0,0,0.06); }
+.fn-chapcom-badge--oor { background: rgba(245,158,11,0.12); color: var(--warn); border: 1px solid rgba(245,158,11,0.3); }
+.fn-chapcom-note { margin: 0; font-size: 12.5px; line-height: 1.65; color: var(--text-secondary); }
+.fn-chapcom-meta { display: flex; align-items: center; gap: 7px; }
+.fn-chapcom-avatar {
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--bg-base); border: 1px solid var(--hairline);
+  display: grid; place-items: center;
+  font-size: 10px; font-weight: 700; color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.fn-chapcom-author { font-size: 11.5px; color: var(--text-secondary); }
+.fn-chapcom-handle { font-size: 10.5px; color: var(--text-faint); }
+
+/* ─── CHAPTER COMPOSER FORM ─────────────────────────────────── */
+.fn-chapcomp { display: flex; flex-direction: column; gap: 14px; padding: 4px 0 24px; }
+.fn-chapcomp-time-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.fn-chapcomp-note-ta {
+  resize: vertical; min-height: 72px;
+  font-family: var(--font-jp);
+  padding: 10px 12px;
+  line-height: 1.7;
+}
+.fn-chapcomp-toggles { display: flex; flex-direction: column; gap: 10px; }
+.fn-chapcomp-toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.fn-chapcomp-toggle .fn-jp { font-size: 13px; color: var(--text-secondary); }
+.fn-chapcomp-preview { padding: 14px; background: var(--bg-elevated); border-radius: var(--r-card); display: flex; flex-direction: column; gap: 10px; }

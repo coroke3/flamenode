@@ -32,7 +32,6 @@ function UserPage({ onNav, lang }) {
             </div>
           </div>
           <div className="fn-user-actions">
-            <button className="fn-btn" data-variant="accent">フォロー</button>
             <button className="fn-btn" data-variant="ghost" data-size="sm" onClick={() => onNav("settings")}>プロフィール編集</button>
           </div>
         </header>
@@ -40,7 +39,6 @@ function UserPage({ onNav, lang }) {
         {/* Stats */}
         <div className="fn-user-stats">
           <div className="fn-user-stat"><span className="fn-display fn-user-stat-v">{me.videos}</span><span className="fn-user-stat-k fn-jp">作品</span></div>
-          <div className="fn-user-stat"><span className="fn-display fn-user-stat-v">1,206</span><span className="fn-user-stat-k fn-jp">フォロワー</span></div>
           <div className="fn-user-stat"><span className="fn-display fn-user-stat-v">84.2k</span><span className="fn-user-stat-k fn-jp">総再生</span></div>
           <div className="fn-user-stat"><span className="fn-display fn-user-stat-v">06</span><span className="fn-user-stat-k fn-jp">参加イベント</span></div>
         </div>

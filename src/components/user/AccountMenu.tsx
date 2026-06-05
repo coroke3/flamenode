@@ -382,11 +382,11 @@ export function AccountMenu({
               <Icon name="settings" size={14} aria-hidden /> 設定
             </Link>
             <Link
-              href="/dashboard"
+              href="/dashboard/post"
               className={styles.menuItem}
               onClick={() => setOpen(false)}
             >
-              <Icon name="edit" size={14} aria-hidden /> 投稿管理
+              <Icon name="edit" size={14} aria-hidden /> 新規投稿
             </Link>
           </div>
 

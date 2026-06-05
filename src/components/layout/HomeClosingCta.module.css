@@ -1,29 +1,4 @@
-.closingCta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  width: min(100% - 40px, 1360px);
-  margin: 56px auto 0;
-  padding: 36px 0;
-  border-top: 1px solid var(--hairline);
-  border-bottom: 1px solid var(--hairline);
-}
-
-.closingCta p,
-.closingCta h2 {
-  margin: 0;
-  color: var(--text-primary);
-  font-family: var(--font-display);
-  font-size: clamp(36px, 6vw, 80px);
-  font-weight: 800;
-  letter-spacing: 0;
-  line-height: 0.95;
-}
-
-.closingCta p {
-  color: var(--text-primary);
-}
+/* レイアウト・枠線は redesign-public.css の .fn-closing に委譲 */
 
 .closingActions {
   display: flex;
@@ -32,30 +7,8 @@
   gap: 10px;
 }
 
-@media (max-width: 900px) {
-  .closingCta {
-    display: grid;
-    padding: 30px 0;
-  }
-
+@media (max-width: 720px) {
   .closingActions {
     justify-content: flex-start;
-  }
-}
-
-@media (max-width: 640px) {
-  .closingCta {
-    width: min(100% - 40px, 100%);
-  }
-
-  .closingCta p,
-  .closingCta h2 {
-    font-size: 38px;
-  }
-}
-
-@media (min-width: 1180px) {
-  .closingCta {
-    width: min(100% - 96px, 1360px);
   }
 }

@@ -13,7 +13,18 @@ interface PreviewRow {
   status: "create" | "update" | "skip" | "merge";
   conflict: boolean;
   warnings: string[];
+  importedState?: {
+    is_active: 0 | 1;
+    is_entry_open: 0 | 1;
+    is_archived: 0 | 1;
+    importMode: string;
+  };
+  staticRebuildTargets?: string[];
+  dbReductionNotes?: string[];
 }
+
+type LegacyImportMode = "archive" | "preserve" | "active_event" | "draft";
+type StaticRebuildStrategy = "none" | "summary" | "event" | "full";
 
 interface ImportCounts {
   events: { create: number; update: number; skip: number; failed: number };
@@ -112,6 +123,11 @@ export function LegacyImportClient(): React.ReactElement {
   const [eventStrategy, setEventStrategy] = React.useState<Strategy>("skip");
   const [videoStrategy, setVideoStrategy] = React.useState<Strategy>("skip");
   const [updateXUsers, setUpdateXUsers] = React.useState(false);
+  const [importMode, setImportMode] = React.useState<LegacyImportMode>("archive");
+  const [forceEntryOpen, setForceEntryOpen] = React.useState(false);
+  const [staticRebuildStrategy, setStaticRebuildStrategy] =
+    React.useState<StaticRebuildStrategy>("event");
+  const [enqueueStaticRebuild, setEnqueueStaticRebuild] = React.useState(true);
   const [analysis, setAnalysis] = React.useState<ImportResult | null>(null);
   const [applyResult, setApplyResult] = React.useState<ImportResult | null>(null);
   const [pending, setPending] = React.useState<"analyze" | "apply" | null>(null);
@@ -170,6 +186,12 @@ export function LegacyImportClient(): React.ReactElement {
         body: JSON.stringify({
           action: "analyze",
           files: files.map((f) => ({ name: f.name, content: f.content })),
+          strategy: {
+            importMode,
+            forceEntryOpen,
+            enqueueStaticRebuild,
+            staticRebuildStrategy,
+          },
         }),
       });
       setAnalysis(await parseImportResponse(res));
@@ -199,6 +221,10 @@ export function LegacyImportClient(): React.ReactElement {
             events: eventStrategy,
             videos: videoStrategy,
             updateXUsers,
+            importMode,
+            forceEntryOpen,
+            enqueueStaticRebuild,
+            staticRebuildStrategy,
           },
         }),
       });
@@ -315,6 +341,54 @@ export function LegacyImportClient(): React.ReactElement {
             <option value="merge">merge: 空欄は保持</option>
           </select>
         </div>
+        <div className={styles.strategyGroup}>
+          <label htmlFor="import-mode">取り込みモード</label>
+          <select
+            id="import-mode"
+            value={importMode}
+            onChange={(e) => setImportMode(e.target.value as LegacyImportMode)}
+            disabled={pending !== null}
+          >
+            <option value="archive">archive: 過去イベント（既定）</option>
+            <option value="preserve">preserve: 日時から推定</option>
+            <option value="active_event">active_event: 開催中として取り込み</option>
+            <option value="draft">draft: 下書き</option>
+          </select>
+        </div>
+        <div className={styles.strategyGroup}>
+          <label htmlFor="rebuild-strategy">静的 JSON 再生成</label>
+          <select
+            id="rebuild-strategy"
+            value={staticRebuildStrategy}
+            onChange={(e) =>
+              setStaticRebuildStrategy(e.target.value as StaticRebuildStrategy)
+            }
+            disabled={pending !== null}
+          >
+            <option value="event">event: イベント単位（推奨）</option>
+            <option value="summary">summary: 一覧のみ</option>
+            <option value="full">full: 動画単位も含む</option>
+            <option value="none">none: キューに積まない</option>
+          </select>
+        </div>
+        <label className={styles.checkboxLine}>
+          <input
+            type="checkbox"
+            checked={forceEntryOpen}
+            onChange={(e) => setForceEntryOpen(e.target.checked)}
+            disabled={pending !== null}
+          />
+          <span>受付中として扱う（active_event / preserve）</span>
+        </label>
+        <label className={styles.checkboxLine}>
+          <input
+            type="checkbox"
+            checked={enqueueStaticRebuild}
+            onChange={(e) => setEnqueueStaticRebuild(e.target.checked)}
+            disabled={pending !== null}
+          />
+          <span>取り込み後に静的 JSON 再生成キューへ積む</span>
+        </label>
         <label className={styles.checkboxLine}>
           <input
             type="checkbox"
@@ -409,9 +483,32 @@ export function LegacyImportClient(): React.ReactElement {
                       </span>
                     </td>
                     <td className={styles.warning}>
-                      {row.warnings.length === 0
+                      {row.importedState ? (
+                        <span>
+                          状態: archived=
+                          {row.importedState.is_archived} active=
+                          {row.importedState.is_active}
+                          <br />
+                        </span>
+                      ) : null}
+                      {row.staticRebuildTargets?.length ? (
+                        <span>
+                          静的JSON: {row.staticRebuildTargets.join(", ")}
+                          <br />
+                        </span>
+                      ) : null}
+                      {row.dbReductionNotes?.length ? (
+                        <span>{row.dbReductionNotes.join(" · ")}</span>
+                      ) : null}
+                      {row.warnings.length > 0 ? (
+                        <span>{row.warnings.join(" / ")}</span>
+                      ) : null}
+                      {!row.importedState &&
+                      !row.staticRebuildTargets?.length &&
+                      !row.dbReductionNotes?.length &&
+                      row.warnings.length === 0
                         ? "-"
-                        : row.warnings.join(" / ")}
+                        : null}
                     </td>
                   </tr>
                 ))}

@@ -1,7 +1,6 @@
 import * as React from "react";
 import Link from "next/link";
 import { Icon } from "@/components/ui/Icon";
-import styles from "./AdminPageHeader.module.css";
 
 export interface AdminPageHeaderAction {
   href: string;
@@ -12,12 +11,9 @@ export interface AdminPageHeaderAction {
 
 export interface AdminPageHeaderProps {
   title: string;
-  description?: string;
-  /** 戻る先のパス (一覧 or 詳細)。指定するとタイトル左に戻るリンクを表示。 */
+  description?: React.ReactNode;
   backHref?: string;
-  /** 戻るリンクのラベル。省略時は「戻る」。 */
   backLabel?: string;
-  /** 右側に並べる主要アクション。横断遷移は admin サイドバーに任せる。 */
   actions?: AdminPageHeaderAction[];
 }
 
@@ -35,14 +31,6 @@ function variantClass(variant: AdminPageHeaderAction["variant"]): string {
 
 /**
  * admin 配下ページの共通上部ヘッダー。
- *
- * 役割:
- *   - ページタイトル / 説明文を統一表示
- *   - 戻るリンク (`backHref`) を左に置く (詳細/編集ページ向け)
- *   - 主要アクション (`actions`) を右に置く (新規作成・編集ボタン等)
- *
- * 横断遷移 (他カテゴリへの移動) は admin サイドバーに任せ、本コンポーネントには置かない。
- * これによりページ遷移ごとに上部ボタン構成がバラバラになる UX 不整合を解消する。
  */
 export function AdminPageHeader({
   title,
@@ -52,18 +40,22 @@ export function AdminPageHeader({
   actions = [],
 }: AdminPageHeaderProps): React.ReactElement {
   return (
-    <header className={styles.header}>
-      <div className={styles.titleArea}>
+    <header className="fn-console-head">
+      <div className="fn-console-head-main">
         {backHref ? (
-          <Link href={backHref} className={styles.backLink}>
-            <Icon name="chevron-left" size={12} aria-hidden /> {backLabel}
-          </Link>
+          <p className="fn-console-back">
+            <Link href={backHref}>
+              <Icon name="chevron-left" size={12} aria-hidden /> {backLabel}
+            </Link>
+          </p>
         ) : null}
-        <h1 className={styles.title}>{title}</h1>
-        {description ? <p className={styles.description}>{description}</p> : null}
+        <h1 className="fn-console-title">{title}</h1>
+        {description ? (
+          <div className="fn-console-lead">{description}</div>
+        ) : null}
       </div>
       {actions.length > 0 ? (
-        <div className={styles.actions}>
+        <div className="fn-console-actions">
           {actions.map((action) => (
             <Link
               key={action.href}

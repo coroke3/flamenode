@@ -1,4 +1,5 @@
-import * as React from "react";
+import * as React from "react";import { FnTable } from "@/components/ui/FnTable";
+
 import Link from "next/link";
 import type { Metadata } from "next";
 import { and, desc, eq, isNull, like, or, sql, inArray } from "drizzle-orm";
@@ -540,7 +541,7 @@ function DiscordTable({
   linkedXByDiscord: Map<string, CurrentLinkedXRow[]>;
 }): React.ReactElement {
   return (
-    <table className="fn-table" style={{ marginTop: 18 }}>
+    <FnTable style={{ marginTop: 18 }}>
       <thead>
         <tr>
           <th>Discord</th>
@@ -662,7 +663,7 @@ function DiscordTable({
           </tr>
         ) : null}
       </tbody>
-    </table>
+    </FnTable>
   );
 }
 
@@ -683,7 +684,7 @@ function XIdTable({
       : [];
 
   return (
-    <table className="fn-table" style={{ marginTop: 18 }}>
+    <FnTable style={{ marginTop: 18 }}>
       <thead>
         <tr>
           <th>X ID</th>
@@ -817,13 +818,13 @@ function XIdTable({
           );
         })}
       </tbody>
-    </table>
+    </FnTable>
   );
 }
 
 function LinkRequestTable({ rows }: { rows: LinkRequestRow[] }): React.ReactElement {
   return (
-    <table className="fn-table" style={{ marginTop: 18 }}>
+    <FnTable style={{ marginTop: 18 }}>
       <thead>
         <tr>
           <th>Discord</th>
@@ -870,7 +871,7 @@ function LinkRequestTable({ rows }: { rows: LinkRequestRow[] }): React.ReactElem
           </tr>
         ) : null}
       </tbody>
-    </table>
+    </FnTable>
   );
 }
 

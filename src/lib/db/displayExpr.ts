@@ -1,4 +1,4 @@
-import { sql, type SQLWrapper } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { videos, xUsers } from "./schema";
 
 /**
@@ -24,9 +24,3 @@ export const creatorNameExpr = sql<string>`COALESCE(${videos.creator_display_nam
 export const creatorIconExpr = sql<
   string | null
 >`COALESCE(${videos.creator_icon_url}, ${xUsers.icon_url})`;
-
-/** 任意の column 群を組み合わせた COALESCE。複雑なケース用。 */
-export function coalesceExpr<T>(...args: SQLWrapper[]): import("drizzle-orm").SQL<T> {
-  if (args.length === 0) throw new Error("coalesceExpr requires args");
-  return sql<T>`COALESCE(${sql.join(args, sql`, `)})`;
-}

@@ -14,7 +14,6 @@ import { VideoForm } from "@/components/forms/VideoForm";
 import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
 import { AppShell } from "@/components/ui/AppShell";
-import { PageHero } from "@/components/ui/PageHero";
 import { StatusPanel } from "@/components/ui/StatusPanel";
 
 export const metadata: Metadata = { title: "枠なし投稿" };
@@ -98,16 +97,20 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
 
   return (
     <AppShell size="default">
-      <PageHero
-        eyebrow="Unslotted Post"
-        title="作品を投稿する"
-        description="イベント枠に紐づかない通常投稿です。投稿者X IDとYouTube IDを確認してから公開します。"
-        actions={
+      <header className="fn-page-head fn-page-head--split">
+        <div className="fn-page-head-main">
+          <p className="fn-eyebrow">Unslotted Post</p>
+          <h1 className="fn-page-title fn-page-title--compact">作品を投稿する</h1>
+          <p className="fn-page-lead">
+            イベント枠に紐づかない通常投稿です。投稿者X IDとYouTube IDを確認してから公開します。
+          </p>
+        </div>
+        <div className="fn-page-head-actions">
           <Link href="/dashboard/post" className="fn-btn fn-btn-ghost">
             投稿方法を選択
           </Link>
-        }
-      />
+        </div>
+      </header>
 
       <StatusPanel
         title={canPost ? "投稿前チェック" : "まだ投稿できません"}

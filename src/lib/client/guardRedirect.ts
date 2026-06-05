@@ -1,3 +1,5 @@
+import { sanitizeNextPath } from "#utils/next";
+
 export type GuardRedirectReason =
   | "unauthenticated"
   | "db_unavailable"
@@ -14,16 +16,8 @@ export interface GuardRouter {
   push(path: string): void;
 }
 
-const SETTINGS_REASONS = new Set<GuardRedirectReason>([
-  "active_x_required",
-  "active_x_rejected",
-  "active_x_not_approved",
-]);
-
 function sanitizeCurrentPath(currentPath: string | null | undefined): string {
-  const raw = typeof currentPath === "string" ? currentPath.trim() : "";
-  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/";
-  return raw;
+  return sanitizeNextPath(currentPath, "/");
 }
 
 export function getGuardRedirectPath(
@@ -66,10 +60,4 @@ export function redirectForGuardReason(
   if (!path) return false;
   router.push(path);
   return true;
-}
-
-export function isSettingsGuardReason(
-  reason: string | null | undefined,
-): reason is GuardRedirectReason {
-  return SETTINGS_REASONS.has(reason as GuardRedirectReason);
 }

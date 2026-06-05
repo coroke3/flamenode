@@ -35,8 +35,9 @@ import {
   uniqueByVideoId,
   type RelatedReason,
 } from "./recommendation";
+import { coalescedVideoScore } from "./videoScoreSql";
 
-const videoScoreExpr = sql<number>`COALESCE((SELECT score FROM video_stats WHERE video_id = ${videos.id}), 0)`;
+const videoScoreExpr = coalescedVideoScore;
 
 function memberChaptersFromJson(
   memberId: string,
@@ -267,7 +268,7 @@ export async function fetchVideoDetail(
  *   - sameEvent: 同一 primary_event_id (max 3)
  *   - sharedMembers: video_members.x_user_id が現在動画のメンバーと一致 (max 2)
  *   - nearDate: scheduled_time が近い順 (max 3)
- *   - topScore: video_stats.score 上位 (max 3)
+ *   - topScore: videos.score 上位 (max 3)
  *   - discovery: 中位スコアからの日替わり seed 混合 (max 2)
  *
  * discovery は完全ランダムではなく、`current.id + YYYY-MM-DD` を seed にして

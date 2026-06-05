@@ -1,4 +1,5 @@
-import * as React from "react";
+import * as React from "react";import { FnTable } from "@/components/ui/FnTable";
+
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
@@ -166,7 +167,7 @@ export default async function AdminHealthPage({
       )}
       {!error ? (
         <section style={{ marginTop: 22 }}>
-          <table className="fn-table">
+          <FnTable>
             <thead>
               <tr>
                 <th>チェック項目</th>
@@ -226,7 +227,7 @@ export default async function AdminHealthPage({
                 </tr>
               ))}
             </tbody>
-          </table>
+          </FnTable>
         </section>
       ) : null}
     </div>

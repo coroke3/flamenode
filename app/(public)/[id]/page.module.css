@@ -1,13 +1,13 @@
 .page {
-  width: min(100% - 32px, calc(var(--content-max) + 260px));
-  margin: 0 auto;
-  padding: 24px 0 72px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 .layout {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 30px;
+  gap: var(--fn-space-block, 30px);
 }
 
 .main {
@@ -20,7 +20,7 @@
   justify-content: space-between;
   gap: 14px;
   padding: 0;
-  margin-bottom: 18px;
+  margin-bottom: var(--fn-space-block, 22px);
   border-bottom: 0;
 }
 
@@ -74,7 +74,7 @@
   flex-wrap: wrap;
   margin-top: 20px;
   padding: 18px 0;
-  border-top: 1px solid var(--hairline, var(--border-subtle));
+  border-top: 0;
   border-bottom: 0;
 }
 
@@ -96,6 +96,12 @@
   }
   .authorLinkGroup {
     flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .breadcrumb {
+    overflow-wrap: anywhere;
+    line-height: 1.45;
   }
 }
 
@@ -160,7 +166,10 @@
 }
 
 .inlineMetaItem + .inlineMetaItem {
-  border-top: 1px solid var(--border-subtle);
+  border-top: 0;
+  padding-top: 14px;
+  margin-top: 2px;
+  box-shadow: inset 0 1px 0 var(--hairline);
 }
 
 .inlineMetaTitle {
@@ -239,8 +248,8 @@
   align-items: center;
   gap: 10px;
   background-color: var(--accent-warning-soft);
-  border: 1px solid var(--accent-warning);
-  border-radius: 8px;
+  border: 0;
+  border-radius: var(--r-card);
   color: var(--accent-warning);
   font-size: 12.5px;
   font-weight: 600;
@@ -251,8 +260,8 @@
   display: grid;
   grid-template-columns: 1fr;
   gap: 0;
-  border-top: 1px solid var(--hairline, var(--border-subtle));
-  border-bottom: 1px solid var(--hairline, var(--border-subtle));
+  border-top: 0;
+  border-bottom: 0;
 }
 
 .eventBox {
@@ -409,11 +418,56 @@
   }
 }
 
-@media (min-width: 2200px) and (min-aspect-ratio: 21 / 9) {
+@media (max-width: 640px) {
   .page {
-    width: min(94%, 1960px);
+    padding-top: 16px;
+    padding-bottom: 56px;
   }
 
+  .title {
+    font-size: clamp(26px, 7.5vw, 36px);
+    line-height: 1.08;
+    overflow-wrap: anywhere;
+  }
+
+  .topActions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .authorActions {
+    margin-left: 0;
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .authorActions {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .authorActions .fn-btn,
+  .topActions .fn-btn {
+    min-height: 44px;
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+    justify-content: center;
+  }
+
+  .authorActions > div {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+  }
+
+  .authorActions .fn-btn-sm {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (min-width: 2200px) and (min-aspect-ratio: 21 / 9) {
   .layout {
     grid-template-columns: minmax(0, 1fr) 420px;
     gap: 48px;

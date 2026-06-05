@@ -11,10 +11,8 @@ import { slots as slotsTable } from "@/lib/db/schema";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
-import { AppShell } from "@/components/ui/AppShell";
-import { PageHero } from "@/components/ui/PageHero";
 import { StatusPanel } from "@/components/ui/StatusPanel";
-import { sanitizeNextPath } from "@/lib/utils/next";
+import { sanitizeNextPath } from "#utils/next";
 
 export const metadata: Metadata = { title: "エントリー" };
 export const dynamic = "force-dynamic";
@@ -36,6 +34,20 @@ export default async function EntryPage({
     !!sessionUser &&
     (sessionUser.is_tos_accepted !== 1 ||
       sessionUser.terms_reaccept_required === 1);
+
+  /** 書き込み系 CTA: 未ログイン → entry、TOS 未同意 → rules、それ以外は本来先 */
+  const resolveWriteHref = (target: string): string => {
+    if (!isLoggedIn) {
+      return `/entry?next=${encodeURIComponent(target)}`;
+    }
+    if (needsTosAccept) {
+      return `/rules?next=${encodeURIComponent(target)}`;
+    }
+    return target;
+  };
+
+  const writeCtaLabel = (defaultLabel: string): string =>
+    needsTosAccept ? "利用規約に同意して進む" : defaultLabel;
 
   const db = getDatabase();
   const activeEventsRaw = db ? await fetchActiveEvents(db).catch(() => []) : [];
@@ -63,46 +75,52 @@ export default async function EntryPage({
   }
 
   return (
-    <AppShell size="default">
-      <PageHero
-        eyebrow="Entry"
-        title="何をしますか？"
-        description="イベント参加か、過去作品の投稿を選んでください。"
-      />
+    <div className="fn-public-container fn-page fn-entry">
+      <header className="fn-page-head">
+        <span className="fn-eyebrow">entry</span>
+        <h1 className="fn-display fn-page-title">何をしますか？</h1>
+        <p className="fn-jp fn-page-lead">
+          イベント参加か、過去作品の投稿を選んでください。
+        </p>
+      </header>
 
       {!isLoggedIn ? (
-        <section className={styles.loginSection} aria-labelledby="login-card">
-          <h2 id="login-card" className={styles.cardTitle}>
-            まず Discord でログインしてください
-          </h2>
-          <p className={styles.cardLead}>
-            参加・投稿にはログインが必要です。連携時に取得した
-            <code> access_token </code>
-            は保存しません。
-          </p>
-          <form
-            action={async () => {
-              "use server";
-              await signIn("discord", { redirectTo: next });
-            }}
-            className={styles.btnRow}
-          >
-            <button type="submit" className="fn-btn fn-btn-primary">
-              <Icon name="discord" size={14} aria-hidden />
-              Discord でログイン
-            </button>
-          </form>
-          {next !== "/entry" ? (
-            <p className={styles.tosNote}>
-              ログイン後、元のページへ戻ります。
+        <section
+          className="fn-entry-status fn-entry-status--warn"
+          aria-labelledby="login-card"
+        >
+          <div className="fn-entry-status-body">
+            <h2 id="login-card" className="fn-jp fn-panel-title">
+              まず Discord でログインしてください
+            </h2>
+            <p className="fn-jp fn-entry-status-lead">
+              参加・投稿にはログインが必要です。連携時に取得した{" "}
+              <code>access_token</code> は保存しません。
             </p>
-          ) : null}
-          <p className={styles.tosNote}>
-            ログイン後、枠確保や投稿などの書き込み操作を行う前に、
-            最新の <Link href="/rules">利用規約</Link>への同意をお願いする場合があります。
-          </p>
+            <form
+              action={async () => {
+                "use server";
+                await signIn("discord", { redirectTo: next });
+              }}
+              className={styles.btnRow}
+            >
+              <button type="submit" className="fn-btn fn-btn-primary fn-btn-lg">
+                <Icon name="discord" size={14} aria-hidden />
+                Discord でログイン
+              </button>
+            </form>
+            {next !== "/entry" ? (
+              <p className="fn-entry-tos-note">ログイン後、元のページへ戻ります。</p>
+            ) : null}
+            <p className="fn-entry-tos-note">
+              ログイン後、枠確保や投稿などの書き込み操作を行う前に、最新の{" "}
+              <Link href="/rules">利用規約</Link>
+              への同意をお願いする場合があります。
+            </p>
+          </div>
         </section>
       ) : needsTosAccept ? (
+        <div className="fn-entry-status fn-entry-status--warn">
         <StatusPanel
           title={
             sessionUser?.terms_reaccept_required === 1
@@ -123,18 +141,28 @@ export default async function EntryPage({
             ? "利用規約の改訂がありました。書き込み操作の前に最新の規約に再同意してください。"
             : "書き込み操作 (枠確保・投稿・いいね等) の前に、最新の利用規約への同意が必要です。"}
         </StatusPanel>
+        </div>
       ) : (
-        <StatusPanel title="現在の操作状態" tone="success">
-          ログイン済み
-          {sessionUser?.active_x_user_id
-            ? ` / Active X ID: @${sessionUser.active_x_user_id}`
-            : " / Active X ID未選択"}
-        </StatusPanel>
+        <div className="fn-entry-status fn-entry-status--ok">
+          <Icon name="check" size={14} aria-hidden className="fn-text-ok" />
+          <span className="fn-jp">
+            ログイン済み
+            {sessionUser?.active_x_user_id
+              ? ` · Active X ID: @${sessionUser.active_x_user_id}`
+              : " · Active X ID未選択"}
+          </span>
+          <Link href="/dashboard/settings" className="fn-link fn-entry-status-actions">
+            切替
+          </Link>
+        </div>
       )}
 
-      <div className={styles.choiceGrid}>
+      <div className={`fn-entry-grid ${styles.choiceGrid}`}>
         {/* カード1: イベントに参加する */}
-        <section className={styles.choiceCard} aria-labelledby="join-event-card">
+        <section
+          className={`fn-entry-card ${styles.choiceCard}`}
+          aria-labelledby="join-event-card"
+        >
           <h2 id="join-event-card" className={styles.cardTitle}>
             <Icon name="calendar" size={16} aria-hidden />
             イベントに参加する
@@ -144,14 +172,12 @@ export default async function EntryPage({
           </p>
           <div className={styles.eventList}>
             {activeEvents.length === 0 ? (
-              <p style={{ color: "var(--text-muted)", fontSize: 12 }}>
-                現在受付中のイベントはありません。
-              </p>
+              <p className="fn-text-muted-sm">現在受付中のイベントはありません。</p>
             ) : (
               activeEvents.map((ev) => (
                 <Link
                   key={ev.id}
-                  href={`/event/${ev.id}/slots`}
+                  href={resolveWriteHref(`/event/${ev.id}/slots`)}
                   className={styles.eventCard}
                   style={
                     ev.accent_color
@@ -183,20 +209,14 @@ export default async function EntryPage({
             )}
           </div>
           {isLoggedIn && activeEvents.length === 1 ? (
-            <div className={styles.btnRow} style={{ marginTop: 12 }}>
+            <div className={`${styles.btnRow} fn-mt-12`}>
               <Link href={`/event/${activeEvents[0].id}/slots`} className="fn-btn fn-btn-primary">
                 <Icon name="calendar" size={14} aria-hidden />
                 スロットを確保する
               </Link>
             </div>
           ) : isLoggedIn && activeEvents.length > 1 ? (
-            <p
-              style={{
-                color: "var(--text-muted)",
-                fontSize: 12,
-                marginTop: 12,
-              }}
-            >
+            <p className="fn-text-muted-sm fn-mt-12">
               参加するイベントを上の一覧から選択してください (募集終了が近い順)。
             </p>
           ) : null}
@@ -204,7 +224,7 @@ export default async function EntryPage({
 
         {/* カード2: 過去の作品を投稿する */}
         <section
-          className={styles.choiceCard}
+          className={`fn-entry-card ${styles.choiceCard}`}
           aria-labelledby="post-unslotted-card"
         >
           <h2 id="post-unslotted-card" className={styles.cardTitle}>
@@ -215,20 +235,17 @@ export default async function EntryPage({
             イベントの枠に関係なく、既存の作品をFlameNodeに登録できます。
             投稿には承認済みのX IDが必要です。
           </p>
-          {isLoggedIn ? (
-            <div className={styles.btnRow}>
-              <Link href="/dashboard/post/unslotted" className="fn-btn fn-btn-ghost">
-                <Icon name="edit" size={14} aria-hidden />
-                作品を投稿する
-              </Link>
-            </div>
-          ) : (
-            <p style={{ color: "var(--text-muted)", fontSize: 12 }}>
-              ログイン後に投稿できます。
-            </p>
-          )}
+          <div className={styles.btnRow}>
+            <Link
+              href={resolveWriteHref("/dashboard/post/unslotted")}
+              className="fn-btn fn-btn-ghost"
+            >
+              <Icon name="edit" size={14} aria-hidden />
+              {writeCtaLabel(isLoggedIn ? "枠なし投稿" : "ログインして枠なし投稿")}
+            </Link>
+          </div>
         </section>
       </div>
-    </AppShell>
+    </div>
   );
 }

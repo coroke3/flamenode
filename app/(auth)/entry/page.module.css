@@ -1,10 +1,5 @@
 .loginSection {
-  display: grid;
-  gap: 12px;
-  padding: 20px 0 22px;
-  margin-bottom: 30px;
-  border-top: 1px solid var(--hairline, var(--border-subtle));
-  border-bottom: 1px solid var(--hairline, var(--border-subtle));
+  display: contents;
 }
 
 .tosNote {
@@ -21,10 +16,7 @@
 }
 
 .choiceGrid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
-  margin-top: 24px;
+  display: contents;
 }
 
 .choiceCard {
@@ -35,15 +27,18 @@
   gap: 14px;
   padding: 24px 26px;
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--accent-primary) 5%, transparent), transparent 42%),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent-primary) 8%, transparent),
+      transparent 42%
+    ),
     var(--bg-surface);
-  border: 1px solid var(--hairline, var(--border-subtle));
-  border-radius: 6px;
+  border: 0;
+  border-radius: var(--r-block, 10px);
   overflow: hidden;
   transition:
     transform 160ms ease,
-    border-color 160ms ease,
-    background 160ms ease;
+    box-shadow 160ms ease;
 }
 
 .choiceCard::before {
@@ -60,10 +55,7 @@
 
 .choiceCard:hover {
   transform: translateY(-2px);
-  border-color: color-mix(in srgb, var(--accent-primary) 48%, var(--border-subtle));
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--accent-primary) 10%, transparent), transparent 48%),
-    var(--bg-surface);
+  box-shadow: var(--shadow-soft);
 }
 
 .choiceCard > * {
@@ -115,8 +107,17 @@
   grid-template-columns: minmax(0, 1fr) max-content;
   gap: 4px 14px;
   align-items: center;
-  padding: 12px 0;
-  border-top: 1px solid var(--hairline, var(--border-subtle));
+  padding: 12px 14px;
+  border: 0;
+  border-radius: var(--r-card);
+  background: var(--bg-elevated);
+  text-decoration: none;
+  color: inherit;
+  transition: background 140ms ease;
+}
+
+.eventCard:hover {
+  background: color-mix(in srgb, var(--accent-primary) 12%, var(--bg-elevated));
 }
 
 .eventCard::after {

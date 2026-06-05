@@ -8,12 +8,6 @@ type Mode = "light" | "dark";
 
 const STORAGE_KEY = "fn-theme";
 
-function getDeviceMode(): Mode {
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
-}
-
 function applyTheme(mode: Mode, persist = true) {
   document.documentElement.setAttribute("data-theme", mode);
   if (!persist) return;
@@ -25,13 +19,15 @@ function applyTheme(mode: Mode, persist = true) {
 }
 
 export function ThemeToggle(): React.ReactElement {
-  const [mode, setMode] = React.useState<Mode>("light");
+  const [mode, setMode] = React.useState<Mode>("dark");
 
   React.useEffect(() => {
-    let initial: Mode = getDeviceMode();
+    let initial: Mode = "dark";
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved === "light" || saved === "dark") initial = saved;
+      if (saved === "light" || saved === "dark") {
+        initial = saved;
+      }
     } catch {
       /* noop */
     }

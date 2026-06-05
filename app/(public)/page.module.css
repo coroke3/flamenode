@@ -4,9 +4,7 @@
 }
 
 .section {
-  width: min(100% - 40px, 1360px);
-  margin: 0 auto;
-  padding: 28px 0 0;
+  padding: 0;
 }
 
 .eventList {
@@ -33,18 +31,7 @@
   display: grid;
   gap: 4px;
   padding: 12px 14px;
-  background: var(--bg-surface);
-  border-radius: var(--radius-md);
-}
-
-@media (min-width: 1180px) {
-  .section {
-    width: min(100% - 96px, 1360px);
-  }
-}
-
-@media (max-width: 640px) {
-  .section {
-    width: min(100% - 40px, 100%);
-  }
+  background: var(--bg-elevated);
+  border: 0;
+  border-radius: var(--r-card);
 }

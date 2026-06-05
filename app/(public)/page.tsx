@@ -19,21 +19,22 @@ import {
 } from "@/lib/db/schema";
 import {
   HomeIntroBand,
+  pickHeroEvents,
   type HomeIntroSlotStat,
 } from "@/components/layout/HomeIntroBand";
-import { HomeEditorialHero } from "@/components/layout/HomeEditorialHero";
+import { HomeTopIntro } from "@/components/layout/HomeTopIntro";
 import { HomeClosingCta } from "@/components/layout/HomeClosingCta";
+import { PublicEventCard } from "@/components/event/PublicEventCard";
+import { categorizePublicEvent } from "@/lib/utils/categorizePublicEvent";
+import { computeEventStatus, isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { Shelf } from "@/components/layout/Shelf";
 import { SectionHeader } from "@/components/layout/SectionHeader";
 import { VideoCard } from "@/components/video/VideoCard";
 import { CreatorCard } from "@/components/user/CreatorCard";
-import { EventPanel } from "@/components/layout/EventPanel";
 import { EmptyState } from "@/components/ui/EmptyState";
-import {
-  type HomeFeatureVideo,
-  type HomeStats,
-  uniqueHomeVideos,
-} from "@/components/layout/homeVisuals";
+import { type HomeStats } from "@/components/layout/homeVisuals";
+import type { events } from "@/lib/db/schema";
+import type { PublicEventCategory } from "@/components/event/PublicEventCard";
 
 export const dynamic = "force-dynamic";
 
@@ -136,19 +137,23 @@ export default async function TopPage(): Promise<React.ReactElement> {
     },
   } = data ?? {};
 
-  const heroVideos = uniqueHomeVideos([
-    ...(recommended as HomeFeatureVideo[]),
-    ...(latest as HomeFeatureVideo[]),
-  ]).slice(0, 5);
+  const heroEvents = pickHeroEvents(activeEvents);
+  const primaryHeroEvent = heroEvents[0] ?? null;
+  const primaryHeroStat = primaryHeroEvent
+    ? topSlotStats.get(primaryHeroEvent.id)
+    : undefined;
 
   return (
-    <div className={styles.page}>
-      <HomeEditorialHero stats={stats} videos={heroVideos} />
+    <div className={`fn-main ${styles.page}`}>
+      <HomeTopIntro
+        stats={stats}
+        primaryEvent={primaryHeroEvent}
+        primarySlotStat={primaryHeroStat}
+      />
       {announcements.length > 0 ? (
         <section
-          className={styles.section}
+          className={`fn-public-container fn-announcement-band ${styles.section}`}
           aria-label="お知らせ"
-          style={{ paddingTop: 18, paddingBottom: 0 }}
         >
           <div className={styles.announcementList}>
             {announcements.map((item) => (
@@ -164,9 +169,13 @@ export default async function TopPage(): Promise<React.ReactElement> {
           </div>
         </section>
       ) : null}
-      <HomeIntroBand activeEvents={activeEvents} slotStats={topSlotStats} />
+      <HomeIntroBand
+        activeEvents={activeEvents}
+        slotStats={topSlotStats}
+        excludeEventId={primaryHeroEvent?.id}
+      />
 
-      <section className={styles.section} aria-labelledby="sec-recommend">
+      <section className={`fn-public-container fn-section ${styles.section}`} aria-labelledby="sec-recommend">
         <SectionHeader
           title="今週のピックアップ"
           description="Selected by editors"
@@ -186,7 +195,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
         </div>
       </section>
 
-      <section className={styles.section} aria-labelledby="sec-creators">
+      <section className={`fn-public-container fn-section ${styles.section}`} aria-labelledby="sec-creators">
         <SectionHeader
           title="注目クリエイター"
           description="Featured artists"
@@ -216,7 +225,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
         </div>
       </section>
 
-      <section className={styles.section} aria-labelledby="sec-latest">
+      <section className={`fn-public-container fn-section ${styles.section}`} aria-labelledby="sec-latest">
         <SectionHeader
           title="新着アップロード"
           description="Just dropped"
@@ -236,22 +245,23 @@ export default async function TopPage(): Promise<React.ReactElement> {
         </div>
       </section>
 
-      <section className={styles.section} aria-labelledby="sec-events">
+      <section className={`fn-public-container fn-section ${styles.section}`} aria-labelledby="sec-events">
         <SectionHeader
           title="募集中のイベント"
           description="Open for entry"
           moreHref="/event"
-          moreLabel="すべて見る"
+          moreLabel="イベント一覧"
         />
-        <div className={styles.eventList}>
+        <div className="fn-evlist-grid">
           {latestEvents.length === 0 ? (
             <EmptyShelf message="公開中のイベントを準備しています。" />
           ) : (
             latestEvents.map((event) => (
-              <EventPanel
+              <PublicEventCard
                 key={event.id}
                 event={event}
-                videos={videosByEvent[event.id] ?? []}
+                category={categorizePublicEvent(event)}
+                videoCount={(videosByEvent[event.id] ?? []).length}
               />
             ))
           )}

@@ -1,4 +1,5 @@
-import * as React from "react";
+import * as React from "react";import { FnTable } from "@/components/ui/FnTable";
+
 import Link from "next/link";
 import type { Metadata } from "next";
 import { and, desc, eq } from "drizzle-orm";
@@ -236,7 +237,7 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
                   推奨: {recommendation.mode}
                 </span>
               </div>
-              <table className="fn-table">
+              <FnTable>
                 <tbody>
                   <SnapshotRow label="Workers requests" value={latestSnapshot.workers_requests_today} />
                   <SnapshotRow label="Pages Functions" value={latestSnapshot.pages_functions_requests_today} />
@@ -246,7 +247,7 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
                   <SnapshotRow label="R2 class B" value={latestSnapshot.r2_class_b_month} />
                   <SnapshotRow label="KV writes" value={latestSnapshot.kv_writes_today} />
                 </tbody>
-              </table>
+              </FnTable>
               {recommendation.reasons.length > 0 ? (
                 <p className="fn-muted fn-text-sm" style={{ marginTop: 10 }}>
                   閾値接近: {recommendation.reasons.join(", ")}
@@ -279,7 +280,7 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
             まだ system_settings の変更履歴はありません。
           </p>
         ) : (
-          <table className="fn-table">
+          <FnTable>
             <thead>
               <tr>
                 <th>日時</th>
@@ -319,13 +320,20 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
                         <>
                           {changed.slice(0, 6).join(", ")}
                           {changed.length > 6 ? ` ほか ${changed.length - 6} 件` : ""}
-                          <Link
-                            href={`/admin/audit?table=system_settings&record=${encodeURIComponent(h.record_id)}`}
-                            className="fn-btn fn-btn-ghost fn-btn-sm"
-                            style={{ marginLeft: 6, padding: "0 6px", height: 22, fontSize: 11 }}
-                          >
-                            詳細
-                          </Link>
+                          {h.record_id ? (
+                            <Link
+                              href={`/admin/audit?table=system_settings&record=${encodeURIComponent(h.record_id)}`}
+                              className="fn-btn fn-btn-ghost fn-btn-sm"
+                              style={{
+                                marginLeft: 6,
+                                padding: "0 6px",
+                                height: 22,
+                                fontSize: 11,
+                              }}
+                            >
+                              詳細
+                            </Link>
+                          ) : null}
                         </>
                       )}
                     </td>
@@ -333,7 +341,7 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
                 );
               })}
             </tbody>
-          </table>
+          </FnTable>
         )}
       </section>
 

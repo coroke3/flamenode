@@ -1,4 +1,5 @@
 import * as React from "react";
+import { FnTable } from "@/components/ui/FnTable";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
@@ -21,6 +22,7 @@ import {
   isAcceptingEntries,
 } from "@/lib/utils/eventStatus";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { SaveEventTemplateForm } from "@/components/admin/SaveEventTemplateForm";
 
 export const metadata: Metadata = { title: "イベント詳細" };
 export const dynamic = "force-dynamic";
@@ -92,18 +94,28 @@ export default async function AdminEventDetailPage({
         backLabel="イベント一覧へ"
         actions={[
           {
-            href: `/admin/events/${event.id}/edit`,
-            label: "設定編集",
-            icon: <Icon name="edit" size={12} aria-hidden />,
+            href: `/manage/events/${event.id}`,
+            label: "運営ビュー",
+            icon: <Icon name="users" size={12} aria-hidden />,
             variant: "primary",
           },
           {
-            href: `/admin/events/${event.id}/slots`,
-            label: "枠管理",
+            href: `/event/${event.id}`,
+            label: "公開ページ",
+            icon: <Icon name="external" size={12} aria-hidden />,
+          },
+          {
+            href: `/admin/events/${event.id}/edit`,
+            label: "設定編集",
+            icon: <Icon name="edit" size={12} aria-hidden />,
+          },
+          {
+            href: `/manage/events/${event.id}/slots`,
+            label: "枠運営",
             icon: <Icon name="clock" size={12} aria-hidden />,
           },
           {
-            href: `/admin/events/${event.id}/staff`,
+            href: `/manage/events/${event.id}/staff`,
             label: "イベント管理者",
             icon: <Icon name="users" size={12} aria-hidden />,
           },
@@ -131,6 +143,16 @@ export default async function AdminEventDetailPage({
         <StatBox label="公開済" value={videoStats.public} />
         <StatBox label="審査待ち" value={videoStats.pending} accent />
         <StatBox label="無効" value={videoStats.voided} />
+      </section>
+
+      <section
+        className="fn-card"
+        style={{ marginTop: 18, padding: "18px 22px" }}
+      >
+        <h2 style={{ fontSize: 14, fontWeight: 700, margin: "0 0 12px" }}>
+          テンプレート化
+        </h2>
+        <SaveEventTemplateForm eventId={event.id} eventTitle={event.title} />
       </section>
 
       <section className="fn-card" style={{ marginTop: 18 }}>
@@ -176,7 +198,7 @@ export default async function AdminEventDetailPage({
         {displaySlots.length === 0 ? (
           <p className="fn-muted fn-text-sm">枠はまだありません。</p>
         ) : (
-          <table className="fn-table">
+          <FnTable>
             <thead>
               <tr>
                 <th>日付</th>
@@ -217,7 +239,7 @@ export default async function AdminEventDetailPage({
                 </tr>
               ))}
             </tbody>
-          </table>
+          </FnTable>
         )}
       </section>
 

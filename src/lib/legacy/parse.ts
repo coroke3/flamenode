@@ -1,3 +1,5 @@
+import { detectDelimiter, parseDelimited, stripBom } from "#utils/delimited";
+
 export function parseLegacyImportText(name: string | undefined, content: string): unknown {
   const filename = name ?? "";
   if (/\.(csv|tsv)$/i.test(filename)) return parseCsv(content);
@@ -13,50 +15,12 @@ export function parseLegacyImportText(name: string | undefined, content: string)
 }
 
 export function parseCsv(text: string): Record<string, string>[] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = "";
-  let quoted = false;
-  const delimiter = detectDelimiter(text);
-
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    const next = text[i + 1];
-
-    if (quoted) {
-      if (ch === '"' && next === '"') {
-        field += '"';
-        i += 1;
-      } else if (ch === '"') {
-        quoted = false;
-      } else {
-        field += ch;
-      }
-      continue;
-    }
-
-    if (ch === '"') {
-      quoted = true;
-    } else if (ch === delimiter) {
-      row.push(field);
-      field = "";
-    } else if (ch === "\n") {
-      row.push(field);
-      rows.push(row);
-      row = [];
-      field = "";
-    } else if (ch !== "\r") {
-      field += ch;
-    }
-  }
-  row.push(field);
-  rows.push(row);
-
-  const [headerRow, ...bodyRows] = rows.filter((r) => r.some((c) => c.trim()));
+  const normalized = stripBom(text);
+  const grid = parseDelimited(normalized, detectDelimiter(normalized));
+  const rows = grid.filter((r) => r.some((c) => c.trim()));
+  const [headerRow, ...bodyRows] = rows;
   if (!headerRow) return [];
-  const headers = headerRow.map((h, index) =>
-    (index === 0 ? h.replace(/^\uFEFF/, "") : h).trim(),
-  );
+  const headers = headerRow.map((h) => h.trim());
   return bodyRows.map((cells) => {
     const obj: Record<string, string> = {};
     headers.forEach((header, index) => {
@@ -64,13 +28,6 @@ export function parseCsv(text: string): Record<string, string>[] {
     });
     return obj;
   });
-}
-
-function detectDelimiter(text: string): "," | "\t" {
-  const firstLine = text.split(/\r?\n/, 1)[0] ?? "";
-  const commaCount = (firstLine.match(/,/g) ?? []).length;
-  const tabCount = (firstLine.match(/\t/g) ?? []).length;
-  return tabCount > commaCount ? "\t" : ",";
 }
 
 function parseLooseJsonObjectArray(text: string): Record<string, unknown>[] {

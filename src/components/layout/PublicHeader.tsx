@@ -5,18 +5,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import styles from "./PublicHeader.module.css";
 import { Logo } from "@/components/ui/Logo";
-import { Icon, type IconName } from "@/components/ui/Icon";
+import { Icon } from "@/components/ui/Icon";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { XIdSwitcher, type XIdEntry } from "@/components/user/XIdSwitcher";
 import { AccountMenu } from "@/components/user/AccountMenu";
 import type { HeaderUser } from "@/lib/auth/headerUser";
-
-const PUBLIC_NAV_ITEMS: { href: string; label: string; iconName: IconName }[] = [
-  { href: "/list", label: "作品", iconName: "grid" },
-  { href: "/event", label: "イベント", iconName: "calendar" },
-  { href: "/user", label: "クリエイター", iconName: "users" },
-  { href: "/entry", label: "募集", iconName: "edit" },
-];
+import { PUBLIC_NAV_ITEMS } from "@/lib/navigation/publicNav";
+import { sanitizeNextPath } from "#utils/next";
 
 function isPathActive(pathname: string | null, href: string): boolean {
   if (!pathname) return false;
@@ -39,29 +34,40 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
   const pathname = usePathname();
+  const loginNext = sanitizeNextPath(pathname ?? "/", "/");
+  const loginHref = `/entry?next=${encodeURIComponent(loginNext)}`;
 
-  const managementLink = user?.management.canAccessAdmin
-    ? { href: "/admin", label: "管理", icon: "settings" as const }
-    : user?.management.canAccessManage
-      ? { href: "/manage", label: "運営", icon: "users" as const }
-      : null;
+  const managementNav = user
+    ? [
+        ...(user.management.canAccessManage
+          ? [{ href: "/manage", label: "運営", icon: "users" as const }]
+          : []),
+        ...(user.management.canAccessAdmin
+          ? [{ href: "/admin", label: "管理", icon: "settings" as const }]
+          : []),
+      ]
+    : [];
 
   return (
-    <header className={styles.header}>
-      <div className={styles.bar}>
-        <Link href="/" className={styles.logoLink} aria-label="FlameNode トップへ">
+    <header className={`fn-header ${styles.header}`}>
+      <div className={`fn-public-container fn-header-inner ${styles.bar}`}>
+        <Link
+          href="/"
+          className={`fn-logo ${styles.logoLink}`}
+          aria-label="FlameNode トップへ"
+        >
           <Logo />
         </Link>
 
-        <nav className={styles.desktopNav} aria-label="公開ナビゲーション">
+        <nav className={`fn-nav ${styles.desktopNav}`} aria-label="公開ナビゲーション">
           {PUBLIC_NAV_ITEMS.map((item) => {
             const active = isPathActive(pathname, item.href);
             return (
               <Link
                 key={item.href}
                 href={item.href}
-                className={`${styles.desktopNavLink} ${
-                  active ? styles.desktopNavLinkActive : ""
+                className={`fn-nav-item fn-nav-ja ${styles.desktopNavLink} ${
+                  active ? `${styles.desktopNavLinkActive} is-active` : ""
                 }`}
                 aria-current={active ? "page" : undefined}
               >
@@ -71,7 +77,7 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
           })}
         </nav>
 
-        <div className={styles.right}>
+        <div className={`fn-header-right ${styles.right}`}>
           <div className={styles.themeButton}>
             <ThemeToggle />
           </div>
@@ -101,16 +107,20 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
 
           {user ? (
             <div className={styles.actionNav}>
-              <Link href="/dashboard/post" className={styles.postBtn}>
+              <Link
+                href="/dashboard/post"
+                className={`fn-btn fn-header-submit ${styles.postBtn}`}
+                data-variant="accent"
+              >
                 <Icon name="edit" size={13} aria-hidden />
                 投稿する
               </Link>
-              {managementLink ? (
-                <Link href={managementLink.href} className={styles.ghostBtn}>
-                  <Icon name={managementLink.icon} size={13} aria-hidden />
-                  {managementLink.label}
+              {managementNav.map((item) => (
+                <Link key={item.href} href={item.href} className={styles.ghostBtn}>
+                  <Icon name={item.icon} size={13} aria-hidden />
+                  {item.label}
                 </Link>
-              ) : null}
+              ))}
               <AccountMenu user={user} />
             </div>
           ) : (
@@ -133,16 +143,12 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
         </div>
       </div>
 
-      <div className={styles.tape} aria-hidden="true">
-        <span>flamenode / node.0426 / moving image archive</span>
-        <span>PVSF2025S / entry open</span>
-        <span>events / creators / video nodes</span>
-        <span>light and dark mode ready</span>
-      </div>
-
       {mobileOpen ? (
         <div className={styles.mobile}>
-          <nav className={styles.mobileNav} aria-label="モバイルナビゲーション">
+          <nav
+            className={`fn-public-container ${styles.mobileNav}`}
+            aria-label="モバイルナビゲーション"
+          >
             <form
               action="/list"
               method="get"
@@ -162,14 +168,11 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
             {!user ? (
               <div className={styles.mobileSection}>
                 <Link
-                  href="/entry"
-                  className={`${styles.mobileLink} ${
-                    isPathActive(pathname, "/entry") ? styles.mobileLinkActive : ""
-                  }`}
+                  href={loginHref}
+                  className={`${styles.mobileLink} ${styles.mobileLinkAccent}`}
                   onClick={() => setMobileOpen(false)}
-                  aria-current={isPathActive(pathname, "/entry") ? "page" : undefined}
                 >
-                  <Icon name="login" size={16} aria-hidden /> ログイン
+                  <Icon name="discord" size={16} aria-hidden /> Discord でログイン
                 </Link>
                 {PUBLIC_NAV_ITEMS.map((item) => {
                   const active = isPathActive(pathname, item.href);
@@ -225,18 +228,20 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
                   </Link>
                 </div>
 
-                {managementLink ? (
+                {managementNav.length > 0 ? (
                   <>
                     <div className={styles.mobileDivider} />
                     <div className={styles.mobileSection}>
-                      <Link
-                        href={managementLink.href}
-                        className={styles.mobileLink}
-                        onClick={() => setMobileOpen(false)}
-                      >
-                        <Icon name={managementLink.icon} size={16} aria-hidden />{" "}
-                        {managementLink.label}
-                      </Link>
+                      {managementNav.map((item) => (
+                        <Link
+                          key={item.href}
+                          href={item.href}
+                          className={styles.mobileLink}
+                          onClick={() => setMobileOpen(false)}
+                        >
+                          <Icon name={item.icon} size={16} aria-hidden /> {item.label}
+                        </Link>
+                      ))}
                     </div>
                   </>
                 ) : null}

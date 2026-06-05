@@ -1,5 +1,9 @@
 import { normalizeHttpUrl } from "@/lib/utils/url";
 import { extractYoutubeId } from "@/lib/youtube/id";
+import {
+  type LegacyImportMode,
+  resolveImportedEventState,
+} from "./importState";
 
 const MOJIBAKE_TOKENS = ["�", "縺", "繧", "荳", "譁", "邵", "陞", "陷", "闕", "隴"];
 const X_ID_MAX_LEN = 64;
@@ -213,6 +217,11 @@ const REPRESENTATIVE_HINT_REGEX = /(主催|代表|運営|統括|荳ｻ|莉｣|�
 
 export function normalizeEventInfo(
   input: LegacyEventInput,
+  options: {
+    importMode?: LegacyImportMode;
+    now?: number;
+    forceEntryOpen?: boolean;
+  } = {},
 ): LegacyEventResult {
   const warnings: string[] = [];
   const eventid = (input.eventid ?? "").toString().trim().replace(/^@+/, "");
@@ -267,6 +276,14 @@ export function normalizeEventInfo(
     representativeId = editors[0].x_user_id;
   }
 
+  const state = resolveImportedEventState({
+    mode: options.importMode ?? "archive",
+    startTime,
+    endTime,
+    now: options.now ?? Math.floor(Date.now() / 1000),
+    forceEntryOpen: options.forceEntryOpen,
+  });
+
   return {
     ok: true,
     warnings,
@@ -279,9 +296,9 @@ export function normalizeEventInfo(
       img_url: normalizeIconUrl(input.img),
       start_time: startTime,
       end_time: endTime,
-      is_active: 1,
-      is_entry_open: 0,
-      is_archived: 0,
+      is_active: state.is_active,
+      is_entry_open: state.is_entry_open,
+      is_archived: state.is_archived,
       representative_x_user_id: representativeId,
     },
     editors,

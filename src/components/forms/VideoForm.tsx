@@ -895,6 +895,7 @@ export function VideoForm({
               initialMembers={initial.members}
               suggestions={memberSuggestions}
               disabled={membersDisabled}
+              collabPermsHref="#video-collab-perms"
             />
             <p className={styles.help} style={{ marginTop: 8 }}>
               X ID 欄は @ 抜きで入力します。未承認 X ID も受け付け、後で本人連携時に紐付け可能です。

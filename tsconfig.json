@@ -21,7 +21,11 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "@app/*": ["./app/*"]
+      "@app/*": ["./app/*"],
+      "#utils/delimited": ["./src/lib/utils/delimited.ts"],
+      "#utils/xid": ["./src/lib/utils/xid.ts"],
+      "#utils/clipboard-html": ["./src/lib/utils/clipboardHtml.ts"],
+      "#spreadsheet/constants": ["./src/lib/admin/spreadsheet/constants.ts"]
     },
     "types": ["@cloudflare/workers-types"]
   },
@@ -31,5 +35,5 @@
     "**/*.tsx",
     ".next/types/**/*.ts"
   ],
-  "exclude": ["node_modules", "設計", "workers/**/*"]
+  "exclude": ["node_modules", "設計", "claudedesign", "workers/**/*"]
 }

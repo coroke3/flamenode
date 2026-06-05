@@ -1,4 +1,5 @@
 import * as React from "react";
+import { FnTable } from "@/components/ui/FnTable";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
@@ -13,6 +14,7 @@ import {
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { getCollaboratorPermissions } from "@/lib/auth/ownership";
 
 export const dynamic = "force-dynamic";
@@ -152,11 +154,21 @@ export default async function ManageEventAudiencePage({
       </p>
 
       {audience.length === 0 ? (
-        <p className="fn-muted fn-text-sm" style={{ marginTop: 16 }}>
-          <Icon name="info" size={12} aria-hidden /> 参加者はまだいません。
-        </p>
+        <EmptyState
+          tone="neutral"
+          title="登録者はまだいません"
+          description="イベントが受付中になると、登録者や参加予定者がここに表示されます。"
+          actions={[
+            { href: `/event/${id}`, label: "公開ページを見る", variant: "primary" },
+            {
+              href: `/manage/events/${id}`,
+              label: "イベント運営トップへ",
+              variant: "ghost",
+            },
+          ]}
+        />
       ) : (
-        <table className="fn-table" style={{ marginTop: 16 }}>
+        <FnTable style={{ marginTop: 16 }}>
           <thead>
             <tr>
               <th>X ID / 名前</th>
@@ -219,7 +231,7 @@ export default async function ManageEventAudiencePage({
               </tr>
             ))}
           </tbody>
-        </table>
+        </FnTable>
       )}
     </div>
   );

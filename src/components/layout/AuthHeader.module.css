@@ -12,13 +12,53 @@
 }
 
 .bar {
-  display: flex;
+  display: grid;
+  grid-template-columns: max-content 1fr max-content;
   align-items: center;
-  gap: 16px;
-  width: min(96%, var(--content-max));
-  margin: 0 auto;
-  height: 54px;
-  padding: 0 16px;
+  gap: 16px 24px;
+  width: 100%;
+  margin: 0;
+  min-height: var(--header-h, 64px);
+  padding: 10px 0;
+}
+
+.desktopNav {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.desktopNavLink {
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+}
+
+.desktopNavLink:hover {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+
+.desktopNavLinkActive {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+
+@media (min-width: 1000px) {
+  .desktopNav {
+    display: flex;
+  }
+}
+
+@media (max-width: 999px) {
+  .bar {
+    grid-template-columns: 1fr max-content;
+  }
 }
 
 .logoLink {
@@ -203,9 +243,9 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  width: min(96%, var(--content-max));
-  margin: 0 auto;
-  padding: 16px;
+  width: 100%;
+  margin: 0;
+  padding: 16px 0;
 }
 
 .mobileSearch {
@@ -267,6 +307,11 @@
   background-color: var(--bg-elevated);
 }
 
+.mobileLinkActive {
+  color: var(--text-primary);
+  background-color: var(--bg-elevated);
+}
+
 .mobileLinkDanger {
   color: var(--accent-danger);
 }
@@ -284,4 +329,47 @@
 
 .mobileXIdContainer {
   padding: 0 4px;
+}
+
+@media (max-width: 640px) {
+  .bar {
+    gap: 10px;
+    padding: 8px 0;
+  }
+
+  .menuToggle {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .mobile {
+    max-height: calc(100dvh - var(--header-h, 56px));
+    padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+  }
+
+  .mobileNav {
+    width: 100%;
+    max-width: none;
+    padding: 12px var(--fn-page-gutter, 16px) 14px;
+    gap: 10px;
+  }
+
+  .mobileSearch input {
+    font-size: 16px;
+  }
+
+  .mobileLink {
+    min-height: 44px;
+    padding: 12px;
+  }
+
+  .postBtn,
+  .ghostBtn {
+    min-height: 44px;
+    height: auto;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
 }

@@ -17,3 +17,8 @@ YOUTUBE_API_KEY=""
 # 公開設定
 NEXT_PUBLIC_SITE_URL="http://localhost:3000"
 NEXT_PUBLIC_SITE_NAME="FlameNode"
+
+# 管理画面: D1 スプレッドシート (/admin/spreadsheet)。本番では原則 false
+ADMIN_SPREADSHEET_ENABLED="true"
+# 1ページあたりの取得行数（未設定時は 500、上限 5000）
+ADMIN_SPREADSHEET_PAGE_SIZE="500"

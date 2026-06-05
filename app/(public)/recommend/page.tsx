@@ -226,17 +226,17 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
   ) as VideoCardData[];
 
   return (
-    <div className={`fn-public-container ${styles.page}`}>
-      <header className={styles.header}>
-        <p className="fn-muted fn-text-xs fn-bold">EXPLORE</p>
-        <h1 className={styles.title}>次に見る作品を探す</h1>
-        <p className={styles.lead}>
+    <div className={`fn-public-container fn-page ${styles.page}`}>
+      <header className="fn-page-head">
+        <span className="fn-eyebrow">explore</span>
+        <h1 className="fn-display fn-page-title">次に見る作品を探す</h1>
+        <p className="fn-jp fn-page-lead">
           最近の動き、新着、見落としがちな作品、イベント、クリエイター。
           いくつかの切り口から、今見たい一本に出会えるように並べています。
         </p>
       </header>
 
-      <nav className={styles.chips} aria-label="表示カテゴリ">
+      <nav className={`fn-chip-scroll ${styles.chips}`} aria-label="表示カテゴリ">
         {FILTER_CHIPS.map((chip) => (
           <a
             key={chip.href}
@@ -250,7 +250,7 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
       </nav>
 
       {hero ? (
-        <section className={styles.hero} aria-labelledby="hero-rec">
+        <section className={`fn-recommend-hero ${styles.hero}`} aria-labelledby="hero-rec">
           <p className="fn-muted fn-text-xs fn-bold" id="hero-rec">
             いま見るなら
           </p>
@@ -360,7 +360,7 @@ function SectionTitle({
       <div>
         <h2>{title}</h2>
         {subtitle ? (
-          <p className="fn-muted fn-text-sm" style={{ margin: "2px 0 0" }}>
+          <p className="fn-muted fn-text-sm fn-section-subtitle">
             {subtitle}
           </p>
         ) : null}

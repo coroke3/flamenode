@@ -30,6 +30,46 @@ const FULL_ALLOW = new Set([
   "scripts/check-db-legacy.mjs",
 ]);
 
+/** 移行中テーブル定義・migration SQL は許容 */
+const PREFIX_ALLOW = [
+  "migrations/",
+  "src/lib/db/schema.ts",
+];
+
+/** 削除予定テーブルへの新規書き込みを検出（段階的に allowlist を縮小する） */
+const DB_REDUCTION_RULES = [
+  {
+    id: "video-stats-insert",
+    label: "video_stats への insert（videos 統計列へ移行中）",
+    pattern: /\.insert\s*\(\s*videoStats\s*\)/g,
+    prefixAllow: [
+      ...PREFIX_ALLOW,
+      "src/lib/actions/video.ts",
+      "src/lib/db/",
+      "src/lib/admin/healthChecks.ts",
+    ],
+  },
+  {
+    id: "event-staff-permissions-insert",
+    label: "event_staff_permissions への insert（permission_keys_json へ移行中）",
+    pattern: /\.insert\s*\(\s*eventStaffPermissions\s*\)/g,
+    prefixAllow: [
+      ...PREFIX_ALLOW,
+      "src/lib/actions/event-staff-admin.ts",
+    ],
+  },
+  {
+    id: "video-softwares-write",
+    label: "video_softwares / replaceVideoSoftwareLabels 利用（used_software_json へ移行中）",
+    pattern: /\b(videoSoftwares|replaceVideoSoftwareLabels)\b/g,
+    prefixAllow: [
+      ...PREFIX_ALLOW,
+      "src/lib/db/software.ts",
+      "src/lib/actions/video.ts",
+    ],
+  },
+];
+
 /** 違反ルール: 各パターンとその allowlist */
 const RULES = [
   {
@@ -86,8 +126,18 @@ function toPosix(p) {
   return p.split(sep).join("/");
 }
 
+function isPrefixAllowed(relPath, prefixes) {
+  return prefixes.some((p) => relPath === p || relPath.startsWith(p));
+}
+
 function isAllowed(relPath) {
-  return FULL_ALLOW.has(relPath);
+  return FULL_ALLOW.has(relPath) || isPrefixAllowed(relPath, PREFIX_ALLOW);
+}
+
+function isDbReductionAllowed(relPath, rule) {
+  return (
+    isAllowed(relPath) || isPrefixAllowed(relPath, rule.prefixAllow ?? [])
+  );
 }
 
 function lineNumber(src, index) {
@@ -113,6 +163,16 @@ for (const sub of SCAN_DIRS) {
       continue;
     }
     for (const rule of RULES) {
+      rule.pattern.lastIndex = 0;
+      let m;
+      while ((m = rule.pattern.exec(src)) !== null) {
+        const line = lineNumber(src, m.index);
+        all.push({ rule: rule.id, label: rule.label, file: rel, line, hit: m[0] });
+        violations++;
+      }
+    }
+    for (const rule of DB_REDUCTION_RULES) {
+      if (isDbReductionAllowed(rel, rule)) continue;
       rule.pattern.lastIndex = 0;
       let m;
       while ((m = rule.pattern.exec(src)) !== null) {

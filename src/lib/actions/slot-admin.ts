@@ -33,6 +33,15 @@ function parseDateInput(raw: string | null | undefined): number | null {
   return parseJstDatetimeLocal(raw);
 }
 
+function revalidateEventSlotPaths(eventId: string): void {
+  revalidatePath(`/manage/events/${eventId}/slots`);
+  revalidatePath(`/manage/events/${eventId}`);
+  revalidatePath(`/manage`);
+  revalidatePath(`/admin/events/${eventId}/slots`);
+  revalidatePath(`/admin/events/${eventId}`);
+  revalidatePath(`/event/${eventId}`);
+}
+
 async function ensureCanEditSlots(eventId: string): Promise<
   | { ok: true; userId: string }
   | { ok: false; result: SlotActionResult }
@@ -169,9 +178,7 @@ export async function generateSlotsBatch(
     created_at: now,
   });
 
-  revalidatePath(`/admin/events/${data.event_id}/slots`);
-  revalidatePath(`/admin/events/${data.event_id}`);
-  revalidatePath(`/event/${data.event_id}`);
+  revalidateEventSlotPaths(data.event_id);
   return { ok: true, created: created.length };
 }
 
@@ -206,9 +213,7 @@ export async function deleteAvailableSlots(
     created_at: now,
   });
 
-  revalidatePath(`/admin/events/${eventId}/slots`);
-  revalidatePath(`/admin/events/${eventId}`);
-  revalidatePath(`/event/${eventId}`);
+  revalidateEventSlotPaths(eventId);
   return { ok: true, created: rows.length };
 }
 
@@ -307,6 +312,7 @@ export async function releaseSlot(formData: FormData): Promise<SlotActionResult>
     await enqueueNotification(db, {
       discordUserId: row.discord_user_id,
       type: "slot_force_released",
+      dedupeKey: `slot_force_released:${row.event_id}:${slotId}:${groupId ?? "solo"}`,
       payload: {
         content: `運営によりイベント枠 (${targetIds.length}枠) が解放されました。`,
         slot_ids: targetIds,
@@ -317,9 +323,7 @@ export async function releaseSlot(formData: FormData): Promise<SlotActionResult>
     });
   }
 
-  revalidatePath(`/admin/events/${row.event_id}/slots`);
-  revalidatePath(`/admin/events/${row.event_id}`);
-  revalidatePath(`/event/${row.event_id}`);
+  revalidateEventSlotPaths(row.event_id);
   return { ok: true };
 }
 
@@ -355,8 +359,6 @@ export async function deleteSlot(formData: FormData): Promise<SlotActionResult> 
     created_at: now,
   });
 
-  revalidatePath(`/admin/events/${row.event_id}/slots`);
-  revalidatePath(`/admin/events/${row.event_id}`);
-  revalidatePath(`/event/${row.event_id}`);
+  revalidateEventSlotPaths(row.event_id);
   return { ok: true };
 }

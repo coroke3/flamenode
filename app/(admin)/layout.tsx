@@ -9,9 +9,17 @@ import {
   AdminSidebarNav,
   type AdminSidebarGroup,
 } from "@/components/admin/AdminSidebarNav";
+import { isAdminSpreadsheetEnabled } from "@/lib/admin/spreadsheet/guard";
+import { AdminModeBanner } from "@/components/admin/AdminModeBanner";
 import styles from "./AdminLayout.module.css";
 
-const ADMIN_NAV_GROUPS: AdminSidebarGroup[] = [
+const ADMIN_NAV_SPREADSHEET_ITEM = {
+  href: "/admin/spreadsheet",
+  label: "DBスプレッドシート",
+  icon: <Icon name="grid" size={14} />,
+} as const;
+
+const ADMIN_NAV_GROUPS_BASE: AdminSidebarGroup[] = [
   {
     title: "概要",
     items: [
@@ -34,6 +42,7 @@ const ADMIN_NAV_GROUPS: AdminSidebarGroup[] = [
       { href: "/admin/videos", label: "作品管理", icon: <Icon name="youtube" size={14} /> },
       { href: "/admin/youtube-sync", label: "YouTube同期状態", icon: <Icon name="refresh" size={14} /> },
       { href: "/admin/events", label: "イベント管理", icon: <Icon name="calendar" size={14} /> },
+      { href: "/admin/events/templates", label: "イベントテンプレート", icon: <Icon name="copy" size={14} /> },
       { href: "/admin/api-endpoints", label: "公開API管理", icon: <Icon name="external" size={14} /> },
       { href: "/admin/announcements", label: "お知らせ管理", icon: <Icon name="alert" size={14} /> },
     ],
@@ -51,6 +60,7 @@ const ADMIN_NAV_GROUPS: AdminSidebarGroup[] = [
       { href: "/admin/rules", label: "規約管理", icon: <Icon name="info" size={14} /> },
       { href: "/admin/audit", label: "監査ログ", icon: <Icon name="clock" size={14} /> },
       { href: "/admin/cost-guard", label: "コストガード", icon: <Icon name="warning" size={14} /> },
+      { href: "/admin/static-builds", label: "静的JSON再生成", icon: <Icon name="refresh" size={14} /> },
       { href: "/admin/health", label: "ヘルスチェック", icon: <Icon name="check" size={14} /> },
       { href: "/admin/health/integrity", label: "DB整合性チェック", icon: <Icon name="list" size={14} /> },
       { href: "/admin/security", label: "セキュリティ", icon: <Icon name="settings" size={14} /> },
@@ -58,6 +68,20 @@ const ADMIN_NAV_GROUPS: AdminSidebarGroup[] = [
     ],
   },
 ];
+
+function buildAdminNavGroups(): AdminSidebarGroup[] {
+  if (!isAdminSpreadsheetEnabled()) {
+    return ADMIN_NAV_GROUPS_BASE;
+  }
+  return ADMIN_NAV_GROUPS_BASE.map((group) =>
+    group.title === "システム"
+      ? {
+          ...group,
+          items: [...group.items, ADMIN_NAV_SPREADSHEET_ITEM],
+        }
+      : group,
+  );
+}
 
 export default async function AdminLayout({
   children,
@@ -80,18 +104,18 @@ export default async function AdminLayout({
   if (user.role !== "admin") redirect("/dashboard");
 
   return (
-    <>
+    <div data-admin-shell data-fn-surface="public">
       <AuthHeader user={user} />
-      <div className={styles.shell}>
-        <div className={styles.frame}>
-          <aside className={styles.sidebar}>
-            <p className={styles.eyebrow}>ADMIN</p>
-            <AdminSidebarNav groups={ADMIN_NAV_GROUPS} />
+      <div className="admin-shell">
+        <div className="admin-frame">
+          <aside className={`admin-sidebar ${styles.sidebar}`}>
+            <AdminModeBanner />
+            <AdminSidebarNav groups={buildAdminNavGroups()} />
           </aside>
-          <main className={styles.main}>{children}</main>
+          <main className="admin-main">{children}</main>
         </div>
       </div>
       <PublicFooter />
-    </>
+    </div>
   );
 }

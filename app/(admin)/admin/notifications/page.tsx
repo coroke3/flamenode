@@ -1,4 +1,6 @@
 import * as React from "react";
+import { FnTable } from "@/components/ui/FnTable";
+
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
@@ -12,7 +14,22 @@ import { NotificationRetryButton } from "@/components/admin/NotificationRetryBut
 import { NotificationCancelButton } from "@/components/admin/NotificationCancelButton";
 import { NotificationPayloadButton } from "@/components/admin/NotificationPayloadButton";
 import { NotificationBulkRetryButton } from "@/components/admin/NotificationBulkRetryButton";
+import { NotificationForceResendButton } from "@/components/admin/NotificationForceResendButton";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { NotificationOutboxSummary } from "@/components/notifications/NotificationOutboxSummary";
+import {
+  drizzleNotificationCategoryCondition,
+  getNotificationStatusLabel,
+} from "@/lib/notifications/display";
+import {
+  ADMIN_NOTIFICATION_CATEGORY_OPTIONS,
+  type NotificationCategory,
+} from "@/lib/notifications/types";
+import {
+  lookupNotificationRecipients,
+  type RecipientLookup,
+} from "@/lib/notifications/recipient";
 
 export const metadata: Metadata = { title: "通知配信状況" };
 export const dynamic = "force-dynamic";
@@ -25,6 +42,7 @@ interface Props {
     type?: string;
     event?: string;
     q?: string;
+    cat?: string;
   }>;
 }
 
@@ -50,6 +68,13 @@ export default async function AdminNotificationsPage({
   const typeFilter = (sp.type ?? "").trim();
   const eventFilter = (sp.event ?? "").trim();
   const qFilter = (sp.q ?? "").trim().slice(0, 100);
+  const catFilter: NotificationCategory | "all" = (() => {
+    const c = (sp.cat ?? "").trim();
+    const allowed = ADMIN_NOTIFICATION_CATEGORY_OPTIONS.map((o) => o.key);
+    return allowed.includes(c as NotificationCategory | "all")
+      ? (c as NotificationCategory | "all")
+      : "all";
+  })();
 
   const db = getDatabase();
   let rows: (typeof notificationOutbox.$inferSelect)[] = [];
@@ -71,6 +96,14 @@ export default async function AdminNotificationsPage({
       }
       if (qFilter) {
         conds.push(like(notificationOutbox.payload_json, `%${qFilter}%`));
+      }
+      if (catFilter !== "all") {
+        conds.push(
+          drizzleNotificationCategoryCondition(
+            catFilter,
+            notificationOutbox.type,
+          ),
+        );
       }
       const where = conds.length === 0 ? undefined : conds.length === 1 ? conds[0] : and(...conds);
 
@@ -129,11 +162,19 @@ export default async function AdminNotificationsPage({
     error = "DB に接続できませんでした。";
   }
 
+  let recipientMap = new Map<string, RecipientLookup>();
+  if (db && rows.length > 0) {
+    recipientMap = await lookupNotificationRecipients(
+      db,
+      rows.map((r) => r.discord_user_id),
+    );
+  }
+
   return (
     <div>
       <AdminPageHeader
         title="通知配信状況"
-        description="notification_outbox の直近 100 件を表示します。Worker (notification-dispatcher) が 5 分間隔で送信し、失敗は最大 3 回まで指数バックオフで再試行します。"
+        description="notification_outbox の直近 100 件。誰に・何の通知かを確認し、失敗時は再試行・キャンセル・強制再送できます。dispatcher は 5 分間隔・1 回最大 50 件・リトライ 1/5/15 分。"
       />
       <p style={{ marginTop: 6, fontSize: 11 }}>
         <Link href="/admin/audit?table=notification_outbox&record=bulk_retry">
@@ -236,6 +277,7 @@ export default async function AdminNotificationsPage({
           if (typeFilter) params.set("type", typeFilter);
           if (eventFilter) params.set("event", eventFilter);
           if (qFilter) params.set("q", qFilter);
+          if (catFilter !== "all") params.set("cat", catFilter);
           const qs = params.toString();
           const href = qs ? `/admin/notifications?${qs}` : "/admin/notifications";
           return (
@@ -263,6 +305,13 @@ export default async function AdminNotificationsPage({
         {status !== "all" ? (
           <input type="hidden" name="status" value={status} />
         ) : null}
+        <select name="cat" defaultValue={catFilter} className="fn-input fn-input-sm">
+          {ADMIN_NOTIFICATION_CATEGORY_OPTIONS.map((o) => (
+            <option key={o.key} value={o.key}>
+              {o.label}
+            </option>
+          ))}
+        </select>
         <input
           name="type"
           defaultValue={typeFilter}
@@ -287,7 +336,7 @@ export default async function AdminNotificationsPage({
         <button type="submit" className="fn-btn fn-btn-ghost fn-btn-sm">
           絞り込み
         </button>
-        {typeFilter || eventFilter || qFilter ? (
+        {typeFilter || eventFilter || qFilter || catFilter !== "all" ? (
           <Link
             href={status === "all" ? "/admin/notifications" : `/admin/notifications?status=${status}`}
             className="fn-btn fn-btn-ghost fn-btn-sm"
@@ -313,30 +362,47 @@ export default async function AdminNotificationsPage({
         </div>
       ) : (
         <section style={{ marginTop: 18 }}>
-          <table className="fn-table">
+          {rows.length === 0 ? (
+            <EmptyState
+              tone={
+                status === "failed" && !typeFilter && !eventFilter && !qFilter
+                  ? "success"
+                  : "neutral"
+              }
+              title={
+                status === "failed" && !typeFilter && !eventFilter && !qFilter
+                  ? "失敗通知はありません"
+                  : "通知ログはありません"
+              }
+              description={
+                status === "failed" && !typeFilter && !eventFilter && !qFilter
+                  ? "現在、失敗状態の通知はありません。Discord 送信が正常に完了しています。"
+                  : "現在の条件に一致する通知はありません。フィルタを変えると別のログが表示される場合があります。"
+              }
+              actions={[
+                ...(status !== "all"
+                  ? [{ href: "/admin/notifications", label: "フィルタを解除", variant: "ghost" as const }]
+                  : []),
+                { href: "/admin/notifications?status=failed", label: "失敗通知を見る", variant: "ghost" },
+                { href: "/admin", label: "管理ダッシュボードへ", variant: "ghost" },
+              ]}
+            />
+          ) : (
+          <FnTable>
             <thead>
               <tr>
-                <th>状態</th>
-                <th>type</th>
-                <th>Discord ID</th>
-                <th>試行</th>
-                <th>次試行</th>
-                <th>登録</th>
-                <th>last_error</th>
+                <th style={{ width: 88 }}>状態</th>
+                <th>通知</th>
+                <th style={{ width: 72 }}>試行</th>
+                <th style={{ width: 100 }}>次試行</th>
+                <th style={{ width: 100 }}>登録</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 ? (
-                <tr>
-                  <td colSpan={8} style={{ padding: 16, textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
-                    該当する通知はありません。
-                  </td>
-                </tr>
-              ) : (
-                rows.map((r) => (
-                  <tr key={r.id}>
-                    <td>
+              {rows.map((r) => (
+                <tr key={r.id}>
+                    <td style={{ verticalAlign: "top" }}>
                       <span
                         className={`fn-badge ${
                           r.status === "sent"
@@ -347,27 +413,35 @@ export default async function AdminNotificationsPage({
                                 ? "fn-badge-warning"
                                 : "fn-badge-soft"
                         }`}
+                        title={r.status ?? ""}
                       >
-                        {r.status ?? "?"}
+                        {getNotificationStatusLabel(r.status)}
                       </span>
-                    </td>
-                    <td style={{ fontFamily: "monospace", fontSize: 11 }}>{r.type}</td>
-                    <td style={{ fontFamily: "monospace", fontSize: 11 }}>{r.discord_user_id}</td>
-                    <td style={{ fontVariantNumeric: "tabular-nums" }}>{r.attempt_count ?? 0}</td>
-                    <td style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                      {r.next_attempt_at ? formatRelative(r.next_attempt_at) : "—"}
-                    </td>
-                    <td style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                      {formatRelative(r.created_at)}
-                    </td>
-                    <td style={{ fontSize: 11, color: "var(--text-muted)", maxWidth: 280 }}>
-                      {r.last_error ? (
-                        <span style={{ wordBreak: "break-all" }}>{r.last_error}</span>
-                      ) : (
-                        "—"
-                      )}
+                      {r.event_id ? (
+                        <div style={{ fontSize: 10, marginTop: 6, wordBreak: "break-all" }}>
+                          <Link href={`/admin/events/${r.event_id}`}>
+                            {r.event_id.slice(0, 10)}…
+                          </Link>
+                        </div>
+                      ) : null}
                     </td>
                     <td>
+                      <NotificationOutboxSummary
+                        row={r}
+                        recipient={recipientMap.get(r.discord_user_id) ?? null}
+                        showTechnicalType
+                      />
+                    </td>
+                    <td style={{ fontVariantNumeric: "tabular-nums", verticalAlign: "top" }}>
+                      {r.attempt_count ?? 0}
+                    </td>
+                    <td style={{ fontSize: 11, color: "var(--text-muted)", verticalAlign: "top" }}>
+                      {r.next_attempt_at ? formatRelative(r.next_attempt_at) : "—"}
+                    </td>
+                    <td style={{ fontSize: 11, color: "var(--text-muted)", verticalAlign: "top" }}>
+                      {formatRelative(r.created_at)}
+                    </td>
+                    <td style={{ verticalAlign: "top" }}>
                       <div style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
                         <NotificationPayloadButton payload={r.payload_json} />
                         <Link
@@ -380,6 +454,9 @@ export default async function AdminNotificationsPage({
                         {r.status === "failed" ? (
                           <NotificationRetryButton id={r.id} />
                         ) : null}
+                        {r.status === "sent" || r.status === "failed" ? (
+                          <NotificationForceResendButton id={r.id} />
+                        ) : null}
                         {r.status === "pending" ||
                         r.status === "processing" ||
                         r.status === "failed" ? (
@@ -387,11 +464,11 @@ export default async function AdminNotificationsPage({
                         ) : null}
                       </div>
                     </td>
-                  </tr>
-                ))
-              )}
+                </tr>
+              ))}
             </tbody>
-          </table>
+          </FnTable>
+          )}
         </section>
       )}
     </div>

@@ -3,9 +3,8 @@
   --event-panel-soft: color-mix(in srgb, var(--bg-surface) 96%, var(--event-accent, var(--accent-primary)) 4%);
   --event-slot-reserved: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 20%, var(--bg-surface));
   --event-slot-open: color-mix(in srgb, var(--bg-base) 88%, var(--event-accent, var(--accent-primary)) 12%);
-  width: min(100% - 96px, 1480px);
-  margin: 0 auto;
-  padding: 34px 0 86px;
+  width: 100%;
+  margin: 0;
   color: var(--text-primary);
 }
 
@@ -26,7 +25,7 @@
   gap: 32px;
   align-items: start;
   padding: 34px 0 28px;
-  border-bottom: 1px solid var(--hairline, var(--border-subtle));
+  border-bottom: 0;
 }
 
 .heroCopy { min-width: 0; }
@@ -87,7 +86,8 @@
   min-height: 84px;
   padding: 18px 16px 16px;
   background: var(--event-panel-soft);
-  border: 1px solid var(--hairline, var(--border-subtle));
+  border: 0;
+  border-radius: var(--r-card);
 }
 
 .statCard strong {
@@ -185,7 +185,7 @@
   grid-template-columns: repeat(3, max-content) minmax(0, 1fr);
   gap: 26px;
   padding-top: 18px;
-  border-top: 1px solid var(--hairline, var(--border-subtle));
+  border-top: 0;
 }
 
 .miniFact,
@@ -241,7 +241,9 @@
 .slotTableWrap {
   position: relative;
   overflow-x: auto;
-  border: 1px solid var(--hairline, var(--border-subtle));
+  border: 0;
+  border-radius: var(--r-card);
+  background: var(--bg-surface);
   scrollbar-width: thin;
   -webkit-overflow-scrolling: touch;
 }
@@ -347,7 +349,6 @@
 .emptyText { margin: 0; color: var(--text-muted); font-size: 13px; }
 
 @media (max-width: 1080px) {
-  .page { width: min(100% - 40px, 1480px); padding-top: 36px; }
   .hero, .recruitCard { grid-template-columns: 1fr; }
   .heroActions, .recruitAside { align-items: flex-start; }
   .statsGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -355,12 +356,27 @@
 }
 
 @media (max-width: 720px) {
-  .page { width: min(100% - 20px, 1480px); padding: 12px 0 58px; }
-  .hero { gap: 16px; padding: 18px 0 20px; }
+  .hero {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 18px 0 20px;
+  }
+  .heroActions,
+  .recruitAside {
+    align-items: stretch;
+    width: 100%;
+  }
+  .heroActions .fn-btn,
+  .recruitAside .fn-btn,
+  .reserveButton {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+  }
   .heroTitle {
     margin-bottom: 14px;
-    font-size: clamp(42px, 14vw, 64px);
-    line-height: 0.9;
+    font-size: clamp(36px, 11vw, 52px);
+    line-height: 0.92;
     overflow-wrap: anywhere;
   }
   .heroLead { font-size: 13.5px; line-height: 1.7; }
@@ -368,13 +384,25 @@
   .crewGrid, .videoGrid { grid-template-columns: 1fr; }
   .heroActions, .recruitAside { align-items: stretch; width: 100%; }
   .statusPill { align-self: flex-start; }
-  .guideLink { align-self: stretch; min-height: 36px; justify-content: center; border: 1px solid var(--hairline, var(--border-subtle)); }
+  .guideLink {
+    align-self: stretch;
+    min-height: 44px;
+    justify-content: center;
+    border: 0;
+    border-radius: var(--r-pill);
+    background: var(--bg-elevated);
+  }
+
+  .cardLink,
+  .statusPill {
+    min-height: 44px;
+  }
   .statCard { min-height: 76px; padding: 13px 12px; }
   .statCard strong { font-size: 24px; }
   .recruitCard {
     gap: 22px;
     min-height: auto;
-    margin: 18px -10px 0;
+    margin: 18px 0 0;
     padding: 24px 18px;
     border-radius: 0;
   }
@@ -392,7 +420,6 @@
   .sectionTitleLine span { font-size: 11.5px; }
   .legend { justify-content: flex-start; gap: 8px 10px; }
   .slotTable { min-width: 760px; }
-  .slotTableWrap { margin-inline: -10px; }
   .reserveButton, .cardLink { width: 100%; }
   .videoGrid { gap: 20px; }
   .videoCard strong { white-space: normal; }

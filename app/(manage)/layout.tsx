@@ -1,16 +1,22 @@
 import * as React from "react";
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { AuthHeader } from "@/components/layout/AuthHeader";
 import { PublicFooter } from "@/components/layout/PublicFooter";
 import { CostGuardBanner } from "@/components/layout/CostGuardBanner";
 import { ManageSidebar } from "@/components/layout/ManageSidebar";
+import { ManageModeBanner } from "@/components/manage/ManageModeBanner";
 import { buildHeaderUser, type HeaderUser } from "@/lib/auth/headerUser";
 
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
+
 /**
- * イベント運営者エリア共通レイアウト。
- * 担当イベントがあれば左にサイドバー (クイックナビ) を表示する。
- * 認可は各ページで判定する (event_staff_permissions に明示許可があるか)。
+ * /manage — イベント運営者向けの現場運用（審査・枠・スタッフ等）。
+ * /admin はサイト全体の管理本部（admin 専用）。非 admin 運営者を /admin に誘導しない。
+ * 認可は各ページで event_staff_permissions を参照する。
  */
 export default async function ManageLayout({
   children,
@@ -31,24 +37,17 @@ export default async function ManageLayout({
   }
 
   return (
-    <>
+    <div data-manage-shell data-fn-surface="public">
       <CostGuardBanner />
       <AuthHeader user={user} />
-      <div
-        style={{
-          flex: 1,
-          width: "min(96%, 1300px)",
-          margin: "0 auto",
-          padding: "20px 16px 64px",
-          display: "flex",
-          gap: 24,
-          alignItems: "flex-start",
-        }}
-      >
+      <div className="manage-shell">
         <ManageSidebar />
-        <main style={{ flex: 1, minWidth: 0 }}>{children}</main>
+        <main className="manage-main">
+          <ManageModeBanner />
+          {children}
+        </main>
       </div>
       <PublicFooter />
-    </>
+    </div>
   );
 }

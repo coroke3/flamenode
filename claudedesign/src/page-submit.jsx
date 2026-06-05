@@ -90,7 +90,6 @@ function SubmitPage({ onNav, lang }) {
               <li key={s.n} className={"fn-step " + (step === s.n ? "is-active" : step > s.n ? "is-done" : "") + (disabled ? " is-disabled" : "")} onClick={() => !disabled && setStep(s.n)}>
                 <span className="fn-step-n fn-mono">{step > s.n ? "✓" : s.n}</span>
                 <span className="fn-step-labels">
-                  <span className="fn-step-en fn-mono">{s.en}</span>
                   <span className="fn-step-jp fn-jp">{disabled ? "スキップ" : s.label}</span>
                 </span>
               </li>
@@ -191,7 +190,7 @@ function SubmitPage({ onNav, lang }) {
 function Step1Entry({ subType, setSubType, title, setTitle, hitokoto, setHitokoto, creators }) {
   return (
     <div className="fn-sb-step">
-      <FormSection num="01" title="参加区分" en="Submission type">
+      <FormSection num="01" title="参加区分">
         <div className="fn-radio-cards">
           {[
             { id: "individual", label: "個人", desc: "1名で制作" },
@@ -207,18 +206,18 @@ function Step1Entry({ subType, setSubType, title, setTitle, hitokoto, setHitokot
         </div>
       </FormSection>
 
-      <FormSection num="02" title="クリエイター情報" en="Creator">
+      <FormSection num="02" title="クリエイター情報">
         <div className="fn-field-grid">
-          <Field label="活動名 / チーム名" required>
+          <Field label="活動名・チーム名" required>
             <input className="fn-input" defaultValue="halo / loop" placeholder="表示名" />
           </Field>
           <Field label="読み方 (フリガナ)">
             <input className="fn-input" defaultValue="ハロループ" placeholder="ひらがな・カタカナ" />
           </Field>
-          <Field label="代表者 X (Twitter) ID" required>
+          <Field label="X (Twitter) ID" required>
             <input className="fn-input fn-mono" defaultValue="@halo_loop_v" />
           </Field>
-          <Field label="映像歴 / Experience">
+          <Field label="映像歴">
             <select className="fn-input" defaultValue="3-5">
               <option value="0-1">〜1年</option>
               <option value="1-3">1〜3年</option>
@@ -228,7 +227,7 @@ function Step1Entry({ subType, setSubType, title, setTitle, hitokoto, setHitokot
           </Field>
         </div>
 
-        <Field label="アイコン画像 (250×250px)">
+        <Field label="アイコン画像">
           <div className="fn-icon-picker">
             <div className="fn-icon-current">h</div>
             <div className="fn-icon-history">
@@ -242,7 +241,7 @@ function Step1Entry({ subType, setSubType, title, setTitle, hitokoto, setHitokot
         </Field>
       </FormSection>
 
-      <FormSection num="03" title="作品基本情報" en="Work">
+      <FormSection num="03" title="作品基本情報">
         <div className="fn-field-grid">
           <Field label="作品タイトル" required wide>
             <input className="fn-input" value={title} onChange={e => setTitle(e.target.value)} placeholder="作品タイトル" />
@@ -257,7 +256,7 @@ function Step1Entry({ subType, setSubType, title, setTitle, hitokoto, setHitokot
             <input className="fn-input fn-mono" defaultValue="https://youtu.be/kai_node_src" placeholder="https://" />
           </Field>
         </div>
-        <Field label="ひとこと (30文字まで)">
+        <Field label="ひとこと（30文字まで）">
           <div className="fn-input-counted">
             <input className="fn-input" value={hitokoto} maxLength={30} onChange={e => setHitokoto(e.target.value)} placeholder="作品紹介を一言" />
             <span className="fn-input-count fn-mono">{hitokoto.length}/30</span>
@@ -272,7 +271,7 @@ function Step1Entry({ subType, setSubType, title, setTitle, hitokoto, setHitokot
 function Step2Members({ members, addMember, removeMember, updateMember, toggleMember, mode, setMode }) {
   return (
     <div className="fn-sb-step">
-      <FormSection num="04" title="合作メンバー" en="Collaborators"
+      <FormSection num="04" title="合作メンバー"
         aside={
           <div className="fn-tabs-mini">
             <button className={mode === "normal" ? "is-active" : ""} onClick={() => setMode("normal")}>通常入力</button>
@@ -343,7 +342,7 @@ function Step3Details({ url, setUrl, ytStatus, setYtStatus, ytId, software, setS
   const removeSw = (s) => setSoftware(list => list.filter(x => x !== s));
   return (
     <div className="fn-sb-step">
-      <FormSection num="05" title="YouTube 連携" en="Source">
+      <FormSection num="05" title="YouTube 連携">
         <Field label="YouTube URL または ID" required>
           <div className="fn-yt-input">
             <input className="fn-input fn-mono" value={url} onChange={e => { setUrl(e.target.value); setYtStatus("verifying"); }} placeholder="https://youtu.be/... / shorts / watch?v=" />
@@ -358,7 +357,7 @@ function Step3Details({ url, setUrl, ytStatus, setYtStatus, ytId, software, setS
         </Field>
       </FormSection>
 
-      <FormSection num="06" title="使用編集ソフト" en="Software"
+      <FormSection num="06" title="使用編集ソフト"
         aside={<div className="fn-tabs-mini"><button className="is-active">通常入力</button><button>CSV入力</button></div>}>
         <div className="fn-chips-input">
           {software.map(s => (
@@ -370,7 +369,7 @@ function Step3Details({ url, setUrl, ytStatus, setYtStatus, ytId, software, setS
         </div>
       </FormSection>
 
-      <FormSection num="07" title="イベント固有質問" en="Event questions">
+      <FormSection num="07" title="イベント固有質問">
         <Field label="この作品のテーマ（PVSF2025S 設問）">
           <input className="fn-input" placeholder="イベントの設問に回答" defaultValue="夜と導線" />
         </Field>
@@ -379,7 +378,7 @@ function Step3Details({ url, setUrl, ytStatus, setYtStatus, ytId, software, setS
         </Field>
       </FormSection>
 
-      <FormSection num="08" title="振り返り・コメント" en="Review (後日入力可)">
+      <FormSection num="08" title="振り返り・コメント">
         <div className="fn-field-grid">
           <Field label="紹介コメント" wide>
             <textarea className="fn-input fn-textarea" placeholder="作品紹介" />
@@ -398,7 +397,7 @@ function Step4Review({ title, selEvent, members, showMembers, software, ytId, su
   const typeLabel = { individual: "個人", collab: "複数人", mixed: "混合" }[subType];
   return (
     <div className="fn-sb-step">
-      <FormSection num="09" title="提出内容の確認" en="Final review">
+      <FormSection num="09" title="提出内容の確認">
         <dl className="fn-review-summary">
           <Row k="参加イベント" v={`${selEvent.title} (${selEvent.code})`} />
           <Row k="スロット" v="08/30 (Sat) 21:00 · 単枠" />

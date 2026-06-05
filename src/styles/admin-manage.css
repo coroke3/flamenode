@@ -1,0 +1,637 @@
+/* admin / manage シェル差別化（公開面リデザインとは別トーン） */
+
+[data-admin-shell] {
+  --admin-bg: #0a0b0d;
+  --admin-surface: #12141a;
+  --admin-elevated: #1a1d26;
+  --admin-border: rgba(244, 246, 238, 0.1);
+  --admin-accent: #9ca3af;
+  --admin-danger: #f87171;
+  --admin-danger-soft: rgba(248, 113, 113, 0.14);
+}
+
+[data-admin-shell] .admin-shell {
+  min-height: calc(100vh - 56px - 80px);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--admin-bg) 96%, #000) 0%,
+    var(--bg-base) 120px
+  );
+}
+
+[data-admin-shell] .admin-frame {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 0;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--fn-page-max, 1360px);
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: var(--fn-page-gutter);
+  padding-right: var(--fn-page-gutter);
+}
+
+[data-admin-shell] .admin-sidebar {
+  border-right: 1px solid var(--admin-border);
+  padding: 18px 16px 28px;
+  background: var(--admin-surface);
+}
+
+[data-admin-shell] .admin-main {
+  padding: 22px 28px 52px;
+  min-width: 0;
+}
+
+[data-admin-shell] .admin-mode-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--admin-border);
+}
+
+[data-admin-shell] .admin-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: var(--r-pill, 8px);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: #f4f6ee;
+  background: #2a2d36;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+[data-admin-shell] .admin-mode-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+[data-admin-shell] .admin-mode-hint {
+  width: 100%;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+[data-admin-shell] .admin-danger-zone {
+  border-color: color-mix(in srgb, var(--admin-danger) 35%, var(--border-subtle)) !important;
+}
+
+[data-manage-shell] {
+  --manage-accent-fallback: var(--accent-primary);
+}
+
+[data-manage-shell] .manage-shell {
+  flex: 1;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--fn-page-max, 1360px);
+  margin-left: auto;
+  margin-right: auto;
+  padding: 16px var(--fn-page-gutter, clamp(20px, 4vw, 48px)) 64px;
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+[data-manage-shell] .manage-main {
+  flex: 1;
+  min-width: 0;
+}
+
+[data-manage-shell] .manage-mode-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--manage-event-accent, var(--manage-accent-fallback));
+}
+
+[data-manage-shell] .manage-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: var(--r-pill, 8px);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: var(--accent-ink);
+  background: var(--manage-event-accent, var(--manage-accent-fallback));
+}
+
+[data-manage-shell] .manage-mode-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+[data-manage-shell] .manage-mode-hint {
+  width: 100%;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+/* ─── 管理 / 運営コンソール共通 ─────────────────────────────── */
+
+[data-admin-shell] .fn-console-head,
+[data-manage-shell] .fn-console-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+[data-admin-shell] .fn-console-head-main,
+[data-manage-shell] .fn-console-head-main {
+  min-width: 0;
+  flex: 1 1 280px;
+}
+
+[data-admin-shell] .fn-console-back,
+[data-manage-shell] .fn-console-back {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+
+[data-admin-shell] .fn-console-back a,
+[data-manage-shell] .fn-console-back a {
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+[data-admin-shell] .fn-console-back a:hover,
+[data-manage-shell] .fn-console-back a:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
+[data-admin-shell] .fn-console-title,
+[data-manage-shell] .fn-console-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+[data-admin-shell] .fn-console-lead,
+[data-manage-shell] .fn-console-lead {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+[data-admin-shell] .fn-console-head-actions,
+[data-manage-shell] .fn-console-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+[data-admin-shell] .fn-console-actions,
+[data-manage-shell] .fn-console-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+[data-admin-shell] .fn-console-eyebrow,
+[data-manage-shell] .fn-console-eyebrow {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+[data-admin-shell] .fn-console-section,
+[data-manage-shell] .fn-console-section {
+  margin-top: 32px;
+}
+
+[data-admin-shell] .fn-console-section--tight,
+[data-manage-shell] .fn-console-section--tight {
+  margin-top: 20px;
+}
+
+[data-admin-shell] .fn-console-stack,
+[data-manage-shell] .fn-console-stack {
+  display: grid;
+  gap: 14px;
+}
+
+[data-admin-shell] .fn-console-card-title,
+[data-manage-shell] .fn-console-card-title {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+[data-admin-shell] .fn-console-card,
+[data-manage-shell] .fn-console-card {
+  margin-top: 20px;
+}
+
+[data-admin-shell] .fn-console-note,
+[data-manage-shell] .fn-console-note {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+[data-admin-shell] .fn-console-meta-sep,
+[data-manage-shell] .fn-console-meta-sep {
+  margin-left: 8px;
+}
+
+[data-admin-shell] .fn-console-stat-grid,
+[data-manage-shell] .fn-console-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+[data-admin-shell] .fn-console-stat,
+[data-manage-shell] .fn-console-stat {
+  padding: 12px 14px;
+}
+
+[data-admin-shell] .fn-console-stat-label,
+[data-manage-shell] .fn-console-stat-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+[data-admin-shell] .fn-console-stat-value,
+[data-manage-shell] .fn-console-stat-value {
+  margin-top: 4px;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+[data-admin-shell] .fn-console-block-lead,
+[data-manage-shell] .fn-console-block-lead {
+  margin: 0 0 10px;
+}
+
+[data-admin-shell] .fn-console-filter-nav,
+[data-manage-shell] .fn-console-filter-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+[data-admin-shell] .fn-console-kv-grid,
+[data-manage-shell] .fn-console-kv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 12px;
+}
+
+[data-admin-shell] .fn-console-kv-value,
+[data-manage-shell] .fn-console-kv-value {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+[data-admin-shell] .fn-console-kv-value--mono,
+[data-manage-shell] .fn-console-kv-value--mono {
+  font-family: var(--font-mono);
+}
+
+[data-admin-shell] .fn-console-kv-value--bold,
+[data-manage-shell] .fn-console-kv-value--bold {
+  font-weight: 700;
+}
+
+[data-admin-shell] .fn-console-badge-row,
+[data-manage-shell] .fn-console-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+[data-admin-shell] .fn-console-xid-grid,
+[data-manage-shell] .fn-console-xid-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 10px;
+}
+
+[data-admin-shell] .fn-console-xid-card,
+[data-manage-shell] .fn-console-xid-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+}
+
+[data-admin-shell] .fn-console-xid-card--active,
+[data-manage-shell] .fn-console-xid-card--active {
+  background: var(--accent-primary-soft);
+}
+
+[data-admin-shell] .fn-console-list,
+[data-manage-shell] .fn-console-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+[data-admin-shell] .fn-console-list-item,
+[data-manage-shell] .fn-console-list-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+[data-admin-shell] .fn-console-list-link,
+[data-manage-shell] .fn-console-list-link {
+  flex: 1 1 120px;
+  min-width: 0;
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+[data-admin-shell] .fn-console-list-link:hover,
+[data-manage-shell] .fn-console-list-link:hover {
+  color: var(--accent-primary-strong);
+  text-decoration: underline;
+}
+
+[data-admin-shell] .fn-console-row-actions,
+[data-manage-shell] .fn-console-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+[data-admin-shell] .fn-td-top,
+[data-manage-shell] .fn-td-top {
+  vertical-align: top;
+}
+
+[data-admin-shell] .fn-td-tabular,
+[data-manage-shell] .fn-td-tabular {
+  font-variant-numeric: tabular-nums;
+  vertical-align: top;
+}
+
+[data-admin-shell] .fn-td-secondary,
+[data-manage-shell] .fn-td-secondary {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+[data-admin-shell] .fn-th-w140,
+[data-manage-shell] .fn-th-w140 {
+  width: 140px;
+}
+
+[data-admin-shell] .fn-th-w56,
+[data-manage-shell] .fn-th-w56 {
+  width: 56px;
+}
+
+[data-admin-shell] .fn-td-ellipsis,
+[data-manage-shell] .fn-td-ellipsis {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-admin-shell] .fn-alert,
+[data-manage-shell] .fn-alert {
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+
+[data-admin-shell] .fn-alert--danger,
+[data-manage-shell] .fn-alert--danger {
+  background: var(--accent-danger-soft, #fee2e2);
+  border-color: var(--accent-danger, #dc2626);
+  color: var(--accent-danger, #991b1b);
+}
+
+[data-admin-shell] .fn-alert--warn,
+[data-manage-shell] .fn-alert--warn {
+  background: var(--accent-warning-soft, #fef3c7);
+  border-color: var(--accent-warning, #d97706);
+}
+
+[data-admin-shell] .fn-td-nowrap,
+[data-manage-shell] .fn-td-nowrap {
+  white-space: nowrap;
+}
+
+[data-admin-shell] .fn-td-muted,
+[data-manage-shell] .fn-td-muted {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+[data-admin-shell] .fn-td-mono,
+[data-manage-shell] .fn-td-mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+[data-admin-shell] .fn-console-event-body,
+[data-manage-shell] .fn-console-event-body {
+  min-width: 0;
+  flex: 1;
+}
+
+[data-admin-shell] .fn-console-event-title-row,
+[data-manage-shell] .fn-console-event-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+[data-admin-shell] .fn-console-event-title-row a,
+[data-manage-shell] .fn-console-event-title-row a {
+  font-weight: 700;
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+[data-admin-shell] .fn-console-event-title-row a:hover,
+[data-manage-shell] .fn-console-event-title-row a:hover {
+  color: var(--accent-primary-strong);
+}
+
+[data-admin-shell] .fn-console-event-meta,
+[data-manage-shell] .fn-console-event-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+[data-manage-shell] .manage-event-hero.fn-console-head {
+  align-items: flex-start;
+  padding: 14px 16px;
+  border-bottom: 0;
+  border-radius: var(--radius-md);
+  background: color-mix(
+    in srgb,
+    var(--manage-event-accent, var(--manage-accent-fallback)) 10%,
+    var(--bg-surface)
+  );
+  border: 1px solid var(--border-subtle);
+  border-left: 4px solid var(--manage-event-accent, var(--manage-accent-fallback));
+}
+
+@media (max-width: 560px) {
+  [data-admin-shell] .fn-console-head,
+  [data-manage-shell] .fn-console-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  [data-admin-shell] .fn-console-actions,
+  [data-manage-shell] .fn-console-actions {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  [data-admin-shell] .fn-console-actions .fn-btn,
+  [data-manage-shell] .fn-console-actions .fn-btn {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+  }
+}
+
+[data-manage-shell] .manage-event-card {
+  padding: 14px 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--manage-event-accent, var(--manage-accent-fallback));
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+[data-manage-shell] .manage-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+[data-manage-shell] .manage-actions .fn-btn {
+  min-height: 38px;
+  padding-left: 14px;
+  padding-right: 14px;
+  font-size: 13px;
+}
+
+[data-manage-shell] .manage-actions .fn-btn-sm {
+  min-height: 38px;
+}
+
+@media (max-width: 760px) {
+  [data-admin-shell] .admin-frame {
+    grid-template-columns: 1fr;
+  }
+
+  [data-admin-shell] .admin-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--admin-border);
+  }
+
+  [data-manage-shell] .manage-shell {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 640px) {
+  [data-admin-shell] .admin-shell,
+  [data-manage-shell] .manage-shell {
+    overflow-x: clip;
+    max-width: 100%;
+  }
+
+  [data-admin-shell] .admin-main,
+  [data-manage-shell] .manage-main {
+    padding-left: 0;
+    padding-right: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  [data-admin-shell] .admin-main table.fn-table,
+  [data-manage-shell] .manage-main table.fn-table {
+    width: max-content;
+    min-width: 100%;
+  }
+
+  [data-admin-shell] .admin-sidebar,
+  [data-manage-shell] .sidebar {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  [data-admin-shell] .admin-sidebar::-webkit-scrollbar,
+  [data-manage-shell] .sidebar::-webkit-scrollbar {
+    display: none;
+  }
+
+  [data-admin-shell] .admin-mode-banner,
+  [data-manage-shell] .manage-mode-banner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  [data-admin-shell] .admin-main .fn-table-scroll,
+  [data-manage-shell] .manage-main .fn-table-scroll {
+    max-width: 100%;
+  }
+}

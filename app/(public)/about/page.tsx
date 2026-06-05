@@ -46,8 +46,10 @@ export default function AboutPage(): React.ReactElement {
         </div>
         <div className={styles.heroInner}>
           <Logo showText={false} className={styles.logo} />
-          <p className={styles.kicker}>Creator archive and event workflow</p>
-          <h1>FlameNode</h1>
+          <p className={`fn-eyebrow ${styles.kicker}`}>
+            Creator archive and event workflow
+          </p>
+          <h1 className="fn-display">FlameNode</h1>
           <p className={styles.lead}>
             FlameNodeは、YouTube作品、クリエイター名義、イベント参加、投稿枠、履歴をひとつの流れで扱うためのプラットフォームです。
             作品を見つける人にも、投稿する人にも、運営する人にも、同じ情報が同じ意味で届くことを目指しています。
@@ -63,7 +65,10 @@ export default function AboutPage(): React.ReactElement {
         </div>
       </section>
 
-      <section className={styles.featureGrid} aria-label="FlameNode の特徴">
+      <section
+        className={`fn-public-container fn-page-section ${styles.featureGrid}`}
+        aria-label="FlameNode の特徴"
+      >
         {FEATURES.map((feature, index) => (
           <article
             key={feature.title}
@@ -79,11 +84,11 @@ export default function AboutPage(): React.ReactElement {
         ))}
       </section>
 
-      <section className={styles.flow}>
-        <div className={styles.flowHeader}>
-          <p className={styles.kicker}>How it works</p>
-          <h2>投稿から公開までの流れ</h2>
-        </div>
+      <section className={`fn-public-container fn-page-section ${styles.flow}`}>
+        <header className={`fn-page-head ${styles.flowHeader}`}>
+          <p className="fn-eyebrow">How it works</p>
+          <h2 className="fn-page-title fn-page-title--compact">投稿から公開までの流れ</h2>
+        </header>
         <ol className={styles.rail}>
           {FLOW.map((label, index) => (
             <li key={label} className={styles.step}>

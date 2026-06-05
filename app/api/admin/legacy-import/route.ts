@@ -7,7 +7,9 @@ import {
   applyLegacyImport,
   splitLegacyPayload,
   type ConflictStrategy,
+  type LegacyImportMode,
   type LegacyImportResult,
+  type StaticRebuildStrategy,
 } from "@/lib/legacy/import";
 import { parseLegacyImportText } from "@/lib/legacy/parse";
 
@@ -22,6 +24,10 @@ interface JsonRequest {
     events?: ConflictStrategy;
     videos?: ConflictStrategy;
     updateXUsers?: boolean;
+    importMode?: "archive" | "preserve" | "active_event" | "draft";
+    forceEntryOpen?: boolean;
+    enqueueStaticRebuild?: boolean;
+    staticRebuildStrategy?: "none" | "summary" | "event" | "full";
   };
 }
 
@@ -92,7 +98,13 @@ async function handleJson(req: Request, operatorId: string): Promise<Response> {
 
     const action = body.action ?? "analyze";
     if (action === "analyze") {
-      const result = await analyzeLegacyPayload(merged.payload);
+      const result = await analyzeLegacyPayload(merged.payload, {
+        importMode: body.strategy?.importMode,
+        forceEntryOpen: body.strategy?.forceEntryOpen,
+        enqueueStaticRebuild: body.strategy?.enqueueStaticRebuild,
+        staticRebuildStrategy: body.strategy?.staticRebuildStrategy,
+        dryRun: true,
+      });
       return NextResponse.json(result);
     }
 
@@ -106,6 +118,10 @@ async function handleJson(req: Request, operatorId: string): Promise<Response> {
           events: body.strategy?.events,
           videos: body.strategy?.videos,
           updateXUsers: body.strategy?.updateXUsers,
+          importMode: body.strategy?.importMode,
+          forceEntryOpen: body.strategy?.forceEntryOpen,
+          enqueueStaticRebuild: body.strategy?.enqueueStaticRebuild,
+          staticRebuildStrategy: body.strategy?.staticRebuildStrategy,
         },
         operatorId,
       );
@@ -119,9 +135,43 @@ async function handleJson(req: Request, operatorId: string): Promise<Response> {
   }
 }
 
+function parseFormImportMode(raw: FormDataEntryValue | null): LegacyImportMode {
+  const v = typeof raw === "string" ? raw.trim() : "";
+  if (
+    v === "archive" ||
+    v === "preserve" ||
+    v === "active_event" ||
+    v === "draft"
+  ) {
+    return v;
+  }
+  return "archive";
+}
+
+function parseFormStaticRebuildStrategy(
+  raw: FormDataEntryValue | null,
+): StaticRebuildStrategy | undefined {
+  const v = typeof raw === "string" ? raw.trim() : "";
+  if (v === "none" || v === "summary" || v === "event" || v === "full") {
+    return v;
+  }
+  return undefined;
+}
+
+function legacyOptionsFromForm(form: FormData) {
+  return {
+    importMode: parseFormImportMode(form.get("import_mode")),
+    enqueueStaticRebuild: form.get("enqueue_static_rebuild") !== "0",
+    staticRebuildStrategy: parseFormStaticRebuildStrategy(
+      form.get("static_rebuild_strategy"),
+    ),
+  };
+}
+
 async function handleForm(req: Request, operatorId: string): Promise<Response> {
   const form = await req.formData();
   const dryRun = form.get("dry_run") === "1";
+  const legacyFormOptions = legacyOptionsFromForm(form);
   const files = form
     .getAll("file")
     .filter((f): f is File => f instanceof File && f.size > 0);
@@ -158,7 +208,10 @@ async function handleForm(req: Request, operatorId: string): Promise<Response> {
 
   if (dryRun) {
     try {
-      const r = await analyzeLegacyPayload(parsed);
+      const r = await analyzeLegacyPayload(parsed, {
+        ...legacyFormOptions,
+        dryRun: true,
+      });
       base.searchParams.set(
         "notice",
         `Dry run complete: events ${r.counts.events.create + r.counts.events.update}, videos ${
@@ -179,7 +232,11 @@ async function handleForm(req: Request, operatorId: string): Promise<Response> {
   }
 
   try {
-    const r = await applyLegacyImport(parsed, { events: "skip", videos: "skip" }, operatorId);
+    const r = await applyLegacyImport(
+      parsed,
+      { events: "skip", videos: "skip", ...legacyFormOptions },
+      operatorId,
+    );
     base.searchParams.set(
       "notice",
       `Import complete: events create ${r.counts.events.create} / update ${r.counts.events.update}, videos create ${r.counts.videos.create} / update ${r.counts.videos.update}${

@@ -1,4 +1,5 @@
 import * as React from "react";
+import { FnTable } from "@/components/ui/FnTable";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
@@ -15,6 +16,10 @@ import {
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 import { COLLABORATOR_PERMISSION_LABELS } from "@/lib/constants/collaborator-permissions";
+import {
+  EventStaffManager,
+  type CollaboratorRow,
+} from "@/components/admin/EventStaffManager";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +55,8 @@ export default async function ManageEventStaffPage({
     ? new Set<string>()
     : await getCollaboratorPermissions(db, user.id, id);
   if (!isAdmin && permissionsForCurrentUser.size === 0) notFound();
+  const canManageMembers =
+    isAdmin || permissionsForCurrentUser.has("event.members");
 
   const staff = await db
     .select({
@@ -78,6 +85,11 @@ export default async function ManageEventStaffPage({
       event_staff_id: eventStaffPermissionsTable.event_staff_id,
       permission_key: eventStaffPermissionsTable.permission_key,
       allowed: eventStaffPermissionsTable.allowed,
+      x_user_id: eventStaffTable.x_user_id,
+      discord_user_id: eventStaffTable.discord_user_id,
+      display_name: eventStaffTable.display_name,
+      is_public_staff: eventStaffTable.is_public,
+      public_role_label: eventStaffTable.public_role_label,
     })
     .from(eventStaffPermissionsTable)
     .innerJoin(
@@ -93,6 +105,34 @@ export default async function ManageEventStaffPage({
     list.push(permission);
     permissionMap.set(permission.event_staff_id, list);
   }
+  const editors = staff
+    .filter((s) => s.x_user_id && (s.role === "editor" || s.role === "representative"))
+    .map((s) => ({
+      x_user_id: s.x_user_id ?? "",
+      role: (s.role ?? "editor") as "editor" | "representative",
+      is_public: s.is_public,
+      public_role_label: s.public_role_label,
+      internal_note: s.internal_note,
+      x_name: s.x_name,
+      icon_url: s.icon_url,
+    }));
+  const collabMap = new Map<string, CollaboratorRow>();
+  for (const row of permissionRows.filter((p) => p.allowed === 1)) {
+    const existing = collabMap.get(row.event_staff_id);
+    if (existing) {
+      existing.permission_keys.push(row.permission_key);
+    } else {
+      collabMap.set(row.event_staff_id, {
+        key: row.event_staff_id,
+        x_user_id: row.x_user_id,
+        discord_user_id: row.discord_user_id,
+        display_name: row.display_name,
+        is_public_staff: row.is_public_staff,
+        public_role_label: row.public_role_label,
+        permission_keys: [row.permission_key],
+      });
+    }
+  }
 
   return (
     <div>
@@ -106,137 +146,150 @@ export default async function ManageEventStaffPage({
         表示メンバー、内部メンバー、付与されている操作範囲を確認できます。
       </p>
 
-      {isAdmin ? (
-        <div style={{ marginTop: 14 }}>
-          <Link
-            href={`/admin/events/${id}/staff`}
-            className="fn-btn fn-btn-ghost fn-btn-sm"
-          >
-            <Icon name="settings" size={11} aria-hidden /> 管理画面で編集
-          </Link>
-        </div>
-      ) : null}
+      {canManageMembers ? (
+        <section
+          style={{
+            marginTop: 18,
+            padding: "20px 22px",
+            background: "var(--bg-surface)",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: "var(--radius-md)",
+          }}
+        >
+          <EventStaffManager
+            eventId={ev.id}
+            editors={editors}
+            collaborators={Array.from(collabMap.values())}
+          />
+        </section>
+      ) : (
+        <>
+          <p className="fn-muted fn-text-sm" style={{ marginTop: 14 }}>
+            あなたの権限ではイベント管理者の編集はできません。現在の登録内容のみ表示しています。
+          </p>
 
-      <table className="fn-table" style={{ marginTop: 14 }}>
-        <thead>
-          <tr>
-            <th>名前</th>
-            <th>役割</th>
-            <th>公開</th>
-            <th>権限</th>
-            <th>承認</th>
-            <th>備考</th>
-          </tr>
-        </thead>
-        <tbody>
-          {staff.length === 0 ? (
+          <FnTable style={{ marginTop: 14 }}>
+            <thead>
+              <tr>
+                <th>名前</th>
+                <th>役割</th>
+                <th>公開</th>
+                <th>権限</th>
+                <th>承認</th>
+                <th>備考</th>
+              </tr>
+            </thead>
+            <tbody>
+              {staff.length === 0 ? (
             <tr>
               <td colSpan={6} style={{ padding: 16, textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
                 スタッフは登録されていません。
               </td>
             </tr>
-          ) : (
-            staff.map((s) => {
-              const keys = permissionMap.get(s.id)?.filter((p) => p.allowed === 1) ?? [];
-              return (
-                <tr key={s.id}>
-                  <td>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      {s.icon_url ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={s.icon_url}
-                          alt=""
-                          width={28}
-                          height={28}
-                          style={{ borderRadius: 999, objectFit: "cover" }}
-                        />
-                      ) : (
-                        <span
-                          style={{
-                            width: 28,
-                            height: 28,
-                            borderRadius: 999,
-                            display: "grid",
-                            placeItems: "center",
-                            background: "var(--bg-elevated)",
-                            color: "var(--text-muted)",
-                          }}
-                        >
-                          <Icon name="user" size={13} aria-hidden />
-                        </span>
-                      )}
-                      <div>
-                        {s.x_user_id ? (
-                          <Link href={`/user/${s.x_user_id}`} style={{ fontWeight: 600 }}>
-                            {s.x_name ?? s.display_name}
-                          </Link>
-                        ) : (
-                          <strong>{s.display_name}</strong>
-                        )}
-                        <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "monospace" }}>
-                          {s.x_user_id ? `@${s.x_user_id}` : s.discord_user_id ?? s.id}
+              ) : (
+                staff.map((s) => {
+                  const keys = permissionMap.get(s.id)?.filter((p) => p.allowed === 1) ?? [];
+                  return (
+                    <tr key={s.id}>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          {s.icon_url ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={s.icon_url}
+                              alt=""
+                              width={28}
+                              height={28}
+                              style={{ borderRadius: 999, objectFit: "cover" }}
+                            />
+                          ) : (
+                            <span
+                              style={{
+                                width: 28,
+                                height: 28,
+                                borderRadius: 999,
+                                display: "grid",
+                                placeItems: "center",
+                                background: "var(--bg-elevated)",
+                                color: "var(--text-muted)",
+                              }}
+                            >
+                              <Icon name="user" size={13} aria-hidden />
+                            </span>
+                          )}
+                          <div>
+                            {s.x_user_id ? (
+                              <Link href={`/user/${s.x_user_id}`} style={{ fontWeight: 600 }}>
+                                {s.x_name ?? s.display_name}
+                              </Link>
+                            ) : (
+                              <strong>{s.display_name}</strong>
+                            )}
+                            <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "monospace" }}>
+                              {s.x_user_id ? `@${s.x_user_id}` : s.discord_user_id ?? s.id}
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    </div>
-                  </td>
-                  <td>
-                    <span className={`fn-badge ${s.role === "representative" ? "fn-badge-accent" : "fn-badge-soft"}`}>
-                      {s.role === "representative" ? "代表" : s.role === "editor" ? "運営" : "スタッフ"}
-                    </span>
-                  </td>
-                  <td>
-                    {s.is_public === 1 ? (
-                      <>
-                        <span className="fn-badge fn-badge-soft">公開</span>
-                        {s.public_role_label ? (
-                          <div style={{ marginTop: 4, fontSize: 11, color: "var(--text-muted)" }}>
-                            {s.public_role_label}
+                      </td>
+                      <td>
+                        <span className={`fn-badge ${s.role === "representative" ? "fn-badge-accent" : "fn-badge-soft"}`}>
+                          {s.role === "representative" ? "代表" : s.role === "editor" ? "運営" : "スタッフ"}
+                        </span>
+                      </td>
+                      <td>
+                        {s.is_public === 1 ? (
+                          <>
+                            <span className="fn-badge fn-badge-soft">公開</span>
+                            {s.public_role_label ? (
+                              <div style={{ marginTop: 4, fontSize: 11, color: "var(--text-muted)" }}>
+                                {s.public_role_label}
+                              </div>
+                            ) : null}
+                          </>
+                        ) : (
+                          <span className="fn-badge fn-badge-neutral">非公開</span>
+                        )}
+                      </td>
+                      <td style={{ maxWidth: 260 }}>
+                        {keys.length === 0 ? (
+                          <span className="fn-muted fn-text-sm">なし</span>
+                        ) : (
+                          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                            {keys.map((p) => (
+                              <span key={p.id} className="fn-badge fn-badge-soft">
+                                {COLLABORATOR_PERMISSION_LABELS[
+                                  p.permission_key as keyof typeof COLLABORATOR_PERMISSION_LABELS
+                                ]?.label ?? p.permission_key}
+                              </span>
+                            ))}
                           </div>
-                        ) : null}
-                      </>
-                    ) : (
-                      <span className="fn-badge fn-badge-neutral">非公開</span>
-                    )}
-                  </td>
-                  <td style={{ maxWidth: 260 }}>
-                    {keys.length === 0 ? (
-                      <span className="fn-muted fn-text-sm">なし</span>
-                    ) : (
-                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                        {keys.map((p) => (
-                          <span key={p.id} className="fn-badge fn-badge-soft">
-                            {COLLABORATOR_PERMISSION_LABELS[
-                              p.permission_key as keyof typeof COLLABORATOR_PERMISSION_LABELS
-                            ]?.label ?? p.permission_key}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </td>
-                  <td style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                    {s.approved_at ? (
-                      <>
-                        <div>{formatUnix(s.approved_at, { dateOnly: true })}</div>
-                        {s.approved_by_user_id ? (
-                          <div style={{ color: "var(--text-muted)" }}>
-                            by {s.approved_by_user_id}
-                          </div>
-                        ) : null}
-                      </>
-                    ) : (
-                      "-"
-                    )}
-                  </td>
-                  <td style={{ fontSize: 11, color: "var(--text-muted)", maxWidth: 220 }}>
-                    {s.internal_note ?? "-"}
-                  </td>
-                </tr>
-              );
-            })
-          )}
-        </tbody>
-      </table>
+                        )}
+                      </td>
+                      <td style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                        {s.approved_at ? (
+                          <>
+                            <div>{formatUnix(s.approved_at, { dateOnly: true })}</div>
+                            {s.approved_by_user_id ? (
+                              <div style={{ color: "var(--text-muted)" }}>
+                                by {s.approved_by_user_id}
+                              </div>
+                            ) : null}
+                          </>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
+                      <td style={{ fontSize: 11, color: "var(--text-muted)", maxWidth: 220 }}>
+                        {s.internal_note ?? "-"}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </FnTable>
+        </>
+      )}
     </div>
   );
 }

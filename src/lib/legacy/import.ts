@@ -13,19 +13,21 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
+  type NotificationBehavior,
+  resolveNotificationBehaviorFromImportOptions,
+  runWithNotificationBehavior,
+} from "@/lib/notifications/context";
+import {
   events,
   eventStaff,
-  eventStaffPermissions,
   historyLogs,
   videoEvents,
   videoMembers,
-  videoStats,
   videoYoutubeMetadata,
   videos,
   xUsers,
 } from "@/lib/db/schema";
-import { COLLABORATOR_PERMISSION_KEYS } from "@/lib/constants/collaborator-permissions";
-import { replaceVideoSoftwareLabels } from "@/lib/db/software";
+import { enqueueStaticRebuildMany } from "@/lib/staticRebuild/enqueue";
 import {
   detectLegacyKind,
   normalizeEventInfo,
@@ -36,6 +38,17 @@ import {
   type LegacyVideoResult,
   type LegacyXUserRow,
 } from "./normalize";
+import {
+  buildUsedSoftwareJson,
+  defaultStaticRebuildStrategy,
+  type ImportedEventFlags,
+  type LegacyImportMode,
+  legacyImportDbReductionNotes,
+  legacyStaffPermissionKeysJson,
+  planStaticRebuildEnqueues,
+  staticRebuildTargetLabels,
+  type StaticRebuildStrategy,
+} from "./importState";
 
 // ============================================================
 // 入出力型
@@ -43,14 +56,30 @@ import {
 
 export type ConflictStrategy = "skip" | "update" | "merge";
 
+export type { LegacyImportMode, StaticRebuildStrategy } from "./importState";
+
+export type { NotificationBehavior } from "@/lib/notifications/context";
+
 export interface LegacyImportOptions {
   /** イベント / 動画それぞれの衝突解決方針 */
   events?: ConflictStrategy;
   videos?: ConflictStrategy;
+  /** 旧データ取り込み時に Discord 通知を送るか (デフォルト false) */
+  sendNotifications?: boolean;
+  /** 通知の振る舞い (デフォルト none) */
+  notificationBehavior?: NotificationBehavior;
   /** ドライラン (DB を変更しない) */
   dryRun?: boolean;
   /** 既存 X ID が pending 状態の時に名前を更新するか */
   updateXUsers?: boolean;
+  /** 旧イベントをどの状態で取り込むか。デフォルト archive */
+  importMode?: LegacyImportMode;
+  /** active_event / preserve のときだけ受付中として扱う */
+  forceEntryOpen?: boolean;
+  /** インポート後に静的 JSON 再生成キューへ積むか。デフォルト true */
+  enqueueStaticRebuild?: boolean;
+  /** 大量インポート時のキュー粒度。未指定時は importMode から推定 */
+  staticRebuildStrategy?: StaticRebuildStrategy;
 }
 
 export interface LegacyPreviewRow {
@@ -60,6 +89,9 @@ export interface LegacyPreviewRow {
   status: "create" | "update" | "skip" | "merge";
   conflict: boolean;
   warnings: string[];
+  importedState?: ImportedEventFlags & { importMode: LegacyImportMode };
+  staticRebuildTargets?: string[];
+  dbReductionNotes?: string[];
 }
 
 export interface LegacyImportResult {
@@ -156,6 +188,11 @@ function toVideoInsertValues(
     scheduling_type: vi.scheduling_type,
     scheduled_time: vi.scheduled_time,
     visibility_status: vi.status,
+    used_software_json: buildUsedSoftwareJson(vi.used_software),
+    app_like_count: 0,
+    score: 0,
+    trending_view_count_24h: 0,
+    score_updated_at: null,
     created_at: vi.created_at ?? now,
     updated_at: now,
   };
@@ -166,18 +203,6 @@ async function ensureImportedVideoDerivedRows(
   vi: LegacyNormalizedVideo,
   now: number,
 ): Promise<void> {
-  await db
-    .insert(videoStats)
-    .values({
-      video_id: vi.id,
-      app_view_count: 0,
-      app_like_count: 0,
-      trending_view_count_24h: 0,
-      score: 0,
-      updated_at: now,
-    })
-    .onConflictDoNothing();
-
   await db
     .insert(videoYoutubeMetadata)
     .values({
@@ -246,13 +271,43 @@ export function splitLegacyPayload(raw: unknown): {
 // 解析 (DB は読み取りのみ)
 // ============================================================
 
+function resolveImportOptions(options: LegacyImportOptions = {}) {
+  const importMode = options.importMode ?? "archive";
+  const dryRun = options.dryRun === true;
+  const staticRebuildStrategy =
+    options.staticRebuildStrategy ??
+    defaultStaticRebuildStrategy(importMode, dryRun);
+  const enqueueStaticRebuild = options.enqueueStaticRebuild !== false && !dryRun;
+  return {
+    importMode,
+    forceEntryOpen: options.forceEntryOpen === true,
+    staticRebuildStrategy,
+    enqueueStaticRebuild,
+    now: Math.floor(Date.now() / 1000),
+  };
+}
+
+function normalizeEventsForImport(
+  eventInputs: LegacyEventInput[],
+  resolved: ReturnType<typeof resolveImportOptions>,
+): LegacyEventResult[] {
+  return eventInputs.map((e) =>
+    normalizeEventInfo(e, {
+      importMode: resolved.importMode,
+      now: resolved.now,
+      forceEntryOpen: resolved.forceEntryOpen,
+    }),
+  );
+}
+
 export async function analyzeLegacyPayload(
   raw: unknown,
-  _options: LegacyImportOptions = {},
+  options: LegacyImportOptions = {},
 ): Promise<LegacyImportResult> {
   const counts = emptyCounts();
   const preview: LegacyPreviewRow[] = [];
   const errors: string[] = [];
+  const resolved = resolveImportOptions(options);
 
   const { eventInputs, videoInputs } = splitLegacyPayload(raw);
   if (eventInputs.length === 0 && videoInputs.length === 0) {
@@ -266,9 +321,7 @@ export async function analyzeLegacyPayload(
     };
   }
 
-  const normalizedEvents: LegacyEventResult[] = eventInputs.map((e) =>
-    normalizeEventInfo(e),
-  );
+  const normalizedEvents = normalizeEventsForImport(eventInputs, resolved);
   const normalizedVideos: LegacyVideoResult[] = videoInputs.map((v) =>
     normalizeLegacyVideo(v),
   );
@@ -332,6 +385,11 @@ export async function analyzeLegacyPayload(
       continue;
     }
     const exists = existingEventIds.has(e.event.id);
+    const flags = {
+      is_active: e.event.is_active,
+      is_entry_open: e.event.is_entry_open,
+      is_archived: e.event.is_archived,
+    };
     preview.push({
       kind: "event",
       id: e.event.id,
@@ -339,6 +397,12 @@ export async function analyzeLegacyPayload(
       status: exists ? "update" : "create",
       conflict: exists,
       warnings: e.warnings,
+      importedState: { ...flags, importMode: resolved.importMode },
+      staticRebuildTargets: staticRebuildTargetLabels(
+        resolved.staticRebuildStrategy,
+        [e.event.id],
+      ),
+      dbReductionNotes: legacyImportDbReductionNotes("event"),
     });
     if (exists) counts.events.update += 1;
     else counts.events.create += 1;
@@ -363,6 +427,7 @@ export async function analyzeLegacyPayload(
       status: exists ? "update" : "create",
       conflict: exists,
       warnings: v.warnings,
+      dbReductionNotes: legacyImportDbReductionNotes("video"),
     });
     if (exists) counts.videos.update += 1;
     else counts.videos.create += 1;
@@ -395,8 +460,21 @@ export async function applyLegacyImport(
   options: LegacyImportOptions,
   operatorDiscordId: string,
 ): Promise<LegacyImportResult> {
+  const notificationBehavior =
+    resolveNotificationBehaviorFromImportOptions(options);
+  return runWithNotificationBehavior(notificationBehavior, async () => {
+    return applyLegacyImportInner(raw, options, operatorDiscordId);
+  });
+}
+
+async function applyLegacyImportInner(
+  raw: unknown,
+  options: LegacyImportOptions,
+  operatorDiscordId: string,
+): Promise<LegacyImportResult> {
   const strategyEvents: ConflictStrategy = options.events ?? "skip";
   const strategyVideos: ConflictStrategy = options.videos ?? "skip";
+  const resolved = resolveImportOptions(options);
 
   // まず解析だけ実行してプレビューを共有 (件数は最後に上書き)
   const analyzed = await analyzeLegacyPayload(raw, options);
@@ -417,10 +495,12 @@ export async function applyLegacyImport(
   const errors: string[] = [...analyzed.errors];
 
   const { eventInputs, videoInputs } = splitLegacyPayload(raw);
-  const normalizedEvents = eventInputs.map((e) => normalizeEventInfo(e));
+  const normalizedEvents = normalizeEventsForImport(eventInputs, resolved);
   const normalizedVideos = videoInputs.map((v) => normalizeLegacyVideo(v));
 
-  const now = Math.floor(Date.now() / 1000);
+  const now = resolved.now;
+  const importedEventIds: string[] = [];
+  const importedVideoIds: string[] = [];
 
   // ---------------------------------------------------------
   // 1) X ID (未承認プレースホルダー) を先に upsert
@@ -523,11 +603,19 @@ export async function applyLegacyImport(
           // editors は merge/update 共通で「足りないものを補う」(既存は保護)
           await upsertEventEditors(db, ev.id, e.editors, strategyEvents);
         }
+        importedEventIds.push(ev.id);
       } else {
-        await db.insert(events).values({ ...ev, created_at: now, updated_at: now });
+        await db.insert(events).values({
+          ...ev,
+          public_api_enabled: 0,
+          public_api_updated_at: null,
+          created_at: now,
+          updated_at: now,
+        });
         counts.events.create += 1;
         await upsertEventEditors(db, ev.id, e.editors, "create");
       }
+      importedEventIds.push(ev.id);
       counts.editors += e.editors.length;
     } catch (err) {
       counts.events.failed += 1;
@@ -547,7 +635,6 @@ export async function applyLegacyImport(
     const exists = (
       await db.select({ id: videos.id }).from(videos).where(eq(videos.id, vi.id)).limit(1)
     )[0];
-    const usedSoftware = vi.used_software;
     const videoValues = toVideoInsertValues(vi, operatorDiscordId, now);
 
     try {
@@ -598,7 +685,7 @@ export async function applyLegacyImport(
         await insertVideoMembers(db, vi.id, v.members);
       }
       await ensureImportedVideoDerivedRows(db, vi, now);
-      await replaceVideoSoftwareLabels(db, vi.id, usedSoftware);
+      importedVideoIds.push(vi.id);
 
       // video_events (m:n): legacy eventid may contain multiple comma-separated ids.
       // The first id is stored as videos.primary_event_id; all ids are linked here.
@@ -619,7 +706,28 @@ export async function applyLegacyImport(
   }
 
   // ---------------------------------------------------------
-  // 4) 監査ログ (long_audit)
+  // 4) 静的 JSON 再生成キュー
+  // ---------------------------------------------------------
+  if (resolved.enqueueStaticRebuild) {
+    const xIdsForRebuild = Array.from(xIdMap.keys());
+    const rebuildItems = planStaticRebuildEnqueues({
+      strategy: resolved.staticRebuildStrategy,
+      importMode: resolved.importMode,
+      eventIds: [...new Set(importedEventIds)],
+      videoIds: [...new Set(importedVideoIds)],
+      xUserIds: xIdsForRebuild,
+    });
+    if (rebuildItems.length > 0) {
+      try {
+        await enqueueStaticRebuildMany(db, rebuildItems);
+      } catch (e) {
+        errors.push(`static_rebuild_queue: ${stringifyError(e)}`);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------
+  // 5) 監査ログ (long_audit)
   // ---------------------------------------------------------
   try {
     await db.insert(historyLogs).values({
@@ -630,6 +738,9 @@ export async function applyLegacyImport(
         options: {
           events: strategyEvents,
           videos: strategyVideos,
+          importMode: resolved.importMode,
+          staticRebuildStrategy: resolved.staticRebuildStrategy,
+          forceEntryOpen: resolved.forceEntryOpen,
         },
         counts,
         errorCount: errors.length,
@@ -685,12 +796,6 @@ async function upsertEventEditors(
   if (editors.length === 0) return;
 
   if (mode === "update") {
-    await db.run(sql`
-      DELETE FROM event_staff_permissions
-      WHERE event_staff_id IN (
-        SELECT id FROM event_staff WHERE event_id = ${eventId}
-      )
-    `);
     await db.delete(eventStaff).where(eq(eventStaff.event_id, eventId));
   }
 
@@ -727,21 +832,17 @@ async function upsertEventEditors(
           internal_note: null,
           approved_by_user_id: null,
           approved_at: null,
+          permission_keys_json: legacyStaffPermissionKeysJson(
+            ed.is_representative_candidate,
+          ),
         })
         .onConflictDoNothing();
-      for (const key of COLLABORATOR_PERMISSION_KEYS) {
-        await db
-          .insert(eventStaffPermissions)
-          .values({
-            id: `legacy_esp_${eventId}_${ed.x_user_id}_${key}`,
-            event_staff_id: staffId,
-            permission_key: key,
-            allowed: 1,
-          })
-          .onConflictDoNothing();
-      }
-    } catch {
-      // 個別失敗は警告対象だが、ここで全体を倒さない
+    } catch (e) {
+      console.warn(
+        "[legacy-import] event_staff insert skipped",
+        { eventId, x_user_id: ed.x_user_id },
+        e instanceof Error ? e.message : e,
+      );
     }
   }
 }

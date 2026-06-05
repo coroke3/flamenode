@@ -14,26 +14,26 @@ import {
   xUsers,
 } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
+import { JsonLd } from "@/components/seo/JsonLd";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 import { normalizeXId } from "@/lib/utils/xid";
 import { resolveXUserIcon } from "@/lib/db/xIconResolution";
 import { Pagination } from "@/components/ui/Pagination";
 import { clampPaging, totalPagesFor } from "@/lib/utils/sql";
 import { formatUnix } from "@/lib/utils/format";
+import { absoluteUrl, buildPageMetadata, compactText } from "@/lib/seo";
+import { coalescedVideoScore } from "@/lib/db/videoScoreSql";
 
 export const dynamic = "force-dynamic";
 
 const WORKS_PAGE_SIZE = 24;
 const COLLAB_PAGE_SIZE = 24;
 
-type CreatorTab = "works" | "events" | "profile";
-
 interface Props {
   params: Promise<{ id: string }>;
   searchParams?: Promise<{
     worksPage?: string;
     collabPage?: string;
-    tab?: string;
     event?: string;
   }>;
 }
@@ -76,11 +76,18 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       .from(xUsers)
       .where(sql`lower(${xUsers.id}) = ${id}`)
       .limit(1);
-    if (u[0]) return { title: u[0].x_name };
+    if (u[0]) {
+      return {
+        title: u[0].x_name,
+        description: u[0].profile_text,
+        image: u[0].icon_url,
+      };
+    }
 
     const fallback = await db
       .select({
         name: sql<string>`COALESCE(${videos.creator_display_name}, ${videos.creator_x_user_id})`,
+        icon_url: videos.creator_icon_url,
       })
       .from(videos)
       .where(
@@ -91,14 +98,20 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       )
       .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
       .limit(1);
-    return { title: fallback[0]?.name ?? id };
+    return {
+      title: fallback[0]?.name ?? id,
+      description: null,
+      image: fallback[0]?.icon_url ?? null,
+    };
   });
-  return data ?? { title: id };
-}
-
-function resolveTab(value: string | undefined): CreatorTab {
-  if (value === "events" || value === "profile") return value;
-  return "works";
+  return buildPageMetadata({
+    title: `${data?.title ?? id} - クリエイター`,
+    description:
+      data?.description ??
+      `FlameNodeで公開されている${data?.title ?? id}の作品と参加イベント。`,
+    path: `/user/${id}`,
+    image: data?.image,
+  });
 }
 
 function format2(value: number): string {
@@ -111,10 +124,6 @@ function formatScore(value: number): string {
 
 function dateOnly(value: number | null | undefined): string {
   return value ? formatUnix(value, { dateOnly: true }) : "-";
-}
-
-function tabHref(basePath: string, tab: CreatorTab): string {
-  return tab === "works" ? basePath : `${basePath}?tab=${tab}`;
 }
 
 function worksHref(basePath: string, eventId?: string): string {
@@ -130,7 +139,6 @@ export default async function UserPage({
 }: Props): Promise<React.ReactElement> {
   const id = normalizeXId((await params).id);
   const sp = (await searchParams) ?? {};
-  const activeTab = resolveTab(sp.tab);
   const selectedEventId =
     typeof sp.event === "string" && sp.event.trim().length > 0
       ? sp.event.trim()
@@ -206,7 +214,7 @@ export default async function UserPage({
       scheduled_time: videos.scheduled_time,
       status: videos.visibility_status,
       part: videos.part,
-      score: sql<number>`COALESCE(${videoStats.score}, 0)`,
+      score: coalescedVideoScore,
     };
 
     const ownVideosRaw = selectedEventId
@@ -283,7 +291,7 @@ export default async function UserPage({
         scheduled_time: videos.scheduled_time,
         status: videos.visibility_status,
         part: videos.part,
-        score: sql<number>`COALESCE(${videoStats.score}, 0)`,
+        score: coalescedVideoScore,
       })
       .from(videos)
       .innerJoin(videoMembers, eq(videos.id, videoMembers.video_id))
@@ -306,7 +314,7 @@ export default async function UserPage({
     const scoreRows = await db
       .select({
         id: videos.id,
-        score: sql<number>`COALESCE(${videoStats.score}, 0)`,
+        score: coalescedVideoScore,
         latest_time: sql<number | null>`MAX(COALESCE(${videos.scheduled_time}, ${videos.created_at}))`,
       })
       .from(videos)
@@ -410,13 +418,27 @@ export default async function UserPage({
   const profileIcon = user.icon_url ?? null;
   const profileName = user.x_name || user.id;
   const totalWorks = ownTotal + collabTotal;
+  const personJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Person",
+    name: profileName,
+    alternateName: `@${user.id}`,
+    description: compactText(user.profile_text),
+    image: profileIcon ? absoluteUrl(profileIcon) : undefined,
+    url: absoluteUrl(`/user/${user.id}`),
+    sameAs: [
+      `https://x.com/${user.id}`,
+      user.youtube_channel_url,
+    ].filter(Boolean),
+  };
 
   return (
-    <div className={styles.page}>
+    <div className={`fn-public-container fn-page ${styles.page}`}>
+      <JsonLd data={personJsonLd} />
       <section className={styles.profile}>
-        <Link href="/user" className={styles.backLink}>
-          ← クリエイター一覧
-        </Link>
+        <p className={`fn-page-back ${styles.profileBack}`}>
+          <Link href="/user">← クリエイター一覧</Link>
+        </p>
         <Link href="/user" className={styles.closeLink} aria-label="閉じる">
           ×
         </Link>
@@ -429,7 +451,7 @@ export default async function UserPage({
           </span>
         )}
         <div className={styles.profileBody}>
-          <h1 className={styles.name}>{profileName}</h1>
+          <h1 className={`fn-profile-name ${styles.name}`}>{profileName}</h1>
           <div className={styles.socialLine}>
             <a href={`https://x.com/${user.id}`} target="_blank" rel="noopener noreferrer">
               X @ {user.id}
@@ -465,34 +487,30 @@ export default async function UserPage({
             <dt>最新投稿</dt>
             <dd>{dateOnly(latestPostAt)}</dd>
           </div>
+          {user.creative_start_date ? (
+            <div>
+              <dt>映像歴</dt>
+              <dd>{dateOnly(user.creative_start_date)}〜</dd>
+            </div>
+          ) : null}
+          {user.approval_requested_at ? (
+            <div>
+              <dt>登録</dt>
+              <dd>{dateOnly(user.approval_requested_at)}</dd>
+            </div>
+          ) : null}
         </dl>
       </section>
 
-      <nav className={styles.tabs} aria-label="クリエイターページ">
-        <Link
-          href={tabHref(basePath, "works")}
-          className={activeTab === "works" ? styles.tabActive : styles.tab}
-        >
-          作品 <small>{ownTotal}</small>
-        </Link>
-        <Link
-          href={tabHref(basePath, "events")}
-          className={activeTab === "events" ? styles.tabActive : styles.tab}
-        >
-          参加履歴 <small>{eventParticipationRows.length}</small>
-        </Link>
-        <Link
-          href={tabHref(basePath, "profile")}
-          className={activeTab === "profile" ? styles.tabActive : styles.tab}
-        >
-          プロフィール
-        </Link>
-      </nav>
-
-      {activeTab === "works" ? (
-        <section className={styles.content}>
+      <section className={styles.content} aria-labelledby="creator-works-heading">
+        <h2 id="creator-works-heading" className={styles.sectionTitle}>
+          作品
+        </h2>
           {eventOptions.length > 0 ? (
-            <div className={styles.filters} aria-label="イベント絞り込み">
+            <div
+              className={`${styles.filters} fn-chip-scroll`}
+              aria-label="イベント絞り込み"
+            >
               <Link
                 href={worksHref(basePath)}
                 className={!selectedEventId ? styles.filterActive : styles.filter}
@@ -563,110 +581,51 @@ export default async function UserPage({
               />
             </section>
           ) : null}
-        </section>
-      ) : null}
+      </section>
 
-      {activeTab === "events" ? (
-        <section className={styles.content}>
-          {eventParticipationRows.length === 0 ? (
-            <div className="fn-empty">
-              <Icon name="info" size={20} aria-hidden />
-              <p className="fn-empty-message">参加履歴はまだありません。</p>
-            </div>
-          ) : (
-            <div className={styles.eventList}>
-              {eventParticipationRows.map((event, index) => (
-                <Link
-                  key={event.id}
-                  href={`/event/${event.id}`}
-                  className={styles.eventRow}
-                >
-                  <span className={styles.eventIndex}>{format2(index + 1)}</span>
-                  <div className={styles.eventBody}>
-                    <div className={styles.eventTitleRow}>
-                      <h2>{event.title}</h2>
-                      <span className={styles.eventBadge}>
-                        {event.roles?.includes("creator") ? "参加中" : "参加済み"}
-                      </span>
-                    </div>
-                    {event.explanation ? <p>{event.explanation}</p> : null}
-                    <span className={styles.eventMeta}>
-                      {event.video_count} works
+      <section
+        className={styles.eventsSection}
+        aria-labelledby="creator-events-heading"
+      >
+        <h2 id="creator-events-heading" className={styles.sectionTitle}>
+          参加イベント
+        </h2>
+        {eventParticipationRows.length === 0 ? (
+          <p className={styles.eventsEmpty}>参加履歴はまだありません。</p>
+        ) : (
+          <div className={styles.eventList}>
+            {eventParticipationRows.map((event, index) => (
+              <Link
+                key={event.id}
+                href={`/event/${event.id}`}
+                className={styles.eventRow}
+              >
+                <span className={styles.eventIndex}>{format2(index + 1)}</span>
+                <div className={styles.eventBody}>
+                  <div className={styles.eventTitleRow}>
+                    <h3>{event.title}</h3>
+                    <span className={styles.eventBadge}>
+                      {event.roles?.includes("creator") ? "参加中" : "参加済み"}
                     </span>
                   </div>
-                  <span className={styles.eventDate}>
-                    {event.start_time
-                      ? event.end_time
-                        ? `${dateOnly(event.start_time)} - ${dateOnly(event.end_time)}`
-                        : dateOnly(event.start_time)
-                      : dateOnly(event.latest_time)}
-                    <Icon name="chevron-right" size={13} aria-hidden />
+                  {event.explanation ? <p>{event.explanation}</p> : null}
+                  <span className={styles.eventMeta}>
+                    {event.video_count} works
                   </span>
-                </Link>
-              ))}
-            </div>
-          )}
-        </section>
-      ) : null}
-
-      {activeTab === "profile" ? (
-        <section className={styles.profileContent}>
-          <div className={styles.profileBlock}>
-            <p className={styles.blockTitle}>プロフィール</p>
-            <dl className={styles.profileRows}>
-              <div>
-                <dt>活動名</dt>
-                <dd>{profileName}</dd>
-              </div>
-              <div>
-                <dt>X (Twitter)</dt>
-                <dd>𝕏 @{user.id}</dd>
-              </div>
-              {user.youtube_channel_url ? (
-                <div>
-                  <dt>YouTube</dt>
-                  <dd>{user.youtube_channel_url.replace(/^https?:\/\//, "")}</dd>
                 </div>
-              ) : null}
-              <div>
-                <dt>映像歴</dt>
-                <dd>
-                  {user.creative_start_date
-                    ? `${dateOnly(user.creative_start_date)} から`
-                    : "-"}
-                </dd>
-              </div>
-            </dl>
+                <span className={styles.eventDate}>
+                  {event.start_time
+                    ? event.end_time
+                      ? `${dateOnly(event.start_time)} - ${dateOnly(event.end_time)}`
+                      : dateOnly(event.start_time)
+                    : dateOnly(event.latest_time)}
+                  <Icon name="chevron-right" size={13} aria-hidden />
+                </span>
+              </Link>
+            ))}
           </div>
-          <div className={styles.profileBlock}>
-            <p className={styles.blockTitle}>FlameNode での活動</p>
-            <dl className={styles.profileRows}>
-              <div>
-                <dt>登録日</dt>
-                <dd>{dateOnly(user.approval_requested_at)}</dd>
-              </div>
-              <div>
-                <dt>参加イベント</dt>
-                <dd>{eventParticipationRows.length} 件</dd>
-              </div>
-              <div>
-                <dt>投稿作品</dt>
-                <dd>{ownTotal} 件</dd>
-              </div>
-              <div>
-                <dt>Active X ID</dt>
-                <dd>@{user.id}</dd>
-              </div>
-            </dl>
-          </div>
-          {user.profile_text ? (
-            <div className={styles.profileBlock}>
-              <p className={styles.blockTitle}>ひとこと</p>
-              <p className={styles.profileText}>{user.profile_text}</p>
-            </div>
-          ) : null}
-        </section>
-      ) : null}
+        )}
+      </section>
     </div>
   );
 }

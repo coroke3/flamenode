@@ -1,16 +1,9 @@
-.footer {
-  margin-top: 64px;
-  border-top: 1px solid var(--hairline);
-  background-color: transparent;
-}
+/* レイアウトは redesign-public.css の .fn-footer / .fn-footer-top に委譲 */
 
 .main {
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
-  width: min(100% - 40px, var(--content-max));
-  margin: 0 auto;
-  padding: 36px 16px 28px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 .brand {
@@ -54,36 +47,25 @@
   color: var(--accent-primary-strong);
 }
 
-.legal {
-  border-top: 1px solid var(--hairline);
-}
-
 .legalInner {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  width: min(100% - 40px, var(--content-max));
-  margin: 0 auto;
-  padding: 14px 16px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
   font-size: 11px;
   color: var(--text-muted);
 }
 
 @media (min-width: 768px) {
-  .main {
-    flex-direction: row;
-    align-items: flex-start;
-    gap: 48px;
-    padding: 44px 28px 36px;
-  }
-
   .column {
-    width: 180px;
+    width: auto;
   }
 
   .legalInner {
     flex-direction: row;
     justify-content: space-between;
-    padding: 18px 28px;
+    align-items: center;
   }
 }

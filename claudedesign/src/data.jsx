@@ -160,15 +160,18 @@ function buildSlotMatrix() {
 
 const SLOT_MATRIX = buildSlotMatrix();
 
-// Chapters for video detail
+// Chapters for video detail — each entry is a "chapter comment" (ChapterCommentItem)
+// fields: time, label, note, author, authorHandle, visibility, outOfRange
 const CHAPTERS = [
-  { time: 0,    label: "Open / 黒画面" },
-  { time: 18,   label: "導入 — 結節" },
-  { time: 47,   label: "Section A: drift" },
-  { time: 84,   label: "中盤 — 音と余白" },
-  { time: 122,  label: "Section B: pulse" },
-  { time: 165,  label: "観測点" },
-  { time: 198,  label: "Close" },
+  { time: 0,   label: "Open / 黒画面",         note: "無音から。最初の3秒は完全な黒。",          author: "halo / loop",   authorHandle: "halo_loop_v",   visibility: "public",  outOfRange: false },
+  { time: 18,  label: "導入 — 結節",            note: "街の明滅が呼吸と同期しはじめる箇所。",      author: "halo / loop",   authorHandle: "halo_loop_v",   visibility: "public",  outOfRange: false },
+  { time: 47,  label: "Section A: drift",      note: "ドリフトのカット繋ぎ。ここ好き。",          author: "frame index",   authorHandle: "frame_index__", visibility: "public",  outOfRange: false },
+  { time: 84,  label: "中盤 — 音と余白",         note: null,                                      author: "tsukimi_track", authorHandle: "tsukimi_track", visibility: "public",  outOfRange: false },
+  { time: 122, label: "Section B: pulse",      note: "脈動のリズムが映像に乗る。",                author: "凜・大塚",       authorHandle: "rin_otsuka_",  visibility: "public",  outOfRange: false },
+  { time: 150, label: "個人メモ: 色補正確認",    note: "本番前に LUT を再確認。",                  author: "halo / loop",   authorHandle: "halo_loop_v",   visibility: "private", outOfRange: false },
+  { time: 165, label: "観測点",                 note: "引きのカット。観測のための余白。",            author: "kosame",        authorHandle: "kosame_film",   visibility: "public",  outOfRange: false },
+  { time: 198, label: "Close",                 note: null,                                       author: "halo / loop",   authorHandle: "halo_loop_v",   visibility: "public",  outOfRange: false },
+  { time: 280, label: "（範囲外）EDテロップ案",   note: "尺が伸びた場合のED候補。",                author: "frame index",   authorHandle: "frame_index__", visibility: "public",  outOfRange: true  },
 ];
 
 const COMMENTS = [

@@ -8,11 +8,12 @@ import { requireSession } from "@/lib/auth/guard";
 import {
   events as eventsTable,
   slots as slotsTable,
-  xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { canEditEvent } from "@/lib/auth/ownership";
-import { Icon } from "@/components/ui/Icon";
-import { formatUnix } from "@/lib/utils/format";
+import { SlotBatchForm } from "@/components/admin/SlotBatchForm";
+import { SlotList } from "@/components/admin/SlotList";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
 
 export const dynamic = "force-dynamic";
 
@@ -80,11 +81,10 @@ export default async function ManageEventSlotsPage({
       status: slotsTable.status,
       display_name: slotsTable.display_name,
       x_user_id: slotsTable.x_user_id,
-      x_name: xUsersTable.x_name,
+      discord_user_id: slotsTable.discord_user_id,
       reservation_group_id: slotsTable.reservation_group_id,
     })
     .from(slotsTable)
-    .leftJoin(xUsersTable, eq(xUsersTable.id, slotsTable.x_user_id))
     .where(where)
     .orderBy(asc(slotsTable.start_time), asc(slotsTable.sort_order))
     .limit(500);
@@ -110,13 +110,28 @@ export default async function ManageEventSlotsPage({
         スロット運営: {ev.title}
       </h1>
       <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 12 }}>
-        {total} 件のスロットを表示します (最大 500)。読み取り専用。
+        枠の生成、空き枠整理、確保済み枠の解放をここで扱えます。{total} 件中、最大 500 件を表示します。
       </p>
+
+      <section
+        style={{
+          marginTop: 18,
+          padding: "20px 22px",
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border-subtle)",
+          borderRadius: "var(--radius-md)",
+        }}
+      >
+        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
+          一括生成 / 空き枠整理
+        </h2>
+        <SlotBatchForm eventId={ev.id} />
+      </section>
 
       <nav
         aria-label="状態フィルタ"
         style={{
-          marginTop: 16,
+          marginTop: 22,
           display: "flex",
           gap: 6,
           flexWrap: "wrap",
@@ -147,72 +162,53 @@ export default async function ManageEventSlotsPage({
         })}
       </nav>
 
-      <div style={{ marginTop: 14 }}>
-        {isAdmin ? (
-          <Link
-            href={`/admin/events/${id}/slots`}
-            className="fn-btn fn-btn-ghost fn-btn-sm"
-          >
-            <Icon name="settings" size={11} aria-hidden /> 管理者でスロット編集
-          </Link>
-        ) : null}
-      </div>
-
-      <table className="fn-table" style={{ marginTop: 14 }}>
-        <thead>
-          <tr>
-            <th>枠</th>
-            <th>状態</th>
-            <th>表示名</th>
-            <th>X ID</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr>
-              <td colSpan={4} style={{ padding: 16, textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
-                該当するスロットはありません。
-              </td>
-            </tr>
-          ) : (
-            rows.map((s) => (
-              <tr key={s.id}>
-                <td>
-                  {s.start_time ? (
-                    <span>
-                      {formatUnix(s.start_time)}
-                      {s.end_time ? ` - ${formatUnix(s.end_time, { timeOnly: true })}` : ""}
-                    </span>
-                  ) : (
-                    <span>{s.slot_label ?? `#${s.sort_order ?? "?"}`}</span>
-                  )}
-                </td>
-                <td>
-                  <span
-                    className={`fn-badge ${
-                      s.status === "submitted"
-                        ? "fn-badge-accent"
-                        : s.status === "reserved"
-                          ? "fn-badge-warning"
-                          : "fn-badge-soft"
-                    }`}
-                  >
-                    {s.status}
-                  </span>
-                </td>
-                <td>{s.display_name ?? "—"}</td>
-                <td style={{ fontFamily: "monospace", fontSize: 11 }}>
-                  {s.x_user_id ? (
-                    <Link href={`/user/${s.x_user_id}`}>@{s.x_user_id}</Link>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
+      <section
+        style={{
+          marginTop: 14,
+          padding: "20px 22px",
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border-subtle)",
+          borderRadius: "var(--radius-md)",
+        }}
+      >
+        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
+          枠一覧 ({rows.length})
+        </h2>
+        {total === 0 ? (
+          <EmptyState
+            tone="warning"
+            title="スロットはまだありません"
+            description="このイベントにはまだ投稿枠が設定されていません。上のフォームから一括生成してください。"
+            actions={[
+              ...(isAdmin
+                ? [
+                    {
+                      href: `/admin/events/${id}/slots`,
+                      label: "管理者用スロット編集へ",
+                      variant: "primary" as const,
+                    },
+                  ]
+                : [
+                    {
+                      href: `/manage/events/${id}`,
+                      label: "イベント運営トップへ",
+                      variant: "ghost" as const,
+                    },
+                    {
+                      href: `/event/${id}`,
+                      label: "公開ページを見る",
+                      variant: "ghost" as const,
+                    },
+                  ]),
+            ]}
+          />
+        ) : (
+          <SlotList
+            slots={rows}
+            slotPartGapSec={(ev.slot_part_gap_minutes ?? 15) * 60}
+          />
+        )}
+      </section>
     </div>
   );
 }

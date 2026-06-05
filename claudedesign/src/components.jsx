@@ -14,6 +14,7 @@ function Header({ page, onNav, lang, density }) {
   const acct = ACCOUNTS[activeAcct];
   const NAV = [
     { id: "top",     ja: "ホーム" },
+    { id: "recommend", ja: "おすすめ" },
     { id: "list",    ja: "作品" },
     { id: "events",  ja: "イベント" },
     { id: "creator", ja: "クリエイター" },
@@ -183,7 +184,6 @@ function Thumb({ video, ratio = "16/9" }) {
         background: `linear-gradient(135deg, hsl(${h} 40% 18%), hsl(${h2} 35% 10%))`
       }} />
       <div className="fn-thumb-grid" aria-hidden="true" />
-      <div className="fn-thumb-code fn-mono">{video.code}</div>
       <div className="fn-thumb-duration fn-mono">{video.duration}</div>
       <div className="fn-thumb-play" aria-hidden="true">
         <svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 2 L12 7 L3 12 Z" fill="currentColor"/></svg>
@@ -251,4 +251,26 @@ function Shelf({ children, ariaLabel }) {
   );
 }
 
-Object.assign(window, { Header, Footer, SectionHeader, Thumb, VideoCard, CreatorCard, Shelf });
+// ─── Admin Header (slim, no site nav) ────────────────────────────
+function AdminHeader({ onNav }) {
+  return (
+    <header className="fn-admin-topbar">
+      <button className="fn-admin-topbar-logo" onClick={() => onNav("top")} aria-label="FlameNode top">
+        <svg viewBox="0 0 693 840" height="20" fill="currentColor" aria-hidden="true">
+          <path d="M404 0L398 0L8 181L0 192L0 727L5 734L12 735L142 675L142 518L150 509L403 385L407 379L407 292L403 286L399 286L200 385L146 408L142 403L144 290L154 283L572 98L572 296L418 371L416 375L421 384L572 522L572 678L314 459L306 458L302 464L302 834L306 839L313 839L676 665L687 659L692 650L691 249L687 245L679 245L586 290L583 289L584 95L577 85L566 86L411 155L410 6Z"></path>
+        </svg>
+        <span className="fn-mono fn-admin-topbar-name">FlameNode</span>
+      </button>
+      <nav className="fn-admin-topbar-nav">
+        <button className="fn-admin-topbar-btn" onClick={() => onNav("admin")}>管理コンソール</button>
+        <button className="fn-admin-topbar-btn" onClick={() => onNav("manageTop")}>イベント運営</button>
+      </nav>
+      <div className="fn-admin-topbar-right">
+        <button className="fn-admin-topbar-btn" onClick={() => onNav("top")}>サイトへ →</button>
+        <button className="fn-admin-topbar-btn" onClick={() => onNav("dashboard")}>マイページ</button>
+      </div>
+    </header>
+  );
+}
+
+Object.assign(window, { Header, Footer, AdminHeader, SectionHeader, Thumb, VideoCard, CreatorCard, Shelf });

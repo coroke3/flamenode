@@ -13,6 +13,9 @@
 4. [Public API 漏洩検査](#4-public-api-漏洩検査)
 5. [DB Legacy 検査](#5-db-legacy-検査)
 6. [管理者向け操作メモ](#6-管理者向け操作メモ)
+7. [Discord 通知運用方針](#7-discord-通知運用方針)
+8. [DB削減後の旧データインポート方針](#8-db削減後の旧データインポート方針)
+9. [関連ドキュメント](#9-関連ドキュメント)
 
 ---
 
@@ -335,7 +338,40 @@ SELECT status, COUNT(*) FROM notification_outbox
 
 ---
 
-## 7. 関連ドキュメント
+## 7. Discord 通知運用方針
+
+- 一般ユーザー向け Discord 通知の正本は **`notification_outbox`** とする
+- **Discord API への送信は `notification-dispatcher` Worker のみ**（Server Action / リマインド処理から直接送らない）
+- 締切前リマインドは **outbox への enqueue のみ**。実送信は dispatcher に任せる
+- 1 回の dispatcher / reminder 処理は **最大 50 件**
+- **`dedupe_key`** で pending / processing / sent の重複を防ぐ（failed / cancelled は再送可）
+- **legacy import / bulk import では通知しない**（`sendNotifications=false` / `notificationBehavior=none` がデフォルト）
+- failed は **`/admin/notifications`** から手動リトライ・キャンセル・強制再送できる
+- **`static_rebuild_queue` と責務を分ける**（dispatcher は outbox のみ、json-generator はキューのみ）
+- 通知ログを **KV に保存しない**（状態は D1 `notification_outbox`、cost guard 等のみ KV）
+
+---
+
+## 8. DB削減後の旧データインポート方針
+
+- 旧イベントはデフォルト **archive** モードで取り込む（管理画面 `/admin/import` の「取り込みモード」）
+- すべてのイベントを `is_active=1` にしない。過去イベントは `is_archived=1` として保存する
+- `api_endpoints` は作らず、`events.public_api_enabled` を使う（インポート時は 0）
+- `video_stats` は作らず、`videos` の統計列（`app_like_count` / `score` 等）を使う
+- `video_youtube_metadata` は YouTube 同期のため維持し、インポート時も作成する
+- `video_softwares` は作らず、`videos.used_software_json` に統合する
+- `event_staff_permissions` は作らず、`event_staff.permission_keys_json` に統合する
+- `announcements` は作らない（必要なら `system_settings.announcements_json` を管理画面から登録）
+- `cost_usage_snapshots` は D1 に保存せず KV へ逃がす（インポート処理では書かない）
+- `user_tos_consents` は利用規約同意履歴のため維持する
+- インポート後の静的 JSON 再生成は `static_rebuild_queue` に積む
+- 大量インポート時は **event** 単位の再生成を基本とし、動画単位の full は明示選択時のみ
+
+ローカル開発では `npm run db:local-apply` または Next 起動時の instrumentation で `0024_legacy_import_db_reduction_prep.sql` を適用する。
+
+---
+
+## 9. 関連ドキュメント
 
 - 設計正本: `.claude/flamenode/source/flamenode_final_detailed_design.md`
 - 要求マップ: `.claude/flamenode/requirements-map.md`

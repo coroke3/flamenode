@@ -172,13 +172,13 @@ export default async function UserListPage({
   };
 
   return (
-    <div className={`fn-public-container ${styles.page}`}>
-      <header className={styles.header}>
-        <div>
-          <p className={styles.eyebrow}>CREATOR</p>
-          <h1 className={styles.title}>クリエイター一覧</h1>
+    <div className={`fn-public-container fn-page ${styles.page}`}>
+      <header className="fn-page-head fn-page-head--split">
+        <div className="fn-page-head-main">
+          <span className="fn-eyebrow">CREATOR</span>
+          <h1 className="fn-display fn-page-title">クリエイター一覧</h1>
         </div>
-        <p className={styles.lead}>
+        <p className="fn-jp fn-page-lead">
           FlameNode に参加しているクリエイターを、作品数や名前から探せます。
         </p>
       </header>

@@ -26,20 +26,6 @@ function VideoDetail({ onNav, lang, selectedVideo }) {
   return (
     <main className="fn-main" data-screen-label="VideoDetail">
       <div className="fn-vd">
-        {/* ── Header strip ─────────────────────────── */}
-        <div className="fn-wrap fn-vd-header">
-          <div className="fn-vd-breadcrumb fn-mono">
-            <span>イベント</span><span>›</span>
-            <span>{event.code}</span><span>›</span>
-            <span style={{ color: "var(--text-primary)" }}>{video.code}</span>
-          </div>
-          <div className="fn-vd-actions">
-            <button className="fn-btn" data-size="sm" data-variant="ghost">共有</button>
-            <button className="fn-btn" data-size="sm" data-variant="ghost">保存</button>
-            <button className="fn-btn" data-size="sm">＋ 再生リスト</button>
-          </div>
-        </div>
-
         {/* ── Main grid ─────────────────────── */}
         <div className="fn-wrap fn-vd-grid">
           {/* Center: player first, then title + meta (EventArchives style) */}
@@ -60,7 +46,6 @@ function VideoDetail({ onNav, lang, selectedVideo }) {
                   </div>
                 </div>
                 <span className="fn-vd-posted fn-mono">{video.posted} 公開</span>
-                <button className="fn-btn" data-size="sm" data-variant="accent">フォロー</button>
               </div>
             </div>
 
@@ -70,47 +55,85 @@ function VideoDetail({ onNav, lang, selectedVideo }) {
               <span className="fn-pill">{video.chapters} チャプター</span>
               <span className="fn-vd-metabar-spacer" />
               <span className="fn-mono fn-vd-views">12,408 回再生 · 188 いいね</span>
+              <span className="fn-vd-metabar-divider" aria-hidden="true" />
+              <div className="fn-vd-quickactions">
+                <button className="fn-vd-qa" aria-label="共有"><i className="fa-solid fa-arrow-up-from-bracket"></i><span>共有</span></button>
+                <button className="fn-vd-qa" aria-label="保存"><i className="fa-regular fa-bookmark"></i><span>保存</span></button>
+                <button className="fn-vd-qa" aria-label="再生リストに追加"><i className="fa-solid fa-plus"></i><span>再生リスト</span></button>
+              </div>
             </div>
 
             <div className="fn-vd-tabs">
               {[
-                { id: "chapters", en: "チャプター" },
-                { id: "comments", en: "ノート" },
-                { id: "description", en: "情報" },
+                { id: "chapterComments", label: "チャプターコメント" },
+                { id: "compose",        label: "追加" },
+                { id: "description",    label: "情報" },
               ].map(t => (
                 <button key={t.id} className={"fn-vd-tab " + (tab === t.id ? "is-active" : "")} onClick={() => setTab(t.id)}>
-                  <span className="fn-display">{t.en}</span>
+                  <span>{t.label}</span>
+                  {t.id === "chapterComments" && <span className="fn-mono fn-vd-tab-n">{chapters.length}</span>}
                 </button>
               ))}
             </div>
 
-            {tab === "chapters" && (
-              <ol className="fn-vd-chaplist">
+            {tab === "chapterComments" && (
+              <ol className="fn-chapcom-list">
                 {chapters.map((c, i) => {
                   const active = currentSec >= c.time && (i === chapters.length - 1 || currentSec < chapters[i + 1].time);
                   return (
-                    <li key={i} className={"fn-vd-chap " + (active ? "is-active" : "")} onClick={() => setCurrentSec(c.time)}>
-                      <span className="fn-mono fn-vd-chap-time">{fmt(c.time)}</span>
-                      <span className="fn-vd-chap-bar" aria-hidden="true" />
-                      <span className="fn-vd-chap-label">{c.label}</span>
+                    <li
+                      key={i}
+                      className={"fn-chapcom " + (active ? "is-active" : "") + (c.outOfRange ? " is-out-of-range" : "") + (c.visibility === "private" ? " is-private" : "")}
+                    >
+                      {/* Time badge */}
+                      <button
+                        className="fn-chapcom-time fn-mono"
+                        onClick={() => !c.outOfRange && setCurrentSec(c.time)}
+                        disabled={c.outOfRange}
+                        title={c.outOfRange ? "動画の尺を超えています" : fmt(c.time)}
+                      >
+                        {fmt(c.time)}
+                      </button>
+
+                      <div className="fn-chapcom-body">
+                        <div className="fn-chapcom-header">
+                          <span className="fn-chapcom-label fn-jp">{c.label}</span>
+                          <div className="fn-chapcom-badges">
+                            {c.visibility === "private" && (
+                              <span className="fn-chapcom-badge fn-chapcom-badge--private fn-mono">
+                                <i className="fa-solid fa-lock"></i> 非公開
+                              </span>
+                            )}
+                            {c.outOfRange && (
+                              <span className="fn-chapcom-badge fn-chapcom-badge--oor fn-mono">
+                                <i className="fa-solid fa-triangle-exclamation"></i> 範囲外
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {c.note && <p className="fn-chapcom-note fn-jp">{c.note}</p>}
+                        <div className="fn-chapcom-meta">
+                          <span className="fn-chapcom-avatar">{c.author.charAt(0)}</span>
+                          <span className="fn-chapcom-author">{c.author}</span>
+                          <span className="fn-mono fn-chapcom-handle">@{c.authorHandle}</span>
+                        </div>
+                      </div>
                     </li>
                   );
                 })}
               </ol>
             )}
 
-            {tab === "comments" && (
-              <ol className="fn-vd-comlist">
-                {comments.map((c, i) => (
-                  <li key={i} className="fn-vd-com" onClick={() => setCurrentSec(c.time)}>
-                    <span className="fn-mono fn-vd-com-time">{fmt(c.time)}</span>
-                    <div className="fn-vd-com-body">
-                      <span className="fn-mono fn-vd-com-by">@{c.by}</span>
-                      <span className="fn-vd-com-text fn-jp">{c.body}</span>
-                    </div>
-                  </li>
-                ))}
-              </ol>
+            {tab === "compose" && (
+              <ChapterComposerForm
+                currentSec={currentSec}
+                durSec={durSec}
+                fmt={fmt}
+                onSubmit={(entry) => {
+                  window.FN_CHAPTERS.push(entry);
+                  setTab("chapterComments");
+                }}
+              />
             )}
 
             {tab === "description" && (
@@ -130,7 +153,39 @@ function VideoDetail({ onNav, lang, selectedVideo }) {
               </dl>
             )}
 
+            <div className="fn-vd-meta">
+              <div className="fn-vd-meta-item">
+                <h3 className="fn-eyebrow">楽曲</h3>
+                <a className="fn-vd-meta-music" href="#" onClick={e => e.preventDefault()}>
+                  <span>{video.music}</span>
+                  <i className="fa-solid fa-arrow-up-right-from-square"></i>
+                </a>
+              </div>
+              <div className="fn-vd-meta-item">
+                <h3 className="fn-eyebrow">紹介コメント</h3>
+                <p className="fn-jp fn-vd-meta-intro">夜の導線をなぞるように、街の明滅と呼吸を重ねました。音の隙間に視線が落ちる瞬間を作りたかった一本です。</p>
+              </div>
+              <details className="fn-vd-details">
+                <summary>詳細コメント</summary>
+                <div className="fn-vd-details-body">
+                  <section>
+                    <h4 className="fn-vd-details-h">みどころ</h4>
+                    <p className="fn-jp">47秒からのドリフト、中盤の音だけの余白区間、観測点の引きのカット。</p>
+                  </section>
+                  <section>
+                    <h4 className="fn-vd-details-h">制作エピソード</h4>
+                    <p className="fn-jp">深夜のロケハンで撮った素材をベースに、音先で構成を組み直しました。チャプター単位で2週間。</p>
+                  </section>
+                  <section>
+                    <h4 className="fn-vd-details-h">あとがき</h4>
+                    <p className="fn-jp">結節線というタイトルは、夜の動線が一点で交わる感覚から。次は昼の作品を作りたい。</p>
+                  </section>
+                </div>
+              </details>
+            </div>
+
             <div className="fn-vd-credits">
+              <h2 className="fn-vd-section-title">参加メンバー <span className="fn-mono fn-vd-section-count">(4)</span></h2>
               <h3 className="fn-eyebrow">メンバー / クレジット</h3>
               <table className="fn-vd-credtable">
                 <thead>
@@ -156,7 +211,7 @@ function VideoDetail({ onNav, lang, selectedVideo }) {
             <div className="fn-vd-playlist">
               <div className="fn-vd-pl-head">
                 <span className="fn-eyebrow">再生リスト · {event.code}</span>
-                <span className="fn-mono fn-vd-pl-pos">3 / 12</span>
+                <button className="fn-vd-pl-add" aria-label="再生リストに追加"><i className="fa-solid fa-plus"></i></button>
               </div>
               {related.slice(0, 5).map((v, i) => (
                 <button key={v.id} className={"fn-vd-pl-item " + (i === 1 ? "is-now" : "")} onClick={() => onNav("video", { video: v.id })}>
@@ -188,6 +243,98 @@ function VideoDetail({ onNav, lang, selectedVideo }) {
         </div>
       </div>
     </main>
+  );
+}
+
+// ─── Chapter composer form ────────────────────────────────────────
+function ChapterComposerForm({ currentSec, durSec, fmt, onSubmit }) {
+  const [time, setTime] = _vUseState(fmt(currentSec));
+  const [label, setLabel] = _vUseState("");
+  const [note, setNote] = _vUseState("");
+  const [isPrivate, setIsPrivate] = _vUseState(false);
+  const [showOnBar, setShowOnBar] = _vUseState(true);
+  const [submitted, setSubmitted] = _vUseState(false);
+
+  const parseSec = str => {
+    const parts = (str || "0:0").split(":").map(Number);
+    return (parts[0] || 0) * 60 + (parts[1] || 0);
+  };
+  const timeSec = parseSec(time);
+  const outOfRange = timeSec > durSec;
+  const valid = label.trim().length > 0 && time.trim().length > 0;
+
+  const handleSubmit = () => {
+    if (!valid) return;
+    onSubmit({ time: timeSec, label: label.trim(), note: note.trim() || null,
+      author: "halo / loop", authorHandle: "halo_loop_v",
+      visibility: isPrivate ? "private" : "public", outOfRange, showOnBar });
+    setLabel(""); setNote(""); setSubmitted(true);
+    setTimeout(() => setSubmitted(false), 2000);
+  };
+
+  return (
+    <div className="fn-chapcomp">
+      <span className="fn-eyebrow" style={{ marginBottom: 14, display: "block" }}>チャプターコメントを追加</span>
+
+      <label className="fn-field">
+        <span className="fn-field-label">時間 <span className="fn-field-req">必須</span></span>
+        <div className="fn-chapcomp-time-row">
+          <input className="fn-input fn-mono" style={{ width: 88 }} placeholder="00:00" value={time} onChange={e => setTime(e.target.value)} />
+          <button className="fn-btn" data-size="sm" data-variant="ghost" onClick={() => setTime(fmt(currentSec))}>現在時刻 ({fmt(currentSec)})</button>
+          {outOfRange && <span className="fn-chapcom-badge fn-chapcom-badge--oor fn-mono"><i className="fa-solid fa-triangle-exclamation"></i> 尺({fmt(durSec)})を超えています</span>}
+        </div>
+      </label>
+
+      <label className="fn-field">
+        <span className="fn-field-label">ラベル <span className="fn-field-req">必須</span></span>
+        <input className="fn-input" placeholder="このチャプターのタイトル" value={label} onChange={e => setLabel(e.target.value)} maxLength={50} />
+      </label>
+
+      <label className="fn-field">
+        <span className="fn-field-label">補足メモ（任意）</span>
+        <textarea className="fn-input fn-chapcomp-note-ta" placeholder="みどころや補足を残せます" value={note} onChange={e => setNote(e.target.value)} maxLength={200} rows={3} />
+        <span className="fn-field-hint" style={{ textAlign: "right" }}>{note.length}/200</span>
+      </label>
+
+      <div className="fn-chapcomp-toggles">
+        <label className="fn-chapcomp-toggle">
+          <button className={"fn-switch " + (isPrivate ? "" : "is-on")} onClick={() => setIsPrivate(v => !v)}><span className="fn-switch-knob" /></button>
+          <span className="fn-jp">{isPrivate ? "非公開（自分だけ見える）" : "公開"}</span>
+        </label>
+        <label className="fn-chapcomp-toggle">
+          <button className={"fn-switch " + (showOnBar ? "is-on" : "")} onClick={() => setShowOnBar(v => !v)}><span className="fn-switch-knob" /></button>
+          <span className="fn-jp">再生バーに点として表示</span>
+        </label>
+      </div>
+
+      {label && (
+        <div className="fn-chapcomp-preview">
+          <span className="fn-eyebrow" style={{ marginBottom: 8, display: "block" }}>プレビュー</span>
+          <div className={"fn-chapcom is-preview " + (isPrivate ? "is-private" : "")}>
+            <button className="fn-chapcom-time fn-mono" disabled>{time || "00:00"}</button>
+            <div className="fn-chapcom-body">
+              <div className="fn-chapcom-header">
+                <span className="fn-chapcom-label fn-jp">{label}</span>
+                <div className="fn-chapcom-badges">
+                  {isPrivate && <span className="fn-chapcom-badge fn-chapcom-badge--private fn-mono"><i className="fa-solid fa-lock"></i> 非公開</span>}
+                  {outOfRange && <span className="fn-chapcom-badge fn-chapcom-badge--oor fn-mono"><i className="fa-solid fa-triangle-exclamation"></i> 範囲外</span>}
+                </div>
+              </div>
+              {note && <p className="fn-chapcom-note fn-jp">{note}</p>}
+              <div className="fn-chapcom-meta">
+                <span className="fn-chapcom-avatar">h</span>
+                <span className="fn-chapcom-author">halo / loop</span>
+                <span className="fn-mono fn-chapcom-handle">@halo_loop_v</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <button className="fn-btn" data-variant="accent" data-size="lg" style={{ width: "100%", marginTop: 8 }} disabled={!valid || submitted} onClick={handleSubmit}>
+        {submitted ? <><i className="fa-solid fa-check"></i> 追加しました</> : "チャプターコメントを追加 →"}
+      </button>
+    </div>
   );
 }
 

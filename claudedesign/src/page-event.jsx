@@ -20,7 +20,7 @@ function EventDetail({ onNav, lang, forceStatus, selectedEvent }) {
           <div className="fn-ev-head-meta">
             <span className="fn-eyebrow">event</span>
             <h1 className="fn-display fn-ev-title">{event.title}</h1>
-            <span className="fn-ev-subtitle fn-jp">{event.subtitle}</span>
+
             <p className="fn-ev-summary">{event.summary}</p>
           </div>
           <div className="fn-ev-head-actions">
@@ -39,11 +39,11 @@ function EventDetail({ onNav, lang, forceStatus, selectedEvent }) {
         {/* Stats strip */}
         <div className="fn-ev-stats">
           <div className="fn-ev-stat">
-            <span className="fn-eyebrow">entry period</span>
+            <span className="fn-eyebrow">募集期間</span>
             <span className="fn-mono fn-ev-stat-v">{md(event.entryOpenIso)} — {md(event.entryCloseIso)}</span>
           </div>
           <div className="fn-ev-stat">
-            <span className="fn-eyebrow">submission</span>
+            <span className="fn-eyebrow">投稿期間</span>
             <span className="fn-mono fn-ev-stat-v">{md(event.submitOpenIso)} — {md(event.submitCloseIso)}</span>
           </div>
           <div className="fn-ev-stat">
@@ -100,19 +100,28 @@ function EventDetail({ onNav, lang, forceStatus, selectedEvent }) {
               </div>
             </div>
           </div>
-          <table className="fn-ev-crew">
-            <thead>
-              <tr>
-                <th>Role</th><th>Name</th><th>X / @</th><th>Scope</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td>Representative</td><td>halo / loop</td><td className="fn-mono">@halo_loop_v</td><td className="fn-ev-crew-scope">event · slots · members</td></tr>
-              <tr><td>Editor</td><td>frame index</td><td className="fn-mono">@frame_index__</td><td className="fn-ev-crew-scope">videos · review</td></tr>
-              <tr><td>Editor</td><td>凜・大塚</td><td className="fn-mono">@rin_otsuka_</td><td className="fn-ev-crew-scope">event · questions</td></tr>
-              <tr><td>Collaborator</td><td>ことりのす</td><td className="fn-mono">@kotorinosu_mv</td><td className="fn-ev-crew-scope">music credit</td></tr>
-            </tbody>
-          </table>
+          <div className="fn-crew-grid">
+            {[
+              { role: "Representative", name: "halo / loop",  handle: "halo_loop_v",    scope: "event · slots · members", initial: "h" },
+              { role: "Editor",         name: "frame index",  handle: "frame_index__",   scope: "videos · review",          initial: "f" },
+              { role: "Editor",         name: "凜・大塚",     handle: "rin_otsuka_",     scope: "event · questions",        initial: "凜" },
+              { role: "Collaborator",   name: "ことりのす",    handle: "kotorinosu_mv",   scope: "music credit",             initial: "こ" },
+            ].map((c, i) => (
+              <div key={i} className="fn-crew-card">
+                <div className="fn-crew-card-top">
+                  <span className="fn-crew-avatar">{c.initial}</span>
+                  <span className="fn-eyebrow fn-crew-role">{c.role}</span>
+                </div>
+                <div className="fn-crew-card-body">
+                  <span className="fn-crew-name">{c.name}</span>
+                  <span className="fn-mono fn-crew-handle">
+                    <i className="fa-brands fa-x-twitter"></i> @{c.handle}
+                  </span>
+                  <span className="fn-mono fn-crew-scope">{c.scope}</span>
+                </div>
+              </div>
+            ))}
+          </div>
         </section>
 
         {/* Submitted videos */}

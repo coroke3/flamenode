@@ -418,7 +418,27 @@
   }
 
   .sectionTitle {
-    margin-inline: -14px;
-    padding-inline: 14px;
+    margin: 0 0 14px;
+    padding: 12px 14px;
+  }
+
+  .preview {
+    flex-direction: column;
+  }
+
+  .previewThumb {
+    width: 100%;
+    max-width: none;
+  }
+
+  .actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .actions .fn-btn {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
   }
 }

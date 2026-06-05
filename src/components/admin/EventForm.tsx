@@ -61,6 +61,8 @@ function partsJsonToText(value: string | null | undefined): string {
 interface EventFormProps {
   mode: "create" | "edit";
   initial?: EventFormInitial;
+  /** 作成時にテンプレート由来の JSON 項目をサーバーへ渡す */
+  templateId?: string;
 }
 
 function unixToInputDateTime(ts: number | null | undefined): string {
@@ -171,6 +173,7 @@ function buildPreviewFromForm(
 export function EventForm({
   mode,
   initial = {},
+  templateId,
 }: EventFormProps): React.ReactElement {
   const router = useRouter();
   const [busy, startTransition] = React.useTransition();
@@ -213,6 +216,9 @@ export function EventForm({
     >
       {mode === "edit" && initial.id ? (
         <input type="hidden" name="id" value={initial.id} />
+      ) : null}
+      {mode === "create" && templateId ? (
+        <input type="hidden" name="template_id" value={templateId} />
       ) : null}
 
       <div>

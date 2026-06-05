@@ -190,6 +190,110 @@ export async function getCollaboratorPermissions(
 }
 
 /**
+ * /manage 配下のイベント運営画面へ入れるか。
+ * ManageSidebar / getEditableEventIds と同じ一覧判定を使い、Active X には依存しない。
+ */
+export async function canAccessManageEvent(
+  db: DB,
+  user: SessionUserLike,
+  eventId: string,
+): Promise<boolean> {
+  if (user.role === "admin") return true;
+  const editable = await getEditableEventIds(db, user.id);
+  return editable.includes(eventId);
+}
+
+/** 担当イベントごとの event_staff ロール（表示用）。Active X は見ない。 */
+export async function getManageStaffRoleForEvent(
+  db: DB,
+  userId: string,
+  eventId: string,
+): Promise<"representative" | "editor" | null> {
+  const approvedXIds = await getApprovedXIds(db, userId);
+  const subjectCond =
+    approvedXIds.length > 0
+      ? or(
+          eq(eventStaff.discord_user_id, userId),
+          inArray(eventStaff.x_user_id, approvedXIds),
+        )!
+      : eq(eventStaff.discord_user_id, userId);
+  const staff = (
+    await db
+      .select({ role: eventStaff.role })
+      .from(eventStaff)
+      .innerJoin(
+        eventStaffPermissions,
+        eq(eventStaffPermissions.event_staff_id, eventStaff.id),
+      )
+      .where(
+        and(
+          eq(eventStaff.event_id, eventId),
+          eq(eventStaffPermissions.allowed, 1),
+          subjectCond,
+        )!,
+      )
+      .limit(1)
+  )[0];
+  if (!staff) return null;
+  return staff.role === "representative" ? "representative" : "editor";
+}
+
+/**
+ * 担当イベントに紐づく運営用 X ID（event_staff.x_user_id）一覧。
+ * Discord 紐づけのみの行は含めない。
+ */
+export async function getManageStaffXUserIds(
+  db: DB,
+  userId: string,
+  eventIds: string[],
+): Promise<string[]> {
+  if (eventIds.length === 0) return [];
+  const approvedXIds = await getApprovedXIds(db, userId);
+  const subjectCond =
+    approvedXIds.length > 0
+      ? or(
+          eq(eventStaff.discord_user_id, userId),
+          inArray(eventStaff.x_user_id, approvedXIds),
+        )!
+      : eq(eventStaff.discord_user_id, userId);
+  const rows = await db
+    .select({ x_user_id: eventStaff.x_user_id })
+    .from(eventStaff)
+    .innerJoin(
+      eventStaffPermissions,
+      eq(eventStaffPermissions.event_staff_id, eventStaff.id),
+    )
+    .where(
+      and(
+        inArray(eventStaff.event_id, eventIds),
+        eq(eventStaffPermissions.allowed, 1),
+        subjectCond,
+      )!,
+    );
+  return Array.from(
+    new Set(
+      rows
+        .map((r) => r.x_user_id?.trim())
+        .filter((x): x is string => !!x),
+    ),
+  );
+}
+
+/**
+ * Active X が運営権限の付与先 X と食い違うとき true（注意表示用）。
+ * 運営入場判定には使わない。
+ */
+export function shouldWarnManageActiveXMismatch(
+  activeXUserId: string | null | undefined,
+  manageStaffXUserIds: readonly string[],
+): boolean {
+  const activeX = activeXUserId?.trim() || null;
+  if (!activeX) return false;
+  if (manageStaffXUserIds.length === 0) return false;
+  return !manageStaffXUserIds.includes(activeX);
+}
+
+/**
  * イベント編集権限の判定。
  *
  * 旧仕様では「スタッフ登録だけで requiredKey によらず全許可」だったが、

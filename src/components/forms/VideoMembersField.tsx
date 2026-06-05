@@ -25,6 +25,8 @@ interface VideoMembersFieldProps {
   suggestions?: VideoMemberSuggestion[];
   hiddenName?: string;
   disabled?: boolean;
+  /** 設定時は「編集できる人」セクションへ誘導するリンクを表示 */
+  collabPermsHref?: string;
 }
 
 const EMPTY_ROW: VideoMemberInput = {
@@ -40,11 +42,19 @@ function chapterLabelForMember(member: VideoMemberInput): string {
   return member.role.trim() || member.name.trim() || (xid ? `@${xid}` : "担当");
 }
 
+function stripCsvEditFlags(members: VideoMemberInput[]): VideoMemberInput[] {
+  return members.map((m) => {
+    const { can_edit: _ce, ...rest } = m;
+    return { ...rest, chapters: rest.chapters ?? [] };
+  });
+}
+
 export function VideoMembersField({
   initialMembers = [],
   suggestions = [],
   hiddenName = "members_json",
   disabled = false,
+  collabPermsHref,
 }: VideoMembersFieldProps): React.ReactElement {
   const [rows, setRows] = React.useState<VideoMemberInput[]>(() =>
     initialMembers.length > 0 ? initialMembers : [{ ...EMPTY_ROW }],
@@ -54,6 +64,10 @@ export function VideoMembersField({
   );
   const [copied, setCopied] = React.useState(false);
   const [csvWarning, setCsvWarning] = React.useState<string | null>(null);
+  const [csvEditDialog, setCsvEditDialog] = React.useState<{
+    members: VideoMemberInput[];
+    editOnNames: string[];
+  } | null>(null);
 
   // /api/internal/x-users/search からの追加候補 (debounce 検索)
   const [fetched, setFetched] = React.useState<VideoMemberSuggestion[]>([]);
@@ -243,7 +257,7 @@ export function VideoMembersField({
       "既存データと重複する項目は出力せず、追加・修正が必要な差分だけを出力してください。",
       "",
       hasExisting ? "既存データ:" : "既存データ (空):",
-      "活動名,ID,チャプター,役割,コメント",
+      "活動名,ID,チャプター,役割,コメント,編集権",
     ];
     if (hasExisting) lines.push(existing);
     lines.push("");
@@ -255,19 +269,7 @@ export function VideoMembersField({
     window.setTimeout(() => setCopied(false), 1800);
   };
 
-  const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    if (disabled) return;
-    const text = e.clipboardData.getData("text");
-    if (!text || !/[\n,]/.test(text)) return;
-    e.preventDefault();
-    const csv = parseVideoMemberCsv(text, {
-      suggestions: mergedSuggestions,
-      existingMembers: rows,
-    });
-    const parsed = csv.members;
-    setCsvWarning(csv.warnings.length > 0 ? csv.warnings.join(" / ") : null);
-    if (parsed.length === 0) return;
-
+  const mergeCsvMembers = React.useCallback((parsed: VideoMemberInput[]) => {
     // 差分追加: 既存メンバーと同じキーなら、空欄でない role / comment / chapters を補完。
     // チャプターは重複キー (memberKey:sec:labelLower) を避けて追加する。
     setRows((prev) => {
@@ -304,6 +306,33 @@ export function VideoMembersField({
       // 空行 (name/x_user_id どちらも空) は除去
       return next.filter((r) => r.name || r.x_user_id);
     });
+  }, []);
+
+  const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (disabled) return;
+    const text = e.clipboardData.getData("text");
+    if (!text || !/[\n,]/.test(text)) return;
+    e.preventDefault();
+    const csv = parseVideoMemberCsv(text, {
+      suggestions: mergedSuggestions,
+      existingMembers: rows,
+    });
+    const stripped = stripCsvEditFlags(csv.members);
+    setCsvWarning(csv.warnings.length > 0 ? csv.warnings.join(" / ") : null);
+    if (stripped.length === 0) return;
+
+    const editOn = csv.members.filter((m) => m.can_edit === 1 || m.can_edit === true);
+    if (editOn.length > 0) {
+      setCsvEditDialog({
+        members: stripped,
+        editOnNames: editOn.map(
+          (m) => m.name.trim() || (m.x_user_id ? `@${normalizeXId(m.x_user_id)}` : "名前未設定"),
+        ),
+      });
+      return;
+    }
+
+    mergeCsvMembers(stripped);
   };
 
   const payload = React.useMemo(() => {
@@ -366,7 +395,13 @@ export function VideoMembersField({
 
       <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
         名前または XID を入力すると、既存のクリエイター情報からもう片方を提案します。作品ごとに表示名は変更できます。
+        作品の編集に参加させる人は、下の「編集できる人」欄で設定してください（この欄では公開表示用の情報のみ）。
       </p>
+      {collabPermsHref && !disabled ? (
+        <a href={collabPermsHref} className="fn-btn fn-btn-ghost fn-btn-sm" style={{ alignSelf: "flex-start" }}>
+          <Icon name="settings" size={11} aria-hidden /> 編集できる人を設定
+        </a>
+      ) : null}
       {searchQuery.trim().length > 0 ? (
         <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>
           {searchStatus === "loading"
@@ -669,16 +704,30 @@ export function VideoMembersField({
                   disabled={disabled}
                 />
               </label>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                <span className={`fn-badge ${r.can_edit === true || r.can_edit === 1 ? "fn-badge-warning" : "fn-badge-soft"}`}>
-                  編集権限 {r.can_edit === true || r.can_edit === 1 ? "あり" : "なし"}
-                </span>
-                <span className={`fn-badge ${r.is_public_member === false || r.is_public_member === 0 ? "fn-badge-soft" : "fn-badge-accent"}`}>
-                  {r.is_public_member === false || r.is_public_member === 0 ? "非公開" : "公開メンバー"}
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                <span
+                  className={`fn-badge ${
+                    r.can_edit === true || r.can_edit === 1
+                      ? "fn-badge-warning"
+                      : "fn-badge-soft"
+                  }`}
+                >
+                  {r.can_edit === true || r.can_edit === 1
+                    ? "作品編集に参加"
+                    : "編集不可"}
                 </span>
                 <span className="fn-badge fn-badge-soft">
                   チャプター {r.chapters?.length ?? 0} 件
                 </span>
+                {collabPermsHref && !disabled ? (
+                  <a
+                    href={collabPermsHref}
+                    className="fn-btn fn-btn-ghost fn-btn-sm"
+                    style={{ padding: "2px 8px", minHeight: 28 }}
+                  >
+                    編集権を管理
+                  </a>
+                ) : null}
               </div>
             </section>
           ))}
@@ -723,7 +772,9 @@ export function VideoMembersField({
           className="fn-input"
           rows={4}
           style={{ marginTop: 6, fontFamily: "monospace", fontSize: 12 }}
-          placeholder={"例:\n活動名,ID,チャプター,役割,コメント\n田中,tanaka,0:12;1:05,作画,よろしく\n佐藤,sato_design,2:10,音響,\"コメントに,を含められます\""}
+          placeholder={
+            "例:\n活動名,ID,チャプター,役割,コメント,編集権\n田中,tanaka,0:12;1:05,作画,よろしく,OFF\n佐藤,sato_design,2:10,音響,\"コメント\",ON\n※編集権列は参考用。付与は「編集できる人」欄で行います。"
+          }
           onPaste={onPaste}
           disabled={disabled}
         />
@@ -738,6 +789,60 @@ export function VideoMembersField({
           {copied ? "コピーしました" : "CSV作成プロンプトをコピー"}
         </button>
       </details>
+
+      {csvEditDialog ? (
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="csv-edit-dialog-title"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            display: "grid",
+            placeItems: "center",
+            padding: 16,
+            background: "rgba(0,0,0,0.45)",
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setCsvEditDialog(null);
+          }}
+        >
+          <div
+            className="fn-card"
+            style={{ width: "min(100%, 420px)", padding: 16 }}
+          >
+            <p id="csv-edit-dialog-title" style={{ margin: "0 0 8px", fontWeight: 700 }}>
+              編集権ONの行が CSV に含まれています
+            </p>
+            <p style={{ margin: 0, fontSize: 13, lineHeight: 1.65, color: "var(--text-secondary)" }}>
+              {csvEditDialog.editOnNames.join("、")}
+            </p>
+            <p style={{ margin: "10px 0 0", fontSize: 12, color: "var(--text-muted)" }}>
+              この画面ではメンバー情報だけ取り込みます。作品編集への参加は「編集できる人」欄から付与してください。
+            </p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="fn-btn fn-btn-ghost fn-btn-sm"
+                onClick={() => setCsvEditDialog(null)}
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                className="fn-btn fn-btn-primary fn-btn-sm"
+                onClick={() => {
+                  mergeCsvMembers(csvEditDialog.members);
+                  setCsvEditDialog(null);
+                }}
+              >
+                メンバー情報だけ取り込む
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

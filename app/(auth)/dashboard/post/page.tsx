@@ -12,11 +12,6 @@ import { requireSession } from "@/lib/auth/guard";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 import { collapseReservationGroups, type SlotBase } from "@/lib/utils/slotGrouping";
-import { AppShell } from "@/components/ui/AppShell";
-import { PageHero } from "@/components/ui/PageHero";
-import { GlassCard } from "@/components/ui/GlassCard";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { StatusPanel } from "@/components/ui/StatusPanel";
 
 export const metadata: Metadata = { title: "投稿方法を選択" };
 export const dynamic = "force-dynamic";
@@ -47,9 +42,6 @@ export default async function PostChooserPage(): Promise<React.ReactElement> {
   const db = getDatabase();
   const activeX = guard.user.active_x_user_id ?? null;
   let reservedSlots: ReservedSlot[] = [];
-  // Active X の承認状態。投稿 (枠あり/枠なしどちらも) は writeGuard で
-  // requireApprovedActiveXId のため、ここでも同じ条件で前置きチェックする。
-  // 注: 枠確保のみは未承認 X でも可能なので、文言で区別する。
   let activeXApprovalStatus: "approved" | "pending" | "rejected" | null = null;
   if (db && activeX) {
     const xRow = (
@@ -90,11 +82,11 @@ export default async function PostChooserPage(): Promise<React.ReactElement> {
         event_title: eventsTable.title,
       })
       .from(slotsTable)
-      .leftJoin(eventsTable, eq(eventsTable.id, slotsTable.event_id))
+      .leftJoin(eventsTable, eq(slotsTable.event_id, eventsTable.id))
       .where(
         and(
           ownerWhere,
-          eq(slotsTable.status, "reserved"),
+          or(eq(slotsTable.status, "reserved"), eq(slotsTable.status, "submitted"))!,
         )!,
       )
       .orderBy(slotsTable.start_time, slotsTable.end_time, slotsTable.sort_order)
@@ -102,12 +94,7 @@ export default async function PostChooserPage(): Promise<React.ReactElement> {
   }
 
   const displaySlots = collapseReservationGroups(reservedSlots as SlotBase[]);
-  // 投稿前チェックの判定:
-  // - activeX 未選択: 投稿不可。枠確保は可能だが、リンクは設定へ誘導。
-  // - approved: 投稿可。
-  // - pending/rejected/未approved: 投稿不可。
   const canPost = activeXApprovalStatus === "approved";
-  const checkTone: "success" | "warning" = canPost ? "success" : "warning";
   const checkTitle = canPost ? "投稿前チェック" : "投稿には追加設定が必要です";
   const checkMessage = !activeX
     ? "投稿にはActive X IDの選択が必要です。設定画面から連携・選択してください。"
@@ -120,76 +107,76 @@ export default async function PostChooserPage(): Promise<React.ReactElement> {
           : "投稿には承認済みのActive X IDが必要です。設定画面で承認状態を確認してください。";
 
   return (
-    <AppShell size="default">
-      <PageHero
-        eyebrow="Post"
-        title="投稿方法を選択"
-        description="イベント枠を確保している作品は枠あり提出から、通常の作品は枠なし投稿から進めます。"
-      />
+    <div className="fn-public-container fn-page fn-postchooser">
+      <header className="fn-page-head">
+        <Link href="/dashboard" className="fn-cp-back fn-mono">
+          ← ダッシュボード
+        </Link>
+        <span className="fn-eyebrow">dashboard / post</span>
+        <h1 className="fn-display fn-page-title">投稿方法を選択</h1>
+        <p className="fn-jp fn-page-lead">
+          イベント枠を確保している作品は枠あり提出から、通常の作品は枠なし投稿から進めます。
+        </p>
+      </header>
 
-      <StatusPanel
-        title={checkTitle}
-        tone={checkTone}
-        action={
-          !canPost ? (
+      <div
+        className={`fn-pc-status-banner ${canPost ? "fn-pc-status-banner--ok" : ""}`}
+        role="status"
+      >
+        <Icon name={canPost ? "check" : "alert"} size={18} aria-hidden />
+        <div>
+          <h3 className="fn-jp">{checkTitle}</h3>
+          <p className="fn-jp fn-pc-banner-lead">{checkMessage}</p>
+          {!canPost ? (
             <Link
               href={`/dashboard/settings?next=${encodeURIComponent("/dashboard/post")}`}
-              className="fn-btn fn-btn-primary"
+              className="fn-btn fn-btn-primary fn-btn-sm fn-mt-12"
             >
               X ID設定を確認
             </Link>
-          ) : null
-        }
-      >
-        {checkMessage}
-      </StatusPanel>
+          ) : null}
+        </div>
+      </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))",
-          gap: 14,
-        }}
-      >
-        <GlassCard>
-          <div className="fn-card-body">
-            <h2 style={{ fontSize: 16, fontWeight: 700 }}>枠あり提出</h2>
-            <p className="fn-muted fn-text-sm" style={{ marginTop: 6 }}>
-              確保済みのイベント枠に作品情報を紐付けます。
-            </p>
-            {displaySlots.length === 0 ? (
-              <div style={{ marginTop: 14 }}>
-                <EmptyState
-                  title="確保済み枠はありません"
-                  description="イベントに参加する場合は、まず空き枠を確保してください。"
-                  href="/entry"
-                  actionLabel="枠を確保する"
-                />
-              </div>
-            ) : (
-              <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
-                {displaySlots.map((slot) => (
+      <div className="fn-pc-grid">
+        <section className="fn-pc-card" aria-labelledby="post-slotted-heading">
+          <div className="fn-pc-card-head">
+            <span className="fn-pc-card-icon" aria-hidden>
+              <Icon name="calendar" size={18} />
+            </span>
+            <div>
+              <h2 id="post-slotted-heading" className="fn-pc-card-title">
+                枠あり提出
+              </h2>
+              <p className="fn-jp fn-pc-card-lead">
+                確保済みのイベント枠に作品情報を紐付けます。
+              </p>
+            </div>
+          </div>
+
+          {displaySlots.length === 0 ? (
+            <div className="fn-pc-empty">
+              <p className="fn-jp fn-pc-banner-lead">確保済み枠はありません。</p>
+              <p className="fn-jp fn-pc-banner-lead">
+                イベントに参加する場合は、まず空き枠を確保してください。
+              </p>
+              <Link href="/entry" className="fn-btn fn-btn-primary fn-btn-sm">
+                枠を確保する
+              </Link>
+            </div>
+          ) : (
+            <ul className="fn-pc-slot-list">
+              {displaySlots.map((slot) => (
+                <li key={slot.id}>
                   <Link
-                    key={slot.id}
                     href={`/dashboard/post/slotted?slot=${slot.id}`}
-                    className="fn-btn fn-btn-ghost"
-                    style={{
-                      justifyContent: "space-between",
-                      gap: 12,
-                      whiteSpace: "normal",
-                      textAlign: "left",
-                    }}
+                    className="fn-pc-slot"
                   >
-                    <span>
-                      <strong>{slot.event_title ?? slot.event_id}</strong>
-                      <span
-                        style={{
-                          display: "block",
-                          fontSize: 11,
-                          color: "var(--text-muted)",
-                          marginTop: 2,
-                        }}
-                      >
+                    <span className="fn-pc-slot-info">
+                      <span className="fn-pc-slot-label">
+                        {slot.event_title ?? slot.event_id}
+                      </span>
+                      <span className="fn-mono fn-pc-slot-event">
                         {slot.start_time
                           ? `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(slot.start_time, { timeOnly: true })}${slot.end_time ? ` - ${formatUnix(slot.end_time, { timeOnly: true })}` : ""}`
                           : (slot.slot_label ?? "時間なし枠")}
@@ -198,27 +185,31 @@ export default async function PostChooserPage(): Promise<React.ReactElement> {
                     </span>
                     <Icon name="chevron-right" size={13} aria-hidden />
                   </Link>
-                ))}
-              </div>
-            )}
-          </div>
-        </GlassCard>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
-        <GlassCard tone="accent">
-          <div className="fn-card-body">
-            <h2 style={{ fontSize: 16, fontWeight: 700 }}>枠なし投稿</h2>
-            <p className="fn-muted fn-text-sm" style={{ marginTop: 6 }}>
-              イベント枠に紐づかない作品を通常投稿として登録します。
-            </p>
-            <Link
-              href="/dashboard/post/unslotted"
-              className="fn-btn fn-btn-primary fn-mt-md"
-            >
-              <Icon name="edit" size={13} aria-hidden /> 枠なしで投稿する
-            </Link>
+        <section className="fn-pc-card" aria-labelledby="post-unslotted-heading">
+          <div className="fn-pc-card-head">
+            <span className="fn-pc-card-icon" aria-hidden>
+              <Icon name="edit" size={18} />
+            </span>
+            <div>
+              <h2 id="post-unslotted-heading" className="fn-pc-card-title">
+                枠なし投稿
+              </h2>
+              <p className="fn-jp fn-pc-card-lead">
+                イベント枠に紐づかない作品を通常投稿として登録します。
+              </p>
+            </div>
           </div>
-        </GlassCard>
+          <Link href="/dashboard/post/unslotted" className="fn-btn fn-btn-primary">
+            <Icon name="edit" size={13} aria-hidden /> 枠なしで投稿する
+          </Link>
+        </section>
       </div>
-    </AppShell>
+    </div>
   );
 }

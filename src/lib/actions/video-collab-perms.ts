@@ -14,6 +14,9 @@ import {
 } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
 import { normalizeXId } from "@/lib/utils/xid";
+import { shouldEnqueueUserNotification } from "@/lib/notifications/context";
+import { enqueueNotification } from "@/lib/notifications/enqueue";
+import { buildVideoEditPermissionGrantedNotification } from "@/lib/notifications/templates/video";
 
 /**
  * 作品単位の共同編集者権限を管理する Server Action 群。
@@ -54,6 +57,10 @@ const upsertSchema = z.object({
     .union([z.literal("1"), z.literal("0"), z.literal("true"), z.literal("false")])
     .optional()
     .transform((v) => v === "1" || v === "true" || v === undefined),
+  notify: z
+    .union([z.literal("1"), z.literal("0")])
+    .optional()
+    .transform((v) => v === "1"),
 });
 
 async function loadEditableVideo(
@@ -63,6 +70,7 @@ async function loadEditableVideo(
 ): Promise<
   | {
       id: string;
+      title: string;
       primary_event_id: string | null;
       creator_x_user_id: string | null;
       submitted_by_discord_user_id: string | null;
@@ -73,6 +81,7 @@ async function loadEditableVideo(
     await db
       .select({
         id: videos.id,
+        title: videos.title,
         primary_event_id: videos.primary_event_id,
         creator_x_user_id: videos.creator_x_user_id,
         submitted_by_discord_user_id: videos.submitted_by_discord_user_id,
@@ -129,6 +138,23 @@ async function findMemberRowForSubject(
   return null;
 }
 
+async function resolveSubjectDiscordRecipient(
+  db: NonNullable<ReturnType<typeof getDatabase>>,
+  xUserId: string | null,
+  discordUserId: string | null,
+): Promise<string | null> {
+  if (discordUserId?.trim()) return discordUserId.trim();
+  if (!xUserId) return null;
+  const xRow = (
+    await db
+      .select({ linked: xUsers.linked_discord_user_id })
+      .from(xUsers)
+      .where(eq(xUsers.id, xUserId))
+      .limit(1)
+  )[0];
+  return xRow?.linked?.trim() || null;
+}
+
 /**
  * 共同編集者の権限を upsert する。
  *
@@ -172,6 +198,7 @@ export async function upsertVideoCollaborator(
 
   const now = Math.floor(Date.now() / 1000);
   const canEditValue = parsed.data.can_edit ? 1 : 0;
+  const shouldNotify = String(formData.get("notify") ?? "1") !== "0";
   const existing = await findMemberRowForSubject(
     db,
     video.id,
@@ -252,12 +279,49 @@ export async function upsertVideoCollaborator(
     created_at: now,
   });
 
+  const wasCanEdit = existing?.can_edit === 1;
+  const isNewGrant = canEditValue === 1 && !wasCanEdit;
+  if (
+    isNewGrant &&
+    shouldNotify &&
+    shouldEnqueueUserNotification()
+  ) {
+    const savedMember = (
+      await findMemberRowForSubject(db, video.id, xUserId, discordUserId)
+    );
+    const subjectDiscord =
+      savedMember?.discord_user_id?.trim() ||
+      (await resolveSubjectDiscordRecipient(
+        db,
+        savedMember?.x_user_id ?? xUserId,
+        discordUserId,
+      ));
+    const subjectX = savedMember?.x_user_id ?? xUserId;
+    const dedupeSubject = subjectX
+      ? `x:${subjectX}`
+      : subjectDiscord
+        ? `discord:${subjectDiscord}`
+        : null;
+    if (subjectDiscord && subjectDiscord !== user.id && dedupeSubject) {
+      await enqueueNotification(db, {
+        discordUserId: subjectDiscord,
+        type: "video_edit_permission_granted",
+        dedupeKey: `video_edit_permission_granted:${video.id}:${dedupeSubject}`,
+        payload: buildVideoEditPermissionGrantedNotification({
+          videoId: video.id,
+          videoTitle: video.title,
+        }),
+        eventId: video.primary_event_id,
+      });
+    }
+  }
+
   revalidatePath(`/dashboard/edit/${video.id}`);
   return {
     ok: true,
     message: canEditValue
-      ? "編集権限を付与しました。"
-      : "編集権限を無効化しました。",
+      ? "作品編集への参加を付与しました。"
+      : "作品編集への参加を無効化しました。",
   };
 }
 
@@ -340,5 +404,5 @@ export async function deleteVideoCollaborator(
   });
 
   revalidatePath(`/dashboard/edit/${video.id}`);
-  return { ok: true, message: "参加者の編集権限を解除しました。" };
+  return { ok: true, message: "作品編集への参加を解除しました。" };
 }

@@ -61,14 +61,6 @@
 }
 .fn-nav-item:hover { color: var(--text-primary); background: var(--bg-elevated); }
 .fn-nav-item.is-active { color: var(--text-primary); background: var(--bg-elevated); }
-.fn-nav-item.is-active::after {
-  content: "";
-  position: absolute;
-  left: 16px; right: 16px;
-  bottom: 3px;
-  height: 2px;
-  background: var(--accent);
-}
 .fn-node .fn-nav-item { border-radius: 9px; }
 
 .fn-header-submit { border-radius: 9px; }
@@ -437,12 +429,10 @@
   scroll-snap-type: x mandatory;
   scroll-padding: 4px;
   padding: 4px 0 16px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-subtle) transparent;
+  scrollbar-width: none;
 }
 .fn-shelf-strip > * { scroll-snap-align: start; }
-.fn-shelf-strip::-webkit-scrollbar { height: 8px; }
-.fn-shelf-strip::-webkit-scrollbar-thumb { background: var(--border-subtle); border-radius: 0; }
+.fn-shelf-strip::-webkit-scrollbar { display: none; }
 
 /* Creator strip is denser */
 .fn-shelf--creators .fn-shelf-strip { grid-auto-columns: 140px; }

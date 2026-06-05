@@ -103,10 +103,17 @@
   gap: 0;
   align-items: stretch;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   padding-bottom: 6px;
   border: 1px solid var(--hairline, var(--border-subtle));
   background: var(--bg-surface);
   scrollbar-width: thin;
+}
+
+@media (max-width: 640px) {
+  .partsRow {
+    grid-auto-columns: minmax(220px, 88vw);
+  }
 }
 
 .partColumn {

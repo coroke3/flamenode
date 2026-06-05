@@ -1,4 +1,6 @@
 import * as React from "react";
+import { FnTable } from "@/components/ui/FnTable";
+
 import Link from "next/link";
 import type { Metadata } from "next";
 import { and, asc, desc, eq, like, or } from "drizzle-orm";
@@ -13,6 +15,7 @@ import {
   isAcceptingEntries,
 } from "@/lib/utils/eventStatus";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 export const metadata: Metadata = { title: "イベント管理" };
 export const dynamic = "force-dynamic";
@@ -117,7 +120,18 @@ export default async function AdminEventsPage({
         {rows.length} 件表示中 (上限 60)
       </p>
 
-      <table className="fn-table" style={{ marginTop: 8 }}>
+      {rows.length === 0 ? (
+        <EmptyState
+          tone="neutral"
+          title="まだイベントがありません"
+          description="最初のイベントを作成すると、募集・投稿枠・運営メンバーを管理できるようになります。"
+          actions={[
+            { href: "/admin/events/new", label: "新規イベントを作成", variant: "primary" },
+            { href: "/admin/events/templates", label: "テンプレートを見る", variant: "ghost" },
+          ]}
+        />
+      ) : (
+      <FnTable style={{ marginTop: 8 }}>
         <thead>
           <tr>
             <th>イベント名</th>
@@ -165,7 +179,13 @@ export default async function AdminEventsPage({
                       詳細
                     </Link>
                     <Link
-                      href={`/admin/events/${ev.id}/staff`}
+                      href={`/manage/events/${ev.id}`}
+                      className="fn-btn fn-btn-ghost fn-btn-sm"
+                    >
+                      運営ビュー
+                    </Link>
+                    <Link
+                      href={`/manage/events/${ev.id}/staff`}
                       className="fn-btn fn-btn-ghost fn-btn-sm"
                     >
                       権限
@@ -182,20 +202,9 @@ export default async function AdminEventsPage({
               </tr>
             );
           })}
-          {rows.length === 0 ? (
-            <tr>
-              <td colSpan={4}>
-                <p
-                  className="fn-empty-message"
-                  style={{ padding: 16, textAlign: "center" }}
-                >
-                  まだイベントがありません。
-                </p>
-              </td>
-            </tr>
-          ) : null}
         </tbody>
-      </table>
+      </FnTable>
+      )}
     </div>
   );
 }

@@ -8,7 +8,7 @@
   min-height: min(78vh, 780px);
   display: grid;
   place-items: center;
-  padding: 72px 16px 56px;
+  padding: 72px var(--fn-page-gutter, clamp(20px, 4vw, 48px)) 56px;
   background:
     linear-gradient(180deg, var(--bg-base) 0%, var(--bg-surface) 100%);
 }
@@ -28,7 +28,10 @@
 .heroInner {
   position: relative;
   z-index: 1;
-  width: min(94%, 860px);
+  width: 100%;
+  max-width: min(860px, var(--fn-page-max, 1360px));
+  margin-left: auto;
+  margin-right: auto;
   text-align: center;
   animation: rise 680ms ease both;
 }
@@ -51,9 +54,9 @@
 .hero h1 {
   font-size: clamp(44px, 10vw, 116px);
   line-height: 0.92;
-  font-weight: 900;
-  letter-spacing: 0;
-  color: var(--text-primary);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--accent-primary);
 }
 
 .lead {
@@ -99,18 +102,18 @@
 .motionLines span:nth-child(3) { top: 68%; animation-delay: 3.2s; }
 
 .featureGrid {
-  width: min(94%, 1120px);
-  margin: 0 auto;
-  padding: 40px 0 20px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
   gap: 14px;
 }
 
 .feature {
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-surface);
-  border-radius: var(--radius-sm);
+  border: 0;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-card, 12px);
   padding: 22px;
   animation: slideIn 520ms ease both;
 }
@@ -121,7 +124,8 @@
   display: grid;
   place-items: center;
   color: var(--accent-primary);
-  border: 1px solid color-mix(in srgb, var(--accent-primary) 40%, var(--border-subtle));
+  background: var(--accent-primary-soft);
+  border: 0;
   border-radius: 50%;
 }
 
@@ -140,13 +144,13 @@
 }
 
 .flow {
-  width: min(94%, 1120px);
-  margin: 0 auto;
-  padding: 32px 0 76px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 .flowHeader {
-  max-width: 640px;
+  max-width: none;
 }
 
 .rail {
@@ -161,9 +165,9 @@
 .step {
   position: relative;
   padding: 16px;
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-card);
-  border-radius: var(--radius-sm);
+  border: 0;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-card, 12px);
   overflow: hidden;
 }
 
@@ -219,10 +223,28 @@
 @media (max-width: 640px) {
   .hero {
     padding-top: 56px;
+    min-height: auto;
+    padding-bottom: 40px;
+  }
+
+  .hero h1 {
+    font-size: clamp(40px, 11vw, 72px);
+    overflow-wrap: anywhere;
   }
 
   .lead {
     text-align: left;
+  }
+
+  .actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .actions .fn-btn {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
   }
 }
 

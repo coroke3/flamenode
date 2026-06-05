@@ -3,8 +3,11 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   addEventEditor,
+  removeCollaborator,
+  removeEventEditor,
   updateEventEditor,
   upsertCollaborator,
 } from "@/lib/actions/event-staff-admin";
@@ -81,7 +84,7 @@ export function EventStaffManager({
   const router = useRouter();
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
-  const [, setConfirm] = React.useState<
+  const [confirm, setConfirm] = React.useState<
     | { kind: "editor"; xUserId: string }
     | { kind: "collaborator"; displayName: string; xUserId: string | null; discordId: string | null }
     | null
@@ -93,6 +96,32 @@ export function EventStaffManager({
       const r = await action(fd);
       if (!r.ok) {
         setError(r.message ?? "操作に失敗しました。");
+        return;
+      }
+      router.refresh();
+    });
+  };
+
+  const runRemove = () => {
+    if (!confirm) return;
+    const target = confirm;
+    setConfirm(null);
+    const fd = new FormData();
+    fd.set("event_id", eventId);
+    if (target.kind === "editor") {
+      fd.set("x_user_id", target.xUserId);
+    } else {
+      fd.set("x_user_id", target.xUserId ?? "");
+      fd.set("discord_user_id", target.discordId ?? "");
+    }
+    setError(null);
+    startTransition(async () => {
+      const r =
+        target.kind === "editor"
+          ? await removeEventEditor(fd)
+          : await removeCollaborator(fd);
+      if (!r.ok) {
+        setError(r.message ?? "削除に失敗しました。");
         return;
       }
       router.refresh();
@@ -363,6 +392,19 @@ export function EventStaffManager({
           onImport={runCollaboratorCsvImport}
         />
       </section>
+      <ConfirmDialog
+        open={confirm !== null}
+        title="イベント管理者を削除しますか?"
+        message={
+          confirm?.kind === "editor"
+            ? `@${confirm.xUserId} の全体権限を削除します。`
+            : `${confirm?.displayName ?? "このメンバー"} のイベント権限を削除します。`
+        }
+        confirmLabel="削除する"
+        tone="danger"
+        onConfirm={runRemove}
+        onCancel={() => setConfirm(null)}
+      />
     </div>
   );
 }

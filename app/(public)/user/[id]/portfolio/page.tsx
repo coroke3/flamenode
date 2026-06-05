@@ -16,16 +16,16 @@ export default async function PortfolioPage({
   const id = normalizeXId((await params).id);
 
   return (
-    <main style={{ width: "min(96%, 760px)", margin: "0 auto", padding: "32px 16px 72px" }}>
-      <div style={{ marginBottom: 18 }}>
+    <main className="fn-public-container fn-page">
+      <header className="fn-page-head">
         <Link href={`/user/${id}`} className="fn-btn fn-btn-ghost fn-btn-sm">
           @{id} に戻る
         </Link>
-      </div>
+        <h1 className="fn-page-title">Portfolio</h1>
+        <p className="fn-page-lead">準備中の機能です</p>
+      </header>
       <section className="fn-card">
-        <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>
-          Portfolio は準備中です
-        </h1>
+        <h2 className="fn-panel-title">Portfolio は準備中です</h2>
         <p className="fn-muted fn-text-sm">
           custom_pages / custom_themes は初期本番では無効化しています。
         </p>

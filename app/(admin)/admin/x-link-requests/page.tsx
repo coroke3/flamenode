@@ -1,4 +1,5 @@
-import * as React from "react";
+import * as React from "react";import { FnTable } from "@/components/ui/FnTable";
+
 import Link from "next/link";
 import type { Metadata } from "next";
 import { and, desc, eq, inArray } from "drizzle-orm";
@@ -134,7 +135,7 @@ export default async function AdminXLinkRequestsPage({
           >
             直近の却下リクエスト (上限 10)
           </h2>
-          <table className="fn-table">
+          <FnTable>
             <thead>
               <tr>
                 <th>申請 X ID</th>
@@ -159,7 +160,7 @@ export default async function AdminXLinkRequestsPage({
                 </tr>
               ))}
             </tbody>
-          </table>
+          </FnTable>
         </section>
       ) : null}
 
@@ -175,7 +176,7 @@ export default async function AdminXLinkRequestsPage({
             履歴はまだありません。
           </p>
         ) : (
-          <table className="fn-table" style={{ marginTop: 8 }}>
+          <FnTable style={{ marginTop: 8 }}>
             <thead>
               <tr>
                 <th>日時</th>
@@ -211,7 +212,15 @@ export default async function AdminXLinkRequestsPage({
                       </span>
                     </td>
                     <td style={{ fontFamily: "monospace", fontSize: 11, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      <Link href={`/admin/audit?record=${encodeURIComponent(h.record_id)}`}>{h.record_id}</Link>
+                      {h.record_id ? (
+                        <Link
+                          href={`/admin/audit?record=${encodeURIComponent(h.record_id)}`}
+                        >
+                          {h.record_id}
+                        </Link>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td style={{ fontSize: 11, color: "var(--text-secondary)" }}>
                       {h.operator_discord_id ? (
@@ -232,7 +241,7 @@ export default async function AdminXLinkRequestsPage({
                 );
               })}
             </tbody>
-          </table>
+          </FnTable>
         )}
       </section>
     </div>

@@ -4,15 +4,22 @@ import type { Metadata } from "next";
 import { eq } from "drizzle-orm";
 import styles from "./page.module.css";
 import { withDatabase } from "@/lib/cloudflare";
-import { countPublicVideos, fetchPublicVideos } from "@/lib/db/listQueries";
+import {
+  countPublicVideos,
+  fetchPublicVideos,
+  parsePublicVideoSort,
+} from "@/lib/db/listQueries";
 import { events as eventsTable } from "@/lib/db/schema";
 import { VideoCard } from "@/components/video/VideoCard";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
+import { buildPageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = buildPageMetadata({
   title: "作品一覧",
-};
+  description: "FlameNodeに投稿された公開作品を、新着順やスコア順で探せます。",
+  path: "/list",
+});
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +54,7 @@ export default async function ListPage({
     const [videos, total, eventInfo] = await Promise.all([
       fetchPublicVideos(db, {
         q,
-        sort: sort as "new" | "old" | "score",
+        sort: parsePublicVideoSort(sort),
         eventId: event || undefined,
         limit: PAGE_SIZE,
         offset,
@@ -86,84 +93,75 @@ export default async function ListPage({
   };
 
   return (
-    <div className={`fn-public-container ${styles.page}`}>
-      <header className={styles.header}>
-        <h1 className={styles.title}>作品一覧</h1>
-        <p className={styles.lead}>
-          FlameNode に投稿された公開作品を、タイトル・作者名・楽曲名から検索できます。
-        </p>
-      </header>
+    <div className={`fn-public-container fn-page ${styles.page}`}>
+        <header className="fn-page-head fn-page-head--split">
+          <div className="fn-page-head-main">
+            <span className="fn-eyebrow">
+              archive — {total.toLocaleString()} works
+            </span>
+            <h1 className="fn-display fn-page-title">作品一覧</h1>
+            <p className="fn-jp fn-page-lead">作品インデックス</p>
+          </div>
+          <div className="fn-cr-controls" aria-label="表示形式">
+            <div className="fn-cr-segment">
+              <Link
+                href={`/list?${params({ view: "grid", page: "1" })}`}
+                className={`fn-cr-seg-btn ${view === "grid" ? "is-active" : ""}`}
+                aria-current={view === "grid" ? "page" : undefined}
+              >
+                <Icon name="grid" size={12} aria-hidden />
+                Tile
+              </Link>
+              <Link
+                href={`/list?${params({ view: "index", page: "1" })}`}
+                className={`fn-cr-seg-btn ${view === "index" ? "is-active" : ""}`}
+                aria-current={view === "index" ? "page" : undefined}
+              >
+                <Icon name="list" size={12} aria-hidden />
+                Index
+              </Link>
+            </div>
+          </div>
+        </header>
 
-      <form className={styles.controls} method="get">
-        <label className={styles.searchBox}>
-          <Icon name="search" size={14} aria-hidden />
-          <span className="fn-sr-only">検索キーワード</span>
-          <input
-            type="search"
-            name="q"
-            defaultValue={q}
-            placeholder="作品名 / 作者名 / 楽曲"
-            autoComplete="off"
-          />
-        </label>
-        <input type="hidden" name="view" value={view} />
-        <div className={styles.controlsGroup}>
-          <span className={styles.controlsLabel}>並び替え</span>
-          <select className="fn-select" name="sort" defaultValue={sort}>
-            <option value="new">新着順</option>
-            <option value="old">古い順</option>
-            <option value="score">おすすめ順</option>
-          </select>
-        </div>
-        {event ? <input type="hidden" name="event" value={event} /> : null}
-        <button type="submit" className="fn-btn fn-btn-primary">
-          適用
-        </button>
-        {q || sort !== "new" || event ? (
-          <Link href={LIST_HREF} className="fn-btn fn-btn-ghost">
-            リセット
-          </Link>
-        ) : null}
-      </form>
+        <form className="fn-list-toolbar" method="get">
+          <label className="fn-list-search">
+            <Icon name="search" size={14} aria-hidden />
+            <span className="fn-sr-only">検索キーワード</span>
+            <input
+              type="search"
+              name="q"
+              defaultValue={q}
+              placeholder="作品名 / 作者名 / 楽曲"
+              autoComplete="off"
+            />
+          </label>
+          <input type="hidden" name="view" value={view} />
+          <div className={styles.controlsGroup}>
+            <span className="fn-list-toolbar-label">並び替え</span>
+            <select className="fn-select" name="sort" defaultValue={sort}>
+              <option value="new">新着順</option>
+              <option value="old">古い順</option>
+              <option value="score">おすすめ順</option>
+            </select>
+          </div>
+          {event ? <input type="hidden" name="event" value={event} /> : null}
+          <button type="submit" className="fn-btn fn-btn-primary">
+            適用
+          </button>
+          {q || sort !== "new" || event ? (
+            <Link href={LIST_HREF} className="fn-btn fn-btn-ghost">
+              リセット
+            </Link>
+          ) : null}
+        </form>
 
-      <div className={styles.viewSwitch} aria-label="表示形式">
-        <Link
-          href={`/list?${params({ view: "grid", page: "1" })}`}
-          className={view === "grid" ? styles.viewButtonActive : styles.viewButton}
-          aria-current={view === "grid" ? "page" : undefined}
-        >
-          <Icon name="grid" size={12} aria-hidden />
-          Tile
-        </Link>
-        <Link
-          href={`/list?${params({ view: "index", page: "1" })}`}
-          className={view === "index" ? styles.viewButtonActive : styles.viewButton}
-          aria-current={view === "index" ? "page" : undefined}
-        >
-          <Icon name="list" size={12} aria-hidden />
-          Index
-        </Link>
-      </div>
-
-      {event ? (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            flexWrap: "wrap",
-            marginTop: 8,
-            fontSize: 13,
-          }}
-          aria-label="現在のフィルター"
-        >
+        {event ? (
+        <div className="fn-filter-bar" aria-label="現在のフィルター">
           <span className="fn-badge fn-badge-soft">
             イベント{" "}
             {eventInfo ? (
-              <Link
-                href={`/event/${eventInfo.id}`}
-                style={{ textDecoration: "underline" }}
-              >
+              <Link href={`/event/${eventInfo.id}`}>
                 {eventInfo.title}
               </Link>
             ) : (
@@ -177,9 +175,9 @@ export default async function ListPage({
             イベント絞り込みを解除
           </Link>
         </div>
-      ) : null}
+        ) : null}
 
-      {videos.length === 0 ? (
+        {videos.length === 0 ? (
         <div className="fn-empty">
           <Icon name="info" size={24} aria-hidden />
           <p className="fn-empty-message">
@@ -189,7 +187,7 @@ export default async function ListPage({
       ) : (
         <>
           {view === "grid" ? (
-            <div className={styles.grid}>
+            <div className={`fn-list-grid ${styles.grid}`}>
               {videos.map((v, index) => (
                 <div key={`${v.id}-list-${index}`} className={styles.gridItem}>
                   <VideoCard video={v} />
@@ -197,8 +195,8 @@ export default async function ListPage({
               ))}
             </div>
           ) : (
-            <div className={styles.indexWrap}>
-              <table className={styles.indexTable}>
+            <div className={`fn-table-scroll ${styles.indexWrap}`}>
+              <table className={`fn-list-tbl ${styles.indexTable}`}>
                 <thead>
                   <tr>
                     <th>Code</th>
@@ -216,7 +214,11 @@ export default async function ListPage({
                       <tr key={`${v.id}-index-${index}`}>
                         <td className={styles.codeCell}>{v.youtube_video_id ?? v.id}</td>
                         <td>
-                          <Link href={href} className={styles.indexTitle} prefetch={false}>
+                          <Link
+                            href={href}
+                            className={`fn-list-tbl-title ${styles.indexTitle}`}
+                            prefetch={false}
+                          >
                             {v.title}
                           </Link>
                         </td>
@@ -261,7 +263,7 @@ export default async function ListPage({
             ) : null}
           </nav>
         </>
-      )}
+        )}
     </div>
   );
 }

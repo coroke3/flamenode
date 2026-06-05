@@ -61,6 +61,15 @@ async function ensureAdminFor(eventId: string): Promise<
   return { ok: true, userId: u.id, db };
 }
 
+function revalidateEventStaffPaths(eventId: string): void {
+  revalidatePath(`/manage/events/${eventId}/staff`);
+  revalidatePath(`/manage/events/${eventId}`);
+  revalidatePath(`/manage`);
+  revalidatePath(`/admin/events/${eventId}/staff`);
+  revalidatePath(`/admin/events/${eventId}`);
+  revalidatePath(`/event/${eventId}`);
+}
+
 async function ensureXUser(
   db: DB,
   xUserId: string,
@@ -216,9 +225,7 @@ export async function addEventEditor(
     now,
   });
 
-  revalidatePath(`/admin/events/${data.event_id}/staff`);
-  revalidatePath(`/admin/events/${data.event_id}`);
-  revalidatePath(`/event/${data.event_id}`);
+  revalidateEventStaffPaths(data.event_id);
   return { ok: true };
 }
 
@@ -249,9 +256,7 @@ export async function removeEventEditor(
     now,
   });
 
-  revalidatePath(`/admin/events/${eventId}/staff`);
-  revalidatePath(`/admin/events/${eventId}`);
-  revalidatePath(`/event/${eventId}`);
+  revalidateEventStaffPaths(eventId);
   return { ok: true };
 }
 
@@ -292,9 +297,7 @@ export async function updateEventEditor(
     now,
   });
 
-  revalidatePath(`/admin/events/${data.event_id}/staff`);
-  revalidatePath(`/admin/events/${data.event_id}`);
-  revalidatePath(`/event/${data.event_id}`);
+  revalidateEventStaffPaths(data.event_id);
   return { ok: true };
 }
 
@@ -394,8 +397,7 @@ export async function upsertCollaborator(
     now,
   });
 
-  revalidatePath(`/admin/events/${data.event_id}/staff`);
-  revalidatePath(`/admin/events/${data.event_id}`);
+  revalidateEventStaffPaths(data.event_id);
   return { ok: true };
 }
 
@@ -434,7 +436,6 @@ export async function removeCollaborator(
     now,
   });
 
-  revalidatePath(`/admin/events/${eventId}/staff`);
-  revalidatePath(`/admin/events/${eventId}`);
+  revalidateEventStaffPaths(eventId);
   return { ok: true };
 }

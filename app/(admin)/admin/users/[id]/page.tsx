@@ -1,4 +1,5 @@
 import * as React from "react";
+import { FnTable } from "@/components/ui/FnTable";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
@@ -122,66 +123,47 @@ export default async function AdminUserDetailPage({
         ]}
       />
       {user.emailVerified ? (
-        <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 12 }}>
-          email認証{" "}
-          {formatRelative(
-            Math.floor((user.emailVerified as Date).getTime() / 1000),
-          )}
+        <p className="fn-console-note">
+          email認証 {formatRelative(user.emailVerified)}
         </p>
       ) : null}
 
-      <section className="fn-card" style={{ marginTop: 20 }}>
-        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
-          IDの主体整理
-        </h2>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
-            gap: 12,
-          }}
-        >
+      <section className="fn-card fn-console-card">
+        <h2 className="fn-console-card-title">IDの主体整理</h2>
+        <div className="fn-console-kv-grid">
           <div>
-            <p className="fn-muted fn-text-xs fn-bold" style={{ margin: 0 }}>
-              Discord / Auth 主体
-            </p>
-            <p style={{ margin: "6px 0 0", fontFamily: "monospace", fontSize: 12 }}>
+            <p className="fn-muted fn-text-xs fn-bold">Discord / Auth 主体</p>
+            <p className="fn-console-kv-value fn-console-kv-value--mono">
               {user.discord_id ?? user.id}
             </p>
-            <p className="fn-muted fn-text-sm" style={{ margin: "6px 0 0" }}>
+            <p className="fn-muted fn-text-sm fn-console-kv-value">
               ログイン、BAN、TOS、通知、管理権限の主体。
             </p>
           </div>
           <div>
-            <p className="fn-muted fn-text-xs fn-bold" style={{ margin: 0 }}>
-              Active X ID
-            </p>
-            <p style={{ margin: "6px 0 0", fontFamily: "monospace", fontSize: 12 }}>
+            <p className="fn-muted fn-text-xs fn-bold">Active X ID</p>
+            <p className="fn-console-kv-value fn-console-kv-value--mono">
               {user.active_x_user_id ? `@${user.active_x_user_id}` : "未設定"}
             </p>
-            <p className="fn-muted fn-text-sm" style={{ margin: "6px 0 0" }}>
+            <p className="fn-muted fn-text-sm fn-console-kv-value">
               作品一覧、いいね、セーブ、ライブラリの現在の操作主体。
             </p>
           </div>
           <div>
-            <p className="fn-muted fn-text-xs fn-bold" style={{ margin: 0 }}>
-              紐づく X ID
-            </p>
-            <p style={{ margin: "6px 0 0", fontWeight: 700 }}>
+            <p className="fn-muted fn-text-xs fn-bold">紐づく X ID</p>
+            <p className="fn-console-kv-value fn-console-kv-value--bold">
               {xIds.length} 件
             </p>
-            <p className="fn-muted fn-text-sm" style={{ margin: "6px 0 0" }}>
+            <p className="fn-muted fn-text-sm fn-console-kv-value">
               作者、プロフィール、アイコン、公開表示の主体。
             </p>
           </div>
         </div>
       </section>
 
-      <section className="fn-card" style={{ marginTop: 20 }}>
-        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
-          権限と状態
-        </h2>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <section className="fn-card fn-console-card">
+        <h2 className="fn-console-card-title">権限と状態</h2>
+        <div className="fn-console-badge-row">
           <span
             className={`fn-badge ${
               user.role === "admin"
@@ -228,50 +210,36 @@ export default async function AdminUserDetailPage({
         </div>
       </section>
 
-      <section className="fn-card" style={{ marginTop: 22 }}>
-        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
-          連携 X ID ({xIds.length})
-        </h2>
+      <section className="fn-card fn-console-card">
+        <h2 className="fn-console-card-title">連携 X ID ({xIds.length})</h2>
         {xIds.length === 0 ? (
           <p className="fn-muted fn-text-sm">未連携です。</p>
         ) : (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 240px), 1fr))",
-              gap: 10,
-            }}
-          >
+          <div className="fn-console-xid-grid">
             {xIds.map((x, index) => (
               <section
                 key={`${x.id}-user-xid-${index}`}
-                style={{
-                  display: "grid",
-                  gap: 8,
-                  padding: 12,
-                  border: "1px solid var(--border-subtle)",
-                  borderRadius: "var(--radius-sm)",
-                  background:
-                    x.id === user.active_x_user_id
-                      ? "var(--accent-primary-soft)"
-                      : "var(--bg-base)",
-                }}
+                className={`fn-console-xid-card ${
+                  x.id === user.active_x_user_id
+                    ? "fn-console-xid-card--active"
+                    : ""
+                }`}
               >
                 <div>
                   <strong>{x.x_name}</strong>
                   <div className="fn-muted fn-text-sm">@{x.id}</div>
                 </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                <div className="fn-console-badge-row">
                   {x.id === user.active_x_user_id ? (
                     <span className="fn-badge fn-badge-soft">Active</span>
                   ) : null}
-                    {x.approval_status === "approved" ? (
-                      <span className="fn-badge fn-badge-accent">承認</span>
-                    ) : x.approval_status === "pending" ? (
-                      <span className="fn-badge fn-badge-warning">待ち</span>
-                    ) : (
-                      <span className="fn-badge fn-badge-danger">却下</span>
-                    )}
+                  {x.approval_status === "approved" ? (
+                    <span className="fn-badge fn-badge-accent">承認</span>
+                  ) : x.approval_status === "pending" ? (
+                    <span className="fn-badge fn-badge-warning">待ち</span>
+                  ) : (
+                    <span className="fn-badge fn-badge-danger">却下</span>
+                  )}
                 </div>
                 <Link href={`/user/${x.id}`} className="fn-btn fn-btn-ghost fn-btn-sm">
                   Xプロフィールを確認
@@ -282,30 +250,22 @@ export default async function AdminUserDetailPage({
         )}
       </section>
 
-      <section className="fn-card" style={{ marginTop: 22 }}>
-        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
-          投稿作品 ({recentVideos.length})
-        </h2>
+      <section className="fn-card fn-console-card">
+        <h2 className="fn-console-card-title">投稿作品 ({recentVideos.length})</h2>
         {recentVideos.length === 0 ? (
           <p className="fn-muted fn-text-sm">投稿はありません。</p>
         ) : (
-          <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none" }}>
+          <ul className="fn-console-list">
             {recentVideos.map((v, index) => (
               <li
                 key={`${v.id}-recent-video-${index}`}
-                style={{
-                  display: "flex",
-                  gap: 12,
-                  alignItems: "center",
-                  padding: "6px 0",
-                  borderBottom: "1px solid var(--border-subtle)",
-                }}
+                className="fn-console-list-item"
               >
                 <span className="fn-badge fn-badge-soft">{v.status}</span>
-                <Link href={`/admin/videos/${v.id}`} style={{ flex: 1, color: "var(--text-primary)" }}>
+                <Link href={`/admin/videos/${v.id}`} className="fn-console-list-link">
                   {v.title}
                 </Link>
-                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                <span className="fn-td-muted">
                   {formatUnix(v.created_at, { dateOnly: true })}
                 </span>
               </li>
@@ -314,14 +274,14 @@ export default async function AdminUserDetailPage({
         )}
       </section>
 
-      <section className="fn-card" style={{ marginTop: 22 }}>
-        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
+      <section className="fn-card fn-console-card">
+        <h2 className="fn-console-card-title">
           X ID 連携申請履歴 ({linkRequests.length})
         </h2>
         {linkRequests.length === 0 ? (
           <p className="fn-muted fn-text-sm">申請はありません。</p>
         ) : (
-          <table className="fn-table">
+          <FnTable>
             <thead>
               <tr>
                 <th>申請 X ID</th>
@@ -348,9 +308,7 @@ export default async function AdminUserDetailPage({
                       {r.link_type ?? "new"}
                     </span>
                   </td>
-                  <td style={{ fontFamily: "monospace", fontSize: 11 }}>
-                    {r.target_x_user_id ?? "—"}
-                  </td>
+                  <td className="fn-td-mono">{r.target_x_user_id ?? "—"}</td>
                   <td>
                     <span
                       className={`fn-badge ${
@@ -364,24 +322,24 @@ export default async function AdminUserDetailPage({
                       {r.status ?? "pending"}
                     </span>
                   </td>
-                  <td className="fn-muted" style={{ fontSize: 11 }}>
+                  <td className="fn-muted fn-td-muted">
                     {formatRelative(r.requested_at)}
                   </td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          </FnTable>
         )}
       </section>
 
-      <section className="fn-card" style={{ marginTop: 22 }}>
-        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
+      <section className="fn-card fn-console-card">
+        <h2 className="fn-console-card-title">
           このユーザーへの管理操作 (record_id 一致)
         </h2>
         {recentOnUser.length === 0 ? (
           <p className="fn-muted fn-text-sm">該当する履歴はありません。</p>
         ) : (
-          <table className="fn-table">
+          <FnTable>
             <thead>
               <tr>
                 <th>日時</th>
@@ -393,10 +351,10 @@ export default async function AdminUserDetailPage({
             <tbody>
               {recentOnUser.map((h) => (
                 <tr key={h.id}>
-                  <td className="fn-muted" style={{ whiteSpace: "nowrap" }}>
+                  <td className="fn-muted fn-td-nowrap">
                     {formatRelative(h.created_at)}
                   </td>
-                  <td style={{ fontFamily: "monospace", fontSize: 11 }}>{h.table_name}</td>
+                  <td className="fn-td-mono">{h.table_name}</td>
                   <td>
                     <span
                       className={`fn-badge ${
@@ -410,24 +368,24 @@ export default async function AdminUserDetailPage({
                       {h.action}
                     </span>
                   </td>
-                  <td style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                  <td className="fn-td-secondary">
                     {h.operator_discord_id ?? "-"}
                   </td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          </FnTable>
         )}
       </section>
 
-      <section className="fn-card" style={{ marginTop: 22 }}>
-        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
+      <section className="fn-card fn-console-card">
+        <h2 className="fn-console-card-title">
           このユーザーが実行した管理操作 (operator 一致)
         </h2>
         {recentByOperator.length === 0 ? (
           <p className="fn-muted fn-text-sm">該当する履歴はありません。</p>
         ) : (
-          <table className="fn-table">
+          <FnTable>
             <thead>
               <tr>
                 <th>日時</th>
@@ -439,10 +397,10 @@ export default async function AdminUserDetailPage({
             <tbody>
               {recentByOperator.map((h) => (
                 <tr key={h.id}>
-                  <td className="fn-muted" style={{ whiteSpace: "nowrap" }}>
+                  <td className="fn-muted fn-td-nowrap">
                     {formatRelative(h.created_at)}
                   </td>
-                  <td style={{ fontFamily: "monospace", fontSize: 11 }}>{h.table_name}</td>
+                  <td className="fn-td-mono">{h.table_name}</td>
                   <td>
                     <span
                       className={`fn-badge ${
@@ -456,18 +414,23 @@ export default async function AdminUserDetailPage({
                       {h.action}
                     </span>
                   </td>
-                  <td style={{ fontFamily: "monospace", fontSize: 11, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    <Link href={`/admin/audit?record=${encodeURIComponent(h.record_id)}`}>
-                      {h.record_id}
-                    </Link>
+                  <td className="fn-td-mono fn-td-ellipsis">
+                    {h.record_id ? (
+                      <Link
+                        href={`/admin/audit?record=${encodeURIComponent(h.record_id)}`}
+                      >
+                        {h.record_id}
+                      </Link>
+                    ) : (
+                      "—"
+                    )}
                   </td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          </FnTable>
         )}
       </section>
-
     </div>
   );
 }

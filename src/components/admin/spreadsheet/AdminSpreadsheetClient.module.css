@@ -1,0 +1,912 @@
+.shell {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+  min-height: 480px;
+}
+
+/* 全画面: 固定オーバーレイ or ブラウザ Fullscreen API */
+.shellFullscreen,
+.shell:fullscreen,
+.shell:-webkit-full-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  gap: 0;
+  min-height: 0;
+  height: 100vh;
+  height: 100dvh;
+  align-items: stretch;
+  background: var(--bg-base, #fff);
+  grid-template-columns: 220px minmax(0, 1fr);
+}
+
+.shellFullscreen .sidebar,
+.shell:fullscreen .sidebar,
+.shell:-webkit-full-screen .sidebar {
+  top: 0;
+  max-height: 100vh;
+  max-height: 100dvh;
+  border-radius: 0;
+  border-right: 1px solid var(--border-subtle);
+  border-left: 0;
+  border-top: 0;
+  border-bottom: 0;
+}
+
+.shellFullscreen .main,
+.shell:fullscreen .main,
+.shell:-webkit-full-screen .main {
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px 10px 0;
+}
+
+.shellFullscreen .sheetChrome,
+.shell:fullscreen .sheetChrome,
+.shell:-webkit-full-screen .sheetChrome {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 0;
+}
+
+.shellFullscreen .gridViewport,
+.shell:fullscreen .gridViewport,
+.shell:-webkit-full-screen .gridViewport {
+  max-height: none;
+  flex: 1;
+  min-height: 0;
+}
+
+.shellFullscreen .gridWrap,
+.shell:fullscreen .gridWrap,
+.shell:-webkit-full-screen .gridWrap {
+  max-height: none;
+}
+
+.shellFullscreen .modalBackdrop,
+.shell:fullscreen .modalBackdrop,
+.shell:-webkit-full-screen .modalBackdrop {
+  z-index: 10001;
+}
+
+@media (max-width: 640px) {
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .toolbarActions {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .toolbarActions .fn-btn {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+  }
+
+  .tableBtn {
+    min-height: 44px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .formulaBar {
+    flex-wrap: wrap;
+  }
+
+  .formulaRef {
+    min-width: 72px;
+    max-width: none;
+    flex: 0 0 auto;
+  }
+
+  .formulaInput {
+    font-size: 16px;
+    min-width: 0;
+    flex: 1 1 100%;
+  }
+
+  .findInput {
+    width: 100%;
+    max-width: none;
+    font-size: 16px;
+  }
+
+  .gridViewport,
+  .gridWrap {
+    max-height: min(58vh, 520px);
+  }
+
+  .sheetRibbon {
+    gap: 4px;
+  }
+
+  .sheetRibbon .fn-btn {
+    min-height: 40px;
+  }
+
+  .modalBackdrop {
+    padding: max(12px, env(safe-area-inset-top))
+      max(12px, env(safe-area-inset-right))
+      max(12px, env(safe-area-inset-bottom))
+      max(12px, env(safe-area-inset-left));
+  }
+
+  .modalActions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .modalActions .fn-btn {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 900px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .shellFullscreen,
+  .shell:fullscreen,
+  .shell:-webkit-full-screen {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .shellFullscreen .sidebar,
+  .shell:fullscreen .sidebar,
+  .shell:-webkit-full-screen .sidebar {
+    max-height: 28vh;
+    position: relative;
+  }
+}
+
+.sidebar {
+  position: sticky;
+  top: 84px;
+  max-height: calc(100vh - 120px);
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  padding: 10px 0;
+}
+
+.sidebarHead {
+  padding: 4px 10px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 4px;
+}
+
+.sidebarHead .fn-btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.schemaNotice {
+  margin: 0;
+  padding: 6px 12px 8px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.groupTitle {
+  margin: 0;
+  padding: 8px 14px 4px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.tableBtn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.tableBtn:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.tableBtnActive {
+  background: var(--accent-primary-soft);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.modeTag {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.toolbarActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.sheetChrome {
+  --sheet-bg: #ffffff;
+  --sheet-header-bg: #f8f9fa;
+  --sheet-border: #dadce0;
+  --sheet-grid: #e0e0e0;
+  --sheet-focus: #1a73e8;
+  --sheet-focus-soft: color-mix(in srgb, #1a73e8 10%, #ffffff);
+
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  border: 1px solid var(--sheet-border);
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--sheet-bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  .sheetChrome {
+    --sheet-bg: var(--bg-base, #1a1a1a);
+    --sheet-header-bg: var(--bg-elevated, #252525);
+    --sheet-border: var(--border-subtle, #3c4043);
+    --sheet-grid: var(--border-subtle, #3c4043);
+    --sheet-focus: var(--accent-primary, #8ab4f8);
+    --sheet-focus-soft: color-mix(
+      in srgb,
+      var(--accent-primary, #8ab4f8) 14%,
+      var(--bg-base, #1a1a1a)
+    );
+  }
+}
+
+.sheetRibbon {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--sheet-border);
+  background: var(--sheet-header-bg);
+}
+
+.formulaBar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0;
+  border-bottom: 1px solid var(--sheet-border);
+  background: var(--sheet-bg);
+}
+
+.formulaRef {
+  flex-shrink: 0;
+  min-width: 100px;
+  max-width: 200px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--text-secondary);
+  border-right: 1px solid var(--sheet-border);
+  text-align: center;
+}
+
+.formulaFx {
+  flex-shrink: 0;
+  padding: 6px 8px;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-muted);
+  border-right: 1px solid var(--sheet-border);
+  user-select: none;
+}
+
+.formulaInput {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.formulaInput:focus {
+  outline: none;
+}
+
+.formulaStatus {
+  flex-shrink: 0;
+  min-width: 80px;
+  padding: 0 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.gridViewport {
+  overflow: auto;
+  background: var(--sheet-bg);
+  max-height: min(70vh, 720px);
+  outline: none;
+  user-select: none;
+}
+
+.gridViewport:focus-visible {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent-primary) 35%, transparent);
+}
+
+.gridWrap {
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  max-height: min(70vh, 720px);
+}
+
+.grid {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  min-width: max-content;
+  width: 100%;
+}
+
+.grid th,
+.grid td {
+  border-right: 1px solid var(--sheet-grid);
+  border-bottom: 1px solid var(--sheet-grid);
+  padding: 0;
+  vertical-align: middle;
+  max-width: 280px;
+}
+
+.cornerHead {
+  position: sticky;
+  left: 0;
+  top: 0;
+  z-index: 4;
+  width: 46px;
+  min-width: 46px;
+  background: var(--sheet-header-bg);
+  border-right: 1px solid var(--sheet-border);
+  border-bottom: 1px solid var(--sheet-border);
+}
+
+.colHead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 2px 6px 4px;
+  background: var(--sheet-header-bg);
+  /* colResizer 用 */
+  isolation: isolate;
+  font-weight: 600;
+  font-size: 11px;
+  text-align: center;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--sheet-border);
+  cursor: default;
+  user-select: none;
+}
+
+.colLetter {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  line-height: 1.2;
+}
+
+.colName {
+  display: block;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.colHead.pk .colName {
+  color: var(--accent-primary);
+}
+
+.rowHead {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: 46px;
+  min-width: 46px;
+  padding: 0 6px;
+  background: var(--sheet-header-bg);
+  font-weight: 400;
+  font-size: 11px;
+  text-align: center;
+  color: var(--text-muted);
+  border-right: 1px solid var(--sheet-border);
+  cursor: default;
+  user-select: none;
+}
+
+.headActive {
+  background: color-mix(in srgb, var(--sheet-focus) 18%, var(--sheet-header-bg));
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.dataCell {
+  padding: 0;
+  height: 24px;
+  max-height: 24px;
+  background: var(--sheet-bg);
+  cursor: cell;
+}
+
+.dataCell .cell,
+.dataCell .cellNull {
+  display: block;
+  padding: 2px 6px;
+  line-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 280px;
+}
+
+.dataCellActive {
+  background: var(--sheet-focus-soft);
+}
+
+.dataCellFocus {
+  box-shadow: inset 0 0 0 2px var(--sheet-focus);
+  z-index: 1;
+  position: relative;
+}
+
+.dataCellReadonly {
+  background: var(--sheet-header-bg);
+  cursor: default;
+}
+
+.cellInputInline {
+  width: 100%;
+  height: 24px;
+  padding: 2px 6px;
+  margin: 0;
+  border: 0;
+  font: inherit;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 20px;
+  background: var(--sheet-bg);
+  color: var(--text-primary);
+  box-shadow: inset 0 0 0 2px var(--sheet-focus);
+}
+
+.cellEmpty {
+  display: block;
+  min-height: 20px;
+}
+
+.emptySheet {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.grid th.pk {
+  color: var(--accent-primary);
+}
+
+.cell {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.cellNull {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.cellBtn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.cellBtn:disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.cellInput {
+  width: 100%;
+  min-width: 120px;
+  padding: 4px 6px;
+  font: inherit;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  border: 1px solid var(--accent-primary);
+  border-radius: 4px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.rowActions {
+  white-space: nowrap;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.status {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.statusErr {
+  color: var(--accent-danger);
+}
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.55);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.modal {
+  width: min(100%, 520px);
+  max-height: 85vh;
+  overflow: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modalTitle {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.field input {
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.historyBtns {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 8px;
+  margin-right: 4px;
+  border-right: 1px solid var(--sheet-border);
+}
+
+.historyCount {
+  margin-left: 4px;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.delimitedBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.delimitedStatus {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+
+.importModal {
+  width: min(100%, 720px);
+}
+
+.importHint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.importOptions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.checkLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.fieldInline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fieldInline select {
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  color: var(--text-primary);
+}
+
+.importTextarea {
+  width: 100%;
+  min-height: 140px;
+  padding: 10px 12px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.45;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  resize: vertical;
+}
+
+.importFileRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.hiddenFile {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.importMeta {
+  color: var(--text-muted);
+}
+
+.importWarnings {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 11px;
+  color: var(--accent-warning, #b8860b);
+}
+
+.previewWrap {
+  max-height: 200px;
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.previewTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.previewTable th,
+.previewTable td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.previewTable th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-elevated);
+  font-weight: 600;
+}
+
+.findBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--sheet-border);
+  background: var(--sheet-header-bg);
+}
+
+.findLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.findInput {
+  width: min(240px, 40vw);
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid var(--sheet-border);
+  border-radius: 4px;
+  background: var(--sheet-bg);
+  color: var(--text-primary);
+}
+
+.statusBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--sheet-border);
+  background: var(--sheet-header-bg);
+}
+
+.statusBarPreview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.colResizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 5px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 3;
+}
+
+.colResizer:hover {
+  background: color-mix(in srgb, var(--sheet-focus) 40%, transparent);
+}
+
+.dataCellFind {
+  background: color-mix(in srgb, #fbbc04 35%, var(--sheet-bg));
+}
+
+.ctxMenu {
+  position: fixed;
+  z-index: 200;
+  min-width: 200px;
+  padding: 4px 0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.ctxMenuItem {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 14px;
+  font-size: 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.ctxMenuItem:hover:not(:disabled) {
+  background: var(--bg-elevated);
+}
+
+.ctxMenuItem:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

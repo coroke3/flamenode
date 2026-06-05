@@ -107,21 +107,21 @@ export default async function EventSlotsPage({
 
   return (
     <div
-      className={styles.page}
+      className={`fn-public-container fn-page ${styles.page}`}
       style={
         {
           "--event-accent": event.accent_color ?? "var(--accent-primary)",
         } as React.CSSProperties
       }
     >
-      <header className={styles.header}>
-        <p className={styles.backLink}>
+      <header className={`fn-slots-head ${styles.header}`}>
+        <p className="fn-page-back">
           <Link href={`/event/${event.id}`}>
             <Icon name="chevron-left" size={12} aria-hidden />
             イベント詳細へ
           </Link>
         </p>
-        <div className={styles.meta}>
+        <div className={`fn-slots-meta ${styles.meta}`}>
           <span className={`fn-badge ${eventStatusBadgeClass(status)}`}>
             {eventStatusLabel(status)}
           </span>
@@ -143,8 +143,8 @@ export default async function EventSlotsPage({
             </span>
           ) : null}
         </div>
-        <h1 className={styles.title}>{event.title} の枠確保</h1>
-        <div className={styles.stats} aria-label="枠の状態">
+        <h1 className={`fn-reserve-title ${styles.title}`}>{event.title} の枠確保</h1>
+        <div className={`fn-slots-stats ${styles.stats}`} aria-label="枠の状態">
           <strong>
             {availableSlots}
             <small>/{slotTotal}</small>

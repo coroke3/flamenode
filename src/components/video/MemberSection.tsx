@@ -343,7 +343,11 @@ function TableView({
   }, []);
 
   return (
-    <div className={styles.tableWrap} role="table" aria-label="参加メンバー">
+    <div
+      className={`fn-table-scroll ${styles.tableWrap}`}
+      role="table"
+      aria-label="参加メンバー"
+    >
       <div className={styles.tableHeader} role="row">
         <SortHeader
           label="活動名"

@@ -1,4 +1,5 @@
-import * as React from "react";
+import * as React from "react";import { FnTable } from "@/components/ui/FnTable";
+
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
@@ -470,7 +471,7 @@ function TableView({
   operatorMap: Map<string, OperatorInfo>;
 }): React.ReactElement {
   return (
-    <table className="fn-table" style={{ marginTop: 8 }}>
+    <FnTable style={{ marginTop: 8 }}>
       <thead>
         <tr>
           <th>日時</th>
@@ -520,7 +521,7 @@ function TableView({
           );
         })}
       </tbody>
-    </table>
+    </FnTable>
   );
 }
 

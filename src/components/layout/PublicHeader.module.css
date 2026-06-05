@@ -2,10 +2,11 @@
   position: sticky;
   top: 0;
   z-index: 30;
+  overflow-x: clip;
   background: color-mix(in srgb, var(--bg-base) 96%, transparent);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline, var(--border-subtle));
   transition:
     background-color 0.2s ease,
     border-color 0.2s ease;
@@ -13,41 +14,14 @@
 
 .bar {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: max-content 1fr max-content;
   align-items: center;
-  gap: 22px;
-  width: min(100% - 40px, 1360px);
-  height: 60px;
-  margin: 0 auto;
-}
-
-.tape {
-  display: none;
-  gap: 30px;
-  height: 24px;
-  align-items: center;
-  overflow: hidden;
-  border-top: 1px solid color-mix(in srgb, var(--hairline) 72%, transparent);
-  color: var(--text-faint, var(--text-muted));
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0;
-  text-transform: lowercase;
-  white-space: nowrap;
-}
-
-.tape span {
-  flex: 0 0 auto;
-  animation: headerTape 56s linear infinite;
-}
-
-@keyframes headerTape {
-  from {
-    transform: translateX(0);
-  }
-  to {
-    transform: translateX(-100vw);
-  }
+  gap: 24px;
+  width: 100%;
+  min-height: var(--header-h);
+  height: auto;
+  padding: 10px 0;
+  margin: 0;
 }
 
 .logoLink {
@@ -61,7 +35,8 @@
   display: none;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  justify-self: center;
+  gap: 4px;
 }
 
 .desktopNavLink {
@@ -70,7 +45,7 @@
   align-items: center;
   min-height: 32px;
   padding: 7px 14px;
-  border-radius: 8px;
+  border-radius: 9px;
   color: var(--text-secondary);
   font-size: 13.5px;
   font-weight: 600;
@@ -180,8 +155,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
   border-radius: var(--radius-pill);
   color: var(--text-primary);
   background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
@@ -210,8 +187,8 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  width: min(100% - 32px, 1320px);
-  margin: 0 auto;
+  width: 100%;
+  margin: 0;
   padding: 16px 0 18px;
 }
 
@@ -258,8 +235,9 @@
   display: flex;
   align-items: center;
   gap: 12px;
+  min-height: 44px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: 9px;
   color: var(--text-secondary);
   font-size: 14px;
   font-weight: 700;
@@ -281,6 +259,16 @@
 
 .mobileLinkActive svg {
   color: var(--accent-primary-strong);
+}
+
+.mobileLinkAccent {
+  color: var(--accent-ink);
+  background: var(--accent-primary);
+}
+
+.mobileLinkAccent:hover {
+  color: var(--accent-ink);
+  background: var(--accent-primary-strong);
 }
 
 .mobileLinkDanger {
@@ -323,28 +311,12 @@
     display: flex;
   }
 
-  .tape {
-    display: none;
-  }
-
   .themeButton {
     display: inline-flex;
   }
 
   .menuToggle {
     display: none;
-  }
-}
-
-@media (min-width: 1180px) {
-  .bar {
-    width: min(100% - 96px, 1360px);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .tape span {
-    animation: none;
   }
 }
 
@@ -406,11 +378,33 @@
 
 @media (max-width: 900px) {
   .bar {
-    width: min(100% - 22px, 1320px);
-    height: 58px;
+    min-height: var(--header-h, 56px);
+    height: auto;
+    gap: 12px;
   }
 
   .desktopNav {
     gap: 18px;
+  }
+}
+
+@media (max-width: 640px) {
+  .mobile {
+    max-height: calc(100dvh - var(--header-h, 56px));
+    padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+  }
+
+  .mobileNav {
+    gap: 10px;
+    padding: 12px 0 14px;
+  }
+
+  .postBtn,
+  .ghostBtn,
+  .loginBtn {
+    min-height: 44px;
+    height: auto;
+    padding-top: 10px;
+    padding-bottom: 10px;
   }
 }

@@ -1,7 +1,7 @@
 .wrap {
-  width: min(100% - 40px, 760px);
-  margin: 0 auto;
-  padding: 40px 0 72px;
+  width: 100%;
+  max-width: none;
+  margin: 0;
 }
 
 .hd {
@@ -22,22 +22,6 @@
 
 .back:hover {
   color: var(--accent-primary);
-}
-
-.title {
-  margin: 0;
-  font-size: clamp(44px, 6vw, 64px);
-  font-weight: 900;
-  line-height: 0.9;
-  letter-spacing: 0;
-}
-
-.lead {
-  margin: 0;
-  font-size: 13px;
-  color: var(--text-muted);
-  line-height: 1.75;
-  max-width: 560px;
 }
 
 .nextRow {
@@ -421,6 +405,23 @@
 }
 
 @media (max-width: 640px) {
+  .wrap {
+    padding-top: 24px;
+    padding-bottom: 48px;
+  }
+
+  .title {
+    font-size: clamp(36px, 9.5vw, 48px);
+    overflow-wrap: anywhere;
+  }
+
+  .cardHd,
+  .activePanel,
+  .discordBadge {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
   .rowHead {
     grid-template-columns: auto 1fr;
   }
@@ -431,8 +432,18 @@
     justify-content: flex-start;
   }
 
+  .rowOps .fn-btn {
+    min-height: 44px;
+  }
+
   .activeBadges {
     margin-left: 0;
     width: 100%;
+  }
+
+  .addRow .fn-btn {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
   }
 }

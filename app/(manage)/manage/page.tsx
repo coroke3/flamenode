@@ -1,25 +1,29 @@
 import * as React from "react";
+import { FnTable } from "@/components/ui/FnTable";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
+import { getEditableEventIds, getManageStaffRoleForEvent } from "@/lib/auth/ownership";
+import { ManageActiveXNotice } from "@/components/layout/ManageActiveXNotice";
 import {
   events as eventsTable,
-  eventStaff as eventStaffTable,
-  eventStaffPermissions as eventStaffPermissionsTable,
   historyLogs as historyLogsTable,
   notificationOutbox as notificationOutboxTable,
   videos as videosTable,
   videoEvents as videoEventsTable,
 } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
 import {
   computeEventStatus,
   eventStatusBadgeClass,
   eventStatusLabel,
 } from "@/lib/utils/eventStatus";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
+import { ManagePageHeader } from "@/components/manage/ManagePageHeader";
 
 export const metadata: Metadata = { title: "イベント運営" };
 export const dynamic = "force-dynamic";
@@ -33,42 +37,18 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
   if (!db) {
     return (
       <div>
-        <h1 style={{ fontSize: 22, fontWeight: 700 }}>イベント運営</h1>
-        <p className="fn-muted fn-text-sm" style={{ marginTop: 8 }}>
-          DB に接続できませんでした。
-        </p>
+        <ManagePageHeader
+          title="イベント運営"
+          description="DB に接続できませんでした。"
+          accent
+        />
       </div>
     );
   }
 
-  const activeX = user.active_x_user_id;
-
-  // event_staff / event_staff_permissions を活性 X ID で参照。X ID 未選択時は空配列を返す。
-  // ただし管理者は全イベントを操作可なので、active X が無くても見える状態にする。
-  const subjectCondition = activeX
-    ? or(
-        eq(eventStaffTable.x_user_id, activeX),
-        eq(eventStaffTable.discord_user_id, user.id),
-      )!
-    : eq(eventStaffTable.discord_user_id, user.id);
-  const staffPermissionRows = await db
-    .select({
-      event_id: eventStaffTable.event_id,
-      role: eventStaffTable.role,
-      approved_at: eventStaffTable.approved_at,
-    })
-    .from(eventStaffTable)
-    .innerJoin(
-      eventStaffPermissionsTable,
-      eq(eventStaffPermissionsTable.event_staff_id, eventStaffTable.id),
-    )
-    .where(and(subjectCondition, eq(eventStaffPermissionsTable.allowed, 1))!);
-  const myEditorRows = Array.from(
-    new Map(staffPermissionRows.map((row) => [row.event_id, row])).values(),
-  );
-
-  const eventIds = myEditorRows.map((r) => r.event_id);
   const isAdmin = user.role === "admin";
+  /** ManageSidebar / canAccessManageEvent と同じ一覧（Active X 非依存） */
+  const eventIds = await getEditableEventIds(db, user.id);
 
   const eventRows = eventIds.length > 0
     ? await db
@@ -138,159 +118,160 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
   // failed 件数集計 (担当イベント分のみ)
   const failedCount = eventNotifications.filter((n) => n.status === "failed").length;
 
-  if (myEditorRows.length === 0) {
+  const staffRoleByEvent = new Map<string, "representative" | "editor" | null>();
+  if (!isAdmin && eventIds.length > 0) {
+    const roles = await Promise.all(
+      eventIds.map(async (eventId) => ({
+        eventId,
+        role: await getManageStaffRoleForEvent(db, user.id, eventId),
+      })),
+    );
+    for (const { eventId, role } of roles) {
+      staffRoleByEvent.set(eventId, role);
+    }
+  }
+
+  if (eventIds.length === 0) {
     return (
       <div>
-        <h1 style={{ fontSize: 22, fontWeight: 700 }}>イベント運営</h1>
-        <p className="fn-muted fn-text-sm" style={{ marginTop: 8 }}>
-          現在、あなたが運営者として登録されているイベントはありません。
-        </p>
-        {isAdmin ? (
-          <p style={{ marginTop: 16, fontSize: 13 }}>
-            管理者の方は <Link href="/admin/events">イベント管理</Link> から、
-            運営者として割り当てるイベントを作成できます。
-          </p>
-        ) : (
-          <p style={{ marginTop: 16, fontSize: 13 }}>
-            イベント主催者にあなたの X ID を登録してもらうと、このページから運営できるようになります。
-          </p>
-        )}
+        <ManagePageHeader
+          title="イベント運営"
+          description="担当イベントの現場運用（審査・枠・通知）です。"
+          accent
+        />
+        <EmptyState
+          tone="warning"
+          title="担当イベントはありません"
+          description={
+            isAdmin
+              ? "イベント運営者として登録されると、この画面から審査・スロット・通知を確認できます。管理者はイベントを作成し、運営メンバーを割り当ててください。"
+              : "イベント主催者にあなたの X ID を運営メンバーとして登録してもらうと、この画面から審査・枠・通知を確認できるようになります。"
+          }
+          actions={
+            isAdmin
+              ? [
+                  { href: "/admin/events", label: "イベント管理へ", variant: "primary" },
+                  { href: "/admin/events/new", label: "新規イベントを作成", variant: "ghost" },
+                ]
+              : [
+                  { href: "/dashboard", label: "ダッシュボードへ", variant: "primary" },
+                  {
+                    href: "/dashboard/settings",
+                    label: "X ID 設定を確認",
+                    variant: "ghost",
+                  },
+                ]
+          }
+        />
       </div>
     );
   }
 
   return (
     <div>
-      <header style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700 }}>イベント運営</h1>
-        <p className="fn-muted fn-text-sm" style={{ marginTop: 4 }}>
-          あなたが担当するイベントの状態・審査待ち・関連履歴を表示します。
-        </p>
-      </header>
+      <ManageActiveXNotice
+        userId={user.id}
+        activeXUserId={user.active_x_user_id}
+      />
+      <ManagePageHeader
+        title="イベント運営"
+        description="あなたが担当するイベントの状態・審査待ち・関連履歴を表示します。"
+        accent
+      >
+        <Link href="/manage/notifications" className="fn-btn fn-btn-ghost fn-btn-sm">
+          <Icon name="alert" size={11} aria-hidden /> 通知センター
+        </Link>
+      </ManagePageHeader>
 
       {failedCount > 0 ? (
-        <div
-          role="status"
-          style={{
-            marginBottom: 14,
-            padding: "10px 14px",
-            background: "var(--accent-danger-soft, #fee2e2)",
-            border: "1px solid var(--accent-danger, #dc2626)",
-            borderRadius: "var(--radius-md)",
-            color: "var(--accent-danger, #991b1b)",
-            fontSize: 13,
-          }}
-        >
+        <div role="status" className="fn-alert fn-alert--danger">
           <strong>担当イベントに失敗通知が {failedCount} 件</strong>
-          {" "}あります。下の「イベント通知」セクションを確認してください。
+          {" "}あります。{" "}
+          <Link href="/manage/notifications?status=failed">通知センターで確認 →</Link>
         </div>
       ) : null}
 
       {eventNotificationSchemaMissing ? (
-        <div
-          role="status"
-          style={{
-            marginBottom: 14,
-            padding: "10px 14px",
-            background: "var(--accent-warning-soft, #fef3c7)",
-            border: "1px solid var(--accent-warning, #d97706)",
-            borderRadius: "var(--radius-md)",
-            color: "var(--text-primary)",
-            fontSize: 13,
-          }}
-        >
+        <div role="status" className="fn-alert fn-alert--warn">
           イベント通知の絞り込みに必要な DB migration が未適用です。
           ローカルでは `npm.cmd run db:local-apply` を実行してください。
         </div>
       ) : null}
 
-      <section style={{ marginTop: 16 }}>
-        <h2
-          style={{
-            fontSize: 13,
-            fontWeight: 700,
-            letterSpacing: "0.18em",
-            color: "var(--text-muted)",
-            textTransform: "uppercase",
-            marginBottom: 10,
-          }}
-        >
-          担当イベント
-        </h2>
-        <div style={{ display: "grid", gap: 10 }}>
+      <section className="fn-console-section fn-console-section--tight">
+        <h2 className="fn-console-eyebrow">担当イベント</h2>
+        <div className="fn-console-stack">
           {eventRows.map((ev) => {
             const status = computeEventStatus(ev);
             const pending = pendingByEvent.get(ev.id) ?? 0;
-            const editor = myEditorRows.find((r) => r.event_id === ev.id);
+            const staffRole = isAdmin
+              ? null
+              : staffRoleByEvent.get(ev.id) ?? null;
             return (
               <article
                 key={ev.id}
-                style={{
-                  padding: "14px 18px",
-                  background: "var(--bg-surface)",
-                  border: "1px solid var(--border-subtle)",
-                  borderRadius: "var(--radius-md)",
-                  display: "flex",
-                  gap: 12,
-                  flexWrap: "wrap",
-                  alignItems: "center",
-                }}
+                className="manage-event-card"
+                style={manageEventAccentStyle(ev.accent_color)}
               >
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <Link
-                      href={`/manage/events/${ev.id}`}
-                      style={{ fontWeight: 700 }}
-                    >
+                <div className="fn-console-event-body">
+                  <div className="fn-console-event-title-row">
+                    <Link href={`/manage/events/${ev.id}`}>
                       {ev.title}
                     </Link>
                     <span className={`fn-badge ${eventStatusBadgeClass(status)}`}>
                       {eventStatusLabel(status)}
                     </span>
-                    <span className="fn-badge fn-badge-soft">
-                      {editor?.role === "representative" ? "代表" : "運営"}
-                    </span>
+                    {!isAdmin ? (
+                      <span className="fn-badge fn-badge-soft">
+                        {staffRole === "representative" ? "代表" : "運営"}
+                      </span>
+                    ) : null}
                     {pending > 0 ? (
                       <span className="fn-badge fn-badge-warning">
                         審査待ち {pending}
                       </span>
                     ) : null}
                   </div>
-                  <div
-                    style={{
-                      marginTop: 4,
-                      fontSize: 12,
-                      color: "var(--text-muted)",
-                    }}
-                  >
+                  <div className="fn-console-event-meta">
                     {ev.start_time ? formatUnix(ev.start_time, { dateOnly: true }) : "—"}
                     {ev.end_time
                       ? ` 〜 ${formatUnix(ev.end_time, { dateOnly: true })}`
                       : ""}
                   </div>
                 </div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <div className="manage-actions">
+                  <Link
+                    href={`/manage/events/${ev.id}`}
+                    className="fn-btn fn-btn-ghost fn-btn-sm"
+                  >
+                    運営トップ
+                  </Link>
+                  <Link
+                    href={`/manage/events/${ev.id}/videos?status=pending`}
+                    className="fn-btn fn-btn-primary fn-btn-sm"
+                  >
+                    <Icon name="check" size={12} aria-hidden /> 審査
+                  </Link>
+                  <Link
+                    href={`/manage/events/${ev.id}/slots`}
+                    className="fn-btn fn-btn-ghost fn-btn-sm"
+                  >
+                    スロット
+                  </Link>
+                  <Link
+                    href={`/event/${ev.id}`}
+                    className="fn-btn fn-btn-ghost fn-btn-sm"
+                  >
+                    公開ページ
+                  </Link>
                   {isAdmin ? (
                     <Link
                       href={`/admin/events/${ev.id}`}
                       className="fn-btn fn-btn-ghost fn-btn-sm"
                     >
-                      <Icon name="settings" size={11} aria-hidden /> 編集
+                      <Icon name="settings" size={12} aria-hidden /> 管理者編集
                     </Link>
                   ) : null}
-                  <Link
-                    href={`/admin/videos?event=${encodeURIComponent(ev.id)}&status=pending`}
-                    className="fn-btn fn-btn-primary fn-btn-sm"
-                  >
-                    <Icon name="check" size={11} aria-hidden /> 審査キュー
-                  </Link>
                 </div>
               </article>
             );
@@ -299,20 +280,9 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
       </section>
 
       {eventNotifications.length > 0 ? (
-        <section style={{ marginTop: 28 }}>
-          <h2
-            style={{
-              fontSize: 13,
-              fontWeight: 700,
-              letterSpacing: "0.18em",
-              color: "var(--text-muted)",
-              textTransform: "uppercase",
-              marginBottom: 10,
-            }}
-          >
-            イベント通知
-          </h2>
-          <table className="fn-table">
+        <section className="fn-console-section">
+          <h2 className="fn-console-eyebrow">イベント通知</h2>
+          <FnTable>
             <thead>
               <tr>
                 <th>日時</th>
@@ -326,22 +296,18 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
                 const ev = eventRows.find((e) => e.id === n.event_id);
                 return (
                   <tr key={n.id}>
-                    <td style={{ whiteSpace: "nowrap" }}>
+                    <td className="fn-td-nowrap">
                       <div>{formatUnix(n.created_at)}</div>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                        {formatRelative(n.created_at)}
-                      </div>
+                      <div className="fn-td-muted">{formatRelative(n.created_at)}</div>
                     </td>
                     <td>
                       {ev ? (
                         <Link href={`/manage/events/${ev.id}`}>{ev.title}</Link>
                       ) : (
-                        <span style={{ fontFamily: "monospace", fontSize: 11 }}>
-                          {n.event_id ?? "—"}
-                        </span>
+                        <span className="fn-td-mono">{n.event_id ?? "—"}</span>
                       )}
                     </td>
-                    <td style={{ fontFamily: "monospace", fontSize: 11 }}>
+                    <td className="fn-td-mono">
                       {n.type}
                     </td>
                     <td>
@@ -361,29 +327,28 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
                 );
               })}
             </tbody>
-          </table>
+          </FnTable>
         </section>
       ) : null}
 
-      <section style={{ marginTop: 28 }}>
-        <h2
-          style={{
-            fontSize: 13,
-            fontWeight: 700,
-            letterSpacing: "0.18em",
-            color: "var(--text-muted)",
-            textTransform: "uppercase",
-            marginBottom: 10,
-          }}
-        >
-          受信箱 (担当イベント関連の更新履歴)
-        </h2>
+      <section className="fn-console-section">
+        <h2 className="fn-console-eyebrow">受信箱 (担当イベント関連の更新履歴)</h2>
         {recentInbox.length === 0 ? (
-          <p className="fn-muted fn-text-sm">
-            <Icon name="check" size={12} aria-hidden /> 直近の更新はありません。
-          </p>
+          <EmptyState
+            tone="success"
+            title="直近の更新はありません"
+            description="担当イベントに関する履歴更新は、ここに表示されます。問題がなければこのままで大丈夫です。"
+            iconName="check"
+            actions={[
+              {
+                href: "/manage",
+                label: "イベント運営トップへ",
+                variant: "ghost",
+              },
+            ]}
+          />
         ) : (
-          <table className="fn-table">
+          <FnTable>
             <thead>
               <tr>
                 <th>日時</th>
@@ -397,19 +362,15 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
                 const ev = eventRows.find((e) => e.id === h.record_id);
                 return (
                   <tr key={h.id}>
-                    <td style={{ whiteSpace: "nowrap" }}>
+                    <td className="fn-td-nowrap">
                       <div>{formatUnix(h.created_at)}</div>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                        {formatRelative(h.created_at)}
-                      </div>
+                      <div className="fn-td-muted">{formatRelative(h.created_at)}</div>
                     </td>
                     <td>
                       {ev ? (
                         <Link href={`/event/${ev.id}`}>{ev.title}</Link>
                       ) : (
-                        <span style={{ fontFamily: "monospace", fontSize: 11 }}>
-                          {h.record_id}
-                        </span>
+                        <span className="fn-td-mono">{h.record_id}</span>
                       )}
                     </td>
                     <td>
@@ -425,14 +386,12 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
                         {h.action}
                       </span>
                     </td>
-                    <td style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                      {h.operator_discord_id ?? "-"}
-                    </td>
+                    <td className="fn-td-muted">{h.operator_discord_id ?? "-"}</td>
                   </tr>
                 );
               })}
             </tbody>
-          </table>
+          </FnTable>
         )}
       </section>
     </div>

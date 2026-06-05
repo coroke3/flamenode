@@ -1,4 +1,5 @@
-import * as React from "react";
+import * as React from "react";import { FnTable } from "@/components/ui/FnTable";
+
 import Link from "next/link";
 import type { Metadata } from "next";
 import { and, desc, eq } from "drizzle-orm";
@@ -120,7 +121,7 @@ export default async function AdminAnnouncementsPage({
         </p>
       </section>
 
-      <table className="fn-table" style={{ marginTop: 18 }}>
+      <FnTable style={{ marginTop: 18 }}>
         <thead>
           <tr>
             <th>タイトル</th>
@@ -193,7 +194,7 @@ export default async function AdminAnnouncementsPage({
             </tr>
           ) : null}
         </tbody>
-      </table>
+      </FnTable>
     </div>
   );
 }

@@ -46,5 +46,33 @@
   border-top: 1px solid var(--border-subtle);
 }
 
+@media (max-width: 640px) {
+  .backdrop {
+    padding: max(12px, env(safe-area-inset-top))
+      max(12px, env(safe-area-inset-right))
+      max(12px, env(safe-area-inset-bottom))
+      max(12px, env(safe-area-inset-left));
+    align-items: flex-end;
+  }
+
+  .dialog {
+    width: 100%;
+    max-height: min(90vh, 100%);
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+
+  .footer {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .footer .fn-btn {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+  }
+}
+
 /* ボタンスタイルは globals.css の fn-btn クラスを className で直接指定するため、
    ここではレイアウト上の補助のみ定義する */

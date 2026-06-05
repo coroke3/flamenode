@@ -7,7 +7,7 @@ import { acceptLatestTerms } from "@/lib/actions/terms";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 import { sanitizeUserHtml } from "@/lib/utils/sanitizeUserHtml";
-import { sanitizeNextPath } from "@/lib/utils/next";
+import { sanitizeNextPath } from "#utils/next";
 
 export const metadata: Metadata = { title: "利用規約" };
 export const dynamic = "force-dynamic";
@@ -111,82 +111,42 @@ export default async function RulesPage({
   const versionLabel = data?.versionLabel ?? "draft-2026-05";
 
   return (
-    <div
-      style={{
-        width: "min(96%, 880px)",
-        margin: "0 auto",
-        padding: "32px 16px 64px",
-      }}
-    >
-      <header style={{ marginBottom: 18, display: "flex", flexDirection: "column", gap: 4 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: "0.04em" }}>
-          利用規約
-        </h1>
-        <p style={{ color: "var(--text-muted)", fontSize: 13 }}>
+    <main className="fn-public-container fn-page">
+      <header className="fn-page-head">
+        <h1 className="fn-page-title fn-page-title--compact">利用規約</h1>
+        <p className="fn-page-lead">
           バージョン: {versionLabel}
           {updatedAt ? ` (更新: ${formatUnix(updatedAt, { dateOnly: true })})` : ""}
         </p>
       </header>
-      <article
-        style={{
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-md)",
-          padding: 28,
-          fontSize: 14,
-          lineHeight: 1.8,
-        }}
-        dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(renderMarkdown(body)) }}
-      />
-      <section
-        style={{
-          marginTop: 24,
-          padding: 22,
-          border: "1px solid var(--border-subtle)",
-          background: "var(--bg-surface)",
-          borderRadius: "var(--radius-md)",
-        }}
-      >
-        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>
-          利用規約への同意
-        </h2>
-        <p style={{ marginTop: 10, fontSize: 13, color: "var(--text-secondary)" }}>
-          枠確保、投稿、いいね、セーブなどの書き込み操作には利用規約への同意が必要です。
-          {next !== "/dashboard" ? " 同意後、元のページへ戻ります。" : ""}
-        </p>
-        <form action={acceptLatestTerms} style={{ marginTop: 18 }}>
-          <input type="hidden" name="next" value={next} />
-          <button type="submit" className="fn-btn fn-btn-primary">
-            利用規約に同意して戻る
-          </button>
-        </form>
-      </section>
-      <section
-        id="event-host"
-        style={{
-          marginTop: 28,
-          padding: 22,
-          border: "1px solid var(--border-subtle)",
-          background: "var(--bg-surface)",
-          borderRadius: "var(--radius-md)",
-        }}
-      >
-        <h2
-          style={{
-            fontSize: 18,
-            fontWeight: 700,
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
-          <Icon name="calendar" size={16} aria-hidden /> イベント開催相談
-        </h2>
-        <p style={{ marginTop: 10, fontSize: 13, color: "var(--text-secondary)" }}>
-          第三者主催イベントを開催したい場合は、Discord またはお問い合わせから運営にご連絡ください。
-          管理者が承認した X ID にイベント編集許可者ロールを付与します。
-        </p>
-      </section>
-    </div>
+      <div className="fn-page-stack">
+        <article
+          className="fn-surface-panel fn-legal-body"
+          dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(renderMarkdown(body)) }}
+        />
+        <section className="fn-surface-panel">
+          <h2 className="fn-panel-title">利用規約への同意</h2>
+          <p className="fn-panel-lead">
+            枠確保、投稿、いいね、セーブなどの書き込み操作には利用規約への同意が必要です。
+            {next !== "/dashboard" ? " 同意後、元のページへ戻ります。" : ""}
+          </p>
+          <form action={acceptLatestTerms} className="fn-panel-actions">
+            <input type="hidden" name="next" value={next} />
+            <button type="submit" className="fn-btn fn-btn-primary">
+              利用規約に同意して戻る
+            </button>
+          </form>
+        </section>
+        <section id="event-host" className="fn-surface-panel">
+          <h2 className="fn-panel-title fn-panel-title--icon">
+            <Icon name="calendar" size={16} aria-hidden /> イベント開催相談
+          </h2>
+          <p className="fn-panel-lead">
+            第三者主催イベントを開催したい場合は、Discord またはお問い合わせから運営にご連絡ください。
+            管理者が承認した X ID にイベント編集許可者ロールを付与します。
+          </p>
+        </section>
+      </div>
+    </main>
   );
 }

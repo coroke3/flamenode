@@ -17,6 +17,7 @@ import {
 } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 export const metadata: Metadata = { title: "管理ダッシュボード" };
 export const dynamic = "force-dynamic";
@@ -231,6 +232,8 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
     tone: Tone;
   }>;
 
+  const pendingTotal = items.reduce((sum, item) => sum + item.value, 0);
+
   return (
     <div>
       <AdminPageHeader
@@ -240,12 +243,8 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
 
       <section
         aria-labelledby="pending-counts"
-        style={{
-          marginTop: 22,
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
-          gap: 12,
-        }}
+        className="fn-admin-stat-grid"
+        style={{ marginTop: 22 }}
       >
         <h2 id="pending-counts" className="fn-sr-only">
           対応待ち件数
@@ -254,6 +253,22 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
           <PendingCountCard key={item.label} {...item} />
         ))}
       </section>
+
+      {pendingTotal === 0 ? (
+        <div style={{ marginTop: 20 }}>
+          <EmptyState
+            tone="success"
+            title="対応待ちはありません"
+            description="現在、管理者がすぐに処理すべき申請・通知失敗・モデレーションはありません。"
+            iconName="check"
+            actions={[
+              { href: "/admin/events", label: "イベント管理へ", variant: "primary" },
+              { href: "/admin/videos", label: "作品管理へ", variant: "ghost" },
+              { href: "/admin/health", label: "ヘルスチェックを見る", variant: "ghost" },
+            ]}
+          />
+        </div>
+      ) : null}
 
       <section
         style={{

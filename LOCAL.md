@@ -260,6 +260,12 @@ npx wrangler d1 execute flamenode_db --local --command "UPDATE system_settings S
 管理者でログインしている場合は `/admin/cost-guard` から UI で操作できます。
 `/admin/cost-guard` では最新 `cost_usage_snapshots`、推奨 mode、`cost_guard_thresholds_json`、一時例外期限も確認・編集できます。
 
+### 6-3. 管理画面 DB スプレッドシート (オプション)
+
+`.dev.vars` に `ADMIN_SPREADSHEET_ENABLED="true"` を設定し、管理者でログインすると `/admin/spreadsheet` がサイドバーに表示されます。全 D1 テーブルを表形式で閲覧・編集できます（認証トークン列はマスク・編集不可、`history_logs` / `cost_usage_snapshots` は読み取り専用）。
+
+CSV / TSV: ツールバーからエクスポート（ダウンロード・クリップボード）とインポート（貼り付け・ファイル・区切り自動/CSV/TSV・ヘッダー行・UPSERT/INSERT）が使えます。インポートは最大 500 行、エクスポートは最大 5000 行です。
+
 ---
 
 ## 7. Worker (Cron) のローカル実行

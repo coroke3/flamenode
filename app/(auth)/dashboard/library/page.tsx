@@ -90,38 +90,16 @@ export default async function DashboardLibraryPage({
     : null;
 
   return (
-    <div
-      style={{
-        width: "min(96%, var(--content-max))",
-        margin: "0 auto",
-        padding: "28px 16px 64px",
-      }}
-    >
-      <header style={{ marginBottom: 18 }}>
-        <p
-          style={{
-            color: "var(--text-muted)",
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: "0.18em",
-            textTransform: "uppercase",
-          }}
-        >
-          LIBRARY
-        </p>
-        <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "0.04em" }}>
-          ライブラリ
-        </h1>
-        <p style={{ marginTop: 6, color: "var(--text-muted)", fontSize: 13 }}>
+    <div className="fn-public-container fn-page">
+      <header className="fn-page-head fn-library-head">
+        <span className="fn-eyebrow">library</span>
+        <h1 className="fn-display fn-page-title">ライブラリ</h1>
+        <p className="fn-jp fn-page-lead">
           自分がいいね・セーブした作品を一覧表示します。
         </p>
       </header>
 
-      <nav
-        role="tablist"
-        style={{ display: "flex", gap: 6, marginBottom: 16 }}
-        aria-label="ライブラリ種別"
-      >
+      <nav role="tablist" className="fn-tab-row" aria-label="ライブラリ種別">
         <Link
           role="tab"
           aria-selected={tab === "like"}
@@ -165,25 +143,18 @@ export default async function DashboardLibraryPage({
         </div>
       ) : (
         <>
-          <div style={{ display: "flex", gap: 8, marginBottom: 14, alignItems: "center" }}>
+          <div className="fn-toolbar">
             <span className="fn-muted fn-text-sm">{videos.length} 件</span>
             {firstVideoHref ? (
               <Link
                 href={firstVideoHref}
-                className="fn-btn fn-btn-primary fn-btn-sm"
-                style={{ marginLeft: "auto" }}
+                className="fn-btn fn-btn-primary fn-btn-sm fn-toolbar-spacer"
               >
                 <Icon name="play" size={12} aria-hidden /> 最初の作品を見る
               </Link>
             ) : null}
           </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-              gap: 16,
-            }}
-          >
+          <div className="fn-media-grid">
             {videos.map((v, index) => (
               <div key={`${v.id}-library-${index}`}>
                 <VideoCard video={v} />

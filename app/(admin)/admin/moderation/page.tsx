@@ -1,4 +1,5 @@
-import * as React from "react";
+import * as React from "react";import { FnTable } from "@/components/ui/FnTable";
+
 import Link from "next/link";
 import type { Metadata } from "next";
 import { and, desc, eq, lt } from "drizzle-orm";
@@ -127,7 +128,7 @@ export default async function AdminModerationPage({
       </form>
 
       <section style={{ marginTop: 18 }}>
-        <table className="fn-table">
+        <FnTable>
           <thead>
             <tr>
               <th>状態</th>
@@ -167,7 +168,7 @@ export default async function AdminModerationPage({
                   </td>
                   <td>
                     {row.related_x_user_id ? (
-                      <Link href={`/admin/users/${encodeURIComponent(row.related_x_user_id)}`}>
+                      <Link href={`/user/${encodeURIComponent(row.related_x_user_id)}`}>
                         @{row.related_x_user_id}
                       </Link>
                     ) : (
@@ -237,7 +238,7 @@ export default async function AdminModerationPage({
               </tr>
             ) : null}
           </tbody>
-        </table>
+        </FnTable>
       </section>
     </div>
   );

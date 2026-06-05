@@ -27,7 +27,7 @@ function CreatorList({ onNav }) {
         <header className="fn-cr-head">
           <div>
             <span className="fn-eyebrow">creators — 412 artists</span>
-            <h1 className="fn-display fn-cr-title">Creators</h1>
+            <h1 className="fn-display fn-cr-title">クリエイター</h1>
             <span className="fn-jp fn-cr-sub">作家インデックス。投稿数・参加イベント数で検索/並び替え。</span>
           </div>
           <div className="fn-cr-controls">
@@ -35,7 +35,7 @@ function CreatorList({ onNav }) {
               {[
                 { id: "featured", label: "Featured" },
                 { id: "videos",   label: "Most works" },
-                { id: "alpha",    label: "A — Z" },
+                { id: "alpha",    label: "50音順" },
               ].map(o => (
                 <button key={o.id} className={"fn-cr-seg-btn " + (sort === o.id ? "is-active" : "")} onClick={() => setSort(o.id)}>
                   <span>{o.label}</span>
@@ -53,7 +53,7 @@ function CreatorList({ onNav }) {
         {view === "grid" ? (
           <div className="fn-cr-grid">
             {display.map((c, i) => (
-              <article key={c.id + "-" + i} className="fn-cr-tile" onClick={() => onNav("video", { video: topVideo[c.id]?.id })}>
+              <article key={c.id + "-" + i} className="fn-cr-tile" onClick={() => onNav("creatorProfile", { creator: c.id })}>
                 <div className="fn-cr-tile-avatar">{c.name.charAt(0)}</div>
                 <div className="fn-cr-tile-body">
                   <h3 className="fn-cr-tile-name">{c.name}</h3>

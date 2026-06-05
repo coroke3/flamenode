@@ -9,7 +9,7 @@
   background:
     linear-gradient(90deg, color-mix(in srgb, var(--event-accent, var(--accent-primary)) 12%, transparent), transparent 36%),
     var(--bg-surface);
-  border: 1px solid var(--border-subtle);
+  border: 0;
   color: var(--text-primary);
   overflow: hidden;
   box-shadow: none;

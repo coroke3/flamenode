@@ -1,0 +1,37 @@
+/* 管理・運営画面のスマホ最適化（admin-manage.css / mobile-public.css と併用） */
+
+@media (max-width: 640px) {
+  [data-admin-shell] .admin-main .fn-btn,
+  [data-manage-shell] .manage-main .fn-btn {
+    min-height: 44px;
+  }
+
+  [data-admin-shell] .admin-main .fn-btn-sm,
+  [data-manage-shell] .manage-main .fn-btn-sm {
+    min-height: 40px;
+  }
+
+  /* 管理トップ等の KPI グリッド */
+  .fn-admin-stat-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* 管理ページヘッダー操作 */
+  [data-admin-shell] .admin-main header .fn-btn,
+  [data-manage-shell] .manage-main header .fn-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  [data-admin-shell] .admin-main header,
+  [data-manage-shell] .manage-main header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  [data-manage-shell] .manage-shell > header {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+}

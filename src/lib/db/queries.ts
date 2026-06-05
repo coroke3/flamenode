@@ -5,14 +5,21 @@ import {
   videos,
   videoEvents,
   videoMembers,
-  videoStats,
   xUsers,
 } from "./schema";
 import { creatorIconExpr, creatorNameExpr } from "./displayExpr";
 import { resolveMissingIcons } from "./iconResolution";
-import { withMissingColumnFallback } from "./queryFallback";
+import {
+  withMissingColumnFallback,
+  withVideoScoreFallback,
+} from "./queryFallback";
 import type { DB } from "./client";
 import { uniqueBy } from "@/lib/utils/unique";
+import {
+  coalescedVideoScore,
+  coalescedVideoScoreAsc,
+  coalescedVideoScoreDesc,
+} from "./videoScoreSql";
 
 const nullVideoPart = sql<string | null>`NULL`;
 
@@ -29,28 +36,33 @@ async function withVideoPartFallback<T>(
 export const publicVideoCondition = eq(videos.visibility_status, "public");
 export const directVideoCondition = sql`${videos.visibility_status} IN ('public', 'limited')`;
 
-/** トップページのおすすめ作品候補 (video_stats.score 上位 N 件)。 */
+/** トップページのおすすめ作品候補（videos.score 上位。列未適用 DB は新着順）。 */
 export async function fetchRecommendedVideos(db: DB, limit = 40) {
-  const rows = await withVideoPartFallback((includePart) =>
-    db
-      .select({
-        id: videos.id,
-        title: videos.title,
-        youtube_video_id: videos.youtube_video_id,
-        display_name: creatorNameExpr,
-        icon_url: creatorIconExpr,
-        creator_x_user_id: videos.creator_x_user_id,
-        primary_event_id: videos.primary_event_id,
-        scheduled_time: videos.scheduled_time,
-        part: includePart ? videos.part : nullVideoPart,
-        video_score: sql<number>`COALESCE(${videoStats.score}, 0)`,
-      })
-      .from(videos)
-      .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
-      .leftJoin(videoStats, eq(videoStats.video_id, videos.id))
-      .where(publicVideoCondition)
-      .orderBy(desc(videoStats.score), desc(videos.scheduled_time))
-      .limit(limit),
+  const rows = await withVideoScoreFallback((hasScore) =>
+    withVideoPartFallback((includePart) =>
+      db
+        .select({
+          id: videos.id,
+          title: videos.title,
+          youtube_video_id: videos.youtube_video_id,
+          display_name: creatorNameExpr,
+          icon_url: creatorIconExpr,
+          creator_x_user_id: videos.creator_x_user_id,
+          primary_event_id: videos.primary_event_id,
+          scheduled_time: videos.scheduled_time,
+          part: includePart ? videos.part : nullVideoPart,
+          ...(hasScore ? { video_score: coalescedVideoScore } : {}),
+        })
+        .from(videos)
+        .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
+        .where(publicVideoCondition)
+        .orderBy(
+          ...(hasScore
+            ? [coalescedVideoScoreDesc, desc(videos.scheduled_time)]
+            : [desc(videos.scheduled_time)]),
+        )
+        .limit(limit),
+    ),
   );
   return resolveMissingIcons(db, uniqueBy(rows, (row) => row.id));
 }
@@ -60,7 +72,7 @@ export async function fetchRecommendedVideos(db: DB, limit = 40) {
  *
  * 単純に score 上位だけだと毎回同じ作品が顔を出すため、
  * 公開作品のうち score が低めの候補を新しい順で混ぜる。
- * video_stats が未集計で 0 の作品も初期本番では自然に露出させる。
+ * score 未適用 DB では scheduled_time ベースのフォールバックになる。
  * 呼び出し側 (`/recommend`) で `limitByCreatorAndEvent` を通して、作者・
  * イベントの偏りを抑えて 6 件程度に絞る前提の候補プール。
  *
@@ -68,29 +80,31 @@ export async function fetchRecommendedVideos(db: DB, limit = 40) {
  * なる。将来的に signals が揃ったら別関数に置き換える。
  */
 export async function fetchUnderratedVideos(db: DB, limit = 60) {
-  const rows = await withVideoPartFallback((includePart) =>
-    db
-      .select({
-        id: videos.id,
-        title: videos.title,
-        youtube_video_id: videos.youtube_video_id,
-        display_name: creatorNameExpr,
-        icon_url: creatorIconExpr,
-        creator_x_user_id: videos.creator_x_user_id,
-        primary_event_id: videos.primary_event_id,
-        scheduled_time: videos.scheduled_time,
-        part: includePart ? videos.part : nullVideoPart,
-        video_score: sql<number>`COALESCE(${videoStats.score}, 0)`,
-      })
-      .from(videos)
-      .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
-      .leftJoin(videoStats, eq(videoStats.video_id, videos.id))
-      .where(publicVideoCondition)
-      .orderBy(
-        asc(sql<number>`COALESCE(${videoStats.score}, 0)`),
-        desc(videos.scheduled_time),
-      )
-      .limit(limit),
+  const rows = await withVideoScoreFallback((hasScore) =>
+    withVideoPartFallback((includePart) =>
+      db
+        .select({
+          id: videos.id,
+          title: videos.title,
+          youtube_video_id: videos.youtube_video_id,
+          display_name: creatorNameExpr,
+          icon_url: creatorIconExpr,
+          creator_x_user_id: videos.creator_x_user_id,
+          primary_event_id: videos.primary_event_id,
+          scheduled_time: videos.scheduled_time,
+          part: includePart ? videos.part : nullVideoPart,
+          ...(hasScore ? { video_score: coalescedVideoScore } : {}),
+        })
+        .from(videos)
+        .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
+        .where(publicVideoCondition)
+        .orderBy(
+          ...(hasScore
+            ? [coalescedVideoScoreAsc, desc(videos.scheduled_time)]
+            : [asc(videos.scheduled_time), desc(videos.id)]),
+        )
+        .limit(limit),
+    ),
   );
   return resolveMissingIcons(db, uniqueBy(rows, (row) => row.id));
 }

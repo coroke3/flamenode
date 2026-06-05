@@ -56,9 +56,16 @@
 @media (max-width: 640px) {
   .panel {
     display: block;
+    padding: 16px;
   }
 
   .action {
     margin-top: 14px;
+  }
+
+  .action :global(.fn-btn) {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
   }
 }

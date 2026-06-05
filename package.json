@@ -3,6 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "imports": {
+    "#utils/delimited": "./src/lib/utils/delimited.ts",
+    "#utils/next": "./src/lib/utils/next.ts",
+    "#utils/xid": "./src/lib/utils/xid.ts",
+    "#utils/clipboard-html": "./src/lib/utils/clipboardHtml.ts",
+    "#spreadsheet/constants": "./src/lib/admin/spreadsheet/constants.ts",
+    "#spreadsheet/cellFormat": "./src/lib/admin/spreadsheet/cellFormat.ts",
+    "#spreadsheet/validation": "./src/lib/admin/spreadsheet/validation.ts",
+    "#spreadsheet/paste": "./src/lib/admin/spreadsheet/paste.ts",
+    "#spreadsheet/grid-find": "./src/lib/admin/spreadsheet/gridFind.ts"
+  },
   "description": "FlameNode - 個人制作映像とイベントをつなぐ動画プラットフォーム。",
   "scripts": {
     "dev": "node -r ./scripts/load-dev-vars.cjs node_modules/next/dist/bin/next dev",
@@ -25,6 +36,7 @@
     "test:notif": "node --test --experimental-strip-types src/lib/notifications/format.test.mjs",
     "test:youtube": "node --test --experimental-strip-types src/lib/youtube/id.test.mjs",
     "test:unit": "node --test --experimental-strip-types workers/**/*.test.mjs src/**/*.test.mjs",
+    "test:static-rebuild": "node --test scripts/static-rebuild.test.mjs",
     "pages:build": "next-on-pages",
     "pages:dev": "next-on-pages && wrangler pages dev .vercel/output/static --compatibility-flag=nodejs_compat --d1=DB --r2=BUCKET --kv=KV",
     "preview": "wrangler pages dev"

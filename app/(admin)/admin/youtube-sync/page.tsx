@@ -1,4 +1,6 @@
 import * as React from "react";
+import { FnTable } from "@/components/ui/FnTable";
+
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
@@ -13,7 +15,11 @@ import {
 import { queueYoutubeMetadataResync } from "@/lib/actions/youtube-sync-admin";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { Icon } from "@/components/ui/Icon";
-import { formatCount, formatUnix } from "@/lib/utils/format";
+import {
+  formatCount,
+  formatDuration as formatDurationSec,
+  formatUnix,
+} from "@/lib/utils/format";
 
 export const metadata: Metadata = { title: "YouTube同期状態" };
 export const dynamic = "force-dynamic";
@@ -69,13 +75,7 @@ function visibilityBadgeClass(status: string): string {
 
 function formatDuration(sec: number | null): string {
   if (sec == null) return "-";
-  const total = Math.max(0, Math.floor(sec));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  return h > 0
-    ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
-    : `${m}:${String(s).padStart(2, "0")}`;
+  return formatDurationSec(sec);
 }
 
 export default async function AdminYoutubeSyncPage({
@@ -228,7 +228,7 @@ export default async function AdminYoutubeSyncPage({
       </p>
 
       <div style={{ marginTop: 10, overflowX: "auto" }}>
-        <table className="fn-table" style={{ minWidth: 1180 }}>
+        <FnTable style={{ minWidth: 1180 }}>
           <thead>
             <tr>
               <th>作品</th>
@@ -342,7 +342,7 @@ export default async function AdminYoutubeSyncPage({
               ))
             )}
           </tbody>
-        </table>
+        </FnTable>
       </div>
     </div>
   );

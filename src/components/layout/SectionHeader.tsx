@@ -8,6 +8,9 @@ interface SectionHeaderProps {
   moreLabel?: string;
 }
 
+/**
+ * 公開面セクション見出し（claudedesign / Standalone 準拠）
+ */
 export function SectionHeader({
   title,
   description,
@@ -15,18 +18,21 @@ export function SectionHeader({
   moreLabel = "もっと見る",
 }: SectionHeaderProps): React.ReactElement {
   return (
-    <div className="fn-section-header">
-      <div className="fn-section-header-center">
-        <h2 className="fn-section-title">{title}</h2>
-        {description ? (
-          <p className="fn-section-description">{description}</p>
-        ) : null}
+    <header className="fn-section-head">
+      <div className="fn-section-head-left">
+        <div className="fn-section-titles">
+          <h2 className="fn-display fn-section-title">{title}</h2>
+          {description ? (
+            <span className="fn-section-jp fn-jp">{description}</span>
+          ) : null}
+        </div>
       </div>
       {moreHref ? (
         <Link href={moreHref} className="fn-section-more">
-          {moreLabel} →
+          {moreLabel}
+          <span aria-hidden>→</span>
         </Link>
       ) : null}
-    </div>
+    </header>
   );
 }

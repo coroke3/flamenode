@@ -1,6 +1,7 @@
 import * as React from "react";
 import { getDatabase } from "@/lib/cloudflare";
 import { systemSettings } from "@/lib/db/schema";
+import styles from "./CostGuardBanner.module.css";
 
 type Mode = "normal" | "economy" | "read_only" | "static_only" | "maintenance";
 
@@ -69,21 +70,18 @@ export async function CostGuardBanner(): Promise<React.ReactElement | null> {
     <div
       role="status"
       aria-live="polite"
+      className={styles.banner}
       style={{
         background: tone.bg,
-        borderBottom: `1px solid ${tone.border}`,
+        borderBottomColor: tone.border,
         color: tone.color,
-        padding: "6px 14px",
-        fontSize: 12,
-        display: "flex",
-        gap: 8,
-        flexWrap: "wrap",
-        alignItems: "center",
       }}
     >
-      <strong>{tone.label}:</strong>
-      <span>{tone.description}</span>
-      {reason ? <em style={{ fontStyle: "normal" }}>(理由: {reason})</em> : null}
+      <div className={`fn-public-container ${styles.inner}`}>
+        <strong>{tone.label}:</strong>
+        <span>{tone.description}</span>
+        {reason ? <em className={styles.reason}>(理由: {reason})</em> : null}
+      </div>
     </div>
   );
 }

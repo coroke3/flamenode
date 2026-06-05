@@ -17,7 +17,7 @@ function ListPage({ onNav }) {
         <header className="fn-cr-head">
           <div>
             <span className="fn-eyebrow">archive — {videos.length} works</span>
-            <h1 className="fn-display fn-cr-title">Video archive</h1>
+            <h1 className="fn-display fn-cr-title">作品一覧</h1>
             <span className="fn-jp fn-cr-sub">作品インデックス</span>
           </div>
           <div className="fn-cr-controls">

@@ -22,6 +22,10 @@ const timeOnlyFormatter = new Intl.DateTimeFormat("ja-JP", {
 
 function toValidUnixSec(value: unknown): number | null {
   if (value == null) return null;
+  if (value instanceof Date) {
+    const ms = value.getTime();
+    return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+  }
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
   if (typeof value === "string") {
     const trimmed = value.trim();

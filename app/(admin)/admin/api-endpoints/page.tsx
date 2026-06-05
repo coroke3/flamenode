@@ -1,4 +1,5 @@
-import * as React from "react";
+import * as React from "react";import { FnTable } from "@/components/ui/FnTable";
+
 import Link from "next/link";
 import type { Metadata } from "next";
 import { desc, eq } from "drizzle-orm";
@@ -142,7 +143,7 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
       </section>
 
       <section style={{ marginTop: 22 }}>
-        <table className="fn-table">
+        <FnTable>
           <thead>
             <tr>
               <th>状態</th>
@@ -205,7 +206,7 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
               </tr>
             ) : null}
           </tbody>
-        </table>
+        </FnTable>
       </section>
 
       <section

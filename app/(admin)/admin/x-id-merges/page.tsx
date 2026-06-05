@@ -1,4 +1,5 @@
-import * as React from "react";
+import * as React from "react";import { FnTable } from "@/components/ui/FnTable";
+
 import Link from "next/link";
 import type { Metadata } from "next";
 import { desc } from "drizzle-orm";
@@ -166,7 +167,7 @@ function MergeRequestTable({
 }): React.ReactElement {
   return (
     <section style={{ marginTop: 22 }}>
-      <table className="fn-table">
+      <FnTable>
         <thead>
           <tr>
             <th>状態</th>
@@ -198,11 +199,11 @@ function MergeRequestTable({
                 </td>
                 <td>
                   <div>
-                    <Link href={`/admin/users/${encodeURIComponent(row.from_x_user_id)}`}>
+                    <Link href={`/user/${encodeURIComponent(row.from_x_user_id)}`}>
                       @{row.from_x_user_id}
                     </Link>
                     {" → "}
-                    <Link href={`/admin/users/${encodeURIComponent(row.to_x_user_id)}`}>
+                    <Link href={`/user/${encodeURIComponent(row.to_x_user_id)}`}>
                       @{row.to_x_user_id}
                     </Link>
                   </div>
@@ -282,7 +283,7 @@ function MergeRequestTable({
             </tr>
           ) : null}
         </tbody>
-      </table>
+      </FnTable>
     </section>
   );
 }
@@ -294,7 +295,7 @@ function RevertTable({
 }): React.ReactElement {
   return (
     <section style={{ marginTop: 22 }}>
-      <table className="fn-table">
+      <FnTable>
         <thead>
           <tr>
             <th>状態</th>
@@ -344,7 +345,7 @@ function RevertTable({
             </tr>
           ) : null}
         </tbody>
-      </table>
+      </FnTable>
     </section>
   );
 }

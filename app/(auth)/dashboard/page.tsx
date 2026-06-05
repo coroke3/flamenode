@@ -182,24 +182,24 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
     (dashboardName.trim().charAt(0) || user.name?.trim().charAt(0) || "F").toUpperCase();
 
   return (
-    <div className={styles.page}>
-      <header className={styles.accountHeader}>
-        <div className={styles.accountIdentity}>
+    <div className={`fn-public-container fn-page fn-dash ${styles.page}`}>
+      <header className={`fn-dash-head ${styles.accountHeader}`}>
+        <div className={`fn-dash-id ${styles.accountIdentity}`}>
           {dashboardIcon ? (
             /* eslint-disable-next-line @next/next/no-img-element */
-            <img src={dashboardIcon} alt="" className={styles.accountAvatar} />
+            <img src={dashboardIcon} alt="" className={`fn-dash-avatar ${styles.accountAvatar}`} />
           ) : (
-            <span className={styles.accountAvatarFallback}>
+            <span className={`fn-dash-avatar-fallback ${styles.accountAvatarFallback}`}>
               {dashboardInitial}
             </span>
           )}
-          <div className={styles.accountText}>
-            <span className={styles.eyebrow}>my account</span>
-            <h1>{dashboardName}</h1>
-            <span className={styles.handle}>{dashboardHandle}</span>
+          <div className="fn-dash-id-text">
+            <span className="fn-eyebrow">my account</span>
+            <h1 className="fn-display fn-dash-name">{dashboardName}</h1>
+            <span className="fn-mono fn-dash-handle">{dashboardHandle}</span>
           </div>
         </div>
-        <div className={styles.accountActions}>
+        <div className={`fn-dash-actions ${styles.accountActions}`}>
           <Link href="/dashboard/settings" className="fn-btn fn-btn-ghost fn-btn-sm">
             <Icon name="settings" size={13} aria-hidden />
             設定
@@ -211,17 +211,25 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
         </div>
       </header>
 
+      {!db ? (
+        <div className="fn-empty" role="status">
+          <p className="fn-empty-message">
+            データを読み込めませんでした。しばらくしてからページを再読み込みしてください。
+          </p>
+        </div>
+      ) : null}
+
       <HeroCard slot={mySlot} event={mySlotEvent} />
 
-      <section className={styles.statsGrid}>
+      <section className={`fn-dash-kpis ${styles.statsGrid}`} aria-label="アカウント統計">
         <Stat label="累計いいね" value={stats.likes.toLocaleString()} />
         <Stat label="累計再生数" value={stats.views.toLocaleString()} />
         <Stat label="投稿作品" value={`${stats.video_count} 本`} />
         <Stat label="参加イベント" value={`${stats.event_count} 本`} />
       </section>
 
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>連携 X ID</h2>
+      <section className={`fn-dash-section ${styles.section}`}>
+        <h2 className={`fn-dash-section-title ${styles.sectionTitle}`}>連携 X ID</h2>
         {xIds.length === 0 ? (
           <div className="fn-empty">
             <Icon name="user" size={20} aria-hidden />
@@ -264,8 +272,8 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
         )}
       </section>
 
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>マイ・ギャラリー</h2>
+      <section className={`fn-dash-section ${styles.section}`}>
+        <h2 className={`fn-dash-section-title ${styles.sectionTitle}`}>マイ・ギャラリー</h2>
         {myVideos.length === 0 ? (
           <div className="fn-empty">
             <Icon name="grid" size={20} aria-hidden />
@@ -280,7 +288,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
             </Link>
           </div>
         ) : (
-          <div className={styles.galleryGrid}>
+          <div className={`fn-gallery-grid ${styles.galleryGrid}`}>
             {myVideos.map((v, index) => (
               <div key={`${v.id}-video-${index}`}>
                 <VideoCard video={v} href={`/dashboard/edit/${v.id}`} />
@@ -290,8 +298,8 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
         )}
       </section>
 
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>自分のチャプターコメント</h2>
+      <section className={`fn-dash-section ${styles.section}`}>
+        <h2 className={`fn-dash-section-title ${styles.sectionTitle}`}>自分のチャプターコメント</h2>
         {myChapters.length === 0 ? (
           <div className="fn-empty">
             <Icon name="chapter" size={20} aria-hidden />
@@ -300,23 +308,22 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
             </p>
           </div>
         ) : (
-          <div style={{ display: "grid", gap: 8 }}>
+          <div className="fn-stack-list">
             {myChapters.map((chapter) => (
               <Link
                 key={chapter.id}
                 href={`/${chapter.youtube_video_id ?? chapter.video_id}`}
-                className="fn-card"
-                style={{ padding: 12, textDecoration: "none" }}
+                className="fn-card fn-stack-item"
               >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                  <strong style={{ color: "var(--text-primary)" }}>
+                <div className="fn-stack-item-head">
+                  <strong className="fn-stack-item-title">
                     {chapter.chapter_label}
                   </strong>
                   <span className={`fn-badge ${chapter.visibility === "private" ? "fn-badge-warning" : "fn-badge-accent"}`}>
                     {chapter.visibility === "private" ? "非公開" : "公開"}
                   </span>
                 </div>
-                <div style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 12 }}>
+                <div className="fn-stack-item-meta">
                   {chapter.video_title ?? chapter.video_id} / {Math.floor(chapter.chapter_time)}秒 / {formatRelative(chapter.created_at)}
                 </div>
               </Link>
@@ -336,9 +343,9 @@ function Stat({
   value: string;
 }): React.ReactElement {
   return (
-    <div className={styles.statCard}>
-      <div className={styles.statLabel}>{label}</div>
-      <div className={styles.statValue}>{value}</div>
+    <div className={`fn-dash-kpi ${styles.statCard}`}>
+      <span className="fn-dash-kpi-v">{value}</span>
+      <span className="fn-dash-kpi-k fn-jp">{label}</span>
     </div>
   );
 }
@@ -385,27 +392,13 @@ function HeroCard({
           : undefined
       }
     >
-      <div className={`fn-card ${cardStyles}`} style={{ marginBottom: 24 }}>
+      <div className={`fn-card fn-highlight-card ${cardStyles}`}>
         <div className="fn-card-body">
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              marginBottom: 8,
-              color: "var(--accent-warning)",
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: "0.18em",
-              textTransform: "uppercase",
-            }}
-          >
+          <div className="fn-highlight-card-kicker">
             <Icon name="alert" size={12} aria-hidden /> アクティブスロット
           </div>
-          <h2 style={{ fontSize: 20, fontWeight: 700 }}>
-            {event.title}
-          </h2>
-          <p style={{ marginTop: 6, fontSize: 13, color: "var(--text-secondary)" }}>
+          <h2 className="fn-highlight-card-title">{event.title}</h2>
+          <p className="fn-highlight-card-lead">
             {slot.start_time
               ? `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(
                   slot.start_time,
@@ -419,7 +412,7 @@ function HeroCard({
               ? ` · 確保期限 ${formatRelative(slot.priority_reclaim_until)}`
               : ""}
           </p>
-          <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+          <div className="fn-highlight-card-actions">
             {slot.status === "submitted" && slot.video_id ? (
               <>
                 <Link

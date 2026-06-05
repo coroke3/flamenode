@@ -72,6 +72,16 @@ function reservationGroupScope(groupId: string, row: SlotRow) {
   )!;
 }
 
+function revalidateSlotViews(eventId: string): void {
+  revalidatePath(`/event/${eventId}`);
+  revalidatePath(`/event/${eventId}/slots`);
+  revalidatePath(`/manage/events/${eventId}/slots`);
+  revalidatePath(`/manage/events/${eventId}`);
+  revalidatePath("/manage");
+  revalidatePath(`/admin/events/${eventId}/slots`);
+  revalidatePath("/dashboard");
+}
+
 export async function reserveSlot(
   formData: FormData,
 ): Promise<SlotReserveResult> {
@@ -203,10 +213,7 @@ export async function reserveSlot(
     created_at: now,
   });
 
-  revalidatePath(`/event/${slotRow.event_id}`);
-  revalidatePath(`/event/${slotRow.event_id}/slots`);
-  revalidatePath(`/admin/events/${slotRow.event_id}/slots`);
-  revalidatePath("/dashboard");
+  revalidateSlotViews(slotRow.event_id);
   return { ok: true, slotId: parsed.data.slot_id };
 }
 
@@ -295,10 +302,7 @@ export async function releaseOwnSlot(
       retention_class: "normal",
       created_at: now,
     });
-    revalidatePath(`/event/${slotRow.event_id}`);
-    revalidatePath(`/event/${slotRow.event_id}/slots`);
-    revalidatePath(`/admin/events/${slotRow.event_id}/slots`);
-    revalidatePath("/dashboard");
+    revalidateSlotViews(slotRow.event_id);
     return { ok: true, slotId };
   }
 
@@ -419,10 +423,7 @@ export async function releaseOwnSlot(
     created_at: now,
   });
 
-  revalidatePath(`/event/${slotRow.event_id}`);
-  revalidatePath(`/event/${slotRow.event_id}/slots`);
-  revalidatePath(`/admin/events/${slotRow.event_id}/slots`);
-  revalidatePath("/dashboard");
+  revalidateSlotViews(slotRow.event_id);
   return { ok: true, slotId };
 }
 
@@ -574,10 +575,7 @@ export async function extendOwnSlotGroup(
     created_at: now,
   });
 
-  revalidatePath(`/event/${anchor.event_id}`);
-  revalidatePath(`/event/${anchor.event_id}/slots`);
-  revalidatePath(`/admin/events/${anchor.event_id}/slots`);
-  revalidatePath("/dashboard");
+  revalidateSlotViews(anchor.event_id);
   return { ok: true, slotId: candidate.id };
 }
 
@@ -761,9 +759,6 @@ export async function mergeOwnSlotGroups(
     created_at: now,
   });
 
-  revalidatePath(`/event/${gap.event_id}`);
-  revalidatePath(`/event/${gap.event_id}/slots`);
-  revalidatePath(`/admin/events/${gap.event_id}/slots`);
-  revalidatePath("/dashboard");
+  revalidateSlotViews(gap.event_id);
   return { ok: true, slotId: gap.id };
 }

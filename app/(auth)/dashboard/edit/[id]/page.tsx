@@ -4,7 +4,6 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { and, asc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
-import { isMissingDbObjectError } from "@/lib/db/optionalObjects";
 import {
   events as eventsTable,
   // 旧 videoCollaborators テーブルは廃止 (移行先 = video_members.can_edit)。
@@ -16,10 +15,11 @@ import {
 } from "@/lib/db/schema";
 import { inArray } from "drizzle-orm";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
+import { VideoEditPermissionSummary } from "@/components/video/VideoEditPermissionSummary";
 import {
-  VideoCollabPermsManager,
-  type VideoCollabSubject,
-} from "@/components/admin/VideoCollabPermsManager";
+  computeEditPermissionSummary,
+  loadVideoCollabSubjects,
+} from "@/lib/video/collabPerms";
 import { requireSession } from "@/lib/auth/guard";
 import { canEditVideo } from "@/lib/auth/ownership";
 import { VideoForm } from "@/components/forms/VideoForm";
@@ -63,95 +63,51 @@ function PrivilegeModeBanner({
   const base = `/dashboard/edit/${encodeURIComponent(videoId)}`;
   if (mode === "admin") {
     return (
-      <div
-        role="status"
-        style={{
-          marginTop: 10,
-          padding: "8px 12px",
-          border: "1px solid var(--accent-danger, #b91c1c)",
-          background:
-            "color-mix(in srgb, var(--accent-danger, #b91c1c) 10%, transparent)",
-          color: "var(--accent-danger, #b91c1c)",
-          borderRadius: "var(--radius-sm)",
-          fontSize: 12,
-          fontWeight: 600,
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "center",
-          gap: 8,
-        }}
-      >
+      <div role="status" className="fn-privilege-banner fn-privilege-banner--admin">
         <Icon name="alert" size={12} aria-hidden />
         管理者権限で編集中。提出主体や所属イベントの変更が可能です。
-        {canOfferEventMode ? (
-          <Link
-            href={`${base}?privileged=event`}
-            className="fn-btn fn-btn-ghost fn-btn-sm"
-          >
-            イベント運営権限で編集
+        <span className="fn-privilege-banner-actions">
+          {canOfferEventMode ? (
+            <Link
+              href={`${base}?privileged=event`}
+              className="fn-btn fn-btn-ghost fn-btn-sm"
+            >
+              イベント運営権限で編集
+            </Link>
+          ) : null}
+          <Link href={base} className="fn-btn fn-btn-ghost fn-btn-sm">
+            通常モードへ戻る
           </Link>
-        ) : null}
-        <Link href={base} className="fn-btn fn-btn-ghost fn-btn-sm" style={{ marginLeft: "auto" }}>
-          通常モードへ戻る
-        </Link>
+        </span>
       </div>
     );
   }
   if (mode === "event") {
     return (
-      <div
-        role="status"
-        style={{
-          marginTop: 10,
-          padding: "8px 12px",
-          border: "1px solid var(--event-accent, var(--accent-primary))",
-          background: "var(--bg-surface)",
-          borderRadius: "var(--radius-sm)",
-          fontSize: 12,
-          fontWeight: 600,
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "center",
-          gap: 8,
-        }}
-      >
+      <div role="status" className="fn-privilege-banner fn-privilege-banner--event">
         <Icon name="users" size={12} aria-hidden />
         イベント運営権限で編集中。
-        {isAdmin ? (
-          <Link
-            href={`${base}?privileged=admin`}
-            className="fn-btn fn-btn-ghost fn-btn-sm"
-          >
-            管理者権限で編集
+        <span className="fn-privilege-banner-actions">
+          {isAdmin ? (
+            <Link
+              href={`${base}?privileged=admin`}
+              className="fn-btn fn-btn-ghost fn-btn-sm"
+            >
+              管理者権限で編集
+            </Link>
+          ) : null}
+          <Link href={base} className="fn-btn fn-btn-ghost fn-btn-sm">
+            通常モードへ戻る
           </Link>
-        ) : null}
-        <Link href={base} className="fn-btn fn-btn-ghost fn-btn-sm" style={{ marginLeft: "auto" }}>
-          通常モードへ戻る
-        </Link>
+        </span>
       </div>
     );
   }
   // normal: 切替ボタンを表示する (admin / event editor のみ)。
-  // admin と canOfferEventMode が両立する場合は両方表示。どちらもない場合は
-  // 上位で早期 return されるためここには来ない。
   return (
-    <div
-      style={{
-        marginTop: 10,
-        padding: "6px 10px",
-        border: "1px dashed var(--border-subtle)",
-        background: "var(--bg-surface)",
-        borderRadius: "var(--radius-sm)",
-        fontSize: 11.5,
-        color: "var(--text-muted)",
-        display: "flex",
-        flexWrap: "wrap",
-        alignItems: "center",
-        gap: 8,
-      }}
-    >
+    <div role="status" className="fn-privilege-banner fn-privilege-banner--normal">
       <Icon name="info" size={11} aria-hidden /> 通常編集モード (作品オーナー / 合作メンバー の権限のみ)
-      <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+      <span className="fn-privilege-banner-actions">
         {isAdmin ? (
           <Link
             href={`${base}?privileged=admin`}
@@ -171,45 +127,6 @@ function PrivilegeModeBanner({
       </span>
     </div>
   );
-}
-
-async function loadVideoCollabSubjects(
-  db: NonNullable<ReturnType<typeof getDatabase>>,
-  videoId: string,
-): Promise<{ subjects: VideoCollabSubject[]; tableAvailable: boolean }> {
-  // video_collaborators 廃止に伴い、video_members.can_edit を正本として読む。
-  // (旧テーブルは migration 0016 でデータ移行済み)
-  try {
-    const rows = await db
-      .select({
-        x_user_id: videoMembers.x_user_id,
-        discord_user_id: videoMembers.discord_user_id,
-        display_name: videoMembers.name,
-        can_edit: videoMembers.can_edit,
-        is_public_member: videoMembers.is_public_member,
-      })
-      .from(videoMembers)
-      .where(eq(videoMembers.video_id, videoId));
-
-    return {
-      tableAvailable: true,
-      subjects: rows
-        // can_edit=1 (共同編集者) または非公開メンバーだけを「権限管理対象」として返す。
-        // 表示専用メンバー (is_public_member=1 かつ can_edit=0) は権限 UI で個別管理しない。
-        .filter((row) => row.can_edit === 1 || row.is_public_member === 0)
-        .map((row) => ({
-          x_user_id: row.x_user_id,
-          discord_user_id: row.discord_user_id,
-          display_name: row.display_name,
-          can_edit: row.can_edit,
-        })),
-    };
-  } catch (error) {
-    if (isMissingDbObjectError(error, "video_members")) {
-      return { subjects: [], tableAvailable: false };
-    }
-    throw error;
-  }
 }
 
 export default async function EditVideoPage({
@@ -251,15 +168,24 @@ export default async function EditVideoPage({
       role: videoMembers.role,
       comment: videoMembers.comment,
       order_index: videoMembers.order_index,
+      can_edit: videoMembers.can_edit,
+      is_public_member: videoMembers.is_public_member,
     })
     .from(videoMembers)
-    .where(eq(videoMembers.video_id, video.id))
+    .where(
+      and(
+        eq(videoMembers.video_id, video.id),
+        eq(videoMembers.is_public_member, 1),
+      )!,
+    )
     .orderBy(videoMembers.order_index);
   const initialMembers = memberRows.map((m) => ({
     name: m.name,
     x_user_id: m.x_user_id ?? "",
     role: m.role ?? "",
     comment: m.comment ?? "",
+    can_edit: m.can_edit,
+    is_public_member: m.is_public_member,
   }));
   const creatorX = video.creator_x_user_id;
   const xRow = creatorX
@@ -336,6 +262,12 @@ export default async function EditVideoPage({
   // 作品単位の合作メンバー編集権限。subject ごと 1 行 (can_edit ON/OFF)。
   const { subjects: videoCollabSubjects, tableAvailable: videoCollabTableAvailable } =
     await loadVideoCollabSubjects(db, video.id);
+  const permissionSummary = computeEditPermissionSummary(videoCollabSubjects, {
+    viewerDiscordId: user.id,
+    ownerDiscordId: video.submitted_by_discord_user_id,
+  });
+  const privilegedQs =
+    privilegeMode === "normal" ? "" : `?privileged=${privilegeMode}`;
 
   // 通常チャプターコメントの投稿は公開動画詳細ページに戻したが、CSV 一括登録だけは
   // 編集権限を持つユーザー向けにこの編集ページから行う。
@@ -406,35 +338,25 @@ export default async function EditVideoPage({
 
   if (!canEditAnySection && !canShowPrivilegeSwitchOnly) {
     return (
-      <div
-        style={{
-          width: "min(96%, 720px)",
-          margin: "60px auto",
-          padding: "48px 28px",
-          background: "var(--bg-surface)",
-          border: "1px solid var(--accent-warning)",
-          borderRadius: "var(--radius-md)",
-          textAlign: "center",
-        }}
-      >
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: "var(--accent-warning)" }}>
-          編集権限がありません
-        </h1>
-        <p style={{ marginTop: 12, color: "var(--text-secondary)" }}>
-          この作品の作者本人、または担当イベントの運営のみが編集できます。
-        </p>
-        <div style={{ marginTop: 18, display: "flex", justifyContent: "center", gap: 8 }}>
-          <Link href="/dashboard" className="fn-btn fn-btn-ghost">
-            ダッシュボードへ
-          </Link>
-          <Link
-            href={`/${video.youtube_video_id ?? video.id}`}
-            className="fn-btn fn-btn-primary"
-          >
-            公開ページを見る
-          </Link>
+      <main className="fn-public-container fn-page fn-guard-shell">
+        <div className="fn-status-panel fn-status-panel--center fn-status-panel--warn">
+          <h1 className="fn-guard-title fn-guard-title--warn">編集権限がありません</h1>
+          <p className="fn-status-panel-lead">
+            この作品の作者本人、または担当イベントの運営のみが編集できます。
+          </p>
+          <div className="fn-panel-actions fn-panel-actions--row">
+            <Link href="/dashboard" className="fn-btn fn-btn-ghost">
+              ダッシュボードへ
+            </Link>
+            <Link
+              href={`/${video.youtube_video_id ?? video.id}`}
+              className="fn-btn fn-btn-primary"
+            >
+              公開ページを見る
+            </Link>
+          </div>
         </div>
-      </div>
+      </main>
     );
   }
 
@@ -469,39 +391,11 @@ export default async function EditVideoPage({
   ].filter((v): v is string => Boolean(v));
 
   return (
-    <div
-      style={{
-        width: "min(96%, 960px)",
-        margin: "0 auto",
-        padding: "28px 16px 64px",
-      }}
-    >
-      <header style={{ marginBottom: 22 }}>
-        <p
-          style={{
-            color: "var(--text-muted)",
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: "0.18em",
-            textTransform: "uppercase",
-          }}
-        >
-          EDIT
-        </p>
-        <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "0.04em" }}>
-          {video.title}
-        </h1>
-        <p
-          style={{
-            marginTop: 6,
-            color: "var(--text-muted)",
-            fontSize: 13,
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
+    <div className="fn-public-container fn-page">
+      <header className="fn-page-head">
+        <p className="fn-eyebrow">EDIT</p>
+        <h1 className="fn-page-title fn-page-title--compact">{video.title}</h1>
+        <p className="fn-page-meta">
           現在の状態:
           <span className="fn-badge fn-badge-soft">{video.visibility_status}</span>
           {video.youtube_video_id ? (
@@ -576,56 +470,28 @@ export default async function EditVideoPage({
         submitBlockedReason={submitBlockedReason}
       />
 
-      <p
-        style={{
-          marginTop: 18,
-          color: "var(--text-muted)",
-          fontSize: 12,
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 6,
-        }}
-      >
+      <p className="fn-page-footnote">
         <Icon name="info" size={12} aria-hidden /> 編集権限はこの作品の作者と
         管理者にのみ付与されます。イベント運営は許可された項目のみ編集可能です。
       </p>
 
-      {canEditIdentity && !videoCollabTableAvailable ? (
-        <section className="fn-card" style={{ marginTop: 24 }}>
-          <div className="fn-card-header">
-            <h2 className="fn-card-title">合作メンバー編集権限は準備中です</h2>
-          </div>
-          <div className="fn-card-body">
-            <p style={{ color: "var(--text-muted)", lineHeight: 1.8, margin: 0 }}>
-              ローカルDBに video_members.can_edit がまだありません。
-              npm.cmd run db:local-apply で migration を適用すると、この管理欄を使えます。
-            </p>
-          </div>
-        </section>
-      ) : null}
-
       {canEditIdentity &&
-      videoCollabTableAvailable &&
-      // 個人作品 (collaboration_type !== "collab") では合作メンバー編集権限の概念が不要。
-      // 既に collab 権限行があるレガシー作品もありうるため、その場合は引き続き表示する。
-      (video.collaboration_type === "collab" || videoCollabSubjects.length > 0) ? (
-        <section className="fn-card" style={{ marginTop: 24 }}>
-          <div className="fn-card-header">
-            <h2 className="fn-card-title">参加者の編集権限</h2>
-          </div>
-          <div className="fn-card-body">
-            <VideoCollabPermsManager
-              videoId={video.id}
-              subjects={videoCollabSubjects}
-            />
-          </div>
-        </section>
+      (video.collaboration_type === "collab" ||
+        videoCollabSubjects.length > 0 ||
+        !videoCollabTableAvailable) ? (
+        <VideoEditPermissionSummary
+          videoId={video.id}
+          summary={permissionSummary}
+          canManage={canEditIdentity}
+          tableAvailable={videoCollabTableAvailable}
+          privilegedQuery={privilegedQs}
+        />
       ) : null}
 
       {/* 通常チャプターコメントの投稿は公開動画詳細ページに戻された。
           メンバーチャプターは VideoMembersField で扱う (将来の Phase 5)。 */}
 
-      <div style={{ marginTop: 24 }}>
+      <div className="fn-page-footer-actions">
         <Link href="/dashboard" className="fn-btn fn-btn-ghost">
           ダッシュボードへ戻る
         </Link>

@@ -30,6 +30,8 @@ import { InteractionButton } from "@/components/video/InteractionButton";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 import { MemberSection } from "@/components/video/MemberSection";
 import { Icon } from "@/components/ui/Icon";
+import { JsonLd } from "@/components/seo/JsonLd";
+import { absoluteUrl, buildPageMetadata, compactText } from "@/lib/seo";
 import { formatUnix } from "@/lib/utils/format";
 import {
   computeEventStatus,
@@ -51,14 +53,26 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     return fetchVideoDetail(db, id);
   });
   if (!detail) return { title: id };
-  return {
+  const videoPath = `/${detail.video.youtube_video_id ?? detail.video.id}`;
+  const description = compactText(
+    detail.video.intro_comment ||
+      detail.video.highlights ||
+      [
+        detail.video.music ? `使用楽曲: ${detail.video.music}` : null,
+        detail.video.credit ? `クレジット: ${detail.video.credit}` : null,
+      ]
+        .filter(Boolean)
+        .join(" / "),
+  );
+  return buildPageMetadata({
     title: `${detail.video.title} - ${detail.video.creator_display_name}`,
-    openGraph: {
-      images: detail.video.youtube_video_id
-        ? [`https://i.ytimg.com/vi/${detail.video.youtube_video_id}/maxresdefault.jpg`]
-        : undefined,
-    },
-  };
+    description,
+    path: videoPath,
+    image: detail.video.youtube_video_id
+      ? `https://i.ytimg.com/vi/${detail.video.youtube_video_id}/maxresdefault.jpg`
+      : detail.video.creator_icon_url,
+    noIndex: detail.video.visibility_status !== "public",
+  });
 }
 
 export default async function VideoDetailPage({
@@ -261,6 +275,36 @@ export default async function VideoDetailPage({
   const youtubeId = video.youtube_video_id
     ? extractYoutubeId(video.youtube_video_id)
     : null;
+  const seoDescription = compactText(
+    video.intro_comment ||
+      video.highlights ||
+      video.production_story ||
+      video.closing_comment ||
+      (video.music ? `使用楽曲: ${video.music}` : null),
+  );
+  const videoJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "VideoObject",
+    name: video.title,
+    description: seoDescription,
+    url: absoluteUrl(`/${video.youtube_video_id ?? video.id}`),
+    thumbnailUrl: youtubeId
+      ? [`https://i.ytimg.com/vi/${youtubeId}/maxresdefault.jpg`]
+      : undefined,
+    uploadDate: new Date(
+      (video.scheduled_time ?? video.created_at) * 1000,
+    ).toISOString(),
+    embedUrl: youtubeId ? `https://www.youtube.com/embed/${youtubeId}` : undefined,
+    contentUrl: youtubeId ? `https://www.youtube.com/watch?v=${youtubeId}` : undefined,
+    author: {
+      "@type": "Person",
+      name: creatorName,
+      url:
+        creatorId && creatorId !== "anonymous"
+          ? absoluteUrl(`/user/${creatorId}`)
+          : undefined,
+    },
+  };
 
   const primaryEvent =
     events.find((e) => e.id === video.primary_event_id) ?? events[0] ?? null;
@@ -286,7 +330,7 @@ export default async function VideoDetailPage({
   }));
 
   const authorBlock = (
-    <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+    <span className="fn-vd-author">
       {creatorIcon ? (
         /* eslint-disable-next-line @next/next/no-img-element */
         <img src={creatorIcon} alt="" className={styles.authorIcon} />
@@ -363,11 +407,15 @@ export default async function VideoDetailPage({
     ) : null;
 
   return (
-    <div className={styles.page} style={accentVar}>
+    <div
+      className={`fn-vd fn-public-container fn-page ${styles.page}`}
+      style={accentVar}
+    >
+      <JsonLd data={videoJsonLd} />
       <div className={styles.layout}>
         <article className={styles.main}>
-          <div className={styles.topStrip}>
-            <div className={styles.breadcrumb}>
+          <div className="fn-vd-topstrip">
+            <div className="fn-vd-breadcrumb">
               <Link href="/list">archive</Link>
               <span>/</span>
               {primaryEvent ? (
@@ -376,11 +424,11 @@ export default async function VideoDetailPage({
                 <span>no-event</span>
               )}
               <span>/</span>
-              <span className={styles.breadcrumbCurrent}>
+              <span className="fn-vd-breadcrumb-current">
                 {video.youtube_video_id ?? video.id}
               </span>
             </div>
-            <div className={styles.topActions}>
+            <div className="fn-vd-topactions">
               {primaryEvent ? (
                 <Link
                   href={`/event/${primaryEvent.id}`}
@@ -455,7 +503,9 @@ export default async function VideoDetailPage({
                       videoId={video.id}
                       kind="like"
                       initialActive={likeActive}
-                      count={stats?.app_like_count ?? 0}
+                      count={
+                        stats?.app_like_count ?? video.app_like_count ?? 0
+                      }
                       {...interactionGate}
                     />
                     <InteractionButton
@@ -511,18 +561,8 @@ export default async function VideoDetailPage({
           ) : null}
 
           {events.length > 1 ? (
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                alignItems: "center",
-                gap: 6,
-                marginTop: 4,
-                fontSize: 12,
-              }}
-              aria-label="その他の所属イベント"
-            >
-              <span style={{ color: "var(--text-muted)" }}>他の所属</span>
+            <div className="fn-vd-event-tags" aria-label="その他の所属イベント">
+              <span className="fn-vd-event-tags-label">他の所属</span>
               {events
                 .filter((e) => !primaryEvent || e.id !== primaryEvent.id)
                 .map((e) => (
@@ -530,7 +570,6 @@ export default async function VideoDetailPage({
                     key={e.id}
                     href={`/event/${e.id}`}
                     className="fn-badge fn-badge-soft"
-                    style={{ textDecoration: "none" }}
                   >
                     {e.title}
                   </Link>
@@ -546,11 +585,7 @@ export default async function VideoDetailPage({
                     href={video.music_reference_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 4,
-                    }}
+                    className="fn-vd-meta-link"
                   >
                     <span>
                       {video.music}
@@ -589,9 +624,7 @@ export default async function VideoDetailPage({
                   {video.production_story ? (
                     <section>
                       <h4 className={styles.inlineMetaTitle}>制作エピソード</h4>
-                      <p style={{ margin: "4px 0 0", lineHeight: 1.7 }}>
-                        {video.production_story}
-                      </p>
+                      <p className="fn-vd-meta-body">{video.production_story}</p>
                     </section>
                   ) : null}
                   {video.closing_comment ? (
@@ -666,20 +699,7 @@ export default async function VideoDetailPage({
               settingsHref={`/dashboard/settings?next=${encodeURIComponent(`/${rawId}`)}`}
             />
           ) : (
-            <section
-              style={{
-                border: "1px solid var(--border-subtle)",
-                background: "var(--bg-card)",
-                borderRadius: "var(--radius-md)",
-                padding: 12,
-                fontSize: 12,
-                color: "var(--text-muted)",
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                flexWrap: "wrap",
-              }}
-            >
+            <section className="fn-vd-login-panel">
               <span>
                 <Icon name="info" size={12} aria-hidden /> ログインするとチャプターコメントを投稿できます。
               </span>
@@ -712,7 +732,7 @@ function RelatedList({
   return (
     <div className={styles.relatedList}>
       {videos.length === 0 ? (
-        <p className="fn-empty-message" style={{ padding: 8 }}>
+        <p className="fn-empty-message">
           関連動画はまだありません。
         </p>
       ) : (

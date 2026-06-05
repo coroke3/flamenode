@@ -1,3 +1,8 @@
+import { createRequire } from "node:module";
+
+// next.config 評価時点で .dev.vars を読む（RSC ワーカーとフラグ判定のずれ防止）
+createRequire(import.meta.url)("./scripts/load-dev-vars.cjs");
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,

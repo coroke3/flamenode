@@ -1,26 +1,45 @@
 import * as React from "react";
 import type { Metadata } from "next";
 import "@/styles/globals.css";
+import { redesignFontClassName } from "@/components/layout/RedesignFonts";
 import { ThemeBootstrap } from "@/components/layout/ThemeBootstrap";
-
-const SITE_NAME = "FlameNode";
-const SITE_DESCRIPTION =
-  "映像（フレーム）の結節点（ノード）。YouTube埋め込みを利用した動画プラットフォーム。イベント参加手続きと第三者イベント開催に対応。";
+import {
+  SITE_DESCRIPTION,
+  SITE_NAME,
+  absoluteUrl,
+  getSiteUrl,
+} from "@/lib/seo";
 
 export const metadata: Metadata = {
+  metadataBase: getSiteUrl(),
   title: { default: SITE_NAME, template: `%s | ${SITE_NAME}` },
   description: SITE_DESCRIPTION,
   applicationName: SITE_NAME,
+  alternates: { canonical: absoluteUrl("/") },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+      "max-video-preview": -1,
+    },
+  },
   openGraph: {
     siteName: SITE_NAME,
     title: SITE_NAME,
     description: SITE_DESCRIPTION,
+    url: absoluteUrl("/"),
     type: "website",
+    images: [{ url: absoluteUrl("/logo.png"), alt: SITE_NAME }],
   },
   twitter: {
     card: "summary_large_image",
     title: SITE_NAME,
     description: SITE_DESCRIPTION,
+    images: [absoluteUrl("/logo.png")],
   },
   icons: {
     icon: "/logo.png",
@@ -30,7 +49,7 @@ export const metadata: Metadata = {
 
 export const viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f8fafc" },
+    { media: "(prefers-color-scheme: light)", color: "#fbfaf5" },
     { media: "(prefers-color-scheme: dark)", color: "#0b0d10" },
   ],
 };
@@ -41,7 +60,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }): React.ReactElement {
   return (
-    <html lang="ja" suppressHydrationWarning>
+    <html
+      lang="ja"
+      className={redesignFontClassName}
+      data-theme="dark"
+      suppressHydrationWarning
+    >
       <head>
         <ThemeBootstrap />
       </head>

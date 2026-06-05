@@ -20,11 +20,11 @@ export default async function PublicLayout({
   }
 
   return (
-    <>
+    <div data-fn-surface="public" className="fn-public-shell fn-app">
       <CostGuardBanner />
       <PublicHeader user={headerUser} />
-      <main className="flex-1 w-full">{children}</main>
+      <main className="fn-main flex-1 w-full">{children}</main>
       <PublicFooter />
-    </>
+    </div>
   );
 }

@@ -158,6 +158,63 @@ export async function cancelNotification(
 }
 
 /**
+ * dedupe を無視して同内容を再 enqueue する (管理者限定)。
+ */
+export async function forceResendNotification(
+  formData: FormData,
+): Promise<NotificationAdminResult> {
+  const session = await auth().catch(() => null);
+  const u = session?.user as { id?: string; role?: string } | undefined;
+  if (!u?.id || u.role !== "admin") {
+    return { ok: false, message: "管理者のみ操作できます。" };
+  }
+
+  const id = String(formData.get("id") ?? "").trim();
+  if (!id) return { ok: false, message: "id が必要です。" };
+
+  const db = getDatabase();
+  if (!db) return { ok: false, message: "DB に接続できません。" };
+
+  const target = (
+    await db
+      .select()
+      .from(notificationOutbox)
+      .where(eq(notificationOutbox.id, id))
+      .limit(1)
+  )[0];
+  if (!target) return { ok: false, message: "通知が見つかりません。" };
+
+  let payload: Record<string, unknown>;
+  try {
+    payload = JSON.parse(target.payload_json) as Record<string, unknown>;
+  } catch {
+    return { ok: false, message: "payload の解析に失敗しました。" };
+  }
+
+  const { enqueueNotification } = await import("@/lib/notifications/enqueue");
+  const { runWithNotificationBehavior } = await import("@/lib/notifications/context");
+  const ok = await runWithNotificationBehavior("user", () =>
+    enqueueNotification(db, {
+      discordUserId: target.discord_user_id,
+      type: target.type,
+      payload,
+      eventId: target.event_id,
+      dedupeKey: target.dedupe_key
+        ? `${target.dedupe_key}:force:${Date.now()}`
+        : null,
+      force: true,
+    }),
+  );
+
+  if (!ok) {
+    return { ok: false, message: "再送の enqueue に失敗しました。" };
+  }
+
+  revalidatePath("/admin/notifications");
+  return { ok: true, message: "通知を再送キューに追加しました。" };
+}
+
+/**
  * failed 通知の一括リトライ。
  * MAX 件数を上限 (50) で打ち切り、attempt_count を 0 に戻す。
  * 履歴には件数だけ残す (個々の id は残さない、ボリュームが大きいため)。

@@ -14,9 +14,12 @@ function TopPage({ onNav, lang, forceStatus }) {
       {/* ── Intro band ──────────────────────────────── */}
       <section className="fn-wrap fn-intro">
         <div className="fn-intro-meta">
-          <h1 className="fn-display fn-intro-title">
-            Video<br /><span className="fn-intro-accent">Nodes</span>
-          </h1>
+          <div className="fn-intro-hero">
+            <h1 className="fn-display fn-intro-copy">
+              映像の、<br />
+              <span className="fn-intro-copy-accent">結節点。</span>
+            </h1>
+          </div>
           <p className="fn-intro-lead fn-jp">
             個人制作映像のアーカイブと、イベントを束ねるプラットフォーム。
           </p>

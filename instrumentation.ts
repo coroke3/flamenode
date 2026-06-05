@@ -18,6 +18,14 @@ import type { Miniflare as MiniflareType } from "miniflare";
  */
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
+
+  try {
+    const req = eval("require") as NodeRequire;
+    req("./scripts/load-dev-vars.cjs");
+  } catch {
+    /* dev preload 済みなら無視 */
+  }
+
   if (process.env.LOCAL_BINDINGS === "0") return;
   if (
     process.argv.some((arg) => arg.includes("build")) ||
@@ -198,6 +206,12 @@ async function repairLocalSchemaDrift(DB: LocalD1Database): Promise<void> {
     await ensureColumn(
       DB,
       "events",
+      "parts_json",
+      "ALTER TABLE `events` ADD `parts_json` text",
+    );
+    await ensureColumn(
+      DB,
+      "events",
       "entry_start_time",
       "ALTER TABLE `events` ADD `entry_start_time` integer",
     );
@@ -225,6 +239,38 @@ async function repairLocalSchemaDrift(DB: LocalD1Database): Promise<void> {
       "video_form_settings_json",
       "ALTER TABLE `events` ADD `video_form_settings_json` text",
     );
+  }
+
+  if (await tableExists(DB, "videos")) {
+    await ensureColumn(
+      DB,
+      "videos",
+      "part",
+      "ALTER TABLE `videos` ADD `part` text",
+    );
+  }
+
+  if (
+    (await tableExists(DB, "events")) &&
+    !(await tableExists(DB, "event_templates"))
+  ) {
+    console.log("[instrumentation] Applying event_templates migration 0022");
+    await applyMigrationFile(DB, "0022_event_templates.sql");
+  }
+
+  if (!(await tableExists(DB, "static_rebuild_queue"))) {
+    console.log("[instrumentation] Applying static_rebuild_queue migration 0023");
+    await applyMigrationFile(DB, "0023_static_rebuild_queue.sql");
+  }
+
+  if (
+    (await tableExists(DB, "videos")) &&
+    !(await columnExists(DB, "videos", "used_software_json"))
+  ) {
+    console.log(
+      "[instrumentation] Applying legacy import DB reduction prep migration 0024",
+    );
+    await applyMigrationFile(DB, "0024_legacy_import_db_reduction_prep.sql");
   }
 
   if (await tableExists(DB, "notification_outbox")) {

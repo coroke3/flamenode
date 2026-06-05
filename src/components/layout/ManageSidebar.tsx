@@ -3,20 +3,19 @@ import Link from "next/link";
 import { inArray } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
-import { getEditableEventIds } from "@/lib/auth/ownership";
+import {
+  getEditableEventIds,
+  getManageStaffXUserIds,
+  shouldWarnManageActiveXMismatch,
+} from "@/lib/auth/ownership";
 import { events as eventsTable } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
+import styles from "./ManageSidebar.module.css";
 
 /**
  * /manage 配下のクイックナビ。担当イベント一覧を左サイドに表示する。
  *
- * 担当判定は user.active_x_user_id 単体ではなく、Discord ユーザーに紐づく
- * 承認済み X ID 全件 (`getApprovedXIds`) で `event_staff.x_user_id` を一致させる。
- *
- * これにより、運営権限を持つ X ID が active になっていない場合や、Discord に
- * 複数の運営 X ID が紐づいている場合でも、サイドバーで担当イベントを確認できる。
- * (旧コードは active X 不一致で空表示になり、ManageLayout が入場を許可しても
- *  サイドバーが空、という権限まわりの UX 不整合が起きていた)
+ * 担当判定は Active X ではなく getEditableEventIds（承認済み X ID 全体 + Discord）。
  */
 export async function ManageSidebar(): Promise<React.ReactElement | null> {
   const u = await getCurrentUser();
@@ -25,106 +24,58 @@ export async function ManageSidebar(): Promise<React.ReactElement | null> {
   if (!db) return null;
 
   const eventIds = await getEditableEventIds(db, u.id);
-  if (eventIds.length === 0) return null;
 
-  const events = await db
-    .select({ id: eventsTable.id, title: eventsTable.title })
-    .from(eventsTable)
-    .where(inArray(eventsTable.id, eventIds));
+  const events =
+    eventIds.length > 0
+      ? await db
+          .select({
+            id: eventsTable.id,
+            title: eventsTable.title,
+            accent_color: eventsTable.accent_color,
+          })
+          .from(eventsTable)
+          .where(inArray(eventsTable.id, eventIds))
+      : [];
 
-  // 運営権限のある X ID と現在の Active X ID がズレていないか確認する。
-  // ズレている場合は「投稿主体 = Active X ID」「運営主体 = 承認済み X ID のどれか」が
-  // 不一致なので、サイドバー上部に注意書きを出す。
-  const activeX = u.active_x_user_id;
-  const activeMatchesEditor = true;
+  const activeX = u.active_x_user_id?.trim() || null;
+  const manageStaffXIds = await getManageStaffXUserIds(db, u.id, eventIds);
+  const warnActiveX = shouldWarnManageActiveXMismatch(activeX, manageStaffXIds);
 
   return (
-    <aside
-      style={{
-        width: 220,
-        minWidth: 200,
-        background: "var(--bg-surface)",
-        border: "1px solid var(--border-subtle)",
-        borderRadius: "var(--radius-md)",
-        padding: "12px 10px",
-        alignSelf: "flex-start",
-        position: "sticky",
-        top: 76,
-      }}
-    >
-      <p
-        style={{
-          fontSize: 10,
-          fontWeight: 700,
-          letterSpacing: "0.16em",
-          color: "var(--text-muted)",
-          textTransform: "uppercase",
-          marginBottom: 8,
-          padding: "0 4px",
-        }}
-      >
-        MANAGE
-      </p>
-      {!activeMatchesEditor ? (
-        <p
-          style={{
-            margin: "0 0 8px",
-            padding: "6px 8px",
-            fontSize: 11,
-            color: "var(--text-secondary)",
-            background: "var(--accent-warning-soft, rgba(255,200,0,0.08))",
-            border: "1px solid var(--accent-warning, #c08a00)",
-            borderRadius: "var(--radius-sm)",
-            lineHeight: 1.4,
-          }}
-        >
-          運営操作は可能ですが、投稿・表示主体は現在の Active X ID
-          {activeX ? ` (@${activeX})` : ""}
-          に依存します。
+    <aside className={styles.sidebar}>
+      <p className={styles.eyebrow}>MANAGE</p>
+      {warnActiveX ? (
+        <p className={styles.warn}>
+          運営権限は承認済み X ID 全体で判定されます。投稿主体は Active X ID
+          {activeX ? ` (@${activeX})` : "（未選択）"}
+          です。
         </p>
       ) : null}
-      <nav
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 2,
-        }}
-      >
-        <Link
-          href="/manage"
-          style={{
-            padding: "6px 8px",
-            fontSize: 12,
-            fontWeight: 700,
-            color: "var(--text-primary)",
-            textDecoration: "none",
-            borderRadius: "var(--radius-sm)",
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          <Icon name="grid" size={11} aria-hidden /> トップ
+      <nav className={styles.nav} aria-label="イベント運営ナビ">
+        <Link href="/manage" className={styles.topLink}>
+          <Icon name="grid" size={11} aria-hidden /> 運営トップ
         </Link>
         {events.map((ev) => (
           <Link
             key={ev.id}
             href={`/manage/events/${ev.id}`}
-            style={{
-              padding: "6px 8px",
-              fontSize: 12,
-              color: "var(--text-secondary)",
-              textDecoration: "none",
-              borderRadius: "var(--radius-sm)",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
+            className={styles.eventLink}
+            style={
+              ev.accent_color
+                ? ({ "--event-accent": ev.accent_color } as React.CSSProperties)
+                : undefined
+            }
+            title={ev.title}
           >
             {ev.title}
           </Link>
         ))}
       </nav>
+      {events.length === 0 ? (
+        <p className={styles.emptyHint}>
+          担当イベントが割り当てられると、ここに一覧が表示されます。
+        </p>
+      ) : null}
     </aside>
   );
 }

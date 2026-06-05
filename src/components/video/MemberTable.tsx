@@ -3,6 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { Icon } from "@/components/ui/Icon";
+import { TableScroll } from "@/components/ui/TableScroll";
 import { formatDuration } from "@/lib/utils/format";
 
 export interface MemberRow {
@@ -86,6 +87,7 @@ export function MemberTable({
   };
 
   return (
+    <TableScroll>
     <table className="fn-table">
       <thead>
         <tr>
@@ -195,5 +197,6 @@ export function MemberTable({
         })}
       </tbody>
     </table>
+    </TableScroll>
   );
 }

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import {
   countPublicVideos,
   fetchPublicVideos,
+  parsePublicVideoSort,
+  type ListVideoParams,
 } from "@/lib/db/listQueries";
 import { getDatabase } from "@/lib/cloudflare";
 import {
@@ -15,7 +17,7 @@ import {
 export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const q = url.searchParams.get("q") ?? "";
-  const sort = url.searchParams.get("sort") ?? "new";
+  const sort = parsePublicVideoSort(url.searchParams.get("sort"));
   const eventId = url.searchParams.get("event") ?? "";
   const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
   const limit = Math.min(
@@ -28,7 +30,7 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ items: [], total: 0, page, limit });
   }
 
-  const params = { q, sort: sort as "new" | "old" | "score", eventId: eventId || undefined };
+  const params: ListVideoParams = { q, sort, eventId: eventId || undefined };
   const [rows, total] = await Promise.all([
     fetchPublicVideos(db, { ...params, limit, offset: (page - 1) * limit }),
     countPublicVideos(db, params),

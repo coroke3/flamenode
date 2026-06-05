@@ -1,7 +1,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth/currentUser";
-import { sanitizeNextPath } from "@/lib/utils/next";
+import { sanitizeNextPath } from "#utils/next";
 
 export interface AuthSessionUser {
   id: string;
@@ -64,49 +64,32 @@ function RequireAuthRedirect({
   const safeNext = sanitizeNextPath(next, "/dashboard");
   const href = `/entry?next=${encodeURIComponent(safeNext)}`;
   return (
-    <div
-      style={{
-        width: "min(96%, 720px)",
-        margin: "60px auto",
-        padding: "48px 28px",
-        background: "var(--bg-surface)",
-        border: "1px solid var(--border-subtle)",
-        borderRadius: "var(--radius-md)",
-        textAlign: "center",
-      }}
-    >
-      <h1 style={{ fontSize: 22, fontWeight: 700 }}>ログインが必要です</h1>
-      <p style={{ marginTop: 12, color: "var(--text-secondary)" }}>
-        この画面はログイン後にご利用いただけます。
-      </p>
-      <Link href={href} className="fn-btn fn-btn-primary fn-mt-md">
-        Discord でログイン
-      </Link>
+    <div className="fn-public-container fn-page fn-guard-shell">
+      <div className="fn-empty fn-guard-card">
+        <h1 className="fn-guard-title">ログインが必要です</h1>
+        <p className="fn-empty-message">
+          この画面はログイン後にご利用いただけます。
+        </p>
+        <Link href={href} className="fn-btn fn-btn-primary fn-mt-md">
+          Discord でログイン
+        </Link>
+      </div>
     </div>
   );
 }
 
 function BannedNotice(): React.ReactElement {
   return (
-    <div
-      style={{
-        width: "min(96%, 720px)",
-        margin: "60px auto",
-        padding: "48px 28px",
-        background: "var(--bg-surface)",
-        border: "1px solid var(--accent-danger)",
-        borderRadius: "var(--radius-md)",
-        textAlign: "center",
-      }}
-    >
-      <h1 style={{ fontSize: 22, fontWeight: 700, color: "var(--accent-danger)" }}>
-        利用が停止されています
-      </h1>
-      <p style={{ marginTop: 12, color: "var(--text-secondary)" }}>
-        現在、このアカウントは利用が停止されています。
-        <br />
-        詳細は運営までお問い合わせください。
-      </p>
+    <div className="fn-public-container fn-page fn-guard-shell">
+      <div className="fn-empty fn-guard-card fn-guard-card--danger">
+        <h1 className="fn-guard-title fn-guard-title--danger">
+          利用が停止されています
+        </h1>
+        <p className="fn-empty-message">
+          現在、このアカウントは利用が停止されています。
+          詳細は運営までお問い合わせください。
+        </p>
+      </div>
     </div>
   );
 }

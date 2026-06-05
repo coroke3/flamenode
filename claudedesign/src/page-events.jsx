@@ -47,13 +47,12 @@ function EventsPage({ onNav, lang }) {
   const ended = events.filter(e => categorize(e) === "ended");
   const archive = events.filter(e => categorize(e) === "archive");
 
-  const Section = ({ title, jp, items }) => items.length === 0 ? null : (
+  const Section = ({ title, items }) => items.length === 0 ? null : (
     <section className="fn-evlist-section">
       <div className="fn-section-head">
         <div className="fn-section-head-left">
           <div className="fn-section-titles">
             <h2 className="fn-display fn-section-title">{title}</h2>
-            <span className="fn-section-jp fn-jp">{jp}</span>
           </div>
         </div>
         <span className="fn-mono fn-evlist-count">{String(items.length).padStart(2, "0")}</span>
@@ -68,14 +67,15 @@ function EventsPage({ onNav, lang }) {
     <main className="fn-main" data-screen-label="Events">
       <div className="fn-wrap">
         <header className="fn-evlist-head">
+          <span className="fn-eyebrow">events — {window.FN_EVENTS.length} total</span>
           <h1 className="fn-display fn-evlist-title">イベント</h1>
           <span className="fn-jp fn-evlist-sub">FlameNode 上で開催される上映フェス・イベントの一覧。</span>
         </header>
 
-        <Section title="募集中" jp="Open for entry" items={open} />
-        <Section title="開催予定" jp="Upcoming" items={upcoming} />
-        <Section title="開催済み" jp="Past events" items={ended} />
-        <Section title="アーカイブ" jp="Always-on archive" items={archive} />
+        <Section title="募集中" items={open} />
+        <Section title="開催予定" items={upcoming} />
+        <Section title="開催済み" items={ended} />
+        <Section title="アーカイブ" items={archive} />
       </div>
     </main>
   );

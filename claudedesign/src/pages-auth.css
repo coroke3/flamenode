@@ -3,18 +3,18 @@
    ──────────────────────────────────────────────────────────────── */
 
 /* ─── Shared form primitives ───────────────────────────────────── */
-.fn-field { display: flex; flex-direction: column; gap: 7px; }
-.fn-field-label { font-size: 11px; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 500; }
-.fn-field-hint { font-size: 11px; color: var(--text-faint); }
+.fn-field { display: flex; flex-direction: column; gap: 8px; }
+.fn-field-label { font-size: 13px; letter-spacing: 0.02em; color: var(--text-secondary); font-weight: 500; }
+.fn-field-hint { font-size: 12px; color: var(--text-faint); }
 .fn-field-row { display: grid; grid-template-columns: 1fr 140px; gap: 16px; }
 .fn-input {
-  height: 42px;
-  padding: 0 14px;
+  height: 46px;
+  padding: 0 16px;
   background: var(--bg-base);
   border: 1px solid var(--border-subtle);
   border-radius: var(--r-card);
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: 15px;
   transition: border-color 160ms ease, background 160ms ease;
 }
 .fn-input::placeholder { color: var(--text-faint); }
@@ -85,6 +85,88 @@
 .fn-auth-divider::before, .fn-auth-divider::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
 .fn-auth-submit { width: 100%; margin-top: 4px; }
 .fn-auth-foot { font-size: 12px; color: var(--text-muted); margin: 8px 0 0; text-align: center; line-height: 1.8; }
+
+/* ─── Auth aside: mid copy + view switch ────────────────────────── */
+.fn-auth-aside-mid { position: relative; }
+.fn-auth-viewswitch { position: relative; display: flex; flex-direction: column; gap: 10px; }
+.fn-auth-viewswitch-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.fn-auth-vbtn {
+  height: 30px; padding: 0 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-pill);
+  font-size: 12px; color: var(--text-muted);
+  transition: all 140ms ease;
+}
+.fn-auth-vbtn:hover { color: var(--text-primary); border-color: var(--border-strong); }
+.fn-auth-vbtn.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.fn-node .fn-auth-vbtn { border-radius: 4px; }
+
+.fn-auth-card--wide { width: min(100%, 560px); }
+.fn-auth-back { align-self: flex-start; font-size: 12px; color: var(--text-muted); margin-bottom: 2px; }
+.fn-auth-back:hover { color: var(--text-primary); }
+.fn-auth-actions { display: flex; gap: 10px; margin-top: 6px; }
+.fn-field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.fn-field-wide { grid-column: 1 / -1; }
+.fn-field-req { margin-left: 6px; font-size: 9.5px; letter-spacing: 0.08em; color: var(--accent-strong); border: 1px solid var(--accent-soft); padding: 1px 5px; border-radius: 3px; vertical-align: middle; }
+.fn-light .fn-field-req { color: #6a8500; }
+
+/* Checkbox */
+.fn-checkbox { display: flex; align-items: flex-start; gap: 10px; font-size: 12.5px; color: var(--text-secondary); cursor: pointer; line-height: 1.5; }
+.fn-checkbox input { width: 17px; height: 17px; margin-top: 1px; accent-color: var(--accent); flex-shrink: 0; }
+
+/* ─── OAuth authorize card ──────────────────────────────────────── */
+.fn-oauth-card { border: 1px solid var(--hairline); border-radius: var(--r-block); padding: 20px; display: flex; flex-direction: column; gap: 16px; background: var(--bg-surface); }
+.fn-oauth-apps { display: flex; align-items: center; justify-content: center; gap: 18px; padding: 6px 0 2px; }
+.fn-oauth-app { width: 48px; height: 48px; border-radius: 12px; display: grid; place-items: center; background: var(--bg-elevated); border: 1px solid var(--hairline); color: var(--text-primary); }
+.fn-oauth-app--x { background: var(--text-primary); color: var(--bg-base); font-size: 20px; }
+.fn-oauth-link { color: var(--text-faint); font-size: 18px; }
+.fn-oauth-acct { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--hairline); border-radius: var(--r-card); }
+.fn-oauth-acct > div { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.fn-oauth-acct-name { font-size: 14px; font-weight: 600; }
+.fn-oauth-acct-handle { font-size: 12px; color: var(--text-muted); }
+.fn-oauth-scopes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.fn-oauth-scopes li { display: flex; align-items: flex-start; gap: 11px; }
+.fn-oauth-scopes li > div { display: flex; flex-direction: column; gap: 2px; }
+.fn-oauth-scopes i { margin-top: 2px; color: var(--ok); font-size: 13px; width: 14px; text-align: center; }
+.fn-oauth-scope-no i { color: var(--text-faint); }
+.fn-oauth-scopes li span:first-child { font-size: 13px; color: var(--text-primary); }
+.fn-oauth-scope-no span:first-child { color: var(--text-muted); }
+.fn-oauth-scope-sub { font-size: 11.5px; color: var(--text-faint); }
+
+/* ─── Register: connected X id banner + icon picker ─────────────── */
+.fn-reg-xid { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--hairline); border-radius: var(--r-card); background: var(--bg-surface); }
+.fn-reg-xid-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.fn-reg-xid-name { font-size: 14px; font-weight: 600; }
+.fn-reg-xid-handle { font-size: 12px; color: var(--text-muted); }
+.fn-reg-xid-handle i, .fn-idrow-handle i, .fn-oauth-acct-handle i { font-size: 10px; margin-right: 2px; }
+.fn-icon-picker { display: flex; gap: 14px; align-items: center; }
+.fn-icon-current { width: 56px; height: 56px; border-radius: 50%; background: var(--bg-elevated); border: 1px solid var(--hairline); display: grid; place-items: center; font-family: var(--font-display); font-size: 24px; color: var(--text-secondary); flex-shrink: 0; }
+.fn-icon-history { display: flex; flex-direction: column; gap: 8px; }
+.fn-icon-thumbs { display: flex; gap: 8px; }
+.fn-icon-thumb { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--hairline); background: var(--bg-elevated); }
+.fn-icon-thumb.is-active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.fn-icon-upload { color: var(--text-muted); display: grid; place-items: center; border-style: dashed; }
+
+/* ─── X ID guard board ──────────────────────────────────────────── */
+.fn-idlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.fn-idrow { display: grid; grid-template-columns: 38px 1fr max-content max-content; align-items: center; gap: 14px; padding: 14px 16px; border: 1px solid var(--hairline); border-radius: var(--r-card); background: var(--bg-surface); }
+.fn-idrow-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fn-idrow-name { font-size: 14px; font-weight: 600; }
+.fn-idrow-handle { font-size: 11.5px; color: var(--text-muted); }
+.fn-idrow-note { font-size: 11.5px; color: var(--text-muted); grid-column: 2 / 3; grid-row: 2; display: none; }
+.fn-idrow-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; }
+.fn-idrow-state i { font-size: 13px; }
+.fn-idstate-ok { color: var(--ok); }
+.fn-idstate-warn { color: var(--warn); }
+.fn-idstate-danger { color: var(--danger); }
+.fn-idrow-ops { grid-column: 4; }
+.fn-idrow--rejected { border-color: rgba(255,90,95,0.3); }
+.fn-idrow--pending { border-color: rgba(245,158,11,0.3); }
+.fn-id-add { margin-top: 16px; }
+@media (max-width: 620px) {
+  .fn-idrow { grid-template-columns: 38px 1fr max-content; }
+  .fn-idrow-ops { grid-column: 1 / -1; }
+}
 
 /* ─── STEPPER (shared) ──────────────────────────────────────────── */
 .fn-stepper { display: flex; list-style: none; margin: 0 0 28px; padding: 0; gap: 0; border: 1px solid var(--hairline); border-radius: var(--r-card); overflow: hidden; }
@@ -168,7 +250,7 @@
 .fn-light .fn-fsec-num { color: #6a8500; }
 .fn-fsec-title { margin: 0; font-size: 15px; font-weight: 700; white-space: nowrap; }
 .fn-fsec-en { display: block; font-size: 9.5px; color: var(--text-faint); letter-spacing: 0.14em; text-transform: uppercase; margin-top: 1px; }
-.fn-fsec-body { padding: 18px; display: flex; flex-direction: column; gap: 16px; }
+.fn-fsec-body { padding: 22px 20px; display: flex; flex-direction: column; gap: 20px; }
 
 /* Mini tabs (normal/csv) */
 .fn-tabs-mini { display: flex; border: 1px solid var(--border-subtle); border-radius: var(--r-pill); overflow: hidden; }
@@ -401,6 +483,70 @@
 .fn-admin-tab-jp { font-size: 10.5px; }
 .fn-admin-tab:hover { color: var(--text-primary); }
 .fn-admin-tab.is-active { color: var(--text-primary); border-bottom-color: var(--accent); }
+.fn-admin-tab { position: relative; }
+.fn-admin-tab-badge {
+  position: absolute; top: 4px; right: 2px;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  background: var(--warn); color: #1A1300;
+  border-radius: 999px;
+  font-size: 9.5px; font-weight: 700;
+  display: grid; place-items: center;
+}
+
+/* ─── ADMIN PANELS (slots / members / history / settings) ───────── */
+.fn-admin-panel { display: flex; flex-direction: column; gap: 18px; }
+.fn-admin-kpis { display: grid; grid-template-columns: repeat(5, 1fr); border: 1px solid var(--hairline); border-radius: var(--r-card); overflow: hidden; }
+.fn-admin-kpi { display: flex; flex-direction: column; gap: 3px; padding: 14px 16px; border-right: 1px solid var(--hairline); }
+.fn-admin-kpi:last-child { border-right: 0; }
+.fn-admin-kpi-v { font-size: 28px; line-height: 1; }
+.fn-admin-kpi[data-tone="accent"] .fn-admin-kpi-v { color: var(--accent-strong); }
+.fn-light .fn-admin-kpi[data-tone="accent"] .fn-admin-kpi-v { color: #7a6a00; }
+.fn-admin-kpi[data-tone="ok"] .fn-admin-kpi-v { color: var(--ok); }
+.fn-admin-kpi[data-tone="warn"] .fn-admin-kpi-v { color: var(--warn); }
+.fn-admin-kpi-k { font-size: 11px; color: var(--text-secondary); }
+@media (max-width: 720px) { .fn-admin-kpis { grid-template-columns: repeat(2, 1fr); } }
+
+.fn-admin-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+
+.fn-admin-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+.fn-admin-tbl th, .fn-admin-tbl td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--hairline); }
+.fn-admin-tbl th { font-size: 10px; letter-spacing: 0.14em; color: var(--text-muted); font-weight: 500; text-transform: uppercase; }
+.fn-admin-tbl tbody tr:hover { background: var(--bg-elevated); }
+.fn-admin-tbl-ops { display: flex; gap: 12px; }
+.fn-link { color: var(--accent-strong); font-size: 12px; }
+.fn-light .fn-link { color: #6a8500; }
+.fn-link:hover { text-decoration: underline; }
+.fn-link-danger { color: var(--danger); }
+.fn-admin-scope-th { text-align: center !important; width: 64px; }
+.fn-admin-scope-td { text-align: center; }
+
+/* Toggle switch */
+.fn-toggle { width: 36px; height: 20px; border-radius: 999px; background: var(--bg-inset); border: 1px solid var(--hairline); position: relative; transition: background 140ms ease; display: inline-block; vertical-align: middle; }
+.fn-toggle-knob { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--text-faint); transition: transform 140ms ease, background 140ms ease; }
+.fn-toggle.is-on { background: var(--accent); border-color: var(--accent); }
+.fn-toggle.is-on .fn-toggle-knob { transform: translateX(16px); background: var(--accent-ink); }
+.fn-toggle:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Audit log */
+.fn-admin-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid var(--hairline); border-radius: var(--r-card); overflow: hidden; }
+.fn-admin-log-row { display: grid; grid-template-columns: 120px 80px 1fr max-content; align-items: center; gap: 14px; padding: 11px 16px; border-bottom: 1px solid var(--hairline); font-size: 13px; }
+.fn-admin-log-row:last-child { border-bottom: 0; }
+.fn-admin-log-row:hover { background: var(--bg-elevated); }
+.fn-admin-log-time { font-size: 11px; color: var(--text-muted); }
+.fn-admin-log-act { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: var(--r-pill); justify-self: start; }
+.fn-log-review { background: rgba(123,216,156,0.16); color: var(--ok); }
+.fn-log-slot { background: var(--accent-soft); color: var(--accent-strong); }
+.fn-light .fn-log-slot { color: #6a8500; }
+.fn-log-member { background: var(--warn-soft); color: var(--warn); }
+.fn-log-settings { background: var(--bg-elevated); color: var(--text-secondary); }
+.fn-admin-log-target { color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fn-admin-log-who { font-size: 11px; color: var(--text-muted); }
+@media (max-width: 720px) { .fn-admin-log-row { grid-template-columns: 1fr max-content; } .fn-admin-log-time, .fn-admin-log-who { display: none; } }
+
+/* Settings */
+.fn-admin-settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 880px) { .fn-admin-settings-grid { grid-template-columns: 1fr; } }
+.fn-admin-settings-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 8px; border-top: 1px solid var(--hairline); }
 
 .fn-admin-grid { display: grid; grid-template-columns: 360px 1fr; gap: 24px; align-items: start; }
 @media (max-width: 980px) { .fn-admin-grid { grid-template-columns: 1fr; } }
@@ -557,3 +703,231 @@
 .fn-switch.is-on { background: var(--accent); border-color: var(--accent); }
 .fn-switch-knob { position: absolute; top: 50%; left: 2px; transform: translateY(-50%); width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left 160ms ease; }
 .fn-switch.is-on .fn-switch-knob { left: 20px; }
+
+/* ─── Discord auth button ──────────────────────────────────────── */
+.fn-auth-discord {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  height: 52px;
+  background: #5865F2;
+  color: #fff;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  transition: background 140ms ease, transform 120ms ease;
+  margin-top: 8px;
+}
+.fn-auth-discord:hover { background: #4752C4; }
+.fn-auth-discord:active { transform: scale(0.98); }
+.fn-auth-discord-icon { font-size: 20px; }
+
+/* OAuth Discord app icon */
+.fn-oauth-app--discord {
+  background: #5865F2;
+  color: #fff;
+  font-size: 22px;
+}
+
+/* Discord verified row (register + status) */
+.fn-reg-discord {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--bg-elevated);
+  border-radius: var(--r-card);
+  border: 1px solid var(--hairline);
+  margin-bottom: 4px;
+}
+
+/* X link input wrapper */
+.fn-xlink-input-wrap { position: relative; }
+.fn-xlink-at {
+  position: absolute;
+  left: 12px; top: 50%;
+  transform: translateY(-50%);
+  font-size: 15px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+/* Add X handle inline form */
+.fn-add-x-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 13px 16px;
+  background: var(--bg-elevated);
+  border-radius: var(--r-card);
+  font-size: 13px;
+  color: var(--text-secondary);
+  border: 1px dashed var(--border-subtle);
+  transition: border-color 140ms ease, color 140ms ease;
+}
+.fn-add-x-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+.fn-add-x-plus { margin-left: auto; color: var(--text-faint); }
+
+.fn-add-x-form {
+  padding: 16px;
+  background: var(--bg-elevated);
+  border-radius: var(--r-card);
+  border: 1px solid var(--accent);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fn-add-x-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
+/* X link done state */
+.fn-xlink-done {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px;
+  background: var(--bg-elevated);
+  border-radius: var(--r-card);
+  margin: 8px 0;
+}
+.fn-xlink-done-icon { font-size: 28px; color: var(--ok); margin-top: 2px; flex-shrink: 0; }
+.fn-xlink-done-handle { font-size: 15px; color: var(--text-primary); display: flex; align-items: center; gap: 8px; }
+.fn-xlink-done-handle i { font-size: 13px; }
+.fn-xlink-done-msg { margin: 6px 0 0; font-size: 13px; color: var(--text-secondary); line-height: 1.7; }
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-card);
+  overflow: hidden;
+  margin: 8px 0;
+}
+.fn-xlink-why-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--hairline);
+}
+.fn-xlink-why-row:last-child { border-bottom: 0; }
+.fn-xlink-why-row > i {
+  font-size: 14px;
+  color: var(--accent-strong);
+  margin-top: 2px;
+  width: 18px;
+  flex-shrink: 0;
+}
+.fn-light .fn-xlink-why-row > i { color: #6a8500; }
+.fn-xlink-why-row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.fn-xlink-why-row > div > span:first-child { font-size: 13.5px; font-weight: 600; }
+
+/* Status page discord section */
+.fn-status-discord {
+  padding: 16px 0 8px;
+}
+.fn-status-divider {
+  display: block;
+  padding: 12px 0 8px;
+  border-top: 1px solid var(--hairline);
+  margin-top: 6px;
+  color: var(--text-faint);
+}
+
+/* Auth info note */
+.fn-auth-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--bg-elevated);
+  border-radius: var(--r-card);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.65;
+  margin: 6px 0;
+}
+.fn-auth-note i { color: var(--text-muted); margin-top: 2px; font-size: 13px; flex-shrink: 0; }
+
+/* ─── ADMIN X ID TABLE ────────────────────────────────────────── */
+.fn-admin-xid { display: flex; flex-direction: column; gap: 20px; padding: 4px 0 40px; }
+.fn-admin-xid-head { display: flex; flex-direction: column; gap: 6px; }
+.fn-admin-xid-note { font-size: 12.5px; color: var(--text-muted); }
+.fn-admin-xid-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+.fn-admin-xid-tbl th, .fn-admin-xid-tbl td {
+  padding: 10px 14px; text-align: left;
+  border-bottom: 1px solid var(--hairline);
+}
+.fn-admin-xid-tbl th {
+  font-size: 10px; letter-spacing: 0.16em;
+  color: var(--text-muted); font-weight: 500;
+  background: var(--bg-elevated);
+}
+.fn-admin-xid-row { transition: background 120ms; }
+.fn-admin-xid-row:hover { background: var(--bg-elevated); }
+.fn-xidrow-approved { opacity: 0.65; }
+.fn-xidrow-rejected { opacity: 0.45; }
+.fn-admin-xid-handle { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.fn-admin-xid-discord { display: flex; align-items: center; gap: 7px; font-size: 12px; }
+.fn-admin-xid-ops { display: flex; gap: 8px; align-items: center; }
+.fn-admin-xid-done { font-size: 11px; color: var(--ok); letter-spacing: 0.06em; }
+.fn-admin-xid-guide { padding: 16px; background: var(--bg-elevated); border-radius: var(--r-card); display: flex; flex-direction: column; gap: 10px; }
+.fn-admin-xid-steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-secondary); line-height: 1.7; }
+
+/* ─── DASHBOARD NOTIFICATIONS ─────────────────────────────────── */
+.fn-notif-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.fn-notif-row {
+  display: grid; grid-template-columns: 28px 1fr max-content;
+  gap: 12px; align-items: center;
+  padding: 14px 0; border-bottom: 1px solid var(--hairline);
+  transition: background 120ms;
+}
+.fn-notif-row:hover { background: var(--bg-elevated); }
+.fn-notif-row.is-unread { background: var(--accent-soft); }
+.fn-notif-row.is-unread:hover { background: var(--accent-soft); }
+.fn-notif-icon {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--bg-elevated);
+  display: grid; place-items: center;
+  font-size: 12px; color: var(--text-muted);
+}
+[data-tone="ok"].fn-notif-icon   { color: var(--ok);   background: rgba(123,255,107,0.12); }
+[data-tone="warn"].fn-notif-icon { color: var(--warn); background: rgba(245,158,11,0.12); }
+.fn-notif-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.fn-notif-text { font-size: 13.5px; color: var(--text-primary); }
+.fn-notif-sub { font-size: 10.5px; color: var(--accent-strong); letter-spacing: 0.08em; }
+.fn-light .fn-notif-sub { color: #6a8500; }
+.fn-notif-time { font-size: 10.5px; color: var(--text-faint); white-space: nowrap; }
+
+/* Dash seg badge */
+.fn-dash-seg-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--accent); color: var(--accent-ink);
+  font-size: 9px; margin-left: 2px;
+}
+
+/* ─── Register TOS preview ────────────────────────────────────── */
+.fn-reg-tos-preview {
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-card);
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+.fn-reg-tos-scroll {
+  max-height: 120px;
+  overflow-y: auto;
+  padding: 14px 16px;
+  scrollbar-width: thin;
+}

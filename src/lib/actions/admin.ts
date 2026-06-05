@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import { historyLogs, videoModerationCases, videos } from "@/lib/db/schema";
-import { enqueueNotification } from "@/lib/notifications/enqueue";
+import { enqueueVideoStatusChangeNotification } from "@/lib/notifications/videoStatusNotify";
 import { generateId } from "@/lib/utils/id";
 
 export interface AdminActionResult {
@@ -122,38 +122,30 @@ export async function setVideoStatus(
     created_at: now,
   });
 
-  // 通知 enqueue: 投稿主に状態変化を伝える。
-  // submitted_by_discord_user_id を宛先とし、event-scoped なら primary_event_id を載せる。
-  if (target.submitted_by_discord_user_id && prevStatus !== status) {
-    const typeMap: Record<string, string> = {
-      public: "video_approved",
-      pending: "video_pending",
-      voided: "video_voided",
-      limited: "video_limited",
-      private: "video_private",
-      hidden: "video_hidden",
-      archived: "video_archived",
-      draft: "video_draft",
-    };
-    const notifType = typeMap[status] ?? "video_status_changed";
-    await enqueueNotification(db, {
-      discordUserId: target.submitted_by_discord_user_id,
-      type: notifType,
-      payload: {
-        content: `作品「${target.title}」のステータスが ${prevStatus} → ${status} に変更されました。`,
-        video_id: videoId,
-        prev_status: prevStatus,
-        next_status: status,
-        reason: reason || undefined,
-      },
-      eventId: target.primary_event_id ?? null,
-    });
-  }
+  const forceNotify = formData.get("force_notify") === "1";
+  await enqueueVideoStatusChangeNotification(db, {
+    videoId,
+    videoTitle: target.title,
+    youtubeVideoId: target.youtube_video_id,
+    prevStatus,
+    nextStatus: status,
+    reason: reason || null,
+    discordUserId: target.submitted_by_discord_user_id,
+    eventId: target.primary_event_id,
+    forceNotify,
+  });
 
   revalidatePath(`/admin/videos/${videoId}`);
   revalidatePath("/admin/videos");
   revalidatePath("/admin");
   revalidatePath(`/${target.youtube_video_id ?? videoId}`);
   revalidatePath("/list");
+
+  const { enqueueAfterVideoStatusChange } = await import("@/lib/staticRebuild/hooks");
+  await enqueueAfterVideoStatusChange(db, {
+    videoId,
+    requestedByUserId: u.id,
+  });
+
   return { ok: true, message: "ステータスを更新しました。" };
 }

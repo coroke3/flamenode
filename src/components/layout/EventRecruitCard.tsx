@@ -152,7 +152,7 @@ function resolveCta(
       };
     case "after_entry":
       return {
-        href: `/event/${event.id}`,
+        href: `/dashboard/post?event=${encodeURIComponent(event.id)}`,
         label: "作品を投稿する",
         iconName: "edit",
       };
@@ -300,24 +300,41 @@ export function EventRecruitCard({
   return (
     <article
       className={[
+        variant === "primary" ? "fn-rec" : "",
         styles.card,
         variant === "compact" ? styles.cardCompact : "",
       ]
         .filter(Boolean)
         .join(" ")}
       style={accentStyle}
+      data-kind={
+        state === "accepting" || state === "after_entry"
+          ? "entry"
+          : state === "before_entry"
+            ? "pre"
+            : state === "ended"
+              ? "ended"
+              : "submit"
+      }
     >
       <div className={styles.left}>
         <header className={styles.header}>
-          <span className={styles.eyebrow}>FlameNode Event</span>
-          <Link href={`/event/${event.id}`} className={styles.title}>
-            {titleLabel}
-          </Link>
-          <span
-            className={`${styles.stateBadge} ${stateBadgeClass(state, styles)}`}
-          >
-            {badgeLabel}
+          <span className={variant === "primary" ? "fn-rec-code" : styles.eyebrow}>
+            {event.id.slice(0, 8).toUpperCase()}
           </span>
+          {variant === "primary" ? (
+            <p className="fn-rec-status">{stateLabel(state)}</p>
+          ) : null}
+          <Link href={`/event/${event.id}`} className={styles.title}>
+            {variant === "primary" ? event.title : titleLabel}
+          </Link>
+          {variant !== "primary" ? (
+            <span
+              className={`${styles.stateBadge} ${stateBadgeClass(state, styles)}`}
+            >
+              {badgeLabel}
+            </span>
+          ) : null}
         </header>
 
         {timeline ? (

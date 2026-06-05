@@ -8,16 +8,20 @@
  * status enum: 'pending' | 'processing' | 'sent' | 'failed'
  * 時刻: Unix integer (Math.floor(Date.now() / 1000))
  */
+import { enqueueSlotDeadlineReminders } from "./reminders.ts";
+
 export interface Env {
   DB: D1Database;
   DISCORD_WEBHOOK_URL?: string;
   DISCORD_BOT_TOKEN?: string;
+  APP_ORIGIN?: string;
+  NEXT_PUBLIC_APP_URL?: string;
 }
 
-const MAX_RETRIES = 3;
-const PROCESSING_STALE_SEC = 600;
-/** 指数バックオフ基数 (秒)。attempt_count=0 の初回失敗で 60 秒後にリトライ */
-const BACKOFF_BASE_SEC = 60;
+const MAX_RETRIES = 4;
+const PROCESSING_STALE_SEC = 15 * 60;
+/** 1回目 1分 / 2回目 5分 / 3回目 15分 */
+const RETRY_BACKOFF_SEC = [60, 300, 900] as const;
 
 type OutboxRow = {
   id: string;
@@ -119,7 +123,9 @@ async function dispatch(env: Env): Promise<void> {
       if (nextCount >= MAX_RETRIES) {
         await markFailedStmt.bind(nextCount, errorMsg || "delivery failed", row.id).run();
       } else {
-        const backoffSec = BACKOFF_BASE_SEC * Math.pow(2, row.attempt_count);
+        const backoffSec =
+          RETRY_BACKOFF_SEC[row.attempt_count] ??
+          RETRY_BACKOFF_SEC[RETRY_BACKOFF_SEC.length - 1];
         const nextAttemptAt = Math.floor(Date.now() / 1000) + backoffSec;
         await markRetryStmt
           .bind(nextCount, errorMsg || "delivery failed", nextAttemptAt, row.id)

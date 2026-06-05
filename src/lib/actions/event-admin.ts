@@ -6,7 +6,8 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import { assertCanEditEvent } from "@/lib/auth/ownership";
-import { events, historyLogs } from "@/lib/db/schema";
+import { eventTemplates, events, historyLogs } from "@/lib/db/schema";
+import { parseEventTemplateSnapshot } from "@/lib/admin/eventTemplateSettings";
 import { parseJstDatetimeLocal } from "@/lib/utils/dateInput";
 import { generateId } from "@/lib/utils/id";
 import { normalizeHttpUrl } from "@/lib/utils/url";
@@ -62,6 +63,7 @@ const eventSchema = z.object({
     .enum(["public_name", "anonymous", "hidden"])
     .default("public_name"),
   parts_text: z.string().max(2000).optional().nullable(),
+  template_id: z.string().trim().max(64).optional().nullable(),
 });
 
 const PART_NAME_MAX_LEN = 40;
@@ -135,6 +137,25 @@ export async function createEvent(
   const id = data.id?.trim() || generateId("ev");
   const now = Math.floor(Date.now() / 1000);
 
+  let templateSnapshot = null;
+  const templateId = data.template_id?.trim();
+  if (templateId) {
+    const tmpl = (
+      await db
+        .select({ settings_json: eventTemplates.settings_json })
+        .from(eventTemplates)
+        .where(eq(eventTemplates.id, templateId))
+        .limit(1)
+    )[0];
+    if (!tmpl) {
+      return { ok: false, message: "指定したテンプレートが見つかりません。" };
+    }
+    templateSnapshot = parseEventTemplateSnapshot(tmpl.settings_json);
+    if (!templateSnapshot) {
+      return { ok: false, message: "テンプレートの設定データが不正です。" };
+    }
+  }
+
   const dup = (
     await db.select({ id: events.id }).from(events).where(eq(events.id, id)).limit(1)
   )[0];
@@ -166,6 +187,10 @@ export async function createEvent(
     slot_type: data.slot_type,
     slot_visibility_mode: data.slot_visibility_mode,
     parts_json: buildPartsJson(data.parts_text),
+    custom_questions: templateSnapshot?.custom_questions ?? null,
+    review_settings: templateSnapshot?.review_settings ?? null,
+    editable_fields: templateSnapshot?.editable_fields ?? null,
+    repeat_rules: templateSnapshot?.repeat_rules ?? null,
     created_at: now,
     updated_at: now,
   });
@@ -263,6 +288,17 @@ export async function updateEvent(
   revalidatePath(`/admin/events/${data.id}`);
   revalidatePath("/event");
   revalidatePath(`/event/${data.id}`);
+
+  const { enqueueAfterEventSettingsChange } = await import(
+    "@/lib/staticRebuild/hooks"
+  );
+  await enqueueAfterEventSettingsChange(db, {
+    db,
+    eventId: data.id,
+    reason: "event_settings_update",
+    requestedByUserId: u.id,
+  });
+
   return { ok: true, eventId: data.id };
 }
 

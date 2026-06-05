@@ -30,5 +30,3 @@ export function requestCurrentTime(timeoutMs = 500): Promise<number> {
     }, timeoutMs);
   });
 }
-
-export const PLAYER_BRIDGE_EVENTS = { REQUEST, RESPONSE } as const;

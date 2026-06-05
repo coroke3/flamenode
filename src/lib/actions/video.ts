@@ -28,11 +28,18 @@ import { detectSupportedImageUpload } from "@/lib/utils/imageUpload";
 import { normalizeXId } from "@/lib/utils/xid";
 import { normalizeHttpUrl } from "@/lib/utils/url";
 import { resolveStagePermissionFieldFromJson } from "@/lib/video/formSettings";
+import { parseMemberChapterTime } from "@/lib/video/memberInput";
 import { computeVideoEventSyncTarget } from "@/lib/video/eventSync";
 import {
   getVideoSoftwareLabel,
   replaceVideoSoftwareLabels,
 } from "@/lib/db/software";
+import { isMissingTableError } from "@/lib/db/queryFallback";
+import { adjustVideoAppLikeCount } from "@/lib/db/videoLikeCount";
+import { shouldEnqueueUserNotification } from "@/lib/notifications/context";
+import { enqueueNotification } from "@/lib/notifications/enqueue";
+import { buildSlotVideoSubmittedNotification } from "@/lib/notifications/templates/slot";
+import { buildFreeVideoSubmittedNotification } from "@/lib/notifications/templates/video";
 
 /**
  * 作品アイコン URL の正規化。
@@ -136,17 +143,6 @@ interface MemberInput {
   role: string;
   comment: string;
   chapters: MemberChapterInput[];
-}
-
-function parseMemberChapterTime(raw: string | null | undefined): number | null {
-  const match = String(raw ?? "").trim().match(/^(\d{1,4}):([0-5]?\d)$/);
-  if (!match) return null;
-  const minutes = Number(match[1]);
-  const seconds = Number(match[2]);
-  if (!Number.isFinite(minutes) || !Number.isFinite(seconds) || seconds > 59) {
-    return null;
-  }
-  return minutes * 60 + seconds;
 }
 
 function parseMembersJson(raw: FormDataEntryValue | null): MemberInput[] {
@@ -728,6 +724,30 @@ export async function createFreeVideo(
   revalidatePath("/");
   revalidatePath("/list");
   revalidatePath("/dashboard");
+  const { enqueueAfterVideoCreate } = await import("@/lib/staticRebuild/hooks");
+  await enqueueAfterVideoCreate(db, {
+    videoId: id,
+    creatorXUserId: activeX || null,
+    primaryEventId: null,
+    eventIds: requestedEventIds,
+    requestedByUserId: userId,
+  });
+
+  if (shouldEnqueueUserNotification()) {
+    await enqueueNotification(db, {
+      discordUserId: userId,
+      type: "video_submitted",
+      dedupeKey: `video_submitted:${id}`,
+      payload: buildFreeVideoSubmittedNotification({
+        videoId: id,
+        videoTitle: parsed.data.title,
+        youtubeVideoId: youtubeId,
+        hasLinkedEvent: requestedEventIds.length > 0,
+      }),
+      eventId: requestedEventIds[0] ?? null,
+    });
+  }
+
   return { ok: true, videoId: id, youtubeVideoId: youtubeId };
 }
 
@@ -970,6 +990,37 @@ export async function submitSlotVideo(
   revalidatePath(`/event/${slotRow.event_id}`);
   revalidatePath(`/event/${slotRow.event_id}/slots`);
   revalidatePath("/dashboard");
+  const { enqueueAfterVideoCreate } = await import("@/lib/staticRebuild/hooks");
+  await enqueueAfterVideoCreate(db, {
+    videoId,
+    creatorXUserId: activeX || null,
+    primaryEventId: slotRow.event_id,
+    eventIds: requestedEventIds,
+    requestedByUserId: userId,
+  });
+
+  if (!exists && shouldEnqueueUserNotification()) {
+    const eventRow = (
+      await db
+        .select({ title: eventsTable.title })
+        .from(eventsTable)
+        .where(eq(eventsTable.id, slotRow.event_id))
+        .limit(1)
+    )[0];
+    await enqueueNotification(db, {
+      discordUserId: userId,
+      type: "slot_video_submitted",
+      dedupeKey: `slot_video_submitted:${videoId}:${slotRow.id}`,
+      payload: buildSlotVideoSubmittedNotification({
+        videoId,
+        videoTitle: parsed.data.title,
+        eventId: slotRow.event_id,
+        eventTitle: eventRow?.title ?? "イベント",
+      }),
+      eventId: slotRow.event_id,
+    });
+  }
+
   return {
     ok: true,
     videoId,
@@ -1410,6 +1461,31 @@ export async function updateVideo(
     revalidatePath(`/event/${target.primary_event_id}/slots`);
   }
   revalidatePath("/dashboard");
+
+  const linkedEvents = await db
+    .select({ event_id: videoEvents.event_id })
+    .from(videoEvents)
+    .where(eq(videoEvents.video_id, videoId));
+  const eventIds = linkedEvents.map((r) => r.event_id);
+
+  const { enqueueAfterVideoUpdate } = await import("@/lib/staticRebuild/hooks");
+  await enqueueAfterVideoUpdate(db, {
+    videoId,
+    creatorXUserId: allowSubmitterChange
+      ? nextCreatorX || null
+      : target.creator_x_user_id,
+    primaryEventId: target.primary_event_id,
+    eventIds,
+    visibilityChanged: false,
+    identityChanged:
+      canEditIdentity &&
+      (parsed.data.display_name !== target.creator_display_name ||
+        (parsed.data.icon_url || null) !== (target.creator_icon_url || null) ||
+        allowSubmitterChange),
+    eventMembershipChanged: canEditPrimaryEvent && formData.has("event_ids"),
+    requestedByUserId: sessionUser.id,
+  });
+
   return {
     ok: true,
     videoId,
@@ -1548,15 +1624,7 @@ export async function toggleVideoInteraction(
       .delete(videoInteractions)
       .where(eq(videoInteractions.id, existing.id));
     if (kind === "like") {
-      // 同時いいね・解除のレースを避けるため DB 側で atomic に減算する。
-      // max(0, ...) で 0 未満に下がらないようにし、初期 NULL も coalesce で吸収する。
-      await db
-        .update(videoStats)
-        .set({
-          app_like_count: sql<number>`max(0, coalesce(${videoStats.app_like_count}, 0) - 1)`,
-          updated_at: now,
-        })
-        .where(eq(videoStats.video_id, videoId));
+      await adjustVideoAppLikeCount(db, videoId, -1, now);
     }
     revalidatePath(`/${target.youtube_video_id ?? videoId}`);
     return { ok: true, active: false, videoId };
@@ -1581,14 +1649,7 @@ export async function toggleVideoInteraction(
     return { ok: false, message: "操作に失敗しました。時間をおいて再試行してください。" };
   }
   if (kind === "like") {
-    // 同時いいねのレースを避けるため DB 側で atomic に加算する。
-    await db
-      .update(videoStats)
-      .set({
-        app_like_count: sql<number>`coalesce(${videoStats.app_like_count}, 0) + 1`,
-        updated_at: now,
-      })
-      .where(eq(videoStats.video_id, videoId));
+    await adjustVideoAppLikeCount(db, videoId, 1, now);
   }
   revalidatePath(`/${target.youtube_video_id ?? videoId}`);
   return { ok: true, active: true, videoId };
