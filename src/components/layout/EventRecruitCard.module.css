@@ -5,17 +5,17 @@
   --tick-color: color-mix(in srgb, var(--text-primary) 28%, transparent);
   --timeline-line: color-mix(in srgb, var(--text-primary) 12%, transparent);
   display: grid;
-  gap: clamp(24px, 2.8vw, 34px);
+  gap: clamp(38px, 4vw, 56px);
   width: 100%;
-  padding: clamp(28px, 3vw, 36px);
+  padding: clamp(30px, 3.2vw, 38px) clamp(28px, 3vw, 36px) clamp(22px, 2.5vw, 30px);
   border-radius: 14px;
   background: var(--card-bg);
   color: var(--text-primary);
 }
 
 .cardCompact {
-  gap: clamp(22px, 2.4vw, 32px);
-  padding: clamp(26px, 2.8vw, 34px);
+  gap: clamp(34px, 3.6vw, 50px);
+  padding: clamp(30px, 3vw, 36px) clamp(26px, 2.8vw, 34px) clamp(22px, 2.4vw, 28px);
 }
 
 .code {
@@ -38,9 +38,9 @@
 
 .side {
   display: grid;
-  gap: clamp(28px, 4vw, 40px);
+  gap: clamp(36px, 4vw, 42px);
   justify-items: end;
-  padding-top: 16px;
+  padding-top: clamp(20px, 2vw, 24px);
 }
 
 .cta {
@@ -92,6 +92,7 @@
 
 .rulerLine {
   position: relative;
+  isolation: isolate;
   height: 58px;
   border-bottom: 1px solid var(--timeline-line);
   background-image:
@@ -102,8 +103,20 @@
   background-size: 100% 42px, 100% 18px;
 }
 
+.rulerLine::before {
+  position: absolute;
+  z-index: 1;
+  top: 31px;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: var(--timeline-line);
+  content: "";
+}
+
 .rulerWindow {
   position: absolute;
+  z-index: 0;
   top: 0;
   bottom: 0;
   display: block;
@@ -112,6 +125,7 @@
 
 .rulerArrow {
   position: absolute;
+  z-index: 2;
   right: -20px;
   top: 24px;
   color: color-mix(in srgb, var(--text-primary) 58%, transparent);
@@ -119,6 +133,7 @@
 
 .rulerMarker {
   position: absolute;
+  z-index: 2;
   top: -14px;
   display: flex;
   flex-direction: column;
@@ -264,7 +279,7 @@
 @media (max-width: 560px) {
   .card,
   .cardCompact {
-    gap: 22px;
+    gap: 30px;
     padding: 20px 18px;
     border-radius: 12px;
   }
