@@ -1,527 +1,282 @@
 .card {
-  position: relative;
-  width: 100%;
+  --card-bg: color-mix(in srgb, var(--bg-surface) 86%, #0b1208 14%);
+  --card-line: color-mix(in srgb, var(--text-primary) 10%, transparent);
+  --card-muted: color-mix(in srgb, var(--text-secondary) 74%, transparent);
+  --tick-color: color-mix(in srgb, var(--text-primary) 30%, transparent);
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 20px;
-  padding: 24px;
-  border-radius: 8px;
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--event-accent, var(--accent-primary)) 12%, transparent), transparent 36%),
-    var(--bg-surface);
-  border: 0;
+  gap: 26px;
+  width: 100%;
+  padding: clamp(24px, 3vw, 36px);
+  border-radius: 14px;
+  background: var(--card-bg);
   color: var(--text-primary);
-  overflow: hidden;
-  box-shadow: none;
-  isolation: isolate;
 }
 
 .cardCompact {
-  padding: 14px 16px;
-  gap: 12px;
-  border-radius: 8px;
+  padding: clamp(22px, 2.6vw, 32px);
 }
 
-.cardCompact .timeline,
-.cardCompact .periods {
-  display: none;
-}
-
-.cardCompact .left {
-  gap: 10px;
-}
-
-.cardCompact .title {
-  font-size: 16px;
-}
-
-.cardCompact .countdown {
-  padding: 10px 12px;
-}
-
-.cardCompact .countdownValue {
-  font-size: 28px;
-}
-
-.cardCompact .slots {
-  padding: 8px 12px;
-}
-
-.cardCompact .slotsValue {
-  font-size: 18px;
-}
-
-.cardCompact .cta {
-  padding: 8px 16px;
-  font-size: 12px;
-}
-
-@media (min-width: 768px) {
-  .cardCompact {
-    grid-template-columns: minmax(0, 1fr) 180px;
-    gap: 18px;
-    padding: 16px 18px;
-  }
-
-  .cardCompact .title {
-    font-size: 18px;
-  }
-
-  .cardCompact .countdownValue {
-    font-size: 32px;
-  }
-}
-
-.left,
-.right {
-  position: relative;
-  z-index: 1;
-}
-
-.left {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
+.topRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 18px;
+  align-items: start;
 }
 
-.right {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  align-items: stretch;
-}
-
-.header {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0;
-  text-transform: uppercase;
-  color: var(--event-accent-strong, var(--accent-primary-strong));
-}
-
-.title {
-  display: inline-block;
-  font-size: clamp(42px, 6vw, 70px);
-  font-weight: 900;
-  letter-spacing: 0;
-  color: var(--event-accent, var(--accent-primary));
-  line-height: 0.9;
-  text-decoration: none;
-  transition: color 0.15s ease;
-}
-
-.title:hover,
-.title:focus-visible {
-  color: var(--event-accent, var(--accent-primary));
-}
-
-.stateBadge {
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: var(--radius-pill);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0;
-  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 18%, transparent);
-  border: 0;
-  color: var(--text-primary);
-}
-
-.stateBadgePost {
-  background: color-mix(in srgb, #60a5fa 18%, transparent);
-  color: var(--text-primary);
-}
-
-.stateBadgeSoon {
-  background: color-mix(in srgb, var(--accent-warning) 18%, transparent);
-  color: var(--text-primary);
-}
-
-.stateBadgeFull {
-  background: var(--accent-danger-soft);
-  color: var(--accent-danger);
-}
-
-.stateBadgeEnded,
-.stateBadgeBefore,
-.stateBadgeOngoing {
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
-}
-
-.timeline {
-  position: relative;
-  margin-top: 4px;
-  padding-bottom: 56px;
-}
-
-.timelineTrack {
-  position: relative;
-  height: 6px;
-  background: var(--bg-elevated);
-  border-radius: 9999px;
-  overflow: visible;
-}
-
-.timelineEntryRange {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--event-accent, var(--accent-primary)) 56%, transparent),
-    var(--event-accent, var(--accent-primary))
-  );
-  border-radius: 9999px;
-  box-shadow: none;
-}
-
-.timelinePostRange {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  background: repeating-linear-gradient(
-    90deg,
-    rgba(147, 197, 253, 0.45) 0,
-    rgba(147, 197, 253, 0.45) 4px,
-    transparent 4px,
-    transparent 8px
-  );
-  border-radius: 9999px;
-}
-
-.timelineMilestone {
-  position: absolute;
-  top: -3px;
-  width: 2px;
-  height: 12px;
-  background: var(--border-strong);
-  transform: translateX(-1px);
-  border-radius: 1px;
-}
-
-.timelineMilestoneEmph {
-  background: var(--event-accent, var(--accent-primary));
-  box-shadow: none;
-}
-
-.timelineNow {
-  position: absolute;
-  top: -6px;
-  width: 3px;
-  height: 18px;
-  background: var(--event-accent, var(--accent-primary));
-  border-radius: 2px;
-  transform: translateX(-1.5px);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--event-accent, var(--accent-primary)) 18%, transparent);
-}
-
-.timelineLabels {
-  position: relative;
-  height: 60px;
-  margin-top: 8px;
-}
-
-.timelineLabel {
-  position: absolute;
-  top: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  max-width: min(110px, 30vw);
-  font-variant-numeric: tabular-nums;
-  pointer-events: none;
-}
-
-.timelineLabelStagger {
-  top: 28px;
-}
-
-.timelineLabelName {
-  font-size: 9px;
-  font-weight: 600;
-  color: var(--text-faint, var(--text-muted));
-  letter-spacing: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  width: 100%;
-}
-
-.timelineLabelDate {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
-
-.periods {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 8px 16px;
+.code {
   margin: 0;
-}
-
-.periodItem {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 12px;
-  border-radius: 0;
-  background: var(--bg-elevated);
-  border: 0;
-}
-
-.periodItem dt {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0;
-  text-transform: uppercase;
-  color: var(--text-faint, var(--text-muted));
-}
-
-.periodItem dd {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
-}
-
-.countdown {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 14px 16px;
-  border-radius: 8px;
-  background: var(--event-accent, var(--accent-primary));
-  border: 0;
-}
-
-.countdownLabel {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0;
-  text-transform: uppercase;
-  color: color-mix(in srgb, var(--accent-ink) 70%, transparent);
-}
-
-.countdownValueWrap {
-  display: flex;
-  align-items: baseline;
-  gap: 4px;
-  line-height: 1;
-}
-
-.countdownValue {
-  font-size: 48px;
-  font-weight: 800;
-  letter-spacing: 0;
-  color: var(--accent-ink);
-  font-variant-numeric: tabular-nums;
-  text-shadow: none;
-}
-
-.countdownUnit {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--accent-ink);
-}
-
-.slots {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 12px 16px;
-  border-radius: 8px;
-  background: var(--bg-elevated);
-  border: 0;
-}
-
-.slotsLow {
-  background: var(--accent-warning-soft);
-}
-
-.slotsFull {
-  background: var(--accent-danger-soft);
-}
-
-.slotsLabel {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.slotsValueWrap {
-  display: flex;
-  align-items: baseline;
-  gap: 4px;
-  font-variant-numeric: tabular-nums;
-}
-
-.slotsValue {
-  font-size: 24px;
-  font-weight: 800;
-  color: var(--text-primary);
-}
-
-.slotsTotal {
-  font-size: 14px;
-  color: var(--text-faint, var(--text-muted));
-  font-weight: 600;
-}
-
-.slotsUnit {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-secondary);
-  margin-left: 2px;
-}
-
-.slotsLow .slotsValue {
-  color: #ff8a79;
-}
-
-.slotsFull .slotsValue {
-  color: #f87171;
-}
-
-.slotsHint {
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.slotGauge {
-  display: grid;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.slotGaugeTrack {
-  display: block;
-  height: 6px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
-}
-
-.slotGaugeFill {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--event-accent, var(--accent-primary)) 72%, #ffffff),
-    var(--event-accent, var(--accent-primary))
-  );
-}
-
-.slotGaugeText {
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-.slotsLow .slotsHint {
-  color: #ff8a79;
-}
-
-.slotsFull .slotsHint {
-  color: #f87171;
+  color: var(--card-muted);
+  font: 800 11px/1 var(--font-mono);
+  letter-spacing: 0.22em;
 }
 
 .cta {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 12px 20px;
+  gap: 10px;
+  min-width: 176px;
+  min-height: 46px;
+  padding: 0 24px;
   background: var(--event-accent, var(--accent-primary));
   color: var(--accent-ink);
-  border-radius: 0;
-  font-weight: 800;
   font-size: 14px;
+  font-weight: 900;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  gap: clamp(28px, 5vw, 58px);
+  align-items: start;
+}
+
+.main {
+  min-width: 0;
+}
+
+.statusTitle {
+  display: inline-block;
+  max-width: 100%;
+  color: var(--event-accent, var(--accent-primary));
+  font: 900 clamp(46px, 6vw, 72px)/0.86 var(--font-display);
   letter-spacing: 0;
   text-decoration: none;
-  box-shadow: none;
-  transition: transform 0.15s ease, background 0.15s ease;
+  overflow-wrap: anywhere;
 }
 
-.cta:hover {
-  transform: translateY(-1px);
-  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 86%, #ffffff);
+.ruler {
+  margin-top: 28px;
 }
 
-.cta:focus-visible {
-  outline: 2px solid var(--event-accent, var(--accent-primary));
-  outline-offset: 2px;
+.months {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin-bottom: 8px;
+  color: var(--card-muted);
+  font: 800 11px/1 var(--font-mono);
 }
 
-@media (min-width: 768px) {
-  .card {
-    grid-template-columns: minmax(0, 1fr) 240px;
-    gap: 32px;
-    padding: 30px 36px;
-  }
-
-  .right {
-    align-items: stretch;
-  }
-
-  .countdownValue {
-    font-size: 56px;
-  }
+.months span:nth-child(2) {
+  text-align: center;
 }
 
-@media (min-width: 1024px) {
-  .card {
-    grid-template-columns: minmax(0, 1fr) 280px;
-    padding: 36px 40px;
-  }
-
-  .countdownValue {
-    font-size: 64px;
-  }
+.months span:nth-child(3) {
+  text-align: right;
 }
 
-@media (max-width: 480px) {
-  .card {
-    padding: 18px 16px;
-    border-radius: 8px;
-  }
+.rulerLine {
+  position: relative;
+  height: 50px;
+  border-bottom: 1px solid var(--card-line);
+  background-image:
+    linear-gradient(90deg, transparent 8%, var(--tick-color) 8% calc(8% + 1px), transparent calc(8% + 1px) 32%, var(--tick-color) 32% calc(32% + 1px), transparent calc(32% + 1px) 68%, var(--tick-color) 68% calc(68% + 1px), transparent calc(68% + 1px)),
+    repeating-linear-gradient(90deg, transparent 0 15px, var(--tick-color) 15px 16px, transparent 16px 18px);
+  background-position: 0 0, 0 24px;
+  background-repeat: no-repeat, repeat-x;
+  background-size: 100% 36px, 100% 18px;
+}
 
-  .title {
-    font-size: 20px;
+.rulerWindow {
+  position: absolute;
+  top: 2px;
+  bottom: 0;
+  display: block;
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 22%, transparent);
+}
+
+.rulerMarker {
+  position: absolute;
+  top: -10px;
+  display: grid;
+  justify-items: center;
+  width: 54px;
+  transform: translateX(-50%);
+  color: var(--event-accent, var(--accent-primary));
+  font: 900 11px/1 var(--font-mono);
+  pointer-events: none;
+}
+
+.rulerMarker::before,
+.rulerMarker::after {
+  content: "";
+  display: block;
+  background: currentColor;
+}
+
+.rulerMarker::before {
+  width: 8px;
+  height: 8px;
+  margin: 8px 0 2px;
+  border-radius: 999px;
+}
+
+.rulerMarker::after {
+  width: 1px;
+  height: 38px;
+}
+
+.countdown {
+  display: grid;
+  gap: 8px;
+  min-height: 120px;
+  padding: 18px 22px;
+  border-radius: 8px;
+  background: var(--event-accent, var(--accent-primary));
+  color: var(--accent-ink);
+}
+
+.countdownHead {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.countdownHead span:last-child {
+  color: color-mix(in srgb, var(--accent-ink) 62%, transparent);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.countdownValueWrap {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.countdownValueWrap strong {
+  font: 900 clamp(58px, 7vw, 76px)/0.82 var(--font-display);
+  font-variant-numeric: tabular-nums;
+}
+
+.countdownValueWrap span {
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.countdown p {
+  margin: 0;
+  color: color-mix(in srgb, var(--accent-ink) 62%, transparent);
+  font-size: 12px;
+}
+
+.slots {
+  display: grid;
+  grid-template-columns: auto auto minmax(80px, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding-top: 18px;
+  border-top: 1px solid var(--card-line);
+}
+
+.slotsLabel {
+  color: var(--card-muted);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.slots strong {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  color: var(--text-primary);
+  font: 900 25px/1 var(--font-display);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.slots small {
+  color: var(--card-muted);
+  font: 800 13px/1 var(--font-mono);
+}
+
+.slotGauge {
+  display: block;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, #000 48%, transparent);
+}
+
+.slotGauge span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--event-accent, var(--accent-primary));
+}
+
+@media (max-width: 640px) {
+  .body {
+    grid-template-columns: 1fr;
+    gap: 24px;
   }
 
   .countdown {
-    padding: 12px 14px;
+    width: min(100%, 340px);
+  }
+}
+
+@media (max-width: 560px) {
+  .card,
+  .cardCompact {
+    gap: 22px;
+    padding: 20px 18px;
+    border-radius: 12px;
   }
 
-  .countdownValue {
-    font-size: 42px;
+  .topRow {
+    grid-template-columns: 1fr;
   }
 
-  .timelineLabelName {
-    font-size: 8px;
+  .cta {
+    width: 100%;
+    min-width: 0;
   }
 
-  .timelineLabelDate {
-    font-size: 9px;
+  .statusTitle {
+    font-size: clamp(40px, 14vw, 56px);
+  }
+
+  .ruler {
+    margin-top: 22px;
+  }
+
+  .countdown {
+    width: 100%;
+    min-height: 112px;
+    padding: 16px 18px;
+  }
+
+  .slots {
+    grid-template-columns: auto auto;
+  }
+
+  .slotGauge {
+    grid-column: 1 / -1;
   }
 }
