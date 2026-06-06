@@ -1,19 +1,21 @@
 .card {
-  --card-bg: color-mix(in srgb, var(--bg-surface) 86%, #0b1208 14%);
-  --card-line: color-mix(in srgb, var(--text-primary) 10%, transparent);
-  --card-muted: color-mix(in srgb, var(--text-secondary) 74%, transparent);
-  --tick-color: color-mix(in srgb, var(--text-primary) 30%, transparent);
+  --card-bg: color-mix(in srgb, var(--bg-surface) 72%, #0b100a 28%);
+  --card-line: color-mix(in srgb, var(--text-primary) 9%, transparent);
+  --card-muted: color-mix(in srgb, var(--text-secondary) 72%, transparent);
+  --tick-color: color-mix(in srgb, var(--text-primary) 28%, transparent);
+  --timeline-line: color-mix(in srgb, var(--text-primary) 12%, transparent);
   display: grid;
-  gap: 26px;
+  gap: clamp(20px, 2.5vw, 30px);
   width: 100%;
-  padding: clamp(24px, 3vw, 36px);
+  padding: clamp(26px, 3vw, 36px);
   border-radius: 14px;
   background: var(--card-bg);
   color: var(--text-primary);
 }
 
 .cardCompact {
-  padding: clamp(22px, 2.6vw, 32px);
+  gap: clamp(18px, 2vw, 28px);
+  padding: clamp(24px, 2.8vw, 34px);
 }
 
 .topRow {
@@ -35,9 +37,10 @@
   align-items: center;
   justify-content: center;
   gap: 10px;
-  min-width: 176px;
-  min-height: 46px;
-  padding: 0 24px;
+  min-width: clamp(154px, 16vw, 180px);
+  min-height: 44px;
+  padding: 0 26px;
+  border-radius: 1px;
   background: var(--event-accent, var(--accent-primary));
   color: var(--accent-ink);
   font-size: 14px;
@@ -48,8 +51,8 @@
 
 .body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
-  gap: clamp(28px, 5vw, 58px);
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  gap: clamp(22px, 4.2vw, 54px);
   align-items: start;
 }
 
@@ -61,20 +64,20 @@
   display: inline-block;
   max-width: 100%;
   color: var(--event-accent, var(--accent-primary));
-  font: 900 clamp(46px, 6vw, 72px)/0.86 var(--font-display);
+  font: 900 clamp(48px, 6vw, 70px)/0.84 var(--font-display);
   letter-spacing: 0;
   text-decoration: none;
   overflow-wrap: anywhere;
 }
 
 .ruler {
-  margin-top: 28px;
+  margin-top: clamp(24px, 3vw, 36px);
 }
 
 .months {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  margin-bottom: 8px;
+  margin-bottom: 7px;
   color: var(--card-muted);
   font: 800 11px/1 var(--font-mono);
 }
@@ -89,34 +92,47 @@
 
 .rulerLine {
   position: relative;
-  height: 50px;
-  border-bottom: 1px solid var(--card-line);
+  height: 54px;
+  border-bottom: 1px solid var(--timeline-line);
   background-image:
     linear-gradient(90deg, transparent 8%, var(--tick-color) 8% calc(8% + 1px), transparent calc(8% + 1px) 32%, var(--tick-color) 32% calc(32% + 1px), transparent calc(32% + 1px) 68%, var(--tick-color) 68% calc(68% + 1px), transparent calc(68% + 1px)),
-    repeating-linear-gradient(90deg, transparent 0 15px, var(--tick-color) 15px 16px, transparent 16px 18px);
-  background-position: 0 0, 0 24px;
+    repeating-linear-gradient(90deg, transparent 0 14px, var(--tick-color) 14px 16px, transparent 16px 19px);
+  background-position: 0 0, 0 27px;
   background-repeat: no-repeat, repeat-x;
-  background-size: 100% 36px, 100% 18px;
+  background-size: 100% 40px, 100% 18px;
 }
 
 .rulerWindow {
   position: absolute;
-  top: 2px;
+  top: 0;
   bottom: 0;
   display: block;
   background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 22%, transparent);
 }
 
+.rulerArrow {
+  position: absolute;
+  right: -20px;
+  top: 22px;
+  color: color-mix(in srgb, var(--text-primary) 58%, transparent);
+}
+
 .rulerMarker {
   position: absolute;
-  top: -10px;
-  display: grid;
+  top: -14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   justify-items: center;
-  width: 54px;
+  width: 48px;
   transform: translateX(-50%);
   color: var(--event-accent, var(--accent-primary));
   font: 900 11px/1 var(--font-mono);
   pointer-events: none;
+}
+
+.rulerMarker span {
+  order: 1;
 }
 
 .rulerMarker::before,
@@ -127,22 +143,24 @@
 }
 
 .rulerMarker::before {
+  order: 2;
   width: 8px;
   height: 8px;
-  margin: 8px 0 2px;
+  margin: 4px 0 0;
   border-radius: 999px;
 }
 
 .rulerMarker::after {
+  order: 3;
   width: 1px;
   height: 38px;
 }
 
 .countdown {
   display: grid;
-  gap: 8px;
+  gap: 7px;
   min-height: 120px;
-  padding: 18px 22px;
+  padding: 18px 22px 17px;
   border-radius: 8px;
   background: var(--event-accent, var(--accent-primary));
   color: var(--accent-ink);
@@ -169,7 +187,7 @@
 }
 
 .countdownValueWrap strong {
-  font: 900 clamp(58px, 7vw, 76px)/0.82 var(--font-display);
+  font: 900 clamp(58px, 7vw, 74px)/0.82 var(--font-display);
   font-variant-numeric: tabular-nums;
 }
 
@@ -189,7 +207,7 @@
   grid-template-columns: auto auto minmax(80px, 1fr);
   gap: 10px;
   align-items: center;
-  padding-top: 18px;
+  padding-top: 16px;
   border-top: 1px solid var(--card-line);
 }
 
@@ -217,10 +235,10 @@
 
 .slotGauge {
   display: block;
-  height: 6px;
+  height: 5px;
   overflow: hidden;
   border-radius: 999px;
-  background: color-mix(in srgb, #000 48%, transparent);
+  background: color-mix(in srgb, #000 58%, transparent);
 }
 
 .slotGauge span {
@@ -230,7 +248,7 @@
   background: var(--event-accent, var(--accent-primary));
 }
 
-@media (max-width: 640px) {
+@media (max-width: 600px) {
   .body {
     grid-template-columns: 1fr;
     gap: 24px;
@@ -259,11 +277,15 @@
   }
 
   .statusTitle {
-    font-size: clamp(40px, 14vw, 56px);
+    font-size: clamp(40px, 14vw, 54px);
   }
 
   .ruler {
     margin-top: 22px;
+  }
+
+  .rulerArrow {
+    right: -12px;
   }
 
   .countdown {

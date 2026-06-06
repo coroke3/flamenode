@@ -249,11 +249,17 @@ export function EventRecruitCard({
                   width: `${timeline.windowWidthPct}%`,
                 }}
               />
+              <Icon
+                name="chevron-right"
+                size={18}
+                className={styles.rulerArrow}
+                aria-hidden
+              />
               <span
                 className={styles.rulerMarker}
                 style={{ left: `${timeline.markerPct}%` }}
               >
-                {timeline.markerLabel}
+                <span>{timeline.markerLabel}</span>
               </span>
             </div>
           </div>
