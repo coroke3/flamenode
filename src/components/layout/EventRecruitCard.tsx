@@ -221,16 +221,9 @@ export function EventRecruitCard({
       style={accentStyle}
       aria-label={`${event.title} ${statusTitle}`}
     >
-      <div className={styles.topRow}>
-        <p className={styles.code}>{event.id.toUpperCase()}</p>
-        <Link href={`/event/${event.id}`} className={styles.cta}>
-          詳細ページへ
-          <Icon name="chevron-right" size={14} aria-hidden />
-        </Link>
-      </div>
-
-      <div className={styles.body}>
+      <div className={styles.layout}>
         <div className={styles.main}>
+          <p className={styles.code}>{event.id.toUpperCase()}</p>
           <Link href={`/event/${event.id}`} className={styles.statusTitle}>
             {statusTitle}
           </Link>
@@ -265,18 +258,24 @@ export function EventRecruitCard({
           </div>
         </div>
 
-        <aside className={styles.countdown}>
-          <div className={styles.countdownHead}>
-            <span>{countdown.heading}</span>
-            <span>{countdown.range}</span>
-          </div>
-          {countdownDisplay ? (
-            <div className={styles.countdownValueWrap}>
-              <strong>{countdownDisplay.value}</strong>
-              <span>{countdownDisplay.unit}</span>
+        <aside className={styles.side}>
+          <Link href={`/event/${event.id}`} className={styles.cta}>
+            詳細ページへ
+            <Icon name="chevron-right" size={14} aria-hidden />
+          </Link>
+          <div className={styles.countdown}>
+            <div className={styles.countdownHead}>
+              <span>{countdown.heading}</span>
+              <span>{countdown.range}</span>
             </div>
-          ) : null}
-          <p>{countdown.label}</p>
+            {countdownDisplay ? (
+              <div className={styles.countdownValueWrap}>
+                <strong>{countdownDisplay.value}</strong>
+                <span>{countdownDisplay.unit}</span>
+              </div>
+            ) : null}
+            <p>{countdown.label}</p>
+          </div>
         </aside>
       </div>
 

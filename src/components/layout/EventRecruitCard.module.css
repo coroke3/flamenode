@@ -5,31 +5,42 @@
   --tick-color: color-mix(in srgb, var(--text-primary) 28%, transparent);
   --timeline-line: color-mix(in srgb, var(--text-primary) 12%, transparent);
   display: grid;
-  gap: clamp(20px, 2.5vw, 30px);
+  gap: clamp(24px, 2.8vw, 34px);
   width: 100%;
-  padding: clamp(26px, 3vw, 36px);
+  padding: clamp(28px, 3vw, 36px);
   border-radius: 14px;
   background: var(--card-bg);
   color: var(--text-primary);
 }
 
 .cardCompact {
-  gap: clamp(18px, 2vw, 28px);
-  padding: clamp(24px, 2.8vw, 34px);
-}
-
-.topRow {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 18px;
-  align-items: start;
+  gap: clamp(22px, 2.4vw, 32px);
+  padding: clamp(26px, 2.8vw, 34px);
 }
 
 .code {
-  margin: 0;
+  margin: 0 0 10px;
   color: var(--card-muted);
   font: 800 11px/1 var(--font-mono);
   letter-spacing: 0.22em;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  gap: clamp(24px, 4.4vw, 58px);
+  align-items: start;
+}
+
+.main {
+  min-width: 0;
+}
+
+.side {
+  display: grid;
+  gap: clamp(28px, 4vw, 40px);
+  justify-items: end;
+  padding-top: 16px;
 }
 
 .cta {
@@ -49,29 +60,18 @@
   white-space: nowrap;
 }
 
-.body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
-  gap: clamp(22px, 4.2vw, 54px);
-  align-items: start;
-}
-
-.main {
-  min-width: 0;
-}
-
 .statusTitle {
   display: inline-block;
   max-width: 100%;
   color: var(--event-accent, var(--accent-primary));
-  font: 900 clamp(48px, 6vw, 70px)/0.84 var(--font-display);
+  font: 900 clamp(52px, 6.3vw, 76px)/0.82 var(--font-display);
   letter-spacing: 0;
   text-decoration: none;
   overflow-wrap: anywhere;
 }
 
 .ruler {
-  margin-top: clamp(24px, 3vw, 36px);
+  margin-top: clamp(28px, 3.2vw, 40px);
 }
 
 .months {
@@ -92,14 +92,14 @@
 
 .rulerLine {
   position: relative;
-  height: 54px;
+  height: 58px;
   border-bottom: 1px solid var(--timeline-line);
   background-image:
     linear-gradient(90deg, transparent 8%, var(--tick-color) 8% calc(8% + 1px), transparent calc(8% + 1px) 32%, var(--tick-color) 32% calc(32% + 1px), transparent calc(32% + 1px) 68%, var(--tick-color) 68% calc(68% + 1px), transparent calc(68% + 1px)),
     repeating-linear-gradient(90deg, transparent 0 14px, var(--tick-color) 14px 16px, transparent 16px 19px);
-  background-position: 0 0, 0 27px;
+  background-position: 0 0, 0 30px;
   background-repeat: no-repeat, repeat-x;
-  background-size: 100% 40px, 100% 18px;
+  background-size: 100% 42px, 100% 18px;
 }
 
 .rulerWindow {
@@ -113,7 +113,7 @@
 .rulerArrow {
   position: absolute;
   right: -20px;
-  top: 22px;
+  top: 24px;
   color: color-mix(in srgb, var(--text-primary) 58%, transparent);
 }
 
@@ -159,6 +159,7 @@
 .countdown {
   display: grid;
   gap: 7px;
+  width: 100%;
   min-height: 120px;
   padding: 18px 22px 17px;
   border-radius: 8px;
@@ -207,7 +208,7 @@
   grid-template-columns: auto auto minmax(80px, 1fr);
   gap: 10px;
   align-items: center;
-  padding-top: 16px;
+  padding-top: 17px;
   border-top: 1px solid var(--card-line);
 }
 
@@ -249,13 +250,14 @@
 }
 
 @media (max-width: 600px) {
-  .body {
+  .layout {
     grid-template-columns: 1fr;
     gap: 24px;
   }
 
-  .countdown {
-    width: min(100%, 340px);
+  .side {
+    justify-items: stretch;
+    padding-top: 0;
   }
 }
 
@@ -267,17 +269,13 @@
     border-radius: 12px;
   }
 
-  .topRow {
-    grid-template-columns: 1fr;
-  }
-
   .cta {
     width: 100%;
     min-width: 0;
   }
 
   .statusTitle {
-    font-size: clamp(40px, 14vw, 54px);
+    font-size: clamp(42px, 15vw, 56px);
   }
 
   .ruler {
