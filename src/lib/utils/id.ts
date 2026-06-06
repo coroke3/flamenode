@@ -29,13 +29,3 @@ function fallback(): string {
     hex.slice(20)
   );
 }
-
-/** 短い英数 ID (アクセシビリティ・URL用)。 */
-export function shortId(len = 10): string {
-  const chars = "abcdefghjkmnpqrstuvwxyz23456789";
-  let out = "";
-  for (let i = 0; i < len; i++) {
-    out += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return out;
-}

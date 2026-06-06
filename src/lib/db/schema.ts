@@ -587,7 +587,7 @@ export const videoMembers = sqliteTable(
     edit_updated_at: integer("edit_updated_at"),
   },
   (t) => ({
-    // 表示順 (デフォルト) + 名前ソート (MemberTable の列ソート) を高速化する。
+    // 表示順 (デフォルト) + 名前ソート (MemberSection の列ソート) を高速化する。
     byVideo: index("video_members_video_order_idx").on(
       t.video_id,
       t.order_index,

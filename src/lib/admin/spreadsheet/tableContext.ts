@@ -94,13 +94,6 @@ export async function getCachedTableColumns(
   return { columns, primaryKeys };
 }
 
-/** @deprecated 単体利用向け。通常は resolveSpreadsheetTableContext を使う */
-export async function loadTableColumns(
-  table: string,
-): Promise<SpreadsheetColumnMeta[]> {
-  return (await getCachedTableColumns(table)).columns;
-}
-
 export async function resolveSpreadsheetTableContext(
   table: string,
 ): Promise<SpreadsheetTableContext> {

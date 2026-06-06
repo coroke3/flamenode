@@ -26,7 +26,6 @@ import {
 } from "./validation";
 
 export type { SpreadsheetColumnMeta } from "./tableContext";
-export { loadTableColumns } from "./tableContext";
 export const SPREADSHEET_EXPORT_MAX_ROWS = 5000;
 
 export interface SpreadsheetPageResult {

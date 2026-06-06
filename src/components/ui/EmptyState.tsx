@@ -20,10 +20,6 @@ export type EmptyStateProps = {
   actions?: EmptyStateAction[];
   tone?: EmptyStateTone;
   className?: string;
-  /** @deprecated actions を使ってください */
-  href?: string;
-  /** @deprecated actions を使ってください */
-  actionLabel?: string;
 };
 
 function toneIcon(tone: EmptyStateTone): IconName {
@@ -59,15 +55,8 @@ export function EmptyState({
   actions,
   tone = "neutral",
   className,
-  href,
-  actionLabel,
 }: EmptyStateProps): React.ReactElement {
-  const resolvedActions: EmptyStateAction[] =
-    actions && actions.length > 0
-      ? actions
-      : href && actionLabel
-        ? [{ href, label: actionLabel, variant: "primary" }]
-        : [];
+  const resolvedActions = actions ?? [];
 
   const iconNode =
     icon ??

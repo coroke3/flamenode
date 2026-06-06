@@ -1,11 +1,11 @@
-import * as React from "react";import { FnTable } from "@/components/ui/FnTable";
+import * as React from "react";
+import { FnTable } from "@/components/ui/FnTable";
 
 import Link from "next/link";
 import type { Metadata } from "next";
 import { and, desc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { costUsageSnapshots, historyLogs, systemSettings } from "@/lib/db/schema";
-import { Icon } from "@/components/ui/Icon";
 import { CostGuardForm } from "@/components/admin/CostGuardForm";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
@@ -345,34 +345,6 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
         )}
       </section>
 
-      <section style={{ marginTop: 28 }}>
-        <h2
-          style={{
-            fontSize: 13,
-            fontWeight: 700,
-            letterSpacing: "0.18em",
-            color: "var(--text-muted)",
-            textTransform: "uppercase",
-            marginBottom: 12,
-          }}
-        >
-          一時許可
-        </h2>
-        <p
-          style={{
-            color: "var(--text-secondary)",
-            fontSize: 13,
-            background: "var(--bg-surface)",
-            padding: 16,
-            border: "1px solid var(--border-subtle)",
-            borderRadius: "var(--radius-md)",
-          }}
-        >
-          <Icon name="info" size={12} aria-hidden /> 読み取り専用中でも、特定の管理者が30分間
-          だけ書き込み可能になる「一時許可」を発行できます。理由を必ず入力してください。
-          (フォームは <code>/api/admin/cost-guard/temp</code> に POST します)
-        </p>
-      </section>
     </div>
   );
 }

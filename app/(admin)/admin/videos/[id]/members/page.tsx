@@ -14,20 +14,13 @@ import type {
   VideoMemberInput,
   VideoMemberSuggestion,
 } from "@/components/forms/VideoMembersField";
+import { formatChapterTime } from "@/lib/utils/chapterTime";
 
 export const metadata: Metadata = { title: "参加者設定" };
 export const dynamic = "force-dynamic";
 
 interface Props {
   params: Promise<{ id: string }>;
-}
-
-function formatChapterTime(seconds: number): string {
-  if (!Number.isFinite(seconds)) return "";
-  const total = Math.max(0, Math.floor(seconds));
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 function parseMemberChapters(raw: string | null): VideoMemberInput["chapters"] {
