@@ -6,6 +6,7 @@ import styles from "./MemberSection.module.css";
 import { Icon } from "@/components/ui/Icon";
 import { cn } from "@/lib/utils/cn";
 import { formatDuration } from "@/lib/utils/format";
+import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
 import { MemberChapterItem } from "./MemberChapterItem";
 import type { MemberChapterItemEntry } from "./MemberChapterItem";
 
@@ -218,12 +219,13 @@ function MemberCard({
   const xExternal = member.x_user_id
     ? `https://x.com/${encodeURIComponent(member.x_user_id)}`
     : null;
+  const iconUrl = cachedGoogleImageUrl(member.icon_url);
 
   const avatar = (
     <span className={styles.avatar} aria-hidden>
-      {member.icon_url ? (
+      {iconUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={member.icon_url} alt="" width={36} height={36} />
+        <img src={iconUrl} alt="" width={36} height={36} />
       ) : (
         <Icon name="user" size={16} aria-hidden />
       )}
@@ -334,8 +336,16 @@ function TableView({
     [members, sort, counts],
   );
 
+  // デフォルト順のインデックスマップ（ソート中にも元の番号を表示するため）
+  const defaultIndexMap = React.useMemo(() => {
+    const map = new Map<string, number>();
+    members.forEach((m, i) => map.set(m.id, i + 1));
+    return map;
+  }, [members]);
+
   const handleSort = React.useCallback((key: SortKey) => {
     setSort((current) => {
+      if (key === "order") return null;
       if (!current || current.key !== key) return { key, direction: "asc" };
       if (current.direction === "asc") return { key, direction: "desc" };
       return null;
@@ -349,6 +359,13 @@ function TableView({
       aria-label="参加メンバー"
     >
       <div className={styles.tableHeader} role="row">
+        <SortHeader
+          label="No."
+          sortKey="order"
+          activeSort={sort}
+          onSort={handleSort}
+          className={styles.tColNo}
+        />
         <SortHeader
           label="活動名"
           sortKey="name"
@@ -381,22 +398,27 @@ function TableView({
           コメント
         </span>
       </div>
-      {sortedMembers.map((member) => {
+      {sortedMembers.map((member, sortIndex) => {
         const displayName = memberDisplayName(member);
+        const iconUrl = cachedGoogleImageUrl(member.icon_url);
         const internalHref = member.x_user_id ? `/user/${member.x_user_id}` : null;
         const externalHref = member.x_user_id
           ? `https://x.com/${encodeURIComponent(member.x_user_id)}`
           : null;
         const times = chapterTimes.get(member.id) ?? [];
+        const rowNum = defaultIndexMap.get(member.id) ?? sortIndex + 1;
 
         return (
           <div role="row" key={member.id} className={styles.tableRow}>
+            <span role="cell" className={styles.tColNo} data-label="No.">
+              {sort ? sortIndex + 1 : rowNum}
+            </span>
             <span role="cell" className={styles.tColName} data-label="活動名">
               <span className={styles.tNameCell}>
                 <span className={styles.tAvatar} aria-hidden>
-                  {member.icon_url ? (
+                  {iconUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={member.icon_url} alt="" width={24} height={24} />
+                    <img src={iconUrl} alt="" width={24} height={24} />
                   ) : (
                     <Icon name="user" size={11} aria-hidden />
                   )}
@@ -485,6 +507,7 @@ function ChaptersView({
       {members.map((member) => {
         const list = grouped.get(member.id) ?? [];
         const displayName = memberDisplayName(member);
+        const iconUrl = cachedGoogleImageUrl(member.icon_url);
         const headerLabel = member.x_user_id
           ? `${displayName}(@${member.x_user_id})`
           : displayName;
@@ -493,9 +516,9 @@ function ChaptersView({
           <section key={member.id} className={styles.chapterGroup}>
             <header className={styles.chapterGroupHead}>
               <span className={styles.avatarSmall} aria-hidden>
-                {member.icon_url ? (
+                {iconUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={member.icon_url} alt="" width={24} height={24} />
+                  <img src={iconUrl} alt="" width={24} height={24} />
                 ) : (
                   <Icon name="user" size={11} aria-hidden />
                 )}

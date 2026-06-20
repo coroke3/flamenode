@@ -8,6 +8,7 @@ import {
   isNotNull,
   lt,
   ne,
+  notInArray,
   or,
   sql,
 } from "drizzle-orm";
@@ -20,22 +21,18 @@ import {
   xUsers,
 } from "./schema";
 import type { DB } from "./client";
-import { resolveMissingIcons } from "./iconResolution";
-import { resolveMemberIcons } from "./xIconResolution";
 import { uniqueBy } from "@/lib/utils/unique";
 import { normalizeXId } from "@/lib/utils/xid";
 import {
   clampRelatedLimit,
   enforceDiversity,
-  fillToMinimum,
   interleaveBuckets,
   perMemberLimit,
-  seededShuffle,
-  todayDateUtc,
   uniqueByVideoId,
   type RelatedReason,
 } from "./recommendation";
 import { coalescedVideoScore } from "./videoScoreSql";
+import { resolveMemberIcons, resolveMemberNames } from "./xIconResolution";
 
 const videoScoreExpr = coalescedVideoScore;
 
@@ -133,13 +130,7 @@ export async function fetchVideoDetail(
         .where(eq(xUsers.id, video.creator_x_user_id))
         .limit(1)
     : [];
-  let creator = creatorRows[0] ?? null;
-  if (creator && !creator.icon_url) {
-    const resolved = await resolveMissingIcons(db, [
-      { creator_x_user_id: creator.id, icon_url: creator.icon_url },
-    ]);
-    creator = { ...creator, icon_url: resolved[0]?.icon_url ?? null };
-  }
+  const creator = creatorRows[0] ?? null;
 
   // 3) 所属イベント
   const eventRows = await db
@@ -159,10 +150,8 @@ export async function fetchVideoDetail(
     .where(eq(videoEvents.video_id, video.id));
 
   // 4) 合作メンバー
-  // icon_url は xUsers.icon_url を 1 段目として取得し、null の場合は
-  // resolveMemberIcons で「そのメンバー X ID の過去作品アイコン」から補完する。
-  // (CLAUDE.md 方針: 作品アイコンとユーザー既定アイコンを完全分離する)
-  const membersRaw = await db
+  // icon_url: xUsers.icon_url → 過去作品の creator_icon_url (個人作→合作) で補完
+  const rawMembers = await db
     .select({
       id: videoMembers.id,
       x_user_id: videoMembers.x_user_id,
@@ -185,7 +174,9 @@ export async function fetchVideoDetail(
       )!,
     )
     .orderBy(videoMembers.order_index);
-  const members = await resolveMemberIcons(db, membersRaw);
+
+  const membersWithIcons = await resolveMemberIcons(db, rawMembers);
+  const members = await resolveMemberNames(db, membersWithIcons);
 
   // 5) チャプター (再生バー点表示の元データ)
   // 可視性ポリシー: public は全員可。private は admin / 動画オーナー (canEditChapters) /
@@ -237,7 +228,7 @@ export async function fetchVideoDetail(
 
   // メンバーチャプターは video_members.chapters_json から生成し、通常チャプターとは別 prop で
   // MemberSection に渡す。
-  const memberChapters = membersRaw
+  const memberChapters = members
     .flatMap((member) => memberChaptersFromJson(member.id, member.chapters_json))
     .sort(
       (a, b) =>
@@ -258,21 +249,14 @@ export async function fetchVideoDetail(
 /**
  * 関連動画の取得 (bucket 混合版)。
  *
- * 旧版は同一作者最大4件 / 同一イベント最大6件 / score上位20件を順に詰める
- * だけで、結果として「毎回同じ作者・同じイベント・上位スコア」が顔を出していた。
- * これを以下の bucket に分け、各 bucket の最大件数を絞ったうえで偏らないように
- * インタリーブする。reason は将来用に内部 result に持つが、動画詳細 UI には
+ * 最新順・スコア順の全体候補は混ぜず、現在の作品と明示的な接点がある
+ * bucket だけを使う。reason は内部 result に保持するが、動画詳細 UI には
  * 表示しない (公開ページの「枠線で囲まれたタグ」が増えるのを避ける)。
  *
  *   - sameCreator: 同一 creator_x_user_id (max 2)
  *   - sameEvent: 同一 primary_event_id (max 3)
  *   - sharedMembers: video_members.x_user_id が現在動画のメンバーと一致 (max 2)
  *   - nearDate: scheduled_time が近い順 (max 3)
- *   - topScore: videos.score 上位 (max 3)
- *   - discovery: 中位スコアからの日替わり seed 混合 (max 2)
- *
- * discovery は完全ランダムではなく、`current.id + YYYY-MM-DD` を seed にして
- * 1 日内では安定するようにする。1 日経つと組み合わせが入れ替わる。
  *
  * 並び順は creator 連続を避けるため round-robin で interleave する。
  */
@@ -301,26 +285,21 @@ export async function fetchRelatedVideos(
 ): Promise<RelatedVideoCardData[]> {
   const relatedLimit = clampRelatedLimit(limit);
   const minTarget = Math.min(15, relatedLimit);
-  const sameEventLimit = relatedLimit >= 30 ? 6 : 4;
-  const sameCreatorLimit = relatedLimit >= 30 ? 4 : 3;
-  const nearDateLimit = relatedLimit >= 30 ? 5 : 3;
-  const topScoreLimit = relatedLimit >= 30 ? 5 : 4;
-  const discoveryLimit = relatedLimit >= 30 ? 4 : 2;
-  const sharedLimit = relatedLimit >= 30 ? 10 : 6;
+  const sameEventLimit = relatedLimit >= 30 ? 8 : 5;
+  const sameCreatorLimit = relatedLimit >= 30 ? 5 : 4;
+  const nearDateLimit = relatedLimit >= 30 ? 6 : 4;
+  const sharedLimit = relatedLimit >= 30 ? 12 : 8;
 
   const baseWhere = and(
     eq(videos.visibility_status, "public"),
     ne(videos.id, current.id),
   );
-  const iconExpr = sql<
-    string | null
-  >`COALESCE(${videos.creator_icon_url}, ${xUsers.icon_url})`;
   const baseSelect = {
     id: videos.id,
     title: videos.title,
     youtube_video_id: videos.youtube_video_id,
     display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.creator_display_name}, ${videos.creator_x_user_id})`,
-    icon_url: iconExpr,
+    icon_url: videos.creator_icon_url,
     creator_x_user_id: videos.creator_x_user_id,
     primary_event_id: videos.primary_event_id,
     scheduled_time: videos.scheduled_time,
@@ -494,70 +473,44 @@ export async function fetchRelatedVideos(
             desc(videoScoreExpr),
           )
           .limit(Math.min(16, nearDateLimit * 3))
-      : await db
-          .select(baseSelect)
-          .from(videos)
-          .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
-          .where(baseWhere)
-          .orderBy(desc(videos.scheduled_time), desc(videoScoreExpr))
-          .limit(Math.min(16, nearDateLimit * 3));
+      : [];
 
-  const topScore: Row[] = await db
-    .select(baseSelect)
-    .from(videos)
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
-    .where(baseWhere)
-    .orderBy(desc(videoScoreExpr), desc(videos.scheduled_time))
-    .limit(Math.min(40, Math.max(20, topScoreLimit * 5)));
-
-  const discovery = seededShuffle(
-    topScore.slice(Math.min(8, Math.floor(topScore.length / 2))),
-    `${current.id}|${todayDateUtc()}`,
-  ).slice(0, discoveryLimit);
-
-  const initialCandidates = interleaveBuckets<Row>([
+  let initialCandidates = interleaveBuckets<Row>([
     { reason: "previous_date", rows: temporalPrevious },
     { reason: "next_date", rows: temporalNext },
     { reason: "shared_member", rows: sharedMembers.slice(0, sharedLimit) },
     { reason: "same_event", rows: sameEvent.slice(0, sameEventLimit) },
     { reason: "same_creator", rows: sameCreator.slice(0, sameCreatorLimit) },
     { reason: "near_date", rows: nearDate.slice(0, nearDateLimit) },
-    { reason: "top_score", rows: topScore.slice(0, topScoreLimit) },
-    { reason: "discovery", rows: discovery },
   ]);
 
-  let selected = enforceDiversity(initialCandidates, {
+  // バケットから15件未満の場合、最新公開動画で補完
+  if (initialCandidates.length < minTarget) {
+    const existingIds = initialCandidates.map((c) => c.row.id);
+    existingIds.push(current.id);
+    const fallbackRows = await db
+      .select(baseSelect)
+      .from(videos)
+      .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
+      .where(
+        and(
+          baseWhere,
+          notInArray(videos.id, existingIds),
+        )!,
+      )
+      .orderBy(desc(videos.scheduled_time), desc(videoScoreExpr))
+      .limit(minTarget - initialCandidates.length + 5);
+    for (const row of fallbackRows) {
+      if (!initialCandidates.some((c) => c.row.id === row.id)) {
+        initialCandidates.push({ row, reason: "near_date" });
+      }
+    }
+  }
+
+  const selected = enforceDiversity(initialCandidates, {
     limit: relatedLimit,
     minTarget,
   });
-
-  if (selected.length < minTarget) {
-    const latestFallback = await db
-      .select(baseSelect)
-      .from(videos)
-      .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
-      .where(baseWhere)
-      .orderBy(desc(videos.scheduled_time), desc(videoScoreExpr))
-      .limit(relatedLimit);
-    selected = fillToMinimum(selected, latestFallback, "latest_fallback", {
-      limit: relatedLimit,
-      minTarget,
-    });
-  }
-
-  if (selected.length < minTarget) {
-    const broadFallback = await db
-      .select(baseSelect)
-      .from(videos)
-      .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
-      .where(baseWhere)
-      .orderBy(desc(videoScoreExpr), desc(videos.scheduled_time))
-      .limit(relatedLimit);
-    selected = fillToMinimum(selected, broadFallback, "broad_fallback", {
-      limit: relatedLimit,
-      minTarget,
-    });
-  }
 
   return selected.map(toRelated).slice(0, relatedLimit);
 }

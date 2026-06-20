@@ -148,12 +148,13 @@
 .tableRow {
   display: grid;
   grid-template-columns:
+    40px
     minmax(190px, 1.25fr)
     minmax(120px, 0.9fr)
     minmax(120px, 0.8fr)
     minmax(86px, 0.75fr)
     minmax(160px, 1.4fr);
-  min-width: 680px;
+  min-width: 720px;
   background: var(--bg-surface);
 }
 
@@ -222,6 +223,14 @@
 .tNameLink:hover,
 .tHandleLink:hover {
   color: var(--event-accent, var(--accent-primary));
+}
+
+.tColNo {
+  width: 40px;
+  min-width: 40px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .tColName,

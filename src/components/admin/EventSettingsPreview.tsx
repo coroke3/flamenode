@@ -1,7 +1,7 @@
 import * as React from "react";
 import {
-  DEFAULT_STAGE_PERMISSION_FIELD,
   parseVideoFormSettings,
+  resolveStagePermissionFields,
 } from "@/lib/video/formSettings";
 
 export interface EventSettingsPreviewValue {
@@ -16,7 +16,6 @@ export interface EventSettingsPreviewValue {
   entry_start_time?: number | string | null;
   entry_end_time?: number | string | null;
   is_active?: number | string | null;
-  is_entry_open?: number | string | null;
   is_archived?: number | string | null;
   allow_user_video_event_links?: number | string | null;
   allow_user_video_edits?: number | string | null;
@@ -110,7 +109,7 @@ export function EventSettingsPreview({
 }): React.ReactElement {
   const accent = event.accent_color?.trim() || "var(--accent-primary)";
   const formSettings = parseVideoFormSettings(event.video_form_settings_json);
-  const stage = formSettings.stage_permission;
+  const stageQuestions = resolveStagePermissionFields([formSettings]);
   const parts = parseParts(event);
   const slotType = event.slot_type ?? "time";
 
@@ -158,22 +157,11 @@ export function EventSettingsPreview({
               <img
                 src={event.icon_url}
                 alt=""
-                width={42}
-                height={42}
-                style={{ borderRadius: 8, objectFit: "cover" }}
+                width={24}
+                height={24}
+                style={{ borderRadius: "50%", objectFit: "cover" }}
               />
-            ) : (
-              <span
-                aria-hidden
-                style={{
-                  width: 42,
-                  height: 42,
-                  borderRadius: 8,
-                  background: accent,
-                  display: "block",
-                }}
-              />
-            )}
+            ) : null}
             <div>
               <h3 style={{ margin: 0, fontSize: 18 }}>{event.title || "イベント名未入力"}</h3>
               <p className="fn-muted" style={{ margin: "2px 0 0", fontSize: 12 }}>
@@ -184,9 +172,6 @@ export function EventSettingsPreview({
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <span className={`fn-badge ${toBool(event.is_active) ? "fn-badge-accent" : "fn-badge-soft"}`}>
               {toBool(event.is_active) ? "公開" : "下書き"}
-            </span>
-            <span className={`fn-badge ${toBool(event.is_entry_open) ? "fn-badge-accent" : "fn-badge-soft"}`}>
-              受付 {toBool(event.is_entry_open) ? "OPEN" : "CLOSED"}
             </span>
             <span className={`fn-badge ${toBool(event.is_archived) ? "fn-badge-warning" : "fn-badge-soft"}`}>
               {toBool(event.is_archived) ? "アーカイブ" : "通常"}
@@ -206,14 +191,21 @@ export function EventSettingsPreview({
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
         <article className="fn-card" style={{ padding: 12 }}>
           <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>投稿フォーム項目</h3>
-          {stage?.enabled ? (
-            <div style={{ display: "grid", gap: 6 }}>
-              <span className={`fn-badge ${stage.required ? "fn-badge-warning" : "fn-badge-soft"}`} style={{ justifySelf: "start" }}>
-                {stage.required ? "必須" : "任意"}
-              </span>
-              <Field label="ラベル" value={stage.label || DEFAULT_STAGE_PERMISSION_FIELD.label} />
-              <Field label="説明" value={stage.description || DEFAULT_STAGE_PERMISSION_FIELD.description} />
-              <Field label="プレースホルダー" value={stage.placeholder || DEFAULT_STAGE_PERMISSION_FIELD.placeholder} />
+          {stageQuestions.length > 0 ? (
+            <div style={{ display: "grid", gap: 10 }}>
+              {stageQuestions.map((question, index) => (
+                <div key={question.id} style={{ display: "grid", gap: 6 }}>
+                  <span
+                    className={`fn-badge ${question.required ? "fn-badge-warning" : "fn-badge-soft"}`}
+                    style={{ justifySelf: "start" }}
+                  >
+                    質問 {index + 1} / {question.required ? "必須" : "任意"}
+                  </span>
+                  <Field label="ラベル" value={question.label} />
+                  <Field label="説明" value={question.description} />
+                  <Field label="プレースホルダー" value={question.placeholder} />
+                </div>
+              ))}
             </div>
           ) : (
             <p className="fn-muted" style={{ margin: 0, fontSize: 12 }}>

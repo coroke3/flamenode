@@ -192,3 +192,75 @@ export async function getXIconCandidates(
 
   return candidates;
 }
+
+/**
+ * 合作メンバーの表示名を解決する。
+ *
+ * 優先順位:
+ *   1. x_users.x_name
+ *   2. 同 X ID の個人作品の videos.creator_display_name (新しい順)
+ *   3. 入力 row の name (video_members.name = 合作登録名)
+ *   4. 同 X ID の合作作品の videos.creator_display_name (新しい順)
+ *   5. x_user_id 自体
+ */
+export async function resolveMemberNames<
+  T extends { x_user_id: string | null; name: string | null; x_name: string | null },
+>(db: DB, members: T[]): Promise<T[]> {
+  const missing = members.filter((m) => !m.x_name && m.x_user_id);
+  if (missing.length === 0) return members;
+
+  const xIds = Array.from(
+    new Set(missing.map((m) => m.x_user_id).filter((s): s is string => !!s)),
+  );
+  if (xIds.length === 0) return members;
+
+  const CHUNK_SIZE = 25;
+  type NameRow = { x_id: string | null; display_name: string | null };
+
+  async function fetchByType(
+    submissionType: "individual" | "collab",
+  ): Promise<NameRow[]> {
+    const out: NameRow[] = [];
+    for (let i = 0; i < xIds.length; i += CHUNK_SIZE) {
+      const chunk = xIds.slice(i, i + CHUNK_SIZE);
+      const rows = await db
+        .select({
+          x_id: videos.creator_x_user_id,
+          display_name: videos.creator_display_name,
+        })
+        .from(videos)
+        .where(
+          and(
+            inArray(videos.creator_x_user_id, chunk),
+            isNotNull(videos.creator_display_name),
+            eq(videos.collaboration_type, submissionType),
+            sql`${videos.visibility_status} NOT IN ('archived', 'voided')`,
+          )!,
+        )
+        .orderBy(desc(videos.created_at));
+      out.push(...rows);
+    }
+    return out;
+  }
+
+  const individualRows = await fetchByType("individual");
+  const collabRows = await fetchByType("collab");
+
+  const names = new Map<string, string>();
+  for (const r of individualRows) {
+    if (!r.x_id || !r.display_name) continue;
+    if (!names.has(r.x_id)) names.set(r.x_id, r.display_name);
+  }
+  for (const r of collabRows) {
+    if (!r.x_id || !r.display_name) continue;
+    if (!names.has(r.x_id)) names.set(r.x_id, r.display_name);
+  }
+
+  return members.map((m) => {
+    if (m.x_name || !m.x_user_id) return m;
+    const resolved = names.get(m.x_user_id);
+    if (resolved) return { ...m, x_name: resolved };
+    if (m.name) return { ...m, x_name: m.name };
+    return { ...m, x_name: m.x_user_id };
+  });
+}

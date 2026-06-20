@@ -352,6 +352,9 @@
     align-items: stretch;
   }
 
+  [data-fn-surface="public"] .fn-event-hero {
+    grid-template-columns: 1fr;
+  }
   [data-fn-surface="public"] .fn-event-hero-title {
     font-size: clamp(32px, 9vw, 48px);
     line-height: 0.92;
@@ -368,6 +371,9 @@
   [data-fn-surface="public"] .fn-event-hero,
   [data-fn-surface="public"] .fn-evlist-head {
     padding-top: 24px;
+  }
+  [data-fn-surface="public"] .fn-event-hero {
+    gap: 16px;
   }
 }
 
@@ -471,6 +477,11 @@
     grid-auto-columns: min(82vw, 280px);
     gap: 12px;
     scroll-padding-inline: var(--fn-page-gutter);
+  }
+
+  [data-fn-surface="public"] .fn-shelf[data-density="compact"] {
+    grid-auto-columns: minmax(104px, 32vw);
+    gap: 8px;
   }
 
   [data-fn-surface="public"] .fn-shelf-fade-left,

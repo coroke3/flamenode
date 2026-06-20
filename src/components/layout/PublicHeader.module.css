@@ -179,8 +179,16 @@
 .mobile {
   border-top: 1px solid var(--hairline);
   background-color: var(--bg-surface);
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-height 0.3s ease, opacity 0.2s ease;
+}
+
+.mobileOpen {
   max-height: calc(100vh - 64px);
   overflow-y: auto;
+  opacity: 1;
 }
 
 .mobileNav {
@@ -305,7 +313,7 @@
   padding: 0 8px;
 }
 
-@media (min-width: 768px) {
+@media (min-width: 1001px) {
   .desktopNav,
   .actionNav {
     display: flex;

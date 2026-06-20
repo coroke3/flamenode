@@ -1,38 +1,70 @@
 import * as React from "react";
 import Link from "next/link";
 
-interface SectionHeaderProps {
-  title: string;
+export interface SectionHeaderClasses {
+  root?: string;
+  left?: string;
+  titles?: string;
+  eyebrow?: string;
+  titleLine?: string;
+  title?: string;
   description?: string;
-  moreHref?: string;
-  moreLabel?: string;
+  action?: string;
 }
 
-/**
- * 公開面セクション見出し（claudedesign / Standalone 準拠）
- */
+interface SectionHeaderProps {
+  title: string;
+  eyebrow?: React.ReactNode;
+  description?: React.ReactNode;
+  action?: React.ReactNode;
+  moreHref?: string;
+  moreLabel?: string;
+  classes?: SectionHeaderClasses;
+}
+
 export function SectionHeader({
   title,
+  eyebrow,
   description,
+  action,
   moreHref,
   moreLabel = "もっと見る",
+  classes = {},
 }: SectionHeaderProps): React.ReactElement {
+  const titleContent = (
+    <>
+      <h2 className={classes.title ?? "fn-display fn-section-title"}>{title}</h2>
+      {description ? (
+        <span className={classes.description ?? "fn-section-jp fn-jp"}>
+          {description}
+        </span>
+      ) : null}
+    </>
+  );
+  const actionNode = action ?? (
+    moreHref ? (
+      <Link href={moreHref} className={classes.action ?? "fn-section-more"}>
+        {moreLabel}
+        <span aria-hidden>→</span>
+      </Link>
+    ) : null
+  );
+
   return (
-    <header className="fn-section-head">
-      <div className="fn-section-head-left">
-        <div className="fn-section-titles">
-          <h2 className="fn-display fn-section-title">{title}</h2>
-          {description ? (
-            <span className="fn-section-jp fn-jp">{description}</span>
+    <header className={classes.root ?? "fn-section-head"}>
+      <div className={classes.left ?? "fn-section-head-left"}>
+        <div className={classes.titles ?? "fn-section-titles"}>
+          {eyebrow ? (
+            <p className={classes.eyebrow ?? "fn-eyebrow"}>{eyebrow}</p>
           ) : null}
+          {classes.titleLine ? (
+            <div className={classes.titleLine}>{titleContent}</div>
+          ) : (
+            titleContent
+          )}
         </div>
       </div>
-      {moreHref ? (
-        <Link href={moreHref} className="fn-section-more">
-          {moreLabel}
-          <span aria-hidden>→</span>
-        </Link>
-      ) : null}
+      {actionNode}
     </header>
   );
 }

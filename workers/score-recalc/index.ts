@@ -45,4 +45,19 @@ async function recalcAll(env: Env): Promise<void> {
   )
     .bind(now)
     .run();
+
+  // videos.score も同期する（クエリは videos.score を参照）
+  await env.DB.prepare(
+    `UPDATE videos SET score = (
+       SELECT COALESCE(ym.view_count, 0) * 1.0
+         + COALESCE(vs.app_like_count, 0) * 5.0
+         - MAX(0, (?1 - COALESCE(v.scheduled_time, ?1))) / 86400.0 * 0.1
+       FROM video_stats vs
+       LEFT JOIN video_youtube_metadata ym ON ym.video_id = vs.video_id
+       WHERE vs.video_id = videos.id
+     )
+     WHERE visibility_status = 'public'`,
+  )
+    .bind(now)
+    .run();
 }

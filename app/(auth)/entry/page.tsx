@@ -1,21 +1,46 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import styles from "./page.module.css";
 import { signIn } from "@/lib/auth";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { getDatabase } from "@/lib/cloudflare";
 import { fetchActiveEvents } from "@/lib/db/queries";
-import { slots as slotsTable } from "@/lib/db/schema";
+import {
+  events as eventsTable,
+  slots as slotsTable,
+  xUsers as xUsersTable,
+} from "@/lib/db/schema";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 import { StatusPanel } from "@/components/ui/StatusPanel";
 import { sanitizeNextPath } from "#utils/next";
+import { collapseReservationGroups, type SlotBase } from "@/lib/utils/slotGrouping";
 
-export const metadata: Metadata = { title: "エントリー" };
+export const metadata: Metadata = { title: "エントリー / 投稿" };
 export const dynamic = "force-dynamic";
+
+type ReservedSlot = {
+  id: string;
+  event_id: string;
+  video_id: string | null;
+  slot_kind: "time" | "count" | null;
+  slot_label: string | null;
+  start_time: number | null;
+  end_time: number | null;
+  sort_order: number | null;
+  status: "available" | "reserved" | "submitted";
+  discord_user_id: string | null;
+  x_user_id: string | null;
+  display_name: string | null;
+  reservation_group_id: string | null;
+  priority_reclaim_until: number | null;
+  priority_reclaim_video_id: string | null;
+  updated_at: number;
+  event_title: string | null;
+};
 
 export default async function EntryPage({
   searchParams,
@@ -50,8 +75,9 @@ export default async function EntryPage({
     needsTosAccept ? "利用規約に同意して進む" : defaultLabel;
 
   const db = getDatabase();
+  const activeX = sessionUser?.active_x_user_id ?? null;
   const activeEventsRaw = db ? await fetchActiveEvents(db).catch(() => []) : [];
-  // 開催前でも受付 OPEN のイベントは募集対象にする。
+  // 開催前でも募集期間内のイベントは募集対象にする。
   // 複数並走時の優先度: 募集終了が近いものを先頭に、未設定は最後尾に回し、その中で start_time 昇順。
   const activeEvents = activeEventsRaw
     .filter((ev) => isAcceptingEntries(ev))
@@ -73,14 +99,77 @@ export default async function EntryPage({
       .groupBy(slotsTable.event_id);
     rows.forEach((row) => slotCounts.set(row.event_id, Number(row.count ?? 0)));
   }
+  let reservedSlots: ReservedSlot[] = [];
+  let activeXApprovalStatus: "approved" | "pending" | "rejected" | null = null;
+  if (db && sessionUser?.id) {
+    if (activeX) {
+      const xRow = (
+        await db
+          .select({ approval_status: xUsersTable.approval_status })
+          .from(xUsersTable)
+          .where(eq(xUsersTable.id, activeX))
+          .limit(1)
+      )[0];
+      activeXApprovalStatus = xRow?.approval_status ?? null;
+    }
+
+    const ownerWhere = activeX
+      ? or(
+          eq(slotsTable.x_user_id, activeX),
+          and(isNull(slotsTable.x_user_id), eq(slotsTable.discord_user_id, sessionUser.id))!,
+        )
+      : eq(slotsTable.discord_user_id, sessionUser.id);
+    reservedSlots = await db
+      .select({
+        id: slotsTable.id,
+        event_id: slotsTable.event_id,
+        video_id: slotsTable.video_id,
+        slot_kind: slotsTable.slot_kind,
+        slot_label: slotsTable.slot_label,
+        start_time: slotsTable.start_time,
+        end_time: slotsTable.end_time,
+        sort_order: slotsTable.sort_order,
+        status: slotsTable.status,
+        discord_user_id: slotsTable.discord_user_id,
+        x_user_id: slotsTable.x_user_id,
+        display_name: slotsTable.display_name,
+        reservation_group_id: slotsTable.reservation_group_id,
+        priority_reclaim_until: slotsTable.priority_reclaim_until,
+        priority_reclaim_video_id: slotsTable.priority_reclaim_video_id,
+        updated_at: slotsTable.updated_at,
+        event_title: eventsTable.title,
+      })
+      .from(slotsTable)
+      .leftJoin(eventsTable, eq(slotsTable.event_id, eventsTable.id))
+      .where(
+        and(
+          ownerWhere,
+          or(eq(slotsTable.status, "reserved"), eq(slotsTable.status, "submitted"))!,
+        )!,
+      )
+      .orderBy(slotsTable.start_time, slotsTable.end_time, slotsTable.sort_order)
+      .limit(12);
+  }
+  const displaySlots = collapseReservationGroups(reservedSlots as SlotBase[]);
+  const canPost = isLoggedIn && activeXApprovalStatus === "approved";
+  const checkTitle = canPost ? "投稿前チェック" : "投稿には追加設定が必要です";
+  const checkMessage = !activeX
+    ? "投稿にはActive X IDの選択が必要です。設定画面から連携・選択してください。"
+    : activeXApprovalStatus === "pending"
+      ? "選択中のActive X IDは承認待ちです。承認後に投稿できます (枠の確保は可能)。"
+      : activeXApprovalStatus === "rejected"
+        ? "選択中のActive X IDは却下されています。設定画面で別のX IDを選択してください。"
+        : activeXApprovalStatus === "approved"
+          ? `投稿者X ID: @${activeX} (承認済) で投稿できます。`
+          : "投稿には承認済みのActive X IDが必要です。設定画面で承認状態を確認してください。";
 
   return (
     <div className="fn-public-container fn-page fn-entry">
       <header className="fn-page-head">
         <span className="fn-eyebrow">entry</span>
-        <h1 className="fn-display fn-page-title">何をしますか？</h1>
+        <h1 className="fn-display fn-page-title">参加・投稿</h1>
         <p className="fn-jp fn-page-lead">
-          イベント参加か、過去作品の投稿を選んでください。
+          イベント参加、確保済み枠への提出、通常投稿をここから始められます。
         </p>
       </header>
 
@@ -157,6 +246,27 @@ export default async function EntryPage({
         </div>
       )}
 
+      {isLoggedIn && !needsTosAccept ? (
+        <div
+          className={`fn-pc-status-banner ${canPost ? "fn-pc-status-banner--ok" : ""}`}
+          role="status"
+        >
+          <Icon name={canPost ? "check" : "alert"} size={18} aria-hidden />
+          <div>
+            <h3 className="fn-jp">{checkTitle}</h3>
+            <p className="fn-jp fn-pc-banner-lead">{checkMessage}</p>
+            {!canPost ? (
+              <Link
+                href={`/dashboard/settings?next=${encodeURIComponent("/entry")}`}
+                className="fn-btn fn-btn-primary fn-btn-sm fn-mt-12"
+              >
+                X ID設定を確認
+              </Link>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
       <div className={`fn-entry-grid ${styles.choiceGrid}`}>
         {/* カード1: イベントに参加する */}
         <section
@@ -210,7 +320,10 @@ export default async function EntryPage({
           </div>
           {isLoggedIn && activeEvents.length === 1 ? (
             <div className={`${styles.btnRow} fn-mt-12`}>
-              <Link href={`/event/${activeEvents[0].id}/slots`} className="fn-btn fn-btn-primary">
+              <Link
+                href={resolveWriteHref(`/event/${activeEvents[0].id}/slots`)}
+                className="fn-btn fn-btn-primary"
+              >
                 <Icon name="calendar" size={14} aria-hidden />
                 スロットを確保する
               </Link>
@@ -222,7 +335,46 @@ export default async function EntryPage({
           ) : null}
         </section>
 
-        {/* カード2: 過去の作品を投稿する */}
+        {/* カード2: 確保済み枠に提出する (枠確保済みの場合のみ表示) */}
+        {displaySlots.length > 0 ? (
+          <section
+            className={`fn-entry-card ${styles.choiceCard}`}
+            aria-labelledby="post-slotted-card"
+          >
+            <h2 id="post-slotted-card" className={styles.cardTitle}>
+              <Icon name="calendar" size={16} aria-hidden />
+              確保済み枠に提出する
+            </h2>
+            <p className={styles.cardLead}>
+              予約済みのイベント枠に作品情報を紐付けます。連続枠も1つの提出として扱います。
+            </p>
+            <ul className="fn-pc-slot-list">
+              {displaySlots.map((slot) => (
+                <li key={slot.id}>
+                  <Link
+                    href={resolveWriteHref(`/entry/slotted?slot=${slot.id}`)}
+                    className="fn-pc-slot"
+                  >
+                    <span className="fn-pc-slot-info">
+                      <span className="fn-pc-slot-label">
+                        {slot.event_title ?? slot.event_id}
+                      </span>
+                      <span className="fn-mono fn-pc-slot-event">
+                        {slot.start_time
+                          ? `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(slot.start_time, { timeOnly: true })}${slot.end_time ? ` - ${formatUnix(slot.end_time, { timeOnly: true })}` : ""}`
+                          : (slot.slot_label ?? "時間なし枠")}
+                        {slot.is_group ? ` / ${slot.group_size}連続` : ""}
+                      </span>
+                    </span>
+                    <Icon name="chevron-right" size={13} aria-hidden />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        {/* カード3: 過去の作品を投稿する */}
         <section
           className={`fn-entry-card ${styles.choiceCard}`}
           aria-labelledby="post-unslotted-card"
@@ -237,7 +389,7 @@ export default async function EntryPage({
           </p>
           <div className={styles.btnRow}>
             <Link
-              href={resolveWriteHref("/dashboard/post/unslotted")}
+              href={resolveWriteHref("/entry/unslotted")}
               className="fn-btn fn-btn-ghost"
             >
               <Icon name="edit" size={14} aria-hidden />

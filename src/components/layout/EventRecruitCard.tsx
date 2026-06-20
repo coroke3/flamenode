@@ -1,9 +1,8 @@
 import * as React from "react";
 import Link from "next/link";
-import { Icon } from "@/components/ui/Icon";
 import type { events as eventsTable } from "@/lib/db/schema";
+import { buildAccentVars } from "@/lib/theme/accent";
 import { computeEventStatus, isAcceptingEntries } from "@/lib/utils/eventStatus";
-import styles from "./EventRecruitCard.module.css";
 
 type EventRow = typeof eventsTable.$inferSelect;
 
@@ -12,6 +11,8 @@ interface EventRecruitCardProps {
   available: number | null;
   total: number | null;
   variant?: "primary" | "compact";
+  actionHref?: string;
+  actionLabel?: string;
 }
 
 type RecruitState =
@@ -23,22 +24,26 @@ type RecruitState =
   | "ended"
   | "full";
 
+type RecruitKind = "pre" | "entry" | "submit" | "ended";
+
 interface TimelineModel {
-  startMonthLabel: string;
-  midMonthLabel: string;
-  endMonthLabel: string;
+  monthLabels: Array<{
+    key: string;
+    label: string;
+    pct: number;
+    align: "start" | "center" | "end";
+  }>;
   markerLabel: string;
   markerPct: number;
+  markerAlign: "start" | "center" | "end";
   windowLeftPct: number;
   windowWidthPct: number;
+  entryLeftPct: number;
+  entryWidthPct: number;
 }
 
 const DAY_SECONDS = 86400;
 const JST = { timeZone: "Asia/Tokyo" } as const;
-const monthFormatter = new Intl.DateTimeFormat("ja-JP", {
-  ...JST,
-  month: "numeric",
-});
 const dateFormatter = new Intl.DateTimeFormat("ja-JP", {
   ...JST,
   month: "numeric",
@@ -64,6 +69,22 @@ function stateLabel(state: RecruitState): string {
   }
 }
 
+function toRecruitKind(state: RecruitState): RecruitKind {
+  switch (state) {
+    case "before_entry":
+      return "pre";
+    case "accepting":
+    case "full":
+      return "entry";
+    case "after_entry":
+    case "soon":
+    case "ongoing":
+      return "submit";
+    case "ended":
+      return "ended";
+  }
+}
+
 function resolveState(
   event: EventRow,
   available: number | null,
@@ -86,43 +107,38 @@ function resolveState(
 function resolveCountdown(
   event: EventRow,
   now: number,
-): { heading: string; label: string; seconds: number | null; range: string } {
+): { heading: string; seconds: number | null; range: string } {
   const postRange = formatRange(event.start_time, event.end_time);
   if (event.start_time != null && event.start_time > now) {
     return {
-      heading: "投稿期間",
-      label: "投稿期間まで",
+      heading: "投稿期間まで",
       seconds: event.start_time - now,
       range: postRange,
     };
   }
   if (event.end_time != null && event.end_time > now) {
     return {
-      heading: "投稿期間",
-      label: "投稿期間終了まで",
+      heading: "投稿期間終了まで",
       seconds: event.end_time - now,
       range: postRange,
     };
   }
   if (event.entry_end_time != null && event.entry_end_time > now) {
     return {
-      heading: "募集期間",
-      label: "募集締切まで",
+      heading: "募集締切まで",
       seconds: event.entry_end_time - now,
       range: formatRange(event.entry_start_time, event.entry_end_time),
     };
   }
   if (event.entry_start_time != null && event.entry_start_time > now) {
     return {
-      heading: "募集期間",
-      label: "募集開始まで",
+      heading: "募集開始まで",
       seconds: event.entry_start_time - now,
       range: formatRange(event.entry_start_time, event.entry_end_time),
     };
   }
   return {
-    heading: "投稿期間",
-    label: "終了済み",
+    heading: "終了済み",
     seconds: null,
     range: postRange,
   };
@@ -140,35 +156,69 @@ function formatRemaining(seconds: number | null): {
   return { value: String(hours), unit: "時間" };
 }
 
-function buildTimeline(event: EventRow, now: number): TimelineModel {
-  const start =
+function buildTimeline(
+  event: EventRow,
+  now: number,
+  state: RecruitState,
+): TimelineModel {
+  const fullStart =
     event.entry_start_time ??
     event.start_time ??
     event.created_at ??
     now - DAY_SECONDS * 14;
-  const end =
+  const fullEnd =
     event.end_time ??
     event.entry_end_time ??
     event.start_time ??
-    start + DAY_SECONDS * 60;
-  const safeEnd = end > start ? end : start + DAY_SECONDS * 60;
-  const duration = safeEnd - start;
-  const mid = start + duration / 2;
-  const windowStart = event.start_time ?? event.entry_end_time ?? start;
+    fullStart + DAY_SECONDS * 60;
+  const safeFullEnd = fullEnd > fullStart ? fullEnd : fullStart + DAY_SECONDS * 60;
+
+  const entryStart = event.entry_start_time ?? fullStart;
+  const entryEnd = event.entry_end_time ?? entryStart + DAY_SECONDS * 7;
+  const windowStart = event.start_time ?? entryEnd;
   const windowEnd =
     event.end_time ??
-    (event.start_time != null ? event.start_time + DAY_SECONDS : safeEnd);
+    (event.start_time != null ? event.start_time + DAY_SECONDS : safeFullEnd);
+
+  let start: number;
+  let end: number;
+
+  if (state === "accepting" || state === "full") {
+    start = fullStart;
+    end = safeFullEnd;
+  } else if (
+    state === "after_entry" ||
+    state === "soon" ||
+    state === "ongoing"
+  ) {
+    const margin = DAY_SECONDS * 2;
+    start = Math.min(entryStart, now) - margin;
+    end = Math.max(windowEnd, now) + margin;
+  } else {
+    start = fullStart;
+    end = safeFullEnd;
+  }
+
+  const safeEnd = end > start ? end : start + DAY_SECONDS * 1;
+  const duration = safeEnd - start;
+  const mid = start + duration / 2;
+
   const windowLeftPct = clampPercent(((windowStart - start) / duration) * 100);
   const windowRightPct = clampPercent(((windowEnd - start) / duration) * 100);
+  const entryLeftPct = clampPercent(((entryStart - start) / duration) * 100);
+  const entryRightPct = clampPercent(((entryEnd - start) / duration) * 100);
+
+  const markerPct = clampPercent(((now - start) / duration) * 100);
 
   return {
-    startMonthLabel: monthLabel(start),
-    midMonthLabel: monthLabel(mid),
-    endMonthLabel: monthLabel(safeEnd),
+    monthLabels: buildMonthLabels(start, mid, safeEnd),
     markerLabel: compactDate(now),
-    markerPct: clampPercent(((now - start) / duration) * 100),
+    markerPct,
+    markerAlign: markerPct <= 8 ? "start" : markerPct >= 92 ? "end" : "center",
     windowLeftPct,
     windowWidthPct: Math.max(2, windowRightPct - windowLeftPct),
+    entryLeftPct,
+    entryWidthPct: Math.max(2, entryRightPct - entryLeftPct),
   };
 }
 
@@ -176,119 +226,217 @@ function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
-function monthLabel(ts: number): string {
-  return monthFormatter.format(new Date(ts * 1000));
-}
-
 function compactDate(ts: number): string {
   return dateFormatter.format(new Date(ts * 1000));
+}
+
+function buildMonthLabels(
+  start: number,
+  mid: number,
+  end: number,
+): TimelineModel["monthLabels"] {
+  const raw: TimelineModel["monthLabels"] = [
+    { key: "start", label: compactDate(start), pct: 0, align: "start" },
+    { key: "mid", label: compactDate(mid), pct: 50, align: "center" },
+    { key: "end", label: compactDate(end), pct: 100, align: "end" },
+  ];
+
+  return raw.filter((item, index, items) => {
+    const previousSameLabel = items
+      .slice(0, index)
+      .find((other) => other.label === item.label);
+    return !previousSameLabel || Math.abs(item.pct - previousSameLabel.pct) >= 18;
+  });
 }
 
 function formatRange(start: number | null, end: number | null): string {
   if (start == null && end == null) return "-";
   const s = start != null ? compactDate(start) : "-";
   const e = end != null ? compactDate(end) : "-";
-  return `${s} - ${e}`;
+  return `${s} — ${e}`;
+}
+
+function RecruitRuler({ timeline }: { timeline: TimelineModel }): React.ReactElement {
+  const ticks = React.useMemo(() => {
+    const list: Array<{ x: number; weekly: boolean; major: boolean }> = [];
+    for (let i = 0; i <= 20; i++) {
+      list.push({
+        x: (i / 20) * 100,
+        weekly: i % 5 === 0,
+        major: i === 0 || i === 10 || i === 20,
+      });
+    }
+    return list;
+  }, []);
+
+  return (
+    <div className="fn-ruler" aria-hidden>
+      <div
+        className="fn-ruler-window"
+        data-kind="submit"
+        style={{
+          left: `${timeline.windowLeftPct}%`,
+          width: `${timeline.windowWidthPct}%`,
+        }}
+      />
+      <div
+        className="fn-ruler-window"
+        data-kind="entry"
+        style={{
+          left: `${timeline.entryLeftPct}%`,
+          width: `${timeline.entryWidthPct}%`,
+        }}
+      />
+      <div className="fn-ruler-ticks">
+        {ticks.map((tick, index) => (
+          <span
+            key={index}
+            className="fn-ruler-tick"
+            data-weekly={tick.weekly && !tick.major ? "" : undefined}
+            data-major={tick.major ? "" : undefined}
+            style={{ left: `${tick.x}%` }}
+          />
+        ))}
+      </div>
+      <div className="fn-ruler-labels">
+        {timeline.monthLabels.map((label) => (
+          <span
+            key={label.key}
+            className="fn-ruler-label fn-mono"
+            data-align={label.align}
+            style={{ left: `${label.pct}%` }}
+          >
+            {label.label}
+          </span>
+        ))}
+        <span
+          className="fn-ruler-label fn-mono"
+          data-today=""
+          data-align={timeline.markerAlign}
+          style={{ left: `${timeline.markerPct}%` }}
+        >
+          {timeline.markerLabel}
+        </span>
+      </div>
+      <div
+        className="fn-ruler-today"
+        style={{ left: `${timeline.markerPct}%` }}
+      />
+      <span className="fn-ruler-arrow" />
+    </div>
+  );
 }
 
 export function EventRecruitCard({
   event,
   available,
   total,
-  variant = "primary",
+  variant: _variant = "primary",
+  actionHref,
+  actionLabel,
 }: EventRecruitCardProps): React.ReactElement {
   const now = Math.floor(Date.now() / 1000);
   const state = resolveState(event, available, now);
+  const kind = toRecruitKind(state);
   const statusTitle = stateLabel(state);
   const countdown = resolveCountdown(event, now);
   const countdownDisplay = formatRemaining(countdown.seconds);
-  const timeline = buildTimeline(event, now);
-  const remaining = available ?? null;
+  const timeline = buildTimeline(event, now, state);
   const slotTotal = total ?? null;
-  const usedRatio =
-    remaining != null && slotTotal != null && slotTotal > 0
-      ? clampPercent(((slotTotal - remaining) / slotTotal) * 100)
+  const filledSlots =
+    slotTotal != null && available != null
+      ? Math.max(0, slotTotal - available)
+      : null;
+  const slotFillPct =
+    slotTotal != null && slotTotal > 0 && filledSlots != null
+      ? clampPercent((filledSlots / slotTotal) * 100)
       : 0;
-  const accentStyle = {
-    "--event-accent": event.accent_color ?? "var(--accent-primary)",
-  } as React.CSSProperties;
+  const ctaHref = actionHref ?? `/event/${event.id}`;
+  const ctaLabel = actionLabel ?? "詳細ページへ";
+
+  const accentStyle = event.accent_color
+    ? ({
+        ...buildAccentVars(event.accent_color, "dark"),
+        "--rec-accent": "var(--event-accent)",
+        "--rec-accent-strong": "var(--event-accent-strong)",
+        "--rec-accent-soft": "var(--event-accent-soft)",
+        "--rec-accent-ink": "var(--event-accent-text)",
+        "--rec-ui-accent": "var(--event-accent)",
+        "--rec-ui-accent-strong": "var(--event-accent-strong)",
+        "--rec-ui-accent-soft": "var(--event-accent-soft)",
+        "--rec-ui-ink": "var(--event-accent-text)",
+      } as React.CSSProperties)
+    : undefined;
 
   return (
     <article
-      className={`${styles.card} ${
-        variant === "compact" ? styles.cardCompact : ""
-      }`}
+      className="fn-rec"
+      data-kind={kind}
+      data-variant={_variant}
       style={accentStyle}
       aria-label={`${event.title} ${statusTitle}`}
     >
-      <div className={styles.layout}>
-        <div className={styles.main}>
-          <p className={styles.code}>{event.id.toUpperCase()}</p>
-          <Link href={`/event/${event.id}`} className={styles.statusTitle}>
+      <header className="fn-rec-head">
+        <div className="fn-rec-title-row">
+          <span className="fn-rec-code fn-mono">{event.id.toUpperCase()}</span>
+          <Link href={`/event/${event.id}`} className="fn-rec-status fn-display">
             {statusTitle}
           </Link>
+        </div>
+        <Link
+          href={ctaHref}
+          className="fn-btn fn-btn-primary fn-rec-cta"
+          data-variant="accent"
+          data-size="lg"
+        >
+          <span>{ctaLabel}</span>
+          <span className="fn-rec-cta-arrow" aria-hidden>
+            →
+          </span>
+        </Link>
+      </header>
 
-          <div className={styles.ruler} aria-hidden>
-            <div className={styles.months}>
-              <span>{timeline.startMonthLabel}</span>
-              <span>{timeline.midMonthLabel}</span>
-              <span>{timeline.endMonthLabel}</span>
-            </div>
-            <div className={styles.rulerLine}>
-              <span
-                className={styles.rulerWindow}
-                style={{
-                  left: `${timeline.windowLeftPct}%`,
-                  width: `${timeline.windowWidthPct}%`,
-                }}
-              />
-              <Icon
-                name="chevron-right"
-                size={18}
-                className={styles.rulerArrow}
-                aria-hidden
-              />
-              <span
-                className={styles.rulerMarker}
-                style={{ left: `${timeline.markerPct}%` }}
-              >
-                <span>{timeline.markerLabel}</span>
+      <div className="fn-rec-body">
+        <RecruitRuler timeline={timeline} />
+        <div className="fn-rec-info" data-kind={kind}>
+          <div className="fn-rec-info-head">
+            <span className="fn-rec-info-label">{countdown.heading}</span>
+            <span className="fn-rec-info-range fn-mono">{countdown.range}</span>
+          </div>
+          {countdownDisplay ? (
+            <div className="fn-rec-info-count">
+              <span className="fn-rec-info-num fn-display">
+                {countdownDisplay.value}
+              </span>
+              <span className="fn-rec-info-tail">
+                <span className="fn-rec-info-unit">{countdownDisplay.unit}</span>
               </span>
             </div>
-          </div>
-        </div>
-
-        <aside className={styles.side}>
-          <Link href={`/event/${event.id}`} className={styles.cta}>
-            詳細ページへ
-            <Icon name="chevron-right" size={14} aria-hidden />
-          </Link>
-          <div className={styles.countdown}>
-            <div className={styles.countdownHead}>
-              <span>{countdown.heading}</span>
-              <span>{countdown.range}</span>
+          ) : (
+            <div className="fn-rec-info-count">
+              <span className="fn-rec-info-num fn-display">—</span>
             </div>
-            {countdownDisplay ? (
-              <div className={styles.countdownValueWrap}>
-                <strong>{countdownDisplay.value}</strong>
-                <span>{countdownDisplay.unit}</span>
-              </div>
-            ) : null}
-            <p>{countdown.label}</p>
-          </div>
-        </aside>
+          )}
+        </div>
       </div>
 
-      <div className={styles.slots}>
-        <span className={styles.slotsLabel}>残り枠</span>
-        <strong>
-          {remaining ?? "-"}
-          {slotTotal != null ? <small>/{slotTotal}</small> : null}
-        </strong>
-        <span className={styles.slotGauge} aria-hidden>
-          <span style={{ width: `${usedRatio}%` }} />
+      <footer className="fn-rec-foot">
+        <span className="fn-rec-foot-cell fn-mono">
+          <span className="fn-rec-foot-k">埋まり枠</span>
+          <span className="fn-rec-foot-v">
+            {filledSlots ?? "-"}
+            {slotTotal != null ? (
+              <span className="fn-rec-foot-tot">/{slotTotal}</span>
+            ) : null}
+          </span>
         </span>
-      </div>
+        <span
+          className="fn-rec-slot-gauge"
+          aria-label={`埋まり枠 ${filledSlots ?? 0}/${slotTotal ?? 0}`}
+        >
+          <span style={{ width: `${slotFillPct}%` }} />
+        </span>
+      </footer>
     </article>
   );
 }

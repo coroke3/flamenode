@@ -9,6 +9,7 @@ import {
   type PublicEventCategory,
 } from "@/components/event/PublicEventCard";
 import { categorizePublicEvent } from "@/lib/utils/categorizePublicEvent";
+import { compareEventsByUpcomingPriority } from "@/lib/utils/eventOrdering";
 
 export const metadata: Metadata = { title: "イベント" };
 export const dynamic = "force-dynamic";
@@ -21,7 +22,7 @@ const EVENT_SECTIONS: {
   sub: string;
 }[] = [
   { id: "open", title: "募集中", sub: "Open for entry" },
-  { id: "upcoming", title: "公開前", sub: "Upcoming" },
+  { id: "upcoming", title: "開催前", sub: "Upcoming" },
   { id: "ended", title: "開催済み", sub: "Past events" },
   { id: "archive", title: "アーカイブ", sub: "Always-on archive" },
 ];
@@ -31,18 +32,25 @@ export default async function EventListPage(): Promise<React.ReactElement> {
     (await withDatabase(async (db) => {
       return db.select().from(eventsTable).orderBy(desc(eventsTable.start_time));
     })) ?? [];
+  const sortedEvents = events.sort(compareEventsByUpcomingPriority);
+
+  // 点イベント（投稿期間が片側のみ）はカード一覧から除外
+  const isPointEvent = (ev: EventRow) =>
+    (ev.start_time != null) !== (ev.end_time != null);
+
+  const filteredEvents = sortedEvents.filter((ev) => !isPointEvent(ev));
 
   return (
     <div className="fn-public-container fn-page">
       <header className="fn-page-head fn-evlist-head">
-        <span className="fn-eyebrow">events — {events.length} total</span>
+        <span className="fn-eyebrow">events - {filteredEvents.length} total</span>
         <h1 className="fn-display fn-evlist-title">イベント</h1>
         <p className="fn-jp fn-evlist-sub">
-          FlameNode で開催される上映フェス・企画・募集イベントを、状態ごとに確認できます。
+          FlameNode で開催される上映フェス・企画・募集イベントを状態ごとに確認できます。
         </p>
       </header>
 
-      {events.length === 0 ? (
+      {filteredEvents.length === 0 ? (
         <div className="fn-empty fn-mt-lg">
           <Icon name="calendar" size={24} aria-hidden />
           <p className="fn-empty-message">
@@ -52,7 +60,7 @@ export default async function EventListPage(): Promise<React.ReactElement> {
       ) : (
         <>
           {EVENT_SECTIONS.map((section) => {
-            const items = events.filter(
+            const items = filteredEvents.filter(
               (ev) => categorizePublicEvent(ev) === section.id,
             );
             if (items.length === 0) return null;

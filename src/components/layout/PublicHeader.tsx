@@ -108,7 +108,7 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
           {user ? (
             <div className={styles.actionNav}>
               <Link
-                href="/dashboard/post"
+                href="/entry"
                 className={`fn-btn fn-header-submit ${styles.postBtn}`}
                 data-variant="accent"
               >
@@ -143,12 +143,12 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
         </div>
       </div>
 
-      {mobileOpen ? (
-        <div className={styles.mobile}>
-          <nav
-            className={`fn-public-container ${styles.mobileNav}`}
-            aria-label="モバイルナビゲーション"
-          >
+      <div className={`${styles.mobile} ${mobileOpen ? styles.mobileOpen : ""}`}>
+        <nav
+          className={`fn-public-container ${styles.mobileNav}`}
+          aria-label="モバイルナビゲーション"
+          aria-hidden={!mobileOpen}
+        >
             <form
               action="/list"
               method="get"
@@ -198,8 +198,24 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
             ) : (
               <>
                 <div className={styles.mobileSection}>
+                  {PUBLIC_NAV_ITEMS.filter((item) => item.href !== "/entry").map((item) => {
+                    const active = isPathActive(pathname, item.href);
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        className={`${styles.mobileLink} ${
+                          active ? styles.mobileLinkActive : ""
+                        }`}
+                        onClick={() => setMobileOpen(false)}
+                        aria-current={active ? "page" : undefined}
+                      >
+                        <Icon name={item.iconName} size={16} aria-hidden /> {item.label}
+                      </Link>
+                    );
+                  })}
                   <Link
-                    href="/dashboard/post"
+                    href="/entry"
                     className={styles.mobileLink}
                     onClick={() => setMobileOpen(false)}
                   >
@@ -276,7 +292,6 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
             )}
           </nav>
         </div>
-      ) : null}
     </header>
   );
 }

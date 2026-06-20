@@ -12,8 +12,10 @@ import {
 import { events as eventsTable } from "@/lib/db/schema";
 import { VideoCard } from "@/components/video/VideoCard";
 import { Icon } from "@/components/ui/Icon";
+import { Pagination } from "@/components/ui/Pagination";
 import { formatUnix } from "@/lib/utils/format";
 import { buildPageMetadata } from "@/lib/seo";
+import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
 
 export const metadata: Metadata = buildPageMetadata({
   title: "作品一覧",
@@ -199,7 +201,7 @@ export default async function ListPage({
               <table className={`fn-list-tbl ${styles.indexTable}`}>
                 <thead>
                   <tr>
-                    <th>Code</th>
+                    <th className={styles.thumbCol} />
                     <th>Title</th>
                     <th>Creator</th>
                     <th>Event</th>
@@ -210,9 +212,24 @@ export default async function ListPage({
                 <tbody>
                   {videos.map((v, index) => {
                     const href = `/${v.youtube_video_id ?? v.id}`;
+                    const youtubeId = v.youtube_video_id ? extractYoutubeId(v.youtube_video_id) : null;
                     return (
                       <tr key={`${v.id}-index-${index}`}>
-                        <td className={styles.codeCell}>{v.youtube_video_id ?? v.id}</td>
+                        <td className={styles.thumbCell}>
+                          {youtubeId ? (
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            <img
+                              src={youtubeThumbUrl(youtubeId, "mqdefault")}
+                              alt=""
+                              className={styles.thumbImg}
+                              loading="lazy"
+                            />
+                          ) : (
+                            <span className={styles.thumbFallback}>
+                              <Icon name="play" size={14} aria-hidden />
+                            </span>
+                          )}
+                        </td>
                         <td>
                           <Link
                             href={href}
@@ -239,29 +256,13 @@ export default async function ListPage({
               </table>
             </div>
           )}
-          <nav className={styles.pagination} aria-label="ページネーション">
-            {pageNum > 1 ? (
-              <Link
-                href={`/list?${params({ page: String(pageNum - 1) })}`}
-                className="fn-btn fn-btn-ghost fn-btn-sm"
-              >
-                <Icon name="chevron-left" size={12} aria-hidden />
-                前へ
-              </Link>
-            ) : null}
-            <span className={styles.pageBadge}>
-              {pageNum} / {totalPages} ページ ({total} 件)
-            </span>
-            {pageNum < totalPages ? (
-              <Link
-                href={`/list?${params({ page: String(pageNum + 1) })}`}
-                className="fn-btn fn-btn-ghost fn-btn-sm"
-              >
-                次へ
-                <Icon name="chevron-right" size={12} aria-hidden />
-              </Link>
-            ) : null}
-          </nav>
+          <Pagination
+            currentPage={pageNum}
+            totalPages={totalPages}
+            total={total}
+            pageSize={PAGE_SIZE}
+            buildHref={(nextPage) => `/list?${params({ page: String(nextPage) })}`}
+          />
         </>
         )}
     </div>

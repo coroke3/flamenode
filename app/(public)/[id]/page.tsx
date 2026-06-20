@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { and, eq, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { buildAccentVars } from "@/lib/theme/accent";
 import styles from "./page.module.css";
 import { getCurrentUser } from "@/lib/auth/currentUser";
@@ -20,7 +20,7 @@ import {
   fetchVideoDetail,
 } from "@/lib/db/videoDetailQueries";
 import { getVideoSoftwareLabel } from "@/lib/db/software";
-import { extractYoutubeId } from "@/lib/youtube/id";
+import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
 import { YoutubePlayer } from "@/components/video/YoutubePlayer";
 import { ChapterTabs } from "@/components/video/ChapterTabs";
 import { ChapterComposer } from "@/components/video/ChapterComposer";
@@ -64,12 +64,13 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
         .filter(Boolean)
         .join(" / "),
   );
+  const metadataYoutubeId = extractYoutubeId(detail.video.youtube_video_id);
   return buildPageMetadata({
     title: `${detail.video.title} - ${detail.video.creator_display_name}`,
     description,
     path: videoPath,
-    image: detail.video.youtube_video_id
-      ? `https://i.ytimg.com/vi/${detail.video.youtube_video_id}/maxresdefault.jpg`
+    image: metadataYoutubeId
+      ? youtubeThumbUrl(metadataYoutubeId, "maxresdefault")
       : detail.video.creator_icon_url,
     noIndex: detail.video.visibility_status !== "public",
   });
@@ -194,22 +195,21 @@ export default async function VideoDetailPage({
             );
           const ids = myInteractions.map((r) => r.video_id);
           if (ids.length > 0) {
-            const { videos: importedVideos } = await import("@/lib/db/schema");
-            const { inArray } = await import("drizzle-orm");
             const rows = await db
               .select({
-                id: importedVideos.id,
-                title: importedVideos.title,
-                youtube_video_id: importedVideos.youtube_video_id,
-                display_name: importedVideos.creator_display_name,
+                id: videosTable.id,
+                title: videosTable.title,
+                youtube_video_id: videosTable.youtube_video_id,
+                display_name: videosTable.creator_display_name,
               })
-              .from(importedVideos)
+              .from(videosTable)
               .where(
                 and(
-                  inArray(importedVideos.id, ids),
-                  ne(importedVideos.visibility_status, "archived"),
+                  inArray(videosTable.id, ids),
+                  ne(videosTable.visibility_status, "archived"),
                 )!,
-              );
+              )
+              .orderBy(desc(videosTable.scheduled_time));
             playlistLabel =
               kind === "like" ? "いいねした作品" : "セーブした作品";
             playlistItems = rows.map((v) => ({
@@ -245,7 +245,6 @@ export default async function VideoDetailPage({
       likeActive,
       bookmarkActive,
       viewerXApproved,
-      viewerCanEditChapters,
       softwareLabel,
       stats: statsRow,
       playlistLabel,
@@ -260,14 +259,13 @@ export default async function VideoDetailPage({
     likeActive,
     bookmarkActive,
     viewerXApproved,
-    viewerCanEditChapters,
     softwareLabel,
     stats,
     playlistLabel,
     playlistItems,
   } = bundle;
 
-  const creatorIcon = creator?.icon_url ?? video.creator_icon_url ?? null;
+  const creatorIcon = video.creator_icon_url ?? null;
   const creatorName = creator?.x_name ?? video.creator_display_name ?? "作者未設定";
   const creatorId = creator?.id ?? video.creator_x_user_id ?? "anonymous";
   const creatorHref =
@@ -289,7 +287,7 @@ export default async function VideoDetailPage({
     description: seoDescription,
     url: absoluteUrl(`/${video.youtube_video_id ?? video.id}`),
     thumbnailUrl: youtubeId
-      ? [`https://i.ytimg.com/vi/${youtubeId}/maxresdefault.jpg`]
+      ? [absoluteUrl(youtubeThumbUrl(youtubeId, "maxresdefault"))]
       : undefined,
     uploadDate: new Date(
       (video.scheduled_time ?? video.created_at) * 1000,
@@ -414,59 +412,27 @@ export default async function VideoDetailPage({
       <JsonLd data={videoJsonLd} />
       <div className={styles.layout}>
         <article className={styles.main}>
-          <div className="fn-vd-topstrip">
-            <div className="fn-vd-breadcrumb">
-              <Link href="/list">archive</Link>
-              <span>/</span>
-              {primaryEvent ? (
-                <Link href={`/event/${primaryEvent.id}`}>{primaryEvent.id}</Link>
+          <div className={styles.heroLayout}>
+            <div className={styles.playerPane}>
+              {youtubeId ? (
+                <YoutubePlayer
+                  youtubeId={youtubeId}
+                  title={video.title}
+                  chapters={chapterMarkers}
+                  accentColor={accentColor}
+                />
               ) : (
-                <span>no-event</span>
+                <div
+                  className="fn-empty"
+                  style={{ aspectRatio: "16 / 9", display: "grid", placeItems: "center" }}
+                >
+                  <p>YouTube 動画 ID が登録されていません。</p>
+                </div>
               )}
-              <span>/</span>
-              <span className="fn-vd-breadcrumb-current">
-                {video.youtube_video_id ?? video.id}
-              </span>
             </div>
-            <div className="fn-vd-topactions">
-              {primaryEvent ? (
-                <Link
-                  href={`/event/${primaryEvent.id}`}
-                  className="fn-btn fn-btn-ghost fn-btn-soft-outline fn-btn-sm"
-                >
-                  <Icon name="calendar" size={12} aria-hidden />
-                  イベント
-                </Link>
-              ) : null}
-              {viewerCanEditChapters ? (
-                <Link
-                  href={`/dashboard/edit/${video.id}`}
-                  className="fn-btn fn-btn-primary fn-btn-sm"
-                >
-                  <Icon name="edit" size={12} aria-hidden />
-                  編集
-                </Link>
-              ) : null}
-            </div>
-          </div>
 
-          {youtubeId ? (
-            <YoutubePlayer
-              youtubeId={youtubeId}
-              title={video.title}
-              chapters={chapterMarkers}
-              accentColor={accentColor}
-            />
-          ) : (
-            <div
-              className="fn-empty"
-              style={{ aspectRatio: "16 / 9", display: "grid", placeItems: "center" }}
-            >
-              <p>YouTube 動画 ID が登録されていません。</p>
-            </div>
-          )}
-
-          <h1 className={styles.title}>{video.title}</h1>
+            <div className={styles.infoPane}>
+              <h1 className={styles.title}>{video.title}</h1>
 
           <div className={styles.author}>
             {creatorHref ? <Link href={creatorHref}>{authorBlock}</Link> : authorBlock}
@@ -474,29 +440,7 @@ export default async function VideoDetailPage({
             <div className={styles.authorActions}>
               {(() => {
                 const currentPath = `/${rawId}`;
-                const interactionGate: {
-                  canInteract: boolean;
-                  disabledReason?: string;
-                  actionHref?: string;
-                } = !viewerUser?.id
-                  ? {
-                      canInteract: false,
-                      disabledReason: "ログインするといいねできます。",
-                      actionHref: `/entry?next=${encodeURIComponent(currentPath)}`,
-                    }
-                  : !viewerActiveX
-                    ? {
-                        canInteract: false,
-                        disabledReason: "X IDを選択するといいねできます。",
-                        actionHref: `/dashboard/settings?next=${encodeURIComponent(currentPath)}`,
-                      }
-                    : !viewerXApproved
-                      ? {
-                          canInteract: false,
-                          disabledReason: "承認済みX IDが必要です。",
-                          actionHref: `/dashboard/settings?next=${encodeURIComponent(currentPath)}`,
-                        }
-                      : { canInteract: true };
+                const canInteract = !!(viewerUser?.id && viewerActiveX && viewerXApproved);
                 return (
                   <>
                     <InteractionButton
@@ -506,14 +450,40 @@ export default async function VideoDetailPage({
                       count={
                         stats?.app_like_count ?? video.app_like_count ?? 0
                       }
-                      {...interactionGate}
+                      canInteract={canInteract}
                     />
                     <InteractionButton
                       videoId={video.id}
                       kind="bookmark"
                       initialActive={bookmarkActive}
-                      {...interactionGate}
+                      canInteract={canInteract}
                     />
+                    {!canInteract ? (
+                      <span className={styles.interactionHint}>
+                        {!viewerUser?.id ? (
+                          <>
+                            ログインするといいね、セーブができます。
+                            <Link href={`/entry?next=${encodeURIComponent(currentPath)}`} className={styles.interactionHintLink}>
+                              ログイン
+                            </Link>
+                          </>
+                        ) : !viewerActiveX ? (
+                          <>
+                            X IDを選択するといいね、セーブができます。
+                            <Link href={`/dashboard/settings?next=${encodeURIComponent(currentPath)}`} className={styles.interactionHintLink}>
+                              X ID設定へ
+                            </Link>
+                          </>
+                        ) : (
+                          <>
+                            承認済みX IDが必要です。
+                            <Link href={`/dashboard/settings?next=${encodeURIComponent(currentPath)}`} className={styles.interactionHintLink}>
+                              X ID設定へ
+                            </Link>
+                          </>
+                        )}
+                      </span>
+                    ) : null}
                   </>
                 );
               })()}
@@ -544,6 +514,14 @@ export default async function VideoDetailPage({
               }
             >
               <span className={styles.eventBoxLabel}>イベント</span>
+              {primaryEvent.icon_url ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={primaryEvent.icon_url}
+                  alt=""
+                  className={styles.eventBoxIcon}
+                />
+              ) : null}
               <Link href={`/event/${primaryEvent.id}`} className={styles.eventBoxTitle}>
                 {primaryEvent.title}
               </Link>
@@ -577,7 +555,7 @@ export default async function VideoDetailPage({
             </div>
           ) : null}
 
-          <div className={styles.metaSection}>
+              <div className={styles.metaSection}>
             {video.music ? (
               <InlineMetaItem title="楽曲">
                 {video.music_reference_url ? (
@@ -638,6 +616,8 @@ export default async function VideoDetailPage({
                 </div>
               </details>
             ) : null}
+              </div>
+            </div>
           </div>
 
           <aside className={styles.relatedMobile} aria-label="関連動画">

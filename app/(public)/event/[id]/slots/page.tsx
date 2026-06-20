@@ -1,6 +1,6 @@
 import * as React from "react";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { asc, eq } from "drizzle-orm";
 import styles from "./page.module.css";
@@ -17,6 +17,7 @@ import {
   isAcceptingEntries,
 } from "@/lib/utils/eventStatus";
 import { formatUnix } from "@/lib/utils/format";
+import { buildAccentVars } from "@/lib/theme/accent";
 import { Icon } from "@/components/ui/Icon";
 import { SlotGrid, type SlotRow } from "@/components/event/SlotGrid";
 import { SlotStatusBoard } from "@/components/event/SlotStatusBoard";
@@ -67,18 +68,21 @@ export default async function EventSlotsPage({
   if (!bundle) notFound();
 
   const { event, slotRows } = bundle;
+
+  // 枠が一件も設定されていない場合はイベントページにリダイレクト
+  if (slotRows.length === 0) {
+    redirect(`/event/${event.id}`);
+  }
   const viewer = await getCurrentUser();
   const status = computeEventStatus(event);
   const accepting = isAcceptingEntries(event);
   const now = Math.floor(Date.now() / 1000);
   const entryNotStartedYet =
     !accepting &&
-    event.is_entry_open === 1 &&
     event.entry_start_time != null &&
     now < event.entry_start_time;
   const entryClosed =
     !accepting &&
-    event.is_entry_open === 1 &&
     event.entry_end_time != null &&
     now > event.entry_end_time;
 
@@ -104,15 +108,12 @@ export default async function EventSlotsPage({
   const fillRatio =
     slotTotal > 0 ? Math.min(100, Math.round((filledSlots / slotTotal) * 100)) : 0;
   const slotPartGapSec = (event.slot_part_gap_minutes ?? 15) * 60;
+  const accentStyle = buildAccentVars(event.accent_color, "dark");
 
   return (
     <div
       className={`fn-public-container fn-page ${styles.page}`}
-      style={
-        {
-          "--event-accent": event.accent_color ?? "var(--accent-primary)",
-        } as React.CSSProperties
-      }
+      style={accentStyle}
     >
       <header className={`fn-slots-head ${styles.header}`}>
         <p className="fn-page-back">
@@ -146,10 +147,10 @@ export default async function EventSlotsPage({
         <h1 className={`fn-reserve-title ${styles.title}`}>{event.title} の枠確保</h1>
         <div className={`fn-slots-stats ${styles.stats}`} aria-label="枠の状態">
           <strong>
-            {availableSlots}
+            {filledSlots}
             <small>/{slotTotal}</small>
           </strong>
-          <span>空き枠</span>
+          <span>埋まり枠</span>
           <em>{fillRatio}% 埋まり</em>
         </div>
       </header>

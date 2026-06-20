@@ -7,12 +7,14 @@ import {
   type EventStatusInput,
 } from "@/lib/utils/eventStatus";
 import { formatUnix } from "@/lib/utils/format";
+import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
 
 export type PublicEventCardEvent = EventStatusInput & {
   id: string;
   title: string;
   explanation?: string | null;
   img_url?: string | null;
+  icon_url?: string | null;
   accent_color?: string | null;
   entry_end_time?: number | null;
 };
@@ -66,11 +68,12 @@ export function PublicEventCard({
   const accepting = isAcceptingEntries(event, now);
   const days = category === "open" ? daysUntilOpen(event, now) : null;
   const accent = event.accent_color ?? undefined;
+  const posterImage = cachedGoogleImageUrl(event.img_url);
   const posterStyle = {
     ...(accent ? { ["--ev-accent" as string]: accent } : {}),
-    ...(event.img_url
+    ...(posterImage
       ? {
-          backgroundImage: `url(${event.img_url})`,
+          backgroundImage: `url(${posterImage})`,
           backgroundSize: "cover",
           backgroundPosition: "center",
         }
@@ -81,13 +84,6 @@ export function PublicEventCard({
     <Link href={`/event/${event.id}`} className="fn-evcard" data-kind={status}>
       <div className="fn-evcard-poster" style={posterStyle}>
         <div className="fn-evcard-poster-grid" aria-hidden />
-        <span className="fn-evcard-code fn-mono">{event.id}</span>
-        {category === "ended" ? (
-          <span className="fn-evcard-ribbon fn-mono">上映終了</span>
-        ) : null}
-        {category === "archive" ? (
-          <span className="fn-evcard-ribbon fn-mono">常時受付</span>
-        ) : null}
       </div>
       <div className="fn-evcard-body">
         <div className="fn-evcard-top">
@@ -98,7 +94,17 @@ export function PublicEventCard({
             {formatRange(event.start_time, event.end_time)}
           </span>
         </div>
-        <h3 className="fn-display fn-evcard-title">{event.title}</h3>
+        <h3 className="fn-display fn-evcard-title">
+          {event.icon_url ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={event.icon_url}
+              alt=""
+              className="fn-evcard-icon"
+            />
+          ) : null}
+          {event.title}
+        </h3>
         {event.explanation ? (
           <p className="fn-evcard-summary">{event.explanation}</p>
         ) : null}
