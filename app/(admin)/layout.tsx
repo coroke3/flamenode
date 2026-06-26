@@ -1,5 +1,6 @@
 import * as React from "react";
 import { redirect } from "next/navigation";
+import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { PublicHeader, type PublicHeaderUser } from "@/components/layout/PublicHeader";
 import { PublicFooter } from "@/components/layout/PublicFooter";
@@ -11,6 +12,10 @@ import {
 } from "@/components/admin/AdminSidebarNav";
 import { isAdminSpreadsheetEnabled } from "@/lib/admin/spreadsheet/guard";
 import { AdminModeBanner } from "@/components/admin/AdminModeBanner";
+
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
 
 const ADMIN_NAV_SPREADSHEET_ITEM = {
   href: "/admin/spreadsheet",

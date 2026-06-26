@@ -176,7 +176,7 @@ export default async function AdminEventsPage({
                       href={`/manage/events/${ev.id}/edit`}
                       className="fn-btn fn-btn-ghost fn-btn-sm"
                     >
-                      詳細
+                      運営設定を開く
                     </Link>
                     <Link
                       href={`/manage/events/${ev.id}`}
@@ -188,7 +188,7 @@ export default async function AdminEventsPage({
                       href={`/manage/events/${ev.id}/staff`}
                       className="fn-btn fn-btn-ghost fn-btn-sm"
                     >
-                      権限
+                      運営権限を編集
                     </Link>
                     <Link
                       href={`/admin/audit?table=events&record=${encodeURIComponent(ev.id)}`}

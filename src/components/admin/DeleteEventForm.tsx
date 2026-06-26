@@ -5,12 +5,23 @@ import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { deleteEvent } from "@/lib/actions/event-admin";
 
+export type EventDeleteImpact = {
+  slotsTotal: number;
+  reservedSlots: number;
+  submittedSlots: number;
+  linkedVideos: number;
+  staffCount: number;
+  apiEndpointCount: number;
+} | null;
+
 export function DeleteEventForm({
   eventId,
   redirectHref = "/admin/events",
+  impact,
 }: {
   eventId: string;
   redirectHref?: string;
+  impact?: EventDeleteImpact;
 }): React.ReactElement {
   const router = useRouter();
   const [confirm, setConfirm] = React.useState("");
@@ -42,6 +53,28 @@ export function DeleteEventForm({
       onSubmit={onSubmit}
       style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}
     >
+      {impact ? (
+        <div
+          style={{
+            padding: "10px 12px",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: "var(--radius-sm)",
+            fontSize: 12,
+            lineHeight: 1.6,
+            background: "var(--bg-surface)",
+          }}
+        >
+          <strong style={{ fontSize: 13 }}>影響範囲:</strong>
+          <ul style={{ margin: "4px 0 0", paddingLeft: 16 }}>
+            <li>スロット: {impact.slotsTotal}件 (予約済み: {impact.reservedSlots}, 提出済み: {impact.submittedSlots})</li>
+            <li>紐づく作品: {impact.linkedVideos}件</li>
+            <li>スタッフ: {impact.staffCount}人</li>
+            {impact.apiEndpointCount > 0 ? (
+              <li>公開API設定: {impact.apiEndpointCount}件</li>
+            ) : null}
+          </ul>
+        </div>
+      ) : null}
       <label className="fn-label">
         確認のためイベント ID <code>{eventId}</code> を入力
       </label>

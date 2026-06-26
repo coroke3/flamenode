@@ -162,8 +162,12 @@ function CheckCard({ result }: { result: IntegrityCheckResult }): React.ReactEle
         {result.sqlPreview ? (
           <details>
             <summary style={{ cursor: "pointer", color: "var(--text-primary)" }}>
-              修復SQLプレビュー
+              修復SQLプレビュー（この画面では実行されません）
             </summary>
+            <p style={{ margin: "4px 0", fontSize: 11, color: "var(--text-muted)" }}>
+              この画面は読み取り専用です。修復SQLは確認用プレビューであり、この画面からは実行されません。
+              修復機能は未実装です。実行する場合は、内容を確認したうえで管理者が別途D1に適用してください。
+            </p>
             <pre
               style={{
                 marginTop: 6,
