@@ -101,6 +101,7 @@ export default async function ManageEventEditPage({
             parts_json: ev.parts_json,
             editable_fields: ev.editable_fields,
             review_settings: ev.review_settings,
+            custom_questions: ev.custom_questions,
           }}
         />
       </section>

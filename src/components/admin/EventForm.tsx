@@ -16,6 +16,13 @@ import {
   parseVideoFormSettings,
   type StagePermissionFieldSettings,
 } from "@/lib/video/formSettings";
+import {
+  parseCustomQuestions,
+  serializeCustomQuestions,
+  normalizeQuestionId,
+  type CustomQuestion,
+  type CustomQuestionType,
+} from "@/lib/video/customQuestions";
 
 export interface EventFormInitial {
   id?: string;
@@ -43,6 +50,7 @@ export interface EventFormInitial {
   parts_json?: string | null;
   editable_fields?: string | null;
   review_settings?: string | null;
+  custom_questions?: string | null;
 }
 
 function partsJsonToText(value: string | null | undefined): string {
@@ -252,6 +260,10 @@ export function EventForm({
       : [createDefaultStagePermissionQuestion()];
   });
 
+  const [customQuestions, setCustomQuestions] = React.useState<CustomQuestion[]>(
+    () => parseCustomQuestions(initial.custom_questions),
+  );
+
   React.useEffect(() => {
     setPreview((current) => ({
       ...current,
@@ -289,6 +301,46 @@ export function EventForm({
     setStageQuestions((current) =>
       current.filter((question) => question.id !== id),
     );
+  };
+
+  const updateCustomQuestion = (
+    id: string,
+    patch: Partial<CustomQuestion>,
+  ) => {
+    setCustomQuestions((current) =>
+      current.map((q) => (q.id === id ? { ...q, ...patch } : q)),
+    );
+  };
+
+  const addCustomQuestion = () => {
+    const newId = `cq_${Date.now().toString(36)}`;
+    setCustomQuestions((current) => [
+      ...current,
+      {
+        id: newId,
+        label: "",
+        type: "text" as CustomQuestionType,
+        required: false,
+        order: current.length,
+        enabled: true,
+      },
+    ]);
+  };
+
+  const removeCustomQuestion = (id: string) => {
+    setCustomQuestions((current) => current.filter((q) => q.id !== id));
+  };
+
+  const moveCustomQuestion = (id: string, direction: -1 | 1) => {
+    setCustomQuestions((current) => {
+      const idx = current.findIndex((q) => q.id === id);
+      if (idx < 0) return current;
+      const target = idx + direction;
+      if (target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return next.map((q, i) => ({ ...q, order: i }));
+    });
   };
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -784,6 +836,227 @@ export function EventForm({
             style={{ justifySelf: "start" }}
           >
             <Icon name="plus" size={12} aria-hidden /> 質問を追加
+          </button>
+        </div>
+      </fieldset>
+
+      <input
+        type="hidden"
+        name="custom_questions_json"
+        value={serializeCustomQuestions(customQuestions) ?? ""}
+      />
+
+      <fieldset
+        style={{
+          marginTop: 16,
+          padding: "14px 0 0",
+          border: 0,
+          borderTop: "1px solid var(--border-subtle)",
+          display: "grid",
+          gap: 12,
+        }}
+      >
+        <legend
+          style={{
+            padding: "0 10px 0 0",
+            fontSize: 13,
+            fontWeight: 800,
+            color: "var(--text-primary)",
+          }}
+        >
+          本格カスタム質問
+        </legend>
+        <p className="fn-muted" style={{ margin: "0 0 2px", fontSize: 12, lineHeight: 1.6 }}>
+          イベントごとに投稿者への質問を定義します。text / textarea / select / multi-select / number / date に対応しています。
+        </p>
+        <div style={{ display: "grid", gap: 10 }}>
+          {customQuestions.length === 0 ? (
+            <p className="fn-muted" style={{ margin: 0, fontSize: 12 }}>
+              カスタム質問は設定されていません。
+            </p>
+          ) : null}
+          {customQuestions.map((q, index) => (
+            <article
+              key={q.id}
+              style={{
+                display: "grid",
+                gap: 10,
+                padding: 12,
+                border: "1px solid var(--border-subtle)",
+                borderRadius: "var(--radius-sm)",
+                background: "var(--bg-surface)",
+              }}
+            >
+              <header
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 8,
+                  flexWrap: "wrap",
+                }}
+              >
+                <strong style={{ fontSize: 13 }}>質問 {index + 1}</strong>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={q.enabled !== false}
+                      onChange={(ev) => updateCustomQuestion(q.id, { enabled: ev.target.checked })}
+                      style={{ accentColor: "var(--accent-primary)" }}
+                    />
+                    表示する
+                  </label>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={q.required}
+                      onChange={(ev) => updateCustomQuestion(q.id, { required: ev.target.checked })}
+                      style={{ accentColor: "var(--accent-primary)" }}
+                    />
+                    必須
+                  </label>
+                  <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" onClick={() => moveCustomQuestion(q.id, -1)} disabled={index === 0}>
+                    &#9650;
+                  </button>
+                  <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" onClick={() => moveCustomQuestion(q.id, 1)} disabled={index === customQuestions.length - 1}>
+                    &#9660;
+                  </button>
+                  <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" onClick={() => removeCustomQuestion(q.id)}>
+                    <Icon name="trash" size={12} aria-hidden /> 削除
+                  </button>
+                </div>
+              </header>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label className="fn-label">質問名 *</label>
+                  <input
+                    type="text"
+                    value={q.label}
+                    onChange={(ev) => updateCustomQuestion(q.id, { label: ev.target.value })}
+                    className="fn-input"
+                    maxLength={120}
+                    placeholder="例: 使用素材の権利状況"
+                  />
+                </div>
+                <div>
+                  <label className="fn-label">ID</label>
+                  <input
+                    type="text"
+                    value={q.id}
+                    onChange={(ev) => updateCustomQuestion(q.id, { id: normalizeQuestionId(ev.target.value) || q.id })}
+                    className="fn-input"
+                    maxLength={64}
+                    placeholder="自動生成"
+                  />
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label className="fn-label">入力形式</label>
+                  <select
+                    value={q.type}
+                    onChange={(ev) => {
+                      const newType = ev.target.value as CustomQuestionType;
+                      const patch: Partial<CustomQuestion> = { type: newType };
+                      if (newType === "select" || newType === "multi-select") {
+                        if (!q.options || q.options.length === 0) patch.options = ["選択肢1"];
+                      }
+                      updateCustomQuestion(q.id, patch);
+                    }}
+                    className="fn-select"
+                  >
+                    <option value="text">短文テキスト</option>
+                    <option value="textarea">長文テキスト</option>
+                    <option value="select">択一選択</option>
+                    <option value="multi-select">複数選択</option>
+                    <option value="number">数値</option>
+                    <option value="date">日付</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="fn-label">ヘルプテキスト</label>
+                  <input
+                    type="text"
+                    value={q.help_text ?? ""}
+                    onChange={(ev) => updateCustomQuestion(q.id, { help_text: ev.target.value || undefined })}
+                    className="fn-input"
+                    maxLength={500}
+                    placeholder="入力欄の下に表示される補足"
+                  />
+                </div>
+              </div>
+              {(q.type === "text" || q.type === "textarea") && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <div>
+                    <label className="fn-label">プレースホルダー</label>
+                    <input
+                      type="text"
+                      value={q.placeholder ?? ""}
+                      onChange={(ev) => updateCustomQuestion(q.id, { placeholder: ev.target.value || undefined })}
+                      className="fn-input"
+                      maxLength={500}
+                    />
+                  </div>
+                  <div>
+                    <label className="fn-label">最大文字数</label>
+                    <input
+                      type="number"
+                      value={q.max_length ?? (q.type === "text" ? 200 : 1000)}
+                      onChange={(ev) => updateCustomQuestion(q.id, { max_length: Number(ev.target.value) || undefined })}
+                      className="fn-input"
+                      min={1}
+                      max={5000}
+                    />
+                  </div>
+                </div>
+              )}
+              {(q.type === "select" || q.type === "multi-select") && (
+                <div>
+                  <label className="fn-label">選択肢 (1行に1項目)</label>
+                  <textarea
+                    value={(q.options ?? []).join("\n")}
+                    onChange={(ev) => {
+                      const lines = ev.target.value.split("\n");
+                      updateCustomQuestion(q.id, { options: lines });
+                    }}
+                    className="fn-input"
+                    rows={4}
+                    placeholder={"選択肢1\n選択肢2\n選択肢3"}
+                  />
+                </div>
+              )}
+              {q.type === "number" && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <div>
+                    <label className="fn-label">最小値</label>
+                    <input
+                      type="number"
+                      value={q.min ?? ""}
+                      onChange={(ev) => updateCustomQuestion(q.id, { min: ev.target.value ? Number(ev.target.value) : undefined })}
+                      className="fn-input"
+                    />
+                  </div>
+                  <div>
+                    <label className="fn-label">最大値</label>
+                    <input
+                      type="number"
+                      value={q.max ?? ""}
+                      onChange={(ev) => updateCustomQuestion(q.id, { max: ev.target.value ? Number(ev.target.value) : undefined })}
+                      className="fn-input"
+                    />
+                  </div>
+                </div>
+              )}
+            </article>
+          ))}
+          <button
+            type="button"
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+            onClick={addCustomQuestion}
+            style={{ justifySelf: "start" }}
+          >
+            <Icon name="plus" size={12} aria-hidden /> カスタム質問を追加
           </button>
         </div>
       </fieldset>

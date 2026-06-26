@@ -12,6 +12,10 @@ import { parseJstDatetimeLocal } from "@/lib/utils/dateInput";
 import { generateId } from "@/lib/utils/id";
 import { normalizeHttpUrl } from "@/lib/utils/url";
 import { DEFAULT_STAGE_PERMISSION_FIELD } from "@/lib/video/formSettings";
+import {
+  parseCustomQuestions,
+  serializeCustomQuestions,
+} from "@/lib/video/customQuestions";
 
 export interface EventActionResult {
   ok: boolean;
@@ -63,6 +67,7 @@ const eventSchema = z.object({
     .default("public_name"),
   parts_text: z.string().max(2000).optional().nullable(),
   template_id: z.string().trim().max(64).optional().nullable(),
+  custom_questions_json: z.string().max(50000).optional().nullable(),
 });
 
 const PART_NAME_MAX_LEN = 40;
@@ -229,7 +234,14 @@ export async function createEvent(
     slot_type: data.slot_type,
     slot_visibility_mode: data.slot_visibility_mode,
     parts_json: buildPartsJson(data.parts_text),
-    custom_questions: templateSnapshot?.custom_questions ?? null,
+    custom_questions: (() => {
+      const raw = formData.get("custom_questions_json");
+      if (typeof raw === "string" && raw.trim()) {
+        const normalized = serializeCustomQuestions(parseCustomQuestions(raw));
+        return normalized ?? templateSnapshot?.custom_questions ?? null;
+      }
+      return templateSnapshot?.custom_questions ?? null;
+    })(),
     review_settings: templateSnapshot?.review_settings ?? null,
     editable_fields: templateSnapshot?.editable_fields ?? null,
     repeat_rules: templateSnapshot?.repeat_rules ?? null,
@@ -314,6 +326,13 @@ export async function updateEvent(
       slot_type: data.slot_type,
       slot_visibility_mode: data.slot_visibility_mode,
       parts_json: buildPartsJson(data.parts_text),
+      custom_questions: (() => {
+        const raw = formData.get("custom_questions_json");
+        if (typeof raw === "string" && raw.trim()) {
+          return serializeCustomQuestions(parseCustomQuestions(raw)) ?? null;
+        }
+        return null;
+      })(),
       updated_at: now,
     })
     .where(eq(events.id, data.id));
