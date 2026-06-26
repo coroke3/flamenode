@@ -33,7 +33,14 @@ type OutboxRow = {
 
 export default {
   async scheduled(_evt: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(dispatch(env));
+    ctx.waitUntil((async () => {
+      try {
+        await enqueueSlotDeadlineReminders(env);
+      } catch (e) {
+        console.error("[notification-dispatcher] reminder enqueue failed:", e);
+      }
+      await dispatch(env);
+    })());
   },
   async fetch(): Promise<Response> {
     return new Response("FlameNode notification-dispatcher", { status: 200 });

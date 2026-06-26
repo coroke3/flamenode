@@ -36,6 +36,7 @@ export async function enqueueAfterVideoCreate(
     },
     { targetType: "top", targetId: "global", reason: "video_create" },
     { targetType: "list_recent", targetId: "global", reason: "video_create" },
+    { targetType: "list_popular", targetId: "global", reason: "video_create" },
     { targetType: "search_index", targetId: "global", reason: "video_create" },
   ];
 
@@ -105,6 +106,7 @@ export async function enqueueAfterVideoUpdate(
     items.push(
       { targetType: "top", targetId: "global", reason: "video_update" },
       { targetType: "list_recent", targetId: "global", reason: "video_update" },
+      { targetType: "list_popular", targetId: "global", reason: "video_update" },
       {
         targetType: "search_index",
         targetId: "global",

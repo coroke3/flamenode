@@ -70,7 +70,7 @@ export async function enqueueSlotDeadlineReminders(
             COUNT(*) AS slot_count
        FROM slots s
        INNER JOIN events e ON e.id = s.event_id
-       INNER JOIN users u ON u.discord_id = s.discord_user_id
+       INNER JOIN `user` u ON u.discord_id = s.discord_user_id
       WHERE s.status = 'reserved'
         AND s.video_id IS NULL
         AND s.discord_user_id IS NOT NULL

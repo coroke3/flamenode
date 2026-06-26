@@ -294,6 +294,26 @@ async function repairLocalSchemaDrift(DB: LocalD1Database): Promise<void> {
       "CREATE INDEX IF NOT EXISTS `notification_outbox_event_idx` ON `notification_outbox` (`event_id`)",
       "notification_outbox_event_idx",
     );
+    await ensureColumn(
+      DB,
+      "notification_outbox",
+      "dedupe_key",
+      "ALTER TABLE `notification_outbox` ADD `dedupe_key` text",
+    );
+    await ensureIndex(
+      DB,
+      "CREATE INDEX IF NOT EXISTS `notification_outbox_dedupe_idx` ON `notification_outbox` (`dedupe_key`)",
+      "notification_outbox_dedupe_idx",
+    );
+  }
+
+  if (await tableExists(DB, "x_users")) {
+    await ensureColumn(
+      DB,
+      "x_users",
+      "portfolio_contact",
+      "ALTER TABLE `x_users` ADD `portfolio_contact` text",
+    );
   }
 
   if (await tableExists(DB, "video_chapters")) {

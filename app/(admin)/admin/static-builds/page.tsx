@@ -73,6 +73,7 @@ export default async function AdminStaticBuildsPage(): Promise<React.ReactElemen
               <option value="video">video</option>
               <option value="user">user</option>
               <option value="list_recent">list_recent</option>
+              <option value="list_popular">list_popular</option>
               <option value="search_index">search_index</option>
             </select>
           </label>
