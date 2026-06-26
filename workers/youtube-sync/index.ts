@@ -20,7 +20,7 @@ export default {
   },
 };
 
-async function syncBatch(env: Env): Promise<void> {
+export async function syncBatch(env: Env): Promise<void> {
   if (!env.YOUTUBE_API_KEY) return;
   const rows = await env.DB.prepare(
     `SELECT v.id, v.youtube_video_id

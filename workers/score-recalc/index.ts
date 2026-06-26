@@ -16,7 +16,7 @@ export default {
   },
 };
 
-async function recalcAll(env: Env): Promise<void> {
+export async function recalcAll(env: Env): Promise<void> {
   // 軽量な多項式: views * 1 + likes * 5 + age_decay
   const now = Math.floor(Date.now() / 1000);
   await env.DB.prepare(
