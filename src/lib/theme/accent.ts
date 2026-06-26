@@ -115,8 +115,3 @@ export function buildAccentVars(
     ["--event-accent-ring" as never]: `color-mix(in srgb, ${accentCss} 50%, transparent)`,
   } as React.CSSProperties;
 }
-
-/** raw hex を直接受け取って妥当な値を返したい場合のヘルパー。 */
-export function safeAccentHex(input: string | null | undefined): string {
-  return normalizeHex(input) ?? DEFAULT_HEX;
-}

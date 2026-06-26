@@ -193,17 +193,6 @@ export interface GridPasteCell {
   value: string | null;
 }
 
-/** Excel / Google スプレッドシート由来の複数セル貼り付けか */
-export function looksLikeTabularPaste(text: string): boolean {
-  if (!text) return false;
-  if (text.includes("\t")) return true;
-  if (text.includes("\r") || text.includes("\n")) {
-    const lines = text.split(/\r?\n/).filter((l) => l.length > 0);
-    return lines.length > 1;
-  }
-  return false;
-}
-
 function countHeaderMatches(
   header: string[],
   tableColumns: ColumnMeta[],
@@ -303,15 +292,6 @@ export async function writeTextToClipboard(text: string): Promise<boolean> {
     } catch {
       return false;
     }
-  }
-}
-
-/** クリップボードからテキストを読む */
-export async function readTextFromClipboard(): Promise<string | null> {
-  try {
-    return await navigator.clipboard.readText();
-  } catch {
-    return null;
   }
 }
 

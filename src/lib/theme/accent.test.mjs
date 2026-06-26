@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildAccentVars, safeAccentHex } from "./accent.ts";
+import { buildAccentVars } from "./accent.ts";
 
 test("buildAccentVars: 無効 hex はデフォルト", () => {
   const v = buildAccentVars(null);
@@ -13,10 +13,4 @@ test("buildAccentVars: ライトとダークで違う結果", () => {
   const a = buildAccentVars("#ffd400", "light");
   const b = buildAccentVars("#ffd400", "dark");
   assert.notEqual(a["--event-accent"], b["--event-accent"]);
-});
-
-test("safeAccentHex: 3桁hexを6桁に展開", () => {
-  assert.equal(safeAccentHex("#abc"), "#aabbcc");
-  assert.equal(safeAccentHex("not-hex"), "#ffd400");
-  assert.equal(safeAccentHex("#FF8800"), "#ff8800");
 });

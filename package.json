@@ -12,8 +12,7 @@
     "#spreadsheet/constants": "./src/lib/admin/spreadsheet/constants.ts",
     "#spreadsheet/cellFormat": "./src/lib/admin/spreadsheet/cellFormat.ts",
     "#spreadsheet/validation": "./src/lib/admin/spreadsheet/validation.ts",
-    "#spreadsheet/paste": "./src/lib/admin/spreadsheet/paste.ts",
-    "#spreadsheet/grid-find": "./src/lib/admin/spreadsheet/gridFind.ts"
+    "#spreadsheet/paste": "./src/lib/admin/spreadsheet/paste.ts"
   },
   "description": "FlameNode - 個人制作映像とイベントをつなぐ動画プラットフォーム。",
   "engines": {

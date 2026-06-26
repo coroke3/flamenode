@@ -11,7 +11,6 @@ import {
 } from "@/components/admin/AdminSidebarNav";
 import { isAdminSpreadsheetEnabled } from "@/lib/admin/spreadsheet/guard";
 import { AdminModeBanner } from "@/components/admin/AdminModeBanner";
-import styles from "./AdminLayout.module.css";
 
 const ADMIN_NAV_SPREADSHEET_ITEM = {
   href: "/admin/spreadsheet",
@@ -108,7 +107,7 @@ export default async function AdminLayout({
       <PublicHeader user={user} />
       <div className="admin-shell">
         <div className="admin-frame">
-          <aside className={`admin-sidebar ${styles.sidebar}`}>
+          <aside className="admin-sidebar">
             <AdminModeBanner />
             <AdminSidebarNav groups={buildAdminNavGroups()} />
           </aside>
