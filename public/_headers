@@ -1,0 +1,22 @@
+# Cloudflare Pages 静的アセットのキャッシュ (無料枠: 静的リクエストは Functions を経由しない)
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/favicon.ico
+  Cache-Control: public, max-age=86400
+
+/robots.txt
+  Cache-Control: public, max-age=3600
+
+/sitemap.xml
+  Cache-Control: public, max-age=3600, stale-while-revalidate=86400
+
+# R2 経由メディア (app/api/media) と同程度の TTL を静的配信にも適用
+/*.png
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+
+/*.webp
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+
+/*.svg
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800

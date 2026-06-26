@@ -40,7 +40,7 @@ function videoHref(id: string): string {
 }
 
 function eventHref(id: string): string {
-  return `/admin/events/${encodeURIComponent(id)}`;
+  return `/manage/events/${encodeURIComponent(id)}`;
 }
 
 async function countRows(

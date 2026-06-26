@@ -2,12 +2,12 @@ import * as React from "react";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { AuthHeader } from "@/components/layout/AuthHeader";
+import { PublicHeader, type PublicHeaderUser } from "@/components/layout/PublicHeader";
 import { PublicFooter } from "@/components/layout/PublicFooter";
 import { CostGuardBanner } from "@/components/layout/CostGuardBanner";
 import { ManageSidebar } from "@/components/layout/ManageSidebar";
 import { ManageModeBanner } from "@/components/manage/ManageModeBanner";
-import { buildHeaderUser, type HeaderUser } from "@/lib/auth/headerUser";
+import { buildHeaderUser } from "@/lib/auth/headerUser";
 
 export const metadata: Metadata = {
   robots: { index: false, follow: false },
@@ -23,7 +23,7 @@ export default async function ManageLayout({
 }: {
   children: React.ReactNode;
 }): Promise<React.ReactElement> {
-  let user: HeaderUser | null = null;
+  let user: PublicHeaderUser | null = null;
   try {
     const session = await auth();
     user = await buildHeaderUser(session?.user);
@@ -39,7 +39,7 @@ export default async function ManageLayout({
   return (
     <div data-manage-shell data-fn-surface="public">
       <CostGuardBanner />
-      <AuthHeader user={user} />
+      <PublicHeader user={user} />
       <div className="manage-shell">
         <ManageSidebar />
         <main className="manage-main">

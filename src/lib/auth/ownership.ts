@@ -15,6 +15,20 @@ import type {
   CollaboratorPermissionKey,
   VideoEditSectionKey,
 } from "./videoEditSections";
+import {
+  VIDEO_PERMISSION_ALIASES,
+  NORMAL_SAFE_VIDEO_EDIT_KEYS,
+  DANGEROUS_ADMIN_VIDEO_EDIT_KEYS,
+  COLLABORATOR_VIDEO_EDIT_KEYS,
+  isSafeNormalVideoEditKey,
+  isDangerousAdminVideoEditKey,
+  isUserDelegatableKey,
+  parseDelegatablePermissionKeys,
+} from "./ownershipCore";
+import type { SessionUserLike } from "./ownershipCore";
+
+export type { SessionUserLike };
+export { isSafeNormalVideoEditKey, isDangerousAdminVideoEditKey } from "./ownershipCore";
 
 /**
  * オーナーシップ判定ヘルパー。
@@ -25,100 +39,7 @@ import type {
  * - event_staff_permissions: permission_key に応じた細粒度許可
  */
 
-export type SessionUserLike = {
-  id: string;
-  role?: string | null;
-  active_x_user_id?: string | null;
-};
-
 export type VideoRow = typeof videos.$inferSelect;
-
-const VIDEO_PERMISSION_ALIASES: Record<VideoEditSectionKey, readonly string[]> = {
-  "video.basics": ["video.basics", "videos.title"],
-  "video.identity": ["video.identity", "videos.title"],
-  "video.descriptions": ["video.descriptions", "videos.review_data"],
-  "video.credits": ["video.credits", "videos.music_credit"],
-  "video.members": ["video.members", "videos.members"],
-  "video.member_chapters": ["video.member_chapters", "video.members", "videos.members"],
-  "video.youtube_id": ["video.youtube_id", "videos.youtube_id"],
-  "video.primary_event": ["video.primary_event", "videos.primary_event"],
-  "video.status": ["video.status"],
-  "video.chapter_admin": ["video.chapter_admin"],
-  "videos.title": ["videos.title", "video.basics", "video.identity"],
-  "videos.music_credit": ["videos.music_credit", "video.credits"],
-  "videos.members": ["videos.members", "video.members"],
-  "videos.review_data": ["videos.review_data", "video.descriptions"],
-  "videos.youtube_id": ["videos.youtube_id", "video.youtube_id"],
-  "videos.primary_event": ["videos.primary_event", "video.primary_event"],
-};
-
-/**
- * 通常編集モード (privilegeMode = "normal") で許可する section key の許可リスト。
- *
- * 設計意図 (新仕様):
- *   - 管理者ユーザーも、通常モードでは「一般ユーザーが自分の作品で触れる範囲」だけ
- *     編集できる。提出主体や YouTube ID 等の危険操作は privilegeMode = "admin" 時のみ。
- *   - イベント管理者ユーザーも、自分が管理するイベント所属作品に対して同じ範囲のみ。
- *   - 作品オーナーは privilegeMode を問わず全権 (オーナーチェックは前段で済む)。
- */
-const NORMAL_SAFE_VIDEO_EDIT_KEYS = new Set<VideoEditSectionKey>([
-  "video.basics",
-  "video.descriptions",
-  "video.credits",
-  "video.members",
-  "video.member_chapters",
-  "videos.title",
-  "videos.review_data",
-  "videos.music_credit",
-  "videos.members",
-]);
-
-/**
- * privilegeMode = "admin" 時にだけ解放される危険キー。
- * 提出主体変更 / YouTube ID 差し替え / 所属イベント変更 / 公開状態 / チャプター運営。
- */
-const DANGEROUS_ADMIN_VIDEO_EDIT_KEYS = new Set<VideoEditSectionKey>([
-  "video.identity",
-  "video.youtube_id",
-  "video.primary_event",
-  "video.status",
-  "video.chapter_admin",
-  "videos.youtube_id",
-  "videos.primary_event",
-]);
-
-export function isSafeNormalVideoEditKey(key: VideoEditSectionKey): boolean {
-  return NORMAL_SAFE_VIDEO_EDIT_KEYS.has(key);
-}
-
-export function isDangerousAdminVideoEditKey(
-  key: VideoEditSectionKey,
-): boolean {
-  return DANGEROUS_ADMIN_VIDEO_EDIT_KEYS.has(key);
-}
-
-/**
- * video_members.can_edit が許可する section の許可リスト (ホワイトリスト方式)。
- *
- * 重要: ここに列挙されていないキーは、合作メンバー編集権限 (can_edit) では絶対に
- * 通らない。特に下記は **永久に絶対許可しない**:
- *   - "video.identity" / "videos.title" / "video.basics" (提出主体・タイトル系)
- *   - "videos.youtube_id" / "video.youtube_id" (YouTube ID 差し替え)
- *   - "videos.primary_event" / "video.primary_event" (所属イベント変更)
- *   - "video.status" / "video.chapter_admin" (公開状態 / チャプター運用)
- *
- * 現在の video_members には粗い can_edit フラグしかないため、
- * 合作コンテンツ系 (説明文・メンバー欄・振り返り) のみホワイトリストで許可する。
- * 将来必要なら作品単位の権限テーブルで section ごとに細分化する。
- */
-const COLLABORATOR_VIDEO_EDIT_KEYS = new Set<VideoEditSectionKey>([
-  "video.descriptions",
-  "video.members",
-  "videos.review_data",
-  "videos.members",
-  "video.credits",
-  "videos.music_credit",
-]);
 
 /** 自分の承認済 X ID 一覧 (active_x_user_id とは独立に全部返す)。 */
 export async function getApprovedXIds(
@@ -187,6 +108,33 @@ export async function getCollaboratorPermissions(
       )!,
     );
   return new Set(rows.map((r) => r.permission_key));
+}
+
+export async function canManageXIdLinkRequests(
+  db: DB,
+  user: SessionUserLike,
+): Promise<boolean> {
+  if (user.role === "admin") return true;
+  const xIds = await getApprovedXIds(db, user.id);
+  const subjectCond =
+    xIds.length > 0
+      ? or(eq(eventStaff.discord_user_id, user.id), inArray(eventStaff.x_user_id, xIds))!
+      : eq(eventStaff.discord_user_id, user.id);
+  const row = (
+    await db
+      .select({ id: eventStaffPermissions.id })
+      .from(eventStaffPermissions)
+      .innerJoin(eventStaff, eq(eventStaff.id, eventStaffPermissions.event_staff_id))
+      .where(
+        and(
+          eq(eventStaffPermissions.permission_key, "xid.link_requests"),
+          eq(eventStaffPermissions.allowed, 1),
+          subjectCond,
+        )!,
+      )
+      .limit(1)
+  )[0];
+  return Boolean(row);
 }
 
 /**
@@ -279,19 +227,7 @@ export async function getManageStaffXUserIds(
   );
 }
 
-/**
- * Active X が運営権限の付与先 X と食い違うとき true（注意表示用）。
- * 運営入場判定には使わない。
- */
-export function shouldWarnManageActiveXMismatch(
-  activeXUserId: string | null | undefined,
-  manageStaffXUserIds: readonly string[],
-): boolean {
-  const activeX = activeXUserId?.trim() || null;
-  if (!activeX) return false;
-  if (manageStaffXUserIds.length === 0) return false;
-  return !manageStaffXUserIds.includes(activeX);
-}
+export { shouldWarnManageActiveXMismatch } from "./ownershipCore";
 
 /**
  * イベント編集権限の判定。
@@ -350,7 +286,6 @@ export async function assertCanEditEvent(
  *
  * - `any` (default): 後方互換。admin / event / owner / collaborator のいずれか
  *   で許可されれば true。明示的にモードを渡さない既存呼び出しはこれを使う。
- *   将来的には呼び出し側で常に明示するのが望ましい。
  *
  * 作品オーナーは privilegeMode に関わらず常に編集可能。
  */
@@ -522,47 +457,4 @@ async function isEventDelegationGranted(
   return false;
 }
 
-/**
- * `allow_user_video_edits` で **collaborator が触れるキーを拡張する** ときに
- * 許可してよい section key のホワイトリスト。
- *
- * 設計意図:
- *   - 一般ログインユーザーやイベント参加者に編集権を配るためのものではない。
- *   - 既に `video_members.can_edit=1` で作品に紐付いている合作メンバーが、
- *     `COLLABORATOR_VIDEO_EDIT_KEYS` のデフォルト範囲を超えて触れるキーを、
- *     イベント単位で増減するための拡張テーブル。
- *   - 危険キー (videos.youtube_id / videos.primary_event / video.identity 等) は
- *     ここに入れない (永久に管理者専用)。
- */
-const USER_DELEGATABLE_KEYS = new Set<string>([
-  "videos.title",
-  "videos.music_credit",
-  "videos.members",
-  "videos.review_data",
-  "video.descriptions",
-  "video.credits",
-  "video.members",
-]);
 
-function isUserDelegatableKey(key: VideoEditSectionKey): boolean {
-  return USER_DELEGATABLE_KEYS.has(key);
-}
-
-function parseDelegatablePermissionKeys(
-  raw: string | null | undefined,
-): Set<string> {
-  if (!raw) return new Set();
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return new Set();
-    const out = new Set<string>();
-    for (const v of parsed) {
-      if (typeof v === "string" && USER_DELEGATABLE_KEYS.has(v)) {
-        out.add(v);
-      }
-    }
-    return out;
-  } catch {
-    return new Set();
-  }
-}

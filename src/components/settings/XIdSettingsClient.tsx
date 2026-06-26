@@ -14,6 +14,11 @@ import {
   updateXIdProfile,
 } from "@/lib/actions/xid";
 import { ConfirmTextDialog } from "@/components/ui/ConfirmTextDialog";
+import {
+  parseSocialLinks,
+  SOCIAL_LINK_TYPE_OPTIONS,
+  type SocialLink,
+} from "@/lib/socialLinks";
 
 /** X ID 連携申請フォーム (Server Action `requestXIdLink`)。 */
 export function XIdLinkForm({
@@ -172,6 +177,7 @@ export function XIdCompactProfileForm({
     x_name: string;
     icon_url: string | null;
     profile_text: string | null;
+    portfolio_contact: string | null;
     youtube_channel_url: string | null;
     other_social_links: string | null;
   };
@@ -204,17 +210,6 @@ export function XIdCompactProfileForm({
   return (
     <form className={styles.stack} onSubmit={onSubmit}>
       <input type="hidden" name="x_user_id" value={x.id} />
-      <input type="hidden" name="profile_text" value={x.profile_text ?? ""} />
-      <input
-        type="hidden"
-        name="youtube_channel_url"
-        value={x.youtube_channel_url ?? ""}
-      />
-      <input
-        type="hidden"
-        name="other_social_links"
-        value={x.other_social_links ?? ""}
-      />
       <label className={styles.compactLabel}>
         表示名オーバーライド（空欄で @ハンドル表示）
       </label>
@@ -237,6 +232,48 @@ export function XIdCompactProfileForm({
           compact
         />
       </div>
+      <label className={styles.compactLabel} htmlFor={`xid-about-${x.id}`}>
+        About / 自己紹介
+      </label>
+      <textarea
+        id={`xid-about-${x.id}`}
+        name="profile_text"
+        className={styles.textarea}
+        defaultValue={x.profile_text ?? ""}
+        rows={3}
+        maxLength={2000}
+        placeholder="制作スタイル、得意なこと、活動紹介など"
+        disabled={pending}
+      />
+      <label className={styles.compactLabel} htmlFor={`xid-contact-${x.id}`}>
+        Contact / 連絡先
+      </label>
+      <textarea
+        id={`xid-contact-${x.id}`}
+        name="portfolio_contact"
+        className={styles.textarea}
+        defaultValue={x.portfolio_contact ?? ""}
+        rows={2}
+        maxLength={1200}
+        placeholder="依頼・連絡先、メール、フォームURL、DM可否など"
+        disabled={pending}
+      />
+      <div className={styles.fieldGrid}>
+        <label className={styles.field}>
+          <span className={styles.compactLabel}>YouTube チャンネル</span>
+          <input
+            name="youtube_channel_url"
+            className={styles.input}
+            defaultValue={x.youtube_channel_url ?? ""}
+            placeholder="https://www.youtube.com/@..."
+            disabled={pending}
+          />
+        </label>
+      </div>
+      <SocialLinksEditor
+        initialValue={x.other_social_links}
+        disabled={pending}
+      />
       <div className={`${styles.row} ${styles.rowEnd}`}>
         <button
           type="button"
@@ -269,6 +306,7 @@ export function XIdProfileForm({
     x_name: string;
     icon_url: string | null;
     profile_text: string | null;
+    portfolio_contact: string | null;
     youtube_channel_url: string | null;
     other_social_links: string | null;
   };
@@ -327,26 +365,32 @@ export function XIdProfileForm({
       </div>
       <textarea
         name="profile_text"
-        className="fn-input"
+        className={styles.textarea}
         defaultValue={x.profile_text ?? ""}
         rows={3}
-        maxLength={1000}
+        maxLength={2000}
         placeholder="プロフィール・概要"
       />
-      <div className={styles.row}>
-        <input
-          name="youtube_channel_url"
-          className={styles.input}
-          defaultValue={x.youtube_channel_url ?? ""}
-          placeholder="YouTubeチャンネルURL"
-        />
-        <input
-          name="other_social_links"
-          className={styles.input}
-          defaultValue={x.other_social_links ?? ""}
-          placeholder="SNS一覧"
-        />
+      <textarea
+        name="portfolio_contact"
+        className={styles.textarea}
+        defaultValue={x.portfolio_contact ?? ""}
+        rows={2}
+        maxLength={1200}
+        placeholder="Contact / 連絡先"
+      />
+      <div className={styles.fieldGrid}>
+        <label className={styles.field}>
+          <span className={styles.compactLabel}>YouTube チャンネル</span>
+          <input
+            name="youtube_channel_url"
+            className={styles.input}
+            defaultValue={x.youtube_channel_url ?? ""}
+            placeholder="https://www.youtube.com/@..."
+          />
+        </label>
       </div>
+      <SocialLinksEditor initialValue={x.other_social_links} />
       <div className={styles.row}>
         <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm" disabled={pending}>
           <Icon name="check" size={12} aria-hidden /> プロフィールを保存
@@ -366,6 +410,114 @@ export function XIdProfileForm({
       {message ? <p className={styles.msgOk}>{message}</p> : null}
       {error ? <p className={styles.msgErr}>{error}</p> : null}
     </form>
+  );
+}
+
+function emptySocialLink(): SocialLink {
+  return { type: "X", url: "" };
+}
+
+function draftSocialLinksJson(links: readonly SocialLink[]): string {
+  const rows = links
+    .map((link) => ({
+      type: link.type.trim() || "Other",
+      url: link.url.trim(),
+    }))
+    .filter((link) => link.url.length > 0);
+  return rows.length > 0 ? JSON.stringify(rows) : "";
+}
+
+function SocialLinksEditor({
+  initialValue,
+  disabled = false,
+}: {
+  initialValue: string | null;
+  disabled?: boolean;
+}): React.ReactElement {
+  const [links, setLinks] = React.useState<SocialLink[]>(() => {
+    const parsed = parseSocialLinks(initialValue);
+    return parsed.length > 0 ? parsed : [emptySocialLink()];
+  });
+  const hiddenValue = React.useMemo(() => draftSocialLinksJson(links), [links]);
+
+  const updateLink = (index: number, patch: Partial<SocialLink>) => {
+    setLinks((current) =>
+      current.map((link, i) => (i === index ? { ...link, ...patch } : link)),
+    );
+  };
+
+  const removeLink = (index: number) => {
+    setLinks((current) => {
+      const next = current.filter((_, i) => i !== index);
+      return next.length > 0 ? next : [emptySocialLink()];
+    });
+  };
+
+  return (
+    <div className={styles.socialEditor}>
+      <input type="hidden" name="other_social_links" value={hiddenValue} />
+      <div className={styles.socialEditorHead}>
+        <span className={styles.compactLabel}>SNS / 外部リンク</span>
+        <button
+          type="button"
+          className="fn-btn fn-btn-ghost fn-btn-sm"
+          onClick={() => setLinks((current) => [...current, emptySocialLink()])}
+          disabled={disabled || links.length >= 8}
+        >
+          <Icon name="plus" size={12} aria-hidden />
+          追加
+        </button>
+      </div>
+      <div className={styles.socialRows}>
+        {links.map((link, index) => (
+          <div className={styles.socialRow} key={`${index}-${link.type}`}>
+            <label className="fn-sr-only" htmlFor={`social-type-${index}`}>
+              SNS種類
+            </label>
+            <select
+              id={`social-type-${index}`}
+              className={styles.select}
+              value={link.type}
+              onChange={(ev) => updateLink(index, { type: ev.currentTarget.value })}
+              disabled={disabled}
+            >
+              {(
+                (SOCIAL_LINK_TYPE_OPTIONS as readonly string[]).includes(link.type)
+                  ? SOCIAL_LINK_TYPE_OPTIONS
+                  : ([link.type, ...SOCIAL_LINK_TYPE_OPTIONS] as const)
+              ).map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+            </select>
+            <label className="fn-sr-only" htmlFor={`social-url-${index}`}>
+              SNS URL
+            </label>
+            <input
+              id={`social-url-${index}`}
+              type="url"
+              className={styles.input}
+              value={link.url}
+              placeholder="https://..."
+              maxLength={500}
+              onChange={(ev) => updateLink(index, { url: ev.currentTarget.value })}
+              disabled={disabled}
+            />
+            <button
+              type="button"
+              className={styles.iconOnlyButton}
+              onClick={() => removeLink(index)}
+              disabled={disabled}
+              aria-label="SNSリンクを削除"
+              title="SNSリンクを削除"
+            >
+              <Icon name="trash" size={13} aria-hidden />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -395,6 +547,8 @@ function XIdIconPicker({
       if (uploadPreview) window.URL.revokeObjectURL(uploadPreview);
     };
   }, [uploadPreview]);
+
+  const selectedIconUrl = currentIconUrl ?? candidates[0] ?? null;
 
   const onSelect = (iconUrl: string) => {
     setError(null);
@@ -476,14 +630,14 @@ function XIdIconPicker({
                 key={url}
                 type="button"
                 onClick={() => onSelect(url)}
-                className={`${styles.iconButton} ${url === currentIconUrl ? styles.iconButtonActive : ""}`}
+                className={`${styles.iconButton} ${url === selectedIconUrl ? styles.iconButtonActive : ""}`}
                 disabled={pending}
-                aria-pressed={url === currentIconUrl}
+                aria-pressed={url === selectedIconUrl}
                 aria-label="アイコンを選択"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={url} alt="" className={styles.iconThumb} />
-                {url === currentIconUrl ? (
+                {url === selectedIconUrl ? (
                   <span className={styles.iconSelectedMark}>
                     <Icon name="check" size={12} aria-hidden />
                   </span>
@@ -495,10 +649,10 @@ function XIdIconPicker({
       ) : !compact ? (
         <div className={styles.uploadPanel}>
           <div className={styles.uploadPreview}>
-            {uploadPreview ?? currentIconUrl ? (
+            {uploadPreview ?? selectedIconUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={uploadPreview ?? currentIconUrl ?? ""}
+                src={uploadPreview ?? selectedIconUrl ?? ""}
                 alt=""
                 className={styles.uploadPreviewImage}
               />

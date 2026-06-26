@@ -92,5 +92,5 @@ export async function updateGlobalEditableFields(
   });
 
   revalidatePath("/admin/users");
-  return { ok: true, message: "一般作品権限(イベント毎)を保存しました。" };
+  return { ok: true, message: "一般作品権限を保存しました。" };
 }

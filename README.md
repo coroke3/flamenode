@@ -70,7 +70,7 @@ npm run build
 - 認証エリア (Discord OAuth + Auth.js)
   - エントリー `/entry`
   - ダッシュボード `/dashboard` (アクティブスロット / マイギャラリー / X ID 連携状況)
-  - 投稿 `/dashboard/post`、スロット提出 `/dashboard/post/slotted`、編集 `/dashboard/edit/[id]`
+  - 参加・投稿 `/entry`、スロット提出 `/entry/slotted`、編集 `/dashboard/edit/[id]`
   - 設定 `/dashboard/settings`
 - 管理エリア (`role === "admin"` ガード)
   - 総合ダッシュボード `/admin` (要対応タスク・コストガード状態)

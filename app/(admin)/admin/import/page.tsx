@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { Icon } from "@/components/ui/Icon";
 import { LegacyImportClient } from "@/components/admin/LegacyImportClient";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { AdminVideoManagementTabs } from "@/components/admin/AdminVideoManagementTabs";
 
 export const metadata: Metadata = { title: "レガシーインポート" };
 export const dynamic = "force-dynamic";
@@ -22,6 +23,7 @@ export default async function AdminImportPage({
         title="レガシーデータ・インポート"
         description="旧 EventArchives の eventinfo.json / video.json / ヘッダー付き CSV から、イベント・運営メンバー・作品・合作メンバー・X ID を取り込みます。"
       />
+      <AdminVideoManagementTabs active="import" />
       {notice ? (
         <div
           role="status"

@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { and, asc, eq } from "drizzle-orm";
 import type { VideoPublicMemberCandidate } from "@/components/admin/VideoCollabPermsManager";
+import { AdminVideoTabs } from "@/components/admin/AdminVideoTabs";
 import { VideoCollabPermsManager } from "@/components/admin/VideoCollabPermsManager";
 import { getDatabase } from "@/lib/cloudflare";
 import { videoMembers, videos as videosTable } from "@/lib/db/schema";
@@ -129,6 +130,14 @@ export default async function EditVideoPermissionsPage({
           公開メンバーとして表示するかどうかとは別です。
         </p>
       </header>
+
+      {privilegeMode === "admin" && user.role === "admin" ? (
+        <AdminVideoTabs
+          videoId={video.id}
+          youtubeVideoId={video.youtube_video_id}
+          active="permissions"
+        />
+      ) : null}
 
       {!videoCollabTableAvailable ? (
         <section className="fn-card">

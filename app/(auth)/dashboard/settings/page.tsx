@@ -20,6 +20,7 @@ import { SettingsStatusPill } from "@/components/settings/SettingsStatusPill";
 import pageStyles from "@/components/settings/settings-page.module.css";
 import { sanitizeNextPath } from "#utils/next";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
+import { normalizePortfolioContact } from "@/lib/profileContact";
 
 export const metadata: Metadata = { title: "設定" };
 export const dynamic = "force-dynamic";
@@ -74,6 +75,7 @@ export default async function SettingsPage({
         : "pending",
     approval_requested_at: x.approval_requested_at,
     profile_text: x.profile_text,
+    portfolio_contact: normalizePortfolioContact(x.portfolio_contact),
     youtube_channel_url: x.youtube_channel_url,
     other_social_links: x.other_social_links,
   }));

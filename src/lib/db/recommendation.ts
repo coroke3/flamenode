@@ -9,11 +9,7 @@ export type RelatedReason =
   | "shared_member"
   | "same_event"
   | "same_creator"
-  | "near_date"
-  | "top_score"
-  | "discovery"
-  | "latest_fallback"
-  | "broad_fallback";
+  | "near_date";
 
 export type RelatedCandidate<T> = {
   row: T;
@@ -30,35 +26,6 @@ export function clampRelatedLimit(limit = RELATED_DEFAULT_LIMIT): number {
   if (!Number.isFinite(limit)) return RELATED_DEFAULT_LIMIT;
   const value = Math.trunc(limit);
   return Math.min(RELATED_MAX_LIMIT, Math.max(RELATED_MIN_LIMIT, value));
-}
-
-export function hashStringToInt(input: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < input.length; i++) {
-    h ^= input.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
-
-export function todayDateUtc(date = new Date()): string {
-  const y = date.getUTCFullYear();
-  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(date.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
-
-export function seededShuffle<T>(rows: readonly T[], seed: string): T[] {
-  const out = [...rows];
-  let state = hashStringToInt(seed) || 1;
-
-  for (let i = out.length - 1; i > 0; i--) {
-    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
-    const j = state % (i + 1);
-    [out[i], out[j]] = [out[j], out[i]];
-  }
-
-  return out;
 }
 
 export function perMemberLimit(memberCount: number): number {
@@ -205,28 +172,4 @@ export function enforceDiversity<T extends DiversityRow>(
   }
 
   return selected.slice(0, limit);
-}
-
-export function fillToMinimum<T extends DiversityRow>(
-  selected: readonly RelatedCandidate<T>[],
-  fallbackRows: readonly T[],
-  reason: RelatedReason,
-  options: {
-    limit: number;
-    minTarget?: number;
-  },
-): RelatedCandidate<T>[] {
-  const limit = clampRelatedLimit(options.limit);
-  const minTarget = Math.min(options.minTarget ?? RELATED_MIN_LIMIT, limit);
-  if (selected.length >= minTarget) return [...selected].slice(0, limit);
-
-  const selectedIds = new Set(selected.map((candidate) => candidate.row.id));
-  const fallback = fallbackRows
-    .filter((row) => !selectedIds.has(row.id))
-    .map((row) => ({ row, reason }));
-
-  return enforceDiversity([...selected, ...fallback], {
-    limit,
-    minTarget,
-  });
 }

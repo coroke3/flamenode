@@ -5,7 +5,11 @@ import type { Metadata } from "next";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
-import { getEditableEventIds, getManageStaffRoleForEvent } from "@/lib/auth/ownership";
+import {
+  canManageXIdLinkRequests,
+  getEditableEventIds,
+  getManageStaffRoleForEvent,
+} from "@/lib/auth/ownership";
 import { ManageActiveXNotice } from "@/components/layout/ManageActiveXNotice";
 import {
   events as eventsTable,
@@ -17,6 +21,7 @@ import {
 import { Icon } from "@/components/ui/Icon";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
+import { compareEventsByUpcomingPriority } from "@/lib/utils/eventOrdering";
 import {
   computeEventStatus,
   eventStatusBadgeClass,
@@ -48,14 +53,31 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
 
   const isAdmin = user.role === "admin";
   /** ManageSidebar / canAccessManageEvent と同じ一覧（Active X 非依存） */
-  const eventIds = await getEditableEventIds(db, user.id);
+  const editableEventIds = isAdmin ? [] : await getEditableEventIds(db, user.id);
 
-  const eventRows = eventIds.length > 0
+  const eventRows = isAdmin
     ? await db
         .select()
         .from(eventsTable)
-        .where(inArray(eventsTable.id, eventIds))
-    : [];
+        .orderBy(
+          desc(eventsTable.start_time),
+          desc(eventsTable.created_at),
+          desc(eventsTable.id),
+        )
+        .then((rows) => rows.sort(compareEventsByUpcomingPriority))
+    : editableEventIds.length > 0
+      ? await db
+          .select()
+          .from(eventsTable)
+          .where(inArray(eventsTable.id, editableEventIds))
+          .orderBy(
+            desc(eventsTable.start_time),
+            desc(eventsTable.created_at),
+            desc(eventsTable.id),
+          )
+          .then((rows) => rows.sort(compareEventsByUpcomingPriority))
+      : [];
+  const eventIds = eventRows.map((event) => event.id);
 
   // 各イベントごとの審査待ち件数
   const pendingByEvent = new Map<string, number>();
@@ -117,6 +139,10 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
 
   // failed 件数集計 (担当イベント分のみ)
   const failedCount = eventNotifications.filter((n) => n.status === "failed").length;
+  const canManageXLinks = await canManageXIdLinkRequests(db, {
+    id: user.id,
+    role: user.role ?? null,
+  });
 
   const staffRoleByEvent = new Map<string, "representative" | "editor" | null>();
   if (!isAdmin && eventIds.length > 0) {
@@ -169,10 +195,12 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
 
   return (
     <div>
-      <ManageActiveXNotice
-        userId={user.id}
-        activeXUserId={user.active_x_user_id}
-      />
+      {!isAdmin ? (
+        <ManageActiveXNotice
+          userId={user.id}
+          activeXUserId={user.active_x_user_id}
+        />
+      ) : null}
       <ManagePageHeader
         title="イベント運営"
         description="あなたが担当するイベントの状態・審査待ち・関連履歴を表示します。"
@@ -181,6 +209,11 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
         <Link href="/manage/notifications" className="fn-btn fn-btn-ghost fn-btn-sm">
           <Icon name="alert" size={11} aria-hidden /> 通知センター
         </Link>
+        {canManageXLinks ? (
+          <Link href="/manage/x-link-requests" className="fn-btn fn-btn-ghost fn-btn-sm">
+            <Icon name="user" size={11} aria-hidden /> X ID 連携申請
+          </Link>
+        ) : null}
       </ManagePageHeader>
 
       {failedCount > 0 ? (
@@ -266,7 +299,7 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
                   </Link>
                   {isAdmin ? (
                     <Link
-                      href={`/admin/events/${ev.id}`}
+                      href={`/manage/events/${ev.id}/edit`}
                       className="fn-btn fn-btn-ghost fn-btn-sm"
                     >
                       <Icon name="settings" size={12} aria-hidden /> 管理者編集

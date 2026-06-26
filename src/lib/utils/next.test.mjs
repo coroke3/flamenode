@@ -7,7 +7,7 @@ import {
 } from "./next.ts";
 
 test("isSafeRelativePath accepts normal app paths", () => {
-  assert.equal(isSafeRelativePath("/dashboard/post?slot=abc"), true);
+  assert.equal(isSafeRelativePath("/entry/slotted?slot=abc"), true);
   assert.equal(isSafeRelativePath("/event/pvsf2025s/slots"), true);
 });
 
@@ -23,7 +23,7 @@ test("sanitizeNextPath falls back for unsafe values", () => {
   assert.equal(sanitizeNextPath(null, "/dashboard"), "/dashboard");
   assert.equal(sanitizeNextPath("//evil", "/"), "/");
   assert.equal(
-    sanitizeNextPath("/dashboard/post", "/dashboard"),
-    "/dashboard/post",
+    sanitizeNextPath("/entry", "/dashboard"),
+    "/entry",
   );
 });

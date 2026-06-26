@@ -127,8 +127,15 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
           .where(
             and(
               eq(slotsTable.status, "reserved"),
-              eq(eventsTable.is_entry_open, 1),
+              eq(eventsTable.is_active, 1),
               eq(eventsTable.is_archived, 0),
+              sql`(${eventsTable.entry_start_time} IS NOT NULL OR ${eventsTable.entry_end_time} IS NOT NULL)`,
+              sql`(${eventsTable.entry_start_time} IS NULL OR ${eventsTable.entry_start_time} <= ${now})`,
+              sql`(${eventsTable.entry_end_time} IS NULL OR ${eventsTable.entry_end_time} >= ${now})`,
+              sql`(
+                COALESCE(${eventsTable.end_time}, ${eventsTable.start_time}) IS NULL
+                OR COALESCE(${eventsTable.end_time}, ${eventsTable.start_time}) > ${now}
+              )`,
             ),
           ),
         db.select().from(systemSettings).limit(1),

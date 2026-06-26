@@ -39,11 +39,9 @@ export function SlotStatusBoard({
   if (total === 0) return <></>;
 
   const pct = (n: number, d: number) => (d === 0 ? 0 : Math.round((n / d) * 100));
-  const available = total - filled;
-  const selected =
-    slots.find((slot) => slot.status === "available") ??
-    slots.find((slot) => slot.status === "reserved") ??
-    slots[0];
+  const fillPct = pct(filled, total);
+  const nextAvailable = slots.find((slot) => slot.status === "available");
+  const selected = nextAvailable ?? slots[0];
   const selectedTime =
     selected?.start_time != null
       ? formatUnix(selected.start_time, { timeOnly: true })
@@ -52,20 +50,32 @@ export function SlotStatusBoard({
     selected?.start_time != null
       ? formatUnix(selected.start_time, { dateOnly: true })
       : null;
-  const selectedStatus =
-    selected?.status === "available"
-      ? "選択可"
-      : selected?.status === "submitted"
-        ? "提出済み"
-        : "この枠は確保できません";
+  const selectedStatus = nextAvailable ? "確保できます" : "空き枠なし";
 
   return (
     <section className={styles.board} aria-label="枠の状態">
-      <p className={styles.eyebrow}>選択中の枠</p>
+      <p className={styles.eyebrow}>{nextAvailable ? "次の空き枠" : "受付状況"}</p>
       <div className={styles.selected}>
         <strong>{selectedTime}</strong>
         {selectedDate ? <span>{selectedDate}</span> : null}
         <small>{selectedStatus}</small>
+      </div>
+
+      <div className={styles.summary} aria-label="埋まり状況">
+        <div className={styles.summaryHead}>
+          <span>埋まり枠</span>
+          <strong>
+            {filled}
+            <small> / {total}</small>
+          </strong>
+        </div>
+        <span className={styles.summaryBar} aria-hidden>
+          <span
+            className={styles.summaryBarFill}
+            style={{ width: `${fillPct}%` }}
+          />
+        </span>
+        <p>{fillPct}% 埋まり</p>
       </div>
 
       <dl className={styles.details}>
@@ -88,9 +98,9 @@ export function SlotStatusBoard({
           </div>
         ) : null}
         <div>
-          <dt>残り枠</dt>
+          <dt>埋まり枠</dt>
           <dd>
-            {available} / {total}
+            {filled} / {total}
           </dd>
         </div>
       </dl>
@@ -103,8 +113,14 @@ export function SlotStatusBoard({
         {partitioned.map((p, i) => (
           <div key={i} className={styles.partRow}>
             <span>{p.label}</span>
-            <strong>{p.total - p.filled}</strong>
+            <strong>
+              {p.filled}
+              <small> / {p.total}</small>
+            </strong>
             <em>{pct(p.filled, p.total)}%</em>
+            <i className={styles.partMeter} aria-hidden>
+              <b style={{ width: `${pct(p.filled, p.total)}%` }} />
+            </i>
           </div>
         ))}
       </div>

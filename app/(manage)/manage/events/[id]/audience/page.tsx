@@ -16,6 +16,8 @@ import {
 import { Icon } from "@/components/ui/Icon";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { getCollaboratorPermissions } from "@/lib/auth/ownership";
+import { ManageEventTabs } from "@/components/manage/ManageEventTabs";
+import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
 
 export const dynamic = "force-dynamic";
 
@@ -142,7 +144,7 @@ export default async function ManageEventAudiencePage({
   });
 
   return (
-    <div>
+    <div style={manageEventAccentStyle(ev.accent_color)}>
       <p style={{ marginBottom: 8, fontSize: 12 }}>
         <Link href={`/manage/events/${id}`}>← イベント運営トップへ</Link>
       </p>
@@ -152,12 +154,13 @@ export default async function ManageEventAudiencePage({
       <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 12 }}>
         {audience.length} 名の参加者 (slot 確保 / 動画提出のいずれかを行った X ID を集約)。読み取り専用。
       </p>
+      <ManageEventTabs eventId={id} active="audience" isAdmin={isAdmin} />
 
       {audience.length === 0 ? (
         <EmptyState
           tone="neutral"
           title="登録者はまだいません"
-          description="イベントが受付中になると、登録者や参加予定者がここに表示されます。"
+          description="このイベントで枠を確保した、または作品を提出した X ID がここに表示されます。"
           actions={[
             { href: `/event/${id}`, label: "公開ページを見る", variant: "primary" },
             {

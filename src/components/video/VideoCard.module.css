@@ -1,48 +1,16 @@
 .card {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
   width: 100%;
   min-width: 0;
-  transition: transform 0.16s ease;
-}
-
-.card:hover {
-  transform: translateY(-2px);
-}
-
-.card:hover .thumb {
-  transform: scale(1.02);
 }
 
 .thumbWrap {
   aspect-ratio: 16 / 9;
-  overflow: hidden;
-  border: 0;
-  border-radius: var(--r-card);
-  background-color: var(--bg-elevated);
-  position: relative;
-  isolation: isolate;
-}
-
-.thumbWrap::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
-  background-size: 32px 32px;
-  mix-blend-mode: overlay;
-  opacity: 0.65;
-  pointer-events: none;
 }
 
 .thumb {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: transform 0.25s ease;
 }
 
 .thumbFallback {
@@ -53,99 +21,23 @@
   color: var(--text-muted);
 }
 
-.title {
-  margin: 0;
-  font-size: 14.5px;
-  font-weight: 700;
-  line-height: 1.35;
-  color: var(--text-primary);
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  overflow: hidden;
-  transition: color 0.15s ease;
-  letter-spacing: 0;
-}
-
-.card:hover .title {
-  color: var(--accent-primary);
-}
-
-.author {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: -5px;
-  color: var(--text-muted);
-}
-
-.authorIcon,
-.authorIconFallback {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.authorIcon {
-  object-fit: cover;
-  background-color: var(--bg-elevated);
-  border: 0;
-}
-
-.authorIconFallback {
-  background-color: var(--bg-elevated);
-  display: grid;
-  place-items: center;
-  color: var(--text-muted);
-}
-
-.authorName {
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-@media (min-width: 700px) {
-  .authorName { font-size: 12px; }
-}
-
-.playMark {
+.statusBadge {
   position: absolute;
-  inset: 0;
-  z-index: 1;
-  margin: auto;
-  width: 46px;
-  height: 46px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 999px;
-  color: #fff;
-  background: rgba(0, 0, 0, 0.46);
-  opacity: 0;
-  transform: scale(0.96);
-  transition:
-    opacity 0.16s ease,
-    transform 0.16s ease;
-  pointer-events: none;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
 }
 
-.card:hover .playMark {
-  opacity: 1;
-  transform: scale(1);
+.partBadge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  font-size: 10px;
+  padding: 2px 7px;
+  letter-spacing: 0;
+  backdrop-filter: blur(2px);
 }
-
-@media (min-width: 1024px) {
-  .card { width: 100%; }
-  .title { font-size: 14.5px; }
-}
-
-.card.compact { width: 100%; }
-@media (min-width: 700px) { .card.compact { width: 100%; } }
-@media (min-width: 1024px) { .card.compact { width: 100%; } }
 
 .list {
   display: flex;
@@ -213,22 +105,4 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.statusBadge {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 1;
-}
-
-.partBadge {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  z-index: 1;
-  font-size: 10px;
-  padding: 2px 7px;
-  letter-spacing: 0;
-  backdrop-filter: blur(2px);
 }

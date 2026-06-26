@@ -10,6 +10,7 @@ import {
 } from "@/lib/db/schema";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { AdminVideoMembersForm } from "@/components/admin/AdminVideoMembersForm";
+import { AdminVideoTabs } from "@/components/admin/AdminVideoTabs";
 import type {
   VideoMemberInput,
   VideoMemberSuggestion,
@@ -115,6 +116,11 @@ export default async function AdminVideoMembersPage({
         description="公開参加者、合作フラグ、メンバーチャプターを管理します。"
         backHref={`/admin/videos/${video.id}`}
         backLabel="作品詳細へ"
+      />
+      <AdminVideoTabs
+        videoId={video.id}
+        youtubeVideoId={video.youtube_video_id}
+        active="members"
       />
       <div style={{ marginTop: 22 }}>
         <AdminVideoMembersForm

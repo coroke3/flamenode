@@ -20,7 +20,6 @@ import {
   videoEvents as videoEventsTable,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
-import { Icon } from "@/components/ui/Icon";
 import {
   computeEventStatus,
   eventStatusBadgeClass,
@@ -38,6 +37,7 @@ import {
 } from "@/lib/notifications/types";
 import { NotificationOutboxSummary } from "@/components/notifications/NotificationOutboxSummary";
 import { ManagePageHeader } from "@/components/manage/ManagePageHeader";
+import { ManageEventTabs } from "@/components/manage/ManageEventTabs";
 import {
   lookupNotificationRecipients,
   type RecipientLookup,
@@ -142,7 +142,7 @@ export default async function ManageEventPage({
     slotStatusMap[r.status] = Number(r.c ?? 0);
   }
   const totalSlots = Object.values(slotStatusMap).reduce((a, b) => a + b, 0);
-  const availableSlots = slotStatusMap.available ?? 0;
+  const filledSlots = Math.max(0, totalSlots - (slotStatusMap.available ?? 0));
   const reservedSlots = slotStatusMap.reserved ?? 0;
   const submittedSlots = slotStatusMap.submitted ?? 0;
 
@@ -292,73 +292,12 @@ export default async function ManageEventPage({
         <Stat label="審査待ち" value={Number(pendingCount[0]?.c ?? 0)} accent />
         <Stat label="公開済み" value={Number(publicCount[0]?.c ?? 0)} />
         <Stat label="枠合計" value={totalSlots} />
-        <Stat label="空き枠" value={availableSlots} />
+        <Stat label="埋まり枠" value={filledSlots} />
         <Stat label="確保済" value={reservedSlots} />
         <Stat label="提出済" value={submittedSlots} />
       </section>
 
-      <div className="manage-actions fn-console-section--tight">
-        <Link
-          href={`/manage/events/${id}/videos?status=pending`}
-          className="fn-btn fn-btn-primary fn-btn-sm"
-        >
-          <Icon name="check" size={12} aria-hidden /> 審査
-        </Link>
-        {isAdmin ? (
-          <Link
-            href={`/admin/videos?event=${encodeURIComponent(id)}&status=pending`}
-            className="fn-btn fn-btn-ghost fn-btn-sm"
-          >
-            管理者用審査一覧
-          </Link>
-        ) : null}
-        <Link
-          href={`/manage/events/${id}/slots`}
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-        >
-          <Icon name="calendar" size={11} aria-hidden /> 枠運営
-        </Link>
-        <Link
-          href={`/manage/events/${id}/staff`}
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-        >
-          <Icon name="users" size={11} aria-hidden /> 運営メンバー
-        </Link>
-        <Link
-          href={`/manage/events/${id}/audience`}
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-        >
-          <Icon name="user" size={11} aria-hidden /> 登録者プレビュー
-        </Link>
-        <Link
-          href={`/manage/notifications?event=${encodeURIComponent(id)}`}
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-        >
-          <Icon name="alert" size={11} aria-hidden /> 通知センター
-        </Link>
-        <Link
-          href={`/event/${id}`}
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-        >
-          公開ページを見る
-        </Link>
-        {isAdmin ? (
-          <>
-            <Link
-              href={`/admin/events/${id}`}
-              className="fn-btn fn-btn-ghost fn-btn-sm"
-            >
-              <Icon name="settings" size={11} aria-hidden /> 管理者設定
-            </Link>
-            <Link
-              href={`/admin/notifications?event=${encodeURIComponent(id)}`}
-              className="fn-btn fn-btn-ghost fn-btn-sm"
-            >
-              <Icon name="alert" size={11} aria-hidden /> 管理者用通知ログ
-            </Link>
-          </>
-        ) : null}
-      </div>
+      <ManageEventTabs eventId={id} active="overview" isAdmin={isAdmin} />
 
       {eventNotificationSchemaMissing ? (
         <div role="status" className="fn-alert fn-alert--warn fn-console-section--tight">

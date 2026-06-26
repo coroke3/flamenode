@@ -78,12 +78,13 @@
 }
 
 .legendAvailable {
-  background: transparent;
+  border-color: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 50%, var(--border-strong)) !important;
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 92%, #ffffff);
 }
 
 .legendReserved {
-  border-color: var(--event-accent, var(--accent-primary)) !important;
-  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 75%, transparent);
+  border-color: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 42%, var(--border-strong)) !important;
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 14%, transparent);
 }
 
 .legendPriority {
@@ -153,6 +154,10 @@
   border-top: 0;
 }
 
+.timeCol {
+  width: 68px;
+}
+
 .table th,
 .table td {
   padding: 0;
@@ -190,9 +195,55 @@
   box-shadow: inset 3px 0 0 var(--event-accent, var(--accent-primary));
 }
 
+.breakRow {
+  background:
+    repeating-linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-elevated) 86%, transparent) 0,
+      color-mix(in srgb, var(--bg-elevated) 86%, transparent) 8px,
+      color-mix(in srgb, var(--event-accent, var(--accent-primary)) 10%, transparent) 8px,
+      color-mix(in srgb, var(--event-accent, var(--accent-primary)) 10%, transparent) 16px
+    );
+}
+
+.breakCell {
+  padding: 10px 12px !important;
+  text-align: center !important;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.breakCell span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.breakCell span::before,
+.breakCell span::after {
+  content: "";
+  width: 20px;
+  height: 1px;
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 50%, transparent);
+}
+
+.breakCell em {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-faint, var(--text-muted));
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+}
+
 .cellTime {
-  width: 70px;
-  padding: 12px 8px 12px 12px !important;
+  width: 68px;
+  padding: 12px !important;
+  text-align: center !important;
   font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
   background: color-mix(in srgb, var(--bg-elevated) 64%, transparent);
@@ -200,6 +251,7 @@
 
 .timeStack {
   display: grid;
+  justify-items: center;
   gap: 2px;
   line-height: 1.25;
 }
@@ -211,7 +263,7 @@
 }
 
 .timeStack strong {
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--text-primary);
 }
 
@@ -221,28 +273,34 @@
 }
 
 .slotTaken {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   min-height: 58px;
-  padding: 10px 10px;
+  padding: 10px 8px 10px 12px;
   min-width: 0;
 }
 
 .slotIdentity {
   min-width: 0;
+  flex: 1;
   display: grid;
   gap: 2px;
 }
 
 .slotName {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 800;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.slotNameMine {
+  color: var(--accent-danger);
 }
 
 .slotId {
@@ -254,6 +312,7 @@
 }
 
 .slotActions {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
@@ -262,13 +321,76 @@
   flex-shrink: 0;
 }
 
+.editSlotButton {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-danger) 58%, transparent);
+  border-radius: var(--radius-pill);
+  color: var(--accent-danger);
+  background: color-mix(in srgb, var(--accent-danger) 12%, transparent);
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.editSlotButton:hover,
+.editSlotButton[aria-expanded="true"] {
+  color: #ffffff;
+  background: var(--accent-danger);
+}
+
+.slotActionMenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  min-width: 138px;
+  padding: 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-lg, 0 16px 44px rgba(0, 0, 0, 0.24));
+}
+
+.slotActionMenuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--text-primary);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.slotActionMenuItem:hover:not(:disabled),
+.slotActionMenuItem:focus-visible {
+  background: var(--accent-primary-soft);
+  outline: none;
+}
+
+.slotActionMenuItem:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .emptySlot {
   display: inline-flex;
+  width: 100%;
   min-height: 58px;
   align-items: center;
+  justify-content: center;
   padding: 10px 12px;
-  font-size: 11px;
-  color: var(--text-muted);
+  color: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 78%, var(--text-muted));
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 10%, transparent);
 }
 
 .emptySlotButton {
@@ -276,26 +398,24 @@
   min-height: 58px;
   display: inline-flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: 7px;
+  justify-content: center;
   border: 0;
   border-radius: 0;
   background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 92%, #ffffff);
-  color: var(--accent-ink);
+  color: var(--event-accent-text, var(--accent-ink));
   cursor: pointer;
-  font-size: 12px;
-  font-weight: 700;
   transition:
-    border-color 0.15s ease,
     background-color 0.15s ease,
-    color 0.15s ease;
+    color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .emptySlotButton:hover:not(:disabled),
 .emptySlotButton:focus-visible {
   background: var(--event-accent, var(--accent-primary));
-  color: var(--accent-ink);
+  color: var(--event-accent-text, var(--accent-ink));
   outline: none;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--event-accent-text, var(--accent-ink)) 72%, transparent);
 }
 
 .emptySlotButton:disabled {
@@ -306,39 +426,27 @@
 .emptyCircle {
   display: grid;
   place-items: center;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border: 2px solid currentColor;
   border-radius: 999px;
-  font-size: 0;
-  line-height: 1;
+  background: transparent;
   color: currentColor;
 }
 
-.emptyCircle::after {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: currentColor;
-  opacity: 0.7;
+.emptySlotButtonMerge {
+  background:
+    repeating-linear-gradient(
+      45deg,
+      color-mix(in srgb, var(--event-accent, var(--accent-primary)) 86%, #ffffff) 0,
+      color-mix(in srgb, var(--event-accent, var(--accent-primary)) 86%, #ffffff) 7px,
+      color-mix(in srgb, var(--event-accent, var(--accent-primary)) 74%, #ffffff) 7px,
+      color-mix(in srgb, var(--event-accent, var(--accent-primary)) 74%, #ffffff) 14px
+    );
 }
 
-.emptySlotButtonText {
-  min-width: 0;
-  font-size: 13px;
-}
-
-.mergeRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  min-height: 64px;
-  padding: 8px;
-  border: 1px dashed rgba(255, 225, 0, 0.42);
-  border-radius: var(--radius-lg);
-  background: rgba(255, 225, 0, 0.06);
+.emptySlotUnavailable {
+  opacity: 0.45;
 }
 
 .mergeDialogBackdrop {
@@ -353,7 +461,7 @@
 
 .mergeDialog {
   background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid color-mix(in srgb, var(--event-accent, var(--accent-primary)) 34%, var(--border-subtle));
   border-radius: var(--radius-md);
   padding: 20px 24px;
   max-width: 360px;
@@ -366,7 +474,7 @@
 .mergeDialogTitle {
   font-size: 14px;
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--event-accent, var(--accent-primary));
   margin: 0;
 }
 
@@ -382,6 +490,21 @@
   gap: 8px;
 }
 
+.mergeDialog :global(.fn-btn-primary) {
+  background-color: var(--event-accent, var(--accent-primary));
+  color: var(--event-accent-text, var(--accent-ink));
+}
+
+.mergeDialog :global(.fn-btn-primary:hover:not(:disabled)) {
+  background-color: var(--event-accent-strong, var(--accent-primary-strong));
+  color: var(--event-accent-text, var(--accent-ink));
+}
+
+.mergeDialog :global(.fn-btn-ghost:hover:not(:disabled)) {
+  background-color: var(--event-accent-soft, var(--accent-primary-soft));
+  color: var(--text-primary);
+}
+
 .reserveDialogBackdrop {
   position: fixed;
   inset: 0;
@@ -395,21 +518,23 @@
 
 .reserveDialog {
   background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid color-mix(in srgb, var(--event-accent, var(--accent-primary)) 34%, var(--border-subtle));
   border-radius: var(--radius-md);
   width: min(92vw, 420px);
   padding: 20px 22px;
   display: flex;
   flex-direction: column;
   gap: 14px;
-  box-shadow: var(--shadow-lg, 0 20px 60px rgba(0, 0, 0, 0.22));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--event-accent, var(--accent-primary)) 14%, transparent),
+    var(--shadow-lg, 0 20px 60px rgba(0, 0, 0, 0.22));
 }
 
 .reserveDialogTitle {
   margin: 0;
   font-size: 16px;
   font-weight: 800;
-  color: var(--text-primary);
+  color: var(--event-accent, var(--accent-primary));
 }
 
 .reserveDialogMessage {
@@ -432,7 +557,7 @@
 }
 
 .reserveDialogHint strong {
-  color: var(--text-primary);
+  color: var(--event-accent, var(--accent-primary));
 }
 
 .reserveDialogFooter {
@@ -440,6 +565,27 @@
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.reserveDialog :global(.fn-input:focus),
+.reserveDialog :global(.fn-select:focus) {
+  border-color: var(--event-accent, var(--accent-primary));
+  box-shadow: 0 0 0 1px var(--event-accent-ring, color-mix(in srgb, var(--event-accent, var(--accent-primary)) 50%, transparent));
+}
+
+.reserveDialog :global(.fn-btn-primary) {
+  background-color: var(--event-accent, var(--accent-primary));
+  color: var(--event-accent-text, var(--accent-ink));
+}
+
+.reserveDialog :global(.fn-btn-primary:hover:not(:disabled)) {
+  background-color: var(--event-accent-strong, var(--accent-primary-strong));
+  color: var(--event-accent-text, var(--accent-ink));
+}
+
+.reserveDialog :global(.fn-btn-ghost:hover:not(:disabled)) {
+  background-color: var(--event-accent-soft, var(--accent-primary-soft));
+  color: var(--text-primary);
 }
 
 @media (max-width: 520px) {
@@ -471,8 +617,7 @@
     min-height: 58px;
   }
 
-  .emptySlotButton,
-  .mergeRow {
+  .emptySlotButton {
     min-height: 58px;
   }
 

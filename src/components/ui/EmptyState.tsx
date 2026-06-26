@@ -67,7 +67,14 @@ export function EmptyState({
     ));
 
   return (
-    <section className={cn(styles.empty, styles[`tone-${tone}`], className)}>
+    <section
+      className={cn(
+        "fn-empty-state",
+        styles.empty,
+        styles[`tone-${tone}`],
+        className,
+      )}
+    >
       <div className={styles.icon} aria-hidden>
         {iconNode}
       </div>

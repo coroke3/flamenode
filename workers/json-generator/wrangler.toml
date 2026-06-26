@@ -18,3 +18,4 @@ bucket_name = "flamenode-storage"
 [[kv_namespaces]]
 binding = "KV"
 id = "00000000000000000000000000000000"
+preview_id = "00000000000000000000000000000000"

@@ -334,7 +334,7 @@ wrangler d1 execute flamenode_db --remote --command "INSERT OR REPLACE INTO syst
 - [ ] `https://<本番ドメイン>/` にアクセスし、フレームのトップが表示される
 - [ ] `Discord でログイン` が成功する
 - [ ] `/dashboard` で自分の Discord ユーザー名が表示される
-- [ ] `/dashboard/post` から自由投稿ができる (動画詳細にリダイレクトされる)
+- [ ] `/entry` から自由投稿ができる (動画詳細にリダイレクトされる)
 - [ ] `/admin` (管理者ロール) に入れて、コストガード状態が `normal` と表示される
 - [ ] `/admin/cost-guard` から `economy` → `normal` の切替ができる
 - [ ] `wrangler tail` で Pages のリクエストログが出る

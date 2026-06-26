@@ -24,6 +24,7 @@ import {
 import { Icon } from "@/components/ui/Icon";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
+import { excludePvsfSummaryVideos } from "@/lib/db/queries";
 
 export const metadata: Metadata = { title: "ダッシュボード" };
 export const dynamic = "force-dynamic";
@@ -34,6 +35,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
   const user = guard.user;
   const db = getDatabase();
   const activeX = user.active_x_user_id ?? null;
+  let activeGalleryXId: string | null = null;
 
   let xIds: (typeof xUsersTable.$inferSelect)[] = [];
   let myVideos: VideoCardData[] = [];
@@ -58,12 +60,12 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
         .from(xUsersTable)
         .where(eq(xUsersTable.linked_discord_user_id, user.id));
 
-      // 「自分の作品」「自分のチャプター」は active X ID 単体ではなく、
-      // 承認済み X ID 全件で集約する。複数 X ID を連携している場合に、
-      // Active を切り替えた瞬間に「前の作品が消えた」ように見える事故を避ける。
-      // 投稿主体 (creator_x_user_id) の厳密性は writeGuard 側で担保されているので、
-      // ここの表示は「自分の資産の全体ビュー」として広く拾う。
+      // マイ・ギャラリーは現在の活動名義を確認する場所なので、
+      // 表示対象をアクティブかつ承認済みの X ID に固定する。
+      // チャプターと集計はアカウント全体の履歴として承認済み X ID 全件を使う。
       const approvedXIds = await getApprovedXIds(db, user.id);
+      activeGalleryXId =
+        activeX && approvedXIds.includes(activeX) ? activeX : null;
       if (approvedXIds.length > 0) {
         myVideos = (await db
           .select({
@@ -83,7 +85,9 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id))
           .where(
             and(
-              inArray(videosTable.creator_x_user_id, approvedXIds),
+              activeGalleryXId
+                ? eq(videosTable.creator_x_user_id, activeGalleryXId)
+                : sql`0 = 1`,
               ne(videosTable.visibility_status, "archived"),
             )!,
           )
@@ -155,6 +159,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
             and(
               inArray(videosTable.creator_x_user_id, approvedXIds),
               ne(videosTable.visibility_status, "archived"),
+              excludePvsfSummaryVideos(),
             )!,
           );
         stats = {
@@ -180,6 +185,11 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
   const dashboardIcon = activeXRow?.icon_url ?? user.image ?? null;
   const dashboardInitial =
     (dashboardName.trim().charAt(0) || user.name?.trim().charAt(0) || "F").toUpperCase();
+  const galleryEmptyMessage = !activeX
+    ? "アクティブ X ID を設定すると、その名義の作品だけが表示されます。"
+    : !activeGalleryXId
+      ? "アクティブ X ID が未承認のため、マイ・ギャラリーには作品を表示していません。"
+      : "アクティブ X ID の作品はまだ登録されていません。";
 
   return (
     <div className={`fn-public-container fn-page fn-dash ${styles.page}`}>
@@ -204,7 +214,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
             <Icon name="settings" size={13} aria-hidden />
             設定
           </Link>
-          <Link href="/dashboard/post" className="fn-btn fn-btn-primary fn-btn-lg">
+          <Link href="/entry" className="fn-btn fn-btn-primary fn-btn-lg">
             <Icon name="plus" size={14} aria-hidden />
             新規投稿
           </Link>
@@ -278,10 +288,10 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           <div className="fn-empty">
             <Icon name="grid" size={20} aria-hidden />
             <p className="fn-empty-message">
-              まだ作品が登録されていません。
+              {galleryEmptyMessage}
             </p>
             <Link
-              href="/dashboard/post"
+              href="/entry"
               className="fn-btn fn-btn-primary fn-mt-md"
             >
               作品を投稿する
@@ -427,7 +437,7 @@ function HeroCard({
               </>
             ) : slot.status === "reserved" ? (
               <Link
-                href={`/dashboard/post/slotted?slot=${slot.id}`}
+                href={`/entry/slotted?slot=${slot.id}`}
                 className="fn-btn fn-btn-primary"
               >
                 <Icon name="upload" size={14} aria-hidden /> 動画を提出する

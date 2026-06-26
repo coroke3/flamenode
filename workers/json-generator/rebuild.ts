@@ -244,7 +244,8 @@ async function rebuildVideo(env: Env, videoId: string): Promise<void> {
 
 async function rebuildUser(env: Env, xId: string): Promise<void> {
   const user = await env.DB.prepare(
-    `SELECT id, x_name, icon_url, profile_text, youtube_channel_url
+    `SELECT id, x_name, icon_url, profile_text, portfolio_contact,
+            youtube_channel_url, other_social_links
      FROM x_users WHERE id = ? AND approval_status = 'approved' LIMIT 1`,
   )
     .bind(xId)

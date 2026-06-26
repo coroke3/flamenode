@@ -74,16 +74,21 @@ test("looksLikeMojibake: tab (U+0009) and LF (U+000A) do NOT trigger", () => {
   assert.equal(looksLikeMojibake("a\nb"), false);
 });
 
-test("normalizeIconUrl: drive open URL → lh3", () => {
+test("normalizeIconUrl: drive open URL → local cache", () => {
   const out = normalizeIconUrl(
     "https://drive.google.com/open?id=ABC123-_456",
   );
-  assert.equal(out, "https://lh3.googleusercontent.com/d/ABC123-_456");
+  assert.equal(out, "/api/google-drive-image/ABC123-_456");
 });
 
-test("normalizeIconUrl: drive file/d/ URL → lh3", () => {
+test("normalizeIconUrl: drive file/d/ URL → local cache", () => {
   const out = normalizeIconUrl("https://drive.google.com/file/d/XYZ_789/view");
-  assert.equal(out, "https://lh3.googleusercontent.com/d/XYZ_789");
+  assert.equal(out, "/api/google-drive-image/XYZ_789");
+});
+
+test("normalizeIconUrl: lh3 URL → local cache", () => {
+  const out = normalizeIconUrl("https://lh3.googleusercontent.com/d/OLD123_abc");
+  assert.equal(out, "/api/google-drive-image/OLD123_abc");
 });
 
 test("normalizeIconUrl: 非 drive URL はそのまま", () => {
@@ -105,6 +110,10 @@ test("normalizeIconUrl: app media paths are preserved", () => {
   assert.equal(
     normalizeIconUrl("/api/media/xicons/sample.png"),
     "/api/media/xicons/sample.png",
+  );
+  assert.equal(
+    normalizeIconUrl("/api/google-drive-image/ABC123-_456"),
+    "/api/google-drive-image/ABC123-_456",
   );
 });
 

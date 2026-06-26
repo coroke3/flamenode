@@ -574,7 +574,7 @@ export function YoutubePlayer({
           }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={youtubeThumbUrl(youtubeId, "maxresdefault")} alt="" />
+          <img src={youtubeThumbUrl(youtubeId, "hqdefault")} alt="" />
           <Icon name="play" size={36} />
         </button>
       ) : null}

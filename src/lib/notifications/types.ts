@@ -47,6 +47,7 @@ const TYPE_LABELS: Record<string, string> = {
   chapter_comment_added: "チャプターコメントが追加されました",
   moderation_created: "モデレーション案件が作成されました",
   announcement_broadcast: "お知らせ配信",
+  terms_reaccept_required: "利用規約の再同意が必要です",
   discord_webhook: "Webhook 配信",
 };
 
@@ -64,6 +65,7 @@ const SEVERITY_BY_TYPE: Record<string, NotificationSeverity> = {
   x_id_alias_approved: "info",
   chapter_comment_added: "info",
   announcement_broadcast: "info",
+  terms_reaccept_required: "info",
   video_pending: "silent",
   video_draft: "silent",
 };

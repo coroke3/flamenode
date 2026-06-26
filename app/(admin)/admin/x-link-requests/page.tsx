@@ -2,12 +2,19 @@ import * as React from "react";import { FnTable } from "@/components/ui/FnTable
 
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
-import { historyLogs, users, xAccountLinkRequests } from "@/lib/db/schema";
+import {
+  historyLogs,
+  users,
+  xAccountLinkRequests,
+  xUserIcons,
+  xUsers,
+} from "@/lib/db/schema";
 import { XLinkRequestTable } from "@/components/admin/XLinkRequestTable";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { AdminUserManagementTabs } from "@/components/admin/AdminUserManagementTabs";
 import { parseAuditDiff } from "@/lib/audit/diff";
 
 export const metadata: Metadata = { title: "X ID 連携申請" };
@@ -45,6 +52,42 @@ export default async function AdminXLinkRequestsPage({
           requested_at: xAccountLinkRequests.requested_at,
           link_type: xAccountLinkRequests.link_type,
           target_x_user_id: xAccountLinkRequests.target_x_user_id,
+          requested_x_name: sql<string | null>`(
+            SELECT ${xUsers.x_name}
+            FROM ${xUsers}
+            WHERE lower(${xUsers.id}) = lower(${xAccountLinkRequests.requested_x_id})
+            LIMIT 1
+          )`,
+          requested_icon_url: sql<string | null>`COALESCE(
+            (
+              SELECT ${xUsers.icon_url}
+              FROM ${xUsers}
+              WHERE lower(${xUsers.id}) = lower(${xAccountLinkRequests.requested_x_id})
+              LIMIT 1
+            ),
+            (
+              SELECT ${xUserIcons.icon_url}
+              FROM ${xUserIcons}
+              WHERE lower(${xUserIcons.x_user_id}) = lower(${xAccountLinkRequests.requested_x_id})
+              ORDER BY ${xUserIcons.created_at} DESC
+              LIMIT 1
+            )
+          )`,
+          target_icon_url: sql<string | null>`COALESCE(
+            (
+              SELECT ${xUsers.icon_url}
+              FROM ${xUsers}
+              WHERE lower(${xUsers.id}) = lower(${xAccountLinkRequests.target_x_user_id})
+              LIMIT 1
+            ),
+            (
+              SELECT ${xUserIcons.icon_url}
+              FROM ${xUserIcons}
+              WHERE lower(${xUserIcons.x_user_id}) = lower(${xAccountLinkRequests.target_x_user_id})
+              ORDER BY ${xUserIcons.created_at} DESC
+              LIMIT 1
+            )
+          )`,
         })
         .from(xAccountLinkRequests)
         .leftJoin(users, eq(users.id, xAccountLinkRequests.discord_user_id))
@@ -92,6 +135,7 @@ export default async function AdminXLinkRequestsPage({
         title="X ID 連携申請"
         description="ユーザーが設定画面から送った連携申請を確認・承認します。承認すると x_users が approved 状態に更新されます。"
       />
+      <AdminUserManagementTabs active="link-requests" />
       <nav
         aria-label="link_type フィルタ"
         style={{

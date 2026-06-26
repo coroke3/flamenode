@@ -22,10 +22,25 @@
   justify-content: flex-end;
 }
 
-.input {
-  flex: 1 1 200px;
+.fieldGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.field {
+  display: flex;
   min-width: 0;
-  padding: 10px 12px;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.input {
+  width: 100%;
+  flex: 0 1 auto;
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 11px;
   border: 0;
   border-radius: var(--radius-md);
   background: var(--bg-elevated);
@@ -33,7 +48,30 @@
   font-size: 14px;
 }
 
+.row .input {
+  flex: 1 1 200px;
+}
+
 .input:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--accent-primary);
+}
+
+.textarea {
+  width: 100%;
+  min-height: 78px;
+  resize: vertical;
+  padding: 10px 11px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.textarea:focus {
   outline: none;
   box-shadow: inset 0 0 0 1.5px var(--accent-primary);
 }
@@ -49,6 +87,72 @@
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 600;
+}
+
+.select {
+  width: 150px;
+  min-height: 38px;
+  min-width: 0;
+  padding: 8px 32px 8px 11px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.select:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--accent-primary);
+}
+
+.socialEditor {
+  display: grid;
+  gap: 8px;
+}
+
+.socialEditorHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.socialRows {
+  display: grid;
+  gap: 8px;
+}
+
+.socialRow {
+  display: grid;
+  grid-template-columns: minmax(118px, 150px) minmax(0, 1fr) 38px;
+  gap: 8px;
+  align-items: center;
+}
+
+.iconOnlyButton {
+  display: inline-grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.iconOnlyButton:hover:not(:disabled),
+.iconOnlyButton:focus-visible {
+  color: var(--accent-danger);
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--accent-danger);
+}
+
+.iconOnlyButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .msgOk {
@@ -222,4 +326,15 @@
 
 .fileInputHidden {
   display: none;
+}
+
+@media (max-width: 640px) {
+  .socialRow {
+    grid-template-columns: minmax(0, 1fr) 38px;
+  }
+
+  .socialRow .select {
+    width: 100%;
+    grid-column: 1 / -1;
+  }
 }

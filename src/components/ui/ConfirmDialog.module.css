@@ -46,6 +46,20 @@
   border-top: 1px solid var(--border-subtle);
 }
 
+.footer :global(.fn-btn-primary) {
+  background-color: var(--event-accent, var(--accent-primary));
+  color: var(--event-accent-text, var(--accent-ink));
+}
+
+.footer :global(.fn-btn-primary:hover:not(:disabled)) {
+  background-color: var(--event-accent-strong, var(--accent-primary-strong));
+  color: var(--event-accent-text, var(--accent-ink));
+}
+
+.footer :global(.fn-btn-ghost:hover:not(:disabled)) {
+  background-color: var(--event-accent-soft, var(--accent-primary-soft));
+}
+
 @media (max-width: 640px) {
   .backdrop {
     padding: max(12px, env(safe-area-inset-top))

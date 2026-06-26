@@ -91,7 +91,7 @@ test("eventStatusBadgeClass: 主要マッピング", () => {
   assert.equal(eventStatusBadgeClass("draft"), "fn-badge-soft");
 });
 
-test("isAcceptingEntries: is_entry_open=0 なら false", () => {
+test("isAcceptingEntries: entry 期間未設定なら false", () => {
   assert.equal(
     isAcceptingEntries(
       {
@@ -107,15 +107,17 @@ test("isAcceptingEntries: is_entry_open=0 なら false", () => {
   );
 });
 
-test("isAcceptingEntries: published + is_entry_open=1 で true", () => {
+test("isAcceptingEntries: published + entry 期間内なら true", () => {
   assert.equal(
     isAcceptingEntries(
       {
         is_active: 1,
         is_archived: 0,
-        is_entry_open: 1,
+        is_entry_open: 0,
         start_time: null,
         end_time: null,
+        entry_start_time: T0 - 100,
+        entry_end_time: T0 + 100,
       },
       T0,
     ),

@@ -14,6 +14,7 @@ import { youtubeThumbUrl, youtubeWatchUrl } from "@/lib/youtube/id";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { AdminVideoStatusForm } from "@/components/admin/AdminVideoStatusForm";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { AdminVideoTabs } from "@/components/admin/AdminVideoTabs";
 import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { createModerationCase } from "@/lib/actions/moderation-admin";
 
@@ -84,19 +85,12 @@ export default async function AdminVideoDetailPage({
         description={`作者: ${video.creator_name} (@${video.creator_x_user_id}) / 登録: ${formatUnix(video.created_at)} (${formatRelative(video.created_at)})`}
         backHref="/admin/videos"
         backLabel="作品一覧へ"
-        actions={[
-          {
-            href: `/admin/videos/${video.id}/members`,
-            label: "参加者設定",
-            icon: <Icon name="users" size={12} aria-hidden />,
-            variant: "primary",
-          },
-          {
-            href: `/admin/audit?table=videos&record=${encodeURIComponent(video.id)}`,
-            label: "監査ログ",
-            icon: <Icon name="clock" size={12} aria-hidden />,
-          },
-        ]}
+      />
+
+      <AdminVideoTabs
+        videoId={video.id}
+        youtubeVideoId={video.youtube_video_id}
+        active="detail"
       />
 
       <div

@@ -73,14 +73,14 @@ test("extractYoutubeId: v= が不正 (短い) なら null", () => {
   );
 });
 
-test("youtubeThumbUrl: id があれば i.ytimg.com URL", () => {
+test("youtubeThumbUrl: id があれば local cache URL", () => {
   assert.equal(
     youtubeThumbUrl("dQw4w9WgXcQ"),
-    "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+    "/api/youtube-thumbnail/dQw4w9WgXcQ/hqdefault",
   );
   assert.equal(
     youtubeThumbUrl("dQw4w9WgXcQ", "maxresdefault"),
-    "https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg",
+    "/api/youtube-thumbnail/dQw4w9WgXcQ/maxresdefault",
   );
 });
 

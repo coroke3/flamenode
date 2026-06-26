@@ -30,7 +30,7 @@ export function PublicFooter(): React.ReactElement {
           title="Event"
           items={[
             { label: "イベント一覧", href: "/event" },
-            { label: "投稿する", href: "/dashboard/post" },
+            { label: "投稿する", href: "/entry" },
             { label: "ダッシュボード", href: "/dashboard" },
           ]}
         />

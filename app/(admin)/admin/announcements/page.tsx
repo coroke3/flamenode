@@ -116,8 +116,8 @@ export default async function AdminAnnouncementsPage({
           <li>対象者数の全件 COUNT は無料枠保護のため管理トップでは実行しません。</li>
         </ul>
         <p style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
-          注意: 公開ボタンを押しても現状は notification_outbox に enqueue されません。
-          大量 enqueue は Opus 判断候補としてキューイング戦略を確定してから実装します。
+          公開後の Discord 配信は各行の broadcast ボタンから段階実行します。
+          Worker の送信結果は通知管理で確認できます。
         </p>
       </section>
 

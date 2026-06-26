@@ -18,6 +18,9 @@ YOUTUBE_API_KEY=""
 NEXT_PUBLIC_SITE_URL="http://localhost:3000"
 NEXT_PUBLIC_SITE_NAME="FlameNode"
 
+# メンテナンス強制 (1 で全ページを /maintenance へ。本番は Pages 環境変数で設定)
+MAINTENANCE_MODE="0"
+
 # 管理画面: D1 スプレッドシート (/admin/spreadsheet)。本番では原則 false
 ADMIN_SPREADSHEET_ENABLED="true"
 # 1ページあたりの取得行数（未設定時は 500、上限 5000）

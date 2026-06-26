@@ -32,7 +32,7 @@ npm run dev:local
 ```
 
 ブラウザで http://localhost:3000/ にアクセスすると、トップ・一覧・イベント・規約・メンテナンスがすべて表示されます。
-データはまだ空なので、ログインしてから `/dashboard/post` で投稿するとリアルタイムにトップへ反映されます。
+データはまだ空なので、ログインしてから `/entry` で投稿するとリアルタイムにトップへ反映されます。
 
 > **想定環境**: Windows (PowerShell 7+) / macOS / Linux。Node.js 20 LTS 以上。
 > ローカル動作モードは目的に応じて 2 種類あります。
@@ -379,7 +379,7 @@ npx wrangler d1 migrations apply flamenode_db --local
 4. `npm run pages:dev` で http://localhost:8788/ を表示
 5. Discord でログイン → 自分の Discord User ID を SQL で確認 → 自分を `admin` に昇格
 6. `/admin` に入って画面遷移を確認
-7. `/dashboard/post` から投稿してトップに反映されるかを確認
+7. `/entry` から投稿してトップに反映されるかを確認
 8. 必要に応じて `MAINTENANCE_MODE=1` や `cost_guard_mode='economy'` の挙動を確認
 
 ここまで通れば、**本番 (`DEPLOY.md`) で同じ操作が成り立つ前提**が手元で再現できたことになります。

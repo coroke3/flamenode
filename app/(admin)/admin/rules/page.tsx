@@ -8,6 +8,7 @@ import { termsVersions, users as usersTable } from "@/lib/db/schema";
 import { formatUnix } from "@/lib/utils/format";
 import { Icon } from "@/components/ui/Icon";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { TermsReacceptBroadcastButton } from "@/components/admin/TermsReacceptBroadcastButton";
 
 export const metadata: Metadata = { title: "規約管理" };
 export const dynamic = "force-dynamic";
@@ -43,12 +44,29 @@ export default async function AdminRulesPage({
             .limit(20))
     : [];
 
-  // dry-run: major 公開時に再同意が必要になるユーザー数
   let userCount = 0;
+  let reacceptRequiredCount = 0;
+  const currentPublishedTerms = db
+    ? (
+        await db
+          .select()
+          .from(termsVersions)
+          .where(eq(termsVersions.status, "published"))
+          .orderBy(desc(termsVersions.published_at), desc(termsVersions.updated_at))
+          .limit(1)
+      )[0] ?? null
+    : null;
   if (db) {
     try {
-      const r = await db.select({ c: sql<number>`COUNT(*)` }).from(usersTable);
-      userCount = Number(r[0]?.c ?? 0);
+      const [allRows, reacceptRows] = await Promise.all([
+        db.select({ c: sql<number>`COUNT(*)` }).from(usersTable),
+        db
+          .select({ c: sql<number>`COUNT(*)` })
+          .from(usersTable)
+          .where(eq(usersTable.terms_reaccept_required, 1)),
+      ]);
+      userCount = Number(allRows[0]?.c ?? 0);
+      reacceptRequiredCount = Number(reacceptRows[0]?.c ?? 0);
     } catch (e) {
       console.error("[AdminRulesPage] user count failed", e);
     }
@@ -106,16 +124,27 @@ export default async function AdminRulesPage({
         </strong>
         <ul style={{ margin: "6px 0 0", paddingLeft: 18, lineHeight: 1.7 }}>
           <li>
-            <code>terms_reaccept_required = 1</code> が立つユーザー: 約{" "}
+            major 公開時に再同意必須になるユーザー: 約{" "}
             <strong>{userCount.toLocaleString()}</strong> 件 (全ユーザー)
           </li>
           <li>
-            通知 enqueue: <strong>0 件</strong> (Opus 判断候補のため未実装)
+            現在の再同意待ち:{" "}
+            <strong>{reacceptRequiredCount.toLocaleString()}</strong> 件
           </li>
+          {currentPublishedTerms ? (
+            <li>
+              通知 enqueue:{" "}
+              <TermsReacceptBroadcastButton
+                termsId={currentPublishedTerms.id}
+                versionLabel={currentPublishedTerms.version_label}
+                affectedCount={reacceptRequiredCount}
+              />
+            </li>
+          ) : null}
         </ul>
         <p style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
-          注意: major 公開時の Discord 通知 enqueue は notification_outbox の容量と
-          Discord Webhook rate-limit を考慮してから実装します。現状はサイト内表示のみ。
+          Discord 通知は notification_outbox に 50 件ずつ段階 enqueue します。
+          送信結果は通知管理で確認できます。
         </p>
       </section>
 

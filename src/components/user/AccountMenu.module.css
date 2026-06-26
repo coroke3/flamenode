@@ -221,10 +221,6 @@
   background-color: var(--bg-elevated);
 }
 
-.xidOptionActive {
-  background-color: var(--accent-primary-soft);
-}
-
 .xidAvatar {
   width: 28px;
   height: 28px;
@@ -267,11 +263,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.checkIcon {
-  color: var(--accent-primary);
-  flex-shrink: 0;
 }
 
 .divider {

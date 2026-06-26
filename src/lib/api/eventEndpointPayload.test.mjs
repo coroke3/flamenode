@@ -6,6 +6,8 @@ import {
   truncateForEventApi,
 } from "./eventEndpointPayload.ts";
 
+const NOW = 1_700_000_000;
+
 test("truncateForEventApi: collapses whitespace and truncates long text", () => {
   assert.equal(truncateForEventApi("  a\n b\tc  "), "a b c");
   const out = truncateForEventApi("x".repeat(300), 10);
@@ -21,6 +23,10 @@ test("buildEventApiPayload: returns minimal event and video fields", () => {
       is_active: 1,
       is_entry_open: 0,
       is_archived: 0,
+      start_time: NOW + 1000,
+      end_time: NOW + 2000,
+      entry_start_time: NOW - 100,
+      entry_end_time: NOW + 100,
     },
     [
       {
@@ -31,6 +37,8 @@ test("buildEventApiPayload: returns minimal event and video fields", () => {
         youtube_video_id: "abc",
       },
     ],
+    undefined,
+    NOW,
   );
   assert.deepEqual(payload, {
     event: {
@@ -38,7 +46,7 @@ test("buildEventApiPayload: returns minimal event and video fields", () => {
       title: "Event",
       explanation: "説明",
       is_active: true,
-      is_entry_open: false,
+      is_entry_open: true,
       is_archived: false,
     },
     videos: [
@@ -70,6 +78,10 @@ test("buildEventApiPayload: clamps video limit", () => {
       is_active: 0,
       is_entry_open: 0,
       is_archived: 1,
+      start_time: null,
+      end_time: null,
+      entry_start_time: null,
+      entry_end_time: null,
     },
     videos,
     999,

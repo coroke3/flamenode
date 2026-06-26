@@ -22,7 +22,7 @@ export const isAdmin = (u: { role?: string }): boolean => u.role === "admin";
 export interface RequireSessionOptions {
   /**
    * ログイン後に戻したいパス。未指定の場合は `/dashboard` にフォールバックする。
-   * 例: `/dashboard/post/slotted?slot=abc`。
+   * 例: `/entry/slotted?slot=abc`。
    */
   next?: string;
 }

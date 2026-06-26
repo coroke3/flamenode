@@ -74,12 +74,12 @@ export interface LegacyImportOptions {
   updateXUsers?: boolean;
   /** 旧イベントをどの状態で取り込むか。デフォルト archive */
   importMode?: LegacyImportMode;
-  /** active_event / preserve のときだけ受付中として扱う */
-  forceEntryOpen?: boolean;
   /** インポート後に静的 JSON 再生成キューへ積むか。デフォルト true */
   enqueueStaticRebuild?: boolean;
   /** 大量インポート時のキュー粒度。未指定時は importMode から推定 */
   staticRebuildStrategy?: StaticRebuildStrategy;
+  /** 返却するプレビュー行数の上限。未指定なら全件返す。 */
+  previewLimit?: number;
 }
 
 export interface LegacyPreviewRow {
@@ -105,7 +105,20 @@ export interface LegacyImportResult {
     editors: number;
   };
   preview: LegacyPreviewRow[];
+  previewTotal: number;
   errors: string[];
+}
+
+interface LegacyImportAnalysis {
+  result: LegacyImportResult;
+  resolved: ReturnType<typeof resolveImportOptions>;
+  eventInputs: LegacyEventInput[];
+  videoInputs: LegacyVideoInput[];
+  normalizedEvents: LegacyEventResult[];
+  normalizedVideos: LegacyVideoResult[];
+  existingEventIds: Set<string>;
+  existingVideoIds: Set<string>;
+  existingXIds: Set<string>;
 }
 
 function emptyCounts(): LegacyImportResult["counts"] {
@@ -280,7 +293,6 @@ function resolveImportOptions(options: LegacyImportOptions = {}) {
   const enqueueStaticRebuild = options.enqueueStaticRebuild !== false && !dryRun;
   return {
     importMode,
-    forceEntryOpen: options.forceEntryOpen === true,
     staticRebuildStrategy,
     enqueueStaticRebuild,
     now: Math.floor(Date.now() / 1000),
@@ -295,7 +307,6 @@ function normalizeEventsForImport(
     normalizeEventInfo(e, {
       importMode: resolved.importMode,
       now: resolved.now,
-      forceEntryOpen: resolved.forceEntryOpen,
     }),
   );
 }
@@ -304,20 +315,46 @@ export async function analyzeLegacyPayload(
   raw: unknown,
   options: LegacyImportOptions = {},
 ): Promise<LegacyImportResult> {
+  return (await analyzeLegacyPayloadInternal(raw, options)).result;
+}
+
+function resolvePreviewLimit(limit: number | undefined): number {
+  if (limit == null) return Number.POSITIVE_INFINITY;
+  if (!Number.isFinite(limit)) return Number.POSITIVE_INFINITY;
+  return Math.max(0, Math.floor(limit));
+}
+
+async function analyzeLegacyPayloadInternal(
+  raw: unknown,
+  options: LegacyImportOptions = {},
+): Promise<LegacyImportAnalysis> {
   const counts = emptyCounts();
   const preview: LegacyPreviewRow[] = [];
+  let previewTotal = 0;
   const errors: string[] = [];
   const resolved = resolveImportOptions(options);
+  const previewLimit = resolvePreviewLimit(options.previewLimit);
 
   const { eventInputs, videoInputs } = splitLegacyPayload(raw);
   if (eventInputs.length === 0 && videoInputs.length === 0) {
     return {
-      ok: false,
-      message:
-        "認識できる events / videos が含まれていません。配列または { events, videos } 形式の JSON を確認してください。",
-      counts,
-      preview,
-      errors: ["empty"],
+      result: {
+        ok: false,
+        message:
+          "認識できる events / videos が含まれていません。配列または { events, videos } 形式の JSON を確認してください。",
+        counts,
+        preview,
+        previewTotal,
+        errors: ["empty"],
+      },
+      resolved,
+      eventInputs,
+      videoInputs,
+      normalizedEvents: [],
+      normalizedVideos: [],
+      existingEventIds: new Set(),
+      existingVideoIds: new Set(),
+      existingXIds: new Set(),
     };
   }
 
@@ -330,6 +367,11 @@ export async function analyzeLegacyPayload(
   const existingEventIds = new Set<string>();
   const existingVideoIds = new Set<string>();
   const existingXIds = new Set<string>();
+
+  const pushPreview = (row: LegacyPreviewRow): void => {
+    previewTotal += 1;
+    if (preview.length < previewLimit) preview.push(row);
+  };
 
   if (db) {
     const eventIds = [
@@ -390,7 +432,7 @@ export async function analyzeLegacyPayload(
       is_entry_open: e.event.is_entry_open,
       is_archived: e.event.is_archived,
     };
-    preview.push({
+    pushPreview({
       kind: "event",
       id: e.event.id,
       title: e.event.title,
@@ -420,7 +462,7 @@ export async function analyzeLegacyPayload(
       continue;
     }
     const exists = existingVideoIds.has(v.video.id);
-    preview.push({
+    pushPreview({
       kind: "video",
       id: v.video.id,
       title: v.video.title,
@@ -439,13 +481,24 @@ export async function analyzeLegacyPayload(
   }
 
   return {
-    ok: true,
-    message: `events ${counts.events.create + counts.events.update} 件 / videos ${
-      counts.videos.create + counts.videos.update
-    } 件を解析しました。`,
-    counts,
-    preview,
-    errors,
+    result: {
+      ok: true,
+      message: `events ${counts.events.create + counts.events.update} 件 / videos ${
+        counts.videos.create + counts.videos.update
+      } 件を解析しました。`,
+      counts,
+      preview,
+      previewTotal,
+      errors,
+    },
+    resolved,
+    eventInputs,
+    videoInputs,
+    normalizedEvents,
+    normalizedVideos,
+    existingEventIds,
+    existingVideoIds,
+    existingXIds,
   };
 }
 
@@ -474,11 +527,12 @@ async function applyLegacyImportInner(
 ): Promise<LegacyImportResult> {
   const strategyEvents: ConflictStrategy = options.events ?? "skip";
   const strategyVideos: ConflictStrategy = options.videos ?? "skip";
-  const resolved = resolveImportOptions(options);
 
-  // まず解析だけ実行してプレビューを共有 (件数は最後に上書き)
-  const analyzed = await analyzeLegacyPayload(raw, options);
+  // まず解析だけ実行してプレビュー・正規化結果・既存IDセットを共有する。
+  const analysis = await analyzeLegacyPayloadInternal(raw, options);
+  const analyzed = analysis.result;
   if (!analyzed.ok) return analyzed;
+  const resolved = analysis.resolved;
 
   const db = getDatabase();
   if (!db) {
@@ -487,16 +541,17 @@ async function applyLegacyImportInner(
       message: "D1 データベースに接続できません。",
       counts: analyzed.counts,
       preview: analyzed.preview,
+      previewTotal: analyzed.previewTotal,
       errors: ["db-not-available"],
     };
   }
 
   const counts = emptyCounts();
   const errors: string[] = [...analyzed.errors];
-
-  const { eventInputs, videoInputs } = splitLegacyPayload(raw);
-  const normalizedEvents = normalizeEventsForImport(eventInputs, resolved);
-  const normalizedVideos = videoInputs.map((v) => normalizeLegacyVideo(v));
+  const normalizedEvents = analysis.normalizedEvents;
+  const normalizedVideos = analysis.normalizedVideos;
+  const existingEventIds = new Set(analysis.existingEventIds);
+  const existingVideoIds = new Set(analysis.existingVideoIds);
 
   const now = resolved.now;
   const importedEventIds: string[] = [];
@@ -515,8 +570,13 @@ async function applyLegacyImportInner(
     xIdMap.set(row.id, {
       id: row.id,
       x_name: row.x_name || prev.x_name,
+      profile_text: row.profile_text ?? prev.profile_text ?? null,
+      portfolio_contact:
+        row.portfolio_contact ?? prev.portfolio_contact ?? null,
       youtube_channel_url:
         row.youtube_channel_url ?? prev.youtube_channel_url ?? null,
+      other_social_links:
+        row.other_social_links ?? prev.other_social_links ?? null,
     });
   };
   for (const e of normalizedEvents)
@@ -537,10 +597,24 @@ async function applyLegacyImportInner(
       try {
         if (existSet.has(x.id)) {
           if (options.updateXUsers) {
-            const patch: { x_name: string; youtube_channel_url?: string | null } =
-              { x_name: x.x_name };
+            const patch: {
+              x_name: string;
+              profile_text?: string | null;
+              portfolio_contact?: string | null;
+              youtube_channel_url?: string | null;
+              other_social_links?: string | null;
+            } = { x_name: x.x_name };
+            if (x.profile_text) {
+              patch.profile_text = x.profile_text;
+            }
+            if (x.portfolio_contact) {
+              patch.portfolio_contact = x.portfolio_contact;
+            }
             if (x.youtube_channel_url) {
               patch.youtube_channel_url = x.youtube_channel_url;
+            }
+            if (x.other_social_links) {
+              patch.other_social_links = x.other_social_links;
             }
             await db
               .update(xUsers)
@@ -552,7 +626,10 @@ async function applyLegacyImportInner(
           await db.insert(xUsers).values({
             id: x.id,
             x_name: x.x_name,
+            profile_text: x.profile_text ?? null,
+            portfolio_contact: x.portfolio_contact ?? null,
             youtube_channel_url: x.youtube_channel_url ?? null,
+            other_social_links: x.other_social_links ?? null,
             approval_status: "approved",
             approval_requested_at: now,
           });
@@ -573,9 +650,7 @@ async function applyLegacyImportInner(
       continue;
     }
     const ev = e.event;
-    const exists = (
-      await db.select({ id: events.id }).from(events).where(eq(events.id, ev.id)).limit(1)
-    )[0];
+    const exists = existingEventIds.has(ev.id);
 
     try {
       if (exists) {
@@ -614,6 +689,7 @@ async function applyLegacyImportInner(
         });
         counts.events.create += 1;
         await upsertEventEditors(db, ev.id, e.editors, "create");
+        existingEventIds.add(ev.id);
       }
       importedEventIds.push(ev.id);
       counts.editors += e.editors.length;
@@ -632,9 +708,7 @@ async function applyLegacyImportInner(
       continue;
     }
     const vi = v.video;
-    const exists = (
-      await db.select({ id: videos.id }).from(videos).where(eq(videos.id, vi.id)).limit(1)
-    )[0];
+    const exists = existingVideoIds.has(vi.id);
     const videoValues = toVideoInsertValues(vi, operatorDiscordId, now);
 
     try {
@@ -683,6 +757,7 @@ async function applyLegacyImportInner(
         });
         counts.videos.create += 1;
         await insertVideoMembers(db, vi.id, v.members);
+        existingVideoIds.add(vi.id);
       }
       await ensureImportedVideoDerivedRows(db, vi, now);
       importedVideoIds.push(vi.id);
@@ -740,7 +815,6 @@ async function applyLegacyImportInner(
           videos: strategyVideos,
           importMode: resolved.importMode,
           staticRebuildStrategy: resolved.staticRebuildStrategy,
-          forceEntryOpen: resolved.forceEntryOpen,
         },
         counts,
         errorCount: errors.length,
@@ -762,6 +836,7 @@ async function applyLegacyImportInner(
         }`,
     counts,
     preview: analyzed.preview,
+    previewTotal: analyzed.previewTotal,
     errors,
   };
 }

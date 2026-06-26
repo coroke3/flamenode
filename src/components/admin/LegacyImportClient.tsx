@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import styles from "./LegacyImportClient.module.css";
 import { Icon } from "@/components/ui/Icon";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { mojibakeHitCount } from "@/lib/utils/mojibake";
 
 interface PreviewRow {
   kind: "event" | "video";
@@ -39,6 +40,7 @@ interface ImportResult {
   message: string;
   counts: ImportCounts;
   preview: PreviewRow[];
+  previewTotal: number;
   errors: string[];
 }
 
@@ -60,7 +62,7 @@ async function readTextSmart(file: File): Promise<{ content: string; encoding: s
     const content = new TextDecoder(encoding, { fatal: false }).decode(buffer);
     const score =
       (content.match(/\uFFFD/g)?.length ?? 0) * 20 +
-      (content.match(/邵|繧|縺|荳|譁|隕/g)?.length ?? 0);
+      mojibakeHitCount(content);
     const parses = (() => {
       try {
         JSON.parse(content);
@@ -84,6 +86,7 @@ async function parseImportResponse(res: Response): Promise<ImportResult> {
       message: `サーバーから空の応答が返りました (HTTP ${res.status})`,
       counts: emptyCounts(),
       preview: [],
+      previewTotal: 0,
       errors: [`HTTP ${res.status}`],
     };
   }
@@ -95,6 +98,7 @@ async function parseImportResponse(res: Response): Promise<ImportResult> {
         message: data.error ?? `想定外の応答です (HTTP ${res.status})`,
         counts: emptyCounts(),
         preview: [],
+        previewTotal: 0,
         errors: [raw.slice(0, 500)],
       };
     }
@@ -103,6 +107,12 @@ async function parseImportResponse(res: Response): Promise<ImportResult> {
       message: data.message,
       counts: data.counts ?? emptyCounts(),
       preview: Array.isArray(data.preview) ? data.preview : [],
+      previewTotal:
+        typeof data.previewTotal === "number"
+          ? data.previewTotal
+          : Array.isArray(data.preview)
+            ? data.preview.length
+            : 0,
       errors: Array.isArray(data.errors) ? data.errors : [],
     };
   } catch {
@@ -111,6 +121,7 @@ async function parseImportResponse(res: Response): Promise<ImportResult> {
       message: `JSON として解析できない応答です (HTTP ${res.status})`,
       counts: emptyCounts(),
       preview: [],
+      previewTotal: 0,
       errors: [raw.slice(0, 500)],
     };
   }
@@ -124,7 +135,6 @@ export function LegacyImportClient(): React.ReactElement {
   const [videoStrategy, setVideoStrategy] = React.useState<Strategy>("skip");
   const [updateXUsers, setUpdateXUsers] = React.useState(false);
   const [importMode, setImportMode] = React.useState<LegacyImportMode>("archive");
-  const [forceEntryOpen, setForceEntryOpen] = React.useState(false);
   const [staticRebuildStrategy, setStaticRebuildStrategy] =
     React.useState<StaticRebuildStrategy>("event");
   const [enqueueStaticRebuild, setEnqueueStaticRebuild] = React.useState(true);
@@ -142,16 +152,15 @@ export function LegacyImportClient(): React.ReactElement {
         f.type.includes("csv") ||
         f.type.includes("tab-separated-values"),
     );
-    const next: PendingFile[] = [];
-    for (const f of arr) {
+    const next: PendingFile[] = await Promise.all(arr.map(async (f) => {
       const decoded = await readTextSmart(f);
-      next.push({
+      return {
         name: f.name,
         size: f.size,
         content: decoded.content,
         encoding: decoded.encoding,
-      });
-    }
+      };
+    }));
     setFiles((prev) => {
       const merged = new Map(prev.map((f) => [f.name, f]));
       for (const f of next) merged.set(f.name, f);
@@ -185,10 +194,10 @@ export function LegacyImportClient(): React.ReactElement {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           action: "analyze",
+          previewLimit: PREVIEW_LIMIT,
           files: files.map((f) => ({ name: f.name, content: f.content })),
           strategy: {
             importMode,
-            forceEntryOpen,
             enqueueStaticRebuild,
             staticRebuildStrategy,
           },
@@ -201,6 +210,7 @@ export function LegacyImportClient(): React.ReactElement {
         message: `通信エラー: ${e instanceof Error ? e.message : String(e)}`,
         counts: emptyCounts(),
         preview: [],
+        previewTotal: 0,
         errors: [],
       });
     } finally {
@@ -216,13 +226,13 @@ export function LegacyImportClient(): React.ReactElement {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           action: "apply",
+          previewLimit: PREVIEW_LIMIT,
           files: files.map((f) => ({ name: f.name, content: f.content })),
           strategy: {
             events: eventStrategy,
             videos: videoStrategy,
             updateXUsers,
             importMode,
-            forceEntryOpen,
             enqueueStaticRebuild,
             staticRebuildStrategy,
           },
@@ -237,6 +247,7 @@ export function LegacyImportClient(): React.ReactElement {
         message: `通信エラー: ${e instanceof Error ? e.message : String(e)}`,
         counts: emptyCounts(),
         preview: [],
+        previewTotal: 0,
         errors: [],
       });
     } finally {
@@ -252,7 +263,7 @@ export function LegacyImportClient(): React.ReactElement {
   const totalSize = files.reduce((acc, f) => acc + f.size, 0);
   const displayResult = applyResult ?? analysis;
   const previewRows = (displayResult?.preview ?? []).slice(0, PREVIEW_LIMIT);
-  const truncated = (displayResult?.preview.length ?? 0) - previewRows.length;
+  const truncated = (displayResult?.previewTotal ?? 0) - previewRows.length;
 
   return (
     <div className={styles.root}>
@@ -371,15 +382,6 @@ export function LegacyImportClient(): React.ReactElement {
             <option value="none">none: キューに積まない</option>
           </select>
         </div>
-        <label className={styles.checkboxLine}>
-          <input
-            type="checkbox"
-            checked={forceEntryOpen}
-            onChange={(e) => setForceEntryOpen(e.target.checked)}
-            disabled={pending !== null}
-          />
-          <span>受付中として扱う（active_event / preserve）</span>
-        </label>
         <label className={styles.checkboxLine}>
           <input
             type="checkbox"

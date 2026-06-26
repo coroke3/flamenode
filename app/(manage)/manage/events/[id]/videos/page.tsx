@@ -13,9 +13,10 @@ import {
   videoEvents as videoEventsTable,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
-import { Icon } from "@/components/ui/Icon";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatRelative, formatUnix } from "@/lib/utils/format";
+import { ManageEventTabs } from "@/components/manage/ManageEventTabs";
+import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
 
 export const dynamic = "force-dynamic";
 
@@ -95,7 +96,7 @@ export default async function ManageEventVideosPage({
     .limit(200);
 
   return (
-    <div>
+    <div style={manageEventAccentStyle(ev.accent_color)}>
       <p className="fn-muted fn-text-sm" style={{ margin: "0 0 12px" }}>
         <Link href={`/manage/events/${id}`}>← イベント運営トップへ</Link>
       </p>
@@ -109,6 +110,7 @@ export default async function ManageEventVideosPage({
           {statusFilter ? `（${statusFilter}）` : ""}
         </p>
       </header>
+      <ManageEventTabs eventId={id} active="review" isAdmin={isAdmin} />
 
       <div
         style={{
@@ -136,17 +138,6 @@ export default async function ManageEventVideosPage({
             </Link>
           );
         })}
-        <Link href={`/event/${id}`} className="fn-btn fn-btn-ghost fn-btn-sm">
-          <Icon name="external" size={11} aria-hidden /> 公開ページ
-        </Link>
-        {isAdmin ? (
-          <Link
-            href={`/admin/videos?event=${encodeURIComponent(id)}&status=pending`}
-            className="fn-btn fn-btn-ghost fn-btn-sm"
-          >
-            管理者用作品管理
-          </Link>
-        ) : null}
       </div>
 
       {rows.length === 0 ? (

@@ -99,7 +99,6 @@ export function snapshotToFormInitial(
     entry_start_time: null,
     entry_end_time: null,
     is_active: 0,
-    is_entry_open: 0,
     is_archived: 0,
     allow_user_video_event_links: snapshot.allow_user_video_event_links,
     allow_user_video_edits: snapshot.allow_user_video_edits,

@@ -10,8 +10,11 @@ import {
   type EventSettingsPreviewValue,
 } from "@/components/admin/EventSettingsPreview";
 import {
+  createDefaultStagePermissionQuestion,
   DEFAULT_STAGE_PERMISSION_FIELD,
+  getStagePermissionQuestions,
   parseVideoFormSettings,
+  type StagePermissionFieldSettings,
 } from "@/lib/video/formSettings";
 
 export interface EventFormInitial {
@@ -27,7 +30,6 @@ export interface EventFormInitial {
   entry_start_time?: number | null;
   entry_end_time?: number | null;
   is_active?: number;
-  is_entry_open?: number;
   is_archived?: number;
   allow_user_video_event_links?: number;
   allow_user_video_edits?: number;
@@ -81,7 +83,66 @@ function textValue(fd: FormData, name: string): string {
   return typeof value === "string" ? value : "";
 }
 
+function boolValue(value: FormDataEntryValue | undefined): boolean {
+  return String(value ?? "") === "1";
+}
+
+function buildVideoFormSettingsFromQuestions(
+  questions: readonly StagePermissionFieldSettings[],
+): string {
+  return JSON.stringify({
+    stage_permissions: questions.map((question) => ({
+      id: question.id,
+      enabled: question.enabled,
+      required: question.required,
+      label: question.label.trim() || DEFAULT_STAGE_PERMISSION_FIELD.label,
+      description:
+        question.description.trim() ||
+        DEFAULT_STAGE_PERMISSION_FIELD.description,
+      placeholder:
+        question.placeholder.trim() ||
+        DEFAULT_STAGE_PERMISSION_FIELD.placeholder,
+    })),
+  });
+}
+
+function readStagePermissionQuestionsFromFormData(
+  fd: FormData,
+): StagePermissionFieldSettings[] {
+  const ids = fd.getAll("stage_permission_question_id");
+  const enabled = fd.getAll("stage_permission_question_enabled");
+  const required = fd.getAll("stage_permission_question_required");
+  const labels = fd.getAll("stage_permission_question_label");
+  const descriptions = fd.getAll("stage_permission_question_description");
+  const placeholders = fd.getAll("stage_permission_question_placeholder");
+
+  return ids
+    .map((rawId, index): StagePermissionFieldSettings | null => {
+      const id = String(rawId ?? "").trim();
+      if (!id) return null;
+      return {
+        id,
+        enabled: boolValue(enabled[index]),
+        required: boolValue(required[index]),
+        label:
+          String(labels[index] ?? "").trim() ||
+          DEFAULT_STAGE_PERMISSION_FIELD.label,
+        description:
+          String(descriptions[index] ?? "").trim() ||
+          DEFAULT_STAGE_PERMISSION_FIELD.description,
+        placeholder:
+          String(placeholders[index] ?? "").trim() ||
+          DEFAULT_STAGE_PERMISSION_FIELD.placeholder,
+      };
+    })
+    .filter((question): question is StagePermissionFieldSettings => question !== null);
+}
+
 function buildPreviewFormSettings(fd: FormData): string {
+  const questions = readStagePermissionQuestionsFromFormData(fd);
+  if (questions.length > 0) {
+    return buildVideoFormSettingsFromQuestions(questions);
+  }
   return JSON.stringify({
     stage_permission: {
       enabled: hasCheckedValue(fd, "stage_permission_enabled"),
@@ -112,7 +173,6 @@ function buildInitialPreview(initial: EventFormInitial): EventSettingsPreviewVal
     entry_start_time: initial.entry_start_time,
     entry_end_time: initial.entry_end_time,
     is_active: initial.is_active ?? 0,
-    is_entry_open: initial.is_entry_open ?? 0,
     is_archived: initial.is_archived ?? 0,
     allow_user_video_event_links: initial.allow_user_video_event_links ?? 0,
     allow_user_video_edits: initial.allow_user_video_edits ?? 0,
@@ -148,7 +208,6 @@ function buildPreviewFromForm(
     entry_start_time: textValue(fd, "entry_start_time"),
     entry_end_time: textValue(fd, "entry_end_time"),
     is_active: textValue(fd, "is_active") || "0",
-    is_entry_open: textValue(fd, "is_entry_open") || "0",
     is_archived: textValue(fd, "is_archived") || "0",
     allow_user_video_event_links:
       textValue(fd, "allow_user_video_event_links") || "0",
@@ -182,9 +241,55 @@ export function EventForm({
   const [preview, setPreview] = React.useState<EventSettingsPreviewValue>(() =>
     buildInitialPreview(initial),
   );
-  const stagePermissionSettings =
-    parseVideoFormSettings(initial.video_form_settings_json).stage_permission ??
-    {};
+  const [stageQuestions, setStageQuestions] = React.useState<
+    StagePermissionFieldSettings[]
+  >(() => {
+    const questions = getStagePermissionQuestions(
+      parseVideoFormSettings(initial.video_form_settings_json),
+    );
+    return questions.length > 0
+      ? questions
+      : [createDefaultStagePermissionQuestion()];
+  });
+
+  React.useEffect(() => {
+    setPreview((current) => ({
+      ...current,
+      video_form_settings_json: buildVideoFormSettingsFromQuestions(stageQuestions),
+    }));
+  }, [stageQuestions]);
+
+  const updateStageQuestion = (
+    id: string,
+    patch: Partial<StagePermissionFieldSettings>,
+  ) => {
+    setStageQuestions((current) =>
+      current.map((question) =>
+        question.id === id ? { ...question, ...patch } : question,
+      ),
+    );
+  };
+
+  const addStageQuestion = () => {
+    setStageQuestions((current) => [
+      ...current,
+      {
+        ...DEFAULT_STAGE_PERMISSION_FIELD,
+        id: `stage_permission_${Date.now().toString(36)}`,
+        enabled: true,
+        required: false,
+        label: `追加質問 ${current.length + 1}`,
+        description: "",
+        placeholder: "",
+      },
+    ]);
+  };
+
+  const removeStageQuestion = (id: string) => {
+    setStageQuestions((current) =>
+      current.filter((question) => question.id !== id),
+    );
+  };
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -199,7 +304,7 @@ export function EventForm({
       }
       setSuccess("保存しました。");
       if (mode === "create" && r.eventId) {
-        router.push(`/admin/events/${r.eventId}/edit`);
+        router.push(`/manage/events/${r.eventId}/edit`);
       } else {
         router.refresh();
       }
@@ -362,7 +467,7 @@ export function EventForm({
         />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
         <div>
           <label className="fn-label">公開</label>
           <select
@@ -372,17 +477,6 @@ export function EventForm({
           >
             <option value="0">下書き</option>
             <option value="1">公開</option>
-          </select>
-        </div>
-        <div>
-          <label className="fn-label">受付</label>
-          <select
-            name="is_entry_open"
-            defaultValue={String(initial.is_entry_open ?? 0)}
-            className="fn-select"
-          >
-            <option value="0">閉</option>
-            <option value="1">開</option>
           </select>
         </div>
         <div>
@@ -432,7 +526,7 @@ export function EventForm({
             color: "var(--text-primary)",
           }}
         >
-          一般作品権限(イベント毎)
+          一般作品権限の上書き
         </legend>
         <div>
           <label className="fn-label">編集できる人</label>
@@ -452,8 +546,8 @@ export function EventForm({
               lineHeight: 1.5,
             }}
           >
-            「設定しない」を選んだ場合、イベント毎の上書きを行わず、ユーザー管理 &gt; 権限
-            タブで設定した通常権限（一般作品権限(イベント毎)）が採用されます。
+            「設定しない」を選んだ場合、このイベントでは上書きせず、ユーザー管理 &gt; 権限
+            タブで設定した一般作品権限が採用されます。
           </p>
         </div>
         <div>
@@ -537,109 +631,160 @@ export function EventForm({
         >
           投稿フォームの追加質問
         </legend>
-        <input type="hidden" name="stage_permission_enabled" value="0" />
-        <input type="hidden" name="stage_permission_required" value="0" />
+        <input type="hidden" name="stage_permission_questions_present" value="1" />
         <p className="fn-muted" style={{ margin: "0 0 2px", fontSize: 12, lineHeight: 1.6 }}>
-          投稿者に、ステージ・素材・権利まわりの確認内容を入力してもらうための欄です。
+          投稿者に確認しておきたい内容を複数設定できます。各質問は投稿フォームに順番どおり表示されます。
         </p>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: 10,
-          }}
-        >
-          <label
-            style={{
-              display: "grid",
-              gridTemplateColumns: "auto minmax(0, 1fr)",
-              gap: 10,
-              alignItems: "flex-start",
-              padding: 12,
-              border: "1px solid var(--border-subtle)",
-              borderRadius: 10,
-              background: "var(--bg-surface)",
-            }}
+        <div style={{ display: "grid", gap: 10 }}>
+          {stageQuestions.length === 0 ? (
+            <p className="fn-muted" style={{ margin: 0, fontSize: 12 }}>
+              追加質問は設定されていません。
+            </p>
+          ) : null}
+          {stageQuestions.map((question, index) => (
+            <article
+              key={question.id}
+              style={{
+                display: "grid",
+                gap: 10,
+                padding: 12,
+                border: "1px solid var(--border-subtle)",
+                borderRadius: "var(--radius-sm)",
+                background: "var(--bg-surface)",
+              }}
+            >
+              <input
+                type="hidden"
+                name="stage_permission_question_id"
+                value={question.id}
+              />
+              <input
+                type="hidden"
+                name="stage_permission_question_enabled"
+                value={question.enabled ? "1" : "0"}
+              />
+              <input
+                type="hidden"
+                name="stage_permission_question_required"
+                value={question.required ? "1" : "0"}
+              />
+              <header
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 8,
+                  flexWrap: "wrap",
+                }}
+              >
+                <strong style={{ fontSize: 13 }}>質問 {index + 1}</strong>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <label
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      fontSize: 12,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={question.enabled}
+                      onChange={(ev) =>
+                        updateStageQuestion(question.id, {
+                          enabled: ev.target.checked,
+                        })
+                      }
+                      style={{ accentColor: "var(--accent-primary)" }}
+                    />
+                    表示する
+                  </label>
+                  <label
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      fontSize: 12,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={question.required}
+                      onChange={(ev) =>
+                        updateStageQuestion(question.id, {
+                          required: ev.target.checked,
+                        })
+                      }
+                      style={{ accentColor: "var(--accent-primary)" }}
+                    />
+                    必須
+                  </label>
+                  <button
+                    type="button"
+                    className="fn-btn fn-btn-ghost fn-btn-sm"
+                    onClick={() => removeStageQuestion(question.id)}
+                  >
+                    <Icon name="trash" size={12} aria-hidden /> 削除
+                  </button>
+                </div>
+              </header>
+              <div>
+                <label className="fn-label">質問名</label>
+                <input
+                  name="stage_permission_question_label"
+                  type="text"
+                  value={question.label}
+                  onChange={(ev) =>
+                    updateStageQuestion(question.id, {
+                      label: ev.target.value,
+                    })
+                  }
+                  className="fn-input"
+                  maxLength={120}
+                />
+              </div>
+              <div>
+                <label className="fn-label">補足文</label>
+                <textarea
+                  name="stage_permission_question_description"
+                  value={question.description}
+                  onChange={(ev) =>
+                    updateStageQuestion(question.id, {
+                      description: ev.target.value,
+                    })
+                  }
+                  className="fn-input"
+                  rows={3}
+                  maxLength={1000}
+                />
+              </div>
+              <div>
+                <label className="fn-label">入力例</label>
+                <input
+                  name="stage_permission_question_placeholder"
+                  type="text"
+                  value={question.placeholder}
+                  onChange={(ev) =>
+                    updateStageQuestion(question.id, {
+                      placeholder: ev.target.value,
+                    })
+                  }
+                  className="fn-input"
+                  maxLength={500}
+                />
+              </div>
+            </article>
+          ))}
+          <button
+            type="button"
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+            onClick={addStageQuestion}
+            style={{ justifySelf: "start" }}
           >
-            <input
-              type="checkbox"
-              name="stage_permission_enabled"
-              value="1"
-              defaultChecked={stagePermissionSettings.enabled === true}
-              style={{ width: 18, height: 18, accentColor: "var(--accent-primary)" }}
-            />
-            <span>
-              <strong style={{ display: "block", fontSize: 13 }}>確認欄を表示する</strong>
-              <span className="fn-muted" style={{ display: "block", marginTop: 3, fontSize: 11.5 }}>
-                投稿フォームに権利・素材確認の入力欄を追加します。
-              </span>
-            </span>
-          </label>
-          <label
-            style={{
-              display: "grid",
-              gridTemplateColumns: "auto minmax(0, 1fr)",
-              gap: 10,
-              alignItems: "flex-start",
-              padding: 12,
-              border: "1px solid var(--border-subtle)",
-              borderRadius: 10,
-              background: "var(--bg-surface)",
-            }}
-          >
-            <input
-              type="checkbox"
-              name="stage_permission_required"
-              value="1"
-              defaultChecked={stagePermissionSettings.required === true}
-              style={{ width: 18, height: 18, accentColor: "var(--accent-primary)" }}
-            />
-            <span>
-              <strong style={{ display: "block", fontSize: 13 }}>入力必須にする</strong>
-              <span className="fn-muted" style={{ display: "block", marginTop: 3, fontSize: 11.5 }}>
-                空欄のまま投稿・更新できないようにします。
-              </span>
-            </span>
-          </label>
-        </div>
-        <div>
-          <label className="fn-label">質問名</label>
-          <input
-            name="stage_permission_label"
-            type="text"
-            defaultValue={
-              stagePermissionSettings.label ??
-              DEFAULT_STAGE_PERMISSION_FIELD.label
-            }
-            className="fn-input"
-            maxLength={120}
-          />
-        </div>
-        <div>
-          <label className="fn-label">補足文</label>
-          <textarea
-            name="stage_permission_description"
-            defaultValue={
-              stagePermissionSettings.description ??
-              DEFAULT_STAGE_PERMISSION_FIELD.description
-            }
-            className="fn-input"
-            rows={3}
-            maxLength={1000}
-          />
-        </div>
-        <div>
-          <label className="fn-label">入力例</label>
-          <input
-            name="stage_permission_placeholder"
-            type="text"
-            defaultValue={
-              stagePermissionSettings.placeholder ??
-              DEFAULT_STAGE_PERMISSION_FIELD.placeholder
-            }
-            className="fn-input"
-            maxLength={500}
-          />
+            <Icon name="plus" size={12} aria-hidden /> 質問を追加
+          </button>
         </div>
       </fieldset>
 

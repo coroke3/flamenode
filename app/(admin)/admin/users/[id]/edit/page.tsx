@@ -4,9 +4,9 @@ import type { Metadata } from "next";
 import { eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { users as usersTable, xUsers as xUsersTable } from "@/lib/db/schema";
-import { Icon } from "@/components/ui/Icon";
 import { UserAdminForm } from "@/components/admin/UserAdminForm";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { AdminUserTabs } from "@/components/admin/AdminUserTabs";
 
 export const metadata: Metadata = { title: "ユーザー編集" };
 export const dynamic = "force-dynamic";
@@ -38,14 +38,8 @@ export default async function AdminUserEditPage({
         description={`ID: ${user.id}`}
         backHref={`/admin/users/${user.id}`}
         backLabel="ユーザー詳細へ"
-        actions={[
-          {
-            href: `/admin/audit?record=${encodeURIComponent(user.id)}`,
-            label: "監査ログ",
-            icon: <Icon name="clock" size={12} aria-hidden />,
-          },
-        ]}
       />
+      <AdminUserTabs userId={user.id} active="edit" />
 
       <section
         style={{

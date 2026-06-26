@@ -16,6 +16,98 @@ export interface XLinkRequestRow {
   requested_at: number;
   link_type?: "new" | "merge" | "alias" | null;
   target_x_user_id?: string | null;
+  requested_x_name?: string | null;
+  requested_icon_url?: string | null;
+  target_icon_url?: string | null;
+}
+
+function xUrl(xId: string): string {
+  return `https://x.com/${encodeURIComponent(xId)}`;
+}
+
+function flameNodeUserUrl(xId: string): string {
+  return `/user/${encodeURIComponent(xId)}`;
+}
+
+function XIdPreview({
+  xId,
+  name,
+  iconUrl,
+  compact = false,
+}: {
+  xId: string;
+  name?: string | null;
+  iconUrl?: string | null;
+  compact?: boolean;
+}): React.ReactElement {
+  const initial = (name ?? xId).trim().slice(0, 1).toUpperCase() || "?";
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: compact ? 6 : 10,
+        minWidth: 0,
+      }}
+    >
+      {iconUrl ? (
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img
+          src={iconUrl}
+          alt=""
+          width={compact ? 24 : 36}
+          height={compact ? 24 : 36}
+          style={{
+            borderRadius: 6,
+            objectFit: "cover",
+            border: "1px solid var(--border-subtle)",
+            background: "var(--bg-elevated)",
+            flexShrink: 0,
+          }}
+        />
+      ) : (
+        <span
+          aria-hidden
+          style={{
+            width: compact ? 24 : 36,
+            height: compact ? 24 : 36,
+            borderRadius: 6,
+            display: "grid",
+            placeItems: "center",
+            border: "1px solid var(--border-subtle)",
+            background: "var(--bg-elevated)",
+            color: "var(--text-secondary)",
+            fontSize: compact ? 10 : 13,
+            fontWeight: 900,
+            flexShrink: 0,
+          }}
+        >
+          {initial}
+        </span>
+      )}
+      <span style={{ minWidth: 0 }}>
+        <strong style={{ display: "block" }}>
+          {name ? `${name} ` : ""}@{xId}
+        </strong>
+        <span
+          style={{
+            display: "flex",
+            gap: 8,
+            flexWrap: "wrap",
+            marginTop: 3,
+            fontSize: 11,
+          }}
+        >
+          <a href={xUrl(xId)} target="_blank" rel="noreferrer">
+            Xで確認
+          </a>
+          <a href={flameNodeUserUrl(xId)} target="_blank" rel="noreferrer">
+            FlameNode
+          </a>
+        </span>
+      </span>
+    </div>
+  );
 }
 
 export function XLinkRequestTable({
@@ -87,7 +179,11 @@ export function XLinkRequestTable({
             <tr key={r.id}>
               <td style={{ fontSize: 11, color: "var(--text-muted)" }}>{r.id}</td>
               <td>
-                <strong>@{r.requested_x_id}</strong>
+                <XIdPreview
+                  xId={r.requested_x_id}
+                  name={r.requested_x_name}
+                  iconUrl={r.requested_icon_url}
+                />
               </td>
               <td>
                 <span
@@ -102,8 +198,12 @@ export function XLinkRequestTable({
                   {r.link_type ?? "new"}
                 </span>
                 {r.target_x_user_id ? (
-                  <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>
-                    target: @{r.target_x_user_id}
+                  <div style={{ marginTop: 8 }}>
+                    <XIdPreview
+                      xId={r.target_x_user_id}
+                      iconUrl={r.target_icon_url}
+                      compact
+                    />
                   </div>
                 ) : null}
               </td>

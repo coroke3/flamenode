@@ -51,9 +51,10 @@ export function normalizeIconUrl(
   const m =
     u.match(/drive\.google\.com\/(?:open|uc)\?[^#]*[?&]?id=([A-Za-z0-9_-]+)/) ||
     u.match(/drive\.google\.com\/file\/d\/([A-Za-z0-9_-]+)/) ||
-    u.match(/drive\.google\.com\/thumbnail\?id=([A-Za-z0-9_-]+)/);
-  if (m?.[1]) return `https://lh3.googleusercontent.com/d/${m[1]}`;
-  if (u.startsWith("/api/media/")) return u;
+    u.match(/drive\.google\.com\/thumbnail\?id=([A-Za-z0-9_-]+)/) ||
+    u.match(/lh3\.googleusercontent\.com\/d\/([A-Za-z0-9_-]+)/);
+  if (m?.[1]) return `/api/google-drive-image/${m[1]}`;
+  if (u.startsWith("/api/media/") || u.startsWith("/api/google-drive-image/")) return u;
   return normalizeHttpUrlCore(u);
 }
 

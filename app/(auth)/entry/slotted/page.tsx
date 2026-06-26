@@ -32,15 +32,15 @@ export default async function SlottedPostPage({
   const { slot: slotId = "" } = await searchParams;
   // ログイン誘導後に slot 付きの URL に戻れるように next を組み立てる。
   const nextPath = slotId
-    ? `/dashboard/post/slotted?slot=${encodeURIComponent(slotId)}`
-    : "/dashboard/post/slotted";
+    ? `/entry/slotted?slot=${encodeURIComponent(slotId)}`
+    : "/entry/slotted";
   const guard = await requireSession({ next: nextPath });
   if (!guard.ok) return guard.element;
   const user = guard.user;
 
   const db = getDatabase();
   if (!db) notFound();
-  if (!slotId) redirect("/dashboard/post");
+  if (!slotId) redirect("/entry");
   const activeXId = user.active_x_user_id ?? null;
   const slotOwnerWhere = activeXId
     ? or(
@@ -58,9 +58,9 @@ export default async function SlottedPostPage({
   if (slot.status === "submitted" && slot.video_id) {
     redirect(`/dashboard/edit/${slot.video_id}`);
   }
-  if (slot.status !== "reserved") redirect("/dashboard/post");
+  if (slot.status !== "reserved") redirect("/entry");
   if (slot.x_user_id && activeXId && slot.x_user_id !== activeXId) {
-    redirect("/dashboard/post");
+    redirect("/entry");
   }
   const ev = (
     await db

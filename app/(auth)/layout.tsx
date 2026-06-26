@@ -1,11 +1,10 @@
 import * as React from "react";
 import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
-import { AuthHeader } from "@/components/layout/AuthHeader";
-import { PublicHeader } from "@/components/layout/PublicHeader";
+import { PublicHeader, type PublicHeaderUser } from "@/components/layout/PublicHeader";
 import { PublicFooter } from "@/components/layout/PublicFooter";
 import { CostGuardBanner } from "@/components/layout/CostGuardBanner";
-import { buildHeaderUser, type HeaderUser } from "@/lib/auth/headerUser";
+import { buildHeaderUser } from "@/lib/auth/headerUser";
 
 export const metadata: Metadata = {
   robots: { index: false, follow: false },
@@ -22,7 +21,7 @@ export default async function AuthLayout({
 }: {
   children: React.ReactNode;
 }): Promise<React.ReactElement> {
-  let user: HeaderUser | null = null;
+  let user: PublicHeaderUser | null = null;
 
   try {
     const session = await auth();
@@ -34,11 +33,7 @@ export default async function AuthLayout({
   return (
     <div data-fn-surface="public" className="fn-public-shell fn-app">
       <CostGuardBanner />
-      {user ? (
-        <AuthHeader user={user} />
-      ) : (
-        <PublicHeader user={null} />
-      )}
+      <PublicHeader user={user} />
       <main className="fn-main flex-1 w-full">{children}</main>
       <PublicFooter />
     </div>

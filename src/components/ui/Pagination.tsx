@@ -49,7 +49,7 @@ export function Pagination({
   unitLabel = "件",
   pageSize,
 }: PaginationProps): React.ReactElement | null {
-  if (totalPages <= 1 && total <= 0) return null;
+  if (totalPages <= 1) return null;
   const pages = pageNumbers(currentPage, totalPages);
   const rangeStart = pageSize ? (currentPage - 1) * pageSize + 1 : null;
   const rangeEnd = pageSize ? Math.min(currentPage * pageSize, total) : null;

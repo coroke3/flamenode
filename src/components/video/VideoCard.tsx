@@ -4,6 +4,7 @@ import styles from "./VideoCard.module.css";
 import { youtubeThumbUrl } from "@/lib/youtube/id";
 import { Icon } from "@/components/ui/Icon";
 import { cn } from "@/lib/utils/cn";
+import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
 
 export interface VideoCardData {
   id: string;
@@ -31,6 +32,7 @@ export function VideoCard({
 }: VideoCardProps): React.ReactElement {
   const link = href ?? `/${video.youtube_video_id ?? video.id}`;
   const thumb = youtubeThumbUrl(video.youtube_video_id, "hqdefault");
+  const creatorIcon = cachedGoogleImageUrl(video.icon_url);
 
   if (size === "list") {
     return (
@@ -56,10 +58,10 @@ export function VideoCard({
   return (
     <Link
       href={link}
-      className={cn(styles.card, size === "compact" && styles.compact)}
+      className={cn("fn-vcard", styles.card, size === "compact" && styles.compact)}
       prefetch={false}
     >
-      <div className={styles.thumbWrap}>
+      <div className={cn("fn-thumb", styles.thumbWrap)}>
         {thumb ? (
           /* eslint-disable-next-line @next/next/no-img-element */
           <img src={thumb} alt="" loading="lazy" className={styles.thumb} />
@@ -68,9 +70,7 @@ export function VideoCard({
             <Icon name="youtube" size={28} aria-hidden />
           </div>
         )}
-        <span className={styles.playMark} aria-hidden>
-          <Icon name="play" size={14} />
-        </span>
+        <span className="fn-thumb-grid" aria-hidden />
         {video.status === "limited" ? (
           <span className={cn("fn-badge", "fn-badge-soft", styles.statusBadge)}>
             限定公開
@@ -88,22 +88,21 @@ export function VideoCard({
           </span>
         ) : null}
       </div>
-      <h3 className={styles.title}>{video.title}</h3>
-      <div className={styles.author}>
-        {video.icon_url ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
-            src={video.icon_url}
-            alt=""
-            loading="lazy"
-            className={styles.authorIcon}
-          />
-        ) : (
-          <span className={styles.authorIconFallback}>
-            <Icon name="user" size={10} aria-hidden />
-          </span>
-        )}
-        <span className={styles.authorName}>{video.display_name}</span>
+      <div className="fn-vcard-body">
+        <h3 className="fn-vcard-title">{video.title}</h3>
+        <div className="fn-vcard-meta">
+          <div className="fn-vcard-creator">
+            <span className="fn-vcard-avatar">
+              {creatorIcon ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img src={creatorIcon} alt="" loading="lazy" />
+              ) : (
+                <Icon name="user" size={10} aria-hidden />
+              )}
+            </span>
+            <span>{video.display_name}</span>
+          </div>
+        </div>
       </div>
     </Link>
   );

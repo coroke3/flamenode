@@ -20,7 +20,7 @@ export const metadata: Metadata = { title: "枠なし投稿" };
 export const dynamic = "force-dynamic";
 
 export default async function UnslottedPostPage(): Promise<React.ReactElement> {
-  const guard = await requireSession({ next: "/dashboard/post/unslotted" });
+  const guard = await requireSession({ next: "/entry/unslotted" });
   if (!guard.ok) return guard.element;
   const user = guard.user;
   const db = getDatabase();
@@ -106,7 +106,7 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
           </p>
         </div>
         <div className="fn-page-head-actions">
-          <Link href="/dashboard/post" className="fn-btn fn-btn-ghost">
+          <Link href="/entry" className="fn-btn fn-btn-ghost">
             投稿方法を選択
           </Link>
         </div>
@@ -118,7 +118,7 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
         action={
           !canPost ? (
             <Link
-              href={`/dashboard/settings?next=${encodeURIComponent("/dashboard/post/unslotted")}`}
+              href={`/dashboard/settings?next=${encodeURIComponent("/entry/unslotted")}`}
               className="fn-btn fn-btn-primary"
             >
               X ID設定を確認

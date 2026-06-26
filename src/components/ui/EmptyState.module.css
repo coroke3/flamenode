@@ -9,6 +9,11 @@
   text-align: center;
 }
 
+:global([data-fn-surface="public"]) .empty {
+  border: 0;
+  border-radius: var(--r-card);
+}
+
 .icon {
   display: grid;
   place-items: center;

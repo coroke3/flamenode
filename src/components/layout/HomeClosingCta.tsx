@@ -17,7 +17,7 @@ export function HomeClosingCta(): React.ReactElement {
         </span>
       </div>
       <div className={styles.closingActions}>
-        <Link href="/dashboard/post" className="fn-btn fn-btn-primary fn-btn-lg">
+        <Link href="/entry" className="fn-btn fn-btn-primary fn-btn-lg">
           新規投稿を始める →
         </Link>
         <Link href="/about" className="fn-btn fn-btn-ghost">

@@ -84,9 +84,11 @@ export default async function DashboardLibraryPage({
     }
   }
 
+  const playlistId = tab === "like" ? "lib-like" : "lib-bookmark";
+  const playlistLabel = tab === "like" ? "いいねした作品" : "セーブした作品";
   const firstVideo = videos[0];
   const firstVideoHref = firstVideo
-    ? `/${firstVideo.youtube_video_id ?? firstVideo.id}`
+    ? `/${firstVideo.youtube_video_id ?? firstVideo.id}?playlist=${playlistId}`
     : null;
 
   return (
@@ -150,14 +152,17 @@ export default async function DashboardLibraryPage({
                 href={firstVideoHref}
                 className="fn-btn fn-btn-primary fn-btn-sm fn-toolbar-spacer"
               >
-                <Icon name="play" size={12} aria-hidden /> 最初の作品を見る
+                <Icon name="play" size={12} aria-hidden /> {playlistLabel}をプレイリストで見る
               </Link>
             ) : null}
           </div>
           <div className="fn-media-grid">
             {videos.map((v, index) => (
               <div key={`${v.id}-library-${index}`}>
-                <VideoCard video={v} />
+                <VideoCard
+                  video={v}
+                  href={`/${v.youtube_video_id ?? v.id}?playlist=${playlistId}`}
+                />
               </div>
             ))}
           </div>

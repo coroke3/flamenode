@@ -1,15 +1,24 @@
 name = "flamenode"
 compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
-# next-on-pages が出力する静的アセット先
+
+# next-on-pages のビルド成果物 (npm run pages:build)
 pages_build_output_dir = ".vercel/output/static"
 
-# Cloudflare Pages (Next.js) で使う環境変数の例
+# Cloudflare Dashboard → Pages → Settings → Builds と揃える
+# Build command:     npm run pages:build
+# Build output dir:  .vercel/output/static
+# Node version:      20
+
+[observability]
+enabled = true
+
+# 非シークレットの公開用環境変数 (シークレットは wrangler pages secret put で登録)
 [vars]
 NEXT_PUBLIC_SITE_NAME = "FlameNode"
 NEXT_PUBLIC_SITE_DESCRIPTION = "映像（フレーム）の結節点（ノード）。YouTube埋め込みを利用した動画プラットフォーム。"
 
-# D1 (SQL DB)
+# D1 (SQL DB) — ID は npm run cf:bootstrap または npm run cf:sync-ids で反映
 [[d1_databases]]
 binding = "DB"
 database_name = "flamenode_db"
@@ -21,17 +30,19 @@ migrations_dir = "migrations"
 binding = "BUCKET"
 bucket_name = "flamenode-storage"
 
-# KV (cache / cost guard flags)
+# KV (cost guard / 軽量キャッシュ)
 [[kv_namespaces]]
 binding = "KV"
 id = "00000000000000000000000000000000"
+preview_id = "00000000000000000000000000000000"
 
-# Durable Object - 閲覧数集約
-[[durable_objects.bindings]]
-name = "VIEW_AGGREGATOR"
-class_name = "ViewAggregator"
-script_name = "flamenode"
-
-[[migrations]]
-tag = "v1"
-new_classes = ["ViewAggregator"]
+# ViewAggregator (Durable Object) は閲覧数集約実装後に有効化する。
+# 現状は未実装のためバインドしない。有効化時は Dashboard の Durable Object 設定も追加すること。
+# [[durable_objects.bindings]]
+# name = "VIEW_AGGREGATOR"
+# class_name = "ViewAggregator"
+# script_name = "flamenode"
+#
+# [[migrations]]
+# tag = "v1"
+# new_classes = ["ViewAggregator"]

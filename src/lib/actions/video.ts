@@ -27,7 +27,15 @@ import { generateId } from "@/lib/utils/id";
 import { detectSupportedImageUpload } from "@/lib/utils/imageUpload";
 import { normalizeXId } from "@/lib/utils/xid";
 import { normalizeHttpUrl } from "@/lib/utils/url";
-import { resolveStagePermissionFieldFromJson } from "@/lib/video/formSettings";
+import { normalizeSocialLinksForStorage } from "@/lib/socialLinks";
+import { buildSlotParts } from "@/lib/utils/slotGroupingCore";
+import {
+  parseStagePermissionAnswers,
+  resolveStagePermissionFieldsFromJson,
+  serializeStagePermissionAnswers,
+  type StagePermissionAnswer,
+  type StagePermissionFieldSettings,
+} from "@/lib/video/formSettings";
 import { parseMemberChapterTime } from "@/lib/video/memberInput";
 import { computeVideoEventSyncTarget } from "@/lib/video/eventSync";
 import {
@@ -102,9 +110,6 @@ const videoFormSchema = z.object({
   // 突き合わせて妥当性を検証する (許可外の値はクリアする)。
   part: z.string().trim().max(40).optional().nullable(),
 });
-
-const STAGE_PERMISSION_REQUIRED_MESSAGE =
-  "ステージ・素材・権利まわりの確認欄を入力してください。";
 
 export interface VideoActionResult {
   ok: boolean;
@@ -213,6 +218,10 @@ async function ensureSubmissionXUser(
 ): Promise<void> {
   if (!args.xId) return;
   const now = Math.floor(Date.now() / 1000);
+  const hasSocialLinksInput = args.socialLinks != null;
+  const socialLinks = hasSocialLinksInput
+    ? normalizeSocialLinksForStorage(args.socialLinks)
+    : null;
   const existing = (
     await db.select().from(xUsers).where(eq(xUsers.id, args.xId)).limit(1)
   )[0];
@@ -224,7 +233,7 @@ async function ensureSubmissionXUser(
       icon_url: null,
       profile_text: args.profileText || null,
       youtube_channel_url: args.youtubeChannelUrl || null,
-      other_social_links: args.socialLinks || null,
+      other_social_links: socialLinks,
       approval_status: "pending",
       approval_requested_at: now,
     });
@@ -237,7 +246,9 @@ async function ensureSubmissionXUser(
       x_name: args.displayName || existing.x_name,
       profile_text: args.profileText ?? existing.profile_text,
       youtube_channel_url: args.youtubeChannelUrl ?? existing.youtube_channel_url,
-      other_social_links: args.socialLinks ?? existing.other_social_links,
+      other_social_links: hasSocialLinksInput
+        ? socialLinks
+        : existing.other_social_links,
     })
     .where(eq(xUsers.id, args.xId));
 }
@@ -259,29 +270,128 @@ function parseEventIdsFromForm(formData: FormData): string[] {
   );
 }
 
-async function getStagePermissionFieldForEvents(
+function parseEventPartsJson(value: string | null | undefined): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function resolvePartFromSlot(
+  db: NonNullable<ReturnType<typeof getDatabase>>,
+  slotRow: typeof slots.$inferSelect,
+): Promise<string | null> {
+  const eventRow = (
+    await db
+      .select({
+        parts_json: eventsTable.parts_json,
+        slot_part_gap_minutes: eventsTable.slot_part_gap_minutes,
+      })
+      .from(eventsTable)
+      .where(eq(eventsTable.id, slotRow.event_id))
+      .limit(1)
+  )[0];
+  const configuredParts = parseEventPartsJson(eventRow?.parts_json);
+  if (configuredParts.length === 0) return null;
+
+  const eventSlots = await db
+    .select({
+      id: slots.id,
+      start_time: slots.start_time,
+      end_time: slots.end_time,
+      slot_kind: slots.slot_kind,
+      sort_order: slots.sort_order,
+    })
+    .from(slots)
+    .where(eq(slots.event_id, slotRow.event_id));
+  const slotParts = buildSlotParts(
+    eventSlots,
+    (eventRow?.slot_part_gap_minutes ?? 15) * 60,
+  );
+  const slotPart = slotParts.find((part) =>
+    part.rows.some((row) => row.id === slotRow.id),
+  );
+  if (!slotPart) return null;
+
+  return configuredParts[slotPart.index - 1] ?? null;
+}
+
+async function getStagePermissionFieldsForEvents(
   db: NonNullable<ReturnType<typeof getDatabase>>,
   eventIds: readonly string[],
 ) {
   const ids = Array.from(new Set(eventIds.filter(Boolean)));
-  if (ids.length === 0) return null;
+  if (ids.length === 0) return [];
   const rows = await db
     .select({ video_form_settings_json: eventsTable.video_form_settings_json })
     .from(eventsTable)
     .where(inArray(eventsTable.id, ids));
-  return resolveStagePermissionFieldFromJson(
+  return resolveStagePermissionFieldsFromJson(
     rows.map((row) => row.video_form_settings_json),
   );
 }
 
-function validateStagePermission(
-  raw: string | null | undefined,
-  field: Awaited<ReturnType<typeof getStagePermissionFieldForEvents>>,
-): string | null {
-  if (!field) return null;
-  const value = (raw ?? "").trim();
-  if (field.required && !value) return "";
-  return value || null;
+function readStagePermissionAnswerMap(formData: FormData): Map<string, string> {
+  const ids = formData.getAll("stage_permission_answer_id");
+  const values = formData.getAll("stage_permission_answer_value");
+  const out = new Map<string, string>();
+  for (let i = 0; i < ids.length; i++) {
+    const id = String(ids[i] ?? "").trim();
+    if (!id) continue;
+    out.set(id, String(values[i] ?? "").trim());
+  }
+
+  const legacy = formData.get("stage_permission");
+  if (typeof legacy === "string" && legacy.trim() && !out.has("stage_permission")) {
+    out.set("stage_permission", legacy.trim());
+  }
+  return out;
+}
+
+function buildStagePermissionSubmission(
+  formData: FormData,
+  fields: readonly StagePermissionFieldSettings[],
+  fallbackRaw?: string | null,
+):
+  | { ok: true; value: string | null }
+  | { ok: false; message: string } {
+  if (fields.length === 0) return { ok: true, value: null };
+
+  const submitted = readStagePermissionAnswerMap(formData);
+  const fallback = new Map(
+    parseStagePermissionAnswers(fallbackRaw).map((answer) => [
+      answer.id,
+      answer.value,
+    ]),
+  );
+  const answers: StagePermissionAnswer[] = [];
+
+  for (const field of fields) {
+    const raw = submitted.has(field.id)
+      ? submitted.get(field.id)
+      : fallback.get(field.id);
+    const value = (raw ?? "").trim();
+    if (value.length > 1000) {
+      return {
+        ok: false,
+        message: `${field.label}は1000文字以内で入力してください。`,
+      };
+    }
+    if (field.required && !value) {
+      return { ok: false, message: `${field.label}を入力してください。` };
+    }
+    if (value) {
+      answers.push({ id: field.id, label: field.label, value });
+    }
+  }
+
+  return { ok: true, value: serializeStagePermissionAnswers(answers) };
 }
 
 async function ensureVideoDerivedRows(
@@ -610,14 +720,13 @@ export async function createFreeVideo(
   }
 
   const requestedEventIds = parseEventIdsFromForm(formData);
-  const stageField = await getStagePermissionFieldForEvents(db, requestedEventIds);
-  const stagePermission = validateStagePermission(
-    parsed.data.stage_permission,
-    stageField,
+  const stageFields = await getStagePermissionFieldsForEvents(db, requestedEventIds);
+  const stagePermissionResult = buildStagePermissionSubmission(
+    formData,
+    stageFields,
   );
-  if (stageField?.required && stagePermission === '') {
-    return { ok: false, message: STAGE_PERMISSION_REQUIRED_MESSAGE };
-  }
+  if (!stagePermissionResult.ok) return stagePermissionResult;
+  const stagePermission = stagePermissionResult.value;
 
   // YouTube ID 重複チェック: 同じ youtube_video_id を持つ非削除・非 voided な動画が
   // 既に存在する場合は拒否する。
@@ -816,16 +925,16 @@ export async function submitSlotVideo(
     return { ok: false, message: "承認済みの X ID を選択してください。" };
   }
 
-  const slotStageField = await getStagePermissionFieldForEvents(db, [
+  const slotStageFields = await getStagePermissionFieldsForEvents(db, [
     slotRow.event_id,
   ]);
-  const stagePermission = validateStagePermission(
-    parsed.data.stage_permission,
-    slotStageField,
+  const stagePermissionResult = buildStagePermissionSubmission(
+    formData,
+    slotStageFields,
   );
-  if (slotStageField?.required && stagePermission === "") {
-    return { ok: false, message: STAGE_PERMISSION_REQUIRED_MESSAGE };
-  }
+  if (!stagePermissionResult.ok) return stagePermissionResult;
+  const stagePermission = stagePermissionResult.value;
+  const slotPart = await resolvePartFromSlot(db, slotRow);
 
   // YouTube ID 重複チェック: 同じ youtube_video_id を持つ非削除・非 voided な動画が
   // 既に存在する場合は拒否する。update 経路では現在の video 自身を除外する。
@@ -878,7 +987,7 @@ export async function submitSlotVideo(
           production_story: parsed.data.production_story ?? null,
           closing_comment: parsed.data.closing_comment ?? null,
           collaboration_type: parsed.data.is_collab ? "collab" : "individual",
-          part: parsed.data.part?.trim() || null,
+          part: slotPart,
           updated_at: now,
         })
         .where(eq(videos.id, videoId));
@@ -921,7 +1030,7 @@ export async function submitSlotVideo(
         highlights: parsed.data.highlights ?? null,
         production_story: parsed.data.production_story ?? null,
         closing_comment: parsed.data.closing_comment ?? null,
-        part: parsed.data.part?.trim() || null,
+        part: slotPart,
         created_at: now,
         updated_at: now,
       });
@@ -1100,14 +1209,14 @@ export async function updateVideo(
   if (target.primary_event_id && !stageEventIds.includes(target.primary_event_id)) {
     stageEventIds.push(target.primary_event_id);
   }
-  const editStageField = await getStagePermissionFieldForEvents(db, stageEventIds);
-  const nextStagePermission = validateStagePermission(
-    parsed.data.stage_permission,
-    editStageField,
+  const editStageFields = await getStagePermissionFieldsForEvents(db, stageEventIds);
+  const nextStagePermissionResult = buildStagePermissionSubmission(
+    formData,
+    editStageFields,
+    target.stage_permission,
   );
-  if (editStageField?.required && nextStagePermission === "") {
-    return { ok: false, message: STAGE_PERMISSION_REQUIRED_MESSAGE };
-  }
+  if (!nextStagePermissionResult.ok) return nextStagePermissionResult;
+  const nextStagePermission = nextStagePermissionResult.value;
 
   const editUser = { id: sessionUser.id, role: sessionUser.role ?? null };
   // クライアントが送ってきた privilegeMode を検証。不正値は "normal" にフォールバック。
@@ -1217,7 +1326,7 @@ export async function updateVideo(
       changed(parsed.data.highlights, target.highlights) ||
       changed(parsed.data.production_story, target.production_story) ||
       changed(parsed.data.used_software, targetSoftwareLabel) ||
-      changed(parsed.data.stage_permission, target.stage_permission) ||
+      changed(nextStagePermission, target.stage_permission) ||
       changed(parsed.data.closing_comment, target.closing_comment))
   ) {
     return { ok: false, message: "紹介文・振り返り項目を編集する権限がありません。" };

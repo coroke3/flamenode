@@ -14,6 +14,7 @@ import {
 } from "@/lib/db/schema";
 import { queueYoutubeMetadataResync } from "@/lib/actions/youtube-sync-admin";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { AdminVideoManagementTabs } from "@/components/admin/AdminVideoManagementTabs";
 import { Icon } from "@/components/ui/Icon";
 import {
   formatCount,
@@ -163,6 +164,7 @@ export default async function AdminYoutubeSyncPage({
         title="YouTubeメタデータ同期状態"
         description="video_youtube_metadata と作品情報を照合し、同期失敗・未同期・YouTube ID なしを確認します。"
       />
+      <AdminVideoManagementTabs active="youtube-sync" />
 
       <form
         method="get"

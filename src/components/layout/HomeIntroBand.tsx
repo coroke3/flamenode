@@ -4,6 +4,7 @@ import styles from "./HomeIntroBand.module.css";
 import { Icon } from "@/components/ui/Icon";
 import type { events } from "@/lib/db/schema";
 import { computeEventStatus, isAcceptingEntries } from "@/lib/utils/eventStatus";
+import { compareEventsByUpcomingPriority } from "@/lib/utils/eventOrdering";
 import { EventRecruitCard } from "./EventRecruitCard";
 
 type EventRow = typeof events.$inferSelect;
@@ -21,6 +22,11 @@ export function isHeroCandidate(event: EventRow, now: number): boolean {
 }
 
 function eventHeroRank(event: EventRow, now: number): number {
+  const status = computeEventStatus(event, now);
+  if (status === "scheduled") {
+    const start = event.start_time ?? event.end_time ?? Number.POSITIVE_INFINITY;
+    return start - now;
+  }
   const acceptingBonus = isAcceptingEntries(event) ? -10_000_000 : 0;
   const start =
     event.start_time ??
@@ -43,6 +49,8 @@ export function pickHeroEvents(
   return activeEvents
     .filter((event) => isHeroCandidate(event, now))
     .sort((a, b) => {
+      const priorityDiff = compareEventsByUpcomingPriority(a, b, now);
+      if (priorityDiff !== 0) return priorityDiff;
       const rankDiff = eventHeroRank(a, now) - eventHeroRank(b, now);
       if (rankDiff !== 0) return rankDiff;
       const aStart = a.start_time ?? Number.POSITIVE_INFINITY;

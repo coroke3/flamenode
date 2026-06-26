@@ -13,6 +13,10 @@ export type EventDisplayStatus =
 export interface EventStatusInput {
   is_active: number | null;
   is_archived: number | null;
+  /**
+   * Legacy DB flag kept for compatibility. Entry acceptance is now derived from
+   * entry_start_time / entry_end_time and does not depend on this value.
+   */
   is_entry_open?: number | null;
   start_time: number | null;
   end_time: number | null;
@@ -86,14 +90,10 @@ export function isAcceptingEntries(
   now: number = Math.floor(Date.now() / 1000),
 ): boolean {
   const status = computeEventStatus(ev, now);
-  if (
-    !(
-      ev.is_entry_open === 1 &&
-      (status === "active" || status === "scheduled" || status === "published")
-    )
-  ) {
+  if (!(status === "active" || status === "scheduled" || status === "published")) {
     return false;
   }
+  if (ev.entry_start_time == null && ev.entry_end_time == null) return false;
   if (ev.entry_start_time != null && now < ev.entry_start_time) return false;
   if (ev.entry_end_time != null && now > ev.entry_end_time) return false;
   return true;

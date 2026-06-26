@@ -1,7 +1,7 @@
 /**
  * `?next=` クエリパラメータ等の遷移先パスを検証する。
  *
- * 受け入れる: 同一サイト内の相対パス (例: `/dashboard/post?slot=abc`)。
+ * 受け入れる: 同一サイト内の相対パス (例: `/entry/slotted?slot=abc`)。
  * 拒否する:
  *   - 空 / undefined / null
  *   - スキーム付き URL (`https://...`)

@@ -6,8 +6,6 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import styles from "./page.module.css";
 import { withDatabase } from "@/lib/cloudflare";
 import {
-  events,
-  videoEvents,
   videoMembers,
   videos,
   videoStats,
@@ -20,9 +18,12 @@ import { normalizeXId } from "@/lib/utils/xid";
 import { resolveXUserIcon } from "@/lib/db/xIconResolution";
 import { Pagination } from "@/components/ui/Pagination";
 import { clampPaging, totalPagesFor } from "@/lib/utils/sql";
-import { formatUnix } from "@/lib/utils/format";
 import { absoluteUrl, buildPageMetadata, compactText } from "@/lib/seo";
 import { coalescedVideoScore } from "@/lib/db/videoScoreSql";
+import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
+import { parseSocialLinks } from "@/lib/socialLinks";
+import { normalizePortfolioContact } from "@/lib/profileContact";
+import { countablePublicVideoCondition } from "@/lib/db/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,6 @@ interface Props {
   searchParams?: Promise<{
     worksPage?: string;
     collabPage?: string;
-    event?: string;
   }>;
 }
 
@@ -43,30 +43,14 @@ interface ProfileUser {
   x_name: string;
   icon_url: string | null;
   profile_text: string | null;
+  portfolio_contact: string | null;
   youtube_channel_url: string | null;
+  other_social_links: string | null;
   creative_start_date: number | null;
   approval_requested_at: number | null;
 }
 
 type CreatorVideo = VideoCardData & { score: number };
-
-interface CreatorEvent {
-  id: string;
-  title: string;
-  explanation: string | null;
-  start_time: number | null;
-  end_time: number | null;
-  entry_end_time: number | null;
-  video_count: number;
-  latest_time: number | null;
-  roles: string | null;
-}
-
-interface EventOption {
-  id: string;
-  title: string;
-  count: number;
-}
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const id = normalizeXId((await params).id);
@@ -80,7 +64,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       return {
         title: u[0].x_name,
         description: u[0].profile_text,
-        image: u[0].icon_url,
+        image: cachedGoogleImageUrl(u[0].icon_url),
       };
     }
 
@@ -101,36 +85,21 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     return {
       title: fallback[0]?.name ?? id,
       description: null,
-      image: fallback[0]?.icon_url ?? null,
+      image: cachedGoogleImageUrl(fallback[0]?.icon_url),
     };
   });
   return buildPageMetadata({
     title: `${data?.title ?? id} - クリエイター`,
     description:
       data?.description ??
-      `FlameNodeで公開されている${data?.title ?? id}の作品と参加イベント。`,
+      `FlameNodeで公開されている${data?.title ?? id}の作品。`,
     path: `/user/${id}`,
     image: data?.image,
   });
 }
 
-function format2(value: number): string {
-  return String(value).padStart(2, "0");
-}
-
 function formatScore(value: number): string {
   return Math.round(value).toLocaleString("en-US");
-}
-
-function dateOnly(value: number | null | undefined): string {
-  return value ? formatUnix(value, { dateOnly: true }) : "-";
-}
-
-function worksHref(basePath: string, eventId?: string): string {
-  if (!eventId) return basePath;
-  const usp = new URLSearchParams();
-  usp.set("event", eventId);
-  return `${basePath}?${usp.toString()}`;
 }
 
 export default async function UserPage({
@@ -139,10 +108,6 @@ export default async function UserPage({
 }: Props): Promise<React.ReactElement> {
   const id = normalizeXId((await params).id);
   const sp = (await searchParams) ?? {};
-  const selectedEventId =
-    typeof sp.event === "string" && sp.event.trim().length > 0
-      ? sp.event.trim()
-      : "";
   const worksPaging = clampPaging({
     page: sp.worksPage,
     pageSize: WORKS_PAGE_SIZE,
@@ -162,7 +127,7 @@ export default async function UserPage({
       .from(xUsers)
       .where(sql`lower(${xUsers.id}) = ${id}`)
       .limit(1);
-    const publicVideoBase = eq(videos.visibility_status, "public");
+    const publicVideoBase = countablePublicVideoCondition;
 
     const fallbackUserRows = userRow[0]
       ? []
@@ -172,7 +137,9 @@ export default async function UserPage({
             x_name: sql<string>`COALESCE(${videos.creator_display_name}, ${videos.creator_x_user_id})`,
             icon_url: videos.creator_icon_url,
             profile_text: sql<string | null>`NULL`,
+            portfolio_contact: sql<string | null>`NULL`,
             youtube_channel_url: sql<string | null>`NULL`,
+            other_social_links: sql<string | null>`NULL`,
             creative_start_date: sql<number | null>`NULL`,
             approval_requested_at: sql<number | null>`NULL`,
           })
@@ -187,7 +154,9 @@ export default async function UserPage({
           x_name: userRow[0].x_name,
           icon_url: userRow[0].icon_url,
           profile_text: userRow[0].profile_text,
+          portfolio_contact: userRow[0].portfolio_contact,
           youtube_channel_url: userRow[0].youtube_channel_url,
+          other_social_links: userRow[0].other_social_links,
           creative_start_date: userRow[0].creative_start_date,
           approval_requested_at: userRow[0].approval_requested_at,
         }
@@ -217,41 +186,22 @@ export default async function UserPage({
       score: coalescedVideoScore,
     };
 
-    const ownVideosRaw = selectedEventId
-      ? await db
-          .select(ownVideoSelect)
-          .from(videos)
-          .innerJoin(videoEvents, eq(videoEvents.video_id, videos.id))
-          .leftJoin(videoStats, eq(videoStats.video_id, videos.id))
-          .where(and(ownWhere, eq(videoEvents.event_id, selectedEventId))!)
-          .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
-          .limit(worksPaging.pageSize)
-          .offset(worksPaging.offset)
-      : await db
-          .select(ownVideoSelect)
-          .from(videos)
-          .leftJoin(videoStats, eq(videoStats.video_id, videos.id))
-          .where(ownWhere)
-          .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
-          .limit(worksPaging.pageSize)
-          .offset(worksPaging.offset);
+    const ownVideosRaw = await db
+      .select(ownVideoSelect)
+      .from(videos)
+      .leftJoin(videoStats, eq(videoStats.video_id, videos.id))
+      .where(ownWhere)
+      .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
+      .limit(worksPaging.pageSize)
+      .offset(worksPaging.offset);
 
-    const ownCountRow = selectedEventId
-      ? (
-          await db
-            .select({ c: sql<number>`COUNT(DISTINCT ${videos.id})` })
-            .from(videos)
-            .innerJoin(videoEvents, eq(videoEvents.video_id, videos.id))
-            .where(and(ownWhere, eq(videoEvents.event_id, selectedEventId))!)
-            .limit(1)
-        )[0]
-      : (
-          await db
-            .select({ c: sql<number>`COUNT(*)` })
-            .from(videos)
-            .where(ownWhere)
-            .limit(1)
-        )[0];
+    const ownCountRow = (
+      await db
+        .select({ c: sql<number>`COUNT(*)` })
+        .from(videos)
+        .where(ownWhere)
+        .limit(1)
+    )[0];
     const ownTotal = Number(ownCountRow?.c ?? 0);
 
     const ownVideos = ownVideosRaw.map((v) => ({
@@ -260,19 +210,6 @@ export default async function UserPage({
       icon_url: v.icon_url ?? user.icon_url,
       score: Number(v.score ?? 0),
     })) as CreatorVideo[];
-
-    const eventOptions = (await db
-      .select({
-        id: events.id,
-        title: events.title,
-        count: sql<number>`COUNT(DISTINCT ${videos.id})`,
-      })
-      .from(events)
-      .innerJoin(videoEvents, eq(videoEvents.event_id, events.id))
-      .innerJoin(videos, eq(videos.id, videoEvents.video_id))
-      .where(ownWhere)
-      .groupBy(events.id)
-      .orderBy(desc(sql`MAX(COALESCE(${videos.scheduled_time}, ${videos.created_at}))`))) as EventOption[];
 
     const collabWhere = and(
       publicVideoBase,
@@ -311,80 +248,12 @@ export default async function UserPage({
     )[0];
     const collabTotal = Number(collabCountRow?.c ?? 0);
 
-    const scoreRows = await db
-      .select({
-        id: videos.id,
-        score: coalescedVideoScore,
-        latest_time: sql<number | null>`MAX(COALESCE(${videos.scheduled_time}, ${videos.created_at}))`,
-      })
-      .from(videos)
-      .leftJoin(videoStats, eq(videoStats.video_id, videos.id))
-      .leftJoin(
-        videoMembers,
-        and(
-          eq(videoMembers.video_id, videos.id),
-          sql`lower(${videoMembers.x_user_id}) = ${id}`,
-        ),
-      )
-      .where(
-        and(
-          publicVideoBase,
-          sql`(lower(${videos.creator_x_user_id}) = ${id} OR ${videoMembers.id} IS NOT NULL)`,
-        )!,
-      )
-      .groupBy(videos.id);
-    const totalScore = scoreRows.reduce(
-      (sum, row) => sum + Number(row.score ?? 0),
-      0,
-    );
-    const latestPostAt =
-      scoreRows.reduce<number | null>((latest, row) => {
-        const value = row.latest_time == null ? null : Number(row.latest_time);
-        if (value == null) return latest;
-        return latest == null || value > latest ? value : latest;
-      }, null) ?? null;
-
-    const eventParticipationRows = (await db
-      .select({
-        id: events.id,
-        title: events.title,
-        explanation: events.explanation,
-        start_time: events.start_time,
-        end_time: events.end_time,
-        entry_end_time: events.entry_end_time,
-        video_count: sql<number>`COUNT(DISTINCT ${videos.id})`,
-        latest_time: sql<number | null>`MAX(COALESCE(${videos.scheduled_time}, ${videos.created_at}))`,
-        roles: sql<string | null>`GROUP_CONCAT(DISTINCT CASE WHEN lower(${videos.creator_x_user_id}) = ${id} THEN 'creator' ELSE 'member' END)`,
-      })
-      .from(events)
-      .innerJoin(videoEvents, eq(videoEvents.event_id, events.id))
-      .innerJoin(videos, eq(videos.id, videoEvents.video_id))
-      .leftJoin(
-        videoMembers,
-        and(
-          eq(videoMembers.video_id, videos.id),
-          sql`lower(${videoMembers.x_user_id}) = ${id}`,
-        ),
-      )
-      .where(
-        and(
-          publicVideoBase,
-          sql`(lower(${videos.creator_x_user_id}) = ${id} OR ${videoMembers.id} IS NOT NULL)`,
-        )!,
-      )
-      .groupBy(events.id)
-      .orderBy(desc(sql`MAX(COALESCE(${videos.scheduled_time}, ${videos.created_at}))`))) as CreatorEvent[];
-
     return {
       user,
       ownVideos,
       ownTotal,
-      eventOptions,
       collabVideos,
       collabTotal,
-      totalScore,
-      latestPostAt,
-      eventParticipationRows,
     };
   });
 
@@ -393,12 +262,8 @@ export default async function UserPage({
     user,
     ownVideos,
     ownTotal,
-    eventOptions,
     collabVideos,
     collabTotal,
-    totalScore,
-    latestPostAt,
-    eventParticipationRows,
   } = bundle;
   const ownTotalPages = totalPagesFor(ownTotal, worksPaging.pageSize);
   const collabTotalPages = totalPagesFor(collabTotal, collabPaging.pageSize);
@@ -406,7 +271,6 @@ export default async function UserPage({
   const buildOwnHref = (p: number) => {
     const usp = new URLSearchParams();
     usp.set("worksPage", String(p));
-    if (selectedEventId) usp.set("event", selectedEventId);
     return `${basePath}?${usp.toString()}`;
   };
   const buildCollabHref = (p: number) => {
@@ -415,9 +279,10 @@ export default async function UserPage({
     return `${basePath}?${usp.toString()}`;
   };
 
-  const profileIcon = user.icon_url ?? null;
+  const profileIcon = cachedGoogleImageUrl(user.icon_url);
   const profileName = user.x_name || user.id;
-  const totalWorks = ownTotal + collabTotal;
+  const socialLinks = parseSocialLinks(user.other_social_links);
+  const portfolioContact = normalizePortfolioContact(user.portfolio_contact);
   const personJsonLd = {
     "@context": "https://schema.org",
     "@type": "Person",
@@ -439,9 +304,6 @@ export default async function UserPage({
         <p className={`fn-page-back ${styles.profileBack}`}>
           <Link href="/user">← クリエイター一覧</Link>
         </p>
-        <Link href="/user" className={styles.closeLink} aria-label="閉じる">
-          ×
-        </Link>
         {profileIcon ? (
           /* eslint-disable-next-line @next/next/no-img-element */
           <img src={profileIcon} alt="" className={styles.avatar} />
@@ -467,69 +329,44 @@ export default async function UserPage({
               </a>
             ) : null}
           </div>
-          {user.profile_text ? <p className={styles.bio}>{user.profile_text}</p> : null}
         </div>
-
-        <dl className={styles.stats} aria-label="クリエイター統計">
-          <div>
-            <dt>Works</dt>
-            <dd>{format2(ownTotal)}</dd>
-          </div>
-          <div>
-            <dt>Events</dt>
-            <dd>{format2(eventParticipationRows.length)}</dd>
-          </div>
-          <div>
-            <dt>Total Score</dt>
-            <dd>{formatScore(totalScore)}</dd>
-          </div>
-          <div>
-            <dt>最新投稿</dt>
-            <dd>{dateOnly(latestPostAt)}</dd>
-          </div>
-          {user.creative_start_date ? (
-            <div>
-              <dt>映像歴</dt>
-              <dd>{dateOnly(user.creative_start_date)}〜</dd>
-            </div>
-          ) : null}
-          {user.approval_requested_at ? (
-            <div>
-              <dt>登録</dt>
-              <dd>{dateOnly(user.approval_requested_at)}</dd>
-            </div>
-          ) : null}
-        </dl>
       </section>
+
+      {user.profile_text || portfolioContact || socialLinks.length > 0 ? (
+        <section className={styles.portfolioBlocks} aria-label="Portfolio">
+          {user.profile_text ? (
+            <article className={styles.portfolioBlock}>
+              <span>About</span>
+              <h2>自己紹介</h2>
+              <p>{user.profile_text}</p>
+            </article>
+          ) : null}
+          {portfolioContact || socialLinks.length > 0 ? (
+            <article className={styles.portfolioBlock}>
+              <span>Contact</span>
+              <h2>連絡先</h2>
+              {portfolioContact ? <p>{portfolioContact}</p> : null}
+              {socialLinks.length > 0 ? (
+                <ul className={styles.socialLinks}>
+                  {socialLinks.map((link) => (
+                    <li key={`${link.type}-${link.url}`}>
+                      <a href={link.url} target="_blank" rel="noopener noreferrer">
+                        {link.type}
+                        <Icon name="external" size={11} aria-hidden />
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </article>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className={styles.content} aria-labelledby="creator-works-heading">
         <h2 id="creator-works-heading" className={styles.sectionTitle}>
           作品
         </h2>
-          {eventOptions.length > 0 ? (
-            <div
-              className={`${styles.filters} fn-chip-scroll`}
-              aria-label="イベント絞り込み"
-            >
-              <Link
-                href={worksHref(basePath)}
-                className={!selectedEventId ? styles.filterActive : styles.filter}
-              >
-                すべて
-              </Link>
-              {eventOptions.map((event) => (
-                <Link
-                  key={event.id}
-                  href={worksHref(basePath, event.id)}
-                  className={
-                    selectedEventId === event.id ? styles.filterActive : styles.filter
-                  }
-                >
-                  {event.title}
-                </Link>
-              ))}
-            </div>
-          ) : null}
 
           {ownVideos.length === 0 ? (
             <div className="fn-empty">
@@ -583,49 +420,6 @@ export default async function UserPage({
           ) : null}
       </section>
 
-      <section
-        className={styles.eventsSection}
-        aria-labelledby="creator-events-heading"
-      >
-        <h2 id="creator-events-heading" className={styles.sectionTitle}>
-          参加イベント
-        </h2>
-        {eventParticipationRows.length === 0 ? (
-          <p className={styles.eventsEmpty}>参加履歴はまだありません。</p>
-        ) : (
-          <div className={styles.eventList}>
-            {eventParticipationRows.map((event, index) => (
-              <Link
-                key={event.id}
-                href={`/event/${event.id}`}
-                className={styles.eventRow}
-              >
-                <span className={styles.eventIndex}>{format2(index + 1)}</span>
-                <div className={styles.eventBody}>
-                  <div className={styles.eventTitleRow}>
-                    <h3>{event.title}</h3>
-                    <span className={styles.eventBadge}>
-                      {event.roles?.includes("creator") ? "参加中" : "参加済み"}
-                    </span>
-                  </div>
-                  {event.explanation ? <p>{event.explanation}</p> : null}
-                  <span className={styles.eventMeta}>
-                    {event.video_count} works
-                  </span>
-                </div>
-                <span className={styles.eventDate}>
-                  {event.start_time
-                    ? event.end_time
-                      ? `${dateOnly(event.start_time)} - ${dateOnly(event.end_time)}`
-                      : dateOnly(event.start_time)
-                    : dateOnly(event.latest_time)}
-                  <Icon name="chevron-right" size={13} aria-hidden />
-                </span>
-              </Link>
-            ))}
-          </div>
-        )}
-      </section>
     </div>
   );
 }

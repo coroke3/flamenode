@@ -124,7 +124,7 @@ export function SlotList({
               <tr key={s.id}>
                 <td>
                   {s.start_time
-                    ? `${formatUnix(s.start_time, { dateOnly: true })} ${formatUnix(s.start_time, { timeOnly: true })}${s.end_time ? ` - ${formatUnix(s.end_time, { timeOnly: true })}` : ""}`
+                    ? `${formatUnix(s.start_time, { dateOnly: true })} ${formatUnix(s.start_time, { timeOnly: true })}`
                     : (s.slot_label ?? "-")}
                   {s.is_group ? (
                     <span className="fn-badge fn-badge-soft" style={{ marginLeft: 6 }}>

@@ -105,5 +105,5 @@ export async function GET(request: Request): Promise<Response> {
   );
 }
 
-// SQL 集計関数の参照を保持 (将来の COUNT/集計拡張用)
+// SQL 集計関数の参照を保持。
 void sql;

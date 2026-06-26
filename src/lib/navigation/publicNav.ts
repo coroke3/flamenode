@@ -1,6 +1,6 @@
 import type { IconName } from "@/components/ui/Icon";
 
-/** 公開面ヘッダー共通ナビ（PublicHeader / AuthHeader） */
+/** 公開面ヘッダー共通ナビ（PublicHeader） */
 export const PUBLIC_NAV_ITEMS: {
   href: string;
   label: string;

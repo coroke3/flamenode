@@ -1,14 +1,16 @@
 import * as React from "react";
 import Link from "next/link";
-import { inArray } from "drizzle-orm";
+import { desc, inArray } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import {
   getEditableEventIds,
   getManageStaffXUserIds,
+  canManageXIdLinkRequests,
   shouldWarnManageActiveXMismatch,
 } from "@/lib/auth/ownership";
 import { events as eventsTable } from "@/lib/db/schema";
+import { compareEventsByUpcomingPriority } from "@/lib/utils/eventOrdering";
 import { Icon } from "@/components/ui/Icon";
 import styles from "./ManageSidebar.module.css";
 
@@ -23,23 +25,66 @@ export async function ManageSidebar(): Promise<React.ReactElement | null> {
   const db = getDatabase();
   if (!db) return null;
 
-  const eventIds = await getEditableEventIds(db, u.id);
+  const isAdmin = u.role === "admin";
+  const editableEventIds = isAdmin ? [] : await getEditableEventIds(db, u.id);
 
   const events =
-    eventIds.length > 0
+    isAdmin
       ? await db
           .select({
             id: eventsTable.id,
             title: eventsTable.title,
             accent_color: eventsTable.accent_color,
+            is_active: eventsTable.is_active,
+            is_archived: eventsTable.is_archived,
+            start_time: eventsTable.start_time,
+            end_time: eventsTable.end_time,
+            entry_start_time: eventsTable.entry_start_time,
+            entry_end_time: eventsTable.entry_end_time,
           })
           .from(eventsTable)
-          .where(inArray(eventsTable.id, eventIds))
-      : [];
+          .orderBy(
+            desc(eventsTable.start_time),
+            desc(eventsTable.created_at),
+            desc(eventsTable.id),
+          )
+          .then((rows) => rows.sort(compareEventsByUpcomingPriority))
+      : editableEventIds.length > 0
+        ? await db
+            .select({
+              id: eventsTable.id,
+              title: eventsTable.title,
+              accent_color: eventsTable.accent_color,
+              is_active: eventsTable.is_active,
+              is_archived: eventsTable.is_archived,
+              start_time: eventsTable.start_time,
+              end_time: eventsTable.end_time,
+              entry_start_time: eventsTable.entry_start_time,
+              entry_end_time: eventsTable.entry_end_time,
+            })
+            .from(eventsTable)
+            .where(inArray(eventsTable.id, editableEventIds))
+            .orderBy(
+              desc(eventsTable.start_time),
+              desc(eventsTable.created_at),
+              desc(eventsTable.id),
+            )
+            .then((rows) => rows.sort(compareEventsByUpcomingPriority))
+        : [];
 
   const activeX = u.active_x_user_id?.trim() || null;
-  const manageStaffXIds = await getManageStaffXUserIds(db, u.id, eventIds);
-  const warnActiveX = shouldWarnManageActiveXMismatch(activeX, manageStaffXIds);
+  const manageStaffXIds = isAdmin
+    ? []
+    : await getManageStaffXUserIds(
+        db,
+        u.id,
+        events.map((event) => event.id),
+      );
+  const warnActiveX = !isAdmin && shouldWarnManageActiveXMismatch(activeX, manageStaffXIds);
+  const canManageXLinks = await canManageXIdLinkRequests(db, {
+    id: u.id,
+    role: u.role ?? null,
+  });
 
   return (
     <aside className={styles.sidebar}>
@@ -55,6 +100,11 @@ export async function ManageSidebar(): Promise<React.ReactElement | null> {
         <Link href="/manage" className={styles.topLink}>
           <Icon name="grid" size={11} aria-hidden /> 運営トップ
         </Link>
+        {canManageXLinks ? (
+          <Link href="/manage/x-link-requests" className={styles.topLink}>
+            <Icon name="user" size={11} aria-hidden /> X ID 連携申請
+          </Link>
+        ) : null}
         {events.map((ev) => (
           <Link
             key={ev.id}

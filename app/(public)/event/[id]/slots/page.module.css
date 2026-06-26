@@ -1,4 +1,6 @@
 .page {
+  --fn-page-gutter: clamp(16px, 3vw, 32px);
+
   width: 100%;
   margin: 0;
 }
@@ -53,19 +55,30 @@
   min-width: 0;
 }
 
-@media (min-width: 1080px) {
+@media (min-width: 1024px) {
   .layout {
-    grid-template-columns: minmax(0, 1fr) minmax(270px, 320px);
+    grid-template-columns: minmax(0, 1fr) 320px;
     align-items: start;
   }
 
   .aside {
     position: sticky;
-    top: calc(var(--header-h, 60px) + 22px);
+    top: calc(var(--header-h, 64px) + 18px);
+  }
+}
+
+@media (min-width: 1280px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr) 360px;
+    gap: 36px;
   }
 }
 
 @media (max-width: 640px) {
+  .page {
+    --fn-page-gutter: clamp(14px, 4vw, 20px);
+  }
+
   .title {
     font-size: clamp(36px, 13vw, 56px);
   }

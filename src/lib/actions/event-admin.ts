@@ -40,7 +40,6 @@ const eventSchema = z.object({
   entry_start_time: z.string().trim().optional().nullable(),
   entry_end_time: z.string().trim().optional().nullable(),
   is_active: z.coerce.number().min(0).max(1).default(0),
-  is_entry_open: z.coerce.number().min(0).max(1).default(0),
   is_archived: z.coerce.number().min(0).max(1).default(0),
   allow_user_video_event_links: z.coerce.number().min(0).max(1).default(0),
   allow_user_video_edits: z.coerce.number().min(0).max(1).default(0),
@@ -90,7 +89,51 @@ function parseDateInput(raw: string | null | undefined): number | null {
   return parseJstDatetimeLocal(raw);
 }
 
-function buildVideoFormSettingsJson(data: z.infer<typeof eventSchema>): string {
+function boolFormValue(value: FormDataEntryValue | undefined): boolean {
+  return String(value ?? "") === "1";
+}
+
+function cleanQuestionId(value: FormDataEntryValue | undefined, index: number): string {
+  const fallback =
+    index === 0 ? "stage_permission" : `stage_permission_${index + 1}`;
+  const cleaned = String(value ?? "")
+    .trim()
+    .replace(/[^A-Za-z0-9_-]/g, "_")
+    .slice(0, 64);
+  return cleaned || fallback;
+}
+
+function buildVideoFormSettingsJson(
+  formData: FormData,
+  data: z.infer<typeof eventSchema>,
+): string {
+  const ids = formData.getAll("stage_permission_question_id");
+  const enabled = formData.getAll("stage_permission_question_enabled");
+  const required = formData.getAll("stage_permission_question_required");
+  const labels = formData.getAll("stage_permission_question_label");
+  const descriptions = formData.getAll("stage_permission_question_description");
+  const placeholders = formData.getAll("stage_permission_question_placeholder");
+  const sentQuestionArray =
+    String(formData.get("stage_permission_questions_present") ?? "") === "1";
+
+  if (sentQuestionArray || ids.length > 0) {
+    const stagePermissions = ids.slice(0, 20).map((id, index) => ({
+      id: cleanQuestionId(id, index),
+      enabled: boolFormValue(enabled[index]),
+      required: boolFormValue(required[index]),
+      label:
+        String(labels[index] ?? "").trim().slice(0, 120) ||
+        DEFAULT_STAGE_PERMISSION_FIELD.label,
+      description:
+        String(descriptions[index] ?? "").trim().slice(0, 1000) ||
+        DEFAULT_STAGE_PERMISSION_FIELD.description,
+      placeholder:
+        String(placeholders[index] ?? "").trim().slice(0, 500) ||
+        DEFAULT_STAGE_PERMISSION_FIELD.placeholder,
+    }));
+    return JSON.stringify({ stage_permissions: stagePermissions });
+  }
+
   return JSON.stringify({
     stage_permission: {
       enabled: data.stage_permission_enabled === 1,
@@ -170,13 +213,12 @@ export async function createEvent(
     img_url: data.img_url ?? null,
     accent_color: data.accent_color ?? null,
     is_active: data.is_active,
-    is_entry_open: data.is_entry_open,
     is_archived: data.is_archived,
     allow_user_video_event_links: data.allow_user_video_event_links,
     allow_user_video_edits: data.allow_user_video_edits,
     user_video_edit_permission_keys_json:
       data.user_video_edit_permission_keys_json ?? null,
-    video_form_settings_json: buildVideoFormSettingsJson(data),
+    video_form_settings_json: buildVideoFormSettingsJson(formData, data),
     start_time: parseDateInput(data.start_time),
     end_time: parseDateInput(data.end_time),
     entry_start_time: parseDateInput(data.entry_start_time),
@@ -206,6 +248,9 @@ export async function createEvent(
   });
 
   revalidatePath("/admin/events");
+  revalidatePath("/manage");
+  revalidatePath(`/manage/events/${id}`);
+  revalidatePath(`/manage/events/${id}/edit`);
   revalidatePath("/event");
   revalidatePath(`/event/${id}`);
   return { ok: true, eventId: id };
@@ -253,13 +298,12 @@ export async function updateEvent(
       img_url: data.img_url ?? null,
       accent_color: data.accent_color ?? null,
       is_active: data.is_active,
-      is_entry_open: data.is_entry_open,
       is_archived: data.is_archived,
       allow_user_video_event_links: data.allow_user_video_event_links,
       allow_user_video_edits: data.allow_user_video_edits,
     user_video_edit_permission_keys_json:
       data.user_video_edit_permission_keys_json ?? null,
-      video_form_settings_json: buildVideoFormSettingsJson(data),
+      video_form_settings_json: buildVideoFormSettingsJson(formData, data),
       start_time: parseDateInput(data.start_time),
       end_time: parseDateInput(data.end_time),
       entry_start_time: parseDateInput(data.entry_start_time),
@@ -286,6 +330,9 @@ export async function updateEvent(
 
   revalidatePath("/admin/events");
   revalidatePath(`/admin/events/${data.id}`);
+  revalidatePath("/manage");
+  revalidatePath(`/manage/events/${data.id}`);
+  revalidatePath(`/manage/events/${data.id}/edit`);
   revalidatePath("/event");
   revalidatePath(`/event/${data.id}`);
 
@@ -344,6 +391,9 @@ export async function deleteEvent(
 
   revalidatePath("/admin/events");
   revalidatePath(`/admin/events/${eventId}`);
+  revalidatePath("/manage");
+  revalidatePath(`/manage/events/${eventId}`);
+  revalidatePath(`/manage/events/${eventId}/edit`);
   revalidatePath("/event");
   revalidatePath(`/event/${eventId}`);
   return { ok: true };

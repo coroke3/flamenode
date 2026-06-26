@@ -75,7 +75,8 @@ export async function enqueueSlotDeadlineReminders(
         AND s.video_id IS NULL
         AND s.discord_user_id IS NOT NULL
         AND e.is_archived = 0
-        AND (e.is_active = 1 OR e.is_entry_open = 1)
+        AND e.is_active = 1
+        AND (e.entry_start_time IS NULL OR e.entry_start_time <= ?1)
         AND e.entry_end_time IS NOT NULL
         AND e.entry_end_time > ?1
         AND e.entry_end_time <= ?2

@@ -90,6 +90,7 @@ export const xUsers = sqliteTable("x_users", {
   x_name: text("x_name").notNull(),
   icon_url: text("icon_url"),
   profile_text: text("profile_text"),
+  portfolio_contact: text("portfolio_contact"),
   youtube_channel_url: text("youtube_channel_url"),
   other_social_links: text("other_social_links"), // JSON
   creative_start_date: integer("creative_start_date"),
@@ -414,7 +415,7 @@ export const videos = sqliteTable("videos", {
   //   "unlisted" は FlameNode 内部の限定公開状態 (URL 知っている人のみ閲覧可) を指す。
   //   YouTube 側の "限定公開 (unlisted)" とは別概念。
   //   YouTube 側が限定公開であっても FlameNode 側 status が "public" なら通常公開扱い。
-  //   YouTube 側の privacy 状態は将来 youtube_privacy_status カラムで管理予定 (未実装)。
+  //   YouTube 側の privacy 状態は video_youtube_metadata.youtube_privacy_status で管理する。
   visibility_status: text("visibility_status", {
     enum: [
       "draft",

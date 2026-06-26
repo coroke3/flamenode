@@ -45,7 +45,6 @@ export function resolveImportedEventState(args: {
   startTime: number | null;
   endTime: number | null;
   now: number;
-  forceEntryOpen?: boolean;
 }): ImportedEventFlags {
   if (args.mode === "draft") {
     return { is_active: 0, is_entry_open: 0, is_archived: 0 };
@@ -54,7 +53,7 @@ export function resolveImportedEventState(args: {
   if (args.mode === "active_event") {
     return {
       is_active: 1,
-      is_entry_open: args.forceEntryOpen ? 1 : 0,
+      is_entry_open: 0,
       is_archived: 0,
     };
   }
@@ -73,7 +72,7 @@ export function resolveImportedEventState(args: {
   if (start && start <= args.now && (!end || end >= args.now)) {
     return {
       is_active: 1,
-      is_entry_open: args.forceEntryOpen ? 1 : 0,
+      is_entry_open: 0,
       is_archived: 0,
     };
   }
@@ -81,7 +80,7 @@ export function resolveImportedEventState(args: {
   if (start && start > args.now) {
     return {
       is_active: 0,
-      is_entry_open: args.forceEntryOpen ? 1 : 0,
+      is_entry_open: 0,
       is_archived: 0,
     };
   }
@@ -222,7 +221,6 @@ export function buildUsedSoftwareJson(
 
 export function importedStateLabel(flags: ImportedEventFlags): string {
   if (flags.is_archived === 1) return "archived";
-  if (flags.is_active === 1 && flags.is_entry_open === 1) return "active (entry open)";
   if (flags.is_active === 1) return "active";
   if (flags.is_archived === 0 && flags.is_active === 0) return "draft / scheduled";
   return "inactive";

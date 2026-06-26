@@ -121,7 +121,7 @@ export default async function AdminAuditDetailPage({
               case "videos":
                 return `/admin/videos/${encodeURIComponent(recordId)}`;
               case "events":
-                return `/admin/events/${encodeURIComponent(recordId)}`;
+                return `/manage/events/${encodeURIComponent(recordId)}/edit`;
               case "users":
                 return `/admin/users/${encodeURIComponent(recordId)}`;
               case "x_account_link_requests":

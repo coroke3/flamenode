@@ -9,8 +9,8 @@ import {
 
 test("getGuardRedirectPath redirects unauthenticated to entry with next", () => {
   assert.equal(
-    getGuardRedirectPath("unauthenticated", "/dashboard/post?mode=free"),
-    "/entry?next=%2Fdashboard%2Fpost%3Fmode%3Dfree",
+    getGuardRedirectPath("unauthenticated", "/entry/unslotted"),
+    "/entry?next=%2Fentry%2Funslotted",
   );
 });
 
@@ -29,8 +29,8 @@ test("getGuardRedirectPath redirects Active X reasons to settings", () => {
     "active_x_not_approved",
   ]) {
     assert.equal(
-      getGuardRedirectPath(reason, "/dashboard/post/slotted?slot=s1"),
-      "/dashboard/settings?next=%2Fdashboard%2Fpost%2Fslotted%3Fslot%3Ds1",
+      getGuardRedirectPath(reason, "/entry/slotted?slot=s1"),
+      "/dashboard/settings?next=%2Fentry%2Fslotted%3Fslot%3Ds1",
     );
   }
 });
@@ -42,7 +42,7 @@ test("getGuardRedirectPath does not redirect terminal error reasons", () => {
     "cost_guard_blocked",
     "db_unavailable",
   ]) {
-    assert.equal(getGuardRedirectPath(reason, "/dashboard/post"), null);
+    assert.equal(getGuardRedirectPath(reason, "/entry"), null);
     assert.equal(shouldShowGuardErrorOnly(reason), true);
   }
 });
@@ -63,8 +63,8 @@ test("redirectForGuardReason pushes when redirectable", () => {
   const ok = redirectForGuardReason(
     { push: (path) => pushed.push(path) },
     "active_x_required",
-    "/dashboard/post",
+    "/entry",
   );
   assert.equal(ok, true);
-  assert.deepEqual(pushed, ["/dashboard/settings?next=%2Fdashboard%2Fpost"]);
+  assert.deepEqual(pushed, ["/dashboard/settings?next=%2Fentry"]);
 });

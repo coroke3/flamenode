@@ -310,6 +310,26 @@
   margin-bottom: 10px;
 }
 
+.fn-console-resource-tabs,
+[data-admin-shell] .fn-console-resource-tabs,
+[data-admin-shell] .fn-console-event-tabs,
+[data-manage-shell] .fn-console-resource-tabs,
+[data-manage-shell] .fn-console-event-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 16px;
+}
+
+.fn-console-resource-tabs .fn-btn,
+[data-admin-shell] .fn-console-resource-tabs .fn-btn,
+[data-admin-shell] .fn-console-event-tabs .fn-btn,
+[data-manage-shell] .fn-console-resource-tabs .fn-btn,
+[data-manage-shell] .fn-console-event-tabs .fn-btn {
+  flex: 0 0 auto;
+}
+
 [data-admin-shell] .fn-console-kv-grid,
 [data-manage-shell] .fn-console-kv-grid {
   display: grid;

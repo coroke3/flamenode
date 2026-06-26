@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { desc } from "drizzle-orm";
 import { events as eventsTable } from "@/lib/db/schema";
 import { getDatabase } from "@/lib/cloudflare";
+import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 import {
   MAX_PUBLIC_EVENT_LIMIT,
   PUBLIC_EVENT_KEYS,
@@ -38,6 +39,8 @@ export async function GET(req: Request): Promise<Response> {
       slot_visibility_mode: eventsTable.slot_visibility_mode,
       start_time: eventsTable.start_time,
       end_time: eventsTable.end_time,
+      entry_start_time: eventsTable.entry_start_time,
+      entry_end_time: eventsTable.entry_end_time,
       max_slots_per_video: eventsTable.max_slots_per_video,
       max_consecutive_slots_per_entry: eventsTable.max_consecutive_slots_per_entry,
     })
@@ -47,8 +50,12 @@ export async function GET(req: Request): Promise<Response> {
     .offset((page - 1) * limit);
 
   // DB 側で明示列を絞り込んでいるが、二重防御として pickKeys も通す。
+  const now = Math.floor(Date.now() / 1000);
   const items: PublicEventDto[] = rows.map((row) =>
-    pickKeys(row, PUBLIC_EVENT_KEYS) as PublicEventDto,
+    pickKeys(
+      { ...row, is_entry_open: isAcceptingEntries(row, now) ? 1 : 0 },
+      PUBLIC_EVENT_KEYS,
+    ) as PublicEventDto,
   );
 
   return NextResponse.json(

@@ -9,6 +9,7 @@ import {
   xIdMergeReverts,
 } from "@/lib/db/schema";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { AdminUserManagementTabs } from "@/components/admin/AdminUserManagementTabs";
 import { Icon } from "@/components/ui/Icon";
 import {
   approveXIdMergeRequest,
@@ -105,6 +106,7 @@ export default async function AdminXIdMergesPage({
         title="X ID統合管理"
         description="既存 X ID 同士の統合申請を、影響範囲の確認、承認、実行の順で扱います。自動実行はしません。"
       />
+      <AdminUserManagementTabs active="merges" />
 
       <nav
         aria-label="X ID統合管理ビュー"

@@ -3,6 +3,7 @@ import type {
   SpreadsheetPasteResult,
 } from "#spreadsheet/paste";
 import { parseSpreadsheetPaste } from "#spreadsheet/paste";
+import { SPREADSHEET_IMPORT_MAX_ROWS } from "#spreadsheet/constants";
 import {
   formatImportPayloadIssue,
   getImportPayloadIssue,
@@ -15,10 +16,12 @@ function parseSpreadsheetImportText(opts: {
   columnNames: string[];
   hasHeader: boolean;
   delimiter: SpreadsheetDelimiterMode;
+  maxRows?: number;
 }): SpreadsheetPasteResult {
   return parseSpreadsheetPaste(opts.text, opts.columnNames, {
     hasHeader: opts.hasHeader,
     delimiter: opts.delimiter,
+    maxRows: opts.maxRows,
   });
 }
 
@@ -54,6 +57,7 @@ export function buildSpreadsheetImportLocalPreview(opts: {
     columnNames: opts.columnNames,
     hasHeader: opts.hasHeader,
     delimiter: opts.delimiter,
+    maxRows: SPREADSHEET_IMPORT_MAX_ROWS + 1,
   });
   const warnings = [...parsed.warnings];
   const rowIssue = getImportRowCountIssue(parsed.rows.length);
@@ -108,6 +112,7 @@ export function prepareSpreadsheetImportRows(opts: {
       columnNames: opts.columnNames,
       hasHeader: opts.hasHeader,
       delimiter: opts.delimiter,
+      maxRows: SPREADSHEET_IMPORT_MAX_ROWS + 1,
     });
     rows = parsed.rows;
     warnings = parsed.warnings;

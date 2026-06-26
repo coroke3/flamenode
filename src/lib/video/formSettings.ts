@@ -1,4 +1,7 @@
+export const LEGACY_STAGE_PERMISSION_ID = "stage_permission";
+
 export interface StagePermissionFieldSettings {
+  id: string;
   enabled: boolean;
   required: boolean;
   label: string;
@@ -6,11 +9,19 @@ export interface StagePermissionFieldSettings {
   placeholder: string;
 }
 
+export interface StagePermissionAnswer {
+  id: string;
+  label: string;
+  value: string;
+}
+
 export interface VideoFormSettings {
   stage_permission?: Partial<StagePermissionFieldSettings> | null;
+  stage_permissions?: Partial<StagePermissionFieldSettings>[] | null;
 }
 
 export const DEFAULT_STAGE_PERMISSION_FIELD: StagePermissionFieldSettings = {
+  id: LEGACY_STAGE_PERMISSION_ID,
   enabled: true,
   required: false,
   label: "ステージ・素材・権利まわりの使用許可",
@@ -19,8 +30,38 @@ export const DEFAULT_STAGE_PERMISSION_FIELD: StagePermissionFieldSettings = {
   placeholder: "例：自作ステージ / 利用規約確認済み / 権利者許可済み など",
 };
 
+function cleanId(value: unknown, fallback: string): string {
+  if (typeof value !== "string") return fallback;
+  const cleaned = value.trim().replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64);
+  return cleaned || fallback;
+}
+
 function cleanText(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function normalizeStagePermissionQuestion(
+  value: Partial<StagePermissionFieldSettings> | null | undefined,
+  index: number,
+): StagePermissionFieldSettings {
+  const fallbackId =
+    index === 0
+      ? LEGACY_STAGE_PERMISSION_ID
+      : `${LEGACY_STAGE_PERMISSION_ID}_${index + 1}`;
+  return {
+    id: cleanId(value?.id, fallbackId),
+    enabled: value?.enabled === true,
+    required: value?.required === true,
+    label: cleanText(value?.label, DEFAULT_STAGE_PERMISSION_FIELD.label),
+    description: cleanText(
+      value?.description,
+      DEFAULT_STAGE_PERMISSION_FIELD.description,
+    ),
+    placeholder: cleanText(
+      value?.placeholder,
+      DEFAULT_STAGE_PERMISSION_FIELD.placeholder,
+    ),
+  };
 }
 
 export function parseVideoFormSettings(
@@ -38,36 +79,122 @@ export function parseVideoFormSettings(
   }
 }
 
-export function resolveStagePermissionField(
-  settingsList: readonly VideoFormSettings[],
-): StagePermissionFieldSettings | null {
-  const enabled = settingsList
-    .map((settings) => settings.stage_permission)
-    .filter(
-      (settings): settings is Partial<StagePermissionFieldSettings> =>
-        !!settings && settings.enabled === true,
-    );
+export function getStagePermissionQuestions(
+  settings: VideoFormSettings,
+): StagePermissionFieldSettings[] {
+  if (Array.isArray(settings.stage_permissions)) {
+    return settings.stage_permissions.map(normalizeStagePermissionQuestion);
+  }
+  if (settings.stage_permission) {
+    return [normalizeStagePermissionQuestion(settings.stage_permission, 0)];
+  }
+  return [];
+}
 
-  if (enabled.length === 0) return null;
-
-  const first = enabled[0] ?? {};
+export function createDefaultStagePermissionQuestion(
+  index = 0,
+): StagePermissionFieldSettings {
   return {
-    enabled: true,
-    required: enabled.some((settings) => settings.required === true),
-    label: cleanText(first.label, DEFAULT_STAGE_PERMISSION_FIELD.label),
-    description: cleanText(
-      first.description,
-      DEFAULT_STAGE_PERMISSION_FIELD.description,
-    ),
-    placeholder: cleanText(
-      first.placeholder,
-      DEFAULT_STAGE_PERMISSION_FIELD.placeholder,
-    ),
+    ...DEFAULT_STAGE_PERMISSION_FIELD,
+    id:
+      index === 0
+        ? LEGACY_STAGE_PERMISSION_ID
+        : `${LEGACY_STAGE_PERMISSION_ID}_${index + 1}`,
+    enabled: false,
   };
 }
 
-export function resolveStagePermissionFieldFromJson(
+export function resolveStagePermissionFields(
+  settingsList: readonly VideoFormSettings[],
+): StagePermissionFieldSettings[] {
+  const byId = new Map<string, StagePermissionFieldSettings>();
+
+  for (const settings of settingsList) {
+    for (const question of getStagePermissionQuestions(settings)) {
+      if (!question.enabled) continue;
+      const existing = byId.get(question.id);
+      if (existing) {
+        byId.set(question.id, {
+          ...existing,
+          required: existing.required || question.required,
+        });
+      } else {
+        byId.set(question.id, question);
+      }
+    }
+  }
+
+  return Array.from(byId.values());
+}
+
+export function resolveStagePermissionFieldsFromJson(
   rawSettings: readonly (string | null | undefined)[],
-): StagePermissionFieldSettings | null {
-  return resolveStagePermissionField(rawSettings.map(parseVideoFormSettings));
+): StagePermissionFieldSettings[] {
+  return resolveStagePermissionFields(rawSettings.map(parseVideoFormSettings));
+}
+
+export function parseStagePermissionAnswers(
+  raw: string | null | undefined,
+): StagePermissionAnswer[] {
+  if (!raw || !raw.trim()) return [];
+  const trimmed = raw.trim();
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return [];
+    }
+    const answers = (parsed as { answers?: unknown }).answers;
+    if (!Array.isArray(answers)) return [];
+    return answers
+      .map((item): StagePermissionAnswer | null => {
+        if (!item || typeof item !== "object") return null;
+        const data = item as Record<string, unknown>;
+        const id = cleanId(data.id, "");
+        const label = cleanText(data.label, DEFAULT_STAGE_PERMISSION_FIELD.label);
+        const value =
+          typeof data.value === "string" && data.value.trim()
+            ? data.value.trim()
+            : "";
+        if (!id || !value) return null;
+        return { id, label, value };
+      })
+      .filter((item): item is StagePermissionAnswer => item !== null);
+  } catch {
+    return [
+      {
+        id: LEGACY_STAGE_PERMISSION_ID,
+        label: DEFAULT_STAGE_PERMISSION_FIELD.label,
+        value: trimmed,
+      },
+    ];
+  }
+}
+
+export function getStagePermissionAnswerValue(
+  raw: string | null | undefined,
+  questionId: string,
+): string {
+  const normalizedId = cleanId(questionId, LEGACY_STAGE_PERMISSION_ID);
+  return (
+    parseStagePermissionAnswers(raw).find((answer) => answer.id === normalizedId)
+      ?.value ?? ""
+  );
+}
+
+export function serializeStagePermissionAnswers(
+  answers: readonly StagePermissionAnswer[],
+): string | null {
+  const cleaned = answers
+    .map((answer) => ({
+      id: cleanId(answer.id, ""),
+      label: cleanText(answer.label, DEFAULT_STAGE_PERMISSION_FIELD.label),
+      value: answer.value.trim(),
+    }))
+    .filter((answer) => answer.id && answer.value);
+
+  if (cleaned.length === 0) return null;
+  if (cleaned.length === 1 && cleaned[0].id === LEGACY_STAGE_PERMISSION_ID) {
+    return cleaned[0].value;
+  }
+  return JSON.stringify({ version: 1, answers: cleaned });
 }

@@ -3,6 +3,7 @@
   "event.slots",
   "event.members",
   "event.questions",
+  "xid.link_requests",
   "videos.title",
   "videos.music_credit",
   "videos.members",
@@ -32,8 +33,12 @@ export const COLLABORATOR_PERMISSION_LABELS: Record<
     description: "公開メンバー、内部メンバー、役職ラベル、権限を管理できます。",
   },
   "event.questions": {
-    label: "投稿フォーム・一般作品権限(イベント毎)",
-    description: "イベント固有の投稿フォーム項目と、投稿後に直せる作品項目を変更できます。",
+    label: "投稿フォーム・一般作品権限の上書き",
+    description: "イベント固有の投稿フォーム項目と、このイベントで上書きする作品編集権限を変更できます。",
+  },
+  "xid.link_requests": {
+    label: "X ID 連携申請の承認",
+    description: "manage 画面で X ID 連携申請を承認・却下できます。",
   },
   "videos.title": {
     label: "作品タイトル編集",

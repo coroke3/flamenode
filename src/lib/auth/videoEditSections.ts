@@ -29,7 +29,9 @@ export type VideoEditSectionKey =
 export type EventEditSectionKey =
   | "event.basic"
   | "event.members"
-  | "event.slots";
+  | "event.slots"
+  | "event.questions"
+  | "xid.link_requests";
 
 export type CollaboratorPermissionKey =
   | VideoEditSectionKey

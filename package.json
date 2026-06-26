@@ -7,6 +7,7 @@
     "#utils/delimited": "./src/lib/utils/delimited.ts",
     "#utils/next": "./src/lib/utils/next.ts",
     "#utils/xid": "./src/lib/utils/xid.ts",
+    "#utils/event-status-core": "./src/lib/utils/eventStatusCore.ts",
     "#utils/clipboard-html": "./src/lib/utils/clipboardHtml.ts",
     "#spreadsheet/constants": "./src/lib/admin/spreadsheet/constants.ts",
     "#spreadsheet/cellFormat": "./src/lib/admin/spreadsheet/cellFormat.ts",
@@ -15,6 +16,9 @@
     "#spreadsheet/grid-find": "./src/lib/admin/spreadsheet/gridFind.ts"
   },
   "description": "FlameNode - 個人制作映像とイベントをつなぐ動画プラットフォーム。",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "node -r ./scripts/load-dev-vars.cjs node_modules/next/dist/bin/next dev",
     "build": "next build",
@@ -37,9 +41,13 @@
     "test:youtube": "node --test --experimental-strip-types src/lib/youtube/id.test.mjs",
     "test:unit": "node --test --experimental-strip-types workers/**/*.test.mjs src/**/*.test.mjs",
     "test:static-rebuild": "node --test scripts/static-rebuild.test.mjs",
-    "pages:build": "next-on-pages",
-    "pages:dev": "next-on-pages && wrangler pages dev .vercel/output/static --compatibility-flag=nodejs_compat --d1=DB --r2=BUCKET --kv=KV",
-    "preview": "wrangler pages dev"
+    "pages:build": "next-on-pages && node scripts/pages-postbuild.mjs",
+    "pages:dev": "npm run pages:build && wrangler pages dev .vercel/output/static --compatibility-flag=nodejs_compat --d1=DB --r2=BUCKET --kv=KV",
+    "pages:deploy": "npm run pages:build && wrangler pages deploy .vercel/output/static --project-name=flamenode",
+    "workers:deploy": "node scripts/deploy-workers.mjs",
+    "cf:bootstrap": "node scripts/cloudflare-bootstrap.mjs",
+    "cf:sync-ids": "node scripts/sync-wrangler-ids.mjs",
+    "preview": "npm run pages:dev"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.7.4",

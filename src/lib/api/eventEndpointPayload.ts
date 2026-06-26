@@ -1,3 +1,5 @@
+import { isAcceptingEntries } from "#utils/event-status-core";
+
 export const EVENT_API_VIDEO_LIMIT = 50;
 export const EVENT_API_EXPLANATION_MAX = 280;
 
@@ -6,8 +8,13 @@ export interface EventApiEventInput {
   title: string;
   explanation: string | null;
   is_active: number | null;
+  /** Legacy storage flag. Public payload now derives this from entry dates. */
   is_entry_open: number | null;
   is_archived: number | null;
+  start_time: number | null;
+  end_time: number | null;
+  entry_start_time: number | null;
+  entry_end_time: number | null;
 }
 
 export interface EventApiVideoInput {
@@ -51,6 +58,7 @@ export function buildEventApiPayload(
   event: EventApiEventInput,
   videos: readonly EventApiVideoInput[],
   limit = EVENT_API_VIDEO_LIMIT,
+  now: number = Math.floor(Date.now() / 1000),
 ): EventApiPayload {
   const safeLimit = Math.max(1, Math.min(EVENT_API_VIDEO_LIMIT, Math.floor(limit)));
   return {
@@ -59,7 +67,7 @@ export function buildEventApiPayload(
       title: event.title,
       explanation: truncateForEventApi(event.explanation),
       is_active: event.is_active === 1,
-      is_entry_open: event.is_entry_open === 1,
+      is_entry_open: isAcceptingEntries(event, now),
       is_archived: event.is_archived === 1,
     },
     videos: videos.slice(0, safeLimit).map((video) => ({

@@ -1,16 +1,15 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
+import { Icon } from "@/components/ui/Icon";
+import { formatUnix } from "@/lib/utils/format";
 import pageStyles from "./settings-page.module.css";
 import { SettingsStatusPill, type XApprovalStatus } from "./SettingsStatusPill";
-import { Icon } from "@/components/ui/Icon";
 import {
   DeleteXIdForm,
   SetActiveXButton,
   XIdCompactProfileForm,
 } from "./XIdSettingsClient";
-import { formatUnix } from "@/lib/utils/format";
 
 export type SettingsXIdRow = {
   id: string;
@@ -19,6 +18,7 @@ export type SettingsXIdRow = {
   approval_status: XApprovalStatus;
   approval_requested_at: number | null;
   profile_text: string | null;
+  portfolio_contact: string | null;
   youtube_channel_url: string | null;
   other_social_links: string | null;
 };
@@ -58,7 +58,7 @@ function XIdAvatar({
 }
 
 function linkedLabel(unix: number | null): string {
-  if (!unix) return "— 連携";
+  if (!unix) return "連携日未記録";
   return `${formatUnix(unix, { dateOnly: true })} 連携`;
 }
 
@@ -74,8 +74,8 @@ export function XIdLinkedList({
   next?: string | null;
 }): React.ReactElement {
   const sorted = React.useMemo(() => {
-    const order = (s: XApprovalStatus) =>
-      s === "approved" ? 0 : s === "pending" ? 1 : 2;
+    const order = (status: XApprovalStatus) =>
+      status === "approved" ? 0 : status === "pending" ? 1 : 2;
     return [...xIds].sort((a, b) => {
       if (a.id === activeXUserId) return -1;
       if (b.id === activeXUserId) return 1;
@@ -89,9 +89,7 @@ export function XIdLinkedList({
       ? activeXUserId
       : null;
 
-  const [editingId, setEditingId] = React.useState<string | null>(
-    defaultEdit,
-  );
+  const [editingId, setEditingId] = React.useState<string | null>(defaultEdit);
 
   React.useEffect(() => {
     if (editingId && !xIds.some((x) => x.id === editingId)) {
@@ -137,40 +135,47 @@ export function XIdLinkedList({
               <div className={pageStyles.rowBadges}>
                 <SettingsStatusPill status={x.approval_status} />
                 {isActive && approved ? (
-                  <span className="fn-badge fn-badge-accent">★ アクティブ</span>
+                  <span className="fn-badge fn-badge-accent">アクティブ</span>
                 ) : null}
               </div>
               <div className={pageStyles.rowOps}>
+                {isActive && approved ? (
+                  <span className={pageStyles.activeMarker}>
+                    <Icon name="check" size={12} aria-hidden />
+                    投稿・枠確保で使用中
+                  </span>
+                ) : null}
                 {approved && !isActive ? (
                   <SetActiveXButton
                     xUserId={x.id}
                     next={next}
                     label="アクティブに設定"
-                    className={pageStyles.linkBtn}
+                    className={`${pageStyles.actionBtn} ${pageStyles.actionBtnPrimary}`}
                   />
                 ) : null}
-                {approved && !isEditing ? (
+                {approved ? (
                   <button
                     type="button"
-                    className={pageStyles.linkBtn}
-                    onClick={() => setEditingId(x.id)}
+                    className={pageStyles.actionBtn}
+                    onClick={() => setEditingId(isEditing ? null : x.id)}
                   >
-                    プロフィール編集
+                    <Icon name="edit" size={12} aria-hidden />
+                    {isEditing ? "編集を閉じる" : "公開プロフィール編集"}
                   </button>
                 ) : null}
                 {x.approval_status === "rejected" ? (
                   <span
-                    className={`${pageStyles.linkBtn} ${pageStyles.linkBtnMuted}`}
+                    className={`${pageStyles.actionBtn} ${pageStyles.actionBtnMuted}`}
                     title="却下された X ID の再審査は運営が行います。"
                   >
-                    再申請
+                    再申請待ち
                   </span>
                 ) : null}
                 {!isActive ? (
                   <DeleteXIdForm
                     xUserId={x.id}
                     label="削除"
-                    className={`${pageStyles.linkBtn} ${pageStyles.linkBtnDanger}`}
+                    className={`${pageStyles.actionBtn} ${pageStyles.actionBtnDanger}`}
                   />
                 ) : null}
               </div>
@@ -178,24 +183,12 @@ export function XIdLinkedList({
 
             {isEditing && approved ? (
               <div className={pageStyles.editPanel}>
-                <p className={pageStyles.editTitle}>プロフィール編集</p>
+                <p className={pageStyles.editTitle}>公開プロフィール編集</p>
                 <XIdCompactProfileForm
                   x={x}
                   iconCandidates={iconCandidatesById[x.id] ?? []}
                   onCancel={() => setEditingId(null)}
                 />
-                <details className={pageStyles.moreProfile}>
-                  <summary
-                    className={`${pageStyles.linkBtn} ${pageStyles.moreProfileSummary}`}
-                  >
-                    その他のプロフィール項目
-                  </summary>
-                  <p className={pageStyles.moreProfileNote}>
-                    概要・YouTube・SNS などは{" "}
-                    <Link href={`/user/${x.id}`}>公開プロフィール</Link>
-                    から編集できます（今後この画面に統合予定）。
-                  </p>
-                </details>
               </div>
             ) : null}
           </li>
@@ -214,8 +207,8 @@ export function PendingLinkRequestList({
 
   return (
     <ul className={`${pageStyles.list} ${pageStyles.listTight}`}>
-      {rows.map((r) => (
-        <li key={r.id} className={pageStyles.row}>
+      {rows.map((row) => (
+        <li key={row.id} className={pageStyles.row}>
           <div className={pageStyles.rowHead}>
             <span
               className={`${pageStyles.avatar} ${pageStyles.avatarSm} ${pageStyles.avatarPending}`}
@@ -224,10 +217,10 @@ export function PendingLinkRequestList({
               ?
             </span>
             <div className={pageStyles.rowInfo}>
-              <span className={pageStyles.rowName}>@{r.requested_x_id}</span>
+              <span className={pageStyles.rowName}>@{row.requested_x_id}</span>
               <span className={pageStyles.rowDate}>
-                {formatUnix(r.requested_at, { dateOnly: true })}{" "}
-                {formatUnix(r.requested_at, { timeOnly: true })} 申請
+                {formatUnix(row.requested_at, { dateOnly: true })}{" "}
+                {formatUnix(row.requested_at, { timeOnly: true })} 申請
               </span>
             </div>
             <div className={pageStyles.rowBadges}>

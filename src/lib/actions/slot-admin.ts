@@ -23,7 +23,6 @@ const batchSchema = z.object({
   start_at: z.string().optional().nullable(),
   end_at: z.string().optional().nullable(),
   interval_minutes: z.coerce.number().min(1).max(60 * 24).default(5),
-  duration_minutes: z.coerce.number().min(1).max(60 * 24).default(5),
   count: z.coerce.number().min(1).max(500).default(1),
   label_prefix: z.string().trim().max(40).optional().nullable(),
   start_index: z.coerce.number().min(0).max(9999).default(1),
@@ -101,12 +100,6 @@ export async function generateSlotsBatch(
   const created: { id: string }[] = [];
 
   if (data.mode === "time") {
-    if (data.duration_minutes > data.interval_minutes) {
-      return {
-        ok: false,
-        message: "枠の長さは間隔以下にしてください。重複枠を作る場合は個別作成で対応してください。",
-      };
-    }
     const startTs = parseDateInput(data.start_at);
     const endTs = parseDateInput(data.end_at);
     if (!startTs || !endTs) {
@@ -116,7 +109,7 @@ export async function generateSlotsBatch(
       return { ok: false, message: "終了時刻は開始より後にしてください。" };
     }
     const intervalSec = data.interval_minutes * 60;
-    const durSec = data.duration_minutes * 60;
+    const durSec = intervalSec;
     let cursor = startTs;
     let order = 0;
     while (cursor + durSec <= endTs && order < 500) {

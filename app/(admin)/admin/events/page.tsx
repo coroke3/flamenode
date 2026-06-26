@@ -173,7 +173,7 @@ export default async function AdminEventsPage({
                 <td>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                     <Link
-                      href={`/admin/events/${ev.id}`}
+                      href={`/manage/events/${ev.id}/edit`}
                       className="fn-btn fn-btn-ghost fn-btn-sm"
                     >
                       詳細

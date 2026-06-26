@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { looksLikeMojibake } from "@/lib/utils/mojibake";
 
 export const SITE_NAME =
   process.env.NEXT_PUBLIC_SITE_NAME?.trim() || "FlameNode";
@@ -9,7 +10,7 @@ const DEFAULT_SITE_DESCRIPTION =
 function readableEnvText(value: string | undefined): string | null {
   const text = value?.trim();
   if (!text) return null;
-  return /繝|縺|譏|蜒|蝓|螟|邨/.test(text) ? null : text;
+  return looksLikeMojibake(text) ? null : text;
 }
 
 export const SITE_DESCRIPTION =

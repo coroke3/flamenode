@@ -1,18 +1,12 @@
 import { normalizeHttpUrl } from "@/lib/utils/url";
+import { looksLikeMojibake } from "@/lib/utils/mojibake";
 import { extractYoutubeId } from "@/lib/youtube/id";
 import {
   type LegacyImportMode,
   resolveImportedEventState,
 } from "./importState";
 
-const MOJIBAKE_TOKENS = ["�", "縺", "繧", "荳", "譁", "邵", "陞", "陷", "闕", "隴"];
 const X_ID_MAX_LEN = 64;
-
-export function looksLikeMojibake(s: string | null | undefined): boolean {
-  if (!s) return false;
-  if (MOJIBAKE_TOKENS.some((t) => s.includes(t))) return true;
-  return /[\u0000-\u0008\u000B-\u001F]/.test(s);
-}
 
 export function normalizeIconUrl(
   url: string | null | undefined,
@@ -23,9 +17,10 @@ export function normalizeIconUrl(
   const m =
     u.match(/drive\.google\.com\/(?:open|uc)\?[^#]*[?&]?id=([A-Za-z0-9_-]+)/) ||
     u.match(/drive\.google\.com\/file\/d\/([A-Za-z0-9_-]+)/) ||
-    u.match(/drive\.google\.com\/thumbnail\?id=([A-Za-z0-9_-]+)/);
-  if (m?.[1]) return `https://lh3.googleusercontent.com/d/${m[1]}`;
-  if (u.startsWith("/api/media/")) return u;
+    u.match(/drive\.google\.com\/thumbnail\?id=([A-Za-z0-9_-]+)/) ||
+    u.match(/lh3\.googleusercontent\.com\/d\/([A-Za-z0-9_-]+)/);
+  if (m?.[1]) return `/api/google-drive-image/${m[1]}`;
+  if (u.startsWith("/api/media/") || u.startsWith("/api/google-drive-image/")) return u;
   return normalizeHttpUrl(u, { maxLength: 1000 });
 }
 
@@ -166,7 +161,10 @@ export function submissionTypeFromLegacyVideo(row: {
 export type LegacyXUserRow = {
   id: string;
   x_name: string;
+  profile_text?: string | null;
+  portfolio_contact?: string | null;
   youtube_channel_url?: string | null;
+  other_social_links?: string | null;
 };
 
 export interface LegacyEventInput {
@@ -213,14 +211,24 @@ export interface LegacyEventResult {
   xUsers: LegacyXUserRow[];
 }
 
-const REPRESENTATIVE_HINT_REGEX = /(主催|代表|運営|統括|荳ｻ|莉｣|驕句霧|邨ｱ)/;
+const REPRESENTATIVE_HINT_REGEX = new RegExp(
+  [
+    "主催",
+    "代表",
+    "運営",
+    "統括",
+    String.fromCodePoint(0x8373, 0xff7b),
+    String.fromCodePoint(0x8389, 0xff63),
+    String.fromCodePoint(0x9a55, 0x53e5, 0x9727),
+    String.fromCodePoint(0x90a8, 0xff71),
+  ].join("|"),
+);
 
 export function normalizeEventInfo(
   input: LegacyEventInput,
   options: {
     importMode?: LegacyImportMode;
     now?: number;
-    forceEntryOpen?: boolean;
   } = {},
 ): LegacyEventResult {
   const warnings: string[] = [];
@@ -281,7 +289,6 @@ export function normalizeEventInfo(
     startTime,
     endTime,
     now: options.now ?? Math.floor(Date.now() / 1000),
-    forceEntryOpen: options.forceEntryOpen,
   });
 
   return {
@@ -442,6 +449,8 @@ export function normalizeLegacyVideo(
       id: tlink,
       x_name: creator || `@${tlink}`,
       youtube_channel_url: youtubeChannelUrl,
+      portfolio_contact: null,
+      other_social_links: otherSns,
     });
   }
 
@@ -464,6 +473,8 @@ export function normalizeLegacyVideo(
         id: xid,
         x_name: name || `@${xid}`,
         youtube_channel_url: null,
+        portfolio_contact: null,
+        other_social_links: null,
       });
     }
   }

@@ -1,0 +1,258 @@
+.page {
+  width: 100%;
+}
+
+.hero {
+  display: grid;
+  gap: 24px;
+  padding-bottom: 28px;
+  border-bottom: 1px solid var(--hairline, var(--border-subtle));
+}
+
+.navLine {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.closeLink {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  color: var(--text-muted);
+  font-size: 24px;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.closeLink:hover {
+  color: var(--accent-primary);
+}
+
+.identity {
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr);
+  gap: 22px;
+  align-items: center;
+}
+
+.avatar,
+.avatarFallback {
+  width: 108px;
+  height: 108px;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+
+.avatar {
+  object-fit: cover;
+}
+
+.avatarFallback {
+  display: grid;
+  place-items: center;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 42px;
+  font-weight: 900;
+}
+
+.identityBody {
+  min-width: 0;
+}
+
+.name {
+  margin: 4px 0 0;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: clamp(48px, 7vw, 88px);
+  font-weight: 900;
+  line-height: 0.92;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-top: 14px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 28px;
+  margin: 0;
+}
+
+.stats div {
+  min-width: 96px;
+}
+
+.stats dt {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.stats dd {
+  margin: 4px 0 0;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.profileGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 28px;
+}
+
+.profileBlock {
+  min-width: 0;
+  padding: 22px;
+  border: 1px solid var(--hairline, var(--border-subtle));
+  background: var(--bg-surface);
+}
+
+.profileBlock span {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.profileBlock h2,
+.sectionHead h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.profileBlock h2 {
+  margin-bottom: 14px;
+}
+
+.profileBlock p {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.85;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.socialLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.socialLinks a {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.socialLinks a:hover {
+  color: var(--accent-primary);
+}
+
+.works {
+  margin-top: 36px;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+@media (min-width: 900px) {
+  .grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1240px) {
+  .grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .identity {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .avatar,
+  .avatarFallback {
+    width: 88px;
+    height: 88px;
+  }
+
+  .name {
+    font-size: clamp(38px, 12vw, 56px);
+  }
+
+  .links a,
+  .closeLink {
+    min-height: 44px;
+  }
+
+  .profileGrid,
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .profileBlock {
+    padding: 18px;
+  }
+}

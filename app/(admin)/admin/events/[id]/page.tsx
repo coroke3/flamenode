@@ -12,7 +12,6 @@ import {
   videoEvents,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
-import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 import { collapseReservationGroups, type SlotBase } from "@/lib/utils/slotGrouping";
 import {
@@ -23,6 +22,7 @@ import {
 } from "@/lib/utils/eventStatus";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { SaveEventTemplateForm } from "@/components/admin/SaveEventTemplateForm";
+import { ManageEventTabs } from "@/components/manage/ManageEventTabs";
 
 export const metadata: Metadata = { title: "イベント詳細" };
 export const dynamic = "force-dynamic";
@@ -74,7 +74,7 @@ export default async function AdminEventDetailPage({
   // 集計サマリ
   const slotStats = {
     total: slots.length,
-    available: slots.filter((s) => s.status === "available").length,
+    filled: slots.filter((s) => s.status !== "available").length,
     reserved: slots.filter((s) => s.status === "reserved").length,
     submitted: slots.filter((s) => s.status === "submitted").length,
   };
@@ -92,40 +92,9 @@ export default async function AdminEventDetailPage({
         description={`ID: ${event.id}`}
         backHref="/admin/events"
         backLabel="イベント一覧へ"
-        actions={[
-          {
-            href: `/manage/events/${event.id}`,
-            label: "運営ビュー",
-            icon: <Icon name="users" size={12} aria-hidden />,
-            variant: "primary",
-          },
-          {
-            href: `/event/${event.id}`,
-            label: "公開ページ",
-            icon: <Icon name="external" size={12} aria-hidden />,
-          },
-          {
-            href: `/admin/events/${event.id}/edit`,
-            label: "設定編集",
-            icon: <Icon name="edit" size={12} aria-hidden />,
-          },
-          {
-            href: `/manage/events/${event.id}/slots`,
-            label: "枠運営",
-            icon: <Icon name="clock" size={12} aria-hidden />,
-          },
-          {
-            href: `/manage/events/${event.id}/staff`,
-            label: "イベント管理者",
-            icon: <Icon name="users" size={12} aria-hidden />,
-          },
-          {
-            href: `/admin/audit?table=events&record=${encodeURIComponent(event.id)}`,
-            label: "監査ログ",
-            icon: <Icon name="clock" size={12} aria-hidden />,
-          },
-        ]}
       />
+
+      <ManageEventTabs eventId={event.id} active="admin-detail" isAdmin />
 
       <section
         style={{
@@ -136,7 +105,7 @@ export default async function AdminEventDetailPage({
         }}
       >
         <StatBox label="枠合計" value={slotStats.total} />
-        <StatBox label="空き枠" value={slotStats.available} />
+        <StatBox label="埋まり枠" value={slotStats.filled} />
         <StatBox label="確保済" value={slotStats.reserved} />
         <StatBox label="提出済" value={slotStats.submitted} />
         <StatBox label="作品" value={videoStats.total} />
@@ -159,9 +128,6 @@ export default async function AdminEventDetailPage({
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <span className={`fn-badge ${eventStatusBadgeClass(status)}`}>
             状態: {eventStatusLabel(status)}
-          </span>
-          <span className="fn-badge fn-badge-soft">
-            受付: {event.is_entry_open === 1 ? "OPEN" : "CLOSED"}
           </span>
           {accepting ? (
             <span className="fn-badge fn-badge-accent">募集中</span>

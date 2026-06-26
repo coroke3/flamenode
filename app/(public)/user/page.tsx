@@ -6,6 +6,12 @@ import styles from "./page.module.css";
 import { withDatabase } from "@/lib/cloudflare";
 import { videos, xUsers } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
+import { Pagination } from "@/components/ui/Pagination";
+import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
+import {
+  excludePvsfSummaryVideos,
+  PVSF_SUMMARY_EVENT_ID,
+} from "@/lib/db/queries";
 
 export const metadata: Metadata = {
   title: "クリエイター一覧",
@@ -42,6 +48,15 @@ export default async function UserListPage({
         const term = `%${keyword.replace(/[%_]/g, (m) => `\\${m}`)}%`;
         filters.push(or(like(xUsers.x_name, term), like(xUsers.id, term))!);
       }
+      const countablePublicVideoAliasV = sql`
+        v.visibility_status = 'public'
+        AND COALESCE(v.primary_event_id, '') <> ${PVSF_SUMMARY_EVENT_ID}
+        AND NOT EXISTS (
+          SELECT 1 FROM video_events AS pvsf_summary_video_events
+          WHERE pvsf_summary_video_events.video_id = v.id
+            AND pvsf_summary_video_events.event_id = ${PVSF_SUMMARY_EVENT_ID}
+        )
+      `;
 
       const rows = await db
         .select({
@@ -50,39 +65,46 @@ export default async function UserListPage({
           ${xUsers.x_name},
           (SELECT v.creator_display_name FROM videos AS v
            WHERE v.creator_x_user_id = "x_users"."id"
-             AND v.visibility_status = 'public'
-           ORDER BY v.scheduled_time DESC LIMIT 1),
-          "x_users"."id"
-        )`,
+             AND ${countablePublicVideoAliasV}
+            ORDER BY v.scheduled_time DESC LIMIT 1),
+           "x_users"."id"
+         )`,
           icon_url: sql<string | null>`COALESCE(
           ${xUsers.icon_url},
           (SELECT v.creator_icon_url FROM videos AS v
            WHERE v.creator_x_user_id = "x_users"."id"
              AND v.creator_icon_url IS NOT NULL
-             AND v.visibility_status = 'public'
-           ORDER BY v.scheduled_time DESC LIMIT 1)
-        )`,
+             AND v.collaboration_type = 'individual'
+             AND ${countablePublicVideoAliasV}
+            ORDER BY v.scheduled_time DESC LIMIT 1),
+          (SELECT v.creator_icon_url FROM videos AS v
+           WHERE v.creator_x_user_id = "x_users"."id"
+             AND v.creator_icon_url IS NOT NULL
+             AND v.collaboration_type = 'collab'
+             AND ${countablePublicVideoAliasV}
+            ORDER BY v.scheduled_time DESC LIMIT 1)
+         )`,
           profile_text: xUsers.profile_text,
           youtube_channel_url: xUsers.youtube_channel_url,
           own_count: sql<number>`(
           SELECT COUNT(DISTINCT v.id)
           FROM videos AS v
           WHERE v.creator_x_user_id = "x_users"."id"
-            AND v.visibility_status = 'public'
+            AND ${countablePublicVideoAliasV}
         )`,
           collab_count: sql<number>`(
           SELECT COUNT(DISTINCT vm.video_id)
           FROM video_members AS vm
           INNER JOIN videos AS v ON v.id = vm.video_id
           WHERE vm.x_user_id = "x_users"."id"
-            AND v.visibility_status = 'public'
+            AND ${countablePublicVideoAliasV}
         )`,
           total_count: sql<number>`(
           SELECT COUNT(DISTINCT v.id)
           FROM videos AS v
           LEFT JOIN video_members AS vm ON vm.video_id = v.id
           WHERE (v.creator_x_user_id = "x_users"."id" OR vm.x_user_id = "x_users"."id")
-            AND v.visibility_status = 'public'
+            AND ${countablePublicVideoAliasV}
         )`,
         })
         .from(xUsers)
@@ -90,6 +112,7 @@ export default async function UserListPage({
 
       const orphanFilters = [
         eq(videos.visibility_status, "public"),
+        excludePvsfSummaryVideos(),
         ne(videos.creator_x_user_id, "anonymous"),
         isNull(xUsers.id),
       ];
@@ -110,16 +133,23 @@ export default async function UserListPage({
           x_name: sql<string>`COALESCE(
           (SELECT v.creator_display_name FROM videos AS v
            WHERE v.creator_x_user_id = ${videos.creator_x_user_id}
-             AND v.visibility_status = 'public'
-           ORDER BY v.scheduled_time DESC, v.created_at DESC LIMIT 1),
+             AND ${countablePublicVideoAliasV}
+            ORDER BY v.scheduled_time DESC, v.created_at DESC LIMIT 1),
           ${videos.creator_x_user_id}
         )`,
-          icon_url: sql<string | null>`(
-          SELECT v.creator_icon_url FROM videos AS v
-          WHERE v.creator_x_user_id = ${videos.creator_x_user_id}
-            AND v.creator_icon_url IS NOT NULL
-            AND v.visibility_status = 'public'
-          ORDER BY v.scheduled_time DESC, v.created_at DESC LIMIT 1
+          icon_url: sql<string | null>`COALESCE(
+          (SELECT v.creator_icon_url FROM videos AS v
+           WHERE v.creator_x_user_id = ${videos.creator_x_user_id}
+             AND v.creator_icon_url IS NOT NULL
+             AND v.collaboration_type = 'individual'
+             AND ${countablePublicVideoAliasV}
+           ORDER BY v.scheduled_time DESC, v.created_at DESC LIMIT 1),
+          (SELECT v.creator_icon_url FROM videos AS v
+           WHERE v.creator_x_user_id = ${videos.creator_x_user_id}
+             AND v.creator_icon_url IS NOT NULL
+             AND v.collaboration_type = 'collab'
+             AND ${countablePublicVideoAliasV}
+           ORDER BY v.scheduled_time DESC, v.created_at DESC LIMIT 1)
         )`,
           profile_text: sql<string | null>`NULL`,
           youtube_channel_url: sql<string | null>`NULL`,
@@ -232,10 +262,10 @@ export default async function UserListPage({
                 prefetch={false}
               >
                 <span className={styles.profile}>
-                  {creator.icon_url ? (
+                  {cachedGoogleImageUrl(creator.icon_url) ? (
                     /* eslint-disable-next-line @next/next/no-img-element */
                     <img
-                      src={creator.icon_url}
+                      src={cachedGoogleImageUrl(creator.icon_url) ?? ""}
                       alt=""
                       className={styles.avatar}
                       loading="lazy"
@@ -260,29 +290,13 @@ export default async function UserListPage({
             ))}
           </div>
 
-          <nav className={styles.pagination} aria-label="ページネーション">
-            {safePage > 1 ? (
-              <Link
-                href={`/user?${params({ page: String(safePage - 1) })}`}
-                className="fn-btn fn-btn-ghost fn-btn-sm"
-              >
-                <Icon name="chevron-left" size={12} aria-hidden />
-                前へ
-              </Link>
-            ) : null}
-            <span className={styles.pageBadge}>
-              {safePage} / {totalPages} ページ
-            </span>
-            {safePage < totalPages ? (
-              <Link
-                href={`/user?${params({ page: String(safePage + 1) })}`}
-                className="fn-btn fn-btn-ghost fn-btn-sm"
-              >
-                次へ
-                <Icon name="chevron-right" size={12} aria-hidden />
-              </Link>
-            ) : null}
-          </nav>
+          <Pagination
+            currentPage={safePage}
+            totalPages={totalPages}
+            total={total}
+            pageSize={PAGE_SIZE}
+            buildHref={(nextPage) => `/user?${params({ page: String(nextPage) })}`}
+          />
         </>
       )}
     </div>

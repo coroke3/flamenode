@@ -20,8 +20,10 @@ import {
   coalescedVideoScoreAsc,
   coalescedVideoScoreDesc,
 } from "./videoScoreSql";
+import { compareEventsByUpcomingPriority } from "@/lib/utils/eventOrdering";
 
 const nullVideoPart = sql<string | null>`NULL`;
+export const PVSF_SUMMARY_EVENT_ID = "PVSFSummary";
 
 async function withVideoPartFallback<T>(
   run: (includePart: boolean) => Promise<T>,
@@ -35,6 +37,21 @@ async function withVideoPartFallback<T>(
  */
 export const publicVideoCondition = eq(videos.visibility_status, "public");
 export const directVideoCondition = sql`${videos.visibility_status} IN ('public', 'limited')`;
+
+export function excludePvsfSummaryVideos() {
+  return sql`
+    COALESCE(${videos.primary_event_id}, '') <> ${PVSF_SUMMARY_EVENT_ID}
+    AND NOT EXISTS (
+      SELECT 1 FROM video_events AS pvsf_summary_video_events
+      WHERE pvsf_summary_video_events.video_id = ${videos.id}
+        AND pvsf_summary_video_events.event_id = ${PVSF_SUMMARY_EVENT_ID}
+    )
+  `;
+}
+export const countablePublicVideoCondition = and(
+  publicVideoCondition,
+  excludePvsfSummaryVideos(),
+)!;
 
 /** トップページのおすすめ作品候補（videos.score 上位。列未適用 DB は新着順）。 */
 export async function fetchRecommendedVideos(db: DB, limit = 40) {
@@ -76,8 +93,8 @@ export async function fetchRecommendedVideos(db: DB, limit = 40) {
  * 呼び出し側 (`/recommend`) で `limitByCreatorAndEvent` を通して、作者・
  * イベントの偏りを抑えて 6 件程度に絞る前提の候補プール。
  *
- * 真のパーソナライズではないが、毎日同じ顔を見せない最低限の rotation には
- * なる。将来的に signals が揃ったら別関数に置き換える。
+ * 真のパーソナライズではないが、毎日同じ顔を見せない最低限の rotation として
+ * 扱う。
  */
 export async function fetchUnderratedVideos(db: DB, limit = 60) {
   const rows = await withVideoScoreFallback((hasScore) =>
@@ -135,12 +152,12 @@ export async function fetchLatestVideos(db: DB, limit = 30) {
 
 /** 直近 N 件のイベント。 */
 export async function fetchLatestEvents(db: DB, limit = 3) {
-  return db
+  const rows = await db
     .select()
     .from(events)
     .where(or(eq(events.is_active, 1), eq(events.is_archived, 1))!)
-    .orderBy(desc(events.start_time))
-    .limit(limit);
+    .orderBy(desc(events.start_time));
+  return rows.sort(compareEventsByUpcomingPriority).slice(0, limit);
 }
 
 /** イベントに紐づく作品 (最大 N 件)。 */
@@ -171,14 +188,34 @@ export async function fetchVideosForEvent(
   return resolveMissingIcons(db, uniqueBy(rows, (row) => row.id));
 }
 
+export async function countVideosForEvent(
+  db: DB,
+  eventId: string,
+): Promise<number> {
+  const rows = await db
+    .select({ count: sql<number>`COUNT(DISTINCT ${videos.id})` })
+    .from(videos)
+    .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
+    .where(
+      and(
+        countablePublicVideoCondition,
+        eq(videoEvents.event_id, eventId),
+      )!,
+    )
+    .limit(1);
+
+  return Number(rows[0]?.count ?? 0);
+}
+
 /** 開催中イベント (is_active=1 かつ期間内かつ非アーカイブ)。 */
 export async function fetchActiveEvents(db: DB) {
   const { activeEventWhere } = await import("@/lib/utils/eventStatus");
-  return db
+  const rows = await db
     .select()
     .from(events)
     .where(activeEventWhere())
     .orderBy(desc(events.start_time));
+  return rows.sort(compareEventsByUpcomingPriority);
 }
 
 /** YouTubeID または UUID で作品を引く。 */
@@ -242,6 +279,7 @@ export async function fetchPickupCreators(db: DB, limit = 40) {
   // 集計: 個人作品数 + 合作参加数で絞る。
   // Drizzle の sql 断片内で ${xUsers.id} 等を埋め込むと D1 が `id` だけに展開し
   // 「ambiguous column name: id」になることがあるため、相関は生 SQL で明示する。
+  const candidateLimit = Math.max(limit * 8, 120);
   const rows = await db
     .select({
       id: xUsers.id,
@@ -251,17 +289,30 @@ export async function fetchPickupCreators(db: DB, limit = 40) {
         SELECT COUNT(DISTINCT v.id) FROM videos AS v
         WHERE v.creator_x_user_id = "x_users"."id"
           AND v.visibility_status = 'public'
+          AND COALESCE(v.primary_event_id, '') <> ${PVSF_SUMMARY_EVENT_ID}
+          AND NOT EXISTS (
+            SELECT 1 FROM video_events AS pvsf_summary_video_events
+            WHERE pvsf_summary_video_events.video_id = v.id
+              AND pvsf_summary_video_events.event_id = ${PVSF_SUMMARY_EVENT_ID}
+          )
       )`,
       collab_count: sql<number>`(
         SELECT COUNT(DISTINCT vm.video_id) FROM video_members AS vm
         INNER JOIN videos AS v ON v.id = vm.video_id
         WHERE vm.x_user_id = "x_users"."id"
           AND v.visibility_status = 'public'
+          AND COALESCE(v.primary_event_id, '') <> ${PVSF_SUMMARY_EVENT_ID}
+          AND NOT EXISTS (
+            SELECT 1 FROM video_events AS pvsf_summary_video_events
+            WHERE pvsf_summary_video_events.video_id = v.id
+              AND pvsf_summary_video_events.event_id = ${PVSF_SUMMARY_EVENT_ID}
+          )
       )`,
     })
     .from(xUsers)
     .where(or(eq(xUsers.approval_status, "approved"), eq(xUsers.approval_status, "pending"))!)
-    .limit(limit * 2);
+    .orderBy(sql`RANDOM()`)
+    .limit(candidateLimit);
   const picked = rows
     .filter((r) => (r.video_count ?? 0) >= 1 || (r.collab_count ?? 0) >= 2)
     .slice(0, limit);

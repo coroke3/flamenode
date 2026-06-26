@@ -7,9 +7,10 @@ import { Icon } from "@/components/ui/Icon";
  * 飛べるリンクに変換するヘルパー。
  *
  * - videos: /admin/videos/{id} (管理) + /{youtube_id ?? id} (公開) は使えないので id だけリンク
- * - events: /admin/events/{id}/edit (管理) + /event/{id} (公開)
+ * - events: /manage/events/{id}/edit (運営) + /event/{id} (公開)
  * - users: /admin/users/{id}
  * - x_users: /admin/users?view=xid&q={id} (検索結果ジャンプ)
+ * - x_account_link_requests: /admin/x-link-requests
  * - slots / video_chapters 等: 親 record の管理画面にフォールバック
  *
  * 不明なテーブル名はリンクなしの素のテキストを返す。
@@ -29,7 +30,7 @@ const TABLE_LINKS: Record<
     adminHref: `/admin/videos/${encodeURIComponent(id)}`,
   }),
   events: (id) => ({
-    adminHref: `/admin/events/${encodeURIComponent(id)}/edit`,
+    adminHref: `/manage/events/${encodeURIComponent(id)}/edit`,
     publicHref: `/event/${encodeURIComponent(id)}`,
   }),
   users: (id) => ({
@@ -48,7 +49,7 @@ const TABLE_LINKS: Record<
   event_staff_permissions: () => ({}),
   notification_outbox: () => ({}),
   x_account_link_requests: (id) => ({
-    adminHref: `/admin/users?view=links&q=${encodeURIComponent(id)}`,
+    adminHref: `/admin/x-link-requests?record=${encodeURIComponent(id)}`,
   }),
 };
 

@@ -181,7 +181,7 @@
   border: 1px solid var(--hairline, var(--border-subtle));
   border-radius: 0;
   background: var(--bg-base);
-  padding: 18px;
+  padding: 14px 16px;
 }
 
 .rowActive,
@@ -192,8 +192,7 @@
 
 .rowHead {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-rows: auto auto;
+  grid-template-columns: auto minmax(180px, 1fr) auto auto;
   gap: 10px 12px;
   align-items: center;
 }
@@ -237,21 +236,97 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   grid-column: 3;
-  grid-row: 1;
-  align-self: start;
+  align-self: center;
 }
 
 .rowOps {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
-  grid-column: 3;
-  grid-row: 2;
+  grid-column: 4;
+  align-items: center;
 }
 
 .rowOps:empty {
   display: none;
+}
+
+.activeMarker {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--hairline, var(--border-subtle));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.actionBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--hairline, var(--border-subtle));
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.actionBtn:hover:not(:disabled),
+.actionBtn:focus-visible {
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.actionBtn:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.actionBtnPrimary {
+  border-color: transparent;
+  background: var(--accent-primary);
+  color: var(--accent-on-primary, #050806);
+}
+
+.actionBtnPrimary:hover:not(:disabled),
+.actionBtnPrimary:focus-visible {
+  border-color: transparent;
+  color: var(--accent-on-primary, #050806);
+  filter: brightness(1.04);
+}
+
+.actionBtnDanger {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent-danger) 15%, transparent);
+  color: var(--accent-danger);
+}
+
+.actionBtnDanger:hover:not(:disabled),
+.actionBtnDanger:focus-visible {
+  border-color: var(--accent-danger);
+  color: #ff8a8a;
+}
+
+.actionBtnMuted {
+  cursor: default;
+  opacity: 0.72;
 }
 
 .linkBtn {
@@ -295,26 +370,6 @@
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
-}
-
-.moreProfile {
-  margin-top: 4px;
-}
-
-.moreProfileSummary {
-  list-style: none;
-  cursor: pointer;
-}
-
-.moreProfileSummary::-webkit-details-marker {
-  display: none;
-}
-
-.moreProfileNote {
-  margin: 8px 0 0;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.65;
 }
 
 .addBox {
@@ -432,8 +487,17 @@
     justify-content: flex-start;
   }
 
-  .rowOps .fn-btn {
-    min-height: 44px;
+  .rowOps {
+    width: 100%;
+  }
+
+  .actionBtn,
+  .activeMarker {
+    min-height: 40px;
+  }
+
+  .actionBtn {
+    flex: 1 1 180px;
   }
 
   .activeBadges {

@@ -47,6 +47,21 @@ export function AdminSidebarNav({
       }
       return true;
     }
+    const querySpecificActive = groups.some((group) =>
+      group.items.some((item) => {
+        const [itemPath, itemQuery] = item.href.split("?");
+        if (!itemQuery || itemPath !== hrefPath || pathname !== itemPath) {
+          return false;
+        }
+        const params = new URLSearchParams(itemQuery);
+        for (const [key, value] of params.entries()) {
+          if (searchParams.get(key) !== value) return false;
+        }
+        return true;
+      }),
+    );
+    if (querySpecificActive) return false;
+
     // /admin はトップなので exact 一致のみ。
     if (hrefPath === "/admin") return pathname === "/admin";
     // それ以外はサブツリー一致 (例: /admin/videos と /admin/videos/[id])。

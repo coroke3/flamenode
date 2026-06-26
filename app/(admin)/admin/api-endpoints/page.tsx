@@ -82,6 +82,10 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
             is_active: eventsTable.is_active,
             is_entry_open: eventsTable.is_entry_open,
             is_archived: eventsTable.is_archived,
+            start_time: eventsTable.start_time,
+            end_time: eventsTable.end_time,
+            entry_start_time: eventsTable.entry_start_time,
+            entry_end_time: eventsTable.entry_end_time,
           })
           .from(eventsTable)
           .where(eq(eventsTable.id, sample.event_id))
@@ -166,7 +170,7 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
                   </td>
                   <td>
                     {row.event_title ? (
-                      <Link href={`/admin/events/${row.event_id}`}>
+                      <Link href={`/manage/events/${row.event_id}`}>
                         {row.event_title}
                       </Link>
                     ) : (

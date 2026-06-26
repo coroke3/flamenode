@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { and, eq, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { canManageXIdLinkRequests } from "@/lib/auth/ownership";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   historyLogs,
@@ -19,11 +20,20 @@ export interface XIdAdminResult {
   message?: string;
 }
 
-async function getAdminUserId(): Promise<string | null> {
+type DB = NonNullable<ReturnType<typeof getDatabase>>;
+
+async function getXIdLinkOperator(): Promise<{ userId: string; db: DB } | null> {
   const session = await auth().catch(() => null);
   const u = session?.user as { id?: string; role?: string } | undefined;
-  if (!u?.id || u.role !== "admin") return null;
-  return u.id;
+  if (!u?.id) return null;
+  const db = getDatabase();
+  if (!db) return null;
+  const ok = await canManageXIdLinkRequests(db, {
+    id: u.id,
+    role: u.role ?? null,
+  });
+  if (!ok) return null;
+  return { userId: u.id, db };
 }
 
 function xUserIdMatches(xUserId: string) {
@@ -36,8 +46,9 @@ function xUserIdMatches(xUserId: string) {
 export async function approveXIdLinkRequest(
   formData: FormData,
 ): Promise<XIdAdminResult> {
-  const adminId = await getAdminUserId();
-  if (!adminId) return { ok: false, message: "管理者のみ実行できます。" };
+  const operator = await getXIdLinkOperator();
+  const adminId = operator?.userId ?? null;
+  if (!adminId) return { ok: false, message: "X ID 連携申請を処理する権限がありません。" };
 
   const requestId = String(formData.get("request_id") ?? "").trim();
   if (!requestId) return { ok: false, message: "申請 ID がありません。" };
@@ -137,12 +148,13 @@ export async function approveXIdLinkRequest(
 
     revalidatePath("/dashboard/settings");
     revalidatePath("/admin/x-link-requests");
+    revalidatePath("/manage/x-link-requests");
     return { ok: true, message: "alias として承認しました。" };
   }
 
   // ============================
   // link_type === "merge": 自動マージは危険操作のため拒否。手動対応を促す。
-  // (Opus 判断候補: 旧データ吸収 / 投稿者付け替え / アイコン継承)
+  // 旧データ吸収 / 投稿者付け替え / アイコン継承は監査ログ確認後に手動で行う。
   // ============================
   if (linkType === "merge") {
     return {
@@ -237,6 +249,7 @@ export async function approveXIdLinkRequest(
 
   revalidatePath("/dashboard/settings");
   revalidatePath("/admin/x-link-requests");
+  revalidatePath("/manage/x-link-requests");
   revalidatePath("/dashboard");
   return { ok: true, message: "承認しました。" };
 }
@@ -247,8 +260,9 @@ export async function approveXIdLinkRequest(
 export async function rejectXIdLinkRequest(
   formData: FormData,
 ): Promise<XIdAdminResult> {
-  const adminId = await getAdminUserId();
-  if (!adminId) return { ok: false, message: "管理者のみ実行できます。" };
+  const operator = await getXIdLinkOperator();
+  const adminId = operator?.userId ?? null;
+  if (!adminId) return { ok: false, message: "X ID 連携申請を処理する権限がありません。" };
 
   const requestId = String(formData.get("request_id") ?? "").trim();
   if (!requestId) return { ok: false, message: "申請 ID がありません。" };
@@ -303,5 +317,6 @@ export async function rejectXIdLinkRequest(
 
   revalidatePath("/dashboard/settings");
   revalidatePath("/admin/x-link-requests");
+  revalidatePath("/manage/x-link-requests");
   return { ok: true, message: "却下しました。" };
 }

@@ -22,11 +22,13 @@ import {
 import { getSpreadsheetD1 } from "./d1Access";
 import {
   normalizePrimaryKeyRecord,
+  primaryKeyFingerprint,
   primaryKeyFromRowValues,
 } from "./validation";
 
 export type { SpreadsheetColumnMeta } from "./tableContext";
 export const SPREADSHEET_EXPORT_MAX_ROWS = 5000;
+const SPREADSHEET_IMPORT_EXISTING_LOOKUP_CHUNK_SIZE = 40;
 
 export interface SpreadsheetPageResult {
   def: SpreadsheetTableDef;
@@ -88,6 +90,69 @@ async function fetchRowByPkRaw(
     .prepare(stmt)
     .bind(...binds)
     .first<Record<string, unknown>>();
+}
+
+function primaryKeyFromRawRow(
+  row: Record<string, unknown>,
+  primaryKeys: string[],
+): Record<string, string> | null {
+  const pk: Record<string, string> = {};
+  for (const key of primaryKeys) {
+    const value = row[key];
+    if (value == null || String(value).trim() === "") return null;
+    pk[key] = String(value);
+  }
+  return pk;
+}
+
+async function fetchExistingRowsByImportPk(
+  ctx: SpreadsheetTableContext,
+  rows: Record<string, string | null>[],
+): Promise<Map<string, Record<string, unknown>>> {
+  const out = new Map<string, Record<string, unknown>>();
+  if (ctx.primaryKeys.length === 0 || rows.length === 0) return out;
+
+  const pks: Record<string, string>[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    try {
+      const pk = primaryKeyFromRowValues(row, ctx.primaryKeys);
+      const fingerprint = primaryKeyFingerprint(pk);
+      if (seen.has(fingerprint)) continue;
+      seen.add(fingerprint);
+      pks.push(pk);
+    } catch {
+      // Per-row import error handling below preserves the existing behavior.
+    }
+  }
+  if (pks.length === 0) return out;
+
+  const db = await getSpreadsheetD1();
+  for (let i = 0; i < pks.length; i += SPREADSHEET_IMPORT_EXISTING_LOOKUP_CHUNK_SIZE) {
+    const chunk = pks.slice(i, i + SPREADSHEET_IMPORT_EXISTING_LOOKUP_CHUNK_SIZE);
+    const binds: string[] = [];
+    const where = chunk
+      .map((pk) => {
+        const parts: string[] = [];
+        for (const key of ctx.primaryKeys) {
+          parts.push(`${quoteIdent(key)} = ?`);
+          binds.push(pk[key]!);
+        }
+        return `(${parts.join(" AND ")})`;
+      })
+      .join(" OR ");
+    const data = await db
+      .prepare(`SELECT * FROM ${ctx.quotedTable} WHERE ${where}`)
+      .bind(...binds)
+      .all<Record<string, unknown>>();
+    for (const raw of data.results ?? []) {
+      const pk = primaryKeyFromRawRow(raw, ctx.primaryKeys);
+      if (!pk) continue;
+      out.set(primaryKeyFingerprint(pk), raw);
+    }
+  }
+
+  return out;
 }
 
 async function queryTableRows(
@@ -365,13 +430,17 @@ async function upsertSpreadsheetRowWithContext(
   opts: {
     row: Record<string, string | null>;
     operatorId: string;
+    existingRow?: Record<string, unknown> | null;
+    existingRowKnown?: boolean;
   },
 ): Promise<"inserted" | "updated" | "skipped"> {
   assertTableEditable(ctx);
 
   const pk = primaryKeyFromRowValues(opts.row, ctx.primaryKeys);
 
-  const existing = await fetchRowByPkRaw(ctx, pk);
+  const existing = opts.existingRowKnown
+    ? (opts.existingRow ?? null)
+    : await fetchRowByPkRaw(ctx, pk);
 
   if (existing) {
     const setCols = ctx.columns.filter(
@@ -434,9 +503,31 @@ export async function applySpreadsheetImport(
   let updated = 0;
   let skipped = 0;
   const errors: Array<{ index: number; message: string }> = [];
+  const existingRowsByPk =
+    opts.mode === "upsert"
+      ? await fetchExistingRowsByImportPk(ctx, opts.rows)
+      : null;
+  const touchedImportPks = new Set<string>();
 
   for (let i = 0; i < opts.rows.length; i++) {
     const row = opts.rows[i]!;
+    let importPkFingerprint: string | null = null;
+    let existingRowKnown = false;
+    let existingRow: Record<string, unknown> | null = null;
+
+    if (existingRowsByPk) {
+      try {
+        const pk = primaryKeyFromRowValues(row, ctx.primaryKeys);
+        importPkFingerprint = primaryKeyFingerprint(pk);
+        if (!touchedImportPks.has(importPkFingerprint)) {
+          existingRowKnown = true;
+          existingRow = existingRowsByPk.get(importPkFingerprint) ?? null;
+        }
+      } catch {
+        // Let the normal per-row import error path report this row.
+      }
+    }
+
     try {
       if (opts.mode === "insert") {
         await insertSpreadsheetRowWithContext(ctx, {
@@ -448,6 +539,8 @@ export async function applySpreadsheetImport(
         const result = await upsertSpreadsheetRowWithContext(ctx, {
           row,
           operatorId: opts.operatorId,
+          existingRow,
+          existingRowKnown,
         });
         if (result === "inserted") inserted += 1;
         else if (result === "updated") updated += 1;
@@ -459,6 +552,7 @@ export async function applySpreadsheetImport(
         message: e instanceof Error ? e.message : "import_failed",
       });
     }
+    if (importPkFingerprint) touchedImportPks.add(importPkFingerprint);
   }
 
   return { inserted, updated, skipped, errors };

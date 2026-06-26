@@ -1,10 +1,10 @@
 import * as React from "react";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { AuthHeader } from "@/components/layout/AuthHeader";
+import { PublicHeader, type PublicHeaderUser } from "@/components/layout/PublicHeader";
 import { PublicFooter } from "@/components/layout/PublicFooter";
 import { Icon } from "@/components/ui/Icon";
-import { buildHeaderUser, type HeaderUser } from "@/lib/auth/headerUser";
+import { buildHeaderUser } from "@/lib/auth/headerUser";
 import {
   AdminSidebarNav,
   type AdminSidebarGroup,
@@ -88,7 +88,7 @@ export default async function AdminLayout({
 }: {
   children: React.ReactNode;
 }): Promise<React.ReactElement> {
-  let user: HeaderUser | null = null;
+  let user: PublicHeaderUser | null = null;
 
   try {
     const session = await auth();
@@ -105,7 +105,7 @@ export default async function AdminLayout({
 
   return (
     <div data-admin-shell data-fn-surface="public">
-      <AuthHeader user={user} />
+      <PublicHeader user={user} />
       <div className="admin-shell">
         <div className="admin-frame">
           <aside className={`admin-sidebar ${styles.sidebar}`}>

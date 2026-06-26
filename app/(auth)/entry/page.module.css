@@ -16,7 +16,7 @@
 }
 
 .choiceGrid {
-  display: contents;
+  display: grid;
 }
 
 .choiceCard {
@@ -155,7 +155,13 @@
 
 @media (min-width: 840px) {
   .choiceGrid {
-    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1120px) {
+  .choiceGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 

@@ -19,6 +19,8 @@ import { ManageVideoStatusForm } from "@/components/manage/ManageVideoStatusForm
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 import { youtubeThumbUrl } from "@/lib/youtube/id";
+import { ManageEventTabs } from "@/components/manage/ManageEventTabs";
+import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
 
 export const dynamic = "force-dynamic";
 
@@ -83,7 +85,7 @@ export default async function ManageEventVideoDetailPage({
     : null;
 
   return (
-    <div>
+    <div style={manageEventAccentStyle(ev.accent_color)}>
       <p className="fn-muted fn-text-sm" style={{ margin: "0 0 12px" }}>
         <Link href={`/manage/events/${id}/videos?status=pending`}>
           ← 審査キューへ
@@ -98,6 +100,7 @@ export default async function ManageEventVideoDetailPage({
           {row.display_name} · 登録 {formatUnix(row.created_at)}
         </p>
       </header>
+      <ManageEventTabs eventId={id} active="review" isAdmin={isAdmin} />
 
       <div
         style={{

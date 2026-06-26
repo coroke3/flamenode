@@ -7,8 +7,10 @@ import { deleteEvent } from "@/lib/actions/event-admin";
 
 export function DeleteEventForm({
   eventId,
+  redirectHref = "/admin/events",
 }: {
   eventId: string;
+  redirectHref?: string;
 }): React.ReactElement {
   const router = useRouter();
   const [confirm, setConfirm] = React.useState("");
@@ -31,7 +33,7 @@ export function DeleteEventForm({
         setError(r.message ?? "削除に失敗しました。");
         return;
       }
-      router.push("/admin/events");
+      router.push(redirectHref);
     });
   };
 

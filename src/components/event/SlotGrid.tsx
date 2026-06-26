@@ -45,8 +45,12 @@ export interface SlotGridProps {
 
 interface SlotGroup {
   label: string;
-  rows: SlotGroupRow[];
+  rows: SlotDisplayRow[];
 }
+
+type SlotDisplayRow =
+  | { kind: "slot"; slot: SlotGroupRow }
+  | { kind: "break"; id: string; detail: string | null };
 
 interface ConfirmExtend {
   slotId: string;
@@ -61,6 +65,13 @@ interface ConfirmMerge {
 interface ReserveTarget {
   slot: SlotGroupRow;
   label: string;
+}
+
+const SLOT_PREVIEW_EVENT = "flamenode:slot-preview";
+
+function formatBreakDetail(end: number | null, start: number | null): string | null {
+  if (end == null || start == null || start <= end) return null;
+  return `${formatUnix(end, { timeOnly: true })} - ${formatUnix(start, { timeOnly: true })}`;
 }
 
 export function SlotGrid({
@@ -82,6 +93,7 @@ export function SlotGrid({
   const [confirmExtend, setConfirmExtend] = React.useState<ConfirmExtend | null>(null);
   const [confirmMerge, setConfirmMerge] = React.useState<ConfirmMerge | null>(null);
   const [reserveTarget, setReserveTarget] = React.useState<ReserveTarget | null>(null);
+  const [actionMenuSlotId, setActionMenuSlotId] = React.useState<string | null>(null);
   const [mergeDisplayName, setMergeDisplayName] = React.useState<string>("");
   const [reserveDisplayName, setReserveDisplayName] = React.useState<string>("");
   const [reserveCount, setReserveCount] = React.useState("1");
@@ -118,21 +130,51 @@ export function SlotGrid({
   );
 
   const groups = React.useMemo<SlotGroup[]>(() => {
-    if (slotKind !== "time") return [{ label: "枠", rows: displayRows }];
+    if (slotKind !== "time") {
+      return [{
+        label: "枠",
+        rows: displayRows.map((slot) => ({ kind: "slot", slot })),
+      }];
+    }
+
     const parts = buildSlotParts(displayRows, slotPartGapSec);
-    return parts.map((part) => ({
-      label: part.start_time
+    const nextGroups: SlotGroup[] = [];
+    let currentDateKey: string | null = null;
+    let currentGroup: SlotGroup | null = null;
+    let previousPartEnd: number | null = null;
+
+    for (const part of parts) {
+      const dateKey = part.start_time
         ? formatUnix(part.start_time, { dateOnly: true })
-        : formatSlotPartLabel(part, "short"),
-      rows: part.rows,
-    }));
+        : formatSlotPartLabel(part, "short");
+
+      if (!currentGroup || currentDateKey !== dateKey) {
+        currentDateKey = dateKey;
+        currentGroup = { label: dateKey, rows: [] };
+        nextGroups.push(currentGroup);
+        previousPartEnd = null;
+      } else if (currentGroup.rows.length > 0) {
+        currentGroup.rows.push({
+          kind: "break",
+          id: `break-${dateKey}-${part.index}`,
+          detail: formatBreakDetail(previousPartEnd, part.start_time),
+        });
+      }
+
+      currentGroup.rows.push(
+        ...part.rows.map((slot): SlotDisplayRow => ({ kind: "slot", slot })),
+      );
+      previousPartEnd = part.end_time ?? part.start_time ?? previousPartEnd;
+    }
+
+    return nextGroups;
   }, [displayRows, slotKind, slotPartGapSec]);
 
   const canTakeSlot = canReserve && !!viewerXId;
 
   const formatSlotLabel = (slot: SlotGroupRow): string => {
     if (slot.start_time) {
-      return `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(slot.start_time, { timeOnly: true })}${slot.end_time ? ` - ${formatUnix(slot.end_time, { timeOnly: true })}` : ""}`;
+      return `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(slot.start_time, { timeOnly: true })}`;
     }
     return slot.slot_label ?? `#${slot.sort_order ?? "?"}`;
   };
@@ -144,6 +186,12 @@ export function SlotGrid({
     setReserveDisplayName(savedName);
     setReserveCount("1");
   };
+
+  const previewSlot = React.useCallback((slotId: string) => {
+    window.dispatchEvent(
+      new CustomEvent(SLOT_PREVIEW_EVENT, { detail: { slotId } }),
+    );
+  }, []);
 
   const onReserve = (
     slotId: string,
@@ -306,7 +354,7 @@ export function SlotGrid({
           <Icon name="check" size={12} aria-hidden /> {success}
           {reservedSlotId ? (
             <Link
-              href={`/dashboard/post/slotted?slot=${reservedSlotId}`}
+              href={`/entry/slotted?slot=${reservedSlotId}`}
               className={styles.inlineAction}
             >
               作品情報を登録
@@ -337,6 +385,10 @@ export function SlotGrid({
           <section key={`part-${index}`} className={styles.partColumn}>
             <header className={styles.partHeader}>{group.label}</header>
             <table className={styles.table}>
+              <colgroup>
+                <col className={styles.timeCol} />
+                <col />
+              </colgroup>
               <thead>
                 <tr>
                   <th>{slotKind === "time" ? "日時" : "枠"}</th>
@@ -344,7 +396,19 @@ export function SlotGrid({
                 </tr>
               </thead>
               <tbody>
-                {group.rows.map((slot) => {
+                {group.rows.map((item) => {
+                  if (item.kind === "break") {
+                    return (
+                      <tr key={item.id} className={styles.breakRow}>
+                        <td colSpan={2} className={styles.breakCell}>
+                          <span>休憩</span>
+                          {item.detail ? <em>{item.detail}</em> : null}
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  const slot = item.slot;
                   const isMine =
                     (!!viewerXId && slot.x_user_id === viewerXId) ||
                     (!slot.x_user_id && !!viewerDiscordId && slot.discord_user_id === viewerDiscordId);
@@ -357,6 +421,8 @@ export function SlotGrid({
                         filled && styles.rowFilled,
                         isMine && styles.rowMine,
                       )}
+                      onMouseEnter={() => previewSlot(slot.id)}
+                      onClick={() => previewSlot(slot.id)}
                     >
                       <td className={styles.cellTime}>
                         {slot.start_time ? (
@@ -364,9 +430,6 @@ export function SlotGrid({
                             <span>{formatUnix(slot.start_time, { dateOnly: true })}</span>
                             <strong>
                               {formatUnix(slot.start_time, { timeOnly: true })}
-                              {slot.end_time
-                                ? ` - ${formatUnix(slot.end_time, { timeOnly: true })}`
-                                : ""}
                             </strong>
                           </span>
                         ) : (
@@ -377,93 +440,102 @@ export function SlotGrid({
                         {filled ? (
                           <div className={styles.slotTaken}>
                             <div className={styles.slotIdentity}>
-                              <span className={styles.slotName}>
-                                {slot.display_name ??
-                                  (slot.x_user_id ? `@${slot.x_user_id}` : "確保済み")}
+                              <span
+                                className={cn(
+                                  styles.slotName,
+                                  isMine && slot.status === "reserved" && styles.slotNameMine,
+                                )}
+                              >
+                                {slot.display_name ?? (slot.x_user_id ? `@${slot.x_user_id}` : "確保済み")}
                               </span>
-                              {slot.x_user_id ? (
-                                <span className={styles.slotId}>@{slot.x_user_id}</span>
-                              ) : null}
-                              {slot.is_group ? (
-                                <span className="fn-badge fn-badge-soft">
-                                  {slot.group_size}連続
-                                </span>
-                              ) : null}
                             </div>
-                            <div className={styles.slotActions}>
-                              {slot.status === "submitted" ? (
-                                <span className="fn-badge fn-badge-accent">提出済</span>
-                              ) : (
-                                <span className="fn-badge fn-badge-warning">確保済</span>
-                              )}
-                              {isMine && slot.status === "reserved" ? (
-                                <>
-                                  <Link
-                                    href={`/dashboard/post/slotted?slot=${slot.id}`}
-                                    className="fn-btn fn-btn-primary fn-btn-sm"
-                                  >
-                                    <Icon name="upload" size={10} aria-hidden /> 作品登録
-                                  </Link>
-                                  <button
-                                    type="button"
-                                    className="fn-btn fn-btn-ghost fn-btn-sm"
-                                    disabled={busy}
-                                    onClick={() => setConfirmReleaseId(slot.id)}
-                                  >
-                                    <Icon name="trash" size={10} aria-hidden /> 解放
-                                  </button>
-                                  {viewerActiveX ? (
-                                    <>
-                                      <button
-                                        type="button"
-                                        className="fn-btn fn-btn-secondary fn-btn-sm"
-                                        disabled={busy || slot.group_size >= maxConsecutiveSlots}
-                                        title={slot.group_size >= maxConsecutiveSlots ? "連続枠の上限に達しています" : "前に 1 枠追加"}
-                                        onClick={() =>
-                                          setConfirmExtend({
-                                            slotId: slot.slot_ids[0] ?? slot.id,
-                                            direction: "backward",
-                                          })
-                                        }
-                                      >
-                                        前を追加
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="fn-btn fn-btn-secondary fn-btn-sm"
-                                        disabled={busy || slot.group_size >= maxConsecutiveSlots}
-                                        title={slot.group_size >= maxConsecutiveSlots ? "連続枠の上限に達しています" : "後ろに 1 枠追加"}
-                                        onClick={() =>
-                                          setConfirmExtend({
-                                            slotId: slot.slot_ids[slot.slot_ids.length - 1] ?? slot.id,
-                                            direction: "forward",
-                                          })
-                                        }
-                                      >
-                                        後を追加
-                                      </button>
-                                    </>
-                                  ) : null}
-                                </>
-                              ) : null}
-                            </div>
+                            {isMine && slot.status === "reserved" ? (
+                              <div className={styles.slotActions}>
+                                <button
+                                  type="button"
+                                  className={styles.editSlotButton}
+                                  aria-expanded={actionMenuSlotId === slot.id}
+                                  disabled={busy}
+                                  onClick={() =>
+                                    setActionMenuSlotId((current) =>
+                                      current === slot.id ? null : slot.id,
+                                    )
+                                  }
+                                >
+                                  編集
+                                </button>
+                                {actionMenuSlotId === slot.id ? (
+                                  <div className={styles.slotActionMenu}>
+                                    <Link
+                                      href={`/entry/slotted?slot=${slot.id}`}
+                                      className={styles.slotActionMenuItem}
+                                      onClick={() => setActionMenuSlotId(null)}
+                                    >
+                                      <Icon name="upload" size={12} aria-hidden /> 作品登録
+                                    </Link>
+                                    <button
+                                      type="button"
+                                      className={styles.slotActionMenuItem}
+                                      disabled={busy}
+                                      onClick={() => {
+                                        setActionMenuSlotId(null);
+                                        setConfirmReleaseId(slot.id);
+                                      }}
+                                    >
+                                      <Icon name="trash" size={12} aria-hidden /> 解放
+                                    </button>
+                                    {viewerActiveX ? (
+                                      <>
+                                        <button
+                                          type="button"
+                                          className={styles.slotActionMenuItem}
+                                          disabled={busy || slot.group_size >= maxConsecutiveSlots}
+                                          onClick={() => {
+                                            setActionMenuSlotId(null);
+                                            setConfirmExtend({
+                                              slotId: slot.slot_ids[0] ?? slot.id,
+                                              direction: "backward",
+                                            });
+                                          }}
+                                        >
+                                          前を追加
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className={styles.slotActionMenuItem}
+                                          disabled={busy || slot.group_size >= maxConsecutiveSlots}
+                                          onClick={() => {
+                                            setActionMenuSlotId(null);
+                                            setConfirmExtend({
+                                              slotId: slot.slot_ids[slot.slot_ids.length - 1] ?? slot.id,
+                                              direction: "forward",
+                                            });
+                                          }}
+                                        >
+                                          後を追加
+                                        </button>
+                                      </>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : null}
                           </div>
                         ) : isMergeTarget(slot) ? (
-                          <div className={styles.mergeRow}>
-                            <span className={styles.emptySlot}>空き</span>
-                            <button
-                              type="button"
-                              className="fn-btn fn-btn-secondary fn-btn-sm"
-                              disabled={busy}
-                              onClick={() => {
-                                const defaultName = getMergeDefaultName(slot);
-                                setMergeDisplayName(defaultName);
-                                setConfirmMerge({ gapSlotId: slot.id, defaultName });
-                              }}
-                            >
-                              ここを埋めて結合
-                            </button>
-                          </div>
+                          <button
+                            type="button"
+                            className={cn(styles.emptySlotButton, styles.emptySlotButtonMerge)}
+                            disabled={busy}
+                            onClick={() => {
+                              const defaultName = getMergeDefaultName(slot);
+                              setMergeDisplayName(defaultName);
+                              setConfirmMerge({ gapSlotId: slot.id, defaultName });
+                            }}
+                            aria-label={`${formatSlotLabel(slot)} を埋めて結合`}
+                            title="ここを埋めて結合"
+                          >
+                            <span className={styles.emptyCircle} aria-hidden />
+                          </button>
                         ) : canTakeSlot ? (
                           <button
                             type="button"
@@ -471,17 +543,26 @@ export function SlotGrid({
                             disabled={busy}
                             onClick={() => openReserveDialog(slot)}
                             aria-label={`${formatSlotLabel(slot)} を確保`}
+                            title="枠を確保"
                           >
-                            <span className={styles.emptyCircle} aria-hidden>○</span>
-                            <span className={styles.emptySlotButtonText}>空き枠</span>
-                            <Icon name="plus" size={11} aria-hidden />
+                            <span className={styles.emptyCircle} aria-hidden />
                           </button>
                         ) : canReserve ? (
-                          <span className={styles.emptySlot}>
-                            {viewerDiscordId ? "空き (X ID 未選択)" : "空き (要ログイン)"}
+                          <span
+                            className={cn(styles.emptySlot, styles.emptySlotUnavailable)}
+                            aria-label={viewerDiscordId ? "空き。X ID 未選択" : "空き。ログインが必要です"}
+                            title={viewerDiscordId ? "X ID 未選択" : "ログインが必要です"}
+                          >
+                            <span className={styles.emptyCircle} aria-hidden />
                           </span>
                         ) : (
-                          <span className={styles.emptySlot}>空き</span>
+                          <span
+                            className={cn(styles.emptySlot, styles.emptySlotUnavailable)}
+                            aria-label="空き"
+                            title="空き"
+                          >
+                            <span className={styles.emptyCircle} aria-hidden />
+                          </span>
                         )}
                       </td>
                     </tr>

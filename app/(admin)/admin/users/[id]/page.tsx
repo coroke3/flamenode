@@ -16,6 +16,7 @@ import {
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { AdminUserTabs } from "@/components/admin/AdminUserTabs";
 
 export const metadata: Metadata = { title: "ユーザー詳細" };
 export const dynamic = "force-dynamic";
@@ -108,20 +109,8 @@ export default async function AdminUserDetailPage({
         description={`ID: ${user.id} / ${user.email ?? "email 未取得"} / 登録 ${formatRelative(user.created_at)}`}
         backHref="/admin/users"
         backLabel="ユーザー管理へ"
-        actions={[
-          {
-            href: `/admin/users/${user.id}/edit`,
-            label: "編集",
-            icon: <Icon name="edit" size={12} aria-hidden />,
-            variant: "primary",
-          },
-          {
-            href: `/admin/audit?operator=${encodeURIComponent(user.id)}`,
-            label: "操作履歴",
-            icon: <Icon name="clock" size={12} aria-hidden />,
-          },
-        ]}
       />
+      <AdminUserTabs userId={user.id} active="detail" />
       {user.emailVerified ? (
         <p className="fn-console-note">
           email認証 {formatRelative(user.emailVerified)}

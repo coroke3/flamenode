@@ -5,7 +5,7 @@ const ACTIVE_GRACE = 86400;
 
 function resolveEventFreshness(event, now) {
   if (event.is_archived === 1) return "archived";
-  if (event.is_active === 1 || event.is_entry_open === 1) return "active";
+  if (event.is_active === 1) return "active";
   const start = event.start_time ?? 0;
   const end = event.end_time ?? 0;
   if (start && end && now >= start && now <= end + ACTIVE_GRACE) return "active";
@@ -44,10 +44,10 @@ test("resolveEventFreshness archived", () => {
   );
 });
 
-test("resolveEventFreshness active flags", () => {
+test("resolveEventFreshness active flag", () => {
   assert.equal(
     resolveEventFreshness(
-      { is_archived: 0, is_active: 0, is_entry_open: 1, start_time: null, end_time: null },
+      { is_archived: 0, is_active: 1, is_entry_open: 0, start_time: null, end_time: null },
       1000,
     ),
     "active",

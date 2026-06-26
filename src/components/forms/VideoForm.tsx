@@ -16,6 +16,7 @@ import {
   updateVideo,
   type VideoActionResult,
 } from "@/lib/actions/video";
+import { formatSocialLinksForText } from "@/lib/socialLinks";
 import {
   VideoMembersField,
   type VideoMemberInput,
@@ -24,7 +25,10 @@ import {
 import { VideoIconPicker } from "@/components/forms/VideoIconPicker";
 import { normalizeXId } from "@/lib/utils/xid";
 import { ErrorCallout } from "@/components/ui/ErrorCallout";
-import { resolveStagePermissionFieldFromJson } from "@/lib/video/formSettings";
+import {
+  getStagePermissionAnswerValue,
+  resolveStagePermissionFieldsFromJson,
+} from "@/lib/video/formSettings";
 import { redirectForGuardReason } from "@/lib/client/guardRedirect";
 
 export interface VideoFormInitialValues {
@@ -219,9 +223,9 @@ export function VideoForm({
       setSelectedPart("");
     }
   }, [availableParts, selectedPart]);
-  const selectedStagePermissionField = React.useMemo(
+  const selectedStagePermissionFields = React.useMemo(
     () =>
-      resolveStagePermissionFieldFromJson(
+      resolveStagePermissionFieldsFromJson(
         eventOptions
           .filter((event) => selectedEventIds.includes(event.id))
           .map((event) => event.video_form_settings_json),
@@ -284,6 +288,9 @@ export function VideoForm({
     (key.startsWith("video.") && videoSectionDisabled) ||
     (key.startsWith("descriptions.") && descriptionsDisabled) ||
     (key.startsWith("members.") && membersDisabled);
+  const requiredStageQuestionCount = selectedStagePermissionFields.filter(
+    (question) => question.required,
+  ).length;
 
   const handleSubmit = (ev: React.FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
@@ -480,7 +487,7 @@ export function VideoForm({
               id="other_social_links"
               name="other_social_links"
               type="text"
-              defaultValue={initial.other_social_links}
+              defaultValue={formatSocialLinksForText(initial.other_social_links)}
               className="fn-input"
               placeholder="X=https://x.com/... / niconico=..."
               maxLength={1000}
@@ -693,7 +700,9 @@ export function VideoForm({
           </div>
         ) : null}
 
-        {availableParts.length > 0 ? (
+        {mode === "slot" ? (
+          <input type="hidden" name="part" value={initial.part ?? ""} />
+        ) : availableParts.length > 0 ? (
           <div className={cx(styles.field, styles.editableField)}>
             <label className={styles.label} htmlFor="part">
               部
@@ -811,32 +820,46 @@ export function VideoForm({
           ) : null}
         </div>
 
-        {selectedStagePermissionField ? (
-          <div className={cx(styles.field, styles.editableField)}>
-            <label
-              className={`${styles.label} ${
-                selectedStagePermissionField.required ? styles.required : ""
-              }`}
-              htmlFor="stage_permission"
+        {selectedStagePermissionFields.map((question, index) => {
+          const fieldId = `stage_permission_${question.id}`;
+          return (
+            <div
+              key={`${question.id}-${index}`}
+              className={cx(styles.field, styles.editableField)}
             >
-              {selectedStagePermissionField.label}
-            </label>
-            {selectedStagePermissionField.description ? (
-              <p className={styles.help}>{selectedStagePermissionField.description}</p>
-            ) : null}
-            <textarea
-              id="stage_permission"
-              name="stage_permission"
-              defaultValue={initial.stage_permission}
-              className="fn-input"
-              rows={3}
-              maxLength={1000}
-              required={selectedStagePermissionField.required}
-              placeholder={selectedStagePermissionField.placeholder}
-              disabled={fieldDisabled("descriptions.stage_permission")}
-            />
-          </div>
-        ) : null}
+              <input
+                type="hidden"
+                name="stage_permission_answer_id"
+                value={question.id}
+              />
+              <label
+                className={`${styles.label} ${
+                  question.required ? styles.required : ""
+                }`}
+                htmlFor={fieldId}
+              >
+                {question.label}
+              </label>
+              {question.description ? (
+                <p className={styles.help}>{question.description}</p>
+              ) : null}
+              <textarea
+                id={fieldId}
+                name="stage_permission_answer_value"
+                defaultValue={getStagePermissionAnswerValue(
+                  initial.stage_permission,
+                  question.id,
+                )}
+                className="fn-input"
+                rows={3}
+                maxLength={1000}
+                required={question.required}
+                placeholder={question.placeholder}
+                disabled={fieldDisabled("descriptions.stage_permission")}
+              />
+            </div>
+          );
+        })}
 
         <div className={cx(styles.field, styles.editableField)}>
           <label className={styles.label} htmlFor="closing_comment">
@@ -1005,13 +1028,15 @@ export function VideoForm({
           <PreviewCheck ok={Boolean(titlePreview.trim())} label="作品タイトル" />
           <PreviewCheck ok={Boolean(displayNamePreview.trim())} label="表示名" />
           <PreviewCheck
-            ok={!selectedStagePermissionField?.required}
+            ok={requiredStageQuestionCount === 0}
             label={
-              selectedStagePermissionField?.required
-                ? "権利・素材確認は入力必須"
-                : "権利・素材確認は任意"
+              requiredStageQuestionCount > 0
+                ? `追加質問 ${requiredStageQuestionCount} 件は入力必須`
+                : selectedStagePermissionFields.length > 0
+                  ? `追加質問 ${selectedStagePermissionFields.length} 件は任意`
+                  : "追加質問なし"
             }
-            pending={Boolean(selectedStagePermissionField?.required)}
+            pending={requiredStageQuestionCount > 0}
           />
           <PreviewCheck
             ok={!isCollab || Boolean(initial.members?.length)}

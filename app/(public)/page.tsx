@@ -3,13 +3,13 @@ import styles from "./page.module.css";
 import { sql } from "drizzle-orm";
 import { withDatabase } from "@/lib/cloudflare";
 import {
+  countablePublicVideoCondition,
+  countVideosForEvent,
   fetchActiveEvents,
   fetchLatestEvents,
   fetchLatestVideos,
   fetchPickupCreators,
   fetchRecommendedVideos,
-  fetchVideosForEvent,
-  publicVideoCondition,
 } from "@/lib/db/queries";
 import { fetchPublicAnnouncements } from "@/lib/db/announcementQueries";
 import {
@@ -61,7 +61,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
       fetchRecommendedVideos(db, 40).then((rows) => shuffle(rows).slice(0, 30)),
       fetchLatestVideos(db, 30),
       fetchPickupCreators(db, 30),
-      fetchLatestEvents(db, 3),
+      fetchLatestEvents(db, 4),
       fetchPublicAnnouncements(db, "all", 3),
     ]);
 
@@ -69,18 +69,18 @@ export default async function TopPage(): Promise<React.ReactElement> {
       db
         .select({ count: sql<number>`COUNT(*)` })
         .from(videosTable)
-        .where(publicVideoCondition),
+        .where(countablePublicVideoCondition),
       db
         .select({ count: sql<number>`COUNT(*)` })
         .from(xUsersTable)
         .where(sql`${xUsersTable.approval_status} IN ('approved', 'pending')`),
     ]);
 
-    const videosByEvent = Object.fromEntries(
+    const eventVideoCounts = Object.fromEntries(
       await Promise.all(
         latestEvents.map(async (event) => {
-          const videos = await fetchVideosForEvent(db, event.id, 8);
-          return [event.id, videos] as const;
+          const count = await countVideosForEvent(db, event.id);
+          return [event.id, count] as const;
         }),
       ),
     );
@@ -111,7 +111,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
       creators,
       latestEvents,
       announcements,
-      videosByEvent,
+      eventVideoCounts,
       topSlotStats,
       stats: {
         publicVideos: Number(videoCountRows[0]?.count ?? latest.length),
@@ -128,7 +128,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
     creators = [],
     latestEvents = [],
     announcements = [],
-    videosByEvent = {},
+    eventVideoCounts = {},
     topSlotStats = new Map<string, HomeIntroSlotStat>(),
     stats = {
       publicVideos: latest.length,
@@ -184,7 +184,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
         />
         <div className={styles.shelfBox}>
           {recommended.length === 0 ? (
-            <EmptyShelf message="おすすめできる作品を準備しています。" />
+            <EmptyShelf message="おすすめできる作品がまだありません。" />
           ) : (
             <Shelf ariaLabel="今週のピックアップ">
               {recommended.map((video, index) => (
@@ -204,9 +204,9 @@ export default async function TopPage(): Promise<React.ReactElement> {
         />
         <div className={styles.shelfBox}>
           {creators.length === 0 ? (
-            <EmptyShelf message="紹介できるクリエイターを準備しています。" />
+            <EmptyShelf message="紹介できるクリエイターがまだありません。" />
           ) : (
-            <Shelf ariaLabel="注目クリエイター">
+            <Shelf ariaLabel="注目クリエイター" density="compact">
               {creators.map((creator, index) => (
                 <CreatorCard
                   key={`${creator.id}-creator-${index}`}
@@ -234,7 +234,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
         />
         <div className={styles.shelfBox}>
           {latest.length === 0 ? (
-            <EmptyShelf message="公開作品を準備しています。" />
+            <EmptyShelf message="公開作品がまだありません。" />
           ) : (
             <Shelf ariaLabel="新着アップロード">
               {latest.map((video, index) => (
@@ -247,21 +247,21 @@ export default async function TopPage(): Promise<React.ReactElement> {
 
       <section className={`fn-public-container fn-section ${styles.section}`} aria-labelledby="sec-events">
         <SectionHeader
-          title="募集中のイベント"
-          description="Open for entry"
+          title="最近のイベント"
+          description="Recent events"
           moreHref="/event"
           moreLabel="イベント一覧"
         />
         <div className="fn-evlist-grid">
           {latestEvents.length === 0 ? (
-            <EmptyShelf message="公開中のイベントを準備しています。" />
+            <EmptyShelf message="公開中のイベントがまだありません。" />
           ) : (
             latestEvents.map((event) => (
               <PublicEventCard
                 key={event.id}
                 event={event}
                 category={categorizePublicEvent(event)}
-                videoCount={(videosByEvent[event.id] ?? []).length}
+                videoCount={eventVideoCounts[event.id] ?? 0}
               />
             ))
           )}
@@ -276,7 +276,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
 function EmptyShelf({ message }: { message: string }): React.ReactElement {
   return (
     <div className={styles.empty}>
-      <EmptyState title="準備中" description={message} />
+      <EmptyState title="まだありません" description={message} />
     </div>
   );
 }

@@ -14,6 +14,7 @@ import { SlotBatchForm } from "@/components/admin/SlotBatchForm";
 import { SlotList } from "@/components/admin/SlotList";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
+import { ManageEventTabs } from "@/components/manage/ManageEventTabs";
 
 export const dynamic = "force-dynamic";
 
@@ -102,7 +103,7 @@ export default async function ManageEventSlotsPage({
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
   return (
-    <div>
+    <div style={manageEventAccentStyle(ev.accent_color)}>
       <p style={{ marginBottom: 8, fontSize: 12 }}>
         <Link href={`/manage/events/${id}`}>← イベント運営トップへ</Link>
       </p>
@@ -112,6 +113,7 @@ export default async function ManageEventSlotsPage({
       <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 12 }}>
         枠の生成、空き枠整理、確保済み枠の解放をここで扱えます。{total} 件中、最大 500 件を表示します。
       </p>
+      <ManageEventTabs eventId={id} active="slots" isAdmin={isAdmin} />
 
       <section
         style={{
@@ -183,7 +185,7 @@ export default async function ManageEventSlotsPage({
               ...(isAdmin
                 ? [
                     {
-                      href: `/admin/events/${id}/slots`,
+                      href: `/manage/events/${id}/slots`,
                       label: "管理者用スロット編集へ",
                       variant: "primary" as const,
                     },

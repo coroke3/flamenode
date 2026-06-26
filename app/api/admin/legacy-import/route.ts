@@ -16,16 +16,17 @@ import { parseLegacyImportText } from "@/lib/legacy/parse";
 const MAX_IMPORT_FILES = 12;
 const MAX_IMPORT_TOTAL_BYTES = 6 * 1024 * 1024;
 const MAX_IMPORT_TEXT_CHARS = 8 * 1024 * 1024;
+const DEFAULT_PREVIEW_LIMIT = 80;
 
 interface JsonRequest {
   action?: "analyze" | "apply";
   files?: { name?: string; content?: string }[];
+  previewLimit?: number;
   strategy?: {
     events?: ConflictStrategy;
     videos?: ConflictStrategy;
     updateXUsers?: boolean;
     importMode?: "archive" | "preserve" | "active_event" | "draft";
-    forceEntryOpen?: boolean;
     enqueueStaticRebuild?: boolean;
     staticRebuildStrategy?: "none" | "summary" | "event" | "full";
   };
@@ -67,6 +68,7 @@ function jsonErrorResult(
       editors: 0,
     },
     preview: [],
+    previewTotal: 0,
     errors,
   };
   return NextResponse.json(body, { status });
@@ -97,13 +99,14 @@ async function handleJson(req: Request, operatorId: string): Promise<Response> {
     }
 
     const action = body.action ?? "analyze";
+    const previewLimit = normalizePreviewLimit(body.previewLimit);
     if (action === "analyze") {
       const result = await analyzeLegacyPayload(merged.payload, {
         importMode: body.strategy?.importMode,
-        forceEntryOpen: body.strategy?.forceEntryOpen,
         enqueueStaticRebuild: body.strategy?.enqueueStaticRebuild,
         staticRebuildStrategy: body.strategy?.staticRebuildStrategy,
         dryRun: true,
+        previewLimit,
       });
       return NextResponse.json(result);
     }
@@ -119,9 +122,9 @@ async function handleJson(req: Request, operatorId: string): Promise<Response> {
           videos: body.strategy?.videos,
           updateXUsers: body.strategy?.updateXUsers,
           importMode: body.strategy?.importMode,
-          forceEntryOpen: body.strategy?.forceEntryOpen,
           enqueueStaticRebuild: body.strategy?.enqueueStaticRebuild,
           staticRebuildStrategy: body.strategy?.staticRebuildStrategy,
+          previewLimit,
         },
         operatorId,
       );
@@ -211,6 +214,7 @@ async function handleForm(req: Request, operatorId: string): Promise<Response> {
       const r = await analyzeLegacyPayload(parsed, {
         ...legacyFormOptions,
         dryRun: true,
+        previewLimit: 0,
       });
       base.searchParams.set(
         "notice",
@@ -234,7 +238,7 @@ async function handleForm(req: Request, operatorId: string): Promise<Response> {
   try {
     const r = await applyLegacyImport(
       parsed,
-      { events: "skip", videos: "skip", ...legacyFormOptions },
+      { events: "skip", videos: "skip", ...legacyFormOptions, previewLimit: 0 },
       operatorId,
     );
     base.searchParams.set(
@@ -263,6 +267,13 @@ async function getImportWriteBlockReason(): Promise<string | null> {
     return `Import apply is disabled in ${mode} mode. Dry run is still available.`;
   }
   return null;
+}
+
+function normalizePreviewLimit(raw: number | undefined): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+    return DEFAULT_PREVIEW_LIMIT;
+  }
+  return Math.min(500, Math.max(0, Math.floor(raw)));
 }
 
 function mergeFiles(files: { name?: string; content?: string }[]): MergeResult {

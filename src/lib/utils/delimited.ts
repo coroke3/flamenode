@@ -5,6 +5,10 @@
 
 export type DelimiterChar = "," | "\t";
 
+export interface ParseDelimitedOptions {
+  maxRows?: number;
+}
+
 export function stripBom(input: string): string {
   return input.replace(/^\uFEFF/, "");
 }
@@ -12,6 +16,7 @@ export function stripBom(input: string): string {
 export function parseDelimited(
   input: string,
   delimiter: DelimiterChar = ",",
+  options: ParseDelimitedOptions = {},
 ): string[][] {
   if (typeof input !== "string") return [];
   const text = stripBom(input);
@@ -21,6 +26,17 @@ export function parseDelimited(
   let inQuotes = false;
   let i = 0;
   const len = text.length;
+  const maxRows =
+    typeof options.maxRows === "number" && Number.isFinite(options.maxRows)
+      ? Math.max(0, Math.trunc(options.maxRows))
+      : null;
+
+  if (maxRows === 0) return rows;
+
+  const pushRow = (): boolean => {
+    if (!(cur.length === 1 && cur[0] === "")) rows.push(cur);
+    return maxRows != null && rows.length >= maxRows;
+  };
 
   while (i < len) {
     const ch = text[i];
@@ -62,7 +78,7 @@ export function parseDelimited(
 
     if (ch === "\n") {
       cur.push(field);
-      rows.push(cur);
+      if (pushRow()) return rows;
       cur = [];
       field = "";
       i += 1;
@@ -75,10 +91,10 @@ export function parseDelimited(
 
   if (field.length > 0 || cur.length > 0) {
     cur.push(field);
-    rows.push(cur);
+    pushRow();
   }
 
-  return rows.filter((r) => !(r.length === 1 && r[0] === ""));
+  return rows;
 }
 
 /** 先頭行から CSV / TSV を推定 */

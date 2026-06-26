@@ -23,6 +23,7 @@ import {
 import { requireSession } from "@/lib/auth/guard";
 import { canEditVideo } from "@/lib/auth/ownership";
 import { VideoForm } from "@/components/forms/VideoForm";
+import { AdminVideoTabs } from "@/components/admin/AdminVideoTabs";
 import { Icon } from "@/components/ui/Icon";
 import { youtubeWatchUrl } from "@/lib/youtube/id";
 import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
@@ -425,6 +426,14 @@ export default async function EditVideoPage({
         />
       </header>
 
+      {privilegeMode === "admin" && user.role === "admin" ? (
+        <AdminVideoTabs
+          videoId={video.id}
+          youtubeVideoId={video.youtube_video_id}
+          active="edit"
+        />
+      ) : null}
+
       <VideoForm
         mode="edit"
         videoId={video.id}
@@ -489,7 +498,7 @@ export default async function EditVideoPage({
       ) : null}
 
       {/* 通常チャプターコメントの投稿は公開動画詳細ページに戻された。
-          メンバーチャプターは VideoMembersField で扱う (将来の Phase 5)。 */}
+          メンバーチャプターは VideoMembersField で扱う。 */}
 
       <div className="fn-page-footer-actions">
         <Link href="/dashboard" className="fn-btn fn-btn-ghost">

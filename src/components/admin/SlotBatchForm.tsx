@@ -23,9 +23,7 @@ export function SlotBatchForm({
   const [success, setSuccess] = React.useState<string | null>(null);
   const [confirmClear, setConfirmClear] = React.useState(false);
   const [intervalMinutes, setIntervalMinutes] = React.useState("5");
-  const [durationMinutes, setDurationMinutes] = React.useState("5");
   const intervalOptions = [5, 6, 10, 15, 30];
-  const durationOptions = [5, 6, 10, 12, 15];
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -119,9 +117,9 @@ export function SlotBatchForm({
                 />
               </div>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
               <div>
-                <label className="fn-label">間隔 (分) *</label>
+                <label className="fn-label">枠の間隔・長さ (分) *</label>
                 <input
                   name="interval_minutes"
                   type="number"
@@ -139,31 +137,6 @@ export function SlotBatchForm({
                       type="button"
                       className={`fn-btn fn-btn-sm ${intervalMinutes === String(n) ? "fn-btn-primary" : "fn-btn-ghost"}`}
                       onClick={() => setIntervalMinutes(String(n))}
-                    >
-                      {n}分
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="fn-label">枠の長さ (分) *</label>
-                <input
-                  name="duration_minutes"
-                  type="number"
-                  min={1}
-                  max={1440}
-                  value={durationMinutes}
-                  onChange={(e) => setDurationMinutes(e.target.value)}
-                  className="fn-input"
-                  required
-                />
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-                  {durationOptions.map((n) => (
-                    <button
-                      key={n}
-                      type="button"
-                      className={`fn-btn fn-btn-sm ${durationMinutes === String(n) ? "fn-btn-primary" : "fn-btn-ghost"}`}
-                      onClick={() => setDurationMinutes(String(n))}
                     >
                       {n}分
                     </button>

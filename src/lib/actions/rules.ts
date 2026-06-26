@@ -6,6 +6,7 @@ import { eq, ne } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import { historyLogs, termsVersions, users } from "@/lib/db/schema";
+import { enqueueNotification } from "@/lib/notifications/enqueue";
 import { generateId } from "@/lib/utils/id";
 
 export interface RulesResult {
@@ -13,6 +14,16 @@ export interface RulesResult {
   message?: string;
   id?: string;
 }
+
+export interface RulesBroadcastResult {
+  ok: boolean;
+  message?: string;
+  enqueued?: number;
+  cursor?: number;
+}
+
+const TERMS_REACCEPT_BATCH_SIZE = 50;
+const TERMS_REACCEPT_MAX_CONTENT_LEN = 1000;
 
 const draftSchema = z.object({
   id: z.string().trim().optional(),
@@ -183,6 +194,101 @@ export async function publishTermsVersion(
   revalidatePath("/admin/rules");
   revalidatePath("/rules");
   return { ok: true, id };
+}
+
+export async function broadcastTermsReaccept(
+  formData: FormData,
+): Promise<RulesBroadcastResult> {
+  const guard = await requireAdmin();
+  if (!guard.ok) return guard.result;
+
+  const termsId = String(formData.get("terms_id") ?? "").trim();
+  const confirm = String(formData.get("confirm") ?? "").trim();
+  const cursorRaw = Number(formData.get("cursor") ?? 0);
+  const cursor =
+    Number.isFinite(cursorRaw) && cursorRaw >= 0 ? Math.floor(cursorRaw) : 0;
+  const content = String(formData.get("content") ?? "")
+    .trim()
+    .slice(0, TERMS_REACCEPT_MAX_CONTENT_LEN);
+
+  if (!termsId) return { ok: false, message: "terms_id が必要です。" };
+  if (confirm !== "TERMS") {
+    return { ok: false, message: "確認文字列 'TERMS' が一致しません。" };
+  }
+
+  const db = getDatabase();
+  if (!db) return { ok: false, message: "DB に接続できません。" };
+
+  const target = (
+    await db.select().from(termsVersions).where(eq(termsVersions.id, termsId)).limit(1)
+  )[0];
+  if (!target) return { ok: false, message: "対象の規約が見つかりません。" };
+  if (target.status !== "published") {
+    return { ok: false, message: "公開中の規約だけ通知できます。" };
+  }
+
+  const targets = await db
+    .select({ discord_user_id: users.id })
+    .from(users)
+    .where(eq(users.terms_reaccept_required, 1))
+    .orderBy(users.id)
+    .limit(TERMS_REACCEPT_BATCH_SIZE)
+    .offset(cursor);
+
+  if (targets.length === 0) {
+    return {
+      ok: true,
+      message: "対象が 0 件です。全件 enqueue 済みか、cursor が終端を超えています。",
+      enqueued: 0,
+      cursor,
+    };
+  }
+
+  const message =
+    content ||
+    `FlameNode の利用規約が更新されました。\n次回投稿前に /rules から内容を確認し、再同意してください。\nversion: ${target.version_label}`;
+
+  let enqueued = 0;
+  for (const row of targets) {
+    const ok = await enqueueNotification(db, {
+      discordUserId: row.discord_user_id,
+      type: "terms_reaccept_required",
+      payload: {
+        content: message,
+        terms_version_id: termsId,
+        version_label: target.version_label,
+        terms_url: "/rules",
+      },
+      dedupeKey: `terms_reaccept_required:${termsId}:${row.discord_user_id}`,
+    });
+    if (ok) enqueued += 1;
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  await db.insert(historyLogs).values({
+    table_name: "terms_versions",
+    record_id: termsId,
+    action: "UPDATE",
+    after_data: JSON.stringify({
+      reaccept_notification_batch: true,
+      cursor,
+      enqueued,
+      executor: guard.userId,
+    }),
+    operator_discord_id: guard.userId,
+    retention_class: "long_audit",
+    created_at: now,
+  });
+
+  const nextCursor = cursor + targets.length;
+  revalidatePath("/admin/rules");
+  revalidatePath("/admin/notifications");
+  return {
+    ok: true,
+    message: `${enqueued} 件 enqueue しました (cursor=${cursor}→${nextCursor})。続きがあれば cursor=${nextCursor} で再実行してください。`,
+    enqueued,
+    cursor: nextCursor,
+  };
 }
 
 export async function archiveTermsVersion(

@@ -5,6 +5,7 @@ export const ACTIVE_GRACE_AFTER_END_SEC = 86400;
 
 export type EventFreshnessInput = {
   is_active: number;
+  /** Legacy DB flag; freshness no longer depends on manual entry status. */
   is_entry_open: number;
   is_archived: number;
   start_time: number | null;
@@ -20,7 +21,7 @@ export function resolveEventFreshness(
   now: number,
 ): EventFreshness {
   if (event.is_archived === 1) return "archived";
-  if (event.is_active === 1 || event.is_entry_open === 1) return "active";
+  if (event.is_active === 1) return "active";
 
   const start = event.start_time ?? 0;
   const end = event.end_time ?? 0;

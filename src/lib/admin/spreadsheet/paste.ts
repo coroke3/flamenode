@@ -14,6 +14,7 @@ export type SpreadsheetDelimiterMode = "auto" | "csv" | "tsv";
 export interface SpreadsheetPasteOptions {
   hasHeader: boolean;
   delimiter: SpreadsheetDelimiterMode;
+  maxRows?: number;
 }
 
 export interface SpreadsheetPasteResult {
@@ -44,7 +45,15 @@ export function parseSpreadsheetPaste(
   }
 
   const delimiter = resolveDelimiter(options.delimiter, trimmed);
-  const grid = parseDelimited(trimmed, delimiter);
+  const parseRowLimit =
+    typeof options.maxRows === "number" && Number.isFinite(options.maxRows)
+      ? Math.max(0, Math.trunc(options.maxRows)) + (options.hasHeader ? 1 : 0)
+      : undefined;
+  const grid = parseDelimited(
+    trimmed,
+    delimiter,
+    parseRowLimit == null ? undefined : { maxRows: parseRowLimit },
+  );
   if (grid.length === 0) {
     return { delimiter, mappedColumns: [], rows: [], warnings: ["行がありません"] };
   }
@@ -62,7 +71,7 @@ export function parseSpreadsheetPaste(
     headerCells.forEach((h, i) => {
       if (!h.trim()) return;
       if (!columnIndexMap[i]) {
-        warnings.push(`未対応の列: ${h.trim()}`);
+        warnings.push(`取り込み対象外の列: ${h.trim()}`);
       }
     });
   } else if (grid[0] && grid[0].length > tableColumns.length) {

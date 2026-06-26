@@ -42,9 +42,8 @@ test("resolveImportedEventState active_event stays active", () => {
       startTime: now - 10_000,
       endTime: now + 10_000,
       now,
-      forceEntryOpen: true,
     }),
-    { is_active: 1, is_entry_open: 1, is_archived: 0 },
+    { is_active: 1, is_entry_open: 0, is_archived: 0 },
   );
 });
 

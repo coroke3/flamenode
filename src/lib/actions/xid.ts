@@ -16,7 +16,9 @@ import {
 import { detectSupportedImageUpload } from "@/lib/utils/imageUpload";
 import { generateId } from "@/lib/utils/id";
 import { normalizeHttpUrl } from "@/lib/utils/url";
+import { normalizePortfolioContact } from "@/lib/profileContact";
 import { normalizeXId } from "@/lib/utils/xid";
+import { validateSocialLinksJson } from "@/lib/socialLinks";
 
 export interface XIdActionResult {
   ok: boolean;
@@ -37,20 +39,89 @@ async function getSessionUserId(): Promise<string | null> {
   return user?.id ?? null;
 }
 
-function sanitizeSocialLinks(raw: string): string | null {
-  const value = raw.trim();
-  if (!value) return null;
-  if (value.length > 2000) return null;
-  if (/\b(?:javascript|vbscript|data):/i.test(value)) return null;
-  return value;
-}
-
 async function assertLinkedXUser(db: NonNullable<ReturnType<typeof getDatabase>>, xUserId: string, userId: string) {
   const row = (
     await db.select().from(xUsers).where(xUserIdMatches(xUserId)).limit(1)
   )[0];
   if (!row || row.linked_discord_user_id !== userId) return null;
   return row;
+}
+
+function errorText(error: unknown): string {
+  if (error == null) return "";
+  if (error instanceof Error) {
+    const cause = "cause" in error ? errorText(error.cause) : "";
+    return `${error.message}\n${cause}`;
+  }
+  if (typeof error === "object") {
+    const value = error as { message?: unknown; cause?: unknown };
+    const message = typeof value.message === "string" ? value.message : "";
+    return `${message}\n${errorText(value.cause)}`;
+  }
+  return String(error);
+}
+
+async function addColumnIfMissing(statement: string): Promise<void> {
+  try {
+    await getEnv().DB.prepare(statement).run();
+  } catch (error) {
+    const text = errorText(error).toLowerCase();
+    if (
+      text.includes("duplicate column") ||
+      text.includes("already exists") ||
+      text.includes("duplicate column name")
+    ) {
+      return;
+    }
+    throw error;
+  }
+}
+
+async function getXUserColumnNames(): Promise<Set<string> | null> {
+  try {
+    const result = await getEnv().DB.prepare("PRAGMA table_info(x_users)").all<{
+      name: string;
+    }>();
+    return new Set((result.results ?? []).map((row) => row.name));
+  } catch {
+    return null;
+  }
+}
+
+async function ensureXUserProfileColumns(): Promise<Set<string> | null> {
+  await addColumnIfMissing("ALTER TABLE x_users ADD COLUMN profile_text TEXT");
+  await addColumnIfMissing("ALTER TABLE x_users ADD COLUMN portfolio_contact TEXT");
+  await addColumnIfMissing("ALTER TABLE x_users ADD COLUMN youtube_channel_url TEXT");
+  await addColumnIfMissing("ALTER TABLE x_users ADD COLUMN other_social_links TEXT");
+  return getXUserColumnNames();
+}
+
+function buildXUserProfileUpdate(
+  columns: Set<string> | null,
+  values: {
+    displayName: string;
+    profileText: string | null;
+    portfolioContact: string | null;
+    youtubeChannelUrl: string | null;
+    otherSocialLinks: string | null;
+  },
+): Partial<typeof xUsers.$inferInsert> {
+  const updateValues: Partial<typeof xUsers.$inferInsert> = {
+    x_name: values.displayName,
+  };
+  if (columns?.has("profile_text")) {
+    updateValues.profile_text = values.profileText;
+  }
+  if (columns?.has("portfolio_contact")) {
+    updateValues.portfolio_contact = values.portfolioContact;
+  }
+  if (columns?.has("youtube_channel_url")) {
+    updateValues.youtube_channel_url = values.youtubeChannelUrl;
+  }
+  if (columns?.has("other_social_links")) {
+    updateValues.other_social_links = values.otherSocialLinks;
+  }
+  return updateValues;
 }
 
 export async function setActiveXId(
@@ -226,7 +297,12 @@ export async function updateXIdProfile(
 
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   const xName = String(formData.get("x_name") ?? "").trim().slice(0, 80);
-  const profileText = String(formData.get("profile_text") ?? "").trim();
+  const profileText = String(formData.get("profile_text") ?? "")
+    .trim()
+    .slice(0, 2000);
+  const portfolioContact = normalizePortfolioContact(
+    String(formData.get("portfolio_contact") ?? "").slice(0, 1200),
+  );
   const youtubeChannelRaw = String(
     formData.get("youtube_channel_url") ?? "",
   ).trim();
@@ -236,7 +312,7 @@ export async function updateXIdProfile(
   const youtubeChannelUrl = youtubeChannelRaw
     ? normalizeHttpUrl(youtubeChannelRaw, { maxLength: 500 })
     : null;
-  const otherSocialLinks = sanitizeSocialLinks(otherSocialLinksRaw);
+  const otherSocialLinks = validateSocialLinksJson(otherSocialLinksRaw);
 
   if (!xUserId) {
     return { ok: false, message: "X ID が必要です。" };
@@ -247,10 +323,12 @@ export async function updateXIdProfile(
       message: "YouTube チャンネル URL は http/https の有効な URL を入力してください。",
     };
   }
-  if (otherSocialLinksRaw && !otherSocialLinks) {
+  if (!otherSocialLinks.ok) {
     return {
       ok: false,
-      message: "SNS リンクに利用できない URL スキームが含まれています。",
+      message:
+        otherSocialLinks.message ??
+        "SNS リンクには http/https の有効な URL を入力してください。",
     };
   }
 
@@ -262,15 +340,32 @@ export async function updateXIdProfile(
   }
   const displayName = xName || String(row.x_name ?? "").trim() || xUserId;
 
-  await db
-    .update(xUsers)
-    .set({
-      x_name: displayName,
-      profile_text: profileText || null,
-      youtube_channel_url: youtubeChannelUrl,
-      other_social_links: otherSocialLinks,
-    })
-    .where(xUserIdMatches(xUserId));
+  const profileValues = {
+    displayName,
+    profileText: profileText || null,
+    portfolioContact,
+    youtubeChannelUrl,
+    otherSocialLinks: otherSocialLinks.value,
+  };
+  const profileColumns = await ensureXUserProfileColumns();
+  const updateValues = buildXUserProfileUpdate(profileColumns, profileValues);
+
+  try {
+    await db
+      .update(xUsers)
+      .set(updateValues)
+      .where(xUserIdMatches(xUserId));
+  } catch (error) {
+    const text = errorText(error).toLowerCase();
+    if (!text.includes("no such column") && !text.includes("unknown column")) {
+      throw error;
+    }
+    const latestColumns = await getXUserColumnNames();
+    await db
+      .update(xUsers)
+      .set(buildXUserProfileUpdate(latestColumns, profileValues))
+      .where(xUserIdMatches(xUserId));
+  }
 
   const now = nowUnix();
   await db.insert(historyLogs).values({
@@ -280,8 +375,9 @@ export async function updateXIdProfile(
     after_data: JSON.stringify({
       x_name: displayName,
       profile_text: profileText || null,
+      portfolio_contact: portfolioContact,
       youtube_channel_url: youtubeChannelUrl,
-      other_social_links: otherSocialLinks,
+      other_social_links: otherSocialLinks.value,
     }),
     operator_discord_id: userId,
     retention_class: "long_audit",
@@ -294,12 +390,27 @@ export async function updateXIdProfile(
 }
 
 export async function enablePortfolio(
-  _formData: FormData,
+  formData: FormData,
 ): Promise<XIdActionResult> {
-  void _formData;
+  const userId = await getSessionUserId();
+  if (!userId) return { ok: false, message: "ログインが必要です。" };
+
+  const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
+  if (!xUserId) return { ok: false, message: "X ID が必要です。" };
+
+  const db = getDatabase();
+  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const row = await assertLinkedXUser(db, xUserId, userId);
+  if (!row) {
+    return { ok: false, message: "この X ID を編集する権限がありません。" };
+  }
+
+  revalidatePath("/dashboard/settings");
+  revalidatePath(`/user/${xUserId}`);
+  revalidatePath(`/user/${xUserId}/portfolio`);
   return {
-    ok: false,
-    message: "Portfolio/custom_pages は初期本番では準備中です。",
+    ok: true,
+    message: "公開ポートフォリオを有効化しました。",
   };
 }
 

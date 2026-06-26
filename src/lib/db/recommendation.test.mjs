@@ -3,10 +3,8 @@ import assert from "node:assert/strict";
 import {
   clampRelatedLimit,
   enforceDiversity,
-  fillToMinimum,
   interleaveBuckets,
   perMemberLimit,
-  seededShuffle,
   uniqueByVideoId,
 } from "./recommendation.ts";
 
@@ -55,15 +53,10 @@ test("interleaveBuckets mixes buckets in priority order", () => {
   );
 });
 
-test("seededShuffle is stable for the same seed", () => {
-  const values = [1, 2, 3, 4, 5, 6];
-  assert.deepEqual(seededShuffle(values, "seed"), seededShuffle(values, "seed"));
-});
-
 test("enforceDiversity avoids consecutive same creator when possible", () => {
   const candidates = [
-    { reason: "top_score", row: row("a1", "a") },
-    { reason: "top_score", row: row("a2", "a") },
+    { reason: "same_creator", row: row("a1", "a") },
+    { reason: "same_creator", row: row("a2", "a") },
     { reason: "same_event", row: row("b1", "b") },
     { reason: "same_event", row: row("c1", "c") },
   ];
@@ -71,19 +64,5 @@ test("enforceDiversity avoids consecutive same creator when possible", () => {
   assert.deepEqual(
     selected.slice(0, 3).map((item) => item.row.id),
     ["a1", "b1", "c1"],
-  );
-});
-
-test("fillToMinimum appends fallback rows without duplicates", () => {
-  const selected = [{ reason: "top_score", row: row("a") }];
-  const filled = fillToMinimum(
-    selected,
-    [row("a"), row("b"), row("c")],
-    "latest_fallback",
-    { limit: 15, minTarget: 3 },
-  );
-  assert.deepEqual(
-    filled.map((item) => item.row.id),
-    ["a", "b", "c"],
   );
 });

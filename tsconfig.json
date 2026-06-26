@@ -24,6 +24,7 @@
       "@app/*": ["./app/*"],
       "#utils/delimited": ["./src/lib/utils/delimited.ts"],
       "#utils/xid": ["./src/lib/utils/xid.ts"],
+      "#utils/event-status-core": ["./src/lib/utils/eventStatusCore.ts"],
       "#utils/clipboard-html": ["./src/lib/utils/clipboardHtml.ts"],
       "#spreadsheet/constants": ["./src/lib/admin/spreadsheet/constants.ts"]
     },

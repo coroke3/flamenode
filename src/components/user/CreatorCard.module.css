@@ -1,40 +1,5 @@
 .card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
   width: 100%;
-  text-align: center;
-  padding: 10px 8px 12px;
-  border-radius: var(--radius-md);
-  transition: background-color 0.15s ease, transform 0.15s ease;
-  text-decoration: none;
-  color: inherit;
-}
-
-.card:hover {
-  background-color: var(--bg-elevated);
-  transform: translateY(-2px);
-}
-
-.iconWrap {
-  width: 92px;
-  height: 92px;
-  border-radius: 50%;
-  overflow: hidden;
-  background-color: var(--bg-elevated);
-  box-shadow: none;
-  transition: box-shadow 0.15s ease, transform 0.15s ease;
-}
-
-.card:hover .iconWrap {
-  box-shadow: 0 0 0 1px var(--accent-primary);
-  transform: scale(1.02);
-}
-
-.icon {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
 }
 
 .iconFallback {
@@ -43,33 +8,4 @@
   width: 100%;
   height: 100%;
   color: var(--text-muted);
-}
-
-.name {
-  margin-top: 10px;
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--text-primary);
-  max-width: 100%;
-  padding: 0 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  transition: color 0.15s ease;
-}
-
-.card:hover .name {
-  color: var(--accent-primary);
-}
-
-.hint {
-  font-size: 10.5px;
-  color: var(--text-faint, var(--text-muted));
-  margin-top: 2px;
-}
-
-@media (min-width: 768px) {
-  .card { width: 100%; }
-  .iconWrap { width: 92px; height: 92px; }
-  .name { font-size: 13px; }
 }

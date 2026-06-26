@@ -398,6 +398,11 @@
 
 @media (max-width: 640px) {
   .mobile {
+    max-height: 0;
+    padding-bottom: 0;
+  }
+
+  .mobileOpen {
     max-height: calc(100dvh - var(--header-h, 56px));
     padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
   }

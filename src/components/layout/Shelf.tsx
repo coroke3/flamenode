@@ -7,13 +7,18 @@ import { cn } from "@/lib/utils/cn";
 interface ShelfProps {
   children: React.ReactNode;
   ariaLabel?: string;
+  density?: "default" | "compact";
 }
 
 /**
  * 横スクロール棚。デスクトップでは左右の半透明矢印を出す。
  * `prefers-reduced-motion` を尊重し、自動スクロールはしない (UX とコスト両面で安全)。
  */
-export function Shelf({ children, ariaLabel }: ShelfProps): React.ReactElement {
+export function Shelf({
+  children,
+  ariaLabel,
+  density = "default",
+}: ShelfProps): React.ReactElement {
   const ref = React.useRef<HTMLDivElement>(null);
   const [canPrev, setCanPrev] = React.useState(false);
   const [canNext, setCanNext] = React.useState(true);
@@ -44,8 +49,14 @@ export function Shelf({ children, ariaLabel }: ShelfProps): React.ReactElement {
   };
 
   return (
-    <div className="fn-shelf-wrapper">
-      <div ref={ref} className="fn-shelf" role="region" aria-label={ariaLabel}>
+    <div className="fn-shelf-wrapper" data-density={density}>
+      <div
+        ref={ref}
+        className="fn-shelf"
+        data-density={density}
+        role="region"
+        aria-label={ariaLabel}
+      >
         {children}
       </div>
       <div aria-hidden className="fn-shelf-fade-left" />

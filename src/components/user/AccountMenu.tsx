@@ -162,14 +162,13 @@ export function AccountMenu({
   const order = (s: XIdEntry["approval_status"]) =>
     s === "approved" ? 0 : s === "pending" ? 1 : 2;
 
-  const sortedXIds = [...xIds].sort((a, b) => {
-    if (a.x_user_id === activeId) return -1;
-    if (b.x_user_id === activeId) return 1;
-    return (
-      order(a.approval_status) - order(b.approval_status) ||
-      a.x_name.localeCompare(b.x_name, "ja")
+  const switchableXIds = [...xIds]
+    .filter((entry) => entry.x_user_id !== activeId)
+    .sort(
+      (a, b) =>
+        order(a.approval_status) - order(b.approval_status) ||
+        a.x_name.localeCompare(b.x_name, "ja"),
     );
-  });
 
   return (
     <div ref={ref} className={styles.root}>
@@ -264,26 +263,21 @@ export function AccountMenu({
             ) : null}
           </div>
 
-          <div className={styles.divider} />
+          {switchableXIds.length > 0 ? (
+            <>
+              <div className={styles.divider} />
 
-          {/* セクション2: X ID切替 */}
-          <div className={styles.section}>
-            <div className={styles.sectionTitle}>X IDを切り替え</div>
-            {sortedXIds.length === 0 ? (
-              <div style={{ padding: "8px 10px", fontSize: 12, color: "var(--text-muted)" }}>
-                連携済みの X ID がありません。
-              </div>
-            ) : (
-              sortedXIds.map((entry, index) => {
-                const isSelected = entry.x_user_id === activeId;
-                return (
+              {/* セクション2: X ID切替 */}
+              <div className={styles.section}>
+                <div className={styles.sectionTitle}>別の X ID に切り替え</div>
+                {switchableXIds.map((entry, index) => (
                   <button
                     key={`${entry.x_user_id}-account-${index}`}
                     type="button"
                     role="menuitem"
                     disabled={pending || entry.approval_status === "rejected"}
                     onClick={() => switchTo(entry)}
-                    className={`${styles.xidOption} ${isSelected ? styles.xidOptionActive : ""}`}
+                    className={styles.xidOption}
                   >
                     {entry.icon_url ? (
                       /* eslint-disable-next-line @next/next/no-img-element */
@@ -310,28 +304,11 @@ export function AccountMenu({
                         却下
                       </span>
                     ) : null}
-                    {isSelected ? (
-                      <Icon
-                        name="check"
-                        size={14}
-                        className={styles.checkIcon}
-                      />
-                    ) : null}
                   </button>
-                );
-              })
-            )}
-            <div style={{ marginTop: 4 }}>
-              <Link
-                href="/dashboard/settings"
-                className={styles.menuItem}
-                style={{ fontSize: 12, padding: "6px 8px", color: "var(--text-muted)" }}
-                onClick={() => setOpen(false)}
-              >
-                <Icon name="settings" size={13} aria-hidden /> X ID連携を管理
-              </Link>
-            </div>
-          </div>
+                ))}
+              </div>
+            </>
+          ) : null}
 
           <div className={styles.divider} />
 
@@ -382,7 +359,7 @@ export function AccountMenu({
               <Icon name="settings" size={14} aria-hidden /> 設定
             </Link>
             <Link
-              href="/dashboard/post"
+              href="/entry"
               className={styles.menuItem}
               onClick={() => setOpen(false)}
             >

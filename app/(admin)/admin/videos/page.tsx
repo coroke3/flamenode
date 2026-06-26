@@ -14,6 +14,7 @@ import { Icon } from "@/components/ui/Icon";
 import { formatRelative } from "@/lib/utils/format";
 import { youtubeThumbUrl } from "@/lib/youtube/id";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { AdminVideoManagementTabs } from "@/components/admin/AdminVideoManagementTabs";
 import { Pagination } from "@/components/ui/Pagination";
 import { clampPaging, escapeLike, totalPagesFor } from "@/lib/utils/sql";
 
@@ -138,10 +139,13 @@ export default async function AdminVideosPage({
         description="作品の状態確認、監査ログ、参加者設定を行います。"
       />
 
+      <AdminVideoManagementTabs q={q} status={status} event={event} />
+
       <form
         action="/admin/videos"
         style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16 }}
       >
+        {status ? <input type="hidden" name="status" value={status} /> : null}
         <input
           className="fn-input"
           name="q"
@@ -149,14 +153,6 @@ export default async function AdminVideosPage({
           placeholder="タイトル / 作者 / X ID"
           style={{ minWidth: 240 }}
         />
-        <select className="fn-select" name="status" defaultValue={status}>
-          <option value="">すべての状態</option>
-          {["draft", "pending", "public", "limited", "private", "hidden", "archived", "voided"].map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
         <select className="fn-select" name="event" defaultValue={event}>
           <option value="">すべてのイベント</option>
           {events.map((ev) => (

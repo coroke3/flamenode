@@ -7,6 +7,7 @@ dist/
 .env
 .env.local
 .dev.vars
+cloudflare/ids.json
 *.log
 tsconfig.tsbuildinfo
 .DS_Store

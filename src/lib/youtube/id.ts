@@ -6,6 +6,15 @@
  */
 
 const YOUTUBE_ID_RE = /^[A-Za-z0-9_-]{11}$/;
+export const YOUTUBE_THUMB_SIZES = [
+  "default",
+  "hqdefault",
+  "mqdefault",
+  "sddefault",
+  "maxresdefault",
+] as const;
+
+export type YoutubeThumbSize = (typeof YOUTUBE_THUMB_SIZES)[number];
 
 /**
  * 入力値から YouTube 動画 ID を抽出する。
@@ -42,9 +51,13 @@ export function extractYoutubeId(input: string | null | undefined): string | nul
 }
 
 /** YouTube サムネイル URL (高画質)。 */
-export function youtubeThumbUrl(id: string | null | undefined, size: "default" | "hqdefault" | "mqdefault" | "sddefault" | "maxresdefault" = "hqdefault"): string {
-  if (!id) return "";
-  return `https://i.ytimg.com/vi/${id}/${size}.jpg`;
+export function youtubeThumbUrl(
+  id: string | null | undefined,
+  size: YoutubeThumbSize = "hqdefault",
+): string {
+  const youtubeId = extractYoutubeId(id);
+  if (!youtubeId) return "";
+  return `/api/youtube-thumbnail/${youtubeId}/${size}`;
 }
 
 /** YouTube 動画ページ URL。 */
