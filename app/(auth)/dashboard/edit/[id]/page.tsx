@@ -231,6 +231,7 @@ export default async function EditVideoPage({
       title: string;
       video_form_settings_json?: string | null;
       parts_json?: string | null;
+      custom_questions?: string | null;
     }
   >();
   for (const ev of allEventRows) {
@@ -242,6 +243,7 @@ export default async function EditVideoPage({
         title: ev.title,
         video_form_settings_json: ev.video_form_settings_json,
         parts_json: ev.parts_json,
+        custom_questions: ev.custom_questions,
       });
     }
   }
@@ -253,6 +255,7 @@ export default async function EditVideoPage({
         title: eventsTable.title,
         video_form_settings_json: eventsTable.video_form_settings_json,
         parts_json: eventsTable.parts_json,
+        custom_questions: eventsTable.custom_questions,
       })
       .from(eventsTable)
       .where(inArray(eventsTable.id, currentEventIds));
@@ -461,6 +464,7 @@ export default async function EditVideoPage({
           intro_comment: video.intro_comment ?? undefined,
           used_software: softwareLabel ?? undefined,
           stage_permission: video.stage_permission ?? undefined,
+          custom_answers: video.custom_answers ?? undefined,
           highlights: video.highlights ?? undefined,
           production_story: video.production_story ?? undefined,
           closing_comment: video.closing_comment ?? undefined,
