@@ -1,6 +1,7 @@
 import * as React from "react";
 import type { Metadata } from "next";
 import "@/styles/globals.css";
+import "@/styles/mobile-hardening.css";
 import { redesignFontClassName } from "@/components/layout/RedesignFonts";
 import { ThemeBootstrap } from "@/components/layout/ThemeBootstrap";
 import {
