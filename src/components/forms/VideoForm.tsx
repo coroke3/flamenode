@@ -1083,6 +1083,26 @@ export function VideoForm({
           {pending ? "送信中…" : "提出する"}
         </button>
       </div>
+
+      <div className={styles.mobileSubmitBar} aria-label="送信操作">
+        <span className={styles.mobileSubmitHint}>
+          {submitBlockedReason
+            ? "投稿できません"
+            : pending
+              ? "送信中…"
+              : mode === "edit"
+                ? "変更を保存できます"
+                : "入力後に提出できます"}
+        </span>
+        <button
+          type="submit"
+          className="fn-btn fn-btn-primary"
+          disabled={pending || !canSubmit}
+          aria-busy={pending}
+        >
+          {pending ? "送信中…" : mode === "edit" ? "保存する" : "提出する"}
+        </button>
+      </div>
     </form>
   );
 }
