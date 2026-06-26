@@ -35,7 +35,7 @@ export type HealthCheckResult = {
 
 type AnyDb = LibSQLDatabase<any>;
 
-/** system_settings が global 1 行であるか */
+/** system_settings が default 1 行であるか */
 async function checkSystemSettingsSingleRow(
   db: AnyDb,
 ): Promise<HealthCheckResult> {

@@ -19,7 +19,7 @@ type QueueRow = {
 
 export async function getCostGuardMode(env: Env): Promise<string> {
   const row = (await env.DB.prepare(
-    `SELECT cost_guard_mode FROM system_settings WHERE id = 'global' LIMIT 1`,
+    `SELECT cost_guard_mode FROM system_settings WHERE id = 'default' LIMIT 1`,
   ).first()) as { cost_guard_mode?: string } | null;
   return row?.cost_guard_mode ?? "normal";
 }

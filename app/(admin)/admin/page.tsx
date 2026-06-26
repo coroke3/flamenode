@@ -138,7 +138,7 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
               )`,
             ),
           ),
-        db.select().from(systemSettings).limit(1),
+        db.select().from(systemSettings).where(eq(systemSettings.id, "default")).limit(1),
       ]);
 
       counts = {

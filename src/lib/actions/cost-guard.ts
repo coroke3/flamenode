@@ -45,16 +45,16 @@ async function upsertGlobal(
     await db
       .select({ id: systemSettings.id })
       .from(systemSettings)
-      .where(eq(systemSettings.id, "global"))
+      .where(eq(systemSettings.id, "default"))
       .limit(1)
   )[0];
   if (existing) {
     await db
       .update(systemSettings)
       .set(patch)
-      .where(eq(systemSettings.id, "global"));
+      .where(eq(systemSettings.id, "default"));
   } else {
-    await db.insert(systemSettings).values({ id: "global", ...patch });
+    await db.insert(systemSettings).values({ id: "default", ...patch });
   }
 }
 

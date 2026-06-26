@@ -65,7 +65,7 @@ export async function liveApiAllowed(db: DB): Promise<boolean> {
     await db
       .select({ cost_guard_mode: systemSettings.cost_guard_mode })
       .from(systemSettings)
-      .where(eq(systemSettings.id, "global"))
+      .where(eq(systemSettings.id, "default"))
       .limit(1)
   )[0];
   const mode = row?.cost_guard_mode ?? "normal";

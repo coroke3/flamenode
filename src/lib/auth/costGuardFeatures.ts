@@ -49,7 +49,7 @@ export async function evaluateCostGuard(
           systemSettings.cost_guard_exception_features_json,
       })
       .from(systemSettings)
-      .where(eq(systemSettings.id, "global"))
+      .where(eq(systemSettings.id, "default"))
       .limit(1)
   )[0];
 
