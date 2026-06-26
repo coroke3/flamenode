@@ -1,0 +1,189 @@
+/* ============================================================
+ * スマホ崩れ防止の最終ガード
+ * 既存のページ別 mobile CSS の後段で、横はみ出しや狭幅時の操作部崩れを抑える。
+ * ============================================================ */
+
+@media (max-width: 640px) {
+  html,
+  body {
+    max-width: 100%;
+    overflow-x: clip;
+  }
+
+  [data-fn-surface="public"],
+  [data-fn-surface="public"] .fn-main,
+  [data-fn-surface="public"] .fn-public-container,
+  [data-admin-shell],
+  [data-manage-shell] {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  [data-fn-surface="public"] img,
+  [data-fn-surface="public"] video,
+  [data-fn-surface="public"] iframe,
+  [data-fn-surface="public"] svg {
+    max-width: 100%;
+  }
+
+  [data-fn-surface="public"] .fn-header-inner {
+    grid-template-columns: minmax(0, 1fr) max-content;
+    gap: 8px;
+  }
+
+  [data-fn-surface="public"] .fn-logo {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  [data-fn-surface="public"] .fn-logo-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  [data-fn-surface="public"] .fn-header-right {
+    min-width: max-content;
+  }
+
+  [data-fn-surface="public"] .fn-vd-topstrip,
+  [data-fn-surface="public"] .fn-rec-info-head,
+  [data-admin-shell] .fn-console-resource-tabs,
+  [data-admin-shell] .fn-console-event-tabs,
+  [data-manage-shell] .fn-console-resource-tabs,
+  [data-manage-shell] .fn-console-event-tabs {
+    min-width: 0;
+  }
+
+  [data-fn-surface="public"] .fn-vd-topstrip {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  [data-fn-surface="public"] .fn-vd-topactions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  [data-fn-surface="public"] .fn-vd-topactions .fn-btn,
+  [data-fn-surface="public"] .fn-vd-topactions .fn-icon-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  [data-fn-surface="public"] .fn-vd-author,
+  [data-fn-surface="public"] .fn-vd-event-tags {
+    min-width: 0;
+  }
+
+  [data-fn-surface="public"] .fn-vd-event-tags a.fn-badge,
+  [data-fn-surface="public"] .fn-badge,
+  [data-fn-surface="public"] .fn-pill {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  [data-fn-surface="public"] .fn-rec-info-head {
+    flex-wrap: wrap;
+    white-space: normal;
+  }
+
+  [data-fn-surface="public"] .fn-rec-foot-cell {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  [data-fn-surface="public"] .fn-rec-foot-v--text {
+    max-width: 100%;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+  }
+
+  [data-admin-shell] .fn-console-resource-tabs,
+  [data-admin-shell] .fn-console-event-tabs,
+  [data-manage-shell] .fn-console-resource-tabs,
+  [data-manage-shell] .fn-console-event-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 6px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  [data-admin-shell] .fn-console-resource-tabs::-webkit-scrollbar,
+  [data-admin-shell] .fn-console-event-tabs::-webkit-scrollbar,
+  [data-manage-shell] .fn-console-resource-tabs::-webkit-scrollbar,
+  [data-manage-shell] .fn-console-event-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  [data-admin-shell] .fn-console-resource-tabs .fn-btn,
+  [data-admin-shell] .fn-console-event-tabs .fn-btn,
+  [data-manage-shell] .fn-console-resource-tabs .fn-btn,
+  [data-manage-shell] .fn-console-event-tabs .fn-btn {
+    flex: 0 0 auto;
+    min-height: 40px;
+  }
+
+  [data-admin-shell] .admin-sidebar,
+  [data-manage-shell] .sidebar {
+    max-width: 100%;
+  }
+}
+
+/* 作品詳細の横長レイアウトは PC 幅だけに限定する。
+   max-aspect 系のスマホ横向きで 2 カラム化して横にはみ出すのを防ぐ。 */
+@media (max-width: 1023px) and (min-aspect-ratio: 20 / 9) {
+  [data-fn-surface="public"] .fn-vd.fn-page {
+    --fn-page-gutter: clamp(14px, 4vw, 20px) !important;
+    --fn-page-max: var(--content-max, 1360px) !important;
+  }
+
+  [data-fn-surface="public"] .fn-vd > div {
+    grid-template-columns: 1fr !important;
+    gap: var(--fn-space-block, 30px) !important;
+  }
+
+  [data-fn-surface="public"] .fn-vd > div > article > div:first-child {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 0 !important;
+  }
+
+  [data-fn-surface="public"] .fn-vd > div > article > div:first-child > div {
+    grid-column: auto !important;
+    grid-row: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding-right: 0 !important;
+    position: static !important;
+  }
+}
+
+@supports not (overflow: clip) {
+  @media (max-width: 640px) {
+    html,
+    body {
+      overflow-x: hidden;
+    }
+  }
+}
+
+@media (max-width: 360px) {
+  [data-fn-surface="public"] .fn-header-inner {
+    gap: 6px;
+  }
+
+  [data-fn-surface="public"] .fn-logo-name {
+    max-width: 38vw;
+  }
+
+  [data-fn-surface="public"] .fn-page,
+  [data-fn-surface="public"] .fn-public-container {
+    padding-left: max(14px, env(safe-area-inset-left));
+    padding-right: max(14px, env(safe-area-inset-right));
+  }
+}
