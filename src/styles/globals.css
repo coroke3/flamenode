@@ -687,6 +687,35 @@ select {
   max-width: 100%;
 }
 
+/* 横スクロール表のヒント（スマホのみ表示） */
+.fn-scroll-hint {
+  display: none;
+  margin: 4px 0 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.fn-scroll-affordance {
+  position: relative;
+}
+
+.fn-scroll-affordance::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 28px;
+  pointer-events: none;
+  background: linear-gradient(to left, var(--bg-surface, #fff), transparent);
+}
+
+@media (max-width: 640px) {
+  .fn-scroll-hint {
+    display: block;
+  }
+}
+
 .fn-admin-stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));

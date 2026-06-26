@@ -428,11 +428,6 @@
     margin-left: 0;
     width: 100%;
     flex-wrap: wrap;
-  }
-
-  .authorActions {
-    width: 100%;
-    flex-wrap: wrap;
     gap: 8px;
   }
 

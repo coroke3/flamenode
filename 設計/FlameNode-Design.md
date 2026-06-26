@@ -206,7 +206,7 @@ Auth.js (NextAuth v5) の DrizzleAdapter が必要とするテーブル群。
 - **status**: text NOT NULL DEFAULT 'available' ("available", "reserved", "submitted")
 - **updated_at**: integer NOT NULL DEFAULT (unixepoch())
 
-`discord_user_id` は「どのDiscordアカウントが操作したか」を残すシステム上の主体、`x_user_id` は「どのクリエイター名義で枠を取ったか」を示す公開・作品管理上の主体とする。枠確保時は `user.active_x_user_id` を `slots.x_user_id` に保存し、`approval_status = "pending"` の X ID でも確保を許可する。管理者がその X ID を却下した場合、受付中イベントに属する未提出の `slots` だけを `status = "available"` に戻し、`discord_user_id`, `x_user_id`, `display_name` を NULL にして即時解放する。自動解放された元枠は24時間だけ `priority_reclaim_video_id` と `priority_reclaim_until` で元投稿者へ優先再取得導線を出す。ただし公開ページでは承認待ちや却下理由を表示せず、枠が空きとして反映される目標時間は10分以内とする。提出済み作品に紐づく枠は自動解放せず、作品を `x_reapply_required` として保持し、ユーザーへ X ID 再申請と枠の取り直しを促す。終了した企画、募集終了した企画、提出済み作品に紐づく枠は履歴保持を優先し、自動解放しない。
+`discord_user_id` は「どのDiscordアカウントが操作したか」を残すシステム上の主体、`x_user_id` は「どのクリエイター名義で枠を取ったか」を示す公開・作品管理上の主体とする。枠確保時は `user.active_x_user_id` を `slots.x_user_id` に保存し、`approval_status = "pending"` の X ID でも確保を許可する。管理者がその X ID を却下した場合、受付中イベントに属する未提出の `slots` だけを `status = "available"` に戻し、`discord_user_id`, `x_user_id`, `display_name` を NULL にして即時解放する。自動解放された元枠は24時間だけ `priority_reclaim_video_id` と `priority_reclaim_until` で元投稿者へ優先再取得導線を出す。ただし公開ページでは承認待ちや却下理由を表示せず、枠が空きとして反映される目標時間は10分以内とする。提出済み作品に紐づく枠は自動解放せず、`video_moderation_cases.case_type = "x_reapply"` の open case として保持し、ユーザーへ X ID 再申請と枠の取り直しを促す。終了した企画、募集終了した企画、提出済み作品に紐づく枠は履歴保持を優先し、自動解放しない。
 
 枠の代理確保は管理者と当該イベントのイベント編集許可者が実行できる。X ID 却下後の枠取り直しでは、元の `reservation_group_id` を新しい予約へ引き継がない。旧枠との関連は `history_logs` に旧 slot ID、新 slot ID、対象 video ID、操作主体を残し、管理者だけが確認できるようにする。
 
@@ -315,56 +315,6 @@ X ID 再申請や void 理由などのケース情報は `videos.x_reapply_*` / 
 - status / is_deleted / is_manual_hidden → visibility_status
 - x_reapply_* / void_* → video_moderation_cases
 -->
-- **custom_answers**: text (JSON Object)
-- **view_count**: integer DEFAULT 0
-- **like_count**: integer DEFAULT 0
-- **youtube_view_count**: integer DEFAULT 0 (YouTube 同期で取得した補助再生数)
-- **trending_view_count_24h**: integer DEFAULT 0 (急上昇表示用のアプリ内24時間閲覧数)
-- **video_score**: real DEFAULT 0.0 (算出式は 2-25 を正とし、アプリ内閲覧数と YouTube 側再生数を含める)
-- **youtube_sync_status**: text DEFAULT 'pending' ("pending", "synced", "failed")
-- **validation_errors**: text (JSON Object)
-- **status**: text NOT NULL DEFAULT 'draft' ("draft", "pending", "x_reapply_required", "public", "unlisted", "private", "voided")
-- **is_manual_hidden**: integer DEFAULT 0
-- **is_deleted**: integer DEFAULT 0 (boolean)
-- **x_reapply_request_id**: text | null (FK → x_account_link_requests.id / X ID 却下後に紐づける再申請)
-- **x_reapply_started_at**: integer | null (X ID 再申請要求状態になった時刻)
-- **x_reapply_due_at**: integer | null (再申請期限。既定は開始から7日)
-- **x_reapply_rejected_x_user_id**: text | null (却下された旧 X ID。公開ページには出さず管理画面だけで履歴表示)
-- **x_reapply_public_reason**: text | null (ユーザー本人に見せる却下理由の公開文面)
-- **x_reapply_attempt_count**: integer DEFAULT 0 (連続却下回数。3回で一時ロック)
-- **x_reapply_locked_until**: integer | null (再申請ロック解除予定時刻)
-- **voided_by_user_id**: text | null (FK → user.id / 運営が作品を無効化した場合の操作主体)
-- **voided_at**: integer | null (timestamp)
-- **void_reason**: text | null
-- **void_reason_category**: text | null ("x_id_invalid", "duplicate", "withdrawn_by_creator", "operator_decision", "expired")
-- **void_detail_private**: text | null (通知・監査用の詳細文。公開ページや通常一覧には出さない)
-- **void_physical_delete_candidate_at**: integer | null (180日保持後の物理削除候補時刻)
-- **void_restored_by_user_id**: text | null (FK → user.id / 管理者復旧時の操作主体)
-- **void_restored_at**: integer | null (timestamp)
-- **scheduling_type**: text DEFAULT 'slotted' ("slotted", "manual")
-- **scheduled_time**: integer (timestamp)
-- **created_at**: integer NOT NULL DEFAULT (unixepoch())
-- **updated_at**: integer NOT NULL DEFAULT (unixepoch())
-
-`scheduled_time` は作品の代表上映時刻であり、枠あり投稿では紐づくスロット群のうち最初の `slots.start_time` をコピーする。`events.max_slots_per_video` が2以上の場合でも、複数枠取得は連続する枠に限り、代表時刻は常に最初の枠とする。連続枠のまとまりは `slots.reservation_group_id` で管理する。
-
-X ID 却下後も提出済み作品そのものは即時削除しない。受付中イベントに提出済み作品がある場合は `status = "x_reapply_required"` にし、ユーザーへ X ID 再申請と枠の取り直しを促す。再申請中の表示名は再申請中のID文字列ではなく、再申請中の名義を主表示にする。再申請が作成されたら `x_reapply_request_id` に紐づけ、作品データはその再申請 ID のもとで保持する。同一 Discord ユーザーが別の承認済み X ID を持つ場合は、その ID への付け替えと新規再申請の両方を選べる。`x_reapply_due_at` は原則として `x_reapply_started_at` から7日後に設定し、期限を過ぎた場合は自動的に `voided` にする。
-
-`voided` は物理削除ではなく、「公開・上映・一覧・エクスポート・スコア上はなかったことにする」論理無効化である。運営が作品ごとなかったことにする場合や、X ID 再申請期限切れ、受付終了までに枠取り直しが完了しなかった場合、または投稿者本人が取り下げ申請した場合は `status = "voided"` とし、`is_deleted = 1`, `voided_by_user_id`, `voided_at`, `void_reason_category`, `void_detail_private` を記録する。理由カテゴリは「X ID不備」「重複投稿」「投稿者都合」「運営判断」「期限切れ」を既定選択肢にする。本人向け通常表示は常に「不備」に統一し、詳細文は通知内だけで伝える。`voided` 作品は公開ページ、一覧、旧形式エクスポート、スコア計算、ランキングから除外し、管理画面でも既定では非表示にする。管理者がステータスフィルタで明示した場合だけ表示し、統計はイベント別・理由カテゴリ別に集計する。`voided` の YouTube ID は重複判定から外し、正しい手順での再投稿を別作品として許可する。コメント、チャプター、いいね、ブックマークは完全削除せず、カスケード無効化として非表示保持するが、再登録作品へは引き継がない。
-
-`voided` 作品は通知からのみ本人が確認でき、通常の本人ダッシュボード一覧には出さない。復旧は可能だが管理者専用操作とし、イベント編集許可者は復旧要請だけを出せる。復旧時は過去スコアも再計算対象に戻す。`voided` 操作は作品IDまたは `VOID` などの確認文字列入力を必須にする二段階確認方式にし、危険操作理由の入力も必須にする。`voided` から180日を過ぎた作品は物理削除候補にできるが、削除前に監査ログ、無効化理由、関連データの保持要件を確認する。
-
-#### 作品ステータス別の権限状態
-
-| status | 公開表示 | ユーザー本人 | 管理者 | イベント編集許可者 |
-| :--- | :--- | :--- | :--- | :--- |
-| `draft` | 非表示 | 全項目編集、削除可 | 確認・代理修正可 | 担当イベント内のみ確認・代理修正可 |
-| `pending` | 原則非表示。イベント一覧では必要に応じて審査中表示 | 許可済みフィールドを編集可 | 審査、承認、差し戻し、手動同期可 | 担当イベント内の審査補助、内容編集、手動同期可 |
-| `x_reapply_required` | イベント作品一覧では「調整中」として薄く表示。動画詳細は閲覧者種別で出し分け | 作品本文、YouTube URL、合作メンバー、クレジットを編集可。枠取り直しを先に促し、X ID 再申請と一体化したウィザードへ誘導 | 通常 `pending` と同じ審査一覧に表示。理由文面編集、再申請確認、付け替え、`voided` 操作可 | 担当イベント内の確認、内容修正、代理枠確保可。最終無効化は管理者判断を基本にする |
-| `public` | 通常公開 | 設定された編集可能フィールドのみ編集可 | 全操作可 | 担当イベント内の許可範囲で編集可 |
-| `unlisted` | 直接URLまたは限定導線のみ | 許可済み範囲で編集可 | 全操作可 | 担当イベント内の許可範囲で編集可 |
-| `private` | 非公開 | 本人ダッシュボードで確認可 | 全操作可 | 担当イベント内で必要な場合のみ確認可 |
-| `voided` | 非表示 | 通常一覧には出さず、通知からのみ「不備」として確認可。本人による再登録は別作品扱い | 監査ログ、統計別枠、復旧、180日後の物理削除候補確認が可能。操作は確認文字列付き二段階確認必須 | 担当イベント内で存在確認、経緯閲覧、復旧要請のみ可能。最終復旧・完全除外判断は管理者へ委ねる |
 
 ### 1-9. video_events (所属イベント)
 - **video_id**: text (FK → videos.id, ON DELETE CASCADE)
@@ -379,6 +329,15 @@ X ID 却下後も提出済み作品そのものは即時削除しない。受付
 - **role**: text
 - **comment**: text
 - **order_index**: integer NOT NULL DEFAULT 0
+- **chapters_json**: text | null (メンバー担当チャプターの JSON)
+- **discord_user_id**: text | null
+- **can_edit**: integer NOT NULL DEFAULT 0
+- **is_public_member**: integer NOT NULL DEFAULT 1
+- **edit_granted_by_user_id**: text | null
+- **edit_granted_at**: integer | null
+- **edit_updated_at**: integer | null
+
+`video_members` は公開メンバー表示、非公開共同編集者、メンバー担当チャプター、共同編集権限を同居させる。旧 `video_collaborators` / `video_collaborator_permissions` / `video_member_chapters` は中間設計であり、現在は `video_members.can_edit` と `video_members.chapters_json` が正本。
 
 ### 1-11. history_logs (履歴)
 - **id**: integer (Primary Key AUTOINCREMENT)
@@ -422,21 +381,16 @@ X ID 却下後も提出済み作品そのものは即時削除しない。受付
 - **synced_at**: integer | null (timestamp)
 - **UNIQUE**: (x_user_id, video_id, interaction_type)
 
-### 1-15. video_comments (コメント)
-- **id**: text (Primary Key)
-- **video_id**: text NOT NULL (FK → videos.id, ON DELETE CASCADE)
-- **x_user_id**: text NOT NULL (FK → x_users.id, ON DELETE CASCADE)
-- **chapter_id**: text | null (FK → video_chapters.id, ON DELETE SET NULL)
-- **body**: text NOT NULL
-- **visibility**: text DEFAULT 'public' ("private", "public")
-- **created_at**: integer NOT NULL (timestamp)
+### 1-15. video_comments (削除済み)
 
-`video_comments.chapter_id` は時間付きコメントを `video_chapters` の秒数へ紐づけるための必須設計である。初期SQLの `video_comments` にはこのカラムがないため、後続マイグレーションで追加する。時間に紐づかない独立コメントは標準機能にせず、通常はコメント投稿時に現在再生位置からチャプターを作成または既存チャプターを選択して紐づける。
+`video_comments` は `0021_slim_mvp_drop_unused_tables.sql` で削除済み。新規 UI / API / Worker / migration で利用しない。
+通常コメント機能は MVP では持たず、作品の時刻付き情報は `video_chapters`、メンバー担当チャプターは `video_members.chapters_json` に寄せる。
 
 ### 1-16. video_chapters (チャプター/時間付きコメント用マーカー)
 - **id**: text (Primary Key)
 - **video_id**: text NOT NULL (FK → videos.id, ON DELETE CASCADE)
 - **x_user_id**: text NOT NULL (FK → x_users.id, ON DELETE CASCADE)
+- **video_member_id**: text | null (deprecated / メンバー担当チャプターは `video_members.chapters_json` が正本)
 - **chapter_time**: real NOT NULL (秒)
 - **chapter_label**: text NOT NULL
 - **note**: text
@@ -447,7 +401,7 @@ X ID 却下後も提出済み作品そのものは即時削除しない。受付
 - **created_at**: integer NOT NULL (timestamp)
 - **updated_at**: integer NOT NULL (timestamp)
 
-時間付きコメントは YouTube 風の独立コメント欄ではなく、ニコニコ動画寄りの「時間軸に紐づく反応」として扱う。ただし UI は一覧中心にし、コメント欄感を強く出しすぎない。ユーザーは任意の秒数を手動設定でき、自分のチャプター一覧を確認し、公開/非公開を切り替えられる。他ユーザーの公開チャプターは閲覧でき、コメントは基本的に `video_comments.chapter_id` を通じてチャプターへ紐づける。
+時間付き情報は YouTube 風の独立コメント欄ではなく、チャプター/メモとして扱う。ユーザーは任意の秒数を手動設定でき、自分のチャプター一覧を確認し、公開/非公開を切り替えられる。他ユーザーの公開チャプターは閲覧できる。`video_comments` への紐づけは行わない。
 
 `marker_kind = 'chapter'` の行、または `show_on_player_bar = 1` の公開行は、独自プレイヤーの再生バー上にチャプターマーカーとして点表示できる。通常コメント由来のチャプターは再生バーを混雑させないため `show_on_player_bar = 0` を既定とし、明示的なチャプター指定時のみ `show_on_player_bar = 1` を初期値にする。過去データの `starts` / `ends` など秒数指定がある情報は、管理インポート時に `marker_kind = 'chapter'` の初期候補として取り込む。
 
@@ -665,13 +619,13 @@ X ID 却下後も提出済み作品そのものは即時削除しない。受付
 - **手動補正**: 候補がない場合、または候補が誤っている場合は手動入力を許可する。手動入力は信頼度を低く表示し、後から X ID 承認・統合で補正できるようにする。
 
 ### 2-7. ページ別の表示条件
-- **/list**: `status == "public"` かつ `is_deleted == false` の全作品。
+- **/list**: `videos.visibility_status = "public"` の全作品。`voided` / `archived` / `hidden` / `private` は除外する。
 - **/event/[id]**: 該当イベントの参加作品。
 
 ### 2-8. 履歴ログの保持期間と一括削除
 - **通常ログ**: 90日間。Cron Triggers (`cleanup` Worker) により自動削除候補にする。
 - **長期ログ**: X ID 再申請、X ID 却下、枠解放、`voided`、復旧、通知送信失敗、コストガード操作は監査上重要なため180日保持する。実装上は別テーブル、または `history_logs.retention_class = "long_audit"` 相当の属性で分ける。
-- **閲覧範囲**: 管理者は全ログを確認できる。イベント編集許可者は担当イベント内に限り、イベント設定、作品、枠、協力者権限、`x_reapply_required`、`voided` 要請に関するログを確認できる。担当外ユーザーのメールアドレス、Discord 連携詳細、他イベント予約詳細はマスクする。
+- **閲覧範囲**: 管理者は全ログを確認できる。イベント編集許可者は担当イベント内に限り、イベント設定、作品、枠、協力者権限、X ID 再申請 case、`voided` 要請に関するログを確認できる。担当外ユーザーのメールアドレス、Discord 連携詳細、他イベント予約詳細はマスクする。
 - **危険操作**: `voided`、復旧、物理削除候補処理、コストガード一時許可、ステータス強制整合は理由入力必須とし、復旧操作自体も新しい監査ログとして残す。
 
 ### 2-9. 枠のリピート一括生成と多重生成ロジック
@@ -679,29 +633,29 @@ X ID 却下後も提出済み作品そのものは即時削除しない。受付
 - **排他制御**: CAS パターンを使用してダブルブッキングを物理的に防止（TECHNICAL_SPEC §3.1 参照）。
 
 ### 2-10. 条件付き自動公開 (Auto-Public) システム
-- **ステートマシン**: 通常は `draft` → `pending` → `public` → `unlisted`/`private`。X ID 却下時は `x_reapply_required` へ退避し、再申請承認と枠取り直し完了後に自動で `pending` へ戻す。期限切れ、受付終了までの未対応、運営判断による無効化では `voided` にする。
-- **Golden Record**: 必須項目 + YouTube 健全性が確認された瞬間に `status = "public"` へ自動更新。
-- **Manual Kill Switch**: 運営による事後差し止め（`is_manual_hidden` または `status = "unlisted"`）。
+- **ステートマシン**: 通常は `draft` → `pending` → `public` → `limited`/`private`/`hidden`。公開可否は `videos.visibility_status` を正とし、X ID 再申請や無効化理由は `video_moderation_cases` で管理する。
+- **Golden Record**: 必須項目 + YouTube 健全性が確認された瞬間に `videos.visibility_status = "public"` へ自動更新。
+- **Manual Kill Switch**: 運営による事後差し止めは `videos.visibility_status = "hidden"` または `"voided"` と `video_moderation_cases` で記録する。
 - **差し戻し**: `public` → `unlisted` + `last_error` へのコメント記録。専用の `returned` ステータスは使用しない。
 
 **トリガー仕様**:
 - **Submit 時即時チェック**: Server Action（動画保存時）で以下の必須チェックを即時実行
-  1. `videos.owner_discord_user_id` ≠ NULL（Discord 認証済み）
-  2. `videos.creator_id` ≠ NULL（X クリエイター登録済み）
+  1. `videos.submitted_by_discord_user_id` ≠ NULL（Discord 認証済み）
+  2. `videos.creator_x_user_id` ≠ NULL（X クリエイター登録済み）
   3. `x_users.approval_status` = `'approved'`（クリエイター承認済み）
   4. `user.is_banned` = false（BANされていない）
   5. `user.accepted_terms_version_id` が最新公開規約を指す（利用規約同意済み）
-  6. 必須フィールド（`title`, `display_name`）が埋まっている
-- **全チェック合格時**: 即時 `status = 'public'` に更新。YouTube URL / ID が入力されたタイミング、保存時、提出時に軽量な即時同期を試行し、成功した場合は `videos.youtube_sync_status = 'synced'` にする。一時的な取得失敗またはクォータ節約で保留した場合のみ `pending` とし、`youtube-sync` Worker の定期同期へ回す。削除済みや存在確認失敗が明確な場合は `failed` としてユーザー修正待ちにする。
-- **X Link 必須**: `videos.creator_id` が紐づく `x_users.approval_status` が `'approved'` でない場合、`status = 'pending'` のまま。クリエイター承認後に再チェック用キューを `notification_outbox` に登録
-- **YouTube 検証**: `youtube-sync` Worker が `youtube_sync_status = 'pending'` の動画を6時間ごとにスキャン。存在確認できたら `youtube_sync_status = 'synced'` に更新する。ユーザー本人は自分の作品に限り、1作品につき1日1回まで「YouTube情報を再同期」を押せる。手動同期は管理者のクォータガードと `read_only` 状態を尊重し、クォータ枯渇時はキュー投入だけに留める。
+  6. 必須フィールド（`title`, `creator_display_name`）が埋まっている
+- **全チェック合格時**: 即時 `videos.visibility_status = 'public'` に更新。YouTube URL / ID が入力されたタイミング、保存時、提出時に軽量な即時同期を試行し、成功した場合は `video_youtube_metadata.sync_status = 'synced'` にする。一時的な取得失敗またはクォータ節約で保留した場合のみ `pending` とし、`youtube-sync` Worker の定期同期へ回す。削除済みや存在確認失敗が明確な場合は `failed` としてユーザー修正待ちにする。
+- **X Link 必須**: `videos.creator_x_user_id` が紐づく `x_users.approval_status` が `'approved'` でない場合、`videos.visibility_status = 'pending'` のまま。クリエイター承認後に再チェック用キューを `notification_outbox` に登録
+- **YouTube 検証**: `youtube-sync` Worker が `video_youtube_metadata.sync_status = 'pending'` の動画を6時間ごとにスキャン。存在確認できたら `video_youtube_metadata.sync_status = 'synced'` に更新する。ユーザー本人は自分の作品に限り、1作品につき1日1回まで「YouTube情報を再同期」を押せる。手動同期は管理者のクォータガードと `read_only` 状態を尊重し、クォータ枯渇時はキュー投入だけに留める。
 
 ### 2-11. 旧システム互換JSONの出力仕様
 - **R2 エクスポート**: Cron Triggers (`json-generator` Worker) で JSON を R2 に静的書き出し。外部ツールは R2 を参照することで D1 負荷をゼロ化。
 - **動画旧形式**: `videos`, `video_members`, `events`, `x_users` から旧 `video.json` 相当を再生成する。`title`, `creator`, `tlink`, `icon`, `time`, `timestamp`, `ylink`, `music`, `credit`, `member`, `memberid`, `beforecomment`, `aftercomment`, `soft`, `hitokoto`, `type1` など、旧ツールが参照するキーを保持する。
-- **イベント旧形式**: `events` と `event_editors` から旧 `eventinfo.json` 相当を再生成する。`eventid`, `start`, `end`, `type`, `icon`, `eventname`, `member`, `memberid`, `menberpost`, `explanation`, `img` を出力する。旧キーの誤字 `menberpost` は互換性のため維持し、同内容の `memberpost` を追加出力してもよい。
-- **ID・名前対応表**: `x_users`, `x_user_aliases`, `video_members`, `event_editors`, `event_collaborator_permissions` から名前・ID の相互変換に使える CSV/JSON を出力する。
-- **出力対象**: 通常エクスポートは公開データのみ。管理者向け詳細エクスポートは限定公開・非公開・管理画面専用メンバーも含められる。外部上映ツール向けはこの方針でよく、限定公開作品は管理者向け詳細エクスポートまたは専用スコープで扱う。`x_reapply_required` は運営向け詳細レポートには状態フラグ付きで出力し、旧形式の上映・再生用出力からは除外する。`voided` は監査・統計専用の別レポートにだけ出す。
+- **イベント旧形式**: `events` と `event_staff` から旧 `eventinfo.json` 相当を再生成する。`eventid`, `start`, `end`, `type`, `icon`, `eventname`, `member`, `memberid`, `menberpost`, `explanation`, `img` を出力する。旧キーの誤字 `menberpost` は互換性のため維持し、同内容の `memberpost` を追加出力してもよい。
+- **ID・名前対応表**: `x_users`, `x_user_aliases`, `video_members`, `event_staff`, `event_staff_permissions` から名前・ID の相互変換に使える CSV/JSON を出力する。
+- **出力対象**: 通常エクスポートは公開データのみ。管理者向け詳細エクスポートは限定公開・非公開・管理画面専用メンバーも含められる。外部上映ツール向けはこの方針でよく、限定公開作品は管理者向け詳細エクスポートまたは専用スコープで扱う。X ID 再申請 case が open の作品は運営向け詳細レポートには状態フラグ付きで出力し、旧形式の上映・再生用出力からは除外する。`voided` は監査・統計専用の別レポートにだけ出す。
 - **文字コード**: JSON と旧出力は UTF-8 を正とする。旧データに文字化けが残る場合は、Shift_JIS、Windows-31J、UTF-8 の取り違えを疑う。システムは疑い行をハイライトし、修正候補を補助表示する。管理者は確認画面で手動修正できるが、必須にはせず、一括スキップして原文のまま取り込むこともできる。
 - **旧データの画像URL**: `icon`, `img` などの外部画像 URL は Cloudflare へ保存せず参照のみで保持する。Cloudflare に保存する画像は新規アイコン画像だけに限定する。
 - **旧データのX ID**: 旧データ内の X ID は未承認 X ID（プレースホルダー）として作成し、将来の本人確認・統合・付け替えに備える。旧データ由来の運営メンバー公開範囲が不明な場合は非公開（管理画面のみ）を既定にする。
@@ -710,11 +664,11 @@ X ID 却下後も提出済み作品そのものは即時削除しない。受付
 - **Lazy Update**: 動画ページアクセス時にバックグラウンドで更新。
 - **バッチ同期**: `youtube-sync` Worker が6時間ごとに50件ずつ同期。
 - **入力時同期**: 投稿・編集フォームで YouTube URL / ID が入力された時点で、11桁IDの正規化、サムネイルURL生成、公開状態・存在確認を即時に試行する。成功すればフォーム上に確認済み表示を出し、ユーザーが投稿直後に状態を確認できるようにする。
-- **ユーザー手動同期**: ログインユーザーは、自分が所有する作品について1作品につき1日1回まで同期要求できる。上限は日本時間 0:00 にリセットする。同期要求は `youtube_sync_status`, 最終要求日、要求者を記録し、連打やクォータ消費を防ぐ。クォータ不足時はキュー投入のみとし、即時同期は保証しない。
+- **ユーザー手動同期**: ログインユーザーは、自分が所有する作品について1作品につき1日1回まで同期要求できる。上限は日本時間 0:00 にリセットする。同期要求は `video_youtube_metadata.sync_status`, 最終要求日、要求者を記録し、連打やクォータ消費を防ぐ。クォータ不足時はキュー投入のみとし、即時同期は保証しない。
 - **管理者・イベント編集許可者の同期**: 管理者と担当イベントのイベント編集許可者による手動同期は、通常ユーザーの1日1回制限の対象外にする。ただし YouTube API クォータと `cost_guard_mode` は尊重し、枯渇時はキュー投入に留める。
 - **クォータ不足時の再実行**: YouTube API クォータ不足で同期できなかったキューは、翌日の日本時間 0:00 以降に自動再実行する。
 - **URL種別**: Shorts URL、通常URL、共有URLはいずれも最終的に11桁の YouTube 動画 ID へ正規化して管理する。
-- **公開状態**: 非公開動画は「YouTube側の公開設定を確認してください」と本人へ表示する。削除済みまたは存在確認失敗は `youtube_sync_status = "failed"` とし、`pending` へ戻さず、YouTube 側の復旧または URL 修正を待つ。
+- **公開状態**: 非公開動画は「YouTube側の公開設定を確認してください」と本人へ表示する。削除済みまたは存在確認失敗は `video_youtube_metadata.sync_status = "failed"` とし、`pending` へ戻さず、YouTube 側の復旧または URL 修正を待つ。
 - **登録許容**: プレミア公開待ち動画、年齢制限付き動画、埋め込み不可動画は登録自体をブロックしない。プレミア公開を順に追うイベントを想定し、埋め込み不可の場合は外部で開く導線や警告を出す。
 - **OGPフォールバック**: YouTube API の1日上限クォータを90%消費した時点で、新規の軽量確認は OGP 解析へ自動的に切り替える。OGPから取得したタイトル・サムネイル・公開予定時刻は確認・提案用に留め、ユーザー入力済みのタイトルや説明文を勝手に上書きしない。
 - **埋め込み不可・年齢制限**: 埋め込み不可または年齢制限付きで iframe 再生ができない場合、プレイヤー中央に YouTube サムネイルと「YouTubeで視聴する」の外部リンクボタンを大きく表示し、タイトル直下にも同じ導線を置く。
@@ -742,13 +696,13 @@ X ID 却下後も提出済み作品そのものは即時削除しない。受付
 
 ### 2-15. X ID連携と既存作品の編集権限
 - **三者照合**: セッションのユーザー ID、X ID、および DB の所有権情報を厳密に照合（TECHNICAL_SPEC §2.1 参照）。
-- **X ID 却下処理の一貫性**: X ID の却下、未提出枠の解放、提出済み作品の `x_reapply_required` 化、通知送信予約、`history_logs` 記録は、D1 のトランザクションまたはそれに準じる一括処理として扱う。途中失敗した場合は管理者タスクに出す。
-- **X ID 却下後の提出済み作品**: 受付中イベントで提出済み作品の X ID が却下された場合、作品は即時削除せず `status = "x_reapply_required"` にする。ユーザーには枠の取り直しを先に促し、その後 X ID 再申請または既存承認済み ID への付け替えを行うウィザードへ誘導する。
-- **再申請期限**: `x_reapply_required` になった作品は7日以内に対応する。期限切れの3日前と24時間前に Discord DM と管理画面通知でリマインドし、最終確認通知は送らない。管理者だけが個別延長でき、最大 +7日、合計14日までにする。期限を過ぎた場合、または枠取り直しをしないままイベント受付が終了した場合は自動的に `voided` にする。連続3回却下された場合は再申請を一時ロックし、管理者への問い合わせを促す。
+- **X ID 却下処理の一貫性**: X ID の却下、未提出枠の解放、提出済み作品の X ID 再申請 case 作成、通知送信予約、`history_logs` 記録は、D1 のトランザクションまたはそれに準じる一括処理として扱う。途中失敗した場合は管理者タスクに出す。
+- **X ID 却下後の提出済み作品**: 受付中イベントで提出済み作品の X ID が却下された場合、作品は即時削除せず `video_moderation_cases.case_type = "x_reapply"` の open case を作る。作品の公開可否は `videos.visibility_status` で管理し、通常は `pending` または `hidden` として公開導線から外す。ユーザーには枠の取り直しを先に促し、その後 X ID 再申請または既存承認済み ID への付け替えを行うウィザードへ誘導する。
+- **再申請期限**: `video_moderation_cases.case_type = "x_reapply"` の open case は7日以内の対応を求める。期限切れの3日前と24時間前に Discord DM と管理画面通知でリマインドし、最終確認通知は送らない。管理者だけが個別延長でき、最大 +7日、合計14日までにする。期限を過ぎた場合、または枠取り直しをしないままイベント受付が終了した場合は `videos.visibility_status = "voided"` にし、case を expired として閉じる。連続3回却下された場合は再申請を一時ロックし、管理者への問い合わせを促す。
 - **枠の取り直し**: 新しい枠が確保されるまで公開処理、上映順確定、旧形式エクスポート出力の対象にしない。元枠は24時間だけ優先再取得候補として提示する。元枠が取れない場合は代替枠があれば提案し、なければ「取得可能な枠がありません」と表示する。連続枠数は短縮・延長を許可し、イベントの最大連続取得数を超えない範囲にする。
-- **編集許可**: `x_reapply_required` 中でも作品本文、YouTube URL、合作メンバー、クレジット修正を許可する。却下理由は auth 側で本人に表示し、本人向け公開文面は「プロフィール未確認」「ID不一致」「非公開アカウント」「その他」のテンプレートから選び、管理者が文面編集できる。内部メモと本人向け文面は完全に分離し、内部メモを公開 API に載せない。
+- **編集許可**: X ID 再申請 case が open の間でも作品本文、YouTube URL、合作メンバー、クレジット修正を許可する。却下理由は auth 側で本人に表示し、本人向け公開文面は「プロフィール未確認」「ID不一致」「非公開アカウント」「その他」のテンプレートから選び、管理者が文面編集できる。内部メモと本人向け文面は完全に分離し、内部メモを公開 API に載せない。
 - **通知**: X ID 再申請が必要になった場合、Discord DM と管理画面通知で知らせる。メール通知は基本的に使わない。通知失敗時は管理画面のタスク一覧に表示する。
-- **運営による無効化**: 運営は必要に応じて作品を `status = "voided"` に変更できる。これは「作品ごとなかったことにする」運用であり、公開ページ、一覧、旧形式エクスポート、スコア計算から除外する。完全な物理削除ではなく、監査ログと管理画面で追跡できる論理無効化とする。`voided` 操作は二段階確認を必須にする。
+- **運営による無効化**: 運営は必要に応じて作品を `videos.visibility_status = "voided"` に変更し、`video_moderation_cases.case_type = "void"` を記録できる。これは「作品ごとなかったことにする」運用であり、公開ページ、一覧、旧形式エクスポート、スコア計算から除外する。完全な物理削除ではなく、監査ログと管理画面で追跡できる論理無効化とする。`voided` 操作は二段階確認を必須にする。
 - **再申請後の復帰**: 再申請された X ID が承認され、枠が取り直され、必要項目が揃った場合は自動的に `pending` へ戻す。既存承認済み X ID へ付け替える場合は、作者表示名を付け替え先 X ID の現在の表示名へ自動同期し、アイコン候補にも自動追加する。元の却下済み X ID は公開ページには出さず、管理画面と担当イベントのイベント編集許可者に確認用履歴として表示するが、正規 alias にはしない。
 - **X ID統合との競合**: X ID 再申請と X ID 統合が同時に発生した場合は、作品の公開復帰に必要な再申請フローを優先する。統合処理は一時停止し、主体の復帰が完了してから再開する。ウィザード開始時点の再申請対象 ID を優先・固定し、途中でアクティブ X ID を切り替えても勝手に対象を変えない。
 - **Discord連携解除時**: X ID 再申請中または未公開の作品は `voided` にし、公開済み作品は所有者不明のアーカイブ扱いとして公開履歴を保持する。X ID の表示名変更履歴は公開ページでは最新名だけ反映し、履歴は管理画面の監査用に留める。
@@ -767,14 +721,14 @@ X ID 却下後も提出済み作品そのものは即時削除しない。受付
 
 ### 2-18. パーソナライズ推薦
 - **嗜好優先**: 視聴時間やブックマークに基づく。
-- **video_score 計算**: `TECHNICAL_SPEC §3.3` 参照。
+- **score 計算**: `videos.score` を新規表示クエリの優先値にし、`video_stats.score` は worker / 旧DB fallback 用に当面 dual-write で残す。
 
 ### 2-19. 動画プレイヤー拡張
 - **コマ送り**: 1/30秒調整。
 - **独自プレイヤー**: YouTube iframe を FlameNode の独自操作レイヤーで包み、再生、停止、音量、全画面、シーク、コマ送りを提供する。
 - **透かし UI 非表示**: マウス停止またはプレイヤー領域外移動時は、再生バーなどのオーバーレイを即座に消す。
 - **振り返り上映用データ**: 作品本文に常設せず、動画詳細ページのポップアップで表示する。
-- **時間付きコメント**: コメントは X ID と `video_comments.chapter_id` に紐づけ、チャプターが保持する動画秒数へ接続する。コメントを選択すると該当秒数へシークする。
+- **時間付き情報**: 通常コメント欄は持たず、X ID と `video_chapters` の秒数付きメモとして扱う。メンバー別の担当チャプターは `video_members.chapters_json` に保持する。
 - **チャプターマーカー**: `video_chapters.show_on_player_bar = 1` の行を、再生バー上に小さな点として表示する。位置は `chapter_time / duration` で算出し、ホバーまたはキーボードフォーカス時に時刻、ラベル、公開/非公開状態を小さな吹き出しで表示する。
 - **マーカー操作**: 点をクリックまたは Enter/Space で選択すると該当秒数へシークする。視覚上の点は小さくして映像を邪魔しないが、操作判定領域は十分に広く取り、キーボードでも移動できるようにする。
 - **密集時の扱い**: マーカーが密集する場合は `marker_kind = 'chapter'` を優先し、画面幅に応じて2秒以内のマーカーを1つの点へまとめる。ホバー、タップ、キーボードフォーカス時に複数候補リストを展開する。通常コメント由来の点は縮約表示または表示切替に回し、モバイルではチャプター点を優先して細かなコメント点は一覧側で確認させる。
@@ -785,7 +739,7 @@ X ID 却下後も提出済み作品そのものは即時削除しない。受付
 ### 2-20. 編集可能フィールド制御
 - **制御**: イベントごとの `editable_fields` 設定を優先。
 - **設定権限**: 編集可能フィールド設定を変更できるのは、管理者または当該イベントの編集許可者のみ。通常ユーザーは許可済みフィールドの範囲内で作品を編集する。
-- **協力者の個別制御**: `event_collaborator_permissions.permission_key` により、イベント単位かつ編集権限単位で操作可否を設定する。協力者の許可範囲は、対象イベントと権限キーに一致する範囲を超えられない。
+- **協力者の個別制御**: `event_staff` と `event_staff_permissions.permission_key` により、イベント単位かつ編集権限単位で操作可否を設定する。協力者の許可範囲は、対象イベントと権限キーに一致する範囲を超えられない。
 
 ### 2-21. 管理者・イベント編集許可者 (RBAC)
 - **管理者**: 全作品の編集権限、X ID 承認、ユーザー管理、BAN、イベント承認、イベント編集許可者の承認、全イベント設定、監査ログ確認を含むすべての管理操作ができる。
@@ -811,7 +765,7 @@ X ID 却下後も提出済み作品そのものは即時削除しない。受付
 
 #### 制御ロジックの優先順位
 1. **イベント別設定 (Event Override)**: `events.editable_fields` (JSON) が定義されている場合、その設定を最優先する。
-2. **イベント協力者設定 (Collaborator Override)**: 協力者として編集する場合、対象作品が属するイベントの `event_collaborator_permissions.permission_key` を適用する。ただしイベント別設定で禁止された項目は協力者側で許可されていても編集不可にする。
+2. **イベント協力者設定 (Collaborator Override)**: 協力者として編集する場合、対象作品が属するイベントの `event_staff_permissions.permission_key` を適用する。ただしイベント別設定で禁止された項目は協力者側で許可されていても編集不可にする。
 3. **全体デフォルト設定 (Global Default)**: イベント別設定がない、または所属イベントがない過去作品（Legacy）の場合、`system_settings.default_editable_fields` を適用する。
 4. **新規/枠あり作品の特例**: 
    - 予約枠 (`slots`) に紐づく未公開作品、または `status` が `draft`/`pending` の作品は、管理者が明示的に制限しない限り**全項目編集可能**をデフォルトとする。
@@ -864,9 +818,9 @@ X ID 却下後も提出済み作品そのものは即時削除しない。受付
 | `comment` | `intro_comment` | |
 | `beforecomment` | `intro_comment` | `comment` が空なら使用、または結合 |
 | `aftercomment` | `closing_comment` | 振り返りコメントとして保存 |
-| `soft` | `used_software` | |
+| `soft` | `used_software_json` | 旧 soft 列を JSON 配列に正規化して保存 |
 | `movieyear` | `declared_experience` | 制作歴・参加区分として保存 |
-| `type1` | `submission_type` | `"個人"` → `"individual"`, `"複数人"` → `"collab"` |
+| `type1` | `collaboration_type` | `"個人"` → `"solo"`, `"複数人"` → `"collab"` |
 | `toudan` | `custom_answers` | `{"toudan": "..."}` として JSON 保存 |
 | `hitokoto` | `highlights` | |
 
@@ -876,10 +830,10 @@ X ID 却下後も提出済み作品そのものは即時削除しない。受付
 ### 2-24. 動画個別ページ（/[id]）
 - **構成**: 旧ページの動画詳細デザインに寄せ、プレイヤー、作品タイトル、投稿者情報、チャプター一覧、スタッフセクション、制作エピソード、関連動画を高密度に配置する。
 - **ウルトラワイド配置**: 横幅が十分に広い場合は、左に作品タイトル・投稿者情報・チャプター一覧、中央に動画プレイヤー、右に関連動画と再生リストを置く3カラム独自レイアウトにする。
-- **関連動画**: 同一作者、合作メンバー、同一楽曲、同一クレジット、所属イベント内の前後作品、`video_score` 上位、ランダム補完を候補化し、重複排除して表示する。
+- **関連動画**: 同一作者、合作メンバー、同一楽曲、同一クレジット、所属イベント内の前後作品、`videos.score`、ランダム補完を候補化し、重複排除して表示する。最新作品の固定補完は行わない。
 - **チャプター**: ユーザーは任意の秒数を手動設定でき、自分のチャプター一覧、公開/非公開切替、他ユーザーの公開チャプター閲覧に対応する。
 - **再生バー上の点表示**: 公開チャプター、投稿者または管理者が指定した重要チャプター、自分の非公開チャプターを再生バー上に点として表示できる。点の色はイベントアクセントまたは FlameNode の黄色を基本にし、非公開点は控えめな色で区別する。
-- **コメント**: コメントは基本的に `video_comments.chapter_id` でチャプターへ紐付ける。投稿主体は常に `user.active_x_user_id` とする。
+- **コメント**: 通常コメント用 `video_comments` は使わない。時刻付きの反応・メモは `video_chapters`、メンバー担当チャプターは `video_members.chapters_json` に保存し、投稿主体は常に `user.active_x_user_id` とする。
 - **再生リスト**: 右レールの一部に YouTube の再生リストに近い UI を設け、イベント内上映順、自分のいいね作品、自分のブックマーク/セーブ作品を順番再生できる。
 - **チャプター/コメント表示**: 左カラムの時系列情報は「チャプター」「コメント」のタブで切り替え、コメント欄感を強く出さず、時間軸に紐づく反応として見せる。ニコニコ動画風の流しコメントは将来的なクライアントサイド任意機能とし、既定は OFF にする。
 - **関連動画と再生リスト**: 右レール最上部に再生リスト風 UI を置き、その下に「同じ作者」「同じイベント」「おすすめ」などの見出し付きセクションで関連動画を出す。
@@ -900,8 +854,8 @@ X ID 却下後も提出済み作品そのものは即時削除しない。受付
 ### 2-25. 推薦スコアリングと閲覧数計測
 作品の「おすすめ度」を定量化し、`/recommend` や関連動画に反映する。
 
-#### スコア算出アルゴリズム (`video_score`)
-- **基本式**: `video_score = (like_count * 10) + view_count + normalized_youtube_view_score + recent_boost`
+#### スコア算出アルゴリズム (`videos.score`)
+- **基本式**: `videos.score = (app_like_count * 10) + app_view_count + normalized_youtube_view_score + recent_boost`
 - **重み付け**: 
   - いいね数 (`like_count`) は意図的な評価であるため、閲覧数に対して 10倍の重みを与える。
   - 閲覧数 (`view_count`) は **FlameNode アプリ内での再生開始回数**を主指標にする。
@@ -920,8 +874,8 @@ X ID 却下後も提出済み作品そのものは即時削除しない。受付
 - **集約方式**: 閲覧イベントは Durable Object を正の短期集約先として動画ID単位でプールし、内部で日付別・時間帯別バケットを持つ。1時間ごとの Cron Worker が差分をまとめて D1 の `videos.view_count` へバルク反映する。KV 時間帯バケットは主経路にせず、緊急時のフォールバックに留める。どの方式でも1再生1書き込みは禁止する。Durable Object 側の未反映カウントは24時間保持し、24時間を超えて反映できない場合は代表管理者へ通知し、監査ログに残して手動確認へ回す。
 - **無料枠保護**: `economy` 以上では閲覧数計測のサンプリング率を既定50%に下げ、表示値は `×2` の補正値として見せる。DO危険水位では即停止せず10%サンプリングへ下げる。`read_only` 以上では新規閲覧イベントの書き込みを止め、止めた閲覧数イベントは後から補完しない。機能制限中はサイト上部またはプレイヤー上部に簡易アラートを出す。
 - **再生リスト由来**: 連続再生リスト由来の閲覧は個別動画ごとに記録するが、スコア計算上の重みは通常再生の0.5倍にし、自動巡回によるスコアインフレを抑える。
-- **ランキング除外**: `voided`, `x_reapply_required`, 非公開、手動非表示の作品はランキング・急上昇・おすすめから完全除外する。急上昇作品はトップや一覧のタブで明示的に出す。
-- **関連動画比率**: 関連動画ロジックは `video_score` 40%、同一作者・同一イベント・同一楽曲・同一クレジットなどの文脈近さ60%を目安にし、単なる人気順より関連性を優先する。
+- **ランキング除外**: `videos.visibility_status` が `public` ではない作品、X ID 再申請 case が open の作品、`voided` の作品はランキング・急上昇・おすすめから完全除外する。急上昇作品はトップや一覧のタブで明示的に出す。
+- **関連動画比率**: 関連動画ロジックは `videos.score` 40%、同一作者・同一イベント・同一楽曲・同一クレジットなどの文脈近さ60%を目安にし、単なる人気順より関連性を優先する。
 
 ### 2-26. 上部メニューバーのアクティブ X ID 常駐
 - **表示**: ログイン済みユーザーには全エリアの上部メニューバーに現在のアクティブ X ID を表示する。
@@ -940,7 +894,7 @@ X ID 却下後も提出済み作品そのものは即時削除しない。受付
 
 ### 2-28. Cloudflare 無料枠・コストガード
 - **静的ファースト**: トップ、一覧、イベント詳細、関連動画、おすすめは R2 に事前生成した JSON と Pages Static Assets を優先し、Pages Functions / Workers / D1 の呼び出しを抑える。
-- **D1節約**: 一覧系はフルスキャン禁止。必ずインデックス、ページング、事前集計を使う。`video_score` や関連動画は Cron でまとめて生成する。
+- **D1節約**: 一覧系はフルスキャン禁止。必ずインデックス、ページング、事前集計を使う。`videos.score` や関連動画は Cron でまとめて生成する。
 - **R2節約**: 動画本体は保存せず YouTube 埋め込みを使う。R2 はアイコン画像、静的 JSON、旧形式エクスポートに限定する。`ListObjects` は高コスト操作として一覧表示に使わない。
 - **画像保存**: 作品サムネイルは Cloudflare/R2 に保存せず、YouTube サムネイル URL を使う。Cloudflare にアップロードする画像はユーザー/作品に紐づくアイコン画像のみとし、元ファイルは1ファイル8MBまでにする。
 - **KV節約**: KV はガード状態、軽量フラグ、短期キャッシュに限定する。高頻度ログや閲覧数を逐次書き込まない。
@@ -1054,7 +1008,7 @@ X ID 却下後も提出済み作品そのものは即時削除しない。受付
 │   ├── youtube-sync/          # メタデータ・いいね・チャプターマーカー候補の定期同期 (6時間ごと)
 │   ├── notification-sender/   # 通知キューの DM 送信 (5分ごと)
 │   ├── r2-gc/                 # 孤立アップロードファイルの削除 (毎日)
-│   └── video-score/           # video_score 再計算 (6時間ごと)
+│   └── video-score/           # videos.score / video_stats.score 再計算 (6時間ごと)
 │
 └── migrations/                # D1 (Drizzle) のマイグレーションファイル群
 ```

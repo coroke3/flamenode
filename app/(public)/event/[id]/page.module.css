@@ -318,8 +318,8 @@
 @media (max-width: 720px) {
   .hero {
     grid-template-columns: 1fr;
-    gap: 16px;
-    padding: 18px 0 20px;
+    gap: 14px;
+    padding: 14px 0 16px;
   }
   .heroActions {
     align-items: stretch;
@@ -332,19 +332,19 @@
     justify-content: center;
   }
   .heroTitle {
-    margin-bottom: 14px;
-    font-size: clamp(36px, 11vw, 52px);
-    line-height: 0.92;
+    margin-bottom: 10px;
+    font-size: clamp(30px, 8.5vw, 42px);
+    line-height: 0.95;
     overflow-wrap: anywhere;
   }
-  .heroLead { font-size: 13.5px; line-height: 1.7; }
+  .heroLead { font-size: 13px; line-height: 1.65; }
   .statsGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .crewGrid, .videoGrid { grid-template-columns: 1fr; }
   .heroActions { align-items: stretch; width: 100%; }
   .statusPill { align-self: flex-start; }
   .guideLink {
     align-self: stretch;
-    min-height: 44px;
+    min-height: 38px;
     justify-content: center;
     border: 0;
     border-radius: var(--r-pill);
@@ -352,10 +352,10 @@
   }
 
   .statusPill {
-    min-height: 44px;
+    min-height: 36px;
   }
-  .statCard { min-height: 76px; padding: 13px 12px; }
-  .statCard strong { font-size: 24px; }
+  .statCard { min-height: 68px; padding: 12px 10px; }
+  .statCard strong { font-size: 22px; }
   .section { margin-top: 48px; }
   .sectionHead { align-items: flex-start; flex-direction: column; gap: 12px; margin-bottom: 14px; }
   .sectionTitleLine { gap: 8px; }

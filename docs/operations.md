@@ -131,6 +131,8 @@ D1 へ適用する場合はファイル名の辞書順を正とする。同じ `
 
 `migrations/meta/_journal.json` は `0007` までの履歴しか持たない。今後 Drizzle meta を復旧するまでは、migration の存在確認は `migrations/*.sql` を正とし、`_journal.json` だけで本番適用済み/未適用を判断しない。
 
+手動 SQL migration で列・index・制約を追加する場合は、同じ PR で `src/lib/db/schema.ts`、この migration 一覧、必要に応じて `設計/FlameNode-Design.md` を更新する。Drizzle で表現できない DDL は、schema コメントと本節に「手動 migration 専用」として残す。
+
 ---
 
 ## 2. Rollback 手順

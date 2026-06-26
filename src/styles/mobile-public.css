@@ -33,13 +33,20 @@
     font-size: max(16px, 1em);
   }
 
-  /* タップ領域（44px 目安） */
-  [data-fn-surface="public"] .fn-btn:not(.fn-btn-icon) {
+  /* タップ領域: 主要操作は44px、補助操作は38px */
+  [data-fn-surface="public"] .fn-btn:not(.fn-btn-icon):not(.fn-btn-sm) {
+    min-height: 38px;
+  }
+
+  [data-fn-surface="public"] .fn-btn-primary,
+  [data-fn-surface="public"] .fn-btn-danger,
+  [data-fn-surface="public"] .fn-btn-warning,
+  [data-fn-surface="public"] .fn-header-submit {
     min-height: 44px;
   }
 
   [data-fn-surface="public"] .fn-btn-sm {
-    min-height: 40px;
+    min-height: 36px;
   }
 
   [data-fn-surface="public"] .fn-btn-icon {
