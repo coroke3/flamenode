@@ -135,6 +135,34 @@
   }
 }
 
+/* 作品詳細の横長レイアウトは PC 幅だけに限定する。
+   max-aspect 系のスマホ横向きで 2 カラム化して横にはみ出すのを防ぐ。 */
+@media (max-width: 1023px) and (min-aspect-ratio: 20 / 9) {
+  [data-fn-surface="public"] .fn-vd.fn-page {
+    --fn-page-gutter: clamp(14px, 4vw, 20px) !important;
+    --fn-page-max: var(--content-max, 1360px) !important;
+  }
+
+  [data-fn-surface="public"] .fn-vd > div {
+    grid-template-columns: 1fr !important;
+    gap: var(--fn-space-block, 30px) !important;
+  }
+
+  [data-fn-surface="public"] .fn-vd > div > article > div:first-child {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 0 !important;
+  }
+
+  [data-fn-surface="public"] .fn-vd > div > article > div:first-child > div {
+    grid-column: auto !important;
+    grid-row: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding-right: 0 !important;
+    position: static !important;
+  }
+}
+
 @supports not (overflow: clip) {
   @media (max-width: 640px) {
     html,
