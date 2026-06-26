@@ -639,13 +639,7 @@ export function VideoForm({
               name="event_ids"
               value={selectedEventIds.join(",")}
             />
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-                gap: 6,
-              }}
-            >
+            <div className={styles.eventOptionGrid}>
               {eventOptions.map((ev) => {
                 const checked = selectedEventIds.includes(ev.id);
                 // slot モードでは slot.event_id を固定で含めるため、編集者でも外せない。
@@ -657,20 +651,7 @@ export function VideoForm({
                 return (
                   <label
                     key={ev.id}
-                    style={{
-                      display: "flex",
-                      gap: 6,
-                      alignItems: "center",
-                      padding: "6px 8px",
-                      border: "1px solid var(--border-subtle)",
-                      borderRadius: "var(--radius-sm)",
-                      background: checked
-                        ? "var(--accent-primary-soft)"
-                        : "transparent",
-                      cursor: locked ? "not-allowed" : "pointer",
-                      fontSize: 12,
-                      opacity: locked && !checked ? 0.55 : 1,
-                    }}
+                    className={`${styles.eventOption} ${checked ? styles.eventOptionChecked : ""} ${locked ? styles.eventOptionLocked : ""}`}
                   >
                     <input
                       type="checkbox"
