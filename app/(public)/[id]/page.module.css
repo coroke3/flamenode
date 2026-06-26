@@ -1,5 +1,4 @@
 .page {
-  --fn-page-gutter: clamp(16px, 3vw, 32px);
   --fn-page-max: min(2100px, 96vw);
 
   width: 100%;
@@ -411,8 +410,6 @@
 
 @media (max-width: 640px) {
   .page {
-    --fn-page-gutter: clamp(14px, 4vw, 20px);
-
     padding-top: 16px;
     padding-bottom: 56px;
   }

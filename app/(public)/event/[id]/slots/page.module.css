@@ -1,6 +1,4 @@
 .page {
-  --fn-page-gutter: clamp(16px, 3vw, 32px);
-
   width: 100%;
   margin: 0;
 }
@@ -75,10 +73,6 @@
 }
 
 @media (max-width: 640px) {
-  .page {
-    --fn-page-gutter: clamp(14px, 4vw, 20px);
-  }
-
   .title {
     font-size: clamp(36px, 13vw, 56px);
   }

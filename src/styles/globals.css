@@ -77,7 +77,11 @@
   --d-gap: 22px;
   --header-h: 64px;
   /* 公開面の標準横ガター */
-  --fn-page-gutter: clamp(24px, 5vw, 56px);
+  --fn-page-gutter-desktop: clamp(24px, 5vw, 56px);
+  --fn-page-gutter-tablet: clamp(20px, 4vw, 40px);
+  --fn-page-gutter-mobile: clamp(16px, 4vw, 20px);
+  --fn-page-gutter-narrow: 16px;
+  --fn-page-gutter: var(--fn-page-gutter-desktop);
   --font-jp: var(--font-noto-jp), "Noto Sans JP", system-ui, sans-serif;
 
   /* タイポグラフィ token (PR46): フルードな clamp で 1 軸に絞る。
@@ -911,4 +915,23 @@ select {
   -webkit-line-clamp: 3;
   line-clamp: 3;
   overflow: hidden;
+}
+
+/* ガター レスポンシブ */
+@media (max-width: 900px) {
+  :root {
+    --fn-page-gutter: var(--fn-page-gutter-tablet);
+  }
+}
+
+@media (max-width: 640px) {
+  :root {
+    --fn-page-gutter: var(--fn-page-gutter-mobile);
+  }
+}
+
+@media (max-width: 360px) {
+  :root {
+    --fn-page-gutter: var(--fn-page-gutter-narrow);
+  }
 }

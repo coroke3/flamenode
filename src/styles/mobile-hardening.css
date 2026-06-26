@@ -183,7 +183,7 @@
 
   [data-fn-surface="public"] .fn-page,
   [data-fn-surface="public"] .fn-public-container {
-    padding-left: max(14px, env(safe-area-inset-left));
-    padding-right: max(14px, env(safe-area-inset-right));
+    padding-left: max(var(--fn-page-gutter), env(safe-area-inset-left));
+    padding-right: max(var(--fn-page-gutter), env(safe-area-inset-right));
   }
 }
