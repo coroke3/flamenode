@@ -29,11 +29,6 @@ import {
   getStagePermissionAnswerValue,
   resolveStagePermissionFieldsFromJson,
 } from "@/lib/video/formSettings";
-import {
-  getCustomQuestionsForEvents,
-  getCustomAnswerValue,
-  type CustomQuestion,
-} from "@/lib/video/customQuestions";
 import { redirectForGuardReason } from "@/lib/client/guardRedirect";
 
 export interface VideoFormInitialValues {
@@ -51,7 +46,6 @@ export interface VideoFormInitialValues {
   intro_comment?: string;
   used_software?: string;
   stage_permission?: string;
-  custom_answers?: string | null;
   highlights?: string;
   production_story?: string;
   closing_comment?: string;
@@ -70,8 +64,6 @@ export interface EventOption {
   video_form_settings_json?: string | null;
   /** イベントに設定された「部」候補 (JSON 文字列)。null/空配列なら部 UI を出さない。 */
   parts_json?: string | null;
-  /** イベントに設定されたカスタム質問 (JSON 文字列)。 */
-  custom_questions?: string | null;
 }
 
 function parsePartsJson(value: string | null | undefined): string[] {
@@ -241,30 +233,6 @@ export function VideoForm({
     [eventOptions, selectedEventIds],
   );
 
-  const selectedCustomQuestions = React.useMemo(() => {
-    const questionsByEvent = new Map<string, readonly CustomQuestion[]>();
-    for (const event of eventOptions) {
-      if (!selectedEventIds.includes(event.id)) continue;
-      const questions = getCustomQuestionsForEvents([event.custom_questions]);
-      if (questions.length > 0) {
-        questionsByEvent.set(event.id, questions);
-      }
-    }
-    return questionsByEvent;
-  }, [eventOptions, selectedEventIds]);
-
-  const allCustomQuestions = React.useMemo(() => {
-    const merged: CustomQuestion[] = [];
-    const seen = new Set<string>();
-    for (const questions of selectedCustomQuestions.values()) {
-      for (const q of questions) {
-        if (seen.has(q.id)) continue;
-        seen.add(q.id);
-        merged.push(q);
-      }
-    }
-    return merged.sort((a, b) => a.order - b.order);
-  }, [selectedCustomQuestions]);
   const [pending, startTransition] = React.useTransition();
   const [result, setResult] = React.useState<VideoActionResult | null>(null);
   // 未保存変更がある状態でブラウザを離れようとしたときに警告を出すための dirty 判定。
@@ -890,189 +858,6 @@ export function VideoForm({
                 placeholder={question.placeholder}
                 disabled={fieldDisabled("descriptions.stage_permission")}
               />
-            </div>
-          );
-        })}
-
-        {allCustomQuestions.map((question) => {
-          const eventIds = Array.from(selectedCustomQuestions.keys());
-          const firstEventId = eventIds[0] ?? "";
-          const existingValue = getCustomAnswerValue(
-            initial.custom_answers,
-            firstEventId,
-            question.id,
-          );
-          const fieldId = `custom_${question.id}`;
-          const disabled = fieldDisabled("descriptions.stage_permission");
-          const inputName = `custom_answer:${firstEventId}:${question.id}`;
-
-          if (question.type === "select") {
-            return (
-              <div
-                key={`cq-${question.id}`}
-                className={cx(styles.field, styles.editableField)}
-              >
-                <label
-                  className={`${styles.label} ${question.required ? styles.required : ""}`}
-                  htmlFor={fieldId}
-                >
-                  {question.label}
-                </label>
-                {question.help_text ? (
-                  <p className={styles.help}>{question.help_text}</p>
-                ) : null}
-                <select
-                  id={fieldId}
-                  name={inputName}
-                  defaultValue={typeof existingValue === "string" ? existingValue : ""}
-                  className="fn-select"
-                  required={question.required}
-                  disabled={disabled}
-                >
-                  <option value="">選択してください</option>
-                  {(question.options ?? []).map((opt) => (
-                    <option key={opt} value={opt}>{opt}</option>
-                  ))}
-                </select>
-              </div>
-            );
-          }
-
-          if (question.type === "multi-select") {
-            const selectedArr = Array.isArray(existingValue)
-              ? existingValue
-              : typeof existingValue === "string" && existingValue
-                ? [existingValue]
-                : [];
-            return (
-              <div
-                key={`cq-${question.id}`}
-                className={cx(styles.field, styles.editableField)}
-              >
-                <label className={`${styles.label} ${question.required ? styles.required : ""}`}>
-                  {question.label}
-                </label>
-                {question.help_text ? (
-                  <p className={styles.help}>{question.help_text}</p>
-                ) : null}
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {(question.options ?? []).map((opt) => (
-                    <label key={opt} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 }}>
-                      <input
-                        type="checkbox"
-                        name={inputName}
-                        value={opt}
-                        defaultChecked={selectedArr.includes(opt)}
-                        disabled={disabled}
-                      />
-                      {opt}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            );
-          }
-
-          if (question.type === "number") {
-            return (
-              <div
-                key={`cq-${question.id}`}
-                className={cx(styles.field, styles.editableField)}
-              >
-                <label
-                  className={`${styles.label} ${question.required ? styles.required : ""}`}
-                  htmlFor={fieldId}
-                >
-                  {question.label}
-                </label>
-                {question.help_text ? (
-                  <p className={styles.help}>{question.help_text}</p>
-                ) : null}
-                <input
-                  id={fieldId}
-                  type="number"
-                  name={inputName}
-                  defaultValue={typeof existingValue === "number" ? existingValue : typeof existingValue === "string" ? existingValue : ""}
-                  className="fn-input"
-                  min={question.min}
-                  max={question.max}
-                  required={question.required}
-                  placeholder={question.placeholder}
-                  disabled={disabled}
-                />
-              </div>
-            );
-          }
-
-          if (question.type === "date") {
-            return (
-              <div
-                key={`cq-${question.id}`}
-                className={cx(styles.field, styles.editableField)}
-              >
-                <label
-                  className={`${styles.label} ${question.required ? styles.required : ""}`}
-                  htmlFor={fieldId}
-                >
-                  {question.label}
-                </label>
-                {question.help_text ? (
-                  <p className={styles.help}>{question.help_text}</p>
-                ) : null}
-                <input
-                  id={fieldId}
-                  type="date"
-                  name={inputName}
-                  defaultValue={typeof existingValue === "string" ? existingValue : ""}
-                  className="fn-input"
-                  required={question.required}
-                  disabled={disabled}
-                />
-              </div>
-            );
-          }
-
-          const isTextarea = question.type === "textarea";
-          const maxLen = question.max_length ?? (isTextarea ? 1000 : 200);
-          return (
-            <div
-              key={`cq-${question.id}`}
-              className={cx(styles.field, styles.editableField)}
-            >
-              <label
-                className={`${styles.label} ${question.required ? styles.required : ""}`}
-                htmlFor={fieldId}
-              >
-                {question.label}
-              </label>
-              {question.help_text ? (
-                <p className={styles.help}>{question.help_text}</p>
-              ) : null}
-              {isTextarea ? (
-                <textarea
-                  id={fieldId}
-                  name={inputName}
-                  defaultValue={typeof existingValue === "string" ? existingValue : ""}
-                  className="fn-input"
-                  rows={3}
-                  maxLength={maxLen}
-                  required={question.required}
-                  placeholder={question.placeholder}
-                  disabled={disabled}
-                />
-              ) : (
-                <input
-                  id={fieldId}
-                  type="text"
-                  name={inputName}
-                  defaultValue={typeof existingValue === "string" ? existingValue : ""}
-                  className="fn-input"
-                  maxLength={maxLen}
-                  required={question.required}
-                  placeholder={question.placeholder}
-                  disabled={disabled}
-                />
-              )}
             </div>
           );
         })}

@@ -75,7 +75,6 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
               title: ev.title,
               video_form_settings_json: ev.video_form_settings_json,
               parts_json: ev.parts_json,
-              custom_questions: ev.custom_questions,
             })),
         )
     : [];

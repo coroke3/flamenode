@@ -113,7 +113,6 @@ export function snapshotToFormInitial(
     parts_json: snapshot.parts_json,
     editable_fields: snapshot.editable_fields,
     review_settings: snapshot.review_settings,
-    custom_questions: snapshot.custom_questions,
   };
 }
 

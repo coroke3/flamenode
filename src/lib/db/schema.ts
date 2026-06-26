@@ -975,3 +975,90 @@ export const staticRebuildQueue = sqliteTable(
     ),
   }),
 );
+
+// ============================================================
+// イベント別カスタム質問 / 回答 (正規化テーブル)
+// ============================================================
+
+/**
+ * イベントごとのカスタム質問定義。1行 = 1質問。
+ * events.custom_questions (旧JSON) は互換用に残すが、新機能の正本はこのテーブル。
+ */
+export const eventCustomQuestions = sqliteTable(
+  "event_custom_questions",
+  {
+    id: text("id").primaryKey(),
+    event_id: text("event_id").notNull(),
+    question_key: text("question_key").notNull(),
+    label: text("label").notNull(),
+    description: text("description"),
+    type: text("type", {
+      enum: ["text", "textarea", "select", "radio", "checkbox"],
+    })
+      .notNull()
+      .default("textarea"),
+    required: integer("required").notNull().default(0),
+    options_json: text("options_json"),
+    placeholder: text("placeholder"),
+    max_length: integer("max_length"),
+    sort_order: integer("sort_order").notNull().default(0),
+    is_active: integer("is_active").notNull().default(1),
+    visibility: text("visibility", {
+      enum: ["review", "private", "public"],
+    })
+      .notNull()
+      .default("review"),
+    created_at: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updated_at: integer("updated_at")
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    eventQuestionKeyUniq: uniqueIndex("event_custom_questions_event_key_uniq")
+      .on(t.event_id, t.question_key),
+    eventSortIdx: index("event_custom_questions_event_sort_idx").on(
+      t.event_id,
+      t.sort_order,
+    ),
+    eventActiveSortIdx: index("event_custom_questions_event_active_sort_idx").on(
+      t.event_id,
+      t.is_active,
+      t.sort_order,
+    ),
+  }),
+);
+
+/**
+ * 動画ごとのカスタム質問回答。1行 = 1回答。
+ * videos.custom_answers (旧JSON) は互換用に残すが、新機能の正本はこのテーブル。
+ */
+export const videoCustomAnswers = sqliteTable(
+  "video_custom_answers",
+  {
+    video_id: text("video_id").notNull(),
+    event_id: text("event_id").notNull(),
+    question_id: text("question_id").notNull(),
+    answer_text: text("answer_text"),
+    answer_json: text("answer_json"),
+    created_at: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updated_at: integer("updated_at")
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    primaryKey: primaryKey({
+      columns: [t.video_id, t.event_id, t.question_id],
+    }),
+    videoIdx: index("video_custom_answers_video_idx").on(t.video_id),
+    eventIdx: index("video_custom_answers_event_idx").on(t.event_id),
+    questionIdx: index("video_custom_answers_question_idx").on(t.question_id),
+    videoEventIdx: index("video_custom_answers_video_event_idx").on(
+      t.video_id,
+      t.event_id,
+    ),
+  }),
+);

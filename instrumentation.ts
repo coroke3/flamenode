@@ -385,6 +385,11 @@ async function repairLocalSchemaDrift(DB: LocalD1Database): Promise<void> {
       "video_members_discord_idx",
     );
   }
+
+  if (!(await tableExists(DB, "event_custom_questions"))) {
+    console.log("[instrumentation] Applying event_custom_questions migration 0027");
+    await applyMigrationFile(DB, "0027_event_custom_questions_and_video_answers.sql");
+  }
 }
 
 async function tableExists(

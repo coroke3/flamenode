@@ -1,141 +1,94 @@
-export type CustomQuestionType =
-  | "text"
-  | "textarea"
-  | "select"
-  | "multi-select"
-  | "number"
-  | "date";
+import type { eventCustomQuestions, videoCustomAnswers } from "@/lib/db/schema";
+
+export type CustomQuestionType = "text" | "textarea" | "select" | "radio" | "checkbox";
+export type CustomQuestionVisibility = "review" | "private" | "public";
+
+export type CustomQuestionRow = typeof eventCustomQuestions.$inferSelect;
+export type CustomAnswerRow = typeof videoCustomAnswers.$inferSelect;
 
 export interface CustomQuestion {
   id: string;
+  event_id: string;
+  question_key: string;
+  label: string;
+  description: string | null;
+  type: CustomQuestionType;
+  required: boolean;
+  options: string[];
+  placeholder: string | null;
+  max_length: number | null;
+  sort_order: number;
+  is_active: boolean;
+  visibility: CustomQuestionVisibility;
+}
+
+export interface CustomAnswerDraft {
+  event_id: string;
+  question_id: string;
+  question_key: string;
+  answer_text: string | null;
+  answer_json: string | null;
+}
+
+export interface CustomAnswerDisplayItem {
+  event_id: string;
+  event_title: string;
+  question_key: string;
   label: string;
   type: CustomQuestionType;
   required: boolean;
-  placeholder?: string;
-  options?: string[];
-  min?: number;
-  max?: number;
-  max_length?: number;
-  order: number;
-  help_text?: string;
-  enabled?: boolean;
+  answer_text: string | null;
+  answer_json: string | null;
+  visibility: CustomQuestionVisibility;
 }
-
-export type CustomAnswers = Record<
-  string,
-  Record<string, string | string[] | number | boolean | null>
->;
 
 const VALID_TYPES: ReadonlySet<string> = new Set([
-  "text",
-  "textarea",
-  "select",
-  "multi-select",
-  "number",
-  "date",
+  "text", "textarea", "select", "radio", "checkbox",
 ]);
-
-const ID_MAX_LEN = 64;
+const VALID_VISIBILITY: ReadonlySet<string> = new Set([
+  "review", "private", "public",
+]);
+const KEY_MAX_LEN = 64;
 const LABEL_MAX_LEN = 120;
-const TEXT_DEFAULT_MAX = 200;
-const TEXTAREA_DEFAULT_MAX = 1000;
-const MAX_QUESTIONS = 50;
-const MAX_OPTIONS = 100;
+const DESC_MAX_LEN = 1000;
+const PLACEHOLDER_MAX_LEN = 1000;
+const MAX_LENGTH_MAX = 5000;
+const MAX_OPTIONS = 50;
 const OPTION_MAX_LEN = 200;
 
-export function normalizeQuestionId(value: unknown): string {
-  if (typeof value !== "string") return "";
-  const cleaned = value
-    .trim()
-    .replace(/[^A-Za-z0-9_-]/g, "_")
-    .slice(0, ID_MAX_LEN);
-  return cleaned;
+export function normalizeQuestionKey(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  return raw.trim().replace(/[^A-Za-z0-9_-]/g, "_").slice(0, KEY_MAX_LEN);
 }
 
-export function normalizeQuestionOptions(options: unknown): string[] {
-  if (!Array.isArray(options)) return [];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const raw of options) {
-    if (typeof raw !== "string") continue;
-    const trimmed = raw.trim().slice(0, OPTION_MAX_LEN);
-    if (!trimmed || seen.has(trimmed)) continue;
-    seen.add(trimmed);
-    out.push(trimmed);
-    if (out.length >= MAX_OPTIONS) break;
+export function parseQuestionType(value: unknown): CustomQuestionType {
+  if (typeof value === "string" && VALID_TYPES.has(value)) {
+    return value as CustomQuestionType;
   }
-  return out;
+  return "textarea";
 }
 
-function normalizeQuestion(
-  raw: Record<string, unknown>,
-  index: number,
-): CustomQuestion | null {
-  const id = normalizeQuestionId(raw.id) || `q_${index}`;
-  const label = typeof raw.label === "string" ? raw.label.trim().slice(0, LABEL_MAX_LEN) : "";
-  if (!label) return null;
-
-  const typeStr = typeof raw.type === "string" ? raw.type : "text";
-  const type: CustomQuestionType = VALID_TYPES.has(typeStr)
-    ? (typeStr as CustomQuestionType)
-    : "text";
-
-  const enabled = raw.enabled !== false;
-
-  const question: CustomQuestion = {
-    id,
-    label,
-    type,
-    required: raw.required === true,
-    order: typeof raw.order === "number" ? raw.order : index,
-    enabled,
-  };
-
-  if (typeof raw.placeholder === "string" && raw.placeholder.trim()) {
-    question.placeholder = raw.placeholder.trim().slice(0, 500);
+export function parseVisibility(value: unknown): CustomQuestionVisibility {
+  if (typeof value === "string" && VALID_VISIBILITY.has(value)) {
+    return value as CustomQuestionVisibility;
   }
-  if (typeof raw.help_text === "string" && raw.help_text.trim()) {
-    question.help_text = raw.help_text.trim().slice(0, 500);
-  }
-
-  if (type === "select" || type === "multi-select") {
-    question.options = normalizeQuestionOptions(raw.options);
-  }
-
-  if (type === "number") {
-    if (typeof raw.min === "number" && Number.isFinite(raw.min)) {
-      question.min = raw.min;
-    }
-    if (typeof raw.max === "number" && Number.isFinite(raw.max)) {
-      question.max = raw.max;
-    }
-  }
-
-  if (type === "text" || type === "textarea") {
-    const defaultMax = type === "text" ? TEXT_DEFAULT_MAX : TEXTAREA_DEFAULT_MAX;
-    if (typeof raw.max_length === "number" && raw.max_length > 0) {
-      question.max_length = Math.min(Math.floor(raw.max_length), 5000);
-    } else {
-      question.max_length = defaultMax;
-    }
-  }
-
-  return question;
+  return "review";
 }
 
-export function parseCustomQuestions(
-  raw: string | null | undefined,
-): CustomQuestion[] {
+export function parseOptionsJson(raw: string | null | undefined): string[] {
   if (!raw || !raw.trim()) return [];
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    const out: CustomQuestion[] = [];
-    for (let i = 0; i < parsed.length && out.length < MAX_QUESTIONS; i++) {
-      const item = parsed[i];
-      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
-      const q = normalizeQuestion(item as Record<string, unknown>, i);
-      if (q) out.push(q);
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const item of parsed) {
+      if (typeof item !== "string") continue;
+      const trimmed = item.trim().slice(0, OPTION_MAX_LEN);
+      if (!trimmed || seen.has(trimmed)) continue;
+      seen.add(trimmed);
+      out.push(trimmed);
+      if (out.length >= MAX_OPTIONS) break;
     }
     return out;
   } catch {
@@ -143,277 +96,253 @@ export function parseCustomQuestions(
   }
 }
 
-export function serializeCustomQuestions(
-  questions: readonly CustomQuestion[],
-): string | null {
-  if (questions.length === 0) return null;
-  const cleaned = questions.map((q, i) => {
-    const entry: Record<string, unknown> = {
-      id: normalizeQuestionId(q.id) || `q_${i}`,
-      label: q.label.trim().slice(0, LABEL_MAX_LEN),
-      type: VALID_TYPES.has(q.type) ? q.type : "text",
-      required: q.required === true,
-      order: typeof q.order === "number" ? q.order : i,
-      enabled: q.enabled !== false,
-    };
-    if (q.placeholder) entry.placeholder = q.placeholder;
-    if (q.help_text) entry.help_text = q.help_text;
-    if (q.options && (q.type === "select" || q.type === "multi-select")) {
-      entry.options = normalizeQuestionOptions(q.options);
-    }
-    if (q.type === "number") {
-      if (typeof q.min === "number") entry.min = q.min;
-      if (typeof q.max === "number") entry.max = q.max;
-    }
-    if ((q.type === "text" || q.type === "textarea") && q.max_length) {
-      entry.max_length = q.max_length;
-    }
-    return entry;
-  });
-  return JSON.stringify(cleaned);
+export function rowToQuestion(row: CustomQuestionRow): CustomQuestion {
+  return {
+    id: row.id,
+    event_id: row.event_id,
+    question_key: row.question_key,
+    label: row.label,
+    description: row.description,
+    type: parseQuestionType(row.type),
+    required: row.required === 1,
+    options: parseOptionsJson(row.options_json),
+    placeholder: row.placeholder,
+    max_length: row.max_length,
+    sort_order: row.sort_order,
+    is_active: row.is_active === 1,
+    visibility: parseVisibility(row.visibility),
+  };
 }
 
-export function parseCustomAnswers(
-  raw: string | null | undefined,
-): CustomAnswers {
-  if (!raw || !raw.trim()) return {};
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    return parsed as CustomAnswers;
-  } catch {
-    return {};
+interface QuestionDefinitionInput {
+  question_key?: unknown;
+  label?: unknown;
+  description?: unknown;
+  type?: unknown;
+  required?: unknown;
+  options_json?: unknown;
+  placeholder?: unknown;
+  max_length?: unknown;
+  sort_order?: unknown;
+  is_active?: unknown;
+  visibility?: unknown;
+}
+
+interface ValidatedQuestion {
+  question_key: string;
+  label: string;
+  description: string | null;
+  type: CustomQuestionType;
+  required: boolean;
+  options_json: string | null;
+  placeholder: string | null;
+  max_length: number | null;
+  sort_order: number;
+  is_active: boolean;
+  visibility: CustomQuestionVisibility;
+}
+
+export function validateQuestionDefinition(
+  input: QuestionDefinitionInput,
+  index: number,
+): ValidatedQuestion | { error: string } {
+  const key = normalizeQuestionKey(input.question_key) || `q_${index}`;
+  const label = typeof input.label === "string"
+    ? input.label.trim().slice(0, LABEL_MAX_LEN)
+    : "";
+  if (!label) {
+    return { error: `質問 ${index + 1}: ラベルは必須です。` };
   }
-}
 
-export function getCustomAnswerValue(
-  rawAnswers: string | null | undefined,
-  eventId: string,
-  questionId: string,
-): string | string[] | number | boolean | null {
-  const answers = parseCustomAnswers(rawAnswers);
-  const eventAnswers = answers[eventId];
-  if (!eventAnswers) return null;
-  const val = eventAnswers[questionId];
-  return val ?? null;
-}
+  const type = parseQuestionType(input.type);
+  const description = typeof input.description === "string"
+    ? input.description.trim().slice(0, DESC_MAX_LEN) || null
+    : null;
+  const placeholder = typeof input.placeholder === "string"
+    ? input.placeholder.trim().slice(0, PLACEHOLDER_MAX_LEN) || null
+    : null;
 
-export function mergeCustomAnswers(
-  existing: CustomAnswers,
-  next: CustomAnswers,
-  eventIds: readonly string[],
-): string | null {
-  const merged: CustomAnswers = { ...existing };
-  for (const eid of eventIds) {
-    if (next[eid] !== undefined) {
-      merged[eid] = next[eid];
+  let max_length: number | null = null;
+  if (type === "text" || type === "textarea") {
+    if (typeof input.max_length === "number" && input.max_length > 0) {
+      max_length = Math.min(Math.floor(input.max_length), MAX_LENGTH_MAX);
+    } else if (typeof input.max_length === "string" && input.max_length.trim()) {
+      const n = Number(input.max_length);
+      max_length = Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), MAX_LENGTH_MAX) : null;
     }
   }
-  const hasAny = Object.values(merged).some(
-    (ea) => ea && Object.keys(ea).length > 0,
-  );
-  if (!hasAny) return null;
-  return JSON.stringify(merged);
+
+  let options_json: string | null = null;
+  if (type === "select" || type === "radio" || type === "checkbox") {
+    const raw = typeof input.options_json === "string" ? input.options_json : null;
+    const options = parseOptionsJson(raw);
+    if (options.length === 0) {
+      return { error: `${label}: 選択肢を1つ以上入力してください。` };
+    }
+    options_json = JSON.stringify(options);
+  }
+
+  const sort_order = typeof input.sort_order === "number"
+    ? input.sort_order
+    : typeof input.sort_order === "string" && input.sort_order.trim()
+      ? Number(input.sort_order) || index
+      : index;
+
+  const is_active = input.is_active === true || input.is_active === 1 ||
+    input.is_active === "1" || input.is_active === "true";
+
+  return {
+    question_key: key,
+    label,
+    description,
+    type,
+    required: input.required === true || input.required === 1 ||
+      input.required === "1" || input.required === "true",
+    options_json,
+    placeholder,
+    max_length,
+    sort_order,
+    is_active,
+    visibility: parseVisibility(input.visibility),
+  };
 }
 
-type ValidationResult =
-  | { ok: true; value: string | null }
+type AnswerValidationResult =
+  | { ok: true; drafts: CustomAnswerDraft[] }
   | { ok: false; message: string };
 
-export function validateCustomAnswersForEvents(args: {
-  questionsByEvent: Map<string, readonly CustomQuestion[]>;
-  rawAnswers: string | null | undefined;
-  eventIds: readonly string[];
-}): ValidationResult {
-  const { questionsByEvent, rawAnswers, eventIds } = args;
-  const answers = parseCustomAnswers(rawAnswers);
+export function validateAnswerInput(
+  question: CustomQuestion,
+  values: string[],
+): AnswerValidationResult {
+  const filtered = values.filter((v) => v.trim());
 
-  for (const eventId of eventIds) {
-    const questions = questionsByEvent.get(eventId) ?? [];
-    const eventAnswers = answers[eventId] ?? {};
-
-    for (const q of questions) {
-      if (q.enabled === false) continue;
-      const raw = eventAnswers[q.id];
-
-      if (q.required) {
-        const isEmpty =
-          raw === null ||
-          raw === undefined ||
-          raw === "" ||
-          (Array.isArray(raw) && raw.length === 0);
-        if (isEmpty) {
-          return { ok: false, message: `${q.label}を入力してください。` };
-        }
-      }
-
-      if (raw === null || raw === undefined || raw === "") continue;
-
-      switch (q.type) {
-        case "text":
-        case "textarea": {
-          if (typeof raw !== "string") {
-            return { ok: false, message: `${q.label}は文字列で入力してください。` };
-          }
-          const maxLen = q.max_length ?? (q.type === "text" ? TEXT_DEFAULT_MAX : TEXTAREA_DEFAULT_MAX);
-          if (raw.length > maxLen) {
-            return {
-              ok: false,
-              message: `${q.label}は${maxLen}文字以内で入力してください。`,
-            };
-          }
-          break;
-        }
-        case "select": {
-          if (typeof raw !== "string") {
-            return { ok: false, message: `${q.label}は文字列で選択してください。` };
-          }
-          if (q.options && q.options.length > 0 && !q.options.includes(raw)) {
-            return {
-              ok: false,
-              message: `${q.label}は選択肢から選んでください。`,
-            };
-          }
-          break;
-        }
-        case "multi-select": {
-          if (!Array.isArray(raw)) {
-            return {
-              ok: false,
-              message: `${q.label}は選択肢から選んでください。`,
-            };
-          }
-          for (const v of raw) {
-            if (typeof v !== "string") {
-              return {
-                ok: false,
-                message: `${q.label}は文字列で選択してください。`,
-              };
-            }
-            if (q.options && q.options.length > 0 && !q.options.includes(v)) {
-              return {
-                ok: false,
-                message: `${q.label}は選択肢から選んでください。`,
-              };
-            }
-          }
-          break;
-        }
-        case "number": {
-          const num = typeof raw === "number" ? raw : Number(raw);
-          if (!Number.isFinite(num)) {
-            return {
-              ok: false,
-              message: `${q.label}は数値で入力してください。`,
-            };
-          }
-          if (typeof q.min === "number" && num < q.min) {
-            return {
-              ok: false,
-              message: `${q.label}は${q.min}以上で入力してください。`,
-            };
-          }
-          if (typeof q.max === "number" && num > q.max) {
-            return {
-              ok: false,
-              message: `${q.label}は${q.max}以下で入力してください。`,
-            };
-          }
-          break;
-        }
-        case "date": {
-          if (typeof raw !== "string") {
-            return {
-              ok: false,
-              message: `${q.label}は日付形式で入力してください。`,
-            };
-          }
-          if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-            return {
-              ok: false,
-              message: `${q.label}はYYYY-MM-DD形式で入力してください。`,
-            };
-          }
-          break;
-        }
-      }
-    }
+  if (question.required && filtered.length === 0) {
+    return { ok: false, message: `${question.label}を入力してください。` };
   }
 
-  return { ok: true, value: rawAnswers ?? null };
+  if (filtered.length === 0) {
+    return { ok: true, drafts: [] };
+  }
+
+  if (question.type === "text" || question.type === "textarea") {
+    const value = filtered[0];
+    const maxLen = question.max_length ?? (question.type === "text" ? 200 : 1000);
+    if (value.length > maxLen) {
+      return {
+        ok: false,
+        message: `${question.label}は${maxLen}文字以内で入力してください。`,
+      };
+    }
+    return {
+      ok: true,
+      drafts: [{
+        event_id: question.event_id,
+        question_id: question.id,
+        question_key: question.question_key,
+        answer_text: value,
+        answer_json: null,
+      }],
+    };
+  }
+
+  if (question.type === "select" || question.type === "radio") {
+    const value = filtered[0];
+    if (question.options.length > 0 && !question.options.includes(value)) {
+      return { ok: false, message: `${question.label}は選択肢から選んでください。` };
+    }
+    return {
+      ok: true,
+      drafts: [{
+        event_id: question.event_id,
+        question_id: question.id,
+        question_key: question.question_key,
+        answer_text: value,
+        answer_json: null,
+      }],
+    };
+  }
+
+  if (question.type === "checkbox") {
+    for (const v of filtered) {
+      if (question.options.length > 0 && !question.options.includes(v)) {
+        return { ok: false, message: `${question.label}は選択肢から選んでください。` };
+      }
+    }
+    return {
+      ok: true,
+      drafts: [{
+        event_id: question.event_id,
+        question_id: question.id,
+        question_key: question.question_key,
+        answer_text: null,
+        answer_json: JSON.stringify(filtered),
+      }],
+    };
+  }
+
+  return { ok: true, drafts: [] };
 }
 
 export function readCustomAnswersFromFormData(
   formData: FormData,
-  eventIds: readonly string[],
-  questionsByEvent: Map<string, readonly CustomQuestion[]>,
-): CustomAnswers {
-  const result: CustomAnswers = {};
+  questionsByEventId: Map<string, CustomQuestion[]>,
+): { drafts: CustomAnswerDraft[]; errors: string[] } {
+  const drafts: CustomAnswerDraft[] = [];
+  const errors: string[] = [];
 
-  for (const eventId of eventIds) {
-    const questions = questionsByEvent.get(eventId) ?? [];
-    if (questions.length === 0) continue;
-    const eventAnswers: Record<string, string | string[] | number | boolean | null> = {};
-
+  for (const [eventId, questions] of questionsByEventId) {
     for (const q of questions) {
-      if (q.enabled === false) continue;
-      const raw = formData.get(`custom_answer:${eventId}:${q.id}`);
+      if (!q.is_active) continue;
+      const name = `custom_answer:${eventId}:${q.question_key}`;
+      const allValues = formData.getAll(name).map((v) =>
+        typeof v === "string" ? v.trim() : ""
+      ).filter(Boolean);
 
-      if (raw === null || raw === undefined) continue;
-
-      switch (q.type) {
-        case "multi-select": {
-          const all = formData.getAll(`custom_answer:${eventId}:${q.id}`);
-          const selected = all
-            .map((v) => (typeof v === "string" ? v.trim() : ""))
-            .filter(Boolean);
-          eventAnswers[q.id] = selected.length > 0 ? selected : null;
-          break;
-        }
-        case "number": {
-          const str = typeof raw === "string" ? raw.trim() : "";
-          if (str === "") {
-            eventAnswers[q.id] = null;
-          } else {
-            const num = Number(str);
-            eventAnswers[q.id] = Number.isFinite(num) ? num : null;
-          }
-          break;
-        }
-        default: {
-          const str = typeof raw === "string" ? raw.trim() : "";
-          eventAnswers[q.id] = str || null;
-          break;
-        }
+      const result = validateAnswerInput(q, allValues);
+      if (!result.ok) {
+        errors.push(result.message);
+        continue;
       }
-    }
-
-    if (Object.keys(eventAnswers).length > 0) {
-      result[eventId] = eventAnswers;
+      drafts.push(...result.drafts);
     }
   }
 
-  return result;
+  return { drafts, errors };
 }
 
-export function getCustomQuestionsForEvents(
-  rawQuestionsList: readonly (string | null | undefined)[],
-): CustomQuestion[] {
-  const byId = new Map<string, CustomQuestion>();
-  for (const raw of rawQuestionsList) {
-    const questions = parseCustomQuestions(raw);
-    for (const q of questions) {
-      if (q.enabled === false) continue;
-      const existing = byId.get(q.id);
-      if (existing) {
-        byId.set(q.id, {
-          ...existing,
-          required: existing.required || q.required,
-        });
-      } else {
-        byId.set(q.id, q);
-      }
+export function formatAnswerForDisplay(
+  question: CustomQuestion,
+  answer: CustomAnswerDraft | undefined,
+): string {
+  if (!answer) return "";
+  if (question.type === "checkbox" && answer.answer_json) {
+    try {
+      const arr = JSON.parse(answer.answer_json) as unknown;
+      if (Array.isArray(arr)) return arr.join(", ");
+    } catch {
+      return "";
     }
   }
-  return Array.from(byId.values()).sort((a, b) => a.order - b.order);
+  return answer.answer_text ?? "";
+}
+
+export function serializeAnswerForDb(
+  question: CustomQuestion,
+  value: string | string[],
+): { answer_text: string | null; answer_json: string | null } {
+  if (question.type === "checkbox" && Array.isArray(value)) {
+    return { answer_text: null, answer_json: JSON.stringify(value) };
+  }
+  const text = Array.isArray(value) ? value[0] ?? "" : value;
+  return { answer_text: text || null, answer_json: null };
+}
+
+export function deserializeAnswerFromDb(
+  row: CustomAnswerRow,
+): { answer_text: string | null; answer_json: string | null } {
+  return {
+    answer_text: row.answer_text,
+    answer_json: row.answer_json,
+  };
 }
