@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
+import styles from "./EventForm.module.css";
 import { createEvent, updateEvent } from "@/lib/actions/event-admin";
 import { PermissionKeysField } from "@/components/admin/PermissionKeysField";
 import {
@@ -354,7 +355,7 @@ export function EventForm({
         />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div className={styles.formGrid2}>
         <div>
           <label className="fn-label">種別</label>
           <select
@@ -392,7 +393,7 @@ export function EventForm({
         />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div className={styles.formGrid2}>
         <div>
           <label className="fn-label">アイコン URL</label>
           <input
@@ -413,7 +414,7 @@ export function EventForm({
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div className={styles.formGrid2}>
         <div>
           <label className="fn-label">開始日時</label>
           <input
@@ -434,7 +435,7 @@ export function EventForm({
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div className={styles.formGrid2}>
         <div>
           <label className="fn-label">募集開始日時</label>
           <input
@@ -467,33 +468,11 @@ export function EventForm({
         />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
-        <div>
-          <label className="fn-label">公開</label>
-          <select
-            name="is_active"
-            defaultValue={String(initial.is_active ?? 0)}
-            className="fn-select"
-          >
-            <option value="0">下書き</option>
-            <option value="1">公開</option>
-          </select>
-        </div>
-        <div>
-          <label className="fn-label">アーカイブ</label>
-          <select
-            name="is_archived"
-            defaultValue={String(initial.is_archived ?? 0)}
-            className="fn-select"
-          >
-            <option value="0">通常</option>
-            <option value="1">アーカイブ</option>
-          </select>
-        </div>
+      <div className={styles.formGrid2}>
         <div>
           <label
             className="fn-label"
-            title="作品投稿者が VideoForm の所属イベント選択でこのイベントを追加できるかどうか"
+            title="このイベントで作品投稿者が VideoForm の所属イベント選択でこのイベントを追加できるかどうか"
           >
             一般ユーザーの追加紐付け
           </label>
@@ -788,7 +767,7 @@ export function EventForm({
         </div>
       </fieldset>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+      <div className={styles.formGrid3}>
         <div>
           <label className="fn-label">1作品あたり最大枠数</label>
           <input
