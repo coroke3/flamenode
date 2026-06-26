@@ -197,7 +197,9 @@ export default async function ListPage({
               ))}
             </div>
           ) : (
-            <div className={`fn-table-scroll ${styles.indexWrap}`}>
+            <>
+              <p className="fn-scroll-hint">横にスクロールできます</p>
+              <div className={`fn-table-scroll fn-scroll-affordance ${styles.indexWrap}`}>
               <table className={`fn-list-tbl ${styles.indexTable}`}>
                 <thead>
                   <tr>
@@ -255,6 +257,7 @@ export default async function ListPage({
                 </tbody>
               </table>
             </div>
+            </>
           )}
           <Pagination
             currentPage={pageNum}
