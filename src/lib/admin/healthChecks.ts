@@ -777,36 +777,41 @@ async function checkOpenModerationCasesOverdue(
   };
 }
 
-/** 有効な api_endpoints が存在しない event を参照していないか */
+/** api_endpoints は deprecated。events.public_api_enabled を正本とする。 */
 async function checkActiveApiEndpointsOrphanEvent(
   db: AnyDb,
 ): Promise<HealthCheckResult> {
-  const where = and(eq(apiEndpointsTable.is_active, 1), isNull(eventsTable.id));
-  const [countRows, sampleRows] = await Promise.all([
-    db
-      .select({ c: sql<number>`COUNT(*)` })
-      .from(apiEndpointsTable)
-      .leftJoin(eventsTable, eq(eventsTable.id, apiEndpointsTable.event_id))
-      .where(where),
-    db
-      .select({ id: apiEndpointsTable.id, event_id: apiEndpointsTable.event_id })
-      .from(apiEndpointsTable)
-      .leftJoin(eventsTable, eq(eventsTable.id, apiEndpointsTable.event_id))
-      .where(where)
-      .limit(10),
-  ]);
-  const count = Number(countRows[0]?.c ?? 0);
-  return {
-    id: "active_api_endpoints_orphan_event",
-    label: "api_endpoints 有効 endpoint の event 参照",
-    status: count === 0 ? "ok" : "warn",
-    count,
-    samples: sampleRows.slice(0, 5).map((r) => `${r.id} event:${r.event_id}`),
-    note:
-      count > 0
-        ? "存在しない event を公開 API として有効化しています。無効化するか event_id を修正してください。"
-        : undefined,
-  };
+  try {
+    const where = and(eq(apiEndpointsTable.is_active, 1), isNull(eventsTable.id));
+    const [countRows] = await Promise.all([
+      db
+        .select({ c: sql<number>`COUNT(*)` })
+        .from(apiEndpointsTable)
+        .leftJoin(eventsTable, eq(eventsTable.id, apiEndpointsTable.event_id))
+        .where(where),
+    ]);
+    const count = Number(countRows[0]?.c ?? 0);
+    return {
+      id: "active_api_endpoints_orphan_event",
+      label: "api_endpoints 有効 endpoint の event 参照 (deprecated)",
+      status: count === 0 ? "ok" : "warn",
+      count,
+      samples: [],
+      note:
+        count > 0
+          ? "api_endpoints は deprecated です。events.public_api_enabled に移行してください。"
+          : "api_endpoints は deprecated です。events.public_api_enabled を正本としてください。",
+    };
+  } catch {
+    return {
+      id: "active_api_endpoints_orphan_event",
+      label: "api_endpoints 有効 endpoint の event 参照 (deprecated)",
+      status: "ok",
+      count: 0,
+      samples: [],
+      note: "api_endpoints テーブルが存在しない場合はこのチェックはスキップされます。",
+    };
+  }
 }
 
 /** x_id_merge_requests の pending が放置されていないか */

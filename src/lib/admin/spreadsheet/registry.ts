@@ -88,7 +88,7 @@ export const SPREADSHEET_TABLE_OVERRIDES: Record<string, SpreadsheetTableOverrid
     software_aliases: { label: "ソフト別名", group: "マスタ", mode: "editable" },
 
     announcements: { label: "お知らせ", group: "公開", mode: "editable" },
-    api_endpoints: { label: "公開 API", group: "公開", mode: "editable" },
+    api_endpoints: { label: "公開 API (deprecated)", group: "公開", mode: "readonly" },
     terms_versions: { label: "利用規約", group: "公開", mode: "editable" },
     user_tos_consents: { label: "規約同意", group: "公開", mode: "readonly" },
 
