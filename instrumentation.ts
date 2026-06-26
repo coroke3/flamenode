@@ -316,6 +316,11 @@ async function repairLocalSchemaDrift(DB: LocalD1Database): Promise<void> {
     );
   }
 
+  if (!(await tableExists(DB, "event_group_events"))) {
+    console.log("[instrumentation] Applying event_group_events migration 0028");
+    await applyMigrationFile(DB, "0028_event_group_events.sql");
+  }
+
   if (await tableExists(DB, "video_chapters")) {
     await ensureColumn(
       DB,

@@ -161,7 +161,21 @@ export const xUserIcons = sqliteTable(
 export const eventGroups = sqliteTable("event_groups", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
+  slug: text("slug").notNull(),
   description: text("description"),
+  group_type: text("group_type", {
+    enum: ["series", "genre", "related", "collection", "other"],
+  })
+    .notNull()
+    .default("series"),
+  icon_url: text("icon_url"),
+  img_url: text("img_url"),
+  accent_color: text("accent_color"),
+  visibility_status: text("visibility_status", {
+    enum: ["public", "private", "archived"],
+  })
+    .notNull()
+    .default("public"),
   sort_order: integer("sort_order").default(0),
   created_at: integer("created_at")
     .notNull()
@@ -169,7 +183,35 @@ export const eventGroups = sqliteTable("event_groups", {
   updated_at: integer("updated_at")
     .notNull()
     .default(sql`(unixepoch())`),
-});
+}, (t) => ({
+  slugUniq: uniqueIndex("event_groups_slug_uniq").on(t.slug),
+  typeSortIdx: index("event_groups_type_sort_idx").on(t.group_type, t.sort_order),
+  visibilitySortIdx: index("event_groups_visibility_sort_idx").on(t.visibility_status, t.sort_order),
+}));
+
+export const eventGroupEvents = sqliteTable("event_group_events", {
+  event_group_id: text("event_group_id").notNull(),
+  event_id: text("event_id").notNull(),
+  relation_type: text("relation_type", {
+    enum: ["member", "primary", "related"],
+  })
+    .notNull()
+    .default("member"),
+  sort_order: integer("sort_order").notNull().default(0),
+  created_at: integer("created_at")
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updated_at: integer("updated_at")
+    .notNull()
+    .default(sql`(unixepoch())`),
+}, (t) => ({
+  primaryKey: primaryKey({
+    columns: [t.event_group_id, t.event_id],
+  }),
+  eventIdx: index("event_group_events_event_idx").on(t.event_id),
+  groupSortIdx: index("event_group_events_group_sort_idx").on(t.event_group_id, t.sort_order),
+  relationIdx: index("event_group_events_relation_idx").on(t.relation_type),
+}));
 
 export const events = sqliteTable("events", {
   id: text("id").primaryKey(),
