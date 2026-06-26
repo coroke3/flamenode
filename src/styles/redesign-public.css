@@ -7,18 +7,19 @@
 [data-theme="dark"] {
   --accent-warning: #ff8a6e;
   --accent-warning-soft: rgba(255, 138, 110, 0.16);
+  --logo-color: #ffffff;
 }
 
 [data-theme="light"] {
   --accent-warning: #ff8a6e;
   --accent-warning-soft: rgba(255, 138, 110, 0.14);
+  --logo-color: #101113;
 }
 
 /* ─── シェル ─────────────────────────────────────────────── */
 
 [data-fn-surface="public"] {
-  /* Standalone サムネイルのロゴ黄に寄せる（UI アクセントは lime のまま） */
-  --logo-mark: #ffd400;
+  --logo-mark: var(--logo-color, var(--text-primary));
   /* 公開面の横位置・最大幅を一元化（ヘッダー / 本文 / フッターで端を揃える） */
   --fn-page-max: var(--content-max, 1360px);
   /* 縦余白スケール（作品詳細 fn-vd のゆとりを他ページにも） */
@@ -415,7 +416,7 @@
 [data-fn-surface="public"] .fn-logo-mark {
   display: inline-flex;
   align-items: center;
-  color: var(--logo-mark, var(--accent-primary));
+  color: var(--logo-mark, var(--text-primary));
   flex-shrink: 0;
 }
 
@@ -427,6 +428,7 @@
   font-size: 19px;
   letter-spacing: -0.015em;
   font-weight: 800;
+  color: var(--logo-color, var(--text-primary));
 }
 
 @media (max-width: 1000px) {

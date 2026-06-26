@@ -423,7 +423,10 @@ function SlotFillCard({
       >
         <i style={{ width: `${stat.pct}%` }} />
       </div>
-      <p>{formatCount(stat.filled)}枠が埋まっています</p>
+      <p>
+        <span>{formatCount(stat.filled)}枠</span>
+        <span>埋まっています</span>
+      </p>
     </article>
   );
 }

@@ -176,26 +176,28 @@
 
 .slotSummaryGrid {
   display: grid;
-  grid-template-columns: minmax(280px, 1.45fr) repeat(auto-fit, minmax(160px, 0.82fr));
+  grid-template-columns: minmax(260px, 1.45fr) repeat(auto-fit, minmax(160px, 0.82fr));
+  grid-auto-rows: minmax(156px, auto);
   gap: 14px;
   align-items: stretch;
 }
 
 .slotSummaryCard {
   display: grid;
-  align-content: start;
+  grid-template-rows: auto 1fr auto auto;
+  align-content: stretch;
   gap: 11px;
   min-width: 0;
-  min-height: 142px;
+  min-height: 156px;
+  height: 100%;
   padding: 16px;
   border: 1px solid var(--hairline, var(--border-subtle));
   background: var(--bg-surface);
 }
 
 .slotSummaryCard[data-featured="true"] {
-  grid-row: span 2;
-  min-height: 298px;
-  padding: 24px;
+  min-height: 156px;
+  padding: 18px 22px;
   border-color: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 56%, var(--border-subtle));
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--event-accent, var(--accent-primary)) 18%, transparent), transparent 58%),
@@ -230,8 +232,8 @@
 }
 
 .slotSummaryCard[data-featured="true"] .slotSummaryCount {
-  margin-top: auto;
-  font-size: clamp(54px, 8vw, 82px);
+  align-self: end;
+  font-size: clamp(46px, 5.4vw, 64px);
 }
 
 .slotSummaryCount small {
@@ -251,7 +253,7 @@
 }
 
 .slotSummaryCard[data-featured="true"] .slotSummaryProgress {
-  height: 12px;
+  height: 10px;
   background: color-mix(in srgb, var(--bg-elevated) 74%, var(--event-accent, var(--accent-primary)) 26%);
 }
 
@@ -263,13 +265,22 @@
 
 .slotSummaryCard p {
   margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 4px;
   color: var(--text-muted);
   font-size: 12px;
+  line-height: 1.35;
 }
 
 .slotSummaryCard[data-featured="true"] p {
   color: var(--text-secondary);
   font-size: 13px;
+}
+
+.slotSummaryCard:not([data-featured="true"]) p {
+  display: grid;
+  gap: 2px;
 }
 
 .crewGrid,
@@ -353,12 +364,11 @@
   .slotTable { min-width: 760px; }
   .slotSummaryGrid { grid-template-columns: 1fr; }
   .slotSummaryCard[data-featured="true"] {
-    grid-row: auto;
-    min-height: 220px;
-    padding: 20px;
+    min-height: 156px;
+    padding: 16px;
   }
   .slotSummaryCard[data-featured="true"] .slotSummaryCount {
-    font-size: clamp(46px, 16vw, 64px);
+    font-size: clamp(42px, 13vw, 58px);
   }
   .reserveButton { width: 100%; }
   .videoGrid { gap: 20px; }

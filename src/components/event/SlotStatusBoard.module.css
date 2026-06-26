@@ -50,6 +50,63 @@
   font-size: 12px;
 }
 
+.selected[data-status="available"] {
+  background: color-mix(in srgb, var(--bg-elevated) 86%, var(--event-accent, var(--accent-primary)));
+  border-color: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 24%, var(--border-subtle));
+}
+
+.selected[data-status="reserved"] {
+  background: color-mix(in srgb, var(--bg-elevated) 88%, #ff6868);
+  border-color: color-mix(in srgb, #ff6868 38%, var(--border-subtle));
+}
+
+.selected[data-status="reserved"] strong {
+  color: #ff6868;
+}
+
+.selected[data-status="submitted"] {
+  background: color-mix(in srgb, var(--bg-elevated) 88%, #7ce1ff);
+  border-color: color-mix(in srgb, #7ce1ff 34%, var(--border-subtle));
+}
+
+.selected[data-status="submitted"] strong {
+  color: #7ce1ff;
+}
+
+.slotDetails {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 2px 0;
+}
+
+.slotDetails div {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+}
+
+.slotDetails dt,
+.slotDetails dd {
+  margin: 0;
+}
+
+.slotDetails dt {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.slotDetails dd {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 850;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
 .summary {
   display: grid;
   gap: 9px;

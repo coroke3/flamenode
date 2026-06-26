@@ -22,15 +22,16 @@ Cloudflare 無料枠・課金抑制・自動停止の詳細は `FlameNode-Cloudf
 ## 1. データベース設計 (Cloudflare D1 / SQLite)
 
 Cloudflare D1 (SQLite) を使用し、リレーショナルモデルとして正規化する。
+実装上の Single Source of Truth は `src/lib/db/schema.ts` である。この章は説明用の設計資料であり、カラム・index・制約の最終判断は schema.ts と `migrations/*.sql` を正とする。
 
-### 1-0. 初期SQLとの差分整理方針
+### 1-0. migration / 旧設計との差分整理方針
 
-`migrations/0000_chief_pet_avengers.sql` は初期スナップショットであり、現在の設計で追加された機能は後続マイグレーションで補完する。実装時の正は本マスターデザインと `FlameNode-Migration-Alignment.md` とし、初期SQLに存在する古い名称・不足カラムはそのまま採用しない。
+`migrations/0000_brave_iceman.sql` は初期スナップショットであり、現在の clean schema は後続 migration で整理されている。古い設計書や初期SQLに残る旧テーブル・旧カラムを新規実装へ戻さない。
 
-- `event_managers` は初期SQL上の旧名として扱い、現在の正規名は `event_editors` とする。後続マイグレーションでは既存行を `event_editors` へ移行し、互換ビューや別名テーブルは残さない。
-- 時間軸マーカーは初期SQLに存在する `video_chapters` を正規テーブル名にし、時間付きコメント、チャプター、再生バー点表示を同じ思想で扱う。
-- `terms_versions`, `user_tos_consents`, `x_id_merge_reverts`, `cost_usage_snapshots`, `software_catalog`, `software_aliases`, `event_groups`, `event_collaborator_permissions` など、設計で追加されたテーブルは後続マイグレーションで追加する。
-- 初期SQLに残る `videos.small_thumbnail`, `videos.large_thumbnail`, `videos.tags` は互換用の旧カラムとして扱い、新規UI・新規設計では使用しない。
+- イベント運営権限の正本は `event_staff` と `event_staff_permissions`。旧 `event_editors` / `event_collaborator_permissions` は `0019_clean_staff_software_and_disabled_features.sql` で移行・廃止済みとして扱う。
+- 作品本体の正本は現行 `videos`。旧 `creator_id`, `owner_discord_user_id`, `submission_type`, `display_name`, `icon_url`, `status`, `is_deleted`, `is_manual_hidden`, `x_reapply_*`, `void_*` へ戻さない。
+- 通常コメント用 `video_comments` は `0021_slim_mvp_drop_unused_tables.sql` で削除済み。新規利用しない。チャプター表示は `video_chapters`、メンバー担当チャプターは `video_members.chapters_json` を使う。
+- `migrations/meta/_journal.json` は `0007` までしか追跡していない。0010以降は手動SQL migrationを含むため、Drizzle metaだけを正本にしない。
 
 ### 1-0. Auth.js 標準テーブル
 
@@ -79,6 +80,7 @@ Auth.js (NextAuth v5) の DrizzleAdapter が必要とするテーブル群。
 - **x_name**: text NOT NULL
 - **icon_url**: text
 - **profile_text**: text
+- **portfolio_contact**: text
 - **youtube_channel_url**: text
 - **other_social_links**: text (JSON)
 - **creative_start_date**: integer (timestamp)
@@ -124,6 +126,10 @@ Auth.js (NextAuth v5) の DrizzleAdapter が必要とするテーブル群。
 - **is_active**: integer NOT NULL DEFAULT **0** (★ デフォルト非公開)
 - **is_entry_open**: integer NOT NULL DEFAULT 0
 - **is_archived**: integer NOT NULL DEFAULT 0 (終了イベントをアーカイブ扱いにする。削除ではなく表示分類で管理)
+- **allow_user_video_event_links**: integer NOT NULL DEFAULT 0 (一般ユーザーが既存作品へ追加所属イベントとして選べるか)
+- **allow_user_video_edits**: integer NOT NULL DEFAULT 0 (一般ユーザーへイベント単位の作品編集権限を委譲するか)
+- **user_video_edit_permission_keys_json**: text | null (委譲する編集 section key の JSON 配列)
+- **video_form_settings_json**: text | null (イベント投稿フォーム設定。追加質問、stage_permission 等)
 - **event_group_id**: text | null (FK → event_groups.id / イベントのグループ分け)
 - **slot_type**: text DEFAULT 'time' ("time", "count" / 時間に紐付く枠と紐付かない枠を区別)
 - **slot_visibility_mode**: text DEFAULT 'public_name' ("public_name", "anonymous", "hidden" / 確保者名の公開範囲)
@@ -137,6 +143,10 @@ Auth.js (NextAuth v5) の DrizzleAdapter が必要とするテーブル群。
 - **review_settings**: text (JSON Object)
 - **editable_fields**: text (JSON Array)
 - **repeat_rules**: text (JSON Object) - リピート生成ルール（省略可能）
+- **slot_part_gap_minutes**: integer DEFAULT 15 (部を分ける間隔。既存DBに DEFAULT 30 の履歴があるため実値優先、NULL はアプリ側 fallback 15)
+- **parts_json**: text | null (作品が選択できる部/カテゴリ候補の JSON 配列)
+- **public_api_enabled**: integer NOT NULL DEFAULT 0
+- **public_api_updated_at**: integer | null
 
 ### 1-5-1. event_groups (イベントグループ)
 - **id**: text (Primary Key)
@@ -148,36 +158,35 @@ Auth.js (NextAuth v5) の DrizzleAdapter が必要とするテーブル群。
 
 イベントグループは、同一シリーズ、年度、主催単位、企画カテゴリなどでイベントをまとめるために使う。公開ページではグループ単位の一覧やアーカイブ導線に使い、管理画面ではイベント数が増えた場合の整理に使う。
 
-### 1-6. event_editors (イベント編集許可者)
-- **event_id**: text (FK → events.id)
-- **x_user_id**: text (FK → x_users.id)
-- **role**: text DEFAULT 'editor' ("representative", "editor")
-- **is_public**: integer DEFAULT 1 (公開ページに表示する運営メンバーなら1、管理画面のみなら0)
-- **public_role_label**: text | null (公開表示用の役職名)
-- **operation_scope_json**: text | null (イベント編集許可者に対する補助的な操作範囲。通常は担当イベント全体を許可し、細分化は `event_collaborator_permissions.permission_key` を使う)
-- **internal_note**: text | null (管理画面のみのメモ)
-- **approved_by_user_id**: text | null (FK → user.id)
-- **approved_at**: integer | null (timestamp)
-- **Primary Key**: (event_id, x_user_id)
-
-初期SQLの `event_managers` はこの役割の旧名である。今後の設計・画面・CSV・旧形式エクスポートでは `event_editors` に統一し、後続マイグレーションで `event_managers` の既存データを `event_editors` へ移す。互換ビューや別名テーブルは残さず、実装上の参照先も `event_editors` に一本化する。
-
-### 1-6-1. event_collaborator_permissions (イベント協力者の個別編集権限)
+### 1-6. event_staff (イベント運営メンバー)
 - **id**: text (Primary Key)
-- **event_id**: text NOT NULL (FK → events.id, ON DELETE CASCADE)
-- **x_user_id**: text | null (FK → x_users.id / X ID として特定できる協力者)
-- **discord_user_id**: text | null (FK → user.id / Discord ユーザーとして特定できる協力者)
-- **display_name**: text NOT NULL (協力者としての管理画面表示名)
-- **permission_key**: text NOT NULL (例: `"event.basic"`, `"event.slots"`, `"event.members"`, `"videos.title"`, `"videos.music_credit"`, `"videos.members"`, `"videos.review_data"`, `"videos.youtube_id"`, `"collaborators.manage"`)
-- **allowed**: integer NOT NULL DEFAULT 1
-- **is_public_staff**: integer DEFAULT 0 (公開ページの運営メンバーとしても表示する場合のみ1)
-- **public_role_label**: text | null (公開表示用の役職名。`is_public_staff = 0` の場合は公開しない)
-- **granted_by_user_id**: text NOT NULL (FK → user.id / 付与者)
+- **event_id**: text NOT NULL (FK → events.id)
+- **x_user_id**: text | null (FK → x_users.id)
+- **discord_user_id**: text | null (FK → user.id)
+- **display_name**: text NOT NULL
+- **role**: text NOT NULL DEFAULT 'staff' ("representative", "editor", "staff")
+- **is_public**: integer NOT NULL DEFAULT 0
+- **public_role_label**: text | null
+- **internal_note**: text | null
+- **approved_by_user_id**: text | null (FK → user.id)
+- **approved_at**: integer | null
+- **permission_keys_json**: text | null (event_staff_permissions 統合先の JSON 配列。新規表示ではこちらを優先)
 - **created_at**: integer NOT NULL DEFAULT (unixepoch())
 - **updated_at**: integer NOT NULL DEFAULT (unixepoch())
-- **UNIQUE**: (event_id, x_user_id, discord_user_id, permission_key)
+- **UNIQUE**: (event_id, x_user_id), (event_id, discord_user_id)
 
-協力者はイベント単位で付与する補助編集者であり、作品単位では管理しない。イベントに紐づく作品へは `video_events.event_id` が対象イベントに一致する場合のみ、付与された `permission_key` に対応する項目を編集できる。`primary_event_id` が別イベントでも、`video_events` で対象イベントに所属していれば編集範囲に含める。協力者追加時の本人承認は不要で、管理者または当該イベントのイベント編集許可者が追加した時点で有効化する。`collaborators.manage` はイベント協力者には付与せず、協力者の追加・削除・権限変更はイベント編集許可者以上に限定する。
+イベント運営者・協力者の現在の正本は `event_staff`。旧 `event_editors` と `event_collaborator_permissions` は `0019_clean_staff_software_and_disabled_features.sql` で移行・廃止済みであり、新規実装で参照しない。
+
+### 1-6-1. event_staff_permissions (イベント運営メンバー権限)
+- **id**: text (Primary Key)
+- **event_staff_id**: text NOT NULL (FK → event_staff.id)
+- **permission_key**: text NOT NULL (例: `"event.basic"`, `"event.slots"`, `"event.members"`, `"videos.title"`, `"videos.music_credit"`, `"videos.members"`, `"videos.review_data"`, `"videos.youtube_id"`, `"videos.primary_event"`, `"video.chapter_admin"`)
+- **allowed**: integer NOT NULL DEFAULT 1
+- **created_at**: integer NOT NULL DEFAULT (unixepoch())
+- **updated_at**: integer NOT NULL DEFAULT (unixepoch())
+- **UNIQUE**: (event_staff_id, permission_key)
+
+`event_staff_permissions` は互換・監査用に残す。新規表示・軽量判定では `event_staff.permission_keys_json` を優先できるが、既存コードとの互換があるため即削除しない。
 
 ### 1-7. slots (予約枠)
 - **id**: text (Primary Key)
@@ -206,14 +215,14 @@ Auth.js (NextAuth v5) の DrizzleAdapter が必要とするテーブル群。
 ### 1-8. videos (作品情報)
 - **id**: text (UUID Primary Key)
 - **primary_event_id**: text (FK → events.id)
-- **creator_id**: text (FK → x_users.id)
-- **owner_discord_user_id**: text NOT NULL (FK → user.id)
-- **submission_type**: text NOT NULL ("individual", "collab", "youtube")
-- **display_name**: text NOT NULL
-- **display_name_yomi**: text
-- **contact_x_id**: text NOT NULL
-- **icon_url**: text
-- **declared_experience**: text
+- **creator_x_user_id**: text | null (FK → x_users.id / 作者 X ID)
+- **submitted_by_discord_user_id**: text NOT NULL (投稿操作を行った Discord ユーザー)
+- **collaboration_type**: text NOT NULL DEFAULT 'individual' ("individual", "collab")
+- **part**: text | null (イベントの `parts_json` から選ぶ部/カテゴリ)
+- **source_type**: text NOT NULL DEFAULT 'youtube' ("youtube", "manual", "external")
+- **creator_display_name**: text NOT NULL
+- **creator_display_name_yomi**: text | null
+- **creator_icon_url**: text | null
 - **title**: text NOT NULL
 - **music**: text
 - **credit**: text
@@ -222,10 +231,90 @@ Auth.js (NextAuth v5) の DrizzleAdapter が必要とするテーブル群。
 - **youtube_video_id**: text
 - **stage_permission**: text
 - **intro_comment**: text
-- **outro_comment**: text
 - **highlights**: text
 - **production_story**: text
-- **used_software**: text
+- **custom_answers**: text (JSON Object / event_id keyed)
+- **visibility_status**: text NOT NULL DEFAULT 'draft' ("draft", "pending", "public", "limited", "private", "hidden", "archived", "voided")
+- **scheduling_type**: text DEFAULT 'slotted' ("slotted", "manual")
+- **scheduled_time**: integer (timestamp)
+- **used_software_json**: text | null
+- **app_like_count**: integer NOT NULL DEFAULT 0
+- **score**: real NOT NULL DEFAULT 0
+- **trending_view_count_24h**: integer NOT NULL DEFAULT 0
+- **score_updated_at**: integer | null
+- **created_at**: integer NOT NULL DEFAULT (unixepoch())
+- **updated_at**: integer NOT NULL DEFAULT (unixepoch())
+
+旧 `creator_id` は `creator_x_user_id`、旧 `owner_discord_user_id` は `submitted_by_discord_user_id`、旧 `display_name` / `icon_url` は `creator_display_name` / `creator_icon_url` に整理済み。旧 `status`, `is_deleted`, `is_manual_hidden`, `unlisted` は `visibility_status` に統合する。YouTube側の限定公開状態は FlameNode の `visibility_status='limited'` とは別概念で、`video_youtube_metadata.youtube_privacy_status` で扱う。
+
+`submitted_by_discord_user_id` は投稿操作の記録であり、単独では作品編集権限を与えない。編集権限は承認済み `creator_x_user_id`、管理者、イベント運営権限、`video_members.can_edit` の共同編集権限から判定する。
+
+X ID 再申請や void 理由などのケース情報は `videos.x_reapply_*` / `videos.void_*` ではなく `video_moderation_cases` に分離する。公開・一覧・スコアからの除外は `visibility_status='voided'` を正とする。
+
+`app_like_count`, `score`, `trending_view_count_24h`, `score_updated_at` は 0024 以降の表示用統計正本。`video_stats` は score-recalc worker と旧DB fallback 用に当面残すが、新規表示クエリでは `videos.score` を優先する。
+
+#### visibility_status
+
+| 値 | 意味 |
+|---|---|
+| `draft` | 下書き |
+| `pending` | 承認・公開待ち |
+| `public` | 公開一覧に出す |
+| `limited` | 直接 URL または限定導線のみ |
+| `private` | 非公開 |
+| `hidden` | 管理上の手動非表示 |
+| `archived` | 通常導線から除外 |
+| `voided` | 無効化。公開・上映・一覧・エクスポート・スコア上は除外 |
+
+`scheduled_time` は作品の代表上映時刻であり、枠あり投稿では紐づくスロット群のうち最初の `slots.start_time` をコピーする。連続枠のまとまりは `slots.reservation_group_id` で管理する。
+
+### 1-8-1. video_youtube_metadata
+- **video_id**: text (Primary Key / FK → videos.id)
+- **youtube_video_id**: text | null
+- **youtube_privacy_status**: text | null
+- **youtube_availability_status**: text | null
+- **duration_seconds**: integer | null
+- **view_count**: integer NOT NULL DEFAULT 0
+- **synced_at**: integer | null
+- **sync_status**: text NOT NULL DEFAULT 'pending' ("pending", "synced", "failed")
+- **sync_error**: text | null
+- **updated_at**: integer NOT NULL
+
+### 1-8-2. video_stats
+- **video_id**: text (Primary Key / FK → videos.id)
+- **app_view_count**: integer NOT NULL DEFAULT 0
+- **app_like_count**: integer NOT NULL DEFAULT 0
+- **trending_view_count_24h**: integer NOT NULL DEFAULT 0
+- **score**: real NOT NULL DEFAULT 0
+- **updated_at**: integer NOT NULL
+
+`video_stats` は即削除しない。`score-recalc` worker が `video_stats` と `videos.score` を同期し、旧DBでは `video_stats` へ fallback する。
+
+### 1-8-3. video_moderation_cases
+- **id**: text (Primary Key)
+- **video_id**: text NOT NULL (FK → videos.id)
+- **case_type**: text NOT NULL ("x_reapply", "void", "duplicate", "rights", "operator")
+- **status**: text NOT NULL DEFAULT 'open' ("open", "resolved", "rejected", "expired", "cancelled")
+- **public_reason**: text | null
+- **private_note**: text | null
+- **due_at**: integer | null
+- **locked_until**: integer | null
+- **attempt_count**: integer NOT NULL DEFAULT 0
+- **related_x_user_id**: text | null
+- **created_by_user_id**: text | null
+- **resolved_by_user_id**: text | null
+- **created_at**: integer NOT NULL
+- **resolved_at**: integer | null
+
+<!--
+旧設計メモ:
+- creator_id → creator_x_user_id
+- owner_discord_user_id → submitted_by_discord_user_id
+- submission_type → collaboration_type / source_type
+- display_name / icon_url → creator_display_name / creator_icon_url
+- status / is_deleted / is_manual_hidden → visibility_status
+- x_reapply_* / void_* → video_moderation_cases
+-->
 - **custom_answers**: text (JSON Object)
 - **view_count**: integer DEFAULT 0
 - **like_count**: integer DEFAULT 0

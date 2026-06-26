@@ -12,7 +12,10 @@ import {
 /**
  * FlameNode D1 (SQLite) スキーマ Single Source of Truth.
  * 命名規則: snake_case で統一。Auth.js 標準カラムだけ camelCase。
- * 詳細は 設計/FlameNode-Design.md を正とする。
+ *
+ * 実装上の正本はこのファイル。設計書・運用手順・手動 SQL migration は
+ * この定義に追従させる。migrations/meta は古い Drizzle snapshot で止まっており、
+ * 0010 以降は手動 SQL migration を含むため、docs/operations.md の注意を読むこと。
  */
 
 // ============================================================
@@ -237,7 +240,11 @@ export const events = sqliteTable("events", {
   review_settings: text("review_settings"),
   editable_fields: text("editable_fields"),
   repeat_rules: text("repeat_rules"),
-  /** スロット表示で「部」を分ける間隔の閾値 (分)。null/未設定なら 15 分。 */
+  /**
+   * スロット表示で「部」を分ける間隔の閾値 (分)。
+   * 実装方針は 15 分。0006 は SQLite/D1 既定値が DEFAULT 30 のままのDBがあるため、
+   * 読み取り時は実値を優先し、NULL/未設定だけアプリ側 fallback 15 として扱う。
+   */
   slot_part_gap_minutes: integer("slot_part_gap_minutes").default(15),
   /**
    * このイベントで作品が選択できる「部」(セクション/カテゴリ) の候補リスト。
@@ -251,20 +258,26 @@ export const events = sqliteTable("events", {
 });
 
 /** イベント設定テンプレート（管理者のみ。枠・作品・スタッフは含まない） */
-export const eventTemplates = sqliteTable("event_templates", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  description: text("description"),
-  source_event_id: text("source_event_id"),
-  settings_json: text("settings_json").notNull(),
-  created_by_user_id: text("created_by_user_id").notNull(),
-  created_at: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updated_at: integer("updated_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-});
+export const eventTemplates = sqliteTable(
+  "event_templates",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    description: text("description"),
+    source_event_id: text("source_event_id"),
+    settings_json: text("settings_json").notNull(),
+    created_by_user_id: text("created_by_user_id").notNull(),
+    created_at: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updated_at: integer("updated_at")
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    updatedIdx: index("event_templates_updated_idx").on(t.updated_at),
+  }),
+);
 
 export const eventStaff = sqliteTable(
   "event_staff",
@@ -437,7 +450,10 @@ export const videos = sqliteTable("videos", {
   scheduled_time: integer("scheduled_time"),
   /** 旧 soft 列・レガシーインポート由来の使用ソフト（JSON） */
   used_software_json: text("used_software_json"),
-  /** video_stats 統合先（Worker で score 再計算） */
+  /**
+   * 表示クエリ向けの統計正本。0024 以降の新規表示クエリは videos.* を優先する。
+   * video_stats は score-recalc worker / 旧DB fallback 用に当面 dual-write で残す。
+   */
   app_like_count: integer("app_like_count").notNull().default(0),
   score: real("score").notNull().default(0),
   trending_view_count_24h: integer("trending_view_count_24h").notNull().default(0),
@@ -597,6 +613,11 @@ export const videoMembers = sqliteTable(
       t.video_id,
       t.name,
     ),
+    byVideoCanEdit: index("video_members_video_can_edit_idx").on(
+      t.video_id,
+      t.can_edit,
+    ),
+    byDiscord: index("video_members_discord_idx").on(t.discord_user_id),
   }),
 );
 
@@ -633,6 +654,7 @@ export const videoChapters = sqliteTable("video_chapters", {
     t.video_id,
     t.chapter_time,
   ),
+  byVideoMember: index("video_chapters_video_member_idx").on(t.video_member_id),
 }));
 
 export const videoInteractions = sqliteTable(
@@ -773,6 +795,9 @@ export const notificationOutbox = sqliteTable(
       t.status,
       t.dedupe_key,
     ),
+    activeDedupeUniq: uniqueIndex("notification_outbox_active_dedupe_uniq")
+      .on(t.dedupe_key)
+      .where(sql`dedupe_key IS NOT NULL AND status IN ('pending', 'processing', 'sent')`),
   }),
 );
 
@@ -936,6 +961,9 @@ export const staticRebuildQueue = sqliteTable(
     error: text("error"),
   },
   (t) => ({
+    targetPendingUniq: uniqueIndex("static_rebuild_queue_target_pending_uniq")
+      .on(t.target_type, t.target_id)
+      .where(sql`status IN ('pending', 'processing')`),
     statusPriorityIdx: index("static_rebuild_queue_status_priority_idx").on(
       t.status,
       t.priority,

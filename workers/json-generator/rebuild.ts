@@ -122,7 +122,7 @@ async function rebuildSearchIndexLite(env: Env): Promise<void> {
   const users = await env.DB.prepare(
     `SELECT id, x_name FROM x_users
      WHERE approval_status = 'approved'
-     ORDER BY updated_at DESC LIMIT 500`,
+     ORDER BY approval_requested_at DESC, id ASC LIMIT 500`,
   ).all();
   await putJson(env, "search-index-lite.json", {
     generated_at: Math.floor(Date.now() / 1000),
@@ -220,7 +220,7 @@ async function rebuildVideo(env: Env, videoId: string): Promise<void> {
     .all();
 
   const members = await env.DB.prepare(
-    `SELECT display_name, x_user_id, role_label, order_index
+    `SELECT name AS display_name, x_user_id, role AS role_label, order_index
      FROM video_members WHERE video_id = ? AND is_public_member = 1
      ORDER BY order_index ASC`,
   )

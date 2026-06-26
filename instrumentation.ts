@@ -170,6 +170,10 @@ async function applyMigrationFile(
 }
 
 async function repairLocalSchemaDrift(DB: LocalD1Database): Promise<void> {
+  // ローカル開発用の救済処理。
+  // 本番 D1 にはこの補修は走らないため、正式な差分管理は migrations/*.sql と
+  // docs/operations.md の適用順を正とする。ここだけに存在する補修を
+  // 本番 migration の代替として扱わないこと。
   if (
     (await tableExists(DB, "videos")) &&
     !(await columnExists(DB, "videos", "creator_x_user_id"))

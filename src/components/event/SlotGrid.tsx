@@ -421,6 +421,7 @@ export function SlotGrid({
                         filled && styles.rowFilled,
                         isMine && styles.rowMine,
                       )}
+                      onPointerEnter={() => previewSlot(slot.id)}
                       onMouseEnter={() => previewSlot(slot.id)}
                       onClick={() => previewSlot(slot.id)}
                     >

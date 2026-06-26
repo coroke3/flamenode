@@ -3,7 +3,7 @@
 最終更新: 2026-05-23
 
 本番運用前の clean schema として、作品本体 `videos` に混在していた投稿者情報、公開状態、YouTube 同期、統計、旧互換、審査・無効化情報を責務ごとに整理する。
-実装正本は `src/lib/db/schema.ts`、移行正本は `migrations/0018_simplify_video_schema.sql`、`0019_clean_staff_software_and_disabled_features.sql`、`0020_split_video_core_metadata_stats.sql`。
+実装正本は `src/lib/db/schema.ts`、移行正本は `migrations/0018_simplify_video_schema.sql`、`0019_clean_staff_software_and_disabled_features.sql`、`0020_split_video_core_metadata_stats.sql`、`0024_legacy_import_db_reduction_prep.sql`。
 
 ## videos の責務
 
@@ -14,8 +14,9 @@
 | identity | `id`, `primary_event_id` |
 | 投稿者 | `creator_x_user_id`, `submitted_by_discord_user_id`, `creator_display_name`, `creator_display_name_yomi`, `creator_icon_url` |
 | 作品分類 | `collaboration_type`, `source_type` |
-| 作品本文 | `title`, `youtube_video_id`, `music`, `music_reference_url`, `credit`, `intro_comment`, `closing_comment`, `highlights`, `production_story`, `used_software`, `stage_permission`, `custom_answers` |
+| 作品本文 | `title`, `youtube_video_id`, `music`, `music_reference_url`, `credit`, `intro_comment`, `closing_comment`, `highlights`, `production_story`, `used_software_json`, `stage_permission`, `custom_answers` |
 | 公開・予定 | `visibility_status`, `scheduling_type`, `scheduled_time` |
+| 表示用統計 | `app_like_count`, `score`, `trending_view_count_24h`, `score_updated_at` |
 | timestamps | `created_at`, `updated_at` |
 
 `submitted_by_discord_user_id` は投稿操作を行った Discord ユーザーの記録であり、単独では編集権限を与えない。
@@ -36,7 +37,7 @@
 | `x_reapply_*`, `void_*` | `video_moderation_cases` |
 | `validation_errors` | `history_logs` へ退避 |
 | YouTube 同期系 | `video_youtube_metadata` |
-| 統計・スコア系 | `video_stats` |
+| 統計・スコア系 | 新規表示クエリは `videos.app_like_count`, `videos.score`, `videos.trending_view_count_24h`, `videos.score_updated_at` を優先。`video_stats` は worker / 旧DB fallback 用に当面残す |
 
 ## collaboration_type / source_type
 
@@ -83,7 +84,7 @@ X ID 再申請、無効化、重複、権利、運営判断などのケース情
 
 ## video_youtube_metadata / video_stats
 
-YouTube 同期結果と一覧高速化用統計は、作品本体から分離する。
+YouTube 同期結果は `video_youtube_metadata` に分離する。一覧表示用の統計は 0024 以降 `videos.*` を優先するが、score-recalc worker と旧DB fallback のため `video_stats` も当面残す。
 
 `video_youtube_metadata`:
 
@@ -98,7 +99,7 @@ YouTube 同期結果と一覧高速化用統計は、作品本体から分離す
 - `sync_error`
 - `updated_at`
 
-`video_stats`:
+`video_stats` (当面の dual-write / fallback):
 
 - `video_id`
 - `app_view_count`
@@ -109,6 +110,7 @@ YouTube 同期結果と一覧高速化用統計は、作品本体から分離す
 
 公開ページ表示時に YouTube API は叩かない。
 閲覧数は1再生ごとに D1 へ直接 UPDATE せず、初期本番では低頻度集計・キャッシュ前提にする。
+新規表示クエリは `videos.score` を優先し、`video_stats` を即 DROP しない。
 
 ## video_members
 
@@ -173,6 +175,5 @@ YouTube 同期結果と一覧高速化用統計は、作品本体から分離す
 
 ## software
 
-ソフトウェア名の正本は `software_catalog`。
-表記ゆれは `software_aliases`、作品との紐付けは `video_softwares` で管理する。
-`videos.used_software` は表示互換用に残すが、新規ロジックでは正本にしない。
+ソフトウェア名の表示正本は `videos.used_software_json`。
+`software_catalog` / `software_aliases` / `video_softwares` は旧整理過程の補助テーブルとして当面残る可能性があるが、新規表示クエリでは `used_software_json` を優先する。
