@@ -1,4 +1,4 @@
-name = "flamenode-youtube-sync"
+name = "flamenode-sync-jobs"
 main = "index.ts"
 compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
@@ -17,4 +17,4 @@ id = "00000000000000000000000000000000"
 preview_id = "00000000000000000000000000000000"
 
 [vars]
-# YOUTUBE_API_KEY は wrangler secret put で投入する想定
+# YOUTUBE_API_KEY is set with wrangler secret put.

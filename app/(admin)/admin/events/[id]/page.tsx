@@ -78,7 +78,7 @@ export default async function AdminEventDetailPage({
     reserved: slots.filter((s) => s.status === "reserved").length,
     submitted: slots.filter((s) => s.status === "submitted").length,
   };
-  const videoStats = {
+  const videoSummary = {
     total: evVideos.length,
     public: evVideos.filter((v) => v.status === "public").length,
     pending: evVideos.filter((v) => v.status === "pending").length,
@@ -108,10 +108,10 @@ export default async function AdminEventDetailPage({
         <StatBox label="埋まり枠" value={slotStats.filled} />
         <StatBox label="確保済" value={slotStats.reserved} />
         <StatBox label="提出済" value={slotStats.submitted} />
-        <StatBox label="作品" value={videoStats.total} />
-        <StatBox label="公開済" value={videoStats.public} />
-        <StatBox label="審査待ち" value={videoStats.pending} accent />
-        <StatBox label="無効" value={videoStats.voided} />
+        <StatBox label="作品" value={videoSummary.total} />
+        <StatBox label="公開済" value={videoSummary.public} />
+        <StatBox label="審査待ち" value={videoSummary.pending} accent />
+        <StatBox label="無効" value={videoSummary.voided} />
       </section>
 
       <section

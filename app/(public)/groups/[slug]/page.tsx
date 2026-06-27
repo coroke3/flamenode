@@ -3,7 +3,13 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { withDatabase } from "@/lib/cloudflare";
-import { fetchPublicEventGroupBySlug, fetchPublicEventsForGroup } from "@/lib/db/eventGroups";
+import {
+  fetchPublicEventGroupBySlug,
+  fetchPublicEventsForGroup,
+  type PublicEventGroupDetail,
+  type PublicGroupEvent,
+} from "@/lib/db/eventGroups";
+import { readStaticJson } from "@/lib/publicData/staticJson";
 
 export const dynamic = "force-dynamic";
 
@@ -21,15 +27,25 @@ function formatDate(ts: number | null): string {
   return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
 }
 
+type StaticGroupPayload = {
+  group: PublicEventGroupDetail;
+  events: PublicGroupEvent[];
+};
+
 export async function generateMetadata({
   params,
 }: {
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const group = await withDatabase(async (db) => {
-    return fetchPublicEventGroupBySlug(db, slug);
-  });
+  const staticPayload = await readStaticJson<StaticGroupPayload>(
+    `groups/${slug}.json`,
+  );
+  const group =
+    staticPayload?.group ??
+    (await withDatabase(async (db) => {
+      return fetchPublicEventGroupBySlug(db, slug);
+    }));
   if (!group) return { title: "グループが見つかりません" };
   return {
     title: group.name,
@@ -49,15 +65,22 @@ export default async function GroupDetailPage({
 }): Promise<React.ReactElement> {
   const { slug } = await params;
 
-  const group = await withDatabase(async (db) => {
-    return fetchPublicEventGroupBySlug(db, slug);
-  });
+  const staticPayload = await readStaticJson<StaticGroupPayload>(
+    `groups/${slug}.json`,
+  );
+  const group =
+    staticPayload?.group ??
+    (await withDatabase(async (db) => {
+      return fetchPublicEventGroupBySlug(db, slug);
+    }));
 
   if (!group) notFound();
 
-  const groupEvents = (await withDatabase(async (db) => {
-    return fetchPublicEventsForGroup(db, group.id);
-  })) ?? [];
+  const groupEvents =
+    staticPayload?.events ??
+    ((await withDatabase(async (db) => {
+      return fetchPublicEventsForGroup(db, group.id);
+    })) ?? []);
 
   return (
     <div className="fn-public-container fn-page">

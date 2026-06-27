@@ -294,7 +294,7 @@ export const events = sqliteTable("events", {
    * 旧データの type 列に相当する分類項目をイベント単位で定義できる。
    */
   parts_json: text("parts_json"),
-  /** 公開イベント API（旧 api_endpoints 代替）。管理者が ON にするまで 0 */
+  /** 公開イベント API。管理者が ON にするまで 0 */
   public_api_enabled: integer("public_api_enabled").notNull().default(0),
   public_api_updated_at: integer("public_api_updated_at"),
 });
@@ -337,8 +337,6 @@ export const eventStaff = sqliteTable(
     internal_note: text("internal_note"),
     approved_by_user_id: text("approved_by_user_id"),
     approved_at: integer("approved_at"),
-    /** event_staff_permissions 統合先（JSON 配列） */
-    permission_keys_json: text("permission_keys_json"),
     created_at: integer("created_at")
       .notNull()
       .default(sql`(unixepoch())`),
@@ -492,10 +490,7 @@ export const videos = sqliteTable("videos", {
   scheduled_time: integer("scheduled_time"),
   /** 旧 soft 列・レガシーインポート由来の使用ソフト（JSON） */
   used_software_json: text("used_software_json"),
-  /**
-   * 表示クエリ向けの統計正本。0024 以降の新規表示クエリは videos.* を優先する。
-   * video_stats は score-recalc worker / 旧DB fallback 用に当面 dual-write で残す。
-   */
+  /** 表示クエリ向けの統計正本。 */
   app_like_count: integer("app_like_count").notNull().default(0),
   score: real("score").notNull().default(0),
   trending_view_count_24h: integer("trending_view_count_24h").notNull().default(0),
@@ -548,18 +543,6 @@ export const videoYoutubeMetadata = sqliteTable("video_youtube_metadata", {
     t.sync_status,
     t.synced_at,
   ),
-}));
-
-export const videoStats = sqliteTable("video_stats", {
-  video_id: text("video_id").primaryKey(),
-  app_view_count: integer("app_view_count").notNull().default(0),
-  app_like_count: integer("app_like_count").notNull().default(0),
-  trending_view_count_24h: integer("trending_view_count_24h").notNull().default(0),
-  score: real("score").notNull().default(0),
-  updated_at: integer("updated_at").notNull(),
-}, (t) => ({
-  byScore: index("video_stats_score_idx").on(t.score),
-  byTrending: index("video_stats_trending_idx").on(t.trending_view_count_24h),
 }));
 
 export const videoModerationCases = sqliteTable("video_moderation_cases", {
@@ -768,13 +751,6 @@ export const systemSettings = sqliteTable("system_settings", {
   cost_guard_updated_at: integer("cost_guard_updated_at"),
   cost_guard_exception_until: integer("cost_guard_exception_until"),
   cost_guard_exception_features_json: text("cost_guard_exception_features_json"),
-});
-
-export const apiEndpoints = sqliteTable("api_endpoints", {
-  id: text("id").primaryKey(),
-  event_id: text("event_id").notNull(),
-  is_active: integer("is_active").default(1),
-  created_at: integer("created_at").notNull(),
 });
 
 export const xIdMergeRequests = sqliteTable("x_id_merge_requests", {

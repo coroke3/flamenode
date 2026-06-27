@@ -68,7 +68,6 @@ export const SPREADSHEET_TABLE_OVERRIDES: Record<string, SpreadsheetTableOverrid
       group: "作品",
       mode: "editable",
     },
-    video_stats: { label: "作品統計", group: "作品", mode: "editable" },
     video_moderation_cases: {
       label: "モデレーション",
       group: "作品",
@@ -88,7 +87,6 @@ export const SPREADSHEET_TABLE_OVERRIDES: Record<string, SpreadsheetTableOverrid
     software_aliases: { label: "ソフト別名", group: "マスタ", mode: "editable" },
 
     announcements: { label: "お知らせ", group: "公開", mode: "editable" },
-    api_endpoints: { label: "公開 API (deprecated)", group: "公開", mode: "readonly" },
     terms_versions: { label: "利用規約", group: "公開", mode: "editable" },
     user_tos_consents: { label: "規約同意", group: "公開", mode: "readonly" },
 
@@ -165,7 +163,6 @@ function inferGroup(table: string): string {
   if (table.startsWith("software")) return "マスタ";
   if (
     table === "announcements" ||
-    table === "api_endpoints" ||
     table === "terms_versions" ||
     table === "user_tos_consents"
   ) {

@@ -8,7 +8,6 @@ import { withDatabase } from "@/lib/cloudflare";
 import {
   videoMembers,
   videos,
-  videoStats,
   xUsers,
 } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
@@ -189,7 +188,6 @@ export default async function UserPage({
     const ownVideosRaw = await db
       .select(ownVideoSelect)
       .from(videos)
-      .leftJoin(videoStats, eq(videoStats.video_id, videos.id))
       .where(ownWhere)
       .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
       .limit(worksPaging.pageSize)
@@ -233,7 +231,6 @@ export default async function UserPage({
       .from(videos)
       .innerJoin(videoMembers, eq(videos.id, videoMembers.video_id))
       .leftJoin(xUsers, sql`lower(${xUsers.id}) = lower(${videos.creator_x_user_id})`)
-      .leftJoin(videoStats, eq(videoStats.video_id, videos.id))
       .where(collabWhere)
       .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
       .limit(collabPaging.pageSize)

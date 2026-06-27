@@ -16,11 +16,9 @@ const IDS_PATH = path.join(ROOT, "cloudflare", "ids.json");
 
 const WRANGLER_FILES = [
   "wrangler.toml",
-  "workers/json-generator/wrangler.toml",
-  "workers/cleanup/wrangler.toml",
-  "workers/youtube-sync/wrangler.toml",
-  "workers/score-recalc/wrangler.toml",
-  "workers/notification-dispatcher/wrangler.toml",
+  "workers/fast-jobs/wrangler.toml",
+  "workers/content-jobs/wrangler.toml",
+  "workers/sync-jobs/wrangler.toml",
 ];
 
 const D1_ZERO = "00000000-0000-0000-0000-000000000000";

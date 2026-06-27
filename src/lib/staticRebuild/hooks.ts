@@ -1,7 +1,12 @@
 import "server-only";
 import { eq, inArray } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
-import { videoEvents, videos } from "@/lib/db/schema";
+import {
+  eventGroupEvents,
+  eventGroups,
+  videoEvents,
+  videos,
+} from "@/lib/db/schema";
 import { enqueueStaticRebuild, enqueueStaticRebuildMany } from "./enqueue";
 import type { EnqueueStaticRebuildInput, StaticRebuildPriority } from "./types";
 
@@ -172,7 +177,7 @@ export async function enqueueAfterEventSettingsChange(
   db: DB,
   opts: HookBase & { eventId: string },
 ): Promise<void> {
-  await enqueueStaticRebuildMany(db, [
+  const items: EnqueueStaticRebuildInput[] = [
     {
       targetType: "event",
       targetId: opts.eventId,
@@ -187,12 +192,34 @@ export async function enqueueAfterEventSettingsChange(
       priority: "low",
     },
     {
+      targetType: "groups_index",
+      targetId: "global",
+      reason: opts.reason,
+      priority: "low",
+    },
+    {
       targetType: "search_index",
       targetId: "global",
       reason: opts.reason,
       priority: "low",
     },
-  ]);
+  ];
+
+  const groups = await db
+    .select({ slug: eventGroups.slug })
+    .from(eventGroupEvents)
+    .innerJoin(eventGroups, eq(eventGroups.id, eventGroupEvents.event_group_id))
+    .where(eq(eventGroupEvents.event_id, opts.eventId));
+  for (const group of groups) {
+    items.push({
+      targetType: "event_group",
+      targetId: group.slug,
+      reason: opts.reason,
+      priority: "normal",
+    });
+  }
+
+  await enqueueStaticRebuildMany(db, items);
 }
 
 /** 手動再生成（管理画面） */

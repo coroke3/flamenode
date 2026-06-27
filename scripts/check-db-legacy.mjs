@@ -39,24 +39,22 @@ const PREFIX_ALLOW = [
 /** 削除予定テーブルへの新規書き込みを検出（段階的に allowlist を縮小する） */
 const DB_REDUCTION_RULES = [
   {
-    id: "video-stats-insert",
-    label: "video_stats への insert（videos 統計列へ移行中）",
-    pattern: /\.insert\s*\(\s*videoStats\s*\)/g,
-    prefixAllow: [
-      ...PREFIX_ALLOW,
-      "src/lib/actions/video.ts",
-      "src/lib/db/",
-      "src/lib/admin/healthChecks.ts",
-    ],
+    id: "video-stats-usage",
+    label: "video_stats / videoStats usage after DB reduction",
+    pattern: /\b(videoStats|video_stats)\b/g,
+    prefixAllow: PREFIX_ALLOW,
   },
   {
-    id: "event-staff-permissions-insert",
-    label: "event_staff_permissions への insert（permission_keys_json へ移行中）",
-    pattern: /\.insert\s*\(\s*eventStaffPermissions\s*\)/g,
-    prefixAllow: [
-      ...PREFIX_ALLOW,
-      "src/lib/actions/event-staff-admin.ts",
-    ],
+    id: "api-endpoints-usage",
+    label: "api_endpoints / apiEndpoints usage after DB reduction",
+    pattern: /\b(apiEndpoints|api_endpoints)\b/g,
+    prefixAllow: PREFIX_ALLOW,
+  },
+  {
+    id: "permission-keys-json-usage",
+    label: "event_staff.permission_keys_json usage after permission normalization",
+    pattern: /\bpermission_keys_json\b/g,
+    prefixAllow: PREFIX_ALLOW,
   },
   {
     id: "video-softwares-write",

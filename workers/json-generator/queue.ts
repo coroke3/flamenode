@@ -47,7 +47,7 @@ export async function processStaticRebuildQueue(env: Env): Promise<{
     sql += ` AND priority = 'high'`;
   }
   if (mode === "read_only") {
-    sql += ` AND target_type IN ('event', 'video', 'user')`;
+    sql += ` AND target_type IN ('event', 'event_group', 'video', 'user')`;
   }
   sql += `
     ORDER BY
@@ -69,7 +69,11 @@ export async function processStaticRebuildQueue(env: Env): Promise<{
     try {
       if (
         mode === "economy" &&
-        (row.target_type === "search_index" || row.target_type === "list_popular") &&
+        (
+          row.target_type === "search_index" ||
+          row.target_type === "list_popular" ||
+          row.target_type === "groups_index"
+        ) &&
         row.priority !== "high"
       ) {
         await markDone(env, row.id, now);

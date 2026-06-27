@@ -9,13 +9,14 @@ import { canEditVideo } from "@/lib/auth/ownership";
 import { writeGuard, type WriteGuardDenyReason } from "@/lib/auth/writeGuard";
 import {
   events as eventsTable,
+  eventCustomQuestions,
   historyLogs,
   slots,
   videos,
   videoEvents,
   videoInteractions,
   videoMembers,
-  videoStats,
+  videoCustomAnswers,
   videoYoutubeMetadata,
   xUsers,
   xUserIcons,
@@ -403,18 +404,6 @@ async function ensureVideoDerivedRows(
   },
 ): Promise<void> {
   await db
-    .insert(videoStats)
-    .values({
-      video_id: args.videoId,
-      app_view_count: 0,
-      app_like_count: 0,
-      trending_view_count_24h: 0,
-      score: 0,
-      updated_at: args.now,
-    })
-    .onConflictDoNothing();
-
-  await db
     .insert(videoYoutubeMetadata)
     .values({
       video_id: args.videoId,
@@ -433,6 +422,70 @@ async function ensureVideoDerivedRows(
       updated_at: args.now,
     })
     .where(eq(videoYoutubeMetadata.video_id, args.videoId));
+}
+
+/** Syncs stage-permission answers into normalized custom answer rows. */
+async function replaceStagePermissionCustomAnswers(
+  db: NonNullable<ReturnType<typeof getDatabase>>,
+  args: {
+    videoId: string;
+    eventIds: string[];
+    stagePermission: string | null;
+    now: number;
+  },
+): Promise<void> {
+  const eventIds = Array.from(new Set(args.eventIds.filter(Boolean)));
+  if (eventIds.length === 0) return;
+
+  await db
+    .delete(videoCustomAnswers)
+    .where(
+      and(
+        eq(videoCustomAnswers.video_id, args.videoId),
+        inArray(videoCustomAnswers.event_id, eventIds),
+      )!,
+    );
+
+  const submitted = new Map(
+    parseStagePermissionAnswers(args.stagePermission).map((answer) => [
+      answer.id,
+      answer.value,
+    ]),
+  );
+  if (submitted.size === 0) return;
+
+  const questions = await db
+    .select({
+      id: eventCustomQuestions.id,
+      event_id: eventCustomQuestions.event_id,
+      question_key: eventCustomQuestions.question_key,
+    })
+    .from(eventCustomQuestions)
+    .where(
+      and(
+        inArray(eventCustomQuestions.event_id, eventIds),
+        eq(eventCustomQuestions.is_active, 1),
+      )!,
+    );
+
+  const values = questions
+    .map((question) => {
+      const value = submitted.get(question.question_key)?.trim();
+      if (!value) return null;
+      return {
+        video_id: args.videoId,
+        event_id: question.event_id,
+        question_id: question.id,
+        answer_text: value,
+        answer_json: null,
+        created_at: args.now,
+        updated_at: args.now,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+
+  if (values.length === 0) return;
+  await db.insert(videoCustomAnswers).values(values).onConflictDoNothing();
 }
 
 /**
@@ -460,7 +513,7 @@ async function syncVideoEvents(
     alwaysInclude?: string[];
     user: { id: string; role?: string | null };
   },
-): Promise<void> {
+): Promise<string[]> {
   const requested = args.requested;
   const alwaysInclude = args.alwaysInclude ?? [];
   const user = args.user;
@@ -529,6 +582,7 @@ async function syncVideoEvents(
         .onConflictDoNothing();
     }
   }
+  return target;
 }
 
 /**
@@ -807,9 +861,15 @@ export async function createFreeVideo(
 
   // 所属イベント (video_events) を differential に同期する。
   // free 投稿でも複数イベントに紐付けできる。primary_event_id は別途扱う。
-  await syncVideoEvents(db, id, {
+  const syncedEventIds = await syncVideoEvents(db, id, {
     requested: requestedEventIds,
     user: { id: userId, role: sessionUser.role ?? null },
+  });
+  await replaceStagePermissionCustomAnswers(db, {
+    videoId: id,
+    eventIds: syncedEventIds,
+    stagePermission,
+    now,
   });
 
   // 投稿主体 X ID の作品アイコン候補に追加する (今回の作品アイコンが空でなければ)。
@@ -1051,10 +1111,16 @@ export async function submitSlotVideo(
     now,
   });
   await replaceVideoSoftwareLabels(db, videoId, parsed.data.used_software ?? null);
-  await syncVideoEvents(db, videoId, {
+  const syncedEventIds = await syncVideoEvents(db, videoId, {
     requested: requestedEventIds,
     alwaysInclude: [slotRow.event_id],
     user: { id: userId, role: sessionUser.role ?? null },
+  });
+  await replaceStagePermissionCustomAnswers(db, {
+    videoId,
+    eventIds: syncedEventIds,
+    stagePermission,
+    now,
   });
 
   const members = parsed.data.is_collab
@@ -1453,6 +1519,21 @@ export async function updateVideo(
       requested: requestedEventIds,
       alwaysInclude,
       user: { id: sessionUser.id, role: sessionUser.role ?? null },
+    });
+  }
+
+  if (canEditDescriptions) {
+    const currentEventIds = (
+      await db
+        .select({ event_id: videoEvents.event_id })
+        .from(videoEvents)
+        .where(eq(videoEvents.video_id, videoId))
+    ).map((row) => row.event_id);
+    await replaceStagePermissionCustomAnswers(db, {
+      videoId,
+      eventIds: currentEventIds,
+      stagePermission: nextStagePermission,
+      now,
     });
   }
 

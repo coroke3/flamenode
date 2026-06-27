@@ -171,7 +171,10 @@ git push origin main
 
 ## 3. Worker 運用
 
-`workers/` 配下の 5 つの Cloudflare Workers はそれぞれ独立した cron で動く。
+Current production Cron Workers are `fast-jobs`, `content-jobs`, and `sync-jobs`.
+Legacy standalone worker directories are kept as importable modules only.
+
+`workers/fast-jobs`、`workers/content-jobs`、`workers/sync-jobs` の3つの Cron Workers が動く。
 
 | Worker | cron | 用途 | 必須環境変数 |
 |---|---|---|---|

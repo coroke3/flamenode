@@ -498,30 +498,6 @@ export async function runIntegrityChecks(
     }),
     makeCheck({
       db,
-      id: "derived_missing_video_stats",
-      area: "derived rows",
-      title: "video_stats 派生行欠落",
-      severity: "warning",
-      description: "videos に対応する video_stats が存在しない作品。",
-      from: sql`videos`,
-      where: sql`NOT EXISTS (SELECT 1 FROM video_stats vs WHERE vs.video_id = videos.id)`,
-      sampleSelect: {
-        id: sql<string>`id`,
-        title: sql<string>`title`,
-      },
-      recommendation:
-        "動画保存時の派生行作成漏れの可能性があります。ensureVideoDerivedRows 相当の処理で作成してください。",
-      sqlPreview:
-        "INSERT INTO video_stats (video_id, updated_at) VALUES ('<video_id>', unixepoch());",
-      mapIssue: (r) => ({
-        id: text(r.id),
-        title: text(r.title),
-        description: "video_stats がありません。",
-        adminHref: videoHref(text(r.id)),
-      }),
-    }),
-    makeCheck({
-      db,
       id: "derived_missing_youtube_metadata",
       area: "derived rows",
       title: "video_youtube_metadata 派生行欠落",

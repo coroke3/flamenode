@@ -20,6 +20,7 @@ import {
 import {
   events,
   eventStaff,
+  eventStaffPermissions,
   historyLogs,
   videoEvents,
   videoMembers,
@@ -44,7 +45,7 @@ import {
   type ImportedEventFlags,
   type LegacyImportMode,
   legacyImportDbReductionNotes,
-  legacyStaffPermissionKeysJson,
+  legacyStaffPermissionKeys,
   planStaticRebuildEnqueues,
   staticRebuildTargetLabels,
   type StaticRebuildStrategy,
@@ -871,6 +872,20 @@ async function upsertEventEditors(
   if (editors.length === 0) return;
 
   if (mode === "update") {
+    const staffRows = await db
+      .select({ id: eventStaff.id })
+      .from(eventStaff)
+      .where(eq(eventStaff.event_id, eventId));
+    if (staffRows.length > 0) {
+      await db
+        .delete(eventStaffPermissions)
+        .where(
+          inArray(
+            eventStaffPermissions.event_staff_id,
+            staffRows.map((row) => row.id),
+          ),
+        );
+    }
     await db.delete(eventStaff).where(eq(eventStaff.event_id, eventId));
   }
 
@@ -892,6 +907,9 @@ async function upsertEventEditors(
           )[0]
         : undefined;
       if (existing) continue;
+      const permissionKeys = legacyStaffPermissionKeys(
+        ed.is_representative_candidate,
+      );
 
       await db
         .insert(eventStaff)
@@ -907,11 +925,25 @@ async function upsertEventEditors(
           internal_note: null,
           approved_by_user_id: null,
           approved_at: null,
-          permission_keys_json: legacyStaffPermissionKeysJson(
-            ed.is_representative_candidate,
-          ),
         })
         .onConflictDoNothing();
+
+      if (permissionKeys.length > 0) {
+        const now = Math.floor(Date.now() / 1000);
+        await db
+          .insert(eventStaffPermissions)
+          .values(
+            permissionKeys.map((permissionKey) => ({
+              id: `legacy_esp_${staffId}_${permissionKey.replace(/[^a-z0-9_.-]+/gi, "_")}`,
+              event_staff_id: staffId,
+              permission_key: permissionKey,
+              allowed: 1,
+              created_at: now,
+              updated_at: now,
+            })),
+          )
+          .onConflictDoNothing();
+      }
     } catch (e) {
       console.warn(
         "[legacy-import] event_staff insert skipped",

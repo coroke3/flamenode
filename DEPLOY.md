@@ -1,5 +1,17 @@
 # FlameNode デプロイ手順書
 
+## Current Worker Layout
+
+Cron Workers are consolidated into 3 deployments:
+
+| Worker | Cron | Config |
+| --- | --- | --- |
+| `flamenode-fast-jobs` | `*/5 * * * *` | `workers/fast-jobs/wrangler.toml` |
+| `flamenode-content-jobs` | `*/15 * * * *` | `workers/content-jobs/wrangler.toml` |
+| `flamenode-sync-jobs` | `0 */12 * * *` | `workers/sync-jobs/wrangler.toml` |
+
+Legacy standalone worker directories are import modules only. Do not deploy them directly.
+
 このドキュメントは、FlameNode を Cloudflare の無料枠を中心に本番運用へ載せるために、**あなた自身が手元で実行する必要のある操作**を時系列でまとめたものです。
 コードや設計図はすべてリポジトリに揃っています。ここに書かれているのは、**Cloudflare アカウント側 / Discord Developer Portal 側 / シェル上で行う 1 回〜数回の操作**だけです。
 

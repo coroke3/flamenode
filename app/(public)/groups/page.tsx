@@ -2,7 +2,11 @@ import * as React from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { withDatabase } from "@/lib/cloudflare";
-import { fetchPublicEventGroups } from "@/lib/db/eventGroups";
+import {
+  fetchPublicEventGroups,
+  type PublicEventGroupCard,
+} from "@/lib/db/eventGroups";
+import { readStaticJson } from "@/lib/publicData/staticJson";
 
 export const metadata: Metadata = {
   title: "イベントグループ",
@@ -26,9 +30,17 @@ export default async function GroupsPage({
   const sp = (await searchParams) ?? {};
   const typeFilter = sp.type && GROUP_TYPE_LABELS[sp.type] ? sp.type : "all";
 
-  const groups = (await withDatabase(async (db) => {
-    return fetchPublicEventGroups(db, { type: typeFilter });
-  })) ?? [];
+  const staticPayload = await readStaticJson<{
+    items: PublicEventGroupCard[];
+  }>("groups/index.json");
+  const staticGroups = staticPayload?.items ?? null;
+  const groups = staticGroups
+    ? staticGroups.filter((group) =>
+        typeFilter === "all" ? true : group.group_type === typeFilter,
+      )
+    : ((await withDatabase(async (db) => {
+        return fetchPublicEventGroups(db, { type: typeFilter });
+      })) ?? []);
 
   return (
     <div className="fn-public-container fn-page">

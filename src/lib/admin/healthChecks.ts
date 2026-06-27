@@ -3,11 +3,6 @@ import "server-only";
 import { and, desc, eq, gte, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import {
-  isMissingColumnError,
-  isMissingTableError,
-} from "@/lib/db/queryFallback";
-import {
-  apiEndpoints as apiEndpointsTable,
   costUsageSnapshots as costUsageSnapshotsTable,
   events as eventsTable,
   historyLogs as historyLogsTable,
@@ -18,7 +13,6 @@ import {
   videoEvents as videoEventsTable,
   videoInteractions as videoInteractionsTable,
   videoModerationCases as videoModerationCasesTable,
-  videoStats,
   videoYoutubeMetadata as videoYoutubeMetadataTable,
   videos as videosTable,
   xIdMergeRequests as xIdMergeRequestsTable,
@@ -340,32 +334,14 @@ const LIKE_COUNT_DRIFT_RATIO = 0.05;
 async function loadVideosWithStoredLikes(
   db: AnyDb,
 ): Promise<{ id: string; like_count: number }[]> {
-  try {
-    const rows = await db
-      .select({
-        id: videosTable.id,
-        like_count: videosTable.app_like_count,
-      })
-      .from(videosTable)
-      .where(gte(videosTable.app_like_count, 1));
-    return rows.map((r) => ({ id: r.id, like_count: r.like_count ?? 0 }));
-  } catch (err) {
-    if (!isMissingColumnError(err, "app_like_count")) throw err;
-  }
-
-  try {
-    const rows = await db
-      .select({ id: videoStats.video_id, like_count: videoStats.app_like_count })
-      .from(videoStats)
-      .where(gte(videoStats.app_like_count, 1));
-    return rows.map((r) => ({
-      id: r.id,
-      like_count: r.like_count ?? 0,
-    }));
-  } catch (err) {
-    if (isMissingTableError(err, "video_stats")) return [];
-    throw err;
-  }
+  const rows = await db
+    .select({
+      id: videosTable.id,
+      like_count: videosTable.app_like_count,
+    })
+    .from(videosTable)
+    .where(gte(videosTable.app_like_count, 1));
+  return rows.map((r) => ({ id: r.id, like_count: r.like_count ?? 0 }));
 }
 
 async function checkLikeCountDrift(db: AnyDb): Promise<HealthCheckResult> {
@@ -432,52 +408,19 @@ async function checkLikeCountDrift(db: AnyDb): Promise<HealthCheckResult> {
   };
 }
 
-/** videos に対応する video_stats が存在するか（0024+ では videos 統計列を正本としスキップ可） */
+/** videos statistic columns are canonical. */
 async function checkMissingVideoStats(
-  db: AnyDb,
+  _db: AnyDb,
 ): Promise<HealthCheckResult> {
-  try {
-    const where = isNull(videoStats.video_id);
-    const [countRows, sampleRows] = await Promise.all([
-      db
-        .select({ c: sql<number>`COUNT(*)` })
-        .from(videosTable)
-        .leftJoin(videoStats, eq(videoStats.video_id, videosTable.id))
-        .where(where),
-      db
-        .select({ id: videosTable.id })
-        .from(videosTable)
-        .leftJoin(videoStats, eq(videoStats.video_id, videosTable.id))
-        .where(where)
-        .limit(10),
-    ]);
-    const count = Number(countRows[0]?.c ?? 0);
-    return {
-      id: "missing_video_stats",
-      label: "video_stats 派生行不足",
-      status: count === 0 ? "ok" : "warn",
-      count,
-      samples: sampleRows.slice(0, 5).map((r) => r.id),
-      note:
-        count > 0
-          ? "動画保存時の派生行作成漏れの可能性があります。ensureVideoDerivedRows 相当の処理で補完してください。"
-          : undefined,
-    };
-  } catch (err) {
-    if (isMissingTableError(err, "video_stats")) {
-      return {
-        id: "missing_video_stats",
-        label: "video_stats 派生行不足",
-        status: "info",
-        count: 0,
-        samples: [],
-        note: "videos の統計列を正本とする DB のため、このチェックはスキップしました。",
-      };
-    }
-    throw err;
-  }
+  return {
+    id: "video_statistics_columns",
+    label: "video statistics columns",
+    status: "ok",
+    count: 0,
+    samples: [],
+    note: "videos.score and videos.app_like_count are canonical.",
+  };
 }
-
 /** videos に対応する video_youtube_metadata が存在するか */
 async function checkMissingVideoYoutubeMetadata(
   db: AnyDb,
@@ -777,43 +720,19 @@ async function checkOpenModerationCasesOverdue(
   };
 }
 
-/** api_endpoints は deprecated。events.public_api_enabled を正本とする。 */
+/** events.public_api_enabled is canonical for public API exposure. */
 async function checkActiveApiEndpointsOrphanEvent(
-  db: AnyDb,
+  _db: AnyDb,
 ): Promise<HealthCheckResult> {
-  try {
-    const where = and(eq(apiEndpointsTable.is_active, 1), isNull(eventsTable.id));
-    const [countRows] = await Promise.all([
-      db
-        .select({ c: sql<number>`COUNT(*)` })
-        .from(apiEndpointsTable)
-        .leftJoin(eventsTable, eq(eventsTable.id, apiEndpointsTable.event_id))
-        .where(where),
-    ]);
-    const count = Number(countRows[0]?.c ?? 0);
-    return {
-      id: "active_api_endpoints_orphan_event",
-      label: "api_endpoints 有効 endpoint の event 参照 (deprecated)",
-      status: count === 0 ? "ok" : "warn",
-      count,
-      samples: [],
-      note:
-        count > 0
-          ? "api_endpoints は deprecated です。events.public_api_enabled に移行してください。"
-          : "api_endpoints は deprecated です。events.public_api_enabled を正本としてください。",
-    };
-  } catch {
-    return {
-      id: "active_api_endpoints_orphan_event",
-      label: "api_endpoints 有効 endpoint の event 参照 (deprecated)",
-      status: "ok",
-      count: 0,
-      samples: [],
-      note: "api_endpoints テーブルが存在しない場合はこのチェックはスキップされます。",
-    };
-  }
+  return {
+    id: "public_api_event_flag",
+    label: "public API event flag",
+    status: "ok",
+    count: 0,
+    samples: [],
+    note: "events.public_api_enabled is canonical.",
+  };
 }
-
 /** x_id_merge_requests の pending が放置されていないか */
 async function checkXIdMergePendingStale(
   db: AnyDb,

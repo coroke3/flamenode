@@ -9,7 +9,6 @@ import {
   events as eventsTable,
   slots as slotsTable,
   videoChapters as videoChaptersTable,
-  videoStats,
   videoYoutubeMetadata,
   videos as videosTable,
   xUsers as xUsersTable,
@@ -144,13 +143,12 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
       if (approvedXIds.length > 0) {
         const aggRows = await db
           .select({
-            likes: sql<number>`COALESCE(SUM(${videoStats.app_like_count}),0)`,
+            likes: sql<number>`COALESCE(SUM(${videosTable.app_like_count}),0)`,
             views: sql<number>`COALESCE(SUM(${videoYoutubeMetadata.view_count}),0)`,
             c: sql<number>`COUNT(*)`,
             ec: sql<number>`COUNT(${videosTable.primary_event_id})`,
           })
           .from(videosTable)
-          .leftJoin(videoStats, eq(videoStats.video_id, videosTable.id))
           .leftJoin(
             videoYoutubeMetadata,
             eq(videoYoutubeMetadata.video_id, videosTable.id),

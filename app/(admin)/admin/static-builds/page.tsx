@@ -68,8 +68,10 @@ export default async function AdminStaticBuildsPage(): Promise<React.ReactElemen
             target_type
             <select name="target_type" className="fn-select" defaultValue="event">
               <option value="top">top</option>
+              <option value="groups_index">groups_index</option>
               <option value="events_index">events_index</option>
               <option value="event">event</option>
+              <option value="event_group">event_group</option>
               <option value="video">video</option>
               <option value="user">user</option>
               <option value="list_recent">list_recent</option>

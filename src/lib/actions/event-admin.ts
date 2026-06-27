@@ -6,12 +6,20 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import { assertCanEditEvent } from "@/lib/auth/ownership";
-import { eventTemplates, events, historyLogs } from "@/lib/db/schema";
+import {
+  eventCustomQuestions,
+  eventTemplates,
+  events,
+  historyLogs,
+} from "@/lib/db/schema";
 import { parseEventTemplateSnapshot } from "@/lib/admin/eventTemplateSettings";
 import { parseJstDatetimeLocal } from "@/lib/utils/dateInput";
 import { generateId } from "@/lib/utils/id";
 import { normalizeHttpUrl } from "@/lib/utils/url";
-import { DEFAULT_STAGE_PERMISSION_FIELD } from "@/lib/video/formSettings";
+import {
+  DEFAULT_STAGE_PERMISSION_FIELD,
+  resolveStagePermissionFieldsFromJson,
+} from "@/lib/video/formSettings";
 
 export interface EventActionResult {
   ok: boolean;
@@ -151,6 +159,43 @@ function buildVideoFormSettingsJson(
   });
 }
 
+async function syncStagePermissionCustomQuestions(
+  db: NonNullable<ReturnType<typeof getDatabase>>,
+  eventId: string,
+  videoFormSettingsJson: string,
+  now: number,
+): Promise<void> {
+  const fields = resolveStagePermissionFieldsFromJson([videoFormSettingsJson]);
+  await db
+    .delete(eventCustomQuestions)
+    .where(eq(eventCustomQuestions.event_id, eventId));
+
+  if (fields.length === 0) return;
+
+  await db
+    .insert(eventCustomQuestions)
+    .values(
+      fields.map((field, index) => ({
+        id: generateId("ecq"),
+        event_id: eventId,
+        question_key: field.id,
+        label: field.label,
+        description: field.description || null,
+        type: "textarea" as const,
+        required: field.required ? 1 : 0,
+        options_json: null,
+        placeholder: field.placeholder || null,
+        max_length: 1000,
+        sort_order: index,
+        is_active: 1,
+        visibility: "review" as const,
+        created_at: now,
+        updated_at: now,
+      })),
+    )
+    .onConflictDoNothing();
+}
+
 async function requireAdmin(): Promise<
   | { ok: true; userId: string }
   | { ok: false; result: EventActionResult }
@@ -204,6 +249,7 @@ export async function createEvent(
   )[0];
   if (dup) return { ok: false, message: `ID「${id}」は既に存在します。` };
 
+  const videoFormSettingsJson = buildVideoFormSettingsJson(formData, data);
   await db.insert(events).values({
     id,
     title: data.title,
@@ -218,7 +264,7 @@ export async function createEvent(
     allow_user_video_edits: data.allow_user_video_edits,
     user_video_edit_permission_keys_json:
       data.user_video_edit_permission_keys_json ?? null,
-    video_form_settings_json: buildVideoFormSettingsJson(formData, data),
+    video_form_settings_json: videoFormSettingsJson,
     start_time: parseDateInput(data.start_time),
     end_time: parseDateInput(data.end_time),
     entry_start_time: parseDateInput(data.entry_start_time),
@@ -236,6 +282,8 @@ export async function createEvent(
     created_at: now,
     updated_at: now,
   });
+
+  await syncStagePermissionCustomQuestions(db, id, videoFormSettingsJson, now);
 
   await db.insert(historyLogs).values({
     table_name: "events",
@@ -288,6 +336,7 @@ export async function updateEvent(
   }
 
   const now = Math.floor(Date.now() / 1000);
+  const videoFormSettingsJson = buildVideoFormSettingsJson(formData, data);
   await db
     .update(events)
     .set({
@@ -301,9 +350,9 @@ export async function updateEvent(
       is_archived: data.is_archived,
       allow_user_video_event_links: data.allow_user_video_event_links,
       allow_user_video_edits: data.allow_user_video_edits,
-    user_video_edit_permission_keys_json:
-      data.user_video_edit_permission_keys_json ?? null,
-      video_form_settings_json: buildVideoFormSettingsJson(formData, data),
+      user_video_edit_permission_keys_json:
+        data.user_video_edit_permission_keys_json ?? null,
+      video_form_settings_json: videoFormSettingsJson,
       start_time: parseDateInput(data.start_time),
       end_time: parseDateInput(data.end_time),
       entry_start_time: parseDateInput(data.entry_start_time),
@@ -317,6 +366,8 @@ export async function updateEvent(
       updated_at: now,
     })
     .where(eq(events.id, data.id));
+
+  await syncStagePermissionCustomQuestions(db, data.id, videoFormSettingsJson, now);
 
   await db.insert(historyLogs).values({
     table_name: "events",

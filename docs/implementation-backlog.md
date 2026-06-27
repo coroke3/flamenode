@@ -1,5 +1,7 @@
 # FlameNode 実装バックログ (Pre-Production Cleanup)
 
+> 2026-06-27 update: OperationMode, public API flag, DB reduction, event group static JSON, normalized custom question persistence, and Worker 3-cron deployment config are wired in code.
+
 最終更新: 2026-06-27
 
 ## 概要

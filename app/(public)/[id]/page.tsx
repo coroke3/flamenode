@@ -11,7 +11,6 @@ import { withDatabase } from "@/lib/cloudflare";
 import {
   videoInteractions,
   videos as videosTable,
-  videoStats,
   xUsers,
 } from "@/lib/db/schema";
 import {
@@ -123,15 +122,6 @@ export default async function VideoDetailPage({
     if (!detail) return null;
 
     const softwareLabel = await getVideoSoftwareLabel(db, detail.video.id);
-    const statsRow =
-      (
-        await db
-          .select()
-          .from(videoStats)
-          .where(eq(videoStats.video_id, detail.video.id))
-          .limit(1)
-      )[0] ?? null;
-
     const related = (await fetchRelatedVideos(
       db,
       {
@@ -246,7 +236,6 @@ export default async function VideoDetailPage({
       bookmarkActive,
       viewerXApproved,
       softwareLabel,
-      stats: statsRow,
       playlistLabel,
       playlistItems,
     };
@@ -260,7 +249,6 @@ export default async function VideoDetailPage({
     bookmarkActive,
     viewerXApproved,
     softwareLabel,
-    stats,
     playlistLabel,
     playlistItems,
   } = bundle;
@@ -447,9 +435,7 @@ export default async function VideoDetailPage({
                       videoId={video.id}
                       kind="like"
                       initialActive={likeActive}
-                      count={
-                        stats?.app_like_count ?? video.app_like_count ?? 0
-                      }
+                      count={video.app_like_count ?? 0}
                       canInteract={canInteract}
                     />
                     <InteractionButton

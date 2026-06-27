@@ -10,7 +10,7 @@ export type ImportedEventFlags = {
   is_archived: 0 | 1;
 };
 
-/** 旧インポートで event_staff.permission_keys_json に入れる代表者向けキー（危険キー除外） */
+/** 旧インポートで event_staff_permissions に入れる代表者向けキー（危険キー除外） */
 export const LEGACY_REPRESENTATIVE_PERMISSION_KEYS = [
   "event.basic",
   "event.slots",
@@ -184,14 +184,14 @@ export function staticRebuildTargetLabels(
 
 export function legacyImportDbReductionNotes(kind: "event" | "video"): string[] {
   const shared = [
-    "video_stats は作成しません（videos の統計列を使用）",
-    "api_endpoints は作成しません",
+    "動画統計テーブルは作成しません（videos の統計列を使用）",
+    "公開APIテーブルは作成しません（events.public_api_enabled を使用）",
     "announcements は作成しません",
   ];
   if (kind === "event") {
     return [
       ...shared,
-      "event_staff_permissions は作成しません（permission_keys_json に統合）",
+      "event_staff_permissions を作成します",
       "public_api_enabled は 0 のままです",
     ];
   }
@@ -226,11 +226,11 @@ export function importedStateLabel(flags: ImportedEventFlags): string {
   return "inactive";
 }
 
-export function legacyStaffPermissionKeysJson(
+export function legacyStaffPermissionKeys(
   isRepresentativeCandidate: boolean,
-): string {
+): string[] {
   const keys = isRepresentativeCandidate
     ? filterSafePermissionKeys(LEGACY_REPRESENTATIVE_PERMISSION_KEYS)
     : [...LEGACY_BASIC_STAFF_PERMISSION_KEYS];
-  return JSON.stringify(keys);
+  return keys;
 }
