@@ -53,7 +53,7 @@ export async function CostGuardBanner(): Promise<React.ReactElement | null> {
     const rows = await db.select().from(systemSettings).limit(1);
     const r = rows[0];
     if (r) {
-      mode = (r.cost_guard_mode ?? "normal") as Mode;
+      mode = (r.operation_mode ?? r.cost_guard_mode ?? "normal") as Mode;
       maintenance = r.is_maintenance_mode ?? 0;
       reason = r.cost_guard_reason ?? null;
     }
@@ -61,8 +61,9 @@ export async function CostGuardBanner(): Promise<React.ReactElement | null> {
     return null;
   }
 
-  // is_maintenance_mode が立っていれば maintenance バナーを優先表示
-  const effectiveMode: Mode = maintenance === 1 ? "maintenance" : mode;
+  // 旧DB互換: operation_mode が未移行で maintenance flag だけ立っている場合を救済する。
+  const effectiveMode: Mode =
+    mode === "normal" && maintenance === 1 ? "maintenance" : mode;
   if (effectiveMode === "normal") return null;
   const tone = TONE[effectiveMode];
 

@@ -153,7 +153,7 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
         moderationOverdue: Number(moderationOverdue[0]?.c ?? 0),
         reservedOpenSlots: Number(reservedOpenSlots[0]?.c ?? 0),
       };
-      mode = sys[0]?.cost_guard_mode ?? "normal";
+      mode = sys[0]?.operation_mode ?? sys[0]?.cost_guard_mode ?? "normal";
       isMaintenance = sys[0]?.is_maintenance_mode ?? 0;
     } catch (err) {
       console.error("[AdminTopPage] fetch failed", err);

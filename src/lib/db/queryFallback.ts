@@ -46,10 +46,7 @@ export function isMissingTableError(err: unknown, tableName: string): boolean {
 }
 
 function isScoreQueryCompatError(err: unknown): boolean {
-  return (
-    isMissingColumnError(err, "score") ||
-    isMissingTableError(err, "video_stats")
-  );
+  return isMissingColumnError(err, "score");
 }
 
 export async function withMissingColumnFallback<T>(
@@ -64,7 +61,7 @@ export async function withMissingColumnFallback<T>(
   }
 }
 
-/** videos.score (0024+) が無い、または video_stats 廃止後の DB 向けフォールバック。 */
+/** Fallback for old databases that do not have videos.score yet. */
 export async function withVideoScoreFallback<T>(
   run: (hasScoreColumn: boolean) => Promise<T>,
 ): Promise<T> {

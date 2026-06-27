@@ -1,28 +1,27 @@
-import * as React from "react";import { FnTable } from "@/components/ui/FnTable";
-
+import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { desc, eq } from "drizzle-orm";
-import { getDatabase } from "@/lib/cloudflare";
-import {
-  apiEndpoints,
-  events as eventsTable,
-  videoEvents as videoEventsTable,
-  videos as videosTable,
-} from "@/lib/db/schema";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { FnTable } from "@/components/ui/FnTable";
 import { Icon } from "@/components/ui/Icon";
-import {
-  createApiEndpoint,
-  setApiEndpointActive,
-} from "@/lib/actions/api-endpoints";
 import {
   buildEventApiPayload,
   EVENT_API_VIDEO_LIMIT,
 } from "@/lib/api/eventEndpointPayload";
+import {
+  createApiEndpoint,
+  setApiEndpointActive,
+} from "@/lib/actions/api-endpoints";
+import { getDatabase } from "@/lib/cloudflare";
+import {
+  events as eventsTable,
+  videoEvents as videoEventsTable,
+  videos as videosTable,
+} from "@/lib/db/schema";
 import { formatUnix } from "@/lib/utils/format";
 
-export const metadata: Metadata = { title: "公開API管理" };
+export const metadata: Metadata = { title: "Public API management" };
 export const dynamic = "force-dynamic";
 
 async function createApiEndpointAction(formData: FormData): Promise<void> {
@@ -52,17 +51,17 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
   if (db) {
     rows = await db
       .select({
-        id: apiEndpoints.id,
-        event_id: apiEndpoints.event_id,
-        is_active: apiEndpoints.is_active,
-        created_at: apiEndpoints.created_at,
+        id: eventsTable.id,
+        event_id: eventsTable.id,
+        is_active: eventsTable.public_api_enabled,
+        created_at: eventsTable.created_at,
         event_title: eventsTable.title,
         event_active: eventsTable.is_active,
         event_archived: eventsTable.is_archived,
       })
-      .from(apiEndpoints)
-      .leftJoin(eventsTable, eq(eventsTable.id, apiEndpoints.event_id))
-      .orderBy(desc(apiEndpoints.created_at))
+      .from(eventsTable)
+      .where(eq(eventsTable.public_api_enabled, 1))
+      .orderBy(desc(eventsTable.created_at))
       .limit(100);
 
     eventOptions = await db
@@ -110,8 +109,8 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
   return (
     <div>
       <AdminPageHeader
-        title="公開API管理"
-        description="イベントごとの軽量な公開 API endpoint を管理します。URL を知っている相手だけが使う MVP 形で、レスポンスは短期キャッシュ前提です。"
+        title="Public API management"
+        description="Enable or disable the public event API with events.public_api_enabled as the source of truth."
       />
 
       <section
@@ -124,11 +123,11 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
         }}
       >
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
-          endpoint 作成
+          Enable event API
         </h2>
         <form action={createApiEndpointAction} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <select name="event_id" className="fn-select" required>
-            <option value="">イベントを選択</option>
+            <option value="">Select event</option>
             {eventOptions.map((event) => (
               <option key={event.id} value={event.id}>
                 {event.title} ({event.id})
@@ -137,12 +136,12 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
           </select>
           <button type="submit" className="fn-btn fn-btn-primary">
             <Icon name="plus" size={13} aria-hidden />
-            作成 / 有効化
+            Enable
           </button>
         </form>
         <p className="fn-muted fn-text-sm" style={{ marginTop: 10 }}>
-          返す情報は event id / title / 短縮説明 / active 状態 / public videos の最小情報のみです。
-          1 endpoint の動画は最大 {EVENT_API_VIDEO_LIMIT} 件、Cache-Control は 5〜10分です。
+          The public response includes only event basics and public video summaries. Each endpoint returns up to{" "}
+          {EVENT_API_VIDEO_LIMIT} videos.
         </p>
       </section>
 
@@ -150,34 +149,25 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
         <FnTable>
           <thead>
             <tr>
-              <th>状態</th>
-              <th>イベント</th>
-              <th>endpoint</th>
-              <th>作成</th>
+              <th>Status</th>
+              <th>Event</th>
+              <th>Endpoint</th>
+              <th>Created</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => {
               const href = `/api/event-endpoints/${encodeURIComponent(row.id)}`;
-              const active = row.is_active === 1 && row.event_title;
               return (
                 <tr key={row.id}>
                   <td>
-                    <span className={`fn-badge ${active ? "fn-badge-accent" : "fn-badge-soft"}`}>
-                      {active ? "有効" : "無効"}
-                    </span>
+                    <span className="fn-badge fn-badge-accent">Enabled</span>
                   </td>
                   <td>
-                    {row.event_title ? (
-                      <Link href={`/manage/events/${row.event_id}`}>
-                        {row.event_title}
-                      </Link>
-                    ) : (
-                      <span style={{ color: "var(--accent-danger)" }}>
-                        event 不明: {row.event_id}
-                      </span>
-                    )}
+                    <Link href={`/manage/events/${row.event_id}`}>
+                      {row.event_title ?? row.event_id}
+                    </Link>
                   </td>
                   <td style={{ fontFamily: "monospace", fontSize: 11 }}>
                     <Link href={href}>{href}</Link>
@@ -186,16 +176,9 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
                   <td>
                     <form action={setApiEndpointActiveAction}>
                       <input type="hidden" name="id" value={row.id} />
-                      <input
-                        type="hidden"
-                        name="is_active"
-                        value={row.is_active === 1 ? "0" : "1"}
-                      />
-                      <button
-                        type="submit"
-                        className={`fn-btn fn-btn-sm ${row.is_active === 1 ? "fn-btn-ghost" : "fn-btn-primary"}`}
-                      >
-                        {row.is_active === 1 ? "無効化" : "有効化"}
+                      <input type="hidden" name="is_active" value="0" />
+                      <button type="submit" className="fn-btn fn-btn-sm fn-btn-ghost">
+                        Disable
                       </button>
                     </form>
                   </td>
@@ -205,7 +188,7 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
             {rows.length === 0 ? (
               <tr>
                 <td colSpan={5} style={{ padding: 18, textAlign: "center" }}>
-                  <span className="fn-muted fn-text-sm">API endpoint はまだありません。</span>
+                  <span className="fn-muted fn-text-sm">No public event APIs are enabled.</span>
                 </td>
               </tr>
             ) : null}
@@ -223,7 +206,7 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
         }}
       >
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
-          APIプレビュー
+          API preview
         </h2>
         <pre
           style={{
@@ -238,8 +221,8 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
             preview ?? {
               event: {
                 id: "event_id",
-                title: "イベントタイトル",
-                explanation: "短縮された説明",
+                title: "Event title",
+                explanation: "Short event summary",
                 is_active: true,
                 is_entry_open: true,
                 is_archived: false,
@@ -247,9 +230,9 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
               videos: [
                 {
                   id: "video_id",
-                  title: "作品タイトル",
+                  title: "Video title",
                   scheduled_time: null,
-                  creator_display_name: "作者名",
+                  creator_display_name: "Creator",
                   youtube_video_id: "YouTube ID",
                 },
               ],

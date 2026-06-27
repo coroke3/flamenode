@@ -63,12 +63,15 @@ export async function handleLiveApiGet<T>(
 export async function liveApiAllowed(db: DB): Promise<boolean> {
   const row = (
     await db
-      .select({ cost_guard_mode: systemSettings.cost_guard_mode })
+      .select({
+        operation_mode: systemSettings.operation_mode,
+        cost_guard_mode: systemSettings.cost_guard_mode,
+      })
       .from(systemSettings)
       .where(eq(systemSettings.id, "default"))
       .limit(1)
   )[0];
-  const mode = row?.cost_guard_mode ?? "normal";
+  const mode = row?.operation_mode ?? row?.cost_guard_mode ?? "normal";
   return mode !== "static_only" && mode !== "maintenance";
 }
 

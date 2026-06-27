@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import { historyLogs, systemSettings } from "@/lib/db/schema";
+import type { OperationMode } from "@/lib/operationMode/types";
 
 export interface CostGuardResult {
   ok: boolean;
@@ -80,7 +81,9 @@ export async function setCostGuardMode(
   if (!db) return { ok: false, message: "DB に接続できません。" };
   const now = Math.floor(Date.now() / 1000);
   await upsertGlobal(db, {
+    operation_mode: mode,
     cost_guard_mode: mode,
+    is_maintenance_mode: mode === "maintenance" ? 1 : 0,
     cost_guard_reason: reason ?? null,
     cost_guard_updated_by_user_id: guard.userId,
     cost_guard_updated_at: now,
@@ -89,7 +92,7 @@ export async function setCostGuardMode(
     table_name: "system_settings",
     record_id: "global",
     action: "UPDATE",
-    after_data: JSON.stringify({ cost_guard_mode: mode, reason }),
+    after_data: JSON.stringify({ operation_mode: mode, reason }),
     operator_discord_id: guard.userId,
     retention_class: "long_audit",
     created_at: now,
@@ -108,12 +111,31 @@ export async function setMaintenanceMode(
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
   const now = Math.floor(Date.now() / 1000);
-  await upsertGlobal(db, { is_maintenance_mode: next });
+  const current = (
+    await db
+      .select({
+        operation_mode: systemSettings.operation_mode,
+        cost_guard_mode: systemSettings.cost_guard_mode,
+      })
+      .from(systemSettings)
+      .where(eq(systemSettings.id, "default"))
+      .limit(1)
+  )[0];
+  const currentMode = normalizeOperationMode(
+    current?.operation_mode ?? current?.cost_guard_mode,
+  );
+  const nextMode: OperationMode =
+    next === 1 ? "maintenance" : currentMode === "maintenance" ? "normal" : currentMode;
+  await upsertGlobal(db, {
+    operation_mode: nextMode,
+    cost_guard_mode: nextMode,
+    is_maintenance_mode: next === 1 ? 1 : 0,
+  });
   await db.insert(historyLogs).values({
     table_name: "system_settings",
     record_id: "global",
     action: "UPDATE",
-    after_data: JSON.stringify({ is_maintenance_mode: next }),
+    after_data: JSON.stringify({ operation_mode: nextMode, is_maintenance_mode: next }),
     operator_discord_id: guard.userId,
     retention_class: "long_audit",
     created_at: now,
@@ -121,6 +143,19 @@ export async function setMaintenanceMode(
   revalidatePath("/admin/cost-guard");
   revalidatePath("/admin");
   return { ok: true };
+}
+
+function normalizeOperationMode(value: string | null | undefined): OperationMode {
+  if (
+    value === "normal" ||
+    value === "economy" ||
+    value === "read_only" ||
+    value === "static_only" ||
+    value === "maintenance"
+  ) {
+    return value;
+  }
+  return "normal";
 }
 
 export async function setAutoCostGuard(

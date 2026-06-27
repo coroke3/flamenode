@@ -79,7 +79,7 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
     try {
       const rows = await db.select().from(systemSettings).limit(1);
       if (rows[0]) {
-        mode = (rows[0].cost_guard_mode ?? "normal") as CostGuardMode;
+        mode = (rows[0].operation_mode ?? rows[0].cost_guard_mode ?? "normal") as CostGuardMode;
         isMaintenance = rows[0].is_maintenance_mode ?? 0;
         autoEnabled = rows[0].auto_cost_guard_enabled ?? 1;
         reason = rows[0].cost_guard_reason;

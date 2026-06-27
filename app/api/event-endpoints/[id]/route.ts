@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { and, desc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
-  apiEndpoints,
   events as eventsTable,
   videoEvents as videoEventsTable,
   videos as videosTable,
@@ -17,35 +16,33 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await params;
-  const endpointId = id.trim();
-  if (!endpointId) return NextResponse.json({ error: "not_found" }, { status: 404 });
+  const eventId = id.trim();
+  if (!eventId) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
   const db = getDatabase();
   if (!db) return NextResponse.json({ error: "db_unavailable" }, { status: 503 });
 
-  const endpoint = (
+  const event = (
     await db
       .select({
-        id: apiEndpoints.id,
-        event_id: apiEndpoints.event_id,
-        is_active: apiEndpoints.is_active,
-        event_title: eventsTable.title,
+        id: eventsTable.id,
+        title: eventsTable.title,
         explanation: eventsTable.explanation,
-        is_event_active: eventsTable.is_active,
+        is_active: eventsTable.is_active,
         is_entry_open: eventsTable.is_entry_open,
         is_archived: eventsTable.is_archived,
+        public_api_enabled: eventsTable.public_api_enabled,
         start_time: eventsTable.start_time,
         end_time: eventsTable.end_time,
         entry_start_time: eventsTable.entry_start_time,
         entry_end_time: eventsTable.entry_end_time,
       })
-      .from(apiEndpoints)
-      .leftJoin(eventsTable, eq(eventsTable.id, apiEndpoints.event_id))
-      .where(eq(apiEndpoints.id, endpointId))
+      .from(eventsTable)
+      .where(eq(eventsTable.id, eventId))
       .limit(1)
   )[0];
 
-  if (!endpoint || endpoint.is_active !== 1 || !endpoint.event_title) {
+  if (!event || event.public_api_enabled !== 1) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
@@ -61,28 +58,14 @@ export async function GET(
     .innerJoin(videosTable, eq(videosTable.id, videoEventsTable.video_id))
     .where(
       and(
-        eq(videoEventsTable.event_id, endpoint.event_id),
+        eq(videoEventsTable.event_id, event.id),
         eq(videosTable.visibility_status, "public"),
       ),
     )
     .orderBy(desc(videosTable.scheduled_time))
     .limit(EVENT_API_VIDEO_LIMIT);
 
-  const payload = buildEventApiPayload(
-    {
-      id: endpoint.event_id,
-      title: endpoint.event_title,
-      explanation: endpoint.explanation,
-      is_active: endpoint.is_event_active,
-      is_entry_open: endpoint.is_entry_open,
-      is_archived: endpoint.is_archived,
-      start_time: endpoint.start_time,
-      end_time: endpoint.end_time,
-      entry_start_time: endpoint.entry_start_time,
-      entry_end_time: endpoint.entry_end_time,
-    },
-    videoRows,
-  );
+  const payload = buildEventApiPayload(event, videoRows);
 
   return NextResponse.json(payload, {
     headers: {
