@@ -321,6 +321,36 @@ async function repairLocalSchemaDrift(DB: LocalD1Database): Promise<void> {
     await applyMigrationFile(DB, "0028_event_group_events.sql");
   }
 
+  if (await tableExists(DB, "system_settings")) {
+    await ensureColumn(
+      DB,
+      "system_settings",
+      "operation_mode",
+      "ALTER TABLE `system_settings` ADD `operation_mode` text DEFAULT 'normal'",
+    );
+  }
+
+  if (await tableExists(DB, "software_catalog")) {
+    await ensureColumn(
+      DB,
+      "software_catalog",
+      "usage_count",
+      "ALTER TABLE `software_catalog` ADD `usage_count` integer NOT NULL DEFAULT 0",
+    );
+    await ensureColumn(
+      DB,
+      "software_catalog",
+      "is_active",
+      "ALTER TABLE `software_catalog` ADD `is_active` integer NOT NULL DEFAULT 1",
+    );
+    await ensureColumn(
+      DB,
+      "software_catalog",
+      "is_verified",
+      "ALTER TABLE `software_catalog` ADD `is_verified` integer NOT NULL DEFAULT 0",
+    );
+  }
+
   if (await tableExists(DB, "video_chapters")) {
     await ensureColumn(
       DB,

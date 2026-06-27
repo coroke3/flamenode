@@ -756,6 +756,10 @@ export const systemSettings = sqliteTable("system_settings", {
   cost_guard_mode: text("cost_guard_mode", {
     enum: ["normal", "economy", "read_only", "static_only", "maintenance"],
   }).default("normal"),
+  /** 正本の動作モード。cost_guard_mode から移行予定。 */
+  operation_mode: text("operation_mode", {
+    enum: ["normal", "economy", "read_only", "static_only", "maintenance"],
+  }).default("normal"),
   auto_cost_guard_enabled: integer("auto_cost_guard_enabled").default(1),
   cost_guard_thresholds_json: text("cost_guard_thresholds_json"),
   disabled_features_json: text("disabled_features_json"),
@@ -926,6 +930,9 @@ export const softwareCatalog = sqliteTable("software_catalog", {
   name: text("name").notNull(),
   normalized_name: text("normalized_name").notNull(),
   category: text("category"),
+  usage_count: integer("usage_count").notNull().default(0),
+  is_active: integer("is_active").notNull().default(1),
+  is_verified: integer("is_verified").notNull().default(0),
   created_at: integer("created_at")
     .notNull()
     .default(sql`(unixepoch())`),
