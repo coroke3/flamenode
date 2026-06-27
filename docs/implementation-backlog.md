@@ -13,14 +13,14 @@ D1 を正本、R2/KV の静的 JSON は公開配信用キャッシュとする�
 
 | 項目 | 意図 | 現状 | 分類 | 優先度 | 対応ファイル候補 |
 |------|------|------|------|--------|-----------------|
-| OperationMode 化 | cost_guard_mode / is_maintenance_mode を統一 | cost_guard_mode のみ使用 | planned | 高 | system_settings, costGuard.ts, queue.ts |
+| OperationMode 化 | cost_guard_mode / is_maintenance_mode を統一 | types/policy/getMode 作成済み、migration 0029 | partial | 高 | system_settings, costGuard.ts, queue.ts |
 | static JSON read layer | 公開ページを R2 静的 JSON に寄せる | D1 直読み | planned | 高 | public pages, lib/publicData/ |
 | static rebuild queue policy | mode に応じた queue 処理 | 全件処理のみ | planned | 高 | workers/json-generator/queue.ts |
 | api_endpoints 削除 | events.public_api_enabled に統一 | deprecated 表記済み | partial | 高 | schema.ts, admin pages |
 | video_stats 削除 | videos 側列に統一 | schema.ts に残存 | planned | 高 | schema.ts, score-recalc worker |
 | permission_keys_json 削除 | event_staff_permissions に統一 | preset 定義済み | partial | 高 | permissions/keys.ts, presets.ts |
-| event groups 正式実装 | 複数イベント所属 | DB schema + helper 完了 | partial | 中 | schema.ts, eventGroups.ts |
-| software catalog 候補辞書化 | 入力候補として利用 | 既存 | partial | 中 | softwareCatalog, admin pages |
+| event groups 正式実装 | 複数イベント所属 | DB schema + helper + 公開ページ完了 | implemented | 中 | schema.ts, eventGroups.ts, /groups |
+| software catalog 候補辞書化 | 入力候補として利用 | usage_count/is_active/is_verified 追加済み | partial | 中 | softwareCatalog, admin pages |
 | custom questions 本格実装 | event_custom_questions / video_custom_answers | schema + utility 作成済み | partial | 中 | EventForm, VideoForm, video.ts |
 | Worker 5→3 統合 | Cron Trigger 削減 | 3本構成に統合済み | implemented | 中 | workers/fast-jobs, content-jobs, sync-jobs |
 | 通知・運営受信箱 | notification-outbox 基盤 | DB 作成済み | partial | 中 | notification-dispatcher |
