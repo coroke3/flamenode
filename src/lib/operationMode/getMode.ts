@@ -5,11 +5,11 @@ import type { OperationMode } from "./types";
 export async function getOperationMode(db: any): Promise<OperationMode> {
   try {
     const row = await db
-      .select({ operation_mode: systemSettings.operation_mode })
+      .select({ operation_mode: systemSettings.operation_mode, cost_guard_mode: systemSettings.cost_guard_mode })
       .from(systemSettings)
       .where(eq(systemSettings.id, "default"))
       .limit(1);
-    const mode = row[0]?.operation_mode;
+    const mode = row[0]?.operation_mode ?? row[0]?.cost_guard_mode;
     if (mode && isValidMode(mode)) return mode;
   } catch {
     // column may not exist yet

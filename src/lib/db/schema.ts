@@ -956,6 +956,9 @@ export const softwareAliases = sqliteTable(
       t.software_id,
       t.normalized_alias,
     ),
+    globalAliasUniq: uniqueIndex("software_aliases_global_alias_uniq").on(
+      t.normalized_alias,
+    ),
   }),
 );
 

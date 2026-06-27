@@ -19,9 +19,9 @@ type QueueRow = {
 
 export async function getCostGuardMode(env: Env): Promise<string> {
   const row = (await env.DB.prepare(
-    `SELECT cost_guard_mode FROM system_settings WHERE id = 'default' LIMIT 1`,
-  ).first()) as { cost_guard_mode?: string } | null;
-  return row?.cost_guard_mode ?? "normal";
+    `SELECT operation_mode, cost_guard_mode FROM system_settings WHERE id = 'default' LIMIT 1`,
+  ).first()) as { operation_mode?: string; cost_guard_mode?: string } | null;
+  return row?.operation_mode ?? row?.cost_guard_mode ?? "normal";
 }
 
 export async function processStaticRebuildQueue(env: Env): Promise<{
