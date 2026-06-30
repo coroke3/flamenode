@@ -21,6 +21,7 @@ import {
   formatDuration as formatDurationSec,
   formatUnix,
 } from "@/lib/utils/format";
+import { AutoSubmitCheckbox, AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 
 export const metadata: Metadata = { title: "YouTube同期状態" };
 export const dynamic = "force-dynamic";
@@ -205,20 +206,17 @@ export default async function AdminYoutubeSyncPage({
           options={["draft", "pending", "public", "limited", "private", "hidden", "archived", "voided"]}
         />
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
-          <input type="checkbox" name="failed" value="1" defaultChecked={failedOnly} />
+          <AutoSubmitCheckbox name="failed" value="1" defaultChecked={failedOnly} />
           同期失敗のみ
         </label>
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
-          <input type="checkbox" name="stale" value="1" defaultChecked={staleOnly} />
+          <AutoSubmitCheckbox name="stale" value="1" defaultChecked={staleOnly} />
           長期間未同期
         </label>
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
-          <input type="checkbox" name="missing" value="1" defaultChecked={missingOnly} />
+          <AutoSubmitCheckbox name="missing" value="1" defaultChecked={missingOnly} />
           YouTube IDなし
         </label>
-        <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm">
-          絞り込む
-        </button>
         <Link href="/admin/youtube-sync" className="fn-btn fn-btn-ghost fn-btn-sm">
           解除
         </Link>
@@ -364,14 +362,14 @@ function SelectFilter({
   return (
     <label style={{ display: "flex", flexDirection: "column", fontSize: 11 }}>
       <span style={{ color: "var(--text-muted)" }}>{label}</span>
-      <select name={name} defaultValue={value} className="fn-input">
+      <AutoSubmitSelect name={name} defaultValue={value} className="fn-input">
         <option value="">すべて</option>
         {options.map((option) => (
           <option key={option} value={option}>
             {option}
           </option>
         ))}
-      </select>
+      </AutoSubmitSelect>
     </label>
   );
 }

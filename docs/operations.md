@@ -120,6 +120,7 @@ D1 へ適用する場合はファイル名の辞書順を正とする。同じ `
 | 0024 | `migrations/0024_legacy_import_db_reduction_prep.sql` | `videos` 統計・使用ソフトJSON列、イベント公開API列、`event_staff.permission_keys_json` | 旧DB削減準備。安全な列追加 |
 | 0025 | `migrations/0025_add_notification_dedupe_key.sql` | `notification_outbox.dedupe_key` と active partial unique | 安全な列追加 + index |
 | 0026 | `migrations/0026_x_user_portfolio_contact.sql` | `x_users.portfolio_contact` | 安全な列追加 |
+| 0032 | `migrations/0032_slots_end_time_normalize.sql` | 旧 `slots.end_time` 列を削除、単独 `reservation_group_id` を解除 | 本番前のスロット正規化。連続枠ロジックは `start_time` と部間隔を正本にする |
 
 ### 1-6. 手動 index / Drizzle meta の注意
 
@@ -270,7 +271,7 @@ allowlist (許可される定義/参照ファイル):
 - `reservation_group_user_mix` — 連続枠ユーザー混在
 - `public_video_without_youtube_id` — 公開動画の YT ID 欠落
 - `voided_video_visible` — `visibility_status='voided'` の動画状態確認
-- `slot_time_overlap` — 同イベント内の時間重複 (スイープ全ペア)
+- `slot_duplicate_start_time` — 同イベント内で同一開始時刻かつ別 `reservation_group_id` の枠
 - `like_count_drift` — `video_stats.app_like_count` vs video_interactions 集計差 (±5 閾値)
 - `missing_video_stats` / `missing_video_youtube_metadata` — 派生行不足
 - `notification_processing_stuck` / `notification_failed_volume` — 通知 outbox の滞留・失敗

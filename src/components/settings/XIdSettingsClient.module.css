@@ -240,7 +240,7 @@
   position: relative;
   aspect-ratio: 1;
   min-width: 0;
-  border: 1px solid var(--hairline, var(--border-subtle));
+  border: 0;
   border-radius: var(--radius-md);
   background: var(--bg-base);
   cursor: pointer;
@@ -250,7 +250,7 @@
 
 .iconButton:hover:not(:disabled),
 .iconButton:focus-visible {
-  border-color: var(--accent-primary);
+  background: var(--accent-primary-soft);
   outline: none;
 }
 
@@ -260,8 +260,28 @@
 }
 
 .iconButtonActive {
-  border-color: var(--accent-primary);
   background: var(--accent-primary-soft);
+  box-shadow: inset 0 0 0 2px var(--accent-primary);
+}
+
+.iconAddButton {
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  background: var(--bg-elevated);
+  cursor: pointer;
+}
+
+.iconAddButton:hover:not(.iconAddButtonDisabled) {
+  color: var(--accent-primary);
+  box-shadow: inset 0 0 0 1px var(--accent-primary);
+  background: var(--accent-primary-soft);
+}
+
+.iconAddButtonDisabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .iconThumb,
@@ -293,7 +313,7 @@
   align-items: center;
   max-width: 540px;
   padding: 12px;
-  border: 1px solid var(--hairline, var(--border-subtle));
+  border: 0;
   border-radius: var(--radius-md);
   background: var(--bg-base);
 }
@@ -303,7 +323,7 @@
   aspect-ratio: 1;
   display: grid;
   place-items: center;
-  border: 1px dashed var(--border-strong, var(--border-subtle));
+  border: 0;
   border-radius: var(--radius-sm);
   background: var(--bg-elevated);
   color: var(--text-muted);

@@ -16,6 +16,7 @@ import {
 } from "@/lib/utils/eventStatus";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 
 export const metadata: Metadata = { title: "イベント管理" };
 export const dynamic = "force-dynamic";
@@ -99,21 +100,18 @@ export default async function AdminEventsPage({
           className="fn-input"
           style={{ maxWidth: 240 }}
         />
-        <select name="filter" className="fn-select" defaultValue={filter}>
+        <AutoSubmitSelect name="filter" className="fn-select" defaultValue={filter}>
           <option value="all">全イベント</option>
           <option value="active">is_active=1</option>
           <option value="draft">下書き (is_active=0)</option>
           <option value="archived">アーカイブ</option>
           <option value="accepting">受付中のみ</option>
-        </select>
-        <select name="sort" className="fn-select" defaultValue={sort}>
+        </AutoSubmitSelect>
+        <AutoSubmitSelect name="sort" className="fn-select" defaultValue={sort}>
           <option value="newest">開催日 新→旧</option>
           <option value="oldest">開催日 旧→新</option>
           <option value="upcoming">開催日 早い順</option>
-        </select>
-        <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm">
-          適用
-        </button>
+        </AutoSubmitSelect>
       </form>
 
       <p style={{ marginTop: 8, fontSize: 11, color: "var(--text-muted)" }}>
@@ -171,7 +169,7 @@ export default async function AdminEventsPage({
                   ) : null}
                 </td>
                 <td>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <div className="fn-console-row-actions">
                     <Link
                       href={`/manage/events/${ev.id}/edit`}
                       className="fn-btn fn-btn-ghost fn-btn-sm"

@@ -11,6 +11,7 @@ import { XIdSwitcher, type XIdEntry } from "@/components/user/XIdSwitcher";
 import { AccountMenu } from "@/components/user/AccountMenu";
 import type { HeaderUser } from "@/lib/auth/headerUser";
 import { PUBLIC_NAV_ITEMS } from "@/lib/navigation/publicNav";
+import { navigateGetForm } from "@/components/forms/AutoSubmitSelect";
 import { sanitizeNextPath } from "#utils/next";
 
 function isPathActive(pathname: string | null, href: string): boolean {
@@ -88,6 +89,10 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
             role="search"
             aria-label="作品検索"
             onClick={() => searchInputRef.current?.focus()}
+            onSubmit={(e) => {
+              e.preventDefault();
+              navigateGetForm(e.currentTarget);
+            }}
           >
             <span className={styles.searchIcon}>
               <Icon name="search" size={14} aria-hidden />
@@ -155,6 +160,10 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
               className={styles.mobileSearch}
               role="search"
               aria-label="作品検索"
+              onSubmit={(e) => {
+                e.preventDefault();
+                navigateGetForm(e.currentTarget);
+              }}
             >
               <Icon name="search" size={14} aria-hidden />
               <input

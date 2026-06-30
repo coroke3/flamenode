@@ -69,6 +69,29 @@ function qualityLabel(q: string | null): string {
   return labels[q ?? ""] ?? "MAX";
 }
 
+interface CaptionTrack {
+  languageCode: string;
+  displayName?: string;
+  languageName?: string;
+  name?: { simpleText?: string; displayName?: string };
+}
+
+function captionTrackLabel(track: CaptionTrack): string {
+  return (
+    track.displayName ??
+    track.languageName ??
+    track.name?.simpleText ??
+    track.name?.displayName ??
+    track.languageCode
+  );
+}
+
+function formatPlaybackRate(rate: number): string {
+  return rate === 1 ? "1×" : `${rate}×`;
+}
+
+const DEFAULT_PLAYBACK_RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+
 export function YoutubePlayer({
   youtubeId,
   title,
@@ -87,6 +110,18 @@ export function YoutubePlayer({
   const [volume, setVolume] = React.useState(100);
   const [quality, setQuality] = React.useState<string | null>(null);
   const [overlayVisible, setOverlayVisible] = React.useState(true);
+  const [playbackRate, setPlaybackRate] = React.useState(1);
+  const [availableRates, setAvailableRates] = React.useState<number[]>(
+    DEFAULT_PLAYBACK_RATES,
+  );
+  const [captionTracks, setCaptionTracks] = React.useState<CaptionTrack[]>([]);
+  const [activeCaptionCode, setActiveCaptionCode] = React.useState<
+    string | null
+  >(null);
+  const [speedMenuOpen, setSpeedMenuOpen] = React.useState(false);
+  const [captionMenuOpen, setCaptionMenuOpen] = React.useState(false);
+  const speedMenuRef = React.useRef<HTMLDivElement>(null);
+  const captionMenuRef = React.useRef<HTMLDivElement>(null);
   // 初回再生開始までは fallbackThumb で iframe を完全に覆い、
   // YouTube 側のタイトル / 大きな ▶ などの UI を表に出さない。
   const [hasInitiallyPlayed, setHasInitiallyPlayed] = React.useState(false);
@@ -106,6 +141,102 @@ export function YoutubePlayer({
     }
   }, []);
 
+  const syncPlaybackRates = React.useCallback(() => {
+    const p = playerRef.current;
+    if (!p) return;
+    try {
+      const rates = p.getAvailablePlaybackRates?.() as number[] | undefined;
+      if (rates?.length) setAvailableRates(rates);
+      const current = p.getPlaybackRate?.();
+      if (typeof current === "number") setPlaybackRate(current);
+    } catch {
+      /* noop */
+    }
+  }, []);
+
+  const syncCaptionTracks = React.useCallback(() => {
+    const p = playerRef.current;
+    if (!p?.getOption) return;
+    try {
+      const tracklist = p.getOption("captions", "tracklist") as
+        | CaptionTrack[]
+        | undefined;
+      if (Array.isArray(tracklist)) setCaptionTracks(tracklist);
+      const current = p.getOption("captions", "track") as
+        | { languageCode?: string }
+        | undefined;
+      setActiveCaptionCode(current?.languageCode ?? null);
+    } catch {
+      /* noop */
+    }
+  }, []);
+
+  const changePlaybackRate = React.useCallback((rate: number) => {
+    const p = playerRef.current;
+    if (!p) return;
+    try {
+      p.setPlaybackRate?.(Number(rate));
+      setPlaybackRate(Number(rate));
+      setSpeedMenuOpen(false);
+    } catch {
+      /* noop */
+    }
+  }, []);
+
+  const setCaption = React.useCallback((languageCode: string | null) => {
+    const p = playerRef.current;
+    if (!p?.setOption) return;
+    try {
+      if (languageCode) {
+        p.setOption("captions", "track", { languageCode });
+        setActiveCaptionCode(languageCode);
+      } else {
+        p.setOption("captions", "track", {});
+        setActiveCaptionCode(null);
+      }
+      setCaptionMenuOpen(false);
+    } catch {
+      /* noop */
+    }
+  }, []);
+
+  const stepPlaybackRate = React.useCallback(
+    (direction: -1 | 1) => {
+      const rates = [...availableRates].sort((a, b) => a - b);
+      const index = rates.indexOf(playbackRate);
+      const nextIndex =
+        index === -1
+          ? rates.findIndex((rate) => rate >= playbackRate)
+          : index + direction;
+      const next = rates[Math.max(0, Math.min(rates.length - 1, nextIndex))];
+      if (typeof next === "number") changePlaybackRate(next);
+    },
+    [availableRates, playbackRate, changePlaybackRate],
+  );
+
+  React.useEffect(() => {
+    setHasInitiallyPlayed(false);
+    setCaptionTracks([]);
+    setActiveCaptionCode(null);
+    setPlaybackRate(1);
+    setAvailableRates(DEFAULT_PLAYBACK_RATES);
+    setSpeedMenuOpen(false);
+    setCaptionMenuOpen(false);
+  }, [youtubeId]);
+
+  React.useEffect(() => {
+    if (!speedMenuOpen && !captionMenuOpen) return;
+    const onPointerDown = (ev: PointerEvent) => {
+      const target = ev.target as Node;
+      if (speedMenuRef.current?.contains(target)) return;
+      if (captionMenuRef.current?.contains(target)) return;
+      setSpeedMenuOpen(false);
+      setCaptionMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [speedMenuOpen, captionMenuOpen]);
+
   React.useEffect(() => {
     let disposed = false;
 
@@ -121,7 +252,7 @@ export function YoutubePlayer({
         host: "https://www.youtube-nocookie.com",
         videoId: youtubeId,
         playerVars: {
-          autoplay: 0,
+          autoplay: 1,
           controls: 0,
           disablekb: 1,
           fs: 0,
@@ -143,14 +274,10 @@ export function YoutubePlayer({
             if (disposed) return;
             const p = playerRef.current;
 
-            // 字幕モジュールの unload を試行する。
-            // cc_load_policy=0 だけでは環境や動画設定によって字幕が出る場合があるため、
-            // IFrame API 経由でも抑制を試みる。ただし完全な字幕無効化は保証できない。
             try {
-              p?.unloadModule?.("captions");
-              p?.unloadModule?.("cc");
+              p?.loadModule?.("captions");
             } catch {
-              /* 環境によっては unloadModule が無効な場合がある — noop */
+              /* 環境によっては loadModule が無効な場合がある — noop */
             }
 
             setReady(true);
@@ -158,6 +285,28 @@ export function YoutubePlayer({
             setVolume(p?.getVolume?.() ?? 100);
             setMuted(p?.isMuted?.() ?? false);
             requestBestQuality();
+            syncPlaybackRates();
+            try {
+              p?.playVideo?.();
+            } catch {
+              /* ブラウザの自動再生ポリシーで拒否される場合がある */
+            }
+          },
+          onApiChange: () => {
+            if (disposed) return;
+            syncCaptionTracks();
+            const p = playerRef.current;
+            if (!p?.getOption || !p?.setOption) return;
+            try {
+              const current = p.getOption("captions", "track") as
+                | { languageCode?: string }
+                | undefined;
+              if (!current?.languageCode) {
+                p.setOption("captions", "track", {});
+              }
+            } catch {
+              /* noop */
+            }
           },
           onStateChange: (e: any) => {
             const state = e?.data;
@@ -166,6 +315,8 @@ export function YoutubePlayer({
               setHasInitiallyPlayed(true);
               setDuration(playerRef.current?.getDuration?.() ?? 0);
               requestBestQuality();
+              syncPlaybackRates();
+              syncCaptionTracks();
             } else if (state === YT.PlayerState.PAUSED) {
               setPlaying(false);
             } else if (state === YT.PlayerState.ENDED) {
@@ -184,6 +335,17 @@ export function YoutubePlayer({
           },
           onPlaybackQualityChange: (e: any) => {
             if (typeof e?.data === "string") setQuality(e.data);
+          },
+          onPlaybackRateChange: (e: any) => {
+            if (typeof e?.data === "number") setPlaybackRate(e.data);
+          },
+          onError: (e: any) => {
+            // YouTube 側の埋め込みエラー。未処理だと dev overlay に [object Event] と出ることがある。
+            if (disposed) return;
+            const code = e?.data;
+            if (typeof code === "number" && code !== 100) {
+              console.warn("[YoutubePlayer] playback error", code);
+            }
           },
         },
       });
@@ -215,7 +377,7 @@ export function YoutubePlayer({
         /* noop */
       }
     };
-  }, [youtubeId, containerId, requestBestQuality]);
+  }, [youtubeId, containerId, requestBestQuality, syncPlaybackRates, syncCaptionTracks]);
 
   React.useEffect(() => {
     if (!ready) return;
@@ -325,12 +487,25 @@ export function YoutubePlayer({
         case "m":
           toggleMute();
           break;
+        case "<":
+          ev.preventDefault();
+          stepPlaybackRate(-1);
+          break;
+        case ">":
+          ev.preventDefault();
+          stepPlaybackRate(1);
+          break;
+        case "c":
+          if (captionTracks.length === 0) break;
+          if (activeCaptionCode) setCaption(null);
+          else setCaption(captionTracks[0]?.languageCode ?? null);
+          break;
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, playing, volume, setPlayerVolume]);
+  }, [ready, playing, volume, setPlayerVolume, stepPlaybackRate, setCaption, captionTracks, activeCaptionCode]);
 
   const togglePlay = () => {
     const p = playerRef.current;
@@ -548,6 +723,97 @@ export function YoutubePlayer({
               onChange={(e) => setPlayerVolume(Number(e.target.value))}
             />
           </div>
+          <div ref={speedMenuRef} className={styles.controlMenuWrap}>
+            <button
+              type="button"
+              className={cn(styles.iconBtn, styles.rateBtn)}
+              aria-label="再生速度"
+              aria-expanded={speedMenuOpen}
+              title="再生速度 (< / >)"
+              onClick={(e) => {
+                e.stopPropagation();
+                setCaptionMenuOpen(false);
+                setSpeedMenuOpen((open) => !open);
+                syncPlaybackRates();
+              }}
+            >
+              {formatPlaybackRate(playbackRate)}
+            </button>
+            {speedMenuOpen ? (
+              <div className={styles.controlMenu} role="menu" aria-label="再生速度">
+                {availableRates.map((rate) => (
+                  <button
+                    key={rate}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={rate === playbackRate}
+                    className={cn(
+                      styles.controlMenuItem,
+                      rate === playbackRate && styles.controlMenuItemActive,
+                    )}
+                    onClick={() => changePlaybackRate(rate)}
+                  >
+                    {formatPlaybackRate(rate)}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <div ref={captionMenuRef} className={styles.controlMenuWrap}>
+            <button
+              type="button"
+              className={cn(
+                styles.iconBtn,
+                !captionTracks.length && styles.iconBtnDisabled,
+                activeCaptionCode && styles.captionsOn,
+              )}
+              aria-label="字幕"
+              aria-expanded={captionMenuOpen}
+              title={captionTracks.length ? "字幕 (c)" : "この動画に字幕はありません"}
+              disabled={captionTracks.length === 0}
+              onClick={(e) => {
+                e.stopPropagation();
+                setSpeedMenuOpen(false);
+                if (!captionTracks.length) return;
+                setCaptionMenuOpen((open) => !open);
+                syncCaptionTracks();
+              }}
+            >
+              <Icon name="captions" size={14} />
+            </button>
+            {captionMenuOpen && captionTracks.length > 0 ? (
+              <div className={styles.controlMenu} role="menu" aria-label="字幕">
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={!activeCaptionCode}
+                  className={cn(
+                    styles.controlMenuItem,
+                    !activeCaptionCode && styles.controlMenuItemActive,
+                  )}
+                  onClick={() => setCaption(null)}
+                >
+                  オフ
+                </button>
+                {captionTracks.map((track, index) => (
+                  <button
+                    key={`${track.languageCode}-${index}`}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={activeCaptionCode === track.languageCode}
+                    className={cn(
+                      styles.controlMenuItem,
+                      activeCaptionCode === track.languageCode &&
+                        styles.controlMenuItemActive,
+                    )}
+                    onClick={() => setCaption(track.languageCode)}
+                  >
+                    {captionTrackLabel(track)}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
           <button
             type="button"
             onClick={requestFullscreen}
@@ -581,9 +847,9 @@ export function YoutubePlayer({
 
       <noscript>
         <iframe
-          src={youtubeEmbedUrl(youtubeId)}
+          src={youtubeEmbedUrl(youtubeId, { autoplay: true })}
           title={title}
-          allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
           allowFullScreen
           className={styles.iframeBox}
         />

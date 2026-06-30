@@ -6,12 +6,6 @@
   color: var(--text-primary);
 }
 
-.icon {
-  flex-shrink: 0;
-  object-fit: contain;
-  border-radius: 2px;
-}
-
 .text {
   display: flex;
   flex-direction: column;

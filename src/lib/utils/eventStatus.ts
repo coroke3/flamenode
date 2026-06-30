@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 import { events } from "@/lib/db/schema";
 import {
   computeEventStatus,
@@ -31,4 +31,9 @@ export function activeEventWhere(now: number = Math.floor(Date.now() / 1000)) {
     eq(events.is_archived, 0),
     sql`((${effectiveEnd}) IS NULL OR (${effectiveEnd}) > ${now})`,
   );
+}
+
+/** 公開イベント一覧・グループに載せてよいイベント。下書き (active=0, archived=0) は除外。 */
+export function publicListableEventWhere() {
+  return or(eq(events.is_active, 1), eq(events.is_archived, 1))!;
 }

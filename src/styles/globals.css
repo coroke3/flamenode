@@ -284,24 +284,10 @@ select {
   color: var(--text-muted);
 }
 
-.fn-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--d-row, 12px);
-}
-
-.fn-divider {
-  height: 1px;
-  background: var(--hairline);
-  border: 0;
-  margin: 0;
-}
-
 .fn-mt-sm { margin-top: 8px; }
 .fn-mt-md { margin-top: 16px; }
+.fn-mb-lg { margin-bottom: 24px; }
 .fn-mt-lg { margin-top: 32px; }
-.fn-mt-xl { margin-top: 48px; }
 
 /* ----------------------------------------------------------
  * 横スクロール棚
@@ -350,12 +336,12 @@ select {
 
 .fn-shelf-fade-left {
   left: 0;
-  background: linear-gradient(to right, var(--shelf-fade-color), transparent);
+  background: none;
 }
 
 .fn-shelf-fade-right {
   right: 0;
-  background: linear-gradient(to left, var(--shelf-fade-color), transparent);
+  background: none;
 }
 
 .fn-shelf-arrow {
@@ -415,27 +401,6 @@ select {
   }
 }
 
-/* ----------------------------------------------------------
- * セクション見出し
- * ---------------------------------------------------------- */
-
-.fn-section-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 24px 0 14px;
-}
-
-.fn-section-header-center {
-  flex: 1;
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  flex-wrap: wrap;
-  text-align: left;
-}
-
 .fn-section-title {
   position: relative;
   font-family: var(--font-display);
@@ -449,11 +414,6 @@ select {
 
 .fn-section-title::after {
   content: none;
-}
-
-.fn-section-description {
-  font-size: 12px;
-  color: var(--text-muted);
 }
 
 .fn-section-more {
@@ -527,6 +487,18 @@ select {
   color: var(--text-primary);
 }
 
+.fn-btn-secondary {
+  background-color: var(--bg-elevated);
+  border-color: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.fn-btn-secondary:hover:not(:disabled) {
+  background-color: var(--bg-surface);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
 .fn-btn-soft {
   background-color: var(--bg-elevated);
   color: var(--text-primary);
@@ -559,12 +531,6 @@ select {
 .fn-btn-lg {
   padding: 11px 18px;
   font-size: 15px;
-}
-
-.fn-btn-icon {
-  padding: 6px;
-  width: 32px;
-  height: 32px;
 }
 
 /* ----------------------------------------------------------
@@ -618,6 +584,25 @@ select {
   padding: 18px;
 }
 
+.fn-card-body {
+  display: grid;
+  gap: 12px;
+}
+
+.fn-card-compact {
+  padding: 14px;
+}
+
+.fn-card-accent {
+  border-color: color-mix(in srgb, var(--accent-primary) 34%, var(--border-subtle));
+  background-color: color-mix(in srgb, var(--accent-primary) 7%, var(--bg-surface));
+}
+
+.fn-card-warning {
+  border-color: color-mix(in srgb, var(--accent-warning) 34%, var(--border-subtle));
+  background-color: color-mix(in srgb, var(--accent-warning) 8%, var(--bg-surface));
+}
+
 /* ----------------------------------------------------------
  * 入力
  * ---------------------------------------------------------- */
@@ -650,16 +635,15 @@ select {
   box-shadow: none;
 }
 
-.fn-textarea {
-  resize: vertical;
-  min-height: 96px;
-  line-height: 1.5;
+.fn-input-sm {
+  min-height: 32px;
+  padding: 6px 9px;
+  font-size: 12px;
 }
 
-.fn-checkbox {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--accent-primary);
+.fn-form-grid {
+  display: grid;
+  gap: 12px;
 }
 
 .fn-label {
@@ -674,13 +658,6 @@ select {
   display: block;
   font-size: 11px;
   color: var(--text-muted);
-  margin-top: 4px;
-}
-
-.fn-error {
-  display: block;
-  font-size: 11px;
-  color: var(--accent-danger);
   margin-top: 4px;
 }
 
@@ -704,14 +681,14 @@ select {
 }
 
 .fn-scroll-affordance::after {
-  content: "";
+  content: none;
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
   width: 28px;
   pointer-events: none;
-  background: linear-gradient(to left, var(--bg-surface, #fff), transparent);
+  background: none;
 }
 
 @media (max-width: 640px) {
@@ -778,35 +755,18 @@ select {
   margin-top: 8px;
 }
 
-/* ----------------------------------------------------------
- * テキストユーティリティ
- * ---------------------------------------------------------- */
-
-.fn-truncate {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .fn-mono {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
 .fn-muted { color: var(--text-muted); }
-.fn-secondary { color: var(--text-secondary); }
-.fn-primary { color: var(--text-primary); }
-.fn-accent { color: var(--accent-primary); }
 .fn-warning { color: var(--accent-warning); }
-.fn-danger { color: var(--accent-danger); }
 
 .fn-text-xs { font-size: 11px; }
 .fn-text-sm { font-size: 12px; }
-.fn-text-md { font-size: 13px; }
-.fn-text-lg { font-size: 14px; }
 
 .fn-bold { font-weight: 700; }
-.fn-semibold { font-weight: 600; }
 
 /* ----------------------------------------------------------
  * スクリーンリーダー専用

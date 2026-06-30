@@ -402,7 +402,6 @@ export const slots = sqliteTable("slots", {
   slot_kind: text("slot_kind", { enum: ["time", "count"] }).default("time"),
   slot_label: text("slot_label"),
   start_time: integer("start_time"),
-  end_time: integer("end_time"),
   sort_order: integer("sort_order").default(0),
   reservation_group_id: text("reservation_group_id"),
   priority_reclaim_video_id: text("priority_reclaim_video_id"),

@@ -46,7 +46,7 @@ export default async function AdminEventDetailPage({
       .select()
       .from(slotsTable)
       .where(eq(slotsTable.event_id, id))
-      .orderBy(slotsTable.start_time, slotsTable.end_time, slotsTable.sort_order);
+      .orderBy(slotsTable.start_time, slotsTable.sort_order);
 
     const evVideos = await db
       .select({
@@ -179,7 +179,7 @@ export default async function AdminEventDetailPage({
                   <td>{s.start_time ? formatUnix(s.start_time, { dateOnly: true }) : (s.slot_label ?? "-")}</td>
                   <td>
                     {s.start_time
-                      ? `${formatUnix(s.start_time, { timeOnly: true })}${s.end_time ? ` - ${formatUnix(s.end_time, { timeOnly: true })}` : ""}`
+                      ? formatUnix(s.start_time, { timeOnly: true })
                       : "-"}
                     {s.is_group ? (
                       <span className="fn-badge fn-badge-soft" style={{ marginLeft: 6 }}>

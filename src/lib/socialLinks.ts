@@ -1,4 +1,4 @@
-import { normalizeHttpUrl } from "@/lib/utils/url";
+import { normalizeHttpUrl } from "#utils/url";
 
 export type SocialLink = {
   type: string;
@@ -11,6 +11,10 @@ export const SOCIAL_LINK_TYPE_OPTIONS = [
   "TikTok",
   "Bluesky",
   "Niconico",
+  "Portfolio",
+  "Tumblr",
+  "Discord",
+  "Email",
   "Website",
   "Other",
 ] as const;
@@ -27,12 +31,29 @@ function cleanType(value: unknown): string {
   if (key === "tiktok") return "TikTok";
   if (key === "bluesky" || key === "bsky") return "Bluesky";
   if (key === "niconico" || key === "nico" || key === "ニコニコ") return "Niconico";
+  if (key === "portfolio") return "Portfolio";
+  if (key === "tumblr" || key === "tumbler") return "Tumblr";
+  if (key === "discord") return "Discord";
+  if (key === "email" || key === "mail") return "Email";
   if (key === "web" || key === "website" || key === "site") return "Website";
   return text || "Other";
 }
 
-function normalizeSocialUrl(value: unknown): string | null {
-  return normalizeHttpUrl(String(value ?? "").trim(), {
+function normalizeSocialUrl(value: unknown, type?: string): string | null {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) return null;
+  const typeKey = cleanType(type).toLowerCase();
+
+  if (typeKey === "email") {
+    const raw = trimmed.replace(/^mailto:/i, "").split("?")[0]?.trim() ?? "";
+    if (!raw || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) return null;
+    return `mailto:${raw}`;
+  }
+
+  if (/^mailto:/i.test(trimmed)) return null;
+  if (!trimmed.includes("://") && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return null;
+
+  return normalizeHttpUrl(trimmed, {
     maxLength: MAX_SOCIAL_URL_LENGTH,
   });
 }
@@ -45,7 +66,7 @@ function normalizeSocialLinks(entries: unknown[]): SocialLink[] | null {
     const row = entry as { type?: unknown; url?: unknown };
     const rawUrl = String(row.url ?? "").trim();
     if (!rawUrl) continue;
-    const url = normalizeSocialUrl(rawUrl);
+    const url = normalizeSocialUrl(rawUrl, cleanType(row.type));
     if (!url) return null;
     out.push({ type: cleanType(row.type), url });
   }
@@ -60,10 +81,11 @@ function parseLegacySocialLinks(raw: string): SocialLink[] {
   const out: SocialLink[] = [];
   for (const chunk of chunks) {
     if (out.length >= MAX_SOCIAL_LINKS) break;
-    const pair = chunk.match(/^([^=:：]+)[=:：]\s*(https?:\/\/\S+)$/i);
-    const looseUrl = chunk.match(/https?:\/\/\S+/i);
-    const type = pair?.[1] ?? "Other";
-    const url = normalizeSocialUrl(pair?.[2] ?? looseUrl?.[0] ?? "");
+    const pair = chunk.match(/^([^=:：]+)[=:：]\s*(\S+)$/i);
+    const looseUrl = chunk.match(/(?:https?:\/\/|mailto:)\S+/i);
+    const looseEmail = chunk.match(/[^\s@]+@[^\s@]+\.[^\s@]+/i);
+    const type = pair?.[1] ?? (/^mailto:/i.test(looseUrl?.[0] ?? "") || looseEmail ? "Email" : "Other");
+    const url = normalizeSocialUrl(pair?.[2] ?? looseUrl?.[0] ?? looseEmail?.[0] ?? "", cleanType(type));
     if (url) out.push({ type: cleanType(type), url });
   }
   return out;
@@ -109,7 +131,7 @@ export function validateSocialLinksJson(raw: string): {
       return {
         ok: false,
         value: null,
-        message: "SNSリンクには http/https の有効なURLを入力してください。",
+        message: "SNSリンクには、Email はメールアドレス、それ以外は http/https の有効なURLを入力してください。",
       };
     }
     return {
@@ -131,4 +153,64 @@ export function formatSocialLinksForText(raw: string | null | undefined): string
   return parseSocialLinks(raw)
     .map((link) => `${link.type}=${link.url}`)
     .join("\n");
+}
+
+export function socialLinkIconName(type: string): "x" | "discord" | "mail" | "external" {
+  switch (cleanType(type)) {
+    case "X":
+      return "x";
+    case "Discord":
+      return "discord";
+    case "Email":
+      return "mail";
+    default:
+      return "external";
+  }
+}
+
+export function formatSocialLinkLabel(type: string, url: string): string {
+  const normalizedType = cleanType(type);
+  if (normalizedType === "Email") {
+    return url.replace(/^mailto:/i, "").split("?")[0] ?? url;
+  }
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./, "");
+    const path = parsed.pathname
+      .split("/")
+      .filter(Boolean)
+      .map((segment) => {
+        try {
+          return decodeURIComponent(segment);
+        } catch {
+          return segment;
+        }
+      })
+      .join("/");
+    if (!path) return host;
+    return `${host}/${path}`;
+  } catch {
+    return url;
+  }
+}
+
+/** プロフィールヘッダー用。プライマリ X ID と重複する X リンクは除外する。 */
+export function profileHeaderSocialLinks(
+  links: readonly SocialLink[],
+  xUserId: string,
+): SocialLink[] {
+  const primaryXHandle = xUserId.trim().replace(/^@/, "").toLowerCase();
+  if (!primaryXHandle) return [...links];
+  return links.filter((link) => {
+    if (cleanType(link.type) !== "X") return true;
+    try {
+      const parsed = new URL(link.url);
+      const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
+      if (host !== "x.com" && host !== "twitter.com") return true;
+      const path = parsed.pathname.replace(/^\/+|\/+$/g, "").toLowerCase();
+      return path !== primaryXHandle;
+    } catch {
+      return true;
+    }
+  });
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 import pageStyles from "./settings-page.module.css";
@@ -29,31 +30,43 @@ export type PendingLinkRequestRow = {
   requested_at: number;
 };
 
+function publicUserHref(xUserId: string): string {
+  return `/user/${encodeURIComponent(xUserId)}`;
+}
+
 function XIdAvatar({
   id,
   iconUrl,
   small,
+  href,
 }: {
   id: string;
   iconUrl: string | null;
   small?: boolean;
+  href?: string | null;
 }): React.ReactElement {
   const letter = id.charAt(0).toUpperCase();
   const className = `${pageStyles.avatar} ${small ? pageStyles.avatarSm : ""}`;
 
-  if (iconUrl) {
-    return (
-      <span className={className} aria-hidden="true">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={iconUrl} alt="" className={pageStyles.avatarImg} />
-      </span>
-    );
-  }
+  const inner = iconUrl ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={iconUrl} alt="" className={pageStyles.avatarImg} />
+  ) : (
+    letter
+  );
+
+  const avatar = (
+    <span className={className} aria-hidden="true">
+      {inner}
+    </span>
+  );
+
+  if (!href) return avatar;
 
   return (
-    <span className={className} aria-hidden="true">
-      {letter}
-    </span>
+    <Link href={href} className={pageStyles.avatarLink} aria-label={`${id} の公開ページ`}>
+      {avatar}
+    </Link>
   );
 }
 
@@ -66,11 +79,13 @@ export function XIdLinkedList({
   xIds,
   activeXUserId,
   iconCandidatesById,
+  channelCandidatesById,
   next,
 }: {
   xIds: SettingsXIdRow[];
   activeXUserId: string | null;
   iconCandidatesById: Record<string, string[]>;
+  channelCandidatesById: Record<string, string[]>;
   next?: string | null;
 }): React.ReactElement {
   const sorted = React.useMemo(() => {
@@ -111,6 +126,7 @@ export function XIdLinkedList({
         const isActive = x.id === activeXUserId;
         const isEditing = editingId === x.id;
         const approved = x.approval_status === "approved";
+        const publicHref = approved ? publicUserHref(x.id) : null;
 
         return (
           <li
@@ -122,9 +138,20 @@ export function XIdLinkedList({
             }
           >
             <div className={pageStyles.rowHead}>
-              <XIdAvatar id={x.id} iconUrl={x.icon_url} small />
+              <XIdAvatar
+                id={x.id}
+                iconUrl={x.icon_url}
+                small
+                href={publicHref}
+              />
               <div className={pageStyles.rowInfo}>
-                <span className={pageStyles.rowName}>{x.x_name || x.id}</span>
+                {publicHref ? (
+                  <Link href={publicHref} className={pageStyles.rowNameLink}>
+                    {x.x_name || x.id}
+                  </Link>
+                ) : (
+                  <span className={pageStyles.rowName}>{x.x_name || x.id}</span>
+                )}
                 <span className={pageStyles.rowHandle}>
                   <Icon name="x" size={11} aria-hidden />@{x.id}
                 </span>
@@ -152,6 +179,12 @@ export function XIdLinkedList({
                     label="アクティブに設定"
                     className={`${pageStyles.actionBtn} ${pageStyles.actionBtnPrimary}`}
                   />
+                ) : null}
+                {approved ? (
+                  <Link href={publicHref!} className={pageStyles.actionBtn}>
+                    <Icon name="user" size={12} aria-hidden />
+                    公開ページ
+                  </Link>
                 ) : null}
                 {approved ? (
                   <button
@@ -187,6 +220,7 @@ export function XIdLinkedList({
                 <XIdCompactProfileForm
                   x={x}
                   iconCandidates={iconCandidatesById[x.id] ?? []}
+                  channelCandidates={channelCandidatesById[x.id] ?? []}
                   onCancel={() => setEditingId(null)}
                 />
               </div>

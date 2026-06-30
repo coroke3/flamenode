@@ -45,7 +45,7 @@
   align-items: center;
   min-height: 32px;
   padding: 7px 14px;
-  border-radius: 9px;
+  border-radius: var(--r-pill, 6px);
   color: var(--text-secondary);
   font-size: 13.5px;
   font-weight: 600;
@@ -62,7 +62,7 @@
 .desktopNavLink:hover,
 .desktopNavLinkActive {
   color: var(--text-primary);
-  background: var(--bg-elevated);
+  background: color-mix(in srgb, var(--bg-surface) 58%, var(--bg-elevated));
 }
 
 .right {
@@ -116,25 +116,26 @@
   min-width: 88px;
   color: var(--accent-ink);
   background: var(--accent-primary);
+  border: 0;
   box-shadow: none;
 }
 
 .postBtn:hover {
   color: var(--accent-ink);
   background: var(--accent-primary-strong);
-  transform: translateY(-1px);
+  transform: none;
 }
 
 .ghostBtn {
   color: var(--text-secondary);
-  border: 1px solid transparent;
-  background: color-mix(in srgb, var(--bg-elevated) 82%, transparent);
+  border: 0;
+  background: transparent;
 }
 
 .ghostBtn:hover {
   color: var(--text-primary);
-  border-color: transparent;
-  background: var(--accent-primary-soft);
+  border: 0;
+  background: var(--bg-elevated);
 }
 
 .loginBtn {
@@ -148,7 +149,7 @@
   color: var(--accent-ink);
   background: var(--accent-primary-strong);
   border-color: transparent;
-  transform: translateY(-1px);
+  transform: none;
 }
 
 .menuToggle {
@@ -161,7 +162,7 @@
   min-height: 44px;
   border-radius: var(--radius-pill);
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
+  background: var(--bg-elevated);
   border: 0;
   cursor: pointer;
   transition:
@@ -171,9 +172,8 @@
 }
 
 .menuToggle:hover {
-  color: #10120a;
-  border-color: var(--accent-primary);
-  background: var(--accent-primary);
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-primary) 12%, var(--bg-elevated));
 }
 
 .mobile {
@@ -206,9 +206,9 @@
   gap: 8px;
   width: 100%;
   padding: 8px 12px;
-  border: 0;
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-pill);
-  background: var(--bg-elevated);
+  background: color-mix(in srgb, var(--bg-surface) 72%, var(--bg-elevated));
 }
 
 .mobileSearch input {
@@ -262,7 +262,7 @@
 
 .mobileLinkActive {
   color: var(--text-primary);
-  background-color: var(--accent-primary-soft);
+  background-color: color-mix(in srgb, var(--accent-primary) 8%, var(--bg-elevated));
 }
 
 .mobileLinkActive svg {
@@ -338,7 +338,7 @@
     height: 36px;
     padding: 0 10px;
     overflow: hidden;
-    border: 0;
+    border: 1px solid transparent;
     border-radius: var(--radius-pill);
     background: transparent;
     cursor: pointer;

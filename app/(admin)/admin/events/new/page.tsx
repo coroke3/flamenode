@@ -61,7 +61,7 @@ export default async function AdminNewEventPage({
         description={
           templateName
             ? `テンプレート「${templateName}」の設定を読み込みました。開催日時は空欄のまま入力してください。`
-            : "イベント本体を作成します。スロットとイベント管理者は作成後に追加します。"
+            : "イベント本体を作成します。枠とイベント管理者は作成後に追加します。"
         }
         backHref="/admin/events"
         backLabel="イベント一覧へ"

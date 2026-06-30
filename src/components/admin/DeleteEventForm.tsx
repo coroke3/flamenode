@@ -66,7 +66,7 @@ export function DeleteEventForm({
         >
           <strong style={{ fontSize: 13 }}>影響範囲:</strong>
           <ul style={{ margin: "4px 0 0", paddingLeft: 16 }}>
-            <li>スロット: {impact.slotsTotal}件 (予約済み: {impact.reservedSlots}, 提出済み: {impact.submittedSlots})</li>
+            <li>枠: {impact.slotsTotal}件 (予約済み: {impact.reservedSlots}, 提出済み: {impact.submittedSlots})</li>
             <li>紐づく作品: {impact.linkedVideos}件</li>
             <li>スタッフ: {impact.staffCount}人</li>
             {impact.apiEndpointCount > 0 ? (

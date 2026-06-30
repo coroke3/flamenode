@@ -15,6 +15,7 @@ import {
 import { ManageActiveXNotice } from "@/components/layout/ManageActiveXNotice";
 import { NotificationOutboxSummary } from "@/components/notifications/NotificationOutboxSummary";
 import { drizzleManageNotificationFilter } from "@/lib/notifications/display";
+import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import {
   lookupNotificationRecipients,
   type RecipientLookup,
@@ -166,32 +167,29 @@ export default async function ManageNotificationsPage({
           alignItems: "center",
         }}
       >
-        <select name="event" defaultValue={eventFilter} className="fn-input fn-input-sm">
+        <AutoSubmitSelect name="event" defaultValue={eventFilter} className="fn-input fn-input-sm">
           <option value="">すべての担当イベント</option>
           {managedEvents.map((e) => (
             <option key={e.id} value={e.id}>
               {e.title}
             </option>
           ))}
-        </select>
-        <select name="notif" defaultValue={notifFilter} className="fn-input fn-input-sm">
+        </AutoSubmitSelect>
+        <AutoSubmitSelect name="notif" defaultValue={notifFilter} className="fn-input fn-input-sm">
           {MANAGE_NOTIFICATION_FILTER_OPTIONS.map((o) => (
             <option key={o.key} value={o.key}>
               {o.label}
             </option>
           ))}
-        </select>
-        <select name="status" defaultValue={statusFilter} className="fn-input fn-input-sm">
+        </AutoSubmitSelect>
+        <AutoSubmitSelect name="status" defaultValue={statusFilter} className="fn-input fn-input-sm">
           <option value="">すべての状態</option>
           <option value="pending">配信待ち</option>
           <option value="processing">送信中</option>
           <option value="sent">送信済み</option>
           <option value="failed">失敗</option>
           <option value="cancelled">キャンセル</option>
-        </select>
-        <button type="submit" className="fn-btn fn-btn-ghost fn-btn-sm">
-          絞り込み
-        </button>
+        </AutoSubmitSelect>
       </form>
 
       {rows.length === 0 ? (

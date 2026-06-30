@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { withDatabase } from "@/lib/cloudflare";
 import { users } from "@/lib/db/schema";
 import { normalizeXId } from "@/lib/utils/xid";
+import { resolveActiveXUserId } from "@/lib/auth/resolveActiveXId";
 
 export type CurrentUser = {
   id: string;
@@ -73,22 +74,34 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
       .from(users)
       .where(eq(users.id, userId))
       .limit(1);
-    return res[0] ?? null;
+    const userRow = res[0] ?? null;
+    if (!userRow) return null;
+
+    const resolvedActive = await resolveActiveXUserId(
+      db,
+      userId,
+      normalizeXId(userRow.active_x_user_id) || null,
+    );
+
+    return { userRow, resolvedActive };
   });
 
   if (!row) return fallback;
 
+  const { userRow, resolvedActive } = row;
+
   return {
-    id: row.id,
-    name: row.name ?? fallback.name,
-    email: row.email ?? fallback.email,
-    image: row.image ?? fallback.image,
+    id: userRow.id,
+    name: userRow.name ?? fallback.name,
+    email: userRow.email ?? fallback.email,
+    image: userRow.image ?? fallback.image,
     role:
-      row.role === "admin" || row.role === "moderator" ? row.role : "user",
-    is_banned: row.is_banned ?? 0,
-    active_x_user_id: normalizeXId(row.active_x_user_id) || null,
-    is_tos_accepted: row.is_tos_accepted ?? 0,
-    accepted_terms_version_id: row.accepted_terms_version_id ?? null,
-    terms_reaccept_required: row.terms_reaccept_required ?? 0,
+      userRow.role === "admin" || userRow.role === "moderator" ? userRow.role : "user",
+    is_banned: userRow.is_banned ?? 0,
+    active_x_user_id:
+      resolvedActive ?? (normalizeXId(userRow.active_x_user_id) || null),
+    is_tos_accepted: userRow.is_tos_accepted ?? 0,
+    accepted_terms_version_id: userRow.accepted_terms_version_id ?? null,
+    terms_reaccept_required: userRow.terms_reaccept_required ?? 0,
   };
 }

@@ -60,7 +60,7 @@ export const SPREADSHEET_TABLE_OVERRIDES: Record<string, SpreadsheetTableOverrid
       group: "イベント",
       mode: "editable",
     },
-    slots: { label: "スロット", group: "イベント", mode: "editable" },
+    slots: { label: "枠", group: "イベント", mode: "editable" },
 
     videos: { label: "作品", group: "作品", mode: "editable" },
     video_youtube_metadata: {

@@ -7,6 +7,7 @@ import {
   type PublicEventGroupCard,
 } from "@/lib/db/eventGroups";
 import { readStaticJson } from "@/lib/publicData/staticJson";
+import { EventDirectoryNav } from "@/components/event/EventDirectoryNav";
 
 export const metadata: Metadata = {
   title: "イベントグループ",
@@ -30,25 +31,33 @@ export default async function GroupsPage({
   const sp = (await searchParams) ?? {};
   const typeFilter = sp.type && GROUP_TYPE_LABELS[sp.type] ? sp.type : "all";
 
-  const staticPayload = await readStaticJson<{
-    items: PublicEventGroupCard[];
-  }>("groups/index.json");
+  const dbGroups =
+    (await withDatabase(async (db) => {
+      return fetchPublicEventGroups(db, { type: typeFilter });
+    })) ?? [];
+
+  const staticPayload =
+    dbGroups.length === 0
+      ? await readStaticJson<{
+          items: PublicEventGroupCard[];
+        }>("groups/index.json")
+      : null;
   const staticGroups = staticPayload?.items ?? null;
-  const groups = staticGroups
-    ? staticGroups.filter((group) =>
-        typeFilter === "all" ? true : group.group_type === typeFilter,
-      )
-    : ((await withDatabase(async (db) => {
-        return fetchPublicEventGroups(db, { type: typeFilter });
-      })) ?? []);
+
+  const groups =
+    dbGroups.length > 0
+      ? dbGroups
+      : (staticGroups?.filter((group) =>
+          typeFilter === "all" ? true : group.group_type === typeFilter,
+        ) ?? []);
 
   return (
     <div className="fn-public-container fn-page">
-      <header className="fn-page-head fn-page-head--split">
+      <header className="fn-page-head">
         <div className="fn-page-head-main">
           <p className="fn-eyebrow">event groups</p>
           <h1 className="fn-page-title">イベントグループ</h1>
-          <p className="fn-page-lead">系列・ジャンル・関連イベントから探す</p>
+          <EventDirectoryNav active="groups" />
         </div>
       </header>
 

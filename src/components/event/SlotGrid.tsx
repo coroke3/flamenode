@@ -22,7 +22,6 @@ export interface SlotRow {
   slot_kind: "time" | "count" | null;
   slot_label: string | null;
   start_time: number | null;
-  end_time: number | null;
   sort_order: number | null;
   status: "available" | "reserved" | "submitted";
   display_name: string | null;
@@ -164,7 +163,7 @@ export function SlotGrid({
       currentGroup.rows.push(
         ...part.rows.map((slot): SlotDisplayRow => ({ kind: "slot", slot })),
       );
-      previousPartEnd = part.end_time ?? part.start_time ?? previousPartEnd;
+      previousPartEnd = part.last_start_time ?? part.start_time ?? previousPartEnd;
     }
 
     return nextGroups;

@@ -13,6 +13,7 @@ import { events as eventsTable } from "@/lib/db/schema";
 import { VideoCard } from "@/components/video/VideoCard";
 import { Icon } from "@/components/ui/Icon";
 import { Pagination } from "@/components/ui/Pagination";
+import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import { formatUnix } from "@/lib/utils/format";
 import { buildPageMetadata } from "@/lib/seo";
 import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
@@ -102,25 +103,24 @@ export default async function ListPage({
               archive — {total.toLocaleString()} works
             </span>
             <h1 className="fn-display fn-page-title">作品一覧</h1>
-            <p className="fn-jp fn-page-lead">作品インデックス</p>
           </div>
           <div className="fn-cr-controls" aria-label="表示形式">
-            <div className="fn-cr-segment">
+            <div className="fn-cr-segment fn-cr-segment--icon-only">
               <Link
                 href={`/list?${params({ view: "grid", page: "1" })}`}
                 className={`fn-cr-seg-btn ${view === "grid" ? "is-active" : ""}`}
                 aria-current={view === "grid" ? "page" : undefined}
+                aria-label="タイル表示"
               >
-                <Icon name="grid" size={12} aria-hidden />
-                Tile
+                <Icon name="grid" size={14} aria-hidden />
               </Link>
               <Link
                 href={`/list?${params({ view: "index", page: "1" })}`}
                 className={`fn-cr-seg-btn ${view === "index" ? "is-active" : ""}`}
                 aria-current={view === "index" ? "page" : undefined}
+                aria-label="一覧表示"
               >
-                <Icon name="list" size={12} aria-hidden />
-                Index
+                <Icon name="list" size={14} aria-hidden />
               </Link>
             </div>
           </div>
@@ -134,23 +134,20 @@ export default async function ListPage({
               type="search"
               name="q"
               defaultValue={q}
-              placeholder="作品名 / 作者名 / 楽曲"
+              placeholder="作品名 / 作者 / 楽曲 / コメント など"
               autoComplete="off"
             />
           </label>
           <input type="hidden" name="view" value={view} />
           <div className={styles.controlsGroup}>
             <span className="fn-list-toolbar-label">並び替え</span>
-            <select className="fn-select" name="sort" defaultValue={sort}>
+            <AutoSubmitSelect className="fn-select" name="sort" defaultValue={sort}>
               <option value="new">新着順</option>
               <option value="old">古い順</option>
               <option value="score">おすすめ順</option>
-            </select>
+            </AutoSubmitSelect>
           </div>
           {event ? <input type="hidden" name="event" value={event} /> : null}
-          <button type="submit" className="fn-btn fn-btn-primary">
-            適用
-          </button>
           {q || sort !== "new" || event ? (
             <Link href={LIST_HREF} className="fn-btn fn-btn-ghost">
               リセット
@@ -189,7 +186,7 @@ export default async function ListPage({
       ) : (
         <>
           {view === "grid" ? (
-            <div className={`fn-list-grid ${styles.grid}`}>
+            <div className="fn-list-grid">
               {videos.map((v, index) => (
                 <div key={`${v.id}-list-${index}`} className={styles.gridItem}>
                   <VideoCard video={v} />

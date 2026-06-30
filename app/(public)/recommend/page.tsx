@@ -230,10 +230,6 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
       <header className="fn-page-head">
         <span className="fn-eyebrow">explore</span>
         <h1 className="fn-display fn-page-title">次に見る作品を探す</h1>
-        <p className="fn-jp fn-page-lead">
-          最近の動き、新着、見落としがちな作品、イベント、クリエイター。
-          いくつかの切り口から、今見たい一本に出会えるように並べています。
-        </p>
       </header>
 
       <nav className={`fn-chip-scroll ${styles.chips}`} aria-label="表示カテゴリ">
@@ -267,7 +263,6 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
       <Rail
         id="rail-hot"
         title="伸びている"
-        subtitle="スコアが高く、最近よく見られている作品"
         items={hot}
         ariaLabel="伸びている作品"
       />
@@ -275,7 +270,6 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
       <Rail
         id="rail-fresh"
         title="新着だけど良さそう"
-        subtitle="ここ最近に投稿された新しい作品"
         items={fresh}
         ariaLabel="新着作品"
         moreHref="/list?sort=new"
@@ -284,7 +278,6 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
       <Rail
         id="rail-underrated"
         title="見落としがち"
-        subtitle="目立つランキングではないけれど良い作品"
         items={underrated}
         ariaLabel="見落としがちな作品"
       />
@@ -292,7 +285,6 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
       <Rail
         id="rail-events"
         title="イベントから見る"
-        subtitle="イベントごとの文脈が見える作品"
         items={eventsRail}
         ariaLabel="イベントごとの作品"
         moreHref="/event"
@@ -301,7 +293,6 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
       <Rail
         id="rail-more"
         title="まとめて見る"
-        subtitle="カテゴリに入りきらなかった公開作品も含めて広めに並べています"
         items={more}
         ariaLabel="さらに探す作品"
         moreHref="/list"
@@ -310,7 +301,6 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
       <section id="rail-creators" className={styles.section}>
         <SectionTitle
           title="クリエイター発見"
-          subtitle="投稿数や参加作品からピックアップ"
           moreHref="/user"
         />
         {creators.length === 0 ? (

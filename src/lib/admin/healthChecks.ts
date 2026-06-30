@@ -146,7 +146,7 @@ async function checkAvailableSlotWithVideo(
   const count = Number(countRows[0]?.c ?? 0);
   return {
     id: "available_slot_with_video",
-    label: "available スロットに video_id あり",
+    label: "available 枠に video_id あり",
     status: count === 0 ? "ok" : "warn",
     count,
     samples: sampleRows.slice(0, 5).map((r) => r.id),
@@ -168,7 +168,7 @@ async function checkSubmittedSlotWithoutVideo(
   const count = Number(countRows[0]?.c ?? 0);
   return {
     id: "submitted_slot_without_video",
-    label: "submitted スロットに video_id なし",
+    label: "submitted 枠に video_id なし",
     status: count === 0 ? "ok" : "warn",
     count,
     samples: sampleRows.slice(0, 5).map((r) => r.id),
@@ -248,15 +248,14 @@ async function checkVoidedVideoVisible(db: AnyDb): Promise<HealthCheckResult> {
   };
 }
 
-/** slot 時間重複チェック (同一 event 内で slot_kind=time かつ start_time/end_time が重複) */
-async function checkSlotTimeOverlap(db: AnyDb): Promise<HealthCheckResult> {
-  // slot_kind=time かつ start_time/end_time が両方 non-null のスロットを取得
+/** Detect same-start slots that are not part of the same reservation group. */
+async function checkSlotDuplicateStartTime(db: AnyDb): Promise<HealthCheckResult> {
+  // Slot end_time is intentionally ignored; continuous slots are start/gap based.
   const rows = await db
     .select({
       id: slotsTable.id,
       event_id: slotsTable.event_id,
       start_time: slotsTable.start_time,
-      end_time: slotsTable.end_time,
       reservation_group_id: slotsTable.reservation_group_id,
     })
     .from(slotsTable)
@@ -264,11 +263,10 @@ async function checkSlotTimeOverlap(db: AnyDb): Promise<HealthCheckResult> {
       and(
         eq(slotsTable.slot_kind, "time"),
         isNotNull(slotsTable.start_time),
-        isNotNull(slotsTable.end_time),
       ),
     );
 
-  // event_id ごとにグループ化
+  // Group by event_id before comparing start_time.
   const byEvent = new Map<string, typeof rows>();
   for (const row of rows) {
     const key = row.event_id;
@@ -280,25 +278,22 @@ async function checkSlotTimeOverlap(db: AnyDb): Promise<HealthCheckResult> {
     list.push(row);
   }
 
-  const overlapSamples: string[] = [];
-  let overlapCount = 0;
+  const duplicateSamples: string[] = [];
+  let duplicateCount = 0;
 
   for (const [, slotList] of byEvent) {
-    // start_time 昇順ソート (区間スイープラインで全ペア検出)
+    // Compare only rows with the same start_time.
     slotList.sort((a, b) => (a.start_time ?? 0) - (b.start_time ?? 0));
 
     for (let i = 0; i < slotList.length; i++) {
       const cur = slotList[i];
-      const curEnd = cur.end_time ?? 0;
-      // cur.end_time より start_time が小さい後続スロットすべてと比較する。
-      // 隣接比較だけだと「長い枠が後続の複数枠を覆う」ケースを取りこぼすので、
-      // start_time が cur.end_time 以上になるまでループを進める。
+      const curStart = cur.start_time ?? 0;
       for (let j = i + 1; j < slotList.length; j++) {
         const next = slotList[j];
         const nextStart = next.start_time ?? 0;
-        if (nextStart >= curEnd) break;
+        if (nextStart !== curStart) break;
 
-        // reservation_group_id が同じペアは連続枠として除外
+        // Same reservation_group_id means these rows are one continuous slot.
         if (
           cur.reservation_group_id != null &&
           cur.reservation_group_id === next.reservation_group_id
@@ -306,23 +301,23 @@ async function checkSlotTimeOverlap(db: AnyDb): Promise<HealthCheckResult> {
           continue;
         }
 
-        overlapCount++;
-        if (overlapSamples.length < 5) {
-          overlapSamples.push(`${cur.id} / ${next.id}`);
+        duplicateCount++;
+        if (duplicateSamples.length < 5) {
+          duplicateSamples.push(`${cur.id} / ${next.id}`);
         }
       }
     }
   }
 
   return {
-    id: "slot_time_overlap",
-    label: "スロット時間重複 (slot_kind=time)",
-    status: overlapCount === 0 ? "ok" : "warn",
-    count: overlapCount,
-    samples: overlapSamples,
+    id: "slot_duplicate_start_time",
+    label: "同一開始時刻の別枠 (slot_kind=time)",
+    status: duplicateCount === 0 ? "ok" : "warn",
+    count: duplicateCount,
+    samples: duplicateSamples,
     note:
-      overlapCount > 0
-        ? "同一 event 内で時間が重複しているスロットペアがあります。reservation_group_id が異なるペアのみ検出。"
+      duplicateCount > 0
+        ? "同一 event 内に同じ開始時刻で、reservation_group_id が異なる枠ペアがあります。"
         : undefined,
   };
 }
@@ -820,7 +815,7 @@ export async function runHealthChecks(db: AnyDb): Promise<HealthCheckResult[]> {
     checkReservationGroupUserMix(db),
     checkPublicVideoWithoutYoutubeId(db),
     checkVoidedVideoVisible(db),
-    checkSlotTimeOverlap(db),
+    checkSlotDuplicateStartTime(db),
     checkLikeCountDrift(db),
     checkMissingVideoStats(db),
     checkMissingVideoYoutubeMetadata(db),

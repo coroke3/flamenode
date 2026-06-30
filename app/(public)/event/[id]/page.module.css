@@ -1,9 +1,9 @@
 .page {
-  --event-panel: color-mix(in srgb, var(--bg-surface) 88%, var(--event-accent, var(--accent-primary)) 12%);
-  --event-panel-soft: color-mix(in srgb, var(--bg-surface) 96%, var(--event-accent, var(--accent-primary)) 4%);
-  --event-slot-reserved: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 20%, var(--bg-surface));
-  --event-slot-open: color-mix(in srgb, var(--bg-base) 88%, var(--event-accent, var(--accent-primary)) 12%);
-  --event-slot-submitted: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 92%, #ffffff);
+  --event-panel: color-mix(in srgb, var(--bg-surface) 94%, var(--event-accent, var(--accent-primary)) 6%);
+  --event-panel-soft: color-mix(in srgb, var(--bg-surface) 98%, var(--event-accent, var(--accent-primary)) 2%);
+  --event-slot-reserved: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 10%, var(--bg-surface));
+  --event-slot-open: color-mix(in srgb, var(--bg-base) 95%, var(--event-accent, var(--accent-primary)) 5%);
+  --event-slot-submitted: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 26%, var(--bg-surface));
   width: 100%;
   margin: 0;
   color: var(--text-primary);
@@ -24,7 +24,7 @@
   gap: 32px;
   align-items: start;
   padding: 34px 0 28px;
-  border-bottom: 0;
+  border-bottom: 1px solid var(--hairline, var(--border-subtle));
 }
 
 .heroCopy { min-width: 0; }
@@ -79,8 +79,8 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
-  min-height: 84px;
-  padding: 18px 16px 16px;
+  min-height: 72px;
+  padding: 14px 12px 12px;
   background: var(--event-panel-soft);
   border: 0;
   border-radius: var(--r-card);
@@ -88,8 +88,8 @@
 
 .statCard strong {
   display: block;
-  margin-top: 10px;
-  font: 900 clamp(23px, 2vw, 30px)/1 var(--font-display);
+  margin-top: 8px;
+  font: 800 clamp(18px, 1.6vw, 22px)/1.1 var(--font-display);
   font-variant-numeric: tabular-nums;
 }
 
@@ -109,71 +109,6 @@
 .sectionTitle { margin: 0; font: 900 clamp(34px, 3.6vw, 46px)/0.95 var(--font-display); }
 .sectionTitleLine span { color: var(--text-muted); font-size: 12px; line-height: 1.6; }
 
-.legend {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  color: var(--text-muted);
-  font: 10px var(--font-mono);
-}
-
-.legend span { display: inline-flex; align-items: center; gap: 6px; }
-.legend i { width: 12px; height: 12px; border: 1px solid var(--border-strong); }
-.legend i[data-kind="available"] { background: var(--event-slot-open); }
-.legend i[data-kind="reserved"] { background: var(--event-slot-reserved); }
-.legend i[data-kind="submitted"] { background: var(--event-slot-submitted); }
-.legend i[data-kind="priority"] { background: repeating-linear-gradient(45deg, var(--bg-elevated) 0 8px, var(--bg-surface) 8px 14px); }
-
-.slotTableWrap {
-  position: relative;
-  overflow-x: auto;
-  border: 0;
-  border-radius: var(--r-card);
-  background: var(--bg-surface);
-  scrollbar-width: thin;
-  -webkit-overflow-scrolling: touch;
-}
-
-.slotTable {
-  width: 100%;
-  min-width: 920px;
-  border-collapse: collapse;
-  table-layout: fixed;
-  background: var(--bg-surface);
-  font-size: 13px;
-}
-
-.slotTable th,
-.slotTable td {
-  height: 64px;
-  padding: 12px;
-  border: 1px solid var(--hairline, var(--border-subtle));
-  text-align: left;
-}
-
-.slotTable thead th,
-.slotTable tbody th {
-  height: 38px;
-  background: var(--bg-elevated);
-  color: var(--text-muted);
-  font: 900 12px/1 var(--font-mono);
-  text-align: center;
-  white-space: nowrap;
-}
-
-.slotTable tbody th { width: 78px; text-align: left; }
-.slotTable td { position: relative; background: var(--event-slot-reserved); }
-.slotTable td[data-status="available"] { background: var(--event-slot-open); color: var(--text-primary); }
-.slotTable td[data-status="reserved"] { background: var(--event-slot-reserved); color: var(--text-primary); }
-.slotTable td[data-status="submitted"] { background: var(--event-slot-submitted); color: var(--accent-ink); }
-.slotTable td[data-status="priority"] { background: repeating-linear-gradient(45deg, var(--bg-elevated) 0 8px, var(--bg-surface) 8px 14px); color: var(--text-muted); }
-.slotTable td[data-status="empty"] { background: var(--bg-base); color: var(--text-faint, var(--text-muted)); }
-.slotTable td span { display: block; overflow: hidden; color: inherit; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
-.slotTable td em { position: absolute; top: 8px; right: 10px; color: color-mix(in srgb, currentColor 70%, transparent); font-size: 10px; font-style: normal; font-weight: 800; }
-.slotTable td[data-status="reserved"] em { color: var(--event-accent, var(--accent-primary)); }
-.slotTable td[data-status="priority"] em { color: var(--text-faint, var(--text-muted)); }
-
 .slotSummaryGrid {
   display: grid;
   grid-template-columns: minmax(260px, 1.45fr) repeat(auto-fit, minmax(160px, 0.82fr));
@@ -191,18 +126,15 @@
   min-height: 156px;
   height: 100%;
   padding: 16px;
-  border: 1px solid var(--hairline, var(--border-subtle));
+  border: 0;
   background: var(--bg-surface);
 }
 
 .slotSummaryCard[data-featured="true"] {
   min-height: 156px;
   padding: 18px 22px;
-  border-color: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 56%, var(--border-subtle));
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--event-accent, var(--accent-primary)) 18%, transparent), transparent 58%),
-    var(--event-panel-soft);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--event-accent, var(--accent-primary)) 24%, transparent);
+  background: var(--event-panel-soft);
+  box-shadow: none;
 }
 
 .slotSummaryTop {
@@ -228,12 +160,12 @@
 
 .slotSummaryCount {
   color: var(--text-primary);
-  font: 900 clamp(26px, 3.5vw, 38px)/0.95 var(--font-display);
+  font: 800 clamp(22px, 2.8vw, 30px)/0.95 var(--font-display);
 }
 
 .slotSummaryCard[data-featured="true"] .slotSummaryCount {
   align-self: end;
-  font-size: clamp(46px, 5.4vw, 64px);
+  font-size: clamp(34px, 4.2vw, 48px);
 }
 
 .slotSummaryCount small {
@@ -254,7 +186,7 @@
 
 .slotSummaryCard[data-featured="true"] .slotSummaryProgress {
   height: 10px;
-  background: color-mix(in srgb, var(--bg-elevated) 74%, var(--event-accent, var(--accent-primary)) 26%);
+  background: color-mix(in srgb, var(--bg-elevated) 88%, var(--event-accent, var(--accent-primary)) 12%);
 }
 
 .slotSummaryProgress i {
@@ -283,30 +215,66 @@
   gap: 2px;
 }
 
-.crewGrid,
-.videoGrid {
+.crewList {
   display: grid;
-  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px 18px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.crewGrid { grid-template-columns: repeat(auto-fit, minmax(210px, 232px)); }
-.videoGrid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 26px 24px; }
-
-.crewCard {
+.crewRow {
   display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px 10px;
+  min-width: 0;
+  width: 100%;
+}
+
+.crewAvatar {
+  flex-shrink: 0;
+  background: var(--bg-elevated);
+  object-fit: cover;
+}
+
+.crewAvatarFallback {
+  color: var(--text-secondary);
+  font: 900 16px/1 var(--font-display);
+}
+
+.crewName {
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.crewName:hover {
+  color: var(--event-accent, var(--accent-primary));
+}
+
+.crewRole {
+  color: var(--event-accent, var(--accent-primary));
+  font: 700 12px/1.2 var(--font-mono);
+  white-space: nowrap;
+}
+
+.crewXLink {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
-  min-height: 120px;
-  padding: 14px 14px;
-  background: var(--event-panel-soft);
+  color: var(--text-muted);
+  font: 12px var(--font-mono);
+  text-decoration: none;
+  white-space: nowrap;
 }
 
-.crewTop { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.crewTop img, .crewTop span { width: 42px; height: 42px; border-radius: 50%; background: var(--bg-elevated); }
-.crewTop img { object-fit: cover; }
-.crewTop span { display: grid; place-items: center; color: var(--text-secondary); font: 900 20px/1 var(--font-display); }
-.crewTop em { color: var(--event-accent, var(--accent-primary)); font: 900 10px/1 var(--font-mono); font-style: normal; letter-spacing: 0.16em; text-transform: uppercase; }
-.crewCard strong { font-size: 16px; font-weight: 900; }
-.crewCard small, .crewCard p { margin: 0; color: var(--text-muted); font: 12px var(--font-mono); }
+.crewXLink:hover {
+  color: var(--text-secondary);
+}
 .emptyText { margin: 0; color: var(--text-muted); font-size: 13px; }
 
 @media (max-width: 1080px) {
@@ -339,7 +307,9 @@
   }
   .heroLead { font-size: 13px; line-height: 1.65; }
   .statsGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .crewGrid, .videoGrid { grid-template-columns: 1fr; }
+  .crewList {
+    grid-template-columns: 1fr;
+  }
   .heroActions { align-items: stretch; width: 100%; }
   .statusPill { align-self: flex-start; }
   .guideLink {
@@ -354,27 +324,23 @@
   .statusPill {
     min-height: 36px;
   }
-  .statCard { min-height: 68px; padding: 12px 10px; }
-  .statCard strong { font-size: 22px; }
+  .statCard { min-height: 64px; padding: 10px 8px; }
+  .statCard strong { font-size: 18px; }
   .section { margin-top: 48px; }
   .sectionHead { align-items: flex-start; flex-direction: column; gap: 12px; margin-bottom: 14px; }
   .sectionTitleLine { gap: 8px; }
   .sectionTitleLine span { font-size: 11.5px; }
-  .legend { justify-content: flex-start; gap: 8px 10px; }
-  .slotTable { min-width: 760px; }
   .slotSummaryGrid { grid-template-columns: 1fr; }
   .slotSummaryCard[data-featured="true"] {
     min-height: 156px;
     padding: 16px;
   }
   .slotSummaryCard[data-featured="true"] .slotSummaryCount {
-    font-size: clamp(42px, 13vw, 58px);
+    font-size: clamp(32px, 10vw, 44px);
   }
   .reserveButton { width: 100%; }
-  .videoGrid { gap: 20px; }
 }
 
 @media (max-width: 360px) {
   .statsGrid { grid-template-columns: 1fr; }
-  .slotTable { min-width: 700px; }
 }

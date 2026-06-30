@@ -28,7 +28,10 @@ import { generateId } from "@/lib/utils/id";
 import { detectSupportedImageUpload } from "@/lib/utils/imageUpload";
 import { normalizeXId } from "@/lib/utils/xid";
 import { normalizeHttpUrl } from "@/lib/utils/url";
-import { normalizeSocialLinksForStorage } from "@/lib/socialLinks";
+import {
+  normalizeSocialLinksForStorage,
+  validateSocialLinksJson,
+} from "@/lib/socialLinks";
 import { buildSlotParts } from "@/lib/utils/slotGroupingCore";
 import {
   parseStagePermissionAnswers,
@@ -83,7 +86,22 @@ const videoFormSchema = z.object({
     (val) => (typeof val === "string" ? normalizeHttpUrl(val, { maxLength: 500 }) : val),
     z.string().trim().max(500).optional().nullable(),
   ),
-  other_social_links: z.string().trim().max(1000).optional().nullable(),
+  other_social_links: z
+    .string()
+    .trim()
+    .max(1000)
+    .optional()
+    .nullable()
+    .superRefine((value, ctx) => {
+      const result = validateSocialLinksJson(value ?? "");
+      if (result.ok) return;
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          result.message ??
+          "SNSリンクには、Email はメールアドレス、それ以外は http/https の有効なURLを入力してください。",
+      });
+    }),
   title: z.string().trim().min(1).max(120),
   youtube_url: z.preprocess(
     (val) => (typeof val === "string" ? normalizeHttpUrl(val, { maxLength: 500 }) ?? val : val),
@@ -305,7 +323,6 @@ async function resolvePartFromSlot(
     .select({
       id: slots.id,
       start_time: slots.start_time,
-      end_time: slots.end_time,
       slot_kind: slots.slot_kind,
       sort_order: slots.sort_order,
     })
@@ -936,7 +953,7 @@ export async function submitSlotVideo(
   const approvedXIds = guard.approvedXIds;
 
   const slotId = String(formData.get("slot_id") ?? "");
-  if (!slotId) return { ok: false, message: "スロット ID がありません。" };
+  if (!slotId) return { ok: false, message: "枠 ID がありません。" };
 
   const parsed = videoFormSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
@@ -964,7 +981,7 @@ export async function submitSlotVideo(
       .where(and(eq(slots.id, slotId), slotOwnerWhere)!)
       .limit(1)
   )[0];
-  if (!slotRow) return { ok: false, message: "スロットが見つかりません。" };
+  if (!slotRow) return { ok: false, message: "枠が見つかりません。" };
 
   const now = Math.floor(Date.now() / 1000);
   const videoId = slotRow.video_id ?? generateId("v");

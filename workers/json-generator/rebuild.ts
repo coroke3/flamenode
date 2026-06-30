@@ -128,8 +128,7 @@ async function rebuildGroupsIndex(env: Env): Promise<void> {
               FROM event_group_events ge2
               INNER JOIN events e2 ON e2.id = ge2.event_id
               WHERE ge2.event_group_id = g.id
-                AND e2.is_active = 1
-                AND e2.is_archived = 0
+                AND (e2.is_active = 1 OR e2.is_archived = 1)
               ORDER BY e2.start_time DESC
               LIMIT 1
             ) AS latest_event_title,
@@ -138,8 +137,7 @@ async function rebuildGroupsIndex(env: Env): Promise<void> {
      LEFT JOIN event_group_events ge ON ge.event_group_id = g.id
      LEFT JOIN events e
        ON e.id = ge.event_id
-      AND e.is_active = 1
-      AND e.is_archived = 0
+      AND (e.is_active = 1 OR e.is_archived = 1)
      WHERE g.visibility_status = 'public'
      GROUP BY g.id
      ORDER BY g.sort_order ASC, g.name ASC
@@ -174,8 +172,7 @@ async function rebuildEventGroup(env: Env, targetId: string): Promise<void> {
      FROM event_group_events ge
      INNER JOIN events e ON e.id = ge.event_id
      WHERE ge.event_group_id = ?
-       AND e.is_active = 1
-       AND e.is_archived = 0
+       AND (e.is_active = 1 OR e.is_archived = 1)
      ORDER BY ge.sort_order ASC, e.start_time DESC, e.id ASC`,
   )
     .bind(groupId)

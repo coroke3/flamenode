@@ -379,7 +379,7 @@ export async function runIntegrityChecks(
       area: "slots",
       title: "slots.event_id 孤立",
       severity: "danger",
-      description: "スロットの event_id に対応する events.id が無い状態。",
+      description: "枠の event_id に対応する events.id が無い状態。",
       from: sql`slots`,
       where: sql`NOT EXISTS (SELECT 1 FROM events e WHERE e.id = slots.event_id)`,
       sampleSelect: {
@@ -388,7 +388,7 @@ export async function runIntegrityChecks(
         status: sql<string>`status`,
       },
       recommendation:
-        "イベント削除後に枠が残った可能性があります。イベント復元またはスロット削除を検討してください。",
+        "イベント削除後に枠が残った可能性があります。イベント復元または枠削除を検討してください。",
       sqlPreview: "DELETE FROM slots WHERE id = '<slot_id>';",
       mapIssue: (r) => ({
         id: text(r.id),
@@ -427,7 +427,7 @@ export async function runIntegrityChecks(
       area: "slots",
       title: "submitted 枠に video_id なし",
       severity: "danger",
-      description: "status=submitted なのに video_id が空のスロット。",
+      description: "status=submitted なのに video_id が空の枠。",
       from: sql`slots`,
       where: sql`status = 'submitted' AND (video_id IS NULL OR trim(video_id) = '')`,
       sampleSelect: {
@@ -451,7 +451,7 @@ export async function runIntegrityChecks(
       area: "slots",
       title: "available 枠に video_id 残存",
       severity: "warning",
-      description: "status=available なのに video_id が残っているスロット。",
+      description: "status=available なのに video_id が残っている枠。",
       from: sql`slots`,
       where: sql`status = 'available' AND video_id IS NOT NULL AND trim(video_id) <> ''`,
       sampleSelect: {
@@ -472,27 +472,35 @@ export async function runIntegrityChecks(
     }),
     makeCheck({
       db,
-      id: "slots_time_inverted",
+      id: "slots_duplicate_start_time",
       area: "slots",
-      title: "スロット時間の逆転",
+      title: "同一開始時刻の別枠",
       severity: "warning",
-      description: "start_time > end_time のスロット。",
+      description:
+        "同一 event 内に同じ start_time で、reservation_group_id が異なる枠が存在する状態。",
       from: sql`slots`,
-      where: sql`start_time IS NOT NULL AND end_time IS NOT NULL AND start_time > end_time`,
+      where: sql`start_time IS NOT NULL
+        AND slot_kind = 'time'
+        AND EXISTS (
+          SELECT 1 FROM slots s2
+          WHERE s2.event_id = slots.event_id
+            AND s2.id <> slots.id
+            AND s2.start_time = slots.start_time
+            AND COALESCE(s2.reservation_group_id, '') <> COALESCE(slots.reservation_group_id, '')
+        )`,
       sampleSelect: {
         id: sql<string>`id`,
         event_id: sql<string>`event_id`,
         start_time: sql<number>`start_time`,
-        end_time: sql<number>`end_time`,
       },
       recommendation:
-        "開始・終了時刻を入れ替えるか、正しい時刻へ修正してください。",
+        "連続枠なら同じ reservation_group_id に揃え、別枠なら開始時刻または部の切り方を見直してください。",
       sqlPreview:
-        "UPDATE slots SET start_time = <start>, end_time = <end> WHERE id = '<slot_id>';",
+        "-- Review start_time and reservation_group_id for the sampled slots.",
       mapIssue: (r) => ({
         id: text(r.id),
         title: `slot:${text(r.id)}`,
-        description: `${text(r.start_time)} > ${text(r.end_time)}`,
+        description: `start_time:${text(r.start_time)}`,
         adminHref: eventHref(text(r.event_id)),
       }),
     }),

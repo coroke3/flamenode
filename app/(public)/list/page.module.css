@@ -1,57 +1,12 @@
+.page {
+  width: 100%;
+  margin: 0;
+}
+
 .controlsGroup {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.controlsLabel {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  color: var(--text-muted);
-  text-transform: uppercase;
-}
-
-.viewSwitch {
-  display: inline-flex;
-  gap: 4px;
-  padding: 3px;
-  margin-bottom: 20px;
-  border: 0;
-  border-radius: var(--r-pill);
-  background: var(--bg-elevated);
-  padding: 2px;
-  gap: 2px;
-}
-
-.viewButton,
-.viewButtonActive {
-  min-height: 30px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 10px;
-  border-radius: 4px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-
-.viewButton:hover {
-  color: var(--text-primary);
-}
-
-.viewButtonActive {
-  color: var(--accent-ink);
-  background: var(--accent-primary);
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--d-gap);
 }
 
 @media (max-width: 640px) {
@@ -59,27 +14,6 @@
     flex-direction: column;
     align-items: stretch;
     width: 100%;
-  }
-
-  .viewSwitch {
-    display: flex;
-    width: 100%;
-    margin-bottom: 16px;
-  }
-
-  .viewButton,
-  .viewButtonActive {
-    flex: 1;
-    justify-content: center;
-    min-height: 44px;
-    padding: 0 12px;
-    font-size: 12px;
-  }
-
-  .pagination {
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 24px;
   }
 
   .indexWrap {
@@ -93,22 +27,9 @@
   }
 }
 
-@media (max-width: 430px) {
-  .grid {
-    grid-template-columns: 1fr;
-  }
-}
-
 .gridItem,
 .gridItem :global(a) {
   width: 100%;
-}
-
-.pagination {
-  display: flex;
-  justify-content: center;
-  gap: 12px;
-  margin-top: 32px;
 }
 
 .indexWrap {
@@ -146,7 +67,7 @@
 }
 
 .indexTable tbody tr:hover {
-  background: color-mix(in srgb, var(--accent-primary) 7%, transparent);
+  background: color-mix(in srgb, var(--accent-primary) 4%, transparent);
 }
 
 .codeCell {
@@ -191,9 +112,9 @@
   font-weight: 700;
 }
 
-.indexTable tbody tr:hover .indexTitle,
 .arrowCell a:hover {
-  color: var(--accent-primary);
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-primary) 8%, var(--bg-elevated));
 }
 
 .indexCreator {
@@ -212,23 +133,6 @@
   place-items: center;
   width: 28px;
   height: 28px;
+  border-radius: var(--r-pill, 6px);
   color: var(--text-muted);
-}
-
-.pageBadge {
-  align-self: center;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-@media (min-width: 700px) {
-  .grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-@media (min-width: 1024px) {
-  .grid {
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  }
 }

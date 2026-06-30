@@ -16,6 +16,7 @@ import { NotificationPayloadButton } from "@/components/admin/NotificationPayloa
 import { NotificationBulkRetryButton } from "@/components/admin/NotificationBulkRetryButton";
 import { NotificationForceResendButton } from "@/components/admin/NotificationForceResendButton";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { NotificationOutboxSummary } from "@/components/notifications/NotificationOutboxSummary";
 import {
@@ -305,13 +306,13 @@ export default async function AdminNotificationsPage({
         {status !== "all" ? (
           <input type="hidden" name="status" value={status} />
         ) : null}
-        <select name="cat" defaultValue={catFilter} className="fn-input fn-input-sm">
+        <AutoSubmitSelect name="cat" defaultValue={catFilter} className="fn-input fn-input-sm">
           {ADMIN_NOTIFICATION_CATEGORY_OPTIONS.map((o) => (
             <option key={o.key} value={o.key}>
               {o.label}
             </option>
           ))}
-        </select>
+        </AutoSubmitSelect>
         <input
           name="type"
           defaultValue={typeFilter}
@@ -333,9 +334,6 @@ export default async function AdminNotificationsPage({
           className="fn-input fn-input-sm"
           style={{ minWidth: 200 }}
         />
-        <button type="submit" className="fn-btn fn-btn-ghost fn-btn-sm">
-          絞り込み
-        </button>
         {typeFilter || eventFilter || qFilter || catFilter !== "all" ? (
           <Link
             href={status === "all" ? "/admin/notifications" : `/admin/notifications?status=${status}`}

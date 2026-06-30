@@ -23,6 +23,7 @@ import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
 import { parseSocialLinks } from "@/lib/socialLinks";
 import { normalizePortfolioContact } from "@/lib/profileContact";
 import { countablePublicVideoCondition } from "@/lib/db/queries";
+import { ProfileSocialLinks } from "@/components/user/ProfileSocialLinks";
 
 export const dynamic = "force-dynamic";
 
@@ -291,6 +292,7 @@ export default async function UserPage({
     sameAs: [
       `https://x.com/${user.id}`,
       user.youtube_channel_url,
+      ...socialLinks.map((link) => link.url),
     ].filter(Boolean),
   };
 
@@ -311,50 +313,27 @@ export default async function UserPage({
         )}
         <div className={styles.profileBody}>
           <h1 className={`fn-profile-name ${styles.name}`}>{profileName}</h1>
-          <div className={styles.socialLine}>
-            <a href={`https://x.com/${user.id}`} target="_blank" rel="noopener noreferrer">
-              X @ {user.id}
-            </a>
-            {user.youtube_channel_url ? (
-              <a
-                href={user.youtube_channel_url}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <Icon name="youtube" size={12} aria-hidden />
-                youtube.com/@{user.id}
-              </a>
-            ) : null}
-          </div>
+          <ProfileSocialLinks
+            className={styles.socialLine}
+            xUserId={user.id}
+            youtubeChannelUrl={user.youtube_channel_url}
+            socialLinks={socialLinks}
+          />
         </div>
       </section>
 
-      {user.profile_text || portfolioContact || socialLinks.length > 0 ? (
+      {user.profile_text || portfolioContact ? (
         <section className={styles.portfolioBlocks} aria-label="Portfolio">
           {user.profile_text ? (
             <article className={styles.portfolioBlock}>
               <span>About</span>
-              <h2>自己紹介</h2>
               <p>{user.profile_text}</p>
             </article>
           ) : null}
-          {portfolioContact || socialLinks.length > 0 ? (
+          {portfolioContact ? (
             <article className={styles.portfolioBlock}>
               <span>Contact</span>
-              <h2>連絡先</h2>
-              {portfolioContact ? <p>{portfolioContact}</p> : null}
-              {socialLinks.length > 0 ? (
-                <ul className={styles.socialLinks}>
-                  {socialLinks.map((link) => (
-                    <li key={`${link.type}-${link.url}`}>
-                      <a href={link.url} target="_blank" rel="noopener noreferrer">
-                        {link.type}
-                        <Icon name="external" size={11} aria-hidden />
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
+              <p>{portfolioContact}</p>
             </article>
           ) : null}
         </section>
@@ -374,7 +353,7 @@ export default async function UserPage({
             </div>
           ) : (
             <>
-              <div className={styles.grid}>
+              <div className="fn-video-grid">
                 {ownVideos.map((v, index) => (
                   <div key={`${v.id}-own-${index}`} className={styles.workCard}>
                     <VideoCard video={v} />
@@ -398,7 +377,7 @@ export default async function UserPage({
           {collabTotal > 0 ? (
             <section className={styles.subSection}>
               <h2 className={styles.subTitle}>参加作品</h2>
-              <div className={styles.grid}>
+              <div className="fn-video-grid">
                 {collabVideos.map((v, index) => (
                   <div key={`${v.id}-collab-${index}`} className={styles.workCard}>
                     <VideoCard video={v} />

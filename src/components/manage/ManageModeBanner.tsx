@@ -20,7 +20,7 @@ export function ManageModeBanner({
       label="イベント運営"
       style={style}
     >
-      担当イベントの審査・スロット・通知を確認できます。サイト全体の管理は管理者のみ
+      担当イベントの審査・枠・通知を確認できます。サイト全体の管理は管理者のみ
       <strong> /admin</strong> で行います。
     </ConsoleModeBanner>
   );

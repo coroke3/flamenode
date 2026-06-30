@@ -20,6 +20,7 @@ import { SettingsStatusPill } from "@/components/settings/SettingsStatusPill";
 import pageStyles from "@/components/settings/settings-page.module.css";
 import { sanitizeNextPath } from "#utils/next";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
+import { getYoutubeChannelCandidates } from "@/lib/db/youtubeChannelCandidates";
 import { normalizePortfolioContact } from "@/lib/profileContact";
 
 export const metadata: Metadata = { title: "設定" };
@@ -90,9 +91,11 @@ export default async function SettingsPage({
     }));
 
   const iconCandidatesById: Record<string, string[]> = {};
+  const channelCandidatesById: Record<string, string[]> = {};
   if (db && xIds.length > 0) {
     for (const x of xIds) {
       iconCandidatesById[x.id] = await getXIconCandidates(db, x.id, 12);
+      channelCandidatesById[x.id] = await getYoutubeChannelCandidates(db, x.id, 12);
     }
   }
 
@@ -135,7 +138,7 @@ export default async function SettingsPage({
             アクティブ X ID
           </h2>
           <p className={pageStyles.cardDesc}>
-            ダッシュボード・作品クレジット・スロット表示に使われる名義です。
+            ダッシュボード・作品クレジット・枠表示に使われる名義です。
           </p>
         </div>
         {activeApproved ? (
@@ -155,9 +158,12 @@ export default async function SettingsPage({
               </span>
             )}
             <div className={pageStyles.activeId}>
-              <span className={pageStyles.activeName}>
+              <Link
+                href={`/user/${encodeURIComponent(activeApproved.id)}`}
+                className={pageStyles.activeNameLink}
+              >
                 {activeApproved.x_name || activeApproved.id}
-              </span>
+              </Link>
               <span className={pageStyles.activeHandle}>
                 <Icon name="x" size={11} aria-hidden />@{activeApproved.id}
               </span>
@@ -192,6 +198,7 @@ export default async function SettingsPage({
           xIds={xIds}
           activeXUserId={user.active_x_user_id}
           iconCandidatesById={iconCandidatesById}
+          channelCandidatesById={channelCandidatesById}
           next={next}
         />
         <PendingLinkRequestList rows={pendingOnly} />

@@ -328,7 +328,7 @@ export async function updateXIdProfile(
       ok: false,
       message:
         otherSocialLinks.message ??
-        "SNS リンクには http/https の有効な URL を入力してください。",
+        "SNS リンクには http/https または mailto の有効な URL を入力してください。",
     };
   }
 

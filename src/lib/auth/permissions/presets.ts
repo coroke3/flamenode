@@ -64,7 +64,7 @@ export const PRESET_DEFINITIONS: Record<EventStaffPreset, PresetDefinition> = {
   },
   slot_manager: {
     label: "枠管理担当",
-    description: "スロット作成・変更を担当します。作品本文やスタッフ管理はできません。",
+    description: "枠作成・変更を担当します。作品本文やスタッフ管理はできません。",
     permissions: [
       "event.slots",
       "event.review",

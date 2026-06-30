@@ -25,7 +25,7 @@ export const COLLABORATOR_PERMISSION_LABELS: Record<
     description: "タイトル、説明、画像、開催期間、受付状態などを変更できます。",
   },
   "event.slots": {
-    label: "スロット管理",
+    label: "枠管理",
     description: "枠の作成、編集、開放、時刻やラベルの変更ができます。",
   },
   "event.members": {

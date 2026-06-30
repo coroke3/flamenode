@@ -318,7 +318,7 @@ export default async function ManageEventPage({
               { href: `/event/${id}`, label: "公開ページを見る", variant: "primary" },
               {
                 href: `/manage/events/${id}/slots`,
-                label: "スロットを見る",
+                label: "枠を見る",
                 variant: "ghost",
               },
               {

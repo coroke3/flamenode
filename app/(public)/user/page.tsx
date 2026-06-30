@@ -7,6 +7,7 @@ import { withDatabase } from "@/lib/cloudflare";
 import { videos, xUsers } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { Pagination } from "@/components/ui/Pagination";
+import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
 import {
   excludePvsfSummaryVideos,
@@ -203,14 +204,11 @@ export default async function UserListPage({
 
   return (
     <div className={`fn-public-container fn-page ${styles.page}`}>
-      <header className="fn-page-head fn-page-head--split">
+      <header className="fn-page-head">
         <div className="fn-page-head-main">
           <span className="fn-eyebrow">CREATOR</span>
           <h1 className="fn-display fn-page-title">クリエイター一覧</h1>
         </div>
-        <p className="fn-jp fn-page-lead">
-          FlameNode に参加しているクリエイターを、作品数や名前から探せます。
-        </p>
       </header>
 
       <form className={styles.controls} method="get">
@@ -227,15 +225,12 @@ export default async function UserListPage({
         </label>
         <label className={styles.sortBox}>
           <span>並び替え</span>
-          <select className="fn-select" name="sort" defaultValue={sort}>
+          <AutoSubmitSelect className="fn-select" name="sort" defaultValue={sort}>
             <option value="score">おすすめ順</option>
             <option value="works">作品数順</option>
             <option value="name">名前順</option>
-          </select>
+          </AutoSubmitSelect>
         </label>
-        <button type="submit" className="fn-btn fn-btn-primary">
-          適用
-        </button>
         {q || sort !== "score" ? (
           <Link href="/user" className="fn-btn fn-btn-ghost">
             リセット

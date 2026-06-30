@@ -37,16 +37,12 @@
 
 .warning {
   border-left-color: var(--accent-warning);
-  background:
-    linear-gradient(90deg, var(--accent-warning-soft), transparent 58%),
-    var(--bg-surface);
+  background: var(--accent-warning-soft);
 }
 
 .danger {
   border-left-color: var(--accent-danger);
-  background:
-    linear-gradient(90deg, var(--accent-danger-soft), transparent 58%),
-    var(--bg-surface);
+  background: var(--accent-danger-soft);
 }
 
 .action {

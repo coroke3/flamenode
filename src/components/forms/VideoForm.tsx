@@ -16,13 +16,14 @@ import {
   updateVideo,
   type VideoActionResult,
 } from "@/lib/actions/video";
-import { formatSocialLinksForText } from "@/lib/socialLinks";
 import {
   VideoMembersField,
   type VideoMemberInput,
   type VideoMemberSuggestion,
 } from "@/components/forms/VideoMembersField";
 import { VideoIconPicker } from "@/components/forms/VideoIconPicker";
+import { SocialLinksEditor } from "@/components/forms/SocialLinksEditor";
+import { YoutubeChannelPicker } from "@/components/settings/YoutubeChannelPicker";
 import { normalizeXId } from "@/lib/utils/xid";
 import { ErrorCallout } from "@/components/ui/ErrorCallout";
 import {
@@ -117,6 +118,10 @@ interface VideoFormProps {
    */
   iconCandidates?: string[];
   /**
+   * YouTube チャンネル URL の候補。`getYoutubeChannelCandidates(db, xId)` から取得。
+   */
+  channelCandidates?: string[];
+  /**
    * 所属イベントの選択肢 (受付中のイベント等)。複数チェック可能で、
    * 出力は hidden input `event_ids` (改行区切り) で渡される。
    * 未指定なら所属イベント選択 UI は表示しない (現在の挙動互換)。
@@ -179,6 +184,7 @@ export function VideoForm({
   disabledFields,
   submitBlockedReason,
   iconCandidates = [],
+  channelCandidates = [],
   eventOptions = [],
   canEditEvents = true,
   canChangeSubmitter = false,
@@ -465,36 +471,19 @@ export function VideoForm({
             disabled={fieldDisabled("submitter.profile_text")}
           />
         </div>
-        <div className={`${styles.row} ${styles.cols2}`}>
-          <div className={cx(styles.field, styles.editableField)}>
-            <label className={styles.label} htmlFor="youtube_channel_url">
-              YouTube チャンネル URL
-            </label>
-            <input
-              id="youtube_channel_url"
-              name="youtube_channel_url"
-              type="url"
-              defaultValue={initial.youtube_channel_url}
-              className="fn-input"
-              placeholder="https://www.youtube.com/@..."
-              disabled={fieldDisabled("submitter.youtube_channel_url")}
-            />
-          </div>
-          <div className={cx(styles.field, styles.editableField)}>
-            <label className={styles.label} htmlFor="other_social_links">
-              SNS 一覧
-            </label>
-            <input
-              id="other_social_links"
-              name="other_social_links"
-              type="text"
-              defaultValue={formatSocialLinksForText(initial.other_social_links)}
-              className="fn-input"
-              placeholder="X=https://x.com/... / niconico=..."
-              maxLength={1000}
-              disabled={fieldDisabled("submitter.other_social_links")}
-            />
-          </div>
+        <div className={cx(styles.field, styles.editableField)}>
+          <span className={styles.label}>YouTube チャンネル</span>
+          <YoutubeChannelPicker
+            defaultValue={initial.youtube_channel_url ?? null}
+            candidates={channelCandidates}
+            disabled={fieldDisabled("submitter.youtube_channel_url")}
+          />
+        </div>
+        <div className={cx(styles.field, styles.editableField)}>
+          <SocialLinksEditor
+            initialValue={initial.other_social_links ?? null}
+            disabled={fieldDisabled("submitter.other_social_links")}
+          />
         </div>
       </section>
 
@@ -632,7 +621,7 @@ export function VideoForm({
             <label className={styles.label}>所属イベント</label>
             <p className={styles.help}>
               この作品を関連付けるイベントを選択します。複数選択可。
-              {slotId ? " 確保したスロットのイベントは固定で含まれます。" : ""}
+              {slotId ? " 確保した枠のイベントは固定で含まれます。" : ""}
             </p>
             <input
               type="hidden"

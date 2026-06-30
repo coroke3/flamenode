@@ -46,6 +46,7 @@ const ADMIN_NAV_GROUPS_BASE: AdminSidebarGroup[] = [
       { href: "/admin/videos", label: "作品管理", icon: <Icon name="youtube" size={14} /> },
       { href: "/admin/youtube-sync", label: "YouTube同期状態", icon: <Icon name="refresh" size={14} /> },
       { href: "/admin/events", label: "イベント管理", icon: <Icon name="calendar" size={14} /> },
+      { href: "/admin/event-groups", label: "イベントグループ", icon: <Icon name="users" size={14} /> },
       { href: "/admin/events/templates", label: "イベントテンプレート", icon: <Icon name="copy" size={14} /> },
       { href: "/admin/api-endpoints", label: "公開API管理", icon: <Icon name="external" size={14} /> },
       { href: "/admin/announcements", label: "お知らせ管理", icon: <Icon name="alert" size={14} /> },

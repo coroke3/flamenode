@@ -30,22 +30,22 @@
 }
 
 .title {
-  margin: 18px 0 0;
-  font-size: clamp(30px, 3.4vw, 46px);
+  margin: 14px 0 0;
+  font-size: clamp(22px, 2.4vw, 32px);
   font-family: var(--font-display);
-  font-weight: 900;
+  font-weight: 800;
   letter-spacing: 0;
-  line-height: 1.08;
+  line-height: 1.15;
   color: var(--text-primary);
 }
 
 .author {
   display: flex;
   align-items: center;
-  gap: 10px 14px;
+  gap: 10px 12px;
   flex-wrap: wrap;
-  margin-top: 20px;
-  padding: 18px 0;
+  margin-top: 14px;
+  padding: 12px 0;
   border-top: 0;
   border-bottom: 0;
 }
@@ -68,8 +68,8 @@
 
 .authorIcon,
 .authorIconFb {
-  width: 46px;
-  height: 46px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
 }
 
@@ -86,8 +86,8 @@
 }
 
 .authorName {
-  font-size: 17px;
-  font-weight: 800;
+  font-size: 14px;
+  font-weight: 700;
   color: var(--text-primary);
 }
 
@@ -243,9 +243,11 @@
   position: relative;
   margin-top: 22px;
   padding: 16px 18px;
-  background:
-    linear-gradient(90deg, var(--event-accent-soft, color-mix(in srgb, var(--accent-primary) 12%, transparent)), transparent 48%),
-    var(--bg-elevated);
+  background: color-mix(
+    in srgb,
+    var(--event-accent, var(--accent-primary)) 10%,
+    var(--bg-elevated)
+  );
   border: 0;
   border-radius: 8px;
   display: flex;
@@ -264,9 +266,11 @@
 }
 
 .eventBox:hover {
-  background:
-    linear-gradient(90deg, var(--event-accent-soft, color-mix(in srgb, var(--accent-primary) 16%, transparent)), transparent 52%),
-    var(--bg-elevated);
+  background: color-mix(
+    in srgb,
+    var(--event-accent, var(--accent-primary)) 14%,
+    var(--bg-elevated)
+  );
 }
 
 .eventBoxLabel {
@@ -292,14 +296,13 @@
 }
 
 .sectionTitle {
-  position: relative;
-  font-family: var(--font-display);
-  font-size: clamp(18px, 2vw, 26px);
-  font-weight: 900;
-  letter-spacing: 0;
-  color: var(--text-primary);
-  margin: 0 0 14px;
-  padding-bottom: 0;
+  margin: 0 0 10px;
+  color: var(--text-muted);
+  font-family: var(--font-jp);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  line-height: 1.5;
 }
 
 .sectionTitle::after {
@@ -415,10 +418,10 @@
   }
 
   .title {
-    font-size: clamp(24px, 7vw, 34px);
-    line-height: 1.08;
+    font-size: clamp(20px, 5.5vw, 26px);
+    line-height: 1.15;
     overflow-wrap: anywhere;
-    margin-top: 14px;
+    margin-top: 12px;
   }
 
   .authorActions {
@@ -492,7 +495,7 @@
 
   .title {
     margin-top: 0;
-    font-size: clamp(28px, 1.9vw, 42px);
+    font-size: clamp(20px, 1.4vw, 28px);
   }
 
   .author {

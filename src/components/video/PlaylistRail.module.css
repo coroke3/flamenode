@@ -132,19 +132,12 @@
   gap: 8px;
   padding: 6px 4px;
   border-radius: var(--radius-sm);
-  transition: background-color 0.15s ease;
-}
-
-.item:hover {
-  background-color: var(--bg-elevated);
+  text-decoration: none;
+  color: inherit;
 }
 
 .itemActive {
   background-color: color-mix(in srgb, var(--accent-primary) 14%, transparent);
-}
-
-.itemActive:hover {
-  background-color: color-mix(in srgb, var(--accent-primary) 22%, transparent);
 }
 
 .itemIndex {
@@ -173,6 +166,11 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: transform 0.25s ease;
+}
+
+.item:hover .itemThumb img {
+  transform: scale(1.06);
 }
 
 .itemThumbFb {

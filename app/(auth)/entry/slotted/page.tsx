@@ -15,11 +15,12 @@ import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
+import { getYoutubeChannelCandidates } from "@/lib/db/youtubeChannelCandidates";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { AppShell } from "@/components/ui/AppShell";
 import { StatusPanel } from "@/components/ui/StatusPanel";
 
-export const metadata: Metadata = { title: "スロット提出" };
+export const metadata: Metadata = { title: "枠提出" };
 export const dynamic = "force-dynamic";
 
 interface Props {
@@ -71,11 +72,11 @@ export default async function SlottedPostPage({
   )[0];
   if (!ev) notFound();
   let slotStart = slot.start_time;
-  let slotEnd = slot.end_time;
+  let slotEnd = slot.start_time;
   let groupSize = 1;
   if (slot.reservation_group_id) {
     const groupRows = await db
-      .select({ start_time: slotsTable.start_time, end_time: slotsTable.end_time })
+      .select({ start_time: slotsTable.start_time })
       .from(slotsTable)
       .where(eq(slotsTable.reservation_group_id, slot.reservation_group_id));
     if (groupRows.length > 0) {
@@ -84,7 +85,7 @@ export default async function SlottedPostPage({
         .map((r) => r.start_time)
         .filter((v): v is number => typeof v === "number");
       const ends = groupRows
-        .map((r) => r.end_time ?? r.start_time)
+        .map((r) => r.start_time)
         .filter((v): v is number => typeof v === "number");
       if (starts.length > 0) slotStart = Math.min(...starts);
       if (ends.length > 0) slotEnd = Math.max(...ends);
@@ -117,6 +118,8 @@ export default async function SlottedPostPage({
     .limit(2000);
   const softwareSuggestions = await getUsedSoftwareSuggestions(db);
   const iconCandidates = activeX ? await getXIconCandidates(db, activeX) : [];
+  const channelCandidates =
+    activeX && db ? await getYoutubeChannelCandidates(db, activeX) : [];
   // 所属イベント候補: 「許可フラグ付き」かつ受付中のイベント + スロットのイベント (常時固定)。
   const acceptingEvents = await db
     .select()
@@ -168,7 +171,7 @@ export default async function SlottedPostPage({
       <header className="fn-page-head fn-page-head--split">
         <div className="fn-page-head-main">
           <p className="fn-eyebrow">Slot Post</p>
-          <h1 className="fn-page-title fn-page-title--compact">スロットに作品を提出</h1>
+          <h1 className="fn-page-title fn-page-title--compact">枠に作品を提出</h1>
           <p className="fn-page-lead">
             確保済みのイベント枠に作品情報を紐づけます。連続枠の場合も1つの提出として扱います。
           </p>
@@ -201,13 +204,15 @@ export default async function SlottedPostPage({
 
       <section className="fn-card fn-highlight-card fn-card-accent">
         <div className="fn-card-body">
-          <p className="fn-highlight-card-kicker">RESERVED SLOT</p>
+          <p className="fn-highlight-card-kicker">確保済み枠</p>
           <h2 className="fn-highlight-card-title">
             {slotStart ? (
               <>
                 {formatUnix(slotStart, { dateOnly: true })}{" "}
                 {formatUnix(slotStart, { timeOnly: true })}
-                {slotEnd ? ` - ${formatUnix(slotEnd, { timeOnly: true })}` : ""}
+                {slotEnd != null && slotEnd > slotStart
+                  ? ` - ${formatUnix(slotEnd, { timeOnly: true })}`
+                  : ""}
               </>
             ) : (
               slot.slot_label ?? "時間指定なし枠"
@@ -244,6 +249,7 @@ export default async function SlottedPostPage({
         softwareSuggestions={softwareSuggestions}
         submitBlockedReason={submitBlockedReason}
         iconCandidates={iconCandidates}
+        channelCandidates={channelCandidates}
         eventOptions={eventOptions}
       />
 

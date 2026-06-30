@@ -170,7 +170,7 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
           title="担当イベントはありません"
           description={
             isAdmin
-              ? "イベント運営者として登録されると、この画面から審査・スロット・通知を確認できます。管理者はイベントを作成し、運営メンバーを割り当ててください。"
+              ? "イベント運営者として登録されると、この画面から審査・枠・通知を確認できます。管理者はイベントを作成し、運営メンバーを割り当ててください。"
               : "イベント主催者にあなたの X ID を運営メンバーとして登録してもらうと、この画面から審査・枠・通知を確認できるようになります。"
           }
           actions={
@@ -289,7 +289,7 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
                     href={`/manage/events/${ev.id}/slots`}
                     className="fn-btn fn-btn-ghost fn-btn-sm"
                   >
-                    スロット
+                    枠
                   </Link>
                   <Link
                     href={`/event/${ev.id}`}

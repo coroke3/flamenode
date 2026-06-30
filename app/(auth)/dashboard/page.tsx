@@ -370,7 +370,7 @@ function HeroCard({
       <section className="fn-card fn-mb-lg">
         <div className="fn-card-body">
           <p className="fn-muted fn-text-sm">
-            現在、ステータス更新が必要なスロットはありません。
+            現在、ステータス更新が必要な枠はありません。
           </p>
           <p className="fn-mt-sm fn-text-sm">
             開催中のイベントがある場合は、エントリー画面から枠を確保できます。
@@ -389,7 +389,6 @@ function HeroCard({
       : slot.priority_reclaim_until
         ? "fn-card-warning"
         : "";
-  const slotEnd = slot.end_time ?? slot.start_time;
   const groupMeta = slot as typeof slot & { is_group?: boolean; group_size?: number };
 
   return (
@@ -403,7 +402,7 @@ function HeroCard({
       <div className={`fn-card fn-highlight-card ${cardStyles}`}>
         <div className="fn-card-body">
           <div className="fn-highlight-card-kicker">
-            <Icon name="alert" size={12} aria-hidden /> アクティブスロット
+            <Icon name="alert" size={12} aria-hidden /> アクティブ枠
           </div>
           <h2 className="fn-highlight-card-title">{event.title}</h2>
           <p className="fn-highlight-card-lead">
@@ -411,7 +410,7 @@ function HeroCard({
               ? `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(
                   slot.start_time,
                   { timeOnly: true },
-                )}${slotEnd ? ` - ${formatUnix(slotEnd, { timeOnly: true })}` : ""}`
+                )}`
               : (slot.slot_label ?? "未指定")}
             {" · "}
             <span>状態: {slot.status}</span>

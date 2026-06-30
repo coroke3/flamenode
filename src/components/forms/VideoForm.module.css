@@ -89,6 +89,10 @@
   padding-top: 2px;
 }
 
+.mobileSubmitBar {
+  display: none;
+}
+
 .preview {
   display: flex;
   gap: 12px;
@@ -153,20 +157,14 @@
   display: grid;
   place-items: center;
   overflow: hidden;
-  background:
-    linear-gradient(135deg, rgba(200, 255, 18, 0.16), transparent 45%),
-    linear-gradient(135deg, #2a331c, #161b0e);
+  background: color-mix(in srgb, var(--accent-primary) 12%, #161b0e);
 }
 
 .previewVisual::after {
-  content: "";
+  content: none;
   position: absolute;
   inset: 0;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
-  background-size: 28px 28px;
-  mix-blend-mode: overlay;
+  background-image: none;
   pointer-events: none;
 }
 
@@ -436,14 +434,7 @@
   }
 
   .actions {
-    flex-direction: column-reverse;
-    align-items: stretch;
-  }
-
-  .actions .fn-btn {
-    width: 100%;
-    min-height: 44px;
-    justify-content: center;
+    display: none;
   }
 
   .mobileSubmitBar {

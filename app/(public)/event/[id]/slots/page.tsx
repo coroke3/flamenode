@@ -58,7 +58,6 @@ export default async function EventSlotsPage({
       .where(eq(slotsTable.event_id, id))
       .orderBy(
         asc(slotsTable.start_time),
-        asc(slotsTable.end_time),
         asc(slotsTable.sort_order),
       );
 
@@ -91,7 +90,6 @@ export default async function EventSlotsPage({
     slot_kind: (slot.slot_kind ?? "time") as "time" | "count",
     slot_label: slot.slot_label,
     start_time: slot.start_time,
-    end_time: slot.end_time,
     sort_order: slot.sort_order,
     status: slot.status,
     display_name: slot.display_name,

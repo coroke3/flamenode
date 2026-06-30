@@ -78,23 +78,18 @@
 }
 
 .legendAvailable {
-  border-color: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 50%, var(--border-strong)) !important;
-  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 92%, #ffffff);
+  border-color: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 34%, var(--border-strong)) !important;
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 18%, var(--bg-elevated));
 }
 
 .legendReserved {
-  border-color: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 42%, var(--border-strong)) !important;
-  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 14%, transparent);
+  border-color: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 24%, var(--border-strong)) !important;
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 9%, transparent);
 }
 
 .legendPriority {
-  background: repeating-linear-gradient(
-    45deg,
-    transparent 0,
-    transparent 4px,
-    color-mix(in srgb, var(--text-primary) 12%, transparent) 4px,
-    color-mix(in srgb, var(--text-primary) 12%, transparent) 8px
-  );
+  background: var(--bg-elevated);
+  border-style: dashed !important;
 }
 
 .partsRow {
@@ -183,27 +178,20 @@
 }
 
 .row:hover {
-  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 7%, transparent);
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 4%, transparent);
 }
 
 .rowFilled {
-  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 14%, transparent);
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 8%, transparent);
 }
 
 .rowMine {
-  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 22%, transparent);
-  box-shadow: inset 3px 0 0 var(--event-accent, var(--accent-primary));
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 14%, transparent);
+  box-shadow: inset 2px 0 0 var(--event-accent, var(--accent-primary));
 }
 
 .breakRow {
-  background:
-    repeating-linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--bg-elevated) 86%, transparent) 0,
-      color-mix(in srgb, var(--bg-elevated) 86%, transparent) 8px,
-      color-mix(in srgb, var(--event-accent, var(--accent-primary)) 10%, transparent) 8px,
-      color-mix(in srgb, var(--event-accent, var(--accent-primary)) 10%, transparent) 16px
-    );
+  background: color-mix(in srgb, var(--bg-elevated) 86%, transparent);
 }
 
 .breakCell {
@@ -303,14 +291,6 @@
   color: var(--accent-danger);
 }
 
-.slotId {
-  font-size: 11px;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .slotActions {
   position: relative;
   display: inline-flex;
@@ -389,8 +369,8 @@
   align-items: center;
   justify-content: center;
   padding: 10px 12px;
-  color: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 78%, var(--text-muted));
-  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 10%, transparent);
+  color: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 55%, var(--text-muted));
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 6%, transparent);
 }
 
 .emptySlotButton {
@@ -401,8 +381,8 @@
   justify-content: center;
   border: 0;
   border-radius: 0;
-  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 92%, #ffffff);
-  color: var(--event-accent-text, var(--accent-ink));
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 18%, var(--bg-elevated));
+  color: var(--text-primary);
   cursor: pointer;
   transition:
     background-color 0.15s ease,
@@ -412,10 +392,10 @@
 
 .emptySlotButton:hover:not(:disabled),
 .emptySlotButton:focus-visible {
-  background: var(--event-accent, var(--accent-primary));
-  color: var(--event-accent-text, var(--accent-ink));
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 28%, var(--bg-elevated));
+  color: var(--text-primary);
   outline: none;
-  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--event-accent-text, var(--accent-ink)) 72%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--event-accent, var(--accent-primary)) 34%, transparent);
 }
 
 .emptySlotButton:disabled {
@@ -435,14 +415,8 @@
 }
 
 .emptySlotButtonMerge {
-  background:
-    repeating-linear-gradient(
-      45deg,
-      color-mix(in srgb, var(--event-accent, var(--accent-primary)) 86%, #ffffff) 0,
-      color-mix(in srgb, var(--event-accent, var(--accent-primary)) 86%, #ffffff) 7px,
-      color-mix(in srgb, var(--event-accent, var(--accent-primary)) 74%, #ffffff) 7px,
-      color-mix(in srgb, var(--event-accent, var(--accent-primary)) 74%, #ffffff) 14px
-    );
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 24%, var(--bg-elevated));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--event-accent, var(--accent-primary)) 38%, transparent);
 }
 
 .emptySlotUnavailable {
@@ -501,7 +475,7 @@
 }
 
 .mergeDialog :global(.fn-btn-ghost:hover:not(:disabled)) {
-  background-color: var(--event-accent-soft, var(--accent-primary-soft));
+  background-color: var(--bg-elevated);
   color: var(--text-primary);
 }
 
@@ -525,9 +499,7 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--event-accent, var(--accent-primary)) 14%, transparent),
-    var(--shadow-lg, 0 20px 60px rgba(0, 0, 0, 0.22));
+  box-shadow: var(--shadow-soft);
 }
 
 .reserveDialogTitle {
@@ -584,7 +556,7 @@
 }
 
 .reserveDialog :global(.fn-btn-ghost:hover:not(:disabled)) {
-  background-color: var(--event-accent-soft, var(--accent-primary-soft));
+  background-color: var(--bg-elevated);
   color: var(--text-primary);
 }
 

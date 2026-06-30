@@ -222,6 +222,56 @@ export async function enqueueAfterEventSettingsChange(
   await enqueueStaticRebuildMany(db, items);
 }
 
+/** イベントグループ設定変更後 */
+export async function enqueueAfterEventGroupChange(
+  db: DB,
+  opts: HookBase & {
+    slug: string;
+    previousSlug?: string | null;
+    eventIds?: string[];
+  },
+): Promise<void> {
+  const items: EnqueueStaticRebuildInput[] = [
+    {
+      targetType: "groups_index",
+      targetId: "global",
+      reason: opts.reason,
+      priority: "low",
+      requestedByUserId: opts.requestedByUserId,
+    },
+    {
+      targetType: "event_group",
+      targetId: opts.slug,
+      reason: opts.reason,
+      priority: opts.priority ?? "normal",
+      requestedByUserId: opts.requestedByUserId,
+    },
+  ];
+
+  if (opts.previousSlug && opts.previousSlug !== opts.slug) {
+    items.push({
+      targetType: "event_group",
+      targetId: opts.previousSlug,
+      reason: opts.reason,
+      priority: "low",
+      requestedByUserId: opts.requestedByUserId,
+    });
+  }
+
+  const eventIdSet = new Set(opts.eventIds ?? []);
+  for (const eventId of eventIdSet) {
+    items.push({
+      targetType: "event",
+      targetId: eventId,
+      reason: opts.reason,
+      priority: "low",
+      requestedByUserId: opts.requestedByUserId,
+    });
+  }
+
+  await enqueueStaticRebuildMany(db, items);
+}
+
 /** 手動再生成（管理画面） */
 export async function enqueueManualStaticRebuild(
   db: DB,

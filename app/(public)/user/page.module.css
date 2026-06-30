@@ -1,3 +1,8 @@
+.page {
+  width: 100%;
+  margin: 0;
+}
+
 .controls {
   display: flex;
   flex-wrap: wrap;
@@ -174,19 +179,6 @@
   color: var(--text-muted);
   font-size: 10px;
   font-weight: 500;
-}
-
-.pagination {
-  display: flex;
-  justify-content: center;
-  gap: 12px;
-  margin-top: 32px;
-}
-
-.pageBadge {
-  align-self: center;
-  color: var(--text-muted);
-  font-size: 12px;
 }
 
 @media (min-width: 620px) {

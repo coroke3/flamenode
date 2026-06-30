@@ -16,6 +16,7 @@ import {
 import {
   countVideosForEvent,
   excludePvsfSummaryVideos,
+  fetchAllPublicVideosForEvent,
   fetchEventWithEditors,
 } from "@/lib/db/queries";
 import {
@@ -27,6 +28,7 @@ import { Icon } from "@/components/ui/Icon";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { EventRecruitCard } from "@/components/layout/EventRecruitCard";
 import { SectionHeader } from "@/components/layout/SectionHeader";
+import { UserAvatar } from "@/components/user/UserAvatar";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 import { formatCount } from "@/lib/utils/format";
 import { absoluteUrl, buildPageMetadata, compactText } from "@/lib/seo";
@@ -101,19 +103,7 @@ export default async function EventDetailPage({
 
     const [eventVideos, eventVideoTotal, creatorCountRow, slotRows] =
       await Promise.all([
-        db
-          .select({
-            id: videos.id,
-            title: videos.title,
-            youtube_video_id: videos.youtube_video_id,
-            display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.creator_display_name}, ${videos.creator_x_user_id})`,
-            icon_url: sql<string | null>`COALESCE(${videos.creator_icon_url}, ${xUsers.icon_url})`,
-          })
-          .from(videos)
-          .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
-          .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
-          .where(publicVideoWhere)
-          .orderBy(asc(videos.scheduled_time), asc(videos.id)),
+        fetchAllPublicVideosForEvent(db, id),
         countVideosForEvent(db, id),
         db
           .select({
@@ -159,7 +149,6 @@ export default async function EventDetailPage({
           .where(eq(slotsTable.event_id, id))
           .orderBy(
             asc(slotsTable.start_time),
-            asc(slotsTable.end_time),
             asc(slotsTable.sort_order),
           ),
       ]);
@@ -188,6 +177,7 @@ export default async function EventDetailPage({
   } as React.CSSProperties;
   const status = computeEventStatus(event);
   const accepting = isAcceptingEntries(event);
+  const showRecruitCard = status !== "ended" && status !== "archived";
   const publicEditors = editors.filter((editor) => editor.is_public === 1);
   const now = Math.floor(Date.now() / 1000);
   const slotTotal = slotRows.length;
@@ -272,7 +262,7 @@ export default async function EventDetailPage({
         <StatCard label="ENTRIES" value={formatCount(eventVideoTotal)} />
         <StatCard label="CREATORS" value={formatCount(creatorTotal)} />
         <StatCard
-          label="FILLED SLOTS"
+          label="FILLED 枠"
           value={<>{filledSlots}<span>/{slotTotal}</span></>}
         />
         <StatCard
@@ -281,28 +271,29 @@ export default async function EventDetailPage({
         />
       </section>
 
-      <EventRecruitCard
-        event={event}
-        available={availableSlots}
-        total={slotTotal}
-        actionHref={inPostPeriod ? "/entry" : slotTotal > 0 ? `/event/${event.id}/slots` : undefined}
-        actionLabel={
-          inPostPeriod
-            ? "作品を提出する"
-            : accepting
-              ? "枠を確保する"
-              : slotTotal > 0
-                ? "枠・スロット表へ"
-                : undefined
-        }
-      />
+      {showRecruitCard ? (
+        <EventRecruitCard
+          event={event}
+          available={availableSlots}
+          total={slotTotal}
+          actionHref={inPostPeriod ? "/entry" : slotTotal > 0 ? `/event/${event.id}/slots` : undefined}
+          actionLabel={
+            inPostPeriod
+              ? "作品を提出する"
+              : accepting
+                ? "枠を確保する"
+                : slotTotal > 0
+                  ? "枠表へ"
+                  : undefined
+          }
+        />
+      ) : null}
 
       {slotSummary ? (
         <section className={styles.section}>
           <SectionHeader
-            eyebrow="SLOT STATUS - 上映枠"
+            eyebrow="枠の状態 - 上映枠"
             title="上映枠の埋まり状況"
-            description="全体と部ごとの埋まっている枠数・埋まり率です。"
             moreHref={slotTotal > 0 ? `/event/${event.id}/slots` : undefined}
             moreLabel="枠を確保する →"
             classes={eventSectionHeaderClasses}
@@ -323,32 +314,45 @@ export default async function EventDetailPage({
             title="Crew"
             classes={eventSectionHeaderClasses}
           />
-          <div className={styles.crewGrid}>
+          <ul className={styles.crewList}>
             {publicEditors.map((member) => (
-              <Link
+              <li
                 key={`${member.x_user_id}-${member.role}`}
-                href={`/user/${member.x_user_id}`}
-                className={styles.crewCard}
+                className={styles.crewRow}
               >
-                <div className={styles.crewTop}>
-                  {member.icon_url ? (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img src={member.icon_url} alt="" />
-                  ) : (
-                    <span>{getInitial(member.x_name ?? member.x_user_id)}</span>
-                  )}
-                  <em>
-                    {member.public_role_label ??
-                      (member.role === "representative"
-                        ? "REPRESENTATIVE"
-                        : "EDITOR")}
-                  </em>
-                </div>
-                <strong>{member.x_name ?? member.x_user_id}</strong>
-                <small>X @ {member.x_user_id}</small>
-              </Link>
+                <UserAvatar
+                  iconUrl={member.icon_url}
+                  label={member.x_name ?? member.x_user_id ?? ""}
+                  size={36}
+                  className={styles.crewAvatar}
+                  fallbackClassName={styles.crewAvatarFallback}
+                />
+                <Link
+                  href={`/user/${member.x_user_id}`}
+                  className={styles.crewName}
+                >
+                  {member.x_name ?? member.x_user_id}
+                </Link>
+                <span className={styles.crewRole}>
+                  {member.public_role_label ??
+                    (member.role === "representative"
+                      ? "代表"
+                      : member.role === "staff"
+                        ? "スタッフ"
+                        : "運営")}
+                </span>
+                <a
+                  href={`https://x.com/${member.x_user_id}`}
+                  className={styles.crewXLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Icon name="x" size={12} aria-hidden />
+                  @{member.x_user_id}
+                </a>
+              </li>
             ))}
-          </div>
+          </ul>
         </section>
       ) : null}
 
@@ -356,7 +360,6 @@ export default async function EventDetailPage({
         <SectionHeader
           eyebrow="投稿 - 提出済み"
           title="投稿"
-          description={`受付中の提出済み作品（${formatCount(eventVideoTotal)}件）`}
           classes={eventSectionHeaderClasses}
           action={
             eventVideoTotal > eventVideos.length ? (
@@ -371,7 +374,7 @@ export default async function EventDetailPage({
             このイベントの提出済み作品はまだ表示できません。
           </p>
         ) : (
-          <div className={styles.videoGrid}>
+          <div className="fn-video-grid">
             {eventVideos.map((video) => (
               <VideoCard key={video.id} video={video} />
             ))}
@@ -440,11 +443,6 @@ function formatRange(start: number | null, end: number | null): string {
 
 function formatMonthDay(ts: number): string {
   return dateFormat.monthDay.format(new Date(ts * 1000));
-}
-
-function getInitial(value: string | null | undefined): string {
-  const trimmed = (value ?? "").trim().replace(/^@/, "");
-  return trimmed.slice(0, 1).toLowerCase() || "?";
 }
 
 function getDayMetric(event: EventRow, now: number) {

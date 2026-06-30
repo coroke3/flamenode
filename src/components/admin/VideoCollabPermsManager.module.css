@@ -113,8 +113,14 @@
   color: var(--ok, #7bd89c);
 }
 
-.badgeMuted {
-  color: var(--text-muted);
+.badgeWarn {
+  background: var(--warn-soft, var(--accent-warning-soft));
+  color: var(--text-primary);
+}
+
+.badgeOk {
+  background: rgba(123, 216, 156, 0.16);
+  color: var(--ok, #7bd89c);
 }
 
 .rowActions {

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import {
   writeGuard,
   type WriteGuardDenyReason,
@@ -11,6 +11,10 @@ import { getDatabase } from "@/lib/cloudflare";
 import { events, historyLogs, slots, xUsers } from "@/lib/db/schema";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { generateId } from "@/lib/utils/id";
+import {
+  areSlotsInSamePart,
+  sortSlotsChronologically,
+} from "@/lib/utils/slotGroupingCore";
 
 export interface SlotReserveResult {
   ok: boolean;
@@ -48,17 +52,13 @@ async function rollbackReservedSlots(
   }
 }
 
-function isAdjacent(prev: SlotRow, next: SlotRow): boolean {
-  if (prev.slot_kind === "time") {
-    const prevEnd = prev.end_time ?? prev.start_time;
-    const nextStart = next.start_time;
-    if (!prevEnd || !nextStart) return false;
-    return Math.abs(nextStart - prevEnd) <= 60;
-  }
-  const prevOrder = prev.sort_order;
-  const nextOrder = next.sort_order;
-  if (prevOrder == null || nextOrder == null) return false;
-  return nextOrder === prevOrder + 1;
+function slotPartGapSec(event: typeof events.$inferSelect): number {
+  const minutes = event.slot_part_gap_minutes ?? 15;
+  return Number.isFinite(minutes) && minutes >= 0 ? minutes * 60 : 15 * 60;
+}
+
+function isAdjacent(prev: SlotRow, next: SlotRow, gapSec: number): boolean {
+  return areSlotsInSamePart(prev, next, gapSec);
 }
 
 function reservationGroupScope(groupId: string, row: SlotRow) {
@@ -113,7 +113,7 @@ export async function reserveSlot(
   const slotRow = (
     await db.select().from(slots).where(eq(slots.id, parsed.data.slot_id)).limit(1)
   )[0];
-  if (!slotRow) return { ok: false, message: "スロットが見つかりません。" };
+  if (!slotRow) return { ok: false, message: "枠が見つかりません。" };
   if (slotRow.status !== "available") {
     return { ok: false, message: "この枠はすでに確保されています。" };
   }
@@ -131,31 +131,31 @@ export async function reserveSlot(
   const reserveCount = Math.min(parsed.data.consecutive_count, maxConsecutive);
   const groupId = reserveCount > 1 ? generateId("sgrp") : null;
   let targetSlots: SlotRow[] = [slotRow];
+  const gapSec = slotPartGapSec(ev);
 
   if (reserveCount > 1) {
-    const candidates = await db
-      .select()
-      .from(slots)
-      .where(
-        and(
-          eq(slots.event_id, slotRow.event_id),
-          eq(slots.status, "available"),
-        )!,
-      )
-      .orderBy(asc(slots.sort_order), asc(slots.start_time));
-    const startIdx = candidates.findIndex((c) => c.id === slotRow.id);
+    const allEventSlots = sortSlotsChronologically(
+      await db.select().from(slots).where(eq(slots.event_id, slotRow.event_id)),
+    );
+    const startIdx = allEventSlots.findIndex((c) => c.id === slotRow.id);
     if (startIdx < 0) {
       return { ok: false, message: "連続枠を確保できませんでした。" };
     }
-    const window = candidates.slice(startIdx, startIdx + reserveCount);
+    const window = allEventSlots.slice(startIdx, startIdx + reserveCount);
     if (window.length < reserveCount) {
       return {
         ok: false,
         message: "連続枠を確保できませんでした。途中に取得済みの枠があります。",
       };
     }
+    if (window.some((candidate) => candidate.status !== "available")) {
+      return {
+        ok: false,
+        message: "連続枠の途中に取得済みの枠があります。",
+      };
+    }
     for (let i = 1; i < window.length; i += 1) {
-      if (!isAdjacent(window[i - 1], window[i])) {
+      if (!isAdjacent(window[i - 1], window[i], gapSec)) {
         return {
           ok: false,
           message:
@@ -236,7 +236,7 @@ export async function releaseOwnSlot(
   const slotRow = (
     await db.select().from(slots).where(eq(slots.id, slotId)).limit(1)
   )[0];
-  if (!slotRow) return { ok: false, message: "スロットが見つかりません。" };
+  if (!slotRow) return { ok: false, message: "枠が見つかりません。" };
   // slot owner 判定: 現在 active な X ID 一致が原則だが、確保時の X が linked された
   // ままで active から外れているだけのケースを救済する。
   // xUsers.linked_discord_user_id === user.id なら自分の枠とみなす。
@@ -306,11 +306,12 @@ export async function releaseOwnSlot(
     return { ok: true, slotId };
   }
 
-  const groupRows = await db
-    .select()
-    .from(slots)
-    .where(reservationGroupScope(groupId, slotRow))
-    .orderBy(asc(slots.sort_order), asc(slots.start_time));
+  const groupRows = sortSlotsChronologically(
+    await db
+      .select()
+      .from(slots)
+      .where(reservationGroupScope(groupId, slotRow)),
+  );
 
   if (groupRows.some((r) => r.status === "submitted")) {
     return {
@@ -340,7 +341,7 @@ export async function releaseOwnSlot(
     return {
       ok: false,
       message:
-        "スロットグループの整合性に問題があります。管理者に連絡してください。",
+        "枠グループの整合性に問題があります。管理者に連絡してください。",
     };
   }
   const isEdge =
@@ -464,7 +465,7 @@ export async function extendOwnSlotGroup(
   const anchor = (
     await db.select().from(slots).where(eq(slots.id, parsed.data.slot_id)).limit(1)
   )[0];
-  if (!anchor) return { ok: false, message: "スロットが見つかりません。" };
+  if (!anchor) return { ok: false, message: "枠が見つかりません。" };
   if (anchor.status !== "reserved") {
     return { ok: false, message: "予約中の枠のみ拡張できます。" };
   }
@@ -482,11 +483,12 @@ export async function extendOwnSlotGroup(
 
   const groupId = anchor.reservation_group_id;
   const currentGroup = groupId
-    ? await db
-        .select()
-        .from(slots)
-        .where(reservationGroupScope(groupId, anchor))
-        .orderBy(asc(slots.sort_order), asc(slots.start_time))
+    ? sortSlotsChronologically(
+        await db
+          .select()
+          .from(slots)
+          .where(reservationGroupScope(groupId, anchor)),
+      )
     : [anchor];
 
   if (
@@ -510,20 +512,25 @@ export async function extendOwnSlotGroup(
       ? currentGroup[0]
       : currentGroup[currentGroup.length - 1];
 
-  const allEventSlots = await db
-    .select()
-    .from(slots)
-    .where(
-      and(eq(slots.event_id, anchor.event_id), eq(slots.status, "available"))!,
-    )
-    .orderBy(asc(slots.sort_order), asc(slots.start_time));
+  const gapSec = slotPartGapSec(ev);
+  const allEventSlots = sortSlotsChronologically(
+    await db.select().from(slots).where(eq(slots.event_id, anchor.event_id)),
+  );
 
-  const candidate = allEventSlots.find((r) => {
-    if (parsed.data.direction === "backward") return isAdjacent(r, edge);
-    return isAdjacent(edge, r);
-  });
-  if (!candidate) {
+  const edgeIndex = allEventSlots.findIndex((r) => r.id === edge.id);
+  const candidate =
+    edgeIndex < 0
+      ? undefined
+      : allEventSlots[
+          parsed.data.direction === "backward" ? edgeIndex - 1 : edgeIndex + 1
+        ];
+  if (!candidate || candidate.status !== "available") {
     return { ok: false, message: "拡張可能な隣接空き枠がありません。" };
+  }
+  const prev = parsed.data.direction === "backward" ? candidate : edge;
+  const next = parsed.data.direction === "backward" ? edge : candidate;
+  if (!isAdjacent(prev, next, gapSec)) {
+    return { ok: false, message: "別の部として扱われる枠は連続枠にできません。" };
   }
   if (candidate.slot_kind !== anchor.slot_kind) {
     return { ok: false, message: "slot_kind が異なるため拡張できません。" };
@@ -616,7 +623,7 @@ export async function mergeOwnSlotGroups(
   const gap = (
     await db.select().from(slots).where(eq(slots.id, parsed.data.gap_slot_id)).limit(1)
   )[0];
-  if (!gap) return { ok: false, message: "スロットが見つかりません。" };
+  if (!gap) return { ok: false, message: "枠が見つかりません。" };
   if (gap.status !== "available") {
     return { ok: false, message: "対象の枠はすでに確保されています。" };
   }
@@ -629,20 +636,22 @@ export async function mergeOwnSlotGroups(
     return { ok: false, message: "受付中ではないため結合できません。" };
   }
 
-  const eventSlots = await db
-    .select()
-    .from(slots)
-    .where(eq(slots.event_id, gap.event_id))
-    .orderBy(asc(slots.sort_order), asc(slots.start_time));
+  const gapSec = slotPartGapSec(ev);
+  const eventSlots = sortSlotsChronologically(
+    await db.select().from(slots).where(eq(slots.event_id, gap.event_id)),
+  );
 
   const gapIdx = eventSlots.findIndex((r) => r.id === gap.id);
-  if (gapIdx < 0) return { ok: false, message: "スロットが見つかりません。" };
+  if (gapIdx < 0) return { ok: false, message: "枠が見つかりません。" };
   const leftNeighbor = eventSlots[gapIdx - 1];
   const rightNeighbor = eventSlots[gapIdx + 1];
   if (!leftNeighbor || !rightNeighbor) {
     return { ok: false, message: "結合対象の隣接枠がありません。" };
   }
-  if (!isAdjacent(leftNeighbor, gap) || !isAdjacent(gap, rightNeighbor)) {
+  if (
+    !isAdjacent(leftNeighbor, gap, gapSec) ||
+    !isAdjacent(gap, rightNeighbor, gapSec)
+  ) {
     return { ok: false, message: "隣接していない枠は結合できません。" };
   }
   if (

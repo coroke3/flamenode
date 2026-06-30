@@ -29,6 +29,7 @@ import { youtubeWatchUrl } from "@/lib/youtube/id";
 import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
 import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
+import { getYoutubeChannelCandidates } from "@/lib/db/youtubeChannelCandidates";
 
 export const metadata: Metadata = { title: "作品を編集" };
 export const dynamic = "force-dynamic";
@@ -208,6 +209,9 @@ export default async function EditVideoPage({
   // 編集対象作品の主体 X ID に紐づく候補を出す。
   // admin が他者作品を編集する場合も creator/contact 由来の候補が出る。
   const iconCandidates = creatorX ? await getXIconCandidates(db, creatorX) : [];
+  const channelCandidates = creatorX
+    ? await getYoutubeChannelCandidates(db, creatorX)
+    : [];
 
   // 所属イベント (video_events 経由) を取得 + 候補リストを組み立てる。
   // 候補 = (受付中のイベント) ∪ (既に紐付いているイベント) ∪ (primary_event_id)。
@@ -475,6 +479,7 @@ export default async function EditVideoPage({
         canEditEvents={canEditIdentity}
         canChangeSubmitter={privilegeMode === "admin" && user.role === "admin"}
         iconCandidates={iconCandidates}
+        channelCandidates={channelCandidates}
         editPrivilegeMode={privilegeMode}
         submitBlockedReason={submitBlockedReason}
       />

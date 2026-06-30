@@ -1,4 +1,5 @@
-import * as React from "react";import { FnTable } from "@/components/ui/FnTable";
+import * as React from "react";
+import { FnTable } from "@/components/ui/FnTable";
 
 import Link from "next/link";
 import type { Metadata } from "next";
@@ -9,6 +10,7 @@ import { formatUnix } from "@/lib/utils/format";
 import { Icon } from "@/components/ui/Icon";
 import { AnnouncementBroadcastButton } from "@/components/admin/AnnouncementBroadcastButton";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 
 export const metadata: Metadata = { title: "お知らせ管理" };
 export const dynamic = "force-dynamic";
@@ -80,20 +82,17 @@ export default async function AdminAnnouncementsPage({
           alignItems: "center",
         }}
       >
-        <select name="audience" className="fn-select" defaultValue={audienceFilter}>
+        <AutoSubmitSelect name="audience" className="fn-select" defaultValue={audienceFilter}>
           <option value="any">対象すべて</option>
           <option value="all">all</option>
           <option value="creators">creators</option>
           <option value="admins">admins</option>
-        </select>
-        <select name="status" className="fn-select" defaultValue={statusFilter}>
+        </AutoSubmitSelect>
+        <AutoSubmitSelect name="status" className="fn-select" defaultValue={statusFilter}>
           <option value="any">公開状態すべて</option>
           <option value="published">公開のみ</option>
           <option value="draft">下書きのみ</option>
-        </select>
-        <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm">
-          絞り込み
-        </button>
+        </AutoSubmitSelect>
       </form>
 
       <section

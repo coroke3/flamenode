@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Icon } from "@/components/ui/Icon";
+import { UserAvatar } from "@/components/user/UserAvatar";
 import {
   addEventEditor,
   removeCollaborator,
@@ -856,34 +857,12 @@ function MemberAvatar({
   iconUrl: string | null;
   name: string;
 }): React.ReactElement {
-  if (iconUrl) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={iconUrl}
-        alt=""
-        width={34}
-        height={34}
-        style={{ borderRadius: 999, objectFit: "cover", flex: "0 0 auto" }}
-      />
-    );
-  }
   return (
-    <span
-      aria-hidden
-      style={{
-        width: 34,
-        height: 34,
-        borderRadius: 999,
-        display: "grid",
-        placeItems: "center",
-        flex: "0 0 auto",
-        background: "var(--bg-elevated)",
-        color: "var(--text-secondary)",
-        fontWeight: 800,
-      }}
-    >
-      {name.slice(0, 1).toUpperCase()}
-    </span>
+    <UserAvatar
+      iconUrl={iconUrl}
+      label={name}
+      size={34}
+      style={{ flex: "0 0 auto" } as React.CSSProperties}
+    />
   );
 }

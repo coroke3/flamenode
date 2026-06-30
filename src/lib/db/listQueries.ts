@@ -1,5 +1,5 @@
-import { and, asc, desc, eq, or, sql } from "drizzle-orm";
-import { videos, videoEvents, xUsers } from "./schema";
+import { and, asc, desc, eq, exists, or, sql } from "drizzle-orm";
+import { videoChapters, videoMembers, videos, videoEvents, xUsers } from "./schema";
 import { coalescedVideoScoreDesc } from "./videoScoreSql";
 import { creatorIconExpr, creatorNameExpr } from "./displayExpr";
 import { resolveMissingIcons } from "./iconResolution";
@@ -7,6 +7,10 @@ import {
   withMissingColumnFallback,
   withVideoScoreFallback,
 } from "./queryFallback";
+import {
+  countablePublicVideoCondition,
+  eventPublicVideoLinkCondition,
+} from "./queries";
 import type { DB } from "./client";
 import { uniqueBy } from "@/lib/utils/unique";
 
@@ -43,6 +47,86 @@ function escapeLikeTerm(value: string): string {
   return value.replace(/[\\%_]/g, "\\$&");
 }
 
+function likeColumn(column: unknown, term: string) {
+  return sql`${column} LIKE ${term} ESCAPE '\\'`;
+}
+
+/** 公開作品一覧のキーワード検索条件。 */
+function buildPublicVideoSearchCondition(db: DB, q: string | undefined) {
+  const trimmed = q?.trim();
+  if (!trimmed) return undefined;
+
+  const term = `%${escapeLikeTerm(trimmed)}%`;
+
+  return or(
+    likeColumn(videos.title, term),
+    likeColumn(videos.creator_display_name, term),
+    likeColumn(videos.creator_display_name_yomi, term),
+    likeColumn(videos.creator_x_user_id, term),
+    likeColumn(videos.music, term),
+    likeColumn(videos.credit, term),
+    likeColumn(videos.intro_comment, term),
+    likeColumn(videos.closing_comment, term),
+    likeColumn(videos.highlights, term),
+    likeColumn(videos.production_story, term),
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(xUsers)
+        .where(
+          and(
+            eq(xUsers.id, videos.creator_x_user_id),
+            or(likeColumn(xUsers.x_name, term), likeColumn(xUsers.id, term)),
+          ),
+        ),
+    ),
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(videoChapters)
+        .where(
+          and(
+            eq(videoChapters.video_id, videos.id),
+            eq(videoChapters.visibility, "public"),
+            or(
+              likeColumn(videoChapters.chapter_label, term),
+              likeColumn(videoChapters.note, term),
+            ),
+          ),
+        ),
+    ),
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(videoMembers)
+        .where(
+          and(
+            eq(videoMembers.video_id, videos.id),
+            or(
+              likeColumn(videoMembers.name, term),
+              likeColumn(videoMembers.comment, term),
+              likeColumn(videoMembers.role, term),
+              likeColumn(videoMembers.x_user_id, term),
+              likeColumn(videoMembers.chapters_json, term),
+            ),
+          ),
+        ),
+    ),
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(videoMembers)
+        .innerJoin(xUsers, eq(xUsers.id, videoMembers.x_user_id))
+        .where(
+          and(
+            eq(videoMembers.video_id, videos.id),
+            or(likeColumn(xUsers.x_name, term), likeColumn(xUsers.id, term)),
+          ),
+        ),
+    ),
+  );
+}
+
 /**
  * 公開作品の汎用一覧取得。検索 / イベント絞り込み / ソート / ページング。
  */
@@ -54,16 +138,8 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
   );
 
   const filters = [baseWhere];
-  if (q && q.trim()) {
-    const term = `%${escapeLikeTerm(q.trim())}%`;
-    filters.push(
-      or(
-        sql`${videos.title} LIKE ${term} ESCAPE '\\'`,
-        sql`${videos.creator_display_name} LIKE ${term} ESCAPE '\\'`,
-        sql`${videos.music} LIKE ${term} ESCAPE '\\'`,
-      )!,
-    );
-  }
+  const searchFilter = buildPublicVideoSearchCondition(db, q);
+  if (searchFilter) filters.push(searchFilter);
 
   return withVideoScoreFallback(async (hasScore) => {
     const effectiveSort =
@@ -76,6 +152,11 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
           : desc(videos.scheduled_time);
 
     if (eventId) {
+      const eventFilters = [
+        countablePublicVideoCondition,
+        eventPublicVideoLinkCondition(eventId),
+      ];
+      if (searchFilter) eventFilters.push(searchFilter);
       const rows = await withVideoPartFallback((includePart) =>
         db
           .select({
@@ -91,9 +172,8 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
             part: includePart ? videos.part : nullVideoPart,
           })
           .from(videos)
-          .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
           .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
-          .where(and(...filters, eq(videoEvents.event_id, eventId))!)
+          .where(and(...eventFilters)!)
           .orderBy(orderBy)
           .limit(limit)
           .offset(offset),
@@ -133,22 +213,18 @@ export async function countPublicVideos(db: DB, params: ListVideoParams) {
     eq(videos.visibility_status, "public"),
   );
   const filters = [baseWhere];
-  if (q && q.trim()) {
-    const term = `%${escapeLikeTerm(q.trim())}%`;
-    filters.push(
-      or(
-        sql`${videos.title} LIKE ${term} ESCAPE '\\'`,
-        sql`${videos.creator_display_name} LIKE ${term} ESCAPE '\\'`,
-        sql`${videos.music} LIKE ${term} ESCAPE '\\'`,
-      )!,
-    );
-  }
+  const searchFilter = buildPublicVideoSearchCondition(db, q);
+  if (searchFilter) filters.push(searchFilter);
   if (eventId) {
+    const eventFilters = [
+      countablePublicVideoCondition,
+      eventPublicVideoLinkCondition(eventId),
+    ];
+    if (searchFilter) eventFilters.push(searchFilter);
     const rows = await db
-      .select({ c: sql<number>`count(DISTINCT ${videos.id})` })
+      .select({ c: sql<number>`count(*)` })
       .from(videos)
-      .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
-      .where(and(...filters, eq(videoEvents.event_id, eventId))!);
+      .where(and(...eventFilters)!);
     return Number(rows[0]?.c ?? 0);
   }
   const rows = await db

@@ -63,7 +63,7 @@ export const DANGEROUS_PERMISSION_KEYS: readonly PermissionKey[] = [
 
 export const PERMISSION_KEY_LABELS: Record<PermissionKey, string> = {
   "event.basic": "イベント基本情報",
-  "event.slots": "スロット管理",
+  "event.slots": "枠管理",
   "event.members": "スタッフ管理",
   "event.questions": "カスタム質問",
   "event.review": "審査・承認",

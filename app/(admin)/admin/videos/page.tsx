@@ -1,4 +1,5 @@
-import * as React from "react";import { FnTable } from "@/components/ui/FnTable";
+import * as React from "react";
+import { FnTable } from "@/components/ui/FnTable";
 
 import Link from "next/link";
 import type { Metadata } from "next";
@@ -17,6 +18,7 @@ import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { AdminVideoManagementTabs } from "@/components/admin/AdminVideoManagementTabs";
 import { Pagination } from "@/components/ui/Pagination";
 import { clampPaging, escapeLike, totalPagesFor } from "@/lib/utils/sql";
+import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 
 export const metadata: Metadata = { title: "作品管理" };
 export const dynamic = "force-dynamic";
@@ -153,18 +155,14 @@ export default async function AdminVideosPage({
           placeholder="タイトル / 作者 / X ID"
           style={{ minWidth: 240 }}
         />
-        <select className="fn-select" name="event" defaultValue={event}>
+        <AutoSubmitSelect className="fn-select" name="event" defaultValue={event}>
           <option value="">すべてのイベント</option>
           {events.map((ev) => (
             <option key={ev.id} value={ev.id}>
               {ev.title}
             </option>
           ))}
-        </select>
-        <button type="submit" className="fn-btn fn-btn-primary">
-          <Icon name="search" size={12} aria-hidden />
-          絞り込み
-        </button>
+        </AutoSubmitSelect>
         {(q || status || event) ? (
           <Link href="/admin/videos" className="fn-btn fn-btn-ghost">
             解除

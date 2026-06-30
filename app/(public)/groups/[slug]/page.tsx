@@ -2,6 +2,7 @@ import * as React from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import styles from "./page.module.css";
 import { withDatabase } from "@/lib/cloudflare";
 import {
   fetchPublicEventGroupBySlug,
@@ -9,7 +10,17 @@ import {
   type PublicEventGroupDetail,
   type PublicGroupEvent,
 } from "@/lib/db/eventGroups";
+import { fetchPublicVideos } from "@/lib/db/listQueries";
 import { readStaticJson } from "@/lib/publicData/staticJson";
+import { Shelf } from "@/components/layout/Shelf";
+import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
+import {
+  computeEventStatus,
+  eventStatusLabel,
+  isAcceptingEntries,
+} from "@/lib/utils/eventStatus";
+import { formatUnix } from "@/lib/utils/format";
+import { Icon } from "@/components/ui/Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -21,16 +32,41 @@ const GROUP_TYPE_LABELS: Record<string, string> = {
   other: "その他",
 };
 
-function formatDate(ts: number | null): string {
-  if (!ts) return "";
-  const d = new Date(ts * 1000);
-  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
-}
-
 type StaticGroupPayload = {
   group: PublicEventGroupDetail;
   events: PublicGroupEvent[];
 };
+
+function formatEventRange(
+  start: number | null,
+  end: number | null,
+): string {
+  const startText = formatUnix(start, { dateOnly: true });
+  const endText = formatUnix(end, { dateOnly: true });
+  if (startText && endText) return `${startText} 〜 ${endText}`;
+  return startText || endText || "";
+}
+
+async function fetchTopVideosByEvent(
+  eventIds: readonly string[],
+): Promise<Record<string, VideoCardData[]>> {
+  if (eventIds.length === 0) return {};
+
+  const result = await withDatabase(async (db) => {
+    const entries = await Promise.all(
+      eventIds.map(async (eventId) => {
+        const videos = await fetchPublicVideos(db, {
+          eventId,
+          sort: "score",
+          limit: 10,
+        });
+        return [eventId, videos] as const;
+      }),
+    );
+    return Object.fromEntries(entries);
+  });
+  return result ?? {};
+}
 
 export async function generateMetadata({
   params,
@@ -77,17 +113,21 @@ export default async function GroupDetailPage({
   if (!group) notFound();
 
   const groupEvents =
-    staticPayload?.events ??
-    ((await withDatabase(async (db) => {
+    (await withDatabase(async (db) => {
       return fetchPublicEventsForGroup(db, group.id);
-    })) ?? []);
+    })) ??
+    staticPayload?.events ??
+    [];
+
+  const topVideosByEvent = await fetchTopVideosByEvent(
+    groupEvents.map((event) => event.id),
+  );
+
+  const now = Math.floor(Date.now() / 1000);
 
   return (
-    <div className="fn-public-container fn-page">
-      <header
-        className="fn-page-head"
-        style={group.accent_color ? { borderBottom: `3px solid ${group.accent_color}` } : undefined}
-      >
+    <div className={`fn-public-container fn-page ${styles.page}`}>
+      <header className="fn-page-head">
         <p className="fn-eyebrow">
           <Link href="/groups" style={{ color: "inherit", textDecoration: "none" }}>
             グループ
@@ -112,7 +152,7 @@ export default async function GroupDetailPage({
       </header>
 
       <section style={{ marginTop: 24 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>
+        <h2 className={styles.sectionTitle}>
           所属イベント ({groupEvents.length}件)
         </h2>
         {groupEvents.length === 0 ? (
@@ -120,54 +160,83 @@ export default async function GroupDetailPage({
             このグループの公開イベントはまだありません。
           </p>
         ) : (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-              gap: 16,
-            }}
-          >
-            {groupEvents.map((ev) => (
-              <Link
-                key={ev.id}
-                href={`/event/${ev.id}`}
-                className="fn-card"
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 8,
-                  padding: 16,
-                  textDecoration: "none",
-                  color: "inherit",
-                  borderTop: ev.accent_color ? `3px solid ${ev.accent_color}` : undefined,
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  {ev.icon_url ? (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img src={ev.icon_url} alt="" style={{ width: 20, height: 20, borderRadius: "50%" }} />
-                  ) : null}
-                  <span className="fn-badge" style={{ fontSize: 10, padding: "2px 6px" }}>
-                    {ev.event_type ?? "event"}
-                  </span>
-                  {ev.relation_type !== "member" ? (
-                    <span className="fn-badge" style={{ fontSize: 10, padding: "2px 6px", background: "var(--accent-primary-soft)" }}>
-                      {ev.relation_type}
-                    </span>
-                  ) : null}
-                </div>
-                <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>{ev.title}</h3>
-                {ev.explanation ? (
-                  <p className="fn-muted" style={{ margin: 0, fontSize: 12, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-                    {ev.explanation}
-                  </p>
-                ) : null}
-                <div style={{ marginTop: "auto", fontSize: 12, color: "var(--text-muted)" }}>
-                  {formatDate(ev.start_time)}
-                  {ev.end_time ? ` 〜 ${formatDate(ev.end_time)}` : ""}
-                </div>
-              </Link>
-            ))}
+          <div className={styles.eventList}>
+            {groupEvents.map((ev) => {
+              const statusInput = {
+                ...ev,
+                is_active: ev.is_active ?? 1,
+                is_archived: ev.is_archived ?? 0,
+              };
+              const status = computeEventStatus(statusInput, now);
+              const accepting = isAcceptingEntries(statusInput, now);
+              const topVideos = topVideosByEvent[ev.id] ?? [];
+              const dateRange = formatEventRange(ev.start_time, ev.end_time);
+
+              return (
+                <article
+                  key={ev.id}
+                  className={styles.eventBlock}
+                  style={
+                    ev.accent_color
+                      ? ({ ["--event-accent" as string]: ev.accent_color } as React.CSSProperties)
+                      : undefined
+                  }
+                >
+                  <header className={styles.eventHead}>
+                    <div className={styles.eventMeta}>
+                      {ev.icon_url ? (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img
+                          src={ev.icon_url}
+                          alt=""
+                          style={{ width: 22, height: 22, borderRadius: "50%" }}
+                        />
+                      ) : null}
+                      <span className="fn-badge" style={{ fontSize: 10, padding: "2px 6px" }}>
+                        {ev.event_type ?? "event"}
+                      </span>
+                      <span className="fn-pill" data-tone={accepting ? "accent" : "muted"}>
+                        {accepting ? "エントリー受付中" : eventStatusLabel(status)}
+                      </span>
+                    </div>
+
+                    <div className={styles.eventTitleRow}>
+                      <h3 className={styles.eventTitle}>
+                        <Link href={`/event/${ev.id}`}>{ev.title}</Link>
+                      </h3>
+                      <div className={styles.eventActions}>
+                        {dateRange ? (
+                          <p className={styles.eventDates}>{dateRange}</p>
+                        ) : null}
+                        <Link href={`/event/${ev.id}`} className={styles.eventLink}>
+                          イベント詳細
+                          <Icon name="chevron-right" size={14} aria-hidden />
+                        </Link>
+                      </div>
+                    </div>
+
+                    {ev.explanation ? (
+                      <p className={styles.eventExplanation}>{ev.explanation}</p>
+                    ) : null}
+                  </header>
+
+                  {topVideos.length > 0 ? (
+                    <div className={styles.shelfBox}>
+                      <Shelf ariaLabel={`${ev.title}のスコア上位作品`}>
+                        {topVideos.map((video, index) => (
+                          <VideoCard
+                            key={`${ev.id}-${video.id}-${index}`}
+                            video={video}
+                          />
+                        ))}
+                      </Shelf>
+                    </div>
+                  ) : (
+                    <p className={styles.emptyVideos}>公開作品はまだありません。</p>
+                  )}
+                </article>
+              );
+            })}
           </div>
         )}
       </section>

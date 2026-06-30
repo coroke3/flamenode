@@ -17,7 +17,6 @@ export interface SlotRowLite {
   slot_kind: "time" | "count" | null;
   slot_label: string | null;
   start_time: number | null;
-  end_time: number | null;
   sort_order?: number | null;
   status: "available" | "reserved" | "submitted";
   display_name: string | null;

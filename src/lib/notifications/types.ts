@@ -37,10 +37,10 @@ const TYPE_LABELS: Record<string, string> = {
   video_archived: "作品のアーカイブ状態が変更されました",
   video_status_changed: "作品の状態が変更されました",
   video_edit_permission_granted: "編集権限が付与されました",
-  slot_video_submitted: "スロット投稿を受け付けました",
+  slot_video_submitted: "枠投稿を受け付けました",
   slot_deadline_reminder: "投稿締切が近づいています",
-  slot_force_released: "スロットが解放されました",
-  slot_voided: "スロットが無効になりました",
+  slot_force_released: "枠が解放されました",
+  slot_voided: "枠が無効になりました",
   x_id_approved: "X ID が承認されました",
   x_id_rejected: "X ID が却下されました",
   x_id_alias_approved: "X ID エイリアスが承認されました",
@@ -103,7 +103,7 @@ export function getNotificationCategoryLabel(
 ): string {
   const map: Record<NotificationCategory, string> = {
     video: "作品",
-    slot: "スロット",
+    slot: "枠",
     x_id: "X ID",
     event: "イベント",
     system: "システム",
@@ -144,7 +144,7 @@ export const MANAGE_NOTIFICATION_FILTER_OPTIONS: ReadonlyArray<{
 }> = [
   { key: "all", label: "すべて" },
   { key: "video", label: "作品" },
-  { key: "slot", label: "スロット" },
+  { key: "slot", label: "枠" },
   { key: "x_id", label: "X ID" },
   { key: "chapter", label: "チャプター" },
   { key: "other", label: "その他" },
@@ -156,7 +156,7 @@ export const ADMIN_NOTIFICATION_CATEGORY_OPTIONS: ReadonlyArray<{
 }> = [
   { key: "all", label: "すべて" },
   { key: "video", label: "作品" },
-  { key: "slot", label: "スロット" },
+  { key: "slot", label: "枠" },
   { key: "x_id", label: "X ID" },
   { key: "chapter", label: "チャプター" },
   { key: "moderation", label: "モデレーション" },

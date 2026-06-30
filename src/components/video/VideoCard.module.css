@@ -3,17 +3,28 @@
   min-width: 0;
 }
 
+.compact {
+  max-width: 240px;
+}
+
 .thumbWrap {
+  position: relative;
   aspect-ratio: 16 / 9;
+  overflow: hidden;
 }
 
 .thumb {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center;
 }
 
 .thumbFallback {
+  position: absolute;
+  inset: 0;
   display: grid;
   place-items: center;
   width: 100%;
@@ -45,20 +56,21 @@
   align-items: flex-start;
   padding: 8px;
   border-radius: var(--radius-md);
-  transition: background-color 0.15s ease;
+  border: 1px solid transparent;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
   text-decoration: none;
   color: inherit;
 }
 
 .list:hover {
+  border-color: var(--border-subtle);
   background-color: var(--bg-elevated);
 }
 
-.list:hover .listTitle {
-  color: var(--accent-primary-strong);
-}
-
 .listThumb {
+  position: relative;
   width: 144px;
   flex-shrink: 0;
   aspect-ratio: 16 / 9;
@@ -68,10 +80,17 @@
   background-color: var(--bg-elevated);
 }
 
-.listThumb img {
+.listThumb img,
+.listThumb .thumbFallback {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center;
+}
+
+.listThumb img {
   transition: transform 0.25s ease;
 }
 
@@ -95,7 +114,6 @@
   -webkit-line-clamp: 2;
   line-clamp: 2;
   overflow: hidden;
-  transition: color 0.15s ease;
 }
 
 .listAuthor {

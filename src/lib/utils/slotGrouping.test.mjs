@@ -9,6 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   sortSlotsChronologically,
+  areSlotsInSamePart,
   buildSlotParts,
   collapseReservationGroups,
 } from "./slotGroupingCore.ts";
@@ -76,6 +77,33 @@ test("buildSlotParts: gapSec 内ならまとめる", () => {
   assert.equal(buildSlotParts(slots, 500).length, 2);
 });
 
+test("buildSlotParts: ignores end_time when splitting parts", () => {
+  const slots = [
+    { start_time: 100, end_time: 5000, slot_kind: "time" },
+    { start_time: 2000, end_time: 2100, slot_kind: "time" },
+  ];
+  const parts = buildSlotParts(slots, 30 * 60);
+  assert.equal(parts.length, 2);
+});
+
+test("areSlotsInSamePart: uses start gap and count sort order", () => {
+  assert.equal(
+    areSlotsInSamePart(
+      { start_time: 100, end_time: 5000, slot_kind: "time" },
+      { start_time: 2000, end_time: 2100, slot_kind: "time" },
+      30 * 60,
+    ),
+    false,
+  );
+  assert.equal(
+    areSlotsInSamePart(
+      { start_time: null, sort_order: 2, slot_kind: "count" },
+      { start_time: null, sort_order: 3, slot_kind: "count" },
+    ),
+    true,
+  );
+});
+
 test("buildSlotParts: JST date change starts a new part", () => {
   const may18LateJst = Math.floor(Date.UTC(2026, 4, 18, 14, 55) / 1000);
   const may19StartJst = Math.floor(Date.UTC(2026, 4, 18, 15, 0) / 1000);
@@ -121,6 +149,8 @@ test("collapseReservationGroups: グループ無し枠はそのまま", () => {
   assert.equal(out.length, 2);
   assert.equal(out[0].is_group, false);
   assert.equal(out[0].group_size, 1);
+  assert.equal(out[0].start_time, 100);
+  assert.equal(Object.hasOwn(out[0], "end_time"), false);
 });
 
 test("collapseReservationGroups: 同 group_id の枠は 1 行に集約", () => {
@@ -136,6 +166,8 @@ test("collapseReservationGroups: 同 group_id の枠は 1 行に集約", () => {
   assert.ok(grouped);
   assert.equal(grouped.is_group, true);
   assert.equal(grouped.group_size, 3);
+  assert.equal(grouped.start_time, 100);
+  assert.equal(Object.hasOwn(grouped, "end_time"), false);
   assert.deepEqual(grouped.slot_ids.sort(), ["s1", "s2", "s3"]);
 });
 

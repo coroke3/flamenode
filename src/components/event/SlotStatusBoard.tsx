@@ -85,7 +85,7 @@ function slotRangeLabel(rows: SlotRow[]): string {
     return first.slot_label ?? `#${first.sort_order ?? "?"}`;
   }
   const start = formatUnix(first.start_time, { timeOnly: true });
-  const end = last.end_time ?? last.start_time;
+  const end = last.start_time;
   if (rows.length <= 1 || end == null || end <= first.start_time) return start;
   return `${start} - ${formatUnix(end, { timeOnly: true })}`;
 }

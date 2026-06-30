@@ -9,19 +9,15 @@
   display: grid;
   place-items: center;
   padding: 72px var(--fn-page-gutter, clamp(20px, 4vw, 48px)) 56px;
-  background:
-    linear-gradient(180deg, var(--bg-base) 0%, var(--bg-surface) 100%);
+  background: var(--bg-base);
 }
 
 .hero::before {
-  content: "";
+  content: none;
   position: absolute;
   inset: 0;
-  background-image:
-    linear-gradient(color-mix(in srgb, var(--border-color) 55%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--border-color) 55%, transparent) 1px, transparent 1px);
-  background-size: 42px 42px;
-  mask-image: linear-gradient(180deg, transparent, #000 18%, #000 74%, transparent);
+  background-image: none;
+  mask-image: none;
   opacity: 0.42;
 }
 
@@ -87,12 +83,7 @@
   left: -10%;
   right: -10%;
   height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    color-mix(in srgb, var(--accent-primary) 70%, transparent),
-    transparent
-  );
+  background: color-mix(in srgb, var(--accent-primary) 28%, transparent);
   transform: translateY(-60px);
   animation: scan 7s linear infinite;
 }
@@ -112,8 +103,8 @@
 
 .feature {
   border: 0;
-  background: var(--bg-elevated);
-  border-radius: var(--radius-card, 12px);
+  background: color-mix(in srgb, var(--bg-surface) 76%, var(--bg-elevated));
+  border-radius: var(--r-card, 4px);
   padding: 22px;
   animation: slideIn 520ms ease both;
 }
@@ -124,7 +115,7 @@
   display: grid;
   place-items: center;
   color: var(--accent-primary);
-  background: var(--accent-primary-soft);
+  background: color-mix(in srgb, var(--accent-primary) 10%, var(--bg-elevated));
   border: 0;
   border-radius: 50%;
 }
@@ -166,8 +157,8 @@
   position: relative;
   padding: 16px;
   border: 0;
-  background: var(--bg-elevated);
-  border-radius: var(--radius-card, 12px);
+  background: color-mix(in srgb, var(--bg-surface) 72%, var(--bg-elevated));
+  border-radius: var(--r-card, 4px);
   overflow: hidden;
 }
 
@@ -176,7 +167,7 @@
   position: absolute;
   inset: auto 0 0;
   height: 2px;
-  background: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 52%, var(--bg-elevated));
   transform: translateX(-100%);
   animation: progress 2.8s ease-in-out infinite;
 }

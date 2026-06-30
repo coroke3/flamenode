@@ -1,4 +1,5 @@
-import * as React from "react";import { FnTable } from "@/components/ui/FnTable";
+import * as React from "react";
+import { FnTable } from "@/components/ui/FnTable";
 
 import Link from "next/link";
 import type { Metadata } from "next";
@@ -8,6 +9,7 @@ import { termsVersions, users as usersTable } from "@/lib/db/schema";
 import { formatUnix } from "@/lib/utils/format";
 import { Icon } from "@/components/ui/Icon";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import { TermsReacceptBroadcastButton } from "@/components/admin/TermsReacceptBroadcastButton";
 
 export const metadata: Metadata = { title: "規約管理" };
@@ -97,15 +99,12 @@ export default async function AdminRulesPage({
           alignItems: "center",
         }}
       >
-        <select name="status" className="fn-select" defaultValue={statusFilter}>
+        <AutoSubmitSelect name="status" className="fn-select" defaultValue={statusFilter}>
           <option value="any">全状態</option>
           <option value="published">公開中</option>
           <option value="draft">下書き</option>
           <option value="archived">アーカイブ</option>
-        </select>
-        <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm">
-          絞り込み
-        </button>
+        </AutoSubmitSelect>
       </form>
 
       <section

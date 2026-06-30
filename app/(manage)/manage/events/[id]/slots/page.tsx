@@ -25,7 +25,7 @@ interface Props {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
-  return { title: `スロット運営 (${id})` };
+  return { title: `枠運営 (${id})` };
 }
 
 export default async function ManageEventSlotsPage({
@@ -77,7 +77,6 @@ export default async function ManageEventSlotsPage({
       slot_kind: slotsTable.slot_kind,
       slot_label: slotsTable.slot_label,
       start_time: slotsTable.start_time,
-      end_time: slotsTable.end_time,
       sort_order: slotsTable.sort_order,
       status: slotsTable.status,
       display_name: slotsTable.display_name,
@@ -108,7 +107,7 @@ export default async function ManageEventSlotsPage({
         <Link href={`/manage/events/${id}`}>← イベント運営トップへ</Link>
       </p>
       <h1 style={{ fontSize: 22, fontWeight: 700 }}>
-        スロット運営: {ev.title}
+        枠運営: {ev.title}
       </h1>
       <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 12 }}>
         枠の生成、空き枠整理、確保済み枠の解放をここで扱えます。{total} 件中、最大 500 件を表示します。
@@ -179,14 +178,14 @@ export default async function ManageEventSlotsPage({
         {total === 0 ? (
           <EmptyState
             tone="warning"
-            title="スロットはまだありません"
+            title="枠はまだありません"
             description="このイベントにはまだ投稿枠が設定されていません。上のフォームから一括生成してください。"
             actions={[
               ...(isAdmin
                 ? [
                     {
                       href: `/manage/events/${id}/slots`,
-                      label: "管理者用スロット編集へ",
+                      label: "管理者用枠編集へ",
                       variant: "primary" as const,
                     },
                   ]

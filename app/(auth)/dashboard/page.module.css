@@ -1,3 +1,8 @@
+.page {
+  width: 100%;
+  margin: 0;
+}
+
 .accountHeader {
   display: flex;
   align-items: flex-start;
@@ -39,12 +44,6 @@
   font-weight: 900;
 }
 
-.accountText {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
 .eyebrow {
   color: var(--text-muted);
   font-family: var(--font-mono);
@@ -52,15 +51,6 @@
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-}
-
-.accountText h1 {
-  font-family: var(--font-display);
-  font-size: clamp(32px, 5vw, 56px);
-  font-weight: 900;
-  letter-spacing: 0;
-  line-height: 1;
-  overflow-wrap: anywhere;
 }
 
 .handle {

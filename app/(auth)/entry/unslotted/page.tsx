@@ -13,6 +13,7 @@ import { Icon } from "@/components/ui/Icon";
 import { VideoForm } from "@/components/forms/VideoForm";
 import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
+import { getYoutubeChannelCandidates } from "@/lib/db/youtubeChannelCandidates";
 import { AppShell } from "@/components/ui/AppShell";
 import { StatusPanel } from "@/components/ui/StatusPanel";
 
@@ -80,6 +81,8 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
     : [];
   const iconCandidates =
     db && activeX ? await getXIconCandidates(db, activeX) : [];
+  const channelCandidates =
+    db && activeX ? await getYoutubeChannelCandidates(db, activeX) : [];
 
   // 投稿は writeGuard で active_x_user_id が approved であることを要求するため、
   // フォーム送信前に同じ条件を判定して「押せるけど失敗する」状態を防ぐ。
@@ -146,6 +149,7 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
         softwareSuggestions={softwareSuggestions}
         submitBlockedReason={submitBlockedReason}
         iconCandidates={iconCandidates}
+        channelCandidates={channelCandidates}
         eventOptions={eventOptions}
       />
       <p

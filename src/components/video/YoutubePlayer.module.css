@@ -93,14 +93,42 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-bottom: 24px;
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.62), transparent);
+  padding-bottom: 28px;
+  background: transparent;
+}
+
+.topBar::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 -36px;
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.78) 0%,
+    rgba(0, 0, 0, 0.42) 52%,
+    rgba(0, 0, 0, 0) 100%
+  );
+  pointer-events: none;
+  z-index: -1;
 }
 
 .bottomBar {
   bottom: 0;
-  padding-top: 28px;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.72), transparent);
+  padding-top: 32px;
+  background: transparent;
+}
+
+.bottomBar::before {
+  content: "";
+  position: absolute;
+  inset: -44px 0 0;
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.86) 0%,
+    rgba(0, 0, 0, 0.48) 55%,
+    rgba(0, 0, 0, 0) 100%
+  );
+  pointer-events: none;
+  z-index: -1;
 }
 
 .hidden {
@@ -239,9 +267,72 @@
   accent-color: var(--event-accent, var(--accent-primary));
 }
 
+.controlMenuWrap {
+  position: relative;
+}
+
+.rateBtn {
+  min-width: 40px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.iconBtnDisabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.captionsOn {
+  color: var(--event-accent, var(--accent-primary));
+}
+
+.controlMenu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 5;
+  min-width: 132px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(8, 8, 8, 0.96);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.controlMenuItem {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.controlMenuItem:hover,
+.controlMenuItem:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.controlMenuItemActive {
+  color: var(--event-accent, var(--accent-primary));
+  background: rgba(255, 255, 255, 0.06);
+}
+
 @media (max-width: 560px) {
   .volumeSlider {
     width: 62px;
+  }
+
+  .rateBtn {
+    min-width: 34px;
+    padding: 0 2px;
   }
 
   .timeText {

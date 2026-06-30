@@ -162,13 +162,54 @@ export function AccountMenu({
   const order = (s: XIdEntry["approval_status"]) =>
     s === "approved" ? 0 : s === "pending" ? 1 : 2;
 
-  const switchableXIds = [...xIds]
-    .filter((entry) => entry.x_user_id !== activeId)
+  const selectableXIds = [...xIds]
+    .filter((entry) => entry.approval_status !== "rejected")
     .sort(
       (a, b) =>
         order(a.approval_status) - order(b.approval_status) ||
         a.x_name.localeCompare(b.x_name, "ja"),
     );
+
+  const hasPendingOnly =
+    xIds.length > 0 &&
+    xIds.every((entry) => entry.approval_status === "pending");
+
+  const switchableXIds = activeEntry
+    ? [...xIds]
+        .filter((entry) => entry.x_user_id !== activeId)
+        .sort(
+          (a, b) =>
+            order(a.approval_status) - order(b.approval_status) ||
+            a.x_name.localeCompare(b.x_name, "ja"),
+        )
+    : [];
+
+  const publicProfileHref =
+    activeEntry?.approval_status === "approved"
+      ? `/user/${encodeURIComponent(activeEntry.x_user_id)}`
+      : null;
+
+  const headerInfoContent = (
+    <>
+      {triggerIcon ? (
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img src={triggerIcon} alt="" className={styles.headerAvatar} />
+      ) : (
+        <span className={styles.headerAvatarFallback}>
+          <Icon name="user" size={20} aria-hidden />
+        </span>
+      )}
+      <div className={styles.headerBody}>
+        <div className={styles.headerName}>{triggerName}</div>
+        <div className={styles.headerId}>
+          {activeEntry ? `@${activeEntry.x_user_id}` : user.name}
+        </div>
+      </div>
+      {publicProfileHref ? (
+        <Icon name="external" size={14} className={styles.headerLinkIcon} aria-hidden />
+      ) : null}
+    </>
+  );
 
   return (
     <div ref={ref} className={styles.root}>
@@ -206,44 +247,128 @@ export function AccountMenu({
 
           {/* セクション1: 主体ステータス表示 */}
           <div className={styles.section}>
-            <div className={styles.headerInfo}>
-              {triggerIcon ? (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img
-                  src={triggerIcon}
-                  alt=""
-                  className={styles.headerAvatar}
-                />
-              ) : (
-                <span className={styles.headerAvatarFallback}>
-                  <Icon name="user" size={20} aria-hidden />
-                </span>
-              )}
-              <div className={styles.headerBody}>
-                <div className={styles.headerName}>{triggerName}</div>
-                <div className={styles.headerId}>
-                  {activeEntry ? `@${activeEntry.x_user_id}` : user.name}
-                </div>
-              </div>
-            </div>
+            {publicProfileHref ? (
+              <Link
+                href={publicProfileHref}
+                className={`${styles.headerInfo} ${styles.headerInfoLink}`}
+                onClick={() => setOpen(false)}
+                aria-label={`${triggerName} の公開ページを開く`}
+              >
+                {headerInfoContent}
+              </Link>
+            ) : (
+              <div className={styles.headerInfo}>{headerInfoContent}</div>
+            )}
 
             {!activeEntry ? (
-              <div className={`${styles.statusNotice} ${styles.noticeWarning}`}>
-                <strong>X ID未選択</strong>
-                <p style={{ marginTop: 4, color: "var(--text-secondary)" }}>
-                  投稿・いいね・セーブにはX IDの選択が必要です。
-                </p>
-                <div style={{ marginTop: 8 }}>
-                  <Link
-                    href="/dashboard/settings"
-                    className="fn-btn fn-btn-primary fn-btn-sm"
-                    onClick={() => setOpen(false)}
-                    style={{ width: "100%", justifyContent: "center" }}
-                  >
-                    X IDを連携する
-                  </Link>
+              xIds.length === 0 ? (
+                <div className={`${styles.statusNotice} ${styles.noticeWarning}`}>
+                  <strong>X ID未連携</strong>
+                  <p style={{ marginTop: 4, color: "var(--text-secondary)" }}>
+                    投稿・いいね・セーブにはX IDの連携が必要です。
+                  </p>
+                  <div style={{ marginTop: 8 }}>
+                    <Link
+                      href="/dashboard/settings"
+                      className="fn-btn fn-btn-primary fn-btn-sm"
+                      onClick={() => setOpen(false)}
+                      style={{ width: "100%", justifyContent: "center" }}
+                    >
+                      X IDを連携する
+                    </Link>
+                  </div>
                 </div>
-              </div>
+              ) : hasPendingOnly ? (
+                <div className={`${styles.statusNotice} ${styles.noticeWarning}`}>
+                  <strong>X ID連携申請中</strong>
+                  <p style={{ marginTop: 4, color: "var(--text-secondary)" }}>
+                    運営の承認後に投稿・いいね・セーブが利用できます。
+                  </p>
+                  <div className={styles.pickList}>
+                    {selectableXIds.map((entry, index) => (
+                      <div
+                        key={`${entry.x_user_id}-pending-${index}`}
+                        className={styles.xidOption}
+                        style={{ cursor: "default" }}
+                      >
+                        <span className={styles.xidBody}>
+                          <span className={styles.xidName}>{entry.x_name}</span>
+                          <span className={styles.xidId}>@{entry.x_user_id}</span>
+                        </span>
+                        <span
+                          className="fn-badge fn-badge-warning"
+                          style={{ fontSize: 9, padding: "1px 4px" }}
+                        >
+                          承認待ち
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <Link
+                      href="/dashboard/settings"
+                      className="fn-btn fn-btn-secondary fn-btn-sm"
+                      onClick={() => setOpen(false)}
+                      style={{ width: "100%", justifyContent: "center" }}
+                    >
+                      設定で確認
+                    </Link>
+                  </div>
+                </div>
+              ) : (
+                <div className={`${styles.statusNotice} ${styles.noticeWarning}`}>
+                  <strong>Active X ID未選択</strong>
+                  <p style={{ marginTop: 4, color: "var(--text-secondary)" }}>
+                    連携済みの X ID からアクティブにするものを選んでください。
+                  </p>
+                  <div className={styles.pickList}>
+                    {selectableXIds.map((entry, index) => (
+                      <button
+                        key={`${entry.x_user_id}-pick-${index}`}
+                        type="button"
+                        disabled={pending}
+                        onClick={() => switchTo(entry)}
+                        className={styles.xidOption}
+                      >
+                        {entry.icon_url ? (
+                          /* eslint-disable-next-line @next/next/no-img-element */
+                          <img
+                            src={entry.icon_url}
+                            alt=""
+                            className={styles.xidAvatar}
+                          />
+                        ) : (
+                          <span className={styles.xidAvatarFallback}>
+                            <Icon name="user" size={12} aria-hidden />
+                          </span>
+                        )}
+                        <span className={styles.xidBody}>
+                          <span className={styles.xidName}>{entry.x_name}</span>
+                          <span className={styles.xidId}>@{entry.x_user_id}</span>
+                        </span>
+                        {entry.approval_status === "pending" ? (
+                          <span
+                            className="fn-badge fn-badge-warning"
+                            style={{ fontSize: 9, padding: "1px 4px" }}
+                          >
+                            承認待ち
+                          </span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <Link
+                      href="/dashboard/settings"
+                      className="fn-btn fn-btn-secondary fn-btn-sm"
+                      onClick={() => setOpen(false)}
+                      style={{ width: "100%", justifyContent: "center" }}
+                    >
+                      設定で管理
+                    </Link>
+                  </div>
+                </div>
+              )
             ) : activeEntry.approval_status === "pending" ? (
               <div className={`${styles.statusNotice} ${styles.noticeWarning}`}>
                 <strong>承認待ち</strong>

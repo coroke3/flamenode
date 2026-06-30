@@ -16,6 +16,7 @@ import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
 import { parseSocialLinks } from "@/lib/socialLinks";
 import { normalizePortfolioContact } from "@/lib/profileContact";
 import { countablePublicVideoCondition } from "@/lib/db/queries";
+import { ProfileSocialLinks } from "@/components/user/ProfileSocialLinks";
 
 export const dynamic = "force-dynamic";
 
@@ -164,11 +165,7 @@ export default async function PortfolioPage({
   const userIcon = cachedGoogleImageUrl(user.icon_url);
   const socialLinks = parseSocialLinks(user.other_social_links);
   const portfolioContact = normalizePortfolioContact(user.portfolio_contact);
-  const hasProfile =
-    user.profile_text ||
-    portfolioContact ||
-    user.youtube_channel_url ||
-    socialLinks.length > 0;
+  const hasProfile = user.profile_text || portfolioContact;
 
   return (
     <main className={`fn-public-container fn-page ${styles.page}`}>
@@ -192,22 +189,12 @@ export default async function PortfolioPage({
           <div className={styles.identityBody}>
             <span className="fn-eyebrow">Portfolio</span>
             <h1 className={styles.name}>{name}</h1>
-            <div className={styles.links}>
-              <a href={`https://x.com/${user.id}`} target="_blank" rel="noreferrer">
-                <Icon name="x" size={12} aria-hidden />
-                @{user.id}
-              </a>
-              {user.youtube_channel_url ? (
-                <a
-                  href={user.youtube_channel_url}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <Icon name="youtube" size={12} aria-hidden />
-                  YouTube
-                </a>
-              ) : null}
-            </div>
+            <ProfileSocialLinks
+              className={styles.links}
+              xUserId={user.id}
+              youtubeChannelUrl={user.youtube_channel_url}
+              socialLinks={socialLinks}
+            />
           </div>
         </div>
 
@@ -230,27 +217,13 @@ export default async function PortfolioPage({
           {user.profile_text ? (
             <article className={styles.profileBlock}>
               <span>About</span>
-              <h2>自己紹介</h2>
               <p>{user.profile_text}</p>
             </article>
           ) : null}
-          {portfolioContact || socialLinks.length > 0 ? (
+          {portfolioContact ? (
             <article className={styles.profileBlock}>
               <span>Contact</span>
-              <h2>連絡先</h2>
-              {portfolioContact ? <p>{portfolioContact}</p> : null}
-              {socialLinks.length > 0 ? (
-                <ul className={styles.socialLinks}>
-                  {socialLinks.map((link) => (
-                    <li key={`${link.type}-${link.url}`}>
-                      <a href={link.url} target="_blank" rel="noopener noreferrer">
-                        {link.type}
-                        <Icon name="external" size={11} aria-hidden />
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
+              <p>{portfolioContact}</p>
             </article>
           ) : null}
         </section>

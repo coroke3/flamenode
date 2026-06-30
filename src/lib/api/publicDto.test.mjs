@@ -68,6 +68,7 @@ test("assertNoForbiddenKeys: 配列インデックスもパスに含まれる", 
 test("FORBIDDEN_PUBLIC_KEYS: 主要な禁止キーが含まれている", () => {
   for (const k of [
     "submitted_by_discord_user_id",
+    "creator_x_user_id",
     "discord_id",
     "access_token",
     "refresh_token",

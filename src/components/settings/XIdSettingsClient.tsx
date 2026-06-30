@@ -14,11 +14,8 @@ import {
   updateXIdProfile,
 } from "@/lib/actions/xid";
 import { ConfirmTextDialog } from "@/components/ui/ConfirmTextDialog";
-import {
-  parseSocialLinks,
-  SOCIAL_LINK_TYPE_OPTIONS,
-  type SocialLink,
-} from "@/lib/socialLinks";
+import { YoutubeChannelPicker } from "@/components/settings/YoutubeChannelPicker";
+import { SocialLinksEditor } from "@/components/forms/SocialLinksEditor";
 
 /** X ID 連携申請フォーム (Server Action `requestXIdLink`)。 */
 export function XIdLinkForm({
@@ -170,6 +167,7 @@ export function SetActiveXButton({
 export function XIdCompactProfileForm({
   x,
   iconCandidates,
+  channelCandidates,
   onCancel,
 }: {
   x: {
@@ -182,6 +180,7 @@ export function XIdCompactProfileForm({
     other_social_links: string | null;
   };
   iconCandidates: string[];
+  channelCandidates: string[];
   onCancel: () => void;
 }): React.ReactElement {
   const router = useRouter();
@@ -259,16 +258,14 @@ export function XIdCompactProfileForm({
         disabled={pending}
       />
       <div className={styles.fieldGrid}>
-        <label className={styles.field}>
+        <div className={styles.field}>
           <span className={styles.compactLabel}>YouTube チャンネル</span>
-          <input
-            name="youtube_channel_url"
-            className={styles.input}
-            defaultValue={x.youtube_channel_url ?? ""}
-            placeholder="https://www.youtube.com/@..."
+          <YoutubeChannelPicker
+            defaultValue={x.youtube_channel_url}
+            candidates={channelCandidates}
             disabled={pending}
           />
-        </label>
+        </div>
       </div>
       <SocialLinksEditor
         initialValue={x.other_social_links}
@@ -300,6 +297,7 @@ export function XIdCompactProfileForm({
 export function XIdProfileForm({
   x,
   iconCandidates,
+  channelCandidates,
 }: {
   x: {
     id: string;
@@ -311,6 +309,7 @@ export function XIdProfileForm({
     other_social_links: string | null;
   };
   iconCandidates: string[];
+  channelCandidates: string[];
 }): React.ReactElement {
   const router = useRouter();
   const [pending, startTransition] = React.useTransition();
@@ -380,15 +379,14 @@ export function XIdProfileForm({
         placeholder="Contact / 連絡先"
       />
       <div className={styles.fieldGrid}>
-        <label className={styles.field}>
+        <div className={styles.field}>
           <span className={styles.compactLabel}>YouTube チャンネル</span>
-          <input
-            name="youtube_channel_url"
-            className={styles.input}
-            defaultValue={x.youtube_channel_url ?? ""}
-            placeholder="https://www.youtube.com/@..."
+          <YoutubeChannelPicker
+            defaultValue={x.youtube_channel_url}
+            candidates={channelCandidates}
+            disabled={pending}
           />
-        </label>
+        </div>
       </div>
       <SocialLinksEditor initialValue={x.other_social_links} />
       <div className={styles.row}>
@@ -410,114 +408,6 @@ export function XIdProfileForm({
       {message ? <p className={styles.msgOk}>{message}</p> : null}
       {error ? <p className={styles.msgErr}>{error}</p> : null}
     </form>
-  );
-}
-
-function emptySocialLink(): SocialLink {
-  return { type: "X", url: "" };
-}
-
-function draftSocialLinksJson(links: readonly SocialLink[]): string {
-  const rows = links
-    .map((link) => ({
-      type: link.type.trim() || "Other",
-      url: link.url.trim(),
-    }))
-    .filter((link) => link.url.length > 0);
-  return rows.length > 0 ? JSON.stringify(rows) : "";
-}
-
-function SocialLinksEditor({
-  initialValue,
-  disabled = false,
-}: {
-  initialValue: string | null;
-  disabled?: boolean;
-}): React.ReactElement {
-  const [links, setLinks] = React.useState<SocialLink[]>(() => {
-    const parsed = parseSocialLinks(initialValue);
-    return parsed.length > 0 ? parsed : [emptySocialLink()];
-  });
-  const hiddenValue = React.useMemo(() => draftSocialLinksJson(links), [links]);
-
-  const updateLink = (index: number, patch: Partial<SocialLink>) => {
-    setLinks((current) =>
-      current.map((link, i) => (i === index ? { ...link, ...patch } : link)),
-    );
-  };
-
-  const removeLink = (index: number) => {
-    setLinks((current) => {
-      const next = current.filter((_, i) => i !== index);
-      return next.length > 0 ? next : [emptySocialLink()];
-    });
-  };
-
-  return (
-    <div className={styles.socialEditor}>
-      <input type="hidden" name="other_social_links" value={hiddenValue} />
-      <div className={styles.socialEditorHead}>
-        <span className={styles.compactLabel}>SNS / 外部リンク</span>
-        <button
-          type="button"
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-          onClick={() => setLinks((current) => [...current, emptySocialLink()])}
-          disabled={disabled || links.length >= 8}
-        >
-          <Icon name="plus" size={12} aria-hidden />
-          追加
-        </button>
-      </div>
-      <div className={styles.socialRows}>
-        {links.map((link, index) => (
-          <div className={styles.socialRow} key={`${index}-${link.type}`}>
-            <label className="fn-sr-only" htmlFor={`social-type-${index}`}>
-              SNS種類
-            </label>
-            <select
-              id={`social-type-${index}`}
-              className={styles.select}
-              value={link.type}
-              onChange={(ev) => updateLink(index, { type: ev.currentTarget.value })}
-              disabled={disabled}
-            >
-              {(
-                (SOCIAL_LINK_TYPE_OPTIONS as readonly string[]).includes(link.type)
-                  ? SOCIAL_LINK_TYPE_OPTIONS
-                  : ([link.type, ...SOCIAL_LINK_TYPE_OPTIONS] as const)
-              ).map((type) => (
-                <option key={type} value={type}>
-                  {type}
-                </option>
-              ))}
-            </select>
-            <label className="fn-sr-only" htmlFor={`social-url-${index}`}>
-              SNS URL
-            </label>
-            <input
-              id={`social-url-${index}`}
-              type="url"
-              className={styles.input}
-              value={link.url}
-              placeholder="https://..."
-              maxLength={500}
-              onChange={(ev) => updateLink(index, { url: ev.currentTarget.value })}
-              disabled={disabled}
-            />
-            <button
-              type="button"
-              className={styles.iconOnlyButton}
-              onClick={() => removeLink(index)}
-              disabled={disabled}
-              aria-label="SNSリンクを削除"
-              title="SNSリンクを削除"
-            >
-              <Icon name="trash" size={13} aria-hidden />
-            </button>
-          </div>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -592,6 +482,58 @@ function XIdIconPicker({
     onUpload(file);
   };
 
+  const iconUploadInput = (
+    <label
+      className={`${styles.iconButton} ${styles.iconAddButton} ${pending ? styles.iconAddButtonDisabled : ""}`}
+      title="画像をアップロード"
+    >
+      <input
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        onChange={(ev) => {
+          onPickUploadFile(ev.currentTarget.files?.[0] ?? null);
+          ev.currentTarget.value = "";
+        }}
+        className={styles.fileInputHidden}
+        disabled={pending}
+        aria-label="画像をアップロード"
+      />
+      <Icon name="plus" size={18} aria-hidden />
+    </label>
+  );
+
+  const iconChoices = (
+    <>
+      <div className={compact ? styles.iconRow : styles.iconGrid}>
+        {candidates.map((url) => (
+          <button
+            key={url}
+            type="button"
+            onClick={() => onSelect(url)}
+            className={`${styles.iconButton} ${url === selectedIconUrl ? styles.iconButtonActive : ""}`}
+            disabled={pending}
+            aria-pressed={url === selectedIconUrl}
+            aria-label="アイコンを選択"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={url} alt="" className={styles.iconThumb} />
+            {url === selectedIconUrl ? (
+              <span className={styles.iconSelectedMark}>
+                <Icon name="check" size={12} aria-hidden />
+              </span>
+            ) : null}
+          </button>
+        ))}
+        {iconUploadInput}
+      </div>
+      {candidates.length === 0 ? (
+        <p className="fn-muted fn-text-sm">
+          まだ候補がありません。＋からアップロードするか、作品に設定したアイコンが候補になります。
+        </p>
+      ) : null}
+    </>
+  );
+
   return (
     <div className={styles.iconPicker}>
       {!compact ? (
@@ -618,35 +560,7 @@ function XIdIconPicker({
           </button>
         </div>
       ) : null}
-      {mode === "select" || compact ? (
-        <div className={compact ? styles.iconRow : styles.iconGrid}>
-          {candidates.length === 0 ? (
-            <p className="fn-muted fn-text-sm">
-              まだ候補がありません。新しくアップロードするか、作品に設定したアイコンが候補になります。
-            </p>
-          ) : (
-            candidates.map((url) => (
-              <button
-                key={url}
-                type="button"
-                onClick={() => onSelect(url)}
-                className={`${styles.iconButton} ${url === selectedIconUrl ? styles.iconButtonActive : ""}`}
-                disabled={pending}
-                aria-pressed={url === selectedIconUrl}
-                aria-label="アイコンを選択"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={url} alt="" className={styles.iconThumb} />
-                {url === selectedIconUrl ? (
-                  <span className={styles.iconSelectedMark}>
-                    <Icon name="check" size={12} aria-hidden />
-                  </span>
-                ) : null}
-              </button>
-            ))
-          )}
-        </div>
-      ) : !compact ? (
+      {mode === "select" || compact ? iconChoices : !compact ? (
         <div className={styles.uploadPanel}>
           <div className={styles.uploadPreview}>
             {uploadPreview ?? selectedIconUrl ? (

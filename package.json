@@ -6,6 +6,7 @@
   "imports": {
     "#utils/delimited": "./src/lib/utils/delimited.ts",
     "#utils/next": "./src/lib/utils/next.ts",
+    "#utils/url": "./src/lib/utils/url.ts",
     "#utils/xid": "./src/lib/utils/xid.ts",
     "#utils/event-status-core": "./src/lib/utils/eventStatusCore.ts",
     "#utils/clipboard-html": "./src/lib/utils/clipboardHtml.ts",

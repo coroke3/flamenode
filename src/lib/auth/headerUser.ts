@@ -1,15 +1,18 @@
 import "server-only";
 
 import { eq } from "drizzle-orm";
-import { getDatabase } from "@/lib/cloudflare";
-import { users, xUsers } from "@/lib/db/schema";
-import { resolveMissingIcons } from "@/lib/db/iconResolution";
+import { withDatabase } from "@/lib/cloudflare";
+import { users } from "@/lib/db/schema";
 import { normalizeXId } from "@/lib/utils/xid";
 import {
-  emptyManagementAccess,
   getManagementAccess,
   type ManagementAccess,
 } from "./managementAccess";
+import { resolveActiveXUserId } from "./resolveActiveXId";
+import {
+  applyActiveXIdToEntries,
+  fetchHeaderXIdEntries,
+} from "./headerXIds";
 
 export type HeaderXIdEntry = {
   x_user_id: string;
@@ -39,20 +42,10 @@ type SessionUserLike = {
   active_x_user_id?: string | null;
 };
 
-function normalizeApprovalStatus(
-  status: string | null | undefined,
-): HeaderXIdEntry["approval_status"] {
-  return status === "approved" || status === "rejected" ? status : "pending";
-}
-
 function normalizeRole(
   role: string | null | undefined,
 ): HeaderUser["role"] {
   return role === "admin" || role === "moderator" ? role : "user";
-}
-
-function approvalRank(status: HeaderXIdEntry["approval_status"]): number {
-  return status === "approved" ? 0 : status === "pending" ? 1 : 2;
 }
 
 function fallbackName(value: string | null | undefined, fallback: string): string {
@@ -65,13 +58,11 @@ export async function buildHeaderUser(
   if (!sessionUser?.id) return null;
   const userId: string = sessionUser.id;
 
-  const db = getDatabase();
   let activeXId = normalizeXId(sessionUser.active_x_user_id) || null;
   let role = normalizeRole(sessionUser.role);
-  let management = emptyManagementAccess();
-  const xIds: HeaderXIdEntry[] = [];
+  let xIds: HeaderXIdEntry[] = [];
 
-  if (db) {
+  const dbPayload = await withDatabase(async (db) => {
     const userRow = (
       await db
         .select({
@@ -82,55 +73,29 @@ export async function buildHeaderUser(
         .where(eq(users.id, userId))
         .limit(1)
     )[0];
-    activeXId = normalizeXId(userRow?.active_x_user_id) || activeXId;
+
+    let resolvedActive =
+      normalizeXId(userRow?.active_x_user_id) || activeXId;
     role = normalizeRole(userRow?.role ?? sessionUser.role);
 
-    const rows = await db
-      .select({
-        x_user_id: xUsers.id,
-        x_name: xUsers.x_name,
-        icon_url: xUsers.icon_url,
-        approval_status: xUsers.approval_status,
-      })
-      .from(xUsers)
-      .where(eq(xUsers.linked_discord_user_id, userId));
+    const entries = await fetchHeaderXIdEntries(db, userId, resolvedActive);
+    resolvedActive =
+      (await resolveActiveXUserId(db, userId, resolvedActive)) ?? resolvedActive;
 
-    const withIconFallback = await resolveMissingIcons(
-      db,
-      rows.map((row) => ({
-        ...row,
-        creator_x_user_id: row.x_user_id,
-      })),
-    );
+    return {
+      role,
+      xIds: applyActiveXIdToEntries(entries, resolvedActive),
+      activeXId: resolvedActive,
+    };
+  });
 
-    const byNormalizedXId = new Map<string, HeaderXIdEntry>();
-    for (const row of withIconFallback) {
-      const normalizedId = normalizeXId(row.x_user_id);
-      if (!normalizedId) continue;
-      const approvalStatus = normalizeApprovalStatus(row.approval_status);
-      const entry: HeaderXIdEntry = {
-        x_user_id: normalizedId,
-        x_name: fallbackName(row.x_name, `@${normalizedId}`),
-        icon_url: row.icon_url,
-        approval_status: approvalStatus,
-        is_active:
-          approvalStatus !== "rejected" &&
-          normalizedId === activeXId,
-      };
-      const existing = byNormalizedXId.get(normalizedId);
-      if (
-        !existing ||
-        entry.is_active ||
-        approvalRank(entry.approval_status) < approvalRank(existing.approval_status)
-      ) {
-        byNormalizedXId.set(normalizedId, entry);
-      }
-    }
-
-    xIds.push(...Array.from(byNormalizedXId.values()));
+  if (dbPayload) {
+    role = dbPayload.role;
+    xIds = dbPayload.xIds;
+    activeXId = dbPayload.activeXId;
   }
 
-  management = await getManagementAccess({ id: sessionUser.id, role });
+  const management = await getManagementAccess({ id: sessionUser.id, role });
 
   return {
     id: sessionUser.id,

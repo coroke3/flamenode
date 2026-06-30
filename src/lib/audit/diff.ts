@@ -40,7 +40,7 @@ const KEY_LABELS: Record<string, string> = {
   is_banned: "BAN状態",
   approval_status: "承認状態",
   status: "状態",
-  slot_status: "スロット状態",
+  slot_status: "枠状態",
   sync_status: "同期状態",
   sync_error: "同期エラー",
   can_edit: "編集権限",

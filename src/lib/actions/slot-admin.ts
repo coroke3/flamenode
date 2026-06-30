@@ -109,10 +109,9 @@ export async function generateSlotsBatch(
       return { ok: false, message: "終了時刻は開始より後にしてください。" };
     }
     const intervalSec = data.interval_minutes * 60;
-    const durSec = intervalSec;
     let cursor = startTs;
     let order = 0;
-    while (cursor + durSec <= endTs && order < 500) {
+    while (cursor + intervalSec <= endTs && order < 500) {
       const id = generateId("slot");
       await db.insert(slots).values({
         id,
@@ -120,7 +119,6 @@ export async function generateSlotsBatch(
         slot_kind: "time",
         slot_label: null,
         start_time: cursor,
-        end_time: cursor + durSec,
         sort_order: order,
         status: "available",
         updated_at: now,
@@ -148,7 +146,6 @@ export async function generateSlotsBatch(
         slot_kind: "count",
         slot_label: `${prefix}${startIndex + i}`,
         start_time: null,
-        end_time: null,
         sort_order: startIndex + i,
         status: "available",
         updated_at: now,
@@ -219,7 +216,7 @@ export async function releaseSlot(formData: FormData): Promise<SlotActionResult>
   const row = (
     await db.select().from(slots).where(eq(slots.id, slotId)).limit(1)
   )[0];
-  if (!row) return { ok: false, message: "スロットが見つかりません。" };
+  if (!row) return { ok: false, message: "枠が見つかりません。" };
 
   const guard = await ensureCanEditSlots(row.event_id);
   if (!guard.ok) return guard.result;
@@ -329,7 +326,7 @@ export async function deleteSlot(formData: FormData): Promise<SlotActionResult> 
   const row = (
     await db.select().from(slots).where(eq(slots.id, slotId)).limit(1)
   )[0];
-  if (!row) return { ok: false, message: "スロットが見つかりません。" };
+  if (!row) return { ok: false, message: "枠が見つかりません。" };
   if (row.status !== "available") {
     return {
       ok: false,

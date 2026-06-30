@@ -9,7 +9,6 @@ export type SlotBase = {
   slot_kind: "time" | "count" | null;
   slot_label: string | null;
   start_time: number | null;
-  end_time: number | null;
   sort_order: number | null;
   status: "available" | "reserved" | "submitted";
   display_name: string | null;
@@ -23,11 +22,11 @@ export type SlotBase = {
   event_title?: string | null;
 };
 
-export type SlotPart<T extends { start_time: number | null; end_time: number | null }> = {
+export type SlotPart<T extends { start_time: number | null }> = {
   index: number;
   rows: T[];
   start_time: number | null;
-  end_time: number | null;
+  last_start_time: number | null;
   is_timeless: boolean;
 };
 
@@ -38,6 +37,13 @@ export type SlotGroupRow = SlotBase & {
   is_group: boolean;
 };
 
+function withoutDeprecatedEndTime(row: SlotBase): SlotBase {
+  const { end_time: _deprecatedEndTime, ...rest } = row as SlotBase & {
+    end_time?: unknown;
+  };
+  return rest;
+}
+
 const JST_OFFSET_SEC = 9 * 60 * 60;
 
 function jstDayBucket(unixSec: number | null): number | null {
@@ -45,11 +51,14 @@ function jstDayBucket(unixSec: number | null): number | null {
   return Math.floor((unixSec + JST_OFFSET_SEC) / (24 * 60 * 60));
 }
 
+function normalizeGapSec(gapSec: number): number {
+  return Number.isFinite(gapSec) && gapSec >= 0 ? gapSec : 15 * 60;
+}
+
 export function sortSlotsChronologically<
   T extends {
     id?: string | null;
     start_time: number | null;
-    end_time: number | null;
     sort_order?: number | null;
   },
 >(rows: T[]): T[] {
@@ -60,65 +69,78 @@ export function sortSlotsChronologically<
     const aStart = a.start_time ?? 0;
     const bStart = b.start_time ?? 0;
     if (aStart !== bStart) return aStart - bStart;
-    const aEnd = a.end_time ?? aStart;
-    const bEnd = b.end_time ?? bStart;
-    if (aEnd !== bEnd) return aEnd - bEnd;
     const sortDiff = (a.sort_order ?? 0) - (b.sort_order ?? 0);
     if (sortDiff !== 0) return sortDiff;
     return (a.id ?? "").localeCompare(b.id ?? "");
   });
 }
 
+export function areSlotsInSamePart<
+  T extends {
+    start_time: number | null;
+    sort_order?: number | null;
+    slot_kind?: string | null;
+  },
+>(prev: T, next: T, gapSec = 15 * 60): boolean {
+  if ((prev.slot_kind ?? null) !== (next.slot_kind ?? null)) return false;
+
+  const prevStart = prev.start_time;
+  const nextStart = next.start_time;
+  if (prevStart != null && nextStart != null) {
+    if (nextStart < prevStart) return false;
+    if (jstDayBucket(prevStart) !== jstDayBucket(nextStart)) return false;
+    return nextStart - prevStart <= normalizeGapSec(gapSec);
+  }
+
+  if (prevStart == null && nextStart == null) {
+    const prevOrder = prev.sort_order;
+    const nextOrder = next.sort_order;
+    if (prevOrder == null || nextOrder == null) return false;
+    return nextOrder === prevOrder + 1;
+  }
+
+  return false;
+}
+
 export function buildSlotParts<
   T extends {
     start_time: number | null;
-    end_time: number | null;
     slot_kind?: string | null;
   },
 >(rows: T[], gapSec = 15 * 60): SlotPart<T>[] {
   if (rows.length === 0) return [];
   const timed = sortSlotsChronologically(rows.filter((r) => r.start_time != null));
   const timeless = rows.filter((r) => r.start_time == null);
-  const effectiveGapSec =
-    Number.isFinite(gapSec) && gapSec >= 0 ? gapSec : 15 * 60;
+  const effectiveGapSec = normalizeGapSec(gapSec);
   const parts: SlotPart<T>[] = [];
   let current: T[] = [];
-  let prevEnd = 0;
   for (const row of timed) {
-    const start = row.start_time ?? 0;
     const prev = current[current.length - 1];
     const startsNewPart =
       current.length === 0 ||
-      start - prevEnd > effectiveGapSec ||
-      (prev != null && (prev.slot_kind ?? null) !== (row.slot_kind ?? null)) ||
-      (prev != null && jstDayBucket(prev.start_time) !== jstDayBucket(row.start_time));
+      (prev != null && !areSlotsInSamePart(prev, row, effectiveGapSec));
     if (startsNewPart) {
       if (current.length > 0) {
+        const lastStart = current[current.length - 1]?.start_time ?? null;
         parts.push({
           index: parts.length + 1,
           rows: current,
           start_time: current[0]?.start_time ?? null,
-          end_time:
-            current[current.length - 1]?.end_time ??
-            current[current.length - 1]?.start_time ??
-            null,
+          last_start_time: lastStart,
           is_timeless: false,
         });
       }
       current = [];
     }
     current.push(row);
-    prevEnd = row.end_time ?? row.start_time ?? prevEnd;
   }
   if (current.length > 0) {
+    const lastStart = current[current.length - 1]?.start_time ?? null;
     parts.push({
       index: parts.length + 1,
       rows: current,
       start_time: current[0]?.start_time ?? null,
-      end_time:
-        current[current.length - 1]?.end_time ??
-        current[current.length - 1]?.start_time ??
-        null,
+      last_start_time: lastStart,
       is_timeless: false,
     });
   }
@@ -127,7 +149,7 @@ export function buildSlotParts<
       index: parts.length + 1,
       rows: timeless,
       start_time: null,
-      end_time: null,
+      last_start_time: null,
       is_timeless: true,
     });
   }
@@ -150,7 +172,7 @@ export function collapseReservationGroups(rows: SlotBase[]): SlotGroupRow[] {
     const groupId = row.reservation_group_id;
     if (!groupId) {
       output.push({
-        ...row,
+        ...withoutDeprecatedEndTime(row),
         slot_ids: [row.id],
         group_id: null,
         group_size: 1,
@@ -181,14 +203,10 @@ export function collapseReservationGroups(rows: SlotBase[]): SlotGroupRow[] {
         slotLabel = `${slotLabel ?? ""}〜${lastLabel}`;
       }
     }
-    const hasTime = first.start_time != null;
     output.push({
-      ...first,
+      ...withoutDeprecatedEndTime(first),
       slot_label: slotLabel,
       start_time: first.start_time ?? null,
-      end_time: hasTime
-        ? last.end_time ?? last.start_time ?? first.end_time
-        : null,
       status,
       display_name: displayName,
       x_user_id: xUserId,

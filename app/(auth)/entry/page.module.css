@@ -1,20 +1,3 @@
-.loginSection {
-  display: contents;
-}
-
-.tosNote {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.7;
-}
-
-.tosNote a {
-  color: var(--accent-primary-strong);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
 .choiceGrid {
   display: grid;
 }
@@ -26,13 +9,7 @@
   flex-direction: column;
   gap: 14px;
   padding: 24px 26px;
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--accent-primary) 8%, transparent),
-      transparent 42%
-    ),
-    var(--bg-surface);
+  background: var(--bg-surface);
   border: 0;
   border-radius: var(--r-block, 10px);
   overflow: hidden;
@@ -42,13 +19,10 @@
 }
 
 .choiceCard::before {
-  content: "";
+  content: none;
   position: absolute;
   inset: 0;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
-  background-size: 30px 30px;
+  background-image: none;
   opacity: 0.5;
   pointer-events: none;
 }

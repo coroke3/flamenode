@@ -9,6 +9,7 @@ import {
 } from "./schema";
 import { creatorIconExpr, creatorNameExpr } from "./displayExpr";
 import { resolveMissingIcons } from "./iconResolution";
+import { resolveMemberIcons } from "./xIconResolution";
 import {
   withMissingColumnFallback,
   withVideoScoreFallback,
@@ -21,6 +22,10 @@ import {
   coalescedVideoScoreDesc,
 } from "./videoScoreSql";
 import { compareEventsByUpcomingPriority } from "@/lib/utils/eventOrdering";
+import {
+  isPickupCreatorEligible,
+  sortPickupCreators,
+} from "@/lib/utils/pickupCreators";
 
 const nullVideoPart = sql<string | null>`NULL`;
 export const PVSF_SUMMARY_EVENT_ID = "PVSFSummary";
@@ -52,6 +57,25 @@ export const countablePublicVideoCondition = and(
   publicVideoCondition,
   excludePvsfSummaryVideos(),
 )!;
+
+/** video_events または primary_event_id でイベントに紐づく公開作品。 */
+export function eventPublicVideoLinkCondition(eventId: string) {
+  return or(
+    sql`EXISTS (
+      SELECT 1 FROM video_events AS event_video_links
+      WHERE event_video_links.video_id = ${videos.id}
+        AND event_video_links.event_id = ${eventId}
+    )`,
+    eq(videos.primary_event_id, eventId),
+  )!;
+}
+
+export function publicEventVideoCondition(eventId: string) {
+  return and(
+    countablePublicVideoCondition,
+    eventPublicVideoLinkCondition(eventId),
+  )!;
+}
 
 /** トップページのおすすめ作品候補（videos.score 上位。列未適用 DB は新着順）。 */
 export async function fetchRecommendedVideos(db: DB, limit = 40) {
@@ -160,12 +184,8 @@ export async function fetchLatestEvents(db: DB, limit = 3) {
   return rows.sort(compareEventsByUpcomingPriority).slice(0, limit);
 }
 
-/** イベントに紐づく作品 (最大 N 件)。 */
-export async function fetchVideosForEvent(
-  db: DB,
-  eventId: string,
-  limit = 8,
-) {
+/** イベント詳細など: 紐づく公開作品を上映順ですべて返す。 */
+export async function fetchAllPublicVideosForEvent(db: DB, eventId: string) {
   const rows = await withVideoPartFallback((includePart) =>
     db
       .select({
@@ -179,13 +199,21 @@ export async function fetchVideosForEvent(
         part: includePart ? videos.part : nullVideoPart,
       })
       .from(videos)
-      .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
       .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
-      .where(and(publicVideoCondition, eq(videoEvents.event_id, eventId))!)
-      .orderBy(desc(videos.scheduled_time))
-      .limit(limit),
+      .where(publicEventVideoCondition(eventId))
+      .orderBy(asc(videos.scheduled_time), asc(videos.id)),
   );
   return resolveMissingIcons(db, uniqueBy(rows, (row) => row.id));
+}
+
+/** イベントに紐づく作品の先頭 N 件 (棚・プレビュー用)。 */
+export async function fetchVideosForEvent(
+  db: DB,
+  eventId: string,
+  limit = 8,
+) {
+  const rows = await fetchAllPublicVideosForEvent(db, eventId);
+  return limit > 0 ? rows.slice(0, limit) : rows;
 }
 
 export async function countVideosForEvent(
@@ -193,15 +221,9 @@ export async function countVideosForEvent(
   eventId: string,
 ): Promise<number> {
   const rows = await db
-    .select({ count: sql<number>`COUNT(DISTINCT ${videos.id})` })
+    .select({ count: sql<number>`COUNT(*)` })
     .from(videos)
-    .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
-    .where(
-      and(
-        countablePublicVideoCondition,
-        eq(videoEvents.event_id, eventId),
-      )!,
-    )
+    .where(publicEventVideoCondition(eventId))
     .limit(1);
 
   return Number(rows[0]?.count ?? 0);
@@ -252,7 +274,8 @@ export async function fetchEventWithEditors(db: DB, eventId: string) {
     .from(eventStaff)
     .leftJoin(xUsers, eq(xUsers.id, eventStaff.x_user_id))
     .where(eq(eventStaff.event_id, eventId));
-  return { event: ev[0], editors };
+  const editorsWithIcons = await resolveMemberIcons(db, editors);
+  return { event: ev[0], editors: editorsWithIcons };
 }
 
 /** 作品の合作メンバー一覧。 */
@@ -274,54 +297,59 @@ export async function fetchVideoMembers(db: DB, videoId: string) {
     .orderBy(videoMembers.order_index);
 }
 
-/** ピックアップクリエイター候補 (個人作1件以上 or 合作参加2件以上)。 */
+/** ピックアップクリエイター候補 (個人作1件以上 or 合作参加2件以上)。作品数の多い順。 */
 export async function fetchPickupCreators(db: DB, limit = 40) {
   // 集計: 個人作品数 + 合作参加数で絞る。
   // Drizzle の sql 断片内で ${xUsers.id} 等を埋め込むと D1 が `id` だけに展開し
   // 「ambiguous column name: id」になることがあるため、相関は生 SQL で明示する。
-  const candidateLimit = Math.max(limit * 8, 120);
+  const personalVideoCountSql = sql<number>`(
+    SELECT COUNT(DISTINCT v.id) FROM videos AS v
+    WHERE v.creator_x_user_id = "x_users"."id"
+      AND v.visibility_status = 'public'
+      AND COALESCE(v.primary_event_id, '') <> ${PVSF_SUMMARY_EVENT_ID}
+      AND NOT EXISTS (
+        SELECT 1 FROM video_events AS pvsf_summary_video_events
+        WHERE pvsf_summary_video_events.video_id = v.id
+          AND pvsf_summary_video_events.event_id = ${PVSF_SUMMARY_EVENT_ID}
+      )
+  )`;
+  const collabVideoCountSql = sql<number>`(
+    SELECT COUNT(DISTINCT vm.video_id) FROM video_members AS vm
+    INNER JOIN videos AS v ON v.id = vm.video_id
+    WHERE vm.x_user_id = "x_users"."id"
+      AND v.visibility_status = 'public'
+      AND COALESCE(v.primary_event_id, '') <> ${PVSF_SUMMARY_EVENT_ID}
+      AND NOT EXISTS (
+        SELECT 1 FROM video_events AS pvsf_summary_video_events
+        WHERE pvsf_summary_video_events.video_id = v.id
+          AND pvsf_summary_video_events.event_id = ${PVSF_SUMMARY_EVENT_ID}
+      )
+  )`;
+  const totalWorkCountSql = sql<number>`(${personalVideoCountSql} + ${collabVideoCountSql})`;
+
+  const candidateLimit = Math.max(limit * 6, 160);
   const rows = await db
     .select({
       id: xUsers.id,
       x_name: xUsers.x_name,
       icon_url: xUsers.icon_url,
-      video_count: sql<number>`(
-        SELECT COUNT(DISTINCT v.id) FROM videos AS v
-        WHERE v.creator_x_user_id = "x_users"."id"
-          AND v.visibility_status = 'public'
-          AND COALESCE(v.primary_event_id, '') <> ${PVSF_SUMMARY_EVENT_ID}
-          AND NOT EXISTS (
-            SELECT 1 FROM video_events AS pvsf_summary_video_events
-            WHERE pvsf_summary_video_events.video_id = v.id
-              AND pvsf_summary_video_events.event_id = ${PVSF_SUMMARY_EVENT_ID}
-          )
-      )`,
-      collab_count: sql<number>`(
-        SELECT COUNT(DISTINCT vm.video_id) FROM video_members AS vm
-        INNER JOIN videos AS v ON v.id = vm.video_id
-        WHERE vm.x_user_id = "x_users"."id"
-          AND v.visibility_status = 'public'
-          AND COALESCE(v.primary_event_id, '') <> ${PVSF_SUMMARY_EVENT_ID}
-          AND NOT EXISTS (
-            SELECT 1 FROM video_events AS pvsf_summary_video_events
-            WHERE pvsf_summary_video_events.video_id = v.id
-              AND pvsf_summary_video_events.event_id = ${PVSF_SUMMARY_EVENT_ID}
-          )
-      )`,
+      video_count: personalVideoCountSql,
+      collab_count: collabVideoCountSql,
     })
     .from(xUsers)
     .where(or(eq(xUsers.approval_status, "approved"), eq(xUsers.approval_status, "pending"))!)
-    .orderBy(sql`RANDOM()`)
+    .orderBy(desc(totalWorkCountSql), desc(personalVideoCountSql), asc(xUsers.x_name))
     .limit(candidateLimit);
-  const picked = rows
-    .filter((r) => (r.video_count ?? 0) >= 1 || (r.collab_count ?? 0) >= 2)
+
+  const picked = sortPickupCreators(rows)
+    .filter((r) => isPickupCreatorEligible(r))
     .slice(0, limit);
-  const withIcons = await resolveMissingIcons(
+  const withIcons = await resolveMemberIcons(
     db,
     picked.map((row) => ({
       ...row,
-      creator_x_user_id: row.id,
+      x_user_id: row.id,
     })),
   );
-  return withIcons.map(({ creator_x_user_id: _creatorId, ...row }) => row);
+  return withIcons.map(({ x_user_id: _xUserId, ...row }) => row);
 }

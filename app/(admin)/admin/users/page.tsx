@@ -1,4 +1,5 @@
-import * as React from "react";import { FnTable } from "@/components/ui/FnTable";
+import * as React from "react";
+import { FnTable } from "@/components/ui/FnTable";
 
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -19,6 +20,7 @@ import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { AdminUserManagementTabs } from "@/components/admin/AdminUserManagementTabs";
 import { Pagination } from "@/components/ui/Pagination";
 import { clampPaging, escapeLike, totalPagesFor } from "@/lib/utils/sql";
+import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 
 const USERS_PAGE_SIZE = 50;
 
@@ -399,7 +401,7 @@ export default async function AdminUsersPage({
               style={{ minWidth: 240 }}
             />
             {activeView === "discord" ? (
-              <select className="fn-select" name="status" defaultValue={status}>
+              <AutoSubmitSelect className="fn-select" name="status" defaultValue={status}>
                 <option value="">すべて</option>
                 <option value="active">有効</option>
                 <option value="banned">BAN</option>
@@ -407,12 +409,8 @@ export default async function AdminUsersPage({
                 <option value="moderator">moderator</option>
                 <option value="tos_not_accepted">TOS未同意</option>
                 <option value="no_active_x">active Xなし</option>
-              </select>
+              </AutoSubmitSelect>
             ) : null}
-            <button type="submit" className="fn-btn fn-btn-primary">
-              <Icon name="search" size={12} aria-hidden />
-              検索
-            </button>
             {(q || status) ? (
               <Link href={`/admin/users?view=${activeView}`} className="fn-btn fn-btn-ghost">
                 解除
@@ -712,8 +710,7 @@ function PermissionsPanel({
       style={{
         marginTop: 18,
         padding: 24,
-        background:
-          "linear-gradient(135deg, var(--bg-surface), var(--bg-elevated) 72%, var(--accent-primary-soft))",
+        background: "var(--bg-surface)",
       }}
     >
       <header

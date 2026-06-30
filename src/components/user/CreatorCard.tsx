@@ -1,9 +1,8 @@
 import * as React from "react";
 import Link from "next/link";
 import styles from "./CreatorCard.module.css";
-import { Icon } from "@/components/ui/Icon";
+import { UserAvatar } from "@/components/user/UserAvatar";
 import { cn } from "@/lib/utils/cn";
-import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
 
 interface CreatorCardData {
   id: string;
@@ -18,7 +17,6 @@ export function CreatorCard({
 }: {
   data: CreatorCardData;
 }): React.ReactElement {
-  const iconUrl = cachedGoogleImageUrl(data.icon_url);
   const hint =
     data.hint ??
     (data.video_count !== undefined
@@ -32,14 +30,13 @@ export function CreatorCard({
       prefetch={false}
     >
       <div className="fn-ccard-avatar">
-        {iconUrl ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img src={iconUrl} alt="" loading="lazy" />
-        ) : (
-          <span className={styles.iconFallback}>
-            <Icon name="user" size={28} aria-hidden />
-          </span>
-        )}
+        <UserAvatar
+          iconUrl={data.icon_url}
+          label={data.x_name}
+          useIconFallback
+          className={styles.avatar}
+          fallbackClassName={styles.iconFallback}
+        />
       </div>
       <span className="fn-ccard-name">{data.x_name}</span>
       <span className="fn-ccard-handle">{hint}</span>

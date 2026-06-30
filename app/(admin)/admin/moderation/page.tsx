@@ -1,4 +1,5 @@
-import * as React from "react";import { FnTable } from "@/components/ui/FnTable";
+import * as React from "react";
+import { FnTable } from "@/components/ui/FnTable";
 
 import Link from "next/link";
 import type { Metadata } from "next";
@@ -11,6 +12,7 @@ import {
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { AutoSubmitCheckbox, AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import { updateModerationCaseStatus } from "@/lib/actions/moderation-admin";
 import { formatUnix } from "@/lib/utils/format";
 
@@ -106,25 +108,22 @@ export default async function AdminModerationPage({
       />
 
       <form method="get" style={{ marginTop: 14, display: "flex", gap: 6, flexWrap: "wrap" }}>
-        <select name="type" className="fn-select" defaultValue={typeFilter}>
+        <AutoSubmitSelect name="type" className="fn-select" defaultValue={typeFilter}>
           <option value="all">type すべて</option>
           {CASE_TYPES.map((type) => (
             <option key={type} value={type}>{type}</option>
           ))}
-        </select>
-        <select name="status" className="fn-select" defaultValue={statusFilter}>
+        </AutoSubmitSelect>
+        <AutoSubmitSelect name="status" className="fn-select" defaultValue={statusFilter}>
           <option value="all">status すべて</option>
           {CASE_STATUSES.map((status) => (
             <option key={status} value={status}>{status}</option>
           ))}
-        </select>
+        </AutoSubmitSelect>
         <label className="fn-btn fn-btn-ghost fn-btn-sm">
-          <input type="checkbox" name="overdue" value="1" defaultChecked={overdueOnly} />
+          <AutoSubmitCheckbox name="overdue" value="1" defaultChecked={overdueOnly} />
           期限切れのみ
         </label>
-        <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm">
-          絞り込み
-        </button>
       </form>
 
       <section style={{ marginTop: 18 }}>

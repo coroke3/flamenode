@@ -21,7 +21,7 @@
 .trigger:hover,
 .triggerActive {
   background-color: var(--bg-elevated);
-  border-color: var(--border-subtle);
+  border-color: transparent;
 }
 
 .triggerAvatar {
@@ -104,7 +104,27 @@
   padding: 10px;
   background-color: var(--bg-elevated);
   border-radius: var(--radius-md);
-  border: 1px solid var(--border-subtle);
+  border: 0;
+}
+
+.headerInfoLink {
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.headerInfoLink:hover {
+  background-color: var(--accent-primary-soft);
+}
+
+.headerLinkIcon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.headerInfoLink:hover .headerLinkIcon {
+  color: var(--text-primary);
 }
 
 .headerAvatar {
@@ -201,6 +221,17 @@
 .menuItemDanger:hover {
   background-color: var(--accent-danger-soft);
   color: var(--accent-danger);
+}
+
+.noticeDanger {
+  border-color: var(--accent-danger);
+}
+
+.pickList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
 }
 
 .xidOption {

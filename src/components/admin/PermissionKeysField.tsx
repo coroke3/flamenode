@@ -121,7 +121,7 @@ export function PermissionKeysField({
                 }`,
                 borderRadius: 10,
                 background: checked
-                  ? "linear-gradient(135deg, var(--accent-primary-soft), var(--bg-surface))"
+                  ? "var(--accent-primary-soft)"
                   : "var(--bg-surface)",
                 boxShadow: checked ? "0 0 0 1px var(--accent-primary-soft) inset" : "none",
                 cursor: "pointer",

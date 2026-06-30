@@ -1,4 +1,5 @@
-import * as React from "react";import { FnTable } from "@/components/ui/FnTable";
+import * as React from "react";
+import { FnTable } from "@/components/ui/FnTable";
 
 import Link from "next/link";
 import type { Metadata } from "next";
@@ -80,7 +81,7 @@ export default async function AdminHealthPage({
         <div>
           <strong>DB整合性チェック</strong>
           <p className="fn-muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
-            参照切れ、派生行欠落、スロット状態矛盾をカード形式で確認できます。
+            参照切れ、派生行欠落、枠状態矛盾をカード形式で確認できます。
           </p>
         </div>
         <Link href="/admin/health/integrity" className="fn-btn fn-btn-primary">

@@ -29,7 +29,6 @@ type ReservedSlot = {
   slot_kind: "time" | "count" | null;
   slot_label: string | null;
   start_time: number | null;
-  end_time: number | null;
   sort_order: number | null;
   status: "available" | "reserved" | "submitted";
   discord_user_id: string | null;
@@ -127,7 +126,6 @@ export default async function EntryPage({
         slot_kind: slotsTable.slot_kind,
         slot_label: slotsTable.slot_label,
         start_time: slotsTable.start_time,
-        end_time: slotsTable.end_time,
         sort_order: slotsTable.sort_order,
         status: slotsTable.status,
         discord_user_id: slotsTable.discord_user_id,
@@ -147,7 +145,7 @@ export default async function EntryPage({
           or(eq(slotsTable.status, "reserved"), eq(slotsTable.status, "submitted"))!,
         )!,
       )
-      .orderBy(slotsTable.start_time, slotsTable.end_time, slotsTable.sort_order)
+      .orderBy(slotsTable.start_time, slotsTable.sort_order)
       .limit(12);
   }
   const displaySlots = collapseReservationGroups(reservedSlots as SlotBase[]);
@@ -278,7 +276,7 @@ export default async function EntryPage({
             イベントに参加する
           </h2>
           <p className={styles.cardLead}>
-            開催中のイベントのスロットを確保して、作品を投稿できます。
+            開催中のイベントの枠を確保して、作品を投稿できます。
           </p>
           <div className={styles.eventList}>
             {activeEvents.length === 0 ? (
@@ -325,7 +323,7 @@ export default async function EntryPage({
                 className="fn-btn fn-btn-primary"
               >
                 <Icon name="calendar" size={14} aria-hidden />
-                スロットを確保する
+                枠を確保する
               </Link>
             </div>
           ) : isLoggedIn && activeEvents.length > 1 ? (
@@ -361,7 +359,7 @@ export default async function EntryPage({
                       </span>
                       <span className="fn-mono fn-pc-slot-event">
                         {slot.start_time
-                          ? `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(slot.start_time, { timeOnly: true })}${slot.end_time ? ` - ${formatUnix(slot.end_time, { timeOnly: true })}` : ""}`
+                          ? `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(slot.start_time, { timeOnly: true })}`
                           : (slot.slot_label ?? "時間なし枠")}
                         {slot.is_group ? ` / ${slot.group_size}連続` : ""}
                       </span>

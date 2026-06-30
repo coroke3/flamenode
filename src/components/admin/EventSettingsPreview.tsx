@@ -234,7 +234,7 @@ export function EventSettingsPreview({
         </article>
 
         <article className="fn-card" style={{ padding: 12 }}>
-          <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>スロット設定</h3>
+          <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>枠設定</h3>
           <div style={{ display: "grid", gap: 6 }}>
             <Field label="枠タイプ" value={slotType === "count" ? "件数枠" : "時間枠"} />
             <Field label="確保者表示" value={event.slot_visibility_mode ?? "public_name"} />
