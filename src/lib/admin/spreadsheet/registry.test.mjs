@@ -53,7 +53,7 @@ test("secret column pattern blocks new token columns", () => {
   assert.equal(isSpreadsheetColumnEditable(def, "display_name"), true);
 });
 
-test("deprecated JSON columns are readonly for spreadsheet import", () => {
+test("deprecated columns are readonly for spreadsheet import", () => {
   for (const [table, columns] of Object.entries(
     SPREADSHEET_READONLY_COLUMNS_BY_TABLE,
   )) {

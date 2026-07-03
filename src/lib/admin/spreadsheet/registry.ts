@@ -129,7 +129,7 @@ export const SPREADSHEET_READONLY_COLUMNS_BY_TABLE: Record<
   string,
   readonly string[]
 > = {
-  events: ["custom_questions"],
+  events: ["custom_questions", "is_active", "is_entry_open", "is_archived"],
   videos: ["custom_answers", "stage_permission"],
 };
 
