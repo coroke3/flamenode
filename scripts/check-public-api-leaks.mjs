@@ -5,7 +5,10 @@
  *   node scripts/check-public-api-leaks.mjs [baseUrl]
  *
  * デフォルト: http://localhost:3000
- * exit 0 = OK, exit 1 = 禁止キー検出, exit 2 = fetch 失敗 (サーバー未起動)
+ * exit 0 = OK
+ * exit 1 = 禁止キー検出
+ * exit 2 = fetch 失敗 (サーバー未起動)
+ * exit 3 = HTTP / JSON 応答異常
  *
  * NOTE: publicDto.ts に依存しないよう禁止キーをここに再掲する。
  */
@@ -75,14 +78,20 @@ async function checkEndpoint(url) {
     res = await fetch(url);
   } catch (err) {
     console.error(`[fetch error] ${url}: ${err.message}`);
-    return null; // fetch 失敗
+    return { kind: "fetch_error" };
   }
   if (!res.ok) {
     console.error(`[HTTP ${res.status}] ${url}`);
-    return []; // サーバーはいるが 4xx/5xx — 漏洩なし扱い (スキップ)
+    return { kind: "http_error", status: res.status };
   }
-  const json = await res.json();
-  return findForbiddenKeys(json);
+  let json;
+  try {
+    json = await res.json();
+  } catch (err) {
+    console.error(`[invalid json] ${url}: ${err.message}`);
+    return { kind: "invalid_json" };
+  }
+  return { kind: "ok", violations: findForbiddenKeys(json) };
 }
 
 const endpoints = [
@@ -94,15 +103,22 @@ const endpoints = [
 
 let hasError = false;
 let fetchFailed = false;
+let responseFailed = false;
 
 for (const url of endpoints) {
   process.stdout.write(`Checking ${url} ... `);
-  const violations = await checkEndpoint(url);
-  if (violations === null) {
+  const result = await checkEndpoint(url);
+  if (result.kind === "fetch_error") {
     fetchFailed = true;
     console.error("FETCH FAILED");
     continue;
   }
+  if (result.kind === "http_error" || result.kind === "invalid_json") {
+    responseFailed = true;
+    console.error("RESPONSE FAILED");
+    continue;
+  }
+  const { violations } = result;
   if (violations.length === 0) {
     console.log("OK");
   } else {
@@ -117,6 +133,10 @@ for (const url of endpoints) {
 if (fetchFailed) {
   console.error("\nOne or more endpoints could not be reached. Is the dev server running?");
   process.exit(2);
+}
+if (responseFailed) {
+  console.error("\nOne or more public API endpoints returned an HTTP error or invalid JSON.");
+  process.exit(3);
 }
 if (hasError) {
   console.error("\nForbidden keys detected in public API responses.");
