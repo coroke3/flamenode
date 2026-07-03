@@ -12,6 +12,10 @@ import {
 } from "@/lib/admin/spreadsheet/query";
 import { buildSpreadsheetImportPreviewToken } from "@/lib/admin/spreadsheet/importPreviewToken";
 import { resolveSpreadsheetTableContext } from "@/lib/admin/spreadsheet/tableContext";
+import { getDatabase } from "@/lib/cloudflare";
+import { systemSettings } from "@/lib/db/schema";
+import { isWriteBlocked } from "@/lib/operationMode/policy";
+import { resolveOperationMode } from "@/lib/operationMode/resolve";
 
 export async function POST(req: Request): Promise<Response> {
   const guard = await requireSpreadsheetAdmin();
@@ -86,6 +90,14 @@ export async function POST(req: Request): Promise<Response> {
       );
     }
 
+    const blocked = await getSpreadsheetImportWriteBlockReason();
+    if (blocked) {
+      return NextResponse.json(
+        { error: "cost_guard", message: blocked },
+        { status: 423 },
+      );
+    }
+
     const result = await applySpreadsheetImport(
       {
         table,
@@ -105,4 +117,18 @@ export async function POST(req: Request): Promise<Response> {
   } catch (e) {
     return spreadsheetErrorResponse(e);
   }
+}
+
+async function getSpreadsheetImportWriteBlockReason(): Promise<string | null> {
+  const db = getDatabase();
+  if (!db) return null;
+  const rows = await db.select().from(systemSettings).limit(1);
+  const mode = resolveOperationMode(rows[0]);
+  if (mode === "maintenance") {
+    return "Spreadsheet import apply is disabled during maintenance. Dry run is still available.";
+  }
+  if (isWriteBlocked(mode)) {
+    return `Spreadsheet import apply is disabled in ${mode} mode. Dry run is still available.`;
+  }
+  return null;
 }
