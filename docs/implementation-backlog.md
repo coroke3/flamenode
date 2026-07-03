@@ -1,8 +1,8 @@
 # FlameNode 実装バックログ (Pre-Production Cleanup)
 
-> 2026-06-27 update: OperationMode, public API flag, DB reduction, event group static JSON, normalized custom question persistence, and Worker 3-cron deployment config are wired in code.
+> 2026-07-03 update: CSV / TSV / legacy import flows require a preview before apply. Admin spreadsheet and legacy import APIs reject direct apply without the matching preview token.
 
-最終更新: 2026-06-27
+最終更新: 2026-07-03
 
 ## 概要
 
@@ -32,8 +32,8 @@ D1 を正本、R2/KV の静的 JSON は公開配信用キャッシュとする�
 | スマホ UI / 入力 UI | ボタンサイズ, ヒーロー, ガター, 下部バー | 改善済み | implemented | 中 | CSS modules |
 | 危険操作 / 監査ログ | history_logs, 確認 UI | 基本実装済み | partial | 中 | history logs, admin pages |
 | migration / Drizzle meta | 手動 migration と Drizzle meta の同期 | 手動 migration 混在 | partial | 低 | migrations/, instrumentation.ts |
-| CSV import 再設計 | 用途別 import workflow | 基本実装済み | partial | 中 | lib/import/, admin pages |
-| Legacy Import Gateway | 旧データ移行 | 未実装 | planned | 低 | admin/import/legacy |
+| CSV import 再設計 | 用途別 import workflow | 運営メンバーCSV / admin spreadsheet / legacy import をプレビュー後保存に統一済み | implemented | 中 | eventStaffCsv, spreadsheet/import, legacy-import |
+| Legacy Import Gateway | 旧データ移行 | `/admin/import` と JSON API を実装済み。apply はプレビュートークン必須 | implemented | 低 | /admin/import, api/admin/legacy-import |
 | D1 schema/runtime fixes | notification-dispatcher, instrumentation, list_popular | 修正済み | implemented | 高 | workers/, instrumentation.ts |
 | Cloudflare deploy | config check, system_settings ID | 整理済み | implemented | 高 | scripts/, package.json |
 | 未使用コード削除 | spreadsheetUtils, safeAccentHex, CSS | 削除済み | implemented | 低 | 多数 |
@@ -62,6 +62,4 @@ D1 を正本、R2/KV の静的 JSON は公開配信用キャッシュとする�
 5. custom questions 本格実装 (EventForm/VideoForm UI)
 6. event_staff permission_mask migration
 7. video_stats 削除 (migration)
-8. CSV import 再設計
-9. Legacy Import Gateway
-10. docs/tests 最終同期
+8. docs/tests 最終同期
