@@ -3,6 +3,7 @@
 > 2026-07-03 update: CSV / TSV / legacy import flows require a preview before apply. Admin spreadsheet and legacy import APIs reject direct apply without the matching preview token.
 > 2026-07-03 update: `operation_mode` resolution is shared across app reads and static rebuild workers. `content-jobs` now has a tested mode policy. `/list` can read `list/recent.json` in `static_only` mode.
 > 2026-07-03 update: Legacy import reuses the stage-permission answer sync path. Imported `stage_permission` / legacy `righttype` values populate `video_custom_answers` when matching `event_custom_questions` exist.
+> 2026-07-03 update: `/event` index can read R2 `events/index.json` in `static_only` mode. `content-jobs` includes public event group sections in that payload.
 
 最終更新: 2026-07-03
 
@@ -18,7 +19,7 @@ D1 を正本、R2/KV の静的 JSON は公開配信用キャッシュとする�
 | 項目 | 意図 | 現状 | 分類 | 優先度 | 対応ファイル候補 |
 |------|------|------|------|--------|-----------------|
 | OperationMode 化 | cost_guard_mode / is_maintenance_mode を統一 | resolver / policy / getMode を共通化。旧カラムは互換 fallback のみ | implemented | 高 | system_settings, costGuard.ts, queue.ts |
-| static JSON read layer | 公開ページを R2 静的 JSON に寄せる | `static_only` 時の `/list` recent は R2 `list/recent.json` を利用。他ページは D1 fallback | partial | 高 | public pages, lib/publicData/ |
+| static JSON read layer | 公開ページを R2 静的 JSON に寄せる | `static_only` 時の `/list` recent と `/event` index は R2 `list/recent.json` / `events/index.json` を利用。top / event detail / video / user は D1 fallback | partial | 高 | public pages, lib/publicData/ |
 | static rebuild queue policy | mode に応じた queue 処理 | maintenance停止 / economy件数制限 / read_only対象制限 / static_only highのみを policy 化 | implemented | 高 | workers/json-generator/queue.ts |
 | api_endpoints 削除 | events.public_api_enabled に統一 | deprecated 表記済み | partial | 高 | schema.ts, admin pages |
 | video_stats 削除 | videos 側列に統一 | schema.ts に残存 | planned | 高 | schema.ts, score-recalc worker |
@@ -57,7 +58,7 @@ D1 を正本、R2/KV の静的 JSON は公開配信用キャッシュとする�
 
 ## 残作業 (次のPRで対応)
 
-1. static JSON read layer 拡張 (top / event / video / user を R2 fallback 対応)
+1. static JSON read layer 拡張 (top / event detail / video / user を R2 fallback 対応)
 2. custom questions 拡張 (select / radio / checkbox UI と表示範囲)
 3. event_staff permission_mask migration
 4. video_stats 削除 (migration)
