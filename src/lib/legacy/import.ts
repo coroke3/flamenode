@@ -29,6 +29,7 @@ import {
 } from "@/lib/db/schema";
 import { keysToPermissionMask } from "@/lib/auth/permissions/mask";
 import { enqueueStaticRebuildMany } from "@/lib/staticRebuild/enqueue";
+import { replaceStagePermissionCustomAnswers } from "@/lib/video/stagePermissionAnswers";
 import {
   detectLegacyKind,
   normalizeEventInfo,
@@ -777,7 +778,14 @@ async function applyLegacyImportInner(
 
       // video_events (m:n): legacy eventid may contain multiple comma-separated ids.
       // The first id is stored as videos.primary_event_id; all ids are linked here.
+      let previousEventIds: string[] = [];
       if (exists && strategyVideos === "update") {
+        previousEventIds = (
+          await db
+            .select({ event_id: videoEvents.event_id })
+            .from(videoEvents)
+            .where(eq(videoEvents.video_id, vi.id))
+        ).map((row) => row.event_id);
         await db.delete(videoEvents).where(eq(videoEvents.video_id, vi.id));
       }
       for (const eventId of v.eventIds) {
@@ -786,6 +794,14 @@ async function applyLegacyImportInner(
           .values({ video_id: vi.id, event_id: eventId })
           .onConflictDoNothing();
       }
+      await replaceStagePermissionCustomAnswers(db, {
+        videoId: vi.id,
+        eventIds: v.eventIds,
+        deleteEventIds:
+          strategyVideos === "update" ? previousEventIds : undefined,
+        stagePermission: vi.stage_permission,
+        now,
+      });
       counts.members += v.members.length;
     } catch (err) {
       counts.videos.failed += 1;
