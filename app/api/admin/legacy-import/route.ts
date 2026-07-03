@@ -49,7 +49,7 @@ export async function POST(req: Request): Promise<Response> {
   if (ct.includes("application/json")) {
     return handleJson(req, u.id);
   }
-  return handleForm(req, u.id);
+  return handleForm(req);
 }
 
 function jsonErrorResult(
@@ -171,7 +171,7 @@ function legacyOptionsFromForm(form: FormData) {
   };
 }
 
-async function handleForm(req: Request, operatorId: string): Promise<Response> {
+async function handleForm(req: Request): Promise<Response> {
   const form = await req.formData();
   const dryRun = form.get("dry_run") === "1";
   const legacyFormOptions = legacyOptionsFromForm(form);
@@ -229,28 +229,10 @@ async function handleForm(req: Request, operatorId: string): Promise<Response> {
     return NextResponse.redirect(base, { status: 303 });
   }
 
-  const blocked = await getImportWriteBlockReason();
-  if (blocked) {
-    base.searchParams.set("notice", blocked);
-    return NextResponse.redirect(base, { status: 303 });
-  }
-
-  try {
-    const r = await applyLegacyImport(
-      parsed,
-      { events: "skip", videos: "skip", ...legacyFormOptions, previewLimit: 0 },
-      operatorId,
-    );
-    base.searchParams.set(
-      "notice",
-      `Import complete: events create ${r.counts.events.create} / update ${r.counts.events.update}, videos create ${r.counts.videos.create} / update ${r.counts.videos.update}${
-        r.errors.length ? `, errors ${r.errors.length}` : ""
-      }.`,
-    );
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    base.searchParams.set("notice", `Import failed: ${msg}`);
-  }
+  base.searchParams.set(
+    "notice",
+    "シンプルフォームはドライラン専用です。保存はプレビューUIで内容を確認してから実行してください。",
+  );
   return NextResponse.redirect(base, { status: 303 });
 }
 

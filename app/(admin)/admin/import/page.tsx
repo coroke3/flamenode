@@ -87,21 +87,21 @@ export default async function AdminImportPage({
             gap: 12,
           }}
         >
-          <label className="fn-label">JSON / CSV ファイル</label>
+          <label className="fn-label">JSON / CSV / TSV ファイル</label>
           <input
             type="file"
             name="file"
-            accept="application/json,text/csv,.json,.csv"
+            accept="application/json,text/csv,text/tab-separated-values,.json,.csv,.tsv"
             className="fn-input"
           />
           <div style={{ display: "flex", gap: 8 }}>
             <button type="submit" name="dry_run" value="1" className="fn-btn fn-btn-ghost">
               <Icon name="info" size={12} aria-hidden /> ドライラン
             </button>
-            <button type="submit" className="fn-btn fn-btn-primary">
-              <Icon name="upload" size={12} aria-hidden /> 取り込み
-            </button>
           </div>
+          <p className="fn-help">
+            このフォームは解析専用です。保存は上のプレビューUIで内容を確認してから実行します。
+          </p>
         </form>
       </details>
     </div>

@@ -128,6 +128,30 @@ async function parseImportResponse(res: Response): Promise<ImportResult> {
   }
 }
 
+function buildPreviewKey({
+  files,
+  importMode,
+  enqueueStaticRebuild,
+  staticRebuildStrategy,
+}: {
+  files: PendingFile[];
+  importMode: LegacyImportMode;
+  enqueueStaticRebuild: boolean;
+  staticRebuildStrategy: StaticRebuildStrategy;
+}): string {
+  return JSON.stringify({
+    files: files.map((file) => ({
+      name: file.name,
+      size: file.size,
+      length: file.content.length,
+      encoding: file.encoding,
+    })),
+    importMode,
+    enqueueStaticRebuild,
+    staticRebuildStrategy,
+  });
+}
+
 export function LegacyImportClient(): React.ReactElement {
   const router = useRouter();
   const [files, setFiles] = React.useState<PendingFile[]>([]);
@@ -140,6 +164,7 @@ export function LegacyImportClient(): React.ReactElement {
     React.useState<StaticRebuildStrategy>("event");
   const [enqueueStaticRebuild, setEnqueueStaticRebuild] = React.useState(true);
   const [analysis, setAnalysis] = React.useState<ImportResult | null>(null);
+  const [analysisKey, setAnalysisKey] = React.useState<string | null>(null);
   const [applyResult, setApplyResult] = React.useState<ImportResult | null>(null);
   const [pending, setPending] = React.useState<"analyze" | "apply" | null>(null);
   const [confirmApply, setConfirmApply] = React.useState(false);
@@ -168,6 +193,7 @@ export function LegacyImportClient(): React.ReactElement {
       return Array.from(merged.values());
     });
     setAnalysis(null);
+    setAnalysisKey(null);
     setApplyResult(null);
   }, []);
 
@@ -182,11 +208,18 @@ export function LegacyImportClient(): React.ReactElement {
   const removeFile = (idx: number) => {
     setFiles((prev) => prev.filter((_, i) => i !== idx));
     setAnalysis(null);
+    setAnalysisKey(null);
     setApplyResult(null);
   };
 
   const runAnalyze = async () => {
     if (files.length === 0) return;
+    const key = buildPreviewKey({
+      files,
+      importMode,
+      enqueueStaticRebuild,
+      staticRebuildStrategy,
+    });
     setPending("analyze");
     setApplyResult(null);
     try {
@@ -204,7 +237,9 @@ export function LegacyImportClient(): React.ReactElement {
           },
         }),
       });
-      setAnalysis(await parseImportResponse(res));
+      const json = await parseImportResponse(res);
+      setAnalysis(json);
+      setAnalysisKey(key);
     } catch (e) {
       setAnalysis({
         ok: false,
@@ -214,12 +249,24 @@ export function LegacyImportClient(): React.ReactElement {
         previewTotal: 0,
         errors: [],
       });
+      setAnalysisKey(null);
     } finally {
       setPending(null);
     }
   };
 
   const doApply = async () => {
+    if (!hasFreshSuccessfulPreview) {
+      setApplyResult({
+        ok: false,
+        message: "先に現在のファイルと取り込みモードでドライランを実行してください。",
+        counts: emptyCounts(),
+        preview: [],
+        previewTotal: 0,
+        errors: ["preview-required"],
+      });
+      return;
+    }
     setPending("apply");
     try {
       const res = await fetch("/api/admin/legacy-import", {
@@ -258,10 +305,21 @@ export function LegacyImportClient(): React.ReactElement {
 
   const runApply = () => {
     if (files.length === 0) return;
+    if (!hasFreshSuccessfulPreview) return;
     setConfirmApply(true);
   };
 
   const totalSize = files.reduce((acc, f) => acc + f.size, 0);
+  const currentPreviewKey = buildPreviewKey({
+    files,
+    importMode,
+    enqueueStaticRebuild,
+    staticRebuildStrategy,
+  });
+  const hasFreshSuccessfulPreview =
+    analysis?.ok === true &&
+    analysis.errors.length === 0 &&
+    analysisKey === currentPreviewKey;
   const displayResult = applyResult ?? analysis;
   const previewRows = (displayResult?.preview ?? []).slice(0, PREVIEW_LIMIT);
   const truncated = (displayResult?.previewTotal ?? 0) - previewRows.length;
@@ -358,7 +416,10 @@ export function LegacyImportClient(): React.ReactElement {
           <select
             id="import-mode"
             value={importMode}
-            onChange={(e) => setImportMode(e.target.value as LegacyImportMode)}
+            onChange={(e) => {
+              setImportMode(e.target.value as LegacyImportMode);
+              setAnalysisKey(null);
+            }}
             disabled={pending !== null}
           >
             <option value="archive">archive: 過去イベント（既定）</option>
@@ -373,7 +434,10 @@ export function LegacyImportClient(): React.ReactElement {
             id="rebuild-strategy"
             value={staticRebuildStrategy}
             onChange={(e) =>
-              setStaticRebuildStrategy(e.target.value as StaticRebuildStrategy)
+              {
+                setStaticRebuildStrategy(e.target.value as StaticRebuildStrategy);
+                setAnalysisKey(null);
+              }
             }
             disabled={pending !== null}
           >
@@ -387,7 +451,10 @@ export function LegacyImportClient(): React.ReactElement {
           <input
             type="checkbox"
             checked={enqueueStaticRebuild}
-            onChange={(e) => setEnqueueStaticRebuild(e.target.checked)}
+            onChange={(e) => {
+              setEnqueueStaticRebuild(e.target.checked);
+              setAnalysisKey(null);
+            }}
             disabled={pending !== null}
           />
           <span>取り込み後に静的 JSON 再生成キューへ積む</span>
@@ -415,12 +482,17 @@ export function LegacyImportClient(): React.ReactElement {
           type="button"
           className="fn-btn fn-btn-primary"
           onClick={runApply}
-          disabled={files.length === 0 || pending !== null}
+          disabled={files.length === 0 || pending !== null || !hasFreshSuccessfulPreview}
         >
           <Icon name="upload" size={12} aria-hidden />
           {pending === "apply" ? "取り込み中..." : "取り込み"}
         </button>
       </div>
+      {files.length > 0 && !hasFreshSuccessfulPreview ? (
+        <div className={styles.fileMeta} style={{ textAlign: "right" }}>
+          取り込み前に、現在の設定でドライランを完了してください。
+        </div>
+      ) : null}
 
       {displayResult ? (
         <>
