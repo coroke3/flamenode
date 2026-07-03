@@ -20,6 +20,10 @@ import {
   DEFAULT_STAGE_PERMISSION_FIELD,
   resolveStagePermissionFieldsFromJson,
 } from "@/lib/video/formSettings";
+import {
+  syncLegacyEventVisibilityFlags,
+  type EventVisibilityStatus,
+} from "@/lib/utils/eventStatus";
 
 export interface EventActionResult {
   ok: boolean;
@@ -50,6 +54,9 @@ const eventSchema = z.object({
   end_time: z.string().trim().optional().nullable(),
   entry_start_time: z.string().trim().optional().nullable(),
   entry_end_time: z.string().trim().optional().nullable(),
+  visibility_status: z
+    .enum(["draft", "private", "public", "archived"])
+    .optional(),
   is_active: z.coerce.number().min(0).max(1).default(0),
   is_archived: z.coerce.number().min(0).max(1).default(0),
   allow_user_video_event_links: z.coerce.number().min(0).max(1).default(0),
@@ -98,6 +105,15 @@ function buildPartsJson(raw: string | null | undefined): string | null {
 
 function parseDateInput(raw: string | null | undefined): number | null {
   return parseJstDatetimeLocal(raw);
+}
+
+function resolveSubmittedEventVisibility(
+  data: Pick<z.infer<typeof eventSchema>, "visibility_status" | "is_active" | "is_archived">,
+): EventVisibilityStatus {
+  if (data.visibility_status) return data.visibility_status;
+  if (data.is_archived === 1) return "archived";
+  if (data.is_active === 1) return "public";
+  return "draft";
 }
 
 function boolFormValue(value: FormDataEntryValue | undefined): boolean {
@@ -253,6 +269,8 @@ export async function createEvent(
   if (dup) return { ok: false, message: `ID「${id}」は既に存在します。` };
 
   const videoFormSettingsJson = buildVideoFormSettingsJson(formData, data);
+  const visibilityStatus = resolveSubmittedEventVisibility(data);
+  const legacyVisibility = syncLegacyEventVisibilityFlags(visibilityStatus);
   await db.insert(events).values({
     id,
     title: data.title,
@@ -261,8 +279,10 @@ export async function createEvent(
     icon_url: data.icon_url ?? null,
     img_url: data.img_url ?? null,
     accent_color: data.accent_color ?? null,
-    is_active: data.is_active,
-    is_archived: data.is_archived,
+    visibility_status: visibilityStatus,
+    is_active: legacyVisibility.is_active,
+    is_entry_open: legacyVisibility.is_entry_open,
+    is_archived: legacyVisibility.is_archived,
     allow_user_video_event_links: data.allow_user_video_event_links,
     allow_user_video_edits: data.allow_user_video_edits,
     user_video_edit_permission_keys_json:
@@ -292,7 +312,7 @@ export async function createEvent(
     table_name: "events",
     record_id: id,
     action: "CREATE",
-    after_data: JSON.stringify({ title: data.title, is_active: data.is_active }),
+    after_data: JSON.stringify({ title: data.title, visibility_status: visibilityStatus }),
     operator_discord_id: guard.userId,
     retention_class: "normal",
     created_at: now,
@@ -367,9 +387,13 @@ export async function updateEvent(
   }
 
   if (canPublish) {
+    const visibilityStatus = resolveSubmittedEventVisibility(data);
+    const legacyVisibility = syncLegacyEventVisibilityFlags(visibilityStatus);
     Object.assign(updatePayload, {
-      is_active: data.is_active,
-      is_archived: data.is_archived,
+      visibility_status: visibilityStatus,
+      is_active: legacyVisibility.is_active,
+      is_entry_open: legacyVisibility.is_entry_open,
+      is_archived: legacyVisibility.is_archived,
       entry_start_time: parseDateInput(data.entry_start_time),
       entry_end_time: parseDateInput(data.entry_end_time),
       allow_user_video_event_links: data.allow_user_video_event_links,
@@ -429,6 +453,7 @@ export async function updateEvent(
         : undefined,
       publish: canPublish
         ? {
+            visibility_status: before.visibility_status,
             is_active: before.is_active,
             is_archived: before.is_archived,
             entry_start_time: before.entry_start_time,
@@ -494,6 +519,7 @@ export async function deleteEvent(
       is_active: 0,
       is_entry_open: 0,
       is_archived: 1,
+      visibility_status: "archived",
       updated_at: now,
     })
     .where(eq(events.id, eventId));

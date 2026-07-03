@@ -10,7 +10,10 @@ export type EventDisplayStatus =
   | "ended"
   | "archived";
 
+export type EventVisibilityStatus = "draft" | "private" | "public" | "archived";
+
 export interface EventStatusInput {
+  visibility_status?: EventVisibilityStatus | string | null;
   is_active: number | null;
   is_archived: number | null;
   /**
@@ -22,6 +25,44 @@ export interface EventStatusInput {
   end_time: number | null;
   entry_start_time?: number | null;
   entry_end_time?: number | null;
+}
+
+export function getEventVisibility(ev: EventStatusInput): EventVisibilityStatus {
+  if (
+    ev.visibility_status === "draft" ||
+    ev.visibility_status === "private" ||
+    ev.visibility_status === "public" ||
+    ev.visibility_status === "archived"
+  ) {
+    return ev.visibility_status;
+  }
+  if (ev.is_archived === 1) return "archived";
+  if (ev.is_active === 1) return "public";
+  return "draft";
+}
+
+export function isPublicEventVisible(ev: EventStatusInput): boolean {
+  return getEventVisibility(ev) === "public";
+}
+
+export function isEventArchived(ev: EventStatusInput): boolean {
+  return getEventVisibility(ev) === "archived";
+}
+
+export function syncLegacyEventVisibilityFlags(
+  visibility: EventVisibilityStatus,
+): {
+  is_active: 0 | 1;
+  is_archived: 0 | 1;
+  is_entry_open: 0 | 1;
+} {
+  if (visibility === "public") {
+    return { is_active: 1, is_archived: 0, is_entry_open: 0 };
+  }
+  if (visibility === "archived") {
+    return { is_active: 0, is_archived: 1, is_entry_open: 0 };
+  }
+  return { is_active: 0, is_archived: 0, is_entry_open: 0 };
 }
 
 export function getEffectiveEventEnd(ev: EventStatusInput): number | null {
@@ -40,8 +81,9 @@ export function computeEventStatus(
   ev: EventStatusInput,
   now: number = Math.floor(Date.now() / 1000),
 ): EventDisplayStatus {
-  if (ev.is_archived === 1) return "archived";
-  if (ev.is_active !== 1) return "draft";
+  const visibility = getEventVisibility(ev);
+  if (visibility === "archived") return "archived";
+  if (visibility !== "public") return "draft";
 
   const effectiveEnd = getEffectiveEventEnd(ev);
   if (effectiveEnd != null && effectiveEnd <= now) return "ended";

@@ -15,6 +15,7 @@ export interface EventSettingsPreviewValue {
   end_time?: number | string | null;
   entry_start_time?: number | string | null;
   entry_end_time?: number | string | null;
+  visibility_status?: string | null;
   is_active?: number | string | null;
   is_archived?: number | string | null;
   allow_user_video_event_links?: number | string | null;
@@ -34,6 +35,26 @@ export interface EventSettingsPreviewValue {
 
 function toBool(value: number | string | boolean | null | undefined): boolean {
   return value === 1 || value === "1" || value === true;
+}
+
+function visibilityLabel(event: EventSettingsPreviewValue): {
+  label: string;
+  className: string;
+} {
+  switch (event.visibility_status) {
+    case "public":
+      return { label: "公開", className: "fn-badge-accent" };
+    case "private":
+      return { label: "非公開", className: "fn-badge-soft" };
+    case "archived":
+      return { label: "アーカイブ", className: "fn-badge-warning" };
+    case "draft":
+      return { label: "下書き", className: "fn-badge-soft" };
+    default:
+      if (toBool(event.is_archived)) return { label: "アーカイブ", className: "fn-badge-warning" };
+      if (toBool(event.is_active)) return { label: "公開", className: "fn-badge-accent" };
+      return { label: "下書き", className: "fn-badge-soft" };
+  }
 }
 
 function displayDate(value: number | string | null | undefined): string {
@@ -112,6 +133,7 @@ export function EventSettingsPreview({
   const stageQuestions = resolveStagePermissionFields([formSettings]);
   const parts = parseParts(event);
   const slotType = event.slot_type ?? "time";
+  const visibility = visibilityLabel(event);
 
   return (
     <section
@@ -170,11 +192,8 @@ export function EventSettingsPreview({
             </div>
           </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <span className={`fn-badge ${toBool(event.is_active) ? "fn-badge-accent" : "fn-badge-soft"}`}>
-              {toBool(event.is_active) ? "公開" : "下書き"}
-            </span>
-            <span className={`fn-badge ${toBool(event.is_archived) ? "fn-badge-warning" : "fn-badge-soft"}`}>
-              {toBool(event.is_archived) ? "アーカイブ" : "通常"}
+            <span className={`fn-badge ${visibility.className}`}>
+              {visibility.label}
             </span>
           </div>
           <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7 }}>

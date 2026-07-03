@@ -1,21 +1,30 @@
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { events } from "@/lib/db/schema";
 import {
   computeEventStatus,
   eventStatusBadgeClass,
   eventStatusLabel,
+  getEventVisibility,
   isAcceptingEntries,
+  isEventArchived,
+  isPublicEventVisible,
+  syncLegacyEventVisibilityFlags,
   type EventDisplayStatus,
   type EventStatusInput,
+  type EventVisibilityStatus,
 } from "./eventStatusCore";
 
 export {
   computeEventStatus,
   eventStatusBadgeClass,
   eventStatusLabel,
+  getEventVisibility,
   isAcceptingEntries,
+  isEventArchived,
+  isPublicEventVisible,
+  syncLegacyEventVisibilityFlags,
 };
-export type { EventDisplayStatus, EventStatusInput };
+export type { EventDisplayStatus, EventStatusInput, EventVisibilityStatus };
 
 export function activeEventWhere(now: number = Math.floor(Date.now() / 1000)) {
   const effectiveEnd = sql`
@@ -27,13 +36,12 @@ export function activeEventWhere(now: number = Math.floor(Date.now() / 1000)) {
   `;
 
   return and(
-    eq(events.is_active, 1),
-    eq(events.is_archived, 0),
+    eq(events.visibility_status, "public"),
     sql`((${effectiveEnd}) IS NULL OR (${effectiveEnd}) > ${now})`,
   );
 }
 
-/** 公開イベント一覧・グループに載せてよいイベント。下書き (active=0, archived=0) は除外。 */
+/** 公開イベント一覧・グループに載せてよいイベント。 */
 export function publicListableEventWhere() {
-  return or(eq(events.is_active, 1), eq(events.is_archived, 1))!;
+  return eq(events.visibility_status, "public");
 }

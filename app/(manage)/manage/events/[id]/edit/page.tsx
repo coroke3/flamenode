@@ -99,6 +99,7 @@ export default async function ManageEventEditPage({
             end_time: ev.end_time,
             entry_start_time: ev.entry_start_time,
             entry_end_time: ev.entry_end_time,
+            visibility_status: ev.visibility_status,
             is_active: ev.is_active,
             is_archived: ev.is_archived,
             allow_user_video_event_links: ev.allow_user_video_event_links,

@@ -225,8 +225,14 @@ export const events = sqliteTable("events", {
   img_url: text("img_url"),
   accent_color: text("accent_color"),
   representative_x_user_id: text("representative_x_user_id"),
+  visibility_status: text("visibility_status", {
+    enum: ["draft", "private", "public", "archived"],
+  }).notNull().default("draft"),
+  /** @deprecated 互換用。新規の公開状態判定は visibility_status を優先する。 */
   is_active: integer("is_active").notNull().default(0),
+  /** @deprecated 互換用。受付可否は entry_start_time / entry_end_time から算出する。 */
   is_entry_open: integer("is_entry_open").notNull().default(0),
+  /** @deprecated 互換用。新規のアーカイブ判定は visibility_status を優先する。 */
   is_archived: integer("is_archived").notNull().default(0),
   /**
    * 一般ユーザー (作品投稿者) が、このイベントを既存作品の追加所属イベントとして
