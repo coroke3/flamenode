@@ -1,6 +1,6 @@
 import * as React from "react";
 import type { Metadata } from "next";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { withDatabase } from "@/lib/cloudflare";
 import { termsVersions } from "@/lib/db/schema";
 import { acceptLatestTerms } from "@/lib/actions/terms";
@@ -63,6 +63,7 @@ export default async function RulesPage({
       .select()
       .from(termsVersions)
       .where(eq(termsVersions.status, "published"))
+      .orderBy(desc(termsVersions.published_at), desc(termsVersions.updated_at))
       .limit(1);
     if (rows[0]) {
       return {
