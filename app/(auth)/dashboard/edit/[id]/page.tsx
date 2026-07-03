@@ -30,6 +30,7 @@ import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
 import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
 import { getYoutubeChannelCandidates } from "@/lib/db/youtubeChannelCandidates";
+import { readStagePermissionCustomAnswers } from "@/lib/video/stagePermissionAnswers";
 
 export const metadata: Metadata = { title: "作品を編集" };
 export const dynamic = "force-dynamic";
@@ -263,6 +264,11 @@ export default async function EditVideoPage({
     for (const ev of attached) acceptingEventMap.set(ev.id, ev);
   }
   const eventOptions = Array.from(acceptingEventMap.values());
+  const stagePermissionInitial = await readStagePermissionCustomAnswers(db, {
+    videoId: video.id,
+    eventIds: currentEventIds,
+    fallbackRaw: video.stage_permission,
+  });
 
   // 作品単位の合作メンバー編集権限。subject ごと 1 行 (can_edit ON/OFF)。
   const { subjects: videoCollabSubjects, tableAvailable: videoCollabTableAvailable } =
@@ -464,7 +470,7 @@ export default async function EditVideoPage({
           credit: video.credit ?? undefined,
           intro_comment: video.intro_comment ?? undefined,
           used_software: softwareLabel ?? undefined,
-          stage_permission: video.stage_permission ?? undefined,
+          stage_permission: stagePermissionInitial ?? undefined,
           highlights: video.highlights ?? undefined,
           production_story: video.production_story ?? undefined,
           closing_comment: video.closing_comment ?? undefined,

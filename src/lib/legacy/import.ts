@@ -165,7 +165,6 @@ function toVideoInsertValues(
     intro_comment: vi.intro_comment,
     closing_comment: vi.closing_comment,
     highlights: vi.highlights,
-    stage_permission: vi.stage_permission,
     primary_event_id: vi.primary_event_id,
     scheduling_type: vi.scheduling_type,
     scheduled_time: vi.scheduled_time,

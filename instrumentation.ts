@@ -313,6 +313,22 @@ WHERE \`visibility_status\` = 'draft'`,
     await applyMigrationFile(DB, "0036_backfill_used_software_json.sql");
   }
 
+  if (
+    (await tableExists(DB, "videos")) &&
+    (await tableExists(DB, "video_events")) &&
+    (await tableExists(DB, "event_custom_questions")) &&
+    (await tableExists(DB, "video_custom_answers")) &&
+    (await columnExists(DB, "videos", "stage_permission"))
+  ) {
+    console.log(
+      "[instrumentation] Backfilling local stage_permission answers with 0037",
+    );
+    await applyMigrationFile(
+      DB,
+      "0037_backfill_stage_permission_custom_answers.sql",
+    );
+  }
+
   if (await tableExists(DB, "notification_outbox")) {
     await ensureColumn(
       DB,

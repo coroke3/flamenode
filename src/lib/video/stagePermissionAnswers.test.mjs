@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { replaceStagePermissionCustomAnswers } from "./stagePermissionAnswers.ts";
+import {
+  readStagePermissionCustomAnswers,
+  replaceStagePermissionCustomAnswers,
+} from "./stagePermissionAnswers.ts";
 
 function createFakeDb(questions) {
   const calls = {
@@ -36,6 +39,22 @@ function createFakeDb(questions) {
           },
         };
       },
+    },
+  };
+}
+
+function createReadFakeDb(questions, answers) {
+  let selectCount = 0;
+  return {
+    select() {
+      selectCount += 1;
+      return {
+        from() {
+          return {
+            where: async () => (selectCount === 1 ? questions : answers),
+          };
+        },
+      };
     },
   };
 }
@@ -103,4 +122,80 @@ test("replaceStagePermissionCustomAnswers clears stale answers when submission i
 
   assert.equal(calls.deleted, 1);
   assert.equal(calls.inserted, null);
+});
+
+test("readStagePermissionCustomAnswers serializes normalized answers", async () => {
+  const db = createReadFakeDb(
+    [
+      {
+        id: "q-stage",
+        event_id: "event-a",
+        question_key: "stage_permission",
+        label: "Stage",
+        sort_order: 0,
+        is_active: 1,
+      },
+      {
+        id: "q-stage-2",
+        event_id: "event-a",
+        question_key: "stage_permission_2",
+        label: "Stage 2",
+        sort_order: 1,
+        is_active: 1,
+      },
+    ],
+    [
+      { question_id: "q-stage", answer_text: "OK" },
+      { question_id: "q-stage-2", answer_text: "条件あり" },
+    ],
+  );
+
+  const result = await readStagePermissionCustomAnswers(db, {
+    videoId: "video-1",
+    eventIds: ["event-a"],
+  });
+
+  assert.deepEqual(JSON.parse(result), {
+    version: 1,
+    answers: [
+      { id: "stage_permission", label: "Stage", value: "OK" },
+      { id: "stage_permission_2", label: "Stage 2", value: "条件あり" },
+    ],
+  });
+});
+
+test("readStagePermissionCustomAnswers does not resurrect legacy fallback after normalization", async () => {
+  const db = createReadFakeDb(
+    [
+      {
+        id: "q-stage",
+        event_id: "event-a",
+        question_key: "stage_permission",
+        label: "Stage",
+        sort_order: 0,
+        is_active: 1,
+      },
+    ],
+    [],
+  );
+
+  const result = await readStagePermissionCustomAnswers(db, {
+    videoId: "video-1",
+    eventIds: ["event-a"],
+    fallbackRaw: "legacy old value",
+  });
+
+  assert.equal(result, null);
+});
+
+test("readStagePermissionCustomAnswers uses legacy fallback before questions are synced", async () => {
+  const db = createReadFakeDb([], []);
+
+  const result = await readStagePermissionCustomAnswers(db, {
+    videoId: "video-1",
+    eventIds: ["event-a"],
+    fallbackRaw: "legacy old value",
+  });
+
+  assert.equal(result, "legacy old value");
 });

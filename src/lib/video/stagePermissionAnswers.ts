@@ -7,6 +7,7 @@ import {
 import {
   LEGACY_STAGE_PERMISSION_ID,
   parseStagePermissionAnswers,
+  serializeStagePermissionAnswers,
 } from "./formSettings.ts";
 import { computeStagePermissionAnswerDeleteEventIds } from "./eventSync.ts";
 
@@ -24,6 +25,73 @@ export interface ReplaceStagePermissionCustomAnswersArgs {
 
 export function stagePermissionQuestionKeyCondition() {
   return sql`(${eventCustomQuestions.question_key} = ${LEGACY_STAGE_PERMISSION_ID} OR substr(${eventCustomQuestions.question_key}, 1, ${STAGE_PERMISSION_KEY_PREFIX.length}) = ${STAGE_PERMISSION_KEY_PREFIX})`;
+}
+
+export async function readStagePermissionCustomAnswers(
+  db: DB,
+  args: {
+    videoId: string;
+    eventIds: readonly string[];
+    fallbackRaw?: string | null;
+  },
+): Promise<string | null> {
+  const eventIds = Array.from(new Set(args.eventIds.filter(Boolean)));
+  if (eventIds.length === 0) return args.fallbackRaw ?? null;
+
+  const questions = await db
+    .select({
+      id: eventCustomQuestions.id,
+      event_id: eventCustomQuestions.event_id,
+      question_key: eventCustomQuestions.question_key,
+      label: eventCustomQuestions.label,
+      sort_order: eventCustomQuestions.sort_order,
+      is_active: eventCustomQuestions.is_active,
+    })
+    .from(eventCustomQuestions)
+    .where(
+      and(
+        inArray(eventCustomQuestions.event_id, eventIds),
+        stagePermissionQuestionKeyCondition(),
+      )!,
+    );
+  if (questions.length === 0) return args.fallbackRaw ?? null;
+
+  const answers = await db
+    .select({
+      question_id: videoCustomAnswers.question_id,
+      answer_text: videoCustomAnswers.answer_text,
+    })
+    .from(videoCustomAnswers)
+    .where(
+      and(
+        eq(videoCustomAnswers.video_id, args.videoId),
+        inArray(videoCustomAnswers.event_id, eventIds),
+        inArray(
+          videoCustomAnswers.question_id,
+          questions.map((question) => question.id),
+        ),
+      )!,
+    );
+  const answerByQuestionId = new Map(
+    answers.map((answer) => [answer.question_id, answer.answer_text ?? ""]),
+  );
+
+  const serialized = serializeStagePermissionAnswers(
+    questions
+      .filter((question) => question.is_active === 1)
+      .sort((a, b) =>
+        a.event_id === b.event_id
+          ? a.sort_order - b.sort_order
+          : eventIds.indexOf(a.event_id) - eventIds.indexOf(b.event_id),
+      )
+      .map((question) => ({
+        id: question.question_key,
+        label: question.label,
+        value: answerByQuestionId.get(question.id)?.trim() ?? "",
+      })),
+  );
+
+  return serialized;
 }
 
 /** Syncs stage-permission answers into normalized custom answer rows. */

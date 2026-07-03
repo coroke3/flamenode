@@ -43,7 +43,10 @@ import {
   computeStagePermissionAnswerDeleteEventIds,
   computeVideoEventSyncTarget,
 } from "@/lib/video/eventSync";
-import { replaceStagePermissionCustomAnswers } from "@/lib/video/stagePermissionAnswers";
+import {
+  readStagePermissionCustomAnswers,
+  replaceStagePermissionCustomAnswers,
+} from "@/lib/video/stagePermissionAnswers";
 import {
   getVideoSoftwareLabel,
   replaceVideoSoftwareLabels,
@@ -781,7 +784,6 @@ export async function createFreeVideo(
       youtube_video_id: youtubeId,
       creator_icon_url: iconUrl,
       visibility_status: "public",
-      stage_permission: stagePermission,
       music: parsed.data.music ?? null,
       music_reference_url: parsed.data.music_reference_url ?? null,
       credit: parsed.data.credit ?? null,
@@ -993,7 +995,6 @@ export async function submitSlotVideo(
           creator_x_user_id: activeX || null,
           creator_display_name: parsed.data.display_name,
           creator_icon_url: parsed.data.icon_url || null,
-          stage_permission: stagePermission,
           music: parsed.data.music ?? null,
           music_reference_url: parsed.data.music_reference_url ?? null,
           credit: parsed.data.credit ?? null,
@@ -1034,7 +1035,6 @@ export async function submitSlotVideo(
         youtube_video_id: youtubeId,
         creator_icon_url: iconUrl,
         visibility_status: "pending",
-        stage_permission: stagePermission,
         primary_event_id: slotRow.event_id,
         scheduling_type: "slotted",
         scheduled_time: slotRow.start_time ?? now,
@@ -1187,6 +1187,16 @@ export async function updateVideo(
   if (!target) return { ok: false, message: "対象作品が見つかりません。" };
 
   const targetSoftwareLabel = await getVideoSoftwareLabel(db, videoId);
+  const stageEventIds = parseEventIdsFromForm(formData);
+  if (target.primary_event_id && !stageEventIds.includes(target.primary_event_id)) {
+    stageEventIds.push(target.primary_event_id);
+  }
+  const editStageFields = await getStagePermissionFieldsForEvents(db, stageEventIds);
+  const currentStagePermission = await readStagePermissionCustomAnswers(db, {
+    videoId,
+    eventIds: stageEventIds,
+    fallbackRaw: target.stage_permission,
+  });
   const raw = Object.fromEntries(formData);
   const setDefault = (key: string, value: string | null | undefined) => {
     if (!Object.prototype.hasOwnProperty.call(raw, key)) {
@@ -1210,7 +1220,7 @@ export async function updateVideo(
   setDefault("highlights", target.highlights);
   setDefault("production_story", target.production_story);
   setDefault("used_software", targetSoftwareLabel);
-  setDefault("stage_permission", target.stage_permission);
+  setDefault("stage_permission", currentStagePermission);
   setDefault("closing_comment", target.closing_comment);
   if (!Object.prototype.hasOwnProperty.call(raw, "is_collab")) {
     raw.is_collab = target.collaboration_type === "collab" ? "true" : "false";
@@ -1226,15 +1236,10 @@ export async function updateVideo(
   const youtubeId = extractYoutubeId(parsed.data.youtube_url);
   if (!youtubeId) return { ok: false, message: "YouTube URL が解析できません。" };
 
-  const stageEventIds = parseEventIdsFromForm(formData);
-  if (target.primary_event_id && !stageEventIds.includes(target.primary_event_id)) {
-    stageEventIds.push(target.primary_event_id);
-  }
-  const editStageFields = await getStagePermissionFieldsForEvents(db, stageEventIds);
   const nextStagePermissionResult = buildStagePermissionSubmission(
     formData,
     editStageFields,
-    target.stage_permission,
+    currentStagePermission,
   );
   if (!nextStagePermissionResult.ok) return nextStagePermissionResult;
   const nextStagePermission = nextStagePermissionResult.value;
@@ -1348,7 +1353,7 @@ export async function updateVideo(
       changed(parsed.data.highlights, target.highlights) ||
       changed(parsed.data.production_story, target.production_story) ||
       changed(parsed.data.used_software, targetSoftwareLabel) ||
-      changed(nextStagePermission, target.stage_permission) ||
+      changed(nextStagePermission, currentStagePermission) ||
       changed(parsed.data.closing_comment, target.closing_comment))
   ) {
     return { ok: false, message: "紹介文・振り返り項目を編集する権限がありません。" };
@@ -1423,9 +1428,6 @@ export async function updateVideo(
         production_story: canEditDescriptions
           ? parsed.data.production_story ?? null
           : target.production_story,
-        stage_permission: canEditDescriptions
-          ? nextStagePermission
-          : target.stage_permission,
         closing_comment: canEditDescriptions
           ? parsed.data.closing_comment ?? null
           : target.closing_comment,
@@ -1545,7 +1547,6 @@ export async function updateVideo(
       highlights: src.highlights,
       production_story: src.production_story,
       used_software: src.used_software ?? targetSoftwareLabel,
-      stage_permission: src.stage_permission,
       closing_comment: src.closing_comment,
       collaboration_type: src.collaboration_type,
       part: src.part,
@@ -1578,9 +1579,6 @@ export async function updateVideo(
     used_software: canEditDescriptions
       ? parsed.data.used_software ?? null
       : targetSoftwareLabel,
-    stage_permission: canEditDescriptions
-      ? nextStagePermission
-      : target.stage_permission,
     closing_comment: canEditDescriptions
       ? parsed.data.closing_comment ?? null
       : target.closing_comment,

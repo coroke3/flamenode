@@ -10,6 +10,7 @@
  *   - 削除済み `video_comments` / `videoComments` 利用
  *   - 新規コードでの `outro_comment` 書き込み (closing_comment に統一)
  *   - 新規コードでの `events.custom_questions` / `videos.custom_answers` JSON 書き込み
+ *   - 新規コードでの `videos.stage_permission` 旧専用欄書き込み
  *   - 新規コードでの `marker_kind` が "chapter" 以外 (MVPは chapter 固定)
  *   - 通常コードでの `event_staff_permissions` 参照
  *
@@ -94,6 +95,13 @@ const DB_REDUCTION_RULES = [
       ...PREFIX_ALLOW,
       "src/lib/admin/spreadsheet/importPrep.test.mjs",
     ],
+  },
+  {
+    id: "videos-stage-permission-write",
+    label: "videos.stage_permission legacy column write after custom answer normalization",
+    pattern:
+      /\bstage_permission\s*:\s*(stagePermission|nextStagePermission|vi\.stage_permission)\b/g,
+    prefixAllow: PREFIX_ALLOW,
   },
 ];
 
