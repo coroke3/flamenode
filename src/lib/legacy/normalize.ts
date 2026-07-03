@@ -1,11 +1,11 @@
-import { normalizeHttpUrl } from "@/lib/utils/url";
-import { looksLikeMojibake } from "@/lib/utils/mojibake";
-import { extractYoutubeId } from "@/lib/youtube/id";
-import type { EventVisibilityStatus } from "@/lib/utils/eventStatusCore";
+import { normalizeHttpUrl } from "../utils/url.ts";
+import { looksLikeMojibake } from "../utils/mojibake.ts";
+import { extractYoutubeId } from "../youtube/id.ts";
+import type { EventVisibilityStatus } from "../utils/eventStatusCore.ts";
 import {
   type LegacyImportMode,
   resolveImportedEventState,
-} from "./importState";
+} from "./importState.ts";
 
 const X_ID_MAX_LEN = 64;
 
@@ -375,10 +375,8 @@ export interface LegacyVideoResult {
     closing_comment: string | null;
     used_software: string | null;
     highlights: string | null;
-    custom_answers: string | null;
     stage_permission: string | null;
     submission_type: "individual" | "collab";
-    declared_experience: string | null;
     primary_event_id: string | null;
     scheduling_type: "slotted" | "manual";
     scheduled_time: number | null;
@@ -423,16 +421,25 @@ export function normalizeLegacyVideo(
   ].filter((s): s is string => !!s);
   const highlights = highlightsParts.length > 0 ? highlightsParts.join("\n") : null;
 
-  const customObj: Record<string, string> = {};
   const toudan = cleanLegacyString(input.toudan);
   const otherSns = normalizeLegacyUrl(input.othersns) ?? cleanLegacyString(input.othersns);
-  if (toudan) customObj.toudan = toudan;
-  if (otherSns) customObj.othersns = otherSns;
+  if (toudan) {
+    warnings.push("toudan is not imported because videos.custom_answers is deprecated.");
+  }
   if ("" in looseRow && looseRow[""] != null && String(looseRow[""]).trim() !== "") {
     const meta = cleanLegacyString(looseRow[""]);
-    if (meta) customObj.legacy_export_meta = meta;
+    if (meta) {
+      warnings.push(
+        "legacy export metadata is not imported because videos.custom_answers is deprecated.",
+      );
+    }
   }
-  const custom_answers = Object.keys(customObj).length > 0 ? JSON.stringify(customObj) : null;
+  const declaredExperience = cleanLegacyString(input.movieyear);
+  if (declaredExperience) {
+    warnings.push(
+      "movieyear is not imported because videos.custom_answers is deprecated.",
+    );
+  }
 
   const submission_type = submissionTypeFromLegacyVideo({
     type2: input.type2,
@@ -515,10 +522,8 @@ export function normalizeLegacyVideo(
       closing_comment: cleanLegacyString(input.aftercomment),
       used_software: cleanLegacyString(input.soft),
       highlights,
-      custom_answers,
       stage_permission: cleanLegacyString(input.righttype),
       submission_type: members.length > 0 ? "collab" : submission_type,
-      declared_experience: cleanLegacyString(input.movieyear),
       primary_event_id: eventId,
       scheduling_type: "manual",
       scheduled_time: scheduled,

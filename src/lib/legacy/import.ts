@@ -143,35 +143,6 @@ export const SQLITE_IN_CLAUSE_MAX = 32;
 type LegacyNormalizedVideo = NonNullable<LegacyVideoResult["video"]>;
 type VideoInsert = typeof videos.$inferInsert;
 
-function normalizeLegacyImportCustomAnswers(
-  raw: string | null,
-  declaredExperience: string | null,
-  primaryEventId: string | null,
-): string | null {
-  const scope = primaryEventId || "global";
-  const scoped: Record<string, Record<string, unknown>> = {};
-  let answers: Record<string, unknown> = {};
-
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        answers = parsed as Record<string, unknown>;
-      }
-    } catch {
-      answers.legacy_raw = raw;
-    }
-  }
-
-  if (declaredExperience) {
-    answers.declared_experience = declaredExperience;
-  }
-
-  if (Object.keys(answers).length === 0) return null;
-  scoped[scope] = answers;
-  return JSON.stringify(scoped);
-}
-
 function toVideoInsertValues(
   vi: LegacyNormalizedVideo,
   operatorDiscordId: string,
@@ -194,11 +165,6 @@ function toVideoInsertValues(
     intro_comment: vi.intro_comment,
     closing_comment: vi.closing_comment,
     highlights: vi.highlights,
-    custom_answers: normalizeLegacyImportCustomAnswers(
-      vi.custom_answers,
-      vi.declared_experience,
-      vi.primary_event_id,
-    ),
     stage_permission: vi.stage_permission,
     primary_event_id: vi.primary_event_id,
     scheduling_type: vi.scheduling_type,
