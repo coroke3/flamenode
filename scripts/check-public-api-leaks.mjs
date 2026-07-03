@@ -132,15 +132,14 @@ for (const url of endpoints) {
 
 if (fetchFailed) {
   console.error("\nOne or more endpoints could not be reached. Is the dev server running?");
-  process.exit(2);
-}
-if (responseFailed) {
+  process.exitCode = 2;
+} else if (responseFailed) {
   console.error("\nOne or more public API endpoints returned an HTTP error or invalid JSON.");
-  process.exit(3);
-}
-if (hasError) {
+  process.exitCode = 3;
+} else if (hasError) {
   console.error("\nForbidden keys detected in public API responses.");
-  process.exit(1);
+  process.exitCode = 1;
+} else {
+  console.log("\nAll public API endpoints passed the forbidden-key check.");
+  process.exitCode = 0;
 }
-console.log("\nAll public API endpoints passed the forbidden-key check.");
-process.exit(0);
