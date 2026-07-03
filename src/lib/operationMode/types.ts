@@ -12,9 +12,10 @@ export type PublicDataStrategy =
 
 export type StaticRebuildPolicy = {
   maxItemsPerRun: number;
-  processSearchIndex: boolean;
-  processListPopular: boolean;
-  processAllTargets: boolean;
+  highPriorityOnly: boolean;
+  allowedTargetTypes: readonly string[] | null;
+  skipTargetTypesUnlessHighPriority: readonly string[];
+  reconcileStaleQueue: boolean;
 };
 
 export const OPERATION_MODE_LABELS: Record<OperationMode, string> = {
