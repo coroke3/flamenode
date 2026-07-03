@@ -206,6 +206,35 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
   });
 }
 
+/** 公開作品の単体取得。UUID / YouTube ID のどちらでも解決する。 */
+export async function fetchPublicVideoByIdOrYoutube(db: DB, idOrYoutube: string) {
+  const rows = await withVideoPartFallback((includePart) =>
+    db
+      .select({
+        id: videos.id,
+        title: videos.title,
+        youtube_video_id: videos.youtube_video_id,
+        display_name: creatorNameExpr,
+        icon_url: creatorIconExpr,
+        creator_x_user_id: videos.creator_x_user_id,
+        primary_event_id: videos.primary_event_id,
+        scheduled_time: videos.scheduled_time,
+        status: videos.visibility_status,
+        part: includePart ? videos.part : nullVideoPart,
+      })
+      .from(videos)
+      .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
+      .where(
+        and(
+          eq(videos.visibility_status, "public"),
+          or(eq(videos.id, idOrYoutube), eq(videos.youtube_video_id, idOrYoutube)),
+        )!,
+      )
+      .limit(1),
+  );
+  return (await resolveMissingIcons(db, rows))[0] ?? null;
+}
+
 /** 公開作品の総数 (ページング用)。 */
 export async function countPublicVideos(db: DB, params: ListVideoParams) {
   const { q, eventId } = params;

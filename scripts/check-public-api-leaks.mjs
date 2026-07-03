@@ -94,12 +94,30 @@ async function checkEndpoint(url) {
   return { kind: "ok", violations: findForbiddenKeys(json) };
 }
 
+async function discoverVideoDetailEndpoint() {
+  try {
+    const res = await fetch(`${baseUrl}/api/videos?limit=1`);
+    if (!res.ok) return null;
+    const json = await res.json();
+    const id = json?.items?.[0]?.id;
+    if (typeof id !== "string" || id.trim() === "") return null;
+    return `${baseUrl}/api/videos/${encodeURIComponent(id)}`;
+  } catch {
+    return null;
+  }
+}
+
 const endpoints = [
   `${baseUrl}/api/videos?limit=5`,
   `${baseUrl}/api/videos?limit=5&offset=0`,
   `${baseUrl}/api/events?limit=5`,
   `${baseUrl}/api/events?limit=1`,
 ];
+
+const videoDetailEndpoint = await discoverVideoDetailEndpoint();
+if (videoDetailEndpoint) {
+  endpoints.push(videoDetailEndpoint);
+}
 
 let hasError = false;
 let fetchFailed = false;
