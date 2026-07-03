@@ -9,6 +9,7 @@
  * 検出するもの:
  *   - 削除済み `video_comments` / `videoComments` 利用
  *   - 新規コードでの `outro_comment` 書き込み (closing_comment に統一)
+ *   - 新規コードでの `events.custom_questions` / `videos.custom_answers` JSON 書き込み
  *   - 新規コードでの `marker_kind` が "chapter" 以外 (MVPは chapter 固定)
  *   - 通常コードでの `event_staff_permissions` 参照
  *
@@ -73,6 +74,25 @@ const DB_REDUCTION_RULES = [
     prefixAllow: [
       ...PREFIX_ALLOW,
       "src/lib/db/software.ts",
+    ],
+  },
+  {
+    id: "events-custom-questions-write",
+    label: "events.custom_questions JSON write after custom question normalization",
+    pattern: /\bcustom_questions\s*:/g,
+    prefixAllow: [
+      ...PREFIX_ALLOW,
+      "src/lib/admin/eventTemplateSettings.ts",
+      "src/lib/admin/eventTemplateSettings.test.mjs",
+    ],
+  },
+  {
+    id: "videos-custom-answers-write",
+    label: "videos.custom_answers JSON write after custom answer normalization",
+    pattern: /\bcustom_answers\s*:/g,
+    prefixAllow: [
+      ...PREFIX_ALLOW,
+      "src/lib/admin/spreadsheet/importPrep.test.mjs",
     ],
   },
 ];
