@@ -133,3 +133,19 @@ test("buildUsedSoftwareJson parses comma-separated string", () => {
   const parsed = JSON.parse(raw);
   assert.deepEqual(parsed.items, ["After Effects", "Blender"]);
 });
+
+test("buildUsedSoftwareJson normalizes separators, duplicates, and whitespace", () => {
+  const raw = buildUsedSoftwareJson("After Effects\nBlender、 after effects , AviUtl");
+  const parsed = JSON.parse(raw);
+  assert.deepEqual(parsed.items, ["After Effects", "Blender", "AviUtl"]);
+});
+
+test("buildUsedSoftwareJson caps item count and item length", () => {
+  const items = Array.from({ length: 25 }, (_, index) =>
+    index === 0 ? "A".repeat(120) : `Tool ${index}`,
+  );
+  const raw = buildUsedSoftwareJson(items);
+  const parsed = JSON.parse(raw);
+  assert.equal(parsed.items.length, 20);
+  assert.equal(parsed.items[0].length, 80);
+});

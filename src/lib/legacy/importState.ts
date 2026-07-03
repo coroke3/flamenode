@@ -255,11 +255,20 @@ export function buildUsedSoftwareJson(
   raw: string | string[] | null | undefined,
 ): string | null {
   if (!raw) return null;
-  const items = (
-    Array.isArray(raw)
-      ? raw
-      : raw.split(/[,、\n]/).map((part) => part.trim())
-  ).filter(Boolean);
+  const sourceItems = Array.isArray(raw)
+    ? raw
+    : raw.split(/[,、\n]/);
+  const items: string[] = [];
+  const seen = new Set<string>();
+  for (const sourceItem of sourceItems) {
+    const item = sourceItem.trim().replace(/\s+/g, " ").slice(0, 80);
+    if (!item) continue;
+    const key = item.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    items.push(item);
+    if (items.length >= 20) break;
+  }
   if (items.length === 0) return null;
   return JSON.stringify({
     source: "legacy",
