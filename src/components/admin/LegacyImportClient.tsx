@@ -6,6 +6,7 @@ import styles from "./LegacyImportClient.module.css";
 import { Icon } from "@/components/ui/Icon";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { mojibakeHitCount } from "@/lib/utils/mojibake";
+import { buildLegacyImportClientPreviewKey } from "@/lib/legacy/clientPreviewKey";
 
 interface PreviewRow {
   kind: "event" | "video";
@@ -131,39 +132,6 @@ async function parseImportResponse(res: Response): Promise<ImportResult> {
   }
 }
 
-function buildPreviewKey({
-  files,
-  importMode,
-  enqueueStaticRebuild,
-  staticRebuildStrategy,
-  eventStrategy,
-  videoStrategy,
-  updateXUsers,
-}: {
-  files: PendingFile[];
-  importMode: LegacyImportMode;
-  enqueueStaticRebuild: boolean;
-  staticRebuildStrategy: StaticRebuildStrategy;
-  eventStrategy: Strategy;
-  videoStrategy: Strategy;
-  updateXUsers: boolean;
-}): string {
-  return JSON.stringify({
-    files: files.map((file) => ({
-      name: file.name,
-      size: file.size,
-      length: file.content.length,
-      encoding: file.encoding,
-    })),
-    importMode,
-    enqueueStaticRebuild,
-    staticRebuildStrategy,
-    eventStrategy,
-    videoStrategy,
-    updateXUsers,
-  });
-}
-
 export function LegacyImportClient(): React.ReactElement {
   const router = useRouter();
   const [files, setFiles] = React.useState<PendingFile[]>([]);
@@ -226,7 +194,7 @@ export function LegacyImportClient(): React.ReactElement {
 
   const runAnalyze = async () => {
     if (files.length === 0) return;
-    const key = buildPreviewKey({
+    const key = buildLegacyImportClientPreviewKey({
       files,
       importMode,
       enqueueStaticRebuild,
@@ -329,7 +297,7 @@ export function LegacyImportClient(): React.ReactElement {
   };
 
   const totalSize = files.reduce((acc, f) => acc + f.size, 0);
-  const currentPreviewKey = buildPreviewKey({
+  const currentPreviewKey = buildLegacyImportClientPreviewKey({
     files,
     importMode,
     enqueueStaticRebuild,
