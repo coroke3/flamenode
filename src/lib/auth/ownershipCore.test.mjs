@@ -188,8 +188,11 @@ test("VIDEO_PERMISSION_ALIASES: video.status は自分自身のみ", () => {
   assert.deepEqual(VIDEO_PERMISSION_ALIASES["video.status"], ["video.status"]);
 });
 
-test("VIDEO_PERMISSION_ALIASES: video.chapter_admin は自分自身のみ", () => {
-  assert.deepEqual(VIDEO_PERMISSION_ALIASES["video.chapter_admin"], ["video.chapter_admin"]);
+test("VIDEO_PERMISSION_ALIASES: video.chapter_admin は member_chapters へ互換変換される", () => {
+  assert.deepEqual(VIDEO_PERMISSION_ALIASES["video.chapter_admin"], [
+    "video.chapter_admin",
+    "video.member_chapters",
+  ]);
 });
 
 // --- セキュリティ: collaborator に危険キーが含まれない ---

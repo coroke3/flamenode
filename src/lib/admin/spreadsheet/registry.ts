@@ -55,11 +55,6 @@ export const SPREADSHEET_TABLE_OVERRIDES: Record<string, SpreadsheetTableOverrid
     event_groups: { label: "イベントグループ", group: "イベント", mode: "editable" },
     events: { label: "イベント", group: "イベント", mode: "editable" },
     event_staff: { label: "イベントスタッフ", group: "イベント", mode: "editable" },
-    event_staff_permissions: {
-      label: "スタッフ権限",
-      group: "イベント",
-      mode: "editable",
-    },
     slots: { label: "枠", group: "イベント", mode: "editable" },
 
     videos: { label: "作品", group: "作品", mode: "editable" },
@@ -132,6 +127,7 @@ const DEFAULT_READONLY_TABLES = new Set([
   "notification_outbox",
   "history_logs",
   "cost_usage_snapshots",
+  "event_staff_permissions",
 ]);
 
 const SECRET_COLUMN_PATTERN =

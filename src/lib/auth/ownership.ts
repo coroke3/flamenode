@@ -1,10 +1,9 @@
 import "server-only";
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, ne, or } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import { isMissingDbObjectError } from "@/lib/db/optionalObjects";
 import {
   eventStaff,
-  eventStaffPermissions,
   events as eventsTable,
   videoMembers,
   videoEvents,
@@ -26,6 +25,8 @@ import {
   parseDelegatablePermissionKeys,
 } from "./ownershipCore";
 import type { SessionUserLike } from "./ownershipCore";
+import { canonicalizePermissionKey } from "./permissions/aliases";
+import { resolveStaffPermissionKeys } from "./permissions/mask";
 
 export type { SessionUserLike };
 export { isSafeNormalVideoEditKey, isDangerousAdminVideoEditKey } from "./ownershipCore";
@@ -36,7 +37,7 @@ export { isSafeNormalVideoEditKey, isDangerousAdminVideoEditKey } from "./owners
  * 設計の RBAC (§2-21) を実装する:
  * - admin: すべて操作可
  * - video の creator_x_user_id が「自分の承認済み X ID」: 編集可
- * - event_staff_permissions: permission_key に応じた細粒度許可
+ * - event_staff.permission_mask: permission_key に応じた細粒度許可
  */
 
 export type VideoRow = typeof videos.$inferSelect;
@@ -71,11 +72,7 @@ export async function getEditableEventIds(
   const rows = await db
     .select({ event_id: eventStaff.event_id })
     .from(eventStaff)
-    .innerJoin(
-      eventStaffPermissions,
-      eq(eventStaffPermissions.event_staff_id, eventStaff.id),
-    )
-    .where(and(subjectCond, eq(eventStaffPermissions.allowed, 1))!);
+    .where(and(subjectCond, ne(eventStaff.permission_mask, 0))!);
   return Array.from(new Set(rows.map((r) => r.event_id)));
 }
 
@@ -97,17 +94,23 @@ export async function getCollaboratorPermissions(
         )!
       : eq(eventStaff.discord_user_id, userId);
   const rows = await db
-    .select({ permission_key: eventStaffPermissions.permission_key })
-    .from(eventStaffPermissions)
-    .innerJoin(eventStaff, eq(eventStaff.id, eventStaffPermissions.event_staff_id))
+    .select({
+      permission_mask: eventStaff.permission_mask,
+      permission_preset: eventStaff.permission_preset,
+      custom_permission_keys_json: eventStaff.custom_permission_keys_json,
+    })
+    .from(eventStaff)
     .where(
       and(
         eq(eventStaff.event_id, eventId),
-        eq(eventStaffPermissions.allowed, 1),
         subjectCond,
       )!,
     );
-  return new Set(rows.map((r) => r.permission_key));
+  const keys = new Set<string>();
+  for (const row of rows) {
+    for (const key of resolveStaffPermissionKeys(row)) keys.add(key);
+  }
+  return keys;
 }
 
 export async function canManageXIdLinkRequests(
@@ -120,21 +123,17 @@ export async function canManageXIdLinkRequests(
     xIds.length > 0
       ? or(eq(eventStaff.discord_user_id, user.id), inArray(eventStaff.x_user_id, xIds))!
       : eq(eventStaff.discord_user_id, user.id);
-  const row = (
-    await db
-      .select({ id: eventStaffPermissions.id })
-      .from(eventStaffPermissions)
-      .innerJoin(eventStaff, eq(eventStaff.id, eventStaffPermissions.event_staff_id))
-      .where(
-        and(
-          eq(eventStaffPermissions.permission_key, "xid.link_requests"),
-          eq(eventStaffPermissions.allowed, 1),
-          subjectCond,
-        )!,
-      )
-      .limit(1)
-  )[0];
-  return Boolean(row);
+  const rows = await db
+    .select({
+      permission_mask: eventStaff.permission_mask,
+      permission_preset: eventStaff.permission_preset,
+      custom_permission_keys_json: eventStaff.custom_permission_keys_json,
+    })
+    .from(eventStaff)
+    .where(subjectCond);
+  return rows.some((row) =>
+    resolveStaffPermissionKeys(row).has("xid.link_requests"),
+  );
 }
 
 /**
@@ -169,14 +168,10 @@ export async function getManageStaffRoleForEvent(
     await db
       .select({ role: eventStaff.role })
       .from(eventStaff)
-      .innerJoin(
-        eventStaffPermissions,
-        eq(eventStaffPermissions.event_staff_id, eventStaff.id),
-      )
       .where(
         and(
           eq(eventStaff.event_id, eventId),
-          eq(eventStaffPermissions.allowed, 1),
+          ne(eventStaff.permission_mask, 0),
           subjectCond,
         )!,
       )
@@ -207,14 +202,10 @@ export async function getManageStaffXUserIds(
   const rows = await db
     .select({ x_user_id: eventStaff.x_user_id })
     .from(eventStaff)
-    .innerJoin(
-      eventStaffPermissions,
-      eq(eventStaffPermissions.event_staff_id, eventStaff.id),
-    )
     .where(
       and(
         inArray(eventStaff.event_id, eventIds),
-        eq(eventStaffPermissions.allowed, 1),
+        ne(eventStaff.permission_mask, 0),
         subjectCond,
       )!,
     );
@@ -236,7 +227,7 @@ export { shouldWarnManageActiveXMismatch } from "./ownershipCore";
  * これだと閲覧目的のスタッフ枠が全権を持ってしまう。新仕様では以下の優先順位:
  *
  * 1. admin → true
- * 2. event_staff_permissions の permission_key が一致 → true
+ * 2. event_staff.permission_mask の permission_key が一致 → true
  *
  * `requiredKey` は必須。省略可にすると「permission を1個でも持つ collaborator」が
  * 別領域 (例: event.members) を持っているだけで他領域 (例: event.slots) を触れる
@@ -251,7 +242,8 @@ export async function canEditEvent(
   if (user.role === "admin") return true;
   // collaborator 権限が明示されていれば最優先で許可。
   const keys = await getCollaboratorPermissions(db, user.id, eventId);
-  if (keys.has(requiredKey)) return true;
+  const canonicalRequiredKey = canonicalizePermissionKey(requiredKey);
+  if (canonicalRequiredKey && keys.has(canonicalRequiredKey)) return true;
   return false;
 }
 
@@ -280,7 +272,7 @@ export async function assertCanEditEvent(
  *
  * - `admin`: admin role だけが全権を持つ。event 経由の権限は使わない。
  *
- * - `event`: event_staff_permissions が効く。
+ * - `event`: event_staff.permission_mask が効く。
  *   admin 特権は使わない (役割を切り分けるため)。
  *   イベント運営者は自分がオーナーでなくても、そのイベント所属作品を編集できる。
  *
@@ -417,7 +409,7 @@ export async function canEditVideo(args: {
   if (privilegeMode === "normal" || privilegeMode === "admin") return false;
 
   // privilegeMode === "event" / "any": イベント運営権限のチェック。
-  // event_staff_permissions により、自分がオーナーでなくても
+  // event_staff.permission_mask により、自分がオーナーでなくても
   // イベント所属作品を編集できる。
   if (eventIds.size === 0) return false;
   const aliases = VIDEO_PERMISSION_ALIASES[requiredKey] ?? [requiredKey];

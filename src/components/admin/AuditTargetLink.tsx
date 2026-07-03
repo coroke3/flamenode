@@ -46,7 +46,6 @@ const TABLE_LINKS: Record<
     adminHref: `/admin/audit?table=slots&record=${encodeURIComponent(id)}`,
   }),
   event_staff: () => ({}),
-  event_staff_permissions: () => ({}),
   notification_outbox: () => ({}),
   x_account_link_requests: (id) => ({
     adminHref: `/admin/x-link-requests?record=${encodeURIComponent(id)}`,

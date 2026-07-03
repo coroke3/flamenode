@@ -10,6 +10,7 @@
  *   - 削除済み `video_comments` / `videoComments` 利用
  *   - 新規コードでの `outro_comment` 書き込み (closing_comment に統一)
  *   - 新規コードでの `marker_kind` が "chapter" 以外 (MVPは chapter 固定)
+ *   - 通常コードでの `event_staff_permissions` 参照
  *
  * allowlist:
  *   - 旧データ normalize / この検査スクリプト自身は許容。
@@ -55,6 +56,15 @@ const DB_REDUCTION_RULES = [
     label: "event_staff.permission_keys_json usage after permission normalization",
     pattern: /\bpermission_keys_json\b/g,
     prefixAllow: PREFIX_ALLOW,
+  },
+  {
+    id: "event-staff-permissions-usage",
+    label: "event_staff_permissions usage after permission_mask migration",
+    pattern: /\b(eventStaffPermissions|event_staff_permissions)\b/g,
+    prefixAllow: [
+      ...PREFIX_ALLOW,
+      "src/lib/admin/spreadsheet/registry.ts",
+    ],
   },
   {
     id: "video-softwares-write",

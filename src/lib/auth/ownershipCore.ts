@@ -28,7 +28,7 @@ export const VIDEO_PERMISSION_ALIASES: Record<
   "video.youtube_id": ["video.youtube_id", "videos.youtube_id"],
   "video.primary_event": ["video.primary_event", "videos.primary_event"],
   "video.status": ["video.status"],
-  "video.chapter_admin": ["video.chapter_admin"],
+  "video.chapter_admin": ["video.chapter_admin", "video.member_chapters"],
   "videos.title": ["videos.title", "video.basics", "video.identity"],
   "videos.music_credit": ["videos.music_credit", "video.credits"],
   "videos.members": ["videos.members", "video.members"],
@@ -107,6 +107,7 @@ export const USER_DELEGATABLE_KEYS = new Set<string>([
   "video.descriptions",
   "video.credits",
   "video.members",
+  "video.member_chapters",
 ]);
 
 export function isSafeNormalVideoEditKey(key: VideoEditSectionKey): boolean {
