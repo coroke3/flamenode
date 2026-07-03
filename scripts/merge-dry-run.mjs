@@ -32,7 +32,8 @@ function parseArgs() {
 }
 
 function normalizeXId(x) {
-  return String(x ?? "").trim().replace(/^@+/, "").toLowerCase();
+  const normalized = String(x ?? "").trim().replace(/^@+/, "").toLowerCase();
+  return /^[a-z0-9_]{1,64}$/.test(normalized) ? normalized : "";
 }
 
 function runD1(sql, remote) {
@@ -118,6 +119,6 @@ try {
 
 console.log("");
 console.log(`Summary: 合計 ${totalRows} 行を ${fromXId} → ${toXId} に更新します。`);
-console.log(`Phase B (mergeXIds Server Action) は未実装。本実装は docs/merge-flow-design.md 参照。`);
+console.log("Phase B/C は実装済みです。実行前に /admin/x-id-merges の影響範囲表示とこの dry-run 結果を突き合わせてください。");
 
 process.exit(conflicts > 0 ? 1 : 0);

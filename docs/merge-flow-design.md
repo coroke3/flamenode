@@ -1,6 +1,6 @@
 # X ID merge フロー 設計メモ
 
-**Status**: 設計のみ、未実装。Opus 判断候補 #8 を残す代わりに最小実装手順を確定。
+**Status**: Phase A/B/C の最小運用フローは実装済み。`x_account_link_requests` 側の merge 自動承認は引き続き無効で、統合は `/admin/x-id-merges` の申請・承認・MERGE確認経由で実行する。
 
 ## 背景
 
@@ -9,20 +9,20 @@
 - 旧 ID で投稿された video, video_chapter, video_member, slot, etc. を新 ID に付け替える
 - 旧 ID のレコードは保持するか削除するかを決める
 
-現状の実装 (`src/lib/actions/xid-admin.ts`) は `link_type === 'merge'` を **拒否** している (`Batch 78`)。
+現状の実装 (`src/lib/actions/xid-admin.ts`) は `link_type === 'merge'` を **拒否** する。統合は `x_id_merge_requests` / `/admin/x-id-merges` に分離して扱う。
 
 ## 実装スコープ
 
 ### Phase A: dry-run スクリプト (危険度: 低)
-- `scripts/merge-dry-run.mjs` を追加
+- `scripts/merge-dry-run.mjs` 実装済み
 - 引数: `--from <oldXId> --to <newXId>`
 - 出力: 影響を受ける行数 (videos, video_chapters, video_members, slots, video_interactions)
 - DB を書き換えない
 - 既存の `check-public-api-leaks.mjs` と同パターン
 
 ### Phase B: 単一 X ID merge Server Action (危険度: 中)
-- `mergeXIds(fromXId, toXId)` action を追加
-- トランザクション内で以下を実行:
+- `mergeXIds(fromXId, toXId)` action 実装済み
+- 以下を実行:
   - `videos.creator_x_user_id = toXId WHERE creator_x_user_id = fromXId`
   - `video_chapters.x_user_id = toXId WHERE x_user_id = fromXId`
   - `video_members.x_user_id = toXId WHERE x_user_id = fromXId`
@@ -31,12 +31,12 @@
   - `x_user_aliases (target=toXId, alias=fromXId)` を追加
   - 旧 `x_users.linked_discord_user_id` を NULL に
   - history_logs (retention_class='long_audit') に詳細記録
-- 通知: 旧 ID/新 ID の Discord に enqueue
+- 通知: 現時点では enqueue しない。本人通知は別UI/別フェーズで扱う。
 
 ### Phase C: admin UI から起動 (危険度: 高)
-- `/admin/x-link-requests` で merge 申請を承認可能にする
-- 確認モーダルで影響件数表示 + 「実行するには 'MERGE' と入力」
-- 失敗時のロールバック手順を docs に追加
+- `/admin/x-id-merges` で merge 申請を承認・実行する
+- 影響件数表示 + 「実行するには 'MERGE' と入力」
+- 取り消し申請の一覧は実装済み。自動ロールバックは未実装。
 
 ## UNIQUE 制約の注意
 
@@ -57,4 +57,5 @@
 ## 関連 Opus 判断候補
 
 - **#8 merge フロー完全実装** (本ドキュメント)
+- **自動ロールバック / 本人通知** は残課題
 - **legacy/normalize core 切り出し** (#9) と独立
