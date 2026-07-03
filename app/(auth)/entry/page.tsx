@@ -329,49 +329,52 @@ export default async function EntryPage({
             <p className="fn-text-muted-sm fn-mt-12">
               参加するイベントを上の一覧から選択してください (募集終了が近い順)。
             </p>
+          ) : activeEvents.length === 0 ? (
+            <div className={`${styles.btnRow} fn-mt-12`}>
+              <Link href="/event" className="fn-btn fn-btn-ghost">
+                <Icon name="calendar" size={14} aria-hidden />
+                イベント一覧を見る
+              </Link>
+            </div>
+          ) : null}
+
+          {displaySlots.length > 0 ? (
+            <div className={styles.slotPanel} aria-labelledby="post-slotted-card">
+              <h3 id="post-slotted-card" className={styles.slotPanelTitle}>
+                <Icon name="check" size={14} aria-hidden />
+                確保済み枠に提出する
+              </h3>
+              <p className={styles.slotPanelLead}>
+                予約済みのイベント枠に作品情報を紐付けます。連続枠も1つの提出として扱います。
+              </p>
+              <ul className="fn-pc-slot-list">
+                {displaySlots.map((slot) => (
+                  <li key={slot.id}>
+                    <Link
+                      href={resolveWriteHref(`/entry/slotted?slot=${slot.id}`)}
+                      className="fn-pc-slot"
+                    >
+                      <span className="fn-pc-slot-info">
+                        <span className="fn-pc-slot-label">
+                          {slot.event_title ?? slot.event_id}
+                        </span>
+                        <span className="fn-mono fn-pc-slot-event">
+                          {slot.start_time
+                            ? `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(slot.start_time, { timeOnly: true })}`
+                            : (slot.slot_label ?? "時間なし枠")}
+                          {slot.is_group ? ` / ${slot.group_size}連続` : ""}
+                        </span>
+                      </span>
+                      <Icon name="chevron-right" size={13} aria-hidden />
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
           ) : null}
         </section>
 
-        {/* カード2: 確保済み枠に提出する (枠確保済みの場合のみ表示) */}
-        {displaySlots.length > 0 ? (
-          <section
-            className={`fn-entry-card ${styles.choiceCard}`}
-            aria-labelledby="post-slotted-card"
-          >
-            <h2 id="post-slotted-card" className={styles.cardTitle}>
-              <Icon name="calendar" size={16} aria-hidden />
-              確保済み枠に提出する
-            </h2>
-            <p className={styles.cardLead}>
-              予約済みのイベント枠に作品情報を紐付けます。連続枠も1つの提出として扱います。
-            </p>
-            <ul className="fn-pc-slot-list">
-              {displaySlots.map((slot) => (
-                <li key={slot.id}>
-                  <Link
-                    href={resolveWriteHref(`/entry/slotted?slot=${slot.id}`)}
-                    className="fn-pc-slot"
-                  >
-                    <span className="fn-pc-slot-info">
-                      <span className="fn-pc-slot-label">
-                        {slot.event_title ?? slot.event_id}
-                      </span>
-                      <span className="fn-mono fn-pc-slot-event">
-                        {slot.start_time
-                          ? `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(slot.start_time, { timeOnly: true })}`
-                          : (slot.slot_label ?? "時間なし枠")}
-                        {slot.is_group ? ` / ${slot.group_size}連続` : ""}
-                      </span>
-                    </span>
-                    <Icon name="chevron-right" size={13} aria-hidden />
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
-
-        {/* カード3: 過去の作品を投稿する */}
+        {/* カード2: 過去の作品を投稿する */}
         <section
           className={`fn-entry-card ${styles.choiceCard}`}
           aria-labelledby="post-unslotted-card"

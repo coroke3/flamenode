@@ -31,7 +31,7 @@ export default async function AuthLayout({
   }
 
   return (
-    <div data-fn-surface="personal" className="fn-public-shell fn-app">
+    <div data-fn-surface="public" className="fn-public-shell fn-app">
       <CostGuardBanner />
       <PublicHeader user={user} />
       <main className="fn-main flex-1 w-full">{children}</main>

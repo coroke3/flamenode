@@ -1,5 +1,7 @@
 .choiceGrid {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(18px, 2.6vw, 28px);
 }
 
 .choiceCard {
@@ -45,8 +47,13 @@
   font-family: var(--font-display);
   font-size: clamp(22px, 3vw, 30px);
   font-weight: 800;
-  line-height: 1;
+  line-height: 1.12;
   color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cardTitle svg {
+  flex: 0 0 auto;
 }
 
 .cardLead {
@@ -78,7 +85,7 @@
 
 .eventCard {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content;
+  grid-template-columns: minmax(0, 1fr) 16px;
   gap: 4px 14px;
   align-items: center;
   padding: 12px 14px;
@@ -125,24 +132,63 @@
   font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--text-muted);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.slotPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+  padding: 14px;
+  border-radius: var(--r-card);
+  background: var(--bg-elevated);
+}
+
+.slotPanelTitle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+
+.slotPanelLead {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.65;
 }
 
 @media (min-width: 840px) {
-  .choiceGrid {
+  :global([data-fn-surface="public"]) .choiceGrid.choiceGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (min-width: 1120px) {
-  .choiceGrid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  :global([data-fn-surface="public"]) .choiceGrid.choiceGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 640px) {
   .choiceCard {
     min-height: 0;
-    padding: 20px;
+    padding: 20px 18px;
+  }
+
+  .cardTitle {
+    align-items: flex-start;
+    font-size: 22px;
+  }
+
+  .eventCard {
+    padding: 12px;
   }
 
   .btnRow > a,
