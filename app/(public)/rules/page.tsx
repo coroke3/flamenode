@@ -73,6 +73,9 @@ export default async function RulesPage({
       };
     }
     return null;
+  }).catch((error) => {
+    console.error("[RulesPage] failed to load published terms", error);
+    return null;
   });
 
   const body = data?.body ?? DEFAULT_TERMS_MARKDOWN;
