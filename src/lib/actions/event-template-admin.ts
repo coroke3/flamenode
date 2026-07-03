@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { desc, eq } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
@@ -10,7 +10,12 @@ import {
   snapshotFromEvent,
   type EventTemplateSnapshot,
 } from "@/lib/admin/eventTemplateSettings";
-import { eventTemplates, events, historyLogs } from "@/lib/db/schema";
+import {
+  eventCustomQuestions,
+  eventTemplates,
+  events,
+  historyLogs,
+} from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
 
 export interface EventTemplateActionResult {
@@ -71,7 +76,28 @@ export async function saveEventAsTemplate(
     return { ok: false, message: "イベントが見つかりません。" };
   }
 
-  const snapshot = snapshotFromEvent(event);
+  const customQuestions = await db
+    .select({
+      question_key: eventCustomQuestions.question_key,
+      label: eventCustomQuestions.label,
+      description: eventCustomQuestions.description,
+      type: eventCustomQuestions.type,
+      required: eventCustomQuestions.required,
+      options_json: eventCustomQuestions.options_json,
+      placeholder: eventCustomQuestions.placeholder,
+      max_length: eventCustomQuestions.max_length,
+      sort_order: eventCustomQuestions.sort_order,
+      is_active: eventCustomQuestions.is_active,
+      visibility: eventCustomQuestions.visibility,
+    })
+    .from(eventCustomQuestions)
+    .where(eq(eventCustomQuestions.event_id, event.id))
+    .orderBy(
+      asc(eventCustomQuestions.sort_order),
+      asc(eventCustomQuestions.question_key),
+    );
+
+  const snapshot = snapshotFromEvent(event, customQuestions);
   const id = generateId("etmpl");
   const now = Math.floor(Date.now() / 1000);
 

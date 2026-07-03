@@ -7,11 +7,15 @@ import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import { canEditEvent } from "@/lib/auth/ownership";
 import {
+  eventCustomQuestions,
   eventTemplates,
   events,
   historyLogs,
 } from "@/lib/db/schema";
-import { parseEventTemplateSnapshot } from "@/lib/admin/eventTemplateSettings";
+import {
+  parseEventTemplateSnapshot,
+  type EventTemplateQuestionDefinition,
+} from "@/lib/admin/eventTemplateSettings";
 import { parseJstDatetimeLocal } from "@/lib/utils/dateInput";
 import { generateId } from "@/lib/utils/id";
 import { normalizeHttpUrl } from "@/lib/utils/url";
@@ -32,6 +36,34 @@ export interface EventActionResult {
 
 type EventUpdatePayload = Partial<typeof events.$inferInsert>;
 type EventEditSection = "basic" | "publish" | "questions" | "slots";
+
+async function restoreTemplateCustomQuestions(
+  db: NonNullable<ReturnType<typeof getDatabase>>,
+  eventId: string,
+  definitions: EventTemplateQuestionDefinition[],
+  now: number,
+): Promise<void> {
+  if (definitions.length === 0) return;
+  const values = definitions.map((definition) => ({
+    id: generateId("ecq"),
+    event_id: eventId,
+    question_key: definition.question_key,
+    label: definition.label,
+    description: definition.description,
+    type: definition.type,
+    required: definition.required ? 1 : 0,
+    options_json: definition.options_json,
+    placeholder: definition.placeholder,
+    max_length: definition.max_length,
+    sort_order: definition.sort_order,
+    is_active: definition.is_active ? 1 : 0,
+    visibility: definition.visibility,
+    created_at: now,
+    updated_at: now,
+  }));
+
+  await db.insert(eventCustomQuestions).values(values).onConflictDoNothing();
+}
 
 const eventSchema = z.object({
   id: z.string().trim().min(1).max(64).optional(),
@@ -260,7 +292,6 @@ export async function createEvent(
     slot_type: data.slot_type,
     slot_visibility_mode: data.slot_visibility_mode,
     parts_json: buildPartsJson(data.parts_text),
-    custom_questions: templateSnapshot?.custom_questions ?? null,
     review_settings: templateSnapshot?.review_settings ?? null,
     editable_fields: templateSnapshot?.editable_fields ?? null,
     repeat_rules: templateSnapshot?.repeat_rules ?? null,
@@ -268,6 +299,12 @@ export async function createEvent(
     updated_at: now,
   });
 
+  await restoreTemplateCustomQuestions(
+    db,
+    id,
+    templateSnapshot?.custom_question_definitions ?? [],
+    now,
+  );
   await syncStagePermissionCustomQuestions(db, id, videoFormSettingsJson, now);
 
   await db.insert(historyLogs).values({
