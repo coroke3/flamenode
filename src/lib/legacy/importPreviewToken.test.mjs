@@ -52,3 +52,73 @@ test("legacy import preview token changes with conflict strategy", async () => {
 
   assert.notEqual(skip, update);
 });
+
+test("legacy import preview token changes with payload content", async () => {
+  const base = {
+    strategy: {
+      events: "skip",
+      videos: "merge",
+      updateXUsers: false,
+      importMode: "archive",
+      enqueueStaticRebuild: true,
+      staticRebuildStrategy: "event",
+    },
+  };
+
+  const original = await buildLegacyImportPreviewToken({
+    ...base,
+    payload: { events: [{ id: "ev1", title: "Event" }], videos: [] },
+  });
+  const changed = await buildLegacyImportPreviewToken({
+    ...base,
+    payload: { events: [{ id: "ev1", title: "Changed" }], videos: [] },
+  });
+
+  assert.notEqual(original, changed);
+});
+
+test("legacy import preview token changes with static rebuild strategy", async () => {
+  const base = {
+    payload: { events: [{ id: "ev1", title: "Event" }], videos: [] },
+    strategy: {
+      events: "skip",
+      videos: "merge",
+      updateXUsers: false,
+      importMode: "archive",
+      enqueueStaticRebuild: true,
+      staticRebuildStrategy: "event",
+    },
+  };
+
+  const eventOnly = await buildLegacyImportPreviewToken(base);
+  const full = await buildLegacyImportPreviewToken({
+    ...base,
+    strategy: { ...base.strategy, staticRebuildStrategy: "full" },
+  });
+
+  assert.notEqual(eventOnly, full);
+});
+
+test("legacy import preview token changes when static rebuild enqueue changes", async () => {
+  const base = {
+    payload: { events: [{ id: "ev1", title: "Event" }], videos: [] },
+    strategy: {
+      events: "skip",
+      videos: "merge",
+      updateXUsers: false,
+      importMode: "archive",
+      staticRebuildStrategy: "event",
+    },
+  };
+
+  const enabled = await buildLegacyImportPreviewToken({
+    ...base,
+    strategy: { ...base.strategy, enqueueStaticRebuild: true },
+  });
+  const disabled = await buildLegacyImportPreviewToken({
+    ...base,
+    strategy: { ...base.strategy, enqueueStaticRebuild: false },
+  });
+
+  assert.notEqual(enabled, disabled);
+});

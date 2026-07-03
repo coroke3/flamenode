@@ -40,3 +40,43 @@ test("spreadsheet import preview token changes with apply mode", async () => {
 
   assert.notEqual(insert, upsert);
 });
+
+test("spreadsheet import preview token changes with row content", async () => {
+  const base = {
+    table: "events",
+    mode: "upsert",
+    columns: ["id", "title"],
+    primaryKeys: ["id"],
+  };
+
+  const original = await buildSpreadsheetImportPreviewToken({
+    ...base,
+    rows: [{ id: "event-1", title: "Event 1" }],
+  });
+  const changed = await buildSpreadsheetImportPreviewToken({
+    ...base,
+    rows: [{ id: "event-1", title: "Changed" }],
+  });
+
+  assert.notEqual(original, changed);
+});
+
+test("spreadsheet import preview token changes with target table", async () => {
+  const base = {
+    mode: "upsert",
+    columns: ["id", "title"],
+    primaryKeys: ["id"],
+    rows: [{ id: "event-1", title: "Event 1" }],
+  };
+
+  const events = await buildSpreadsheetImportPreviewToken({
+    ...base,
+    table: "events",
+  });
+  const videos = await buildSpreadsheetImportPreviewToken({
+    ...base,
+    table: "videos",
+  });
+
+  assert.notEqual(events, videos);
+});
