@@ -22,6 +22,14 @@ import {
   PRESET_DEFINITIONS,
   type EventStaffPreset,
 } from "@/lib/auth/permissions/presets";
+import {
+  buildEventStaffCsvPreview,
+  EVENT_STAFF_CSV_SAMPLE,
+  eventStaffCsvPresetLabel,
+  type EventStaffCsvExistingSubject,
+  type EventStaffCsvPreview,
+  type EventStaffCsvRow,
+} from "@/lib/admin/eventStaffCsv";
 
 export interface EditorRow {
   x_user_id: string;
@@ -45,16 +53,6 @@ export interface CollaboratorRow {
 }
 
 type CollaboratorPreset = Exclude<EventStaffPreset, "owner" | "manager">;
-
-type CollaboratorCsvRow = {
-  display_name: string;
-  x_user_id: string;
-  discord_user_id: string;
-  permission_preset: CollaboratorPreset;
-  permission_keys: string[];
-  is_public_staff: string;
-  public_role_label: string;
-};
 
 interface EventStaffManagerProps {
   eventId: string;
@@ -88,30 +86,6 @@ function normalizeCollaboratorPreset(
   return permissionKeys.length > 0 ? "custom" : "public_staff";
 }
 
-function parseCsvAssignment(raw: string): {
-  permission_preset: CollaboratorPreset;
-  permission_keys: string[];
-} {
-  const value = raw.trim();
-  if (!value) {
-    return { permission_preset: "public_staff", permission_keys: [] };
-  }
-  if (isCollaboratorPreset(value)) {
-    return { permission_preset: value, permission_keys: [] };
-  }
-  const keySource = value.startsWith("custom:")
-    ? value.slice("custom:".length)
-    : value;
-  const permissionKeys = keySource
-    .split(/[|;]/)
-    .map((k) => k.trim())
-    .filter(Boolean);
-  return {
-    permission_preset: permissionKeys.length > 0 ? "custom" : "public_staff",
-    permission_keys: permissionKeys,
-  };
-}
-
 function visibleCustomPermissionKeys(isSiteAdmin: boolean): PermissionKey[] {
   return COLLABORATOR_PERMISSION_KEYS.filter((key) => {
     const canonical = canonicalizePermissionKey(key);
@@ -121,46 +95,6 @@ function visibleCustomPermissionKeys(isSiteAdmin: boolean): PermissionKey[] {
 
 function visiblePresetOptions(isSiteAdmin: boolean): readonly CollaboratorPreset[] {
   return isSiteAdmin ? ADMIN_COLLABORATOR_PRESETS : COLLABORATOR_PRESETS;
-}
-
-function parseCollaboratorCsv(raw: string): CollaboratorCsvRow[] {
-  return raw
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line, index) => index !== 0 || !/^\uFEFF?表示名[,\t]/.test(line))
-    .map((line, index) => {
-      const cols = line.includes("\t")
-        ? line.split("\t")
-        : line.split(",").map((c) => c.trim());
-      const [
-        displayName = "",
-        xUserId = "",
-        maybeDiscordOrPermissions = "",
-        maybePresetOrPermissions = "",
-        maybePublicOrLabel = "0",
-        maybeLabel = "",
-      ] = cols;
-      const usesLegacySixColumns = cols.length >= 6;
-      const discordUserId = usesLegacySixColumns ? maybeDiscordOrPermissions : "";
-      const assignmentSource = usesLegacySixColumns
-        ? maybePresetOrPermissions
-        : maybeDiscordOrPermissions;
-      const isPublic = usesLegacySixColumns
-        ? maybePublicOrLabel
-        : maybePresetOrPermissions || "0";
-      const roleLabel = usesLegacySixColumns ? maybeLabel : maybePublicOrLabel;
-      const assignment = parseCsvAssignment(assignmentSource);
-      return {
-        display_name: displayName.trim() || `共同編集者 ${index + 1}`,
-        x_user_id: xUserId.replace(/^@/, "").trim(),
-        discord_user_id: discordUserId.trim(),
-        permission_preset: assignment.permission_preset,
-        permission_keys: assignment.permission_keys,
-        is_public_staff: isPublic.trim() === "1" ? "1" : "0",
-        public_role_label: roleLabel.trim(),
-      };
-    });
 }
 
 export function EventStaffManager({
@@ -177,6 +111,19 @@ export function EventStaffManager({
     | { kind: "collaborator"; displayName: string; xUserId: string | null; discordId: string | null }
     | null
   >(null);
+  const existingCsvSubjects = React.useMemo<EventStaffCsvExistingSubject[]>(
+    () => [
+      ...editors.map((editor) => ({
+        x_user_id: editor.x_user_id,
+        discord_user_id: null,
+      })),
+      ...collaborators.map((collaborator) => ({
+        x_user_id: collaborator.x_user_id,
+        discord_user_id: collaborator.discord_user_id,
+      })),
+    ],
+    [editors, collaborators],
+  );
 
   const runAction = (
     fd: FormData,
@@ -219,14 +166,15 @@ export function EventStaffManager({
     });
   };
 
-  const runCollaboratorCsvImport = (rows: CollaboratorCsvRow[]) => {
-    if (rows.length === 0) {
+  const runCollaboratorCsvImport = (rows: EventStaffCsvRow[]) => {
+    const validRows = rows.filter((row) => row.errors.length === 0);
+    if (validRows.length === 0) {
       setError("取り込める行がありません。");
       return;
     }
     setError(null);
     startTransition(async () => {
-      for (const row of rows) {
+      for (const row of validRows) {
         if (!isSiteAdmin && row.permission_preset === "xid_reviewer") {
           setError("X ID確認担当プリセットはsite adminだけが付与できます。");
           return;
@@ -328,6 +276,7 @@ export function EventStaffManager({
         <CollaboratorForm
           eventId={eventId}
           isSiteAdmin={isSiteAdmin}
+          existingSubjects={existingCsvSubjects}
           busy={busy}
           onSubmit={(fd) => runAction(fd, upsertCollaborator)}
           onImport={runCollaboratorCsvImport}
@@ -843,21 +792,26 @@ function PermissionChecklist({
 function CollaboratorForm({
   eventId,
   isSiteAdmin,
+  existingSubjects,
   busy,
   onSubmit,
   onImport,
 }: {
   eventId: string;
   isSiteAdmin: boolean;
+  existingSubjects: readonly EventStaffCsvExistingSubject[];
   busy: boolean;
   onSubmit: (fd: FormData) => void;
-  onImport: (rows: CollaboratorCsvRow[]) => void;
+  onImport: (rows: EventStaffCsvRow[]) => void;
 }): React.ReactElement {
   const [permKeys, setPermKeys] = React.useState<string[]>([]);
   const [preset, setPreset] = React.useState<CollaboratorPreset>("public_staff");
   const [csvText, setCsvText] = React.useState("");
+  const [csvPreview, setCsvPreview] = React.useState<EventStaffCsvPreview | null>(null);
   const [copied, setCopied] = React.useState(false);
   const customPermissionKeys = visibleCustomPermissionKeys(isSiteAdmin);
+  const previewValidRows =
+    csvPreview?.rows.filter((row) => row.errors.length === 0) ?? [];
   const toggle = (key: string) => {
     setPermKeys((prev) =>
       prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key],
@@ -1026,8 +980,11 @@ function CollaboratorForm({
           className="fn-input"
           rows={5}
           value={csvText}
-          onChange={(event) => setCsvText(event.target.value)}
-          placeholder="例: 進行担当,yamada,,slot_manager,1,進行"
+          onChange={(event) => {
+            setCsvText(event.target.value);
+            setCsvPreview(null);
+          }}
+          placeholder={EVENT_STAFF_CSV_SAMPLE}
           disabled={busy}
         />
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1039,17 +996,149 @@ function CollaboratorForm({
             type="button"
             className="fn-btn fn-btn-primary fn-btn-sm"
             onClick={() => {
-              const rows = parseCollaboratorCsv(csvText);
-              onImport(rows);
-              if (rows.length > 0) setCsvText("");
+              setCsvPreview(
+                buildEventStaffCsvPreview({
+                  text: csvText,
+                  existingSubjects,
+                  isSiteAdmin,
+                }),
+              );
             }}
             disabled={busy || csvText.trim().length === 0}
           >
-            <Icon name="upload" size={11} aria-hidden /> CSVを取り込む
+            <Icon name="info" size={11} aria-hidden /> CSVをプレビュー
+          </button>
+          <button
+            type="button"
+            className="fn-btn fn-btn-primary fn-btn-sm"
+            onClick={() => {
+              if (!csvPreview || csvPreview.hasErrors) return;
+              onImport(previewValidRows);
+              setCsvText("");
+              setCsvPreview(null);
+            }}
+            disabled={
+              busy ||
+              !csvPreview ||
+              csvPreview.hasErrors ||
+              previewValidRows.length === 0
+            }
+          >
+            <Icon name="upload" size={11} aria-hidden /> プレビュー内容を保存
           </button>
         </div>
+        {csvPreview ? <CsvPreviewPanel preview={csvPreview} /> : null}
       </div>
     </form>
+  );
+}
+
+function CsvPreviewPanel({
+  preview,
+}: {
+  preview: EventStaffCsvPreview;
+}): React.ReactElement {
+  if (preview.rows.length === 0) {
+    return (
+      <p className="fn-alert fn-alert--danger" style={{ margin: 0 }}>
+        <Icon name="warning" size={13} aria-hidden /> 取り込める行がありません。
+      </p>
+    );
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      <div className="fn-console-badge-row">
+        <span className="fn-badge fn-badge-soft">
+          追加 {preview.counts.create}件
+        </span>
+        <span className="fn-badge fn-badge-soft">
+          更新 {preview.counts.update}件
+        </span>
+        <span
+          className={
+            preview.counts.error > 0
+              ? "fn-badge fn-badge-warning"
+              : "fn-badge fn-badge-neutral"
+          }
+        >
+          エラー {preview.counts.error}件
+        </span>
+        {preview.counts.legacy > 0 ? (
+          <span className="fn-badge fn-badge-neutral">
+            旧形式 {preview.counts.legacy}行
+          </span>
+        ) : null}
+      </div>
+
+      <div style={{ overflowX: "auto" }}>
+        <table className="fn-table" style={{ minWidth: 760 }}>
+          <thead>
+            <tr>
+              <th style={{ width: 54 }}>行</th>
+              <th style={{ width: 82 }}>判定</th>
+              <th>表示名</th>
+              <th>対象</th>
+              <th style={{ width: 150 }}>担当</th>
+              <th style={{ width: 120 }}>公開表示</th>
+              <th>結果</th>
+            </tr>
+          </thead>
+          <tbody>
+            {preview.rows.map((row) => (
+              <tr key={`${row.lineNumber}-${row.display_name}`}>
+                <td>{row.lineNumber}</td>
+                <td>
+                  <span
+                    className={
+                      row.action === "update"
+                        ? "fn-badge fn-badge-warning"
+                        : "fn-badge fn-badge-soft"
+                    }
+                  >
+                    {row.action === "update" ? "更新" : "追加"}
+                  </span>
+                </td>
+                <td>{row.display_name}</td>
+                <td>
+                  {row.x_user_id ? (
+                    <code>@{row.x_user_id}</code>
+                  ) : row.discord_user_id ? (
+                    <code>discord:{row.discord_user_id}</code>
+                  ) : (
+                    "-"
+                  )}
+                </td>
+                <td>
+                  {eventStaffCsvPresetLabel(row.permission_preset)}
+                  {row.permission_preset === "custom" ? (
+                    <span className="fn-muted fn-text-sm">
+                      {" "}
+                      ({row.permission_keys.length}件)
+                    </span>
+                  ) : null}
+                </td>
+                <td>
+                  {row.is_public_staff === "1" ? "公開" : "非公開"}
+                  {row.public_role_label ? ` / ${row.public_role_label}` : ""}
+                </td>
+                <td>
+                  {row.errors.length > 0 ? (
+                    <span className="fn-alert fn-alert--danger" style={{ margin: 0 }}>
+                      {row.errors.join(" / ")}
+                    </span>
+                  ) : (
+                    <span className="fn-muted fn-text-sm">
+                      {row.warnings.length > 0 ? row.warnings.join(" / ") : "OK"}
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
