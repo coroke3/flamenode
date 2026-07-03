@@ -308,6 +308,7 @@ async function insertSpreadsheetRowWithContext(
   },
 ): Promise<void> {
   assertTableEditable(ctx);
+  const pk = primaryKeyFromRowValues(opts.row, ctx.primaryKeys);
 
   const keys = ctx.columns
     .map((c) => c.name)
@@ -330,10 +331,10 @@ async function insertSpreadsheetRowWithContext(
     .prepare(
       `INSERT INTO ${ctx.quotedTable} (${colList}) VALUES (${placeholders})`,
     )
-    .bind(...values)
+      .bind(...values)
     .run();
 
-  const pk = primaryKeyFromRowValues(opts.row, ctx.primaryKeys);
+  const afterRaw = await fetchRowByPkRaw(ctx, pk);
 
   await writeHistory({
     operatorId: opts.operatorId,
@@ -341,7 +342,7 @@ async function insertSpreadsheetRowWithContext(
     recordId: recordIdFromPk(pk),
     action: "CREATE",
     before: null,
-    after: opts.row,
+    after: afterRaw ?? opts.row,
   });
 }
 
