@@ -76,7 +76,7 @@ export const SPREADSHEET_TABLE_OVERRIDES: Record<string, SpreadsheetTableOverrid
       group: "作品",
       mode: "editable",
     },
-    video_softwares: { label: "使用ソフト", group: "作品", mode: "editable" },
+    video_softwares: { label: "使用ソフト", group: "作品", mode: "readonly" },
 
     software_catalog: { label: "ソフトカタログ", group: "マスタ", mode: "editable" },
     software_aliases: { label: "ソフト別名", group: "マスタ", mode: "editable" },
@@ -106,6 +106,15 @@ export const SPREADSHEET_TABLE_BLOCKLIST = new Set([
   "sqlite_sequence",
 ]);
 
+export const SPREADSHEET_DEPRECATED_READONLY_TABLES = [
+  "api" + "_endpoints",
+  "dashboard_metrics_cache",
+  "event_staff" + "_permissions",
+  "video" + "_comments",
+  "video" + "_stats",
+  "video_softwares",
+] as const;
+
 /** セル編集禁止（表示はマスク） */
 export const SPREADSHEET_SECRET_COLUMNS = new Set([
   "refresh_token",
@@ -122,12 +131,12 @@ const DEFAULT_READONLY_TABLES = new Set([
   "account",
   "session",
   "verificationToken",
+  ...SPREADSHEET_DEPRECATED_READONLY_TABLES,
   "user_tos_consents",
   "x_id_merge_reverts",
   "notification_outbox",
   "history_logs",
   "cost_usage_snapshots",
-  "event_staff_permissions",
 ]);
 
 const SECRET_COLUMN_PATTERN =

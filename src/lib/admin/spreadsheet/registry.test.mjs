@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { normalizeSpreadsheetPage } from "./constants.ts";
 import {
   buildSpreadsheetTableDefs,
+  SPREADSHEET_DEPRECATED_READONLY_TABLES,
   isSpreadsheetColumnEditable,
   isSpreadsheetTableBlocklisted,
   resolveSpreadsheetTableDef,
@@ -36,6 +37,13 @@ test("resolveSpreadsheetTableDef applies overrides", () => {
   const def = resolveSpreadsheetTableDef("videos", true);
   assert.equal(def.label, "作品");
   assert.equal(def.mode, "editable");
+});
+
+test("deprecated DB tables are readonly for spreadsheet import", () => {
+  for (const table of SPREADSHEET_DEPRECATED_READONLY_TABLES) {
+    const def = resolveSpreadsheetTableDef(table, true);
+    assert.equal(def.mode, "readonly", `${table} should be readonly`);
+  }
 });
 
 test("secret column pattern blocks new token columns", () => {
