@@ -125,6 +125,7 @@ D1 へ適用する場合はファイル名の辞書順を正とする。同じ `
 | 0034 | `migrations/0034_user_can_create_events.sql` | `user.can_create_events` | サイト管理者が開催権限を付与するための安全な列追加 |
 | 0035 | `migrations/0035_event_visibility_status.sql` | `events.visibility_status` と index | イベント公開状態の正本。旧 `is_active` / `is_archived` は互換列として同期対象 |
 | 0036 | `migrations/0036_backfill_used_software_json.sql` | 旧使用ソフト中間テーブルから `videos.used_software_json` へ backfill | 旧テーブル削除前のデータ移行。既存 JSON がある行は上書きしない |
+| 0037 | `migrations/0037_backfill_stage_permission_custom_answers.sql` | 旧 `videos.stage_permission` から `video_custom_answers` へ backfill | 旧ステージ許可列の新規書き込み停止前提。質問定義があるイベントだけ正規化回答へ移行する |
 
 ### 1-6. 手動 index / Drizzle meta の注意
 
@@ -425,6 +426,8 @@ SELECT status, COUNT(*) FROM notification_outbox
 - `video_softwares` は作らず、`videos.used_software_json` に統合する
 - `stage_permission` / legacy `righttype` は、対象イベントに `event_custom_questions` があれば `video_custom_answers` へも同期する
 - `event_staff_permissions` へは新規書き込みしない。取り込み時の運営権限は `event_staff.permission_preset` / `permission_mask` / `custom_permission_keys_json` に統合する
+- Admin spreadsheet import では旧互換列 (`events.is_active` / `events.is_entry_open` / `events.is_archived`, `videos.custom_answers`, `videos.stage_permission`, `system_settings.cost_guard_mode`, `system_settings.is_maintenance_mode`, `video_chapters.video_member_id`) を読み取り専用として無視する
+- Admin spreadsheet import で `video_chapters` を追加する場合、MVP 方針に合わせて `marker_kind` は常に `chapter` に補完する
 - `announcements` は作らない（必要なら `system_settings.announcements_json` を管理画面から登録）
 - `cost_usage_snapshots` は D1 に保存せず KV へ逃がす（インポート処理では書かない）
 - `user_tos_consents` は利用規約同意履歴のため維持する

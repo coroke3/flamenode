@@ -6,6 +6,7 @@
 > 2026-07-03 update: `/event` index can read R2 `events/index.json` in `static_only` mode. `content-jobs` includes public event group sections in that payload.
 > 2026-07-04 update: Legacy import no longer writes deprecated `videos.custom_answers`; dropped legacy-only values are surfaced as import warnings.
 > 2026-07-04 update: Event templates no longer copy legacy `events.custom_questions`; template snapshots store normalized `custom_question_definitions` and restore them into `event_custom_questions`.
+> 2026-07-04 update: Admin spreadsheet import treats legacy compatibility columns as read-only, including event visibility flags, operation-mode fallbacks, `videos.stage_permission`, and fixed `video_chapters.marker_kind=chapter` inserts.
 
 最終更新: 2026-07-04
 
@@ -54,7 +55,11 @@ D1 を正本、R2/KV の静的 JSON は公開配信用キャッシュとする�
 | event_staff_permissions | event_staff.permission_preset / permission_mask / custom_permission_keys_json | 移行元のみ / 新規書き込み禁止 | mask backfill migration |
 | events.custom_questions (旧 JSON) | event_custom_questions | 新規書き込み禁止。テンプレートは `custom_question_definitions` から正規化テーブルへ復元 | write path removed |
 | videos.custom_answers (旧 JSON) | video_custom_answers | 新規書き込み禁止。legacy import は旧JSON格納値を warning として扱う | write path removed |
+| videos.stage_permission | video_custom_answers | 新規書き込み禁止。0037 で既存値を正規化テーブルへ backfill。汎用 spreadsheet import では読み取り専用 | write path removed |
 | video_softwares | videos.used_software_json + software_catalog | 通常保存と legacy import は JSON 保存へ移行済み。旧テーブルは読み取りフォールバックのみ | implemented |
+| events.is_active / is_entry_open / is_archived | events.visibility_status / entry_start_time / entry_end_time | 互換列。通常保存は同期、汎用 spreadsheet import では読み取り専用 | readonly fallback |
+| system_settings.cost_guard_mode / is_maintenance_mode | system_settings.operation_mode | 互換 fallback。汎用 spreadsheet import では読み取り専用 | readonly fallback |
+| video_chapters.video_member_id / marker_kind | video_members.chapters_json / marker_kind=chapter | メンバーチャプター分離後の互換列。汎用 import では `marker_kind=chapter` を強制 | readonly/fixed |
 
 ---
 
