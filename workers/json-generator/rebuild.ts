@@ -115,7 +115,7 @@ async function rebuildEventsIndex(env: Env): Promise<void> {
     `SELECT id, title, explanation, icon_url, img_url, accent_color,
             start_time, end_time, is_active, is_entry_open, is_archived
      FROM events
-     WHERE is_archived = 0
+     WHERE visibility_status = 'public'
      ORDER BY start_time DESC
      LIMIT 200`,
   ).all();

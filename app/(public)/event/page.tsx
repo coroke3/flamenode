@@ -9,6 +9,7 @@ import {
   type PublicEventCategory,
 } from "@/components/event/PublicEventCard";
 import { categorizePublicEvent } from "@/lib/utils/categorizePublicEvent";
+import { publicListableEventWhere } from "@/lib/utils/eventStatus";
 import { compareEventsByUpcomingPriority } from "@/lib/utils/eventOrdering";
 import {
   fetchEventListGroupSections,
@@ -47,7 +48,11 @@ function isPointEvent(ev: EventRow): boolean {
 export default async function EventListPage(): Promise<React.ReactElement> {
   const { events, groupSections } = await withDatabase(async (db) => {
     const [eventRows, groups] = await Promise.all([
-      db.select().from(eventsTable).orderBy(desc(eventsTable.start_time)),
+      db
+        .select()
+        .from(eventsTable)
+        .where(publicListableEventWhere())
+        .orderBy(desc(eventsTable.start_time)),
       fetchEventListGroupSections(db),
     ]);
     return { events: eventRows, groupSections: groups };
