@@ -1,7 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { computeVideoEventSyncTarget } from "./eventSync.ts";
+import {
+  computeStagePermissionAnswerDeleteEventIds,
+  computeVideoEventSyncTarget,
+} from "./eventSync.ts";
 
 test("computeVideoEventSyncTarget deduplicates admin event ids", () => {
   assert.deepEqual(
@@ -49,5 +52,25 @@ test("computeVideoEventSyncTarget ignores unmodifiable requested events", () => 
       modifiableEventIds: ["allowed"],
     }),
     ["allowed"],
+  );
+});
+
+test("computeStagePermissionAnswerDeleteEventIds includes removed events", () => {
+  assert.deepEqual(
+    computeStagePermissionAnswerDeleteEventIds({
+      previousEventIds: ["old", "kept", "old"],
+      targetEventIds: ["kept", "new"],
+    }),
+    ["old", "kept", "new"],
+  );
+});
+
+test("computeStagePermissionAnswerDeleteEventIds trims empty values", () => {
+  assert.deepEqual(
+    computeStagePermissionAnswerDeleteEventIds({
+      previousEventIds: [" old ", "", "  "],
+      targetEventIds: ["new", " old "],
+    }),
+    ["old", "new"],
   );
 });

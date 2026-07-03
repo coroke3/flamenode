@@ -6,6 +6,11 @@ export interface VideoEventSyncTargetArgs {
   modifiableEventIds?: Iterable<string>;
 }
 
+export interface StagePermissionAnswerDeleteScopeArgs {
+  targetEventIds: string[];
+  previousEventIds?: string[];
+}
+
 function unique(values: Iterable<string>): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -42,4 +47,10 @@ export function computeVideoEventSyncTarget(
   }
 
   return Array.from(target);
+}
+
+export function computeStagePermissionAnswerDeleteEventIds(
+  args: StagePermissionAnswerDeleteScopeArgs,
+): string[] {
+  return unique([...(args.previousEventIds ?? []), ...args.targetEventIds]);
 }

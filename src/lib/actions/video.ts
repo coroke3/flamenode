@@ -41,7 +41,10 @@ import {
   type StagePermissionFieldSettings,
 } from "@/lib/video/formSettings";
 import { parseMemberChapterTime } from "@/lib/video/memberInput";
-import { computeVideoEventSyncTarget } from "@/lib/video/eventSync";
+import {
+  computeStagePermissionAnswerDeleteEventIds,
+  computeVideoEventSyncTarget,
+} from "@/lib/video/eventSync";
 import {
   getVideoSoftwareLabel,
   replaceVideoSoftwareLabels,
@@ -447,21 +450,29 @@ async function replaceStagePermissionCustomAnswers(
   args: {
     videoId: string;
     eventIds: string[];
+    deleteEventIds?: string[];
     stagePermission: string | null;
     now: number;
   },
 ): Promise<void> {
   const eventIds = Array.from(new Set(args.eventIds.filter(Boolean)));
-  if (eventIds.length === 0) return;
+  const deleteEventIds = computeStagePermissionAnswerDeleteEventIds({
+    previousEventIds: args.deleteEventIds ?? [],
+    targetEventIds: eventIds,
+  });
 
-  await db
-    .delete(videoCustomAnswers)
-    .where(
-      and(
-        eq(videoCustomAnswers.video_id, args.videoId),
-        inArray(videoCustomAnswers.event_id, eventIds),
-      )!,
-    );
+  if (deleteEventIds.length > 0) {
+    await db
+      .delete(videoCustomAnswers)
+      .where(
+        and(
+          eq(videoCustomAnswers.video_id, args.videoId),
+          inArray(videoCustomAnswers.event_id, deleteEventIds),
+        )!,
+      );
+  }
+
+  if (eventIds.length === 0) return;
 
   const submitted = new Map(
     parseStagePermissionAnswers(args.stagePermission).map((answer) => [
@@ -1334,7 +1345,8 @@ export async function updateVideo(
     !canEditYoutube &&
     !canEditCredits &&
     !canEditDescriptions &&
-    !canEditMembers
+    !canEditMembers &&
+    !canEditPrimaryEvent
   ) {
     return { ok: false, message: "編集権限がありません。" };
   }
@@ -1529,27 +1541,45 @@ export async function updateVideo(
 
   // 所属イベント (video_events) の編集は canEditPrimaryEvent で制御。
   // primary_event_id 自体は alwaysInclude として固定し、追加 / 削除のみ制御。
+  let syncedEventIdsForStagePermission: string[] | null = null;
+  let stagePermissionDeleteEventIds: string[] | undefined;
   if (canEditPrimaryEvent && formData.has("event_ids")) {
     const requestedEventIds = parseEventIdsFromForm(formData);
     const alwaysInclude = target.primary_event_id ? [target.primary_event_id] : [];
-    await syncVideoEvents(db, videoId, {
-      requested: requestedEventIds,
-      alwaysInclude,
-      user: { id: sessionUser.id, role: sessionUser.role ?? null },
-    });
-  }
-
-  if (canEditDescriptions) {
-    const currentEventIds = (
+    const previousEventIds = (
       await db
         .select({ event_id: videoEvents.event_id })
         .from(videoEvents)
         .where(eq(videoEvents.video_id, videoId))
     ).map((row) => row.event_id);
+    const syncedEventIds = await syncVideoEvents(db, videoId, {
+      requested: requestedEventIds,
+      alwaysInclude,
+      user: { id: sessionUser.id, role: sessionUser.role ?? null },
+    });
+    syncedEventIdsForStagePermission = syncedEventIds;
+    stagePermissionDeleteEventIds = computeStagePermissionAnswerDeleteEventIds({
+      previousEventIds,
+      targetEventIds: syncedEventIds,
+    });
+  }
+
+  if (canEditDescriptions || stagePermissionDeleteEventIds) {
+    const currentEventIds =
+      syncedEventIdsForStagePermission ??
+      (
+        await db
+          .select({ event_id: videoEvents.event_id })
+          .from(videoEvents)
+          .where(eq(videoEvents.video_id, videoId))
+      ).map((row) => row.event_id);
     await replaceStagePermissionCustomAnswers(db, {
       videoId,
       eventIds: currentEventIds,
-      stagePermission: nextStagePermission,
+      deleteEventIds: stagePermissionDeleteEventIds,
+      stagePermission: canEditDescriptions
+        ? nextStagePermission
+        : target.stage_permission,
       now,
     });
   }
