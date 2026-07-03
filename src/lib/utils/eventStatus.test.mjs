@@ -9,11 +9,81 @@ import {
   eventStatusLabel,
   eventStatusBadgeClass,
   isAcceptingEntries,
+  getEventVisibility,
+  isPublicEventVisible,
+  syncLegacyEventVisibilityFlags,
   getEffectiveEventEnd,
   getEffectiveEventStart,
 } from "./eventStatusCore.ts";
 
 const T0 = 1700000000;
+
+test("getEventVisibility: visibility_status takes precedence over legacy flags", () => {
+  assert.equal(
+    getEventVisibility({
+      visibility_status: "private",
+      is_active: 1,
+      is_archived: 0,
+      start_time: null,
+      end_time: null,
+    }),
+    "private",
+  );
+  assert.equal(
+    computeEventStatus(
+      {
+        visibility_status: "archived",
+        is_active: 1,
+        is_archived: 0,
+        start_time: null,
+        end_time: null,
+      },
+      T0,
+    ),
+    "archived",
+  );
+});
+
+test("isPublicEventVisible: only public visibility is public", () => {
+  assert.equal(
+    isPublicEventVisible({
+      visibility_status: "public",
+      is_active: 0,
+      is_archived: 0,
+      start_time: null,
+      end_time: null,
+    }),
+    true,
+  );
+  assert.equal(
+    isPublicEventVisible({
+      visibility_status: "private",
+      is_active: 1,
+      is_archived: 0,
+      start_time: null,
+      end_time: null,
+    }),
+    false,
+  );
+});
+
+test("syncLegacyEventVisibilityFlags: mirrors visibility for compatibility columns", () => {
+  assert.deepEqual(syncLegacyEventVisibilityFlags("public"), {
+    is_active: 1,
+    is_archived: 0,
+    is_entry_open: 0,
+  });
+  assert.deepEqual(syncLegacyEventVisibilityFlags("archived"), {
+    is_active: 0,
+    is_archived: 1,
+    is_entry_open: 0,
+  });
+  assert.deepEqual(syncLegacyEventVisibilityFlags("private"), {
+    is_active: 0,
+    is_archived: 0,
+    is_entry_open: 0,
+  });
+});
 
 test("computeEventStatus: is_archived=1 → archived", () => {
   assert.equal(
