@@ -332,6 +332,22 @@ export const eventStaff = sqliteTable(
     role: text("role", { enum: ["representative", "editor", "staff"] })
       .notNull()
       .default("staff"),
+    permission_preset: text("permission_preset", {
+      enum: [
+        "owner",
+        "manager",
+        "slot_manager",
+        "content_editor",
+        "reviewer",
+        "xid_reviewer",
+        "public_staff",
+        "custom",
+      ],
+    })
+      .notNull()
+      .default("public_staff"),
+    permission_mask: integer("permission_mask").notNull().default(0),
+    custom_permission_keys_json: text("custom_permission_keys_json"),
     is_public: integer("is_public").notNull().default(0),
     public_role_label: text("public_role_label"),
     internal_note: text("internal_note"),
@@ -354,6 +370,14 @@ export const eventStaff = sqliteTable(
       t.discord_user_id,
     ),
     byEvent: index("event_staff_event_idx").on(t.event_id),
+    publicIdx: index("event_staff_public_idx").on(
+      t.event_id,
+      t.is_public,
+      t.display_name,
+    ),
+    permissionIdx: index("event_staff_permission_idx")
+      .on(t.event_id, t.permission_mask)
+      .where(sql`${t.permission_mask} <> 0`),
   }),
 );
 

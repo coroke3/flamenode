@@ -1,72 +1,61 @@
-﻿export const COLLABORATOR_PERMISSION_KEYS = [
-  "event.basic",
-  "event.slots",
-  "event.members",
-  "event.questions",
-  "xid.link_requests",
-  "videos.title",
-  "videos.music_credit",
-  "videos.members",
-  "videos.review_data",
-  "videos.youtube_id",
-  "videos.primary_event",
-  "video.chapter_admin",
-] as const;
+import {
+  ALL_PERMISSION_KEYS,
+  PERMISSION_DEFINITIONS,
+  type PermissionKey,
+} from "@/lib/auth/permissions/keys";
+
+export const COLLABORATOR_PERMISSION_KEYS = [...ALL_PERMISSION_KEYS] as const;
+
+export type LegacyCollaboratorPermissionKey =
+  | "videos.title"
+  | "videos.music_credit"
+  | "videos.members"
+  | "videos.review_data"
+  | "videos.youtube_id"
+  | "videos.primary_event"
+  | "video.chapter_admin";
 
 export type CollaboratorPermissionKey =
-  (typeof COLLABORATOR_PERMISSION_KEYS)[number];
+  | PermissionKey
+  | LegacyCollaboratorPermissionKey;
 
 export const COLLABORATOR_PERMISSION_LABELS: Record<
   CollaboratorPermissionKey,
   { label: string; description: string }
 > = {
-  "event.basic": {
-    label: "イベント基本情報の編集",
-    description: "タイトル、説明、画像、開催期間、受付状態などを変更できます。",
-  },
-  "event.slots": {
-    label: "枠管理",
-    description: "枠の作成、編集、開放、時刻やラベルの変更ができます。",
-  },
-  "event.members": {
-    label: "イベント管理者を登録/編集",
-    description: "公開メンバー、内部メンバー、役職ラベル、権限を管理できます。",
-  },
-  "event.questions": {
-    label: "投稿フォーム・一般作品権限の上書き",
-    description: "イベント固有の投稿フォーム項目と、このイベントで上書きする作品編集権限を変更できます。",
-  },
-  "xid.link_requests": {
-    label: "X ID 連携申請の承認",
-    description: "manage 画面で X ID 連携申請を承認・却下できます。",
-  },
+  ...Object.fromEntries(
+    Object.entries(PERMISSION_DEFINITIONS).map(([key, def]) => [
+      key,
+      { label: def.label, description: def.description },
+    ]),
+  ) as Record<PermissionKey, { label: string; description: string }>,
   "videos.title": {
     label: "作品タイトル編集",
-    description: "イベント所属作品のタイトルと表示名を変更できます。",
+    description: "旧互換キーです。保存時は video.basics に正規化されます。",
   },
   "videos.music_credit": {
     label: "楽曲・クレジット編集",
-    description: "楽曲名、クレジット、楽曲参照 URL を変更できます。",
+    description: "旧互換キーです。保存時は video.credits に正規化されます。",
   },
   "videos.members": {
     label: "作品メンバー編集",
-    description: "メンバー名、X ID、役割、コメント、担当チャプターを変更できます。",
+    description: "旧互換キーです。保存時は video.members に正規化されます。",
   },
   "videos.review_data": {
     label: "作品説明・振り返り編集",
-    description: "紹介文、制作エピソード、使用ソフト、見どころを変更できます。",
+    description: "旧互換キーです。保存時は video.descriptions に正規化されます。",
   },
   "videos.youtube_id": {
     label: "YouTube ID 編集",
-    description: "YouTube URL / ID を変更できます。重複確認が必要です。",
+    description: "旧互換キーです。保存時は video.youtube_id に正規化されます。",
   },
   "videos.primary_event": {
     label: "所属イベント変更",
-    description: "primary_event_id や追加所属イベントを変更できます。",
+    description: "旧互換キーです。保存時は video.primary_event に正規化されます。",
   },
   "video.chapter_admin": {
     label: "チャプター管理",
-    description: "イベント所属作品のチャプターコメントを編集・削除できます。",
+    description: "旧互換キーです。保存時は video.member_chapters に正規化されます。",
   },
 };
 

@@ -259,21 +259,19 @@ interface VideoFormSettings {
 
 ---
 
-## 6. event_staff_permissions.permission_key
+## 6. event_staff.permission_mask
 
-イベントごとのスタッフに付与する操作権限キー。表示用スタッフ情報は `event_staff`、実際の操作許可は `event_staff_permissions` を正本にする。
-スタッフは全体ロールでも作品単位ロールでもなく、対象イベントの中で許可された権限キーだけを操作できる。
+イベント運営メンバーの操作権限は `event_staff.permission_preset` / `event_staff.permission_mask` / `event_staff.custom_permission_keys_json` を正本にする。`event_staff_permissions` は移行元としてのみ扱い、新規書き込みしない。
+スタッフ権限は対象イベントにスコープする。全体ロールでも作品単位ロールでもなく、対象イベントと権限キーが一致する範囲だけを操作できる。
 
 ### 設計ルール
 
-- `event_staff` は人物・表示・内部メモを保持し、`event_staff_permissions` は1権限1行で保持する。
-- 同じスタッフへ複数権限を付与する場合は、同じ `event_staff_id` に対して `permission_key` の異なる行を複数作成する。
-- 同一 `event_staff_id` と `permission_key` は重複登録しない。
-- 本人承認は不要。管理者または当該イベントのイベント編集許可者が追加した時点で有効にする。
-- イベント側の `events.editable_fields` で禁止された作品項目は、協力者側に対応する `permission_key` があっても編集不可にする。
-- `videos.youtube_id`、`videos.primary_event`、`videos.creator_x_user_id` のような高リスク操作は、通常フィールドとは別の権限キーとして明示する。
-- `collaborators.manage` は通常スタッフには付与しない。スタッフの追加・削除・権限変更は管理者または明示的な管理権限保持者に限定する。
-
+- `event_staff` は人物・表示・内部メモ・権限割り当てを保持する。
+- 複数権限は `event_staff.permission_mask` の bit として保持する。
+- `custom_permission_keys_json` は `permission_preset = "custom"` の補助入力に限定し、不正 JSON は空配列扱いにする。
+- `event_staff_permissions` は参照が消えるまで移行元としてだけ読み取り可能にする。
+- adminOnly 権限は owner / manager preset に自動付与しない。
+- 旧 `videos.*` キーは正本 `video.*` キーへの片道 alias として扱う。
 ### 権限キー一覧
 
 | permission_key | 対象 | 許可される操作 |

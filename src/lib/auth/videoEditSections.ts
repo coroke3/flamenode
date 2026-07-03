@@ -1,6 +1,6 @@
 /**
  * 作品編集・イベント編集の section permission key。
- * `eventStaffPermissions.permission_key` に格納される文字列の取りうる値を
+ * `event_staff.permission_mask` と旧権限キー互換値の取りうる値を
  * 型で固定するためのリテラル union。
  *
  * canEditVideo / canEditEvent の requiredKey はこの型を必須に取り、
@@ -18,7 +18,7 @@ export type VideoEditSectionKey =
   | "video.status"
   | "video.chapter_admin"
   // Legacy / admin UI permission keys. Keep these accepted so
-  // Old permission keys are still accepted so migrated event_staff_permissions keep working.
+  // Old permission keys are still accepted so migrated staff rows keep working.
   | "videos.title"
   | "videos.music_credit"
   | "videos.members"
@@ -28,9 +28,14 @@ export type VideoEditSectionKey =
 
 export type EventEditSectionKey =
   | "event.basic"
+  | "event.publish"
   | "event.members"
   | "event.slots"
   | "event.questions"
+  | "event.review"
+  | "event.notifications"
+  | "event.public_api"
+  | "event.static_rebuild"
   | "xid.link_requests";
 
 export type CollaboratorPermissionKey =

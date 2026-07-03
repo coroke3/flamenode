@@ -20,7 +20,7 @@ D1 を正本、R2/KV の静的 JSON は公開配信用キャッシュとする�
 | static rebuild queue policy | mode に応じた queue 処理 | 全件処理のみ | planned | 高 | workers/json-generator/queue.ts |
 | api_endpoints 削除 | events.public_api_enabled に統一 | deprecated 表記済み | partial | 高 | schema.ts, admin pages |
 | video_stats 削除 | videos 側列に統一 | schema.ts に残存 | planned | 高 | schema.ts, score-recalc worker |
-| permission_keys_json 削除 | event_staff_permissions に統一 | preset 定義済み | partial | 高 | permissions/keys.ts, presets.ts |
+| event_staff 権限正本 | permission_preset / permission_mask / custom_permission_keys_json | mask/preset 実装済み | partial | 高 | permissions/keys.ts, presets.ts, mask.ts |
 | event groups 正式実装 | 複数イベント所属 | DB schema + helper + 公開ページ完了 | implemented | 中 | schema.ts, eventGroups.ts, /groups |
 | software catalog 候補辞書化 | 入力候補として利用 | usage_count/is_active/is_verified 追加済み | partial | 中 | softwareCatalog, admin pages |
 | custom questions 本格実装 | event_custom_questions / video_custom_answers | schema + utility 作成済み | partial | 中 | EventForm, VideoForm, video.ts |
@@ -46,7 +46,7 @@ D1 を正本、R2/KV の静的 JSON は公開配信用キャッシュとする�
 |------|------|---------|-----------|
 | api_endpoints | events.public_api_enabled | テーブル削除 | deprecated |
 | video_stats | videos.score / app_like_count / video_youtube_metadata.view_count | テーブル削除 | planned |
-| event_staff.permission_keys_json | event_staff_permissions | カラム削除 | preset定義済み |
+| event_staff_permissions | event_staff.permission_preset / permission_mask / custom_permission_keys_json | 移行元のみ / 新規書き込み禁止 | mask backfill migration |
 | events.custom_questions (旧 JSON) | event_custom_questions | 新規書き込み禁止 | schema作成済み |
 | videos.custom_answers (旧 JSON) | video_custom_answers | 新規書き込み禁止 | schema作成済み |
 | video_softwares | videos.used_software_json + software_catalog | 削除候補 | planned |
@@ -60,7 +60,7 @@ D1 を正本、R2/KV の静的 JSON は公開配信用キャッシュとする�
 3. static rebuild queue policy (mode別処理)
 4. event groups 公開ページ (/groups, /groups/[slug])
 5. custom questions 本格実装 (EventForm/VideoForm UI)
-6. permission_keys_json 削除 (migration)
+6. event_staff permission_mask migration
 7. video_stats 削除 (migration)
 8. CSV import 再設計
 9. Legacy Import Gateway

@@ -28,7 +28,7 @@ Cloudflare D1 (SQLite) を使用し、リレーショナルモデルとして正
 
 `migrations/0000_brave_iceman.sql` は初期スナップショットであり、現在の clean schema は後続 migration で整理されている。古い設計書や初期SQLに残る旧テーブル・旧カラムを新規実装へ戻さない。
 
-- イベント運営権限の正本は `event_staff` と `event_staff_permissions`。旧 `event_editors` / `event_collaborator_permissions` は `0019_clean_staff_software_and_disabled_features.sql` で移行・廃止済みとして扱う。
+- イベント運営権限の正本は `event_staff.permission_preset` / `event_staff.permission_mask` / `event_staff.custom_permission_keys_json`。旧 `event_editors` / `event_collaborator_permissions` は `0019_clean_staff_software_and_disabled_features.sql` で移行・廃止済みとして扱う。
 - 作品本体の正本は現行 `videos`。旧 `creator_id`, `owner_discord_user_id`, `submission_type`, `display_name`, `icon_url`, `status`, `is_deleted`, `is_manual_hidden`, `x_reapply_*`, `void_*` へ戻さない。
 - 通常コメント用 `video_comments` は `0021_slim_mvp_drop_unused_tables.sql` で削除済み。新規利用しない。チャプター表示は `video_chapters`、メンバー担当チャプターは `video_members.chapters_json` を使う。
 - `migrations/meta/_journal.json` は `0007` までしか追跡していない。0010以降は手動SQL migrationを含むため、Drizzle metaだけを正本にしない。
@@ -170,7 +170,9 @@ Auth.js (NextAuth v5) の DrizzleAdapter が必要とするテーブル群。
 - **internal_note**: text | null
 - **approved_by_user_id**: text | null (FK → user.id)
 - **approved_at**: integer | null
-- **permission_keys_json**: text | null (event_staff_permissions 統合先の JSON 配列。新規表示ではこちらを優先)
+- **permission_preset**: text NOT NULL DEFAULT 'public_staff' ("owner", "manager", "slot_manager", "content_editor", "reviewer", "xid_reviewer", "public_staff", "custom")
+- **permission_mask**: integer NOT NULL DEFAULT 0 (permission key bit mask; max 45 keys)
+- **custom_permission_keys_json**: text | null (custom preset only; invalid JSON is treated as [])
 - **created_at**: integer NOT NULL DEFAULT (unixepoch())
 - **updated_at**: integer NOT NULL DEFAULT (unixepoch())
 - **UNIQUE**: (event_id, x_user_id), (event_id, discord_user_id)
@@ -186,7 +188,7 @@ Auth.js (NextAuth v5) の DrizzleAdapter が必要とするテーブル群。
 - **updated_at**: integer NOT NULL DEFAULT (unixepoch())
 - **UNIQUE**: (event_staff_id, permission_key)
 
-`event_staff_permissions` は互換・監査用に残す。新規表示・軽量判定では `event_staff.permission_keys_json` を優先できるが、既存コードとの互換があるため即削除しない。
+`event_staff_permissions` は移行元としてのみ残し、新規書き込みしない。新規書き込み・権限判定・表示は `event_staff.permission_preset` / `event_staff.permission_mask` / `event_staff.custom_permission_keys_json` を正本にする。
 
 ### 1-7. slots (予約枠)
 - **id**: text (Primary Key)
@@ -654,7 +656,7 @@ X ID 再申請や void 理由などのケース情報は `videos.x_reapply_*` / 
 - **R2 エクスポート**: Cron Triggers (`json-generator` Worker) で JSON を R2 に静的書き出し。外部ツールは R2 を参照することで D1 負荷をゼロ化。
 - **動画旧形式**: `videos`, `video_members`, `events`, `x_users` から旧 `video.json` 相当を再生成する。`title`, `creator`, `tlink`, `icon`, `time`, `timestamp`, `ylink`, `music`, `credit`, `member`, `memberid`, `beforecomment`, `aftercomment`, `soft`, `hitokoto`, `type1` など、旧ツールが参照するキーを保持する。
 - **イベント旧形式**: `events` と `event_staff` から旧 `eventinfo.json` 相当を再生成する。`eventid`, `start`, `end`, `type`, `icon`, `eventname`, `member`, `memberid`, `menberpost`, `explanation`, `img` を出力する。旧キーの誤字 `menberpost` は互換性のため維持し、同内容の `memberpost` を追加出力してもよい。
-- **ID・名前対応表**: `x_users`, `x_user_aliases`, `video_members`, `event_staff`, `event_staff_permissions` から名前・ID の相互変換に使える CSV/JSON を出力する。
+- **ID・名前対応表**: `x_users`, `x_user_aliases`, `video_members`, `event_staff` から名前・ID の相互変換に使える CSV/JSON を出力する。
 - **出力対象**: 通常エクスポートは公開データのみ。管理者向け詳細エクスポートは限定公開・非公開・管理画面専用メンバーも含められる。外部上映ツール向けはこの方針でよく、限定公開作品は管理者向け詳細エクスポートまたは専用スコープで扱う。X ID 再申請 case が open の作品は運営向け詳細レポートには状態フラグ付きで出力し、旧形式の上映・再生用出力からは除外する。`voided` は監査・統計専用の別レポートにだけ出す。
 - **文字コード**: JSON と旧出力は UTF-8 を正とする。旧データに文字化けが残る場合は、Shift_JIS、Windows-31J、UTF-8 の取り違えを疑う。システムは疑い行をハイライトし、修正候補を補助表示する。管理者は確認画面で手動修正できるが、必須にはせず、一括スキップして原文のまま取り込むこともできる。
 - **旧データの画像URL**: `icon`, `img` などの外部画像 URL は Cloudflare へ保存せず参照のみで保持する。Cloudflare に保存する画像は新規アイコン画像だけに限定する。
@@ -739,7 +741,7 @@ X ID 再申請や void 理由などのケース情報は `videos.x_reapply_*` / 
 ### 2-20. 編集可能フィールド制御
 - **制御**: イベントごとの `editable_fields` 設定を優先。
 - **設定権限**: 編集可能フィールド設定を変更できるのは、管理者または当該イベントの編集許可者のみ。通常ユーザーは許可済みフィールドの範囲内で作品を編集する。
-- **協力者の個別制御**: `event_staff` と `event_staff_permissions.permission_key` により、イベント単位かつ編集権限単位で操作可否を設定する。協力者の許可範囲は、対象イベントと権限キーに一致する範囲を超えられない。
+- **協力者の個別制御**: `event_staff.permission_mask` により、イベント単位かつ編集権限単位で操作可否を設定する。協力者の許可範囲は、対象イベントと権限キーに一致する範囲を超えられない。
 
 ### 2-21. 管理者・イベント編集許可者 (RBAC)
 - **管理者**: 全作品の編集権限、X ID 承認、ユーザー管理、BAN、イベント承認、イベント編集許可者の承認、全イベント設定、監査ログ確認を含むすべての管理操作ができる。
@@ -765,7 +767,7 @@ X ID 再申請や void 理由などのケース情報は `videos.x_reapply_*` / 
 
 #### 制御ロジックの優先順位
 1. **イベント別設定 (Event Override)**: `events.editable_fields` (JSON) が定義されている場合、その設定を最優先する。
-2. **イベント協力者設定 (Collaborator Override)**: 協力者として編集する場合、対象作品が属するイベントの `event_staff_permissions.permission_key` を適用する。ただしイベント別設定で禁止された項目は協力者側で許可されていても編集不可にする。
+2. **イベント協力者設定 (Collaborator Override)**: 協力者として編集する場合、対象作品が属するイベントの `event_staff.permission_mask` を適用する。ただしイベント別設定で禁止された項目は協力者側で許可されていても編集不可にする。
 3. **全体デフォルト設定 (Global Default)**: イベント別設定がない、または所属イベントがない過去作品（Legacy）の場合、`system_settings.default_editable_fields` を適用する。
 4. **新規/枠あり作品の特例**: 
    - 予約枠 (`slots`) に紐づく未公開作品、または `status` が `draft`/`pending` の作品は、管理者が明示的に制限しない限り**全項目編集可能**をデフォルトとする。

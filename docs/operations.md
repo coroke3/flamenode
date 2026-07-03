@@ -112,15 +112,16 @@ D1 へ適用する場合はファイル名の辞書順を正とする。同じ `
 | 0016 | `migrations/0016_video_members_can_edit.sql` | `video_members` に共同編集権限を統合 | 安全な列追加 + 旧データ移行。事前重複確認推奨 |
 | 0017 | `migrations/0017_video_member_chapters.sql` | 旧 `video_member_chapters` | 旧中間設計。`0018` で廃止 |
 | 0018 | `migrations/0018_simplify_video_schema.sql` | `videos` / `video_members` 再構築、`video_member_chapters` / `video_collaborators` 廃止 | 破壊的/再構築。dump 必須 |
-| 0019 | `migrations/0019_clean_staff_software_and_disabled_features.sql` | `event_staff` / `event_staff_permissions` 正本化、旧 `event_editors` / `event_collaborator_permissions` 廃止、software 整理 | 破壊的/再構築。dump 必須 |
+| 0019 | `migrations/0019_clean_staff_software_and_disabled_features.sql` | `event_staff` / 旧 `event_staff_permissions` への移行、旧 `event_editors` / `event_collaborator_permissions` 廃止、software 整理 | 破壊的/再構築。dump 必須 |
 | 0020 | `migrations/0020_split_video_core_metadata_stats.sql` | `videos` を現行 core へ再構築、`video_youtube_metadata` / `video_stats` / `video_moderation_cases` 作成 | 破壊的/再構築。dump 必須 |
 | 0021 | `migrations/0021_slim_mvp_drop_unused_tables.sql` | `video_comments` / `dashboard_metrics_cache` 削除 | 破壊的 DROP。dump 必須 |
 | 0022 | `migrations/0022_event_templates.sql` | `event_templates` | 安全なテーブル追加 + index |
 | 0023 | `migrations/0023_static_rebuild_queue.sql` | `static_rebuild_queue` と pending/processing partial unique | 安全なテーブル追加 + index |
-| 0024 | `migrations/0024_legacy_import_db_reduction_prep.sql` | `videos` 統計・使用ソフトJSON列、イベント公開API列、`event_staff.permission_keys_json` | 旧DB削減準備。安全な列追加 |
+| 0024 | `migrations/0024_legacy_import_db_reduction_prep.sql` | `videos` 統計・使用ソフトJSON列、イベント公開API列、旧 `event_staff.permission_keys_json` | 旧DB削減準備。安全な列追加 |
 | 0025 | `migrations/0025_add_notification_dedupe_key.sql` | `notification_outbox.dedupe_key` と active partial unique | 安全な列追加 + index |
 | 0026 | `migrations/0026_x_user_portfolio_contact.sql` | `x_users.portfolio_contact` | 安全な列追加 |
 | 0032 | `migrations/0032_slots_end_time_normalize.sql` | 旧 `slots.end_time` 列を削除、単独 `reservation_group_id` を解除 | 本番前のスロット正規化。連続枠ロジックは `start_time` と部間隔を正本にする |
+| 0033 | `migrations/0033_event_staff_permission_mask.sql` | `event_staff.permission_preset` / `permission_mask` / `custom_permission_keys_json` | 旧 `event_staff_permissions` から backfill。以後の判定・新規書き込みは `event_staff` 3列を正本にする |
 
 ### 1-6. 手動 index / Drizzle meta の注意
 
@@ -411,7 +412,7 @@ SELECT status, COUNT(*) FROM notification_outbox
 - `video_stats` は score-recalc worker / 旧DB fallback との dual-write のため当面残す。新規設計では表示正本にしない
 - `video_youtube_metadata` は YouTube 同期のため維持し、インポート時も作成する
 - `video_softwares` は作らず、`videos.used_software_json` に統合する
-- `event_staff_permissions` は作らず、`event_staff.permission_keys_json` に統合する
+- `event_staff_permissions` へは新規書き込みしない。取り込み時の運営権限は `event_staff.permission_preset` / `permission_mask` / `custom_permission_keys_json` に統合する
 - `announcements` は作らない（必要なら `system_settings.announcements_json` を管理画面から登録）
 - `cost_usage_snapshots` は D1 に保存せず KV へ逃がす（インポート処理では書かない）
 - `user_tos_consents` は利用規約同意履歴のため維持する
