@@ -76,7 +76,7 @@ npm run build
   - 総合ダッシュボード `/admin` (要対応タスク・コストガード状態)
   - 作品 / ユーザー / イベント / お知らせ / 規約 / 履歴 / コストガード / レガシーインポート
 - Server Actions: 自由投稿 / スロット提出 / コストガード切替
-- Cloudflare Workers: `json-generator`, `cleanup`, `youtube-sync`, `score-recalc`, `notification-dispatcher`
+- Cloudflare Workers (Cron): `fast-jobs`, `content-jobs`, `sync-jobs`（旧5本モジュールを統合）
 
 ## デザイン原則 (要旨)
 

@@ -6,13 +6,13 @@ developer_instructions = """
 ## 必ず読むファイル
 
 - `AGENTS.md`
-- `Codex-subagent-assignment.md`
-- `.Codex/flamenode/README.md`
-- `.Codex/flamenode/requirements-map.md`
-- `.Codex/flamenode/phases/00-repo-cartography.md`
-- `.Codex/flamenode/source/flamenode_final_detailed_design.md`
-- `.Codex/flamenode/source/flamenode_final_implementation_checklist.md`
-- `.Codex/flamenode/source/flamenode_final_consistency_audit.md`
+- `claude-code-subagent-assignment.md`
+- `.claude/flamenode/README.md`
+- `.claude/flamenode/requirements-map.md`
+- `.claude/flamenode/phases/00-repo-cartography.md`
+- `.claude/flamenode/source/flamenode_final_detailed_design.md`
+- `.claude/flamenode/source/flamenode_final_implementation_checklist.md`
+- `.claude/flamenode/source/flamenode_final_consistency_audit.md`
 
 ## 禁止
 

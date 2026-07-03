@@ -1,5 +1,4 @@
 import * as React from "react";
-import Link from "next/link";
 import type { Metadata } from "next";
 import { desc } from "drizzle-orm";
 import { withDatabase } from "@/lib/cloudflare";
@@ -15,7 +14,7 @@ import {
   fetchEventListGroupSections,
   type EventListGroupSection,
 } from "@/lib/db/eventGroups";
-import { EventDirectoryNav } from "@/components/event/EventDirectoryNav";
+import { eventGroupAnchorId } from "@/lib/eventGroupRoutes";
 
 export const metadata: Metadata = { title: "イベント" };
 export const dynamic = "force-dynamic";
@@ -83,7 +82,6 @@ export default async function EventListPage(): Promise<React.ReactElement> {
         <div className="fn-page-head-main">
           <span className="fn-eyebrow">events - {filteredEvents.length} total</span>
           <h1 className="fn-display fn-evlist-title">イベント</h1>
-          <EventDirectoryNav active="events" />
         </div>
       </header>
 
@@ -159,26 +157,19 @@ function EventGroupSection({
   group: EventListGroupSection & { events: EventRow[] };
 }): React.ReactElement {
   return (
-    <section className="fn-evlist-section">
+    <section
+      id={eventGroupAnchorId(group.slug)}
+      className="fn-evlist-section"
+    >
       <div className="fn-section-head">
         <div className="fn-section-head-left">
           <div className="fn-section-titles">
-            <h2 className="fn-display fn-section-title">
-              <Link
-                href={`/groups/${group.slug}`}
-                style={{ color: "inherit", textDecoration: "none" }}
-              >
-                {group.name}
-              </Link>
-            </h2>
+            <h2 className="fn-display fn-section-title">{group.name}</h2>
             <span className="fn-section-jp">
               {GROUP_TYPE_LABELS[group.group_type] ?? group.group_type}
             </span>
           </div>
         </div>
-        <Link href={`/groups/${group.slug}`} className="fn-section-more">
-          詳細を見る →
-        </Link>
       </div>
       {group.description ? (
         <p

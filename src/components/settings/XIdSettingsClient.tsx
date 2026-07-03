@@ -181,7 +181,7 @@ export function XIdCompactProfileForm({
   };
   iconCandidates: string[];
   channelCandidates: string[];
-  onCancel: () => void;
+  onCancel?: () => void;
 }): React.ReactElement {
   const router = useRouter();
   const [pending, startTransition] = React.useTransition();
@@ -202,7 +202,7 @@ export function XIdCompactProfileForm({
       }
       setMessage(result.message ?? "保存しました。");
       router.refresh();
-      onCancel();
+      onCancel?.();
     });
   };
 
@@ -272,14 +272,16 @@ export function XIdCompactProfileForm({
         disabled={pending}
       />
       <div className={`${styles.row} ${styles.rowEnd}`}>
-        <button
-          type="button"
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-          disabled={pending}
-          onClick={onCancel}
-        >
-          キャンセル
-        </button>
+        {onCancel ? (
+          <button
+            type="button"
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+            disabled={pending}
+            onClick={onCancel}
+          >
+            キャンセル
+          </button>
+        ) : null}
         <button
           type="submit"
           className="fn-btn fn-btn-primary fn-btn-sm"

@@ -6,6 +6,7 @@ import {
   createEventGroup,
   updateEventGroup,
 } from "@/lib/actions/event-group-admin";
+import { eventGroupPublicHref } from "@/lib/eventGroupRoutes";
 
 export interface EventGroupInitial {
   id?: string;
@@ -95,7 +96,7 @@ export function EventGroupForm({
           required
         />
         <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--text-muted)" }}>
-          公開 URL: /groups/{"{slug}"}
+          公開 URL: {eventGroupPublicHref("{slug}")}
         </p>
       </div>
       <div>

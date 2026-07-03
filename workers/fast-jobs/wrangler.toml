@@ -10,3 +10,8 @@ crons = ["*/5 * * * *"]
 binding = "DB"
 database_name = "flamenode_db"
 database_id = "00000000-0000-0000-0000-000000000000"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "00000000000000000000000000000000"
+preview_id = "00000000000000000000000000000000"

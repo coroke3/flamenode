@@ -4,7 +4,7 @@
 
 | ファイル | 役割 |
 |---|---|
-| `AGENTS.md` | エントリポイント（.Codex/flamenode/ 参照はstale、.claude/flamenode/ を使う） |
+| `AGENTS.md` | エントリポイント（Codex / Cursor 共通。`.claude/flamenode/` を正本とする） |
 | `.claude/flamenode/README.md` | 実装ロードマップ・フェーズ構成・PR分割案 |
 | `.claude/flamenode/requirements-map.md` | 116項目の要求カバレッジマップ（A〜Q） |
 | `.claude/flamenode/source/flamenode_final_detailed_design.md` | ID設計・共通ガード・投稿・スロット・部番号・チャプター・API・health/security 最終設計 |
@@ -31,7 +31,7 @@
 | **スロット予約グループ** | 完全 | `src/lib/actions/slot.ts` + `slot-admin.ts` + `slotGroupingCore.ts` — reservation_group_id による予約/解放/分割/拡張/結合 |
 | **公開動画API** | 完全 | `app/api/videos/route.ts`（54行）— ホワイトリスト返却、ページネーション、キャッシュヘッダー |
 | **health/security チェック** | 完全 | `src/lib/admin/healthChecks.ts` — 全チェック項目をカバー（integration/voided/overlap/user-mix等） |
-| **Worker** | 完全 | notification-dispatcher、json-generator、cleanup、youtube-sync、score-recalc — 5つのWorker |
+| **Worker** | 完全 | `fast-jobs`, `content-jobs`, `sync-jobs`（旧5本を統合） |
 | **マイグレーション** | 完全 | 27ファイル（0000-0026） |
 | **ユーザー管理ページ** | 完全 | `app/(public)/users/[username]/` — プロフィール、動画一覧、ライブラリ、保存済み、X-linkリクエスト |
 | **ダッシュボード** | 完全 | `app/(auth)/dashboard/` — 編集ページ（権限サブページ）、ライブラリ、設定、アイコン管理 |

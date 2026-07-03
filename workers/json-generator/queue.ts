@@ -8,6 +8,7 @@ export interface Env {
 
 const MAX_QUEUE_ITEMS_PER_RUN = 20;
 const MAX_QUEUE_ITEMS_ECONOMY = 5;
+const DEPRECATED_TARGET_TYPES = new Set(["groups_index", "event_group"]);
 
 type QueueRow = {
   id: string;
@@ -47,7 +48,7 @@ export async function processStaticRebuildQueue(env: Env): Promise<{
     sql += ` AND priority = 'high'`;
   }
   if (mode === "read_only") {
-    sql += ` AND target_type IN ('event', 'event_group', 'video', 'user')`;
+    sql += ` AND target_type IN ('event', 'video', 'user')`;
   }
   sql += `
     ORDER BY
@@ -67,12 +68,16 @@ export async function processStaticRebuildQueue(env: Env): Promise<{
     if (!marked) continue;
 
     try {
+      if (DEPRECATED_TARGET_TYPES.has(row.target_type)) {
+        await markDone(env, row.id, now);
+        processed++;
+        continue;
+      }
       if (
         mode === "economy" &&
         (
           row.target_type === "search_index" ||
-          row.target_type === "list_popular" ||
-          row.target_type === "groups_index"
+          row.target_type === "list_popular"
         ) &&
         row.priority !== "high"
       ) {

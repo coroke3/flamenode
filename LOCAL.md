@@ -270,22 +270,22 @@ CSV / TSV: ツールバーからエクスポート（ダウンロード・クリ
 
 ## 7. Worker (Cron) のローカル実行
 
-`workers/` 配下の 5 つの Worker は、それぞれ単独で `wrangler dev` できます。Cron トリガを再現したい場合は `--test-scheduled` を付けて起動し、`/__scheduled` エンドポイントを叩きます。
+`workers/fast-jobs`、`workers/content-jobs`、`workers/sync-jobs` の 3 つの統合 Worker は、それぞれ単独で `wrangler dev` できます。Cron トリガを再現したい場合は `--test-scheduled` を付けて起動し、`/__scheduled` エンドポイントを叩きます。
 
 ```powershell
-# 例: JSON ジェネレータ
-cd workers/json-generator
+# 例: 静的 JSON 再生成 (content-jobs)
+cd workers/content-jobs
 npx wrangler dev --test-scheduled --local
 # 別ターミナルで
 curl "http://127.0.0.1:8787/__scheduled?cron=*/15+*+*+*+*"
 cd ../..
 ```
 
-本番MVPの実スケジュールは、JSON生成が15分ごと、YouTube同期とscore再計算が12時間ごとです。ローカルで `__scheduled` を叩く場合は、確認対象 Worker の `wrangler.toml` に書かれた cron 文字列に合わせてください。
+本番MVPの実スケジュールは、content-jobs が15分ごと、sync-jobs が12時間ごと、fast-jobs が5分ごとです。ローカルで `__scheduled` を叩く場合は、確認対象 Worker の `wrangler.toml` に書かれた cron 文字列に合わせてください。
 
 ローカル D1 / KV を共有させるには、`workers/<name>/wrangler.toml` の `database_id` / KV `id` をそのままにしておけば、Pages 側と同じ Miniflare ストレージ (`.wrangler/state`) を使います。
 
-> 5 つの Worker を同時に立てる必要はほぼありません。確認したい Worker だけ起動するのが普通です。
+> 3 つの Worker を同時に立てる必要はほぼありません。確認したい Worker だけ起動するのが普通です。
 
 ---
 

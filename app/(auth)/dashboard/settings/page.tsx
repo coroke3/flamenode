@@ -12,11 +12,10 @@ import { Icon } from "@/components/ui/Icon";
 import { XIdLinkForm } from "@/components/settings/XIdSettingsClient";
 import {
   PendingLinkRequestList,
-  XIdLinkedList,
   type PendingLinkRequestRow,
   type SettingsXIdRow,
 } from "@/components/settings/XIdLinkedList";
-import { SettingsStatusPill } from "@/components/settings/SettingsStatusPill";
+import { SettingsXAccountPanel } from "@/components/settings/SettingsXAccountPanel";
 import pageStyles from "@/components/settings/settings-page.module.css";
 import { sanitizeNextPath } from "#utils/next";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
@@ -26,12 +25,37 @@ import { normalizePortfolioContact } from "@/lib/profileContact";
 export const metadata: Metadata = { title: "設定" };
 export const dynamic = "force-dynamic";
 
+type UtilityTabId = "discord" | "link" | "pending";
+
+function parseUtilityTab(value: string | undefined): UtilityTabId | null {
+  if (value === "discord" || value === "link" || value === "pending") {
+    return value;
+  }
+  return null;
+}
+
+function sortXIds(
+  xIds: SettingsXIdRow[],
+  activeXUserId: string | null,
+): SettingsXIdRow[] {
+  const order = (status: SettingsXIdRow["approval_status"]) =>
+    status === "approved" ? 0 : status === "pending" ? 1 : 2;
+  return [...xIds].sort((a, b) => {
+    if (a.id === activeXUserId) return -1;
+    if (b.id === activeXUserId) return 1;
+    return order(a.approval_status) - order(b.approval_status);
+  });
+}
+
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ next?: string }>;
+  searchParams?: Promise<{ next?: string; tab?: string; x?: string }>;
 }): Promise<React.ReactElement> {
   const params = await searchParams;
+  const legacyTab =
+    params?.tab === "account" || params?.tab === "xids" ? params.tab : null;
+  const utilityTab = legacyTab ? null : parseUtilityTab(params?.tab);
   const rawNext = params?.next?.trim();
   const next =
     rawNext && rawNext !== "/dashboard/settings"
@@ -99,12 +123,45 @@ export default async function SettingsPage({
     }
   }
 
-  const activeX =
-    user.active_x_user_id != null
-      ? xIds.find((x) => x.id === user.active_x_user_id)
+  const sortedXIds = sortXIds(xIds, user.active_x_user_id);
+  const requestedX = params?.x?.trim() ?? null;
+  const selectedX =
+    utilityTab == null && requestedX
+      ? xIds.find((x) => x.id.toLowerCase() === requestedX.toLowerCase()) ?? null
       : null;
-  const activeApproved =
-    activeX?.approval_status === "approved" ? activeX : null;
+
+  const defaultX =
+    (user.active_x_user_id
+      ? xIds.find((x) => x.id === user.active_x_user_id)
+      : null) ??
+    sortedXIds[0] ??
+    null;
+
+  const activeXPanel = selectedX ?? defaultX;
+  const showUtilityTab =
+    utilityTab ??
+    (xIds.length === 0 && pendingOnly.length === 0
+      ? "link"
+      : xIds.length === 0 && pendingOnly.length > 0
+        ? "pending"
+        : null);
+
+  const buildSettingsHref = (opts: {
+    x?: string | null;
+    tab?: UtilityTabId | null;
+  }): string => {
+    const qs = new URLSearchParams();
+    if (opts.tab) {
+      qs.set("tab", opts.tab);
+    } else if (opts.x) {
+      qs.set("x", opts.x);
+    }
+    if (next) qs.set("next", next);
+    const query = qs.toString();
+    return query ? `/dashboard/settings?${query}` : "/dashboard/settings";
+  };
+
+  const xTabSelected = showUtilityTab == null && activeXPanel != null;
 
   return (
     <div className={`fn-public-container fn-page ${pageStyles.wrap}`}>
@@ -114,7 +171,7 @@ export default async function SettingsPage({
         </Link>
         <h1 className="fn-display fn-page-title">設定</h1>
         <p className="fn-page-lead">
-          X ID 連携、アクティブ X ID の切替、Discord アカウント情報を管理します。
+          連携した X ID ごとにプロフィールを編集し、アクティブ X ID を切り替えます。
         </p>
         {next ? (
           <div className={pageStyles.nextRow}>
@@ -126,129 +183,185 @@ export default async function SettingsPage({
         ) : null}
       </header>
 
-      <section
-        className={`${pageStyles.card} ${pageStyles.cardAccent}`}
-        aria-labelledby="settings-active-h"
-      >
-        <div className={pageStyles.cardHd}>
-          <h2
-            id="settings-active-h"
-            className={`${pageStyles.cardTitle} ${pageStyles.cardTitleAccent}`}
+      <nav className={pageStyles.tabs} aria-label="X ID とアカウント">
+        <div className={pageStyles.tabList} role="tablist">
+          {sortedXIds.map((x) => {
+            const selected = xTabSelected && activeXPanel?.id === x.id;
+            const isActive = x.id === user.active_x_user_id;
+            return (
+              <Link
+                key={x.id}
+                href={buildSettingsHref({ x: x.id })}
+                role="tab"
+                aria-selected={selected}
+                aria-controls="settings-panel-x"
+                className={`${pageStyles.tab} ${
+                  selected ? pageStyles.tabActive : ""
+                } ${isActive ? pageStyles.tabCurrent : ""}`}
+              >
+                <span className={pageStyles.tabLabel}>
+                  {x.x_name && x.x_name !== x.id ? x.x_name : `@${x.id}`}
+                </span>
+                <span className={pageStyles.tabMeta}>
+                  @{x.id}
+                  {isActive && x.approval_status === "approved" ? " · アクティブ" : ""}
+                </span>
+              </Link>
+            );
+          })}
+
+          {pendingOnly.length > 0 ? (
+            <Link
+              href={buildSettingsHref({ tab: "pending" })}
+              role="tab"
+              aria-selected={showUtilityTab === "pending"}
+              aria-controls="settings-panel-pending"
+              className={`${pageStyles.tab} ${
+                showUtilityTab === "pending" ? pageStyles.tabActive : ""
+              }`}
+            >
+              <span className={pageStyles.tabLabel}>申請中</span>
+              <span className={pageStyles.tabMeta}>{pendingOnly.length}件</span>
+            </Link>
+          ) : null}
+
+          <Link
+            href={buildSettingsHref({ tab: "link" })}
+            role="tab"
+            aria-selected={showUtilityTab === "link"}
+            aria-controls="settings-panel-link"
+            className={`${pageStyles.tab} ${
+              showUtilityTab === "link" ? pageStyles.tabActive : ""
+            }`}
           >
-            アクティブ X ID
-          </h2>
-          <p className={pageStyles.cardDesc}>
-            ダッシュボード・作品クレジット・枠表示に使われる名義です。
-          </p>
+            <span className={pageStyles.tabLabel}>新規連携</span>
+            <span className={pageStyles.tabMeta}>X ID を追加</span>
+          </Link>
+
+          <Link
+            href={buildSettingsHref({ tab: "discord" })}
+            role="tab"
+            aria-selected={showUtilityTab === "discord"}
+            aria-controls="settings-panel-discord"
+            className={`${pageStyles.tab} ${
+              showUtilityTab === "discord" ? pageStyles.tabActive : ""
+            }`}
+          >
+            <span className={pageStyles.tabLabel}>Discord</span>
+            <span className={pageStyles.tabMeta}>{user.name ?? "接続済み"}</span>
+          </Link>
         </div>
-        {activeApproved ? (
-          <div className={pageStyles.activePanel}>
-            {activeApproved.icon_url ? (
-              <span className={pageStyles.avatar} aria-hidden="true">
+      </nav>
+
+      {xTabSelected && activeXPanel ? (
+        <section
+          id="settings-panel-x"
+          role="tabpanel"
+          className={`${pageStyles.card} ${pageStyles.cardAccent}`}
+          aria-labelledby="settings-x-h"
+        >
+          <div className={pageStyles.cardHd}>
+            <h2 id="settings-x-h" className={pageStyles.cardTitle}>
+              @{activeXPanel.id}
+            </h2>
+            <p className={pageStyles.cardDesc}>
+              この X ID の公開プロフィールとアクティブ設定を管理します。
+            </p>
+          </div>
+          <SettingsXAccountPanel
+            x={activeXPanel}
+            isActive={activeXPanel.id === user.active_x_user_id}
+            iconCandidates={iconCandidatesById[activeXPanel.id] ?? []}
+            channelCandidates={channelCandidatesById[activeXPanel.id] ?? []}
+            next={next}
+          />
+        </section>
+      ) : null}
+
+      {showUtilityTab === "pending" ? (
+        <section
+          id="settings-panel-pending"
+          role="tabpanel"
+          className={pageStyles.card}
+          aria-labelledby="settings-pending-h"
+        >
+          <div className={`${pageStyles.cardHd} ${pageStyles.cardHdBordered}`}>
+            <h2 id="settings-pending-h" className={pageStyles.cardTitle}>
+              承認待ちの申請
+            </h2>
+            <p className={pageStyles.cardDesc}>
+              運営が確認中の X ID 連携申請です。承認されると左のタブに表示されます。
+            </p>
+          </div>
+          <PendingLinkRequestList rows={pendingOnly} />
+        </section>
+      ) : null}
+
+      {showUtilityTab === "link" ? (
+        <section
+          id="settings-panel-link"
+          role="tabpanel"
+          className={pageStyles.card}
+          aria-labelledby="settings-link-h"
+        >
+          <div className={`${pageStyles.cardHd} ${pageStyles.cardHdBordered}`}>
+            <h2 id="settings-link-h" className={pageStyles.cardTitle}>
+              新しい X ID を連携
+            </h2>
+            <p className={pageStyles.cardDesc}>
+              申請後は運営（管理者）が目視確認して承認します。
+            </p>
+          </div>
+          <div className={pageStyles.addBox}>
+            <XIdLinkForm />
+          </div>
+        </section>
+      ) : null}
+
+      {showUtilityTab === "discord" ? (
+        <section
+          id="settings-panel-discord"
+          role="tabpanel"
+          className={pageStyles.card}
+          aria-labelledby="settings-discord-h"
+        >
+          <div className={`${pageStyles.cardHd} ${pageStyles.cardHdBordered}`}>
+            <h2 id="settings-discord-h" className={pageStyles.cardTitle}>
+              Discord
+            </h2>
+            <p className={pageStyles.cardDesc}>
+              FlameNode のログインに使用しています。変更はできません。
+            </p>
+          </div>
+          <div className={pageStyles.discordBadge}>
+            {user.image ? (
+              <span className={pageStyles.discordAvatar} aria-hidden="true">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={activeApproved.icon_url}
+                  src={user.image}
                   alt=""
                   className={pageStyles.avatarImg}
                 />
               </span>
             ) : (
-              <span className={pageStyles.avatar} aria-hidden="true">
-                {activeApproved.id.charAt(0).toUpperCase()}
+              <span className={pageStyles.discordAvatar} aria-hidden="true">
+                {(user.name ?? "?").charAt(0)}
               </span>
             )}
-            <div className={pageStyles.activeId}>
-              <Link
-                href={`/user/${encodeURIComponent(activeApproved.id)}`}
-                className={pageStyles.activeNameLink}
-              >
-                {activeApproved.x_name || activeApproved.id}
-              </Link>
-              <span className={pageStyles.activeHandle}>
-                <Icon name="x" size={11} aria-hidden />@{activeApproved.id}
+            <div className={pageStyles.discordId}>
+              <span className={pageStyles.discordName}>{user.name}</span>
+              <span className={pageStyles.discordMeta}>
+                <Icon name="discord" size={13} aria-hidden />
+                {user.id}
               </span>
             </div>
-            <div className={pageStyles.activeBadges}>
-              <span className="fn-badge fn-badge-accent">アクティブ</span>
-              <SettingsStatusPill status="approved" />
-            </div>
+            <span className="fn-badge fn-badge-neutral">接続済み</span>
           </div>
-        ) : (
-          <div className={pageStyles.activePanel}>
-            <p className={pageStyles.activePanelEmpty}>
-              {activeX && activeX.approval_status !== "approved"
-                ? "承認済みの X ID をアクティブに設定してください。"
-                : "承認済みの X ID を連携し、アクティブに設定してください。"}
-            </p>
-          </div>
-        )}
-      </section>
-
-      <section className={pageStyles.card} aria-labelledby="settings-linked-h">
-        <div className={`${pageStyles.cardHd} ${pageStyles.cardHdBordered}`}>
-          <h2 id="settings-linked-h" className={pageStyles.cardTitle}>
-            連携 X ID
-          </h2>
-          <p className={pageStyles.cardDesc}>
-            複数の X ID を連携できます。投稿や枠確保の名義はアクティブ X ID が使われます。
+          <p className={pageStyles.discordNote}>
+            Discord アカウントの変更・削除はできません。アカウントの削除をご希望の場合はお問い合わせください。
           </p>
-        </div>
-
-        <XIdLinkedList
-          xIds={xIds}
-          activeXUserId={user.active_x_user_id}
-          iconCandidatesById={iconCandidatesById}
-          channelCandidatesById={channelCandidatesById}
-          next={next}
-        />
-        <PendingLinkRequestList rows={pendingOnly} />
-
-        <div className={pageStyles.addBox}>
-          <span className={pageStyles.addLabel}>新しい X ID を申請</span>
-          <XIdLinkForm compact />
-          <p className={pageStyles.addHint}>
-            申請後は運営（管理者）が目視確認して承認します。
-          </p>
-        </div>
-      </section>
-
-      <section className={pageStyles.card} aria-labelledby="settings-discord-h">
-        <div className={`${pageStyles.cardHd} ${pageStyles.cardHdBordered}`}>
-          <h2 id="settings-discord-h" className={pageStyles.cardTitle}>
-            Discord
-          </h2>
-          <p className={pageStyles.cardDesc}>
-            FlameNode のログインに使用しています。変更はできません。
-          </p>
-        </div>
-        <div className={pageStyles.discordBadge}>
-          {user.image ? (
-            <span className={pageStyles.discordAvatar} aria-hidden="true">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={user.image}
-                alt=""
-                className={pageStyles.avatarImg}
-              />
-            </span>
-          ) : (
-            <span className={pageStyles.discordAvatar} aria-hidden="true">
-              {(user.name ?? "?").charAt(0)}
-            </span>
-          )}
-          <div className={pageStyles.discordId}>
-            <span className={pageStyles.discordName}>{user.name}</span>
-            <span className={pageStyles.discordMeta}>
-              <Icon name="discord" size={13} aria-hidden />
-              {user.id}
-            </span>
-          </div>
-          <span className="fn-badge fn-badge-neutral">接続済み</span>
-        </div>
-        <p className={pageStyles.discordNote}>
-          Discord アカウントの変更・削除はできません。アカウントの削除をご希望の場合はお問い合わせください。
-        </p>
-      </section>
+        </section>
+      ) : null}
     </div>
   );
 }

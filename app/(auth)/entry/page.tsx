@@ -181,8 +181,7 @@ export default async function EntryPage({
               まず Discord でログインしてください
             </h2>
             <p className="fn-jp fn-entry-status-lead">
-              参加・投稿にはログインが必要です。連携時に取得した{" "}
-              <code>access_token</code> は保存しません。
+              参加・投稿にはログインが必要です。
             </p>
             <form
               action={async () => {

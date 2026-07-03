@@ -163,7 +163,7 @@ export async function createEventGroup(
   });
 
   revalidatePath("/admin/event-groups");
-  revalidatePath("/groups");
+  revalidatePath("/event");
   return { ok: true, id };
 }
 
@@ -239,8 +239,7 @@ export async function updateEventGroup(
 
   revalidatePath("/admin/event-groups");
   revalidatePath(`/admin/event-groups/${id}/edit`);
-  revalidatePath("/groups");
-  revalidatePath(`/groups/${d.slug}`);
+  revalidatePath("/event");
   return { ok: true, id };
 }
 
@@ -289,7 +288,7 @@ export async function deleteEventGroup(
   });
 
   revalidatePath("/admin/event-groups");
-  revalidatePath("/groups");
+  revalidatePath("/event");
   return { ok: true };
 }
 
@@ -352,8 +351,7 @@ export async function addEventsToGroup(input: {
   });
 
   revalidatePath(`/admin/event-groups/${groupId}/edit`);
-  revalidatePath("/groups");
-  revalidatePath(`/groups/${group.slug}`);
+  revalidatePath("/event");
   return { ok: true, id: groupId, added: toAdd.length };
 }
 
@@ -408,8 +406,7 @@ export async function removeEventFromGroup(input: {
   });
 
   revalidatePath(`/admin/event-groups/${groupId}/edit`);
-  revalidatePath("/groups");
-  revalidatePath(`/groups/${group.slug}`);
+  revalidatePath("/event");
   return { ok: true, id: groupId };
 }
 
@@ -464,6 +461,6 @@ export async function updateGroupMemberRelation(input: {
   });
 
   revalidatePath(`/admin/event-groups/${groupId}/edit`);
-  revalidatePath(`/groups/${group.slug}`);
+  revalidatePath("/event");
   return { ok: true, id: groupId };
 }

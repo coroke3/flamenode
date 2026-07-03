@@ -1,18 +1,19 @@
 # AGENTS.md
 
-このリポジトリでCodexを使う場合は、最初にこのファイルを読むこと。
+このリポジトリで Codex を使う場合は、最初にこのファイルを読むこと。
 
 ## 最重要
 
 FlameNodeの修正作業では、次の正本を必ず参照する。
 
-1. `Codex-subagent-assignment.md`
-2. `.Codex/flamenode/README.md`
-3. `.Codex/flamenode/source/flamenode_final_detailed_design.md`
-4. `.Codex/flamenode/source/flamenode_final_implementation_checklist.md`
-5. `.Codex/flamenode/source/flamenode_final_consistency_audit.md`
+1. `claude-code-subagent-assignment.md`
+2. `.claude/flamenode/README.md`
+3. `.claude/flamenode/source/flamenode_final_detailed_design.md`
+4. `.claude/flamenode/source/flamenode_final_implementation_checklist.md`
+5. `.claude/flamenode/source/flamenode_final_consistency_audit.md`
 
-この5つは、Codexが実装を進めるための入口である。
+この5つは、Codex / Cursor いずれのエージェントも実装を進めるための入口である。
+（旧 `.Codex/` パスは廃止。実体は `.claude/flamenode/` を正本とする。）
 
 ## 4つの原典について
 
@@ -23,18 +24,18 @@ FlameNodeの修正作業では、次の正本を必ず参照する。
 - `flamenode_final_consistency_audit.md`
 - `flamenode_revision_instructions_answered.md`
 
-このうち、前3つは `.Codex/flamenode/source/` に原典として格納済み。4つ目の長大な回答反映版は、`Codex-subagent-assignment.md` と `.Codex/flamenode/README.md` 以下の分割命令に反映済みとして扱う。ただし、実装前レビューでは Appendix A の全領域 A〜Q が欠けていないか必ず確認する。
+このうち、前3つは `.claude/flamenode/source/` に原典として格納済み。4つ目の長大な回答反映版は、`claude-code-subagent-assignment.md` と `.claude/flamenode/README.md` 以下の分割命令に反映済みとして扱う。ただし、実装前レビューでは Appendix A の全領域 A〜Q が欠けていないか必ず確認する。
 
 ## 作業の基本順序
 
 1. いきなり実装しない。
-2. まず `.Codex/flamenode/README.md` を読む。
+2. まず `.claude/flamenode/README.md` を読む。
 3. Phase 0 の調査を実施する。
 4. PR分割案を出す。
 5. 最初の実装PRは `auth/id-write-guard` から始める。
 6. 1PRで1テーマだけ触る。
 7. `npm run typecheck` と `npm run build` を実行する。
-8. 最終レビューで `.Codex/flamenode/source/flamenode_final_implementation_checklist.md` をすべて確認する。
+8. 最終レビューで `.claude/flamenode/source/flamenode_final_implementation_checklist.md` をすべて確認する。
 
 ## モデル選択
 
@@ -60,7 +61,7 @@ FlameNodeの修正作業では、次の正本を必ず参照する。
 
 ```text
 まずコード変更はしないでください。
-AGENTS.md、Codex-subagent-assignment.md、.Codex/flamenode/README.md、.Codex/flamenode/source/ の原典3ファイルを読んでください。
+AGENTS.md、claude-code-subagent-assignment.md、.claude/flamenode/README.md、.claude/flamenode/source/ の原典3ファイルを読んでください。
 その上で、Phase 0として関連ファイル地図、PR分割案、最初に着手すべき最小PRを出してください。
 4つの原典の内容が抜け漏れなく反映されるかも同時に確認してください。
 ```

@@ -179,25 +179,30 @@ Legacy standalone worker directories are kept as importable modules only.
 
 | Worker | cron | 用途 | 必須環境変数 |
 |---|---|---|---|
-| `notification-dispatcher` | `*/5 * * * *` | `notification_outbox` を読み Discord 配信 | `DISCORD_WEBHOOK_URL`, `DISCORD_BOT_TOKEN` |
-| `json-generator` | `*/15 * * * *` | `top.json` / `event/{id}.json` を R2 に出力 | (R2 / KV bind) |
-| `cleanup` | `0 */1 * * *` | 期限切れ slot 解放 / 古い通知削除 | なし |
-| `youtube-sync` | `0 */12 * * *` | YouTube 再生数・公開状態の低頻度同期 | `YOUTUBE_API_KEY` |
-| `score-recalc` | `30 */12 * * *` | `video_stats` と `videos.score` の低頻度再計算 | なし |
+| `flamenode-fast-jobs` | `*/5 * * * *` | `notification_outbox` 配信・スロット締切リマインド（`notification-dispatcher` 統合） | `DISCORD_WEBHOOK_URL`, `DISCORD_BOT_TOKEN`（任意） |
+| `flamenode-content-jobs` | `*/15 * * * *` | 静的 JSON 再生成・クリーンアップ（`json-generator` / `cleanup` 統合） | D1 / R2 / KV bind |
+| `flamenode-sync-jobs` | `0 */12 * * *` | YouTube 同期・スコア再計算（`youtube-sync` / `score-recalc` 統合） | `YOUTUBE_API_KEY` |
 
 ### 3-1. デプロイ
 
 ```sh
-cd workers/<worker-name>
-wrangler deploy
+npm run workers:deploy
+```
+
+個別デプロイ:
+
+```sh
+cd workers/fast-jobs && wrangler deploy
+cd workers/content-jobs && wrangler deploy
+cd workers/sync-jobs && wrangler deploy
 ```
 
 ### 3-2. 監視ポイント
 
 - `notification_outbox.status = 'failed'` の件数増加
 - `notification_outbox.status = 'pending'` で `attempt_count = 2` のレコード (次回 failed 確定)
-- `youtube-sync` の API クォータ枯渇 (HTTP 403)
-- `json-generator` の R2 書き込み失敗
+- `sync-jobs` の YouTube API クォータ枯渇 (HTTP 403)
+- `content-jobs` の R2 書き込み失敗
 
 詳細は `.claude/flamenode/source/ops-notifications-workers-audit.md` を参照。
 

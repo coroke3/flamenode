@@ -1,9 +1,7 @@
 export type StaticRebuildTargetType =
   | "top"
-  | "groups_index"
   | "events_index"
   | "event"
-  | "event_group"
   | "video"
   | "user"
   | "list_recent"

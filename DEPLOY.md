@@ -32,9 +32,9 @@ FlameNode は次の構成で動きます。
 | オブジェクトストレージ | Cloudflare R2 (`flamenode-storage`) | `wrangler r2 bucket create` |
 | キャッシュ / フラグ | Cloudflare KV (`KV`) | `wrangler kv namespace create` |
 | 閲覧数集約 | Durable Object (`ViewAggregator`) | Pages デプロイで自動定義 |
-| 定期処理 (5 種類) | Cloudflare Workers + Cron Triggers | 各 `workers/<name>` で `wrangler deploy` |
+| 定期処理 (3 Cron) | Cloudflare Workers + Cron Triggers | `npm run workers:deploy`（`fast-jobs` / `content-jobs` / `sync-jobs`） |
 
-無料枠の Cron は **アカウント全体で 5 個まで**です。本リポジトリは 5 個ぴったりに収まるよう設計されています (`json-generator` / `cleanup` / `youtube-sync` / `score-recalc` / `notification-dispatcher`)。
+無料枠の Cron は **アカウント全体で 5 個まで**です。本リポジトリは **3 Cron**（統合 Worker 3 本）で運用し、旧 5 本構成のモジュールは `workers/json-generator` などから import するだけです。
 
 ---
 
@@ -117,11 +117,9 @@ database_id = "abcdef01-2345-6789-abcd-ef0123456789"
 `database_id` をコピーし、**以下のすべてのファイル**で `00000000-0000-0000-0000-000000000000` をその値に置き換えてください。
 
 - `wrangler.toml`
-- `workers/json-generator/wrangler.toml`
-- `workers/cleanup/wrangler.toml`
-- `workers/youtube-sync/wrangler.toml`
-- `workers/score-recalc/wrangler.toml`
-- `workers/notification-dispatcher/wrangler.toml`
+- `workers/fast-jobs/wrangler.toml`
+- `workers/content-jobs/wrangler.toml`
+- `workers/sync-jobs/wrangler.toml`
 
 ### 2-2. R2 バケットを作成
 
@@ -143,8 +141,9 @@ wrangler kv namespace create FLAMENODE_KV --preview
 それぞれ表示される `id` / `preview_id` を、以下に貼り替えます (`00000000000000000000000000000000` の部分)。
 
 - `wrangler.toml` (Pages 用)
-- `workers/json-generator/wrangler.toml`
-- `workers/youtube-sync/wrangler.toml`
+- `workers/fast-jobs/wrangler.toml`
+- `workers/content-jobs/wrangler.toml`
+- `workers/sync-jobs/wrangler.toml`
 
 ### 2-4. (任意) ドメインを Cloudflare に乗せる
 
@@ -223,19 +222,20 @@ wrangler pages secret put YOUTUBE_API_KEY
 
 ### 5-2. Workers のシークレット
 
-`youtube-sync` Worker だけ YouTube API キーが必須です。
+`sync-jobs`（YouTube 同期）で YouTube API キーが必要です。
 
 ```powershell
-cd workers/youtube-sync
+cd workers/sync-jobs
 wrangler secret put YOUTUBE_API_KEY
 cd ../..
 ```
 
-`notification-dispatcher` で Discord Webhook を使う場合:
+`fast-jobs`（通知ディスパッチ）で Discord Webhook / Bot を使う場合:
 
 ```powershell
-cd workers/notification-dispatcher
+cd workers/fast-jobs
 wrangler secret put DISCORD_WEBHOOK_URL
+wrangler secret put DISCORD_BOT_TOKEN
 cd ../..
 ```
 
@@ -289,25 +289,27 @@ Dashboard → **Pages → flamenode → Custom domains** からドメインを�
 
 ## 7. Workers (Cron) のデプロイ
 
-5 つの Worker を順にデプロイします。各ディレクトリで `wrangler deploy` を実行してください。
+3 つの統合 Worker をデプロイします。ルートから一括実行するのが簡単です。
 
 ```powershell
-cd workers/json-generator      ; wrangler deploy ; cd ../..
-cd workers/cleanup             ; wrangler deploy ; cd ../..
-cd workers/youtube-sync        ; wrangler deploy ; cd ../..
-cd workers/score-recalc        ; wrangler deploy ; cd ../..
-cd workers/notification-dispatcher ; wrangler deploy ; cd ../..
+npm run workers:deploy
 ```
 
-各 Worker のスケジュールは次のとおりです (合計 5 Cron / アカウント上限 5):
+個別にデプロイする場合:
 
-| Worker | Cron | 役割 |
+```powershell
+cd workers/fast-jobs    ; wrangler deploy ; cd ../..
+cd workers/content-jobs ; wrangler deploy ; cd ../..
+cd workers/sync-jobs    ; wrangler deploy ; cd ../..
+```
+
+各 Worker のスケジュールは次のとおりです (合計 3 Cron):
+
+| Worker | Cron | 役割（統合元モジュール） |
 | --- | --- | --- |
-| `flamenode-json-generator` | `*/15 * * * *` | トップ・一覧・推薦の静的 JSON を R2 / KV に書き出す |
-| `flamenode-cleanup` | `0 */1 * * *` | 期限切れスロット解放 / 古い通知削除 |
-| `flamenode-youtube-sync` | `0 */12 * * *` | YouTube 視聴数 / 公開状態の低頻度同期 |
-| `flamenode-score-recalc` | `30 */12 * * *` | `video_stats.score` 低頻度再計算 |
-| `flamenode-notification-dispatcher` | `*/5 * * * *` | Discord Webhook などへの通知ディスパッチ |
+| `flamenode-fast-jobs` | `*/5 * * * *` | 通知ディスパッチ・スロット締切リマインド（`notification-dispatcher`） |
+| `flamenode-content-jobs` | `*/15 * * * *` | 静的 JSON 再生成・クリーンアップ（`json-generator` / `cleanup`） |
+| `flamenode-sync-jobs` | `0 */12 * * *` | YouTube 同期・スコア再計算（`youtube-sync` / `score-recalc`） |
 
 > Cron 起動を手元から検証するには、Dashboard → **Workers → 各 Worker → Triggers → Send test event** で `scheduled` を選んで実行できます。
 
@@ -350,7 +352,7 @@ wrangler d1 execute flamenode_db --remote --command "INSERT OR REPLACE INTO syst
 - [ ] `/admin` (管理者ロール) に入れて、コストガード状態が `normal` と表示される
 - [ ] `/admin/cost-guard` から `economy` → `normal` の切替ができる
 - [ ] `wrangler tail` で Pages のリクエストログが出る
-- [ ] `wrangler tail flamenode-json-generator` で 15 分以内に Cron 起動ログが出る
+- [ ] `wrangler tail flamenode-content-jobs` で 15 分以内に Cron 起動ログが出る
 - [ ] `https://<本番ドメイン>/maintenance` が表示できる
 
 ---
@@ -428,7 +430,7 @@ Workers の自動デプロイは GitHub Actions の `cloudflare/wrangler-action@
 | --- | --- |
 | ログインできない | Discord Developer Portal の Redirect URI、`AUTH_SECRET`、`NEXTAUTH_URL`、Pages の Bindings に `DB` が刺さっているか |
 | 「DB に接続できません」とフォームが返す | Pages → Settings → Functions の D1 binding (`DB`) が `flamenode_db` を指しているか |
-| トップページが空 | `flamenode-json-generator` Worker の Cron 実行が成功しているか (`wrangler tail`)。R2 / KV に書き込み権限があるか |
+| トップページが空 | `flamenode-content-jobs` Worker の Cron 実行が成功しているか (`wrangler tail`)。R2 / KV に書き込み権限があるか |
 | 502 / 1101 エラー | `wrangler tail` で Functions のスタックトレースを確認。`compatibility_flags = ["nodejs_compat"]` が消えていないか |
 | Cron が動かない | `wrangler.toml` (worker) の `[triggers] crons` と Dashboard → Triggers が一致しているか。アカウント全体で 6 個以上になっていないか |
 | Auth.js のエラー `MissingSecret` | `AUTH_SECRET` が Production / Preview の両方に設定されているか |

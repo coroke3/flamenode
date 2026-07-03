@@ -8,6 +8,7 @@ import { eventGroupEvents, eventGroups } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
+import { eventGroupPublicHref } from "@/lib/eventGroupRoutes";
 
 export const metadata: Metadata = { title: "イベントグループ管理" };
 export const dynamic = "force-dynamic";
@@ -156,7 +157,7 @@ export default async function AdminEventGroupsPage({
               <td>
                 <strong>{g.name}</strong>
                 <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                  /groups/{g.slug}
+                  {eventGroupPublicHref(g.slug)}
                 </div>
               </td>
               <td>{GROUP_TYPE_LABELS[g.group_type] ?? g.group_type}</td>
@@ -180,7 +181,7 @@ export default async function AdminEventGroupsPage({
                   </Link>
                   {g.visibility_status === "public" ? (
                     <Link
-                      href={`/groups/${g.slug}`}
+                      href={eventGroupPublicHref(g.slug)}
                       className="fn-btn fn-btn-ghost fn-btn-sm"
                       target="_blank"
                     >

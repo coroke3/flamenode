@@ -1,12 +1,7 @@
 import "server-only";
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
-import {
-  eventGroupEvents,
-  eventGroups,
-  videoEvents,
-  videos,
-} from "@/lib/db/schema";
+import { videoEvents, videos } from "@/lib/db/schema";
 import { enqueueStaticRebuild, enqueueStaticRebuildMany } from "./enqueue";
 import type { EnqueueStaticRebuildInput, StaticRebuildPriority } from "./types";
 
@@ -192,32 +187,12 @@ export async function enqueueAfterEventSettingsChange(
       priority: "low",
     },
     {
-      targetType: "groups_index",
-      targetId: "global",
-      reason: opts.reason,
-      priority: "low",
-    },
-    {
       targetType: "search_index",
       targetId: "global",
       reason: opts.reason,
       priority: "low",
     },
   ];
-
-  const groups = await db
-    .select({ slug: eventGroups.slug })
-    .from(eventGroupEvents)
-    .innerJoin(eventGroups, eq(eventGroups.id, eventGroupEvents.event_group_id))
-    .where(eq(eventGroupEvents.event_id, opts.eventId));
-  for (const group of groups) {
-    items.push({
-      targetType: "event_group",
-      targetId: group.slug,
-      reason: opts.reason,
-      priority: "normal",
-    });
-  }
 
   await enqueueStaticRebuildMany(db, items);
 }
@@ -233,30 +208,13 @@ export async function enqueueAfterEventGroupChange(
 ): Promise<void> {
   const items: EnqueueStaticRebuildInput[] = [
     {
-      targetType: "groups_index",
+      targetType: "events_index",
       targetId: "global",
       reason: opts.reason,
       priority: "low",
       requestedByUserId: opts.requestedByUserId,
     },
-    {
-      targetType: "event_group",
-      targetId: opts.slug,
-      reason: opts.reason,
-      priority: opts.priority ?? "normal",
-      requestedByUserId: opts.requestedByUserId,
-    },
   ];
-
-  if (opts.previousSlug && opts.previousSlug !== opts.slug) {
-    items.push({
-      targetType: "event_group",
-      targetId: opts.previousSlug,
-      reason: opts.reason,
-      priority: "low",
-      requestedByUserId: opts.requestedByUserId,
-    });
-  }
 
   const eventIdSet = new Set(opts.eventIds ?? []);
   for (const eventId of eventIdSet) {

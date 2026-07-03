@@ -9,6 +9,7 @@ import { EventGroupForm } from "@/components/admin/EventGroupForm";
 import { EventGroupMembersEditor } from "@/components/admin/EventGroupMembersEditor";
 import { DeleteEventGroupForm } from "@/components/admin/DeleteEventGroupForm";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { eventGroupPublicHref } from "@/lib/eventGroupRoutes";
 
 export const metadata: Metadata = { title: "イベントグループ編集" };
 export const dynamic = "force-dynamic";
@@ -57,7 +58,7 @@ export default async function AdminEventGroupEditPage({
           ...(row.visibility_status === "public"
             ? [
                 {
-                  href: `/groups/${row.slug}`,
+                  href: eventGroupPublicHref(row.slug),
                   label: "公開ページ",
                   icon: <Icon name="external" size={12} aria-hidden />,
                 },

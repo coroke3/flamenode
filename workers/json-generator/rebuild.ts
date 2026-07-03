@@ -12,9 +12,6 @@ export async function rebuildTarget(
     case "top":
       await rebuildTop(env);
       break;
-    case "groups_index":
-      await rebuildGroupsIndex(env);
-      break;
     case "list_recent":
       await rebuildListRecent(env);
       break;
@@ -26,9 +23,6 @@ export async function rebuildTarget(
       break;
     case "event":
       await rebuildEvent(env, targetId);
-      break;
-    case "event_group":
-      await rebuildEventGroup(env, targetId);
       break;
     case "video":
       await rebuildVideo(env, targetId);
@@ -115,73 +109,6 @@ async function rebuildEventsIndex(env: Env): Promise<void> {
   await putJson(env, "events/index.json", {
     generated_at: Math.floor(Date.now() / 1000),
     items: rows.results ?? [],
-  }, "public, max-age=300, stale-while-revalidate=1800");
-}
-
-async function rebuildGroupsIndex(env: Env): Promise<void> {
-  const rows = await env.DB.prepare(
-    `SELECT g.id, g.slug, g.name, g.description, g.group_type,
-            g.icon_url, g.img_url, g.accent_color,
-            COUNT(e.id) AS event_count,
-            (
-              SELECT e2.title
-              FROM event_group_events ge2
-              INNER JOIN events e2 ON e2.id = ge2.event_id
-              WHERE ge2.event_group_id = g.id
-                AND (e2.is_active = 1 OR e2.is_archived = 1)
-              ORDER BY e2.start_time DESC
-              LIMIT 1
-            ) AS latest_event_title,
-            MAX(e.start_time) AS latest_event_start_time
-     FROM event_groups g
-     LEFT JOIN event_group_events ge ON ge.event_group_id = g.id
-     LEFT JOIN events e
-       ON e.id = ge.event_id
-      AND (e.is_active = 1 OR e.is_archived = 1)
-     WHERE g.visibility_status = 'public'
-     GROUP BY g.id
-     ORDER BY g.sort_order ASC, g.name ASC
-     LIMIT 200`,
-  ).all();
-  await putJson(env, "groups/index.json", {
-    generated_at: Math.floor(Date.now() / 1000),
-    items: rows.results ?? [],
-  }, "public, max-age=300, stale-while-revalidate=1800");
-}
-
-async function rebuildEventGroup(env: Env, targetId: string): Promise<void> {
-  const group = (
-    await env.DB.prepare(
-      `SELECT id, slug, name, description, group_type,
-              icon_url, img_url, accent_color, visibility_status
-       FROM event_groups
-       WHERE visibility_status = 'public' AND (id = ? OR slug = ?)
-       LIMIT 1`,
-    )
-      .bind(targetId, targetId)
-      .first()
-  ) as Record<string, unknown> | null;
-  if (!group) throw new Error(`Event group not found: ${targetId}`);
-
-  const groupId = String(group.id);
-  const groupSlug = String(group.slug);
-  const groupEvents = await env.DB.prepare(
-    `SELECT e.id, e.title, e.event_type, e.explanation, e.icon_url, e.img_url,
-            e.accent_color, e.start_time, e.end_time, e.entry_start_time,
-            e.entry_end_time, e.is_entry_open, ge.relation_type
-     FROM event_group_events ge
-     INNER JOIN events e ON e.id = ge.event_id
-     WHERE ge.event_group_id = ?
-       AND (e.is_active = 1 OR e.is_archived = 1)
-     ORDER BY ge.sort_order ASC, e.start_time DESC, e.id ASC`,
-  )
-    .bind(groupId)
-    .all();
-
-  await putJson(env, `groups/${groupSlug}.json`, {
-    generated_at: Math.floor(Date.now() / 1000),
-    group,
-    events: groupEvents.results ?? [],
   }, "public, max-age=300, stale-while-revalidate=1800");
 }
 

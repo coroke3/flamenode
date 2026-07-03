@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { events as eventsTable } from "@/lib/db/schema";
 import { buildAccentVars } from "@/lib/theme/accent";
 import { computeEventStatus, isAcceptingEntries } from "@/lib/utils/eventStatus";
+import { formatRemainingTimeMetric } from "@/lib/utils/remainingTime";
 
 type EventRow = typeof eventsTable.$inferSelect;
 
@@ -142,18 +143,6 @@ function resolveCountdown(
     seconds: null,
     range: postRange,
   };
-}
-
-function formatRemaining(seconds: number | null): {
-  value: string;
-  unit: string;
-} | null {
-  if (seconds == null) return null;
-  if (seconds <= 0) return { value: "0", unit: "日" };
-  const days = Math.ceil(seconds / DAY_SECONDS);
-  if (days >= 1) return { value: String(days), unit: "日" };
-  const hours = Math.max(1, Math.ceil(seconds / 3600));
-  return { value: String(hours), unit: "時間" };
 }
 
 function buildTimeline(
@@ -340,7 +329,7 @@ export function EventRecruitCard({
   const kind = toRecruitKind(state);
   const statusTitle = stateLabel(state);
   const countdown = resolveCountdown(event, now);
-  const countdownDisplay = formatRemaining(countdown.seconds);
+  const countdownDisplay = formatRemainingTimeMetric(countdown.seconds);
   const timeline = buildTimeline(event, now, state);
   const slotTotal = total ?? null;
   const filledSlots =
