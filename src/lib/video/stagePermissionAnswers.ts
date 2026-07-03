@@ -1,13 +1,18 @@
-import { and, eq, inArray } from "drizzle-orm";
-import { getDatabase } from "@/lib/cloudflare";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import type { getDatabase } from "../cloudflare.ts";
 import {
   eventCustomQuestions,
   videoCustomAnswers,
-} from "@/lib/db/schema";
-import { parseStagePermissionAnswers } from "@/lib/video/formSettings";
-import { computeStagePermissionAnswerDeleteEventIds } from "@/lib/video/eventSync";
+} from "../db/schema.ts";
+import {
+  LEGACY_STAGE_PERMISSION_ID,
+  parseStagePermissionAnswers,
+} from "./formSettings.ts";
+import { computeStagePermissionAnswerDeleteEventIds } from "./eventSync.ts";
 
 type DB = NonNullable<ReturnType<typeof getDatabase>>;
+
+const STAGE_PERMISSION_KEY_PREFIX = `${LEGACY_STAGE_PERMISSION_ID}_`;
 
 export interface ReplaceStagePermissionCustomAnswersArgs {
   videoId: string;
@@ -17,24 +22,49 @@ export interface ReplaceStagePermissionCustomAnswersArgs {
   now: number;
 }
 
+function stagePermissionQuestionKeyCondition() {
+  return sql`(${eventCustomQuestions.question_key} = ${LEGACY_STAGE_PERMISSION_ID} OR substr(${eventCustomQuestions.question_key}, 1, ${STAGE_PERMISSION_KEY_PREFIX.length}) = ${STAGE_PERMISSION_KEY_PREFIX})`;
+}
+
 /** Syncs stage-permission answers into normalized custom answer rows. */
 export async function replaceStagePermissionCustomAnswers(
   db: DB,
   args: ReplaceStagePermissionCustomAnswersArgs,
 ): Promise<void> {
   const eventIds = Array.from(new Set(args.eventIds.filter(Boolean)));
-  const deleteEventIds = computeStagePermissionAnswerDeleteEventIds({
+  const syncEventIds = computeStagePermissionAnswerDeleteEventIds({
     previousEventIds: args.deleteEventIds ?? [],
     targetEventIds: eventIds,
   });
 
-  if (deleteEventIds.length > 0) {
+  if (syncEventIds.length === 0) return;
+
+  const stageQuestions = await db
+    .select({
+      id: eventCustomQuestions.id,
+      event_id: eventCustomQuestions.event_id,
+      question_key: eventCustomQuestions.question_key,
+      is_active: eventCustomQuestions.is_active,
+    })
+    .from(eventCustomQuestions)
+    .where(
+      and(
+        inArray(eventCustomQuestions.event_id, syncEventIds),
+        stagePermissionQuestionKeyCondition(),
+      )!,
+    );
+
+  if (stageQuestions.length > 0) {
     await db
       .delete(videoCustomAnswers)
       .where(
         and(
           eq(videoCustomAnswers.video_id, args.videoId),
-          inArray(videoCustomAnswers.event_id, deleteEventIds),
+          inArray(videoCustomAnswers.event_id, syncEventIds),
+          inArray(
+            videoCustomAnswers.question_id,
+            stageQuestions.map((question) => question.id),
+          ),
         )!,
       );
   }
@@ -49,21 +79,12 @@ export async function replaceStagePermissionCustomAnswers(
   );
   if (submitted.size === 0) return;
 
-  const questions = await db
-    .select({
-      id: eventCustomQuestions.id,
-      event_id: eventCustomQuestions.event_id,
-      question_key: eventCustomQuestions.question_key,
-    })
-    .from(eventCustomQuestions)
-    .where(
-      and(
-        inArray(eventCustomQuestions.event_id, eventIds),
-        eq(eventCustomQuestions.is_active, 1),
-      )!,
-    );
-
-  const values = questions
+  const eventIdSet = new Set(eventIds);
+  const values = stageQuestions
+    .filter(
+      (question) =>
+        eventIdSet.has(question.event_id) && question.is_active === 1,
+    )
     .map((question) => {
       const value = submitted.get(question.question_key)?.trim();
       if (!value) return null;
