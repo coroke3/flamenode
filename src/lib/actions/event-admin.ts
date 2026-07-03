@@ -7,7 +7,6 @@ import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import { canEditEvent } from "@/lib/auth/ownership";
 import {
-  eventCustomQuestions,
   eventTemplates,
   events,
   historyLogs,
@@ -18,8 +17,8 @@ import { generateId } from "@/lib/utils/id";
 import { normalizeHttpUrl } from "@/lib/utils/url";
 import {
   DEFAULT_STAGE_PERMISSION_FIELD,
-  resolveStagePermissionFieldsFromJson,
 } from "@/lib/video/formSettings";
+import { syncStagePermissionCustomQuestions } from "@/lib/video/stagePermissionQuestions";
 import {
   syncLegacyEventVisibilityFlags,
   type EventVisibilityStatus,
@@ -176,43 +175,6 @@ function buildVideoFormSettingsJson(
         DEFAULT_STAGE_PERMISSION_FIELD.placeholder,
     },
   });
-}
-
-async function syncStagePermissionCustomQuestions(
-  db: NonNullable<ReturnType<typeof getDatabase>>,
-  eventId: string,
-  videoFormSettingsJson: string,
-  now: number,
-): Promise<void> {
-  const fields = resolveStagePermissionFieldsFromJson([videoFormSettingsJson]);
-  await db
-    .delete(eventCustomQuestions)
-    .where(eq(eventCustomQuestions.event_id, eventId));
-
-  if (fields.length === 0) return;
-
-  await db
-    .insert(eventCustomQuestions)
-    .values(
-      fields.map((field, index) => ({
-        id: generateId("ecq"),
-        event_id: eventId,
-        question_key: field.id,
-        label: field.label,
-        description: field.description || null,
-        type: "textarea" as const,
-        required: field.required ? 1 : 0,
-        options_json: null,
-        placeholder: field.placeholder || null,
-        max_length: 1000,
-        sort_order: index,
-        is_active: 1,
-        visibility: "review" as const,
-        created_at: now,
-        updated_at: now,
-      })),
-    )
-    .onConflictDoNothing();
 }
 
 async function requireAdmin(): Promise<

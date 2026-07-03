@@ -22,7 +22,7 @@ export interface ReplaceStagePermissionCustomAnswersArgs {
   now: number;
 }
 
-function stagePermissionQuestionKeyCondition() {
+export function stagePermissionQuestionKeyCondition() {
   return sql`(${eventCustomQuestions.question_key} = ${LEGACY_STAGE_PERMISSION_ID} OR substr(${eventCustomQuestions.question_key}, 1, ${STAGE_PERMISSION_KEY_PREFIX.length}) = ${STAGE_PERMISSION_KEY_PREFIX})`;
 }
 
