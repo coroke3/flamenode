@@ -25,10 +25,20 @@ Static JSON targets currently supported by `content-jobs`:
 | `list_popular` | `list/popular.json` |
 | `events_index` | `events/index.json` |
 | `event` | `events/{id}.json` |
-| `groups_index` | `groups/index.json` |
-| `event_group` | `groups/{slug}.json` |
 | `video` | `videos/{id}.json` |
 | `user` | `users/{id}.json` |
 | `search_index` | `search-index-lite.json` |
+
+Legacy `groups_index` / `event_group` queue rows are treated as deprecated no-op targets and marked done. Public group pages are served from D1 until a dedicated static payload is added.
+
+`content-jobs` queue behavior follows `system_settings.operation_mode`:
+
+| Mode | Queue behavior |
+|---|---|
+| `normal` | Up to 20 pending rows per run, includes stale queue reconciliation |
+| `economy` | Up to 5 rows per run; `search_index` / `list_popular` are skipped unless priority is `high` |
+| `read_only` | Processes only `event`, `video`, and `user` targets |
+| `static_only` | Processes only `high` priority rows |
+| `maintenance` | Does not process the queue |
 
 `score-recalc` updates `videos.score` directly. The old stats table is not used.

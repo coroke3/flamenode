@@ -186,6 +186,13 @@ Legacy standalone worker directories are kept as importable modules only.
 
 ### 3-1. デプロイ
 
+デプロイ前のローカル検証:
+
+```sh
+npx tsc -p workers/tsconfig.json --noEmit
+npm run test:workers
+```
+
 ```sh
 npm run workers:deploy
 ```

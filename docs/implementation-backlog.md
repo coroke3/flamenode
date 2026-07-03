@@ -1,6 +1,7 @@
 # FlameNode 実装バックログ (Pre-Production Cleanup)
 
 > 2026-07-03 update: CSV / TSV / legacy import flows require a preview before apply. Admin spreadsheet and legacy import APIs reject direct apply without the matching preview token.
+> 2026-07-03 update: `operation_mode` resolution is shared across app reads and static rebuild workers. `content-jobs` now has a tested mode policy. `/list` can read `list/recent.json` in `static_only` mode.
 
 最終更新: 2026-07-03
 
@@ -15,15 +16,15 @@ D1 を正本、R2/KV の静的 JSON は公開配信用キャッシュとする�
 
 | 項目 | 意図 | 現状 | 分類 | 優先度 | 対応ファイル候補 |
 |------|------|------|------|--------|-----------------|
-| OperationMode 化 | cost_guard_mode / is_maintenance_mode を統一 | types/policy/getMode 作成済み、migration 0029 | partial | 高 | system_settings, costGuard.ts, queue.ts |
-| static JSON read layer | 公開ページを R2 静的 JSON に寄せる | D1 直読み | planned | 高 | public pages, lib/publicData/ |
-| static rebuild queue policy | mode に応じた queue 処理 | 全件処理のみ | planned | 高 | workers/json-generator/queue.ts |
+| OperationMode 化 | cost_guard_mode / is_maintenance_mode を統一 | resolver / policy / getMode を共通化。旧カラムは互換 fallback のみ | implemented | 高 | system_settings, costGuard.ts, queue.ts |
+| static JSON read layer | 公開ページを R2 静的 JSON に寄せる | `static_only` 時の `/list` recent は R2 `list/recent.json` を利用。他ページは D1 fallback | partial | 高 | public pages, lib/publicData/ |
+| static rebuild queue policy | mode に応じた queue 処理 | maintenance停止 / economy件数制限 / read_only対象制限 / static_only highのみを policy 化 | implemented | 高 | workers/json-generator/queue.ts |
 | api_endpoints 削除 | events.public_api_enabled に統一 | deprecated 表記済み | partial | 高 | schema.ts, admin pages |
 | video_stats 削除 | videos 側列に統一 | schema.ts に残存 | planned | 高 | schema.ts, score-recalc worker |
 | event_staff 権限正本 | permission_preset / permission_mask / custom_permission_keys_json | mask/preset 実装済み | partial | 高 | permissions/keys.ts, presets.ts, mask.ts |
 | event groups 正式実装 | 複数イベント所属 | DB schema + helper + 公開ページ完了 | implemented | 中 | schema.ts, eventGroups.ts, /groups |
 | software catalog 候補辞書化 | 入力候補として利用 | usage_count/is_active/is_verified 追加済み | partial | 中 | softwareCatalog, admin pages |
-| custom questions 本格実装 | event_custom_questions / video_custom_answers | schema + utility 作成済み | partial | 中 | EventForm, VideoForm, video.ts |
+| custom questions 本格実装 | event_custom_questions / video_custom_answers | EventForm/VideoForm の追加質問と正規化テーブル同期は実装済み。select/radio等のUIは未拡張 | partial | 中 | EventForm, VideoForm, video.ts |
 | Worker 5→3 統合 | Cron Trigger 削減 | 3本構成に統合済み | implemented | 中 | workers/fast-jobs, content-jobs, sync-jobs |
 | 通知・運営受信箱 | notification-outbox 基盤 | DB 作成済み | partial | 中 | notification-dispatcher |
 | YouTube 同期リトライ | バックオフ / リトライ | 基本実装済み | implemented | 低 | youtube-sync worker |
@@ -55,11 +56,9 @@ D1 を正本、R2/KV の静的 JSON は公開配信用キャッシュとする�
 
 ## 残作業 (次のPRで対応)
 
-1. OperationMode 正本化 (cost_guard_mode → operation_mode)
-2. static JSON read layer (公開ページをR2に寄せる)
-3. static rebuild queue policy (mode別処理)
-4. event groups 公開ページ (/groups, /groups/[slug])
-5. custom questions 本格実装 (EventForm/VideoForm UI)
-6. event_staff permission_mask migration
-7. video_stats 削除 (migration)
-8. docs/tests 最終同期
+1. static JSON read layer 拡張 (top / event / video / user を R2 fallback 対応)
+2. custom questions 拡張 (select / radio / checkbox UI と表示範囲)
+3. event_staff permission_mask migration
+4. video_stats 削除 (migration)
+5. api_endpoints 削除 (events.public_api_enabled への完全移行)
+6. docs/tests 最終同期
