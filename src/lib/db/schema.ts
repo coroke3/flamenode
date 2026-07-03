@@ -30,6 +30,7 @@ export const users = sqliteTable("user", {
   image: text("image"),
   discord_id: text("discord_id"),
   role: text("role", { enum: ["user", "admin", "moderator"] }).default("user"),
+  can_create_events: integer("can_create_events").notNull().default(0),
   is_tos_accepted: integer("is_tos_accepted").default(0),
   accepted_terms_version_id: text("accepted_terms_version_id"),
   terms_reaccept_required: integer("terms_reaccept_required").default(0),

@@ -6,6 +6,7 @@ import { Icon } from "@/components/ui/Icon";
 import {
   refreshXUserIcon,
   setUserBanned,
+  setUserCanCreateEvents,
   setUserNotifications,
   setUserRole,
 } from "@/lib/actions/user-admin";
@@ -16,6 +17,7 @@ interface UserAdminFormProps {
     id: string;
     role: "user" | "admin" | "moderator" | null;
     is_banned: number | null;
+    can_create_events: number | null;
     is_notification_enabled: number | null;
   };
   xUserIds: string[];
@@ -123,6 +125,29 @@ export function UserAdminForm({
             </button>
           </div>
         )}
+      </section>
+
+      <section>
+        <h2 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>
+          開催権限
+        </h2>
+        <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
+          ON のユーザーは将来のイベント作成権限候補として扱います。開催申請フローは作成しません。
+        </p>
+        <button
+          type="button"
+          className={`fn-btn fn-btn-sm ${user.can_create_events === 1 ? "fn-btn-primary" : "fn-btn-ghost"}`}
+          disabled={busy}
+          onClick={() => {
+            const next = user.can_create_events === 1 ? 0 : 1;
+            const fd = new FormData();
+            fd.set("user_id", user.id);
+            fd.set("can_create_events", String(next));
+            run(fd, setUserCanCreateEvents, "開催権限を更新しました。");
+          }}
+        >
+          {user.can_create_events === 1 ? "開催権限ON" : "開催権限OFF"}
+        </button>
       </section>
 
       <section>

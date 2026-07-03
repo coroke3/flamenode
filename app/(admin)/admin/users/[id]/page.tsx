@@ -170,6 +170,9 @@ export default async function AdminUserDetailPage({
           <span className="fn-badge fn-badge-soft">
             通知: {user.is_notification_enabled === 1 ? "有効" : "停止"}
           </span>
+          <span className={`fn-badge ${user.can_create_events === 1 ? "fn-badge-accent" : "fn-badge-neutral"}`}>
+            開催権限: {user.can_create_events === 1 ? "ON" : "OFF"}
+          </span>
           <span className="fn-badge fn-badge-soft">
             Active X: {user.active_x_user_id ? `@${user.active_x_user_id}` : "-"}
           </span>

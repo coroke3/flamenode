@@ -55,6 +55,7 @@ export default async function AdminUserEditPage({
             id: user.id,
             role: (user.role ?? "user") as "user" | "admin" | "moderator",
             is_banned: user.is_banned ?? 0,
+            can_create_events: user.can_create_events ?? 0,
             is_notification_enabled: user.is_notification_enabled ?? 1,
           }}
           xUserIds={xIds.map((x) => x.id)}

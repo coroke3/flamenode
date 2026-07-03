@@ -178,6 +178,57 @@ export async function setUserNotifications(
   return { ok: true };
 }
 
+const eventCreateSchema = z.object({
+  user_id: z.string().trim().min(1),
+  can_create_events: z.coerce.number().min(0).max(1),
+});
+
+export async function setUserCanCreateEvents(
+  formData: FormData,
+): Promise<UserAdminResult> {
+  const guard = await requireAdmin();
+  if (!guard.ok) return guard.result;
+  const parsed = eventCreateSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: parsed.error.issues[0]?.message ?? "入力エラー",
+    };
+  }
+  const { user_id, can_create_events } = parsed.data;
+  const db = getDatabase();
+  if (!db) return { ok: false, message: "DB に接続できません。" };
+
+  const target = (
+    await db.select().from(users).where(eq(users.id, user_id)).limit(1)
+  )[0];
+  if (!target) {
+    return { ok: false, message: "対象ユーザーが見つかりません。" };
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  await db
+    .update(users)
+    .set({ can_create_events })
+    .where(eq(users.id, user_id));
+
+  await db.insert(historyLogs).values({
+    table_name: "user",
+    record_id: user_id,
+    action: "UPDATE",
+    before_data: JSON.stringify({ can_create_events: target.can_create_events }),
+    after_data: JSON.stringify({ can_create_events }),
+    operator_discord_id: guard.userId,
+    retention_class: "long_audit",
+    created_at: now,
+  });
+
+  revalidatePath(`/admin/users/${user_id}`);
+  revalidatePath(`/admin/users/${user_id}/edit`);
+  revalidatePath("/admin/users");
+  return { ok: true };
+}
+
 /**
  * X user のアイコンを「同 creator_x_user_id の最新作品の icon_url」から再計算して反映する。
  * legacy import 由来の `x_users.icon_url = NULL` を救済する管理者操作。

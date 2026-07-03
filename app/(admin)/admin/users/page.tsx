@@ -34,6 +34,7 @@ type AdminUserRow = {
   image: string | null;
   role: "user" | "admin" | "moderator" | null;
   is_banned: number | null;
+  can_create_events: number | null;
   active_x_user_id: string | null;
   active_x_name: string | null;
   active_x_icon_url: string | null;
@@ -207,6 +208,8 @@ export default async function AdminUsersPage({
               ? eq(usersTable.role, "moderator")
               : status === "active"
                 ? eq(usersTable.is_banned, 0)
+                : status === "can_create_events"
+                  ? eq(usersTable.can_create_events, 1)
                 : status === "tos_not_accepted"
                   ? eq(usersTable.is_tos_accepted, 0)
                   : status === "no_active_x"
@@ -230,6 +233,7 @@ export default async function AdminUsersPage({
           image: usersTable.image,
           role: usersTable.role,
           is_banned: usersTable.is_banned,
+          can_create_events: usersTable.can_create_events,
           active_x_user_id: usersTable.active_x_user_id,
           active_x_name: xUsersTable.x_name,
           active_x_icon_url: xUsersTable.icon_url,
@@ -407,6 +411,7 @@ export default async function AdminUsersPage({
                 <option value="banned">BAN</option>
                 <option value="admin">admin</option>
                 <option value="moderator">moderator</option>
+                <option value="can_create_events">開催権限あり</option>
                 <option value="tos_not_accepted">TOS未同意</option>
                 <option value="no_active_x">active Xなし</option>
               </AutoSubmitSelect>
@@ -544,6 +549,11 @@ function DiscordTable({
               ) : (
                 <span className="fn-badge fn-badge-soft">USER</span>
               )}
+              {u.can_create_events === 1 ? (
+                <span className="fn-badge fn-badge-accent" style={{ marginLeft: 4 }}>
+                  開催可
+                </span>
+              ) : null}
             </td>
             <td>{formatRelative(u.created_at)}</td>
             <td>
