@@ -3,6 +3,13 @@ import { cacheControlForFreshness, resolveEventFreshness } from "./freshness";
 
 type Env = { DB: D1Database; R2: R2Bucket; KV: KVNamespace };
 
+const EVENT_INDEX_COLUMNS = `
+  id, title, explanation, icon_url, img_url, accent_color,
+  start_time, end_time, entry_start_time, entry_end_time,
+  visibility_status, is_active, is_entry_open, is_archived,
+  event_group_id
+`;
+
 export async function rebuildTarget(
   env: Env,
   targetType: string,
@@ -111,18 +118,120 @@ async function rebuildListPopular(env: Env): Promise<void> {
 }
 
 async function rebuildEventsIndex(env: Env): Promise<void> {
-  const rows = await env.DB.prepare(
-    `SELECT id, title, explanation, icon_url, img_url, accent_color,
-            start_time, end_time, is_active, is_entry_open, is_archived
+  const [rows, groupSections] = await Promise.all([
+    env.DB.prepare(
+      `SELECT ${EVENT_INDEX_COLUMNS}
      FROM events
      WHERE visibility_status = 'public'
      ORDER BY start_time DESC
      LIMIT 200`,
-  ).all();
+    ).all(),
+    rebuildEventGroupSections(env),
+  ]);
   await putJson(env, "events/index.json", {
     generated_at: Math.floor(Date.now() / 1000),
     items: rows.results ?? [],
+    group_sections: groupSections,
   }, "public, max-age=300, stale-while-revalidate=1800");
+}
+
+async function rebuildEventGroupSections(env: Env): Promise<unknown[]> {
+  const groups = await env.DB.prepare(
+    `SELECT id, slug, name, description, group_type, icon_url, accent_color, sort_order
+     FROM event_groups
+     WHERE visibility_status = 'public'
+     ORDER BY sort_order ASC, name ASC`,
+  ).all<Record<string, unknown>>();
+  const groupRows = groups.results ?? [];
+  if (groupRows.length === 0) return [];
+
+  const groupIds = groupRows
+    .map((group) => String(group.id ?? "").trim())
+    .filter(Boolean);
+  if (groupIds.length === 0) return [];
+
+  const placeholders = groupIds.map(() => "?").join(",");
+  const eventsByGroup = new Map<string, Record<string, unknown>[]>();
+
+  const junctionRows = await env.DB.prepare(
+    `SELECT ege.event_group_id AS group_id, ${EVENT_INDEX_COLUMNS
+      .split(",")
+      .map((column) => `e.${column.trim()}`)
+      .join(", ")}
+     FROM event_group_events ege
+     INNER JOIN events e ON e.id = ege.event_id
+     WHERE ege.event_group_id IN (${placeholders})
+       AND e.visibility_status = 'public'
+     ORDER BY e.start_time DESC, e.id ASC`,
+  )
+    .bind(...groupIds)
+    .all<Record<string, unknown>>();
+  for (const row of junctionRows.results ?? []) {
+    mergeGroupEvent(eventsByGroup, row.group_id, stripGroupId(row));
+  }
+
+  const legacyRows = await env.DB.prepare(
+    `SELECT ${EVENT_INDEX_COLUMNS}
+     FROM events
+     WHERE event_group_id IN (${placeholders})
+       AND event_group_id IS NOT NULL
+       AND event_group_id <> ''
+       AND visibility_status = 'public'
+     ORDER BY start_time DESC, id ASC`,
+  )
+    .bind(...groupIds)
+    .all<Record<string, unknown>>();
+  for (const row of legacyRows.results ?? []) {
+    mergeGroupEvent(eventsByGroup, row.event_group_id, row);
+  }
+
+  return groupRows.map((group) => {
+    const id = String(group.id ?? "");
+    const events = eventsByGroup.get(id) ?? [];
+    return {
+      ...group,
+      sort_order: normalizeNumber(group.sort_order) ?? 0,
+      latest_event_start_time: latestEventStart(events),
+      events,
+    };
+  });
+}
+
+function mergeGroupEvent(
+  target: Map<string, Record<string, unknown>[]>,
+  rawGroupId: unknown,
+  event: Record<string, unknown>,
+): void {
+  const groupId = String(rawGroupId ?? "").trim();
+  const eventId = String(event.id ?? "").trim();
+  if (!groupId || !eventId) return;
+  const current = target.get(groupId) ?? [];
+  if (current.some((row) => row.id === eventId)) return;
+  current.push(event);
+  target.set(groupId, current);
+}
+
+function stripGroupId(
+  row: Record<string, unknown>,
+): Record<string, unknown> {
+  const { group_id: _groupId, ...event } = row;
+  return event;
+}
+
+function normalizeNumber(value: unknown): number | null {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.floor(n);
+}
+
+function latestEventStart(events: readonly Record<string, unknown>[]): number | null {
+  let latest: number | null = null;
+  for (const event of events) {
+    const start = normalizeNumber(event.start_time);
+    if (start == null) continue;
+    if (latest == null || start > latest) latest = start;
+  }
+  return latest;
 }
 
 async function rebuildSearchIndexLite(env: Env): Promise<void> {

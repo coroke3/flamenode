@@ -16,11 +16,21 @@ import {
   type EventListGroupSection,
 } from "@/lib/db/eventGroups";
 import { eventGroupAnchorId } from "@/lib/eventGroupRoutes";
+import { loadStaticEventsIndex } from "@/lib/publicData/staticEventsIndex";
+import type {
+  StaticEventGroupSection,
+  StaticEventIndexEvent,
+} from "@/lib/publicData/staticEventsIndexCore";
 
 export const metadata: Metadata = { title: "イベント" };
 export const dynamic = "force-dynamic";
 
 type EventRow = typeof eventsTable.$inferSelect;
+type EventListEvent = EventRow | StaticEventIndexEvent;
+type EventGroupSectionView = Omit<EventListGroupSection, "events"> &
+  Omit<StaticEventGroupSection, "events"> & {
+    events: EventListEvent[];
+  };
 
 const GROUP_TYPE_LABELS: Record<string, string> = {
   series: "系列",
@@ -41,22 +51,29 @@ const EVENT_SECTIONS: {
   { id: "archive", title: "アーカイブ", sub: "Always-on archive" },
 ];
 
-function isPointEvent(ev: EventRow): boolean {
+function isPointEvent(ev: EventListEvent): boolean {
   return (ev.start_time != null) !== (ev.end_time != null);
 }
 
 export default async function EventListPage(): Promise<React.ReactElement> {
-  const { events, groupSections } = await withDatabase(async (db) => {
-    const [eventRows, groups] = await Promise.all([
-      db
-        .select()
-        .from(eventsTable)
-        .where(publicListableEventWhere())
-        .orderBy(desc(eventsTable.start_time)),
-      fetchEventListGroupSections(db),
-    ]);
-    return { events: eventRows, groupSections: groups };
-  }) ?? { events: [], groupSections: [] };
+  const staticIndex = await loadStaticEventsIndex();
+  const source =
+    staticIndex ??
+    (await withDatabase(async (db) => {
+      const [eventRows, groups] = await Promise.all([
+        db
+          .select()
+          .from(eventsTable)
+          .where(publicListableEventWhere())
+          .orderBy(desc(eventsTable.start_time)),
+        fetchEventListGroupSections(db),
+      ]);
+      return {
+        events: eventRows as EventListEvent[],
+        groupSections: groups as EventGroupSectionView[],
+      };
+    }));
+  const { events, groupSections } = source ?? { events: [], groupSections: [] };
 
   const sortedEvents = events.sort(compareEventsByUpcomingPriority);
   const filteredEvents = sortedEvents.filter((ev) => !isPointEvent(ev));
@@ -159,7 +176,7 @@ export default async function EventListPage(): Promise<React.ReactElement> {
 function EventGroupSection({
   group,
 }: {
-  group: EventListGroupSection & { events: EventRow[] };
+  group: EventGroupSectionView;
 }): React.ReactElement {
   return (
     <section

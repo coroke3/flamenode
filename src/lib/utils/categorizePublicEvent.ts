@@ -1,14 +1,15 @@
-import type { events } from "@/lib/db/schema";
 import type { PublicEventCategory } from "@/components/event/PublicEventCard";
-import { computeEventStatus, isAcceptingEntries } from "@/lib/utils/eventStatus";
-
-type EventRow = typeof events.$inferSelect;
+import {
+  computeEventStatus,
+  isAcceptingEntries,
+  type EventStatusInput,
+} from "@/lib/utils/eventStatus";
 
 /**
  * 公開イベント一覧の表示分類。DB状態は増やさず既存カラムから導出する。
  */
 export function categorizePublicEvent(
-  event: EventRow,
+  event: EventStatusInput,
   now = Math.floor(Date.now() / 1000),
 ): PublicEventCategory {
   const status = computeEventStatus(event, now);
