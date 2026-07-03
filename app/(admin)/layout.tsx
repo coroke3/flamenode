@@ -45,15 +45,14 @@ const ADMIN_NAV_GROUPS_BASE: AdminSidebarGroup[] = [
     items: [
       { href: "/admin/videos", label: "作品管理", icon: <Icon name="youtube" size={14} /> },
       { href: "/admin/youtube-sync", label: "YouTube同期状態", icon: <Icon name="refresh" size={14} /> },
-      { href: "/admin/events", label: "イベント管理", icon: <Icon name="calendar" size={14} /> },
+      { href: "/admin/events", label: "全イベント管理", icon: <Icon name="calendar" size={14} /> },
       { href: "/admin/event-groups", label: "イベントグループ", icon: <Icon name="users" size={14} /> },
       { href: "/admin/events/templates", label: "イベントテンプレート", icon: <Icon name="copy" size={14} /> },
-      { href: "/admin/api-endpoints", label: "公開API管理", icon: <Icon name="external" size={14} /> },
       { href: "/admin/announcements", label: "お知らせ管理", icon: <Icon name="alert" size={14} /> },
     ],
   },
   {
-    title: "ユーザー",
+    title: "ユーザー・権限",
     items: [
       { href: "/admin/users", label: "ユーザー / X ID", icon: <Icon name="users" size={14} /> },
       { href: "/admin/users?view=permissions", label: "権限管理", icon: <Icon name="settings" size={14} /> },
@@ -64,12 +63,18 @@ const ADMIN_NAV_GROUPS_BASE: AdminSidebarGroup[] = [
     items: [
       { href: "/admin/rules", label: "規約管理", icon: <Icon name="info" size={14} /> },
       { href: "/admin/audit", label: "監査ログ", icon: <Icon name="clock" size={14} /> },
-      { href: "/admin/cost-guard", label: "コストガード", icon: <Icon name="warning" size={14} /> },
+      { href: "/admin/cost-guard", label: "operation_mode", icon: <Icon name="warning" size={14} /> },
       { href: "/admin/static-builds", label: "静的JSON再生成", icon: <Icon name="refresh" size={14} /> },
       { href: "/admin/health", label: "ヘルスチェック", icon: <Icon name="check" size={14} /> },
       { href: "/admin/health/integrity", label: "DB整合性チェック", icon: <Icon name="list" size={14} /> },
-      { href: "/admin/security", label: "セキュリティ", icon: <Icon name="settings" size={14} /> },
       { href: "/admin/import", label: "インポート", icon: <Icon name="upload" size={14} /> },
+    ],
+  },
+  {
+    title: "高度な管理",
+    items: [
+      { href: "/admin/security", label: "セキュリティ", icon: <Icon name="settings" size={14} /> },
+      { href: "/admin/api-endpoints", label: "公開API管理", icon: <Icon name="external" size={14} /> },
     ],
   },
 ];
@@ -79,7 +84,7 @@ function buildAdminNavGroups(): AdminSidebarGroup[] {
     return ADMIN_NAV_GROUPS_BASE;
   }
   return ADMIN_NAV_GROUPS_BASE.map((group) =>
-    group.title === "システム"
+    group.title === "高度な管理"
       ? {
           ...group,
           items: [...group.items, ADMIN_NAV_SPREADSHEET_ITEM],
