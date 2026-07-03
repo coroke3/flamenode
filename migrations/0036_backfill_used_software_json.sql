@@ -5,7 +5,7 @@ UPDATE `videos`
 SET `used_software_json` = (
   SELECT json_object(
     'source',
-    'legacy_migration',
+    'legacy',
     'raw',
     group_concat(`label`, ', '),
     'items',
