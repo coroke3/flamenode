@@ -243,6 +243,33 @@ async function repairLocalSchemaDrift(DB: LocalD1Database): Promise<void> {
       "video_form_settings_json",
       "ALTER TABLE `events` ADD `video_form_settings_json` text",
     );
+    await ensureColumn(
+      DB,
+      "events",
+      "visibility_status",
+      "ALTER TABLE `events` ADD `visibility_status` text NOT NULL DEFAULT 'draft'",
+    );
+    if (
+      (await columnExists(DB, "events", "is_archived")) &&
+      (await columnExists(DB, "events", "is_active"))
+    ) {
+      await runOptionalSql(
+        DB,
+        `UPDATE \`events\`
+SET \`visibility_status\` = CASE
+  WHEN \`is_archived\` = 1 THEN 'archived'
+  WHEN \`is_active\` = 1 THEN 'public'
+  ELSE 'draft'
+END
+WHERE \`visibility_status\` = 'draft'`,
+        "backfill local events.visibility_status",
+      );
+    }
+    await ensureIndex(
+      DB,
+      "CREATE INDEX IF NOT EXISTS `events_visibility_status_idx` ON `events` (`visibility_status`, `start_time`, `end_time`)",
+      "events_visibility_status_idx",
+    );
   }
 
   if (await tableExists(DB, "videos")) {
@@ -313,6 +340,79 @@ async function repairLocalSchemaDrift(DB: LocalD1Database): Promise<void> {
       "x_users",
       "portfolio_contact",
       "ALTER TABLE `x_users` ADD `portfolio_contact` text",
+    );
+  }
+
+  if (await tableExists(DB, "user")) {
+    await ensureColumn(
+      DB,
+      "user",
+      "can_create_events",
+      "ALTER TABLE `user` ADD `can_create_events` integer NOT NULL DEFAULT 0",
+    );
+  }
+
+  if (await tableExists(DB, "event_staff")) {
+    await ensureColumn(
+      DB,
+      "event_staff",
+      "permission_preset",
+      "ALTER TABLE `event_staff` ADD `permission_preset` text NOT NULL DEFAULT 'public_staff'",
+    );
+    await ensureColumn(
+      DB,
+      "event_staff",
+      "permission_mask",
+      "ALTER TABLE `event_staff` ADD `permission_mask` integer NOT NULL DEFAULT 0",
+    );
+    await ensureColumn(
+      DB,
+      "event_staff",
+      "custom_permission_keys_json",
+      "ALTER TABLE `event_staff` ADD `custom_permission_keys_json` text",
+    );
+    if (await columnExists(DB, "event_staff", "role")) {
+      await runOptionalSql(
+        DB,
+        `UPDATE \`event_staff\`
+SET \`permission_preset\` = CASE
+  WHEN \`role\` = 'representative' THEN 'owner'
+  WHEN \`role\` = 'editor' THEN 'manager'
+  ELSE \`permission_preset\`
+END
+WHERE \`permission_preset\` = 'public_staff'`,
+        "backfill local event_staff.permission_preset",
+      );
+    }
+    await runOptionalSql(
+      DB,
+      `UPDATE \`event_staff\`
+SET \`permission_mask\` = CASE \`permission_preset\`
+  WHEN 'owner' THEN 64639
+  WHEN 'manager' THEN 64631
+  WHEN 'slot_manager' THEN 4
+  WHEN 'content_editor' THEN 31744
+  WHEN 'reviewer' THEN 32800
+  WHEN 'xid_reviewer' THEN 512
+  ELSE \`permission_mask\`
+END
+WHERE \`permission_mask\` = 0`,
+      "backfill local event_staff.permission_mask",
+    );
+    await ensureIndex(
+      DB,
+      "CREATE INDEX IF NOT EXISTS `event_staff_event_idx` ON `event_staff` (`event_id`)",
+      "event_staff_event_idx",
+    );
+    await ensureIndex(
+      DB,
+      "CREATE INDEX IF NOT EXISTS `event_staff_public_idx` ON `event_staff` (`event_id`, `is_public`, `display_name`)",
+      "event_staff_public_idx",
+    );
+    await ensureIndex(
+      DB,
+      "CREATE INDEX IF NOT EXISTS `event_staff_permission_idx` ON `event_staff` (`event_id`, `permission_mask`) WHERE `permission_mask` <> 0",
+      "event_staff_permission_idx",
     );
   }
 
@@ -520,6 +620,18 @@ async function ensureIndex(
       `[instrumentation] Failed to ensure local index ${indexName}:`,
       errorMessage(e),
     );
+  }
+}
+
+async function runOptionalSql(
+  DB: LocalD1Database,
+  sql: string,
+  label: string,
+): Promise<void> {
+  try {
+    await DB.prepare(sql).run();
+  } catch (e) {
+    console.warn(`[instrumentation] Failed to ${label}:`, errorMessage(e));
   }
 }
 
