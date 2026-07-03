@@ -20,7 +20,6 @@ import {
 import {
   events,
   eventStaff,
-  eventStaffPermissions,
   historyLogs,
   videoEvents,
   videoMembers,
@@ -28,6 +27,7 @@ import {
   videos,
   xUsers,
 } from "@/lib/db/schema";
+import { keysToPermissionMask } from "@/lib/auth/permissions/mask";
 import { enqueueStaticRebuildMany } from "@/lib/staticRebuild/enqueue";
 import {
   detectLegacyKind,
@@ -872,20 +872,6 @@ async function upsertEventEditors(
   if (editors.length === 0) return;
 
   if (mode === "update") {
-    const staffRows = await db
-      .select({ id: eventStaff.id })
-      .from(eventStaff)
-      .where(eq(eventStaff.event_id, eventId));
-    if (staffRows.length > 0) {
-      await db
-        .delete(eventStaffPermissions)
-        .where(
-          inArray(
-            eventStaffPermissions.event_staff_id,
-            staffRows.map((row) => row.id),
-          ),
-        );
-    }
     await db.delete(eventStaff).where(eq(eventStaff.event_id, eventId));
   }
 
@@ -910,6 +896,10 @@ async function upsertEventEditors(
       const permissionKeys = legacyStaffPermissionKeys(
         ed.is_representative_candidate,
       );
+      const permissionPreset = ed.is_representative_candidate ? "owner" : "manager";
+      const permissionMask = keysToPermissionMask(permissionKeys, {
+        allowAdminOnly: false,
+      });
 
       await db
         .insert(eventStaff)
@@ -920,6 +910,9 @@ async function upsertEventEditors(
           discord_user_id: null,
           display_name: ed.x_name ?? `@${ed.x_user_id}`,
           role: ed.is_representative_candidate ? "representative" : "editor",
+          permission_preset: permissionPreset,
+          permission_mask: permissionMask,
+          custom_permission_keys_json: null,
           is_public: ed.is_public,
           public_role_label: ed.public_role_label,
           internal_note: null,
@@ -927,23 +920,6 @@ async function upsertEventEditors(
           approved_at: null,
         })
         .onConflictDoNothing();
-
-      if (permissionKeys.length > 0) {
-        const now = Math.floor(Date.now() / 1000);
-        await db
-          .insert(eventStaffPermissions)
-          .values(
-            permissionKeys.map((permissionKey) => ({
-              id: `legacy_esp_${staffId}_${permissionKey.replace(/[^a-z0-9_.-]+/gi, "_")}`,
-              event_staff_id: staffId,
-              permission_key: permissionKey,
-              allowed: 1,
-              created_at: now,
-              updated_at: now,
-            })),
-          )
-          .onConflictDoNothing();
-      }
     } catch (e) {
       console.warn(
         "[legacy-import] event_staff insert skipped",

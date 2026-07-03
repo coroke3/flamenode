@@ -8,15 +8,18 @@ import { getDatabase } from "@/lib/cloudflare";
 import { assertCanEditEvent } from "@/lib/auth/ownership";
 import {
   eventStaff,
-  eventStaffPermissions,
   historyLogs,
   xUsers,
 } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
+import { canonicalizePermissionKey } from "@/lib/auth/permissions/aliases";
+import { isAdminOnlyKey, type PermissionKey } from "@/lib/auth/permissions/keys";
+import { keysToPermissionMask, normalizePermissionKeys } from "@/lib/auth/permissions/mask";
 import {
-  COLLABORATOR_PERMISSION_KEYS,
-  type CollaboratorPermissionKey,
-} from "@/lib/constants/collaborator-permissions";
+  getPresetPermissions,
+  legacyRoleToPreset,
+  type EventStaffPreset,
+} from "@/lib/auth/permissions/presets";
 import { normalizeXId } from "@/lib/utils/xid";
 
 export interface StaffActionResult {
@@ -27,10 +30,8 @@ export interface StaffActionResult {
 type DB = NonNullable<ReturnType<typeof getDatabase>>;
 type StaffRole = "editor" | "representative" | "staff";
 
-const allPermissionKeys = [...COLLABORATOR_PERMISSION_KEYS];
-
 async function ensureAdminFor(eventId: string): Promise<
-  | { ok: true; userId: string; db: DB }
+  | { ok: true; userId: string; role: string | null; db: DB }
   | { ok: false; result: StaffActionResult }
 > {
   const session = await auth().catch(() => null);
@@ -58,7 +59,7 @@ async function ensureAdminFor(eventId: string): Promise<
       },
     };
   }
-  return { ok: true, userId: u.id, db };
+  return { ok: true, userId: u.id, role: u.role ?? null, db };
 }
 
 function revalidateEventStaffPaths(eventId: string): void {
@@ -116,41 +117,62 @@ async function findStaffBySubject(
   )[0] ?? null;
 }
 
-async function replacePermissions(
-  db: DB,
-  staffId: string,
-  keys: readonly CollaboratorPermissionKey[],
-  now: number,
-): Promise<void> {
-  await db
-    .delete(eventStaffPermissions)
-    .where(eq(eventStaffPermissions.event_staff_id, staffId));
-  const uniqueKeys = Array.from(new Set(keys));
-  for (const key of uniqueKeys) {
-    await db.insert(eventStaffPermissions).values({
-      id: generateId("esp"),
-      event_staff_id: staffId,
-      permission_key: key,
-      allowed: 1,
-      created_at: now,
-      updated_at: now,
-    });
-  }
+function assignmentFromPreset(preset: EventStaffPreset): {
+  permission_preset: EventStaffPreset;
+  permission_mask: number;
+  custom_permission_keys_json: string | null;
+} {
+  return {
+    permission_preset: preset,
+    permission_mask: keysToPermissionMask(getPresetPermissions(preset), {
+      allowAdminOnly: true,
+    }),
+    custom_permission_keys_json: null,
+  };
 }
 
-function parsePermissionKeys(raw: string | null | undefined): CollaboratorPermissionKey[] {
+function assignmentFromCustomKeys(
+  keys: readonly string[],
+  isSiteAdmin: boolean,
+): {
+  permission_preset: EventStaffPreset;
+  permission_mask: number;
+  custom_permission_keys_json: string | null;
+  keys: PermissionKey[];
+} {
+  const canonicalKeys = normalizePermissionKeys(keys, {
+    allowAdminOnly: isSiteAdmin,
+  });
+  const blockedAdminOnly = keys
+    .map((key) => canonicalizePermissionKey(key))
+    .filter((key): key is PermissionKey => !!key && isAdminOnlyKey(key));
+  if (!isSiteAdmin && blockedAdminOnly.length > 0) {
+    throw new Error("site admin 専用権限はイベント運営者から付与できません。");
+  }
+  return {
+    permission_preset: canonicalKeys.length > 0 ? "custom" : "public_staff",
+    permission_mask: keysToPermissionMask(canonicalKeys, {
+      allowAdminOnly: isSiteAdmin,
+    }),
+    custom_permission_keys_json:
+      canonicalKeys.length > 0 ? JSON.stringify(canonicalKeys) : null,
+    keys: canonicalKeys,
+  };
+}
+
+function parsePermissionKeys(raw: string | null | undefined): string[] {
   const keys = (raw ?? "")
     .split(",")
     .map((s) => s.trim())
-    .filter(Boolean) as CollaboratorPermissionKey[];
-  const invalid = keys.find((k) => !COLLABORATOR_PERMISSION_KEYS.includes(k));
+    .filter(Boolean);
+  const invalid = keys.find((k) => !canonicalizePermissionKey(k));
   if (invalid) throw new Error(`選べない権限が含まれています: ${invalid}`);
   return Array.from(new Set(keys));
 }
 
 async function writeStaffLog(args: {
   db: DB;
-  table: "event_staff" | "event_staff_permissions";
+  table: "event_staff";
   recordId: string;
   action: "CREATE" | "UPDATE" | "DELETE";
   userId: string;
@@ -199,6 +221,7 @@ export async function addEventEditor(
 
   const displayName = await ensureXUser(guard.db, xUserId, `@${xUserId}`, now);
   const staffId = generateId("es");
+  const assignment = assignmentFromPreset(legacyRoleToPreset(data.role));
   await guard.db.insert(eventStaff).values({
     id: staffId,
     event_id: data.event_id,
@@ -206,6 +229,9 @@ export async function addEventEditor(
     discord_user_id: null,
     display_name: displayName,
     role: data.role,
+    permission_preset: assignment.permission_preset,
+    permission_mask: assignment.permission_mask,
+    custom_permission_keys_json: assignment.custom_permission_keys_json,
     is_public: data.is_public,
     public_role_label: data.public_role_label ?? null,
     internal_note: data.internal_note ?? null,
@@ -214,14 +240,19 @@ export async function addEventEditor(
     created_at: now,
     updated_at: now,
   });
-  await replacePermissions(guard.db, staffId, allPermissionKeys, now);
   await writeStaffLog({
     db: guard.db,
     table: "event_staff",
     recordId: staffId,
     action: "CREATE",
     userId: guard.userId,
-    payload: { event_id: data.event_id, x_user_id: xUserId, role: data.role },
+    payload: {
+      event_id: data.event_id,
+      x_user_id: xUserId,
+      role: data.role,
+      permission_preset: assignment.permission_preset,
+      permission_mask: assignment.permission_mask,
+    },
     now,
   });
 
@@ -243,9 +274,6 @@ export async function removeEventEditor(
   if (!existing) return { ok: true };
   const now = Math.floor(Date.now() / 1000);
 
-  await guard.db
-    .delete(eventStaffPermissions)
-    .where(eq(eventStaffPermissions.event_staff_id, existing.id));
   await guard.db.delete(eventStaff).where(eq(eventStaff.id, existing.id));
   await writeStaffLog({
     db: guard.db,
@@ -276,11 +304,15 @@ export async function updateEventEditor(
   const existing = await findStaffBySubject(guard.db, data.event_id, xUserId, null);
   if (!existing) return { ok: false, message: "対象スタッフが見つかりません。" };
   const now = Math.floor(Date.now() / 1000);
+  const assignment = assignmentFromPreset(legacyRoleToPreset(data.role));
 
   await guard.db
     .update(eventStaff)
     .set({
       role: data.role,
+      permission_preset: assignment.permission_preset,
+      permission_mask: assignment.permission_mask,
+      custom_permission_keys_json: assignment.custom_permission_keys_json,
       is_public: data.is_public,
       public_role_label: data.public_role_label ?? null,
       internal_note: data.internal_note ?? null,
@@ -293,7 +325,12 @@ export async function updateEventEditor(
     recordId: existing.id,
     action: "UPDATE",
     userId: guard.userId,
-    payload: { role: data.role, is_public: data.is_public },
+    payload: {
+      role: data.role,
+      is_public: data.is_public,
+      permission_preset: assignment.permission_preset,
+      permission_mask: assignment.permission_mask,
+    },
     now,
   });
 
@@ -333,7 +370,7 @@ export async function upsertCollaborator(
     return { ok: false, message: "X ID か Discord User ID のどちらかが必要です。" };
   }
 
-  let permissionKeys: CollaboratorPermissionKey[];
+  let permissionKeys: string[];
   try {
     permissionKeys = parsePermissionKeys(data.permission_keys);
   } catch (e) {
@@ -342,6 +379,12 @@ export async function upsertCollaborator(
   const guard = await ensureAdminFor(data.event_id);
   if (!guard.ok) return guard.result;
   const now = Math.floor(Date.now() / 1000);
+  let assignment: ReturnType<typeof assignmentFromCustomKeys>;
+  try {
+    assignment = assignmentFromCustomKeys(permissionKeys, guard.role === "admin");
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "入力エラー" };
+  }
   if (xUserId) await ensureXUser(guard.db, xUserId, data.display_name, now);
 
   const existing = await findStaffBySubject(
@@ -364,6 +407,9 @@ export async function upsertCollaborator(
         discord_user_id: discordUserId ?? existing.discord_user_id,
         display_name: data.display_name,
         role: nextRole,
+        permission_preset: assignment.permission_preset,
+        permission_mask: assignment.permission_mask,
+        custom_permission_keys_json: assignment.custom_permission_keys_json,
         is_public: data.is_public_staff,
         public_role_label: data.public_role_label ?? null,
         updated_at: now,
@@ -377,6 +423,9 @@ export async function upsertCollaborator(
       discord_user_id: discordUserId,
       display_name: data.display_name,
       role: nextRole,
+      permission_preset: assignment.permission_preset,
+      permission_mask: assignment.permission_mask,
+      custom_permission_keys_json: assignment.custom_permission_keys_json,
       is_public: data.is_public_staff,
       public_role_label: data.public_role_label ?? null,
       internal_note: null,
@@ -386,14 +435,18 @@ export async function upsertCollaborator(
       updated_at: now,
     });
   }
-  await replacePermissions(guard.db, staffId, permissionKeys, now);
   await writeStaffLog({
     db: guard.db,
-    table: "event_staff_permissions",
+    table: "event_staff",
     recordId: staffId,
     action: existing ? "UPDATE" : "CREATE",
     userId: guard.userId,
-    payload: { display_name: data.display_name, keys: permissionKeys },
+    payload: {
+      display_name: data.display_name,
+      keys: assignment.keys,
+      permission_preset: assignment.permission_preset,
+      permission_mask: assignment.permission_mask,
+    },
     now,
   });
 
@@ -421,15 +474,22 @@ export async function removeCollaborator(
   if (!existing) return { ok: true };
   const now = Math.floor(Date.now() / 1000);
 
-  await guard.db
-    .delete(eventStaffPermissions)
-    .where(eq(eventStaffPermissions.event_staff_id, existing.id));
   if (existing.role === "staff") {
     await guard.db.delete(eventStaff).where(eq(eventStaff.id, existing.id));
+  } else {
+    await guard.db
+      .update(eventStaff)
+      .set({
+        permission_preset: "public_staff",
+        permission_mask: 0,
+        custom_permission_keys_json: null,
+        updated_at: now,
+      })
+      .where(eq(eventStaff.id, existing.id));
   }
   await writeStaffLog({
     db: guard.db,
-    table: "event_staff_permissions",
+    table: "event_staff",
     recordId: existing.id,
     action: "DELETE",
     userId: guard.userId,

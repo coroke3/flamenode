@@ -10,19 +10,37 @@ export type ImportedEventFlags = {
   is_archived: 0 | 1;
 };
 
-/** 旧インポートで event_staff_permissions に入れる代表者向けキー（危険キー除外） */
+/** 旧インポートで event_staff.permission_mask に入れる代表者向けキー（adminOnly 除外） */
 export const LEGACY_REPRESENTATIVE_PERMISSION_KEYS = [
   "event.basic",
+  "event.publish",
   "event.slots",
   "event.members",
   "event.questions",
-  "videos.title",
-  "videos.music_credit",
-  "videos.members",
-  "videos.review_data",
+  "event.review",
+  "event.notifications",
+  "video.basics",
+  "video.descriptions",
+  "video.credits",
+  "video.members",
+  "video.member_chapters",
+  "video.status",
 ] as const;
 
-export const LEGACY_BASIC_STAFF_PERMISSION_KEYS = ["event.basic"] as const;
+export const LEGACY_BASIC_STAFF_PERMISSION_KEYS = [
+  "event.basic",
+  "event.publish",
+  "event.slots",
+  "event.questions",
+  "event.review",
+  "event.notifications",
+  "video.basics",
+  "video.descriptions",
+  "video.credits",
+  "video.members",
+  "video.member_chapters",
+  "video.status",
+] as const;
 
 const DANGEROUS_PERMISSION_PREFIXES = ["admin.", "system."] as const;
 const DANGEROUS_PERMISSION_KEYS = new Set([
@@ -191,7 +209,7 @@ export function legacyImportDbReductionNotes(kind: "event" | "video"): string[] 
   if (kind === "event") {
     return [
       ...shared,
-      "event_staff_permissions を作成します",
+      "event_staff.permission_mask を設定します",
       "public_api_enabled は 0 のままです",
     ];
   }

@@ -11,9 +11,9 @@ import { requireSession } from "@/lib/auth/guard";
 import { getCollaboratorPermissions } from "@/lib/auth/ownership";
 import { getDatabase } from "@/lib/cloudflare";
 import { COLLABORATOR_PERMISSION_LABELS } from "@/lib/constants/collaborator-permissions";
+import { resolveStaffPermissionKeys } from "@/lib/auth/permissions/mask";
 import {
   eventStaff as eventStaffTable,
-  eventStaffPermissions as eventStaffPermissionsTable,
   events as eventsTable,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
@@ -32,6 +32,9 @@ type StaffRow = {
   discord_user_id: string | null;
   display_name: string | null;
   role: string | null;
+  permission_preset: string | null;
+  permission_mask: number | null;
+  custom_permission_keys_json: string | null;
   is_public: number | null;
   public_role_label: string | null;
   internal_note: string | null;
@@ -80,6 +83,9 @@ export default async function ManageEventStaffPage({
       discord_user_id: eventStaffTable.discord_user_id,
       display_name: eventStaffTable.display_name,
       role: eventStaffTable.role,
+      permission_preset: eventStaffTable.permission_preset,
+      permission_mask: eventStaffTable.permission_mask,
+      custom_permission_keys_json: eventStaffTable.custom_permission_keys_json,
       is_public: eventStaffTable.is_public,
       public_role_label: eventStaffTable.public_role_label,
       internal_note: eventStaffTable.internal_note,
@@ -94,32 +100,12 @@ export default async function ManageEventStaffPage({
     .where(eq(eventStaffTable.event_id, id))
     .orderBy(asc(eventStaffTable.display_name));
 
-  const permissionRows = await db
-    .select({
-      id: eventStaffPermissionsTable.id,
-      event_staff_id: eventStaffPermissionsTable.event_staff_id,
-      permission_key: eventStaffPermissionsTable.permission_key,
-      allowed: eventStaffPermissionsTable.allowed,
-      x_user_id: eventStaffTable.x_user_id,
-      discord_user_id: eventStaffTable.discord_user_id,
-      display_name: eventStaffTable.display_name,
-      is_public_staff: eventStaffTable.is_public,
-      public_role_label: eventStaffTable.public_role_label,
-    })
-    .from(eventStaffPermissionsTable)
-    .innerJoin(
-      eventStaffTable,
-      eq(eventStaffTable.id, eventStaffPermissionsTable.event_staff_id),
-    )
-    .where(eq(eventStaffTable.event_id, id))
-    .orderBy(asc(eventStaffPermissionsTable.permission_key));
-
   const permissionKeysByStaffId = new Map<string, string[]>();
-  for (const permission of permissionRows) {
-    if (permission.allowed !== 1) continue;
-    const list = permissionKeysByStaffId.get(permission.event_staff_id) ?? [];
-    list.push(permission.permission_key);
-    permissionKeysByStaffId.set(permission.event_staff_id, list);
+  for (const row of staff) {
+    permissionKeysByStaffId.set(
+      row.id,
+      Array.from(resolveStaffPermissionKeys(row)),
+    );
   }
 
   const editors = staff
@@ -135,27 +121,32 @@ export default async function ManageEventStaffPage({
     }));
 
   const collabMap = new Map<string, CollaboratorRow>();
-  for (const row of permissionRows.filter((p) => p.allowed === 1)) {
-    const existing = collabMap.get(row.event_staff_id);
+  for (const row of staff) {
+    const permissionKeys = permissionKeysByStaffId.get(row.id) ?? [];
+    if (permissionKeys.length === 0) continue;
+    const existing = collabMap.get(row.id);
     if (existing) {
-      existing.permission_keys.push(row.permission_key);
+      existing.permission_keys.push(...permissionKeys);
     } else {
-      collabMap.set(row.event_staff_id, {
-        key: row.event_staff_id,
+      collabMap.set(row.id, {
+        key: row.id,
         x_user_id: row.x_user_id,
         discord_user_id: row.discord_user_id,
         display_name:
           row.display_name ?? row.x_user_id ?? row.discord_user_id ?? "未設定",
-        is_public_staff: row.is_public_staff,
+        is_public_staff: row.is_public,
         public_role_label: row.public_role_label,
-        permission_keys: [row.permission_key],
+        permission_keys: permissionKeys,
       });
     }
   }
 
   const collaboratorRows = Array.from(collabMap.values());
   const publicStaffCount = staff.filter((s) => s.is_public === 1).length;
-  const permissionCount = permissionRows.filter((p) => p.allowed === 1).length;
+  const permissionCount = Array.from(permissionKeysByStaffId.values()).reduce(
+    (sum, keys) => sum + keys.length,
+    0,
+  );
   const approvedXCount = staff.filter((s) => s.approval_status === "approved").length;
 
   return (
