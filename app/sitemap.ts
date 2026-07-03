@@ -60,7 +60,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
             start_time: events.start_time,
           })
           .from(events)
-          .where(eq(events.is_archived, 0))
+          .where(eq(events.visibility_status, "public"))
           .orderBy(desc(events.updated_at))
           .limit(200),
         db

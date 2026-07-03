@@ -227,7 +227,7 @@ export default async function EditVideoPage({
   const allEventRows = await db
     .select()
     .from(eventsTable)
-    .where(eq(eventsTable.is_archived, 0));
+    .where(eq(eventsTable.visibility_status, "public"));
   const acceptingEventMap = new Map<
     string,
     {

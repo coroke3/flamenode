@@ -23,6 +23,7 @@ import {
   computeEventStatus,
   eventStatusLabel,
   isAcceptingEntries,
+  isPublicEventVisible,
 } from "@/lib/utils/eventStatus";
 import { Icon } from "@/components/ui/Icon";
 import { JsonLd } from "@/components/seo/JsonLd";
@@ -83,7 +84,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     description: event.explanation,
     path: `/event/${event.id}`,
     image: event.img_url ?? event.icon_url,
-    noIndex: event.is_archived === 1,
+    noIndex: !isPublicEventVisible(event),
   });
 }
 

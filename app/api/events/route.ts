@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { events as eventsTable } from "@/lib/db/schema";
 import { getDatabase } from "@/lib/cloudflare";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
@@ -31,6 +31,7 @@ export async function GET(req: Request): Promise<Response> {
       icon_url: eventsTable.icon_url,
       img_url: eventsTable.img_url,
       accent_color: eventsTable.accent_color,
+      visibility_status: eventsTable.visibility_status,
       is_active: eventsTable.is_active,
       is_entry_open: eventsTable.is_entry_open,
       is_archived: eventsTable.is_archived,
@@ -45,6 +46,7 @@ export async function GET(req: Request): Promise<Response> {
       max_consecutive_slots_per_entry: eventsTable.max_consecutive_slots_per_entry,
     })
     .from(eventsTable)
+    .where(eq(eventsTable.visibility_status, "public"))
     .orderBy(desc(eventsTable.start_time))
     .limit(limit)
     .offset((page - 1) * limit);
@@ -53,7 +55,12 @@ export async function GET(req: Request): Promise<Response> {
   const now = Math.floor(Date.now() / 1000);
   const items: PublicEventDto[] = rows.map((row) =>
     pickKeys(
-      { ...row, is_entry_open: isAcceptingEntries(row, now) ? 1 : 0 },
+      {
+        ...row,
+        is_active: 1,
+        is_entry_open: isAcceptingEntries(row, now) ? 1 : 0,
+        is_archived: 0,
+      },
       PUBLIC_EVENT_KEYS,
     ) as PublicEventDto,
   );

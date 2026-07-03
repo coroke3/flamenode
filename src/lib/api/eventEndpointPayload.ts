@@ -1,4 +1,4 @@
-import { isAcceptingEntries } from "#utils/event-status-core";
+import { getEventVisibility, isAcceptingEntries } from "#utils/event-status-core";
 
 export const EVENT_API_VIDEO_LIMIT = 50;
 export const EVENT_API_EXPLANATION_MAX = 280;
@@ -7,6 +7,7 @@ export interface EventApiEventInput {
   id: string;
   title: string;
   explanation: string | null;
+  visibility_status?: string | null;
   is_active: number | null;
   /** Legacy storage flag. Public payload now derives this from entry dates. */
   is_entry_open: number | null;
@@ -61,14 +62,15 @@ export function buildEventApiPayload(
   now: number = Math.floor(Date.now() / 1000),
 ): EventApiPayload {
   const safeLimit = Math.max(1, Math.min(EVENT_API_VIDEO_LIMIT, Math.floor(limit)));
+  const visibility = getEventVisibility(event);
   return {
     event: {
       id: event.id,
       title: event.title,
       explanation: truncateForEventApi(event.explanation),
-      is_active: event.is_active === 1,
+      is_active: visibility === "public",
       is_entry_open: isAcceptingEntries(event, now),
-      is_archived: event.is_archived === 1,
+      is_archived: visibility === "archived",
     },
     videos: videos.slice(0, safeLimit).map((video) => ({
       id: video.id,

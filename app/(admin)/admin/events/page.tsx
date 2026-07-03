@@ -22,7 +22,7 @@ export const metadata: Metadata = { title: "イベント管理" };
 export const dynamic = "force-dynamic";
 
 type SortKey = "newest" | "oldest" | "upcoming";
-type FilterKey = "all" | "active" | "archived" | "accepting" | "draft";
+type FilterKey = "all" | "public" | "private" | "archived" | "accepting" | "draft";
 
 interface Props {
   searchParams?: Promise<{
@@ -47,7 +47,8 @@ export default async function AdminEventsPage({
   })();
   const filter: FilterKey = (() => {
     switch (sp.filter) {
-      case "active":
+      case "public":
+      case "private":
       case "archived":
       case "accepting":
       case "draft":
@@ -102,8 +103,9 @@ export default async function AdminEventsPage({
         />
         <AutoSubmitSelect name="filter" className="fn-select" defaultValue={filter}>
           <option value="all">全イベント</option>
-          <option value="active">is_active=1</option>
-          <option value="draft">下書き (is_active=0)</option>
+          <option value="public">public</option>
+          <option value="private">private</option>
+          <option value="draft">draft</option>
           <option value="archived">アーカイブ</option>
           <option value="accepting">受付中のみ</option>
         </AutoSubmitSelect>
@@ -216,9 +218,12 @@ async function loadEvents(
   if (!db) return [];
   const term = `%${q}%`;
   const conds = [
-    filter === "active" ? eq(eventsTable.is_active, 1) : undefined,
-    filter === "archived" ? eq(eventsTable.is_archived, 1) : undefined,
-    filter === "draft" ? eq(eventsTable.is_active, 0) : undefined,
+    filter === "public" ||
+    filter === "private" ||
+    filter === "archived" ||
+    filter === "draft"
+      ? eq(eventsTable.visibility_status, filter)
+      : undefined,
     q ? or(like(eventsTable.title, term), like(eventsTable.id, term)) : undefined,
   ].filter((c): c is NonNullable<typeof c> => c !== undefined);
   const where = conds.length === 0 ? undefined : conds.length === 1 ? conds[0] : and(...conds);

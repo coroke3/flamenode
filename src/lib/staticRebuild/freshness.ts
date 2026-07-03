@@ -1,9 +1,11 @@
 import type { EventFreshness } from "./types";
+import { getEventVisibility } from "#utils/event-status-core";
 
 /** 終了後も live 寄りに扱う猶予（秒） */
 export const ACTIVE_GRACE_AFTER_END_SEC = 86400;
 
 export type EventFreshnessInput = {
+  visibility_status?: string | null;
   is_active: number;
   /** Legacy DB flag; freshness no longer depends on manual entry status. */
   is_entry_open: number;
@@ -20,8 +22,9 @@ export function resolveEventFreshness(
   event: EventFreshnessInput,
   now: number,
 ): EventFreshness {
-  if (event.is_archived === 1) return "archived";
-  if (event.is_active === 1) return "active";
+  const visibility = getEventVisibility(event);
+  if (visibility === "archived") return "archived";
+  if (visibility === "public") return "active";
 
   const start = event.start_time ?? 0;
   const end = event.end_time ?? 0;

@@ -179,7 +179,7 @@ export async function fetchLatestEvents(db: DB, limit = 3) {
   const rows = await db
     .select()
     .from(events)
-    .where(or(eq(events.is_active, 1), eq(events.is_archived, 1))!)
+    .where(eq(events.visibility_status, "public"))
     .orderBy(desc(events.start_time));
   return rows.sort(compareEventsByUpcomingPriority).slice(0, limit);
 }

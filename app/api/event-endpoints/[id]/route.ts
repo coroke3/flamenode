@@ -10,6 +10,7 @@ import {
   buildEventApiPayload,
   EVENT_API_VIDEO_LIMIT,
 } from "@/lib/api/eventEndpointPayload";
+import { isPublicEventVisible } from "@/lib/utils/eventStatus";
 
 export async function GET(
   _req: Request,
@@ -28,6 +29,7 @@ export async function GET(
         id: eventsTable.id,
         title: eventsTable.title,
         explanation: eventsTable.explanation,
+        visibility_status: eventsTable.visibility_status,
         is_active: eventsTable.is_active,
         is_entry_open: eventsTable.is_entry_open,
         is_archived: eventsTable.is_archived,
@@ -42,7 +44,7 @@ export async function GET(
       .limit(1)
   )[0];
 
-  if (!event || event.public_api_enabled !== 1) {
+  if (!event || event.public_api_enabled !== 1 || !isPublicEventVisible(event)) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
