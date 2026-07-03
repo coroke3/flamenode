@@ -308,6 +308,19 @@ export function EventForm({
           ["枠設定", editableSections.slots],
         ] as const
       : [];
+  const canEditBasic = mode === "create" || editableSections?.basic !== false;
+  const canEditPublish = mode === "create" || editableSections?.publish !== false;
+  const canEditQuestions =
+    mode === "create" || editableSections?.questions !== false;
+  const canEditSlots = mode === "create" || editableSections?.slots !== false;
+  const sectionGateStyle = (
+    allowed: boolean,
+    base: React.CSSProperties = {},
+  ): React.CSSProperties => ({
+    ...base,
+    opacity: allowed ? base.opacity : 0.58,
+    pointerEvents: allowed ? base.pointerEvents : "none",
+  });
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -386,7 +399,7 @@ export function EventForm({
         />
       </div>
 
-      <div>
+      <div style={sectionGateStyle(canEditBasic)}>
         <label className="fn-label">タイトル *</label>
         <input
           name="title"
@@ -399,7 +412,7 @@ export function EventForm({
       </div>
 
       <div className={styles.formGrid2}>
-        <div>
+        <div style={sectionGateStyle(canEditBasic)}>
           <label className="fn-label">種別</label>
           <select
             name="event_type"
@@ -412,7 +425,7 @@ export function EventForm({
             <option value="other">other</option>
           </select>
         </div>
-        <div>
+        <div style={sectionGateStyle(canEditSlots)}>
           <label className="fn-label">枠タイプ</label>
           <select
             name="slot_type"
@@ -425,7 +438,7 @@ export function EventForm({
         </div>
       </div>
 
-      <div>
+      <div style={sectionGateStyle(canEditBasic)}>
         <label className="fn-label">説明</label>
         <textarea
           name="explanation"
@@ -436,7 +449,10 @@ export function EventForm({
         />
       </div>
 
-      <div className={styles.formGrid2}>
+      <div
+        className={styles.formGrid2}
+        style={sectionGateStyle(canEditBasic)}
+      >
         <div>
           <label className="fn-label">アイコン URL</label>
           <input
@@ -457,7 +473,10 @@ export function EventForm({
         </div>
       </div>
 
-      <div className={styles.formGrid2}>
+      <div
+        className={styles.formGrid2}
+        style={sectionGateStyle(canEditBasic)}
+      >
         <div>
           <label className="fn-label">開始日時</label>
           <input
@@ -478,7 +497,10 @@ export function EventForm({
         </div>
       </div>
 
-      <div className={styles.formGrid2}>
+      <div
+        className={styles.formGrid2}
+        style={sectionGateStyle(canEditPublish)}
+      >
         <div>
           <label className="fn-label">募集開始日時</label>
           <input
@@ -499,7 +521,7 @@ export function EventForm({
         </div>
       </div>
 
-      <div>
+      <div style={sectionGateStyle(canEditBasic)}>
         <label className="fn-label">アクセントカラー (HEX)</label>
         <input
           name="accent_color"
@@ -511,7 +533,10 @@ export function EventForm({
         />
       </div>
 
-      <div className={styles.formGrid2}>
+      <div
+        className={styles.formGrid2}
+        style={sectionGateStyle(canEditPublish)}
+      >
         <div>
           <label
             className="fn-label"
@@ -531,14 +556,14 @@ export function EventForm({
       </div>
 
       <fieldset
-        style={{
+        style={sectionGateStyle(canEditQuestions, {
           marginTop: 16,
           padding: "14px 0 0",
           border: 0,
           borderTop: "1px solid var(--border-subtle)",
           display: "grid",
           gap: 12,
-        }}
+        })}
       >
         <legend
           style={{
@@ -593,14 +618,14 @@ export function EventForm({
       </fieldset>
 
       <fieldset
-        style={{
+        style={sectionGateStyle(canEditSlots, {
           marginTop: 16,
           padding: "14px 0 0",
           border: 0,
           borderTop: "1px solid var(--border-subtle)",
           display: "grid",
           gap: 8,
-        }}
+        })}
       >
         <legend
           style={{
@@ -634,14 +659,14 @@ export function EventForm({
       </fieldset>
 
       <fieldset
-        style={{
+        style={sectionGateStyle(canEditQuestions, {
           marginTop: 16,
           padding: "14px 0 0",
           border: 0,
           borderTop: "1px solid var(--border-subtle)",
           display: "grid",
           gap: 12,
-        }}
+        })}
       >
         <legend
           style={{
@@ -810,7 +835,10 @@ export function EventForm({
         </div>
       </fieldset>
 
-      <div className={styles.formGrid3}>
+      <div
+        className={styles.formGrid3}
+        style={sectionGateStyle(canEditSlots)}
+      >
         <div>
           <label className="fn-label">1作品あたり最大枠数</label>
           <input
