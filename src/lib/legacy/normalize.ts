@@ -424,20 +424,20 @@ export function normalizeLegacyVideo(
   const toudan = cleanLegacyString(input.toudan);
   const otherSns = normalizeLegacyUrl(input.othersns) ?? cleanLegacyString(input.othersns);
   if (toudan) {
-    warnings.push("toudan is not imported because videos.custom_answers is deprecated.");
+    warnings.push("toudan は videos.custom_answers 廃止のため取り込みません。");
   }
   if ("" in looseRow && looseRow[""] != null && String(looseRow[""]).trim() !== "") {
     const meta = cleanLegacyString(looseRow[""]);
     if (meta) {
       warnings.push(
-        "legacy export metadata is not imported because videos.custom_answers is deprecated.",
+        "旧エクスポートメタデータは videos.custom_answers 廃止のため取り込みません。",
       );
     }
   }
   const declaredExperience = cleanLegacyString(input.movieyear);
   if (declaredExperience) {
     warnings.push(
-      "movieyear is not imported because videos.custom_answers is deprecated.",
+      "movieyear は videos.custom_answers 廃止のため取り込みません。",
     );
   }
 
