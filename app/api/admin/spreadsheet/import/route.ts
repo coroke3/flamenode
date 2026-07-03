@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import type { SpreadsheetDelimiterMode } from "@/lib/admin/spreadsheet/paste";
-import { prepareSpreadsheetImportRows } from "@/lib/admin/spreadsheet/importPrep";
+import {
+  buildReadonlyImportColumnWarnings,
+  prepareSpreadsheetImportRows,
+} from "@/lib/admin/spreadsheet/importPrep";
 import {
   readSpreadsheetJsonBody,
   requireSpreadsheetAdmin,
@@ -12,6 +15,7 @@ import {
 } from "@/lib/admin/spreadsheet/query";
 import { buildSpreadsheetImportPreviewToken } from "@/lib/admin/spreadsheet/importPreviewToken";
 import { resolveSpreadsheetTableContext } from "@/lib/admin/spreadsheet/tableContext";
+import { isSpreadsheetColumnEditable } from "@/lib/admin/spreadsheet/registry";
 import { getDatabase } from "@/lib/cloudflare";
 import { systemSettings } from "@/lib/db/schema";
 import { isWriteBlocked } from "@/lib/operationMode/policy";
@@ -63,6 +67,14 @@ export async function POST(req: Request): Promise<Response> {
       hasHeader,
       delimiter,
     });
+    const readonlyWarnings = buildReadonlyImportColumnWarnings({
+      rows,
+      mappedColumns,
+      readonlyColumns: ctx.columns
+        .map((column) => column.name)
+        .filter((column) => !isSpreadsheetColumnEditable(ctx.def, column)),
+    });
+    const importWarnings = [...warnings, ...readonlyWarnings];
     const previewToken = await buildSpreadsheetImportPreviewToken({
       table: ctx.def.table,
       mode,
@@ -78,7 +90,7 @@ export async function POST(req: Request): Promise<Response> {
         previewToken,
         rowCount: rows.length,
         mappedColumns,
-        warnings,
+        warnings: importWarnings,
         preview: rows.slice(0, 20),
       });
     }
@@ -112,7 +124,7 @@ export async function POST(req: Request): Promise<Response> {
       ok: true,
       ...result,
       mappedColumns,
-      warnings,
+      warnings: importWarnings,
     });
   } catch (e) {
     return spreadsheetErrorResponse(e);

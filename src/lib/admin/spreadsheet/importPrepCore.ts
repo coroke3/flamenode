@@ -79,6 +79,23 @@ export type PreparedSpreadsheetImport = {
   mappedColumns: string[];
 };
 
+export function buildReadonlyImportColumnWarnings(opts: {
+  rows: Record<string, string | null>[];
+  mappedColumns: string[];
+  readonlyColumns: string[];
+}): string[] {
+  const importedColumns = new Set(
+    opts.mappedColumns.length > 0
+      ? opts.mappedColumns
+      : opts.rows.flatMap((row) => Object.keys(row)),
+  );
+  const ignored = opts.readonlyColumns.filter((column) =>
+    importedColumns.has(column),
+  );
+  if (ignored.length === 0) return [];
+  return [`Readonly columns are ignored on import: ${ignored.join(", ")}`];
+}
+
 /**
  * インポート用の行データを解決し、共通検証を通す。
  * 失敗時は errors.ts が理解できる Error を throw する。

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildReadonlyImportColumnWarnings,
   buildSpreadsheetImportLocalPreview,
   prepareSpreadsheetImportRows,
 } from "./importPrepCore.ts";
@@ -70,5 +71,24 @@ test("spreadsheet import parsing stops after the import row cap", () => {
         delimiter: "auto",
       }),
     /too_many_rows/,
+  );
+});
+
+test("buildReadonlyImportColumnWarnings reports ignored readonly columns", () => {
+  assert.deepEqual(
+    buildReadonlyImportColumnWarnings({
+      rows: [{ id: "1", custom_answers: "{}" }],
+      mappedColumns: ["id", "custom_answers"],
+      readonlyColumns: ["custom_answers"],
+    }),
+    ["Readonly columns are ignored on import: custom_answers"],
+  );
+  assert.deepEqual(
+    buildReadonlyImportColumnWarnings({
+      rows: [{ id: "1" }],
+      mappedColumns: ["id"],
+      readonlyColumns: ["custom_answers"],
+    }),
+    [],
   );
 });
