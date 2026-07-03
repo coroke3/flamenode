@@ -1,4 +1,12 @@
 import { rebuildTarget } from "./rebuild";
+import {
+  queueLimitForMode,
+  queueModeWhereClause,
+  resolveQueueOperationMode,
+  shouldReconcileStaleQueue,
+  shouldSkipQueueTarget,
+  type OperationMode,
+} from "./queuePolicy";
 
 export interface Env {
   DB: D1Database;
@@ -6,8 +14,6 @@ export interface Env {
   KV: KVNamespace;
 }
 
-const MAX_QUEUE_ITEMS_PER_RUN = 20;
-const MAX_QUEUE_ITEMS_ECONOMY = 5;
 const DEPRECATED_TARGET_TYPES = new Set(["groups_index", "event_group"]);
 
 type QueueRow = {
@@ -18,25 +24,28 @@ type QueueRow = {
   attempt_count: number;
 };
 
-export async function getCostGuardMode(env: Env): Promise<string> {
+export async function getOperationMode(env: Env): Promise<OperationMode> {
   const row = (await env.DB.prepare(
-    `SELECT operation_mode, cost_guard_mode FROM system_settings WHERE id = 'default' LIMIT 1`,
-  ).first()) as { operation_mode?: string; cost_guard_mode?: string } | null;
-  return row?.operation_mode ?? row?.cost_guard_mode ?? "normal";
+    `SELECT operation_mode, cost_guard_mode, is_maintenance_mode FROM system_settings WHERE id = 'default' LIMIT 1`,
+  ).first()) as {
+    operation_mode?: string;
+    cost_guard_mode?: string;
+    is_maintenance_mode?: number;
+  } | null;
+  return resolveQueueOperationMode(row);
 }
 
 export async function processStaticRebuildQueue(env: Env): Promise<{
   processed: number;
   failed: number;
 }> {
-  const mode = await getCostGuardMode(env);
+  const mode = await getOperationMode(env);
   if (mode === "maintenance") {
     return { processed: 0, failed: 0 };
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const limit =
-    mode === "economy" ? MAX_QUEUE_ITEMS_ECONOMY : MAX_QUEUE_ITEMS_PER_RUN;
+  const limit = queueLimitForMode(mode);
 
   let sql = `
     SELECT id, target_type, target_id, priority, attempt_count
@@ -44,12 +53,7 @@ export async function processStaticRebuildQueue(env: Env): Promise<{
     WHERE status = 'pending'
       AND (next_retry_at IS NULL OR next_retry_at <= ?)
   `;
-  if (mode === "static_only") {
-    sql += ` AND priority = 'high'`;
-  }
-  if (mode === "read_only") {
-    sql += ` AND target_type IN ('event', 'video', 'user')`;
-  }
+  sql += queueModeWhereClause(mode);
   sql += `
     ORDER BY
       CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END,
@@ -74,12 +78,7 @@ export async function processStaticRebuildQueue(env: Env): Promise<{
         continue;
       }
       if (
-        mode === "economy" &&
-        (
-          row.target_type === "search_index" ||
-          row.target_type === "list_popular"
-        ) &&
-        row.priority !== "high"
+        shouldSkipQueueTarget(mode, row)
       ) {
         await markDone(env, row.id, now);
         processed++;
@@ -94,7 +93,7 @@ export async function processStaticRebuildQueue(env: Env): Promise<{
     }
   }
 
-  if (mode === "normal" || mode === "economy") {
+  if (shouldReconcileStaleQueue(mode)) {
     await reconcileStaleQueue(env, now);
   }
 
