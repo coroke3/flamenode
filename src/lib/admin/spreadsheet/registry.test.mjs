@@ -4,6 +4,7 @@ import { normalizeSpreadsheetPage } from "./constants.ts";
 import {
   buildSpreadsheetTableDefs,
   SPREADSHEET_DEPRECATED_READONLY_TABLES,
+  SPREADSHEET_READONLY_COLUMNS_BY_TABLE,
   isSpreadsheetColumnEditable,
   isSpreadsheetTableBlocklisted,
   resolveSpreadsheetTableDef,
@@ -50,4 +51,23 @@ test("secret column pattern blocks new token columns", () => {
   const def = resolveSpreadsheetTableDef("user", true);
   assert.equal(isSpreadsheetColumnEditable(def, "api_secret"), false);
   assert.equal(isSpreadsheetColumnEditable(def, "display_name"), true);
+});
+
+test("deprecated JSON columns are readonly for spreadsheet import", () => {
+  for (const [table, columns] of Object.entries(
+    SPREADSHEET_READONLY_COLUMNS_BY_TABLE,
+  )) {
+    const def = resolveSpreadsheetTableDef(table, true);
+    for (const column of columns) {
+      assert.equal(
+        isSpreadsheetColumnEditable(def, column),
+        false,
+        `${table}.${column} should be readonly`,
+      );
+    }
+  }
+  assert.equal(
+    isSpreadsheetColumnEditable(resolveSpreadsheetTableDef("videos", true), "title"),
+    true,
+  );
 });

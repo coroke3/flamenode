@@ -125,6 +125,14 @@ export const SPREADSHEET_SECRET_COLUMNS = new Set([
   "password",
 ]);
 
+export const SPREADSHEET_READONLY_COLUMNS_BY_TABLE: Record<
+  string,
+  readonly string[]
+> = {
+  events: ["custom_questions"],
+  videos: ["custom_answers"],
+};
+
 const DEFAULT_READONLY_TABLES = new Set([
   "account",
   "session",
@@ -229,6 +237,9 @@ export function isSpreadsheetColumnEditable(
   column: string,
 ): boolean {
   if (def.mode === "readonly") return false;
+  if (SPREADSHEET_READONLY_COLUMNS_BY_TABLE[def.table]?.includes(column)) {
+    return false;
+  }
   if (SPREADSHEET_SECRET_COLUMNS.has(column)) return false;
   if (SECRET_COLUMN_PATTERN.test(column)) return false;
   return true;
