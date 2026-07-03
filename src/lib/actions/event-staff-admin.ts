@@ -29,6 +29,16 @@ export interface StaffActionResult {
 
 type DB = NonNullable<ReturnType<typeof getDatabase>>;
 type StaffRole = "editor" | "representative" | "staff";
+const COLLABORATOR_PRESETS = [
+  "slot_manager",
+  "content_editor",
+  "reviewer",
+  "xid_reviewer",
+  "public_staff",
+  "custom",
+] as const;
+
+type CollaboratorPreset = (typeof COLLABORATOR_PRESETS)[number];
 
 async function ensureAdminFor(eventId: string): Promise<
   | { ok: true; userId: string; role: string | null; db: DB }
@@ -348,15 +358,37 @@ const collabSchema = z.object({
     .nullable(),
   discord_user_id: z.string().trim().min(1).optional().nullable(),
   display_name: z.string().trim().min(1).max(80),
+  permission_preset: z.enum(COLLABORATOR_PRESETS).default("public_staff"),
   permission_keys: z.string().trim().optional().nullable(),
   is_public_staff: z.coerce.number().min(0).max(1).default(0),
   public_role_label: z.string().trim().max(40).optional().nullable(),
 });
 
+function assignmentFromCollaboratorPreset(
+  preset: CollaboratorPreset,
+  rawPermissionKeys: string[],
+  isSiteAdmin: boolean,
+): ReturnType<typeof assignmentFromCustomKeys> {
+  if (preset === "custom") {
+    return assignmentFromCustomKeys(rawPermissionKeys, isSiteAdmin);
+  }
+  if (preset === "xid_reviewer" && !isSiteAdmin) {
+    throw new Error("site admin 専用プリセットはイベント運営者から付与できません。");
+  }
+  const assignment = assignmentFromPreset(preset);
+  return {
+    ...assignment,
+    keys: getPresetPermissions(preset),
+  };
+}
+
 export async function upsertCollaborator(
   formData: FormData,
 ): Promise<StaffActionResult> {
   const raw = Object.fromEntries(formData);
+  const hasExplicitPermissionPreset =
+    typeof raw.permission_preset === "string" &&
+    raw.permission_preset.trim().length > 0;
   if (typeof raw.x_user_id === "string" && raw.x_user_id.trim() === "") raw.x_user_id = null as never;
   if (typeof raw.discord_user_id === "string" && raw.discord_user_id.trim() === "") raw.discord_user_id = null as never;
   const parsed = collabSchema.safeParse(raw);
@@ -379,9 +411,18 @@ export async function upsertCollaborator(
   const guard = await ensureAdminFor(data.event_id);
   if (!guard.ok) return guard.result;
   const now = Math.floor(Date.now() / 1000);
+  const requestedPreset = hasExplicitPermissionPreset
+    ? data.permission_preset
+    : permissionKeys.length > 0
+      ? "custom"
+      : "public_staff";
   let assignment: ReturnType<typeof assignmentFromCustomKeys>;
   try {
-    assignment = assignmentFromCustomKeys(permissionKeys, guard.role === "admin");
+    assignment = assignmentFromCollaboratorPreset(
+      requestedPreset,
+      permissionKeys,
+      guard.role === "admin",
+    );
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "入力エラー" };
   }

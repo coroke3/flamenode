@@ -123,7 +123,7 @@ export default async function ManageEventStaffPage({
   const collabMap = new Map<string, CollaboratorRow>();
   for (const row of staff) {
     const permissionKeys = permissionKeysByStaffId.get(row.id) ?? [];
-    if (permissionKeys.length === 0) continue;
+    if (row.role === "editor" || row.role === "representative") continue;
     const existing = collabMap.get(row.id);
     if (existing) {
       existing.permission_keys.push(...permissionKeys);
@@ -134,6 +134,7 @@ export default async function ManageEventStaffPage({
         discord_user_id: row.discord_user_id,
         display_name:
           row.display_name ?? row.x_user_id ?? row.discord_user_id ?? "未設定",
+        permission_preset: row.permission_preset,
         is_public_staff: row.is_public,
         public_role_label: row.public_role_label,
         permission_keys: permissionKeys,
@@ -143,6 +144,9 @@ export default async function ManageEventStaffPage({
 
   const collaboratorRows = Array.from(collabMap.values());
   const publicStaffCount = staff.filter((s) => s.is_public === 1).length;
+  const permissionHolderCount = Array.from(permissionKeysByStaffId.values())
+    .filter((keys) => keys.length > 0)
+    .length;
   const permissionCount = Array.from(permissionKeysByStaffId.values()).reduce(
     (sum, keys) => sum + keys.length,
     0,
@@ -172,7 +176,7 @@ export default async function ManageEventStaffPage({
       <section className="fn-console-stat-grid fn-console-section--tight">
         <SummaryCard label="登録メンバー" value={staff.length} note="公開・非公開を含む総数" />
         <SummaryCard label="公開メンバー" value={publicStaffCount} note="イベントページに掲載" />
-        <SummaryCard label="権限保持者" value={collaboratorRows.length} note="部分的な編集権限あり" />
+        <SummaryCard label="権限保持者" value={permissionHolderCount} note="部分的な編集権限あり" />
         <SummaryCard label="許可項目" value={permissionCount} note={`承認済みX ID ${approvedXCount}件`} />
       </section>
 
@@ -203,6 +207,7 @@ export default async function ManageEventStaffPage({
             eventId={ev.id}
             editors={editors}
             collaborators={collaboratorRows}
+            isSiteAdmin={isAdmin}
           />
         </section>
       ) : null}
