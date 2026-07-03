@@ -27,7 +27,12 @@ type TabItem = {
   href: string;
   label: string;
   icon?: IconName;
-  adminOnly?: boolean;
+};
+
+type AdminLinkItem = {
+  href: string;
+  label: string;
+  icon?: IconName;
 };
 
 export function ManageEventTabs({
@@ -44,23 +49,10 @@ export function ManageEventTabs({
       icon: "grid",
     },
     {
-      key: "admin-detail",
-      href: `/admin/events/${encodedId}`,
-      label: "管理詳細",
-      icon: "info",
-      adminOnly: true,
-    },
-    {
       key: "review",
       href: `/manage/events/${encodedId}/videos?status=pending`,
       label: "審査",
       icon: "check",
-    },
-    {
-      key: "admin-review",
-      href: `/admin/videos?event=${encodedId}&status=pending`,
-      label: "管理者用審査一覧",
-      adminOnly: true,
     },
     {
       key: "slots",
@@ -77,7 +69,7 @@ export function ManageEventTabs({
     {
       key: "edit",
       href: `/manage/events/${encodedId}/edit`,
-      label: "設定編集",
+      label: "イベント設定",
       icon: "settings",
     },
     {
@@ -89,36 +81,21 @@ export function ManageEventTabs({
     {
       key: "notifications",
       href: `/manage/notifications?event=${encodedId}`,
-      label: "通知センター",
+      label: "通知",
       icon: "alert",
     },
     {
       key: "public",
       href: `/event/${encodedId}`,
-      label: "公開ページを見る",
+      label: "公開ページ",
       icon: "external",
-    },
-    {
-      key: "audit",
-      href: `/admin/audit?table=events&record=${encodedId}`,
-      label: "監査ログ",
-      icon: "clock",
-      adminOnly: true,
-    },
-    {
-      key: "admin-notifications",
-      href: `/admin/notifications?event=${encodedId}`,
-      label: "管理者用通知ログ",
-      icon: "alert",
-      adminOnly: true,
     },
   ];
 
   return (
-    <nav className="fn-console-event-tabs" aria-label="イベント運営メニュー">
-      {tabs
-        .filter((tab) => !tab.adminOnly || isAdmin)
-        .map((tab) => {
+    <>
+      <nav className="fn-console-event-tabs" aria-label="イベント運営メニュー">
+        {tabs.map((tab) => {
           const isActive = tab.key === active;
           return (
             <Link
@@ -132,6 +109,63 @@ export function ManageEventTabs({
             </Link>
           );
         })}
-    </nav>
+      </nav>
+      {isAdmin ? <ManageAdminLinksMenu eventId={eventId} /> : null}
+    </>
+  );
+}
+
+export function ManageAdminLinksMenu({
+  eventId,
+}: {
+  eventId: string;
+}): React.ReactElement {
+  const encodedId = encodeURIComponent(eventId);
+  const links: AdminLinkItem[] = [
+    {
+      href: `/admin/events/${encodedId}`,
+      label: "管理詳細",
+      icon: "info",
+    },
+    {
+      href: `/admin/videos?event=${encodedId}&status=pending`,
+      label: "管理者用審査一覧",
+      icon: "check",
+    },
+    {
+      href: `/admin/audit?table=events&record=${encodedId}`,
+      label: "監査ログ",
+      icon: "clock",
+    },
+    {
+      href: `/admin/notifications?event=${encodedId}`,
+      label: "管理者用通知ログ",
+      icon: "alert",
+    },
+    {
+      href: `/admin/videos?event=${encodedId}`,
+      label: "全作品管理で見る",
+      icon: "youtube",
+    },
+  ];
+
+  return (
+    <div
+      className="fn-console-badge-row"
+      aria-label="サイト管理で開く"
+      style={{ marginTop: 8 }}
+    >
+      <span className="fn-badge fn-badge-neutral">サイト管理で開く</span>
+      {links.map((link) => (
+        <Link
+          key={link.href}
+          href={link.href}
+          className="fn-btn fn-btn-ghost fn-btn-sm"
+        >
+          {link.icon ? <Icon name={link.icon} size={11} aria-hidden /> : null}
+          {link.label}
+        </Link>
+      ))}
+    </div>
   );
 }
