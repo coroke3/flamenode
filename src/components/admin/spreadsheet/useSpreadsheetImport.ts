@@ -37,6 +37,15 @@ export function useSpreadsheetImport({
   const [preview, setPreview] = React.useState<SpreadsheetImportPreview | null>(
     null,
   );
+  const columnSignature = React.useMemo(
+    () => columnNames.join("\u001f"),
+    [columnNames],
+  );
+
+  React.useEffect(() => {
+    setPreview(null);
+    setError(null);
+  }, [table, columnSignature]);
 
   const localPreview = React.useMemo(
     () =>
