@@ -68,12 +68,11 @@ const DB_REDUCTION_RULES = [
   },
   {
     id: "video-softwares-write",
-    label: "video_softwares / replaceVideoSoftwareLabels 利用（used_software_json へ移行中）",
-    pattern: /\b(videoSoftwares|replaceVideoSoftwareLabels)\b/g,
+    label: "video_softwares usage after used_software_json migration",
+    pattern: /\b(videoSoftwares|video_softwares)\b/g,
     prefixAllow: [
       ...PREFIX_ALLOW,
       "src/lib/db/software.ts",
-      "src/lib/actions/video.ts",
     ],
   },
 ];

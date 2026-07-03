@@ -5,25 +5,23 @@ import type { DB } from "./client";
 import {
   softwareAliases,
   softwareCatalog,
+  videos,
   videoSoftwares,
 } from "./schema";
 import { generateId } from "@/lib/utils/id";
+import {
+  buildEmptySoftwareLabelsJson,
+  buildSoftwareLabelsJson,
+  normalizeSoftwareLabels,
+  parseSoftwareLabelsJson,
+} from "@/lib/utils/softwareLabels";
 
 function normalizeSoftwareName(value: string): string {
   return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 export function parseSoftwareLabels(raw: string | null | undefined): string[] {
-  if (!raw) return [];
-  return Array.from(
-    new Set(
-      raw
-        .split(/[\n,;、，]+/)
-        .map((label) => label.trim().replace(/\s+/g, " "))
-        .filter(Boolean)
-        .slice(0, 20),
-    ),
-  );
+  return normalizeSoftwareLabels(raw);
 }
 
 async function resolveSoftwareId(db: DB, label: string): Promise<string> {
@@ -73,27 +71,37 @@ export async function replaceVideoSoftwareLabels(
   raw: string | null | undefined,
 ): Promise<void> {
   const labels = parseSoftwareLabels(raw);
-  await db.delete(videoSoftwares).where(eq(videoSoftwares.video_id, videoId));
-  let orderIndex = 0;
   const seenSoftwareIds = new Set<string>();
   for (const label of labels) {
     const softwareId = await resolveSoftwareId(db, label);
     if (seenSoftwareIds.has(softwareId)) continue;
     seenSoftwareIds.add(softwareId);
-    await db.insert(videoSoftwares).values({
-      video_id: videoId,
-      software_id: softwareId,
-      raw_label: label,
-      order_index: orderIndex,
-    });
-    orderIndex += 1;
   }
+  await db
+    .update(videos)
+    .set({
+      used_software_json:
+        buildSoftwareLabelsJson(labels, "manual") ??
+        buildEmptySoftwareLabelsJson("manual"),
+    })
+    .where(eq(videos.id, videoId));
 }
 
 export async function getVideoSoftwareLabels(
   db: DB,
   videoId: string,
 ): Promise<string[]> {
+  const video = (
+    await db
+      .select({ used_software_json: videos.used_software_json })
+      .from(videos)
+      .where(eq(videos.id, videoId))
+      .limit(1)
+  )[0];
+  if (video?.used_software_json != null) {
+    return parseSoftwareLabelsJson(video.used_software_json);
+  }
+
   const rows = await db
     .select({
       raw_label: videoSoftwares.raw_label,

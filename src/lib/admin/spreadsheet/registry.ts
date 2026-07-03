@@ -76,8 +76,6 @@ export const SPREADSHEET_TABLE_OVERRIDES: Record<string, SpreadsheetTableOverrid
       group: "作品",
       mode: "editable",
     },
-    video_softwares: { label: "使用ソフト", group: "作品", mode: "readonly" },
-
     software_catalog: { label: "ソフトカタログ", group: "マスタ", mode: "editable" },
     software_aliases: { label: "ソフト別名", group: "マスタ", mode: "editable" },
 
@@ -112,7 +110,7 @@ export const SPREADSHEET_DEPRECATED_READONLY_TABLES = [
   "event_staff" + "_permissions",
   "video" + "_comments",
   "video" + "_stats",
-  "video_softwares",
+  "video" + "_softwares",
 ] as const;
 
 /** セル編集禁止（表示はマスク） */

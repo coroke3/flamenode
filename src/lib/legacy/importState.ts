@@ -1,5 +1,6 @@
 import type { EnqueueStaticRebuildInput } from "@/lib/staticRebuild/types";
 import type { EventVisibilityStatus } from "@/lib/utils/eventStatusCore";
+import { buildSoftwareLabelsJson } from "../utils/softwareLabels.ts";
 import { normalizePermissionKeys } from "../auth/permissions/mask.ts";
 import { getPresetPermissions } from "../auth/permissions/presets.ts";
 
@@ -208,7 +209,7 @@ export function legacyImportDbReductionNotes(kind: "event" | "video"): string[] 
   }
   return [
     ...shared,
-    "video_softwares は作成しません（used_software_json に統合）",
+    "使用ソフト中間テーブルは作成せず、used_software_json に統合します",
     "video_youtube_metadata は作成します",
   ];
 }
@@ -216,27 +217,7 @@ export function legacyImportDbReductionNotes(kind: "event" | "video"): string[] 
 export function buildUsedSoftwareJson(
   raw: string | string[] | null | undefined,
 ): string | null {
-  if (!raw) return null;
-  const sourceItems = Array.isArray(raw)
-    ? raw
-    : raw.split(/[,、\n]/);
-  const items: string[] = [];
-  const seen = new Set<string>();
-  for (const sourceItem of sourceItems) {
-    const item = sourceItem.trim().replace(/\s+/g, " ").slice(0, 80);
-    if (!item) continue;
-    const key = item.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    items.push(item);
-    if (items.length >= 20) break;
-  }
-  if (items.length === 0) return null;
-  return JSON.stringify({
-    source: "legacy",
-    raw: items.join(", "),
-    items,
-  });
+  return buildSoftwareLabelsJson(raw, "legacy");
 }
 
 export function importedStateLabel(flags: ImportedEventFlags): string {

@@ -52,7 +52,7 @@ D1 を正本、R2/KV の静的 JSON は公開配信用キャッシュとする�
 | event_staff_permissions | event_staff.permission_preset / permission_mask / custom_permission_keys_json | 移行元のみ / 新規書き込み禁止 | mask backfill migration |
 | events.custom_questions (旧 JSON) | event_custom_questions | 新規書き込み禁止 | schema作成済み |
 | videos.custom_answers (旧 JSON) | video_custom_answers | 新規書き込み禁止 | schema作成済み |
-| video_softwares | videos.used_software_json + software_catalog | 削除候補 | planned |
+| video_softwares | videos.used_software_json + software_catalog | 通常保存と legacy import は JSON 保存へ移行済み。旧テーブルは読み取りフォールバックのみ | implemented |
 
 ---
 
