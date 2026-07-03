@@ -33,7 +33,7 @@ export interface MergeXIdsResult {
  * - dry-run なしのため必ず docs/merge-flow-design.md を読んでから実行
  * - video_interactions の UNIQUE 衝突対策: 旧 ID の重複行を先に DELETE
  * - history_logs (long_audit) に before/after 件数を記録
- * - 通知は enqueue しない (本人通知は Phase C で別 UI から発火)
+ * - 通知は enqueue しない (本人通知は別フェーズの UI から発火)
  */
 export async function mergeXIds(
   formData: FormData,
