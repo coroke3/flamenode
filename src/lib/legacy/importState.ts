@@ -213,16 +213,22 @@ export function planStaticRebuildEnqueues(args: {
 
 export function staticRebuildTargetLabels(
   strategy: StaticRebuildStrategy,
+  importMode: LegacyImportMode,
   eventIds: string[],
 ): string[] {
-  if (strategy === "none") return ["なし"];
-  const labels = ["events_index", "search_index"];
-  if (strategy !== "summary") labels.push("list_recent");
-  if (strategy === "event" || strategy === "full") {
-    for (const id of eventIds) labels.push(`event:${id}`);
-  }
-  if (strategy === "full") labels.push("video:*", "user:*");
-  return labels;
+  const items = planStaticRebuildEnqueues({
+    strategy,
+    importMode,
+    eventIds,
+    videoIds: strategy === "full" ? ["*"] : [],
+    xUserIds: strategy === "full" ? ["*"] : [],
+  });
+  if (items.length === 0) return ["なし"];
+  return items.map((item) =>
+    item.targetId === "global"
+      ? item.targetType
+      : `${item.targetType}:${item.targetId}`,
+  );
 }
 
 export function legacyImportDbReductionNotes(kind: "event" | "video"): string[] {

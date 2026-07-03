@@ -460,6 +460,7 @@ async function analyzeLegacyPayloadInternal(
       importedState: { ...flags, importMode: resolved.importMode },
       staticRebuildTargets: staticRebuildTargetLabels(
         resolved.staticRebuildStrategy,
+        resolved.importMode,
         [e.event.id],
       ),
       dbReductionNotes: legacyImportDbReductionNotes("event"),

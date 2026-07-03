@@ -6,6 +6,7 @@ import {
   defaultStaticRebuildStrategy,
   planStaticRebuildEnqueues,
   resolveImportedEventState,
+  staticRebuildTargetLabels,
 } from "./importState.ts";
 
 test("resolveImportedEventState defaults archive to inactive archived", () => {
@@ -97,6 +98,27 @@ test("planStaticRebuildEnqueues avoids per-video by default", () => {
   const types = items.map((i) => `${i.targetType}:${i.targetId}`);
   assert.ok(types.includes("event:PVSF2024Sp"));
   assert.ok(!types.some((t) => t.startsWith("video:")));
+});
+
+test("staticRebuildTargetLabels mirrors archive event enqueue plan", () => {
+  const labels = staticRebuildTargetLabels("event", "archive", ["PVSF2024Sp"]);
+  assert.deepEqual(labels, ["events_index", "search_index", "event:PVSF2024Sp"]);
+});
+
+test("staticRebuildTargetLabels includes list_recent for non-archive summary", () => {
+  const labels = staticRebuildTargetLabels("summary", "active_event", ["PVSF2024Sp"]);
+  assert.deepEqual(labels, ["events_index", "search_index", "list_recent"]);
+});
+
+test("staticRebuildTargetLabels returns none for draft mode", () => {
+  const labels = staticRebuildTargetLabels("event", "draft", ["PVSF2024Sp"]);
+  assert.deepEqual(labels, ["なし"]);
+});
+
+test("staticRebuildTargetLabels shows wildcard detail targets for full strategy", () => {
+  const labels = staticRebuildTargetLabels("full", "active_event", ["PVSF2024Sp"]);
+  assert.ok(labels.includes("video:*"));
+  assert.ok(labels.includes("user:*"));
 });
 
 test("buildUsedSoftwareJson stores legacy items", () => {
