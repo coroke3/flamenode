@@ -15,6 +15,7 @@ interface PreviewRow {
   conflict: boolean;
   warnings: string[];
   importedState?: {
+    visibility_status: "draft" | "private" | "public" | "archived";
     is_active: 0 | 1;
     is_entry_open: 0 | 1;
     is_archived: 0 | 1;
@@ -487,7 +488,9 @@ export function LegacyImportClient(): React.ReactElement {
                     <td className={styles.warning}>
                       {row.importedState ? (
                         <span>
-                          状態: archived=
+                          公開状態: {row.importedState.visibility_status}
+                          <br />
+                          互換フラグ: archived=
                           {row.importedState.is_archived} active=
                           {row.importedState.is_active}
                           <br />

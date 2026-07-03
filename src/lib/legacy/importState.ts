@@ -1,10 +1,12 @@
 import type { EnqueueStaticRebuildInput } from "@/lib/staticRebuild/types";
+import type { EventVisibilityStatus } from "@/lib/utils/eventStatusCore";
 
 export type LegacyImportMode = "archive" | "preserve" | "active_event" | "draft";
 
 export type StaticRebuildStrategy = "none" | "summary" | "event" | "full";
 
 export type ImportedEventFlags = {
+  visibility_status: EventVisibilityStatus;
   is_active: 0 | 1;
   is_entry_open: 0 | 1;
   is_archived: 0 | 1;
@@ -65,11 +67,17 @@ export function resolveImportedEventState(args: {
   now: number;
 }): ImportedEventFlags {
   if (args.mode === "draft") {
-    return { is_active: 0, is_entry_open: 0, is_archived: 0 };
+    return {
+      visibility_status: "draft",
+      is_active: 0,
+      is_entry_open: 0,
+      is_archived: 0,
+    };
   }
 
   if (args.mode === "active_event") {
     return {
+      visibility_status: "public",
       is_active: 1,
       is_entry_open: 0,
       is_archived: 0,
@@ -77,18 +85,29 @@ export function resolveImportedEventState(args: {
   }
 
   if (args.mode === "archive") {
-    return { is_active: 0, is_entry_open: 0, is_archived: 1 };
+    return {
+      visibility_status: "archived",
+      is_active: 0,
+      is_entry_open: 0,
+      is_archived: 1,
+    };
   }
 
   const end = args.endTime ?? null;
   const start = args.startTime ?? null;
 
   if (end && end < args.now) {
-    return { is_active: 0, is_entry_open: 0, is_archived: 1 };
+    return {
+      visibility_status: "archived",
+      is_active: 0,
+      is_entry_open: 0,
+      is_archived: 1,
+    };
   }
 
   if (start && start <= args.now && (!end || end >= args.now)) {
     return {
+      visibility_status: "public",
       is_active: 1,
       is_entry_open: 0,
       is_archived: 0,
@@ -97,13 +116,19 @@ export function resolveImportedEventState(args: {
 
   if (start && start > args.now) {
     return {
+      visibility_status: "draft",
       is_active: 0,
       is_entry_open: 0,
       is_archived: 0,
     };
   }
 
-  return { is_active: 0, is_entry_open: 0, is_archived: 1 };
+  return {
+    visibility_status: "archived",
+    is_active: 0,
+    is_entry_open: 0,
+    is_archived: 1,
+  };
 }
 
 export function defaultStaticRebuildStrategy(
@@ -238,6 +263,10 @@ export function buildUsedSoftwareJson(
 }
 
 export function importedStateLabel(flags: ImportedEventFlags): string {
+  if (flags.visibility_status === "public") return "public";
+  if (flags.visibility_status === "archived") return "archived";
+  if (flags.visibility_status === "private") return "private";
+  if (flags.visibility_status === "draft") return "draft";
   if (flags.is_archived === 1) return "archived";
   if (flags.is_active === 1) return "active";
   if (flags.is_archived === 0 && flags.is_active === 0) return "draft / scheduled";

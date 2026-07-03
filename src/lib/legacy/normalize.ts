@@ -1,6 +1,7 @@
 import { normalizeHttpUrl } from "@/lib/utils/url";
 import { looksLikeMojibake } from "@/lib/utils/mojibake";
 import { extractYoutubeId } from "@/lib/youtube/id";
+import type { EventVisibilityStatus } from "@/lib/utils/eventStatusCore";
 import {
   type LegacyImportMode,
   resolveImportedEventState,
@@ -202,6 +203,7 @@ export interface LegacyEventResult {
     img_url: string | null;
     start_time: number | null;
     end_time: number | null;
+    visibility_status: EventVisibilityStatus;
     is_active: 0 | 1;
     is_entry_open: 0 | 1;
     is_archived: 0 | 1;
@@ -303,6 +305,7 @@ export function normalizeEventInfo(
       img_url: normalizeIconUrl(input.img),
       start_time: startTime,
       end_time: endTime,
+      visibility_status: state.visibility_status,
       is_active: state.is_active,
       is_entry_open: state.is_entry_open,
       is_archived: state.is_archived,

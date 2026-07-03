@@ -429,6 +429,7 @@ async function analyzeLegacyPayloadInternal(
     }
     const exists = existingEventIds.has(e.event.id);
     const flags = {
+      visibility_status: e.event.visibility_status,
       is_active: e.event.is_active,
       is_entry_open: e.event.is_entry_open,
       is_archived: e.event.is_archived,

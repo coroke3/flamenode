@@ -17,7 +17,12 @@ test("resolveImportedEventState defaults archive to inactive archived", () => {
       endTime: now - 3_600,
       now,
     }),
-    { is_active: 0, is_entry_open: 0, is_archived: 1 },
+    {
+      visibility_status: "archived",
+      is_active: 0,
+      is_entry_open: 0,
+      is_archived: 1,
+    },
   );
 });
 
@@ -30,7 +35,12 @@ test("resolveImportedEventState preserve marks ended events archived", () => {
       endTime: now - 10_000,
       now,
     }),
-    { is_active: 0, is_entry_open: 0, is_archived: 1 },
+    {
+      visibility_status: "archived",
+      is_active: 0,
+      is_entry_open: 0,
+      is_archived: 1,
+    },
   );
 });
 
@@ -43,7 +53,30 @@ test("resolveImportedEventState active_event stays active", () => {
       endTime: now + 10_000,
       now,
     }),
-    { is_active: 1, is_entry_open: 0, is_archived: 0 },
+    {
+      visibility_status: "public",
+      is_active: 1,
+      is_entry_open: 0,
+      is_archived: 0,
+    },
+  );
+});
+
+test("resolveImportedEventState draft keeps legacy flags inactive", () => {
+  const now = 1_700_000_000;
+  assert.deepEqual(
+    resolveImportedEventState({
+      mode: "draft",
+      startTime: now - 10_000,
+      endTime: now + 10_000,
+      now,
+    }),
+    {
+      visibility_status: "draft",
+      is_active: 0,
+      is_entry_open: 0,
+      is_archived: 0,
+    },
   );
 });
 
