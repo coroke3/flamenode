@@ -4,10 +4,13 @@ import assert from "node:assert/strict";
 import {
   buildUsedSoftwareJson,
   defaultStaticRebuildStrategy,
+  filterSafePermissionKeys,
+  legacyStaffPermissionKeys,
   planStaticRebuildEnqueues,
   resolveImportedEventState,
   staticRebuildTargetLabels,
 } from "./importState.ts";
+import { getPresetPermissions } from "../auth/permissions/presets.ts";
 
 test("resolveImportedEventState defaults archive to inactive archived", () => {
   const now = 1_700_000_000;
@@ -148,4 +151,22 @@ test("buildUsedSoftwareJson caps item count and item length", () => {
   const parsed = JSON.parse(raw);
   assert.equal(parsed.items.length, 20);
   assert.equal(parsed.items[0].length, 80);
+});
+
+test("legacyStaffPermissionKeys mirrors owner and manager presets", () => {
+  assert.deepEqual(legacyStaffPermissionKeys(true), getPresetPermissions("owner"));
+  assert.deepEqual(legacyStaffPermissionKeys(false), getPresetPermissions("manager"));
+});
+
+test("filterSafePermissionKeys canonicalizes aliases and drops adminOnly keys", () => {
+  assert.deepEqual(
+    filterSafePermissionKeys([
+      "videos.youtube_id",
+      "video.chapter_admin",
+      "video.status",
+      "event.public_api",
+      "videos.review_data",
+    ]),
+    ["video.member_chapters", "video.status", "video.descriptions"],
+  );
 });

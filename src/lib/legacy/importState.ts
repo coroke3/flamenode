@@ -1,5 +1,7 @@
 import type { EnqueueStaticRebuildInput } from "@/lib/staticRebuild/types";
 import type { EventVisibilityStatus } from "@/lib/utils/eventStatusCore";
+import { normalizePermissionKeys } from "../auth/permissions/mask.ts";
+import { getPresetPermissions } from "../auth/permissions/presets.ts";
 
 export type LegacyImportMode = "archive" | "preserve" | "active_event" | "draft";
 
@@ -12,52 +14,12 @@ export type ImportedEventFlags = {
   is_archived: 0 | 1;
 };
 
-/** 旧インポートで event_staff.permission_mask に入れる代表者向けキー（adminOnly 除外） */
-export const LEGACY_REPRESENTATIVE_PERMISSION_KEYS = [
-  "event.basic",
-  "event.publish",
-  "event.slots",
-  "event.members",
-  "event.questions",
-  "event.review",
-  "event.notifications",
-  "video.basics",
-  "video.descriptions",
-  "video.credits",
-  "video.members",
-  "video.member_chapters",
-  "video.status",
-] as const;
-
-export const LEGACY_BASIC_STAFF_PERMISSION_KEYS = [
-  "event.basic",
-  "event.publish",
-  "event.slots",
-  "event.questions",
-  "event.review",
-  "event.notifications",
-  "video.basics",
-  "video.descriptions",
-  "video.credits",
-  "video.members",
-  "video.member_chapters",
-  "video.status",
-] as const;
-
-const DANGEROUS_PERMISSION_PREFIXES = ["admin.", "system."] as const;
-const DANGEROUS_PERMISSION_KEYS = new Set([
-  "videos.youtube_id",
-  "videos.primary_event",
-  "video.identity",
-  "video.chapter_admin",
-]);
+/** 旧インポートで event_staff.permission_mask に入れるキー（adminOnly 除外）。 */
+export const LEGACY_REPRESENTATIVE_PERMISSION_KEYS = getPresetPermissions("owner");
+export const LEGACY_BASIC_STAFF_PERMISSION_KEYS = getPresetPermissions("manager");
 
 export function filterSafePermissionKeys(keys: readonly string[]): string[] {
-  return keys.filter(
-    (key) =>
-      !DANGEROUS_PERMISSION_KEYS.has(key) &&
-      !DANGEROUS_PERMISSION_PREFIXES.some((prefix) => key.startsWith(prefix)),
-  );
+  return normalizePermissionKeys(keys, { allowAdminOnly: false });
 }
 
 export function resolveImportedEventState(args: {
