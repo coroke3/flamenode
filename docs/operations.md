@@ -241,6 +241,7 @@ npm run check:public-api-leaks
 - exit 0: OK
 - exit 1: 禁止キー検出 (デプロイ前にブロックすべき)
 - exit 2: fetch 失敗 (dev server 未起動)
+- exit 3: HTTP 4xx/5xx または JSON 解析失敗 (API エラーとして修正すべき)
 
 検査対象エンドポイントは `scripts/check-public-api-leaks.mjs` 上部参照。
 禁止キーリストは `src/lib/api/publicDto.ts` の `FORBIDDEN_PUBLIC_KEYS` と同期。
