@@ -18,5 +18,28 @@ if (!fs.existsSync(target)) {
   process.exit(0);
 }
 
-fs.rmSync(target, { recursive: true, force: true });
-console.log(`[clean-next-cache] Removed ${target}`);
+try {
+  fs.rmSync(target, {
+    recursive: true,
+    force: true,
+    maxRetries: process.platform === "win32" ? 10 : 0,
+    retryDelay: 200,
+  });
+  console.log(`[clean-next-cache] Removed ${target}`);
+} catch (err) {
+  if (
+    err &&
+    typeof err === "object" &&
+    ("code" in err) &&
+    (err.code === "EPERM" || err.code === "EBUSY")
+  ) {
+    console.error(
+      "[clean-next-cache] Failed to remove .next because another process is using it.",
+    );
+    console.error(
+      "[clean-next-cache] Stop running Next.js dev/start/build processes for this workspace, then retry.",
+    );
+    process.exit(1);
+  }
+  throw err;
+}
