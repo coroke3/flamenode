@@ -766,10 +766,11 @@ export const systemSettings = sqliteTable("system_settings", {
   upcoming_editable_fields: text("upcoming_editable_fields"),
   is_maintenance_mode: integer("is_maintenance_mode").default(0),
   history_retention_days: integer("history_retention_days").default(90),
+  /** @deprecated 互換用。新規の動作モード判定は operation_mode を参照する。 */
   cost_guard_mode: text("cost_guard_mode", {
     enum: ["normal", "economy", "read_only", "static_only", "maintenance"],
   }).default("normal"),
-  /** 正本の動作モード。cost_guard_mode から移行予定。 */
+  /** 正本の動作モード。 */
   operation_mode: text("operation_mode", {
     enum: ["normal", "economy", "read_only", "static_only", "maintenance"],
   }).default("normal"),

@@ -40,7 +40,7 @@ const TONE: Record<
 };
 
 /**
- * cost_guard_mode が normal 以外のとき、上部に簡易バナーを表示するサーバーコンポーネント。
+ * operation_mode が normal 以外のとき、上部に簡易バナーを表示するサーバーコンポーネント。
  * DB アクセスに失敗した場合は何も出さない (静かに失敗)。
  */
 export async function CostGuardBanner(): Promise<React.ReactElement | null> {
@@ -53,7 +53,7 @@ export async function CostGuardBanner(): Promise<React.ReactElement | null> {
     const rows = await db.select().from(systemSettings).limit(1);
     const r = rows[0];
     if (r) {
-      mode = (r.operation_mode ?? r.cost_guard_mode ?? "normal") as Mode;
+      mode = (r.operation_mode ?? "normal") as Mode;
       maintenance = r.is_maintenance_mode ?? 0;
       reason = r.cost_guard_reason ?? null;
     }

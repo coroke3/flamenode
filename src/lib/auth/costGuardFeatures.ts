@@ -29,7 +29,7 @@ export type CostGuardCheckResult =
  *
  * 判定順:
  * 1. cost_guard_exception_features_json に feature があり、例外期限内 → 通す
- * 2. cost_guard_mode が read_only / static_only / maintenance → mode で停止
+ * 2. operation_mode が read_only / static_only / maintenance → mode で停止
  * 3. disabled_features_json に feature があれば → feature で停止
  * 4. それ以外 → 通す
  *
@@ -44,7 +44,6 @@ export async function evaluateCostGuard(
     await db
       .select({
         operation_mode: systemSettings.operation_mode,
-        cost_guard_mode: systemSettings.cost_guard_mode,
         is_maintenance_mode: systemSettings.is_maintenance_mode,
         disabled_features_json: systemSettings.disabled_features_json,
         cost_guard_exception_until: systemSettings.cost_guard_exception_until,
@@ -87,10 +86,9 @@ export async function evaluateCostGuard(
 
 function resolveOperationMode(row: {
   operation_mode?: string | null;
-  cost_guard_mode?: string | null;
   is_maintenance_mode?: number | null;
 }): OperationMode {
-  const raw = row.operation_mode ?? row.cost_guard_mode ?? "normal";
+  const raw = row.operation_mode ?? "normal";
   if (isOperationMode(raw)) return raw;
   if (row.is_maintenance_mode === 1) return "maintenance";
   return "normal";

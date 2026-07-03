@@ -258,7 +258,7 @@ async function getImportWriteBlockReason(): Promise<string | null> {
   const db = getDatabase();
   if (!db) return null;
   const rows = await db.select().from(systemSettings).limit(1);
-  const mode = rows[0]?.operation_mode ?? rows[0]?.cost_guard_mode ?? "normal";
+  const mode = rows[0]?.operation_mode ?? "normal";
   const isMaintenance = rows[0]?.is_maintenance_mode === 1;
   if (isMaintenance || mode === "maintenance") {
     return "Import apply is disabled during maintenance. Dry run is still available.";

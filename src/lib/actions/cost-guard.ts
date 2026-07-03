@@ -82,7 +82,6 @@ export async function setCostGuardMode(
   const now = Math.floor(Date.now() / 1000);
   await upsertGlobal(db, {
     operation_mode: mode,
-    cost_guard_mode: mode,
     is_maintenance_mode: mode === "maintenance" ? 1 : 0,
     cost_guard_reason: reason ?? null,
     cost_guard_updated_by_user_id: guard.userId,
@@ -115,20 +114,18 @@ export async function setMaintenanceMode(
     await db
       .select({
         operation_mode: systemSettings.operation_mode,
-        cost_guard_mode: systemSettings.cost_guard_mode,
       })
       .from(systemSettings)
       .where(eq(systemSettings.id, "default"))
       .limit(1)
   )[0];
   const currentMode = normalizeOperationMode(
-    current?.operation_mode ?? current?.cost_guard_mode,
+    current?.operation_mode,
   );
   const nextMode: OperationMode =
     next === 1 ? "maintenance" : currentMode === "maintenance" ? "normal" : currentMode;
   await upsertGlobal(db, {
     operation_mode: nextMode,
-    cost_guard_mode: nextMode,
     is_maintenance_mode: next === 1 ? 1 : 0,
   });
   await db.insert(historyLogs).values({
