@@ -2,6 +2,7 @@
 
 > 2026-07-03 update: CSV / TSV / legacy import flows require a preview before apply. Admin spreadsheet and legacy import APIs reject direct apply without the matching preview token.
 > 2026-07-03 update: `operation_mode` resolution is shared across app reads and static rebuild workers. `content-jobs` now has a tested mode policy. `/list` can read `list/recent.json` in `static_only` mode.
+> 2026-07-03 update: Legacy import reuses the stage-permission answer sync path. Imported `stage_permission` / legacy `righttype` values populate `video_custom_answers` when matching `event_custom_questions` exist.
 
 最終更新: 2026-07-03
 

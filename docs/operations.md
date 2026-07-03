@@ -420,6 +420,7 @@ SELECT status, COUNT(*) FROM notification_outbox
 - `video_stats` は score-recalc worker / 旧DB fallback との dual-write のため当面残す。新規設計では表示正本にしない
 - `video_youtube_metadata` は YouTube 同期のため維持し、インポート時も作成する
 - `video_softwares` は作らず、`videos.used_software_json` に統合する
+- `stage_permission` / legacy `righttype` は、対象イベントに `event_custom_questions` があれば `video_custom_answers` へも同期する
 - `event_staff_permissions` へは新規書き込みしない。取り込み時の運営権限は `event_staff.permission_preset` / `permission_mask` / `custom_permission_keys_json` に統合する
 - `announcements` は作らない（必要なら `system_settings.announcements_json` を管理画面から登録）
 - `cost_usage_snapshots` は D1 に保存せず KV へ逃がす（インポート処理では書かない）
