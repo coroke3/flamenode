@@ -1544,7 +1544,7 @@ export async function updateVideo(
       intro_comment: src.intro_comment,
       highlights: src.highlights,
       production_story: src.production_story,
-      used_software: targetSoftwareLabel,
+      used_software: src.used_software ?? targetSoftwareLabel,
       stage_permission: src.stage_permission,
       closing_comment: src.closing_comment,
       collaboration_type: src.collaboration_type,
