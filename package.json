@@ -42,7 +42,7 @@
     "test:youtube": "node --test --experimental-strip-types src/lib/youtube/id.test.mjs",
     "test:unit": "node --test --experimental-strip-types workers/**/*.test.mjs src/**/*.test.mjs",
     "test:static-rebuild": "node --test scripts/static-rebuild.test.mjs",
-    "pages:build": "next-on-pages && node scripts/pages-postbuild.mjs",
+    "pages:build": "node scripts/run-next-on-pages.cjs && node scripts/pages-postbuild.mjs",
     "pages:dev": "npm run pages:build && wrangler pages dev .vercel/output/static --compatibility-flag=nodejs_compat --d1=DB --r2=BUCKET --kv=KV",
     "pages:deploy": "npm run pages:build && wrangler pages deploy .vercel/output/static --project-name=flamenode",
     "workers:deploy": "node scripts/deploy-workers.mjs",
