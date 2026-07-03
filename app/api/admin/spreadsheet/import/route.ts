@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { SpreadsheetDelimiterMode } from "@/lib/admin/spreadsheet/paste";
 import {
   buildReadonlyImportColumnWarnings,
+  omitReadonlyImportColumns,
   prepareSpreadsheetImportRows,
 } from "@/lib/admin/spreadsheet/importPrep";
 import {
@@ -67,12 +68,17 @@ export async function POST(req: Request): Promise<Response> {
       hasHeader,
       delimiter,
     });
+    const readonlyColumns = ctx.columns
+      .map((column) => column.name)
+      .filter((column) => !isSpreadsheetColumnEditable(ctx.def, column));
     const readonlyWarnings = buildReadonlyImportColumnWarnings({
       rows,
       mappedColumns,
-      readonlyColumns: ctx.columns
-        .map((column) => column.name)
-        .filter((column) => !isSpreadsheetColumnEditable(ctx.def, column)),
+      readonlyColumns,
+    });
+    const writableRows = omitReadonlyImportColumns({
+      rows,
+      readonlyColumns,
     });
     const importWarnings = [...warnings, ...readonlyWarnings];
     const previewToken = await buildSpreadsheetImportPreviewToken({
@@ -80,7 +86,7 @@ export async function POST(req: Request): Promise<Response> {
       mode,
       columns: ctx.columnNames,
       primaryKeys: ctx.primaryKeys,
-      rows,
+      rows: writableRows,
     });
 
     if (body.dryRun) {
@@ -88,10 +94,10 @@ export async function POST(req: Request): Promise<Response> {
         ok: true,
         dryRun: true,
         previewToken,
-        rowCount: rows.length,
+        rowCount: writableRows.length,
         mappedColumns,
         warnings: importWarnings,
-        preview: rows.slice(0, 20),
+        preview: writableRows.slice(0, 20),
       });
     }
 
@@ -114,7 +120,7 @@ export async function POST(req: Request): Promise<Response> {
       {
         table,
         mode,
-        rows,
+        rows: writableRows,
         operatorId: guard.session.userId,
       },
       ctx,

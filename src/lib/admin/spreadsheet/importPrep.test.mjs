@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildReadonlyImportColumnWarnings,
   buildSpreadsheetImportLocalPreview,
+  omitReadonlyImportColumns,
   prepareSpreadsheetImportRows,
 } from "./importPrepCore.ts";
 import { SPREADSHEET_IMPORT_MAX_ROWS } from "#spreadsheet/constants";
@@ -42,6 +43,27 @@ test("prepareSpreadsheetImportRows rejects empty input", () => {
         delimiter: "auto",
       }),
     /no_rows/,
+  );
+});
+
+test("omitReadonlyImportColumns removes ignored columns before token/apply", () => {
+  assert.deepEqual(
+    omitReadonlyImportColumns({
+      rows: [
+        {
+          id: "1",
+          title: "Title",
+          custom_answers: "{}",
+        },
+      ],
+      readonlyColumns: ["custom_answers"],
+    }),
+    [
+      {
+        id: "1",
+        title: "Title",
+      },
+    ],
   );
 });
 

@@ -96,6 +96,22 @@ export function buildReadonlyImportColumnWarnings(opts: {
   return [`Readonly columns are ignored on import: ${ignored.join(", ")}`];
 }
 
+export function omitReadonlyImportColumns(opts: {
+  rows: Record<string, string | null>[];
+  readonlyColumns: string[];
+}): Record<string, string | null>[] {
+  if (opts.readonlyColumns.length === 0) return opts.rows;
+  const readonlySet = new Set(opts.readonlyColumns);
+  return opts.rows.map((row) => {
+    const next: Record<string, string | null> = {};
+    for (const [column, value] of Object.entries(row)) {
+      if (readonlySet.has(column)) continue;
+      next[column] = value;
+    }
+    return next;
+  });
+}
+
 /**
  * インポート用の行データを解決し、共通検証を通す。
  * 失敗時は errors.ts が理解できる Error を throw する。
