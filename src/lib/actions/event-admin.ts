@@ -5,7 +5,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
-import { assertCanEditEvent } from "@/lib/auth/ownership";
+import { canEditEvent } from "@/lib/auth/ownership";
 import {
   eventCustomQuestions,
   eventTemplates,
@@ -26,6 +26,9 @@ export interface EventActionResult {
   message?: string;
   eventId?: string;
 }
+
+type EventUpdatePayload = Partial<typeof events.$inferInsert>;
+type EventEditSection = "basic" | "publish" | "questions" | "slots";
 
 const eventSchema = z.object({
   id: z.string().trim().min(1).max(64).optional(),
@@ -321,59 +324,124 @@ export async function updateEvent(
   const data = parsed.data;
   if (!data.id) return { ok: false, message: "id が必要です。" };
 
-  try {
-    await assertCanEditEvent(
-      db,
-      { id: u.id, role: u.role ?? null },
-      data.id,
-      "event.basic",
-    );
-  } catch (e) {
+  const user = { id: u.id, role: u.role ?? null };
+  const [canBasic, canPublish, canQuestions, canSlots] = await Promise.all([
+    canEditEvent(db, user, data.id, "event.basic"),
+    canEditEvent(db, user, data.id, "event.publish"),
+    canEditEvent(db, user, data.id, "event.questions"),
+    canEditEvent(db, user, data.id, "event.slots"),
+  ]);
+  if (!canBasic && !canPublish && !canQuestions && !canSlots) {
     return {
       ok: false,
-      message: e instanceof Error ? e.message : "権限がありません。",
+      message: "このイベント設定を変更する権限がありません。",
     };
   }
 
+  const before = (
+    await db.select().from(events).where(eq(events.id, data.id)).limit(1)
+  )[0];
+  if (!before) return { ok: false, message: "イベントが見つかりません。" };
+
   const now = Math.floor(Date.now() / 1000);
-  const videoFormSettingsJson = buildVideoFormSettingsJson(formData, data);
-  await db
-    .update(events)
-    .set({
+  const updatePayload: EventUpdatePayload = { updated_at: now };
+  const updatedSections: EventEditSection[] = [];
+  const changedByPermission: Record<EventEditSection, string> = {} as Record<
+    EventEditSection,
+    string
+  >;
+
+  if (canBasic) {
+    Object.assign(updatePayload, {
       title: data.title,
       event_type: data.event_type,
       explanation: data.explanation ?? null,
       icon_url: data.icon_url ?? null,
       img_url: data.img_url ?? null,
       accent_color: data.accent_color ?? null,
+      start_time: parseDateInput(data.start_time),
+      end_time: parseDateInput(data.end_time),
+    });
+    updatedSections.push("basic");
+    changedByPermission.basic = "event.basic";
+  }
+
+  if (canPublish) {
+    Object.assign(updatePayload, {
       is_active: data.is_active,
       is_archived: data.is_archived,
+      entry_start_time: parseDateInput(data.entry_start_time),
+      entry_end_time: parseDateInput(data.entry_end_time),
       allow_user_video_event_links: data.allow_user_video_event_links,
+    });
+    updatedSections.push("publish");
+    changedByPermission.publish = "event.publish";
+  }
+
+  let videoFormSettingsJson: string | null = null;
+  if (canQuestions) {
+    videoFormSettingsJson = buildVideoFormSettingsJson(formData, data);
+    Object.assign(updatePayload, {
       allow_user_video_edits: data.allow_user_video_edits,
       user_video_edit_permission_keys_json:
         data.user_video_edit_permission_keys_json ?? null,
       video_form_settings_json: videoFormSettingsJson,
-      start_time: parseDateInput(data.start_time),
-      end_time: parseDateInput(data.end_time),
-      entry_start_time: parseDateInput(data.entry_start_time),
-      entry_end_time: parseDateInput(data.entry_end_time),
+    });
+    updatedSections.push("questions");
+    changedByPermission.questions = "event.questions";
+  }
+
+  if (canSlots) {
+    Object.assign(updatePayload, {
       max_slots_per_video: data.max_slots_per_video,
       max_consecutive_slots_per_entry: data.max_consecutive_slots_per_entry,
       slot_part_gap_minutes: data.slot_part_gap_minutes,
       slot_type: data.slot_type,
       slot_visibility_mode: data.slot_visibility_mode,
       parts_json: buildPartsJson(data.parts_text),
-      updated_at: now,
-    })
+    });
+    updatedSections.push("slots");
+    changedByPermission.slots = "event.slots";
+  }
+
+  await db
+    .update(events)
+    .set(updatePayload)
     .where(eq(events.id, data.id));
 
-  await syncStagePermissionCustomQuestions(db, data.id, videoFormSettingsJson, now);
+  if (canQuestions && videoFormSettingsJson != null) {
+    await syncStagePermissionCustomQuestions(db, data.id, videoFormSettingsJson, now);
+  }
 
   await db.insert(historyLogs).values({
     table_name: "events",
     record_id: data.id,
     action: "UPDATE",
-    after_data: JSON.stringify({ title: data.title, is_active: data.is_active }),
+    before_data: JSON.stringify({
+      updated_sections: updatedSections,
+      basic: canBasic
+        ? {
+            title: before.title,
+            event_type: before.event_type,
+            start_time: before.start_time,
+            end_time: before.end_time,
+          }
+        : undefined,
+      publish: canPublish
+        ? {
+            is_active: before.is_active,
+            is_archived: before.is_archived,
+            entry_start_time: before.entry_start_time,
+            entry_end_time: before.entry_end_time,
+            allow_user_video_event_links: before.allow_user_video_event_links,
+          }
+        : undefined,
+    }),
+    after_data: JSON.stringify({
+      updated_sections: updatedSections,
+      changed_by_permission: changedByPermission,
+      update: updatePayload,
+    }),
     operator_discord_id: u.id,
     retention_class: "normal",
     created_at: now,

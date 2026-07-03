@@ -66,6 +66,12 @@ interface EventFormProps {
   initial?: EventFormInitial;
   /** 作成時にテンプレート由来の JSON 項目をサーバーへ渡す */
   templateId?: string;
+  editableSections?: {
+    basic: boolean;
+    publish: boolean;
+    questions: boolean;
+    slots: boolean;
+  };
 }
 
 function unixToInputDateTime(ts: number | null | undefined): string {
@@ -234,6 +240,7 @@ export function EventForm({
   mode,
   initial = {},
   templateId,
+  editableSections,
 }: EventFormProps): React.ReactElement {
   const router = useRouter();
   const [busy, startTransition] = React.useTransition();
@@ -292,6 +299,16 @@ export function EventForm({
     );
   };
 
+  const sectionStatus =
+    mode === "edit" && editableSections
+      ? [
+          ["基本情報", editableSections.basic],
+          ["公開・受付", editableSections.publish],
+          ["投稿フォーム", editableSections.questions],
+          ["枠設定", editableSections.slots],
+        ] as const
+      : [];
+
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
@@ -325,6 +342,32 @@ export function EventForm({
       ) : null}
       {mode === "create" && templateId ? (
         <input type="hidden" name="template_id" value={templateId} />
+      ) : null}
+
+      {sectionStatus.length > 0 ? (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 6,
+            padding: 10,
+            border: "1px solid var(--border-subtle)",
+            borderRadius: "var(--radius-sm)",
+            background: "var(--bg-surface)",
+          }}
+        >
+          {sectionStatus.map(([label, allowed]) => (
+            <span
+              key={label}
+              className={allowed ? "fn-badge fn-badge-soft" : "fn-badge"}
+              style={{
+                opacity: allowed ? 1 : 0.55,
+              }}
+            >
+              {label}: {allowed ? "変更可" : "権限なし"}
+            </span>
+          ))}
+        </div>
       ) : null}
 
       <div>

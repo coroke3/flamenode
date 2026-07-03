@@ -40,13 +40,22 @@ export default async function ManageEventEditPage({
   )[0];
   if (!ev) notFound();
 
-  const canManageBasic = await canEditEvent(
-    db,
-    { id: user.id, role: user.role ?? null },
-    id,
-    "event.basic",
-  );
-  if (!canManageBasic) notFound();
+  const eventEditor = { id: user.id, role: user.role ?? null };
+  const [canManageBasic, canManagePublish, canManageQuestions, canManageSlots] =
+    await Promise.all([
+      canEditEvent(db, eventEditor, id, "event.basic"),
+      canEditEvent(db, eventEditor, id, "event.publish"),
+      canEditEvent(db, eventEditor, id, "event.questions"),
+      canEditEvent(db, eventEditor, id, "event.slots"),
+    ]);
+  if (
+    !canManageBasic &&
+    !canManagePublish &&
+    !canManageQuestions &&
+    !canManageSlots
+  ) {
+    notFound();
+  }
 
   const isAdmin = user.role === "admin";
 
@@ -68,6 +77,12 @@ export default async function ManageEventEditPage({
       <section className="fn-console-section">
         <EventForm
           mode="edit"
+          editableSections={{
+            basic: canManageBasic,
+            publish: canManagePublish,
+            questions: canManageQuestions,
+            slots: canManageSlots,
+          }}
           initial={{
             id: ev.id,
             title: ev.title,
