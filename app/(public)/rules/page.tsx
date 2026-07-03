@@ -8,45 +8,13 @@ import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 import { sanitizeUserHtml } from "@/lib/utils/sanitizeUserHtml";
 import { sanitizeNextPath } from "#utils/next";
+import {
+  DEFAULT_TERMS_MARKDOWN,
+  DEFAULT_TERMS_VERSION_LABEL,
+} from "@/lib/terms/defaultTerms";
 
 export const metadata: Metadata = { title: "利用規約" };
 export const dynamic = "force-dynamic";
-
-const FALLBACK = `# FlameNode 利用規約 (暫定)
-
-FlameNode は YouTube 埋め込みを利用した動画プラットフォームです。
-本サイトを利用される前に、以下の項目に同意の上、ご利用ください。
-
-## 1. アカウント
-
-* Discord 認証を介したアカウントを利用します。
-* X (Twitter) アカウントは X ID として連携でき、作者・参加者の主体として表示されます。
-
-## 2. 投稿
-
-* YouTube に公開された動画のみを取り扱います。動画ファイル本体は本サービスにアップロードされません。
-* 著作権・肖像権など第三者の権利を侵害する動画の登録は禁止します。
-
-## 3. イベント
-
-* 第三者主催のイベントは、運営の承認のもと開催できます。
-* イベント運営は、参加者の作品情報を必要な範囲で閲覧・編集できます。
-
-## 4. 禁止事項
-
-* 他者への迷惑行為、プラットフォームの安定運用を妨げる行為。
-* 不正な情報の登録、なりすまし、悪意あるリンク投稿。
-
-## 5. 免責
-
-* 本サービスは無料で提供されます。可用性・継続性を保証するものではありません。
-* 公開状態の管理は投稿者の責任で行ってください。
-
-## 6. 変更
-
-* 本規約は予告なく変更される場合があります。重要な変更があった場合は、次回投稿時に再同意を求めます。
-
-更新日: 2026-05-01`;
 
 function renderMarkdown(md: string): string {
   // 軽量 Markdown ライク変換 (見出し・リスト・段落のみ)
@@ -106,9 +74,9 @@ export default async function RulesPage({
     return null;
   });
 
-  const body = data?.body ?? FALLBACK;
+  const body = data?.body ?? DEFAULT_TERMS_MARKDOWN;
   const updatedAt = data?.updatedAt ?? null;
-  const versionLabel = data?.versionLabel ?? "draft-2026-05";
+  const versionLabel = data?.versionLabel ?? DEFAULT_TERMS_VERSION_LABEL;
 
   return (
     <main className="fn-public-container fn-page">
