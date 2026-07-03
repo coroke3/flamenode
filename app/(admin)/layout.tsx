@@ -115,7 +115,7 @@ export default async function AdminLayout({
   if (user.role !== "admin") redirect("/dashboard");
 
   return (
-    <div data-admin-shell data-fn-surface="public">
+    <div data-admin-shell data-fn-surface="admin">
       <PublicHeader user={user} />
       <div className="admin-shell">
         <div className="admin-frame">

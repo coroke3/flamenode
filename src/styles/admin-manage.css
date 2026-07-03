@@ -1,5 +1,135 @@
 /* admin / manage シェル差別化（公開面リデザインとは別トーン） */
 
+/* 非公開面でも共通ヘッダー/フッターの基本レイアウトだけは維持する。
+   公開ページ専用のカード/フォーム/ヒーローCSSは data-fn-surface="public" に閉じる。 */
+[data-fn-surface="admin"],
+[data-fn-surface="manage"],
+[data-fn-surface="personal"] {
+  min-height: 100vh;
+  color: var(--text-primary);
+  background: var(--bg-base);
+}
+
+[data-fn-surface="admin"] .fn-header,
+[data-fn-surface="manage"] .fn-header,
+[data-fn-surface="personal"] .fn-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  overflow-x: clip;
+  background: color-mix(in srgb, var(--bg-base) 94%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--hairline, var(--border-subtle));
+}
+
+[data-fn-surface="admin"] .fn-header-inner,
+[data-fn-surface="manage"] .fn-header-inner,
+[data-fn-surface="personal"] .fn-header-inner {
+  display: grid;
+  grid-template-columns: max-content 1fr max-content;
+  align-items: center;
+  gap: 24px;
+  min-height: var(--header-h, 64px);
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+[data-fn-surface="admin"] .fn-header-right,
+[data-fn-surface="manage"] .fn-header-right,
+[data-fn-surface="personal"] .fn-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+[data-fn-surface="admin"] .fn-footer,
+[data-fn-surface="manage"] .fn-footer,
+[data-fn-surface="personal"] .fn-footer {
+  margin-top: 64px;
+  border-top: 1px solid var(--hairline);
+  background: var(--bg-surface);
+}
+
+[data-fn-surface="admin"] .fn-footer-top,
+[data-fn-surface="manage"] .fn-footer-top,
+[data-fn-surface="personal"] .fn-footer-top {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 32px;
+  padding: 48px 0 28px;
+}
+
+[data-fn-surface="admin"] .fn-footer-brand,
+[data-fn-surface="manage"] .fn-footer-brand,
+[data-fn-surface="personal"] .fn-footer-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+[data-fn-surface="admin"] .fn-footer-logo-row,
+[data-fn-surface="manage"] .fn-footer-logo-row,
+[data-fn-surface="personal"] .fn-footer-logo-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-primary);
+}
+
+[data-fn-surface="admin"] .fn-footer-cols,
+[data-fn-surface="manage"] .fn-footer-cols,
+[data-fn-surface="personal"] .fn-footer-cols {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+}
+
+[data-fn-surface="admin"] .fn-footer-cols ul,
+[data-fn-surface="manage"] .fn-footer-cols ul,
+[data-fn-surface="personal"] .fn-footer-cols ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+}
+
+[data-fn-surface="admin"] .fn-footer-bottom,
+[data-fn-surface="manage"] .fn-footer-bottom,
+[data-fn-surface="personal"] .fn-footer-bottom {
+  display: flex;
+  justify-content: space-between;
+  padding: 16px 0;
+  border-top: 1px solid var(--hairline);
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  color: var(--text-faint);
+}
+
+@media (max-width: 1000px) {
+  [data-fn-surface="admin"] .fn-header-inner,
+  [data-fn-surface="manage"] .fn-header-inner,
+  [data-fn-surface="personal"] .fn-header-inner {
+    grid-template-columns: 1fr max-content;
+  }
+}
+
+@media (max-width: 760px) {
+  [data-fn-surface="admin"] .fn-footer-top,
+  [data-fn-surface="manage"] .fn-footer-top,
+  [data-fn-surface="personal"] .fn-footer-top {
+    grid-template-columns: 1fr;
+  }
+
+  [data-fn-surface="admin"] .fn-footer-cols,
+  [data-fn-surface="manage"] .fn-footer-cols,
+  [data-fn-surface="personal"] .fn-footer-cols {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 [data-admin-shell] {
   --admin-bg: #0a0b0d;
   --admin-surface: #12141a;

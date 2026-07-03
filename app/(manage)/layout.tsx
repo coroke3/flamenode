@@ -37,7 +37,7 @@ export default async function ManageLayout({
   }
 
   return (
-    <div data-manage-shell data-fn-surface="public">
+    <div data-manage-shell data-fn-surface="manage">
       <CostGuardBanner />
       <PublicHeader user={user} />
       <div className="manage-shell">
