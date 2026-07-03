@@ -7,6 +7,7 @@
 > 2026-07-04 update: Legacy import no longer writes deprecated `videos.custom_answers`; dropped legacy-only values are surfaced as import warnings.
 > 2026-07-04 update: Event templates no longer copy legacy `events.custom_questions`; template snapshots store normalized `custom_question_definitions` and restore them into `event_custom_questions`.
 > 2026-07-04 update: Admin spreadsheet import treats legacy compatibility columns as read-only, including event visibility flags, operation-mode fallbacks, `videos.stage_permission`, and fixed `video_chapters.marker_kind=chapter` inserts.
+> 2026-07-04 update (Prompt 7): `event_group_events` を正本化し `events.event_group_id` の読み取り fallback を削除。`src/lib/publicData/loader.ts` で R2 優先 + DB fallback + 再生成キュー投入。`primary_event_id` ↔ `video_events` 同期と repair script 追加。
 
 最終更新: 2026-07-04
 
@@ -22,14 +23,13 @@ D1 を正本、R2/KV の静的 JSON は公開配信用キャッシュとする�
 | 項目 | 意図 | 現状 | 分類 | 優先度 | 対応ファイル候補 |
 |------|------|------|------|--------|-----------------|
 | OperationMode 化 | cost_guard_mode / is_maintenance_mode を統一 | resolver / policy / getMode を共通化。旧カラムは互換 fallback のみ | implemented | 高 | system_settings, costGuard.ts, queue.ts |
-| static JSON read layer | 公開ページを R2 静的 JSON に寄せる | `static_only` 時の `/list` recent と `/event` index は R2 `list/recent.json` / `events/index.json` を利用。top / event detail / video / user は D1 fallback | partial | 高 | public pages, lib/publicData/ |
+| static JSON read layer | 公開ページを R2 静的 JSON に寄せる | `loader.ts` で R2 優先 + overlay 時 DB fallback + miss 時 enqueue。`/list` `/event` 接続済み。event/video detail loader 追加、ページ全面接続は partial | partial | 高 | lib/publicData/, public pages |
 | static rebuild queue policy | mode に応じた queue 処理 | maintenance停止 / economy件数制限 / read_only対象制限 / static_only highのみを policy 化 | implemented | 高 | workers/json-generator/queue.ts |
 | api_endpoints 削除 | events.public_api_enabled に統一 | deprecated 表記済み | partial | 高 | schema.ts, admin pages |
 | video_stats 削除 | videos 側列に統一 | schema.ts に残存 | planned | 高 | schema.ts, score-recalc worker |
 | event_staff 権限正本 | permission_preset / permission_mask / custom_permission_keys_json | mask/preset 実装済み | partial | 高 | permissions/keys.ts, presets.ts, mask.ts |
-| event groups 正式実装 | 複数イベント所属 | DB schema + helper + 公開ページ完了 | implemented | 中 | schema.ts, eventGroups.ts, /groups |
-| software catalog 候補辞書化 | 入力候補として利用 | usage_count/is_active/is_verified 追加済み | partial | 中 | softwareCatalog, admin pages |
-| custom questions 本格実装 | event_custom_questions / video_custom_answers | EventForm/VideoForm の追加質問と正規化テーブル同期は実装済み。select/radio等のUIは未拡張 | partial | 中 | EventForm, VideoForm, video.ts |
+| event groups 正式実装 | 複数イベント所属 | `event_group_events` 正本。legacy `events.event_group_id` クリア migration + repair script | implemented | 中 | eventGroups.ts, migrations/0039 |
+| custom questions 本格実装 | event_custom_questions / video_custom_answers | 投稿経路で `replaceGeneralCustomAnswers` 配線済み。EventForm の一般質問 UI は partial | partial | 中 | EventForm, video.ts, customQuestionAnswers.ts |
 | Worker 5→3 統合 | Cron Trigger 削減 | 3本構成に統合済み | implemented | 中 | workers/fast-jobs, content-jobs, sync-jobs |
 | 通知・運営受信箱 | notification-outbox 基盤 | DB 作成済み | partial | 中 | notification-dispatcher |
 | YouTube 同期リトライ | バックオフ / リトライ | 基本実装済み | implemented | 低 | youtube-sync worker |

@@ -129,7 +129,7 @@ async function applyMigrationsIfNeeded(DB: LocalD1Database): Promise<void> {
   // 初期 system_settings
   try {
     await DB.prepare(
-      "INSERT OR REPLACE INTO system_settings (id, cost_guard_mode, auto_cost_guard_enabled, is_maintenance_mode, history_retention_days) VALUES ('default', 'normal', 1, 0, 90)",
+      "INSERT OR REPLACE INTO system_settings (id, operation_mode, auto_cost_guard_enabled, is_maintenance_mode, history_retention_days) VALUES ('default', 'normal', 1, 0, 90)",
     ).run();
   } catch {
     /* noop */

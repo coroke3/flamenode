@@ -56,6 +56,7 @@ const ADMIN_NAV_GROUPS_BASE: AdminSidebarGroup[] = [
     items: [
       { href: "/admin/users", label: "ユーザー / X ID", icon: <Icon name="users" size={14} /> },
       { href: "/admin/users?view=permissions", label: "権限管理", icon: <Icon name="settings" size={14} /> },
+      { href: "/admin/permissions/simulator", label: "権限シミュレーター", icon: <Icon name="user" size={14} /> },
       { href: "/admin/users?status=can_create_events", label: "開催権限", icon: <Icon name="calendar" size={14} /> },
     ],
   },

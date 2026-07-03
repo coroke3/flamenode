@@ -1,5 +1,4 @@
-import * as React from "react";import { FnTable } from "@/components/ui/FnTable";
-
+import * as React from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
@@ -14,9 +13,10 @@ import {
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { formatRelative, formatUnix } from "@/lib/utils/format";
 import { ManageEventTabs } from "@/components/manage/ManageEventTabs";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
+import { VideoReviewQueueTable } from "@/components/admin/VideoReviewQueueTable";
+import { fetchVideoReviewSummaries } from "@/lib/admin/videoReviewMeta";
 
 export const dynamic = "force-dynamic";
 
@@ -78,10 +78,11 @@ export default async function ManageEventVideosPage({
     ? eq(videosTable.visibility_status, statusFilter as never)
     : undefined;
 
-  const rows = await db
+  const baseRows = await db
     .select({
       id: videosTable.id,
       title: videosTable.title,
+      youtube_video_id: videosTable.youtube_video_id,
       display_name: sql<string>`COALESCE(${xUsersTable.x_name}, ${videosTable.creator_display_name}, ${videosTable.creator_x_user_id})`,
       visibility_status: videosTable.visibility_status,
       created_at: videosTable.created_at,
@@ -89,11 +90,24 @@ export default async function ManageEventVideosPage({
     .from(videosTable)
     .innerJoin(videoEventsTable, eq(videoEventsTable.video_id, videosTable.id))
     .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id))
-    .where(
-      and(eq(videoEventsTable.event_id, id), statusCond)!,
-    )
+    .where(and(eq(videoEventsTable.event_id, id), statusCond)!)
     .orderBy(desc(videosTable.created_at))
     .limit(200);
+
+  const summaries = await fetchVideoReviewSummaries(
+    db,
+    baseRows.map((row) => row.id),
+    id,
+  );
+
+  const rows = baseRows.map((row) => {
+    const summary = summaries.get(row.id);
+    return {
+      ...row,
+      stage_permission_summary: summary?.stage_permission_summary ?? "—",
+      required_unanswered_count: summary?.required_unanswered_count ?? 0,
+    };
+  });
 
   return (
     <div style={manageEventAccentStyle(ev.accent_color)}>
@@ -110,7 +124,11 @@ export default async function ManageEventVideosPage({
           {statusFilter ? `（${statusFilter}）` : ""}
         </p>
       </header>
-      <ManageEventTabs eventId={id} active="review" isAdmin={isAdmin} />
+      <ManageEventTabs
+        eventId={id}
+        active={statusFilter === "pending" ? "review" : "submissions"}
+        isAdmin={isAdmin}
+      />
 
       <div
         style={{
@@ -123,9 +141,7 @@ export default async function ManageEventVideosPage({
       >
         {STATUS_FILTERS.map((f) => {
           const active =
-            f.value === "all"
-              ? statusFilter === ""
-              : f.value === statusFilter;
+            f.value === "all" ? statusFilter === "" : f.value === statusFilter;
           const href = `/manage/events/${id}/videos?status=${encodeURIComponent(f.value)}`;
           return (
             <Link
@@ -164,55 +180,11 @@ export default async function ManageEventVideosPage({
           ]}
         />
       ) : (
-        <FnTable>
-          <thead>
-            <tr>
-              <th>タイトル</th>
-              <th>作者</th>
-              <th>状態</th>
-              <th>登録</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((v, index) => (
-              <tr key={`${v.id}-mv-${index}`}>
-                <td>{v.title}</td>
-                <td>{v.display_name}</td>
-                <td>
-                  <span
-                    className={`fn-badge ${
-                      v.visibility_status === "pending"
-                        ? "fn-badge-warning"
-                        : "fn-badge-soft"
-                    }`}
-                  >
-                    {v.visibility_status}
-                  </span>
-                </td>
-                <td className="fn-muted" title={formatUnix(v.created_at)}>
-                  {formatRelative(v.created_at)}
-                </td>
-                <td>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <Link
-                      href={`/manage/events/${id}/videos/${v.id}`}
-                      className="fn-btn fn-btn-primary fn-btn-sm"
-                    >
-                      審査
-                    </Link>
-                    <Link
-                      href={`/dashboard/edit/${v.id}?privileged=event`}
-                      className="fn-btn fn-btn-ghost fn-btn-sm"
-                    >
-                      内容を確認
-                    </Link>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </FnTable>
+        <VideoReviewQueueTable
+          rows={rows}
+          reviewHref={(videoId) => `/manage/events/${id}/videos/${videoId}`}
+          contentHref={(videoId) => `/dashboard/edit/${videoId}?privileged=event`}
+        />
       )}
     </div>
   );

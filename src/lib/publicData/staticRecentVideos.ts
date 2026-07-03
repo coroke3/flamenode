@@ -1,5 +1,8 @@
 import "server-only";
-import { readStaticJsonIfStaticOnly } from "./staticJson";
+import {
+  loadPublicJson,
+  type PublicJsonLoadResult,
+} from "./loader";
 import {
   normalizeStaticRecentVideoPage,
   type StaticRecentVideoPage,
@@ -11,9 +14,17 @@ const RECENT_VIDEOS_KEY = "list/recent.json";
 export async function loadStaticRecentVideosPage(params: {
   page: number;
   pageSize: number;
-}): Promise<StaticRecentVideoPage | null> {
-  const payload =
-    await readStaticJsonIfStaticOnly<StaticRecentVideosPayload>(RECENT_VIDEOS_KEY);
-  if (!payload) return null;
-  return normalizeStaticRecentVideoPage(payload, params.page, params.pageSize);
+}): Promise<
+  PublicJsonLoadResult<StaticRecentVideoPage> & { page: StaticRecentVideoPage | null }
+> {
+  const result = await loadPublicJson<StaticRecentVideosPayload>({
+    r2Key: RECENT_VIDEOS_KEY,
+    targetType: "list_recent",
+    targetId: "global",
+    reason: "public_list_miss",
+  });
+  const page = result.data
+    ? normalizeStaticRecentVideoPage(result.data, params.page, params.pageSize)
+    : null;
+  return { ...result, data: page, page };
 }

@@ -170,21 +170,6 @@ async function rebuildEventGroupSections(env: Env): Promise<unknown[]> {
     mergeGroupEvent(eventsByGroup, row.group_id, stripGroupId(row));
   }
 
-  const legacyRows = await env.DB.prepare(
-    `SELECT ${EVENT_INDEX_COLUMNS}
-     FROM events
-     WHERE event_group_id IN (${placeholders})
-       AND event_group_id IS NOT NULL
-       AND event_group_id <> ''
-       AND visibility_status = 'public'
-     ORDER BY start_time DESC, id ASC`,
-  )
-    .bind(...groupIds)
-    .all<Record<string, unknown>>();
-  for (const row of legacyRows.results ?? []) {
-    mergeGroupEvent(eventsByGroup, row.event_group_id, row);
-  }
-
   return groupRows.map((group) => {
     const id = String(group.id ?? "");
     const events = eventsByGroup.get(id) ?? [];

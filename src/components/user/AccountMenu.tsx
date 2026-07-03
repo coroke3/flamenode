@@ -492,26 +492,27 @@ export function AccountMenu({
             </Link>
           </div>
 
-          {/* セクション5: 管理 / 運営 (権限時のみ) */}
+          {/* セクション5: イベント運営 / サイト管理 (権限時のみ) */}
           {user.management.canAccessAdmin || user.management.canAccessManage ? (
             <>
               <div className={styles.divider} />
               <div className={styles.section}>
+                {user.management.canAccessManage ? (
+                  <Link
+                    href="/manage"
+                    className={styles.menuItem}
+                    onClick={() => setOpen(false)}
+                  >
+                    <Icon name="users" size={14} aria-hidden /> イベント運営
+                  </Link>
+                ) : null}
                 {user.management.canAccessAdmin ? (
                   <Link
                     href="/admin"
                     className={styles.menuItem}
                     onClick={() => setOpen(false)}
                   >
-                    <Icon name="settings" size={14} aria-hidden /> 管理
-                  </Link>
-                ) : user.management.canAccessManage ? (
-                  <Link
-                    href="/manage"
-                    className={styles.menuItem}
-                    onClick={() => setOpen(false)}
-                  >
-                    <Icon name="users" size={14} aria-hidden /> 運営
+                    <Icon name="settings" size={14} aria-hidden /> サイト管理
                   </Link>
                 ) : null}
               </div>

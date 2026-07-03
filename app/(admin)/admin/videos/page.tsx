@@ -16,6 +16,9 @@ import { formatRelative } from "@/lib/utils/format";
 import { youtubeThumbUrl } from "@/lib/youtube/id";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { AdminVideoManagementTabs } from "@/components/admin/AdminVideoManagementTabs";
+import { VideoReviewQueueTable } from "@/components/admin/VideoReviewQueueTable";
+import { fetchVideoReviewSummaries } from "@/lib/admin/videoReviewMeta";
+import { videoVisibilityBadgeClass, videoVisibilityLabel } from "@/lib/admin/videoVisibilityLabels";
 import { Pagination } from "@/components/ui/Pagination";
 import { clampPaging, escapeLike, totalPagesFor } from "@/lib/utils/sql";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
@@ -134,6 +137,31 @@ export default async function AdminVideosPage({
     return `/admin/videos?${sp.toString()}`;
   };
 
+  const reviewSummaries =
+    db && rows.length > 0
+      ? await fetchVideoReviewSummaries(
+          db,
+          rows.map((r) => r.id),
+          event || undefined,
+        )
+      : new Map();
+
+  const reviewRows = rows.map((v) => {
+    const summary = reviewSummaries.get(v.id);
+    return {
+      id: v.id,
+      title: v.title,
+      youtube_video_id: v.youtube_video_id,
+      display_name: v.display_name,
+      visibility_status: v.status,
+      created_at: v.created_at,
+      stage_permission_summary: summary?.stage_permission_summary ?? "—",
+      required_unanswered_count: summary?.required_unanswered_count ?? 0,
+    };
+  });
+
+  const useReviewTable = status === "pending";
+
   return (
     <div>
       <AdminPageHeader
@@ -170,6 +198,32 @@ export default async function AdminVideosPage({
         ) : null}
       </form>
 
+      {useReviewTable ? (
+        <div style={{ marginTop: 18 }}>
+          <VideoReviewQueueTable
+            rows={reviewRows}
+            reviewHref={(videoId) => `/admin/videos/${videoId}`}
+            contentHref={(videoId) => `/dashboard/edit/${videoId}`}
+            extraActions={(videoId) => (
+              <>
+                <Link
+                  href={`/admin/videos/${videoId}/members`}
+                  className="fn-btn fn-btn-ghost fn-btn-sm"
+                >
+                  参加者
+                </Link>
+                <Link
+                  href={`/admin/audit?table=videos&record=${encodeURIComponent(videoId)}`}
+                  className="fn-btn fn-btn-ghost fn-btn-sm"
+                  title="この作品の監査ログ"
+                >
+                  監査
+                </Link>
+              </>
+            )}
+          />
+        </div>
+      ) : (
       <FnTable style={{ marginTop: 18 }}>
         <thead>
           <tr>
@@ -222,17 +276,9 @@ export default async function AdminVideosPage({
               </td>
               <td>
                 <span
-                  className={`fn-badge ${
-                    v.status === "public"
-                      ? "fn-badge-accent"
-                      : v.status === "pending"
-                        ? "fn-badge-warning"
-                        : v.status === "voided"
-                          ? "fn-badge-danger"
-                          : "fn-badge-soft"
-                  }`}
+                  className={`fn-badge ${videoVisibilityBadgeClass(v.status)}`}
                 >
-                  {v.status}
+                  {videoVisibilityLabel(v.status)}
                 </span>
               </td>
               <td>{formatRelative(v.created_at)}</td>
@@ -272,6 +318,7 @@ export default async function AdminVideosPage({
           ) : null}
         </tbody>
       </FnTable>
+      )}
 
       <Pagination
         currentPage={page}

@@ -15,7 +15,7 @@ import { Icon } from "@/components/ui/Icon";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
 import { ManageEventTabs } from "@/components/manage/ManageEventTabs";
 
-export const metadata: Metadata = { title: "イベント設定編集" };
+export const metadata: Metadata = { title: "イベント設定" };
 export const dynamic = "force-dynamic";
 
 interface Props {
@@ -66,7 +66,7 @@ export default async function ManageEventEditPage({
         activeXUserId={user.active_x_user_id}
       />
       <ManagePageHeader
-        title={`${ev.title} 設定編集`}
+        title={`${ev.title} イベント設定`}
         description={`ID: ${ev.id}`}
         backHref={`/manage/events/${ev.id}`}
         backLabel="イベント運営トップへ"

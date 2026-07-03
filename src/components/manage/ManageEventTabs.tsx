@@ -6,6 +6,7 @@ export type ManageEventTabKey =
   | "overview"
   | "admin-detail"
   | "review"
+  | "submissions"
   | "admin-review"
   | "slots"
   | "staff"
@@ -59,6 +60,12 @@ export function ManageEventTabs({
       href: `/manage/events/${encodedId}/slots`,
       label: "枠管理",
       icon: "calendar",
+    },
+    {
+      key: "submissions",
+      href: `/manage/events/${encodedId}/videos?status=all`,
+      label: "提出状況",
+      icon: "list",
     },
     {
       key: "staff",

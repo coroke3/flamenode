@@ -18,6 +18,10 @@ import { formatUnix } from "@/lib/utils/format";
 import { StatusPanel } from "@/components/ui/StatusPanel";
 import { sanitizeNextPath } from "#utils/next";
 import { collapseReservationGroups, type SlotBase } from "@/lib/utils/slotGrouping";
+import {
+  EntryProgressSteps,
+  resolveEntryStepStates,
+} from "@/components/entry/EntryProgressSteps";
 
 export const metadata: Metadata = { title: "エントリー / 投稿" };
 export const dynamic = "force-dynamic";
@@ -150,6 +154,15 @@ export default async function EntryPage({
   }
   const displaySlots = collapseReservationGroups(reservedSlots as SlotBase[]);
   const canPost = isLoggedIn && activeXApprovalStatus === "approved";
+  const entrySteps = resolveEntryStepStates({
+    isLoggedIn,
+    needsTosAccept,
+    activeX,
+    activeXApprovalStatus,
+    hasReservedSlots: displaySlots.length > 0,
+    canPost,
+  });
+  const settingsHref = `/dashboard/settings?next=${encodeURIComponent("/entry")}`;
   const checkTitle = canPost ? "投稿前チェック" : "投稿には追加設定が必要です";
   const checkMessage = !activeX
     ? "投稿にはActive X IDの選択が必要です。設定画面から連携・選択してください。"
@@ -170,6 +183,8 @@ export default async function EntryPage({
           イベント参加、確保済み枠への提出、通常投稿をここから始められます。
         </p>
       </header>
+
+      <EntryProgressSteps states={entrySteps} />
 
       {!isLoggedIn ? (
         <section
@@ -237,7 +252,7 @@ export default async function EntryPage({
               ? ` · Active X ID: @${sessionUser.active_x_user_id}`
               : " · Active X ID未選択"}
           </span>
-          <Link href="/dashboard/settings" className="fn-link fn-entry-status-actions">
+          <Link href={settingsHref} className="fn-link fn-entry-status-actions">
             切替
           </Link>
         </div>
@@ -253,10 +268,7 @@ export default async function EntryPage({
             <h3 className="fn-jp">{checkTitle}</h3>
             <p className="fn-jp fn-pc-banner-lead">{checkMessage}</p>
             {!canPost ? (
-              <Link
-                href={`/dashboard/settings?next=${encodeURIComponent("/entry")}`}
-                className="fn-btn fn-btn-primary fn-btn-sm fn-mt-12"
-              >
+              <Link href={settingsHref} className="fn-btn fn-btn-primary fn-btn-sm fn-mt-12">
                 X ID設定を確認
               </Link>
             ) : null}

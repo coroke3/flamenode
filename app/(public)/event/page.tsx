@@ -17,6 +17,7 @@ import {
 } from "@/lib/db/eventGroups";
 import { eventGroupAnchorId } from "@/lib/eventGroupRoutes";
 import { loadStaticEventsIndex } from "@/lib/publicData/staticEventsIndex";
+import { canFallbackToDatabase } from "@/lib/publicData/loader";
 import type {
   StaticEventGroupSection,
   StaticEventIndexEvent,
@@ -31,6 +32,10 @@ type EventGroupSectionView = Omit<EventListGroupSection, "events"> &
   Omit<StaticEventGroupSection, "events"> & {
     events: EventListEvent[];
   };
+type EventListSource = {
+  events: EventListEvent[];
+  groupSections: EventGroupSectionView[];
+};
 
 const GROUP_TYPE_LABELS: Record<string, string> = {
   series: "系列",
@@ -56,24 +61,30 @@ function isPointEvent(ev: EventListEvent): boolean {
 }
 
 export default async function EventListPage(): Promise<React.ReactElement> {
-  const staticIndex = await loadStaticEventsIndex();
-  const source =
-    staticIndex ??
-    (await withDatabase(async (db) => {
-      const [eventRows, groups] = await Promise.all([
-        db
-          .select()
-          .from(eventsTable)
-          .where(publicListableEventWhere())
-          .orderBy(desc(eventsTable.start_time)),
-        fetchEventListGroupSections(db),
-      ]);
-      return {
-        events: eventRows as EventListEvent[],
-        groupSections: groups as EventGroupSectionView[],
-      };
-    }));
-  const { events, groupSections } = source ?? { events: [], groupSections: [] };
+  const staticLoaded = await loadStaticEventsIndex();
+  const emptySource: EventListSource = { events: [], groupSections: [] };
+  const source: EventListSource = staticLoaded.index
+    ? {
+        events: staticLoaded.index.events,
+        groupSections: staticLoaded.index.groupSections,
+      }
+    : canFallbackToDatabase(staticLoaded.strategy)
+      ? ((await withDatabase(async (db): Promise<EventListSource> => {
+          const [eventRows, groups] = await Promise.all([
+            db
+              .select()
+              .from(eventsTable)
+              .where(publicListableEventWhere())
+              .orderBy(desc(eventsTable.start_time)),
+            fetchEventListGroupSections(db),
+          ]);
+          return {
+            events: eventRows,
+            groupSections: groups as EventGroupSectionView[],
+          };
+        })) ?? emptySource)
+      : emptySource;
+  const { events, groupSections } = source;
 
   const sortedEvents = events.sort(compareEventsByUpcomingPriority);
   const filteredEvents = sortedEvents.filter((ev) => !isPointEvent(ev));
@@ -102,8 +113,9 @@ export default async function EventListPage(): Promise<React.ReactElement> {
     <div className="fn-public-container fn-page">
       <header className="fn-page-head">
         <div className="fn-page-head-main">
-          <span className="fn-eyebrow">events - {filteredEvents.length} total</span>
-          <h1 className="fn-display fn-evlist-title">イベント</h1>
+          <span className="fn-eyebrow">EVENTS</span>
+          <h1 className="fn-display fn-evlist-title">イベントを探す</h1>
+          <p className="fn-page-lead">{filteredEvents.length} events</p>
         </div>
       </header>
 

@@ -76,3 +76,25 @@ export async function enqueueStaticRebuildAdmin(
 
   revalidatePath("/admin/static-builds");
 }
+
+export async function retryAllFailedStaticRebuild(): Promise<void> {
+  const guard = await requireAdminUser();
+  if (!guard.ok) return;
+
+  const db = getDatabase();
+  if (!db) return;
+
+  const now = Math.floor(Date.now() / 1000);
+  await db
+    .update(staticRebuildQueue)
+    .set({
+      status: "pending",
+      priority: "high",
+      next_retry_at: null,
+      error: null,
+      updated_at: now,
+    })
+    .where(eq(staticRebuildQueue.status, "failed"));
+
+  revalidatePath("/admin/static-builds");
+}

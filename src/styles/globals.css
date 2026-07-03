@@ -336,12 +336,29 @@ select {
 
 .fn-shelf-fade-left {
   left: 0;
-  background: none;
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--bg-base) 92%, transparent),
+    transparent
+  );
+  opacity: 0;
+  transition: opacity 0.15s ease;
 }
 
 .fn-shelf-fade-right {
   right: 0;
-  background: none;
+  background: linear-gradient(
+    to left,
+    color-mix(in srgb, var(--bg-base) 92%, transparent),
+    transparent
+  );
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.fn-shelf-fade-left.is-visible,
+.fn-shelf-fade-right.is-visible {
+  opacity: 1;
 }
 
 .fn-shelf-arrow {
@@ -668,33 +685,52 @@ select {
   max-width: 100%;
 }
 
-/* 横スクロール表のヒント（スマホのみ表示） */
-.fn-scroll-hint {
-  display: none;
-  margin: 4px 0 6px;
-  font-size: 11px;
-  color: var(--text-muted);
+.fn-hscroll-surface {
+  position: relative;
+}
+
+.fn-hscroll-fade-left,
+.fn-hscroll-fade-right {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 28px;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.fn-hscroll-fade-left {
+  left: 0;
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--bg-base) 94%, transparent),
+    transparent
+  );
+}
+
+.fn-hscroll-fade-right {
+  right: 0;
+  background: linear-gradient(
+    to left,
+    color-mix(in srgb, var(--bg-base) 94%, transparent),
+    transparent
+  );
+}
+
+.fn-hscroll-fade-left.is-visible,
+.fn-hscroll-fade-right.is-visible {
+  opacity: 1;
 }
 
 .fn-scroll-affordance {
   position: relative;
 }
 
-.fn-scroll-affordance::after {
-  content: none;
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 28px;
-  pointer-events: none;
-  background: none;
-}
-
-@media (max-width: 640px) {
-  .fn-scroll-hint {
-    display: block;
-  }
+/* 旧: 目に見える横スクロール文言は廃止（sr-only のみ） */
+.fn-scroll-hint {
+  display: none !important;
 }
 
 .fn-admin-stat-grid {

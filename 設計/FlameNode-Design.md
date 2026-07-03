@@ -148,15 +148,24 @@ Auth.js (NextAuth v5) の DrizzleAdapter が必要とするテーブル群。
 - **public_api_enabled**: integer NOT NULL DEFAULT 0
 - **public_api_updated_at**: integer | null
 
-### 1-5-1. event_groups (イベントグループ)
+### 1-5-1. event_groups / event_group_events (イベントグループ)
+
+**正本は `event_group_events`（多対多）。** 1 イベントは複数グループに所属できる。`events.event_group_id` は legacy 列として残るが新規書き込み・読み取り fallback は使わない（`0039` で NULL 化）。
+
+#### event_groups
 - **id**: text (Primary Key)
 - **name**: text NOT NULL
+- **slug**: text NOT NULL UNIQUE
 - **description**: text
-- **sort_order**: integer DEFAULT 0
-- **created_at**: integer NOT NULL DEFAULT (unixepoch())
-- **updated_at**: integer NOT NULL DEFAULT (unixepoch())
+- **group_type**, **visibility_status**, **sort_order**, 画像・accent 等
+- **created_at** / **updated_at**
 
-イベントグループは、同一シリーズ、年度、主催単位、企画カテゴリなどでイベントをまとめるために使う。公開ページではグループ単位の一覧やアーカイブ導線に使い、管理画面ではイベント数が増えた場合の整理に使う。
+#### event_group_events
+- **event_group_id** + **event_id** (複合 PK)
+- **relation_type**: member / primary / related
+- **sort_order**
+
+イベントグループは、同一シリーズ、年度、主催単位、企画カテゴリなどでイベントをまとめるために使う。グループ削除時は `event_group_events` も削除する。
 
 ### 1-6. event_staff (イベント運営メンバー)
 - **id**: text (Primary Key)

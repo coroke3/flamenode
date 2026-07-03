@@ -189,7 +189,7 @@ export default async function AboutPage(): Promise<React.ReactElement> {
         <div className={styles.heroInner}>
           <div className={styles.heroCopy}>
             <Logo showText={false} className={styles.logo} />
-            <p className="fn-eyebrow">About FlameNode</p>
+            <p className="fn-eyebrow">ABOUT</p>
             <h1 className="fn-display">
               作品が見つかり、イベントの記録も残る場所。
             </h1>

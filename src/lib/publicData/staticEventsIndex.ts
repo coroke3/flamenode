@@ -1,5 +1,5 @@
 import "server-only";
-import { readStaticJsonIfStaticOnly } from "./staticJson";
+import { loadPublicJson } from "./loader";
 import {
   normalizeStaticEventsIndex,
   type StaticEventsIndex,
@@ -8,9 +8,20 @@ import {
 
 const EVENTS_INDEX_KEY = "events/index.json";
 
-export async function loadStaticEventsIndex(): Promise<StaticEventsIndex | null> {
-  const payload =
-    await readStaticJsonIfStaticOnly<StaticEventsIndexPayload>(EVENTS_INDEX_KEY);
-  if (!payload) return null;
-  return normalizeStaticEventsIndex(payload);
+export async function loadStaticEventsIndex(): Promise<{
+  index: StaticEventsIndex | null;
+  strategy: Awaited<ReturnType<typeof loadPublicJson>>["strategy"];
+  enqueued: boolean;
+}> {
+  const result = await loadPublicJson<StaticEventsIndexPayload>({
+    r2Key: EVENTS_INDEX_KEY,
+    targetType: "events_index",
+    targetId: "global",
+    reason: "public_events_index_miss",
+  });
+  return {
+    index: result.data ? normalizeStaticEventsIndex(result.data) : null,
+    strategy: result.strategy,
+    enqueued: result.enqueued,
+  };
 }

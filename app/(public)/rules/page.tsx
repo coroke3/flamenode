@@ -85,7 +85,10 @@ export default async function RulesPage({
   return (
     <main className="fn-public-container fn-page">
       <header className="fn-page-head">
-        <h1 className="fn-page-title fn-page-title--compact">利用規約</h1>
+        <div className="fn-page-head-main">
+          <span className="fn-eyebrow">RULES</span>
+          <h1 className="fn-page-title fn-page-title--compact">利用規約</h1>
+        </div>
         <p className="fn-page-lead">
           バージョン: {versionLabel}
           {updatedAt ? ` (更新: ${formatUnix(updatedAt, { dateOnly: true })})` : ""}

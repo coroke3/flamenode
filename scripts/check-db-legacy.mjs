@@ -15,7 +15,7 @@
  *   - 通常コードでの `event_staff_permissions` 参照
  *
  * allowlist:
- *   - 旧データ normalize / この検査スクリプト自身は許容。
+ *   - 旧データ normalize / repair script / この検査スクリプト自身は許容。
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -29,6 +29,9 @@ const SCAN_EXT = new Set([".ts", ".tsx", ".mjs", ".cjs", ".js"]);
 const FULL_ALLOW = new Set([
   // 旧データ正規化 (legacy import) は outro/closing 含めて許容
   "src/lib/legacy/normalize.ts",
+  // repair scripts
+  "scripts/repair-video-event-links.mjs",
+  "scripts/repair-event-group-legacy.mjs",
   // この検査スクリプト自身
   "scripts/check-db-legacy.mjs",
 ]);
@@ -102,6 +105,48 @@ const DB_REDUCTION_RULES = [
     pattern:
       /\bstage_permission\s*:\s*(stagePermission|nextStagePermission|vi\.stage_permission)\b/g,
     prefixAllow: PREFIX_ALLOW,
+  },
+  {
+    id: "events-legacy-group-id-write",
+    label: "events.event_group_id legacy column write (use event_group_events)",
+    pattern: /\bevents(?:Table)?\.event_group_id\b/g,
+    prefixAllow: [
+      ...PREFIX_ALLOW,
+      "src/lib/db/eventGroups.ts",
+      "src/lib/publicData/staticEventsIndexCore.ts",
+      "app/api/events/route.ts",
+      "src/lib/api/publicDto.ts",
+    ],
+  },
+  {
+    id: "cost-guard-mode-write",
+    label: "system_settings.cost_guard_mode new write (use operation_mode)",
+    pattern: /\bcost_guard_mode\s*:/g,
+    prefixAllow: [
+      ...PREFIX_ALLOW,
+      "src/lib/actions/cost-guard.ts",
+      "src/lib/operationMode/",
+      "src/lib/auth/costGuardFeatures.ts",
+      "src/lib/staticRebuild/liveGuard.ts",
+      "src/lib/operationMode/getMode.ts",
+      "workers/json-generator/queuePolicy.ts",
+      "workers/json-generator/queuePolicy.test.mjs",
+      "app/(admin)/admin/static-builds/page.tsx",
+    ],
+  },
+  {
+    id: "is-maintenance-mode-write",
+    label: "system_settings.is_maintenance_mode new write (use operation_mode)",
+    pattern: /\bis_maintenance_mode\s*:/g,
+    prefixAllow: [
+      ...PREFIX_ALLOW,
+      "src/lib/actions/cost-guard.ts",
+      "src/lib/operationMode/",
+      "src/lib/auth/costGuardFeatures.ts",
+      "src/lib/staticRebuild/liveGuard.ts",
+      "workers/json-generator/queuePolicy.test.mjs",
+      "app/(admin)/admin/static-builds/page.tsx",
+    ],
   },
 ];
 

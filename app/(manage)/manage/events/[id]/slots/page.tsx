@@ -83,6 +83,7 @@ export default async function ManageEventSlotsPage({
       x_user_id: slotsTable.x_user_id,
       discord_user_id: slotsTable.discord_user_id,
       reservation_group_id: slotsTable.reservation_group_id,
+      video_id: slotsTable.video_id,
     })
     .from(slotsTable)
     .where(where)
@@ -205,6 +206,7 @@ export default async function ManageEventSlotsPage({
           />
         ) : (
           <SlotList
+            eventId={id}
             slots={rows}
             slotPartGapSec={(ev.slot_part_gap_minutes ?? 15) * 60}
           />

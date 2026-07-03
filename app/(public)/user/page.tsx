@@ -15,7 +15,7 @@ import {
 } from "@/lib/db/queries";
 
 export const metadata: Metadata = {
-  title: "クリエイター一覧",
+  title: "クリエイターを見つける",
 };
 
 export const dynamic = "force-dynamic";
@@ -206,8 +206,8 @@ export default async function UserListPage({
     <div className={`fn-public-container fn-page ${styles.page}`}>
       <header className="fn-page-head">
         <div className="fn-page-head-main">
-          <span className="fn-eyebrow">CREATOR</span>
-          <h1 className="fn-display fn-page-title">クリエイター一覧</h1>
+          <span className="fn-eyebrow">CREATORS</span>
+          <h1 className="fn-display fn-page-title">クリエイターを見つける</h1>
         </div>
       </header>
 

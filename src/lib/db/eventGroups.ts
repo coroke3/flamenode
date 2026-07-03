@@ -1,4 +1,4 @@
-import { eq, and, desc, asc, inArray, isNotNull, ne } from "drizzle-orm";
+import { eq, and, desc, asc, inArray } from "drizzle-orm";
 import { eventGroups, eventGroupEvents, events } from "@/lib/db/schema";
 import { publicListableEventWhere } from "@/lib/utils/eventStatus";
 
@@ -16,11 +16,6 @@ export type EventListGroupSection = {
   latest_event_start_time: number | null;
   events: EventRow[];
 };
-
-const legacyGroupLinkWhere = and(
-  isNotNull(events.event_group_id),
-  ne(events.event_group_id, ""),
-);
 
 function mergeGroupEvents<T extends { id: string; start_time: number | null }>(
   target: Map<string, T[]>,
@@ -57,20 +52,6 @@ async function fetchPublicEventsByGroupIds(
 
   for (const row of junctionRows) {
     mergeGroupEvents(eventsByGroup, row.group_id, row.event);
-  }
-
-  const legacyRows = (await db
-    .select({ event: events })
-    .from(events)
-    .where(
-      and(inArray(events.event_group_id, [...groupIds]), listable, legacyGroupLinkWhere),
-    )
-    .orderBy(desc(events.start_time), asc(events.id))) as Array<{ event: EventRow }>;
-
-  for (const row of legacyRows) {
-    const groupId = row.event.event_group_id;
-    if (!groupId) continue;
-    mergeGroupEvents(eventsByGroup, groupId, row.event);
   }
 
   return eventsByGroup;

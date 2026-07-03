@@ -43,10 +43,16 @@ import {
   computeStagePermissionAnswerDeleteEventIds,
   computeVideoEventSyncTarget,
 } from "@/lib/video/eventSync";
+import { ensurePrimaryEventInVideoEvents } from "@/lib/video/primaryEventLink";
 import {
   readStagePermissionCustomAnswers,
   replaceStagePermissionCustomAnswers,
 } from "@/lib/video/stagePermissionAnswers";
+import {
+  fetchActiveCustomQuestionsForEvents,
+  replaceGeneralCustomAnswers,
+} from "@/lib/video/customQuestionAnswers";
+import { readCustomAnswersFromFormData } from "@/lib/video/customQuestions";
 import {
   getVideoSoftwareLabel,
   replaceVideoSoftwareLabels,
@@ -828,6 +834,23 @@ export async function createFreeVideo(
     stagePermission,
     now,
   });
+  const customQuestionsByEvent = await fetchActiveCustomQuestionsForEvents(
+    db,
+    syncedEventIds,
+  );
+  const customAnswerRead = readCustomAnswersFromFormData(
+    formData,
+    customQuestionsByEvent,
+  );
+  if (customAnswerRead.errors.length > 0) {
+    return { ok: false, message: customAnswerRead.errors[0] };
+  }
+  await replaceGeneralCustomAnswers(db, {
+    videoId: id,
+    eventIds: syncedEventIds,
+    drafts: customAnswerRead.drafts,
+    now,
+  });
 
   // 投稿主体 X ID の作品アイコン候補に追加する (今回の作品アイコンが空でなければ)。
   // x_users.icon_url は変更しない。
@@ -1071,10 +1094,25 @@ export async function submitSlotVideo(
     alwaysInclude: [slotRow.event_id],
     user: { id: userId, role: sessionUser.role ?? null },
   });
+  await ensurePrimaryEventInVideoEvents(db, videoId, slotRow.event_id);
   await replaceStagePermissionCustomAnswers(db, {
     videoId,
     eventIds: syncedEventIds,
     stagePermission,
+    now,
+  });
+  const slotCustomQuestions = await fetchActiveCustomQuestionsForEvents(
+    db,
+    syncedEventIds,
+  );
+  const slotCustomRead = readCustomAnswersFromFormData(formData, slotCustomQuestions);
+  if (slotCustomRead.errors.length > 0) {
+    return { ok: false, message: slotCustomRead.errors[0] };
+  }
+  await replaceGeneralCustomAnswers(db, {
+    videoId,
+    eventIds: syncedEventIds,
+    drafts: slotCustomRead.drafts,
     now,
   });
 
@@ -1486,6 +1524,7 @@ export async function updateVideo(
       alwaysInclude,
       user: { id: sessionUser.id, role: sessionUser.role ?? null },
     });
+    await ensurePrimaryEventInVideoEvents(db, videoId, target.primary_event_id);
     syncedEventIdsForStagePermission = syncedEventIds;
     stagePermissionDeleteEventIds = computeStagePermissionAnswerDeleteEventIds({
       previousEventIds,
@@ -1509,6 +1548,23 @@ export async function updateVideo(
       stagePermission: canEditDescriptions
         ? nextStagePermission
         : target.stage_permission,
+      now,
+    });
+    const updateCustomQuestions = await fetchActiveCustomQuestionsForEvents(
+      db,
+      currentEventIds,
+    );
+    const updateCustomRead = readCustomAnswersFromFormData(
+      formData,
+      updateCustomQuestions,
+    );
+    if (updateCustomRead.errors.length > 0) {
+      return { ok: false, message: updateCustomRead.errors[0] };
+    }
+    await replaceGeneralCustomAnswers(db, {
+      videoId,
+      eventIds: currentEventIds,
+      drafts: updateCustomRead.drafts,
       now,
     });
   }

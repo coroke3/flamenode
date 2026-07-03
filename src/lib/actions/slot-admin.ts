@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import { assertCanEditEvent } from "@/lib/auth/ownership";
@@ -351,4 +351,180 @@ export async function deleteSlot(formData: FormData): Promise<SlotActionResult> 
 
   revalidateEventSlotPaths(row.event_id);
   return { ok: true };
+}
+
+function parseSlotIds(formData: FormData): string[] {
+  const raw = String(formData.get("slot_ids") ?? "").trim();
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((id) => String(id).trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/** 選択した空き枠を一括削除。 */
+export async function batchDeleteAvailableSlots(
+  formData: FormData,
+): Promise<SlotActionResult> {
+  const eventId = String(formData.get("event_id") ?? "").trim();
+  const slotIds = parseSlotIds(formData);
+  if (!eventId) return { ok: false, message: "event_id が必要です。" };
+  if (slotIds.length === 0) return { ok: false, message: "枠が選択されていません。" };
+
+  const db = getDatabase();
+  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const guard = await ensureCanEditSlots(eventId);
+  if (!guard.ok) return guard.result;
+
+  const rows = await db
+    .select()
+    .from(slots)
+    .where(and(eq(slots.event_id, eventId), inArray(slots.id, slotIds))!);
+
+  const invalid = rows.filter((r) => r.status !== "available");
+  if (invalid.length > 0) {
+    return {
+      ok: false,
+      message: `空き枠以外が ${invalid.length} 件含まれています。`,
+    };
+  }
+  if (rows.length === 0) return { ok: false, message: "対象枠が見つかりません。" };
+
+  const now = Math.floor(Date.now() / 1000);
+  await db.delete(slots).where(inArray(slots.id, slotIds));
+  for (const row of rows) {
+    await db.insert(historyLogs).values({
+      table_name: "slots",
+      record_id: row.id,
+      action: "DELETE",
+      before_data: JSON.stringify({ event_id: eventId, batch: true }),
+      operator_discord_id: guard.userId,
+      retention_class: "normal",
+      created_at: now,
+    });
+  }
+
+  revalidateEventSlotPaths(eventId);
+  return { ok: true, message: `${rows.length} 件の空き枠を削除しました。` };
+}
+
+/** 選択した確保済枠を一括解放。 */
+export async function batchReleaseReservedSlots(
+  formData: FormData,
+): Promise<SlotActionResult> {
+  const eventId = String(formData.get("event_id") ?? "").trim();
+  const slotIds = parseSlotIds(formData);
+  if (!eventId) return { ok: false, message: "event_id が必要です。" };
+  if (slotIds.length === 0) return { ok: false, message: "枠が選択されていません。" };
+
+  const db = getDatabase();
+  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const guard = await ensureCanEditSlots(eventId);
+  if (!guard.ok) return guard.result;
+
+  const rows = await db
+    .select()
+    .from(slots)
+    .where(and(eq(slots.event_id, eventId), inArray(slots.id, slotIds))!);
+
+  const invalid = rows.filter((r) => r.status !== "reserved");
+  if (invalid.length > 0) {
+    return {
+      ok: false,
+      message: `確保済以外が ${invalid.length} 件含まれています。`,
+    };
+  }
+  if (rows.length === 0) return { ok: false, message: "対象枠が見つかりません。" };
+
+  const now = Math.floor(Date.now() / 1000);
+  const releasedGroups = new Set<string>();
+
+  for (const row of rows) {
+    const groupId = row.reservation_group_id?.trim() || null;
+    if (groupId && releasedGroups.has(groupId)) continue;
+
+    const targetIds = groupId
+      ? (
+          await db
+            .select({ id: slots.id })
+            .from(slots)
+            .where(
+              and(
+                eq(slots.event_id, eventId),
+                eq(slots.reservation_group_id, groupId),
+                eq(slots.status, "reserved"),
+              )!,
+            )
+        ).map((s) => s.id)
+      : [row.id];
+
+    await db
+      .update(slots)
+      .set({
+        status: "available",
+        x_user_id: null,
+        discord_user_id: null,
+        display_name: null,
+        reservation_group_id: null,
+        video_id: null,
+        updated_at: now,
+      })
+      .where(inArray(slots.id, targetIds));
+
+    if (groupId) releasedGroups.add(groupId);
+
+    await db.insert(historyLogs).values({
+      table_name: "slots",
+      record_id: row.id,
+      action: "UPDATE",
+      before_data: JSON.stringify({ status: "reserved", batch: true }),
+      after_data: JSON.stringify({
+        status: "available",
+        forced_release: true,
+        slot_ids: targetIds,
+      }),
+      operator_discord_id: guard.userId,
+      retention_class: "long_audit",
+      created_at: now,
+    });
+  }
+
+  revalidateEventSlotPaths(eventId);
+  return { ok: true, message: `${rows.length} 件の確保済枠を解放しました。` };
+}
+
+/** 選択枠のラベルを一括変更。 */
+export async function batchUpdateSlotLabels(
+  formData: FormData,
+): Promise<SlotActionResult> {
+  const eventId = String(formData.get("event_id") ?? "").trim();
+  const slotIds = parseSlotIds(formData);
+  const label = String(formData.get("label") ?? "").trim();
+  if (!eventId) return { ok: false, message: "event_id が必要です。" };
+  if (slotIds.length === 0) return { ok: false, message: "枠が選択されていません。" };
+  if (!label) return { ok: false, message: "ラベルを入力してください。" };
+
+  const db = getDatabase();
+  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const guard = await ensureCanEditSlots(eventId);
+  if (!guard.ok) return guard.result;
+
+  const rows = await db
+    .select({ id: slots.id })
+    .from(slots)
+    .where(and(eq(slots.event_id, eventId), inArray(slots.id, slotIds))!);
+
+  if (rows.length === 0) return { ok: false, message: "対象枠が見つかりません。" };
+
+  const now = Math.floor(Date.now() / 1000);
+  await db
+    .update(slots)
+    .set({ slot_label: label, updated_at: now })
+    .where(inArray(slots.id, slotIds));
+
+  revalidateEventSlotPaths(eventId);
+  return { ok: true, message: `${rows.length} 件のラベルを更新しました。` };
 }

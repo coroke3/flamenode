@@ -270,7 +270,7 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
             description="現在、管理者がすぐに処理すべき申請・通知失敗・モデレーションはありません。"
             iconName="check"
             actions={[
-              { href: "/admin/events", label: "イベント管理へ", variant: "primary" },
+              { href: "/admin/events", label: "全イベント管理へ", variant: "primary" },
               { href: "/admin/videos", label: "作品管理へ", variant: "ghost" },
               { href: "/admin/health", label: "ヘルスチェックを見る", variant: "ghost" },
             ]}

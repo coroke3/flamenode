@@ -15,7 +15,7 @@ export const metadata: Metadata = {
 
 /**
  * /manage — イベント運営者向けの現場運用（審査・枠・スタッフ等）。
- * /admin はサイト全体の管理本部（admin 専用）。非 admin 運営者を /admin に誘導しない。
+ * /admin はサイト管理（admin 専用）。非 admin 運営者を /admin に誘導しない。
  * 認可は各ページで event_staff.permission_mask を参照する。
  */
 export default async function ManageLayout({

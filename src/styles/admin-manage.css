@@ -130,6 +130,319 @@
   }
 }
 
+/* personal — entry / dashboard / settings（公開ヒーローは使わない） */
+[data-fn-surface="personal"].fn-personal-shell {
+  display: flex;
+  flex-direction: column;
+}
+
+[data-fn-surface="personal"] > main,
+[data-fn-surface="personal"] .fn-main {
+  flex: 1;
+  width: 100%;
+}
+
+[data-fn-surface="personal"] {
+  --fn-page-max: var(--content-max, 1360px);
+  --fn-space-page-top: clamp(24px, 4vw, 36px);
+  --fn-space-page-bottom: clamp(40px, 5vw, 64px);
+}
+
+[data-fn-surface="personal"] .fn-public-container {
+  width: 100%;
+  max-width: var(--fn-page-max);
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: var(--fn-page-gutter, clamp(16px, 4vw, 32px));
+  padding-right: var(--fn-page-gutter, clamp(16px, 4vw, 32px));
+  box-sizing: border-box;
+}
+
+[data-fn-surface="personal"] .fn-page,
+[data-fn-surface="personal"] .fn-entry,
+[data-fn-surface="personal"] .fn-dash {
+  width: 100%;
+}
+
+[data-fn-surface="personal"] .fn-page {
+  padding-top: var(--fn-space-page-top);
+  padding-bottom: var(--fn-space-page-bottom);
+}
+
+[data-fn-surface="personal"] .fn-page-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: clamp(16px, 2.5vw, 24px);
+}
+
+[data-fn-surface="personal"] .fn-page-title,
+[data-fn-surface="personal"] .fn-entry-title,
+[data-fn-surface="personal"] .fn-dash-name {
+  margin: 2px 0 0;
+  font-family: var(--font-display);
+  font-size: clamp(26px, 4vw, 36px);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+
+[data-fn-surface="personal"] .fn-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+[data-fn-surface="personal"] .fn-page-lead,
+[data-fn-surface="personal"] .fn-entry-lead {
+  max-width: 42rem;
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+
+[data-fn-surface="personal"] .fn-panel-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+[data-fn-surface="personal"] .fn-entry-status,
+[data-fn-surface="personal"] .fn-pc-status-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 16px 20px;
+  border: 0;
+  border-radius: var(--r-block, 10px);
+  margin-bottom: 20px;
+  font-size: 13.5px;
+}
+
+[data-fn-surface="personal"] .fn-entry-status--ok,
+[data-fn-surface="personal"] .fn-pc-status-banner--ok {
+  background: var(--bg-surface);
+}
+
+[data-fn-surface="personal"] .fn-entry-status--warn,
+[data-fn-surface="personal"] .fn-pc-status-banner {
+  background: var(--accent-primary-soft);
+}
+
+[data-fn-surface="personal"] .fn-entry-status-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+[data-fn-surface="personal"] .fn-entry-status-lead,
+[data-fn-surface="personal"] .fn-pc-banner-lead {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+[data-fn-surface="personal"] .fn-entry-tos-note {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+[data-fn-surface="personal"] .fn-entry-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+  padding-bottom: 48px;
+}
+
+[data-fn-surface="personal"] .fn-entry-card {
+  border: 0;
+  border-radius: var(--r-block, 10px);
+}
+
+[data-fn-surface="personal"] .fn-entry-steps {
+  margin: 0 0 clamp(20px, 3vw, 28px);
+}
+
+[data-fn-surface="personal"] .fn-entry-steps-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+[data-fn-surface="personal"] .fn-entry-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-card);
+  background: var(--bg-surface);
+}
+
+[data-fn-surface="personal"] .fn-entry-step-index {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+}
+
+[data-fn-surface="personal"] .fn-entry-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+[data-fn-surface="personal"] .fn-entry-step-label {
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+
+[data-fn-surface="personal"] .fn-entry-step-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+[data-fn-surface="personal"] .fn-entry-step--done {
+  border-color: color-mix(in srgb, var(--accent-primary) 24%, var(--border-subtle));
+}
+
+[data-fn-surface="personal"] .fn-entry-step--done .fn-entry-step-state {
+  color: var(--text-secondary);
+}
+
+[data-fn-surface="personal"] .fn-entry-step--current {
+  border-color: color-mix(in srgb, var(--accent-primary) 55%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-primary) 8%, var(--bg-surface));
+}
+
+[data-fn-surface="personal"] .fn-entry-step--current .fn-entry-step-index {
+  color: var(--accent-ink);
+  background: var(--accent-primary);
+}
+
+[data-fn-surface="personal"] .fn-entry-step--warn {
+  border-color: color-mix(in srgb, var(--accent-warning) 45%, var(--border-subtle));
+}
+
+[data-fn-surface="personal"] .fn-entry-step--warn .fn-entry-step-state {
+  color: var(--accent-warning);
+}
+
+[data-fn-surface="personal"] .fn-entry-step--error {
+  border-color: color-mix(in srgb, var(--accent-danger) 45%, var(--border-subtle));
+}
+
+[data-fn-surface="personal"] .fn-entry-step--error .fn-entry-step-state {
+  color: var(--accent-danger);
+}
+
+@media (min-width: 900px) {
+  [data-fn-surface="personal"] .fn-entry-steps-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1120px) {
+  [data-fn-surface="personal"] .fn-entry-steps-list {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+[data-fn-surface="personal"] .fn-entry-status-actions {
+  margin-left: 8px;
+}
+
+[data-fn-surface="personal"] .fn-text-muted-sm {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+[data-fn-surface="personal"] .fn-mt-12 {
+  margin-top: 12px;
+}
+
+[data-fn-surface="personal"] .fn-text-ok {
+  color: var(--ok, var(--accent-primary-strong));
+}
+
+[data-fn-surface="personal"] .fn-pc-status-banner h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+[data-fn-surface="personal"] .fn-pc-slot-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+[data-fn-surface="personal"] .fn-pc-slot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: var(--r-card);
+  background: var(--bg-elevated);
+  color: inherit;
+  text-decoration: none;
+  transition: background 120ms ease;
+}
+
+[data-fn-surface="personal"] .fn-pc-slot:hover {
+  background: color-mix(in srgb, var(--accent-primary) 14%, var(--bg-elevated));
+}
+
+[data-fn-surface="personal"] .fn-pc-slot-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+[data-fn-surface="personal"] .fn-pc-slot-label {
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+[data-fn-surface="personal"] .fn-pc-slot-event {
+  color: var(--text-faint);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+}
+
 [data-admin-shell] {
   --admin-bg: #0a0b0d;
   --admin-surface: #12141a;

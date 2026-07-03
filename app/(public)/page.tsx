@@ -177,6 +177,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
 
       <section className={`fn-public-container fn-section ${styles.section}`} aria-labelledby="sec-recommend">
         <SectionHeader
+          eyebrow="PICKS"
           title="今週のピックアップ"
           moreHref="/recommend"
           moreLabel="一覧を見る"
@@ -196,6 +197,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
 
       <section className={`fn-public-container fn-section ${styles.section}`} aria-labelledby="sec-creators">
         <SectionHeader
+          eyebrow="CREATORS"
           title="注目クリエイター"
           moreHref="/user"
           moreLabel="もっと見る"
@@ -225,6 +227,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
 
       <section className={`fn-public-container fn-section ${styles.section}`} aria-labelledby="sec-latest">
         <SectionHeader
+          eyebrow="LATEST"
           title="新着アップロード"
           moreHref="/list"
           moreLabel="すべて見る"
@@ -244,6 +247,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
 
       <section className={`fn-public-container fn-section ${styles.section}`} aria-labelledby="sec-events">
         <SectionHeader
+          eyebrow="EVENTS"
           title="最近のイベント"
           moreHref="/event"
           moreLabel="イベント一覧"

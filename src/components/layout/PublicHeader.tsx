@@ -33,21 +33,44 @@ interface PublicHeaderProps {
 
 export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
   const [mobileOpen, setMobileOpen] = React.useState(false);
-  const searchInputRef = React.useRef<HTMLInputElement>(null);
+  const [mobileSearchOpen, setMobileSearchOpen] = React.useState(false);
+  const desktopSearchRef = React.useRef<HTMLInputElement>(null);
+  const mobileSearchRef = React.useRef<HTMLInputElement>(null);
+  const mobileSearchPanelRef = React.useRef<HTMLDivElement>(null);
   const pathname = usePathname();
-  const loginNext = sanitizeNextPath(pathname ?? "/", "/");
-  const loginHref = `/entry?next=${encodeURIComponent(loginNext)}`;
+  const entryNext = sanitizeNextPath(pathname ?? "/", "/");
+  const entryHref =
+    entryNext === "/entry"
+      ? "/entry"
+      : `/entry?next=${encodeURIComponent(entryNext)}`;
 
   const managementNav = user
     ? [
         ...(user.management.canAccessManage
-          ? [{ href: "/manage", label: "運営", icon: "users" as const }]
+          ? [{ href: "/manage", label: "イベント運営", icon: "users" as const }]
           : []),
         ...(user.management.canAccessAdmin
-          ? [{ href: "/admin", label: "管理", icon: "settings" as const }]
+          ? [{ href: "/admin", label: "サイト管理", icon: "settings" as const }]
           : []),
       ]
     : [];
+
+  React.useEffect(() => {
+    if (!mobileSearchOpen) return;
+    mobileSearchRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMobileSearchOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mobileSearchOpen]);
+
+  const closeMobilePanels = () => {
+    setMobileOpen(false);
+    setMobileSearchOpen(false);
+  };
 
   return (
     <header className={`fn-header ${styles.header}`}>
@@ -82,13 +105,13 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
           <div className={styles.themeButton}>
             <ThemeToggle />
           </div>
+
           <form
             action="/list"
             method="get"
             className={styles.searchForm}
             role="search"
             aria-label="作品検索"
-            onClick={() => searchInputRef.current?.focus()}
             onSubmit={(e) => {
               e.preventDefault();
               navigateGetForm(e.currentTarget);
@@ -98,11 +121,11 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
               <Icon name="search" size={14} aria-hidden />
             </span>
             <label htmlFor="header-search" className="fn-sr-only">
-              検索
+              作品を検索
             </label>
             <input
               id="header-search"
-              ref={searchInputRef}
+              ref={desktopSearchRef}
               type="search"
               name="q"
               placeholder="作品を検索"
@@ -110,30 +133,49 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
             />
           </form>
 
+          <button
+            type="button"
+            className={styles.mobileSearchToggle}
+            aria-label="作品を検索"
+            aria-expanded={mobileSearchOpen}
+            aria-controls="header-mobile-search"
+            onClick={() => {
+              setMobileSearchOpen((open) => !open);
+              setMobileOpen(false);
+            }}
+          >
+            <Icon name="search" size={18} aria-hidden />
+          </button>
+
           {user ? (
-            <div className={styles.actionNav}>
+            <>
               <Link
                 href="/entry"
-                className={`fn-btn fn-header-submit ${styles.postBtn}`}
+                className={`fn-btn fn-header-submit ${styles.headerCta} ${styles.postBtn}`}
                 data-variant="accent"
               >
                 <Icon name="edit" size={13} aria-hidden />
-                投稿する
+                <span>投稿する</span>
               </Link>
-              {managementNav.map((item) => (
-                <Link key={item.href} href={item.href} className={styles.ghostBtn}>
-                  <Icon name={item.icon} size={13} aria-hidden />
-                  {item.label}
-                </Link>
-              ))}
-              <AccountMenu user={user} />
-            </div>
+              <div className={styles.actionNav}>
+                {managementNav.map((item) => (
+                  <Link key={item.href} href={item.href} className={styles.ghostBtn}>
+                    <Icon name={item.icon} size={13} aria-hidden />
+                    {item.label}
+                  </Link>
+                ))}
+                <AccountMenu user={user} />
+              </div>
+            </>
           ) : (
-            <div className={styles.actionNav}>
-              <Link href="/entry" className={styles.loginBtn}>
-                ログイン
-              </Link>
-            </div>
+            <Link
+              href={entryHref}
+              className={`fn-btn fn-header-submit ${styles.headerCta} ${styles.joinBtn}`}
+              data-variant="accent"
+            >
+              <Icon name="edit" size={13} aria-hidden />
+              <span>参加・投稿する</span>
+            </Link>
           )}
 
           <button
@@ -141,11 +183,59 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
             className={styles.menuToggle}
             aria-label="メニューを開く"
             aria-expanded={mobileOpen}
-            onClick={() => setMobileOpen((v) => !v)}
+            onClick={() => {
+              setMobileOpen((open) => !open);
+              setMobileSearchOpen(false);
+            }}
           >
             <Icon name={mobileOpen ? "close" : "menu"} size={18} />
           </button>
         </div>
+      </div>
+
+      <div
+        id="header-mobile-search"
+        ref={mobileSearchPanelRef}
+        className={`${styles.mobileSearchPanel} ${
+          mobileSearchOpen ? styles.mobileSearchPanelOpen : ""
+        }`}
+        hidden={!mobileSearchOpen}
+      >
+        <form
+          action="/list"
+          method="get"
+          className={`fn-public-container ${styles.mobileSearchPanelForm}`}
+          role="search"
+          aria-label="作品検索"
+          onSubmit={(e) => {
+            e.preventDefault();
+            navigateGetForm(e.currentTarget);
+            setMobileSearchOpen(false);
+          }}
+        >
+          <label htmlFor="header-mobile-search-input" className="fn-sr-only">
+            作品を検索
+          </label>
+          <input
+            id="header-mobile-search-input"
+            ref={mobileSearchRef}
+            type="search"
+            name="q"
+            placeholder="作品を検索"
+            autoComplete="off"
+          />
+          <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm">
+            検索
+          </button>
+          <button
+            type="button"
+            className={`fn-btn fn-btn-ghost fn-btn-sm ${styles.mobileSearchClose}`}
+            aria-label="検索を閉じる"
+            onClick={() => setMobileSearchOpen(false)}
+          >
+            <Icon name="close" size={14} aria-hidden />
+          </button>
+        </form>
       </div>
 
       <div className={`${styles.mobile} ${mobileOpen ? styles.mobileOpen : ""}`}>
@@ -154,35 +244,32 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
           aria-label="モバイルナビゲーション"
           aria-hidden={!mobileOpen}
         >
-            <form
-              action="/list"
-              method="get"
-              className={styles.mobileSearch}
-              role="search"
-              aria-label="作品検索"
-              onSubmit={(e) => {
-                e.preventDefault();
-                navigateGetForm(e.currentTarget);
-              }}
-            >
-              <Icon name="search" size={14} aria-hidden />
-              <input
-                type="search"
-                name="q"
-                placeholder="作品を検索"
-                autoComplete="off"
-              />
-            </form>
-
-            {!user ? (
+          {!user ? (
+            <div className={styles.mobileSection}>
+              {PUBLIC_NAV_ITEMS.map((item) => {
+                const active = isPathActive(pathname, item.href);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`${styles.mobileLink} ${
+                      active ? styles.mobileLinkActive : ""
+                    }`}
+                    onClick={closeMobilePanels}
+                    aria-current={active ? "page" : undefined}
+                  >
+                    <Icon name={item.iconName} size={16} aria-hidden /> {item.label}
+                  </Link>
+                );
+              })}
+              <div className={styles.mobileThemeRow}>
+                <span>テーマ</span>
+                <ThemeToggle />
+              </div>
+            </div>
+          ) : (
+            <>
               <div className={styles.mobileSection}>
-                <Link
-                  href={loginHref}
-                  className={`${styles.mobileLink} ${styles.mobileLinkAccent}`}
-                  onClick={() => setMobileOpen(false)}
-                >
-                  <Icon name="discord" size={16} aria-hidden /> Discord でログイン
-                </Link>
                 {PUBLIC_NAV_ITEMS.map((item) => {
                   const active = isPathActive(pathname, item.href);
                   return (
@@ -192,115 +279,84 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
                       className={`${styles.mobileLink} ${
                         active ? styles.mobileLinkActive : ""
                       }`}
-                      onClick={() => setMobileOpen(false)}
+                      onClick={closeMobilePanels}
                       aria-current={active ? "page" : undefined}
                     >
                       <Icon name={item.iconName} size={16} aria-hidden /> {item.label}
                     </Link>
                   );
                 })}
-                <div className={styles.mobileThemeRow}>
-                  <span>テーマ</span>
-                  <ThemeToggle />
-                </div>
+                <Link
+                  href="/dashboard"
+                  className={styles.mobileLink}
+                  onClick={closeMobilePanels}
+                >
+                  <Icon name="grid" size={16} aria-hidden /> マイページ
+                </Link>
+                <Link
+                  href="/dashboard/library"
+                  className={styles.mobileLink}
+                  onClick={closeMobilePanels}
+                >
+                  <Icon name="bookmark" size={16} aria-hidden /> ライブラリ
+                </Link>
+                <Link
+                  href="/dashboard/settings"
+                  className={styles.mobileLink}
+                  onClick={closeMobilePanels}
+                >
+                  <Icon name="settings" size={16} aria-hidden /> 設定
+                </Link>
               </div>
-            ) : (
-              <>
-                <div className={styles.mobileSection}>
-                  {PUBLIC_NAV_ITEMS.filter((item) => item.href !== "/entry").map((item) => {
-                    const active = isPathActive(pathname, item.href);
-                    return (
+
+              {managementNav.length > 0 ? (
+                <>
+                  <div className={styles.mobileDivider} />
+                  <div className={styles.mobileSection}>
+                    {managementNav.map((item) => (
                       <Link
                         key={item.href}
                         href={item.href}
-                        className={`${styles.mobileLink} ${
-                          active ? styles.mobileLinkActive : ""
-                        }`}
-                        onClick={() => setMobileOpen(false)}
-                        aria-current={active ? "page" : undefined}
+                        className={styles.mobileLink}
+                        onClick={closeMobilePanels}
                       >
-                        <Icon name={item.iconName} size={16} aria-hidden /> {item.label}
+                        <Icon name={item.icon} size={16} aria-hidden /> {item.label}
                       </Link>
-                    );
-                  })}
-                  <Link
-                    href="/entry"
-                    className={styles.mobileLink}
-                    onClick={() => setMobileOpen(false)}
-                  >
-                    <Icon name="edit" size={16} aria-hidden /> 投稿する
-                  </Link>
-                  <Link
-                    href="/dashboard"
-                    className={styles.mobileLink}
-                    onClick={() => setMobileOpen(false)}
-                  >
-                    <Icon name="grid" size={16} aria-hidden /> マイページ
-                  </Link>
-                  <Link
-                    href="/dashboard/library"
-                    className={styles.mobileLink}
-                    onClick={() => setMobileOpen(false)}
-                  >
-                    <Icon name="bookmark" size={16} aria-hidden /> ライブラリ
-                  </Link>
-                  <Link
-                    href="/dashboard/settings"
-                    className={styles.mobileLink}
-                    onClick={() => setMobileOpen(false)}
-                  >
-                    <Icon name="settings" size={16} aria-hidden /> 設定
-                  </Link>
-                </div>
-
-                {managementNav.length > 0 ? (
-                  <>
-                    <div className={styles.mobileDivider} />
-                    <div className={styles.mobileSection}>
-                      {managementNav.map((item) => (
-                        <Link
-                          key={item.href}
-                          href={item.href}
-                          className={styles.mobileLink}
-                          onClick={() => setMobileOpen(false)}
-                        >
-                          <Icon name={item.icon} size={16} aria-hidden /> {item.label}
-                        </Link>
-                      ))}
-                    </div>
-                  </>
-                ) : null}
-
-                <div className={styles.mobileDivider} />
-                <div className={styles.mobileSection}>
-                  <div className={styles.mobileSectionTitle}>X ID切替</div>
-                  <div className={styles.mobileXIdContainer}>
-                    <XIdSwitcher entries={user.xIds} discordName={user.name} />
+                    ))}
                   </div>
-                </div>
+                </>
+              ) : null}
 
-                <div className={styles.mobileDivider} />
-                <div className={styles.mobileSection}>
-                  <div className={styles.mobileSectionTitle}>テーマ</div>
-                  <div className={styles.themeSlot}>
-                    <ThemeToggle />
-                  </div>
+              <div className={styles.mobileDivider} />
+              <div className={styles.mobileSection}>
+                <div className={styles.mobileSectionTitle}>X ID切替</div>
+                <div className={styles.mobileXIdContainer}>
+                  <XIdSwitcher entries={user.xIds} discordName={user.name} />
                 </div>
+              </div>
 
-                <div className={styles.mobileDivider} />
-                <div className={styles.mobileSection}>
-                  <Link
-                    href="/api/auth/signout"
-                    className={`${styles.mobileLink} ${styles.mobileLinkDanger}`}
-                    onClick={() => setMobileOpen(false)}
-                  >
-                    <Icon name="logout" size={16} aria-hidden /> ログアウト
-                  </Link>
+              <div className={styles.mobileDivider} />
+              <div className={styles.mobileSection}>
+                <div className={styles.mobileSectionTitle}>テーマ</div>
+                <div className={styles.themeSlot}>
+                  <ThemeToggle />
                 </div>
-              </>
-            )}
-          </nav>
-        </div>
+              </div>
+
+              <div className={styles.mobileDivider} />
+              <div className={styles.mobileSection}>
+                <Link
+                  href="/api/auth/signout"
+                  className={`${styles.mobileLink} ${styles.mobileLinkDanger}`}
+                  onClick={closeMobilePanels}
+                >
+                  <Icon name="logout" size={16} aria-hidden /> ログアウト
+                </Link>
+              </div>
+            </>
+          )}
+        </nav>
+      </div>
     </header>
   );
 }

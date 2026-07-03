@@ -18,7 +18,7 @@ import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 
-export const metadata: Metadata = { title: "イベント管理" };
+export const metadata: Metadata = { title: "全イベント管理" };
 export const dynamic = "force-dynamic";
 
 type SortKey = "newest" | "oldest" | "upcoming";
@@ -71,7 +71,7 @@ export default async function AdminEventsPage({
   return (
     <div>
       <AdminPageHeader
-        title="イベント管理"
+        title="全イベント管理"
         description="イベントの作成・公開設定・運営メンバー管理を行います。"
         actions={[
           {

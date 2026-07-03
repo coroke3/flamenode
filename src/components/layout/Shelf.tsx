@@ -59,8 +59,8 @@ export function Shelf({
       >
         {children}
       </div>
-      <div aria-hidden className="fn-shelf-fade-left" />
-      <div aria-hidden className="fn-shelf-fade-right" />
+      <div aria-hidden className={cn("fn-shelf-fade-left", canPrev && "is-visible")} />
+      <div aria-hidden className={cn("fn-shelf-fade-right", canNext && "is-visible")} />
       <button
         type="button"
         aria-label="前へスクロール"

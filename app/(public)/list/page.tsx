@@ -13,11 +13,13 @@ import { events as eventsTable } from "@/lib/db/schema";
 import { VideoCard } from "@/components/video/VideoCard";
 import { Icon } from "@/components/ui/Icon";
 import { Pagination } from "@/components/ui/Pagination";
+import { TableScroll } from "@/components/ui/TableScroll";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import { formatUnix } from "@/lib/utils/format";
 import { buildPageMetadata } from "@/lib/seo";
 import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
 import { loadStaticRecentVideosPage } from "@/lib/publicData/staticRecentVideos";
+import { canFallbackToDatabase } from "@/lib/publicData/loader";
 
 export const metadata: Metadata = buildPageMetadata({
   title: "作品一覧",
@@ -50,19 +52,22 @@ export default async function ListPage({
     event = "",
     view: rawView = "grid",
   } = await searchParams;
-  const view = rawView === "index" ? "index" : "grid";
+  const view =
+    rawView === "index" ? "index" : rawView === "compact" ? "compact" : "grid";
   const parsedSort = parsePublicVideoSort(sort);
   const pageNum = Math.max(1, parseInt(page, 10) || 1);
   const offset = (pageNum - 1) * PAGE_SIZE;
 
-  const staticData =
+  const staticLoad =
     !q.trim() && parsedSort === "new" && !event
       ? await loadStaticRecentVideosPage({ page: pageNum, pageSize: PAGE_SIZE })
       : null;
 
-  const data = staticData
-    ? { videos: staticData.videos, total: staticData.total, eventInfo: null }
-    : await withDatabase(async (db) => {
+  const data = staticLoad?.page
+    ? { videos: staticLoad.page.videos, total: staticLoad.page.total, eventInfo: null }
+    : staticLoad && !canFallbackToDatabase(staticLoad.strategy)
+      ? { videos: [], total: 0, eventInfo: null }
+      : await withDatabase(async (db) => {
         const [videos, total, eventInfo] = await Promise.all([
           fetchPublicVideos(db, {
             q,
@@ -108,10 +113,9 @@ export default async function ListPage({
     <div className={`fn-public-container fn-page ${styles.page}`}>
         <header className="fn-page-head fn-page-head--split">
           <div className="fn-page-head-main">
-            <span className="fn-eyebrow">
-              archive — {total.toLocaleString()} works
-            </span>
+            <span className="fn-eyebrow">ARCHIVE</span>
             <h1 className="fn-display fn-page-title">作品一覧</h1>
+            <p className="fn-page-lead">{total.toLocaleString()} works</p>
           </div>
           <div className="fn-cr-controls" aria-label="表示形式">
             <div className="fn-cr-segment fn-cr-segment--icon-only">
@@ -122,6 +126,14 @@ export default async function ListPage({
                 aria-label="タイル表示"
               >
                 <Icon name="grid" size={14} aria-hidden />
+              </Link>
+              <Link
+                href={`/list?${params({ view: "compact", page: "1" })}`}
+                className={`fn-cr-seg-btn ${view === "compact" ? "is-active" : ""}`}
+                aria-current={view === "compact" ? "page" : undefined}
+                aria-label="コンパクト表示"
+              >
+                <Icon name="compact" size={14} aria-hidden />
               </Link>
               <Link
                 href={`/list?${params({ view: "index", page: "1" })}`}
@@ -143,7 +155,7 @@ export default async function ListPage({
               type="search"
               name="q"
               defaultValue={q}
-              placeholder="作品名 / 作者 / 楽曲 / コメント など"
+              placeholder="作品を検索"
               autoComplete="off"
             />
           </label>
@@ -202,10 +214,16 @@ export default async function ListPage({
                 </div>
               ))}
             </div>
+          ) : view === "compact" ? (
+            <div className={`fn-list-compact ${styles.compactGrid}`}>
+              {videos.map((v, index) => (
+                <div key={`${v.id}-compact-${index}`} className={styles.compactItem}>
+                  <VideoCard video={v} size="compact" />
+                </div>
+              ))}
+            </div>
           ) : (
-            <>
-              <p className="fn-scroll-hint">横にスクロールできます</p>
-              <div className={`fn-table-scroll fn-scroll-affordance ${styles.indexWrap}`}>
+            <TableScroll className={styles.indexWrap}>
               <table className={`fn-list-tbl ${styles.indexTable}`}>
                 <thead>
                   <tr>
@@ -262,8 +280,7 @@ export default async function ListPage({
                   })}
                 </tbody>
               </table>
-            </div>
-            </>
+            </TableScroll>
           )}
           <Pagination
             currentPage={pageNum}

@@ -33,6 +33,7 @@ export type IconName =
   | "clock"
   | "list"
   | "grid"
+  | "compact"
   | "warning"
   | "info"
   | "check"
@@ -246,6 +247,16 @@ const ICON_PATHS: Record<IconName, React.ReactNode> = {
       <rect x="14" y="3" width="7" height="7" />
       <rect x="14" y="14" width="7" height="7" />
       <rect x="3" y="14" width="7" height="7" />
+    </>
+  ),
+  compact: (
+    <>
+      <rect x="4" y="4" width="7" height="4" rx="0.5" />
+      <rect x="13" y="4" width="7" height="4" rx="0.5" />
+      <rect x="4" y="10" width="7" height="4" rx="0.5" />
+      <rect x="13" y="10" width="7" height="4" rx="0.5" />
+      <rect x="4" y="16" width="7" height="4" rx="0.5" />
+      <rect x="13" y="16" width="7" height="4" rx="0.5" />
     </>
   ),
   warning: (

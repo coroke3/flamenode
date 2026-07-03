@@ -2,6 +2,7 @@ import "server-only";
 
 import { sql, type SQL } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
+import { buildPermissionIntegrityChecks } from "./permissionIntegrityChecks";
 
 const DISPLAY_LIMIT = 50;
 
@@ -64,7 +65,7 @@ function finalize(
   };
 }
 
-async function makeCheck(args: {
+export async function makeCheck(args: {
   db: DB;
   id: string;
   title: string;
@@ -102,7 +103,8 @@ async function makeCheck(args: {
 export async function runIntegrityChecks(
   db: DB,
 ): Promise<IntegrityCheckResult[]> {
-  return Promise.all([
+  const [base, permission] = await Promise.all([
+    Promise.all([
     makeCheck({
       db,
       id: "videos_primary_event_missing_event",
@@ -708,5 +710,8 @@ export async function runIntegrityChecks(
         adminHref: `/admin/audit/${text(r.id)}`,
       }),
     }),
+    ]),
+    buildPermissionIntegrityChecks(db),
   ]);
+  return [...base, ...permission];
 }

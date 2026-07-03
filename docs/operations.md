@@ -15,7 +15,8 @@ DB 実装の正本は `src/lib/db/schema.ts`。設計文書や migration 手順�
 6. [管理者向け操作メモ](#6-管理者向け操作メモ)
 7. [Discord 通知運用方針](#7-discord-通知運用方針)
 8. [DB削減後の旧データインポート方針](#8-db削減後の旧データインポート方針)
-9. [関連ドキュメント](#9-関連ドキュメント)
+9. [静的 JSON / operation_mode / Cloudflare デプロイ](#10-静的-json--operation_mode--cloudflare-デプロイ2026-07-04)
+10. [関連ドキュメント](#9-関連ドキュメント)
 
 ---
 
@@ -435,6 +436,79 @@ SELECT status, COUNT(*) FROM notification_outbox
 - 大量インポート時は **event** 単位の再生成を基本とし、動画単位の full は明示選択時のみ
 
 ローカル開発では `npm run db:local-apply` または Next 起動時の instrumentation で `0024_legacy_import_db_reduction_prep.sql` を適用できる。ただし instrumentation はローカル救済であり、本番 migration の代替ではない。
+
+---
+
+## 10. 静的 JSON / operation_mode / Cloudflare デプロイ（2026-07-04）
+
+### 10-1. 公開データの正本
+
+| 層 | 役割 |
+| --- | --- |
+| D1 | 正本（編集・審査・権限） |
+| R2 `BUCKET` | 公開用静的 JSON キャッシュ |
+| `static_rebuild_queue` | 編集駆動の再生成キュー |
+
+読み取りは `src/lib/publicData/loader.ts` が担当する。
+
+1. R2 から JSON を試す
+2. `static_json_with_live_overlay`（normal / economy / read_only）なら DB fallback 可
+3. ミス時は `static_rebuild_queue` に投入（`static_only` は high のみ）
+4. `maintenance` / `static_only` で DB fallback の無限ループは禁止（ページ側で `canFallbackToDatabase` を確認）
+
+### 10-2. operation_mode 正本
+
+| 値 | 意味 |
+| --- | --- |
+| `normal` | 通常運用 |
+| `economy` | 重い処理を抑制 |
+| `read_only` | 投稿・編集停止、閲覧は可 |
+| `static_only` | 静的 JSON のみで公開（D1 fallback しない） |
+| `maintenance` | メンテナンス（管理者以外は軽量表示） |
+
+**書き込み正本は `system_settings.operation_mode` のみ。** `cost_guard_mode` / `is_maintenance_mode` への新規書き込みは禁止（読み取り fallback のみ）。
+
+管理: `/admin/cost-guard` / `/admin/static-builds`
+
+### 10-3. Wrangler bindings（Pages / Workers）
+
+| Binding | 用途 |
+| --- | --- |
+| `DB` | D1 `flamenode_db` |
+| `BUCKET` | R2 静的 JSON + メディア |
+| `KV` | cost guard スナップショット等 |
+
+ローカル: `npm run pages:dev`（`--d1=DB --r2=BUCKET --kv=KV`）
+
+### 10-4. Cloudflare Pages ビルド
+
+```sh
+npm run pages:build
+```
+
+出力: `.vercel/output/static` → `wrangler pages deploy`
+
+Workers（json-generator 等）: `npm run workers:deploy`
+
+### 10-5. 本番デプロイ前チェックリスト
+
+- [ ] `npm run typecheck` / `npm run lint`
+- [ ] `npm run check:db-legacy`
+- [ ] `wrangler d1 migrations apply flamenode_db --remote`（未適用分）
+- [ ] repair script（必要時）: `npm run repair:video-event-links -- --remote` / `npm run repair:event-group-legacy -- --remote`
+- [ ] `/admin/static-builds` で failed キューが残っていないか
+- [ ] `operation_mode` が意図どおりか
+
+### 10-6. Repair / rollback
+
+| スクリプト | 用途 |
+| --- | --- |
+| `npm run repair:video-event-links` | `primary_event_id` 欠落の `video_events` 補完 |
+| `npm run repair:event-group-legacy` | `events.event_group_id` → `event_group_events` 移行 + slug 重複修復 |
+
+`--dry-run` で件数確認、`--remote` で本番 D1。
+
+Rollback は migration 前の D1 dump から復元（`wrangler d1 export` / import）。
 
 ---
 
