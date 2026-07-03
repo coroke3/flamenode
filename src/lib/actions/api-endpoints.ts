@@ -42,6 +42,7 @@ export async function createApiEndpoint(
     await db
       .select({
         id: events.id,
+        visibility_status: events.visibility_status,
         public_api_enabled: events.public_api_enabled,
       })
       .from(events)
@@ -49,6 +50,9 @@ export async function createApiEndpoint(
       .limit(1)
   )[0];
   if (!current) return { ok: false, message: "Event was not found." };
+  if (current.visibility_status !== "public") {
+    return { ok: false, message: "Only public events can expose a public API." };
+  }
 
   const now = Math.floor(Date.now() / 1000);
   await db
@@ -89,6 +93,7 @@ export async function setApiEndpointActive(
     await db
       .select({
         id: events.id,
+        visibility_status: events.visibility_status,
         public_api_enabled: events.public_api_enabled,
       })
       .from(events)
@@ -96,6 +101,9 @@ export async function setApiEndpointActive(
       .limit(1)
   )[0];
   if (!current) return { ok: false, message: "Event was not found." };
+  if (next === 1 && current.visibility_status !== "public") {
+    return { ok: false, message: "Only public events can expose a public API." };
+  }
 
   const now = Math.floor(Date.now() / 1000);
   await db

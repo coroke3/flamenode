@@ -1,7 +1,7 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { FnTable } from "@/components/ui/FnTable";
 import { Icon } from "@/components/ui/Icon";
@@ -42,8 +42,7 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
     is_active: number | null;
     created_at: number;
     event_title: string | null;
-    event_active: number | null;
-    event_archived: number | null;
+    event_visibility_status: string | null;
   }> = [];
   let eventOptions: Array<{ id: string; title: string }> = [];
   let preview: unknown = null;
@@ -56,8 +55,7 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
         is_active: eventsTable.public_api_enabled,
         created_at: eventsTable.created_at,
         event_title: eventsTable.title,
-        event_active: eventsTable.is_active,
-        event_archived: eventsTable.is_archived,
+        event_visibility_status: eventsTable.visibility_status,
       })
       .from(eventsTable)
       .where(eq(eventsTable.public_api_enabled, 1))
@@ -67,10 +65,16 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
     eventOptions = await db
       .select({ id: eventsTable.id, title: eventsTable.title })
       .from(eventsTable)
+      .where(eq(eventsTable.visibility_status, "public"))
       .orderBy(desc(eventsTable.created_at))
       .limit(100);
 
-    const sample = rows.find((row) => row.is_active === 1 && row.event_title);
+    const sample = rows.find(
+      (row) =>
+        row.is_active === 1 &&
+        row.event_title &&
+        row.event_visibility_status === "public",
+    );
     if (sample) {
       const event = (
         await db
@@ -78,6 +82,7 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
             id: eventsTable.id,
             title: eventsTable.title,
             explanation: eventsTable.explanation,
+            visibility_status: eventsTable.visibility_status,
             is_active: eventsTable.is_active,
             is_entry_open: eventsTable.is_entry_open,
             is_archived: eventsTable.is_archived,
@@ -100,7 +105,12 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
         })
         .from(videoEventsTable)
         .innerJoin(videosTable, eq(videosTable.id, videoEventsTable.video_id))
-        .where(eq(videoEventsTable.event_id, sample.event_id))
+        .where(
+          and(
+            eq(videoEventsTable.event_id, sample.event_id),
+            eq(videosTable.visibility_status, "public"),
+          ),
+        )
         .limit(3);
       if (event) preview = buildEventApiPayload(event, videos, 3);
     }
@@ -163,6 +173,9 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
                 <tr key={row.id}>
                   <td>
                     <span className="fn-badge fn-badge-accent">Enabled</span>
+                    <span className="fn-badge fn-badge-soft" style={{ marginLeft: 6 }}>
+                      {row.event_visibility_status ?? "unknown"}
+                    </span>
                   </td>
                   <td>
                     <Link href={`/manage/events/${row.event_id}`}>
