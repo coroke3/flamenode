@@ -130,7 +130,7 @@ export const SPREADSHEET_READONLY_COLUMNS_BY_TABLE: Record<
   readonly string[]
 > = {
   events: ["custom_questions"],
-  videos: ["custom_answers"],
+  videos: ["custom_answers", "stage_permission"],
 };
 
 const DEFAULT_READONLY_TABLES = new Set([

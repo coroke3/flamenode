@@ -54,9 +54,10 @@ test("omitReadonlyImportColumns removes ignored columns before token/apply", () 
           id: "1",
           title: "Title",
           custom_answers: "{}",
+          stage_permission: "legacy value",
         },
       ],
-      readonlyColumns: ["custom_answers"],
+      readonlyColumns: ["custom_answers", "stage_permission"],
     }),
     [
       {
@@ -99,11 +100,11 @@ test("spreadsheet import parsing stops after the import row cap", () => {
 test("buildReadonlyImportColumnWarnings reports ignored readonly columns", () => {
   assert.deepEqual(
     buildReadonlyImportColumnWarnings({
-      rows: [{ id: "1", custom_answers: "{}" }],
-      mappedColumns: ["id", "custom_answers"],
-      readonlyColumns: ["custom_answers"],
+      rows: [{ id: "1", custom_answers: "{}", stage_permission: "legacy" }],
+      mappedColumns: ["id", "custom_answers", "stage_permission"],
+      readonlyColumns: ["custom_answers", "stage_permission"],
     }),
-    ["Readonly columns are ignored on import: custom_answers"],
+    ["Readonly columns are ignored on import: custom_answers, stage_permission"],
   );
   assert.deepEqual(
     buildReadonlyImportColumnWarnings({
