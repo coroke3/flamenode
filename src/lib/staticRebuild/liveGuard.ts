@@ -4,6 +4,8 @@ import { eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import type { DB } from "@/lib/db/client";
 import { systemSettings } from "@/lib/db/schema";
+import { isLiveApiEnabled } from "@/lib/operationMode/policy";
+import { resolveOperationMode } from "@/lib/operationMode/resolve";
 
 /** live API の GET ハンドラ共通: DB 未接続・cost guard・クエリ失敗を JSON で返す（画面全体の 500 回避）。 */
 export async function handleLiveApiGet<T>(
@@ -65,13 +67,14 @@ export async function liveApiAllowed(db: DB): Promise<boolean> {
     await db
       .select({
         operation_mode: systemSettings.operation_mode,
+        cost_guard_mode: systemSettings.cost_guard_mode,
+        is_maintenance_mode: systemSettings.is_maintenance_mode,
       })
       .from(systemSettings)
       .where(eq(systemSettings.id, "default"))
       .limit(1)
   )[0];
-  const mode = row?.operation_mode ?? "normal";
-  return mode !== "static_only" && mode !== "maintenance";
+  return isLiveApiEnabled(resolveOperationMode(row));
 }
 
 export function liveApiCacheControl(): string {

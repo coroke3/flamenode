@@ -2,7 +2,7 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import { systemSettings } from "@/lib/db/schema";
-import type { OperationMode } from "@/lib/operationMode/types";
+import { resolveOperationMode } from "@/lib/operationMode/resolve";
 
 /**
  * CostGuard の機能キー。
@@ -44,6 +44,7 @@ export async function evaluateCostGuard(
     await db
       .select({
         operation_mode: systemSettings.operation_mode,
+        cost_guard_mode: systemSettings.cost_guard_mode,
         is_maintenance_mode: systemSettings.is_maintenance_mode,
         disabled_features_json: systemSettings.disabled_features_json,
         cost_guard_exception_until: systemSettings.cost_guard_exception_until,
@@ -82,26 +83,6 @@ export async function evaluateCostGuard(
     return { blocked: true, reason: "feature" };
   }
   return { blocked: false };
-}
-
-function resolveOperationMode(row: {
-  operation_mode?: string | null;
-  is_maintenance_mode?: number | null;
-}): OperationMode {
-  const raw = row.operation_mode ?? "normal";
-  if (isOperationMode(raw)) return raw;
-  if (row.is_maintenance_mode === 1) return "maintenance";
-  return "normal";
-}
-
-function isOperationMode(value: string): value is OperationMode {
-  return (
-    value === "normal" ||
-    value === "economy" ||
-    value === "read_only" ||
-    value === "static_only" ||
-    value === "maintenance"
-  );
 }
 
 function parseFeatureList(raw: string | null, column: string): string[] {

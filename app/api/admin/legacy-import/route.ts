@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import { systemSettings } from "@/lib/db/schema";
+import { isWriteBlocked } from "@/lib/operationMode/policy";
+import { resolveOperationMode } from "@/lib/operationMode/resolve";
 import {
   analyzeLegacyPayload,
   applyLegacyImport,
@@ -304,12 +306,11 @@ async function getImportWriteBlockReason(): Promise<string | null> {
   const db = getDatabase();
   if (!db) return null;
   const rows = await db.select().from(systemSettings).limit(1);
-  const mode = rows[0]?.operation_mode ?? "normal";
-  const isMaintenance = rows[0]?.is_maintenance_mode === 1;
-  if (isMaintenance || mode === "maintenance") {
+  const mode = resolveOperationMode(rows[0]);
+  if (mode === "maintenance") {
     return "Import apply is disabled during maintenance. Dry run is still available.";
   }
-  if (mode === "read_only" || mode === "static_only") {
+  if (isWriteBlocked(mode)) {
     return `Import apply is disabled in ${mode} mode. Dry run is still available.`;
   }
   return null;

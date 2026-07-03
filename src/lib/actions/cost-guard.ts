@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import { historyLogs, systemSettings } from "@/lib/db/schema";
+import { resolveOperationMode } from "@/lib/operationMode/resolve";
 import type { OperationMode } from "@/lib/operationMode/types";
 
 export interface CostGuardResult {
@@ -114,14 +115,14 @@ export async function setMaintenanceMode(
     await db
       .select({
         operation_mode: systemSettings.operation_mode,
+        cost_guard_mode: systemSettings.cost_guard_mode,
+        is_maintenance_mode: systemSettings.is_maintenance_mode,
       })
       .from(systemSettings)
       .where(eq(systemSettings.id, "default"))
       .limit(1)
   )[0];
-  const currentMode = normalizeOperationMode(
-    current?.operation_mode,
-  );
+  const currentMode = resolveOperationMode(current);
   const nextMode: OperationMode =
     next === 1 ? "maintenance" : currentMode === "maintenance" ? "normal" : currentMode;
   await upsertGlobal(db, {
@@ -140,19 +141,6 @@ export async function setMaintenanceMode(
   revalidatePath("/admin/cost-guard");
   revalidatePath("/admin");
   return { ok: true };
-}
-
-function normalizeOperationMode(value: string | null | undefined): OperationMode {
-  if (
-    value === "normal" ||
-    value === "economy" ||
-    value === "read_only" ||
-    value === "static_only" ||
-    value === "maintenance"
-  ) {
-    return value;
-  }
-  return "normal";
 }
 
 export async function setAutoCostGuard(

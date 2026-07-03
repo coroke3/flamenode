@@ -18,6 +18,8 @@ import {
 import { Icon } from "@/components/ui/Icon";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { resolveOperationMode } from "@/lib/operationMode/resolve";
+import type { OperationMode } from "@/lib/operationMode/types";
 
 export const metadata: Metadata = { title: "管理ダッシュボード" };
 export const dynamic = "force-dynamic";
@@ -53,7 +55,7 @@ const EMPTY_COUNTS: PendingCounts = {
 export default async function AdminTopPage(): Promise<React.ReactElement> {
   const db = getDatabase();
   let counts = { ...EMPTY_COUNTS };
-  let mode: string = "normal";
+  let mode: OperationMode = "normal";
   let isMaintenance = 0;
 
   if (db) {
@@ -152,7 +154,7 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
         moderationOverdue: Number(moderationOverdue[0]?.c ?? 0),
         reservedOpenSlots: Number(reservedOpenSlots[0]?.c ?? 0),
       };
-      mode = sys[0]?.operation_mode ?? "normal";
+      mode = resolveOperationMode(sys[0]);
       isMaintenance = sys[0]?.is_maintenance_mode ?? 0;
     } catch (err) {
       console.error("[AdminTopPage] fetch failed", err);

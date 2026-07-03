@@ -14,12 +14,14 @@ import {
   recommendCostGuardMode,
 } from "@/lib/admin/costGuardPolicy";
 import { parseAuditDiff } from "@/lib/audit/diff";
+import { resolveOperationMode } from "@/lib/operationMode/resolve";
+import type { OperationMode } from "@/lib/operationMode/types";
 
 export const metadata: Metadata = { title: "コストガード" };
 export const dynamic = "force-dynamic";
 
 const MODES: Array<{
-  value: string;
+  value: OperationMode;
   label: string;
   description: string;
   badge: string;
@@ -56,16 +58,9 @@ const MODES: Array<{
   },
 ];
 
-type CostGuardMode =
-  | "normal"
-  | "economy"
-  | "read_only"
-  | "static_only"
-  | "maintenance";
-
 export default async function AdminCostGuardPage(): Promise<React.ReactElement> {
   const db = getDatabase();
-  let mode: CostGuardMode = "normal";
+  let mode: OperationMode = "normal";
   let isMaintenance = 0;
   let autoEnabled = 1;
   let reason: string | null = null;
@@ -79,7 +74,7 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
     try {
       const rows = await db.select().from(systemSettings).limit(1);
       if (rows[0]) {
-        mode = (rows[0].operation_mode ?? "normal") as CostGuardMode;
+        mode = resolveOperationMode(rows[0]);
         isMaintenance = rows[0].is_maintenance_mode ?? 0;
         autoEnabled = rows[0].auto_cost_guard_enabled ?? 1;
         reason = rows[0].cost_guard_reason;

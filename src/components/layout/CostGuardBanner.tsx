@@ -1,12 +1,12 @@
 import * as React from "react";
 import { getDatabase } from "@/lib/cloudflare";
 import { systemSettings } from "@/lib/db/schema";
+import { resolveOperationMode } from "@/lib/operationMode/resolve";
+import type { OperationMode } from "@/lib/operationMode/types";
 import styles from "./CostGuardBanner.module.css";
 
-type Mode = "normal" | "economy" | "read_only" | "static_only" | "maintenance";
-
 const TONE: Record<
-  Exclude<Mode, "normal">,
+  Exclude<OperationMode, "normal">,
   { bg: string; border: string; color: string; label: string; description: string }
 > = {
   economy: {
@@ -46,26 +46,21 @@ const TONE: Record<
 export async function CostGuardBanner(): Promise<React.ReactElement | null> {
   const db = getDatabase();
   if (!db) return null;
-  let mode: Mode = "normal";
-  let maintenance = 0;
+  let mode: OperationMode = "normal";
   let reason: string | null = null;
   try {
     const rows = await db.select().from(systemSettings).limit(1);
     const r = rows[0];
     if (r) {
-      mode = (r.operation_mode ?? "normal") as Mode;
-      maintenance = r.is_maintenance_mode ?? 0;
+      mode = resolveOperationMode(r);
       reason = r.cost_guard_reason ?? null;
     }
   } catch {
     return null;
   }
 
-  // 旧DB互換: operation_mode が未移行で maintenance flag だけ立っている場合を救済する。
-  const effectiveMode: Mode =
-    mode === "normal" && maintenance === 1 ? "maintenance" : mode;
-  if (effectiveMode === "normal") return null;
-  const tone = TONE[effectiveMode];
+  if (mode === "normal") return null;
+  const tone = TONE[mode];
 
   return (
     <div
