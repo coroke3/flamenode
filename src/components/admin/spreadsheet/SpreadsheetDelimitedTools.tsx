@@ -93,6 +93,7 @@ export function SpreadsheetDelimitedTools({
         delimiter={imp.delimiter}
         mode={imp.mode}
         displayPreview={imp.displayPreview}
+        canImport={imp.canImport}
         onClose={imp.closeModal}
         onTextChange={(t) => {
           imp.setText(t);

@@ -50,6 +50,27 @@ export function useSpreadsheetImport({
   );
 
   const displayPreview = preview ?? localPreview;
+  const canImport = Boolean(preview?.previewToken);
+
+  const updateText = React.useCallback((next: string) => {
+    setText(next);
+    setPreview(null);
+  }, []);
+
+  const updateHasHeader = React.useCallback((next: boolean) => {
+    setHasHeader(next);
+    setPreview(null);
+  }, []);
+
+  const updateDelimiter = React.useCallback((next: SpreadsheetDelimiterMode) => {
+    setDelimiter(next);
+    setPreview(null);
+  }, []);
+
+  const updateMode = React.useCallback((next: "insert" | "upsert") => {
+    setMode(next);
+    setPreview(null);
+  }, []);
 
   const reset = React.useCallback(() => {
     setText("");
@@ -89,6 +110,7 @@ export function useSpreadsheetImport({
       }
       setText(content);
       setPreview(null);
+      setError(null);
       const lower = file.name.toLowerCase();
       if (lower.endsWith(".tsv")) setDelimiter("tsv");
       else if (lower.endsWith(".csv")) setDelimiter("csv");
@@ -140,9 +162,13 @@ export function useSpreadsheetImport({
       setError(validationErr);
       return;
     }
+    if (!preview?.previewToken) {
+      setError("反映前にサーバーで確認してください。");
+      return;
+    }
     if (
       !window.confirm(
-        `${mode === "upsert" ? "UPSERT（PK一致で更新）" : "INSERT（新規のみ）"} で ${rowCount} 行を反映します。続行しますか？`,
+        `${mode === "upsert" ? "UPSERT（PK一致で更新）" : "INSERT（新規のみ）"} で ${preview.rowCount} 行を反映します。続行しますか？`,
       )
     ) {
       return;
@@ -156,6 +182,7 @@ export function useSpreadsheetImport({
         hasHeader,
         delimiter,
         mode,
+        previewToken: preview.previewToken,
       });
       const errCount = j.errors?.length ?? 0;
       setOpen(false);
@@ -176,6 +203,7 @@ export function useSpreadsheetImport({
     localPreview?.rowCount,
     mode,
     onImported,
+    preview,
     reset,
     setBarStatus,
     table,
@@ -187,16 +215,17 @@ export function useSpreadsheetImport({
     openModal,
     closeModal,
     text,
-    setText,
+    setText: updateText,
     hasHeader,
-    setHasHeader,
+    setHasHeader: updateHasHeader,
     delimiter,
-    setDelimiter,
+    setDelimiter: updateDelimiter,
     mode,
-    setMode,
+    setMode: updateMode,
     busy,
     error,
     displayPreview,
+    canImport,
     onFile,
     runDryRun,
     runImport,

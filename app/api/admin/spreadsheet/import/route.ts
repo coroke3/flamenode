@@ -10,6 +10,7 @@ import {
   applySpreadsheetImport,
   type SpreadsheetImportMode,
 } from "@/lib/admin/spreadsheet/query";
+import { buildSpreadsheetImportPreviewToken } from "@/lib/admin/spreadsheet/importPreviewToken";
 import { resolveSpreadsheetTableContext } from "@/lib/admin/spreadsheet/tableContext";
 
 export async function POST(req: Request): Promise<Response> {
@@ -24,6 +25,7 @@ export async function POST(req: Request): Promise<Response> {
     hasHeader?: boolean;
     delimiter?: SpreadsheetDelimiterMode;
     dryRun?: boolean;
+    previewToken?: string;
   };
   try {
     body = await readSpreadsheetJsonBody(req);
@@ -57,16 +59,31 @@ export async function POST(req: Request): Promise<Response> {
       hasHeader,
       delimiter,
     });
+    const previewToken = await buildSpreadsheetImportPreviewToken({
+      table: ctx.def.table,
+      mode,
+      columns: ctx.columnNames,
+      primaryKeys: ctx.primaryKeys,
+      rows,
+    });
 
     if (body.dryRun) {
       return NextResponse.json({
         ok: true,
         dryRun: true,
+        previewToken,
         rowCount: rows.length,
         mappedColumns,
         warnings,
         preview: rows.slice(0, 20),
       });
+    }
+
+    if (!body.previewToken || body.previewToken !== previewToken) {
+      return NextResponse.json(
+        { error: "preview_required" },
+        { status: 409 },
+      );
     }
 
     const result = await applySpreadsheetImport(

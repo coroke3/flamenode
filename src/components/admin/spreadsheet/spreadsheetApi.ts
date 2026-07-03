@@ -170,6 +170,13 @@ export async function previewSpreadsheetImport(body: {
       "invalid_response",
     );
   }
+  if (typeof j.previewToken !== "string" || j.previewToken.length === 0) {
+    throw new SpreadsheetApiError(
+      formatSpreadsheetApiError(200, { error: "invalid_response" }),
+      200,
+      "invalid_response",
+    );
+  }
   return j;
 }
 
@@ -179,6 +186,7 @@ export async function runSpreadsheetImport(body: {
   hasHeader: boolean;
   delimiter: SpreadsheetDelimiterMode;
   mode: "insert" | "upsert";
+  previewToken: string;
 }): Promise<SpreadsheetImportResult> {
   const j = await request<SpreadsheetImportResult & { error?: string }>(
     "/api/admin/spreadsheet/import",

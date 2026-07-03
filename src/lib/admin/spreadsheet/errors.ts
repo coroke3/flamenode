@@ -40,6 +40,8 @@ export function spreadsheetHttpStatus(message: string): number {
     case "foreign_key_violation":
     case "not_null_violation":
       return 400;
+    case "preview_required":
+      return 409;
     case "row_not_found":
       return 404;
     case SPREADSHEET_ERROR.DB_UNAVAILABLE:

@@ -64,6 +64,8 @@ export function formatSpreadsheetApiError(
       return "取り込みテキストが大きすぎます。ファイルを分割するか行数を減らしてください。";
     case "no_rows":
       return "取り込む行がありません。";
+    case "preview_required":
+      return "反映前にサーバー確認が必要です。内容や設定を変更した場合は再確認してください。";
     case "empty_row":
       return "空の行は追加できません。";
     case "unique_violation":

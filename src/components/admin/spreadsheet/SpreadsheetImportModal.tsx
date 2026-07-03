@@ -15,6 +15,7 @@ export function SpreadsheetImportModal({
   delimiter,
   mode,
   displayPreview,
+  canImport,
   onClose,
   onTextChange,
   onHasHeaderChange,
@@ -33,6 +34,7 @@ export function SpreadsheetImportModal({
   delimiter: SpreadsheetDelimiterMode;
   mode: "insert" | "upsert";
   displayPreview: SpreadsheetImportPreview | null;
+  canImport: boolean;
   onClose: () => void;
   onTextChange: (text: string) => void;
   onHasHeaderChange: (v: boolean) => void;
@@ -60,6 +62,7 @@ export function SpreadsheetImportModal({
         <p className={styles.importHint}>
           Excel やスプレッドシートからコピーした表をそのまま貼り付けできます。1
           行目をヘッダーにする場合は列名がテーブルと一致している必要があります。
+          反映前に必ずサーバー確認を実行してください。
         </p>
 
         <div className={styles.importOptions}>
@@ -124,7 +127,7 @@ export function SpreadsheetImportModal({
           </button>
           <span className={styles.importMeta}>
             {displayPreview
-              ? `${displayPreview.rowCount} 行 · 列: ${displayPreview.mappedColumns.length > 0 ? displayPreview.mappedColumns.join(", ") : "（位置マッチ）"}`
+              ? `${displayPreview.rowCount} 行 · 列: ${displayPreview.mappedColumns.length > 0 ? displayPreview.mappedColumns.join(", ") : "（位置マッチ）"} · ${canImport ? "サーバー確認済み" : "サーバー確認前"}`
               : "プレビュー待ち"}
           </span>
         </div>
@@ -187,10 +190,10 @@ export function SpreadsheetImportModal({
           <button
             type="button"
             className="fn-btn fn-btn-primary fn-btn-sm"
-            disabled={busy || !text.trim()}
+            disabled={busy || !text.trim() || !canImport}
             onClick={onImport}
           >
-            {busy ? "処理中…" : "反映する"}
+            {busy ? "処理中…" : canImport ? "プレビュー内容を反映" : "確認後に反映"}
           </button>
         </div>
       </div>

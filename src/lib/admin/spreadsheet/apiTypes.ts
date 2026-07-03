@@ -38,6 +38,7 @@ export type SpreadsheetCatalogResponse = {
 };
 
 export type SpreadsheetImportPreview = {
+  previewToken?: string;
   rowCount: number;
   mappedColumns: string[];
   warnings: string[];
