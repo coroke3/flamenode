@@ -6,19 +6,19 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Icon } from "@/components/ui/Icon";
 import { UserAvatar } from "@/components/user/UserAvatar";
 import {
-  addEventEditor,
-  removeCollaborator,
-  removeEventEditor,
-  updateEventEditor,
-  upsertCollaborator,
+  removeEventStaffMember,
+  upsertEventStaffMember,
 } from "@/lib/actions/event-staff-admin";
-import {
-  COLLABORATOR_PERMISSION_KEYS,
-  COLLABORATOR_PERMISSION_LABELS,
-} from "@/lib/constants/collaborator-permissions";
+import { COLLABORATOR_PERMISSION_LABELS } from "@/lib/constants/collaborator-permissions";
 import { canonicalizePermissionKey } from "@/lib/auth/permissions/aliases";
-import { isAdminOnlyKey, type PermissionKey } from "@/lib/auth/permissions/keys";
 import {
+  ALL_PERMISSION_KEYS,
+  isAdminOnlyKey,
+  isDangerousKey,
+  type PermissionKey,
+} from "@/lib/auth/permissions/keys";
+import {
+  getPresetPermissions,
   PRESET_DEFINITIONS,
   type EventStaffPreset,
 } from "@/lib/auth/permissions/presets";
@@ -31,133 +31,167 @@ import {
   type EventStaffCsvRow,
 } from "@/lib/admin/eventStaffCsv";
 
-export interface EditorRow {
-  x_user_id: string;
-  role: "editor" | "representative" | null;
-  is_public: number | null;
-  public_role_label: string | null;
-  internal_note: string | null;
-  x_name: string | null;
-  icon_url: string | null;
-}
-
-export interface CollaboratorRow {
-  key: string;
+export interface EventStaffMemberRow {
+  id: string;
   x_user_id: string | null;
   discord_user_id: string | null;
   display_name: string;
   permission_preset: string | null;
-  is_public_staff: number | null;
+  is_public: number | null;
   public_role_label: string | null;
+  internal_note: string | null;
   permission_keys: string[];
+  x_name: string | null;
+  icon_url: string | null;
 }
 
-type CollaboratorPreset = Exclude<EventStaffPreset, "owner" | "manager">;
+/** @deprecated EventStaffMemberRow を使用 */
+export type EditorRow = never;
+/** @deprecated EventStaffMemberRow を使用 */
+export type CollaboratorRow = never;
 
 interface EventStaffManagerProps {
   eventId: string;
-  editors: EditorRow[];
-  collaborators: CollaboratorRow[];
+  members: EventStaffMemberRow[];
   isSiteAdmin: boolean;
 }
 
-const COLLABORATOR_PRESETS: readonly CollaboratorPreset[] = [
-  "public_staff",
+const BASE_PRESETS: readonly EventStaffPreset[] = [
+  "owner",
+  "manager",
   "slot_manager",
   "content_editor",
   "reviewer",
+  "public_staff",
   "custom",
 ];
 
-const ADMIN_COLLABORATOR_PRESETS: readonly CollaboratorPreset[] = [
-  ...COLLABORATOR_PRESETS,
-  "xid_reviewer",
-];
+const ADMIN_ONLY_PRESETS: readonly EventStaffPreset[] = ["xid_reviewer"];
 
-function isCollaboratorPreset(value: string): value is CollaboratorPreset {
-  return (ADMIN_COLLABORATOR_PRESETS as readonly string[]).includes(value);
+function visiblePresets(isSiteAdmin: boolean): readonly EventStaffPreset[] {
+  return isSiteAdmin ? [...BASE_PRESETS, ...ADMIN_ONLY_PRESETS] : BASE_PRESETS;
 }
 
-function normalizeCollaboratorPreset(
+function normalizeMemberPreset(
   preset: string | null | undefined,
   permissionKeys: readonly string[],
-): CollaboratorPreset {
-  if (preset && isCollaboratorPreset(preset)) return preset;
+): EventStaffPreset {
+  const options = [...BASE_PRESETS, ...ADMIN_ONLY_PRESETS];
+  if (preset && (options as readonly string[]).includes(preset)) {
+    return preset as EventStaffPreset;
+  }
   return permissionKeys.length > 0 ? "custom" : "public_staff";
 }
 
 function visibleCustomPermissionKeys(isSiteAdmin: boolean): PermissionKey[] {
-  return COLLABORATOR_PERMISSION_KEYS.filter((key) => {
-    const canonical = canonicalizePermissionKey(key);
-    return canonical && (isSiteAdmin || !isAdminOnlyKey(canonical));
-  }) as PermissionKey[];
+  return ALL_PERMISSION_KEYS.filter((key) => isSiteAdmin || !isAdminOnlyKey(key));
 }
 
-function visiblePresetOptions(isSiteAdmin: boolean): readonly CollaboratorPreset[] {
-  return isSiteAdmin ? ADMIN_COLLABORATOR_PRESETS : COLLABORATOR_PRESETS;
+function capabilityLabels(keys: readonly string[]): string[] {
+  return keys.map((key) => {
+    const canonical = canonicalizePermissionKey(key);
+    if (!canonical) return "不明な権限";
+    return COLLABORATOR_PERMISSION_LABELS[canonical]?.label ?? "権限";
+  });
+}
+
+function resolvePresetKeys(
+  preset: EventStaffPreset,
+  customKeys: readonly string[],
+  isSiteAdmin: boolean,
+): PermissionKey[] {
+  if (preset === "custom") {
+    return customKeys
+      .map((key) => canonicalizePermissionKey(key))
+      .filter((key): key is PermissionKey => !!key && (isSiteAdmin || !isAdminOnlyKey(key)));
+  }
+  return [...getPresetPermissions(preset)];
+}
+
+function buildPresetDiffMessage(
+  currentKeys: readonly string[],
+  nextKeys: readonly string[],
+): string {
+  const current = new Set(
+    currentKeys
+      .map((k) => canonicalizePermissionKey(k))
+      .filter((key): key is PermissionKey => !!key),
+  );
+  const next = new Set(
+    nextKeys
+      .map((k) => canonicalizePermissionKey(k))
+      .filter((key): key is PermissionKey => !!key),
+  );
+  const added = [...next].filter((key) => !current.has(key));
+  const removed = [...current].filter((key) => !next.has(key));
+  const lines: string[] = [];
+  if (added.length > 0) {
+    lines.push(`追加: ${capabilityLabels(added).join("、")}`);
+  }
+  if (removed.length > 0) {
+    lines.push(`削除: ${capabilityLabels(removed).join("、")}`);
+  }
+  if (lines.length === 0) {
+    return "担当プリセットとできることに変更はありません。";
+  }
+  return lines.join("\n");
 }
 
 export function EventStaffManager({
   eventId,
-  editors,
-  collaborators,
+  members,
   isSiteAdmin,
 }: EventStaffManagerProps): React.ReactElement {
   const router = useRouter();
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
-  const [confirm, setConfirm] = React.useState<
-    | { kind: "editor"; xUserId: string }
-    | { kind: "collaborator"; displayName: string; xUserId: string | null; discordId: string | null }
-    | null
-  >(null);
+  const [removeTarget, setRemoveTarget] = React.useState<EventStaffMemberRow | null>(null);
+  const [savePreview, setSavePreview] = React.useState<{
+    fd: FormData;
+    message: string;
+  } | null>(null);
+
   const existingCsvSubjects = React.useMemo<EventStaffCsvExistingSubject[]>(
-    () => [
-      ...editors.map((editor) => ({
-        x_user_id: editor.x_user_id,
-        discord_user_id: null,
+    () =>
+      members.map((member) => ({
+        x_user_id: member.x_user_id,
+        discord_user_id: member.discord_user_id,
       })),
-      ...collaborators.map((collaborator) => ({
-        x_user_id: collaborator.x_user_id,
-        discord_user_id: collaborator.discord_user_id,
-      })),
-    ],
-    [editors, collaborators],
+    [members],
   );
 
-  const runAction = (
-    fd: FormData,
-    action: (fd: FormData) => Promise<{ ok: boolean; message?: string }>,
-  ) => {
+  const runUpsert = (fd: FormData) => {
     setError(null);
     startTransition(async () => {
-      const result = await action(fd);
+      const result = await upsertEventStaffMember(fd);
       if (!result.ok) {
         setError(result.message ?? "更新に失敗しました。");
         return;
       }
+      setSavePreview(null);
       router.refresh();
     });
   };
 
+  const requestSave = (fd: FormData, currentKeys: readonly string[], nextKeys: readonly string[]) => {
+    setSavePreview({
+      fd,
+      message: buildPresetDiffMessage(currentKeys, nextKeys),
+    });
+  };
+
   const runRemove = () => {
-    if (!confirm) return;
-    const target = confirm;
-    setConfirm(null);
+    if (!removeTarget) return;
+    const target = removeTarget;
+    setRemoveTarget(null);
     const fd = new FormData();
     fd.set("event_id", eventId);
-    if (target.kind === "editor") {
-      fd.set("x_user_id", target.xUserId);
-    } else {
-      fd.set("x_user_id", target.xUserId ?? "");
-      fd.set("discord_user_id", target.discordId ?? "");
-    }
+    fd.set("staff_id", target.id);
+    fd.set("x_user_id", target.x_user_id ?? "");
+    fd.set("discord_user_id", target.discord_user_id ?? "");
     setError(null);
     startTransition(async () => {
-      const result =
-        target.kind === "editor"
-          ? await removeEventEditor(fd)
-          : await removeCollaborator(fd);
+      const result = await removeEventStaffMember(fd);
       if (!result.ok) {
         setError(result.message ?? "削除に失敗しました。");
         return;
@@ -166,7 +200,7 @@ export function EventStaffManager({
     });
   };
 
-  const runCollaboratorCsvImport = (rows: EventStaffCsvRow[]) => {
+  const runCsvImport = (rows: EventStaffCsvRow[]) => {
     const validRows = rows.filter((row) => row.errors.length === 0);
     if (validRows.length === 0) {
       setError("取り込める行がありません。");
@@ -176,14 +210,7 @@ export function EventStaffManager({
     startTransition(async () => {
       for (const row of validRows) {
         if (!isSiteAdmin && row.permission_preset === "xid_reviewer") {
-          setError("X ID確認担当プリセットはsite adminだけが付与できます。");
-          return;
-        }
-        const invalid = row.permission_keys.find(
-          (key) => !canonicalizePermissionKey(key),
-        );
-        if (invalid) {
-          setError(`存在しない権限キーが含まれています: ${invalid}`);
+          setError("X ID確認担当プリセットは site admin だけが付与できます。");
           return;
         }
         const blockedAdminOnly = row.permission_keys.find((key) => {
@@ -201,9 +228,9 @@ export function EventStaffManager({
         fd.set("discord_user_id", row.discord_user_id);
         fd.set("permission_preset", row.permission_preset);
         fd.set("permission_keys", row.permission_keys.join(","));
-        fd.set("is_public_staff", row.is_public_staff);
+        fd.set("is_public", row.is_public_staff);
         fd.set("public_role_label", row.public_role_label);
-        const result = await upsertCollaborator(fd);
+        const result = await upsertEventStaffMember(fd);
         if (!result.ok) {
           setError(result.message ?? `${row.display_name} の取り込みに失敗しました。`);
           return;
@@ -223,78 +250,60 @@ export function EventStaffManager({
 
       <section style={{ display: "grid", gap: 12 }}>
         <SectionHeading
-          title={`代表・運営 (${editors.length})`}
-          description="イベント全体を編集できるメンバーです。公開ページへの掲載有無もここで設定します。"
+          title={`メンバー管理 (${members.length})`}
+          description="表示名、公開設定、担当プリセットを1画面で管理します。custom のときだけ詳細権限を選べます。"
         />
-        {editors.length === 0 ? (
-          <EmptyState label="代表・運営はまだ登録されていません。" />
+        {members.length === 0 ? (
+          <EmptyState label="運営メンバーはまだ登録されていません。" />
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
-            {editors.map((editor) => (
-              <EditorForm
-                key={editor.x_user_id}
-                editor={editor}
+            {members.map((member) => (
+              <MemberCard
+                key={member.id}
                 eventId={eventId}
+                member={member}
+                isSiteAdmin={isSiteAdmin}
                 busy={busy}
-                onSave={(fd) => runAction(fd, updateEventEditor)}
-                onRemove={() => setConfirm({ kind: "editor", xUserId: editor.x_user_id })}
+                onRequestSave={requestSave}
+                onRemove={() => setRemoveTarget(member)}
               />
             ))}
           </div>
         )}
-        <AddEditorForm
-          eventId={eventId}
-          busy={busy}
-          onSubmit={(fd) => runAction(fd, addEventEditor)}
-        />
-      </section>
-
-      <section style={{ display: "grid", gap: 12 }}>
-        <SectionHeading
-          title={`共同編集権限 (${collaborators.length})`}
-          description="全体権限ではなく、必要な編集項目だけを付与します。通常は X ID で紐付けます。"
-        />
-        {collaborators.length === 0 ? (
-          <EmptyState label="共同編集権限を持つメンバーはまだ登録されていません。" />
-        ) : (
-          <CollaboratorPermissionMatrix
-            eventId={eventId}
-            collaborators={collaborators}
-            isSiteAdmin={isSiteAdmin}
-            busy={busy}
-            onSave={(fd) => runAction(fd, upsertCollaborator)}
-            onRemove={(collaborator) =>
-              setConfirm({
-                kind: "collaborator",
-                displayName: collaborator.display_name,
-                xUserId: collaborator.x_user_id,
-                discordId: collaborator.discord_user_id,
-              })
-            }
-          />
-        )}
-        <CollaboratorForm
+        <AddMemberForm
           eventId={eventId}
           isSiteAdmin={isSiteAdmin}
-          existingSubjects={existingCsvSubjects}
           busy={busy}
-          onSubmit={(fd) => runAction(fd, upsertCollaborator)}
-          onImport={runCollaboratorCsvImport}
+          onRequestSave={(fd, nextKeys) => requestSave(fd, [], nextKeys)}
         />
       </section>
 
+      <CsvImportSection
+        isSiteAdmin={isSiteAdmin}
+        existingSubjects={existingCsvSubjects}
+        busy={busy}
+        onImport={runCsvImport}
+      />
+
       <ConfirmDialog
-        open={confirm !== null}
+        open={removeTarget !== null}
         title="メンバーを削除しますか?"
-        message={
-          confirm?.kind === "editor"
-            ? `@${confirm.xUserId} の代表・運営権限を削除します。`
-            : `${confirm?.displayName ?? "このメンバー"} の共同編集権限を削除します。`
-        }
+        message={`${removeTarget?.display_name ?? "このメンバー"} をイベント運営メンバーから外します。`}
         confirmLabel="削除する"
         tone="danger"
         onConfirm={runRemove}
-        onCancel={() => setConfirm(null)}
+        onCancel={() => setRemoveTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={savePreview !== null}
+        title="担当プリセットの変更を保存しますか?"
+        message={savePreview?.message ?? ""}
+        confirmLabel="保存する"
+        onConfirm={() => {
+          if (savePreview) runUpsert(savePreview.fd);
+        }}
+        onCancel={() => setSavePreview(null)}
       />
     </div>
   );
@@ -331,265 +340,30 @@ function EmptyState({ label }: { label: string }): React.ReactElement {
   );
 }
 
-function EditorForm({
-  editor,
+function MemberCard({
   eventId,
-  busy,
-  onSave,
-  onRemove,
-}: {
-  editor: EditorRow;
-  eventId: string;
-  busy: boolean;
-  onSave: (fd: FormData) => void;
-  onRemove: () => void;
-}): React.ReactElement {
-  const displayName = editor.x_name ?? editor.x_user_id;
-  return (
-    <form
-      onSubmit={(ev) => {
-        ev.preventDefault();
-        onSave(new FormData(ev.currentTarget));
-      }}
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))",
-        gap: 10,
-        alignItems: "center",
-        padding: 12,
-        border: "1px solid var(--border-subtle)",
-        borderRadius: "var(--radius-sm)",
-        background: "var(--bg-base)",
-      }}
-    >
-      <input type="hidden" name="event_id" value={eventId} />
-      <input type="hidden" name="x_user_id" value={editor.x_user_id} />
-      <div style={{ display: "flex", gap: 10, alignItems: "center", minWidth: 0 }}>
-        <MemberAvatar iconUrl={editor.icon_url} name={displayName} />
-        <div style={{ minWidth: 0 }}>
-          <strong style={{ display: "block", overflowWrap: "anywhere" }}>{displayName}</strong>
-          <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-            @{editor.x_user_id}
-          </span>
-        </div>
-      </div>
-      <select name="role" defaultValue={editor.role ?? "editor"} className="fn-select" disabled={busy}>
-        <option value="editor">運営</option>
-        <option value="representative">代表</option>
-      </select>
-      <select name="is_public" defaultValue={String(editor.is_public ?? 1)} className="fn-select" disabled={busy}>
-        <option value="1">公開する</option>
-        <option value="0">非公開</option>
-      </select>
-      <div style={{ display: "grid", gap: 8 }}>
-        <input
-          type="text"
-          name="public_role_label"
-          defaultValue={editor.public_role_label ?? ""}
-          placeholder="公開ラベル"
-          className="fn-input"
-          maxLength={40}
-          disabled={busy}
-        />
-        <input
-          type="text"
-          name="internal_note"
-          defaultValue={editor.internal_note ?? ""}
-          placeholder="内部メモ"
-          className="fn-input"
-          maxLength={120}
-          disabled={busy}
-        />
-      </div>
-      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-        <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm" disabled={busy}>
-          <Icon name="check" size={11} aria-hidden /> 保存
-        </button>
-        <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" disabled={busy} onClick={onRemove}>
-          <Icon name="trash" size={11} aria-hidden />
-        </button>
-      </div>
-    </form>
-  );
-}
-
-function AddEditorForm({
-  eventId,
-  busy,
-  onSubmit,
-}: {
-  eventId: string;
-  busy: boolean;
-  onSubmit: (fd: FormData) => void;
-}): React.ReactElement {
-  return (
-    <form
-      onSubmit={(ev) => {
-        ev.preventDefault();
-        const form = ev.currentTarget;
-        const fd = new FormData(form);
-        fd.set("event_id", eventId);
-        onSubmit(fd);
-        form.reset();
-      }}
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 150px), 1fr))",
-        gap: 8,
-        padding: 12,
-        border: "1px dashed var(--border-subtle)",
-        borderRadius: "var(--radius-sm)",
-      }}
-    >
-      <input
-        type="text"
-        name="x_user_id"
-        placeholder="X ID (@なし)"
-        className="fn-input"
-        pattern="[A-Za-z0-9_]{1,32}"
-        required
-        disabled={busy}
-      />
-      <select name="role" defaultValue="editor" className="fn-select" disabled={busy}>
-        <option value="editor">運営</option>
-        <option value="representative">代表</option>
-      </select>
-      <select name="is_public" defaultValue="1" className="fn-select" disabled={busy}>
-        <option value="1">公開する</option>
-        <option value="0">非公開</option>
-      </select>
-      <input
-        type="text"
-        name="public_role_label"
-        placeholder="公開ラベル"
-        className="fn-input"
-        maxLength={40}
-        disabled={busy}
-      />
-      <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm" disabled={busy}>
-        <Icon name="plus" size={11} aria-hidden /> 追加
-      </button>
-    </form>
-  );
-}
-
-function CollaboratorCard({
-  collaborator,
-  busy,
-  onRemove,
-}: {
-  collaborator: CollaboratorRow;
-  busy: boolean;
-  onRemove: () => void;
-}): React.ReactElement {
-  return (
-    <article
-      style={{
-        display: "grid",
-        gap: 10,
-        padding: 12,
-        border: "1px solid var(--border-subtle)",
-        borderRadius: "var(--radius-sm)",
-        background: "var(--bg-base)",
-      }}
-    >
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-        <div style={{ minWidth: 0 }}>
-          <strong style={{ display: "block", overflowWrap: "anywhere" }}>{collaborator.display_name}</strong>
-          <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-            {collaborator.x_user_id ? `@${collaborator.x_user_id}` : ""}
-            {collaborator.discord_user_id ? ` discord:${collaborator.discord_user_id.slice(0, 10)}...` : ""}
-          </span>
-        </div>
-        <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" disabled={busy} onClick={onRemove}>
-          <Icon name="trash" size={11} aria-hidden />
-        </button>
-      </div>
-      <div className="fn-console-badge-row">
-        <span className={collaborator.is_public_staff === 1 ? "fn-badge fn-badge-soft" : "fn-badge fn-badge-neutral"}>
-          {collaborator.is_public_staff === 1 ? "公開" : "非公開"}
-        </span>
-        {collaborator.public_role_label ? (
-          <span className="fn-badge fn-badge-neutral">{collaborator.public_role_label}</span>
-        ) : null}
-      </div>
-      <div className="fn-console-badge-row">
-        {collaborator.permission_keys.length === 0 ? (
-          <span className="fn-muted fn-text-sm">権限なし</span>
-        ) : (
-          collaborator.permission_keys.map((key) => {
-            const meta =
-              COLLABORATOR_PERMISSION_LABELS[
-                key as keyof typeof COLLABORATOR_PERMISSION_LABELS
-              ];
-            return (
-              <span key={key} className="fn-badge fn-badge-soft" title={meta?.description ?? ""}>
-                {meta?.label ?? "権限"}
-              </span>
-            );
-          })
-        )}
-      </div>
-    </article>
-  );
-}
-
-function CollaboratorPermissionMatrix({
-  eventId,
-  collaborators,
+  member,
   isSiteAdmin,
   busy,
-  onSave,
+  onRequestSave,
   onRemove,
 }: {
   eventId: string;
-  collaborators: CollaboratorRow[];
+  member: EventStaffMemberRow;
   isSiteAdmin: boolean;
   busy: boolean;
-  onSave: (fd: FormData) => void;
-  onRemove: (collaborator: CollaboratorRow) => void;
-}): React.ReactElement {
-  return (
-    <div style={{ display: "grid", gap: 10 }}>
-      {collaborators.map((collaborator) => (
-        <CollaboratorPermissionCard
-          key={collaborator.key}
-          eventId={eventId}
-          collaborator={collaborator}
-          isSiteAdmin={isSiteAdmin}
-          busy={busy}
-          onSave={onSave}
-          onRemove={() => onRemove(collaborator)}
-        />
-      ))}
-    </div>
-  );
-}
-
-function CollaboratorPermissionCard({
-  eventId,
-  collaborator,
-  isSiteAdmin,
-  busy,
-  onSave,
-  onRemove,
-}: {
-  eventId: string;
-  collaborator: CollaboratorRow;
-  isSiteAdmin: boolean;
-  busy: boolean;
-  onSave: (fd: FormData) => void;
+  onRequestSave: (fd: FormData, currentKeys: readonly string[], nextKeys: readonly string[]) => void;
   onRemove: () => void;
 }): React.ReactElement {
-  const permissionSet = new Set(collaborator.permission_keys);
-  const [preset, setPreset] = React.useState<CollaboratorPreset>(() =>
-    normalizeCollaboratorPreset(
-      collaborator.permission_preset,
-      collaborator.permission_keys,
-    ),
+  const [preset, setPreset] = React.useState<EventStaffPreset>(() =>
+    normalizeMemberPreset(member.permission_preset, member.permission_keys),
   );
+  const [customKeys, setCustomKeys] = React.useState<string[]>(
+    () => member.permission_keys,
+  );
+  const presetOptions = visiblePresets(isSiteAdmin);
   const customPermissionKeys = visibleCustomPermissionKeys(isSiteAdmin);
-  const presetDefinition = PRESET_DEFINITIONS[preset];
+  const capabilityKeys = resolvePresetKeys(preset, customKeys, isSiteAdmin);
 
   return (
     <form
@@ -597,14 +371,18 @@ function CollaboratorPermissionCard({
         ev.preventDefault();
         const fd = new FormData(ev.currentTarget);
         fd.set("event_id", eventId);
+        fd.set("staff_id", member.id);
         fd.set("permission_preset", preset);
         fd.set(
           "permission_keys",
-          preset === "custom"
-            ? fd.getAll("permission_key").map(String).join(",")
-            : "",
+          preset === "custom" ? fd.getAll("permission_key").map(String).join(",") : "",
         );
-        onSave(fd);
+        const nextKeys = resolvePresetKeys(
+          preset,
+          preset === "custom" ? fd.getAll("permission_key").map(String) : [],
+          isSiteAdmin,
+        );
+        onRequestSave(fd, member.permission_keys, nextKeys);
       }}
       style={{
         display: "grid",
@@ -615,233 +393,155 @@ function CollaboratorPermissionCard({
         background: "var(--bg-base)",
       }}
     >
-      <input type="hidden" name="display_name" value={collaborator.display_name} />
-      <input type="hidden" name="x_user_id" value={collaborator.x_user_id ?? ""} />
-      <input type="hidden" name="discord_user_id" value={collaborator.discord_user_id ?? ""} />
-
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
-        <div style={{ minWidth: 0 }}>
-          <strong style={{ display: "block", overflowWrap: "anywhere" }}>
-            {collaborator.display_name}
-          </strong>
-          <span
-            style={{
-              display: "block",
-              marginTop: 2,
-              fontSize: 11,
-              color: "var(--text-muted)",
-              fontFamily: "var(--font-mono)",
-            }}
-          >
-            {collaborator.x_user_id ? `@${collaborator.x_user_id}` : ""}
-            {collaborator.discord_user_id
-              ? `${collaborator.x_user_id ? " / " : ""}discord:${collaborator.discord_user_id.slice(0, 12)}...`
-              : ""}
-          </span>
+        <div style={{ display: "flex", gap: 10, minWidth: 0 }}>
+          <MemberAvatar iconUrl={member.icon_url} name={member.display_name} />
+          <div style={{ minWidth: 0 }}>
+            <strong style={{ display: "block", overflowWrap: "anywhere" }}>{member.display_name}</strong>
+            <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+              {member.x_user_id ? `@${member.x_user_id}` : ""}
+              {member.discord_user_id
+                ? `${member.x_user_id ? " / " : ""}discord:${member.discord_user_id}`
+                : ""}
+            </span>
+          </div>
         </div>
         <button
           type="button"
           className="fn-btn fn-btn-ghost fn-btn-sm"
           disabled={busy}
           onClick={onRemove}
-          aria-label={`${collaborator.display_name} を削除`}
+          aria-label={`${member.display_name} を削除`}
         >
           <Icon name="trash" size={11} aria-hidden />
         </button>
       </div>
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        <select
-          name="permission_preset"
-          value={preset}
-          onChange={(event) => setPreset(event.target.value as CollaboratorPreset)}
-          className="fn-select"
-          disabled={busy}
-          style={{ minHeight: 30, fontSize: 12, width: "auto" }}
-        >
-          {visiblePresetOptions(isSiteAdmin).map((option) => (
-            <option key={option} value={option}>
-              {PRESET_DEFINITIONS[option].label}
-            </option>
-          ))}
-        </select>
-        <select
-          name="is_public_staff"
-          defaultValue={String(collaborator.is_public_staff ?? 0)}
-          className="fn-select"
-          disabled={busy}
-          style={{ minHeight: 30, fontSize: 12, width: "auto" }}
-        >
-          <option value="0">非公開</option>
-          <option value="1">公開</option>
-        </select>
-        <input
-          type="text"
-          name="public_role_label"
-          defaultValue={collaborator.public_role_label ?? ""}
-          placeholder="公開ラベル"
-          className="fn-input"
-          maxLength={40}
-          disabled={busy}
-          style={{ minHeight: 30, fontSize: 12, flex: 1, minWidth: 120 }}
-        />
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 160px), 1fr))",
+          gap: 8,
+        }}
+      >
+        <input type="hidden" name="display_name" value={member.display_name} />
+        <input type="hidden" name="x_user_id" value={member.x_user_id ?? ""} />
+        <input type="hidden" name="discord_user_id" value={member.discord_user_id ?? ""} />
+        <label className="fn-label">
+          公開状態
+          <select
+            name="is_public"
+            defaultValue={String(member.is_public ?? 0)}
+            className="fn-select"
+            disabled={busy}
+          >
+            <option value="0">非公開</option>
+            <option value="1">公開</option>
+          </select>
+        </label>
+        <label className="fn-label">
+          公開ラベル
+          <input
+            type="text"
+            name="public_role_label"
+            defaultValue={member.public_role_label ?? ""}
+            placeholder="例: 進行"
+            className="fn-input"
+            maxLength={40}
+            disabled={busy}
+          />
+        </label>
+        <label className="fn-label">
+          表示分類
+          <input
+            type="text"
+            name="internal_note"
+            defaultValue={member.internal_note ?? ""}
+            placeholder="内部メモ"
+            className="fn-input"
+            maxLength={120}
+            disabled={busy}
+          />
+        </label>
+        <label className="fn-label">
+          担当プリセット
+          <select
+            value={preset}
+            onChange={(event) => setPreset(event.target.value as EventStaffPreset)}
+            className="fn-select"
+            disabled={busy}
+          >
+            {presetOptions.map((option) => (
+              <option key={option} value={option}>
+                {PRESET_DEFINITIONS[option].label}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
-      <p className="fn-console-note" style={{ margin: 0 }}>
-        {presetDefinition.description}
-      </p>
-
-      {preset === "custom" ? (
-        <PermissionChecklist
-          keys={customPermissionKeys}
-          selected={permissionSet}
-          busy={busy}
-        />
-      ) : (
-        <PresetPermissionPreview preset={preset} />
-      )}
+      <div>
+        <div className="fn-console-eyebrow" style={{ marginBottom: 6 }}>できること</div>
+        <p className="fn-console-note" style={{ margin: "0 0 8px" }}>
+          {PRESET_DEFINITIONS[preset].description}
+        </p>
+        {preset === "custom" ? (
+          <PermissionChecklist
+            keys={customPermissionKeys}
+            selected={new Set(customKeys)}
+            busy={busy}
+            onToggle={(key, checked) => {
+              setCustomKeys((prev) =>
+                checked ? [...new Set([...prev, key])] : prev.filter((item) => item !== key),
+              );
+            }}
+          />
+        ) : (
+          <CapabilityBadges keys={capabilityKeys} />
+        )}
+      </div>
 
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm" disabled={busy}>
-          保存
+          変更を確認
         </button>
       </div>
     </form>
   );
 }
 
-function PresetPermissionPreview({
-  preset,
-}: {
-  preset: CollaboratorPreset;
-}): React.ReactElement {
-  const permissions = PRESET_DEFINITIONS[preset].permissions;
-  if (permissions.length === 0) {
-    return (
-      <span className="fn-muted fn-text-sm">
-        内部編集権限は付与されません。
-      </span>
-    );
-  }
-  return (
-    <div className="fn-console-badge-row">
-      {permissions.map((key) => {
-        const meta = COLLABORATOR_PERMISSION_LABELS[key];
-        return (
-          <span key={key} className="fn-badge fn-badge-soft" title={meta.description}>
-            {meta.label}
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
-function PermissionChecklist({
-  keys,
-  selected,
-  busy,
-}: {
-  keys: readonly PermissionKey[];
-  selected: ReadonlySet<string>;
-  busy: boolean;
-}): React.ReactElement {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 200px), 1fr))",
-        gap: 6,
-      }}
-    >
-      {keys.map((key) => {
-        const meta = COLLABORATOR_PERMISSION_LABELS[key];
-        const checked = selected.has(key);
-        return (
-          <label
-            key={key}
-            title={meta.description}
-            style={{
-              display: "flex",
-              gap: 6,
-              alignItems: "center",
-              padding: "6px 8px",
-              borderRadius: "var(--radius-sm)",
-              background: checked ? "var(--accent-primary-soft)" : "var(--bg-elevated)",
-              cursor: busy ? "not-allowed" : "pointer",
-              fontSize: 11,
-              lineHeight: 1.3,
-            }}
-          >
-            <input
-              type="checkbox"
-              name="permission_key"
-              value={key}
-              defaultChecked={checked}
-              disabled={busy}
-              style={{ flex: "0 0 auto" }}
-            />
-            <span style={{ overflowWrap: "anywhere" }}>{meta.label}</span>
-          </label>
-        );
-      })}
-    </div>
-  );
-}
-
-function CollaboratorForm({
+function AddMemberForm({
   eventId,
   isSiteAdmin,
-  existingSubjects,
   busy,
-  onSubmit,
-  onImport,
+  onRequestSave,
 }: {
   eventId: string;
   isSiteAdmin: boolean;
-  existingSubjects: readonly EventStaffCsvExistingSubject[];
   busy: boolean;
-  onSubmit: (fd: FormData) => void;
-  onImport: (rows: EventStaffCsvRow[]) => void;
+  onRequestSave: (fd: FormData, nextKeys: readonly string[]) => void;
 }): React.ReactElement {
-  const [permKeys, setPermKeys] = React.useState<string[]>([]);
-  const [preset, setPreset] = React.useState<CollaboratorPreset>("public_staff");
-  const [csvText, setCsvText] = React.useState("");
-  const [csvPreview, setCsvPreview] = React.useState<EventStaffCsvPreview | null>(null);
-  const [copied, setCopied] = React.useState(false);
+  const [preset, setPreset] = React.useState<EventStaffPreset>("manager");
+  const [customKeys, setCustomKeys] = React.useState<string[]>([]);
+  const presetOptions = visiblePresets(isSiteAdmin);
   const customPermissionKeys = visibleCustomPermissionKeys(isSiteAdmin);
-  const previewValidRows =
-    csvPreview?.rows.filter((row) => row.errors.length === 0) ?? [];
-  const toggle = (key: string) => {
-    setPermKeys((prev) =>
-      prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key],
-    );
-  };
-  const copyCsvPrompt = async () => {
-    const prompt = [
-      "次の情報を FlameNode のイベント共同編集者CSVに整形してください。",
-      "出力はCSV本文のみ。列は 表示名,X ID,Discord User ID,担当プリセット,公開フラグ,公開ラベル の6列です。",
-      "担当プリセットは slot_manager,content_editor,reviewer,public_staff のいずれかを使ってください。",
-      "X IDは@なし。公開する場合は1、それ以外は0にしてください。",
-    ].join("\n");
-    await navigator.clipboard.writeText(prompt);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1600);
-  };
 
   return (
     <form
       onSubmit={(ev) => {
         ev.preventDefault();
-        const form = ev.currentTarget;
-        const fd = new FormData(form);
+        const fd = new FormData(ev.currentTarget);
         fd.set("event_id", eventId);
         fd.set("permission_preset", preset);
-        fd.set("permission_keys", preset === "custom" ? permKeys.join(",") : "");
-        onSubmit(fd);
-        setPermKeys([]);
-        setPreset("public_staff");
-        form.reset();
+        fd.set(
+          "permission_keys",
+          preset === "custom" ? customKeys.join(",") : "",
+        );
+        const nextKeys = resolvePresetKeys(preset, customKeys, isSiteAdmin);
+        onRequestSave(fd, nextKeys);
+        ev.currentTarget.reset();
+        setPreset("manager");
+        setCustomKeys([]);
       }}
       style={{
         display: "grid",
@@ -851,7 +551,7 @@ function CollaboratorForm({
         borderRadius: "var(--radius-sm)",
       }}
     >
-      <h4 style={{ margin: 0, fontSize: 13, fontWeight: 800 }}>共同編集者を追加・更新</h4>
+      <h4 style={{ margin: 0, fontSize: 13, fontWeight: 800 }}>メンバーを追加</h4>
       <div
         style={{
           display: "grid",
@@ -859,14 +559,7 @@ function CollaboratorForm({
           gap: 8,
         }}
       >
-        <input
-          type="text"
-          name="display_name"
-          placeholder="表示名"
-          className="fn-input"
-          required
-          disabled={busy}
-        />
+        <input type="text" name="display_name" placeholder="表示名" className="fn-input" required disabled={busy} />
         <input
           type="text"
           name="x_user_id"
@@ -884,21 +577,20 @@ function CollaboratorForm({
           disabled={busy}
         />
         <select
-          name="permission_preset"
           value={preset}
-          onChange={(event) => setPreset(event.target.value as CollaboratorPreset)}
+          onChange={(event) => setPreset(event.target.value as EventStaffPreset)}
           className="fn-select"
           disabled={busy}
         >
-          {visiblePresetOptions(isSiteAdmin).map((option) => (
+          {presetOptions.map((option) => (
             <option key={option} value={option}>
               {PRESET_DEFINITIONS[option].label}
             </option>
           ))}
         </select>
-        <select name="is_public_staff" defaultValue="0" className="fn-select" disabled={busy}>
+        <select name="is_public" defaultValue="0" className="fn-select" disabled={busy}>
           <option value="0">非公開</option>
-          <option value="1">公開メンバー</option>
+          <option value="1">公開</option>
         </select>
         <input
           type="text"
@@ -908,6 +600,14 @@ function CollaboratorForm({
           maxLength={40}
           disabled={busy}
         />
+        <input
+          type="text"
+          name="internal_note"
+          placeholder="表示分類（内部メモ）"
+          className="fn-input"
+          maxLength={120}
+          disabled={busy}
+        />
       </div>
 
       <p className="fn-console-note" style={{ margin: 0 }}>
@@ -915,121 +615,191 @@ function CollaboratorForm({
       </p>
 
       {preset === "custom" ? (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 260px), 1fr))",
-            gap: 8,
-          }}
-        >
-          {customPermissionKeys.map((key) => {
-            const meta = COLLABORATOR_PERMISSION_LABELS[key];
-            const checked = permKeys.includes(key);
-            return (
-              <label
-                key={key}
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  alignItems: "flex-start",
-                  padding: "9px 10px",
-                  border: "1px solid var(--border-subtle)",
-                  borderRadius: "var(--radius-sm)",
-                  background: checked ? "var(--accent-primary-soft)" : "var(--bg-base)",
-                  cursor: "pointer",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => toggle(key)}
-                  disabled={busy}
-                  style={{ marginTop: 2 }}
-                />
-                <span style={{ minWidth: 0 }}>
-                  <strong style={{ display: "block", fontSize: 12 }}>{meta.label}</strong>
-                  <span style={{ display: "block", fontSize: 11, color: "var(--text-muted)", lineHeight: 1.45 }}>
-                    {meta.description}
-                  </span>
-                </span>
-              </label>
+        <PermissionChecklist
+          keys={customPermissionKeys}
+          selected={new Set(customKeys)}
+          busy={busy}
+          onToggle={(key, checked) => {
+            setCustomKeys((prev) =>
+              checked ? [...new Set([...prev, key])] : prev.filter((item) => item !== key),
             );
-          })}
-        </div>
+          }}
+        />
       ) : (
-        <PresetPermissionPreview preset={preset} />
+        <CapabilityBadges keys={resolvePresetKeys(preset, [], isSiteAdmin)} />
       )}
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm" disabled={busy}>
-          <Icon name="check" size={11} aria-hidden /> 追加・更新
+          <Icon name="plus" size={11} aria-hidden /> 追加を確認
         </button>
-        {preset === "public_staff" ? (
-          <span className="fn-muted fn-text-sm">
-            権限未選択の場合は、公開メンバーとしての登録だけになります。
-          </span>
-        ) : null}
-      </div>
-
-      <div style={{ display: "grid", gap: 8, marginTop: 4 }}>
-        <label className="fn-label" htmlFor="collaborator_csv">
-          CSVでまとめて追加
-        </label>
-        <textarea
-          id="collaborator_csv"
-          className="fn-input"
-          rows={5}
-          value={csvText}
-          onChange={(event) => {
-            setCsvText(event.target.value);
-            setCsvPreview(null);
-          }}
-          placeholder={EVENT_STAFF_CSV_SAMPLE}
-          disabled={busy}
-        />
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" onClick={copyCsvPrompt} disabled={busy}>
-            <Icon name="copy" size={11} aria-hidden />
-            {copied ? "コピーしました" : "CSV作成プロンプトをコピー"}
-          </button>
-          <button
-            type="button"
-            className="fn-btn fn-btn-primary fn-btn-sm"
-            onClick={() => {
-              setCsvPreview(
-                buildEventStaffCsvPreview({
-                  text: csvText,
-                  existingSubjects,
-                  isSiteAdmin,
-                }),
-              );
-            }}
-            disabled={busy || csvText.trim().length === 0}
-          >
-            <Icon name="info" size={11} aria-hidden /> CSVをプレビュー
-          </button>
-          <button
-            type="button"
-            className="fn-btn fn-btn-primary fn-btn-sm"
-            onClick={() => {
-              if (!csvPreview || csvPreview.hasErrors) return;
-              onImport(previewValidRows);
-              setCsvText("");
-              setCsvPreview(null);
-            }}
-            disabled={
-              busy ||
-              !csvPreview ||
-              csvPreview.hasErrors ||
-              previewValidRows.length === 0
-            }
-          >
-            <Icon name="upload" size={11} aria-hidden /> プレビュー内容を保存
-          </button>
-        </div>
-        {csvPreview ? <CsvPreviewPanel preview={csvPreview} /> : null}
       </div>
     </form>
+  );
+}
+
+function CapabilityBadges({ keys }: { keys: readonly PermissionKey[] }): React.ReactElement {
+  if (keys.length === 0) {
+    return <span className="fn-muted fn-text-sm">内部編集権限は付与されません。</span>;
+  }
+  return (
+    <div className="fn-console-badge-row">
+      {keys.map((key) => {
+        const meta = COLLABORATOR_PERMISSION_LABELS[key];
+        return (
+          <span key={key} className="fn-badge fn-badge-soft" title={meta?.description ?? ""}>
+            {meta?.label ?? "権限"}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function PermissionChecklist({
+  keys,
+  selected,
+  busy,
+  onToggle,
+}: {
+  keys: readonly PermissionKey[];
+  selected: ReadonlySet<string>;
+  busy: boolean;
+  onToggle: (key: PermissionKey, checked: boolean) => void;
+}): React.ReactElement {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 220px), 1fr))",
+        gap: 8,
+      }}
+    >
+      {keys.map((key) => {
+        const meta = COLLABORATOR_PERMISSION_LABELS[key];
+        const checked = selected.has(key);
+        const dangerous = isDangerousKey(key) || isAdminOnlyKey(key);
+        return (
+          <label
+            key={key}
+            title={meta?.description ?? ""}
+            style={{
+              display: "flex",
+              gap: 8,
+              alignItems: "flex-start",
+              padding: "9px 10px",
+              border: dangerous
+                ? "1px solid var(--danger-border, #c62828)"
+                : "1px solid var(--border-subtle)",
+              borderRadius: "var(--radius-sm)",
+              background: checked ? "var(--accent-primary-soft)" : "var(--bg-base)",
+              cursor: busy ? "not-allowed" : "pointer",
+            }}
+          >
+            <input
+              type="checkbox"
+              name="permission_key"
+              value={key}
+              checked={checked}
+              onChange={(event) => onToggle(key, event.target.checked)}
+              disabled={busy}
+              style={{ marginTop: 2 }}
+            />
+            <span style={{ minWidth: 0 }}>
+              <strong style={{ display: "block", fontSize: 12 }}>{meta?.label ?? "権限"}</strong>
+              <span style={{ display: "block", fontSize: 11, color: "var(--text-muted)", lineHeight: 1.45 }}>
+                {meta?.description ?? ""}
+              </span>
+            </span>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
+function CsvImportSection({
+  isSiteAdmin,
+  existingSubjects,
+  busy,
+  onImport,
+}: {
+  isSiteAdmin: boolean;
+  existingSubjects: readonly EventStaffCsvExistingSubject[];
+  busy: boolean;
+  onImport: (rows: EventStaffCsvRow[]) => void;
+}): React.ReactElement {
+  const [csvText, setCsvText] = React.useState("");
+  const [csvPreview, setCsvPreview] = React.useState<EventStaffCsvPreview | null>(null);
+  const [copied, setCopied] = React.useState(false);
+  const previewValidRows = csvPreview?.rows.filter((row) => row.errors.length === 0) ?? [];
+
+  const copyCsvPrompt = async () => {
+    const prompt = [
+      "次の情報を FlameNode のイベント運営メンバーCSVに整形してください。",
+      "出力はCSV本文のみ。列は 表示名,X ID,Discord User ID,担当プリセット,公開フラグ,公開ラベル の6列です。",
+      "担当プリセットは owner,manager,slot_manager,content_editor,reviewer,public_staff のいずれかを使ってください。",
+      "X IDは@なし。公開する場合は1、それ以外は0にしてください。",
+    ].join("\n");
+    await navigator.clipboard.writeText(prompt);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  };
+
+  return (
+    <section style={{ display: "grid", gap: 8 }}>
+      <label className="fn-label" htmlFor="staff_csv">
+        CSVでまとめて追加
+      </label>
+      <textarea
+        id="staff_csv"
+        className="fn-input"
+        rows={5}
+        value={csvText}
+        onChange={(event) => {
+          setCsvText(event.target.value);
+          setCsvPreview(null);
+        }}
+        placeholder={EVENT_STAFF_CSV_SAMPLE}
+        disabled={busy}
+      />
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" onClick={copyCsvPrompt} disabled={busy}>
+          <Icon name="copy" size={11} aria-hidden />
+          {copied ? "コピーしました" : "CSV作成プロンプトをコピー"}
+        </button>
+        <button
+          type="button"
+          className="fn-btn fn-btn-primary fn-btn-sm"
+          onClick={() => {
+            setCsvPreview(
+              buildEventStaffCsvPreview({
+                text: csvText,
+                existingSubjects,
+                isSiteAdmin,
+              }),
+            );
+          }}
+          disabled={busy || csvText.trim().length === 0}
+        >
+          <Icon name="info" size={11} aria-hidden /> CSVをプレビュー
+        </button>
+        <button
+          type="button"
+          className="fn-btn fn-btn-primary fn-btn-sm"
+          onClick={() => {
+            if (!csvPreview || csvPreview.hasErrors) return;
+            onImport(previewValidRows);
+            setCsvText("");
+            setCsvPreview(null);
+          }}
+          disabled={busy || !csvPreview || csvPreview.hasErrors || previewValidRows.length === 0}
+        >
+          <Icon name="upload" size={11} aria-hidden /> プレビュー内容を保存
+        </button>
+      </div>
+      {csvPreview ? <CsvPreviewPanel preview={csvPreview} /> : null}
+    </section>
   );
 }
 
@@ -1049,28 +819,15 @@ function CsvPreviewPanel({
   return (
     <div style={{ display: "grid", gap: 10 }}>
       <div className="fn-console-badge-row">
-        <span className="fn-badge fn-badge-soft">
-          追加 {preview.counts.create}件
-        </span>
-        <span className="fn-badge fn-badge-soft">
-          更新 {preview.counts.update}件
-        </span>
-        <span
-          className={
-            preview.counts.error > 0
-              ? "fn-badge fn-badge-warning"
-              : "fn-badge fn-badge-neutral"
-          }
-        >
+        <span className="fn-badge fn-badge-soft">追加 {preview.counts.create}件</span>
+        <span className="fn-badge fn-badge-soft">更新 {preview.counts.update}件</span>
+        <span className={preview.counts.error > 0 ? "fn-badge fn-badge-warning" : "fn-badge fn-badge-neutral"}>
           エラー {preview.counts.error}件
         </span>
         {preview.counts.legacy > 0 ? (
-          <span className="fn-badge fn-badge-neutral">
-            旧形式 {preview.counts.legacy}行
-          </span>
+          <span className="fn-badge fn-badge-neutral">旧形式 {preview.counts.legacy}行</span>
         ) : null}
       </div>
-
       <div style={{ overflowX: "auto" }}>
         <table className="fn-table" style={{ minWidth: 760 }}>
           <thead>
@@ -1089,35 +846,15 @@ function CsvPreviewPanel({
               <tr key={`${row.lineNumber}-${row.display_name}`}>
                 <td>{row.lineNumber}</td>
                 <td>
-                  <span
-                    className={
-                      row.action === "update"
-                        ? "fn-badge fn-badge-warning"
-                        : "fn-badge fn-badge-soft"
-                    }
-                  >
+                  <span className={row.action === "update" ? "fn-badge fn-badge-warning" : "fn-badge fn-badge-soft"}>
                     {row.action === "update" ? "更新" : "追加"}
                   </span>
                 </td>
                 <td>{row.display_name}</td>
                 <td>
-                  {row.x_user_id ? (
-                    <code>@{row.x_user_id}</code>
-                  ) : row.discord_user_id ? (
-                    <code>discord:{row.discord_user_id}</code>
-                  ) : (
-                    "-"
-                  )}
+                  {row.x_user_id ? <code>@{row.x_user_id}</code> : row.discord_user_id ? <code>discord:{row.discord_user_id}</code> : "-"}
                 </td>
-                <td>
-                  {eventStaffCsvPresetLabel(row.permission_preset)}
-                  {row.permission_preset === "custom" ? (
-                    <span className="fn-muted fn-text-sm">
-                      {" "}
-                      ({row.permission_keys.length}件)
-                    </span>
-                  ) : null}
-                </td>
+                <td>{eventStaffCsvPresetLabel(row.permission_preset)}</td>
                 <td>
                   {row.is_public_staff === "1" ? "公開" : "非公開"}
                   {row.public_role_label ? ` / ${row.public_role_label}` : ""}

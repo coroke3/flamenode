@@ -3,11 +3,16 @@ import {
   isAdminOnlyKey,
   type PermissionKey,
 } from "./keys.ts";
-import { canonicalizePermissionKey } from "./aliases.ts";
+import {
+  canonicalizePermissionKey,
+  expandPermissionAliases,
+} from "./aliases.ts";
 import {
   getPresetPermissions,
   type EventStaffPreset,
 } from "./presets.ts";
+
+export { expandPermissionAliases };
 
 export const MAX_PERMISSION_KEYS_FOR_NUMBER_MASK = 45;
 

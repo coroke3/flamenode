@@ -25,8 +25,13 @@ import {
   parseDelegatablePermissionKeys,
 } from "./ownershipCore";
 import type { SessionUserLike } from "./ownershipCore";
-import { canonicalizePermissionKey } from "./permissions/aliases";
-import { resolveStaffPermissionKeys } from "./permissions/mask";
+import { expandPermissionAliases } from "./permissions/aliases";
+import {
+  hasPermission,
+  resolveStaffPermissionKeys,
+  safeParseCustomPermissionKeys,
+} from "./permissions/mask";
+import { getPresetPermissions, type EventStaffPreset } from "./permissions/presets";
 
 export type { SessionUserLike };
 export { isSafeNormalVideoEditKey, isDangerousAdminVideoEditKey } from "./ownershipCore";
@@ -240,10 +245,48 @@ export async function canEditEvent(
   requiredKey: CollaboratorPermissionKey,
 ): Promise<boolean> {
   if (user.role === "admin") return true;
-  // collaborator 権限が明示されていれば最優先で許可。
-  const keys = await getCollaboratorPermissions(db, user.id, eventId);
-  const canonicalRequiredKey = canonicalizePermissionKey(requiredKey);
-  if (canonicalRequiredKey && keys.has(canonicalRequiredKey)) return true;
+
+  const candidateKeys = expandPermissionAliases(requiredKey);
+  if (candidateKeys.length === 0) return false;
+
+  const xIds = await getApprovedXIds(db, user.id);
+  const subjectCond =
+    xIds.length > 0
+      ? or(
+          eq(eventStaff.discord_user_id, user.id),
+          inArray(eventStaff.x_user_id, xIds),
+        )!
+      : eq(eventStaff.discord_user_id, user.id);
+  const rows = await db
+    .select({
+      permission_mask: eventStaff.permission_mask,
+      permission_preset: eventStaff.permission_preset,
+      custom_permission_keys_json: eventStaff.custom_permission_keys_json,
+    })
+    .from(eventStaff)
+    .where(and(eq(eventStaff.event_id, eventId), subjectCond)!);
+
+  for (const row of rows) {
+    for (const key of candidateKeys) {
+      if (hasPermission(row.permission_mask, key)) return true;
+    }
+    if (row.permission_preset === "custom") {
+      const customKeys = safeParseCustomPermissionKeys(
+        row.custom_permission_keys_json,
+        { allowAdminOnly: true },
+      );
+      if (candidateKeys.some((key) => customKeys.includes(key))) return true;
+    }
+    if (
+      (row.permission_mask ?? 0) === 0 &&
+      row.permission_preset &&
+      row.permission_preset !== "custom"
+    ) {
+      const preset = row.permission_preset as EventStaffPreset;
+      const presetKeys = getPresetPermissions(preset);
+      if (candidateKeys.some((key) => presetKeys.includes(key))) return true;
+    }
+  }
   return false;
 }
 

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { ALL_PERMISSION_KEYS } from "./keys.ts";
 import {
   MAX_PERMISSION_KEYS_FOR_NUMBER_MASK,
+  expandPermissionAliases,
   hasPermission,
   keysToPermissionMask,
   normalizePermissionKeys,
@@ -24,6 +25,11 @@ test("keysToPermissionMask does not use 32bit bit operators", () => {
     "video.member_chapters",
     "video.status",
   ]);
+});
+
+test("expandPermissionAliases drops unknown keys", () => {
+  assert.deepEqual(expandPermissionAliases("videos.title"), ["video.basics"]);
+  assert.deepEqual(expandPermissionAliases("not.a.real.key"), []);
 });
 
 test("legacy permission keys are canonicalized one-way", () => {

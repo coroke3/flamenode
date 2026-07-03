@@ -13,6 +13,11 @@ import {
   historyLogs,
 } from "@/lib/db/schema";
 import {
+  buildEventUpdateAuditPayload,
+  EVENT_SECTION_PERMISSION_KEYS,
+  type EventEditSection,
+} from "@/lib/admin/eventSectionFields";
+import {
   parseEventTemplateSnapshot,
   type EventTemplateQuestionDefinition,
 } from "@/lib/admin/eventTemplateSettings";
@@ -35,7 +40,6 @@ export interface EventActionResult {
 }
 
 type EventUpdatePayload = Partial<typeof events.$inferInsert>;
-type EventEditSection = "basic" | "publish" | "questions" | "slots";
 
 async function restoreTemplateCustomQuestions(
   db: NonNullable<ReturnType<typeof getDatabase>>,
@@ -112,6 +116,8 @@ const eventSchema = z.object({
     .default("public_name"),
   parts_text: z.string().max(2000).optional().nullable(),
   template_id: z.string().trim().max(64).optional().nullable(),
+  editable_fields: z.string().trim().max(4000).optional().nullable(),
+  review_settings: z.string().trim().max(4000).optional().nullable(),
 });
 
 const PART_NAME_MAX_LEN = 40;
@@ -382,7 +388,7 @@ export async function updateEvent(
       end_time: parseDateInput(data.end_time),
     });
     updatedSections.push("basic");
-    changedByPermission.basic = "event.basic";
+    changedByPermission.basic = EVENT_SECTION_PERMISSION_KEYS.basic;
   }
 
   if (canPublish) {
@@ -398,7 +404,7 @@ export async function updateEvent(
       allow_user_video_event_links: data.allow_user_video_event_links,
     });
     updatedSections.push("publish");
-    changedByPermission.publish = "event.publish";
+    changedByPermission.publish = EVENT_SECTION_PERMISSION_KEYS.publish;
   }
 
   let videoFormSettingsJson: string | null = null;
@@ -409,9 +415,11 @@ export async function updateEvent(
       user_video_edit_permission_keys_json:
         data.user_video_edit_permission_keys_json ?? null,
       video_form_settings_json: videoFormSettingsJson,
+      editable_fields: data.editable_fields ?? before.editable_fields,
+      review_settings: data.review_settings ?? before.review_settings,
     });
     updatedSections.push("questions");
-    changedByPermission.questions = "event.questions";
+    changedByPermission.questions = EVENT_SECTION_PERMISSION_KEYS.questions;
   }
 
   if (canSlots) {
@@ -424,7 +432,7 @@ export async function updateEvent(
       parts_json: buildPartsJson(data.parts_text),
     });
     updatedSections.push("slots");
-    changedByPermission.slots = "event.slots";
+    changedByPermission.slots = EVENT_SECTION_PERMISSION_KEYS.slots;
   }
 
   await db
@@ -436,36 +444,19 @@ export async function updateEvent(
     await syncStagePermissionCustomQuestions(db, data.id, videoFormSettingsJson, now);
   }
 
+  const audit = buildEventUpdateAuditPayload({
+    updatedSections,
+    changedByPermission,
+    before,
+    afterPayload: updatePayload,
+  });
+
   await db.insert(historyLogs).values({
     table_name: "events",
     record_id: data.id,
     action: "UPDATE",
-    before_data: JSON.stringify({
-      updated_sections: updatedSections,
-      basic: canBasic
-        ? {
-            title: before.title,
-            event_type: before.event_type,
-            start_time: before.start_time,
-            end_time: before.end_time,
-          }
-        : undefined,
-      publish: canPublish
-        ? {
-            visibility_status: before.visibility_status,
-            is_active: before.is_active,
-            is_archived: before.is_archived,
-            entry_start_time: before.entry_start_time,
-            entry_end_time: before.entry_end_time,
-            allow_user_video_event_links: before.allow_user_video_event_links,
-          }
-        : undefined,
-    }),
-    after_data: JSON.stringify({
-      updated_sections: updatedSections,
-      changed_by_permission: changedByPermission,
-      update: updatePayload,
-    }),
+    before_data: audit.before_data,
+    after_data: audit.after_data,
     operator_discord_id: u.id,
     retention_class: "normal",
     created_at: now,

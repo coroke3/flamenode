@@ -68,15 +68,18 @@ function buildPermissionJson(selected: Set<PermissionChoiceId>): string {
 export function PermissionKeysField({
   name,
   defaultValue,
+  disabled = false,
 }: {
   name: string;
   defaultValue: string | null | undefined;
+  disabled?: boolean;
 }): React.ReactElement {
   const [selected, setSelected] = React.useState<Set<PermissionChoiceId>>(() =>
     parseSelectedIds(defaultValue),
   );
 
   const toggle = (id: PermissionChoiceId) => {
+    if (disabled) return;
     setSelected((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
@@ -124,13 +127,15 @@ export function PermissionKeysField({
                   ? "var(--accent-primary-soft)"
                   : "var(--bg-surface)",
                 boxShadow: checked ? "0 0 0 1px var(--accent-primary-soft) inset" : "none",
-                cursor: "pointer",
+                cursor: disabled ? "not-allowed" : "pointer",
+                opacity: disabled ? 0.65 : 1,
               }}
             >
               <input
                 type="checkbox"
                 checked={checked}
                 onChange={() => toggle(choice.id)}
+                disabled={disabled}
                 style={{
                   width: 18,
                   height: 18,

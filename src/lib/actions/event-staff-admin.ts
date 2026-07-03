@@ -29,16 +29,29 @@ export interface StaffActionResult {
 
 type DB = NonNullable<ReturnType<typeof getDatabase>>;
 type StaffRole = "editor" | "representative" | "staff";
-const COLLABORATOR_PRESETS = [
+
+const ALL_STAFF_PRESETS = [
+  "owner",
+  "manager",
   "slot_manager",
   "content_editor",
   "reviewer",
   "xid_reviewer",
   "public_staff",
   "custom",
+] as const satisfies readonly EventStaffPreset[];
+
+const MANAGE_STAFF_PRESETS = [
+  "owner",
+  "manager",
+  "slot_manager",
+  "content_editor",
+  "reviewer",
+  "public_staff",
+  "custom",
 ] as const;
 
-type CollaboratorPreset = (typeof COLLABORATOR_PRESETS)[number];
+type ManageStaffPreset = (typeof MANAGE_STAFF_PRESETS)[number];
 
 async function ensureAdminFor(eventId: string): Promise<
   | { ok: true; userId: string; role: string | null; db: DB }
@@ -127,6 +140,20 @@ async function findStaffBySubject(
   )[0] ?? null;
 }
 
+async function findStaffById(
+  db: DB,
+  eventId: string,
+  staffId: string,
+): Promise<typeof eventStaff.$inferSelect | null> {
+  return (
+    await db
+      .select()
+      .from(eventStaff)
+      .where(and(eq(eventStaff.event_id, eventId), eq(eventStaff.id, staffId))!)
+      .limit(1)
+  )[0] ?? null;
+}
+
 function assignmentFromPreset(preset: EventStaffPreset): {
   permission_preset: EventStaffPreset;
   permission_mask: number;
@@ -180,6 +207,30 @@ function parsePermissionKeys(raw: string | null | undefined): string[] {
   return Array.from(new Set(keys));
 }
 
+function roleFromPreset(preset: EventStaffPreset): StaffRole {
+  if (preset === "owner") return "representative";
+  if (preset === "manager") return "editor";
+  return "staff";
+}
+
+function assignmentFromStaffPreset(
+  preset: EventStaffPreset,
+  rawPermissionKeys: string[],
+  isSiteAdmin: boolean,
+): ReturnType<typeof assignmentFromCustomKeys> {
+  if (preset === "custom") {
+    return assignmentFromCustomKeys(rawPermissionKeys, isSiteAdmin);
+  }
+  if (preset === "xid_reviewer" && !isSiteAdmin) {
+    throw new Error("site admin 専用プリセットはイベント運営者から付与できません。");
+  }
+  const assignment = assignmentFromPreset(preset);
+  return {
+    ...assignment,
+    keys: getPresetPermissions(preset),
+  };
+}
+
 async function writeStaffLog(args: {
   db: DB;
   table: "event_staff";
@@ -200,68 +251,122 @@ async function writeStaffLog(args: {
   });
 }
 
-const addEditorSchema = z.object({
+const staffMemberSchema = z.object({
   event_id: z.string().trim().min(1),
+  staff_id: z.string().trim().optional().nullable(),
+  display_name: z.string().trim().min(1).max(80),
   x_user_id: z
     .string()
     .trim()
-    .min(1)
-    .regex(/^[A-Za-z0-9_]{1,32}$/),
-  role: z.enum(["editor", "representative"]).default("editor"),
-  is_public: z.coerce.number().min(0).max(1).default(1),
+    .regex(/^[A-Za-z0-9_]{1,32}$/)
+    .optional()
+    .nullable(),
+  discord_user_id: z.string().trim().min(1).optional().nullable(),
+  permission_preset: z.enum(ALL_STAFF_PRESETS).default("public_staff"),
+  permission_keys: z.string().trim().optional().nullable(),
+  is_public: z.coerce.number().min(0).max(1).default(0),
   public_role_label: z.string().trim().max(40).optional().nullable(),
   internal_note: z.string().trim().max(500).optional().nullable(),
 });
 
-export async function addEventEditor(
+export async function upsertEventStaffMember(
   formData: FormData,
 ): Promise<StaffActionResult> {
-  const parsed = addEditorSchema.safeParse(Object.fromEntries(formData));
+  const raw = Object.fromEntries(formData);
+  if (typeof raw.x_user_id === "string" && raw.x_user_id.trim() === "") {
+    raw.x_user_id = null as never;
+  }
+  if (typeof raw.discord_user_id === "string" && raw.discord_user_id.trim() === "") {
+    raw.discord_user_id = null as never;
+  }
+  const parsed = staffMemberSchema.safeParse(raw);
   if (!parsed.success) {
     return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
   }
   const data = parsed.data;
-  const xUserId = normalizeXId(data.x_user_id);
+  const xUserId = data.x_user_id ? normalizeXId(data.x_user_id) : null;
+  const discordUserId = data.discord_user_id?.trim() || null;
+  if (!xUserId && !discordUserId) {
+    return { ok: false, message: "X ID か Discord User ID のどちらかが必要です。" };
+  }
+
+  let permissionKeys: string[];
+  try {
+    permissionKeys = parsePermissionKeys(data.permission_keys);
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "入力エラー" };
+  }
+
   const guard = await ensureAdminFor(data.event_id);
   if (!guard.ok) return guard.result;
   const now = Math.floor(Date.now() / 1000);
+  const isSiteAdmin = guard.role === "admin";
+  const preset = data.permission_preset;
 
-  const existing = await findStaffBySubject(guard.db, data.event_id, xUserId, null);
-  if (existing) return { ok: false, message: "既に登録されています。" };
+  let assignment: ReturnType<typeof assignmentFromCustomKeys>;
+  try {
+    assignment = assignmentFromStaffPreset(preset, permissionKeys, isSiteAdmin);
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "入力エラー" };
+  }
 
-  const displayName = await ensureXUser(guard.db, xUserId, `@${xUserId}`, now);
-  const staffId = generateId("es");
-  const assignment = assignmentFromPreset(legacyRoleToPreset(data.role));
-  await guard.db.insert(eventStaff).values({
-    id: staffId,
-    event_id: data.event_id,
-    x_user_id: xUserId,
-    discord_user_id: null,
-    display_name: displayName,
-    role: data.role,
-    permission_preset: assignment.permission_preset,
-    permission_mask: assignment.permission_mask,
-    custom_permission_keys_json: assignment.custom_permission_keys_json,
-    is_public: data.is_public,
-    public_role_label: data.public_role_label ?? null,
-    internal_note: data.internal_note ?? null,
-    approved_by_user_id: guard.userId,
-    approved_at: now,
-    created_at: now,
-    updated_at: now,
-  });
+  if (xUserId) await ensureXUser(guard.db, xUserId, data.display_name, now);
+
+  const staffId = data.staff_id?.trim() || null;
+  const existing = staffId
+    ? await findStaffById(guard.db, data.event_id, staffId)
+    : await findStaffBySubject(guard.db, data.event_id, xUserId, discordUserId);
+  const nextStaffId = existing?.id ?? generateId("es");
+  const nextRole = roleFromPreset(assignment.permission_preset);
+
+  if (existing) {
+    await guard.db
+      .update(eventStaff)
+      .set({
+        x_user_id: xUserId ?? existing.x_user_id,
+        discord_user_id: discordUserId ?? existing.discord_user_id,
+        display_name: data.display_name,
+        role: nextRole,
+        permission_preset: assignment.permission_preset,
+        permission_mask: assignment.permission_mask,
+        custom_permission_keys_json: assignment.custom_permission_keys_json,
+        is_public: data.is_public,
+        public_role_label: data.public_role_label ?? null,
+        internal_note: data.internal_note ?? existing.internal_note,
+        updated_at: now,
+      })
+      .where(eq(eventStaff.id, existing.id));
+  } else {
+    await guard.db.insert(eventStaff).values({
+      id: nextStaffId,
+      event_id: data.event_id,
+      x_user_id: xUserId,
+      discord_user_id: discordUserId,
+      display_name: data.display_name,
+      role: nextRole,
+      permission_preset: assignment.permission_preset,
+      permission_mask: assignment.permission_mask,
+      custom_permission_keys_json: assignment.custom_permission_keys_json,
+      is_public: data.is_public,
+      public_role_label: data.public_role_label ?? null,
+      internal_note: data.internal_note ?? null,
+      approved_by_user_id: guard.userId,
+      approved_at: now,
+      created_at: now,
+      updated_at: now,
+    });
+  }
+
   await writeStaffLog({
     db: guard.db,
     table: "event_staff",
-    recordId: staffId,
-    action: "CREATE",
+    recordId: nextStaffId,
+    action: existing ? "UPDATE" : "CREATE",
     userId: guard.userId,
     payload: {
-      event_id: data.event_id,
-      x_user_id: xUserId,
-      role: data.role,
+      display_name: data.display_name,
       permission_preset: assignment.permission_preset,
-      permission_mask: assignment.permission_mask,
+      keys: assignment.keys,
     },
     now,
   });
@@ -270,17 +375,25 @@ export async function addEventEditor(
   return { ok: true };
 }
 
-export async function removeEventEditor(
+export async function removeEventStaffMember(
   formData: FormData,
 ): Promise<StaffActionResult> {
   const eventId = String(formData.get("event_id") ?? "").trim();
+  const staffId = String(formData.get("staff_id") ?? "").trim();
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
-  if (!eventId || !xUserId) {
-    return { ok: false, message: "event_id と x_user_id が必要です。" };
+  const discordUserId = String(formData.get("discord_user_id") ?? "").trim() || null;
+  if (!eventId || (!staffId && !xUserId && !discordUserId)) {
+    return {
+      ok: false,
+      message: "event_id と staff_id または x_user_id / discord_user_id が必要です。",
+    };
   }
   const guard = await ensureAdminFor(eventId);
   if (!guard.ok) return guard.result;
-  const existing = await findStaffBySubject(guard.db, eventId, xUserId, null);
+
+  const existing = staffId
+    ? await findStaffById(guard.db, eventId, staffId)
+    : await findStaffBySubject(guard.db, eventId, xUserId || null, discordUserId);
   if (!existing) return { ok: true };
   const now = Math.floor(Date.now() / 1000);
 
@@ -298,245 +411,89 @@ export async function removeEventEditor(
   return { ok: true };
 }
 
-const updateEditorSchema = addEditorSchema.extend({});
-
-export async function updateEventEditor(
-  formData: FormData,
-): Promise<StaffActionResult> {
-  const parsed = updateEditorSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) {
-    return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
-  }
-  const data = parsed.data;
-  const xUserId = normalizeXId(data.x_user_id);
-  const guard = await ensureAdminFor(data.event_id);
-  if (!guard.ok) return guard.result;
-  const existing = await findStaffBySubject(guard.db, data.event_id, xUserId, null);
-  if (!existing) return { ok: false, message: "対象スタッフが見つかりません。" };
-  const now = Math.floor(Date.now() / 1000);
-  const assignment = assignmentFromPreset(legacyRoleToPreset(data.role));
-
-  await guard.db
-    .update(eventStaff)
-    .set({
-      role: data.role,
-      permission_preset: assignment.permission_preset,
-      permission_mask: assignment.permission_mask,
-      custom_permission_keys_json: assignment.custom_permission_keys_json,
-      is_public: data.is_public,
-      public_role_label: data.public_role_label ?? null,
-      internal_note: data.internal_note ?? null,
-      updated_at: now,
-    })
-    .where(eq(eventStaff.id, existing.id));
-  await writeStaffLog({
-    db: guard.db,
-    table: "event_staff",
-    recordId: existing.id,
-    action: "UPDATE",
-    userId: guard.userId,
-    payload: {
-      role: data.role,
-      is_public: data.is_public,
-      permission_preset: assignment.permission_preset,
-      permission_mask: assignment.permission_mask,
-    },
-    now,
-  });
-
-  revalidateEventStaffPaths(data.event_id);
-  return { ok: true };
-}
-
-const collabSchema = z.object({
+const addEditorSchema = z.object({
   event_id: z.string().trim().min(1),
   x_user_id: z
     .string()
     .trim()
-    .regex(/^[A-Za-z0-9_]{1,32}$/)
-    .optional()
-    .nullable(),
-  discord_user_id: z.string().trim().min(1).optional().nullable(),
-  display_name: z.string().trim().min(1).max(80),
-  permission_preset: z.enum(COLLABORATOR_PRESETS).default("public_staff"),
-  permission_keys: z.string().trim().optional().nullable(),
-  is_public_staff: z.coerce.number().min(0).max(1).default(0),
+    .min(1)
+    .regex(/^[A-Za-z0-9_]{1,32}$/),
+  role: z.enum(["editor", "representative"]).default("editor"),
+  is_public: z.coerce.number().min(0).max(1).default(1),
   public_role_label: z.string().trim().max(40).optional().nullable(),
+  internal_note: z.string().trim().max(500).optional().nullable(),
 });
 
-function assignmentFromCollaboratorPreset(
-  preset: CollaboratorPreset,
-  rawPermissionKeys: string[],
-  isSiteAdmin: boolean,
-): ReturnType<typeof assignmentFromCustomKeys> {
-  if (preset === "custom") {
-    return assignmentFromCustomKeys(rawPermissionKeys, isSiteAdmin);
-  }
-  if (preset === "xid_reviewer" && !isSiteAdmin) {
-    throw new Error("site admin 専用プリセットはイベント運営者から付与できません。");
-  }
-  const assignment = assignmentFromPreset(preset);
-  return {
-    ...assignment,
-    keys: getPresetPermissions(preset),
-  };
-}
-
-export async function upsertCollaborator(
+/** @deprecated upsertEventStaffMember を使用 */
+export async function addEventEditor(
   formData: FormData,
 ): Promise<StaffActionResult> {
-  const raw = Object.fromEntries(formData);
-  const hasExplicitPermissionPreset =
-    typeof raw.permission_preset === "string" &&
-    raw.permission_preset.trim().length > 0;
-  if (typeof raw.x_user_id === "string" && raw.x_user_id.trim() === "") raw.x_user_id = null as never;
-  if (typeof raw.discord_user_id === "string" && raw.discord_user_id.trim() === "") raw.discord_user_id = null as never;
-  const parsed = collabSchema.safeParse(raw);
+  const parsed = addEditorSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
   }
   const data = parsed.data;
-  const xUserId = data.x_user_id ? normalizeXId(data.x_user_id) : null;
-  const discordUserId = data.discord_user_id?.trim() || null;
-  if (!xUserId && !discordUserId) {
-    return { ok: false, message: "X ID か Discord User ID のどちらかが必要です。" };
-  }
-
-  let permissionKeys: string[];
-  try {
-    permissionKeys = parsePermissionKeys(data.permission_keys);
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : "入力エラー" };
-  }
-  const guard = await ensureAdminFor(data.event_id);
-  if (!guard.ok) return guard.result;
-  const now = Math.floor(Date.now() / 1000);
-  const requestedPreset = hasExplicitPermissionPreset
-    ? data.permission_preset
-    : permissionKeys.length > 0
-      ? "custom"
-      : "public_staff";
-  let assignment: ReturnType<typeof assignmentFromCustomKeys>;
-  try {
-    assignment = assignmentFromCollaboratorPreset(
-      requestedPreset,
-      permissionKeys,
-      guard.role === "admin",
-    );
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : "入力エラー" };
-  }
-  if (xUserId) await ensureXUser(guard.db, xUserId, data.display_name, now);
-
-  const existing = await findStaffBySubject(
-    guard.db,
-    data.event_id,
-    xUserId,
-    discordUserId,
-  );
-  const staffId = existing?.id ?? generateId("es");
-  const nextRole: StaffRole =
-    existing?.role === "editor" || existing?.role === "representative"
-      ? existing.role
-      : "staff";
-
-  if (existing) {
-    await guard.db
-      .update(eventStaff)
-      .set({
-        x_user_id: xUserId ?? existing.x_user_id,
-        discord_user_id: discordUserId ?? existing.discord_user_id,
-        display_name: data.display_name,
-        role: nextRole,
-        permission_preset: assignment.permission_preset,
-        permission_mask: assignment.permission_mask,
-        custom_permission_keys_json: assignment.custom_permission_keys_json,
-        is_public: data.is_public_staff,
-        public_role_label: data.public_role_label ?? null,
-        updated_at: now,
-      })
-      .where(eq(eventStaff.id, existing.id));
-  } else {
-    await guard.db.insert(eventStaff).values({
-      id: staffId,
-      event_id: data.event_id,
-      x_user_id: xUserId,
-      discord_user_id: discordUserId,
-      display_name: data.display_name,
-      role: nextRole,
-      permission_preset: assignment.permission_preset,
-      permission_mask: assignment.permission_mask,
-      custom_permission_keys_json: assignment.custom_permission_keys_json,
-      is_public: data.is_public_staff,
-      public_role_label: data.public_role_label ?? null,
-      internal_note: null,
-      approved_by_user_id: guard.userId,
-      approved_at: now,
-      created_at: now,
-      updated_at: now,
-    });
-  }
-  await writeStaffLog({
-    db: guard.db,
-    table: "event_staff",
-    recordId: staffId,
-    action: existing ? "UPDATE" : "CREATE",
-    userId: guard.userId,
-    payload: {
-      display_name: data.display_name,
-      keys: assignment.keys,
-      permission_preset: assignment.permission_preset,
-      permission_mask: assignment.permission_mask,
-    },
-    now,
-  });
-
-  revalidateEventStaffPaths(data.event_id);
-  return { ok: true };
+  const next = new FormData();
+  next.set("event_id", data.event_id);
+  next.set("x_user_id", data.x_user_id);
+  next.set("display_name", `@${normalizeXId(data.x_user_id)}`);
+  next.set("permission_preset", legacyRoleToPreset(data.role));
+  next.set("is_public", String(data.is_public));
+  if (data.public_role_label) next.set("public_role_label", data.public_role_label);
+  if (data.internal_note) next.set("internal_note", data.internal_note);
+  return upsertEventStaffMember(next);
 }
 
+/** @deprecated removeEventStaffMember を使用 */
+export async function removeEventEditor(
+  formData: FormData,
+): Promise<StaffActionResult> {
+  return removeEventStaffMember(formData);
+}
+
+/** @deprecated upsertEventStaffMember を使用 */
+export async function updateEventEditor(
+  formData: FormData,
+): Promise<StaffActionResult> {
+  const parsed = addEditorSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
+  }
+  const data = parsed.data;
+  const next = new FormData();
+  next.set("event_id", data.event_id);
+  next.set("x_user_id", data.x_user_id);
+  next.set("display_name", `@${normalizeXId(data.x_user_id)}`);
+  next.set("permission_preset", legacyRoleToPreset(data.role));
+  next.set("is_public", String(data.is_public));
+  if (data.public_role_label) next.set("public_role_label", data.public_role_label);
+  if (data.internal_note) next.set("internal_note", data.internal_note);
+  return upsertEventStaffMember(next);
+}
+
+/** @deprecated upsertEventStaffMember を使用 */
+export async function upsertCollaborator(
+  formData: FormData,
+): Promise<StaffActionResult> {
+  const raw = Object.fromEntries(formData);
+  const next = new FormData();
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value === "string") next.set(key, value);
+  }
+  if (!next.has("permission_preset") && next.get("permission_keys")) {
+    next.set("permission_preset", "custom");
+  }
+  if (next.has("is_public_staff") && !next.has("is_public")) {
+    next.set("is_public", String(next.get("is_public_staff")));
+  }
+  return upsertEventStaffMember(next);
+}
+
+/** @deprecated removeEventStaffMember を使用 */
 export async function removeCollaborator(
   formData: FormData,
 ): Promise<StaffActionResult> {
-  const eventId = String(formData.get("event_id") ?? "").trim();
-  const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
-  const discordUserId = String(formData.get("discord_user_id") ?? "").trim() || null;
-  if (!eventId || (!xUserId && !discordUserId)) {
-    return { ok: false, message: "event_id と x_user_id or discord_user_id が必要です。" };
-  }
-  const guard = await ensureAdminFor(eventId);
-  if (!guard.ok) return guard.result;
-  const existing = await findStaffBySubject(
-    guard.db,
-    eventId,
-    xUserId || null,
-    discordUserId,
-  );
-  if (!existing) return { ok: true };
-  const now = Math.floor(Date.now() / 1000);
-
-  if (existing.role === "staff") {
-    await guard.db.delete(eventStaff).where(eq(eventStaff.id, existing.id));
-  } else {
-    await guard.db
-      .update(eventStaff)
-      .set({
-        permission_preset: "public_staff",
-        permission_mask: 0,
-        custom_permission_keys_json: null,
-        updated_at: now,
-      })
-      .where(eq(eventStaff.id, existing.id));
-  }
-  await writeStaffLog({
-    db: guard.db,
-    table: "event_staff",
-    recordId: existing.id,
-    action: "DELETE",
-    userId: guard.userId,
-    now,
-  });
-
-  revalidateEventStaffPaths(eventId);
-  return { ok: true };
+  return removeEventStaffMember(formData);
 }
+
+export type { ManageStaffPreset };

@@ -9,7 +9,7 @@ import {
   type EventStaffPreset,
 } from "../auth/permissions/presets.ts";
 
-export type EventStaffCsvPreset = Exclude<EventStaffPreset, "owner" | "manager">;
+export type EventStaffCsvPreset = EventStaffPreset;
 
 export type EventStaffCsvAction = "create" | "update";
 
@@ -57,6 +57,8 @@ export const EVENT_STAFF_CSV_SAMPLE = [
 ].join("\n");
 
 const CSV_PRESETS = [
+  "owner",
+  "manager",
   "slot_manager",
   "content_editor",
   "reviewer",

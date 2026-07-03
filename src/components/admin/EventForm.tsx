@@ -78,6 +78,56 @@ function resolveInitialVisibility(
   return "draft";
 }
 
+function inputGateProps(allowed: boolean): React.InputHTMLAttributes<HTMLInputElement> {
+  return allowed
+    ? {}
+    : { readOnly: true, tabIndex: -1, "aria-disabled": true };
+}
+
+function textareaGateProps(
+  allowed: boolean,
+): React.TextareaHTMLAttributes<HTMLTextAreaElement> {
+  return allowed
+    ? {}
+    : { readOnly: true, tabIndex: -1, "aria-disabled": true };
+}
+
+function GatedSelect({
+  allowed,
+  name,
+  defaultValue,
+  className,
+  children,
+}: {
+  allowed: boolean;
+  name: string;
+  defaultValue: string;
+  className?: string;
+  children: React.ReactNode;
+}): React.ReactElement {
+  if (!allowed) {
+    return (
+      <>
+        <input type="hidden" name={name} value={defaultValue} />
+        <select
+          className={className}
+          defaultValue={defaultValue}
+          disabled
+          aria-disabled
+          tabIndex={-1}
+        >
+          {children}
+        </select>
+      </>
+    );
+  }
+  return (
+    <select name={name} defaultValue={defaultValue} className={className}>
+      {children}
+    </select>
+  );
+}
+
 interface EventFormProps {
   mode: "create" | "edit";
   initial?: EventFormInitial;
@@ -338,7 +388,6 @@ export function EventForm({
   ): React.CSSProperties => ({
     ...base,
     opacity: allowed ? base.opacity : 0.58,
-    pointerEvents: allowed ? base.pointerEvents : "none",
   });
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -427,13 +476,15 @@ export function EventForm({
           className="fn-input"
           maxLength={200}
           required
+          {...inputGateProps(canEditBasic)}
         />
       </div>
 
       <div className={styles.formGrid2}>
         <div style={sectionGateStyle(canEditBasic)}>
           <label className="fn-label">種別</label>
-          <select
+          <GatedSelect
+            allowed={canEditBasic}
             name="event_type"
             defaultValue={initial.event_type ?? "event"}
             className="fn-select"
@@ -442,18 +493,19 @@ export function EventForm({
             <option value="collabo">collabo (コラボ)</option>
             <option value="type">type (タイプ別)</option>
             <option value="other">other</option>
-          </select>
+          </GatedSelect>
         </div>
         <div style={sectionGateStyle(canEditSlots)}>
           <label className="fn-label">枠タイプ</label>
-          <select
+          <GatedSelect
+            allowed={canEditSlots}
             name="slot_type"
             defaultValue={initial.slot_type ?? "time"}
             className="fn-select"
           >
             <option value="time">時間付き</option>
             <option value="count">時間なし (番号のみ)</option>
-          </select>
+          </GatedSelect>
         </div>
       </div>
 
@@ -465,6 +517,7 @@ export function EventForm({
           className="fn-input"
           rows={4}
           maxLength={4000}
+          {...textareaGateProps(canEditBasic)}
         />
       </div>
 
@@ -479,6 +532,7 @@ export function EventForm({
             type="url"
             defaultValue={initial.icon_url ?? ""}
             className="fn-input"
+            {...inputGateProps(canEditBasic)}
           />
         </div>
         <div>
@@ -488,6 +542,7 @@ export function EventForm({
             type="url"
             defaultValue={initial.img_url ?? ""}
             className="fn-input"
+            {...inputGateProps(canEditBasic)}
           />
         </div>
       </div>
@@ -503,6 +558,7 @@ export function EventForm({
             type="datetime-local"
             defaultValue={unixToInputDateTime(initial.start_time)}
             className="fn-input"
+            {...inputGateProps(canEditBasic)}
           />
         </div>
         <div>
@@ -512,6 +568,7 @@ export function EventForm({
             type="datetime-local"
             defaultValue={unixToInputDateTime(initial.end_time)}
             className="fn-input"
+            {...inputGateProps(canEditBasic)}
           />
         </div>
       </div>
@@ -527,6 +584,7 @@ export function EventForm({
             type="datetime-local"
             defaultValue={unixToInputDateTime(initial.entry_start_time)}
             className="fn-input"
+            {...inputGateProps(canEditPublish)}
           />
         </div>
         <div>
@@ -536,6 +594,7 @@ export function EventForm({
             type="datetime-local"
             defaultValue={unixToInputDateTime(initial.entry_end_time)}
             className="fn-input"
+            {...inputGateProps(canEditPublish)}
           />
         </div>
       </div>
@@ -549,6 +608,7 @@ export function EventForm({
           className="fn-input"
           maxLength={20}
           placeholder="#ffd400"
+          {...inputGateProps(canEditBasic)}
         />
       </div>
 
@@ -558,7 +618,8 @@ export function EventForm({
       >
         <div>
           <label className="fn-label">公開状態</label>
-          <select
+          <GatedSelect
+            allowed={canEditPublish}
             name="visibility_status"
             defaultValue={resolveInitialVisibility(initial)}
             className="fn-select"
@@ -567,7 +628,7 @@ export function EventForm({
             <option value="private">非公開</option>
             <option value="public">公開</option>
             <option value="archived">アーカイブ</option>
-          </select>
+          </GatedSelect>
         </div>
         <div>
           <label
@@ -576,14 +637,15 @@ export function EventForm({
           >
             一般ユーザーの追加紐付け
           </label>
-          <select
+          <GatedSelect
+            allowed={canEditPublish}
             name="allow_user_video_event_links"
             defaultValue={String(initial.allow_user_video_event_links ?? 0)}
             className="fn-select"
           >
             <option value="0">運営承認制 (既定)</option>
             <option value="1">許可</option>
-          </select>
+          </GatedSelect>
         </div>
       </div>
 
@@ -609,14 +671,15 @@ export function EventForm({
         </legend>
         <div>
           <label className="fn-label">編集できる人</label>
-          <select
+          <GatedSelect
+            allowed={canEditQuestions}
             name="allow_user_video_edits"
             defaultValue={String(initial.allow_user_video_edits ?? 0)}
             className="fn-select"
           >
             <option value="0">設定しない (通常権限を採用)</option>
             <option value="1">投稿者・共同編集者にも一部変更を許可</option>
-          </select>
+          </GatedSelect>
           <p
             style={{
               marginTop: 4,
@@ -645,6 +708,7 @@ export function EventForm({
           <PermissionKeysField
             name="user_video_edit_permission_keys_json"
             defaultValue={initial.user_video_edit_permission_keys_json}
+            disabled={!canEditQuestions}
           />
         </div>
       </fieldset>
@@ -687,6 +751,7 @@ export function EventForm({
           className="fn-input"
           rows={4}
           placeholder={"1部\n2部"}
+          {...textareaGateProps(canEditSlots)}
         />
       </fieldset>
 
@@ -770,6 +835,7 @@ export function EventForm({
                     <input
                       type="checkbox"
                       checked={question.enabled}
+                      disabled={!canEditQuestions}
                       onChange={(ev) =>
                         updateStageQuestion(question.id, {
                           enabled: ev.target.checked,
@@ -791,6 +857,7 @@ export function EventForm({
                     <input
                       type="checkbox"
                       checked={question.required}
+                      disabled={!canEditQuestions}
                       onChange={(ev) =>
                         updateStageQuestion(question.id, {
                           required: ev.target.checked,
@@ -803,6 +870,7 @@ export function EventForm({
                   <button
                     type="button"
                     className="fn-btn fn-btn-ghost fn-btn-sm"
+                    disabled={!canEditQuestions}
                     onClick={() => removeStageQuestion(question.id)}
                   >
                     <Icon name="trash" size={12} aria-hidden /> 削除
@@ -815,6 +883,7 @@ export function EventForm({
                   name="stage_permission_question_label"
                   type="text"
                   value={question.label}
+                  readOnly={!canEditQuestions}
                   onChange={(ev) =>
                     updateStageQuestion(question.id, {
                       label: ev.target.value,
@@ -829,6 +898,7 @@ export function EventForm({
                 <textarea
                   name="stage_permission_question_description"
                   value={question.description}
+                  readOnly={!canEditQuestions}
                   onChange={(ev) =>
                     updateStageQuestion(question.id, {
                       description: ev.target.value,
@@ -845,6 +915,7 @@ export function EventForm({
                   name="stage_permission_question_placeholder"
                   type="text"
                   value={question.placeholder}
+                  readOnly={!canEditQuestions}
                   onChange={(ev) =>
                     updateStageQuestion(question.id, {
                       placeholder: ev.target.value,
@@ -859,6 +930,7 @@ export function EventForm({
           <button
             type="button"
             className="fn-btn fn-btn-ghost fn-btn-sm"
+            disabled={!canEditQuestions}
             onClick={addStageQuestion}
             style={{ justifySelf: "start" }}
           >
@@ -880,6 +952,7 @@ export function EventForm({
             max={20}
             defaultValue={initial.max_slots_per_video ?? 1}
             className="fn-input"
+            {...inputGateProps(canEditSlots)}
           />
         </div>
         <div>
@@ -891,6 +964,7 @@ export function EventForm({
             max={20}
             defaultValue={initial.max_consecutive_slots_per_entry ?? 3}
             className="fn-input"
+            {...inputGateProps(canEditSlots)}
           />
         </div>
         <div>
@@ -904,11 +978,13 @@ export function EventForm({
             max={1440}
             defaultValue={initial.slot_part_gap_minutes ?? 15}
             className="fn-input"
+            {...inputGateProps(canEditSlots)}
           />
         </div>
         <div>
           <label className="fn-label">確保者表示</label>
-          <select
+          <GatedSelect
+            allowed={canEditSlots}
             name="slot_visibility_mode"
             defaultValue={initial.slot_visibility_mode ?? "public_name"}
             className="fn-select"
@@ -916,7 +992,7 @@ export function EventForm({
             <option value="public_name">名前公開</option>
             <option value="anonymous">匿名</option>
             <option value="hidden">非表示</option>
-          </select>
+          </GatedSelect>
         </div>
       </div>
 
