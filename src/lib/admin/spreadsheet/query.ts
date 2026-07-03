@@ -2,7 +2,12 @@ import "server-only";
 import { getDatabase } from "@/lib/cloudflare";
 import { historyLogs } from "@/lib/db/schema";
 import type { SpreadsheetTableDef } from "./registry";
-import { isSpreadsheetColumnEditable, SPREADSHEET_SECRET_COLUMNS } from "./registry";
+import {
+  applySpreadsheetForcedInsertValues,
+  isSpreadsheetColumnEditable,
+  isSpreadsheetForcedInsertColumn,
+  SPREADSHEET_SECRET_COLUMNS,
+} from "./registry";
 import { SPREADSHEET_IMPORT_MAX_ROWS } from "./constants";
 import {
   clampSpreadsheetPageLimit,
@@ -308,21 +313,23 @@ async function insertSpreadsheetRowWithContext(
   },
 ): Promise<void> {
   assertTableEditable(ctx);
-  const pk = primaryKeyFromRowValues(opts.row, ctx.primaryKeys);
+  const row = applySpreadsheetForcedInsertValues(ctx.def.table, opts.row);
+  const pk = primaryKeyFromRowValues(row, ctx.primaryKeys);
 
   const keys = ctx.columns
     .map((c) => c.name)
     .filter(
       (name) =>
-        opts.row[name] !== undefined &&
-        isSpreadsheetColumnEditable(ctx.def, name),
+        row[name] !== undefined &&
+        (isSpreadsheetColumnEditable(ctx.def, name) ||
+          isSpreadsheetForcedInsertColumn(ctx.def.table, name)),
     );
   if (keys.length === 0) throw new Error("empty_row");
 
   const colList = keys.map(quoteIdent).join(", ");
   const placeholders = keys.map(() => "?").join(", ");
   const values = keys.map((k) => {
-    const v = opts.row[k];
+    const v = row[k];
     return v === "" ? null : v;
   });
 
@@ -342,7 +349,7 @@ async function insertSpreadsheetRowWithContext(
     recordId: recordIdFromPk(pk),
     action: "CREATE",
     before: null,
-    after: afterRaw ?? opts.row,
+    after: afterRaw ?? row,
   });
 }
 

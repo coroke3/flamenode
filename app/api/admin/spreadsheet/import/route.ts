@@ -16,7 +16,10 @@ import {
 } from "@/lib/admin/spreadsheet/query";
 import { buildSpreadsheetImportPreviewToken } from "@/lib/admin/spreadsheet/importPreviewToken";
 import { resolveSpreadsheetTableContext } from "@/lib/admin/spreadsheet/tableContext";
-import { isSpreadsheetColumnEditable } from "@/lib/admin/spreadsheet/registry";
+import {
+  applySpreadsheetForcedInsertValues,
+  isSpreadsheetColumnEditable,
+} from "@/lib/admin/spreadsheet/registry";
 import { getDatabase } from "@/lib/cloudflare";
 import { systemSettings } from "@/lib/db/schema";
 import { isWriteBlocked } from "@/lib/operationMode/policy";
@@ -79,7 +82,7 @@ export async function POST(req: Request): Promise<Response> {
     const writableRows = omitReadonlyImportColumns({
       rows,
       readonlyColumns,
-    });
+    }).map((row) => applySpreadsheetForcedInsertValues(ctx.def.table, row));
     const importWarnings = [...warnings, ...readonlyWarnings];
     const previewToken = await buildSpreadsheetImportPreviewToken({
       table: ctx.def.table,

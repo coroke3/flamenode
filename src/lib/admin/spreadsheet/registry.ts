@@ -131,8 +131,35 @@ export const SPREADSHEET_READONLY_COLUMNS_BY_TABLE: Record<
 > = {
   events: ["custom_questions", "is_active", "is_entry_open", "is_archived"],
   system_settings: ["is_maintenance_mode", "cost_guard_mode"],
+  video_chapters: ["video_member_id", "marker_kind"],
   videos: ["custom_answers", "stage_permission"],
 };
+
+export const SPREADSHEET_FORCED_INSERT_VALUES_BY_TABLE: Record<
+  string,
+  Record<string, string>
+> = {
+  video_chapters: { marker_kind: "chapter" },
+};
+
+export function applySpreadsheetForcedInsertValues(
+  table: string,
+  row: Record<string, string | null>,
+): Record<string, string | null> {
+  const forced = SPREADSHEET_FORCED_INSERT_VALUES_BY_TABLE[table];
+  if (!forced) return row;
+  return { ...row, ...forced };
+}
+
+export function isSpreadsheetForcedInsertColumn(
+  table: string,
+  column: string,
+): boolean {
+  return Object.prototype.hasOwnProperty.call(
+    SPREADSHEET_FORCED_INSERT_VALUES_BY_TABLE[table] ?? {},
+    column,
+  );
+}
 
 const DEFAULT_READONLY_TABLES = new Set([
   "account",

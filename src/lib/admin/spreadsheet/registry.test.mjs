@@ -2,10 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { normalizeSpreadsheetPage } from "./constants.ts";
 import {
+  applySpreadsheetForcedInsertValues,
   buildSpreadsheetTableDefs,
   SPREADSHEET_DEPRECATED_READONLY_TABLES,
   SPREADSHEET_READONLY_COLUMNS_BY_TABLE,
   isSpreadsheetColumnEditable,
+  isSpreadsheetForcedInsertColumn,
   isSpreadsheetTableBlocklisted,
   resolveSpreadsheetTableDef,
 } from "./registry.ts";
@@ -69,5 +71,25 @@ test("deprecated columns are readonly for spreadsheet import", () => {
   assert.equal(
     isSpreadsheetColumnEditable(resolveSpreadsheetTableDef("videos", true), "title"),
     true,
+  );
+});
+
+test("forced spreadsheet insert values normalize fixed chapter markers", () => {
+  const markerColumn = "marker_kind";
+  const nonChapterMarker = "comment";
+  assert.deepEqual(
+    applySpreadsheetForcedInsertValues("video_chapters", {
+      id: "ch-1",
+      [markerColumn]: nonChapterMarker,
+    }),
+    { id: "ch-1", marker_kind: "chapter" },
+  );
+  assert.equal(
+    isSpreadsheetForcedInsertColumn("video_chapters", "marker_kind"),
+    true,
+  );
+  assert.equal(
+    isSpreadsheetForcedInsertColumn("video_chapters", "chapter_label"),
+    false,
   );
 });
