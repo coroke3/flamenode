@@ -43,6 +43,7 @@ interface ImportResult {
   preview: PreviewRow[];
   previewTotal: number;
   errors: string[];
+  previewToken?: string;
 }
 
 interface PendingFile {
@@ -115,6 +116,8 @@ async function parseImportResponse(res: Response): Promise<ImportResult> {
             ? data.preview.length
             : 0,
       errors: Array.isArray(data.errors) ? data.errors : [],
+      previewToken:
+        typeof data.previewToken === "string" ? data.previewToken : undefined,
     };
   } catch {
     return {
@@ -133,11 +136,17 @@ function buildPreviewKey({
   importMode,
   enqueueStaticRebuild,
   staticRebuildStrategy,
+  eventStrategy,
+  videoStrategy,
+  updateXUsers,
 }: {
   files: PendingFile[];
   importMode: LegacyImportMode;
   enqueueStaticRebuild: boolean;
   staticRebuildStrategy: StaticRebuildStrategy;
+  eventStrategy: Strategy;
+  videoStrategy: Strategy;
+  updateXUsers: boolean;
 }): string {
   return JSON.stringify({
     files: files.map((file) => ({
@@ -149,6 +158,9 @@ function buildPreviewKey({
     importMode,
     enqueueStaticRebuild,
     staticRebuildStrategy,
+    eventStrategy,
+    videoStrategy,
+    updateXUsers,
   });
 }
 
@@ -219,6 +231,9 @@ export function LegacyImportClient(): React.ReactElement {
       importMode,
       enqueueStaticRebuild,
       staticRebuildStrategy,
+      eventStrategy,
+      videoStrategy,
+      updateXUsers,
     });
     setPending("analyze");
     setApplyResult(null);
@@ -234,6 +249,9 @@ export function LegacyImportClient(): React.ReactElement {
             importMode,
             enqueueStaticRebuild,
             staticRebuildStrategy,
+            events: eventStrategy,
+            videos: videoStrategy,
+            updateXUsers,
           },
         }),
       });
@@ -274,6 +292,7 @@ export function LegacyImportClient(): React.ReactElement {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           action: "apply",
+          previewToken: analysis?.previewToken,
           previewLimit: PREVIEW_LIMIT,
           files: files.map((f) => ({ name: f.name, content: f.content })),
           strategy: {
@@ -315,10 +334,14 @@ export function LegacyImportClient(): React.ReactElement {
     importMode,
     enqueueStaticRebuild,
     staticRebuildStrategy,
+    eventStrategy,
+    videoStrategy,
+    updateXUsers,
   });
   const hasFreshSuccessfulPreview =
     analysis?.ok === true &&
     analysis.errors.length === 0 &&
+    typeof analysis.previewToken === "string" &&
     analysisKey === currentPreviewKey;
   const displayResult = applyResult ?? analysis;
   const previewRows = (displayResult?.preview ?? []).slice(0, PREVIEW_LIMIT);
@@ -390,7 +413,10 @@ export function LegacyImportClient(): React.ReactElement {
           <select
             id="ev-strategy"
             value={eventStrategy}
-            onChange={(e) => setEventStrategy(e.target.value as Strategy)}
+            onChange={(e) => {
+              setEventStrategy(e.target.value as Strategy);
+              setAnalysisKey(null);
+            }}
             disabled={pending !== null}
           >
             <option value="skip">skip: 既存を保護</option>
@@ -403,7 +429,10 @@ export function LegacyImportClient(): React.ReactElement {
           <select
             id="vd-strategy"
             value={videoStrategy}
-            onChange={(e) => setVideoStrategy(e.target.value as Strategy)}
+            onChange={(e) => {
+              setVideoStrategy(e.target.value as Strategy);
+              setAnalysisKey(null);
+            }}
             disabled={pending !== null}
           >
             <option value="skip">skip: 既存を保護</option>
@@ -463,7 +492,10 @@ export function LegacyImportClient(): React.ReactElement {
           <input
             type="checkbox"
             checked={updateXUsers}
-            onChange={(e) => setUpdateXUsers(e.target.checked)}
+            onChange={(e) => {
+              setUpdateXUsers(e.target.checked);
+              setAnalysisKey(null);
+            }}
             disabled={pending !== null}
           />
           <span>既存 X ID の表示名も更新</span>

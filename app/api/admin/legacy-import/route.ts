@@ -11,6 +11,10 @@ import {
   type LegacyImportResult,
   type StaticRebuildStrategy,
 } from "@/lib/legacy/import";
+import {
+  buildLegacyImportPreviewToken,
+  type LegacyImportPreviewTokenStrategy,
+} from "@/lib/legacy/importPreviewToken";
 import { parseLegacyImportText } from "@/lib/legacy/parse";
 
 const MAX_IMPORT_FILES = 12;
@@ -21,6 +25,7 @@ const DEFAULT_PREVIEW_LIMIT = 80;
 interface JsonRequest {
   action?: "analyze" | "apply";
   files?: { name?: string; content?: string }[];
+  previewToken?: string;
   previewLimit?: number;
   strategy?: {
     events?: ConflictStrategy;
@@ -100,30 +105,45 @@ async function handleJson(req: Request, operatorId: string): Promise<Response> {
 
     const action = body.action ?? "analyze";
     const previewLimit = normalizePreviewLimit(body.previewLimit);
+    const strategy = normalizeJsonImportStrategy(body.strategy);
+    const previewToken = await buildLegacyImportPreviewToken({
+      payload: merged.payload,
+      strategy,
+    });
     if (action === "analyze") {
       const result = await analyzeLegacyPayload(merged.payload, {
-        importMode: body.strategy?.importMode,
-        enqueueStaticRebuild: body.strategy?.enqueueStaticRebuild,
-        staticRebuildStrategy: body.strategy?.staticRebuildStrategy,
+        events: strategy.events,
+        videos: strategy.videos,
+        updateXUsers: strategy.updateXUsers,
+        importMode: strategy.importMode,
+        enqueueStaticRebuild: strategy.enqueueStaticRebuild,
+        staticRebuildStrategy: strategy.staticRebuildStrategy,
         dryRun: true,
         previewLimit,
       });
-      return NextResponse.json(result);
+      return NextResponse.json({ ...result, previewToken });
     }
 
     if (action === "apply") {
+      if (!body.previewToken || body.previewToken !== previewToken) {
+        return jsonErrorResult(
+          "反映前に現在のファイルと設定でドライランを実行してください。",
+          409,
+          ["preview-required"],
+        );
+      }
       const blocked = await getImportWriteBlockReason();
       if (blocked) return jsonErrorResult(blocked, 423, ["cost-guard"]);
 
       const result = await applyLegacyImport(
         merged.payload,
         {
-          events: body.strategy?.events,
-          videos: body.strategy?.videos,
-          updateXUsers: body.strategy?.updateXUsers,
-          importMode: body.strategy?.importMode,
-          enqueueStaticRebuild: body.strategy?.enqueueStaticRebuild,
-          staticRebuildStrategy: body.strategy?.staticRebuildStrategy,
+          events: strategy.events,
+          videos: strategy.videos,
+          updateXUsers: strategy.updateXUsers,
+          importMode: strategy.importMode,
+          enqueueStaticRebuild: strategy.enqueueStaticRebuild,
+          staticRebuildStrategy: strategy.staticRebuildStrategy,
           previewLimit,
         },
         operatorId,
@@ -234,6 +254,50 @@ async function handleForm(req: Request): Promise<Response> {
     "シンプルフォームはドライラン専用です。保存はプレビューUIで内容を確認してから実行してください。",
   );
   return NextResponse.redirect(base, { status: 303 });
+}
+
+function normalizeJsonImportMode(raw: unknown): LegacyImportMode {
+  if (
+    raw === "archive" ||
+    raw === "preserve" ||
+    raw === "active_event" ||
+    raw === "draft"
+  ) {
+    return raw;
+  }
+  return "archive";
+}
+
+function normalizeJsonConflictStrategy(raw: unknown): ConflictStrategy {
+  if (raw === "update" || raw === "merge") return raw;
+  return "skip";
+}
+
+function normalizeJsonStaticRebuildStrategy(
+  raw: unknown,
+  importMode: LegacyImportMode,
+): StaticRebuildStrategy {
+  if (raw === "none" || raw === "summary" || raw === "event" || raw === "full") {
+    return raw;
+  }
+  return importMode === "draft" ? "none" : "event";
+}
+
+function normalizeJsonImportStrategy(
+  raw: JsonRequest["strategy"],
+): LegacyImportPreviewTokenStrategy {
+  const importMode = normalizeJsonImportMode(raw?.importMode);
+  return {
+    events: normalizeJsonConflictStrategy(raw?.events),
+    videos: normalizeJsonConflictStrategy(raw?.videos),
+    updateXUsers: raw?.updateXUsers === true,
+    importMode,
+    enqueueStaticRebuild: raw?.enqueueStaticRebuild !== false,
+    staticRebuildStrategy: normalizeJsonStaticRebuildStrategy(
+      raw?.staticRebuildStrategy,
+      importMode,
+    ),
+  };
 }
 
 async function getImportWriteBlockReason(): Promise<string | null> {

@@ -50,6 +50,7 @@ import {
   staticRebuildTargetLabels,
   type StaticRebuildStrategy,
 } from "./importState";
+import { resolveLegacyImportPreviewStatus } from "./importPreviewStatus";
 
 // ============================================================
 // 入出力型
@@ -335,6 +336,8 @@ async function analyzeLegacyPayloadInternal(
   const errors: string[] = [];
   const resolved = resolveImportOptions(options);
   const previewLimit = resolvePreviewLimit(options.previewLimit);
+  const strategyEvents: ConflictStrategy = options.events ?? "skip";
+  const strategyVideos: ConflictStrategy = options.videos ?? "skip";
 
   const { eventInputs, videoInputs } = splitLegacyPayload(raw);
   if (eventInputs.length === 0 && videoInputs.length === 0) {
@@ -421,6 +424,17 @@ async function analyzeLegacyPayloadInternal(
     }
   }
 
+  const uniqueXIds = new Set<string>();
+  for (const e of normalizedEvents) for (const x of e.xUsers) uniqueXIds.add(x.id);
+  for (const v of normalizedVideos) for (const x of v.xUsers) uniqueXIds.add(x.id);
+  for (const xId of uniqueXIds) {
+    if (existingXIds.has(xId)) {
+      if (options.updateXUsers) counts.xUsers.update += 1;
+    } else {
+      counts.xUsers.create += 1;
+    }
+  }
+
   for (const e of normalizedEvents) {
     if (!e.ok || !e.event) {
       errors.push(`event: ${e.warnings.join(" / ") || "parse error"}`);
@@ -434,11 +448,12 @@ async function analyzeLegacyPayloadInternal(
       is_entry_open: e.event.is_entry_open,
       is_archived: e.event.is_archived,
     };
+    const status = resolveLegacyImportPreviewStatus(exists, strategyEvents);
     pushPreview({
       kind: "event",
       id: e.event.id,
       title: e.event.title,
-      status: exists ? "update" : "create",
+      status,
       conflict: exists,
       warnings: e.warnings,
       importedState: { ...flags, importMode: resolved.importMode },
@@ -448,13 +463,10 @@ async function analyzeLegacyPayloadInternal(
       ),
       dbReductionNotes: legacyImportDbReductionNotes("event"),
     });
-    if (exists) counts.events.update += 1;
-    else counts.events.create += 1;
-    counts.editors += e.editors.length;
-    for (const x of e.xUsers) {
-      if (existingXIds.has(x.id)) counts.xUsers.update += 1;
-      else counts.xUsers.create += 1;
-    }
+    if (status === "create") counts.events.create += 1;
+    else if (status === "skip") counts.events.skip += 1;
+    else counts.events.update += 1;
+    if (status !== "skip") counts.editors += e.editors.length;
   }
 
   for (const v of normalizedVideos) {
@@ -464,22 +476,20 @@ async function analyzeLegacyPayloadInternal(
       continue;
     }
     const exists = existingVideoIds.has(v.video.id);
+    const status = resolveLegacyImportPreviewStatus(exists, strategyVideos);
     pushPreview({
       kind: "video",
       id: v.video.id,
       title: v.video.title,
-      status: exists ? "update" : "create",
+      status,
       conflict: exists,
       warnings: v.warnings,
       dbReductionNotes: legacyImportDbReductionNotes("video"),
     });
-    if (exists) counts.videos.update += 1;
-    else counts.videos.create += 1;
-    counts.members += v.members.length;
-    for (const x of v.xUsers) {
-      if (existingXIds.has(x.id)) counts.xUsers.update += 1;
-      else counts.xUsers.create += 1;
-    }
+    if (status === "create") counts.videos.create += 1;
+    else if (status === "skip") counts.videos.skip += 1;
+    else counts.videos.update += 1;
+    if (status !== "skip") counts.members += v.members.length;
   }
 
   return {
@@ -658,6 +668,8 @@ async function applyLegacyImportInner(
       if (exists) {
         if (strategyEvents === "skip") {
           counts.events.skip += 1;
+          importedEventIds.push(ev.id);
+          continue;
         } else if (strategyEvents === "update" || strategyEvents === "merge") {
           // merge は「存在する旧フィールドだけ上書き」する。
           const patch: Partial<typeof ev> & { updated_at?: number } = {
@@ -680,7 +692,6 @@ async function applyLegacyImportInner(
           // editors は merge/update 共通で「足りないものを補う」(既存は保護)
           await upsertEventEditors(db, ev.id, e.editors, strategyEvents);
         }
-        importedEventIds.push(ev.id);
       } else {
         await db.insert(events).values({
           ...ev,
