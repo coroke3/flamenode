@@ -17,6 +17,7 @@ import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import { formatUnix } from "@/lib/utils/format";
 import { buildPageMetadata } from "@/lib/seo";
 import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
+import { loadStaticRecentVideosPage } from "@/lib/publicData/staticRecentVideos";
 
 export const metadata: Metadata = buildPageMetadata({
   title: "作品一覧",
@@ -50,36 +51,44 @@ export default async function ListPage({
     view: rawView = "grid",
   } = await searchParams;
   const view = rawView === "index" ? "index" : "grid";
+  const parsedSort = parsePublicVideoSort(sort);
   const pageNum = Math.max(1, parseInt(page, 10) || 1);
   const offset = (pageNum - 1) * PAGE_SIZE;
 
-  const data = await withDatabase(async (db) => {
-    const [videos, total, eventInfo] = await Promise.all([
-      fetchPublicVideos(db, {
-        q,
-        sort: parsePublicVideoSort(sort),
-        eventId: event || undefined,
-        limit: PAGE_SIZE,
-        offset,
-      }),
-      countPublicVideos(db, {
-        q,
-        eventId: event || undefined,
-      }),
-      event
-        ? db
-            .select({
-              id: eventsTable.id,
-              title: eventsTable.title,
-            })
-            .from(eventsTable)
-            .where(eq(eventsTable.id, event))
-            .limit(1)
-            .then((rows) => rows[0] ?? null)
-        : Promise.resolve(null),
-    ]);
-    return { videos, total, eventInfo };
-  });
+  const staticData =
+    !q.trim() && parsedSort === "new" && !event
+      ? await loadStaticRecentVideosPage({ page: pageNum, pageSize: PAGE_SIZE })
+      : null;
+
+  const data = staticData
+    ? { videos: staticData.videos, total: staticData.total, eventInfo: null }
+    : await withDatabase(async (db) => {
+        const [videos, total, eventInfo] = await Promise.all([
+          fetchPublicVideos(db, {
+            q,
+            sort: parsedSort,
+            eventId: event || undefined,
+            limit: PAGE_SIZE,
+            offset,
+          }),
+          countPublicVideos(db, {
+            q,
+            eventId: event || undefined,
+          }),
+          event
+            ? db
+                .select({
+                  id: eventsTable.id,
+                  title: eventsTable.title,
+                })
+                .from(eventsTable)
+                .where(eq(eventsTable.id, event))
+                .limit(1)
+                .then((rows) => rows[0] ?? null)
+            : Promise.resolve(null),
+        ]);
+        return { videos, total, eventInfo };
+      });
 
   const { videos = [], total = 0, eventInfo = null } = data ?? {};
 

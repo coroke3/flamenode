@@ -70,14 +70,27 @@ async function rebuildTop(env: Env): Promise<void> {
 }
 
 async function rebuildListRecent(env: Env): Promise<void> {
-  const rows = await env.DB.prepare(
-    `SELECT id, title, youtube_video_id, creator_display_name, creator_x_user_id,
-            creator_icon_url, scheduled_time
+  const [rows, totalRow] = await Promise.all([
+    env.DB.prepare(
+      `SELECT id, title, youtube_video_id,
+              creator_display_name AS display_name,
+              creator_display_name,
+              creator_x_user_id,
+              creator_icon_url AS icon_url,
+              creator_icon_url,
+              primary_event_id,
+              scheduled_time,
+              visibility_status AS status
      FROM videos WHERE visibility_status = 'public'
      ORDER BY scheduled_time DESC LIMIT 120`,
-  ).all();
+    ).all(),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS c FROM videos WHERE visibility_status = 'public'`,
+    ).first<{ c?: number }>(),
+  ]);
   await putJson(env, "list/recent.json", {
     generated_at: Math.floor(Date.now() / 1000),
+    total: Number(totalRow?.c ?? rows.results?.length ?? 0),
     items: rows.results ?? [],
   }, "public, max-age=120, stale-while-revalidate=600");
 }
