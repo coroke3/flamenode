@@ -122,6 +122,9 @@ D1 へ適用する場合はファイル名の辞書順を正とする。同じ `
 | 0026 | `migrations/0026_x_user_portfolio_contact.sql` | `x_users.portfolio_contact` | 安全な列追加 |
 | 0032 | `migrations/0032_slots_end_time_normalize.sql` | 旧 `slots.end_time` 列を削除、単独 `reservation_group_id` を解除 | 本番前のスロット正規化。連続枠ロジックは `start_time` と部間隔を正本にする |
 | 0033 | `migrations/0033_event_staff_permission_mask.sql` | `event_staff.permission_preset` / `permission_mask` / `custom_permission_keys_json` | 旧 `event_staff_permissions` から backfill。以後の判定・新規書き込みは `event_staff` 3列を正本にする |
+| 0034 | `migrations/0034_user_can_create_events.sql` | `user.can_create_events` | サイト管理者が開催権限を付与するための安全な列追加 |
+| 0035 | `migrations/0035_event_visibility_status.sql` | `events.visibility_status` と index | イベント公開状態の正本。旧 `is_active` / `is_archived` は互換列として同期対象 |
+| 0036 | `migrations/0036_backfill_used_software_json.sql` | 旧使用ソフト中間テーブルから `videos.used_software_json` へ backfill | 旧テーブル削除前のデータ移行。既存 JSON がある行は上書きしない |
 
 ### 1-6. 手動 index / Drizzle meta の注意
 

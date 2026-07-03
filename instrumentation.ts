@@ -304,6 +304,15 @@ WHERE \`visibility_status\` = 'draft'`,
     await applyMigrationFile(DB, "0024_legacy_import_db_reduction_prep.sql");
   }
 
+  if (
+    (await tableExists(DB, "videos")) &&
+    (await tableExists(DB, "video_softwares")) &&
+    (await columnExists(DB, "videos", "used_software_json"))
+  ) {
+    console.log("[instrumentation] Backfilling local used_software_json with 0036");
+    await applyMigrationFile(DB, "0036_backfill_used_software_json.sql");
+  }
+
   if (await tableExists(DB, "notification_outbox")) {
     await ensureColumn(
       DB,
