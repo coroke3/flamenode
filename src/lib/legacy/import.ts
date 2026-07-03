@@ -568,7 +568,7 @@ async function applyLegacyImportInner(
   const existingVideoIds = new Set(analysis.existingVideoIds);
 
   const now = resolved.now;
-  const importedEventIds: string[] = [];
+  const rebuildEventIds: string[] = [];
   const importedVideoIds: string[] = [];
 
   // ---------------------------------------------------------
@@ -670,7 +670,6 @@ async function applyLegacyImportInner(
       if (exists) {
         if (strategyEvents === "skip") {
           counts.events.skip += 1;
-          importedEventIds.push(ev.id);
           continue;
         } else if (strategyEvents === "update" || strategyEvents === "merge") {
           // merge は「存在する旧フィールドだけ上書き」する。
@@ -706,7 +705,7 @@ async function applyLegacyImportInner(
         await upsertEventEditors(db, ev.id, e.editors, "create");
         existingEventIds.add(ev.id);
       }
-      importedEventIds.push(ev.id);
+      rebuildEventIds.push(ev.id);
       counts.editors += e.editors.length;
     } catch (err) {
       counts.events.failed += 1;
@@ -780,13 +779,15 @@ async function applyLegacyImportInner(
       // video_events (m:n): legacy eventid may contain multiple comma-separated ids.
       // The first id is stored as videos.primary_event_id; all ids are linked here.
       let previousEventIds: string[] = [];
-      if (exists && strategyVideos === "update") {
+      if (exists) {
         previousEventIds = (
           await db
             .select({ event_id: videoEvents.event_id })
             .from(videoEvents)
             .where(eq(videoEvents.video_id, vi.id))
         ).map((row) => row.event_id);
+      }
+      if (exists && strategyVideos === "update") {
         await db.delete(videoEvents).where(eq(videoEvents.video_id, vi.id));
       }
       for (const eventId of v.eventIds) {
@@ -803,6 +804,7 @@ async function applyLegacyImportInner(
         stagePermission: vi.stage_permission,
         now,
       });
+      rebuildEventIds.push(...previousEventIds, ...v.eventIds);
       counts.members += v.members.length;
     } catch (err) {
       counts.videos.failed += 1;
@@ -818,7 +820,7 @@ async function applyLegacyImportInner(
     const rebuildItems = planStaticRebuildEnqueues({
       strategy: resolved.staticRebuildStrategy,
       importMode: resolved.importMode,
-      eventIds: [...new Set(importedEventIds)],
+      eventIds: [...new Set(rebuildEventIds)],
       videoIds: [...new Set(importedVideoIds)],
       xUserIds: xIdsForRebuild,
     });
