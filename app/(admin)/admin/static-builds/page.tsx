@@ -27,8 +27,6 @@ export const dynamic = "force-dynamic";
 const TARGET_TYPES: StaticRebuildTargetType[] = [
   "top",
   "events_index",
-  "event_groups_index",
-  "event_group",
   "event",
   "video",
   "user",

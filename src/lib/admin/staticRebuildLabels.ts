@@ -16,8 +16,8 @@ const TARGET_LABELS: Record<StaticRebuildTargetType, string> = {
 const TARGET_ID_HINTS: Record<StaticRebuildTargetType, string> = {
   top: "global など固定ID",
   events_index: "global など固定ID",
-  event_groups_index: "global など固定ID",
-  event_group: "グループ slug または ID",
+  event_groups_index: "廃止（events_index を使用）",
+  event_group: "廃止（events_index を使用）",
   event: "イベント ID",
   video: "作品 ID（内部）",
   user: "X ID",

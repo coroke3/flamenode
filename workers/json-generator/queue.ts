@@ -14,7 +14,11 @@ export interface Env {
   KV: KVNamespace;
 }
 
-const DEPRECATED_TARGET_TYPES = new Set(["groups_index", "event_group"]);
+const DEPRECATED_TARGET_TYPES = new Set([
+  "groups_index",
+  "event_groups_index",
+  "event_group",
+]);
 
 type QueueRow = {
   id: string;

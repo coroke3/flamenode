@@ -31,7 +31,7 @@ Static JSON targets currently supported by `content-jobs`:
 
 `events_index` includes public event group sections for the public `/event` index. Dedicated group detail/static payloads are still not generated.
 
-Legacy `groups_index` / `event_group` queue rows are treated as deprecated no-op targets and marked done. Public group pages are served from D1 until a dedicated static payload is added.
+Legacy `groups_index` / `event_groups_index` / `event_group` queue rows are treated as deprecated no-op targets and marked done. New enqueue requests for those aliases are normalized to `events_index:global`.
 
 `content-jobs` queue behavior follows `system_settings.operation_mode`:
 

@@ -35,7 +35,6 @@ export async function GET(req: Request): Promise<Response> {
       is_active: eventsTable.is_active,
       is_entry_open: eventsTable.is_entry_open,
       is_archived: eventsTable.is_archived,
-      event_group_id: eventsTable.event_group_id,
       slot_type: eventsTable.slot_type,
       slot_visibility_mode: eventsTable.slot_visibility_mode,
       start_time: eventsTable.start_time,

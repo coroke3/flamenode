@@ -6,8 +6,7 @@ type Env = { DB: D1Database; R2: R2Bucket; KV: KVNamespace };
 const EVENT_INDEX_COLUMNS = `
   id, title, explanation, icon_url, img_url, accent_color,
   start_time, end_time, entry_start_time, entry_end_time,
-  visibility_status, is_active, is_entry_open, is_archived,
-  event_group_id
+  visibility_status, is_active, is_entry_open, is_archived
 `;
 
 export async function rebuildTarget(

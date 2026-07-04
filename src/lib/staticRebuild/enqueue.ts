@@ -1,10 +1,52 @@
 import "server-only";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import { historyLogs, staticRebuildQueue } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
+import { normalizeStaticRebuildTarget } from "./normalizeTarget";
 import { pickHigherPriority } from "./priority";
 import type { EnqueueStaticRebuildInput } from "./types";
+
+const PUBLIC_MISS_COOLDOWN_SEC = 5 * 60;
+const DEFAULT_DONE_COOLDOWN_SEC = 60;
+
+async function shouldSkipRecentEnqueue(
+  db: DB,
+  input: EnqueueStaticRebuildInput,
+  now: number,
+): Promise<boolean> {
+  const latest = (
+    await db
+      .select()
+      .from(staticRebuildQueue)
+      .where(
+        and(
+          eq(staticRebuildQueue.target_type, input.targetType),
+          eq(staticRebuildQueue.target_id, input.targetId),
+        )!,
+      )
+      .orderBy(desc(staticRebuildQueue.updated_at))
+      .limit(1)
+  )[0];
+
+  if (!latest) return false;
+  if (latest.status === "pending" || latest.status === "processing") {
+    return false;
+  }
+
+  if (latest.status === "failed") {
+    const retryAt = latest.next_retry_at ?? 0;
+    return retryAt > now;
+  }
+
+  if (latest.status !== "done") return false;
+
+  const processedAt = latest.processed_at ?? latest.updated_at ?? 0;
+  const cooldown = input.reason.startsWith("public_")
+    ? PUBLIC_MISS_COOLDOWN_SEC
+    : DEFAULT_DONE_COOLDOWN_SEC;
+  return processedAt > 0 && now - processedAt < cooldown;
+}
 
 /**
  * 静的 JSON 再生成キューへ投入。保存処理は成功させ、enqueue 失敗は warn のみ。
@@ -13,8 +55,9 @@ export async function enqueueStaticRebuild(
   db: DB,
   input: EnqueueStaticRebuildInput,
 ): Promise<void> {
+  const normalized = normalizeStaticRebuildTarget(input);
   const now = Math.floor(Date.now() / 1000);
-  const priority = input.priority ?? "normal";
+  const priority = normalized.priority ?? "normal";
 
   try {
     const existing = await db
@@ -22,8 +65,8 @@ export async function enqueueStaticRebuild(
       .from(staticRebuildQueue)
       .where(
         and(
-          eq(staticRebuildQueue.target_type, input.targetType),
-          eq(staticRebuildQueue.target_id, input.targetId),
+          eq(staticRebuildQueue.target_type, normalized.targetType),
+          eq(staticRebuildQueue.target_id, normalized.targetId),
           inArray(staticRebuildQueue.status, ["pending", "processing"]),
         )!,
       )
@@ -34,13 +77,13 @@ export async function enqueueStaticRebuild(
       await db
         .update(staticRebuildQueue)
         .set({
-          reason: input.reason,
+          reason: normalized.reason,
           priority: pickHigherPriority(
             row.priority as "high" | "normal" | "low",
             priority,
           ),
           requested_by_user_id:
-            input.requestedByUserId ?? row.requested_by_user_id,
+            normalized.requestedByUserId ?? row.requested_by_user_id,
           updated_at: now,
         })
         .where(eq(staticRebuildQueue.id, row.id));
@@ -51,26 +94,30 @@ export async function enqueueStaticRebuild(
       return;
     }
 
+    if (await shouldSkipRecentEnqueue(db, normalized, now)) {
+      return;
+    }
+
     await db.insert(staticRebuildQueue).values({
       id: generateId("srb"),
-      target_type: input.targetType,
-      target_id: input.targetId,
-      reason: input.reason,
+      target_type: normalized.targetType,
+      target_id: normalized.targetId,
+      reason: normalized.reason,
       priority,
       status: "pending",
-      requested_by_user_id: input.requestedByUserId ?? null,
+      requested_by_user_id: normalized.requestedByUserId ?? null,
       created_at: now,
       updated_at: now,
     });
   } catch (e) {
-    console.warn("[enqueueStaticRebuild] failed", input, e);
+    console.warn("[enqueueStaticRebuild] failed", normalized, e);
     try {
       await db.insert(historyLogs).values({
         table_name: "static_rebuild_queue",
-        record_id: `${input.targetType}:${input.targetId}`,
+        record_id: `${normalized.targetType}:${normalized.targetId}`,
         action: "UPDATE",
         after_data: JSON.stringify({
-          reason: input.reason,
+          reason: normalized.reason,
           error: e instanceof Error ? e.message : String(e),
         }),
         operator_discord_id: input.requestedByUserId ?? null,

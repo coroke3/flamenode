@@ -446,6 +446,20 @@ WHERE \`permission_mask\` = 0`,
     await applyMigrationFile(DB, "0028_event_group_events.sql");
   }
 
+  if (
+    (await tableExists(DB, "events")) &&
+    (await columnExists(DB, "events", "event_group_id"))
+  ) {
+    const legacy = (await DB.prepare(
+      `SELECT COUNT(*) AS c FROM events
+       WHERE event_group_id IS NOT NULL AND trim(event_group_id) <> ''`,
+    ).first()) as { c?: number } | null;
+    if (Number(legacy?.c ?? 0) > 0) {
+      console.log("[instrumentation] Applying event_group legacy cleanup 0039");
+      await applyMigrationFile(DB, "0039_event_group_legacy_cleanup.sql");
+    }
+  }
+
   if (await tableExists(DB, "system_settings")) {
     await ensureColumn(
       DB,

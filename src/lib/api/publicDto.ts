@@ -50,7 +50,6 @@ export const PUBLIC_EVENT_KEYS = [
   "is_active",
   "is_entry_open",
   "is_archived",
-  "event_group_id",
   "slot_type",
   "slot_visibility_mode",
   "start_time",
@@ -73,7 +72,6 @@ export interface PublicEventDto {
   is_active: number;
   is_entry_open: number;
   is_archived: number;
-  event_group_id: string | null;
   slot_type: "time" | "count" | null;
   slot_visibility_mode: "public_name" | "anonymous" | "hidden" | null;
   start_time: number | null;

@@ -19,7 +19,6 @@ export interface StaticEventIndexEvent {
   is_active: number;
   is_entry_open: number;
   is_archived: number;
-  event_group_id: string | null;
 }
 
 export interface StaticEventGroupSection {
@@ -107,7 +106,6 @@ function normalizeEvent(value: unknown): StaticEventIndexEvent | null {
     is_active: normalizeFlag(row.is_active, 1),
     is_entry_open: normalizeFlag(row.is_entry_open, 0),
     is_archived: normalizeFlag(row.is_archived, 0),
-    event_group_id: null,
   };
 }
 

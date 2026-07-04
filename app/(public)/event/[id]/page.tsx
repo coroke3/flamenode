@@ -34,6 +34,8 @@ import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 import { formatCount } from "@/lib/utils/format";
 import { absoluteUrl, buildPageMetadata, compactText } from "@/lib/seo";
 import { buildSlotParts, formatSlotPartLabel } from "@/lib/utils/slotGrouping";
+import { loadStaticEventDetail } from "@/lib/publicData/staticEventDetail";
+import { canFallbackToDatabase } from "@/lib/publicData/loader";
 
 export const dynamic = "force-dynamic";
 
@@ -92,8 +94,12 @@ export default async function EventDetailPage({
   params,
 }: Props): Promise<React.ReactElement> {
   const { id } = await params;
+  const staticLoaded = await loadStaticEventDetail(id);
 
-  const bundle = await withDatabase(async (db) => {
+  const bundle =
+    !canFallbackToDatabase(staticLoaded.strategy) && !staticLoaded.detail
+      ? null
+      : await withDatabase(async (db) => {
     const data = await fetchEventWithEditors(db, id);
     if (!data) return null;
 

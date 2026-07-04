@@ -38,6 +38,8 @@ import {
   eventStatusLabel,
   isAcceptingEntries,
 } from "@/lib/utils/eventStatus";
+import { loadStaticVideoDetail } from "@/lib/publicData/staticVideoDetail";
+import { canFallbackToDatabase } from "@/lib/publicData/loader";
 
 export const dynamic = "force-dynamic";
 
@@ -81,6 +83,16 @@ export default async function VideoDetailPage({
 }: Props): Promise<React.ReactElement> {
   const { id: rawId } = await params;
   const { playlist = "" } = (await searchParams) ?? {};
+
+  const staticProbe =
+    rawId.length !== 11 ? await loadStaticVideoDetail(rawId) : null;
+  if (
+    staticProbe &&
+    !canFallbackToDatabase(staticProbe.strategy) &&
+    !staticProbe.detail
+  ) {
+    notFound();
+  }
 
   const viewerUser = await getCurrentUser();
   const viewerActiveX = viewerUser?.active_x_user_id ?? null;
