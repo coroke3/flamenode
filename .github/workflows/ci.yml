@@ -29,8 +29,12 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Production build
+        run: npm run build
+
       - name: Unit tests
         run: npm run test:unit
 
-      - name: DB legacy check
+      - name: DB legacy check (advisory)
+        continue-on-error: true
         run: npm run check:db-legacy

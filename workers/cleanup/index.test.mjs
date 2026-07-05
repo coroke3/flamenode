@@ -33,9 +33,12 @@ function makeDbMock(opts = {}) {
   return {
     recorder,
     prepare(sql) {
-      const firstReturn = sql.includes("history_retention_days")
-        ? opts.historyRetentionFirst ?? null
-        : null;
+      let firstReturn = null;
+      if (sql.includes("history_retention_days")) {
+        firstReturn = opts.historyRetentionFirst ?? null;
+      } else if (sql.includes("compact_after_days")) {
+        firstReturn = opts.auditSettingsFirst ?? { compact_after_days: 30 };
+      }
       return makePreparedMock(sql, recorder, firstReturn);
     },
   };
@@ -46,7 +49,7 @@ function makeEnvMock(opts) {
   return { env: { DB: db }, recorder: db.recorder };
 }
 
-test("runCleanup: expected cleanup SQL is issued without video writes", async () => {
+test("runCleanup: audit_logs と通知・スロットのクリーンアップ SQL を発行する", async () => {
   const { env, recorder } = makeEnvMock();
   await runCleanup(env);
 
@@ -57,40 +60,69 @@ test("runCleanup: expected cleanup SQL is issued without video writes", async ()
   assert.equal(sqls.some((s) => s.includes("deadline_at")), false);
   assert.ok(sqls.some((s) => s.includes("DELETE FROM notification_outbox") && s.includes("'sent'")));
   assert.ok(sqls.some((s) => s.includes("DELETE FROM notification_outbox") && s.includes("'failed'")));
-  assert.ok(sqls.some((s) => s.includes("DELETE FROM history_logs") && s.includes("retention_class = 'normal'")));
-  assert.ok(sqls.some((s) => s.includes("DELETE FROM history_logs") && s.includes("retention_class = 'long_audit'")));
+  assert.ok(
+    sqls.some(
+      (s) =>
+        s.includes("UPDATE audit_logs") &&
+        s.includes("restore_status = 'expired'"),
+    ),
+  );
+  assert.ok(sqls.some((s) => s.includes("DELETE FROM audit_logs")));
+  assert.ok(
+    sqls.some(
+      (s) =>
+        s.includes("UPDATE audit_logs") &&
+        s.includes("before_json = NULL"),
+    ),
+  );
+  assert.equal(sqls.some((s) => s.includes("history_logs")), false);
   assert.equal(sqls.some((s) => s.includes("UPDATE videos")), false);
 });
 
-test("runCleanup: history_retention_days=30 shortens normal history cutoff", async () => {
+test("runCleanup: compact_after_days を audit_log_settings から読む", async () => {
   const { env, recorder } = makeEnvMock({
-    historyRetentionFirst: { history_retention_days: 30 },
+    auditSettingsFirst: { compact_after_days: 14 },
   });
   await runCleanup(env);
 
   const now = Math.floor(Date.now() / 1000);
-  const normalDelete = recorder.find(
-    (r) => r.sql.includes("DELETE FROM history_logs") && r.sql.includes("'normal'"),
+  const compactUpdate = recorder.find(
+    (r) =>
+      r.sql.includes("UPDATE audit_logs") &&
+      r.sql.includes("before_json = NULL"),
   );
-  assert.ok(normalDelete);
-  const cutoff = normalDelete.binds[0];
-  const expected = now - 30 * 86400;
+  assert.ok(compactUpdate);
+  const cutoff = compactUpdate.binds[0];
+  const expected = now - 14 * 86400;
   assert.ok(Math.abs(cutoff - expected) <= 5, `cutoff=${cutoff} ~= ${expected}`);
 });
 
-test("runCleanup: history_retention_days=null falls back to 90 days", async () => {
-  const { env, recorder } = makeEnvMock({
-    historyRetentionFirst: { history_retention_days: null },
-  });
+test("runCleanup: audit_log_settings 未作成時は compact 30 日フォールバック", async () => {
+  const recorder = [];
+  const env = {
+    DB: {
+      prepare(sql) {
+        if (sql.includes("compact_after_days")) {
+          return makePreparedMock(sql, recorder, null);
+        }
+        if (sql.includes("history_retention_days")) {
+          return makePreparedMock(sql, recorder, { history_retention_days: null });
+        }
+        return makePreparedMock(sql, recorder, null);
+      },
+    },
+  };
   await runCleanup(env);
 
   const now = Math.floor(Date.now() / 1000);
-  const normalDelete = recorder.find(
-    (r) => r.sql.includes("DELETE FROM history_logs") && r.sql.includes("'normal'"),
+  const compactUpdate = recorder.find(
+    (r) =>
+      r.sql.includes("UPDATE audit_logs") &&
+      r.sql.includes("before_json = NULL"),
   );
-  assert.ok(normalDelete);
-  const cutoff = normalDelete.binds[0];
-  const expected = now - 90 * 86400;
+  assert.ok(compactUpdate);
+  const cutoff = compactUpdate.binds[0];
+  const expected = now - 30 * 86400;
   assert.ok(Math.abs(cutoff - expected) <= 5, `cutoff=${cutoff} ~= ${expected}`);
 });
 

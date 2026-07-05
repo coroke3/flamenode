@@ -38,6 +38,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Typecheck
+        run: npm run typecheck
+
       - name: Apply Cloudflare resource IDs
         env:
           CF_IDS_JSON: ${{ secrets.CF_IDS_JSON }}
@@ -76,6 +79,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
 
       - name: Apply Cloudflare resource IDs
         env:
