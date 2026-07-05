@@ -2,7 +2,9 @@ import "server-only";
 
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
-import { accounts, historyLogs, notificationOutbox, users, xUsers } from "@/lib/db/schema";
+import type { DB } from "@/lib/db/client";
+import { accounts, notificationOutbox, users, xUsers } from "@/lib/db/schema";
+import { auditAction } from "@/lib/audit/helpers";
 import { shouldEnqueueUserNotification } from "./context";
 import { validateNotificationPayload } from "./format";
 
@@ -163,7 +165,7 @@ export async function enqueueNotification(
     }
     console.warn("[enqueueNotification] failed", e);
     try {
-      await db.insert(historyLogs).values({
+      await auditAction(db as DB, {
         table_name: "notification_outbox",
         record_id: "enqueue_failed",
         action: "CREATE",
@@ -172,9 +174,8 @@ export async function enqueueNotification(
           dedupe_key: dedupeKey,
           error: msg.slice(0, 500),
         }),
-        operator_discord_id: null,
+        operator_discord_id: input.discordUserId ?? "system",
         retention_class: "normal",
-        created_at: Math.floor(Date.now() / 1000),
       });
     } catch {
       // history 失敗は握りつぶす

@@ -6,8 +6,8 @@ import {
   eventCustomQuestions,
   videoCustomAnswers,
   videoEvents,
-  videos,
 } from "@/lib/db/schema";
+import { readStagePermissionCustomAnswers } from "@/lib/video/stagePermissionAnswers";
 
 export type VideoReviewSummary = {
   stage_permission_summary: string;
@@ -29,17 +29,34 @@ export async function fetchVideoReviewSummaries(
   const out = new Map<string, VideoReviewSummary>();
   if (videoIds.length === 0) return out;
 
-  const stageRows = await db
+  const eventLinks = await db
     .select({
-      id: videos.id,
-      stage_permission: videos.stage_permission,
+      video_id: videoEvents.video_id,
+      event_id: videoEvents.event_id,
     })
-    .from(videos)
-    .where(inArray(videos.id, [...videoIds]));
+    .from(videoEvents)
+    .where(
+      and(
+        inArray(videoEvents.video_id, [...videoIds]),
+        eventId ? eq(videoEvents.event_id, eventId) : undefined,
+      )!,
+    );
 
-  for (const row of stageRows) {
-    out.set(row.id, {
-      stage_permission_summary: summarizeStagePermission(row.stage_permission),
+  const eventIdsByVideo = new Map<string, string[]>();
+  for (const row of eventLinks) {
+    const list = eventIdsByVideo.get(row.video_id) ?? [];
+    list.push(row.event_id);
+    eventIdsByVideo.set(row.video_id, list);
+  }
+
+  for (const videoId of videoIds) {
+    const eventIds = eventIdsByVideo.get(videoId) ?? [];
+    const stagePermission = await readStagePermissionCustomAnswers(db, {
+      videoId,
+      eventIds,
+    });
+    out.set(videoId, {
+      stage_permission_summary: summarizeStagePermission(stagePermission),
       required_unanswered_count: 0,
     });
   }

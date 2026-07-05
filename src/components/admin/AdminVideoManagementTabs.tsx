@@ -12,8 +12,7 @@ export type AdminVideoManagementTabKey =
   | "draft"
   | "archived"
   | "voided"
-  | "youtube-sync"
-  | "import";
+  | "youtube-sync";
 
 interface AdminVideoManagementTabsProps {
   q?: string;
@@ -23,14 +22,14 @@ interface AdminVideoManagementTabsProps {
 }
 
 type StatusTab = {
-  key: Exclude<AdminVideoManagementTabKey, "youtube-sync" | "import">;
+  key: Exclude<AdminVideoManagementTabKey, "youtube-sync">;
   value: string | null;
   label: string;
   icon: IconName;
 };
 
 type ExtraTab = {
-  key: Extract<AdminVideoManagementTabKey, "youtube-sync" | "import">;
+  key: Extract<AdminVideoManagementTabKey, "youtube-sync">;
   href: string;
   label: string;
   icon: IconName;
@@ -54,12 +53,6 @@ const EXTRA_TABS: ExtraTab[] = [
     href: "/admin/youtube-sync",
     label: "YouTube同期",
     icon: "refresh",
-  },
-  {
-    key: "import",
-    href: "/admin/import",
-    label: "インポート",
-    icon: "upload",
   },
 ];
 

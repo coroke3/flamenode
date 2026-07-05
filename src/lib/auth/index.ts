@@ -123,6 +123,20 @@ export async function buildAuthConfig(): Promise<NextAuthConfig> {
       error: "/entry",
     },
     callbacks: {
+      async redirect({ url, baseUrl }) {
+        const base = baseUrl.replace(/\/$/, "");
+        if (url.startsWith("/")) {
+          return `${base}${url}`;
+        }
+        try {
+          const target = new URL(url);
+          const origin = new URL(base);
+          if (target.origin === origin.origin) return url;
+        } catch {
+          /* fall through */
+        }
+        return `${base}/dashboard`;
+      },
       async session({ session, user }) {
         if (session.user && user) {
           const su = session.user as typeof session.user & {

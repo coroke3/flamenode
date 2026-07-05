@@ -14,8 +14,8 @@ import {
   createFreeVideo,
   submitSlotVideo,
   updateVideo,
-  type VideoActionResult,
 } from "@/lib/actions/video";
+import type { VideoActionResult } from "@/lib/video/types";
 import {
   VideoMembersField,
   type VideoMemberInput,
@@ -118,7 +118,8 @@ interface VideoFormProps {
    */
   iconCandidates?: string[];
   /**
-   * YouTube チャンネル URL の候補。`getYoutubeChannelCandidates(db, xId)` から取得。
+   * YouTube チャンネル URL の候補。`getYoutubeChannelCandidates(db, xId)` から取得
+   * (当該 X ID が creator の作品投稿時に記録した URL を含む。アクティブ X ID とは無関係)。
    */
   channelCandidates?: string[];
   /**

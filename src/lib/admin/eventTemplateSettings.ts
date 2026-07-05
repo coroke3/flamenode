@@ -136,6 +136,7 @@ export function normalizeTemplateQuestionDefinitions(
 export function snapshotFromEvent(
   event: EventRow,
   customQuestions: EventTemplateQuestionRow[] = [],
+  videoFormSettingsJson: string | null = null,
 ): EventTemplateSnapshot {
   return {
     event_type: (event.event_type ?? "event") as EventTemplateSnapshot["event_type"],
@@ -147,7 +148,7 @@ export function snapshotFromEvent(
     allow_user_video_edits: event.allow_user_video_edits,
     user_video_edit_permission_keys_json:
       event.user_video_edit_permission_keys_json,
-    video_form_settings_json: event.video_form_settings_json,
+    video_form_settings_json: videoFormSettingsJson,
     max_slots_per_video: event.max_slots_per_video,
     max_consecutive_slots_per_entry: event.max_consecutive_slots_per_entry,
     slot_part_gap_minutes: event.slot_part_gap_minutes ?? 15,

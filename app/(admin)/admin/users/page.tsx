@@ -45,7 +45,7 @@ type AdminXUserRow = {
   id: string;
   x_name: string;
   icon_url: string | null;
-  approval_status: "pending" | "approved" | "rejected" | null;
+  approval_status: "pending" | "approved" | "rejected" | "imported" | null;
   linked_discord_user_id: string | null;
   linked_discord_name: string | null;
   linked_discord_image: string | null;

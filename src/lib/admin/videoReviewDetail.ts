@@ -11,6 +11,7 @@ import {
 } from "@/lib/db/schema";
 import { readStagePermissionCustomAnswers } from "@/lib/video/stagePermissionAnswers";
 import { getVideoSoftwareLabel } from "@/lib/db/software";
+import { parseMemberChaptersJson } from "@/lib/video/memberChaptersJson";
 
 export type VideoReviewCustomAnswer = {
   label: string;
@@ -46,24 +47,14 @@ export type VideoReviewDetail = {
   members: VideoReviewMember[];
 };
 
-function parseChaptersSummary(raw: string | null): string | null {
-  if (!raw?.trim()) return null;
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return raw;
-    const labels = parsed
-      .map((item) => {
-        if (!item || typeof item !== "object") return "";
-        const row = item as Record<string, unknown>;
-        const label = String(row.label ?? row.title ?? "").trim();
-        const start = String(row.start ?? row.time ?? "").trim();
-        return label && start ? `${label} (${start})` : label || start;
-      })
-      .filter(Boolean);
-    return labels.length > 0 ? labels.join(" / ") : raw;
-  } catch {
-    return raw;
-  }
+function formatMemberChaptersSummary(
+  chaptersJson: string | null,
+): string | null {
+  const rows = parseMemberChaptersJson(chaptersJson);
+  if (rows.length === 0) return null;
+  return rows
+    .map((row) => `${row.label} (${row.time_seconds})`)
+    .join(" / ");
 }
 
 export async function fetchVideoReviewDetail(
@@ -85,7 +76,6 @@ export async function fetchVideoReviewDetail(
         intro_comment: videos.intro_comment,
         highlights: videos.highlights,
         production_story: videos.production_story,
-        stage_permission: videos.stage_permission,
         visibility_status: videos.visibility_status,
         primary_event_id: videos.primary_event_id,
       })
@@ -115,7 +105,6 @@ export async function fetchVideoReviewDetail(
   const stagePermission = await readStagePermissionCustomAnswers(db, {
     videoId,
     eventIds: linkedEventIds,
-    fallbackRaw: video.stage_permission,
   });
 
   const questions =
@@ -128,9 +117,7 @@ export async function fetchVideoReviewDetail(
             question_key: eventCustomQuestions.question_key,
           })
           .from(eventCustomQuestions)
-          .where(
-            inArray(eventCustomQuestions.event_id, linkedEventIds),
-          )
+          .where(inArray(eventCustomQuestions.event_id, linkedEventIds))
       : [];
 
   const nonStageQuestions = questions.filter(
@@ -162,11 +149,12 @@ export async function fetchVideoReviewDetail(
 
   const members = await db
     .select({
+      id: videoMembers.id,
       name: videoMembers.name,
       role: videoMembers.role,
       x_user_id: videoMembers.x_user_id,
-      chapters_json: videoMembers.chapters_json,
       is_public_member: videoMembers.is_public_member,
+      chapters_json: videoMembers.chapters_json,
     })
     .from(videoMembers)
     .where(eq(videoMembers.video_id, videoId))
@@ -200,7 +188,7 @@ export async function fetchVideoReviewDetail(
       name: m.name,
       role: m.role,
       x_user_id: m.x_user_id,
-      chapters: parseChaptersSummary(m.chapters_json),
+      chapters: formatMemberChaptersSummary(m.chapters_json),
       is_public_member: m.is_public_member === 1,
     })),
   };

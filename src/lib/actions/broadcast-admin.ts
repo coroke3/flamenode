@@ -1,14 +1,11 @@
 "use server";
+import { auditAction } from "@/lib/audit/helpers";
 
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
-import {
-  historyLogs,
-  users as usersTable,
-  xUsers as xUsersTable,
-} from "@/lib/db/schema";
+import { users as usersTable, xUsers as xUsersTable } from "@/lib/db/schema";
 import { enqueueNotification } from "@/lib/notifications/enqueue";
 
 export interface BroadcastResult {
@@ -124,7 +121,7 @@ export async function broadcastAnnouncement(
 
   // 監査ログ
   const now = Math.floor(Date.now() / 1000);
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "announcements",
     record_id: announcementId,
     action: "UPDATE",
@@ -137,7 +134,6 @@ export async function broadcastAnnouncement(
     }),
     operator_discord_id: u.id,
     retention_class: "long_audit",
-    created_at: now,
   });
 
   revalidatePath("/admin/notifications");

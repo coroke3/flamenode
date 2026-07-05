@@ -5,7 +5,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { and, desc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
-import { costUsageSnapshots, historyLogs, systemSettings } from "@/lib/db/schema";
+import { costUsageSnapshots, auditLogs, systemSettings } from "@/lib/db/schema";
 import { CostGuardForm } from "@/components/admin/CostGuardForm";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
@@ -69,13 +69,13 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
   let exceptionUntil: number | null = null;
   let exceptionFeaturesJson: string | null = null;
   let latestSnapshot: (typeof costUsageSnapshots.$inferSelect) | null = null;
-  let history: (typeof historyLogs.$inferSelect)[] = [];
+  let history: (typeof auditLogs.$inferSelect)[] = [];
   if (db) {
     try {
       const rows = await db.select().from(systemSettings).limit(1);
       if (rows[0]) {
         mode = resolveOperationMode(rows[0]);
-        isMaintenance = rows[0].is_maintenance_mode ?? 0;
+        isMaintenance = mode === "maintenance" ? 1 : 0;
         autoEnabled = rows[0].auto_cost_guard_enabled ?? 1;
         reason = rows[0].cost_guard_reason;
         updatedAt = rows[0].cost_guard_updated_at ?? null;
@@ -92,14 +92,14 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
       )[0] ?? null;
       history = await db
         .select()
-        .from(historyLogs)
+        .from(auditLogs)
         .where(
           and(
-            eq(historyLogs.table_name, "system_settings"),
-            eq(historyLogs.action, "UPDATE"),
+            eq(auditLogs.table_name, "system_settings"),
+            eq(auditLogs.operation, "UPDATE"),
           )!,
         )
-        .orderBy(desc(historyLogs.created_at))
+        .orderBy(desc(auditLogs.created_at))
         .limit(20);
     } catch (e) {
       console.error("[AdminCostGuardPage]", e);
@@ -286,8 +286,8 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
             <tbody>
               {history.map((h) => {
                 const changed = parseAuditDiff(
-                  h.before_data,
-                  h.after_data,
+                  h.before_json,
+                  h.after_json,
                 ).changedKeys;
                 return (
                   <tr key={h.id}>
@@ -298,11 +298,11 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
                       </div>
                     </td>
                     <td style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                      {h.operator_discord_id ? (
+                      {h.actor_user_id ? (
                         <Link
-                          href={`/admin/users/${encodeURIComponent(h.operator_discord_id)}`}
+                          href={`/admin/users/${encodeURIComponent(h.actor_user_id)}`}
                         >
-                          {h.operator_discord_id}
+                          {h.actor_user_id}
                         </Link>
                       ) : (
                         "-"
@@ -315,9 +315,9 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
                         <>
                           {changed.slice(0, 6).join(", ")}
                           {changed.length > 6 ? ` ほか ${changed.length - 6} 件` : ""}
-                          {h.record_id ? (
+                          {h.target_id ? (
                             <Link
-                              href={`/admin/audit?table=system_settings&record=${encodeURIComponent(h.record_id)}`}
+                              href={`/admin/audit?table=system_settings&record=${encodeURIComponent(h.target_id)}`}
                               className="fn-btn fn-btn-ghost fn-btn-sm"
                               style={{
                                 marginLeft: 6,

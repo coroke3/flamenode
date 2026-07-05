@@ -5,7 +5,8 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
-import { announcements, historyLogs } from "@/lib/db/schema";
+import { announcements } from "@/lib/db/schema";
+import { auditAction } from "@/lib/audit/helpers";
 import { generateId } from "@/lib/utils/id";
 
 export interface AnnouncementResult {
@@ -78,14 +79,13 @@ export async function createAnnouncement(
     updated_at: now,
   });
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "announcements",
     record_id: id,
     action: "CREATE",
-    after_data: JSON.stringify({ title: d.title, is_published: d.is_published }),
+    after_data: { title: d.title, is_published: d.is_published },
     operator_discord_id: guard.userId,
     retention_class: "normal",
-    created_at: now,
   });
 
   revalidatePath("/admin/announcements");
@@ -122,14 +122,13 @@ export async function updateAnnouncement(
     })
     .where(eq(announcements.id, d.id));
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "announcements",
     record_id: d.id,
     action: "UPDATE",
-    after_data: JSON.stringify({ title: d.title, is_published: d.is_published }),
+    after_data: { title: d.title, is_published: d.is_published },
     operator_discord_id: guard.userId,
     retention_class: "normal",
-    created_at: now,
   });
 
   revalidatePath("/admin/announcements");
@@ -148,13 +147,12 @@ export async function deleteAnnouncement(
   if (!db) return { ok: false, message: "DB に接続できません。" };
   const now = Math.floor(Date.now() / 1000);
   await db.delete(announcements).where(eq(announcements.id, id));
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "announcements",
     record_id: id,
     action: "DELETE",
     operator_discord_id: guard.userId,
     retention_class: "long_audit",
-    created_at: now,
   });
   revalidatePath("/admin/announcements");
   return { ok: true };
@@ -175,14 +173,13 @@ export async function setAnnouncementPublished(
     .update(announcements)
     .set({ is_published: next, updated_at: now })
     .where(eq(announcements.id, id));
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "announcements",
     record_id: id,
     action: "UPDATE",
-    after_data: JSON.stringify({ is_published: next }),
+    after_data: { is_published: next },
     operator_discord_id: guard.userId,
     retention_class: "normal",
-    created_at: now,
   });
   revalidatePath("/admin/announcements");
   return { ok: true };

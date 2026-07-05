@@ -13,7 +13,7 @@ import {
 import { ManageActiveXNotice } from "@/components/layout/ManageActiveXNotice";
 import {
   events as eventsTable,
-  historyLogs as historyLogsTable,
+  auditLogs as auditLogsTable,
   notificationOutbox as notificationOutboxTable,
   slots as slotsTable,
   videos as videosTable,
@@ -169,14 +169,14 @@ export default async function ManageEventPage({
   // 当該イベントの直近 history_logs (events / video_events / slots すべて)
   const historyEv = await db
     .select()
-    .from(historyLogsTable)
+    .from(auditLogsTable)
     .where(
       and(
-        eq(historyLogsTable.table_name, "events"),
-        eq(historyLogsTable.record_id, id),
+        eq(auditLogsTable.table_name, "events"),
+        eq(auditLogsTable.target_id, id),
       )!,
     )
-    .orderBy(desc(historyLogsTable.created_at))
+    .orderBy(desc(auditLogsTable.created_at))
     .limit(15);
 
   // event-scoped 通知: カテゴリ別件数は DB の GROUP BY で集計し、
@@ -484,18 +484,18 @@ export default async function ManageEventPage({
                   <td>
                     <span
                       className={`fn-badge ${
-                        h.action === "DELETE"
+                        h.operation === "DELETE"
                           ? "fn-badge-danger"
-                          : h.action === "CREATE"
+                          : h.operation === "CREATE"
                             ? "fn-badge-accent"
                             : "fn-badge-soft"
                       }`}
                     >
-                      {h.action}
+                      {h.operation}
                     </span>
                   </td>
                   <td className="fn-td-secondary">
-                    {h.operator_discord_id ?? "-"}
+                    {h.actor_user_id ?? "-"}
                   </td>
                 </tr>
               ))}

@@ -11,6 +11,7 @@ import {
   SetActiveXButton,
   XIdCompactProfileForm,
 } from "./XIdSettingsClient";
+import { publicPageLinkProps, publicUserHref } from "./settingsPublicLink";
 
 export type SettingsXIdRow = {
   id: string;
@@ -29,10 +30,6 @@ export type PendingLinkRequestRow = {
   requested_x_id: string;
   requested_at: number;
 };
-
-function publicUserHref(xUserId: string): string {
-  return `/user/${encodeURIComponent(xUserId)}`;
-}
 
 function XIdAvatar({
   id,
@@ -64,7 +61,12 @@ function XIdAvatar({
   if (!href) return avatar;
 
   return (
-    <Link href={href} className={pageStyles.avatarLink} aria-label={`${id} の公開ページ`}>
+    <Link
+      href={href}
+      className={pageStyles.avatarLink}
+      aria-label={`${id} の公開ページ`}
+      {...publicPageLinkProps}
+    >
       {avatar}
     </Link>
   );
@@ -146,7 +148,11 @@ export function XIdLinkedList({
               />
               <div className={pageStyles.rowInfo}>
                 {publicHref ? (
-                  <Link href={publicHref} className={pageStyles.rowNameLink}>
+                  <Link
+                    href={publicHref}
+                    className={pageStyles.rowNameLink}
+                    {...publicPageLinkProps}
+                  >
                     {x.x_name || x.id}
                   </Link>
                 ) : (
@@ -181,7 +187,11 @@ export function XIdLinkedList({
                   />
                 ) : null}
                 {approved ? (
-                  <Link href={publicHref!} className={pageStyles.actionBtn}>
+                  <Link
+                    href={publicHref!}
+                    className={pageStyles.actionBtn}
+                    {...publicPageLinkProps}
+                  >
                     <Icon name="user" size={12} aria-hidden />
                     公開ページ
                   </Link>
@@ -218,6 +228,7 @@ export function XIdLinkedList({
               <div className={pageStyles.editPanel}>
                 <p className={pageStyles.editTitle}>公開プロフィール編集</p>
                 <XIdCompactProfileForm
+                  key={x.id}
                   x={x}
                   iconCandidates={iconCandidatesById[x.id] ?? []}
                   channelCandidates={channelCandidatesById[x.id] ?? []}

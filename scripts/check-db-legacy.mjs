@@ -1,21 +1,11 @@
 /**
  * legacy / deleted DB 利用検査 (静的ソース解析、DB 不要)。
+ * 旧互換が残っていたら失敗する。
  *
  * Usage:
  *   node scripts/check-db-legacy.mjs
  *
  * exit 0 = OK, exit 1 = 違反検出
- *
- * 検出するもの:
- *   - 削除済み `video_comments` / `videoComments` 利用
- *   - 新規コードでの `outro_comment` 書き込み (closing_comment に統一)
- *   - 新規コードでの `events.custom_questions` / `videos.custom_answers` JSON 書き込み
- *   - 新規コードでの `videos.stage_permission` 旧専用欄書き込み
- *   - 新規コードでの `marker_kind` が "chapter" 以外 (MVPは chapter 固定)
- *   - 通常コードでの `event_staff_permissions` 参照
- *
- * allowlist:
- *   - 旧データ normalize / repair script / この検査スクリプト自身は許容。
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -25,132 +15,146 @@ const ROOT = process.cwd();
 const SCAN_DIRS = ["src", "app", "workers"];
 const SCAN_EXT = new Set([".ts", ".tsx", ".mjs", ".cjs", ".js"]);
 
-/** ファイル全体を許可するパス (POSIX 形式で比較) */
 const FULL_ALLOW = new Set([
-  // 旧データ正規化 (legacy import) は outro/closing 含めて許容
-  "src/lib/legacy/normalize.ts",
-  // repair scripts
-  "scripts/repair-video-event-links.mjs",
-  "scripts/repair-event-group-legacy.mjs",
-  // この検査スクリプト自身
   "scripts/check-db-legacy.mjs",
 ]);
 
-/** 移行中テーブル定義・migration SQL は許容 */
 const PREFIX_ALLOW = [
   "migrations/",
-  "src/lib/db/schema.ts",
+  "docs/",
 ];
 
-/** 削除予定テーブルへの新規書き込みを検出（段階的に allowlist を縮小する） */
+const FILE_ALLOW = new Set([
+  "src/lib/auth/permissions/mask.ts",
+  "instrumentation.ts",
+]);
+
 const DB_REDUCTION_RULES = [
   {
-    id: "video-stats-usage",
-    label: "video_stats / videoStats usage after DB reduction",
-    pattern: /\b(videoStats|video_stats)\b/g,
-    prefixAllow: PREFIX_ALLOW,
-  },
-  {
-    id: "api-endpoints-usage",
-    label: "api_endpoints / apiEndpoints usage after DB reduction",
-    pattern: /\b(apiEndpoints|api_endpoints)\b/g,
-    prefixAllow: PREFIX_ALLOW,
-  },
-  {
-    id: "permission-keys-json-usage",
-    label: "event_staff.permission_keys_json usage after permission normalization",
-    pattern: /\bpermission_keys_json\b/g,
-    prefixAllow: PREFIX_ALLOW,
-  },
-  {
-    id: "event-staff-permissions-usage",
-    label: "event_staff_permissions usage after permission_mask migration",
-    pattern: /\b(eventStaffPermissions|event_staff_permissions)\b/g,
-    prefixAllow: [
-      ...PREFIX_ALLOW,
-      "src/lib/admin/spreadsheet/registry.ts",
-    ],
-  },
-  {
-    id: "video-softwares-write",
-    label: "video_softwares usage after used_software_json migration",
-    pattern: /\b(videoSoftwares|video_softwares)\b/g,
-    prefixAllow: [
-      ...PREFIX_ALLOW,
-      "src/lib/db/software.ts",
-    ],
-  },
-  {
-    id: "events-custom-questions-write",
-    label: "events.custom_questions JSON write after custom question normalization",
-    pattern: /\bcustom_questions\s*:/g,
-    prefixAllow: [
-      ...PREFIX_ALLOW,
-      "src/lib/admin/eventTemplateSettings.ts",
-      "src/lib/admin/eventTemplateSettings.test.mjs",
-    ],
-  },
-  {
-    id: "videos-custom-answers-write",
-    label: "videos.custom_answers JSON write after custom answer normalization",
-    pattern: /\bcustom_answers\s*:/g,
-    prefixAllow: [
-      ...PREFIX_ALLOW,
-      "src/lib/admin/spreadsheet/importPrep.test.mjs",
-    ],
-  },
-  {
-    id: "videos-stage-permission-write",
-    label: "videos.stage_permission legacy column write after custom answer normalization",
+    id: "events-legacy-flags",
+    label: "events.is_active / is_entry_open / is_archived column usage",
     pattern:
-      /\bstage_permission\s*:\s*(stagePermission|nextStagePermission|vi\.stage_permission)\b/g,
+      /\b(is_active|is_entry_open|is_archived)\b/g,
+    prefixAllow: [...PREFIX_ALLOW, "src/lib/import/legacy/"],
+    fileAllow: new Set(["src/lib/api/eventEndpointPayload.ts"]),
+    skipLine: (line) =>
+      line.includes("is_active:") ||
+      line.includes("is_entry_open:") ||
+      line.includes("is_archived:"),
+  },
+  {
+    id: "permission-mask",
+    label: "event_staff.permission_mask / number bitmask usage",
+    pattern: /\bpermission_mask\b/g,
+    prefixAllow: PREFIX_ALLOW,
+    fileAllow: new Set(["src/lib/auth/permissions/mask.ts", "instrumentation.ts", "src/lib/import/legacy/types.ts", "src/lib/import/legacy/plan.test.mjs"]),
+  },
+  {
+    id: "event-staff-permissions-table",
+    label: "event_staff_permissions usage (removed)",
+    pattern: /\b(eventStaffPermissions|event_staff_permissions)\b/g,
     prefixAllow: PREFIX_ALLOW,
   },
   {
-    id: "events-legacy-group-id-write",
-    label: "events.event_group_id legacy column write (use event_group_events)",
-    pattern: /\bevents(?:Table)?\.event_group_id\b/g,
-    prefixAllow: [
-      ...PREFIX_ALLOW,
-      "src/lib/db/eventGroups.ts",
-      "src/lib/publicData/staticEventsIndexCore.ts",
-      "app/api/events/route.ts",
-      "src/lib/api/publicDto.ts",
-    ],
+    id: "used-software-json",
+    label: "videos.used_software_json usage (removed; use video_softwares)",
+    pattern: /\bused_software_json\b/g,
+    prefixAllow: [...PREFIX_ALLOW, "src/lib/import/legacy/"],
   },
   {
-    id: "cost-guard-mode-write",
-    label: "system_settings.cost_guard_mode new write (use operation_mode)",
-    pattern: /\bcost_guard_mode\s*:/g,
-    prefixAllow: [
-      ...PREFIX_ALLOW,
-      "src/lib/actions/cost-guard.ts",
-      "src/lib/operationMode/",
-      "src/lib/auth/costGuardFeatures.ts",
-      "src/lib/staticRebuild/liveGuard.ts",
-      "src/lib/operationMode/getMode.ts",
-      "workers/json-generator/queuePolicy.ts",
-      "workers/json-generator/queuePolicy.test.mjs",
-      "app/(admin)/admin/static-builds/page.tsx",
-    ],
+    id: "video-member-chapters-table",
+    label: "video_member_chapters / videoMemberChapters usage (removed)",
+    pattern: /\b(videoMemberChapters|video_member_chapters)\b/g,
+    prefixAllow: PREFIX_ALLOW,
   },
   {
-    id: "is-maintenance-mode-write",
-    label: "system_settings.is_maintenance_mode new write (use operation_mode)",
-    pattern: /\bis_maintenance_mode\s*:/g,
-    prefixAllow: [
-      ...PREFIX_ALLOW,
-      "src/lib/actions/cost-guard.ts",
-      "src/lib/operationMode/",
-      "src/lib/auth/costGuardFeatures.ts",
-      "src/lib/staticRebuild/liveGuard.ts",
-      "workers/json-generator/queuePolicy.test.mjs",
-      "app/(admin)/admin/static-builds/page.tsx",
-    ],
+    id: "video-chapters-member-id",
+    label: "video_chapters.video_member_id usage (removed)",
+    pattern: /\bvideo_member_id\b/g,
+    prefixAllow: PREFIX_ALLOW,
+    fileAllow: new Set([
+      "src/lib/db/videoDetailQueries.ts",
+      "src/lib/video/memberChaptersJson.ts",
+    ]),
+    skipLine: (line) =>
+      line.includes("video_member_id:") ||
+      line.includes("video_member_id,") ||
+      line.includes("video_member_id ") ||
+      line.includes("video_member_id}") ||
+      line.includes("video_member_id;"),
+  },
+  {
+    id: "event-group-id-column",
+    label: "events.event_group_id usage (removed; use event_group_events)",
+    pattern: /\bevent_group_id\b/g,
+    prefixAllow: PREFIX_ALLOW,
+  },
+  {
+    id: "custom-questions-json",
+    label: "events.custom_questions JSON column usage",
+    pattern: /\bcustom_questions\b/g,
+    prefixAllow: PREFIX_ALLOW,
+  },
+  {
+    id: "custom-answers-json",
+    label: "videos.custom_answers JSON column usage",
+    pattern: /\bcustom_answers\b/g,
+    prefixAllow: PREFIX_ALLOW,
+  },
+  {
+    id: "video-form-settings-json",
+    label: "events.video_form_settings_json column usage",
+    pattern: /\bvideo_form_settings_json\b/g,
+    prefixAllow: PREFIX_ALLOW,
+  },
+  {
+    id: "videos-stage-permission-column",
+    label: "videos.stage_permission column usage",
+    pattern: /\bstage_permission\b/g,
+    prefixAllow: [...PREFIX_ALLOW, "src/lib/import/legacy/"],
+    fileAllow: new Set([
+      "src/lib/video/stagePermissionAnswers.ts",
+      "src/lib/video/stagePermissionQuestions.ts",
+      "src/lib/admin/videoReviewDetail.ts",
+    ]),
+  },
+  {
+    id: "cost-guard-mode",
+    label: "system_settings.cost_guard_mode (use operation_mode)",
+    pattern: /\bcost_guard_mode\b/g,
+    prefixAllow: PREFIX_ALLOW,
+  },
+  {
+    id: "is-maintenance-mode",
+    label: "system_settings.is_maintenance_mode (use operation_mode)",
+    pattern: /\bis_maintenance_mode\b/g,
+    prefixAllow: PREFIX_ALLOW,
+  },
+  {
+    id: "query-fallback",
+    label: "withMissingColumnFallback / withVideoScoreFallback usage",
+    pattern: /\b(withMissingColumnFallback|withVideoScoreFallback|queryFallback)\b/g,
+    prefixAllow: PREFIX_ALLOW,
+  },
+  {
+    id: "legacy-import",
+    label: "legacy import module usage (@/lib/legacy)",
+    // @/lib/legacy (旧モジュール) を禁止。新モジュールは @/lib/import/legacy
+    pattern: /@\/lib\/legacy\b/g,
+    prefixAllow: [],
+  },
+  {
+    id: "legacy-import-old-api",
+    label: "旧 legacy-import API ルート参照 (廃止済み)",
+    // 旧 /api/admin/legacy-import 参照を禁止 (410 stub 自体は許可)
+    pattern: /\/api\/admin\/legacy-import/g,
+    prefixAllow: [],
+    fileAllow: new Set([
+      "app/api/admin/legacy-import/route.ts",
+    ]),
   },
 ];
 
-/** 違反ルール: 各パターンとその allowlist */
 const RULES = [
   {
     id: "video-comments-usage",
@@ -158,19 +162,42 @@ const RULES = [
     pattern: /\b(videoComments|video_comments)\b/g,
   },
   {
-    id: "outro-comment-write",
-    label: "outro_comment 新規書き込み",
-    // `outro_comment:` のオブジェクトリテラル形式に絞る (insert/update 用法)
-    pattern: /\boutro_comment\s*:/g,
-    // 表示用 (`video.outro_comment` プロパティアクセス) は対象外
+    id: "video-stats-usage",
+    label: "video_stats / videoStats usage (removed)",
+    pattern: /\b(videoStats|video_stats)\b/g,
   },
   {
-    id: "marker-kind-non-chapter",
-    label: 'marker_kind に "chapter" 以外をセット',
-    // marker_kind: "comment" / "review" / "system" の "値" 代入のみ検出。
-    // 末尾に [,;})] が続く場合のみ "値" と判定し、`|`(型ユニオン)は除外する。
-    pattern:
-      /marker_kind\s*[:=]\s*['"](comment|review|system)['"]\s*(?=[,;}\)\r\n]|$)/g,
+    id: "api-endpoints-usage",
+    label: "api_endpoints / apiEndpoints usage (removed)",
+    pattern: /\b(apiEndpoints|api_endpoints)\b/g,
+  },
+  {
+    id: "history-logs-usage",
+    label: "history_logs / historyLogs usage (removed; use audit_logs)",
+    pattern: /\b(historyLogs|history_logs)\b/g,
+    prefixAllow: [],
+    fileAllow: new Set(["src/lib/audit/helpers.ts"]),
+  },
+  {
+    id: "outro-comment-write",
+    label: "outro_comment 新規書き込み",
+    pattern: /\boutro_comment\s*:/g,
+  },
+  {
+    id: "sync-legacy-event-visibility",
+    label: "syncLegacyEventVisibilityFlags usage (removed)",
+    pattern: /\bsyncLegacyEventVisibilityFlags\b/g,
+  },
+  {
+    id: "legacy-permission-aliases",
+    label: "LEGACY_PERMISSION_ALIASES usage (removed)",
+    pattern: /\bLEGACY_PERMISSION_ALIASES\b/g,
+  },
+  {
+    id: "has-permission-mask",
+    label: "hasPermission(number mask) usage (removed)",
+    pattern: /\bhasPermission\s*\(/g,
+    fileAllow: new Set(["src/lib/auth/permissions/mask.ts"]),
   },
 ];
 
@@ -211,12 +238,18 @@ function isPrefixAllowed(relPath, prefixes) {
 }
 
 function isAllowed(relPath) {
-  return FULL_ALLOW.has(relPath) || isPrefixAllowed(relPath, PREFIX_ALLOW);
+  return (
+    FULL_ALLOW.has(relPath) ||
+    FILE_ALLOW.has(relPath) ||
+    isPrefixAllowed(relPath, PREFIX_ALLOW)
+  );
 }
 
-function isDbReductionAllowed(relPath, rule) {
+function isRuleAllowed(relPath, rule) {
   return (
-    isAllowed(relPath) || isPrefixAllowed(relPath, rule.prefixAllow ?? [])
+    isAllowed(relPath) ||
+    isPrefixAllowed(relPath, rule.prefixAllow ?? []) ||
+    (rule.fileAllow?.has(relPath) ?? false)
   );
 }
 
@@ -226,6 +259,12 @@ function lineNumber(src, index) {
     if (src.charCodeAt(i) === 10) line++;
   }
   return line;
+}
+
+function lineAt(src, index) {
+  const start = src.lastIndexOf("\n", index) + 1;
+  const end = src.indexOf("\n", index);
+  return src.slice(start, end === -1 ? undefined : end);
 }
 
 let violations = 0;
@@ -243,6 +282,7 @@ for (const sub of SCAN_DIRS) {
       continue;
     }
     for (const rule of RULES) {
+      if (isRuleAllowed(rel, rule)) continue;
       rule.pattern.lastIndex = 0;
       let m;
       while ((m = rule.pattern.exec(src)) !== null) {
@@ -252,10 +292,11 @@ for (const sub of SCAN_DIRS) {
       }
     }
     for (const rule of DB_REDUCTION_RULES) {
-      if (isDbReductionAllowed(rel, rule)) continue;
+      if (isRuleAllowed(rel, rule)) continue;
       rule.pattern.lastIndex = 0;
       let m;
       while ((m = rule.pattern.exec(src)) !== null) {
+        if (rule.skipLine?.(lineAt(src, m.index))) continue;
         const line = lineNumber(src, m.index);
         all.push({ rule: rule.id, label: rule.label, file: rel, line, hit: m[0] });
         violations++;

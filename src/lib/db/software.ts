@@ -2,19 +2,9 @@ import "server-only";
 
 import { asc, eq } from "drizzle-orm";
 import type { DB } from "./client";
-import {
-  softwareAliases,
-  softwareCatalog,
-  videos,
-  videoSoftwares,
-} from "./schema";
+import { softwareAliases, softwareCatalog, videoSoftwares } from "./schema";
 import { generateId } from "@/lib/utils/id";
-import {
-  buildEmptySoftwareLabelsJson,
-  buildSoftwareLabelsJson,
-  normalizeSoftwareLabels,
-  parseSoftwareLabelsJson,
-} from "@/lib/utils/softwareLabels";
+import { normalizeSoftwareLabels } from "@/lib/utils/softwareLabels";
 
 function normalizeSoftwareName(value: string): string {
   return value.trim().replace(/\s+/g, " ").toLowerCase();
@@ -71,49 +61,32 @@ export async function replaceVideoSoftwareLabels(
   raw: string | null | undefined,
 ): Promise<void> {
   const labels = parseSoftwareLabels(raw);
+  await db.delete(videoSoftwares).where(eq(videoSoftwares.video_id, videoId));
   const seenSoftwareIds = new Set<string>();
+  let order = 0;
   for (const label of labels) {
     const softwareId = await resolveSoftwareId(db, label);
     if (seenSoftwareIds.has(softwareId)) continue;
     seenSoftwareIds.add(softwareId);
+    await db.insert(videoSoftwares).values({
+      video_id: videoId,
+      software_id: softwareId,
+      raw_label: label,
+      order_index: order++,
+    });
   }
-  await db
-    .update(videos)
-    .set({
-      used_software_json:
-        buildSoftwareLabelsJson(labels, "manual") ??
-        buildEmptySoftwareLabelsJson("manual"),
-    })
-    .where(eq(videos.id, videoId));
 }
 
 export async function getVideoSoftwareLabels(
   db: DB,
   videoId: string,
 ): Promise<string[]> {
-  const video = (
-    await db
-      .select({ used_software_json: videos.used_software_json })
-      .from(videos)
-      .where(eq(videos.id, videoId))
-      .limit(1)
-  )[0];
-  if (video?.used_software_json != null) {
-    return parseSoftwareLabelsJson(video.used_software_json);
-  }
-
   const rows = await db
-    .select({
-      raw_label: videoSoftwares.raw_label,
-      catalog_name: softwareCatalog.name,
-    })
+    .select({ raw_label: videoSoftwares.raw_label })
     .from(videoSoftwares)
-    .leftJoin(softwareCatalog, eq(softwareCatalog.id, videoSoftwares.software_id))
     .where(eq(videoSoftwares.video_id, videoId))
     .orderBy(asc(videoSoftwares.order_index));
-  return rows
-    .map((row) => row.raw_label || row.catalog_name)
-    .filter((label): label is string => Boolean(label));
+  return rows.map((row) => row.raw_label);
 }
 
 export async function getVideoSoftwareLabel(

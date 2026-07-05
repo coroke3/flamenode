@@ -13,7 +13,7 @@ import {
 import { ManageActiveXNotice } from "@/components/layout/ManageActiveXNotice";
 import {
   events as eventsTable,
-  historyLogs as historyLogsTable,
+  auditLogs as auditLogsTable,
   notificationOutbox as notificationOutboxTable,
   videos as videosTable,
   videoEvents as videoEventsTable,
@@ -104,18 +104,18 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
     }
   }
 
-  // 担当イベント関連の history_logs を直近で取得 (event_id を record_id として参照する記録)
+  // 担当イベント関連の audit_logs を直近で取得 (event_id を target_id として参照する記録)
   const recentInbox = eventIds.length > 0
     ? await db
         .select()
-        .from(historyLogsTable)
+        .from(auditLogsTable)
         .where(
           and(
-            eq(historyLogsTable.table_name, "events"),
-            inArray(historyLogsTable.record_id, eventIds),
+            eq(auditLogsTable.table_name, "events"),
+            inArray(auditLogsTable.target_id, eventIds),
           )!,
         )
-        .orderBy(desc(historyLogsTable.created_at))
+        .orderBy(desc(auditLogsTable.created_at))
         .limit(20)
     : [];
 
@@ -392,7 +392,7 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
             </thead>
             <tbody>
               {recentInbox.map((h) => {
-                const ev = eventRows.find((e) => e.id === h.record_id);
+                const ev = eventRows.find((e) => e.id === h.target_id);
                 return (
                   <tr key={h.id}>
                     <td className="fn-td-nowrap">
@@ -403,23 +403,23 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
                       {ev ? (
                         <Link href={`/event/${ev.id}`}>{ev.title}</Link>
                       ) : (
-                        <span className="fn-td-mono">{h.record_id}</span>
+                        <span className="fn-td-mono">{h.target_id}</span>
                       )}
                     </td>
                     <td>
                       <span
                         className={`fn-badge ${
-                          h.action === "DELETE"
+                          h.operation === "DELETE"
                             ? "fn-badge-danger"
-                            : h.action === "CREATE"
+                            : h.operation === "CREATE"
                               ? "fn-badge-accent"
                               : "fn-badge-soft"
                         }`}
                       >
-                        {h.action}
+                        {h.operation}
                       </span>
                     </td>
-                    <td className="fn-td-muted">{h.operator_discord_id ?? "-"}</td>
+                    <td className="fn-td-muted">{h.actor_user_id ?? "-"}</td>
                   </tr>
                 );
               })}

@@ -17,6 +17,7 @@ import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
 import { getYoutubeChannelCandidates } from "@/lib/db/youtubeChannelCandidates";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
+import { loadStagePermissionFormSettingsJsonByEvents } from "@/lib/video/stagePermissionQuestions";
 import { AppShell } from "@/components/ui/AppShell";
 import { StatusPanel } from "@/components/ui/StatusPanel";
 
@@ -135,19 +136,25 @@ export default async function SlottedPostPage({
         .map((event) => ({
           id: event.id,
           title: event.title,
-          video_form_settings_json: event.video_form_settings_json,
           parts_json: event.parts_json,
         })),
     );
   const slotEventOption = {
     id: ev.id,
     title: ev.title,
-    video_form_settings_json: ev.video_form_settings_json,
     parts_json: ev.parts_json,
   };
-  const eventOptions = acceptingEvents.some((o) => o.id === ev.id)
+  const rawEventOptions = acceptingEvents.some((o) => o.id === ev.id)
     ? acceptingEvents
     : [slotEventOption, ...acceptingEvents];
+  const formSettingsByEvent = await loadStagePermissionFormSettingsJsonByEvents(
+    db,
+    rawEventOptions.map((option) => option.id),
+  );
+  const eventOptions = rawEventOptions.map((option) => ({
+    ...option,
+    video_form_settings_json: formSettingsByEvent.get(option.id) ?? null,
+  }));
   const initialEventIds = [ev.id];
 
   // 投稿は writeGuard で active_x_user_id が approved であることを要求するため、

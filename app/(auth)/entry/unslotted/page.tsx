@@ -9,6 +9,7 @@ import {
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
+import { loadStagePermissionFormSettingsJsonByEvents } from "@/lib/video/stagePermissionQuestions";
 import { Icon } from "@/components/ui/Icon";
 import { VideoForm } from "@/components/forms/VideoForm";
 import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
@@ -74,11 +75,20 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
             .map((ev) => ({
               id: ev.id,
               title: ev.title,
-              video_form_settings_json: ev.video_form_settings_json,
               parts_json: ev.parts_json,
             })),
         )
     : [];
+  const formSettingsByEvent = db
+    ? await loadStagePermissionFormSettingsJsonByEvents(
+        db,
+        eventOptions.map((option) => option.id),
+      )
+    : new Map<string, string | null>();
+  const enrichedEventOptions = eventOptions.map((option) => ({
+    ...option,
+    video_form_settings_json: formSettingsByEvent.get(option.id) ?? null,
+  }));
   const iconCandidates =
     db && activeX ? await getXIconCandidates(db, activeX) : [];
   const channelCandidates =
@@ -150,7 +160,7 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
         submitBlockedReason={submitBlockedReason}
         iconCandidates={iconCandidates}
         channelCandidates={channelCandidates}
-        eventOptions={eventOptions}
+        eventOptions={enrichedEventOptions}
       />
       <p
         style={{

@@ -3,12 +3,7 @@ import "server-only";
 import { and, eq, or } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import { eventStaff } from "@/lib/db/schema";
-import {
-  hasPermission,
-  keysToPermissionMask,
-  permissionMaskToKeys,
-  resolveStaffPermissionKeys,
-} from "@/lib/auth/permissions/mask";
+import { resolveStaffPermissionKeys } from "@/lib/auth/permissions/permissionResolver";
 import {
   PRESET_DEFINITIONS,
   type EventStaffPreset,
@@ -34,7 +29,6 @@ export type PermissionSimulationResult = {
   displayName: string | null;
   preset: EventStaffPreset | null;
   presetLabel: string | null;
-  permissionMask: number;
   resolvedKeys: PermissionKey[];
   resolvedLabels: string[];
   spotlight: Array<{ key: PermissionKey; label: string; allowed: boolean }>;
@@ -60,7 +54,6 @@ export async function simulateEventPermissions(
     displayName: null,
     preset: null,
     presetLabel: null,
-    permissionMask: 0,
     resolvedKeys: [],
     resolvedLabels: [],
     spotlight: SPOTLIGHT_KEYS.map((key) => ({
@@ -89,7 +82,6 @@ export async function simulateEventPermissions(
   const preset = (row.permission_preset ?? "public_staff") as EventStaffPreset;
   const resolved = resolveStaffPermissionKeys(row);
   const resolvedKeys = [...resolved].sort();
-  const mask = Number(row.permission_mask ?? 0);
 
   return {
     found: true,
@@ -99,13 +91,12 @@ export async function simulateEventPermissions(
     displayName: row.display_name,
     preset,
     presetLabel: PRESET_DEFINITIONS[preset]?.label ?? preset,
-    permissionMask: mask,
     resolvedKeys,
     resolvedLabels: listResolvedPermissionLabels(resolvedKeys),
     spotlight: SPOTLIGHT_KEYS.map((key) => ({
       key,
       label: formatPermissionKeyLabel(key),
-      allowed: hasPermission(mask, key) || resolved.has(key),
+      allowed: resolved.has(key),
     })),
   };
 }
@@ -113,5 +104,3 @@ export async function simulateEventPermissions(
 export function listResolvedPermissionLabels(keys: PermissionKey[]): string[] {
   return keys.map((key) => formatPermissionKeyLabel(key));
 }
-
-export { permissionMaskToKeys, keysToPermissionMask };

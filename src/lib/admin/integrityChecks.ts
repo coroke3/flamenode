@@ -232,39 +232,6 @@ export async function runIntegrityChecks(
     }),
     makeCheck({
       db,
-      id: "events_visibility_legacy_flag_mismatch",
-      area: "events",
-      title: "events.visibility_status と旧フラグの矛盾",
-      severity: "warning",
-      description:
-        "公開状態の正本と互換用 is_active/is_archived が一致していません。",
-      from: sql`events`,
-      where: sql`visibility_status IN ('draft','private','public','archived')
-        AND (
-          (visibility_status = 'public' AND (is_active <> 1 OR is_archived <> 0))
-          OR (visibility_status = 'archived' AND (is_active <> 0 OR is_archived <> 1))
-          OR (visibility_status IN ('draft','private') AND (is_active <> 0 OR is_archived <> 0))
-        )`,
-      sampleSelect: {
-        id: sql<string>`id`,
-        title: sql<string>`title`,
-        status: sql<string>`visibility_status`,
-        is_active: sql<number>`is_active`,
-        is_archived: sql<number>`is_archived`,
-      },
-      recommendation:
-        "保存処理を通して再保存するか、visibility_status に合わせて旧フラグを同期してください。",
-      sqlPreview:
-        "UPDATE events SET is_active = CASE WHEN visibility_status = 'public' THEN 1 ELSE 0 END, is_archived = CASE WHEN visibility_status = 'archived' THEN 1 ELSE 0 END;",
-      mapIssue: (r) => ({
-        id: text(r.id),
-        title: text(r.title),
-        description: `visibility_status:${text(r.status)} / is_active:${text(r.is_active)} / is_archived:${text(r.is_archived)}`,
-        adminHref: eventHref(text(r.id)),
-      }),
-    }),
-    makeCheck({
-      db,
       id: "events_public_api_non_public",
       area: "events",
       title: "非公開イベントの Public API 有効化",

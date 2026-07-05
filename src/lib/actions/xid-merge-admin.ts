@@ -5,11 +5,11 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import {
-  historyLogs,
   xIdMergeRequests,
   xIdMergeReverts,
   xUsers,
 } from "@/lib/db/schema";
+import { auditAction } from "@/lib/audit/helpers";
 import { fetchXIdMergeImpact, summarizeMergeImpact } from "@/lib/admin/xIdMergeImpact";
 import { mergeXIds } from "@/lib/actions/merge-admin";
 import { generateId } from "@/lib/utils/id";
@@ -64,14 +64,13 @@ export async function createXIdMergeRequest(
     created_at: now,
     updated_at: now,
   });
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "x_id_merge_requests",
     record_id: id,
     action: "CREATE",
-    after_data: JSON.stringify({ from_x_user_id: fromXId, to_x_user_id: toXId }),
+    after_data: { from_x_user_id: fromXId, to_x_user_id: toXId },
     operator_discord_id: guard.userId,
     retention_class: "long_audit",
-    created_at: now,
   });
   revalidatePath("/admin/x-id-merges");
   return { ok: true, id, message: "X ID 統合申請を作成しました。" };
@@ -111,15 +110,14 @@ async function setXIdMergeRequestStatus(
     .update(xIdMergeRequests)
     .set({ status, updated_at: now })
     .where(eq(xIdMergeRequests.id, id));
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "x_id_merge_requests",
     record_id: id,
     action: "UPDATE",
-    before_data: JSON.stringify({ status: current.status }),
-    after_data: JSON.stringify({ status }),
+    before_data: { status: current.status },
+    after_data: { status },
     operator_discord_id: guard.userId,
     retention_class: "long_audit",
-    created_at: now,
   });
   revalidatePath("/admin/x-id-merges");
   return { ok: true, id, message: status === "approved" ? "承認しました。" : "却下しました。" };
@@ -167,15 +165,14 @@ export async function executeXIdMergeRequest(
     .update(xIdMergeRequests)
     .set({ status: "done", updated_at: now })
     .where(eq(xIdMergeRequests.id, id));
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "x_id_merge_requests",
     record_id: id,
     action: "UPDATE",
-    before_data: JSON.stringify({ status: "approved" }),
-    after_data: JSON.stringify({ status: "done", restore_snapshot: snapshot }),
+    before_data: { status: "approved" },
+    after_data: { status: "done", restore_snapshot: snapshot },
     operator_discord_id: guard.userId,
     retention_class: "long_audit",
-    created_at: now,
   });
   revalidatePath("/admin/x-id-merges");
   return { ok: true, id, message: merged.message };
@@ -202,15 +199,14 @@ export async function rejectXIdMergeRevert(
     .update(xIdMergeReverts)
     .set({ status: "rejected", updated_at: now })
     .where(eq(xIdMergeReverts.id, id));
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "x_id_merge_reverts",
     record_id: id,
     action: "UPDATE",
-    before_data: JSON.stringify({ status: "pending" }),
-    after_data: JSON.stringify({ status: "rejected" }),
+    before_data: { status: "pending" },
+    after_data: { status: "rejected" },
     operator_discord_id: guard.userId,
     retention_class: "long_audit",
-    created_at: now,
   });
   revalidatePath("/admin/x-id-merges");
   return { ok: true, message: "取り消し申請を却下しました。" };

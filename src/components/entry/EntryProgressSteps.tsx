@@ -39,6 +39,7 @@ const STATE_LABELS: Record<EntryStepState, string> = {
 
 interface EntryProgressStepsProps {
   states: Record<EntryStepKey, EntryStepState>;
+  hasLinkedXIds?: boolean;
 }
 
 function markCurrent(
@@ -68,7 +69,7 @@ export function resolveEntryStepStates(input: {
   isLoggedIn: boolean;
   needsTosAccept: boolean;
   activeX: string | null;
-  activeXApprovalStatus: "approved" | "pending" | "rejected" | null;
+  activeXApprovalStatus: "approved" | "pending" | "rejected" | "imported" | null;
   hasReservedSlots: boolean;
   canPost: boolean;
 }): Record<EntryStepKey, EntryStepState> {
@@ -157,12 +158,16 @@ function stepIcon(state: EntryStepState): React.ReactElement {
 
 export function EntryProgressSteps({
   states,
+  hasLinkedXIds = true,
 }: EntryProgressStepsProps): React.ReactElement {
+  const xSelectLabel = hasLinkedXIds ? STEP_LABELS["x-select"] : "X ID連携";
+
   return (
     <nav className="fn-entry-steps" aria-label="参加・投稿の進捗">
       <ol className="fn-entry-steps-list">
         {STEP_ORDER.map((key, index) => {
           const state = states[key];
+          const label = key === "x-select" ? xSelectLabel : STEP_LABELS[key];
           return (
             <li
               key={key}
@@ -173,11 +178,10 @@ export function EntryProgressSteps({
                 {index + 1}
               </span>
               <span className="fn-entry-step-body">
-                <span className="fn-entry-step-label">{STEP_LABELS[key]}</span>
+                <span className="fn-entry-step-label">{label}</span>
                 <span className="fn-entry-step-state">
                   {stepIcon(state)}
-                  <span className="fn-sr-only">{STATE_LABELS[state]}</span>
-                  <span aria-hidden>{STATE_LABELS[state]}</span>
+                  <span>{STATE_LABELS[state]}</span>
                 </span>
               </span>
             </li>

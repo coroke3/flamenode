@@ -1,8 +1,5 @@
 /**
- * 期限切れスロット解放 / 古い通知削除 / 監査ログのアーカイブを担当するスケジュールワーカー。
- * 設計の `cleanup` ジョブに対応。
- *
- * retention 計算ロジックは `./retention.ts` に切り出されている (純粋関数)。
+ * 期限切れスロット解放 / 古い通知削除 / 監査ログクリーンアップを担当するスケジュールワーカー。
  */
 import {
   computeHistoryCutoffs,
@@ -31,8 +28,6 @@ export default {
 
 /**
  * runCleanup を最大 CLEANUP_MAX_RETRIES 回まで即時リトライする。
- * 一時エラーだけ拾い直し、スキーマエラーは即諦める。
- * (D1 binding は非常に短時間で復旧するため、ウォーム内のリトライで十分なケースが多い)
  */
 export async function runCleanupWithRetry(env: Env): Promise<void> {
   let attempt = 0;
@@ -50,7 +45,6 @@ export async function runCleanupWithRetry(env: Env): Promise<void> {
         e,
       );
       if (!decision.shouldRetry) break;
-      // 100ms x attempt のごく短いバックオフ
       await new Promise((r) => setTimeout(r, 100 * attempt));
     }
   }
@@ -81,7 +75,6 @@ export async function runCleanup(env: Env): Promise<void> {
   const { normalCutoff, longAuditCutoff } = computeHistoryCutoffs(now, retentionDays);
   const voidedHideCutoff = computeVoidedVideoHideCutoff(now);
 
-  // 期限切れの slot.priority_reclaim_until を解放
   await env.DB.prepare(
     `UPDATE slots
      SET priority_reclaim_until = NULL, updated_at = ?1
@@ -90,10 +83,6 @@ export async function runCleanup(env: Env): Promise<void> {
     .bind(now)
     .run();
 
-  // X ID 再申請や void 対応は video_moderation_cases に寄せる。
-  // slots には deadline_at / x_reapply_required / voided を持たないため、cleanup では触らない。
-
-  // notification_outbox: 完了済みを TTL に従って削除
   await env.DB.prepare(
     `DELETE FROM notification_outbox
      WHERE status = 'sent' AND created_at IS NOT NULL AND created_at < ?1`,
@@ -108,23 +97,60 @@ export async function runCleanup(env: Env): Promise<void> {
     .bind(failedCutoff)
     .run();
 
-  // history_logs: retention_class ごとに TTL 削除
-  await env.DB.prepare(
-    `DELETE FROM history_logs
-     WHERE (retention_class IS NULL OR retention_class = 'normal')
-       AND created_at < ?1`,
+  // audit_logs: 新正本 — expires_at インデックスを使い小分け削除
+  const { AUDIT_CLEANUP_BATCH_LIMIT } = await import("./retention.ts");
+
+  const expiredMark = await env.DB.prepare(
+    `UPDATE audit_logs
+     SET restore_status = 'expired'
+     WHERE restore_status = 'restorable'
+       AND expires_at IS NOT NULL
+       AND expires_at < ?1
+     LIMIT ?2`,
   )
-    .bind(normalCutoff)
+    .bind(now, AUDIT_CLEANUP_BATCH_LIMIT)
     .run();
 
-  await env.DB.prepare(
-    `DELETE FROM history_logs
-     WHERE retention_class = 'long_audit'
-       AND created_at < ?1`,
+  const expiredDelete = await env.DB.prepare(
+    `DELETE FROM audit_logs
+     WHERE expires_at IS NOT NULL
+       AND expires_at < ?1
+     LIMIT ?2`,
   )
-    .bind(longAuditCutoff)
+    .bind(now, AUDIT_CLEANUP_BATCH_LIMIT)
     .run();
 
-  // voided 動画: 無料枠防衛のため、ここでは D1 への動画状態 UPDATE を行わない。
-  voidedHideCutoff;
+  // compact: 古いログの before/after を軽量化 (復元不可化)
+  let compactCutoff = now - 30 * 86400;
+  try {
+    const settingsRow = await env.DB.prepare(
+      `SELECT compact_after_days FROM audit_log_settings WHERE id = 'default' LIMIT 1`,
+    ).first<{ compact_after_days: number | null }>();
+    const days = Number(settingsRow?.compact_after_days ?? 30);
+    if (Number.isFinite(days) && days > 0) {
+      compactCutoff = now - Math.floor(days) * 86400;
+    }
+  } catch {
+    // audit_log_settings 未作成時はデフォルト 30 日
+  }
+
+  await env.DB.prepare(
+    `UPDATE audit_logs
+     SET before_json = NULL,
+         after_json = NULL,
+         inverse_patch_json = NULL,
+         restore_status = CASE
+           WHEN restore_status = 'restorable' THEN 'not_restorable'
+           ELSE restore_status
+         END
+     WHERE created_at < ?1
+       AND (before_json IS NOT NULL OR after_json IS NOT NULL)
+     LIMIT ?2`,
+  )
+    .bind(compactCutoff, AUDIT_CLEANUP_BATCH_LIMIT)
+    .run();
+
+  void voidedHideCutoff;
+  void expiredMark;
+  void expiredDelete;
 }

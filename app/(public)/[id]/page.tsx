@@ -266,8 +266,10 @@ export default async function VideoDetailPage({
   } = bundle;
 
   const creatorIcon = video.creator_icon_url ?? null;
-  const creatorName = creator?.x_name ?? video.creator_display_name ?? "作者未設定";
   const creatorId = creator?.id ?? video.creator_x_user_id ?? "anonymous";
+  const creatorName =
+    video.creator_display_name?.trim() ||
+    (creatorId !== "anonymous" ? creatorId : "作者未設定");
   const creatorHref =
     creator?.id && creator.id !== "anonymous" ? `/user/${creator.id}` : null;
   const youtubeId = video.youtube_video_id
@@ -307,25 +309,9 @@ export default async function VideoDetailPage({
   const primaryEvent =
     events.find((e) => e.id === video.primary_event_id) ?? events[0] ?? null;
   const primaryEventStatus = primaryEvent ? computeEventStatus(primaryEvent) : null;
-  const accentColor = primaryEvent?.accent_color ?? "#ffd100";
   const accentVar = primaryEvent?.accent_color
     ? buildAccentVars(primaryEvent.accent_color, "dark")
     : undefined;
-
-  const chapterMarkers = chapters.map((c) => ({
-    id: c.id,
-    time: c.chapter_time,
-    label: c.chapter_label,
-    visibility: (c.visibility ?? "public") as "public" | "private",
-    marker_kind: (c.marker_kind ?? "comment") as
-      | "comment"
-      | "chapter"
-      | "review"
-      | "system",
-    note: c.note,
-    author_name: c.author_name,
-    author_icon: c.author_icon,
-  }));
 
   const authorBlock = (
     <span className="fn-vd-author">
@@ -415,12 +401,7 @@ export default async function VideoDetailPage({
           <div className={styles.heroLayout}>
             <div className={styles.playerPane}>
               {youtubeId ? (
-                <YoutubePlayer
-                  youtubeId={youtubeId}
-                  title={video.title}
-                  chapters={chapterMarkers}
-                  accentColor={accentColor}
-                />
+                <YoutubePlayer youtubeId={youtubeId} title={video.title} />
               ) : (
                 <div
                   className="fn-empty"
@@ -658,7 +639,7 @@ export default async function VideoDetailPage({
               chapter_time: c.chapter_time,
               chapter_label: c.chapter_label,
               visibility: (c.visibility ?? "public") as "public" | "private",
-              marker_kind: (c.marker_kind ?? "comment") as
+              marker_kind: "comment" as
                 | "comment"
                 | "chapter"
                 | "review"

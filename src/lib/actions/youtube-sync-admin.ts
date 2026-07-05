@@ -1,14 +1,11 @@
 "use server";
+import { auditAction } from "@/lib/audit/helpers";
 
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { getDatabase } from "@/lib/cloudflare";
-import {
-  historyLogs,
-  videos,
-  videoYoutubeMetadata,
-} from "@/lib/db/schema";
+import { videos, videoYoutubeMetadata } from "@/lib/db/schema";
 
 export async function queueYoutubeMetadataResync(
   formData: FormData,
@@ -69,7 +66,7 @@ export async function queueYoutubeMetadataResync(
     })
     .where(eq(videoYoutubeMetadata.video_id, videoId));
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "video_youtube_metadata",
     record_id: videoId,
     action: before ? "UPDATE" : "CREATE",
@@ -87,8 +84,7 @@ export async function queueYoutubeMetadataResync(
       requested_by: "admin_youtube_sync",
     }),
     operator_discord_id: user.id,
-    retention_class: "normal",
-    created_at: now,
+    retention_class: "normal",
   });
 
   revalidatePath("/admin/youtube-sync");

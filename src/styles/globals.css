@@ -79,9 +79,11 @@
   /* 公開面の標準横ガター */
   --fn-page-gutter-desktop: clamp(24px, 5vw, 56px);
   --fn-page-gutter-tablet: clamp(20px, 4vw, 40px);
-  --fn-page-gutter-mobile: clamp(16px, 4vw, 20px);
-  --fn-page-gutter-narrow: 16px;
+  --fn-page-gutter-mobile: clamp(22px, 6vw, 32px);
+  --fn-page-gutter-narrow: 22px;
   --fn-page-gutter: var(--fn-page-gutter-desktop);
+  --fn-page-gutter-inline-start: var(--fn-page-gutter);
+  --fn-page-gutter-inline-end: var(--fn-page-gutter);
   --font-jp: var(--font-noto-jp), "Noto Sans JP", system-ui, sans-serif;
 
   /* タイポグラフィ token (PR46): フルードな clamp で 1 軸に絞る。
@@ -826,14 +828,8 @@ select {
   max-width: var(--fn-page-max, var(--content-max, 1360px));
   margin-left: auto;
   margin-right: auto;
-  padding-left: var(--fn-page-gutter);
-  padding-right: var(--fn-page-gutter);
-}
-
-@media (max-width: 640px) {
-  :root {
-    --fn-page-gutter: clamp(32px, 8vw, 48px);
-  }
+  padding-left: var(--fn-page-gutter-inline-start);
+  padding-right: var(--fn-page-gutter-inline-end);
 }
 
 /* 公開ページのセクション区切り。控えめな下線+余白だけ */
@@ -930,4 +926,36 @@ select {
   :root {
     --fn-page-gutter: var(--fn-page-gutter-narrow);
   }
+}
+
+/* モバイル横ガター + safe-area（全サーフェス共通） */
+@supports (padding: max(0px)) {
+  @media (max-width: 640px) {
+    :root {
+      --fn-page-gutter-inline-start: max(
+        var(--fn-page-gutter),
+        env(safe-area-inset-left, 0px)
+      );
+      --fn-page-gutter-inline-end: max(
+        var(--fn-page-gutter),
+        env(safe-area-inset-right, 0px)
+      );
+    }
+  }
+}
+
+/* fn-public-container 併用時: 修飾クラスの padding 短縮で横ガターを消さない */
+[data-fn-surface="public"] .fn-public-container.fn-intro,
+[data-fn-surface="public"] .fn-public-container.fn-section,
+[data-fn-surface="public"] .fn-public-container.fn-closing,
+[data-fn-surface="public"] .fn-public-container.fn-announcement-band,
+[data-fn-surface="public"] .fn-public-container.fn-footer-top,
+[data-fn-surface="admin"] .fn-public-container.fn-footer-top,
+[data-fn-surface="manage"] .fn-public-container.fn-footer-top,
+[data-fn-surface="personal"] .fn-public-container.fn-footer-top,
+[data-fn-surface="personal"] .fn-public-container.fn-page,
+[data-fn-surface="personal"] .fn-public-container.fn-dash,
+[data-fn-surface="personal"] .fn-public-container.fn-entry {
+  padding-left: var(--fn-page-gutter-inline-start);
+  padding-right: var(--fn-page-gutter-inline-end);
 }

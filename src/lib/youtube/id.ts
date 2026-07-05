@@ -71,7 +71,6 @@ export function youtubeEmbedUrl(id: string, opts: { autoplay?: boolean; start?: 
   params.set("rel", "0");
   params.set("modestbranding", "1");
   params.set("playsinline", "1");
-  params.set("enablejsapi", "1");
   if (opts.autoplay) params.set("autoplay", "1");
   if (opts.mute) params.set("mute", "1");
   if (opts.start && opts.start > 0) params.set("start", String(Math.floor(opts.start)));

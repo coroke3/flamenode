@@ -6,12 +6,12 @@ import { auth } from "@/lib/auth";
 import { canManageXIdLinkRequests } from "@/lib/auth/ownership";
 import { getDatabase } from "@/lib/cloudflare";
 import {
-  historyLogs,
   users,
   xAccountLinkRequests,
   xUserAliases,
   xUsers,
 } from "@/lib/db/schema";
+import { auditAction } from "@/lib/audit/helpers";
 import { normalizeXId } from "@/lib/utils/xid";
 import { enqueueNotification } from "@/lib/notifications/enqueue";
 
@@ -120,19 +120,18 @@ export async function approveXIdLinkRequest(
       return { ok: false, message: "すでに処理済みの申請です。" };
     }
 
-    await db.insert(historyLogs).values({
+    await auditAction(db, {
       table_name: "x_account_link_requests",
       record_id: requestId,
       action: "UPDATE",
-      after_data: JSON.stringify({
+      after_data: {
         status: "approved",
         link_type: "alias",
         target_x_user_id: targetXId,
         alias_x_id: xid,
-      }),
+      },
       operator_discord_id: adminId,
       retention_class: "long_audit",
-      created_at: now,
     });
 
     await enqueueNotification(db, {
@@ -223,18 +222,17 @@ export async function approveXIdLinkRequest(
       .where(eq(users.id, discordUserId));
   }
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "x_account_link_requests",
     record_id: requestId,
     action: "UPDATE",
-    after_data: JSON.stringify({
+    after_data: {
       status: "approved",
       link_type: "new",
       x_user_id: xid,
-    }),
+    },
     operator_discord_id: adminId,
     retention_class: "long_audit",
-    created_at: now,
   });
 
   await enqueueNotification(db, {
@@ -289,17 +287,16 @@ export async function rejectXIdLinkRequest(
     .set({ status: "rejected" })
     .where(eq(xAccountLinkRequests.id, requestId));
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "x_account_link_requests",
     record_id: requestId,
     action: "UPDATE",
-    after_data: JSON.stringify({
+    after_data: {
       status: "rejected",
       reason: reason || null,
-    }),
+    },
     operator_discord_id: adminId,
     retention_class: "long_audit",
-    created_at: now,
   });
 
   await enqueueNotification(db, {

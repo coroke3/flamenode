@@ -16,6 +16,10 @@ import {
   type SettingsXIdRow,
 } from "@/components/settings/XIdLinkedList";
 import { SettingsXAccountPanel } from "@/components/settings/SettingsXAccountPanel";
+import {
+  SettingsNoXIdOnboarding,
+  SettingsPageLead,
+} from "@/components/settings/SettingsNoXIdOnboarding";
 import pageStyles from "@/components/settings/settings-page.module.css";
 import { sanitizeNextPath } from "#utils/next";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
@@ -50,9 +54,15 @@ function sortXIds(
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ next?: string; tab?: string; x?: string }>;
+  searchParams?: Promise<{
+    next?: string;
+    tab?: string;
+    x?: string;
+    onboarding?: string;
+  }>;
 }): Promise<React.ReactElement> {
   const params = await searchParams;
+  const isOnboarding = params?.onboarding === "1";
   const legacyTab =
     params?.tab === "account" || params?.tab === "xids" ? params.tab : null;
   const utilityTab = legacyTab ? null : parseUtilityTab(params?.tab);
@@ -119,9 +129,12 @@ export default async function SettingsPage({
   if (db && xIds.length > 0) {
     for (const x of xIds) {
       iconCandidatesById[x.id] = await getXIconCandidates(db, x.id, 12);
-      channelCandidatesById[x.id] = await getYoutubeChannelCandidates(db, x.id, 12);
+      channelCandidatesById[x.id] = await getYoutubeChannelCandidates(db, x.id, 24);
     }
   }
+
+  const hasLinkedXIds = xIds.length > 0;
+  const pendingRequestCount = pendingOnly.length;
 
   const sortedXIds = sortXIds(xIds, user.active_x_user_id);
   const requestedX = params?.x?.trim() ?? null;
@@ -139,18 +152,21 @@ export default async function SettingsPage({
 
   const activeXPanel = selectedX ?? defaultX;
   const showUtilityTab =
-    utilityTab ??
-    (xIds.length === 0 && pendingOnly.length === 0
+    isOnboarding
       ? "link"
-      : xIds.length === 0 && pendingOnly.length > 0
-        ? "pending"
-        : null);
+      : utilityTab ??
+        (xIds.length === 0 && pendingOnly.length === 0
+          ? "link"
+          : xIds.length === 0 && pendingOnly.length > 0
+            ? "pending"
+            : null);
 
   const buildSettingsHref = (opts: {
     x?: string | null;
     tab?: UtilityTabId | null;
   }): string => {
     const qs = new URLSearchParams();
+    if (isOnboarding) qs.set("onboarding", "1");
     if (opts.tab) {
       qs.set("tab", opts.tab);
     } else if (opts.x) {
@@ -161,19 +177,34 @@ export default async function SettingsPage({
     return query ? `/dashboard/settings?${query}` : "/dashboard/settings";
   };
 
+  const onboardingSuccessHref = next ?? "/dashboard";
+
   const xTabSelected = showUtilityTab == null && activeXPanel != null;
 
   return (
     <div className={`fn-public-container fn-page ${pageStyles.wrap}`}>
       <header className={`fn-page-head ${pageStyles.hd}`}>
-        <Link href="/dashboard" className={pageStyles.back}>
-          ← ダッシュボード
-        </Link>
-        <h1 className="fn-display fn-page-title">設定</h1>
-        <p className="fn-page-lead">
-          連携した X ID ごとにプロフィールを編集し、アクティブ X ID を切り替えます。
-        </p>
-        {next ? (
+        {!isOnboarding ? (
+          <Link href="/dashboard" className={pageStyles.back}>
+            ← ダッシュボード
+          </Link>
+        ) : (
+          <p className={pageStyles.onboardingEyebrow}>初回セットアップ</p>
+        )}
+        <h1 className="fn-display fn-page-title">
+          {isOnboarding ? "X ID を登録" : "設定"}
+        </h1>
+        {isOnboarding ? (
+          <p className="fn-page-lead">
+            FlameNode を使うには、活動名義となる X ID の連携申請が必要です。申請後は運営が承認します。
+          </p>
+        ) : (
+          <SettingsPageLead
+            hasLinkedXIds={hasLinkedXIds}
+            pendingCount={pendingRequestCount}
+          />
+        )}
+        {next && !isOnboarding ? (
           <div className={pageStyles.nextRow}>
             <Link href={next} className="fn-btn fn-btn-primary fn-btn-sm">
               <Icon name="chevron-right" size={13} aria-hidden />
@@ -183,6 +214,7 @@ export default async function SettingsPage({
         ) : null}
       </header>
 
+      {!isOnboarding ? (
       <nav className={pageStyles.tabs} aria-label="X ID とアカウント">
         <div className={pageStyles.tabList} role="tablist">
           {sortedXIds.map((x) => {
@@ -199,12 +231,20 @@ export default async function SettingsPage({
                   selected ? pageStyles.tabActive : ""
                 } ${isActive ? pageStyles.tabCurrent : ""}`}
               >
-                <span className={pageStyles.tabLabel}>
-                  {x.x_name && x.x_name !== x.id ? x.x_name : `@${x.id}`}
-                </span>
-                <span className={pageStyles.tabMeta}>
-                  @{x.id}
-                  {isActive && x.approval_status === "approved" ? " · アクティブ" : ""}
+                <SettingsTabAvatar
+                  iconUrl={x.icon_url}
+                  label={x.x_name || x.id}
+                />
+                <span className={pageStyles.tabBody}>
+                  <span className={pageStyles.tabLabel}>
+                    {x.x_name && x.x_name !== x.id ? x.x_name : `@${x.id}`}
+                  </span>
+                  <span className={pageStyles.tabMeta}>
+                    @{x.id}
+                    {isActive && x.approval_status === "approved"
+                      ? " · アクティブ"
+                      : ""}
+                  </span>
                 </span>
               </Link>
             );
@@ -220,8 +260,16 @@ export default async function SettingsPage({
                 showUtilityTab === "pending" ? pageStyles.tabActive : ""
               }`}
             >
-              <span className={pageStyles.tabLabel}>申請中</span>
-              <span className={pageStyles.tabMeta}>{pendingOnly.length}件</span>
+              <span
+                className={`${pageStyles.tabIcon} ${pageStyles.tabIconMuted}`}
+                aria-hidden
+              >
+                <Icon name="clock" size={16} />
+              </span>
+              <span className={pageStyles.tabBody}>
+                <span className={pageStyles.tabLabel}>申請中</span>
+                <span className={pageStyles.tabMeta}>{pendingOnly.length}件</span>
+              </span>
             </Link>
           ) : null}
 
@@ -234,8 +282,20 @@ export default async function SettingsPage({
               showUtilityTab === "link" ? pageStyles.tabActive : ""
             }`}
           >
-            <span className={pageStyles.tabLabel}>新規連携</span>
-            <span className={pageStyles.tabMeta}>X ID を追加</span>
+            <span
+              className={`${pageStyles.tabIcon} ${pageStyles.tabIconMuted}`}
+              aria-hidden
+            >
+              <Icon name="plus" size={16} />
+            </span>
+            <span className={pageStyles.tabBody}>
+              <span className={pageStyles.tabLabel}>
+                {hasLinkedXIds ? "新規連携" : "X ID連携"}
+              </span>
+              <span className={pageStyles.tabMeta}>
+                {hasLinkedXIds ? "X ID を追加" : "最初の連携"}
+              </span>
+            </span>
           </Link>
 
           <Link
@@ -247,11 +307,27 @@ export default async function SettingsPage({
               showUtilityTab === "discord" ? pageStyles.tabActive : ""
             }`}
           >
-            <span className={pageStyles.tabLabel}>Discord</span>
-            <span className={pageStyles.tabMeta}>{user.name ?? "接続済み"}</span>
+            {user.image ? (
+              <span className={pageStyles.tabIcon} aria-hidden>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={user.image} alt="" className={pageStyles.tabIconImg} />
+              </span>
+            ) : (
+              <span
+                className={`${pageStyles.tabIcon} ${pageStyles.tabIconMuted}`}
+                aria-hidden
+              >
+                <Icon name="discord" size={16} />
+              </span>
+            )}
+            <span className={pageStyles.tabBody}>
+              <span className={pageStyles.tabLabel}>Discord</span>
+              <span className={pageStyles.tabMeta}>{user.name ?? "接続済み"}</span>
+            </span>
           </Link>
         </div>
       </nav>
+      ) : null}
 
       {xTabSelected && activeXPanel ? (
         <section
@@ -269,6 +345,7 @@ export default async function SettingsPage({
             </p>
           </div>
           <SettingsXAccountPanel
+            key={activeXPanel.id}
             x={activeXPanel}
             isActive={activeXPanel.id === user.active_x_user_id}
             iconCandidates={iconCandidatesById[activeXPanel.id] ?? []}
@@ -304,16 +381,25 @@ export default async function SettingsPage({
           className={pageStyles.card}
           aria-labelledby="settings-link-h"
         >
+          {!hasLinkedXIds ? (
+            <SettingsNoXIdOnboarding pendingCount={pendingRequestCount} />
+          ) : null}
           <div className={`${pageStyles.cardHd} ${pageStyles.cardHdBordered}`}>
             <h2 id="settings-link-h" className={pageStyles.cardTitle}>
-              新しい X ID を連携
+              {hasLinkedXIds ? "新しい X ID を連携" : "X ID を連携"}
             </h2>
             <p className={pageStyles.cardDesc}>
-              申請後は運営（管理者）が目視確認して承認します。
+              {hasLinkedXIds
+                ? "追加の X ID を申請できます。運営（管理者）が目視確認して承認します。"
+                : "@ を除いたユーザー名を入力して申請してください。承認後に投稿やプロフィール編集ができます。"}
             </p>
           </div>
           <div className={pageStyles.addBox}>
-            <XIdLinkForm />
+            <XIdLinkForm
+              onSuccessRedirect={
+                isOnboarding ? onboardingSuccessHref : next ?? null
+              }
+            />
           </div>
         </section>
       ) : null}
@@ -363,5 +449,28 @@ export default async function SettingsPage({
         </section>
       ) : null}
     </div>
+  );
+}
+
+function SettingsTabAvatar({
+  iconUrl,
+  label,
+}: {
+  iconUrl: string | null;
+  label: string;
+}): React.ReactElement {
+  const fallback = (label.trim().charAt(0) || "?").toUpperCase();
+  if (iconUrl) {
+    return (
+      <span className={pageStyles.tabIcon} aria-hidden>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={iconUrl} alt="" className={pageStyles.tabIconImg} />
+      </span>
+    );
+  }
+  return (
+    <span className={pageStyles.tabIcon} aria-hidden>
+      {fallback}
+    </span>
   );
 }

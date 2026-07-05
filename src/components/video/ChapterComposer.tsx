@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { createChapter, createChaptersBulk } from "@/lib/actions/chapter";
-import { requestCurrentTime } from "./playerBridge";
 
 interface ChapterComposerProps {
   videoId: string;
@@ -45,13 +44,6 @@ function parseTimeInput(raw: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function formatTime(sec: number): string {
-  if (!Number.isFinite(sec) || sec < 0) sec = 0;
-  const mm = Math.floor(sec / 60);
-  const ss = Math.floor(sec % 60);
-  return `${mm.toString().padStart(2, "0")}:${ss.toString().padStart(2, "0")}`;
-}
-
 /**
  * チャプター投稿フォーム。動画詳細ページ右レール下に置く想定。
  */
@@ -68,7 +60,6 @@ export function ChapterComposer({
   const [label, setLabel] = React.useState("");
   const [note, setNote] = React.useState("");
   const [isPublic, setIsPublic] = React.useState(true);
-  const [showOnBar, setShowOnBar] = React.useState(true);
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
 
@@ -100,11 +91,6 @@ export function ChapterComposer({
     });
   };
 
-  const fillCurrentTime = async () => {
-    const t = await requestCurrentTime();
-    setTimeStr(formatTime(t));
-  };
-
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!canPost) {
@@ -124,7 +110,7 @@ export function ChapterComposer({
     fd.set("note", note.trim());
     fd.set("visibility", isPublic ? "public" : "private");
     fd.set("marker_kind", "chapter");
-    fd.set("show_on_player_bar", showOnBar ? "1" : "0");
+    fd.set("show_on_player_bar", "0");
     startTransition(async () => {
       const r = await createChapter(fd);
       if (!r.ok) {
@@ -227,14 +213,6 @@ export function ChapterComposer({
               maxLength={9}
               required
             />
-            <button
-              type="button"
-              className="fn-btn fn-btn-ghost fn-btn-sm"
-              onClick={fillCurrentTime}
-              disabled={busy}
-            >
-              <Icon name="clock" size={11} aria-hidden /> 現在時刻
-            </button>
             <span className="fn-badge fn-badge-neutral">チャプターコメント</span>
           </div>
           <input
@@ -277,21 +255,6 @@ export function ChapterComposer({
                 onChange={(e) => setIsPublic(e.target.checked)}
               />
               公開
-            </label>
-            <label
-              style={{
-                display: "inline-flex",
-                gap: 4,
-                alignItems: "center",
-                cursor: "pointer",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={showOnBar}
-                onChange={(e) => setShowOnBar(e.target.checked)}
-              />
-              再生バーに点表示
             </label>
           </div>
           {error ? (

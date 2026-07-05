@@ -27,7 +27,7 @@
     "typecheck": "tsc --noEmit",
     "dev:local": "node -r ./scripts/load-dev-vars.cjs node_modules/next/dist/bin/next dev",
     "clean:next": "node scripts/clean-next-cache.cjs",
-    "dev:clean": "node scripts/clean-next-cache.cjs && node -r ./scripts/load-dev-vars.cjs node_modules/next/dist/bin/next dev",
+    "dev:clean": "node scripts/stop-dev-ports.cjs && node scripts/clean-next-cache.cjs && node -r ./scripts/load-dev-vars.cjs node_modules/next/dist/bin/next dev",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",

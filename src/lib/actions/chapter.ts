@@ -1,4 +1,5 @@
 "use server";
+import { auditAction } from "@/lib/audit/helpers";
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -6,11 +7,7 @@ import { eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { canEditVideo } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
-import {
-  historyLogs,
-  videoChapters,
-  videos,
-} from "@/lib/db/schema";
+import { videoChapters, videos } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
 import { parseCsv } from "@/lib/utils/csv";
 import { parseChapterTime } from "@/lib/utils/chapterTime";
@@ -30,10 +27,6 @@ const createSchema = z.object({
   // 旧仕様の video_member_id は chapter.ts では扱わない (メンバーチャプターは
   // video_members.chapters_json + replaceVideoMembers 経路で管理)。
   visibility: z.enum(["public", "private"]).default("public"),
-  marker_kind: z
-    .enum(["chapter", "comment", "review", "system"])
-    .default("chapter")
-    .transform(() => "chapter" as const),
   show_on_player_bar: z.coerce.number().min(0).max(1).default(1),
 });
 
@@ -93,13 +86,12 @@ export async function createChapter(
     chapter_label: data.chapter_label,
     note: data.note ?? null,
     visibility: data.visibility,
-    marker_kind: data.marker_kind,
     show_on_player_bar: data.show_on_player_bar,
     created_at: now,
     updated_at: now,
   });
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "video_chapters",
     record_id: id,
     action: "CREATE",
@@ -108,11 +100,9 @@ export async function createChapter(
       chapter_time: data.chapter_time,
       label: data.chapter_label,
       visibility: data.visibility,
-      marker_kind: data.marker_kind,
     }),
     operator_discord_id: sUser.id,
     retention_class: "normal",
-    created_at: now,
   });
 
   // 通知: 動画オーナーに新しい public チャプターコメントが付いたことを伝える。
@@ -207,7 +197,6 @@ export async function updateChapter(
       chapter_label: data.chapter_label,
       note: data.note ?? null,
       visibility: data.visibility,
-      marker_kind: data.marker_kind,
       show_on_player_bar: data.show_on_player_bar,
       updated_at: now,
     })
@@ -266,7 +255,7 @@ export async function deleteChapter(
   const now = Math.floor(Date.now() / 1000);
   await db.delete(videoChapters).where(eq(videoChapters.id, chapterId));
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "video_chapters",
     record_id: chapterId,
     action: "DELETE",
@@ -277,7 +266,6 @@ export async function deleteChapter(
     }),
     operator_discord_id: sUser.id,
     retention_class: "normal",
-    created_at: now,
   });
 
   const target = (
@@ -431,7 +419,6 @@ export async function createChaptersBulk(
       chapter_label: rawLabel,
       note: rawNote || null,
       visibility,
-      marker_kind: "chapter",
       show_on_player_bar: 1,
       created_at: now,
       updated_at: now,
@@ -440,7 +427,7 @@ export async function createChaptersBulk(
   }
 
   if (inserted > 0) {
-    await db.insert(historyLogs).values({
+    await auditAction(db, {
       table_name: "video_chapters",
       record_id: video_id,
       action: "CREATE",
@@ -452,7 +439,6 @@ export async function createChaptersBulk(
       }),
       operator_discord_id: sUser.id,
       retention_class: "normal",
-      created_at: now,
     });
   }
 

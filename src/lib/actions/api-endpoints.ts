@@ -1,10 +1,11 @@
 "use server";
+import { auditAction } from "@/lib/audit/helpers";
 
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
-import { events, historyLogs } from "@/lib/db/schema";
+import { events } from "@/lib/db/schema";
 
 export interface ApiEndpointResult {
   ok: boolean;
@@ -59,7 +60,7 @@ export async function createApiEndpoint(
     .update(events)
     .set({ public_api_enabled: 1, updated_at: now })
     .where(eq(events.id, eventId));
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "events",
     record_id: eventId,
     action: "UPDATE",
@@ -68,8 +69,7 @@ export async function createApiEndpoint(
     }),
     after_data: JSON.stringify({ public_api_enabled: 1 }),
     operator_discord_id: guard.userId,
-    retention_class: "long_audit",
-    created_at: now,
+    retention_class: "long_audit",
   });
 
   revalidatePath("/admin/api-endpoints");
@@ -110,7 +110,7 @@ export async function setApiEndpointActive(
     .update(events)
     .set({ public_api_enabled: next, updated_at: now })
     .where(eq(events.id, id));
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "events",
     record_id: id,
     action: "UPDATE",
@@ -119,8 +119,7 @@ export async function setApiEndpointActive(
     }),
     after_data: JSON.stringify({ public_api_enabled: next }),
     operator_discord_id: guard.userId,
-    retention_class: "long_audit",
-    created_at: now,
+    retention_class: "long_audit",
   });
 
   revalidatePath("/admin/api-endpoints");

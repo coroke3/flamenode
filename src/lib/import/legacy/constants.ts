@@ -1,0 +1,9 @@
+export const MAX_IMPORT_FILES = 12;
+export const MAX_IMPORT_TOTAL_BYTES = 6 * 1024 * 1024;
+export const MAX_PREVIEW_ROWS = 100;
+export const MAX_APPLY_EVENTS = 500;
+export const MAX_APPLY_VIDEOS = 1000;
+export const MAX_CHUNK_SIZE = 50;
+export const MAX_IN_CLAUSE = 32;
+export const PARSER_VERSION = "2";
+export const SCHEMA_VERSION = "1";

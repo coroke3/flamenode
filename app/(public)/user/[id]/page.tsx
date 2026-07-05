@@ -23,6 +23,7 @@ import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
 import { parseSocialLinks } from "@/lib/socialLinks";
 import { normalizePortfolioContact } from "@/lib/profileContact";
 import { countablePublicVideoCondition } from "@/lib/db/queries";
+import { storedCreatorNameExpr } from "@/lib/db/displayExpr";
 import { ProfileSocialLinks } from "@/components/user/ProfileSocialLinks";
 
 export const dynamic = "force-dynamic";
@@ -205,8 +206,6 @@ export default async function UserPage({
 
     const ownVideos = ownVideosRaw.map((v) => ({
       ...v,
-      display_name: user.x_name || v.display_name || user.id,
-      icon_url: v.icon_url ?? user.icon_url,
       score: Number(v.score ?? 0),
     })) as CreatorVideo[];
 
@@ -220,8 +219,8 @@ export default async function UserPage({
         id: videos.id,
         title: videos.title,
         youtube_video_id: videos.youtube_video_id,
-        display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.creator_display_name}, ${videos.creator_x_user_id})`,
-        icon_url: sql<string | null>`COALESCE(${videos.creator_icon_url}, ${xUsers.icon_url})`,
+        display_name: storedCreatorNameExpr,
+        icon_url: videos.creator_icon_url,
         creator_x_user_id: videos.creator_x_user_id,
         primary_event_id: videos.primary_event_id,
         scheduled_time: videos.scheduled_time,
@@ -231,7 +230,6 @@ export default async function UserPage({
       })
       .from(videos)
       .innerJoin(videoMembers, eq(videos.id, videoMembers.video_id))
-      .leftJoin(xUsers, sql`lower(${xUsers.id}) = lower(${videos.creator_x_user_id})`)
       .where(collabWhere)
       .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
       .limit(collabPaging.pageSize)

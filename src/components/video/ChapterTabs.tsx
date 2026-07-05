@@ -5,6 +5,7 @@ import styles from "./ChapterTabs.module.css";
 import { Icon } from "@/components/ui/Icon";
 import { cn } from "@/lib/utils/cn";
 import { ChapterCommentItem } from "./ChapterCommentItem";
+import { seekToTime } from "./playerBridge";
 
 export interface ChapterEntry {
   id: string;
@@ -26,7 +27,7 @@ interface ChapterTabsProps {
 export function ChapterTabs({
   chapters,
   duration,
-  onSeek,
+  onSeek = seekToTime,
 }: ChapterTabsProps): React.ReactElement {
   return (
     <div className={styles.root}>

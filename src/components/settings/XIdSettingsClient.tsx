@@ -20,8 +20,10 @@ import { SocialLinksEditor } from "@/components/forms/SocialLinksEditor";
 /** X ID 連携申請フォーム (Server Action `requestXIdLink`)。 */
 export function XIdLinkForm({
   compact = false,
+  onSuccessRedirect,
 }: {
   compact?: boolean;
+  onSuccessRedirect?: string | null;
 } = {}): React.ReactElement {
   const router = useRouter();
   const [pending, startTransition] = React.useTransition();
@@ -42,7 +44,11 @@ export function XIdLinkForm({
             "連携申請を受け付けました。承認後、一覧に表示されます。",
         );
         form?.reset();
-        router.refresh();
+        if (onSuccessRedirect) {
+          router.push(onSuccessRedirect);
+        } else {
+          router.refresh();
+        }
       } else {
         setErrMsg(r.message ?? "申請に失敗しました。");
       }
@@ -207,7 +213,7 @@ export function XIdCompactProfileForm({
   };
 
   return (
-    <form className={styles.stack} onSubmit={onSubmit}>
+    <form key={x.id} className={styles.stack} onSubmit={onSubmit}>
       <input type="hidden" name="x_user_id" value={x.id} />
       <label className={styles.compactLabel}>
         表示名オーバーライド（空欄で @ハンドル表示）
@@ -225,6 +231,7 @@ export function XIdCompactProfileForm({
           アイコン候補（作品サムネから自動取得）
         </span>
         <XIdIconPicker
+          key={x.id}
           xUserId={x.id}
           currentIconUrl={x.icon_url}
           candidates={iconCandidates}
@@ -259,8 +266,11 @@ export function XIdCompactProfileForm({
       />
       <div className={styles.fieldGrid}>
         <div className={styles.field}>
-          <span className={styles.compactLabel}>YouTube チャンネル</span>
+          <span className={styles.compactLabel}>
+            YouTube チャンネル（過去の作品から候補を表示）
+          </span>
           <YoutubeChannelPicker
+            key={x.id}
             defaultValue={x.youtube_channel_url}
             candidates={channelCandidates}
             disabled={pending}
@@ -268,6 +278,7 @@ export function XIdCompactProfileForm({
         </div>
       </div>
       <SocialLinksEditor
+        key={x.id}
         initialValue={x.other_social_links}
         disabled={pending}
       />
@@ -339,6 +350,7 @@ export function XIdProfileForm({
 
   return (
     <form
+      key={x.id}
       className={styles.stack}
       onSubmit={(ev) => {
         ev.preventDefault();
@@ -349,6 +361,7 @@ export function XIdProfileForm({
       <div className={styles.stack}>
         <label className={styles.compactLabel}>アイコン</label>
         <XIdIconPicker
+          key={x.id}
           xUserId={x.id}
           currentIconUrl={x.icon_url}
           candidates={iconCandidates}
@@ -382,15 +395,18 @@ export function XIdProfileForm({
       />
       <div className={styles.fieldGrid}>
         <div className={styles.field}>
-          <span className={styles.compactLabel}>YouTube チャンネル</span>
+          <span className={styles.compactLabel}>
+            YouTube チャンネル（過去の作品から候補を表示）
+          </span>
           <YoutubeChannelPicker
+            key={x.id}
             defaultValue={x.youtube_channel_url}
             candidates={channelCandidates}
             disabled={pending}
           />
         </div>
       </div>
-      <SocialLinksEditor initialValue={x.other_social_links} />
+      <SocialLinksEditor key={x.id} initialValue={x.other_social_links} />
       <div className={styles.row}>
         <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm" disabled={pending}>
           <Icon name="check" size={12} aria-hidden /> プロフィールを保存

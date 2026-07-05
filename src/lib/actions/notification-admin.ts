@@ -1,10 +1,11 @@
 "use server";
+import { auditAction } from "@/lib/audit/helpers";
 
 import { revalidatePath } from "next/cache";
 import { eq, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
-import { historyLogs, notificationOutbox } from "@/lib/db/schema";
+import { notificationOutbox } from "@/lib/db/schema";
 
 export interface NotificationAdminResult {
   ok: boolean;
@@ -61,7 +62,7 @@ export async function retryFailedNotification(
     })
     .where(eq(notificationOutbox.id, id));
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "notification_outbox",
     record_id: id,
     action: "UPDATE",
@@ -78,8 +79,7 @@ export async function retryFailedNotification(
       retried_at: now,
     }),
     operator_discord_id: u.id,
-    retention_class: "normal",
-    created_at: now,
+    retention_class: "normal",
   });
 
   revalidatePath("/admin/notifications");
@@ -132,7 +132,7 @@ export async function cancelNotification(
     })
     .where(eq(notificationOutbox.id, id));
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "notification_outbox",
     record_id: id,
     action: "UPDATE",
@@ -149,8 +149,7 @@ export async function cancelNotification(
       cancelled_at: now,
     }),
     operator_discord_id: u.id,
-    retention_class: "normal",
-    created_at: now,
+    retention_class: "normal",
   });
 
   revalidatePath("/admin/notifications");
@@ -261,7 +260,7 @@ export async function retryAllFailedNotifications(
       )})`,
     );
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "notification_outbox",
     record_id: "bulk_retry",
     action: "UPDATE",
@@ -272,8 +271,7 @@ export async function retryAllFailedNotifications(
       retried_at: now,
     }),
     operator_discord_id: u.id,
-    retention_class: "long_audit",
-    created_at: now,
+    retention_class: "long_audit",
   });
 
   revalidatePath("/admin/notifications");

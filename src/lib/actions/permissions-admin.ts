@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
-import { historyLogs, systemSettings } from "@/lib/db/schema";
+import { systemSettings } from "@/lib/db/schema";
+import { auditAction } from "@/lib/audit/helpers";
 
 export interface PermissionAdminResult {
   ok: boolean;
@@ -72,23 +73,22 @@ export async function updateGlobalEditableFields(
     });
   }
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "system_settings",
     record_id: id,
     action: before ? "UPDATE" : "CREATE",
     before_data: before
-      ? JSON.stringify({
+      ? {
           default_editable_fields: before.default_editable_fields,
           upcoming_editable_fields: before.upcoming_editable_fields,
-        })
+        }
       : null,
-    after_data: JSON.stringify({
+    after_data: {
       default_editable_fields: defaultFields,
       upcoming_editable_fields: upcomingFields,
-    }),
+    },
     operator_discord_id: u.id,
     retention_class: "long_audit",
-    created_at: now,
   });
 
   revalidatePath("/admin/users");

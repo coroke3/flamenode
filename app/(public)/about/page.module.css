@@ -3,7 +3,8 @@
 }
 
 .hero {
-  padding: clamp(42px, 6vw, 68px) var(--fn-page-gutter, clamp(20px, 4vw, 48px)) clamp(34px, 5vw, 56px);
+  padding: clamp(42px, 6vw, 68px) var(--fn-page-gutter-inline-end, var(--fn-page-gutter, clamp(20px, 4vw, 48px)))
+    clamp(34px, 5vw, 56px) var(--fn-page-gutter-inline-start, var(--fn-page-gutter, clamp(20px, 4vw, 48px)));
   background: var(--bg-base);
   border-bottom: 1px solid var(--hairline, var(--border-subtle));
 }

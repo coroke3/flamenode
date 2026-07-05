@@ -36,7 +36,7 @@ export default async function PermissionSimulatorPage({
     <div>
       <AdminPageHeader
         title="権限シミュレーター"
-        description="イベントスタッフの permission_mask / プリセットを、X ID または Discord ID から確認します。"
+        description="イベントスタッフのプリセット / カスタム権限を、X ID または Discord ID から確認します。"
       />
       <PermissionSimulatorPanel
         eventId={eventId}

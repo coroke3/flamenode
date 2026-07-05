@@ -9,6 +9,7 @@ import { formatDuration } from "@/lib/utils/format";
 import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
 import { MemberChapterItem } from "./MemberChapterItem";
 import type { MemberChapterItemEntry } from "./MemberChapterItem";
+import { seekToTime } from "./playerBridge";
 
 export interface MemberSectionMember {
   id: string;
@@ -119,7 +120,7 @@ export function MemberSection({
   members,
   memberChapters,
   duration,
-  onSeek,
+  onSeek = seekToTime,
 }: MemberSectionProps): React.ReactElement | null {
   const [mode, setMode] = React.useState<ViewMode>("cards");
   const chapters = memberChapters ?? [];

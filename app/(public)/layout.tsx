@@ -1,9 +1,22 @@
 import * as React from "react";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { PublicHeader, type PublicHeaderUser } from "@/components/layout/PublicHeader";
 import { PublicFooter } from "@/components/layout/PublicFooter";
 import { CostGuardBanner } from "@/components/layout/CostGuardBanner";
 import { buildHeaderUser } from "@/lib/auth/headerUser";
+import { getCurrentUser } from "@/lib/auth/currentUser";
+import {
+  buildXIdOnboardingHref,
+  isXIdOnboardingExemptPath,
+  userNeedsXIdOnboarding,
+} from "@/lib/auth/xidOnboarding";
+
+function isPublicOnboardingExemptPath(pathname: string): boolean {
+  if (isXIdOnboardingExemptPath(pathname)) return true;
+  return pathname === "/rules" || pathname.startsWith("/rules/");
+}
 
 export default async function PublicLayout({
   children,
@@ -11,12 +24,29 @@ export default async function PublicLayout({
   children: React.ReactNode;
 }): Promise<React.ReactElement> {
   let headerUser: PublicHeaderUser | null = null;
+  const sessionUser = await getCurrentUser();
 
   try {
     const session = await auth();
     headerUser = await buildHeaderUser(session?.user);
   } catch {
     headerUser = null;
+  }
+
+  if (sessionUser && sessionUser.is_banned !== 1) {
+    const hdrs = await headers();
+    const pathname = hdrs.get("x-pathname") ?? "";
+    const search = hdrs.get("x-search") ?? "";
+    if (pathname && !isPublicOnboardingExemptPath(pathname)) {
+      const needsOnboarding = await userNeedsXIdOnboarding(
+        sessionUser.id,
+        sessionUser.role,
+      );
+      if (needsOnboarding) {
+        const returnTo = search ? `${pathname}?${search}` : pathname;
+        redirect(buildXIdOnboardingHref(returnTo));
+      }
+    }
   }
 
   return (

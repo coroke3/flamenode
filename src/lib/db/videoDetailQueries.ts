@@ -23,6 +23,7 @@ import {
 import type { DB } from "./client";
 import { uniqueBy } from "@/lib/utils/unique";
 import { normalizeXId } from "@/lib/utils/xid";
+import { parseMemberChaptersJson } from "@/lib/video/memberChaptersJson";
 import {
   clampRelatedLimit,
   enforceDiversity,
@@ -32,13 +33,14 @@ import {
   type RelatedReason,
 } from "./recommendation";
 import { coalescedVideoScore } from "./videoScoreSql";
+import { storedCreatorNameExpr } from "./displayExpr";
 import { resolveMemberIcons, resolveMemberNames } from "./xIconResolution";
 
 const videoScoreExpr = coalescedVideoScore;
 
 function memberChaptersFromJson(
   memberId: string,
-  raw: string | null,
+  chaptersJson: string | null,
 ): {
   id: string;
   video_member_id: string;
@@ -47,44 +49,14 @@ function memberChaptersFromJson(
   note: string | null;
   order_index: number;
 }[] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((item, index) => {
-        if (!item || typeof item !== "object") return null;
-        const row = item as Record<string, unknown>;
-        const time = Number(row.time_seconds ?? row.time ?? row.chapter_time);
-        const label =
-          String(row.label ?? row.chapter_label ?? "").trim() || "担当";
-        if (!Number.isFinite(time)) return null;
-        const note = String(row.note ?? "").trim();
-        return {
-          id: `${memberId}:${index}`,
-          video_member_id: memberId,
-          chapter_time: time,
-          chapter_label: label,
-          note: note || null,
-          order_index:
-            typeof row.order_index === "number" ? row.order_index : index,
-        };
-      })
-      .filter(
-        (
-          row,
-        ): row is {
-          id: string;
-          video_member_id: string;
-          chapter_time: number;
-          chapter_label: string;
-          note: string | null;
-          order_index: number;
-        } => row !== null,
-      );
-  } catch {
-    return [];
-  }
+  return parseMemberChaptersJson(chaptersJson).map((row, index) => ({
+    id: `${memberId}-ch-${index}`,
+    video_member_id: memberId,
+    chapter_time: row.time_seconds,
+    chapter_label: row.label,
+    note: row.note || null,
+    order_index: row.order_index,
+  }));
 }
 
 /**
@@ -141,9 +113,9 @@ export async function fetchVideoDetail(
       accent_color: events.accent_color,
       start_time: events.start_time,
       end_time: events.end_time,
-      is_active: events.is_active,
-      is_entry_open: events.is_entry_open,
-      is_archived: events.is_archived,
+      visibility_status: events.visibility_status,
+      entry_start_time: events.entry_start_time,
+      entry_end_time: events.entry_end_time,
     })
     .from(videoEvents)
     .innerJoin(events, eq(videoEvents.event_id, events.id))
@@ -199,16 +171,12 @@ export async function fetchVideoDetail(
     chapterVisibilityCond = eq(videoChapters.visibility, "public");
   }
   // 通常チャプターコメントは video_chapters から取得。
-  // 旧仕様で混在していた video_member_id 付き行は移行済み。
-  // 念のため video_member_id IS NULL
-  // 条件を入れて、互換期間中に残った旧データが通常チャプターに紛れ込まないようガードする。
   const chapters = await db
     .select({
       id: videoChapters.id,
       chapter_time: videoChapters.chapter_time,
       chapter_label: videoChapters.chapter_label,
       visibility: videoChapters.visibility,
-      marker_kind: videoChapters.marker_kind,
       show_on_player_bar: videoChapters.show_on_player_bar,
       note: videoChapters.note,
       x_user_id: videoChapters.x_user_id,
@@ -220,16 +188,15 @@ export async function fetchVideoDetail(
     .where(
       and(
         eq(videoChapters.video_id, video.id),
-        sql`${videoChapters.video_member_id} IS NULL`,
         chapterVisibilityCond ? chapterVisibilityCond : sql`1=1`,
       )!,
     )
     .orderBy(videoChapters.chapter_time);
 
-  // メンバーチャプターは video_members.chapters_json から生成し、通常チャプターとは別 prop で
-  // MemberSection に渡す。
   const memberChapters = members
-    .flatMap((member) => memberChaptersFromJson(member.id, member.chapters_json))
+    .flatMap((member) =>
+      memberChaptersFromJson(member.id, member.chapters_json ?? null),
+    )
     .sort(
       (a, b) =>
         a.chapter_time - b.chapter_time ||
@@ -298,7 +265,7 @@ export async function fetchRelatedVideos(
     id: videos.id,
     title: videos.title,
     youtube_video_id: videos.youtube_video_id,
-    display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.creator_display_name}, ${videos.creator_x_user_id})`,
+    display_name: storedCreatorNameExpr,
     icon_url: videos.creator_icon_url,
     creator_x_user_id: videos.creator_x_user_id,
     primary_event_id: videos.primary_event_id,
@@ -529,7 +496,7 @@ export async function fetchEventPlaylistVideos(
       id: videos.id,
       title: videos.title,
       youtube_video_id: videos.youtube_video_id,
-      display_name: sql<string>`COALESCE(${xUsers.x_name}, ${videos.creator_display_name}, ${videos.creator_x_user_id})`,
+      display_name: storedCreatorNameExpr,
       scheduled_time: videos.scheduled_time,
     })
     .from(videos)

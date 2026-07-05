@@ -3,25 +3,24 @@
  * - 横スクロール抑制、タップ領域、見出し縮小、1カラム化
  * ============================================================ */
 
-@supports (padding: max(0px)) {
-  [data-fn-surface="public"].fn-public-shell {
-    padding-left: max(0px, env(safe-area-inset-left));
-    padding-right: max(0px, env(safe-area-inset-right));
-  }
-}
-
 @media (max-width: 640px) {
-  [data-fn-surface="public"] {
+  [data-fn-surface="public"],
+  [data-fn-surface="personal"],
+  [data-admin-shell],
+  [data-manage-shell] {
     --header-h: 56px;
   }
 
   [data-fn-surface="public"].fn-public-shell,
-  [data-fn-surface="public"].fn-app {
+  [data-fn-surface="public"].fn-app,
+  [data-fn-surface="personal"].fn-personal-shell,
+  [data-fn-surface="personal"].fn-app {
     overflow-x: clip;
     max-width: 100%;
   }
 
-  html:has([data-fn-surface="public"]) {
+  html:has([data-fn-surface="public"]),
+  html:has([data-fn-surface="personal"]) {
     overflow-x: clip;
   }
 
@@ -72,7 +71,7 @@
 
   /* トップ intro */
   [data-fn-surface="public"] .fn-intro {
-    padding: 28px 0 32px;
+    padding-block: 28px 32px;
     gap: 24px;
   }
 

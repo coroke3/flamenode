@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, inArray, ne, or } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import { isMissingDbObjectError } from "@/lib/db/optionalObjects";
 import {
@@ -27,11 +27,10 @@ import {
 import type { SessionUserLike } from "./ownershipCore";
 import { expandPermissionAliases } from "./permissions/aliases";
 import {
-  hasPermission,
   resolveStaffPermissionKeys,
-  safeParseCustomPermissionKeys,
-} from "./permissions/mask";
-import { getPresetPermissions, type EventStaffPreset } from "./permissions/presets";
+  staffRowHasPermissionKey,
+  type StaffPermissionRow,
+} from "./permissions/permissionResolver";
 
 export type { SessionUserLike };
 export { isSafeNormalVideoEditKey, isDangerousAdminVideoEditKey } from "./ownershipCore";
@@ -42,8 +41,17 @@ export { isSafeNormalVideoEditKey, isDangerousAdminVideoEditKey } from "./owners
  * 設計の RBAC (§2-21) を実装する:
  * - admin: すべて操作可
  * - video の creator_x_user_id が「自分の承認済み X ID」: 編集可
- * - event_staff.permission_mask: permission_key に応じた細粒度許可
+ * - event_staff (preset + custom_permission_keys_json): permission_key に応じた細粒度許可
  */
+
+function staffRowHasAnyPermissions(row: StaffPermissionRow): boolean {
+  return resolveStaffPermissionKeys(row).size > 0;
+}
+
+const staffPermissionSelect = {
+  permission_preset: eventStaff.permission_preset,
+  custom_permission_keys_json: eventStaff.custom_permission_keys_json,
+} as const;
 
 export type VideoRow = typeof videos.$inferSelect;
 
@@ -75,10 +83,17 @@ export async function getEditableEventIds(
       ? or(eq(eventStaff.discord_user_id, userId), inArray(eventStaff.x_user_id, xIds))!
       : eq(eventStaff.discord_user_id, userId);
   const rows = await db
-    .select({ event_id: eventStaff.event_id })
+    .select({
+      event_id: eventStaff.event_id,
+      ...staffPermissionSelect,
+    })
     .from(eventStaff)
-    .where(and(subjectCond, ne(eventStaff.permission_mask, 0))!);
-  return Array.from(new Set(rows.map((r) => r.event_id)));
+    .where(subjectCond);
+  return Array.from(
+    new Set(
+      rows.filter(staffRowHasAnyPermissions).map((r) => r.event_id),
+    ),
+  );
 }
 
 /**
@@ -99,11 +114,7 @@ export async function getCollaboratorPermissions(
         )!
       : eq(eventStaff.discord_user_id, userId);
   const rows = await db
-    .select({
-      permission_mask: eventStaff.permission_mask,
-      permission_preset: eventStaff.permission_preset,
-      custom_permission_keys_json: eventStaff.custom_permission_keys_json,
-    })
+    .select(staffPermissionSelect)
     .from(eventStaff)
     .where(
       and(
@@ -129,11 +140,7 @@ export async function canManageXIdLinkRequests(
       ? or(eq(eventStaff.discord_user_id, user.id), inArray(eventStaff.x_user_id, xIds))!
       : eq(eventStaff.discord_user_id, user.id);
   const rows = await db
-    .select({
-      permission_mask: eventStaff.permission_mask,
-      permission_preset: eventStaff.permission_preset,
-      custom_permission_keys_json: eventStaff.custom_permission_keys_json,
-    })
+    .select(staffPermissionSelect)
     .from(eventStaff)
     .where(subjectCond);
   return rows.some((row) =>
@@ -171,17 +178,10 @@ export async function getManageStaffRoleForEvent(
       : eq(eventStaff.discord_user_id, userId);
   const staff = (
     await db
-      .select({ role: eventStaff.role })
+      .select({ role: eventStaff.role, ...staffPermissionSelect })
       .from(eventStaff)
-      .where(
-        and(
-          eq(eventStaff.event_id, eventId),
-          ne(eventStaff.permission_mask, 0),
-          subjectCond,
-        )!,
-      )
-      .limit(1)
-  )[0];
+      .where(and(eq(eventStaff.event_id, eventId), subjectCond)!)
+  ).find(staffRowHasAnyPermissions);
   if (!staff) return null;
   return staff.role === "representative" ? "representative" : "editor";
 }
@@ -205,18 +205,13 @@ export async function getManageStaffXUserIds(
         )!
       : eq(eventStaff.discord_user_id, userId);
   const rows = await db
-    .select({ x_user_id: eventStaff.x_user_id })
+    .select({ x_user_id: eventStaff.x_user_id, ...staffPermissionSelect })
     .from(eventStaff)
-    .where(
-      and(
-        inArray(eventStaff.event_id, eventIds),
-        ne(eventStaff.permission_mask, 0),
-        subjectCond,
-      )!,
-    );
+    .where(and(inArray(eventStaff.event_id, eventIds), subjectCond)!);
   return Array.from(
     new Set(
       rows
+        .filter(staffRowHasAnyPermissions)
         .map((r) => r.x_user_id?.trim())
         .filter((x): x is string => !!x),
     ),
@@ -232,7 +227,7 @@ export { shouldWarnManageActiveXMismatch } from "./ownershipCore";
  * これだと閲覧目的のスタッフ枠が全権を持ってしまう。新仕様では以下の優先順位:
  *
  * 1. admin → true
- * 2. event_staff.permission_mask の permission_key が一致 → true
+ * 2. event_staff の permission_key が一致 → true
  *
  * `requiredKey` は必須。省略可にすると「permission を1個でも持つ collaborator」が
  * 別領域 (例: event.members) を持っているだけで他領域 (例: event.slots) を触れる
@@ -258,33 +253,13 @@ export async function canEditEvent(
         )!
       : eq(eventStaff.discord_user_id, user.id);
   const rows = await db
-    .select({
-      permission_mask: eventStaff.permission_mask,
-      permission_preset: eventStaff.permission_preset,
-      custom_permission_keys_json: eventStaff.custom_permission_keys_json,
-    })
+    .select(staffPermissionSelect)
     .from(eventStaff)
     .where(and(eq(eventStaff.event_id, eventId), subjectCond)!);
 
   for (const row of rows) {
-    for (const key of candidateKeys) {
-      if (hasPermission(row.permission_mask, key)) return true;
-    }
-    if (row.permission_preset === "custom") {
-      const customKeys = safeParseCustomPermissionKeys(
-        row.custom_permission_keys_json,
-        { allowAdminOnly: true },
-      );
-      if (candidateKeys.some((key) => customKeys.includes(key))) return true;
-    }
-    if (
-      (row.permission_mask ?? 0) === 0 &&
-      row.permission_preset &&
-      row.permission_preset !== "custom"
-    ) {
-      const preset = row.permission_preset as EventStaffPreset;
-      const presetKeys = getPresetPermissions(preset);
-      if (candidateKeys.some((key) => presetKeys.includes(key))) return true;
+    if (candidateKeys.some((key) => staffRowHasPermissionKey(row, key))) {
+      return true;
     }
   }
   return false;
@@ -315,7 +290,7 @@ export async function assertCanEditEvent(
  *
  * - `admin`: admin role だけが全権を持つ。event 経由の権限は使わない。
  *
- * - `event`: event_staff.permission_mask が効く。
+ * - `event`: event_staff の権限キーが効く。
  *   admin 特権は使わない (役割を切り分けるため)。
  *   イベント運営者は自分がオーナーでなくても、そのイベント所属作品を編集できる。
  *
@@ -452,7 +427,7 @@ export async function canEditVideo(args: {
   if (privilegeMode === "normal" || privilegeMode === "admin") return false;
 
   // privilegeMode === "event" / "any": イベント運営権限のチェック。
-  // event_staff.permission_mask により、自分がオーナーでなくても
+  // event_staff の権限キーにより、自分がオーナーでなくても
   // イベント所属作品を編集できる。
   if (eventIds.size === 0) return false;
   const aliases = VIDEO_PERMISSION_ALIASES[requiredKey] ?? [requiredKey];

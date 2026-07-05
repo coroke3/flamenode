@@ -4,7 +4,8 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
-import { updateVideoMembersAdmin, type VideoActionResult } from "@/lib/actions/video";
+import { updateVideoMembersAdmin } from "@/lib/actions/video";
+import type { VideoActionResult } from "@/lib/video/types";
 import {
   VideoMembersField,
   type VideoMemberInput,

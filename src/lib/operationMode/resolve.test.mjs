@@ -21,36 +21,10 @@ test("normalizeOperationMode: 不正値は null", () => {
   assert.equal(normalizeOperationMode(undefined), null);
 });
 
-test("resolveOperationMode: operation_mode を正本として優先する", () => {
+test("resolveOperationMode: operation_mode のみ参照する", () => {
   assert.equal(
-    resolveOperationMode({
-      operation_mode: "read_only",
-      cost_guard_mode: "normal",
-      is_maintenance_mode: 0,
-    }),
+    resolveOperationMode({ operation_mode: "read_only" }),
     "read_only",
-  );
-});
-
-test("resolveOperationMode: operation_mode 不正時は cost_guard_mode へ fallback", () => {
-  assert.equal(
-    resolveOperationMode({
-      operation_mode: "broken",
-      cost_guard_mode: "static_only",
-      is_maintenance_mode: 0,
-    }),
-    "static_only",
-  );
-});
-
-test("resolveOperationMode: 旧 maintenance flag は安全側で maintenance", () => {
-  assert.equal(
-    resolveOperationMode({
-      operation_mode: "normal",
-      cost_guard_mode: "normal",
-      is_maintenance_mode: 1,
-    }),
-    "maintenance",
   );
 });
 

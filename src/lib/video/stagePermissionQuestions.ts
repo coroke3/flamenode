@@ -93,3 +93,97 @@ export async function syncStagePermissionCustomQuestions(
       .onConflictDoNothing();
   }
 }
+
+export async function loadStagePermissionFormSettingsJson(
+  db: DB,
+  eventId: string,
+): Promise<string | null> {
+  const rows = await db
+    .select({
+      question_key: eventCustomQuestions.question_key,
+      label: eventCustomQuestions.label,
+      description: eventCustomQuestions.description,
+      placeholder: eventCustomQuestions.placeholder,
+      required: eventCustomQuestions.required,
+      is_active: eventCustomQuestions.is_active,
+      sort_order: eventCustomQuestions.sort_order,
+    })
+    .from(eventCustomQuestions)
+    .where(
+      and(
+        eq(eventCustomQuestions.event_id, eventId),
+        stagePermissionQuestionKeyCondition(),
+      )!,
+    )
+    .orderBy(eventCustomQuestions.sort_order);
+
+  if (rows.length === 0) return null;
+  return JSON.stringify({
+    stage_permissions: rows.map((row) => ({
+      id: row.question_key,
+      enabled: row.is_active === 1,
+      required: row.required === 1,
+      label: row.label,
+      description: row.description ?? "",
+      placeholder: row.placeholder ?? "",
+    })),
+  });
+}
+
+export async function loadStagePermissionFormSettingsJsonByEvents(
+  db: DB,
+  eventIds: readonly string[],
+): Promise<Map<string, string | null>> {
+  const ids = Array.from(new Set(eventIds.filter(Boolean)));
+  const out = new Map<string, string | null>();
+  if (ids.length === 0) return out;
+
+  const rows = await db
+    .select({
+      event_id: eventCustomQuestions.event_id,
+      question_key: eventCustomQuestions.question_key,
+      label: eventCustomQuestions.label,
+      description: eventCustomQuestions.description,
+      placeholder: eventCustomQuestions.placeholder,
+      required: eventCustomQuestions.required,
+      is_active: eventCustomQuestions.is_active,
+      sort_order: eventCustomQuestions.sort_order,
+    })
+    .from(eventCustomQuestions)
+    .where(
+      and(
+        inArray(eventCustomQuestions.event_id, ids),
+        stagePermissionQuestionKeyCondition(),
+      )!,
+    )
+    .orderBy(eventCustomQuestions.event_id, eventCustomQuestions.sort_order);
+
+  const grouped = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const list = grouped.get(row.event_id) ?? [];
+    list.push(row);
+    grouped.set(row.event_id, list);
+  }
+
+  for (const eventId of ids) {
+    const eventRows = grouped.get(eventId) ?? [];
+    if (eventRows.length === 0) {
+      out.set(eventId, null);
+      continue;
+    }
+    out.set(
+      eventId,
+      JSON.stringify({
+        stage_permissions: eventRows.map((row) => ({
+          id: row.question_key,
+          enabled: row.is_active === 1,
+          required: row.required === 1,
+          label: row.label,
+          description: row.description ?? "",
+          placeholder: row.placeholder ?? "",
+        })),
+      }),
+    );
+  }
+  return out;
+}

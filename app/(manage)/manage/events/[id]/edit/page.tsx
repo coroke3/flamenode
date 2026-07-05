@@ -7,6 +7,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
 import { canEditEvent } from "@/lib/auth/ownership";
 import { events as eventsTable } from "@/lib/db/schema";
+import { loadStagePermissionFormSettingsJson } from "@/lib/video/stagePermissionQuestions";
 import { EventForm } from "@/components/admin/EventForm";
 import { DeleteEventForm } from "@/components/admin/DeleteEventForm";
 import { ManageActiveXNotice } from "@/components/layout/ManageActiveXNotice";
@@ -39,6 +40,8 @@ export default async function ManageEventEditPage({
     await db.select().from(eventsTable).where(eq(eventsTable.id, id)).limit(1)
   )[0];
   if (!ev) notFound();
+
+  const videoFormSettingsJson = await loadStagePermissionFormSettingsJson(db, id);
 
   const eventEditor = { id: user.id, role: user.role ?? null };
   const [canManageBasic, canManagePublish, canManageQuestions, canManageSlots] =
@@ -100,13 +103,13 @@ export default async function ManageEventEditPage({
             entry_start_time: ev.entry_start_time,
             entry_end_time: ev.entry_end_time,
             visibility_status: ev.visibility_status,
-            is_active: ev.is_active,
-            is_archived: ev.is_archived,
+            is_active: ev.visibility_status === "public" ? 1 : 0,
+            is_archived: ev.visibility_status === "archived" ? 1 : 0,
             allow_user_video_event_links: ev.allow_user_video_event_links,
             allow_user_video_edits: ev.allow_user_video_edits,
             user_video_edit_permission_keys_json:
               ev.user_video_edit_permission_keys_json,
-            video_form_settings_json: ev.video_form_settings_json,
+            video_form_settings_json: videoFormSettingsJson,
             max_slots_per_video: ev.max_slots_per_video,
             max_consecutive_slots_per_entry:
               ev.max_consecutive_slots_per_entry,

@@ -10,18 +10,18 @@ import { fetchActiveEvents } from "@/lib/db/queries";
 import {
   events as eventsTable,
   slots as slotsTable,
-  xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
-import { StatusPanel } from "@/components/ui/StatusPanel";
 import { sanitizeNextPath } from "#utils/next";
 import { collapseReservationGroups, type SlotBase } from "@/lib/utils/slotGrouping";
 import {
-  EntryProgressSteps,
-  resolveEntryStepStates,
-} from "@/components/entry/EntryProgressSteps";
+  entryLoginRedirectTo,
+  getOnboardingState,
+  onboardingHref,
+  onboardingRulesHref,
+} from "@/lib/auth/onboarding";
 
 export const metadata: Metadata = { title: "エントリー / 投稿" };
 export const dynamic = "force-dynamic";
@@ -52,36 +52,33 @@ export default async function EntryPage({
 }): Promise<React.ReactElement> {
   const params = await searchParams;
   const next = sanitizeNextPath(params?.next, "/entry");
-  // 失敗時は null として扱う。getCurrentUser は内部で auth().catch を行うため
-  // ここで try/catch する必要はない。
   const sessionUser = await getCurrentUser();
   const isLoggedIn = !!sessionUser?.id;
-  // 書き込みガードは is_tos_accepted !== 1 (および terms_reaccept_required === 1) で
-  // tos_required / tos_reaccept_required を返す。ここでも同じ条件を見て CTA 出す。
-  const needsTosAccept =
-    !!sessionUser &&
-    (sessionUser.is_tos_accepted !== 1 ||
-      sessionUser.terms_reaccept_required === 1);
+  const db = getDatabase();
+  const onboarding = await getOnboardingState(db, sessionUser);
+  const onboardingNext = onboardingHref(next);
 
-  /** 書き込み系 CTA: 未ログイン → entry、TOS 未同意 → rules、それ以外は本来先 */
   const resolveWriteHref = (target: string): string => {
     if (!isLoggedIn) {
       return `/entry?next=${encodeURIComponent(target)}`;
     }
-    if (needsTosAccept) {
-      return `/rules?next=${encodeURIComponent(target)}`;
+    if (!onboarding.isComplete) {
+      return onboardingHref(target);
+    }
+    if (onboarding.needsTosAccept) {
+      return onboardingRulesHref(onboardingHref(target));
     }
     return target;
   };
 
-  const writeCtaLabel = (defaultLabel: string): string =>
-    needsTosAccept ? "利用規約に同意して進む" : defaultLabel;
+  const writeCtaLabel = (defaultLabel: string): string => {
+    if (!isLoggedIn) return defaultLabel;
+    if (!onboarding.isComplete) return "初期設定を続ける";
+    if (onboarding.needsTosAccept) return "利用規約に同意して進む";
+    return defaultLabel;
+  };
 
-  const db = getDatabase();
-  const activeX = sessionUser?.active_x_user_id ?? null;
   const activeEventsRaw = db ? await fetchActiveEvents(db).catch(() => []) : [];
-  // 開催前でも募集期間内のイベントは募集対象にする。
-  // 複数並走時の優先度: 募集終了が近いものを先頭に、未設定は最後尾に回し、その中で start_time 昇順。
   const activeEvents = activeEventsRaw
     .filter((ev) => isAcceptingEntries(ev))
     .sort((a, b) => {
@@ -102,20 +99,10 @@ export default async function EntryPage({
       .groupBy(slotsTable.event_id);
     rows.forEach((row) => slotCounts.set(row.event_id, Number(row.count ?? 0)));
   }
-  let reservedSlots: ReservedSlot[] = [];
-  let activeXApprovalStatus: "approved" | "pending" | "rejected" | null = null;
-  if (db && sessionUser?.id) {
-    if (activeX) {
-      const xRow = (
-        await db
-          .select({ approval_status: xUsersTable.approval_status })
-          .from(xUsersTable)
-          .where(eq(xUsersTable.id, activeX))
-          .limit(1)
-      )[0];
-      activeXApprovalStatus = xRow?.approval_status ?? null;
-    }
 
+  let reservedSlots: ReservedSlot[] = [];
+  const activeX = sessionUser?.active_x_user_id ?? null;
+  if (db && sessionUser?.id) {
     const ownerWhere = activeX
       ? or(
           eq(slotsTable.x_user_id, activeX),
@@ -152,27 +139,9 @@ export default async function EntryPage({
       .orderBy(slotsTable.start_time, slotsTable.sort_order)
       .limit(12);
   }
+
   const displaySlots = collapseReservationGroups(reservedSlots as SlotBase[]);
-  const canPost = isLoggedIn && activeXApprovalStatus === "approved";
-  const entrySteps = resolveEntryStepStates({
-    isLoggedIn,
-    needsTosAccept,
-    activeX,
-    activeXApprovalStatus,
-    hasReservedSlots: displaySlots.length > 0,
-    canPost,
-  });
-  const settingsHref = `/dashboard/settings?next=${encodeURIComponent("/entry")}`;
-  const checkTitle = canPost ? "投稿前チェック" : "投稿には追加設定が必要です";
-  const checkMessage = !activeX
-    ? "投稿にはActive X IDの選択が必要です。設定画面から連携・選択してください。"
-    : activeXApprovalStatus === "pending"
-      ? "選択中のActive X IDは承認待ちです。承認後に投稿できます (枠の確保は可能)。"
-      : activeXApprovalStatus === "rejected"
-        ? "選択中のActive X IDは却下されています。設定画面で別のX IDを選択してください。"
-        : activeXApprovalStatus === "approved"
-          ? `投稿者X ID: @${activeX} (承認済) で投稿できます。`
-          : "投稿には承認済みのActive X IDが必要です。設定画面で承認状態を確認してください。";
+  const canPost = onboarding.canPost;
 
   return (
     <div className="fn-public-container fn-page fn-entry">
@@ -184,8 +153,6 @@ export default async function EntryPage({
         </p>
       </header>
 
-      <EntryProgressSteps states={entrySteps} />
-
       {!isLoggedIn ? (
         <section
           className="fn-entry-status fn-entry-status--warn"
@@ -196,12 +163,12 @@ export default async function EntryPage({
               まず Discord でログインしてください
             </h2>
             <p className="fn-jp fn-entry-status-lead">
-              参加・投稿にはログインが必要です。
+              参加・投稿にはログインと初期設定が必要です。
             </p>
             <form
               action={async () => {
                 "use server";
-                await signIn("discord", { redirectTo: next });
+                await signIn("discord", { redirectTo: entryLoginRedirectTo(next) });
               }}
               className={styles.btnRow}
             >
@@ -211,73 +178,55 @@ export default async function EntryPage({
               </button>
             </form>
             {next !== "/entry" ? (
-              <p className="fn-entry-tos-note">ログイン後、元のページへ戻ります。</p>
+              <p className="fn-entry-tos-note">ログイン後、初期設定を経て元のページへ戻ります。</p>
             ) : null}
-            <p className="fn-entry-tos-note">
-              ログイン後、枠確保や投稿などの書き込み操作を行う前に、最新の{" "}
-              <Link href="/rules">利用規約</Link>
-              への同意をお願いする場合があります。
-            </p>
           </div>
         </section>
-      ) : needsTosAccept ? (
-        <div className="fn-entry-status fn-entry-status--warn">
-        <StatusPanel
-          title={
-            sessionUser?.terms_reaccept_required === 1
-              ? "利用規約の再同意が必要です"
-              : "利用規約への同意が必要です"
-          }
-          tone="warning"
-          action={
-            <Link
-              href={`/rules?next=${encodeURIComponent(next)}`}
-              className="fn-btn fn-btn-primary"
-            >
-              利用規約を確認する
+      ) : !onboarding.isComplete ? (
+        <div className="fn-entry-status fn-entry-status--warn" role="status">
+          <Icon name="alert" size={18} aria-hidden />
+          <div>
+            <h2 className="fn-jp fn-panel-title">初期設定が未完了です</h2>
+            <p className="fn-jp fn-entry-status-lead">
+              利用規約への同意と X ID 連携を済ませると、投稿・枠確保が使えます。
+            </p>
+            <Link href={onboardingNext} className="fn-btn fn-btn-primary fn-mt-12">
+              初期設定を続ける
             </Link>
-          }
-        >
-          {sessionUser?.terms_reaccept_required === 1
-            ? "利用規約の改訂がありました。書き込み操作の前に最新の規約に再同意してください。"
-            : "書き込み操作 (枠確保・投稿・いいね等) の前に、最新の利用規約への同意が必要です。"}
-        </StatusPanel>
+          </div>
+        </div>
+      ) : !canPost ? (
+        <div className="fn-entry-status fn-entry-status--warn" role="status">
+          <Icon name="clock" size={18} aria-hidden />
+          <div>
+            <h2 className="fn-jp fn-panel-title">X ID 承認待ち</h2>
+            <p className="fn-jp fn-entry-status-lead">
+              枠確保は可能です。投稿は X ID 承認後に利用できます。
+            </p>
+            <Link href={onboardingNext} className="fn-btn fn-btn-ghost fn-btn-sm fn-mt-12">
+              初期設定を確認
+            </Link>
+          </div>
         </div>
       ) : (
         <div className="fn-entry-status fn-entry-status--ok">
           <Icon name="check" size={14} aria-hidden className="fn-text-ok" />
           <span className="fn-jp">
-            ログイン済み
+            投稿可能
             {sessionUser?.active_x_user_id
-              ? ` · Active X ID: @${sessionUser.active_x_user_id}`
-              : " · Active X ID未選択"}
+              ? ` · @${sessionUser.active_x_user_id}`
+              : ""}
           </span>
-          <Link href={settingsHref} className="fn-link fn-entry-status-actions">
-            切替
+          <Link
+            href={`/dashboard/settings?next=${encodeURIComponent("/entry")}`}
+            className="fn-link fn-entry-status-actions"
+          >
+            名義を切替
           </Link>
         </div>
       )}
 
-      {isLoggedIn && !needsTosAccept ? (
-        <div
-          className={`fn-pc-status-banner ${canPost ? "fn-pc-status-banner--ok" : ""}`}
-          role="status"
-        >
-          <Icon name={canPost ? "check" : "alert"} size={18} aria-hidden />
-          <div>
-            <h3 className="fn-jp">{checkTitle}</h3>
-            <p className="fn-jp fn-pc-banner-lead">{checkMessage}</p>
-            {!canPost ? (
-              <Link href={settingsHref} className="fn-btn fn-btn-primary fn-btn-sm fn-mt-12">
-                X ID設定を確認
-              </Link>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-
       <div className={`fn-entry-grid ${styles.choiceGrid}`}>
-        {/* カード1: イベントに参加する */}
         <section
           className={`fn-entry-card ${styles.choiceCard}`}
           aria-labelledby="join-event-card"
@@ -334,7 +283,7 @@ export default async function EntryPage({
                 className="fn-btn fn-btn-primary"
               >
                 <Icon name="calendar" size={14} aria-hidden />
-                枠を確保する
+                {writeCtaLabel("枠を確保する")}
               </Link>
             </div>
           ) : isLoggedIn && activeEvents.length > 1 ? (
@@ -386,7 +335,6 @@ export default async function EntryPage({
           ) : null}
         </section>
 
-        {/* カード2: 過去の作品を投稿する */}
         <section
           className={`fn-entry-card ${styles.choiceCard}`}
           aria-labelledby="post-unslotted-card"

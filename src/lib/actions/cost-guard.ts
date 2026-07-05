@@ -1,11 +1,12 @@
 "use server";
+import { auditAction } from "@/lib/audit/helpers";
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
-import { historyLogs, systemSettings } from "@/lib/db/schema";
+import { systemSettings } from "@/lib/db/schema";
 import { resolveOperationMode } from "@/lib/operationMode/resolve";
 import type { OperationMode } from "@/lib/operationMode/types";
 
@@ -83,19 +84,17 @@ export async function setCostGuardMode(
   const now = Math.floor(Date.now() / 1000);
   await upsertGlobal(db, {
     operation_mode: mode,
-    is_maintenance_mode: mode === "maintenance" ? 1 : 0,
     cost_guard_reason: reason ?? null,
     cost_guard_updated_by_user_id: guard.userId,
     cost_guard_updated_at: now,
   });
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "system_settings",
     record_id: "global",
     action: "UPDATE",
     after_data: JSON.stringify({ operation_mode: mode, reason }),
     operator_discord_id: guard.userId,
     retention_class: "long_audit",
-    created_at: now,
   });
   revalidatePath("/admin/cost-guard");
   revalidatePath("/admin");
@@ -115,8 +114,6 @@ export async function setMaintenanceMode(
     await db
       .select({
         operation_mode: systemSettings.operation_mode,
-        cost_guard_mode: systemSettings.cost_guard_mode,
-        is_maintenance_mode: systemSettings.is_maintenance_mode,
       })
       .from(systemSettings)
       .where(eq(systemSettings.id, "default"))
@@ -127,16 +124,14 @@ export async function setMaintenanceMode(
     next === 1 ? "maintenance" : currentMode === "maintenance" ? "normal" : currentMode;
   await upsertGlobal(db, {
     operation_mode: nextMode,
-    is_maintenance_mode: next === 1 ? 1 : 0,
   });
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "system_settings",
     record_id: "global",
     action: "UPDATE",
-    after_data: JSON.stringify({ operation_mode: nextMode, is_maintenance_mode: next }),
+    after_data: JSON.stringify({ operation_mode: nextMode }),
     operator_discord_id: guard.userId,
     retention_class: "long_audit",
-    created_at: now,
   });
   revalidatePath("/admin/cost-guard");
   revalidatePath("/admin");
@@ -153,14 +148,13 @@ export async function setAutoCostGuard(
   if (!db) return { ok: false, message: "DB に接続できません。" };
   const now = Math.floor(Date.now() / 1000);
   await upsertGlobal(db, { auto_cost_guard_enabled: next });
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "system_settings",
     record_id: "global",
     action: "UPDATE",
     after_data: JSON.stringify({ auto_cost_guard_enabled: next }),
     operator_discord_id: guard.userId,
     retention_class: "normal",
-    created_at: now,
   });
   revalidatePath("/admin/cost-guard");
   return { ok: true };
@@ -198,14 +192,13 @@ export async function setCostGuardAdvancedSettings(
     cost_guard_exception_features_json: exceptionFeaturesJson.value,
   };
   await upsertGlobal(db, patch);
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "system_settings",
     record_id: "global",
     action: "UPDATE",
     after_data: JSON.stringify(patch),
     operator_discord_id: guard.userId,
     retention_class: "long_audit",
-    created_at: now,
   });
   revalidatePath("/admin/cost-guard");
   return { ok: true, message: "詳細設定を更新しました。" };

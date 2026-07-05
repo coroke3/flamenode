@@ -1,67 +1,57 @@
 # AGENTS.md
 
-このリポジトリで Codex を使う場合は、最初にこのファイルを読むこと。
+FlameNode: YouTube 埋め込み動画プラットフォーム (イベント参加・スロット・投稿審査)。Cloudflare ネイティブ。
+Next.js 15 App Router + React 19 + TS / D1 + Drizzle / R2 / KV / Workers (Cron 3本) / Auth.js v5 + Discord OAuth。
 
-## 最重要
+## コマンド
 
-FlameNodeの修正作業では、次の正本を必ず参照する。
-
-1. `claude-code-subagent-assignment.md`
-2. `.claude/flamenode/README.md`
-3. `.claude/flamenode/source/flamenode_final_detailed_design.md`
-4. `.claude/flamenode/source/flamenode_final_implementation_checklist.md`
-5. `.claude/flamenode/source/flamenode_final_consistency_audit.md`
-
-この5つは、Codex / Cursor いずれのエージェントも実装を進めるための入口である。
-（旧 `.Codex/` パスは廃止。実体は `.claude/flamenode/` を正本とする。）
-
-## 4つの原典について
-
-今回の実装方針は、以下4ファイルの内容を抜け漏れなく反映する必要がある。
-
-- `flamenode_final_detailed_design.md`
-- `flamenode_final_implementation_checklist.md`
-- `flamenode_final_consistency_audit.md`
-- `flamenode_revision_instructions_answered.md`
-
-このうち、前3つは `.claude/flamenode/source/` に原典として格納済み。4つ目の長大な回答反映版は、`claude-code-subagent-assignment.md` と `.claude/flamenode/README.md` 以下の分割命令に反映済みとして扱う。ただし、実装前レビューでは Appendix A の全領域 A〜Q が欠けていないか必ず確認する。
-
-## 作業の基本順序
-
-1. いきなり実装しない。
-2. まず `.claude/flamenode/README.md` を読む。
-3. Phase 0 の調査を実施する。
-4. PR分割案を出す。
-5. 最初の実装PRは `auth/id-write-guard` から始める。
-6. 1PRで1テーマだけ触る。
-7. `npm run typecheck` と `npm run build` を実行する。
-8. 最終レビューで `.claude/flamenode/source/flamenode_final_implementation_checklist.md` をすべて確認する。
-
-## モデル選択
-
-- 探索・一覧化・単純な要約だけ Haiku。
-- 通常実装は Sonnet。
-- ID/権限/DB/連続枠/security/公開API/仕様衝突/最終レビューは Opus。
-
-## 絶対禁止
-
-- フロントだけで権限を守ったことにする。
-- API直叩きで更新できる穴を残す。
-- Discord IDとX IDを混同する。
-- owner_discord_user_idだけで作品編集を許可する。
-- 未承認X IDで投稿・チャプターコメント・いいね・セーブ・ライブラリを許可する。
-- contact_x_id自由入力を投稿主体にする。
-- 連続枠を表示だけでまとめ、DB整合性を放置する。
-- video_commentsを新規利用する。
-- marker_kind依存の分岐を増やす。
-- 公開APIで内部情報を返す。
-- 未実装機能を実装済みのように見せる。
-
-## 推奨開始プロンプト
-
-```text
-まずコード変更はしないでください。
-AGENTS.md、claude-code-subagent-assignment.md、.claude/flamenode/README.md、.claude/flamenode/source/ の原典3ファイルを読んでください。
-その上で、Phase 0として関連ファイル地図、PR分割案、最初に着手すべき最小PRを出してください。
-4つの原典の内容が抜け漏れなく反映されるかも同時に確認してください。
+```sh
+npm run dev            # 開発サーバ (instrumentation.ts が Miniflare で D1/R2/KV 自動起動 + migration 冪等 apply)
+npm run typecheck      # 変更後必須
+npm run build          # 変更後必須
+npm run test:unit      # node:test。テストのある領域を触ったら実行
+npm run db:local-apply # ローカル D1 へ migration 適用
+npm run check:db-legacy        # deprecated DB 書き込みの静的検出
+npm run check:public-api-leaks # 公開 API 漏洩検査 (dev server 必須)
 ```
+
+- シークレットは `.dev.vars` (コミット禁止)
+- Windows では next-on-pages dev が不安定。動作確認は `npm run dev` を使う
+
+## 構成 (非自明な点のみ)
+
+- `app/(public)|(auth)|(manage)|(admin)`: 順にログイン不要 / Discord ログイン / event_staff 権限 / role=admin
+- `src/lib/publicData/`: 公開 API の whitelist DTO 層。公開レスポンスは必ずここを経由
+- `workers/`: デプロイは統合3本 (`fast-jobs`/`content-jobs`/`sync-jobs`) のみ。他は import 用モジュール
+- CSS は `globals.css` + `*.module.css`。**Tailwind 禁止**。UI に絵文字禁止 (SVG アイコンを使う)。UI 文言は日本語
+
+## ドキュメント正本
+
+| 目的 | 場所 |
+|---|---|
+| 設計仕様 (SSoT) | `設計/FlameNode-Design.md`, `設計/FlameNode-Design-System.md`, `設計/設計app/**/*.md` |
+| 残タスク・実装状況 | `docs/implementation-backlog.md` |
+| 運用手順 (migration/Worker/検査) | `docs/operations.md` |
+| ローカル環境 / デプロイ | `LOCAL.md` / `DEPLOY.md` |
+| 権限・ID 仕様の根拠 (2026-05 修正原典) | `.claude/flamenode/source/`, `claude-code-subagent-assignment.md` |
+
+## ルール
+
+1. 1 PR = 1 テーマ。small-batch
+2. 変更後は `typecheck` + `build` 必須
+3. スキーマ変更は migration 同伴 + `docs/operations.md` と整合。**`npm run db:generate` は使わない** (Drizzle meta が `0007` 止まりで壊れた差分が出る)。手動 SQL migration を `migrations/` に追加する
+4. deploy / 本番 D1 migration はユーザー操作。実行しない
+5. D1 が正本、R2/KV の静的 JSON は配信キャッシュ。二重正本を作らない
+
+## 絶対禁止 (設計監査で確定した不変条件)
+
+- 権限チェックをフロントのみに置く (API 直叩きの穴を残す)
+- Discord ID と X ID の混同
+- `owner_discord_user_id` だけで作品編集を許可
+- 未承認 X ID での投稿・チャプターコメント・いいね・セーブ・ライブラリ
+- `contact_x_id` 自由入力を投稿主体にする
+- 連続枠を表示だけでまとめ DB 整合性を放置
+- `video_comments` の新規利用 (チャプターコメントに統合済み)
+- `marker_kind` 依存の分岐追加
+- 公開 API で内部情報を返す
+- 未実装機能を実装済みのように見せる

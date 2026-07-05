@@ -3,7 +3,6 @@
 import * as React from "react";
 import Link from "next/link";
 import type { PermissionSimulationResult } from "@/lib/admin/permissionSimulator";
-import { permissionMaskToKeys } from "@/lib/auth/permissions/mask";
 
 interface PermissionSimulatorPanelProps {
   eventId: string;
@@ -137,30 +136,6 @@ export function PermissionSimulatorPanel({
                 ))}
               </ul>
             )}
-            <details style={{ marginTop: 12 }}>
-              <summary style={{ cursor: "pointer", fontSize: 12 }}>
-                permission_mask 数値（詳細）
-              </summary>
-              <dl
-                style={{
-                  marginTop: 8,
-                  display: "grid",
-                  gridTemplateColumns: "auto 1fr",
-                  gap: "4px 8px",
-                  fontSize: 12,
-                }}
-              >
-                <dt className="fn-muted">mask</dt>
-                <dd style={{ margin: 0 }}>
-                  <code>{result.permissionMask}</code> (0x
-                  {result.permissionMask.toString(16)})
-                </dd>
-                <dt className="fn-muted">keys</dt>
-                <dd style={{ margin: 0 }}>
-                  <code>{permissionMaskToKeys(result.permissionMask).join(", ") || "—"}</code>
-                </dd>
-              </dl>
-            </details>
           </section>
         </div>
       )}

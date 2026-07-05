@@ -5,7 +5,8 @@ import { and, eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { canEditEvent } from "@/lib/auth/ownership";
 import { getDatabase } from "@/lib/cloudflare";
-import { historyLogs, videos, videoEvents } from "@/lib/db/schema";
+import { videos, videoEvents } from "@/lib/db/schema";
+import { auditAction } from "@/lib/audit/helpers";
 import { enqueueVideoStatusChangeNotification } from "@/lib/notifications/videoStatusNotify";
 
 export interface ManageVideoActionResult {
@@ -93,20 +94,14 @@ export async function setManageVideoStatus(
     })
     .where(eq(videos.id, videoId));
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "videos",
     record_id: videoId,
     action: "UPDATE",
-    before_data: JSON.stringify({ visibility_status: prevStatus }),
-    after_data: JSON.stringify({
-      visibility_status: status,
-      reason: reason || null,
-      event_id: eventId,
-      scope: "manage",
-    }),
+    before_data: { visibility_status: prevStatus },
+    after_data: { visibility_status: status, reason: reason || null, event_id: eventId, scope: "manage" },
     operator_discord_id: u.id,
     retention_class: "normal",
-    created_at: now,
   });
 
   await enqueueVideoStatusChangeNotification(db, {

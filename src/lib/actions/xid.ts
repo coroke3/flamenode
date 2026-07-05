@@ -6,13 +6,13 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { getDatabase, getEnv } from "@/lib/cloudflare";
 import {
-  historyLogs,
   users,
   videos,
   xAccountLinkRequests,
   xUserIcons,
   xUsers,
 } from "@/lib/db/schema";
+import { auditAction } from "@/lib/audit/helpers";
 import { detectSupportedImageUpload } from "@/lib/utils/imageUpload";
 import { generateId } from "@/lib/utils/id";
 import { normalizeHttpUrl } from "@/lib/utils/url";
@@ -156,14 +156,13 @@ export async function setActiveXId(
     .set({ active_x_user_id: xUserId })
     .where(eq(users.id, userId));
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "user",
     record_id: userId,
     action: "UPDATE",
-    after_data: JSON.stringify({ active_x_user_id: xUserId }),
+    after_data: { active_x_user_id: xUserId },
     operator_discord_id: userId,
     retention_class: "normal",
-    created_at: now,
   });
 
   revalidatePath("/");
@@ -268,21 +267,21 @@ export async function requestXIdLink(
     requested_at: now,
   });
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "x_account_link_requests",
     record_id: id,
     action: "CREATE",
-    after_data: JSON.stringify({
+    after_data: {
       requested_x_id: requestedXId,
       link_type: linkType,
       target_x_user_id: targetXUserId || null,
-    }),
+    },
     operator_discord_id: userId,
     retention_class: "long_audit",
-    created_at: now,
   });
 
   revalidatePath("/dashboard/settings");
+  revalidatePath("/onboarding");
   return {
     ok: true,
     message: "連携申請を受け付けました。承認後、一覧に表示されます。",
@@ -368,20 +367,19 @@ export async function updateXIdProfile(
   }
 
   const now = nowUnix();
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "x_users",
     record_id: xUserId,
     action: "UPDATE",
-    after_data: JSON.stringify({
+    after_data: {
       x_name: displayName,
       profile_text: profileText || null,
       portfolio_contact: portfolioContact,
       youtube_channel_url: youtubeChannelUrl,
       other_social_links: otherSocialLinks.value,
-    }),
+    },
     operator_discord_id: userId,
     retention_class: "long_audit",
-    created_at: now,
   });
 
   revalidatePath("/dashboard/settings");
@@ -448,14 +446,13 @@ export async function deleteLinkedXId(
     );
 
   const now = nowUnix();
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "x_users",
     record_id: xUserId,
     action: "UPDATE",
-    after_data: JSON.stringify({ linked_discord_user_id: null }),
+    after_data: { linked_discord_user_id: null },
     operator_discord_id: userId,
     retention_class: "long_audit",
-    created_at: now,
   });
 
   revalidatePath("/dashboard/settings");
@@ -517,14 +514,13 @@ export async function setXIdIcon(
   await db.update(xUsers).set({ icon_url: iconUrl }).where(xUserIdMatches(xUserId));
 
   const now = nowUnix();
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "x_users",
     record_id: xUserId,
     action: "UPDATE",
-    after_data: JSON.stringify({ icon_url: iconUrl, source: "select" }),
+    after_data: { icon_url: iconUrl, source: "select" },
     operator_discord_id: userId,
     retention_class: "long_audit",
-    created_at: now,
   });
 
   revalidatePath("/dashboard/settings");
@@ -604,14 +600,13 @@ export async function uploadXIdIcon(
   });
   await db.update(xUsers).set({ icon_url: iconUrl }).where(xUserIdMatches(xUserId));
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "x_users",
     record_id: xUserId,
     action: "UPDATE",
-    after_data: JSON.stringify({ icon_url: iconUrl, source: "upload" }),
+    after_data: { icon_url: iconUrl, source: "upload" },
     operator_discord_id: userId,
     retention_class: "long_audit",
-    created_at: now,
   });
 
   revalidatePath("/dashboard/settings");

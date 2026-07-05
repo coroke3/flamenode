@@ -33,10 +33,9 @@ interface PublicHeaderProps {
 
 export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
   const [mobileOpen, setMobileOpen] = React.useState(false);
-  const [mobileSearchOpen, setMobileSearchOpen] = React.useState(false);
-  const desktopSearchRef = React.useRef<HTMLInputElement>(null);
-  const mobileSearchRef = React.useRef<HTMLInputElement>(null);
-  const mobileSearchPanelRef = React.useRef<HTMLDivElement>(null);
+  const [searchOpen, setSearchOpen] = React.useState(false);
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
+  const searchPanelRef = React.useRef<HTMLDivElement>(null);
   const pathname = usePathname();
   const entryNext = sanitizeNextPath(pathname ?? "/", "/");
   const entryHref =
@@ -44,32 +43,21 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
       ? "/entry"
       : `/entry?next=${encodeURIComponent(entryNext)}`;
 
-  const managementNav = user
-    ? [
-        ...(user.management.canAccessManage
-          ? [{ href: "/manage", label: "イベント運営", icon: "users" as const }]
-          : []),
-        ...(user.management.canAccessAdmin
-          ? [{ href: "/admin", label: "サイト管理", icon: "settings" as const }]
-          : []),
-      ]
-    : [];
-
   React.useEffect(() => {
-    if (!mobileSearchOpen) return;
-    mobileSearchRef.current?.focus();
+    if (!searchOpen) return;
+    searchInputRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setMobileSearchOpen(false);
+        setSearchOpen(false);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [mobileSearchOpen]);
+  }, [searchOpen]);
 
   const closeMobilePanels = () => {
     setMobileOpen(false);
-    setMobileSearchOpen(false);
+    setSearchOpen(false);
   };
 
   return (
@@ -106,41 +94,14 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
             <ThemeToggle />
           </div>
 
-          <form
-            action="/list"
-            method="get"
-            className={styles.searchForm}
-            role="search"
-            aria-label="作品検索"
-            onSubmit={(e) => {
-              e.preventDefault();
-              navigateGetForm(e.currentTarget);
-            }}
-          >
-            <span className={styles.searchIcon}>
-              <Icon name="search" size={14} aria-hidden />
-            </span>
-            <label htmlFor="header-search" className="fn-sr-only">
-              作品を検索
-            </label>
-            <input
-              id="header-search"
-              ref={desktopSearchRef}
-              type="search"
-              name="q"
-              placeholder="作品を検索"
-              autoComplete="off"
-            />
-          </form>
-
           <button
             type="button"
-            className={styles.mobileSearchToggle}
+            className={styles.searchToggle}
             aria-label="作品を検索"
-            aria-expanded={mobileSearchOpen}
-            aria-controls="header-mobile-search"
+            aria-expanded={searchOpen}
+            aria-controls="header-search-panel"
             onClick={() => {
-              setMobileSearchOpen((open) => !open);
+              setSearchOpen((open) => !open);
               setMobileOpen(false);
             }}
           >
@@ -158,12 +119,6 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
                 <span>投稿する</span>
               </Link>
               <div className={styles.actionNav}>
-                {managementNav.map((item) => (
-                  <Link key={item.href} href={item.href} className={styles.ghostBtn}>
-                    <Icon name={item.icon} size={13} aria-hidden />
-                    {item.label}
-                  </Link>
-                ))}
                 <AccountMenu user={user} />
               </div>
             </>
@@ -185,7 +140,7 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
             aria-expanded={mobileOpen}
             onClick={() => {
               setMobileOpen((open) => !open);
-              setMobileSearchOpen(false);
+              setSearchOpen(false);
             }}
           >
             <Icon name={mobileOpen ? "close" : "menu"} size={18} />
@@ -194,31 +149,31 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
       </div>
 
       <div
-        id="header-mobile-search"
-        ref={mobileSearchPanelRef}
-        className={`${styles.mobileSearchPanel} ${
-          mobileSearchOpen ? styles.mobileSearchPanelOpen : ""
+        id="header-search-panel"
+        ref={searchPanelRef}
+        className={`${styles.searchPanel} ${
+          searchOpen ? styles.searchPanelOpen : ""
         }`}
-        hidden={!mobileSearchOpen}
+        hidden={!searchOpen}
       >
         <form
           action="/list"
           method="get"
-          className={`fn-public-container ${styles.mobileSearchPanelForm}`}
+          className={`fn-public-container ${styles.searchPanelForm}`}
           role="search"
           aria-label="作品検索"
           onSubmit={(e) => {
             e.preventDefault();
             navigateGetForm(e.currentTarget);
-            setMobileSearchOpen(false);
+            setSearchOpen(false);
           }}
         >
-          <label htmlFor="header-mobile-search-input" className="fn-sr-only">
+          <label htmlFor="header-search-input" className="fn-sr-only">
             作品を検索
           </label>
           <input
-            id="header-mobile-search-input"
-            ref={mobileSearchRef}
+            id="header-search-input"
+            ref={searchInputRef}
             type="search"
             name="q"
             placeholder="作品を検索"
@@ -229,9 +184,9 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
           </button>
           <button
             type="button"
-            className={`fn-btn fn-btn-ghost fn-btn-sm ${styles.mobileSearchClose}`}
+            className={`fn-btn fn-btn-ghost fn-btn-sm ${styles.searchClose}`}
             aria-label="検索を閉じる"
-            onClick={() => setMobileSearchOpen(false)}
+            onClick={() => setSearchOpen(false)}
           >
             <Icon name="close" size={14} aria-hidden />
           </button>
@@ -308,24 +263,6 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
                   <Icon name="settings" size={16} aria-hidden /> 設定
                 </Link>
               </div>
-
-              {managementNav.length > 0 ? (
-                <>
-                  <div className={styles.mobileDivider} />
-                  <div className={styles.mobileSection}>
-                    {managementNav.map((item) => (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        className={styles.mobileLink}
-                        onClick={closeMobilePanels}
-                      >
-                        <Icon name={item.icon} size={16} aria-hidden /> {item.label}
-                      </Link>
-                    ))}
-                  </div>
-                </>
-              ) : null}
 
               <div className={styles.mobileDivider} />
               <div className={styles.mobileSection}>

@@ -30,11 +30,9 @@ type QueueRow = {
 
 export async function getOperationMode(env: Env): Promise<OperationMode> {
   const row = (await env.DB.prepare(
-    `SELECT operation_mode, cost_guard_mode, is_maintenance_mode FROM system_settings WHERE id = 'default' LIMIT 1`,
+    `SELECT operation_mode FROM system_settings WHERE id = 'default' LIMIT 1`,
   ).first()) as {
     operation_mode?: string;
-    cost_guard_mode?: string;
-    is_maintenance_mode?: number;
   } | null;
   return resolveQueueOperationMode(row);
 }

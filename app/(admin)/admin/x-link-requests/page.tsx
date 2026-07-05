@@ -1,11 +1,12 @@
-import * as React from "react";import { FnTable } from "@/components/ui/FnTable";
+import * as React from "react";
+import { FnTable } from "@/components/ui/FnTable";
 
 import Link from "next/link";
 import type { Metadata } from "next";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
-  historyLogs,
+  auditLogs,
   users,
   xAccountLinkRequests,
   xUserIcons,
@@ -115,17 +116,17 @@ export default async function AdminXLinkRequestsPage({
   const recentHistory = db
     ? await db
         .select()
-        .from(historyLogs)
+        .from(auditLogs)
         .where(
           and(
-            inArray(historyLogs.table_name, [
+            inArray(auditLogs.table_name, [
               "x_account_link_requests",
               "x_users",
             ]),
-            inArray(historyLogs.action, ["UPDATE", "CREATE"]),
+            inArray(auditLogs.operation, ["UPDATE", "CREATE"]),
           )!,
         )
-        .orderBy(desc(historyLogs.created_at))
+        .orderBy(desc(auditLogs.created_at))
         .limit(RECENT_HISTORY_LIMIT)
     : [];
 
@@ -234,8 +235,8 @@ export default async function AdminXLinkRequestsPage({
             <tbody>
               {recentHistory.map((h) => {
                 const changed = parseAuditDiff(
-                  h.before_data,
-                  h.after_data,
+                  h.before_json,
+                  h.after_json,
                 ).changedKeys;
                 return (
                   <tr key={h.id}>
@@ -249,29 +250,29 @@ export default async function AdminXLinkRequestsPage({
                     <td>
                       <span
                         className={`fn-badge ${
-                          h.action === "CREATE" ? "fn-badge-accent" : "fn-badge-soft"
+                          h.operation === "CREATE" ? "fn-badge-accent" : "fn-badge-soft"
                         }`}
                       >
-                        {h.action}
+                        {h.operation}
                       </span>
                     </td>
                     <td style={{ fontFamily: "monospace", fontSize: 11, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {h.record_id ? (
+                      {h.target_id ? (
                         <Link
-                          href={`/admin/audit?record=${encodeURIComponent(h.record_id)}`}
+                          href={`/admin/audit?record=${encodeURIComponent(h.target_id)}`}
                         >
-                          {h.record_id}
+                          {h.target_id}
                         </Link>
                       ) : (
                         "—"
                       )}
                     </td>
                     <td style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                      {h.operator_discord_id ? (
+                      {h.actor_user_id ? (
                         <Link
-                          href={`/admin/users/${encodeURIComponent(h.operator_discord_id)}`}
+                          href={`/admin/users/${encodeURIComponent(h.actor_user_id)}`}
                         >
-                          {h.operator_discord_id}
+                          {h.actor_user_id}
                         </Link>
                       ) : (
                         "-"

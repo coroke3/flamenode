@@ -5,7 +5,8 @@ import { z } from "zod";
 import { and, desc, eq, isNotNull, ne } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
-import { historyLogs, users, videos, xUsers } from "@/lib/db/schema";
+import { users, videos, xUsers } from "@/lib/db/schema";
+import { auditAction } from "@/lib/audit/helpers";
 import { normalizeXId } from "@/lib/utils/xid";
 
 export interface UserAdminResult {
@@ -61,15 +62,14 @@ export async function setUserRole(formData: FormData): Promise<UserAdminResult> 
   const now = Math.floor(Date.now() / 1000);
   await db.update(users).set({ role }).where(eq(users.id, user_id));
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "user",
     record_id: user_id,
     action: "UPDATE",
-    before_data: JSON.stringify({ role: target.role }),
-    after_data: JSON.stringify({ role }),
+    before_data: { role: target.role },
+    after_data: { role },
     operator_discord_id: guard.userId,
     retention_class: "long_audit",
-    created_at: now,
   });
 
   revalidatePath(`/admin/users/${user_id}`);
@@ -113,15 +113,14 @@ export async function setUserBanned(
   const now = Math.floor(Date.now() / 1000);
   await db.update(users).set({ is_banned }).where(eq(users.id, user_id));
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "user",
     record_id: user_id,
     action: "UPDATE",
-    before_data: JSON.stringify({ is_banned: target.is_banned }),
-    after_data: JSON.stringify({ is_banned, reason: reason || null }),
+    before_data: { is_banned: target.is_banned },
+    after_data: { is_banned, reason: reason || null },
     operator_discord_id: guard.userId,
     retention_class: "long_audit",
-    created_at: now,
   });
 
   revalidatePath(`/admin/users/${user_id}`);
@@ -163,15 +162,14 @@ export async function setUserNotifications(
     .set({ is_notification_enabled })
     .where(eq(users.id, user_id));
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "user",
     record_id: user_id,
     action: "UPDATE",
-    before_data: JSON.stringify({ is_notification_enabled: target.is_notification_enabled }),
-    after_data: JSON.stringify({ is_notification_enabled }),
+    before_data: { is_notification_enabled: target.is_notification_enabled },
+    after_data: { is_notification_enabled },
     operator_discord_id: guard.userId,
     retention_class: "normal",
-    created_at: now,
   });
 
   revalidatePath(`/admin/users/${user_id}`);
@@ -212,15 +210,14 @@ export async function setUserCanCreateEvents(
     .set({ can_create_events })
     .where(eq(users.id, user_id));
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "user",
     record_id: user_id,
     action: "UPDATE",
-    before_data: JSON.stringify({ can_create_events: target.can_create_events }),
-    after_data: JSON.stringify({ can_create_events }),
+    before_data: { can_create_events: target.can_create_events },
+    after_data: { can_create_events },
     operator_discord_id: guard.userId,
     retention_class: "long_audit",
-    created_at: now,
   });
 
   revalidatePath(`/admin/users/${user_id}`);
@@ -274,14 +271,13 @@ export async function refreshXUserIcon(
     .where(eq(xUsers.id, xUserId));
 
   const now = Math.floor(Date.now() / 1000);
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "x_users",
     record_id: xUserId,
     action: "UPDATE",
-    after_data: JSON.stringify({ icon_url: newIcon, source: "videos_latest" }),
+    after_data: { icon_url: newIcon, source: "videos_latest" },
     operator_discord_id: guard.userId,
     retention_class: "normal",
-    created_at: now,
   });
 
   revalidatePath(`/user/${xUserId}`);

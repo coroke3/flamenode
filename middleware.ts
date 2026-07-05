@@ -17,8 +17,16 @@ export const config = {
 };
 
 export async function middleware(req: NextRequest): Promise<NextResponse> {
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set("x-pathname", req.nextUrl.pathname);
+  const search = req.nextUrl.searchParams.toString();
+  if (search) requestHeaders.set("x-search", search);
+
+  const passThrough = () =>
+    NextResponse.next({ request: { headers: requestHeaders } });
+
   const isMaintenance = process.env.MAINTENANCE_MODE === "1";
-  if (!isMaintenance) return NextResponse.next();
+  if (!isMaintenance) return passThrough();
 
   // 既にメンテナンスページや認証 API ならそのまま
   const url = req.nextUrl;
@@ -27,7 +35,7 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     url.pathname.startsWith("/admin") ||
     url.pathname.startsWith("/api/auth")
   ) {
-    return NextResponse.next();
+    return passThrough();
   }
 
   return NextResponse.redirect(new URL("/maintenance", url));

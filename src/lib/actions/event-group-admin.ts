@@ -9,8 +9,8 @@ import {
   eventGroupEvents,
   eventGroups,
   events,
-  historyLogs,
 } from "@/lib/db/schema";
+import { auditAction } from "@/lib/audit/helpers";
 import { enqueueAfterEventGroupChange } from "@/lib/staticRebuild/hooks";
 import { generateId } from "@/lib/utils/id";
 
@@ -144,14 +144,13 @@ export async function createEventGroup(
     updated_at: now,
   });
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "event_groups",
     record_id: id,
     action: "CREATE",
-    after_data: JSON.stringify({ name: d.name, slug: d.slug }),
+    after_data: { name: d.name, slug: d.slug },
     operator_discord_id: guard.userId,
     retention_class: "normal",
-    created_at: now,
   });
 
   await enqueueAfterEventGroupChange(db, {
@@ -216,15 +215,14 @@ export async function updateEventGroup(
     })
     .where(eq(eventGroups.id, id));
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "event_groups",
     record_id: id,
     action: "UPDATE",
-    before_data: JSON.stringify({ name: existing.name, slug: existing.slug }),
-    after_data: JSON.stringify({ name: d.name, slug: d.slug }),
+    before_data: { name: existing.name, slug: existing.slug },
+    after_data: { name: d.name, slug: d.slug },
     operator_discord_id: guard.userId,
     retention_class: "normal",
-    created_at: now,
   });
 
   await enqueueAfterEventGroupChange(db, {
@@ -268,14 +266,13 @@ export async function deleteEventGroup(
     .where(eq(eventGroupEvents.event_group_id, id));
   await db.delete(eventGroups).where(eq(eventGroups.id, id));
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "event_groups",
     record_id: id,
     action: "DELETE",
-    before_data: JSON.stringify({ name: existing.name, slug: existing.slug }),
+    before_data: { name: existing.name, slug: existing.slug },
     operator_discord_id: guard.userId,
     retention_class: "normal",
-    created_at: now,
   });
 
   await enqueueAfterEventGroupChange(db, {

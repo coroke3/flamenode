@@ -7,8 +7,6 @@ export type OperationMode =
 
 export interface OperationModeRow {
   operation_mode?: string | null;
-  cost_guard_mode?: string | null;
-  is_maintenance_mode?: number | boolean | null;
 }
 
 const MAX_QUEUE_ITEMS_PER_RUN = 20;
@@ -27,11 +25,7 @@ export function isOperationMode(value: unknown): value is OperationMode {
 export function resolveQueueOperationMode(
   row: OperationModeRow | null | undefined,
 ): OperationMode {
-  if (row?.is_maintenance_mode === 1 || row?.is_maintenance_mode === true) {
-    return "maintenance";
-  }
   if (isOperationMode(row?.operation_mode)) return row.operation_mode;
-  if (isOperationMode(row?.cost_guard_mode)) return row.cost_guard_mode;
   return "normal";
 }
 

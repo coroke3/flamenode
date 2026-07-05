@@ -39,10 +39,12 @@ npm run dev:local
 >
 > | モード | 起動コマンド | 主な用途 | D1 / R2 / KV / Auth.js |
 > | --- | --- | --- | --- |
-> | A. UI 専用 | `npm run dev` | デザイン確認、コンポーネント編集、レイアウト調整 | **使えない** (空 DB として扱う) |
-> | B. フル動作 | `npm run pages:dev` | ログイン、投稿、管理画面、Worker 動作確認 | **すべて使える** (Miniflare で D1/R2/KV をローカル再現) |
+> | A. 通常開発 | `npm run dev` (http://localhost:3000) | 日常の開発全般 (UI・ログイン・投稿・管理画面) | **すべて使える** (`instrumentation.ts` が Miniflare で D1/R2/KV を自動起動し、migration も冪等 apply) |
+> | B. 本番相当 | `npm run pages:dev` (http://localhost:8788) | next-on-pages ビルド後の edge ランタイム検証、デプロイ前確認 | **すべて使える** (wrangler pages dev + Miniflare) |
 >
-> 普段の UI イテレーションはモード A、バックエンド込みで確認したいときはモード B、という使い分けが一番楽です。
+> 普段の開発はモード A で完結します。デプロイ前に本番相当のランタイムで確認したいときだけモード B を使います。
+> 両モードとも `.wrangler/state/v3` を共有するため、同じローカル DB を参照します。
+> Miniflare 起動をスキップしたい場合は環境変数 `LOCAL_BINDINGS=0` を設定します。
 
 ---
 
@@ -122,30 +124,13 @@ NEXT_PUBLIC_SITE_NAME="FlameNode"
 openssl rand -hex 32
 ```
 
-### 2-3. ビルドアダプタの導入 (モード B を使う場合のみ)
+### 2-3. ビルドアダプタについて (追加作業なし)
 
-`wrangler pages dev` で Next.js を動かすには Cloudflare 公式アダプタが必要です。初回のみ追加してください。
-
-```powershell
-npm i -D @cloudflare/next-on-pages
-```
-
-そして `package.json` の `scripts` に次を追加します (DEPLOY.md と同じ):
-
-```json
-{
-  "scripts": {
-    "pages:build": "npx @cloudflare/next-on-pages",
-    "pages:dev":   "npx @cloudflare/next-on-pages && npx wrangler pages dev .vercel/output/static --compatibility-flag=nodejs_compat --d1=DB --r2=BUCKET --kv=KV"
-  }
-}
-```
-
-> `--d1=DB --r2=BUCKET --kv=KV` を付けることで、Miniflare が **ローカル専用の D1 / R2 / KV** を自動で立ち上げ、`wrangler.toml` のバインディング名どおりに `env.DB` などを Next.js から参照できるようになります。データは `.wrangler/` 配下に永続化されます。
+`@cloudflare/next-on-pages` は devDependencies に含まれており、`pages:build` / `pages:dev` / `pages:deploy` スクリプトも `package.json` に定義済みです。`npm install` 以外の準備は不要です。
 
 ---
 
-## 3. モード A: 純粋な UI 確認 (`next dev`)
+## 3. モード A: 通常開発 (`next dev` + Miniflare 内蔵)
 
 ```powershell
 npm run dev
@@ -155,16 +140,15 @@ npm run dev
 
 ### 期待される挙動
 
-- トップ、`/list`、`/event`、`/recommend`、`/rules`、`/maintenance` などの公開ページが表示される
-- 動画 / イベントの中身は **空** のまま (D1 に接続できないため)
-- ログインボタンを押しても OAuth は通らない (Auth.js の DB セッションが使えないため)
-- フォームを送信すると `DB に接続できません` のエラーが返る
+- `instrumentation.ts` が起動時に Miniflare を立ち上げ、D1 / R2 / KV が `.wrangler/state/v3` を使ってローカル再現される
+- ローカル D1 へのマイグレーションが冪等に自動 apply され、`system_settings` もシードされる
+- Discord OAuth 設定済みならログイン・投稿・管理画面まで一通り動作する
 
-このモードはあくまで **CSS / レイアウト / コンポーネント実装の高速確認用**です。データを使った確認は次のモード B で行います。
+日常の開発はこのモードで完結します。next-on-pages ビルド後の edge ランタイム固有の問題を確認したいときだけ、次のモード B を使います。
 
 ---
 
-## 4. モード B: フル動作 (`wrangler pages dev` + Miniflare)
+## 4. モード B: 本番相当 (`wrangler pages dev` + Miniflare)
 
 ### 4-1. ローカル D1 にスキーマを流し込む
 
@@ -338,8 +322,8 @@ npx wrangler d1 migrations apply flamenode_db --local
 | 目的 | コマンド |
 | --- | --- |
 | 依存導入 | `npm install` |
-| UI だけ動かす | `npm run dev` (http://localhost:3000) |
-| フル動作 | `npm run pages:dev` (http://localhost:8788) |
+| 通常開発 (フル動作) | `npm run dev` (http://localhost:3000) |
+| 本番相当ランタイム | `npm run pages:dev` (http://localhost:8788) |
 | 型チェック (アプリ) | `npm run typecheck` |
 | 型チェック (Workers) | `npx tsc --noEmit -p workers` |
 | Lint | `npm run lint` |
@@ -347,7 +331,7 @@ npx wrangler d1 migrations apply flamenode_db --local
 | ローカル DB マイグレーション | `npx wrangler d1 migrations apply flamenode_db --local` |
 | ローカル DB に SQL 実行 | `npx wrangler d1 execute flamenode_db --local --command "..."` |
 | ローカル DB を GUI で見る | `npm run db:studio` |
-| schema → migration 再生成 | `npm run db:generate` |
+| schema 変更時の migration | 手動 SQL を `migrations/` に追加 (`db:generate` は使わない。docs/operations.md §1 参照) |
 | ローカルストレージ全消し | `Remove-Item -Recurse -Force .wrangler` |
 
 ---
@@ -356,7 +340,7 @@ npx wrangler d1 migrations apply flamenode_db --local
 
 | 症状 | 原因と対処 |
 | --- | --- |
-| `npm run dev` で「DB に接続できません」 | 想定どおり。D1 を使うならモード B (`npm run pages:dev`) を使う |
+| `npm run dev` で「DB に接続できません」 | Miniflare 起動失敗の可能性。ターミナルの instrumentation ログを確認。`LOCAL_BINDINGS=0` が設定されていないかも確認 |
 | `npm run pages:dev` 起動時に `D1_ERROR: no such table` | ローカル D1 にマイグレーションがあたっていない。`npx wrangler d1 migrations apply flamenode_db --local` を実行 |
 | Discord ログインで `redirect_uri_mismatch` | Discord Developer Portal の Redirect に `http://localhost:3000/api/auth/callback/discord` が無い |
 | `/entry?error=Configuration` と `Invalid URL` (auth) | `AUTH_URL` または `NEXTAUTH_URL` が未設定。`.dev.vars` に `AUTH_URL="http://localhost:3000"` を追加するか、`NEXT_PUBLIC_SITE_URL` を正しい絶対 URL にする（コード側でも `NEXT_PUBLIC_SITE_URL` から自動補完する） |

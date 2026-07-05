@@ -12,10 +12,7 @@ import {
   XIdCompactProfileForm,
 } from "./XIdSettingsClient";
 import type { SettingsXIdRow } from "./XIdLinkedList";
-
-function publicUserHref(xUserId: string): string {
-  return `/user/${encodeURIComponent(xUserId)}`;
-}
+import { publicPageLinkProps, publicUserHref } from "./settingsPublicLink";
 
 function linkedLabel(unix: number | null): string {
   if (!unix) return "連携日未記録";
@@ -53,7 +50,11 @@ export function SettingsXAccountPanel({
         )}
         <div className={pageStyles.activeId}>
           {publicHref ? (
-            <Link href={publicHref} className={pageStyles.activeNameLink}>
+            <Link
+              href={publicHref}
+              className={pageStyles.activeNameLink}
+              {...publicPageLinkProps}
+            >
               {x.x_name || x.id}
             </Link>
           ) : (
@@ -88,7 +89,11 @@ export function SettingsXAccountPanel({
           />
         ) : null}
         {publicHref ? (
-          <Link href={publicHref} className={pageStyles.actionBtn}>
+          <Link
+            href={publicHref}
+            className={pageStyles.actionBtn}
+            {...publicPageLinkProps}
+          >
             <Icon name="user" size={12} aria-hidden />
             公開ページ
           </Link>

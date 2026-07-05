@@ -8,13 +8,13 @@ import { getDatabase } from "@/lib/cloudflare";
 import { assertCanEditEvent } from "@/lib/auth/ownership";
 import {
   eventStaff,
-  historyLogs,
   xUsers,
 } from "@/lib/db/schema";
+import { auditAction } from "@/lib/audit/helpers";
 import { generateId } from "@/lib/utils/id";
 import { canonicalizePermissionKey } from "@/lib/auth/permissions/aliases";
 import { isAdminOnlyKey, type PermissionKey } from "@/lib/auth/permissions/keys";
-import { keysToPermissionMask, normalizePermissionKeys } from "@/lib/auth/permissions/mask";
+import { normalizePermissionKeys } from "@/lib/auth/permissions/permissionResolver";
 import {
   getPresetPermissions,
   legacyRoleToPreset,
@@ -156,14 +156,10 @@ async function findStaffById(
 
 function assignmentFromPreset(preset: EventStaffPreset): {
   permission_preset: EventStaffPreset;
-  permission_mask: number;
   custom_permission_keys_json: string | null;
 } {
   return {
     permission_preset: preset,
-    permission_mask: keysToPermissionMask(getPresetPermissions(preset), {
-      allowAdminOnly: true,
-    }),
     custom_permission_keys_json: null,
   };
 }
@@ -173,7 +169,6 @@ function assignmentFromCustomKeys(
   isSiteAdmin: boolean,
 ): {
   permission_preset: EventStaffPreset;
-  permission_mask: number;
   custom_permission_keys_json: string | null;
   keys: PermissionKey[];
 } {
@@ -188,9 +183,6 @@ function assignmentFromCustomKeys(
   }
   return {
     permission_preset: canonicalKeys.length > 0 ? "custom" : "public_staff",
-    permission_mask: keysToPermissionMask(canonicalKeys, {
-      allowAdminOnly: isSiteAdmin,
-    }),
     custom_permission_keys_json:
       canonicalKeys.length > 0 ? JSON.stringify(canonicalKeys) : null,
     keys: canonicalKeys,
@@ -240,14 +232,13 @@ async function writeStaffLog(args: {
   payload?: unknown;
   now: number;
 }): Promise<void> {
-  await args.db.insert(historyLogs).values({
+  await auditAction(args.db, {
     table_name: args.table,
     record_id: args.recordId,
     action: args.action,
-    after_data: args.payload ? JSON.stringify(args.payload) : null,
+    after_data: args.payload ? (args.payload as Record<string, unknown>) : null,
     operator_discord_id: args.userId,
     retention_class: "long_audit",
-    created_at: args.now,
   });
 }
 
@@ -328,7 +319,6 @@ export async function upsertEventStaffMember(
         display_name: data.display_name,
         role: nextRole,
         permission_preset: assignment.permission_preset,
-        permission_mask: assignment.permission_mask,
         custom_permission_keys_json: assignment.custom_permission_keys_json,
         is_public: data.is_public,
         public_role_label: data.public_role_label ?? null,
@@ -345,7 +335,6 @@ export async function upsertEventStaffMember(
       display_name: data.display_name,
       role: nextRole,
       permission_preset: assignment.permission_preset,
-      permission_mask: assignment.permission_mask,
       custom_permission_keys_json: assignment.custom_permission_keys_json,
       is_public: data.is_public,
       public_role_label: data.public_role_label ?? null,

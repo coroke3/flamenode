@@ -78,6 +78,94 @@ export function computeVoidedVideoHideCutoff(now: number): number {
   return now - VOIDED_VIDEO_HIDE_TTL_SEC;
 }
 
+// ============================================================
+// audit_logs (新正本)
+// ============================================================
+
+export const AUDIT_NORMAL_DAYS_DEFAULT = 30;
+export const AUDIT_RESTORABLE_DAYS_DEFAULT = 180;
+export const AUDIT_LONG_AUDIT_DAYS_DEFAULT = 365;
+export const AUDIT_CLEANUP_BATCH_LIMIT = 500;
+
+export interface AuditLogSettingsRow {
+  normal_retention_days: number;
+  restorable_retention_days: number;
+  long_audit_retention_days: number;
+  max_payload_bytes: number;
+  compact_after_days: number;
+}
+
+export const DEFAULT_AUDIT_LOG_SETTINGS_ROW: AuditLogSettingsRow = {
+  normal_retention_days: AUDIT_NORMAL_DAYS_DEFAULT,
+  restorable_retention_days: AUDIT_RESTORABLE_DAYS_DEFAULT,
+  long_audit_retention_days: AUDIT_LONG_AUDIT_DAYS_DEFAULT,
+  max_payload_bytes: 20000,
+  compact_after_days: 30,
+};
+
+function clampAuditDays(
+  value: unknown,
+  min: number,
+  max: number,
+  fallback: number,
+): number {
+  const raw = Number(value ?? fallback);
+  if (!Number.isFinite(raw) || raw <= 0) return fallback;
+  return Math.min(Math.max(Math.floor(raw), min), max);
+}
+
+/**
+ * audit_log_settings 行を正規化する。
+ */
+export function normalizeAuditLogSettingsRow(
+  row: Partial<AuditLogSettingsRow> | null | undefined,
+): AuditLogSettingsRow {
+  const base = row ?? {};
+  return {
+    normal_retention_days: clampAuditDays(
+      base.normal_retention_days,
+      7,
+      365,
+      AUDIT_NORMAL_DAYS_DEFAULT,
+    ),
+    restorable_retention_days: clampAuditDays(
+      base.restorable_retention_days,
+      14,
+      1095,
+      AUDIT_RESTORABLE_DAYS_DEFAULT,
+    ),
+    long_audit_retention_days: clampAuditDays(
+      base.long_audit_retention_days,
+      30,
+      3650,
+      AUDIT_LONG_AUDIT_DAYS_DEFAULT,
+    ),
+    max_payload_bytes: clampAuditDays(
+      base.max_payload_bytes,
+      1000,
+      1_000_000,
+      20000,
+    ),
+    compact_after_days: clampAuditDays(
+      base.compact_after_days,
+      1,
+      365,
+      30,
+    ),
+  };
+}
+
+/**
+ * compact_after_days 経過後の軽量化 cutoff (Unix 秒)。
+ */
+export function computeAuditCompactCutoff(
+  now: number,
+  compactAfterDays: number,
+): number {
+  const days = clampAuditDays(compactAfterDays, 1, 365, 30);
+  return now - days * 86400;
+}
+
 /**
  * cleanup ジョブ全体のリトライ判定。
  * D1 の一時的エラー (ネットワーク / Throttle) は次回 cron を待たず即リトライしてよい。

@@ -65,32 +65,19 @@ cd flamenode
 npm install
 ```
 
-### 1-4. Pages 用ビルドアダプタの追加 (初回のみ)
+### 1-4. Pages 用ビルドアダプタ (導入済み)
 
-Next.js 15 のサーバ機能を Cloudflare Pages で動かすには [`@cloudflare/next-on-pages`](https://github.com/cloudflare/next-on-pages) が必要です。`package.json` に追加してください。
+Next.js 15 のサーバ機能を Cloudflare Pages で動かすための [`@cloudflare/next-on-pages`](https://github.com/cloudflare/next-on-pages) は、**すでに devDependencies に含まれており**、`npm install` だけで揃います。追加作業は不要です。
 
-```powershell
-npm i -D @cloudflare/next-on-pages
-```
+`package.json` には次のスクリプトが定義済みです。
 
-そして `package.json` の `scripts` に次を追加します (推奨)。
+| スクリプト | 内容 |
+| --- | --- |
+| `npm run pages:build` | `scripts/run-next-on-pages.cjs` (Windows 対応ラッパー) でビルド後、`scripts/pages-postbuild.mjs` を実行 |
+| `npm run pages:dev` | ビルドして `wrangler pages dev` で本番相当のランタイム起動 (D1/R2/KV は Miniflare) |
+| `npm run pages:deploy` | ビルドして `wrangler pages deploy --project-name=flamenode` |
 
-```json
-{
-  "scripts": {
-    "pages:build": "npx @cloudflare/next-on-pages",
-    "pages:dev": "npx wrangler pages dev .vercel/output/static --compatibility-flag=nodejs_compat",
-    "pages:deploy": "npx @cloudflare/next-on-pages && npx wrangler pages deploy .vercel/output/static"
-  }
-}
-```
-
-> Cloudflare Pages は `.vercel/output/static` を成果物として配信するため、`wrangler.toml` の `pages_build_output_dir` も `.vercel/output/static` に変更してください。
->
-> ```toml
-> # wrangler.toml
-> pages_build_output_dir = ".vercel/output/static"
-> ```
+成果物は `.vercel/output/static` に出力され、`wrangler.toml` の `pages_build_output_dir` もこれに合わせてあります。
 
 ---
 

@@ -6,7 +6,7 @@ import type { Metadata } from "next";
 import { desc, eq, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
-  historyLogs as historyLogsTable,
+  auditLogs as auditLogsTable,
   users as usersTable,
   videoInteractions as videoInteractionsTable,
   videos as videosTable,
@@ -55,18 +55,18 @@ export default async function AdminUserDetailPage({
     .limit(20);
 
   // 当該ユーザーが操作した管理アクション + 当該ユーザーに対する管理アクション
-  // operator_discord_id か record_id が user.id に一致するものを取得
+  // actor_user_id か target_id が user.id に一致するものを取得
   const recentByOperator = await db
     .select()
-    .from(historyLogsTable)
-    .where(eq(historyLogsTable.operator_discord_id, user.id))
-    .orderBy(desc(historyLogsTable.created_at))
+    .from(auditLogsTable)
+    .where(eq(auditLogsTable.actor_user_id, user.id))
+    .orderBy(desc(auditLogsTable.created_at))
     .limit(15);
   const recentOnUser = await db
     .select()
-    .from(historyLogsTable)
-    .where(eq(historyLogsTable.record_id, user.id))
-    .orderBy(desc(historyLogsTable.created_at))
+    .from(auditLogsTable)
+    .where(eq(auditLogsTable.target_id, user.id))
+    .orderBy(desc(auditLogsTable.created_at))
     .limit(15);
 
   // Active X ID のライブラリ件数 (like/bookmark)
@@ -326,7 +326,7 @@ export default async function AdminUserDetailPage({
 
       <section className="fn-card fn-console-card">
         <h2 className="fn-console-card-title">
-          このユーザーへの管理操作 (record_id 一致)
+          このユーザーへの管理操作 (target_id 一致)
         </h2>
         {recentOnUser.length === 0 ? (
           <p className="fn-muted fn-text-sm">該当する履歴はありません。</p>
@@ -350,18 +350,18 @@ export default async function AdminUserDetailPage({
                   <td>
                     <span
                       className={`fn-badge ${
-                        h.action === "DELETE"
+                        h.operation === "DELETE"
                           ? "fn-badge-danger"
-                          : h.action === "CREATE"
+                          : h.operation === "CREATE"
                             ? "fn-badge-accent"
                             : "fn-badge-soft"
                       }`}
                     >
-                      {h.action}
+                      {h.operation}
                     </span>
                   </td>
                   <td className="fn-td-secondary">
-                    {h.operator_discord_id ?? "-"}
+                    {h.actor_user_id ?? "-"}
                   </td>
                 </tr>
               ))}
@@ -396,22 +396,22 @@ export default async function AdminUserDetailPage({
                   <td>
                     <span
                       className={`fn-badge ${
-                        h.action === "DELETE"
+                        h.operation === "DELETE"
                           ? "fn-badge-danger"
-                          : h.action === "CREATE"
+                          : h.operation === "CREATE"
                             ? "fn-badge-accent"
                             : "fn-badge-soft"
                       }`}
                     >
-                      {h.action}
+                      {h.operation}
                     </span>
                   </td>
                   <td className="fn-td-mono fn-td-ellipsis">
-                    {h.record_id ? (
+                    {h.target_id ? (
                       <Link
-                        href={`/admin/audit?record=${encodeURIComponent(h.record_id)}`}
+                        href={`/admin/audit?record=${encodeURIComponent(h.target_id)}`}
                       >
-                        {h.record_id}
+                        {h.target_id}
                       </Link>
                     ) : (
                       "—"

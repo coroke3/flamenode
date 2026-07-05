@@ -5,7 +5,7 @@ import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import {
   costUsageSnapshots as costUsageSnapshotsTable,
   events as eventsTable,
-  historyLogs as historyLogsTable,
+  auditLogs as auditLogsTable,
   notificationOutbox as notificationOutboxTable,
   slots as slotsTable,
   systemSettings,
@@ -477,41 +477,16 @@ async function checkVideosOutroComment(
   };
 }
 
-/** deprecated: video_chapters.marker_kind != 'chapter' (MVPでは chapter 固定) */
+/** marker_kind 列は 0044 で削除済み */
 async function checkChapterNonChapterMarker(
-  db: AnyDb,
+  _db: AnyDb,
 ): Promise<HealthCheckResult> {
-  const where = and(
-    isNotNull(videoChaptersTable.marker_kind),
-    ne(videoChaptersTable.marker_kind, "chapter"),
-  );
-  const [countRows, sampleRows] = await Promise.all([
-    db
-      .select({ c: sql<number>`COUNT(*)` })
-      .from(videoChaptersTable)
-      .where(where),
-    db
-      .select({
-        id: videoChaptersTable.id,
-        marker_kind: videoChaptersTable.marker_kind,
-      })
-      .from(videoChaptersTable)
-      .where(where)
-      .limit(10),
-  ]);
-  const count = Number(countRows[0]?.c ?? 0);
   return {
     id: "chapter_non_chapter_marker",
-    label: "video_chapters.marker_kind != 'chapter' (旧データ)",
-    status: count === 0 ? "ok" : "info",
-    count,
-    samples: sampleRows
-      .slice(0, 5)
-      .map((r) => `${r.id} (${r.marker_kind ?? "?"})`),
-    note:
-      count > 0
-        ? "MVP は marker_kind=chapter 固定運用。旧データの comment/review/system は表示のみで、新規書き込みは chapter のみ。"
-        : undefined,
+    label: "video_chapters.marker_kind (削除済み)",
+    status: "ok",
+    count: 0,
+    samples: [],
   };
 }
 
@@ -541,29 +516,32 @@ async function checkOrphanVideoMember(
   };
 }
 
-/** video_members.chapters_json が valid JSON として保存されているか */
+/** video_member_chapters.video_member_id が video_members に存在するか */
 async function checkVideoMembersChaptersJsonInvalid(
   db: AnyDb,
 ): Promise<HealthCheckResult> {
-  const where = sql`chapters_json IS NOT NULL AND trim(chapters_json) <> '' AND json_valid(chapters_json) = 0`;
+  const where = sql`NOT EXISTS (SELECT 1 FROM video_members vm WHERE vm.id = video_member_chapters.video_member_id)`;
   const [countRows, sampleRows] = await Promise.all([
-    db.select({ c: sql<number>`COUNT(*)` }).from(sql`video_members`).where(where),
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(sql`video_member_chapters`)
+      .where(where),
     db
       .select({ id: sql<string>`id` })
-      .from(sql`video_members`)
+      .from(sql`video_member_chapters`)
       .where(where)
       .limit(10),
   ]);
   const count = Number(countRows[0]?.c ?? 0);
   return {
-    id: "video_members_chapters_json_invalid",
-    label: "video_members.chapters_json invalid JSON",
+    id: "video_member_chapters_orphan",
+    label: "video_member_chapters の親 video_members が無い",
     status: count === 0 ? "ok" : "warn",
     count,
     samples: sampleRows.slice(0, 5).map((r) => r.id),
     note:
       count > 0
-        ? "メンバー担当チャプターは video_members.chapters_json から生成します。JSON 形式を確認してください。"
+        ? "メンバー削除時に video_member_chapters が残っています。"
         : undefined,
   };
 }
@@ -766,34 +744,34 @@ async function checkXIdMergePendingStale(
   };
 }
 
-/** history_logs の normal retention 対象件数 */
-async function checkHistoryLogsRetentionCandidates(
+/** audit_logs の normal retention 対象件数 */
+async function checkAuditLogsRetentionCandidates(
   db: AnyDb,
 ): Promise<HealthCheckResult> {
   const settings = await db.select().from(systemSettings).limit(1);
   const days = Math.max(7, Number(settings[0]?.history_retention_days ?? 90) || 90);
   const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
   const where = and(
-    or(isNull(historyLogsTable.retention_class), eq(historyLogsTable.retention_class, "normal")),
-    lt(historyLogsTable.created_at, cutoff),
+    or(isNull(auditLogsTable.retention_class), eq(auditLogsTable.retention_class, "normal")),
+    lt(auditLogsTable.created_at, cutoff),
   );
   const [countRows, sampleRows] = await Promise.all([
-    db.select({ c: sql<number>`COUNT(*)` }).from(historyLogsTable).where(where),
+    db.select({ c: sql<number>`COUNT(*)` }).from(auditLogsTable).where(where),
     db
       .select({
-        id: historyLogsTable.id,
-        table_name: historyLogsTable.table_name,
-        created_at: historyLogsTable.created_at,
+        id: auditLogsTable.id,
+        table_name: auditLogsTable.table_name,
+        created_at: auditLogsTable.created_at,
       })
-      .from(historyLogsTable)
+      .from(auditLogsTable)
       .where(where)
-      .orderBy(historyLogsTable.created_at)
+      .orderBy(auditLogsTable.created_at)
       .limit(10),
   ]);
   const count = Number(countRows[0]?.c ?? 0);
   return {
-    id: "history_logs_retention_candidates",
-    label: "history_logs normal retention 対象",
+    id: "audit_logs_retention_candidates",
+    label: "audit_logs normal retention 対象",
     status: count === 0 ? "ok" : "info",
     count,
     samples: sampleRows.slice(0, 5).map((r) => `${r.id} ${r.table_name}`),
@@ -829,6 +807,6 @@ export async function runHealthChecks(db: AnyDb): Promise<HealthCheckResult[]> {
     checkOpenModerationCasesOverdue(db),
     checkActiveApiEndpointsOrphanEvent(db),
     checkXIdMergePendingStale(db),
-    checkHistoryLogsRetentionCandidates(db),
+    checkAuditLogsRetentionCandidates(db),
   ]);
 }

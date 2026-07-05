@@ -1,6 +1,6 @@
 /**
  * 作品編集・イベント編集の section permission key。
- * `event_staff.permission_mask` と旧権限キー互換値の取りうる値を
+ * `event_staff` の権限キーと旧権限キー互換値の取りうる値を
  * 型で固定するためのリテラル union。
  *
  * canEditVideo / canEditEvent の requiredKey はこの型を必須に取り、

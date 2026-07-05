@@ -1,12 +1,16 @@
 import { assertNoForbiddenPublicKeys } from "./sanitize";
-import { cacheControlForFreshness, resolveEventFreshness } from "./freshness";
+import {
+  cacheControlForFreshness,
+  enrichEventRowForStaticJson,
+  resolveEventFreshness,
+} from "./freshness";
 
 type Env = { DB: D1Database; R2: R2Bucket; KV: KVNamespace };
 
 const EVENT_INDEX_COLUMNS = `
   id, title, explanation, icon_url, img_url, accent_color,
   start_time, end_time, entry_start_time, entry_end_time,
-  visibility_status, is_active, is_entry_open, is_archived
+  visibility_status
 `;
 
 export async function rebuildTarget(
@@ -129,7 +133,9 @@ async function rebuildEventsIndex(env: Env): Promise<void> {
   ]);
   await putJson(env, "events/index.json", {
     generated_at: Math.floor(Date.now() / 1000),
-    items: rows.results ?? [],
+    items: (rows.results ?? []).map((row) =>
+      enrichEventRowForStaticJson(row as Record<string, unknown>),
+    ),
     group_sections: groupSections,
   }, "public, max-age=300, stale-while-revalidate=1800");
 }
@@ -240,7 +246,8 @@ async function rebuildEvent(env: Env, eventId: string): Promise<void> {
   const ev = (
     await env.DB.prepare(
       `SELECT id, title, explanation, icon_url, img_url, accent_color,
-              start_time, end_time, is_active, is_entry_open, is_archived
+              start_time, end_time, entry_start_time, entry_end_time,
+              visibility_status
        FROM events WHERE id = ? LIMIT 1`,
     )
       .bind(eventId)
@@ -251,14 +258,13 @@ async function rebuildEvent(env: Env, eventId: string): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
   const freshness = resolveEventFreshness(
     {
-      is_active: Number(ev.is_active ?? 0),
-      is_entry_open: Number(ev.is_entry_open ?? 0),
-      is_archived: Number(ev.is_archived ?? 0),
+      visibility_status: (ev.visibility_status as string | null) ?? null,
       start_time: (ev.start_time as number | null) ?? null,
       end_time: (ev.end_time as number | null) ?? null,
     },
     now,
   );
+  const eventPayload = enrichEventRowForStaticJson(ev, now);
 
   const staff = await env.DB.prepare(
     `SELECT es.role, es.display_name, es.public_role_label,
@@ -292,7 +298,7 @@ async function rebuildEvent(env: Env, eventId: string): Promise<void> {
   const payload = {
     generated_at: now,
     freshness,
-    event: ev,
+    event: eventPayload,
     public_staff: staff.results ?? [],
     slots_summary: slotSummary.results ?? [],
     public_videos: publicVideos.results ?? [],

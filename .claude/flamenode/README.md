@@ -1,4 +1,6 @@
-# FlameNode Claude Code 実装インデックス
+# FlameNode Claude Code 実装インデックス (アーカイブ)
+
+> **位置づけ (2026-07 更新)**: 2026-05 修正キャンペーン (Phase 0〜9) の分割命令セット。キャンペーンは完了済みで、現行の作業ガイドは `/AGENTS.md` と `/CLAUDE.md`。仕様根拠 (権限・ID・連続枠・公開 API) の確認用として維持する。
 
 このディレクトリは、Claude CodeがFlameNode修正を実行しやすいように分割した命令セットである。
 

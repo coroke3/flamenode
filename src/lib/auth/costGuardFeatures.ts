@@ -44,8 +44,6 @@ export async function evaluateCostGuard(
     await db
       .select({
         operation_mode: systemSettings.operation_mode,
-        cost_guard_mode: systemSettings.cost_guard_mode,
-        is_maintenance_mode: systemSettings.is_maintenance_mode,
         disabled_features_json: systemSettings.disabled_features_json,
         cost_guard_exception_until: systemSettings.cost_guard_exception_until,
         cost_guard_exception_features_json:

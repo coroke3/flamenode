@@ -86,6 +86,8 @@ function deny(reason: WriteGuardDenyReason): WriteGuardFailure {
   return { ok: false, reason, message: MESSAGES[reason] };
 }
 
+export { getOnboardingHrefForWriteGuardReason } from "./onboardingUrls";
+
 export async function writeGuard(
   options: WriteGuardOptions = {},
 ): Promise<WriteGuardResult> {

@@ -4,8 +4,9 @@ import { Icon } from "@/components/ui/Icon";
 import { LegacyImportClient } from "@/components/admin/LegacyImportClient";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { AdminVideoManagementTabs } from "@/components/admin/AdminVideoManagementTabs";
+import { isLegacyImportToolEnabled } from "@/lib/import/legacy/featureFlag";
 
-export const metadata: Metadata = { title: "レガシーインポート" };
+export const metadata: Metadata = { title: "旧データ移行ツール" };
 export const dynamic = "force-dynamic";
 
 interface Props {
@@ -16,14 +17,16 @@ export default async function AdminImportPage({
   searchParams,
 }: Props): Promise<React.ReactElement> {
   const { notice = "" } = await searchParams;
+  const enabled = isLegacyImportToolEnabled();
 
   return (
     <div>
       <AdminPageHeader
-        title="レガシーデータ・インポート"
+        title="旧データ移行ツール"
         description="旧 EventArchives の eventinfo.json / video.json / ヘッダー付き CSV から、イベント・運営メンバー・作品・合作メンバー・X ID を取り込みます。"
       />
-      <AdminVideoManagementTabs active="import" />
+      <AdminVideoManagementTabs />
+
       {notice ? (
         <div
           role="status"
@@ -41,69 +44,55 @@ export default async function AdminImportPage({
         </div>
       ) : null}
 
-      <section className="fn-card" style={{ marginTop: 22 }}>
-        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>手順</h2>
-        <ol
+      {!enabled ? (
+        <div
           style={{
-            paddingLeft: 18,
-            color: "var(--text-secondary)",
+            marginTop: 22,
+            padding: "16px 18px",
+            borderRadius: "var(--radius-sm)",
+            border: "1px solid var(--border-subtle)",
+            background: "var(--bg-elevated)",
             fontSize: 13,
-            lineHeight: 1.8,
-          }}
-        >
-          <li>JSON または CSV を投入します。複数ファイルを同時に扱えます。</li>
-          <li>まずドライランで件数・衝突・文字化け疑いを確認します。</li>
-          <li>衝突時の方針を skip / update / merge から選んで取り込みます。</li>
-          <li>取り込み結果は監査ログに残ります。</li>
-        </ol>
-        <p className="fn-help">
-          旧データ由来の X ID は公開プロフィールとして扱い、Discord 連携の本人確認は別途 X ID 申請で行います。
-        </p>
-      </section>
-
-      <section className="fn-card" style={{ marginTop: 22 }}>
-        <LegacyImportClient />
-      </section>
-
-      <details className="fn-card" style={{ marginTop: 22 }}>
-        <summary
-          style={{
-            cursor: "pointer",
-            fontSize: 13,
-            fontWeight: 600,
             color: "var(--text-secondary)",
           }}
         >
-          シンプルフォーム
-        </summary>
-        <form
-          action="/api/admin/legacy-import"
-          method="post"
-          encType="multipart/form-data"
-          style={{
-            marginTop: 14,
-            display: "flex",
-            flexDirection: "column",
-            gap: 12,
-          }}
-        >
-          <label className="fn-label">JSON / CSV / TSV ファイル</label>
-          <input
-            type="file"
-            name="file"
-            accept="application/json,text/csv,text/tab-separated-values,.json,.csv,.tsv"
-            className="fn-input"
-          />
-          <div style={{ display: "flex", gap: 8 }}>
-            <button type="submit" name="dry_run" value="1" className="fn-btn fn-btn-ghost">
-              <Icon name="info" size={12} aria-hidden /> ドライラン
-            </button>
-          </div>
-          <p className="fn-help">
-            このフォームは解析専用です。保存は上のプレビューUIで内容を確認してから実行します。
-          </p>
-        </form>
-      </details>
+          <Icon name="warning" size={14} aria-hidden />{" "}
+          旧データ移行ツールは現在無効です。有効にするには環境変数{" "}
+          <code>ENABLE_LEGACY_IMPORT_TOOL=true</code> を設定してください。
+        </div>
+      ) : null}
+
+      {enabled ? (
+        <>
+          <section className="fn-card" style={{ marginTop: 22 }}>
+            <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>手順</h2>
+            <ol
+              style={{
+                paddingLeft: 18,
+                color: "var(--text-secondary)",
+                fontSize: 13,
+                lineHeight: 1.8,
+              }}
+            >
+              <li>JSON または CSV を投入します。複数ファイルを同時に扱えます。</li>
+              <li>まずドライランで件数・衝突・文字化け疑いを確認します。</li>
+              <li>
+                衝突時の方針を <strong>skip_existing</strong>（既存を保護）または{" "}
+                <strong>replace_imported</strong>（過去取り込み分を置き換え）から選んで取り込みます。
+              </li>
+              <li>取り込み結果はバッチ記録・監査ログに残ります。</li>
+            </ol>
+            <p className="fn-help">
+              旧データ由来の X ID は <code>approval_status=imported</code>{" "}
+              として取り込みます。Discord 連携による本人確認は別途 X ID 申請で行います。
+            </p>
+          </section>
+
+          <section className="fn-card" style={{ marginTop: 22 }}>
+            <LegacyImportClient />
+          </section>
+        </>
+      ) : null}
     </div>
   );
 }

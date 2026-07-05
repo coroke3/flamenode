@@ -10,35 +10,14 @@ import {
 
 test("resolveQueueOperationMode: operation_mode を正本にする", () => {
   assert.equal(
-    resolveQueueOperationMode({
-      operation_mode: "static_only",
-      cost_guard_mode: "normal",
-      is_maintenance_mode: 0,
-    }),
+    resolveQueueOperationMode({ operation_mode: "static_only" }),
     "static_only",
   );
 });
 
-test("resolveQueueOperationMode: 旧 cost_guard_mode へ fallback", () => {
-  assert.equal(
-    resolveQueueOperationMode({
-      operation_mode: "broken",
-      cost_guard_mode: "economy",
-      is_maintenance_mode: 0,
-    }),
-    "economy",
-  );
-});
-
-test("resolveQueueOperationMode: 旧 maintenance flag は安全側で停止", () => {
-  assert.equal(
-    resolveQueueOperationMode({
-      operation_mode: "normal",
-      cost_guard_mode: "normal",
-      is_maintenance_mode: 1,
-    }),
-    "maintenance",
-  );
+test("resolveQueueOperationMode: 不正値は normal", () => {
+  assert.equal(resolveQueueOperationMode({ operation_mode: "broken" }), "normal");
+  assert.equal(resolveQueueOperationMode(null), "normal");
 });
 
 test("queueLimitForMode: economy だけ処理件数を絞る", () => {

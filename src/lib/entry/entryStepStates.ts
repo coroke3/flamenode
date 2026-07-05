@@ -44,7 +44,7 @@ export function resolveEntryStepStates(input: {
   isLoggedIn: boolean;
   needsTosAccept: boolean;
   activeX: string | null;
-  activeXApprovalStatus: "approved" | "pending" | "rejected" | null;
+  activeXApprovalStatus: "approved" | "pending" | "rejected" | "imported" | null;
   hasReservedSlots: boolean;
   canPost: boolean;
 }): Record<EntryStepKey, EntryStepState> {

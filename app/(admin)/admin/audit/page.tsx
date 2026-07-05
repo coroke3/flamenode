@@ -1,5 +1,5 @@
-import * as React from "react";import { FnTable } from "@/components/ui/FnTable";
-
+import * as React from "react";
+import { FnTable } from "@/components/ui/FnTable";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
@@ -7,7 +7,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import Link from "next/link";
 import {
-  historyLogs,
+  auditLogs,
   users as usersTable,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
@@ -21,14 +21,15 @@ import { parseAuditDiff } from "@/lib/audit/diff";
 export const metadata: Metadata = { title: "監査ログ" };
 export const dynamic = "force-dynamic";
 
-type HistoryRow = typeof historyLogs.$inferSelect;
+type AuditRow = typeof auditLogs.$inferSelect;
 
 interface Props {
   searchParams?: Promise<{
     table?: string;
-    action?: string;
-    operator?: string;
+    operation?: string;
+    actor?: string;
     record?: string;
+    restore_status?: string;
     limit?: string;
     since?: string;
     until?: string;
@@ -43,10 +44,44 @@ function normalizeViewMode(raw: string | undefined): ViewMode {
 }
 
 const MAX_LIMIT = 100;
-const DEFAULT_LIMIT = 100;
+const DEFAULT_LIMIT = 50;
 
-function diffSummary(row: HistoryRow): { keys: string[]; count: number } {
-  const diff = parseAuditDiff(row.before_data, row.after_data);
+const OPERATIONS = [
+  "CREATE",
+  "UPDATE",
+  "DELETE",
+  "RESTORE",
+  "STATUS_CHANGE",
+  "MERGE",
+  "SYSTEM",
+] as const;
+
+const RESTORE_STATUSES = [
+  "restorable",
+  "restored",
+  "expired",
+  "not_restorable",
+  "blocked",
+  "failed",
+] as const;
+
+const COMMON_TABLES = [
+  "videos",
+  "events",
+  "users",
+  "x_users",
+  "slots",
+  "video_chapters",
+  "video_members",
+  "event_staff",
+  "x_account_link_requests",
+  "notification_outbox",
+  "system_settings",
+  "audit_log_settings",
+] as const;
+
+function diffSummary(row: AuditRow): { keys: string[]; count: number } {
+  const diff = parseAuditDiff(row.before_json, row.after_json);
   return { keys: diff.changedKeys, count: diff.changedKeys.length };
 }
 
@@ -59,12 +94,13 @@ export default async function AdminAuditPage({
   const sp = (await searchParams) ?? {};
   const viewMode = normalizeViewMode(sp.view);
   const tableFilter = (sp.table ?? "").trim();
-  const actionFilter = (sp.action ?? "").trim().toUpperCase();
-  const operatorFilter = (sp.operator ?? "").trim();
+  const operationFilter = (sp.operation ?? "").trim().toUpperCase();
+  const actorFilter = (sp.actor ?? "").trim();
   const recordFilter = (sp.record ?? "").trim();
+  const restoreStatusFilter = (sp.restore_status ?? "").trim();
   const sinceFilter = (sp.since ?? "").trim();
   const untilFilter = (sp.until ?? "").trim();
-  // YYYY-MM-DD を JST 0:00 / 24:00 として Unix 秒に変換 (failure 時は null)
+
   const parseDateBoundary = (s: string, end: boolean): number | null => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
     const suffix = end ? "T23:59:59+09:00" : "T00:00:00+09:00";
@@ -80,37 +116,48 @@ export default async function AdminAuditPage({
       : DEFAULT_LIMIT;
 
   const db = getDatabase();
-  let rows: HistoryRow[] = [];
-  let distinctTables: string[] = [];
+  let rows: AuditRow[] = [];
   let operatorMap = new Map<string, OperatorInfo>();
+
   if (db) {
     const conds = [];
-    if (tableFilter) conds.push(eq(historyLogs.table_name, tableFilter));
-    if (actionFilter === "CREATE" || actionFilter === "UPDATE" || actionFilter === "DELETE") {
-      conds.push(eq(historyLogs.action, actionFilter));
+    if (tableFilter) conds.push(eq(auditLogs.table_name, tableFilter));
+    if (OPERATIONS.includes(operationFilter as (typeof OPERATIONS)[number])) {
+      conds.push(
+        eq(
+          auditLogs.operation,
+          operationFilter as (typeof OPERATIONS)[number],
+        ),
+      );
     }
-    if (operatorFilter) conds.push(eq(historyLogs.operator_discord_id, operatorFilter));
-    if (recordFilter) conds.push(eq(historyLogs.record_id, recordFilter));
-    if (sinceUnix != null) conds.push(gte(historyLogs.created_at, sinceUnix));
-    if (untilUnix != null) conds.push(lte(historyLogs.created_at, untilUnix));
+    if (actorFilter) conds.push(eq(auditLogs.actor_user_id, actorFilter));
+    if (recordFilter) conds.push(eq(auditLogs.target_id, recordFilter));
+    if (
+      RESTORE_STATUSES.includes(
+        restoreStatusFilter as (typeof RESTORE_STATUSES)[number],
+      )
+    ) {
+      conds.push(
+        eq(
+          auditLogs.restore_status,
+          restoreStatusFilter as (typeof RESTORE_STATUSES)[number],
+        ),
+      );
+    }
+    if (sinceUnix != null) conds.push(gte(auditLogs.created_at, sinceUnix));
+    if (untilUnix != null) conds.push(lte(auditLogs.created_at, untilUnix));
 
     rows = await db
       .select()
-      .from(historyLogs)
+      .from(auditLogs)
       .where(conds.length > 0 ? and(...conds) : undefined)
-      .orderBy(desc(historyLogs.created_at))
+      .orderBy(desc(auditLogs.created_at))
       .limit(limit);
 
-    // operator_discord_id を Discord 名 / X 名 / アイコンに解決する。
-    // 行に保存された operator_snapshot_json があれば優先する (当時情報の保全)。
-    const opIds = Array.from(
-      new Set(
-        rows
-          .map((r) => r.operator_discord_id)
-          .filter((v): v is string => Boolean(v)),
-      ),
+    const actorIds = Array.from(
+      new Set(rows.map((r) => r.actor_user_id).filter(Boolean)),
     );
-    if (opIds.length > 0) {
+    if (actorIds.length > 0) {
       const userJoin = await db
         .select({
           id: usersTable.id,
@@ -125,18 +172,11 @@ export default async function AdminAuditPage({
           xUsersTable,
           sql`lower(${xUsersTable.id}) = lower(${usersTable.active_x_user_id})`,
         )
-        .where(inArray(usersTable.id, opIds));
+        .where(inArray(usersTable.id, actorIds));
       const map = new Map<string, (typeof userJoin)[number]>();
       for (const u of userJoin) map.set(u.id, u);
       operatorMap = map;
     }
-
-    const tableRows = await db
-      .select({ name: historyLogs.table_name })
-      .from(historyLogs)
-      .groupBy(historyLogs.table_name)
-      .orderBy(sql`${historyLogs.table_name} ASC`);
-    distinctTables = tableRows.map((r) => r.name);
   }
 
   return (
@@ -164,7 +204,7 @@ export default async function AdminAuditPage({
           <span style={{ color: "var(--text-muted)" }}>テーブル</span>
           <select name="table" defaultValue={tableFilter} className="fn-input">
             <option value="">すべて</option>
-            {distinctTables.map((t) => (
+            {COMMON_TABLES.map((t) => (
               <option key={t} value={t}>
                 {t}
               </option>
@@ -172,32 +212,50 @@ export default async function AdminAuditPage({
           </select>
         </label>
         <label style={{ display: "flex", flexDirection: "column", fontSize: 11 }}>
-          <span style={{ color: "var(--text-muted)" }}>操作</span>
-          <select name="action" defaultValue={actionFilter} className="fn-input">
+          <span style={{ color: "var(--text-muted)" }}>操作種別</span>
+          <select name="operation" defaultValue={operationFilter} className="fn-input">
             <option value="">すべて</option>
-            <option value="CREATE">CREATE</option>
-            <option value="UPDATE">UPDATE</option>
-            <option value="DELETE">DELETE</option>
+            {OPERATIONS.map((op) => (
+              <option key={op} value={op}>
+                {op}
+              </option>
+            ))}
           </select>
         </label>
         <label style={{ display: "flex", flexDirection: "column", fontSize: 11 }}>
-          <span style={{ color: "var(--text-muted)" }}>実行者 Discord ID</span>
+          <span style={{ color: "var(--text-muted)" }}>復元ステータス</span>
+          <select
+            name="restore_status"
+            defaultValue={restoreStatusFilter}
+            className="fn-input"
+          >
+            <option value="">すべて</option>
+            <option value="restorable">復元可能</option>
+            <option value="restored">復元済み</option>
+            <option value="expired">期限切れ</option>
+            <option value="not_restorable">復元不可</option>
+            <option value="blocked">競合</option>
+            <option value="failed">失敗</option>
+          </select>
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", fontSize: 11 }}>
+          <span style={{ color: "var(--text-muted)" }}>実行者 user_id</span>
           <input
             type="text"
-            name="operator"
-            defaultValue={operatorFilter}
+            name="actor"
+            defaultValue={actorFilter}
             className="fn-input"
-            placeholder="discord_id"
+            placeholder="user_id 完全一致"
           />
         </label>
         <label style={{ display: "flex", flexDirection: "column", fontSize: 11 }}>
-          <span style={{ color: "var(--text-muted)" }}>レコード ID</span>
+          <span style={{ color: "var(--text-muted)" }}>対象レコード ID</span>
           <input
             type="text"
             name="record"
             defaultValue={recordFilter}
             className="fn-input"
-            placeholder="record_id 完全一致"
+            placeholder="target_id 完全一致"
           />
         </label>
         <label style={{ display: "flex", flexDirection: "column", fontSize: 11 }}>
@@ -324,33 +382,54 @@ function ViewModeSwitch({
   );
 }
 
-function ActionBadge({ action }: { action: string }): React.ReactElement {
-  return (
-    <span
-      className={`fn-badge ${
-        action === "DELETE"
-          ? "fn-badge-danger"
-          : action === "CREATE"
-            ? "fn-badge-accent"
-            : "fn-badge-soft"
-      }`}
-    >
-      {action}
-    </span>
-  );
+function OperationBadge({ operation }: { operation: string }): React.ReactElement {
+  const cls =
+    operation === "DELETE"
+      ? "fn-badge-danger"
+      : operation === "CREATE"
+        ? "fn-badge-accent"
+        : operation === "RESTORE"
+          ? "fn-badge-warning"
+          : operation === "SYSTEM"
+            ? "fn-badge-soft"
+            : "fn-badge-soft";
+  return <span className={`fn-badge ${cls}`}>{operation}</span>;
+}
+
+const RESTORE_STATUS_MAP: Record<
+  string,
+  { label: string; cls: string }
+> = {
+  restorable: { label: "復元可能", cls: "fn-badge-accent" },
+  restored: { label: "復元済み", cls: "fn-badge-soft" },
+  expired: { label: "期限切れ", cls: "fn-badge-warning" },
+  not_restorable: { label: "復元不可", cls: "" },
+  blocked: { label: "競合", cls: "fn-badge-warning" },
+  failed: { label: "失敗", cls: "fn-badge-danger" },
+};
+
+function RestoreStatusBadge({
+  status,
+}: {
+  status: string;
+}): React.ReactElement | null {
+  if (status === "not_restorable") return null;
+  const info = RESTORE_STATUS_MAP[status];
+  if (!info) return null;
+  return <span className={`fn-badge ${info.cls}`}>{info.label}</span>;
 }
 
 function DiffSummaryCell({
   row,
   diff,
 }: {
-  row: HistoryRow;
+  row: AuditRow;
   diff: { keys: string[]; count: number };
 }): React.ReactElement {
-  if (row.action === "UPDATE" && diff.count === 0) {
+  if (row.operation === "UPDATE" && diff.count === 0) {
     return <span style={{ color: "var(--text-muted)" }}>変更なし</span>;
   }
-  if (row.action === "UPDATE") {
+  if (row.operation === "UPDATE") {
     return (
       <>
         <span className="fn-badge fn-badge-soft" style={{ marginRight: 6 }}>
@@ -368,17 +447,24 @@ function DiffSummaryCell({
           {diff.keys.length > 6 ? ` ほか ${diff.keys.length - 6} 件` : ""}
         </span>
         <AuditDiffDetail
-          before={row.before_data}
-          after={row.after_data}
+          before={row.before_json}
+          after={row.after_json}
           changedKeys={diff.keys}
         />
       </>
     );
   }
-  if (row.action === "CREATE") {
+  if (row.operation === "CREATE") {
     return <span style={{ color: "var(--text-muted)" }}>新規作成</span>;
   }
-  return <span style={{ color: "var(--text-muted)" }}>削除</span>;
+  if (row.operation === "DELETE") {
+    return <span style={{ color: "var(--text-muted)" }}>削除</span>;
+  }
+  return (
+    <span style={{ color: "var(--text-muted)", fontFamily: "monospace", fontSize: 11 }}>
+      {row.context ?? row.operation}
+    </span>
+  );
 }
 
 type OperatorInfo = {
@@ -390,36 +476,29 @@ type OperatorInfo = {
   x_icon: string | null;
 };
 
-/**
- * 監査ログの実行者を「Discord 名 / @x_id (アイコン)」形式で表示する。
- * row.operator_snapshot_json があれば優先 (当時情報の保全)。
- */
 function OperatorBadge({
   row,
   operatorMap,
 }: {
-  row: HistoryRow;
+  row: AuditRow;
   operatorMap: Map<string, OperatorInfo>;
 }): React.ReactElement {
-  if (!row.operator_discord_id) {
-    return <span style={{ color: "var(--text-muted)" }}>-</span>;
-  }
   let snapshot: {
     discord_name?: string | null;
     x_user_id?: string | null;
     x_name?: string | null;
     icon_url?: string | null;
   } | null = null;
-  if (row.operator_snapshot_json) {
+  if (row.actor_snapshot_json) {
     try {
-      snapshot = JSON.parse(row.operator_snapshot_json);
+      snapshot = JSON.parse(row.actor_snapshot_json);
     } catch {
       snapshot = null;
     }
   }
-  const live = operatorMap.get(row.operator_discord_id);
+  const live = operatorMap.get(row.actor_user_id);
   const displayName =
-    snapshot?.discord_name ?? live?.name ?? row.operator_discord_id;
+    snapshot?.discord_name ?? live?.name ?? row.actor_user_id;
   const xId = snapshot?.x_user_id ?? live?.active_x_user_id ?? null;
   const xName = snapshot?.x_name ?? live?.x_name ?? null;
   const iconUrl = snapshot?.icon_url ?? live?.x_icon ?? live?.image ?? null;
@@ -467,7 +546,7 @@ function TableView({
   rows,
   operatorMap,
 }: {
-  rows: HistoryRow[];
+  rows: AuditRow[];
   operatorMap: Map<string, OperatorInfo>;
 }): React.ReactElement {
   return (
@@ -477,7 +556,8 @@ function TableView({
           <th>日時</th>
           <th>テーブル</th>
           <th>操作</th>
-          <th>レコード ID</th>
+          <th>対象 ID</th>
+          <th>復元</th>
           <th>実行者</th>
           <th>変更差分サマリ</th>
         </tr>
@@ -503,13 +583,16 @@ function TableView({
               </td>
               <td style={{ fontFamily: "monospace", fontSize: 12 }}>{h.table_name}</td>
               <td>
-                <ActionBadge action={h.action} />
+                <OperationBadge operation={h.operation} />
               </td>
               <td style={{ fontSize: 11 }}>
                 <AuditTargetLink
                   tableName={h.table_name}
-                  recordId={h.record_id}
+                  recordId={h.target_id}
                 />
+              </td>
+              <td>
+                <RestoreStatusBadge status={h.restore_status} />
               </td>
               <td style={{ fontSize: 12, color: "var(--text-secondary)" }}>
                 <OperatorBadge row={h} operatorMap={operatorMap} />
@@ -525,8 +608,8 @@ function TableView({
   );
 }
 
-function groupByDay(rows: HistoryRow[]): [string, HistoryRow[]][] {
-  const map = new Map<string, HistoryRow[]>();
+function groupByDay(rows: AuditRow[]): [string, AuditRow[]][] {
+  const map = new Map<string, AuditRow[]>();
   for (const r of rows) {
     const key = new Date(r.created_at * 1000)
       .toLocaleDateString("ja-JP", {
@@ -547,11 +630,9 @@ function TimelineView({
   rows,
   operatorMap,
 }: {
-  rows: HistoryRow[];
+  rows: AuditRow[];
   operatorMap: Map<string, OperatorInfo>;
 }): React.ReactElement {
-  // 日付 (YYYY-MM-DD, JST) 単位でグルーピングして縦タイムラインに並べる。
-  // 1 行 = 1 操作。左にタイムスタンプ、右にアクション + 差分サマリ。
   const groups = groupByDay(rows);
 
   return (
@@ -615,7 +696,8 @@ function TimelineView({
                     >
                       {formatUnix(h.created_at)}
                     </Link>
-                    <ActionBadge action={h.action} />
+                    <OperationBadge operation={h.operation} />
+                    <RestoreStatusBadge status={h.restore_status} />
                     <span
                       style={{
                         fontFamily: "monospace",
@@ -627,7 +709,7 @@ function TimelineView({
                     </span>
                     <AuditTargetLink
                       tableName={h.table_name}
-                      recordId={h.record_id}
+                      recordId={h.target_id}
                     />
                     <span
                       style={{
@@ -656,7 +738,7 @@ function CardsView({
   rows,
   operatorMap,
 }: {
-  rows: HistoryRow[];
+  rows: AuditRow[];
   operatorMap: Map<string, OperatorInfo>;
 }): React.ReactElement {
   return (
@@ -692,7 +774,8 @@ function CardsView({
                 flexWrap: "wrap",
               }}
             >
-              <ActionBadge action={h.action} />
+              <OperationBadge operation={h.operation} />
+              <RestoreStatusBadge status={h.restore_status} />
               <Link
                 href={`/admin/audit/${h.id}`}
                 style={{
@@ -728,7 +811,7 @@ function CardsView({
               <span>{h.table_name}</span>
               <AuditTargetLink
                 tableName={h.table_name}
-                recordId={h.record_id}
+                recordId={h.target_id}
               />
             </div>
             <div

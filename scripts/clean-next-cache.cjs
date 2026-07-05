@@ -1,9 +1,36 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { execSync } = require("node:child_process");
 
 const workspace = process.cwd();
 const target = path.resolve(workspace, ".next");
 const expected = path.join(workspace, ".next");
+
+function isDevPortInUse(port) {
+  try {
+    const out = execSync("netstat -ano", {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.split(/\r?\n/).some((line) => {
+      return line.includes("LISTENING") && line.includes(`:${port} `);
+    });
+  } catch {
+    return false;
+  }
+}
+
+for (const port of [3000, 3001]) {
+  if (isDevPortInUse(port)) {
+    console.error(
+      `[clean-next-cache] Port ${port} is in use. Stop Next.js dev/start/build first.`,
+    );
+    console.error(
+      "[clean-next-cache] Removing .next while Next is running causes webpack 'options.factory' / missing chunk errors.",
+    );
+    process.exit(1);
+  }
+}
 
 if (target !== expected) {
   throw new Error(`Refusing to remove unexpected path: ${target}`);

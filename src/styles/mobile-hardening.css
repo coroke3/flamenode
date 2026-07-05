@@ -26,24 +26,36 @@
     max-width: 100%;
   }
 
-  [data-fn-surface="public"] .fn-header-inner {
+  [data-fn-surface="public"] .fn-header-inner,
+  [data-fn-surface="personal"] .fn-header-inner,
+  [data-fn-surface="admin"] .fn-header-inner,
+  [data-fn-surface="manage"] .fn-header-inner {
     grid-template-columns: minmax(0, 1fr) max-content;
     gap: 8px;
   }
 
-  [data-fn-surface="public"] .fn-logo {
+  [data-fn-surface="public"] .fn-logo,
+  [data-fn-surface="personal"] .fn-logo,
+  [data-fn-surface="admin"] .fn-logo,
+  [data-fn-surface="manage"] .fn-logo {
     min-width: 0;
     overflow: hidden;
   }
 
-  [data-fn-surface="public"] .fn-logo-name {
+  [data-fn-surface="public"] .fn-logo-name,
+  [data-fn-surface="personal"] .fn-logo-name,
+  [data-fn-surface="admin"] .fn-logo-name,
+  [data-fn-surface="manage"] .fn-logo-name {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  [data-fn-surface="public"] .fn-header-right {
+  [data-fn-surface="public"] .fn-header-right,
+  [data-fn-surface="personal"] .fn-header-right,
+  [data-fn-surface="admin"] .fn-header-right,
+  [data-fn-surface="manage"] .fn-header-right {
     min-width: max-content;
   }
 
@@ -173,17 +185,17 @@
 }
 
 @media (max-width: 360px) {
-  [data-fn-surface="public"] .fn-header-inner {
+  [data-fn-surface="public"] .fn-header-inner,
+  [data-fn-surface="personal"] .fn-header-inner,
+  [data-fn-surface="admin"] .fn-header-inner,
+  [data-fn-surface="manage"] .fn-header-inner {
     gap: 6px;
   }
 
-  [data-fn-surface="public"] .fn-logo-name {
+  [data-fn-surface="public"] .fn-logo-name,
+  [data-fn-surface="personal"] .fn-logo-name,
+  [data-fn-surface="admin"] .fn-logo-name,
+  [data-fn-surface="manage"] .fn-logo-name {
     max-width: 38vw;
-  }
-
-  [data-fn-surface="public"] .fn-page,
-  [data-fn-surface="public"] .fn-public-container {
-    padding-left: max(var(--fn-page-gutter), env(safe-area-inset-left));
-    padding-right: max(var(--fn-page-gutter), env(safe-area-inset-right));
   }
 }

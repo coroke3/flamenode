@@ -12,10 +12,9 @@ import {
   type EventStaffPreset,
 } from "@/lib/auth/permissions/presets";
 import {
-  keysToPermissionMask,
   resolveStaffPermissionKeys,
   safeParseCustomPermissionKeys,
-} from "@/lib/auth/permissions/mask";
+} from "@/lib/auth/permissions/permissionResolver";
 import { makeCheck, type IntegrityCheckResult, type IntegrityIssue } from "./integrityChecks";
 
 function text(value: unknown): string {
@@ -48,48 +47,11 @@ function finalizeJsCheck(
   };
 }
 
-function knownMaskMax(): number {
-  return keysToPermissionMask(getPresetPermissions("owner"), {
-    allowAdminOnly: true,
-  });
-}
-
-const KNOWN_MASK_MAX = knownMaskMax();
-
-function maskUnknownBits(mask: number): number {
-  const numeric = Number(mask ?? 0);
-  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
-  return numeric & ~KNOWN_MASK_MAX;
-}
 
 export async function buildPermissionIntegrityChecks(
   db: DB,
 ): Promise<IntegrityCheckResult[]> {
   const sqlChecks = await Promise.all([
-    makeCheck({
-      db,
-      id: "staff_public_staff_with_mask",
-      area: "event_staff",
-      title: "public_staff なのに permission_mask が 0 以外",
-      severity: "warning",
-      description: "表示専用スタッフに内部操作権限ビットが付いています。",
-      from: sql`event_staff`,
-      where: sql`permission_preset = 'public_staff' AND permission_mask <> 0`,
-      sampleSelect: {
-        id: sql<string>`id`,
-        event_id: sql<string>`event_id`,
-        x_user_id: sql<string>`x_user_id`,
-        permission_mask: sql<number>`permission_mask`,
-      },
-      recommendation:
-        "permission_mask を 0 に戻すか、必要ならプリセットを変更してください。",
-      mapIssue: (row) => ({
-        id: text(row.id),
-        title: `@${text(row.x_user_id) || "—"}`,
-        description: `event:${text(row.event_id)} mask=${text(row.permission_mask)}`,
-        adminHref: staffHref(text(row.event_id)),
-      }),
-    }),
     makeCheck({
       db,
       id: "staff_representative_public_staff",
@@ -213,7 +175,6 @@ export async function buildPermissionIntegrityChecks(
       event_id: sql<string>`event_id`,
       x_user_id: sql<string>`x_user_id`,
       permission_preset: sql<string>`permission_preset`,
-      permission_mask: sql<number>`permission_mask`,
       custom_permission_keys_json: sql<string | null>`custom_permission_keys_json`,
     })
     .from(sql`event_staff`)
@@ -221,25 +182,13 @@ export async function buildPermissionIntegrityChecks(
 
   const ownerIssues: IntegrityIssue[] = [];
   const managerIssues: IntegrityIssue[] = [];
-  const unknownBitIssues: IntegrityIssue[] = [];
   const invalidCustomIssues: IntegrityIssue[] = [];
 
   for (const row of staffRows) {
     const id = text(row.id);
     const eventId = text(row.event_id);
     const preset = text(row.permission_preset) as EventStaffPreset;
-    const mask = Number(row.permission_mask ?? 0);
     const customJson = row.custom_permission_keys_json ?? null;
-
-    const unknown = maskUnknownBits(mask);
-    if (unknown > 0) {
-      unknownBitIssues.push({
-        id,
-        title: `@${text(row.x_user_id) || "—"}`,
-        description: `未知ビット ${unknown} (mask=${mask}) event:${eventId}`,
-        adminHref: staffHref(eventId),
-      });
-    }
 
     if (preset === "custom" && customJson && customJson.trim() !== "[]") {
       const parsed = safeParseCustomPermissionKeys(customJson, {
@@ -256,7 +205,6 @@ export async function buildPermissionIntegrityChecks(
     }
 
     const resolved = resolveStaffPermissionKeys({
-      permission_mask: mask,
       permission_preset: preset,
       custom_permission_keys_json: customJson,
     });
@@ -297,7 +245,7 @@ export async function buildPermissionIntegrityChecks(
       "danger",
       "owner プリセットに必要な権限キーが解決できません。",
       ownerIssues.slice(0, 50),
-      "permission_mask を再設定してください。",
+      "プリセット定義を確認してください。",
     ),
     finalizeJsCheck(
       "staff_manager_has_dangerous_permissions",
@@ -306,14 +254,6 @@ export async function buildPermissionIntegrityChecks(
       "manager に危険権限が含まれています。",
       managerIssues.slice(0, 50),
       "危険権限を外してください。",
-    ),
-    finalizeJsCheck(
-      "staff_mask_unknown_bits",
-      "permission_mask に未知ビット",
-      "warning",
-      "定義外ビットが立っています。",
-      unknownBitIssues.slice(0, 50),
-      "mask を再計算してください。",
     ),
     finalizeJsCheck(
       "staff_custom_json_invalid",

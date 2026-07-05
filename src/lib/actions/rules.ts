@@ -1,11 +1,12 @@
 "use server";
+import { auditAction } from "@/lib/audit/helpers";
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { eq, ne } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
-import { historyLogs, termsVersions, users } from "@/lib/db/schema";
+import { termsVersions, users } from "@/lib/db/schema";
 import { enqueueNotification } from "@/lib/notifications/enqueue";
 import { generateId } from "@/lib/utils/id";
 
@@ -73,14 +74,13 @@ export async function createTermsVersion(
     created_at: now,
     updated_at: now,
   });
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "terms_versions",
     record_id: id,
     action: "CREATE",
     after_data: JSON.stringify({ version_label: d.version_label }),
     operator_discord_id: guard.userId,
     retention_class: "long_audit",
-    created_at: now,
   });
   revalidatePath("/admin/rules");
   return { ok: true, id };
@@ -123,13 +123,12 @@ export async function updateTermsVersion(
       updated_at: now,
     })
     .where(eq(termsVersions.id, d.id));
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "terms_versions",
     record_id: d.id,
     action: "UPDATE",
     operator_discord_id: guard.userId,
     retention_class: "long_audit",
-    created_at: now,
   });
   revalidatePath("/admin/rules");
   revalidatePath(`/admin/rules/${d.id}/edit`);
@@ -178,7 +177,7 @@ export async function publishTermsVersion(
       .where(ne(users.id, ""));
   }
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "terms_versions",
     record_id: id,
     action: "UPDATE",
@@ -189,7 +188,6 @@ export async function publishTermsVersion(
     }),
     operator_discord_id: guard.userId,
     retention_class: "long_audit",
-    created_at: now,
   });
   revalidatePath("/admin/rules");
   revalidatePath("/rules");
@@ -265,7 +263,7 @@ export async function broadcastTermsReaccept(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "terms_versions",
     record_id: termsId,
     action: "UPDATE",
@@ -277,7 +275,6 @@ export async function broadcastTermsReaccept(
     }),
     operator_discord_id: guard.userId,
     retention_class: "long_audit",
-    created_at: now,
   });
 
   const nextCursor = cursor + targets.length;
@@ -305,14 +302,13 @@ export async function archiveTermsVersion(
     .update(termsVersions)
     .set({ status: "archived", updated_at: now })
     .where(eq(termsVersions.id, id));
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "terms_versions",
     record_id: id,
     action: "UPDATE",
     after_data: JSON.stringify({ status: "archived" }),
     operator_discord_id: guard.userId,
     retention_class: "long_audit",
-    created_at: now,
   });
   revalidatePath("/admin/rules");
   revalidatePath("/rules");

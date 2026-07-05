@@ -35,10 +35,23 @@ export default async function DashboardLibraryPage({
   const db = getDatabase();
   let videos: VideoCardData[] = [];
   let hasOtherTabHits = false;
+  let linkedXCount = 0;
+  let activeXApproved = false;
 
   if (db) {
+    const linkedRows = await db
+      .select({ id: xUsersTable.id, approval_status: xUsersTable.approval_status })
+      .from(xUsersTable)
+      .where(eq(xUsersTable.linked_discord_user_id, user.id));
+    linkedXCount = linkedRows.length;
+
     const activeX = user.active_x_user_id;
-    if (activeX) {
+    const activeRow = activeX
+      ? linkedRows.find((row) => row.id === activeX)
+      : null;
+    activeXApproved = activeRow?.approval_status === "approved";
+
+    if (activeX && activeXApproved) {
       const myInteractions = await db
         .select({
           video_id: videoInteractions.video_id,
@@ -84,6 +97,9 @@ export default async function DashboardLibraryPage({
     }
   }
 
+  const needsXIdLink = linkedXCount === 0;
+  const needsActiveX = linkedXCount > 0 && !activeXApproved;
+
   const playlistId = tab === "like" ? "lib-like" : "lib-bookmark";
   const playlistLabel = tab === "like" ? "いいねした作品" : "セーブした作品";
   const firstVideo = videos[0];
@@ -126,7 +142,19 @@ export default async function DashboardLibraryPage({
         </Link>
       </nav>
 
-      {videos.length === 0 ? (
+      {needsXIdLink || needsActiveX ? (
+        <div className="fn-empty">
+          <Icon name="user" size={20} aria-hidden />
+          <p className="fn-empty-message">
+            {needsXIdLink
+              ? "いいね・セーブには X ID の連携が必要です。"
+              : "承認済みのアクティブ X ID を設定すると、いいね・セーブした作品を表示できます。"}
+          </p>
+          <Link href="/dashboard/settings" className="fn-btn fn-btn-primary fn-mt-md">
+            {needsXIdLink ? "X ID を連携する" : "X ID 設定を開く"}
+          </Link>
+        </div>
+      ) : videos.length === 0 ? (
         <div className="fn-empty">
           <Icon name="info" size={20} aria-hidden />
           <p className="fn-empty-message">

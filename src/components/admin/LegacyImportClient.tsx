@@ -6,35 +6,28 @@ import styles from "./LegacyImportClient.module.css";
 import { Icon } from "@/components/ui/Icon";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { mojibakeHitCount } from "@/lib/utils/mojibake";
-import { buildLegacyImportClientPreviewKey } from "@/lib/legacy/clientPreviewKey";
 
 interface PreviewRow {
   kind: "event" | "video";
   id: string;
   title: string;
-  status: "create" | "update" | "skip" | "merge";
+  action: "create" | "replace" | "skip";
   conflict: boolean;
+  visibility_status?: "draft" | "private" | "public" | "archived";
+  softwareCount: number;
+  memberCount: number;
   warnings: string[];
-  importedState?: {
-    visibility_status: "draft" | "private" | "public" | "archived";
-    is_active: 0 | 1;
-    is_entry_open: 0 | 1;
-    is_archived: 0 | 1;
-    importMode: string;
-  };
-  staticRebuildTargets?: string[];
-  dbReductionNotes?: string[];
 }
 
-type LegacyImportMode = "archive" | "preserve" | "active_event" | "draft";
-type StaticRebuildStrategy = "none" | "summary" | "event" | "full";
+type ImportMode = "archive" | "preserve" | "active_event" | "draft";
+type ImportStrategy = "create_only" | "replace_imported" | "skip_existing";
 
 interface ImportCounts {
-  events: { create: number; update: number; skip: number; failed: number };
-  videos: { create: number; update: number; skip: number; failed: number };
-  xUsers: { create: number; update: number };
+  events: { create: number; replace: number; skip: number; failed: number };
+  videos: { create: number; replace: number; skip: number; failed: number };
+  xUsers: { create: number };
   members: number;
-  editors: number;
+  staff: number;
 }
 
 interface ImportResult {
@@ -54,9 +47,7 @@ interface PendingFile {
   encoding: string;
 }
 
-type Strategy = "skip" | "update" | "merge";
-
-const PREVIEW_LIMIT = 80;
+const PREVIEW_LIMIT = 100;
 const DECODER_CANDIDATES = ["utf-8", "shift_jis", "windows-31j"];
 
 async function readTextSmart(file: File): Promise<{ content: string; encoding: string }> {
@@ -64,8 +55,7 @@ async function readTextSmart(file: File): Promise<{ content: string; encoding: s
   const decoded = DECODER_CANDIDATES.map((encoding) => {
     const content = new TextDecoder(encoding, { fatal: false }).decode(buffer);
     const score =
-      (content.match(/\uFFFD/g)?.length ?? 0) * 20 +
-      mojibakeHitCount(content);
+      (content.match(/\uFFFD/g)?.length ?? 0) * 20 + mojibakeHitCount(content);
     const parses = (() => {
       try {
         JSON.parse(content);
@@ -95,10 +85,10 @@ async function parseImportResponse(res: Response): Promise<ImportResult> {
   }
   try {
     const data = JSON.parse(raw) as Partial<ImportResult> & { error?: string };
-    if (typeof data.message !== "string") {
+    if (typeof data.message !== "string" && typeof data.error !== "string") {
       return {
         ok: false,
-        message: data.error ?? `想定外の応答です (HTTP ${res.status})`,
+        message: `想定外の応答です (HTTP ${res.status})`,
         counts: emptyCounts(),
         preview: [],
         previewTotal: 0,
@@ -107,16 +97,16 @@ async function parseImportResponse(res: Response): Promise<ImportResult> {
     }
     return {
       ok: data.ok === true,
-      message: data.message,
-      counts: data.counts ?? emptyCounts(),
-      preview: Array.isArray(data.preview) ? data.preview : [],
+      message: data.message ?? data.error ?? `HTTP ${res.status}`,
+      counts: (data.counts as ImportCounts) ?? emptyCounts(),
+      preview: Array.isArray(data.preview) ? (data.preview as PreviewRow[]) : [],
       previewTotal:
         typeof data.previewTotal === "number"
           ? data.previewTotal
           : Array.isArray(data.preview)
             ? data.preview.length
             : 0,
-      errors: Array.isArray(data.errors) ? data.errors : [],
+      errors: Array.isArray(data.errors) ? (data.errors as string[]) : [],
       previewToken:
         typeof data.previewToken === "string" ? data.previewToken : undefined,
     };
@@ -136,12 +126,8 @@ export function LegacyImportClient(): React.ReactElement {
   const router = useRouter();
   const [files, setFiles] = React.useState<PendingFile[]>([]);
   const [dragOver, setDragOver] = React.useState(false);
-  const [eventStrategy, setEventStrategy] = React.useState<Strategy>("skip");
-  const [videoStrategy, setVideoStrategy] = React.useState<Strategy>("skip");
-  const [updateXUsers, setUpdateXUsers] = React.useState(false);
-  const [importMode, setImportMode] = React.useState<LegacyImportMode>("archive");
-  const [staticRebuildStrategy, setStaticRebuildStrategy] =
-    React.useState<StaticRebuildStrategy>("event");
+  const [strategy, setStrategy] = React.useState<ImportStrategy>("skip_existing");
+  const [importMode, setImportMode] = React.useState<ImportMode>("archive");
   const [enqueueStaticRebuild, setEnqueueStaticRebuild] = React.useState(true);
   const [analysis, setAnalysis] = React.useState<ImportResult | null>(null);
   const [analysisKey, setAnalysisKey] = React.useState<string | null>(null);
@@ -149,6 +135,17 @@ export function LegacyImportClient(): React.ReactElement {
   const [pending, setPending] = React.useState<"analyze" | "apply" | null>(null);
   const [confirmApply, setConfirmApply] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const currentKey = React.useMemo(
+    () =>
+      JSON.stringify({
+        files: files.map((f) => ({ name: f.name, size: f.size })),
+        strategy,
+        importMode,
+        enqueueStaticRebuild,
+      }),
+    [files, strategy, importMode, enqueueStaticRebuild],
+  );
 
   const addFiles = React.useCallback(async (list: FileList | File[]) => {
     const arr = Array.from(list).filter(
@@ -158,15 +155,12 @@ export function LegacyImportClient(): React.ReactElement {
         f.type.includes("csv") ||
         f.type.includes("tab-separated-values"),
     );
-    const next: PendingFile[] = await Promise.all(arr.map(async (f) => {
-      const decoded = await readTextSmart(f);
-      return {
-        name: f.name,
-        size: f.size,
-        content: decoded.content,
-        encoding: decoded.encoding,
-      };
-    }));
+    const next: PendingFile[] = await Promise.all(
+      arr.map(async (f) => {
+        const decoded = await readTextSmart(f);
+        return { name: f.name, size: f.size, content: decoded.content, encoding: decoded.encoding };
+      }),
+    );
     setFiles((prev) => {
       const merged = new Map(prev.map((f) => [f.name, f]));
       for (const f of next) merged.set(f.name, f);
@@ -180,9 +174,7 @@ export function LegacyImportClient(): React.ReactElement {
   const onDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setDragOver(false);
-    if (e.dataTransfer.files?.length) {
-      void addFiles(e.dataTransfer.files);
-    }
+    if (e.dataTransfer.files?.length) void addFiles(e.dataTransfer.files);
   };
 
   const removeFile = (idx: number) => {
@@ -192,40 +184,28 @@ export function LegacyImportClient(): React.ReactElement {
     setApplyResult(null);
   };
 
+  const buildRequestBody = (action: "analyze" | "apply") => ({
+    action,
+    files: files.map((f) => ({ name: f.name, content: f.content })),
+    strategy: { importMode, strategy, enqueueStaticRebuild },
+    ...(action === "apply" && analysis?.previewToken
+      ? { previewToken: analysis.previewToken }
+      : {}),
+  });
+
   const runAnalyze = async () => {
     if (files.length === 0) return;
-    const key = buildLegacyImportClientPreviewKey({
-      files,
-      importMode,
-      enqueueStaticRebuild,
-      staticRebuildStrategy,
-      eventStrategy,
-      videoStrategy,
-      updateXUsers,
-    });
     setPending("analyze");
     setApplyResult(null);
     try {
-      const res = await fetch("/api/admin/legacy-import", {
+      const res = await fetch("/api/admin/import/legacy", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "analyze",
-          previewLimit: PREVIEW_LIMIT,
-          files: files.map((f) => ({ name: f.name, content: f.content })),
-          strategy: {
-            importMode,
-            enqueueStaticRebuild,
-            staticRebuildStrategy,
-            events: eventStrategy,
-            videos: videoStrategy,
-            updateXUsers,
-          },
-        }),
+        body: JSON.stringify(buildRequestBody("analyze")),
       });
       const json = await parseImportResponse(res);
       setAnalysis(json);
-      setAnalysisKey(key);
+      setAnalysisKey(currentKey);
     } catch (e) {
       setAnalysis({
         ok: false,
@@ -242,36 +222,13 @@ export function LegacyImportClient(): React.ReactElement {
   };
 
   const doApply = async () => {
-    if (!hasFreshSuccessfulPreview) {
-      setApplyResult({
-        ok: false,
-        message: "先に現在のファイルと取り込みモードでドライランを実行してください。",
-        counts: emptyCounts(),
-        preview: [],
-        previewTotal: 0,
-        errors: ["preview-required"],
-      });
-      return;
-    }
+    if (!hasFreshSuccessfulPreview) return;
     setPending("apply");
     try {
-      const res = await fetch("/api/admin/legacy-import", {
+      const res = await fetch("/api/admin/import/legacy", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "apply",
-          previewToken: analysis?.previewToken,
-          previewLimit: PREVIEW_LIMIT,
-          files: files.map((f) => ({ name: f.name, content: f.content })),
-          strategy: {
-            events: eventStrategy,
-            videos: videoStrategy,
-            updateXUsers,
-            importMode,
-            enqueueStaticRebuild,
-            staticRebuildStrategy,
-          },
-        }),
+        body: JSON.stringify(buildRequestBody("apply")),
       });
       const json = await parseImportResponse(res);
       setApplyResult(json);
@@ -290,40 +247,24 @@ export function LegacyImportClient(): React.ReactElement {
     }
   };
 
-  const runApply = () => {
-    if (files.length === 0) return;
-    if (!hasFreshSuccessfulPreview) return;
-    setConfirmApply(true);
-  };
-
-  const totalSize = files.reduce((acc, f) => acc + f.size, 0);
-  const currentPreviewKey = buildLegacyImportClientPreviewKey({
-    files,
-    importMode,
-    enqueueStaticRebuild,
-    staticRebuildStrategy,
-    eventStrategy,
-    videoStrategy,
-    updateXUsers,
-  });
   const hasFreshSuccessfulPreview =
     analysis?.ok === true &&
     analysis.errors.length === 0 &&
     typeof analysis.previewToken === "string" &&
-    analysisKey === currentPreviewKey;
+    analysisKey === currentKey;
+
+  const totalSize = files.reduce((acc, f) => acc + f.size, 0);
   const displayResult = applyResult ?? analysis;
   const previewRows = (displayResult?.preview ?? []).slice(0, PREVIEW_LIMIT);
   const truncated = (displayResult?.previewTotal ?? 0) - previewRows.length;
 
   return (
     <div className={styles.root}>
+      {/* ドロップゾーン */}
       <div
         className={`${styles.dropzone} ${dragOver ? styles.dropzoneActive : ""}`}
         onClick={() => inputRef.current?.click()}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragOver(true);
-        }}
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
         role="button"
@@ -375,37 +316,22 @@ export function LegacyImportClient(): React.ReactElement {
         </div>
       ) : null}
 
+      {/* 設定コントロール */}
       <div className={styles.controls}>
         <div className={styles.strategyGroup}>
-          <label htmlFor="ev-strategy">イベント衝突</label>
+          <label htmlFor="import-strategy">衝突戦略</label>
           <select
-            id="ev-strategy"
-            value={eventStrategy}
+            id="import-strategy"
+            value={strategy}
             onChange={(e) => {
-              setEventStrategy(e.target.value as Strategy);
+              setStrategy(e.target.value as ImportStrategy);
               setAnalysisKey(null);
             }}
             disabled={pending !== null}
           >
-            <option value="skip">skip: 既存を保護</option>
-            <option value="update">update: 全置換</option>
-            <option value="merge">merge: 空欄は保持</option>
-          </select>
-        </div>
-        <div className={styles.strategyGroup}>
-          <label htmlFor="vd-strategy">動画衝突</label>
-          <select
-            id="vd-strategy"
-            value={videoStrategy}
-            onChange={(e) => {
-              setVideoStrategy(e.target.value as Strategy);
-              setAnalysisKey(null);
-            }}
-            disabled={pending !== null}
-          >
-            <option value="skip">skip: 既存を保護</option>
-            <option value="update">update: 全置換</option>
-            <option value="merge">merge: 空欄は保持</option>
+            <option value="skip_existing">skip_existing: 既存を保護</option>
+            <option value="create_only">create_only: 新規のみ</option>
+            <option value="replace_imported">replace_imported: 取り込み済みを置き換え</option>
           </select>
         </div>
         <div className={styles.strategyGroup}>
@@ -414,7 +340,7 @@ export function LegacyImportClient(): React.ReactElement {
             id="import-mode"
             value={importMode}
             onChange={(e) => {
-              setImportMode(e.target.value as LegacyImportMode);
+              setImportMode(e.target.value as ImportMode);
               setAnalysisKey(null);
             }}
             disabled={pending !== null}
@@ -423,25 +349,6 @@ export function LegacyImportClient(): React.ReactElement {
             <option value="preserve">preserve: 日時から推定</option>
             <option value="active_event">active_event: 開催中として取り込み</option>
             <option value="draft">draft: 下書き</option>
-          </select>
-        </div>
-        <div className={styles.strategyGroup}>
-          <label htmlFor="rebuild-strategy">静的 JSON 再生成</label>
-          <select
-            id="rebuild-strategy"
-            value={staticRebuildStrategy}
-            onChange={(e) =>
-              {
-                setStaticRebuildStrategy(e.target.value as StaticRebuildStrategy);
-                setAnalysisKey(null);
-              }
-            }
-            disabled={pending !== null}
-          >
-            <option value="event">event: イベント単位（推奨）</option>
-            <option value="summary">summary: 一覧のみ</option>
-            <option value="full">full: 動画単位も含む</option>
-            <option value="none">none: キューに積まない</option>
           </select>
         </div>
         <label className={styles.checkboxLine}>
@@ -456,18 +363,6 @@ export function LegacyImportClient(): React.ReactElement {
           />
           <span>取り込み後に静的 JSON 再生成キューへ積む</span>
         </label>
-        <label className={styles.checkboxLine}>
-          <input
-            type="checkbox"
-            checked={updateXUsers}
-            onChange={(e) => {
-              setUpdateXUsers(e.target.checked);
-              setAnalysisKey(null);
-            }}
-            disabled={pending !== null}
-          />
-          <span>既存 X ID の表示名も更新</span>
-        </label>
         <div style={{ flex: 1 }} />
         <button
           type="button"
@@ -481,31 +376,27 @@ export function LegacyImportClient(): React.ReactElement {
         <button
           type="button"
           className="fn-btn fn-btn-primary"
-          onClick={runApply}
+          onClick={() => setConfirmApply(true)}
           disabled={files.length === 0 || pending !== null || !hasFreshSuccessfulPreview}
         >
           <Icon name="upload" size={12} aria-hidden />
           {pending === "apply" ? "取り込み中..." : "取り込み"}
         </button>
       </div>
+
       {files.length > 0 && !hasFreshSuccessfulPreview ? (
         <div className={styles.fileMeta} style={{ textAlign: "right" }}>
           取り込み前に、現在の設定でドライランを完了してください。
         </div>
       ) : null}
 
+      {/* 結果表示 */}
       {displayResult ? (
         <>
           <div
-            className={`${styles.notice} ${
-              displayResult.ok ? styles.successNotice : ""
-            }`}
+            className={`${styles.notice} ${displayResult.ok ? styles.successNotice : ""}`}
           >
-            <Icon
-              name={displayResult.ok ? "check" : "warning"}
-              size={13}
-              aria-hidden
-            />{" "}
+            <Icon name={displayResult.ok ? "check" : "warning"} size={13} aria-hidden />{" "}
             {applyResult ? "本番取り込み: " : "ドライラン: "}
             {displayResult.message}
           </div>
@@ -513,23 +404,23 @@ export function LegacyImportClient(): React.ReactElement {
           <div className={styles.summary}>
             <SummaryCard
               label="イベント"
-              value={`${displayResult.counts.events.create + displayResult.counts.events.update}`}
-              sub={`新規 ${displayResult.counts.events.create} / 更新 ${displayResult.counts.events.update} / skip ${displayResult.counts.events.skip} / 失敗 ${displayResult.counts.events.failed}`}
+              value={`${displayResult.counts.events.create + (displayResult.counts.events.replace ?? 0)}`}
+              sub={`新規 ${displayResult.counts.events.create} / 置換 ${displayResult.counts.events.replace ?? 0} / skip ${displayResult.counts.events.skip} / 失敗 ${displayResult.counts.events.failed}`}
             />
             <SummaryCard
               label="動画"
-              value={`${displayResult.counts.videos.create + displayResult.counts.videos.update}`}
-              sub={`新規 ${displayResult.counts.videos.create} / 更新 ${displayResult.counts.videos.update} / skip ${displayResult.counts.videos.skip} / 失敗 ${displayResult.counts.videos.failed}`}
+              value={`${displayResult.counts.videos.create + (displayResult.counts.videos.replace ?? 0)}`}
+              sub={`新規 ${displayResult.counts.videos.create} / 置換 ${displayResult.counts.videos.replace ?? 0} / skip ${displayResult.counts.videos.skip} / 失敗 ${displayResult.counts.videos.failed}`}
             />
             <SummaryCard
               label="X ID"
               value={`${displayResult.counts.xUsers.create}`}
-              sub={`既存更新 ${displayResult.counts.xUsers.update}`}
+              sub="imported ステータスで取り込み"
             />
             <SummaryCard
-              label="運営 / メンバー"
-              value={`${displayResult.counts.editors + displayResult.counts.members}`}
-              sub={`editors ${displayResult.counts.editors} / members ${displayResult.counts.members}`}
+              label="メンバー / スタッフ"
+              value={`${(displayResult.counts.members ?? 0) + (displayResult.counts.staff ?? 0)}`}
+              sub={`members ${displayResult.counts.members ?? 0} / staff ${displayResult.counts.staff ?? 0}`}
             />
           </div>
 
@@ -537,11 +428,11 @@ export function LegacyImportClient(): React.ReactElement {
             <table className={styles.previewTable}>
               <thead>
                 <tr>
-                  <th style={{ width: 70 }}>種別</th>
+                  <th style={{ width: 60 }}>種別</th>
                   <th>ID</th>
                   <th>タイトル</th>
-                  <th style={{ width: 90 }}>状態</th>
-                  <th>警告</th>
+                  <th style={{ width: 90 }}>アクション</th>
+                  <th>詳細</th>
                 </tr>
               </thead>
               <tbody>
@@ -553,36 +444,24 @@ export function LegacyImportClient(): React.ReactElement {
                     </td>
                     <td>{row.title}</td>
                     <td>
-                      <span className={statusClass(row.status, styles)}>
-                        {row.status}
-                      </span>
+                      <span className={actionClass(row.action, styles)}>{row.action}</span>
                     </td>
                     <td className={styles.warning}>
-                      {row.importedState ? (
-                        <span>
-                          公開状態: {row.importedState.visibility_status}
-                          <br />
-                          互換フラグ: archived=
-                          {row.importedState.is_archived} active=
-                          {row.importedState.is_active}
-                          <br />
-                        </span>
+                      {row.kind === "event" && row.visibility_status ? (
+                        <span>公開状態: {row.visibility_status}<br /></span>
                       ) : null}
-                      {row.staticRebuildTargets?.length ? (
-                        <span>
-                          静的JSON: {row.staticRebuildTargets.join(", ")}
-                          <br />
-                        </span>
+                      {row.kind === "video" && row.softwareCount > 0 ? (
+                        <span>ソフト: {row.softwareCount} 件<br /></span>
                       ) : null}
-                      {row.dbReductionNotes?.length ? (
-                        <span>{row.dbReductionNotes.join(" · ")}</span>
+                      {row.kind === "video" && row.memberCount > 0 ? (
+                        <span>メンバー: {row.memberCount} 件<br /></span>
                       ) : null}
                       {row.warnings.length > 0 ? (
                         <span>{row.warnings.join(" / ")}</span>
                       ) : null}
-                      {!row.importedState &&
-                      !row.staticRebuildTargets?.length &&
-                      !row.dbReductionNotes?.length &&
+                      {!row.visibility_status &&
+                      !row.softwareCount &&
+                      !row.memberCount &&
                       row.warnings.length === 0
                         ? "-"
                         : null}
@@ -613,7 +492,7 @@ export function LegacyImportClient(): React.ReactElement {
       <ConfirmDialog
         open={confirmApply}
         title="インポートを実行しますか?"
-        message={`インポートを実行します。\n\nイベント衝突: ${eventStrategy}\n動画衝突: ${videoStrategy}\n既存 X ID 更新: ${updateXUsers ? "する" : "しない"}\n\n続行しますか?`}
+        message={`インポートを実行します。\n\n戦略: ${strategy}\n取り込みモード: ${importMode}\n静的 JSON 再生成: ${enqueueStaticRebuild ? "する" : "しない"}\n\n続行しますか?`}
         confirmLabel="取り込む"
         tone="danger"
         onConfirm={() => {
@@ -644,21 +523,18 @@ function SummaryCard({
   );
 }
 
-function statusClass(
-  status: PreviewRow["status"],
-  cls: typeof styles,
-): string {
-  if (status === "create") return cls.statusCreate;
-  if (status === "update" || status === "merge") return cls.statusUpdate;
+function actionClass(action: PreviewRow["action"], cls: typeof styles): string {
+  if (action === "create") return cls.statusCreate;
+  if (action === "replace") return cls.statusUpdate;
   return cls.statusSkip;
 }
 
 function emptyCounts(): ImportCounts {
   return {
-    events: { create: 0, update: 0, skip: 0, failed: 0 },
-    videos: { create: 0, update: 0, skip: 0, failed: 0 },
-    xUsers: { create: 0, update: 0 },
+    events: { create: 0, replace: 0, skip: 0, failed: 0 },
+    videos: { create: 0, replace: 0, skip: 0, failed: 0 },
+    xUsers: { create: 0 },
     members: 0,
-    editors: 0,
+    staff: 0,
   };
 }

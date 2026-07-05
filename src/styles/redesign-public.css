@@ -52,8 +52,8 @@
   max-width: var(--fn-page-max);
   margin-left: auto;
   margin-right: auto;
-  padding-left: var(--fn-page-gutter);
-  padding-right: var(--fn-page-gutter);
+  padding-left: var(--fn-page-gutter-inline-start);
+  padding-right: var(--fn-page-gutter-inline-end);
 }
 
 /* ページ幅モディファイア（後方互換）— いずれも標準レールと同じ幅 */
@@ -376,7 +376,7 @@
   align-items: center;
   gap: 24px;
   min-height: var(--header-h, 64px);
-  padding: 10px 0;
+  padding-block: 10px;
 }
 
 [data-fn-surface="public"] .fn-nav {
@@ -460,7 +460,7 @@
   display: grid;
   grid-template-columns: 1fr 2fr;
   gap: 32px;
-  padding: 48px 0 28px;
+  padding-block: 48px 28px;
 }
 
 [data-fn-surface="public"] .fn-footer-brand {
@@ -529,7 +529,7 @@
 /* ─── セクション見出し ───────────────────────────────────── */
 
 [data-fn-surface="public"] .fn-section {
-  padding: var(--fn-space-section) 0 0;
+  padding-block: var(--fn-space-section) 0;
 }
 
 [data-fn-surface="public"] .fn-section-title,
@@ -547,7 +547,7 @@
   display: grid;
   grid-template-columns: 0.9fr 1.1fr;
   gap: clamp(40px, 5vw, 56px);
-  padding: clamp(48px, 6vw, 64px) 0 clamp(44px, 5vw, 56px);
+  padding-block: clamp(48px, 6vw, 64px) clamp(44px, 5vw, 56px);
   align-items: center;
 }
 
@@ -623,7 +623,7 @@
   [data-fn-surface="public"] .fn-intro {
     grid-template-columns: 1fr;
     gap: 32px;
-    padding: 36px 0;
+    padding-block: 36px;
   }
 }
 
@@ -779,7 +779,7 @@
 
 [data-fn-surface="public"] .fn-closing {
   margin-top: 56px;
-  padding: 36px 0;
+  padding-block: 36px;
   display: flex;
   align-items: center;
   justify-content: space-between;

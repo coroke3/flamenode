@@ -9,6 +9,9 @@ import { videos, xUsers } from "./schema";
  */
 export const creatorNameExpr = sql<string>`COALESCE(${videos.creator_display_name}, ${xUsers.x_name}, '@' || ${videos.creator_x_user_id})`;
 
+/** 作品に保存された投稿者名のみ。x_users からは補完しない。 */
+export const storedCreatorNameExpr = sql<string>`COALESCE(${videos.creator_display_name}, ${videos.creator_x_user_id})`;
+
 /**
  * 作品カード用のアイコン解決 (1段目、DB 単発で済む)。
  *

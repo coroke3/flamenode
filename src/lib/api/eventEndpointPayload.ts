@@ -8,10 +8,6 @@ export interface EventApiEventInput {
   title: string;
   explanation: string | null;
   visibility_status?: string | null;
-  is_active: number | null;
-  /** Legacy storage flag. Public payload now derives this from entry dates. */
-  is_entry_open: number | null;
-  is_archived: number | null;
   start_time: number | null;
   end_time: number | null;
   entry_start_time: number | null;

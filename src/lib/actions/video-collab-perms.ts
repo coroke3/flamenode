@@ -1,4 +1,5 @@
 "use server";
+import { auditAction } from "@/lib/audit/helpers";
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -6,12 +7,7 @@ import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { canEditVideo } from "@/lib/auth/ownership";
-import {
-  historyLogs,
-  videoMembers,
-  videos,
-  xUsers,
-} from "@/lib/db/schema";
+import { videoMembers, videos, xUsers } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
 import { normalizeXId } from "@/lib/utils/xid";
 import { shouldEnqueueUserNotification } from "@/lib/notifications/context";
@@ -257,7 +253,7 @@ export async function upsertVideoCollaborator(
     });
   }
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "video_members",
     record_id: existing?.id ?? video.id,
     action: existing ? "UPDATE" : "CREATE",
@@ -276,7 +272,6 @@ export async function upsertVideoCollaborator(
     }),
     operator_discord_id: user.id,
     retention_class: "long_audit",
-    created_at: now,
   });
 
   const wasCanEdit = existing?.can_edit === 1;
@@ -385,7 +380,7 @@ export async function deleteVideoCollaborator(
       .where(eq(videoMembers.id, existing.id));
   }
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "video_members",
     record_id: existing.id,
     action: existing.is_public_member === 0 ? "DELETE" : "UPDATE",
@@ -400,7 +395,6 @@ export async function deleteVideoCollaborator(
     }),
     operator_discord_id: user.id,
     retention_class: "long_audit",
-    created_at: now,
   });
 
   revalidatePath(`/dashboard/edit/${video.id}`);

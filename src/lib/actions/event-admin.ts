@@ -1,45 +1,42 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
-import { canEditEvent } from "@/lib/auth/ownership";
 import {
   eventCustomQuestions,
   eventTemplates,
   events,
-  historyLogs,
 } from "@/lib/db/schema";
-import {
-  buildEventUpdateAuditPayload,
-  EVENT_SECTION_PERMISSION_KEYS,
-  type EventEditSection,
-} from "@/lib/admin/eventSectionFields";
+import { auditAction } from "@/lib/audit/helpers";
 import {
   parseEventTemplateSnapshot,
   type EventTemplateQuestionDefinition,
 } from "@/lib/admin/eventTemplateSettings";
-import { parseJstDatetimeLocal } from "@/lib/utils/dateInput";
 import { generateId } from "@/lib/utils/id";
-import { normalizeHttpUrl } from "@/lib/utils/url";
-import {
-  DEFAULT_STAGE_PERMISSION_FIELD,
-} from "@/lib/video/formSettings";
 import { syncStagePermissionCustomQuestions } from "@/lib/video/stagePermissionQuestions";
 import {
-  syncLegacyEventVisibilityFlags,
-  type EventVisibilityStatus,
-} from "@/lib/utils/eventStatus";
+  buildPartsJson,
+  buildVideoFormSettingsJson,
+  parseEventForm,
+  resolveSubmittedEventVisibility,
+} from "@/lib/event/eventForm";
+import { buildEventUpdatePayload, parseDateInput } from "@/lib/event/eventPayload";
+import { writeEventUpdateAudit } from "@/lib/event/eventAudit";
+import {
+  revalidateEventListPaths,
+  revalidateEventPaths,
+} from "@/lib/event/eventRevalidate";
+import {
+  hasAnyEventEditPermission,
+  resolveEventEditPermissions,
+} from "@/lib/event/eventEditPermissions";
 
 export interface EventActionResult {
   ok: boolean;
   message?: string;
   eventId?: string;
 }
-
-type EventUpdatePayload = Partial<typeof events.$inferInsert>;
 
 async function restoreTemplateCustomQuestions(
   db: NonNullable<ReturnType<typeof getDatabase>>,
@@ -69,152 +66,6 @@ async function restoreTemplateCustomQuestions(
   await db.insert(eventCustomQuestions).values(values).onConflictDoNothing();
 }
 
-const eventSchema = z.object({
-  id: z.string().trim().min(1).max(64).optional(),
-  title: z.string().trim().min(1).max(200),
-  event_type: z
-    .enum(["event", "collabo", "type", "other"])
-    .default("event"),
-  explanation: z.string().trim().max(4000).optional().nullable(),
-  icon_url: z.preprocess(
-    (val) => (typeof val === "string" ? normalizeHttpUrl(val, { maxLength: 500 }) : val),
-    z.string().trim().max(500).optional().nullable(),
-  ),
-  img_url: z.preprocess(
-    (val) => (typeof val === "string" ? normalizeHttpUrl(val, { maxLength: 500 }) : val),
-    z.string().trim().max(500).optional().nullable(),
-  ),
-  accent_color: z.string().trim().max(20).optional().nullable(),
-  start_time: z.string().trim().optional().nullable(),
-  end_time: z.string().trim().optional().nullable(),
-  entry_start_time: z.string().trim().optional().nullable(),
-  entry_end_time: z.string().trim().optional().nullable(),
-  visibility_status: z
-    .enum(["draft", "private", "public", "archived"])
-    .optional(),
-  is_active: z.coerce.number().min(0).max(1).default(0),
-  is_archived: z.coerce.number().min(0).max(1).default(0),
-  allow_user_video_event_links: z.coerce.number().min(0).max(1).default(0),
-  allow_user_video_edits: z.coerce.number().min(0).max(1).default(0),
-  user_video_edit_permission_keys_json: z
-    .string()
-    .trim()
-    .max(2000)
-    .optional()
-    .nullable(),
-  stage_permission_enabled: z.coerce.number().min(0).max(1).default(0),
-  stage_permission_required: z.coerce.number().min(0).max(1).default(0),
-  stage_permission_label: z.string().trim().max(120).optional().nullable(),
-  stage_permission_description: z.string().trim().max(1000).optional().nullable(),
-  stage_permission_placeholder: z.string().trim().max(500).optional().nullable(),
-  max_slots_per_video: z.coerce.number().min(1).max(20).default(1),
-  max_consecutive_slots_per_entry: z.coerce.number().min(1).max(20).default(3),
-  slot_part_gap_minutes: z.coerce.number().min(1).max(1440).default(15),
-  slot_type: z.enum(["time", "count"]).default("time"),
-  slot_visibility_mode: z
-    .enum(["public_name", "anonymous", "hidden"])
-    .default("public_name"),
-  parts_text: z.string().max(2000).optional().nullable(),
-  template_id: z.string().trim().max(64).optional().nullable(),
-  editable_fields: z.string().trim().max(4000).optional().nullable(),
-  review_settings: z.string().trim().max(4000).optional().nullable(),
-});
-
-const PART_NAME_MAX_LEN = 40;
-const PART_MAX_COUNT = 20;
-
-function buildPartsJson(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  const seen = new Set<string>();
-  const parts: string[] = [];
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const truncated = trimmed.slice(0, PART_NAME_MAX_LEN);
-    if (seen.has(truncated)) continue;
-    seen.add(truncated);
-    parts.push(truncated);
-    if (parts.length >= PART_MAX_COUNT) break;
-  }
-  if (parts.length === 0) return null;
-  return JSON.stringify(parts);
-}
-
-function parseDateInput(raw: string | null | undefined): number | null {
-  return parseJstDatetimeLocal(raw);
-}
-
-function resolveSubmittedEventVisibility(
-  data: Pick<z.infer<typeof eventSchema>, "visibility_status" | "is_active" | "is_archived">,
-): EventVisibilityStatus {
-  if (data.visibility_status) return data.visibility_status;
-  if (data.is_archived === 1) return "archived";
-  if (data.is_active === 1) return "public";
-  return "draft";
-}
-
-function boolFormValue(value: FormDataEntryValue | undefined): boolean {
-  return String(value ?? "") === "1";
-}
-
-function cleanQuestionId(value: FormDataEntryValue | undefined, index: number): string {
-  const fallback =
-    index === 0 ? "stage_permission" : `stage_permission_${index + 1}`;
-  const cleaned = String(value ?? "")
-    .trim()
-    .replace(/[^A-Za-z0-9_-]/g, "_")
-    .slice(0, 64);
-  return cleaned || fallback;
-}
-
-function buildVideoFormSettingsJson(
-  formData: FormData,
-  data: z.infer<typeof eventSchema>,
-): string {
-  const ids = formData.getAll("stage_permission_question_id");
-  const enabled = formData.getAll("stage_permission_question_enabled");
-  const required = formData.getAll("stage_permission_question_required");
-  const labels = formData.getAll("stage_permission_question_label");
-  const descriptions = formData.getAll("stage_permission_question_description");
-  const placeholders = formData.getAll("stage_permission_question_placeholder");
-  const sentQuestionArray =
-    String(formData.get("stage_permission_questions_present") ?? "") === "1";
-
-  if (sentQuestionArray || ids.length > 0) {
-    const stagePermissions = ids.slice(0, 20).map((id, index) => ({
-      id: cleanQuestionId(id, index),
-      enabled: boolFormValue(enabled[index]),
-      required: boolFormValue(required[index]),
-      label:
-        String(labels[index] ?? "").trim().slice(0, 120) ||
-        DEFAULT_STAGE_PERMISSION_FIELD.label,
-      description:
-        String(descriptions[index] ?? "").trim().slice(0, 1000) ||
-        DEFAULT_STAGE_PERMISSION_FIELD.description,
-      placeholder:
-        String(placeholders[index] ?? "").trim().slice(0, 500) ||
-        DEFAULT_STAGE_PERMISSION_FIELD.placeholder,
-    }));
-    return JSON.stringify({ stage_permissions: stagePermissions });
-  }
-
-  return JSON.stringify({
-    stage_permission: {
-      enabled: data.stage_permission_enabled === 1,
-      required: data.stage_permission_required === 1,
-      label:
-        data.stage_permission_label?.trim() ||
-        DEFAULT_STAGE_PERMISSION_FIELD.label,
-      description:
-        data.stage_permission_description?.trim() ||
-        DEFAULT_STAGE_PERMISSION_FIELD.description,
-      placeholder:
-        data.stage_permission_placeholder?.trim() ||
-        DEFAULT_STAGE_PERMISSION_FIELD.placeholder,
-    },
-  });
-}
-
 async function requireAdmin(): Promise<
   | { ok: true; userId: string }
   | { ok: false; result: EventActionResult }
@@ -236,10 +87,8 @@ export async function createEvent(
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
 
-  const parsed = eventSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) {
-    return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
-  }
+  const parsed = parseEventForm(formData);
+  if (!parsed.ok) return parsed;
   const data = parsed.data;
   const id = data.id?.trim() || generateId("ev");
   const now = Math.floor(Date.now() / 1000);
@@ -270,7 +119,6 @@ export async function createEvent(
 
   const videoFormSettingsJson = buildVideoFormSettingsJson(formData, data);
   const visibilityStatus = resolveSubmittedEventVisibility(data);
-  const legacyVisibility = syncLegacyEventVisibilityFlags(visibilityStatus);
   await db.insert(events).values({
     id,
     title: data.title,
@@ -280,14 +128,10 @@ export async function createEvent(
     img_url: data.img_url ?? null,
     accent_color: data.accent_color ?? null,
     visibility_status: visibilityStatus,
-    is_active: legacyVisibility.is_active,
-    is_entry_open: legacyVisibility.is_entry_open,
-    is_archived: legacyVisibility.is_archived,
     allow_user_video_event_links: data.allow_user_video_event_links,
     allow_user_video_edits: data.allow_user_video_edits,
     user_video_edit_permission_keys_json:
       data.user_video_edit_permission_keys_json ?? null,
-    video_form_settings_json: videoFormSettingsJson,
     start_time: parseDateInput(data.start_time),
     end_time: parseDateInput(data.end_time),
     entry_start_time: parseDateInput(data.entry_start_time),
@@ -313,22 +157,17 @@ export async function createEvent(
   );
   await syncStagePermissionCustomQuestions(db, id, videoFormSettingsJson, now);
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "events",
     record_id: id,
     action: "CREATE",
-    after_data: JSON.stringify({ title: data.title, visibility_status: visibilityStatus }),
+    after_data: { title: data.title, visibility_status: visibilityStatus },
     operator_discord_id: guard.userId,
     retention_class: "normal",
-    created_at: now,
   });
 
-  revalidatePath("/admin/events");
-  revalidatePath("/manage");
-  revalidatePath(`/manage/events/${id}`);
-  revalidatePath(`/manage/events/${id}/edit`);
-  revalidatePath("/event");
-  revalidatePath(`/event/${id}`);
+  revalidateEventListPaths();
+  revalidateEventPaths(id);
   return { ok: true, eventId: id };
 }
 
@@ -342,21 +181,14 @@ export async function updateEvent(
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
 
-  const parsed = eventSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) {
-    return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
-  }
+  const parsed = parseEventForm(formData);
+  if (!parsed.ok) return parsed;
   const data = parsed.data;
   if (!data.id) return { ok: false, message: "id が必要です。" };
 
   const user = { id: u.id, role: u.role ?? null };
-  const [canBasic, canPublish, canQuestions, canSlots] = await Promise.all([
-    canEditEvent(db, user, data.id, "event.basic"),
-    canEditEvent(db, user, data.id, "event.publish"),
-    canEditEvent(db, user, data.id, "event.questions"),
-    canEditEvent(db, user, data.id, "event.slots"),
-  ]);
-  if (!canBasic && !canPublish && !canQuestions && !canSlots) {
+  const permissions = await resolveEventEditPermissions(db, user, data.id);
+  if (!hasAnyEventEditPermission(permissions)) {
     return {
       ok: false,
       message: "このイベント設定を変更する権限がありません。",
@@ -369,106 +201,39 @@ export async function updateEvent(
   if (!before) return { ok: false, message: "イベントが見つかりません。" };
 
   const now = Math.floor(Date.now() / 1000);
-  const updatePayload: EventUpdatePayload = { updated_at: now };
-  const updatedSections: EventEditSection[] = [];
-  const changedByPermission: Record<EventEditSection, string> = {} as Record<
-    EventEditSection,
-    string
-  >;
-
-  if (canBasic) {
-    Object.assign(updatePayload, {
-      title: data.title,
-      event_type: data.event_type,
-      explanation: data.explanation ?? null,
-      icon_url: data.icon_url ?? null,
-      img_url: data.img_url ?? null,
-      accent_color: data.accent_color ?? null,
-      start_time: parseDateInput(data.start_time),
-      end_time: parseDateInput(data.end_time),
-    });
-    updatedSections.push("basic");
-    changedByPermission.basic = EVENT_SECTION_PERMISSION_KEYS.basic;
-  }
-
-  if (canPublish) {
-    const visibilityStatus = resolveSubmittedEventVisibility(data);
-    const legacyVisibility = syncLegacyEventVisibilityFlags(visibilityStatus);
-    Object.assign(updatePayload, {
-      visibility_status: visibilityStatus,
-      is_active: legacyVisibility.is_active,
-      is_entry_open: legacyVisibility.is_entry_open,
-      is_archived: legacyVisibility.is_archived,
-      entry_start_time: parseDateInput(data.entry_start_time),
-      entry_end_time: parseDateInput(data.entry_end_time),
-      allow_user_video_event_links: data.allow_user_video_event_links,
-    });
-    updatedSections.push("publish");
-    changedByPermission.publish = EVENT_SECTION_PERMISSION_KEYS.publish;
-  }
-
-  let videoFormSettingsJson: string | null = null;
-  if (canQuestions) {
-    videoFormSettingsJson = buildVideoFormSettingsJson(formData, data);
-    Object.assign(updatePayload, {
-      allow_user_video_edits: data.allow_user_video_edits,
-      user_video_edit_permission_keys_json:
-        data.user_video_edit_permission_keys_json ?? null,
-      video_form_settings_json: videoFormSettingsJson,
-      editable_fields: data.editable_fields ?? before.editable_fields,
-      review_settings: data.review_settings ?? before.review_settings,
-    });
-    updatedSections.push("questions");
-    changedByPermission.questions = EVENT_SECTION_PERMISSION_KEYS.questions;
-  }
-
-  if (canSlots) {
-    Object.assign(updatePayload, {
-      max_slots_per_video: data.max_slots_per_video,
-      max_consecutive_slots_per_entry: data.max_consecutive_slots_per_entry,
-      slot_part_gap_minutes: data.slot_part_gap_minutes,
-      slot_type: data.slot_type,
-      slot_visibility_mode: data.slot_visibility_mode,
-      parts_json: buildPartsJson(data.parts_text),
-    });
-    updatedSections.push("slots");
-    changedByPermission.slots = EVENT_SECTION_PERMISSION_KEYS.slots;
-  }
+  const built = buildEventUpdatePayload({
+    data,
+    before,
+    formData,
+    permissions,
+    now,
+  });
 
   await db
     .update(events)
-    .set(updatePayload)
+    .set(built.payload)
     .where(eq(events.id, data.id));
 
-  if (canQuestions && videoFormSettingsJson != null) {
-    await syncStagePermissionCustomQuestions(db, data.id, videoFormSettingsJson, now);
+  if (permissions.questions && built.videoFormSettingsJson != null) {
+    await syncStagePermissionCustomQuestions(
+      db,
+      data.id,
+      built.videoFormSettingsJson,
+      now,
+    );
   }
 
-  const audit = buildEventUpdateAuditPayload({
-    updatedSections,
-    changedByPermission,
+  await writeEventUpdateAudit({
+    db,
+    eventId: data.id,
+    operatorUserId: u.id,
+    updatedSections: built.updatedSections,
+    changedByPermission: built.changedByPermission,
     before,
-    afterPayload: updatePayload,
+    afterPayload: built.payload,
   });
 
-  await db.insert(historyLogs).values({
-    table_name: "events",
-    record_id: data.id,
-    action: "UPDATE",
-    before_data: audit.before_data,
-    after_data: audit.after_data,
-    operator_discord_id: u.id,
-    retention_class: "normal",
-    created_at: now,
-  });
-
-  revalidatePath("/admin/events");
-  revalidatePath(`/admin/events/${data.id}`);
-  revalidatePath("/manage");
-  revalidatePath(`/manage/events/${data.id}`);
-  revalidatePath(`/manage/events/${data.id}/edit`);
-  revalidatePath("/event");
-  revalidatePath(`/event/${data.id}`);
+  revalidateEventPaths(data.id);
 
   const { enqueueAfterEventSettingsChange } = await import(
     "@/lib/staticRebuild/hooks"
@@ -506,30 +271,20 @@ export async function deleteEvent(
   await db
     .update(events)
     .set({
-      is_active: 0,
-      is_entry_open: 0,
-      is_archived: 1,
       visibility_status: "archived",
       updated_at: now,
     })
     .where(eq(events.id, eventId));
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "events",
     record_id: eventId,
     action: "UPDATE",
-    after_data: JSON.stringify({ archived_by_delete_action: true }),
+    after_data: { archived_by_delete_action: true },
     operator_discord_id: guard.userId,
     retention_class: "long_audit",
-    created_at: now,
   });
 
-  revalidatePath("/admin/events");
-  revalidatePath(`/admin/events/${eventId}`);
-  revalidatePath("/manage");
-  revalidatePath(`/manage/events/${eventId}`);
-  revalidatePath(`/manage/events/${eventId}/edit`);
-  revalidatePath("/event");
-  revalidatePath(`/event/${eventId}`);
+  revalidateEventPaths(eventId);
   return { ok: true };
 }

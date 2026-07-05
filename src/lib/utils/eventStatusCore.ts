@@ -14,13 +14,6 @@ export type EventVisibilityStatus = "draft" | "private" | "public" | "archived";
 
 export interface EventStatusInput {
   visibility_status?: EventVisibilityStatus | string | null;
-  is_active: number | null;
-  is_archived: number | null;
-  /**
-   * Legacy DB flag kept for compatibility. Entry acceptance is now derived from
-   * entry_start_time / entry_end_time and does not depend on this value.
-   */
-  is_entry_open?: number | null;
   start_time: number | null;
   end_time: number | null;
   entry_start_time?: number | null;
@@ -36,8 +29,6 @@ export function getEventVisibility(ev: EventStatusInput): EventVisibilityStatus 
   ) {
     return ev.visibility_status;
   }
-  if (ev.is_archived === 1) return "archived";
-  if (ev.is_active === 1) return "public";
   return "draft";
 }
 
@@ -47,22 +38,6 @@ export function isPublicEventVisible(ev: EventStatusInput): boolean {
 
 export function isEventArchived(ev: EventStatusInput): boolean {
   return getEventVisibility(ev) === "archived";
-}
-
-export function syncLegacyEventVisibilityFlags(
-  visibility: EventVisibilityStatus,
-): {
-  is_active: 0 | 1;
-  is_archived: 0 | 1;
-  is_entry_open: 0 | 1;
-} {
-  if (visibility === "public") {
-    return { is_active: 1, is_archived: 0, is_entry_open: 0 };
-  }
-  if (visibility === "archived") {
-    return { is_active: 0, is_archived: 1, is_entry_open: 0 };
-  }
-  return { is_active: 0, is_archived: 0, is_entry_open: 0 };
 }
 
 export function getEffectiveEventEnd(ev: EventStatusInput): number | null {

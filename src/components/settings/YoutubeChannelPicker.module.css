@@ -130,13 +130,18 @@
 .candidateLabel {
   grid-column: 2;
   grid-row: 1;
+  min-width: 0;
   font-size: 13px;
   font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .candidateUrl {
   grid-column: 2;
   grid-row: 2;
+  min-width: 0;
   font-size: 11px;
   color: var(--text-muted);
   overflow: hidden;
@@ -144,12 +149,19 @@
   white-space: nowrap;
 }
 
-.candidateButton > :first-child {
+.candidateLeadIcon {
+  grid-column: 1;
   grid-row: 1 / span 2;
+  align-self: center;
+  flex-shrink: 0;
 }
 
-.candidateButton > :last-child {
+.candidateCheck {
+  grid-column: 3;
   grid-row: 1 / span 2;
+  align-self: center;
+  flex-shrink: 0;
+  color: var(--accent-primary-strong);
 }
 
 .customPanel {

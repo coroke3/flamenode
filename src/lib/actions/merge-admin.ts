@@ -6,7 +6,6 @@ import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   eventStaff,
-  historyLogs,
   slots,
   videoChapters,
   videoInteractions,
@@ -16,6 +15,7 @@ import {
   xUserIcons,
   xUsers,
 } from "@/lib/db/schema";
+import { auditAction } from "@/lib/audit/helpers";
 import { normalizeXId } from "@/lib/utils/xid";
 
 export interface MergeXIdsResult {
@@ -229,19 +229,14 @@ export async function mergeXIds(
   `);
 
   // 監査ログ (long_audit)
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "x_users",
     record_id: fromXId,
     action: "UPDATE",
-    before_data: JSON.stringify({ x_user_id: fromXId, linked_discord_user_id: fromRow[0].linked_discord_user_id }),
-    after_data: JSON.stringify({
-      merged_into: toXId,
-      counts,
-      executor: u.id,
-    }),
+    before_data: { x_user_id: fromXId, linked_discord_user_id: fromRow[0].linked_discord_user_id },
+    after_data: { merged_into: toXId, counts, executor: u.id },
     operator_discord_id: u.id,
     retention_class: "long_audit",
-    created_at: now,
   });
 
   revalidatePath("/admin/x-link-requests");

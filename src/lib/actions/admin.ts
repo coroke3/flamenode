@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
-import { historyLogs, videoModerationCases, videos } from "@/lib/db/schema";
+import { videoModerationCases, videos } from "@/lib/db/schema";
+import { auditAction } from "@/lib/audit/helpers";
 import { enqueueVideoStatusChangeNotification } from "@/lib/notifications/videoStatusNotify";
 import { generateId } from "@/lib/utils/id";
 
@@ -108,18 +109,14 @@ export async function setVideoStatus(
 
   await db.update(videos).set(patch).where(eq(videos.id, videoId));
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "videos",
     record_id: videoId,
     action: "UPDATE",
-      before_data: JSON.stringify({ visibility_status: prevStatus }),
-    after_data: JSON.stringify({ visibility_status: status, reason: reason || null }),
+    before_data: { visibility_status: prevStatus },
+    after_data: { visibility_status: status, reason: reason || null },
     operator_discord_id: u.id,
-    retention_class:
-      status === "voided"
-        ? "long_audit"
-        : "normal",
-    created_at: now,
+    retention_class: status === "voided" ? "long_audit" : "normal",
   });
 
   const forceNotify = formData.get("force_notify") === "1";

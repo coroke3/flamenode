@@ -4,15 +4,17 @@
 
 イベント参加手続き、スロット確保、投稿審査、振り返り上映、第三者イベント開催を一体で扱う、Cloudflare ネイティブな動画アーカイブサイトです。
 
-詳細な仕様・設計は [`設計/`](./設計) 配下のドキュメントを参照してください。
+- 設計仕様 (SSoT): [`設計/`](./設計) 配下 (`FlameNode-Design.md`, `FlameNode-Design-System.md`, `設計app/**/*.md`)
+- ローカル動作手順: [`LOCAL.md`](./LOCAL.md) / デプロイ手順: [`DEPLOY.md`](./DEPLOY.md)
+- 運用手順: [`docs/operations.md`](./docs/operations.md) / 実装状況・残タスク: [`docs/implementation-backlog.md`](./docs/implementation-backlog.md)
+- AI エージェント向けガイド: [`AGENTS.md`](./AGENTS.md)
 
 ## 技術スタック
 
 - **フレームワーク**: Next.js 15 (App Router) + React 19 + TypeScript
-- **DB**: Cloudflare D1 (SQLite) + Drizzle ORM
-- **ストレージ**: Cloudflare R2
-- **キャッシュ**: Cloudflare KV
-- **背景処理**: Cloudflare Workers (Cron Triggers) + Durable Objects
+- **DB**: Cloudflare D1 (SQLite) + Drizzle ORM（D1 が正本。R2/KV の静的 JSON は配信用キャッシュ）
+- **ストレージ / キャッシュ**: Cloudflare R2 / KV
+- **背景処理**: Cloudflare Workers (Cron 3本: `fast-jobs` / `content-jobs` / `sync-jobs`) + Durable Objects
 - **認証**: Auth.js (NextAuth v5) + Discord OAuth
 - **スタイル**: 純粋 CSS (`src/styles/globals.css` のグローバルユーティリティ + 各コンポーネント `*.module.css`) と CSS カスタムプロパティ。Tailwind は使用しない。Light / Dark / System を `data-theme` で切替。
 
@@ -22,68 +24,46 @@
 app/                 # Next.js App Router
   (public)/          # 公開エリア (ログイン不要)
   (auth)/            # ユーザーエリア (要 Discord ログイン)
-  (admin)/           # 運営エリア
+  (manage)/          # イベント運営エリア (event_staff 権限)
+  (admin)/           # 運営エリア (role === "admin")
   api/               # Route Handlers / Auth.js / Webhooks
 src/
   components/        # React コンポーネント
-  actions/           # Server Actions
-  lib/               # DB, 認証, 外部連携, ユーティリティ
-  hooks/             # カスタムフック
-  types/             # TypeScript 型定義
-workers/             # Cloudflare Workers (Cron, Durable Objects)
-migrations/          # Drizzle マイグレーション
+  lib/               # DB, 認証, 権限, Server Actions, 通知, publicData, ユーティリティ
+  styles/            # グローバル CSS
+workers/             # Cloudflare Workers (統合3本 + import 用モジュール)
+migrations/          # D1 マイグレーション
+scripts/             # 運用・検査スクリプト
+instrumentation.ts   # ローカル dev 時に Miniflare で D1/R2/KV を自動起動
 設計/                 # 設計仕様 (Single Source of Truth)
 ```
 
 ## 開発手順
 
 ```sh
-# 依存関係インストール
 npm install
+cp .dev.vars.example .dev.vars   # シークレットを記入 (LOCAL.md 参照)
 
-# .dev.vars を用意
-cp .dev.vars.example .dev.vars
+npm run dev          # 開発サーバ (Miniflare が D1/R2/KV を自動起動、migration も冪等 apply)
+npm run typecheck    # 型チェック
+npm run build        # プロダクションビルド
+npm run test:unit    # 単体テスト (node:test)
 
-# 開発サーバ
-npm run dev
-
-# DB マイグレーション (D1)
-npm run db:generate
-npm run db:migrate
-
-# 型チェック
-npm run typecheck
-
-# プロダクションビルド
-npm run build
+npm run db:local-apply  # ローカル D1 へ migration 適用
+# スキーマ変更時は手動 SQL migration を作成 (docs/operations.md §1 参照。db:generate は現在使わない)
 ```
 
-## 実装済み機能 (v0.1)
+## 主な機能
 
-- 公開エリア
-  - トップページ (横スクロール棚 / 開催中イベントバンド / おすすめ・最新・クリエイター・イベントセクション)
-  - 作品一覧 `/list` (検索・並び替え・ページング) と `/search` リダイレクト
-  - 作品詳細 `/[id]` (独自 YouTube プレイヤー、チャプター/コメントタブ、関連動画レール)
-  - イベント `/event`, `/event/[id]` (期間・スタッフ・スロット・作品グリッド)
-  - クリエイタープロフィール `/user/[id]`
-  - 利用規約 `/rules`、メンテナンス `/maintenance`、おすすめ `/recommend`
-- 認証エリア (Discord OAuth + Auth.js)
-  - エントリー `/entry`
-  - ダッシュボード `/dashboard` (アクティブスロット / マイギャラリー / X ID 連携状況)
-  - 参加・投稿 `/entry`、スロット提出 `/entry/slotted`、編集 `/dashboard/edit/[id]`
-  - 設定 `/dashboard/settings`
-- 管理エリア (`role === "admin"` ガード)
-  - 総合ダッシュボード `/admin` (要対応タスク・コストガード状態)
-  - 作品 / ユーザー / イベント / お知らせ / 規約 / 履歴 / コストガード / レガシーインポート
-- Server Actions: 自由投稿 / スロット提出 / コストガード切替
-- Cloudflare Workers (Cron): `fast-jobs`, `content-jobs`, `sync-jobs`（旧5本モジュールを統合）
+- **公開エリア**: トップ / 作品一覧 `/list` / 作品詳細 (独自 YouTube プレイヤー、チャプターコメント) / イベント `/event` / クリエイタープロフィール `/user/[id]` / 規約・お知らせ
+- **ユーザーエリア** (Discord OAuth): ダッシュボード、イベント参加・投稿 `/entry`、スロット提出、作品編集、X ID 連携申請、ライブラリ (いいね・セーブ)
+- **運営エリア** `/manage`: イベントスタッフ向けの受信箱・スロット運営・メンバー管理 (permission_mask による細分権限)
+- **管理エリア** `/admin`: 作品 / ユーザー / イベント / お知らせ / 規約 / 監査ログ / 通知 / コストガード / health・security チェック / レガシーインポート / DB スプレッドシート
+- **背景処理**: 静的 JSON 再生成 (R2/KV 配信)、YouTube 同期、スコア再計算、通知ディスパッチ、TTL クリーンアップ
 
 ## デザイン原則 (要旨)
 
 - 作品優先・高密度。装飾より作品サムネイルとカードの並びを優先する。
-- 黄色 (`#FFD400`) を主アクセントとし、CTA・選択中・フォーカス・アクティブ X ID に統一して使う。
-- イベント別アクセントカラーが設定されている場合はそれを優先。
+- 黄色 (`#FFD400`) を主アクセントとし、CTA・選択中・フォーカス・アクティブ X ID に統一して使う。イベント別アクセントカラーがあればそれを優先。
 - ライト / ダーク両対応。同じ配置・密度で実装する。
-- 絵文字は UI に使わない。Font Awesome / Lucide / Material Symbols 等の正規 SVG アイコンを使う。
-
-設計の Single Source of Truth は `設計/FlameNode-Design.md` および `設計/FlameNode-Design-System.md`、各ページ設計図 (`設計/設計app/**/*.md`) です。
+- 絵文字は UI に使わない。正規 SVG アイコン (Lucide 等) を使う。

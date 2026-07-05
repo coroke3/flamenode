@@ -16,6 +16,7 @@ import type {
   VideoMemberSuggestion,
 } from "@/components/forms/VideoMembersField";
 import { formatChapterTime } from "@/lib/utils/chapterTime";
+import { parseMemberChaptersJson } from "@/lib/video/memberChaptersJson";
 
 export const metadata: Metadata = { title: "参加者設定" };
 export const dynamic = "force-dynamic";
@@ -24,28 +25,14 @@ interface Props {
   params: Promise<{ id: string }>;
 }
 
-function parseMemberChapters(raw: string | null): VideoMemberInput["chapters"] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((item) => {
-        if (!item || typeof item !== "object") return null;
-        const row = item as Record<string, unknown>;
-        const time = Number(row.time_seconds ?? row.time ?? row.chapter_time);
-        const label = String(row.label ?? row.chapter_label ?? "").trim();
-        if (!Number.isFinite(time)) return null;
-        return {
-          time: formatChapterTime(time),
-          label,
-          note: String(row.note ?? ""),
-        };
-      })
-      .filter((row): row is NonNullable<typeof row> => row !== null);
-  } catch {
-    return [];
-  }
+function parseMemberChapters(
+  chaptersJson: string | null,
+): VideoMemberInput["chapters"] {
+  return parseMemberChaptersJson(chaptersJson).map((row) => ({
+    time: formatChapterTime(row.time_seconds),
+    label: row.label,
+    note: row.note ?? "",
+  }));
 }
 
 export default async function AdminVideoMembersPage({
@@ -76,10 +63,10 @@ export default async function AdminVideoMembersPage({
       x_user_id: videoMembers.x_user_id,
       role: videoMembers.role,
       comment: videoMembers.comment,
-      chapters_json: videoMembers.chapters_json,
       order_index: videoMembers.order_index,
       can_edit: videoMembers.can_edit,
       is_public_member: videoMembers.is_public_member,
+      chapters_json: videoMembers.chapters_json,
     })
     .from(videoMembers)
     .where(eq(videoMembers.video_id, video.id))

@@ -37,7 +37,6 @@ type StaffRow = {
   discord_user_id: string | null;
   display_name: string | null;
   permission_preset: string | null;
-  permission_mask: number | null;
   custom_permission_keys_json: string | null;
   is_public: number | null;
   public_role_label: string | null;
@@ -86,7 +85,6 @@ export default async function ManageEventStaffPage({
       discord_user_id: eventStaffTable.discord_user_id,
       display_name: eventStaffTable.display_name,
       permission_preset: eventStaffTable.permission_preset,
-      permission_mask: eventStaffTable.permission_mask,
       custom_permission_keys_json: eventStaffTable.custom_permission_keys_json,
       is_public: eventStaffTable.is_public,
       public_role_label: eventStaffTable.public_role_label,

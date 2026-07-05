@@ -11,7 +11,7 @@ import { Icon } from "@/components/ui/Icon";
  * - 同じ「赤いエラー」でも原因が違えば CTA は変える:
  *   - `tos_required` → 利用規約へ
  *   - `unauthenticated` → ログインへ
- *   - `active_x_not_approved` → X ID 設定へ
+ *   - `active_x_not_approved` → 初期設定へ
  *   - `cost_guard_blocked` / `maintenance_mode` → 説明だけ (ボタンなし)
  *
  * - `nextHref` は CTA に next= で付加する。未指定なら現在 URL を encodeURIComponent。
@@ -44,16 +44,23 @@ function buildNext(): string {
 }
 
 function ctaFor(reason: ErrorCalloutReason): CtaSpec | null {
+  const next = buildNext();
   switch (reason) {
     case "unauthenticated":
-      return { href: `/entry?next=${encodeURIComponent(buildNext())}`, label: "ログイン" };
+      return { href: `/entry?next=${encodeURIComponent(next)}`, label: "ログイン" };
     case "tos_required":
     case "tos_reaccept_required":
-      return { href: `/rules?next=${encodeURIComponent(buildNext())}`, label: "利用規約を確認" };
+      return {
+        href: `/rules?next=${encodeURIComponent(`/onboarding?next=${encodeURIComponent(next)}`)}`,
+        label: "利用規約を確認",
+      };
     case "active_x_required":
     case "active_x_rejected":
     case "active_x_not_approved":
-      return { href: `/dashboard/settings?next=${encodeURIComponent(buildNext())}`, label: "X ID 設定へ" };
+      return {
+        href: `/onboarding?next=${encodeURIComponent(next)}`,
+        label: "初期設定を続ける",
+      };
     case "duplicate_youtube_id":
       return { href: "/list", label: "既存作品を探す" };
     case "submitter_change_denied":

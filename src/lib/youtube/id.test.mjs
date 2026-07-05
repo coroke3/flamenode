@@ -96,12 +96,12 @@ test("youtubeWatchUrl: 単純連結", () => {
   );
 });
 
-test("youtubeEmbedUrl: rel/modestbranding/playsinline/enablejsapi が常に含まれる", () => {
+test("youtubeEmbedUrl: rel/modestbranding/playsinline が常に含まれる", () => {
   const url = youtubeEmbedUrl("abc");
   assert.ok(url.includes("rel=0"));
   assert.ok(url.includes("modestbranding=1"));
   assert.ok(url.includes("playsinline=1"));
-  assert.ok(url.includes("enablejsapi=1"));
+  assert.ok(!url.includes("enablejsapi=1"));
 });
 
 test("youtubeEmbedUrl: autoplay/mute/start オプション反映", () => {

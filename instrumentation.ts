@@ -86,6 +86,8 @@ export async function register(): Promise<void> {
 type LocalD1Statement = {
   first: () => Promise<unknown>;
   run: () => Promise<unknown>;
+  all: <T = unknown>() => Promise<{ results?: T[] }>;
+  bind: (...values: unknown[]) => LocalD1Statement;
 };
 
 type LocalD1Database = {
@@ -276,6 +278,12 @@ WHERE \`visibility_status\` = 'draft'`,
     await ensureColumn(
       DB,
       "videos",
+      "creator_youtube_channel_url",
+      "ALTER TABLE `videos` ADD `creator_youtube_channel_url` text",
+    );
+    await ensureColumn(
+      DB,
+      "videos",
       "part",
       "ALTER TABLE `videos` ADD `part` text",
     );
@@ -302,15 +310,6 @@ WHERE \`visibility_status\` = 'draft'`,
       "[instrumentation] Applying legacy import DB reduction prep migration 0024",
     );
     await applyMigrationFile(DB, "0024_legacy_import_db_reduction_prep.sql");
-  }
-
-  if (
-    (await tableExists(DB, "videos")) &&
-    (await tableExists(DB, "video_softwares")) &&
-    (await columnExists(DB, "videos", "used_software_json"))
-  ) {
-    console.log("[instrumentation] Backfilling local used_software_json with 0036");
-    await applyMigrationFile(DB, "0036_backfill_used_software_json.sql");
   }
 
   if (
@@ -387,12 +386,6 @@ WHERE \`visibility_status\` = 'draft'`,
     await ensureColumn(
       DB,
       "event_staff",
-      "permission_mask",
-      "ALTER TABLE `event_staff` ADD `permission_mask` integer NOT NULL DEFAULT 0",
-    );
-    await ensureColumn(
-      DB,
-      "event_staff",
       "custom_permission_keys_json",
       "ALTER TABLE `event_staff` ADD `custom_permission_keys_json` text",
     );
@@ -409,21 +402,6 @@ WHERE \`permission_preset\` = 'public_staff'`,
         "backfill local event_staff.permission_preset",
       );
     }
-    await runOptionalSql(
-      DB,
-      `UPDATE \`event_staff\`
-SET \`permission_mask\` = CASE \`permission_preset\`
-  WHEN 'owner' THEN 64639
-  WHEN 'manager' THEN 64631
-  WHEN 'slot_manager' THEN 4
-  WHEN 'content_editor' THEN 31744
-  WHEN 'reviewer' THEN 32800
-  WHEN 'xid_reviewer' THEN 512
-  ELSE \`permission_mask\`
-END
-WHERE \`permission_mask\` = 0`,
-      "backfill local event_staff.permission_mask",
-    );
     await ensureIndex(
       DB,
       "CREATE INDEX IF NOT EXISTS `event_staff_event_idx` ON `event_staff` (`event_id`)",
@@ -433,11 +411,6 @@ WHERE \`permission_mask\` = 0`,
       DB,
       "CREATE INDEX IF NOT EXISTS `event_staff_public_idx` ON `event_staff` (`event_id`, `is_public`, `display_name`)",
       "event_staff_public_idx",
-    );
-    await ensureIndex(
-      DB,
-      "CREATE INDEX IF NOT EXISTS `event_staff_permission_idx` ON `event_staff` (`event_id`, `permission_mask`) WHERE `permission_mask` <> 0",
-      "event_staff_permission_idx",
     );
   }
 
@@ -458,6 +431,46 @@ WHERE \`permission_mask\` = 0`,
       console.log("[instrumentation] Applying event_group legacy cleanup 0039");
       await applyMigrationFile(DB, "0039_event_group_legacy_cleanup.sql");
     }
+  }
+
+  if (
+    (await tableExists(DB, "x_users")) &&
+    !(await tableExists(DB, "x_user_youtube_channels"))
+  ) {
+    console.log("[instrumentation] Applying x_user_youtube_channels migration 0040");
+    await applyMigrationFile(DB, "0040_x_user_youtube_channels.sql");
+  }
+
+  if (await tableExists(DB, "x_user_youtube_channels")) {
+    console.log(
+      "[instrumentation] Applying x_user_youtube_channels creator sync 0041",
+    );
+    await applyMigrationFile(DB, "0041_x_user_youtube_channels_creator_sync.sql");
+  }
+
+  if (
+    (await tableExists(DB, "videos")) &&
+    (await columnExists(DB, "videos", "creator_youtube_channel_url")) &&
+    (await tableExists(DB, "x_user_youtube_channels"))
+  ) {
+    await runOptionalSql(
+      DB,
+      `UPDATE \`videos\`
+SET \`creator_youtube_channel_url\` = (
+  SELECT c.\`youtube_channel_url\`
+  FROM \`x_user_youtube_channels\` c
+  WHERE c.\`source_video_id\` = \`videos\`.\`id\`
+  ORDER BY c.\`created_at\` DESC
+  LIMIT 1
+)
+WHERE \`creator_youtube_channel_url\` IS NULL
+  AND EXISTS (
+    SELECT 1
+    FROM \`x_user_youtube_channels\` c
+    WHERE c.\`source_video_id\` = \`videos\`.\`id\`
+  )`,
+      "backfill local videos.creator_youtube_channel_url",
+    );
   }
 
   if (await tableExists(DB, "system_settings")) {
@@ -583,6 +596,91 @@ WHERE \`permission_mask\` = 0`,
   if (!(await tableExists(DB, "event_custom_questions"))) {
     console.log("[instrumentation] Applying event_custom_questions migration 0027");
     await applyMigrationFile(DB, "0027_event_custom_questions_and_video_answers.sql");
+  }
+
+  if (!(await tableExists(DB, "audit_logs"))) {
+    console.log("[instrumentation] Applying audit_logs migration 0043");
+    await applyMigrationFile(DB, "0043_audit_logs.sql");
+  }
+
+  if (await tableExists(DB, "history_logs")) {
+    console.log("[instrumentation] Applying db canonical cleanup migration 0044");
+    await applyMigrationFile(DB, "0044_db_canonical_cleanup.sql");
+  }
+
+  if (
+    (await tableExists(DB, "videos")) &&
+    (await columnExists(DB, "videos", "used_software_json"))
+  ) {
+    console.log("[instrumentation] Applying clean software migration 0045");
+    await applyMigrationFile(DB, "0045_clean_software.sql");
+  }
+
+  if (
+    (await tableExists(DB, "event_staff")) &&
+    (await columnExists(DB, "event_staff", "permission_mask"))
+  ) {
+    await backfillPermissionMaskToCustomJson(DB);
+    console.log(
+      "[instrumentation] Applying clean event staff permissions migration 0046",
+    );
+    await applyMigrationFile(DB, "0046_clean_event_staff_permissions.sql");
+  }
+
+  if (await tableExists(DB, "video_member_chapters")) {
+    console.log("[instrumentation] Applying clean member chapters migration 0047");
+    await applyMigrationFile(DB, "0047_clean_member_chapters.sql");
+  }
+
+  if (!(await tableExists(DB, "legacy_import_batches"))) {
+    console.log("[instrumentation] Applying legacy_import_batches migration 0048");
+    await applyMigrationFile(DB, "0048_legacy_import_batches.sql");
+  }
+
+  if (
+    (await tableExists(DB, "user")) &&
+    !(await columnExists(DB, "user", "onboarding_completed_at"))
+  ) {
+    console.log(
+      "[instrumentation] Applying user onboarding_completed_at migration 0049",
+    );
+    await applyMigrationFile(DB, "0049_user_onboarding_completed_at.sql");
+  }
+}
+
+async function backfillPermissionMaskToCustomJson(
+  DB: LocalD1Database,
+): Promise<void> {
+  const { permissionMaskToKeys } = await import(
+    "@/lib/auth/permissions/mask"
+  );
+  const result = await DB.prepare(
+    `SELECT id, permission_mask, permission_preset, custom_permission_keys_json
+     FROM event_staff
+     WHERE permission_mask IS NOT NULL AND permission_mask <> 0`,
+  ).all<{
+    id: string;
+    permission_mask: number;
+    permission_preset: string | null;
+    custom_permission_keys_json: string | null;
+  }>();
+  const rows = result.results ?? [];
+  for (const row of rows) {
+    const existing = row.custom_permission_keys_json?.trim();
+    if (existing && existing !== "[]") continue;
+    const keys = permissionMaskToKeys(row.permission_mask);
+    if (keys.length === 0) continue;
+    await DB.prepare(
+      `UPDATE event_staff
+       SET custom_permission_keys_json = ?,
+           permission_preset = CASE
+             WHEN permission_preset = 'public_staff' THEN 'custom'
+             ELSE permission_preset
+           END
+       WHERE id = ?`,
+    )
+      .bind(JSON.stringify(keys), row.id)
+      .run();
   }
 }
 

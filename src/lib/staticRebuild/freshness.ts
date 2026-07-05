@@ -6,10 +6,6 @@ export const ACTIVE_GRACE_AFTER_END_SEC = 86400;
 
 export type EventFreshnessInput = {
   visibility_status?: string | null;
-  is_active: number;
-  /** Legacy DB flag; freshness no longer depends on manual entry status. */
-  is_entry_open: number;
-  is_archived: number;
   start_time: number | null;
   end_time: number | null;
 };

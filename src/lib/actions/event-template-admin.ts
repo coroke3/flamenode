@@ -14,8 +14,9 @@ import {
   eventCustomQuestions,
   eventTemplates,
   events,
-  historyLogs,
 } from "@/lib/db/schema";
+import { auditAction } from "@/lib/audit/helpers";
+import { loadStagePermissionFormSettingsJson } from "@/lib/video/stagePermissionQuestions";
 import { generateId } from "@/lib/utils/id";
 
 export interface EventTemplateActionResult {
@@ -97,7 +98,11 @@ export async function saveEventAsTemplate(
       asc(eventCustomQuestions.question_key),
     );
 
-  const snapshot = snapshotFromEvent(event, customQuestions);
+  const snapshot = snapshotFromEvent(
+    event,
+    customQuestions,
+    await loadStagePermissionFormSettingsJson(db, event.id),
+  );
   const id = generateId("etmpl");
   const now = Math.floor(Date.now() / 1000);
 
@@ -112,17 +117,13 @@ export async function saveEventAsTemplate(
     updated_at: now,
   });
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "event_templates",
     record_id: id,
     action: "CREATE",
-    after_data: JSON.stringify({
-      name: parsed.data.name,
-      source_event_id: event.id,
-    }),
+    after_data: { name: parsed.data.name, source_event_id: event.id },
     operator_discord_id: guard.userId,
     retention_class: "normal",
-    created_at: now,
   });
 
   revalidatePath("/admin/events/templates");
@@ -158,14 +159,13 @@ export async function deleteEventTemplate(
   await db.delete(eventTemplates).where(eq(eventTemplates.id, templateId));
 
   const now = Math.floor(Date.now() / 1000);
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "event_templates",
     record_id: templateId,
     action: "DELETE",
-    after_data: JSON.stringify({ name: row.name }),
+    after_data: { name: row.name },
     operator_discord_id: guard.userId,
     retention_class: "normal",
-    created_at: now,
   });
 
   revalidatePath("/admin/events/templates");

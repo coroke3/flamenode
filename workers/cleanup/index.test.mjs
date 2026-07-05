@@ -140,19 +140,24 @@ test("runCleanupWithRetry: transient errors are retried", async () => {
 });
 
 test("runCleanupWithRetry: schema errors are not retried", async () => {
-  let firstCallCount = 0;
+  let auditDeleteAttempts = 0;
   const env = {
     DB: {
-      prepare() {
+      prepare(sql) {
+        const isAuditDelete =
+          typeof sql === "string" && sql.includes("DELETE FROM audit_logs");
         return {
           bind() {
             return this;
           },
           async first() {
-            firstCallCount += 1;
-            throw new Error("no such column: bogus");
+            return null;
           },
           async run() {
+            if (isAuditDelete) {
+              auditDeleteAttempts += 1;
+              throw new Error("no such table: audit_logs");
+            }
             return { success: true };
           },
         };
@@ -160,7 +165,7 @@ test("runCleanupWithRetry: schema errors are not retried", async () => {
     },
   };
   await runCleanupWithRetry(env);
-  assert.equal(firstCallCount, 1);
+  assert.equal(auditDeleteAttempts, 1);
 });
 
 test("runCleanup: mutating slot queries bind current time", async () => {

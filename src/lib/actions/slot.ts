@@ -1,4 +1,5 @@
 "use server";
+import { auditAction } from "@/lib/audit/helpers";
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -8,7 +9,7 @@ import {
   type WriteGuardDenyReason,
 } from "@/lib/auth/writeGuard";
 import { getDatabase } from "@/lib/cloudflare";
-import { events, historyLogs, slots, xUsers } from "@/lib/db/schema";
+import { events, slots, xUsers } from "@/lib/db/schema";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { generateId } from "@/lib/utils/id";
 import {
@@ -196,7 +197,7 @@ export async function reserveSlot(
     return { ok: false, message: failure };
   }
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "slots",
     record_id: parsed.data.slot_id,
     action: "UPDATE",
@@ -209,8 +210,7 @@ export async function reserveSlot(
       reservation_group_id: groupId,
     }),
     operator_discord_id: user.id,
-    retention_class: "normal",
-    created_at: now,
+    retention_class: "normal",
   });
 
   revalidateSlotViews(slotRow.event_id);
@@ -288,7 +288,7 @@ export async function releaseOwnSlot(
       })
       .where(eq(slots.id, slotId));
 
-    await db.insert(historyLogs).values({
+    await auditAction(db, {
       table_name: "slots",
       record_id: slotId,
       action: "UPDATE",
@@ -299,8 +299,7 @@ export async function releaseOwnSlot(
         reservation_group_id: null,
       }),
       operator_discord_id: user.id,
-      retention_class: "normal",
-      created_at: now,
+      retention_class: "normal",
     });
     revalidateSlotViews(slotRow.event_id);
     return { ok: true, slotId };
@@ -408,7 +407,7 @@ export async function releaseOwnSlot(
     }
   }
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "slots",
     record_id: slotId,
     action: "UPDATE",
@@ -420,8 +419,7 @@ export async function releaseOwnSlot(
       split: splitInfo,
     }),
     operator_discord_id: user.id,
-    retention_class: "normal",
-    created_at: now,
+    retention_class: "normal",
   });
 
   revalidateSlotViews(slotRow.event_id);
@@ -566,7 +564,7 @@ export async function extendOwnSlotGroup(
       .where(eq(slots.id, anchor.id));
   }
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "slots",
     record_id: candidate.id,
     action: "UPDATE",
@@ -578,8 +576,7 @@ export async function extendOwnSlotGroup(
       reservation_group_id: nextGroupId,
     }),
     operator_discord_id: user.id,
-    retention_class: "normal",
-    created_at: now,
+    retention_class: "normal",
   });
 
   revalidateSlotViews(anchor.event_id);
@@ -746,7 +743,7 @@ export async function mergeOwnSlotGroups(
       inArray(slots.id, [...leftGroup, ...rightGroup].map((r) => r.id)),
     );
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "slots",
     record_id: gap.id,
     action: "UPDATE",
@@ -764,8 +761,7 @@ export async function mergeOwnSlotGroups(
       ],
     }),
     operator_discord_id: user.id,
-    retention_class: "normal",
-    created_at: now,
+    retention_class: "normal",
   });
 
   revalidateSlotViews(gap.event_id);

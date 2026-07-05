@@ -8,7 +8,6 @@ import {
   isAcceptingEntries,
   isEventArchived,
   isPublicEventVisible,
-  syncLegacyEventVisibilityFlags,
   type EventDisplayStatus,
   type EventStatusInput,
   type EventVisibilityStatus,
@@ -22,7 +21,6 @@ export {
   isAcceptingEntries,
   isEventArchived,
   isPublicEventVisible,
-  syncLegacyEventVisibilityFlags,
 };
 export type { EventDisplayStatus, EventStatusInput, EventVisibilityStatus };
 

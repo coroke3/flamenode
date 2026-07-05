@@ -161,7 +161,7 @@ export function YoutubeChannelPicker({
                 <ul className={styles.candidateList}>
                   {candidates.length === 0 ? (
                     <li className={styles.candidateEmpty}>
-                      候補がありません。「URLを入力」から設定できます。
+                      この X ID の過去作品に登録されたチャンネルがありません。「URLを入力」から設定できます。
                     </li>
                   ) : (
                     candidates.map((url) => (
@@ -171,13 +171,23 @@ export function YoutubeChannelPicker({
                           className={`${styles.candidateButton} ${url === value ? styles.candidateButtonActive : ""}`}
                           onClick={() => applyUrl(url)}
                         >
-                          <Icon name="youtube" size={14} aria-hidden />
+                          <Icon
+                            name="youtube"
+                            size={14}
+                            aria-hidden
+                            className={styles.candidateLeadIcon}
+                          />
                           <span className={styles.candidateLabel}>
                             {formatYoutubeChannelLabel(url)}
                           </span>
                           <span className={styles.candidateUrl}>{url}</span>
                           {url === value ? (
-                            <Icon name="check" size={14} aria-hidden />
+                            <Icon
+                              name="check"
+                              size={14}
+                              aria-hidden
+                              className={styles.candidateCheck}
+                            />
                           ) : null}
                         </button>
                       </li>

@@ -1,4 +1,5 @@
 "use server";
+import { auditAction } from "@/lib/audit/helpers";
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -6,7 +7,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import { assertCanEditEvent } from "@/lib/auth/ownership";
-import { historyLogs, slots } from "@/lib/db/schema";
+import { slots } from "@/lib/db/schema";
 import { parseJstDatetimeLocal } from "@/lib/utils/dateInput";
 import { generateId } from "@/lib/utils/id";
 import { enqueueNotification } from "@/lib/notifications/enqueue";
@@ -154,7 +155,7 @@ export async function generateSlotsBatch(
     }
   }
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "slots",
     record_id: data.event_id,
     action: "CREATE",
@@ -164,8 +165,7 @@ export async function generateSlotsBatch(
       event_id: data.event_id,
     }),
     operator_discord_id: guard.userId,
-    retention_class: "normal",
-    created_at: now,
+    retention_class: "normal",
   });
 
   revalidateEventSlotPaths(data.event_id);
@@ -193,14 +193,13 @@ export async function deleteAvailableSlots(
     await db.delete(slots).where(eq(slots.id, r.id));
   }
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "slots",
     record_id: eventId,
     action: "DELETE",
     after_data: JSON.stringify({ deleted: rows.length, scope: "available" }),
     operator_discord_id: guard.userId,
-    retention_class: "normal",
-    created_at: now,
+    retention_class: "normal",
   });
 
   revalidateEventSlotPaths(eventId);
@@ -281,7 +280,7 @@ export async function releaseSlot(formData: FormData): Promise<SlotActionResult>
       .where(eq(slots.id, slotId));
   }
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "slots",
     record_id: slotId,
     action: "UPDATE",
@@ -293,8 +292,7 @@ export async function releaseSlot(formData: FormData): Promise<SlotActionResult>
       reservation_group_id: groupId ?? null,
     }),
     operator_discord_id: guard.userId,
-    retention_class: "long_audit",
-    created_at: now,
+    retention_class: "long_audit",
   });
 
   // 通知: スロット所有者 (Discord) に強制解放を伝える。
@@ -339,14 +337,13 @@ export async function deleteSlot(formData: FormData): Promise<SlotActionResult> 
 
   const now = Math.floor(Date.now() / 1000);
   await db.delete(slots).where(eq(slots.id, slotId));
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "slots",
     record_id: slotId,
     action: "DELETE",
     before_data: JSON.stringify({ event_id: row.event_id }),
     operator_discord_id: guard.userId,
-    retention_class: "normal",
-    created_at: now,
+    retention_class: "normal",
   });
 
   revalidateEventSlotPaths(row.event_id);
@@ -396,14 +393,13 @@ export async function batchDeleteAvailableSlots(
   const now = Math.floor(Date.now() / 1000);
   await db.delete(slots).where(inArray(slots.id, slotIds));
   for (const row of rows) {
-    await db.insert(historyLogs).values({
+    await auditAction(db, {
       table_name: "slots",
       record_id: row.id,
       action: "DELETE",
       before_data: JSON.stringify({ event_id: eventId, batch: true }),
       operator_discord_id: guard.userId,
-      retention_class: "normal",
-      created_at: now,
+      retention_class: "normal",
     });
   }
 
@@ -476,7 +472,7 @@ export async function batchReleaseReservedSlots(
 
     if (groupId) releasedGroups.add(groupId);
 
-    await db.insert(historyLogs).values({
+    await auditAction(db, {
       table_name: "slots",
       record_id: row.id,
       action: "UPDATE",
@@ -487,8 +483,7 @@ export async function batchReleaseReservedSlots(
         slot_ids: targetIds,
       }),
       operator_discord_id: guard.userId,
-      retention_class: "long_audit",
-      created_at: now,
+      retention_class: "long_audit",
     });
   }
 

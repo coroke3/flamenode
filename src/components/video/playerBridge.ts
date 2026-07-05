@@ -1,13 +1,22 @@
 /**
- * 動画プレイヤーとフォームの間の軽量 PubSub。
+ * 動画プレイヤーと周辺 UI の軽量ブリッジ。
  *
- * - `requestCurrentTime()`: フォーム側から呼ぶ。500ms 以内に応答が無ければ 0 を返す。
- * - YoutubePlayer 側は `flamenode:request-time` を listen し、`flamenode:current-time`
- *   をディスパッチして応答する。
+ * - `seekToTime(time)`: 埋め込み iframe を指定秒から再生し直す。
+ * - `requestCurrentTime()`: 単純埋め込みでは再生位置を取得できないため常に 0。
  */
 
+const SEEK = "flamenode:seek";
 const REQUEST = "flamenode:request-time";
 const RESPONSE = "flamenode:current-time";
+
+export function seekToTime(time: number): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent(SEEK, {
+      detail: { time: Math.max(0, Math.floor(time)) },
+    }),
+  );
+}
 
 export function requestCurrentTime(timeoutMs = 500): Promise<number> {
   return new Promise((resolve) => {

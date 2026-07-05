@@ -64,6 +64,7 @@ export async function acceptLatestTerms(formData: FormData): Promise<void> {
 
   revalidatePath("/rules");
   revalidatePath("/dashboard");
+  revalidatePath("/onboarding");
   revalidateSafePath(next);
   redirect(next);
 }

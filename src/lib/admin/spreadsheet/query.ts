@@ -1,6 +1,6 @@
 import "server-only";
 import { getDatabase } from "@/lib/cloudflare";
-import { historyLogs } from "@/lib/db/schema";
+import { auditAction } from "@/lib/audit/helpers";
 import type { SpreadsheetTableDef } from "./registry";
 import {
   applySpreadsheetForcedInsertValues,
@@ -201,9 +201,8 @@ async function writeHistory(opts: {
 }): Promise<void> {
   const db = getDatabase();
   if (!db) return;
-  const now = Math.floor(Date.now() / 1000);
   try {
-    await db.insert(historyLogs).values({
+    await auditAction(db, {
       table_name: opts.table,
       record_id: opts.recordId,
       action: opts.action,
@@ -211,7 +210,6 @@ async function writeHistory(opts: {
       after_data: opts.after != null ? JSON.stringify(opts.after) : null,
       operator_discord_id: opts.operatorId,
       retention_class: "long_audit",
-      created_at: now,
     });
   } catch {
     /* 履歴書き込み失敗でもセル更新は成功扱いのまま */

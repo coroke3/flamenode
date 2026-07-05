@@ -67,8 +67,6 @@ export async function liveApiAllowed(db: DB): Promise<boolean> {
     await db
       .select({
         operation_mode: systemSettings.operation_mode,
-        cost_guard_mode: systemSettings.cost_guard_mode,
-        is_maintenance_mode: systemSettings.is_maintenance_mode,
       })
       .from(systemSettings)
       .where(eq(systemSettings.id, "default"))

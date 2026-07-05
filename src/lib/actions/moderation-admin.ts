@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
-import { historyLogs, videoModerationCases, videos } from "@/lib/db/schema";
+import { videoModerationCases, videos } from "@/lib/db/schema";
+import { auditAction } from "@/lib/audit/helpers";
 import {
   normalizeModerationCaseType,
   normalizeModerationResolutionStatus,
@@ -132,27 +133,26 @@ export async function createModerationCase(
       .where(eq(videos.id, videoId));
     videoStatusChanged = nextVideoStatus;
 
-    await db.insert(historyLogs).values({
+    await auditAction(db, {
       table_name: "videos",
       record_id: videoId,
       action: "UPDATE",
-      before_data: JSON.stringify({ visibility_status: target.visibility_status }),
-      after_data: JSON.stringify({
+      before_data: { visibility_status: target.visibility_status },
+      after_data: {
         visibility_status: nextVideoStatus,
         moderation_case_id: id,
         case_type: caseType,
-      }),
+      },
       operator_discord_id: u.id,
       retention_class: nextVideoStatus === "voided" ? "long_audit" : "normal",
-      created_at: now,
     });
   }
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "video_moderation_cases",
     record_id: id,
     action: "CREATE",
-    after_data: JSON.stringify({
+    after_data: {
       video_id: videoId,
       case_type: caseType,
       status: "open",
@@ -161,10 +161,9 @@ export async function createModerationCase(
       due_at: dueAt,
       related_x_user_id: relatedXUserId,
       video_status: videoStatusChanged,
-    }),
+    },
     operator_discord_id: u.id,
     retention_class: "long_audit",
-    created_at: now,
   });
 
   await notifyVideoSubmitter(db, target, {
@@ -262,7 +261,7 @@ export async function updateModerationCaseStatus(
       .where(eq(videos.id, current.video_id));
     videoStatusChanged = nextVideoStatus;
 
-    await db.insert(historyLogs).values({
+    await auditAction(db, {
       table_name: "videos",
       record_id: current.video_id,
       action: "UPDATE",
@@ -273,12 +272,11 @@ export async function updateModerationCaseStatus(
         case_status: status,
       }),
       operator_discord_id: u.id,
-      retention_class: nextVideoStatus === "voided" ? "long_audit" : "normal",
-      created_at: now,
+      retention_class: nextVideoStatus === "voided" ? "long_audit" : "normal",
     });
   }
 
-  await db.insert(historyLogs).values({
+  await auditAction(db, {
     table_name: "video_moderation_cases",
     record_id: id,
     action: "UPDATE",
@@ -289,8 +287,7 @@ export async function updateModerationCaseStatus(
       video_status: videoStatusChanged,
     }),
     operator_discord_id: u.id,
-    retention_class: "long_audit",
-    created_at: now,
+    retention_class: "long_audit",
   });
 
   await notifyVideoSubmitter(db, target, {

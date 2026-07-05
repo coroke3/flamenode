@@ -31,6 +31,7 @@ import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
 import { getYoutubeChannelCandidates } from "@/lib/db/youtubeChannelCandidates";
 import { readStagePermissionCustomAnswers } from "@/lib/video/stagePermissionAnswers";
+import { loadStagePermissionFormSettingsJsonByEvents } from "@/lib/video/stagePermissionQuestions";
 
 export const metadata: Metadata = { title: "作品を編集" };
 export const dynamic = "force-dynamic";
@@ -245,7 +246,6 @@ export default async function EditVideoPage({
       acceptingEventMap.set(ev.id, {
         id: ev.id,
         title: ev.title,
-        video_form_settings_json: ev.video_form_settings_json,
         parts_json: ev.parts_json,
       });
     }
@@ -256,18 +256,23 @@ export default async function EditVideoPage({
       .select({
         id: eventsTable.id,
         title: eventsTable.title,
-        video_form_settings_json: eventsTable.video_form_settings_json,
         parts_json: eventsTable.parts_json,
       })
       .from(eventsTable)
       .where(inArray(eventsTable.id, currentEventIds));
     for (const ev of attached) acceptingEventMap.set(ev.id, ev);
   }
-  const eventOptions = Array.from(acceptingEventMap.values());
+  const formSettingsByEvent = await loadStagePermissionFormSettingsJsonByEvents(
+    db,
+    Array.from(acceptingEventMap.keys()),
+  );
+  const eventOptions = Array.from(acceptingEventMap.values()).map((event) => ({
+    ...event,
+    video_form_settings_json: formSettingsByEvent.get(event.id) ?? null,
+  }));
   const stagePermissionInitial = await readStagePermissionCustomAnswers(db, {
     videoId: video.id,
     eventIds: currentEventIds,
-    fallbackRaw: video.stage_permission,
   });
 
   // 作品単位の合作メンバー編集権限。subject ごと 1 行 (can_edit ON/OFF)。

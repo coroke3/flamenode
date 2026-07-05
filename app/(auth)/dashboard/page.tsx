@@ -14,6 +14,7 @@ import {
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth/guard";
+import { getOnboardingState, onboardingHref } from "@/lib/auth/onboarding";
 import {
   collapseReservationGroups,
   sortSlotsChronologically,
@@ -33,6 +34,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
   if (!guard.ok) return guard.element;
   const user = guard.user;
   const db = getDatabase();
+  const onboarding = await getOnboardingState(db, user);
   const activeX = user.active_x_user_id ?? null;
   let activeGalleryXId: string | null = null;
 
@@ -179,15 +181,20 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
     ? `@${activeXRow.id}`
     : user.active_x_user_id
       ? `@${user.active_x_user_id}`
-      : "X ID 未選択";
+      : xIds.length === 0
+        ? "X ID 未連携"
+        : "X ID 未選択";
   const dashboardIcon = activeXRow?.icon_url ?? user.image ?? null;
   const dashboardInitial =
     (dashboardName.trim().charAt(0) || user.name?.trim().charAt(0) || "F").toUpperCase();
-  const galleryEmptyMessage = !activeX
-    ? "アクティブ X ID を設定すると、その名義の作品だけが表示されます。"
-    : !activeGalleryXId
-      ? "アクティブ X ID が未承認のため、マイ・ギャラリーには作品を表示していません。"
-      : "アクティブ X ID の作品はまだ登録されていません。";
+  const galleryEmptyMessage =
+    xIds.length === 0
+      ? "X ID を連携すると、承認後に作品の投稿やマイ・ギャラリーが使えるようになります。"
+      : !activeX
+        ? "アクティブ X ID を設定すると、その名義の作品だけが表示されます。"
+        : !activeGalleryXId
+          ? "アクティブ X ID が未承認のため、マイ・ギャラリーには作品を表示していません。"
+          : "アクティブ X ID の作品はまだ登録されていません。";
 
   return (
     <div className={`fn-public-container fn-page fn-dash ${styles.page}`}>
@@ -219,6 +226,28 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
         </div>
       </header>
 
+      {!onboarding.isComplete ? (
+        <div
+          className="fn-pc-status-banner"
+          role="status"
+          style={{ marginBottom: 20 }}
+        >
+          <Icon name="alert" size={18} aria-hidden />
+          <div>
+            <h3 className="fn-jp">初期設定が未完了です</h3>
+            <p className="fn-jp fn-pc-banner-lead">
+              利用規約への同意とX ID連携を済ませると、投稿・枠確保が使えます。
+            </p>
+            <Link
+              href={onboardingHref("/dashboard")}
+              className="fn-btn fn-btn-primary fn-btn-sm fn-mt-12"
+            >
+              初期設定を続ける
+            </Link>
+          </div>
+        </div>
+      ) : null}
+
       {!db ? (
         <div className="fn-empty" role="status">
           <p className="fn-empty-message">
@@ -245,10 +274,10 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
               X ID がまだ連携されていません。
             </p>
             <Link
-              href="/dashboard/settings"
+              href={onboarding.isComplete ? "/dashboard/settings" : onboardingHref("/dashboard")}
               className="fn-btn fn-btn-primary fn-mt-md"
             >
-              X ID を連携する
+              {onboarding.isComplete ? "X ID を連携する" : "初期設定を続ける"}
             </Link>
           </div>
         ) : (
@@ -289,10 +318,10 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
               {galleryEmptyMessage}
             </p>
             <Link
-              href="/entry"
+              href={xIds.length === 0 ? "/dashboard/settings" : "/entry"}
               className="fn-btn fn-btn-primary fn-mt-md"
             >
-              作品を投稿する
+              {xIds.length === 0 ? "X ID を連携する" : "作品を投稿する"}
             </Link>
           </div>
         ) : (
