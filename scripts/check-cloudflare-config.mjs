@@ -73,17 +73,19 @@ function main() {
   const hasCfIdsJson = !!process.env.CF_IDS_JSON?.trim();
   const hasLocalIds = fs.existsSync(IDS_PATH);
 
-  if (!hasCfIdsJson && !hasLocalIds) {
-    errors.push(
+  for (const rel of WRANGLER_FILES) {
+    const filePath = path.join(ROOT, rel);
+    errors.push(...checkToml(filePath, rel));
+  }
+
+  const hasRealIdsInToml = errors.length === 0;
+
+  if (!hasCfIdsJson && !hasLocalIds && !hasRealIdsInToml) {
+    errors.unshift(
       "Cloudflare ID 設定ファイルが見つかりません。\n" +
         "  GitHub Secret `CF_IDS_JSON` を設定するか、\n" +
         "  ローカルでは `cp cloudflare/ids.example.json cloudflare/ids.json` して `npm run cf:sync-ids` を実行してください。",
     );
-  }
-
-  for (const rel of WRANGLER_FILES) {
-    const filePath = path.join(ROOT, rel);
-    errors.push(...checkToml(filePath, rel));
   }
 
   if (errors.length > 0) {
