@@ -1,3 +1,5 @@
+export const runtime = "edge";
+
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
@@ -22,6 +24,7 @@ interface JsonRequest {
   action?: "analyze" | "apply";
   files?: { name?: string; content?: string }[];
   previewToken?: string;
+  anchorNow?: number;
   strategy?: {
     importMode?: string;
     strategy?: string;
@@ -115,19 +118,27 @@ export async function POST(req: Request): Promise<Response> {
   const importMode = normalizeImportMode(body.strategy?.importMode);
   const strategy = normalizeStrategy(body.strategy?.strategy);
   const enqueueStaticRebuild = body.strategy?.enqueueStaticRebuild !== false;
-  const now = Math.floor(Date.now() / 1000);
+  const action = body.action ?? "analyze";
+  const anchorNow =
+    action === "apply" &&
+    typeof body.anchorNow === "number" &&
+    Number.isFinite(body.anchorNow)
+      ? Math.floor(body.anchorNow)
+      : Math.floor(Date.now() / 1000);
 
   const normalizedEvents = allEvents.map((e) =>
     normalizeEventInfo(e as Parameters<typeof normalizeEventInfo>[0], {
       importMode,
-      now,
+      now: anchorNow,
     }),
   );
   const normalizedVideos = allVideos.map((v) =>
     normalizeLegacyVideo(v as Parameters<typeof normalizeLegacyVideo>[0]),
   );
 
-  const plan = buildLegacyImportPlan(normalizedEvents, normalizedVideos, now, { importMode });
+  const plan = buildLegacyImportPlan(normalizedEvents, normalizedVideos, anchorNow, {
+    importMode,
+  });
 
   // ハッシュ・トークン計算
   const fileHashInput = files.map((f) => ({
@@ -141,14 +152,12 @@ export async function POST(req: Request): Promise<Response> {
   ]);
   const previewToken = await buildPreviewToken({
     fileHash,
-    planHash,
     strategy,
     importMode,
     userId: u.id,
+    anchorNow,
     featureFlagEnabled: true,
   });
-
-  const action = body.action ?? "analyze";
 
   if (action === "analyze") {
     const db = getDatabase();
@@ -159,6 +168,7 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({
       ...dryRun,
       previewToken,
+      anchorNow,
       plan: {
         events: plan.stats.events,
         videos: plan.stats.videos,
@@ -170,7 +180,11 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   if (action === "apply") {
-    if (!body.previewToken || body.previewToken !== previewToken) {
+    if (
+      !body.previewToken ||
+      body.previewToken !== previewToken ||
+      body.anchorNow !== anchorNow
+    ) {
       return errorResponse(
         "反映前に現在のファイルと設定でドライランを実行してください。",
         409,

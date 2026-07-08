@@ -8,6 +8,7 @@ import { getCurrentUser } from "@/lib/auth/currentUser";
 import { auditLogs, auditRestoreRuns } from "@/lib/db/schema";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { AdminSectionTabs } from "@/components/admin/AdminSectionTabs";
 import { FnTable } from "@/components/ui/FnTable";
 
 export const metadata: Metadata = { title: "復元履歴" };
@@ -49,6 +50,8 @@ export default async function AdminAuditRestorePage(): Promise<React.ReactElemen
         backHref="/admin/audit"
         backLabel="監査ログ一覧へ"
       />
+
+      <AdminSectionTabs hub="audit" />
 
       {runs.length === 0 ? (
         <p

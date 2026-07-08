@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
 import { canAccessManageEvent } from "@/lib/auth/ownership";
@@ -17,22 +17,33 @@ import { ManageEventTabs } from "@/components/manage/ManageEventTabs";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
 import { VideoReviewQueueTable } from "@/components/admin/VideoReviewQueueTable";
 import { fetchVideoReviewSummaries } from "@/lib/admin/videoReviewMeta";
+import {
+  VIDEO_VISIBILITY_GROUPS,
+  normalizeVideoVisibilityFilter,
+  type VideoVisibilityGroupKey,
+  videoVisibilityFilterLabel,
+  videoVisibilityGroupForFilter,
+  videoVisibilityStatusesForFilter,
+} from "@/lib/admin/videoVisibilityLabels";
 
 export const dynamic = "force-dynamic";
 
-const STATUS_FILTERS = [
+type StatusFilter = {
+  value: "all" | VideoVisibilityGroupKey;
+  label: string;
+};
+
+const STATUS_FILTERS: readonly StatusFilter[] = [
   { value: "all", label: "すべて" },
-  { value: "pending", label: "審査待ち" },
-  { value: "public", label: "公開" },
-  { value: "hidden", label: "非表示" },
-  { value: "private", label: "非公開" },
-  { value: "limited", label: "限定" },
-  { value: "draft", label: "下書き" },
-] as const;
+  ...VIDEO_VISIBILITY_GROUPS.map((group) => ({
+    value: group.key,
+    label: group.label,
+  })),
+];
 
 interface Props {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ status?: string }>;
+  searchParams: Promise<{ status?: string | string[] }>;
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -54,8 +65,12 @@ export default async function ManageEventVideosPage({
   searchParams,
 }: Props): Promise<React.ReactElement> {
   const { id } = await params;
-  const { status: statusRaw = "pending" } = await searchParams;
-  const statusFilter = statusRaw === "all" ? "" : statusRaw;
+  const { status: statusRaw = "review" } = await searchParams;
+  const statusFilter = normalizeVideoVisibilityFilter(statusRaw, "review");
+  const activeStatusGroup = statusFilter
+    ? videoVisibilityGroupForFilter(statusFilter)
+    : null;
+  const isReviewFilter = activeStatusGroup === "review";
 
   const guard = await requireSession({
     next: `/manage/events/${encodeURIComponent(id)}/videos`,
@@ -74,9 +89,15 @@ export default async function ManageEventVideosPage({
   const isAdmin = user.role === "admin";
   if (!(await canAccessManageEvent(db, user, id))) notFound();
 
-  const statusCond = statusFilter
-    ? eq(videosTable.visibility_status, statusFilter as never)
-    : undefined;
+  const statusValues = videoVisibilityStatusesForFilter(statusFilter);
+  const statusCond =
+    statusValues && statusValues.length > 1
+      ? inArray(videosTable.visibility_status, statusValues)
+      : statusValues?.[0]
+        ? eq(videosTable.visibility_status, statusValues[0])
+        : undefined;
+  const eventCond = eq(videoEventsTable.event_id, id);
+  const where = statusCond ? and(eventCond, statusCond) : eventCond;
 
   const baseRows = await db
     .select({
@@ -90,7 +111,7 @@ export default async function ManageEventVideosPage({
     .from(videosTable)
     .innerJoin(videoEventsTable, eq(videoEventsTable.video_id, videosTable.id))
     .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id))
-    .where(and(eq(videoEventsTable.event_id, id), statusCond)!)
+    .where(where)
     .orderBy(desc(videosTable.created_at))
     .limit(200);
 
@@ -121,27 +142,25 @@ export default async function ManageEventVideosPage({
         </h1>
         <p className="fn-muted fn-text-sm" style={{ margin: 0 }}>
           このイベントに紐づく作品 {rows.length} 件
-          {statusFilter ? `（${statusFilter}）` : ""}
+          {statusFilter ? `（${videoVisibilityFilterLabel(statusFilter)}）` : ""}
         </p>
       </header>
       <ManageEventTabs
         eventId={id}
-        active={statusFilter === "pending" ? "review" : "submissions"}
+        active={isReviewFilter ? "review" : "submissions"}
         isAdmin={isAdmin}
       />
 
       <div
+        className="fn-console-filter-nav"
         style={{
-          display: "flex",
-          gap: 6,
-          flexWrap: "wrap",
           marginBottom: 16,
           alignItems: "center",
         }}
       >
         {STATUS_FILTERS.map((f) => {
           const active =
-            f.value === "all" ? statusFilter === "" : f.value === statusFilter;
+            f.value === "all" ? statusFilter === "" : f.value === activeStatusGroup;
           const href = `/manage/events/${id}/videos?status=${encodeURIComponent(f.value)}`;
           return (
             <Link
@@ -158,18 +177,18 @@ export default async function ManageEventVideosPage({
 
       {rows.length === 0 ? (
         <EmptyState
-          tone={statusFilter === "pending" ? "success" : "neutral"}
+          tone={isReviewFilter ? "success" : "neutral"}
           title={
-            statusFilter === "pending"
+            isReviewFilter
               ? "審査待ちはありません"
               : "該当する作品はありません"
           }
           description={
-            statusFilter === "pending"
+            isReviewFilter
               ? "現在、このイベントで対応が必要な作品はありません。"
               : "フィルタ条件を変えると、別の作品が表示される場合があります。"
           }
-          iconName={statusFilter === "pending" ? "check" : "info"}
+          iconName={isReviewFilter ? "check" : "info"}
           actions={[
             { href: `/event/${id}`, label: "公開ページを見る", variant: "primary" },
             {

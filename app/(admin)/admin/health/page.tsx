@@ -8,6 +8,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { runHealthChecks, type HealthCheckResult } from "@/lib/admin/healthChecks";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { AdminSectionTabs } from "@/components/admin/AdminSectionTabs";
 
 export const metadata: Metadata = { title: "DB ヘルスチェック" };
 export const dynamic = "force-dynamic";
@@ -66,6 +67,8 @@ export default async function AdminHealthPage({
         title="DB ヘルスチェック"
         description="データベースの整合性を読み取り専用で点検します。修復操作はありません。"
       />
+
+      <AdminSectionTabs hub="health" />
 
       <section
         className="fn-card"

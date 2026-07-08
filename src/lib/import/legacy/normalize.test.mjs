@@ -140,4 +140,13 @@ describe("normalizeLegacyVideo", () => {
     const result = normalizeLegacyVideo({ eventid: "ev1" });
     assert.ok(!result.ok);
   });
+
+  it("uses a stable fallback video id when youtube id is missing", () => {
+    const input = { title: "無YT動画", tlink: "creator_x", eventid: "ev1" };
+    const a = normalizeLegacyVideo(input);
+    const b = normalizeLegacyVideo(input);
+    assert.ok(a.ok && b.ok);
+    assert.equal(a.video?.id, b.video?.id);
+    assert.match(a.video?.id ?? "", /^legacy_fb_[0-9a-f]+$/);
+  });
 });

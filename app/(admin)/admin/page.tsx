@@ -357,6 +357,28 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
           監査ログ
         </Link>
       </section>
+
+      <section
+        style={{
+          marginTop: 20,
+          padding: "16px 18px",
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border-subtle)",
+          borderRadius: "var(--radius-md)",
+          display: "flex",
+          gap: 8,
+          flexWrap: "wrap",
+          alignItems: "center",
+        }}
+      >
+        <span className="fn-muted fn-text-sm">
+          イベント現場の運営（枠・審査・スタッフ）は /manage で行います。
+        </span>
+        <Link href="/manage" className="fn-btn fn-btn-ghost fn-btn-sm">
+          イベント現場運営へ
+          <Icon name="chevron-right" size={11} aria-hidden />
+        </Link>
+      </section>
     </div>
   );
 }

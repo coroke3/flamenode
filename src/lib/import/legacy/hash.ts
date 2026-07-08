@@ -25,11 +25,18 @@ export async function stableSha256(value: unknown): Promise<string> {
   return toHex(digest);
 }
 
-/** ファイルリストのハッシュ (内容・名前・サイズのみ) */
+/** ファイルリストのハッシュ (名前・サイズ・内容) */
 export async function hashFiles(
   files: Array<{ name: string; content: string; size: number }>,
 ): Promise<string> {
-  return stableSha256(
-    files.map((f) => ({ name: f.name, size: f.size, len: f.content.length })),
+  const parts = await Promise.all(
+    [...files]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(async (f) => ({
+        name: f.name,
+        size: f.size,
+        contentHash: await stableSha256(f.content),
+      })),
   );
+  return stableSha256(parts);
 }

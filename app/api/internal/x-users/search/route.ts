@@ -1,3 +1,5 @@
+export const runtime = "edge";
+
 import { NextResponse } from "next/server";
 import { and, eq, like, or, asc, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";

@@ -55,19 +55,19 @@
 }
 
 .selected[data-status="reserved"] {
-  background: color-mix(in srgb, var(--bg-elevated) 94%, #ff6868);
+  background: color-mix(in srgb, var(--bg-elevated) 94%, var(--status-reserved));
 }
 
 .selected[data-status="reserved"] strong {
-  color: color-mix(in srgb, #ff6868 75%, var(--text-primary));
+  color: color-mix(in srgb, var(--status-reserved) 75%, var(--text-primary));
 }
 
 .selected[data-status="submitted"] {
-  background: color-mix(in srgb, var(--bg-elevated) 94%, #7ce1ff);
+  background: color-mix(in srgb, var(--bg-elevated) 94%, var(--status-submitted));
 }
 
 .selected[data-status="submitted"] strong {
-  color: color-mix(in srgb, #7ce1ff 75%, var(--text-primary));
+  color: color-mix(in srgb, var(--status-submitted) 75%, var(--text-primary));
 }
 
 .slotDetails {

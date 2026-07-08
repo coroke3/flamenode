@@ -14,15 +14,8 @@ export interface ManageVideoActionResult {
   message?: string;
 }
 
-/** イベント運営者が変更可能な公開状態（voided / archived は管理者専用） */
-const MANAGE_ALLOWED_STATUS = new Set([
-  "draft",
-  "pending",
-  "public",
-  "limited",
-  "private",
-  "hidden",
-]);
+/** イベント運営者が通常操作で変更できる公開状態。内部状態は管理者側に集約する。 */
+const MANAGE_ALLOWED_STATUS = new Set(["pending", "public", "private"]);
 
 export async function setManageVideoStatus(
   formData: FormData,

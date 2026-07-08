@@ -83,6 +83,26 @@ export interface XIdOption {
   x_name: string;
 }
 
+/** slot モードのステップ 0 用。確保済み枠の表示に使う。 */
+export interface VideoFormSlotInfo {
+  eventTitle: string;
+  slotTimeLabel: string;
+  displayName: string;
+  groupSize?: number;
+}
+
+type WizardStepKey = "slot" | "submitter" | "work" | "youtube" | "confirm";
+
+const WIZARD_STEPS_SLOT: { key: WizardStepKey; label: string }[] = [
+  { key: "slot", label: "枠確保" },
+  { key: "submitter", label: "提出者情報" },
+  { key: "work", label: "作品情報" },
+  { key: "youtube", label: "YouTube URL" },
+  { key: "confirm", label: "確認・送信" },
+];
+
+const WIZARD_STEPS_FREE = WIZARD_STEPS_SLOT.slice(1);
+
 interface VideoFormProps {
   mode: "free" | "slot" | "edit";
   initial?: VideoFormInitialValues;
@@ -145,6 +165,8 @@ interface VideoFormProps {
    * `edit_privilege_mode` で送信される。サーバーは別途 URL/セッションから再検証する。
    */
   editPrivilegeMode?: "normal" | "admin" | "event";
+  /** slot モードのウィザード Step 0 表示用。 */
+  slotInfo?: VideoFormSlotInfo;
 }
 
 /** section key が disabledSections に含まれているか確認する小関数。 */
@@ -190,8 +212,15 @@ export function VideoForm({
   canEditEvents = true,
   canChangeSubmitter = false,
   editPrivilegeMode,
+  slotInfo,
 }: VideoFormProps): React.ReactElement {
   const router = useRouter();
+  const formRef = React.useRef<HTMLFormElement>(null);
+  const isWizard = mode === "slot" || mode === "free";
+  const wizardSteps = mode === "slot" ? WIZARD_STEPS_SLOT : WIZARD_STEPS_FREE;
+  const [currentStep, setCurrentStep] = React.useState(0);
+  const [maxReachedStep, setMaxReachedStep] = React.useState(0);
+  const [stepError, setStepError] = React.useState<string | null>(null);
   const [youtubeUrl, setYoutubeUrl] = React.useState(initial.youtube_url ?? "");
   const [titlePreview, setTitlePreview] = React.useState(initial.title ?? "");
   const [displayNamePreview, setDisplayNamePreview] = React.useState(
@@ -300,6 +329,96 @@ export function VideoForm({
     (question) => question.required,
   ).length;
 
+  const currentStepKey = isWizard ? wizardSteps[currentStep]?.key : null;
+  const isWizardLastStep = isWizard && currentStep === wizardSteps.length - 1;
+  const isWizardFirstStep = isWizard && currentStep === 0;
+  const showSidePreview =
+    !isWizard ||
+    currentStepKey === "youtube" ||
+    currentStepKey === "confirm";
+
+  const isStepVisible = (key: WizardStepKey): boolean => {
+    if (!isWizard) return true;
+    if (key === "slot" || key === "confirm") {
+      return currentStepKey === key;
+    }
+    if (key === "submitter") return currentStepKey === "submitter";
+    if (key === "work") return currentStepKey === "work";
+    if (key === "youtube") return currentStepKey === "youtube";
+    return false;
+  };
+
+  const validateWizardStep = (stepKey: WizardStepKey): string | null => {
+    const form = formRef.current;
+    if (stepKey === "slot") return null;
+
+    if (stepKey === "submitter") {
+      if (isActiveXFixed && !normalizedActiveXId) {
+        return "承認済み X ID がありません。設定画面から連携してください。";
+      }
+      const displayName = form?.elements.namedItem("display_name");
+      const displayValue =
+        displayName instanceof HTMLInputElement ? displayName.value.trim() : "";
+      if (!displayValue) return "表示名 / 活動名 / 団体名を入力してください。";
+      return null;
+    }
+
+    if (stepKey === "work") {
+      const titleEl = form?.elements.namedItem("title");
+      const titleValue =
+        titleEl instanceof HTMLInputElement ? titleEl.value.trim() : "";
+      if (!titleValue) return "作品タイトルを入力してください。";
+
+      for (const question of selectedStagePermissionFields) {
+        if (!question.required) continue;
+        const fieldId = `stage_permission_${question.id}`;
+        const answerEl = form?.elements.namedItem(fieldId);
+        const answerValue =
+          answerEl instanceof HTMLTextAreaElement ? answerEl.value.trim() : "";
+        if (!answerValue) {
+          return `「${question.label}」を入力してください。`;
+        }
+      }
+      return null;
+    }
+
+    if (stepKey === "youtube") {
+      const trimmed = youtubeUrl.trim();
+      if (!trimmed) return "YouTube URL を入力してください。";
+      if (!extractYoutubeId(trimmed)) {
+        return "有効な YouTube URL または動画 ID を入力してください。";
+      }
+      return null;
+    }
+
+    return null;
+  };
+
+  const goToWizardStep = (index: number) => {
+    if (!isWizard || index > maxReachedStep || index === currentStep) return;
+    setStepError(null);
+    setCurrentStep(index);
+  };
+
+  const goWizardNext = () => {
+    if (!isWizard || !currentStepKey) return;
+    const err = validateWizardStep(currentStepKey);
+    if (err) {
+      setStepError(err);
+      return;
+    }
+    setStepError(null);
+    const next = Math.min(currentStep + 1, wizardSteps.length - 1);
+    setCurrentStep(next);
+    setMaxReachedStep((prev) => Math.max(prev, next));
+  };
+
+  const goWizardBack = () => {
+    if (!isWizard || isWizardFirstStep) return;
+    setStepError(null);
+    setCurrentStep((prev) => Math.max(0, prev - 1));
+  };
+
   const handleSubmit = (ev: React.FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
     const formData = new FormData(ev.currentTarget);
@@ -337,6 +456,7 @@ export function VideoForm({
 
   return (
     <form
+      ref={formRef}
       className={styles.form}
       onSubmit={handleSubmit}
       onChange={() => {
@@ -361,7 +481,96 @@ export function VideoForm({
         </datalist>
       ) : null}
 
+      {isWizard ? (
+        <nav className={styles.stepProgress} aria-label="投稿ステップ">
+          <ol className={styles.stepProgressList}>
+            {wizardSteps.map((step, index) => {
+              const state =
+                index < currentStep
+                  ? "done"
+                  : index === currentStep
+                    ? "current"
+                    : "pending";
+              const clickable = index <= maxReachedStep && index !== currentStep;
+              return (
+                <li key={step.key} className={styles.stepProgressItem}>
+                  <button
+                    type="button"
+                    className={styles.stepProgressButton}
+                    data-state={state}
+                    data-clickable={clickable ? "true" : undefined}
+                    disabled={!clickable}
+                    onClick={() => goToWizardStep(index)}
+                    aria-current={index === currentStep ? "step" : undefined}
+                  >
+                    <span className={styles.stepProgressIndex} aria-hidden>
+                      {state === "done" ? (
+                        <Icon name="check" size={11} />
+                      ) : (
+                        index + 1
+                      )}
+                    </span>
+                    <span>{step.label}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        </nav>
+      ) : null}
+
       <div className={styles.formMain}>
+      {isWizard && mode === "slot" ? (
+        <div
+          className={cx(
+            styles.stepPanel,
+            !isStepVisible("slot") && styles.stepPanelHidden,
+          )}
+          hidden={!isStepVisible("slot")}
+        >
+          <section className={styles.section}>
+            <h2 className={styles.sectionTitle}>
+              <Icon name="calendar" size={14} aria-hidden /> 枠確保
+            </h2>
+            <div className={styles.slotDoneCard}>
+              <p className={styles.slotDoneKicker}>確保済み枠</p>
+              <h3 className={styles.slotDoneTitle}>
+                {slotInfo?.slotTimeLabel ?? "枠情報を読み込み中"}
+              </h3>
+              <p className={styles.slotDoneLead}>
+                イベント: <strong>{slotInfo?.eventTitle ?? "—"}</strong>
+                <br />
+                確保名: <strong>{slotInfo?.displayName ?? displayNamePreview}</strong>
+                {slotInfo?.groupSize && slotInfo.groupSize > 1
+                  ? ` / 連続枠 ${slotInfo.groupSize}`
+                  : ""}
+              </p>
+              <span className={styles.slotDoneBadge}>
+                <Icon name="check" size={12} aria-hidden />
+                枠確保完了
+              </span>
+            </div>
+            <p className={styles.help} style={{ marginTop: 12 }}>
+              次のステップで提出者情報と作品情報を登録し、最後に YouTube URL を紐づけます。
+            </p>
+          </section>
+        </div>
+      ) : null}
+
+      {stepError ? (
+        <div className={styles.stepError} role="alert">
+          <Icon name="warning" size={13} aria-hidden />
+          <span>{stepError}</span>
+        </div>
+      ) : null}
+
+      <div
+        className={cx(
+          styles.stepPanel,
+          isWizard && !isStepVisible("submitter") && styles.stepPanelHidden,
+        )}
+        hidden={isWizard ? !isStepVisible("submitter") : undefined}
+      >
       <section
         className={cx(
           styles.section,
@@ -487,7 +696,15 @@ export function VideoForm({
           />
         </div>
       </section>
+      </div>
 
+      <div
+        className={cx(
+          styles.stepPanel,
+          isWizard && !isStepVisible("work") && styles.stepPanelHidden,
+        )}
+        hidden={isWizard ? !isStepVisible("work") : undefined}
+      >
       <section
         className={cx(
           styles.section,
@@ -524,6 +741,7 @@ export function VideoForm({
           />
         </div>
 
+        {!isWizard ? (
         <div className={cx(styles.field, styles.editableField)}>
           <label
             className={`${styles.label} ${styles.required}`}
@@ -569,6 +787,7 @@ export function VideoForm({
             </div>
           ) : null}
         </div>
+        ) : null}
 
         <div className={`${styles.row} ${styles.cols2}`}>
           <div className={cx(styles.field, styles.editableField)}>
@@ -622,7 +841,11 @@ export function VideoForm({
             <label className={styles.label}>所属イベント</label>
             <p className={styles.help}>
               この作品を関連付けるイベントを選択します。複数選択可。
-              {slotId ? " 確保した枠のイベントは固定で含まれます。" : ""}
+              {slotId
+                ? " 確保した枠のイベントは固定で含まれます。"
+                : mode === "free"
+                  ? " 枠なし投稿を受け付けるイベントのみ表示されます。"
+                  : ""}
             </p>
             <input
               type="hidden"
@@ -898,6 +1121,133 @@ export function VideoForm({
           </div>
         ) : null}
       </section>
+      </div>
+
+      {isWizard ? (
+        <div
+          className={cx(
+            styles.stepPanel,
+            !isStepVisible("youtube") && styles.stepPanelHidden,
+          )}
+          hidden={!isStepVisible("youtube")}
+        >
+          <section className={styles.section}>
+            <h2 className={styles.sectionTitle}>
+              <Icon name="youtube" size={14} aria-hidden /> YouTube URL 登録
+            </h2>
+            <div className={styles.youtubeStepSection}>
+              <div className={cx(styles.field, styles.editableField)}>
+                <label
+                  className={`${styles.label} ${styles.required}`}
+                  htmlFor="youtube_url"
+                >
+                  YouTube URL
+                </label>
+                <input
+                  id="youtube_url"
+                  name="youtube_url"
+                  type="url"
+                  value={youtubeUrl}
+                  onChange={(e) => setYoutubeUrl(e.target.value)}
+                  className="fn-input"
+                  placeholder="https://www.youtube.com/watch?v=..."
+                  required
+                  readOnly={fieldDisabled("video.youtube_url")}
+                  aria-readonly={fieldDisabled("video.youtube_url") || undefined}
+                  style={
+                    fieldDisabled("video.youtube_url")
+                      ? { opacity: 0.65, cursor: "default" }
+                      : undefined
+                  }
+                />
+                <p className={styles.help}>
+                  限定公開でも登録可能です。URL を入力すると下にサムネイルが表示されます。
+                </p>
+              </div>
+              {youtubeId ? (
+                <div className={styles.youtubeStepPreview}>
+                  <div className={styles.youtubeStepThumb}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={youtubeThumbUrl(youtubeId, "hqdefault")} alt="" />
+                  </div>
+                  <div className={styles.youtubeStepMeta}>
+                    <strong style={{ color: "var(--text-primary)" }}>
+                      YouTube ID: {youtubeId}
+                    </strong>
+                    <br />
+                    <a
+                      href={youtubeWatchUrl(youtubeId)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      YouTube で確認 →
+                    </a>
+                  </div>
+                </div>
+              ) : (
+                <p className={styles.help}>
+                  動画の URL または 11 桁の動画 ID を入力してください。
+                </p>
+              )}
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {isWizard ? (
+        <div
+          className={cx(
+            styles.stepPanel,
+            !isStepVisible("confirm") && styles.stepPanelHidden,
+          )}
+          hidden={!isStepVisible("confirm")}
+        >
+          <section className={styles.section}>
+            <h2 className={styles.sectionTitle}>
+              <Icon name="check" size={14} aria-hidden /> 確認・送信
+            </h2>
+            <div className={styles.confirmSummary}>
+              <p className={styles.help}>
+                入力内容を確認して、問題なければ提出してください。
+              </p>
+              <div className={styles.confirmSummaryGrid}>
+                <dl className={styles.confirmSummaryList}>
+                  <div>
+                    <dt>X ID</dt>
+                    <dd>@{normalizedActiveXId || normalizedInitialXId || "未設定"}</dd>
+                  </div>
+                  <div>
+                    <dt>表示名</dt>
+                    <dd>{displayNamePreview.trim() || "未入力"}</dd>
+                  </div>
+                  <div>
+                    <dt>タイトル</dt>
+                    <dd>{titlePreview.trim() || "未入力"}</dd>
+                  </div>
+                  <div>
+                    <dt>イベント</dt>
+                    <dd>
+                      {selectedEventLabels.length > 0
+                        ? selectedEventLabels.join(" / ")
+                        : "未選択"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>YouTube</dt>
+                    <dd>{youtubeId ?? "未入力"}</dd>
+                  </div>
+                </dl>
+                {youtubeId ? (
+                  <div className={styles.confirmThumb}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={youtubeThumbUrl(youtubeId, "hqdefault")} alt="" />
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {result && !result.ok ? (
         <ErrorCallout
@@ -974,7 +1324,14 @@ export function VideoForm({
       ) : null}
       </div>
 
-      <aside className={styles.sidePreview} aria-label="投稿内容プレビュー">
+      <aside
+        className={cx(
+          styles.sidePreview,
+          isWizard && !showSidePreview && styles.sidePreviewHidden,
+        )}
+        aria-label="投稿内容プレビュー"
+        hidden={isWizard ? !showSidePreview : undefined}
+      >
         <span className={styles.sideEyebrow}>live preview</span>
         <div className={styles.previewCard}>
           <div className={styles.previewVisual}>
@@ -1044,17 +1401,85 @@ export function VideoForm({
       </aside>
 
       <div className={styles.actions}>
-        <button
-          type="submit"
-          className="fn-btn fn-btn-primary"
-          disabled={pending || !canSubmit}
-          aria-busy={pending}
-        >
-          <Icon name="upload" size={14} aria-hidden />
-          {pending ? "送信中…" : "提出する"}
-        </button>
+        {isWizard ? (
+          <div className={styles.wizardNav}>
+            <button
+              type="button"
+              className="fn-btn fn-btn-ghost"
+              onClick={goWizardBack}
+              disabled={isWizardFirstStep || pending}
+            >
+              戻る
+            </button>
+            <span className={styles.wizardNavHint}>
+              {wizardSteps[currentStep]?.label ?? ""}
+            </span>
+            {isWizardLastStep ? (
+              <button
+                type="submit"
+                className="fn-btn fn-btn-primary"
+                disabled={pending || !canSubmit}
+                aria-busy={pending}
+              >
+                <Icon name="upload" size={14} aria-hidden />
+                {pending ? "送信中…" : "提出する"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="fn-btn fn-btn-primary"
+                onClick={goWizardNext}
+                disabled={pending}
+              >
+                次へ
+                <Icon name="chevron-right" size={14} aria-hidden />
+              </button>
+            )}
+          </div>
+        ) : (
+          <button
+            type="submit"
+            className="fn-btn fn-btn-primary"
+            disabled={pending || !canSubmit}
+            aria-busy={pending}
+          >
+            <Icon name="upload" size={14} aria-hidden />
+            {pending ? "送信中…" : "提出する"}
+          </button>
+        )}
       </div>
 
+      {isWizard ? (
+        <div className={styles.mobileWizardBar} aria-label="ステップ操作">
+          <button
+            type="button"
+            className="fn-btn fn-btn-ghost"
+            onClick={goWizardBack}
+            disabled={isWizardFirstStep || pending}
+          >
+            戻る
+          </button>
+          {isWizardLastStep ? (
+            <button
+              type="submit"
+              className="fn-btn fn-btn-primary"
+              disabled={pending || !canSubmit}
+              aria-busy={pending}
+            >
+              {pending ? "送信中…" : "提出する"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="fn-btn fn-btn-primary"
+              onClick={goWizardNext}
+              disabled={pending}
+            >
+              次へ
+            </button>
+          )}
+        </div>
+      ) : (
       <div className={styles.mobileSubmitBar} aria-label="送信操作">
         <span className={styles.mobileSubmitHint}>
           {submitBlockedReason
@@ -1074,6 +1499,7 @@ export function VideoForm({
           {pending ? "送信中…" : mode === "edit" ? "保存する" : "提出する"}
         </button>
       </div>
+      )}
     </form>
   );
 }

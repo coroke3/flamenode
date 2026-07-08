@@ -28,6 +28,7 @@ test("basic section snapshot excludes publish/questions/slots fields", () => {
     entry_start_time: 3,
     entry_end_time: 4,
     allow_user_video_event_links: 1,
+    allow_unslotted_posts: 0,
     allow_user_video_edits: 1,
     user_video_edit_permission_keys_json: "[]",
     video_form_settings_json: "{}",
@@ -68,6 +69,7 @@ test("publish section snapshot includes visibility and entry fields only", () =>
     entry_start_time: 10,
     entry_end_time: 20,
     allow_user_video_event_links: 0,
+    allow_unslotted_posts: 1,
     allow_user_video_edits: 0,
     user_video_edit_permission_keys_json: null,
     video_form_settings_json: null,
@@ -82,5 +84,6 @@ test("publish section snapshot includes visibility and entry fields only", () =>
   });
   assert.equal(publish.visibility_status, "private");
   assert.equal(publish.entry_start_time, 10);
+  assert.equal(publish.allow_unslotted_posts, 1);
   assert.equal(!("title" in publish), true);
 });

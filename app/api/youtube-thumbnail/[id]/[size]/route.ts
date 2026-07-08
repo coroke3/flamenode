@@ -1,3 +1,5 @@
+export const runtime = "edge";
+
 import {
   YOUTUBE_THUMB_SIZES,
   type YoutubeThumbSize,

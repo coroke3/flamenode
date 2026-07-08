@@ -51,12 +51,12 @@
 }
 
 .tone-success .icon {
-  color: var(--ok, #7bd89c);
-  background: rgba(123, 216, 156, 0.14);
+  color: var(--ok);
+  background: var(--success-soft);
 }
 
 .tone-success {
-  border-color: rgba(123, 216, 156, 0.22);
+  border-color: var(--success-border);
 }
 
 .tone-warning .icon {
@@ -65,14 +65,14 @@
 }
 
 .tone-warning {
-  border-color: color-mix(in srgb, var(--warn, #ff8a6e) 28%, var(--border-subtle));
+  border-color: color-mix(in srgb, var(--warn) 28%, var(--border-subtle));
 }
 
 .tone-danger .icon {
   color: var(--danger, var(--accent-danger));
-  background: var(--accent-danger-soft, rgba(220, 38, 38, 0.12));
+  background: var(--accent-danger-soft);
 }
 
 .tone-danger {
-  border-color: color-mix(in srgb, var(--danger, #dc2626) 24%, var(--border-subtle));
+  border-color: color-mix(in srgb, var(--danger) 24%, var(--border-subtle));
 }

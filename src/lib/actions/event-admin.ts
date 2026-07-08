@@ -129,6 +129,7 @@ export async function createEvent(
     accent_color: data.accent_color ?? null,
     visibility_status: visibilityStatus,
     allow_user_video_event_links: data.allow_user_video_event_links,
+    allow_unslotted_posts: data.allow_unslotted_posts,
     allow_user_video_edits: data.allow_user_video_edits,
     user_video_edit_permission_keys_json:
       data.user_video_edit_permission_keys_json ?? null,

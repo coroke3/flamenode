@@ -3,11 +3,18 @@ import "server-only";
 import * as React from "react";
 import { Icon } from "@/components/ui/Icon";
 import type { AdminSidebarGroup } from "@/components/admin/AdminSidebarNav";
+import { isLegacyImportToolEnabled } from "@/lib/import/legacy/featureFlag";
 
 function isAdminSpreadsheetNavEnabled(): boolean {
   const v = process.env.ADMIN_SPREADSHEET_ENABLED?.trim().toLowerCase();
   return v === "1" || v === "true" || v === "yes";
 }
+
+const ADMIN_NAV_LEGACY_IMPORT_ITEM = {
+  href: "/admin/import",
+  label: "旧データ移行",
+  icon: <Icon name="upload" size={14} />,
+} as const;
 
 const ADMIN_NAV_SPREADSHEET_ITEM = {
   href: "/admin/spreadsheet",
@@ -23,7 +30,7 @@ const ADMIN_NAV_GROUPS_BASE: AdminSidebarGroup[] = [
     ],
   },
   {
-    title: "対応待ち",
+    title: "審査・申請",
     items: [
       {
         href: "/admin/videos?status=pending",
@@ -32,23 +39,13 @@ const ADMIN_NAV_GROUPS_BASE: AdminSidebarGroup[] = [
       },
       {
         href: "/admin/x-link-requests",
-        label: "X ID連携申請",
+        label: "X ID申請",
         icon: <Icon name="user" size={14} />,
       },
       {
-        href: "/admin/x-id-merges",
-        label: "X ID統合申請",
-        icon: <Icon name="users" size={14} />,
-      },
-      {
-        href: "/admin/moderation?status=open",
+        href: "/admin/moderation",
         label: "モデレーション",
         icon: <Icon name="warning" size={14} />,
-      },
-      {
-        href: "/admin/notifications?status=failed",
-        label: "通知失敗",
-        icon: <Icon name="alert" size={14} />,
       },
     ],
   },
@@ -58,25 +55,20 @@ const ADMIN_NAV_GROUPS_BASE: AdminSidebarGroup[] = [
       { href: "/admin/videos", label: "作品管理", icon: <Icon name="youtube" size={14} /> },
       {
         href: "/admin/youtube-sync",
-        label: "YouTube同期状態",
+        label: "YouTube同期",
         icon: <Icon name="refresh" size={14} />,
-      },
-      { href: "/admin/events", label: "全イベント管理", icon: <Icon name="calendar" size={14} /> },
-      {
-        href: "/admin/event-groups",
-        label: "イベントグループ",
-        icon: <Icon name="users" size={14} />,
-      },
-      {
-        href: "/admin/events/templates",
-        label: "イベントテンプレート",
-        icon: <Icon name="copy" size={14} />,
       },
       {
         href: "/admin/announcements",
-        label: "お知らせ管理",
+        label: "お知らせ",
         icon: <Icon name="alert" size={14} />,
       },
+    ],
+  },
+  {
+    title: "イベント",
+    items: [
+      { href: "/admin/events", label: "イベント管理", icon: <Icon name="calendar" size={14} /> },
     ],
   },
   {
@@ -84,37 +76,22 @@ const ADMIN_NAV_GROUPS_BASE: AdminSidebarGroup[] = [
     items: [
       { href: "/admin/users", label: "ユーザー / X ID", icon: <Icon name="users" size={14} /> },
       {
-        href: "/admin/users?view=permissions",
-        label: "権限管理",
-        icon: <Icon name="settings" size={14} />,
-      },
-      {
         href: "/admin/permissions/simulator",
         label: "権限シミュレーター",
         icon: <Icon name="user" size={14} />,
-      },
-      {
-        href: "/admin/users?status=can_create_events",
-        label: "開催権限",
-        icon: <Icon name="calendar" size={14} />,
       },
     ],
   },
   {
     title: "システム",
     items: [
+      {
+        href: "/admin/notifications",
+        label: "通知配信",
+        icon: <Icon name="alert" size={14} />,
+      },
       { href: "/admin/rules", label: "規約管理", icon: <Icon name="info" size={14} /> },
       { href: "/admin/audit", label: "監査ログ", icon: <Icon name="clock" size={14} /> },
-      {
-        href: "/admin/audit/settings",
-        label: "ログ設定",
-        icon: <Icon name="settings" size={14} />,
-      },
-      {
-        href: "/admin/audit/restore",
-        label: "復元履歴",
-        icon: <Icon name="refresh" size={14} />,
-      },
       {
         href: "/admin/cost-guard",
         label: "operation_mode",
@@ -126,11 +103,6 @@ const ADMIN_NAV_GROUPS_BASE: AdminSidebarGroup[] = [
         icon: <Icon name="refresh" size={14} />,
       },
       { href: "/admin/health", label: "ヘルスチェック", icon: <Icon name="check" size={14} /> },
-      {
-        href: "/admin/health/integrity",
-        label: "DB整合性チェック",
-        icon: <Icon name="list" size={14} />,
-      },
     ],
   },
   {
@@ -147,15 +119,29 @@ const ADMIN_NAV_GROUPS_BASE: AdminSidebarGroup[] = [
 ];
 
 export function buildAdminNavGroups(): AdminSidebarGroup[] {
-  if (!isAdminSpreadsheetNavEnabled()) {
-    return ADMIN_NAV_GROUPS_BASE;
+  let groups = ADMIN_NAV_GROUPS_BASE;
+
+  if (isAdminSpreadsheetNavEnabled()) {
+    groups = groups.map((group) =>
+      group.title === "高度な管理"
+        ? {
+            ...group,
+            items: [...group.items, ADMIN_NAV_SPREADSHEET_ITEM],
+          }
+        : group,
+    );
   }
-  return ADMIN_NAV_GROUPS_BASE.map((group) =>
-    group.title === "高度な管理"
-      ? {
-          ...group,
-          items: [...group.items, ADMIN_NAV_SPREADSHEET_ITEM],
-        }
-      : group,
-  );
+
+  if (isLegacyImportToolEnabled()) {
+    groups = groups.map((group) =>
+      group.title === "高度な管理"
+        ? {
+            ...group,
+            items: [...group.items, ADMIN_NAV_LEGACY_IMPORT_ITEM],
+          }
+        : group,
+    );
+  }
+
+  return groups;
 }

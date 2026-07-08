@@ -18,6 +18,7 @@ import {
   coalescedVideoScoreDesc,
 } from "./videoScoreSql";
 import { compareEventsByUpcomingPriority } from "@/lib/utils/eventOrdering";
+import { publicListableEventWhere } from "@/lib/utils/eventStatus";
 import {
   isPickupCreatorEligible,
   sortPickupCreators,
@@ -150,7 +151,7 @@ export async function fetchLatestEvents(db: DB, limit = 3) {
   const rows = await db
     .select()
     .from(events)
-    .where(eq(events.visibility_status, "public"))
+    .where(publicListableEventWhere())
     .orderBy(desc(events.start_time));
   return rows.sort(compareEventsByUpcomingPriority).slice(0, limit);
 }

@@ -1,4 +1,22 @@
-const LABELS: Record<string, string> = {
+import type { VideoVisibilityStatus } from "@/lib/constants/collaborator-permissions";
+
+export type VideoVisibilityGroupKey = "review" | "public" | "private" | "closed";
+type SearchParamValue = string | readonly string[] | null | undefined;
+
+type VideoVisibilityGroup = {
+  key: VideoVisibilityGroupKey;
+  label: string;
+  statuses: readonly VideoVisibilityStatus[];
+};
+
+export const VIDEO_VISIBILITY_GROUPS: readonly VideoVisibilityGroup[] = [
+  { key: "review", label: "審査待ち", statuses: ["pending"] },
+  { key: "public", label: "公開", statuses: ["public", "limited"] },
+  { key: "private", label: "非公開", statuses: ["draft", "private", "hidden"] },
+  { key: "closed", label: "終了・無効", statuses: ["archived", "voided"] },
+];
+
+const LABELS: Record<VideoVisibilityStatus, string> = {
   draft: "下書き",
   pending: "審査待ち",
   public: "公開",
@@ -9,13 +27,79 @@ const LABELS: Record<string, string> = {
   voided: "停止",
 };
 
+const ALL_STATUSES = new Set<VideoVisibilityStatus>(
+  VIDEO_VISIBILITY_GROUPS.flatMap((group) => group.statuses),
+);
+
+export function isVideoVisibilityStatus(
+  status: string,
+): status is VideoVisibilityStatus {
+  return ALL_STATUSES.has(status as VideoVisibilityStatus);
+}
+
+export function isVideoVisibilityGroupKey(
+  value: string,
+): value is VideoVisibilityGroupKey {
+  return VIDEO_VISIBILITY_GROUPS.some((group) => group.key === value);
+}
+
+export function videoVisibilityGroupForStatus(
+  status: string,
+): VideoVisibilityGroupKey | null {
+  if (!isVideoVisibilityStatus(status)) return null;
+  return (
+    VIDEO_VISIBILITY_GROUPS.find((group) => group.statuses.includes(status))
+      ?.key ?? null
+  );
+}
+
+export function videoVisibilityGroupForFilter(
+  value: string,
+): VideoVisibilityGroupKey | null {
+  if (isVideoVisibilityGroupKey(value)) return value;
+  return videoVisibilityGroupForStatus(value);
+}
+
+export function videoVisibilityStatusesForFilter(
+  value: string,
+): readonly VideoVisibilityStatus[] | null {
+  if (!value) return null;
+  const group = VIDEO_VISIBILITY_GROUPS.find((item) => item.key === value);
+  if (group) return group.statuses;
+  return isVideoVisibilityStatus(value) ? [value] : null;
+}
+
+export function normalizeVideoVisibilityFilter(
+  value: SearchParamValue,
+  fallback = "",
+): string {
+  const normalized = firstSearchParamValue(value);
+  if (!normalized || normalized === "all") return "";
+  if (isVideoVisibilityGroupKey(normalized) || isVideoVisibilityStatus(normalized)) {
+    return normalized;
+  }
+  return fallback;
+}
+
+function firstSearchParamValue(value: SearchParamValue): string {
+  if (typeof value === "string") return value.trim();
+  if (Array.isArray(value)) return (value[0] ?? "").trim();
+  return "";
+}
+
 export function videoVisibilityLabel(status: string): string {
-  return LABELS[status] ?? status;
+  return isVideoVisibilityStatus(status) ? LABELS[status] : status;
+}
+
+export function videoVisibilityFilterLabel(value: string): string {
+  const group = VIDEO_VISIBILITY_GROUPS.find((item) => item.key === value);
+  return group?.label ?? videoVisibilityLabel(value);
 }
 
 export function videoVisibilityBadgeClass(status: string): string {
-  if (status === "public") return "fn-badge-accent";
-  if (status === "pending") return "fn-badge-warning";
+  const group = videoVisibilityGroupForStatus(status);
+  if (group === "public") return "fn-badge-accent";
+  if (group === "review") return "fn-badge-warning";
   if (status === "voided") return "fn-badge-danger";
   return "fn-badge-soft";
 }

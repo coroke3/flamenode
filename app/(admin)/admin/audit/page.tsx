@@ -15,6 +15,7 @@ import { inArray } from "drizzle-orm";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { AuditDiffDetail } from "@/components/admin/AuditDiffDetail";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { AdminSectionTabs } from "@/components/admin/AdminSectionTabs";
 import { AuditTargetLink } from "@/components/admin/AuditTargetLink";
 import { parseAuditDiff } from "@/lib/audit/diff";
 
@@ -185,6 +186,8 @@ export default async function AdminAuditPage({
         title="監査ログ"
         description="管理操作を新しい順に表示します。before / after の変更キーをサマリで確認できます。"
       />
+
+      <AdminSectionTabs hub="audit" />
 
       <form
         method="get"

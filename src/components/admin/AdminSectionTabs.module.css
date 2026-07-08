@@ -1,0 +1,11 @@
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 16px;
+}
+
+.tabs :global(.fn-btn) {
+  flex: 0 0 auto;
+}

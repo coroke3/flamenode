@@ -34,6 +34,7 @@ export interface EventFormInitial {
   is_active?: number;
   is_archived?: number;
   allow_user_video_event_links?: number;
+  allow_unslotted_posts?: number;
   allow_user_video_edits?: number;
   user_video_edit_permission_keys_json?: string | null;
   video_form_settings_json?: string | null;
@@ -250,6 +251,7 @@ function buildInitialPreview(initial: EventFormInitial): EventSettingsPreviewVal
     is_active: initial.is_active ?? 0,
     is_archived: initial.is_archived ?? 0,
     allow_user_video_event_links: initial.allow_user_video_event_links ?? 0,
+    allow_unslotted_posts: initial.allow_unslotted_posts ?? 0,
     allow_user_video_edits: initial.allow_user_video_edits ?? 0,
     user_video_edit_permission_keys_json:
       initial.user_video_edit_permission_keys_json,
@@ -287,6 +289,7 @@ function buildPreviewFromForm(
     is_archived: textValue(fd, "is_archived") || "0",
     allow_user_video_event_links:
       textValue(fd, "allow_user_video_event_links") || "0",
+    allow_unslotted_posts: textValue(fd, "allow_unslotted_posts") || "0",
     allow_user_video_edits: textValue(fd, "allow_user_video_edits") || "0",
     user_video_edit_permission_keys_json: textValue(
       fd,
@@ -644,6 +647,23 @@ export function EventForm({
             className="fn-select"
           >
             <option value="0">運営承認制 (既定)</option>
+            <option value="1">許可</option>
+          </GatedSelect>
+        </div>
+        <div>
+          <label
+            className="fn-label"
+            title="枠なし投稿 (/entry/unslotted) で投稿者がこのイベントを所属として選べるかどうか"
+          >
+            枠なし投稿の紐づけ
+          </label>
+          <GatedSelect
+            allowed={canEditPublish}
+            name="allow_unslotted_posts"
+            defaultValue={String(initial.allow_unslotted_posts ?? 0)}
+            className="fn-select"
+          >
+            <option value="0">不許可 (既定)</option>
             <option value="1">許可</option>
           </GatedSelect>
         </div>

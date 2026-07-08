@@ -15,7 +15,7 @@ export interface StaticEventIndexEvent {
   end_time: number | null;
   entry_start_time: number | null;
   entry_end_time: number | null;
-  visibility_status: "public";
+  visibility_status: "public" | "archived";
   is_active: number;
   is_entry_open: number;
   is_archived: number;
@@ -102,11 +102,18 @@ function normalizeEvent(value: unknown): StaticEventIndexEvent | null {
     end_time: normalizeUnix(row.end_time),
     entry_start_time: normalizeUnix(row.entry_start_time),
     entry_end_time: normalizeUnix(row.entry_end_time),
-    visibility_status: "public",
+    visibility_status: normalizeListableVisibility(row.visibility_status),
     is_active: normalizeFlag(row.is_active, 1),
     is_entry_open: normalizeFlag(row.is_entry_open, 0),
     is_archived: normalizeFlag(row.is_archived, 0),
   };
+}
+
+function normalizeListableVisibility(
+  value: unknown,
+): StaticEventIndexEvent["visibility_status"] {
+  if (normalizeString(value) === "archived") return "archived";
+  return "public";
 }
 
 function normalizeString(value: unknown): string | null {

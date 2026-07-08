@@ -26,6 +26,41 @@
   flex-wrap: wrap;
 }
 
+.successCard {
+  padding: 16px 18px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--accent-primary);
+  background: var(--accent-primary-soft);
+}
+
+.successCardBody {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.successCardMessage {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.successCardSecondary {
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.successCardSecondary:hover {
+  color: var(--text-primary);
+}
+
 .inlineAction {
   display: inline-flex;
   align-items: center;
@@ -315,7 +350,7 @@
 
 .editSlotButton:hover,
 .editSlotButton[aria-expanded="true"] {
-  color: #ffffff;
+  color: var(--on-danger);
   background: var(--accent-danger);
 }
 
@@ -330,7 +365,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   background: var(--bg-surface);
-  box-shadow: var(--shadow-lg, 0 16px 44px rgba(0, 0, 0, 0.24));
+  box-shadow: var(--shadow-lg);
 }
 
 .slotActionMenuItem {
@@ -426,7 +461,7 @@
 .mergeDialogBackdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--backdrop-scrim);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -482,7 +517,7 @@
 .reserveDialogBackdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--backdrop-scrim);
   display: flex;
   align-items: center;
   justify-content: center;

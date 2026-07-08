@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { buildLegacyImportPlan } from "./plan.ts";
 import { normalizeEventInfo, normalizeLegacyVideo } from "./normalize.ts";
+import { stableSha256 } from "./hash.ts";
 
 const NOW = 1700000000;
 
@@ -100,5 +101,20 @@ describe("buildLegacyImportPlan", () => {
     const badEvent = normalizeEventInfo({ eventid: "" });
     const plan = buildLegacyImportPlan([badEvent], [], NOW);
     assert.equal(plan.errors.filter((e) => e.source === "event").length, 1);
+  });
+
+  it("builds identical plans across repeated calls (stable preview token)", async () => {
+    const events = [makeEvent()];
+    const videos = [makeVideo()];
+    const planA = buildLegacyImportPlan(events, videos, NOW);
+    const planB = buildLegacyImportPlan(events, videos, NOW);
+    assert.deepEqual(planA.eventCustomQuestions, planB.eventCustomQuestions);
+    assert.deepEqual(planA.videoCustomAnswers, planB.videoCustomAnswers);
+    assert.deepEqual(planA.videos, planB.videos);
+    const [hashA, hashB] = await Promise.all([
+      stableSha256(planA),
+      stableSha256(planB),
+    ]);
+    assert.equal(hashA, hashB);
   });
 });

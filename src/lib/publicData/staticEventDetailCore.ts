@@ -18,9 +18,39 @@ export interface StaticEventDetailVideo {
   scheduled_time: number | null;
 }
 
+export interface StaticEventDetailEvent {
+  id: string;
+  title: string;
+  explanation: string | null;
+  icon_url: string | null;
+  img_url: string | null;
+  accent_color: string | null;
+  start_time: number | null;
+  end_time: number | null;
+  entry_start_time: number | null;
+  entry_end_time: number | null;
+  visibility_status: string;
+}
+
+export interface StaticEventDetailStaff {
+  role: string | null;
+  display_name: string;
+  public_role_label: string | null;
+  x_user_id: string | null;
+  x_name: string | null;
+  icon_url: string | null;
+}
+
+export interface StaticEventSlotSummary {
+  status: string;
+  count: number;
+}
+
 export interface StaticEventDetail {
   generatedAt: number | null;
-  event: Record<string, unknown>;
+  event: StaticEventDetailEvent;
+  publicStaff: StaticEventDetailStaff[];
+  slotSummary: StaticEventSlotSummary[];
   publicVideos: StaticEventDetailVideo[];
 }
 
@@ -28,8 +58,8 @@ export function normalizeStaticEventDetail(
   payload: StaticEventDetailPayload,
 ): StaticEventDetail | null {
   if (!payload.event || typeof payload.event !== "object") return null;
-  const event = payload.event;
-  const id = normalizeString(event.id);
+  const event = normalizeEvent(payload.event);
+  const id = event?.id;
   if (!id) return null;
 
   const videos = Array.isArray(payload.public_videos)
@@ -37,11 +67,44 @@ export function normalizeStaticEventDetail(
         .map(normalizeEventVideo)
         .filter((row): row is StaticEventDetailVideo => row !== null)
     : [];
+  const publicStaff = Array.isArray(payload.public_staff)
+    ? payload.public_staff
+        .map(normalizePublicStaff)
+        .filter((row): row is StaticEventDetailStaff => row !== null)
+    : [];
+  const slotSummary = Array.isArray(payload.slots_summary)
+    ? payload.slots_summary
+        .map(normalizeSlotSummary)
+        .filter((row): row is StaticEventSlotSummary => row !== null)
+    : [];
 
   return {
     generatedAt: normalizeUnix(payload.generated_at),
     event,
+    publicStaff,
+    slotSummary,
     publicVideos: videos,
+  };
+}
+
+function normalizeEvent(value: unknown): StaticEventDetailEvent | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const id = normalizeString(row.id);
+  const title = normalizeString(row.title);
+  if (!id || !title) return null;
+  return {
+    id,
+    title,
+    explanation: normalizeNullableString(row.explanation),
+    icon_url: normalizeNullableString(row.icon_url),
+    img_url: normalizeNullableString(row.img_url),
+    accent_color: normalizeNullableString(row.accent_color),
+    start_time: normalizeUnix(row.start_time),
+    end_time: normalizeUnix(row.end_time),
+    entry_start_time: normalizeUnix(row.entry_start_time),
+    entry_end_time: normalizeUnix(row.entry_end_time),
+    visibility_status: normalizeString(row.visibility_status) ?? "public",
   };
 }
 
@@ -62,6 +125,33 @@ function normalizeEventVideo(value: unknown): StaticEventDetailVideo | null {
     visibility_status: normalizeString(row.visibility_status) ?? "public",
     scheduled_time: normalizeUnix(row.scheduled_time),
   };
+}
+
+function normalizePublicStaff(value: unknown): StaticEventDetailStaff | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const displayName =
+    normalizeString(row.display_name) ??
+    normalizeString(row.x_name) ??
+    normalizeString(row.x_user_id);
+  if (!displayName) return null;
+  return {
+    role: normalizeNullableString(row.role),
+    display_name: displayName,
+    public_role_label: normalizeNullableString(row.public_role_label),
+    x_user_id: normalizeNullableString(row.x_user_id),
+    x_name: normalizeNullableString(row.x_name),
+    icon_url: normalizeNullableString(row.icon_url),
+  };
+}
+
+function normalizeSlotSummary(value: unknown): StaticEventSlotSummary | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const status = normalizeString(row.status);
+  const count = normalizeUnix(row.c);
+  if (!status || count == null || count < 0) return null;
+  return { status, count };
 }
 
 function normalizeString(value: unknown): string | null {

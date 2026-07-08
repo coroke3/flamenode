@@ -459,12 +459,19 @@ export function normalizeLegacyVideo(input: LegacyVideoInput): LegacyVideoResult
     return { ok: false, warnings, members: [], xUsers: [], eventId: null, eventIds: [] };
   }
 
-  const id = youtubeId ? `legacy_${youtubeId}` : `legacy_${randomId()}`;
   const eventIds = splitLegacyEventIds(input.eventid);
   const eventId = eventIds[0] ?? null;
   if ((input.eventid ?? "").toString().trim() && eventIds.length === 0) {
     warnings.push("eventid をイベントIDとして解釈できませんでした。");
   }
+
+  const fallbackSeed = [
+    eventIds.join(","),
+    tlink ?? "",
+    title ?? "",
+    cleanLegacyString(input.ylink) ?? "",
+  ].join("|");
+  const id = youtubeId ? `legacy_${youtubeId}` : stableImportFallbackVideoId(fallbackSeed);
 
   return {
     ok: true,
@@ -518,11 +525,13 @@ function extractYoutubeIdSimple(url: string): string | null {
   return null;
 }
 
-function randomId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
+function stableImportFallbackVideoId(seed: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
   }
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+  return `legacy_fb_${(hash >>> 0).toString(16)}`;
 }
 
 // normalizeCore re-exports for convenience

@@ -56,14 +56,12 @@
   top: calc(100% + 8px);
   right: 0;
   width: min(300px, calc(100vw - 24px));
-  background-color: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+  background-color: var(--bg-overlay);
   border: 1px solid var(--border-subtle);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-soft);
   padding: 6px;
   z-index: 40;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
 }
 
 .popoverHeader {

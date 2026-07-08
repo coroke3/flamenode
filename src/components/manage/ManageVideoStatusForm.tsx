@@ -7,10 +7,7 @@ import { setManageVideoStatus } from "@/lib/actions/manage-video";
 const MANAGE_STATUS_VALUES = [
   "pending",
   "public",
-  "hidden",
   "private",
-  "limited",
-  "draft",
 ] as const;
 
 interface ManageVideoStatusFormProps {

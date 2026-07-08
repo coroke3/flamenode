@@ -19,6 +19,7 @@ export interface EventSettingsPreviewValue {
   is_active?: number | string | null;
   is_archived?: number | string | null;
   allow_user_video_event_links?: number | string | null;
+  allow_unslotted_posts?: number | string | null;
   allow_user_video_edits?: number | string | null;
   user_video_edit_permission_keys_json?: string | null;
   video_form_settings_json?: string | null;
@@ -271,6 +272,7 @@ export function EventSettingsPreview({
           <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>権限・運用設定</h3>
           <div style={{ display: "grid", gap: 6 }}>
             <Field label="ユーザーの追加紐付け" value={toBool(event.allow_user_video_event_links) ? "許可" : "不許可"} />
+            <Field label="枠なし投稿の紐づけ" value={toBool(event.allow_unslotted_posts) ? "許可" : "不許可"} />
             <Field label="一般ユーザー編集" value={toBool(event.allow_user_video_edits) ? "一部許可" : "通常権限"} />
             <Field label="許可キー" value={tryJsonSummary(event.user_video_edit_permission_keys_json)} />
             <Field label="editable_fields" value={tryJsonSummary(event.editable_fields)} />

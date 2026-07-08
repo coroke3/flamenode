@@ -241,6 +241,18 @@ export default async function SlottedPostPage({
       <VideoForm
         mode="slot"
         slotId={slot.id}
+        slotInfo={{
+          eventTitle: ev.title,
+          slotTimeLabel: slotStart
+            ? `${formatUnix(slotStart, { dateOnly: true })} ${formatUnix(slotStart, { timeOnly: true })}${
+                slotEnd != null && slotEnd > slotStart
+                  ? ` - ${formatUnix(slotEnd, { timeOnly: true })}`
+                  : ""
+              }`
+            : (slot.slot_label ?? "時間指定なし枠"),
+          displayName: slot.display_name ?? xRow?.x_name ?? user.name,
+          groupSize: groupSize > 1 ? groupSize : undefined,
+        }}
         xIdOptions={xIdOptions}
         activeXId={activeX ?? undefined}
         initial={{

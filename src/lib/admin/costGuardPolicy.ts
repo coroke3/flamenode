@@ -35,6 +35,14 @@ export interface CostGuardRecommendation {
   highestRatio: number;
 }
 
+const MODE_RANK: Record<CostGuardMode, number> = {
+  normal: 0,
+  economy: 1,
+  read_only: 2,
+  static_only: 3,
+  maintenance: 4,
+};
+
 const DEFAULT_DAILY_LIMITS: Record<keyof CostUsageSnapshotLike, number> = {
   workers_requests_today: 100_000,
   pages_functions_requests_today: 100_000,
@@ -44,6 +52,27 @@ const DEFAULT_DAILY_LIMITS: Record<keyof CostUsageSnapshotLike, number> = {
   r2_class_b_month: 10_000_000,
   kv_writes_today: 1_000,
 };
+
+export function isCostGuardMode(value: unknown): value is CostGuardMode {
+  return (
+    value === "normal" ||
+    value === "economy" ||
+    value === "read_only" ||
+    value === "static_only" ||
+    value === "maintenance"
+  );
+}
+
+export function normalizeCostGuardMode(value: unknown): CostGuardMode {
+  return isCostGuardMode(value) ? value : "normal";
+}
+
+export function isMoreRestrictiveCostGuardMode(
+  next: CostGuardMode,
+  current: CostGuardMode,
+): boolean {
+  return MODE_RANK[next] > MODE_RANK[current];
+}
 
 export function parseCostGuardThresholds(
   raw: string | null | undefined,

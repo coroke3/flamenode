@@ -3,7 +3,7 @@ import { FnTable } from "@/components/ui/FnTable";
 
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq, like, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, like, ne, or, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   events as eventsTable,
@@ -18,7 +18,13 @@ import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { AdminVideoManagementTabs } from "@/components/admin/AdminVideoManagementTabs";
 import { VideoReviewQueueTable } from "@/components/admin/VideoReviewQueueTable";
 import { fetchVideoReviewSummaries } from "@/lib/admin/videoReviewMeta";
-import { videoVisibilityBadgeClass, videoVisibilityLabel } from "@/lib/admin/videoVisibilityLabels";
+import {
+  normalizeVideoVisibilityFilter,
+  videoVisibilityBadgeClass,
+  videoVisibilityGroupForFilter,
+  videoVisibilityLabel,
+  videoVisibilityStatusesForFilter,
+} from "@/lib/admin/videoVisibilityLabels";
 import { Pagination } from "@/components/ui/Pagination";
 import { clampPaging, escapeLike, totalPagesFor } from "@/lib/utils/sql";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
@@ -28,6 +34,7 @@ export const dynamic = "force-dynamic";
 
 const VIDEO_PAGE_SIZE = 50;
 const EVENT_OPTIONS_LIMIT = 200;
+type SearchParamValue = string | string[] | undefined;
 
 type AdminVideoRow = {
   id: string;
@@ -42,14 +49,18 @@ export default async function AdminVideosPage({
   searchParams,
 }: {
   searchParams: Promise<{
-    q?: string;
-    status?: string;
-    event?: string;
-    page?: string;
+    q?: SearchParamValue;
+    status?: SearchParamValue;
+    event?: SearchParamValue;
+    page?: SearchParamValue;
   }>;
 }): Promise<React.ReactElement> {
-  const { q = "", status = "", event = "", page: pageRaw = "1" } =
-    await searchParams;
+  const sp = await searchParams;
+  const q = cleanSearchParam(sp.q);
+  const statusRaw = sp.status;
+  const event = cleanSearchParam(sp.event);
+  const pageRaw = cleanSearchParam(sp.page) || "1";
+  const status = normalizeVideoVisibilityFilter(statusRaw);
   const { page, pageSize, offset } = clampPaging({
     page: pageRaw,
     pageSize: VIDEO_PAGE_SIZE,
@@ -74,7 +85,13 @@ export default async function AdminVideosPage({
             like(xUsersTable.id, term),
           )
         : undefined;
-      const statusFilter = status ? eq(videosTable.visibility_status, status as never) : undefined;
+      const statusValues = videoVisibilityStatusesForFilter(status);
+      const statusFilter =
+        statusValues && statusValues.length > 1
+          ? inArray(videosTable.visibility_status, statusValues)
+          : statusValues?.[0]
+            ? eq(videosTable.visibility_status, statusValues[0])
+            : undefined;
       const eventFilter = event ? eq(videoEventsTable.event_id, event) : undefined;
       const conds = [queryFilter, statusFilter, eventFilter].filter(
         (c): c is NonNullable<typeof c> => c !== undefined,
@@ -160,7 +177,7 @@ export default async function AdminVideosPage({
     };
   });
 
-  const useReviewTable = status === "pending";
+  const useReviewTable = videoVisibilityGroupForFilter(status) === "review";
 
   return (
     <div>
@@ -173,7 +190,7 @@ export default async function AdminVideosPage({
 
       <form
         action="/admin/videos"
-        style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16 }}
+        className="fn-console-filter-form"
       >
         {status ? <input type="hidden" name="status" value={status} /> : null}
         <input
@@ -181,7 +198,6 @@ export default async function AdminVideosPage({
           name="q"
           defaultValue={q}
           placeholder="タイトル / 作者 / X ID"
-          style={{ minWidth: 240 }}
         />
         <AutoSubmitSelect className="fn-select" name="event" defaultValue={event}>
           <option value="">すべてのイベント</option>
@@ -192,7 +208,7 @@ export default async function AdminVideosPage({
           ))}
         </AutoSubmitSelect>
         {(q || status || event) ? (
-          <Link href="/admin/videos" className="fn-btn fn-btn-ghost">
+          <Link href="/admin/videos" className="fn-btn fn-btn-ghost fn-console-filter-action">
             解除
           </Link>
         ) : null}
@@ -330,4 +346,9 @@ export default async function AdminVideosPage({
       />
     </div>
   );
+}
+
+function cleanSearchParam(value: SearchParamValue): string {
+  if (Array.isArray(value)) return (value[0] ?? "").trim();
+  return (value ?? "").trim();
 }

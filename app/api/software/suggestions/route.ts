@@ -1,3 +1,5 @@
+export const runtime = "edge";
+
 import { NextResponse } from "next/server";
 import { withDatabase } from "@/lib/cloudflare";
 import { softwareCatalog, softwareAliases } from "@/lib/db/schema";

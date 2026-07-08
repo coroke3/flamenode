@@ -29,6 +29,7 @@ export const eventSchema = z.object({
   is_active: z.coerce.number().min(0).max(1).default(0),
   is_archived: z.coerce.number().min(0).max(1).default(0),
   allow_user_video_event_links: z.coerce.number().min(0).max(1).default(0),
+  allow_unslotted_posts: z.coerce.number().min(0).max(1).default(0),
   allow_user_video_edits: z.coerce.number().min(0).max(1).default(0),
   user_video_edit_permission_keys_json: z
     .string()

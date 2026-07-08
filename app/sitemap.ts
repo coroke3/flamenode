@@ -1,5 +1,8 @@
+export const runtime = "edge";
+
 import type { MetadataRoute } from "next";
 import { desc, eq, sql } from "drizzle-orm";
+import { publicListableEventWhere } from "@/lib/utils/eventStatus";
 import { withDatabase } from "@/lib/cloudflare";
 import { events, videos, xUsers } from "@/lib/db/schema";
 import { absoluteUrl } from "@/lib/seo";
@@ -60,7 +63,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
             start_time: events.start_time,
           })
           .from(events)
-          .where(eq(events.visibility_status, "public"))
+          .where(publicListableEventWhere())
           .orderBy(desc(events.updated_at))
           .limit(200),
         db

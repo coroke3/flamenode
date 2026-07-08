@@ -13,6 +13,7 @@ function baseEvent(overrides = {}) {
     img_url: null,
     accent_color: null,
     allow_user_video_event_links: 1,
+    allow_unslotted_posts: 0,
     allow_user_video_edits: 1,
     user_video_edit_permission_keys_json: null,
     video_form_settings_json: null,

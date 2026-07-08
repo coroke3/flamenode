@@ -15,6 +15,7 @@ import {
   isAcceptingEntries,
 } from "@/lib/utils/eventStatus";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { AdminSectionTabs } from "@/components/admin/AdminSectionTabs";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 
@@ -82,6 +83,8 @@ export default async function AdminEventsPage({
           },
         ]}
       />
+
+      <AdminSectionTabs hub="events" />
 
       <form
         method="get"

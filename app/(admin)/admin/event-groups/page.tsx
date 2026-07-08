@@ -7,6 +7,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { eventGroupEvents, eventGroups } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { AdminSectionTabs } from "@/components/admin/AdminSectionTabs";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import { eventGroupPublicHref } from "@/lib/eventGroupRoutes";
 
@@ -114,6 +115,8 @@ export default async function AdminEventGroupsPage({
           },
         ]}
       />
+
+      <AdminSectionTabs hub="events" />
 
       <form
         method="get"

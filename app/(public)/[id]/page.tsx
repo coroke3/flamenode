@@ -40,6 +40,7 @@ import {
 } from "@/lib/utils/eventStatus";
 import { loadStaticVideoDetail } from "@/lib/publicData/staticVideoDetail";
 import { canFallbackToDatabase } from "@/lib/publicData/loader";
+import type { StaticVideoDetail } from "@/lib/publicData/staticVideoDetailCore";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,31 @@ interface Props {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
+  const staticLoaded = await loadStaticVideoDetail(id);
+  if (staticLoaded.detail) {
+      const { video } = staticLoaded.detail;
+      const videoPath = `/${video.youtube_video_id ?? video.id}`;
+      const description = compactText(
+        video.intro_comment ||
+          video.highlights ||
+          [
+            video.music ? `使用楽曲: ${video.music}` : null,
+            video.credit ? `クレジット: ${video.credit}` : null,
+          ]
+            .filter(Boolean)
+            .join(" / "),
+      );
+      const metadataYoutubeId = extractYoutubeId(video.youtube_video_id);
+      return buildPageMetadata({
+        title: `${video.title} - ${video.creator_display_name ?? "unknown"}`,
+        description,
+        path: videoPath,
+        image: metadataYoutubeId
+          ? youtubeThumbUrl(metadataYoutubeId, "maxresdefault")
+          : video.creator_icon_url,
+        noIndex: video.visibility_status !== "public",
+      });
+  }
   const detail = await withDatabase(async (db) => {
     return fetchVideoDetail(db, id);
   });
@@ -84,14 +110,10 @@ export default async function VideoDetailPage({
   const { id: rawId } = await params;
   const { playlist = "" } = (await searchParams) ?? {};
 
-  const staticProbe =
-    rawId.length !== 11 ? await loadStaticVideoDetail(rawId) : null;
-  if (
-    staticProbe &&
-    !canFallbackToDatabase(staticProbe.strategy) &&
-    !staticProbe.detail
-  ) {
-    notFound();
+  const staticProbe = await loadStaticVideoDetail(rawId);
+  if (!canFallbackToDatabase(staticProbe.strategy)) {
+    if (!staticProbe.detail) notFound();
+    return <StaticVideoDetailView detail={staticProbe.detail} rawId={rawId} />;
   }
 
   const viewerUser = await getCurrentUser();
@@ -675,6 +697,166 @@ export default async function VideoDetailPage({
             <h3 className={styles.relatedHeading}>関連動画</h3>
             <RelatedList videos={related} firstCount={18} />
           </div>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+function StaticVideoDetailView({
+  detail,
+  rawId,
+}: {
+  detail: StaticVideoDetail;
+  rawId: string;
+}): React.ReactElement {
+  const { video } = detail;
+  if (video.visibility_status !== "public" && video.visibility_status !== "limited") {
+    notFound();
+  }
+  const creatorIcon = video.creator_icon_url ?? null;
+  const creatorId = video.creator_x_user_id ?? "anonymous";
+  const creatorName =
+    video.creator_display_name?.trim() ||
+    (creatorId !== "anonymous" ? creatorId : "作者未設定");
+  const creatorHref = creatorId !== "anonymous" ? `/user/${creatorId}` : null;
+  const youtubeId = video.youtube_video_id
+    ? extractYoutubeId(video.youtube_video_id)
+    : null;
+  const videoJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "VideoObject",
+    name: video.title,
+    description: compactText(
+      video.intro_comment ||
+        video.highlights ||
+        video.production_story ||
+        video.closing_comment ||
+        (video.music ? `使用楽曲: ${video.music}` : null),
+    ),
+    url: absoluteUrl(`/${video.youtube_video_id ?? video.id}`),
+    thumbnailUrl: youtubeId
+      ? [absoluteUrl(youtubeThumbUrl(youtubeId, "maxresdefault"))]
+      : undefined,
+    uploadDate: video.scheduled_time
+      ? new Date(video.scheduled_time * 1000).toISOString()
+      : undefined,
+    embedUrl: youtubeId ? `https://www.youtube.com/embed/${youtubeId}` : undefined,
+    contentUrl: youtubeId ? `https://www.youtube.com/watch?v=${youtubeId}` : undefined,
+    author: {
+      "@type": "Person",
+      name: creatorName,
+      url: creatorHref ? absoluteUrl(creatorHref) : undefined,
+    },
+  };
+
+  const authorBlock = (
+    <span className="fn-vd-author">
+      {creatorIcon ? (
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img src={creatorIcon} alt="" className={styles.authorIcon} />
+      ) : (
+        <span className={styles.authorIconFb}>
+          <Icon name="user" size={18} aria-hidden />
+        </span>
+      )}
+      <span>
+        <span className={styles.authorName}>{creatorName}</span>
+        <span className={styles.authorMeta}>
+          {creatorId !== "anonymous" ? <span>@{creatorId}</span> : null}
+          {video.scheduled_time ? (
+            <span>公開 {formatUnix(video.scheduled_time, { dateOnly: true })}</span>
+          ) : null}
+        </span>
+      </span>
+    </span>
+  );
+
+  return (
+    <div className={`fn-vd fn-public-container fn-page ${styles.page}`}>
+      <JsonLd data={videoJsonLd} />
+      <div className={styles.layout}>
+        <article className={styles.main}>
+          <div className={styles.heroLayout}>
+            <div className={styles.playerPane}>
+              {youtubeId ? (
+                <YoutubePlayer youtubeId={youtubeId} title={video.title} />
+              ) : (
+                <div
+                  className="fn-empty"
+                  style={{ aspectRatio: "16 / 9", display: "grid", placeItems: "center" }}
+                >
+                  <p>YouTube 動画 ID が登録されていません。</p>
+                </div>
+              )}
+            </div>
+            <div className={styles.infoPane}>
+              <h1 className={styles.title}>{video.title}</h1>
+              <div className={styles.author}>
+                {creatorHref ? <Link href={creatorHref}>{authorBlock}</Link> : authorBlock}
+              </div>
+              <div className={styles.metaSection}>
+                {video.music ? (
+                  <InlineMetaItem title="楽曲">
+                    {video.music}
+                    {video.credit ? ` / ${video.credit}` : ""}
+                  </InlineMetaItem>
+                ) : null}
+                {video.intro_comment ? (
+                  <InlineMetaItem title="紹介コメント">
+                    <IntroCommentBlock text={video.intro_comment} />
+                  </InlineMetaItem>
+                ) : null}
+                {video.highlights || video.production_story || video.closing_comment ? (
+                  <details className={styles.detailComments}>
+                    <summary>詳細コメント</summary>
+                    <div className={styles.detailCommentsBody}>
+                      {video.highlights ? <p>{video.highlights}</p> : null}
+                      {video.production_story ? <p>{video.production_story}</p> : null}
+                      {video.closing_comment ? <p>{video.closing_comment}</p> : null}
+                    </div>
+                  </details>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          {detail.publicMembers.length > 0 ? (
+            <section className={styles.section}>
+              <h2 className={styles.sectionTitle}>
+                参加メンバー ({detail.publicMembers.length})
+              </h2>
+              <ul className={styles.relatedList}>
+                {detail.publicMembers.map((member) => (
+                  <li key={`${member.x_user_id ?? member.display_name}-${member.order_index ?? ""}`}>
+                    {member.x_user_id ? (
+                      <Link href={`/user/${member.x_user_id}`}>
+                        {member.display_name}
+                      </Link>
+                    ) : (
+                      member.display_name
+                    )}
+                    {member.role_label ? ` / ${member.role_label}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+        </article>
+
+        <aside className={styles.aside}>
+          <section className="fn-vd-login-panel">
+            <span>
+              <Icon name="info" size={12} aria-hidden />
+              ログインするといいね、セーブ、チャプターコメントが使えます。
+            </span>
+            <Link
+              href={`/entry?next=${encodeURIComponent(`/${rawId}`)}`}
+              className="fn-btn fn-btn-ghost fn-btn-sm"
+            >
+              ログイン
+            </Link>
+          </section>
         </aside>
       </div>
     </div>

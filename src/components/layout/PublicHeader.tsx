@@ -90,13 +90,13 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
         </nav>
 
         <div className={`fn-header-right ${styles.right}`}>
-          <div className={styles.themeButton}>
+          <div className={`${styles.themeButton} ${styles.barCompactHidden}`}>
             <ThemeToggle />
           </div>
 
           <button
             type="button"
-            className={styles.searchToggle}
+            className={`${styles.searchToggle} ${styles.barCompactHidden}`}
             aria-label="作品を検索"
             aria-expanded={searchOpen}
             aria-controls="header-search-panel"
@@ -112,24 +112,24 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
             <>
               <Link
                 href="/entry"
-                className={`fn-btn fn-header-submit ${styles.headerCta} ${styles.postBtn}`}
+                className={`fn-btn fn-header-submit ${styles.headerCta} ${styles.postBtn} ${styles.barCompactHidden}`}
                 data-variant="accent"
               >
                 <Icon name="edit" size={13} aria-hidden />
                 <span>投稿する</span>
               </Link>
-              <div className={styles.actionNav}>
+              <div className={`${styles.actionNav} ${styles.barCompactHidden}`}>
                 <AccountMenu user={user} />
               </div>
             </>
           ) : (
             <Link
               href={entryHref}
-              className={`fn-btn fn-header-submit ${styles.headerCta} ${styles.joinBtn}`}
+              className={`fn-btn fn-header-submit ${styles.headerCta} ${styles.joinBtn} ${styles.barCompactHidden}`}
               data-variant="accent"
             >
               <Icon name="edit" size={13} aria-hidden />
-              <span>参加・投稿する</span>
+              <span>参加する</span>
             </Link>
           )}
 
@@ -199,6 +199,52 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
           aria-label="モバイルナビゲーション"
           aria-hidden={!mobileOpen}
         >
+          <div className={styles.mobileSection}>
+            <form
+              action="/list"
+              method="get"
+              className={styles.mobileSearch}
+              role="search"
+              aria-label="作品検索"
+              onSubmit={(e) => {
+                e.preventDefault();
+                navigateGetForm(e.currentTarget);
+                closeMobilePanels();
+              }}
+            >
+              <Icon name="search" size={16} aria-hidden />
+              <label htmlFor="mobile-header-search-input" className="fn-sr-only">
+                作品を検索
+              </label>
+              <input
+                id="mobile-header-search-input"
+                type="search"
+                name="q"
+                placeholder="作品を検索"
+                autoComplete="off"
+              />
+            </form>
+            {user ? (
+              <Link
+                href="/entry"
+                className={`${styles.mobileLink} ${styles.mobileLinkAccent}`}
+                onClick={closeMobilePanels}
+              >
+                <Icon name="edit" size={16} aria-hidden /> 投稿する
+              </Link>
+            ) : (
+              <Link
+                href={entryHref}
+                className={`${styles.mobileLink} ${styles.mobileLinkAccent}`}
+                onClick={closeMobilePanels}
+              >
+                <Icon name="edit" size={16} aria-hidden /> 参加する
+              </Link>
+            )}
+          </div>
+
+          <div className={styles.mobileDivider} />
+
           {!user ? (
             <div className={styles.mobileSection}>
               {PUBLIC_NAV_ITEMS.map((item) => {
@@ -263,6 +309,33 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
                   <Icon name="settings" size={16} aria-hidden /> 設定
                 </Link>
               </div>
+
+              {user.management.canAccessAdmin ||
+              user.management.canAccessManage ? (
+                <>
+                  <div className={styles.mobileDivider} />
+                  <div className={styles.mobileSection}>
+                    {user.management.canAccessManage ? (
+                      <Link
+                        href="/manage"
+                        className={styles.mobileLink}
+                        onClick={closeMobilePanels}
+                      >
+                        <Icon name="users" size={16} aria-hidden /> 運営
+                      </Link>
+                    ) : null}
+                    {user.management.canAccessAdmin ? (
+                      <Link
+                        href="/admin"
+                        className={styles.mobileLink}
+                        onClick={closeMobilePanels}
+                      >
+                        <Icon name="settings" size={16} aria-hidden /> 管理
+                      </Link>
+                    ) : null}
+                  </div>
+                </>
+              ) : null}
 
               <div className={styles.mobileDivider} />
               <div className={styles.mobileSection}>

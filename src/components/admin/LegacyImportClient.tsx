@@ -38,6 +38,7 @@ interface ImportResult {
   previewTotal: number;
   errors: string[];
   previewToken?: string;
+  anchorNow?: number;
 }
 
 interface PendingFile {
@@ -109,6 +110,10 @@ async function parseImportResponse(res: Response): Promise<ImportResult> {
       errors: Array.isArray(data.errors) ? (data.errors as string[]) : [],
       previewToken:
         typeof data.previewToken === "string" ? data.previewToken : undefined,
+      anchorNow:
+        typeof data.anchorNow === "number" && Number.isFinite(data.anchorNow)
+          ? data.anchorNow
+          : undefined,
     };
   } catch {
     return {
@@ -189,7 +194,10 @@ export function LegacyImportClient(): React.ReactElement {
     files: files.map((f) => ({ name: f.name, content: f.content })),
     strategy: { importMode, strategy, enqueueStaticRebuild },
     ...(action === "apply" && analysis?.previewToken
-      ? { previewToken: analysis.previewToken }
+      ? {
+          previewToken: analysis.previewToken,
+          anchorNow: analysis.anchorNow,
+        }
       : {}),
   });
 
@@ -251,6 +259,7 @@ export function LegacyImportClient(): React.ReactElement {
     analysis?.ok === true &&
     analysis.errors.length === 0 &&
     typeof analysis.previewToken === "string" &&
+    typeof analysis.anchorNow === "number" &&
     analysisKey === currentKey;
 
   const totalSize = files.reduce((acc, f) => acc + f.size, 0);

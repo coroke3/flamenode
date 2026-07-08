@@ -10,6 +10,7 @@ import {
   type IntegritySeverity,
 } from "@/lib/admin/integrityChecks";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { AdminSectionTabs } from "@/components/admin/AdminSectionTabs";
 import { Icon } from "@/components/ui/Icon";
 
 export const metadata: Metadata = { title: "DB 整合性チェック" };
@@ -219,6 +220,8 @@ export default async function AdminIntegrityPage(): Promise<React.ReactElement> 
         backHref="/admin/health"
         backLabel="ヘルスチェックへ"
       />
+
+      <AdminSectionTabs hub="health" />
 
       <section
         style={{

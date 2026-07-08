@@ -87,7 +87,18 @@ export async function createFreeVideo(
   const syncedEventIds = await resolveEventSyncTargetForNewVideo(db, {
     requested: requestedEventIds,
     user: { id: userId, role: sessionUser.role ?? null },
+    linkPolicy: "unslotted_posts",
   });
+  if (
+    sessionUser.role !== "admin" &&
+    requestedEventIds.some((id) => !syncedEventIds.includes(id))
+  ) {
+    return {
+      ok: false,
+      message:
+        "選択したイベントの一部は枠なし投稿の紐づけを受け付けていません。",
+    };
+  }
   const customValidation = await validateCustomAnswersForEvents(
     db,
     formData,
@@ -132,6 +143,7 @@ export async function createFreeVideo(
       production_story: parsed.data.production_story ?? null,
       closing_comment: parsed.data.closing_comment ?? null,
       part: parsed.data.part?.trim() || null,
+      primary_event_id: syncedEventIds[0] ?? null,
       scheduling_type: "manual",
       scheduled_time: now,
       created_at: now,
@@ -156,6 +168,7 @@ export async function createFreeVideo(
   await syncVideoEvents(db, id, {
     requested: requestedEventIds,
     user: { id: userId, role: sessionUser.role ?? null },
+    linkPolicy: "unslotted_posts",
   });
   await replaceStagePermissionCustomAnswers(db, {
     videoId: id,
@@ -193,8 +206,8 @@ export async function createFreeVideo(
   await enqueueAfterVideoCreate(db, {
     videoId: id,
     creatorXUserId: activeX || null,
-    primaryEventId: null,
-    eventIds: requestedEventIds,
+    primaryEventId: syncedEventIds[0] ?? null,
+    eventIds: syncedEventIds,
     requestedByUserId: userId,
   });
 
@@ -209,7 +222,7 @@ export async function createFreeVideo(
         youtubeVideoId: youtubeId,
         hasLinkedEvent: requestedEventIds.length > 0,
       }),
-      eventId: requestedEventIds[0] ?? null,
+      eventId: syncedEventIds[0] ?? null,
     });
   }
 

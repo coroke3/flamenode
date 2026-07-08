@@ -1,17 +1,15 @@
 import * as React from "react";
 import Link from "next/link";
 import { Icon, type IconName } from "@/components/ui/Icon";
+import {
+  VIDEO_VISIBILITY_GROUPS,
+  type VideoVisibilityGroupKey,
+  videoVisibilityGroupForFilter,
+} from "@/lib/admin/videoVisibilityLabels";
 
 export type AdminVideoManagementTabKey =
   | "all"
-  | "pending"
-  | "public"
-  | "limited"
-  | "private"
-  | "hidden"
-  | "draft"
-  | "archived"
-  | "voided"
+  | VideoVisibilityGroupKey
   | "youtube-sync";
 
 interface AdminVideoManagementTabsProps {
@@ -35,16 +33,21 @@ type ExtraTab = {
   icon: IconName;
 };
 
+const GROUP_ICONS: Record<VideoVisibilityGroupKey, IconName> = {
+  review: "check",
+  public: "external",
+  private: "pause",
+  closed: "warning",
+};
+
 const STATUS_TABS: StatusTab[] = [
   { key: "all", value: null, label: "すべて", icon: "list" },
-  { key: "pending", value: "pending", label: "審査待ち", icon: "check" },
-  { key: "public", value: "public", label: "公開", icon: "external" },
-  { key: "limited", value: "limited", label: "限定公開", icon: "user" },
-  { key: "private", value: "private", label: "非公開", icon: "pause" },
-  { key: "hidden", value: "hidden", label: "非表示", icon: "mute" },
-  { key: "draft", value: "draft", label: "下書き", icon: "edit" },
-  { key: "archived", value: "archived", label: "アーカイブ", icon: "grid" },
-  { key: "voided", value: "voided", label: "無効", icon: "warning" },
+  ...VIDEO_VISIBILITY_GROUPS.map((group) => ({
+    key: group.key,
+    value: group.key,
+    label: group.label,
+    icon: GROUP_ICONS[group.key],
+  })),
 ];
 
 const EXTRA_TABS: ExtraTab[] = [
@@ -80,7 +83,7 @@ export function AdminVideoManagementTabs({
   active,
 }: AdminVideoManagementTabsProps): React.ReactElement {
   const statusKey =
-    STATUS_TABS.find((tab) => tab.value === (status || null))?.key ?? "all";
+    status ? (videoVisibilityGroupForFilter(status) ?? "all") : "all";
   const activeKey = active ?? statusKey;
 
   return (

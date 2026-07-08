@@ -33,6 +33,7 @@ export function snapshotEventSection(
         entry_start_time: row.entry_start_time,
         entry_end_time: row.entry_end_time,
         allow_user_video_event_links: row.allow_user_video_event_links,
+        allow_unslotted_posts: row.allow_unslotted_posts,
       };
     case "questions":
       return {

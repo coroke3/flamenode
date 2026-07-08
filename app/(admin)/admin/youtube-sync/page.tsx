@@ -4,7 +4,7 @@ import { FnTable } from "@/components/ui/FnTable";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { and, desc, eq, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { getDatabase } from "@/lib/cloudflare";
 import {
@@ -22,22 +22,34 @@ import {
   formatUnix,
 } from "@/lib/utils/format";
 import { AutoSubmitCheckbox, AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
+import {
+  VIDEO_VISIBILITY_GROUPS,
+  normalizeVideoVisibilityFilter,
+  videoVisibilityBadgeClass,
+  videoVisibilityLabel,
+  videoVisibilityStatusesForFilter,
+} from "@/lib/admin/videoVisibilityLabels";
 
 export const metadata: Metadata = { title: "YouTube同期状態" };
 export const dynamic = "force-dynamic";
 
 const LIMIT = 100;
 const STALE_SECONDS = 14 * 24 * 60 * 60;
+type SearchParamValue = string | string[] | undefined;
+const FLAMENODE_VISIBILITY_OPTIONS = VIDEO_VISIBILITY_GROUPS.map((group) => ({
+  value: group.key,
+  label: group.label,
+}));
 
 interface Props {
   searchParams?: Promise<{
-    sync_status?: string;
-    privacy?: string;
-    availability?: string;
-    visibility?: string;
-    failed?: string;
-    stale?: string;
-    missing?: string;
+    sync_status?: SearchParamValue;
+    privacy?: SearchParamValue;
+    availability?: SearchParamValue;
+    visibility?: SearchParamValue;
+    failed?: SearchParamValue;
+    stale?: SearchParamValue;
+    missing?: SearchParamValue;
   }>;
 }
 
@@ -57,7 +69,8 @@ type YoutubeSyncRow = {
   updated_at: number | null;
 };
 
-function cleanFilter(raw: string | undefined): string {
+function cleanFilter(raw: SearchParamValue): string {
+  if (Array.isArray(raw)) return (raw[0] ?? "").trim();
   return (raw ?? "").trim();
 }
 
@@ -65,13 +78,6 @@ function statusBadgeClass(status: string | null): string {
   if (status === "failed") return "fn-badge-danger";
   if (status === "pending") return "fn-badge-warning";
   if (status === "synced") return "fn-badge-accent";
-  return "fn-badge-soft";
-}
-
-function visibilityBadgeClass(status: string): string {
-  if (status === "public") return "fn-badge-accent";
-  if (status === "pending") return "fn-badge-warning";
-  if (status === "voided" || status === "private") return "fn-badge-danger";
   return "fn-badge-soft";
 }
 
@@ -90,10 +96,10 @@ export default async function AdminYoutubeSyncPage({
   const syncStatus = cleanFilter(sp.sync_status);
   const privacy = cleanFilter(sp.privacy);
   const availability = cleanFilter(sp.availability);
-  const visibility = cleanFilter(sp.visibility);
-  const failedOnly = sp.failed === "1";
-  const staleOnly = sp.stale === "1";
-  const missingOnly = sp.missing === "1";
+  const visibility = normalizeVideoVisibilityFilter(cleanFilter(sp.visibility));
+  const failedOnly = cleanFilter(sp.failed) === "1";
+  const staleOnly = cleanFilter(sp.stale) === "1";
+  const missingOnly = cleanFilter(sp.missing) === "1";
 
   const db = getDatabase();
   let rows: YoutubeSyncRow[] = [];
@@ -108,7 +114,12 @@ export default async function AdminYoutubeSyncPage({
     if (availability) {
       conds.push(eq(videoYoutubeMetadata.youtube_availability_status, availability));
     }
-    if (visibility) conds.push(eq(videosTable.visibility_status, visibility as never));
+    const visibilityStatuses = videoVisibilityStatusesForFilter(visibility);
+    if (visibilityStatuses && visibilityStatuses.length > 1) {
+      conds.push(inArray(videosTable.visibility_status, visibilityStatuses));
+    } else if (visibilityStatuses?.[0]) {
+      conds.push(eq(videosTable.visibility_status, visibilityStatuses[0]));
+    }
     if (failedOnly) conds.push(eq(videoYoutubeMetadata.sync_status, "failed"));
     if (staleOnly) {
       conds.push(
@@ -169,17 +180,7 @@ export default async function AdminYoutubeSyncPage({
 
       <form
         method="get"
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 12,
-          alignItems: "flex-end",
-          marginTop: 16,
-          padding: 12,
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-md)",
-        }}
+        className="fn-console-filter-form fn-console-filter-panel"
       >
         <SelectFilter
           name="sync_status"
@@ -203,21 +204,21 @@ export default async function AdminYoutubeSyncPage({
           name="visibility"
           label="FlameNode公開状態"
           value={visibility}
-          options={["draft", "pending", "public", "limited", "private", "hidden", "archived", "voided"]}
+          options={FLAMENODE_VISIBILITY_OPTIONS}
         />
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+        <label className="fn-console-filter-check">
           <AutoSubmitCheckbox name="failed" value="1" defaultChecked={failedOnly} />
           同期失敗のみ
         </label>
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+        <label className="fn-console-filter-check">
           <AutoSubmitCheckbox name="stale" value="1" defaultChecked={staleOnly} />
           長期間未同期
         </label>
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+        <label className="fn-console-filter-check">
           <AutoSubmitCheckbox name="missing" value="1" defaultChecked={missingOnly} />
           YouTube IDなし
         </label>
-        <Link href="/admin/youtube-sync" className="fn-btn fn-btn-ghost fn-btn-sm">
+        <Link href="/admin/youtube-sync" className="fn-btn fn-btn-ghost fn-btn-sm fn-console-filter-action">
           解除
         </Link>
       </form>
@@ -266,8 +267,8 @@ export default async function AdminYoutubeSyncPage({
                     )}
                   </td>
                   <td>
-                    <span className={`fn-badge ${visibilityBadgeClass(row.visibility_status)}`}>
-                      {row.visibility_status}
+                    <span className={`fn-badge ${videoVisibilityBadgeClass(row.visibility_status)}`}>
+                      {videoVisibilityLabel(row.visibility_status)}
                     </span>
                   </td>
                   <td>
@@ -357,19 +358,28 @@ function SelectFilter({
   name: string;
   label: string;
   value: string;
-  options: string[];
+  options: readonly SelectFilterOption[];
 }): React.ReactElement {
+  const normalizedOptions = options.map((option) =>
+    typeof option === "string" ? { value: option, label: option } : option,
+  );
+  const hasCurrentValue = normalizedOptions.some((option) => option.value === value);
   return (
-    <label style={{ display: "flex", flexDirection: "column", fontSize: 11 }}>
-      <span style={{ color: "var(--text-muted)" }}>{label}</span>
+    <label className="fn-console-filter-field">
+      <span>{label}</span>
       <AutoSubmitSelect name={name} defaultValue={value} className="fn-input">
         <option value="">すべて</option>
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
+        {value && !hasCurrentValue ? (
+          <option value={value}>{value}</option>
+        ) : null}
+        {normalizedOptions.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
           </option>
         ))}
       </AutoSubmitSelect>
     </label>
   );
 }
+
+type SelectFilterOption = string | { value: string; label: string };

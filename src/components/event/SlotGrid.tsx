@@ -349,18 +349,30 @@ export function SlotGrid({
         </p>
       ) : null}
       {success ? (
-        <p role="status" className={styles.successBar}>
-          <Icon name="check" size={12} aria-hidden /> {success}
-          {reservedSlotId ? (
-            <Link
-              href={`/entry/slotted?slot=${reservedSlotId}`}
-              className={styles.inlineAction}
-            >
-              作品情報を登録
-              <Icon name="chevron-right" size={11} aria-hidden />
-            </Link>
-          ) : null}
-        </p>
+        <div role="status" className={styles.successCard}>
+          <div className={styles.successCardBody}>
+            <p className={styles.successCardMessage}>
+              <Icon name="check" size={14} aria-hidden /> {success}
+            </p>
+            {reservedSlotId ? (
+              <>
+                <Link
+                  href={`/entry/slotted?slot=${reservedSlotId}`}
+                  className="fn-btn fn-btn-primary"
+                >
+                  次へ: 作品情報を登録する
+                  <Icon name="chevron-right" size={14} aria-hidden />
+                </Link>
+                <Link
+                  href="/dashboard"
+                  className={styles.successCardSecondary}
+                >
+                  あとで登録する (ダッシュボードから再開できます)
+                </Link>
+              </>
+            ) : null}
+          </div>
+        </div>
       ) : null}
 
       {hasMineSlot && maxConsecutiveSlots > 1 ? (

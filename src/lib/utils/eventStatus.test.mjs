@@ -39,10 +39,18 @@ test("getEventVisibility: visibility_status のみを見る", () => {
   );
 });
 
-test("isPublicEventVisible: public のみ true", () => {
+test("isPublicEventVisible: public と archived のみ true", () => {
   assert.equal(
     isPublicEventVisible({
       visibility_status: "public",
+      start_time: null,
+      end_time: null,
+    }),
+    true,
+  );
+  assert.equal(
+    isPublicEventVisible({
+      visibility_status: "archived",
       start_time: null,
       end_time: null,
     }),

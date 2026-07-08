@@ -8,5 +8,5 @@
 }
 
 .dark {
-  color: #fff;
+  color: var(--text-primary);
 }

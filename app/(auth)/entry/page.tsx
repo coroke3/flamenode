@@ -238,6 +238,11 @@ export default async function EntryPage({
           <p className={styles.cardLead}>
             開催中のイベントの枠を確保して、作品を投稿できます。
           </p>
+          <ol className={styles.flowSteps} aria-label="投稿の流れ">
+            <li>枠を確保</li>
+            <li>作品情報を登録</li>
+            <li>YouTube URL を登録</li>
+          </ol>
           <div className={styles.eventList}>
             {activeEvents.length === 0 ? (
               <p className="fn-text-muted-sm">現在受付中のイベントはありません。</p>
@@ -309,27 +314,43 @@ export default async function EntryPage({
                 予約済みのイベント枠に作品情報を紐付けます。連続枠も1つの提出として扱います。
               </p>
               <ul className="fn-pc-slot-list">
-                {displaySlots.map((slot) => (
-                  <li key={slot.id}>
-                    <Link
-                      href={resolveWriteHref(`/entry/slotted?slot=${slot.id}`)}
-                      className="fn-pc-slot"
-                    >
-                      <span className="fn-pc-slot-info">
-                        <span className="fn-pc-slot-label">
-                          {slot.event_title ?? slot.event_id}
-                        </span>
-                        <span className="fn-mono fn-pc-slot-event">
-                          {slot.start_time
-                            ? `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(slot.start_time, { timeOnly: true })}`
-                            : (slot.slot_label ?? "時間なし枠")}
-                          {slot.is_group ? ` / ${slot.group_size}連続` : ""}
-                        </span>
-                      </span>
-                      <Icon name="chevron-right" size={13} aria-hidden />
-                    </Link>
-                  </li>
-                ))}
+                {displaySlots.map((slot) => {
+                  const needsSubmission =
+                    !slot.video_id && slot.status === "reserved";
+                  const slotHref = resolveWriteHref(
+                    `/entry/slotted?slot=${slot.id}`,
+                  );
+                  return (
+                    <li key={slot.id}>
+                      <div className={styles.slotRow}>
+                        <Link href={slotHref} className="fn-pc-slot">
+                          <span className="fn-pc-slot-info">
+                            <span className="fn-pc-slot-label">
+                              {slot.event_title ?? slot.event_id}
+                            </span>
+                            <span className="fn-mono fn-pc-slot-event">
+                              {slot.start_time
+                                ? `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(slot.start_time, { timeOnly: true })}`
+                                : (slot.slot_label ?? "時間なし枠")}
+                              {slot.is_group ? ` / ${slot.group_size}連続` : ""}
+                            </span>
+                          </span>
+                          {!needsSubmission ? (
+                            <Icon name="chevron-right" size={13} aria-hidden />
+                          ) : null}
+                        </Link>
+                        {needsSubmission ? (
+                          <Link
+                            href={slotHref}
+                            className="fn-btn fn-btn-primary fn-btn-sm"
+                          >
+                            登録を続ける
+                          </Link>
+                        ) : null}
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           ) : null}
@@ -347,6 +368,10 @@ export default async function EntryPage({
             イベントの枠に関係なく、既存の作品をFlameNodeに登録できます。
             投稿には承認済みのX IDが必要です。
           </p>
+          <ol className={styles.flowSteps} aria-label="投稿の流れ">
+            <li>作品情報を登録</li>
+            <li>YouTube URL を登録</li>
+          </ol>
           <div className={styles.btnRow}>
             <Link
               href={resolveWriteHref("/entry/unslotted")}

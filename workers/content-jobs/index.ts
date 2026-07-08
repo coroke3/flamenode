@@ -6,6 +6,7 @@
 import { processStaticRebuildQueue } from "../json-generator/queue.ts";
 import { runCleanupWithRetry } from "../cleanup/index.ts";
 import { runJob } from "../shared/runJob.ts";
+import { applyAutoCostGuard } from "../cost-guard/auto.ts";
 
 export interface Env {
   DB: D1Database;
@@ -18,6 +19,7 @@ const CLEANUP_INTERVAL_SEC = 3600;
 export default {
   async scheduled(_evt: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil((async () => {
+      await runJob("content-jobs", () => applyAutoCostGuard(env));
       await runJob("content-jobs", () => processStaticRebuildQueue(env));
       const lastCleanup = await env.KV.get("content-jobs:cleanup:last_run");
       const now = Math.floor(Date.now() / 1000);

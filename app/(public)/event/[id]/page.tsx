@@ -36,6 +36,7 @@ import { absoluteUrl, buildPageMetadata, compactText } from "@/lib/seo";
 import { buildSlotParts, formatSlotPartLabel } from "@/lib/utils/slotGrouping";
 import { loadStaticEventDetail } from "@/lib/publicData/staticEventDetail";
 import { canFallbackToDatabase } from "@/lib/publicData/loader";
+import type { StaticEventDetail } from "@/lib/publicData/staticEventDetailCore";
 
 export const dynamic = "force-dynamic";
 
@@ -72,6 +73,17 @@ const dateFormat = {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
+  const staticLoaded = await loadStaticEventDetail(id);
+  if (staticLoaded.detail) {
+    const event = staticLoaded.detail.event;
+    return buildPageMetadata({
+      title: event.title,
+      description: event.explanation,
+      path: `/event/${event.id}`,
+      image: event.img_url ?? event.icon_url,
+      noIndex: !isPublicEventVisible(event),
+    });
+  }
   const event = await withDatabase(async (db) => {
     const rows = await db
       .select()
@@ -95,13 +107,15 @@ export default async function EventDetailPage({
 }: Props): Promise<React.ReactElement> {
   const { id } = await params;
   const staticLoaded = await loadStaticEventDetail(id);
+  if (!canFallbackToDatabase(staticLoaded.strategy)) {
+    if (!staticLoaded.detail) notFound();
+    return <StaticEventDetailView detail={staticLoaded.detail} />;
+  }
 
   const bundle =
-    !canFallbackToDatabase(staticLoaded.strategy) && !staticLoaded.detail
-      ? null
-      : await withDatabase(async (db) => {
+    await withDatabase(async (db) => {
     const data = await fetchEventWithEditors(db, id);
-    if (!data) return null;
+    if (!data || !isPublicEventVisible(data.event)) return null;
 
     const publicVideoWhere = and(
       eq(videoEvents.event_id, id),
@@ -379,6 +393,137 @@ export default async function EventDetailPage({
         {eventVideos.length === 0 ? (
           <p className={styles.emptyText}>
             このイベントの提出済み作品はまだ表示できません。
+          </p>
+        ) : (
+          <div className="fn-video-grid">
+            {eventVideos.map((video) => (
+              <VideoCard key={video.id} video={video} />
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function StaticEventDetailView({
+  detail,
+}: {
+  detail: StaticEventDetail;
+}): React.ReactElement {
+  const { event } = detail;
+  if (!isPublicEventVisible(event)) notFound();
+  const now = Math.floor(Date.now() / 1000);
+  const accentVar = {
+    "--event-accent": event.accent_color ?? "var(--accent-primary)",
+  } as React.CSSProperties;
+  const status = computeEventStatus(event);
+  const accepting = isAcceptingEntries(event);
+  const slotTotal = detail.slotSummary.reduce((sum, row) => sum + row.count, 0);
+  const availableSlots =
+    detail.slotSummary.find((row) => row.status === "available")?.count ?? 0;
+  const filledSlots = Math.max(0, slotTotal - availableSlots);
+  const dayMetric = getDayMetric(event as EventRow, now);
+  const eventVideos = detail.publicVideos.map((video) => ({
+    id: video.id,
+    title: video.title,
+    youtube_video_id: video.youtube_video_id,
+    display_name: video.creator_display_name,
+    icon_url: video.creator_icon_url,
+    creator_x_user_id: video.creator_x_user_id,
+    scheduled_time: video.scheduled_time,
+    status: video.visibility_status,
+  }));
+
+  return (
+    <div
+      className={`fn-public-container fn-page ${styles.page}`}
+      style={accentVar}
+    >
+      <header className={`fn-page-head fn-event-hero ${styles.hero}`}>
+        <div className={styles.heroCopy}>
+          <p className="fn-eyebrow">EVENT</p>
+          <h1 className={`fn-event-hero-title ${styles.heroTitle}`}>
+            {event.title}
+          </h1>
+          {event.explanation ? (
+            <p className={`fn-event-hero-lead fn-jp ${styles.heroLead}`}>
+              {event.explanation}
+            </p>
+          ) : null}
+        </div>
+        <div className={styles.heroActions}>
+          <span className={styles.statusPill}>
+            {accepting ? "募集中" : eventStatusLabel(status)}
+          </span>
+          {accepting ? (
+            <Link href={`/event/${event.id}/slots`} className={styles.reserveButton}>
+              枠を見る <Icon name="chevron-right" size={14} aria-hidden />
+            </Link>
+          ) : null}
+        </div>
+      </header>
+
+      <section className={styles.statsGrid} aria-label="イベント概要">
+        <StatCard label="募集期間" value={formatRange(event.entry_start_time, event.entry_end_time)} />
+        <StatCard label="投稿期間" value={formatRange(event.start_time, event.end_time)} />
+        <StatCard label="ENTRIES" value={formatCount(eventVideos.length)} />
+        <StatCard label="CREW" value={formatCount(detail.publicStaff.length)} />
+        <StatCard
+          label="FILLED 枠"
+          value={<>{filledSlots}<span>/{slotTotal}</span></>}
+        />
+        <StatCard
+          label={dayMetric.label}
+          value={<>{dayMetric.value}<span>日</span></>}
+        />
+      </section>
+
+      {detail.publicStaff.length > 0 ? (
+        <section className={styles.section}>
+          <SectionHeader
+            eyebrow="CREW"
+            title="Crew"
+            classes={eventSectionHeaderClasses}
+          />
+          <ul className={styles.crewList}>
+            {detail.publicStaff.map((member) => (
+              <li
+                key={`${member.x_user_id ?? member.display_name}-${member.role ?? ""}`}
+                className={styles.crewRow}
+              >
+                <UserAvatar
+                  iconUrl={member.icon_url}
+                  label={member.x_name ?? member.display_name}
+                  size={36}
+                  className={styles.crewAvatar}
+                  fallbackClassName={styles.crewAvatarFallback}
+                />
+                {member.x_user_id ? (
+                  <Link href={`/user/${member.x_user_id}`} className={styles.crewName}>
+                    {member.x_name ?? member.display_name}
+                  </Link>
+                ) : (
+                  <span className={styles.crewName}>{member.display_name}</span>
+                )}
+                <span className={styles.crewRole}>
+                  {member.public_role_label ?? member.role ?? "staff"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      <section className={styles.section}>
+        <SectionHeader
+          eyebrow="投稿"
+          title="投稿"
+          classes={eventSectionHeaderClasses}
+        />
+        {eventVideos.length === 0 ? (
+          <p className={styles.emptyText}>
+            このイベントの公開済み作品はまだ表示できません。
           </p>
         ) : (
           <div className="fn-video-grid">

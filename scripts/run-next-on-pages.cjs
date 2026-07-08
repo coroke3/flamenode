@@ -1,6 +1,6 @@
 const { existsSync } = require("node:fs");
 const { dirname, join, resolve } = require("node:path");
-const { spawn } = require("node:child_process");
+const { spawnSync } = require("node:child_process");
 
 const root = resolve(__dirname, "..");
 const nextOnPagesEntry = join(
@@ -14,6 +14,8 @@ const nextOnPagesEntry = join(
 const shim = join(__dirname, "next-on-pages-windows-shim.cjs");
 
 const env = { ...process.env };
+const requireShimOption = `--require=${shim}`;
+env.NODE_OPTIONS = [env.NODE_OPTIONS, requireShimOption].filter(Boolean).join(" ");
 
 if (process.platform === "win32") {
   const toGitBashPath = (value) => {
@@ -32,25 +34,41 @@ if (process.platform === "win32") {
   }
 }
 
-const child = spawn(
-  process.execPath,
-  ["--require", shim, nextOnPagesEntry, ...process.argv.slice(2)],
-  {
+const cliArgs = process.argv.slice(2);
+const hasSkipBuild = cliArgs.includes("--skip-build") || cliArgs.includes("-s");
+
+function run(command, args, options = {}) {
+  const result = spawnSync(command, args, {
     cwd: root,
-    env,
+    env: options.env ?? env,
+    shell: options.shell ?? false,
     stdio: "inherit",
-  },
-);
-
-child.on("exit", (code, signal) => {
-  if (signal) {
-    process.kill(process.pid, signal);
-    return;
+  });
+  if (result.error) {
+    console.error(result.error);
+    process.exit(1);
   }
-  process.exit(code ?? 0);
-});
+  if (result.signal) {
+    process.kill(process.pid, result.signal);
+    return 1;
+  }
+  return result.status ?? 0;
+}
 
-child.on("error", (error) => {
-  console.error(error);
-  process.exit(1);
-});
+if (process.platform === "win32" && !hasSkipBuild) {
+  const vercelEnv = { ...env, PATH: process.env.PATH };
+  const vercelStatus = run("npx.cmd", ["vercel", "build"], {
+    env: vercelEnv,
+    shell: true,
+  });
+  if (vercelStatus !== 0) process.exit(vercelStatus);
+  cliArgs.unshift("--skip-build");
+}
+
+const status = run(process.execPath, [
+  "--require",
+  shim,
+  nextOnPagesEntry,
+  ...cliArgs,
+]);
+process.exit(status);

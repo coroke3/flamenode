@@ -64,6 +64,7 @@ export function buildEventUpdatePayload(args: {
       entry_start_time: parseDateInput(data.entry_start_time),
       entry_end_time: parseDateInput(data.entry_end_time),
       allow_user_video_event_links: data.allow_user_video_event_links,
+      allow_unslotted_posts: data.allow_unslotted_posts,
     });
     updatedSections.push("publish");
     changedByPermission.publish = EVENT_SECTION_PERMISSION_KEYS.publish;

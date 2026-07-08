@@ -165,7 +165,8 @@ export async function generateSlotsBatch(
       event_id: data.event_id,
     }),
     operator_discord_id: guard.userId,
-    retention_class: "normal",
+    retention_class: "normal",
+
   });
 
   revalidateEventSlotPaths(data.event_id);
@@ -199,7 +200,8 @@ export async function deleteAvailableSlots(
     action: "DELETE",
     after_data: JSON.stringify({ deleted: rows.length, scope: "available" }),
     operator_discord_id: guard.userId,
-    retention_class: "normal",
+    retention_class: "normal",
+
   });
 
   revalidateEventSlotPaths(eventId);
@@ -292,7 +294,8 @@ export async function releaseSlot(formData: FormData): Promise<SlotActionResult>
       reservation_group_id: groupId ?? null,
     }),
     operator_discord_id: guard.userId,
-    retention_class: "long_audit",
+    retention_class: "long_audit",
+
   });
 
   // 通知: スロット所有者 (Discord) に強制解放を伝える。
@@ -343,7 +346,8 @@ export async function deleteSlot(formData: FormData): Promise<SlotActionResult> 
     action: "DELETE",
     before_data: JSON.stringify({ event_id: row.event_id }),
     operator_discord_id: guard.userId,
-    retention_class: "normal",
+    retention_class: "normal",
+
   });
 
   revalidateEventSlotPaths(row.event_id);
@@ -399,7 +403,8 @@ export async function batchDeleteAvailableSlots(
       action: "DELETE",
       before_data: JSON.stringify({ event_id: eventId, batch: true }),
       operator_discord_id: guard.userId,
-      retention_class: "normal",
+      retention_class: "normal",
+
     });
   }
 
@@ -483,7 +488,8 @@ export async function batchReleaseReservedSlots(
         slot_ids: targetIds,
       }),
       operator_discord_id: guard.userId,
-      retention_class: "long_audit",
+      retention_class: "long_audit",
+
     });
   }
 

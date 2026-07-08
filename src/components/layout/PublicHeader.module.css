@@ -3,9 +3,7 @@
   top: 0;
   z-index: 30;
   overflow-x: clip;
-  background: color-mix(in srgb, var(--bg-base) 96%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: var(--bg-overlay);
   border-bottom: 1px solid var(--hairline, var(--border-subtle));
   transition:
     background-color 0.2s ease,
@@ -409,6 +407,26 @@
   padding: 0 8px;
 }
 
+@media (max-width: 1000px) {
+  .bar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+  }
+
+  .barCompactHidden {
+    display: none !important;
+  }
+
+  .right {
+    gap: 0;
+    min-width: 0;
+  }
+
+  .menuToggle {
+    display: inline-flex;
+  }
+}
+
 @media (min-width: 1001px) {
   .desktopNav {
     display: flex;
@@ -420,12 +438,6 @@
 
   .menuToggle {
     display: none;
-  }
-}
-
-@media (max-width: 1000px) {
-  .menuToggle {
-    display: inline-flex;
   }
 }
 

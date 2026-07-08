@@ -646,6 +646,16 @@ WHERE \`creator_youtube_channel_url\` IS NULL
     );
     await applyMigrationFile(DB, "0049_user_onboarding_completed_at.sql");
   }
+
+  if (
+    (await tableExists(DB, "events")) &&
+    !(await columnExists(DB, "events", "allow_unslotted_posts"))
+  ) {
+    console.log(
+      "[instrumentation] Applying allow_unslotted_posts migration 0050",
+    );
+    await applyMigrationFile(DB, "0050_allow_unslotted_posts.sql");
+  }
 }
 
 async function backfillPermissionMaskToCustomJson(

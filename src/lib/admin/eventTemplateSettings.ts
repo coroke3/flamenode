@@ -47,6 +47,7 @@ export interface EventTemplateSnapshot {
   img_url: string | null;
   accent_color: string | null;
   allow_user_video_event_links: number;
+  allow_unslotted_posts: number;
   allow_user_video_edits: number;
   user_video_edit_permission_keys_json: string | null;
   video_form_settings_json: string | null;
@@ -145,6 +146,7 @@ export function snapshotFromEvent(
     img_url: event.img_url,
     accent_color: event.accent_color,
     allow_user_video_event_links: event.allow_user_video_event_links,
+    allow_unslotted_posts: event.allow_unslotted_posts,
     allow_user_video_edits: event.allow_user_video_edits,
     user_video_edit_permission_keys_json:
       event.user_video_edit_permission_keys_json,
@@ -223,6 +225,7 @@ export function snapshotToFormInitial(
     is_active: 0,
     is_archived: 0,
     allow_user_video_event_links: snapshot.allow_user_video_event_links,
+    allow_unslotted_posts: snapshot.allow_unslotted_posts ?? 0,
     allow_user_video_edits: snapshot.allow_user_video_edits,
     user_video_edit_permission_keys_json:
       snapshot.user_video_edit_permission_keys_json,

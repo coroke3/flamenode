@@ -5,6 +5,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { getAuditLogSettings } from "@/lib/audit/settings";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { AdminSectionTabs } from "@/components/admin/AdminSectionTabs";
 import { AuditSettingsForm } from "@/components/admin/AuditSettingsForm";
 
 export const metadata: Metadata = { title: "監査ログ設定" };
@@ -27,6 +28,8 @@ export default async function AdminAuditSettingsPage(): Promise<React.ReactEleme
         backHref="/admin/audit"
         backLabel="監査ログ一覧へ"
       />
+
+      <AdminSectionTabs hub="audit" />
 
       <div
         style={{

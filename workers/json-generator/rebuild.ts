@@ -125,7 +125,7 @@ async function rebuildEventsIndex(env: Env): Promise<void> {
     env.DB.prepare(
       `SELECT ${EVENT_INDEX_COLUMNS}
      FROM events
-     WHERE visibility_status = 'public'
+     WHERE visibility_status IN ('public', 'archived')
      ORDER BY start_time DESC
      LIMIT 200`,
     ).all(),
@@ -166,7 +166,7 @@ async function rebuildEventGroupSections(env: Env): Promise<unknown[]> {
      FROM event_group_events ege
      INNER JOIN events e ON e.id = ege.event_id
      WHERE ege.event_group_id IN (${placeholders})
-       AND e.visibility_status = 'public'
+       AND e.visibility_status IN ('public', 'archived')
      ORDER BY e.start_time DESC, e.id ASC`,
   )
     .bind(...groupIds)
@@ -318,16 +318,21 @@ async function rebuildVideo(env: Env, videoId: string): Promise<void> {
             creator_icon_url, music, credit, intro_comment, highlights,
             production_story, closing_comment, visibility_status, scheduled_time,
             primary_event_id, collaboration_type, part
-     FROM videos WHERE id = ? LIMIT 1`,
+     FROM videos
+     WHERE id = ? OR youtube_video_id = ?
+     ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END
+     LIMIT 1`,
   )
-    .bind(videoId)
+    .bind(videoId, videoId, videoId)
     .first();
   if (!row) throw new Error(`Video not found: ${videoId}`);
+  const internalVideoId = String((row as { id: unknown }).id ?? "").trim();
+  if (!internalVideoId) throw new Error(`Video id missing: ${videoId}`);
 
   const events = await env.DB.prepare(
     `SELECT event_id FROM video_events WHERE video_id = ?`,
   )
-    .bind(videoId)
+    .bind(internalVideoId)
     .all();
 
   const members = await env.DB.prepare(
@@ -335,7 +340,7 @@ async function rebuildVideo(env: Env, videoId: string): Promise<void> {
      FROM video_members WHERE video_id = ? AND is_public_member = 1
      ORDER BY order_index ASC`,
   )
-    .bind(videoId)
+    .bind(internalVideoId)
     .all();
 
   const payload = {
@@ -347,10 +352,21 @@ async function rebuildVideo(env: Env, videoId: string): Promise<void> {
 
   await putJson(
     env,
-    `videos/${videoId}.json`,
+    `videos/${internalVideoId}.json`,
     payload,
     "public, max-age=300, stale-while-revalidate=1800",
   );
+  const youtubeVideoId = String(
+    (row as { youtube_video_id?: unknown }).youtube_video_id ?? "",
+  ).trim();
+  if (youtubeVideoId && youtubeVideoId !== internalVideoId) {
+    await putJson(
+      env,
+      `videos/${youtubeVideoId}.json`,
+      payload,
+      "public, max-age=300, stale-while-revalidate=1800",
+    );
+  }
 }
 
 async function rebuildUser(env: Env, xId: string): Promise<void> {
@@ -363,18 +379,37 @@ async function rebuildUser(env: Env, xId: string): Promise<void> {
     .first();
   if (!user) throw new Error(`User not found: ${xId}`);
 
-  const recentVideos = await env.DB.prepare(
-    `SELECT id, title, youtube_video_id, scheduled_time
+  const [recentVideos, totalRow] = await Promise.all([
+    env.DB.prepare(
+      `SELECT id, title, youtube_video_id,
+              creator_display_name AS display_name,
+              creator_display_name,
+              creator_x_user_id,
+              creator_icon_url AS icon_url,
+              creator_icon_url,
+              primary_event_id,
+              scheduled_time,
+              visibility_status AS status,
+              part
      FROM videos
      WHERE creator_x_user_id = ? AND visibility_status = 'public'
-     ORDER BY scheduled_time DESC LIMIT 24`,
-  )
-    .bind(xId)
-    .all();
+     ORDER BY scheduled_time DESC LIMIT 120`,
+    )
+      .bind(xId)
+      .all(),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS c
+       FROM videos
+       WHERE creator_x_user_id = ? AND visibility_status = 'public'`,
+    )
+      .bind(xId)
+      .first<{ c?: number }>(),
+  ]);
 
   await putJson(env, `users/${xId}.json`, {
     generated_at: Math.floor(Date.now() / 1000),
     user,
+    total_works: Number(totalRow?.c ?? recentVideos.results?.length ?? 0),
     recent_videos: recentVideos.results ?? [],
   }, "public, max-age=600, stale-while-revalidate=3600");
 }

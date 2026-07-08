@@ -128,6 +128,7 @@ export async function saveEventAsTemplate(
 
   revalidatePath("/admin/events/templates");
   revalidatePath(`/admin/events/${event.id}`);
+  revalidatePath(`/manage/events/${event.id}`);
   return { ok: true, templateId: id, message: "テンプレートを保存しました。" };
 }
 

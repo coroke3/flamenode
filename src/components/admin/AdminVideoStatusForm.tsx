@@ -10,12 +10,9 @@ interface AdminVideoStatusFormProps {
 }
 
 const STATUS_VALUES = [
-  "draft",
   "pending",
   "public",
-  "limited",
   "private",
-  "hidden",
   "archived",
   "voided",
 ] as const;

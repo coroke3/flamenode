@@ -4,6 +4,17 @@ import type { DB } from "@/lib/db/client";
 import { getEditableEventIds } from "@/lib/auth/ownership";
 import { computeVideoEventSyncTarget } from "@/lib/video/eventSync";
 
+/** 一般ユーザーが video_events を変更できるかの判定に使うイベント列。 */
+export type VideoEventUserLinkPolicy =
+  | "video_event_links"
+  | "unslotted_posts";
+
+function eventAllowColumn(policy: VideoEventUserLinkPolicy) {
+  return policy === "unslotted_posts"
+    ? eventsTable.allow_unslotted_posts
+    : eventsTable.allow_user_video_event_links;
+}
+
 /** 新規作品 (video_events 未作成) の同期先イベント ID を事前計算する。 */
 export async function resolveEventSyncTargetForNewVideo(
   db: DB,
@@ -11,11 +22,14 @@ export async function resolveEventSyncTargetForNewVideo(
     requested: string[];
     alwaysInclude?: string[];
     user: { id: string; role?: string | null };
+    linkPolicy?: VideoEventUserLinkPolicy;
   },
 ): Promise<string[]> {
   const requested = args.requested;
   const alwaysInclude = args.alwaysInclude ?? [];
   const user = args.user;
+  const linkPolicy = args.linkPolicy ?? "video_event_links";
+  const allowColumn = eventAllowColumn(linkPolicy);
 
   if (user.role === "admin") {
     return computeVideoEventSyncTarget({
@@ -32,7 +46,7 @@ export async function resolveEventSyncTargetForNewVideo(
     const rows = await db
       .select({
         id: eventsTable.id,
-        allow: eventsTable.allow_user_video_event_links,
+        allow: allowColumn,
       })
       .from(eventsTable)
       .where(inArray(eventsTable.id, universe));
@@ -86,11 +100,14 @@ export async function resolveVideoEventSyncTargetIds(
     requested: string[];
     alwaysInclude?: string[];
     user: { id: string; role?: string | null };
+    linkPolicy?: VideoEventUserLinkPolicy;
   },
 ): Promise<string[]> {
   const requested = args.requested;
   const alwaysInclude = args.alwaysInclude ?? [];
   const user = args.user;
+  const linkPolicy = args.linkPolicy ?? "video_event_links";
+  const allowColumn = eventAllowColumn(linkPolicy);
 
   const current = await db
     .select({ event_id: videoEvents.event_id })
@@ -115,7 +132,7 @@ export async function resolveVideoEventSyncTargetIds(
     const rows = await db
       .select({
         id: eventsTable.id,
-        allow: eventsTable.allow_user_video_event_links,
+        allow: allowColumn,
       })
       .from(eventsTable)
       .where(inArray(eventsTable.id, universe));
@@ -143,6 +160,7 @@ export async function syncVideoEvents(
     requested: string[];
     alwaysInclude?: string[];
     user: { id: string; role?: string | null };
+    linkPolicy?: VideoEventUserLinkPolicy;
   },
 ): Promise<string[]> {
   const target = await resolveVideoEventSyncTargetIds(db, videoId, args);

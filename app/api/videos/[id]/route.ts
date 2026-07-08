@@ -1,3 +1,5 @@
+export const runtime = "edge";
+
 import { NextResponse } from "next/server";
 import { getDatabase } from "@/lib/cloudflare";
 import { fetchPublicVideoByIdOrYoutube } from "@/lib/db/listQueries";

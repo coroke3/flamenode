@@ -267,6 +267,16 @@ export const events = sqliteTable("events", {
     .notNull()
     .default(0),
   /**
+   * 枠なし投稿 (/entry/unslotted) で一般ユーザーが作品をこのイベントに
+   * 紐づけてよいか。
+   *   0 = 不許可 (既定)
+   *   1 = 許可。受付中かつ公開のイベントが枠なし投稿フォームの候補になる
+   * `allow_user_video_event_links` は既存作品の追加所属用。用途が異なる。
+   */
+  allow_unslotted_posts: integer("allow_unslotted_posts")
+    .notNull()
+    .default(0),
+  /**
    * このイベントに紐付いた作品について、一般ユーザー (作品オーナーや合作メンバー
    * 以外) にもイベント単位で編集権限を委譲するか。
    *   0 = 委譲しない (既定)。動画オーナー / 合作メンバー / イベント運営のみ編集可。

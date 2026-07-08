@@ -64,6 +64,16 @@ export function VideoStatusForm({
   const statusFieldId = `${formIdPrefix}-status`;
   const categoryFieldId = `${formIdPrefix}-void-category`;
   const reasonFieldId = `${formIdPrefix}-reason`;
+  const statusOptions = React.useMemo<VideoVisibilityStatus[]>(() => {
+    const options = [...statuses];
+    if (
+      isVideoVisibilityStatus(currentStatus) &&
+      !options.includes(currentStatus)
+    ) {
+      return [currentStatus, ...options];
+    }
+    return options;
+  }, [currentStatus, statuses]);
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -120,7 +130,7 @@ export function VideoStatusForm({
         onChange={(e) => setStatus(e.target.value)}
         disabled={pending}
       >
-        {statuses.map((value) => (
+        {statusOptions.map((value) => (
           <option key={value} value={value}>
             {formatStatusOption(value, optionDescription)}
           </option>
@@ -189,6 +199,10 @@ export function VideoStatusForm({
       ) : null}
     </form>
   );
+}
+
+function isVideoVisibilityStatus(value: string): value is VideoVisibilityStatus {
+  return Object.prototype.hasOwnProperty.call(VIDEO_STATUS_LABELS, value);
 }
 
 function formatStatusOption(

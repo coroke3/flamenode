@@ -51,7 +51,7 @@ export function staticRebuildAdminHref(
 ): string | null {
   switch (targetType) {
     case "event":
-      return `/admin/events/${encodeURIComponent(targetId)}`;
+      return `/manage/events/${encodeURIComponent(targetId)}`;
     case "video":
       return `/admin/videos/${encodeURIComponent(targetId)}`;
     case "user":

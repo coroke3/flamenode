@@ -4,7 +4,6 @@ import { Icon, type IconName } from "@/components/ui/Icon";
 
 export type ManageEventTabKey =
   | "overview"
-  | "admin-detail"
   | "review"
   | "submissions"
   | "admin-review"
@@ -129,11 +128,6 @@ export function ManageAdminLinksMenu({
 }): React.ReactElement {
   const encodedId = encodeURIComponent(eventId);
   const links: AdminLinkItem[] = [
-    {
-      href: `/admin/events/${encodedId}`,
-      label: "管理詳細",
-      icon: "info",
-    },
     {
       href: `/admin/videos?event=${encodedId}&status=pending`,
       label: "管理者用審査一覧",

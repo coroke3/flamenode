@@ -254,7 +254,7 @@
 
 [data-fn-surface="public"] .fn-pill[data-tone="ok"] {
   color: var(--ok);
-  background: rgba(123, 216, 156, 0.16);
+  background: var(--success-soft);
 }
 
 [data-fn-surface="public"] .fn-pill[data-tone="warn"] {
@@ -364,9 +364,7 @@
   top: 0;
   z-index: 30;
   overflow-x: clip;
-  background: color-mix(in srgb, var(--bg-base) 92%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: var(--bg-overlay);
   border-bottom: 1px solid var(--hairline, var(--border-subtle));
 }
 
@@ -658,7 +656,7 @@
   aspect-ratio: 16 / 9;
   border-radius: var(--r-card);
   overflow: hidden;
-  background: color-mix(in srgb, var(--ev-accent, var(--accent-primary)) 28%, #11140d);
+  background: color-mix(in srgb, var(--ev-accent, var(--accent-primary)) 28%, var(--bg-inset, var(--bg-elevated)));
   isolation: isolate;
 }
 

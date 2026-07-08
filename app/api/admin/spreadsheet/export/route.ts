@@ -1,3 +1,5 @@
+export const runtime = "edge";
+
 import { NextResponse } from "next/server";
 import { rowsToDelimitedGrid } from "@/lib/admin/spreadsheet/paste";
 import { fetchSpreadsheetExport } from "@/lib/admin/spreadsheet/query";

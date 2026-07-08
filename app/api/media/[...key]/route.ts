@@ -1,3 +1,5 @@
+export const runtime = "edge";
+
 import { getEnv } from "@/lib/cloudflare";
 
 const PUBLIC_MEDIA_PREFIXES = [

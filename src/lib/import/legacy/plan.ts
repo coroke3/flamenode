@@ -7,7 +7,6 @@
  * - event_staff は representative_candidate → "manager", 他 → "public_staff"
  */
 
-import { generateId } from "../../utils/id.ts";
 import type {
   CanonicalEvent,
   CanonicalEventCustomQuestion,
@@ -52,6 +51,16 @@ const LEGACY_QUESTION_DESCRIPTIONS: Record<string, string> = {
 
 function normalizeSoftwareName(label: string): string {
   return label.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/** インポートプランと previewToken がリクエスト間で安定するよう、決定的 ID を使う。 */
+function legacySoftwareCatalogId(normalizedName: string): string {
+  const slug = normalizedName.replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  return `sw_imp_${slug || "unknown"}`;
+}
+
+function legacyEventQuestionId(eventId: string, questionKey: string): string {
+  return `ecq_imp_${eventId}_${questionKey}`;
 }
 
 /**
@@ -106,7 +115,7 @@ export function buildLegacyImportPlan(
     const normalized = normalizeSoftwareName(label);
     const existing = softwareCatalogMap.get(normalized);
     if (existing) return existing.id;
-    const id = generateId("sw");
+    const id = legacySoftwareCatalogId(normalized);
     softwareCatalogMap.set(normalized, { id, name: label, normalized_name: normalized });
     return id;
   };
@@ -177,7 +186,7 @@ export function buildLegacyImportPlan(
     if (videoEventIds.has(ev.id)) {
       const qMap = new Map<string, string>();
       LEGACY_QUESTION_KEYS.forEach((key, idx) => {
-        const qid = generateId("q");
+        const qid = legacyEventQuestionId(ev.id, key);
         qMap.set(key, qid);
         eventCustomQuestions.push({
           id: qid,

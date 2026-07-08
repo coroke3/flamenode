@@ -11,6 +11,8 @@ import {
   getSiteUrl,
 } from "@/lib/seo";
 
+export const runtime = "edge";
+
 export const metadata: Metadata = {
   metadataBase: getSiteUrl(),
   title: { default: SITE_NAME, template: `%s | ${SITE_NAME}` },

@@ -105,7 +105,7 @@ export async function buildAuthConfig(): Promise<NextAuthConfig> {
   const baseConfig: NextAuthConfig = {
     secret: authSecret,
     trustHost: true,
-    session: { strategy: "database" },
+    session: { strategy: db ? "database" : "jwt" },
     providers: [
       Discord({
         clientId: discordClientId,

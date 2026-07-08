@@ -1,8 +1,14 @@
+export const runtime = "edge";
+
 import { NextResponse } from "next/server";
-import { desc, eq } from "drizzle-orm";
+import { desc } from "drizzle-orm";
 import { events as eventsTable } from "@/lib/db/schema";
 import { getDatabase } from "@/lib/cloudflare";
-import { isAcceptingEntries } from "@/lib/utils/eventStatus";
+import {
+  isAcceptingEntries,
+  isEventArchived,
+  publicListableEventWhere,
+} from "@/lib/utils/eventStatus";
 import {
   MAX_PUBLIC_EVENT_LIMIT,
   PUBLIC_EVENT_KEYS,
@@ -42,7 +48,7 @@ export async function GET(req: Request): Promise<Response> {
       max_consecutive_slots_per_entry: eventsTable.max_consecutive_slots_per_entry,
     })
     .from(eventsTable)
-    .where(eq(eventsTable.visibility_status, "public"))
+    .where(publicListableEventWhere())
     .orderBy(desc(eventsTable.start_time))
     .limit(limit)
     .offset((page - 1) * limit);
@@ -53,9 +59,9 @@ export async function GET(req: Request): Promise<Response> {
     pickKeys(
       {
         ...row,
-        is_active: 1,
+        is_active: row.visibility_status === "public" ? 1 : 0,
         is_entry_open: isAcceptingEntries(row, now) ? 1 : 0,
-        is_archived: 0,
+        is_archived: isEventArchived(row) ? 1 : 0,
       },
       PUBLIC_EVENT_KEYS,
     ) as PublicEventDto,

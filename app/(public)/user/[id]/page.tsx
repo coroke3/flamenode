@@ -25,6 +25,9 @@ import { normalizePortfolioContact } from "@/lib/profileContact";
 import { countablePublicVideoCondition } from "@/lib/db/queries";
 import { storedCreatorNameExpr } from "@/lib/db/displayExpr";
 import { ProfileSocialLinks } from "@/components/user/ProfileSocialLinks";
+import { loadStaticUserProfile } from "@/lib/publicData/staticUserProfile";
+import { canFallbackToDatabase } from "@/lib/publicData/loader";
+import type { StaticUserProfile } from "@/lib/publicData/staticUserProfileCore";
 
 export const dynamic = "force-dynamic";
 
@@ -55,6 +58,18 @@ type CreatorVideo = VideoCardData & { score: number };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const id = normalizeXId((await params).id);
+  const staticLoaded = await loadStaticUserProfile(id);
+  if (staticLoaded.profile) {
+    const { user } = staticLoaded.profile;
+    return buildPageMetadata({
+      title: `${user.x_name} - クリエイター`,
+      description:
+        user.profile_text ??
+        `FlameNodeで公開されている${user.x_name}の作品。`,
+      path: `/user/${id}`,
+      image: cachedGoogleImageUrl(user.icon_url),
+    });
+  }
   const data = await withDatabase(async (db) => {
     const u = await db
       .select()
@@ -121,6 +136,16 @@ export default async function UserPage({
     defaultPageSize: COLLAB_PAGE_SIZE,
     maxPageSize: COLLAB_PAGE_SIZE,
   });
+  const staticLoaded = await loadStaticUserProfile(id);
+  if (!canFallbackToDatabase(staticLoaded.strategy)) {
+    if (!staticLoaded.profile) notFound();
+    return (
+      <StaticUserProfileView
+        profile={staticLoaded.profile}
+        page={worksPaging.page}
+      />
+    );
+  }
 
   const bundle = await withDatabase(async (db) => {
     const userRow = await db
@@ -394,6 +419,110 @@ export default async function UserPage({
           ) : null}
       </section>
 
+    </div>
+  );
+}
+
+function StaticUserProfileView({
+  profile,
+  page,
+}: {
+  profile: StaticUserProfile;
+  page: number;
+}): React.ReactElement {
+  const { user } = profile;
+  const staticTotal = Math.min(profile.totalWorks, profile.recentVideos.length);
+  const ownTotalPages = totalPagesFor(staticTotal, WORKS_PAGE_SIZE);
+  const pageNum = Math.min(
+    Math.max(1, Math.floor(page)),
+    Math.max(1, ownTotalPages),
+  );
+  const offset = (pageNum - 1) * WORKS_PAGE_SIZE;
+  const ownVideos = profile.recentVideos.slice(offset, offset + WORKS_PAGE_SIZE);
+  const basePath = `/user/${encodeURIComponent(user.id)}`;
+  const buildOwnHref = (p: number) => {
+    const usp = new URLSearchParams();
+    usp.set("worksPage", String(p));
+    return `${basePath}?${usp.toString()}`;
+  };
+  const profileIcon = cachedGoogleImageUrl(user.icon_url);
+  const profileName = user.x_name || user.id;
+  const socialLinks = parseSocialLinks(user.other_social_links);
+  const portfolioContact = normalizePortfolioContact(user.portfolio_contact);
+
+  return (
+    <div className={`fn-public-container fn-page ${styles.page}`}>
+      <section className={styles.profile}>
+        <p className={`fn-page-back ${styles.profileBack}`}>
+          <Link href="/user">← クリエイター一覧</Link>
+        </p>
+        {profileIcon ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img src={profileIcon} alt="" className={styles.avatar} />
+        ) : (
+          <span className={styles.avatarFb}>
+            {profileName.slice(0, 1).toUpperCase()}
+          </span>
+        )}
+        <div className={styles.profileBody}>
+          <h1 className={`fn-profile-name ${styles.name}`}>{profileName}</h1>
+          <ProfileSocialLinks
+            className={styles.socialLine}
+            xUserId={user.id}
+            youtubeChannelUrl={user.youtube_channel_url}
+            socialLinks={socialLinks}
+          />
+        </div>
+      </section>
+
+      {user.profile_text || portfolioContact ? (
+        <section className={styles.portfolioBlocks} aria-label="Portfolio">
+          {user.profile_text ? (
+            <article className={styles.portfolioBlock}>
+              <span>About</span>
+              <p>{user.profile_text}</p>
+            </article>
+          ) : null}
+          {portfolioContact ? (
+            <article className={styles.portfolioBlock}>
+              <span>Contact</span>
+              <p>{portfolioContact}</p>
+            </article>
+          ) : null}
+        </section>
+      ) : null}
+
+      <section className={styles.content} aria-labelledby="creator-works-heading">
+        <h2 id="creator-works-heading" className={styles.sectionTitle}>
+          作品
+        </h2>
+        {ownVideos.length === 0 ? (
+          <div className="fn-empty">
+            <Icon name="info" size={20} aria-hidden />
+            <p className="fn-empty-message">
+              まだ公開されている作品がありません。
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="fn-video-grid">
+              {ownVideos.map((v, index) => (
+                <div key={`${v.id}-static-own-${index}`} className={styles.workCard}>
+                  <VideoCard video={v} />
+                </div>
+              ))}
+            </div>
+            <Pagination
+              currentPage={pageNum}
+              totalPages={ownTotalPages}
+              total={staticTotal}
+              pageSize={WORKS_PAGE_SIZE}
+              buildHref={buildOwnHref}
+              unitLabel="件"
+            />
+          </>
+        )}
+      </section>
     </div>
   );
 }

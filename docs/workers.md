@@ -5,7 +5,7 @@ FlameNode uses 3 Cron Workers in production.
 | Worker | Cron | Main responsibility | Notes |
 |---|---:|---|---|
 | `fast-jobs` | `*/5 * * * *` | Slot reminder enqueue + notification dispatch | Uses `workers/notification-dispatcher/*` modules |
-| `content-jobs` | `*/15 * * * *` | Static JSON rebuild queue + retention cleanup | Writes R2/KV static JSON |
+| `content-jobs` | `*/15 * * * *` | Cost guard escalation + static JSON rebuild queue + retention cleanup | Writes R2/KV static JSON |
 | `sync-jobs` | `0 */12 * * *` | YouTube sync + score recalculation | Requires `YOUTUBE_API_KEY` for YouTube sync |
 
 Legacy standalone worker entrypoints remain as importable modules, but their `wrangler.toml` files are intentionally removed. Deploy only:
@@ -34,6 +34,12 @@ Static JSON targets currently supported by `content-jobs`:
 Legacy `groups_index` / `event_groups_index` / `event_group` queue rows are treated as deprecated no-op targets and marked done. New enqueue requests for those aliases are normalized to `events_index:global`.
 
 `content-jobs` queue behavior follows `system_settings.operation_mode`:
+
+Before processing the rebuild queue, `content-jobs` also applies automatic cost
+guard escalation when `system_settings.auto_cost_guard_enabled = 1`. It reads the
+latest `cost_usage_snapshots` row, compares it with
+`system_settings.cost_guard_thresholds_json`, and only moves `operation_mode` to
+a more restrictive mode. It never downgrades automatically.
 
 | Mode | Queue behavior |
 |---|---|

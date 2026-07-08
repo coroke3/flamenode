@@ -164,6 +164,64 @@
   line-height: 1.65;
 }
 
+.flowSteps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  counter-reset: flow-step;
+}
+
+.flowSteps li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.flowSteps li:not(:last-child)::after {
+  content: "→";
+  margin-left: 4px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.flowSteps li::before {
+  content: counter(flow-step);
+  counter-increment: flow-step;
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent-primary-soft);
+  color: var(--accent-primary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.slotRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.slotRow > :global(.fn-pc-slot) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.slotRow > :global(.fn-btn) {
+  flex-shrink: 0;
+}
+
 @media (min-width: 840px) {
   :global([data-fn-surface="personal"]) .choiceGrid.choiceGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

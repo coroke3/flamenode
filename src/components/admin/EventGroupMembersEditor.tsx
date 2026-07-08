@@ -196,7 +196,7 @@ export function EventGroupMembersEditor({
             >
               <div style={{ flex: "1 1 180px", minWidth: 0 }}>
                 <Link
-                  href={`/admin/events/${m.event_id}`}
+                  href={`/manage/events/${m.event_id}`}
                   style={{ fontWeight: 600, fontSize: 13 }}
                 >
                   {m.title}

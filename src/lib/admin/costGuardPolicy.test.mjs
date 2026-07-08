@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  isMoreRestrictiveCostGuardMode,
   parseCostGuardThresholds,
   recommendCostGuardMode,
 } from "./costGuardPolicy.ts";
@@ -41,4 +42,10 @@ test("recommendCostGuardMode: high usage reaches maintenance", () => {
   const result = recommendCostGuardMode({ workers_requests_today: 100_000 });
   assert.equal(result.mode, "maintenance");
   assert.equal(result.highestRatio, 1);
+});
+
+test("isMoreRestrictiveCostGuardMode: only escalates", () => {
+  assert.equal(isMoreRestrictiveCostGuardMode("read_only", "economy"), true);
+  assert.equal(isMoreRestrictiveCostGuardMode("economy", "static_only"), false);
+  assert.equal(isMoreRestrictiveCostGuardMode("static_only", "static_only"), false);
 });

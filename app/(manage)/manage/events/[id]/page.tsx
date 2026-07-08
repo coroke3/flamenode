@@ -38,6 +38,7 @@ import {
 import { NotificationOutboxSummary } from "@/components/notifications/NotificationOutboxSummary";
 import { ManagePageHeader } from "@/components/manage/ManagePageHeader";
 import { ManageEventTabs } from "@/components/manage/ManageEventTabs";
+import { SaveEventTemplateForm } from "@/components/admin/SaveEventTemplateForm";
 import {
   lookupNotificationRecipients,
   type RecipientLookup,
@@ -298,6 +299,15 @@ export default async function ManageEventPage({
       </section>
 
       <ManageEventTabs eventId={id} active="overview" isAdmin={isAdmin} />
+
+      {isAdmin ? (
+        <section className="fn-console-section">
+          <h2 className="fn-console-eyebrow">テンプレート化</h2>
+          <div className="fn-card" style={{ padding: "18px 22px" }}>
+            <SaveEventTemplateForm eventId={ev.id} eventTitle={ev.title} />
+          </div>
+        </section>
+      ) : null}
 
       {eventNotificationSchemaMissing ? (
         <div role="status" className="fn-alert fn-alert--warn fn-console-section--tight">

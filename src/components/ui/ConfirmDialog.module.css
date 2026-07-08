@@ -2,7 +2,7 @@
 .backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--backdrop-scrim);
   display: grid;
   place-items: center;
   z-index: 9000;
@@ -13,7 +13,7 @@
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg, 12px);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-overlay);
   width: min(100%, 440px);
   padding: 0;
   overflow: hidden;

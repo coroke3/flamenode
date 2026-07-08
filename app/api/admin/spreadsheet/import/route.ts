@@ -1,3 +1,5 @@
+export const runtime = "edge";
+
 import { NextResponse } from "next/server";
 import type { SpreadsheetDelimiterMode } from "@/lib/admin/spreadsheet/paste";
 import {

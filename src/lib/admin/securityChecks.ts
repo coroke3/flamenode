@@ -1,7 +1,5 @@
 import "server-only";
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { and, eq, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import {
@@ -158,54 +156,15 @@ function checkPublicApiLeak(): SecurityCheckResult {
  * かつ src/lib/db/schema.ts に "notification_outbox" 定義しかない場合は WARN。
  */
 function checkNotificationTableMismatch(): SecurityCheckResult {
-  try {
-    const cwd = process.cwd();
-    const workerPath = join(
-      cwd,
-      "workers",
-      "notification-dispatcher",
-      "index.ts",
-    );
-    const schemaPath = join(cwd, "src", "lib", "db", "schema.ts");
-
-    const workerSrc = readFileSync(workerPath, "utf-8");
-    const schemaSrc = readFileSync(schemaPath, "utf-8");
-
-    // Worker が raw SQL で "notifications" テーブルを参照しているか
-    const workerHasNotifications = workerSrc.includes('"notifications"') || workerSrc.includes("'notifications'") || workerSrc.includes("`notifications`") || workerSrc.includes("FROM notifications") || workerSrc.includes("UPDATE notifications");
-    // ORM スキーマ側に "notification_outbox" 定義があるか
-    const schemaHasOutbox = schemaSrc.includes("notification_outbox");
-
-    if (workerHasNotifications && schemaHasOutbox) {
-      return {
-        id: "notification_table_mismatch",
-        label: "通知テーブル名乖離 (Worker vs ORM schema)",
-        status: "warn",
-        count: 1,
-        samples: [],
-        note:
-          'workers/notification-dispatcher/index.ts が "notifications" テーブルを参照しているが、ORM schema は "notification_outbox" のみ定義。カラム名差分も含め Opus 判断を推奨。',
-      };
-    }
-
-    return {
-      id: "notification_table_mismatch",
-      label: "通知テーブル名乖離 (Worker vs ORM schema)",
-      status: "ok",
-      count: 0,
-      samples: [],
-      note: "Worker と ORM schema のテーブル名が一致しています。",
-    };
-  } catch {
-    return {
-      id: "notification_table_mismatch",
-      label: "通知テーブル名乖離 (Worker vs ORM schema)",
-      status: "info",
-      count: 0,
-      samples: [],
-      note: "自動検査スキップ (ファイル読み取り失敗)。",
-    };
-  }
+  return {
+    id: "notification_table_mismatch",
+    label: "??????????? (Worker vs ORM schema)",
+    status: "info",
+    count: 0,
+    samples: [],
+    note:
+      "Cloudflare Pages Edge Runtime ????????????????CI ????????????",
+  };
 }
 
 /** banned ユーザーがチャプターコメントを投稿していないか (BAN 後の投稿検出) */

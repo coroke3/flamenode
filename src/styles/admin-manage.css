@@ -17,9 +17,7 @@
   top: 0;
   z-index: 30;
   overflow-x: clip;
-  background: color-mix(in srgb, var(--bg-base) 94%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: var(--bg-overlay);
   border-bottom: 1px solid var(--hairline, var(--border-subtle));
 }
 
@@ -1138,6 +1136,67 @@
   margin-bottom: 10px;
 }
 
+[data-admin-shell] .fn-console-filter-form,
+[data-manage-shell] .fn-console-filter-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+  margin-top: 16px;
+}
+
+[data-admin-shell] .fn-console-filter-panel,
+[data-manage-shell] .fn-console-filter-panel {
+  padding: 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+[data-admin-shell] .fn-console-filter-form > .fn-input,
+[data-admin-shell] .fn-console-filter-form > .fn-select,
+[data-manage-shell] .fn-console-filter-form > .fn-input,
+[data-manage-shell] .fn-console-filter-form > .fn-select {
+  flex: 1 1 220px;
+  min-width: min(100%, 220px);
+}
+
+[data-admin-shell] .fn-console-filter-field,
+[data-manage-shell] .fn-console-filter-field {
+  display: flex;
+  flex: 1 1 180px;
+  min-width: min(100%, 180px);
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+}
+
+[data-admin-shell] .fn-console-filter-field > span,
+[data-manage-shell] .fn-console-filter-field > span {
+  color: var(--text-muted);
+}
+
+[data-admin-shell] .fn-console-filter-field .fn-input,
+[data-admin-shell] .fn-console-filter-field .fn-select,
+[data-manage-shell] .fn-console-filter-field .fn-input,
+[data-manage-shell] .fn-console-filter-field .fn-select {
+  min-width: 0;
+}
+
+[data-admin-shell] .fn-console-filter-check,
+[data-manage-shell] .fn-console-filter-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  font-size: 12px;
+}
+
+[data-admin-shell] .fn-console-filter-action,
+[data-manage-shell] .fn-console-filter-action {
+  flex: 0 0 auto;
+}
+
 .fn-console-resource-tabs,
 [data-admin-shell] .fn-console-resource-tabs,
 [data-admin-shell] .fn-console-event-tabs,
@@ -1391,6 +1450,29 @@
   [data-manage-shell] .fn-console-actions .fn-btn {
     width: 100%;
     min-height: 44px;
+    justify-content: center;
+  }
+
+  [data-admin-shell] .fn-console-filter-form,
+  [data-manage-shell] .fn-console-filter-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  [data-admin-shell] .fn-console-filter-form > .fn-input,
+  [data-admin-shell] .fn-console-filter-form > .fn-select,
+  [data-admin-shell] .fn-console-filter-field,
+  [data-admin-shell] .fn-console-filter-action,
+  [data-manage-shell] .fn-console-filter-form > .fn-input,
+  [data-manage-shell] .fn-console-filter-form > .fn-select,
+  [data-manage-shell] .fn-console-filter-field,
+  [data-manage-shell] .fn-console-filter-action {
+    width: 100%;
+    min-width: 0;
+  }
+
+  [data-admin-shell] .fn-console-filter-action.fn-btn,
+  [data-manage-shell] .fn-console-filter-action.fn-btn {
     justify-content: center;
   }
 }

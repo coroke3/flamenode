@@ -1,8 +1,10 @@
-import * as React from "react";import { FnTable } from "@/components/ui/FnTable";
+import * as React from "react";
+import { FnTable } from "@/components/ui/FnTable";
 
 import Link from "next/link";
 import type { Metadata } from "next";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { AdminSectionTabs } from "@/components/admin/AdminSectionTabs";
 import { DeleteEventTemplateButton } from "@/components/admin/DeleteEventTemplateButton";
 import { Icon } from "@/components/ui/Icon";
 import { listEventTemplatesForAdmin } from "@/lib/actions/event-template-admin";
@@ -31,12 +33,14 @@ export default async function AdminEventTemplatesPage(): Promise<React.ReactElem
         ]}
       />
 
+      <AdminSectionTabs hub="events" />
+
       <section
         className="fn-card"
         style={{ marginTop: 18, padding: "18px 22px" }}
       >
         <p className="fn-muted fn-text-sm" style={{ margin: "0 0 14px" }}>
-          既存イベントからテンプレートを作るには、イベント詳細の「テンプレート化」から保存してください。
+          既存イベントからテンプレートを作るには、イベント運営トップ（/manage/events/[id]）の「テンプレート化」から保存してください。
         </p>
 
         {templates.length === 0 ? (

@@ -186,7 +186,7 @@ Legacy standalone worker directories are kept as importable modules only.
 | Worker | cron | 用途 | 必須環境変数 |
 |---|---|---|---|
 | `flamenode-fast-jobs` | `*/5 * * * *` | `notification_outbox` 配信・スロット締切リマインド（`notification-dispatcher` 統合） | `DISCORD_WEBHOOK_URL`, `DISCORD_BOT_TOKEN`（任意） |
-| `flamenode-content-jobs` | `*/15 * * * *` | 静的 JSON 再生成・クリーンアップ（`json-generator` / `cleanup` 統合） | D1 / R2 / KV bind |
+| `flamenode-content-jobs` | `*/15 * * * *` | コストガード自動昇格・静的 JSON 再生成・クリーンアップ（`json-generator` / `cleanup` 統合） | D1 / R2 / KV bind |
 | `flamenode-sync-jobs` | `0 */12 * * *` | YouTube 同期・スコア再計算（`youtube-sync` / `score-recalc` 統合） | `YOUTUBE_API_KEY` |
 
 ### 3-1. デプロイ
@@ -228,6 +228,7 @@ cd workers/sync-jobs && wrangler deploy
 - 新規表示クエリは `videos.score` / `videos.app_like_count` を優先する。`video_stats` は score-recalc worker と旧DB fallback 用に当面残し、即 DROP しない。
 - `video_stats.app_view_count` は閲覧ごとに更新しない。like/bookmark と低頻度 score 再計算に限定する。
 - `cost_usage_snapshots` は高頻度保存しない。`/admin/cost-guard` で最新 snapshot と推奨 mode を確認し、閾値は `system_settings.cost_guard_thresholds_json` で管理する。
+- `system_settings.auto_cost_guard_enabled = 1` の場合、`content-jobs` は 15 分 Cron で最新 snapshot を読み、推奨 mode が現在より厳しい場合だけ `operation_mode` を自動昇格する。自動降格はしないため、復帰は管理者が `/admin/cost-guard` から行う。
 
 ### 3-3. 通知失敗の調査クエリ
 

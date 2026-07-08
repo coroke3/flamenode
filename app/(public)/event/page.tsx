@@ -63,27 +63,29 @@ function isPointEvent(ev: EventListEvent): boolean {
 export default async function EventListPage(): Promise<React.ReactElement> {
   const staticLoaded = await loadStaticEventsIndex();
   const emptySource: EventListSource = { events: [], groupSections: [] };
-  const source: EventListSource = staticLoaded.index
+  const staticSource: EventListSource | null = staticLoaded.index
     ? {
         events: staticLoaded.index.events,
-        groupSections: staticLoaded.index.groupSections,
+        groupSections: staticLoaded.index.groupSections as EventGroupSectionView[],
       }
-    : canFallbackToDatabase(staticLoaded.strategy)
-      ? ((await withDatabase(async (db): Promise<EventListSource> => {
-          const [eventRows, groups] = await Promise.all([
-            db
-              .select()
-              .from(eventsTable)
-              .where(publicListableEventWhere())
-              .orderBy(desc(eventsTable.start_time)),
-            fetchEventListGroupSections(db),
-          ]);
-          return {
-            events: eventRows,
-            groupSections: groups as EventGroupSectionView[],
-          };
-        })) ?? emptySource)
-      : emptySource;
+    : null;
+
+  const source: EventListSource = canFallbackToDatabase(staticLoaded.strategy)
+    ? ((await withDatabase(async (db): Promise<EventListSource> => {
+        const [eventRows, groups] = await Promise.all([
+          db
+            .select()
+            .from(eventsTable)
+            .where(publicListableEventWhere())
+            .orderBy(desc(eventsTable.start_time)),
+          fetchEventListGroupSections(db),
+        ]);
+        return {
+          events: eventRows,
+          groupSections: groups as EventGroupSectionView[],
+        };
+      })) ?? staticSource ?? emptySource)
+    : (staticSource ?? emptySource);
   const { events, groupSections } = source;
 
   const sortedEvents = events.sort(compareEventsByUpcomingPriority);

@@ -32,8 +32,23 @@ export function getEventVisibility(ev: EventStatusInput): EventVisibilityStatus 
   return "draft";
 }
 
+/** 公開サイトの一覧・詳細に載せてよい visibility。 */
+export const PUBLICLY_LISTABLE_EVENT_VISIBILITIES = [
+  "public",
+  "archived",
+] as const satisfies readonly EventVisibilityStatus[];
+
+export function isPubliclyListableEventVisibility(
+  visibility: EventVisibilityStatus | string | null | undefined,
+): boolean {
+  return (
+    visibility === "public" ||
+    visibility === "archived"
+  );
+}
+
 export function isPublicEventVisible(ev: EventStatusInput): boolean {
-  return getEventVisibility(ev) === "public";
+  return isPubliclyListableEventVisibility(getEventVisibility(ev));
 }
 
 export function isEventArchived(ev: EventStatusInput): boolean {

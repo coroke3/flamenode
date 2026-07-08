@@ -25,8 +25,8 @@
   padding: 6px 8px;
   font-size: 11px;
   color: var(--text-secondary);
-  background: var(--accent-warning-soft, rgba(255, 200, 0, 0.08));
-  border: 1px solid var(--accent-warning, #c08a00);
+  background: var(--accent-warning-soft);
+  border: 1px solid var(--accent-warning);
   border-radius: var(--radius-sm);
   line-height: 1.4;
 }

@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { events } from "@/lib/db/schema";
 import {
   computeEventStatus,
@@ -41,5 +41,5 @@ export function activeEventWhere(now: number = Math.floor(Date.now() / 1000)) {
 
 /** 公開イベント一覧・グループに載せてよいイベント。 */
 export function publicListableEventWhere() {
-  return eq(events.visibility_status, "public");
+  return inArray(events.visibility_status, ["public", "archived"]);
 }

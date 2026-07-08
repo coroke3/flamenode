@@ -106,6 +106,7 @@ export default async function ManageEventEditPage({
             is_active: ev.visibility_status === "public" ? 1 : 0,
             is_archived: ev.visibility_status === "archived" ? 1 : 0,
             allow_user_video_event_links: ev.allow_user_video_event_links,
+            allow_unslotted_posts: ev.allow_unslotted_posts,
             allow_user_video_edits: ev.allow_user_video_edits,
             user_video_edit_permission_keys_json:
               ev.user_video_edit_permission_keys_json,
