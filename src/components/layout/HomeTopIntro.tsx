@@ -1,19 +1,16 @@
 import * as React from "react";
 import Link from "next/link";
 import { Icon } from "@/components/ui/Icon";
-import type { events } from "@/lib/db/schema";
 import {
   formatHomeNumber,
   type HomeStats,
 } from "./homeVisuals";
-import { EventRecruitCard } from "./EventRecruitCard";
+import { EventRecruitCard, type RecruitEvent } from "./EventRecruitCard";
 import type { HomeIntroSlotStat } from "./HomeIntroBand";
-
-type EventRow = typeof events.$inferSelect;
 
 interface HomeTopIntroProps {
   stats: HomeStats;
-  primaryEvent: EventRow | null;
+  primaryEvent: RecruitEvent | null;
   primarySlotStat?: HomeIntroSlotStat;
 }
 

@@ -33,8 +33,10 @@ import { VideoCard } from "@/components/video/VideoCard";
 import { CreatorCard } from "@/components/user/CreatorCard";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { type HomeStats } from "@/components/layout/homeVisuals";
-import type { events } from "@/lib/db/schema";
 import type { PublicEventCategory } from "@/components/event/PublicEventCard";
+import { loadStaticTopPage } from "@/lib/publicData/staticTop";
+import { canFallbackToDatabase } from "@/lib/publicData/loader";
+import type { StaticTopData } from "@/lib/publicData/staticTopCore";
 
 export const dynamic = "force-dynamic";
 
@@ -47,8 +49,8 @@ function shuffle<T>(items: T[]): T[] {
   return copied;
 }
 
-export default async function TopPage(): Promise<React.ReactElement> {
-  const data = await withDatabase(async (db) => {
+async function fetchTopPageFromDatabase(): Promise<StaticTopData | null> {
+  return withDatabase(async (db) => {
     const [
       activeEvents,
       recommendedRaw,
@@ -105,6 +107,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
     }
 
     return {
+      generatedAt: null,
       activeEvents,
       recommended: recommendedRaw,
       latest,
@@ -120,6 +123,15 @@ export default async function TopPage(): Promise<React.ReactElement> {
       } satisfies HomeStats,
     };
   });
+}
+
+export default async function TopPage(): Promise<React.ReactElement> {
+  const staticLoaded = await loadStaticTopPage();
+  const data =
+    staticLoaded.top ??
+    (canFallbackToDatabase(staticLoaded.strategy)
+      ? await fetchTopPageFromDatabase()
+      : null);
 
   const {
     activeEvents = [],

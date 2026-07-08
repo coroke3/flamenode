@@ -197,7 +197,7 @@ npx wrangler d1 execute flamenode_db --local --command "SELECT id, name, role FR
 npx wrangler d1 execute flamenode_db --local --command "UPDATE user SET role='admin' WHERE id='<上で得た id>';"
 
 # system_settings の初期化 (まだ無ければ)
-npx wrangler d1 execute flamenode_db --local --command "INSERT OR REPLACE INTO system_settings (id, cost_guard_mode, auto_cost_guard_enabled) VALUES ('default', 'normal', 1);"
+npx wrangler d1 execute flamenode_db --local --command "INSERT INTO system_settings (id, operation_mode, auto_cost_guard_enabled) VALUES ('default', 'normal', 1) ON CONFLICT(id) DO UPDATE SET operation_mode=excluded.operation_mode, auto_cost_guard_enabled=excluded.auto_cost_guard_enabled;"
 ```
 
 GUI で見たい場合は Drizzle Studio を使えます (本番 D1 ではなく D1-HTTP 接続なので、ローカル運用では一時的な参照に使う想定です):
@@ -235,10 +235,10 @@ MAINTENANCE_MODE=1
 
 ```powershell
 # economy にする
-npx wrangler d1 execute flamenode_db --local --command "UPDATE system_settings SET cost_guard_mode='economy' WHERE id='default';"
+npx wrangler d1 execute flamenode_db --local --command "UPDATE system_settings SET operation_mode='economy' WHERE id='default';"
 
 # normal に戻す
-npx wrangler d1 execute flamenode_db --local --command "UPDATE system_settings SET cost_guard_mode='normal' WHERE id='default';"
+npx wrangler d1 execute flamenode_db --local --command "UPDATE system_settings SET operation_mode='normal' WHERE id='default';"
 ```
 
 管理者でログインしている場合は `/admin/cost-guard` から UI で操作できます。
@@ -364,6 +364,6 @@ npx wrangler d1 migrations apply flamenode_db --local
 5. Discord でログイン → 自分の Discord User ID を SQL で確認 → 自分を `admin` に昇格
 6. `/admin` に入って画面遷移を確認
 7. `/entry` から投稿してトップに反映されるかを確認
-8. 必要に応じて `MAINTENANCE_MODE=1` や `cost_guard_mode='economy'` の挙動を確認
+8. 必要に応じて `MAINTENANCE_MODE=1` や `operation_mode='economy'` の挙動を確認
 
 ここまで通れば、**本番 (`DEPLOY.md`) で同じ操作が成り立つ前提**が手元で再現できたことになります。

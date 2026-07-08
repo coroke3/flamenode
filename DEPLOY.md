@@ -319,7 +319,7 @@ wrangler d1 execute flamenode_db --remote --command "UPDATE user SET role='admin
 ### 8-2. system_settings の初期化
 
 ```powershell
-wrangler d1 execute flamenode_db --remote --command "INSERT OR REPLACE INTO system_settings (id, cost_guard_mode, auto_cost_guard_enabled) VALUES ('default', 'normal', 1);"
+wrangler d1 execute flamenode_db --remote --command "INSERT INTO system_settings (id, operation_mode, auto_cost_guard_enabled) VALUES ('default', 'normal', 1) ON CONFLICT(id) DO UPDATE SET operation_mode=excluded.operation_mode, auto_cost_guard_enabled=excluded.auto_cost_guard_enabled;"
 ```
 
 ### 8-3. 利用規約の最初の版
@@ -350,10 +350,10 @@ wrangler d1 execute flamenode_db --remote --command "INSERT OR REPLACE INTO syst
 
 ```powershell
 # 即時メンテナンスモード
-wrangler d1 execute flamenode_db --remote --command "UPDATE system_settings SET cost_guard_mode='maintenance', is_maintenance_mode=1 WHERE id='default';"
+wrangler d1 execute flamenode_db --remote --command "UPDATE system_settings SET operation_mode='maintenance' WHERE id='default';"
 
 # 解除
-wrangler d1 execute flamenode_db --remote --command "UPDATE system_settings SET cost_guard_mode='normal', is_maintenance_mode=0 WHERE id='default';"
+wrangler d1 execute flamenode_db --remote --command "UPDATE system_settings SET operation_mode='normal' WHERE id='default';"
 ```
 
 UI で操作する場合は管理者で `/admin/cost-guard` を開いてください。

@@ -1,14 +1,19 @@
 import * as React from "react";
 import Link from "next/link";
-import type { events as eventsTable } from "@/lib/db/schema";
 import { buildAccentVars } from "@/lib/theme/accent";
 import { computeEventStatus, isAcceptingEntries } from "@/lib/utils/eventStatus";
+import type { EventStatusInput } from "@/lib/utils/eventStatus";
 import { formatRemainingTimeMetric } from "@/lib/utils/remainingTime";
 
-type EventRow = typeof eventsTable.$inferSelect;
+export type RecruitEvent = EventStatusInput & {
+  id: string;
+  title: string;
+  accent_color?: string | null;
+  created_at?: number | null;
+};
 
 interface EventRecruitCardProps {
-  event: EventRow;
+  event: RecruitEvent;
   available: number | null;
   total: number | null;
   variant?: "primary" | "compact";
@@ -87,7 +92,7 @@ function toRecruitKind(state: RecruitState): RecruitKind {
 }
 
 function resolveState(
-  event: EventRow,
+  event: RecruitEvent,
   available: number | null,
   now: number,
 ): RecruitState {
@@ -106,7 +111,7 @@ function resolveState(
 }
 
 function resolveCountdown(
-  event: EventRow,
+  event: RecruitEvent,
   now: number,
 ): { heading: string; seconds: number | null; range: string } {
   const postRange = formatRange(event.start_time, event.end_time);
@@ -128,14 +133,14 @@ function resolveCountdown(
     return {
       heading: "募集締切まで",
       seconds: event.entry_end_time - now,
-      range: formatRange(event.entry_start_time, event.entry_end_time),
+      range: formatRange(event.entry_start_time ?? null, event.entry_end_time),
     };
   }
   if (event.entry_start_time != null && event.entry_start_time > now) {
     return {
       heading: "募集開始まで",
       seconds: event.entry_start_time - now,
-      range: formatRange(event.entry_start_time, event.entry_end_time),
+      range: formatRange(event.entry_start_time, event.entry_end_time ?? null),
     };
   }
   return {
@@ -146,7 +151,7 @@ function resolveCountdown(
 }
 
 function buildTimeline(
-  event: EventRow,
+  event: RecruitEvent,
   now: number,
   state: RecruitState,
 ): TimelineModel {

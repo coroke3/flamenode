@@ -451,6 +451,7 @@ SELECT status, COUNT(*) FROM notification_outbox
 | `static_rebuild_queue` | 編集駆動の再生成キュー |
 
 読み取りは `src/lib/publicData/loader.ts` が担当する。
+接続済みの主要公開導線は top / `/list` / `/event` / `/event/[id]` / video detail / `/user/[id]`。
 
 1. R2 から JSON を試す
 2. `static_json_with_live_overlay`（normal / economy / read_only）なら DB fallback 可

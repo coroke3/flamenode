@@ -2,12 +2,9 @@ import * as React from "react";
 import Link from "next/link";
 import styles from "./HomeIntroBand.module.css";
 import { Icon } from "@/components/ui/Icon";
-import type { events } from "@/lib/db/schema";
 import { computeEventStatus, isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { compareEventsByUpcomingPriority } from "@/lib/utils/eventOrdering";
-import { EventRecruitCard } from "./EventRecruitCard";
-
-type EventRow = typeof events.$inferSelect;
+import { EventRecruitCard, type RecruitEvent } from "./EventRecruitCard";
 
 export interface HomeIntroSlotStat {
   available: number;
@@ -20,6 +17,8 @@ export function isHeroCandidate(event: EventRow, now: number): boolean {
   const status = computeEventStatus(event, now);
   return status !== "draft" && status !== "ended" && status !== "archived";
 }
+
+type EventRow = RecruitEvent;
 
 function eventHeroRank(event: EventRow, now: number): number {
   const status = computeEventStatus(event, now);

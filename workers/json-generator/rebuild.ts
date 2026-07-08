@@ -10,8 +10,10 @@ type Env = { DB: D1Database; R2: R2Bucket; KV: KVNamespace };
 const EVENT_INDEX_COLUMNS = `
   id, title, explanation, icon_url, img_url, accent_color,
   start_time, end_time, entry_start_time, entry_end_time,
-  visibility_status
+  visibility_status, created_at
 `;
+
+const PVSF_SUMMARY_EVENT_ID = "PVSFSummary";
 
 export async function rebuildTarget(
   env: Env,
@@ -64,17 +66,190 @@ async function putJson(
 }
 
 async function rebuildTop(env: Env): Promise<void> {
-  const rows = await env.DB.prepare(
-    `SELECT id, title, youtube_video_id, creator_display_name AS display_name,
-            creator_icon_url AS icon_url, scheduled_time
-     FROM videos WHERE visibility_status = 'public'
-     ORDER BY scheduled_time DESC LIMIT 60`,
-  ).all();
-  const payload = { generated_at: Math.floor(Date.now() / 1000), items: rows.results ?? [] };
+  const now = Math.floor(Date.now() / 1000);
+  const [
+    recommended,
+    latest,
+    activeEvents,
+    latestEvents,
+    creators,
+    announcements,
+    slotStats,
+    publicVideoCount,
+    creatorCount,
+  ] = await Promise.all([
+    env.DB.prepare(
+      `SELECT id, title, youtube_video_id,
+              creator_display_name AS display_name,
+              creator_display_name,
+              creator_x_user_id,
+              creator_icon_url AS icon_url,
+              creator_icon_url,
+              primary_event_id,
+              scheduled_time,
+              visibility_status AS status,
+              part
+       FROM videos
+       WHERE visibility_status = 'public'
+       ORDER BY COALESCE(score, 0) DESC, scheduled_time DESC
+       LIMIT 40`,
+    ).all(),
+    env.DB.prepare(
+      `SELECT id, title, youtube_video_id,
+              creator_display_name AS display_name,
+              creator_display_name,
+              creator_x_user_id,
+              creator_icon_url AS icon_url,
+              creator_icon_url,
+              primary_event_id,
+              scheduled_time,
+              visibility_status AS status,
+              part
+       FROM videos
+       WHERE visibility_status = 'public'
+       ORDER BY scheduled_time DESC
+       LIMIT 30`,
+    ).all(),
+    env.DB.prepare(
+      `SELECT ${EVENT_INDEX_COLUMNS}
+       FROM events
+       WHERE visibility_status = 'public'
+         AND (
+           (CASE
+              WHEN end_time IS NOT NULL THEN end_time
+              WHEN start_time IS NOT NULL THEN start_time
+              ELSE NULL
+            END) IS NULL
+           OR (CASE
+              WHEN end_time IS NOT NULL THEN end_time
+              WHEN start_time IS NOT NULL THEN start_time
+              ELSE NULL
+            END) > ?
+         )
+       ORDER BY start_time DESC
+       LIMIT 30`,
+    ).bind(now).all<Record<string, unknown>>(),
+    env.DB.prepare(
+      `SELECT ${EVENT_INDEX_COLUMNS}
+       FROM events
+       WHERE visibility_status IN ('public', 'archived')
+       ORDER BY start_time DESC
+       LIMIT 12`,
+    ).all<Record<string, unknown>>(),
+    env.DB.prepare(
+      `WITH creator_counts AS (
+         SELECT
+           xu.id,
+           xu.x_name,
+           xu.icon_url,
+           (
+             SELECT COUNT(DISTINCT v.id)
+             FROM videos AS v
+             WHERE v.creator_x_user_id = xu.id
+               AND v.visibility_status = 'public'
+               AND COALESCE(v.primary_event_id, '') <> ?
+               AND NOT EXISTS (
+                 SELECT 1 FROM video_events AS pvsf_summary_video_events
+                 WHERE pvsf_summary_video_events.video_id = v.id
+                   AND pvsf_summary_video_events.event_id = ?
+               )
+           ) AS video_count,
+           (
+             SELECT COUNT(DISTINCT vm.video_id)
+             FROM video_members AS vm
+             INNER JOIN videos AS v ON v.id = vm.video_id
+             WHERE vm.x_user_id = xu.id
+               AND v.visibility_status = 'public'
+               AND COALESCE(v.primary_event_id, '') <> ?
+               AND NOT EXISTS (
+                 SELECT 1 FROM video_events AS pvsf_summary_video_events
+                 WHERE pvsf_summary_video_events.video_id = v.id
+                   AND pvsf_summary_video_events.event_id = ?
+               )
+           ) AS collab_count
+         FROM x_users AS xu
+         WHERE xu.approval_status IN ('approved', 'pending')
+       )
+       SELECT id, x_name, icon_url, video_count, collab_count
+       FROM creator_counts
+       WHERE video_count >= 1 OR collab_count >= 2
+       ORDER BY (video_count + collab_count) DESC, video_count DESC, x_name ASC
+       LIMIT 30`,
+    )
+      .bind(
+        PVSF_SUMMARY_EVENT_ID,
+        PVSF_SUMMARY_EVENT_ID,
+        PVSF_SUMMARY_EVENT_ID,
+        PVSF_SUMMARY_EVENT_ID,
+      )
+      .all(),
+    env.DB.prepare(
+      `SELECT id, title, body, severity, publish_at, expire_at
+       FROM announcements
+       WHERE is_published = 1
+         AND target_audience = 'all'
+         AND (publish_at IS NULL OR publish_at <= ?)
+         AND (expire_at IS NULL OR expire_at > ?)
+       ORDER BY publish_at DESC, updated_at DESC
+       LIMIT 3`,
+    ).bind(now, now).all(),
+    env.DB.prepare(
+      `SELECT event_id,
+              SUM(CASE WHEN status = 'available' THEN 1 ELSE 0 END) AS available,
+              COUNT(*) AS total
+       FROM slots
+       GROUP BY event_id`,
+    ).all(),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS c
+       FROM videos AS v
+       WHERE v.visibility_status = 'public'
+         AND COALESCE(v.primary_event_id, '') <> ?
+         AND NOT EXISTS (
+           SELECT 1 FROM video_events AS pvsf_summary_video_events
+           WHERE pvsf_summary_video_events.video_id = v.id
+             AND pvsf_summary_video_events.event_id = ?
+         )`,
+    )
+      .bind(PVSF_SUMMARY_EVENT_ID, PVSF_SUMMARY_EVENT_ID)
+      .first<{ c?: number }>(),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS c
+       FROM x_users
+       WHERE approval_status IN ('approved', 'pending')`,
+    ).first<{ c?: number }>(),
+  ]);
+
+  const activeEventItems = (activeEvents.results ?? []).map((row) =>
+    enrichEventRowForStaticJson(row, now),
+  );
+  const latestEventItems = (latestEvents.results ?? []).map((row) =>
+    enrichEventRowForStaticJson(row, now),
+  );
+  const payload = {
+    generated_at: now,
+    recommended: recommended.results ?? [],
+    latest: latest.results ?? [],
+    items: latest.results ?? [],
+    active_events: activeEventItems,
+    latest_events: latestEventItems,
+    creators: creators.results ?? [],
+    announcements: announcements.results ?? [],
+    slot_stats: slotStats.results ?? [],
+    stats: {
+      public_videos: Number(publicVideoCount?.c ?? latest.results?.length ?? 0),
+      active_events: activeEventItems.length,
+      creators: Number(creatorCount?.c ?? creators.results?.length ?? 0),
+    },
+  };
   await putJson(env, "top.json", payload, "public, max-age=60, stale-while-revalidate=300");
   await env.KV.put(
     "static:top",
-    JSON.stringify({ generated_at: payload.generated_at, count: rows.results?.length ?? 0 }),
+    JSON.stringify({
+      generated_at: payload.generated_at,
+      count: payload.latest.length,
+      active_events: payload.active_events.length,
+    }),
     { expirationTtl: 600 },
   );
 }
