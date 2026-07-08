@@ -88,6 +88,30 @@ test("applyAutoCostGuard: escalates to the recommended stricter mode", async () 
   assert.equal(state.auditRows.length, 1);
 });
 
+test("applyAutoCostGuard: normal mode stays normal under thresholds", async () => {
+  const { env, state } = makeEnv({
+    settings: { operation_mode: "normal", auto_cost_guard_enabled: 1 },
+    snapshot: {
+      id: "snap1",
+      workers_requests_today: 10_000,
+      pages_functions_requests_today: 10_000,
+      d1_rows_read_today: 100_000,
+      d1_rows_written_today: 1_000,
+      kv_writes_today: 100,
+    },
+  });
+
+  const result = await applyAutoCostGuard(env, 1_700_000_000);
+
+  assert.equal(result.applied, false);
+  assert.equal(result.reason, "not_more_restrictive");
+  assert.equal(result.currentMode, "normal");
+  assert.equal(result.recommendedMode, "normal");
+  assert.equal(state.settings.operation_mode, "normal");
+  assert.equal(state.snapshot.guard_mode_after_check, "normal");
+  assert.equal(state.auditRows.length, 0);
+});
+
 test("applyAutoCostGuard: does not automatically downgrade", async () => {
   const { env, state } = makeEnv({
     settings: { operation_mode: "static_only", auto_cost_guard_enabled: 1 },

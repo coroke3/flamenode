@@ -77,3 +77,17 @@ test("getStaticRebuildPolicy: mirrors worker queue mode behavior", () => {
     reconcileStaleQueue: false,
   });
 });
+
+test("normal mode keeps full write/live/rebuild behavior enabled", () => {
+  assert.equal(getPublicDataStrategy("normal"), "static_json_with_live_overlay");
+  assert.equal(isWriteBlocked("normal"), false);
+  assert.equal(isLiveApiEnabled("normal"), true);
+  assert.equal(isStaticRebuildEnabled("normal"), true);
+  assert.deepEqual(getStaticRebuildPolicy("normal"), {
+    maxItemsPerRun: 20,
+    highPriorityOnly: false,
+    allowedTargetTypes: null,
+    skipTargetTypesUnlessHighPriority: [],
+    reconcileStaleQueue: true,
+  });
+});
