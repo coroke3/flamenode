@@ -7,7 +7,7 @@ export const metadata: Metadata = { title: "メンテナンス中" };
 
 export default function MaintenancePage(): React.ReactElement {
   return (
-    <main className="fn-public-container fn-page fn-guard-shell">
+    <div className="fn-public-container fn-page fn-guard-shell">
       <div className="fn-status-panel fn-status-panel--center">
         <Icon name="warning" size={36} className="fn-warning" aria-hidden />
         <h1 className="fn-status-panel-title">メンテナンス中</h1>
@@ -26,6 +26,6 @@ export default function MaintenancePage(): React.ReactElement {
           </Link>
         </div>
       </div>
-    </main>
+    </div>
   );
 }

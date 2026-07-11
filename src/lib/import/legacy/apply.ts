@@ -173,7 +173,7 @@ export async function applyLegacyImportPlan(
   }
 
   // ----------------------------------------------------------
-  // 3) X ユーザー (approval_status = "imported")
+  // 3) X ユーザー（未承認として取り込み、運営レビュー後に利用可能にする）
   // ----------------------------------------------------------
   const existingXIds = new Set<string>();
   const xIdList = plan.xUsers.map((x) => x.id);
@@ -195,7 +195,7 @@ export async function applyLegacyImportPlan(
         portfolio_contact: xu.portfolio_contact,
         youtube_channel_url: xu.youtube_channel_url,
         other_social_links: xu.other_social_links,
-        approval_status: "imported",
+        approval_status: "pending",
         approval_requested_at: now,
       }).onConflictDoNothing();
       counts.xUsers.create++;
@@ -328,7 +328,7 @@ export async function applyLegacyImportPlan(
         await db.insert(videos).values({
           id: vi.id,
           title: vi.title,
-          submitted_by_discord_user_id: operatorId,
+          submitted_by_user_id: operatorId,
           creator_x_user_id: vi.creator_x_user_id,
           creator_display_name: vi.creator_display_name,
           creator_display_name_yomi: vi.creator_display_name_yomi,
@@ -348,7 +348,6 @@ export async function applyLegacyImportPlan(
           visibility_status: vi.visibility_status,
           app_like_count: 0,
           score: 0,
-          trending_view_count_24h: 0,
           score_updated_at: null,
           created_at: vi.created_at ?? now,
           updated_at: now,
@@ -395,7 +394,7 @@ export async function applyLegacyImportPlan(
             chapters_json: m.chapters_json,
             is_public_member: 1,
             can_edit: 0,
-            discord_user_id: null,
+            user_id: null,
             edit_granted_by_user_id: null,
             edit_granted_at: null,
             edit_updated_at: null,
@@ -581,7 +580,7 @@ async function upsertEventStaff(
       id: staff.id,
       event_id: staff.event_id,
       x_user_id: staff.x_user_id,
-      discord_user_id: null,
+      user_id: null,
       display_name: staff.display_name,
       role: "editor" as "editor",
       permission_preset: preset,

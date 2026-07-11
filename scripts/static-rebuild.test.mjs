@@ -17,7 +17,7 @@ function pickHigherPriority(a, b) {
   return rank[a] <= rank[b] ? a : b;
 }
 
-const FORBIDDEN = new Set(["submitted_by_discord_user_id", "discord_user_id"]);
+const FORBIDDEN = new Set(["submitted_by_user_id", "user_id", "discord_id"]);
 
 function assertNoForbidden(value, path = "root") {
   if (value === null || value === undefined) return;
@@ -80,6 +80,6 @@ test("pickHigherPriority", () => {
 
 test("forbidden keys rejected in public json", () => {
   assert.throws(() =>
-    assertNoForbidden({ title: "ok", submitted_by_discord_user_id: "x" }),
+    assertNoForbidden({ title: "ok", submitted_by_user_id: "x" }),
   );
 });

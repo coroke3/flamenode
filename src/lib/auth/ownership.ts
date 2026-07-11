@@ -1,7 +1,6 @@
 import "server-only";
 import { and, eq, inArray, or } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
-import { isMissingDbObjectError } from "@/lib/db/optionalObjects";
 import {
   eventStaff,
   events as eventsTable,
@@ -65,7 +64,7 @@ export async function getApprovedXIds(
     .from(xUsers)
     .where(
       and(
-        eq(xUsers.linked_discord_user_id, userId),
+        eq(xUsers.linked_user_id, userId),
         eq(xUsers.approval_status, "approved"),
       )!,
     );
@@ -80,8 +79,8 @@ export async function getEditableEventIds(
   const xIds = await getApprovedXIds(db, userId);
   const subjectCond =
     xIds.length > 0
-      ? or(eq(eventStaff.discord_user_id, userId), inArray(eventStaff.x_user_id, xIds))!
-      : eq(eventStaff.discord_user_id, userId);
+      ? or(eq(eventStaff.user_id, userId), inArray(eventStaff.x_user_id, xIds))!
+      : eq(eventStaff.user_id, userId);
   const rows = await db
     .select({
       event_id: eventStaff.event_id,
@@ -98,7 +97,7 @@ export async function getEditableEventIds(
 
 /**
  * 当該イベントで自分が持つ permission_key 一覧。
- * x_user_id 連携 / discord_user_id 連携の両方を見る。
+ * x_user_id 連携 / 内部 user_id 連携の両方を見る。
  */
 export async function getCollaboratorPermissions(
   db: DB,
@@ -109,10 +108,10 @@ export async function getCollaboratorPermissions(
   const subjectCond =
     xIds.length > 0
       ? or(
-          eq(eventStaff.discord_user_id, userId),
+          eq(eventStaff.user_id, userId),
           inArray(eventStaff.x_user_id, xIds),
         )!
-      : eq(eventStaff.discord_user_id, userId);
+      : eq(eventStaff.user_id, userId);
   const rows = await db
     .select(staffPermissionSelect)
     .from(eventStaff)
@@ -137,8 +136,8 @@ export async function canManageXIdLinkRequests(
   const xIds = await getApprovedXIds(db, user.id);
   const subjectCond =
     xIds.length > 0
-      ? or(eq(eventStaff.discord_user_id, user.id), inArray(eventStaff.x_user_id, xIds))!
-      : eq(eventStaff.discord_user_id, user.id);
+      ? or(eq(eventStaff.user_id, user.id), inArray(eventStaff.x_user_id, xIds))!
+      : eq(eventStaff.user_id, user.id);
   const rows = await db
     .select(staffPermissionSelect)
     .from(eventStaff)
@@ -172,10 +171,10 @@ export async function getManageStaffRoleForEvent(
   const subjectCond =
     approvedXIds.length > 0
       ? or(
-          eq(eventStaff.discord_user_id, userId),
+          eq(eventStaff.user_id, userId),
           inArray(eventStaff.x_user_id, approvedXIds),
         )!
-      : eq(eventStaff.discord_user_id, userId);
+      : eq(eventStaff.user_id, userId);
   const staff = (
     await db
       .select({ role: eventStaff.role, ...staffPermissionSelect })
@@ -200,10 +199,10 @@ export async function getManageStaffXUserIds(
   const subjectCond =
     approvedXIds.length > 0
       ? or(
-          eq(eventStaff.discord_user_id, userId),
+          eq(eventStaff.user_id, userId),
           inArray(eventStaff.x_user_id, approvedXIds),
         )!
-      : eq(eventStaff.discord_user_id, userId);
+      : eq(eventStaff.user_id, userId);
   const rows = await db
     .select({ x_user_id: eventStaff.x_user_id, ...staffPermissionSelect })
     .from(eventStaff)
@@ -248,10 +247,10 @@ export async function canEditEvent(
   const subjectCond =
     xIds.length > 0
       ? or(
-          eq(eventStaff.discord_user_id, user.id),
+          eq(eventStaff.user_id, user.id),
           inArray(eventStaff.x_user_id, xIds),
         )!
-      : eq(eventStaff.discord_user_id, user.id);
+      : eq(eventStaff.user_id, user.id);
   const rows = await db
     .select(staffPermissionSelect)
     .from(eventStaff)
@@ -304,8 +303,7 @@ export type CanEditVideoPrivilegeMode = "normal" | "admin" | "event" | "any";
 /**
  * 動画編集権限の判定。`privilegeMode` で評価する権限ソースを切り替える。
  *
- * `submitted_by_discord_user_id` 単独は判定対象外 (legacy import 由来の混入を防ぐため。
- * 禁止事項: submitted_by_discord_user_id だけで作品編集を許可しない)。
+ * `submitted_by_user_id` 単独は判定対象外 (投稿記録だけで編集権を与えないため)。
  *
  * `requiredKey` は必須。section 別の編集権限を明示することで、collaborator が
  * 持っていない section を触れないよう保証する。
@@ -315,7 +313,7 @@ export async function canEditVideo(args: {
   user: SessionUserLike;
   video: Pick<
     VideoRow,
-    "creator_x_user_id" | "primary_event_id" | "id" | "submitted_by_discord_user_id"
+    "creator_x_user_id" | "primary_event_id" | "id" | "submitted_by_user_id"
   >;
   requiredKey: VideoEditSectionKey;
   /** 既定 "any"。詳細は CanEditVideoPrivilegeMode を参照。 */
@@ -367,10 +365,10 @@ export async function canEditVideo(args: {
   const memberSubjectCond =
     approved.length > 0
       ? or(
-          eq(videoMembers.discord_user_id, user.id),
+          eq(videoMembers.user_id, user.id),
           inArray(videoMembers.x_user_id, approved),
         )!
-      : eq(videoMembers.discord_user_id, user.id);
+      : eq(videoMembers.user_id, user.id);
   const editableMemberRows = await db
     .select({ can_edit: videoMembers.can_edit })
     .from(videoMembers)
@@ -381,14 +379,7 @@ export async function canEditVideo(args: {
         memberSubjectCond,
       )!,
     )
-    .limit(1)
-    .catch((error: unknown) => {
-      // 旧 D1 で can_edit 列がまだ無いケース等に備えて握り潰す (instrumentation で補修される)
-      if (isMissingDbObjectError(error, "video_members")) {
-        return [];
-      }
-      throw error;
-    });
+    .limit(1);
   const isCollaborator = editableMemberRows.length > 0;
 
   // この時点で eventIds を確定させる (allow_user_video_edits の判定にも使う)。
@@ -466,5 +457,3 @@ async function isEventDelegationGranted(
   }
   return false;
 }
-
-

@@ -1,8 +1,5 @@
 import "server-only";
 import { auth } from "@/lib/auth";
-import { loadDevVarsIfNeeded } from "@/lib/dev/loadDevVars";
-
-loadDevVarsIfNeeded();
 
 export function isAdminSpreadsheetEnabled(): boolean {
   const v = process.env.ADMIN_SPREADSHEET_ENABLED?.trim().toLowerCase();

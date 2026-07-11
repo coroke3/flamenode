@@ -29,7 +29,7 @@ export default async function AdminUserEditPage({
   const xIds = await db
     .select({ id: xUsersTable.id })
     .from(xUsersTable)
-    .where(eq(xUsersTable.linked_discord_user_id, user.id));
+    .where(eq(xUsersTable.linked_user_id, user.id));
 
   return (
     <div>

@@ -14,11 +14,11 @@ export async function loadVideoCollabSubjects(
     const rows = await db
       .select({
         x_user_id: videoMembers.x_user_id,
-        discord_user_id: videoMembers.discord_user_id,
+        user_id: videoMembers.user_id,
         display_name: videoMembers.name,
         can_edit: videoMembers.can_edit,
         is_public_member: videoMembers.is_public_member,
-        linked_discord_user_id: xUsers.linked_discord_user_id,
+        linked_user_id: xUsers.linked_user_id,
       })
       .from(videoMembers)
       .leftJoin(xUsers, eq(videoMembers.x_user_id, xUsers.id))
@@ -30,12 +30,12 @@ export async function loadVideoCollabSubjects(
         .filter((row) => row.can_edit === 1 || row.is_public_member === 0)
         .map((row) => ({
           x_user_id: row.x_user_id,
-          discord_user_id: row.discord_user_id,
+          user_id: row.user_id,
           display_name: row.display_name,
           can_edit: row.can_edit,
           is_public_member: row.is_public_member,
           has_discord_link: Boolean(
-            row.discord_user_id?.trim() || row.linked_discord_user_id?.trim(),
+            row.user_id?.trim() || row.linked_user_id?.trim(),
           ),
         })),
     };
@@ -64,7 +64,7 @@ export interface EditPermissionSummary {
 }
 
 function editorHasDiscord(s: VideoCollabSubject): boolean {
-  return Boolean(s.discord_user_id?.trim() || s.has_discord_link);
+  return Boolean(s.user_id?.trim() || s.has_discord_link);
 }
 
 export function computeEditPermissionSummary(
@@ -109,7 +109,7 @@ export function computeEditPermissionSummary(
   const viewer = options?.viewerDiscordId?.trim();
   const owner = options?.ownerDiscordId?.trim();
   const otherEditors = editors.filter((s) => {
-    const discord = s.discord_user_id?.trim();
+    const discord = s.user_id?.trim();
     if (viewer && discord === viewer) return false;
     if (owner && discord === owner) return false;
     return true;

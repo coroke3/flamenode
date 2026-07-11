@@ -1,5 +1,19 @@
 # AGENTS.md
 
+## Codex エージェント運用
+
+- メインエージェントは要件整理、設計判断、実装方針、統合、最終検証を担当する。
+- 明確に分離できる調査、テスト、ログ解析、単純変換、独立した小規模実装は `luna_worker` へ委譲する。
+- サブエージェントの利用自体を目的にせず、一工程だけの小さな作業では起動しない。
+- 並列化するのは独立作業だけとし、同一ファイルを複数のサブエージェントに同時編集させない。
+- 設計変更、DB migration、認証・認可、セキュリティ、破壊的変更、最終レビューはメインエージェントが担当する。
+- メインエージェントはサブエージェントの出力をそのまま採用せず、差分とテスト結果を必ず検証する。
+
+> Status: Active
+> Last verified: 2026-07-11
+> Verified against commit: `5f48e0f` + working tree
+> Source of truth: `src/lib/db/schema.ts`, `migrations/0000_flame_node_baseline.sql`, `docs/README.md`
+
 FlameNode: YouTube 埋め込み動画プラットフォーム (イベント参加・スロット・投稿審査)。Cloudflare ネイティブ。
 Next.js 15 App Router + React 19 + TS / D1 + Drizzle / R2 / KV / Workers (Cron 3本) / Auth.js v5 + Discord OAuth。
 
@@ -39,7 +53,7 @@ npm run check:public-api-leaks # 公開 API 漏洩検査 (dev server 必須)
 
 1. 1 PR = 1 テーマ。small-batch
 2. 変更後は `typecheck` + `build` 必須
-3. スキーマ変更は migration 同伴 + `docs/operations.md` と整合。**`npm run db:generate` は使わない** (Drizzle meta が `0007` 止まりで壊れた差分が出る)。手動 SQL migration を `migrations/` に追加する
+3. スキーマ変更は migration 同伴 + `docs/operations/migrations.md` と整合。**`npm run db:generate` は使わない**。手動 SQL migration を `migrations/` に追加する
 4. deploy / 本番 D1 migration はユーザー操作。実行しない
 5. D1 が正本、R2/KV の静的 JSON は配信キャッシュ。二重正本を作らない
 
@@ -47,7 +61,7 @@ npm run check:public-api-leaks # 公開 API 漏洩検査 (dev server 必須)
 
 - 権限チェックをフロントのみに置く (API 直叩きの穴を残す)
 - Discord ID と X ID の混同
-- `owner_discord_user_id` だけで作品編集を許可
+- 投稿記録や表示用ミラーだけで作品編集を許可
 - 未承認 X ID での投稿・チャプターコメント・いいね・セーブ・ライブラリ
 - `contact_x_id` 自由入力を投稿主体にする
 - 連続枠を表示だけでまとめ DB 整合性を放置

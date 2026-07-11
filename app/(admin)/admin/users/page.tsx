@@ -46,14 +46,14 @@ type AdminXUserRow = {
   x_name: string;
   icon_url: string | null;
   approval_status: "pending" | "approved" | "rejected" | "imported" | null;
-  linked_discord_user_id: string | null;
-  linked_discord_name: string | null;
-  linked_discord_image: string | null;
+  linked_user_id: string | null;
+  linked_user_name: string | null;
+  linked_user_image: string | null;
   active_holder_id: string | null;
 };
 
 type CurrentLinkedXRow = {
-  discord_user_id: string | null;
+  user_id: string | null;
   x_user_id: string;
   x_name: string | null;
   icon_url: string | null;
@@ -186,7 +186,7 @@ export default async function AdminUsersPage({
       const xTerm = `%${escapedX.toLowerCase()}%`;
       const activeXJoin = and(
         sql`lower(${xUsersTable.id}) = lower(${usersTable.active_x_user_id})`,
-        eq(xUsersTable.linked_discord_user_id, usersTable.id),
+        eq(xUsersTable.linked_user_id, usersTable.id),
         eq(xUsersTable.approval_status, "approved"),
       )!;
 
@@ -276,7 +276,7 @@ export default async function AdminUsersPage({
             like(sql<string>`lower(${xUsersTable.id})`, xTerm),
             like(sql<string>`lower(${xUsersTable.x_name})`, lowerTerm),
             like(sql<string>`lower(${usersTable.name})`, lowerTerm),
-            eq(xUsersTable.linked_discord_user_id, q),
+          eq(xUsersTable.linked_user_id, q),
           )
         : undefined;
       const xLimit = activeView === "xid" ? pageSize : USERS_PAGE_SIZE * 2;
@@ -287,13 +287,13 @@ export default async function AdminUsersPage({
           x_name: xUsersTable.x_name,
           icon_url: xUsersTable.icon_url,
           approval_status: xUsersTable.approval_status,
-          linked_discord_user_id: xUsersTable.linked_discord_user_id,
-          linked_discord_name: usersTable.name,
-          linked_discord_image: usersTable.image,
+          linked_user_id: xUsersTable.linked_user_id,
+          linked_user_name: usersTable.name,
+          linked_user_image: usersTable.image,
           active_holder_id: usersTable.active_x_user_id,
         })
         .from(xUsersTable)
-        .leftJoin(usersTable, eq(usersTable.id, xUsersTable.linked_discord_user_id))
+        .leftJoin(usersTable, eq(usersTable.id, xUsersTable.linked_user_id))
         .where(xFilter)
         .orderBy(xUsersTable.id)
         .limit(xLimit)
@@ -303,7 +303,7 @@ export default async function AdminUsersPage({
           await db
             .select({ c: sql<number>`COUNT(*)` })
             .from(xUsersTable)
-            .leftJoin(usersTable, eq(usersTable.id, xUsersTable.linked_discord_user_id))
+            .leftJoin(usersTable, eq(usersTable.id, xUsersTable.linked_user_id))
             .where(xFilter)
             .limit(1)
         )[0];
@@ -320,12 +320,12 @@ export default async function AdminUsersPage({
       );
       xRows = xRowsWithIcons.map((x) => ({ ...x, icon_url: x.icon_url }));
 
-      const visibleDiscordIds = userRows.map((u) => u.id);
+      const visibleUserIds = userRows.map((u) => u.id);
       linkedXRows =
-        visibleDiscordIds.length > 0
+        visibleUserIds.length > 0
           ? await db
               .select({
-                discord_user_id: xUsersTable.linked_discord_user_id,
+                user_id: xUsersTable.linked_user_id,
                 x_user_id: xUsersTable.id,
                 x_name: xUsersTable.x_name,
                 icon_url: xUsersTable.icon_url,
@@ -334,7 +334,7 @@ export default async function AdminUsersPage({
               .from(xUsersTable)
               .where(
                 and(
-                  inArray(xUsersTable.linked_discord_user_id, visibleDiscordIds),
+                  inArray(xUsersTable.linked_user_id, visibleUserIds),
                   eq(xUsersTable.approval_status, "approved"),
                 )!,
               )
@@ -357,12 +357,12 @@ export default async function AdminUsersPage({
     }
   }
 
-  const linkedXByDiscord = new Map<string, CurrentLinkedXRow[]>();
+  const linkedXByUser = new Map<string, CurrentLinkedXRow[]>();
   for (const row of linkedXRows) {
-    if (!row.discord_user_id) continue;
-    const rows = linkedXByDiscord.get(row.discord_user_id) ?? [];
+    if (!row.user_id) continue;
+    const rows = linkedXByUser.get(row.user_id) ?? [];
     rows.push(row);
-    linkedXByDiscord.set(row.discord_user_id, rows);
+    linkedXByUser.set(row.user_id, rows);
   }
 
   const currentTotal = activeView === "xid" ? totalXUsers : totalUsers;
@@ -430,7 +430,7 @@ export default async function AdminUsersPage({
       ) : activeView === "xid" ? (
         <XIdTable rows={xRows} />
       ) : (
-        <DiscordTable rows={userRows} linkedXByDiscord={linkedXByDiscord} />
+        <DiscordTable rows={userRows} linkedXByUser={linkedXByUser} />
       )}
 
       {activeView !== "permissions" ? (
@@ -449,10 +449,10 @@ export default async function AdminUsersPage({
 
 function DiscordTable({
   rows,
-  linkedXByDiscord,
+  linkedXByUser,
 }: {
   rows: AdminUserRow[];
-  linkedXByDiscord: Map<string, CurrentLinkedXRow[]>;
+  linkedXByUser: Map<string, CurrentLinkedXRow[]>;
 }): React.ReactElement {
   return (
     <FnTable style={{ marginTop: 18 }}>
@@ -523,7 +523,7 @@ function DiscordTable({
                 "-"
               )}
               {(() => {
-                const links = linkedXByDiscord.get(u.id) ?? [];
+                const links = linkedXByUser.get(u.id) ?? [];
                 const xids = Array.from(
                   new Set(links.map((link) => normalizeXId(link.x_user_id)).filter(Boolean)),
                 );
@@ -635,11 +635,11 @@ function XIdTable({ rows }: { rows: AdminXUserRow[] }): React.ReactElement {
                 </div>
               </td>
               <td>
-                {x.linked_discord_user_id ? (
+                {x.linked_user_id ? (
                   <span>
-                    <strong>{x.linked_discord_name ?? "Discord user"}</strong>
+                    <strong>{x.linked_user_name ?? "Discord user"}</strong>
                     <span style={{ display: "block", fontSize: 11, color: "var(--text-muted)" }}>
-                      {x.linked_discord_user_id.slice(0, 14)}...
+                      {x.linked_user_id.slice(0, 14)}...
                     </span>
                   </span>
                 ) : (
@@ -665,9 +665,9 @@ function XIdTable({ rows }: { rows: AdminXUserRow[] }): React.ReactElement {
                 ) : null}
               </td>
               <td>
-                {x.linked_discord_user_id ? (
+                {x.linked_user_id ? (
                   <Link
-                    href={`/admin/users/${x.linked_discord_user_id}`}
+                      href={`/admin/users/${x.linked_user_id}`}
                     className="fn-btn fn-btn-ghost fn-btn-sm"
                   >
                     詳細

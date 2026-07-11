@@ -28,7 +28,7 @@ export interface SlotRowLite {
   status: "available" | "reserved" | "submitted";
   display_name: string | null;
   x_user_id: string | null;
-  discord_user_id?: string | null;
+  reserved_by_user_id?: string | null;
   reservation_group_id?: string | null;
   video_id?: string | null;
 }

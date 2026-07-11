@@ -69,7 +69,7 @@ export async function updateVideoMembersAdmin(
       member_count: members.length,
       source: "admin_video_members",
     }),
-    operator_discord_id: user.id,
+    operator_user_id: user.id,
     retention_class: "normal",
   });
 

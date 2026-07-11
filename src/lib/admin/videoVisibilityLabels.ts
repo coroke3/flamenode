@@ -12,7 +12,7 @@ type VideoVisibilityGroup = {
 export const VIDEO_VISIBILITY_GROUPS: readonly VideoVisibilityGroup[] = [
   { key: "review", label: "審査待ち", statuses: ["pending"] },
   { key: "public", label: "公開", statuses: ["public", "limited"] },
-  { key: "private", label: "非公開", statuses: ["draft", "private", "hidden"] },
+  { key: "private", label: "非公開", statuses: ["draft", "private"] },
   { key: "closed", label: "終了・無効", statuses: ["archived", "voided"] },
 ];
 
@@ -22,7 +22,6 @@ const LABELS: Record<VideoVisibilityStatus, string> = {
   public: "公開",
   limited: "限定公開",
   private: "非公開",
-  hidden: "非表示",
   archived: "アーカイブ",
   voided: "停止",
 };

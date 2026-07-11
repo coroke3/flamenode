@@ -6,6 +6,7 @@ import {
   type CostGuardMode,
   type CostUsageSnapshotLike,
 } from "../../src/lib/admin/costGuardPolicy.ts";
+import { logWorkerJob, safeErrorSummary } from "../shared/safeLog.ts";
 
 export interface Env {
   DB: D1Database;
@@ -209,7 +210,19 @@ async function writeAudit(
       )
       .run();
   } catch (error) {
-    console.warn("[auto-cost-guard] failed to write audit log:", error);
+    const occurredAt = new Date().toISOString();
+    logWorkerJob({
+      worker: "content-jobs",
+      job: "cost-guard-audit",
+      run_id: crypto.randomUUID(),
+      started_at: occurredAt,
+      processed: 0,
+      skipped: 0,
+      failed: 1,
+      duration_ms: 0,
+      result: "failed",
+      error: safeErrorSummary(error),
+    });
   }
 }
 

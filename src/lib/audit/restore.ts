@@ -1,234 +1,171 @@
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import { auditLogs, auditRestoreRuns, users } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
-import type { RestoreOptions, RestoreResult } from "./types";
-import { AuditOperation, RestoreStatus } from "./types";
-import { getAdapter, RESTORABLE_TABLES } from "./adapters";
-import { writeAuditLog } from "./logger";
+import { getAdapter } from "./adapters";
+import { evaluateRestoreCapability } from "./capability";
+import { assertChanges, mutateWithAudit } from "./mutate";
 import { computeChangedKeys } from "./snapshot";
+import {
+  AuditOperation,
+  RestoreStatus,
+  RestoreStrategy,
+  type RestoreOptions,
+  type RestoreResult,
+} from "./types";
 
-// ============================================================
-// restoreAuditLog
-// ============================================================
+function parseSnapshot(json: string | null): Record<string, unknown> | null {
+  if (!json) return null;
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
- * 指定した監査ログエントリを元に、対象レコードを以前の状態に復元する。
- *
- * - 管理者権限チェック
- * - ログの存在・restorable 判定
- * - 期限切れチェック
- * - アダプター取得 (ホワイトリスト外は拒否)
- * - 競合チェック (after_json vs 現行レコード)
- * - dry_run モード対応
- * - 復元実行
- * - RESTORE 監査ログ書き込み
- * - 元ログの restore_status を restored に更新
- * - audit_restore_runs にレコード挿入
+ * 復元本体、復元履歴、元ログの状態更新、RESTORE 監査ログを単一 D1 batch で確定する。
+ * いずれか一つでも失敗した場合は、復元対象を含めて全て rollback される。
  */
 export async function restoreAuditLog(
   db: DB,
   options: RestoreOptions,
 ): Promise<RestoreResult> {
   const { auditId, userId, reason, forceOverwrite = false, dry_run = false, confirmText } = options;
-
-  if (!dry_run) {
-    const required = `RESTORE ${auditId}`;
-    if (!confirmText || confirmText.trim() !== required) {
-      return {
-        ok: false,
-        message: `確認テキストが正しくありません。「${required}」と入力してください。`,
-      };
-    }
-    if (!reason.trim()) {
-      return { ok: false, message: "復元理由の入力が必要です。" };
-    }
+  if (!dry_run && confirmText?.trim() !== `RESTORE ${auditId}`) {
+    return { ok: false, message: `確認テキスト「RESTORE ${auditId}」を入力してください。` };
+  }
+  if (!dry_run && !reason.trim()) {
+    return { ok: false, message: "復元理由を入力してください。" };
   }
 
-  // 管理者チェック
-  const user = await db
-    .select({ role: users.role })
-    .from(users)
-    .where(eq(users.id, userId))
-    .get();
-
+  const user = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).get();
   if (!user || user.role !== "admin") {
-    return { ok: false, message: "管理者のみリストアを実行できます。" };
+    return { ok: false, message: "site admin のみ監査ログを復元できます。" };
   }
 
-  // 監査ログを取得
-  const log = await db
-    .select()
-    .from(auditLogs)
-    .where(eq(auditLogs.id, auditId))
+  const log = await db.select().from(auditLogs).where(eq(auditLogs.id, auditId)).get();
+  if (!log) return { ok: false, message: "監査ログが見つかりません。" };
+
+  const priorSuccess = await db
+    .select({ id: auditRestoreRuns.id })
+    .from(auditRestoreRuns)
+    .where(
+      and(
+        eq(auditRestoreRuns.audit_log_id, auditId),
+        eq(auditRestoreRuns.status, "success"),
+      )!,
+    )
+    .limit(1)
     .get();
-
-  if (!log) {
-    return { ok: false, message: "監査ログが見つかりません。" };
+  if (priorSuccess) {
+    return { ok: false, message: "この監査ログはすでに復元済みです。" };
   }
 
-  // restorable 判定
-  if (log.restore_status !== RestoreStatus.restorable) {
-    return {
-      ok: false,
-      message: `このログはリストアできません (status: ${log.restore_status})。`,
-    };
-  }
-
-  // 期限切れチェック
   const now = Math.floor(Date.now() / 1000);
   if (log.expires_at !== null && log.expires_at < now) {
-    await db
-      .update(auditLogs)
-      .set({ restore_status: RestoreStatus.expired })
-      .where(eq(auditLogs.id, auditId));
-    return { ok: false, message: "このログの保持期限が切れています。" };
+    return { ok: false, message: "このログの復元可能期間は終了しています。" };
   }
 
-  // ホワイトリストチェック
-  if (!RESTORABLE_TABLES.has(log.table_name)) {
-    return {
-      ok: false,
-      message: `テーブル "${log.table_name}" はリストア対象外です。`,
-    };
+  const strategy = log.restore_strategy as RestoreStrategy;
+  const before = parseSnapshot(log.before_json);
+  const after = parseSnapshot(log.after_json);
+  const capability = evaluateRestoreCapability({
+    tableName: log.table_name,
+    strategy,
+    before,
+    after,
+    payloadExceeded: false,
+  });
+  if (!capability.restorable) {
+    return { ok: false, message: capability.message };
   }
 
-  // アダプター取得
   const adapter = getAdapter(log.table_name);
-  if (!adapter) {
-    return {
-      ok: false,
-      message: `テーブル "${log.table_name}" のアダプターが見つかりません。`,
-    };
-  }
+  if (!adapter) return { ok: false, message: "復元アダプターが見つかりません。" };
+  const target = strategy === RestoreStrategy.delete_created ? after : before;
+  if (!target) return { ok: false, message: "復元用スナップショットがありません。" };
 
-  const strategy = log.restore_strategy as import("./types").RestoreStrategy;
-
-  // 復元データ: update_before / recreate_deleted は before、delete_created は after
-  let restoreTarget: Record<string, unknown> | null = null;
-  const sourceJson =
-    strategy === "delete_created" ? log.after_json : log.before_json;
-  if (!sourceJson) {
-    return {
-      ok: false,
-      message: "リストアに必要なスナップショットデータが存在しません。",
-    };
-  }
-  try {
-    restoreTarget = JSON.parse(sourceJson) as Record<string, unknown>;
-  } catch {
-    return { ok: false, message: "スナップショットデータの解析に失敗しました。" };
-  }
-
-  // 現行レコードを取得
   const current = await adapter.fetchCurrent(db, log.target_id);
-
-  // after_json から期待する状態を解析
-  let afterData: Record<string, unknown> | null = null;
-  if (log.after_json) {
-    try {
-      afterData = JSON.parse(log.after_json) as Record<string, unknown>;
-    } catch {
-      // 無視
-    }
-  }
-
-  // 競合チェック: 現行レコードと after_json が一致するか
   const conflicts: string[] = [];
-  if (current && afterData && !forceOverwrite) {
-    const changedSince = computeChangedKeys(afterData, current);
-    conflicts.push(...changedSince);
+  if (strategy === RestoreStrategy.recreate_deleted) {
+    if (current) conflicts.push("target_already_exists");
+  } else if (!current) {
+    conflicts.push("target_missing");
+  } else if (after) {
+    conflicts.push(...computeChangedKeys(after, current));
   }
 
   if (dry_run) {
     return {
       ok: true,
-      message: conflicts.length > 0
-        ? `競合キー: ${conflicts.join(", ")}`
-        : "競合なし。リストア可能です。",
-      diff: {
-        current,
-        target: restoreTarget,
-        conflicts,
-      },
+      message: conflicts.length ? `競合あり: ${conflicts.join(", ")}` : "競合なし。復元可能です。",
+      diff: { current, target, conflicts },
     };
   }
-
-  // 競合があり forceOverwrite=false なら拒否
-  if (conflicts.length > 0 && !forceOverwrite) {
+  if (conflicts.length && !forceOverwrite) {
     return {
       ok: false,
-      message: `競合が検出されました。変更されたキー: ${conflicts.join(", ")}。強制上書きするには forceOverwrite=true を使用してください。`,
-      diff: {
-        current,
-        target: restoreTarget,
-        conflicts,
-      },
+      message: `競合が検出されました: ${conflicts.join(", ")}。`,
+      diff: { current, target, conflicts },
     };
   }
 
-  // リストア実行
-  const restoreRunId = generateId("rst");
+  let restoreMutation;
   try {
-    await adapter.applyRestore(db, restoreTarget, strategy, {
+    restoreMutation = adapter.buildRestoreMutation(db, target, strategy, {
       forceOverwrite,
       actorUserId: userId,
+      expectedCurrent: current,
     });
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    await db
-      .update(auditLogs)
-      .set({ restore_status: RestoreStatus.failed })
-      .where(eq(auditLogs.id, auditId));
-
-    await db.insert(auditRestoreRuns).values({
-      id: restoreRunId,
-      audit_log_id: auditId,
-      executed_by_user_id: userId,
-      reason,
-      status: "failed",
-      error_message: errMsg,
-      executed_at: now,
-    });
-
-    return { ok: false, message: `リストア実行中にエラーが発生しました: ${errMsg}` };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "復元mutationを作成できません。" };
   }
 
-  // 元ログを restored に更新
-  await db
-    .update(auditLogs)
-    .set({ restore_status: RestoreStatus.restored })
-    .where(eq(auditLogs.id, auditId));
+  const restoreRunId = generateId("rst");
+  try {
+    await mutateWithAudit(db, {
+      mutationStatements: [restoreMutation.query],
+      expectedMutationChanges: restoreMutation.expectedChanges,
+      audits: [{
+        table_name: log.table_name,
+        target_id: log.target_id,
+        operation: AuditOperation.RESTORE,
+        before: current,
+        after: target,
+        actor_user_id: userId,
+        reason,
+        context: `restore:${auditId}`,
+        retention_class: "long_audit",
+        restore_strategy: RestoreStrategy.none,
+        strict: true,
+      }],
+      postAuditStatements: [
+        db.update(auditLogs)
+          .set({ restore_status: RestoreStatus.restored })
+          .where(and(eq(auditLogs.id, auditId), sql`${auditLogs.restore_status} <> 'restored'`)!),
+        db.run(assertChanges(1)),
+        db.insert(auditRestoreRuns).values({
+          id: restoreRunId,
+          audit_log_id: auditId,
+          executed_by_user_id: userId,
+          reason,
+          status: "success",
+          error_message: null,
+          executed_at: now,
+        }),
+        db.run(assertChanges(1)),
+      ],
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      message: `復元を確定できませんでした。変更はロールバックされました: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 
-  // audit_restore_runs に記録
-  await db.insert(auditRestoreRuns).values({
-    id: restoreRunId,
-    audit_log_id: auditId,
-    executed_by_user_id: userId,
-    reason,
-    status: "success",
-    error_message: null,
-    executed_at: now,
-  });
-
-  // RESTORE 監査ログ書き込み
-  await writeAuditLog(db, {
-    table_name: log.table_name,
-    target_id: log.target_id,
-    operation: AuditOperation.RESTORE,
-    before: current,
-    after: restoreTarget,
-    actor_user_id: userId,
-    reason,
-    retention_class: "long_audit",
-    context: "restore",
-  }).catch(() => {
-    // RESTORE ログ書き込み失敗は致命的ではないので無視
-  });
-
-  return {
-    ok: true,
-    message: "リストアが完了しました。",
-    restore_run_id: restoreRunId,
-  };
+  return { ok: true, message: "復元が完了しました。", restore_run_id: restoreRunId };
 }

@@ -106,7 +106,7 @@ export function getNotificationFailureGuidance(input: {
     return {
       summary: "Discord ユーザーが見つかりません。",
       nextSteps: [
-        "discord_user_id が正しいか users / accounts を確認",
+        "recipient_user_id と users の紐付きを確認",
         "連携解除済みなら通知をキャンセルする",
       ],
     };

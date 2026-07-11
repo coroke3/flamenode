@@ -68,7 +68,7 @@ export async function createApiEndpoint(
       public_api_enabled: current.public_api_enabled ?? 0,
     }),
     after_data: JSON.stringify({ public_api_enabled: 1 }),
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "long_audit",
   });
 
@@ -118,7 +118,7 @@ export async function setApiEndpointActive(
       public_api_enabled: current.public_api_enabled ?? 0,
     }),
     after_data: JSON.stringify({ public_api_enabled: next }),
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "long_audit",
   });
 

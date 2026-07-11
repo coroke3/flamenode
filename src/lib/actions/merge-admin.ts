@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import {
@@ -15,7 +15,8 @@ import {
   xUserIcons,
   xUsers,
 } from "@/lib/db/schema";
-import { auditAction } from "@/lib/audit/helpers";
+import { mutateWithAudit } from "@/lib/audit/mutate";
+import { planXIdMergeEventStaffOwnerProtection } from "@/lib/event/eventOwnershipCore";
 import { normalizeXId } from "@/lib/utils/xid";
 
 export interface MergeXIdsResult {
@@ -77,8 +78,9 @@ export async function mergeXIds(
 
   const now = Math.floor(Date.now() / 1000);
 
-  // 影響件数を事前集計
-  const [vc, cc, mc, sc, ic, ec, iconc, aliasOwnerc, aliasRefc] = await Promise.all([
+  // 影響件数と owner 競合を事前集計する。後続 batch の changes() 検査に使うため、
+  // 同時更新が発生した場合は fail-closed で全操作を rollback する。
+  const [vc, cc, mc, sc, ic, ec, iconc, aliasOwnerc, aliasRefc, aliasSourceRefc, interactionCollisionc, iconCollisionc, aliasCollisionc, linkRequestc, affectedStaff] = await Promise.all([
     db
       .select({ c: sql<number>`COUNT(*)` })
       .from(videos)
@@ -115,6 +117,61 @@ export async function mergeXIds(
       .select({ c: sql<number>`COUNT(*)` })
       .from(xUserAliases)
       .where(eq(xUserAliases.alias_x_id, fromXId)),
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(xUserAliases)
+      .where(and(
+        eq(xUserAliases.x_user_id, fromXId),
+        eq(xUserAliases.alias_x_id, fromXId),
+      )!),
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(videoInteractions)
+      .where(sql`
+        ${videoInteractions.x_user_id} = ${fromXId}
+        AND EXISTS (
+          SELECT 1 FROM video_interactions b
+          WHERE b.x_user_id = ${toXId}
+            AND b.video_id = ${videoInteractions.video_id}
+            AND b.interaction_type = ${videoInteractions.interaction_type}
+        )
+      `),
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(xUserIcons)
+      .where(sql`
+        ${xUserIcons.x_user_id} = ${fromXId}
+        AND EXISTS (
+          SELECT 1 FROM x_user_icons b
+          WHERE b.x_user_id = ${toXId}
+            AND b.icon_url = ${xUserIcons.icon_url}
+        )
+      `),
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(xUserAliases)
+      .where(sql`
+        ${xUserAliases.x_user_id} = ${fromXId}
+        AND ${xUserAliases.alias_x_id} <> ${fromXId}
+        AND EXISTS (
+          SELECT 1 FROM x_user_aliases b
+          WHERE b.x_user_id = ${toXId}
+            AND b.alias_x_id = ${xUserAliases.alias_x_id}
+        )
+      `),
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(sql`x_account_link_requests`)
+      .where(sql`
+        status = 'pending'
+          AND link_type = 'merge'
+          AND requested_x_id = ${fromXId}
+          AND target_x_user_id = ${toXId}
+      `),
+    db
+      .select()
+      .from(eventStaff)
+      .where(inArray(eventStaff.x_user_id, [fromXId, toXId])),
   ]);
   const counts = {
     videos: Number(vc[0]?.c ?? 0),
@@ -128,116 +185,173 @@ export async function mergeXIds(
     x_user_aliases_ref: Number(aliasRefc[0]?.c ?? 0),
   };
 
-  // video_interactions UNIQUE 衝突対策: 旧 ID の (video_id, interaction_type) が
-  // 新 ID にも存在する場合は旧 ID 側を先に削除する。
-  await db.run(sql`
-    DELETE FROM video_interactions
-    WHERE x_user_id = ${fromXId}
-      AND EXISTS (
-        SELECT 1 FROM video_interactions b
-        WHERE b.x_user_id = ${toXId}
-          AND b.video_id = video_interactions.video_id
-          AND b.interaction_type = video_interactions.interaction_type
-      )
-  `);
-
-  // event_staff の UNIQUE 制約 (event_id, x_user_id) 衝突対策: 旧側 (旧 ID + 同 event) を削除
-  await db.run(sql`
-    DELETE FROM event_staff
-    WHERE x_user_id = ${fromXId}
-      AND EXISTS (
-        SELECT 1 FROM event_staff b
-        WHERE b.x_user_id = ${toXId}
-          AND b.event_id = event_staff.event_id
-      )
-  `);
-
-  // x_user_icons の UNIQUE 制約 (x_user_id, icon_url) 衝突対策。
-  await db.run(sql`
-    DELETE FROM x_user_icons
-    WHERE x_user_id = ${fromXId}
-      AND EXISTS (
-        SELECT 1 FROM x_user_icons b
-        WHERE b.x_user_id = ${toXId}
-          AND b.icon_url = x_user_icons.icon_url
-      )
-  `);
-
-  // x_user_aliases の owner 側を付け替える前に同一 alias の衝突を除去。
-  await db.run(sql`
-    DELETE FROM x_user_aliases
-    WHERE x_user_id = ${fromXId}
-      AND EXISTS (
-        SELECT 1 FROM x_user_aliases b
-        WHERE b.x_user_id = ${toXId}
-          AND b.alias_x_id = x_user_aliases.alias_x_id
-      )
-  `);
-
-  // 旧 ID 自身を alias として追加するため、旧 ID を alias 側に持つ行は重複元として削除。
-  await db
-    .delete(xUserAliases)
-    .where(eq(xUserAliases.alias_x_id, fromXId));
-
-  // 各テーブルで x_user_id / creator_x_user_id を付け替え
-  await db.update(videos).set({ creator_x_user_id: toXId }).where(eq(videos.creator_x_user_id, fromXId));
-  await db.update(videoChapters).set({ x_user_id: toXId }).where(eq(videoChapters.x_user_id, fromXId));
-  await db.update(videoMembers).set({ x_user_id: toXId }).where(eq(videoMembers.x_user_id, fromXId));
-  await db.update(slots).set({ x_user_id: toXId }).where(eq(slots.x_user_id, fromXId));
-  await db
-    .update(videoInteractions)
-    .set({ x_user_id: toXId })
-    .where(eq(videoInteractions.x_user_id, fromXId));
-  await db
-    .update(eventStaff)
-    .set({ x_user_id: toXId })
-    .where(eq(eventStaff.x_user_id, fromXId));
-  await db
-    .update(xUserIcons)
-    .set({ x_user_id: toXId })
-    .where(eq(xUserIcons.x_user_id, fromXId));
-  await db
-    .update(xUserAliases)
-    .set({ x_user_id: toXId })
-    .where(eq(xUserAliases.x_user_id, fromXId));
-
-  // x_user_aliases に旧 ID を新 ID の別名として記録 (重複は ON CONFLICT で無視)
-  try {
-    await db
-      .insert(xUserAliases)
-      .values({ x_user_id: toXId, alias_x_id: fromXId })
-      .onConflictDoNothing();
-  } catch {
-    // composite PK 重複は無視
-  }
-
-  // 旧 x_users の Discord 紐付けを外す (行自体は保持)
-  await db
-    .update(xUsers)
-    .set({ linked_discord_user_id: null })
-    .where(and(eq(xUsers.id, fromXId))!);
-
-  // pending 状態の x_account_link_requests (link_type=merge, requested_x_id=fromXId, target_x_user_id=toXId)
-  // を一括で approved にする (UI からの承認ボタンを兼ねる)
-  await db.run(sql`
-    UPDATE x_account_link_requests
-    SET status = 'approved'
-    WHERE status = 'pending'
-      AND link_type = 'merge'
-      AND requested_x_id = ${fromXId}
-      AND target_x_user_id = ${toXId}
-  `);
-
-  // 監査ログ (long_audit)
-  await auditAction(db, {
-    table_name: "x_users",
-    record_id: fromXId,
-    action: "UPDATE",
-    before_data: { x_user_id: fromXId, linked_discord_user_id: fromRow[0].linked_discord_user_id },
-    after_data: { merged_into: toXId, counts, executor: u.id },
-    operator_discord_id: u.id,
-    retention_class: "long_audit",
+  const mergeOwnerPlan = planXIdMergeEventStaffOwnerProtection({
+    rows: affectedStaff,
+    fromXUserId: fromXId,
+    toXUserId: toXId,
   });
+  const collidedSourceStaffIds = new Set(mergeOwnerPlan.collidedSourceStaffIds);
+  const promotedTargetStaffIds = new Set(mergeOwnerPlan.promotedTargetStaffIds);
+  const collisionCount = collidedSourceStaffIds.size;
+  const promotionCount = promotedTargetStaffIds.size;
+  const interactionCollisionCount = Number(interactionCollisionc[0]?.c ?? 0);
+  const iconCollisionCount = Number(iconCollisionc[0]?.c ?? 0);
+  const aliasCollisionCount = Number(aliasCollisionc[0]?.c ?? 0);
+  const aliasSourceRefCount = Number(aliasSourceRefc[0]?.c ?? 0);
+  const linkRequestCount = Number(linkRequestc[0]?.c ?? 0);
+  const mergedStaffAfter = affectedStaff
+    .filter((row) => !collidedSourceStaffIds.has(row.id))
+    .map((row) => {
+      if (promotedTargetStaffIds.has(row.id)) {
+        return {
+          ...row,
+          permission_preset: "owner" as const,
+          role: "representative" as const,
+          updated_at: now,
+        };
+      }
+      if (row.x_user_id === fromXId) {
+        return { ...row, x_user_id: toXId, updated_at: now };
+      }
+      return row;
+    });
+
+  try {
+    await mutateWithAudit(db, {
+      mutationStatements: [
+        db.run(sql`
+          DELETE FROM video_interactions
+          WHERE x_user_id = ${fromXId}
+            AND EXISTS (
+              SELECT 1 FROM video_interactions b
+              WHERE b.x_user_id = ${toXId}
+                AND b.video_id = video_interactions.video_id
+                AND b.interaction_type = video_interactions.interaction_type
+            )
+        `),
+        db.run(sql`
+          UPDATE event_staff
+          SET permission_preset = 'owner', role = 'representative', updated_at = ${now}
+          WHERE x_user_id = ${toXId}
+            AND EXISTS (
+              SELECT 1 FROM event_staff source
+              WHERE source.x_user_id = ${fromXId}
+                AND source.event_id = event_staff.event_id
+                AND source.permission_preset = 'owner'
+            )
+            AND permission_preset <> 'owner'
+        `),
+        db.run(sql`
+          DELETE FROM event_staff
+          WHERE x_user_id = ${fromXId}
+            AND EXISTS (
+              SELECT 1 FROM event_staff b
+              WHERE b.x_user_id = ${toXId}
+                AND b.event_id = event_staff.event_id
+            )
+        `),
+        db.run(sql`
+          DELETE FROM x_user_icons
+          WHERE x_user_id = ${fromXId}
+            AND EXISTS (
+              SELECT 1 FROM x_user_icons b
+              WHERE b.x_user_id = ${toXId}
+                AND b.icon_url = x_user_icons.icon_url
+            )
+        `),
+        db.run(sql`
+          DELETE FROM x_user_aliases WHERE alias_x_id = ${fromXId}
+        `),
+        db.run(sql`
+          DELETE FROM x_user_aliases
+          WHERE x_user_id = ${fromXId}
+            AND alias_x_id <> ${fromXId}
+            AND EXISTS (
+              SELECT 1 FROM x_user_aliases b
+              WHERE b.x_user_id = ${toXId}
+                AND b.alias_x_id = x_user_aliases.alias_x_id
+            )
+        `),
+        db.run(sql`UPDATE videos SET creator_x_user_id = ${toXId} WHERE creator_x_user_id = ${fromXId}`),
+        db.run(sql`UPDATE video_chapters SET x_user_id = ${toXId} WHERE x_user_id = ${fromXId}`),
+        db.run(sql`UPDATE video_members SET x_user_id = ${toXId} WHERE x_user_id = ${fromXId}`),
+        db.run(sql`UPDATE slots SET x_user_id = ${toXId} WHERE x_user_id = ${fromXId}`),
+        db.run(sql`UPDATE video_interactions SET x_user_id = ${toXId} WHERE x_user_id = ${fromXId}`),
+        db.run(sql`
+          UPDATE event_staff
+          SET x_user_id = ${toXId}, updated_at = ${now}
+          WHERE x_user_id = ${fromXId}
+        `),
+        db.run(sql`UPDATE x_user_icons SET x_user_id = ${toXId} WHERE x_user_id = ${fromXId}`),
+        db.run(sql`UPDATE x_user_aliases SET x_user_id = ${toXId} WHERE x_user_id = ${fromXId}`),
+        db.run(sql`INSERT INTO x_user_aliases (x_user_id, alias_x_id) VALUES (${toXId}, ${fromXId})`),
+        db.run(sql`UPDATE x_users SET linked_user_id = NULL WHERE id = ${fromXId}`),
+        db.run(sql`
+          UPDATE x_account_link_requests
+          SET status = 'approved'
+          WHERE status = 'pending'
+            AND link_type = 'merge'
+            AND requested_x_id = ${fromXId}
+            AND target_x_user_id = ${toXId}
+        `),
+      ],
+      expectedMutationChanges: [
+        interactionCollisionCount,
+        promotionCount,
+        collisionCount,
+        iconCollisionCount,
+        counts.x_user_aliases_ref,
+        aliasCollisionCount,
+        counts.videos,
+        counts.video_chapters,
+        counts.video_members,
+        counts.slots,
+        counts.video_interactions - interactionCollisionCount,
+        counts.event_staff - collisionCount,
+        counts.x_user_icons - iconCollisionCount,
+        counts.x_user_aliases_owner - aliasSourceRefCount - aliasCollisionCount,
+        1,
+        1,
+        linkRequestCount,
+      ],
+      audits: [{
+        table_name: "x_users",
+        target_id: fromXId,
+        operation: "MERGE",
+        before: {
+          from_x_user: fromRow[0],
+          to_x_user: toRow[0],
+          event_staff: affectedStaff,
+          counts,
+        },
+        after: {
+          from_x_user: { ...fromRow[0], linked_user_id: null },
+          to_x_user: toRow[0],
+          event_staff: mergedStaffAfter,
+          merged_into: toXId,
+          counts,
+          collision_counts: {
+            video_interactions: interactionCollisionCount,
+            event_staff: collisionCount,
+            promoted_event_staff: promotionCount,
+            x_user_icons: iconCollisionCount,
+            x_user_aliases: aliasCollisionCount,
+          },
+        },
+        actor_user_id: u.id,
+        reason: "管理者による X ID 統合",
+        context: "x-id-merge",
+        retention_class: "long_audit",
+        restore_strategy: "none",
+        strict: true,
+      }],
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "X ID 統合を安全に確定できませんでした。",
+    };
+  }
 
   revalidatePath("/admin/x-link-requests");
   revalidatePath(`/admin/users`);

@@ -59,7 +59,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
       xIds = await db
         .select()
         .from(xUsersTable)
-        .where(eq(xUsersTable.linked_discord_user_id, user.id));
+        .where(eq(xUsersTable.linked_user_id, user.id));
 
       // マイ・ギャラリーは現在の活動名義を確認する場所なので、
       // 表示対象をアクティブかつ承認済みの X ID に固定する。
@@ -116,9 +116,9 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
       const slotOwnerWhere = activeX
         ? or(
             eq(slotsTable.x_user_id, activeX),
-            and(isNull(slotsTable.x_user_id), eq(slotsTable.discord_user_id, user.id))!,
+            and(isNull(slotsTable.x_user_id), eq(slotsTable.reserved_by_user_id, user.id))!,
           )
-        : eq(slotsTable.discord_user_id, user.id);
+        : eq(slotsTable.reserved_by_user_id, user.id);
       const slotRows = await db
         .select()
         .from(slotsTable)

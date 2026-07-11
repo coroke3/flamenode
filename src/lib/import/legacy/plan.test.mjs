@@ -74,7 +74,7 @@ describe("buildLegacyImportPlan", () => {
     }
   });
 
-  it("sets event_staff permission_preset to manager (not owner) for representative", () => {
+  it("sets event_staff permission_preset to owner for representative", () => {
     const eventResult = normalizeEventInfo({
       eventid: "ev1",
       eventname: "Test",
@@ -85,8 +85,7 @@ describe("buildLegacyImportPlan", () => {
     const plan = buildLegacyImportPlan([eventResult], [], NOW);
     const hostStaff = plan.eventStaff.find((s) => s.x_user_id === "host_user");
     assert.ok(hostStaff);
-    // owner ではなく manager になる
-    assert.equal(hostStaff.permission_preset, "manager");
+    assert.equal(hostStaff.permission_preset, "owner");
     assert.ok(!("permission_mask" in hostStaff));
   });
 

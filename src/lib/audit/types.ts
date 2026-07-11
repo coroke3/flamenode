@@ -1,4 +1,5 @@
 import type { DB } from "@/lib/db/client";
+import type { BatchItem } from "drizzle-orm/batch";
 
 // ============================================================
 // 監査ログ操作種別
@@ -104,7 +105,7 @@ export interface AuditLogSettings {
 // ============================================================
 
 export interface ActorSnapshot {
-  discord_user_id: string | null;
+  discord_id: string | null;
   discord_name: string | null;
   x_user_id: string | null;
   x_name: string | null;
@@ -144,14 +145,29 @@ export interface RestoreResult {
 // ============================================================
 
 export interface RestoreAdapter {
+  /** このアダプターが安全に実装している復元戦略。 */
+  supportedStrategies: readonly RestoreStrategy[];
   fetchCurrent(
     db: DB,
     targetId: string,
   ): Promise<Record<string, unknown> | null>;
-  applyRestore(
+  /**
+   * D1 batch に直接渡せる復元 mutation を返す。
+   * `applyRestore` のように個別クエリを実行してはいけない。呼び出し元が
+   * audit_logs / audit_restore_runs / RESTORE 監査ログと一つの batch にする。
+   */
+  buildRestoreMutation(
     db: DB,
-    before: Record<string, unknown>,
+    snapshot: Record<string, unknown>,
     strategy: RestoreStrategy,
-    options: { forceOverwrite?: boolean; actorUserId: string },
-  ): Promise<void>;
+    options: {
+      forceOverwrite?: boolean;
+      actorUserId: string;
+      /** 復元前の再検証に使う、読み出し時点の現行行。 */
+      expectedCurrent?: Record<string, unknown> | null;
+    },
+  ): {
+    query: BatchItem<"sqlite">;
+    expectedChanges: number;
+  };
 }

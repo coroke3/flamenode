@@ -35,8 +35,10 @@ export default async function AdminLayout({
   return (
     <div data-admin-shell data-fn-surface="admin">
       <PublicHeader user={user} />
-      <ConsoleShell>
-        <ConsoleSidebar consoleMode="admin" />
+      <ConsoleShell
+        consoleMode="admin"
+        navigation={<ConsoleSidebar consoleMode="admin" />}
+      >
         <main className="admin-main">{children}</main>
       </ConsoleShell>
       <PublicFooter />

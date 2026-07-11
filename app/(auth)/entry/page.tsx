@@ -35,7 +35,7 @@ type ReservedSlot = {
   start_time: number | null;
   sort_order: number | null;
   status: "available" | "reserved" | "submitted";
-  discord_user_id: string | null;
+  reserved_by_user_id: string | null;
   x_user_id: string | null;
   display_name: string | null;
   reservation_group_id: string | null;
@@ -43,6 +43,7 @@ type ReservedSlot = {
   priority_reclaim_video_id: string | null;
   updated_at: number;
   event_title: string | null;
+  event_entry_end_time: number | null;
 };
 
 export default async function EntryPage({
@@ -106,9 +107,9 @@ export default async function EntryPage({
     const ownerWhere = activeX
       ? or(
           eq(slotsTable.x_user_id, activeX),
-          and(isNull(slotsTable.x_user_id), eq(slotsTable.discord_user_id, sessionUser.id))!,
+          and(isNull(slotsTable.x_user_id), eq(slotsTable.reserved_by_user_id, sessionUser.id))!,
         )
-      : eq(slotsTable.discord_user_id, sessionUser.id);
+      : eq(slotsTable.reserved_by_user_id, sessionUser.id);
     reservedSlots = await db
       .select({
         id: slotsTable.id,
@@ -119,7 +120,7 @@ export default async function EntryPage({
         start_time: slotsTable.start_time,
         sort_order: slotsTable.sort_order,
         status: slotsTable.status,
-        discord_user_id: slotsTable.discord_user_id,
+        reserved_by_user_id: slotsTable.reserved_by_user_id,
         x_user_id: slotsTable.x_user_id,
         display_name: slotsTable.display_name,
         reservation_group_id: slotsTable.reservation_group_id,
@@ -127,6 +128,7 @@ export default async function EntryPage({
         priority_reclaim_video_id: slotsTable.priority_reclaim_video_id,
         updated_at: slotsTable.updated_at,
         event_title: eventsTable.title,
+        event_entry_end_time: eventsTable.entry_end_time,
       })
       .from(slotsTable)
       .leftJoin(eventsTable, eq(slotsTable.event_id, eventsTable.id))
@@ -140,7 +142,20 @@ export default async function EntryPage({
       .limit(12);
   }
 
-  const displaySlots = collapseReservationGroups(reservedSlots as SlotBase[]);
+  type EntrySlotGroup = ReturnType<typeof collapseReservationGroups>[number] & {
+    event_entry_end_time?: number | null;
+  };
+  const displaySlots = (collapseReservationGroups(
+    reservedSlots as SlotBase[],
+  ) as EntrySlotGroup[]).sort((a, b) => {
+    const aNeedsSubmission = !a.video_id && a.status === "reserved";
+    const bNeedsSubmission = !b.video_id && b.status === "reserved";
+    if (aNeedsSubmission !== bNeedsSubmission) return aNeedsSubmission ? -1 : 1;
+    const aDeadline = a.event_entry_end_time ?? Number.POSITIVE_INFINITY;
+    const bDeadline = b.event_entry_end_time ?? Number.POSITIVE_INFINITY;
+    if (aDeadline !== bDeadline) return aDeadline - bDeadline;
+    return (a.start_time ?? Number.POSITIVE_INFINITY) - (b.start_time ?? Number.POSITIVE_INFINITY);
+  });
   const canPost = onboarding.canPost;
 
   return (
@@ -243,6 +258,56 @@ export default async function EntryPage({
             <li>作品情報を登録</li>
             <li>YouTube URL を登録</li>
           </ol>
+          {displaySlots.length > 0 ? (
+            <div className={`${styles.slotPanel} ${styles.slotPanelProminent}`} aria-labelledby="post-slotted-card">
+              <div className={styles.slotPanelHeader}>
+                <h3 id="post-slotted-card" className={styles.slotPanelTitle}>
+                  <Icon name="check" size={14} aria-hidden />
+                  確保済み枠に提出する
+                </h3>
+                <span className={styles.slotPanelCount}>{displaySlots.length}件</span>
+              </div>
+              <p className={styles.slotPanelLead}>
+                未提出の枠から先に表示しています。連続枠は1つの提出として扱います。
+              </p>
+              <ul className="fn-pc-slot-list">
+                {displaySlots.map((slot) => {
+                  const needsSubmission = !slot.video_id && slot.status === "reserved";
+                  const slotHref = resolveWriteHref(`/entry/slotted?slot=${slot.id}`);
+                  return (
+                    <li key={slot.id}>
+                      <div className={styles.slotRow}>
+                        <Link href={slotHref} className="fn-pc-slot">
+                          <span className="fn-pc-slot-info">
+                            <span className="fn-pc-slot-label">{slot.event_title ?? slot.event_id}</span>
+                            <span className="fn-mono fn-pc-slot-event">
+                              {slot.start_time
+                                ? `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(slot.start_time, { timeOnly: true })}`
+                                : (slot.slot_label ?? "時間なし枠")}
+                              {slot.is_group ? ` / ${slot.group_size}連続` : ""}
+                            </span>
+                            {slot.event_entry_end_time != null ? (
+                              <span className={styles.slotDeadline}>
+                                提出期限: {formatUnix(slot.event_entry_end_time)}
+                              </span>
+                            ) : null}
+                          </span>
+                          {!needsSubmission ? <Icon name="chevron-right" size={13} aria-hidden /> : null}
+                        </Link>
+                        {needsSubmission ? (
+                          <Link href={slotHref} className="fn-btn fn-btn-primary fn-btn-sm">
+                            作品情報の登録を続ける
+                          </Link>
+                        ) : (
+                          <span className={styles.slotSubmitted}>提出済み</span>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ) : null}
           <div className={styles.eventList}>
             {activeEvents.length === 0 ? (
               <p className="fn-text-muted-sm">現在受付中のイベントはありません。</p>
@@ -304,56 +369,6 @@ export default async function EntryPage({
             </div>
           ) : null}
 
-          {displaySlots.length > 0 ? (
-            <div className={styles.slotPanel} aria-labelledby="post-slotted-card">
-              <h3 id="post-slotted-card" className={styles.slotPanelTitle}>
-                <Icon name="check" size={14} aria-hidden />
-                確保済み枠に提出する
-              </h3>
-              <p className={styles.slotPanelLead}>
-                予約済みのイベント枠に作品情報を紐付けます。連続枠も1つの提出として扱います。
-              </p>
-              <ul className="fn-pc-slot-list">
-                {displaySlots.map((slot) => {
-                  const needsSubmission =
-                    !slot.video_id && slot.status === "reserved";
-                  const slotHref = resolveWriteHref(
-                    `/entry/slotted?slot=${slot.id}`,
-                  );
-                  return (
-                    <li key={slot.id}>
-                      <div className={styles.slotRow}>
-                        <Link href={slotHref} className="fn-pc-slot">
-                          <span className="fn-pc-slot-info">
-                            <span className="fn-pc-slot-label">
-                              {slot.event_title ?? slot.event_id}
-                            </span>
-                            <span className="fn-mono fn-pc-slot-event">
-                              {slot.start_time
-                                ? `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(slot.start_time, { timeOnly: true })}`
-                                : (slot.slot_label ?? "時間なし枠")}
-                              {slot.is_group ? ` / ${slot.group_size}連続` : ""}
-                            </span>
-                          </span>
-                          {!needsSubmission ? (
-                            <Icon name="chevron-right" size={13} aria-hidden />
-                          ) : null}
-                        </Link>
-                        {needsSubmission ? (
-                          <Link
-                            href={slotHref}
-                            className="fn-btn fn-btn-primary fn-btn-sm"
-                          >
-                            登録を続ける
-                          </Link>
-                        ) : null}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ) : null}
         </section>
 
         <section

@@ -19,7 +19,6 @@ export const MODERATION_VIDEO_STATUSES = [
   "public",
   "limited",
   "private",
-  "hidden",
   "archived",
   "voided",
 ] as const;

@@ -208,7 +208,7 @@ async function writeHistory(opts: {
       action: opts.action,
       before_data: opts.before != null ? JSON.stringify(opts.before) : null,
       after_data: opts.after != null ? JSON.stringify(opts.after) : null,
-      operator_discord_id: opts.operatorId,
+      operator_user_id: opts.operatorId,
       retention_class: "long_audit",
     });
   } catch {

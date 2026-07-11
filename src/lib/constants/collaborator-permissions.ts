@@ -65,7 +65,6 @@ export type VideoVisibilityStatus =
   | "public"
   | "limited"
   | "private"
-  | "hidden"
   | "archived"
   | "voided";
 
@@ -92,10 +91,6 @@ export const VIDEO_STATUS_LABELS: Record<
   private: {
     label: "非公開",
     description: "投稿者本人と管理者だけが閲覧できる状態です。",
-  },
-  hidden: {
-    label: "手動非表示",
-    description: "運営判断で通常導線から隠している状態です。",
   },
   archived: {
     label: "アーカイブ",

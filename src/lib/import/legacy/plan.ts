@@ -4,7 +4,7 @@
  * - ソフトウェアカタログの重複排除
  * - イベントごとのデフォルトカスタム質問（stage_permission / stage_participation / production_experience）
  * - video_custom_answers のマッピング
- * - event_staff は representative_candidate → "manager", 他 → "public_staff"
+ * - event_staff は代表者を必ず "owner"、他を "public_staff" に正規化
  */
 
 import type {
@@ -130,9 +130,19 @@ export function buildLegacyImportPlan(
   // どのイベントがカスタム質問を必要とするか後で計算するため、
   // 先にビデオ→イベントIDのマッピングを準備
   const videoEventIds = new Set<string>();
+  const creatorCandidatesByEvent = new Map<string, string[]>();
   for (const v of normalizedVideos) {
     if (v.ok && v.video) {
-      for (const eid of v.eventIds) videoEventIds.add(eid);
+      for (const eid of v.eventIds) {
+        videoEventIds.add(eid);
+        if (v.video.creator_x_user_id) {
+          const candidates = creatorCandidatesByEvent.get(eid) ?? [];
+          if (!candidates.includes(v.video.creator_x_user_id)) {
+            candidates.push(v.video.creator_x_user_id);
+          }
+          creatorCandidatesByEvent.set(eid, candidates);
+        }
+      }
     }
   }
 
@@ -152,6 +162,56 @@ export function buildLegacyImportPlan(
     }
 
     const ev = e.event;
+    // event_staff: 代表者は owner、他は public_staff。event ごとの owner 不在は
+    // 後段の書込みを許さない入力エラーとして扱う。
+    const ownerXUserId =
+      ev.representative_x_user_id ??
+      creatorCandidatesByEvent.get(ev.id)?.[0] ??
+      null;
+    if (!ev.representative_x_user_id && ownerXUserId) {
+      warnings.push({
+        source: `event:${ev.id}`,
+        message: `代表者情報がないため、最初の作品投稿者 @${ownerXUserId} を owner として取り込みます。`,
+      });
+    }
+    const staffForEvent: CanonicalEventStaff[] = [];
+    let hasOwner = false;
+    for (const ed of e.editors) {
+      const staffId = `legacy_es_${ev.id}_${ed.x_user_id}`;
+      const preset: CanonicalEventStaff["permission_preset"] =
+        ed.is_representative_candidate || ed.x_user_id === ownerXUserId
+        ? "owner"
+        : "public_staff";
+      if (preset === "owner") hasOwner = true;
+      staffForEvent.push({
+        id: staffId,
+        event_id: ev.id,
+        x_user_id: ed.x_user_id,
+        display_name: ed.x_name ?? `@${ed.x_user_id}`,
+        permission_preset: preset,
+        is_public: ed.is_public,
+        public_role_label: ed.public_role_label,
+      });
+    }
+    if (!hasOwner && ownerXUserId) {
+      staffForEvent.push({
+        id: `legacy_es_${ev.id}_${ownerXUserId}`,
+        event_id: ev.id,
+        x_user_id: ownerXUserId,
+        display_name: `@${ownerXUserId}`,
+        permission_preset: "owner",
+        is_public: 0,
+        public_role_label: null,
+      });
+      hasOwner = true;
+    }
+    if (!hasOwner) {
+      errors.push({
+        source: `event:${ev.id}`,
+        message: "イベント代表者を特定できないため、owner を持つ event_staff を作成できません。",
+      });
+      continue;
+    }
     events.push({
       id: ev.id,
       title: ev.title,
@@ -162,25 +222,9 @@ export function buildLegacyImportPlan(
       start_time: ev.start_time,
       end_time: ev.end_time,
       visibility_status: ev.visibility_status,
-      representative_x_user_id: ev.representative_x_user_id,
+      representative_x_user_id: ownerXUserId,
     });
-
-    // event_staff: representative_candidate → "manager", other → "public_staff"
-    for (const ed of e.editors) {
-      const staffId = `legacy_es_${ev.id}_${ed.x_user_id}`;
-      const preset: CanonicalEventStaff["permission_preset"] = ed.is_representative_candidate
-        ? "manager"
-        : "public_staff";
-      eventStaff.push({
-        id: staffId,
-        event_id: ev.id,
-        x_user_id: ed.x_user_id,
-        display_name: ed.x_name ?? `@${ed.x_user_id}`,
-        permission_preset: preset,
-        is_public: ed.is_public,
-        public_role_label: ed.public_role_label,
-      });
-    }
+    eventStaff.push(...staffForEvent);
 
     // デフォルトカスタム質問 (イベントにビデオが紐付いている場合のみ)
     if (videoEventIds.has(ev.id)) {

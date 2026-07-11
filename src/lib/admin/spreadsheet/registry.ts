@@ -88,7 +88,7 @@ export const SPREADSHEET_TABLE_OVERRIDES: Record<string, SpreadsheetTableOverrid
       group: "システム",
       mode: "readonly",
     },
-    history_logs: { label: "履歴ログ", group: "システム", mode: "readonly" },
+    audit_logs: { label: "監査ログ", group: "システム", mode: "readonly" },
     system_settings: { label: "システム設定", group: "システム", mode: "editable" },
     cost_usage_snapshots: {
       label: "コスト snapshot",
@@ -169,7 +169,7 @@ const DEFAULT_READONLY_TABLES = new Set([
   "user_tos_consents",
   "x_id_merge_reverts",
   "notification_outbox",
-  "history_logs",
+  "audit_logs",
   "cost_usage_snapshots",
 ]);
 
@@ -209,7 +209,7 @@ function inferGroup(table: string): string {
   }
   if (
     table === "notification_outbox" ||
-    table === "history_logs" ||
+    table === "audit_logs" ||
     table === "system_settings" ||
     table === "cost_usage_snapshots"
   ) {

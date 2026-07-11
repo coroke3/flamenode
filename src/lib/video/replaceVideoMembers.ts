@@ -94,7 +94,7 @@ export async function replaceVideoMembers(
       order_index: i,
       is_public_member: 1,
       can_edit: carry?.can_edit ?? 0,
-      discord_user_id: carry?.discord_user_id ?? null,
+      user_id: carry?.user_id ?? null,
       edit_granted_by_user_id: carry?.edit_granted_by_user_id ?? null,
       edit_granted_at: carry?.edit_granted_at ?? null,
       edit_updated_at: carry?.edit_updated_at ?? null,

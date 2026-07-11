@@ -1,4 +1,11 @@
-# FlameNode 運用手順
+# FlameNode 運用手順（pre-baseline履歴）
+
+> Status: Historical
+> Replaced by: `docs/operations/README.md`
+> Retained for: baseline再作成前の運用経緯の保存
+
+> このファイル以下の手順・migration一覧・旧列名は現行運用の根拠として使用しない。
+> 現行の正本は `docs/operations/README.md` とそこからリンクするActive文書である。
 
 最終更新: 2026-07-06
 

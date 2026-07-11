@@ -122,7 +122,7 @@ export async function saveEventAsTemplate(
     record_id: id,
     action: "CREATE",
     after_data: { name: parsed.data.name, source_event_id: event.id },
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "normal",
   });
 
@@ -165,7 +165,7 @@ export async function deleteEventTemplate(
     record_id: templateId,
     action: "DELETE",
     after_data: { name: row.name },
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "normal",
   });
 

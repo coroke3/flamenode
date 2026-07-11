@@ -24,7 +24,7 @@ export async function buildActorSnapshot(
 
   if (!user) {
     return {
-      discord_user_id: null,
+      discord_id: null,
       discord_name: null,
       x_user_id: null,
       x_name: null,
@@ -52,7 +52,7 @@ export async function buildActorSnapshot(
   }
 
   return {
-    discord_user_id: user.discord_id ?? null,
+    discord_id: user.discord_id ?? null,
     discord_name: user.name ?? null,
     x_user_id: user.active_x_user_id ?? null,
     x_name,

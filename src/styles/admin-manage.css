@@ -931,6 +931,66 @@
   min-width: 0;
 }
 
+[data-manage-shell] .fn-console-frame {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 20px;
+  width: 100%;
+  min-width: 0;
+}
+
+[data-manage-shell] .admin-sidebar {
+  position: sticky;
+  top: calc(var(--header-h, 56px) + 16px);
+  align-self: start;
+  padding: 14px 12px 20px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+}
+
+[data-manage-shell] .admin-sidebar .console-sidebar-warn,
+[data-manage-shell] .admin-sidebar .console-sidebar-empty {
+  margin: 8px 10px 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+[data-manage-shell] .admin-sidebar .console-sidebar-warn {
+  margin-top: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--accent-warning);
+  background: var(--accent-warning-soft);
+}
+
+[data-manage-shell] .admin-sidebar .console-sidebar-event-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--event-accent, var(--accent-primary));
+}
+
+[data-manage-shell] .admin-sidebar [data-event-link="true"] {
+  border-left: 3px solid var(--event-accent, transparent);
+  padding-left: 8px;
+}
+
+/* モバイルでは横スクロールのナビを使わず、同じナビをドロワーとして表示する。 */
+.fn-console-navigation {
+  min-width: 0;
+}
+
+.fn-console-drawer-trigger,
+.fn-console-drawer-close,
+.fn-console-drawer-backdrop {
+  display: none;
+}
+
+.fn-console-drawer-panel {
+  min-width: 0;
+}
+
 [data-manage-shell] .manage-mode-banner {
   display: flex;
   flex-wrap: wrap;
@@ -1552,13 +1612,127 @@
     grid-template-columns: 1fr;
   }
 
-  [data-admin-shell] .admin-sidebar {
-    border-right: 0;
-    border-bottom: 1px solid var(--admin-border);
+  [data-manage-shell] .fn-console-frame {
+    grid-template-columns: 1fr;
+    gap: 14px;
   }
 
-  [data-manage-shell] .manage-shell {
+  .fn-console-drawer-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-height: 44px;
+    padding: 8px 12px;
+    color: var(--text-primary);
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-surface);
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .fn-console-drawer-trigger:focus-visible,
+  .fn-console-drawer-close:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+  }
+
+  .fn-console-drawer-backdrop {
+    display: block;
+    position: fixed;
+    z-index: 80;
+    inset: 0;
+    visibility: hidden;
+    opacity: 0;
+    background: rgba(0, 0, 0, 0.42);
+    transition: opacity 160ms ease, visibility 0s linear 160ms;
+  }
+
+  .fn-console-drawer-backdrop[data-open="true"] {
+    visibility: visible;
+    opacity: 1;
+    transition-delay: 0s;
+  }
+
+  .fn-console-drawer-panel {
+    position: fixed;
+    z-index: 81;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(360px, calc(100vw - 40px));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background: var(--bg-base);
+    box-shadow: 18px 0 42px rgba(0, 0, 0, 0.24);
+    transform: translateX(-105%);
+    transition: transform 180ms ease;
+  }
+
+  .fn-console-drawer-panel[data-open="true"] {
+    transform: translateX(0);
+  }
+
+  .fn-console-drawer-panel > .admin-sidebar {
+    box-sizing: border-box;
+    min-height: 100%;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .fn-console-drawer-close {
+    display: grid;
+    position: absolute;
+    z-index: 1;
+    top: 9px;
+    right: 9px;
+    width: 44px;
+    height: 44px;
+    place-items: center;
+    color: var(--text-primary);
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-surface);
+  }
+
+  .fn-console-drawer-panel nav {
     flex-direction: column;
+    overflow: visible;
+    padding-bottom: 0;
+  }
+
+  .fn-console-drawer-panel nav section,
+  .fn-console-drawer-panel .console-manage-nav {
+    display: grid;
+  }
+
+  .fn-console-drawer-panel nav h2,
+  .fn-console-drawer-panel .console-manage-nav h2 {
+    display: block;
+  }
+
+  .fn-console-drawer-panel nav a,
+  .fn-console-drawer-panel .console-manage-nav a {
+    width: 100%;
+    min-height: 44px;
+    box-sizing: border-box;
+    white-space: normal;
+  }
+
+  .fn-console-drawer-panel nav a::before,
+  .fn-console-drawer-panel .console-manage-nav a::before {
+    top: 6px;
+    right: auto;
+    bottom: 6px;
+    left: 0;
+    width: 3px;
+    height: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fn-console-drawer-backdrop,
+  .fn-console-drawer-panel {
+    transition: none;
   }
 }
 

@@ -6,12 +6,20 @@ on:
     branches: [main]
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   verify:
     runs-on: ubuntu-latest
+    env:
+      # 実在しない値だけをPR CIに渡す。Cloudflare IDやOAuth secretは不要。
+      NEXT_PUBLIC_SITE_URL: https://flamenode.invalid
+      AUTH_URL: https://flamenode.invalid
+      AUTH_SECRET: ci-placeholder-not-a-production-secret
+      AUTH_DISCORD_ID: ci-placeholder-id
+      AUTH_DISCORD_SECRET: ci-placeholder-secret
+      CI: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -29,12 +37,32 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Production build
-        run: npm run build
-
       - name: Unit tests
         run: npm run test:unit
 
-      - name: DB legacy check (advisory)
-        continue-on-error: true
-        run: npm run check:db-legacy
+      - name: Worker tests
+        run: npm run test:workers
+
+      - name: Integration tests
+        run: npm run test:integration
+
+      - name: Production build
+        run: npm run build
+
+      - name: Cloudflare Pages build
+        run: npm run pages:build
+
+      - name: Pages output check
+        run: npm run check:pages-output
+
+      - name: Cloudflare template check
+        run: npm run check:cloudflare-template
+
+      - name: DB and owner checks
+        run: |
+          npm run check:db-schema
+          npm run check:db-legacy
+          npm run check:event-owners
+
+      - name: Project document checks
+        run: npm run check:project-docs

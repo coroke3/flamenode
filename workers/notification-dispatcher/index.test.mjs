@@ -25,7 +25,7 @@ test("deliver: generic notification types use Discord DM when bot token exists",
       {
         type: "announcement_broadcast",
         payload_json: JSON.stringify({ content: "hello" }),
-        discord_user_id: "123456789012345678",
+        discord_id: "123456789012345678",
       },
       { DISCORD_BOT_TOKEN: "bot-token" },
     );
@@ -55,7 +55,7 @@ test("deliver: discord_webhook without webhook URL does not fall back to DM", as
       {
         type: "discord_webhook",
         payload_json: JSON.stringify({ content: "hello" }),
-        discord_user_id: "123456789012345678",
+        discord_id: "123456789012345678",
       },
       { DISCORD_BOT_TOKEN: "bot-token" },
     );
@@ -80,7 +80,7 @@ test("deliver: discord_webhook uses webhook URL when configured", async () => {
       {
         type: "discord_webhook",
         payload_json: JSON.stringify({ content: "hello" }),
-        discord_user_id: "123456789012345678",
+        discord_id: "123456789012345678",
       },
       {
         DISCORD_WEBHOOK_URL: "https://example.test/webhook",

@@ -3,31 +3,41 @@
 import * as React from "react";
 import styles from "./ThemeToggle.module.css";
 import { Icon } from "@/components/ui/Icon";
+import {
+  THEME_STORAGE_KEY,
+  nextThemeMode,
+  normalizeThemeMode,
+  resolveTheme,
+  type ThemeMode,
+} from "@/lib/theme/mode";
 
-type Mode = "light" | "dark";
+function getPrefersDark(): boolean {
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+}
 
-const STORAGE_KEY = "fn-theme";
-
-function applyTheme(mode: Mode, persist = true) {
-  document.documentElement.setAttribute("data-theme", mode);
+function applyTheme(mode: ThemeMode, persist = true): void {
+  const resolved = resolveTheme(mode, getPrefersDark());
+  document.documentElement.setAttribute("data-theme", resolved);
+  document.documentElement.setAttribute("data-theme-preference", mode);
   if (!persist) return;
   try {
-    localStorage.setItem(STORAGE_KEY, mode);
+    localStorage.setItem(THEME_STORAGE_KEY, mode);
   } catch {
     /* noop */
   }
 }
 
-export function ThemeToggle(): React.ReactElement {
-  const [mode, setMode] = React.useState<Mode>("dark");
+export function ThemeToggle({
+  variant = "cycle",
+}: {
+  variant?: "cycle" | "segmented";
+}): React.ReactElement {
+  const [mode, setMode] = React.useState<ThemeMode>("system");
 
   React.useEffect(() => {
-    let initial: Mode = "dark";
+    let initial: ThemeMode = "system";
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved === "light" || saved === "dark") {
-        initial = saved;
-      }
+      initial = normalizeThemeMode(localStorage.getItem(THEME_STORAGE_KEY));
     } catch {
       /* noop */
     }
@@ -35,11 +45,49 @@ export function ThemeToggle(): React.ReactElement {
     applyTheme(initial, false);
   }, []);
 
-  const next = mode === "dark" ? "light" : "dark";
+  React.useEffect(() => {
+    if (mode !== "system") return;
+    const query = window.matchMedia?.("(prefers-color-scheme: dark)");
+    const onChange = () => applyTheme("system", false);
+    query?.addEventListener?.("change", onChange);
+    return () => query?.removeEventListener?.("change", onChange);
+  }, [mode]);
+
+  const select = (next: ThemeMode) => {
+    setMode(next);
+    applyTheme(next);
+  };
+
+  if (variant === "segmented") {
+    return (
+      <div className={styles.segmented} role="group" aria-label="テーマ">
+        {(["light", "dark", "system"] as const).map((item) => (
+          <button
+            key={item}
+            type="button"
+            className={styles.segment}
+            data-active={item === mode || undefined}
+            aria-pressed={item === mode}
+            onClick={() => select(item)}
+          >
+            <Icon
+              name={item === "light" ? "sun" : item === "dark" ? "moon" : "settings"}
+              size={13}
+              aria-hidden
+            />
+            {item === "light" ? "ライト" : item === "dark" ? "ダーク" : "OS設定"}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
   const label =
-    mode === "dark"
-      ? "現在はダークモード。ライトモードへ切り替え"
-      : "現在はライトモード。ダークモードへ切り替え";
+    mode === "system"
+      ? "現在はOS設定に追従中。ライトテーマへ切り替え"
+      : mode === "light"
+        ? "現在はライトテーマ。ダークテーマへ切り替え"
+        : "現在はダークテーマ。OS設定に追従へ切り替え";
 
   return (
     <button
@@ -48,11 +96,13 @@ export function ThemeToggle(): React.ReactElement {
       title={label}
       className={styles.button}
       onClick={() => {
-        setMode(next);
-        applyTheme(next);
+        select(nextThemeMode(mode));
       }}
     >
-      <Icon name={mode === "dark" ? "moon" : "sun"} size={15} />
+      <Icon
+        name={mode === "system" ? "settings" : mode === "dark" ? "moon" : "sun"}
+        size={15}
+      />
       <span className={styles.dot} aria-hidden />
     </button>
   );

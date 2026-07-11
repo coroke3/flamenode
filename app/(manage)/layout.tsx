@@ -6,8 +6,8 @@ import { auth } from "@/lib/auth";
 import { PublicHeader, type PublicHeaderUser } from "@/components/layout/PublicHeader";
 import { PublicFooter } from "@/components/layout/PublicFooter";
 import { CostGuardBanner } from "@/components/layout/CostGuardBanner";
-import { ManageSidebar } from "@/components/layout/ManageSidebar";
-import { ManageModeBanner } from "@/components/manage/ManageModeBanner";
+import { ConsoleShell } from "@/components/layout/ConsoleShell";
+import { ConsoleSidebar } from "@/components/layout/ConsoleSidebar";
 import { buildHeaderUser } from "@/lib/auth/headerUser";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import {
@@ -64,13 +64,14 @@ export default async function ManageLayout({
     <div data-manage-shell data-fn-surface="manage">
       <CostGuardBanner />
       <PublicHeader user={user} />
-      <div className="manage-shell">
-        <ManageSidebar />
+      <ConsoleShell
+        consoleMode="manage"
+        navigation={<ConsoleSidebar consoleMode="manage" />}
+      >
         <main className="manage-main">
-          <ManageModeBanner />
           {children}
         </main>
-      </div>
+      </ConsoleShell>
       <PublicFooter />
     </div>
   );

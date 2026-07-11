@@ -1,6 +1,9 @@
-# X ID merge フロー 設計メモ
+# X ID merge フロー 設計メモ（pre-baseline履歴）
 
-**Status**: Phase A/B/C の最小運用フローは実装済み。`x_account_link_requests` 側の merge 自動承認は引き続き無効で、統合は `/admin/x-id-merges` の申請・承認・MERGE確認経由で実行する。
+> Status: Historical
+> Replaced by: `docs/operations/x-id-merge.md`
+
+以下はbaseline再作成前の検討記録であり、現行実装の根拠として使用しない。
 
 ## 背景
 

@@ -12,7 +12,7 @@ import {
 type AnyDb = LibSQLDatabase<any>;
 
 /**
- * 作品の公開状態変更時に投稿者へ Discord 通知を enqueue する。
+ * 作品の公開状態変更時に投稿者へ通知を enqueue する。
  * admin / manage の setVideoStatus から共通利用（文面・dedupe を一元化）。
  */
 export async function enqueueVideoStatusChangeNotification(
@@ -24,13 +24,13 @@ export async function enqueueVideoStatusChangeNotification(
     prevStatus: string;
     nextStatus: string;
     reason?: string | null;
-    discordUserId: string | null | undefined;
+    recipientUserId: string | null | undefined;
     eventId?: string | null;
     forceNotify?: boolean;
   },
 ): Promise<void> {
   if (!shouldEnqueueUserNotification()) return;
-  if (!args.discordUserId?.trim()) return;
+  if (!args.recipientUserId?.trim()) return;
   if (args.prevStatus === args.nextStatus) return;
 
   const status = args.nextStatus;
@@ -47,7 +47,7 @@ export async function enqueueVideoStatusChangeNotification(
 
   if (status === "public") {
     await enqueueNotification(db, {
-      discordUserId: args.discordUserId,
+      recipientUserId: args.recipientUserId,
       type: "video_approved",
       dedupeKey: `video_approved:${args.videoId}`,
       payload: buildVideoApprovedNotification({
@@ -62,7 +62,7 @@ export async function enqueueVideoStatusChangeNotification(
 
   if (status === "voided") {
     await enqueueNotification(db, {
-      discordUserId: args.discordUserId,
+      recipientUserId: args.recipientUserId,
       type: "video_voided",
       dedupeKey: `video_status_changed:${args.videoId}:${status}`,
       payload: buildVideoVoidedNotification(baseArgs),
@@ -74,17 +74,15 @@ export async function enqueueVideoStatusChangeNotification(
   if (
     status === "limited" ||
     status === "private" ||
-    status === "hidden" ||
     status === "archived"
   ) {
     const typeMap = {
       limited: "video_limited",
       private: "video_private",
-      hidden: "video_hidden",
       archived: "video_archived",
     } as const;
     await enqueueNotification(db, {
-      discordUserId: args.discordUserId,
+      recipientUserId: args.recipientUserId,
       type: typeMap[status],
       dedupeKey: `video_status_changed:${args.videoId}:${status}`,
       payload: buildVideoVisibilityChangedNotification(baseArgs),
@@ -95,7 +93,7 @@ export async function enqueueVideoStatusChangeNotification(
 
   if (forceNotify) {
     await enqueueNotification(db, {
-      discordUserId: args.discordUserId,
+      recipientUserId: args.recipientUserId,
       type: "video_status_changed",
       dedupeKey: `video_status_changed:${args.videoId}:${status}`,
       payload: buildVideoVisibilityChangedNotification(baseArgs),

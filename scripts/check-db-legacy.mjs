@@ -34,18 +34,14 @@ const DB_REDUCTION_RULES = [
     id: "events-legacy-flags",
     label: "events.is_active / is_entry_open / is_archived column usage",
     pattern:
-      /\b(is_active|is_entry_open|is_archived)\b/g,
+      /\b(?:events|eventsTable)\.(?:is_active|is_entry_open|is_archived)\b|\bsql`(?=[^`]*\b(?:FROM|UPDATE|JOIN)\s+events\b)[^`]*\b(?:is_active|is_entry_open|is_archived)\b[^`]*`/g,
     prefixAllow: [...PREFIX_ALLOW, "src/lib/import/legacy/"],
-    fileAllow: new Set(["src/lib/api/eventEndpointPayload.ts"]),
-    skipLine: (line) =>
-      line.includes("is_active:") ||
-      line.includes("is_entry_open:") ||
-      line.includes("is_archived:"),
   },
   {
     id: "permission-mask",
     label: "event_staff.permission_mask / number bitmask usage",
-    pattern: /\bpermission_mask\b/g,
+    pattern:
+      /\b(?:eventStaff|event_staff)\.permission_mask\b|\bsql`[^`]*\bevent_staff\.permission_mask\b[^`]*`/g,
     prefixAllow: PREFIX_ALLOW,
     fileAllow: new Set(["src/lib/auth/permissions/mask.ts", "instrumentation.ts", "src/lib/import/legacy/types.ts", "src/lib/import/legacy/plan.test.mjs"]),
   },
@@ -58,76 +54,71 @@ const DB_REDUCTION_RULES = [
   {
     id: "used-software-json",
     label: "videos.used_software_json usage (removed; use video_softwares)",
-    pattern: /\bused_software_json\b/g,
+    pattern:
+      /\b(?:videos|videosTable)\.used_software_json\b|\bsql`[^`]*\bvideos\.used_software_json\b[^`]*`/g,
     prefixAllow: [...PREFIX_ALLOW, "src/lib/import/legacy/"],
   },
   {
     id: "video-member-chapters-table",
     label: "video_member_chapters / videoMemberChapters usage (removed)",
-    pattern: /\b(videoMemberChapters|video_member_chapters)\b/g,
+    pattern:
+      /\bvideoMemberChapters\b|\bsql`[^`]*\bvideo_member_chapters\b[^`]*`/g,
     prefixAllow: PREFIX_ALLOW,
   },
   {
     id: "video-chapters-member-id",
     label: "video_chapters.video_member_id usage (removed)",
-    pattern: /\bvideo_member_id\b/g,
+    pattern:
+      /\bvideoChapters\.video_member_id\b|\bsql`[^`]*\bvideo_chapters\.video_member_id\b[^`]*`/g,
     prefixAllow: PREFIX_ALLOW,
-    fileAllow: new Set([
-      "src/lib/db/videoDetailQueries.ts",
-      "src/lib/video/memberChaptersJson.ts",
-    ]),
-    skipLine: (line) =>
-      line.includes("video_member_id:") ||
-      line.includes("video_member_id,") ||
-      line.includes("video_member_id ") ||
-      line.includes("video_member_id}") ||
-      line.includes("video_member_id;"),
   },
   {
     id: "event-group-id-column",
     label: "events.event_group_id usage (removed; use event_group_events)",
-    pattern: /\bevent_group_id\b/g,
+    pattern:
+      /\b(?:events|eventsTable)\.event_group_id\b|\bsql`[^`]*\bevents\.event_group_id\b[^`]*`/g,
     prefixAllow: PREFIX_ALLOW,
   },
   {
     id: "custom-questions-json",
     label: "events.custom_questions JSON column usage",
-    pattern: /\bcustom_questions\b/g,
+    pattern:
+      /\b(?:events|eventsTable)\.custom_questions\b|\bsql`[^`]*\bevents\.custom_questions\b[^`]*`/g,
     prefixAllow: PREFIX_ALLOW,
   },
   {
     id: "custom-answers-json",
     label: "videos.custom_answers JSON column usage",
-    pattern: /\bcustom_answers\b/g,
+    pattern:
+      /\b(?:videos|videosTable)\.custom_answers\b|\bsql`[^`]*\bvideos\.custom_answers\b[^`]*`/g,
     prefixAllow: PREFIX_ALLOW,
   },
   {
     id: "video-form-settings-json",
     label: "events.video_form_settings_json column usage",
-    pattern: /\bvideo_form_settings_json\b/g,
+    pattern:
+      /\b(?:events|eventsTable)\.video_form_settings_json\b|\bsql`[^`]*\bevents\.video_form_settings_json\b[^`]*`/g,
     prefixAllow: PREFIX_ALLOW,
   },
   {
     id: "videos-stage-permission-column",
     label: "videos.stage_permission column usage",
-    pattern: /\bstage_permission\b/g,
+    pattern:
+      /\b(?:videos|videosTable)\.stage_permission\b|\bsql`[^`]*\bvideos\.stage_permission\b[^`]*`/g,
     prefixAllow: [...PREFIX_ALLOW, "src/lib/import/legacy/"],
-    fileAllow: new Set([
-      "src/lib/video/stagePermissionAnswers.ts",
-      "src/lib/video/stagePermissionQuestions.ts",
-      "src/lib/admin/videoReviewDetail.ts",
-    ]),
   },
   {
     id: "cost-guard-mode",
     label: "system_settings.cost_guard_mode (use operation_mode)",
-    pattern: /\bcost_guard_mode\b/g,
+    pattern:
+      /\b(?:systemSettings|system_settings)\.cost_guard_mode\b|\bsql`[^`]*\bsystem_settings\.cost_guard_mode\b[^`]*`/g,
     prefixAllow: PREFIX_ALLOW,
   },
   {
     id: "is-maintenance-mode",
     label: "system_settings.is_maintenance_mode (use operation_mode)",
-    pattern: /\bis_maintenance_mode\b/g,
+    pattern:
+      /\b(?:systemSettings|system_settings)\.is_maintenance_mode\b|\bsql`[^`]*\bsystem_settings\.is_maintenance_mode\b[^`]*`/g,
     prefixAllow: PREFIX_ALLOW,
   },
   {
@@ -174,7 +165,7 @@ const RULES = [
   {
     id: "history-logs-usage",
     label: "history_logs / historyLogs usage (removed; use audit_logs)",
-    pattern: /\b(historyLogs|history_logs)\b/g,
+    pattern: /\bhistoryLogs\b|\bsql`[^`]*\bhistory_logs\b[^`]*`/g,
     prefixAllow: [],
     fileAllow: new Set(["src/lib/audit/helpers.ts"]),
   },

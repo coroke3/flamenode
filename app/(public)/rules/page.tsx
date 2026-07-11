@@ -83,7 +83,7 @@ export default async function RulesPage({
   const versionLabel = data?.versionLabel ?? DEFAULT_TERMS_VERSION_LABEL;
 
   return (
-    <main className="fn-public-container fn-page">
+    <div className="fn-public-container fn-page">
       <header className="fn-page-head">
         <div className="fn-page-head-main">
           <span className="fn-eyebrow">RULES</span>
@@ -122,6 +122,6 @@ export default async function RulesPage({
           </p>
         </section>
       </div>
-    </main>
+    </div>
   );
 }

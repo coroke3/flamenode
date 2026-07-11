@@ -1,20 +1,18 @@
 import "server-only";
 
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import type { DB } from "@/lib/db/client";
-import { accounts, notificationOutbox, users, xUsers } from "@/lib/db/schema";
+import { notificationOutbox, users, xUsers } from "@/lib/db/schema";
 import { auditAction } from "@/lib/audit/helpers";
 import { shouldEnqueueUserNotification } from "./context";
 import { validateNotificationPayload } from "./format";
 
 type AnyDb = LibSQLDatabase<any>;
-const DISCORD_SNOWFLAKE_RE = /^\d{15,22}$/;
-
 export interface EnqueueNotificationInput {
-  /** 送信先 Discord ユーザー ID (users.id / discord_id / accounts から解決可) */
-  discordUserId?: string | null;
-  /** x_users.id 指定時は linked_discord_user_id を解決 */
+  /** 送信先の Auth.js 内部ユーザー ID。 */
+  recipientUserId?: string | null;
+  /** x_users.id 指定時は linked_user_id を解決 */
   xUserId?: string | null;
   type: string;
   payload: Record<string, unknown>;
@@ -27,63 +25,46 @@ function randomId(): string {
   return crypto.randomUUID();
 }
 
-async function resolveDiscordRecipientId(
+async function resolveRecipientUserId(
   db: AnyDb,
   input: EnqueueNotificationInput,
   force = false,
 ): Promise<string | null> {
-  const candidate = input.discordUserId?.trim();
+  const candidate = input.recipientUserId?.trim();
   if (candidate) {
     const rows = await db
       .select({
-        discord_id: users.discord_id,
-        provider_account_id: accounts.providerAccountId,
+        id: users.id,
         is_notification_enabled: users.is_notification_enabled,
       })
       .from(users)
-      .leftJoin(
-        accounts,
-        and(eq(accounts.userId, users.id), eq(accounts.provider, "discord"))!,
-      )
-      .where(
-        or(
-          eq(users.id, candidate),
-          eq(users.discord_id, candidate),
-          eq(accounts.providerAccountId, candidate),
-        )!,
-      )
+      .where(eq(users.id, candidate))
       .limit(1);
     const row = rows[0];
     if (!force && row?.is_notification_enabled === 0) return null;
-    return (
-      row?.provider_account_id ??
-      row?.discord_id ??
-      (DISCORD_SNOWFLAKE_RE.test(candidate) ? candidate : null)
-    );
+    return row?.id ?? null;
   }
 
   const xId = input.xUserId?.trim();
   if (!xId) return null;
   const xRow = (
     await db
-      .select({ linked: xUsers.linked_discord_user_id })
+      .select({ linked: xUsers.linked_user_id })
       .from(xUsers)
       .where(eq(xUsers.id, xId))
       .limit(1)
   )[0];
-  const linked = xRow?.linked?.trim();
-  if (!linked || !DISCORD_SNOWFLAKE_RE.test(linked)) return null;
-  if (!force) {
-    const userRow = (
-      await db
-        .select({ is_notification_enabled: users.is_notification_enabled })
-        .from(users)
-        .where(eq(users.discord_id, linked))
-        .limit(1)
-    )[0];
-    if (userRow?.is_notification_enabled === 0) return null;
-  }
-  return linked;
+  const linkedUserId = xRow?.linked?.trim();
+  if (!linkedUserId) return null;
+  const userRow = (
+    await db
+      .select({ id: users.id, is_notification_enabled: users.is_notification_enabled })
+      .from(users)
+      .where(eq(users.id, linkedUserId))
+      .limit(1)
+  )[0];
+  if (!userRow || (!force && userRow.is_notification_enabled === 0)) return null;
+  return userRow.id;
 }
 
 async function hasActiveDedupe(
@@ -133,19 +114,19 @@ export async function enqueueNotification(
   }
 
   try {
-    const discordRecipientId = await resolveDiscordRecipientId(
+    const recipientUserId = await resolveRecipientUserId(
       db,
       input,
       input.force ?? false,
     );
-    if (!discordRecipientId) {
+    if (!recipientUserId) {
       return false;
     }
 
     const now = Math.floor(Date.now() / 1000);
     await db.insert(notificationOutbox).values({
       id: randomId(),
-      discord_user_id: discordRecipientId,
+      recipient_user_id: recipientUserId,
       type: input.type,
       payload_json: JSON.stringify(input.payload),
       status: "pending",
@@ -174,7 +155,7 @@ export async function enqueueNotification(
           dedupe_key: dedupeKey,
           error: msg.slice(0, 500),
         }),
-        operator_discord_id: input.discordUserId ?? "system",
+        operator_user_id: input.recipientUserId ?? "system",
         retention_class: "normal",
       });
     } catch {

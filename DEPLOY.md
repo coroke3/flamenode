@@ -1,5 +1,10 @@
 # FlameNode デプロイ手順書
 
+> Status: Active
+> Last verified: 2026-07-11
+> Verified against commit: `5f48e0f` + working tree
+> Source of truth: `package.json`, `wrangler.toml`, `workers/*/wrangler.toml`, `.github/workflows/`
+
 ## Current Worker Layout
 
 Cron Workers are consolidated into 3 deployments:

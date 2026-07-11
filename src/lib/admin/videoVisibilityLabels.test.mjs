@@ -17,7 +17,6 @@ test("videoVisibilityStatusesForFilter groups simplified public statuses", () =>
   assert.deepEqual(videoVisibilityStatusesForFilter("private"), [
     "draft",
     "private",
-    "hidden",
   ]);
   assert.deepEqual(videoVisibilityStatusesForFilter("closed"), [
     "archived",
@@ -25,17 +24,17 @@ test("videoVisibilityStatusesForFilter groups simplified public statuses", () =>
   ]);
 });
 
-test("videoVisibilityStatusesForFilter still accepts raw legacy statuses", () => {
+test("videoVisibilityStatusesForFilter accepts canonical raw statuses and rejects removed ones", () => {
   assert.deepEqual(videoVisibilityStatusesForFilter("limited"), ["limited"]);
-  assert.deepEqual(videoVisibilityStatusesForFilter("hidden"), ["hidden"]);
   assert.equal(videoVisibilityGroupForFilter("limited"), "public");
-  assert.equal(videoVisibilityGroupForFilter("hidden"), "private");
+  assert.equal(videoVisibilityStatusesForFilter("hidden"), null);
+  assert.equal(videoVisibilityGroupForFilter("hidden"), null);
 });
 
 test("normalizeVideoVisibilityFilter prevents unknown query values becoming all rows", () => {
   assert.equal(normalizeVideoVisibilityFilter("all"), "");
   assert.equal(normalizeVideoVisibilityFilter(" public "), "public");
-  assert.equal(normalizeVideoVisibilityFilter([" hidden ", "public"]), "hidden");
+  assert.equal(normalizeVideoVisibilityFilter([" hidden ", "public"]), "");
   assert.equal(normalizeVideoVisibilityFilter("bad-status"), "");
   assert.equal(normalizeVideoVisibilityFilter("bad-status", "review"), "review");
   assert.equal(normalizeVideoVisibilityFilter(["bad-status"], "review"), "review");

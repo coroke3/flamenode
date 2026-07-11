@@ -86,7 +86,7 @@ export async function uploadVideoIconCandidate(
     record_id: activeX,
     action: "CREATE",
     after_data: JSON.stringify({ icon_url: iconUrl, source: "video_upload" }),
-    operator_discord_id: sessionUser.id,
+    operator_user_id: sessionUser.id,
     retention_class: "normal",
   });
 

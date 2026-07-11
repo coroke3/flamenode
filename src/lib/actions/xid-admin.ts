@@ -69,7 +69,7 @@ export async function approveXIdLinkRequest(
   }
 
   const xid = normalizeXId(reqRow.requested_x_id);
-  const discordUserId = reqRow.discord_user_id;
+  const userId = reqRow.user_id;
   const now = Math.floor(Date.now() / 1000);
   const linkType = reqRow.link_type ?? "new";
 
@@ -92,12 +92,12 @@ export async function approveXIdLinkRequest(
       return { ok: false, message: "target_x_user_id が見つかりません。" };
     }
     if (
-      targetRow.linked_discord_user_id &&
-      targetRow.linked_discord_user_id !== discordUserId
+      targetRow.linked_user_id &&
+      targetRow.linked_user_id !== userId
     ) {
       return {
         ok: false,
-        message: "target_x_user_id が別の Discord ユーザーに紐づいているため alias 追加できません。",
+        message: "target_x_user_id が別ユーザーに紐づいているため alias 追加できません。",
       };
     }
     // 既存 alias の重複は composite PK で防がれる
@@ -130,12 +130,12 @@ export async function approveXIdLinkRequest(
         target_x_user_id: targetXId,
         alias_x_id: xid,
       },
-      operator_discord_id: adminId,
+      operator_user_id: adminId,
       retention_class: "long_audit",
     });
 
     await enqueueNotification(db, {
-      discordUserId,
+      recipientUserId: userId,
       type: "x_id_alias_approved",
       payload: {
         content: `X ID @${xid} を @${targetXId} の別名として承認しました。`,
@@ -164,14 +164,14 @@ export async function approveXIdLinkRequest(
   }
 
   // ============================
-  // link_type === "new": 既存実装どおり (x_users 行作成 or 既存行へ linked_discord_user_id 更新)
+  // link_type === "new": 既存実装どおり (x_users 行作成 or 既存行へ linked_user_id 更新)
   // ============================
   const existing = (
     await db.select().from(xUsers).where(xUserIdMatches(xid)).limit(1)
   )[0];
   if (
-    existing?.linked_discord_user_id &&
-    existing.linked_discord_user_id !== discordUserId
+    existing?.linked_user_id &&
+    existing.linked_user_id !== userId
   ) {
     return {
       ok: false,
@@ -183,7 +183,7 @@ export async function approveXIdLinkRequest(
     await db.insert(xUsers).values({
       id: xid,
       x_name: `@${xid}`,
-      linked_discord_user_id: discordUserId,
+      linked_user_id: userId,
       approval_status: "approved",
       approval_requested_at: now,
     });
@@ -191,7 +191,7 @@ export async function approveXIdLinkRequest(
     await db
       .update(xUsers)
       .set({
-        linked_discord_user_id: discordUserId,
+        linked_user_id: userId,
         approval_status: "approved",
         approval_requested_at: now,
       })
@@ -213,13 +213,13 @@ export async function approveXIdLinkRequest(
   }
 
   const userRow = (
-    await db.select().from(users).where(eq(users.id, discordUserId)).limit(1)
+    await db.select().from(users).where(eq(users.id, userId)).limit(1)
   )[0];
   if (userRow && !userRow.active_x_user_id) {
     await db
       .update(users)
       .set({ active_x_user_id: xid })
-      .where(eq(users.id, discordUserId));
+      .where(eq(users.id, userId));
   }
 
   await auditAction(db, {
@@ -231,12 +231,12 @@ export async function approveXIdLinkRequest(
       link_type: "new",
       x_user_id: xid,
     },
-    operator_discord_id: adminId,
+    operator_user_id: adminId,
     retention_class: "long_audit",
   });
 
   await enqueueNotification(db, {
-    discordUserId: discordUserId,
+    recipientUserId: userId,
     type: "x_id_approved",
     payload: {
       content: `X ID @${xid} の連携申請が承認されました。`,
@@ -295,12 +295,12 @@ export async function rejectXIdLinkRequest(
       status: "rejected",
       reason: reason || null,
     },
-    operator_discord_id: adminId,
+    operator_user_id: adminId,
     retention_class: "long_audit",
   });
 
   await enqueueNotification(db, {
-    discordUserId: reqRow.discord_user_id,
+    recipientUserId: reqRow.user_id,
     type: "x_id_rejected",
     payload: {
       content: reason

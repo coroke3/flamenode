@@ -118,7 +118,7 @@ export default async function ManageNotificationsPage({
   if (rows.length > 0) {
     recipientMap = await lookupNotificationRecipients(
       db,
-      rows.map((r) => r.discord_user_id),
+      rows.map((r) => r.recipient_user_id),
     );
   }
 
@@ -220,7 +220,7 @@ export default async function ManageNotificationsPage({
                 <td>
                   <NotificationOutboxSummary
                     row={n}
-                    recipient={recipientMap.get(n.discord_user_id) ?? null}
+                    recipient={recipientMap.get(n.recipient_user_id) ?? null}
                   />
                 </td>
                 <td style={{ verticalAlign: "top", fontSize: 12 }}>

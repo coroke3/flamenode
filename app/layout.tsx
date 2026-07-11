@@ -69,7 +69,6 @@ export default function RootLayout({
     <html
       lang="ja"
       className={redesignFontClassName}
-      data-theme="dark"
       suppressHydrationWarning
     >
       <head>

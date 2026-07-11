@@ -1,6 +1,6 @@
 import { isValidPermissionKey, type PermissionKey } from "./keys.ts";
 
-/** 旧 event_staff_permissions.permission_key → 現行 PermissionKey への一方向正規化。 */
+/** 旧スタッフ権限キー → 現行 PermissionKey への一方向正規化。 */
 const LEGACY_TO_CANONICAL: Record<string, PermissionKey> = {
   "videos.title": "video.basics",
   "videos.review_data": "video.descriptions",

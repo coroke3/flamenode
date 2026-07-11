@@ -83,25 +83,22 @@ export interface XIdOption {
   x_name: string;
 }
 
-/** slot モードのステップ 0 用。確保済み枠の表示に使う。 */
-export interface VideoFormSlotInfo {
-  eventTitle: string;
-  slotTimeLabel: string;
-  displayName: string;
-  groupSize?: number;
-}
+type WizardStepKey = "submitter" | "work" | "youtube" | "confirm";
 
-type WizardStepKey = "slot" | "submitter" | "work" | "youtube" | "confirm";
+export type WizardValidationError = {
+  message: string;
+  fieldId?: string;
+  step: WizardStepKey;
+};
 
 const WIZARD_STEPS_SLOT: { key: WizardStepKey; label: string }[] = [
-  { key: "slot", label: "枠確保" },
   { key: "submitter", label: "提出者情報" },
   { key: "work", label: "作品情報" },
   { key: "youtube", label: "YouTube URL" },
   { key: "confirm", label: "確認・送信" },
 ];
 
-const WIZARD_STEPS_FREE = WIZARD_STEPS_SLOT.slice(1);
+const WIZARD_STEPS_FREE = WIZARD_STEPS_SLOT;
 
 interface VideoFormProps {
   mode: "free" | "slot" | "edit";
@@ -165,8 +162,6 @@ interface VideoFormProps {
    * `edit_privilege_mode` で送信される。サーバーは別途 URL/セッションから再検証する。
    */
   editPrivilegeMode?: "normal" | "admin" | "event";
-  /** slot モードのウィザード Step 0 表示用。 */
-  slotInfo?: VideoFormSlotInfo;
 }
 
 /** section key が disabledSections に含まれているか確認する小関数。 */
@@ -212,7 +207,6 @@ export function VideoForm({
   canEditEvents = true,
   canChangeSubmitter = false,
   editPrivilegeMode,
-  slotInfo,
 }: VideoFormProps): React.ReactElement {
   const router = useRouter();
   const formRef = React.useRef<HTMLFormElement>(null);
@@ -220,7 +214,7 @@ export function VideoForm({
   const wizardSteps = mode === "slot" ? WIZARD_STEPS_SLOT : WIZARD_STEPS_FREE;
   const [currentStep, setCurrentStep] = React.useState(0);
   const [maxReachedStep, setMaxReachedStep] = React.useState(0);
-  const [stepError, setStepError] = React.useState<string | null>(null);
+  const [stepError, setStepError] = React.useState<WizardValidationError | null>(null);
   const [youtubeUrl, setYoutubeUrl] = React.useState(initial.youtube_url ?? "");
   const [titlePreview, setTitlePreview] = React.useState(initial.title ?? "");
   const [displayNamePreview, setDisplayNamePreview] = React.useState(
@@ -228,6 +222,9 @@ export function VideoForm({
   );
   const [isCollab, setIsCollab] = React.useState(
     Boolean(initial.is_collab || (initial.members?.length ?? 0) > 0),
+  );
+  const [members, setMembers] = React.useState<VideoMemberInput[]>(
+    initial.members ?? [],
   );
   // 所属イベントの選択状態。slot モードでは slot.event_id が initial.event_ids
   // に含まれている前提で、固定として扱う (UI でも変更不可)。
@@ -268,6 +265,23 @@ export function VideoForm({
       ),
     [eventOptions, selectedEventIds],
   );
+  const [stageAnswers, setStageAnswers] = React.useState<Record<string, string>>({});
+
+  React.useEffect(() => {
+    setStageAnswers((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const question of selectedStagePermissionFields) {
+        if (Object.hasOwn(next, question.id)) continue;
+        next[question.id] = getStagePermissionAnswerValue(
+          initial.stage_permission,
+          question.id,
+        );
+        changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, [initial.stage_permission, selectedStagePermissionFields]);
 
   const [pending, startTransition] = React.useTransition();
   const [result, setResult] = React.useState<VideoActionResult | null>(null);
@@ -325,9 +339,15 @@ export function VideoForm({
     (key.startsWith("video.") && videoSectionDisabled) ||
     (key.startsWith("descriptions.") && descriptionsDisabled) ||
     (key.startsWith("members.") && membersDisabled);
-  const requiredStageQuestionCount = selectedStagePermissionFields.filter(
-    (question) => question.required,
+  const incompleteRequiredStageQuestionCount = selectedStagePermissionFields.filter(
+    (question) => question.required && !stageAnswers[question.id]?.trim(),
   ).length;
+  const memberCount = members.filter(
+    (member) => member.name.trim() || member.x_user_id.trim(),
+  ).length;
+  const handleMembersChange = React.useCallback((next: VideoMemberInput[]) => {
+    setMembers(next);
+  }, []);
 
   const currentStepKey = isWizard ? wizardSteps[currentStep]?.key : null;
   const isWizardLastStep = isWizard && currentStep === wizardSteps.length - 1;
@@ -339,7 +359,7 @@ export function VideoForm({
 
   const isStepVisible = (key: WizardStepKey): boolean => {
     if (!isWizard) return true;
-    if (key === "slot" || key === "confirm") {
+    if (key === "confirm") {
       return currentStepKey === key;
     }
     if (key === "submitter") return currentStepKey === "submitter";
@@ -348,18 +368,29 @@ export function VideoForm({
     return false;
   };
 
-  const validateWizardStep = (stepKey: WizardStepKey): string | null => {
+  const validateWizardStep = (
+    stepKey: WizardStepKey,
+  ): WizardValidationError | null => {
     const form = formRef.current;
-    if (stepKey === "slot") return null;
 
     if (stepKey === "submitter") {
       if (isActiveXFixed && !normalizedActiveXId) {
-        return "承認済み X ID がありません。設定画面から連携してください。";
+        return {
+          step: "submitter",
+          fieldId: "creator_x_user_id",
+          message: "承認済み X ID がありません。設定画面から連携してください。",
+        };
       }
       const displayName = form?.elements.namedItem("display_name");
       const displayValue =
         displayName instanceof HTMLInputElement ? displayName.value.trim() : "";
-      if (!displayValue) return "表示名 / 活動名 / 団体名を入力してください。";
+      if (!displayValue) {
+        return {
+          step: "submitter",
+          fieldId: "display_name",
+          message: "表示名 / 活動名 / 団体名を入力してください。",
+        };
+      }
       return null;
     }
 
@@ -367,16 +398,24 @@ export function VideoForm({
       const titleEl = form?.elements.namedItem("title");
       const titleValue =
         titleEl instanceof HTMLInputElement ? titleEl.value.trim() : "";
-      if (!titleValue) return "作品タイトルを入力してください。";
+      if (!titleValue) {
+        return {
+          step: "work",
+          fieldId: "title",
+          message: "作品タイトルを入力してください。",
+        };
+      }
 
       for (const question of selectedStagePermissionFields) {
         if (!question.required) continue;
         const fieldId = `stage_permission_${question.id}`;
-        const answerEl = form?.elements.namedItem(fieldId);
-        const answerValue =
-          answerEl instanceof HTMLTextAreaElement ? answerEl.value.trim() : "";
+        const answerValue = stageAnswers[question.id]?.trim() ?? "";
         if (!answerValue) {
-          return `「${question.label}」を入力してください。`;
+          return {
+            step: "work",
+            fieldId,
+            message: `「${question.label}」を入力してください。`,
+          };
         }
       }
       return null;
@@ -384,9 +423,19 @@ export function VideoForm({
 
     if (stepKey === "youtube") {
       const trimmed = youtubeUrl.trim();
-      if (!trimmed) return "YouTube URL を入力してください。";
+      if (!trimmed) {
+        return {
+          step: "youtube",
+          fieldId: "youtube_url",
+          message: "YouTube URL を入力してください。",
+        };
+      }
       if (!extractYoutubeId(trimmed)) {
-        return "有効な YouTube URL または動画 ID を入力してください。";
+        return {
+          step: "youtube",
+          fieldId: "youtube_url",
+          message: "有効な YouTube URL または動画 ID を入力してください。",
+        };
       }
       return null;
     }
@@ -418,6 +467,21 @@ export function VideoForm({
     setStepError(null);
     setCurrentStep((prev) => Math.max(0, prev - 1));
   };
+
+  React.useEffect(() => {
+    if (!stepError || !isWizard) return;
+    const index = wizardSteps.findIndex((step) => step.key === stepError.step);
+    if (index >= 0) setCurrentStep(index);
+    const frame = window.requestAnimationFrame(() => {
+      const target = stepError.fieldId
+        ? document.getElementById(stepError.fieldId)
+        : null;
+      if (!(target instanceof HTMLElement)) return;
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      target.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [isWizard, stepError, wizardSteps]);
 
   const handleSubmit = (ev: React.FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
@@ -520,47 +584,11 @@ export function VideoForm({
       ) : null}
 
       <div className={styles.formMain}>
-      {isWizard && mode === "slot" ? (
-        <div
-          className={cx(
-            styles.stepPanel,
-            !isStepVisible("slot") && styles.stepPanelHidden,
-          )}
-          hidden={!isStepVisible("slot")}
-        >
-          <section className={styles.section}>
-            <h2 className={styles.sectionTitle}>
-              <Icon name="calendar" size={14} aria-hidden /> 枠確保
-            </h2>
-            <div className={styles.slotDoneCard}>
-              <p className={styles.slotDoneKicker}>確保済み枠</p>
-              <h3 className={styles.slotDoneTitle}>
-                {slotInfo?.slotTimeLabel ?? "枠情報を読み込み中"}
-              </h3>
-              <p className={styles.slotDoneLead}>
-                イベント: <strong>{slotInfo?.eventTitle ?? "—"}</strong>
-                <br />
-                確保名: <strong>{slotInfo?.displayName ?? displayNamePreview}</strong>
-                {slotInfo?.groupSize && slotInfo.groupSize > 1
-                  ? ` / 連続枠 ${slotInfo.groupSize}`
-                  : ""}
-              </p>
-              <span className={styles.slotDoneBadge}>
-                <Icon name="check" size={12} aria-hidden />
-                枠確保完了
-              </span>
-            </div>
-            <p className={styles.help} style={{ marginTop: 12 }}>
-              次のステップで提出者情報と作品情報を登録し、最後に YouTube URL を紐づけます。
-            </p>
-          </section>
-        </div>
-      ) : null}
 
       {stepError ? (
-        <div className={styles.stepError} role="alert">
+        <div id="wizard-validation-error" className={styles.stepError} role="alert">
           <Icon name="warning" size={13} aria-hidden />
-          <span>{stepError}</span>
+          <span>{stepError.message}</span>
         </div>
       ) : null}
 
@@ -649,7 +677,16 @@ export function VideoForm({
               className="fn-input"
               maxLength={80}
               required
-              onChange={(e) => setDisplayNamePreview(e.target.value)}
+              onChange={(e) => {
+                setDisplayNamePreview(e.target.value);
+                setDirty(true);
+              }}
+              aria-invalid={stepError?.fieldId === "display_name" || undefined}
+              aria-describedby={
+                stepError?.fieldId === "display_name"
+                  ? "wizard-validation-error"
+                  : undefined
+              }
               readOnly={fieldDisabled("submitter.display_name")}
               aria-readonly={fieldDisabled("submitter.display_name") || undefined}
               style={fieldDisabled("submitter.display_name") ? { opacity: 0.65, cursor: "default" } : undefined}
@@ -733,8 +770,17 @@ export function VideoForm({
             className="fn-input"
             placeholder="例: First Light - 春の輪"
             maxLength={120}
-            required
-            onChange={(e) => setTitlePreview(e.target.value)}
+              required
+              onChange={(e) => {
+                setTitlePreview(e.target.value);
+                setDirty(true);
+              }}
+              aria-invalid={stepError?.fieldId === "title" || undefined}
+              aria-describedby={
+                stepError?.fieldId === "title"
+                  ? "wizard-validation-error"
+                  : undefined
+              }
             readOnly={fieldDisabled("video.title")}
             aria-readonly={fieldDisabled("video.title") || undefined}
             style={fieldDisabled("video.title") ? { opacity: 0.65, cursor: "default" } : undefined}
@@ -1041,16 +1087,26 @@ export function VideoForm({
               <textarea
                 id={fieldId}
                 name="stage_permission_answer_value"
-                defaultValue={getStagePermissionAnswerValue(
-                  initial.stage_permission,
-                  question.id,
-                )}
+                value={stageAnswers[question.id] ?? ""}
+                onChange={(event) => {
+                  setStageAnswers((current) => ({
+                    ...current,
+                    [question.id]: event.target.value,
+                  }));
+                  setDirty(true);
+                }}
                 className="fn-input"
                 rows={3}
                 maxLength={1000}
                 required={question.required}
                 placeholder={question.placeholder}
                 disabled={fieldDisabled("descriptions.stage_permission")}
+                aria-invalid={stepError?.fieldId === fieldId || undefined}
+                aria-describedby={
+                  stepError?.fieldId === fieldId
+                    ? "wizard-validation-error"
+                    : undefined
+                }
               />
             </div>
           );
@@ -1113,6 +1169,7 @@ export function VideoForm({
               initialMembers={initial.members}
               suggestions={memberSuggestions}
               disabled={membersDisabled}
+              onChange={handleMembersChange}
               collabPermsHref="#video-collab-perms"
             />
             <p className={styles.help} style={{ marginTop: 8 }}>
@@ -1148,7 +1205,10 @@ export function VideoForm({
                   name="youtube_url"
                   type="url"
                   value={youtubeUrl}
-                  onChange={(e) => setYoutubeUrl(e.target.value)}
+                  onChange={(e) => {
+                    setYoutubeUrl(e.target.value);
+                    setDirty(true);
+                  }}
                   className="fn-input"
                   placeholder="https://www.youtube.com/watch?v=..."
                   required
@@ -1157,6 +1217,12 @@ export function VideoForm({
                   style={
                     fieldDisabled("video.youtube_url")
                       ? { opacity: 0.65, cursor: "default" }
+                      : undefined
+                  }
+                  aria-invalid={stepError?.fieldId === "youtube_url" || undefined}
+                  aria-describedby={
+                    stepError?.fieldId === "youtube_url"
+                      ? "wizard-validation-error"
                       : undefined
                   }
                 />
@@ -1357,15 +1423,15 @@ export function VideoForm({
           <PreviewCheck ok={Boolean(titlePreview.trim())} label="作品タイトル" />
           <PreviewCheck ok={Boolean(displayNamePreview.trim())} label="表示名" />
           <PreviewCheck
-            ok={requiredStageQuestionCount === 0}
+            ok={incompleteRequiredStageQuestionCount === 0}
             label={
-              requiredStageQuestionCount > 0
-                ? `追加質問 ${requiredStageQuestionCount} 件は入力必須`
+              incompleteRequiredStageQuestionCount > 0
+                ? `追加質問 ${incompleteRequiredStageQuestionCount} 件は入力必須`
                 : selectedStagePermissionFields.length > 0
                   ? `追加質問 ${selectedStagePermissionFields.length} 件は任意`
                   : "追加質問なし"
             }
-            pending={requiredStageQuestionCount > 0}
+            pending={incompleteRequiredStageQuestionCount > 0}
           />
           <PreviewCheck
             ok={!isCollab || Boolean(initial.members?.length)}

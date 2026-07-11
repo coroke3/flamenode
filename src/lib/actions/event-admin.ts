@@ -163,7 +163,7 @@ export async function createEvent(
     record_id: id,
     action: "CREATE",
     after_data: { title: data.title, visibility_status: visibilityStatus },
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "normal",
   });
 
@@ -282,7 +282,7 @@ export async function deleteEvent(
     record_id: eventId,
     action: "UPDATE",
     after_data: { archived_by_delete_action: true },
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "long_audit",
   });
 

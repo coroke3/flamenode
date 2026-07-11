@@ -159,7 +159,7 @@ export async function enqueueStaticRebuild(
           reason: normalized.reason,
           error: e instanceof Error ? e.message : String(e),
         }),
-        operator_discord_id: input.requestedByUserId ?? "system",
+        operator_user_id: input.requestedByUserId ?? "system",
         retention_class: "normal",
       });
     } catch (historyErr) {

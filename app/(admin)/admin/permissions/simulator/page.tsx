@@ -14,21 +14,21 @@ export default async function PermissionSimulatorPage({
   searchParams: Promise<{
     event_id?: string;
     x_user_id?: string;
-    discord_user_id?: string;
+    user_id?: string;
   }>;
 }): Promise<React.ReactElement> {
   const sp = await searchParams;
   const eventId = (sp.event_id ?? "").trim();
   const xUserId = (sp.x_user_id ?? "").trim();
-  const discordUserId = (sp.discord_user_id ?? "").trim();
+  const userId = (sp.user_id ?? "").trim();
 
   const db = getDatabase();
   const result =
-    db && eventId && (xUserId || discordUserId)
+    db && eventId && (xUserId || userId)
       ? await simulateEventPermissions(db, {
           eventId,
           xUserId: xUserId || undefined,
-          discordUserId: discordUserId || undefined,
+          userId: userId || undefined,
         })
       : null;
 
@@ -36,12 +36,12 @@ export default async function PermissionSimulatorPage({
     <div>
       <AdminPageHeader
         title="権限シミュレーター"
-        description="イベントスタッフのプリセット / カスタム権限を、X ID または Discord ID から確認します。"
+        description="イベントスタッフのプリセット / カスタム権限を、X ID またはユーザー ID から確認します。"
       />
       <PermissionSimulatorPanel
         eventId={eventId}
         xUserId={xUserId}
-        discordUserId={discordUserId}
+        userId={userId}
         result={result}
       />
     </div>

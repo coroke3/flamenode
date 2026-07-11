@@ -59,7 +59,7 @@ export async function createXIdMergeRequest(
     id,
     from_x_user_id: fromXId,
     to_x_user_id: toXId,
-    requested_by_uid: guard.userId,
+    requested_by_user_id: guard.userId,
     status: "pending",
     created_at: now,
     updated_at: now,
@@ -69,7 +69,7 @@ export async function createXIdMergeRequest(
     record_id: id,
     action: "CREATE",
     after_data: { from_x_user_id: fromXId, to_x_user_id: toXId },
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "long_audit",
   });
   revalidatePath("/admin/x-id-merges");
@@ -116,7 +116,7 @@ async function setXIdMergeRequestStatus(
     action: "UPDATE",
     before_data: { status: current.status },
     after_data: { status },
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "long_audit",
   });
   revalidatePath("/admin/x-id-merges");
@@ -171,7 +171,7 @@ export async function executeXIdMergeRequest(
     action: "UPDATE",
     before_data: { status: "approved" },
     after_data: { status: "done", restore_snapshot: snapshot },
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "long_audit",
   });
   revalidatePath("/admin/x-id-merges");
@@ -205,7 +205,7 @@ export async function rejectXIdMergeRevert(
     action: "UPDATE",
     before_data: { status: "pending" },
     after_data: { status: "rejected" },
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "long_audit",
   });
   revalidatePath("/admin/x-id-merges");

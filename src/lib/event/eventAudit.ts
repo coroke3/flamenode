@@ -26,7 +26,7 @@ export async function writeEventUpdateAudit(args: {
     action: "UPDATE",
     before_data: audit.before_data,
     after_data: audit.after_data,
-    operator_discord_id: args.operatorUserId,
+    operator_user_id: args.operatorUserId,
     retention_class: "normal",
   });
 }

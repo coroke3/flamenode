@@ -17,11 +17,11 @@ import styles from "./VideoCollabPermsManager.module.css";
 
 export interface VideoCollabSubject {
   x_user_id: string | null;
-  discord_user_id: string | null;
+  user_id: string | null;
   display_name: string;
   can_edit: number;
   is_public_member: number;
-  /** x_users に行があり linked_discord_user_id がある */
+  /** x_users に行があり linked_user_id がある */
   has_discord_link?: boolean;
 }
 
@@ -46,7 +46,7 @@ type GrantDialogState = {
 
 type NewSubjectDraft = {
   x_user_id: string;
-  discord_user_id?: string | null;
+  user_id?: string | null;
   display_name: string;
 };
 
@@ -54,19 +54,19 @@ type RevokeDialogState = {
   subject: VideoCollabSubject;
 };
 
-function subjectKey(s: Pick<VideoCollabSubject, "x_user_id" | "discord_user_id">): string {
-  return s.x_user_id ? `x:${s.x_user_id}` : `d:${s.discord_user_id ?? ""}`;
+function subjectKey(s: Pick<VideoCollabSubject, "x_user_id" | "user_id">): string {
+  return s.x_user_id ? `x:${s.x_user_id}` : `u:${s.user_id ?? ""}`;
 }
 
 function hasResolvableSubject(s: {
   x_user_id?: string | null;
-  discord_user_id?: string | null;
+  user_id?: string | null;
 }): boolean {
-  return Boolean(s.x_user_id?.trim() || s.discord_user_id?.trim());
+  return Boolean(s.x_user_id?.trim() || s.user_id?.trim());
 }
 
 function hasDiscordLink(subject: VideoCollabSubject): boolean {
-  return Boolean(subject.discord_user_id?.trim() || subject.has_discord_link);
+  return Boolean(subject.user_id?.trim() || subject.has_discord_link);
 }
 
 /** 一覧行は最大2バッジまで */
@@ -232,7 +232,7 @@ export function VideoCollabPermsManager({
     const fd = new FormData();
     fd.set("video_id", videoId);
     if (draft.x_user_id) fd.set("x_user_id", draft.x_user_id);
-    if (draft.discord_user_id) fd.set("discord_user_id", draft.discord_user_id);
+    if (draft.user_id) fd.set("user_id", draft.user_id);
     fd.set("display_name", draft.display_name);
     fd.set("can_edit", "1");
     fd.set("notify", options.notify ? "1" : "0");
@@ -253,7 +253,7 @@ export function VideoCollabPermsManager({
     const fd = new FormData();
     fd.set("video_id", videoId);
     if (subject.x_user_id) fd.set("x_user_id", subject.x_user_id);
-    if (subject.discord_user_id) fd.set("discord_user_id", subject.discord_user_id);
+    if (subject.user_id) fd.set("user_id", subject.user_id);
     startTransition(async () => {
       const r = await deleteVideoCollaborator(fd);
       if (!r.ok) {
@@ -290,8 +290,8 @@ export function VideoCollabPermsManager({
           <div className={styles.rowSub}>
             {s.x_user_id
               ? `@${s.x_user_id}`
-              : s.discord_user_id
-                ? `discord:${s.discord_user_id}`
+              : s.user_id
+                ? `user:${s.user_id}`
                 : "(ID未設定)"}
           </div>
           <p className={styles.rowStatus}>編集できます</p>
@@ -387,7 +387,7 @@ export function VideoCollabPermsManager({
                         {
                           x_user_id: p.x_user_id ?? "",
                           display_name: p.display_name,
-                          discord_user_id: null,
+                          user_id: null,
                           can_edit: 0,
                           is_public_member: 1,
                         },
@@ -567,7 +567,7 @@ function AddHiddenEditorForm({
             onAdd({
               display_name: name.trim(),
               x_user_id: xUserId.trim(),
-              discord_user_id: discordId.trim() || null,
+              user_id: discordId.trim() || null,
             });
             setName("");
             setXUserId("");

@@ -6,7 +6,9 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Icon } from "@/components/ui/Icon";
 import { UserAvatar } from "@/components/user/UserAvatar";
 import {
+  bulkUpsertEventStaffFromCsv,
   removeEventStaffMember,
+  transferEventOwnershipAction,
   upsertEventStaffMember,
 } from "@/lib/actions/event-staff-admin";
 import { COLLABORATOR_PERMISSION_LABELS } from "@/lib/constants/collaborator-permissions";
@@ -34,7 +36,7 @@ import {
 export interface EventStaffMemberRow {
   id: string;
   x_user_id: string | null;
-  discord_user_id: string | null;
+  user_id: string | null;
   display_name: string;
   permission_preset: string | null;
   is_public: number | null;
@@ -45,15 +47,11 @@ export interface EventStaffMemberRow {
   icon_url: string | null;
 }
 
-/** @deprecated EventStaffMemberRow を使用 */
-export type EditorRow = never;
-/** @deprecated EventStaffMemberRow を使用 */
-export type CollaboratorRow = never;
-
 interface EventStaffManagerProps {
   eventId: string;
   members: EventStaffMemberRow[];
   isSiteAdmin: boolean;
+  currentUserId: string;
 }
 
 const BASE_PRESETS: readonly EventStaffPreset[] = [
@@ -141,11 +139,14 @@ export function EventStaffManager({
   eventId,
   members,
   isSiteAdmin,
+  currentUserId,
 }: EventStaffManagerProps): React.ReactElement {
   const router = useRouter();
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
-  const [removeTarget, setRemoveTarget] = React.useState<EventStaffMemberRow | null>(null);
+  const [removeTarget, setRemoveTarget] = React.useState<
+    (EventStaffMemberRow & { formData: FormData }) | null
+  >(null);
   const [savePreview, setSavePreview] = React.useState<{
     fd: FormData;
     message: string;
@@ -155,7 +156,7 @@ export function EventStaffManager({
     () =>
       members.map((member) => ({
         x_user_id: member.x_user_id,
-        discord_user_id: member.discord_user_id,
+        user_id: member.user_id,
       })),
     [members],
   );
@@ -173,25 +174,54 @@ export function EventStaffManager({
     });
   };
 
-  const requestSave = (fd: FormData, currentKeys: readonly string[], nextKeys: readonly string[]) => {
+  const requestSave = (
+    fd: FormData,
+    member: EventStaffMemberRow | null,
+    currentKeys: readonly string[],
+    nextKeys: readonly string[],
+  ) => {
+    if (!String(fd.get("reason") ?? "").trim()) {
+      setError("変更理由を入力してください。");
+      return;
+    }
+    if (
+      member?.user_id === currentUserId &&
+      String(fd.get("confirm_text") ?? "").trim() !== `SELF CHANGE ${eventId}`
+    ) {
+      setError(`自分のスタッフ情報を変更するには「SELF CHANGE ${eventId}」と入力してください。`);
+      return;
+    }
     setSavePreview({
       fd,
       message: buildPresetDiffMessage(currentKeys, nextKeys),
     });
   };
 
+  const requestRemove = (member: EventStaffMemberRow, formData: FormData) => {
+    if (!String(formData.get("reason") ?? "").trim()) {
+      setError("削除理由を入力してください。");
+      return;
+    }
+    if (
+      member.user_id === currentUserId &&
+      String(formData.get("confirm_text") ?? "").trim() !== `REMOVE SELF ${eventId}`
+    ) {
+      setError(`自分をスタッフから削除するには「REMOVE SELF ${eventId}」と入力してください。`);
+      return;
+    }
+    setError(null);
+    setRemoveTarget({ ...member, formData });
+  };
+
   const runRemove = () => {
     if (!removeTarget) return;
-    const target = removeTarget;
+    const { formData, ...target } = removeTarget;
     setRemoveTarget(null);
-    const fd = new FormData();
-    fd.set("event_id", eventId);
-    fd.set("staff_id", target.id);
-    fd.set("x_user_id", target.x_user_id ?? "");
-    fd.set("discord_user_id", target.discord_user_id ?? "");
+    formData.set("event_id", eventId);
+    formData.set("staff_id", target.id);
     setError(null);
     startTransition(async () => {
-      const result = await removeEventStaffMember(fd);
+      const result = await removeEventStaffMember(formData);
       if (!result.ok) {
         setError(result.message ?? "削除に失敗しました。");
         return;
@@ -200,7 +230,21 @@ export function EventStaffManager({
     });
   };
 
-  const runCsvImport = (rows: EventStaffCsvRow[]) => {
+  const runOwnershipTransfer = (fd: FormData) => {
+    setError(null);
+    startTransition(async () => {
+      const result = await transferEventOwnershipAction(fd);
+      if (!result.ok) {
+        setError(result.message ?? "代表権限の移譲に失敗しました。");
+        return;
+      }
+      router.refresh();
+    });
+  };
+
+  const ownerCount = members.filter((member) => member.permission_preset === "owner").length;
+
+  const runCsvImport = (rows: EventStaffCsvRow[], reason: string) => {
     const validRows = rows.filter((row) => row.errors.length === 0);
     if (validRows.length === 0) {
       setError("取り込める行がありません。");
@@ -208,33 +252,14 @@ export function EventStaffManager({
     }
     setError(null);
     startTransition(async () => {
-      for (const row of validRows) {
-        if (!isSiteAdmin && row.permission_preset === "xid_reviewer") {
-          setError("X ID確認担当プリセットは site admin だけが付与できます。");
-          return;
-        }
-        const blockedAdminOnly = row.permission_keys.find((key) => {
-          const canonical = canonicalizePermissionKey(key);
-          return canonical ? isAdminOnlyKey(canonical) : false;
-        });
-        if (!isSiteAdmin && blockedAdminOnly) {
-          setError("site admin 専用権限はイベント運営者から付与できません。");
-          return;
-        }
-        const fd = new FormData();
-        fd.set("event_id", eventId);
-        fd.set("display_name", row.display_name);
-        fd.set("x_user_id", row.x_user_id);
-        fd.set("discord_user_id", row.discord_user_id);
-        fd.set("permission_preset", row.permission_preset);
-        fd.set("permission_keys", row.permission_keys.join(","));
-        fd.set("is_public", row.is_public_staff);
-        fd.set("public_role_label", row.public_role_label);
-        const result = await upsertEventStaffMember(fd);
-        if (!result.ok) {
-          setError(result.message ?? `${row.display_name} の取り込みに失敗しました。`);
-          return;
-        }
+      const result = await bulkUpsertEventStaffFromCsv({
+        eventId,
+        rows: validRows,
+        reason,
+      });
+      if (!result.ok) {
+        setError(result.message ?? "CSVの取り込みに失敗しました。");
+        return;
       }
       router.refresh();
     });
@@ -263,9 +288,11 @@ export function EventStaffManager({
                 eventId={eventId}
                 member={member}
                 isSiteAdmin={isSiteAdmin}
+                currentUserId={currentUserId}
+                ownerCount={ownerCount}
                 busy={busy}
                 onRequestSave={requestSave}
-                onRemove={() => setRemoveTarget(member)}
+                onRemove={requestRemove}
               />
             ))}
           </div>
@@ -274,9 +301,17 @@ export function EventStaffManager({
           eventId={eventId}
           isSiteAdmin={isSiteAdmin}
           busy={busy}
-          onRequestSave={(fd, nextKeys) => requestSave(fd, [], nextKeys)}
+          onRequestSave={(fd, nextKeys) => requestSave(fd, null, [], nextKeys)}
         />
       </section>
+
+      <OwnershipTransferForm
+        eventId={eventId}
+        members={members}
+        currentUserId={currentUserId}
+        busy={busy}
+        onTransfer={runOwnershipTransfer}
+      />
 
       <CsvImportSection
         isSiteAdmin={isSiteAdmin}
@@ -344,6 +379,8 @@ function MemberCard({
   eventId,
   member,
   isSiteAdmin,
+  currentUserId,
+  ownerCount,
   busy,
   onRequestSave,
   onRemove,
@@ -351,9 +388,16 @@ function MemberCard({
   eventId: string;
   member: EventStaffMemberRow;
   isSiteAdmin: boolean;
+  currentUserId: string;
+  ownerCount: number;
   busy: boolean;
-  onRequestSave: (fd: FormData, currentKeys: readonly string[], nextKeys: readonly string[]) => void;
-  onRemove: () => void;
+  onRequestSave: (
+    fd: FormData,
+    member: EventStaffMemberRow,
+    currentKeys: readonly string[],
+    nextKeys: readonly string[],
+  ) => void;
+  onRemove: (member: EventStaffMemberRow, formData: FormData) => void;
 }): React.ReactElement {
   const [preset, setPreset] = React.useState<EventStaffPreset>(() =>
     normalizeMemberPreset(member.permission_preset, member.permission_keys),
@@ -364,6 +408,9 @@ function MemberCard({
   const presetOptions = visiblePresets(isSiteAdmin);
   const customPermissionKeys = visibleCustomPermissionKeys(isSiteAdmin);
   const capabilityKeys = resolvePresetKeys(preset, customKeys, isSiteAdmin);
+  const isOwner = member.permission_preset === "owner";
+  const isLastOwner = isOwner && ownerCount === 1;
+  const isCurrentUser = member.user_id === currentUserId;
 
   return (
     <form
@@ -382,7 +429,7 @@ function MemberCard({
           preset === "custom" ? fd.getAll("permission_key").map(String) : [],
           isSiteAdmin,
         );
-        onRequestSave(fd, member.permission_keys, nextKeys);
+        onRequestSave(fd, member, member.permission_keys, nextKeys);
       }}
       style={{
         display: "grid",
@@ -398,10 +445,11 @@ function MemberCard({
           <MemberAvatar iconUrl={member.icon_url} name={member.display_name} />
           <div style={{ minWidth: 0 }}>
             <strong style={{ display: "block", overflowWrap: "anywhere" }}>{member.display_name}</strong>
+            {isOwner ? <span className="fn-badge fn-badge-warning">代表者</span> : null}
             <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
               {member.x_user_id ? `@${member.x_user_id}` : ""}
-              {member.discord_user_id
-                ? `${member.x_user_id ? " / " : ""}discord:${member.discord_user_id}`
+              {member.user_id
+                ? `${member.x_user_id ? " / " : ""}user:${member.user_id}`
                 : ""}
             </span>
           </div>
@@ -409,8 +457,12 @@ function MemberCard({
         <button
           type="button"
           className="fn-btn fn-btn-ghost fn-btn-sm"
-          disabled={busy}
-          onClick={onRemove}
+          disabled={busy || isLastOwner}
+          title={isLastOwner ? "最後の代表者は削除できません。先に代表権限を移譲してください。" : undefined}
+          onClick={(event) => {
+            const form = event.currentTarget.form;
+            if (form) onRemove(member, new FormData(form));
+          }}
           aria-label={`${member.display_name} を削除`}
         >
           <Icon name="trash" size={11} aria-hidden />
@@ -426,7 +478,7 @@ function MemberCard({
       >
         <input type="hidden" name="display_name" value={member.display_name} />
         <input type="hidden" name="x_user_id" value={member.x_user_id ?? ""} />
-        <input type="hidden" name="discord_user_id" value={member.discord_user_id ?? ""} />
+        <input type="hidden" name="user_id" value={member.user_id ?? ""} />
         <label className="fn-label">
           公開状態
           <select
@@ -472,13 +524,19 @@ function MemberCard({
             disabled={busy}
           >
             {presetOptions.map((option) => (
-              <option key={option} value={option}>
+              <option key={option} value={option} disabled={isLastOwner && option !== "owner"}>
                 {PRESET_DEFINITIONS[option].label}
               </option>
             ))}
           </select>
         </label>
       </div>
+
+      {isLastOwner ? (
+        <p className="fn-alert fn-alert--danger" style={{ margin: 0 }}>
+          このイベントの最後の代表者です。削除または権限を下げる前に、別のスタッフへ代表権限を移譲してください。
+        </p>
+      ) : null}
 
       <div>
         <div className="fn-console-eyebrow" style={{ marginBottom: 6 }}>できること</div>
@@ -499,6 +557,40 @@ function MemberCard({
         ) : (
           <CapabilityBadges keys={capabilityKeys} />
         )}
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))",
+          gap: 8,
+        }}
+      >
+        <label className="fn-label">
+          変更・削除の理由 (必須)
+          <input
+            type="text"
+            name="reason"
+            className="fn-input"
+            placeholder="監査ログに残す理由"
+            maxLength={500}
+            required
+            disabled={busy}
+          />
+        </label>
+        <label className="fn-label">
+          自己操作の確認
+          <input
+            type="text"
+            name="confirm_text"
+            className="fn-input"
+            placeholder={isCurrentUser ? `SELF CHANGE ${eventId} / REMOVE SELF ${eventId}` : `SELF CHANGE ${eventId}`}
+            disabled={busy}
+          />
+          <span className="fn-console-note">
+            自分の変更時は SELF CHANGE、自己削除時は REMOVE SELF をイベント ID 付きで入力します。
+          </span>
+        </label>
       </div>
 
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -570,10 +662,9 @@ function AddMemberForm({
         />
         <input
           type="text"
-          name="discord_user_id"
-          placeholder="Discord User ID"
+          name="user_id"
+          placeholder="ユーザー ID"
           className="fn-input"
-          inputMode="numeric"
           disabled={busy}
         />
         <select
@@ -629,12 +720,160 @@ function AddMemberForm({
         <CapabilityBadges keys={resolvePresetKeys(preset, [], isSiteAdmin)} />
       )}
 
+      <label className="fn-label">
+        追加理由 (必須)
+        <input
+          type="text"
+          name="reason"
+          className="fn-input"
+          placeholder="監査ログに残す理由"
+          maxLength={500}
+          required
+          disabled={busy}
+        />
+      </label>
+
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm" disabled={busy}>
           <Icon name="plus" size={11} aria-hidden /> 追加を確認
         </button>
       </div>
     </form>
+  );
+}
+
+function OwnershipTransferForm({
+  eventId,
+  members,
+  currentUserId,
+  busy,
+  onTransfer,
+}: {
+  eventId: string;
+  members: readonly EventStaffMemberRow[];
+  currentUserId: string;
+  busy: boolean;
+  onTransfer: (fd: FormData) => void;
+}): React.ReactElement | null {
+  const ownerMembers = members.filter((member) => member.permission_preset === "owner");
+  const [fromStaffId, setFromStaffId] = React.useState(ownerMembers[0]?.id ?? "");
+  const [toStaffId, setToStaffId] = React.useState(
+    members.find((member) => member.id !== ownerMembers[0]?.id)?.id ?? "",
+  );
+  const fromMember = ownerMembers.find((member) => member.id === fromStaffId) ?? ownerMembers[0];
+  const targetMembers = members.filter((member) => member.id !== fromMember?.id);
+  const needsSelfConfirmation = fromMember?.user_id === currentUserId;
+
+  if (!fromMember || targetMembers.length === 0) return null;
+
+  return (
+    <section
+      style={{
+        display: "grid",
+        gap: 10,
+        padding: 14,
+        border: "1px solid var(--danger-border, #c62828)",
+        borderRadius: "var(--radius-sm)",
+        background: "var(--bg-base)",
+      }}
+    >
+      <div>
+        <h3 className="fn-console-card-title" style={{ marginBottom: 4 }}>代表権限の移譲</h3>
+        <p className="fn-console-note">
+          最後の代表者を削除・降格する前に、登録済みスタッフへ代表権限を移譲してください。
+        </p>
+      </div>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          const fd = new FormData(event.currentTarget);
+          fd.set("event_id", eventId);
+          fd.set("from_staff_id", fromMember.id);
+          fd.set("to_staff_id", toStaffId);
+          onTransfer(fd);
+        }}
+        style={{ display: "grid", gap: 8 }}
+      >
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
+            gap: 8,
+          }}
+        >
+          <label className="fn-label">
+            移譲元（代表者）
+            <select
+              value={fromMember.id}
+              className="fn-select"
+              disabled={busy}
+              onChange={(event) => {
+                const nextFromId = event.target.value;
+                setFromStaffId(nextFromId);
+                if (toStaffId === nextFromId) {
+                  setToStaffId(members.find((member) => member.id !== nextFromId)?.id ?? "");
+                }
+              }}
+            >
+              {ownerMembers.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.display_name} ({member.x_user_id ? `@${member.x_user_id}` : `user:${member.user_id ?? member.id}`})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="fn-label">
+            移譲先
+            <select
+              value={toStaffId}
+              className="fn-select"
+              disabled={busy}
+              onChange={(event) => setToStaffId(event.target.value)}
+            >
+              {targetMembers.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.display_name} ({member.x_user_id ? `@${member.x_user_id}` : `user:${member.user_id ?? member.id}`})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="fn-label">
+            移譲理由 (必須)
+            <input type="text" name="reason" className="fn-input" maxLength={500} required disabled={busy} />
+          </label>
+          <label className="fn-label">
+            移譲確認 (必須)
+            <input
+              type="text"
+              name="confirm_text"
+              className="fn-input"
+              placeholder={`TRANSFER ${eventId}`}
+              required
+              disabled={busy}
+            />
+          </label>
+          <label className="fn-label">
+            自己変更の確認{needsSelfConfirmation ? " (必須)" : ""}
+            <input
+              type="text"
+              name="self_confirm_text"
+              className="fn-input"
+              placeholder={`SELF CHANGE ${eventId}`}
+              required={needsSelfConfirmation}
+              disabled={busy}
+            />
+          </label>
+        </div>
+        <p className="fn-console-note" style={{ margin: 0 }}>
+          確認欄には「TRANSFER {eventId}」を正確に入力してください。移譲元が自分の場合は「SELF CHANGE {eventId}」も必要です。
+        </p>
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button type="submit" className="fn-btn fn-btn-danger fn-btn-sm" disabled={busy}>
+            代表権限を移譲する
+          </button>
+        </div>
+      </form>
+    </section>
   );
 }
 
@@ -727,9 +966,10 @@ function CsvImportSection({
   isSiteAdmin: boolean;
   existingSubjects: readonly EventStaffCsvExistingSubject[];
   busy: boolean;
-  onImport: (rows: EventStaffCsvRow[]) => void;
+  onImport: (rows: EventStaffCsvRow[], reason: string) => void;
 }): React.ReactElement {
   const [csvText, setCsvText] = React.useState("");
+  const [reason, setReason] = React.useState("");
   const [csvPreview, setCsvPreview] = React.useState<EventStaffCsvPreview | null>(null);
   const [copied, setCopied] = React.useState(false);
   const previewValidRows = csvPreview?.rows.filter((row) => row.errors.length === 0) ?? [];
@@ -737,8 +977,9 @@ function CsvImportSection({
   const copyCsvPrompt = async () => {
     const prompt = [
       "次の情報を FlameNode のイベント運営メンバーCSVに整形してください。",
-      "出力はCSV本文のみ。列は 表示名,X ID,Discord User ID,担当プリセット,公開フラグ,公開ラベル の6列です。",
-      "担当プリセットは owner,manager,slot_manager,content_editor,reviewer,public_staff のいずれかを使ってください。",
+      "出力はCSV本文のみ。列は 表示名,X ID,ユーザー ID,担当プリセット,公開フラグ,公開ラベル の6列です。",
+      "ユーザー ID はAuth.js内部ユーザーIDであり、Discord Snowflakeは入力しません。",
+      "担当プリセットは manager,slot_manager,content_editor,reviewer,public_staff のいずれかを使ってください。代表者の変更はCSVでは行えません。",
       "X IDは@なし。公開する場合は1、それ以外は0にしてください。",
     ].join("\n");
     await navigator.clipboard.writeText(prompt);
@@ -761,6 +1002,20 @@ function CsvImportSection({
           setCsvPreview(null);
         }}
         placeholder={EVENT_STAFF_CSV_SAMPLE}
+        disabled={busy}
+      />
+      <label className="fn-label" htmlFor="staff_csv_reason">
+        変更理由
+      </label>
+      <input
+        id="staff_csv_reason"
+        className="fn-input"
+        type="text"
+        value={reason}
+        onChange={(event) => setReason(event.target.value)}
+        placeholder="例: 企画運営チームの一括登録"
+        maxLength={500}
+        required
         disabled={busy}
       />
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -789,11 +1044,9 @@ function CsvImportSection({
           className="fn-btn fn-btn-primary fn-btn-sm"
           onClick={() => {
             if (!csvPreview || csvPreview.hasErrors) return;
-            onImport(previewValidRows);
-            setCsvText("");
-            setCsvPreview(null);
+            onImport(previewValidRows, reason);
           }}
-          disabled={busy || !csvPreview || csvPreview.hasErrors || previewValidRows.length === 0}
+          disabled={busy || !csvPreview || csvPreview.hasErrors || previewValidRows.length === 0 || reason.trim().length === 0}
         >
           <Icon name="upload" size={11} aria-hidden /> プレビュー内容を保存
         </button>
@@ -824,9 +1077,6 @@ function CsvPreviewPanel({
         <span className={preview.counts.error > 0 ? "fn-badge fn-badge-warning" : "fn-badge fn-badge-neutral"}>
           エラー {preview.counts.error}件
         </span>
-        {preview.counts.legacy > 0 ? (
-          <span className="fn-badge fn-badge-neutral">旧形式 {preview.counts.legacy}行</span>
-        ) : null}
       </div>
       <div style={{ overflowX: "auto" }}>
         <table className="fn-table" style={{ minWidth: 760 }}>
@@ -852,7 +1102,7 @@ function CsvPreviewPanel({
                 </td>
                 <td>{row.display_name}</td>
                 <td>
-                  {row.x_user_id ? <code>@{row.x_user_id}</code> : row.discord_user_id ? <code>discord:{row.discord_user_id}</code> : "-"}
+                  {row.x_user_id ? <code>@{row.x_user_id}</code> : row.user_id ? <code>user:{row.user_id}</code> : "-"}
                 </td>
                 <td>{eventStaffCsvPresetLabel(row.permission_preset)}</td>
                 <td>

@@ -203,7 +203,6 @@ export default async function AdminVideoDetailPage({
             <select name="video_status" className="fn-select" defaultValue="">
               <option value="">変更しない</option>
               <option value="voided">voided: 一時的に公開停止</option>
-              <option value="hidden">hidden: 非表示</option>
               <option value="pending">pending: 再確認待ち</option>
             </select>
           </label>

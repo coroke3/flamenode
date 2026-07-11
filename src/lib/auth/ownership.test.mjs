@@ -202,20 +202,6 @@ test("parseDelegatablePermissionKeys: 危険キーは除外される", () => {
   assert.equal(result.size, 0);
 });
 
-// --- セキュリティ: 編集権限の分離確認 ---
-
-test("セキュリティ: owner_discord_user_id だけで編集許可しない (設計確認)", () => {
-  assert.ok(true, "設計確認: owner_discord_user_id だけで編集許可しない");
-});
-
-test("セキュリティ: 未承認 X ID は枠確保のみ (設計確認)", () => {
-  assert.ok(true, "設計確認: 未承認 X ID は枠確保のみ");
-});
-
-test("セキュリティ: Discord ID と X ID の責務分離 (設計確認)", () => {
-  assert.ok(true, "設計確認: Discord ID と X ID の責務分離");
-});
-
 // --- privilegeMode の分離確認 ---
 
 test("privilegeMode: normal モードでは admin でも safe key だけ", () => {

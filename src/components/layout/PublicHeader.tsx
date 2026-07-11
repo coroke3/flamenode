@@ -198,6 +198,7 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
           className={`fn-public-container ${styles.mobileNav}`}
           aria-label="モバイルナビゲーション"
           aria-hidden={!mobileOpen}
+          inert={!mobileOpen}
         >
           <div className={styles.mobileSection}>
             <form

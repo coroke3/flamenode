@@ -1,0 +1,7 @@
+# FlameNode project-scoped Codex defaults.
+model = "gpt-5.6-terra"
+model_reasoning_effort = "max"
+
+[agents]
+max_threads = 6
+max_depth = 1

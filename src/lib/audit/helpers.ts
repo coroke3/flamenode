@@ -11,7 +11,6 @@ const RESTORABLE_TABLES = new Set([
   "video_members",
   "video_chapters",
   "event_staff",
-  "event_staff_permissions",
   "event_groups",
   "event_group_events",
   "announcements",
@@ -21,7 +20,6 @@ const RESTORABLE_TABLES = new Set([
 const STRICT_TABLES = new Set([
   "users",
   "event_staff",
-  "event_staff_permissions",
   "system_settings",
   "audit_log_settings",
   "x_id_merge_requests",
@@ -101,7 +99,7 @@ export interface AuditActionInput {
   action: "CREATE" | "UPDATE" | "DELETE";
   before_data?: string | Record<string, unknown> | null;
   after_data?: string | Record<string, unknown> | null;
-  operator_discord_id: string;
+  operator_user_id: string;
   retention_class?: RetentionClass | "normal" | "long_audit";
   reason?: string | null;
   action_label?: string | null;
@@ -111,7 +109,7 @@ export interface AuditActionInput {
 }
 
 /**
- * 既存 historyLogs insert パターンから writeAuditLog へのブリッジ。
+ * 監査アクションを正規化し、共通の writeAuditLog へ渡す。
  */
 export async function auditAction(
   db: DB,
@@ -133,7 +131,7 @@ export async function auditAction(
     operation: input.action,
     before,
     after,
-    actor_user_id: input.operator_discord_id,
+    actor_user_id: input.operator_user_id,
     reason: input.reason,
     retention_class: retentionClass,
     restore_strategy: restoreStrategy,

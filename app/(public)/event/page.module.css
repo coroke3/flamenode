@@ -1,0 +1,128 @@
+.filterForm {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 12px;
+  border: 1px solid var(--hairline, var(--border-subtle));
+  background: var(--bg-surface);
+}
+
+.searchField {
+  display: flex;
+  align-items: center;
+  flex: 1 1 280px;
+  min-width: 0;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 10px;
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-base);
+}
+
+.searchField:focus-within {
+  border-color: var(--accent-primary);
+  outline: 2px solid color-mix(in srgb, var(--accent-primary) 28%, transparent);
+  outline-offset: 1px;
+}
+
+.searchField input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  color: var(--text-primary);
+  background: transparent;
+}
+
+.sortField {
+  display: grid;
+  gap: 4px;
+  flex: 0 1 180px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.sortField select {
+  min-height: 40px;
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: normal;
+}
+
+.filterForm > :global(.fn-btn) {
+  min-height: 40px;
+}
+
+.statusChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: clamp(20px, 3vw, 32px);
+}
+
+.statusChip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 6px 11px;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.statusChip:hover,
+.statusChip:focus-visible {
+  color: var(--text-primary);
+  border-color: var(--accent-primary);
+}
+
+.statusChipActive {
+  color: var(--accent-ink);
+  border-color: var(--accent-primary);
+  background: var(--accent-primary);
+}
+
+@media (max-width: 700px) {
+  .filterForm {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .searchField {
+    flex-basis: 100%;
+  }
+
+  .sortField {
+    flex: 1 1 170px;
+  }
+
+  .filterForm > :global(.fn-btn) {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .statusChips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .statusChips::-webkit-scrollbar {
+    display: none;
+  }
+
+  .statusChip {
+    flex: 0 0 auto;
+    min-height: 40px;
+  }
+}

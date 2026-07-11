@@ -83,7 +83,7 @@ export async function queueYoutubeMetadataResync(
       sync_error: null,
       requested_by: "admin_youtube_sync",
     }),
-    operator_discord_id: user.id,
+    operator_user_id: user.id,
     retention_class: "normal",
   });
 

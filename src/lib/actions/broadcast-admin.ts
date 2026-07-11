@@ -61,34 +61,34 @@ export async function broadcastAnnouncement(
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
 
-  // 対象 Discord ID を audience に応じてバッチ取得 (cursor から BROADCAST_BATCH_SIZE 件)
-  let targets: { discord_user_id: string }[] = [];
+  // 対象内部ユーザー ID を audience に応じてバッチ取得 (cursor から BROADCAST_BATCH_SIZE 件)
+  let targets: { user_id: string }[] = [];
   if (audience === "all") {
     targets = await db
-      .select({ discord_user_id: usersTable.id })
+      .select({ user_id: usersTable.id })
       .from(usersTable)
       .orderBy(usersTable.id)
       .limit(BROADCAST_BATCH_SIZE)
       .offset(cursor);
   } else if (audience === "admins") {
     targets = await db
-      .select({ discord_user_id: usersTable.id })
+      .select({ user_id: usersTable.id })
       .from(usersTable)
       .where(eq(usersTable.role, "admin"))
       .orderBy(usersTable.id)
       .limit(BROADCAST_BATCH_SIZE)
       .offset(cursor);
   } else {
-    // creators: approved X ID を持つ distinct discord_user_id
+    // creators: approved X ID を持つ distinct user_id
     const rows = await db
-      .selectDistinct({ discord_user_id: xUsersTable.linked_discord_user_id })
+      .selectDistinct({ user_id: xUsersTable.linked_user_id })
       .from(xUsersTable)
       .where(eq(xUsersTable.approval_status, "approved"))
-      .orderBy(xUsersTable.linked_discord_user_id)
+      .orderBy(xUsersTable.linked_user_id)
       .limit(BROADCAST_BATCH_SIZE)
       .offset(cursor);
-    targets = rows.filter((r) => r.discord_user_id != null) as {
-      discord_user_id: string;
+    targets = rows.filter((r) => r.user_id != null) as {
+      user_id: string;
     }[];
   }
 
@@ -103,9 +103,9 @@ export async function broadcastAnnouncement(
 
   let enqueued = 0;
   for (const t of targets) {
-    if (!t.discord_user_id) continue;
+    if (!t.user_id) continue;
     const ok = await enqueueNotification(db, {
-      discordUserId: t.discord_user_id,
+      recipientUserId: t.user_id,
       type: "announcement_broadcast",
       payload: {
         content,
@@ -132,7 +132,7 @@ export async function broadcastAnnouncement(
       enqueued,
       executor: u.id,
     }),
-    operator_discord_id: u.id,
+    operator_user_id: u.id,
     retention_class: "long_audit",
   });
 

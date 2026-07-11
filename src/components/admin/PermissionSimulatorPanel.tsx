@@ -7,14 +7,14 @@ import type { PermissionSimulationResult } from "@/lib/admin/permissionSimulator
 interface PermissionSimulatorPanelProps {
   eventId: string;
   xUserId: string;
-  discordUserId: string;
+  userId: string;
   result: PermissionSimulationResult | null;
 }
 
 export function PermissionSimulatorPanel({
   eventId,
   xUserId,
-  discordUserId,
+  userId,
   result,
 }: PermissionSimulatorPanelProps): React.ReactElement {
   return (
@@ -40,12 +40,12 @@ export function PermissionSimulatorPanel({
           />
         </label>
         <label className="fn-label">
-          Discord User ID
+          ユーザー ID
           <input
-            name="discord_user_id"
+            name="user_id"
             className="fn-input"
-            defaultValue={discordUserId}
-            placeholder="数字のユーザーID"
+            defaultValue={userId}
+            placeholder="Auth.js 内部ユーザー ID"
           />
         </label>
         <button type="submit" className="fn-btn fn-btn-primary">
@@ -54,7 +54,7 @@ export function PermissionSimulatorPanel({
       </form>
 
       <p className="fn-muted fn-text-sm" style={{ margin: 0 }}>
-        X ID または Discord User ID のどちらか一方を入力してください。イベントスタッフ登録を参照します。
+        X ID またはユーザー ID のどちらか一方を入力してください。イベントスタッフ登録を参照します。
       </p>
 
       {!result ? (
@@ -84,8 +84,8 @@ export function PermissionSimulatorPanel({
               </dd>
               <dt className="fn-muted">X ID</dt>
               <dd style={{ margin: 0 }}>{result.xUserId ? `@${result.xUserId}` : "—"}</dd>
-              <dt className="fn-muted">Discord ID</dt>
-              <dd style={{ margin: 0 }}>{result.discordUserId ?? "—"}</dd>
+              <dt className="fn-muted">ユーザー ID</dt>
+              <dd style={{ margin: 0 }}>{result.userId ?? "—"}</dd>
             </dl>
             <p style={{ marginTop: 12 }}>
               <Link

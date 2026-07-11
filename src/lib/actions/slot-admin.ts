@@ -164,7 +164,7 @@ export async function generateSlotsBatch(
       count: created.length,
       event_id: data.event_id,
     }),
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "normal",
 
   });
@@ -199,7 +199,7 @@ export async function deleteAvailableSlots(
     record_id: eventId,
     action: "DELETE",
     after_data: JSON.stringify({ deleted: rows.length, scope: "available" }),
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "normal",
 
   });
@@ -233,9 +233,9 @@ export async function releaseSlot(formData: FormData): Promise<SlotActionResult>
         and(
           eq(slots.reservation_group_id, groupId),
           eq(slots.event_id, row.event_id),
-          row.discord_user_id
-            ? eq(slots.discord_user_id, row.discord_user_id)
-            : isNull(slots.discord_user_id),
+          row.reserved_by_user_id
+            ? eq(slots.reserved_by_user_id, row.reserved_by_user_id)
+            : isNull(slots.reserved_by_user_id),
           row.x_user_id ? eq(slots.x_user_id, row.x_user_id) : isNull(slots.x_user_id),
         )!,
       );
@@ -249,7 +249,7 @@ export async function releaseSlot(formData: FormData): Promise<SlotActionResult>
       .update(slots)
       .set({
         status: "available",
-        discord_user_id: null,
+        reserved_by_user_id: null,
         x_user_id: null,
         display_name: null,
         reservation_group_id: null,
@@ -260,9 +260,9 @@ export async function releaseSlot(formData: FormData): Promise<SlotActionResult>
         and(
           eq(slots.reservation_group_id, groupId),
           eq(slots.event_id, row.event_id),
-          row.discord_user_id
-            ? eq(slots.discord_user_id, row.discord_user_id)
-            : isNull(slots.discord_user_id),
+          row.reserved_by_user_id
+            ? eq(slots.reserved_by_user_id, row.reserved_by_user_id)
+            : isNull(slots.reserved_by_user_id),
           row.x_user_id ? eq(slots.x_user_id, row.x_user_id) : isNull(slots.x_user_id),
         )!,
       );
@@ -272,7 +272,7 @@ export async function releaseSlot(formData: FormData): Promise<SlotActionResult>
       .update(slots)
       .set({
         status: "available",
-        discord_user_id: null,
+        reserved_by_user_id: null,
         x_user_id: null,
         display_name: null,
         reservation_group_id: null,
@@ -293,15 +293,15 @@ export async function releaseSlot(formData: FormData): Promise<SlotActionResult>
       slot_ids: targetIds,
       reservation_group_id: groupId ?? null,
     }),
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "long_audit",
 
   });
 
-  // 通知: スロット所有者 (Discord) に強制解放を伝える。
-  if (row.discord_user_id) {
+  // 通知: スロット所有者に強制解放を伝える。
+  if (row.reserved_by_user_id) {
     await enqueueNotification(db, {
-      discordUserId: row.discord_user_id,
+      recipientUserId: row.reserved_by_user_id,
       type: "slot_force_released",
       dedupeKey: `slot_force_released:${row.event_id}:${slotId}:${groupId ?? "solo"}`,
       payload: {
@@ -345,7 +345,7 @@ export async function deleteSlot(formData: FormData): Promise<SlotActionResult> 
     record_id: slotId,
     action: "DELETE",
     before_data: JSON.stringify({ event_id: row.event_id }),
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "normal",
 
   });
@@ -402,7 +402,7 @@ export async function batchDeleteAvailableSlots(
       record_id: row.id,
       action: "DELETE",
       before_data: JSON.stringify({ event_id: eventId, batch: true }),
-      operator_discord_id: guard.userId,
+      operator_user_id: guard.userId,
       retention_class: "normal",
 
     });
@@ -467,7 +467,7 @@ export async function batchReleaseReservedSlots(
       .set({
         status: "available",
         x_user_id: null,
-        discord_user_id: null,
+        reserved_by_user_id: null,
         display_name: null,
         reservation_group_id: null,
         video_id: null,
@@ -487,7 +487,7 @@ export async function batchReleaseReservedSlots(
         forced_release: true,
         slot_ids: targetIds,
       }),
-      operator_discord_id: guard.userId,
+      operator_user_id: guard.userId,
       retention_class: "long_audit",
 
     });

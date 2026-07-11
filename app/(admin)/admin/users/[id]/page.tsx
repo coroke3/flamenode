@@ -40,7 +40,7 @@ export default async function AdminUserDetailPage({
   const xIds = await db
     .select()
     .from(xUsersTable)
-    .where(eq(xUsersTable.linked_discord_user_id, user.id));
+    .where(eq(xUsersTable.linked_user_id, user.id));
 
   const recentVideos = await db
     .select({
@@ -50,7 +50,7 @@ export default async function AdminUserDetailPage({
       created_at: videosTable.created_at,
     })
     .from(videosTable)
-    .where(eq(videosTable.submitted_by_discord_user_id, user.id))
+    .where(eq(videosTable.submitted_by_user_id, user.id))
     .orderBy(desc(videosTable.created_at))
     .limit(20);
 
@@ -98,7 +98,7 @@ export default async function AdminUserDetailPage({
       requested_at: xAccountLinkRequestsTable.requested_at,
     })
     .from(xAccountLinkRequestsTable)
-    .where(eq(xAccountLinkRequestsTable.discord_user_id, user.id))
+    .where(eq(xAccountLinkRequestsTable.user_id, user.id))
     .orderBy(desc(xAccountLinkRequestsTable.requested_at))
     .limit(10);
 

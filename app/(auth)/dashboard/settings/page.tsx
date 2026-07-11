@@ -82,7 +82,7 @@ export default async function SettingsPage({
     ? await db
         .select()
         .from(xUsersTable)
-        .where(eq(xUsersTable.linked_discord_user_id, user.id))
+        .where(eq(xUsersTable.linked_user_id, user.id))
     : [];
 
   const pendingLinkRequests = db
@@ -91,7 +91,7 @@ export default async function SettingsPage({
         .from(linkReqTable)
         .where(
           and(
-            eq(linkReqTable.discord_user_id, user.id),
+            eq(linkReqTable.user_id, user.id),
             eq(linkReqTable.status, "pending"),
           )!,
         )

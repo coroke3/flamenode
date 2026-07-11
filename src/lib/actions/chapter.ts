@@ -101,7 +101,7 @@ export async function createChapter(
       label: data.chapter_label,
       visibility: data.visibility,
     }),
-    operator_discord_id: sUser.id,
+    operator_user_id: sUser.id,
     retention_class: "normal",
   });
 
@@ -110,11 +110,11 @@ export async function createChapter(
   // (private チャプターはオーナーには不要 - 投稿者本人にしか見えないため)
   if (
     data.visibility === "public" &&
-    target.submitted_by_discord_user_id &&
-    target.submitted_by_discord_user_id !== sUser.id
+    target.submitted_by_user_id &&
+    target.submitted_by_user_id !== sUser.id
   ) {
     await enqueueNotification(db, {
-      discordUserId: target.submitted_by_discord_user_id,
+      recipientUserId: target.submitted_by_user_id,
       type: "chapter_comment_added",
       payload: {
         content: `作品「${target.title}」に新しいチャプターコメント「${data.chapter_label}」が追加されました。`,
@@ -264,7 +264,7 @@ export async function deleteChapter(
       chapter_time: existing.chapter_time,
       label: existing.chapter_label,
     }),
-    operator_discord_id: sUser.id,
+    operator_user_id: sUser.id,
     retention_class: "normal",
   });
 
@@ -437,7 +437,7 @@ export async function createChaptersBulk(
         inserted,
         skipped,
       }),
-      operator_discord_id: sUser.id,
+      operator_user_id: sUser.id,
       retention_class: "normal",
     });
   }

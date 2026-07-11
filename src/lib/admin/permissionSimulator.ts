@@ -25,7 +25,7 @@ export type PermissionSimulationResult = {
   found: boolean;
   eventId: string;
   xUserId: string | null;
-  discordUserId: string | null;
+  userId: string | null;
   displayName: string | null;
   preset: EventStaffPreset | null;
   presetLabel: string | null;
@@ -39,18 +39,18 @@ export async function simulateEventPermissions(
   input: {
     eventId: string;
     xUserId?: string;
-    discordUserId?: string;
+    userId?: string;
   },
 ): Promise<PermissionSimulationResult> {
   const eventId = input.eventId.trim();
   const xUserId = input.xUserId?.trim().replace(/^@/, "") || null;
-  const discordUserId = input.discordUserId?.trim() || null;
+  const userId = input.userId?.trim() || null;
 
   const empty: PermissionSimulationResult = {
     found: false,
     eventId,
     xUserId,
-    discordUserId,
+    userId,
     displayName: null,
     preset: null,
     presetLabel: null,
@@ -63,11 +63,11 @@ export async function simulateEventPermissions(
     })),
   };
 
-  if (!eventId || (!xUserId && !discordUserId)) return empty;
+  if (!eventId || (!xUserId && !userId)) return empty;
 
   const subjectCond = xUserId
     ? eq(eventStaff.x_user_id, xUserId)
-    : eq(eventStaff.discord_user_id, discordUserId!);
+    : eq(eventStaff.user_id, userId!);
 
   const row = (
     await db
@@ -87,7 +87,7 @@ export async function simulateEventPermissions(
     found: true,
     eventId,
     xUserId: row.x_user_id,
-    discordUserId: row.discord_user_id,
+    userId: row.user_id,
     displayName: row.display_name,
     preset,
     presetLabel: PRESET_DEFINITIONS[preset]?.label ?? preset,

@@ -25,6 +25,8 @@ interface VideoMembersFieldProps {
   suggestions?: VideoMemberSuggestion[];
   hiddenName?: string;
   disabled?: boolean;
+  /** 正規化後の有効メンバー一覧。入力・追加・削除・並び替え・CSV反映のすべてで通知する。 */
+  onChange?: (members: VideoMemberInput[]) => void;
   /** 設定時は「編集できる人」セクションへ誘導するリンクを表示 */
   collabPermsHref?: string;
 }
@@ -49,11 +51,34 @@ function stripCsvEditFlags(members: VideoMemberInput[]): VideoMemberInput[] {
   });
 }
 
+function normalizeMemberRows(rows: VideoMemberInput[]): VideoMemberInput[] {
+  return rows
+    .map((r) => ({
+      name: r.name.trim(),
+      x_user_id: normalizeXId(r.x_user_id),
+      role: r.role.trim(),
+      comment: r.comment.trim(),
+      chapters: (r.chapters ?? [])
+        .map((c) => {
+          const time = normalizeMemberChapterTime(c.time);
+          if (!time) return null;
+          return {
+            time,
+            label: c.label.trim() || chapterLabelForMember(r),
+            note: c.note.trim(),
+          };
+        })
+        .filter((c): c is NonNullable<typeof c> => c !== null),
+    }))
+    .filter((r) => r.name || r.x_user_id);
+}
+
 export function VideoMembersField({
   initialMembers = [],
   suggestions = [],
   hiddenName = "members_json",
   disabled = false,
+  onChange,
   collabPermsHref,
 }: VideoMembersFieldProps): React.ReactElement {
   const [rows, setRows] = React.useState<VideoMemberInput[]>(() =>
@@ -335,28 +360,12 @@ export function VideoMembersField({
     mergeCsvMembers(stripped);
   };
 
-  const payload = React.useMemo(() => {
-    const cleaned = rows
-      .map((r) => ({
-        name: r.name.trim(),
-        x_user_id: normalizeXId(r.x_user_id),
-        role: r.role.trim(),
-        comment: r.comment.trim(),
-        chapters: (r.chapters ?? [])
-          .map((c) => {
-            const time = normalizeMemberChapterTime(c.time);
-            if (!time) return null;
-            return {
-              time,
-              label: c.label.trim() || chapterLabelForMember(r),
-              note: c.note.trim(),
-            };
-          })
-          .filter((c): c is NonNullable<typeof c> => c !== null),
-      }))
-      .filter((r) => r.name || r.x_user_id);
-    return JSON.stringify(cleaned);
-  }, [rows]);
+  const normalizedRows = React.useMemo(() => normalizeMemberRows(rows), [rows]);
+  const payload = React.useMemo(() => JSON.stringify(normalizedRows), [normalizedRows]);
+
+  React.useEffect(() => {
+    onChange?.(normalizedRows);
+  }, [normalizedRows, onChange]);
 
   // メンバー行ごとのチャプター行を編集するヘルパー
   const updateChapterTimes = (i: number, raw: string) => {

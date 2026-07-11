@@ -21,7 +21,7 @@ const baseSlot = {
   status: "available",
   display_name: null,
   x_user_id: null,
-  discord_user_id: null,
+  reserved_by_user_id: null,
   video_id: null,
   updated_at: 0,
   priority_reclaim_video_id: null,

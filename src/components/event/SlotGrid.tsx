@@ -26,7 +26,7 @@ export interface SlotRow {
   status: "available" | "reserved" | "submitted";
   display_name: string | null;
   x_user_id: string | null;
-  discord_user_id: string | null;
+  reserved_by_user_id: string | null;
   reservation_group_id?: string | null;
 }
 
@@ -422,7 +422,7 @@ export function SlotGrid({
                   const slot = item.slot;
                   const isMine =
                     (!!viewerXId && slot.x_user_id === viewerXId) ||
-                    (!slot.x_user_id && !!viewerDiscordId && slot.discord_user_id === viewerDiscordId);
+                    (!slot.x_user_id && !!viewerDiscordId && slot.reserved_by_user_id === viewerDiscordId);
                   const filled = slot.status !== "available";
                   return (
                     <tr

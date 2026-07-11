@@ -43,7 +43,7 @@ async function assertLinkedXUser(db: NonNullable<ReturnType<typeof getDatabase>>
   const row = (
     await db.select().from(xUsers).where(xUserIdMatches(xUserId)).limit(1)
   )[0];
-  if (!row || row.linked_discord_user_id !== userId) return null;
+  if (!row || row.linked_user_id !== userId) return null;
   return row;
 }
 
@@ -161,7 +161,7 @@ export async function setActiveXId(
     record_id: userId,
     action: "UPDATE",
     after_data: { active_x_user_id: xUserId },
-    operator_discord_id: userId,
+    operator_user_id: userId,
     retention_class: "normal",
   });
 
@@ -202,15 +202,15 @@ export async function requestXIdLink(
   const existingUser = (
     await db.select().from(xUsers).where(xUserIdMatches(requestedXId)).limit(1)
   )[0];
-  if (existingUser?.linked_discord_user_id === userId) {
+  if (existingUser?.linked_user_id === userId) {
     return {
       ok: false,
       message: "この X ID はすでに現在のアカウントに紐づいています。",
     };
   }
   if (
-    existingUser?.linked_discord_user_id &&
-    existingUser.linked_discord_user_id !== userId &&
+    existingUser?.linked_user_id &&
+    existingUser.linked_user_id !== userId &&
     linkType !== "merge"
   ) {
     return {
@@ -225,7 +225,7 @@ export async function requestXIdLink(
       .from(xAccountLinkRequests)
       .where(
         and(
-          eq(xAccountLinkRequests.discord_user_id, userId),
+          eq(xAccountLinkRequests.user_id, userId),
           sql`lower(${xAccountLinkRequests.requested_x_id}) = ${requestedXId}`,
           eq(xAccountLinkRequests.status, "pending"),
         )!,
@@ -244,7 +244,7 @@ export async function requestXIdLink(
     .from(xAccountLinkRequests)
     .where(
       and(
-        eq(xAccountLinkRequests.discord_user_id, userId),
+        eq(xAccountLinkRequests.user_id, userId),
         eq(xAccountLinkRequests.status, "pending"),
       )!,
     );
@@ -259,7 +259,7 @@ export async function requestXIdLink(
   const id = generateId("xreq");
   await db.insert(xAccountLinkRequests).values({
     id,
-    discord_user_id: userId,
+    user_id: userId,
     requested_x_id: requestedXId,
     link_type: linkType,
     target_x_user_id: targetXUserId || null,
@@ -276,7 +276,7 @@ export async function requestXIdLink(
       link_type: linkType,
       target_x_user_id: targetXUserId || null,
     },
-    operator_discord_id: userId,
+    operator_user_id: userId,
     retention_class: "long_audit",
   });
 
@@ -378,7 +378,7 @@ export async function updateXIdProfile(
       youtube_channel_url: youtubeChannelUrl,
       other_social_links: otherSocialLinks.value,
     },
-    operator_discord_id: userId,
+    operator_user_id: userId,
     retention_class: "long_audit",
   });
 
@@ -436,7 +436,7 @@ export async function deleteLinkedXId(
 
   await db
     .update(xUsers)
-    .set({ linked_discord_user_id: null, approval_status: "pending" })
+    .set({ linked_user_id: null, approval_status: "pending" })
     .where(xUserIdMatches(xUserId));
   await db
     .update(users)
@@ -450,8 +450,8 @@ export async function deleteLinkedXId(
     table_name: "x_users",
     record_id: xUserId,
     action: "UPDATE",
-    after_data: { linked_discord_user_id: null },
-    operator_discord_id: userId,
+    after_data: { linked_user_id: null },
+    operator_user_id: userId,
     retention_class: "long_audit",
   });
 
@@ -519,7 +519,7 @@ export async function setXIdIcon(
     record_id: xUserId,
     action: "UPDATE",
     after_data: { icon_url: iconUrl, source: "select" },
-    operator_discord_id: userId,
+    operator_user_id: userId,
     retention_class: "long_audit",
   });
 
@@ -605,7 +605,7 @@ export async function uploadXIdIcon(
     record_id: xUserId,
     action: "UPDATE",
     after_data: { icon_url: iconUrl, source: "upload" },
-    operator_discord_id: userId,
+    operator_user_id: userId,
     retention_class: "long_audit",
   });
 

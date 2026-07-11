@@ -69,7 +69,7 @@ export default async function EditVideoPermissionsPage({
   });
   if (!canEditIdentity) {
     return (
-      <main className="fn-public-container fn-page fn-guard-shell">
+      <div className="fn-public-container fn-page fn-guard-shell">
         <div className="fn-empty fn-guard-card">
           <h1 className="fn-guard-title">編集権限がありません</h1>
           <p className="fn-empty-message">
@@ -82,7 +82,7 @@ export default async function EditVideoPermissionsPage({
             作品編集へ戻る
           </Link>
         </div>
-      </main>
+      </div>
     );
   }
 

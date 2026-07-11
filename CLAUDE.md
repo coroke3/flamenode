@@ -1,5 +1,10 @@
 # CLAUDE.md
 
+> Status: Active
+> Last verified: 2026-07-11
+> Verified against commit: `5f48e0f` + working tree
+> Source of truth: `AGENTS.md`
+
 正本は `AGENTS.md`。まずそれを読む。以下は Claude Code 固有の追記のみ。
 
 ## サブエージェント / コマンド

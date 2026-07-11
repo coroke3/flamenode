@@ -47,9 +47,9 @@ export default async function SlottedPostPage({
   const slotOwnerWhere = activeXId
     ? or(
         eq(slotsTable.x_user_id, activeXId),
-        and(isNull(slotsTable.x_user_id), eq(slotsTable.discord_user_id, user.id))!,
+        and(isNull(slotsTable.x_user_id), eq(slotsTable.reserved_by_user_id, user.id))!,
       )
-    : eq(slotsTable.discord_user_id, user.id);
+    : eq(slotsTable.reserved_by_user_id, user.id);
   const rows = await db
     .select()
     .from(slotsTable)
@@ -107,7 +107,7 @@ export default async function SlottedPostPage({
     .from(xUsersTable)
     .where(
       and(
-        eq(xUsersTable.linked_discord_user_id, user.id),
+        eq(xUsersTable.linked_user_id, user.id),
         eq(xUsersTable.approval_status, "approved"),
       )!,
     )
@@ -241,18 +241,6 @@ export default async function SlottedPostPage({
       <VideoForm
         mode="slot"
         slotId={slot.id}
-        slotInfo={{
-          eventTitle: ev.title,
-          slotTimeLabel: slotStart
-            ? `${formatUnix(slotStart, { dateOnly: true })} ${formatUnix(slotStart, { timeOnly: true })}${
-                slotEnd != null && slotEnd > slotStart
-                  ? ` - ${formatUnix(slotEnd, { timeOnly: true })}`
-                  : ""
-              }`
-            : (slot.slot_label ?? "時間指定なし枠"),
-          displayName: slot.display_name ?? xRow?.x_name ?? user.name,
-          groupSize: groupSize > 1 ? groupSize : undefined,
-        }}
         xIdOptions={xIdOptions}
         activeXId={activeX ?? undefined}
         initial={{

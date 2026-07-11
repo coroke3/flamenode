@@ -184,7 +184,7 @@ export default async function AboutPage(): Promise<React.ReactElement> {
     : [];
 
   return (
-    <main className={styles.page}>
+    <div className={styles.page}>
       <section className={styles.hero}>
         <div className={styles.heroInner}>
           <div className={styles.heroCopy}>
@@ -313,6 +313,6 @@ export default async function AboutPage(): Promise<React.ReactElement> {
           ))}
           </div>
       </section>
-    </main>
+    </div>
   );
 }

@@ -34,10 +34,7 @@ export interface CanonicalEventStaff {
   event_id: string;
   x_user_id: string;
   display_name: string;
-  /**
-   * "manager" | "public_staff" のみ。
-   * owner は原則不使用（DB enum の型に合わせる）
-   */
+  /** イベント代表者は必ず owner、その他は必要最小限のプリセットにする。 */
   permission_preset:
     | "owner"
     | "manager"

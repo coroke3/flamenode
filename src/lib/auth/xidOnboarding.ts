@@ -43,7 +43,7 @@ export async function userNeedsXIdOnboarding(
     const linked = await db
       .select({ id: xUsers.id })
       .from(xUsers)
-      .where(eq(xUsers.linked_discord_user_id, userId))
+      .where(eq(xUsers.linked_user_id, userId))
       .limit(1);
     if (linked.length > 0) return false;
 
@@ -52,7 +52,7 @@ export async function userNeedsXIdOnboarding(
       .from(xAccountLinkRequests)
       .where(
         and(
-          eq(xAccountLinkRequests.discord_user_id, userId),
+          eq(xAccountLinkRequests.user_id, userId),
           eq(xAccountLinkRequests.status, "pending"),
         )!,
       )

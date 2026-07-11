@@ -168,7 +168,7 @@ export default async function PortfolioPage({
   const hasProfile = user.profile_text || portfolioContact;
 
   return (
-    <main className={`fn-public-container fn-page ${styles.page}`}>
+    <div className={`fn-public-container fn-page ${styles.page}`}>
       <header className={styles.hero}>
         <div className={styles.navLine}>
           <Link href={`/user/${user.id}`} className="fn-btn fn-btn-ghost fn-btn-sm">
@@ -260,6 +260,6 @@ export default async function PortfolioPage({
           </div>
         )}
       </section>
-    </main>
+    </div>
   );
 }

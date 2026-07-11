@@ -79,7 +79,7 @@ export async function createTermsVersion(
     record_id: id,
     action: "CREATE",
     after_data: JSON.stringify({ version_label: d.version_label }),
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "long_audit",
   });
   revalidatePath("/admin/rules");
@@ -127,7 +127,7 @@ export async function updateTermsVersion(
     table_name: "terms_versions",
     record_id: d.id,
     action: "UPDATE",
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "long_audit",
   });
   revalidatePath("/admin/rules");
@@ -186,7 +186,7 @@ export async function publishTermsVersion(
       severity: target.severity,
       forced_reaccept: target.severity === "major",
     }),
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "long_audit",
   });
   revalidatePath("/admin/rules");
@@ -226,7 +226,7 @@ export async function broadcastTermsReaccept(
   }
 
   const targets = await db
-    .select({ discord_user_id: users.id })
+    .select({ user_id: users.id })
     .from(users)
     .where(eq(users.terms_reaccept_required, 1))
     .orderBy(users.id)
@@ -249,7 +249,7 @@ export async function broadcastTermsReaccept(
   let enqueued = 0;
   for (const row of targets) {
     const ok = await enqueueNotification(db, {
-      discordUserId: row.discord_user_id,
+      recipientUserId: row.user_id,
       type: "terms_reaccept_required",
       payload: {
         content: message,
@@ -257,7 +257,7 @@ export async function broadcastTermsReaccept(
         version_label: target.version_label,
         terms_url: "/rules",
       },
-      dedupeKey: `terms_reaccept_required:${termsId}:${row.discord_user_id}`,
+      dedupeKey: `terms_reaccept_required:${termsId}:${row.user_id}`,
     });
     if (ok) enqueued += 1;
   }
@@ -273,7 +273,7 @@ export async function broadcastTermsReaccept(
       enqueued,
       executor: guard.userId,
     }),
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "long_audit",
   });
 
@@ -307,7 +307,7 @@ export async function archiveTermsVersion(
     record_id: id,
     action: "UPDATE",
     after_data: JSON.stringify({ status: "archived" }),
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "long_audit",
   });
   revalidatePath("/admin/rules");

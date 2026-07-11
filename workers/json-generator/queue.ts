@@ -1,4 +1,4 @@
-import { rebuildTarget } from "./rebuild";
+import { rebuildTarget } from "./rebuild.ts";
 import {
   queueLimitForMode,
   queueModeWhereClause,
@@ -6,7 +6,8 @@ import {
   shouldReconcileStaleQueue,
   shouldSkipQueueTarget,
   type OperationMode,
-} from "./queuePolicy";
+} from "./queuePolicy.ts";
+import { safeErrorSummary } from "../shared/safeLog.ts";
 
 export interface Env {
   DB: D1Database;
@@ -19,6 +20,7 @@ const DEPRECATED_TARGET_TYPES = new Set([
   "event_groups_index",
   "event_group",
 ]);
+const STALE_QUEUE_RECONCILE_LIMIT = 20;
 
 type QueueRow = {
   id: string;
@@ -40,10 +42,11 @@ export async function getOperationMode(env: Env): Promise<OperationMode> {
 export async function processStaticRebuildQueue(env: Env): Promise<{
   processed: number;
   failed: number;
+  skipped: number;
 }> {
   const mode = await getOperationMode(env);
   if (mode === "maintenance") {
-    return { processed: 0, failed: 0 };
+    return { processed: 0, failed: 0, skipped: 1 };
   }
 
   const now = Math.floor(Date.now() / 1000);
@@ -68,15 +71,20 @@ export async function processStaticRebuildQueue(env: Env): Promise<{
 
   let processed = 0;
   let failed = 0;
+  let skipped = 0;
 
   for (const row of rows) {
     const marked = await markProcessing(env, row.id, now);
-    if (!marked) continue;
+    if (!marked) {
+      skipped++;
+      continue;
+    }
 
     try {
       if (DEPRECATED_TARGET_TYPES.has(row.target_type)) {
         await markDone(env, row.id, now);
         processed++;
+        skipped++;
         continue;
       }
       if (
@@ -84,6 +92,7 @@ export async function processStaticRebuildQueue(env: Env): Promise<{
       ) {
         await markDone(env, row.id, now);
         processed++;
+        skipped++;
         continue;
       }
       await rebuildTarget(env, row.target_type, row.target_id);
@@ -99,7 +108,7 @@ export async function processStaticRebuildQueue(env: Env): Promise<{
     await reconcileStaleQueue(env, now);
   }
 
-  return { processed, failed };
+  return { processed, failed, skipped };
 }
 
 async function markProcessing(
@@ -134,7 +143,7 @@ async function markRetryOrFailed(
   now: number,
 ): Promise<void> {
   const attempt = Number(row.attempt_count ?? 0) + 1;
-  const message = error instanceof Error ? error.message : String(error);
+  const message = safeErrorSummary(error);
   if (attempt >= 4) {
     await env.DB.prepare(
       `UPDATE static_rebuild_queue
@@ -162,8 +171,9 @@ async function reconcileStaleQueue(env: Env, now: number): Promise<void> {
   await env.DB.prepare(
     `UPDATE static_rebuild_queue
      SET priority = 'normal', updated_at = ?
-     WHERE status = 'failed' AND updated_at < ? AND attempt_count < 4`,
+     WHERE status = 'failed' AND updated_at < ? AND attempt_count < 4
+     LIMIT ?`,
   )
-    .bind(now, dayAgo)
+    .bind(now, dayAgo, STALE_QUEUE_RECONCILE_LIMIT)
     .run();
 }

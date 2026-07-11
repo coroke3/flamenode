@@ -42,7 +42,7 @@ export default async function DashboardLibraryPage({
     const linkedRows = await db
       .select({ id: xUsersTable.id, approval_status: xUsersTable.approval_status })
       .from(xUsersTable)
-      .where(eq(xUsersTable.linked_discord_user_id, user.id));
+      .where(eq(xUsersTable.linked_user_id, user.id));
     linkedXCount = linkedRows.length;
 
     const activeX = user.active_x_user_id;

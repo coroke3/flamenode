@@ -94,7 +94,7 @@ export default async function EventSlotsPage({
     status: slot.status,
     display_name: slot.display_name,
     x_user_id: slot.x_user_id,
-    discord_user_id: slot.discord_user_id,
+    reserved_by_user_id: slot.reserved_by_user_id,
     reservation_group_id: slot.reservation_group_id,
   }));
 
@@ -186,7 +186,7 @@ export default async function EventSlotsPage({
       ) : null}
 
       <div className={styles.layout}>
-        <main className={styles.main}>
+        <div className={styles.main}>
           <SlotGrid
             slots={slotRowsForGrid}
             viewerXId={viewer?.active_x_user_id ?? null}
@@ -197,7 +197,7 @@ export default async function EventSlotsPage({
             maxConsecutiveSlots={event.max_consecutive_slots_per_entry ?? 1}
             slotPartGapSec={slotPartGapSec}
           />
-        </main>
+        </div>
         {slotRowsForGrid.length > 0 ? (
           <aside className={styles.aside}>
             <SlotStatusBoard

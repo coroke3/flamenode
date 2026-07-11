@@ -63,9 +63,9 @@ export async function submitSlotVideo(
   const slotOwnerWhere = requestedX
     ? or(
         eq(slots.x_user_id, requestedX),
-        and(eq(slots.discord_user_id, userId), isNull(slots.x_user_id))!,
+        and(eq(slots.reserved_by_user_id, userId), isNull(slots.x_user_id))!,
       )
-    : eq(slots.discord_user_id, userId);
+    : eq(slots.reserved_by_user_id, userId);
   const slotRow = (
     await db
       .select()
@@ -176,7 +176,7 @@ export async function submitSlotVideo(
 
       await db.insert(videos).values({
         id: videoId,
-        submitted_by_discord_user_id: userId,
+        submitted_by_user_id: userId,
         creator_x_user_id: activeX || null,
         collaboration_type: parsed.data.is_collab ? "collab" : "individual",
         source_type: "youtube",
@@ -252,7 +252,7 @@ export async function submitSlotVideo(
     ? and(
         eq(slots.reservation_group_id, slotRow.reservation_group_id),
         eq(slots.event_id, slotRow.event_id),
-        eq(slots.discord_user_id, userId),
+        eq(slots.reserved_by_user_id, userId),
         slotRow.x_user_id
           ? eq(slots.x_user_id, slotRow.x_user_id)
           : isNull(slots.x_user_id),
@@ -268,7 +268,7 @@ export async function submitSlotVideo(
     record_id: slotRow.id,
     action: "UPDATE",
     after_data: JSON.stringify({ status: "submitted", video_id: videoId }),
-    operator_discord_id: userId,
+    operator_user_id: userId,
     retention_class: "normal",
   });
 
@@ -294,7 +294,7 @@ export async function submitSlotVideo(
         .limit(1)
     )[0];
     await enqueueNotification(db, {
-      discordUserId: userId,
+      recipientUserId: userId,
       type: "slot_video_submitted",
       dedupeKey: `slot_video_submitted:${videoId}:${slotRow.id}`,
       payload: buildSlotVideoSubmittedNotification({

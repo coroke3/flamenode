@@ -1,7 +1,7 @@
 import "server-only";
 
 import { eq, sql } from "drizzle-orm";
-import { users, xUsers } from "@/lib/db/schema";
+import { xUsers } from "@/lib/db/schema";
 import type { DB } from "@/lib/db/client";
 import { normalizeXId } from "@/lib/utils/xid";
 
@@ -17,13 +17,7 @@ function approvalRank(status: string | null | undefined): number {
 }
 
 function pickAutoActiveXId(rows: readonly LinkedXRow[]): string | null {
-  const usable = rows.filter((row) => row.approval_status !== "rejected");
-  if (usable.length === 0) return null;
-
-  const approved = usable.filter((row) => row.approval_status === "approved");
-  if (usable.length === 1) {
-    return normalizeXId(usable[0]!.id);
-  }
+  const approved = rows.filter((row) => row.approval_status === "approved");
   if (approved.length === 1) {
     return normalizeXId(approved[0]!.id);
   }
@@ -35,8 +29,9 @@ function xUserIdMatches(xUserId: string) {
 }
 
 /**
- * users.active_x_user_id を、連携済み X ID から自動補完する。
- * 複数候補で一意に決まらない場合は DB を更新せず null を返す。
+ * users.active_x_user_id を連携済み・承認済み X ID の範囲で解決する。
+ * 所有者の自動付与や DB 更新は行わない。明示的な連携・選択フローだけが
+ * linked_user_id / active_x_user_id を変更できる。
  */
 export async function resolveActiveXUserId(
   db: DB,
@@ -51,7 +46,7 @@ export async function resolveActiveXUserId(
         .select({
           id: xUsers.id,
           approval_status: xUsers.approval_status,
-          linked_discord_user_id: xUsers.linked_discord_user_id,
+          linked_user_id: xUsers.linked_user_id,
         })
         .from(xUsers)
         .where(xUserIdMatches(normalizedCurrent))
@@ -59,16 +54,9 @@ export async function resolveActiveXUserId(
     )[0];
     if (
       currentRow &&
-      currentRow.approval_status !== "rejected" &&
-      (!currentRow.linked_discord_user_id ||
-        currentRow.linked_discord_user_id === userId)
+      currentRow.approval_status === "approved" &&
+      currentRow.linked_user_id === userId
     ) {
-      if (!currentRow.linked_discord_user_id) {
-        await db
-          .update(xUsers)
-          .set({ linked_discord_user_id: userId })
-          .where(xUserIdMatches(normalizedCurrent));
-      }
       return normalizeXId(currentRow.id);
     }
   }
@@ -79,7 +67,7 @@ export async function resolveActiveXUserId(
       approval_status: xUsers.approval_status,
     })
     .from(xUsers)
-    .where(eq(xUsers.linked_discord_user_id, userId));
+    .where(eq(xUsers.linked_user_id, userId));
 
   if (linkedRows.length === 0) return null;
 
@@ -98,20 +86,13 @@ export async function resolveActiveXUserId(
 
   if (normalizedCurrent) {
     const current = byId.get(normalizedCurrent);
-    if (current && current.approval_status !== "rejected") {
+    if (current && current.approval_status === "approved") {
       return normalizedCurrent;
     }
   }
 
   const autoPick = pickAutoActiveXId(Array.from(byId.values()));
   if (!autoPick) return null;
-
-  if (autoPick !== normalizedCurrent) {
-    await db
-      .update(users)
-      .set({ active_x_user_id: autoPick })
-      .where(eq(users.id, userId));
-  }
 
   return autoPick;
 }

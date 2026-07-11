@@ -91,14 +91,11 @@ async function checkUnapprovedCreatorVideos(
 /** BAN ユーザーの書き込み */
 async function checkBannedUserVideos(db: AnyDb): Promise<SecurityCheckResult> {
   const rows = await db
-    .select({ id: videosTable.id, owner: videosTable.submitted_by_discord_user_id })
+    .select({ id: videosTable.id, owner: videosTable.submitted_by_user_id })
     .from(videosTable)
     .innerJoin(
       usersTable,
-      or(
-        eq(usersTable.id, videosTable.submitted_by_discord_user_id),
-        eq(usersTable.discord_id, videosTable.submitted_by_discord_user_id),
-      )!,
+      eq(usersTable.id, videosTable.submitted_by_user_id),
     )
     .where(eq(usersTable.is_banned, 1))
     .limit(10);
@@ -117,14 +114,11 @@ async function checkTosNotAcceptedUserVideos(
   db: AnyDb,
 ): Promise<SecurityCheckResult> {
   const rows = await db
-    .select({ id: videosTable.id, owner: videosTable.submitted_by_discord_user_id })
+    .select({ id: videosTable.id, owner: videosTable.submitted_by_user_id })
     .from(videosTable)
     .innerJoin(
       usersTable,
-      or(
-        eq(usersTable.id, videosTable.submitted_by_discord_user_id),
-        eq(usersTable.discord_id, videosTable.submitted_by_discord_user_id),
-      )!,
+      eq(usersTable.id, videosTable.submitted_by_user_id),
     )
     .where(ne(usersTable.is_tos_accepted, 1))
     .limit(10);
@@ -171,7 +165,7 @@ function checkNotificationTableMismatch(): SecurityCheckResult {
 async function checkBannedUserChapters(
   db: AnyDb,
 ): Promise<SecurityCheckResult> {
-  // x_users.linked_discord_user_id 経由で banned ユーザーが投稿した video_chapters を検出。
+  // x_users.linked_user_id 経由で banned ユーザーが投稿した video_chapters を検出。
   // raw SQL で `users AS u` を書くと、schema 上 `user` (singular) にマップされている関係で
   // 実行時に "no such table: users" が出るため drizzle ORM で組む。
   const rows = await db
@@ -186,7 +180,7 @@ async function checkBannedUserChapters(
     )
     .innerJoin(
       usersTable,
-      eq(usersTable.id, xUsersTable.linked_discord_user_id!),
+      eq(usersTable.id, xUsersTable.linked_user_id!),
     )
     .where(eq(usersTable.is_banned, 1))
     .limit(10);
@@ -204,7 +198,7 @@ async function checkBannedUserChapters(
   };
 }
 
-/** approved な X ID が存在するのに linked_discord_user_id が NULL (孤立) */
+/** approved な X ID が存在するのに linked_user_id が NULL (孤立) */
 async function checkOrphanApprovedXId(
   db: AnyDb,
 ): Promise<SecurityCheckResult> {
@@ -214,14 +208,14 @@ async function checkOrphanApprovedXId(
     .where(
       and(
         eq(xUsersTable.approval_status, "approved"),
-        isNull(xUsersTable.linked_discord_user_id),
+        isNull(xUsersTable.linked_user_id),
       ),
     )
     .limit(10);
   const count = rows.length;
   return {
     id: "orphan_approved_xid",
-    label: "approved な X ID で linked_discord_user_id が NULL",
+    label: "approved な X ID で linked_user_id が NULL",
     status: count === 0 ? "ok" : "info",
     count,
     samples: rows.slice(0, 5).map((r) => `x:${r.id}`),

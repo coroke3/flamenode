@@ -13,7 +13,7 @@ export type SlotBase = {
   status: "available" | "reserved" | "submitted";
   display_name: string | null;
   x_user_id: string | null;
-  discord_user_id: string | null;
+  reserved_by_user_id: string | null;
   reservation_group_id: string | null;
   video_id: string | null;
   updated_at: number;
@@ -193,9 +193,9 @@ export function collapseReservationGroups(rows: SlotBase[]): SlotGroupRow[] {
     const displayName =
       groupRows.find((r) => r.display_name)?.display_name ?? first.display_name;
     const xUserId = groupRows.find((r) => r.x_user_id)?.x_user_id ?? first.x_user_id;
-    const discordUserId =
-      groupRows.find((r) => r.discord_user_id)?.discord_user_id ??
-      first.discord_user_id;
+    const reservedByUserId =
+      groupRows.find((r) => r.reserved_by_user_id)?.reserved_by_user_id ??
+      first.reserved_by_user_id;
     let slotLabel = first.slot_label;
     if (first.slot_kind === "count" && groupRows.length > 1) {
       const lastLabel = last.slot_label;
@@ -210,7 +210,7 @@ export function collapseReservationGroups(rows: SlotBase[]): SlotGroupRow[] {
       status,
       display_name: displayName,
       x_user_id: xUserId,
-      discord_user_id: discordUserId,
+      reserved_by_user_id: reservedByUserId,
       reservation_group_id: groupId,
       slot_ids: groupRows.map((r) => r.id),
       group_id: groupId,

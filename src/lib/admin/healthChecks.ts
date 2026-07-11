@@ -179,7 +179,7 @@ async function checkSubmittedSlotWithoutVideo(
 async function checkReservationGroupUserMix(
   db: AnyDb,
 ): Promise<HealthCheckResult> {
-  // 同一 reservation_group_id に Discord user または X ID が複数いるグループ。
+  // 同一 reservation_group_id に内部ユーザーまたは X ID が複数いるグループ。
   // count は混在グループの実数を返したいので、ノーリミットの中間結果から長さを取る。
   // (groupBy + HAVING を COUNT(*) でラップするには subquery が必要だが、混在は実運用で
   //  数十件以下に収まる想定のため、サンプル取得とは分けても合算でも変わらない。)
@@ -189,7 +189,7 @@ async function checkReservationGroupUserMix(
     .where(isNotNull(slotsTable.reservation_group_id))
     .groupBy(slotsTable.reservation_group_id)
     .having(sql`
-      COUNT(DISTINCT ${slotsTable.discord_user_id}) > 1
+      COUNT(DISTINCT ${slotsTable.reserved_by_user_id}) > 1
       OR COUNT(DISTINCT ${slotsTable.x_user_id}) > 1
     `);
   const count = rows.length;
@@ -516,32 +516,39 @@ async function checkOrphanVideoMember(
   };
 }
 
-/** video_member_chapters.video_member_id が video_members に存在するか */
-async function checkVideoMembersChaptersJsonInvalid(
+/** video_members.chapters_json が現行の配列形式を満たすか */
+async function checkVideoMemberChaptersJsonInvalid(
   db: AnyDb,
 ): Promise<HealthCheckResult> {
-  const where = sql`NOT EXISTS (SELECT 1 FROM video_members vm WHERE vm.id = video_member_chapters.video_member_id)`;
+  const where = sql`
+    chapters_json IS NOT NULL
+    AND trim(chapters_json) <> ''
+    AND CASE
+      WHEN json_valid(chapters_json) = 1 THEN json_type(chapters_json) <> 'array'
+      ELSE 1
+    END
+  `;
   const [countRows, sampleRows] = await Promise.all([
     db
       .select({ c: sql<number>`COUNT(*)` })
-      .from(sql`video_member_chapters`)
+      .from(sql`video_members`)
       .where(where),
     db
       .select({ id: sql<string>`id` })
-      .from(sql`video_member_chapters`)
+      .from(sql`video_members`)
       .where(where)
       .limit(10),
   ]);
   const count = Number(countRows[0]?.c ?? 0);
   return {
-    id: "video_member_chapters_orphan",
-    label: "video_member_chapters の親 video_members が無い",
+    id: "video_members_chapters_json_invalid",
+    label: "video_members.chapters_json がJSON配列ではない",
     status: count === 0 ? "ok" : "warn",
     count,
     samples: sampleRows.slice(0, 5).map((r) => r.id),
     note:
       count > 0
-        ? "メンバー削除時に video_member_chapters が残っています。"
+        ? "chapters_json を空またはJSON配列に正規化してください。"
         : undefined,
   };
 }
@@ -800,7 +807,7 @@ export async function runHealthChecks(db: AnyDb): Promise<HealthCheckResult[]> {
     checkVideosOutroComment(db),
     checkChapterNonChapterMarker(db),
     checkOrphanVideoMember(db),
-    checkVideoMembersChaptersJsonInvalid(db),
+    checkVideoMemberChaptersJsonInvalid(db),
     checkNotificationProcessingStuck(db),
     checkNotificationFailedVolume(db),
     checkCostUsageSnapshotFreshness(db),

@@ -2,7 +2,7 @@
  * 公開 API ホワイトリスト DTO。
  *
  * `/api/videos` と `/api/events` が返してよいフィールドだけを明示する。
- * 内部用 ID (Discord ID / active_x_user_id / linked_discord_user_id)、認証関連
+ * 内部用 ID (user_id / active_x_user_id / linked_user_id)、認証関連
  * (verification_token / access_token / refresh_token)、運用情報 (internal_note
  * / private note / void_detail_private / is_banned / TOS / role / email) などは
  * 一切公開してはならない。
@@ -86,11 +86,16 @@ export interface PublicEventDto {
  */
 export const FORBIDDEN_PUBLIC_KEYS: ReadonlySet<string> = new Set([
   // 個人特定 ID
-  "submitted_by_discord_user_id",
+  "submitted_by_user_id",
   "creator_x_user_id",
-  "discord_user_id",
+  "user_id",
+  "actor_user_id",
+  "operator_user_id",
+  "approved_by_user_id",
+  "recipient_user_id",
+  "reserved_by_user_id",
   "discord_id",
-  "linked_discord_user_id",
+  "linked_user_id",
   "active_x_user_id",
   // 認証関連
   "email",

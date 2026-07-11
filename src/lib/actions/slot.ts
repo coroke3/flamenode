@@ -42,7 +42,7 @@ async function rollbackReservedSlots(
     await db
       .update(slots)
       .set({
-        discord_user_id: original.discord_user_id,
+        reserved_by_user_id: original.reserved_by_user_id,
         x_user_id: original.x_user_id,
         display_name: original.display_name,
         reservation_group_id: original.reservation_group_id,
@@ -66,9 +66,9 @@ function reservationGroupScope(groupId: string, row: SlotRow) {
   return and(
     eq(slots.reservation_group_id, groupId),
     eq(slots.event_id, row.event_id),
-    row.discord_user_id
-      ? eq(slots.discord_user_id, row.discord_user_id)
-      : isNull(slots.discord_user_id),
+    row.reserved_by_user_id
+      ? eq(slots.reserved_by_user_id, row.reserved_by_user_id)
+      : isNull(slots.reserved_by_user_id),
     row.x_user_id ? eq(slots.x_user_id, row.x_user_id) : isNull(slots.x_user_id),
   )!;
 }
@@ -175,7 +175,7 @@ export async function reserveSlot(
     const updated = await db
       .update(slots)
       .set({
-        discord_user_id: user.id,
+        reserved_by_user_id: user.id,
         x_user_id: activeX,
         display_name: parsed.data.display_name,
         reservation_group_id: groupId,
@@ -204,12 +204,12 @@ export async function reserveSlot(
     after_data: JSON.stringify({
       status: "reserved",
       x_user_id: activeX,
-      discord_user_id: user.id,
+      reserved_by_user_id: user.id,
       display_name: parsed.data.display_name,
       slot_ids: updatedOriginals.map((r) => r.id),
       reservation_group_id: groupId,
     }),
-    operator_discord_id: user.id,
+    operator_user_id: user.id,
     retention_class: "normal",
   });
 
@@ -239,7 +239,7 @@ export async function releaseOwnSlot(
   if (!slotRow) return { ok: false, message: "枠が見つかりません。" };
   // slot owner 判定: 現在 active な X ID 一致が原則だが、確保時の X が linked された
   // ままで active から外れているだけのケースを救済する。
-  // xUsers.linked_discord_user_id === user.id なら自分の枠とみなす。
+  // xUsers.linked_user_id === user.id なら自分の枠とみなす。
   let isOwner = false;
   if (slotRow.x_user_id) {
     if (slotRow.x_user_id === activeX) {
@@ -252,7 +252,7 @@ export async function releaseOwnSlot(
           .where(
             and(
               eq(xUsers.id, slotRow.x_user_id),
-              eq(xUsers.linked_discord_user_id, user.id),
+              eq(xUsers.linked_user_id, user.id),
             )!,
           )
           .limit(1)
@@ -260,7 +260,7 @@ export async function releaseOwnSlot(
       if (linkedXOwner) isOwner = true;
     }
   } else {
-    isOwner = slotRow.discord_user_id === user.id;
+    isOwner = slotRow.reserved_by_user_id === user.id;
   }
   if (!isOwner) {
     return { ok: false, message: "自分が確保した枠のみ解放できます。" };
@@ -279,7 +279,7 @@ export async function releaseOwnSlot(
     await db
       .update(slots)
       .set({
-        discord_user_id: null,
+        reserved_by_user_id: null,
         x_user_id: null,
         display_name: null,
         reservation_group_id: null,
@@ -298,7 +298,7 @@ export async function releaseOwnSlot(
         slot_ids: [slotId],
         reservation_group_id: null,
       }),
-      operator_discord_id: user.id,
+      operator_user_id: user.id,
       retention_class: "normal",
     });
     revalidateSlotViews(slotRow.event_id);
@@ -323,7 +323,7 @@ export async function releaseOwnSlot(
     groupRows.some(
       (r) =>
         r.x_user_id !== slotRow.x_user_id ||
-        r.discord_user_id !== slotRow.discord_user_id ||
+        r.reserved_by_user_id !== slotRow.reserved_by_user_id ||
         r.event_id !== slotRow.event_id,
     )
   ) {
@@ -349,7 +349,7 @@ export async function releaseOwnSlot(
   await db
     .update(slots)
     .set({
-      discord_user_id: null,
+      reserved_by_user_id: null,
       x_user_id: null,
       display_name: null,
       reservation_group_id: null,
@@ -418,7 +418,7 @@ export async function releaseOwnSlot(
       reservation_group_id: groupId,
       split: splitInfo,
     }),
-    operator_discord_id: user.id,
+    operator_user_id: user.id,
     retention_class: "normal",
   });
 
@@ -467,7 +467,7 @@ export async function extendOwnSlotGroup(
   if (anchor.status !== "reserved") {
     return { ok: false, message: "予約中の枠のみ拡張できます。" };
   }
-  if (anchor.x_user_id !== activeX || anchor.discord_user_id !== user.id) {
+  if (anchor.x_user_id !== activeX || anchor.reserved_by_user_id !== user.id) {
     return { ok: false, message: "自分の枠のみ拡張できます。" };
   }
 
@@ -491,7 +491,7 @@ export async function extendOwnSlotGroup(
 
   if (
     currentGroup.some(
-      (r) => r.x_user_id !== activeX || r.discord_user_id !== user.id,
+      (r) => r.x_user_id !== activeX || r.reserved_by_user_id !== user.id,
     )
   ) {
     return {
@@ -541,7 +541,7 @@ export async function extendOwnSlotGroup(
   const updated = await db
     .update(slots)
     .set({
-      discord_user_id: user.id,
+      reserved_by_user_id: user.id,
       x_user_id: activeX,
       display_name: displayName,
       reservation_group_id: nextGroupId,
@@ -575,7 +575,7 @@ export async function extendOwnSlotGroup(
       direction: parsed.data.direction,
       reservation_group_id: nextGroupId,
     }),
-    operator_discord_id: user.id,
+    operator_user_id: user.id,
     retention_class: "normal",
   });
 
@@ -666,8 +666,8 @@ export async function mergeOwnSlotGroups(
   if (
     leftNeighbor.x_user_id !== activeX ||
     rightNeighbor.x_user_id !== activeX ||
-    leftNeighbor.discord_user_id !== user.id ||
-    rightNeighbor.discord_user_id !== user.id
+    leftNeighbor.reserved_by_user_id !== user.id ||
+    rightNeighbor.reserved_by_user_id !== user.id
   ) {
     return { ok: false, message: "自分の枠どうしのみ結合できます。" };
   }
@@ -689,7 +689,7 @@ export async function mergeOwnSlotGroups(
     : [rightNeighbor];
 
   for (const r of [...leftGroup, ...rightGroup]) {
-    if (r.x_user_id !== activeX || r.discord_user_id !== user.id) {
+    if (r.x_user_id !== activeX || r.reserved_by_user_id !== user.id) {
       return {
         ok: false,
         message: "グループ内に他ユーザー / 別 X ID の枠が混在しています。",
@@ -716,7 +716,7 @@ export async function mergeOwnSlotGroups(
   const updatedGap = await db
     .update(slots)
     .set({
-      discord_user_id: user.id,
+      reserved_by_user_id: user.id,
       x_user_id: activeX,
       display_name: displayName,
       reservation_group_id: mergedGroupId,
@@ -760,7 +760,7 @@ export async function mergeOwnSlotGroups(
         ...rightGroup.map((r) => r.id),
       ],
     }),
-    operator_discord_id: user.id,
+    operator_user_id: user.id,
     retention_class: "normal",
   });
 

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import styles from "./AccountMenu.module.css";
 import { Icon } from "@/components/ui/Icon";
+import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { setActiveXId } from "@/lib/actions/xid";
 import { normalizeXId } from "@/lib/utils/xid";
 
@@ -34,9 +35,6 @@ interface AccountMenuProps {
   onSwitch?: (xUserId: string) => void;
 }
 
-type Mode = "light" | "dark";
-const STORAGE_KEY = "fn-theme";
-
 function dedupeXIds(entries: readonly XIdEntry[]): XIdEntry[] {
   const seen = new Set<string>();
   const out: XIdEntry[] = [];
@@ -53,24 +51,6 @@ function dedupeXIds(entries: readonly XIdEntry[]): XIdEntry[] {
   return out;
 }
 
-function getDeviceMode(): Mode {
-  if (typeof window === "undefined") return "light";
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
-}
-
-function applyTheme(mode: Mode, persist = true) {
-  if (typeof document === "undefined") return;
-  document.documentElement.setAttribute("data-theme", mode);
-  if (!persist) return;
-  try {
-    localStorage.setItem(STORAGE_KEY, mode);
-  } catch {
-    /* noop */
-  }
-}
-
 export function AccountMenu({
   user,
   onSwitch,
@@ -83,23 +63,11 @@ export function AccountMenu({
     xIds.find((e) => e.is_active)?.x_user_id ?? null,
   );
   const [pending, startTransition] = React.useTransition();
-  const [themeMode, setThemeMode] = React.useState<Mode>("light");
   const ref = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     setActiveId(xIds.find((e) => e.is_active)?.x_user_id ?? null);
   }, [xIds]);
-
-  React.useEffect(() => {
-    let initial: Mode = getDeviceMode();
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved === "light" || saved === "dark") initial = saved;
-    } catch {
-      /* noop */
-    }
-    setThemeMode(initial);
-  }, []);
 
   React.useEffect(() => {
     if (!open) return;
@@ -148,11 +116,6 @@ export function AccountMenu({
         setError(res.message ?? "X ID の切り替えに失敗しました。");
       }
     });
-  };
-
-  const handleThemeChange = (nextMode: Mode) => {
-    setThemeMode(nextMode);
-    applyTheme(nextMode);
   };
 
   // トリガー用のアイコンと名前
@@ -440,22 +403,7 @@ export function AccountMenu({
           {/* セクション3: テーマ切替 */}
           <div className={styles.section}>
             <div className={styles.sectionTitle}>テーマ</div>
-            <div className={styles.themeGroup}>
-              <button
-                type="button"
-                className={`${styles.themeBtn} ${themeMode === "light" ? styles.themeBtnActive : ""}`}
-                onClick={() => handleThemeChange("light")}
-              >
-                <Icon name="sun" size={13} /> ライト
-              </button>
-              <button
-                type="button"
-                className={`${styles.themeBtn} ${themeMode === "dark" ? styles.themeBtnActive : ""}`}
-                onClick={() => handleThemeChange("dark")}
-              >
-                <Icon name="moon" size={13} /> ダーク
-              </button>
-            </div>
+            <ThemeToggle variant="segmented" />
           </div>
 
           <div className={styles.divider} />

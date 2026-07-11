@@ -34,7 +34,7 @@ interface Props {
 type StaffRow = {
   id: string;
   x_user_id: string | null;
-  discord_user_id: string | null;
+  user_id: string | null;
   display_name: string | null;
   permission_preset: string | null;
   custom_permission_keys_json: string | null;
@@ -82,7 +82,7 @@ export default async function ManageEventStaffPage({
     .select({
       id: eventStaffTable.id,
       x_user_id: eventStaffTable.x_user_id,
-      discord_user_id: eventStaffTable.discord_user_id,
+      user_id: eventStaffTable.user_id,
       display_name: eventStaffTable.display_name,
       permission_preset: eventStaffTable.permission_preset,
       custom_permission_keys_json: eventStaffTable.custom_permission_keys_json,
@@ -102,9 +102,9 @@ export default async function ManageEventStaffPage({
   const members: EventStaffMemberRow[] = staff.map((row) => ({
     id: row.id,
     x_user_id: row.x_user_id,
-    discord_user_id: row.discord_user_id,
+    user_id: row.user_id,
     display_name:
-      row.display_name ?? row.x_user_id ?? row.discord_user_id ?? "未設定",
+      row.display_name ?? row.x_user_id ?? row.user_id ?? "未設定",
     permission_preset: row.permission_preset,
     is_public: row.is_public,
     public_role_label: row.public_role_label,
@@ -119,6 +119,7 @@ export default async function ManageEventStaffPage({
   );
 
   const publicStaffCount = staff.filter((s) => s.is_public === 1).length;
+  const ownerCount = staff.filter((s) => s.permission_preset === "owner").length;
   const permissionHolderCount = members.filter((m) => m.permission_keys.length > 0).length;
   const approvedXCount = staff.filter((s) => s.approval_status === "approved").length;
 
@@ -143,6 +144,7 @@ export default async function ManageEventStaffPage({
       <ManageEventTabs eventId={id} active="staff" isAdmin={isAdmin} />
 
       <section className="fn-console-stat-grid fn-console-section--tight">
+        <SummaryCard label="代表者" value={ownerCount} note="イベントの最終管理責任者" />
         <SummaryCard label="登録メンバー" value={staff.length} note="公開・非公開を含む総数" />
         <SummaryCard label="公開メンバー" value={publicStaffCount} note="イベントページに掲載" />
         <SummaryCard label="権限保持者" value={permissionHolderCount} note="内部操作権限あり" />
@@ -176,6 +178,7 @@ export default async function ManageEventStaffPage({
             eventId={ev.id}
             members={members}
             isSiteAdmin={isAdmin}
+            currentUserId={user.id}
           />
         </section>
       ) : null}
@@ -276,12 +279,13 @@ function StaffCard({
             <strong style={{ overflowWrap: "anywhere" }}>{name}</strong>
           )}
           <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-            {row.x_user_id ? `@${row.x_user_id}` : row.discord_user_id ?? row.id}
+            {row.x_user_id ? `@${row.x_user_id}` : row.user_id ?? row.id}
           </div>
         </div>
       </div>
 
       <div className="fn-console-badge-row">
+        {row.permission_preset === "owner" ? <span className="fn-badge fn-badge-warning">代表者</span> : null}
         <span className="fn-badge fn-badge-soft">{presetLabel}</span>
         <span className={row.is_public === 1 ? "fn-badge fn-badge-soft" : "fn-badge fn-badge-neutral"}>
           {row.is_public === 1 ? "公開" : "非公開"}

@@ -1,18 +1,15 @@
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import {
-  events,
-  videos,
-  slots,
   announcements,
   eventGroups,
+  eventStaff,
+  events,
+  slots,
+  videos,
   xAccountLinkRequests,
 } from "@/lib/db/schema";
 import type { RestoreAdapter, RestoreStrategy } from "./types";
-
-// ============================================================
-// リストア可能テーブルホワイトリスト
-// ============================================================
 
 export const RESTORABLE_TABLES = new Set([
   "events",
@@ -20,304 +17,188 @@ export const RESTORABLE_TABLES = new Set([
   "slots",
   "announcements",
   "event_groups",
+  "event_staff",
   "x_account_link_requests",
 ]);
 
-// ============================================================
-// events アダプター
-// ============================================================
+function unsupported(table: string, strategy: RestoreStrategy): never {
+  throw new Error(`Unsupported ${table} restore strategy: ${strategy}`);
+}
 
 const eventsAdapter: RestoreAdapter = {
-  async fetchCurrent(db: DB, targetId: string) {
-    const row = await db
-      .select()
-      .from(events)
-      .where(eq(events.id, targetId))
-      .get();
+  supportedStrategies: ["update_before"],
+  async fetchCurrent(db, targetId) {
+    const row = await db.select().from(events).where(eq(events.id, targetId)).get();
     return row ? (row as unknown as Record<string, unknown>) : null;
   },
-
-  async applyRestore(
-    db: DB,
-    before: Record<string, unknown>,
-    strategy: RestoreStrategy,
-    _options,
-  ) {
-    if (strategy === "delete_created") {
-      await db
-        .update(events)
-        .set({
-          visibility_status: "archived",
-          updated_at: Math.floor(Date.now() / 1000),
-        })
-        .where(eq(events.id, before.id as string));
-      return;
-    }
-
-    if (strategy === "recreate_deleted") {
-      // events は物理削除しないので visibility_status=archived に戻す
-      await db
-        .update(events)
-        .set({
-          visibility_status: (before.visibility_status as "draft" | "private" | "public" | "archived") ?? "draft",
-          updated_at: Math.floor(Date.now() / 1000),
-        })
-        .where(eq(events.id, before.id as string));
-      return;
-    }
-
-    if (strategy === "update_before") {
-      const { id, created_at, ...updateFields } = before;
-      await db
-        .update(events)
-        .set({
-          ...(updateFields as Partial<typeof events.$inferInsert>),
-          updated_at: Math.floor(Date.now() / 1000),
-        })
-        .where(eq(events.id, id as string));
-      return;
-    }
+  buildRestoreMutation(db, snapshot, strategy, options) {
+    if (strategy !== "update_before") return unsupported("events", strategy);
+    const { id, created_at, ...set } = snapshot;
+    return {
+      query: db.update(events).set(set as Partial<typeof events.$inferInsert>).where(eq(events.id, id as string)),
+      expectedChanges: 1,
+    };
   },
 };
-
-// ============================================================
-// videos アダプター
-// ============================================================
 
 const videosAdapter: RestoreAdapter = {
-  async fetchCurrent(db: DB, targetId: string) {
-    const row = await db
-      .select()
-      .from(videos)
-      .where(eq(videos.id, targetId))
-      .get();
+  supportedStrategies: ["update_before"],
+  async fetchCurrent(db, targetId) {
+    const row = await db.select().from(videos).where(eq(videos.id, targetId)).get();
     return row ? (row as unknown as Record<string, unknown>) : null;
   },
-
-  async applyRestore(
-    db: DB,
-    before: Record<string, unknown>,
-    strategy: RestoreStrategy,
-    _options,
-  ) {
-    if (strategy === "delete_created") {
-      await db
-        .update(videos)
-        .set({
-          visibility_status: "archived",
-          updated_at: Math.floor(Date.now() / 1000),
-        })
-        .where(eq(videos.id, before.id as string));
-      return;
-    }
-
-    if (strategy === "recreate_deleted") {
-      // videos は物理削除しないので visibility_status を before の値に戻す
-      await db
-        .update(videos)
-        .set({
-          visibility_status: (before.visibility_status as "draft" | "pending" | "public" | "limited" | "private" | "hidden" | "archived" | "voided") ?? "archived",
-          updated_at: Math.floor(Date.now() / 1000),
-        })
-        .where(eq(videos.id, before.id as string));
-      return;
-    }
-
-    if (strategy === "update_before") {
-      const { id, created_at, ...updateFields } = before;
-      await db
-        .update(videos)
-        .set({
-          ...(updateFields as Partial<typeof videos.$inferInsert>),
-          updated_at: Math.floor(Date.now() / 1000),
-        })
-        .where(eq(videos.id, id as string));
-      return;
-    }
+  buildRestoreMutation(db, snapshot, strategy) {
+    if (strategy !== "update_before") return unsupported("videos", strategy);
+    const { id, created_at, ...set } = snapshot;
+    return {
+      query: db.update(videos).set(set as Partial<typeof videos.$inferInsert>).where(eq(videos.id, id as string)),
+      expectedChanges: 1,
+    };
   },
 };
-
-// ============================================================
-// slots アダプター
-// ============================================================
 
 const slotsAdapter: RestoreAdapter = {
-  async fetchCurrent(db: DB, targetId: string) {
-    const row = await db
-      .select()
-      .from(slots)
-      .where(eq(slots.id, targetId))
-      .get();
+  supportedStrategies: ["update_before", "recreate_deleted"],
+  async fetchCurrent(db, targetId) {
+    const row = await db.select().from(slots).where(eq(slots.id, targetId)).get();
     return row ? (row as unknown as Record<string, unknown>) : null;
   },
-
-  async applyRestore(
-    db: DB,
-    before: Record<string, unknown>,
-    strategy: RestoreStrategy,
-    _options,
-  ) {
+  buildRestoreMutation(db, snapshot, strategy) {
     if (strategy === "update_before") {
-      const { id, ...updateFields } = before;
-      await db
-        .update(slots)
-        .set({
-          ...(updateFields as Partial<typeof slots.$inferInsert>),
-          updated_at: Math.floor(Date.now() / 1000),
-        })
-        .where(eq(slots.id, id as string));
-      return;
+      const { id, ...set } = snapshot;
+      return {
+        query: db.update(slots).set(set as Partial<typeof slots.$inferInsert>).where(eq(slots.id, id as string)),
+        expectedChanges: 1,
+      };
     }
-
     if (strategy === "recreate_deleted") {
-      // slots は物理削除される場合があるので INSERT を試みる
-      await db
-        .insert(slots)
-        .values(before as typeof slots.$inferInsert)
-        .onConflictDoUpdate({
-          target: slots.id,
-          set: before as Partial<typeof slots.$inferInsert>,
-        });
-      return;
+      return {
+        query: db.insert(slots).values(snapshot as typeof slots.$inferInsert),
+        expectedChanges: 1,
+      };
     }
+    return unsupported("slots", strategy);
   },
 };
-
-// ============================================================
-// announcements アダプター
-// ============================================================
 
 const announcementsAdapter: RestoreAdapter = {
-  async fetchCurrent(db: DB, targetId: string) {
-    const row = await db
-      .select()
-      .from(announcements)
-      .where(eq(announcements.id, targetId))
-      .get();
+  supportedStrategies: ["update_before", "recreate_deleted"],
+  async fetchCurrent(db, targetId) {
+    const row = await db.select().from(announcements).where(eq(announcements.id, targetId)).get();
     return row ? (row as unknown as Record<string, unknown>) : null;
   },
-
-  async applyRestore(
-    db: DB,
-    before: Record<string, unknown>,
-    strategy: RestoreStrategy,
-    _options,
-  ) {
+  buildRestoreMutation(db, snapshot, strategy) {
     if (strategy === "update_before") {
-      const { id, created_at, ...updateFields } = before;
-      await db
-        .update(announcements)
-        .set({
-          ...(updateFields as Partial<typeof announcements.$inferInsert>),
-          updated_at: Math.floor(Date.now() / 1000),
-        })
-        .where(eq(announcements.id, id as string));
-      return;
+      const { id, created_at, ...set } = snapshot;
+      return {
+        query: db.update(announcements).set(set as Partial<typeof announcements.$inferInsert>).where(eq(announcements.id, id as string)),
+        expectedChanges: 1,
+      };
     }
-
     if (strategy === "recreate_deleted") {
-      await db
-        .insert(announcements)
-        .values(before as typeof announcements.$inferInsert)
-        .onConflictDoUpdate({
-          target: announcements.id,
-          set: before as Partial<typeof announcements.$inferInsert>,
-        });
-      return;
+      return {
+        query: db.insert(announcements).values(snapshot as typeof announcements.$inferInsert),
+        expectedChanges: 1,
+      };
     }
+    return unsupported("announcements", strategy);
   },
 };
-
-// ============================================================
-// event_groups アダプター
-// ============================================================
 
 const eventGroupsAdapter: RestoreAdapter = {
-  async fetchCurrent(db: DB, targetId: string) {
-    const row = await db
-      .select()
-      .from(eventGroups)
-      .where(eq(eventGroups.id, targetId))
-      .get();
+  supportedStrategies: ["update_before", "recreate_deleted"],
+  async fetchCurrent(db, targetId) {
+    const row = await db.select().from(eventGroups).where(eq(eventGroups.id, targetId)).get();
     return row ? (row as unknown as Record<string, unknown>) : null;
   },
-
-  async applyRestore(
-    db: DB,
-    before: Record<string, unknown>,
-    strategy: RestoreStrategy,
-    _options,
-  ) {
+  buildRestoreMutation(db, snapshot, strategy) {
     if (strategy === "update_before") {
-      const { id, created_at, ...updateFields } = before;
-      await db
-        .update(eventGroups)
-        .set({
-          ...(updateFields as Partial<typeof eventGroups.$inferInsert>),
-          updated_at: Math.floor(Date.now() / 1000),
-        })
-        .where(eq(eventGroups.id, id as string));
-      return;
+      const { id, created_at, ...set } = snapshot;
+      return {
+        query: db.update(eventGroups).set(set as Partial<typeof eventGroups.$inferInsert>).where(eq(eventGroups.id, id as string)),
+        expectedChanges: 1,
+      };
     }
-
     if (strategy === "recreate_deleted") {
-      await db
-        .insert(eventGroups)
-        .values(before as typeof eventGroups.$inferInsert)
-        .onConflictDoUpdate({
-          target: eventGroups.id,
-          set: before as Partial<typeof eventGroups.$inferInsert>,
-        });
-      return;
+      return {
+        query: db.insert(eventGroups).values(snapshot as typeof eventGroups.$inferInsert),
+        expectedChanges: 1,
+      };
     }
+    return unsupported("event_groups", strategy);
   },
 };
-
-// ============================================================
-// x_account_link_requests アダプター
-// ============================================================
 
 const xAccountLinkRequestsAdapter: RestoreAdapter = {
-  async fetchCurrent(db: DB, targetId: string) {
-    const row = await db
-      .select()
-      .from(xAccountLinkRequests)
-      .where(eq(xAccountLinkRequests.id, targetId))
-      .get();
+  supportedStrategies: ["update_before", "recreate_deleted"],
+  async fetchCurrent(db, targetId) {
+    const row = await db.select().from(xAccountLinkRequests).where(eq(xAccountLinkRequests.id, targetId)).get();
     return row ? (row as unknown as Record<string, unknown>) : null;
   },
-
-  async applyRestore(
-    db: DB,
-    before: Record<string, unknown>,
-    strategy: RestoreStrategy,
-    _options,
-  ) {
+  buildRestoreMutation(db, snapshot, strategy) {
     if (strategy === "update_before") {
-      const { id, ...updateFields } = before;
-      await db
-        .update(xAccountLinkRequests)
-        .set(updateFields as Partial<typeof xAccountLinkRequests.$inferInsert>)
-        .where(eq(xAccountLinkRequests.id, id as string));
-      return;
+      const { id, ...set } = snapshot;
+      return {
+        query: db.update(xAccountLinkRequests).set(set as Partial<typeof xAccountLinkRequests.$inferInsert>).where(eq(xAccountLinkRequests.id, id as string)),
+        expectedChanges: 1,
+      };
     }
-
     if (strategy === "recreate_deleted") {
-      await db
-        .insert(xAccountLinkRequests)
-        .values(before as typeof xAccountLinkRequests.$inferInsert)
-        .onConflictDoUpdate({
-          target: xAccountLinkRequests.id,
-          set: before as Partial<typeof xAccountLinkRequests.$inferInsert>,
-        });
-      return;
+      return {
+        query: db.insert(xAccountLinkRequests).values(snapshot as typeof xAccountLinkRequests.$inferInsert),
+        expectedChanges: 1,
+      };
     }
+    return unsupported("x_account_link_requests", strategy);
   },
 };
 
-// ============================================================
-// アダプター取得
-// ============================================================
+const eventStaffAdapter: RestoreAdapter = {
+  supportedStrategies: ["delete_created", "update_before", "recreate_deleted"],
+  async fetchCurrent(db, targetId) {
+    const row = await db.select().from(eventStaff).where(eq(eventStaff.id, targetId)).get();
+    return row ? (row as unknown as Record<string, unknown>) : null;
+  },
+  buildRestoreMutation(db, snapshot, strategy, options) {
+    const id = snapshot.id as string;
+    const eventId = snapshot.event_id as string;
+    if (strategy === "delete_created") {
+      return {
+        query: db.delete(eventStaff).where(and(
+          eq(eventStaff.id, id),
+          eq(eventStaff.event_id, eventId),
+          sql`(${eventStaff.permission_preset} <> 'owner' OR (SELECT COUNT(*) FROM event_staff WHERE event_id = ${eventId} AND permission_preset = 'owner') > 1)`,
+          options.forceOverwrite || options.expectedCurrent?.updated_at === undefined
+            ? sql`1 = 1`
+            : sql`${eventStaff.updated_at} = ${options.expectedCurrent.updated_at as number}`,
+        )!),
+        expectedChanges: 1,
+      };
+    }
+    if (strategy === "update_before") {
+      const { id: _id, created_at, ...set } = snapshot;
+      const nextPreset = snapshot.permission_preset as string;
+      return {
+        query: db.update(eventStaff).set(set as Partial<typeof eventStaff.$inferInsert>).where(and(
+          eq(eventStaff.id, id),
+          eq(eventStaff.event_id, eventId),
+          sql`(${eventStaff.permission_preset} <> 'owner' OR ${nextPreset} = 'owner' OR (SELECT COUNT(*) FROM event_staff WHERE event_id = ${eventId} AND permission_preset = 'owner') > 1)`,
+          options.forceOverwrite || options.expectedCurrent?.updated_at === undefined
+            ? sql`1 = 1`
+            : sql`${eventStaff.updated_at} = ${options.expectedCurrent.updated_at as number}`,
+        )!),
+        expectedChanges: 1,
+      };
+    }
+    if (strategy === "recreate_deleted") {
+      return {
+        query: db.insert(eventStaff).values(snapshot as typeof eventStaff.$inferInsert),
+        expectedChanges: 1,
+      };
+    }
+    return unsupported("event_staff", strategy);
+  },
+};
 
 const ADAPTERS: Record<string, RestoreAdapter> = {
   events: eventsAdapter,
@@ -325,13 +206,10 @@ const ADAPTERS: Record<string, RestoreAdapter> = {
   slots: slotsAdapter,
   announcements: announcementsAdapter,
   event_groups: eventGroupsAdapter,
+  event_staff: eventStaffAdapter,
   x_account_link_requests: xAccountLinkRequestsAdapter,
 };
 
-/**
- * テーブル名に対応するリストアアダプターを返す。
- * ホワイトリスト外は null。
- */
 export function getAdapter(tableName: string): RestoreAdapter | null {
   return ADAPTERS[tableName] ?? null;
 }

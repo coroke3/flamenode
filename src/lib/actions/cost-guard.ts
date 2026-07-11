@@ -93,7 +93,7 @@ export async function setCostGuardMode(
     record_id: "global",
     action: "UPDATE",
     after_data: JSON.stringify({ operation_mode: mode, reason }),
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "long_audit",
   });
   revalidatePath("/admin/cost-guard");
@@ -130,7 +130,7 @@ export async function setMaintenanceMode(
     record_id: "global",
     action: "UPDATE",
     after_data: JSON.stringify({ operation_mode: nextMode }),
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "long_audit",
   });
   revalidatePath("/admin/cost-guard");
@@ -153,7 +153,7 @@ export async function setAutoCostGuard(
     record_id: "global",
     action: "UPDATE",
     after_data: JSON.stringify({ auto_cost_guard_enabled: next }),
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "normal",
   });
   revalidatePath("/admin/cost-guard");
@@ -197,7 +197,7 @@ export async function setCostGuardAdvancedSettings(
     record_id: "global",
     action: "UPDATE",
     after_data: JSON.stringify(patch),
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "long_audit",
   });
   revalidatePath("/admin/cost-guard");

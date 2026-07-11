@@ -48,7 +48,10 @@ export function ManageSidebarNav({
   }
 
   return (
-    <section className={navStyles.navGroup} aria-label="イベント運営ナビ">
+    <section
+      className={`${navStyles.navGroup} console-manage-nav`}
+      aria-label="イベント運営ナビ"
+    >
       <h2 className={navStyles.navGroupTitle}>イベント運営</h2>
       {warnActiveX ? (
         <p className="console-sidebar-warn">

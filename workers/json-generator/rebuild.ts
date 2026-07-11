@@ -1,9 +1,9 @@
-import { assertNoForbiddenPublicKeys } from "./sanitize";
+import { assertNoForbiddenPublicKeys } from "./sanitize.ts";
 import {
   cacheControlForFreshness,
   enrichEventRowForStaticJson,
   resolveEventFreshness,
-} from "./freshness";
+} from "./freshness.ts";
 
 type Env = { DB: D1Database; R2: R2Bucket; KV: KVNamespace };
 
@@ -402,7 +402,7 @@ function latestEventStart(events: readonly Record<string, unknown>[]): number | 
 async function rebuildSearchIndexLite(env: Env): Promise<void> {
   const videos = await env.DB.prepare(
     `SELECT id, title, creator_display_name, creator_x_user_id, youtube_video_id
-     FROM videos WHERE visibility_status IN ('public', 'limited')
+     FROM videos WHERE visibility_status = 'public'
      ORDER BY updated_at DESC LIMIT 500`,
   ).all();
   const users = await env.DB.prepare(
@@ -463,7 +463,7 @@ async function rebuildEvent(env: Env, eventId: string): Promise<void> {
             v.creator_x_user_id, v.creator_icon_url, v.visibility_status, v.scheduled_time
      FROM videos v
      INNER JOIN video_events ve ON ve.video_id = v.id
-     WHERE ve.event_id = ? AND v.visibility_status IN ('public', 'limited')
+     WHERE ve.event_id = ? AND v.visibility_status = 'public'
      ORDER BY v.scheduled_time DESC
      LIMIT 500`,
   )

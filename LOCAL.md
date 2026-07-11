@@ -1,5 +1,10 @@
 # FlameNode ローカル動作手順書
 
+> Status: Active
+> Last verified: 2026-07-11
+> Verified against commit: `5f48e0f` + working tree
+> Source of truth: `package.json`, `migrations/0000_flame_node_baseline.sql`, `docs/operations/migrations.md`
+
 このドキュメントは、FlameNode を **手元の PC で動かして動作確認する**ための手順をまとめたものです。
 本番デプロイ手順は `DEPLOY.md` を参照してください。ここではローカルで完結する作業だけを扱います。
 
@@ -27,7 +32,7 @@
 # 動作中のサーバを止める
 Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match "next.*dev|load-dev-vars" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 
-# 改めて起動 (Miniflare の D1/R2/KV が自動で立ち上がり、migrations も冪等に当たる)
+# 改めて起動 (Miniflare の D1/R2/KV が立ち上がる。事前にbaselineを適用しておく)
 npm run dev:local
 ```
 
@@ -39,7 +44,7 @@ npm run dev:local
 >
 > | モード | 起動コマンド | 主な用途 | D1 / R2 / KV / Auth.js |
 > | --- | --- | --- | --- |
-> | A. 通常開発 | `npm run dev` (http://localhost:3000) | 日常の開発全般 (UI・ログイン・投稿・管理画面) | **すべて使える** (`instrumentation.ts` が Miniflare で D1/R2/KV を自動起動し、migration も冪等 apply) |
+> | A. 通常開発 | `npm run dev` (http://localhost:3000) | 日常の開発全般 (UI・ログイン・投稿・管理画面) | **すべて使える** (`instrumentation.ts` が Miniflare で D1/R2/KV を起動し、schema不一致ならfail-fast) |
 > | B. 本番相当 | `npm run pages:dev` (http://localhost:8788) | next-on-pages ビルド後の edge ランタイム検証、デプロイ前確認 | **すべて使える** (wrangler pages dev + Miniflare) |
 >
 > 普段の開発はモード A で完結します。デプロイ前に本番相当のランタイムで確認したいときだけモード B を使います。
@@ -153,7 +158,7 @@ npm run dev
 ### 4-1. ローカル D1 にスキーマを流し込む
 
 ```powershell
-# .wrangler 配下にローカル SQLite を作成し、migrations/0000_brave_iceman.sql を適用
+# .wrangler 配下にローカル SQLite を作成し、active baselineを適用
 npx wrangler d1 migrations apply flamenode_db --local
 ```
 
@@ -280,18 +285,18 @@ cd ../..
 ```powershell
 # サンプルイベントを 1 件
 npx wrangler d1 execute flamenode_db --local --command @"
-INSERT INTO events (id, title, description, start_time, end_time, is_active, created_at)
-VALUES ('ev_demo', 'デモイベント', 'ローカル動作確認用', strftime('%s','now') - 3600, strftime('%s','now') + 7*24*3600, 1, strftime('%s','now'));
+INSERT INTO events (id, title, explanation, start_time, end_time, visibility_status, created_at, updated_at)
+VALUES ('ev_demo', 'デモイベント', 'ローカル動作確認用', strftime('%s','now') - 3600, strftime('%s','now') + 7*24*3600, 'public', strftime('%s','now'), strftime('%s','now'));
 "@
 
 # サンプル動画を 1 件
 npx wrangler d1 execute flamenode_db --local --command @"
-INSERT INTO videos (id, owner_discord_user_id, submission_type, display_name, contact_x_id, title, youtube_video_id, status, scheduling_type, scheduled_time, created_at, updated_at)
-VALUES ('v_demo', '<your-discord-id>', 'individual', 'デモ作者', 'demo', 'デモ作品', 'dQw4w9WgXcQ', 'public', 'manual', strftime('%s','now'), strftime('%s','now'), strftime('%s','now'));
+INSERT INTO videos (id, submitted_by_user_id, submission_type, display_name, creator_x_user_id, title, youtube_video_id, visibility_status, scheduling_type, scheduled_time, created_at, updated_at)
+VALUES ('v_demo', '<your-user-id>', 'individual', 'デモ作者', 'demo', 'デモ作品', 'dQw4w9WgXcQ', 'public', 'manual', strftime('%s','now'), strftime('%s','now'), strftime('%s','now'));
 "@
 ```
 
-> `<your-discord-id>` は `SELECT id FROM user;` で取得できる Discord User ID です。
+> `<your-user-id>` は `SELECT id FROM user;` で取得するAuth.js内部ユーザーIDです。Discord Snowflakeは `user.discord_id` にだけ保存します。
 
 サンプル投入後にトップ (http://localhost:8788/) を再読み込みすると、デモ作品とイベントが表示されます。
 
@@ -343,7 +348,7 @@ npx wrangler d1 migrations apply flamenode_db --local
 | `npm run dev` で「DB に接続できません」 | Miniflare 起動失敗の可能性。ターミナルの instrumentation ログを確認。`LOCAL_BINDINGS=0` が設定されていないかも確認 |
 | `npm run pages:dev` 起動時に `D1_ERROR: no such table` | ローカル D1 にマイグレーションがあたっていない。`npx wrangler d1 migrations apply flamenode_db --local` を実行 |
 | Discord ログインで `redirect_uri_mismatch` | Discord Developer Portal の Redirect に `http://localhost:3000/api/auth/callback/discord` が無い |
-| `/entry?error=Configuration` と `Invalid URL` (auth) | `AUTH_URL` または `NEXTAUTH_URL` が未設定。`.dev.vars` に `AUTH_URL="http://localhost:3000"` を追加するか、`NEXT_PUBLIC_SITE_URL` を正しい絶対 URL にする（コード側でも `NEXT_PUBLIC_SITE_URL` から自動補完する） |
+| `/entry?error=Configuration` と `Invalid URL` (auth) | `AUTH_URL` または `NEXTAUTH_URL` が未設定。`.dev.vars` に `AUTH_URL="http://localhost:3000"` を追加するか、`NEXT_PUBLIC_SITE_URL` を正しい絶対 URL にする |
 | ログイン後に `/dashboard` で 500 | `user` テーブルにカラムが足りていない可能性。`.wrangler` を消して再マイグレーション |
 | `/admin` に弾かれる | `role` が `user` のまま。SQL で自分を `admin` にする (4-4 参照) |
 | Cookie がブラウザに残ってログイン状態が変 | DevTools → Application → Cookies で `localhost:8788` を全削除して再試行 |
@@ -361,7 +366,7 @@ npx wrangler d1 migrations apply flamenode_db --local
 2. `.dev.vars` を `.dev.vars.example` から作る
 3. `npx wrangler d1 migrations apply flamenode_db --local`
 4. `npm run pages:dev` で http://localhost:8788/ を表示
-5. Discord でログイン → 自分の Discord User ID を SQL で確認 → 自分を `admin` に昇格
+5. Discord でログイン → `SELECT id, discord_id FROM user;` で内部ユーザーIDとDiscord Snowflakeの分離を確認 → 自分を `admin` に昇格
 6. `/admin` に入って画面遷移を確認
 7. `/entry` から投稿してトップに反映されるかを確認
 8. 必要に応じて `MAINTENANCE_MODE=1` や `operation_mode='economy'` の挙動を確認

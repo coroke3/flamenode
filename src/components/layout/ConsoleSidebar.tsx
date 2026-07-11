@@ -31,14 +31,24 @@ export async function ConsoleSidebar({
   if (!db) return null;
 
   const isAdmin = u.role === "admin";
-  const canManage =
-    isAdmin ||
-    (await getEditableEventIds(db, u.id)).length > 0 ||
-    (await canManageXIdLinkRequests(db, { id: u.id, role: u.role ?? null }));
-
-  if (!isAdmin && !canManage) return null;
+  if (consoleMode === "admin") {
+    if (!isAdmin) return null;
+    return (
+      <aside className="admin-sidebar">
+        <AdminModeBanner />
+        <AdminSidebarNav groups={buildAdminNavGroups()} />
+      </aside>
+    );
+  }
 
   const editableEventIds = isAdmin ? [] : await getEditableEventIds(db, u.id);
+  const showXLinkRequests = await canManageXIdLinkRequests(db, {
+    id: u.id,
+    role: u.role ?? null,
+  });
+  if (!isAdmin && editableEventIds.length === 0 && !showXLinkRequests) {
+    return null;
+  }
 
   const events =
     isAdmin
@@ -91,23 +101,15 @@ export async function ConsoleSidebar({
         events.map((event) => event.id),
       );
   const warnActiveX = !isAdmin && shouldWarnManageActiveXMismatch(activeX, manageStaffXIds);
-  const showXLinkRequests = await canManageXIdLinkRequests(db, {
-    id: u.id,
-    role: u.role ?? null,
-  });
-
   return (
     <aside className="admin-sidebar">
-      {consoleMode === "admin" ? <AdminModeBanner /> : <ManageModeBanner />}
-      {isAdmin ? <AdminSidebarNav groups={buildAdminNavGroups()} /> : null}
-      {canManage ? (
-        <ManageSidebarNav
-          events={events}
-          showXLinkRequests={showXLinkRequests}
-          warnActiveX={warnActiveX}
-          activeX={activeX}
-        />
-      ) : null}
+      <ManageModeBanner />
+      <ManageSidebarNav
+        events={events}
+        showXLinkRequests={showXLinkRequests}
+        warnActiveX={warnActiveX}
+        activeX={activeX}
+      />
     </aside>
   );
 }

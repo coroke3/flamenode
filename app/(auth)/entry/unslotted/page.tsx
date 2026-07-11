@@ -43,7 +43,7 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
         .from(xUsersTable)
         .where(
           and(
-            eq(xUsersTable.linked_discord_user_id, user.id),
+            eq(xUsersTable.linked_user_id, user.id),
             eq(xUsersTable.approval_status, "approved"),
           )!,
         )

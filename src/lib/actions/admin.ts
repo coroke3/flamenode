@@ -115,7 +115,7 @@ export async function setVideoStatus(
     action: "UPDATE",
     before_data: { visibility_status: prevStatus },
     after_data: { visibility_status: status, reason: reason || null },
-    operator_discord_id: u.id,
+    operator_user_id: u.id,
     retention_class: status === "voided" ? "long_audit" : "normal",
   });
 
@@ -127,7 +127,7 @@ export async function setVideoStatus(
     prevStatus,
     nextStatus: status,
     reason: reason || null,
-    discordUserId: target.submitted_by_discord_user_id,
+    recipientUserId: target.submitted_by_user_id,
     eventId: target.primary_event_id,
     forceNotify,
   });

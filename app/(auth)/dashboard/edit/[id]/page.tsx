@@ -280,7 +280,7 @@ export default async function EditVideoPage({
     await loadVideoCollabSubjects(db, video.id);
   const permissionSummary = computeEditPermissionSummary(videoCollabSubjects, {
     viewerDiscordId: user.id,
-    ownerDiscordId: video.submitted_by_discord_user_id,
+    ownerDiscordId: video.submitted_by_user_id,
   });
   const privilegedQs =
     privilegeMode === "normal" ? "" : `?privileged=${privilegeMode}`;
@@ -294,7 +294,7 @@ export default async function EditVideoPage({
     .from(xUsersTable)
     .where(
       and(
-        eq(xUsersTable.linked_discord_user_id, user.id),
+        eq(xUsersTable.linked_user_id, user.id),
         eq(xUsersTable.approval_status, "approved"),
       )!,
     )
@@ -354,7 +354,7 @@ export default async function EditVideoPage({
 
   if (!canEditAnySection && !canShowPrivilegeSwitchOnly) {
     return (
-      <main className="fn-public-container fn-page fn-guard-shell">
+      <div className="fn-public-container fn-page fn-guard-shell">
         <div className="fn-status-panel fn-status-panel--center fn-status-panel--warn">
           <h1 className="fn-guard-title fn-guard-title--warn">編集権限がありません</h1>
           <p className="fn-status-panel-lead">
@@ -372,7 +372,7 @@ export default async function EditVideoPage({
             </Link>
           </div>
         </div>
-      </main>
+      </div>
     );
   }
 

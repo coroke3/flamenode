@@ -78,7 +78,7 @@ export async function retryFailedNotification(
       retried_by: u.id,
       retried_at: now,
     }),
-    operator_discord_id: u.id,
+    operator_user_id: u.id,
     retention_class: "normal",
   });
 
@@ -148,7 +148,7 @@ export async function cancelNotification(
       cancelled_by: u.id,
       cancelled_at: now,
     }),
-    operator_discord_id: u.id,
+    operator_user_id: u.id,
     retention_class: "normal",
   });
 
@@ -194,7 +194,7 @@ export async function forceResendNotification(
   const { runWithNotificationBehavior } = await import("@/lib/notifications/context");
   const ok = await runWithNotificationBehavior("user", () =>
     enqueueNotification(db, {
-      discordUserId: target.discord_user_id,
+      recipientUserId: target.recipient_user_id,
       type: target.type,
       payload,
       eventId: target.event_id,
@@ -270,7 +270,7 @@ export async function retryAllFailedNotifications(
       retried_by: u.id,
       retried_at: now,
     }),
-    operator_discord_id: u.id,
+    operator_user_id: u.id,
     retention_class: "long_audit",
   });
 

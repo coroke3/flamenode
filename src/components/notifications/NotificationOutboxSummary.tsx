@@ -49,7 +49,7 @@ export function NotificationOutboxSummary({
         ) : null}
       </div>
       <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-        宛先: {formatRecipientDisplay(row.discord_user_id, recipient)}
+        宛先: {formatRecipientDisplay(row.recipient_user_id, recipient)}
         {recipient?.notificationsEnabled === false ? (
           <span style={{ marginLeft: 6, color: "var(--accent-warning)" }}>
             (通知OFF)

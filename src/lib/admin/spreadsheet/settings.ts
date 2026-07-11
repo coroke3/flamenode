@@ -1,6 +1,5 @@
 import "server-only";
 
-import { loadDevVarsIfNeeded } from "@/lib/dev/loadDevVars";
 import {
   normalizeSpreadsheetPage,
   SPREADSHEET_PAGE_SIZE_CAP,
@@ -9,8 +8,6 @@ import {
 } from "./constants";
 
 export { normalizeSpreadsheetPage } from "./constants";
-
-loadDevVarsIfNeeded();
 
 /** 実行時のページサイズ（ADMIN_SPREADSHEET_PAGE_SIZE → フォールバック） */
 export function getSpreadsheetPageSize(): number {

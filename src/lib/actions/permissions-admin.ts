@@ -87,7 +87,7 @@ export async function updateGlobalEditableFields(
       default_editable_fields: defaultFields,
       upcoming_editable_fields: upcomingFields,
     },
-    operator_discord_id: u.id,
+    operator_user_id: u.id,
     retention_class: "long_audit",
   });
 

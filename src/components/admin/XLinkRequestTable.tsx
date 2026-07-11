@@ -10,7 +10,7 @@ import { Icon } from "@/components/ui/Icon";
 export interface XLinkRequestRow {
   id: string;
   requested_x_id: string;
-  discord_user_id: string;
+  user_id: string;
   discord_name: string | null;
   discord_image: string | null;
   requested_at: number;
@@ -242,7 +242,7 @@ export function XLinkRequestTable({
                         color: "var(--text-muted)",
                       }}
                     >
-                      {r.discord_user_id}
+                      {r.user_id}
                     </span>
                   </span>
                 </div>

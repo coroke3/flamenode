@@ -26,22 +26,22 @@ function fallbackName(value: string | null | undefined, fallback: string): strin
 }
 
 function ownsXUserRow(
-  row: { linked_discord_user_id: string | null },
+  row: { linked_user_id: string | null },
   userId: string,
 ): boolean {
-  return !row.linked_discord_user_id || row.linked_discord_user_id === userId;
+  return !row.linked_user_id || row.linked_user_id === userId;
 }
 
 /**
  * ヘッダー用: Discord に紐づく X ID、active 行、承認待ち申請をまとめて返す。
- * linked_discord_user_id 欠損時は active 行から自動修復する。
+ * linked_user_id 欠損時は active 行から自動修復する。
  */
 export async function fetchHeaderXIdEntries(
   db: DB,
   userId: string,
   activeXId: string | null,
 ): Promise<HeaderXIdEntry[]> {
-  const rowConditions = [eq(xUsers.linked_discord_user_id, userId)];
+  const rowConditions = [eq(xUsers.linked_user_id, userId)];
   if (activeXId) {
     rowConditions.push(xUserIdMatches(activeXId));
   }
@@ -52,7 +52,7 @@ export async function fetchHeaderXIdEntries(
       x_name: xUsers.x_name,
       icon_url: xUsers.icon_url,
       approval_status: xUsers.approval_status,
-      linked_discord_user_id: xUsers.linked_discord_user_id,
+      linked_user_id: xUsers.linked_user_id,
     })
     .from(xUsers)
     .where(rowConditions.length === 1 ? rowConditions[0] : or(...rowConditions)!);
@@ -65,10 +65,10 @@ export async function fetchHeaderXIdEntries(
     const normalizedId = normalizeXId(row.x_user_id);
     if (!normalizedId) continue;
 
-    if (!row.linked_discord_user_id) {
+    if (!row.linked_user_id) {
       await db
         .update(xUsers)
-        .set({ linked_discord_user_id: userId })
+        .set({ linked_user_id: userId })
         .where(xUserIdMatches(normalizedId));
     }
 
@@ -96,7 +96,7 @@ export async function fetchHeaderXIdEntries(
     .from(xAccountLinkRequests)
     .where(
       and(
-        eq(xAccountLinkRequests.discord_user_id, userId),
+        eq(xAccountLinkRequests.user_id, userId),
         eq(xAccountLinkRequests.status, "pending"),
       )!,
     );

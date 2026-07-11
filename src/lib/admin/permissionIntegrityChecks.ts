@@ -78,11 +78,11 @@ export async function buildPermissionIntegrityChecks(
       db,
       id: "staff_missing_subject_ids",
       area: "event_staff",
-      title: "X ID / Discord ID が両方空",
+      title: "X ID / 内部ユーザー ID が両方空",
       severity: "danger",
       description: "スタッフ行に紐づくユーザー識別子がありません。",
       from: sql`event_staff`,
-      where: sql`(x_user_id IS NULL OR trim(x_user_id) = '') AND (discord_user_id IS NULL OR trim(discord_user_id) = '')`,
+      where: sql`(x_user_id IS NULL OR trim(x_user_id) = '') AND (user_id IS NULL OR trim(user_id) = '')`,
       sampleSelect: {
         id: sql<string>`id`,
         event_id: sql<string>`event_id`,
@@ -157,15 +157,15 @@ export async function buildPermissionIntegrityChecks(
     .having(sql`COUNT(*) > 1`)
     .limit(50);
 
-  const duplicateDiscord = await db
+  const duplicateUser = await db
     .select({
       event_id: sql<string>`event_id`,
-      discord_user_id: sql<string>`discord_user_id`,
+      user_id: sql<string>`user_id`,
       c: sql<number>`COUNT(*)`,
     })
     .from(sql`event_staff`)
-    .where(sql`discord_user_id IS NOT NULL AND trim(discord_user_id) <> ''`)
-    .groupBy(sql`event_id`, sql`discord_user_id`)
+    .where(sql`user_id IS NOT NULL AND trim(user_id) <> ''`)
+    .groupBy(sql`event_id`, sql`user_id`)
     .having(sql`COUNT(*) > 1`)
     .limit(50);
 
@@ -281,17 +281,17 @@ export async function buildPermissionIntegrityChecks(
           recommendation: "重複行を統合または削除してください。",
         }
       : null,
-    duplicateDiscord.length > 0
+    duplicateUser.length > 0
       ? {
-          id: "staff_duplicate_discord_per_event",
-          title: "同一イベント内で Discord ID が重複",
+          id: "staff_duplicate_user_per_event",
+          title: "同一イベント内で内部ユーザー ID が重複",
           area: "event_staff",
           severity: "warning" as const,
-          description: "同じイベントに同一 Discord ID のスタッフ行が複数あります。",
-          count: duplicateDiscord.length,
-          issues: duplicateDiscord.map((row) => ({
-            id: `${text(row.event_id)}:${text(row.discord_user_id)}`,
-            title: text(row.discord_user_id),
+          description: "同じイベントに同一の内部ユーザー ID を持つスタッフ行が複数あります。",
+          count: duplicateUser.length,
+          issues: duplicateUser.map((row) => ({
+            id: `${text(row.event_id)}:${text(row.user_id)}`,
+            title: text(row.user_id),
             description: `event:${text(row.event_id)} × ${text(row.c)} 件`,
             adminHref: staffHref(text(row.event_id)),
           })),

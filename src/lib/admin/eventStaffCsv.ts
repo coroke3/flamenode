@@ -10,27 +10,23 @@ import {
 } from "../auth/permissions/presets.ts";
 
 export type EventStaffCsvPreset = EventStaffPreset;
-
 export type EventStaffCsvAction = "create" | "update";
-
-export type EventStaffCsvFormat = "current" | "legacy";
 
 export interface EventStaffCsvExistingSubject {
   x_user_id: string | null;
-  discord_user_id: string | null;
+  user_id: string | null;
 }
 
 export interface EventStaffCsvRow {
   lineNumber: number;
   display_name: string;
   x_user_id: string;
-  discord_user_id: string;
+  user_id: string;
   permission_preset: EventStaffCsvPreset;
   permission_keys: PermissionKey[];
   is_public_staff: "0" | "1";
   public_role_label: string;
   action: EventStaffCsvAction;
-  format: EventStaffCsvFormat;
   errors: string[];
   warnings: string[];
 }
@@ -41,13 +37,16 @@ export interface EventStaffCsvPreview {
     create: number;
     update: number;
     error: number;
-    legacy: number;
   };
   hasErrors: boolean;
 }
 
+/**
+ * CSV の第3列は Discord Snowflake ではなく Auth.js の内部ユーザー ID である。
+ * 旧5列形式および旧識別子形式は本格運用前の整理として受け付けない。
+ */
 export const EVENT_STAFF_CSV_HEADER =
-  "表示名,X ID,Discord User ID,担当プリセット,公開フラグ,公開ラベル";
+  "表示名,X ID,ユーザー ID,担当プリセット,公開フラグ,公開ラベル";
 
 export const EVENT_STAFF_CSV_SAMPLE = [
   EVENT_STAFF_CSV_HEADER,
@@ -118,24 +117,20 @@ function isHeaderRow(row: readonly string[]): boolean {
   );
 }
 
-function detectRowFormat(row: readonly string[]): EventStaffCsvFormat {
-  return row.length >= 6 ? "current" : "legacy";
-}
-
 function subjectKey(row: EventStaffCsvExistingSubject): string[] {
   const keys: string[] = [];
   if (row.x_user_id) keys.push(`x:${normalizeXIdForCsv(row.x_user_id)}`);
-  if (row.discord_user_id) keys.push(`d:${row.discord_user_id.trim()}`);
+  if (row.user_id) keys.push(`u:${row.user_id.trim()}`);
   return keys;
 }
 
 function resolveAction(
   xUserId: string,
-  discordUserId: string,
+  userId: string,
   existingKeys: ReadonlySet<string>,
 ): EventStaffCsvAction {
   if (xUserId && existingKeys.has(`x:${xUserId}`)) return "update";
-  if (discordUserId && existingKeys.has(`d:${discordUserId}`)) return "update";
+  if (userId && existingKeys.has(`u:${userId}`)) return "update";
   return "create";
 }
 
@@ -154,35 +149,32 @@ export function buildEventStaffCsvPreview(args: {
     const lineNumber = index + 1;
     if (index === 0 && isHeaderRow(cols)) return;
 
-    const format = detectRowFormat(cols);
     const [
       rawDisplayName = "",
       rawXUserId = "",
-      maybeDiscordOrAssignment = "",
-      maybePresetOrPublic = "",
-      maybePublicOrLabel = "0",
-      maybeLabel = "",
+      rawUserId = "",
+      rawAssignment = "",
+      rawPublicFlag = "0",
+      rawPublicLabel = "",
     ] = cols;
-    const usesCurrentFormat = format === "current";
     const displayName = rawDisplayName.trim() || `共同編集者 ${lineNumber}`;
     const xUserId = normalizeXIdForCsv(rawXUserId);
-    const discordUserId = usesCurrentFormat ? maybeDiscordOrAssignment.trim() : "";
-    const assignmentSource = usesCurrentFormat
-      ? maybePresetOrPublic
-      : maybeDiscordOrAssignment;
-    const publicFlag = usesCurrentFormat
-      ? maybePublicOrLabel
-      : maybePresetOrPublic || "0";
-    const publicLabel = usesCurrentFormat ? maybeLabel : maybePublicOrLabel;
-    const assignment = parseAssignment(assignmentSource);
+    const userId = rawUserId.trim();
+    const assignment = parseAssignment(rawAssignment);
     const errors = [...assignment.errors];
     const warnings: string[] = [];
 
-    if (!xUserId && !discordUserId) {
-      errors.push("X ID か Discord User ID のどちらかが必要です。");
+    if (cols.length !== 6) {
+      errors.push("正本CSVは「表示名,X ID,ユーザー ID,担当プリセット,公開フラグ,公開ラベル」の6列です。");
+    }
+    if (!xUserId && !userId) {
+      errors.push("X ID か内部ユーザー ID のどちらかが必要です。");
     }
     if (rawXUserId.trim() && !/^[a-z0-9_]{1,64}$/.test(xUserId)) {
       errors.push("X ID の形式が正しくありません。");
+    }
+    if (assignment.preset === "owner") {
+      errors.push("代表者の追加・変更はCSVでは行えません。専用の代表者移譲操作を使用してください。");
     }
     if (assignment.preset === "xid_reviewer" && !args.isSiteAdmin) {
       errors.push("X ID確認担当プリセットは site admin だけが付与できます。");
@@ -193,21 +185,17 @@ export function buildEventStaffCsvPreview(args: {
     ) {
       errors.push("site admin 専用権限はイベント運営者から付与できません。");
     }
-    if (format === "legacy") {
-      warnings.push("旧形式として読み取りました。次回から6列の正本CSVを使ってください。");
-    }
 
     rows.push({
       lineNumber,
       display_name: displayName,
       x_user_id: xUserId,
-      discord_user_id: discordUserId,
+      user_id: userId,
       permission_preset: assignment.preset,
       permission_keys: assignment.keys,
-      is_public_staff: publicFlag.trim() === "1" ? "1" : "0",
-      public_role_label: publicLabel.trim(),
-      action: resolveAction(xUserId, discordUserId, existingKeys),
-      format,
+      is_public_staff: rawPublicFlag.trim() === "1" ? "1" : "0",
+      public_role_label: rawPublicLabel.trim(),
+      action: resolveAction(xUserId, userId, existingKeys),
       errors: Array.from(new Set(errors)),
       warnings,
     });
@@ -218,10 +206,9 @@ export function buildEventStaffCsvPreview(args: {
       if (row.errors.length > 0) acc.error += 1;
       else if (row.action === "update") acc.update += 1;
       else acc.create += 1;
-      if (row.format === "legacy") acc.legacy += 1;
       return acc;
     },
-    { create: 0, update: 0, error: 0, legacy: 0 },
+    { create: 0, update: 0, error: 0 },
   );
 
   return {

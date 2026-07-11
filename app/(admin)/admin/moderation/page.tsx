@@ -202,7 +202,6 @@ export default async function AdminModerationPage({
                           <option value="">作品状態は変更しない</option>
                           <option value="pending">pending</option>
                           <option value="public">public</option>
-                          <option value="hidden">hidden</option>
                           <option value="voided">voided</option>
                           <option value="archived">archived</option>
                         </select>

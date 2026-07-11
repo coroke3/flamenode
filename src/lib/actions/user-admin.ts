@@ -68,7 +68,7 @@ export async function setUserRole(formData: FormData): Promise<UserAdminResult> 
     action: "UPDATE",
     before_data: { role: target.role },
     after_data: { role },
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "long_audit",
   });
 
@@ -119,7 +119,7 @@ export async function setUserBanned(
     action: "UPDATE",
     before_data: { is_banned: target.is_banned },
     after_data: { is_banned, reason: reason || null },
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "long_audit",
   });
 
@@ -168,7 +168,7 @@ export async function setUserNotifications(
     action: "UPDATE",
     before_data: { is_notification_enabled: target.is_notification_enabled },
     after_data: { is_notification_enabled },
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "normal",
   });
 
@@ -216,7 +216,7 @@ export async function setUserCanCreateEvents(
     action: "UPDATE",
     before_data: { can_create_events: target.can_create_events },
     after_data: { can_create_events },
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "long_audit",
   });
 
@@ -276,7 +276,7 @@ export async function refreshXUserIcon(
     record_id: xUserId,
     action: "UPDATE",
     after_data: { icon_url: newIcon, source: "videos_latest" },
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "normal",
   });
 

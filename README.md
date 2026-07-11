@@ -1,5 +1,10 @@
 # FlameNode
 
+> Status: Active
+> Last verified: 2026-07-11
+> Verified against commit: `5f48e0f` + working tree
+> Source of truth: `src/lib/db/schema.ts`, `migrations/0000_flame_node_baseline.sql`, `docs/README.md`
+
 > 映像（フレーム）の結節点（ノード）。YouTube 埋め込みを利用した動画プラットフォーム。
 
 イベント参加手続き、スロット確保、投稿審査、振り返り上映、第三者イベント開催を一体で扱う、Cloudflare ネイティブな動画アーカイブサイトです。
@@ -8,6 +13,7 @@
 - ローカル動作手順: [`LOCAL.md`](./LOCAL.md) / デプロイ手順: [`DEPLOY.md`](./DEPLOY.md)
 - 運用手順: [`docs/operations.md`](./docs/operations.md) / 実装状況・残タスク: [`docs/implementation-backlog.md`](./docs/implementation-backlog.md)
 - AI エージェント向けガイド: [`AGENTS.md`](./AGENTS.md)
+- 現行文書の索引: [`docs/README.md`](./docs/README.md)
 
 ## 技術スタック
 

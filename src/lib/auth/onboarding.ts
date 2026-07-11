@@ -79,7 +79,7 @@ export async function getOnboardingState(
     const linkedRows = await db
       .select({ approval_status: xUsers.approval_status })
       .from(xUsers)
-      .where(eq(xUsers.linked_discord_user_id, user.id));
+      .where(eq(xUsers.linked_user_id, user.id));
     hasLinkedXId = linkedRows.length > 0;
     hasPendingLinkedXId = linkedRows.some((row) => row.approval_status === "pending");
 
@@ -88,7 +88,7 @@ export async function getOnboardingState(
       .from(xAccountLinkRequests)
       .where(
         and(
-          eq(xAccountLinkRequests.discord_user_id, user.id),
+          eq(xAccountLinkRequests.user_id, user.id),
           eq(xAccountLinkRequests.status, "pending"),
         )!,
       );

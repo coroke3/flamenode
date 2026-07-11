@@ -36,7 +36,7 @@ export default async function ManageXLinkRequestsPage(): Promise<React.ReactElem
     .select({
       id: xAccountLinkRequests.id,
       requested_x_id: xAccountLinkRequests.requested_x_id,
-      discord_user_id: xAccountLinkRequests.discord_user_id,
+      user_id: xAccountLinkRequests.user_id,
       discord_name: users.name,
       discord_image: users.image,
       requested_at: xAccountLinkRequests.requested_at,
@@ -80,7 +80,7 @@ export default async function ManageXLinkRequestsPage(): Promise<React.ReactElem
       )`,
     })
     .from(xAccountLinkRequests)
-    .leftJoin(users, eq(users.id, xAccountLinkRequests.discord_user_id))
+    .leftJoin(users, eq(users.id, xAccountLinkRequests.user_id))
     .where(
       and(
         eq(xAccountLinkRequests.status, "pending"),

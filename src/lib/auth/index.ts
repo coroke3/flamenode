@@ -8,42 +8,6 @@ import { accounts, sessions, users, verificationTokens } from "@/lib/db/schema";
 
 const LOCAL_DEV_AUTH_SECRET = "flamenode-local-development-auth-secret";
 
-function loadLocalDevVarsIfNeeded(): void {
-  if (process.env.NODE_ENV === "production") return;
-  if (process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET) return;
-
-  try {
-    const req = eval("require") as NodeRequire;
-    const fs = req("node:fs") as typeof import("node:fs");
-    const path = req("node:path") as typeof import("node:path");
-    const file = path.join(process.cwd(), ".dev.vars");
-    if (!fs.existsSync(file)) return;
-
-    const content = fs.readFileSync(file, "utf8");
-    for (const raw of content.split(/\r?\n/)) {
-      const line = raw.trim();
-      if (!line || line.startsWith("#")) continue;
-      const eq = line.indexOf("=");
-      if (eq <= 0) continue;
-      const key = line.slice(0, eq).trim();
-      let value = line.slice(eq + 1).trim();
-      if (
-        (value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'"))
-      ) {
-        value = value.slice(1, -1);
-      }
-      if (process.env[key] === undefined || process.env[key] === "") {
-        process.env[key] = value;
-      }
-    }
-  } catch {
-    // The package script already preloads .dev.vars; this is only a fallback.
-  }
-}
-
-loadLocalDevVarsIfNeeded();
-
 function ensureAuthSecretEnv(): void {
   if (process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET) return;
   if (process.env.NODE_ENV !== "production") {
@@ -64,14 +28,18 @@ function ensureAuthBaseUrlEnv(): void {
   const vercel = process.env.VERCEL_URL?.trim();
   const fromVercel =
     vercel && !/^https?:\/\//i.test(vercel) ? `https://${vercel}` : vercel;
-  const candidate = (fromPublic || fromVercel || "http://localhost:3000").trim();
+  const candidate = (fromPublic || fromVercel || "").trim();
+  if (!candidate) {
+    throw new Error(
+      "AUTH_URL または NEXT_PUBLIC_SITE_URL を明示してください。Hostヘッダーやlocalhostへの暗黙fallbackは使用しません。",
+    );
+  }
   try {
     const origin = new URL(candidate).origin;
     process.env.AUTH_URL = origin;
     process.env.NEXTAUTH_URL = origin;
   } catch {
-    process.env.AUTH_URL = "http://localhost:3000";
-    process.env.NEXTAUTH_URL = "http://localhost:3000";
+    throw new Error("AUTH_URL / NEXT_PUBLIC_SITE_URL のoriginが不正です。");
   }
 }
 
@@ -92,6 +60,9 @@ export async function buildAuthConfig(): Promise<NextAuthConfig> {
   await waitForLocalBindings();
   const env = getEnv();
   const db = await getDatabaseAsync();
+  if (!db) {
+    throw new Error("AUTH_DATABASE_UNAVAILABLE");
+  }
   const authSecret =
     envValue(process.env.AUTH_SECRET) ??
     envValue(process.env.NEXTAUTH_SECRET) ??
@@ -104,8 +75,8 @@ export async function buildAuthConfig(): Promise<NextAuthConfig> {
     envValue(env.AUTH_DISCORD_SECRET);
   const baseConfig: NextAuthConfig = {
     secret: authSecret,
-    trustHost: true,
-    session: { strategy: db ? "database" : "jwt" },
+    trustHost: false,
+    session: { strategy: "database" },
     providers: [
       Discord({
         clientId: discordClientId,
@@ -171,6 +142,7 @@ export async function buildAuthConfig(): Promise<NextAuthConfig> {
           user.id
         ) {
           const eventDb = getDatabase();
+          if (!eventDb) throw new Error("AUTH_DATABASE_UNAVAILABLE");
           await eventDb
             ?.update(users)
             .set({ discord_id: account.providerAccountId })
@@ -189,18 +161,15 @@ export async function buildAuthConfig(): Promise<NextAuthConfig> {
     },
   };
 
-  if (db) {
-    return {
-      ...baseConfig,
-      adapter: DrizzleAdapter(db as never, {
-        usersTable: users as never,
-        accountsTable: accounts as never,
-        sessionsTable: sessions as never,
-        verificationTokensTable: verificationTokens as never,
-      } as never),
-    };
-  }
-  return baseConfig;
+  return {
+    ...baseConfig,
+    adapter: DrizzleAdapter(db as never, {
+      usersTable: users as never,
+      accountsTable: accounts as never,
+      sessionsTable: sessions as never,
+      verificationTokensTable: verificationTokens as never,
+    } as never),
+  };
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth(async () =>

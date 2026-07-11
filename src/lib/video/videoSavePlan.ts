@@ -256,7 +256,7 @@ export async function writeVideoAudit(db: DB, plan: VideoSavePlan): Promise<void
       allow_submitter_change: plan.allowSubmitterChange,
       ...plan.auditAfter,
     }),
-    operator_discord_id: plan.operatorUserId,
+    operator_user_id: plan.operatorUserId,
     retention_class: "normal",
   });
 }

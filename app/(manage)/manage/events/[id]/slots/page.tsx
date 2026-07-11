@@ -81,7 +81,7 @@ export default async function ManageEventSlotsPage({
       status: slotsTable.status,
       display_name: slotsTable.display_name,
       x_user_id: slotsTable.x_user_id,
-      discord_user_id: slotsTable.discord_user_id,
+      reserved_by_user_id: slotsTable.reserved_by_user_id,
       reservation_group_id: slotsTable.reservation_group_id,
       video_id: slotsTable.video_id,
     })

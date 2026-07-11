@@ -18,10 +18,15 @@ const baseUrl = process.argv[2] ?? "http://localhost:3000";
 /** publicDto.ts の FORBIDDEN_PUBLIC_KEYS と同内容。 */
 const FORBIDDEN_KEYS = new Set([
   // 個人特定 ID
-  "submitted_by_discord_user_id",
-  "discord_user_id",
+  "submitted_by_user_id",
+  "user_id",
+  "actor_user_id",
+  "operator_user_id",
+  "approved_by_user_id",
+  "recipient_user_id",
+  "reserved_by_user_id",
   "discord_id",
-  "linked_discord_user_id",
+  "linked_user_id",
   "active_x_user_id",
   "creator_x_user_id",
   // 認証関連

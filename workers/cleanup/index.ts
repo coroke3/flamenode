@@ -10,48 +10,62 @@ import {
   CLEANUP_MAX_RETRIES,
   HISTORY_NORMAL_DAYS_DEFAULT,
   HISTORY_LONG_AUDIT_DAYS_DEFAULT,
+  AUDIT_CLEANUP_BATCH_LIMIT,
   type RetentionDays,
 } from "./retention.ts";
+import { logWorkerJob, safeErrorSummary } from "../shared/safeLog.ts";
 
 export interface Env {
   DB: D1Database;
 }
 
-export default {
-  async scheduled(_evt: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(runCleanupWithRetry(env));
-  },
-  async fetch(): Promise<Response> {
-    return new Response("FlameNode cleanup", { status: 200 });
-  },
-};
-
 /**
  * runCleanup を最大 CLEANUP_MAX_RETRIES 回まで即時リトライする。
  */
-export async function runCleanupWithRetry(env: Env): Promise<void> {
+export async function runCleanupWithRetry(
+  env: Env,
+): Promise<{ processed: number; failed: number }> {
+  const startedMs = Date.now();
+  const runId = crypto.randomUUID();
   let attempt = 0;
   let lastError: unknown = null;
   while (attempt < CLEANUP_MAX_RETRIES) {
     try {
       await runCleanup(env);
-      return;
+      return { processed: 1, failed: 0 };
     } catch (e) {
       attempt += 1;
       lastError = e;
       const decision = shouldRetryCleanupError(attempt, e);
-      console.error(
-        `[cleanup] attempt=${attempt} failed (${decision.reason}):`,
-        e,
-      );
+      logWorkerJob({
+        worker: "content-jobs",
+        job: "cleanup-retry",
+        run_id: runId,
+        started_at: new Date(startedMs).toISOString(),
+        processed: 0,
+        skipped: 0,
+        failed: 1,
+        duration_ms: Date.now() - startedMs,
+        result: "failed",
+        error: `${decision.reason}:${safeErrorSummary(e)}`,
+      });
       if (!decision.shouldRetry) break;
       await new Promise((r) => setTimeout(r, 100 * attempt));
     }
   }
-  console.error(
-    `[cleanup] gave up after ${attempt} attempt(s). last_error=`,
-    lastError,
-  );
+  logWorkerJob({
+    worker: "content-jobs",
+    job: "cleanup-give-up",
+    run_id: runId,
+    started_at: new Date(startedMs).toISOString(),
+    processed: 0,
+    skipped: 0,
+    failed: 1,
+    duration_ms: Date.now() - startedMs,
+    result: "failed",
+    error: safeErrorSummary(lastError),
+  });
+  return { processed: 0, failed: 1 };
 }
 
 export async function readHistoryRetentionDays(env: Env): Promise<RetentionDays> {
@@ -78,28 +92,29 @@ export async function runCleanup(env: Env): Promise<void> {
   await env.DB.prepare(
     `UPDATE slots
      SET priority_reclaim_until = NULL, updated_at = ?1
-     WHERE priority_reclaim_until IS NOT NULL AND priority_reclaim_until < ?1`,
+     WHERE priority_reclaim_until IS NOT NULL AND priority_reclaim_until < ?1
+     LIMIT ?2`,
   )
-    .bind(now)
+    .bind(now, AUDIT_CLEANUP_BATCH_LIMIT)
     .run();
 
   await env.DB.prepare(
     `DELETE FROM notification_outbox
-     WHERE status = 'sent' AND created_at IS NOT NULL AND created_at < ?1`,
+     WHERE status = 'sent' AND created_at IS NOT NULL AND created_at < ?1
+     LIMIT ?2`,
   )
-    .bind(sentCutoff)
+    .bind(sentCutoff, AUDIT_CLEANUP_BATCH_LIMIT)
     .run();
 
   await env.DB.prepare(
     `DELETE FROM notification_outbox
-     WHERE status = 'failed' AND created_at IS NOT NULL AND created_at < ?1`,
+     WHERE status IN ('failed', 'dead_letter') AND created_at IS NOT NULL AND created_at < ?1
+     LIMIT ?2`,
   )
-    .bind(failedCutoff)
+    .bind(failedCutoff, AUDIT_CLEANUP_BATCH_LIMIT)
     .run();
 
   // audit_logs: 新正本 — expires_at インデックスを使い小分け削除
-  const { AUDIT_CLEANUP_BATCH_LIMIT } = await import("./retention.ts");
-
   const expiredMark = await env.DB.prepare(
     `UPDATE audit_logs
      SET restore_status = 'expired'

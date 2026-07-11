@@ -149,7 +149,7 @@ export async function createEventGroup(
     record_id: id,
     action: "CREATE",
     after_data: { name: d.name, slug: d.slug },
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "normal",
   });
 
@@ -221,7 +221,7 @@ export async function updateEventGroup(
     action: "UPDATE",
     before_data: { name: existing.name, slug: existing.slug },
     after_data: { name: d.name, slug: d.slug },
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "normal",
   });
 
@@ -271,7 +271,7 @@ export async function deleteEventGroup(
     record_id: id,
     action: "DELETE",
     before_data: { name: existing.name, slug: existing.slug },
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "normal",
   });
 

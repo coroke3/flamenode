@@ -84,7 +84,7 @@ export async function createAnnouncement(
     record_id: id,
     action: "CREATE",
     after_data: { title: d.title, is_published: d.is_published },
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "normal",
   });
 
@@ -127,7 +127,7 @@ export async function updateAnnouncement(
     record_id: d.id,
     action: "UPDATE",
     after_data: { title: d.title, is_published: d.is_published },
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "normal",
   });
 
@@ -151,7 +151,7 @@ export async function deleteAnnouncement(
     table_name: "announcements",
     record_id: id,
     action: "DELETE",
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "long_audit",
   });
   revalidatePath("/admin/announcements");
@@ -178,7 +178,7 @@ export async function setAnnouncementPublished(
     record_id: id,
     action: "UPDATE",
     after_data: { is_published: next },
-    operator_discord_id: guard.userId,
+    operator_user_id: guard.userId,
     retention_class: "normal",
   });
   revalidatePath("/admin/announcements");

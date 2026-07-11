@@ -47,7 +47,7 @@ export default async function AdminXLinkRequestsPage({
         .select({
           id: xAccountLinkRequests.id,
           requested_x_id: xAccountLinkRequests.requested_x_id,
-          discord_user_id: xAccountLinkRequests.discord_user_id,
+          user_id: xAccountLinkRequests.user_id,
           discord_name: users.name,
           discord_image: users.image,
           requested_at: xAccountLinkRequests.requested_at,
@@ -91,7 +91,7 @@ export default async function AdminXLinkRequestsPage({
           )`,
         })
         .from(xAccountLinkRequests)
-        .leftJoin(users, eq(users.id, xAccountLinkRequests.discord_user_id))
+        .leftJoin(users, eq(users.id, xAccountLinkRequests.user_id))
         .where(pendingWhere)
         .orderBy(desc(xAccountLinkRequests.requested_at))
     : [];
@@ -102,7 +102,7 @@ export default async function AdminXLinkRequestsPage({
         .select({
           id: xAccountLinkRequests.id,
           requested_x_id: xAccountLinkRequests.requested_x_id,
-          discord_user_id: xAccountLinkRequests.discord_user_id,
+          user_id: xAccountLinkRequests.user_id,
           link_type: xAccountLinkRequests.link_type,
           requested_at: xAccountLinkRequests.requested_at,
         })
@@ -197,7 +197,7 @@ export default async function AdminXLinkRequestsPage({
                     <span className="fn-badge fn-badge-soft">{r.link_type ?? "new"}</span>
                   </td>
                   <td style={{ fontFamily: "monospace", fontSize: 11 }}>
-                    {r.discord_user_id}
+                    {r.user_id}
                   </td>
                   <td className="fn-muted">
                     {formatRelative(r.requested_at)}

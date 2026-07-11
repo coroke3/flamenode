@@ -123,7 +123,7 @@ export async function createFreeVideo(
   try {
     await db.insert(videos).values({
       id,
-      submitted_by_discord_user_id: userId,
+      submitted_by_user_id: userId,
       creator_x_user_id: activeX || null,
       collaboration_type: parsed.data.is_collab ? "collab" : "individual",
       source_type: "youtube",
@@ -195,7 +195,7 @@ export async function createFreeVideo(
     record_id: id,
     action: "CREATE",
     after_data: JSON.stringify({ title: parsed.data.title, youtube_video_id: youtubeId }),
-    operator_discord_id: userId,
+    operator_user_id: userId,
     retention_class: "normal",
   });
 
@@ -213,7 +213,7 @@ export async function createFreeVideo(
 
   if (shouldEnqueueUserNotification()) {
     await enqueueNotification(db, {
-      discordUserId: userId,
+      recipientUserId: userId,
       type: "video_submitted",
       dedupeKey: `video_submitted:${id}`,
       payload: buildFreeVideoSubmittedNotification({

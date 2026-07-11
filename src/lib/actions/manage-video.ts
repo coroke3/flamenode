@@ -93,7 +93,7 @@ export async function setManageVideoStatus(
     action: "UPDATE",
     before_data: { visibility_status: prevStatus },
     after_data: { visibility_status: status, reason: reason || null, event_id: eventId, scope: "manage" },
-    operator_discord_id: u.id,
+    operator_user_id: u.id,
     retention_class: "normal",
   });
 
@@ -104,7 +104,7 @@ export async function setManageVideoStatus(
     prevStatus,
     nextStatus: status,
     reason: reason || null,
-    discordUserId: target.submitted_by_discord_user_id,
+    recipientUserId: target.submitted_by_user_id,
     eventId,
   });
 

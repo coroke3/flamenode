@@ -36,7 +36,7 @@ async function notifyVideoSubmitter(
   db: ReturnType<typeof getDatabase>,
   target: {
     title: string;
-    submitted_by_discord_user_id: string | null;
+    submitted_by_user_id: string | null;
     primary_event_id: string | null;
   } | null,
   input: {
@@ -45,9 +45,9 @@ async function notifyVideoSubmitter(
     payload: Record<string, unknown>;
   },
 ): Promise<void> {
-  if (!db || !target?.submitted_by_discord_user_id) return;
+  if (!db || !target?.submitted_by_user_id) return;
   await enqueueNotification(db, {
-    discordUserId: target.submitted_by_discord_user_id,
+    recipientUserId: target.submitted_by_user_id,
     type: input.type,
     payload: {
       content: input.content,
@@ -96,7 +96,7 @@ export async function createModerationCase(
         id: videos.id,
         title: videos.title,
         visibility_status: videos.visibility_status,
-        submitted_by_discord_user_id: videos.submitted_by_discord_user_id,
+        submitted_by_user_id: videos.submitted_by_user_id,
         primary_event_id: videos.primary_event_id,
         youtube_video_id: videos.youtube_video_id,
       })
@@ -143,7 +143,7 @@ export async function createModerationCase(
         moderation_case_id: id,
         case_type: caseType,
       },
-      operator_discord_id: u.id,
+      operator_user_id: u.id,
       retention_class: nextVideoStatus === "voided" ? "long_audit" : "normal",
     });
   }
@@ -162,7 +162,7 @@ export async function createModerationCase(
       related_x_user_id: relatedXUserId,
       video_status: videoStatusChanged,
     },
-    operator_discord_id: u.id,
+    operator_user_id: u.id,
     retention_class: "long_audit",
   });
 
@@ -230,7 +230,7 @@ export async function updateModerationCaseStatus(
         id: videos.id,
         title: videos.title,
         visibility_status: videos.visibility_status,
-        submitted_by_discord_user_id: videos.submitted_by_discord_user_id,
+        submitted_by_user_id: videos.submitted_by_user_id,
         primary_event_id: videos.primary_event_id,
         youtube_video_id: videos.youtube_video_id,
       })
@@ -271,7 +271,7 @@ export async function updateModerationCaseStatus(
         moderation_case_id: id,
         case_status: status,
       }),
-      operator_discord_id: u.id,
+      operator_user_id: u.id,
       retention_class: nextVideoStatus === "voided" ? "long_audit" : "normal",
     });
   }
@@ -286,7 +286,7 @@ export async function updateModerationCaseStatus(
       note: note || null,
       video_status: videoStatusChanged,
     }),
-    operator_discord_id: u.id,
+    operator_user_id: u.id,
     retention_class: "long_audit",
   });
 

@@ -14,19 +14,27 @@ export const BLOCKED_TABLES = new Set([
   "verificationToken",
 ]);
 
-/** 値をリダクトするフィールド名 (完全一致) */
+/** 値をリダクトするフィールド名 (完全一致・小文字化して照合) */
 const REDACT_FIELDS = new Set([
   "access_token",
   "refresh_token",
   "id_token",
-  "sessionToken",
+  "sessiontoken",
+  "session_token",
+  "session",
   "verification_token",
   "token",
   "secret",
   "password",
+  "authorization",
+  "cookie",
+  "credential",
+  "credentials",
+  "api_key",
+  "apikey",
 ]);
 
-const REDACTED_MARKER = "[REDACTED]";
+export const REDACTED_MARKER = "[REDACTED]";
 
 /** フィールド値の文字列化後の最大長 (デフォルト) */
 export const DEFAULT_MAX_FIELD_LENGTH = 2000;
@@ -46,36 +54,45 @@ export function sanitizeForAudit(
   maxFieldLength = DEFAULT_MAX_FIELD_LENGTH,
 ): Record<string, unknown> | null {
   if (obj == null) return null;
+  return sanitizeObject(obj, maxFieldLength);
+}
 
+function mustRedact(key: string): boolean {
+  const normalized = key.trim().toLowerCase();
+  return (
+    REDACT_FIELDS.has(normalized) ||
+    /(?:^|[_-])(?:token|secret|password|credential|authorization|cookie|api[_-]?key)(?:$|[_-])/i.test(
+      normalized,
+    )
+  );
+}
+
+function sanitizeValue(value: unknown, maxFieldLength: number): unknown {
+  if (typeof value === "string") {
+    return value.length > maxFieldLength
+      ? value.slice(0, maxFieldLength) + "…[truncated]"
+      : value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeValue(item, maxFieldLength));
+  }
+  if (value !== null && typeof value === "object") {
+    return sanitizeObject(value as Record<string, unknown>, maxFieldLength);
+  }
+  return value;
+}
+
+function sanitizeObject(
+  obj: Record<string, unknown>,
+  maxFieldLength: number,
+): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) {
     if (value === undefined) continue;
-
-    if (REDACT_FIELDS.has(key)) {
-      result[key] = REDACTED_MARKER;
-      continue;
-    }
-
-    if (typeof value === "string") {
-      result[key] =
-        value.length > maxFieldLength
-          ? value.slice(0, maxFieldLength) + "…[truncated]"
-          : value;
-      continue;
-    }
-
-    if (value !== null && typeof value === "object") {
-      // ネストされたオブジェクトも再帰的にサニタイズ
-      result[key] = sanitizeForAudit(
-        value as Record<string, unknown>,
-        maxFieldLength,
-      );
-      continue;
-    }
-
-    result[key] = value;
+    result[key] = mustRedact(key)
+      ? REDACTED_MARKER
+      : sanitizeValue(value, maxFieldLength);
   }
-
   return result;
 }
 

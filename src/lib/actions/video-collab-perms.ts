@@ -25,7 +25,7 @@ import { buildVideoEditPermissionGrantedNotification } from "@/lib/notifications
  *   - 粒度は can_edit ON/OFF のみ。範囲は COLLABORATOR_VIDEO_EDIT_KEYS で制限される。
  *   - 操作者は `video.identity` 権限を持つ必要がある (作者本人 / admin / event
  *     identity 権限保持者)。
- *   - subject は X ID (連携前でも先付与可) または discord_user_id で指定。
+ *   - subject は X ID (連携前でも先付与可) または user_id で指定。
  *   - 既存の表示メンバーに subject が含まれていれば、その行に can_edit を立てる。
  *     含まれていなければ非公開メンバー (is_public_member = 0) として新規追加。
  *   - 監査ログは history_logs に retention_class=long_audit で記録。
@@ -47,7 +47,7 @@ const upsertSchema = z.object({
     .max(32)
     .optional()
     .transform((s) => normalizeXId(s ?? "")),
-  discord_user_id: z.string().trim().max(64).optional().nullable(),
+  user_id: z.string().trim().max(128).optional().nullable(),
   display_name: z.string().trim().min(1).max(80),
   can_edit: z
     .union([z.literal("1"), z.literal("0"), z.literal("true"), z.literal("false")])
@@ -69,7 +69,7 @@ async function loadEditableVideo(
       title: string;
       primary_event_id: string | null;
       creator_x_user_id: string | null;
-      submitted_by_discord_user_id: string | null;
+      submitted_by_user_id: string | null;
     }
   | null
 > {
@@ -80,7 +80,7 @@ async function loadEditableVideo(
         title: videos.title,
         primary_event_id: videos.primary_event_id,
         creator_x_user_id: videos.creator_x_user_id,
-        submitted_by_discord_user_id: videos.submitted_by_discord_user_id,
+        submitted_by_user_id: videos.submitted_by_user_id,
       })
       .from(videos)
       .where(eq(videos.id, videoId))
@@ -97,12 +97,12 @@ async function loadEditableVideo(
   return row;
 }
 
-/** 既存の video_members 行を「同じ subject (x_user_id or discord_user_id)」で検索する。 */
+/** 既存の video_members 行を「同じ subject (x_user_id or user_id)」で検索する。 */
 async function findMemberRowForSubject(
   db: NonNullable<ReturnType<typeof getDatabase>>,
   videoId: string,
   xUserId: string | null,
-  discordUserId: string | null,
+  userId: string | null,
 ): Promise<typeof videoMembers.$inferSelect | null> {
   if (xUserId) {
     const rows = await db
@@ -118,14 +118,14 @@ async function findMemberRowForSubject(
       .limit(1);
     if (rows[0]) return rows[0];
   }
-  if (discordUserId) {
+  if (userId) {
     const rows = await db
       .select()
       .from(videoMembers)
       .where(
         and(
           eq(videoMembers.video_id, videoId),
-          eq(videoMembers.discord_user_id, discordUserId),
+          eq(videoMembers.user_id, userId),
         )!,
       )
       .limit(1);
@@ -134,16 +134,16 @@ async function findMemberRowForSubject(
   return null;
 }
 
-async function resolveSubjectDiscordRecipient(
+async function resolveSubjectRecipientUserId(
   db: NonNullable<ReturnType<typeof getDatabase>>,
   xUserId: string | null,
-  discordUserId: string | null,
+  userId: string | null,
 ): Promise<string | null> {
-  if (discordUserId?.trim()) return discordUserId.trim();
+  if (userId?.trim()) return userId.trim();
   if (!xUserId) return null;
   const xRow = (
     await db
-      .select({ linked: xUsers.linked_discord_user_id })
+      .select({ linked: xUsers.linked_user_id })
       .from(xUsers)
       .where(eq(xUsers.id, xUserId))
       .limit(1)
@@ -155,7 +155,7 @@ async function resolveSubjectDiscordRecipient(
  * 共同編集者の権限を upsert する。
  *
  * - 既存の video_members 行が同じ subject にあれば、その行の can_edit と
- *   表示名・discord_user_id・edit_* タイムスタンプを更新する。
+ *   表示名・user_id・edit_* タイムスタンプを更新する。
  * - 無ければ新規 video_members 行を **is_public_member = 0** で追加 (非公開編集者)。
  */
 export async function upsertVideoCollaborator(
@@ -173,11 +173,11 @@ export async function upsertVideoCollaborator(
     };
   }
   const xUserId = parsed.data.x_user_id || null;
-  const discordUserId = parsed.data.discord_user_id?.trim() || null;
-  if (!xUserId && !discordUserId) {
+  const subjectUserId = parsed.data.user_id?.trim() || null;
+  if (!xUserId && !subjectUserId) {
     return {
       ok: false,
-      message: "X ID か Discord User ID のいずれかを指定してください。",
+      message: "X ID かユーザー ID のいずれかを指定してください。",
     };
   }
 
@@ -199,7 +199,7 @@ export async function upsertVideoCollaborator(
     db,
     video.id,
     xUserId,
-    discordUserId,
+    subjectUserId,
   );
 
   // X ID 指定があれば xUsers に pending で先行作成 (UI で「未承認 X ID への先付与」)
@@ -223,7 +223,7 @@ export async function upsertVideoCollaborator(
       .set({
         name: parsed.data.display_name,
         can_edit: canEditValue,
-        discord_user_id: discordUserId ?? existing.discord_user_id ?? null,
+        user_id: subjectUserId ?? existing.user_id ?? null,
         edit_granted_by_user_id:
           canEditValue === 1 ? user.id : existing.edit_granted_by_user_id,
         edit_granted_at:
@@ -239,7 +239,7 @@ export async function upsertVideoCollaborator(
       id: generateId("vm"),
       video_id: video.id,
       x_user_id: xUserId,
-      discord_user_id: discordUserId,
+      user_id: subjectUserId,
       name: parsed.data.display_name,
       role: null,
       comment: null,
@@ -265,12 +265,12 @@ export async function upsertVideoCollaborator(
         })
       : null,
     after_data: JSON.stringify({
-      subject: xUserId ? `x:${xUserId}` : `discord:${discordUserId}`,
+      subject: xUserId ? `x:${xUserId}` : `user:${subjectUserId}`,
       display_name: parsed.data.display_name,
       can_edit: canEditValue,
       is_public_member: existing?.is_public_member ?? 0,
     }),
-    operator_discord_id: user.id,
+    operator_user_id: user.id,
     retention_class: "long_audit",
   });
 
@@ -282,24 +282,24 @@ export async function upsertVideoCollaborator(
     shouldEnqueueUserNotification()
   ) {
     const savedMember = (
-      await findMemberRowForSubject(db, video.id, xUserId, discordUserId)
+      await findMemberRowForSubject(db, video.id, xUserId, subjectUserId)
     );
-    const subjectDiscord =
-      savedMember?.discord_user_id?.trim() ||
-      (await resolveSubjectDiscordRecipient(
+    const recipientUserId =
+      savedMember?.user_id?.trim() ||
+      (await resolveSubjectRecipientUserId(
         db,
         savedMember?.x_user_id ?? xUserId,
-        discordUserId,
+        subjectUserId,
       ));
     const subjectX = savedMember?.x_user_id ?? xUserId;
     const dedupeSubject = subjectX
       ? `x:${subjectX}`
-      : subjectDiscord
-        ? `discord:${subjectDiscord}`
+      : recipientUserId
+        ? `user:${recipientUserId}`
         : null;
-    if (subjectDiscord && subjectDiscord !== user.id && dedupeSubject) {
+    if (recipientUserId && recipientUserId !== user.id && dedupeSubject) {
       await enqueueNotification(db, {
-        discordUserId: subjectDiscord,
+        recipientUserId,
         type: "video_edit_permission_granted",
         dedupeKey: `video_edit_permission_granted:${video.id}:${dedupeSubject}`,
         payload: buildVideoEditPermissionGrantedNotification({
@@ -337,10 +337,9 @@ export async function deleteVideoCollaborator(
 
   const videoId = String(formData.get("video_id") ?? "").trim();
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
-  const discordUserId =
-    String(formData.get("discord_user_id") ?? "").trim() || null;
+  const subjectUserId = String(formData.get("user_id") ?? "").trim() || null;
   if (!videoId) return { ok: false, message: "video_id がありません。" };
-  if (!xUserId && !discordUserId) {
+  if (!xUserId && !subjectUserId) {
     return { ok: false, message: "対象 subject が指定されていません。" };
   }
 
@@ -359,7 +358,7 @@ export async function deleteVideoCollaborator(
     db,
     video.id,
     xUserId || null,
-    discordUserId,
+    subjectUserId,
   );
   if (!existing) {
     return { ok: true, message: "該当する権限行はすでにありません。" };
@@ -390,10 +389,10 @@ export async function deleteVideoCollaborator(
       is_public_member: existing.is_public_member,
     }),
     after_data: JSON.stringify({
-      subject: xUserId ? `x:${xUserId}` : `discord:${discordUserId}`,
+      subject: xUserId ? `x:${xUserId}` : `user:${subjectUserId}`,
       action: "revoke_can_edit",
     }),
-    operator_discord_id: user.id,
+    operator_user_id: user.id,
     retention_class: "long_audit",
   });
 

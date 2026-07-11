@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  check,
   index,
   integer,
   primaryKey,
@@ -100,11 +101,14 @@ export const xUsers = sqliteTable("x_users", {
   youtube_channel_url: text("youtube_channel_url"),
   other_social_links: text("other_social_links"), // JSON
   creative_start_date: integer("creative_start_date"),
-  linked_discord_user_id: text("linked_discord_user_id"),
+  /** 所有者のAuth.js内部ユーザーID。Discord Snowflakeではない。 */
+  linked_user_id: text("linked_user_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
   verification_token: text("verification_token"),
   token_expires_at: integer("token_expires_at"),
   approval_status: text("approval_status", {
-    enum: ["pending", "approved", "rejected", "imported"],
+    enum: ["pending", "approved", "rejected"],
   }).default("pending"),
   approval_requested_at: integer("approval_requested_at"),
 });
@@ -120,7 +124,9 @@ export const xUserAliases = sqliteTable(
 
 export const xAccountLinkRequests = sqliteTable("x_account_link_requests", {
   id: text("id").primaryKey(),
-  discord_user_id: text("discord_user_id").notNull(),
+  user_id: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
   requested_x_id: text("requested_x_id").notNull(),
   link_type: text("link_type", { enum: ["new", "merge", "alias"] }).notNull(),
   target_x_user_id: text("target_x_user_id"),
@@ -357,9 +363,16 @@ export const eventStaff = sqliteTable(
   "event_staff",
   {
     id: text("id").primaryKey(),
-    event_id: text("event_id").notNull(),
-    x_user_id: text("x_user_id"),
-    discord_user_id: text("discord_user_id"),
+    event_id: text("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    x_user_id: text("x_user_id").references(() => xUsers.id, {
+      onDelete: "set null",
+    }),
+    /** 権限・監査主体に使うAuth.js内部ユーザーID。 */
+    user_id: text("user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
     display_name: text("display_name").notNull(),
     role: text("role", { enum: ["representative", "editor", "staff"] })
       .notNull()
@@ -382,7 +395,10 @@ export const eventStaff = sqliteTable(
     is_public: integer("is_public").notNull().default(0),
     public_role_label: text("public_role_label"),
     internal_note: text("internal_note"),
-    approved_by_user_id: text("approved_by_user_id"),
+    approved_by_user_id: text("approved_by_user_id").references(
+      () => users.id,
+      { onDelete: "set null" },
+    ),
     approved_at: integer("approved_at"),
     created_at: integer("created_at")
       .notNull()
@@ -396,24 +412,39 @@ export const eventStaff = sqliteTable(
       t.event_id,
       t.x_user_id,
     ),
-    eventDiscordUniq: uniqueIndex("event_staff_event_discord_uniq").on(
+    eventUserUniq: uniqueIndex("event_staff_event_user_uniq").on(
       t.event_id,
-      t.discord_user_id,
+      t.user_id,
     ),
     byEvent: index("event_staff_event_idx").on(t.event_id),
+    ownerLookup: index("event_staff_event_preset_idx").on(
+      t.event_id,
+      t.permission_preset,
+    ),
     publicIdx: index("event_staff_public_idx").on(
       t.event_id,
       t.is_public,
       t.display_name,
+    ),
+    subjectRequired: check(
+      "event_staff_subject_required",
+      sql`${t.user_id} IS NOT NULL OR ${t.x_user_id} IS NOT NULL`,
     ),
   }),
 );
 
 export const slots = sqliteTable("slots", {
   id: text("id").primaryKey(),
-  event_id: text("event_id").notNull(),
-  discord_user_id: text("discord_user_id"),
-  x_user_id: text("x_user_id"),
+  event_id: text("event_id")
+    .notNull()
+    .references(() => events.id, { onDelete: "cascade" }),
+  reserved_by_user_id: text("reserved_by_user_id").references(
+    () => users.id,
+    { onDelete: "set null" },
+  ),
+  x_user_id: text("x_user_id").references(() => xUsers.id, {
+    onDelete: "set null",
+  }),
   display_name: text("display_name"),
   slot_kind: text("slot_kind", { enum: ["time", "count"] }).default("time"),
   slot_label: text("slot_label"),
@@ -431,6 +462,7 @@ export const slots = sqliteTable("slots", {
   updated_at: integer("updated_at")
     .notNull()
     .default(sql`(unixepoch())`),
+  version: integer("version").notNull().default(1),
 }, (t) => ({
   byEvent: index("slots_event_idx").on(t.event_id, t.start_time),
   byVideo: index("slots_video_idx").on(t.video_id),
@@ -444,8 +476,12 @@ export const videos = sqliteTable("videos", {
   id: text("id").primaryKey(),
   // identity / owner
   primary_event_id: text("primary_event_id"),
-  creator_x_user_id: text("creator_x_user_id"),
-  submitted_by_discord_user_id: text("submitted_by_discord_user_id").notNull(),
+  creator_x_user_id: text("creator_x_user_id").references(() => xUsers.id, {
+    onDelete: "set null",
+  }),
+  submitted_by_user_id: text("submitted_by_user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "restrict" }),
   // classification
   collaboration_type: text("collaboration_type", {
     enum: ["individual", "collab"],
@@ -485,7 +521,6 @@ export const videos = sqliteTable("videos", {
       "public",
       "limited",
       "private",
-      "hidden",
       "archived",
       "voided",
     ],
@@ -500,7 +535,6 @@ export const videos = sqliteTable("videos", {
   /** 表示クエリ向けの統計正本。 */
   app_like_count: integer("app_like_count").notNull().default(0),
   score: real("score").notNull().default(0),
-  trending_view_count_24h: integer("trending_view_count_24h").notNull().default(0),
   score_updated_at: integer("score_updated_at"),
   // timestamps
   created_at: integer("created_at")
@@ -513,7 +547,7 @@ export const videos = sqliteTable("videos", {
   visibilityStatusIdx: index("videos_visibility_status_idx").on(t.visibility_status),
   scheduledIdx: index("videos_scheduled_idx").on(t.scheduled_time),
   primaryEventIdx: index("videos_primary_event_idx").on(t.primary_event_id),
-  submittedByIdx: index("videos_submitted_by_idx").on(t.submitted_by_discord_user_id),
+  submittedByIdx: index("videos_submitted_by_idx").on(t.submitted_by_user_id),
   creatorXIdx: index("videos_creator_x_idx").on(t.creator_x_user_id),
   youtubeIdIdx: index("videos_youtube_id_idx").on(t.youtube_video_id),
   // posting/youtube-id-and-active-x:
@@ -530,7 +564,9 @@ export const videos = sqliteTable("videos", {
 }));
 
 export const videoYoutubeMetadata = sqliteTable("video_youtube_metadata", {
-  video_id: text("video_id").primaryKey(),
+  video_id: text("video_id")
+    .primaryKey()
+    .references(() => videos.id, { onDelete: "cascade" }),
   youtube_video_id: text("youtube_video_id"),
   youtube_privacy_status: text("youtube_privacy_status"),
   youtube_availability_status: text("youtube_availability_status"),
@@ -554,7 +590,9 @@ export const videoYoutubeMetadata = sqliteTable("video_youtube_metadata", {
 
 export const videoModerationCases = sqliteTable("video_moderation_cases", {
   id: text("id").primaryKey(),
-  video_id: text("video_id").notNull(),
+  video_id: text("video_id")
+    .notNull()
+    .references(() => videos.id, { onDelete: "cascade" }),
   case_type: text("case_type", {
     enum: ["x_reapply", "void", "duplicate", "rights", "operator"],
   }).notNull(),
@@ -568,9 +606,16 @@ export const videoModerationCases = sqliteTable("video_moderation_cases", {
   due_at: integer("due_at"),
   locked_until: integer("locked_until"),
   attempt_count: integer("attempt_count").notNull().default(0),
-  related_x_user_id: text("related_x_user_id"),
-  created_by_user_id: text("created_by_user_id"),
-  resolved_by_user_id: text("resolved_by_user_id"),
+  related_x_user_id: text("related_x_user_id").references(() => xUsers.id, {
+    onDelete: "set null",
+  }),
+  created_by_user_id: text("created_by_user_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  resolved_by_user_id: text("resolved_by_user_id").references(
+    () => users.id,
+    { onDelete: "set null" },
+  ),
   created_at: integer("created_at").notNull(),
   resolved_at: integer("resolved_at"),
 }, (t) => ({
@@ -584,8 +629,12 @@ export const videoModerationCases = sqliteTable("video_moderation_cases", {
 export const videoEvents = sqliteTable(
   "video_events",
   {
-    video_id: text("video_id").notNull(),
-    event_id: text("event_id").notNull(),
+    video_id: text("video_id")
+      .notNull()
+      .references(() => videos.id, { onDelete: "cascade" }),
+    event_id: text("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.video_id, t.event_id] }),
@@ -600,13 +649,19 @@ export const videoMembers = sqliteTable(
   "video_members",
   {
     id: text("id").primaryKey(),
-    video_id: text("video_id").notNull(),
-    x_user_id: text("x_user_id"),
+    video_id: text("video_id")
+      .notNull()
+      .references(() => videos.id, { onDelete: "cascade" }),
+    x_user_id: text("x_user_id").references(() => xUsers.id, {
+      onDelete: "set null",
+    }),
     name: text("name").notNull(),
     role: text("role"),
     comment: text("comment"),
     order_index: integer("order_index").notNull().default(0),
-    discord_user_id: text("discord_user_id"),
+    user_id: text("user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
     /**
      * 1 = この video_member は作品単位の共同編集者として扱う (can_edit ON)。
      * 範囲は `COLLABORATOR_VIDEO_EDIT_KEYS` で制限される (危険キーは触れない)。
@@ -641,15 +696,19 @@ export const videoMembers = sqliteTable(
       t.video_id,
       t.can_edit,
     ),
-    byDiscord: index("video_members_discord_idx").on(t.discord_user_id),
+    byUser: index("video_members_user_idx").on(t.user_id),
   }),
 );
 
 export const videoSoftwares = sqliteTable(
   "video_softwares",
   {
-    video_id: text("video_id").notNull(),
-    software_id: text("software_id").notNull(),
+    video_id: text("video_id")
+      .notNull()
+      .references(() => videos.id, { onDelete: "cascade" }),
+    software_id: text("software_id")
+      .notNull()
+      .references(() => softwareCatalog.id, { onDelete: "restrict" }),
     raw_label: text("raw_label").notNull(),
     order_index: integer("order_index").notNull().default(0),
   },
@@ -668,8 +727,12 @@ export const videoSoftwares = sqliteTable(
 
 export const videoChapters = sqliteTable("video_chapters", {
   id: text("id").primaryKey(),
-  video_id: text("video_id").notNull(),
-  x_user_id: text("x_user_id").notNull(),
+  video_id: text("video_id")
+    .notNull()
+    .references(() => videos.id, { onDelete: "cascade" }),
+  x_user_id: text("x_user_id")
+    .notNull()
+    .references(() => xUsers.id, { onDelete: "restrict" }),
   chapter_time: real("chapter_time").notNull(),
   chapter_label: text("chapter_label").notNull(),
   note: text("note"),
@@ -731,11 +794,22 @@ export const systemSettings = sqliteTable("system_settings", {
   cost_guard_exception_features_json: text("cost_guard_exception_features_json"),
 });
 
+/** active baselineと実接続先の一致確認用。id='current' の一行だけを保持する。 */
+export const schemaVersion = sqliteTable("flamenode_schema_meta", {
+  id: text("id").primaryKey(),
+  version: text("version").notNull(),
+  applied_at: integer("applied_at")
+    .notNull()
+    .default(sql`(unixepoch())`),
+});
+
 export const xIdMergeRequests = sqliteTable("x_id_merge_requests", {
   id: text("id").primaryKey(),
   from_x_user_id: text("from_x_user_id").notNull(),
   to_x_user_id: text("to_x_user_id").notNull(),
-  requested_by_uid: text("requested_by_uid").notNull(),
+  requested_by_user_id: text("requested_by_user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "restrict" }),
   status: text("status", {
     enum: ["pending", "approved", "rejected", "done"],
   }).default("pending"),
@@ -746,7 +820,9 @@ export const xIdMergeRequests = sqliteTable("x_id_merge_requests", {
 export const xIdMergeReverts = sqliteTable("x_id_merge_reverts", {
   id: text("id").primaryKey(),
   merge_request_id: text("merge_request_id").notNull(),
-  requested_by_uid: text("requested_by_uid").notNull(),
+  requested_by_user_id: text("requested_by_user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "restrict" }),
   status: text("status", {
     enum: ["pending", "approved", "rejected", "done"],
   }).default("pending"),
@@ -760,16 +836,29 @@ export const notificationOutbox = sqliteTable(
   "notification_outbox",
   {
     id: text("id").primaryKey(),
-    discord_user_id: text("discord_user_id").notNull(),
+    /** 配送先のAuth.js内部ユーザーID。送信時だけusers.discord_idへ解決する。 */
+    recipient_user_id: text("recipient_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
     type: text("type").notNull(),
     payload_json: text("payload_json").notNull(),
     status: text("status", {
-      enum: ["pending", "processing", "sent", "failed", "cancelled"],
+      enum: [
+        "pending",
+        "processing",
+        "sent",
+        "failed",
+        "cancelled",
+        "dead_letter",
+      ],
     }).default("pending"),
     attempt_count: integer("attempt_count").default(0),
     processing_started_at: integer("processing_started_at"),
+    lease_token: text("lease_token"),
+    lease_expires_at: integer("lease_expires_at"),
     next_attempt_at: integer("next_attempt_at"),
     last_error: text("last_error"),
+    processed_at: integer("processed_at"),
     /** event-scoped 通知 (運営者受信箱用)。null は全体通知。 */
     event_id: text("event_id"),
     /** 同一通知の重複 enqueue 防止 (pending/processing/sent で unique) */
@@ -787,6 +876,10 @@ export const notificationOutbox = sqliteTable(
     byProcessingStarted: index("notification_outbox_processing_started_idx").on(
       t.status,
       t.processing_started_at,
+    ),
+    byLease: index("notification_outbox_lease_idx").on(
+      t.status,
+      t.lease_expires_at,
     ),
     // /manage/events/[id] が event_id で絞り込むため
     byEvent: index("notification_outbox_event_idx").on(t.event_id),
@@ -928,7 +1021,7 @@ export const staticRebuildQueue = sqliteTable(
       .notNull()
       .default("normal"),
     status: text("status", {
-      enum: ["pending", "processing", "done", "failed"],
+      enum: ["pending", "processing", "done", "failed", "dead_letter"],
     })
       .notNull()
       .default("pending"),
@@ -941,6 +1034,8 @@ export const staticRebuildQueue = sqliteTable(
       .notNull()
       .default(sql`(unixepoch())`),
     processing_started_at: integer("processing_started_at"),
+    lease_token: text("lease_token"),
+    lease_expires_at: integer("lease_expires_at"),
     processed_at: integer("processed_at"),
     next_retry_at: integer("next_retry_at"),
     error: text("error"),
@@ -958,8 +1053,53 @@ export const staticRebuildQueue = sqliteTable(
       t.status,
       t.next_retry_at,
     ),
+    leaseIdx: index("static_rebuild_queue_lease_idx").on(
+      t.status,
+      t.lease_expires_at,
+    ),
   }),
 );
+
+/** 公開R2 JSONの実体を追跡し、非公開化・ID変更時に旧keyを安全に削除する。 */
+export const staticArtifacts = sqliteTable(
+  "static_artifacts",
+  {
+    id: text("id").primaryKey(),
+    target_type: text("target_type").notNull(),
+    target_id: text("target_id").notNull(),
+    object_key: text("object_key").notNull(),
+    content_hash: text("content_hash").notNull(),
+    schema_version: integer("schema_version").notNull(),
+    source_updated_at: integer("source_updated_at"),
+    generated_at: integer("generated_at").notNull(),
+    deleted_at: integer("deleted_at"),
+  },
+  (t) => ({
+    targetKeyUnique: uniqueIndex("static_artifacts_target_key_uniq").on(
+      t.target_type,
+      t.target_id,
+      t.object_key,
+    ),
+    liveKeyUnique: uniqueIndex("static_artifacts_live_key_uniq")
+      .on(t.object_key)
+      .where(sql`${t.deleted_at} IS NULL`),
+    targetIdx: index("static_artifacts_target_idx").on(
+      t.target_type,
+      t.target_id,
+      t.deleted_at,
+    ),
+  }),
+);
+
+/** Cronの重複実行を防ぐD1正本のlease。KVをCAS用途に使わない。 */
+export const workerLeases = sqliteTable("worker_leases", {
+  job_name: text("job_name").primaryKey(),
+  lease_token: text("lease_token").notNull(),
+  lease_expires_at: integer("lease_expires_at").notNull(),
+  updated_at: integer("updated_at")
+    .notNull()
+    .default(sql`(unixepoch())`),
+});
 
 // ============================================================
 // イベント別カスタム質問 / 回答 (正規化テーブル)
@@ -1081,6 +1221,8 @@ export const auditLogs = sqliteTable("audit_logs", {
   restore_status: text("restore_status", {
     enum: ["not_restorable", "restorable", "restored", "expired", "blocked", "failed"],
   }).notNull().default("not_restorable"),
+  restore_unavailable_reason_code: text("restore_unavailable_reason_code"),
+  restore_unavailable_message: text("restore_unavailable_message"),
   payload_size_bytes: integer("payload_size_bytes").notNull().default(0),
   expires_at: integer("expires_at"),
   created_at: integer("created_at")
