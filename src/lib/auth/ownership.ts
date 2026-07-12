@@ -80,19 +80,30 @@ export async function getApprovedXIds(
 export async function getEditableEventIds(
   db: DB,
   userId: string,
+  candidateEventIds?: readonly string[],
 ): Promise<string[]> {
   const xIds = await getApprovedXIds(db, userId);
   const subjectCond =
     xIds.length > 0
       ? or(eq(eventStaff.user_id, userId), inArray(eventStaff.x_user_id, xIds))!
       : eq(eventStaff.user_id, userId);
-  const rows = await db
+  const candidateIds = candidateEventIds
+    ? Array.from(new Set(candidateEventIds.filter(Boolean)))
+    : null;
+  if (candidateIds && candidateIds.length === 0) return [];
+  const rowsQuery = db
     .select({
       event_id: eventStaff.event_id,
       ...staffPermissionSelect,
     })
     .from(eventStaff)
-    .where(subjectCond);
+    .where(candidateIds
+      ? and(subjectCond, inArray(eventStaff.event_id, candidateIds))!
+      : subjectCond);
+  const rows = candidateIds ? await rowsQuery.limit(candidateIds.length * 4 + 1) : await rowsQuery;
+  if (candidateIds && rows.length > candidateIds.length * 4) {
+    throw new Error("editable_event_staff_read_limit_exceeded");
+  }
   return Array.from(
     new Set(
       rows.filter(staffRowHasAnyPermissions).map((r) => r.event_id),

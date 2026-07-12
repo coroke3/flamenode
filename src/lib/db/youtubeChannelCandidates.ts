@@ -3,6 +3,10 @@ import { generateId } from "@/lib/utils/id";
 import { normalizeYoutubeChannelInput } from "@/lib/utils/youtubeChannel";
 import type { DB } from "./client";
 import { videos, xUserYoutubeChannels, xUsers } from "./schema";
+import {
+  emptyVideoAtomicWritePlan,
+  type VideoAtomicWritePlan,
+} from "@/lib/video/atomicWritePlan";
 
 function xUserIdLower(xId: string): string {
   return xId.trim().toLowerCase();
@@ -28,76 +32,59 @@ export function snapshotYoutubeChannelUrl(
  * x_users.youtube_channel_url (プロフィール正本) は変更しない。
  * 紐づけ先は引数の xUserId ではなく、当該作品の creator_x_user_id を優先する。
  */
-export async function recordYoutubeChannelCandidateFromVideo(
+export async function buildYoutubeChannelCandidatePlan(
   db: DB,
   args: {
     xUserId: string;
     youtubeChannelUrl: string | null | undefined;
     videoId: string;
+    actorUserId: string;
   },
-): Promise<void> {
+): Promise<VideoAtomicWritePlan> {
   const normalized = snapshotYoutubeChannelUrl(args.youtubeChannelUrl);
-  if (!normalized) return;
-
-  const creatorFromVideo = args.videoId
-    ? (
-        await db
-          .select({ creator_x_user_id: videos.creator_x_user_id })
-          .from(videos)
-          .where(eq(videos.id, args.videoId))
-          .limit(1)
-      )[0]?.creator_x_user_id
-    : null;
-  const xUserId = creatorFromVideo?.trim() || args.xUserId.trim();
-  if (!xUserId) return;
+  const xUserId = args.xUserId.trim();
+  if (!normalized || !xUserId) return emptyVideoAtomicWritePlan();
+  const existing = (
+    await db
+      .select({ id: xUserYoutubeChannels.id })
+      .from(xUserYoutubeChannels)
+      .where(and(
+        eq(xUserYoutubeChannels.x_user_id, xUserId),
+        eq(xUserYoutubeChannels.youtube_channel_url, normalized),
+      )!)
+      .limit(1)
+  )[0];
+  if (existing) return emptyVideoAtomicWritePlan();
 
   const now = Math.floor(Date.now() / 1000);
-  await db
-    .insert(xUserYoutubeChannels)
-    .values({
-      id: generateId("xuch"),
-      x_user_id: xUserId,
-      youtube_channel_url: normalized,
-      source_video_id: args.videoId,
-      source_type: "video",
-      created_at: now,
-    })
-    .onConflictDoNothing();
+  const after: typeof xUserYoutubeChannels.$inferSelect = {
+    id: generateId("xuch"),
+    x_user_id: xUserId,
+    youtube_channel_url: normalized,
+    source_video_id: args.videoId,
+    source_type: "video",
+    created_at: now,
+  };
+  return {
+    statements: [db.insert(xUserYoutubeChannels).values(after)],
+    expectedChanges: [1],
+    audits: [{
+      table_name: "x_user_youtube_channels",
+      target_id: after.id,
+      operation: "CREATE",
+      before: null,
+      after: { ...after },
+      actor_user_id: args.actorUserId,
+      context: "video-save:youtube-candidate",
+      retention_class: "normal",
+      strict: true,
+    }],
+  };
 }
 
 /**
  * 過去作品スナップショットから候補テーブルへ不足分を補完する (冪等)。
  */
-async function reconcileYoutubeChannelCandidatesFromVideos(
-  db: DB,
-  xId: string,
-  limit = 32,
-): Promise<void> {
-  const rows = await db
-    .select({
-      video_id: videos.id,
-      channel_url: videos.creator_youtube_channel_url,
-    })
-    .from(videos)
-    .where(
-      and(
-        creatorXUserIdMatches(xId),
-        isNotNull(videos.creator_youtube_channel_url),
-      )!,
-    )
-    .orderBy(desc(videos.created_at))
-    .limit(limit);
-
-  for (const row of rows) {
-    if (!row.channel_url) continue;
-    await recordYoutubeChannelCandidateFromVideo(db, {
-      xUserId: xId,
-      youtubeChannelUrl: row.channel_url,
-      videoId: row.video_id,
-    });
-  }
-}
-
 /**
  * YouTube チャンネル選択用候補。
  *
@@ -123,8 +110,6 @@ export async function getYoutubeChannelCandidates(
     seen.add(normalized);
     out.push(normalized);
   };
-
-  await reconcileYoutubeChannelCandidatesFromVideos(db, xId);
 
   const row = (
     await db

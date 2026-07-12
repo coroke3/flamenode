@@ -1,23 +1,24 @@
-import { auditAction } from "@/lib/audit/helpers";
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { videos, videoEvents } from "@/lib/db/schema";
 import type { DB } from "@/lib/db/client";
-import { recordYoutubeChannelCandidateFromVideo } from "@/lib/db/youtubeChannelCandidates";
-import { replaceVideoSoftwareLabels } from "@/lib/db/software";
+import { buildYoutubeChannelCandidatePlan } from "@/lib/db/youtubeChannelCandidates";
+import { buildReplaceVideoSoftwarePlan } from "@/lib/db/software";
 import type { CanEditVideoPrivilegeMode } from "@/lib/auth/ownership";
-import { ensurePrimaryEventInVideoEvents } from "@/lib/video/primaryEventLink";
-import { ensureSubmissionXUser } from "@/lib/video/ensureSubmissionXUser";
-import { ensureVideoDerivedRows, syncVideoEvents } from "@/lib/video/syncVideoEvents";
-import { replaceVideoMembers } from "@/lib/video/replaceVideoMembers";
-import { recordXIconCandidateFromVideo } from "@/lib/video/iconCandidate";
+import { buildSubmissionXUserPlan } from "@/lib/video/ensureSubmissionXUser";
 import {
-  replaceStagePermissionCustomAnswers,
+  buildSyncVideoEventsPlan,
+  buildVideoDerivedRowsPlan,
+  MAX_ATOMIC_VIDEO_EVENTS,
+} from "@/lib/video/syncVideoEvents";
+import { buildReplaceVideoMembersPlan } from "@/lib/video/replaceVideoMembers";
+import { buildXIconCandidatePlan } from "@/lib/video/iconCandidate";
+import {
+  buildReplaceStagePermissionAnswersPlan,
   readStagePermissionCustomAnswers,
 } from "@/lib/video/stagePermissionAnswers";
 import type { CustomAnswerDraft } from "@/lib/video/customQuestions";
-import { replaceGeneralCustomAnswers } from "@/lib/video/customQuestionAnswers";
-import { parseEventIdsFromForm } from "@/lib/video/parseEventIds";
+import { buildReplaceGeneralCustomAnswersPlan } from "@/lib/video/customQuestionAnswers";
 import type { VideoFormData } from "@/lib/video/videoFormSchema";
 import type { AllowedVideoEditSections } from "@/lib/video/computeEditSections";
 import type { ValidatedMemberSubmission } from "@/lib/video/submissionValidation";
@@ -26,6 +27,14 @@ import {
   computeStaticRebuildFlags,
   computeVideoRevalidatePaths,
 } from "@/lib/video/computeRevalidateTargets";
+import { expectedRowCondition } from "@/lib/audit/adapters";
+import {
+  appendVideoAtomicWritePlan,
+  emptyVideoAtomicWritePlan,
+  executeVideoAtomicWritePlan,
+} from "@/lib/video/atomicWritePlan";
+import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
+import type { EnqueueStaticRebuildInput } from "@/lib/staticRebuild/types";
 
 import {
   buildVideoAuditSnapshot,
@@ -76,6 +85,7 @@ export interface VideoSavePlan {
   profileText: string | null;
   youtubeChannelUrl: string | null;
   socialLinks: string | null;
+  target: typeof videos.$inferSelect;
 }
 
 export function buildVideoUpdatePayload(args: {
@@ -224,6 +234,7 @@ export function buildVideoUpdatePlan(args: {
     profileText: args.parsed.profile_text ?? null,
     youtubeChannelUrl: args.parsed.youtube_channel_url ?? null,
     socialLinks: args.parsed.other_social_links ?? null,
+    target: { ...args.target },
   };
 }
 
@@ -237,44 +248,29 @@ export function computeStagePermissionDeleteIds(args: {
   });
 }
 
-export async function writeVideoAudit(db: DB, plan: VideoSavePlan): Promise<void> {
-  await auditAction(db, {
-    table_name: "videos",
-    record_id: plan.videoId,
-    action: "UPDATE",
-    before_data: JSON.stringify(plan.auditBefore),
-    after_data: JSON.stringify({
-      sections: {
-        identity: plan.sections.identity,
-        basics: plan.sections.basics,
-        youtube: plan.sections.youtube,
-        credits: plan.sections.credits,
-        descriptions: plan.sections.descriptions,
-        members: plan.sections.members,
-      },
-      privilege_mode: plan.privilegeMode,
-      allow_submitter_change: plan.allowSubmitterChange,
-      ...plan.auditAfter,
-    }),
-    operator_user_id: plan.operatorUserId,
-    retention_class: "normal",
-  });
-}
-
 export async function applyVideoUpdatePlan(
   db: DB,
   plan: VideoSavePlan,
   args: {
     approvedXIds: string[];
     sessionRole: string | null | undefined;
-    formData: FormData;
   },
 ): Promise<void> {
   const { payload, sections } = plan;
-  let syncedEventIds = plan.syncedEventIds;
+  const existingEventRows = await db
+    .select({ event_id: videoEvents.event_id })
+    .from(videoEvents)
+    .where(eq(videoEvents.video_id, plan.videoId))
+    .limit(MAX_ATOMIC_VIDEO_EVENTS + 1);
+  if (existingEventRows.length > MAX_ATOMIC_VIDEO_EVENTS) {
+    throw new Error("video_event_existing_atomic_limit_exceeded");
+  }
+  const existingEventIds = existingEventRows.map((row) => row.event_id);
+  const targetEventIds = plan.syncedEventIds ?? existingEventIds;
+  const atomic = emptyVideoAtomicWritePlan();
 
   if (sections.identity) {
-    await ensureSubmissionXUser(db, {
+    appendVideoAtomicWritePlan(atomic, await buildSubmissionXUserPlan(db, {
       xId: plan.nextCreatorX,
       displayName: payload.creator_display_name ?? "",
       profileText: plan.profileText,
@@ -282,115 +278,133 @@ export async function applyVideoUpdatePlan(
       socialLinks: plan.socialLinks,
       allowProfileUpdate:
         args.sessionRole === "admin" || args.approvedXIds.includes(plan.nextCreatorX),
-    });
+      actorUserId: plan.operatorUserId,
+    }));
   }
 
-  await db
-    .update(videos)
+  const after = { ...plan.target, ...payload };
+  atomic.statements.push(db.update(videos)
     .set(payload as Partial<typeof videos.$inferInsert>)
-    .where(eq(videos.id, plan.videoId));
+    .where(and(
+      eq(videos.id, plan.videoId),
+      expectedRowCondition({ expectedCurrent: plan.target }),
+    )!));
+  atomic.expectedChanges.push(1);
+  atomic.audits.push({
+    table_name: "videos",
+    target_id: plan.videoId,
+    operation: "UPDATE",
+    before: { ...plan.target },
+    after,
+    actor_user_id: plan.operatorUserId,
+    reason: `privilege:${plan.privilegeMode}`,
+    context: "video-save:update",
+    retention_class: "normal",
+    strict: true,
+  });
 
   if (sections.youtube) {
-    await ensureVideoDerivedRows(db, {
+    appendVideoAtomicWritePlan(atomic, await buildVideoDerivedRowsPlan(db, {
       videoId: plan.videoId,
       youtubeVideoId: plan.youtubeId,
       now: payload.updated_at,
-    });
+      actorUserId: plan.operatorUserId,
+    }));
   }
-
   if (sections.descriptions) {
-    await replaceVideoSoftwareLabels(db, plan.videoId, plan.usedSoftware);
+    appendVideoAtomicWritePlan(atomic, await buildReplaceVideoSoftwarePlan(db, {
+      videoId: plan.videoId,
+      raw: plan.usedSoftware,
+      actorUserId: plan.operatorUserId,
+    }));
   }
-
   if (sections.members && plan.memberSubmission) {
-    await replaceVideoMembers(
-      db,
-      plan.videoId,
-      plan.memberSubmission.members,
-      plan.memberSubmission.chaptersByIndex,
-    );
+    appendVideoAtomicWritePlan(atomic, await buildReplaceVideoMembersPlan(db, {
+      videoId: plan.videoId,
+      members: plan.memberSubmission.members,
+      chaptersByIndex: plan.memberSubmission.chaptersByIndex,
+      actorUserId: plan.operatorUserId,
+    }));
   }
-
-  if (sections.primary_event && args.formData.has("event_ids")) {
-    const requestedEventIds = parseEventIdsFromForm(args.formData);
-    const alwaysInclude = plan.primaryEventId ? [plan.primaryEventId] : [];
-    syncedEventIds = await syncVideoEvents(db, plan.videoId, {
-      requested: requestedEventIds,
-      alwaysInclude,
-      user: { id: plan.operatorUserId, role: args.sessionRole ?? null },
-    });
-    if (plan.primaryEventId) {
-      await ensurePrimaryEventInVideoEvents(db, plan.videoId, plan.primaryEventId);
-    }
+  if (plan.syncedEventIds) {
+    appendVideoAtomicWritePlan(atomic, await buildSyncVideoEventsPlan(db, plan.videoId, {
+      targetEventIds,
+      actorUserId: plan.operatorUserId,
+    }));
   }
-
-  const currentEventIds =
-    syncedEventIds ??
-    (
-      await db
-        .select({ event_id: videoEvents.event_id })
-        .from(videoEvents)
-        .where(eq(videoEvents.video_id, plan.videoId))
-    ).map((row) => row.event_id);
-
   if (sections.descriptions || plan.stagePermissionDeleteEventIds) {
-    const preservedStagePermission = sections.descriptions
+    const stagePermission = sections.descriptions
       ? plan.stagePermission
       : await readStagePermissionCustomAnswers(db, {
           videoId: plan.videoId,
-          eventIds: currentEventIds,
+          eventIds: targetEventIds,
         });
-    await replaceStagePermissionCustomAnswers(db, {
+    appendVideoAtomicWritePlan(atomic, await buildReplaceStagePermissionAnswersPlan(db, {
       videoId: plan.videoId,
-      eventIds: currentEventIds,
+      eventIds: targetEventIds,
       deleteEventIds: plan.stagePermissionDeleteEventIds,
-      stagePermission: preservedStagePermission,
+      stagePermission,
       now: payload.updated_at,
-    });
-    await replaceGeneralCustomAnswers(db, {
+      actorUserId: plan.operatorUserId,
+    }));
+    appendVideoAtomicWritePlan(atomic, await buildReplaceGeneralCustomAnswersPlan(db, {
       videoId: plan.videoId,
-      eventIds: currentEventIds,
+      eventIds: targetEventIds,
       drafts: plan.customAnswerDrafts,
       now: payload.updated_at,
-    });
+      actorUserId: plan.operatorUserId,
+    }));
   }
-
   if (sections.identity) {
-    await recordXIconCandidateFromVideo(db, {
+    appendVideoAtomicWritePlan(atomic, await buildXIconCandidatePlan(db, {
       xUserId: plan.nextCreatorX,
       iconUrl: payload.creator_icon_url,
       videoId: plan.videoId,
-    });
-    await recordYoutubeChannelCandidateFromVideo(db, {
+      actorUserId: plan.operatorUserId,
+    }));
+    appendVideoAtomicWritePlan(atomic, await buildYoutubeChannelCandidatePlan(db, {
       xUserId: plan.nextCreatorX,
       youtubeChannelUrl: payload.creator_youtube_channel_url,
       videoId: plan.videoId,
+      actorUserId: plan.operatorUserId,
+    }));
+  }
+
+  const queueItems: EnqueueStaticRebuildInput[] = [{
+    targetType: "video",
+    targetId: plan.videoId,
+    reason: "video_update",
+    requestedByUserId: plan.operatorUserId,
+  }];
+  if (plan.rebuildFlags.identityChanged && payload.creator_x_user_id) {
+    queueItems.push({
+      targetType: "user",
+      targetId: payload.creator_x_user_id,
+      reason: "video_identity_update",
+      requestedByUserId: plan.operatorUserId,
+    });
+    queueItems.push({
+      targetType: "search_index",
+      targetId: "global",
+      reason: "video_identity_update",
+      requestedByUserId: plan.operatorUserId,
     });
   }
-
-  for (const path of plan.revalidatePaths) {
-    revalidatePath(path);
+  if (plan.rebuildFlags.eventMembershipChanged) {
+    for (const eventId of new Set([plan.primaryEventId, ...existingEventIds, ...targetEventIds])) {
+      if (!eventId) continue;
+      queueItems.push({
+        targetType: "event",
+        targetId: eventId,
+        reason: "video_update",
+        requestedByUserId: plan.operatorUserId,
+      });
+    }
   }
+  const queue = await buildStaticRebuildQueueBatch(db, queueItems);
+  atomic.statements.push(...queue.statements);
+  atomic.expectedChanges.push(...queue.expectedChanges);
+  await executeVideoAtomicWritePlan(db, atomic);
 
-  const linkedEvents = await db
-    .select({ event_id: videoEvents.event_id })
-    .from(videoEvents)
-    .where(eq(videoEvents.video_id, plan.videoId));
-  const eventIds = linkedEvents.map((r) => r.event_id);
-
-  const { enqueueAfterVideoUpdate } = await import("@/lib/staticRebuild/hooks");
-  await enqueueAfterVideoUpdate(db, {
-    videoId: plan.videoId,
-    creatorXUserId: plan.allowSubmitterChange
-      ? plan.nextCreatorX || null
-      : payload.creator_x_user_id,
-    primaryEventId: plan.primaryEventId,
-    eventIds,
-    visibilityChanged: false,
-    identityChanged: plan.rebuildFlags.identityChanged,
-    eventMembershipChanged: plan.rebuildFlags.eventMembershipChanged,
-    requestedByUserId: plan.operatorUserId,
-  });
-
-  await writeVideoAudit(db, plan);
+  for (const path of plan.revalidatePaths) revalidatePath(path);
 }

@@ -1,46 +1,51 @@
 "use server";
 
-import { auditAction } from "@/lib/audit/helpers";
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { videos } from "@/lib/db/schema";
-import { extractYoutubeId } from "@/lib/youtube/id";
-import { generateId } from "@/lib/utils/id";
-import { recordYoutubeChannelCandidateFromVideo, snapshotYoutubeChannelUrl } from "@/lib/db/youtubeChannelCandidates";
-import { normalizeXId } from "@/lib/utils/xid";
-import { replaceVideoSoftwareLabels } from "@/lib/db/software";
-import { shouldEnqueueUserNotification } from "@/lib/notifications/context";
-import { enqueueNotification } from "@/lib/notifications/enqueue";
+import { buildReplaceVideoSoftwarePlan } from "@/lib/db/software";
+import {
+  buildYoutubeChannelCandidatePlan,
+  snapshotYoutubeChannelUrl,
+} from "@/lib/db/youtubeChannelCandidates";
+import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { buildFreeVideoSubmittedNotification } from "@/lib/notifications/templates/video";
-import { parseVideoForm } from "@/lib/video/videoFormSchema";
+import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
+import { generateId } from "@/lib/utils/id";
+import { normalizeXId } from "@/lib/utils/xid";
+import { extractYoutubeId } from "@/lib/youtube/id";
+import {
+  appendVideoAtomicWritePlan,
+  emptyVideoAtomicWritePlan,
+  executeVideoAtomicWritePlan,
+} from "@/lib/video/atomicWritePlan";
+import { buildReplaceGeneralCustomAnswersPlan } from "@/lib/video/customQuestionAnswers";
+import { buildSubmissionXUserPlan } from "@/lib/video/ensureSubmissionXUser";
+import { buildXIconCandidatePlan } from "@/lib/video/iconCandidate";
 import { parseEventIdsFromForm } from "@/lib/video/parseEventIds";
+import { buildReplaceVideoMembersPlan } from "@/lib/video/replaceVideoMembers";
 import {
   buildStagePermissionSubmission,
   getStagePermissionFieldsForEvents,
 } from "@/lib/video/stagePermissionSubmission";
-import { ensureSubmissionXUser } from "@/lib/video/ensureSubmissionXUser";
-import {
-  ensureVideoDerivedRows,
-  resolveEventSyncTargetForNewVideo,
-  syncVideoEvents,
-} from "@/lib/video/syncVideoEvents";
-import { replaceVideoMembers } from "@/lib/video/replaceVideoMembers";
-import { recordXIconCandidateFromVideo } from "@/lib/video/iconCandidate";
-import { isYoutubeIdUniqueConstraintError } from "@/lib/video/youtubeDuplicate";
-import { checkYoutubeVideoDuplicate } from "@/lib/video/slotPart";
+import { buildReplaceStagePermissionAnswersPlan } from "@/lib/video/stagePermissionAnswers";
 import {
   validateCustomAnswersForEvents,
   validateVideoMemberSubmission,
 } from "@/lib/video/submissionValidation";
-import { replaceStagePermissionCustomAnswers } from "@/lib/video/stagePermissionAnswers";
-import { replaceGeneralCustomAnswers } from "@/lib/video/customQuestionAnswers";
+import {
+  buildSyncVideoEventsPlan,
+  buildVideoDerivedRowsPlan,
+  MAX_ATOMIC_VIDEO_EVENTS,
+  resolveEventSyncTargetForNewVideo,
+} from "@/lib/video/syncVideoEvents";
+import { checkYoutubeVideoDuplicate } from "@/lib/video/slotPart";
 import type { VideoActionResult } from "@/lib/video/types";
+import { parseVideoForm } from "@/lib/video/videoFormSchema";
+import { isYoutubeIdUniqueConstraintError } from "@/lib/video/youtubeDuplicate";
 
-export async function createFreeVideo(
-  formData: FormData,
-): Promise<VideoActionResult> {
+export async function createFreeVideo(formData: FormData): Promise<VideoActionResult> {
   const guard = await writeGuard({
     requireApprovedActiveXId: true,
     feature: "post_video_unslotted",
@@ -48,56 +53,49 @@ export async function createFreeVideo(
   if (!guard.ok) return { ok: false, reason: guard.reason, message: guard.message };
   const sessionUser = guard.user;
   const userId = sessionUser.id;
-  const approvedXIds = guard.approvedXIds;
-
   const parsed = parseVideoForm(Object.fromEntries(formData));
   if (!parsed.ok) return parsed;
   const youtubeId = extractYoutubeId(parsed.data.youtube_url);
-  if (!youtubeId) {
-    return { ok: false, message: "YouTube URL が解析できません。" };
-  }
+  if (!youtubeId) return { ok: false, message: "YouTube URLを解析できません。" };
 
   const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
-
+  if (!db) return { ok: false, message: "DBに接続できません。" };
   const activeX = normalizeXId(sessionUser.active_x_user_id);
-  if (!activeX || !approvedXIds.includes(activeX)) {
-    return { ok: false, message: "承認済みの X ID を選択してください。" };
+  if (!activeX || !guard.approvedXIds.includes(activeX)) {
+    return { ok: false, message: "承認済みのX IDを選択してください。" };
   }
 
   const requestedEventIds = parseEventIdsFromForm(formData);
-  const stageFields = await getStagePermissionFieldsForEvents(db, requestedEventIds);
-  const stagePermissionResult = buildStagePermissionSubmission(
-    formData,
-    stageFields,
-  );
-  if (!stagePermissionResult.ok) return stagePermissionResult;
-  const stagePermission = stagePermissionResult.value;
-
-  if (await checkYoutubeVideoDuplicate(db, youtubeId)) {
-    return { ok: false, message: "この YouTube 動画は既に登録されています。" };
+  if (requestedEventIds.length > MAX_ATOMIC_VIDEO_EVENTS) {
+    return { ok: false, message: "選択イベント数が保存上限を超えています。" };
   }
-
+  const stageFields = await getStagePermissionFieldsForEvents(db, requestedEventIds);
+  const stagePermissionResult = buildStagePermissionSubmission(formData, stageFields);
+  if (!stagePermissionResult.ok) return stagePermissionResult;
+  if (await checkYoutubeVideoDuplicate(db, youtubeId)) {
+    return { ok: false, message: "このYouTube動画は既に登録されています。" };
+  }
   const memberValidation = validateVideoMemberSubmission(
     formData,
     parsed.data.is_collab ?? false,
   );
   if (!memberValidation.ok) return memberValidation;
-
-  const syncedEventIds = await resolveEventSyncTargetForNewVideo(db, {
-    requested: requestedEventIds,
-    user: { id: userId, role: sessionUser.role ?? null },
-    linkPolicy: "unslotted_posts",
-  });
+  let syncedEventIds: string[];
+  try {
+    syncedEventIds = await resolveEventSyncTargetForNewVideo(db, {
+      requested: requestedEventIds,
+      user: { id: userId, role: sessionUser.role ?? null },
+      linkPolicy: "unslotted_posts",
+    });
+  } catch (error) {
+    console.warn("[createFreeVideo] event plan rejected", error);
+    return { ok: false, message: "選択イベント数が保存上限を超えています。" };
+  }
   if (
     sessionUser.role !== "admin" &&
-    requestedEventIds.some((id) => !syncedEventIds.includes(id))
+    requestedEventIds.some((eventId) => !syncedEventIds.includes(eventId))
   ) {
-    return {
-      ok: false,
-      message:
-        "選択したイベントの一部は枠なし投稿の紐づけを受け付けていません。",
-    };
+    return { ok: false, message: "選択したイベントの一部には投稿できません。" };
   }
   const customValidation = await validateCustomAnswersForEvents(
     db,
@@ -106,125 +104,151 @@ export async function createFreeVideo(
   );
   if (!customValidation.ok) return customValidation;
 
-  const id = generateId("v");
+  const videoId = generateId("v");
   const now = Math.floor(Date.now() / 1000);
-  const displayName = parsed.data.display_name;
   const iconUrl = parsed.data.icon_url || null;
-
-  await ensureSubmissionXUser(db, {
-    xId: activeX,
-    displayName,
-    profileText: parsed.data.profile_text ?? null,
-    youtubeChannelUrl: parsed.data.youtube_channel_url ?? null,
-    socialLinks: parsed.data.other_social_links ?? null,
-    allowProfileUpdate: true,
-  });
+  const videoAfter: typeof videos.$inferSelect = {
+    id: videoId,
+    primary_event_id: syncedEventIds[0] ?? null,
+    creator_x_user_id: activeX,
+    submitted_by_user_id: userId,
+    collaboration_type: parsed.data.is_collab ? "collab" : "individual",
+    part: parsed.data.part?.trim() || null,
+    source_type: "youtube",
+    creator_display_name: parsed.data.display_name,
+    creator_display_name_yomi: null,
+    creator_icon_url: iconUrl,
+    creator_youtube_channel_url: snapshotYoutubeChannelUrl(
+      parsed.data.youtube_channel_url,
+    ),
+    title: parsed.data.title,
+    music: parsed.data.music ?? null,
+    credit: parsed.data.credit ?? null,
+    music_reference_url: parsed.data.music_reference_url ?? null,
+    closing_comment: parsed.data.closing_comment ?? null,
+    youtube_video_id: youtubeId,
+    intro_comment: parsed.data.intro_comment ?? null,
+    highlights: parsed.data.highlights ?? null,
+    production_story: parsed.data.production_story ?? null,
+    visibility_status: "public",
+    scheduling_type: "manual",
+    scheduled_time: now,
+    app_like_count: 0,
+    score: 0,
+    score_updated_at: null,
+    created_at: now,
+    updated_at: now,
+  };
 
   try {
-    await db.insert(videos).values({
-      id,
-      submitted_by_user_id: userId,
-      creator_x_user_id: activeX || null,
-      collaboration_type: parsed.data.is_collab ? "collab" : "individual",
-      source_type: "youtube",
-      creator_display_name: displayName,
-      title: parsed.data.title,
-      youtube_video_id: youtubeId,
-      creator_icon_url: iconUrl,
-      creator_youtube_channel_url: snapshotYoutubeChannelUrl(
-        parsed.data.youtube_channel_url,
-      ),
-      visibility_status: "public",
-      music: parsed.data.music ?? null,
-      music_reference_url: parsed.data.music_reference_url ?? null,
-      credit: parsed.data.credit ?? null,
-      intro_comment: parsed.data.intro_comment ?? null,
-      highlights: parsed.data.highlights ?? null,
-      production_story: parsed.data.production_story ?? null,
-      closing_comment: parsed.data.closing_comment ?? null,
-      part: parsed.data.part?.trim() || null,
-      primary_event_id: syncedEventIds[0] ?? null,
-      scheduling_type: "manual",
-      scheduled_time: now,
-      created_at: now,
-      updated_at: now,
+    const plan = emptyVideoAtomicWritePlan();
+    appendVideoAtomicWritePlan(plan, await buildSubmissionXUserPlan(db, {
+      xId: activeX,
+      displayName: parsed.data.display_name,
+      profileText: parsed.data.profile_text ?? null,
+      youtubeChannelUrl: parsed.data.youtube_channel_url ?? null,
+      socialLinks: parsed.data.other_social_links ?? null,
+      allowProfileUpdate: true,
+      actorUserId: userId,
+    }));
+    plan.statements.push(db.insert(videos).values(videoAfter));
+    plan.expectedChanges.push(1);
+    plan.audits.push({
+      table_name: "videos",
+      target_id: videoId,
+      operation: "CREATE",
+      before: null,
+      after: { ...videoAfter },
+      actor_user_id: userId,
+      context: "video-save:create-free",
+      retention_class: "normal",
+      strict: true,
     });
-  } catch (err) {
-    if (isYoutubeIdUniqueConstraintError(err)) {
-      return { ok: false, message: "この YouTube 動画は既に登録されています。" };
-    }
-    throw err;
-  }
+    appendVideoAtomicWritePlan(plan, await buildVideoDerivedRowsPlan(db, {
+      videoId, youtubeVideoId: youtubeId, now, actorUserId: userId,
+    }));
+    appendVideoAtomicWritePlan(plan, await buildReplaceVideoMembersPlan(db, {
+      videoId,
+      members: memberValidation.value.members,
+      chaptersByIndex: memberValidation.value.chaptersByIndex,
+      actorUserId: userId,
+    }));
+    appendVideoAtomicWritePlan(plan, await buildReplaceVideoSoftwarePlan(db, {
+      videoId, raw: parsed.data.used_software ?? null, actorUserId: userId,
+    }));
+    appendVideoAtomicWritePlan(plan, await buildSyncVideoEventsPlan(db, videoId, {
+      targetEventIds: syncedEventIds, actorUserId: userId,
+    }));
+    appendVideoAtomicWritePlan(plan, await buildReplaceStagePermissionAnswersPlan(db, {
+      videoId,
+      eventIds: syncedEventIds,
+      stagePermission: stagePermissionResult.value,
+      now,
+      actorUserId: userId,
+    }));
+    appendVideoAtomicWritePlan(plan, await buildReplaceGeneralCustomAnswersPlan(db, {
+      videoId,
+      eventIds: syncedEventIds,
+      drafts: customValidation.drafts,
+      now,
+      actorUserId: userId,
+    }));
+    appendVideoAtomicWritePlan(plan, await buildXIconCandidatePlan(db, {
+      xUserId: activeX, iconUrl, videoId, actorUserId: userId,
+    }));
+    appendVideoAtomicWritePlan(plan, await buildYoutubeChannelCandidatePlan(db, {
+      xUserId: activeX,
+      youtubeChannelUrl: parsed.data.youtube_channel_url ?? null,
+      videoId,
+      actorUserId: userId,
+    }));
 
-  await ensureVideoDerivedRows(db, { videoId: id, youtubeVideoId: youtubeId, now });
-  await replaceVideoMembers(
-    db,
-    id,
-    memberValidation.value.members,
-    memberValidation.value.chaptersByIndex,
-  );
-  await replaceVideoSoftwareLabels(db, id, parsed.data.used_software ?? null);
-
-  await syncVideoEvents(db, id, {
-    requested: requestedEventIds,
-    user: { id: userId, role: sessionUser.role ?? null },
-    linkPolicy: "unslotted_posts",
-  });
-  await replaceStagePermissionCustomAnswers(db, {
-    videoId: id,
-    eventIds: syncedEventIds,
-    stagePermission,
-    now,
-  });
-  await replaceGeneralCustomAnswers(db, {
-    videoId: id,
-    eventIds: syncedEventIds,
-    drafts: customValidation.drafts,
-    now,
-  });
-
-  await recordXIconCandidateFromVideo(db, { xUserId: activeX, iconUrl, videoId: id });
-  await recordYoutubeChannelCandidateFromVideo(db, {
-    xUserId: activeX,
-    youtubeChannelUrl: parsed.data.youtube_channel_url ?? null,
-    videoId: id,
-  });
-
-  await auditAction(db, {
-    table_name: "videos",
-    record_id: id,
-    action: "CREATE",
-    after_data: JSON.stringify({ title: parsed.data.title, youtube_video_id: youtubeId }),
-    operator_user_id: userId,
-    retention_class: "normal",
-  });
-
-  revalidatePath("/");
-  revalidatePath("/list");
-  revalidatePath("/dashboard");
-  const { enqueueAfterVideoCreate } = await import("@/lib/staticRebuild/hooks");
-  await enqueueAfterVideoCreate(db, {
-    videoId: id,
-    creatorXUserId: activeX || null,
-    primaryEventId: syncedEventIds[0] ?? null,
-    eventIds: syncedEventIds,
-    requestedByUserId: userId,
-  });
-
-  if (shouldEnqueueUserNotification()) {
-    await enqueueNotification(db, {
+    const notification = await buildNotificationOutboxStatement(db, {
       recipientUserId: userId,
       type: "video_submitted",
-      dedupeKey: `video_submitted:${id}`,
+      dedupeKey: `video_submitted:${videoId}`,
       payload: buildFreeVideoSubmittedNotification({
-        videoId: id,
+        videoId,
         videoTitle: parsed.data.title,
         youtubeVideoId: youtubeId,
         hasLinkedEvent: requestedEventIds.length > 0,
       }),
       eventId: syncedEventIds[0] ?? null,
     });
+    if (notification) {
+      plan.statements.push(notification);
+      plan.expectedChanges.push(1);
+    }
+    const queue = await buildStaticRebuildQueueBatch(db, [
+      { targetType: "video", targetId: videoId, reason: "video_create", priority: "high", requestedByUserId: userId },
+      { targetType: "top", targetId: "global", reason: "video_create" },
+      { targetType: "list_recent", targetId: "global", reason: "video_create" },
+      { targetType: "list_popular", targetId: "global", reason: "video_create" },
+      { targetType: "search_index", targetId: "global", reason: "video_create" },
+      { targetType: "user", targetId: activeX, reason: "video_create" },
+      ...syncedEventIds.map((eventId) => ({
+        targetType: "event" as const,
+        targetId: eventId,
+        reason: "video_create",
+        priority: "high" as const,
+      })),
+    ]);
+    plan.statements.push(...queue.statements);
+    plan.expectedChanges.push(...queue.expectedChanges);
+    await executeVideoAtomicWritePlan(db, plan);
+  } catch (error) {
+    if (isYoutubeIdUniqueConstraintError(error)) {
+      return { ok: false, message: "このYouTube動画は既に登録されています。" };
+    }
+    console.warn("[createFreeVideo] atomic save rejected", error);
+    return {
+      ok: false,
+      message: "保存対象が多すぎるか競合が発生しました。入力を確認して再試行してください。",
+    };
   }
 
-  return { ok: true, videoId: id, youtubeVideoId: youtubeId };
+  revalidatePath("/");
+  revalidatePath("/list");
+  revalidatePath("/dashboard");
+  return { ok: true, videoId, youtubeVideoId: youtubeId };
 }
