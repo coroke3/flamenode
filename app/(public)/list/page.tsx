@@ -108,6 +108,7 @@ export default async function ListPage({
     if (merged.page && merged.page !== "1") p.set("page", merged.page);
     return p.toString();
   };
+  const activeFilterCount = [q.trim(), sort !== "new" ? sort : "", event].filter(Boolean).length;
 
   return (
     <div className={`fn-public-container fn-page ${styles.page}`}>
@@ -147,54 +148,65 @@ export default async function ListPage({
           </div>
         </header>
 
-        <form className="fn-list-toolbar" method="get">
-          <label className="fn-list-search">
-            <Icon name="search" size={14} aria-hidden />
-            <span className="fn-sr-only">検索キーワード</span>
-            <input
-              type="search"
-              name="q"
-              defaultValue={q}
-              placeholder="作品を検索"
-              autoComplete="off"
-            />
-          </label>
-          <input type="hidden" name="view" value={view} />
-          <div className={styles.controlsGroup}>
-            <span className="fn-list-toolbar-label">並び替え</span>
-            <AutoSubmitSelect className="fn-select" name="sort" defaultValue={sort}>
-              <option value="new">新着順</option>
-              <option value="old">古い順</option>
-              <option value="score">おすすめ順</option>
-            </AutoSubmitSelect>
-          </div>
-          {event ? <input type="hidden" name="event" value={event} /> : null}
-          {q || sort !== "new" || event ? (
-            <Link href={LIST_HREF} className="fn-btn fn-btn-ghost">
-              リセット
-            </Link>
-          ) : null}
-        </form>
-
-        {event ? (
-        <div className="fn-filter-bar" aria-label="現在のフィルター">
-          <span className="fn-badge fn-badge-soft">
-            イベント{" "}
-            {eventInfo ? (
-              <Link href={`/event/${eventInfo.id}`}>
-                {eventInfo.title}
+        <details className={styles.mobileFilterPanel} open>
+          <summary>
+            <span>絞り込み</span>
+            <span className={styles.filterSummaryMeta}>
+              {activeFilterCount > 0 ? `${activeFilterCount}件適用中` : "条件なし"}
+            </span>
+          </summary>
+          <form className="fn-list-toolbar" method="get">
+            <label className="fn-list-search">
+              <Icon name="search" size={14} aria-hidden />
+              <span className="fn-sr-only">検索キーワード</span>
+              <input
+                type="search"
+                name="q"
+                defaultValue={q}
+                placeholder="作品を検索"
+                autoComplete="off"
+              />
+            </label>
+            <input type="hidden" name="view" value={view} />
+            <div className={styles.controlsGroup}>
+              <span className="fn-list-toolbar-label">並び替え</span>
+              <AutoSubmitSelect className="fn-select" name="sort" defaultValue={sort}>
+                <option value="new">新着順</option>
+                <option value="old">古い順</option>
+                <option value="score">おすすめ順</option>
+              </AutoSubmitSelect>
+            </div>
+            {event ? <input type="hidden" name="event" value={event} /> : null}
+            {activeFilterCount > 0 ? (
+              <Link href={LIST_HREF} className="fn-btn fn-btn-ghost">
+                リセット
               </Link>
-            ) : (
-              event
-            )}
-          </span>
-          <Link
-            href={`/list?${params({ event: "", page: "1" })}`}
-            className="fn-btn fn-btn-ghost fn-btn-sm"
-          >
-            イベント絞り込みを解除
-          </Link>
-        </div>
+            ) : null}
+          </form>
+        </details>
+
+        {activeFilterCount > 0 ? (
+          <div className={styles.activeFilters} aria-label="適用中のフィルター">
+            <span className={styles.activeFiltersLabel}>適用中</span>
+            {q.trim() ? (
+              <Link className={styles.activeChip} href={`/list?${params({ q: "", page: "1" })}`}>
+                検索: {q.trim()}
+                <span aria-hidden>×</span>
+              </Link>
+            ) : null}
+            {sort !== "new" ? (
+              <Link className={styles.activeChip} href={`/list?${params({ sort: "new", page: "1" })}`}>
+                並び順: {sort === "old" ? "古い順" : "おすすめ順"}
+                <span aria-hidden>×</span>
+              </Link>
+            ) : null}
+            {event ? (
+              <Link className={styles.activeChip} href={`/list?${params({ event: "", page: "1" })}`}>
+                イベント: {eventInfo?.title ?? event}
+                <span aria-hidden>×</span>
+              </Link>
+            ) : null}
+          </div>
         ) : null}
 
         {videos.length === 0 ? (
