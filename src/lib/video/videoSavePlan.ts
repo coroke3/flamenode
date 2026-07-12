@@ -2,7 +2,6 @@ import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
 import { videos, videoEvents } from "@/lib/db/schema";
 import type { DB } from "@/lib/db/client";
-import { buildYoutubeChannelCandidatePlan } from "@/lib/db/youtubeChannelCandidates";
 import { buildReplaceVideoSoftwarePlan } from "@/lib/db/software";
 import type { CanEditVideoPrivilegeMode } from "@/lib/auth/ownership";
 import { buildSubmissionXUserPlan } from "@/lib/video/ensureSubmissionXUser";
@@ -12,7 +11,6 @@ import {
   MAX_ATOMIC_VIDEO_EVENTS,
 } from "@/lib/video/syncVideoEvents";
 import { buildReplaceVideoMembersPlan } from "@/lib/video/replaceVideoMembers";
-import { buildXIconCandidatePlan } from "@/lib/video/iconCandidate";
 import {
   buildReplaceStagePermissionAnswersPlan,
   readStagePermissionCustomAnswers,
@@ -355,21 +353,6 @@ export async function applyVideoUpdatePlan(
       actorUserId: plan.operatorUserId,
     }));
   }
-  if (sections.identity) {
-    appendVideoAtomicWritePlan(atomic, await buildXIconCandidatePlan(db, {
-      xUserId: plan.nextCreatorX,
-      iconUrl: payload.creator_icon_url,
-      videoId: plan.videoId,
-      actorUserId: plan.operatorUserId,
-    }));
-    appendVideoAtomicWritePlan(atomic, await buildYoutubeChannelCandidatePlan(db, {
-      xUserId: plan.nextCreatorX,
-      youtubeChannelUrl: payload.creator_youtube_channel_url,
-      videoId: plan.videoId,
-      actorUserId: plan.operatorUserId,
-    }));
-  }
-
   const queueItems: EnqueueStaticRebuildInput[] = [{
     targetType: "video",
     targetId: plan.videoId,

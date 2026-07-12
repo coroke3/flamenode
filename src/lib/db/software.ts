@@ -11,8 +11,7 @@ import {
   type VideoAtomicWritePlan,
 } from "@/lib/video/atomicWritePlan";
 import { expectedRowCondition } from "@/lib/audit/adapters";
-
-export const MAX_ATOMIC_VIDEO_SOFTWARES = 4;
+import { MAX_ATOMIC_VIDEO_SOFTWARES } from "@/lib/video/atomicLimits";
 
 function normalizeSoftwareName(value: string): string {
   return value.trim().replace(/\s+/g, " ").toLowerCase();

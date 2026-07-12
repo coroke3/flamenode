@@ -6,7 +6,6 @@ import { writeGuard } from "@/lib/auth/writeGuard";
 import { videos } from "@/lib/db/schema";
 import { buildReplaceVideoSoftwarePlan } from "@/lib/db/software";
 import {
-  buildYoutubeChannelCandidatePlan,
   snapshotYoutubeChannelUrl,
 } from "@/lib/db/youtubeChannelCandidates";
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
@@ -22,7 +21,6 @@ import {
 } from "@/lib/video/atomicWritePlan";
 import { buildReplaceGeneralCustomAnswersPlan } from "@/lib/video/customQuestionAnswers";
 import { buildSubmissionXUserPlan } from "@/lib/video/ensureSubmissionXUser";
-import { buildXIconCandidatePlan } from "@/lib/video/iconCandidate";
 import { parseEventIdsFromForm } from "@/lib/video/parseEventIds";
 import { buildReplaceVideoMembersPlan } from "@/lib/video/replaceVideoMembers";
 import {
@@ -193,16 +191,6 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
       now,
       actorUserId: userId,
     }));
-    appendVideoAtomicWritePlan(plan, await buildXIconCandidatePlan(db, {
-      xUserId: activeX, iconUrl, videoId, actorUserId: userId,
-    }));
-    appendVideoAtomicWritePlan(plan, await buildYoutubeChannelCandidatePlan(db, {
-      xUserId: activeX,
-      youtubeChannelUrl: parsed.data.youtube_channel_url ?? null,
-      videoId,
-      actorUserId: userId,
-    }));
-
     const notification = await buildNotificationOutboxStatement(db, {
       recipientUserId: userId,
       type: "video_submitted",

@@ -1,12 +1,7 @@
 import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
-import { generateId } from "@/lib/utils/id";
 import { normalizeYoutubeChannelInput } from "@/lib/utils/youtubeChannel";
 import type { DB } from "./client";
 import { videos, xUserYoutubeChannels, xUsers } from "./schema";
-import {
-  emptyVideoAtomicWritePlan,
-  type VideoAtomicWritePlan,
-} from "@/lib/video/atomicWritePlan";
 
 function xUserIdLower(xId: string): string {
   return xId.trim().toLowerCase();
@@ -32,56 +27,6 @@ export function snapshotYoutubeChannelUrl(
  * x_users.youtube_channel_url (プロフィール正本) は変更しない。
  * 紐づけ先は引数の xUserId ではなく、当該作品の creator_x_user_id を優先する。
  */
-export async function buildYoutubeChannelCandidatePlan(
-  db: DB,
-  args: {
-    xUserId: string;
-    youtubeChannelUrl: string | null | undefined;
-    videoId: string;
-    actorUserId: string;
-  },
-): Promise<VideoAtomicWritePlan> {
-  const normalized = snapshotYoutubeChannelUrl(args.youtubeChannelUrl);
-  const xUserId = args.xUserId.trim();
-  if (!normalized || !xUserId) return emptyVideoAtomicWritePlan();
-  const existing = (
-    await db
-      .select({ id: xUserYoutubeChannels.id })
-      .from(xUserYoutubeChannels)
-      .where(and(
-        eq(xUserYoutubeChannels.x_user_id, xUserId),
-        eq(xUserYoutubeChannels.youtube_channel_url, normalized),
-      )!)
-      .limit(1)
-  )[0];
-  if (existing) return emptyVideoAtomicWritePlan();
-
-  const now = Math.floor(Date.now() / 1000);
-  const after: typeof xUserYoutubeChannels.$inferSelect = {
-    id: generateId("xuch"),
-    x_user_id: xUserId,
-    youtube_channel_url: normalized,
-    source_video_id: args.videoId,
-    source_type: "video",
-    created_at: now,
-  };
-  return {
-    statements: [db.insert(xUserYoutubeChannels).values(after)],
-    expectedChanges: [1],
-    audits: [{
-      table_name: "x_user_youtube_channels",
-      target_id: after.id,
-      operation: "CREATE",
-      before: null,
-      after: { ...after },
-      actor_user_id: args.actorUserId,
-      context: "video-save:youtube-candidate",
-      retention_class: "normal",
-      strict: true,
-    }],
-  };
-}
-
 /**
  * 過去作品スナップショットから候補テーブルへ不足分を補完する (冪等)。
  */

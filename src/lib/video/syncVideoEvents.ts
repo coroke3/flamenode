@@ -9,8 +9,8 @@ import {
   emptyVideoAtomicWritePlan,
 } from "@/lib/video/atomicWritePlan";
 import { expectedRowCondition } from "@/lib/audit/adapters";
-
-export const MAX_ATOMIC_VIDEO_EVENTS = 4;
+import { MAX_ATOMIC_VIDEO_EVENTS } from "@/lib/video/atomicLimits";
+export { MAX_ATOMIC_VIDEO_EVENTS } from "@/lib/video/atomicLimits";
 
 /** 一般ユーザーが video_events を変更できるかの判定に使うイベント列。 */
 export type VideoEventUserLinkPolicy =

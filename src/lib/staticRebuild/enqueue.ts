@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq, inArray, isNull, max, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, max, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DB } from "@/lib/db/client";
 import { staticRebuildQueue } from "@/lib/db/schema";
@@ -53,6 +53,8 @@ const PUBLIC_MISS_COOLDOWN_SEC = 5 * 60;
 const DEFAULT_DONE_COOLDOWN_SEC = 60;
 export const MAX_STATIC_REBUILD_BATCH_TARGETS = 16;
 export const STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT = 2;
+export const STATIC_REBUILD_BULK_UPDATE_ROWS = 6;
+export const STATIC_REBUILD_BULK_INSERT_ROWS = 10;
 
 export type StaticRebuildQueueBatch = {
   statements: BatchItem<"sqlite">[];
@@ -134,63 +136,28 @@ export async function buildStaticRebuildQueueBatch(
     },
   );
 
+  const activeUpdates: Array<{
+    row: typeof staticRebuildQueue.$inferSelect;
+    reason: string;
+    priority: "high" | "normal" | "low";
+    requestedByUserId: string | null;
+  }> = [];
+  const inserts: (typeof staticRebuildQueue.$inferInsert)[] = [];
   for (const normalized of normalizedItems) {
     const row = activeByTarget.get(
       staticRebuildTargetKey(normalized.targetType, normalized.targetId),
     );
-    if (row?.status === "pending") {
-      statements.push(
-        db
-          .update(staticRebuildQueue)
-          .set({
-            reason: normalized.reason,
-            priority: pickHigherPriority(
-              row.priority as "high" | "normal" | "low",
-              normalized.priority ?? "normal",
-            ),
-            requested_by_user_id:
-              normalized.requestedByUserId ?? row.requested_by_user_id,
-            updated_at: now,
-          })
-          .where(
-            and(
-              eq(staticRebuildQueue.id, row.id),
-              eq(staticRebuildQueue.status, "pending"),
-              eq(staticRebuildQueue.updated_at, row.updated_at),
-            )!,
-          ),
-      );
-      expectedChanges.push(1);
-      continue;
-    }
-    if (row?.status === "processing") {
-      statements.push(
-        db
-          .update(staticRebuildQueue)
-          .set({
-            reason: normalized.reason,
-            priority: pickHigherPriority(
-              row.priority as "high" | "normal" | "low",
-              normalized.priority ?? "normal",
-            ),
-            requested_by_user_id:
-              normalized.requestedByUserId ?? row.requested_by_user_id,
-            lease_token: null,
-            lease_expires_at: null,
-            updated_at: now,
-          })
-          .where(
-            and(
-              eq(staticRebuildQueue.id, row.id),
-              eq(staticRebuildQueue.status, "processing"),
-              eq(staticRebuildQueue.updated_at, row.updated_at),
-              row.lease_token
-                ? eq(staticRebuildQueue.lease_token, row.lease_token)
-                : isNull(staticRebuildQueue.lease_token),
-            )!,
-          ),
-      );
-      expectedChanges.push(1);
+    if (row?.status === "pending" || row?.status === "processing") {
+      activeUpdates.push({
+        row,
+        reason: normalized.reason,
+        priority: pickHigherPriority(
+          row.priority as "high" | "normal" | "low",
+          normalized.priority ?? "normal",
+        ),
+        requestedByUserId:
+          normalized.requestedByUserId ?? row.requested_by_user_id,
+      });
       continue;
     }
     const latest = latestByTarget.get(
@@ -198,20 +165,51 @@ export async function buildStaticRebuildQueueBatch(
     );
     if (shouldSkipRecentRow(normalized, latest, now)) continue;
 
-    statements.push(
-      db.insert(staticRebuildQueue).values({
-        id: generateId("srb"),
-        target_type: normalized.targetType,
-        target_id: normalized.targetId,
-        reason: normalized.reason,
-        priority: normalized.priority ?? "normal",
-        status: "pending",
-        requested_by_user_id: normalized.requestedByUserId ?? null,
-        created_at: now,
-        updated_at: now,
-      }),
-    );
-    expectedChanges.push(1);
+    inserts.push({
+      id: generateId("srb"),
+      target_type: normalized.targetType,
+      target_id: normalized.targetId,
+      reason: normalized.reason,
+      priority: normalized.priority ?? "normal",
+      status: "pending",
+      requested_by_user_id: normalized.requestedByUserId ?? null,
+      created_at: now,
+      updated_at: now,
+    });
+  }
+
+  for (let offset = 0; offset < activeUpdates.length; offset += STATIC_REBUILD_BULK_UPDATE_ROWS) {
+    const chunk = activeUpdates.slice(offset, offset + STATIC_REBUILD_BULK_UPDATE_ROWS);
+    statements.push(db.update(staticRebuildQueue).set({
+      reason: sql<string>`CASE ${staticRebuildQueue.id} ${sql.join(
+        chunk.map((item) => sql`WHEN ${item.row.id} THEN ${item.reason}`),
+        sql` `,
+      )} ELSE ${staticRebuildQueue.reason} END`,
+      priority: sql<"high" | "normal" | "low">`CASE ${staticRebuildQueue.id} ${sql.join(
+        chunk.map((item) => sql`WHEN ${item.row.id} THEN ${item.priority}`),
+        sql` `,
+      )} ELSE ${staticRebuildQueue.priority} END`,
+      requested_by_user_id: sql<string | null>`CASE ${staticRebuildQueue.id} ${sql.join(
+        chunk.map((item) => sql`WHEN ${item.row.id} THEN ${item.requestedByUserId}`),
+        sql` `,
+      )} ELSE ${staticRebuildQueue.requested_by_user_id} END`,
+      lease_token: null,
+      lease_expires_at: null,
+      updated_at: now,
+    }).where(or(...chunk.map((item) => and(
+      eq(staticRebuildQueue.id, item.row.id),
+      eq(staticRebuildQueue.status, item.row.status),
+      eq(staticRebuildQueue.updated_at, item.row.updated_at),
+      item.row.lease_token
+        ? eq(staticRebuildQueue.lease_token, item.row.lease_token)
+        : isNull(staticRebuildQueue.lease_token),
+    )!))!));
+    expectedChanges.push(chunk.length);
+  }
+  for (let offset = 0; offset < inserts.length; offset += STATIC_REBUILD_BULK_INSERT_ROWS) {
+    const chunk = inserts.slice(offset, offset + STATIC_REBUILD_BULK_INSERT_ROWS);
+    statements.push(db.insert(staticRebuildQueue).values(chunk));
+    expectedChanges.push(chunk.length);
   }
 
   return { statements, expectedChanges };

@@ -10,8 +10,7 @@ import {
   type VideoAtomicWritePlan,
 } from "@/lib/video/atomicWritePlan";
 import { expectedRowCondition } from "@/lib/audit/adapters";
-
-export const MAX_ATOMIC_VIDEO_MEMBERS = 4;
+import { MAX_ATOMIC_VIDEO_MEMBERS } from "@/lib/video/atomicLimits";
 
 export async function buildReplaceVideoMembersPlan(
   db: DB,

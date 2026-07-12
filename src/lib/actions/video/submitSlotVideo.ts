@@ -13,7 +13,6 @@ import {
 } from "@/lib/db/schema";
 import { buildReplaceVideoSoftwarePlan } from "@/lib/db/software";
 import {
-  buildYoutubeChannelCandidatePlan,
   snapshotYoutubeChannelUrl,
 } from "@/lib/db/youtubeChannelCandidates";
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
@@ -29,7 +28,6 @@ import {
 } from "@/lib/video/atomicWritePlan";
 import { buildReplaceGeneralCustomAnswersPlan } from "@/lib/video/customQuestionAnswers";
 import { buildSubmissionXUserPlan } from "@/lib/video/ensureSubmissionXUser";
-import { buildXIconCandidatePlan } from "@/lib/video/iconCandidate";
 import { parseEventIdsFromForm } from "@/lib/video/parseEventIds";
 import { buildReplaceVideoMembersPlan } from "@/lib/video/replaceVideoMembers";
 import {
@@ -53,8 +51,7 @@ import {
 import type { VideoActionResult } from "@/lib/video/types";
 import { parseVideoForm } from "@/lib/video/videoFormSchema";
 import { isYoutubeIdUniqueConstraintError } from "@/lib/video/youtubeDuplicate";
-
-const MAX_ATOMIC_SUBMITTED_SLOTS = 3;
+import { MAX_ATOMIC_SUBMITTED_SLOTS } from "@/lib/video/atomicLimits";
 
 export async function submitSlotVideo(formData: FormData): Promise<VideoActionResult> {
   const guard = await writeGuard({
@@ -252,18 +249,6 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
       videoId,
       members: memberValidation.value.members,
       chaptersByIndex: memberValidation.value.chaptersByIndex,
-      actorUserId: userId,
-    }));
-    appendVideoAtomicWritePlan(plan, await buildXIconCandidatePlan(db, {
-      xUserId: activeX,
-      iconUrl: parsed.data.icon_url ?? null,
-      videoId,
-      actorUserId: userId,
-    }));
-    appendVideoAtomicWritePlan(plan, await buildYoutubeChannelCandidatePlan(db, {
-      xUserId: activeX,
-      youtubeChannelUrl: parsed.data.youtube_channel_url ?? null,
-      videoId,
       actorUserId: userId,
     }));
     for (const row of submittedSlots) {

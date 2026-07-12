@@ -16,8 +16,7 @@ import {
   type VideoAtomicWritePlan,
 } from "@/lib/video/atomicWritePlan";
 import { expectedRowCondition } from "@/lib/audit/adapters";
-
-export const MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS = 4;
+import { MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS } from "@/lib/video/atomicLimits";
 export const MAX_VIDEO_CUSTOM_QUESTIONS_READ = 18;
 
 type DB = NonNullable<ReturnType<typeof getDatabase>>;
