@@ -22,14 +22,14 @@ concurrency:
   group: deploy-cloudflare-production
   cancel-in-progress: false
 
-env:
-  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-  CF_IDS_JSON: ${{ secrets.CF_IDS_JSON }}
-
 jobs:
   build-pages-artifact:
     runs-on: ubuntu-latest
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_IDS_JSON: ${{ secrets.CF_IDS_JSON }}
     steps:
       - uses: actions/checkout@v4
 
@@ -81,6 +81,10 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.apply_migrations)
     runs-on: ubuntu-latest
     environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_IDS_JSON: ${{ secrets.CF_IDS_JSON }}
     steps:
       - uses: actions/checkout@v4
 
@@ -115,6 +119,10 @@ jobs:
       (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_pages))
     runs-on: ubuntu-latest
     environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_IDS_JSON: ${{ secrets.CF_IDS_JSON }}
     permissions:
       contents: read
       deployments: write
@@ -162,6 +170,10 @@ jobs:
       (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_workers))
     runs-on: ubuntu-latest
     environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_IDS_JSON: ${{ secrets.CF_IDS_JSON }}
     steps:
       - uses: actions/checkout@v4
 
