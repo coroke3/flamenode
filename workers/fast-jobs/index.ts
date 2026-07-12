@@ -6,6 +6,7 @@
 import { processNotificationQueue } from "../notification-dispatcher/dispatch.ts";
 import { enqueueSlotDeadlineReminders } from "../notification-dispatcher/reminders.ts";
 import { withCronLease } from "../shared/cronLease.ts";
+import { withBoundedRetry } from "../shared/queue.ts";
 import { runJob } from "../shared/runJob.ts";
 
 export interface Env {
@@ -32,7 +33,10 @@ export async function runFastJobs(env: Env): Promise<void> {
         const now = Math.floor(Date.now() / 1000);
         if (!lastReminder || now - Number(lastReminder) > REMINDER_INTERVAL_SEC) {
           const reminders = await runJob("fast-jobs", "slot-deadline-reminders", () =>
-            enqueueSlotDeadlineReminders(env),
+            withBoundedRetry(() => enqueueSlotDeadlineReminders(env), {
+              attempts: 2,
+              delayMs: 100,
+            }),
           );
           processed += reminders.processed;
           failed += reminders.failed;

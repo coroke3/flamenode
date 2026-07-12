@@ -7,6 +7,7 @@
  */
 import { recalcScoreBatch } from "../score-recalc/index.ts";
 import { withCronLease } from "../shared/cronLease.ts";
+import { withBoundedRetry } from "../shared/queue.ts";
 import { runJob } from "../shared/runJob.ts";
 import { syncBatch } from "../youtube-sync/index.ts";
 
@@ -24,9 +25,11 @@ export async function runSyncJobs(env: Env): Promise<void> {
       env,
       { jobName: "sync-jobs", leaseSeconds: SYNC_JOBS_LEASE_SEC },
       async () => {
-        const youtube = await runJob("sync-jobs", "youtube-sync", () => syncBatch(env));
+        const youtube = await runJob("sync-jobs", "youtube-sync", () =>
+          withBoundedRetry(() => syncBatch(env), { attempts: 2, delayMs: 250 }),
+        );
         const score = await runJob("sync-jobs", "score-recalc", () =>
-          recalcScoreBatch(env),
+          withBoundedRetry(() => recalcScoreBatch(env), { attempts: 2, delayMs: 100 }),
         );
         return {
           processed: youtube.processed + score.processed,
