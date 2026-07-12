@@ -165,6 +165,7 @@ export async function updateChapter(
         user: { id: sUser.id, role: sUser.role ?? null },
         video: targetVideo,
         requiredKey: "video.chapter_admin",
+        privilegeMode: "event",
       });
     }
   }
@@ -223,6 +224,7 @@ export async function deleteChapter(
         user: { id: sUser.id, role: sUser.role ?? null },
         video: targetVideo,
         requiredKey: "video.chapter_admin",
+        privilegeMode: "event",
       });
     }
   }
@@ -309,6 +311,7 @@ export async function createChaptersBulk(
       user: { id: sUser.id, role: sUser.role ?? null },
       video: target,
       requiredKey: "video.chapter_admin",
+      privilegeMode: "event",
     }));
   if (!canMod) {
     return { ok: false, message: "この動画のチャプター一括登録権限がありません。" };

@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   VIDEO_PERMISSION_ALIASES,
   NORMAL_SAFE_VIDEO_EDIT_KEYS,
@@ -11,6 +12,7 @@ import {
   isDangerousAdminVideoEditKey,
   isUserDelegatableKey,
   parseDelegatablePermissionKeys,
+  resolveAdminOrEventVideoPrivilegeMode,
 } from "./ownershipCore.ts";
 
 // --- VIDEO_PERMISSION_ALIASES ---
@@ -214,4 +216,18 @@ test("privilegeMode: collaborator のデフォルト許可キーは合作系の�
   const collabKeys = Array.from(COLLABORATOR_VIDEO_EDIT_KEYS);
   const dangerousOverlap = collabKeys.filter((k) => isDangerousAdminVideoEditKey(k));
   assert.equal(dangerousOverlap.length, 0, "collaborator 許可キーに危険キーが含まれない");
+});
+
+test("privilegeMode: admin/event 併用入口はロールごとに単一モードへ分離する", () => {
+  assert.equal(resolveAdminOrEventVideoPrivilegeMode("admin"), "admin");
+  assert.equal(resolveAdminOrEventVideoPrivilegeMode("moderator"), "event");
+  assert.equal(resolveAdminOrEventVideoPrivilegeMode("user"), "event");
+  assert.equal(resolveAdminOrEventVideoPrivilegeMode(null), "event");
+});
+
+test("privilegeMode: any・省略可能引数・暗黙defaultを再導入しない", () => {
+  const source = readFileSync(new URL("./ownership.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /CanEditVideoPrivilegeMode[^;]+"any"/);
+  assert.doesNotMatch(source, /privilegeMode\?\s*:/);
+  assert.doesNotMatch(source, /privilegeMode\s*\?\?\s*/);
 });

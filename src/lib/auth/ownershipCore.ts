@@ -11,6 +11,16 @@ export type SessionUserLike = {
   active_x_user_id?: string | null;
 };
 
+/**
+ * admin と event の両方を許可する画面・操作でも、一度の判定では権限源を混ぜない。
+ * admin 以外に admin 特権を与えず、admin を event 権限へ暗黙fallbackさせない。
+ */
+export function resolveAdminOrEventVideoPrivilegeMode(
+  role: string | null | undefined,
+): "admin" | "event" {
+  return role === "admin" ? "admin" : "event";
+}
+
 export const VIDEO_PERMISSION_ALIASES: Record<
   VideoEditSectionKey,
   readonly string[]

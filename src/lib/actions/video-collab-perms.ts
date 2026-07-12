@@ -6,7 +6,10 @@ import { z } from "zod";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { writeGuard } from "@/lib/auth/writeGuard";
-import { canEditVideo } from "@/lib/auth/ownership";
+import {
+  canEditVideo,
+  resolveAdminOrEventVideoPrivilegeMode,
+} from "@/lib/auth/ownership";
 import { videoMembers, videos, xUsers } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
 import { normalizeXId } from "@/lib/utils/xid";
@@ -92,6 +95,7 @@ async function loadEditableVideo(
     user,
     video: row,
     requiredKey: "video.identity",
+    privilegeMode: resolveAdminOrEventVideoPrivilegeMode(user.role),
   });
   if (!ok) return null;
   return row;

@@ -6,7 +6,11 @@ import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { buildAccentVars } from "@/lib/theme/accent";
 import styles from "./page.module.css";
 import { getCurrentUser } from "@/lib/auth/currentUser";
-import { getApprovedXIds, canEditVideo } from "@/lib/auth/ownership";
+import {
+  getApprovedXIds,
+  canEditVideo,
+  resolveAdminOrEventVideoPrivilegeMode,
+} from "@/lib/auth/ownership";
 import { withDatabase } from "@/lib/cloudflare";
 import {
   videoInteractions,
@@ -143,6 +147,7 @@ export default async function VideoDetailPage({
           user: { id: viewerUser.id, role: viewerUser.role ?? null },
           video: probe,
           requiredKey: "video.chapter_admin",
+          privilegeMode: resolveAdminOrEventVideoPrivilegeMode(viewerUser.role),
         });
       }
     }
