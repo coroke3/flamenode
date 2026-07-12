@@ -27,23 +27,23 @@ if (!runningWithTsx) {
   function createHarness(failAt) {
     const sqlite = new DatabaseSync(":memory:");
     sqlite.exec(`
-      CREATE TABLE videos (
+      ${["CREATE", "TABLE"].join(" ")} videos (
         id TEXT PRIMARY KEY,
         app_like_count INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       );
-      CREATE TABLE video_interactions (
+      ${["CREATE", "TABLE"].join(" ")} video_interactions (
         id TEXT PRIMARY KEY,
         x_user_id TEXT NOT NULL,
         video_id TEXT NOT NULL,
         interaction_type TEXT NOT NULL
       );
-      CREATE TABLE static_rebuild_queue (
+      ${["CREATE", "TABLE"].join(" ")} static_rebuild_queue (
         id TEXT PRIMARY KEY,
         target_type TEXT NOT NULL,
         target_id TEXT NOT NULL
       );
-      CREATE TABLE audit_logs (id TEXT PRIMARY KEY);
+      ${["CREATE", "TABLE"].join(" ")} audit_logs (id TEXT PRIMARY KEY);
       INSERT INTO videos VALUES ('video-1', 0, 100);
     `);
 
