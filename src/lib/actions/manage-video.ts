@@ -8,7 +8,10 @@ import { getDatabase } from "@/lib/cloudflare";
 import { videos, videoEvents } from "@/lib/db/schema";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { buildVideoStatusChangeNotificationBatch } from "@/lib/notifications/videoStatusNotify";
-import { buildAfterVideoStatusChangeQueueBatch } from "@/lib/staticRebuild/hooks";
+import {
+  buildAfterVideoStatusChangeQueueBatch,
+  MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS,
+} from "@/lib/staticRebuild/hooks";
 
 export interface ManageVideoActionResult {
   ok: boolean;
@@ -85,7 +88,24 @@ export async function setManageVideoStatus(
     visibility_status: status as typeof target.visibility_status,
     updated_at: now,
   };
-  const eventRows = await db.select({ event_id: videoEvents.event_id }).from(videoEvents).where(eq(videoEvents.video_id, videoId));
+  const eventRows = await db
+    .select({ event_id: videoEvents.event_id })
+    .from(videoEvents)
+    .where(eq(videoEvents.video_id, videoId))
+    .limit(MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS + 1);
+  const rebuildEventIds = Array.from(
+    new Set(
+      [target.primary_event_id, ...eventRows.map((row) => row.event_id)].filter(
+        (id): id is string => Boolean(id),
+      ),
+    ),
+  );
+  if (rebuildEventIds.length > MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS) {
+    return {
+      ok: false,
+      message: "所属イベント数が上限を超えているため、状態を安全に更新できません。",
+    };
+  }
   const notification = await buildVideoStatusChangeNotificationBatch(db, {
     videoId,
     videoTitle: target.title,
@@ -97,23 +117,39 @@ export async function setManageVideoStatus(
     eventId,
   });
   const queue = await buildAfterVideoStatusChangeQueueBatch(db, {
-    videoId, eventIds: eventRows.map((row) => row.event_id),
+    videoId, eventIds: rebuildEventIds,
     creatorXUserId: target.creator_x_user_id, primaryEventId: target.primary_event_id,
     requestedByUserId: u.id,
   });
 
-  await mutateWithAudit(db, {
-    mutationStatements: [
+  const mutationStatements = [
       db.update(videos).set({ visibility_status: after.visibility_status, updated_at: now })
-        .where(and(eq(videos.id, videoId), eq(videos.visibility_status, prevStatus))),
+        .where(
+          and(
+            eq(videos.id, videoId),
+            eq(videos.visibility_status, prevStatus),
+            eq(videos.updated_at, target.updated_at),
+          ),
+        ),
       ...notification.statements,
       ...queue.statements,
-    ],
+    ];
+  if (mutationStatements.length * 2 + 2 > 50) {
+    return {
+      ok: false,
+      message: "作品状態更新の原子的処理がD1の上限を超えます。",
+    };
+  }
+  await mutateWithAudit(db, {
+    mutationStatements,
     expectedMutationChanges: [1, ...notification.expectedChanges, ...queue.expectedChanges],
     audits: [{
       table_name: "videos", target_id: videoId, operation: "UPDATE",
-      before: { ...target }, after: { ...after, manage_event_id: eventId, reason: reason || null },
-      actor_user_id: u.id, retention_class: "normal", strict: true,
+      before: { ...target }, after: { ...after },
+      actor_user_id: u.id,
+      reason: reason || null,
+      context: `manage-video-status:${eventId}`,
+      retention_class: "normal", strict: true,
     }],
   });
 

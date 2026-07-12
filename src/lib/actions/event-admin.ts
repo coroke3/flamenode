@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import {
@@ -35,9 +35,35 @@ import {
 
 type PlannedQuestion = typeof eventCustomQuestions.$inferInsert;
 
-function questionSnapshot(row: PlannedQuestion): Record<string, unknown> { return { ...row }; }
+export const MAX_EVENT_CUSTOM_QUESTIONS = 18;
+export const MAX_D1_ATOMIC_BATCH_STATEMENTS = 50;
+const MAX_QUESTIONS_PER_INSERT = 6;
 
-function stageQuestionRows(eventId: string, settingsJson: string, now: number): PlannedQuestion[] {
+function questionSnapshot(row: PlannedQuestion): Record<string, unknown> {
+  return { ...row };
+}
+
+export function fitsD1AtomicBatchBudget(mutationCount: number): boolean {
+  // mutateWithAudit は変更件数を検査するため、各 mutation の直後に assertion を
+  // 1 statement 追加し、最後に audit INSERT と audit assertion を1件ずつ追加する。
+  return mutationCount * 2 + 2 <= MAX_D1_ATOMIC_BATCH_STATEMENTS;
+}
+
+function questionInsertChunks(
+  rows: PlannedQuestion[],
+): PlannedQuestion[][] {
+  const chunks: PlannedQuestion[][] = [];
+  for (let index = 0; index < rows.length; index += MAX_QUESTIONS_PER_INSERT) {
+    chunks.push(rows.slice(index, index + MAX_QUESTIONS_PER_INSERT));
+  }
+  return chunks;
+}
+
+function stageQuestionRows(
+  eventId: string,
+  settingsJson: string,
+  now: number,
+): PlannedQuestion[] {
   return resolveStagePermissionFieldsFromJson([settingsJson]).map((field, index) => ({
     id: generateId("ecq"), event_id: eventId, question_key: field.id,
     label: field.label, description: field.description || null, type: "textarea" as const,
@@ -139,25 +165,83 @@ export async function createEvent(
     public_api_enabled: 0,
     public_api_updated_at: null,
   } satisfies typeof events.$inferInsert;
-  const templateQuestions = (templateSnapshot?.custom_question_definitions ?? []).slice(0, 20).map((definition) => ({
-    id: generateId("ecq"), event_id: id, question_key: definition.question_key,
-    label: definition.label, description: definition.description, type: definition.type,
-    required: definition.required ? 1 : 0, options_json: definition.options_json,
-    placeholder: definition.placeholder, max_length: definition.max_length,
-    sort_order: definition.sort_order, is_active: definition.is_active ? 1 : 0,
-    visibility: definition.visibility, created_at: now, updated_at: now,
+  const templateQuestions = (
+    templateSnapshot?.custom_question_definitions ?? []
+  ).map((definition) => ({
+    id: generateId("ecq"),
+    event_id: id,
+    question_key: definition.question_key,
+    label: definition.label,
+    description: definition.description,
+    type: definition.type,
+    required: definition.required ? 1 : 0,
+    options_json: definition.options_json,
+    placeholder: definition.placeholder,
+    max_length: definition.max_length,
+    sort_order: definition.sort_order,
+    is_active: definition.is_active ? 1 : 0,
+    visibility: definition.visibility,
+    created_at: now,
+    updated_at: now,
   } satisfies PlannedQuestion));
   const questions = [...templateQuestions, ...stageQuestionRows(id, videoFormSettingsJson, now)];
+  if (questions.length > MAX_EVENT_CUSTOM_QUESTIONS) {
+    return {
+      ok: false,
+      message: `カスタム質問はステージ質問を含めて最大${MAX_EVENT_CUSTOM_QUESTIONS}件です。`,
+    };
+  }
+  if (new Set(questions.map((row) => row.question_key)).size !== questions.length) {
+    return { ok: false, message: "カスタム質問の識別子が重複しています。" };
+  }
   const queue = await buildStaticRebuildQueueBatch(db, [
     { targetType: "event", targetId: id, reason: "event_create", priority: "high", requestedByUserId: guard.userId },
     { targetType: "events_index", targetId: "global", reason: "event_create", priority: "low", requestedByUserId: guard.userId },
     { targetType: "search_index", targetId: "global", reason: "event_create", priority: "low", requestedByUserId: guard.userId },
   ]);
-  const questionAudits = questions.map((row) => ({ table_name: "event_custom_questions", target_id: row.id, operation: "CREATE" as const, before: null, after: questionSnapshot(row), actor_user_id: guard.userId, retention_class: "normal" as const, strict: true }));
+  const mutationStatements = [
+    db.insert(events).values(createdRow),
+    ...questionInsertChunks(questions).map((chunk) =>
+      db.insert(eventCustomQuestions).values(chunk),
+    ),
+    ...queue.statements,
+  ];
+  const expectedMutationChanges = [
+    1,
+    ...questionInsertChunks(questions).map((chunk) => chunk.length),
+    ...queue.expectedChanges,
+  ];
+  if (!fitsD1AtomicBatchBudget(mutationStatements.length)) {
+    return { ok: false, message: "イベント作成の原子的処理がD1の上限を超えます。" };
+  }
   await mutateWithAudit(db, {
-    mutationStatements: [db.insert(events).values(createdRow), ...questions.map((row) => db.insert(eventCustomQuestions).values(row)), ...queue.statements],
-    expectedMutationChanges: [1, ...questions.map(() => 1), ...queue.expectedChanges],
-    audits: [{ table_name: "events", target_id: id, operation: "CREATE", before: null, after: createdRow, actor_user_id: guard.userId, retention_class: "normal", strict: true }, ...questionAudits],
+    mutationStatements,
+    expectedMutationChanges,
+    audits: [
+      {
+        table_name: "events",
+        target_id: id,
+        operation: "CREATE",
+        before: null,
+        after: createdRow,
+        actor_user_id: guard.userId,
+        retention_class: "normal",
+        strict: true,
+      },
+      ...(questions.length > 0
+        ? [{
+            table_name: "event_custom_questions",
+            target_id: id,
+            operation: "CREATE" as const,
+            before: null,
+            after: { rows: questions.map(questionSnapshot) },
+            actor_user_id: guard.userId,
+            context: "event-create:custom-questions",
+            retention_class: "normal" as const,
+            strict: true,
+          }]
+        : []),
+    ],
   });
 
   revalidateEventListPaths();
@@ -212,29 +296,114 @@ export async function updateEvent(
   }];
 
   if (permissions.questions && built.videoFormSettingsJson != null) {
-    const existing = await db.select().from(eventCustomQuestions).where(and(eq(eventCustomQuestions.event_id, data.id), stagePermissionQuestionKeyCondition()));
+    const existing = await db
+      .select()
+      .from(eventCustomQuestions)
+      .where(
+        and(
+          eq(eventCustomQuestions.event_id, data.id),
+          stagePermissionQuestionKeyCondition(),
+        ),
+      );
     const next = stageQuestionRows(data.id, built.videoFormSettingsJson, now);
+    if (next.length > MAX_EVENT_CUSTOM_QUESTIONS) {
+      return {
+        ok: false,
+        message: `カスタム質問は最大${MAX_EVENT_CUSTOM_QUESTIONS}件です。`,
+      };
+    }
+    if (new Set(next.map((row) => row.question_key)).size !== next.length) {
+      return { ok: false, message: "カスタム質問の識別子が重複しています。" };
+    }
     const nextByKey = new Map(next.map((row) => [row.question_key, row]));
+    const obsoleteQuestions = existing.filter(
+      (row) => !nextByKey.has(row.question_key),
+    );
+    const obsoleteQuestionIds = obsoleteQuestions.map((row) => row.id);
+    const deletedAnswers = obsoleteQuestionIds.length > 0
+      ? await db
+          .select()
+          .from(videoCustomAnswers)
+          .where(inArray(videoCustomAnswers.question_id, obsoleteQuestionIds))
+      : [];
+    if (deletedAnswers.length > 0) {
+      mutations.push(
+        db
+          .delete(videoCustomAnswers)
+          .where(inArray(videoCustomAnswers.question_id, obsoleteQuestionIds)),
+      );
+      expected.push(deletedAnswers.length);
+      audits.push({
+        table_name: "video_custom_answers",
+        target_id: data.id,
+        operation: "DELETE",
+        before: { rows: deletedAnswers },
+        after: { rows: [] },
+        actor_user_id: u.id,
+        context: "event-update:removed-stage-question-answers",
+        retention_class: "normal",
+        strict: true,
+      });
+    }
+    if (obsoleteQuestionIds.length > 0) {
+      mutations.push(
+        db
+          .delete(eventCustomQuestions)
+          .where(inArray(eventCustomQuestions.id, obsoleteQuestionIds)),
+      );
+      expected.push(obsoleteQuestionIds.length);
+    }
+
+    const finalQuestions: Array<typeof eventCustomQuestions.$inferSelect> = [];
     for (const row of existing) {
       const replacement = nextByKey.get(row.question_key);
       if (!replacement) {
-        const answerCount = (await db.select({ id: videoCustomAnswers.video_id }).from(videoCustomAnswers).where(eq(videoCustomAnswers.question_id, row.id))).length;
-        mutations.push(db.delete(videoCustomAnswers).where(eq(videoCustomAnswers.question_id, row.id)), db.delete(eventCustomQuestions).where(eq(eventCustomQuestions.id, row.id)));
-        expected.push(answerCount, 1);
-        audits.push({ table_name: "event_custom_questions", target_id: row.id, operation: "DELETE" as const, before: row, after: null, actor_user_id: u.id, retention_class: "normal" as const, strict: true });
         continue;
       }
       nextByKey.delete(row.question_key);
       const { id: _id, event_id: _eventId, created_at: _createdAt, ...updateValues } = replacement;
       const updated = { ...row, ...replacement, id: row.id, created_at: row.created_at };
-      mutations.push(db.update(eventCustomQuestions).set(updateValues).where(eq(eventCustomQuestions.id, row.id)));
+      mutations.push(
+        db
+          .update(eventCustomQuestions)
+          .set(updateValues)
+          .where(
+            and(
+              eq(eventCustomQuestions.id, row.id),
+              eq(eventCustomQuestions.updated_at, row.updated_at),
+            ),
+          ),
+      );
       expected.push(1);
-      audits.push({ table_name: "event_custom_questions", target_id: row.id, operation: "UPDATE" as const, before: row, after: updated, actor_user_id: u.id, retention_class: "normal" as const, strict: true });
+      finalQuestions.push(updated);
     }
-    for (const row of nextByKey.values()) {
-      mutations.push(db.insert(eventCustomQuestions).values(row));
-      expected.push(1);
-      audits.push({ table_name: "event_custom_questions", target_id: row.id, operation: "CREATE" as const, before: null, after: row, actor_user_id: u.id, retention_class: "normal" as const, strict: true });
+    const insertedQuestions = [...nextByKey.values()];
+    if (insertedQuestions.length > 0) {
+      const insertChunks = questionInsertChunks(insertedQuestions);
+      mutations.push(
+        ...insertChunks.map((chunk) =>
+          db.insert(eventCustomQuestions).values(chunk),
+        ),
+      );
+      expected.push(...insertChunks.map((chunk) => chunk.length));
+      finalQuestions.push(
+        ...insertedQuestions as Array<typeof eventCustomQuestions.$inferSelect>,
+      );
+    }
+    const questionsChanged =
+      existing.length > 0 || insertedQuestions.length > 0;
+    if (questionsChanged) {
+      audits.push({
+        table_name: "event_custom_questions",
+        target_id: data.id,
+        operation: "UPDATE",
+        before: { rows: existing },
+        after: { rows: finalQuestions },
+        actor_user_id: u.id,
+        context: "event-update:stage-questions",
+        retention_class: "normal",
+        strict: true,
+      });
     }
   }
   const queue = await buildStaticRebuildQueueBatch(db, [
@@ -242,8 +411,12 @@ export async function updateEvent(
     { targetType: "events_index", targetId: "global", reason: "event_settings_update", priority: "low", requestedByUserId: u.id },
     { targetType: "search_index", targetId: "global", reason: "event_settings_update", priority: "low", requestedByUserId: u.id },
   ]);
+  const mutationStatements = [...mutations, ...queue.statements];
+  if (!fitsD1AtomicBatchBudget(mutationStatements.length)) {
+    return { ok: false, message: "イベント更新の原子的処理がD1の上限を超えます。" };
+  }
   await mutateWithAudit(db, {
-    mutationStatements: [...mutations, ...queue.statements],
+    mutationStatements,
     expectedMutationChanges: [...expected, ...queue.expectedChanges],
     audits,
   });

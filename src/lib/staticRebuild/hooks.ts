@@ -1,7 +1,8 @@
 import "server-only";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
-import { videoEvents, videos } from "@/lib/db/schema";
+import { staticRebuildQueue, videoEvents, videos } from "@/lib/db/schema";
+import { generateId } from "@/lib/utils/id";
 import {
   buildStaticRebuildQueueBatch,
   enqueueStaticRebuild,
@@ -16,6 +17,8 @@ type HookBase = {
   priority?: StaticRebuildPriority;
   reason: string;
 };
+
+export const MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS = 8;
 
 export async function enqueueAfterVideoCreate(
   db: DB,
@@ -177,17 +180,93 @@ export async function buildAfterVideoStatusChangeQueueBatch(
   db: DB,
   opts: { videoId: string; eventIds: string[]; creatorXUserId?: string | null; primaryEventId?: string | null; requestedByUserId?: string | null },
 ): Promise<StaticRebuildQueueBatch> {
-  const eventIds = Array.from(new Set([opts.primaryEventId, ...opts.eventIds].filter((id): id is string => Boolean(id))));
-  const items: EnqueueStaticRebuildInput[] = [
+  const eventIds = Array.from(
+    new Set(
+      [opts.primaryEventId, ...opts.eventIds].filter(
+        (id): id is string => Boolean(id),
+      ),
+    ),
+  );
+  if (eventIds.length > MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS) {
+    throw new Error("video_status_rebuild_event_limit_exceeded");
+  }
+
+  const fixedItems: EnqueueStaticRebuildInput[] = [
     { targetType: "video", targetId: opts.videoId, reason: "video_update", priority: "normal", requestedByUserId: opts.requestedByUserId },
     { targetType: "top", targetId: "global", reason: "video_update" },
     { targetType: "list_recent", targetId: "global", reason: "video_update" },
     { targetType: "list_popular", targetId: "global", reason: "video_update" },
     { targetType: "search_index", targetId: "global", reason: "video_update", priority: "low" },
   ];
-  if (opts.creatorXUserId) items.push({ targetType: "user", targetId: opts.creatorXUserId, reason: "video_update" });
-  for (const eventId of eventIds) items.push({ targetType: "event", targetId: eventId, reason: "video_update" });
-  return buildStaticRebuildQueueBatch(db, items);
+  if (opts.creatorXUserId) {
+    fixedItems.push({
+      targetType: "user",
+      targetId: opts.creatorXUserId,
+      reason: "video_update",
+    });
+  }
+  const fixedBatch = await buildStaticRebuildQueueBatch(db, fixedItems);
+  if (eventIds.length === 0) return fixedBatch;
+
+  // event target は一括取得し、イベント数に比例するSELECT N+1を作らない。
+  const activeRows = await db
+    .select()
+    .from(staticRebuildQueue)
+    .where(
+      and(
+        eq(staticRebuildQueue.target_type, "event"),
+        inArray(staticRebuildQueue.target_id, eventIds),
+        inArray(staticRebuildQueue.status, ["pending", "processing"]),
+      ),
+    );
+  const activeByEventId = new Map(
+    activeRows.map((row) => [row.target_id, row]),
+  );
+  const now = Math.floor(Date.now() / 1000);
+  const statements = [...fixedBatch.statements];
+  const expectedChanges = [...fixedBatch.expectedChanges];
+
+  for (const eventId of eventIds) {
+    const active = activeByEventId.get(eventId);
+    if (active?.status === "processing") continue;
+    if (active?.status === "pending") {
+      statements.push(
+        db
+          .update(staticRebuildQueue)
+          .set({
+            reason: "video_update",
+            requested_by_user_id:
+              opts.requestedByUserId ?? active.requested_by_user_id,
+            updated_at: now,
+          })
+          .where(
+            and(
+              eq(staticRebuildQueue.id, active.id),
+              eq(staticRebuildQueue.status, "pending"),
+              eq(staticRebuildQueue.updated_at, active.updated_at),
+            ),
+          ),
+      );
+      expectedChanges.push(1);
+      continue;
+    }
+    statements.push(
+      db.insert(staticRebuildQueue).values({
+        id: generateId("srb"),
+        target_type: "event",
+        target_id: eventId,
+        reason: "video_update",
+        priority: "normal",
+        status: "pending",
+        requested_by_user_id: opts.requestedByUserId ?? null,
+        created_at: now,
+        updated_at: now,
+      }),
+    );
+    expectedChanges.push(1);
+  }
+
+  return { statements, expectedChanges };
 }
 
 export async function enqueueAfterEventSettingsChange(
