@@ -22,7 +22,82 @@ if (!runningWithTsx) {
   if (result.error) throw result.error;
   if (result.status !== 0) process.exitCode = result.status ?? 1;
 } else {
-  const { executeVideoAtomicWritePlan } = await import("./atomicWritePlan.ts");
+  const {
+    executeVideoAtomicWritePlan,
+    inspectVideoAtomicWritePlanBudget,
+    VideoAtomicPlanBudgetError,
+  } = await import("./atomicWritePlan.ts");
+
+  const budgetPlan = (statementCount, auditCount) => ({
+    statements: Array.from({ length: statementCount }, () => ({ kind: "mutation" })),
+    expectedChanges: Array.from({ length: statementCount }, () => 1),
+    audits: Array.from({ length: auditCount }, (_, index) => ({
+      table_name: "videos",
+      target_id: `video-${index}`,
+      operation: "UPDATE",
+      before: { id: `video-${index}` },
+      after: { id: `video-${index}` },
+      actor_user_id: "actor-1",
+    })),
+  });
+
+  test("D1境界は15 statement・16 auditでちょうど50 queryに収まる", () => {
+    const budget = inspectVideoAtomicWritePlanBudget(budgetPlan(15, 16));
+    assert.equal(budget.totalQueryCount, 50);
+    assert.equal(budget.withinLimit, true);
+  });
+
+  test("最小の単独投稿は5 statement・3 auditで24 queryに収まる", () => {
+    const budget = inspectVideoAtomicWritePlanBudget(budgetPlan(5, 3));
+    assert.deepEqual(
+      {
+        statements: budget.mutationStatementCount,
+        assertions: budget.mutationAssertionCount,
+        auditChunks: budget.auditChunkCount,
+        preparation: budget.preparationQueryCount,
+        reserved: budget.reservedCallerQueryCount,
+        total: budget.totalQueryCount,
+      },
+      { statements: 5, assertions: 5, auditChunks: 1, preparation: 2, reserved: 10, total: 24 },
+    );
+  });
+
+  test("代表的な投稿はqueue既存行混在時も15 statement・15 auditで50 queryに収まる", () => {
+    const budget = inspectVideoAtomicWritePlanBudget(budgetPlan(15, 15));
+    assert.deepEqual(
+      {
+        statements: budget.mutationStatementCount,
+        assertions: budget.mutationAssertionCount,
+        auditChunks: budget.auditChunkCount,
+        preparation: budget.preparationQueryCount,
+        reserved: budget.reservedCallerQueryCount,
+        total: budget.totalQueryCount,
+      },
+      { statements: 15, assertions: 15, auditChunks: 4, preparation: 2, reserved: 10, total: 50 },
+    );
+    assert.equal(budget.withinLimit, true);
+  });
+
+  test("全上限同時指定の22 statement・53 auditは84 queryとして事前拒否する", async () => {
+    const plan = budgetPlan(22, 53);
+    const budget = inspectVideoAtomicWritePlanBudget(plan);
+    assert.equal(budget.totalQueryCount, 84);
+    assert.equal(budget.withinLimit, false);
+    let batchCalled = false;
+    await assert.rejects(
+      executeVideoAtomicWritePlan({ batch: async () => { batchCalled = true; } }, plan),
+      (error) =>
+        error instanceof VideoAtomicPlanBudgetError &&
+        error.budget.totalQueryCount === budget.totalQueryCount,
+    );
+    assert.equal(batchCalled, false);
+  });
+
+  test("16 statement・16 auditは52 queryとなり境界直後で事前拒否する", () => {
+    const budget = inspectVideoAtomicWritePlanBudget(budgetPlan(16, 16));
+    assert.equal(budget.totalQueryCount, 52);
+    assert.equal(budget.withinLimit, false);
+  });
 
   function createHarness(failAt) {
     const sqlite = new DatabaseSync(":memory:");
@@ -50,7 +125,7 @@ if (!runningWithTsx) {
               continue;
             }
             generated += 1;
-            // Five changes assertions are followed by the audit INSERT/assertion pair.
+            // 5件の変更件数assertionの次が、監査INSERTと監査assertionになる。
             if (generated === 6) {
               sqlite.prepare("INSERT INTO audit_logs VALUES ('audit-1')").run();
               if (failAt === "audit") throw new Error("injected:audit");

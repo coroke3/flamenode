@@ -59,14 +59,39 @@ test("更新・削除planは全scalar snapshot CASを共通利用する", () => 
 });
 
 test("1 statementの最悪bind数はD1上限100未満に固定する", () => {
-  const member = read("./replaceVideoMembers.ts");
-  const software = read("../db/software.ts");
-  assert.match(member, /MAX_ATOMIC_VIDEO_MEMBERS = 4/);
-  assert.match(software, /MAX_ATOMIC_VIDEO_SOFTWARES = 4/);
-  // video_members is currently 15 scalar columns plus the repeated id predicate.
+  const limits = read("./atomicLimits.ts");
+  assert.match(limits, /MAX_ATOMIC_VIDEO_MEMBERS = 4/);
+  assert.match(limits, /MAX_ATOMIC_VIDEO_SOFTWARES = 4/);
+  // video_membersは15 scalar列と重複するid条件を含む。
   assert.ok(4 * 16 < 100);
-  // video_softwares is 4 scalar columns plus repeated PK predicates.
+  // video_softwaresは4 scalar列と重複する複合PK条件を含む。
   assert.ok(4 * 6 < 100);
+});
+
+test("静的queueはCASE更新とmulti-values INSERTへ集約する", () => {
+  const queue = read("../staticRebuild/enqueue.ts");
+  assert.match(queue, /STATIC_REBUILD_BULK_UPDATE_ROWS = 6/);
+  assert.match(queue, /STATIC_REBUILD_BULK_INSERT_ROWS = 10/);
+  assert.match(queue, /CASE \$\{staticRebuildQueue\.id\}/);
+  assert.match(queue, /db\.insert\(staticRebuildQueue\)\.values\(chunk\)/);
+});
+
+test("投稿候補はvideos snapshotから導出し候補履歴を二重書込みしない", () => {
+  const combined = [create, submit, update].join("\n");
+  assert.doesNotMatch(combined, /buildXIconCandidatePlan/);
+  assert.doesNotMatch(combined, /buildYoutubeChannelCandidatePlan/);
+});
+
+test("FormData parserとUIはatomic上限の共通定数を使う", () => {
+  const memberParser = read("./memberInputs.ts");
+  const videoSchema = read("./videoFormSchema.ts");
+  const videoForm = read("../../components/forms/VideoForm.tsx");
+  const memberForm = read("../../components/forms/VideoMembersField.tsx");
+  assert.match(memberParser, /\.max\(\s*MAX_ATOMIC_VIDEO_MEMBERS/);
+  assert.match(videoSchema, /normalizeSoftwareLabels\(value\)\.length <= MAX_ATOMIC_VIDEO_SOFTWARES/);
+  assert.match(videoForm, /selectedEventIds\.length >= MAX_ATOMIC_VIDEO_EVENTS/);
+  assert.match(videoForm, /最大\{MAX_ATOMIC_VIDEO_SOFTWARES\}件/);
+  assert.match(memberForm, /normalizedRows\.length >= MAX_ATOMIC_VIDEO_MEMBERS/);
 });
 
 test("主要行の監査は投影ではなく完全なbefore/after rowを保持する", () => {
