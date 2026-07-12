@@ -3,6 +3,10 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 const source = await readFile(new URL("./slot-admin.ts", import.meta.url), "utf8");
+const formSource = await readFile(
+  new URL("../../components/admin/SlotBatchForm.tsx", import.meta.url),
+  "utf8",
+);
 
 test("slot-admin の全 mutation が canonical atomic helper を使う", () => {
   for (const name of [
@@ -67,4 +71,33 @@ test("3行の最悪経路が D1 Free 50 query / 100 bind 契約内に収まる",
   assert.ok(Math.max(maxConditionalInsertBinds, maxStrictAuditInsertBinds, maxUpdateBinds) <= 100);
   assert.equal(worstQueryCount, 27);
   assert.ok(worstQueryCount <= 50);
+});
+
+test("slot生成のUIとserverは同じ3件上限を案内・検証する", () => {
+  const serverLimit = source.match(/const MAX_ATOMIC_SLOT_ROWS = (\d+);/)?.[1];
+  const formLimit = formSource.match(/const MAX_ATOMIC_SLOT_ROWS = (\d+);/)?.[1];
+
+  assert.equal(serverLimit, "3");
+  assert.equal(formLimit, serverLimit);
+  assert.match(source, /count: z\.coerce\.number\(\)\.min\(1\)\.max\(MAX_ATOMIC_SLOT_ROWS\)/);
+  assert.match(formSource, /max=\{MAX_ATOMIC_SLOT_ROWS\}/);
+  assert.match(formSource, /defaultValue=\{MAX_ATOMIC_SLOT_ROWS\}/);
+  assert.match(formSource, /終了日時までの範囲から、一度に最大 \{MAX_ATOMIC_SLOT_ROWS\} 枠/);
+  assert.match(formSource, /一度に最大 \{MAX_ATOMIC_SLOT_ROWS\} 枠まで生成できます/);
+});
+
+test("上限判定前のavailable・group queryは4件目で打ち切る", () => {
+  assert.equal((source.match(/\.limit\(MAX_ATOMIC_SLOT_ROWS \+ 1\)/g) ?? []).length, 3);
+  assert.match(
+    source,
+    /eq\(slots\.status, "available"\)[\s\S]*?\.limit\(MAX_ATOMIC_SLOT_ROWS \+ 1\)/,
+  );
+  assert.match(
+    source,
+    /eq\(slots\.reservation_group_id, groupId\)[\s\S]*?\.limit\(MAX_ATOMIC_SLOT_ROWS \+ 1\)/,
+  );
+  assert.match(
+    source,
+    /inArray\(slots\.reservation_group_id, groupIds\)[\s\S]*?\.limit\(MAX_ATOMIC_SLOT_ROWS \+ 1\)/,
+  );
 });

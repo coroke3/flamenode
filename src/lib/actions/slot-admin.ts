@@ -34,7 +34,7 @@ const batchSchema = z.object({
   start_at: z.string().optional().nullable(),
   end_at: z.string().optional().nullable(),
   interval_minutes: z.coerce.number().min(1).max(60 * 24).default(5),
-  count: z.coerce.number().min(1).max(500).default(1),
+  count: z.coerce.number().min(1).max(MAX_ATOMIC_SLOT_ROWS).default(1),
   label_prefix: z.string().trim().max(40).optional().nullable(),
   start_index: z.coerce.number().min(0).max(9999).default(1),
 });
@@ -246,7 +246,11 @@ export async function deleteAvailableSlots(formData: FormData): Promise<SlotActi
   if (!guard.ok) return guard.result;
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
-  const rows = await db.select().from(slots).where(and(eq(slots.event_id, eventId), eq(slots.status, "available"))!);
+  const rows = await db
+    .select()
+    .from(slots)
+    .where(and(eq(slots.event_id, eventId), eq(slots.status, "available"))!)
+    .limit(MAX_ATOMIC_SLOT_ROWS + 1);
   if (rows.length === 0) return { ok: true, created: 0 };
   if (rows.length > MAX_ATOMIC_SLOT_ROWS) return { ok: false, message: `一度に処理できる枠は ${MAX_ATOMIC_SLOT_ROWS} 件までです。` };
   const queueBatch = await buildEventQueueBatch(db, eventId, "slot_admin_delete_available", guard.userId);
@@ -273,7 +277,11 @@ export async function releaseSlot(formData: FormData): Promise<SlotActionResult>
   if (!guard.ok) return guard.result;
   const groupId = row.reservation_group_id?.trim() || null;
   const rows = groupId
-    ? await db.select().from(slots).where(and(eq(slots.event_id, row.event_id), eq(slots.reservation_group_id, groupId), row.reserved_by_user_id ? eq(slots.reserved_by_user_id, row.reserved_by_user_id) : isNull(slots.reserved_by_user_id), row.x_user_id ? eq(slots.x_user_id, row.x_user_id) : isNull(slots.x_user_id))!)
+    ? await db
+        .select()
+        .from(slots)
+        .where(and(eq(slots.event_id, row.event_id), eq(slots.reservation_group_id, groupId), row.reserved_by_user_id ? eq(slots.reserved_by_user_id, row.reserved_by_user_id) : isNull(slots.reserved_by_user_id), row.x_user_id ? eq(slots.x_user_id, row.x_user_id) : isNull(slots.x_user_id))!)
+        .limit(MAX_ATOMIC_SLOT_ROWS + 1)
     : [row];
   if (rows.length === 0 || rows.some((candidate) => candidate.status !== "reserved")) return { ok: false, message: "対象グループ全体が予約中ではありません。" };
   if (rows.length > MAX_ATOMIC_SLOT_ROWS) return { ok: false, message: `一度に解放できる枠は ${MAX_ATOMIC_SLOT_ROWS} 件までです。` };
@@ -354,7 +362,13 @@ export async function batchReleaseReservedSlots(formData: FormData): Promise<Slo
   const selected = await db.select().from(slots).where(and(eq(slots.event_id, eventId), inArray(slots.id, slotIds))!);
   if (selected.length !== slotIds.length || selected.some((row) => row.status !== "reserved")) return { ok: false, message: "対象に予約中以外または存在しない枠があります。" };
   const groupIds = [...new Set(selected.map((row) => row.reservation_group_id).filter((id): id is string => Boolean(id)))];
-  const grouped = groupIds.length > 0 ? await db.select().from(slots).where(and(eq(slots.event_id, eventId), inArray(slots.reservation_group_id, groupIds))!) : [];
+  const grouped = groupIds.length > 0
+    ? await db
+        .select()
+        .from(slots)
+        .where(and(eq(slots.event_id, eventId), inArray(slots.reservation_group_id, groupIds))!)
+        .limit(MAX_ATOMIC_SLOT_ROWS + 1)
+    : [];
   const byId = new Map<string, SlotRow>(selected.map((row) => [row.id, row]));
   for (const row of grouped) byId.set(row.id, row);
   const rows = [...byId.values()];
