@@ -34,7 +34,7 @@ test("audit mutation は D1 batch と変更件数 assertion を同一取引で�
   // assertion していることを固定する。
   assert.match(mutateSource, /await db\.batch\(batchItems/);
   assert.match(mutateSource, /db\.run\(assertChanges\(perStatementExpectedChanges\[index\]/);
-  assert.match(mutateSource, /db\.run\(assertionSql\(entries\)\)/);
+  assert.match(mutateSource, /auditChunks\.flatMap/);
   assert.match(mutateSource, /input\.postAuditStatements/);
 });
 

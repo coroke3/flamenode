@@ -3,7 +3,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import type { DB } from "@/lib/db/client";
 import type { WriteAuditLogInput } from "./types";
 import {
-  prepareAuditLogEntry,
+  prepareAuditLogEntries,
   type PreparedAuditLogEntry,
 } from "./logger";
 
@@ -14,6 +14,23 @@ const AUDIT_COLUMNS = sql.raw(`
   payload_size_bytes, expires_at, created_at,
   restore_unavailable_reason_code, restore_unavailable_message
 `);
+
+/** D1 の 1 query あたり bind parameter 上限。 */
+export const D1_MAX_BIND_PARAMETERS = 100;
+/** D1 Free の 1 invocation あたり batch query 上限。 */
+export const D1_MAX_BATCH_QUERIES = 50;
+/** caller の権限・対象行取得など、監査関数外の query 用に予約する余裕。 */
+export const D1_RESERVED_CALLER_QUERIES = 10;
+const AUDIT_COLUMN_COUNT = 20;
+const AUDIT_CONDITION_BIND_COUNT = 1;
+/**
+ * 監査 INSERT は条件 bind も含めて上限を越えない固定 chunk にする。
+ * floor((100 - 1) / (20 + 1)) = 4
+ */
+export const AUDIT_INSERT_CHUNK_SIZE = Math.floor(
+  (D1_MAX_BIND_PARAMETERS - AUDIT_CONDITION_BIND_COUNT) /
+    (AUDIT_COLUMN_COUNT + AUDIT_CONDITION_BIND_COUNT),
+);
 
 export class AuditMutationError extends Error {
   constructor(message: string) {
@@ -88,6 +105,46 @@ function assertionSql(entries: readonly PreparedAuditLogEntry[]): SQL {
   `;
 }
 
+function chunkEntries(
+  entries: readonly PreparedAuditLogEntry[],
+): readonly PreparedAuditLogEntry[][] {
+  const chunks: PreparedAuditLogEntry[][] = [];
+  for (let index = 0; index < entries.length; index += AUDIT_INSERT_CHUNK_SIZE) {
+    chunks.push(entries.slice(index, index + AUDIT_INSERT_CHUNK_SIZE));
+  }
+  return chunks;
+}
+
+function auditInsertSql(
+  entries: readonly PreparedAuditLogEntry[],
+  condition: SQL,
+): SQL {
+  const selects = entries.map((entry) => auditSelect(entry, condition));
+  return sql`
+    INSERT INTO audit_logs (${AUDIT_COLUMNS})
+    ${sql.join(selects, sql` UNION ALL `)}
+  `;
+}
+
+function countBatchQueries(
+  mutationStatementCount: number,
+  mutationAssertionCount: number,
+  auditEntryCount: number,
+  postAuditStatementCount: number,
+): number {
+  return (
+    mutationStatementCount +
+    mutationAssertionCount +
+    Math.ceil(auditEntryCount / AUDIT_INSERT_CHUNK_SIZE) * 2 +
+    postAuditStatementCount
+  );
+}
+
+function countPreparationQueries(audits: readonly WriteAuditLogInput[]): number {
+  if (audits.length === 0) return 0;
+  return 1 + new Set(audits.map((audit) => audit.actor_user_id)).size;
+}
+
 /**
  * D1 batch を使い、本体変更と監査 INSERT を同じ all-or-nothing 単位で実行する。
  *
@@ -105,22 +162,19 @@ export async function mutateWithAudit(
     throw new AuditMutationError("重要 mutation には監査ログが必要です。");
   }
 
-  const entries = await Promise.all(
-    input.audits.map(async (audit) => {
-      const entry = await prepareAuditLogEntry(db, { ...audit, strict: true });
-      if (!entry) {
-        throw new AuditMutationError(
-          `テーブル「${audit.table_name}」の監査ログを作成できません。`,
-        );
-      }
-      return entry;
-    }),
-  );
-
-  const perStatementExpectedChanges =
+  const scalarExpectedChanges =
+    typeof input.expectedMutationChanges === "number"
+      ? input.expectedMutationChanges
+      : null;
+  const perStatementExpectedChanges: readonly (number | null)[] | null =
     typeof input.expectedMutationChanges === "number"
       ? null
       : input.expectedMutationChanges;
+  if (scalarExpectedChanges !== null && input.mutationStatements.length !== 1) {
+    throw new AuditMutationError(
+      "scalar の mutation 件数検査は本体 SQL 1件に限定されます。",
+    );
+  }
   if (
     perStatementExpectedChanges &&
     perStatementExpectedChanges.length !== input.mutationStatements.length
@@ -130,15 +184,40 @@ export async function mutateWithAudit(
     );
   }
 
-  const condition = perStatementExpectedChanges
-    ? sql`1 = 1`
-    : sql`changes() = ${input.expectedMutationChanges}`;
-  const selects = entries.map((entry) => auditSelect(entry, condition));
-  const auditInsert = sql`
-    INSERT INTO audit_logs (${AUDIT_COLUMNS})
-    ${sql.join(selects, sql` UNION ALL `)}
-  `;
+  const mutationAssertionCount = perStatementExpectedChanges
+    ? perStatementExpectedChanges.filter((expected) => expected !== null).length
+    : 1;
+  const plannedQueryCount = countBatchQueries(
+    input.mutationStatements.length,
+    mutationAssertionCount,
+    input.audits.length,
+    input.postAuditStatements?.length ?? 0,
+  );
+  const preparationQueryCount = countPreparationQueries(input.audits);
+  if (
+    preparationQueryCount + plannedQueryCount + D1_RESERVED_CALLER_QUERIES >
+    D1_MAX_BATCH_QUERIES
+  ) {
+    throw new AuditMutationError(
+      `監査前処理と D1 batch の query 数が上限を超えるため拒否しました（前処理${preparationQueryCount} + batch${plannedQueryCount} + 予約${D1_RESERVED_CALLER_QUERIES}/${D1_MAX_BATCH_QUERIES}）。`,
+    );
+  }
 
+  const preparedEntries = await prepareAuditLogEntries(
+    db,
+    input.audits.map((audit) => ({ ...audit, strict: true })),
+  );
+  const entries = preparedEntries.map((entry, index) => {
+    if (!entry) {
+      throw new AuditMutationError(
+        `テーブル「${input.audits[index].table_name}」の監査ログを作成できません。`,
+      );
+    }
+    return entry;
+  });
+
+  const condition = sql`1 = 1`;
+  const auditChunks = chunkEntries(entries);
   const mutationBatchItems: BatchItem<"sqlite">[] = perStatementExpectedChanges
     ? input.mutationStatements.flatMap((statement, index) => [
         statement,
@@ -146,12 +225,17 @@ export async function mutateWithAudit(
           ? []
           : [db.run(assertChanges(perStatementExpectedChanges[index]!))]),
       ])
-    : [...input.mutationStatements];
+    : [
+        input.mutationStatements[0],
+        db.run(assertChanges(scalarExpectedChanges!)),
+      ];
 
   const batchItems: BatchItem<"sqlite">[] = [
     ...mutationBatchItems,
-    db.run(auditInsert),
-    db.run(assertionSql(entries)),
+    ...auditChunks.flatMap((chunk) => [
+      db.run(auditInsertSql(chunk, condition)),
+      db.run(assertionSql(chunk)),
+    ]),
     ...(input.postAuditStatements ?? []),
   ];
 
