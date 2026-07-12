@@ -1,9 +1,9 @@
 "use server";
-import { auditAction } from "@/lib/audit/helpers";
+import { mutateWithAudit } from "@/lib/audit/mutate";
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { canEditVideo } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
@@ -78,31 +78,13 @@ export async function createChapter(
 
   const id = generateId("ch");
   const now = Math.floor(Date.now() / 1000);
-  await db.insert(videoChapters).values({
-    id,
-    video_id: data.video_id,
-    x_user_id: activeX,
-    chapter_time: data.chapter_time,
-    chapter_label: data.chapter_label,
-    note: data.note ?? null,
-    visibility: data.visibility,
-    show_on_player_bar: data.show_on_player_bar,
-    created_at: now,
-    updated_at: now,
-  });
-
-  await auditAction(db, {
-    table_name: "video_chapters",
-    record_id: id,
-    action: "CREATE",
-    after_data: JSON.stringify({
-      video_id: data.video_id,
-      chapter_time: data.chapter_time,
-      label: data.chapter_label,
-      visibility: data.visibility,
-    }),
-    operator_user_id: sUser.id,
-    retention_class: "normal",
+  await mutateWithAudit(db, {
+    mutationStatements: [db.run(sql`
+      INSERT INTO video_chapters (id, video_id, x_user_id, chapter_time, chapter_label, note, visibility, show_on_player_bar, created_at, updated_at)
+      VALUES (${id}, ${data.video_id}, ${activeX}, ${data.chapter_time}, ${data.chapter_label}, ${data.note ?? null}, ${data.visibility}, ${data.show_on_player_bar}, ${now}, ${now})
+    `)],
+    expectedMutationChanges: 1,
+    audits: [{ table_name: "video_chapters", target_id: id, operation: "CREATE", before: null, after: { id, video_id: data.video_id, x_user_id: activeX, chapter_time: data.chapter_time, chapter_label: data.chapter_label, note: data.note ?? null, visibility: data.visibility, show_on_player_bar: data.show_on_player_bar, order_index: 0, created_at: now, updated_at: now }, actor_user_id: sUser.id, retention_class: "normal" }],
   });
 
   // 通知: 動画オーナーに新しい public チャプターコメントが付いたことを伝える。
@@ -190,17 +172,11 @@ export async function updateChapter(
 
   // updateChapter は通常チャプターコメント専用。video_member_id は触らない。
   const now = Math.floor(Date.now() / 1000);
-  await db
-    .update(videoChapters)
-    .set({
-      chapter_time: data.chapter_time,
-      chapter_label: data.chapter_label,
-      note: data.note ?? null,
-      visibility: data.visibility,
-      show_on_player_bar: data.show_on_player_bar,
-      updated_at: now,
-    })
-    .where(eq(videoChapters.id, data.chapter_id));
+  await mutateWithAudit(db, {
+    mutationStatements: [db.run(sql`UPDATE video_chapters SET chapter_time=${data.chapter_time}, chapter_label=${data.chapter_label}, note=${data.note ?? null}, visibility=${data.visibility}, show_on_player_bar=${data.show_on_player_bar}, updated_at=${now} WHERE id=${data.chapter_id} AND updated_at=${existing.updated_at}`)],
+    expectedMutationChanges: 1,
+    audits: [{ table_name: "video_chapters", target_id: data.chapter_id, operation: "UPDATE", before: { ...existing }, after: { ...existing, chapter_time: data.chapter_time, chapter_label: data.chapter_label, note: data.note ?? null, visibility: data.visibility, show_on_player_bar: data.show_on_player_bar, updated_at: now }, actor_user_id: sUser.id, retention_class: "normal" }],
+  });
 
   const target = (
     await db.select().from(videos).where(eq(videos.id, existing.video_id)).limit(1)
@@ -253,19 +229,10 @@ export async function deleteChapter(
   if (!canMod) return { ok: false, message: "削除権限がありません。" };
 
   const now = Math.floor(Date.now() / 1000);
-  await db.delete(videoChapters).where(eq(videoChapters.id, chapterId));
-
-  await auditAction(db, {
-    table_name: "video_chapters",
-    record_id: chapterId,
-    action: "DELETE",
-    before_data: JSON.stringify({
-      video_id: existing.video_id,
-      chapter_time: existing.chapter_time,
-      label: existing.chapter_label,
-    }),
-    operator_user_id: sUser.id,
-    retention_class: "normal",
+  await mutateWithAudit(db, {
+    mutationStatements: [db.run(sql`DELETE FROM video_chapters WHERE id=${chapterId} AND updated_at=${existing.updated_at}`)],
+    expectedMutationChanges: 1,
+    audits: [{ table_name: "video_chapters", target_id: chapterId, operation: "DELETE", before: { ...existing }, after: null, actor_user_id: sUser.id, retention_class: "normal" }],
   });
 
   const target = (
@@ -374,6 +341,13 @@ export async function createChaptersBulk(
   const errors: string[] = [];
   let inserted = 0;
   let skipped = 0;
+  const pendingRows: Array<{
+    id: string;
+    chapter_time: number;
+    chapter_label: string;
+    note: string | null;
+    visibility: "public" | "private";
+  }> = [];
 
   for (let i = 0; i < rowsRaw.length; i++) {
     const cols = rowsRaw[i]!;
@@ -411,34 +385,26 @@ export async function createChaptersBulk(
     void rawMember;
 
     const id = generateId("ch");
-    await db.insert(videoChapters).values({
-      id,
-      video_id,
-      x_user_id: activeX,
-      chapter_time: time,
-      chapter_label: rawLabel,
-      note: rawNote || null,
-      visibility,
-      show_on_player_bar: 1,
-      created_at: now,
-      updated_at: now,
-    });
+    pendingRows.push({ id, chapter_time: time, chapter_label: rawLabel, note: rawNote || null, visibility });
     inserted += 1;
   }
 
   if (inserted > 0) {
-    await auditAction(db, {
-      table_name: "video_chapters",
-      record_id: video_id,
-      action: "CREATE",
-      after_data: JSON.stringify({
-        bulk: true,
-        video_id,
-        inserted,
-        skipped,
-      }),
-      operator_user_id: sUser.id,
-      retention_class: "normal",
+    await mutateWithAudit(db, {
+      mutationStatements: [db.run(sql`
+        INSERT INTO video_chapters (id, video_id, x_user_id, chapter_time, chapter_label, note, visibility, show_on_player_bar, created_at, updated_at)
+        VALUES ${sql.join(pendingRows.map((row) => sql`(${row.id}, ${video_id}, ${activeX}, ${row.chapter_time}, ${row.chapter_label}, ${row.note}, ${row.visibility}, 1, ${now}, ${now})`), sql`, `)}
+      `)],
+      expectedMutationChanges: inserted,
+      audits: pendingRows.map((row) => ({
+        table_name: "video_chapters" as const,
+        target_id: row.id,
+        operation: "CREATE" as const,
+        before: null,
+        after: { id: row.id, video_id, x_user_id: activeX, chapter_time: row.chapter_time, chapter_label: row.chapter_label, note: row.note, visibility: row.visibility, show_on_player_bar: 1, order_index: 0, created_at: now, updated_at: now },
+        actor_user_id: sUser.id,
+        retention_class: "normal" as const,
+      })),
     });
   }
 
