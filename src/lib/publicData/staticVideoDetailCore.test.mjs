@@ -27,3 +27,12 @@ test("normalizeStaticVideoDetail: normalizes video and members", () => {
 test("normalizeStaticVideoDetail: rejects payload without video title", () => {
   assert.equal(normalizeStaticVideoDetail({ video: { id: "video1" } }), null);
 });
+
+test("normalizeStaticVideoDetail: rejects private artifacts", () => {
+  assert.equal(
+    normalizeStaticVideoDetail({
+      video: { id: "private", title: "Private", visibility_status: "private" },
+    }),
+    null,
+  );
+});

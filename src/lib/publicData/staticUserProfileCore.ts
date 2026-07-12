@@ -1,4 +1,5 @@
 import type { VideoCardData } from "@/components/video/VideoCard";
+import { isPublicVideoListable } from "./visibility.ts";
 
 export interface StaticUserProfilePayload {
   generated_at?: unknown;
@@ -56,7 +57,9 @@ function normalizeVideo(value: unknown): VideoCardData | null {
   const row = value as Record<string, unknown>;
   const id = normalizeString(row.id);
   const title = normalizeString(row.title);
-  if (!id || !title) return null;
+  if (!id || !title || !isPublicVideoListable(row.status ?? row.visibility_status)) {
+    return null;
+  }
   return {
     id,
     title,
@@ -71,7 +74,7 @@ function normalizeVideo(value: unknown): VideoCardData | null {
     creator_x_user_id: normalizeNullableString(row.creator_x_user_id),
     primary_event_id: normalizeNullableString(row.primary_event_id),
     scheduled_time: normalizeUnix(row.scheduled_time),
-    status: normalizeNullableString(row.status) ?? normalizeNullableString(row.visibility_status),
+    status: "public",
     part: normalizeNullableString(row.part),
   };
 }

@@ -13,8 +13,10 @@ import {
   MAX_PUBLIC_EVENT_LIMIT,
   PUBLIC_EVENT_KEYS,
   PublicEventDto,
+  assertNoForbiddenKeys,
   pickKeys,
 } from "@/lib/api/publicDto";
+import { loadStaticEventsIndex } from "@/lib/publicData/staticEventsIndex";
 
 /** イベント一覧 JSON。 */
 export async function GET(req: Request): Promise<Response> {
@@ -24,6 +26,30 @@ export async function GET(req: Request): Promise<Response> {
     MAX_PUBLIC_EVENT_LIMIT,
     Math.max(1, parseInt(url.searchParams.get("limit") ?? "60", 10) || 60),
   );
+
+  const staticIndex = await loadStaticEventsIndex();
+  if (staticIndex.strategy === "static_json_only" && staticIndex.index) {
+    const now = Math.floor(Date.now() / 1000);
+    const offset = (page - 1) * limit;
+    const items: PublicEventDto[] = staticIndex.index.events
+      .slice(offset, offset + limit)
+      .map((row) => pickKeys(
+        {
+          ...row,
+          is_active: row.visibility_status === "public" ? 1 : 0,
+          is_entry_open: isAcceptingEntries(row, now) ? 1 : 0,
+          is_archived: isEventArchived(row) ? 1 : 0,
+        },
+        PUBLIC_EVENT_KEYS,
+      ) as PublicEventDto);
+    const payload = { items, page, limit };
+    assertNoForbiddenKeys(payload);
+    return NextResponse.json(payload, {
+      headers: {
+        "Cache-Control": "public, max-age=60, s-maxage=120, stale-while-revalidate=300",
+      },
+    });
+  }
 
   const db = getDatabase();
   if (!db) return NextResponse.json({ items: [], page, limit });
@@ -67,8 +93,10 @@ export async function GET(req: Request): Promise<Response> {
     ) as PublicEventDto,
   );
 
+  const payload = { items, page, limit };
+  assertNoForbiddenKeys(payload);
   return NextResponse.json(
-    { items, page, limit },
+    payload,
     {
       headers: {
         "Cache-Control":

@@ -10,6 +10,7 @@ test("normalizeStaticEventsIndex normalizes events and group sections", () => {
       {
         id: "event1",
         title: "Event 1",
+        visibility_status: "public",
         start_time: 200,
         entry_end_time: 150,
         is_active: 1,
@@ -24,7 +25,7 @@ test("normalizeStaticEventsIndex normalizes events and group sections", () => {
         sort_order: 2,
         latest_event_start_time: 200,
         events: [
-          { id: "event1", title: "Event 1", start_time: 200 },
+          { id: "event1", title: "Event 1", start_time: 200, visibility_status: "public" },
           { id: "missing-title" },
         ],
       },
@@ -53,10 +54,27 @@ test("normalizeStaticEventsIndex rejects payload without items", () => {
 
 test("normalizeStaticEventsIndex drops invalid groups", () => {
   const index = normalizeStaticEventsIndex({
-    items: [{ id: "event1", title: "Event 1" }],
+    items: [{ id: "event1", title: "Event 1", visibility_status: "public" }],
     group_sections: [{ id: "group1" }],
   });
 
   assert.ok(index);
   assert.equal(index.groupSections.length, 0);
+});
+
+test("normalizeStaticEventsIndex drops private rows in index and groups", () => {
+  const index = normalizeStaticEventsIndex({
+    items: [
+      { id: "public", title: "Public", visibility_status: "public" },
+      { id: "private", title: "Private", visibility_status: "private" },
+    ],
+    group_sections: [{
+      id: "group1", slug: "group", name: "Group", events: [
+        { id: "private", title: "Private", visibility_status: "private" },
+      ],
+    }],
+  });
+  assert.ok(index);
+  assert.deepEqual(index.events.map((event) => event.id), ["public"]);
+  assert.equal(index.groupSections[0].events.length, 0);
 });

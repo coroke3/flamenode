@@ -18,6 +18,7 @@ test("normalizeStaticUserProfile: normalizes user profile payload", () => {
         youtube_video_id: "abcdefghijk",
         display_name: "Creator",
         creator_x_user_id: "creator",
+        status: "public",
       },
     ],
   });
@@ -31,4 +32,16 @@ test("normalizeStaticUserProfile: normalizes user profile payload", () => {
 
 test("normalizeStaticUserProfile: rejects payload without user id", () => {
   assert.equal(normalizeStaticUserProfile({ user: { x_name: "Creator" } }), null);
+});
+
+test("normalizeStaticUserProfile: excludes non-public cards", () => {
+  const profile = normalizeStaticUserProfile({
+    user: { id: "creator", x_name: "Creator" },
+    recent_videos: [
+      { id: "public", title: "Public", status: "public" },
+      { id: "private", title: "Private", status: "private" },
+    ],
+  });
+  assert.ok(profile);
+  assert.deepEqual(profile.recentVideos.map((video) => video.id), ["public"]);
 });

@@ -9,6 +9,8 @@ type Env = { DB: D1Database; R2: R2Bucket; KV: KVNamespace };
 
 const EVENT_INDEX_COLUMNS = `
   id, title, explanation, icon_url, img_url, accent_color,
+  event_type, slot_type, slot_visibility_mode,
+  max_slots_per_video, max_consecutive_slots_per_entry,
   start_time, end_time, entry_start_time, entry_end_time,
   visibility_status, created_at
 `;

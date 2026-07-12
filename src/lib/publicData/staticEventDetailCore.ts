@@ -1,3 +1,8 @@
+import {
+  isPublicVideoListable,
+  normalizePublicEventVisibility,
+} from "./visibility.ts";
+
 export interface StaticEventDetailPayload {
   generated_at?: unknown;
   freshness?: unknown;
@@ -14,7 +19,7 @@ export interface StaticEventDetailVideo {
   creator_display_name: string;
   creator_x_user_id: string | null;
   creator_icon_url: string | null;
-  visibility_status: string;
+  visibility_status: "public";
   scheduled_time: number | null;
 }
 
@@ -29,7 +34,7 @@ export interface StaticEventDetailEvent {
   end_time: number | null;
   entry_start_time: number | null;
   entry_end_time: number | null;
-  visibility_status: string;
+  visibility_status: "public" | "archived";
 }
 
 export interface StaticEventDetailStaff {
@@ -92,7 +97,8 @@ function normalizeEvent(value: unknown): StaticEventDetailEvent | null {
   const row = value as Record<string, unknown>;
   const id = normalizeString(row.id);
   const title = normalizeString(row.title);
-  if (!id || !title) return null;
+  const visibility = normalizePublicEventVisibility(row.visibility_status);
+  if (!id || !title || !visibility) return null;
   return {
     id,
     title,
@@ -104,7 +110,7 @@ function normalizeEvent(value: unknown): StaticEventDetailEvent | null {
     end_time: normalizeUnix(row.end_time),
     entry_start_time: normalizeUnix(row.entry_start_time),
     entry_end_time: normalizeUnix(row.entry_end_time),
-    visibility_status: normalizeString(row.visibility_status) ?? "public",
+    visibility_status: visibility,
   };
 }
 
@@ -113,7 +119,7 @@ function normalizeEventVideo(value: unknown): StaticEventDetailVideo | null {
   const row = value as Record<string, unknown>;
   const id = normalizeString(row.id);
   const title = normalizeString(row.title);
-  if (!id || !title) return null;
+  if (!id || !title || !isPublicVideoListable(row.visibility_status)) return null;
   return {
     id,
     title,
@@ -122,7 +128,7 @@ function normalizeEventVideo(value: unknown): StaticEventDetailVideo | null {
       normalizeString(row.creator_display_name) ?? "unknown",
     creator_x_user_id: normalizeNullableString(row.creator_x_user_id),
     creator_icon_url: normalizeNullableString(row.creator_icon_url),
-    visibility_status: normalizeString(row.visibility_status) ?? "public",
+    visibility_status: "public",
     scheduled_time: normalizeUnix(row.scheduled_time),
   };
 }

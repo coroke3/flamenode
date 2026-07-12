@@ -1,3 +1,5 @@
+import { isPublicVideoDirect } from "./visibility.ts";
+
 export interface StaticVideoDetailPayload {
   generated_at?: unknown;
   video?: Record<string, unknown>;
@@ -70,7 +72,8 @@ function normalizeVideo(value: unknown): StaticVideoDetailVideo | null {
   const row = value as Record<string, unknown>;
   const id = normalizeString(row.id);
   const title = normalizeString(row.title);
-  if (!id || !title) return null;
+  const visibility = normalizeString(row.visibility_status) ?? "public";
+  if (!id || !title || !isPublicVideoDirect(visibility)) return null;
   return {
     id,
     title,
@@ -84,7 +87,7 @@ function normalizeVideo(value: unknown): StaticVideoDetailVideo | null {
     highlights: normalizeNullableString(row.highlights),
     production_story: normalizeNullableString(row.production_story),
     closing_comment: normalizeNullableString(row.closing_comment),
-    visibility_status: normalizeString(row.visibility_status) ?? "public",
+    visibility_status: visibility,
     scheduled_time: normalizeUnix(row.scheduled_time),
     primary_event_id: normalizeNullableString(row.primary_event_id),
     collaboration_type: normalizeNullableString(row.collaboration_type),
