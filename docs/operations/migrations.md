@@ -14,6 +14,10 @@
 
 現行コードは旧列・旧tableのruntime fallback、旧方式への二重書き込み、起動時のschema変更を行わない。schema不一致はfail-fastで扱う。
 
+baselineには旧`events.event_group_id`が存在しないため、pre-baseline用の
+`repair:event-group-legacy` scriptはactive pathから削除済みである。Remote D1を
+自動repairせず、旧環境を破棄・再作成する場合も運用者がbackupと対象を確認して行う。
+
 ## ローカル
 
 空のローカルD1には次を実行する。

@@ -15,11 +15,6 @@ export interface Env {
   KV: KVNamespace;
 }
 
-const DEPRECATED_TARGET_TYPES = new Set([
-  "groups_index",
-  "event_groups_index",
-  "event_group",
-]);
 const STALE_QUEUE_RECONCILE_LIMIT = 20;
 const PROCESSING_LEASE_SEC = 5 * 60;
 
@@ -86,11 +81,6 @@ export async function processStaticRebuildQueue(env: Env): Promise<{
     }
 
     try {
-      if (DEPRECATED_TARGET_TYPES.has(row.target_type)) {
-        if (await markDone(env, row.id, token, now)) processed++;
-        else skipped++;
-        continue;
-      }
       if (
         shouldSkipQueueTarget(mode, row)
       ) {

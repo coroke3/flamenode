@@ -6,7 +6,7 @@ import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import { staticRebuildQueue } from "@/lib/db/schema";
 import { enqueueManualStaticRebuild } from "@/lib/staticRebuild/hooks";
-import type { StaticRebuildTargetType } from "@/lib/staticRebuild/types";
+import { isStaticRebuildTargetType } from "@/lib/staticRebuild/types";
 
 export type StaticRebuildAdminResult = {
   ok: boolean;
@@ -58,11 +58,11 @@ export async function enqueueStaticRebuildAdmin(
   const guard = await requireAdminUser();
   if (!guard.ok) return;
 
-  const targetType = String(formData.get("target_type") ?? "").trim() as StaticRebuildTargetType;
+  const targetType = String(formData.get("target_type") ?? "").trim();
   const targetId = String(formData.get("target_id") ?? "").trim();
   const reason = String(formData.get("reason") ?? "manual_rebuild").trim();
 
-  if (!targetType || !targetId) return;
+  if (!isStaticRebuildTargetType(targetType) || !targetId) return;
 
   const db = getDatabase();
   if (!db) return;

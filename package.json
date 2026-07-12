@@ -33,7 +33,6 @@
     "grant-admin": "node scripts/grant-admin.cjs",
     "check:db-legacy": "node scripts/check-db-legacy.mjs",
     "repair:video-event-links": "node scripts/repair-video-event-links.mjs",
-    "repair:event-group-legacy": "node scripts/repair-event-group-legacy.mjs",
     "check:public-api-leaks": "node scripts/check-public-api-leaks.mjs",
     "check:cloudflare-config": "node scripts/check-cloudflare-config.mjs",
     "check:cloudflare-template": "node scripts/check-cloudflare-template.mjs",

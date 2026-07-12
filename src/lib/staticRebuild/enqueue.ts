@@ -5,7 +5,6 @@ import type { DB } from "@/lib/db/client";
 import { staticRebuildQueue } from "@/lib/db/schema";
 import { auditAction } from "@/lib/audit/helpers";
 import { generateId } from "@/lib/utils/id";
-import { normalizeStaticRebuildTarget } from "./normalizeTarget";
 import { pickHigherPriority } from "./priority";
 import {
   indexUniqueStaticRebuildTargetRows,
@@ -24,28 +23,27 @@ function dedupeStaticRebuildInputs(
 ): EnqueueStaticRebuildInput[] {
   const byKey = new Map<string, EnqueueStaticRebuildInput>();
   for (const item of items) {
-    const normalized = normalizeStaticRebuildTarget(item);
-    const key = `${normalized.targetType}:${normalized.targetId}`;
+    const key = `${item.targetType}:${item.targetId}`;
     const existing = byKey.get(key);
     if (!existing) {
-      byKey.set(key, normalized);
+      byKey.set(key, item);
       continue;
     }
     const mergedPriority = pickHigherPriority(
       (existing.priority ?? "normal") as "high" | "normal" | "low",
-      (normalized.priority ?? "normal") as "high" | "normal" | "low",
+      (item.priority ?? "normal") as "high" | "normal" | "low",
     );
     byKey.set(key, {
       ...existing,
-      ...normalized,
+      ...item,
       priority: mergedPriority,
       reason:
         PRIORITY_RANK[mergedPriority] >=
         PRIORITY_RANK[(existing.priority ?? "normal") as "high" | "normal" | "low"]
-          ? normalized.reason
+          ? item.reason
           : existing.reason,
       requestedByUserId:
-        normalized.requestedByUserId ?? existing.requestedByUserId,
+        item.requestedByUserId ?? existing.requestedByUserId,
     });
   }
   return Array.from(byKey.values());
@@ -272,9 +270,9 @@ export async function enqueueStaticRebuild(
   db: DB,
   input: EnqueueStaticRebuildInput,
 ): Promise<void> {
-  const normalized = normalizeStaticRebuildTarget(input);
+  const target = input;
   const now = Math.floor(Date.now() / 1000);
-  const priority = normalized.priority ?? "normal";
+  const priority = target.priority ?? "normal";
 
   try {
     for (let enqueueAttempt = 0; enqueueAttempt < 2; enqueueAttempt += 1) {
@@ -283,8 +281,8 @@ export async function enqueueStaticRebuild(
         .from(staticRebuildQueue)
         .where(
           and(
-            eq(staticRebuildQueue.target_type, normalized.targetType),
-            eq(staticRebuildQueue.target_id, normalized.targetId),
+            eq(staticRebuildQueue.target_type, target.targetType),
+            eq(staticRebuildQueue.target_id, target.targetId),
             inArray(staticRebuildQueue.status, ["pending", "processing"]),
           )!,
         )
@@ -294,13 +292,13 @@ export async function enqueueStaticRebuild(
       if (!row) break;
 
       const update = db.update(staticRebuildQueue).set({
-        reason: normalized.reason,
+        reason: target.reason,
         priority: pickHigherPriority(
           row.priority as "high" | "normal" | "low",
           priority,
         ),
         requested_by_user_id:
-          normalized.requestedByUserId ?? row.requested_by_user_id,
+          target.requestedByUserId ?? row.requested_by_user_id,
         ...(row.status === "processing"
           ? { lease_token: null, lease_expires_at: null }
           : {}),
@@ -326,30 +324,30 @@ export async function enqueueStaticRebuild(
       }
     }
 
-    if (await shouldSkipRecentEnqueue(db, normalized, now)) {
+    if (await shouldSkipRecentEnqueue(db, target, now)) {
       return;
     }
 
     await db.insert(staticRebuildQueue).values({
       id: generateId("srb"),
-      target_type: normalized.targetType,
-      target_id: normalized.targetId,
-      reason: normalized.reason,
+      target_type: target.targetType,
+      target_id: target.targetId,
+      reason: target.reason,
       priority,
       status: "pending",
-      requested_by_user_id: normalized.requestedByUserId ?? null,
+      requested_by_user_id: target.requestedByUserId ?? null,
       created_at: now,
       updated_at: now,
     });
   } catch (e) {
-    console.warn("[enqueueStaticRebuild] failed", normalized, e);
+    console.warn("[enqueueStaticRebuild] failed", target, e);
     try {
       await auditAction(db, {
         table_name: "static_rebuild_queue",
-        record_id: `${normalized.targetType}:${normalized.targetId}`,
+        record_id: `${target.targetType}:${target.targetId}`,
         action: "UPDATE",
         after_data: JSON.stringify({
-          reason: normalized.reason,
+          reason: target.reason,
           error: e instanceof Error ? e.message : String(e),
         }),
         operator_user_id: input.requestedByUserId ?? "system",
