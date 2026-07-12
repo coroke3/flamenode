@@ -55,7 +55,7 @@ export default async function AdminSpreadsheetPage({
     <div style={{ paddingBottom: 48 }}>
       <AdminPageHeader
         title="DB スプレッドシート"
-        description="D1 の全テーブルを表形式で閲覧・編集します。変更は history_logs に記録されます。認証トークン列はマスク表示・編集不可です。"
+        description="D1 の全テーブルを表形式で閲覧・編集します。変更は audit_logs に記録されます。認証トークン列はマスク表示・編集不可です。"
         backHref="/admin"
         backLabel="ダッシュボード"
       />

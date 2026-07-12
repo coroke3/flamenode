@@ -13,7 +13,7 @@
   - 削除: `history_logs`, `event_staff_permissions`, `video_softwares`, `video_stats`, `api_endpoints`, `video_comments`
   - 列除去: `events` 旧公開フラグ / `video_form_settings_json`, `videos.stage_permission` / `custom_answers`, `video_members.chapters_json`, `video_chapters.marker_kind` / `video_member_id`, `system_settings.cost_guard_mode` / `is_maintenance_mode`
 
-ローカル適用: `npm run db:local-apply`（instrumentation が `history_logs` 存在時に 0044 を適用）
+`0044` は `migrations/historical/` に保持する履歴資料であり、runtime から自動適用しない。新規ローカル DB は active baseline を `npm run db:local-apply` で手動適用する。
 
 ## 正本マッピング
 

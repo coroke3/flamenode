@@ -23,7 +23,7 @@ export interface BroadcastResult {
  * - OFFSET ベースで段階実行 (UI から「次の 50 件」ボタンで進める)
  * - target_audience に応じて宛先を切り替え
  * - notification_outbox に type='announcement_broadcast' で挿入
- * - history_logs にバッチ件数を記録
+ * - audit_logs にバッチ件数を記録
  *
  * 完全な broadcast は複数回呼び出して進める。本実装はあくまで「安全に
  * 段階配信する」ためのもので、誤実行による全件通知を防ぐ。

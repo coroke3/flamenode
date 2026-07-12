@@ -31,7 +31,7 @@ import { buildVideoEditPermissionGrantedNotification } from "@/lib/notifications
  *   - subject は X ID (連携前でも先付与可) または user_id で指定。
  *   - 既存の表示メンバーに subject が含まれていれば、その行に can_edit を立てる。
  *     含まれていなければ非公開メンバー (is_public_member = 0) として新規追加。
- *   - 監査ログは history_logs に retention_class=long_audit で記録。
+ *   - 監査ログは audit_logs に retention_class=long_audit で記録。
  *
  * 関数名は旧テーブル時代の名前 (`upsertVideoCollaborator` 等) を一旦維持。
  * UI / import 側を書き換えるタイミングで `*VideoMemberPerm` 系へ改名する想定。

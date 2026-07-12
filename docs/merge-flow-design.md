@@ -33,7 +33,7 @@
   - `video_interactions.x_user_id = toXId WHERE x_user_id = fromXId` (UNIQUE 制約に注意)
   - `x_user_aliases (target=toXId, alias=fromXId)` を追加
   - 旧 `x_users.linked_discord_user_id` を NULL に
-  - history_logs (retention_class='long_audit') に詳細記録
+  - audit_logs (retention_class='long_audit') に詳細記録
 - 通知: 現時点では enqueue しない。本人通知は別UI/別フェーズで扱う。
 
 ### Phase C: admin UI から起動 (危険度: 高)

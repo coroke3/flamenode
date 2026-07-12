@@ -52,7 +52,7 @@ export function computeNotificationCutoffs(now: number): NotificationCutoffs {
 }
 
 /**
- * history_logs の retention_class ごとの cutoff 秒を計算する。
+ * system_settings の旧保持日数設定から cutoff 秒を計算する。
  */
 export interface HistoryCutoffs {
   normalCutoff: number;

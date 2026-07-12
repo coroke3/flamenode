@@ -216,7 +216,7 @@ export default async function AdminIntegrityPage(): Promise<React.ReactElement> 
     <div>
       <AdminPageHeader
         title="DB 整合性チェック"
-        description="videos / video_events / video_members / slots / 派生行 / history_logs の参照整合性を読み取り専用で確認します。"
+        description="videos / video_events / video_members / slots / 派生行 / audit_logs の参照整合性を読み取り専用で確認します。"
         backHref="/admin/health"
         backLabel="ヘルスチェックへ"
       />

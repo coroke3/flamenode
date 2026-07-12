@@ -112,8 +112,8 @@ export default async function AdminXLinkRequestsPage({
         .limit(10)
     : [];
 
-  // 直近の承認/却下履歴を history_logs (table_name 'x_account_link_requests' / 'x_users') から取得
-  const recentHistory = db
+  // 直近の承認/却下監査を audit_logs (table_name 'x_account_link_requests' / 'x_users') から取得
+  const recentAuditLogs = db
     ? await db
         .select()
         .from(auditLogs)
@@ -185,7 +185,7 @@ export default async function AdminXLinkRequestsPage({
               <tr>
                 <th>申請 X ID</th>
                 <th>種別</th>
-                <th>申請者 Discord</th>
+                <th>申請者ユーザー ID</th>
                 <th>申請日時</th>
               </tr>
             </thead>
@@ -214,9 +214,9 @@ export default async function AdminXLinkRequestsPage({
           直近の承認/却下履歴
         </h2>
         <p className="fn-muted fn-text-sm" style={{ marginTop: 4 }}>
-          history_logs から直近 {RECENT_HISTORY_LIMIT} 件を表示。詳細な差分は <Link href="/admin/audit?table=x_account_link_requests">監査ログ</Link> で確認できます。
+          audit_logs から直近 {RECENT_HISTORY_LIMIT} 件を表示。詳細な差分は <Link href="/admin/audit?table=x_account_link_requests">監査ログ</Link> で確認できます。
         </p>
-        {recentHistory.length === 0 ? (
+        {recentAuditLogs.length === 0 ? (
           <p className="fn-muted fn-text-sm" style={{ marginTop: 12 }}>
             履歴はまだありません。
           </p>
@@ -233,7 +233,7 @@ export default async function AdminXLinkRequestsPage({
               </tr>
             </thead>
             <tbody>
-              {recentHistory.map((h) => {
+              {recentAuditLogs.map((h) => {
                 const changed = parseAuditDiff(
                   h.before_json,
                   h.after_json,
