@@ -20,7 +20,7 @@ Next.js 15 App Router + React 19 + TS / D1 + Drizzle / R2 / KV / Workers (Cron 3
 ## コマンド
 
 ```sh
-npm run dev            # 開発サーバ (instrumentation.ts が Miniflare で D1/R2/KV 自動起動 + migration 冪等 apply)
+npm run dev            # 開発サーバ (ローカル D1/R2/KV binding を利用。migration は事前に手動適用)
 npm run typecheck      # 変更後必須
 npm run build          # 変更後必須
 npm run test:unit      # node:test。テストのある領域を触ったら実行
@@ -30,7 +30,7 @@ npm run check:public-api-leaks # 公開 API 漏洩検査 (dev server 必須)
 ```
 
 - シークレットは `.dev.vars` (コミット禁止)
-- Windows では next-on-pages dev が不安定。動作確認は `npm run dev` を使う
+- Windows では next-on-pages dev が不安定。通常確認は `npm run dev`、Pages相当確認は `npm run pages:dev` を使う
 
 ## 構成 (非自明な点のみ)
 
@@ -45,7 +45,8 @@ npm run check:public-api-leaks # 公開 API 漏洩検査 (dev server 必須)
 |---|---|
 | 設計仕様 (SSoT) | `設計/FlameNode-Design.md`, `設計/FlameNode-Design-System.md`, `設計/設計app/**/*.md` |
 | 残タスク・実装状況 | `docs/implementation-backlog.md` |
-| 運用手順 (migration/Worker/検査) | `docs/operations.md` |
+| 運用手順 (migration/Worker/検査) | `docs/operations/README.md`, `docs/operations/migrations.md` |
+| DB履歴・テンプレート | `docs/db-history/README.md`, `docs/db-change-history.md`, `docs/templates/migration.md` |
 | ローカル環境 / デプロイ | `LOCAL.md` / `DEPLOY.md` |
 | 権限・ID 仕様の根拠 (2026-05 修正原典) | `.claude/flamenode/source/`, `claude-code-subagent-assignment.md` |
 
@@ -56,6 +57,7 @@ npm run check:public-api-leaks # 公開 API 漏洩検査 (dev server 必須)
 3. スキーマ変更は migration 同伴 + `docs/operations/migrations.md` と整合。**`npm run db:generate` は使わない**。手動 SQL migration を `migrations/` に追加する
 4. deploy / 本番 D1 migration はユーザー操作。実行しない
 5. D1 が正本、R2/KV の静的 JSON は配信キャッシュ。二重正本を作らない
+6. 起動時にruntime migration、旧列fallback、二重書き込みを行わない。Remote D1 migration/deployは運用者の明示操作に限る
 
 ## 絶対禁止 (設計監査で確定した不変条件)
 

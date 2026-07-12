@@ -3,7 +3,7 @@
 > Status: Active
 > Last verified: 2026-07-11
 > Verified against commit: `5f48e0f` + working tree
-> Source of truth: `package.json`, `wrangler.toml`, `workers/*/wrangler.toml`, `.github/workflows/`
+> Source of truth: `package.json`, `wrangler.toml`, `workers/*/wrangler.toml`, `docs/operations/migrations.md`
 
 ## Current Worker Layout
 
@@ -145,20 +145,19 @@ wrangler kv namespace create FLAMENODE_KV --preview
 
 ## 3. データベースの初期化
 
+Remote D1の作成、backup、migration適用、rollbackは運用者が対象D1とbackupを確認したうえで手動実行する。CI、Codex、Pages deployはRemote D1を自動変更しない。
+
 ### 3-1. マイグレーション SQL の確認
 
-リポジトリには既に `migrations/0000_brave_iceman.sql` が含まれています。ローカルで再生成する必要は通常ありません。
-スキーマを変えた場合のみ:
-
-```powershell
-npm run db:generate
-```
+リポジトリの現行active migrationは `migrations/0000_flame_node_baseline.sql` です。DB schemaの正本は `src/lib/db/schema.ts` であり、`db:generate` は使いません。
 
 ### 3-2. 本番 D1 へマイグレーション適用
 
 ```powershell
 wrangler d1 migrations apply flamenode_db --remote
 ```
+
+適用前に `npm.cmd run check:db-schema` と `npm.cmd run check:db-history` を実行し、対象migrationとbackupを記録してください。旧migrationは `migrations/historical/` に保存されたHistorical資料で、現行runtimeのfallbackや二重書き込みには使用しません。
 
 ローカル開発用 (Miniflare) には:
 
@@ -230,6 +229,15 @@ wrangler secret put DISCORD_WEBHOOK_URL
 wrangler secret put DISCORD_BOT_TOKEN
 cd ../..
 ```
+
+legacy importを一時的に有効化する場合は、Pages側へ次の2値を登録します。通常運用では `ENABLE_LEGACY_IMPORT_TOOL` を未設定または `false` にします。
+
+```powershell
+wrangler pages secret put ENABLE_LEGACY_IMPORT_TOOL
+wrangler pages secret put LEGACY_IMPORT_PREVIEW_SECRET
+```
+
+`LEGACY_IMPORT_PREVIEW_SECRET` は32文字以上のランダム値とし、ログ・監査snapshot・Issueへ出力しません。import完了後はsecretをローテーションまたは無効化します。
 
 ### 5-3. ローカル開発用 `.dev.vars`
 
@@ -382,6 +390,10 @@ wrangler d1 export flamenode_db --remote --output=backup-$(Get-Date -Format yyyy
 
 R2 のオブジェクトは `wrangler r2 object` または `rclone` で別バケット / 外部ストレージへコピーしてください。
 
+### 10-5. Legacy import / cleanup
+
+legacy importはpreview → 承認済みapply → audit確認の順で実行します。対象ファイル、preview、batch結果、警告を記録し、途中失敗時に直接再実行しません。期限切れpreview・一時ファイル・不要な入力artifactはretentionを確認してcleanupし、active D1の正本データやaudit_logsを無差別削除しません。静的JSONの古いartifact cleanupは `content-jobs` の制限付き処理に任せます。
+
 ---
 
 ## 11. ローカル開発フロー (参考)
@@ -401,9 +413,11 @@ npm run pages:dev                    # Pages の本番に近いランタイム�
 
 ---
 
-## 12. CI/CD (任意)
+## 12. CI/CD (検査のみ)
 
-GitHub に push したら自動で Pages へ反映する場合、Cloudflare Dashboard → **Pages → Connect to Git** で本リポジトリを連携し、ビルドコマンドを次のように設定します。
+CIではPages build、文書検査、Worker dry-runなどの検証だけを行います。Remote D1 migrationと本番Pages/Worker deployは、同一commitと検査結果を確認した運用者が手動で実行します。Git連携を使う場合も、Remote D1を自動適用する設定は追加しません。
+
+Cloudflare Dashboard → **Pages → Connect to Git** を使う場合のbuild設定は次のとおりです。
 
 ```text
 Build command:        npx @cloudflare/next-on-pages

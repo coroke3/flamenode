@@ -25,8 +25,18 @@ FlameNodeは Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、3�
 | fail-closed時の一次対応 | [incident-response.md](incident-response.md) |
 | X ID統合 | [x-id-merge.md](x-id-merge.md) |
 
+## 文書とDB履歴
+
+- 現行のDB運用: [migrations.md](migrations.md)
+- migrationテンプレート: [../templates/migration.md](../templates/migration.md)
+- DB履歴索引: [../db-history/README.md](../db-history/README.md)
+- DB変更履歴: [../db-change-history.md](../db-change-history.md)
+- Historical資料: [../historical/README.md](../historical/README.md)
+
+Active文書は現行実装の手順だけを扱う。旧migrationや過去の設計本文はHistoricalとして保存し、runtime migration、旧列fallback、二重書き込みの運用手順として再利用しない。
+
 ## 必須検査
 
-ローカルで変更を統合する前に、少なくとも `npm run typecheck`、`npm run lint`、`npm run test:unit`、`npm run test:workers`、`npm run test:integration`、`npm run build`、`npm run pages:build`、`npm run check:pages-output`、`npm run check:cloudflare-template`、`npm run check:db-schema`、`npm run check:db-legacy`、`npm run check:event-owners`、`npm run check:project-docs` を通す。
+ローカルで変更を統合する前に、少なくとも `npm run typecheck`、`npm run lint`、`npm run test:unit`、`npm run test:workers`、`npm run test:integration`、`npm run build`、`npm run pages:build`、`npm run check:pages-output`、`npm run check:cloudflare-template`、`npm run check:db-schema`、`npm run check:db-legacy`、`npm run check:event-owners`、`npm run check:docs`、`npm run check:db-history`、`npm run check:project-docs` を通す。
 
 `check:cloudflare-config` は実SecretとIDを持たない環境ではfail-closedで失敗する。CIはfixture/template検査を使い、本番設定の成功を偽装しない。

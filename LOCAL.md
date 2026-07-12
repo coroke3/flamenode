@@ -13,14 +13,14 @@
 > - [x] `npm install` 完了
 > - [x] `.dev.vars` を作成、`AUTH_SECRET` 自動生成済み
 > - [x] Git for Windows (bash 同梱) を `winget install` で導入
-> - [x] `@cloudflare/next-on-pages` を試したが Windows で不安定なため **Miniflare 内蔵モード**に切替
+> - [x] `@cloudflare/next-on-pages` を試したが Windows では不安定なため、通常開発は **Miniflare binding** を利用
 > - [x] `instrumentation.ts` を追加し、`next dev` 起動時に Miniflare で D1/R2/KV を自動起動
-> - [x] 起動時にローカル D1 へマイグレーションを冪等 apply、`system_settings` も自動シード
+> - [ ] ローカルD1へ `migrations/0000_flame_node_baseline.sql` を手動適用（起動時のruntime migrationは行わない）
 > - [x] `npm run dev:local` で起動できる状態 (http://localhost:3000/、`/list`, `/event`, `/api/videos`, `/api/auth/providers` すべて 200 で応答することを確認済み)
 > - [ ] **要対応**: Discord Developer Portal でアプリを作り、`.dev.vars` の `AUTH_DISCORD_ID` / `AUTH_DISCORD_SECRET` を埋める
 > - [ ] **要対応**: ログイン後、自分を `role='admin'` に SQL で昇格 (`/admin` を確認したい場合のみ)
 >
-> 残作業はこの 2 つだけです。詳細は本書の §5 と §6 を参照してください。
+> 残作業はDiscord OAuthと必要時の管理者確認です。詳細は本書の §5 と §7 を参照してください。
 
 ---
 
@@ -113,6 +113,10 @@ AUTH_TRUST_HOST="true"
 AUTH_DISCORD_ID="<Discord Developer Portal の Client ID>"
 AUTH_DISCORD_SECRET="<Discord Developer Portal の Client Secret>"
 
+# legacy importを使う場合だけ設定（通常は無効）
+ENABLE_LEGACY_IMPORT_TOOL="false"
+LEGACY_IMPORT_PREVIEW_SECRET=""
+
 # OAuth のリダイレクト組み立てに必須。`npm run dev:local` でポートを変えたらここも合わせる
 AUTH_URL="http://localhost:3000"
 
@@ -145,8 +149,8 @@ npm run dev
 
 ### 期待される挙動
 
-- `instrumentation.ts` が起動時に Miniflare を立ち上げ、D1 / R2 / KV が `.wrangler/state/v3` を使ってローカル再現される
-- ローカル D1 へのマイグレーションが冪等に自動 apply され、`system_settings` もシードされる
+- `instrumentation.ts` が起動時にMiniflare bindingを立ち上げ、D1 / R2 / KV が `.wrangler/state/v3` を使ってローカル再現される
+- ローカルD1のschemaは起動前に `npm.cmd run db:local-apply` で手動適用する。schema不一致はfail-fastで扱う
 - Discord OAuth 設定済みならログイン・投稿・管理画面まで一通り動作する
 
 日常の開発はこのモードで完結します。next-on-pages ビルド後の edge ランタイム固有の問題を確認したいときだけ、次のモード B を使います。
@@ -224,9 +228,20 @@ npm run db:studio
 
 > 本番アプリと同じクライアントを使うとサインインユーザーが混ざるので、ローカル用は別の Discord アプリにすることを強く推奨します。
 
+## 6. Legacy import のローカル確認
+
+legacy importは通常無効です。確認時だけ `.dev.vars` に次を設定し、サーバーを再起動します。
+
+```env
+ENABLE_LEGACY_IMPORT_TOOL="true"
+LEGACY_IMPORT_PREVIEW_SECRET="32文字以上のローカル専用ランダム値"
+```
+
+`/admin/import` は管理者認証、preview、署名token、入力hash一致を要求します。secretはGitへコミットせず、検証後は一時ファイルとローカル状態をcleanupします。
+
 ---
 
-## 6. メンテナンスモード / コストガードの確認
+## 7. メンテナンスモード / コストガードの確認
 
 ### 6-1. middleware による即時メンテナンス
 
@@ -336,7 +351,7 @@ npx wrangler d1 migrations apply flamenode_db --local
 | ローカル DB マイグレーション | `npx wrangler d1 migrations apply flamenode_db --local` |
 | ローカル DB に SQL 実行 | `npx wrangler d1 execute flamenode_db --local --command "..."` |
 | ローカル DB を GUI で見る | `npm run db:studio` |
-| schema 変更時の migration | 手動 SQL を `migrations/` に追加 (`db:generate` は使わない。docs/operations.md §1 参照) |
+| schema 変更時の migration | 手動 SQL を `migrations/` に追加 (`db:generate` は使わない。docs/operations/migrations.md 参照) |
 | ローカルストレージ全消し | `Remove-Item -Recurse -Force .wrangler` |
 
 ---

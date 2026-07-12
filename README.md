@@ -11,7 +11,8 @@
 
 - 設計仕様 (SSoT): [`設計/`](./設計) 配下 (`FlameNode-Design.md`, `FlameNode-Design-System.md`, `設計app/**/*.md`)
 - ローカル動作手順: [`LOCAL.md`](./LOCAL.md) / デプロイ手順: [`DEPLOY.md`](./DEPLOY.md)
-- 運用手順: [`docs/operations.md`](./docs/operations.md) / 実装状況・残タスク: [`docs/implementation-backlog.md`](./docs/implementation-backlog.md)
+- 運用手順: [`docs/operations/README.md`](./docs/operations/README.md) / 実装状況・残タスク: [`docs/implementation-backlog.md`](./docs/implementation-backlog.md)
+- DB変更履歴: [`docs/db-history/README.md`](./docs/db-history/README.md) / migrationテンプレート: [`docs/templates/migration.md`](./docs/templates/migration.md)
 - AI エージェント向けガイド: [`AGENTS.md`](./AGENTS.md)
 - 現行文書の索引: [`docs/README.md`](./docs/README.md)
 
@@ -50,13 +51,13 @@ instrumentation.ts   # ローカル dev 時に Miniflare で D1/R2/KV を自動�
 npm install
 cp .dev.vars.example .dev.vars   # シークレットを記入 (LOCAL.md 参照)
 
-npm run dev          # 開発サーバ (Miniflare が D1/R2/KV を自動起動、migration も冪等 apply)
+npm run dev          # 開発サーバ (Miniflare のローカル binding を利用。migration は手動適用)
 npm run typecheck    # 型チェック
 npm run build        # プロダクションビルド
 npm run test:unit    # 単体テスト (node:test)
 
 npm run db:local-apply  # ローカル D1 へ migration 適用
-# スキーマ変更時は手動 SQL migration を作成 (docs/operations.md §1 参照。db:generate は現在使わない)
+# スキーマ変更時は手動 SQL migration を作成 (docs/operations/migrations.md 参照。db:generate は使わない)
 ```
 
 ## 主な機能
@@ -70,6 +71,6 @@ npm run db:local-apply  # ローカル D1 へ migration 適用
 ## デザイン原則 (要旨)
 
 - 作品優先・高密度。装飾より作品サムネイルとカードの並びを優先する。
-- 黄色 (`#FFD400`) を主アクセントとし、CTA・選択中・フォーカス・アクティブ X ID に統一して使う。イベント別アクセントカラーがあればそれを優先。
+- ライムを正式アクセントとし、CTA・選択中・フォーカス・アクティブ X ID に統一して使う。イベント別アクセントカラーがあればそれを優先。
 - ライト / ダーク両対応。同じ配置・密度で実装する。
 - 絵文字は UI に使わない。正規 SVG アイコン (Lucide 等) を使う。

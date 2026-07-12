@@ -5,6 +5,42 @@
 > Verified against commit: `5f48e0f` + working tree
 > Source of truth: `src/lib/db/schema.ts`, `migrations/0000_flame_node_baseline.sql`
 
-ローカルの空D1には `npm run db:local-apply` を実行する。開発サーバーはmigration、ALTER、backfillを実行しない。schema versionが一致しない場合はfail-fastで停止する。
+## 正本
 
-Remote D1の作成、backup、migration適用、rollbackは運用者がCloudflareの手順に従い明示的に行う。CIとCodexはRemote D1を変更しない。
+- DB schemaの正本は `src/lib/db/schema.ts`。
+- 空のD1へ適用するactive migrationは `migrations/0000_flame_node_baseline.sql` のみ。
+- 旧migration本文は `migrations/historical/` に保存する履歴資料であり、現行の適用対象ではない。
+- D1が正本であり、R2/KVの静的JSONは公開配信用キャッシュである。
+
+現行コードは旧列・旧tableのruntime fallback、旧方式への二重書き込み、起動時のschema変更を行わない。schema不一致はfail-fastで扱う。
+
+## ローカル
+
+空のローカルD1には次を実行する。
+
+```sh
+npm.cmd run db:local-apply
+```
+
+開発サーバーやWorkerはmigration、ALTER、backfillを自動実行しない。変更後は少なくとも次を実行する。
+
+```sh
+npm.cmd run check:db-schema
+npm.cmd run check:db-history
+```
+
+## Remote D1
+
+Remote D1の作成、backup、migration適用、rollbackは運用者がCloudflareの手順に従い、対象D1とmigrationを確認して明示的に行う。CIとCodexはRemote D1を変更しない。
+
+本番適用前に、schemaとmigrationの差分、backup、適用対象、復旧手順を記録する。Remote D1の初期化や自動削除は行わない。
+
+## 変更手順
+
+1. `src/lib/db/schema.ts` を先に更新し、必要なSQLを新しいactive migrationとして追加する。
+2. migrationヘッダーを [migration template](../templates/migration.md) に従って記載する。
+3. [DB変更履歴](../db-change-history.md) と [DB CHANGELOG](../DB-CHANGELOG.md) を同じ変更で更新する。
+4. 旧migrationは書き換えず、必要なら `migrations/historical/` に保持する。
+5. `check:db-schema`、`check:db-history`、`check:project-docs` を実行する。
+
+rollbackがSQLだけで安全にできない変更は、backupからの運用者による復旧を手順化し、アプリケーションに旧形式fallbackを戻さない。
