@@ -18,10 +18,7 @@ import {
 import { SPREADSHEET_IMPORT_MAX_BATCH_ROWS } from "@/lib/admin/spreadsheet/constants";
 import { buildSpreadsheetImportPreviewToken } from "@/lib/admin/spreadsheet/importPreviewToken";
 import { resolveSpreadsheetTableContext } from "@/lib/admin/spreadsheet/tableContext";
-import {
-  applySpreadsheetForcedInsertValues,
-  isSpreadsheetColumnEditable,
-} from "@/lib/admin/spreadsheet/registry";
+import { isSpreadsheetColumnEditable } from "@/lib/admin/spreadsheet/registry";
 import { getDatabase } from "@/lib/cloudflare";
 import { systemSettings } from "@/lib/db/schema";
 import { isWriteBlocked } from "@/lib/operationMode/policy";
@@ -86,7 +83,7 @@ export async function POST(req: Request): Promise<Response> {
       columnNames: ctx.columnNames,
       readonlyColumns,
     });
-    const writableRows = rows.map((row) => applySpreadsheetForcedInsertValues(ctx.def.table, row));
+    const writableRows = rows;
     const importWarnings = [...warnings];
     if (writableRows.length > SPREADSHEET_IMPORT_MAX_BATCH_ROWS) {
       importWarnings.push(

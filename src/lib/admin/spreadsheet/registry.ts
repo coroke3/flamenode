@@ -168,34 +168,14 @@ export const SPREADSHEET_SECRET_COLUMNS = new Set([
   "password",
 ]);
 
-export const SPREADSHEET_FORCED_INSERT_VALUES_BY_TABLE: Record<
-  string,
-  Record<string, string>
-> = {
-  video_chapters: { marker_kind: "chapter" },
-};
-
-export function applySpreadsheetForcedInsertValues(
-  table: string,
-  row: Record<string, string | null>,
-): Record<string, string | null> {
-  const forced = SPREADSHEET_FORCED_INSERT_VALUES_BY_TABLE[table];
-  if (!forced) return row;
-  return { ...row, ...forced };
-}
-
-export function isSpreadsheetForcedInsertColumn(
-  table: string,
-  column: string,
-): boolean {
-  return Object.prototype.hasOwnProperty.call(
-    SPREADSHEET_FORCED_INSERT_VALUES_BY_TABLE[table] ?? {},
-    column,
-  );
-}
-
 const SECRET_COLUMN_PATTERN =
   /(?:^|_)(?:token|secret|password|credential)s?$/i;
+
+export function isSpreadsheetSecretColumn(column: string): boolean {
+  return (
+    SPREADSHEET_SECRET_COLUMNS.has(column) || SECRET_COLUMN_PATTERN.test(column)
+  );
+}
 
 export function isValidSqliteTableName(name: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
@@ -285,7 +265,6 @@ export function isSpreadsheetColumnEditable(
   column: string,
 ): boolean {
   if (def.mode === "readonly") return false;
-  if (SPREADSHEET_SECRET_COLUMNS.has(column)) return false;
-  if (SECRET_COLUMN_PATTERN.test(column)) return false;
+  if (isSpreadsheetSecretColumn(column)) return false;
   return true;
 }

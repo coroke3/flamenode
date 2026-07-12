@@ -5,10 +5,9 @@ import * as schema from "../../db/schema.ts";
 import { eventGroupEvents, eventGroups, events, videos } from "../../db/schema.ts";
 import { normalizeSpreadsheetPage } from "./constants.ts";
 import {
-  applySpreadsheetForcedInsertValues,
   buildSpreadsheetTableDefs,
   isSpreadsheetColumnEditable,
-  isSpreadsheetForcedInsertColumn,
+  isSpreadsheetSecretColumn,
   isSpreadsheetTableBlocklisted,
   SPREADSHEET_COLUMN_POLICIES,
   primaryKeysFromColumns,
@@ -77,14 +76,8 @@ test("every supplemental policy targets a real schema table.column", () => {
 test("secret columns and readonly tables remain protected", () => {
   const user = resolveSpreadsheetTableDef("user", true);
   assert.equal(isSpreadsheetColumnEditable(user, "api_secret"), false);
+  assert.equal(isSpreadsheetSecretColumn("lease_token"), true);
+  assert.equal(isSpreadsheetSecretColumn("display_name"), false);
   assert.equal(isSpreadsheetColumnEditable(user, "display_name"), true);
   assert.equal(resolveSpreadsheetTableDef("account", true).mode, "readonly");
-});
-
-test("forced spreadsheet insert values normalize fixed chapter markers", () => {
-  assert.deepEqual(
-    applySpreadsheetForcedInsertValues("video_chapters", { id: "ch-1", marker_kind: "comment" }),
-    { id: "ch-1", marker_kind: "chapter" },
-  );
-  assert.equal(isSpreadsheetForcedInsertColumn("video_chapters", "marker_kind"), true);
 });

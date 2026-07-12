@@ -8,8 +8,36 @@ export const SPREADSHEET_PAGE_SIZE_CAP = 5000;
 
 /** 1回のインポートで処理できる最大行数 */
 export const SPREADSHEET_IMPORT_MAX_ROWS = 500;
-/** D1 batch: mutation + changes assertion per row, audit INSERT + audit assertion. */
-export const SPREADSHEET_IMPORT_MAX_BATCH_ROWS = 20;
+
+export const SPREADSHEET_D1_BATCH_STATEMENT_LIMIT = 50;
+export const SPREADSHEET_D1_BATCH_STATEMENT_RESERVE = 10;
+
+/**
+ * Spreadsheet import 1回分のD1 statement予算。
+ * prep 2 + mutation/assertion 2N + audit準備 2*ceil(N/4) + 安全枠10。
+ */
+export function estimateSpreadsheetImportD1Statements(rowCount: number): number {
+  const rows = Math.max(0, Math.trunc(rowCount));
+  return (
+    2 +
+    rows * 2 +
+    Math.ceil(rows / 4) * 2 +
+    SPREADSHEET_D1_BATCH_STATEMENT_RESERVE
+  );
+}
+
+/** 15行で50 statements、16行では52となるfail-closed上限。 */
+export const SPREADSHEET_IMPORT_MAX_BATCH_ROWS = 15;
+
+export function isSpreadsheetImportBatchSizeAllowed(rowCount: number): boolean {
+  return (
+    Number.isInteger(rowCount) &&
+    rowCount >= 1 &&
+    rowCount <= SPREADSHEET_IMPORT_MAX_BATCH_ROWS &&
+    estimateSpreadsheetImportD1Statements(rowCount) <=
+      SPREADSHEET_D1_BATCH_STATEMENT_LIMIT
+  );
+}
 
 /** 貼り付けテキストの最大文字数（クライアント・API 共通） */
 export const SPREADSHEET_IMPORT_MAX_TEXT_CHARS = 2_000_000;

@@ -5,15 +5,13 @@ import { getDatabase } from "@/lib/cloudflare";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import type { SpreadsheetTableDef } from "./registry";
 import {
-  applySpreadsheetForcedInsertValues,
   isSpreadsheetColumnEditable,
-  isSpreadsheetForcedInsertColumn,
-  SPREADSHEET_SECRET_COLUMNS,
+  isSpreadsheetSecretColumn,
   getSpreadsheetColumnPolicy,
   SPREADSHEET_DEFAULT_MAX_CELL_CHARS,
 } from "./registry";
 import {
-  SPREADSHEET_IMPORT_MAX_BATCH_ROWS,
+  isSpreadsheetImportBatchSizeAllowed,
   SPREADSHEET_IMPORT_MAX_ROWS,
 } from "./constants";
 import {
@@ -56,7 +54,7 @@ export interface SpreadsheetPageResult {
 
 function maskValue(column: string, value: unknown): unknown {
   if (value == null) return value;
-  if (!SPREADSHEET_SECRET_COLUMNS.has(column)) return value;
+  if (!isSpreadsheetSecretColumn(column)) return value;
   const s = String(value);
   if (s.length <= 8) return "••••••••";
   return `${s.slice(0, 4)}…${s.slice(-4)}`;
@@ -265,10 +263,7 @@ function validateSpreadsheetInputValues(
 ): void {
   for (const key of Object.keys(row)) {
     if (!ctx.columnNames.includes(key)) throw new Error("unknown_column");
-    if (
-      !isSpreadsheetColumnEditable(ctx.def, key) &&
-      !isSpreadsheetForcedInsertColumn(ctx.def.table, key)
-    ) {
+    if (!isSpreadsheetColumnEditable(ctx.def, key)) {
       throw new Error("column_not_editable");
     }
     const value = row[key];
@@ -327,7 +322,7 @@ function prepareCompleteInsertRow(
   ctx: SpreadsheetTableContext,
   rowInput: Record<string, string | null>,
 ): Record<string, string | number | null> {
-  const row = applySpreadsheetForcedInsertValues(ctx.def.table, rowInput);
+  const row = rowInput;
   validateSpreadsheetInputValues(ctx, row);
   const complete: Record<string, string | number | null> = {};
   for (const column of ctx.columns) {
@@ -668,7 +663,7 @@ export async function applySpreadsheetImport(
   if (opts.rows.length > SPREADSHEET_IMPORT_MAX_ROWS) {
     throw new Error("too_many_rows");
   }
-  if (opts.rows.length > SPREADSHEET_IMPORT_MAX_BATCH_ROWS) {
+  if (!isSpreadsheetImportBatchSizeAllowed(opts.rows.length)) {
     throw new Error("batch_too_large");
   }
 
@@ -680,10 +675,7 @@ export async function applySpreadsheetImport(
     try {
       for (const key of Object.keys(row)) {
         if (!ctx.columnNames.includes(key)) throw new Error("unknown_column");
-        if (
-          !isSpreadsheetColumnEditable(ctx.def, key) &&
-          !isSpreadsheetForcedInsertColumn(ctx.def.table, key)
-        ) {
+        if (!isSpreadsheetColumnEditable(ctx.def, key)) {
           throw new Error("column_not_editable");
         }
       }
