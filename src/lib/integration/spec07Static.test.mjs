@@ -50,3 +50,22 @@ test("audit restore source contains payload, stale-snapshot, and atomic failure 
   assert.match(mutate, /changes\(\) =/);
   assert.match(mutate, /json_extract\('not-valid-json'/);
 });
+
+test("local development shares Wrangler bindings and persistence with migration commands", () => {
+  const instrumentation = fs.readFileSync(path.join(root, "instrumentation.ts"), "utf8");
+  const grantAdmin = fs.readFileSync(path.join(root, "scripts/grant-admin.cjs"), "utf8");
+
+  for (const source of [instrumentation, grantAdmin]) {
+    assert.match(source, /getPlatformProxy/);
+    assert.match(source, /configPath:\s*"wrangler\.toml"/);
+    assert.match(source, /persist:\s*\{\s*path:\s*"\.wrangler\/state\/v3"\s*\}/);
+    assert.match(source, /remoteBindings:\s*false/);
+    assert.match(source, /envFiles:\s*\[\]/);
+    assert.doesNotMatch(source, /d1Databases|DB:\s*"flamenode_db"/);
+  }
+
+  assert.match(instrumentation, /await assertLocalSchemaVersion\(DB\)/);
+  assert.match(instrumentation, /__FLAMENODE_LOCAL_PLATFORM\s*=\s*platform/);
+  assert.match(grantAdmin, /const db = platform\.env\.DB/);
+  assert.match(grantAdmin, /finally\s*\{\s*await platform\.dispose\(\)/s);
+});
