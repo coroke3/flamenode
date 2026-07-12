@@ -1,6 +1,8 @@
 import "server-only";
+import { sql } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { getDatabase } from "@/lib/cloudflare";
-import { auditAction } from "@/lib/audit/helpers";
+import { mutateWithAudit } from "@/lib/audit/mutate";
 import type { SpreadsheetTableDef } from "./registry";
 import {
   applySpreadsheetForcedInsertValues,
@@ -8,13 +10,17 @@ import {
   isSpreadsheetForcedInsertColumn,
   SPREADSHEET_SECRET_COLUMNS,
 } from "./registry";
-import { SPREADSHEET_IMPORT_MAX_ROWS } from "./constants";
+import {
+  SPREADSHEET_IMPORT_MAX_BATCH_ROWS,
+  SPREADSHEET_IMPORT_MAX_ROWS,
+} from "./constants";
 import {
   clampSpreadsheetPageLimit,
   normalizeSpreadsheetPage,
 } from "./settings";
 
 export { SPREADSHEET_IMPORT_MAX_ROWS } from "./constants";
+export { SPREADSHEET_IMPORT_MAX_BATCH_ROWS } from "./constants";
 import {
   assertColumnEditable,
   assertTableEditable,
@@ -191,36 +197,200 @@ async function queryTableRows(
   };
 }
 
-async function writeHistory(opts: {
-  operatorId: string;
-  table: string;
-  recordId: string;
-  action: "UPDATE" | "CREATE" | "DELETE";
-  before: unknown;
-  after: unknown;
-}): Promise<void> {
-  const db = getDatabase();
-  if (!db) return;
-  try {
-    await auditAction(db, {
-      table_name: opts.table,
-      record_id: opts.recordId,
-      action: opts.action,
-      before_data: opts.before != null ? JSON.stringify(opts.before) : null,
-      after_data: opts.after != null ? JSON.stringify(opts.after) : null,
-      operator_user_id: opts.operatorId,
-      retention_class: "long_audit",
-    });
-  } catch {
-    /* 履歴書き込み失敗でもセル更新は成功扱いのまま */
-  }
-}
-
 function recordIdFromPk(pk: Record<string, string>): string {
   return Object.entries(pk)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([, v]) => v)
     .join(":");
+}
+
+type SpreadsheetMutation = {
+  statement: BatchItem<"sqlite">;
+  audit: {
+    table_name: string;
+    target_id: string;
+    operation: "CREATE" | "UPDATE" | "DELETE";
+    before: Record<string, unknown> | null;
+    after: Record<string, unknown> | null;
+    actor_user_id: string;
+    retention_class: "long_audit";
+    strict: true;
+    context: "admin_spreadsheet";
+  };
+};
+
+function spreadsheetDb() {
+  const db = getDatabase();
+  if (!db) throw new Error("db_unavailable");
+  return db;
+}
+
+function snapshotCondition(
+  ctx: SpreadsheetTableContext,
+  row: Record<string, unknown>,
+): ReturnType<typeof sql> {
+  return sql.join(
+    ctx.columns.map((column) =>
+      sql`${sql.raw(quoteIdent(column.name))} IS ${row[column.name] ?? null}`,
+    ),
+    sql` AND `,
+  );
+}
+
+function primaryKeyCondition(
+  ctx: SpreadsheetTableContext,
+  pk: Record<string, string>,
+): ReturnType<typeof sql> {
+  return sql.join(
+    ctx.primaryKeys.map((key) =>
+      sql`${sql.raw(quoteIdent(key))} = ${pk[key]}`,
+    ),
+    sql` AND `,
+  );
+}
+
+function fullInsertedRow(
+  ctx: SpreadsheetTableContext,
+  row: Record<string, string | null>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    ctx.columns.map((column) => [
+      column.name,
+      row[column.name] === "" ? null : row[column.name] ?? null,
+    ]),
+  );
+}
+
+function buildInsertMutation(
+  ctx: SpreadsheetTableContext,
+  rowInput: Record<string, string | null>,
+  operatorId: string,
+): SpreadsheetMutation {
+  for (const key of Object.keys(rowInput)) {
+    if (!ctx.columnNames.includes(key)) throw new Error("unknown_column");
+    if (
+      !isSpreadsheetColumnEditable(ctx.def, key) &&
+      !isSpreadsheetForcedInsertColumn(ctx.def.table, key)
+    ) {
+      throw new Error("column_not_editable");
+    }
+  }
+  const row = applySpreadsheetForcedInsertValues(ctx.def.table, rowInput);
+  const pk = primaryKeyFromRowValues(row, ctx.primaryKeys);
+  const keys = ctx.columns
+    .map((c) => c.name)
+    .filter(
+      (name) =>
+        row[name] !== undefined &&
+        (isSpreadsheetColumnEditable(ctx.def, name) ||
+          isSpreadsheetForcedInsertColumn(ctx.def.table, name)),
+    );
+  if (keys.length === 0) throw new Error("empty_row");
+  const db = spreadsheetDb();
+  const values = keys.map((key) => (row[key] === "" ? null : row[key]));
+  return {
+    statement: db.run(sql`
+      INSERT INTO ${sql.raw(ctx.quotedTable)} (${sql.raw(keys.map(quoteIdent).join(", "))})
+      VALUES (${sql.join(values.map((value) => sql`${value}`), sql`, `)})
+    `),
+    audit: {
+      table_name: ctx.def.table,
+      target_id: recordIdFromPk(pk),
+      operation: "CREATE",
+      before: null,
+      after: fullInsertedRow(ctx, row),
+      actor_user_id: operatorId,
+      retention_class: "long_audit",
+      strict: true,
+      context: "admin_spreadsheet",
+    },
+  };
+}
+
+function buildUpdateMutation(
+  ctx: SpreadsheetTableContext,
+  pk: Record<string, string>,
+  before: Record<string, unknown>,
+  values: Record<string, string | null>,
+  operatorId: string,
+): SpreadsheetMutation {
+  const setCols = ctx.columns.filter(
+    (column) =>
+      column.pk === 0 &&
+      isSpreadsheetColumnEditable(ctx.def, column.name) &&
+      values[column.name] !== undefined,
+  );
+  if (setCols.length === 0) throw new Error("empty_row");
+  const pkWhere = primaryKeyCondition(ctx, pk);
+  const optimistic = snapshotCondition(ctx, before);
+  const after = { ...before };
+  for (const column of setCols) {
+    after[column.name] = values[column.name] === "" ? null : values[column.name];
+  }
+  const db = spreadsheetDb();
+  return {
+    statement: db.run(sql`
+      UPDATE ${sql.raw(ctx.quotedTable)}
+      SET ${sql.join(
+        setCols.map((column) =>
+          sql`${sql.raw(quoteIdent(column.name))} = ${values[column.name] === "" ? null : values[column.name]}`,
+        ),
+        sql`, `,
+      )}
+      WHERE ${pkWhere} AND ${optimistic}
+    `),
+    audit: {
+      table_name: ctx.def.table,
+      target_id: recordIdFromPk(pk),
+      operation: "UPDATE",
+      before,
+      after,
+      actor_user_id: operatorId,
+      retention_class: "long_audit",
+      strict: true,
+      context: "admin_spreadsheet",
+    },
+  };
+}
+
+function buildDeleteMutation(
+  ctx: SpreadsheetTableContext,
+  pk: Record<string, string>,
+  before: Record<string, unknown>,
+  operatorId: string,
+): SpreadsheetMutation {
+  const pkWhere = primaryKeyCondition(ctx, pk);
+  const optimistic = snapshotCondition(ctx, before);
+  const db = spreadsheetDb();
+  return {
+    statement: db.run(sql`
+      DELETE FROM ${sql.raw(ctx.quotedTable)}
+      WHERE ${pkWhere} AND ${optimistic}
+    `),
+    audit: {
+      table_name: ctx.def.table,
+      target_id: recordIdFromPk(pk),
+      operation: "DELETE",
+      before,
+      after: null,
+      actor_user_id: operatorId,
+      retention_class: "long_audit",
+      strict: true,
+      context: "admin_spreadsheet",
+    },
+  };
+}
+
+async function executeSpreadsheetMutations(
+  mutations: SpreadsheetMutation[],
+): Promise<void> {
+  if (mutations.length === 0) return;
+  const db = spreadsheetDb();
+  await mutateWithAudit(db, {
+    mutationStatements: mutations.map((mutation) => mutation.statement),
+    expectedMutationChanges: mutations.map(() => 1),
+    audits: mutations.map((mutation) => mutation.audit),
+  });
 }
 
 export async function fetchSpreadsheetPage(opts: {
@@ -278,29 +448,15 @@ export async function updateSpreadsheetCell(opts: {
   const beforeRaw = await fetchRowByPkRaw(ctx, primaryKey);
   if (!beforeRaw) throw new Error("row_not_found");
 
-  const { clause: pkClause, binds: pkBinds } = buildPkWhere(
-    ctx.primaryKeys,
-    primaryKey,
-  );
-  const bindValue = opts.value === "" ? null : opts.value;
-  const db = await getSpreadsheetD1();
-  await db
-    .prepare(
-      `UPDATE ${ctx.quotedTable} SET ${quoteIdent(opts.column)} = ? WHERE ${pkClause}`,
-    )
-    .bind(bindValue, ...pkBinds)
-    .run();
-
-  const afterRaw = await fetchRowByPkRaw(ctx, primaryKey);
-
-  await writeHistory({
-    operatorId: opts.operatorId,
-    table: ctx.def.table,
-    recordId: recordIdFromPk(primaryKey),
-    action: "UPDATE",
-    before: beforeRaw,
-    after: afterRaw,
-  });
+  await executeSpreadsheetMutations([
+    buildUpdateMutation(
+      ctx,
+      primaryKey,
+      beforeRaw,
+      { [opts.column]: opts.value },
+      opts.operatorId,
+    ),
+  ]);
 }
 
 async function insertSpreadsheetRowWithContext(
@@ -311,44 +467,9 @@ async function insertSpreadsheetRowWithContext(
   },
 ): Promise<void> {
   assertTableEditable(ctx);
-  const row = applySpreadsheetForcedInsertValues(ctx.def.table, opts.row);
-  const pk = primaryKeyFromRowValues(row, ctx.primaryKeys);
-
-  const keys = ctx.columns
-    .map((c) => c.name)
-    .filter(
-      (name) =>
-        row[name] !== undefined &&
-        (isSpreadsheetColumnEditable(ctx.def, name) ||
-          isSpreadsheetForcedInsertColumn(ctx.def.table, name)),
-    );
-  if (keys.length === 0) throw new Error("empty_row");
-
-  const colList = keys.map(quoteIdent).join(", ");
-  const placeholders = keys.map(() => "?").join(", ");
-  const values = keys.map((k) => {
-    const v = row[k];
-    return v === "" ? null : v;
-  });
-
-  const db = await getSpreadsheetD1();
-  await db
-    .prepare(
-      `INSERT INTO ${ctx.quotedTable} (${colList}) VALUES (${placeholders})`,
-    )
-      .bind(...values)
-    .run();
-
-  const afterRaw = await fetchRowByPkRaw(ctx, pk);
-
-  await writeHistory({
-    operatorId: opts.operatorId,
-    table: ctx.def.table,
-    recordId: recordIdFromPk(pk),
-    action: "CREATE",
-    before: null,
-    after: afterRaw ?? row,
-  });
+  await executeSpreadsheetMutations([
+    buildInsertMutation(ctx, opts.row, opts.operatorId),
+  ]);
 }
 
 export async function insertSpreadsheetRow(opts: {
@@ -378,21 +499,9 @@ export async function deleteSpreadsheetRow(opts: {
   const beforeRaw = await fetchRowByPkRaw(ctx, primaryKey);
   if (!beforeRaw) throw new Error("row_not_found");
 
-  const { clause, binds } = buildPkWhere(ctx.primaryKeys, primaryKey);
-  const db = await getSpreadsheetD1();
-  await db
-    .prepare(`DELETE FROM ${ctx.quotedTable} WHERE ${clause}`)
-    .bind(...binds)
-    .run();
-
-  await writeHistory({
-    operatorId: opts.operatorId,
-    table: ctx.def.table,
-    recordId: recordIdFromPk(primaryKey),
-    action: "DELETE",
-    before: beforeRaw,
-    after: null,
-  });
+  await executeSpreadsheetMutations([
+    buildDeleteMutation(ctx, primaryKey, beforeRaw, opts.operatorId),
+  ]);
 }
 
 export interface SpreadsheetExportResult {
@@ -431,7 +540,7 @@ export interface SpreadsheetImportResult {
   errors: Array<{ index: number; message: string }>;
 }
 
-async function upsertSpreadsheetRowWithContext(
+async function planUpsertSpreadsheetRow(
   ctx: SpreadsheetTableContext,
   opts: {
     row: Record<string, string | null>;
@@ -439,9 +548,7 @@ async function upsertSpreadsheetRowWithContext(
     existingRow?: Record<string, unknown> | null;
     existingRowKnown?: boolean;
   },
-): Promise<"inserted" | "updated" | "skipped"> {
-  assertTableEditable(ctx);
-
+): Promise<{ kind: "inserted" | "updated" | "skipped"; mutation?: SpreadsheetMutation }> {
   const pk = primaryKeyFromRowValues(opts.row, ctx.primaryKeys);
 
   const existing = opts.existingRowKnown
@@ -455,38 +562,16 @@ async function upsertSpreadsheetRowWithContext(
         isSpreadsheetColumnEditable(ctx.def, c.name) &&
         opts.row[c.name] !== undefined,
     );
-    if (setCols.length === 0) return "skipped";
-
-    const setParts: string[] = [];
-    const binds: unknown[] = [];
-    for (const col of setCols) {
-      setParts.push(`${quoteIdent(col.name)} = ?`);
-      const v = opts.row[col.name];
-      binds.push(v === "" ? null : v);
-    }
-    const { clause, binds: pkBinds } = buildPkWhere(ctx.primaryKeys, pk);
-    const db = await getSpreadsheetD1();
-    await db
-      .prepare(
-        `UPDATE ${ctx.quotedTable} SET ${setParts.join(", ")} WHERE ${clause}`,
-      )
-      .bind(...binds, ...pkBinds)
-      .run();
-
-    const afterRaw = await fetchRowByPkRaw(ctx, pk);
-    await writeHistory({
-      operatorId: opts.operatorId,
-      table: ctx.def.table,
-      recordId: recordIdFromPk(pk),
-      action: "UPDATE",
-      before: existing,
-      after: afterRaw,
-    });
-    return "updated";
+    if (setCols.length === 0) return { kind: "skipped" };
+    return {
+      kind: "updated",
+      mutation: buildUpdateMutation(ctx, pk, existing, opts.row, opts.operatorId),
+    };
   }
-
-  await insertSpreadsheetRowWithContext(ctx, opts);
-  return "inserted";
+  return {
+    kind: "inserted",
+    mutation: buildInsertMutation(ctx, opts.row, opts.operatorId),
+  };
 }
 
 export async function applySpreadsheetImport(
@@ -504,62 +589,66 @@ export async function applySpreadsheetImport(
   if (opts.rows.length > SPREADSHEET_IMPORT_MAX_ROWS) {
     throw new Error("too_many_rows");
   }
+  if (opts.rows.length > SPREADSHEET_IMPORT_MAX_BATCH_ROWS) {
+    throw new Error("batch_too_large");
+  }
 
-  let inserted = 0;
-  let updated = 0;
-  let skipped = 0;
   const errors: Array<{ index: number; message: string }> = [];
+  const seenPks = new Set<string>();
+  const preparedRows: Array<{ row: Record<string, string | null>; pk: Record<string, string>; fingerprint: string }> = [];
+  for (let index = 0; index < opts.rows.length; index++) {
+    const row = opts.rows[index]!;
+    try {
+      for (const key of Object.keys(row)) {
+        if (!ctx.columnNames.includes(key)) throw new Error("unknown_column");
+        if (
+          !isSpreadsheetColumnEditable(ctx.def, key) &&
+          !isSpreadsheetForcedInsertColumn(ctx.def.table, key)
+        ) {
+          throw new Error("column_not_editable");
+        }
+      }
+      const pk = primaryKeyFromRowValues(row, ctx.primaryKeys);
+      const fingerprint = primaryKeyFingerprint(pk);
+      if (seenPks.has(fingerprint)) throw new Error("duplicate_primary_key");
+      seenPks.add(fingerprint);
+      if (Object.keys(row).length === 0) throw new Error("empty_row");
+      preparedRows.push({ row, pk, fingerprint });
+    } catch (error) {
+      errors.push({
+        index,
+        message: error instanceof Error ? error.message : "invalid_row",
+      });
+    }
+  }
+  if (errors.length > 0) return { inserted: 0, updated: 0, skipped: 0, errors };
+
   const existingRowsByPk =
     opts.mode === "upsert"
       ? await fetchExistingRowsByImportPk(ctx, opts.rows)
       : null;
-  const touchedImportPks = new Set<string>();
-
-  for (let i = 0; i < opts.rows.length; i++) {
-    const row = opts.rows[i]!;
-    let importPkFingerprint: string | null = null;
-    let existingRowKnown = false;
-    let existingRow: Record<string, unknown> | null = null;
-
-    if (existingRowsByPk) {
-      try {
-        const pk = primaryKeyFromRowValues(row, ctx.primaryKeys);
-        importPkFingerprint = primaryKeyFingerprint(pk);
-        if (!touchedImportPks.has(importPkFingerprint)) {
-          existingRowKnown = true;
-          existingRow = existingRowsByPk.get(importPkFingerprint) ?? null;
-        }
-      } catch {
-        // Let the normal per-row import error path report this row.
-      }
+  const mutations: SpreadsheetMutation[] = [];
+  let inserted = 0;
+  let updated = 0;
+  let skipped = 0;
+  for (const prepared of preparedRows) {
+    if (opts.mode === "insert") {
+      mutations.push(buildInsertMutation(ctx, prepared.row, opts.operatorId));
+      inserted += 1;
+      continue;
     }
-
-    try {
-      if (opts.mode === "insert") {
-        await insertSpreadsheetRowWithContext(ctx, {
-          row,
-          operatorId: opts.operatorId,
-        });
-        inserted += 1;
-      } else {
-        const result = await upsertSpreadsheetRowWithContext(ctx, {
-          row,
-          operatorId: opts.operatorId,
-          existingRow,
-          existingRowKnown,
-        });
-        if (result === "inserted") inserted += 1;
-        else if (result === "updated") updated += 1;
-        else skipped += 1;
-      }
-    } catch (e) {
-      errors.push({
-        index: i,
-        message: e instanceof Error ? e.message : "import_failed",
-      });
-    }
-    if (importPkFingerprint) touchedImportPks.add(importPkFingerprint);
+    const existing = existingRowsByPk?.get(prepared.fingerprint) ?? null;
+    const planned = await planUpsertSpreadsheetRow(ctx, {
+      row: prepared.row,
+      operatorId: opts.operatorId,
+      existingRow: existing,
+      existingRowKnown: true,
+    });
+    if (planned.mutation) mutations.push(planned.mutation);
+    if (planned.kind === "inserted") inserted += 1;
+    else if (planned.kind === "updated") updated += 1;
+    else skipped += 1;
   }
-
-  return { inserted, updated, skipped, errors };
+  await executeSpreadsheetMutations(mutations);
+  return { inserted, updated, skipped, errors: [] };
 }

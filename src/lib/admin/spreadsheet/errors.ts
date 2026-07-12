@@ -34,6 +34,8 @@ export function spreadsheetHttpStatus(message: string): number {
     case "missing_primary_key":
     case "no_rows":
     case "too_many_rows":
+    case "batch_too_large":
+    case "duplicate_primary_key":
     case "payload_too_large":
     case "invalid_json":
     case "unique_violation":

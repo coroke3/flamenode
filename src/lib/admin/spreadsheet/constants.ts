@@ -8,6 +8,8 @@ export const SPREADSHEET_PAGE_SIZE_CAP = 5000;
 
 /** 1回のインポートで処理できる最大行数 */
 export const SPREADSHEET_IMPORT_MAX_ROWS = 500;
+/** D1 batch: mutation + changes assertion per row, audit INSERT + audit assertion. */
+export const SPREADSHEET_IMPORT_MAX_BATCH_ROWS = 20;
 
 /** 貼り付けテキストの最大文字数（クライアント・API 共通） */
 export const SPREADSHEET_IMPORT_MAX_TEXT_CHARS = 2_000_000;
