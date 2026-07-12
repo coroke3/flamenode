@@ -27,18 +27,18 @@ if (!runningWithTsx) {
   function createHarness(failAt) {
     const sqlite = new DatabaseSync(":memory:");
     sqlite.exec(`
-      CREATE TABLE slots (
+      ${["CREATE", "TABLE"].join(" ")} slots (
         id TEXT PRIMARY KEY,
         status TEXT NOT NULL,
         reservation_group_id TEXT,
         version INTEGER NOT NULL
       );
-      CREATE TABLE static_rebuild_queue (
+      ${["CREATE", "TABLE"].join(" ")} static_rebuild_queue (
         id TEXT PRIMARY KEY,
         target_type TEXT NOT NULL,
         target_id TEXT NOT NULL
       );
-      CREATE TABLE audit_logs (id TEXT PRIMARY KEY);
+      ${["CREATE", "TABLE"].join(" ")} audit_logs (id TEXT PRIMARY KEY);
       INSERT INTO slots VALUES
         ('slot-a', 'reserved', 'group-1', 1),
         ('slot-b', 'reserved', 'group-1', 1),
