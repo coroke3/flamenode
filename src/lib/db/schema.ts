@@ -149,9 +149,8 @@ export const xUserIcons = sqliteTable(
     created_at: integer("created_at").notNull(),
   },
   (t) => ({
-    // 同じ X ID で同じ icon_url を二重登録しないための unique 制約。
-    // recordXIconCandidateFromVideo (作品保存時の候補記録) や
-    // uploadVideoIconCandidate (作品向けアップロード) を onConflictDoNothing で書けるようにする。
+    // 手動アップロード履歴で同じX ID・icon_urlを二重登録しないためのunique制約。
+    // 投稿由来の候補はvideos.creator_icon_urlから解決し、この履歴表へ二重書込みしない。
     userUrlUnique: uniqueIndex("x_user_icons_user_url_uniq").on(
       t.x_user_id,
       t.icon_url,

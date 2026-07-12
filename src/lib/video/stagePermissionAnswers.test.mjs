@@ -2,10 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   readStagePermissionCustomAnswers,
-  replaceStagePermissionCustomAnswers,
+  buildReplaceStagePermissionAnswersPlan,
 } from "./stagePermissionAnswers.ts";
 
-function createFakeDb(questions) {
+function createFakeDb(questions, existingAnswers = []) {
+  let selectCount = 0;
   const calls = {
     deleted: 0,
     inserted: null,
@@ -14,18 +15,24 @@ function createFakeDb(questions) {
     calls,
     db: {
       select() {
+        selectCount += 1;
         return {
           from() {
             return {
-              where: async () => questions,
+              where() {
+                return {
+                  limit: async () => (selectCount === 1 ? questions : existingAnswers),
+                };
+              },
             };
           },
         };
       },
       delete() {
         return {
-          where: async () => {
+          where: () => {
             calls.deleted += 1;
+            return { kind: "delete" };
           },
         };
       },
@@ -33,9 +40,7 @@ function createFakeDb(questions) {
         return {
           values(values) {
             calls.inserted = values;
-            return {
-              onConflictDoNothing: async () => undefined,
-            };
+            return { kind: "insert" };
           },
         };
       },
@@ -51,7 +56,11 @@ function createReadFakeDb(questions, answers) {
       return {
         from() {
           return {
-            where: async () => (selectCount === 1 ? questions : answers),
+            where() {
+              return {
+                limit: async () => (selectCount === 1 ? questions : answers),
+              };
+            },
           };
         },
       };
@@ -59,7 +68,7 @@ function createReadFakeDb(questions, answers) {
   };
 }
 
-test("replaceStagePermissionCustomAnswers replaces active stage-permission answers", async () => {
+test("buildReplaceStagePermissionAnswersPlan plans active stage-permission answers", async () => {
   const { db, calls } = createFakeDb([
     {
       id: "q-stage",
@@ -75,7 +84,7 @@ test("replaceStagePermissionCustomAnswers replaces active stage-permission answe
     },
   ]);
 
-  await replaceStagePermissionCustomAnswers(db, {
+  const plan = await buildReplaceStagePermissionAnswersPlan(db, {
     videoId: "video-1",
     eventIds: ["event-a"],
     deleteEventIds: ["event-old"],
@@ -87,9 +96,12 @@ test("replaceStagePermissionCustomAnswers replaces active stage-permission answe
       ],
     }),
     now: 123,
+    actorUserId: "actor-1",
   });
 
-  assert.equal(calls.deleted, 1);
+  assert.equal(calls.deleted, 0);
+  assert.equal(plan.statements.length, 1);
+  assert.deepEqual(plan.expectedChanges, [1]);
   assert.deepEqual(calls.inserted, [
     {
       video_id: "video-1",
@@ -103,7 +115,16 @@ test("replaceStagePermissionCustomAnswers replaces active stage-permission answe
   ]);
 });
 
-test("replaceStagePermissionCustomAnswers clears stale answers when submission is empty", async () => {
+test("buildReplaceStagePermissionAnswersPlan clears stale answers when submission is empty", async () => {
+  const existing = {
+    video_id: "video-1",
+    event_id: "event-a",
+    question_id: "q-stage",
+    answer_text: "old",
+    answer_json: null,
+    created_at: 100,
+    updated_at: 100,
+  };
   const { db, calls } = createFakeDb([
     {
       id: "q-stage",
@@ -111,17 +132,20 @@ test("replaceStagePermissionCustomAnswers clears stale answers when submission i
       question_key: "stage_permission",
       is_active: 1,
     },
-  ]);
+  ], [existing]);
 
-  await replaceStagePermissionCustomAnswers(db, {
+  const plan = await buildReplaceStagePermissionAnswersPlan(db, {
     videoId: "video-1",
     eventIds: ["event-a"],
     stagePermission: null,
     now: 123,
+    actorUserId: "actor-1",
   });
 
   assert.equal(calls.deleted, 1);
   assert.equal(calls.inserted, null);
+  assert.deepEqual(plan.expectedChanges, [1]);
+  assert.deepEqual(plan.audits[0].before, existing);
 });
 
 test("readStagePermissionCustomAnswers serializes normalized answers", async () => {

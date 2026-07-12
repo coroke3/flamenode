@@ -1,4 +1,4 @@
-import { and, eq, sql, type SQL } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import {
   announcements,
@@ -11,6 +11,8 @@ import {
 } from "@/lib/db/schema";
 import { isEventOwner } from "@/lib/event/eventOwnershipCore";
 import type { RestoreAdapter, RestoreStrategy } from "./types";
+import { expectedRowCondition } from "./expectedRowCondition";
+export { expectedRowCondition } from "./expectedRowCondition";
 
 export const RESTORABLE_TABLES = new Set([
   "events",
@@ -37,42 +39,6 @@ function unsupported(table: string, strategy: RestoreStrategy): never {
  * Compare every scalar returned by the preflight read in the mutation WHERE
  * clause so a stale restore becomes a zero-change, fail-closed batch.
  */
-export function expectedRowCondition(
-  options: {
-    forceOverwrite?: boolean;
-    expectedCurrent?: Record<string, unknown> | null;
-  },
-): SQL {
-  if (options.forceOverwrite) return sql`1 = 1`;
-  const expected = options.expectedCurrent;
-  if (!expected) return sql`0 = 1`;
-
-  const predicates: SQL[] = [];
-  for (const [key, value] of Object.entries(expected)) {
-    // Column names come from a row returned by one of the fixed adapters, but
-    // quote them nevertheless. Values remain bound SQL parameters.
-    const column = sql.raw(`"${key.replaceAll('"', '""')}"`);
-    if (value === null) {
-      predicates.push(sql`${column} IS NULL`);
-    } else if (value instanceof Date && Number.isFinite(value.getTime())) {
-      // timestamp_ms列はDrizzle selectでDateになるが、SQLite上はepoch ms整数。
-      predicates.push(sql`${column} = ${value.getTime()}`);
-    } else if (
-      typeof value === "string" ||
-      typeof value === "number" ||
-      typeof value === "bigint" ||
-      typeof value === "boolean"
-    ) {
-      predicates.push(sql`${column} = ${value}`);
-    } else {
-      // D1 rows are scalar. An unexpected value must never weaken the guard.
-      return sql`0 = 1`;
-    }
-  }
-
-  return predicates.length > 0 ? sql.join(predicates, sql` AND `) : sql`0 = 1`;
-}
-
 const eventsAdapter: RestoreAdapter = {
   supportedStrategies: ["update_before"],
   async fetchCurrent(db, targetId) {
@@ -228,27 +194,15 @@ const eventStaffAdapter: RestoreAdapter = {
   buildRestoreMutation(db, snapshot, strategy, options) {
     const id = snapshot.id as string;
     const eventId = snapshot.event_id as string;
-    const expectedPreset = options.expectedCurrent?.permission_preset;
-    const hasExpectedPreset = typeof expectedPreset === "string";
-    const currentIsOwner = hasExpectedPreset && isEventOwner({
-      permission_preset: expectedPreset,
+    const targetIsOwner = isEventOwner({
+      permission_preset: String(snapshot.permission_preset ?? ""),
     });
-    const ownerMutationGuard = (nextPreset: string | null): SQL => sql`
-      ${hasExpectedPreset ? 1 : 0} = 1 AND (
-        ${currentIsOwner ? 0 : 1} = 1
-        OR ${nextPreset} = 'owner'
-        OR (
-          SELECT COUNT(*) FROM event_staff
-          WHERE event_id = ${eventId} AND permission_preset = 'owner'
-        ) > 1
-      )
-    `;
     if (strategy === "delete_created") {
       return {
         query: db.delete(eventStaff).where(and(
           eq(eventStaff.id, id),
           eq(eventStaff.event_id, eventId),
-          ownerMutationGuard(null),
+          sql`(${targetIsOwner ? 0 : 1} = 1 OR (SELECT COUNT(*) FROM event_staff WHERE event_id = ${eventId} AND permission_preset = 'owner') > 1)`,
           expectedRowCondition(options),
         )!),
         expectedChanges: 1,
@@ -261,7 +215,7 @@ const eventStaffAdapter: RestoreAdapter = {
         query: db.update(eventStaff).set(set as Partial<typeof eventStaff.$inferInsert>).where(and(
           eq(eventStaff.id, id),
           eq(eventStaff.event_id, eventId),
-          ownerMutationGuard(nextPreset),
+          sql`(${targetIsOwner ? 0 : 1} = 1 OR ${nextPreset} = 'owner' OR (SELECT COUNT(*) FROM event_staff WHERE event_id = ${eventId} AND permission_preset = 'owner') > 1)`,
           expectedRowCondition(options),
         )!),
         expectedChanges: 1,

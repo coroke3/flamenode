@@ -10,14 +10,18 @@ import {
   serializeStagePermissionAnswers,
 } from "./formSettings.ts";
 import { computeStagePermissionAnswerDeleteEventIds } from "./eventSync.ts";
-import {
-  compositeAuditTargetId,
-  emptyVideoAtomicWritePlan,
-  type VideoAtomicWritePlan,
-} from "@/lib/video/atomicWritePlan";
-import { expectedRowCondition } from "@/lib/audit/adapters";
+import type { VideoAtomicWritePlan } from "./atomicWritePlan.ts";
+import { expectedRowCondition } from "../audit/expectedRowCondition.ts";
 
 type DB = NonNullable<ReturnType<typeof getDatabase>>;
+
+function emptyPlan(): VideoAtomicWritePlan {
+  return { statements: [], expectedChanges: [], audits: [] };
+}
+
+function answerTargetId(videoId: string, eventId: string, questionId: string): string {
+  return [videoId, eventId, questionId].map(encodeURIComponent).join(":");
+}
 
 const STAGE_PERMISSION_KEY_PREFIX = `${DEFAULT_STAGE_PERMISSION_QUESTION_KEY}_`;
 
@@ -118,7 +122,7 @@ export async function buildReplaceStagePermissionAnswersPlan(
     targetEventIds: eventIds,
   });
 
-  if (syncEventIds.length === 0) return emptyVideoAtomicWritePlan();
+  if (syncEventIds.length === 0) return emptyPlan();
 
   const stageQuestions = await db
     .select({
@@ -161,7 +165,7 @@ export async function buildReplaceStagePermissionAnswersPlan(
       answer.value,
     ]),
   );
-  const plan = emptyVideoAtomicWritePlan();
+  const plan = emptyPlan();
   if (existing.length > 0) {
     plan.statements.push(db.delete(videoCustomAnswers).where(or(...existing.map((row) => and(
       eq(videoCustomAnswers.video_id, row.video_id),
@@ -172,7 +176,7 @@ export async function buildReplaceStagePermissionAnswersPlan(
     plan.expectedChanges.push(existing.length);
     plan.audits.push(...existing.map((row) => ({
       table_name: "video_custom_answers",
-      target_id: compositeAuditTargetId(row.video_id, row.event_id, row.question_id),
+      target_id: answerTargetId(row.video_id, row.event_id, row.question_id),
       operation: "DELETE" as const,
       before: { ...row },
       after: null,
@@ -210,7 +214,7 @@ export async function buildReplaceStagePermissionAnswersPlan(
   plan.expectedChanges.push(values.length);
   plan.audits.push(...values.map((row) => ({
     table_name: "video_custom_answers",
-    target_id: compositeAuditTargetId(row.video_id, row.event_id, row.question_id),
+    target_id: answerTargetId(row.video_id, row.event_id, row.question_id),
     operation: "CREATE" as const,
     before: null,
     after: { ...row },
