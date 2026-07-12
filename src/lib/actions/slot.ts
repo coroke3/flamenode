@@ -1,15 +1,26 @@
 "use server";
-import { auditAction } from "@/lib/audit/helpers";
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  sql,
+  type SQL,
+} from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
+import { mutateWithAudit } from "@/lib/audit/mutate";
 import {
   writeGuard,
   type WriteGuardDenyReason,
 } from "@/lib/auth/writeGuard";
 import { getDatabase } from "@/lib/cloudflare";
 import { events, slots, xUsers } from "@/lib/db/schema";
+import { MAX_ATOMIC_SLOT_ROWS } from "@/lib/slots/atomicLimits";
+import { buildReleaseGroupDecisions } from "@/lib/slots/userSlotCore";
+import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { generateId } from "@/lib/utils/id";
 import {
@@ -24,53 +35,52 @@ export interface SlotReserveResult {
   reason?: WriteGuardDenyReason;
 }
 
+type DB = NonNullable<ReturnType<typeof getDatabase>>;
+type SlotRow = typeof slots.$inferSelect;
+type EventRow = typeof events.$inferSelect;
+type SlotPatch = Partial<typeof slots.$inferInsert>;
+
+type PlannedSlotUpdate = {
+  before: SlotRow;
+  after: SlotRow;
+  statement: BatchItem<"sqlite">;
+};
+
 const reserveSchema = z.object({
   slot_id: z.string().trim().min(1),
   display_name: z.string().trim().min(1).max(80),
-  consecutive_count: z.coerce.number().min(1).max(20).default(1),
+  consecutive_count: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_ATOMIC_SLOT_ROWS)
+    .default(1),
 });
 
-type SlotRow = typeof slots.$inferSelect;
+const extendSchema = z.object({
+  slot_id: z.string().trim().min(1),
+  direction: z.enum(["forward", "backward"]),
+});
 
-async function rollbackReservedSlots(
-  db: NonNullable<ReturnType<typeof getDatabase>>,
-  originals: SlotRow[],
-  now: number,
-): Promise<void> {
-  if (originals.length === 0) return;
-  for (const original of originals) {
-    await db
-      .update(slots)
-      .set({
-        reserved_by_user_id: original.reserved_by_user_id,
-        x_user_id: original.x_user_id,
-        display_name: original.display_name,
-        reservation_group_id: original.reservation_group_id,
-        status: original.status,
-        updated_at: now,
-      })
-      .where(eq(slots.id, original.id));
-  }
+const mergeSchema = z.object({
+  gap_slot_id: z.string().trim().min(1),
+  display_name: z.string().trim().min(1).max(80),
+});
+
+function snapshot(row: SlotRow): Record<string, unknown> {
+  return { ...row };
 }
 
-function slotPartGapSec(event: typeof events.$inferSelect): number {
-  const minutes = event.slot_part_gap_minutes ?? 15;
-  return Number.isFinite(minutes) && minutes >= 0 ? minutes * 60 : 15 * 60;
-}
-
-function isAdjacent(prev: SlotRow, next: SlotRow, gapSec: number): boolean {
-  return areSlotsInSamePart(prev, next, gapSec);
-}
-
-function reservationGroupScope(groupId: string, row: SlotRow) {
-  return and(
-    eq(slots.reservation_group_id, groupId),
-    eq(slots.event_id, row.event_id),
-    row.reserved_by_user_id
-      ? eq(slots.reserved_by_user_id, row.reserved_by_user_id)
-      : isNull(slots.reserved_by_user_id),
-    row.x_user_id ? eq(slots.x_user_id, row.x_user_id) : isNull(slots.x_user_id),
-  )!;
+function mutationError(error: unknown): SlotReserveResult {
+  console.warn(
+    "[user-slot] atomic mutation failed",
+    error instanceof Error ? error.name : "UnknownError",
+  );
+  return {
+    ok: false,
+    message:
+      "枠の状態が変更されたか、安全な保存を完了できませんでした。画面を更新してもう一度お試しください。",
+  };
 }
 
 function revalidateSlotViews(eventId: string): void {
@@ -81,6 +91,288 @@ function revalidateSlotViews(eventId: string): void {
   revalidatePath("/manage");
   revalidatePath(`/admin/events/${eventId}/slots`);
   revalidatePath("/dashboard");
+}
+
+function slotPartGapSec(event: EventRow): number {
+  const minutes = event.slot_part_gap_minutes ?? 15;
+  return Number.isFinite(minutes) && minutes >= 0 ? minutes * 60 : 15 * 60;
+}
+
+function eventAtomicLimit(event: EventRow): number {
+  const configured = Number(event.max_consecutive_slots_per_entry ?? 1);
+  if (!Number.isFinite(configured) || configured < 1) return 1;
+  return Math.min(Math.floor(configured), MAX_ATOMIC_SLOT_ROWS);
+}
+
+function reservationGroupScope(groupId: string, eventId: string) {
+  return and(
+    eq(slots.event_id, eventId),
+    eq(slots.reservation_group_id, groupId),
+  )!;
+}
+
+/** 全列を比較し、読取後の変更を version 以外の列でも検出する。 */
+function expectedRowCondition(row: SlotRow) {
+  return and(
+    eq(slots.id, row.id),
+    eq(slots.event_id, row.event_id),
+    eq(slots.status, row.status),
+    eq(slots.version, row.version),
+    eq(slots.updated_at, row.updated_at),
+    sql`${slots.reserved_by_user_id} IS ${row.reserved_by_user_id}`,
+    sql`${slots.x_user_id} IS ${row.x_user_id}`,
+    sql`${slots.display_name} IS ${row.display_name}`,
+    sql`${slots.slot_kind} IS ${row.slot_kind}`,
+    sql`${slots.slot_label} IS ${row.slot_label}`,
+    sql`${slots.start_time} IS ${row.start_time}`,
+    sql`${slots.sort_order} IS ${row.sort_order}`,
+    sql`${slots.reservation_group_id} IS ${row.reservation_group_id}`,
+    sql`${slots.priority_reclaim_video_id} IS ${row.priority_reclaim_video_id}`,
+    sql`${slots.priority_reclaim_until} IS ${row.priority_reclaim_until}`,
+    sql`${slots.video_id} IS ${row.video_id}`,
+  )!;
+}
+
+function planSlotUpdate(
+  db: DB,
+  before: SlotRow,
+  patch: SlotPatch,
+  now: number,
+): PlannedSlotUpdate {
+  const values: SlotPatch = {
+    ...patch,
+    updated_at: now,
+    version: before.version + 1,
+  };
+  return {
+    before,
+    after: { ...before, ...values } as SlotRow,
+    statement: db.update(slots).set(values).where(expectedRowCondition(before)),
+  };
+}
+
+async function commitSlotUpdates(args: {
+  db: DB;
+  updates: readonly PlannedSlotUpdate[];
+  eventId: string;
+  actorUserId: string;
+  reason: string;
+}): Promise<void> {
+  if (
+    args.updates.length === 0 ||
+    args.updates.length > MAX_ATOMIC_SLOT_ROWS ||
+    new Set(args.updates.map((update) => update.before.id)).size !==
+      args.updates.length
+  ) {
+    throw new Error("原子的に処理できる枠数を超えています。");
+  }
+
+  const queue = await buildStaticRebuildQueueBatch(args.db, [
+    {
+      targetType: "event",
+      targetId: args.eventId,
+      reason: args.reason,
+      priority: "high",
+      requestedByUserId: args.actorUserId,
+    },
+  ]);
+
+  await mutateWithAudit(args.db, {
+    mutationStatements: [
+      ...args.updates.map((update) => update.statement),
+      ...queue.statements,
+    ],
+    expectedMutationChanges: [
+      ...args.updates.map(() => 1),
+      ...queue.expectedChanges,
+    ],
+    audits: args.updates.map((update) => ({
+      table_name: "slots",
+      target_id: update.before.id,
+      operation: "UPDATE",
+      before: snapshot(update.before),
+      after: snapshot(update.after),
+      actor_user_id: args.actorUserId,
+      reason: args.reason,
+      context: "user-slot",
+      retention_class: "normal",
+      restore_strategy: "update_before",
+      strict: true,
+    })),
+  });
+}
+
+async function loadSlot(db: DB, slotId: string): Promise<SlotRow | null> {
+  return (
+    await db.select().from(slots).where(eq(slots.id, slotId)).limit(1)
+  )[0] ?? null;
+}
+
+async function loadEvent(db: DB, eventId: string): Promise<EventRow | null> {
+  return (
+    await db.select().from(events).where(eq(events.id, eventId)).limit(1)
+  )[0] ?? null;
+}
+
+async function loadBoundedGroup(db: DB, anchor: SlotRow): Promise<SlotRow[]> {
+  const groupId = anchor.reservation_group_id?.trim() || null;
+  if (!groupId) return [anchor];
+
+  const rows = await db
+    .select()
+    .from(slots)
+    .where(reservationGroupScope(groupId, anchor.event_id))
+    .limit(MAX_ATOMIC_SLOT_ROWS + 1);
+  if (rows.length > MAX_ATOMIC_SLOT_ROWS) {
+    throw new Error(
+      `連続枠が上限 ${MAX_ATOMIC_SLOT_ROWS} 件を超えています。運営へ連絡してください。`,
+    );
+  }
+  if (rows.length === 0 || !rows.some((row) => row.id === anchor.id)) {
+    throw new Error("連続枠の完全な状態を確認できませんでした。");
+  }
+  if (
+    rows.some(
+      (row) =>
+        row.event_id !== anchor.event_id ||
+        row.reserved_by_user_id !== anchor.reserved_by_user_id ||
+        row.x_user_id !== anchor.x_user_id,
+    )
+  ) {
+    throw new Error("連続枠に別の利用者または X ID が混在しています。");
+  }
+  return sortSlotsChronologically(rows);
+}
+
+function orderCondition(row: SlotRow, direction: "forward" | "backward"): SQL {
+  const sortOrder = row.sort_order ?? 0;
+  if (row.start_time != null) {
+    return direction === "forward"
+      ? sql`
+          ${slots.start_time} IS NOT NULL AND (
+            ${slots.start_time} > ${row.start_time}
+            OR (
+              ${slots.start_time} = ${row.start_time}
+              AND (
+                COALESCE(${slots.sort_order}, 0) > ${sortOrder}
+                OR (
+                  COALESCE(${slots.sort_order}, 0) = ${sortOrder}
+                  AND ${slots.id} > ${row.id}
+                )
+              )
+            )
+          )
+        `
+      : sql`
+          ${slots.start_time} IS NOT NULL AND (
+            ${slots.start_time} < ${row.start_time}
+            OR (
+              ${slots.start_time} = ${row.start_time}
+              AND (
+                COALESCE(${slots.sort_order}, 0) < ${sortOrder}
+                OR (
+                  COALESCE(${slots.sort_order}, 0) = ${sortOrder}
+                  AND ${slots.id} < ${row.id}
+                )
+              )
+            )
+          )
+        `;
+  }
+  return direction === "forward"
+    ? sql`
+        ${slots.start_time} IS NULL AND (
+          COALESCE(${slots.sort_order}, 0) > ${sortOrder}
+          OR (
+            COALESCE(${slots.sort_order}, 0) = ${sortOrder}
+            AND ${slots.id} > ${row.id}
+          )
+        )
+      `
+    : sql`
+        ${slots.start_time} IS NULL AND (
+          COALESCE(${slots.sort_order}, 0) < ${sortOrder}
+          OR (
+            COALESCE(${slots.sort_order}, 0) = ${sortOrder}
+            AND ${slots.id} < ${row.id}
+          )
+        )
+      `;
+}
+
+async function loadOrderedNeighbors(
+  db: DB,
+  row: SlotRow,
+  direction: "forward" | "backward",
+): Promise<SlotRow[]> {
+  const query = db
+    .select()
+    .from(slots)
+    .where(and(eq(slots.event_id, row.event_id), orderCondition(row, direction))!);
+  if (row.start_time != null) {
+    return direction === "forward"
+      ? query
+        .orderBy(
+          asc(slots.start_time),
+          asc(sql`COALESCE(${slots.sort_order}, 0)`),
+          asc(slots.id),
+        )
+        .limit(MAX_ATOMIC_SLOT_ROWS + 1)
+      : query
+        .orderBy(
+          desc(slots.start_time),
+          desc(sql`COALESCE(${slots.sort_order}, 0)`),
+          desc(slots.id),
+        )
+        .limit(MAX_ATOMIC_SLOT_ROWS + 1);
+  }
+  return direction === "forward"
+    ? query
+        .orderBy(
+          asc(sql`COALESCE(${slots.sort_order}, 0)`),
+          asc(slots.id),
+        )
+        .limit(MAX_ATOMIC_SLOT_ROWS + 1)
+    : query
+        .orderBy(
+          desc(sql`COALESCE(${slots.sort_order}, 0)`),
+          desc(slots.id),
+        )
+        .limit(MAX_ATOMIC_SLOT_ROWS + 1);
+}
+
+function assertAdjacentSequence(rows: readonly SlotRow[], gapSec: number): void {
+  for (let index = 1; index < rows.length; index += 1) {
+    if (!areSlotsInSamePart(rows[index - 1], rows[index], gapSec)) {
+      throw new Error("別の部または連続していない枠はまとめて操作できません。");
+    }
+  }
+}
+
+async function ownsSlot(
+  db: DB,
+  row: SlotRow,
+  userId: string,
+  activeXId: string | null,
+): Promise<boolean> {
+  if (row.x_user_id) {
+    if (row.x_user_id === activeXId) return true;
+    return Boolean(
+      (
+        await db
+          .select({ id: xUsers.id })
+          .from(xUsers)
+          .where(
+            and(
+              eq(xUsers.id, row.x_user_id),
+              eq(xUsers.linked_user_id, userId),
+            )!,
+          )
+          .limit(1)
+      )[0],
+    );
+  }
+  return row.reserved_by_user_id === userId;
 }
 
 export async function reserveSlot(
@@ -94,12 +386,9 @@ export async function reserveSlot(
   if (!guard.ok) {
     return { ok: false, reason: guard.reason, message: guard.message };
   }
-  const user = guard.user;
-  const activeX = guard.activeXId;
-  if (!activeX) {
+  if (!guard.activeXId) {
     return { ok: false, message: "X ID を選択してから枠を確保してください。" };
   }
-
   const parsed = reserveSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return {
@@ -107,114 +396,71 @@ export async function reserveSlot(
       message: parsed.error.issues[0]?.message ?? "入力エラー",
     };
   }
-
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
 
-  const slotRow = (
-    await db.select().from(slots).where(eq(slots.id, parsed.data.slot_id)).limit(1)
-  )[0];
-  if (!slotRow) return { ok: false, message: "枠が見つかりません。" };
-  if (slotRow.status !== "available") {
-    return { ok: false, message: "この枠はすでに確保されています。" };
-  }
+  try {
+    const anchor = await loadSlot(db, parsed.data.slot_id);
+    if (!anchor) return { ok: false, message: "枠が見つかりません。" };
+    if (anchor.status !== "available") {
+      return { ok: false, message: "この枠はすでに確保されています。" };
+    }
+    const event = await loadEvent(db, anchor.event_id);
+    if (!event) return { ok: false, message: "イベントが見つかりません。" };
+    if (!isAcceptingEntries(event)) {
+      return { ok: false, message: "受付中ではないため枠を確保できません。" };
+    }
+    const maxRows = eventAtomicLimit(event);
+    if (parsed.data.consecutive_count > maxRows) {
+      return {
+        ok: false,
+        message: `一度に確保できる連続枠は ${maxRows} 件までです。`,
+      };
+    }
 
-  const ev = (
-    await db.select().from(events).where(eq(events.id, slotRow.event_id)).limit(1)
-  )[0];
-  if (!ev) return { ok: false, message: "イベントが見つかりません。" };
-  if (!isAcceptingEntries(ev)) {
-    return { ok: false, message: "受付中ではないため枠を確保できません。" };
-  }
+    const targetRows = [anchor];
+    if (parsed.data.consecutive_count > 1) {
+      const candidates = await loadOrderedNeighbors(db, anchor, "forward");
+      targetRows.push(
+        ...candidates.slice(0, parsed.data.consecutive_count - 1),
+      );
+    }
+    if (targetRows.length !== parsed.data.consecutive_count) {
+      return { ok: false, message: "必要な数の連続空き枠がありません。" };
+    }
+    if (targetRows.some((row) => row.status !== "available")) {
+      return { ok: false, message: "連続枠の途中に確保済みの枠があります。" };
+    }
+    assertAdjacentSequence(targetRows, slotPartGapSec(event));
 
-  const now = Math.floor(Date.now() / 1000);
-  const maxConsecutive = ev.max_consecutive_slots_per_entry ?? 1;
-  const reserveCount = Math.min(parsed.data.consecutive_count, maxConsecutive);
-  const groupId = reserveCount > 1 ? generateId("sgrp") : null;
-  let targetSlots: SlotRow[] = [slotRow];
-  const gapSec = slotPartGapSec(ev);
-
-  if (reserveCount > 1) {
-    const allEventSlots = sortSlotsChronologically(
-      await db.select().from(slots).where(eq(slots.event_id, slotRow.event_id)),
+    const now = Math.floor(Date.now() / 1000);
+    const groupId = targetRows.length > 1 ? generateId("sgrp") : null;
+    const updates = targetRows.map((row) =>
+      planSlotUpdate(
+        db,
+        row,
+        {
+          reserved_by_user_id: guard.user.id,
+          x_user_id: guard.activeXId,
+          display_name: parsed.data.display_name,
+          reservation_group_id: groupId,
+          status: "reserved",
+        },
+        now,
+      ),
     );
-    const startIdx = allEventSlots.findIndex((c) => c.id === slotRow.id);
-    if (startIdx < 0) {
-      return { ok: false, message: "連続枠を確保できませんでした。" };
-    }
-    const window = allEventSlots.slice(startIdx, startIdx + reserveCount);
-    if (window.length < reserveCount) {
-      return {
-        ok: false,
-        message: "連続枠を確保できませんでした。途中に取得済みの枠があります。",
-      };
-    }
-    if (window.some((candidate) => candidate.status !== "available")) {
-      return {
-        ok: false,
-        message: "連続枠の途中に取得済みの枠があります。",
-      };
-    }
-    for (let i = 1; i < window.length; i += 1) {
-      if (!isAdjacent(window[i - 1], window[i], gapSec)) {
-        return {
-          ok: false,
-          message:
-            slotRow.slot_kind === "time"
-              ? "連続枠を確保できませんでした。時間が連続していません。"
-              : "連続枠を確保できませんでした。枠番号が連続していません。",
-        };
-      }
-    }
-    targetSlots = window;
+    await commitSlotUpdates({
+      db,
+      updates,
+      eventId: anchor.event_id,
+      actorUserId: guard.user.id,
+      reason: "slot_user_reserve",
+    });
+    revalidateSlotViews(anchor.event_id);
+    return { ok: true, slotId: anchor.id };
+  } catch (error) {
+    return mutationError(error);
   }
-
-  const updatedOriginals: SlotRow[] = [];
-  let failure: string | null = null;
-  for (const target of targetSlots) {
-    const updated = await db
-      .update(slots)
-      .set({
-        reserved_by_user_id: user.id,
-        x_user_id: activeX,
-        display_name: parsed.data.display_name,
-        reservation_group_id: groupId,
-        status: "reserved",
-        updated_at: now,
-      })
-      .where(and(eq(slots.id, target.id), eq(slots.status, "available"))!)
-      .returning({ id: slots.id });
-    if (updated.length === 0) {
-      failure =
-        "枠確保に失敗しました。他のユーザーが先に取得した可能性があります。";
-      break;
-    }
-    updatedOriginals.push(target);
-  }
-
-  if (failure) {
-    await rollbackReservedSlots(db, updatedOriginals, now);
-    return { ok: false, message: failure };
-  }
-
-  await auditAction(db, {
-    table_name: "slots",
-    record_id: parsed.data.slot_id,
-    action: "UPDATE",
-    after_data: JSON.stringify({
-      status: "reserved",
-      x_user_id: activeX,
-      reserved_by_user_id: user.id,
-      display_name: parsed.data.display_name,
-      slot_ids: updatedOriginals.map((r) => r.id),
-      reservation_group_id: groupId,
-    }),
-    operator_user_id: user.id,
-    retention_class: "normal",
-  });
-
-  revalidateSlotViews(slotRow.event_id);
-  return { ok: true, slotId: parsed.data.slot_id };
 }
 
 export async function releaseOwnSlot(
@@ -224,214 +470,76 @@ export async function releaseOwnSlot(
   if (!guard.ok) {
     return { ok: false, reason: guard.reason, message: guard.message };
   }
-  const user = guard.user;
-  const activeX = guard.activeXId;
-
   const slotId = String(formData.get("slot_id") ?? "").trim();
   if (!slotId) return { ok: false, message: "slot_id が必要です。" };
-
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
 
-  const slotRow = (
-    await db.select().from(slots).where(eq(slots.id, slotId)).limit(1)
-  )[0];
-  if (!slotRow) return { ok: false, message: "枠が見つかりません。" };
-  // slot owner 判定: 現在 active な X ID 一致が原則だが、確保時の X が linked された
-  // ままで active から外れているだけのケースを救済する。
-  // xUsers.linked_user_id === user.id なら自分の枠とみなす。
-  let isOwner = false;
-  if (slotRow.x_user_id) {
-    if (slotRow.x_user_id === activeX) {
-      isOwner = true;
-    } else {
-      const linkedXOwner = (
-        await db
-          .select({ id: xUsers.id })
-          .from(xUsers)
-          .where(
-            and(
-              eq(xUsers.id, slotRow.x_user_id),
-              eq(xUsers.linked_user_id, user.id),
-            )!,
-          )
-          .limit(1)
-      )[0];
-      if (linkedXOwner) isOwner = true;
+  try {
+    const anchor = await loadSlot(db, slotId);
+    if (!anchor) return { ok: false, message: "枠が見つかりません。" };
+    if (!(await ownsSlot(db, anchor, guard.user.id, guard.activeXId))) {
+      return { ok: false, message: "自分が確保した枠のみ解放できます。" };
     }
-  } else {
-    isOwner = slotRow.reserved_by_user_id === user.id;
-  }
-  if (!isOwner) {
-    return { ok: false, message: "自分が確保した枠のみ解放できます。" };
-  }
-  if (slotRow.status !== "reserved") {
-    return {
-      ok: false,
-      message: "提出済みの枠は解放できません。先に作品取り下げを相談してください。",
-    };
-  }
+    if (anchor.status !== "reserved") {
+      return {
+        ok: false,
+        message: "提出済みの枠は解放できません。先に作品取り下げを相談してください。",
+      };
+    }
 
-  const now = Math.floor(Date.now() / 1000);
-  const groupId = slotRow.reservation_group_id;
-
-  if (!groupId) {
-    await db
-      .update(slots)
-      .set({
-        reserved_by_user_id: null,
-        x_user_id: null,
-        display_name: null,
-        reservation_group_id: null,
-        status: "available",
-        updated_at: now,
-      })
-      .where(eq(slots.id, slotId));
-
-    await auditAction(db, {
-      table_name: "slots",
-      record_id: slotId,
-      action: "UPDATE",
-      after_data: JSON.stringify({
-        status: "available",
-        released_by: "owner",
-        slot_ids: [slotId],
-        reservation_group_id: null,
-      }),
-      operator_user_id: user.id,
-      retention_class: "normal",
-    });
-    revalidateSlotViews(slotRow.event_id);
-    return { ok: true, slotId };
-  }
-
-  const groupRows = sortSlotsChronologically(
-    await db
-      .select()
-      .from(slots)
-      .where(reservationGroupScope(groupId, slotRow)),
-  );
-
-  if (groupRows.some((r) => r.status === "submitted")) {
-    return {
-      ok: false,
-      message:
-        "提出済みの枠を含むグループは通常解放できません。先に作品取り下げを相談してください。",
-    };
-  }
-  if (
-    groupRows.some(
-      (r) =>
-        r.x_user_id !== slotRow.x_user_id ||
-        r.reserved_by_user_id !== slotRow.reserved_by_user_id ||
-        r.event_id !== slotRow.event_id,
-    )
-  ) {
-    return {
-      ok: false,
-      message: "グループ内に他ユーザー / 別 X ID の枠が混在しています。",
-    };
-  }
-
-  const targetIdx = groupRows.findIndex((r) => r.id === slotId);
-  if (targetIdx < 0) {
-    // 直前で slotRow.reservation_group_id が一致しているはずだが、レース等で
-    // グループから外れていた場合 split 計算が暴発するため明示的に拒否する。
-    return {
-      ok: false,
-      message:
-        "枠グループの整合性に問題があります。管理者に連絡してください。",
-    };
-  }
-  const isEdge =
-    targetIdx === 0 || targetIdx === groupRows.length - 1 || groupRows.length <= 2;
-
-  await db
-    .update(slots)
-    .set({
-      reserved_by_user_id: null,
-      x_user_id: null,
-      display_name: null,
-      reservation_group_id: null,
-      status: "available",
-      updated_at: now,
-    })
-    .where(eq(slots.id, slotId));
-
-  let splitInfo: {
-    leftGroupId: string | null;
-    rightGroupId: string | null;
-  } = { leftGroupId: null, rightGroupId: null };
-
-  if (groupRows.length <= 2) {
-    if (groupRows.length === 2) {
-      const remaining = groupRows.find((r) => r.id !== slotId);
-      if (remaining) {
-        await db
-          .update(slots)
-          .set({ reservation_group_id: null, updated_at: now })
-          .where(eq(slots.id, remaining.id));
+    const groupRows = await loadBoundedGroup(db, anchor);
+    if (groupRows.some((row) => row.status !== "reserved")) {
+      return { ok: false, message: "予約中でない枠を含む連続枠は解放できません。" };
+    }
+    const now = Math.floor(Date.now() / 1000);
+    const decisions = new Map(
+      buildReleaseGroupDecisions(groupRows, anchor.id).map((decision) => [
+        decision.id,
+        decision,
+      ]),
+    );
+    const updates = groupRows.map((row) => {
+      const decision = decisions.get(row.id);
+      if (!decision) throw new Error("連続枠の状態を確定できませんでした。");
+      if (decision.release) {
+        return planSlotUpdate(
+          db,
+          row,
+          {
+            reserved_by_user_id: null,
+            x_user_id: null,
+            display_name: null,
+            reservation_group_id: null,
+            status: "available",
+          },
+          now,
+        );
       }
-    }
-  } else if (!isEdge) {
-    const left = groupRows.slice(0, targetIdx);
-    const right = groupRows.slice(targetIdx + 1);
-    const leftGroupId = left.length >= 2 ? generateId("sgrp") : null;
-    const rightGroupId = right.length >= 2 ? generateId("sgrp") : null;
-    await db
-      .update(slots)
-      .set({ reservation_group_id: leftGroupId, updated_at: now })
-      .where(
-        inArray(
-          slots.id,
-          left.map((r) => r.id),
-        ),
+      return planSlotUpdate(
+        db,
+        row,
+        {
+          reservation_group_id: decision.reservation_group_id,
+        },
+        now,
       );
-    await db
-      .update(slots)
-      .set({ reservation_group_id: rightGroupId, updated_at: now })
-      .where(
-        inArray(
-          slots.id,
-          right.map((r) => r.id),
-        ),
-      );
-    splitInfo = { leftGroupId, rightGroupId };
-  } else {
-    const remaining = groupRows.filter((r) => r.id !== slotId);
-    if (remaining.length === 1) {
-      await db
-        .update(slots)
-        .set({ reservation_group_id: null, updated_at: now })
-        .where(eq(slots.id, remaining[0].id));
-    }
+    });
+    await commitSlotUpdates({
+      db,
+      updates,
+      eventId: anchor.event_id,
+      actorUserId: guard.user.id,
+      reason: "slot_user_release",
+    });
+    revalidateSlotViews(anchor.event_id);
+    return { ok: true, slotId: anchor.id };
+  } catch (error) {
+    return mutationError(error);
   }
-
-  await auditAction(db, {
-    table_name: "slots",
-    record_id: slotId,
-    action: "UPDATE",
-    after_data: JSON.stringify({
-      status: "available",
-      released_by: "owner",
-      slot_ids: [slotId],
-      reservation_group_id: groupId,
-      split: splitInfo,
-    }),
-    operator_user_id: user.id,
-    retention_class: "normal",
-  });
-
-  revalidateSlotViews(slotRow.event_id);
-  return { ok: true, slotId };
 }
 
-const extendSchema = z.object({
-  slot_id: z.string().trim().min(1),
-  direction: z.enum(["forward", "backward"]),
-});
-
-/** 自分のグループに前方/後方の隣接 available 枠を 1 つ追加する。 */
+/** 自分のグループに前方または後方の隣接空き枠を一つ追加する。 */
 export async function extendOwnSlotGroup(
   formData: FormData,
 ): Promise<SlotReserveResult> {
@@ -443,12 +551,9 @@ export async function extendOwnSlotGroup(
   if (!guard.ok) {
     return { ok: false, reason: guard.reason, message: guard.message };
   }
-  const user = guard.user;
-  const activeX = guard.activeXId;
-  if (!activeX) {
+  if (!guard.activeXId) {
     return { ok: false, message: "X ID を選択してから操作してください。" };
   }
-
   const parsed = extendSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return {
@@ -456,139 +561,83 @@ export async function extendOwnSlotGroup(
       message: parsed.error.issues[0]?.message ?? "入力エラー",
     };
   }
-
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
 
-  const anchor = (
-    await db.select().from(slots).where(eq(slots.id, parsed.data.slot_id)).limit(1)
-  )[0];
-  if (!anchor) return { ok: false, message: "枠が見つかりません。" };
-  if (anchor.status !== "reserved") {
-    return { ok: false, message: "予約中の枠のみ拡張できます。" };
+  try {
+    const anchor = await loadSlot(db, parsed.data.slot_id);
+    if (!anchor) return { ok: false, message: "枠が見つかりません。" };
+    if (
+      anchor.status !== "reserved" ||
+      anchor.x_user_id !== guard.activeXId ||
+      anchor.reserved_by_user_id !== guard.user.id
+    ) {
+      return { ok: false, message: "自分の予約中の枠のみ拡張できます。" };
+    }
+    const event = await loadEvent(db, anchor.event_id);
+    if (!event) return { ok: false, message: "イベントが見つかりません。" };
+    if (!isAcceptingEntries(event)) {
+      return { ok: false, message: "受付中ではないため枠を拡張できません。" };
+    }
+    const groupRows = await loadBoundedGroup(db, anchor);
+    if (groupRows.length + 1 > eventAtomicLimit(event)) {
+      return { ok: false, message: "連続枠の上限を超えるため拡張できません。" };
+    }
+    if (groupRows.some((row) => row.status !== "reserved")) {
+      return { ok: false, message: "予約中でない枠を含む連続枠は拡張できません。" };
+    }
+
+    const edge = parsed.data.direction === "backward"
+      ? groupRows[0]
+      : groupRows[groupRows.length - 1];
+    const candidate = (
+      await loadOrderedNeighbors(db, edge, parsed.data.direction)
+    )[0];
+    if (!candidate || candidate.status !== "available") {
+      return { ok: false, message: "拡張可能な隣接空き枠がありません。" };
+    }
+    const orderedPair = parsed.data.direction === "backward"
+      ? [candidate, edge]
+      : [edge, candidate];
+    assertAdjacentSequence(orderedPair, slotPartGapSec(event));
+    if (candidate.slot_kind !== anchor.slot_kind) {
+      return { ok: false, message: "種類が異なる枠は拡張できません。" };
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const groupId = anchor.reservation_group_id || generateId("sgrp");
+    const updates = [
+      ...groupRows.map((row) =>
+        planSlotUpdate(db, row, { reservation_group_id: groupId }, now),
+      ),
+      planSlotUpdate(
+        db,
+        candidate,
+        {
+          reserved_by_user_id: guard.user.id,
+          x_user_id: guard.activeXId,
+          display_name: groupRows[0].display_name,
+          reservation_group_id: groupId,
+          status: "reserved",
+        },
+        now,
+      ),
+    ];
+    await commitSlotUpdates({
+      db,
+      updates,
+      eventId: anchor.event_id,
+      actorUserId: guard.user.id,
+      reason: "slot_user_extend",
+    });
+    revalidateSlotViews(anchor.event_id);
+    return { ok: true, slotId: candidate.id };
+  } catch (error) {
+    return mutationError(error);
   }
-  if (anchor.x_user_id !== activeX || anchor.reserved_by_user_id !== user.id) {
-    return { ok: false, message: "自分の枠のみ拡張できます。" };
-  }
-
-  const ev = (
-    await db.select().from(events).where(eq(events.id, anchor.event_id)).limit(1)
-  )[0];
-  if (!ev) return { ok: false, message: "イベントが見つかりません。" };
-  if (!isAcceptingEntries(ev)) {
-    return { ok: false, message: "受付中ではないため枠を拡張できません。" };
-  }
-
-  const groupId = anchor.reservation_group_id;
-  const currentGroup = groupId
-    ? sortSlotsChronologically(
-        await db
-          .select()
-          .from(slots)
-          .where(reservationGroupScope(groupId, anchor)),
-      )
-    : [anchor];
-
-  if (
-    currentGroup.some(
-      (r) => r.x_user_id !== activeX || r.reserved_by_user_id !== user.id,
-    )
-  ) {
-    return {
-      ok: false,
-      message: "グループ内に他ユーザー / 別 X ID の枠が混在しています。",
-    };
-  }
-
-  const maxConsecutive = ev.max_consecutive_slots_per_entry ?? 1;
-  if (currentGroup.length + 1 > maxConsecutive) {
-    return { ok: false, message: "連続枠の上限を超えるため拡張できません。" };
-  }
-
-  const edge =
-    parsed.data.direction === "backward"
-      ? currentGroup[0]
-      : currentGroup[currentGroup.length - 1];
-
-  const gapSec = slotPartGapSec(ev);
-  const allEventSlots = sortSlotsChronologically(
-    await db.select().from(slots).where(eq(slots.event_id, anchor.event_id)),
-  );
-
-  const edgeIndex = allEventSlots.findIndex((r) => r.id === edge.id);
-  const candidate =
-    edgeIndex < 0
-      ? undefined
-      : allEventSlots[
-          parsed.data.direction === "backward" ? edgeIndex - 1 : edgeIndex + 1
-        ];
-  if (!candidate || candidate.status !== "available") {
-    return { ok: false, message: "拡張可能な隣接空き枠がありません。" };
-  }
-  const prev = parsed.data.direction === "backward" ? candidate : edge;
-  const next = parsed.data.direction === "backward" ? edge : candidate;
-  if (!isAdjacent(prev, next, gapSec)) {
-    return { ok: false, message: "別の部として扱われる枠は連続枠にできません。" };
-  }
-  if (candidate.slot_kind !== anchor.slot_kind) {
-    return { ok: false, message: "slot_kind が異なるため拡張できません。" };
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  const nextGroupId = groupId ?? generateId("sgrp");
-  const displayName = currentGroup[0].display_name;
-
-  const updated = await db
-    .update(slots)
-    .set({
-      reserved_by_user_id: user.id,
-      x_user_id: activeX,
-      display_name: displayName,
-      reservation_group_id: nextGroupId,
-      status: "reserved",
-      updated_at: now,
-    })
-    .where(and(eq(slots.id, candidate.id), eq(slots.status, "available"))!)
-    .returning({ id: slots.id });
-  if (updated.length === 0) {
-    return {
-      ok: false,
-      message: "拡張に失敗しました。他のユーザーが先に取得した可能性があります。",
-    };
-  }
-
-  if (!groupId) {
-    await db
-      .update(slots)
-      .set({ reservation_group_id: nextGroupId, updated_at: now })
-      .where(eq(slots.id, anchor.id));
-  }
-
-  await auditAction(db, {
-    table_name: "slots",
-    record_id: candidate.id,
-    action: "UPDATE",
-    after_data: JSON.stringify({
-      status: "reserved",
-      extended_by: "owner",
-      anchor_slot_id: anchor.id,
-      direction: parsed.data.direction,
-      reservation_group_id: nextGroupId,
-    }),
-    operator_user_id: user.id,
-    retention_class: "normal",
-  });
-
-  revalidateSlotViews(anchor.event_id);
-  return { ok: true, slotId: candidate.id };
 }
 
-const mergeSchema = z.object({
-  gap_slot_id: z.string().trim().min(1),
-  display_name: z.string().trim().min(1).max(80),
-});
-
-/** 左右の同一主体グループの間にある単一 available 枠を埋めて 1 グループに結合する。 */
+/** 左右の同一主体グループ間にある一枠を埋め、最大三枠へ結合する。 */
 export async function mergeOwnSlotGroups(
   formData: FormData,
 ): Promise<SlotReserveResult> {
@@ -600,12 +649,9 @@ export async function mergeOwnSlotGroups(
   if (!guard.ok) {
     return { ok: false, reason: guard.reason, message: guard.message };
   }
-  const user = guard.user;
-  const activeX = guard.activeXId;
-  if (!activeX) {
+  if (!guard.activeXId) {
     return { ok: false, message: "X ID を選択してから操作してください。" };
   }
-
   const parsed = mergeSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return {
@@ -613,157 +659,100 @@ export async function mergeOwnSlotGroups(
       message: parsed.error.issues[0]?.message ?? "入力エラー",
     };
   }
-
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
 
-  const gap = (
-    await db.select().from(slots).where(eq(slots.id, parsed.data.gap_slot_id)).limit(1)
-  )[0];
-  if (!gap) return { ok: false, message: "枠が見つかりません。" };
-  if (gap.status !== "available") {
-    return { ok: false, message: "対象の枠はすでに確保されています。" };
-  }
-
-  const ev = (
-    await db.select().from(events).where(eq(events.id, gap.event_id)).limit(1)
-  )[0];
-  if (!ev) return { ok: false, message: "イベントが見つかりません。" };
-  if (!isAcceptingEntries(ev)) {
-    return { ok: false, message: "受付中ではないため結合できません。" };
-  }
-
-  const gapSec = slotPartGapSec(ev);
-  const eventSlots = sortSlotsChronologically(
-    await db.select().from(slots).where(eq(slots.event_id, gap.event_id)),
-  );
-
-  const gapIdx = eventSlots.findIndex((r) => r.id === gap.id);
-  if (gapIdx < 0) return { ok: false, message: "枠が見つかりません。" };
-  const leftNeighbor = eventSlots[gapIdx - 1];
-  const rightNeighbor = eventSlots[gapIdx + 1];
-  if (!leftNeighbor || !rightNeighbor) {
-    return { ok: false, message: "結合対象の隣接枠がありません。" };
-  }
-  if (
-    !isAdjacent(leftNeighbor, gap, gapSec) ||
-    !isAdjacent(gap, rightNeighbor, gapSec)
-  ) {
-    return { ok: false, message: "隣接していない枠は結合できません。" };
-  }
-  if (
-    leftNeighbor.slot_kind !== gap.slot_kind ||
-    rightNeighbor.slot_kind !== gap.slot_kind
-  ) {
-    return { ok: false, message: "slot_kind が異なるため結合できません。" };
-  }
-  if (
-    leftNeighbor.status !== "reserved" ||
-    rightNeighbor.status !== "reserved"
-  ) {
-    return { ok: false, message: "両隣が予約中のときのみ結合できます。" };
-  }
-  if (
-    leftNeighbor.x_user_id !== activeX ||
-    rightNeighbor.x_user_id !== activeX ||
-    leftNeighbor.reserved_by_user_id !== user.id ||
-    rightNeighbor.reserved_by_user_id !== user.id
-  ) {
-    return { ok: false, message: "自分の枠どうしのみ結合できます。" };
-  }
-
-  const leftGroupId = leftNeighbor.reservation_group_id;
-  const rightGroupId = rightNeighbor.reservation_group_id;
-
-  const leftGroup = leftGroupId
-    ? await db
-        .select()
-        .from(slots)
-        .where(reservationGroupScope(leftGroupId, leftNeighbor))
-    : [leftNeighbor];
-  const rightGroup = rightGroupId
-    ? await db
-        .select()
-        .from(slots)
-        .where(reservationGroupScope(rightGroupId, rightNeighbor))
-    : [rightNeighbor];
-
-  for (const r of [...leftGroup, ...rightGroup]) {
-    if (r.x_user_id !== activeX || r.reserved_by_user_id !== user.id) {
-      return {
-        ok: false,
-        message: "グループ内に他ユーザー / 別 X ID の枠が混在しています。",
-      };
+  try {
+    const gap = await loadSlot(db, parsed.data.gap_slot_id);
+    if (!gap) return { ok: false, message: "枠が見つかりません。" };
+    if (gap.status !== "available") {
+      return { ok: false, message: "対象の枠はすでに確保されています。" };
     }
-    if (r.status === "submitted") {
-      return {
-        ok: false,
-        message: "提出済みの枠を含むグループは結合できません。",
-      };
+    const event = await loadEvent(db, gap.event_id);
+    if (!event) return { ok: false, message: "イベントが見つかりません。" };
+    if (!isAcceptingEntries(event)) {
+      return { ok: false, message: "受付中ではないため結合できません。" };
     }
-  }
 
-  const maxConsecutive = ev.max_consecutive_slots_per_entry ?? 1;
-  const finalSize = leftGroup.length + rightGroup.length + 1;
-  if (finalSize > maxConsecutive) {
-    return { ok: false, message: "連続枠の上限を超えるため結合できません。" };
-  }
+    const left = (await loadOrderedNeighbors(db, gap, "backward"))[0];
+    const right = (await loadOrderedNeighbors(db, gap, "forward"))[0];
+    if (!left || !right) {
+      return { ok: false, message: "結合対象の隣接枠がありません。" };
+    }
+    assertAdjacentSequence([left, gap, right], slotPartGapSec(event));
+    if (
+      left.slot_kind !== gap.slot_kind ||
+      right.slot_kind !== gap.slot_kind ||
+      left.status !== "reserved" ||
+      right.status !== "reserved" ||
+      left.x_user_id !== guard.activeXId ||
+      right.x_user_id !== guard.activeXId ||
+      left.reserved_by_user_id !== guard.user.id ||
+      right.reserved_by_user_id !== guard.user.id
+    ) {
+      return { ok: false, message: "自分の予約中の隣接枠どうしのみ結合できます。" };
+    }
 
-  const now = Math.floor(Date.now() / 1000);
-  const mergedGroupId = generateId("sgrp");
-  const displayName = parsed.data.display_name;
-
-  const updatedGap = await db
-    .update(slots)
-    .set({
-      reserved_by_user_id: user.id,
-      x_user_id: activeX,
-      display_name: displayName,
-      reservation_group_id: mergedGroupId,
-      status: "reserved",
-      updated_at: now,
-    })
-    .where(and(eq(slots.id, gap.id), eq(slots.status, "available"))!)
-    .returning({ id: slots.id });
-  if (updatedGap.length === 0) {
-    return {
-      ok: false,
-      message: "結合に失敗しました。中間枠が他のユーザーに取得された可能性があります。",
-    };
-  }
-
-  await db
-    .update(slots)
-    .set({
-      display_name: displayName,
-      reservation_group_id: mergedGroupId,
-      updated_at: now,
-    })
-    .where(
-      inArray(slots.id, [...leftGroup, ...rightGroup].map((r) => r.id)),
+    const leftGroup = await loadBoundedGroup(db, left);
+    const rightGroup = await loadBoundedGroup(db, right);
+    const byId = new Map<string, SlotRow>();
+    for (const row of [...leftGroup, ...rightGroup]) byId.set(row.id, row);
+    const reservedRows = sortSlotsChronologically([...byId.values()]);
+    if (
+      reservedRows.some(
+        (row) =>
+          row.status !== "reserved" ||
+          row.x_user_id !== guard.activeXId ||
+          row.reserved_by_user_id !== guard.user.id,
+      )
+    ) {
+      return { ok: false, message: "連続枠に別の利用者または状態が混在しています。" };
+    }
+    if (reservedRows.length + 1 > eventAtomicLimit(event)) {
+      return { ok: false, message: "連続枠の上限を超えるため結合できません。" };
+    }
+    assertAdjacentSequence(
+      sortSlotsChronologically([...reservedRows, gap]),
+      slotPartGapSec(event),
     );
 
-  await auditAction(db, {
-    table_name: "slots",
-    record_id: gap.id,
-    action: "UPDATE",
-    after_data: JSON.stringify({
-      status: "reserved",
-      merged_by: "owner",
-      gap_slot_id: gap.id,
-      reservation_group_id: mergedGroupId,
-      left_group_id: leftGroupId,
-      right_group_id: rightGroupId,
-      slot_ids: [
-        ...leftGroup.map((r) => r.id),
-        gap.id,
-        ...rightGroup.map((r) => r.id),
-      ],
-    }),
-    operator_user_id: user.id,
-    retention_class: "normal",
-  });
-
-  revalidateSlotViews(gap.event_id);
-  return { ok: true, slotId: gap.id };
+    const now = Math.floor(Date.now() / 1000);
+    const groupId = generateId("sgrp");
+    const updates = [
+      ...reservedRows.map((row) =>
+        planSlotUpdate(
+          db,
+          row,
+          {
+            display_name: parsed.data.display_name,
+            reservation_group_id: groupId,
+          },
+          now,
+        ),
+      ),
+      planSlotUpdate(
+        db,
+        gap,
+        {
+          reserved_by_user_id: guard.user.id,
+          x_user_id: guard.activeXId,
+          display_name: parsed.data.display_name,
+          reservation_group_id: groupId,
+          status: "reserved",
+        },
+        now,
+      ),
+    ];
+    await commitSlotUpdates({
+      db,
+      updates,
+      eventId: gap.event_id,
+      actorUserId: guard.user.id,
+      reason: "slot_user_merge",
+    });
+    revalidateSlotViews(gap.event_id);
+    return { ok: true, slotId: gap.id };
+  } catch (error) {
+    return mutationError(error);
+  }
 }

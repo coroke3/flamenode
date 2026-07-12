@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { releaseOwnSlot, reserveSlot, extendOwnSlotGroup, mergeOwnSlotGroups } from "@/lib/actions/slot";
+import { MAX_ATOMIC_SLOT_ROWS } from "@/lib/slots/atomicLimits";
 import { formatUnix } from "@/lib/utils/format";
 import { cn } from "@/lib/utils/cn";
 import {
@@ -97,6 +98,10 @@ export function SlotGrid({
   const [reserveDisplayName, setReserveDisplayName] = React.useState<string>("");
   const [reserveCount, setReserveCount] = React.useState("1");
   const [savedName, setSavedName] = React.useState<string>("");
+  const atomicMaxConsecutiveSlots = Math.min(
+    Math.max(Math.floor(maxConsecutiveSlots), 1),
+    MAX_ATOMIC_SLOT_ROWS,
+  );
 
   const redirectForGuardReason = React.useCallback(
     (reason?: string): boolean => {
@@ -375,13 +380,13 @@ export function SlotGrid({
         </div>
       ) : null}
 
-      {hasMineSlot && maxConsecutiveSlots > 1 ? (
+      {hasMineSlot && atomicMaxConsecutiveSlots > 1 ? (
         <p className={styles.ownerHelp}>
           <strong>連続枠の操作:</strong>{" "}
           自分の枠の右側にある「<strong>前を追加</strong>」「<strong>後を追加</strong>」で
           隣接する空き枠を 1 つずつ取り込めます。
           自分の枠で挟まれた空き枠には「<strong>ここを埋めて結合</strong>」が表示され、
-          1 グループにまとめられます。連続上限は {maxConsecutiveSlots} 枠です。
+          1 グループにまとめられます。連続上限は {atomicMaxConsecutiveSlots} 枠です。
         </p>
       ) : null}
 
@@ -501,7 +506,7 @@ export function SlotGrid({
                                         <button
                                           type="button"
                                           className={styles.slotActionMenuItem}
-                                          disabled={busy || slot.group_size >= maxConsecutiveSlots}
+                                          disabled={busy || slot.group_size >= atomicMaxConsecutiveSlots}
                                           onClick={() => {
                                             setActionMenuSlotId(null);
                                             setConfirmExtend({
@@ -515,7 +520,7 @@ export function SlotGrid({
                                         <button
                                           type="button"
                                           className={styles.slotActionMenuItem}
-                                          disabled={busy || slot.group_size >= maxConsecutiveSlots}
+                                          disabled={busy || slot.group_size >= atomicMaxConsecutiveSlots}
                                           onClick={() => {
                                             setActionMenuSlotId(null);
                                             setConfirmExtend({
@@ -734,7 +739,7 @@ export function SlotGrid({
                 onChange={(e) => setReserveCount(e.target.value)}
               >
                 {Array.from(
-                  { length: Math.min(Math.max(maxConsecutiveSlots, 1), 6) },
+                  { length: atomicMaxConsecutiveSlots },
                   (_, i) => i + 1,
                 ).map((n) => (
                   <option key={n} value={n}>
@@ -742,9 +747,9 @@ export function SlotGrid({
                   </option>
                 ))}
               </select>
-              {maxConsecutiveSlots > 1 ? (
+              {atomicMaxConsecutiveSlots > 1 ? (
                 <p className={styles.reserveDialogHint}>
-                  連続枠は空きが隣接している場合だけまとめて確保されます。上限は {maxConsecutiveSlots} 枠です。
+                  連続枠は空きが隣接している場合だけまとめて確保されます。上限は {atomicMaxConsecutiveSlots} 枠です。
                 </p>
               ) : null}
             </div>

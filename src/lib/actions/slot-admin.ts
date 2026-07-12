@@ -13,6 +13,7 @@ import { parseJstDatetimeLocal } from "@/lib/utils/dateInput";
 import { generateId } from "@/lib/utils/id";
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
+import { MAX_ATOMIC_SLOT_ROWS } from "@/lib/slots/atomicLimits";
 
 export interface SlotActionResult {
   ok: boolean;
@@ -24,8 +25,6 @@ export interface SlotActionResult {
 // 3行時の最大は条件付き slot INSERT 54 bind、strict audit INSERT 60 bind。
 // batch release の最悪経路も、権限・対象・audit・notification・queue の事前 query と
 // mutation/assert/audit/notification/queue の batch statement を合わせて 27 query に収まる。
-const MAX_ATOMIC_SLOT_ROWS = 3;
-
 type SlotRow = typeof slots.$inferSelect;
 
 const batchSchema = z.object({

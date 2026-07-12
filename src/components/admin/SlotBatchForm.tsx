@@ -8,12 +8,11 @@ import {
   deleteAvailableSlots,
   generateSlotsBatch,
 } from "@/lib/actions/slot-admin";
+import { MAX_ATOMIC_SLOT_ROWS } from "@/lib/slots/atomicLimits";
 
 interface SlotBatchFormProps {
   eventId: string;
 }
-
-const MAX_ATOMIC_SLOT_ROWS = 3;
 
 export function SlotBatchForm({
   eventId,
