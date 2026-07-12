@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, sql, type SQL } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import {
   announcements,
@@ -11,8 +11,14 @@ import {
 } from "@/lib/db/schema";
 import { isEventOwner } from "@/lib/event/eventOwnershipCore";
 import type { RestoreAdapter, RestoreStrategy } from "./types";
-import { expectedRowCondition } from "./expectedRowCondition";
-export { expectedRowCondition } from "./expectedRowCondition";
+import { expectedRowCondition as buildExpectedRowCondition } from "./expectedRowCondition";
+
+export function expectedRowCondition(options: {
+  forceOverwrite?: boolean;
+  expectedCurrent?: Record<string, unknown> | null;
+}): SQL {
+  return buildExpectedRowCondition(options);
+}
 
 export const RESTORABLE_TABLES = new Set([
   "events",

@@ -1,46 +1,23 @@
-import type { BatchItem } from "drizzle-orm/batch";
 import type { DB } from "@/lib/db/client";
-import type { WriteAuditLogInput } from "@/lib/audit/types";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import {
   planD1AuditMutationBudget,
   type D1AuditMutationBudget,
 } from "@/lib/audit/mutateBudget";
-
-export interface VideoAtomicWritePlan {
-  statements: BatchItem<"sqlite">[];
-  expectedChanges: (number | null)[];
-  audits: WriteAuditLogInput[];
-}
+import type { VideoAtomicWritePlan } from "./atomicWritePlanCore";
+export {
+  appendVideoAtomicWritePlan,
+  compositeAuditTargetId,
+  emptyVideoAtomicWritePlan,
+  mergeVideoAtomicWritePlans,
+  type VideoAtomicWritePlan,
+} from "./atomicWritePlanCore";
 
 /*
  * 投稿時のアイコン・YouTubeチャンネル候補は、videosのsnapshotから候補読取側が導出する。
  * x_user_icons / x_user_youtube_channelsへ投稿保存と重複する履歴行は書かず、
  * 原子的保存のDB mutation数と二重正本を増やさない。
  */
-
-export function emptyVideoAtomicWritePlan(): VideoAtomicWritePlan {
-  return { statements: [], expectedChanges: [], audits: [] };
-}
-
-export function mergeVideoAtomicWritePlans(
-  ...plans: readonly VideoAtomicWritePlan[]
-): VideoAtomicWritePlan {
-  return {
-    statements: plans.flatMap((plan) => plan.statements),
-    expectedChanges: plans.flatMap((plan) => plan.expectedChanges),
-    audits: plans.flatMap((plan) => plan.audits),
-  };
-}
-
-export function appendVideoAtomicWritePlan(
-  target: VideoAtomicWritePlan,
-  plan: VideoAtomicWritePlan,
-): void {
-  target.statements.push(...plan.statements);
-  target.expectedChanges.push(...plan.expectedChanges);
-  target.audits.push(...plan.audits);
-}
 
 export class VideoAtomicPlanBudgetError extends Error {
   constructor(readonly budget: D1AuditMutationBudget) {
@@ -79,8 +56,4 @@ export async function executeVideoAtomicWritePlan(
     expectedMutationChanges: plan.expectedChanges,
     audits: plan.audits,
   });
-}
-
-export function compositeAuditTargetId(...parts: readonly string[]): string {
-  return parts.map((part) => encodeURIComponent(part)).join(":");
 }

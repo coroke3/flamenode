@@ -22,12 +22,13 @@ test("仕様01/02のD1 baselineはowner subjectとleaseのcanonical契約を持�
 test("監査復元の競合検出とowner最後の一人保護は同じD1 mutationへ伝播する", () => {
   const restore = read("src/lib/audit/restore.ts");
   const adapters = read("src/lib/audit/adapters.ts");
+  const expectedCondition = read("src/lib/audit/expectedRowCondition.ts");
   assert.match(restore, /computeChangedKeys\(after, current\)/);
   assert.match(restore, /conflicts\.length && !forceOverwrite/);
   assert.match(restore, /expectedCurrent: current/);
   assert.match(adapters, /export function expectedRowCondition/);
-  assert.match(adapters, /Object\.entries\(expected\)/);
-  assert.match(adapters, /sql\.join\(predicates, sql` AND `\)/);
+  assert.match(expectedCondition, /Object\.entries\(expected\)/);
+  assert.match(expectedCondition, /sql\.join\(predicates, sql` AND `\)/);
   assert.match(adapters, /COUNT\(\*\).*permission_preset = 'owner'/s);
   assert.match(read("src/lib/audit/mutate.ts"), /changes\(\)/);
 });
