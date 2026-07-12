@@ -207,9 +207,61 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - name: Smoke test the deployed health endpoint
+      - name: Smoke test the deployed Pages and optional Worker endpoints
         env:
           SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL }}
+          FAST_JOBS_URL: ${{ vars.FAST_JOBS_URL }}
+          CONTENT_JOBS_URL: ${{ vars.CONTENT_JOBS_URL }}
+          SYNC_JOBS_URL: ${{ vars.SYNC_JOBS_URL }}
         run: |
+          set -euo pipefail
           test -n "$SITE_URL" || { echo "::error::NEXT_PUBLIC_SITE_URL production variable is required for smoke test."; exit 1; }
-          curl --fail --show-error --silent --retry 3 --retry-delay 5 "${SITE_URL%/}/api/health"
+          curl_required() {
+            curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --retry-max-time 30 --connect-timeout 10 --max-time 15 --output /dev/null "$1"
+          }
+          curl_status() {
+            curl --show-error --silent --location --retry 3 --retry-delay 2 --retry-max-time 30 --connect-timeout 10 --max-time 15 --output /dev/null --write-out '%{http_code}' "$1"
+          }
+
+          echo "Checking Pages top page"
+          curl_required "${SITE_URL%/}"
+          echo "Checking Pages health"
+          curl_required "${SITE_URL%/}/api/health"
+
+          homepage="$(mktemp)"
+          trap 'rm -f "$homepage"' EXIT
+          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --retry-max-time 30 --connect-timeout 10 --max-time 15 --output "$homepage" "${SITE_URL%/}/"
+          asset="$(grep -Eo '/_next/static/[^"[:space:]]+' "$homepage" | head -n 1 || true)"
+          test -n "$asset" || { echo "::error::homepage did not expose a _next/static asset."; exit 1; }
+          echo "Checking Pages static asset: $asset"
+          curl_required "${SITE_URL%/}${asset}"
+
+          auth_status="$(curl_status "${SITE_URL%/}/api/auth/callback/discord")"
+          case "$auth_status" in
+            5*|000) echo "::error::Auth callback returned an unavailable status: $auth_status"; exit 1 ;;
+          esac
+
+          check_worker_health() {
+            local name="$1"
+            local url="$2"
+            if [ -n "$url" ]; then
+              echo "Checking $name /health"
+              curl_required "${url%/}/health"
+            fi
+          }
+          check_worker_rebuild_rejection() {
+            local name="$1"
+            local url="$2"
+            if [ -n "$url" ]; then
+              local status
+              status="$(curl --show-error --silent --location --request POST --retry 3 --retry-delay 2 --retry-max-time 30 --connect-timeout 10 --max-time 15 --output /dev/null --write-out '%{http_code}' "${url%/}/rebuild")"
+              case "$status" in
+                401|404|405) ;;
+                *) echo "::error::$name /rebuild unauthenticated request returned $status; expected 401, 404, or 405."; exit 1 ;;
+              esac
+            fi
+          }
+          check_worker_health "fast-jobs" "$FAST_JOBS_URL"
+          check_worker_health "content-jobs" "$CONTENT_JOBS_URL"
+          check_worker_health "sync-jobs" "$SYNC_JOBS_URL"
+          check_worker_rebuild_rejection "content-jobs" "$CONTENT_JOBS_URL"

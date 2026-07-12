@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const ROOT = process.cwd();
-const OUTPUT = path.join(ROOT, ".vercel", "output", "static");
+const OUTPUT = path.resolve(process.env.PAGES_OUTPUT_DIR?.trim() || path.join(ROOT, ".vercel", "output", "static"));
 const errors = [];
 
 function file(relative) {
@@ -56,6 +56,23 @@ function assertNoSecrets(files) {
   }
 }
 
+function assertNoCloudflareIdFiles(files) {
+  for (const full of files) {
+    const relative = path.relative(OUTPUT, full);
+    const normalized = relative.replaceAll("\\", "/");
+    const basename = path.basename(full);
+    const looksLikeIdsFile = /^(?:ids|cloudflare[-_]ids)\.json$/i.test(basename);
+    let looksLikeCloudflareIds = false;
+    if (!looksLikeIdsFile && path.extname(full).toLowerCase() === ".json" && fs.statSync(full).size <= 512 * 1024) {
+      const text = fs.readFileSync(full, "utf8");
+      looksLikeCloudflareIds = /"(?:d1_database_id|kv_namespace_id|kv_preview_id)"\s*:/.test(text);
+    }
+    if (looksLikeIdsFile || looksLikeCloudflareIds) {
+      errors.push(`${normalized} contains Cloudflare resource IDs; remove this file from the Pages artifact before deploy`);
+    }
+  }
+}
+
 if (!fs.existsSync(OUTPUT)) {
   errors.push(".vercel/output/static is missing; run npm run pages:build first");
 } else {
@@ -83,8 +100,10 @@ if (!fs.existsSync(OUTPUT)) {
   }
   const files = collectFiles(OUTPUT);
   if (files.some((full) => /(?:^|[\\/])\.dev\.vars$/i.test(full))) {
-    errors.push("Pages output must not contain .dev.vars");
+    const devVars = files.find((full) => /(?:^|[\\/])\.dev\.vars$/i.test(full));
+    errors.push(`${path.relative(OUTPUT, devVars).replaceAll("\\", "/")} contains .dev.vars; remove this file from the Pages artifact before deploy`);
   }
+  assertNoCloudflareIdFiles(files);
   assertNoSecrets(files);
 }
 

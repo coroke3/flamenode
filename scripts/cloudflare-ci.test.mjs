@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
 const root = path.resolve(import.meta.dirname, "..");
 const checker = path.join(root, "scripts", "check-cloudflare-config.mjs");
+const pagesChecker = path.join(root, "scripts", "check-pages-output.mjs");
 
 function run(env) {
   return execFileSync(process.execPath, [checker], {
@@ -19,6 +21,15 @@ function failureOutput(env) {
   try {
     run(env);
     assert.fail("expected checker to fail");
+  } catch (error) {
+    return `${error.stdout ?? ""}${error.stderr ?? ""}`;
+  }
+}
+
+function runFailure(command, env) {
+  try {
+    execFileSync(process.execPath, [command], { cwd: root, env: { ...process.env, ...env }, encoding: "utf8" });
+    assert.fail("expected command to fail");
   } catch (error) {
     return `${error.stdout ?? ""}${error.stderr ?? ""}`;
   }
@@ -93,6 +104,37 @@ test("fixture config check is explicitly separate and accepts template IDs", () 
   }));
 });
 
+test("Cloudflare config check fails closed when a required wrangler file is missing", () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flamenode-cloudflare-config-"));
+  try {
+    fs.writeFileSync(path.join(fixtureRoot, "wrangler.toml"), "# fixture\n");
+    const output = runFailure(checker, {
+      CLOUDFLARE_CONFIG_MODE: "fixture",
+      CLOUDFLARE_CONFIG_ROOT: fixtureRoot,
+    });
+    assert.match(output, /workers\/fast-jobs\/wrangler\.toml: required Cloudflare configuration file is missing/);
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test("Pages output check rejects Cloudflare ID files without logging IDs", () => {
+  const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flamenode-pages-output-"));
+  try {
+    fs.mkdirSync(path.join(outputRoot, "_next", "static"), { recursive: true });
+    fs.mkdirSync(path.join(outputRoot, "cloudflare"), { recursive: true });
+    fs.writeFileSync(path.join(outputRoot, "_worker.js"), "export default {};\n");
+    fs.writeFileSync(path.join(outputRoot, "_routes.json"), JSON.stringify({ version: 1, include: ["/*"], exclude: ["/_next/static/*"] }));
+    fs.writeFileSync(path.join(outputRoot, "cloudflare", "ids.json"), JSON.stringify({ d1_database_id: "secret-real-id" }));
+    const output = runFailure(pagesChecker, { PAGES_OUTPUT_DIR: outputRoot });
+    assert.match(output, /cloudflare\/ids\.json/);
+    assert.match(output, /remove this file from the Pages artifact/);
+    assert.doesNotMatch(output, /secret-real-id/);
+  } finally {
+    fs.rmSync(outputRoot, { recursive: true, force: true });
+  }
+});
+
 test("deploy workflow preserves immutable artifact and deployment order", () => {
   const workflow = fs.readFileSync(path.join(root, ".github/workflows/deploy-cloudflare.yml"), "utf8");
   assert.doesNotMatch(workflow, /^\s+push:\s*$/m);
@@ -104,4 +146,12 @@ test("deploy workflow preserves immutable artifact and deployment order", () => 
   assert.ok(workflow.indexOf("deploy-workers:") < workflow.indexOf("smoke-production:"));
   assert.match(workflow, /environment: production/);
   assert.match(workflow, /group: deploy-cloudflare-production/);
+  assert.match(workflow, /--retry-max-time 30/);
+  assert.match(workflow, /api\/health/);
+  assert.match(workflow, /_next\/static/);
+  assert.match(workflow, /api\/auth\/callback\/discord/);
+  assert.match(workflow, /FAST_JOBS_URL/);
+  assert.match(workflow, /CONTENT_JOBS_URL/);
+  assert.match(workflow, /SYNC_JOBS_URL/);
+  assert.match(workflow, /expected 401, 404, or 405/);
 });

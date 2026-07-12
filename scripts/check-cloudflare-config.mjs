@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const ROOT = process.cwd();
+const ROOT = path.resolve(process.env.CLOUDFLARE_CONFIG_ROOT?.trim() || process.cwd());
 const MODE = process.env.CLOUDFLARE_CONFIG_MODE?.trim() || "production";
 const WRANGLER_FILES = [
   "wrangler.toml",
@@ -31,7 +31,7 @@ function isSafeName(value) {
 }
 
 function checkToml(filePath, relativePath, allowPlaceholders) {
-  if (!fs.existsSync(filePath)) return [];
+  if (!fs.existsSync(filePath)) return [`${relativePath}: required Cloudflare configuration file is missing`];
   const errors = [];
   const lines = fs.readFileSync(filePath, "utf8").split("\n");
   for (let index = 0; index < lines.length; index += 1) {
