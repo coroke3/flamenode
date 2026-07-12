@@ -30,18 +30,44 @@ function unsupported(table: string, strategy: RestoreStrategy): never {
  * restore の事前 read と確定 write の間に競合が起きても、非 force 操作は
  * mutation を成立させない。版列を持たない表は明示的な force 以外 fail-closed にする。
  */
-function versionCondition(
-  column: { name: string },
+/**
+ * The preflight read and the restore write must observe the same row.  A
+ * timestamp is useful as an index-friendly fast path, but it is not a proof
+ * of freshness: callers can update a row without changing that timestamp.
+ * Compare every scalar returned by the preflight read in the mutation WHERE
+ * clause so a stale restore becomes a zero-change, fail-closed batch.
+ */
+export function expectedRowCondition(
   options: {
     forceOverwrite?: boolean;
     expectedCurrent?: Record<string, unknown> | null;
   },
-  field = "updated_at",
 ): SQL {
   if (options.forceOverwrite) return sql`1 = 1`;
-  const version = options.expectedCurrent?.[field];
-  if (typeof version !== "number") return sql`0 = 1`;
-  return sql`${sql.raw(column.name)} = ${version}`;
+  const expected = options.expectedCurrent;
+  if (!expected) return sql`0 = 1`;
+
+  const predicates: SQL[] = [];
+  for (const [key, value] of Object.entries(expected)) {
+    // Column names come from a row returned by one of the fixed adapters, but
+    // quote them nevertheless. Values remain bound SQL parameters.
+    const column = sql.raw(`"${key.replaceAll('"', '""')}"`);
+    if (value === null) {
+      predicates.push(sql`${column} IS NULL`);
+    } else if (
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "bigint" ||
+      typeof value === "boolean"
+    ) {
+      predicates.push(sql`${column} = ${value}`);
+    } else {
+      // D1 rows are scalar. An unexpected value must never weaken the guard.
+      return sql`0 = 1`;
+    }
+  }
+
+  return predicates.length > 0 ? sql.join(predicates, sql` AND `) : sql`0 = 1`;
 }
 
 const eventsAdapter: RestoreAdapter = {
@@ -56,7 +82,7 @@ const eventsAdapter: RestoreAdapter = {
     return {
       query: db.update(events).set(set as Partial<typeof events.$inferInsert>).where(and(
         eq(events.id, id as string),
-        versionCondition(events.updated_at, options),
+        expectedRowCondition(options),
       )!),
       expectedChanges: 1,
     };
@@ -75,7 +101,7 @@ const videosAdapter: RestoreAdapter = {
     return {
       query: db.update(videos).set(set as Partial<typeof videos.$inferInsert>).where(and(
         eq(videos.id, id as string),
-        versionCondition(videos.updated_at, options),
+        expectedRowCondition(options),
       )!),
       expectedChanges: 1,
     };
@@ -94,7 +120,7 @@ const slotsAdapter: RestoreAdapter = {
       return {
         query: db.update(slots).set(set as Partial<typeof slots.$inferInsert>).where(and(
           eq(slots.id, id as string),
-          versionCondition(slots.updated_at, options),
+          expectedRowCondition(options),
         )!),
         expectedChanges: 1,
       };
@@ -121,7 +147,7 @@ const announcementsAdapter: RestoreAdapter = {
       return {
         query: db.update(announcements).set(set as Partial<typeof announcements.$inferInsert>).where(and(
           eq(announcements.id, id as string),
-          versionCondition(announcements.updated_at, options),
+          expectedRowCondition(options),
         )!),
         expectedChanges: 1,
       };
@@ -148,7 +174,7 @@ const eventGroupsAdapter: RestoreAdapter = {
       return {
         query: db.update(eventGroups).set(set as Partial<typeof eventGroups.$inferInsert>).where(and(
           eq(eventGroups.id, id as string),
-          versionCondition(eventGroups.updated_at, options),
+          expectedRowCondition(options),
         )!),
         expectedChanges: 1,
       };
@@ -175,7 +201,7 @@ const xAccountLinkRequestsAdapter: RestoreAdapter = {
       return {
         query: db.update(xAccountLinkRequests).set(set as Partial<typeof xAccountLinkRequests.$inferInsert>).where(and(
           eq(xAccountLinkRequests.id, id as string),
-          versionCondition(xAccountLinkRequests.requested_at, options, "requested_at"),
+          expectedRowCondition(options),
         )!),
         expectedChanges: 1,
       };
@@ -208,7 +234,7 @@ const eventStaffAdapter: RestoreAdapter = {
           eq(eventStaff.id, id),
           eq(eventStaff.event_id, eventId),
           sql`(${targetIsOwner ? 0 : 1} = 1 OR (SELECT COUNT(*) FROM event_staff WHERE event_id = ${eventId} AND permission_preset = 'owner') > 1)`,
-          versionCondition(eventStaff.updated_at, options),
+          expectedRowCondition(options),
         )!),
         expectedChanges: 1,
       };
@@ -221,7 +247,7 @@ const eventStaffAdapter: RestoreAdapter = {
           eq(eventStaff.id, id),
           eq(eventStaff.event_id, eventId),
           sql`(${targetIsOwner ? 0 : 1} = 1 OR ${nextPreset} = 'owner' OR (SELECT COUNT(*) FROM event_staff WHERE event_id = ${eventId} AND permission_preset = 'owner') > 1)`,
-          versionCondition(eventStaff.updated_at, options),
+          expectedRowCondition(options),
         )!),
         expectedChanges: 1,
       };
