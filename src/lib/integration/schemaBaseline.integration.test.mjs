@@ -12,6 +12,7 @@ test("active migrations apply cleanly and match schema.ts manifests", () => {
   assert.deepEqual(result.migrations, [
     "0000_flame_node_baseline.sql",
     "0001_spreadsheet_import_runs.sql",
+    "0002_terms_reaccept_manual_cost_guard.sql",
   ]);
   assert.ok(result.tableCount > 40);
   assert.ok(result.indexCount > 70);

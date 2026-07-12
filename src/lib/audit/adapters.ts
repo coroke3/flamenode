@@ -200,15 +200,27 @@ const eventStaffAdapter: RestoreAdapter = {
   buildRestoreMutation(db, snapshot, strategy, options) {
     const id = snapshot.id as string;
     const eventId = snapshot.event_id as string;
-    const targetIsOwner = isEventOwner({
-      permission_preset: String(snapshot.permission_preset ?? ""),
+    const expectedPreset = options.expectedCurrent?.permission_preset;
+    const hasExpectedPreset = typeof expectedPreset === "string";
+    const currentIsOwner = hasExpectedPreset && isEventOwner({
+      permission_preset: expectedPreset,
     });
+    const ownerMutationGuard = (nextPreset: string | null): SQL => sql`
+      ${hasExpectedPreset ? 1 : 0} = 1 AND (
+        ${currentIsOwner ? 0 : 1} = 1
+        OR ${nextPreset} = 'owner'
+        OR (
+          SELECT COUNT(*) FROM event_staff
+          WHERE event_id = ${eventId} AND permission_preset = 'owner'
+        ) > 1
+      )
+    `;
     if (strategy === "delete_created") {
       return {
         query: db.delete(eventStaff).where(and(
           eq(eventStaff.id, id),
           eq(eventStaff.event_id, eventId),
-          sql`(${targetIsOwner ? 0 : 1} = 1 OR (SELECT COUNT(*) FROM event_staff WHERE event_id = ${eventId} AND permission_preset = 'owner') > 1)`,
+          ownerMutationGuard(null),
           expectedRowCondition(options),
         )!),
         expectedChanges: 1,
@@ -221,7 +233,7 @@ const eventStaffAdapter: RestoreAdapter = {
         query: db.update(eventStaff).set(set as Partial<typeof eventStaff.$inferInsert>).where(and(
           eq(eventStaff.id, id),
           eq(eventStaff.event_id, eventId),
-          sql`(${targetIsOwner ? 0 : 1} = 1 OR ${nextPreset} = 'owner' OR (SELECT COUNT(*) FROM event_staff WHERE event_id = ${eventId} AND permission_preset = 'owner') > 1)`,
+          ownerMutationGuard(nextPreset),
           expectedRowCondition(options),
         )!),
         expectedChanges: 1,
