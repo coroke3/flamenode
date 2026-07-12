@@ -2,9 +2,8 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import { systemSettings } from "@/lib/db/schema";
-import { normalizeOperationMode } from "@/lib/operationMode/resolve";
 import {
-  parseWriteFeatureList,
+  evaluateCostGuardCore,
   type WriteFeatureKey,
 } from "./writeGuardCore";
 
@@ -22,10 +21,10 @@ export type CostGuardCheckResult =
  * CostGuard 判定。常に DB 直読み (本PR範囲ではキャッシュなし)。
  *
  * 判定順:
- * 1. operation_mode が不正、または read_only / static_only / maintenance → mode で停止
- * 2. disabled_features_json が不正、または feature を含む → feature で停止
- * 3. それ以外 → 通す
- * 管理者を含め例外設定によるbypassは行わない。
+ * 1. activeで既知featureだけの明示override対象なら通す
+ * 2. operation_mode が不正、または read_only / static_only / maintenance → mode で停止
+ * 3. disabled_features_json が不正、または feature を含む → feature で停止
+ * 4. それ以外 → 通す
  */
 export async function evaluateCostGuard(
   db: DB,
@@ -36,6 +35,9 @@ export async function evaluateCostGuard(
       .select({
         operation_mode: systemSettings.operation_mode,
         disabled_features_json: systemSettings.disabled_features_json,
+        cost_guard_exception_until: systemSettings.cost_guard_exception_until,
+        cost_guard_exception_features_json:
+          systemSettings.cost_guard_exception_features_json,
       })
       .from(systemSettings)
       .where(eq(systemSettings.id, "default"))
@@ -45,15 +47,13 @@ export async function evaluateCostGuard(
   // baselineはdefault行を必ず作る。不在は設定破損としてfail-closedにする。
   if (!row) return { blocked: true, reason: "mode" };
 
-  const mode = normalizeOperationMode(row.operation_mode);
-  if (!mode) return { blocked: true, reason: "mode" };
-  if (mode === "read_only" || mode === "static_only" || mode === "maintenance") {
-    return { blocked: true, reason: "mode" };
-  }
-
-  const disabled = parseWriteFeatureList(row.disabled_features_json);
-  if (!disabled.ok || disabled.features.includes(feature)) {
-    return { blocked: true, reason: "feature" };
-  }
-  return { blocked: false };
+  const now = Math.floor(Date.now() / 1000);
+  return evaluateCostGuardCore({
+    feature,
+    operationMode: row.operation_mode,
+    disabledFeaturesJson: row.disabled_features_json,
+    exceptionUntil: row.cost_guard_exception_until,
+    exceptionFeaturesJson: row.cost_guard_exception_features_json,
+    now,
+  });
 }

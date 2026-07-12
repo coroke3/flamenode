@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { parseWriteFeatureList } from "./writeGuardCore.ts";
+import {
+  evaluateCostGuardCore,
+  parseWriteFeatureList,
+} from "./writeGuardCore.ts";
 
 const source = await readFile(new URL("./costGuardFeatures.ts", import.meta.url), "utf8");
 
@@ -26,5 +29,36 @@ test("CostGuard feature list is fail-closed when malformed", () => {
 
 test("missing system settings and invalid mode are fail-closed", () => {
   assert.match(source, /if \(!row\) return \{ blocked: true, reason: "mode" \}/);
-  assert.match(source, /if \(!mode\) return \{ blocked: true, reason: "mode" \}/);
+  assert.deepEqual(evaluateCostGuardCore({
+    feature: "edit_video",
+    operationMode: "invalid",
+    disabledFeaturesJson: null,
+    exceptionUntil: null,
+    exceptionFeaturesJson: null,
+    now: 100,
+  }), { blocked: true, reason: "mode" });
+});
+
+test("active override allows only its explicit known feature", () => {
+  const base = {
+    operationMode: "maintenance",
+    disabledFeaturesJson: null,
+    exceptionUntil: 200,
+    exceptionFeaturesJson: '["admin_cost_guard_settings"]',
+    now: 100,
+  };
+  assert.deepEqual(evaluateCostGuardCore({ ...base, feature: "admin_cost_guard_settings" }), { blocked: false });
+  assert.deepEqual(evaluateCostGuardCore({ ...base, feature: "edit_video" }), { blocked: true, reason: "mode" });
+});
+
+test("expired, malformed, and unknown overrides never bypass", () => {
+  const base = {
+    feature: "admin_cost_guard_settings",
+    operationMode: "maintenance",
+    disabledFeaturesJson: null,
+    now: 100,
+  };
+  assert.deepEqual(evaluateCostGuardCore({ ...base, exceptionUntil: 100, exceptionFeaturesJson: '["admin_cost_guard_settings"]' }), { blocked: true, reason: "mode" });
+  assert.deepEqual(evaluateCostGuardCore({ ...base, exceptionUntil: 200, exceptionFeaturesJson: "not-json" }), { blocked: true, reason: "feature" });
+  assert.deepEqual(evaluateCostGuardCore({ ...base, exceptionUntil: 200, exceptionFeaturesJson: '["unknown"]' }), { blocked: true, reason: "feature" });
 });

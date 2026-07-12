@@ -17,8 +17,6 @@ interface CostGuardFormProps {
   isMaintenance: number;
   autoEnabled: number;
   thresholdsJson: string | null;
-  exceptionUntil: number | null;
-  exceptionFeaturesJson: string | null;
 }
 
 const MODES = [
@@ -36,12 +34,6 @@ export function CostGuardForm(props: CostGuardFormProps): React.ReactElement {
   const [busy, startTransition] = React.useTransition();
   const [thresholdsJson, setThresholdsJson] = React.useState(
     props.thresholdsJson ?? '{ "economy": 0.75, "read_only": 0.9, "static_only": 0.97, "maintenance": 1 }',
-  );
-  const [exceptionUntil, setExceptionUntil] = React.useState(
-    unixToInput(props.exceptionUntil),
-  );
-  const [exceptionFeaturesJson, setExceptionFeaturesJson] = React.useState(
-    props.exceptionFeaturesJson ?? "",
   );
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
@@ -76,8 +68,6 @@ export function CostGuardForm(props: CostGuardFormProps): React.ReactElement {
     e.preventDefault();
     const fd = new FormData();
     fd.set("thresholds_json", thresholdsJson);
-    fd.set("exception_until", exceptionUntil);
-    fd.set("exception_features_json", exceptionFeaturesJson);
     run(fd, setCostGuardAdvancedSettings, "詳細設定を更新しました。");
   };
 
@@ -181,7 +171,7 @@ export function CostGuardForm(props: CostGuardFormProps): React.ReactElement {
 
       <section>
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
-          閾値と一時例外
+          閾値
         </h2>
         <form
           onSubmit={onSubmitAdvanced}
@@ -195,26 +185,6 @@ export function CostGuardForm(props: CostGuardFormProps): React.ReactElement {
               value={thresholdsJson}
               onChange={(e) => setThresholdsJson(e.target.value)}
               maxLength={4000}
-            />
-          </label>
-          <label className="fn-label">
-            例外期限
-            <input
-              type="datetime-local"
-              className="fn-input"
-              value={exceptionUntil}
-              onChange={(e) => setExceptionUntil(e.target.value)}
-            />
-          </label>
-          <label className="fn-label">
-            例外機能 JSON
-            <textarea
-              className="fn-input"
-              rows={2}
-              value={exceptionFeaturesJson}
-              onChange={(e) => setExceptionFeaturesJson(e.target.value)}
-              maxLength={2000}
-              placeholder='["video_edit","youtube_sync"]'
             />
           </label>
           <button type="submit" className="fn-btn fn-btn-ghost" disabled={busy}>
@@ -239,11 +209,4 @@ export function CostGuardForm(props: CostGuardFormProps): React.ReactElement {
       />
     </div>
   );
-}
-
-function unixToInput(ts: number | null | undefined): string {
-  if (!ts) return "";
-  const d = new Date(ts * 1000);
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }

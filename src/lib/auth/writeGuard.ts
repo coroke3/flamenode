@@ -152,3 +152,23 @@ export async function requireAdminWrite(
 ): Promise<WriteGuardResult> {
   return writeGuard({ feature, requiredRole: "admin" });
 }
+
+/**
+ * CostGuard override設定専用。通常mutationから呼んではならない。
+ * mode/feature判定だけを意図的に省き、認証・DB・BAN・TOS・adminはfail-closed。
+ */
+export async function requireCostGuardOverrideAdmin(): Promise<WriteGuardResult> {
+  const user = await getCurrentUser();
+  if (!user) return deny("unauthenticated");
+  const db = getDatabase();
+  if (!db) return deny("db_unavailable");
+  const identityDeny = evaluateWriteIdentity(user, "admin");
+  if (identityDeny) return deny(identityDeny);
+  const approvedXIds = await getApprovedXIds(db, user.id);
+  return {
+    ok: true,
+    user,
+    activeXId: user.active_x_user_id,
+    approvedXIds,
+  };
+}

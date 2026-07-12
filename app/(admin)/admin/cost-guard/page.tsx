@@ -7,6 +7,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { costUsageSnapshots, auditLogs, systemSettings } from "@/lib/db/schema";
 import { CostGuardForm } from "@/components/admin/CostGuardForm";
+import { CostGuardOverrideForm } from "@/components/admin/CostGuardOverrideForm";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import {
@@ -174,6 +175,8 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
             isMaintenance={isMaintenance}
             autoEnabled={autoEnabled}
             thresholdsJson={thresholdsJson}
+          />
+          <CostGuardOverrideForm
             exceptionUntil={exceptionUntil}
             exceptionFeaturesJson={exceptionFeaturesJson}
           />
