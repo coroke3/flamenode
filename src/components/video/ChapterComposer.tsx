@@ -5,6 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { createChapter, createChaptersBulk } from "@/lib/actions/chapter";
+import {
+  MAX_ATOMIC_CHAPTER_BULK_ROWS,
+  parseChapterBulkCsv,
+} from "@/lib/actions/chapterLimits";
 
 interface ChapterComposerProps {
   videoId: string;
@@ -75,6 +79,11 @@ export function ChapterComposer({
     setBulkErrors([]);
     if (!bulkCsv.trim()) {
       setBulkMessage("CSV を貼り付けてください。");
+      return;
+    }
+    const dataRowCount = parseChapterBulkCsv(bulkCsv).length;
+    if (dataRowCount > MAX_ATOMIC_CHAPTER_BULK_ROWS) {
+      setBulkMessage(`CSVは一度に最大${MAX_ATOMIC_CHAPTER_BULK_ROWS}行まで登録できます。`);
       return;
     }
     const fd = new FormData();
@@ -310,7 +319,7 @@ export function ChapterComposer({
             <p style={{ fontSize: 11, color: "var(--text-muted)", margin: 0 }}>
               列: <code>time,label,note,visibility,member</code> /
               time は <code>mm:ss</code> または <code>hh:mm:ss</code> /
-              member は X ID または名前で video_members と一致した場合のみ紐付け。
+              最大 {MAX_ATOMIC_CHAPTER_BULK_ROWS} 行。member 列は互換入力として受け付けますが登録には使用しません。
             </p>
             <textarea
               className="fn-input"
