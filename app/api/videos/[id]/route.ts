@@ -6,6 +6,7 @@ import { fetchPublicVideoByIdOrYoutube } from "@/lib/db/listQueries";
 import {
   PUBLIC_VIDEO_KEYS,
   PublicVideoDto,
+  assertNoForbiddenKeys,
   pickKeys,
 } from "@/lib/api/publicDto";
 
@@ -35,8 +36,10 @@ export async function GET(_req: Request, { params }: Params): Promise<Response> 
     ...pickKeys(row, PUBLIC_VIDEO_KEYS),
     status: "public" as const,
   };
+  const payload = { item };
+  assertNoForbiddenKeys(payload);
   return NextResponse.json(
-    { item },
+    payload,
     {
       headers: {
         "Cache-Control":

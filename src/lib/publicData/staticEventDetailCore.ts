@@ -15,9 +15,10 @@ export interface StaticEventDetailPayload {
 export interface StaticEventDetailVideo {
   id: string;
   title: string;
+  /** UI compatibility only; public payloads must not populate this internal key. */
+  creator_x_user_id?: string;
   youtube_video_id: string | null;
   creator_display_name: string;
-  creator_x_user_id: string | null;
   creator_icon_url: string | null;
   visibility_status: "public";
   scheduled_time: number | null;
@@ -126,7 +127,6 @@ function normalizeEventVideo(value: unknown): StaticEventDetailVideo | null {
     youtube_video_id: normalizeNullableString(row.youtube_video_id),
     creator_display_name:
       normalizeString(row.creator_display_name) ?? "unknown",
-    creator_x_user_id: normalizeNullableString(row.creator_x_user_id),
     creator_icon_url: normalizeNullableString(row.creator_icon_url),
     visibility_status: "public",
     scheduled_time: normalizeUnix(row.scheduled_time),

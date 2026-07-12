@@ -10,9 +10,10 @@ export interface StaticVideoDetailPayload {
 export interface StaticVideoDetailVideo {
   id: string;
   title: string;
+  /** UI compatibility only; public payloads must not populate this internal key. */
+  creator_x_user_id?: string;
   youtube_video_id: string | null;
   creator_display_name: string | null;
-  creator_x_user_id: string | null;
   creator_icon_url: string | null;
   music: string | null;
   credit: string | null;
@@ -79,7 +80,6 @@ function normalizeVideo(value: unknown): StaticVideoDetailVideo | null {
     title,
     youtube_video_id: normalizeNullableString(row.youtube_video_id),
     creator_display_name: normalizeNullableString(row.creator_display_name),
-    creator_x_user_id: normalizeNullableString(row.creator_x_user_id),
     creator_icon_url: normalizeNullableString(row.creator_icon_url),
     music: normalizeNullableString(row.music),
     credit: normalizeNullableString(row.credit),

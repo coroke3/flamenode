@@ -12,6 +12,7 @@ import {
   MAX_PUBLIC_LIST_LIMIT,
   PUBLIC_VIDEO_KEYS,
   PublicVideoDto,
+  assertNoForbiddenKeys,
   pickKeys,
 } from "@/lib/api/publicDto";
 
@@ -44,8 +45,10 @@ export async function GET(req: Request): Promise<Response> {
     ...pickKeys(row, PUBLIC_VIDEO_KEYS),
     status: "public" as const,
   }));
+  const payload = { items, total, page, limit };
+  assertNoForbiddenKeys(payload);
   return NextResponse.json(
-    { items, total, page, limit },
+    payload,
     {
       headers: {
         "Cache-Control":
