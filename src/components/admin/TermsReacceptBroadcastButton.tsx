@@ -98,7 +98,7 @@ export function TermsReacceptBroadcastButton({
               再同意通知 enqueue
             </h3>
             <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 12 }}>
-              対象は terms_reaccept_required=1 のユーザーです。1 回 30 件まで enqueue します。
+              対象は最新major版以降へ未同意のユーザーです。1回30件までenqueueします。
             </p>
 
             <label style={{ display: "grid", gap: 4, fontSize: 12 }}>

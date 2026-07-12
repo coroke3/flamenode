@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { and, count, eq, gt } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { termsVersions, users } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
@@ -10,6 +10,10 @@ import { expectedRowCondition } from "@/lib/audit/adapters";
 import { mutateWithAudit, planD1AuditMutationBudget } from "@/lib/audit/mutate";
 import { buildKnownRecipientNotificationBatch } from "@/lib/notifications/enqueue";
 import { generateId } from "@/lib/utils/id";
+import {
+  getLatestPublishedMajorTerms,
+  termsReacceptRequiredCondition,
+} from "@/lib/terms/reaccept";
 
 export interface RulesResult { ok: boolean; message?: string; id?: string }
 export interface RulesBroadcastResult extends RulesResult { enqueued?: number; cursor?: string }
@@ -95,14 +99,15 @@ export async function publishTermsVersion(formData: FormData): Promise<RulesResu
   if (target.status === "published") return { ok: true, id };
   const published = await db.select().from(termsVersions).where(eq(termsVersions.status, "published")).limit(2);
   if (published.length > 1) return { ok: false, message: "公開中の規約が複数存在するため処理を停止しました。" };
-  const userCount = target.severity === "major"
-    ? Number((await db.select({ value: count() }).from(users).where(eq(users.terms_reaccept_required, 0)))[0]?.value ?? 0)
-    : 0;
-  const now = Math.floor(Date.now() / 1000);
+  const current = published[0];
+  // 秒精度でも公開順序が曖昧にならないよう、公開時刻を単調増加させる。
+  const now = Math.max(
+    Math.floor(Date.now() / 1000),
+    (current?.published_at ?? 0) + 1,
+  );
   const statements = [];
   const expected: number[] = [];
   const audits = [];
-  const current = published[0];
   if (current) {
     const after = { ...current, status: "archived" as const, updated_at: now };
     statements.push(db.update(termsVersions).set({ status: "archived", updated_at: now }).where(and(eq(termsVersions.id, current.id), expectedRowCondition({ expectedCurrent: snapshot(current) }))!));
@@ -113,11 +118,6 @@ export async function publishTermsVersion(formData: FormData): Promise<RulesResu
   statements.push(db.update(termsVersions).set({ status: "published", published_at: now, updated_at: now }).where(and(eq(termsVersions.id, target.id), expectedRowCondition({ expectedCurrent: snapshot(target) }))!));
   expected.push(1);
   audits.push({ table_name: "terms_versions", target_id: target.id, operation: "UPDATE" as const, before: snapshot(target), after: snapshot(targetAfter), actor_user_id: guard.user.id, retention_class: "long_audit" as const, context: "admin_terms_publish", reason: "規約版の公開", strict: true });
-  if (userCount > 0) {
-    statements.push(db.update(users).set({ terms_reaccept_required: 1 }).where(eq(users.terms_reaccept_required, 0)));
-    expected.push(userCount);
-    audits.push({ table_name: "user", target_id: `terms_reaccept:${target.id}`, operation: "UPDATE" as const, before: { terms_reaccept_required: 0, affected_count: userCount }, after: { terms_reaccept_required: 1, affected_count: userCount }, actor_user_id: guard.user.id, retention_class: "long_audit" as const, context: "admin_terms_publish", reason: "major規約公開に伴う全利用者の再同意要求", strict: true });
-  }
   try {
     await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits });
   } catch (error) { return mutationError(error); }
@@ -139,8 +139,10 @@ export async function broadcastTermsReaccept(formData: FormData): Promise<RulesB
   if (!db) return { ok: false, message: "DB に接続できません。" };
   const target = (await db.select().from(termsVersions).where(eq(termsVersions.id, termsId)).limit(1))[0];
   if (!target || target.status !== "published") return { ok: false, message: "公開中の規約だけ通知できます。" };
+  const requiredMajor = await getLatestPublishedMajorTerms(db);
+  if (!requiredMajor) return { ok: true, message: "再同意が必要なmajor規約はありません。", enqueued: 0, cursor };
   const rows = await db.select({ user_id: users.id }).from(users).where(and(
-    eq(users.terms_reaccept_required, 1),
+    termsReacceptRequiredCondition(requiredMajor),
     eq(users.is_notification_enabled, 1),
     cursor ? gt(users.id, cursor) : undefined,
   )!).orderBy(users.id).limit(TERMS_REACCEPT_BATCH_SIZE + 1);

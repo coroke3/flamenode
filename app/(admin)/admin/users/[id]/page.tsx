@@ -17,6 +17,10 @@ import { Icon } from "@/components/ui/Icon";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { AdminUserTabs } from "@/components/admin/AdminUserTabs";
+import {
+  getLatestPublishedMajorTerms,
+  termsReacceptRequiredValue,
+} from "@/lib/terms/reaccept";
 
 export const metadata: Metadata = { title: "ユーザー詳細" };
 export const dynamic = "force-dynamic";
@@ -32,10 +36,22 @@ export default async function AdminUserDetailPage({
   const db = getDatabase();
   if (!db) notFound();
 
-  const user = (
-    await db.select().from(usersTable).where(eq(usersTable.id, id)).limit(1)
+  const requiredMajor = await getLatestPublishedMajorTerms(db);
+  const userResult = (
+    await db
+      .select({
+        row: usersTable,
+        reaccept_required: termsReacceptRequiredValue(requiredMajor),
+      })
+      .from(usersTable)
+      .where(eq(usersTable.id, id))
+      .limit(1)
   )[0];
-  if (!user) notFound();
+  if (!userResult) notFound();
+  const user = {
+    ...userResult.row,
+    terms_reaccept_required: userResult.reaccept_required === 1 ? 1 : 0,
+  };
 
   const xIds = await db
     .select()

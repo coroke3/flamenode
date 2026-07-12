@@ -3,7 +3,7 @@ import { FnTable } from "@/components/ui/FnTable";
 
 import Link from "next/link";
 import type { Metadata } from "next";
-import { desc, eq, sql } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { termsVersions, users as usersTable } from "@/lib/db/schema";
 import { formatUnix } from "@/lib/utils/format";
@@ -11,6 +11,10 @@ import { Icon } from "@/components/ui/Icon";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import { TermsReacceptBroadcastButton } from "@/components/admin/TermsReacceptBroadcastButton";
+import {
+  getLatestPublishedMajorTerms,
+  termsReacceptRequiredCondition,
+} from "@/lib/terms/reaccept";
 
 export const metadata: Metadata = { title: "規約管理" };
 export const dynamic = "force-dynamic";
@@ -46,8 +50,8 @@ export default async function AdminRulesPage({
             .limit(20))
     : [];
 
-  let userCount = 0;
   let reacceptRequiredCount = 0;
+  let reacceptCountIsLowerBound = false;
   const currentPublishedTerms = db
     ? (
         await db
@@ -60,15 +64,17 @@ export default async function AdminRulesPage({
     : null;
   if (db) {
     try {
-      const [allRows, reacceptRows] = await Promise.all([
-        db.select({ c: sql<number>`COUNT(*)` }).from(usersTable),
-        db
-          .select({ c: sql<number>`COUNT(*)` })
-          .from(usersTable)
-          .where(eq(usersTable.terms_reaccept_required, 1)),
-      ]);
-      userCount = Number(allRows[0]?.c ?? 0);
-      reacceptRequiredCount = Number(reacceptRows[0]?.c ?? 0);
+      const requiredMajor = await getLatestPublishedMajorTerms(db);
+      const reacceptRows = requiredMajor
+        ? await db
+            .select({ id: usersTable.id })
+            .from(usersTable)
+            .where(termsReacceptRequiredCondition(requiredMajor))
+            .orderBy(usersTable.id)
+            .limit(31)
+        : [];
+      reacceptCountIsLowerBound = reacceptRows.length > 30;
+      reacceptRequiredCount = Math.min(reacceptRows.length, 30);
     } catch (e) {
       console.error("[AdminRulesPage] user count failed", e);
     }
@@ -123,12 +129,11 @@ export default async function AdminRulesPage({
         </strong>
         <ul style={{ margin: "6px 0 0", paddingLeft: 18, lineHeight: 1.7 }}>
           <li>
-            major 公開時に再同意必須になるユーザー: 約{" "}
-            <strong>{userCount.toLocaleString()}</strong> 件 (全ユーザー)
+            major公開時はユーザー行を一括更新せず、同意履歴から再同意要否を動的判定します。
           </li>
           <li>
             現在の再同意待ち:{" "}
-            <strong>{reacceptRequiredCount.toLocaleString()}</strong> 件
+            <strong>{reacceptRequiredCount.toLocaleString()}{reacceptCountIsLowerBound ? "件以上" : "件"}</strong>
           </li>
           {currentPublishedTerms ? (
             <li>
@@ -142,7 +147,7 @@ export default async function AdminRulesPage({
           ) : null}
         </ul>
         <p style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
-          Discord 通知は notification_outbox に 50 件ずつ段階 enqueue します。
+          Discord 通知は notification_outbox に30件ずつ段階enqueueします。
           送信結果は通知管理で確認できます。
         </p>
       </section>
