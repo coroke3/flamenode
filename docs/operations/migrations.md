@@ -29,6 +29,11 @@ npm.cmd run check:db-schema
 npm.cmd run check:db-history
 ```
 
+`check:db-schema` はactive migrationを番号順に空の`node:sqlite`へ実際に適用し、
+`foreign_keys`、`foreign_key_check`、`integrity_check`、CHECK有効化を確認する。
+さらに`schema.ts`のtable・named index・foreign key manifestとSQLiteの実体を比較し、
+SQL構文エラー、欠落、余分な定義をfail-closedで検出する。
+
 ## Remote D1
 
 Remote D1の作成、backup、migration適用、rollbackは運用者がCloudflareの手順に従い、対象D1とmigrationを確認して明示的に行う。CIとCodexはRemote D1を変更しない。
