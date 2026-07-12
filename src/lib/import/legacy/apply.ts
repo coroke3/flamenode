@@ -18,7 +18,6 @@ import type { DB } from "@/lib/db/client";
 import type { WriteAuditLogInput } from "@/lib/audit/types";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import {
-  auditLogs,
   eventCustomQuestions,
   eventStaff,
   events,
@@ -36,10 +35,15 @@ import {
   users,
   xUsers,
 } from "@/lib/db/schema";
-import { replaceEventStaffWithProtection } from "@/lib/event/eventOwnership";
-import { enqueueStaticRebuildMany } from "@/lib/staticRebuild/enqueue";
+import { buildReplaceEventStaffWithProtection } from "@/lib/event/eventOwnership";
 import { generateId } from "@/lib/utils/id";
-import { MAX_IN_CLAUSE } from "./constants";
+import {
+  MAX_D1_AUDIT_ENTRIES,
+  MAX_D1_AUDIT_PAYLOAD_BYTES,
+  MAX_D1_BATCH_STATEMENTS,
+  MAX_IN_CLAUSE,
+} from "./constants";
+import { stableSha256 } from "./hash";
 import type {
   CanonicalVideo,
   CanonicalXUser,
@@ -55,6 +59,8 @@ export interface ApplyOptions {
   batchId: string;
   fileHash: string;
   planHash: string;
+  /** preview claim 時に発行した lease。apply 本体はこの値を持つ実行だけを受け付ける。 */
+  leaseToken: string;
   fileNamesJson?: string;
   fileCount: number;
 }
@@ -66,7 +72,6 @@ export interface ApplyResult {
   errors: string[];
   batchId: string;
 }
-
 /** 実行した管理者を作品投稿者にしないための、ログイン不能な移行専用 principal。 */
 const LEGACY_IMPORT_SYSTEM_USER_ID = "system_legacy_import";
 
@@ -106,7 +111,6 @@ async function fetchExistingIds<T extends { id: string }>(
   }
   return existing;
 }
-
 function normalizeSoftwareName(label: string): string {
   return label.trim().replace(/\s+/g, " ").toLowerCase();
 }
@@ -161,7 +165,7 @@ function buildLegacyXUserAtomicWork(args: {
       linked_user_id: null,
       verification_token: null,
       token_expires_at: null,
-      approval_status: "pending",
+      approval_status: "imported",
       approval_requested_at: args.now,
     };
     mutationStatements.push(args.db.run(sql`
@@ -264,13 +268,16 @@ type LegacyVideoAtomicResult = {
   createdXIds: string[];
   memberCount: number;
   eventIds: string[];
+  mutationStatements: BatchItem<"sqlite">[];
+  expectedMutationChanges: Array<number | null>;
+  audits: WriteAuditLogInput[];
 };
 
 /**
  * 作品本体と replace 型の関連行を単一の D1 batch に閉じ込める。
  * legacy import はこの入口以外から videos / members / relations を変更しない。
  */
-async function replaceLegacyVideoAtomically(args: {
+async function buildLegacyVideoAtomicWork(args: {
   db: DB;
   video: CanonicalVideo;
   existing: typeof videos.$inferSelect | null;
@@ -593,29 +600,23 @@ async function replaceLegacyVideoAtomically(args: {
     )
   `));
 
-  await mutateWithAudit(args.db, {
-    mutationStatements,
-    expectedMutationChanges,
-    audits,
-  });
   return {
     createdXIds: xUserWork.createdIds,
     memberCount: afterMembers.length,
     eventIds: [...new Set(args.eventRows.map((relation) => relation.event_id))],
+    mutationStatements,
+    expectedMutationChanges,
+    audits,
   };
 }
 
 export async function applyLegacyImportPlan(
   db: DB,
-  plan: LegacyImportPlan,
+  requestPlan: LegacyImportPlan,
   options: ApplyOptions,
   operatorId: string,
 ): Promise<ApplyResult> {
   const now = Math.floor(Date.now() / 1000);
-  const strategy = options.strategy;
-  if (plan.errors.length > 0) {
-    throw new Error("Validation errors prevent legacy import apply.");
-  }
   const stagedBatch = (
     await db
       .select({
@@ -623,6 +624,10 @@ export async function applyLegacyImportPlan(
         executed_by_user_id: legacyImportBatches.executed_by_user_id,
         file_hash: legacyImportBatches.file_hash,
         plan_hash: legacyImportBatches.plan_hash,
+        canonical_plan_json: legacyImportBatches.canonical_plan_json,
+        preview_expires_at: legacyImportBatches.preview_expires_at,
+        lease_token: legacyImportBatches.lease_token,
+        lease_expires_at: legacyImportBatches.lease_expires_at,
       })
       .from(legacyImportBatches)
       .where(eq(legacyImportBatches.id, options.batchId))
@@ -633,9 +638,39 @@ export async function applyLegacyImportPlan(
     stagedBatch.status !== "applying" ||
     stagedBatch.executed_by_user_id !== operatorId ||
     stagedBatch.file_hash !== options.fileHash ||
-    stagedBatch.plan_hash !== options.planHash
+    stagedBatch.plan_hash !== options.planHash ||
+    !stagedBatch.canonical_plan_json ||
+    !stagedBatch.preview_expires_at ||
+    stagedBatch.preview_expires_at < now ||
+    stagedBatch.lease_token !== options.leaseToken ||
+    !stagedBatch.lease_expires_at ||
+    stagedBatch.lease_expires_at < now
   ) {
     throw new Error("Legacy import requires a claimed preview record.");
+  }
+  let plan: LegacyImportPlan;
+  try {
+    plan = JSON.parse(stagedBatch.canonical_plan_json) as LegacyImportPlan;
+  } catch {
+    throw new Error("Legacy import preview has no valid canonical plan.");
+  }
+  if (
+    !Array.isArray(plan.events) ||
+    !Array.isArray(plan.videos) ||
+    !Array.isArray(plan.eventStaff) ||
+    !Array.isArray(plan.xUsers)
+  ) {
+    throw new Error("Legacy import preview canonical plan is malformed.");
+  }
+  if (await stableSha256(plan) !== options.planHash) {
+    throw new Error("Legacy import preview canonical plan hash does not match.");
+  }
+  if (await stableSha256(requestPlan) !== options.planHash) {
+    throw new Error("Legacy import request plan hash does not match its preview.");
+  }
+  const strategy = options.strategy;
+  if (plan.errors.length > 0) {
+    throw new Error("Validation errors prevent legacy import apply.");
   }
   const errors: string[] = [];
   const counts: ApplyResult["counts"] = {
@@ -647,6 +682,9 @@ export async function applyLegacyImportPlan(
   };
 
   const rebuildEventIds = new Set<string>();
+  const mutationStatements: BatchItem<"sqlite">[] = [];
+  const expectedMutationChanges: Array<number | null> = [];
+  const audits: WriteAuditLogInput[] = [];
 
   // ----------------------------------------------------------
   // 1) バッチ記録 (status="planned") - apply 失敗しても記録が残る
@@ -935,7 +973,7 @@ export async function applyLegacyImportPlan(
         )
       `));
       questionExpectedChanges.push(null);
-      await replaceEventStaffWithProtection({
+      const staffWork = await buildReplaceEventStaffWithProtection({
         db,
         eventId: ev.id,
         actorUserId: operatorId,
@@ -985,6 +1023,9 @@ export async function applyLegacyImportPlan(
           ],
         },
       });
+      mutationStatements.push(...staffWork.mutationStatements);
+      expectedMutationChanges.push(...staffWork.expectedMutationChanges);
+      audits.push(...staffWork.audits);
       for (const xUserId of eventXUserWork.createdIds) {
         existingXIds.add(xUserId);
         createdXIds.add(xUserId);
@@ -1022,7 +1063,7 @@ export async function applyLegacyImportPlan(
     const extra = plan.videoNormExtras.find((e) => e.video_id === vi.id);
 
     try {
-      const result = await replaceLegacyVideoAtomically({
+      const result = await buildLegacyVideoAtomicWork({
         db,
         video: vi,
         existing: existingVideosById.get(vi.id) ?? null,
@@ -1036,6 +1077,9 @@ export async function applyLegacyImportPlan(
         batchId: options.batchId,
         now,
       });
+      mutationStatements.push(...result.mutationStatements);
+      expectedMutationChanges.push(...result.expectedMutationChanges);
+      audits.push(...result.audits);
       for (const xUserId of result.createdXIds) {
         existingXIds.add(xUserId);
         createdXIds.add(xUserId);
@@ -1070,83 +1114,89 @@ export async function applyLegacyImportPlan(
   // 6) 静的 JSON 再生成キュー
   // ----------------------------------------------------------
   if (options.enqueueStaticRebuild && options.importMode !== "draft") {
-    const eventIdList = [...rebuildEventIds];
-    const rebuildItems: Parameters<typeof enqueueStaticRebuildMany>[1] = [
-      { targetType: "events_index", targetId: "global", reason: "legacy_import", priority: "low" },
-      { targetType: "search_index", targetId: "global", reason: "legacy_import", priority: "low" },
-    ];
-    if (options.importMode !== "archive") {
-      rebuildItems.push({
-        targetType: "list_recent",
-        targetId: "global",
-        reason: "legacy_import",
-        priority: "low",
-      });
-    }
-    for (const eventId of eventIdList) {
-      rebuildItems.push({ targetType: "event", targetId: eventId, reason: "legacy_import", priority: "low" });
-    }
-    try {
-      await enqueueStaticRebuildMany(db, rebuildItems);
-    } catch (e) {
-      errors.push(`static_rebuild_queue: ${stringifyError(e)}`);
+    const rebuildTargets = [
+      ["events_index", "global"],
+      ["search_index", "global"],
+      ...(options.importMode !== "archive" ? [["list_recent", "global"]] : []),
+      ...[...rebuildEventIds].map((eventId) => ["event", eventId]),
+    ] as const;
+    for (const [targetType, targetId] of rebuildTargets) {
+      mutationStatements.push(db.run(sql`
+        INSERT OR IGNORE INTO static_rebuild_queue (
+          id, target_type, target_id, reason, priority, status, attempt_count,
+          requested_by_user_id, created_at, updated_at
+        ) VALUES (
+          ${generateId("srb")}, ${targetType}, ${targetId}, 'legacy_import',
+          'low', 'pending', 0, ${operatorId}, ${now}, ${now}
+        )
+      `));
+      expectedMutationChanges.push(null);
     }
   }
 
   // ----------------------------------------------------------
   // 7) 監査ログ (audit_logs)
   // ----------------------------------------------------------
-  try {
-    await db.insert(auditLogs).values({
-      id: generateId("al"),
-      table_name: "legacy_import",
-      target_id: options.batchId,
-      operation: "SYSTEM",
-      before_json: null,
-      after_json: JSON.stringify({
-        strategy,
-        importMode: options.importMode,
-        counts,
-        errorCount: errors.length,
-      }),
-      changed_keys_json: null,
-      inverse_patch_json: null,
-      actor_user_id: operatorId,
-      actor_snapshot_json: null,
-      reason: "legacy_import",
-      context: null,
-      retention_class: "long_audit",
-      restore_strategy: "none",
-      restore_status: "not_restorable",
-      payload_size_bytes: 0,
-      expires_at: null,
-      created_at: now,
-    });
-  } catch (e) {
-    errors.push(`audit_log: ${stringifyError(e)}`);
-  }
+  audits.push({
+    table_name: "legacy_import",
+    target_id: options.batchId,
+    operation: "SYSTEM",
+    before: null,
+    after: { strategy, importMode: options.importMode, counts, errorCount: errors.length },
+    actor_user_id: operatorId,
+    reason: "legacy_import",
+    context: null,
+    retention_class: "long_audit",
+    restore_strategy: "none",
+    strict: true,
+  });
 
   // ----------------------------------------------------------
   // 8) バッチ status 更新
   // ----------------------------------------------------------
-  const batchStatus = errors.length > 0 ? "failed" : "applied";
-  try {
-    await db.update(legacyImportBatches).set({
-      status: batchStatus,
-      counts_json: JSON.stringify(counts),
-      error_count: errors.length,
-      applied_at: batchStatus === "applied" ? now : null,
-      failed_at: batchStatus === "failed" ? now : null,
-      error_summary: errors.length > 0 ? errors.slice(0, 5).join("\n") : null,
-    }).where(
-      and(
+  if (errors.length > 0) throw new Error(errors.join("\n"));
+  if (mutationStatements.length === 0) {
+    mutationStatements.push(db.run(sql`SELECT 1`));
+    expectedMutationChanges.push(null);
+  }
+  const assertionCount = expectedMutationChanges.filter((value) => value !== null).length;
+  if (mutationStatements.length + assertionCount + 4 > MAX_D1_BATCH_STATEMENTS) {
+    throw new Error("Legacy import finalize exceeds the D1 batch statement limit.");
+  }
+  if (audits.length > MAX_D1_AUDIT_ENTRIES) {
+    throw new Error("Legacy import finalize exceeds the audit entry limit.");
+  }
+  const auditPayloadBytes = new TextEncoder().encode(JSON.stringify(
+    audits.map((audit) => ({ before: audit.before ?? null, after: audit.after ?? null })),
+  )).length;
+  if (auditPayloadBytes > MAX_D1_AUDIT_PAYLOAD_BYTES) {
+    throw new Error("Legacy import finalize exceeds the audit payload limit.");
+  }
+  await mutateWithAudit(db, {
+    mutationStatements,
+    expectedMutationChanges,
+    audits,
+    postAuditStatements: [
+      db.update(legacyImportBatches).set({
+        status: "applied",
+        counts_json: JSON.stringify(counts),
+        error_count: 0,
+        applied_at: now,
+        failed_at: null,
+        error_summary: null,
+        lease_token: null,
+        lease_expires_at: null,
+        consumed_at: now,
+      }).where(and(
         eq(legacyImportBatches.id, options.batchId),
         eq(legacyImportBatches.status, "applying"),
-      )!,
-    );
-  } catch (e) {
-    errors.push(`batch_update: ${stringifyError(e)}`);
-  }
+        eq(legacyImportBatches.lease_token, options.leaseToken),
+      )!),
+      db.run(sql`
+        SELECT CASE WHEN changes() = 1 THEN 1 ELSE json_extract('not-valid-json', '$') END
+      `),
+    ],
+  });
 
   return {
     ok: errors.length === 0,
@@ -1162,26 +1212,37 @@ export async function applyLegacyImportPlan(
   };
 }
 
-async function recordBatchItem(
+/**
+ * preview/apply の途中で失効した lease を bounded に失敗へ確定する。
+ * canonical table や audit を削除せず、次の preview/apply 要求の前に最大20件だけ回収する。
+ */
+export async function cleanupExpiredLegacyImportBatches(
   db: DB,
-  batchId: string,
-  targetTable: string,
-  targetId: string,
-  action: string,
-  now: number,
+  now = Math.floor(Date.now() / 1000),
+  limit = LEGACY_IMPORT_EXPIRY_CLEANUP_LIMIT,
 ): Promise<void> {
-  try {
-    await db.insert(legacyImportBatchItems).values({
-      batch_id: batchId,
-      target_table: targetTable,
-      target_id: targetId,
-      action,
-      source_key: null,
-      status: "ok",
-      warning_count: 0,
-      created_at: now,
-    }).onConflictDoNothing();
-  } catch {
-    // 記録失敗は本体処理に影響しない
-  }
+  const boundedLimit = Math.max(1, Math.min(limit, 20));
+  await db.run(sql`
+    UPDATE legacy_import_batches
+    SET status = 'failed',
+        failed_at = ${now},
+        error_count = CASE WHEN error_count < 1 THEN 1 ELSE error_count END,
+        error_summary = COALESCE(error_summary, 'preview or apply lease expired'),
+        lease_token = NULL,
+        lease_expires_at = NULL,
+        consumed_at = ${now}
+    WHERE id IN (
+      SELECT id
+      FROM legacy_import_batches
+      WHERE (
+        (status = 'previewed' AND preview_expires_at IS NOT NULL AND preview_expires_at < ${now})
+        OR (status = 'applying' AND lease_expires_at IS NOT NULL AND lease_expires_at < ${now})
+      )
+      ORDER BY created_at ASC
+      LIMIT ${boundedLimit}
+    )
+  `);
 }
+
+/** 呼び出し側が一回の回収で消費してよい失効preview数。 */
+export const LEGACY_IMPORT_EXPIRY_CLEANUP_LIMIT = 20;

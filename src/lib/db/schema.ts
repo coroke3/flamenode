@@ -1291,10 +1291,17 @@ export const legacyImportBatches = sqliteTable(
     applied_at: integer("applied_at"),
     failed_at: integer("failed_at"),
     error_summary: text("error_summary"),
+    /** preview で確定した canonical plan。apply request body を正本にしない。 */
+    canonical_plan_json: text("canonical_plan_json"),
+    preview_expires_at: integer("preview_expires_at"),
+    lease_token: text("lease_token"),
+    lease_expires_at: integer("lease_expires_at"),
+    consumed_at: integer("consumed_at"),
   },
   (t) => ({
     createdIdx: index("legacy_import_batches_created_idx").on(t.created_at),
     fileHashIdx: index("legacy_import_batches_file_hash_idx").on(t.file_hash),
+    leaseIdx: index("legacy_import_batches_lease_idx").on(t.status, t.lease_expires_at),
   }),
 );
 

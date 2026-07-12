@@ -22,3 +22,7 @@
 npm.cmd run check:db-schema
 npm.cmd run check:db-history
 ```
+
+## Legacy import staging
+
+`legacy_import_batches` persists `canonical_plan_json` / `preview_expires_at` for the reviewed plan and `lease_token` / `lease_expires_at` / `consumed_at` for one-time apply. These columns belong to the pre-production baseline only; this repository never changes Remote D1 automatically.

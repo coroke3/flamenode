@@ -5,7 +5,20 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import type { DB } from "@/lib/db/client";
-import { events, legacyImportBatches, videos } from "@/lib/db/schema";
+import {
+  eventCustomQuestions,
+  eventStaff,
+  events,
+  legacyImportBatches,
+  slots,
+  videoCustomAnswers,
+  videoEvents,
+  videoMembers,
+  videoSoftwares,
+  videoYoutubeMetadata,
+  videos,
+  xUsers,
+} from "@/lib/db/schema";
 import {
   getLegacyImportPreviewSecret,
   isLegacyImportToolEnabled,
@@ -15,7 +28,10 @@ import { splitLegacyPayload } from "@/lib/import/legacy/payload";
 import { normalizeEventInfo, normalizeLegacyVideo } from "@/lib/import/legacy/normalize";
 import { buildLegacyImportPlan } from "@/lib/import/legacy/plan";
 import { buildDryRunResult } from "@/lib/import/legacy/dryRun";
-import { applyLegacyImportPlan } from "@/lib/import/legacy/apply";
+import {
+  applyLegacyImportPlan,
+  cleanupExpiredLegacyImportBatches,
+} from "@/lib/import/legacy/apply";
 import {
   buildPreviewToken,
   LEGACY_IMPORT_PREVIEW_TTL_SECONDS,
@@ -26,8 +42,10 @@ import { generateId } from "@/lib/utils/id";
 import {
   MAX_IMPORT_FILES,
   MAX_IMPORT_TOTAL_BYTES,
+  MAX_CANONICAL_PLAN_BYTES,
   MAX_IN_CLAUSE,
   MAX_PREVIEW_ROWS,
+  LEGACY_IMPORT_LEASE_SECONDS,
   PARSER_VERSION,
   SCHEMA_VERSION,
 } from "@/lib/import/legacy/constants";
@@ -49,6 +67,7 @@ type TargetVersion = { id: string; updatedAt: number | null };
 type PreviewTargetVersions = {
   events: TargetVersion[];
   videos: TargetVersion[];
+  relationHash: string;
 };
 type StoredPreviewStrategy = {
   previewVersion: 1;
@@ -94,27 +113,79 @@ async function captureTargetVersions(
 ): Promise<PreviewTargetVersions> {
   const eventIds = [...new Set(plan.events.map((event) => event.id))].sort();
   const videoIds = [...new Set(plan.videos.map((video) => video.id))].sort();
+  const xUserIds = [...new Set(plan.xUsers.map((xUser) => xUser.id.toLowerCase()))].sort();
   const eventVersions = new Map<string, number>();
   const videoVersions = new Map<string, number>();
+  const relations: Record<string, unknown[]> = {
+    event_custom_questions: [],
+    event_staff: [],
+    event_slots: [],
+    video_custom_answers: [],
+    video_events: [],
+    video_members: [],
+    video_slots: [],
+    video_softwares: [],
+    video_youtube_metadata: [],
+    x_users: [],
+  };
 
   for (const ids of chunked(eventIds, MAX_IN_CLAUSE)) {
-    const rows = await db
-      .select({ id: events.id, updatedAt: events.updated_at })
-      .from(events)
-      .where(inArray(events.id, ids));
+    const [rows, staffRows, questionRows, slotRows] = await Promise.all([
+      db
+        .select({ id: events.id, updatedAt: events.updated_at })
+        .from(events)
+        .where(inArray(events.id, ids)),
+      db.select().from(eventStaff).where(inArray(eventStaff.event_id, ids)),
+      db.select().from(eventCustomQuestions).where(inArray(eventCustomQuestions.event_id, ids)),
+      db.select().from(slots).where(inArray(slots.event_id, ids)),
+    ]);
     for (const row of rows) eventVersions.set(row.id, row.updatedAt);
+    relations.event_staff.push(...staffRows);
+    relations.event_custom_questions.push(...questionRows);
+    relations.event_slots.push(...slotRows);
   }
   for (const ids of chunked(videoIds, MAX_IN_CLAUSE)) {
-    const rows = await db
-      .select({ id: videos.id, updatedAt: videos.updated_at })
-      .from(videos)
-      .where(inArray(videos.id, ids));
+    const [rows, memberRows, eventRows, answerRows, softwareRows, metadataRows, slotRows] =
+      await Promise.all([
+        db
+          .select({ id: videos.id, updatedAt: videos.updated_at })
+          .from(videos)
+          .where(inArray(videos.id, ids)),
+        db.select().from(videoMembers).where(inArray(videoMembers.video_id, ids)),
+        db.select().from(videoEvents).where(inArray(videoEvents.video_id, ids)),
+        db.select().from(videoCustomAnswers).where(inArray(videoCustomAnswers.video_id, ids)),
+        db.select().from(videoSoftwares).where(inArray(videoSoftwares.video_id, ids)),
+        db.select().from(videoYoutubeMetadata).where(inArray(videoYoutubeMetadata.video_id, ids)),
+        db.select().from(slots).where(inArray(slots.video_id, ids)),
+      ]);
     for (const row of rows) videoVersions.set(row.id, row.updatedAt);
+    relations.video_members.push(...memberRows);
+    relations.video_events.push(...eventRows);
+    relations.video_custom_answers.push(...answerRows);
+    relations.video_softwares.push(...softwareRows);
+    relations.video_youtube_metadata.push(...metadataRows);
+    relations.video_slots.push(...slotRows);
   }
+  for (const ids of chunked(xUserIds, MAX_IN_CLAUSE)) {
+    const rows = await db
+      .select()
+      .from(xUsers)
+      .where(inArray(sql<string>`lower(${xUsers.id})`, ids));
+    relations.x_users.push(...rows);
+  }
+  const relationHash = await stableSha256(
+    Object.fromEntries(
+      Object.entries(relations).map(([table, rows]) => [
+        table,
+        [...rows].sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
+      ]),
+    ),
+  );
 
   return {
     events: eventIds.map((id) => ({ id, updatedAt: eventVersions.get(id) ?? null })),
     videos: videoIds.map((id) => ({ id, updatedAt: videoVersions.get(id) ?? null })),
+    relationHash,
   };
 }
 
@@ -146,6 +217,8 @@ function parseStoredPreviewStrategy(value: string): StoredPreviewStrategy | null
       !targetVersions ||
       !Array.isArray(targetVersions.events) ||
       !Array.isArray(targetVersions.videos) ||
+      typeof targetVersions.relationHash !== "string" ||
+      !/^[a-f0-9]{64}$/i.test(targetVersions.relationHash) ||
       !targetVersions.events.every(isTargetVersion) ||
       !targetVersions.videos.every(isTargetVersion)
     ) {
@@ -169,6 +242,7 @@ async function targetVersionsStillMatch(
 async function markPreviewFailed(
   db: DB,
   batchId: string,
+  leaseToken: string,
   message: string,
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
@@ -179,8 +253,15 @@ async function markPreviewFailed(
       failed_at: now,
       error_count: 1,
       error_summary: message.slice(0, 1000),
+      lease_token: null,
+      lease_expires_at: null,
+      consumed_at: now,
     })
-    .where(and(eq(legacyImportBatches.id, batchId), eq(legacyImportBatches.status, "applying"))!);
+    .where(and(
+      eq(legacyImportBatches.id, batchId),
+      eq(legacyImportBatches.status, "applying"),
+      eq(legacyImportBatches.lease_token, leaseToken),
+    )!);
 }
 
 export async function POST(req: Request): Promise<Response> {
@@ -273,6 +354,8 @@ export async function POST(req: Request): Promise<Response> {
   const db = getDatabase();
   if (!db) return errorResponse("D1 データベースに接続できません。", 503);
 
+  await cleanupExpiredLegacyImportBatches(db);
+
   if (action === "analyze") {
     const dryRun = await buildDryRunResult(db, plan, strategy);
     if (!dryRun.ok) {
@@ -294,6 +377,14 @@ export async function POST(req: Request): Promise<Response> {
     const batchId = generateId("lib");
     const nonce = generateId("lip");
     const expiresAt = now + LEGACY_IMPORT_PREVIEW_TTL_SECONDS;
+    const canonicalPlanJson = JSON.stringify(plan);
+    if (new TextEncoder().encode(canonicalPlanJson).length > MAX_CANONICAL_PLAN_BYTES) {
+      return errorResponse(
+        "canonical import plan が許可サイズを超えています。対象を分割してください。",
+        413,
+        ["canonical-plan-limit"],
+      );
+    }
     const targetVersions = await captureTargetVersions(db, plan);
     const storedStrategy: StoredPreviewStrategy = {
       previewVersion: 1,
@@ -325,6 +416,11 @@ export async function POST(req: Request): Promise<Response> {
       applied_at: null,
       failed_at: null,
       error_summary: null,
+      canonical_plan_json: canonicalPlanJson,
+      preview_expires_at: expiresAt,
+      lease_token: null,
+      lease_expires_at: null,
+      consumed_at: null,
     });
     const previewToken = await buildPreviewToken(
       {
@@ -399,6 +495,10 @@ export async function POST(req: Request): Promise<Response> {
     preview.plan_hash !== planHash ||
     preview.parser_version !== PARSER_VERSION ||
     preview.schema_version !== SCHEMA_VERSION ||
+    preview.preview_expires_at !== claims.expiresAt ||
+    !preview.canonical_plan_json ||
+    preview.lease_token !== null ||
+    preview.consumed_at !== null ||
     storedStrategy.nonce !== claims.nonce ||
     storedStrategy.expiresAt !== claims.expiresAt ||
     storedStrategy.anchorNow !== anchorNow ||
@@ -412,12 +512,24 @@ export async function POST(req: Request): Promise<Response> {
     return errorResponse("分析後に対象データが変更されたため、再分析が必要です。", 409, ["preview-stale"]);
   }
 
+  const leaseToken = generateId("lil");
+  const leaseExpiresAt = now + LEGACY_IMPORT_LEASE_SECONDS;
   try {
     await db.batch([
       db.run(sql`
         UPDATE legacy_import_batches
-        SET status = 'applying', error_summary = NULL, failed_at = NULL
-        WHERE id = ${claims.batchId} AND status = 'previewed'
+        SET status = 'applying',
+            error_summary = NULL,
+            failed_at = NULL,
+            lease_token = ${leaseToken},
+            lease_expires_at = ${leaseExpiresAt}
+        WHERE id = ${claims.batchId}
+          AND status = 'previewed'
+          AND preview_expires_at = ${claims.expiresAt}
+          AND preview_expires_at >= ${now}
+          AND canonical_plan_json IS NOT NULL
+          AND lease_token IS NULL
+          AND consumed_at IS NULL
       `),
       db.run(sql`
         SELECT CASE
@@ -441,6 +553,7 @@ export async function POST(req: Request): Promise<Response> {
         batchId: claims.batchId,
         fileHash,
         planHash,
+        leaseToken,
         fileNamesJson: JSON.stringify(files.map((file) => file.name ?? "")),
         fileCount: files.length,
       },
@@ -450,7 +563,7 @@ export async function POST(req: Request): Promise<Response> {
   } catch (error) {
     const message = error instanceof Error ? error.message : "legacy import apply に失敗しました。";
     try {
-      await markPreviewFailed(db, claims.batchId, message);
+      await markPreviewFailed(db, claims.batchId, leaseToken, message);
     } catch {
       // apply 側の content mutation は失敗している。失敗記録不能時も再試行を許可しない。
     }

@@ -54,6 +54,14 @@ export type EventStaffBulkAtomicExtras = {
   audits: readonly WriteAuditLogInput[];
 };
 
+/** 全置換を外部のより大きな D1 batch に組み込むための確定前 work。 */
+export type EventStaffReplaceAtomicWork = {
+  afterRows: EventStaffRow[];
+  mutationStatements: BatchItem<"sqlite">[];
+  expectedMutationChanges: Array<number | null>;
+  audits: WriteAuditLogInput[];
+};
+
 export type EventStaffBulkUpsert = {
   /** 新規行では発行済みの ID、更新行では既存 ID。 */
   id: string;
@@ -665,7 +673,7 @@ function eventStaffVersionGuard(args: {
  * delete → insert の途中状態を外へ出さず、最終集合の subject 一意性と owner 最低 1 人を
  * 先に検証する。legacy import と spreadsheet apply は直接 table を操作せずこの入口を使う。
  */
-export async function replaceEventStaffWithProtection(args: {
+export async function buildReplaceEventStaffWithProtection(args: {
   db: DB;
   eventId: string;
   actorUserId: string;
@@ -676,7 +684,7 @@ export async function replaceEventStaffWithProtection(args: {
   /** 既存の本人スタッフを降格・削除する場合だけ必要。 */
   confirmText?: string | null;
   atomicExtras?: EventStaffBulkAtomicExtras;
-}): Promise<EventStaffRow[]> {
+}): Promise<EventStaffReplaceAtomicWork> {
   if (!args.reason.trim()) {
     throw new Error("スタッフ一括置換には理由が必要です。");
   }
@@ -830,12 +838,37 @@ export async function replaceEventStaffWithProtection(args: {
     })),
   ];
 
-  await mutateWithAudit(args.db, {
+  return {
+    afterRows,
     mutationStatements,
     expectedMutationChanges,
     audits,
+  };
+}
+
+/**
+ * event_staff の全置換を単独で確定する通常入口。
+ * import/spreadsheet のように大きな単位で原子化する経路は
+ * buildReplaceEventStaffWithProtection を利用して同じ batch に組み込む。
+ */
+export async function replaceEventStaffWithProtection(args: {
+  db: DB;
+  eventId: string;
+  actorUserId: string;
+  reason: string;
+  context?: string | null;
+  now: number;
+  replacements: readonly EventStaffReplacement[];
+  confirmText?: string | null;
+  atomicExtras?: EventStaffBulkAtomicExtras;
+}): Promise<EventStaffRow[]> {
+  const work = await buildReplaceEventStaffWithProtection(args);
+  await mutateWithAudit(args.db, {
+    mutationStatements: work.mutationStatements,
+    expectedMutationChanges: work.expectedMutationChanges,
+    audits: work.audits,
   });
-  return afterRows;
+  return work.afterRows;
 }
 
 export async function transferEventOwnership(args: {

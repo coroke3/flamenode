@@ -272,10 +272,16 @@ CREATE TABLE "legacy_import_batches" (
   "created_at" integer NOT NULL,
   "applied_at" integer,
   "failed_at" integer,
-  "error_summary" text
+  "error_summary" text,
+  "canonical_plan_json" text,
+  "preview_expires_at" integer,
+  "lease_token" text,
+  "lease_expires_at" integer,
+  "consumed_at" integer
 );
 CREATE INDEX "legacy_import_batches_created_idx" ON "legacy_import_batches" ("created_at");
 CREATE INDEX "legacy_import_batches_file_hash_idx" ON "legacy_import_batches" ("file_hash");
+CREATE INDEX "legacy_import_batches_lease_idx" ON "legacy_import_batches" ("status", "lease_expires_at");
 
 CREATE TABLE "notification_outbox" (
   "id" text PRIMARY KEY NOT NULL,

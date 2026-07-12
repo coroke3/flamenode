@@ -19,3 +19,5 @@
 | Rollback | not safely reversible。必要時は運用者がbackupから復旧する。 |
 | Validation | `check:db-schema`、`check:db-history`、空SQLiteへのbaseline適用。 |
 | PR | current working tree |
+
+Legacy import staging: `legacy_import_batches` persists canonical plan JSON, preview expiry, one-time lease, and consumed timestamp. The apply request is never the canonical source.
