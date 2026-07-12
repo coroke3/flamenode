@@ -2,7 +2,10 @@
 
 import * as React from "react";
 import type { SpreadsheetDelimiterMode } from "@/lib/admin/spreadsheet/paste";
-import { SPREADSHEET_IMPORT_MAX_TEXT_CHARS } from "@/lib/admin/spreadsheet/constants";
+import {
+  SPREADSHEET_IMPORT_MAX_BATCH_ROWS,
+  SPREADSHEET_IMPORT_MAX_TEXT_CHARS,
+} from "@/lib/admin/spreadsheet/constants";
 import { buildSpreadsheetImportLocalPreview } from "@/lib/admin/spreadsheet/importPrepCore";
 import {
   SPREADSHEET_IMPORT_MAX_FILE_BYTES,
@@ -59,7 +62,9 @@ export function useSpreadsheetImport({
   );
 
   const displayPreview = preview ?? localPreview;
-  const canImport = Boolean(preview?.previewToken);
+  const canImport = Boolean(
+    preview?.previewToken && preview.rowCount <= SPREADSHEET_IMPORT_MAX_BATCH_ROWS,
+  );
 
   const updateText = React.useCallback((next: string) => {
     setText(next);

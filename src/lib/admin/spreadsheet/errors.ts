@@ -36,6 +36,14 @@ export function spreadsheetHttpStatus(message: string): number {
     case "too_many_rows":
     case "batch_too_large":
     case "duplicate_primary_key":
+    case "unsupported_default":
+    case "missing_required_column":
+    case "value_too_long":
+    case "invalid_enum":
+    case "invalid_json_value":
+    case "invalid_url":
+    case "invalid_integer":
+    case "invalid_number":
     case "payload_too_large":
     case "invalid_json":
     case "unique_violation":

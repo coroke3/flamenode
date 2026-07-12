@@ -38,8 +38,11 @@ async function loadTableNamesFromD1(): Promise<string[]> {
   const result = await db.prepare(
       `SELECT name FROM sqlite_master
        WHERE type = 'table'
-         AND name NOT LIKE 'sqlite_%'
-         AND substr(name, 1, 1) != '_'
+       AND name NOT LIKE 'sqlite_%'
+       AND substr(name, 1, 1) != '_'
+       AND EXISTS (
+         SELECT 1 FROM pragma_table_info(name) WHERE pk > 0
+       )
        ORDER BY name COLLATE NOCASE`,
     )
     .all<{ name: string }>();

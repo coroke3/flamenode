@@ -15,6 +15,44 @@ export interface SpreadsheetTableDef {
   inSchema: boolean;
 }
 
+export type SpreadsheetColumnPolicy = {
+  enum?: readonly string[];
+  json?: boolean;
+  url?: boolean;
+  maxLength?: number;
+};
+
+export const SPREADSHEET_COLUMN_POLICIES: Record<string, SpreadsheetColumnPolicy> = {
+  role: { enum: ["user", "admin", "moderator"] },
+  visibility: { enum: ["private", "public"] },
+  severity: { enum: ["minor", "major"] },
+  source: { enum: ["app", "youtube"] },
+  slot_type: { enum: ["time", "count"] },
+  slot_kind: { enum: ["time", "count"] },
+  icon_url: { url: true, maxLength: 2048 },
+  img_url: { url: true, maxLength: 2048 },
+  creator_icon_url: { url: true, maxLength: 2048 },
+  creator_youtube_channel_url: { url: true, maxLength: 2048 },
+  music_reference_url: { url: true, maxLength: 2048 },
+  youtube_channel_url: { url: true, maxLength: 2048 },
+  custom_permission_keys_json: { json: true, maxLength: 100_000 },
+  settings_json: { json: true, maxLength: 100_000 },
+  payload_json: { json: true, maxLength: 100_000 },
+  options_json: { json: true, maxLength: 100_000 },
+  chapters_json: { json: true, maxLength: 100_000 },
+};
+
+export const SPREADSHEET_DEFAULT_MAX_CELL_CHARS = 100_000;
+
+export function primaryKeysFromColumns(
+  columns: Array<{ name: string; pk: number }>,
+): string[] {
+  return columns
+    .filter((column) => column.pk > 0)
+    .sort((a, b) => a.pk - b.pk)
+    .map((column) => column.name);
+}
+
 export type SpreadsheetTableOverride = {
   label?: string;
   group?: string;
@@ -54,7 +92,7 @@ export const SPREADSHEET_TABLE_OVERRIDES: Record<string, SpreadsheetTableOverrid
 
     event_groups: { label: "イベントグループ", group: "イベント", mode: "editable" },
     events: { label: "イベント", group: "イベント", mode: "editable" },
-    event_staff: { label: "イベントスタッフ", group: "イベント", mode: "editable" },
+    event_staff: { label: "イベントスタッフ", group: "イベント", mode: "readonly" },
     slots: { label: "枠", group: "イベント", mode: "editable" },
 
     videos: { label: "作品", group: "作品", mode: "editable" },
@@ -161,18 +199,6 @@ export function isSpreadsheetForcedInsertColumn(
   );
 }
 
-const DEFAULT_READONLY_TABLES = new Set([
-  "account",
-  "session",
-  "verificationToken",
-  ...SPREADSHEET_DEPRECATED_READONLY_TABLES,
-  "user_tos_consents",
-  "x_id_merge_reverts",
-  "notification_outbox",
-  "audit_logs",
-  "cost_usage_snapshots",
-]);
-
 const SECRET_COLUMN_PATTERN =
   /(?:^|_)(?:token|secret|password|credential)s?$/i;
 
@@ -222,13 +248,6 @@ function inferLabel(table: string): string {
   return table.replace(/_/g, " ");
 }
 
-function inferMode(table: string): SpreadsheetMode {
-  if (DEFAULT_READONLY_TABLES.has(table)) return "readonly";
-  if (table.endsWith("_logs")) return "readonly";
-  if (table.endsWith("_outbox")) return "readonly";
-  return "editable";
-}
-
 export function resolveSpreadsheetTableDef(
   table: string,
   inSchema: boolean,
@@ -238,7 +257,7 @@ export function resolveSpreadsheetTableDef(
     table,
     label: override?.label ?? inferLabel(table),
     group: override?.group ?? inferGroup(table),
-    mode: override?.mode ?? inferMode(table),
+    mode: override?.mode ?? "readonly",
     inSchema,
   };
 }
@@ -252,7 +271,13 @@ export function buildSpreadsheetTableDefs(
   const names = new Set<string>();
 
   for (const name of dbTableNames) {
-    if (!isSpreadsheetTableBlocklisted(name)) names.add(name);
+    if (
+      !isSpreadsheetTableBlocklisted(name) &&
+      schemaSet.has(name) &&
+      Object.prototype.hasOwnProperty.call(SPREADSHEET_TABLE_OVERRIDES, name)
+    ) {
+      names.add(name);
+    }
   }
 
   return [...names]

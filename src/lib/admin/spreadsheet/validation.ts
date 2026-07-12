@@ -12,6 +12,23 @@ import { formatSpreadsheetCellValue } from "#spreadsheet/cellFormat";
 
 export const SPREADSHEET_IMPORT_MAX_FILE_BYTES = 2_000_000;
 
+export function resolveSpreadsheetDefaultValue(
+  column: Pick<SpreadsheetColumnMeta, "defaultValue">,
+): string | number | null {
+  const raw = column.defaultValue?.trim();
+  if (!raw || /^null$/i.test(raw)) return null;
+  const unwrapped = raw.replace(/^\((.*)\)$/, "$1").trim();
+  if (/^unixepoch\(\)$/i.test(unwrapped)) return Math.floor(Date.now() / 1000);
+  if (/^current_timestamp$/i.test(unwrapped)) {
+    return new Date().toISOString().replace("T", " ").slice(0, 19);
+  }
+  if (/^-?\d+(?:\.\d+)?$/.test(unwrapped)) return Number(unwrapped);
+  if (unwrapped.startsWith("'") && unwrapped.endsWith("'")) {
+    return unwrapped.slice(1, -1).replace(/''/g, "'");
+  }
+  throw new Error("unsupported_default");
+}
+
 export type PrimaryKeyIssue = "no_primary_key_columns" | "missing_primary_key";
 
 export type ImportPayloadIssue = "no_rows" | "too_many_rows" | "payload_too_large";

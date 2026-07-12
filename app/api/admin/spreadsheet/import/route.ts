@@ -16,6 +16,7 @@ import {
   applySpreadsheetImport,
   type SpreadsheetImportMode,
 } from "@/lib/admin/spreadsheet/query";
+import { SPREADSHEET_IMPORT_MAX_BATCH_ROWS } from "@/lib/admin/spreadsheet/constants";
 import { buildSpreadsheetImportPreviewToken } from "@/lib/admin/spreadsheet/importPreviewToken";
 import { resolveSpreadsheetTableContext } from "@/lib/admin/spreadsheet/tableContext";
 import {
@@ -86,6 +87,11 @@ export async function POST(req: Request): Promise<Response> {
       readonlyColumns,
     }).map((row) => applySpreadsheetForcedInsertValues(ctx.def.table, row));
     const importWarnings = [...warnings, ...readonlyWarnings];
+    if (writableRows.length > SPREADSHEET_IMPORT_MAX_BATCH_ROWS) {
+      importWarnings.push(
+        `一括反映は ${SPREADSHEET_IMPORT_MAX_BATCH_ROWS} 行までです。500 行まではプレビューできますが、分割して反映してください。`,
+      );
+    }
     const previewToken = await buildSpreadsheetImportPreviewToken({
       table: ctx.def.table,
       mode,
@@ -99,6 +105,7 @@ export async function POST(req: Request): Promise<Response> {
         ok: true,
         dryRun: true,
         previewToken,
+        applyMaxRows: SPREADSHEET_IMPORT_MAX_BATCH_ROWS,
         rowCount: writableRows.length,
         mappedColumns,
         warnings: importWarnings,

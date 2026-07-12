@@ -6,6 +6,8 @@ export type SpreadsheetColumnMeta = {
   notNull: boolean;
   pk: number;
   editable: boolean;
+  defaultValue?: string | null;
+  generated?: boolean;
 };
 
 export type SpreadsheetTableDefClient = {
@@ -43,6 +45,7 @@ export type SpreadsheetImportPreview = {
   mappedColumns: string[];
   warnings: string[];
   preview: Record<string, string | null>[];
+  applyMaxRows?: number;
 };
 
 export type SpreadsheetImportResult = {

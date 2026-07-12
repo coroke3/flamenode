@@ -9,6 +9,8 @@ import {
   isSpreadsheetColumnEditable,
   isSpreadsheetForcedInsertColumn,
   SPREADSHEET_SECRET_COLUMNS,
+  SPREADSHEET_COLUMN_POLICIES,
+  SPREADSHEET_DEFAULT_MAX_CELL_CHARS,
 } from "./registry";
 import {
   SPREADSHEET_IMPORT_MAX_BATCH_ROWS,
@@ -35,6 +37,7 @@ import {
   normalizePrimaryKeyRecord,
   primaryKeyFingerprint,
   primaryKeyFromRowValues,
+  resolveSpreadsheetDefaultValue,
 } from "./validation";
 
 export type { SpreadsheetColumnMeta } from "./tableContext";
@@ -225,6 +228,64 @@ function spreadsheetDb() {
   return db;
 }
 
+async function validateSpreadsheetForeignKeys(
+  ctx: SpreadsheetTableContext,
+  row: Record<string, string | null>,
+): Promise<void> {
+  const db = await getSpreadsheetD1();
+  for (const foreignKey of ctx.foreignKeys) {
+    const value = row[foreignKey.column];
+    if (value == null || value === "") continue;
+    const found = await db
+      .prepare(
+        `SELECT 1 FROM ${quoteIdent(foreignKey.referencedTable)} WHERE ${quoteIdent(foreignKey.referencedColumn)} = ? LIMIT 1`,
+      )
+      .bind(value)
+      .first();
+    if (!found) throw new Error("foreign_key_violation");
+  }
+}
+
+function validateSpreadsheetInputValues(
+  ctx: SpreadsheetTableContext,
+  row: Record<string, string | null>,
+): void {
+  for (const key of Object.keys(row)) {
+    if (!ctx.columnNames.includes(key)) throw new Error("unknown_column");
+    if (
+      !isSpreadsheetColumnEditable(ctx.def, key) &&
+      !isSpreadsheetForcedInsertColumn(ctx.def.table, key)
+    ) {
+      throw new Error("column_not_editable");
+    }
+    const value = row[key];
+    const meta = ctx.columns.find((column) => column.name === key)!;
+    if (value == null && meta.notNull) throw new Error("not_null_violation");
+    const policy = SPREADSHEET_COLUMN_POLICIES[key];
+    if (value != null && String(value).length > (policy?.maxLength ?? SPREADSHEET_DEFAULT_MAX_CELL_CHARS)) {
+      throw new Error("value_too_long");
+    }
+    if (policy?.enum && value != null && !policy.enum.includes(String(value))) {
+      throw new Error("invalid_enum");
+    }
+    if (policy?.json && value != null) {
+      try { JSON.parse(String(value)); } catch { throw new Error("invalid_json_value"); }
+    }
+    if (policy?.url && value != null) {
+      try {
+        const url = new URL(String(value));
+        if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error();
+      } catch { throw new Error("invalid_url"); }
+    }
+    if (value != null && meta.type.toUpperCase().includes("INT") && !/^-?\d+$/.test(String(value))) {
+      throw new Error("invalid_integer");
+    }
+    if (value != null && /REAL|FLOA|DOUB|NUMERIC|DECIMAL/i.test(meta.type) && !/^-?\d+(?:\.\d+)?$/.test(String(value))) {
+      throw new Error("invalid_number");
+    }
+  }
+}
+
 function snapshotCondition(
   ctx: SpreadsheetTableContext,
   row: Record<string, unknown>,
@@ -249,16 +310,27 @@ function primaryKeyCondition(
   );
 }
 
-function fullInsertedRow(
+function prepareCompleteInsertRow(
   ctx: SpreadsheetTableContext,
-  row: Record<string, string | null>,
-): Record<string, unknown> {
-  return Object.fromEntries(
-    ctx.columns.map((column) => [
-      column.name,
-      row[column.name] === "" ? null : row[column.name] ?? null,
-    ]),
-  );
+  rowInput: Record<string, string | null>,
+): Record<string, string | number | null> {
+  const row = applySpreadsheetForcedInsertValues(ctx.def.table, rowInput);
+  validateSpreadsheetInputValues(ctx, row);
+  const complete: Record<string, string | number | null> = {};
+  for (const column of ctx.columns) {
+    if (column.generated) continue;
+    if (row[column.name] !== undefined) {
+      if (row[column.name] == null && column.notNull) throw new Error("not_null_violation");
+      complete[column.name] = row[column.name] === "" ? null : row[column.name]!;
+    } else if (column.defaultValue != null) {
+      complete[column.name] = resolveSpreadsheetDefaultValue(column);
+    } else if (column.notNull) {
+      throw new Error("missing_required_column");
+    } else {
+      complete[column.name] = null;
+    }
+  }
+  return complete;
 }
 
 function buildInsertMutation(
@@ -266,28 +338,17 @@ function buildInsertMutation(
   rowInput: Record<string, string | null>,
   operatorId: string,
 ): SpreadsheetMutation {
-  for (const key of Object.keys(rowInput)) {
-    if (!ctx.columnNames.includes(key)) throw new Error("unknown_column");
-    if (
-      !isSpreadsheetColumnEditable(ctx.def, key) &&
-      !isSpreadsheetForcedInsertColumn(ctx.def.table, key)
-    ) {
-      throw new Error("column_not_editable");
-    }
-  }
-  const row = applySpreadsheetForcedInsertValues(ctx.def.table, rowInput);
-  const pk = primaryKeyFromRowValues(row, ctx.primaryKeys);
-  const keys = ctx.columns
-    .map((c) => c.name)
-    .filter(
-      (name) =>
-        row[name] !== undefined &&
-        (isSpreadsheetColumnEditable(ctx.def, name) ||
-          isSpreadsheetForcedInsertColumn(ctx.def.table, name)),
-    );
+  const row = prepareCompleteInsertRow(ctx, rowInput);
+  const pk = normalizePrimaryKeyRecord(
+    ctx.primaryKeys,
+    Object.fromEntries(
+      ctx.primaryKeys.map((key) => [key, String(row[key] ?? "")]),
+    ),
+  );
+  const keys = Object.keys(row);
   if (keys.length === 0) throw new Error("empty_row");
   const db = spreadsheetDb();
-  const values = keys.map((key) => (row[key] === "" ? null : row[key]));
+  const values = keys.map((key) => row[key]);
   return {
     statement: db.run(sql`
       INSERT INTO ${sql.raw(ctx.quotedTable)} (${sql.raw(keys.map(quoteIdent).join(", "))})
@@ -298,7 +359,7 @@ function buildInsertMutation(
       target_id: recordIdFromPk(pk),
       operation: "CREATE",
       before: null,
-      after: fullInsertedRow(ctx, row),
+      after: row,
       actor_user_id: operatorId,
       retention_class: "long_audit",
       strict: true,
@@ -314,6 +375,7 @@ function buildUpdateMutation(
   values: Record<string, string | null>,
   operatorId: string,
 ): SpreadsheetMutation {
+  validateSpreadsheetInputValues(ctx, values);
   const setCols = ctx.columns.filter(
     (column) =>
       column.pk === 0 &&
@@ -444,9 +506,11 @@ export async function updateSpreadsheetCell(opts: {
     ctx.primaryKeys,
     opts.primaryKey,
   );
+  validateSpreadsheetInputValues(ctx, primaryKey);
 
   const beforeRaw = await fetchRowByPkRaw(ctx, primaryKey);
   if (!beforeRaw) throw new Error("row_not_found");
+  await validateSpreadsheetForeignKeys(ctx, { [opts.column]: opts.value });
 
   await executeSpreadsheetMutations([
     buildUpdateMutation(
@@ -467,6 +531,7 @@ async function insertSpreadsheetRowWithContext(
   },
 ): Promise<void> {
   assertTableEditable(ctx);
+  await validateSpreadsheetForeignKeys(ctx, opts.row);
   await executeSpreadsheetMutations([
     buildInsertMutation(ctx, opts.row, opts.operatorId),
   ]);
@@ -495,6 +560,7 @@ export async function deleteSpreadsheetRow(opts: {
     ctx.primaryKeys,
     opts.primaryKey,
   );
+  validateSpreadsheetInputValues(ctx, primaryKey);
 
   const beforeRaw = await fetchRowByPkRaw(ctx, primaryKey);
   if (!beforeRaw) throw new Error("row_not_found");
@@ -613,6 +679,18 @@ export async function applySpreadsheetImport(
       if (seenPks.has(fingerprint)) throw new Error("duplicate_primary_key");
       seenPks.add(fingerprint);
       if (Object.keys(row).length === 0) throw new Error("empty_row");
+      validateSpreadsheetInputValues(ctx, row);
+      if (opts.mode === "insert") {
+        const complete = prepareCompleteInsertRow(ctx, row);
+        await validateSpreadsheetForeignKeys(
+          ctx,
+          Object.fromEntries(
+            Object.entries(complete).map(([key, value]) => [key, value == null ? null : String(value)]),
+          ),
+        );
+      } else {
+        await validateSpreadsheetForeignKeys(ctx, row);
+      }
       preparedRows.push({ row, pk, fingerprint });
     } catch (error) {
       errors.push({

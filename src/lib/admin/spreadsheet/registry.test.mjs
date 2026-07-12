@@ -9,6 +9,7 @@ import {
   isSpreadsheetColumnEditable,
   isSpreadsheetForcedInsertColumn,
   isSpreadsheetTableBlocklisted,
+  primaryKeysFromColumns,
   resolveSpreadsheetTableDef,
 } from "./registry.ts";
 
@@ -24,16 +25,13 @@ test("blocklists internal sqlite tables", () => {
   assert.equal(isSpreadsheetTableBlocklisted("videos"), false);
 });
 
-test("buildSpreadsheetTableDefs includes new DB tables automatically", () => {
+test("buildSpreadsheetTableDefs only includes schema tables on the explicit allowlist", () => {
   const defs = buildSpreadsheetTableDefs(
     ["videos", "brand_new_table"],
     new Set(["videos"]),
   );
-  assert.equal(defs.length, 2);
-  const fresh = defs.find((d) => d.table === "brand_new_table");
-  assert.ok(fresh);
-  assert.equal(fresh.inSchema, false);
-  assert.equal(fresh.group, "その他");
+  assert.equal(defs.length, 1);
+  assert.equal(defs[0]?.table, "videos");
 });
 
 test("resolveSpreadsheetTableDef applies overrides", () => {
@@ -42,10 +40,22 @@ test("resolveSpreadsheetTableDef applies overrides", () => {
   assert.equal(def.mode, "editable");
 });
 
+test("tables without a declared primary key have no spreadsheet key", () => {
+  assert.deepEqual(
+    primaryKeysFromColumns([
+      { name: "value", type: "TEXT", notNull: false, pk: 0, editable: true },
+    ]),
+    [],
+  );
+});
+
+test("event_staff cannot be edited directly", () => {
+  assert.equal(resolveSpreadsheetTableDef("event_staff", true).mode, "readonly");
+});
+
 test("deprecated DB tables are readonly for spreadsheet import", () => {
   for (const table of SPREADSHEET_DEPRECATED_READONLY_TABLES) {
-    const def = resolveSpreadsheetTableDef(table, true);
-    assert.equal(def.mode, "readonly", `${table} should be readonly`);
+    assert.equal(resolveSpreadsheetTableDef(table, true).mode, "readonly");
   }
 });
 
@@ -56,40 +66,20 @@ test("secret column pattern blocks new token columns", () => {
 });
 
 test("deprecated columns are readonly for spreadsheet import", () => {
-  for (const [table, columns] of Object.entries(
-    SPREADSHEET_READONLY_COLUMNS_BY_TABLE,
-  )) {
+  for (const [table, columns] of Object.entries(SPREADSHEET_READONLY_COLUMNS_BY_TABLE)) {
     const def = resolveSpreadsheetTableDef(table, true);
     for (const column of columns) {
-      assert.equal(
-        isSpreadsheetColumnEditable(def, column),
-        false,
-        `${table}.${column} should be readonly`,
-      );
+      assert.equal(isSpreadsheetColumnEditable(def, column), false);
     }
   }
-  assert.equal(
-    isSpreadsheetColumnEditable(resolveSpreadsheetTableDef("videos", true), "title"),
-    true,
-  );
+  assert.equal(isSpreadsheetColumnEditable(resolveSpreadsheetTableDef("videos", true), "title"), true);
 });
 
 test("forced spreadsheet insert values normalize fixed chapter markers", () => {
-  const markerColumn = "marker_kind";
-  const nonChapterMarker = "comment";
   assert.deepEqual(
-    applySpreadsheetForcedInsertValues("video_chapters", {
-      id: "ch-1",
-      [markerColumn]: nonChapterMarker,
-    }),
+    applySpreadsheetForcedInsertValues("video_chapters", { id: "ch-1", marker_kind: "comment" }),
     { id: "ch-1", marker_kind: "chapter" },
   );
-  assert.equal(
-    isSpreadsheetForcedInsertColumn("video_chapters", "marker_kind"),
-    true,
-  );
-  assert.equal(
-    isSpreadsheetForcedInsertColumn("video_chapters", "chapter_label"),
-    false,
-  );
+  assert.equal(isSpreadsheetForcedInsertColumn("video_chapters", "marker_kind"), true);
+  assert.equal(isSpreadsheetForcedInsertColumn("video_chapters", "chapter_label"), false);
 });

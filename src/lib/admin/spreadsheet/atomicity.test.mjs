@@ -16,7 +16,7 @@ test("spreadsheet writes use one strict audit batch", () => {
   assert.match(querySource, /mutateWithAudit\(db/);
   assert.match(querySource, /expectedMutationChanges: mutations\.map\(\(\) => 1\)/);
   assert.match(querySource, /strict: true/);
-  assert.match(querySource, /after: fullInsertedRow\(ctx, row\)/);
+  assert.match(querySource, /after: row/);
   assert.doesNotMatch(querySource, /await writeHistory/);
 });
 

@@ -5,6 +5,7 @@ import { getSpreadsheetTableDef } from "./discovery";
 import { isValidSqliteTableName } from "./registry";
 import {
   isSpreadsheetColumnEditable,
+  primaryKeysFromColumns,
   type SpreadsheetTableDef,
 } from "./registry";
 
@@ -18,12 +19,13 @@ export interface SpreadsheetTableContext {
   quotedTable: string;
   orderColumn: string;
   columnNames: string[];
+  foreignKeys: Array<{ column: string; referencedTable: string; referencedColumn: string }>;
 }
 
 const COLUMN_CACHE_TTL_MS = 30_000;
 const columnCache = new Map<
   string,
-  { columns: SpreadsheetColumnMeta[]; primaryKeys: string[]; cachedAt: number }
+  { columns: SpreadsheetColumnMeta[]; primaryKeys: string[]; foreignKeys: Array<{ column: string; referencedTable: string; referencedColumn: string }>; cachedAt: number }
 >();
 
 export function invalidateSpreadsheetColumnCache(): void {
@@ -34,29 +36,19 @@ export function quoteIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
 }
 
-export function primaryKeysFromColumns(
-  columns: SpreadsheetColumnMeta[],
-): string[] {
-  const pks = columns
-    .filter((c) => c.pk > 0)
-    .sort((a, b) => a.pk - b.pk)
-    .map((c) => c.name);
-  if (pks.length > 0) return pks;
-  if (columns[0]) return [columns[0].name];
-  return [];
-}
-
 async function loadTableColumnsFromDb(
   table: string,
 ): Promise<SpreadsheetColumnMeta[]> {
   const db = await getSpreadsheetD1();
   const result = await db
-    .prepare(`PRAGMA table_info(${quoteIdent(table)})`)
+    .prepare(`PRAGMA table_xinfo(${quoteIdent(table)})`)
     .all<{
       name: string;
       type: string;
       notnull: number;
       pk: number;
+      dflt_value: string | null;
+      hidden: number;
     }>();
 
   return (result.results ?? []).map((r) => ({
@@ -65,6 +57,24 @@ async function loadTableColumnsFromDb(
     notNull: Boolean(r.notnull),
     pk: Number(r.pk ?? 0),
     editable: true,
+    defaultValue: r.dflt_value ?? null,
+    generated: Number(r.hidden ?? 0) !== 0,
+  }));
+}
+
+async function loadForeignKeysFromDb(
+  table: string,
+): Promise<Array<{ column: string; referencedTable: string; referencedColumn: string }>> {
+  const db = await getSpreadsheetD1();
+  const result = await db.prepare(`PRAGMA foreign_key_list(${quoteIdent(table)})`).all<{
+    from: string;
+    table: string;
+    to: string;
+  }>();
+  return (result.results ?? []).map((row) => ({
+    column: row.from,
+    referencedTable: row.table,
+    referencedColumn: row.to,
   }));
 }
 
@@ -81,17 +91,18 @@ export function enrichSpreadsheetColumns(
 
 export async function getCachedTableColumns(
   table: string,
-): Promise<{ columns: SpreadsheetColumnMeta[]; primaryKeys: string[] }> {
+): Promise<{ columns: SpreadsheetColumnMeta[]; primaryKeys: string[]; foreignKeys: Array<{ column: string; referencedTable: string; referencedColumn: string }> }> {
   const now = Date.now();
   const hit = columnCache.get(table);
   if (hit && now - hit.cachedAt < COLUMN_CACHE_TTL_MS) {
-    return { columns: hit.columns, primaryKeys: hit.primaryKeys };
+    return { columns: hit.columns, primaryKeys: hit.primaryKeys, foreignKeys: hit.foreignKeys };
   }
 
   const columns = await loadTableColumnsFromDb(table);
   const primaryKeys = primaryKeysFromColumns(columns);
-  columnCache.set(table, { columns, primaryKeys, cachedAt: now });
-  return { columns, primaryKeys };
+  const foreignKeys = await loadForeignKeysFromDb(table);
+  columnCache.set(table, { columns, primaryKeys, foreignKeys, cachedAt: now });
+  return { columns, primaryKeys, foreignKeys };
 }
 
 export async function resolveSpreadsheetTableContext(
@@ -104,8 +115,8 @@ export async function resolveSpreadsheetTableContext(
   const def = await getSpreadsheetTableDef(trimmed);
   if (!def) throw new Error("unknown_table");
 
-  const { columns, primaryKeys } = await getCachedTableColumns(def.table);
-  if (columns.length === 0) {
+  const { columns, primaryKeys, foreignKeys } = await getCachedTableColumns(def.table);
+  if (columns.length === 0 || primaryKeys.length === 0 || columns.some((column) => column.generated)) {
     throw new Error("unknown_table");
   }
   return {
@@ -115,6 +126,7 @@ export async function resolveSpreadsheetTableContext(
     quotedTable: quoteIdent(def.table),
     orderColumn: quoteIdent(primaryKeys[0] ?? columns[0]?.name ?? "rowid"),
     columnNames: columns.map((c) => c.name),
+    foreignKeys,
   };
 }
 
