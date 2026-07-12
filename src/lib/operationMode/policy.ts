@@ -62,7 +62,3 @@ export function getStaticRebuildPolicy(mode: OperationMode): StaticRebuildPolicy
       };
   }
 }
-
-export function isAdminBypassAllowed(mode: OperationMode): boolean {
-  return mode === "maintenance";
-}

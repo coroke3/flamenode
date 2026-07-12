@@ -2,11 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { and, desc, eq, isNotNull, ne } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { and, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { users, videos, xUsers } from "@/lib/db/schema";
-import { auditAction } from "@/lib/audit/helpers";
+import { requireAdminWrite } from "@/lib/auth/writeGuard";
+import { expectedRowCondition } from "@/lib/audit/adapters";
+import { mutateWithAudit } from "@/lib/audit/mutate";
+import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import { normalizeXId } from "@/lib/utils/xid";
 
 export interface UserAdminResult {
@@ -14,19 +16,66 @@ export interface UserAdminResult {
   message?: string;
 }
 
-async function requireAdmin(): Promise<
-  | { ok: true; userId: string }
-  | { ok: false; result: UserAdminResult }
-> {
-  const session = await auth().catch(() => null);
-  const u = session?.user as { id?: string; role?: string } | undefined;
-  if (!u?.id) return { ok: false, result: { ok: false, message: "ログインが必要です。" } };
-  if (u.role !== "admin")
-    return {
-      ok: false,
-      result: { ok: false, message: "管理者のみ操作できます。" },
-    };
-  return { ok: true, userId: u.id };
+type UserRow = typeof users.$inferSelect;
+type UserPatch = Partial<typeof users.$inferInsert>;
+
+function snapshot(row: object): Record<string, unknown> {
+  return { ...row };
+}
+
+function mutationError(error: unknown): UserAdminResult {
+  console.error("[user-admin] atomic mutation failed", error);
+  return { ok: false, message: "更新が競合したか、監査記録に失敗しました。再読み込みしてお試しください。" };
+}
+
+async function updateUserAtomic(input: {
+  db: NonNullable<ReturnType<typeof getDatabase>>;
+  actorUserId: string;
+  target: UserRow;
+  patch: UserPatch;
+  retentionClass: "normal" | "long_audit";
+  context: string;
+  reason?: string | null;
+}): Promise<UserAdminResult> {
+  const after = { ...input.target, ...input.patch };
+  try {
+    await mutateWithAudit(input.db, {
+      mutationStatements: [
+        input.db
+          .update(users)
+          .set(input.patch)
+          .where(
+            and(
+              eq(users.id, input.target.id),
+              expectedRowCondition({ expectedCurrent: snapshot(input.target) }),
+            )!,
+          ),
+      ],
+      expectedMutationChanges: 1,
+      audits: [{
+        table_name: "user",
+        target_id: input.target.id,
+        operation: "UPDATE",
+        before: snapshot(input.target),
+        after: snapshot(after),
+        actor_user_id: input.actorUserId,
+        retention_class: input.retentionClass,
+        context: input.context,
+        reason: input.reason ?? null,
+        strict: true,
+      }],
+    });
+    return { ok: true };
+  } catch (error) {
+    return mutationError(error);
+  }
+}
+
+async function getTargetUser(
+  db: NonNullable<ReturnType<typeof getDatabase>>,
+  userId: string,
+): Promise<UserRow | null> {
+  return (await db.select().from(users).where(eq(users.id, userId)).limit(1))[0] ?? null;
 }
 
 const roleSchema = z.object({
@@ -35,251 +84,149 @@ const roleSchema = z.object({
 });
 
 export async function setUserRole(formData: FormData): Promise<UserAdminResult> {
-  const guard = await requireAdmin();
-  if (!guard.ok) return guard.result;
+  const guard = await requireAdminWrite("admin_user_role");
+  if (!guard.ok) return { ok: false, message: guard.message };
   const parsed = roleSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) {
-    return {
-      ok: false,
-      message: parsed.error.issues[0]?.message ?? "入力エラー",
-    };
-  }
+  if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
   const { user_id, role } = parsed.data;
-  if (user_id === guard.userId && role !== "admin") {
-    return {
-      ok: false,
-      message: "自分自身の admin ロールは外せません。他の admin に依頼してください。",
-    };
+  if (user_id === guard.user.id && role !== "admin") {
+    return { ok: false, message: "自分自身の管理者権限は解除できません。" };
   }
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
-
-  const target = (
-    await db.select().from(users).where(eq(users.id, user_id)).limit(1)
-  )[0];
+  const target = await getTargetUser(db, user_id);
   if (!target) return { ok: false, message: "対象ユーザーが見つかりません。" };
-
-  const now = Math.floor(Date.now() / 1000);
-  await db.update(users).set({ role }).where(eq(users.id, user_id));
-
-  await auditAction(db, {
-    table_name: "user",
-    record_id: user_id,
-    action: "UPDATE",
-    before_data: { role: target.role },
-    after_data: { role },
-    operator_user_id: guard.userId,
-    retention_class: "long_audit",
-  });
-
-  revalidatePath(`/admin/users/${user_id}`);
-  revalidatePath("/admin/users");
-  return { ok: true };
+  const result = await updateUserAtomic({ db, actorUserId: guard.user.id, target, patch: { role }, retentionClass: "long_audit", context: "admin_user_role" });
+  if (result.ok) {
+    revalidatePath(`/admin/users/${user_id}`);
+    revalidatePath("/admin/users");
+  }
+  return result;
 }
 
 const banSchema = z.object({
   user_id: z.string().trim().min(1),
-  is_banned: z.coerce.number().min(0).max(1),
+  is_banned: z.coerce.number().int().min(0).max(1),
   reason: z.string().trim().max(500).optional().nullable(),
 });
 
-export async function setUserBanned(
-  formData: FormData,
-): Promise<UserAdminResult> {
-  const guard = await requireAdmin();
-  if (!guard.ok) return guard.result;
+export async function setUserBanned(formData: FormData): Promise<UserAdminResult> {
+  const guard = await requireAdminWrite("admin_user_ban");
+  if (!guard.ok) return { ok: false, message: guard.message };
   const parsed = banSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) {
-    return {
-      ok: false,
-      message: parsed.error.issues[0]?.message ?? "入力エラー",
-    };
-  }
+  if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
   const { user_id, is_banned, reason } = parsed.data;
-  if (user_id === guard.userId && is_banned === 1) {
-    return { ok: false, message: "自分自身を BAN にはできません。" };
-  }
-  if (is_banned === 1 && !reason) {
-    return { ok: false, message: "BAN には理由が必要です。" };
-  }
+  if (user_id === guard.user.id && is_banned === 1) return { ok: false, message: "自分自身をBANにはできません。" };
+  if (is_banned === 1 && !reason) return { ok: false, message: "BANには理由が必要です。" };
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
-
-  const target = (
-    await db.select().from(users).where(eq(users.id, user_id)).limit(1)
-  )[0];
+  const target = await getTargetUser(db, user_id);
   if (!target) return { ok: false, message: "対象ユーザーが見つかりません。" };
-
-  const now = Math.floor(Date.now() / 1000);
-  await db.update(users).set({ is_banned }).where(eq(users.id, user_id));
-
-  await auditAction(db, {
-    table_name: "user",
-    record_id: user_id,
-    action: "UPDATE",
-    before_data: { is_banned: target.is_banned },
-    after_data: { is_banned, reason: reason || null },
-    operator_user_id: guard.userId,
-    retention_class: "long_audit",
-  });
-
-  revalidatePath(`/admin/users/${user_id}`);
-  revalidatePath("/admin/users");
-  return { ok: true };
+  const result = await updateUserAtomic({ db, actorUserId: guard.user.id, target, patch: { is_banned }, retentionClass: "long_audit", context: "admin_user_ban", reason: reason || (is_banned === 0 ? "BAN解除" : null) });
+  if (result.ok) {
+    revalidatePath(`/admin/users/${user_id}`);
+    revalidatePath("/admin/users");
+  }
+  return result;
 }
 
 const notifSchema = z.object({
   user_id: z.string().trim().min(1),
-  is_notification_enabled: z.coerce.number().min(0).max(1),
+  is_notification_enabled: z.coerce.number().int().min(0).max(1),
 });
 
-export async function setUserNotifications(
-  formData: FormData,
-): Promise<UserAdminResult> {
-  const guard = await requireAdmin();
-  if (!guard.ok) return guard.result;
+export async function setUserNotifications(formData: FormData): Promise<UserAdminResult> {
+  const guard = await requireAdminWrite("admin_user_notifications");
+  if (!guard.ok) return { ok: false, message: guard.message };
   const parsed = notifSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) {
-    return {
-      ok: false,
-      message: parsed.error.issues[0]?.message ?? "入力エラー",
-    };
-  }
-  const { user_id, is_notification_enabled } = parsed.data;
+  if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
-
-  const target = (
-    await db.select().from(users).where(eq(users.id, user_id)).limit(1)
-  )[0];
-  if (!target) {
-    return { ok: false, message: "対象ユーザーが見つかりません。" };
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  await db
-    .update(users)
-    .set({ is_notification_enabled })
-    .where(eq(users.id, user_id));
-
-  await auditAction(db, {
-    table_name: "user",
-    record_id: user_id,
-    action: "UPDATE",
-    before_data: { is_notification_enabled: target.is_notification_enabled },
-    after_data: { is_notification_enabled },
-    operator_user_id: guard.userId,
-    retention_class: "normal",
-  });
-
-  revalidatePath(`/admin/users/${user_id}`);
-  return { ok: true };
+  const target = await getTargetUser(db, parsed.data.user_id);
+  if (!target) return { ok: false, message: "対象ユーザーが見つかりません。" };
+  const result = await updateUserAtomic({ db, actorUserId: guard.user.id, target, patch: { is_notification_enabled: parsed.data.is_notification_enabled }, retentionClass: "normal", context: "admin_user_notifications" });
+  if (result.ok) revalidatePath(`/admin/users/${parsed.data.user_id}`);
+  return result;
 }
 
 const eventCreateSchema = z.object({
   user_id: z.string().trim().min(1),
-  can_create_events: z.coerce.number().min(0).max(1),
+  can_create_events: z.coerce.number().int().min(0).max(1),
 });
 
-export async function setUserCanCreateEvents(
-  formData: FormData,
-): Promise<UserAdminResult> {
-  const guard = await requireAdmin();
-  if (!guard.ok) return guard.result;
+export async function setUserCanCreateEvents(formData: FormData): Promise<UserAdminResult> {
+  const guard = await requireAdminWrite("admin_user_event_create");
+  if (!guard.ok) return { ok: false, message: guard.message };
   const parsed = eventCreateSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) {
-    return {
-      ok: false,
-      message: parsed.error.issues[0]?.message ?? "入力エラー",
-    };
-  }
-  const { user_id, can_create_events } = parsed.data;
+  if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
-
-  const target = (
-    await db.select().from(users).where(eq(users.id, user_id)).limit(1)
-  )[0];
-  if (!target) {
-    return { ok: false, message: "対象ユーザーが見つかりません。" };
+  const target = await getTargetUser(db, parsed.data.user_id);
+  if (!target) return { ok: false, message: "対象ユーザーが見つかりません。" };
+  const result = await updateUserAtomic({ db, actorUserId: guard.user.id, target, patch: { can_create_events: parsed.data.can_create_events }, retentionClass: "long_audit", context: "admin_user_event_create" });
+  if (result.ok) {
+    revalidatePath(`/admin/users/${parsed.data.user_id}`);
+    revalidatePath(`/admin/users/${parsed.data.user_id}/edit`);
+    revalidatePath("/admin/users");
   }
-
-  const now = Math.floor(Date.now() / 1000);
-  await db
-    .update(users)
-    .set({ can_create_events })
-    .where(eq(users.id, user_id));
-
-  await auditAction(db, {
-    table_name: "user",
-    record_id: user_id,
-    action: "UPDATE",
-    before_data: { can_create_events: target.can_create_events },
-    after_data: { can_create_events },
-    operator_user_id: guard.userId,
-    retention_class: "long_audit",
-  });
-
-  revalidatePath(`/admin/users/${user_id}`);
-  revalidatePath(`/admin/users/${user_id}/edit`);
-  revalidatePath("/admin/users");
-  return { ok: true };
+  return result;
 }
 
-/**
- * X user のアイコンを「同 creator_x_user_id の最新作品の icon_url」から再計算して反映する。
- * legacy import 由来の `x_users.icon_url = NULL` を救済する管理者操作。
- */
-export async function refreshXUserIcon(
-  formData: FormData,
-): Promise<UserAdminResult> {
-  const guard = await requireAdmin();
-  if (!guard.ok) return guard.result;
+export async function refreshXUserIcon(formData: FormData): Promise<UserAdminResult> {
+  const guard = await requireAdminWrite("admin_x_icon_refresh");
+  if (!guard.ok) return { ok: false, message: guard.message };
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   if (!xUserId) return { ok: false, message: "x_user_id が必要です。" };
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
-
-  // 個人作 → 合作の順で latest icon を探す
-  const findLatestIcon = async (
-    submissionType: "individual" | "collab",
-  ): Promise<string | null> => {
-    const rows = await db
-      .select({ icon_url: videos.creator_icon_url })
-      .from(videos)
-      .where(
-        and(
-          eq(videos.creator_x_user_id, xUserId),
-          isNotNull(videos.creator_icon_url),
-          eq(videos.collaboration_type, submissionType),
-          ne(videos.visibility_status, "archived"),
-        )!,
-      )
-      .orderBy(desc(videos.created_at))
-      .limit(1);
-    return rows[0]?.icon_url ?? null;
-  };
-
-  const newIcon = (await findLatestIcon("individual")) ?? (await findLatestIcon("collab"));
-  if (!newIcon) {
-    return { ok: false, message: "候補アイコンが見つかりませんでした。" };
+  const target = (await db.select().from(xUsers).where(eq(xUsers.id, xUserId)).limit(1))[0];
+  if (!target) return { ok: false, message: "対象Xユーザーが見つかりません。" };
+  const latest = (await db
+    .select({ icon_url: videos.creator_icon_url })
+    .from(videos)
+    .where(and(
+      eq(videos.creator_x_user_id, xUserId),
+      isNotNull(videos.creator_icon_url),
+      inArray(videos.collaboration_type, ["individual", "collab"]),
+      ne(videos.visibility_status, "archived"),
+    )!)
+    .orderBy(sql`CASE WHEN ${videos.collaboration_type} = 'individual' THEN 0 ELSE 1 END`, desc(videos.created_at))
+    .limit(1))[0];
+  if (!latest?.icon_url) return { ok: false, message: "候補アイコンが見つかりませんでした。" };
+  const after = { ...target, icon_url: latest.icon_url };
+  const queue = await buildStaticRebuildQueueBatch(db, [{
+    targetType: "user",
+    targetId: xUserId,
+    reason: "admin_x_icon_refresh",
+    priority: "normal",
+    requestedByUserId: guard.user.id,
+  }]);
+  try {
+    await mutateWithAudit(db, {
+      mutationStatements: [
+        db.update(xUsers).set({ icon_url: latest.icon_url }).where(and(
+          eq(xUsers.id, xUserId),
+          expectedRowCondition({ expectedCurrent: snapshot(target) }),
+        )!),
+        ...queue.statements,
+      ],
+      expectedMutationChanges: [1, ...queue.expectedChanges],
+      audits: [{
+        table_name: "x_users",
+        target_id: xUserId,
+        operation: "UPDATE",
+        before: snapshot(target),
+        after: snapshot(after),
+        actor_user_id: guard.user.id,
+        retention_class: "normal",
+        context: "admin_x_icon_refresh",
+        reason: "作品の最新アイコンから再計算",
+        strict: true,
+      }],
+    });
+  } catch (error) {
+    return mutationError(error);
   }
-
-  await db
-    .update(xUsers)
-    .set({ icon_url: newIcon })
-    .where(eq(xUsers.id, xUserId));
-
-  const now = Math.floor(Date.now() / 1000);
-  await auditAction(db, {
-    table_name: "x_users",
-    record_id: xUserId,
-    action: "UPDATE",
-    after_data: { icon_url: newIcon, source: "videos_latest" },
-    operator_user_id: guard.userId,
-    retention_class: "normal",
-  });
-
   revalidatePath(`/user/${xUserId}`);
   return { ok: true };
 }

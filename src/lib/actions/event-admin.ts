@@ -38,8 +38,8 @@ import {
 
 type PlannedQuestion = typeof eventCustomQuestions.$inferInsert;
 
-export const MAX_EVENT_CUSTOM_QUESTIONS = 18;
-export const MAX_EVENT_CUSTOM_ANSWER_DELETE_ROWS = 20;
+const MAX_EVENT_CUSTOM_QUESTIONS = 18;
+const MAX_EVENT_CUSTOM_ANSWER_DELETE_ROWS = 20;
 const MAX_QUESTIONS_PER_INSERT = 6;
 
 function questionSnapshot(row: PlannedQuestion): Record<string, unknown> {

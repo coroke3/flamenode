@@ -22,6 +22,80 @@ export interface EnqueueNotificationInput {
   force?: boolean;
 }
 
+export type KnownRecipientNotificationInput = Omit<
+  EnqueueNotificationInput,
+  "recipientUserId" | "xUserId" | "force"
+> & {
+  recipientUserId: string;
+};
+
+export type NotificationOutboxBatch = {
+  statements: BatchItem<"sqlite">[];
+  expectedChanges: null[];
+};
+
+/**
+ * 事前に権限・通知可否を一括取得済みの宛先向けbuilder。dedupe確認も1 queryに
+ * 集約し、管理系broadcastでN+1を発生させない。
+ */
+export async function buildKnownRecipientNotificationBatch(
+  db: AnyDb,
+  inputs: readonly KnownRecipientNotificationInput[],
+): Promise<NotificationOutboxBatch> {
+  if (!shouldEnqueueUserNotification() || inputs.length === 0) {
+    return { statements: [], expectedChanges: [] };
+  }
+  if (inputs.length > 30) throw new Error("notification_batch_limit_exceeded");
+
+  const dedupeKeys = inputs.map((input) => input.dedupeKey?.trim() || null);
+  const nonNullKeys = dedupeKeys.filter((key): key is string => key !== null);
+  if (new Set(nonNullKeys).size !== nonNullKeys.length) {
+    throw new Error("notification_batch_duplicate_dedupe_key");
+  }
+  const active = nonNullKeys.length === 0
+    ? []
+    : await db
+        .select({ dedupe_key: notificationOutbox.dedupe_key })
+        .from(notificationOutbox)
+        .where(and(
+          inArray(notificationOutbox.dedupe_key, nonNullKeys),
+          inArray(notificationOutbox.status, ["pending", "processing", "sent"]),
+        )!)
+        .limit(inputs.length + 1);
+  const existing = new Set(active.map((row) => row.dedupe_key).filter(Boolean));
+  const now = Math.floor(Date.now() / 1000);
+  const statements: BatchItem<"sqlite">[] = [];
+
+  inputs.forEach((input, index) => {
+    const check = validateNotificationPayload(input.type, input.payload);
+    if (!check.ok) throw new Error(`通知 payload が不正です: ${check.reason}`);
+    const recipientUserId = input.recipientUserId.trim();
+    if (!recipientUserId) throw new Error("notification_recipient_required");
+    const dedupeKey = dedupeKeys[index];
+    if (dedupeKey && existing.has(dedupeKey)) return;
+    statements.push(db.insert(notificationOutbox).values({
+      id: randomId(),
+      recipient_user_id: recipientUserId,
+      type: input.type,
+      payload_json: JSON.stringify(input.payload),
+      status: "pending",
+      attempt_count: 0,
+      processing_started_at: null,
+      next_attempt_at: null,
+      last_error: null,
+      event_id: input.eventId ?? null,
+      dedupe_key: dedupeKey,
+      created_at: now,
+    }));
+  });
+  return {
+    statements,
+    // Unique raceはbatch全体を失敗させる。changes固定を追加するとD1 50 queryを
+    // 超えるため、idempotent INSERTとしてmutateWithAuditのnull指定を使う。
+    expectedChanges: statements.map(() => null),
+  };
+}
+
 function randomId(): string {
   return crypto.randomUUID();
 }
