@@ -54,6 +54,9 @@ export function expectedRowCondition(
     const column = sql.raw(`"${key.replaceAll('"', '""')}"`);
     if (value === null) {
       predicates.push(sql`${column} IS NULL`);
+    } else if (value instanceof Date && Number.isFinite(value.getTime())) {
+      // timestamp_ms列はDrizzle selectでDateになるが、SQLite上はepoch ms整数。
+      predicates.push(sql`${column} = ${value.getTime()}`);
     } else if (
       typeof value === "string" ||
       typeof value === "number" ||
