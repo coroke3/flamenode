@@ -1,6 +1,5 @@
 export const runtime = "edge";
 
-import { NextResponse } from "next/server";
 import { desc } from "drizzle-orm";
 import { events as eventsTable } from "@/lib/db/schema";
 import { getDatabase } from "@/lib/cloudflare";
@@ -17,9 +16,12 @@ import {
   pickKeys,
 } from "@/lib/api/publicDto";
 import { loadStaticEventsIndex } from "@/lib/publicData/staticEventsIndex";
+import { checkPublicApiRateLimit, publicJsonResponse } from "@/lib/api/publicApi";
 
 /** イベント一覧 JSON。 */
 export async function GET(req: Request): Promise<Response> {
+  const limited = checkPublicApiRateLimit(req, "/api/events");
+  if (limited) return limited;
   const url = new URL(req.url);
   const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
   const limit = Math.min(
@@ -44,15 +46,11 @@ export async function GET(req: Request): Promise<Response> {
       ) as PublicEventDto);
     const payload = { items, page, limit };
     assertNoForbiddenKeys(payload);
-    return NextResponse.json(payload, {
-      headers: {
-        "Cache-Control": "public, max-age=60, s-maxage=120, stale-while-revalidate=300",
-      },
-    });
+    return publicJsonResponse(req, payload, "public, max-age=60, s-maxage=120, stale-while-revalidate=300");
   }
 
   const db = getDatabase();
-  if (!db) return NextResponse.json({ items: [], page, limit });
+  if (!db) return publicJsonResponse(req, { items: [], page, limit }, "public, max-age=60, s-maxage=120, stale-while-revalidate=300");
 
   const rows = await db
     .select({
@@ -95,13 +93,5 @@ export async function GET(req: Request): Promise<Response> {
 
   const payload = { items, page, limit };
   assertNoForbiddenKeys(payload);
-  return NextResponse.json(
-    payload,
-    {
-      headers: {
-        "Cache-Control":
-          "public, max-age=60, s-maxage=120, stale-while-revalidate=300",
-      },
-    },
-  );
+  return publicJsonResponse(req, payload, "public, max-age=60, s-maxage=120, stale-while-revalidate=300");
 }

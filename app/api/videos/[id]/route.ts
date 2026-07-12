@@ -9,6 +9,7 @@ import {
   assertNoForbiddenKeys,
   pickKeys,
 } from "@/lib/api/publicDto";
+import { checkPublicApiRateLimit, publicJsonResponse } from "@/lib/api/publicApi";
 
 interface Params {
   params: Promise<{ id: string }>;
@@ -16,6 +17,8 @@ interface Params {
 
 /** 公開作品の単体 JSON API。内部 ID は返さず、リスト API と同じ DTO に絞る。 */
 export async function GET(_req: Request, { params }: Params): Promise<Response> {
+  const limited = checkPublicApiRateLimit(_req, "/api/videos/:id");
+  if (limited) return limited;
   const { id } = await params;
   const key = decodeURIComponent(id ?? "").trim();
   if (!key) {
@@ -38,13 +41,5 @@ export async function GET(_req: Request, { params }: Params): Promise<Response> 
   };
   const payload = { item };
   assertNoForbiddenKeys(payload);
-  return NextResponse.json(
-    payload,
-    {
-      headers: {
-        "Cache-Control":
-          "public, max-age=30, s-maxage=60, stale-while-revalidate=120",
-      },
-    },
-  );
+  return publicJsonResponse(_req, payload, "public, max-age=30, s-maxage=60, stale-while-revalidate=120");
 }

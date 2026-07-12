@@ -14,7 +14,7 @@ import { requireSession } from "@/lib/auth/guard";
 import { getCollaboratorPermissions } from "@/lib/auth/ownership";
 import { getDatabase } from "@/lib/cloudflare";
 import { PRESET_DEFINITIONS } from "@/lib/auth/permissions/presets";
-import { resolveStaffPermissionKeys } from "@/lib/auth/permissions/mask";
+import { resolveStaffPermissionKeys } from "@/lib/auth/permissions/permissionResolver";
 import {
   eventStaff as eventStaffTable,
   events as eventsTable,

@@ -25,7 +25,6 @@ const PREFIX_ALLOW = [
 ];
 
 const FILE_ALLOW = new Set([
-  "src/lib/auth/permissions/mask.ts",
   "instrumentation.ts",
 ]);
 
@@ -43,7 +42,7 @@ const DB_REDUCTION_RULES = [
     pattern:
       /\b(?:eventStaff|event_staff)\.permission_mask\b|\bsql`[^`]*\bevent_staff\.permission_mask\b[^`]*`/g,
     prefixAllow: PREFIX_ALLOW,
-    fileAllow: new Set(["src/lib/auth/permissions/mask.ts", "instrumentation.ts", "src/lib/import/legacy/types.ts", "src/lib/import/legacy/plan.test.mjs"]),
+    fileAllow: new Set(["instrumentation.ts", "src/lib/import/legacy/types.ts", "src/lib/import/legacy/plan.test.mjs"]),
   },
   {
     id: "event-staff-permissions-table",
@@ -140,9 +139,6 @@ const DB_REDUCTION_RULES = [
     // 旧 /api/admin/legacy-import 参照を禁止 (410 stub 自体は許可)
     pattern: /\/api\/admin\/legacy-import/g,
     prefixAllow: [],
-    fileAllow: new Set([
-      "app/api/admin/legacy-import/route.ts",
-    ]),
   },
   {
     id: "runtime-schema-ddl",
@@ -155,7 +151,7 @@ const DB_REDUCTION_RULES = [
     label: "runtime backfill (use migrations or explicit operations scripts)",
     pattern: /\bbackfill(?:ing)?\b/gi,
     prefixAllow: ["src/lib/integration/"],
-    fileAllow: new Set(["src/lib/auth/permissions/mask.ts"]),
+    fileAllow: new Set(),
   },
 ];
 
@@ -201,7 +197,6 @@ const RULES = [
     id: "has-permission-mask",
     label: "hasPermission(number mask) usage (removed)",
     pattern: /\bhasPermission\s*\(/g,
-    fileAllow: new Set(["src/lib/auth/permissions/mask.ts"]),
   },
 ];
 

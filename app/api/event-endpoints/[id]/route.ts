@@ -13,11 +13,14 @@ import {
   EVENT_API_VIDEO_LIMIT,
 } from "@/lib/api/eventEndpointPayload";
 import { isPublicEventVisible } from "@/lib/utils/eventStatus";
+import { checkPublicApiRateLimit, publicJsonResponse } from "@/lib/api/publicApi";
 
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  const limited = checkPublicApiRateLimit(_req, "/api/event-endpoints/:id");
+  if (limited) return limited;
   const { id } = await params;
   const eventId = id.trim();
   if (!eventId) return NextResponse.json({ error: "not_found" }, { status: 404 });
@@ -68,9 +71,5 @@ export async function GET(
 
   const payload = buildEventApiPayload(event, videoRows);
 
-  return NextResponse.json(payload, {
-    headers: {
-      "Cache-Control": "public, max-age=300, s-maxage=600, stale-while-revalidate=600",
-    },
-  });
+  return publicJsonResponse(_req, payload, "public, max-age=300, s-maxage=600, stale-while-revalidate=600");
 }
