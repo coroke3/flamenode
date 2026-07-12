@@ -13,10 +13,21 @@ const WRANGLER_FILES = [
 ];
 const D1_ZERO = "00000000-0000-0000-0000-000000000000";
 const KV_ZERO = "00000000000000000000000000000000";
+const ACCOUNT_ID_PATTERN = /^[0-9a-f]{32}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const HEX_ID_PATTERN = /^[0-9a-f]{32}$/i;
+const SAFE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/;
 
-function isZero(value, kind) {
-  if (!value) return true;
-  return value.replace(/-/g, "") === (kind === "d1" ? D1_ZERO.replace(/-/g, "") : KV_ZERO);
+function isNonZeroUuid(value) {
+  return typeof value === "string" && UUID_PATTERN.test(value) && value.toLowerCase() !== D1_ZERO;
+}
+
+function isNonZeroHexId(value) {
+  return typeof value === "string" && HEX_ID_PATTERN.test(value) && value.toLowerCase() !== KV_ZERO;
+}
+
+function isSafeName(value) {
+  return typeof value === "string" && SAFE_NAME_PATTERN.test(value);
 }
 
 function checkToml(filePath, relativePath, allowPlaceholders) {
@@ -27,16 +38,16 @@ function checkToml(filePath, relativePath, allowPlaceholders) {
     const line = lines[index].trim();
     const lineNumber = index + 1;
     const d1 = line.match(/database_id\s*=\s*"([^"]*)"/);
-    if (d1 && !allowPlaceholders && isZero(d1[1], "d1")) {
-      errors.push(`${relativePath}:${lineNumber}: D1 database_id is a placeholder`);
+    if (d1 && !allowPlaceholders && !isNonZeroUuid(d1[1])) {
+      errors.push(`${relativePath}:${lineNumber}: D1 database_id must be a non-zero UUID`);
     }
     const kv = line.match(/^id\s*=\s*"([^"]*)"/);
-    if (kv && !d1 && !allowPlaceholders && isZero(kv[1], "kv")) {
-      errors.push(`${relativePath}:${lineNumber}: KV id is a placeholder`);
+    if (kv && !d1 && !allowPlaceholders && !isNonZeroHexId(kv[1])) {
+      errors.push(`${relativePath}:${lineNumber}: KV id must be a non-zero 32-character hex ID`);
     }
     const preview = line.match(/preview_id\s*=\s*"([^"]*)"/);
-    if (preview && !allowPlaceholders && isZero(preview[1], "kv")) {
-      errors.push(`${relativePath}:${lineNumber}: KV preview_id is a placeholder`);
+    if (preview && !allowPlaceholders && !isNonZeroHexId(preview[1])) {
+      errors.push(`${relativePath}:${lineNumber}: KV preview_id must be a non-zero 32-character hex ID`);
     }
   }
   return errors;
@@ -50,19 +61,27 @@ function main() {
 
   const errors = [];
   if (MODE === "production") {
-    for (const name of ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "CF_IDS_JSON"]) {
-      if (!process.env[name]?.trim()) errors.push(`production secret ${name} is required`);
-    }
-    if (process.env.CF_IDS_JSON?.trim()) {
+    if (!process.env.CLOUDFLARE_API_TOKEN?.trim()) errors.push("CLOUDFLARE_API_TOKEN is required");
+    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID?.trim();
+    if (!ACCOUNT_ID_PATTERN.test(accountId ?? "")) errors.push("CLOUDFLARE_ACCOUNT_ID must be a 32-character hex ID");
+    const idsJson = process.env.CF_IDS_JSON?.trim();
+    if (!idsJson) {
+      errors.push("CF_IDS_JSON is required");
+    } else {
       try {
-        const ids = JSON.parse(process.env.CF_IDS_JSON);
-        for (const name of ["d1_database_id", "kv_namespace_id", "kv_preview_id"]) {
-          if (!ids[name]?.trim() || isZero(ids[name], name.startsWith("d1") ? "d1" : "kv")) {
-            errors.push(`CF_IDS_JSON.${name} must be a real Cloudflare ID`);
+        const ids = JSON.parse(idsJson);
+        if (ids === null || typeof ids !== "object" || Array.isArray(ids) || Object.getPrototypeOf(ids) !== Object.prototype) {
+          errors.push("CF_IDS_JSON must be a plain object");
+        } else {
+          if (!isNonZeroUuid(ids.d1_database_id)) errors.push("CF_IDS_JSON.d1_database_id must be a non-zero UUID");
+          if (!isNonZeroHexId(ids.kv_namespace_id)) errors.push("CF_IDS_JSON.kv_namespace_id must be a non-zero 32-character hex ID");
+          if (!isNonZeroHexId(ids.kv_preview_id)) errors.push("CF_IDS_JSON.kv_preview_id must be a non-zero 32-character hex ID");
+          for (const name of ["d1_database_name", "r2_bucket_name", "pages_project_name"]) {
+            if (!isSafeName(ids[name])) errors.push(`CF_IDS_JSON.${name} must be a safe non-empty string`);
           }
         }
-      } catch (error) {
-        errors.push(`CF_IDS_JSON must be valid JSON: ${error instanceof Error ? error.message : "unknown error"}`);
+      } catch {
+        errors.push("CF_IDS_JSON must be valid JSON");
       }
     }
   }
