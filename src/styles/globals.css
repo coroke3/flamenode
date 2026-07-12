@@ -452,18 +452,22 @@ select {
 
 @media (max-width: 700px) {
   .fn-shelf {
-    grid-template-rows: repeat(2, max-content);
     grid-auto-columns: clamp(210px, 72vw, 260px);
     gap: 12px;
   }
 
-  .fn-shelf > *:nth-child(even) {
-    transform: translateX(50%);
+  .fn-shelf[data-mobile-rows="2"] {
+    grid-template-rows: repeat(2, max-content);
+    grid-auto-columns: clamp(150px, 46vw, 190px);
   }
 
   .fn-shelf[data-density="compact"] {
     grid-auto-columns: minmax(104px, 32vw);
     gap: 8px;
+  }
+
+  .fn-shelf[data-density="compact"][data-mobile-rows="2"] {
+    grid-auto-columns: clamp(150px, 46vw, 190px);
   }
 }
 

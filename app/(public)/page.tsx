@@ -218,7 +218,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
           {creators.length === 0 ? (
             <EmptyShelf message="紹介できるクリエイターがまだありません。" />
           ) : (
-            <Shelf ariaLabel="注目クリエイター" density="compact">
+            <Shelf ariaLabel="注目クリエイター" density="compact" mobileRows={1}>
               {creators.map((creator, index) => (
                 <CreatorCard
                   key={`${creator.id}-creator-${index}`}
