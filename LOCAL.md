@@ -15,7 +15,7 @@
 > - [x] Git for Windows (bash 同梱) を `winget install` で導入
 > - [x] `@cloudflare/next-on-pages` を試したが Windows では不安定なため、通常開発は **Miniflare binding** を利用
 > - [x] `instrumentation.ts` を追加し、`next dev` 起動時に Miniflare で D1/R2/KV を自動起動
-> - [ ] ローカルD1へ `migrations/0000_flame_node_baseline.sql` を手動適用（起動時のruntime migrationは行わない）
+> - [ ] ローカルD1へ `migrations/0000_flame_node_baseline.sql` を手動適用（起動時の自動スキーマ適用は行わない）
 > - [x] `npm run dev:local` で起動できる状態 (http://localhost:3000/、`/list`, `/event`, `/api/videos`, `/api/auth/providers` すべて 200 で応答することを確認済み)
 > - [ ] **要対応**: Discord Developer Portal でアプリを作り、`.dev.vars` の `AUTH_DISCORD_ID` / `AUTH_DISCORD_SECRET` を埋める
 > - [ ] **要対応**: ログイン後、自分を `role='admin'` に SQL で昇格 (`/admin` を確認したい場合のみ)
@@ -351,7 +351,7 @@ npx wrangler d1 migrations apply flamenode_db --local
 | ローカル DB マイグレーション | `npx wrangler d1 migrations apply flamenode_db --local` |
 | ローカル DB に SQL 実行 | `npx wrangler d1 execute flamenode_db --local --command "..."` |
 | ローカル DB を GUI で見る | `npm run db:studio` |
-| schema 変更時の migration | 手動 SQL を `migrations/` に追加 (`db:generate` は使わない。docs/operations/migrations.md 参照) |
+| schema 変更時の migration | 手動 SQL を `migrations/` に追加 (自動生成は使わない。docs/operations/migrations.md 参照) |
 | ローカルストレージ全消し | `Remove-Item -Recurse -Force .wrangler` |
 
 ---

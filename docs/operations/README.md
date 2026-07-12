@@ -33,7 +33,7 @@ FlameNodeは Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、3�
 - DB変更履歴: [../db-change-history.md](../db-change-history.md)
 - Historical資料: [../historical/README.md](../historical/README.md)
 
-Active文書は現行実装の手順だけを扱う。旧migrationや過去の設計本文はHistoricalとして保存し、runtime migration、旧列fallback、二重書き込みの運用手順として再利用しない。
+Active文書は現行実装の手順だけを扱う。旧migrationや過去の設計本文はHistoricalとして保存し、起動時の自動スキーマ適用、旧列fallback、二重書き込みの運用手順として再利用しない。
 
 ## 必須検査
 

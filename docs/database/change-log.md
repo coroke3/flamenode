@@ -11,7 +11,7 @@
 | --- | --- |
 | Type | baseline |
 | Summary | pre-production用の最終canonical schemaを空D1へ一括作成する。 |
-| Reason | runtime migrationと旧列の互換経路を廃止し、schemaとactive pathを一意化する。 |
+| Reason | 起動時の自動スキーマ適用と旧列の互換経路を廃止し、schemaとactive pathを一意化する。 |
 | Tables | Auth、X ID、event/slot/video、audit、queue/outbox、static artifact、worker leaseを含む全active table。 |
 | Data migration | なし。旧migrationは `migrations/historical/` へ内容を保ったまま分離。 |
 | Compatibility | 旧列・旧tableとのruntime互換は提供しない。 |

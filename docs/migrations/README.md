@@ -6,4 +6,4 @@
 
 現行のmigration運用は [`operations/migrations.md`](../operations/migrations.md) に集約する。新規migrationの記録形式は [`templates/migration.md`](../templates/migration.md)、DB変更履歴は [`db-change-history.md`](../db-change-history.md) を参照する。
 
-active pathとHistorical pathを混在させない。`migrations/historical/` のSQL本文は履歴として保存するだけで、runtime migration、旧列fallback、二重書き込みの実装や運用手順として扱わない。
+active pathとHistorical pathを混在させない。`migrations/historical/` のSQL本文は履歴として保存するだけで、起動時の自動スキーマ適用、旧列fallback、二重書き込みの実装や運用手順として扱わない。

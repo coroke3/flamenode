@@ -30,7 +30,7 @@ npm run check:public-api-leaks # 公開 API 漏洩検査 (dev server 必須)
 ```
 
 - シークレットは `.dev.vars` (コミット禁止)
-- Windows では next-on-pages dev が不安定。通常確認は `npm run dev`、Pages相当確認は `npm run pages:dev` を使う
+- Windows では edge runtime の本番相当devが不安定。通常確認は `npm run dev`、Pages相当確認は `npm run pages:dev` を使う
 
 ## 構成 (非自明な点のみ)
 
@@ -54,10 +54,10 @@ npm run check:public-api-leaks # 公開 API 漏洩検査 (dev server 必須)
 
 1. 1 PR = 1 テーマ。small-batch
 2. 変更後は `typecheck` + `build` 必須
-3. スキーマ変更は migration 同伴 + `docs/operations/migrations.md` と整合。**`npm run db:generate` は使わない**。手動 SQL migration を `migrations/` に追加する
+3. スキーマ変更は migration 同伴 + `docs/operations/migrations.md` と整合。自動生成ではなく手動 SQL migration を `migrations/` に追加する
 4. deploy / 本番 D1 migration はユーザー操作。実行しない
 5. D1 が正本、R2/KV の静的 JSON は配信キャッシュ。二重正本を作らない
-6. 起動時にruntime migration、旧列fallback、二重書き込みを行わない。Remote D1 migration/deployは運用者の明示操作に限る
+6. 起動時の自動スキーマ適用、旧列fallback、二重書き込みを行わない。Remote D1 migration/deployは運用者の明示操作に限る
 
 ## 絶対禁止 (設計監査で確定した不変条件)
 

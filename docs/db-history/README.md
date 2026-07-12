@@ -16,6 +16,6 @@
 
 ## 方針
 
-DBはD1を正本とし、R2/KVの静的JSONはキャッシュとする。現行コードにruntime migration、旧列fallback、二重書き込みを残さない。Cloudflare Pages + `@cloudflare/next-on-pages` と、`fast-jobs`、`content-jobs`、`sync-jobs` の3 Cron Worker構成は変更しない。
+DBはD1を正本とし、R2/KVの静的JSONはキャッシュとする。現行コードに起動時の自動スキーマ適用、旧列fallback、二重書き込みを残さない。Cloudflare Pages + `@cloudflare/next-on-pages` と、`fast-jobs`、`content-jobs`、`sync-jobs` の3 Cron Worker構成は変更しない。
 
 旧migrationは内容を改変・削除せずHistoricalとして保存する。履歴資料の記述は当時の記録であり、現行仕様の根拠にはしない。

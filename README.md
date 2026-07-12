@@ -57,7 +57,7 @@ npm run build        # プロダクションビルド
 npm run test:unit    # 単体テスト (node:test)
 
 npm run db:local-apply  # ローカル D1 へ migration 適用
-# スキーマ変更時は手動 SQL migration を作成 (docs/operations/migrations.md 参照。db:generate は使わない)
+# スキーマ変更時は手動 SQL migration を作成 (docs/operations/migrations.md 参照。自動生成は使わない)
 ```
 
 ## 主な機能

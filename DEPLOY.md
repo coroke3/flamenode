@@ -149,7 +149,7 @@ Remote D1の作成、backup、migration適用、rollbackは運用者が対象D1�
 
 ### 3-1. マイグレーション SQL の確認
 
-リポジトリの現行active migrationは `migrations/0000_flame_node_baseline.sql` です。DB schemaの正本は `src/lib/db/schema.ts` であり、`db:generate` は使いません。
+リポジトリの現行active migrationは `migrations/0000_flame_node_baseline.sql` です。DB schemaの正本は `src/lib/db/schema.ts` であり、自動生成は使いません。
 
 ### 3-2. 本番 D1 へマイグレーション適用
 

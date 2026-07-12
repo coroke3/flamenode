@@ -5,6 +5,8 @@
 > Verified against commit: `5f48e0f` + working tree
 > Source of truth: `src/lib/db/schema.ts`, `migrations/0000_flame_node_baseline.sql`, `wrangler.toml`, `package.json`
 
+現行のCloudflare構成は Pages + `@cloudflare/next-on-pages`、D1、R2、KV、3本のCron Workerです。
+
 現行実装はコード、DB schema、active migration、Cloudflare設定、Active文書の順に確認します。Historical文書は経緯の保存だけを目的とし、現行実装の根拠には使用しません。
 
 | 区分 | 文書 | 責務 |

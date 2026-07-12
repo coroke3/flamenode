@@ -10,7 +10,7 @@
 | --- | --- |
 | Type | baseline |
 | Summary | 最終canonical schemaを空D1へ一括作成 |
-| Reason | schemaとactive pathを一意化し、runtime migration・旧列fallback・二重書き込みを現行方式から除外 |
+| Reason | schemaとactive pathを一意化し、起動時の自動スキーマ適用・旧列fallback・二重書き込みを現行方式から除外 |
 | Data migration | なし。旧migration本文は `migrations/historical/` に保存 |
 | Data loss | intentional。Remote D1や本番データを自動変更しない |
 | Rollback | not safely reversible。運用者がbackupから復旧 |
