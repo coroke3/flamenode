@@ -5,7 +5,7 @@ import {
   videoCustomAnswers,
 } from "../db/schema.ts";
 import {
-  LEGACY_STAGE_PERMISSION_ID,
+  DEFAULT_STAGE_PERMISSION_QUESTION_KEY,
   parseStagePermissionAnswers,
   serializeStagePermissionAnswers,
 } from "./formSettings.ts";
@@ -13,7 +13,7 @@ import { computeStagePermissionAnswerDeleteEventIds } from "./eventSync.ts";
 
 type DB = NonNullable<ReturnType<typeof getDatabase>>;
 
-const STAGE_PERMISSION_KEY_PREFIX = `${LEGACY_STAGE_PERMISSION_ID}_`;
+const STAGE_PERMISSION_KEY_PREFIX = `${DEFAULT_STAGE_PERMISSION_QUESTION_KEY}_`;
 
 export interface ReplaceStagePermissionCustomAnswersArgs {
   videoId: string;
@@ -24,7 +24,7 @@ export interface ReplaceStagePermissionCustomAnswersArgs {
 }
 
 export function stagePermissionQuestionKeyCondition() {
-  return sql`(${eventCustomQuestions.question_key} = ${LEGACY_STAGE_PERMISSION_ID} OR substr(${eventCustomQuestions.question_key}, 1, ${STAGE_PERMISSION_KEY_PREFIX.length}) = ${STAGE_PERMISSION_KEY_PREFIX})`;
+  return sql`(${eventCustomQuestions.question_key} = ${DEFAULT_STAGE_PERMISSION_QUESTION_KEY} OR substr(${eventCustomQuestions.question_key}, 1, ${STAGE_PERMISSION_KEY_PREFIX.length}) = ${STAGE_PERMISSION_KEY_PREFIX})`;
 }
 
 export async function readStagePermissionCustomAnswers(
@@ -32,11 +32,10 @@ export async function readStagePermissionCustomAnswers(
   args: {
     videoId: string;
     eventIds: readonly string[];
-    fallbackRaw?: string | null;
   },
 ): Promise<string | null> {
   const eventIds = Array.from(new Set(args.eventIds.filter(Boolean)));
-  if (eventIds.length === 0) return args.fallbackRaw ?? null;
+  if (eventIds.length === 0) return null;
 
   const questions = await db
     .select({
@@ -54,7 +53,7 @@ export async function readStagePermissionCustomAnswers(
         stagePermissionQuestionKeyCondition(),
       )!,
     );
-  if (questions.length === 0) return args.fallbackRaw ?? null;
+  if (questions.length === 0) return null;
 
   const answers = await db
     .select({

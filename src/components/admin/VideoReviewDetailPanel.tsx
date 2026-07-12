@@ -113,7 +113,7 @@ export function VideoReviewDetailPanel({
           <Field label="intro_comment" value={video.intro_comment ?? "—"} />
           <Field label="highlights" value={video.highlights ?? "—"} />
           <Field label="production_story" value={video.production_story ?? "—"} />
-          <Field label="stage_permission" value={video.stagePermission ?? "—"} />
+          <Field label="権利確認" value={video.stagePermission ?? "—"} />
         </dl>
 
         {video.customAnswers.length > 0 ? (

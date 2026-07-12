@@ -83,7 +83,7 @@ export async function setApiEndpointActive(
   if (!guard.ok) return guard.result;
 
   const id = String(formData.get("id") ?? "").trim();
-  const next = Number(formData.get("is_active") ?? 0) === 1 ? 1 : 0;
+  const next = Number(formData.get("public_api_enabled") ?? 0) === 1 ? 1 : 0;
   if (!id) return { ok: false, message: "id is required." };
 
   const db = getDatabase();

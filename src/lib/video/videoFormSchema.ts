@@ -54,7 +54,6 @@ export const videoFormSchema = z.object({
   highlights: z.string().trim().max(1000).optional().nullable(),
   production_story: z.string().trim().max(1000).optional().nullable(),
   used_software: z.string().trim().max(200).optional().nullable(),
-  stage_permission: z.string().trim().max(1000).optional().nullable(),
   closing_comment: z.string().trim().max(500).optional().nullable(),
   is_collab: z
     .union([z.literal("on"), z.literal("true"), z.literal("false"), z.boolean()])

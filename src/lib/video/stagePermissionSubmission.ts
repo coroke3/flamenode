@@ -21,8 +21,8 @@ export async function getStagePermissionFieldsForEvents(
 }
 
 export function readStagePermissionAnswerMap(formData: FormData): Map<string, string> {
-  const ids = formData.getAll("stage_permission_answer_id");
-  const values = formData.getAll("stage_permission_answer_value");
+  const ids = formData.getAll("custom_question_answer_id");
+  const values = formData.getAll("custom_question_answer_value");
   const out = new Map<string, string>();
   for (let i = 0; i < ids.length; i++) {
     const id = String(ids[i] ?? "").trim();
@@ -30,17 +30,13 @@ export function readStagePermissionAnswerMap(formData: FormData): Map<string, st
     out.set(id, String(values[i] ?? "").trim());
   }
 
-  const legacy = formData.get("stage_permission");
-  if (typeof legacy === "string" && legacy.trim() && !out.has("stage_permission")) {
-    out.set("stage_permission", legacy.trim());
-  }
   return out;
 }
 
 export function buildStagePermissionSubmission(
   formData: FormData,
   fields: readonly StagePermissionFieldSettings[],
-  fallbackRaw?: string | null,
+  existingAnswersJson?: string | null,
 ):
   | { ok: true; value: string | null }
   | { ok: false; message: string } {
@@ -48,7 +44,7 @@ export function buildStagePermissionSubmission(
 
   const submitted = readStagePermissionAnswerMap(formData);
   const fallback = new Map(
-    parseStagePermissionAnswers(fallbackRaw).map((answer) => [
+    parseStagePermissionAnswers(existingAnswersJson).map((answer) => [
       answer.id,
       answer.value,
     ]),

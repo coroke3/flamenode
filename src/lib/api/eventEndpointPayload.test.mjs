@@ -35,17 +35,17 @@ test("buildEventApiPayload: returns minimal event and video fields", () => {
         youtube_video_id: "abc",
       },
     ],
-    undefined,
-    NOW,
   );
   assert.deepEqual(payload, {
     event: {
       id: "evt1",
       title: "Event",
       explanation: "説明",
-      is_active: true,
-      is_entry_open: true,
-      is_archived: false,
+      visibility_status: "public",
+      start_time: NOW + 1000,
+      end_time: NOW + 2000,
+      entry_start_time: NOW - 100,
+      entry_end_time: NOW + 100,
     },
     videos: [
       {
@@ -73,9 +73,7 @@ test("buildEventApiPayload: clamps video limit", () => {
       id: "evt",
       title: "Event",
       explanation: null,
-      is_active: 0,
-      is_entry_open: 0,
-      is_archived: 1,
+      visibility_status: "archived",
       start_time: null,
       end_time: null,
       entry_start_time: null,

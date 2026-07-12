@@ -13,13 +13,14 @@ test("parseVideoFormSettings returns empty settings for invalid JSON", () => {
 
 test("resolveStagePermissionFieldsFromJson enables field when any event enables it", () => {
   const resolved = resolveStagePermissionFieldsFromJson([
-    JSON.stringify({ stage_permission: { enabled: false } }),
+    JSON.stringify({ stage_permissions: [{ id: "stage_permission", enabled: false }] }),
     JSON.stringify({
-      stage_permission: {
+      stage_permissions: [{
+        id: "stage_permission",
         enabled: true,
         required: false,
         label: "権利確認",
-      },
+      }],
     }),
   ]);
 
@@ -30,8 +31,8 @@ test("resolveStagePermissionFieldsFromJson enables field when any event enables 
 
 test("resolveStagePermissionFieldsFromJson requires field when any event requires it", () => {
   const resolved = resolveStagePermissionFieldsFromJson([
-    JSON.stringify({ stage_permission: { enabled: true, required: false } }),
-    JSON.stringify({ stage_permission: { enabled: true, required: true } }),
+    JSON.stringify({ stage_permissions: [{ id: "stage_permission", enabled: true, required: false }] }),
+    JSON.stringify({ stage_permissions: [{ id: "stage_permission", enabled: true, required: true }] }),
   ]);
 
   assert.equal(resolved[0]?.required, true);
@@ -41,7 +42,7 @@ test("resolveStagePermissionFieldsFromJson requires field when any event require
 test("resolveStagePermissionFieldsFromJson hides field when no event enables it", () => {
   assert.deepEqual(
     resolveStagePermissionFieldsFromJson([
-      JSON.stringify({ stage_permission: { enabled: false } }),
+      JSON.stringify({ stage_permissions: [{ id: "stage_permission", enabled: false }] }),
       "{}",
     ]),
     [],

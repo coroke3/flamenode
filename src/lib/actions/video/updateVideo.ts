@@ -88,7 +88,6 @@ export async function updateVideo(
   setDefault("highlights", target.highlights);
   setDefault("production_story", target.production_story);
   setDefault("used_software", targetSoftwareLabel);
-  setDefault("stage_permission", currentStagePermission);
   setDefault("closing_comment", target.closing_comment);
   if (!Object.prototype.hasOwnProperty.call(raw, "is_collab")) {
     raw.is_collab = target.collaboration_type === "collab" ? "true" : "false";

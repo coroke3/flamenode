@@ -3,11 +3,7 @@ export const runtime = "edge";
 import { desc } from "drizzle-orm";
 import { events as eventsTable } from "@/lib/db/schema";
 import { getDatabase } from "@/lib/cloudflare";
-import {
-  isAcceptingEntries,
-  isEventArchived,
-  publicListableEventWhere,
-} from "@/lib/utils/eventStatus";
+import { publicListableEventWhere } from "@/lib/utils/eventStatus";
 import {
   MAX_PUBLIC_EVENT_LIMIT,
   PUBLIC_EVENT_KEYS,
@@ -31,19 +27,10 @@ export async function GET(req: Request): Promise<Response> {
 
   const staticIndex = await loadStaticEventsIndex();
   if (staticIndex.strategy === "static_json_only" && staticIndex.index) {
-    const now = Math.floor(Date.now() / 1000);
     const offset = (page - 1) * limit;
     const items: PublicEventDto[] = staticIndex.index.events
       .slice(offset, offset + limit)
-      .map((row) => pickKeys(
-        {
-          ...row,
-          is_active: row.visibility_status === "public" ? 1 : 0,
-          is_entry_open: isAcceptingEntries(row, now) ? 1 : 0,
-          is_archived: isEventArchived(row) ? 1 : 0,
-        },
-        PUBLIC_EVENT_KEYS,
-      ) as PublicEventDto);
+      .map((row) => pickKeys(row, PUBLIC_EVENT_KEYS) as PublicEventDto);
     const payload = { items, page, limit };
     assertNoForbiddenKeys(payload);
     return publicJsonResponse(req, payload, "public, max-age=60, s-maxage=120, stale-while-revalidate=300");
@@ -78,17 +65,8 @@ export async function GET(req: Request): Promise<Response> {
     .offset((page - 1) * limit);
 
   // DB 側で明示列を絞り込んでいるが、二重防御として pickKeys も通す。
-  const now = Math.floor(Date.now() / 1000);
   const items: PublicEventDto[] = rows.map((row) =>
-    pickKeys(
-      {
-        ...row,
-        is_active: row.visibility_status === "public" ? 1 : 0,
-        is_entry_open: isAcceptingEntries(row, now) ? 1 : 0,
-        is_archived: isEventArchived(row) ? 1 : 0,
-      },
-      PUBLIC_EVENT_KEYS,
-    ) as PublicEventDto,
+    pickKeys(row, PUBLIC_EVENT_KEYS) as PublicEventDto,
   );
 
   const payload = { items, page, limit };

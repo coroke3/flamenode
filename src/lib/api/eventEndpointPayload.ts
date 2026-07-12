@@ -1,4 +1,4 @@
-import { getEventVisibility, isAcceptingEntries } from "#utils/event-status-core";
+import { getEventVisibility } from "#utils/event-status-core";
 
 export const EVENT_API_VIDEO_LIMIT = 50;
 export const EVENT_API_EXPLANATION_MAX = 280;
@@ -27,9 +27,11 @@ export interface EventApiPayload {
     id: string;
     title: string;
     explanation: string | null;
-    is_active: boolean;
-    is_entry_open: boolean;
-    is_archived: boolean;
+    visibility_status: "draft" | "private" | "public" | "archived";
+    start_time: number | null;
+    end_time: number | null;
+    entry_start_time: number | null;
+    entry_end_time: number | null;
   };
   videos: Array<{
     id: string;
@@ -55,7 +57,6 @@ export function buildEventApiPayload(
   event: EventApiEventInput,
   videos: readonly EventApiVideoInput[],
   limit = EVENT_API_VIDEO_LIMIT,
-  now: number = Math.floor(Date.now() / 1000),
 ): EventApiPayload {
   const safeLimit = Math.max(1, Math.min(EVENT_API_VIDEO_LIMIT, Math.floor(limit)));
   const visibility = getEventVisibility(event);
@@ -64,9 +65,11 @@ export function buildEventApiPayload(
       id: event.id,
       title: event.title,
       explanation: truncateForEventApi(event.explanation),
-      is_active: visibility === "public",
-      is_entry_open: isAcceptingEntries(event, now),
-      is_archived: visibility === "archived",
+      visibility_status: visibility,
+      start_time: event.start_time,
+      end_time: event.end_time,
+      entry_start_time: event.entry_start_time,
+      entry_end_time: event.entry_end_time,
     },
     videos: videos.slice(0, safeLimit).map((video) => ({
       id: video.id,

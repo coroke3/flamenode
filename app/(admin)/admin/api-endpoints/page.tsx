@@ -39,7 +39,7 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
   let rows: Array<{
     id: string;
     event_id: string;
-    is_active: number | null;
+    public_api_enabled: number | null;
     created_at: number;
     event_title: string | null;
     event_visibility_status: string | null;
@@ -52,7 +52,7 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
       .select({
         id: eventsTable.id,
         event_id: eventsTable.id,
-        is_active: eventsTable.public_api_enabled,
+        public_api_enabled: eventsTable.public_api_enabled,
         created_at: eventsTable.created_at,
         event_title: eventsTable.title,
         event_visibility_status: eventsTable.visibility_status,
@@ -71,7 +71,7 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
 
     const sample = rows.find(
       (row) =>
-        row.is_active === 1 &&
+        row.public_api_enabled === 1 &&
         row.event_title &&
         row.event_visibility_status === "public",
     );
@@ -186,7 +186,7 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
                   <td>
                     <form action={setApiEndpointActiveAction}>
                       <input type="hidden" name="id" value={row.id} />
-                      <input type="hidden" name="is_active" value="0" />
+                      <input type="hidden" name="public_api_enabled" value="0" />
                       <button type="submit" className="fn-btn fn-btn-sm fn-btn-ghost">
                         Disable
                       </button>
@@ -233,9 +233,11 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
                 id: "event_id",
                 title: "Event title",
                 explanation: "Short event summary",
-                is_active: true,
-                is_entry_open: true,
-                is_archived: false,
+                visibility_status: "public",
+                start_time: null,
+                end_time: null,
+                entry_start_time: null,
+                entry_end_time: null,
               },
               videos: [
                 {

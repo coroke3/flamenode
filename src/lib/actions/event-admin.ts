@@ -160,7 +160,7 @@ export async function createEvent(
   )[0];
   if (dup) return { ok: false, message: `ID「${id}」は既に存在します。` };
 
-  const videoFormSettingsJson = buildVideoFormSettingsJson(formData, data);
+  const videoFormSettingsJson = buildVideoFormSettingsJson(formData);
   const visibilityStatus = resolveSubmittedEventVisibility(data);
   const createdRow = {
     id,

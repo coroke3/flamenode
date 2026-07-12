@@ -23,7 +23,6 @@ function baseEvent(overrides = {}) {
     slot_type: "time",
     slot_visibility_mode: "public_name",
     parts_json: null,
-    custom_questions: "{\"legacy\":true}",
     review_settings: null,
     editable_fields: null,
     repeat_rules: null,
@@ -48,7 +47,6 @@ test("snapshotFromEvent stores normalized custom questions instead of legacy JSO
     },
   ]);
 
-  assert.equal("custom_questions" in snapshot, false);
   assert.deepEqual(snapshot.custom_question_definitions, [
     {
       question_key: "extra_note",
@@ -66,10 +64,9 @@ test("snapshotFromEvent stores normalized custom questions instead of legacy JSO
   ]);
 });
 
-test("parseEventTemplateSnapshot ignores legacy custom_questions payload", () => {
+test("parseEventTemplateSnapshot normalizes an absent question definition list", () => {
   const snapshot = parseEventTemplateSnapshot(JSON.stringify(baseEvent()));
 
   assert.ok(snapshot);
-  assert.equal("custom_questions" in snapshot, false);
   assert.deepEqual(snapshot.custom_question_definitions, []);
 });

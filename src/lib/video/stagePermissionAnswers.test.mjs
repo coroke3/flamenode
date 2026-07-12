@@ -164,7 +164,7 @@ test("readStagePermissionCustomAnswers serializes normalized answers", async () 
   });
 });
 
-test("readStagePermissionCustomAnswers does not resurrect legacy fallback after normalization", async () => {
+test("readStagePermissionCustomAnswers returns null when normalized answers are empty", async () => {
   const db = createReadFakeDb(
     [
       {
@@ -182,20 +182,18 @@ test("readStagePermissionCustomAnswers does not resurrect legacy fallback after 
   const result = await readStagePermissionCustomAnswers(db, {
     videoId: "video-1",
     eventIds: ["event-a"],
-    fallbackRaw: "legacy old value",
   });
 
   assert.equal(result, null);
 });
 
-test("readStagePermissionCustomAnswers uses legacy fallback before questions are synced", async () => {
+test("readStagePermissionCustomAnswers returns null before questions are synced", async () => {
   const db = createReadFakeDb([], []);
 
   const result = await readStagePermissionCustomAnswers(db, {
     videoId: "video-1",
     eventIds: ["event-a"],
-    fallbackRaw: "legacy old value",
   });
 
-  assert.equal(result, "legacy old value");
+  assert.equal(result, null);
 });

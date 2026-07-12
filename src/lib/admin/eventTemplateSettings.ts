@@ -172,16 +172,34 @@ export function parseEventTemplateSnapshot(
 ): EventTemplateSnapshot | null {
   try {
     const parsed = JSON.parse(raw) as EventTemplateSnapshot & {
-      custom_questions?: unknown;
       custom_question_definitions?: unknown;
     };
     if (!parsed || typeof parsed !== "object") return null;
     if (!parsed.event_type || !parsed.slot_type) return null;
-    const {
-      custom_questions: _legacyCustomQuestions,
-      custom_question_definitions,
-      ...snapshot
-    } = parsed;
+    const { custom_question_definitions } = parsed;
+    const snapshot: Omit<EventTemplateSnapshot, "custom_question_definitions"> = {
+      event_type: parsed.event_type,
+      explanation: parsed.explanation ?? null,
+      icon_url: parsed.icon_url ?? null,
+      img_url: parsed.img_url ?? null,
+      accent_color: parsed.accent_color ?? null,
+      allow_user_video_event_links: parsed.allow_user_video_event_links ?? 0,
+      allow_unslotted_posts: parsed.allow_unslotted_posts ?? 0,
+      allow_user_video_edits: parsed.allow_user_video_edits ?? 0,
+      user_video_edit_permission_keys_json:
+        parsed.user_video_edit_permission_keys_json ?? null,
+      video_form_settings_json: parsed.video_form_settings_json ?? null,
+      max_slots_per_video: parsed.max_slots_per_video ?? 1,
+      max_consecutive_slots_per_entry:
+        parsed.max_consecutive_slots_per_entry ?? 3,
+      slot_part_gap_minutes: parsed.slot_part_gap_minutes ?? 15,
+      slot_type: parsed.slot_type,
+      slot_visibility_mode: parsed.slot_visibility_mode ?? "public_name",
+      parts_json: parsed.parts_json ?? null,
+      review_settings: parsed.review_settings ?? null,
+      editable_fields: parsed.editable_fields ?? null,
+      repeat_rules: parsed.repeat_rules ?? null,
+    };
     return {
       ...snapshot,
       custom_question_definitions: normalizeTemplateQuestionDefinitions(
@@ -208,7 +226,7 @@ function partsJsonToText(value: string | null | undefined): string {
   }
 }
 
-/** 新規イベントフォーム用の初期値（日時は空、公開フラグはオフ） */
+/** 新規イベントフォーム用の初期値（日時は空、公開状態は下書き）。 */
 export function snapshotToFormInitial(
   snapshot: EventTemplateSnapshot,
 ): EventFormInitial {
@@ -222,8 +240,7 @@ export function snapshotToFormInitial(
     end_time: null,
     entry_start_time: null,
     entry_end_time: null,
-    is_active: 0,
-    is_archived: 0,
+    visibility_status: "draft",
     allow_user_video_event_links: snapshot.allow_user_video_event_links,
     allow_unslotted_posts: snapshot.allow_unslotted_posts ?? 0,
     allow_user_video_edits: snapshot.allow_user_video_edits,

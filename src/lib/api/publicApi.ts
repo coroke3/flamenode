@@ -56,11 +56,19 @@ function etagMatches(request: Request, etag: string): boolean {
   });
 }
 
-export async function publicJsonResponse(request: Request, payload: unknown, cacheControl: string): Promise<Response> {
+export async function publicJsonResponse(
+  request: Request,
+  payload: unknown,
+  cacheControl: string,
+  status = 200,
+): Promise<Response> {
   const etag = await payloadEtag(payload);
   const headers = { "Cache-Control": cacheControl, ETag: etag };
-  if (etagMatches(request, etag)) return new Response(null, { status: 304, headers });
+  if (status === 200 && etagMatches(request, etag)) {
+    return new Response(null, { status: 304, headers });
+  }
   return new Response(JSON.stringify(payload), {
+    status,
     headers: { ...headers, "Content-Type": "application/json" },
   });
 }

@@ -186,7 +186,14 @@ const RULES = [
   {
     id: "sync-legacy-event-visibility",
     label: "syncLegacyEventVisibilityFlags usage (removed)",
-    pattern: /\bsyncLegacyEventVisibilityFlags\b/g,
+    pattern:
+      /\b(?:syncLegacyEventVisibilityFlags|computedEventLegacyFlags|enrichEventRowForStaticJson)\b/g,
+  },
+  {
+    id: "legacy-event-form-fields",
+    label: "legacy event/video FormData compatibility fields",
+    pattern:
+      /\bstage_permission_(?:enabled|required|label|description|placeholder|question|answer)(?:_[a-z]+)?\b/g,
   },
   {
     id: "legacy-permission-aliases",

@@ -13,7 +13,6 @@ test("normalizeStaticEventsIndex normalizes events and group sections", () => {
         visibility_status: "public",
         start_time: 200,
         entry_end_time: 150,
-        is_active: 1,
       },
     ],
     group_sections: [

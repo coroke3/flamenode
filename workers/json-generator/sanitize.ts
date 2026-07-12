@@ -11,6 +11,11 @@ const FORBIDDEN = new Set([
   "private_note",
   "approval_status",
   "access_token",
+  "is_active",
+  "is_entry_open",
+  "is_archived",
+  "custom_questions",
+  "stage_permission",
 ]);
 
 export function assertNoForbiddenPublicKeys(value: unknown, path = "root"): void {

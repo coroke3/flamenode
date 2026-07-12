@@ -1,7 +1,6 @@
 import { assertNoForbiddenPublicKeys } from "./sanitize.ts";
 import {
   cacheControlForFreshness,
-  enrichEventRowForStaticJson,
   resolveEventFreshness,
 } from "./freshness.ts";
 
@@ -321,12 +320,8 @@ async function rebuildTop(env: Env): Promise<void> {
     ).first<{ c?: number }>(),
   ]);
 
-  const activeEventItems = (activeEvents.results ?? []).map((row) =>
-    enrichEventRowForStaticJson(row, now),
-  );
-  const latestEventItems = (latestEvents.results ?? []).map((row) =>
-    enrichEventRowForStaticJson(row, now),
-  );
+  const activeEventItems = activeEvents.results ?? [];
+  const latestEventItems = latestEvents.results ?? [];
   const payload = {
     generated_at: now,
     recommended: recommended.results ?? [],
@@ -409,9 +404,7 @@ async function rebuildEventsIndex(env: Env): Promise<void> {
   ]);
   await putJson(env, "events/index.json", {
     generated_at: Math.floor(Date.now() / 1000),
-    items: (rows.results ?? []).map((row) =>
-      enrichEventRowForStaticJson(row as Record<string, unknown>),
-    ),
+    items: rows.results ?? [],
     group_sections: groupSections,
   }, "public, max-age=300, stale-while-revalidate=1800", { targetType: "events_index", targetId: "global" });
 }
@@ -548,7 +541,7 @@ async function rebuildEvent(env: Env, eventId: string): Promise<void> {
     },
     now,
   );
-  const eventPayload = enrichEventRowForStaticJson(ev, now);
+  const eventPayload = ev;
 
   const staff = await env.DB.prepare(
     `SELECT es.role, es.display_name, es.public_role_label,

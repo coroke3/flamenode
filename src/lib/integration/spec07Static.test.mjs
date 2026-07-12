@@ -20,6 +20,8 @@ test("deprecated identifiers remain covered by the legacy static checker", () =>
     "api" + "Endpoints",
     "api_" + "endpoints",
     "syncLegacy" + "EventVisibilityFlags",
+    "computedEvent" + "LegacyFlags",
+    "enrichEventRowFor" + "StaticJson",
     "@/lib/" + "legacy",
   ];
   for (const identifier of identifiers) {

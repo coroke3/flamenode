@@ -86,7 +86,7 @@ test("FORBIDDEN_PUBLIC_KEYS: 主要な禁止キーが含まれている", () => 
 });
 
 test("FORBIDDEN_PUBLIC_KEYS: 安全なキーは含まれない", () => {
-  for (const k of ["id", "title", "youtube_video_id", "scheduled_time", "is_active"]) {
+  for (const k of ["id", "title", "youtube_video_id", "scheduled_time", "visibility_status"]) {
     assert.equal(FORBIDDEN_PUBLIC_KEYS.has(k), false, `${k} should NOT be forbidden`);
   }
 });
@@ -109,4 +109,25 @@ test("PUBLIC_EVENT_KEYS と FORBIDDEN_PUBLIC_KEYS は重複しない", () => {
       `PUBLIC_EVENT_KEYS の "${k}" は禁止キー側にも含まれている`,
     );
   }
+});
+
+test("PUBLIC_EVENT_KEYS は canonical visibility と受付期間だけを公開する", () => {
+  assert.deepEqual(PUBLIC_EVENT_KEYS, [
+    "id",
+    "title",
+    "event_type",
+    "explanation",
+    "icon_url",
+    "img_url",
+    "accent_color",
+    "visibility_status",
+    "slot_type",
+    "slot_visibility_mode",
+    "start_time",
+    "end_time",
+    "entry_start_time",
+    "entry_end_time",
+    "max_slots_per_video",
+    "max_consecutive_slots_per_entry",
+  ]);
 });

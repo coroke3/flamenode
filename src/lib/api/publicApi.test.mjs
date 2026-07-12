@@ -31,6 +31,28 @@ test("public JSON response emits stable quoted ETag and returns bodyless 304 for
   assert.equal(second.headers.get("Cache-Control"), "public, max-age=30");
 });
 
+test("public JSON error response keeps status, ETag, and cache policy without returning 304", async () => {
+  const payload = { error: "not_found" };
+  const first = await publicJsonResponse(
+    request("error-client"),
+    payload,
+    "public, max-age=60",
+    404,
+  );
+  const etag = first.headers.get("ETag");
+  assert.equal(first.status, 404);
+  assert.match(etag ?? "", /^"[0-9a-f]{64}"$/);
+
+  const second = await publicJsonResponse(
+    request("error-client", { "If-None-Match": etag }),
+    payload,
+    "public, max-age=60",
+    404,
+  );
+  assert.equal(second.status, 404);
+  assert.deepEqual(await second.json(), payload);
+});
+
 test("rate limiter uses connecting IP before forwarded IP and returns Retry-After", () => {
   clearPublicApiRateLimitForTests();
   const now = 1000;
