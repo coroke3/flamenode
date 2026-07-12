@@ -31,8 +31,10 @@ npm.cmd run check:db-history
 
 `check:db-schema` はactive migrationを番号順に空の`node:sqlite`へ実際に適用し、
 `foreign_keys`、`foreign_key_check`、`integrity_check`、CHECK有効化を確認する。
-さらに`schema.ts`のtable・named index・foreign key manifestとSQLiteの実体を比較し、
-SQL構文エラー、欠落、余分な定義をfail-closedで検出する。
+さらに`schema.ts`のtable、列名・SQLite型・nullability・PK順・比較可能なdefault、
+named indexのunique属性・列順、foreign key manifestとSQLiteの実体を比較し、
+SQL構文エラー、欠落、余分な定義をfail-closedで検出する。defaultは文字列・数値・
+`sql`リテラルを正規化して比較し、動的式など静的解析不能な値だけを比較対象外とする。
 
 ## Remote D1
 

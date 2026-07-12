@@ -12,6 +12,68 @@ function sortedUnique(values) {
   return [...new Set(values)].sort();
 }
 
+function hasSingleOuterParentheses(value) {
+  if (!value.startsWith("(") || !value.endsWith(")")) return false;
+  let depth = 0;
+  let quote = null;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (quote) {
+      if (char === quote && value[index - 1] !== "\\") quote = null;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (char === "(") depth += 1;
+    if (char === ")") depth -= 1;
+    if (depth === 0 && index < value.length - 1) return false;
+  }
+  return depth === 0;
+}
+
+function normalizeSqlExpression(value) {
+  let normalized = value.trim();
+  while (hasSingleOuterParentheses(normalized)) {
+    normalized = normalized.slice(1, -1).trim();
+  }
+  return normalized.replace(/\s+/g, " ").toLowerCase();
+}
+
+function normalizeActualDefault(value) {
+  if (value === null || value === undefined) return null;
+  const raw = String(value).trim();
+  if (/^'(?:[^']|'')*'$/.test(raw)) {
+    return `string:${raw.slice(1, -1).replaceAll("''", "'")}`;
+  }
+  if (/^-?(?:\d+\.?\d*|\.\d+)$/.test(raw)) {
+    return `number:${Number(raw)}`;
+  }
+  return `sql:${normalizeSqlExpression(raw)}`;
+}
+
+function readExpectedDefault(columnChunk) {
+  if (!/\.default\s*\(/.test(columnChunk)) {
+    return { comparable: true, value: null };
+  }
+  const doubleQuoted = columnChunk.match(/\.default\s*\(\s*("(?:[^"\\]|\\.)*")\s*\)/);
+  if (doubleQuoted) {
+    return { comparable: true, value: `string:${JSON.parse(doubleQuoted[1])}` };
+  }
+  const singleQuoted = columnChunk.match(/\.default\s*\(\s*'((?:[^']|'')*)'\s*\)/);
+  if (singleQuoted) {
+    return { comparable: true, value: `string:${singleQuoted[1].replaceAll("''", "'")}` };
+  }
+  const numeric = columnChunk.match(/\.default\s*\(\s*(-?(?:\d+\.?\d*|\.\d+))\s*\)/);
+  if (numeric) return { comparable: true, value: `number:${Number(numeric[1])}` };
+  const sqlDefault = columnChunk.match(/\.default\s*\(\s*sql`([\s\S]*?)`\s*\)/);
+  if (sqlDefault) {
+    return { comparable: true, value: `sql:${normalizeSqlExpression(sqlDefault[1])}` };
+  }
+  return { comparable: false, value: null };
+}
+
 function findMatchingBrace(source, start) {
   let depth = 0;
   let quote = null;
@@ -70,6 +132,59 @@ export function assertExactNames(label, expectedValues, actualValues) {
   }
 }
 
+export function assertTableColumns(tableName, expectedColumns, actualColumns) {
+  assertExactNames(
+    `${tableName} columns`,
+    expectedColumns.map((column) => column.name),
+    actualColumns.map((column) => String(column.name)),
+  );
+  for (const expected of expectedColumns) {
+    const actual = actualColumns.find((column) => String(column.name) === expected.name);
+    const actualType = String(actual.type ?? "").toUpperCase();
+    const actualNotNull = Number(actual.notnull ?? 0);
+    const actualPk = Number(actual.pk ?? 0);
+    if (actualType !== expected.type) {
+      throw new Error(
+        `${tableName}.${expected.name} type不一致: expected=${expected.type} actual=${actualType}`,
+      );
+    }
+    if (actualNotNull !== expected.notNull) {
+      throw new Error(
+        `${tableName}.${expected.name} notNull不一致: expected=${expected.notNull} actual=${actualNotNull}`,
+      );
+    }
+    if (actualPk !== expected.pk) {
+      throw new Error(
+        `${tableName}.${expected.name} pk順不一致: expected=${expected.pk} actual=${actualPk}`,
+      );
+    }
+    if (expected.default.comparable) {
+      const actualDefault = normalizeActualDefault(actual.dflt_value);
+      if (actualDefault !== expected.default.value) {
+        throw new Error(
+          `${tableName}.${expected.name} default不一致: ` +
+            `expected=${expected.default.value} actual=${actualDefault}`,
+        );
+      }
+    }
+  }
+}
+
+export function assertIndexDefinition(expected, actual) {
+  if (Number(actual.unique) !== expected.unique) {
+    throw new Error(
+      `${expected.name} unique不一致: expected=${expected.unique} actual=${actual.unique}`,
+    );
+  }
+  const actualColumns = actual.columns.map(String);
+  if (JSON.stringify(actualColumns) !== JSON.stringify(expected.columns)) {
+    throw new Error(
+      `${expected.name} index列不一致: ` +
+        `expected=[${expected.columns.join(", ")}] actual=[${actualColumns.join(", ")}]`,
+    );
+  }
+}
+
 function readSchemaManifest(schemaText) {
   const tableMatches = [
     ...schemaText.matchAll(
@@ -79,6 +194,8 @@ function readSchemaManifest(schemaText) {
   const tables = tableMatches.map((match) => match[2]);
   const variables = new Map(tableMatches.map((match) => [match[1], match[2]]));
   const columnsByTable = new Map();
+  const tableColumns = new Map();
+  const indexes = [];
   const unresolvedForeignKeys = [];
 
   for (let index = 0; index < tableMatches.length; index += 1) {
@@ -104,6 +221,7 @@ function readSchemaManifest(schemaText) {
       (candidate) => candidate[1].length === columnIndent,
     );
     const propertyColumns = new Map();
+    const columnManifest = [];
     for (let propertyIndex = 0; propertyIndex < propertyMatches.length; propertyIndex += 1) {
       const property = propertyMatches[propertyIndex];
       const chunk = objectText.slice(
@@ -113,6 +231,18 @@ function readSchemaManifest(schemaText) {
       const column = chunk.match(/(?:text|integer|real)\s*\(\s*["']([^"']+)["']/);
       if (!column) continue;
       propertyColumns.set(property[2], column[1]);
+      columnManifest.push({
+        property: property[2],
+        name: column[1],
+        type: column[0].trimStart().toLowerCase().startsWith("text")
+          ? "TEXT"
+          : column[0].trimStart().toLowerCase().startsWith("real")
+            ? "REAL"
+            : "INTEGER",
+        notNull: /\.notNull\s*\(\s*\)/.test(chunk) || /\.primaryKey\s*\(/.test(chunk) ? 1 : 0,
+        pk: /\.primaryKey\s*\(/.test(chunk) ? 1 : 0,
+        default: readExpectedDefault(chunk),
+      });
       const reference = chunk.match(
         /\.references\s*\(\s*\(\)\s*=>\s*([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)/,
       );
@@ -129,6 +259,37 @@ function readSchemaManifest(schemaText) {
       }
     }
     columnsByTable.set(tableName, propertyColumns);
+    const compositePrimaryKey = segment.match(
+      /primaryKey\s*\(\s*\{[\s\S]*?columns\s*:\s*\[([\s\S]*?)\][\s\S]*?\}\s*\)/,
+    );
+    if (compositePrimaryKey) {
+      const properties = [
+        ...compositePrimaryKey[1].matchAll(/\bt\.([A-Za-z_$][\w$]*)/g),
+      ].map((primaryKey) => primaryKey[1]);
+      properties.forEach((property, primaryKeyIndex) => {
+        const column = columnManifest.find((candidate) => candidate.property === property);
+        if (!column) throw new Error(`${tableName}の複合PK列${property}を解決できません。`);
+        column.pk = primaryKeyIndex + 1;
+        column.notNull = 1;
+      });
+    }
+    tableColumns.set(tableName, columnManifest);
+
+    for (const indexMatch of segment.matchAll(
+      /\b(uniqueIndex|index)\s*\(\s*["']([A-Za-z0-9_]+)["']\s*\)\s*\.on\s*\(([\s\S]*?)\)/g,
+    )) {
+      const indexColumns = [...indexMatch[3].matchAll(/\bt\.([A-Za-z_$][\w$]*)/g)]
+        .map((columnMatch) => propertyColumns.get(columnMatch[1]));
+      if (indexColumns.some((column) => !column)) {
+        throw new Error(`${tableName}のindex ${indexMatch[2]} 列を解決できません。`);
+      }
+      indexes.push({
+        name: indexMatch[2],
+        table: tableName,
+        unique: indexMatch[1] === "uniqueIndex" ? 1 : 0,
+        columns: indexColumns,
+      });
+    }
   }
 
   const foreignKeys = unresolvedForeignKeys.map((foreignKey) => {
@@ -152,10 +313,8 @@ function readSchemaManifest(schemaText) {
 
   return {
     tables: sortedUnique(tables),
-    indexes: sortedUnique(
-      [...schemaText.matchAll(/(?:uniqueIndex|index)\s*\(\s*["']([A-Za-z0-9_]+)["']/g)]
-        .map((match) => match[1]),
-    ),
+    indexes,
+    tableColumns,
     checks: sortedUnique(
       [...schemaText.matchAll(/\bcheck\s*\(\s*["']([A-Za-z0-9_]+)["']/g)]
         .map((match) => match[1]),
@@ -244,7 +403,32 @@ export function validateDbSchema(root = process.cwd()) {
       .filter((row) => row.type === "index" && !String(row.name).startsWith("sqlite_autoindex_"))
       .map((row) => String(row.name));
     assertExactNames("table manifest", manifest.tables, actualTables);
-    assertExactNames("index manifest", manifest.indexes, actualIndexes);
+    assertExactNames(
+      "index manifest",
+      manifest.indexes.map((index) => index.name),
+      actualIndexes,
+    );
+
+    for (const tableName of actualTables) {
+      const escaped = tableName.replaceAll('"', '""');
+      const actualColumns = db.prepare(`PRAGMA table_info("${escaped}")`).all();
+      assertTableColumns(tableName, manifest.tableColumns.get(tableName) ?? [], actualColumns);
+    }
+    for (const expectedIndex of manifest.indexes) {
+      const tableEscaped = expectedIndex.table.replaceAll('"', '""');
+      const indexRow = db
+        .prepare(`PRAGMA index_list("${tableEscaped}")`)
+        .all()
+        .find((row) => String(row.name) === expectedIndex.name);
+      if (!indexRow) throw new Error(`${expectedIndex.name}のindex metadataがありません。`);
+      const indexEscaped = expectedIndex.name.replaceAll('"', '""');
+      const columns = db
+        .prepare(`PRAGMA index_info("${indexEscaped}")`)
+        .all()
+        .sort((left, right) => Number(left.seqno) - Number(right.seqno))
+        .map((row) => String(row.name));
+      assertIndexDefinition(expectedIndex, { unique: indexRow.unique, columns });
+    }
 
     const tableSql = sqliteRows
       .filter((row) => row.type === "table")
