@@ -26,6 +26,7 @@ import {
 import type { SessionUserLike } from "./ownershipCore";
 import { expandPermissionAliases } from "./permissions/aliases";
 import {
+  getManageStaffRole,
   resolveStaffPermissionKeys,
   staffRowHasPermissionKey,
   type StaffPermissionRow,
@@ -177,12 +178,11 @@ export async function getManageStaffRoleForEvent(
       : eq(eventStaff.user_id, userId);
   const staff = (
     await db
-      .select({ role: eventStaff.role, ...staffPermissionSelect })
+      .select(staffPermissionSelect)
       .from(eventStaff)
       .where(and(eq(eventStaff.event_id, eventId), subjectCond)!)
   ).find(staffRowHasAnyPermissions);
-  if (!staff) return null;
-  return staff.role === "representative" ? "representative" : "editor";
+  return staff ? getManageStaffRole(staff) : null;
 }
 
 /**

@@ -338,7 +338,7 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
               <div className={styles.mobileSection}>
                 <div className={styles.mobileSectionTitle}>テーマ</div>
                 <div className={styles.themeSlot}>
-                  <ThemeToggle />
+                  <ThemeToggle variant="segmented" />
                 </div>
               </div>
 

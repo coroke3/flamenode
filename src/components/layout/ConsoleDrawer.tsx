@@ -120,6 +120,7 @@ export function ConsoleDrawer({
         role={drawerOpen ? "dialog" : undefined}
         aria-modal={drawerOpen || undefined}
         aria-label={drawerOpen ? label : undefined}
+        aria-hidden={isMobile && !drawerOpen ? true : undefined}
         inert={isMobile && !drawerOpen ? true : undefined}
         tabIndex={-1}
         onClick={(event) => {

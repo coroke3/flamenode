@@ -410,6 +410,17 @@
 
 .themeSlot {
   padding: 0 8px;
+  min-width: 0;
+}
+
+.themeSlot > div {
+  width: 100%;
+  max-width: 100%;
+}
+
+.themeSlot > div button {
+  flex: 1 1 0;
+  justify-content: center;
 }
 
 @media (max-width: 1000px) {
