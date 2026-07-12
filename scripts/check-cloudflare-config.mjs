@@ -3,8 +3,10 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const ROOT = path.resolve(process.env.CLOUDFLARE_CONFIG_ROOT?.trim() || process.cwd());
 const MODE = process.env.CLOUDFLARE_CONFIG_MODE?.trim() || "production";
+const ROOT = path.resolve(
+  MODE === "fixture" ? process.env.CLOUDFLARE_CONFIG_ROOT?.trim() || process.cwd() : process.cwd(),
+);
 const WRANGLER_FILES = [
   "wrangler.toml",
   "workers/fast-jobs/wrangler.toml",

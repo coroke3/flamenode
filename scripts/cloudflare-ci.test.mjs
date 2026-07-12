@@ -95,6 +95,28 @@ test("production config check fails closed without Cloudflare secrets", () => {
   }));
 });
 
+test("production config check ignores fixture root override", () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flamenode-cloudflare-production-root-"));
+  try {
+    const output = failureOutput({
+      ...productionBase,
+      CLOUDFLARE_CONFIG_ROOT: fixtureRoot,
+      CF_IDS_JSON: JSON.stringify({
+        d1_database_id: "12345678-1234-1234-1234-123456789abc",
+        kv_namespace_id: "123456789abcdef0123456789abcdef0",
+        kv_preview_id: "abcdef0123456789abcdef0123456789",
+        d1_database_name: "flamenode-db",
+        r2_bucket_name: "flamenode-assets",
+        pages_project_name: "flamenode",
+      }),
+    });
+    assert.match(output, /wrangler\.toml:\d+: D1 database_id must be a non-zero UUID/);
+    assert.doesNotMatch(output, /required Cloudflare configuration file is missing/);
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test("fixture config check is explicitly separate and accepts template IDs", () => {
   assert.doesNotThrow(() => run({
     CLOUDFLARE_CONFIG_MODE: "fixture",

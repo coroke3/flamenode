@@ -42,3 +42,5 @@ Active文書は現行実装の手順だけを扱う。旧migrationや過去の�
 `check:cloudflare-config` は実SecretとIDを持たない環境ではfail-closedで失敗する。CIはfixture/template検査を使い、本番設定の成功を偽装しない。
 
 本番デプロイでは `CLOUDFLARE_CONFIG_MODE=production` を使用し、GitHub Environment `production` の `CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`CF_IDS_JSON` を必須とする。CIのfixture検査は `CLOUDFLARE_CONFIG_MODE=fixture` を明示した場合だけ許可され、実リソース設定の検証結果を代用しない。
+
+本番smoke testでは、任意の環境変数 `FAST_JOBS_URL`、`CONTENT_JOBS_URL`、`SYNC_JOBS_URL` を設定すると、対応するWorkerの `/health` も確認する。`CONTENT_JOBS_URL` が設定されている場合は、未認証の `/rebuild` が副作用を起こさず `401`、`404`、`405` のいずれかを返すことも検証する。
