@@ -52,7 +52,10 @@ export async function register(): Promise<void> {
   }
 
   const init = (async () => {
-    const { Miniflare } = await import("miniflare");
+    // Next の instrumentation は Edge 向けにも解析される。Miniflare はローカル Node
+    // 開発時だけ必要な Node 依存なので、production/Edge bundle に取り込ませない。
+    // `webpackIgnore` により Node runtime が development register 時だけ解決する。
+    const { Miniflare } = await import(/* webpackIgnore: true */ "miniflare");
     const miniflare = new Miniflare({
       modules: true,
       script: "export default { fetch() { return new Response('ok'); } }",
