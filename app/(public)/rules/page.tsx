@@ -6,8 +6,8 @@ import { termsVersions } from "@/lib/db/schema";
 import { acceptLatestTerms } from "@/lib/actions/terms";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
-import { sanitizeUserHtml } from "@/lib/utils/sanitizeUserHtml";
 import { sanitizeNextPath } from "#utils/next";
+import { parseLegalMarkdown } from "@/lib/terms/legalMarkdown";
 import {
   DEFAULT_TERMS_MARKDOWN,
   DEFAULT_TERMS_VERSION_LABEL,
@@ -16,39 +16,22 @@ import {
 export const metadata: Metadata = { title: "利用規約" };
 export const dynamic = "force-dynamic";
 
-function renderMarkdown(md: string): string {
-  // 軽量 Markdown ライク変換 (見出し・リスト・段落のみ)
-  const lines = md.split(/\r?\n/);
-  const out: string[] = [];
-  let inList = false;
-  for (const raw of lines) {
-    const line = raw.trimEnd();
-    if (line.startsWith("# ")) {
-      if (inList) { out.push("</ul>"); inList = false; }
-      out.push(`<h2>${escape(line.slice(2))}</h2>`);
-    } else if (line.startsWith("## ")) {
-      if (inList) { out.push("</ul>"); inList = false; }
-      out.push(`<h3>${escape(line.slice(3))}</h3>`);
-    } else if (line.startsWith("* ") || line.startsWith("- ")) {
-      if (!inList) { out.push("<ul>"); inList = true; }
-      out.push(`<li>${escape(line.slice(2))}</li>`);
-    } else if (line === "") {
-      if (inList) { out.push("</ul>"); inList = false; }
-      out.push("");
-    } else {
-      if (inList) { out.push("</ul>"); inList = false; }
-      out.push(`<p>${escape(line)}</p>`);
+function renderMarkdown(markdown: string): React.ReactNode[] {
+  return parseLegalMarkdown(markdown).map((block, blockIndex) => {
+    const key = `${block.type}-${blockIndex}`;
+    if (block.type === "heading2") return <h2 key={key}>{block.text}</h2>;
+    if (block.type === "heading3") return <h3 key={key}>{block.text}</h3>;
+    if (block.type === "list") {
+      return (
+        <ul key={key}>
+          {block.items.map((item, itemIndex) => (
+            <li key={`${key}-${itemIndex}`}>{item}</li>
+          ))}
+        </ul>
+      );
     }
-  }
-  if (inList) out.push("</ul>");
-  return out.join("\n");
-}
-
-function escape(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    return <p key={key}>{block.text}</p>;
+  });
 }
 
 export default async function RulesPage({
@@ -95,10 +78,9 @@ export default async function RulesPage({
         </p>
       </header>
       <div className="fn-page-stack">
-        <article
-          className="fn-surface-panel fn-legal-body"
-          dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(renderMarkdown(body)) }}
-        />
+        <article className="fn-surface-panel fn-legal-body">
+          {renderMarkdown(body)}
+        </article>
         <section className="fn-surface-panel">
           <h2 className="fn-panel-title">利用規約への同意</h2>
           <p className="fn-panel-lead">
