@@ -1,5 +1,6 @@
 import "server-only";
 import { and, desc, eq, inArray } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import type { DB } from "@/lib/db/client";
 import { staticRebuildQueue } from "@/lib/db/schema";
 import { auditAction } from "@/lib/audit/helpers";
@@ -48,6 +49,84 @@ function dedupeStaticRebuildInputs(
 
 const PUBLIC_MISS_COOLDOWN_SEC = 5 * 60;
 const DEFAULT_DONE_COOLDOWN_SEC = 60;
+
+export type StaticRebuildQueueBatch = {
+  statements: BatchItem<"sqlite">[];
+  expectedChanges: number[];
+};
+
+/**
+ * Event Group mutation と同じ D1 batch に queue write を含めるための builder。
+ * ここでは書き込みを実行せず、失敗は呼び出し元へ返して batch を rollback させる。
+ */
+export async function buildStaticRebuildQueueBatch(
+  db: DB,
+  items: EnqueueStaticRebuildInput[],
+): Promise<StaticRebuildQueueBatch> {
+  const statements: BatchItem<"sqlite">[] = [];
+  const expectedChanges: number[] = [];
+  const now = Math.floor(Date.now() / 1000);
+
+  for (const input of dedupeStaticRebuildInputs(items)) {
+    const normalized = normalizeStaticRebuildTarget(input);
+    const active = await db
+      .select()
+      .from(staticRebuildQueue)
+      .where(
+        and(
+          eq(staticRebuildQueue.target_type, normalized.targetType),
+          eq(staticRebuildQueue.target_id, normalized.targetId),
+          inArray(staticRebuildQueue.status, ["pending", "processing"]),
+        )!,
+      )
+      .limit(1);
+    const row = active[0];
+    if (row?.status === "pending") {
+      statements.push(
+        db
+          .update(staticRebuildQueue)
+          .set({
+            reason: normalized.reason,
+            priority: pickHigherPriority(
+              row.priority as "high" | "normal" | "low",
+              normalized.priority ?? "normal",
+            ),
+            requested_by_user_id:
+              normalized.requestedByUserId ?? row.requested_by_user_id,
+            updated_at: now,
+          })
+          .where(
+            and(
+              eq(staticRebuildQueue.id, row.id),
+              eq(staticRebuildQueue.status, "pending"),
+              eq(staticRebuildQueue.updated_at, row.updated_at),
+            )!,
+          ),
+      );
+      expectedChanges.push(1);
+      continue;
+    }
+    if (row?.status === "processing") continue;
+    if (await shouldSkipRecentEnqueue(db, normalized, now)) continue;
+
+    statements.push(
+      db.insert(staticRebuildQueue).values({
+        id: generateId("srb"),
+        target_type: normalized.targetType,
+        target_id: normalized.targetId,
+        reason: normalized.reason,
+        priority: normalized.priority ?? "normal",
+        status: "pending",
+        requested_by_user_id: normalized.requestedByUserId ?? null,
+        created_at: now,
+        updated_at: now,
+      }),
+    );
+    expectedChanges.push(1);
+  }
+
+  return { statements, expectedChanges };
+}
 
 async function shouldSkipRecentEnqueue(
   db: DB,
