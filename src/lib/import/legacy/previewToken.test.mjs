@@ -29,6 +29,25 @@ test("legacy import preview token is HMAC signed and round-trips its claims", as
   assert.equal(claims.anchorNow, payload.anchorNow);
 });
 
+test("legacy import preview token binds expiry, anchor, file hash, and plan hash", async () => {
+  const token = await buildPreviewToken(payload, secret);
+  const claims = await verifyPreviewToken(token, secret);
+  assert.deepEqual(
+    {
+      expiresAt: claims?.expiresAt,
+      anchorNow: claims?.anchorNow,
+      fileHash: claims?.fileHash,
+      planHash: claims?.planHash,
+    },
+    {
+      expiresAt: payload.expiresAt,
+      anchorNow: payload.anchorNow,
+      fileHash: payload.fileHash,
+      planHash: payload.planHash,
+    },
+  );
+});
+
 test("legacy import preview token rejects a changed payload or signing secret", async () => {
   const token = await buildPreviewToken(payload, secret);
   const [claims, signature] = token.split(".");
