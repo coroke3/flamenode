@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { normalizeXId } from "#utils/xid";
 import { parseMemberChapterTime } from "./memberInput.ts";
+import { MAX_ATOMIC_VIDEO_MEMBERS } from "./atomicLimits.ts";
 
 const memberChapterSchema = z.object({
   time: z.string().trim().min(1, "メンバーチャプターの時刻を入力してください。"),
@@ -16,7 +17,10 @@ const memberInputSchema = z.object({
   chapters: z.array(memberChapterSchema).max(30).optional().default([]),
 });
 
-const membersJsonSchema = z.array(memberInputSchema).max(50);
+const membersJsonSchema = z.array(memberInputSchema).max(
+  MAX_ATOMIC_VIDEO_MEMBERS,
+  `合作メンバーは最大${MAX_ATOMIC_VIDEO_MEMBERS}人です。`,
+);
 
 export interface MemberChapterInput {
   time: string;

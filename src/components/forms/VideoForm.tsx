@@ -31,6 +31,10 @@ import {
   resolveStagePermissionFieldsFromJson,
 } from "@/lib/video/formSettings";
 import { redirectForGuardReason } from "@/lib/client/guardRedirect";
+import {
+  MAX_ATOMIC_VIDEO_EVENTS,
+  MAX_ATOMIC_VIDEO_SOFTWARES,
+} from "@/lib/video/atomicLimits";
 
 export interface VideoFormInitialValues {
   display_name?: string;
@@ -901,6 +905,8 @@ export function VideoForm({
             <div className={styles.eventOptionGrid}>
               {eventOptions.map((ev) => {
                 const checked = selectedEventIds.includes(ev.id);
+                const atEventLimit =
+                  !checked && selectedEventIds.length >= MAX_ATOMIC_VIDEO_EVENTS;
                 // slot モードでは slot.event_id を固定で含めるため、編集者でも外せない。
                 const locked =
                   !canEditEvents ||
@@ -915,7 +921,7 @@ export function VideoForm({
                     <input
                       type="checkbox"
                       checked={checked}
-                      disabled={locked}
+                      disabled={locked || atEventLimit}
                       onChange={(e) => {
                         if (locked) return;
                         setSelectedEventIds((prev) =>
@@ -938,6 +944,9 @@ export function VideoForm({
                 );
               })}
             </div>
+            <p className={styles.help}>
+              所属イベントは最大{MAX_ATOMIC_VIDEO_EVENTS}件です。
+            </p>
           </div>
         ) : null}
 
@@ -1054,6 +1063,9 @@ export function VideoForm({
             list="used-software-suggestions"
             disabled={fieldDisabled("descriptions.used_software")}
           />
+          <p className={styles.help}>
+            カンマ区切りで最大{MAX_ATOMIC_VIDEO_SOFTWARES}件まで入力できます。
+          </p>
           {softwareSuggestions.length > 0 ? (
             <p className={styles.help}>
               既存データから候補を出しています。該当しない場合はそのまま入力できます。
