@@ -46,6 +46,15 @@ export const users = sqliteTable("user", {
     .default(sql`(unixepoch())`),
 }, (t) => ({
   discordIdUnique: uniqueIndex("user_discord_id_unique").on(t.discord_id),
+  tosReacceptScan: index("user_tos_reaccept_scan_idx").on(
+    t.is_tos_accepted,
+    t.id,
+  ),
+  tosNotifyScan: index("user_tos_notify_scan_idx").on(
+    t.is_notification_enabled,
+    t.is_tos_accepted,
+    t.id,
+  ),
 }));
 
 export const accounts = sqliteTable(
@@ -783,8 +792,6 @@ export const systemSettings = sqliteTable("system_settings", {
   operation_mode: text("operation_mode", {
     enum: ["normal", "economy", "read_only", "static_only", "maintenance"],
   }).default("normal"),
-  auto_cost_guard_enabled: integer("auto_cost_guard_enabled").default(1),
-  cost_guard_thresholds_json: text("cost_guard_thresholds_json"),
   disabled_features_json: text("disabled_features_json"),
   cost_guard_reason: text("cost_guard_reason"),
   cost_guard_updated_by_user_id: text("cost_guard_updated_by_user_id"),
@@ -915,61 +922,59 @@ export const announcements = sqliteTable("announcements", {
     .default(sql`(unixepoch())`),
 });
 
-export const costUsageSnapshots = sqliteTable("cost_usage_snapshots", {
-  id: text("id").primaryKey(),
-  captured_at: integer("captured_at").notNull(),
-  source: text("source", {
-    enum: ["cloudflare_dashboard", "graphql_analytics", "estimated_local"],
-  }),
-  workers_requests_today: integer("workers_requests_today").default(0),
-  pages_functions_requests_today: integer("pages_functions_requests_today").default(0),
-  d1_rows_read_today: integer("d1_rows_read_today").default(0),
-  d1_rows_written_today: integer("d1_rows_written_today").default(0),
-  r2_storage_gb_month_estimate: real("r2_storage_gb_month_estimate").default(0),
-  r2_class_a_month: integer("r2_class_a_month").default(0),
-  r2_class_b_month: integer("r2_class_b_month").default(0),
-  durable_object_requests_today: integer("durable_object_requests_today").default(0),
-  durable_object_duration_gb_s_today: real("durable_object_duration_gb_s_today").default(0),
-  kv_reads_today: integer("kv_reads_today").default(0),
-  kv_writes_today: integer("kv_writes_today").default(0),
-  queues_operations_today: integer("queues_operations_today").default(0),
-  guard_mode_after_check: text("guard_mode_after_check"),
-  created_at: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-});
-
 // ============================================================
 // 利用規約 / ソフト辞書
 // ============================================================
 
-export const termsVersions = sqliteTable("terms_versions", {
-  id: text("id").primaryKey(),
-  version_label: text("version_label").notNull(),
-  body_markdown: text("body_markdown").notNull(),
-  status: text("status", { enum: ["draft", "published", "archived"] }).default(
-    "draft",
-  ),
-  severity: text("severity", { enum: ["minor", "major"] }).default("minor"),
-  published_at: integer("published_at"),
-  created_by_user_id: text("created_by_user_id").notNull(),
-  created_at: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updated_at: integer("updated_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-});
+export const termsVersions = sqliteTable(
+  "terms_versions",
+  {
+    id: text("id").primaryKey(),
+    version_label: text("version_label").notNull(),
+    body_markdown: text("body_markdown").notNull(),
+    status: text("status", { enum: ["draft", "published", "archived"] }).default(
+      "draft",
+    ),
+    severity: text("severity", { enum: ["minor", "major"] }).default("minor"),
+    published_at: integer("published_at"),
+    created_by_user_id: text("created_by_user_id").notNull(),
+    created_at: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updated_at: integer("updated_at")
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    severityPublished: index("terms_versions_severity_published_idx").on(
+      t.severity,
+      t.published_at,
+      t.updated_at,
+    ),
+  }),
+);
 
-export const userTosConsents = sqliteTable("user_tos_consents", {
-  id: text("id").primaryKey(),
-  user_id: text("user_id").notNull(),
-  terms_version_id: text("terms_version_id").notNull(),
-  consented_at: integer("consented_at").notNull(),
-  consent_context: text("consent_context", {
-    enum: ["entry", "post", "edit", "admin"],
-  }).notNull(),
-});
+export const userTosConsents = sqliteTable(
+  "user_tos_consents",
+  {
+    id: text("id").primaryKey(),
+    user_id: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // fallback-currentも保存するため、terms_versionsへのFKは付けない。
+    terms_version_id: text("terms_version_id").notNull(),
+    consented_at: integer("consented_at").notNull(),
+    consent_context: text("consent_context", {
+      enum: ["entry", "post", "edit", "admin"],
+    }).notNull(),
+  },
+  (t) => ({
+    byUserTerms: index("user_tos_consents_user_terms_idx").on(
+      t.user_id,
+      t.terms_version_id,
+    ),
+  }),
+);
 
 export const softwareCatalog = sqliteTable("software_catalog", {
   id: text("id").primaryKey(),

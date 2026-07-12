@@ -5,6 +5,18 @@
 > Verified against commit: `5f48e0f` + working tree
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
 
+## 2026-07-13 — `0002_terms_reaccept_manual_cost_guard.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | destructive cleanup + additive indexes/FK |
+| Summary | 規約再同意のbounded検索を追加し、CostGuardを手動制御へ統一 |
+| Tables | `user`、`terms_versions`、`user_tos_consents`、`system_settings`。`cost_usage_snapshots`は削除 |
+| Compatibility | runtime fallbackなし。新コードの前に運用者がbackupとmigration適用を確認 |
+| Data loss | 未計測snapshot tableと未使用の自動判定設定2列を削除 |
+| Rollback | migration前backupから手動復元 |
+| Validation | schema/history検査、再同意/CostGuard unit・integration |
+
 ## 2026-07-13 — `0001_spreadsheet_import_runs.sql`
 
 | 項目 | 内容 |

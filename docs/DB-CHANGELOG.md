@@ -16,3 +16,7 @@
 - `0001_spreadsheet_import_runs.sql`を追加。
 - Spreadsheet previewの署名nonceを短期保存し、本体mutation・監査と同じD1 batchで一回だけ消費する。
 - consumed/expired runは既存`content-jobs` cleanupで上限付き削除する。
+- `0002_terms_reaccept_manual_cost_guard.sql`を追加。
+- 規約再同意を全user更新ではなく同意履歴とkeyset検索から導出し、必要な索引と`user_tos_consents.user_id` FKを追加。
+- 実測collectorのない自動CostGuard列・snapshot tableを削除し、手動mode/featureと15分overrideへ統一。
+- `0002`は破壊的cleanupを含むため、Remote D1では運用者がbackup確認後に明示適用する。

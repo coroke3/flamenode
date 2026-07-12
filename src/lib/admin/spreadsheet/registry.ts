@@ -38,7 +38,6 @@ export const SPREADSHEET_COLUMN_POLICIES: Record<string, SpreadsheetColumnPolicy
   "videos.music_reference_url": { url: true, maxLength: 2048 },
   "x_user_icons.icon_url": { url: true, maxLength: 2048 },
   "x_user_youtube_channels.youtube_channel_url": { url: true, maxLength: 2048 },
-  "system_settings.cost_guard_thresholds_json": { json: true, maxLength: 100_000 },
   "system_settings.disabled_features_json": { json: true, maxLength: 100_000 },
   "events.user_video_edit_permission_keys_json": { json: true, maxLength: 100_000 },
   "announcements.body": { maxLength: 200_000 },
@@ -142,11 +141,6 @@ export const SPREADSHEET_TABLE_OVERRIDES: Record<string, SpreadsheetTableOverrid
     },
     audit_logs: { label: "監査ログ", group: "システム", mode: "readonly" },
     system_settings: { label: "システム設定", group: "システム", mode: "editable" },
-    cost_usage_snapshots: {
-      label: "コスト snapshot",
-      group: "システム",
-      mode: "readonly",
-    },
   };
 
 /** スプレッドシートから除外するシステムテーブル */
@@ -211,8 +205,7 @@ function inferGroup(table: string): string {
   if (
     table === "notification_outbox" ||
     table === "audit_logs" ||
-    table === "system_settings" ||
-    table === "cost_usage_snapshots"
+    table === "system_settings"
   ) {
     return "システム";
   }

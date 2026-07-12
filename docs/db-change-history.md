@@ -4,6 +4,18 @@
 > Last verified: 2026-07-12
 > Source of truth: `src/lib/db/schema.ts`, `migrations/` active path
 
+## 2026-07-13 — `0002_terms_reaccept_manual_cost_guard.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | destructive cleanup + additive indexes/FK |
+| Summary | 規約再同意を履歴からbounded検索する索引と同意user FKを追加し、未計測の自動CostGuard正本を削除 |
+| Reason | major公開時の全user更新/COUNTを廃止し、keyset通知をD1 Free枠内で処理する。実測collectorがない自動判定を手動mode/feature/15分overrideへ統一する |
+| Data migration | `user_tos_consents`を同一列で再構築し、`user.id`へのcascade FKを追加 |
+| Data loss | `cost_usage_snapshots`、`system_settings.auto_cost_guard_enabled`、`cost_guard_thresholds_json`を削除 |
+| Rollback | migration前のD1 backupから運用者が手動復元 |
+| Validation | `check:db-schema`、`check:db-history`、再同意/CostGuard unit・integration |
+
 ## 2026-07-13 — `0001_spreadsheet_import_runs.sql`
 
 | 項目 | 内容 |

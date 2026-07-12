@@ -10,6 +10,7 @@
 | --- | --- | --- |
 | Active | `migrations/0000_flame_node_baseline.sql` | 空D1へ最初に適用する現行baseline |
 | Active | `migrations/0001_spreadsheet_import_runs.sql` | Spreadsheet previewの一回限りrun |
+| Active | `migrations/0002_terms_reaccept_manual_cost_guard.sql` | 規約再同意索引/FKと手動CostGuardへの整理 |
 | Active | [`db-change-history.md`](../db-change-history.md) | 現行DB変更履歴 |
 | Planned | `docs/implementation-backlog.md` | 未着手またはブロック中の要求。実装済みと記載しない |
 | Historical | `migrations/historical/` | 旧migration本文の保存。現行runtimeでは参照・適用しない |
