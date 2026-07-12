@@ -1,8 +1,8 @@
 # FlameNode ローカル動作手順書
 
 > Status: Active
-> Last verified: 2026-07-11
-> Verified against commit: `5f48e0f` + working tree
+> Last verified: 2026-07-12
+> Verified against commit: `00be565` + working tree
 > Source of truth: `package.json`, `migrations/0000_flame_node_baseline.sql`, `docs/operations/migrations.md`
 
 このドキュメントは、FlameNode を **手元の PC で動かして動作確認する**ための手順をまとめたものです。

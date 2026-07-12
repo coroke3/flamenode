@@ -1,6 +1,17 @@
 # FlameNode 要求カバレッジマップ
 
+> Status: Active
+> Last verified: 2026-07-12
+> Verified against commit: `00be565` + working tree
+> Source of truth: `設計/`, `src/lib/db/schema.ts`, `docs/implementation-backlog.md`
+
 このファイルは `flamenode_revision_instructions_answered.md` の内容を、Claude Codeが実装時に照合しやすい形へ変換した要求マップである。
+
+## 現行統合状況
+
+- 01〜07 統合仕様の schema、認証・権限、原子性、監査・復元、owner 保護、Cloudflare Pages / Worker / CI、主要 UX、文書検査はコードへ反映済み。
+- この表はプロダクト要求の判断根拠であり、各行を一律に「実装済み」と宣言する一覧ではない。保留中のプロダクト判断と将来拡張はそのまま明示する。
+- 実環境で残る作業は Remote D1 への baseline 適用、Cloudflare resource / secret 設定、Discord OAuth 設定、デプロイ後 smoke test であり、運用者の明示操作に限定する。
 
 ## 0. 読み方
 
@@ -199,7 +210,7 @@
 | P-3 | 確認文字列 | 必要に応じて要求。 |
 | P-4 | 監査ログ | 重要操作はすべて記録。 |
 | P-5 | 差分表示 | JSONそのままでなく変更前後の差分として表示。 |
-| P-6 | 物理削除 | 要再検討。復元機能未実装の間は危険操作を制限。 |
+| P-6 | 物理削除 | 復元アダプターと完全な before snapshot がある操作だけ復元可能とする。復元直前に競合を再検証し、対象変更・復元履歴・RESTORE監査を単一 D1 batch で確定する。復元不能な物理削除は理由を明示して制限する。 |
 
 ## Q. 管理画面・運営画面UX
 

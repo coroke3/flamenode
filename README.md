@@ -1,8 +1,8 @@
 # FlameNode
 
 > Status: Active
-> Last verified: 2026-07-11
-> Verified against commit: `5f48e0f` + working tree
+> Last verified: 2026-07-12
+> Verified against commit: `00be565` + working tree
 > Source of truth: `src/lib/db/schema.ts`, `migrations/0000_flame_node_baseline.sql`, `docs/README.md`
 
 > 映像（フレーム）の結節点（ノード）。YouTube 埋め込みを利用した動画プラットフォーム。

@@ -1,8 +1,8 @@
 # FlameNode デプロイ手順書
 
 > Status: Active
-> Last verified: 2026-07-11
-> Verified against commit: `5f48e0f` + working tree
+> Last verified: 2026-07-12
+> Verified against commit: `00be565` + working tree
 > Source of truth: `package.json`, `wrangler.toml`, `workers/*/wrangler.toml`, `docs/operations/migrations.md`
 
 ## Current Worker Layout
