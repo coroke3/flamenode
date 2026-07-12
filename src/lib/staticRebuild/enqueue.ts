@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DB } from "@/lib/db/client";
 import { staticRebuildQueue } from "@/lib/db/schema";
@@ -106,7 +106,36 @@ export async function buildStaticRebuildQueueBatch(
       expectedChanges.push(1);
       continue;
     }
-    if (row?.status === "processing") continue;
+    if (row?.status === "processing") {
+      statements.push(
+        db
+          .update(staticRebuildQueue)
+          .set({
+            reason: normalized.reason,
+            priority: pickHigherPriority(
+              row.priority as "high" | "normal" | "low",
+              normalized.priority ?? "normal",
+            ),
+            requested_by_user_id:
+              normalized.requestedByUserId ?? row.requested_by_user_id,
+            lease_token: null,
+            lease_expires_at: null,
+            updated_at: now,
+          })
+          .where(
+            and(
+              eq(staticRebuildQueue.id, row.id),
+              eq(staticRebuildQueue.status, "processing"),
+              eq(staticRebuildQueue.updated_at, row.updated_at),
+              row.lease_token
+                ? eq(staticRebuildQueue.lease_token, row.lease_token)
+                : isNull(staticRebuildQueue.lease_token),
+            )!,
+          ),
+      );
+      expectedChanges.push(1);
+      continue;
+    }
     if (await shouldSkipRecentEnqueue(db, normalized, now)) continue;
 
     statements.push(
@@ -178,38 +207,53 @@ export async function enqueueStaticRebuild(
   const priority = normalized.priority ?? "normal";
 
   try {
-    const existing = await db
-      .select()
-      .from(staticRebuildQueue)
-      .where(
+    for (let enqueueAttempt = 0; enqueueAttempt < 2; enqueueAttempt += 1) {
+      const existing = await db
+        .select()
+        .from(staticRebuildQueue)
+        .where(
+          and(
+            eq(staticRebuildQueue.target_type, normalized.targetType),
+            eq(staticRebuildQueue.target_id, normalized.targetId),
+            inArray(staticRebuildQueue.status, ["pending", "processing"]),
+          )!,
+        )
+        .limit(1);
+
+      const row = existing[0];
+      if (!row) break;
+
+      const update = db.update(staticRebuildQueue).set({
+        reason: normalized.reason,
+        priority: pickHigherPriority(
+          row.priority as "high" | "normal" | "low",
+          priority,
+        ),
+        requested_by_user_id:
+          normalized.requestedByUserId ?? row.requested_by_user_id,
+        ...(row.status === "processing"
+          ? { lease_token: null, lease_expires_at: null }
+          : {}),
+        updated_at: now,
+      });
+      const result = await update.where(
         and(
-          eq(staticRebuildQueue.target_type, normalized.targetType),
-          eq(staticRebuildQueue.target_id, normalized.targetId),
-          inArray(staticRebuildQueue.status, ["pending", "processing"]),
+          eq(staticRebuildQueue.id, row.id),
+          eq(staticRebuildQueue.status, row.status),
+          eq(staticRebuildQueue.updated_at, row.updated_at),
+          ...(row.status === "processing"
+            ? [
+                row.lease_token
+                  ? eq(staticRebuildQueue.lease_token, row.lease_token)
+                  : isNull(staticRebuildQueue.lease_token),
+              ]
+            : []),
         )!,
-      )
-      .limit(1);
-
-    const row = existing[0];
-    if (row?.status === "pending") {
-      await db
-        .update(staticRebuildQueue)
-        .set({
-          reason: normalized.reason,
-          priority: pickHigherPriority(
-            row.priority as "high" | "normal" | "low",
-            priority,
-          ),
-          requested_by_user_id:
-            normalized.requestedByUserId ?? row.requested_by_user_id,
-          updated_at: now,
-        })
-        .where(eq(staticRebuildQueue.id, row.id));
-      return;
-    }
-
-    if (row?.status === "processing") {
-      return;
+      );
+      if ((result.meta?.changes ?? 0) === 1) return;
+      if (enqueueAttempt === 1) {
+        throw new Error("static rebuild queue active row changed during enqueue");
+      }
     }
 
     if (await shouldSkipRecentEnqueue(db, normalized, now)) {
