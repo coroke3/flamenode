@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import { assertCanEditEvent } from "@/lib/auth/ownership";
@@ -19,11 +20,11 @@ export interface SlotActionResult {
   created?: number;
 }
 
-// strict audit chunking が共通化された後も caller 側で再計算しやすいよう、上限を明示する。
-// 2行なら slot INSERT の bind、queue builder 最大2 query、release通知最大2 query、
-// strict audit準備2 query/行、および action prequery を合わせた最悪経路が10 query予約内に収まり、
-// D1 100 bind/query と batch内の通知・queue statement予算も超えない。
-const MAX_ATOMIC_SLOT_ROWS = 2;
+// D1 Free の 50 query / statement あたり 100 bind を超えない caller 側上限。
+// 3行時の最大は条件付き slot INSERT 54 bind、strict audit INSERT 60 bind。
+// batch release の最悪経路も、権限・対象・audit・notification・queue の事前 query と
+// mutation/assert/audit/notification/queue の batch statement を合わせて 27 query に収まる。
+const MAX_ATOMIC_SLOT_ROWS = 3;
 
 type SlotRow = typeof slots.$inferSelect;
 
@@ -61,7 +62,13 @@ function versionedWhere(
   status?: "available" | "reserved" | "submitted",
 ) {
   const versions = or(
-    ...rows.map((row) => and(eq(slots.id, row.id), eq(slots.version, row.version))),
+    ...rows.map((row) =>
+      and(
+        eq(slots.id, row.id),
+        eq(slots.version, row.version),
+        eq(slots.updated_at, row.updated_at),
+      ),
+    ),
   );
   return and(
     eq(slots.event_id, eventId),
@@ -353,6 +360,23 @@ export async function batchReleaseReservedSlots(formData: FormData): Promise<Slo
   const rows = [...byId.values()];
   if (rows.length > MAX_ATOMIC_SLOT_ROWS) return { ok: false, message: `reservation_group を含む処理対象は ${MAX_ATOMIC_SLOT_ROWS} 件以内にしてください。` };
   if (rows.some((row) => row.status !== "reserved")) return { ok: false, message: "reservation_group 全体が予約中ではありません。" };
+  const notifications: BatchItem<"sqlite">[] = [];
+  for (const groupId of groupIds) {
+    const representative = rows.find((row) => row.reservation_group_id === groupId);
+    if (representative) {
+      const statement = await buildReleaseNotification(
+        db,
+        representative,
+        rows.filter((row) => row.reservation_group_id === groupId).map((row) => row.id),
+        groupId,
+      );
+      if (statement) notifications.push(statement);
+    }
+  }
+  for (const row of selected.filter((candidate) => !candidate.reservation_group_id)) {
+    const statement = await buildReleaseNotification(db, row, [row.id], null);
+    if (statement) notifications.push(statement);
+  }
   const now = Math.floor(Date.now() / 1000);
   const queueBatch = await buildEventQueueBatch(db, eventId, "slot_admin_batch_release", guard.userId);
   try {
@@ -360,6 +384,7 @@ export async function batchReleaseReservedSlots(formData: FormData): Promise<Slo
       mutationStatements: [db.update(slots).set({ status: "available", x_user_id: null, reserved_by_user_id: null, display_name: null, reservation_group_id: null, video_id: null, updated_at: now, version: sql`${slots.version} + 1` }).where(versionedWhere(eventId, rows, "reserved")), ...queueBatch.statements],
       expectedMutationChanges: [rows.length, ...queueBatch.expectedChanges],
       audits: rows.map((row) => ({ table_name: "slots", target_id: row.id, operation: "UPDATE", before: snapshot(row), after: { ...snapshot(row), status: "available", x_user_id: null, reserved_by_user_id: null, display_name: null, reservation_group_id: null, video_id: null, updated_at: now, version: row.version + 1 }, actor_user_id: guard.userId, retention_class: "long_audit", strict: true })),
+      postAuditStatements: notifications,
     });
   } catch (error) { return mutationError(error); }
   revalidateEventSlotPaths(eventId);

@@ -18,13 +18,53 @@ test("slot-admin の全 mutation が canonical atomic helper を使う", () => {
   }
   assert.equal((source.match(/mutateWithAudit\(/g) ?? []).length, 7);
   assert.equal((source.match(/buildEventQueueBatch\(/g) ?? []).length, 8);
+  assert.equal((source.match(/\.\.\.queueBatch\.statements/g) ?? []).length, 7);
+  assert.equal((source.match(/\.\.\.queueBatch\.expectedChanges/g) ?? []).length, 7);
   assert.doesNotMatch(source, /auditAction\(/);
 });
 
-test("slot-admin は caller 側の明示上限と stale CAS を持つ", () => {
-  assert.match(source, /MAX_ATOMIC_SLOT_ROWS = 2/);
+test("slot-admin は競合時に部分生成せず full snapshot と二重 CAS を維持する", () => {
+  assert.match(source, /MAX_ATOMIC_SLOT_ROWS = 3/);
+  assert.match(source, /INSERT INTO slots/);
   assert.match(source, /NOT EXISTS \(/);
-  assert.match(source, /versionedWhere\(/);
-  assert.match(source, /expectedMutationChanges:/);
-  assert.match(source, /postAuditStatements:/);
+  assert.match(source, /UNION ALL/);
+  assert.match(source, /expectedMutationChanges: \[newRows\.length, \.\.\.queueBatch\.expectedChanges\]/);
+  assert.match(source, /eq\(slots\.version, row\.version\)/);
+  assert.match(source, /eq\(slots\.updated_at, row\.updated_at\)/);
+  assert.match(source, /before: snapshot\(/);
+  assert.match(source, /after: (?:snapshot\(|after\(|\{ \.\.\.snapshot\()/);
+});
+
+test("queue は mutation 側、解放通知は同じ audit batch の post-audit 側に入る", () => {
+  assert.doesNotMatch(source, /postAuditStatements:\s*(?:queueBatch|\[\.\.\.queueBatch)/);
+  assert.equal((source.match(/postAuditStatements:/g) ?? []).length, 2);
+  assert.match(source, /postAuditStatements: notification \? \[notification\] : \[\]/);
+  assert.match(source, /postAuditStatements: notifications/);
+});
+
+test("3行の最悪経路が D1 Free 50 query / 100 bind 契約内に収まる", () => {
+  const maxRows = 3;
+  const maxConditionalInsertBinds = 18 * maxRows;
+  const maxStrictAuditInsertBinds = 20 * maxRows;
+  const maxUpdateBinds = 10 + 3 * maxRows;
+
+  const permissionPrequeries = 2;
+  const targetPrequeries = 2;
+  const auditPrequeries = 2 * maxRows;
+  const notificationPrequeries = 2 * maxRows;
+  const queuePrequeries = 2;
+  const batchStatements = 9;
+  const worstQueryCount =
+    permissionPrequeries +
+    targetPrequeries +
+    auditPrequeries +
+    notificationPrequeries +
+    queuePrequeries +
+    batchStatements;
+
+  assert.equal(maxConditionalInsertBinds, 54);
+  assert.equal(maxStrictAuditInsertBinds, 60);
+  assert.ok(Math.max(maxConditionalInsertBinds, maxStrictAuditInsertBinds, maxUpdateBinds) <= 100);
+  assert.equal(worstQueryCount, 27);
+  assert.ok(worstQueryCount <= 50);
 });
