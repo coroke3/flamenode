@@ -25,9 +25,12 @@ const importRouteSource = await readFile(
 
 test("spreadsheet writes use one strict audit batch", () => {
   assert.match(querySource, /mutateWithAudit\(db/);
-  assert.match(querySource, /expectedMutationChanges: mutations\.map\(\(\) => 1\)/);
+  assert.match(querySource, /expectedMutationChanges: allMutations\.map\(\(\) => 1\)/);
   assert.match(querySource, /strict: true/);
   assert.match(querySource, /after: row/);
+  assert.match(querySource, /buildPreviewRunConsumptionMutation/);
+  assert.match(querySource, /isNull\(spreadsheetImportRuns\.consumed_at\)/);
+  assert.match(querySource, /gte\(spreadsheetImportRuns\.expires_at, consumedAt\)/);
   assert.doesNotMatch(querySource, /await writeHistory/);
 });
 
@@ -41,16 +44,16 @@ test("spreadsheet import rejects invalid rows before mutation and caps D1 batch 
   assert.match(querySource, /if \(errors\.length > 0\) return \{ inserted: 0/);
   assert.match(querySource, /if \(!isSpreadsheetImportBatchSizeAllowed\(opts\.rows\.length\)\)/);
   assert.match(constantsSource, /SPREADSHEET_IMPORT_MAX_ROWS = 500/);
-  assert.equal(SPREADSHEET_IMPORT_MAX_BATCH_ROWS, 15);
+  assert.equal(SPREADSHEET_IMPORT_MAX_BATCH_ROWS, 14);
 });
 
-test("spreadsheet D1 budget accepts 15 rows and rejects 16 without weakening reserve", () => {
+test("spreadsheet D1 budget accepts 14 guarded rows and rejects 15 without weakening reserve", () => {
   assert.equal(SPREADSHEET_D1_BATCH_STATEMENT_LIMIT, 50);
   assert.equal(SPREADSHEET_D1_BATCH_STATEMENT_RESERVE, 10);
-  assert.equal(estimateSpreadsheetImportD1Statements(15), 50);
-  assert.equal(estimateSpreadsheetImportD1Statements(16), 52);
-  assert.equal(isSpreadsheetImportBatchSizeAllowed(15), true);
-  assert.equal(isSpreadsheetImportBatchSizeAllowed(16), false);
+  assert.equal(estimateSpreadsheetImportD1Statements(14), 50);
+  assert.equal(estimateSpreadsheetImportD1Statements(15), 52);
+  assert.equal(isSpreadsheetImportBatchSizeAllowed(14), true);
+  assert.equal(isSpreadsheetImportBatchSizeAllowed(15), false);
 });
 
 test("spreadsheet import does not silently omit readonly or unknown columns", () => {

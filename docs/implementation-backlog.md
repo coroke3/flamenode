@@ -3,7 +3,7 @@
 > Status: Planned
 > Last verified: 2026-07-12
 > Verified against commit: `00be565` + working tree
-> Source of truth: `src/lib/db/schema.ts`, `migrations/0000_flame_node_baseline.sql`, `docs/operations/README.md`
+> Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `docs/operations/README.md`
 
 ## 統合実装の完了状況
 

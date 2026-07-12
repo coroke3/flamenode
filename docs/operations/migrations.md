@@ -3,12 +3,12 @@
 > Status: Active
 > Last verified: 2026-07-11
 > Verified against commit: `5f48e0f` + working tree
-> Source of truth: `src/lib/db/schema.ts`, `migrations/0000_flame_node_baseline.sql`
+> Source of truth: `src/lib/db/schema.ts`, `migrations/` active path
 
 ## 正本
 
 - DB schemaの正本は `src/lib/db/schema.ts`。
-- 空のD1へ適用するactive migrationは `migrations/0000_flame_node_baseline.sql` のみ。
+- active migrationは `0000_flame_node_baseline.sql`、`0001_spreadsheet_import_runs.sql` の番号順で適用する。
 - 旧migration本文は `migrations/historical/` に保存する履歴資料であり、現行の適用対象ではない。
 - D1が正本であり、R2/KVの静的JSONは公開配信用キャッシュである。
 
@@ -32,6 +32,13 @@ npm.cmd run check:db-history
 ## Remote D1
 
 Remote D1の作成、backup、migration適用、rollbackは運用者がCloudflareの手順に従い、対象D1とmigrationを確認して明示的に行う。CIとCodexはRemote D1を変更しない。
+
+現行の適用順は次のとおり。
+
+1. `0000_flame_node_baseline.sql`
+2. `0001_spreadsheet_import_runs.sql`
+
+`0001`適用前はSpreadsheet preview/applyがfail-closedになる。先にコードだけをdeployせず、運用者がbackup、migration、Pagesの順序を確認する。
 
 本番適用前に、schemaとmigrationの差分、backup、適用対象、復旧手順を記録する。Remote D1の初期化や自動削除は行わない。
 

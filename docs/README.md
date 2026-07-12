@@ -3,7 +3,7 @@
 > Status: Active
 > Last verified: 2026-07-12
 > Verified against commit: `00be565` + working tree
-> Source of truth: `src/lib/db/schema.ts`, `migrations/0000_flame_node_baseline.sql`, `wrangler.toml`, `package.json`
+> Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `wrangler.toml`, `package.json`
 
 現行のCloudflare構成は Pages + `@cloudflare/next-on-pages`、D1、R2、KV、3本のCron Workerです。
 

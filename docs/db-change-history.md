@@ -2,7 +2,19 @@
 
 > Status: Active
 > Last verified: 2026-07-12
-> Source of truth: `src/lib/db/schema.ts`, `migrations/0000_flame_node_baseline.sql`
+> Source of truth: `src/lib/db/schema.ts`, `migrations/` active path
+
+## 2026-07-13 — `0001_spreadsheet_import_runs.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | additive |
+| Summary | Spreadsheet preview tokenをHMAC署名し、一回限りnonceをD1で原子的に消費する |
+| Reason | stable SHA256一致だけではtokenを偽造・再利用できるため、実行者・payload・schema・期限を署名してreplayを防止する |
+| Data migration | なし。新規短期run tableのみ |
+| Data loss | none |
+| Rollback | manual |
+| Validation | `check:db-schema`、`check:db-history`、unit/integration |
 
 ## 2026-07-11 — `0000_flame_node_baseline.sql`
 

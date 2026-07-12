@@ -1,8 +1,10 @@
 import "server-only";
-import { sql } from "drizzle-orm";
+import { and, eq, gte, isNull, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDatabase } from "@/lib/cloudflare";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { spreadsheetImportRuns } from "@/lib/db/schema";
+import type { SpreadsheetImportPreviewClaims } from "./importPreviewToken";
 import type { SpreadsheetTableDef } from "./registry";
 import {
   isSpreadsheetColumnEditable,
@@ -453,14 +455,65 @@ function buildDeleteMutation(
 
 async function executeSpreadsheetMutations(
   mutations: SpreadsheetMutation[],
+  previewRun?: SpreadsheetImportPreviewClaims,
 ): Promise<void> {
-  if (mutations.length === 0) return;
+  const allMutations = previewRun
+    ? [buildPreviewRunConsumptionMutation(previewRun), ...mutations]
+    : mutations;
+  if (allMutations.length === 0) return;
   const db = spreadsheetDb();
   await mutateWithAudit(db, {
-    mutationStatements: mutations.map((mutation) => mutation.statement),
-    expectedMutationChanges: mutations.map(() => 1),
-    audits: mutations.map((mutation) => mutation.audit),
+    mutationStatements: allMutations.map((mutation) => mutation.statement),
+    expectedMutationChanges: allMutations.map(() => 1),
+    audits: allMutations.map((mutation) => mutation.audit),
   });
+}
+
+function buildPreviewRunConsumptionMutation(
+  claims: SpreadsheetImportPreviewClaims,
+): SpreadsheetMutation {
+  const consumedAt = Math.floor(Date.now() / 1000);
+  const before = {
+    nonce: claims.nonce,
+    operator_user_id: claims.operatorUserId,
+    table_name: claims.table,
+    mode: claims.mode,
+    payload_hash: claims.payloadHash,
+    schema_fingerprint: claims.schemaFingerprint,
+    expires_at: claims.expiresAt,
+    consumed_at: null,
+    created_at: claims.issuedAt,
+  };
+  const after = { ...before, consumed_at: consumedAt };
+  const db = spreadsheetDb();
+  return {
+    statement: db
+      .update(spreadsheetImportRuns)
+      .set({ consumed_at: consumedAt })
+      .where(and(
+        eq(spreadsheetImportRuns.nonce, claims.nonce),
+        eq(spreadsheetImportRuns.operator_user_id, claims.operatorUserId),
+        eq(spreadsheetImportRuns.table_name, claims.table),
+        eq(spreadsheetImportRuns.mode, claims.mode),
+        eq(spreadsheetImportRuns.payload_hash, claims.payloadHash),
+        eq(spreadsheetImportRuns.schema_fingerprint, claims.schemaFingerprint),
+        eq(spreadsheetImportRuns.expires_at, claims.expiresAt),
+        eq(spreadsheetImportRuns.created_at, claims.issuedAt),
+        isNull(spreadsheetImportRuns.consumed_at),
+        gte(spreadsheetImportRuns.expires_at, consumedAt),
+      )!),
+    audit: {
+      table_name: "spreadsheet_import_runs",
+      target_id: claims.nonce,
+      operation: "UPDATE",
+      before,
+      after,
+      actor_user_id: claims.operatorUserId,
+      retention_class: "long_audit",
+      strict: true,
+      context: "admin_spreadsheet",
+    },
+  };
 }
 
 export async function fetchSpreadsheetPage(opts: {
@@ -654,11 +707,22 @@ export async function applySpreadsheetImport(
     mode: SpreadsheetImportMode;
     rows: Record<string, string | null>[];
     operatorId: string;
+    previewRun: SpreadsheetImportPreviewClaims;
   },
   existingCtx?: SpreadsheetTableContext,
 ): Promise<SpreadsheetImportResult> {
   const ctx = existingCtx ?? (await resolveSpreadsheetTableContext(opts.table));
   assertTableEditable(ctx);
+
+  if (
+    opts.previewRun.operatorUserId !== opts.operatorId ||
+    opts.previewRun.table !== ctx.def.table ||
+    opts.previewRun.mode !== opts.mode ||
+    JSON.stringify(opts.previewRun.columns) !== JSON.stringify(ctx.columnNames) ||
+    JSON.stringify(opts.previewRun.primaryKeys) !== JSON.stringify(ctx.primaryKeys)
+  ) {
+    throw new Error("preview_required");
+  }
 
   if (opts.rows.length > SPREADSHEET_IMPORT_MAX_ROWS) {
     throw new Error("too_many_rows");
@@ -722,6 +786,6 @@ export async function applySpreadsheetImport(
     else if (planned.kind === "updated") updated += 1;
     else skipped += 1;
   }
-  await executeSpreadsheetMutations(mutations);
+  await executeSpreadsheetMutations(mutations, opts.previewRun);
   return { inserted, updated, skipped, errors: [] };
 }

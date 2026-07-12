@@ -3,7 +3,7 @@
 > Status: Active
 > Last verified: 2026-07-12
 > Verified against commit: `00be565` + working tree
-> Source of truth: `package.json`, `migrations/0000_flame_node_baseline.sql`, `docs/operations/migrations.md`
+> Source of truth: `package.json`, `migrations/` active path, `docs/operations/migrations.md`
 
 このドキュメントは、FlameNode を **手元の PC で動かして動作確認する**ための手順をまとめたものです。
 本番デプロイ手順は `DEPLOY.md` を参照してください。ここではローカルで完結する作業だけを扱います。
@@ -108,6 +108,7 @@ cp .dev.vars.example .dev.vars
 ```env
 # .dev.vars
 AUTH_SECRET="<openssl rand -hex 32 で生成した値>"
+SPREADSHEET_IMPORT_PREVIEW_SECRET="<独立した32文字以上のランダム値>"
 AUTH_TRUST_HOST="true"
 
 AUTH_DISCORD_ID="<Discord Developer Portal の Client ID>"

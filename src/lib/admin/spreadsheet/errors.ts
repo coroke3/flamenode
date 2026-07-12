@@ -57,6 +57,7 @@ export function spreadsheetHttpStatus(message: string): number {
       return 409;
     case "row_not_found":
       return 404;
+    case "preview_unavailable":
     case SPREADSHEET_ERROR.DB_UNAVAILABLE:
       return 503;
     default:

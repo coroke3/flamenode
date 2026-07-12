@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-/** Active baseline と schema.ts の同期を、Node 20 でも実行できる静的検査で確認する。 */
+/** Active migration列とschema.tsの同期をNode 20で検証する。 */
 import fs from "node:fs";
 import path from "node:path";
 
 const ROOT = process.cwd();
 const MIGRATIONS = path.join(ROOT, "migrations");
-const BASELINE = path.join(MIGRATIONS, "0000_flame_node_baseline.sql");
+const BASELINE_NAME = "0000_flame_node_baseline.sql";
+const BASELINE = path.join(MIGRATIONS, BASELINE_NAME);
 const SCHEMA = path.join(ROOT, "src", "lib", "db", "schema.ts");
 const VERSION = "2026-07-11-baseline-1";
 
@@ -15,29 +16,40 @@ function fail(message) {
 }
 
 if (!fs.existsSync(BASELINE)) {
-  fail("active baseline migrations/0000_flame_node_baseline.sql がありません。");
+  fail(`active baseline migrations/${BASELINE_NAME} がありません。`);
 } else {
-  const activeSql = fs.readFileSync(BASELINE, "utf8");
   const activeFiles = fs
     .readdirSync(MIGRATIONS, { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith(".sql"))
     .map((entry) => entry.name)
     .sort();
-  if (activeFiles.length !== 1 || activeFiles[0] !== "0000_flame_node_baseline.sql") {
-    fail(`active migrationはbaseline一つだけでなければなりません: ${activeFiles.join(", ") || "なし"}`);
+  if (
+    activeFiles[0] !== BASELINE_NAME ||
+    activeFiles.some((name) => !/^\d{4}_[a-z0-9_]+\.sql$/.test(name))
+  ) {
+    fail(
+      `active migrationは0000 baselineから番号順で配置してください: ${activeFiles.join(", ") || "なし"}`,
+    );
   }
-  if (!activeSql.includes(`VALUES ('current', '${VERSION}', unixepoch())`)) {
+
+  const baselineSql = fs.readFileSync(BASELINE, "utf8");
+  const activeSql = activeFiles
+    .map((name) => fs.readFileSync(path.join(MIGRATIONS, name), "utf8"))
+    .join("\n");
+  if (!baselineSql.includes(`VALUES ('current', '${VERSION}', unixepoch())`)) {
     fail(`schema meta version ${VERSION} がbaselineにありません。`);
   }
-  if (/\b(?:ALTER|DROP)\s+TABLE\b/i.test(activeSql)) {
+  if (/\b(?:ALTER|DROP)\s+TABLE\b/i.test(baselineSql)) {
     fail("baselineにALTER/DROP TABLEを含めないでください。最終schemaのCREATEだけを置きます。");
   }
 
   const schemaText = fs.readFileSync(SCHEMA, "utf8");
-  const tableNames = [...schemaText.matchAll(/sqliteTable\("([a-zA-Z0-9_]+)"/g)].map((match) => match[1]);
+  const tableNames = [
+    ...schemaText.matchAll(/sqliteTable\("([a-zA-Z0-9_]+)"/g),
+  ].map((match) => match[1]);
   for (const tableName of tableNames) {
     if (!activeSql.includes(`CREATE TABLE "${tableName}"`)) {
-      fail(`schema.tsのtable ${tableName} がactive baselineにありません。`);
+      fail(`schema.tsのtable ${tableName} がactive migration列にありません。`);
     }
   }
   for (const required of [
@@ -46,14 +58,17 @@ if (!fs.existsSync(BASELINE)) {
     'CREATE TABLE "worker_leases"',
     'CREATE TABLE "static_artifacts"',
     'CREATE TABLE "flamenode_schema_meta"',
+    'CREATE TABLE "spreadsheet_import_runs"',
   ]) {
-    if (!activeSql.includes(required)) fail(`必須定義がbaselineにありません: ${required}`);
+    if (!activeSql.includes(required)) {
+      fail(`必須定義がactive migration列にありません: ${required}`);
+    }
   }
 }
 
 if (!fs.existsSync(path.join(MIGRATIONS, "historical"))) {
-  fail("旧migrationを保存する migrations/historical がありません。");
+  fail("旧migrationを保存するmigrations/historicalがありません。");
 }
 
 if (process.exitCode) process.exit(process.exitCode);
-console.log("[check:db-schema] OK: active baseline and schema.ts are aligned.");
+console.log("[check:db-schema] OK: active migrations and schema.ts are aligned.");

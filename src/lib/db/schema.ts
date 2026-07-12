@@ -1270,6 +1270,32 @@ export const auditLogSettings = sqliteTable("audit_log_settings", {
     .default(sql`(unixepoch())`),
 });
 
+/** 管理Spreadsheet importの署名済みpreviewを一度だけapplyするための短期run。 */
+export const spreadsheetImportRuns = sqliteTable("spreadsheet_import_runs", {
+  nonce: text("nonce").primaryKey(),
+  operator_user_id: text("operator_user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  table_name: text("table_name").notNull(),
+  mode: text("mode", { enum: ["insert", "upsert"] }).notNull(),
+  payload_hash: text("payload_hash").notNull(),
+  schema_fingerprint: text("schema_fingerprint").notNull(),
+  expires_at: integer("expires_at").notNull(),
+  consumed_at: integer("consumed_at"),
+  created_at: integer("created_at").notNull(),
+}, (t) => ({
+  nonceCheck: check("spreadsheet_import_runs_nonce_check", sql`length(${t.nonce}) = 36 AND substr(${t.nonce}, 9, 1) = '-' AND substr(${t.nonce}, 14, 1) = '-' AND substr(${t.nonce}, 19, 1) = '-' AND substr(${t.nonce}, 24, 1) = '-' AND ${t.nonce} NOT GLOB '*[^0-9a-f-]*'`),
+  tableNameCheck: check("spreadsheet_import_runs_table_name_check", sql`length(${t.table_name}) BETWEEN 1 AND 128`),
+  modeCheck: check("spreadsheet_import_runs_mode_check", sql`${t.mode} IN ('insert', 'upsert')`),
+  payloadHashCheck: check("spreadsheet_import_runs_payload_hash_check", sql`length(${t.payload_hash}) = 64 AND ${t.payload_hash} NOT GLOB '*[^0-9a-f]*'`),
+  schemaHashCheck: check("spreadsheet_import_runs_schema_hash_check", sql`length(${t.schema_fingerprint}) = 64 AND ${t.schema_fingerprint} NOT GLOB '*[^0-9a-f]*'`),
+  expiryCheck: check("spreadsheet_import_runs_expiry_check", sql`${t.expires_at} > ${t.created_at}`),
+  consumedCheck: check("spreadsheet_import_runs_consumed_check", sql`${t.consumed_at} IS NULL OR ${t.consumed_at} >= ${t.created_at}`),
+  byExpiry: index("spreadsheet_import_runs_expires_idx").on(t.expires_at),
+  byConsumedExpiry: index("spreadsheet_import_runs_consumed_expires_idx").on(t.consumed_at, t.expires_at),
+  byOperatorCreated: index("spreadsheet_import_runs_operator_created_idx").on(t.operator_user_id, t.created_at),
+}));
+
 /** 旧データ移行ツールの batch 記録（一回限り移行用）。 */
 export const legacyImportBatches = sqliteTable(
   "legacy_import_batches",

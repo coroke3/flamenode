@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-12
-> Source of truth: `src/lib/db/schema.ts`, `migrations/0000_flame_node_baseline.sql`
+> Source of truth: `src/lib/db/schema.ts`, `migrations/` active path
 
 現行のmigration運用は [`operations/migrations.md`](../operations/migrations.md) に集約する。新規migrationの記録形式は [`templates/migration.md`](../templates/migration.md)、DB変更履歴は [`db-change-history.md`](../db-change-history.md) を参照する。
 

@@ -16,11 +16,16 @@ import {
   type SpreadsheetImportMode,
 } from "@/lib/admin/spreadsheet/query";
 import { SPREADSHEET_IMPORT_MAX_BATCH_ROWS } from "@/lib/admin/spreadsheet/constants";
-import { buildSpreadsheetImportPreviewToken } from "@/lib/admin/spreadsheet/importPreviewToken";
+import {
+  buildSpreadsheetImportPreviewBinding,
+  issueSpreadsheetImportPreviewToken,
+  requireSpreadsheetImportPreviewSecret,
+  verifySpreadsheetImportPreviewToken,
+} from "@/lib/admin/spreadsheet/importPreviewToken";
 import { resolveSpreadsheetTableContext } from "@/lib/admin/spreadsheet/tableContext";
 import { isSpreadsheetColumnEditable } from "@/lib/admin/spreadsheet/registry";
-import { getDatabase } from "@/lib/cloudflare";
-import { systemSettings } from "@/lib/db/schema";
+import { getDatabase, getEnv } from "@/lib/cloudflare";
+import { spreadsheetImportRuns, systemSettings } from "@/lib/db/schema";
 import { isWriteBlocked } from "@/lib/operationMode/policy";
 import { resolveOperationMode } from "@/lib/operationMode/resolve";
 
@@ -90,19 +95,41 @@ export async function POST(req: Request): Promise<Response> {
         `一括反映は ${SPREADSHEET_IMPORT_MAX_BATCH_ROWS} 行までです。500 行まではプレビューできますが、分割して反映してください。`,
       );
     }
-    const previewToken = await buildSpreadsheetImportPreviewToken({
+    const secret = requireSpreadsheetImportPreviewSecret(
+      getEnv().SPREADSHEET_IMPORT_PREVIEW_SECRET,
+    );
+    const previewBinding = await buildSpreadsheetImportPreviewBinding({
+      operatorUserId: guard.session.userId,
       table: ctx.def.table,
       mode,
       columns: ctx.columnNames,
       primaryKeys: ctx.primaryKeys,
+      schemaColumns: ctx.columns,
       rows: writableRows,
     });
 
     if (body.dryRun) {
+      const issued = await issueSpreadsheetImportPreviewToken(
+        previewBinding,
+        secret,
+      );
+      const db = getDatabase();
+      if (!db) throw new Error("db_unavailable");
+      await db.insert(spreadsheetImportRuns).values({
+        nonce: issued.claims.nonce,
+        operator_user_id: issued.claims.operatorUserId,
+        table_name: issued.claims.table,
+        mode: issued.claims.mode,
+        payload_hash: issued.claims.payloadHash,
+        schema_fingerprint: issued.claims.schemaFingerprint,
+        expires_at: issued.claims.expiresAt,
+        consumed_at: null,
+        created_at: issued.claims.issuedAt,
+      });
       return NextResponse.json({
         ok: true,
         dryRun: true,
-        previewToken,
+        previewToken: issued.token,
         applyMaxRows: SPREADSHEET_IMPORT_MAX_BATCH_ROWS,
         rowCount: writableRows.length,
         mappedColumns,
@@ -111,7 +138,18 @@ export async function POST(req: Request): Promise<Response> {
       });
     }
 
-    if (!body.previewToken || body.previewToken !== previewToken) {
+    if (!body.previewToken) {
+      return NextResponse.json(
+        { error: "preview_required" },
+        { status: 409 },
+      );
+    }
+    const previewRun = await verifySpreadsheetImportPreviewToken(
+      body.previewToken,
+      secret,
+      previewBinding,
+    );
+    if (!previewRun) {
       return NextResponse.json(
         { error: "preview_required" },
         { status: 409 },
@@ -132,6 +170,7 @@ export async function POST(req: Request): Promise<Response> {
         mode,
         rows: writableRows,
         operatorId: guard.session.userId,
+        previewRun,
       },
       ctx,
     );

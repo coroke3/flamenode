@@ -149,7 +149,7 @@ Remote D1の作成、backup、migration適用、rollbackは運用者が対象D1�
 
 ### 3-1. マイグレーション SQL の確認
 
-リポジトリの現行active migrationは `migrations/0000_flame_node_baseline.sql` です。DB schemaの正本は `src/lib/db/schema.ts` であり、自動生成は使いません。
+リポジトリのactive migrationは `migrations/` 直下を番号順に適用します。現行は `0000_flame_node_baseline.sql`、`0001_spreadsheet_import_runs.sql` です。DB schemaの正本は `src/lib/db/schema.ts` であり、自動生成は使いません。
 
 ### 3-2. 本番 D1 へマイグレーション適用
 
@@ -197,6 +197,7 @@ Auth.js (NextAuth v5) は **Discord 1 プロバイダ**だけを使います。
 ```powershell
 # Auth.js
 wrangler pages secret put AUTH_SECRET            # `openssl rand -hex 32` で作成した値
+wrangler pages secret put SPREADSHEET_IMPORT_PREVIEW_SECRET # 独立した32文字以上のランダム値
 wrangler pages secret put AUTH_DISCORD_ID
 wrangler pages secret put AUTH_DISCORD_SECRET
 
@@ -210,6 +211,8 @@ wrangler pages secret put YOUTUBE_API_KEY
 > `wrangler pages secret put <NAME>` は対話式で値を聞いてくるので、コピーして貼り付けてください。
 > Cloudflare Dashboard の **Pages → プロジェクト → Settings → Environment variables** からも追加できます。
 > 必ず **Production** と **Preview** の双方に設定してください。
+
+`SPREADSHEET_IMPORT_PREVIEW_SECRET`は`AUTH_SECRET`やlegacy import用secretと共用しません。未設定時のSpreadsheet dry-run/applyはfail-closedが正しい動作です。
 
 ### 5-2. Workers のシークレット
 
@@ -423,7 +426,7 @@ Cloudflare Dashboard → **Pages → Connect to Git** を使う場合のbuild設
 Build command:        npx @cloudflare/next-on-pages
 Build output directory: .vercel/output/static
 Root directory:       /
-Environment variables: AUTH_SECRET, AUTH_DISCORD_ID, AUTH_DISCORD_SECRET, NEXTAUTH_URL, YOUTUBE_API_KEY
+Environment variables: AUTH_SECRET, SPREADSHEET_IMPORT_PREVIEW_SECRET, AUTH_DISCORD_ID, AUTH_DISCORD_SECRET, NEXTAUTH_URL, YOUTUBE_API_KEY
 ```
 
 Workers の自動デプロイは GitHub Actions の `cloudflare/wrangler-action@v3` を使うのが簡単です。シークレットは GitHub の Secret に格納し、`CLOUDFLARE_API_TOKEN` (Workers Scripts: Edit 権限) を渡してください。

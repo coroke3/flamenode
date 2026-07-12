@@ -14,20 +14,22 @@ export const SPREADSHEET_D1_BATCH_STATEMENT_RESERVE = 10;
 
 /**
  * Spreadsheet import 1回分のD1 statement予算。
- * prep 2 + mutation/assertion 2N + audit準備 2*ceil(N/4) + 安全枠10。
+ * prep 2 + (nonce guard + row mutation)のassertion付き2(N+1)
+ * + audit chunk 2*ceil((N+1)/4) + 安全枠10。
  */
 export function estimateSpreadsheetImportD1Statements(rowCount: number): number {
   const rows = Math.max(0, Math.trunc(rowCount));
+  const guardedMutations = rows + 1;
   return (
     2 +
-    rows * 2 +
-    Math.ceil(rows / 4) * 2 +
+    guardedMutations * 2 +
+    Math.ceil(guardedMutations / 4) * 2 +
     SPREADSHEET_D1_BATCH_STATEMENT_RESERVE
   );
 }
 
-/** 15行で50 statements、16行では52となるfail-closed上限。 */
-export const SPREADSHEET_IMPORT_MAX_BATCH_ROWS = 15;
+/** nonce guard込みで14行が50 statements、15行は52となるfail-closed上限。 */
+export const SPREADSHEET_IMPORT_MAX_BATCH_ROWS = 14;
 
 export function isSpreadsheetImportBatchSizeAllowed(rowCount: number): boolean {
   return (

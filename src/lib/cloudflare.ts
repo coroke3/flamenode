@@ -14,6 +14,7 @@ export interface FlameNodeEnv {
   AUTH_SECRET?: string;
   AUTH_DISCORD_ID?: string;
   AUTH_DISCORD_SECRET?: string;
+  SPREADSHEET_IMPORT_PREVIEW_SECRET?: string;
   DISCORD_GUILD_ID?: string;
   DISCORD_BOT_TOKEN?: string;
   YOUTUBE_API_KEY?: string;
@@ -108,6 +109,8 @@ export function getEnv(): FlameNodeEnv {
       AUTH_SECRET: process.env.AUTH_SECRET,
       AUTH_DISCORD_ID: process.env.AUTH_DISCORD_ID,
       AUTH_DISCORD_SECRET: process.env.AUTH_DISCORD_SECRET,
+      SPREADSHEET_IMPORT_PREVIEW_SECRET:
+        process.env.SPREADSHEET_IMPORT_PREVIEW_SECRET,
       DISCORD_GUILD_ID: process.env.DISCORD_GUILD_ID,
       DISCORD_BOT_TOKEN: process.env.DISCORD_BOT_TOKEN,
       YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY,
@@ -124,6 +127,8 @@ export function getEnv(): FlameNodeEnv {
     AUTH_SECRET: process.env.AUTH_SECRET,
     AUTH_DISCORD_ID: process.env.AUTH_DISCORD_ID,
     AUTH_DISCORD_SECRET: process.env.AUTH_DISCORD_SECRET,
+    SPREADSHEET_IMPORT_PREVIEW_SECRET:
+      process.env.SPREADSHEET_IMPORT_PREVIEW_SECRET,
     DISCORD_GUILD_ID: process.env.DISCORD_GUILD_ID,
     DISCORD_BOT_TOKEN: process.env.DISCORD_BOT_TOKEN,
     YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY,

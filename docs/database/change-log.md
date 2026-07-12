@@ -3,7 +3,19 @@
 > Status: Active
 > Last verified: 2026-07-11
 > Verified against commit: `5f48e0f` + working tree
-> Source of truth: `migrations/0000_flame_node_baseline.sql`, `src/lib/db/schema.ts`
+> Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
+
+## 2026-07-13 — `0001_spreadsheet_import_runs.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | additive |
+| Summary | Spreadsheet import previewのHMAC nonceを一度だけ原子的に消費する短期runを追加 |
+| Tables | `spreadsheet_import_runs` |
+| Compatibility | runtime fallbackなし。migration未適用時はpreview/applyをfail-closed |
+| Data loss | none |
+| Rollback | manual |
+| Validation | schema/history検査、HMAC unit、SQLite transaction integration |
 
 ## 2026-07-11 — `0000_flame_node_baseline.sql`
 

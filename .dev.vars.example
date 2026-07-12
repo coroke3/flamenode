@@ -1,5 +1,7 @@
 # Auth.js
 AUTH_SECRET="please-generate-a-strong-random-string"
+# 独立した32文字以上のランダム値をローカル.dev.varsだけへ設定する
+SPREADSHEET_IMPORT_PREVIEW_SECRET=""
 AUTH_TRUST_HOST="true"
 # OAuth のリダイレクト組み立てに必須 (未設定だと signIn で Invalid URL)
 # ポートを変えた場合はここも合わせる (例: http://localhost:3001)

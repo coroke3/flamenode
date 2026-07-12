@@ -43,7 +43,7 @@ function assertNoSecrets(files) {
     /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/i,
     /\bAKIA[0-9A-Z]{16}\b/,
     /https:\/\/discord(?:app)?\.com\/api\/webhooks\/\d+\/[A-Za-z0-9_-]{20,}/i,
-    /(?:CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID|CF_IDS_JSON|WORKER_ADMIN_TOKEN|AUTH_SECRET|DISCORD_BOT_TOKEN|DISCORD_WEBHOOK_URL|YOUTUBE_API_KEY)\s*[:=]\s*["'][^"']{8,}/,
+    /(?:CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID|CF_IDS_JSON|WORKER_ADMIN_TOKEN|AUTH_SECRET|SPREADSHEET_IMPORT_PREVIEW_SECRET|DISCORD_BOT_TOKEN|DISCORD_WEBHOOK_URL|YOUTUBE_API_KEY)\s*[:=]\s*["'][^"']{8,}/,
   ];
   for (const full of files) {
     const extension = path.extname(full).toLowerCase();

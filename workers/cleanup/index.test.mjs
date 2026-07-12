@@ -60,6 +60,12 @@ test("runCleanup: audit_logs と通知・スロットのクリーンアップ SQ
   assert.equal(sqls.some((s) => s.includes("deadline_at")), false);
   assert.ok(sqls.some((s) => s.includes("DELETE FROM notification_outbox") && s.includes("'sent'")));
   assert.ok(sqls.some((s) => s.includes("DELETE FROM notification_outbox") && s.includes("'failed'")));
+  const previewCleanup = recorder.find((r) =>
+    r.sql.includes("DELETE FROM spreadsheet_import_runs"),
+  );
+  assert.ok(previewCleanup);
+  assert.ok(previewCleanup.sql.includes("LIMIT ?2"));
+  assert.equal(previewCleanup.binds[1], 500);
   assert.ok(
     sqls.some(
       (s) =>

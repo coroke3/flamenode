@@ -3,9 +3,9 @@
 > Status: Active
 > Last verified: 2026-07-11
 > Verified against commit: `5f48e0f` + working tree
-> Source of truth: `src/lib/db/schema.ts`, `migrations/0000_flame_node_baseline.sql`
+> Source of truth: `src/lib/db/schema.ts`, `migrations/` active path
 
-`src/lib/db/schema.ts` がDBの唯一の正本です。active migrationは `migrations/0000_flame_node_baseline.sql` だけで、空のD1に最終schemaを作成します。以前のmigration本文は改変せず `migrations/historical/` に保存しています。
+`src/lib/db/schema.ts` がDBの唯一の正本です。active migrationは `migrations/` 直下を番号順に適用し、空のD1にはbaseline後にadditive migrationを適用します。以前のmigration本文は改変せず `migrations/historical/` に保存しています。
 
 - applied migrationを変更しない。schema変更は新しいbaselineを作る前に、pre-productionであることとRemote D1を自動変更しないことを確認する。
 - 自動生成は使わない。手動SQLとschema、現行の [DB change history](../db-change-history.md) を同じ変更で更新する。
