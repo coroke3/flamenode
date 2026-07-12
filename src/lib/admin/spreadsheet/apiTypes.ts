@@ -8,6 +8,7 @@ export type SpreadsheetColumnMeta = {
   editable: boolean;
   defaultValue?: string | null;
   generated?: boolean;
+  enumValues?: readonly string[];
 };
 
 export type SpreadsheetTableDefClient = {

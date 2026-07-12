@@ -11,6 +11,10 @@ const constantsSource = await readFile(
   fileURLToPath(new URL("./constants.ts", import.meta.url)),
   "utf8",
 );
+const importRouteSource = await readFile(
+  fileURLToPath(new URL("../../../../app/api/admin/spreadsheet/import/route.ts", import.meta.url)),
+  "utf8",
+);
 
 test("spreadsheet writes use one strict audit batch", () => {
   assert.match(querySource, /mutateWithAudit\(db/);
@@ -26,4 +30,17 @@ test("spreadsheet import rejects invalid rows before mutation and caps D1 batch 
   assert.match(querySource, /if \(opts\.rows\.length > SPREADSHEET_IMPORT_MAX_BATCH_ROWS\)/);
   assert.match(constantsSource, /SPREADSHEET_IMPORT_MAX_ROWS = 500/);
   assert.match(constantsSource, /SPREADSHEET_IMPORT_MAX_BATCH_ROWS = 20/);
+});
+
+test("spreadsheet import does not silently omit readonly or unknown columns", () => {
+  assert.match(importRouteSource, /invalidColumns/);
+  assert.match(importRouteSource, /column_not_editable/);
+  assert.match(importRouteSource, /unknown_column/);
+  assert.doesNotMatch(importRouteSource, /omitReadonlyImportColumns/);
+});
+
+test("spreadsheet foreign-key prevalidation deduplicates values into bounded IN queries", () => {
+  assert.match(querySource, /new Set\(/);
+  assert.match(querySource, /IN \(\$\{placeholders\}\)/);
+  assert.match(querySource, /offset \+= 99/);
 });

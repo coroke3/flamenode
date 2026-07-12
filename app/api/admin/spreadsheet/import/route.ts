@@ -3,8 +3,6 @@ export const runtime = "edge";
 import { NextResponse } from "next/server";
 import type { SpreadsheetDelimiterMode } from "@/lib/admin/spreadsheet/paste";
 import {
-  buildReadonlyImportColumnWarnings,
-  omitReadonlyImportColumns,
   prepareSpreadsheetImportRows,
 } from "@/lib/admin/spreadsheet/importPrep";
 import {
@@ -67,26 +65,34 @@ export async function POST(req: Request): Promise<Response> {
       return NextResponse.json({ error: "table_readonly" }, { status: 400 });
     }
 
-    const { rows, warnings, mappedColumns } = prepareSpreadsheetImportRows({
+    const { rows, warnings, mappedColumns, invalidColumns } = prepareSpreadsheetImportRows({
       text: body.text,
       rows: body.rows,
       columnNames: ctx.columnNames,
       hasHeader,
       delimiter,
     });
-    const readonlyColumns = ctx.columns
-      .map((column) => column.name)
-      .filter((column) => !isSpreadsheetColumnEditable(ctx.def, column));
-    const readonlyWarnings = buildReadonlyImportColumnWarnings({
-      rows,
-      mappedColumns,
-      readonlyColumns,
+    if (invalidColumns.length > 0) {
+      throw new Error(`unknown_column:${invalidColumns.join(",")}`);
+    }
+    const importedColumns = new Set(
+      mappedColumns.length > 0 ? mappedColumns : rows.flatMap((row) => Object.keys(row)),
+    );
+    const unknownColumns = [...importedColumns].filter(
+      (column) => !ctx.columnNames.includes(column),
+    );
+    if (unknownColumns.length > 0) {
+      throw new Error(`unknown_column:${unknownColumns.join(",")}`);
+    }
+    const readonlyColumns = [...importedColumns].filter((column) => {
+      const meta = ctx.columns.find((item) => item.name === column);
+      return meta && !isSpreadsheetColumnEditable(ctx.def, column);
     });
-    const writableRows = omitReadonlyImportColumns({
-      rows,
-      readonlyColumns,
-    }).map((row) => applySpreadsheetForcedInsertValues(ctx.def.table, row));
-    const importWarnings = [...warnings, ...readonlyWarnings];
+    if (readonlyColumns.length > 0) {
+      throw new Error(`column_not_editable:${readonlyColumns.join(",")}`);
+    }
+    const writableRows = rows.map((row) => applySpreadsheetForcedInsertValues(ctx.def.table, row));
+    const importWarnings = [...warnings];
     if (writableRows.length > SPREADSHEET_IMPORT_MAX_BATCH_ROWS) {
       importWarnings.push(
         `一括反映は ${SPREADSHEET_IMPORT_MAX_BATCH_ROWS} 行までです。500 行まではプレビューできますが、分割して反映してください。`,

@@ -30,6 +30,7 @@ export type SpreadsheetImportLocalPreview = {
   mappedColumns: string[];
   warnings: string[];
   preview: Record<string, string | null>[];
+  invalidColumns?: string[];
 };
 
 /** UI 用ローカルプレビュー（サーバーと同じパース・検証ルール） */
@@ -49,6 +50,7 @@ export function buildSpreadsheetImportLocalPreview(opts: {
       mappedColumns: [],
       warnings: [formatImportPayloadIssue(preIssue)],
       preview: [],
+      invalidColumns: [],
     };
   }
 
@@ -70,6 +72,7 @@ export function buildSpreadsheetImportLocalPreview(opts: {
     mappedColumns: parsed.mappedColumns,
     warnings,
     preview: parsed.rows.slice(0, 12),
+    invalidColumns: parsed.invalidColumns ?? [],
   };
 }
 
@@ -77,6 +80,7 @@ export type PreparedSpreadsheetImport = {
   rows: Record<string, string | null>[];
   warnings: string[];
   mappedColumns: string[];
+  invalidColumns: string[];
 };
 
 export function buildReadonlyImportColumnWarnings(opts: {
@@ -127,6 +131,7 @@ export function prepareSpreadsheetImportRows(opts: {
   let rows = opts.rows ?? null;
   let warnings: string[] = [];
   let mappedColumns: string[] = [];
+  let invalidColumns: string[] = [];
 
   const textSizeIssue = getImportTextSizeIssue(text);
   if (textSizeIssue) {
@@ -150,6 +155,7 @@ export function prepareSpreadsheetImportRows(opts: {
     rows = parsed.rows;
     warnings = parsed.warnings;
     mappedColumns = parsed.mappedColumns;
+    invalidColumns = parsed.invalidColumns ?? [];
   }
 
   if (!rows || rows.length === 0) {
@@ -161,5 +167,5 @@ export function prepareSpreadsheetImportRows(opts: {
     throw new Error(postIssue);
   }
 
-  return { rows, warnings, mappedColumns };
+  return { rows, warnings, mappedColumns, invalidColumns };
 }

@@ -24,6 +24,9 @@ export function spreadsheetErrorMessage(error: unknown): string {
 }
 
 export function spreadsheetHttpStatus(message: string): number {
+  if (message.startsWith("unknown_column:") || message.startsWith("column_not_editable:")) {
+    return 400;
+  }
   switch (message) {
     case SPREADSHEET_ERROR.UNKNOWN_TABLE:
     case SPREADSHEET_ERROR.TABLE_READONLY:

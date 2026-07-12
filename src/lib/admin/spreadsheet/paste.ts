@@ -22,6 +22,7 @@ export interface SpreadsheetPasteResult {
   mappedColumns: string[];
   rows: Record<string, string | null>[];
   warnings: string[];
+  invalidColumns?: string[];
 }
 
 function resolveDelimiter(mode: SpreadsheetDelimiterMode, text: string): DelimiterChar {
@@ -39,6 +40,7 @@ export function parseSpreadsheetPaste(
   options: SpreadsheetPasteOptions,
 ): SpreadsheetPasteResult {
   const warnings: string[] = [];
+  const invalidColumns: string[] = [];
   const trimmed = text.trim();
   if (!trimmed) {
     return { delimiter: ",", mappedColumns: [], rows: [], warnings: ["空の入力です"] };
@@ -71,10 +73,12 @@ export function parseSpreadsheetPaste(
     headerCells.forEach((h, i) => {
       if (!h.trim()) return;
       if (!columnIndexMap[i]) {
+        invalidColumns.push(h.trim());
         warnings.push(`取り込み対象外の列: ${h.trim()}`);
       }
     });
   } else if (grid[0] && grid[0].length > tableColumns.length) {
+    invalidColumns.push("__extra_columns__");
     warnings.push(
       `列数がテーブルより多いです (${grid[0].length} > ${tableColumns.length})`,
     );
@@ -104,7 +108,7 @@ export function parseSpreadsheetPaste(
     rows.push(row);
   }
 
-  return { delimiter, mappedColumns, rows, warnings };
+  return { delimiter, mappedColumns, rows, warnings, invalidColumns };
 }
 
 export function rowsToDelimitedGrid(

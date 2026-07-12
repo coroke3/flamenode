@@ -2,6 +2,7 @@ import "server-only";
 
 import { getSpreadsheetD1 } from "./d1Access";
 import { getSpreadsheetTableDef } from "./discovery";
+import { getDrizzleColumnEnumValues } from "./schemaTables";
 import { isValidSqliteTableName } from "./registry";
 import {
   isSpreadsheetColumnEditable,
@@ -59,6 +60,7 @@ async function loadTableColumnsFromDb(
     editable: true,
     defaultValue: r.dflt_value ?? null,
     generated: Number(r.hidden ?? 0) !== 0,
+    enumValues: getDrizzleColumnEnumValues(table, r.name),
   }));
 }
 

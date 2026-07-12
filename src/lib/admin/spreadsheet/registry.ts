@@ -23,26 +23,43 @@ export type SpreadsheetColumnPolicy = {
 };
 
 export const SPREADSHEET_COLUMN_POLICIES: Record<string, SpreadsheetColumnPolicy> = {
-  role: { enum: ["user", "admin", "moderator"] },
-  visibility: { enum: ["private", "public"] },
-  severity: { enum: ["minor", "major"] },
-  source: { enum: ["app", "youtube"] },
-  slot_type: { enum: ["time", "count"] },
-  slot_kind: { enum: ["time", "count"] },
-  icon_url: { url: true, maxLength: 2048 },
-  img_url: { url: true, maxLength: 2048 },
-  creator_icon_url: { url: true, maxLength: 2048 },
-  creator_youtube_channel_url: { url: true, maxLength: 2048 },
-  music_reference_url: { url: true, maxLength: 2048 },
-  youtube_channel_url: { url: true, maxLength: 2048 },
-  custom_permission_keys_json: { json: true, maxLength: 100_000 },
-  settings_json: { json: true, maxLength: 100_000 },
-  payload_json: { json: true, maxLength: 100_000 },
-  options_json: { json: true, maxLength: 100_000 },
-  chapters_json: { json: true, maxLength: 100_000 },
+  "user.role": { maxLength: 32 },
+  "event_groups.icon_url": { url: true, maxLength: 2048 },
+  "event_groups.img_url": { url: true, maxLength: 2048 },
+  "event_groups.group_type": { maxLength: 32 },
+  "event_groups.visibility_status": { maxLength: 32 },
+  "event_group_events.relation_type": { maxLength: 32 },
+  "events.icon_url": { url: true, maxLength: 2048 },
+  "events.img_url": { url: true, maxLength: 2048 },
+  "events.review_settings": { json: true, maxLength: 100_000 },
+  "events.editable_fields": { json: true, maxLength: 100_000 },
+  "events.repeat_rules": { json: true, maxLength: 100_000 },
+  "events.parts_json": { json: true, maxLength: 100_000 },
+  "videos.music_reference_url": { url: true, maxLength: 2048 },
+  "videos.review_data": { json: true, maxLength: 100_000 },
+  "videos.members": { json: true, maxLength: 100_000 },
+  "videos.custom_answers": { json: true, maxLength: 100_000 },
+  "x_user_icons.icon_url": { url: true, maxLength: 2048 },
+  "x_user_youtube_channels.youtube_channel_url": { url: true, maxLength: 2048 },
+  "system_settings.cost_guard_thresholds": { json: true, maxLength: 100_000 },
+  "system_settings.disabled_features": { json: true, maxLength: 100_000 },
+  "system_settings.user_video_edit_permission_keys_json": { json: true, maxLength: 100_000 },
+  "announcements.body": { maxLength: 200_000 },
+  "terms_versions.terms_markdown": { maxLength: 200_000 },
 };
 
 export const SPREADSHEET_DEFAULT_MAX_CELL_CHARS = 100_000;
+
+export function getSpreadsheetColumnPolicy(
+  table: string,
+  column: string,
+  enumValues?: readonly string[],
+): SpreadsheetColumnPolicy {
+  return {
+    ...SPREADSHEET_COLUMN_POLICIES[`${table}.${column}`],
+    ...(enumValues && enumValues.length > 0 ? { enum: enumValues } : {}),
+  };
+}
 
 export function primaryKeysFromColumns(
   columns: Array<{ name: string; pk: number }>,

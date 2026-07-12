@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { getTableColumns } from "drizzle-orm";
+import { eventGroupEvents, eventGroups, events, videos } from "../../db/schema.ts";
 import { normalizeSpreadsheetPage } from "./constants.ts";
 import {
   applySpreadsheetForcedInsertValues,
@@ -51,6 +53,29 @@ test("tables without a declared primary key have no spreadsheet key", () => {
 
 test("event_staff cannot be edited directly", () => {
   assert.equal(resolveSpreadsheetTableDef("event_staff", true).mode, "readonly");
+});
+
+test("editable canonical enum columns come from schema metadata", () => {
+  const expected = {
+    event_groups: {
+      group_type: ["series", "genre", "related", "collection", "other"],
+      visibility_status: ["public", "private", "archived"],
+    },
+    event_group_events: { relation_type: ["member", "primary", "related"] },
+    events: {
+      visibility_status: ["draft", "private", "public", "archived"],
+    },
+    videos: {
+      visibility_status: ["draft", "pending", "public", "limited", "private", "archived", "voided"],
+    },
+  };
+  const tables = { event_groups: eventGroups, event_group_events: eventGroupEvents, events, videos };
+  for (const [table, columns] of Object.entries(expected)) {
+    const metadata = getTableColumns(tables[table]);
+    for (const [column, values] of Object.entries(columns)) {
+      assert.deepEqual(metadata[column].enumValues, values, `${table}.${column}`);
+    }
+  }
 });
 
 test("deprecated DB tables are readonly for spreadsheet import", () => {
