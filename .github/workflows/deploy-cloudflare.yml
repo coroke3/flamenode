@@ -1,8 +1,6 @@
 name: Deploy Cloudflare
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       deploy_workers:
@@ -30,6 +28,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CF_IDS_JSON: ${{ secrets.CF_IDS_JSON }}
+      CLOUDFLARE_CONFIG_MODE: production
     steps:
       - uses: actions/checkout@v4
 
@@ -43,8 +42,8 @@ jobs:
 
       - name: Apply Cloudflare resource IDs
         run: |
-          if [ -z "$CF_IDS_JSON" ] && [ ! -f cloudflare/ids.json ]; then
-            echo "::error::CF_IDS_JSON (GitHub Secret) または cloudflare/ids.json が必要です。"
+          if [ -z "$CF_IDS_JSON" ]; then
+            echo "::error::production Secret CF_IDS_JSON is required."
             exit 1
           fi
           node scripts/sync-wrangler-ids.mjs
@@ -77,14 +76,14 @@ jobs:
   migrate-d1:
     needs: build-pages-artifact
     if: >-
-      github.event_name == 'push' ||
-      (github.event_name == 'workflow_dispatch' && inputs.apply_migrations)
+      github.event_name == 'workflow_dispatch' && inputs.apply_migrations
     runs-on: ubuntu-latest
     environment: production
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CF_IDS_JSON: ${{ secrets.CF_IDS_JSON }}
+      CLOUDFLARE_CONFIG_MODE: production
     steps:
       - uses: actions/checkout@v4
 
@@ -96,8 +95,8 @@ jobs:
       - name: Install dependencies and apply IDs
         run: |
           npm ci
-          if [ -z "$CF_IDS_JSON" ] && [ ! -f cloudflare/ids.json ]; then
-            echo "::error::CF_IDS (GitHub Secret) または cloudflare/ids.json が必要です。"
+          if [ -z "$CF_IDS_JSON" ]; then
+            echo "::error::production Secret CF_IDS_JSON is required."
             exit 1
           fi
           node scripts/sync-wrangler-ids.mjs
@@ -116,13 +115,14 @@ jobs:
       always() &&
       needs.build-pages-artifact.result == 'success' &&
       (needs.migrate-d1.result == 'success' || needs.migrate-d1.result == 'skipped') &&
-      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_pages))
+      github.event_name == 'workflow_dispatch' && inputs.deploy_pages
     runs-on: ubuntu-latest
     environment: production
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CF_IDS_JSON: ${{ secrets.CF_IDS_JSON }}
+      CLOUDFLARE_CONFIG_MODE: production
     permissions:
       contents: read
       deployments: write
@@ -139,8 +139,8 @@ jobs:
 
       - name: Apply Cloudflare resource IDs
         run: |
-          if [ -z "$CF_IDS_JSON" ] && [ ! -f cloudflare/ids.json ]; then
-            echo "::error::CF_IDS_JSON (GitHub Secret) または cloudflare/ids.json が必要です。"
+          if [ -z "$CF_IDS_JSON" ]; then
+            echo "::error::production Secret CF_IDS_JSON is required."
             exit 1
           fi
           node scripts/sync-wrangler-ids.mjs
@@ -167,13 +167,14 @@ jobs:
       needs.build-pages-artifact.result == 'success' &&
       (needs.migrate-d1.result == 'success' || needs.migrate-d1.result == 'skipped') &&
       (needs.deploy-pages.result == 'success' || needs.deploy-pages.result == 'skipped') &&
-      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_workers))
+      github.event_name == 'workflow_dispatch' && inputs.deploy_workers
     runs-on: ubuntu-latest
     environment: production
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CF_IDS_JSON: ${{ secrets.CF_IDS_JSON }}
+      CLOUDFLARE_CONFIG_MODE: production
     steps:
       - uses: actions/checkout@v4
 
@@ -185,8 +186,8 @@ jobs:
       - name: Install dependencies and apply IDs
         run: |
           npm ci
-          if [ -z "$CF_IDS_JSON" ] && [ ! -f cloudflare/ids.json ]; then
-            echo "::error::CF_IDS_JSON (GitHub Secret) または cloudflare/ids.json が必要です。"
+          if [ -z "$CF_IDS_JSON" ]; then
+            echo "::error::production Secret CF_IDS_JSON is required."
             exit 1
           fi
           node scripts/sync-wrangler-ids.mjs

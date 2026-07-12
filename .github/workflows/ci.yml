@@ -43,6 +43,9 @@ jobs:
       - name: Worker tests
         run: npm run test:workers
 
+      - name: Cloudflare CI contract tests
+        run: npm run test:cloudflare-ci
+
       - name: Integration tests
         run: npm run test:integration
 
@@ -58,6 +61,11 @@ jobs:
       - name: Cloudflare template check
         run: npm run check:cloudflare-template
 
+      - name: Cloudflare fixture config check
+        run: npm run check:cloudflare-config
+        env:
+          CLOUDFLARE_CONFIG_MODE: fixture
+
       - name: DB and owner checks
         run: |
           npm run check:db-schema
@@ -66,3 +74,8 @@ jobs:
 
       - name: Project document checks
         run: npm run check:project-docs
+
+      - name: Active documentation and DB history checks
+        run: |
+          npm run check:docs
+          npm run check:db-history

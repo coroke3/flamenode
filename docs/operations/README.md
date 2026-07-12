@@ -40,3 +40,5 @@ Active文書は現行実装の手順だけを扱う。旧migrationや過去の�
 ローカルで変更を統合する前に、少なくとも `npm run typecheck`、`npm run lint`、`npm run test:unit`、`npm run test:workers`、`npm run test:integration`、`npm run build`、`npm run pages:build`、`npm run check:pages-output`、`npm run check:cloudflare-template`、`npm run check:db-schema`、`npm run check:db-legacy`、`npm run check:event-owners`、`npm run check:docs`、`npm run check:db-history`、`npm run check:project-docs` を通す。
 
 `check:cloudflare-config` は実SecretとIDを持たない環境ではfail-closedで失敗する。CIはfixture/template検査を使い、本番設定の成功を偽装しない。
+
+本番デプロイでは `CLOUDFLARE_CONFIG_MODE=production` を使用し、GitHub Environment `production` の `CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`CF_IDS_JSON` を必須とする。CIのfixture検査は `CLOUDFLARE_CONFIG_MODE=fixture` を明示した場合だけ許可され、実リソース設定の検証結果を代用しない。

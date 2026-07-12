@@ -51,6 +51,7 @@
     "test:youtube": "node --test --experimental-strip-types src/lib/youtube/id.test.mjs",
     "test:unit": "node --test --experimental-strip-types workers/**/*.test.mjs src/**/*.test.mjs",
     "test:integration": "node --test src/**/*.integration.test.mjs",
+    "test:cloudflare-ci": "node --test scripts/cloudflare-ci.test.mjs",
     "test:static-rebuild": "node --test scripts/static-rebuild.test.mjs",
     "pages:build": "node scripts/run-next-on-pages.cjs && node scripts/pages-postbuild.mjs",
     "pages:build:docker": "node scripts/pages-build-docker.mjs",
