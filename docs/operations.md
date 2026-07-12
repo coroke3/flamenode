@@ -504,7 +504,7 @@ Workers（json-generator 等）: `npm run workers:deploy`
 - [ ] `npm run typecheck` / `npm run lint`
 - [ ] `npm run check:db-legacy`
 - [ ] `wrangler d1 migrations apply flamenode_db --remote`（未適用分）
-- [ ] repair script（必要時）: `npm run repair:video-event-links -- --remote` / `npm run repair:event-group-legacy -- --remote`
+- [ ] repair script（必要時）: `npm run repair:video-event-links -- --remote`
 - [ ] `/admin/static-builds` で failed キューが残っていないか
 - [ ] `operation_mode` が意図どおりか
 
@@ -513,9 +513,12 @@ Workers（json-generator 等）: `npm run workers:deploy`
 | スクリプト | 用途 |
 | --- | --- |
 | `npm run repair:video-event-links` | `primary_event_id` 欠落の `video_events` 補完 |
-| `npm run repair:event-group-legacy` | `events.event_group_id` → `event_group_events` 移行 + slug 重複修復 |
 
 `--dry-run` で件数確認、`--remote` で本番 D1。
+
+現行baselineには旧`events.event_group_id`が存在しないため、Remote D1を旧形式から
+自動repairするscriptは提供しない。pre-baseline環境を整理する場合は、運用者がbackupと
+対象を確認し、破棄・再作成または明示的なbaseline適用手順を判断する。
 
 Rollback は migration 前の D1 dump から復元（`wrangler d1 export` / import）。
 

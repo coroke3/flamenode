@@ -41,4 +41,3 @@ test("enqueueとWorkerは旧target aliasを正規化・no-op完了しない", ()
   assert.doesNotMatch(enqueue, /normalizeStaticRebuildTarget|alias:/);
   assert.doesNotMatch(workerQueue, /DEPRECATED_TARGET_TYPES/);
 });
-

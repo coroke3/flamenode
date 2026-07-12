@@ -29,4 +29,3 @@ test("rules pageは生HTML挿入とregex sanitizerを使用しない", () => {
   assert.doesNotMatch(page, /dangerouslySetInnerHTML|sanitizeUserHtml/);
   assert.match(page, /parseLegalMarkdown/);
 });
-

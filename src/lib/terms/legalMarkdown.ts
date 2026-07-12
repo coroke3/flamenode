@@ -43,4 +43,3 @@ export function parseLegalMarkdown(markdown: string): LegalMarkdownBlock[] {
   flushList();
   return blocks;
 }
-
