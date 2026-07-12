@@ -47,81 +47,23 @@ async function assertLinkedXUser(db: NonNullable<ReturnType<typeof getDatabase>>
   return row;
 }
 
-function errorText(error: unknown): string {
-  if (error == null) return "";
-  if (error instanceof Error) {
-    const cause = "cause" in error ? errorText(error.cause) : "";
-    return `${error.message}\n${cause}`;
-  }
-  if (typeof error === "object") {
-    const value = error as { message?: unknown; cause?: unknown };
-    const message = typeof value.message === "string" ? value.message : "";
-    return `${message}\n${errorText(value.cause)}`;
-  }
-  return String(error);
-}
-
-async function addColumnIfMissing(statement: string): Promise<void> {
-  try {
-    await getEnv().DB.prepare(statement).run();
-  } catch (error) {
-    const text = errorText(error).toLowerCase();
-    if (
-      text.includes("duplicate column") ||
-      text.includes("already exists") ||
-      text.includes("duplicate column name")
-    ) {
-      return;
-    }
-    throw error;
-  }
-}
-
-async function getXUserColumnNames(): Promise<Set<string> | null> {
-  try {
-    const result = await getEnv().DB.prepare("PRAGMA table_info(x_users)").all<{
-      name: string;
-    }>();
-    return new Set((result.results ?? []).map((row) => row.name));
-  } catch {
-    return null;
-  }
-}
-
-async function ensureXUserProfileColumns(): Promise<Set<string> | null> {
-  await addColumnIfMissing("ALTER TABLE x_users ADD COLUMN profile_text TEXT");
-  await addColumnIfMissing("ALTER TABLE x_users ADD COLUMN portfolio_contact TEXT");
-  await addColumnIfMissing("ALTER TABLE x_users ADD COLUMN youtube_channel_url TEXT");
-  await addColumnIfMissing("ALTER TABLE x_users ADD COLUMN other_social_links TEXT");
-  return getXUserColumnNames();
-}
-
-function buildXUserProfileUpdate(
-  columns: Set<string> | null,
-  values: {
-    displayName: string;
-    profileText: string | null;
-    portfolioContact: string | null;
-    youtubeChannelUrl: string | null;
-    otherSocialLinks: string | null;
-  },
-): Partial<typeof xUsers.$inferInsert> {
-  const updateValues: Partial<typeof xUsers.$inferInsert> = {
+function buildXUserProfileUpdate(values: {
+  displayName: string;
+  profileText: string | null;
+  portfolioContact: string | null;
+  youtubeChannelUrl: string | null;
+  otherSocialLinks: string | null;
+}): Pick<
+  typeof xUsers.$inferInsert,
+  "x_name" | "profile_text" | "portfolio_contact" | "youtube_channel_url" | "other_social_links"
+> {
+  return {
     x_name: values.displayName,
+    profile_text: values.profileText,
+    portfolio_contact: values.portfolioContact,
+    youtube_channel_url: values.youtubeChannelUrl,
+    other_social_links: values.otherSocialLinks,
   };
-  if (columns?.has("profile_text")) {
-    updateValues.profile_text = values.profileText;
-  }
-  if (columns?.has("portfolio_contact")) {
-    updateValues.portfolio_contact = values.portfolioContact;
-  }
-  if (columns?.has("youtube_channel_url")) {
-    updateValues.youtube_channel_url = values.youtubeChannelUrl;
-  }
-  if (columns?.has("other_social_links")) {
-    updateValues.other_social_links = values.otherSocialLinks;
-  }
-  return updateValues;
 }
 
 export async function setActiveXId(
@@ -346,25 +288,10 @@ export async function updateXIdProfile(
     youtubeChannelUrl,
     otherSocialLinks: otherSocialLinks.value,
   };
-  const profileColumns = await ensureXUserProfileColumns();
-  const updateValues = buildXUserProfileUpdate(profileColumns, profileValues);
-
-  try {
-    await db
-      .update(xUsers)
-      .set(updateValues)
-      .where(xUserIdMatches(xUserId));
-  } catch (error) {
-    const text = errorText(error).toLowerCase();
-    if (!text.includes("no such column") && !text.includes("unknown column")) {
-      throw error;
-    }
-    const latestColumns = await getXUserColumnNames();
-    await db
-      .update(xUsers)
-      .set(buildXUserProfileUpdate(latestColumns, profileValues))
-      .where(xUserIdMatches(xUserId));
-  }
+  await db
+    .update(xUsers)
+    .set(buildXUserProfileUpdate(profileValues))
+    .where(xUserIdMatches(xUserId));
 
   const now = nowUnix();
   await auditAction(db, {

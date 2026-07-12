@@ -27,6 +27,19 @@ test("deprecated identifiers remain covered by the legacy static checker", () =>
   }
 });
 
+test("X ID profile updates use canonical columns without runtime schema fallback", () => {
+  const xid = fs.readFileSync(path.join(root, "src/lib/actions/xid.ts"), "utf8");
+  const checker = fs.readFileSync(path.join(root, "scripts/check-db-legacy.mjs"), "utf8");
+  assert.doesNotMatch(xid, /addColumnIfMissing|PRAGMA\s+table_info|ensureXUserProfileColumns/);
+  assert.doesNotMatch(xid, /ALTER\s+TABLE|CREATE\s+TABLE|backfill/i);
+  assert.match(xid, /profile_text:\s*values\.profileText/);
+  assert.match(xid, /portfolio_contact:\s*values\.portfolioContact/);
+  assert.match(xid, /youtube_channel_url:\s*values\.youtubeChannelUrl/);
+  assert.match(xid, /other_social_links:\s*values\.otherSocialLinks/);
+  assert.match(checker, /runtime-schema-ddl/);
+  assert.match(checker, /runtime-backfill/);
+});
+
 test("audit restore source contains payload, stale-snapshot, and atomic failure guards", () => {
   const capability = fs.readFileSync(path.join(root, "src/lib/audit/capability.ts"), "utf8");
   const restore = fs.readFileSync(path.join(root, "src/lib/audit/restore.ts"), "utf8");

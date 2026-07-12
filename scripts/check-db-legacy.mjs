@@ -144,6 +144,19 @@ const DB_REDUCTION_RULES = [
       "app/api/admin/legacy-import/route.ts",
     ]),
   },
+  {
+    id: "runtime-schema-ddl",
+    label: "runtime schema DDL (use migrations or explicit operations scripts)",
+    pattern: /\b(?:ALTER\s+TABLE|CREATE\s+TABLE|CREATE\s+INDEX|DROP\s+TABLE|DROP\s+INDEX)\b/gi,
+    prefixAllow: ["src/lib/integration/"],
+  },
+  {
+    id: "runtime-backfill",
+    label: "runtime backfill (use migrations or explicit operations scripts)",
+    pattern: /\bbackfill(?:ing)?\b/gi,
+    prefixAllow: ["src/lib/integration/"],
+    fileAllow: new Set(["src/lib/auth/permissions/mask.ts"]),
+  },
 ];
 
 const RULES = [
