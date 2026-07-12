@@ -36,7 +36,7 @@ export function termsReacceptRequiredCondition(
   if (!requiredMajor?.published_at) return sql`0 = 1`;
   const publishedAt = requiredMajor.published_at;
   return sql`
-    COALESCE(${users.is_tos_accepted}, 0) = 1
+    ${users.is_tos_accepted} = 1
     AND NOT (
       EXISTS (
         SELECT 1
