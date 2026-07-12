@@ -3,7 +3,6 @@ import "server-only";
 import { and, desc, eq, gte, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import {
-  costUsageSnapshots as costUsageSnapshotsTable,
   events as eventsTable,
   auditLogs as auditLogsTable,
   notificationOutbox as notificationOutboxTable,
@@ -622,47 +621,6 @@ async function checkNotificationFailedVolume(
   };
 }
 
-/** cost_usage_snapshots の最新値が古すぎないか */
-async function checkCostUsageSnapshotFreshness(
-  db: AnyDb,
-): Promise<HealthCheckResult> {
-  const latest = (
-    await db
-      .select({
-        id: costUsageSnapshotsTable.id,
-        captured_at: costUsageSnapshotsTable.captured_at,
-        source: costUsageSnapshotsTable.source,
-      })
-      .from(costUsageSnapshotsTable)
-      .orderBy(desc(costUsageSnapshotsTable.captured_at))
-      .limit(1)
-  )[0];
-  if (!latest) {
-    return {
-      id: "cost_usage_snapshot_freshness",
-      label: "cost_usage_snapshots 最新 snapshot",
-      status: "info",
-      count: 0,
-      samples: [],
-      note:
-        "まだ usage snapshot がありません。Cloudflare API 未連携の場合は estimated_local の低頻度 snapshot から開始してください。",
-    };
-  }
-  const now = Math.floor(Date.now() / 1000);
-  const ageSec = now - latest.captured_at;
-  return {
-    id: "cost_usage_snapshot_freshness",
-    label: "cost_usage_snapshots 最新 snapshot",
-    status: ageSec > 24 * 3600 ? "warn" : ageSec > 6 * 3600 ? "info" : "ok",
-    count: ageSec,
-    samples: [`${latest.id} (${latest.source ?? "unknown"})`],
-    note:
-      ageSec > 6 * 3600
-        ? "最新 snapshot が古くなっています。高頻度書き込みは避けつつ、1〜6時間程度の低頻度取得を推奨します。"
-        : undefined,
-  };
-}
-
 /** open の video_moderation_cases が期限切れになっていないか */
 async function checkOpenModerationCasesOverdue(
   db: AnyDb,
@@ -810,7 +768,6 @@ export async function runHealthChecks(db: AnyDb): Promise<HealthCheckResult[]> {
     checkVideoMemberChaptersJsonInvalid(db),
     checkNotificationProcessingStuck(db),
     checkNotificationFailedVolume(db),
-    checkCostUsageSnapshotFreshness(db),
     checkOpenModerationCasesOverdue(db),
     checkActiveApiEndpointsOrphanEvent(db),
     checkXIdMergePendingStale(db),

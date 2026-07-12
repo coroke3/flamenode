@@ -6,7 +6,7 @@ export const WRITE_FEATURE_KEYS = [
   "admin_user_event_create", "admin_x_icon_refresh", "admin_terms_create",
   "admin_terms_update", "admin_terms_publish", "admin_terms_archive",
   "admin_terms_broadcast", "admin_moderation_create",
-  "admin_moderation_update", "admin_cost_guard_settings",
+  "admin_moderation_update",
 ] as const;
 
 export type WriteFeatureKey = (typeof WRITE_FEATURE_KEYS)[number];

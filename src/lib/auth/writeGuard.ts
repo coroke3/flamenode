@@ -154,10 +154,10 @@ export async function requireAdminWrite(
 }
 
 /**
- * CostGuard override設定専用。通常mutationから呼んではならない。
+ * CostGuardの手動mode/override制御専用。通常mutationから呼んではならない。
  * mode/feature判定だけを意図的に省き、認証・DB・BAN・TOS・adminはfail-closed。
  */
-export async function requireCostGuardOverrideAdmin(): Promise<WriteGuardResult> {
+export async function requireCostGuardControlAdmin(): Promise<WriteGuardResult> {
   const user = await getCurrentUser();
   if (!user) return deny("unauthenticated");
   const db = getDatabase();

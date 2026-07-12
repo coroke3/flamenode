@@ -22,7 +22,7 @@ function enableOverride(db, fault = false) {
   db.exec("BEGIN IMMEDIATE");
   try {
     const before = db.prepare("SELECT * FROM system_settings WHERE id='default'").get();
-    const changed = db.prepare("UPDATE system_settings SET cost_guard_reason=?, cost_guard_exception_until=?, cost_guard_exception_features_json=?, cost_guard_updated_by_user_id=?, cost_guard_updated_at=? WHERE id='default' AND operation_mode='maintenance' AND cost_guard_exception_until IS NULL").run("reason", 1000, '[\"admin_cost_guard_settings\"]', "admin", 100).changes;
+    const changed = db.prepare("UPDATE system_settings SET cost_guard_reason=?, cost_guard_exception_until=?, cost_guard_exception_features_json=?, cost_guard_updated_by_user_id=?, cost_guard_updated_at=? WHERE id='default' AND operation_mode='maintenance' AND cost_guard_exception_until IS NULL").run("reason", 1000, '[\"edit_video\"]', "admin", 100).changes;
     if (changed !== 1) throw new Error("cas_conflict");
     if (fault) throw new Error("audit_fault");
     const after = db.prepare("SELECT * FROM system_settings WHERE id='default'").get();

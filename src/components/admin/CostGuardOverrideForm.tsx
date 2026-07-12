@@ -18,7 +18,7 @@ export function CostGuardOverrideForm(props: Props): React.ReactElement {
   const [busy, startTransition] = React.useTransition();
   const [reason, setReason] = React.useState("");
   const [confirm, setConfirm] = React.useState("");
-  const [features, setFeatures] = React.useState<string[]>(["admin_cost_guard_settings"]);
+  const [features, setFeatures] = React.useState<string[]>(["edit_video"]);
   const [message, setMessage] = React.useState<string | null>(null);
   const active = Boolean(props.exceptionUntil && props.exceptionUntil > Math.floor(Date.now() / 1000));
 

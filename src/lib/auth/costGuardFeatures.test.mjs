@@ -44,21 +44,21 @@ test("active override allows only its explicit known feature", () => {
     operationMode: "maintenance",
     disabledFeaturesJson: null,
     exceptionUntil: 200,
-    exceptionFeaturesJson: '["admin_cost_guard_settings"]',
+    exceptionFeaturesJson: '["edit_video"]',
     now: 100,
   };
-  assert.deepEqual(evaluateCostGuardCore({ ...base, feature: "admin_cost_guard_settings" }), { blocked: false });
-  assert.deepEqual(evaluateCostGuardCore({ ...base, feature: "edit_video" }), { blocked: true, reason: "mode" });
+  assert.deepEqual(evaluateCostGuardCore({ ...base, feature: "edit_video" }), { blocked: false });
+  assert.deepEqual(evaluateCostGuardCore({ ...base, feature: "post_video_unslotted" }), { blocked: true, reason: "mode" });
 });
 
 test("expired, malformed, and unknown overrides never bypass", () => {
   const base = {
-    feature: "admin_cost_guard_settings",
+    feature: "edit_video",
     operationMode: "maintenance",
     disabledFeaturesJson: null,
     now: 100,
   };
-  assert.deepEqual(evaluateCostGuardCore({ ...base, exceptionUntil: 100, exceptionFeaturesJson: '["admin_cost_guard_settings"]' }), { blocked: true, reason: "mode" });
+  assert.deepEqual(evaluateCostGuardCore({ ...base, exceptionUntil: 100, exceptionFeaturesJson: '["edit_video"]' }), { blocked: true, reason: "mode" });
   assert.deepEqual(evaluateCostGuardCore({ ...base, exceptionUntil: 200, exceptionFeaturesJson: "not-json" }), { blocked: true, reason: "feature" });
   assert.deepEqual(evaluateCostGuardCore({ ...base, exceptionUntil: 200, exceptionFeaturesJson: '["unknown"]' }), { blocked: true, reason: "feature" });
 });
