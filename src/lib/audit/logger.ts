@@ -101,12 +101,15 @@ export async function prepareAuditLogEntry(
   const changedKeys = computeChangedKeys(sanitizedBefore, sanitizedAfter);
   const inversePatch = buildInversePatch(sanitizedBefore, sanitizedAfter);
 
-  const changedKeysJson = changedKeys.length > 0 ? JSON.stringify(changedKeys) : null;
-  const inversePatchJson = inversePatch ? JSON.stringify(inversePatch) : null;
-
   // ペイロードサイズチェック
   const payloadSize = calculatePayloadSize(beforeJson, afterJson);
   const payloadExceeded = payloadSize > settings.max_payload_bytes;
+
+  const changedKeysJson = changedKeys.length > 0 ? JSON.stringify(changedKeys) : null;
+  // before/after を破棄した監査ログに復元用の inverse patch だけを残すと、
+  // 復元可能に見える不完全な記録になる。payload 上限超過時は復元材料を一切保持しない。
+  const inversePatchJson =
+    payloadExceeded || !inversePatch ? null : JSON.stringify(inversePatch);
 
   // ペイロード超過時は before/after を null に
   const finalBeforeJson = payloadExceeded ? null : beforeJson;

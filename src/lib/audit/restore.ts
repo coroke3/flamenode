@@ -71,6 +71,8 @@ export async function restoreAuditLog(
   }
 
   const strategy = log.restore_strategy as RestoreStrategy;
+  const payloadExceeded =
+    log.restore_unavailable_reason_code === "payload_exceeded";
   const before = parseSnapshot(log.before_json);
   const after = parseSnapshot(log.after_json);
   const capability = evaluateRestoreCapability({
@@ -78,7 +80,7 @@ export async function restoreAuditLog(
     strategy,
     before,
     after,
-    payloadExceeded: false,
+    payloadExceeded,
   });
   if (!capability.restorable) {
     return { ok: false, message: capability.message };
@@ -88,6 +90,9 @@ export async function restoreAuditLog(
   if (!adapter) return { ok: false, message: "復元アダプターが見つかりません。" };
   const target = strategy === RestoreStrategy.delete_created ? after : before;
   if (!target) return { ok: false, message: "復元用スナップショットがありません。" };
+  if (target.id !== log.target_id) {
+    return { ok: false, message: "監査対象IDがスナップショットと一致しません。" };
+  }
 
   const current = await adapter.fetchCurrent(db, log.target_id);
   const conflicts: string[] = [];
