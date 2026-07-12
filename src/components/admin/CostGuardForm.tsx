@@ -13,7 +13,7 @@ interface Props {
 
 const MODES = [
   ["normal", "通常"], ["economy", "省エネ"], ["read_only", "読み取り専用"],
-  ["static_only", "静的のみ"], ["maintenance", "メンテナンス"],
+  ["static_only", "静的のみ"],
 ] as const;
 
 export function CostGuardForm(props: Props): React.ReactElement {

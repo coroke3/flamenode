@@ -164,11 +164,10 @@ export async function requireCostGuardControlAdmin(): Promise<WriteGuardResult> 
   if (!db) return deny("db_unavailable");
   const identityDeny = evaluateWriteIdentity(user, "admin");
   if (identityDeny) return deny(identityDeny);
-  const approvedXIds = await getApprovedXIds(db, user.id);
   return {
     ok: true,
     user,
-    activeXId: user.active_x_user_id,
-    approvedXIds,
+    activeXId: null,
+    approvedXIds: [],
   };
 }

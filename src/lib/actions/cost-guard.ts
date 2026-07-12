@@ -22,7 +22,7 @@ export interface CostGuardResult { ok: boolean; message?: string }
 const OVERRIDE_DURATION_SEC = 15 * 60;
 const MAX_OVERRIDE_FEATURES = 8;
 const modeSchema = z.object({
-  mode: z.enum(["normal", "economy", "read_only", "static_only", "maintenance"]),
+  mode: z.enum(["normal", "economy", "read_only", "static_only"]),
   reason: z.string().trim().min(1).max(500),
 });
 type SettingsRow = typeof systemSettings.$inferSelect;

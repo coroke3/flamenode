@@ -19,6 +19,8 @@ test("all manual CostGuard control writes use the dedicated control guard and at
   assert.doesNotMatch(action, /auditAction\(/);
   assert.doesNotMatch(action, /await db\.(?:insert|update|delete)/);
   assert.doesNotMatch(action, /setAutoCostGuard|setCostGuardAdvancedSettings/);
+  assert.match(action, /z\.enum\(\["normal", "economy", "read_only", "static_only"\]\)/);
+  assert.doesNotMatch(normalUi, /\["maintenance", "メンテナンス"\]/);
 });
 
 test("override is a separate, short, confirmed and allowlisted emergency operation", () => {
@@ -35,4 +37,13 @@ test("override is a separate, short, confirmed and allowlisted emergency operati
   assert.match(overrideUi, /setCostGuardOverride/);
   assert.match(overrideUi, /clearCostGuardOverride/);
   assert.match(overrideUi, /15分限定/);
+});
+
+test("control guard skips Active X lookup while keeping identity checks", async () => {
+  const guard = await readFile(new URL("../auth/writeGuard.ts", import.meta.url), "utf8");
+  const control = guard.slice(guard.indexOf("export async function requireCostGuardControlAdmin"));
+  assert.match(control, /evaluateWriteIdentity\(user, "admin"\)/);
+  assert.match(control, /activeXId: null/);
+  assert.match(control, /approvedXIds: \[\]/);
+  assert.doesNotMatch(control, /getApprovedXIds\(/);
 });
