@@ -26,7 +26,10 @@ import {
 import { parseLegacyImportText } from "@/lib/import/legacy/parse";
 import { splitLegacyPayload } from "@/lib/import/legacy/payload";
 import { normalizeEventInfo, normalizeLegacyVideo } from "@/lib/import/legacy/normalize";
-import { buildLegacyImportPlan } from "@/lib/import/legacy/plan";
+import {
+  assertLegacyImportPlanLimits,
+  buildLegacyImportPlan,
+} from "@/lib/import/legacy/plan";
 import { buildDryRunResult } from "@/lib/import/legacy/dryRun";
 import {
   applyLegacyImportPlan,
@@ -130,34 +133,29 @@ async function captureTargetVersions(
   };
 
   for (const ids of chunked(eventIds, MAX_IN_CLAUSE)) {
-    const [rows, staffRows, questionRows, slotRows] = await Promise.all([
-      db
+    const rows = await db
         .select({ id: events.id, updatedAt: events.updated_at })
         .from(events)
-        .where(inArray(events.id, ids)),
-      db.select().from(eventStaff).where(inArray(eventStaff.event_id, ids)),
-      db.select().from(eventCustomQuestions).where(inArray(eventCustomQuestions.event_id, ids)),
-      db.select().from(slots).where(inArray(slots.event_id, ids)),
-    ]);
+        .where(inArray(events.id, ids));
+    const staffRows = await db.select().from(eventStaff).where(inArray(eventStaff.event_id, ids));
+    const questionRows = await db.select().from(eventCustomQuestions).where(inArray(eventCustomQuestions.event_id, ids));
+    const slotRows = await db.select().from(slots).where(inArray(slots.event_id, ids));
     for (const row of rows) eventVersions.set(row.id, row.updatedAt);
     relations.event_staff.push(...staffRows);
     relations.event_custom_questions.push(...questionRows);
     relations.event_slots.push(...slotRows);
   }
   for (const ids of chunked(videoIds, MAX_IN_CLAUSE)) {
-    const [rows, memberRows, eventRows, answerRows, softwareRows, metadataRows, slotRows] =
-      await Promise.all([
-        db
+    const rows = await db
           .select({ id: videos.id, updatedAt: videos.updated_at })
           .from(videos)
-          .where(inArray(videos.id, ids)),
-        db.select().from(videoMembers).where(inArray(videoMembers.video_id, ids)),
-        db.select().from(videoEvents).where(inArray(videoEvents.video_id, ids)),
-        db.select().from(videoCustomAnswers).where(inArray(videoCustomAnswers.video_id, ids)),
-        db.select().from(videoSoftwares).where(inArray(videoSoftwares.video_id, ids)),
-        db.select().from(videoYoutubeMetadata).where(inArray(videoYoutubeMetadata.video_id, ids)),
-        db.select().from(slots).where(inArray(slots.video_id, ids)),
-      ]);
+          .where(inArray(videos.id, ids));
+    const memberRows = await db.select().from(videoMembers).where(inArray(videoMembers.video_id, ids));
+    const eventRows = await db.select().from(videoEvents).where(inArray(videoEvents.video_id, ids));
+    const answerRows = await db.select().from(videoCustomAnswers).where(inArray(videoCustomAnswers.video_id, ids));
+    const softwareRows = await db.select().from(videoSoftwares).where(inArray(videoSoftwares.video_id, ids));
+    const metadataRows = await db.select().from(videoYoutubeMetadata).where(inArray(videoYoutubeMetadata.video_id, ids));
+    const slotRows = await db.select().from(slots).where(inArray(slots.video_id, ids));
     for (const row of rows) videoVersions.set(row.id, row.updatedAt);
     relations.video_members.push(...memberRows);
     relations.video_events.push(...eventRows);
@@ -341,6 +339,15 @@ export async function POST(req: Request): Promise<Response> {
   const plan = buildLegacyImportPlan(normalizedEvents, normalizedVideos, anchorNow, {
     importMode,
   });
+  try {
+    assertLegacyImportPlanLimits(plan, strategy, action);
+  } catch (error) {
+    return errorResponse(
+      error instanceof Error ? error.message : "legacy import plan limit exceeded",
+      413,
+      ["plan-limit"],
+    );
+  }
   const fileHashInput = files.map((file) => ({
     name: file.name ?? "",
     content: file.content ?? "",

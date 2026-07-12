@@ -273,6 +273,15 @@ type LegacyVideoAtomicResult = {
   audits: WriteAuditLogInput[];
 };
 
+type LegacyVideoBeforeRows = {
+  members: Array<typeof videoMembers.$inferSelect>;
+  events: Array<typeof videoEvents.$inferSelect>;
+  answers: Array<typeof videoCustomAnswers.$inferSelect>;
+  metadata: Array<typeof videoYoutubeMetadata.$inferSelect>;
+  softwares: Array<typeof videoSoftwares.$inferSelect>;
+  slots: Array<typeof slots.$inferSelect>;
+};
+
 /**
  * 作品本体と replace 型の関連行を単一の D1 batch に閉じ込める。
  * legacy import はこの入口以外から videos / members / relations を変更しない。
@@ -290,19 +299,15 @@ async function buildLegacyVideoAtomicWork(args: {
   actorUserId: string;
   batchId: string;
   now: number;
+  beforeRows: LegacyVideoBeforeRows;
 }): Promise<LegacyVideoAtomicResult> {
   const afterVideo = buildLegacyVideoSnapshot(args.video, args.existing, args.now);
-  const [beforeMembers, beforeEventRows, beforeAnswers, beforeMetadataRows, beforeSoftwareRows, beforeSlots] =
-    args.existing
-      ? await Promise.all([
-          args.db.select().from(videoMembers).where(eq(videoMembers.video_id, args.video.id)),
-          args.db.select().from(videoEvents).where(eq(videoEvents.video_id, args.video.id)),
-          args.db.select().from(videoCustomAnswers).where(eq(videoCustomAnswers.video_id, args.video.id)),
-          args.db.select().from(videoYoutubeMetadata).where(eq(videoYoutubeMetadata.video_id, args.video.id)),
-          args.db.select().from(videoSoftwares).where(eq(videoSoftwares.video_id, args.video.id)),
-          args.db.select().from(slots).where(eq(slots.video_id, args.video.id)),
-        ])
-      : [[], [], [], [], [], []] as const;
+  const beforeMembers = args.existing ? args.beforeRows.members : [];
+  const beforeEventRows = args.existing ? args.beforeRows.events : [];
+  const beforeAnswers = args.existing ? args.beforeRows.answers : [];
+  const beforeMetadataRows = args.existing ? args.beforeRows.metadata : [];
+  const beforeSoftwareRows = args.existing ? args.beforeRows.softwares : [];
+  const beforeSlots = args.existing ? args.beforeRows.slots : [];
 
   const legacySlotId = `slot_imp_${args.video.id}`;
   if (beforeSlots.some((slot) => slot.id !== legacySlotId)) {
@@ -711,10 +716,8 @@ export async function applyLegacyImportPlan(
   let importedEventIds = new Set<string>();
   let importedVideoIds = new Set<string>();
   if (strategy === "replace_imported") {
-    [importedEventIds, importedVideoIds] = await Promise.all([
-      fetchImportedIds(db, eventIds),
-      fetchImportedIds(db, videoIds),
-    ]);
+    importedEventIds = await fetchImportedIds(db, eventIds);
+    importedVideoIds = await fetchImportedIds(db, videoIds);
   }
 
   // ----------------------------------------------------------
@@ -731,6 +734,47 @@ export async function applyLegacyImportPlan(
   }
   const xUsersById = new Map(plan.xUsers.map((xUser) => [xUser.id.toLowerCase(), xUser]));
   const createdXIds = new Set<string>();
+
+  const groupRows = <T>(rows: readonly T[], key: (row: T) => string): Map<string, T[]> => {
+    const grouped = new Map<string, T[]>();
+    for (const row of rows) {
+      const id = key(row);
+      grouped.set(id, [...(grouped.get(id) ?? []), row]);
+    }
+    return grouped;
+  };
+  const allEventStaff = eventIds.length > 0
+    ? await db.select().from(eventStaff).where(inArray(eventStaff.event_id, eventIds))
+    : [];
+  const allEventQuestions = eventIds.length > 0
+    ? await db.select().from(eventCustomQuestions).where(inArray(eventCustomQuestions.event_id, eventIds))
+    : [];
+  const allVideoMembers = videoIds.length > 0
+    ? await db.select().from(videoMembers).where(inArray(videoMembers.video_id, videoIds))
+    : [];
+  const allVideoEvents = videoIds.length > 0
+    ? await db.select().from(videoEvents).where(inArray(videoEvents.video_id, videoIds))
+    : [];
+  const allVideoAnswers = videoIds.length > 0
+    ? await db.select().from(videoCustomAnswers).where(inArray(videoCustomAnswers.video_id, videoIds))
+    : [];
+  const allVideoMetadata = videoIds.length > 0
+    ? await db.select().from(videoYoutubeMetadata).where(inArray(videoYoutubeMetadata.video_id, videoIds))
+    : [];
+  const allVideoSoftwares = videoIds.length > 0
+    ? await db.select().from(videoSoftwares).where(inArray(videoSoftwares.video_id, videoIds))
+    : [];
+  const allVideoSlots = videoIds.length > 0
+    ? await db.select().from(slots).where(inArray(slots.video_id, videoIds))
+    : [];
+  const eventStaffByEvent = groupRows(allEventStaff, (row) => row.event_id);
+  const eventQuestionsByEvent = groupRows(allEventQuestions, (row) => row.event_id);
+  const videoMembersByVideo = groupRows(allVideoMembers, (row) => row.video_id);
+  const videoEventsByVideo = groupRows(allVideoEvents, (row) => row.video_id);
+  const videoAnswersByVideo = groupRows(allVideoAnswers, (row) => row.video_id);
+  const videoMetadataByVideo = groupRows(allVideoMetadata, (row) => row.video_id);
+  const videoSoftwaresByVideo = groupRows(allVideoSoftwares, (row) => row.video_id);
+  const videoSlotsByVideo = groupRows(allVideoSlots, (row) => row.video_id ?? "");
 
   // ----------------------------------------------------------
   // 4) events
@@ -853,10 +897,7 @@ export async function applyLegacyImportPlan(
         now,
       });
       if (exists && strategy === "replace_imported") {
-        const existingStaffRows = await db
-          .select({ id: eventStaff.id })
-          .from(eventStaff)
-          .where(eq(eventStaff.event_id, ev.id));
+        const existingStaffRows = eventStaffByEvent.get(ev.id) ?? [];
         if (existingStaffRows.some((row) => !row.id.startsWith(`legacy_es_${ev.id}_`))) {
           throw new Error(
             "replace_imported cannot replace staff that was not created by the legacy importer.",
@@ -865,10 +906,7 @@ export async function applyLegacyImportPlan(
       }
       const qRows = plan.eventCustomQuestions.filter((q) => q.event_id === ev.id);
       const beforeQuestionRows = existingEvent
-        ? await db
-            .select()
-            .from(eventCustomQuestions)
-            .where(eq(eventCustomQuestions.event_id, ev.id))
+        ? eventQuestionsByEvent.get(ev.id) ?? []
         : [];
       const afterQuestionRows: Array<typeof eventCustomQuestions.$inferSelect> = qRows.map(
         (question) => ({
@@ -1076,6 +1114,14 @@ export async function applyLegacyImportPlan(
         actorUserId: operatorId,
         batchId: options.batchId,
         now,
+        beforeRows: {
+          members: videoMembersByVideo.get(vi.id) ?? [],
+          events: videoEventsByVideo.get(vi.id) ?? [],
+          answers: videoAnswersByVideo.get(vi.id) ?? [],
+          metadata: videoMetadataByVideo.get(vi.id) ?? [],
+          softwares: videoSoftwaresByVideo.get(vi.id) ?? [],
+          slots: videoSlotsByVideo.get(vi.id) ?? [],
+        },
       });
       mutationStatements.push(...result.mutationStatements);
       expectedMutationChanges.push(...result.expectedMutationChanges);

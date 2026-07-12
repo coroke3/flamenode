@@ -96,19 +96,15 @@ export async function buildDryRunResult(
   const videoIds = plan.videos.map((v) => v.id);
   const xIdList = plan.xUsers.map((x) => x.id);
 
-  const [existingEventIds, existingVideoIds, existingXIds] = await Promise.all([
-    fetchExistingEventIds(db, eventIds),
-    fetchExistingVideoIds(db, videoIds),
-    fetchExistingXIds(db, xIdList),
-  ]);
+  const existingEventIds = await fetchExistingEventIds(db, eventIds);
+  const existingVideoIds = await fetchExistingVideoIds(db, videoIds);
+  const existingXIds = await fetchExistingXIds(db, xIdList);
 
   let importedEventIds = new Set<string>();
   let importedVideoIds = new Set<string>();
   if (strategy === "replace_imported") {
-    [importedEventIds, importedVideoIds] = await Promise.all([
-      fetchImportedEventIds(db, eventIds),
-      fetchImportedVideoIds(db, videoIds),
-    ]);
+    importedEventIds = await fetchImportedEventIds(db, eventIds);
+    importedVideoIds = await fetchImportedVideoIds(db, videoIds);
   }
 
   const counts = {

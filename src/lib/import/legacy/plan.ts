@@ -19,6 +19,7 @@ import type {
   CanonicalYoutubeMetadata,
   ImportError,
   ImportMode,
+  ImportStrategy,
   ImportStats,
   ImportWarning,
   LegacyImportPlan,
@@ -30,6 +31,75 @@ import type {
   LegacyVideoResult,
   LegacyXUserRow,
 } from "./normalize.ts";
+import {
+  LEGACY_IMPORT_D1_QUERY_LIMIT,
+  LEGACY_IMPORT_ENTITY_CAPS,
+  LEGACY_IMPORT_FINALIZE_QUERY_RESERVE,
+  MAX_IN_CLAUSE,
+} from "./constants.ts";
+
+export type LegacyImportBudgetPhase = "analyze" | "apply";
+
+export type LegacyImportQueryBudget = {
+  phase: LegacyImportBudgetPhase;
+  preflightQueries: number;
+  finalizeReserve: number;
+  totalQueries: number;
+  limit: number;
+  withinLimit: boolean;
+};
+
+function chunkCount(count: number): number {
+  return count === 0 ? 0 : Math.ceil(count / MAX_IN_CLAUSE);
+}
+
+/** 前段read/stagingとfinalize予約を合わせ、D1 50 query制約を事前評価する。 */
+export function planLegacyImportQueryBudget(
+  plan: Pick<LegacyImportPlan, "events" | "videos" | "xUsers">,
+  strategy: ImportStrategy,
+  phase: LegacyImportBudgetPhase,
+): LegacyImportQueryBudget {
+  const eventChunks = chunkCount(plan.events.length);
+  const videoChunks = chunkCount(plan.videos.length);
+  const xUserChunks = chunkCount(plan.xUsers.length);
+  // version capture: event本体+3関連、video本体+6関連、x_users。
+  const versionQueries = eventChunks * 4 + videoChunks * 7 + xUserChunks;
+  const strategyQueries = strategy === "replace_imported"
+    ? eventChunks + videoChunks
+    : 0;
+  const preflightQueries = phase === "analyze"
+    ? 4 + versionQueries + eventChunks + videoChunks + xUserChunks + strategyQueries
+    : 3 + versionQueries + eventChunks * 3 + videoChunks * 8 + xUserChunks + strategyQueries;
+  const finalizeReserve = phase === "apply" ? LEGACY_IMPORT_FINALIZE_QUERY_RESERVE : 0;
+  const totalQueries = preflightQueries + finalizeReserve;
+  return {
+    phase,
+    preflightQueries,
+    finalizeReserve,
+    totalQueries,
+    limit: LEGACY_IMPORT_D1_QUERY_LIMIT,
+    withinLimit: totalQueries <= LEGACY_IMPORT_D1_QUERY_LIMIT,
+  };
+}
+
+/** parse/normalize後かつDB write前に、全entity capとquery予算をfail-closed検査する。 */
+export function assertLegacyImportPlanLimits(
+  plan: LegacyImportPlan,
+  strategy: ImportStrategy,
+  phase: LegacyImportBudgetPhase,
+): LegacyImportQueryBudget {
+  for (const [key, cap] of Object.entries(LEGACY_IMPORT_ENTITY_CAPS)) {
+    const rows = plan[key as keyof typeof LEGACY_IMPORT_ENTITY_CAPS];
+    if (!Array.isArray(rows) || rows.length > cap) {
+      throw new Error(`legacy_import_entity_cap_exceeded:${key}:${Array.isArray(rows) ? rows.length : "invalid"}/${cap}`);
+    }
+  }
+  const budget = planLegacyImportQueryBudget(plan, strategy, phase);
+  if (!budget.withinLimit) {
+    throw new Error(`legacy_import_query_budget_exceeded:${budget.totalQueries}/${budget.limit}`);
+  }
+  return budget;
+}
 
 const LEGACY_QUESTION_KEYS = [
   "stage_permission",
