@@ -1,6 +1,6 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import {
@@ -8,13 +8,15 @@ import {
   eventTemplates,
   events,
 } from "@/lib/db/schema";
-import { auditAction } from "@/lib/audit/helpers";
+import { mutateWithAudit } from "@/lib/audit/mutate";
 import {
   parseEventTemplateSnapshot,
-  type EventTemplateQuestionDefinition,
 } from "@/lib/admin/eventTemplateSettings";
 import { generateId } from "@/lib/utils/id";
-import { syncStagePermissionCustomQuestions } from "@/lib/video/stagePermissionQuestions";
+import { resolveStagePermissionFieldsFromJson } from "@/lib/video/formSettings";
+import { stagePermissionQuestionKeyCondition } from "@/lib/video/stagePermissionAnswers";
+import { videoCustomAnswers } from "@/lib/db/schema";
+import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import {
   buildPartsJson,
   buildVideoFormSettingsJson,
@@ -22,7 +24,6 @@ import {
   resolveSubmittedEventVisibility,
 } from "@/lib/event/eventForm";
 import { buildEventUpdatePayload, parseDateInput } from "@/lib/event/eventPayload";
-import { writeEventUpdateAudit } from "@/lib/event/eventAudit";
 import {
   revalidateEventListPaths,
   revalidateEventPaths,
@@ -32,38 +33,24 @@ import {
   resolveEventEditPermissions,
 } from "@/lib/event/eventEditPermissions";
 
+type PlannedQuestion = typeof eventCustomQuestions.$inferInsert;
+
+function questionSnapshot(row: PlannedQuestion): Record<string, unknown> { return { ...row }; }
+
+function stageQuestionRows(eventId: string, settingsJson: string, now: number): PlannedQuestion[] {
+  return resolveStagePermissionFieldsFromJson([settingsJson]).map((field, index) => ({
+    id: generateId("ecq"), event_id: eventId, question_key: field.id,
+    label: field.label, description: field.description || null, type: "textarea" as const,
+    required: field.required ? 1 : 0, options_json: null, placeholder: field.placeholder || null,
+    max_length: 1000, sort_order: index, is_active: 1, visibility: "review" as const,
+    created_at: now, updated_at: now,
+  }));
+}
+
 export interface EventActionResult {
   ok: boolean;
   message?: string;
   eventId?: string;
-}
-
-async function restoreTemplateCustomQuestions(
-  db: NonNullable<ReturnType<typeof getDatabase>>,
-  eventId: string,
-  definitions: EventTemplateQuestionDefinition[],
-  now: number,
-): Promise<void> {
-  if (definitions.length === 0) return;
-  const values = definitions.map((definition) => ({
-    id: generateId("ecq"),
-    event_id: eventId,
-    question_key: definition.question_key,
-    label: definition.label,
-    description: definition.description,
-    type: definition.type,
-    required: definition.required ? 1 : 0,
-    options_json: definition.options_json,
-    placeholder: definition.placeholder,
-    max_length: definition.max_length,
-    sort_order: definition.sort_order,
-    is_active: definition.is_active ? 1 : 0,
-    visibility: definition.visibility,
-    created_at: now,
-    updated_at: now,
-  }));
-
-  await db.insert(eventCustomQuestions).values(values).onConflictDoNothing();
 }
 
 async function requireAdmin(): Promise<
@@ -119,7 +106,7 @@ export async function createEvent(
 
   const videoFormSettingsJson = buildVideoFormSettingsJson(formData, data);
   const visibilityStatus = resolveSubmittedEventVisibility(data);
-  await db.insert(events).values({
+  const createdRow = {
     id,
     title: data.title,
     event_type: data.event_type,
@@ -148,23 +135,29 @@ export async function createEvent(
     repeat_rules: templateSnapshot?.repeat_rules ?? null,
     created_at: now,
     updated_at: now,
-  });
-
-  await restoreTemplateCustomQuestions(
-    db,
-    id,
-    templateSnapshot?.custom_question_definitions ?? [],
-    now,
-  );
-  await syncStagePermissionCustomQuestions(db, id, videoFormSettingsJson, now);
-
-  await auditAction(db, {
-    table_name: "events",
-    record_id: id,
-    action: "CREATE",
-    after_data: { title: data.title, visibility_status: visibilityStatus },
-    operator_user_id: guard.userId,
-    retention_class: "normal",
+    representative_x_user_id: null,
+    public_api_enabled: 0,
+    public_api_updated_at: null,
+  } satisfies typeof events.$inferInsert;
+  const templateQuestions = (templateSnapshot?.custom_question_definitions ?? []).slice(0, 20).map((definition) => ({
+    id: generateId("ecq"), event_id: id, question_key: definition.question_key,
+    label: definition.label, description: definition.description, type: definition.type,
+    required: definition.required ? 1 : 0, options_json: definition.options_json,
+    placeholder: definition.placeholder, max_length: definition.max_length,
+    sort_order: definition.sort_order, is_active: definition.is_active ? 1 : 0,
+    visibility: definition.visibility, created_at: now, updated_at: now,
+  } satisfies PlannedQuestion));
+  const questions = [...templateQuestions, ...stageQuestionRows(id, videoFormSettingsJson, now)];
+  const queue = await buildStaticRebuildQueueBatch(db, [
+    { targetType: "event", targetId: id, reason: "event_create", priority: "high", requestedByUserId: guard.userId },
+    { targetType: "events_index", targetId: "global", reason: "event_create", priority: "low", requestedByUserId: guard.userId },
+    { targetType: "search_index", targetId: "global", reason: "event_create", priority: "low", requestedByUserId: guard.userId },
+  ]);
+  const questionAudits = questions.map((row) => ({ table_name: "event_custom_questions", target_id: row.id, operation: "CREATE" as const, before: null, after: questionSnapshot(row), actor_user_id: guard.userId, retention_class: "normal" as const, strict: true }));
+  await mutateWithAudit(db, {
+    mutationStatements: [db.insert(events).values(createdRow), ...questions.map((row) => db.insert(eventCustomQuestions).values(row)), ...queue.statements],
+    expectedMutationChanges: [1, ...questions.map(() => 1), ...queue.expectedChanges],
+    audits: [{ table_name: "events", target_id: id, operation: "CREATE", before: null, after: createdRow, actor_user_id: guard.userId, retention_class: "normal", strict: true }, ...questionAudits],
   });
 
   revalidateEventListPaths();
@@ -210,41 +203,52 @@ export async function updateEvent(
     now,
   });
 
-  await db
-    .update(events)
-    .set(built.payload)
-    .where(eq(events.id, data.id));
+  const after = { ...before, ...built.payload } as typeof events.$inferSelect;
+  const mutations: Array<Parameters<typeof mutateWithAudit>[1]["mutationStatements"][number]> = [db.update(events).set(built.payload).where(and(eq(events.id, data.id), eq(events.updated_at, before.updated_at)))];
+  const expected = [1];
+  const audits: Array<Parameters<typeof mutateWithAudit>[1]["audits"][number]> = [{
+    table_name: "events", target_id: data.id, operation: "UPDATE" as const,
+    before, after, actor_user_id: u.id, retention_class: "normal" as const, strict: true,
+  }];
 
   if (permissions.questions && built.videoFormSettingsJson != null) {
-    await syncStagePermissionCustomQuestions(
-      db,
-      data.id,
-      built.videoFormSettingsJson,
-      now,
-    );
+    const existing = await db.select().from(eventCustomQuestions).where(and(eq(eventCustomQuestions.event_id, data.id), stagePermissionQuestionKeyCondition()));
+    const next = stageQuestionRows(data.id, built.videoFormSettingsJson, now);
+    const nextByKey = new Map(next.map((row) => [row.question_key, row]));
+    for (const row of existing) {
+      const replacement = nextByKey.get(row.question_key);
+      if (!replacement) {
+        const answerCount = (await db.select({ id: videoCustomAnswers.video_id }).from(videoCustomAnswers).where(eq(videoCustomAnswers.question_id, row.id))).length;
+        mutations.push(db.delete(videoCustomAnswers).where(eq(videoCustomAnswers.question_id, row.id)), db.delete(eventCustomQuestions).where(eq(eventCustomQuestions.id, row.id)));
+        expected.push(answerCount, 1);
+        audits.push({ table_name: "event_custom_questions", target_id: row.id, operation: "DELETE" as const, before: row, after: null, actor_user_id: u.id, retention_class: "normal" as const, strict: true });
+        continue;
+      }
+      nextByKey.delete(row.question_key);
+      const { id: _id, event_id: _eventId, created_at: _createdAt, ...updateValues } = replacement;
+      const updated = { ...row, ...replacement, id: row.id, created_at: row.created_at };
+      mutations.push(db.update(eventCustomQuestions).set(updateValues).where(eq(eventCustomQuestions.id, row.id)));
+      expected.push(1);
+      audits.push({ table_name: "event_custom_questions", target_id: row.id, operation: "UPDATE" as const, before: row, after: updated, actor_user_id: u.id, retention_class: "normal" as const, strict: true });
+    }
+    for (const row of nextByKey.values()) {
+      mutations.push(db.insert(eventCustomQuestions).values(row));
+      expected.push(1);
+      audits.push({ table_name: "event_custom_questions", target_id: row.id, operation: "CREATE" as const, before: null, after: row, actor_user_id: u.id, retention_class: "normal" as const, strict: true });
+    }
   }
-
-  await writeEventUpdateAudit({
-    db,
-    eventId: data.id,
-    operatorUserId: u.id,
-    updatedSections: built.updatedSections,
-    changedByPermission: built.changedByPermission,
-    before,
-    afterPayload: built.payload,
+  const queue = await buildStaticRebuildQueueBatch(db, [
+    { targetType: "event", targetId: data.id, reason: "event_settings_update", requestedByUserId: u.id },
+    { targetType: "events_index", targetId: "global", reason: "event_settings_update", priority: "low", requestedByUserId: u.id },
+    { targetType: "search_index", targetId: "global", reason: "event_settings_update", priority: "low", requestedByUserId: u.id },
+  ]);
+  await mutateWithAudit(db, {
+    mutationStatements: [...mutations, ...queue.statements],
+    expectedMutationChanges: [...expected, ...queue.expectedChanges],
+    audits,
   });
 
   revalidateEventPaths(data.id);
-
-  const { enqueueAfterEventSettingsChange } = await import(
-    "@/lib/staticRebuild/hooks"
-  );
-  await enqueueAfterEventSettingsChange(db, {
-    db,
-    eventId: data.id,
-    reason: "event_settings_update",
-    requestedByUserId: u.id,
-  });
 
   return { ok: true, eventId: data.id };
 }
@@ -269,21 +273,18 @@ export async function deleteEvent(
   if (!db) return { ok: false, message: "DB に接続できません。" };
 
   const now = Math.floor(Date.now() / 1000);
-  await db
-    .update(events)
-    .set({
-      visibility_status: "archived",
-      updated_at: now,
-    })
-    .where(eq(events.id, eventId));
-
-  await auditAction(db, {
-    table_name: "events",
-    record_id: eventId,
-    action: "UPDATE",
-    after_data: { archived_by_delete_action: true },
-    operator_user_id: guard.userId,
-    retention_class: "long_audit",
+  const before = (await db.select().from(events).where(eq(events.id, eventId)).limit(1))[0];
+  if (!before) return { ok: false, message: "イベントが見つかりません。" };
+  const after = { ...before, visibility_status: "archived" as const, updated_at: now };
+  const queue = await buildStaticRebuildQueueBatch(db, [
+    { targetType: "event", targetId: eventId, reason: "event_archive", priority: "high", requestedByUserId: guard.userId },
+    { targetType: "events_index", targetId: "global", reason: "event_archive", priority: "low", requestedByUserId: guard.userId },
+    { targetType: "search_index", targetId: "global", reason: "event_archive", priority: "low", requestedByUserId: guard.userId },
+  ]);
+  await mutateWithAudit(db, {
+    mutationStatements: [db.update(events).set({ visibility_status: "archived", updated_at: now }).where(and(eq(events.id, eventId), eq(events.updated_at, before.updated_at))), ...queue.statements],
+    expectedMutationChanges: [1, ...queue.expectedChanges],
+    audits: [{ table_name: "events", target_id: eventId, operation: "UPDATE", before, after, actor_user_id: guard.userId, retention_class: "long_audit", strict: true }],
   });
 
   revalidateEventPaths(eventId);

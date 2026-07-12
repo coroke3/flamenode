@@ -6,8 +6,9 @@ import { auth } from "@/lib/auth";
 import { canEditEvent } from "@/lib/auth/ownership";
 import { getDatabase } from "@/lib/cloudflare";
 import { videos, videoEvents } from "@/lib/db/schema";
-import { auditAction } from "@/lib/audit/helpers";
-import { enqueueVideoStatusChangeNotification } from "@/lib/notifications/videoStatusNotify";
+import { mutateWithAudit } from "@/lib/audit/mutate";
+import { buildVideoStatusChangeNotificationBatch } from "@/lib/notifications/videoStatusNotify";
+import { buildAfterVideoStatusChangeQueueBatch } from "@/lib/staticRebuild/hooks";
 
 export interface ManageVideoActionResult {
   ok: boolean;
@@ -79,25 +80,13 @@ export async function setManageVideoStatus(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  await db
-    .update(videos)
-    .set({
-      visibility_status: status as typeof videos.$inferInsert.visibility_status,
-      updated_at: now,
-    })
-    .where(eq(videos.id, videoId));
-
-  await auditAction(db, {
-    table_name: "videos",
-    record_id: videoId,
-    action: "UPDATE",
-    before_data: { visibility_status: prevStatus },
-    after_data: { visibility_status: status, reason: reason || null, event_id: eventId, scope: "manage" },
-    operator_user_id: u.id,
-    retention_class: "normal",
-  });
-
-  await enqueueVideoStatusChangeNotification(db, {
+  const after = {
+    ...target,
+    visibility_status: status as typeof target.visibility_status,
+    updated_at: now,
+  };
+  const eventRows = await db.select({ event_id: videoEvents.event_id }).from(videoEvents).where(eq(videoEvents.video_id, videoId));
+  const notification = await buildVideoStatusChangeNotificationBatch(db, {
     videoId,
     videoTitle: target.title,
     youtubeVideoId: target.youtube_video_id,
@@ -107,6 +96,26 @@ export async function setManageVideoStatus(
     recipientUserId: target.submitted_by_user_id,
     eventId,
   });
+  const queue = await buildAfterVideoStatusChangeQueueBatch(db, {
+    videoId, eventIds: eventRows.map((row) => row.event_id),
+    creatorXUserId: target.creator_x_user_id, primaryEventId: target.primary_event_id,
+    requestedByUserId: u.id,
+  });
+
+  await mutateWithAudit(db, {
+    mutationStatements: [
+      db.update(videos).set({ visibility_status: after.visibility_status, updated_at: now })
+        .where(and(eq(videos.id, videoId), eq(videos.visibility_status, prevStatus))),
+      ...notification.statements,
+      ...queue.statements,
+    ],
+    expectedMutationChanges: [1, ...notification.expectedChanges, ...queue.expectedChanges],
+    audits: [{
+      table_name: "videos", target_id: videoId, operation: "UPDATE",
+      before: { ...target }, after: { ...after, manage_event_id: eventId, reason: reason || null },
+      actor_user_id: u.id, retention_class: "normal", strict: true,
+    }],
+  });
 
   revalidatePath(`/manage/events/${eventId}/videos`);
   revalidatePath(`/manage/events/${eventId}/videos/${videoId}`);
@@ -114,12 +123,6 @@ export async function setManageVideoStatus(
   revalidatePath("/manage");
   revalidatePath(`/${target.youtube_video_id ?? videoId}`);
   revalidatePath("/list");
-
-  const { enqueueAfterVideoStatusChange } = await import("@/lib/staticRebuild/hooks");
-  await enqueueAfterVideoStatusChange(db, {
-    videoId,
-    requestedByUserId: u.id,
-  });
 
   return { ok: true, message: "ステータスを更新しました。" };
 }

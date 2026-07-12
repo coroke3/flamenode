@@ -173,6 +173,23 @@ export async function enqueueAfterVideoStatusChange(
   });
 }
 
+export async function buildAfterVideoStatusChangeQueueBatch(
+  db: DB,
+  opts: { videoId: string; eventIds: string[]; creatorXUserId?: string | null; primaryEventId?: string | null; requestedByUserId?: string | null },
+): Promise<StaticRebuildQueueBatch> {
+  const eventIds = Array.from(new Set([opts.primaryEventId, ...opts.eventIds].filter((id): id is string => Boolean(id))));
+  const items: EnqueueStaticRebuildInput[] = [
+    { targetType: "video", targetId: opts.videoId, reason: "video_update", priority: "normal", requestedByUserId: opts.requestedByUserId },
+    { targetType: "top", targetId: "global", reason: "video_update" },
+    { targetType: "list_recent", targetId: "global", reason: "video_update" },
+    { targetType: "list_popular", targetId: "global", reason: "video_update" },
+    { targetType: "search_index", targetId: "global", reason: "video_update", priority: "low" },
+  ];
+  if (opts.creatorXUserId) items.push({ targetType: "user", targetId: opts.creatorXUserId, reason: "video_update" });
+  for (const eventId of eventIds) items.push({ targetType: "event", targetId: eventId, reason: "video_update" });
+  return buildStaticRebuildQueueBatch(db, items);
+}
+
 export async function enqueueAfterEventSettingsChange(
   db: DB,
   opts: HookBase & { eventId: string },
