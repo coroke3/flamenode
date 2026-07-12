@@ -50,7 +50,7 @@ export type EventStaffAtomicExtras = {
 /** 一括スタッフ更新で同じ D1 batch に含める補助 mutation。 */
 export type EventStaffBulkAtomicExtras = {
   mutationStatements: readonly BatchItem<"sqlite">[];
-  expectedMutationChanges: readonly number[];
+  expectedMutationChanges: readonly (number | null)[];
   audits: readonly WriteAuditLogInput[];
 };
 
@@ -59,6 +59,15 @@ export type EventStaffBulkUpsert = {
   id: string;
   /** null は新規作成、文字列は同じイベント内の既存行を更新する。 */
   existingId: string | null;
+  values: EventStaffWriteValues;
+};
+
+/**
+ * イベントのスタッフ集合を置換するための正規化済み行。
+ * import / spreadsheet のように delete → insert が必要な入口も、この型を経由する。
+ */
+export type EventStaffReplacement = {
+  id: string;
   values: EventStaffWriteValues;
 };
 
@@ -619,6 +628,214 @@ export async function bulkUpsertEventStaffWithProtection(args: {
     audits,
   });
   return afterRows.map(({ after }) => after);
+}
+
+function eventStaffVersionGuard(args: {
+  eventId: string;
+  rows: readonly EventStaffRow[];
+}) {
+  const rowPredicates = args.rows.map(
+    (row) => sql`
+      EXISTS (
+        SELECT 1 FROM event_staff
+        WHERE id = ${row.id} AND event_id = ${args.eventId}
+          AND updated_at = ${row.updated_at}
+      )
+    `,
+  );
+  const exactSet =
+    args.rows.length === 0
+      ? sql`NOT EXISTS (SELECT 1 FROM event_staff WHERE event_id = ${args.eventId})`
+      : sql`
+          (SELECT COUNT(*) FROM event_staff WHERE event_id = ${args.eventId}) = ${args.rows.length}
+          AND ${sql.join(rowPredicates, sql` AND `)}
+        `;
+
+  return sql`
+    SELECT CASE
+      WHEN (${exactSet}) THEN 1
+      ELSE json_extract('not-valid-json', '$')
+    END
+  `;
+}
+
+/**
+ * event_staff の全置換を単一の D1 batch で行う。
+ *
+ * delete → insert の途中状態を外へ出さず、最終集合の subject 一意性と owner 最低 1 人を
+ * 先に検証する。legacy import と spreadsheet apply は直接 table を操作せずこの入口を使う。
+ */
+export async function replaceEventStaffWithProtection(args: {
+  db: DB;
+  eventId: string;
+  actorUserId: string;
+  reason: string;
+  context?: string | null;
+  now: number;
+  replacements: readonly EventStaffReplacement[];
+  /** 既存の本人スタッフを降格・削除する場合だけ必要。 */
+  confirmText?: string | null;
+  atomicExtras?: EventStaffBulkAtomicExtras;
+}): Promise<EventStaffRow[]> {
+  if (!args.reason.trim()) {
+    throw new Error("スタッフ一括置換には理由が必要です。");
+  }
+  if (args.replacements.length === 0) {
+    throw new Error(LAST_OWNER_ERROR);
+  }
+  if (
+    args.atomicExtras &&
+    args.atomicExtras.mutationStatements.length !==
+      args.atomicExtras.expectedMutationChanges.length
+  ) {
+    throw new Error("一括スタッフ置換の補助 mutation と変更件数が一致しません。");
+  }
+
+  const beforeRows = await args.db
+    .select()
+    .from(eventStaff)
+    .where(eq(eventStaff.event_id, args.eventId));
+  const ids = new Set<string>();
+  const xSubjectOwners = new Map<string, string>();
+  const userSubjectOwners = new Map<string, string>();
+  let ownerCount = 0;
+  const afterRows: EventStaffRow[] = [];
+
+  for (const replacement of args.replacements) {
+    if (!replacement.id || ids.has(replacement.id)) {
+      throw new Error("一括スタッフ置換に重複または空のスタッフ ID があります。");
+    }
+    ids.add(replacement.id);
+    validateEventStaffSubject({
+      userId: replacement.values.user_id,
+      xUserId: replacement.values.x_user_id,
+    });
+    if (replacement.values.x_user_id) {
+      const duplicate = xSubjectOwners.get(replacement.values.x_user_id);
+      if (duplicate) {
+        throw new Error("同一イベントに同一 X ID のスタッフを重複登録できません。");
+      }
+      xSubjectOwners.set(replacement.values.x_user_id, replacement.id);
+    }
+    if (replacement.values.user_id) {
+      const duplicate = userSubjectOwners.get(replacement.values.user_id);
+      if (duplicate) {
+        throw new Error("同一イベントに同一内部ユーザー ID のスタッフを重複登録できません。");
+      }
+      userSubjectOwners.set(replacement.values.user_id, replacement.id);
+    }
+    if (replacement.values.permission_preset === "owner") ownerCount += 1;
+    afterRows.push({
+      id: replacement.id,
+      event_id: args.eventId,
+      user_id: replacement.values.user_id,
+      x_user_id: replacement.values.x_user_id,
+      display_name: replacement.values.display_name,
+      role: syncLegacyRoleFromPreset(replacement.values.permission_preset),
+      permission_preset: replacement.values.permission_preset,
+      custom_permission_keys_json: replacement.values.custom_permission_keys_json,
+      is_public: replacement.values.is_public,
+      public_role_label: replacement.values.public_role_label,
+      internal_note: replacement.values.internal_note,
+      approved_by_user_id: args.actorUserId,
+      approved_at: args.now,
+      created_at: args.now,
+      updated_at: args.now,
+    });
+  }
+  if (ownerCount < 1) throw new Error(LAST_OWNER_ERROR);
+
+  const approvedXIds = await getApprovedXIdsForUser(args.db, args.actorUserId);
+  for (const before of beforeRows) {
+    if (
+      !isActorTargetingSelf({
+        actorUserId: args.actorUserId,
+        target: asOwnershipRow(before),
+        approvedXIds,
+      })
+    ) {
+      continue;
+    }
+    const next = afterRows.find(
+      (after) =>
+        (after.user_id !== null && after.user_id === before.user_id) ||
+        (after.x_user_id !== null && after.x_user_id === before.x_user_id),
+    );
+    assertSelfChangeConfirmation({
+      eventId: args.eventId,
+      isSelfTarget: true,
+      removesMembership: !next,
+      losesMemberPermission:
+        before.permission_preset === "owner" && next?.permission_preset !== "owner",
+      confirmText: args.confirmText,
+      reason: args.reason,
+    });
+  }
+
+  const mutationStatements: BatchItem<"sqlite">[] = [
+    ...(args.atomicExtras?.mutationStatements ?? []),
+    args.db.run(eventStaffVersionGuard({ eventId: args.eventId, rows: beforeRows })),
+    args.db.run(sql`DELETE FROM event_staff WHERE event_id = ${args.eventId}`),
+    ...afterRows.map((after) =>
+      args.db.run(sql`
+        INSERT INTO event_staff (
+          id, event_id, user_id, x_user_id, display_name, role,
+          permission_preset, custom_permission_keys_json, is_public,
+          public_role_label, internal_note, approved_by_user_id, approved_at,
+          created_at, updated_at
+        ) VALUES (
+          ${after.id}, ${after.event_id}, ${after.user_id}, ${after.x_user_id},
+          ${after.display_name}, ${after.role}, ${after.permission_preset},
+          ${after.custom_permission_keys_json}, ${after.is_public},
+          ${after.public_role_label}, ${after.internal_note},
+          ${after.approved_by_user_id}, ${after.approved_at}, ${after.created_at},
+          ${after.updated_at}
+        )
+      `),
+    ),
+  ];
+  const expectedMutationChanges: Array<number | null> = [
+    ...(args.atomicExtras?.expectedMutationChanges ?? []),
+    null,
+    beforeRows.length,
+    ...afterRows.map(() => 1),
+  ];
+  const audits: WriteAuditLogInput[] = [
+    ...(args.atomicExtras?.audits ?? []),
+    ...beforeRows.map<WriteAuditLogInput>((before) => ({
+      table_name: "event_staff",
+      target_id: before.id,
+      operation: "DELETE",
+      before: snapshot(before),
+      after: null,
+      actor_user_id: args.actorUserId,
+      reason: args.reason,
+      context: args.context ?? null,
+      retention_class: "long_audit",
+      restore_strategy: "recreate_deleted",
+      strict: true,
+    })),
+    ...afterRows.map<WriteAuditLogInput>((after) => ({
+      table_name: "event_staff",
+      target_id: after.id,
+      operation: "CREATE",
+      before: null,
+      after: snapshot(after),
+      actor_user_id: args.actorUserId,
+      reason: args.reason,
+      context: args.context ?? null,
+      retention_class: "long_audit",
+      restore_strategy: "delete_created",
+      strict: true,
+    })),
+  ];
+
+  await mutateWithAudit(args.db, {
+    mutationStatements,
+    expectedMutationChanges,
+    audits,
+  });
+  return afterRows;
 }
 
 export async function transferEventOwnership(args: {

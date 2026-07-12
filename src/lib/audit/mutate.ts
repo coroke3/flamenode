@@ -30,7 +30,11 @@ export type AtomicAuditMutationInput = {
    * 数値は従来どおり最後の statement を検査する。配列を渡す場合は各 statement
    * の直後に検査し、複数行の一括処理も D1 batch 全体で fail-closed にする。
    */
-  expectedMutationChanges: number | readonly number[];
+  /**
+   * `null` は競合しても安全な idempotent INSERT など、変更件数を固定できない
+   * statement を表す。UPDATE/DELETE や置換系 DML は必ず数値を指定する。
+   */
+  expectedMutationChanges: number | readonly (number | null)[];
   /** mutation ごとの完全 before/after snapshot。 */
   audits: readonly WriteAuditLogInput[];
   /**
@@ -138,7 +142,9 @@ export async function mutateWithAudit(
   const mutationBatchItems: BatchItem<"sqlite">[] = perStatementExpectedChanges
     ? input.mutationStatements.flatMap((statement, index) => [
         statement,
-        db.run(assertChanges(perStatementExpectedChanges[index]!)),
+        ...(perStatementExpectedChanges[index] === null
+          ? []
+          : [db.run(assertChanges(perStatementExpectedChanges[index]!))]),
       ])
     : [...input.mutationStatements];
 

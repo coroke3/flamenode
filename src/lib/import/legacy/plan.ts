@@ -275,6 +275,17 @@ export function buildLegacyImportPlan(
     }
 
     const vi = v.video;
+    if (
+      vi.scheduling_type === "slotted" &&
+      (!vi.primary_event_id || vi.scheduled_time === null)
+    ) {
+      errors.push({
+        source: `video:${vi.id}`,
+        message:
+          "スロット投稿には primary_event_id と scheduled_time が必要です。枠を復元できない入力は適用できません。",
+      });
+      continue;
+    }
     videos.push({
       id: vi.id,
       title: vi.title,
