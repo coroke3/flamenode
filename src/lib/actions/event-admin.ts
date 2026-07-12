@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import {
@@ -8,7 +8,10 @@ import {
   eventTemplates,
   events,
 } from "@/lib/db/schema";
-import { mutateWithAudit } from "@/lib/audit/mutate";
+import {
+  mutateWithAudit,
+  planD1AuditMutationBudget,
+} from "@/lib/audit/mutate";
 import {
   parseEventTemplateSnapshot,
 } from "@/lib/admin/eventTemplateSettings";
@@ -36,17 +39,25 @@ import {
 type PlannedQuestion = typeof eventCustomQuestions.$inferInsert;
 
 export const MAX_EVENT_CUSTOM_QUESTIONS = 18;
-export const MAX_D1_ATOMIC_BATCH_STATEMENTS = 50;
+export const MAX_EVENT_CUSTOM_ANSWER_DELETE_ROWS = 20;
 const MAX_QUESTIONS_PER_INSERT = 6;
 
 function questionSnapshot(row: PlannedQuestion): Record<string, unknown> {
   return { ...row };
 }
 
-export function fitsD1AtomicBatchBudget(mutationCount: number): boolean {
-  // mutateWithAudit は変更件数を検査するため、各 mutation の直後に assertion を
-  // 1 statement 追加し、最後に audit INSERT と audit assertion を1件ずつ追加する。
-  return mutationCount * 2 + 2 <= MAX_D1_ATOMIC_BATCH_STATEMENTS;
+function fitsD1AtomicBatchBudget(
+  mutationCount: number,
+  auditCount: number,
+  postAuditCount = 0,
+): boolean {
+  return planD1AuditMutationBudget({
+    mutationStatementCount: mutationCount,
+    mutationAssertionCount: mutationCount,
+    auditEntryCount: auditCount,
+    postAuditStatementCount: postAuditCount,
+    distinctActorCount: 1,
+  }).withinLimit;
 }
 
 function questionInsertChunks(
@@ -57,6 +68,25 @@ function questionInsertChunks(
     chunks.push(rows.slice(index, index + MAX_QUESTIONS_PER_INSERT));
   }
   return chunks;
+}
+
+function sameQuestionDefinition(
+  current: typeof eventCustomQuestions.$inferSelect,
+  next: PlannedQuestion,
+): boolean {
+  return (
+    current.question_key === next.question_key &&
+    current.label === next.label &&
+    current.description === next.description &&
+    current.type === next.type &&
+    current.required === next.required &&
+    current.options_json === next.options_json &&
+    current.placeholder === next.placeholder &&
+    current.max_length === next.max_length &&
+    current.sort_order === next.sort_order &&
+    current.is_active === next.is_active &&
+    current.visibility === next.visibility
+  );
 }
 
 function stageQuestionRows(
@@ -211,37 +241,36 @@ export async function createEvent(
     ...questionInsertChunks(questions).map((chunk) => chunk.length),
     ...queue.expectedChanges,
   ];
-  if (!fitsD1AtomicBatchBudget(mutationStatements.length)) {
+  const audits: Parameters<typeof mutateWithAudit>[1]["audits"] = [
+    {
+      table_name: "events",
+      target_id: id,
+      operation: "CREATE",
+      before: null,
+      after: createdRow,
+      actor_user_id: guard.userId,
+      retention_class: "normal",
+      strict: true,
+    },
+    ...questions.map((row) => ({
+      table_name: "event_custom_questions",
+      target_id: row.id,
+      operation: "CREATE" as const,
+      before: null,
+      after: questionSnapshot(row),
+      actor_user_id: guard.userId,
+      context: "event-create:custom-question",
+      retention_class: "normal" as const,
+      strict: true,
+    })),
+  ];
+  if (!fitsD1AtomicBatchBudget(mutationStatements.length, audits.length)) {
     return { ok: false, message: "イベント作成の原子的処理がD1の上限を超えます。" };
   }
   await mutateWithAudit(db, {
     mutationStatements,
     expectedMutationChanges,
-    audits: [
-      {
-        table_name: "events",
-        target_id: id,
-        operation: "CREATE",
-        before: null,
-        after: createdRow,
-        actor_user_id: guard.userId,
-        retention_class: "normal",
-        strict: true,
-      },
-      ...(questions.length > 0
-        ? [{
-            table_name: "event_custom_questions",
-            target_id: id,
-            operation: "CREATE" as const,
-            before: null,
-            after: { rows: questions.map(questionSnapshot) },
-            actor_user_id: guard.userId,
-            context: "event-create:custom-questions",
-            retention_class: "normal" as const,
-            strict: true,
-          }]
-        : []),
-    ],
+    audits,
   });
 
   revalidateEventListPaths();
@@ -255,6 +284,7 @@ export async function updateEvent(
   const session = await auth().catch(() => null);
   const u = session?.user as { id?: string; role?: string } | undefined;
   if (!u?.id) return { ok: false, message: "ログインが必要です。" };
+  const actorUserId = u.id;
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
@@ -292,7 +322,7 @@ export async function updateEvent(
   const expected = [1];
   const audits: Array<Parameters<typeof mutateWithAudit>[1]["audits"][number]> = [{
     table_name: "events", target_id: data.id, operation: "UPDATE" as const,
-    before, after, actor_user_id: u.id, retention_class: "normal" as const, strict: true,
+    before, after, actor_user_id: actorUserId, retention_class: "normal" as const, strict: true,
   }];
 
   if (permissions.questions && built.videoFormSettingsJson != null) {
@@ -304,7 +334,14 @@ export async function updateEvent(
           eq(eventCustomQuestions.event_id, data.id),
           stagePermissionQuestionKeyCondition(),
         ),
-      );
+      )
+      .limit(MAX_EVENT_CUSTOM_QUESTIONS + 1);
+    if (existing.length > MAX_EVENT_CUSTOM_QUESTIONS) {
+      return {
+        ok: false,
+        message: "既存のカスタム質問数が上限を超えているため更新できません。",
+      };
+    }
     const next = stageQuestionRows(data.id, built.videoFormSettingsJson, now);
     if (next.length > MAX_EVENT_CUSTOM_QUESTIONS) {
       return {
@@ -325,42 +362,86 @@ export async function updateEvent(
           .select()
           .from(videoCustomAnswers)
           .where(inArray(videoCustomAnswers.question_id, obsoleteQuestionIds))
+          .limit(MAX_EVENT_CUSTOM_ANSWER_DELETE_ROWS + 1)
       : [];
+    if (deletedAnswers.length > MAX_EVENT_CUSTOM_ANSWER_DELETE_ROWS) {
+      return {
+        ok: false,
+        message: "削除対象の回答数が上限を超えているため更新できません。",
+      };
+    }
     if (deletedAnswers.length > 0) {
       mutations.push(
         db
           .delete(videoCustomAnswers)
-          .where(inArray(videoCustomAnswers.question_id, obsoleteQuestionIds)),
+          .where(
+            or(
+              ...deletedAnswers.map((answer) =>
+                and(
+                  eq(videoCustomAnswers.video_id, answer.video_id),
+                  eq(videoCustomAnswers.event_id, answer.event_id),
+                  eq(videoCustomAnswers.question_id, answer.question_id),
+                  eq(videoCustomAnswers.updated_at, answer.updated_at),
+                ),
+              ),
+            ),
+          ),
       );
       expected.push(deletedAnswers.length);
-      audits.push({
-        table_name: "video_custom_answers",
-        target_id: data.id,
-        operation: "DELETE",
-        before: { rows: deletedAnswers },
-        after: { rows: [] },
-        actor_user_id: u.id,
-        context: "event-update:removed-stage-question-answers",
-        retention_class: "normal",
-        strict: true,
-      });
+      audits.push(
+        ...deletedAnswers.map((answer) => ({
+          table_name: "video_custom_answers",
+          target_id: `${answer.video_id}:${answer.event_id}:${answer.question_id}`,
+          operation: "DELETE" as const,
+          before: answer,
+          after: null,
+          actor_user_id: actorUserId,
+          context: "event-update:removed-stage-question-answer",
+          retention_class: "normal" as const,
+          strict: true,
+        })),
+      );
     }
     if (obsoleteQuestionIds.length > 0) {
       mutations.push(
         db
           .delete(eventCustomQuestions)
-          .where(inArray(eventCustomQuestions.id, obsoleteQuestionIds)),
+          .where(
+            or(
+              ...obsoleteQuestions.map((row) =>
+                and(
+                  eq(eventCustomQuestions.id, row.id),
+                  eq(eventCustomQuestions.updated_at, row.updated_at),
+                ),
+              ),
+            ),
+          ),
       );
       expected.push(obsoleteQuestionIds.length);
+      audits.push(
+        ...obsoleteQuestions.map((row) => ({
+          table_name: "event_custom_questions",
+          target_id: row.id,
+          operation: "DELETE" as const,
+          before: row,
+          after: null,
+          actor_user_id: actorUserId,
+          context: "event-update:removed-stage-question",
+          retention_class: "normal" as const,
+          strict: true,
+        })),
+      );
     }
 
-    const finalQuestions: Array<typeof eventCustomQuestions.$inferSelect> = [];
     for (const row of existing) {
       const replacement = nextByKey.get(row.question_key);
       if (!replacement) {
         continue;
       }
       nextByKey.delete(row.question_key);
+      if (sameQuestionDefinition(row, replacement)) {
+        continue;
+      }
       const { id: _id, event_id: _eventId, created_at: _createdAt, ...updateValues } = replacement;
       const updated = { ...row, ...replacement, id: row.id, created_at: row.created_at };
       mutations.push(
@@ -375,7 +456,17 @@ export async function updateEvent(
           ),
       );
       expected.push(1);
-      finalQuestions.push(updated);
+      audits.push({
+        table_name: "event_custom_questions",
+        target_id: row.id,
+        operation: "UPDATE",
+        before: row,
+        after: updated,
+        actor_user_id: actorUserId,
+        context: "event-update:stage-question",
+        retention_class: "normal",
+        strict: true,
+      });
     }
     const insertedQuestions = [...nextByKey.values()];
     if (insertedQuestions.length > 0) {
@@ -386,33 +477,28 @@ export async function updateEvent(
         ),
       );
       expected.push(...insertChunks.map((chunk) => chunk.length));
-      finalQuestions.push(
-        ...insertedQuestions as Array<typeof eventCustomQuestions.$inferSelect>,
+      audits.push(
+        ...insertedQuestions.map((row) => ({
+          table_name: "event_custom_questions",
+          target_id: row.id,
+          operation: "CREATE" as const,
+          before: null,
+          after: row,
+          actor_user_id: actorUserId,
+          context: "event-update:stage-question",
+          retention_class: "normal" as const,
+          strict: true,
+        })),
       );
-    }
-    const questionsChanged =
-      existing.length > 0 || insertedQuestions.length > 0;
-    if (questionsChanged) {
-      audits.push({
-        table_name: "event_custom_questions",
-        target_id: data.id,
-        operation: "UPDATE",
-        before: { rows: existing },
-        after: { rows: finalQuestions },
-        actor_user_id: u.id,
-        context: "event-update:stage-questions",
-        retention_class: "normal",
-        strict: true,
-      });
     }
   }
   const queue = await buildStaticRebuildQueueBatch(db, [
-    { targetType: "event", targetId: data.id, reason: "event_settings_update", requestedByUserId: u.id },
-    { targetType: "events_index", targetId: "global", reason: "event_settings_update", priority: "low", requestedByUserId: u.id },
-    { targetType: "search_index", targetId: "global", reason: "event_settings_update", priority: "low", requestedByUserId: u.id },
+    { targetType: "event", targetId: data.id, reason: "event_settings_update", requestedByUserId: actorUserId },
+    { targetType: "events_index", targetId: "global", reason: "event_settings_update", priority: "low", requestedByUserId: actorUserId },
+    { targetType: "search_index", targetId: "global", reason: "event_settings_update", priority: "low", requestedByUserId: actorUserId },
   ]);
   const mutationStatements = [...mutations, ...queue.statements];
-  if (!fitsD1AtomicBatchBudget(mutationStatements.length)) {
+  if (!fitsD1AtomicBatchBudget(mutationStatements.length, audits.length)) {
     return { ok: false, message: "イベント更新の原子的処理がD1の上限を超えます。" };
   }
   await mutateWithAudit(db, {

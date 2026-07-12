@@ -6,6 +6,18 @@ import {
   prepareAuditLogEntries,
   type PreparedAuditLogEntry,
 } from "./logger";
+import {
+  AUDIT_INSERT_CHUNK_SIZE,
+  planD1AuditMutationBudget,
+} from "./mutateBudget";
+
+export {
+  AUDIT_INSERT_CHUNK_SIZE,
+  D1_MAX_BATCH_QUERIES,
+  D1_MAX_BIND_PARAMETERS,
+  D1_RESERVED_CALLER_QUERIES,
+  planD1AuditMutationBudget,
+} from "./mutateBudget";
 
 const AUDIT_COLUMNS = sql.raw(`
   id, table_name, target_id, operation, before_json, after_json,
@@ -14,23 +26,6 @@ const AUDIT_COLUMNS = sql.raw(`
   payload_size_bytes, expires_at, created_at,
   restore_unavailable_reason_code, restore_unavailable_message
 `);
-
-/** D1 の 1 query あたり bind parameter 上限。 */
-export const D1_MAX_BIND_PARAMETERS = 100;
-/** D1 Free の 1 invocation あたり batch query 上限。 */
-export const D1_MAX_BATCH_QUERIES = 50;
-/** caller の権限・対象行取得など、監査関数外の query 用に予約する余裕。 */
-export const D1_RESERVED_CALLER_QUERIES = 10;
-const AUDIT_COLUMN_COUNT = 20;
-const AUDIT_CONDITION_BIND_COUNT = 1;
-/**
- * 監査 INSERT は条件 bind も含めて上限を越えない固定 chunk にする。
- * floor((100 - 1) / (20 + 1)) = 4
- */
-export const AUDIT_INSERT_CHUNK_SIZE = Math.floor(
-  (D1_MAX_BIND_PARAMETERS - AUDIT_CONDITION_BIND_COUNT) /
-    (AUDIT_COLUMN_COUNT + AUDIT_CONDITION_BIND_COUNT),
-);
 
 export class AuditMutationError extends Error {
   constructor(message: string) {
@@ -126,25 +121,6 @@ function auditInsertSql(
   `;
 }
 
-function countBatchQueries(
-  mutationStatementCount: number,
-  mutationAssertionCount: number,
-  auditEntryCount: number,
-  postAuditStatementCount: number,
-): number {
-  return (
-    mutationStatementCount +
-    mutationAssertionCount +
-    Math.ceil(auditEntryCount / AUDIT_INSERT_CHUNK_SIZE) * 2 +
-    postAuditStatementCount
-  );
-}
-
-function countPreparationQueries(audits: readonly WriteAuditLogInput[]): number {
-  if (audits.length === 0) return 0;
-  return 1 + new Set(audits.map((audit) => audit.actor_user_id)).size;
-}
-
 /**
  * D1 batch を使い、本体変更と監査 INSERT を同じ all-or-nothing 単位で実行する。
  *
@@ -187,19 +163,18 @@ export async function mutateWithAudit(
   const mutationAssertionCount = perStatementExpectedChanges
     ? perStatementExpectedChanges.filter((expected) => expected !== null).length
     : 1;
-  const plannedQueryCount = countBatchQueries(
-    input.mutationStatements.length,
+  const budget = planD1AuditMutationBudget({
+    mutationStatementCount: input.mutationStatements.length,
     mutationAssertionCount,
-    input.audits.length,
-    input.postAuditStatements?.length ?? 0,
-  );
-  const preparationQueryCount = countPreparationQueries(input.audits);
-  if (
-    preparationQueryCount + plannedQueryCount + D1_RESERVED_CALLER_QUERIES >
-    D1_MAX_BATCH_QUERIES
-  ) {
+    auditEntryCount: input.audits.length,
+    postAuditStatementCount: input.postAuditStatements?.length ?? 0,
+    distinctActorCount: new Set(
+      input.audits.map((audit) => audit.actor_user_id),
+    ).size,
+  });
+  if (!budget.withinLimit) {
     throw new AuditMutationError(
-      `監査前処理と D1 batch の query 数が上限を超えるため拒否しました（前処理${preparationQueryCount} + batch${plannedQueryCount} + 予約${D1_RESERVED_CALLER_QUERIES}/${D1_MAX_BATCH_QUERIES}）。`,
+      `監査前処理と D1 batch の query 数が上限を超えるため拒否しました（前処理${budget.preparationQueryCount} + batch${budget.batchQueryCount} + 予約${budget.reservedCallerQueryCount}/${budget.limit}）。`,
     );
   }
 

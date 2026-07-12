@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, max, or } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DB } from "@/lib/db/client";
 import { staticRebuildQueue } from "@/lib/db/schema";
@@ -49,6 +49,8 @@ function dedupeStaticRebuildInputs(
 
 const PUBLIC_MISS_COOLDOWN_SEC = 5 * 60;
 const DEFAULT_DONE_COOLDOWN_SEC = 60;
+export const MAX_STATIC_REBUILD_BATCH_TARGETS = 16;
+export const STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT = 2;
 
 export type StaticRebuildQueueBatch = {
   statements: BatchItem<"sqlite">[];
@@ -63,24 +65,75 @@ export async function buildStaticRebuildQueueBatch(
   db: DB,
   items: EnqueueStaticRebuildInput[],
 ): Promise<StaticRebuildQueueBatch> {
+  const normalizedItems = dedupeStaticRebuildInputs(items);
+  if (normalizedItems.length > MAX_STATIC_REBUILD_BATCH_TARGETS) {
+    throw new Error("static_rebuild_batch_target_limit_exceeded");
+  }
+  if (normalizedItems.length === 0) {
+    return { statements: [], expectedChanges: [] };
+  }
+
   const statements: BatchItem<"sqlite">[] = [];
   const expectedChanges: number[] = [];
   const now = Math.floor(Date.now() / 1000);
+  const targetCondition = or(
+    ...normalizedItems.map((input) =>
+      and(
+        eq(staticRebuildQueue.target_type, input.targetType),
+        eq(staticRebuildQueue.target_id, input.targetId),
+      ),
+    ),
+  )!;
+  const activeRows = await db
+    .select()
+    .from(staticRebuildQueue)
+    .where(
+      and(
+        targetCondition,
+        inArray(staticRebuildQueue.status, ["pending", "processing"]),
+      ),
+    );
+  const latestUpdate = db
+    .select({
+      target_type: staticRebuildQueue.target_type,
+      target_id: staticRebuildQueue.target_id,
+      updated_at: max(staticRebuildQueue.updated_at).as("latest_updated_at"),
+    })
+    .from(staticRebuildQueue)
+    .where(targetCondition)
+    .groupBy(
+      staticRebuildQueue.target_type,
+      staticRebuildQueue.target_id,
+    )
+    .as("latest_static_rebuild_queue");
+  const latestRows = await db
+    .select({ queue: staticRebuildQueue })
+    .from(staticRebuildQueue)
+    .innerJoin(
+      latestUpdate,
+      and(
+        eq(staticRebuildQueue.target_type, latestUpdate.target_type),
+        eq(staticRebuildQueue.target_id, latestUpdate.target_id),
+        eq(staticRebuildQueue.updated_at, latestUpdate.updated_at),
+      ),
+    )
+    .where(targetCondition);
+  const keyOf = (targetType: string, targetId: string) =>
+    `${targetType}:${targetId}`;
+  const activeByTarget = new Map(
+    activeRows.map((row) => [keyOf(row.target_type, row.target_id), row]),
+  );
+  const latestByTarget = new Map(
+    latestRows.map(({ queue }) => [
+      keyOf(queue.target_type, queue.target_id),
+      queue,
+    ]),
+  );
 
-  for (const input of dedupeStaticRebuildInputs(items)) {
-    const normalized = normalizeStaticRebuildTarget(input);
-    const active = await db
-      .select()
-      .from(staticRebuildQueue)
-      .where(
-        and(
-          eq(staticRebuildQueue.target_type, normalized.targetType),
-          eq(staticRebuildQueue.target_id, normalized.targetId),
-          inArray(staticRebuildQueue.status, ["pending", "processing"]),
-        )!,
-      )
-      .limit(1);
-    const row = active[0];
+  for (const normalized of normalizedItems) {
+    const row = activeByTarget.get(
+      keyOf(normalized.targetType, normalized.targetId),
+    );
     if (row?.status === "pending") {
       statements.push(
         db
@@ -136,7 +189,10 @@ export async function buildStaticRebuildQueueBatch(
       expectedChanges.push(1);
       continue;
     }
-    if (await shouldSkipRecentEnqueue(db, normalized, now)) continue;
+    const latest = latestByTarget.get(
+      keyOf(normalized.targetType, normalized.targetId),
+    );
+    if (shouldSkipRecentRow(normalized, latest, now)) continue;
 
     statements.push(
       db.insert(staticRebuildQueue).values({
@@ -176,6 +232,14 @@ async function shouldSkipRecentEnqueue(
       .limit(1)
   )[0];
 
+  return shouldSkipRecentRow(input, latest, now);
+}
+
+function shouldSkipRecentRow(
+  input: EnqueueStaticRebuildInput,
+  latest: typeof staticRebuildQueue.$inferSelect | undefined,
+  now: number,
+): boolean {
   if (!latest) return false;
   if (latest.status === "pending" || latest.status === "processing") {
     return false;

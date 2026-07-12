@@ -6,12 +6,20 @@ import { auth } from "@/lib/auth";
 import { canEditEvent } from "@/lib/auth/ownership";
 import { getDatabase } from "@/lib/cloudflare";
 import { videos, videoEvents } from "@/lib/db/schema";
-import { mutateWithAudit } from "@/lib/audit/mutate";
-import { buildVideoStatusChangeNotificationBatch } from "@/lib/notifications/videoStatusNotify";
+import {
+  D1_RESERVED_CALLER_QUERIES,
+  mutateWithAudit,
+  planD1AuditMutationBudget,
+} from "@/lib/audit/mutate";
+import {
+  buildVideoStatusChangeNotificationBatch,
+  VIDEO_STATUS_NOTIFICATION_PREFETCH_QUERY_COUNT,
+} from "@/lib/notifications/videoStatusNotify";
 import {
   buildAfterVideoStatusChangeQueueBatch,
   MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS,
 } from "@/lib/staticRebuild/hooks";
+import { STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT } from "@/lib/staticRebuild/enqueue";
 
 export interface ManageVideoActionResult {
   ok: boolean;
@@ -20,6 +28,13 @@ export interface ManageVideoActionResult {
 
 /** イベント運営者が通常操作で変更できる公開状態。内部状態は管理者側に集約する。 */
 const MANAGE_ALLOWED_STATUS = new Set(["pending", "public", "private"]);
+const MANAGE_VIDEO_STATUS_OWN_PREFETCH_QUERY_COUNT = 3;
+const MANAGE_VIDEO_STATUS_PERMISSION_QUERY_COUNT = 2;
+export const MANAGE_VIDEO_STATUS_CALLER_QUERY_COUNT =
+  MANAGE_VIDEO_STATUS_OWN_PREFETCH_QUERY_COUNT +
+  MANAGE_VIDEO_STATUS_PERMISSION_QUERY_COUNT +
+  VIDEO_STATUS_NOTIFICATION_PREFETCH_QUERY_COUNT +
+  STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT;
 
 export async function setManageVideoStatus(
   formData: FormData,
@@ -83,6 +98,12 @@ export async function setManageVideoStatus(
   }
 
   const now = Math.floor(Date.now() / 1000);
+  if (MANAGE_VIDEO_STATUS_CALLER_QUERY_COUNT > D1_RESERVED_CALLER_QUERIES) {
+    return {
+      ok: false,
+      message: "作品状態更新の事前確認queryがD1予約枠を超えています。",
+    };
+  }
   const after = {
     ...target,
     visibility_status: status as typeof target.visibility_status,
@@ -134,7 +155,13 @@ export async function setManageVideoStatus(
       ...notification.statements,
       ...queue.statements,
     ];
-  if (mutationStatements.length * 2 + 2 > 50) {
+  const budget = planD1AuditMutationBudget({
+    mutationStatementCount: mutationStatements.length,
+    mutationAssertionCount: mutationStatements.length,
+    auditEntryCount: 1,
+    distinctActorCount: 1,
+  });
+  if (!budget.withinLimit) {
     return {
       ok: false,
       message: "作品状態更新の原子的処理がD1の上限を超えます。",

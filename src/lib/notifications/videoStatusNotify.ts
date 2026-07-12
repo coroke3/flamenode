@@ -14,6 +14,8 @@ import {
 
 type AnyDb = LibSQLDatabase<any>;
 
+export const VIDEO_STATUS_NOTIFICATION_PREFETCH_QUERY_COUNT = 2;
+
 export type VideoStatusNotificationBatch = {
   statements: BatchItem<"sqlite">[];
   expectedChanges: number[];
