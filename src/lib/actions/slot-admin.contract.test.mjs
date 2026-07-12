@@ -7,6 +7,10 @@ const formSource = await readFile(
   new URL("../../components/admin/SlotBatchForm.tsx", import.meta.url),
   "utf8",
 );
+const limitSource = await readFile(
+  new URL("../slots/atomicLimits.ts", import.meta.url),
+  "utf8",
+);
 
 test("slot-admin の全 mutation が canonical atomic helper を使う", () => {
   for (const name of [
@@ -28,7 +32,7 @@ test("slot-admin の全 mutation が canonical atomic helper を使う", () => {
 });
 
 test("slot-admin は競合時に部分生成せず full snapshot と二重 CAS を維持する", () => {
-  assert.match(source, /MAX_ATOMIC_SLOT_ROWS = 3/);
+  assert.match(source, /from "@\/lib\/slots\/atomicLimits"/);
   assert.match(source, /INSERT INTO slots/);
   assert.match(source, /NOT EXISTS \(/);
   assert.match(source, /UNION ALL/);
@@ -74,11 +78,11 @@ test("3行の最悪経路が D1 Free 50 query / 100 bind 契約内に収まる",
 });
 
 test("slot生成のUIとserverは同じ3件上限を案内・検証する", () => {
-  const serverLimit = source.match(/const MAX_ATOMIC_SLOT_ROWS = (\d+);/)?.[1];
-  const formLimit = formSource.match(/const MAX_ATOMIC_SLOT_ROWS = (\d+);/)?.[1];
+  const serverLimit = limitSource.match(/MAX_ATOMIC_SLOT_ROWS = (\d+);/)?.[1];
 
   assert.equal(serverLimit, "3");
-  assert.equal(formLimit, serverLimit);
+  assert.match(source, /from "@\/lib\/slots\/atomicLimits"/);
+  assert.match(formSource, /from "@\/lib\/slots\/atomicLimits"/);
   assert.match(source, /count: z\.coerce\.number\(\)\.min\(1\)\.max\(MAX_ATOMIC_SLOT_ROWS\)/);
   assert.match(formSource, /max=\{MAX_ATOMIC_SLOT_ROWS\}/);
   assert.match(formSource, /defaultValue=\{MAX_ATOMIC_SLOT_ROWS\}/);
