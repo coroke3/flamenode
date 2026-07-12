@@ -1,6 +1,7 @@
 import "server-only";
 
 import { and, eq, inArray, sql } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import type { DB } from "@/lib/db/client";
 import { notificationOutbox, users, xUsers } from "@/lib/db/schema";
@@ -65,6 +66,45 @@ async function resolveRecipientUserId(
   )[0];
   if (!userRow || (!force && userRow.is_notification_enabled === 0)) return null;
   return userRow.id;
+}
+
+/**
+ * 通知の宛先・dedupe・payload を事前検証し、呼び出し側の D1 batch に
+ * そのまま追加できる outbox INSERT を返す。INSERT 自体は swallow せず、
+ * 本体 mutation と同じ batch の rollback 条件にする。
+ */
+export async function buildNotificationOutboxStatement(
+  db: AnyDb,
+  input: EnqueueNotificationInput,
+): Promise<BatchItem<"sqlite"> | null> {
+  if (!shouldEnqueueUserNotification()) return null;
+
+  const check = validateNotificationPayload(input.type, input.payload);
+  if (!check.ok) throw new Error(`通知 payload が不正です: ${check.reason}`);
+
+  const dedupeKey = input.dedupeKey?.trim() || null;
+  if (dedupeKey && !input.force && (await hasActiveDedupe(db, dedupeKey))) {
+    return null;
+  }
+
+  const recipientUserId = await resolveRecipientUserId(db, input, input.force ?? false);
+  if (!recipientUserId) return null;
+
+  const now = Math.floor(Date.now() / 1000);
+  return db.insert(notificationOutbox).values({
+    id: randomId(),
+    recipient_user_id: recipientUserId,
+    type: input.type,
+    payload_json: JSON.stringify(input.payload),
+    status: "pending",
+    attempt_count: 0,
+    processing_started_at: null,
+    next_attempt_at: null,
+    last_error: null,
+    event_id: input.eventId ?? null,
+    dedupe_key: dedupeKey,
+    created_at: now,
+  });
 }
 
 async function hasActiveDedupe(
