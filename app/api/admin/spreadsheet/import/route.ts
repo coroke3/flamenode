@@ -3,6 +3,7 @@ export const runtime = "edge";
 import { NextResponse } from "next/server";
 import type { SpreadsheetDelimiterMode } from "@/lib/admin/spreadsheet/paste";
 import {
+  assertSpreadsheetImportColumns,
   prepareSpreadsheetImportRows,
 } from "@/lib/admin/spreadsheet/importPrep";
 import {
@@ -72,25 +73,19 @@ export async function POST(req: Request): Promise<Response> {
       hasHeader,
       delimiter,
     });
-    if (invalidColumns.length > 0) {
-      throw new Error(`unknown_column:${invalidColumns.join(",")}`);
-    }
     const importedColumns = new Set(
       mappedColumns.length > 0 ? mappedColumns : rows.flatMap((row) => Object.keys(row)),
     );
-    const unknownColumns = [...importedColumns].filter(
-      (column) => !ctx.columnNames.includes(column),
-    );
-    if (unknownColumns.length > 0) {
-      throw new Error(`unknown_column:${unknownColumns.join(",")}`);
-    }
     const readonlyColumns = [...importedColumns].filter((column) => {
       const meta = ctx.columns.find((item) => item.name === column);
       return meta && !isSpreadsheetColumnEditable(ctx.def, column);
     });
-    if (readonlyColumns.length > 0) {
-      throw new Error(`column_not_editable:${readonlyColumns.join(",")}`);
-    }
+    assertSpreadsheetImportColumns({
+      mappedColumns: mappedColumns.length > 0 ? mappedColumns : [...importedColumns],
+      invalidColumns,
+      columnNames: ctx.columnNames,
+      readonlyColumns,
+    });
     const writableRows = rows.map((row) => applySpreadsheetForcedInsertValues(ctx.def.table, row));
     const importWarnings = [...warnings];
     if (writableRows.length > SPREADSHEET_IMPORT_MAX_BATCH_ROWS) {

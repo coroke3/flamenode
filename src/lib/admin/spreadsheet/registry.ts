@@ -36,16 +36,13 @@ export const SPREADSHEET_COLUMN_POLICIES: Record<string, SpreadsheetColumnPolicy
   "events.repeat_rules": { json: true, maxLength: 100_000 },
   "events.parts_json": { json: true, maxLength: 100_000 },
   "videos.music_reference_url": { url: true, maxLength: 2048 },
-  "videos.review_data": { json: true, maxLength: 100_000 },
-  "videos.members": { json: true, maxLength: 100_000 },
-  "videos.custom_answers": { json: true, maxLength: 100_000 },
   "x_user_icons.icon_url": { url: true, maxLength: 2048 },
   "x_user_youtube_channels.youtube_channel_url": { url: true, maxLength: 2048 },
-  "system_settings.cost_guard_thresholds": { json: true, maxLength: 100_000 },
-  "system_settings.disabled_features": { json: true, maxLength: 100_000 },
-  "system_settings.user_video_edit_permission_keys_json": { json: true, maxLength: 100_000 },
+  "system_settings.cost_guard_thresholds_json": { json: true, maxLength: 100_000 },
+  "system_settings.disabled_features_json": { json: true, maxLength: 100_000 },
+  "events.user_video_edit_permission_keys_json": { json: true, maxLength: 100_000 },
   "announcements.body": { maxLength: 200_000 },
-  "terms_versions.terms_markdown": { maxLength: 200_000 },
+  "terms_versions.body_markdown": { maxLength: 200_000 },
 };
 
 export const SPREADSHEET_DEFAULT_MAX_CELL_CHARS = 100_000;
@@ -159,15 +156,6 @@ export const SPREADSHEET_TABLE_BLOCKLIST = new Set([
   "sqlite_sequence",
 ]);
 
-export const SPREADSHEET_DEPRECATED_READONLY_TABLES = [
-  "api" + "_endpoints",
-  "dashboard_metrics_cache",
-  "event_staff" + "_permissions",
-  "video" + "_comments",
-  "video" + "_stats",
-  "video" + "_softwares",
-] as const;
-
 /** セル編集禁止（表示はマスク） */
 export const SPREADSHEET_SECRET_COLUMNS = new Set([
   "refresh_token",
@@ -179,16 +167,6 @@ export const SPREADSHEET_SECRET_COLUMNS = new Set([
   "session_state",
   "password",
 ]);
-
-export const SPREADSHEET_READONLY_COLUMNS_BY_TABLE: Record<
-  string,
-  readonly string[]
-> = {
-  events: ["custom_questions", "is_active", "is_entry_open", "is_archived"],
-  system_settings: ["is_maintenance_mode", "cost_guard_mode"],
-  video_chapters: ["video_member_id", "marker_kind"],
-  videos: ["custom_answers", "stage_permission"],
-};
 
 export const SPREADSHEET_FORCED_INSERT_VALUES_BY_TABLE: Record<
   string,
@@ -307,9 +285,6 @@ export function isSpreadsheetColumnEditable(
   column: string,
 ): boolean {
   if (def.mode === "readonly") return false;
-  if (SPREADSHEET_READONLY_COLUMNS_BY_TABLE[def.table]?.includes(column)) {
-    return false;
-  }
   if (SPREADSHEET_SECRET_COLUMNS.has(column)) return false;
   if (SECRET_COLUMN_PATTERN.test(column)) return false;
   return true;

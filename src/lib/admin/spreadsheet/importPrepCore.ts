@@ -83,6 +83,27 @@ export type PreparedSpreadsheetImport = {
   invalidColumns: string[];
 };
 
+export function assertSpreadsheetImportColumns(opts: {
+  mappedColumns: string[];
+  invalidColumns: string[];
+  columnNames: string[];
+  readonlyColumns: string[];
+}): void {
+  if (opts.invalidColumns.length > 0) {
+    throw new Error(`unknown_column:${opts.invalidColumns.join(",")}`);
+  }
+  const unknown = opts.mappedColumns.filter(
+    (column) => !opts.columnNames.includes(column),
+  );
+  if (unknown.length > 0) throw new Error(`unknown_column:${unknown.join(",")}`);
+  const readonly = opts.mappedColumns.filter((column) =>
+    opts.readonlyColumns.includes(column),
+  );
+  if (readonly.length > 0) {
+    throw new Error(`column_not_editable:${readonly.join(",")}`);
+  }
+}
+
 export function buildReadonlyImportColumnWarnings(opts: {
   rows: Record<string, string | null>[];
   mappedColumns: string[];

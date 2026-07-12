@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  assertSpreadsheetImportColumns,
   buildReadonlyImportColumnWarnings,
   buildSpreadsheetImportLocalPreview,
   omitReadonlyImportColumns,
@@ -18,6 +19,41 @@ test("prepareSpreadsheetImportRows parses TSV with header", () => {
   });
   assert.equal(result.rows.length, 2);
   assert.equal(result.rows[0]?.id, "1");
+});
+
+test("header omission does not materialize readonly columns, explicit readonly headers fail", () => {
+  const partial = prepareSpreadsheetImportRows({
+    text: "id\tname\n1\talice",
+    columnNames: ["id", "name", "secret"],
+    hasHeader: true,
+    delimiter: "tsv",
+  });
+  assert.deepEqual(Object.keys(partial.rows[0] ?? {}), ["id", "name"]);
+  assert.doesNotThrow(() =>
+    assertSpreadsheetImportColumns({
+      mappedColumns: partial.mappedColumns,
+      invalidColumns: partial.invalidColumns,
+      columnNames: ["id", "name", "secret"],
+      readonlyColumns: ["secret"],
+    }),
+  );
+
+  const explicit = prepareSpreadsheetImportRows({
+    text: "id\tsecret\n1\tvalue",
+    columnNames: ["id", "name", "secret"],
+    hasHeader: true,
+    delimiter: "tsv",
+  });
+  assert.throws(
+    () =>
+      assertSpreadsheetImportColumns({
+        mappedColumns: explicit.mappedColumns,
+        invalidColumns: explicit.invalidColumns,
+        columnNames: ["id", "name", "secret"],
+        readonlyColumns: ["secret"],
+      }),
+    /column_not_editable:secret/,
+  );
 });
 
 test("buildSpreadsheetImportLocalPreview warns on no_rows", () => {
@@ -53,11 +89,11 @@ test("omitReadonlyImportColumns removes ignored columns before token/apply", () 
         {
           id: "1",
           title: "Title",
-          custom_answers: "{}",
-          stage_permission: "legacy value",
+          readonly_field: "{}",
+          secret_field: "legacy value",
         },
       ],
-      readonlyColumns: ["custom_answers", "stage_permission"],
+      readonlyColumns: ["readonly_field", "secret_field"],
     }),
     [
       {
@@ -100,17 +136,17 @@ test("spreadsheet import parsing stops after the import row cap", () => {
 test("buildReadonlyImportColumnWarnings reports ignored readonly columns", () => {
   assert.deepEqual(
     buildReadonlyImportColumnWarnings({
-      rows: [{ id: "1", custom_answers: "{}", stage_permission: "legacy" }],
-      mappedColumns: ["id", "custom_answers", "stage_permission"],
-      readonlyColumns: ["custom_answers", "stage_permission"],
+      rows: [{ id: "1", readonly_field: "{}", secret_field: "legacy" }],
+      mappedColumns: ["id", "readonly_field", "secret_field"],
+      readonlyColumns: ["readonly_field", "secret_field"],
     }),
-    ["Readonly columns are ignored on import: custom_answers, stage_permission"],
+    ["Readonly columns are ignored on import: readonly_field, secret_field"],
   );
   assert.deepEqual(
     buildReadonlyImportColumnWarnings({
       rows: [{ id: "1" }],
       mappedColumns: ["id"],
-      readonlyColumns: ["custom_answers"],
+      readonlyColumns: ["readonly_field"],
     }),
     [],
   );

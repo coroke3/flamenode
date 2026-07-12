@@ -95,11 +95,7 @@ export function parseSpreadsheetPaste(
       if (!col) continue;
       row[col] = parseSpreadsheetCellInput(line[i]);
     }
-    if (options.hasHeader) {
-      for (const col of tableColumns) {
-        if (!(col in row)) row[col] = null;
-      }
-    } else {
+    if (!options.hasHeader) {
       for (let i = 0; i < tableColumns.length; i++) {
         const col = tableColumns[i]!;
         row[col] = parseSpreadsheetCellInput(line[i]);

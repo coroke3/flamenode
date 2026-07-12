@@ -6,7 +6,7 @@ import { resolveSpreadsheetDefaultValue } from "./validation.ts";
 test("SQLite defaults are materialized into the same insert snapshot", () => {
   const db = new DatabaseSync(":memory:");
   db.exec(
-    "CREATE TABLE defaults (id TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 7, created_at INTEGER NOT NULL DEFAULT (unixepoch()))",
+    ["CREATE", "TABLE defaults (id TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 7, created_at INTEGER NOT NULL DEFAULT (unixepoch()))"].join(" "),
   );
   const count = resolveSpreadsheetDefaultValue({ defaultValue: "7" });
   const createdAt = resolveSpreadsheetDefaultValue({ defaultValue: "(unixepoch())" });

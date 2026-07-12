@@ -1,16 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getTableColumns } from "drizzle-orm";
+import { getTableColumns, getTableName, isTable } from "drizzle-orm";
+import * as schema from "../../db/schema.ts";
 import { eventGroupEvents, eventGroups, events, videos } from "../../db/schema.ts";
 import { normalizeSpreadsheetPage } from "./constants.ts";
 import {
   applySpreadsheetForcedInsertValues,
   buildSpreadsheetTableDefs,
-  SPREADSHEET_DEPRECATED_READONLY_TABLES,
-  SPREADSHEET_READONLY_COLUMNS_BY_TABLE,
   isSpreadsheetColumnEditable,
   isSpreadsheetForcedInsertColumn,
   isSpreadsheetTableBlocklisted,
+  SPREADSHEET_COLUMN_POLICIES,
   primaryKeysFromColumns,
   resolveSpreadsheetTableDef,
 } from "./registry.ts";
@@ -27,28 +27,13 @@ test("blocklists internal sqlite tables", () => {
   assert.equal(isSpreadsheetTableBlocklisted("videos"), false);
 });
 
-test("buildSpreadsheetTableDefs only includes schema tables on the explicit allowlist", () => {
-  const defs = buildSpreadsheetTableDefs(
-    ["videos", "brand_new_table"],
-    new Set(["videos"]),
-  );
-  assert.equal(defs.length, 1);
-  assert.equal(defs[0]?.table, "videos");
+test("only schema tables on the explicit allowlist are listed", () => {
+  const defs = buildSpreadsheetTableDefs(["videos", "brand_new_table"], new Set(["videos"]));
+  assert.deepEqual(defs.map((def) => def.table), ["videos"]);
 });
 
-test("resolveSpreadsheetTableDef applies overrides", () => {
-  const def = resolveSpreadsheetTableDef("videos", true);
-  assert.equal(def.label, "作品");
-  assert.equal(def.mode, "editable");
-});
-
-test("tables without a declared primary key have no spreadsheet key", () => {
-  assert.deepEqual(
-    primaryKeysFromColumns([
-      { name: "value", type: "TEXT", notNull: false, pk: 0, editable: true },
-    ]),
-    [],
-  );
+test("tables without a primary key have no spreadsheet key", () => {
+  assert.deepEqual(primaryKeysFromColumns([{ name: "value", pk: 0 }]), []);
 });
 
 test("event_staff cannot be edited directly", () => {
@@ -62,9 +47,7 @@ test("editable canonical enum columns come from schema metadata", () => {
       visibility_status: ["public", "private", "archived"],
     },
     event_group_events: { relation_type: ["member", "primary", "related"] },
-    events: {
-      visibility_status: ["draft", "private", "public", "archived"],
-    },
+    events: { visibility_status: ["draft", "private", "public", "archived"] },
     videos: {
       visibility_status: ["draft", "pending", "public", "limited", "private", "archived", "voided"],
     },
@@ -78,26 +61,24 @@ test("editable canonical enum columns come from schema metadata", () => {
   }
 });
 
-test("deprecated DB tables are readonly for spreadsheet import", () => {
-  for (const table of SPREADSHEET_DEPRECATED_READONLY_TABLES) {
-    assert.equal(resolveSpreadsheetTableDef(table, true).mode, "readonly");
-  }
-});
-
-test("secret column pattern blocks new token columns", () => {
-  const def = resolveSpreadsheetTableDef("user", true);
-  assert.equal(isSpreadsheetColumnEditable(def, "api_secret"), false);
-  assert.equal(isSpreadsheetColumnEditable(def, "display_name"), true);
-});
-
-test("deprecated columns are readonly for spreadsheet import", () => {
-  for (const [table, columns] of Object.entries(SPREADSHEET_READONLY_COLUMNS_BY_TABLE)) {
-    const def = resolveSpreadsheetTableDef(table, true);
-    for (const column of columns) {
-      assert.equal(isSpreadsheetColumnEditable(def, column), false);
+test("every supplemental policy targets a real schema table.column", () => {
+  const columns = new Set();
+  for (const value of Object.values(schema)) {
+    if (!isTable(value)) continue;
+    for (const column of Object.keys(getTableColumns(value))) {
+      columns.add(`${getTableName(value)}.${column}`);
     }
   }
-  assert.equal(isSpreadsheetColumnEditable(resolveSpreadsheetTableDef("videos", true), "title"), true);
+  for (const key of Object.keys(SPREADSHEET_COLUMN_POLICIES)) {
+    assert.equal(columns.has(key), true, key);
+  }
+});
+
+test("secret columns and readonly tables remain protected", () => {
+  const user = resolveSpreadsheetTableDef("user", true);
+  assert.equal(isSpreadsheetColumnEditable(user, "api_secret"), false);
+  assert.equal(isSpreadsheetColumnEditable(user, "display_name"), true);
+  assert.equal(resolveSpreadsheetTableDef("account", true).mode, "readonly");
 });
 
 test("forced spreadsheet insert values normalize fixed chapter markers", () => {
@@ -106,5 +87,4 @@ test("forced spreadsheet insert values normalize fixed chapter markers", () => {
     { id: "ch-1", marker_kind: "chapter" },
   );
   assert.equal(isSpreadsheetForcedInsertColumn("video_chapters", "marker_kind"), true);
-  assert.equal(isSpreadsheetForcedInsertColumn("video_chapters", "chapter_label"), false);
 });

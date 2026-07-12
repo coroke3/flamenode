@@ -34,8 +34,7 @@ test("spreadsheet import rejects invalid rows before mutation and caps D1 batch 
 
 test("spreadsheet import does not silently omit readonly or unknown columns", () => {
   assert.match(importRouteSource, /invalidColumns/);
-  assert.match(importRouteSource, /column_not_editable/);
-  assert.match(importRouteSource, /unknown_column/);
+  assert.match(importRouteSource, /assertSpreadsheetImportColumns/);
   assert.doesNotMatch(importRouteSource, /omitReadonlyImportColumns/);
 });
 
