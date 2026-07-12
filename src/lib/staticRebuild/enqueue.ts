@@ -7,6 +7,10 @@ import { auditAction } from "@/lib/audit/helpers";
 import { generateId } from "@/lib/utils/id";
 import { normalizeStaticRebuildTarget } from "./normalizeTarget";
 import { pickHigherPriority } from "./priority";
+import {
+  indexUniqueStaticRebuildTargetRows,
+  staticRebuildTargetKey,
+} from "./queueBatchCore";
 import type { EnqueueStaticRebuildInput } from "./types";
 
 const PRIORITY_RANK: Record<"high" | "normal" | "low", number> = {
@@ -92,7 +96,8 @@ export async function buildStaticRebuildQueueBatch(
         targetCondition,
         inArray(staticRebuildQueue.status, ["pending", "processing"]),
       ),
-    );
+    )
+    .limit(MAX_STATIC_REBUILD_BATCH_TARGETS + 1);
   const latestUpdate = db
     .select({
       target_type: staticRebuildQueue.target_type,
@@ -117,22 +122,23 @@ export async function buildStaticRebuildQueueBatch(
         eq(staticRebuildQueue.updated_at, latestUpdate.updated_at),
       ),
     )
-    .where(targetCondition);
-  const keyOf = (targetType: string, targetId: string) =>
-    `${targetType}:${targetId}`;
-  const activeByTarget = new Map(
-    activeRows.map((row) => [keyOf(row.target_type, row.target_id), row]),
-  );
-  const latestByTarget = new Map(
-    latestRows.map(({ queue }) => [
-      keyOf(queue.target_type, queue.target_id),
-      queue,
-    ]),
+    .where(targetCondition)
+    .limit(MAX_STATIC_REBUILD_BATCH_TARGETS + 1);
+  const activeByTarget = indexUniqueStaticRebuildTargetRows(activeRows, {
+    maxRows: MAX_STATIC_REBUILD_BATCH_TARGETS,
+    label: "active",
+  });
+  const latestByTarget = indexUniqueStaticRebuildTargetRows(
+    latestRows.map(({ queue }) => queue),
+    {
+      maxRows: MAX_STATIC_REBUILD_BATCH_TARGETS,
+      label: "latest",
+    },
   );
 
   for (const normalized of normalizedItems) {
     const row = activeByTarget.get(
-      keyOf(normalized.targetType, normalized.targetId),
+      staticRebuildTargetKey(normalized.targetType, normalized.targetId),
     );
     if (row?.status === "pending") {
       statements.push(
@@ -190,7 +196,7 @@ export async function buildStaticRebuildQueueBatch(
       continue;
     }
     const latest = latestByTarget.get(
-      keyOf(normalized.targetType, normalized.targetId),
+      staticRebuildTargetKey(normalized.targetType, normalized.targetId),
     );
     if (shouldSkipRecentRow(normalized, latest, now)) continue;
 
