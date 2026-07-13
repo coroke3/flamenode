@@ -1,3 +1,4 @@
+export type EventExportFormat = "legacy" | "new";
 export type EventExportUpdateMode = "realtime" | "scheduled";
 
 export interface EventExportStaffSnapshot {
@@ -124,6 +125,113 @@ function parseJson(value: string | null): unknown {
 
 function answerValue(answer: EventExportAnswerSnapshot): unknown {
   return answer.answer_json ? parseJson(answer.answer_json) : answer.answer_text;
+}
+
+function answerText(video: EventExportVideoSnapshot, key: string): string {
+  const answer = video.answers.find((candidate) => candidate.key === key);
+  if (!answer) return "";
+  const value = answerValue(answer);
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function legacyDateParts(value: number | null): { date: string; time: string } {
+  if (value == null || !Number.isFinite(value)) return { date: "", time: "" };
+  const date = new Date((value + 9 * 60 * 60) * 1000);
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const hour = String(date.getUTCHours()).padStart(2, "0");
+  const minute = String(date.getUTCMinutes()).padStart(2, "0");
+  return { date: `${month}/${day}`, time: `${hour}:${minute}` };
+}
+
+function memberChapterBounds(chaptersJson: string | null): {
+  start: string;
+  end: string;
+} {
+  const parsed = parseJson(chaptersJson);
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    return { start: "", end: "" };
+  }
+  const first = parsed[0];
+  if (!first || typeof first !== "object") {
+    return { start: "", end: "" };
+  }
+  const chapter = first as { time_seconds?: unknown; end_seconds?: unknown };
+  const start = Number(chapter.time_seconds);
+  const end = Number(chapter.end_seconds);
+  return {
+    start: Number.isFinite(start) && start >= 0 ? String(start) : "",
+    end: Number.isFinite(end) && end >= 0 ? String(end) : "",
+  };
+}
+
+export function buildLegacyEventExportPayload(
+  snapshot: EventExportSnapshot,
+): Array<Record<string, unknown>> {
+  return snapshot.videos.map((video) => {
+    const schedule = legacyDateParts(video.scheduled_time);
+    const chapterBounds = video.members.map((member) =>
+      memberChapterBounds(member.chapters_json),
+    );
+    const isCollaboration =
+      video.collaboration_type === "collab" || video.members.length > 1;
+
+    return {
+      id: video.id,
+      eventid: snapshot.event.id,
+      timestamp:
+        isoFromUnix(video.created_at) ?? isoFromUnix(video.scheduled_time) ?? "",
+      type1: isCollaboration ? "複数人" : "個人",
+      type2: isCollaboration ? "団体" : "個人",
+      type: video.part ?? "",
+      creator: video.creator_display_name,
+      yomi: video.creator_display_name_yomi ?? "",
+      movieyear: answerText(video, "production_experience"),
+      tlink: video.creator_x_user_id ?? "",
+      ychlink: video.creator_youtube_channel_url ?? "",
+      icon: video.creator_icon_url ?? "",
+      member: video.members.map((member) => member.name).join(","),
+      memberid: video.members
+        .map((member) => (member.x_user_id ? `@${member.x_user_id}` : ""))
+        .join(","),
+      data: schedule.date,
+      time: schedule.time,
+      title: video.title,
+      music: video.music ?? "",
+      credit: video.credit ?? "",
+      ymulink: video.music_reference_url ?? "",
+      up: "",
+      othersns: video.creator_other_social_links ?? "",
+      righttype: answerText(video, "stage_permission"),
+      comment: video.intro_comment ?? "",
+      ylink: youtubeUrl(video.youtube_video_id) ?? "",
+      "": "",
+      beforecomment: video.intro_comment ?? "",
+      aftercomment: video.closing_comment ?? "",
+      soft: video.softwares
+        .map((software) => software.raw_label || software.name)
+        .filter(Boolean)
+        .join(","),
+      toudan: answerText(video, "stage_participation"),
+      hitokoto: video.highlights ?? "",
+      starts: chapterBounds.map((chapter) => chapter.start).join(","),
+      ends: chapterBounds.map((chapter) => chapter.end).join(","),
+      startm: "",
+      endm: "",
+      ycomment: video.highlights ?? "",
+      status: "public",
+      small: youtubeThumbnail(video.youtube_video_id, "medium") ?? "",
+      largeThumbnail: youtubeThumbnail(video.youtube_video_id, "large") ?? "",
+      link: xProfileUrl(video.creator_x_user_id) ?? "",
+      fu: video.part ?? "",
+    };
+  });
 }
 
 export function buildEventExportPayload(
@@ -264,4 +372,15 @@ export function buildEventExportPayload(
       truncated: snapshot.truncated,
     },
   };
+}
+
+export function buildEventExportPayloadForFormat(
+  snapshot: EventExportSnapshot,
+  format: EventExportFormat,
+  generatedAt = Math.floor(Date.now() / 1000),
+  updateMode: EventExportUpdateMode = "realtime",
+): unknown {
+  return format === "legacy"
+    ? buildLegacyEventExportPayload(snapshot)
+    : buildEventExportPayload(snapshot, generatedAt, updateMode);
 }
