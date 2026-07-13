@@ -149,12 +149,6 @@ export function normalizeSocialLinksForStorage(
   return serializeSocialLinks(parseSocialLinks(raw));
 }
 
-export function formatSocialLinksForText(raw: string | null | undefined): string {
-  return parseSocialLinks(raw)
-    .map((link) => `${link.type}=${link.url}`)
-    .join("\n");
-}
-
 export function socialLinkIconName(type: string): "x" | "discord" | "mail" | "external" {
   switch (cleanType(type)) {
     case "X":
