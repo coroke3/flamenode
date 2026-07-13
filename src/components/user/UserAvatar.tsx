@@ -1,7 +1,6 @@
 import * as React from "react";
 import { Icon } from "@/components/ui/Icon";
 import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
-import { getUserAvatarInitial } from "@/lib/utils/avatar";
 import { cn } from "@/lib/utils/cn";
 
 export interface UserAvatarProps {
@@ -83,7 +82,7 @@ export function UserAvatar({
       }}
       aria-hidden
     >
-      {getUserAvatarInitial(label)}
+      {label.trim().replace(/^@/, "").slice(0, 1).toLowerCase() || "?"}
     </span>
   );
 }

@@ -4,7 +4,6 @@ import type { BatchItem } from "drizzle-orm/batch";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { and, eq, inArray } from "drizzle-orm";
 import { notificationOutbox, users } from "@/lib/db/schema";
-import { shouldEnqueueUserNotification } from "./context";
 import { enqueueNotification } from "./enqueue";
 import {
   buildVideoApprovedNotification,
@@ -83,7 +82,7 @@ export async function buildVideoStatusChangeNotificationBatch(
   args: VideoStatusNotificationArgs,
 ): Promise<VideoStatusNotificationBatch> {
   const empty = { statements: [], expectedChanges: [] };
-  if (!shouldEnqueueUserNotification() || !args.recipientUserId?.trim()) return empty;
+  if (!args.recipientUserId?.trim()) return empty;
   const spec = notificationSpec(args);
   if (!spec) return empty;
 
@@ -130,7 +129,7 @@ export async function enqueueVideoStatusChangeNotification(
   db: AnyDb,
   args: VideoStatusNotificationArgs,
 ): Promise<void> {
-  if (!shouldEnqueueUserNotification() || !args.recipientUserId?.trim()) return;
+  if (!args.recipientUserId?.trim()) return;
   const spec = notificationSpec(args);
   if (!spec) return;
 
