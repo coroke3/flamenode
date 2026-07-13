@@ -63,12 +63,14 @@ class QuotaDeferredError extends Error {
 }
 
 class YouTubeApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly reason: string,
-  ) {
+  readonly status: number;
+  readonly reason: string;
+
+  constructor(status: number, reason: string) {
     super(`youtube_api_${status}_${reason}`);
     this.name = "YouTubeApiError";
+    this.status = status;
+    this.reason = reason;
   }
 }
 
@@ -91,13 +93,22 @@ export function parseDailyQuotaLimit(raw: string | undefined): number {
 
 class DailyQuotaBudget {
   private dirty = false;
+  private readonly env: PlaylistSyncEnv;
+  readonly day: string;
+  readonly limit: number;
+  private units: number;
 
   private constructor(
-    private readonly env: PlaylistSyncEnv,
-    readonly day: string,
-    readonly limit: number,
-    private units: number,
-  ) {}
+    env: PlaylistSyncEnv,
+    day: string,
+    limit: number,
+    units: number,
+  ) {
+    this.env = env;
+    this.day = day;
+    this.limit = limit;
+    this.units = units;
+  }
 
   static async load(env: PlaylistSyncEnv, now: number): Promise<DailyQuotaBudget> {
     const day = quotaDayKey(now);
