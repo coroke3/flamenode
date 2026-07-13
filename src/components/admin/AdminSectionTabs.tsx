@@ -23,6 +23,7 @@ const HUB_TABS: Record<AdminSectionHub, TabItem[]> = {
   health: [
     { href: "/admin/health", label: "ヘルスチェック", icon: "check" },
     { href: "/admin/health/integrity", label: "DB整合性", icon: "list" },
+    { href: "/admin/workers", label: "Worker監視", icon: "clock" },
   ],
   events: [
     { href: "/admin/events", label: "イベント一覧", icon: "calendar" },
