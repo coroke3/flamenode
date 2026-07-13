@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { MAX_NOTIFICATION_BATCH, processNotificationQueue } from "./dispatch.ts";
+import {
+  MAX_DISCORD_EXTERNAL_REQUESTS_PER_RUN,
+  MAX_NOTIFICATION_BATCH,
+  processNotificationQueue,
+} from "./dispatch.ts";
 
 test("notification dispatcher uses recipient_user_id and bounded lease-aware selection", async () => {
   const statements = [];
@@ -32,4 +36,5 @@ test("notification dispatcher uses recipient_user_id and bounded lease-aware sel
   assert.match(sql, /lease_expires_at <= \?1/);
   assert.match(sql, /LIMIT \?3/);
   assert.equal(MAX_NOTIFICATION_BATCH, 6);
+  assert.equal(MAX_DISCORD_EXTERNAL_REQUESTS_PER_RUN, 12);
 });
