@@ -3,10 +3,10 @@ main = "index.ts"
 compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Workers Free では 1時間未満の Cron は CPU 10ms 上限になる。
-# 静的JSON生成とcleanupは重処理なので、1時間間隔にして長時間Cron枠を使う。
+# Workers FreeはCron間隔にかかわらずCPU 10ms。
+# 1回1 targetに固定し、15分間隔で小分け処理する。
 [triggers]
-crons = ["0 * * * *"]
+crons = ["*/15 * * * *"]
 
 [[d1_databases]]
 binding = "DB"
