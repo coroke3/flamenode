@@ -3,6 +3,8 @@ main = "index.ts"
 compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Workers FreeはCron間隔にかかわらずCPU 10ms。
+# 1回1 targetに固定し、15分間隔で小分け処理する。
 [triggers]
 crons = ["*/15 * * * *"]
 
