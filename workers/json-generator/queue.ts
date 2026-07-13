@@ -15,9 +15,15 @@ export interface Env {
   KV: KVNamespace;
 }
 
+export interface ProcessStaticQueueOptions {
+  limit?: number;
+  priorities?: readonly ("high" | "normal" | "low")[];
+  targetTypes?: readonly string[];
+  reconcile?: boolean;
+}
+
 const STALE_QUEUE_RECONCILE_LIMIT = 20;
 const PROCESSING_LEASE_SEC = 5 * 60;
-const PROCESSING_CONCURRENCY = 2;
 const MAX_ATTEMPTS = 4;
 
 type QueueRow = {
@@ -39,7 +45,20 @@ export async function getOperationMode(env: Env): Promise<OperationMode> {
   return resolveQueueOperationMode(row);
 }
 
-export async function processStaticRebuildQueue(env: Env): Promise<{
+function boundedLimit(mode: OperationMode, requested: number | undefined): number {
+  const modeLimit = queueLimitForMode(mode);
+  if (!Number.isFinite(requested)) return modeLimit;
+  return Math.min(modeLimit, Math.max(1, Math.floor(requested ?? modeLimit)));
+}
+
+function placeholders(values: readonly unknown[]): string {
+  return values.map(() => "?").join(",");
+}
+
+export async function processStaticRebuildQueue(
+  env: Env,
+  options: ProcessStaticQueueOptions = {},
+): Promise<{
   processed: number;
   failed: number;
   skipped: number;
@@ -50,12 +69,16 @@ export async function processStaticRebuildQueue(env: Env): Promise<{
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const limit = queueLimitForMode(mode);
+  const limit = boundedLimit(mode, options.limit);
 
-  if (shouldReconcileStaleQueue(mode)) {
+  if (
+    options.reconcile !== false &&
+    shouldReconcileStaleQueue(mode)
+  ) {
     await reconcileStaleQueue(env, now);
   }
 
+  const bindValues: unknown[] = [now];
   let query = `
     SELECT id, target_type, target_id, priority, attempt_count
     FROM static_rebuild_queue
@@ -63,24 +86,34 @@ export async function processStaticRebuildQueue(env: Env): Promise<{
       AND (next_retry_at IS NULL OR next_retry_at <= ?)
   `;
   query += queueModeWhereClause(mode);
+
+  const priorities = options.priorities?.filter(Boolean) ?? [];
+  if (priorities.length > 0) {
+    query += ` AND priority IN (${placeholders(priorities)})`;
+    bindValues.push(...priorities);
+  }
+
+  const targetTypes = options.targetTypes?.map((value) => value.trim()).filter(Boolean) ?? [];
+  if (targetTypes.length > 0) {
+    query += ` AND target_type IN (${placeholders(targetTypes)})`;
+    bindValues.push(...targetTypes);
+  }
+
   query += `
     ORDER BY
       CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END,
       created_at ASC
     LIMIT ?
   `;
+  bindValues.push(limit);
 
-  const result = await env.DB.prepare(query).bind(now, limit).all();
+  const result = await env.DB.prepare(query).bind(...bindValues).all();
   const rows = (result.results ?? []) as QueueRow[];
   const outcomes: QueueOutcome[] = [];
 
-  for (let offset = 0; offset < rows.length; offset += PROCESSING_CONCURRENCY) {
-    const chunk = rows.slice(offset, offset + PROCESSING_CONCURRENCY);
-    outcomes.push(
-      ...(await Promise.all(
-        chunk.map((row) => processQueueRow(env, mode, row, now)),
-      )),
-    );
+  // D1/R2の同時接続数を増やさないため常に逐次処理する。
+  for (const row of rows) {
+    outcomes.push(await processQueueRow(env, mode, row, now));
   }
 
   return outcomes.reduce(
@@ -135,8 +168,8 @@ export async function markProcessing(
 }
 
 /**
- * processing 中に enqueue が入ると updated_at が processing_started_at より新しくなる。
- * その場合は完了行にせず、同じ行を pending へ戻して次の世代を再生成する。
+ * processing中にenqueueが入るとupdated_atがprocessing_started_atより新しくなる。
+ * その場合は完了行にせず、同じ行をpendingへ戻して次の世代を再生成する。
  */
 export async function markDone(
   env: Env,
@@ -245,7 +278,7 @@ async function recoverLeaseInvalidatedProcessing(
     .run();
 }
 
-/** 失敗・長時間 processing の取り残し確認（全件再生成はしない） */
+/** 失敗・長時間processingの取り残し確認（全件再生成はしない）。 */
 export async function reconcileStaleQueue(env: Env, now: number): Promise<void> {
   await env.DB.prepare(
     `UPDATE static_rebuild_queue
