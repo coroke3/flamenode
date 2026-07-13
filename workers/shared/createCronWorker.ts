@@ -6,7 +6,10 @@ interface CreateCronWorkerOptions<
   Env extends CronWorkerEnv,
 > {
   service: string;
-  run: (env: Env) => Promise<void>;
+  run: (
+    env: Env,
+    event: ScheduledEvent,
+  ) => Promise<void>;
   fetch?: (
     request: Request,
     env: Env,
@@ -22,11 +25,11 @@ export function createCronWorker<
 }: CreateCronWorkerOptions<Env>) {
   return {
     scheduled(
-      _event: ScheduledEvent,
+      event: ScheduledEvent,
       env: Env,
       context: ExecutionContext,
     ): void {
-      context.waitUntil(run(env));
+      context.waitUntil(run(env, event));
     },
 
     async fetch(
