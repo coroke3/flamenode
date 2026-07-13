@@ -10,8 +10,7 @@ const MAX_LIVE_SLOTS = 6000;
 
 function normalizeEventId(eventId: string): string | null {
   const id = eventId.trim();
-  if (!id || id.length > MAX_EVENT_ID_LEN) return null;
-  return id;
+  return id && id.length <= MAX_EVENT_ID_LEN ? id : null;
 }
 
 async function eventExists(db: DB, eventId: string): Promise<boolean> {
@@ -30,28 +29,16 @@ export async function getLiveEventSummary(db: DB, eventId: string) {
 
   const now = Math.floor(Date.now() / 1000);
   const freshness = resolveEventFreshness(ev, now);
-
-  const slotRows = await db
-    .select({
-      status: slots.status,
-      c: sql<number>`COUNT(*)`,
-    })
-    .from(slots)
-    .where(eq(slots.event_id, id))
-    .groupBy(slots.status);
-
-  let openSlots = 0;
-  let reservedSlots = 0;
-  let submitted = 0;
-  for (const r of slotRows) {
-    const n = Number(r.c ?? 0);
-    if (r.status === "available") openSlots += n;
-    if (r.status === "reserved") reservedSlots += n;
-    if (r.status === "submitted") submitted += n;
-  }
-
-  const pendingReview = (
-    await db
+  const [slotRows, pendingReviewRows] = await Promise.all([
+    db
+      .select({
+        status: slots.status,
+        c: sql<number>`COUNT(*)`,
+      })
+      .from(slots)
+      .where(eq(slots.event_id, id))
+      .groupBy(slots.status),
+    db
       .select({ c: sql<number>`COUNT(*)` })
       .from(videos)
       .innerJoin(videoEvents, eq(videoEvents.video_id, videos.id))
@@ -60,8 +47,18 @@ export async function getLiveEventSummary(db: DB, eventId: string) {
           eq(videoEvents.event_id, id),
           eq(videos.visibility_status, "pending"),
         )!,
-      )
-  )[0];
+      ),
+  ]);
+
+  let openSlots = 0;
+  let reservedSlots = 0;
+  let submitted = 0;
+  for (const row of slotRows) {
+    const count = Number(row.c ?? 0);
+    if (row.status === "available") openSlots += count;
+    if (row.status === "reserved") reservedSlots += count;
+    if (row.status === "submitted") submitted += count;
+  }
 
   return {
     event_id: id,
@@ -69,15 +66,14 @@ export async function getLiveEventSummary(db: DB, eventId: string) {
     open_slots: openSlots,
     reserved_slots: reservedSlots,
     submitted,
-    pending_review: Number(pendingReview?.c ?? 0),
+    pending_review: Number(pendingReviewRows[0]?.c ?? 0),
     generated_at: now,
   };
 }
 
 export async function getLiveEventSlots(db: DB, eventId: string) {
   const id = normalizeEventId(eventId);
-  if (!id) return null;
-  if (!(await eventExists(db, id))) return null;
+  if (!id || !(await eventExists(db, id))) return null;
 
   const rows = await db
     .select({
@@ -101,8 +97,7 @@ export async function getLiveEventSlots(db: DB, eventId: string) {
 
 export async function getLiveEventSubmissions(db: DB, eventId: string) {
   const id = normalizeEventId(eventId);
-  if (!id) return null;
-  if (!(await eventExists(db, id))) return null;
+  if (!id || !(await eventExists(db, id))) return null;
 
   const rows = await db
     .select({
