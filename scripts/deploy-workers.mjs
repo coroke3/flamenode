@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 /**
- * workers/ 配下の 3 つの Cron Worker を順にデプロイする。
- * 旧5本構成 (json-generator, cleanup, youtube-sync, score-recalc, notification-dispatcher)
- * から3本構成 (fast-jobs, content-jobs, sync-jobs) に統合済み。
+ * background-jobsをdeployし、旧3 Cron Workerを削除する。
+ * 新Workerのdeploy成功前には旧Workerを触らない。
  */
 import { execSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
 
-const WORKERS = [
-  "fast-jobs",
-  "content-jobs",
-  "sync-jobs",
+const WORKER = "background-jobs";
+const LEGACY_WORKERS = [
+  "flamenode-fast-jobs",
+  "flamenode-content-jobs",
+  "flamenode-sync-jobs",
 ];
 
 if (
@@ -29,9 +29,9 @@ const commitSha =
   process.env.GITHUB_SHA ??
   "unknown";
 
-function deploy(name) {
-  const dir = path.join("workers", name);
-  console.log(`\n=== deploy: ${name} ===`);
+function deploy() {
+  const dir = path.join("workers", WORKER);
+  console.log(`\n=== deploy: ${WORKER} ===`);
   execSync(
     `npx wrangler deploy --var BUILD_COMMIT_SHA:${commitSha}`,
     {
@@ -42,11 +42,27 @@ function deploy(name) {
   );
 }
 
-function main() {
-  for (const name of WORKERS) {
-    deploy(name);
+function deleteLegacyWorkers() {
+  for (const name of LEGACY_WORKERS) {
+    console.log(`\n=== delete legacy worker: ${name} ===`);
+    try {
+      execSync(
+        `npx wrangler delete --name ${name} --force`,
+        {
+          stdio: "inherit",
+          env: process.env,
+        },
+      );
+    } catch {
+      console.warn(`[workers:deploy] legacy worker not deleted or already absent: ${name}`);
+    }
   }
-  console.log("\n[workers:deploy] すべて完了。");
+}
+
+function main() {
+  deploy();
+  deleteLegacyWorkers();
+  console.log("\n[workers:deploy] background-jobsへの統合完了。");
 }
 
 main();
