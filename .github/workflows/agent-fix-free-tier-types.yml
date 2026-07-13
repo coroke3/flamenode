@@ -1,0 +1,30 @@
+name: Apply free-tier type defaults
+
+on:
+  push:
+    branches:
+      - agent/free-tier-background-worker
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/free-tier-background-worker
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: 型初期値を適用
+        run: node scripts/agent-fix-free-tier-types.mjs
+      - name: 変更をcommitしてpush
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix operational defaults for free-tier jobs"
+          git push origin HEAD:agent/free-tier-background-worker
