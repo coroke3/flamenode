@@ -5,6 +5,7 @@
  */
 import { createCronWorker } from "../shared/createCronWorker.ts";
 import { processStaticRebuildQueue } from "../json-generator/queue.ts";
+import { withDeduplicatingR2 } from "../json-generator/r2Dedup.ts";
 import { runCleanupWithRetry } from "../cleanup/index.ts";
 import { withCronLease } from "../shared/cronLease.ts";
 import { runJob } from "../shared/runJob.ts";
@@ -37,11 +38,12 @@ export async function runContentJobs(env: Env): Promise<void> {
           let processed = 0;
           let skipped = 0;
           let failed = 0;
+          const rebuildEnv = withDeduplicatingR2(env);
 
           const rebuild = await runJob(
             "content-jobs",
             "static-rebuild-queue",
-            () => processStaticRebuildQueue(env),
+            () => processStaticRebuildQueue(rebuildEnv),
           );
           processed += rebuild.processed;
           skipped += rebuild.skipped;
@@ -109,7 +111,7 @@ export async function handleContentJobsFetch(
           "content-jobs",
           "manual-static-rebuild",
           async () => {
-            queueResult = await runQueue(env);
+            queueResult = await runQueue(withDeduplicatingR2(env));
             return queueResult;
           },
           { rethrow: true },
