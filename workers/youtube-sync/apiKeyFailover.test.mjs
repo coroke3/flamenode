@@ -90,8 +90,8 @@ test("quota超過は副キーへ切り替えない", async () => {
   const kv = createKv();
   const calls = [];
   const keys = resolveYoutubeApiKeys({
-    YOUTUBE_API_KEY: "primary",
-    YOUTUBE_API_KEY_SECONDARY: "secondary",
+    YOUTUBE_API_KEY: "primary-secret",
+    YOUTUBE_API_KEY_SECONDARY: "secondary-secret",
   });
   await assert.rejects(
     fetchYoutubeJsonWithFailover(
@@ -106,7 +106,7 @@ test("quota超過は副キーへ切り替えない", async () => {
     ),
     /quota:youtube_api_quotaexceeded/,
   );
-  assert.deepEqual(calls, ["primary"]);
+  assert.deepEqual(calls, ["primary-secret"]);
 });
 
 test("主キーのcredential障害時だけ副キーへ切り替える", async () => {
@@ -116,8 +116,8 @@ test("主キーのcredential障害時だけ副キーへ切り替える", async (
   const kv = createKv();
   const calls = [];
   const keys = resolveYoutubeApiKeys({
-    YOUTUBE_API_KEY: "primary",
-    YOUTUBE_API_KEY_SECONDARY: "secondary",
+    YOUTUBE_API_KEY: "primary-secret",
+    YOUTUBE_API_KEY_SECONDARY: "secondary-secret",
   });
   const result = await fetchYoutubeJsonWithFailover(
     { KV: kv },
@@ -126,19 +126,20 @@ test("主キーのcredential障害時だけ副キーへ切り替える", async (
     async (url) => {
       const key = new URL(url).searchParams.get("key");
       calls.push(key);
-      return key === "primary"
+      return key === "primary-secret"
         ? errorResponse(400, "keyInvalid")
         : Response.json({ items: [{ id: "video-1" }] });
     },
     10_000,
   );
 
-  assert.deepEqual(calls, ["primary", "secondary"]);
+  assert.deepEqual(calls, ["primary-secret", "secondary-secret"]);
   assert.deepEqual(result, { items: [{ id: "video-1" }] });
-  const status = JSON.parse(kv.values.get(YOUTUBE_API_KEY_STATUS_KV));
+  const serialized = kv.values.get(YOUTUBE_API_KEY_STATUS_KV);
+  const status = JSON.parse(serialized);
   assert.equal(status.active_key, "secondary");
   assert.equal(status.disabled_until.primary, 10_000 + YOUTUBE_API_KEY_DISABLE_SEC);
   assert.equal(status.last_failover_from, "primary");
   assert.equal(status.last_failure_kind, "credential");
-  assert.doesNotMatch(JSON.stringify(status), /primary|secondary-key/);
+  assert.doesNotMatch(serialized, /primary-secret|secondary-secret/);
 });
