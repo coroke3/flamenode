@@ -3,9 +3,17 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 const source = await readFile(new URL("./index.ts", import.meta.url), "utf8");
+const sharedSource = await readFile(
+  new URL("../shared/createCronWorker.ts", import.meta.url),
+  "utf8",
+);
 
-test("sync-jobs health は service と commit を返す", () => {
+test("sync-jobs health は共通Cron Workerからserviceとcommitを返す", () => {
+  assert.match(source, /createCronWorker/);
   assert.match(source, /service:\s*"sync-jobs"/);
   assert.match(source, /BUILD_COMMIT_SHA/);
-  assert.match(source, /async fetch\(\s*req: Request,\s*env: Env/);
+  assert.match(sharedSource, /async fetch\(/);
+  assert.match(sharedSource, /pathname\s*===\s*[\r\n\s]*"\/health"/);
+  assert.match(sharedSource, /commit:/);
+  assert.match(sharedSource, /env\.BUILD_COMMIT_SHA/);
 });
