@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-13
-> Verified against commit: `agent/free-tier-background-worker`
+> Verified against commit: `fcdf468`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `docs/README.md`, `package.json`, `wrangler.toml`
 
 ## Codex エージェント運用
