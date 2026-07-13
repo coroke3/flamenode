@@ -1,5 +1,12 @@
-export type EventExportFormat = "legacy" | "new";
 export type EventExportUpdateMode = "realtime" | "scheduled";
+
+export interface EventExportStaffSnapshot {
+  x_user_id: string | null;
+  display_name: string;
+  public_role_label: string | null;
+  x_name: string | null;
+  icon_url: string | null;
+}
 
 export interface EventExportEventSnapshot {
   id: string;
@@ -14,6 +21,7 @@ export interface EventExportEventSnapshot {
   entry_start_time: number | null;
   entry_end_time: number | null;
   updated_at: number;
+  public_staff: EventExportStaffSnapshot[];
 }
 
 export interface EventExportMemberSnapshot {
@@ -36,6 +44,15 @@ export interface EventExportAnswerSnapshot {
   answer_text: string | null;
   answer_json: string | null;
   sort_order: number;
+}
+
+export interface EventExportChapterSnapshot {
+  x_user_id: string;
+  chapter_time: number;
+  chapter_label: string;
+  note: string | null;
+  show_on_player_bar: number | null;
+  order_index: number | null;
 }
 
 export interface EventExportVideoSnapshot {
@@ -64,9 +81,11 @@ export interface EventExportVideoSnapshot {
   score: number;
   created_at: number;
   updated_at: number;
+  event_ids: string[];
   members: EventExportMemberSnapshot[];
   softwares: EventExportSoftwareSnapshot[];
   answers: EventExportAnswerSnapshot[];
+  chapters: EventExportChapterSnapshot[];
 }
 
 export interface EventExportSnapshot {
@@ -76,17 +95,17 @@ export interface EventExportSnapshot {
   truncated: boolean;
 }
 
-function youtubeUrl(id: string | null): string {
-  return id ? `https://www.youtube.com/watch?v=${id}` : "";
+function youtubeUrl(id: string | null): string | null {
+  return id ? `https://www.youtube.com/watch?v=${id}` : null;
 }
 
-function youtubeThumbnail(id: string | null, large = false): string {
-  if (!id) return "";
-  return `https://i.ytimg.com/vi/${id}/${large ? "maxresdefault" : "mqdefault"}.jpg`;
+function youtubeThumbnail(id: string | null, size: "medium" | "large"): string | null {
+  if (!id) return null;
+  return `https://i.ytimg.com/vi/${id}/${size === "large" ? "maxresdefault" : "mqdefault"}.jpg`;
 }
 
-function xProfileUrl(xId: string | null): string {
-  return xId ? `https://x.com/${encodeURIComponent(xId)}` : "";
+function xProfileUrl(xId: string | null): string | null {
+  return xId ? `https://x.com/${encodeURIComponent(xId)}` : null;
 }
 
 function isoFromUnix(value: number | null): string | null {
@@ -94,17 +113,7 @@ function isoFromUnix(value: number | null): string | null {
   return new Date(value * 1000).toISOString();
 }
 
-function legacyDateParts(value: number | null): { date: string; time: string } {
-  if (value == null || !Number.isFinite(value)) return { date: "", time: "" };
-  const date = new Date((value + 9 * 60 * 60) * 1000);
-  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(date.getUTCDate()).padStart(2, "0");
-  const hour = String(date.getUTCHours()).padStart(2, "0");
-  const minute = String(date.getUTCMinutes()).padStart(2, "0");
-  return { date: `${month}/${day}`, time: `${hour}:${minute}` };
-}
-
-function parseAnswerJson(value: string | null): unknown {
+function parseJson(value: string | null): unknown {
   if (!value) return null;
   try {
     return JSON.parse(value) as unknown;
@@ -113,92 +122,26 @@ function parseAnswerJson(value: string | null): unknown {
   }
 }
 
-function firstChapterTime(chaptersJson: string | null): string {
-  if (!chaptersJson) return "";
-  try {
-    const parsed = JSON.parse(chaptersJson) as Array<{ time_seconds?: unknown }>;
-    const first = Array.isArray(parsed) ? parsed[0] : undefined;
-    const value = Number(first?.time_seconds);
-    return Number.isFinite(value) && value >= 0 ? String(value) : "";
-  } catch {
-    return "";
-  }
+function answerValue(answer: EventExportAnswerSnapshot): unknown {
+  return answer.answer_json ? parseJson(answer.answer_json) : answer.answer_text;
 }
 
-function buildLegacyRows(snapshot: EventExportSnapshot): Array<Record<string, unknown>> {
-  return snapshot.videos.map((video) => {
-    const schedule = legacyDateParts(video.scheduled_time);
-    const memberNames = video.members.map((member) => member.name).join(",");
-    const memberIds = video.members
-      .map((member) => (member.x_user_id ? `@${member.x_user_id}` : ""))
-      .join(",");
-    const starts = video.members.map((member) => firstChapterTime(member.chapters_json)).join(",");
-    const software = video.softwares
-      .map((item) => item.raw_label || item.name)
-      .filter(Boolean)
-      .join(",");
-    const isCollaboration = video.collaboration_type === "collab" || video.members.length > 1;
-
-    return {
-      id: video.id,
-      eventid: snapshot.event.id,
-      timestamp: isoFromUnix(video.created_at) ?? isoFromUnix(video.scheduled_time) ?? "",
-      type1: isCollaboration ? "複数人" : "個人",
-      type2: isCollaboration ? "団体" : "個人",
-      type: video.part ?? "",
-      creator: video.creator_display_name,
-      yomi: video.creator_display_name_yomi ?? "",
-      movieyear: "",
-      tlink: video.creator_x_user_id ?? "",
-      ychlink: video.creator_youtube_channel_url ?? "",
-      icon: video.creator_icon_url ?? "",
-      member: memberNames,
-      memberid: memberIds,
-      data: schedule.date,
-      time: schedule.time,
-      title: video.title,
-      music: video.music ?? "",
-      credit: video.credit ?? "",
-      ymulink: video.music_reference_url ?? "",
-      up: "",
-      othersns: video.creator_other_social_links ?? "",
-      righttype: "",
-      comment: video.intro_comment ?? "",
-      ylink: youtubeUrl(video.youtube_video_id),
-      "": "",
-      beforecomment: video.intro_comment ?? "",
-      aftercomment: video.closing_comment ?? "",
-      soft: software,
-      toudan: "",
-      hitokoto: video.highlights ?? "",
-      starts,
-      ends: "",
-      startm: "",
-      endm: "",
-      ycomment: video.highlights ?? "",
-      status: "public",
-      small: youtubeThumbnail(video.youtube_video_id),
-      largeThumbnail: youtubeThumbnail(video.youtube_video_id, true),
-      link: xProfileUrl(video.creator_x_user_id),
-      fu: video.part ?? "",
-    };
-  });
-}
-
-function buildNewPayload(
+export function buildEventExportPayload(
   snapshot: EventExportSnapshot,
-  generatedAt: number,
-  updateMode: EventExportUpdateMode,
-): Record<string, unknown> {
+  generatedAt = Math.floor(Date.now() / 1000),
+  updateMode: EventExportUpdateMode = "realtime",
+) {
   return {
-    schema_version: 2,
+    schema_version: 3,
     format: "flamenode-event-export",
     generated_at: isoFromUnix(generatedAt),
+    generated_at_unix: generatedAt,
     update_mode: updateMode,
     event: {
       id: snapshot.event.id,
       title: snapshot.event.title,
       explanation: snapshot.event.explanation,
+      status: "public" as const,
       icon_url: snapshot.event.icon_url,
       image_url: snapshot.event.img_url,
       accent_color: snapshot.event.accent_color,
@@ -208,82 +151,117 @@ function buildNewPayload(
       entry_start_at: isoFromUnix(snapshot.event.entry_start_time),
       entry_end_at: isoFromUnix(snapshot.event.entry_end_time),
       updated_at: isoFromUnix(snapshot.event.updated_at),
+      unix_time: {
+        start: snapshot.event.start_time,
+        end: snapshot.event.end_time,
+        entry_start: snapshot.event.entry_start_time,
+        entry_end: snapshot.event.entry_end_time,
+        updated: snapshot.event.updated_at,
+      },
+      public_staff: snapshot.event.public_staff.map((staff) => ({
+        display_name: staff.display_name,
+        role_label: staff.public_role_label,
+        x_id: staff.x_user_id,
+        x_name: staff.x_name,
+        x_url: xProfileUrl(staff.x_user_id),
+        icon_url: staff.icon_url,
+      })),
     },
-    videos: snapshot.videos.map((video) => ({
-      id: video.id,
-      title: video.title,
-      status: "public",
-      primary_event_id: video.primary_event_id,
-      collaboration_type: video.collaboration_type,
-      part: video.part,
-      source: {
-        type: video.source_type,
-        youtube_video_id: video.youtube_video_id,
-        youtube_url: youtubeUrl(video.youtube_video_id) || null,
-        thumbnail_url: youtubeThumbnail(video.youtube_video_id, true) || null,
-      },
-      creator: {
-        display_name: video.creator_display_name,
-        display_name_yomi: video.creator_display_name_yomi,
-        x_id: video.creator_x_user_id,
-        x_url: xProfileUrl(video.creator_x_user_id) || null,
-        icon_url: video.creator_icon_url,
-        youtube_channel_url: video.creator_youtube_channel_url,
-        other_social_links: parseAnswerJson(video.creator_other_social_links),
-      },
-      music: {
-        title: video.music,
-        credit: video.credit,
-        reference_url: video.music_reference_url,
-      },
-      comments: {
-        introduction: video.intro_comment,
-        highlights: video.highlights,
-        production_story: video.production_story,
-        closing: video.closing_comment,
-      },
-      scheduled_at: isoFromUnix(video.scheduled_time),
-      created_at: isoFromUnix(video.created_at),
-      updated_at: isoFromUnix(video.updated_at),
-      stats: {
-        app_likes: video.app_like_count,
-        score: video.score,
-      },
-      members: video.members.map((member) => ({
-        name: member.name,
-        x_id: member.x_user_id,
-        x_url: xProfileUrl(member.x_user_id) || null,
-        role_label: member.role_label,
-        order: member.order_index,
-        chapters: parseAnswerJson(member.chapters_json),
-      })),
-      softwares: video.softwares.map((software) => ({
-        name: software.name,
-        source_label: software.raw_label,
-        order: software.order_index,
-      })),
-      custom_answers: video.answers.map((answer) => ({
+    videos: snapshot.videos.map((video) => {
+      const customAnswers = video.answers.map((answer) => ({
         key: answer.key,
         label: answer.label,
-        value: answer.answer_json ? parseAnswerJson(answer.answer_json) : answer.answer_text,
+        value: answerValue(answer),
         order: answer.sort_order,
-      })),
-    })),
+      }));
+      return {
+        id: video.id,
+        title: video.title,
+        status: "public" as const,
+        primary_event_id: video.primary_event_id,
+        event_ids: video.event_ids,
+        collaboration_type: video.collaboration_type,
+        participant_scope:
+          video.collaboration_type === "collab" || video.members.length > 1
+            ? ("group" as const)
+            : ("individual" as const),
+        part: video.part,
+        source: {
+          type: video.source_type,
+          youtube_video_id: video.youtube_video_id,
+          youtube_url: youtubeUrl(video.youtube_video_id),
+          thumbnail_url: youtubeThumbnail(video.youtube_video_id, "large"),
+          thumbnails: {
+            medium_url: youtubeThumbnail(video.youtube_video_id, "medium"),
+            large_url: youtubeThumbnail(video.youtube_video_id, "large"),
+          },
+        },
+        creator: {
+          display_name: video.creator_display_name,
+          display_name_yomi: video.creator_display_name_yomi,
+          x_id: video.creator_x_user_id,
+          x_url: xProfileUrl(video.creator_x_user_id),
+          icon_url: video.creator_icon_url,
+          youtube_channel_url: video.creator_youtube_channel_url,
+          other_social_links: parseJson(video.creator_other_social_links),
+        },
+        music: {
+          title: video.music,
+          credit: video.credit,
+          reference_url: video.music_reference_url,
+        },
+        comments: {
+          introduction: video.intro_comment,
+          highlights: video.highlights,
+          production_story: video.production_story,
+          closing: video.closing_comment,
+        },
+        scheduled_at: isoFromUnix(video.scheduled_time),
+        created_at: isoFromUnix(video.created_at),
+        updated_at: isoFromUnix(video.updated_at),
+        unix_time: {
+          scheduled: video.scheduled_time,
+          created: video.created_at,
+          updated: video.updated_at,
+        },
+        stats: {
+          app_likes: video.app_like_count,
+          score: video.score,
+        },
+        members: video.members.map((member) => ({
+          name: member.name,
+          x_id: member.x_user_id,
+          x_url: xProfileUrl(member.x_user_id),
+          role_label: member.role_label,
+          order: member.order_index,
+          chapters: parseJson(member.chapters_json),
+        })),
+        chapters: video.chapters.map((chapter) => ({
+          time_seconds: chapter.chapter_time,
+          label: chapter.chapter_label,
+          note: chapter.note,
+          show_on_player_bar: chapter.show_on_player_bar === 1,
+          order: chapter.order_index ?? 0,
+          author: {
+            x_id: chapter.x_user_id,
+            x_url: xProfileUrl(chapter.x_user_id),
+          },
+        })),
+        softwares: video.softwares.map((software) => ({
+          name: software.name,
+          source_label: software.raw_label,
+          order: software.order_index,
+        })),
+        custom_answers: customAnswers,
+        custom_answers_by_key: Object.fromEntries(
+          customAnswers.map((answer) => [answer.key, answer.value]),
+        ),
+      };
+    }),
     meta: {
       count: snapshot.videos.length,
       limit: snapshot.limit,
       truncated: snapshot.truncated,
     },
   };
-}
-
-export function buildEventExportPayload(
-  snapshot: EventExportSnapshot,
-  format: EventExportFormat,
-  generatedAt = Math.floor(Date.now() / 1000),
-  updateMode: EventExportUpdateMode = "realtime",
-): unknown {
-  return format === "legacy"
-    ? buildLegacyRows(snapshot)
-    : buildNewPayload(snapshot, generatedAt, updateMode);
 }
