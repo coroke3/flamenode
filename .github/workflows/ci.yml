@@ -12,6 +12,7 @@ concurrency:
 
 jobs:
   verify:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     env:
       # 実在しない値だけをPR CIに渡す。Cloudflare IDやOAuth secretは不要。
@@ -127,3 +128,54 @@ jobs:
         run: |
           npm run check:docs
           npm run check:db-history
+
+  report-main:
+    if: always() && github.event_name == 'push' && github.actor != 'github-actions[bot]'
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Record result only for the current main HEAD
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          current_sha="$(git rev-parse origin/main)"
+          if [ "$current_sha" != "$CANDIDATE_SHA" ]; then
+            echo "main moved to $current_sha; result for $CANDIDATE_SHA is intentionally not recorded."
+            exit 0
+          fi
+          git reset --hard origin/main
+          if [ "$VERIFY_RESULT" = "success" ]; then
+            verdict="PASS"
+          else
+            verdict="FAIL"
+          fi
+          completed_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          cat > docs/operations/last-main-ci.md <<EOF
+          # 最新mainのCI結果
+
+          > Status: Active
+          > Result: ${verdict}
+          > Verify job: ${VERIFY_RESULT}
+          > Candidate commit: ${CANDIDATE_SHA}
+          > Completed at: ${completed_at}
+          > Workflow run: ${RUN_URL}
+
+          この結果は、workflow完了時点でもCandidate commitがmain HEADだった場合だけ記録されます。
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/operations/last-main-ci.md
+          git commit -m "docs: record main CI ${CANDIDATE_SHA:0:7} (${verdict})"
+          git push origin HEAD:main
