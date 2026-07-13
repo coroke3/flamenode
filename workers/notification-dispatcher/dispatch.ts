@@ -27,6 +27,7 @@ const DISCORD_FETCH_TIMEOUT_MS = 5_000;
 const DISCORD_MAX_RETRY_AFTER_MS = 15 * 60 * 1_000;
 const DISCORD_DM_CHANNEL_TTL_SEC = 30 * 24 * 60 * 60;
 const DISCORD_DM_CHANNEL_CACHE_MAX = 1_000;
+const DISCORD_GLOBAL_COOLDOWN_KEY = "discord:global";
 /** 6件 × 未cache時最大2 request。inline retryは行わない。 */
 export const MAX_DISCORD_EXTERNAL_REQUESTS_PER_RUN = 12;
 /**
@@ -139,13 +140,21 @@ async function evictDmChannel(env: Env, discordId: string): Promise<void> {
   }
 }
 
-function cooldownSeconds(routeKey: string, now = Date.now()): number {
-  const until = discordCooldowns.get(routeKey) ?? 0;
+function activeCooldownUntil(key: string, now: number): number {
+  const until = discordCooldowns.get(key) ?? 0;
   if (until <= now) {
-    discordCooldowns.delete(routeKey);
+    discordCooldowns.delete(key);
     return 0;
   }
-  return Math.max(1, Math.ceil((until - now) / 1_000));
+  return until;
+}
+
+function cooldownSeconds(routeKey: string, now = Date.now()): number {
+  const until = Math.max(
+    activeCooldownUntil(DISCORD_GLOBAL_COOLDOWN_KEY, now),
+    activeCooldownUntil(routeKey, now),
+  );
+  return until > 0 ? Math.max(1, Math.ceil((until - now) / 1_000)) : 0;
 }
 
 function setCooldown(routeKey: string, delayMs: number): void {
@@ -217,9 +226,16 @@ async function discordFailure(
     response.headers.get("retry-after"),
     DISCORD_MAX_RETRY_AFTER_MS,
   );
+  let globalLimit =
+    response.headers.get("x-ratelimit-global") === "true" ||
+    response.headers.get("x-ratelimit-scope") === "global";
   if (response.status === 429 && retryAfterMs == null) {
     try {
-      const body = (await response.json()) as { retry_after?: unknown };
+      const body = (await response.json()) as {
+        retry_after?: unknown;
+        global?: unknown;
+      };
+      globalLimit ||= body.global === true;
       const seconds = Number(body.retry_after);
       if (Number.isFinite(seconds) && seconds >= 0) {
         retryAfterMs = Math.min(
@@ -235,7 +251,7 @@ async function discordFailure(
   }
 
   if (retryAfterMs != null && retryAfterMs > 0) {
-    setCooldown(routeKey, retryAfterMs);
+    setCooldown(globalLimit ? DISCORD_GLOBAL_COOLDOWN_KEY : routeKey, retryAfterMs);
   }
   const permanent = response.status === 401 || response.status === 403 || response.status === 404;
   return {
