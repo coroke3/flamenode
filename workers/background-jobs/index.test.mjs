@@ -28,4 +28,6 @@ test("外部APIとD1予算のため件数を固定する", () => {
   assert.match(source, /limit:\s*10[\s\S]*realtimeOnly:\s*true/);
   assert.match(source, /syncBatch\(env, \{ limit: 50 \}\)/);
   assert.match(source, /recalcScoreBatch\(env, \{ limit: 50 \}\)/);
+  assert.match(source, /STATIC_SKIP_NOTIFICATION_COUNT\s*=\s*4/);
+  assert.match(source, /processStaticRebuildQueue[\s\S]*limit:\s*1/);
 });
