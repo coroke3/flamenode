@@ -13,67 +13,60 @@ function normalizeEventId(eventId: string): string | null {
   return id && id.length <= MAX_EVENT_ID_LEN ? id : null;
 }
 
-async function eventExists(db: DB, eventId: string): Promise<boolean> {
-  const row = (
-    await db.select({ id: events.id }).from(events).where(eq(events.id, eventId)).limit(1)
-  )[0];
-  return Boolean(row);
-}
-
 export async function getLiveEventSummary(db: DB, eventId: string) {
   const id = normalizeEventId(eventId);
   if (!id) return null;
 
-  const ev = (await db.select().from(events).where(eq(events.id, id)).limit(1))[0];
-  if (!ev) return null;
+  const rows = await db
+    .select({
+      visibility_status: events.visibility_status,
+      start_time: events.start_time,
+      end_time: events.end_time,
+      open_slots: sql<number>`(
+        SELECT COUNT(*) FROM slots AS live_slots
+        WHERE live_slots.event_id = ${events.id}
+          AND live_slots.status = 'available'
+      )`,
+      reserved_slots: sql<number>`(
+        SELECT COUNT(*) FROM slots AS live_slots
+        WHERE live_slots.event_id = ${events.id}
+          AND live_slots.status = 'reserved'
+      )`,
+      submitted: sql<number>`(
+        SELECT COUNT(*) FROM slots AS live_slots
+        WHERE live_slots.event_id = ${events.id}
+          AND live_slots.status = 'submitted'
+      )`,
+      pending_review: sql<number>`(
+        SELECT COUNT(*)
+        FROM videos AS live_videos
+        INNER JOIN video_events AS live_video_events
+          ON live_video_events.video_id = live_videos.id
+        WHERE live_video_events.event_id = ${events.id}
+          AND live_videos.visibility_status = 'pending'
+      )`,
+    })
+    .from(events)
+    .where(eq(events.id, id))
+    .limit(1);
+  const event = rows[0];
+  if (!event) return null;
 
   const now = Math.floor(Date.now() / 1000);
-  const freshness = resolveEventFreshness(ev, now);
-  const [slotRows, pendingReviewRows] = await Promise.all([
-    db
-      .select({
-        status: slots.status,
-        c: sql<number>`COUNT(*)`,
-      })
-      .from(slots)
-      .where(eq(slots.event_id, id))
-      .groupBy(slots.status),
-    db
-      .select({ c: sql<number>`COUNT(*)` })
-      .from(videos)
-      .innerJoin(videoEvents, eq(videoEvents.video_id, videos.id))
-      .where(
-        and(
-          eq(videoEvents.event_id, id),
-          eq(videos.visibility_status, "pending"),
-        )!,
-      ),
-  ]);
-
-  let openSlots = 0;
-  let reservedSlots = 0;
-  let submitted = 0;
-  for (const row of slotRows) {
-    const count = Number(row.c ?? 0);
-    if (row.status === "available") openSlots += count;
-    if (row.status === "reserved") reservedSlots += count;
-    if (row.status === "submitted") submitted += count;
-  }
-
   return {
     event_id: id,
-    freshness,
-    open_slots: openSlots,
-    reserved_slots: reservedSlots,
-    submitted,
-    pending_review: Number(pendingReviewRows[0]?.c ?? 0),
+    freshness: resolveEventFreshness(event, now),
+    open_slots: Number(event.open_slots ?? 0),
+    reserved_slots: Number(event.reserved_slots ?? 0),
+    submitted: Number(event.submitted ?? 0),
+    pending_review: Number(event.pending_review ?? 0),
     generated_at: now,
   };
 }
 
 export async function getLiveEventSlots(db: DB, eventId: string) {
   const id = normalizeEventId(eventId);
-  if (!id || !(await eventExists(db, id))) return null;
+  if (!id) return null;
 
   const rows = await db
     .select({
@@ -82,22 +75,37 @@ export async function getLiveEventSlots(db: DB, eventId: string) {
       video_id: slots.video_id,
       display_name: slots.display_name,
     })
-    .from(slots)
-    .where(eq(slots.event_id, id))
+    .from(events)
+    .leftJoin(slots, eq(slots.event_id, events.id))
+    .where(eq(events.id, id))
     .orderBy(slots.start_time)
     .limit(MAX_LIVE_SLOTS);
+  if (rows.length === 0) return null;
+
+  const slotRows = rows.flatMap((row) =>
+    row.id == null
+      ? []
+      : [
+          {
+            id: row.id,
+            status: row.status!,
+            video_id: row.video_id,
+            display_name: row.display_name,
+          },
+        ],
+  );
 
   return {
     event_id: id,
-    slots: rows,
-    truncated: rows.length >= MAX_LIVE_SLOTS,
+    slots: slotRows,
+    truncated: slotRows.length >= MAX_LIVE_SLOTS,
     generated_at: Math.floor(Date.now() / 1000),
   };
 }
 
 export async function getLiveEventSubmissions(db: DB, eventId: string) {
   const id = normalizeEventId(eventId);
-  if (!id || !(await eventExists(db, id))) return null;
+  if (!id) return null;
 
   const rows = await db
     .select({
@@ -106,20 +114,40 @@ export async function getLiveEventSubmissions(db: DB, eventId: string) {
       creator_display_name: videos.creator_display_name,
       updated_at: videos.updated_at,
     })
-    .from(videos)
-    .innerJoin(videoEvents, eq(videoEvents.video_id, videos.id))
-    .where(
+    .from(events)
+    .leftJoin(
+      videoEvents,
       and(
-        eq(videoEvents.event_id, id),
-        eq(videos.visibility_status, "public"),
+        eq(videoEvents.event_id, events.id),
+        sql`EXISTS (
+          SELECT 1 FROM videos AS public_videos
+          WHERE public_videos.id = ${videoEvents.video_id}
+            AND public_videos.visibility_status = 'public'
+        )`,
       )!,
     )
+    .leftJoin(videos, eq(videos.id, videoEvents.video_id))
+    .where(eq(events.id, id))
     .orderBy(sql`${videos.updated_at} DESC`)
     .limit(50);
+  if (rows.length === 0) return null;
+
+  const submissions = rows.flatMap((row) =>
+    row.video_id == null
+      ? []
+      : [
+          {
+            video_id: row.video_id,
+            title: row.title!,
+            creator_display_name: row.creator_display_name,
+            updated_at: row.updated_at!,
+          },
+        ],
+  );
 
   return {
     event_id: id,
-    submissions: rows,
+    submissions,
     generated_at: Math.floor(Date.now() / 1000),
   };
 }

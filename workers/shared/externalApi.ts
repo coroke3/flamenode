@@ -83,20 +83,40 @@ export async function fetchWithTimeout(
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(),
-    Math.max(1, Math.floor(options.timeoutMs)),
+  const callerSignal = init.signal;
+  let abortSource: "caller" | "timeout" | null = null;
+  const abort = (source: "caller" | "timeout") => {
+    if (abortSource !== null) return;
+    abortSource = source;
+    controller.abort();
+  };
+  const onCallerAbort = () => abort("caller");
+  if (callerSignal?.aborted) {
+    onCallerAbort();
+  } else {
+    callerSignal?.addEventListener("abort", onCallerAbort, { once: true });
+  }
+
+  const timeoutMs = Math.max(
+    1,
+    Math.floor(Number.isFinite(options.timeoutMs) ? options.timeoutMs : 1),
   );
+  const timeout = setTimeout(() => abort("timeout"), timeoutMs);
   try {
     return await fetchImpl(input, {
       ...init,
       signal: controller.signal,
     });
   } catch (error) {
-    const timedOut = error instanceof Error && error.name === "AbortError";
-    throw new Error(timedOut ? options.timeoutErrorCode : options.networkErrorCode);
+    const aborted = error instanceof Error && error.name === "AbortError";
+    throw new Error(
+      aborted && abortSource === "timeout"
+        ? options.timeoutErrorCode
+        : options.networkErrorCode,
+    );
   } finally {
     clearTimeout(timeout);
+    callerSignal?.removeEventListener("abort", onCallerAbort);
   }
 }
 
