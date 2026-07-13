@@ -5,7 +5,6 @@ import {
   computeHistoryCutoffs,
   computeNotificationCutoffs,
   computeRetentionDays,
-  computeVoidedVideoHideCutoff,
   shouldRetryCleanupError,
   CLEANUP_MAX_RETRIES,
   HISTORY_NORMAL_DAYS_DEFAULT,
@@ -74,7 +73,15 @@ export async function readHistoryRetentionDays(env: Env): Promise<RetentionDays>
       `SELECT history_retention_days FROM system_settings LIMIT 1`,
     ).first<{ history_retention_days: number | null }>();
     return computeRetentionDays(row?.history_retention_days);
-  } catch {
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        worker: "content-jobs",
+        job: "cleanup-retention-settings",
+        result: "fallback",
+        error: safeErrorSummary(error),
+      }),
+    );
     return {
       normalDays: HISTORY_NORMAL_DAYS_DEFAULT,
       longAuditDays: HISTORY_LONG_AUDIT_DAYS_DEFAULT,
@@ -87,7 +94,6 @@ export async function runCleanup(env: Env): Promise<void> {
   const retentionDays = await readHistoryRetentionDays(env);
   const { sentCutoff, failedCutoff } = computeNotificationCutoffs(now);
   const { normalCutoff, longAuditCutoff } = computeHistoryCutoffs(now, retentionDays);
-  const voidedHideCutoff = computeVoidedVideoHideCutoff(now);
 
   await env.DB.prepare(
     `UPDATE slots
@@ -128,7 +134,7 @@ export async function runCleanup(env: Env): Promise<void> {
     .bind(now, AUDIT_CLEANUP_BATCH_LIMIT)
     .run();
 
-  const expiredMark = await env.DB.prepare(
+  await env.DB.prepare(
     `UPDATE audit_logs
      SET restore_status = 'expired'
      WHERE restore_status = 'restorable'
@@ -139,7 +145,7 @@ export async function runCleanup(env: Env): Promise<void> {
     .bind(now, AUDIT_CLEANUP_BATCH_LIMIT)
     .run();
 
-  const expiredDelete = await env.DB.prepare(
+  await env.DB.prepare(
     `DELETE FROM audit_logs
      WHERE expires_at IS NOT NULL
        AND expires_at < ?1
@@ -158,8 +164,15 @@ export async function runCleanup(env: Env): Promise<void> {
     if (Number.isFinite(days) && days > 0) {
       compactCutoff = now - Math.floor(days) * 86400;
     }
-  } catch {
-    // audit_log_settings 未作成時はデフォルト 30 日
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        worker: "content-jobs",
+        job: "cleanup-compact-settings",
+        result: "fallback",
+        error: safeErrorSummary(error),
+      }),
+    );
   }
 
   await env.DB.prepare(
@@ -178,7 +191,6 @@ export async function runCleanup(env: Env): Promise<void> {
     .bind(compactCutoff, AUDIT_CLEANUP_BATCH_LIMIT)
     .run();
 
-  void voidedHideCutoff;
-  void expiredMark;
-  void expiredDelete;
+  void normalCutoff;
+  void longAuditCutoff;
 }

@@ -85,6 +85,20 @@ async function fetchImportedVideoIds(db: DB, ids: string[]): Promise<Set<string>
   return imported;
 }
 
+function incrementCount(map: Map<string, number>, key: string): void {
+  map.set(key, (map.get(key) ?? 0) + 1);
+}
+
+function indexWarnings(plan: LegacyImportPlan): Map<string, string[]> {
+  const warnings = new Map<string, string[]>();
+  for (const warning of plan.warnings) {
+    const current = warnings.get(warning.source);
+    if (current) current.push(warning.message);
+    else warnings.set(warning.source, [warning.message]);
+  }
+  return warnings;
+}
+
 export async function buildDryRunResult(
   db: DB,
   plan: LegacyImportPlan,
@@ -96,15 +110,31 @@ export async function buildDryRunResult(
   const videoIds = plan.videos.map((v) => v.id);
   const xIdList = plan.xUsers.map((x) => x.id);
 
-  const existingEventIds = await fetchExistingEventIds(db, eventIds);
-  const existingVideoIds = await fetchExistingVideoIds(db, videoIds);
-  const existingXIds = await fetchExistingXIds(db, xIdList);
+  const [existingEventIds, existingVideoIds, existingXIds] = await Promise.all([
+    fetchExistingEventIds(db, eventIds),
+    fetchExistingVideoIds(db, videoIds),
+    fetchExistingXIds(db, xIdList),
+  ]);
 
   let importedEventIds = new Set<string>();
   let importedVideoIds = new Set<string>();
   if (strategy === "replace_imported") {
-    importedEventIds = await fetchImportedEventIds(db, eventIds);
-    importedVideoIds = await fetchImportedVideoIds(db, videoIds);
+    [importedEventIds, importedVideoIds] = await Promise.all([
+      fetchImportedEventIds(db, eventIds),
+      fetchImportedVideoIds(db, videoIds),
+    ]);
+  }
+
+  const warningMessages = indexWarnings(plan);
+  const staffCountByEvent = new Map<string, number>();
+  for (const staff of plan.eventStaff) incrementCount(staffCountByEvent, staff.event_id);
+  const memberCountByVideo = new Map<string, number>();
+  for (const member of plan.videoMembers) incrementCount(memberCountByVideo, member.video_id);
+  const firstExtraByVideo = new Map<string, (typeof plan.videoNormExtras)[number]>();
+  for (const extra of plan.videoNormExtras) {
+    if (!firstExtraByVideo.has(extra.video_id)) {
+      firstExtraByVideo.set(extra.video_id, extra);
+    }
   }
 
   const counts = {
@@ -139,9 +169,7 @@ export async function buildDryRunResult(
       counts.events.skip++;
     }
 
-    const eventWarnings = plan.warnings
-      .filter((w) => w.source === `event:${ev.id}`)
-      .map((w) => w.message);
+    const eventWarnings = warningMessages.get(`event:${ev.id}`) ?? [];
 
     previewTotal++;
     if (previewRows.length < MAX_PREVIEW_ROWS) {
@@ -159,8 +187,7 @@ export async function buildDryRunResult(
     }
 
     if (action !== "skip") {
-      const staffCount = plan.eventStaff.filter((s) => s.event_id === ev.id).length;
-      counts.staff += staffCount;
+      counts.staff += staffCountByEvent.get(ev.id) ?? 0;
     }
   }
 
@@ -179,12 +206,9 @@ export async function buildDryRunResult(
       counts.videos.skip++;
     }
 
-    const videoWarnings = plan.warnings
-      .filter((w) => w.source === `video:${vi.id}`)
-      .map((w) => w.message);
-
-    const memberCount = plan.videoMembers.filter((m) => m.video_id === vi.id).length;
-    const extra = plan.videoNormExtras.find((e) => e.video_id === vi.id);
+    const videoWarnings = warningMessages.get(`video:${vi.id}`) ?? [];
+    const memberCount = memberCountByVideo.get(vi.id) ?? 0;
+    const extra = firstExtraByVideo.get(vi.id);
     const softwareCount = extra?.softwareLabels.length ?? 0;
 
     previewTotal++;

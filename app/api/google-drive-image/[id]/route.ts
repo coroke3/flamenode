@@ -8,6 +8,7 @@ const FAILURE_TTL_MS = 10 * 60 * 1000;
 const STALE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 5000;
 const MAX_CACHE_ENTRIES = 600;
+const MAX_IMAGE_CACHE_BYTES = 24 * 1024 * 1024;
 
 type ImageCacheEntry = {
   bytes: Uint8Array;
@@ -36,12 +37,35 @@ const failureCache =
 globalCache.__flamenodeGoogleDriveImages = imageCache;
 globalCache.__flamenodeGoogleDriveFailures = failureCache;
 
-function pruneCache<T>(cache: Map<string, T>): void {
+function pruneEntryCache<T>(cache: Map<string, T>): void {
   if (cache.size <= MAX_CACHE_ENTRIES) return;
   const deleteCount = Math.ceil(MAX_CACHE_ENTRIES / 10);
   for (const key of cache.keys()) {
     cache.delete(key);
     if (cache.size <= MAX_CACHE_ENTRIES - deleteCount) break;
+  }
+}
+
+/** 件数だけでなく総bytesも制限し、大画像が続いたisolateのメモリ増加を抑える。 */
+function pruneImageCache(): void {
+  let totalBytes = 0;
+  for (const entry of imageCache.values()) totalBytes += entry.bytes.byteLength;
+  if (
+    imageCache.size <= MAX_CACHE_ENTRIES &&
+    totalBytes <= MAX_IMAGE_CACHE_BYTES
+  ) {
+    return;
+  }
+
+  for (const [key, entry] of imageCache) {
+    imageCache.delete(key);
+    totalBytes -= entry.bytes.byteLength;
+    if (
+      imageCache.size <= MAX_CACHE_ENTRIES &&
+      totalBytes <= MAX_IMAGE_CACHE_BYTES
+    ) {
+      break;
+    }
   }
 }
 
@@ -120,7 +144,7 @@ export async function GET(
         status: upstream.status,
         expiresAt: now + FAILURE_TTL_MS,
       });
-      pruneCache(failureCache);
+      pruneEntryCache(failureCache);
       if (cached && cached.staleUntil > now) {
         return imageResponse(cached, "stale");
       }
@@ -137,14 +161,14 @@ export async function GET(
     };
     imageCache.set(id, entry);
     failureCache.delete(id);
-    pruneCache(imageCache);
+    pruneImageCache();
     return imageResponse(entry, "miss");
   } catch {
     failureCache.set(id, {
       status: 0,
       expiresAt: now + FAILURE_TTL_MS,
     });
-    pruneCache(failureCache);
+    pruneEntryCache(failureCache);
     if (cached && cached.staleUntil > now) {
       return imageResponse(cached, "stale");
     }
