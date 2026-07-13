@@ -86,13 +86,17 @@ function unixNow(): number {
 }
 
 class DailyQuotaBudget {
+  private readonly env: PlaylistSyncEnv;
+  private readonly now: number;
   private remainingUnits: number;
 
   private constructor(
-    private readonly env: PlaylistSyncEnv,
-    private readonly now: number,
+    env: PlaylistSyncEnv,
+    now: number,
     remainingUnits: number,
   ) {
+    this.env = env;
+    this.now = now;
     this.remainingUnits = remainingUnits;
   }
 
