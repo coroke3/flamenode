@@ -12,7 +12,6 @@ import {
   parseRetryAfterMs as parseSharedRetryAfterMs,
   type FetchLike,
 } from "../shared/externalApi.ts";
-import { normalizeLegacyVideoCursor } from "../shared/legacyCursor.ts";
 
 export interface Env {
   DB: D1Database;
@@ -46,7 +45,6 @@ type MetadataWrite = {
 };
 
 export const YOUTUBE_SYNC_BATCH_SIZE = 50;
-export const YOUTUBE_SYNC_BATCHES_PER_RUN = 1;
 export const YOUTUBE_SYNC_FETCH_TIMEOUT_MS = 8_000;
 export const YOUTUBE_SYNC_MAX_ATTEMPTS = 2;
 export const YOUTUBE_SYNC_MAX_RETRY_DELAY_MS = 15_000;
@@ -59,10 +57,6 @@ const ACTIVE_EVENT_GRACE_SEC = 24 * 60 * 60;
 const BULK_UPSERT_ROWS = 8;
 const YOUTUBE_QUOTA_COOLDOWN_SEC = 60 * 60;
 const YOUTUBE_QUOTA_COOLDOWN_KEY = "external-api:youtube:quota-cooldown-until";
-
-export function normalizeYoutubeSyncCursor(value: string | null): string {
-  return normalizeLegacyVideoCursor(value);
-}
 
 const RETRYABLE_YOUTUBE_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 const YOUTUBE_QUOTA_REASONS = new Set([
@@ -380,7 +374,10 @@ export async function syncBatch(
 
   const budget = new ExternalRequestBudget(YOUTUBE_MAX_QUOTA_UNITS_PER_RUN);
   const youtubeItems = await fetchYoutubeItems(url.toString(), env, budget, fetchImpl);
-  const writes = buildMetadataWrites(rows, new Map(youtubeItems.map((item) => [item.id, item])));
+  const writes = buildMetadataWrites(
+    rows,
+    new Map(youtubeItems.map((item) => [item.id, item])),
+  );
   await persistMetadataBatch(env, writes, now);
   return { processed: writes.length, failed: 0, skipped: 0 };
 }
