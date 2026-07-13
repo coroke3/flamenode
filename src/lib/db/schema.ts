@@ -198,6 +198,12 @@ export const videos = sqliteTable(
       t.score,
       t.scheduled_time,
     ),
+    creatorPublicIdx: index("videos_creator_public_idx").on(
+      t.creator_x_user_id,
+      t.visibility_status,
+      t.primary_event_id,
+      t.id,
+    ),
     creatorFallbackIdx: index("videos_creator_fallback_idx")
       .on(t.creator_x_user_id, t.collaboration_type, t.created_at)
       .where(
@@ -208,6 +214,84 @@ export const videos = sqliteTable(
       .where(
         sql`youtube_video_id IS NOT NULL AND youtube_video_id <> '' AND visibility_status NOT IN ('archived', 'voided')`,
       ),
+  }),
+);
+
+export const videoMembers = sqliteTable(
+  "video_members",
+  {
+    id: text("id").primaryKey(),
+    video_id: text("video_id")
+      .notNull()
+      .references(() => videos.id, { onDelete: "cascade" }),
+    x_user_id: text("x_user_id").references(() => xUsers.id, {
+      onDelete: "set null",
+    }),
+    name: text("name").notNull(),
+    role: text("role"),
+    comment: text("comment"),
+    order_index: integer("order_index").notNull().default(0),
+    user_id: text("user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    can_edit: integer("can_edit").notNull().default(0),
+    is_public_member: integer("is_public_member").notNull().default(1),
+    edit_granted_by_user_id: text("edit_granted_by_user_id"),
+    edit_granted_at: integer("edit_granted_at"),
+    edit_updated_at: integer("edit_updated_at"),
+    chapters_json: text("chapters_json"),
+  },
+  (t) => ({
+    byVideo: index("video_members_video_order_idx").on(
+      t.video_id,
+      t.order_index,
+    ),
+    byVideoName: index("video_members_video_name_idx").on(
+      t.video_id,
+      t.name,
+    ),
+    byVideoCanEdit: index("video_members_video_can_edit_idx").on(
+      t.video_id,
+      t.can_edit,
+    ),
+    byUser: index("video_members_user_idx").on(t.user_id),
+    byXUserVideo: index("video_members_x_user_video_idx").on(
+      t.x_user_id,
+      t.video_id,
+    ),
+  }),
+);
+
+export const videoChapters = sqliteTable(
+  "video_chapters",
+  {
+    id: text("id").primaryKey(),
+    video_id: text("video_id")
+      .notNull()
+      .references(() => videos.id, { onDelete: "cascade" }),
+    x_user_id: text("x_user_id")
+      .notNull()
+      .references(() => xUsers.id, { onDelete: "restrict" }),
+    chapter_time: real("chapter_time").notNull(),
+    chapter_label: text("chapter_label").notNull(),
+    note: text("note"),
+    visibility: text("visibility", {
+      enum: ["private", "public"],
+    }).default("public"),
+    show_on_player_bar: integer("show_on_player_bar").default(0),
+    order_index: integer("order_index").default(0),
+    created_at: integer("created_at").notNull(),
+    updated_at: integer("updated_at").notNull(),
+  },
+  (t) => ({
+    byVideoTime: index("video_chapters_video_time_idx").on(
+      t.video_id,
+      t.chapter_time,
+    ),
+    byVideoVisibility: index("video_chapters_video_visibility_idx").on(
+      t.video_id,
+      t.visibility,
+    ),
   }),
 );
 
