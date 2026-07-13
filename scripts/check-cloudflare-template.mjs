@@ -1,14 +1,17 @@
 #!/usr/bin/env node
-/** Validate checked-in Pages and Cron Worker templates. Placeholder IDs are allowed here. */
+/** Validate checked-in Pages and unified Cron Worker templates. Placeholder IDs are allowed here. */
 import fs from "node:fs";
 import path from "node:path";
 
 const ROOT = process.cwd();
 const errors = [];
 const expectedWorkers = new Map([
-  ["fast-jobs", { name: "flamenode-fast-jobs", d1: true, r2: false, kv: true }],
-  ["content-jobs", { name: "flamenode-content-jobs", d1: true, r2: true, kv: true }],
-  ["sync-jobs", { name: "flamenode-sync-jobs", d1: true, r2: false, kv: true }],
+  ["background-jobs", {
+    name: "flamenode-background-jobs",
+    d1: true,
+    r2: true,
+    kv: true,
+  }],
 ]);
 
 function read(relative) {
@@ -31,7 +34,7 @@ function checkWorker(directory, expected) {
   requirePattern(text, relative, /^main\s*=\s*"index\.ts"\s*$/m, "main must be index.ts");
   requirePattern(text, relative, /^compatibility_date\s*=\s*"\d{4}-\d{2}-\d{2}"\s*$/m, "compatibility_date is required");
   requirePattern(text, relative, /compatibility_flags\s*=\s*\[[^\]]*"nodejs_compat"/m, "nodejs_compat is required");
-  requirePattern(text, relative, /\[triggers\][\s\S]*?crons\s*=\s*\[[^\]]+\]/m, "one cron trigger is required");
+  requirePattern(text, relative, /\[triggers\][\s\S]*?crons\s*=\s*\[[\s\S]*?"\*\/5 \* \* \* \*"[\s\S]*?"0 \* \* \* \*"[\s\S]*?\]/m, "5-minute and hourly cron triggers are required");
   if (expected.d1) requirePattern(text, relative, /\[\[d1_databases\]\][\s\S]*?binding\s*=\s*"DB"/m, "D1 binding DB is required");
   if (expected.r2) requirePattern(text, relative, /\[\[r2_buckets\]\][\s\S]*?binding\s*=\s*"R2"/m, "R2 binding R2 is required");
   if (expected.kv) requirePattern(text, relative, /\[\[kv_namespaces\]\][\s\S]*?binding\s*=\s*"KV"/m, "KV binding KV is required");
@@ -55,7 +58,7 @@ const workerDirectories = fs
   .sort();
 const expectedDirectories = [...expectedWorkers.keys()].sort();
 if (workerDirectories.join(",") !== expectedDirectories.join(",")) {
-  errors.push(`exactly three deployed worker templates are required: ${expectedDirectories.join(", ")}`);
+  errors.push(`exactly one deployed worker template is required: ${expectedDirectories.join(", ")}`);
 }
 for (const [directory, expected] of expectedWorkers) checkWorker(directory, expected);
 
@@ -64,4 +67,4 @@ if (errors.length) {
   for (const error of errors) console.error(`- ${error}`);
   process.exit(1);
 }
-console.log("[check:cloudflare-template] OK (placeholder IDs accepted for CI template validation)");
+console.log("[check:cloudflare-template] OK (one Worker, two Cron triggers)");
