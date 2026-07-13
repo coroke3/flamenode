@@ -1,0 +1,88 @@
+name: Inventory branches before cleanup
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/inventory-branches.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/branch-cleanup-final
+          fetch-depth: 0
+      - name: Inventory every remote branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'
+          out="$RUNNER_TEMP/branch-inventory"
+          mkdir -p "$out/details"
+          printf 'branch\tsha\tclassification\tbehind\tahead\tunique_patch_commits\tlatest_subject\n' > "$out/inventory.tsv"
+
+          while IFS= read -r ref; do
+            branch="${ref#refs/remotes/origin/}"
+            case "$branch" in
+              main|HEAD|agent/branch-cleanup-final) continue ;;
+            esac
+
+            sha="$(git rev-parse "$ref")"
+            counts="$(git rev-list --left-right --count origin/main..."$ref")"
+            behind="$(printf '%s' "$counts" | awk '{print $1}')"
+            ahead="$(printf '%s' "$counts" | awk '{print $2}')"
+            latest="$(git log -1 --format=%s "$ref" | tr '\t\n' '  ')"
+            unique_file="$out/details/${branch//\//__}.txt"
+            {
+              echo "branch: $branch"
+              echo "sha: $sha"
+              echo "behind: $behind"
+              echo "ahead: $ahead"
+              echo
+              echo '[unique patch commits versus main]'
+              git cherry -v origin/main "$ref" || true
+              echo
+              echo '[commits not reachable from main]'
+              git log --no-merges --format='%H%x09%ad%x09%s' --date=iso-strict origin/main.."$ref" || true
+              echo
+              echo '[diff stat from merge base]'
+              git diff --stat origin/main..."$ref" || true
+              echo
+              echo '[changed files from merge base]'
+              git diff --name-status origin/main..."$ref" || true
+            } > "$unique_file"
+
+            unique_count="$(git cherry origin/main "$ref" | grep -c '^+' || true)"
+            if git merge-base --is-ancestor "$ref" origin/main; then
+              classification='merged'
+            elif [ "$unique_count" -eq 0 ]; then
+              classification='patch-equivalent'
+            else
+              classification='unique'
+            fi
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+              "$branch" "$sha" "$classification" "$behind" "$ahead" "$unique_count" "$latest" \
+              >> "$out/inventory.tsv"
+          done < <(git for-each-ref --format='%(refname)' refs/remotes/origin | sort)
+
+          {
+            echo "total=$(tail -n +2 "$out/inventory.tsv" | wc -l)"
+            echo "merged=$(awk -F '\t' '$3=="merged"{n++} END{print n+0}' "$out/inventory.tsv")"
+            echo "patch_equivalent=$(awk -F '\t' '$3=="patch-equivalent"{n++} END{print n+0}' "$out/inventory.tsv")"
+            echo "unique=$(awk -F '\t' '$3=="unique"{n++} END{print n+0}' "$out/inventory.tsv")"
+          } > "$out/summary.txt"
+          cat "$out/summary.txt"
+          column -t -s $'\t' "$out/inventory.tsv" || cat "$out/inventory.tsv"
+      - name: Upload inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: branch-inventory
+          path: ${{ runner.temp }}/branch-inventory
+          if-no-files-found: error
+          retention-days: 1
