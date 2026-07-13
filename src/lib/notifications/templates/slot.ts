@@ -1,5 +1,4 @@
-import { appUrl } from "../format";
-import type { DiscordNotificationPayload } from "./types";
+import { appUrl, type DiscordNotificationPayload } from "../format";
 
 export function buildSlotVideoSubmittedNotification(args: {
   videoId: string;
