@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  MAX_DISCORD_DM_KV_WRITES_PER_RUN,
   MAX_DISCORD_EXTERNAL_REQUESTS_PER_RUN,
   MAX_NOTIFICATION_BATCH,
   processNotificationQueue,
@@ -37,4 +38,5 @@ test("notification dispatcher uses recipient_user_id and bounded lease-aware sel
   assert.match(sql, /LIMIT \?3/);
   assert.equal(MAX_NOTIFICATION_BATCH, 6);
   assert.equal(MAX_DISCORD_EXTERNAL_REQUESTS_PER_RUN, 12);
+  assert.equal(MAX_DISCORD_DM_KV_WRITES_PER_RUN, 2);
 });
