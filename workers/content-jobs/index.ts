@@ -20,51 +20,69 @@ export interface Env {
 
 const CLEANUP_INTERVAL_SEC = 3600;
 const CONTENT_JOBS_LEASE_SEC = 14 * 60;
+const CLEANUP_LEASE_SEC = 10 * 60;
 
 type QueueResult = { processed: number; failed: number; skipped?: number };
 type QueueRunner = (env: Env) => Promise<QueueResult>;
 
 export async function runContentJobs(env: Env): Promise<void> {
-  await runJob("content-jobs", "cron", async () => {
-    const leased = await withCronLease(
-      env,
-      { jobName: "content-jobs", leaseSeconds: CONTENT_JOBS_LEASE_SEC },
-      async () => {
-        let processed = 0;
-        let skipped = 0;
-        let failed = 0;
+  await runJob(
+    "content-jobs",
+    "cron",
+    async () => {
+      const leased = await withCronLease(
+        env,
+        { jobName: "content-jobs", leaseSeconds: CONTENT_JOBS_LEASE_SEC },
+        async () => {
+          let processed = 0;
+          let skipped = 0;
+          let failed = 0;
 
-        const rebuild = await runJob("content-jobs", "static-rebuild-queue", () =>
-          processStaticRebuildQueue(env),
-        );
-        processed += rebuild.processed;
-        skipped += rebuild.skipped;
-        failed += rebuild.failed;
-
-        const lastCleanup = await env.KV.get("content-jobs:cleanup:last_run");
-        const now = Math.floor(Date.now() / 1000);
-        if (!lastCleanup || now - Number(lastCleanup) > CLEANUP_INTERVAL_SEC) {
-          const cleanup = await runJob("content-jobs", "cleanup", () =>
-            runCleanupWithRetry(env),
+          const rebuild = await runJob(
+            "content-jobs",
+            "static-rebuild-queue",
+            () => processStaticRebuildQueue(env),
           );
-          processed += cleanup.processed;
-          skipped += cleanup.skipped;
-          failed += cleanup.failed;
-          if (cleanup.succeeded && cleanup.failed === 0) {
-            await env.KV.put("content-jobs:cleanup:last_run", String(now), {
-              expirationTtl: 7200,
-            });
-          }
-        } else {
-          skipped += 1;
-          await runJob("content-jobs", "cleanup", async () => ({ skipped: 1 }));
-        }
+          processed += rebuild.processed;
+          skipped += rebuild.skipped;
+          failed += rebuild.failed;
 
-        return { processed, skipped, failed };
-      },
-    );
-    return leased.acquired ? (leased.value ?? { skipped: 1 }) : { skipped: 1 };
-  });
+          const cleanupLease = await withCronLease(
+            env,
+            {
+              jobName: "content-jobs:cleanup",
+              leaseSeconds: CLEANUP_LEASE_SEC,
+              minimumIntervalSeconds: CLEANUP_INTERVAL_SEC,
+            },
+            () =>
+              runJob(
+                "content-jobs",
+                "cleanup",
+                () => runCleanupWithRetry(env),
+                { rethrow: true },
+              ),
+          );
+          if (cleanupLease.acquired) {
+            const cleanup = cleanupLease.value;
+            processed += cleanup?.processed ?? 0;
+            skipped += cleanup?.skipped ?? 0;
+            failed += cleanup?.failed ?? 0;
+          } else {
+            skipped += 1;
+            await runJob("content-jobs", "cleanup", async () => ({
+              skipped: 1,
+            }));
+          }
+
+          return { processed, skipped, failed };
+        },
+      );
+      return leased.acquired
+        ? (leased.value ?? { skipped: 1 })
+        : { skipped: 1 };
+    },
+    { rethrow: true },
+  );
 }
 
 export async function handleContentJobsFetch(
@@ -87,22 +105,35 @@ export async function handleContentJobsFetch(
       env,
       { jobName: "content-jobs", leaseSeconds: CONTENT_JOBS_LEASE_SEC },
       async () => {
-        const run = await runJob("content-jobs", "manual-static-rebuild", async () => {
-          queueResult = await runQueue(env);
-          return queueResult;
-        });
-        if (!run.succeeded) throw new Error("manual static rebuild failed");
+        await runJob(
+          "content-jobs",
+          "manual-static-rebuild",
+          async () => {
+            queueResult = await runQueue(env);
+            return queueResult;
+          },
+          { rethrow: true },
+        );
         return queueResult;
       },
     );
   } catch {
-    return Response.json({ ok: false, error: "rebuild_failed" }, { status: 500 });
+    return Response.json(
+      { ok: false, error: "rebuild_failed" },
+      { status: 500 },
+    );
   }
   if (!leaseResult.acquired) {
-    return Response.json({ ok: false, error: "job_already_running" }, { status: 409 });
+    return Response.json(
+      { ok: false, error: "job_already_running" },
+      { status: 409 },
+    );
   }
   if (!leaseResult.value) {
-    return Response.json({ ok: false, error: "rebuild_failed" }, { status: 500 });
+    return Response.json(
+      { ok: false, error: "rebuild_failed" },
+      { status: 500 },
+    );
   }
   return Response.json({ ok: true, ...leaseResult.value });
 }
