@@ -30,8 +30,8 @@ jobs:
             | base64 --decode \
             | gzip --decompress \
             > /tmp/file-reduction.patch
-          git fetch --depth=1 origin main
-          git reset --hard origin/main
+          git fetch --depth=1 origin main:refs/remotes/origin/main
+          git reset --hard refs/remotes/origin/main
           git apply --index /tmp/file-reduction.patch
 
       - name: 依存関係を取得
