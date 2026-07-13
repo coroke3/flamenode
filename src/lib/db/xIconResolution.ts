@@ -10,12 +10,14 @@ type SnapshotRow = {
   icon_url: string | null;
   display_name: string | null;
   collaboration_type: "individual" | "collab";
+  icon_rank: number;
+  name_rank: number;
 };
 
 /**
- * X ID・投稿種別ごとに最新1件だけをDB側で選ぶ。
- * 従来と同じ created_at DESC、individual → collab の優先順位を維持し、
- * 全履歴をアプリへ転送しない。
+ * X ID・投稿種別ごとに、最新の非NULLアイコンと最新の表示名だけをDB側で選ぶ。
+ * アイコンがない最新作品によって、より古い有効なアイコンが隠れないよう
+ * icon_rankとname_rankを独立させる。従来の個人作→合作、created_at DESCを維持する。
  */
 async function fetchLatestCreatorSnapshots(
   db: DB,
@@ -42,11 +44,20 @@ async function fetchLatestCreatorSnapshots(
               icon_url: videos.creator_icon_url,
               display_name: videos.creator_display_name,
               collaboration_type: videos.collaboration_type,
-              snapshot_rank:
+              icon_rank:
                 sql<number>`ROW_NUMBER() OVER (
                   PARTITION BY ${videos.creator_x_user_id}, ${videos.collaboration_type}
-                  ORDER BY ${videos.created_at} DESC
-                )`.as("snapshot_rank"),
+                  ORDER BY
+                    CASE WHEN ${videos.creator_icon_url} IS NULL THEN 1 ELSE 0 END,
+                    ${videos.created_at} DESC
+                )`.as("icon_rank"),
+              name_rank:
+                sql<number>`ROW_NUMBER() OVER (
+                  PARTITION BY ${videos.creator_x_user_id}, ${videos.collaboration_type}
+                  ORDER BY
+                    CASE WHEN ${videos.creator_display_name} IS NULL THEN 1 ELSE 0 END,
+                    ${videos.created_at} DESC
+                )`.as("name_rank"),
             })
             .from(videos)
             .where(
@@ -67,9 +78,11 @@ async function fetchLatestCreatorSnapshots(
               icon_url: ranked.icon_url,
               display_name: ranked.display_name,
               collaboration_type: ranked.collaboration_type,
+              icon_rank: ranked.icon_rank,
+              name_rank: ranked.name_rank,
             })
             .from(ranked)
-            .where(eq(ranked.snapshot_rank, 1));
+            .where(or(eq(ranked.icon_rank, 1), eq(ranked.name_rank, 1))!);
         }),
     );
     for (const rows of rowsByChunk) output.push(...rows);
@@ -98,8 +111,12 @@ function snapshotMaps(rows: SnapshotRow[]): {
       row.collaboration_type === "individual"
         ? individualNames
         : collabNames;
-    if (row.icon_url) iconMap.set(row.x_id, row.icon_url);
-    if (row.display_name) nameMap.set(row.x_id, row.display_name);
+    if (row.icon_rank === 1 && row.icon_url) {
+      iconMap.set(row.x_id, row.icon_url);
+    }
+    if (row.name_rank === 1 && row.display_name) {
+      nameMap.set(row.x_id, row.display_name);
+    }
   }
   return { individualIcons, collabIcons, individualNames, collabNames };
 }
