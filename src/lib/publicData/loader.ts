@@ -28,6 +28,35 @@ export type PublicJsonLoadResult<T> = {
   enqueued: boolean;
 };
 
+type PublicJsonLoaderConfig<TPayload, TResult> = {
+  r2Key: (id: string) => string;
+  targetType: StaticRebuildTargetType;
+  targetId?: (id: string) => string;
+  reason: string;
+  normalize: (payload: TPayload) => TResult | null;
+};
+
+export function createPublicJsonLoader<TPayload, TResult>({
+  r2Key,
+  targetType,
+  targetId = (id) => id,
+  reason,
+  normalize,
+}: PublicJsonLoaderConfig<TPayload, TResult>) {
+  return async (id: string): Promise<PublicJsonLoadResult<TResult>> => {
+    const result = await loadPublicJson<TPayload>({
+      r2Key: r2Key(id),
+      targetType,
+      targetId: targetId(id),
+      reason,
+    });
+    return {
+      ...result,
+      data: result.data == null ? null : normalize(result.data),
+    };
+  };
+}
+
 export async function loadPublicJson<T>(
   options: PublicJsonLoadOptions,
 ): Promise<PublicJsonLoadResult<T>> {
