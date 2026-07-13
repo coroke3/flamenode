@@ -1,1106 +1,216 @@
 import { sql } from "drizzle-orm";
 import {
-  check,
   index,
   integer,
-  primaryKey,
   real,
   sqliteTable,
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import { users } from "./schema.base";
 
 /**
- * FlameNode D1 (SQLite) schema Single Source of Truth.
+ * FlameNode D1 schema overlay.
  *
- * Active migration:
- * - migrations/0000_flame_node_baseline.sql
- * - 0001以降のincremental migration
- *
- * migrations/historicalは履歴保管専用であり、
- * runtime・deploy・新規環境構築では使用しない。
- *
- * request-time DDL、起動時schema適用、
- * 二重schema正本は禁止する。
+ * 大半の安定した定義は schema.base.ts に保持し、このファイルでは
+ * incremental migrationで拡張した高頻度テーブルだけを明示的に上書きする。
+ * 明示exportは export * より優先されるため、利用側のimport名は変更しない。
  */
+export * from "./schema.base";
 
-// ============================================================
-// Auth.js 標準テーブル + FlameNode 拡張
-// ============================================================
-
-export const users = sqliteTable("user", {
-  id: text("id").primaryKey(),
-  name: text("name"),
-  email: text("email"),
-  emailVerified: integer("emailVerified", { mode: "timestamp_ms" }),
-  image: text("image"),
-  discord_id: text("discord_id"),
-  role: text("role", { enum: ["user", "admin", "moderator"] }).default("user"),
-  can_create_events: integer("can_create_events").notNull().default(0),
-  is_tos_accepted: integer("is_tos_accepted").default(0),
-  accepted_terms_version_id: text("accepted_terms_version_id"),
-  terms_reaccept_required: integer("terms_reaccept_required").default(0),
-  is_banned: integer("is_banned").default(0),
-  is_notification_enabled: integer("is_notification_enabled").default(1),
-  active_x_user_id: text("active_x_user_id"),
-  /** 初回オンボーディング完了時刻 (Unix epoch 秒)。 */
-  onboarding_completed_at: integer("onboarding_completed_at"),
-  last_guild_check: integer("last_guild_check"),
-  created_at: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-}, (t) => ({
-  discordIdUnique: uniqueIndex("user_discord_id_unique").on(t.discord_id),
-  tosReacceptScan: index("user_tos_reaccept_scan_idx").on(
-    t.is_tos_accepted,
-    t.id,
-  ),
-  tosNotifyScan: index("user_tos_notify_scan_idx").on(
-    t.is_notification_enabled,
-    t.is_tos_accepted,
-    t.id,
-  ),
-}));
-
-export const accounts = sqliteTable(
-  "account",
-  {
-    userId: text("userId")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    type: text("type").notNull(),
-    provider: text("provider").notNull(),
-    providerAccountId: text("providerAccountId").notNull(),
-    refresh_token: text("refresh_token"),
-    access_token: text("access_token"),
-    expires_at: integer("expires_at"),
-    token_type: text("token_type"),
-    scope: text("scope"),
-    id_token: text("id_token"),
-    session_state: text("session_state"),
-  },
-  (t) => ({
-    pk: primaryKey({ columns: [t.provider, t.providerAccountId] }),
-  }),
-);
-
-export const sessions = sqliteTable("session", {
-  sessionToken: text("sessionToken").primaryKey(),
-  userId: text("userId")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  expires: integer("expires", { mode: "timestamp_ms" }).notNull(),
-});
-
-export const verificationTokens = sqliteTable(
-  "verificationToken",
-  {
-    identifier: text("identifier").notNull(),
-    token: text("token").notNull(),
-    expires: integer("expires", { mode: "timestamp_ms" }).notNull(),
-  },
-  (t) => ({ pk: primaryKey({ columns: [t.identifier, t.token] }) }),
-);
-
-// ============================================================
-// X ID / クリエイター
-// ============================================================
-
-export const xUsers = sqliteTable("x_users", {
-  id: text("id").primaryKey(), // X ID (@抜き)
-  x_name: text("x_name").notNull(),
-  icon_url: text("icon_url"),
-  profile_text: text("profile_text"),
-  portfolio_contact: text("portfolio_contact"),
-  youtube_channel_url: text("youtube_channel_url"),
-  other_social_links: text("other_social_links"), // JSON
-  creative_start_date: integer("creative_start_date"),
-  /** 所有者のAuth.js内部ユーザーID。Discord Snowflakeではない。 */
-  linked_user_id: text("linked_user_id").references(() => users.id, {
-    onDelete: "set null",
-  }),
-  verification_token: text("verification_token"),
-  token_expires_at: integer("token_expires_at"),
-  approval_status: text("approval_status", {
-    enum: ["pending", "approved", "rejected"],
-  }).default("pending"),
-  approval_requested_at: integer("approval_requested_at"),
-});
-
-export const xUserAliases = sqliteTable(
-  "x_user_aliases",
-  {
-    x_user_id: text("x_user_id").notNull(),
-    alias_x_id: text("alias_x_id").notNull(),
-  },
-  (t) => ({ pk: primaryKey({ columns: [t.x_user_id, t.alias_x_id] }) }),
-);
-
-export const xAccountLinkRequests = sqliteTable("x_account_link_requests", {
-  id: text("id").primaryKey(),
-  user_id: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  requested_x_id: text("requested_x_id").notNull(),
-  link_type: text("link_type", { enum: ["new", "merge", "alias"] }).notNull(),
-  target_x_user_id: text("target_x_user_id"),
-  status: text("status", {
-    enum: ["pending", "approved", "rejected"],
-  }).default("pending"),
-  requested_at: integer("requested_at").notNull(),
-});
-
-export const xUserIcons = sqliteTable(
-  "x_user_icons",
+export const xUsers = sqliteTable(
+  "x_users",
   {
     id: text("id").primaryKey(),
-    x_user_id: text("x_user_id").notNull(),
-    icon_url: text("icon_url").notNull(),
-    source_video_id: text("source_video_id"),
-    source_type: text("source_type", {
-      enum: ["video", "manual", "legacy"],
-    }).default("video"),
-    created_at: integer("created_at").notNull(),
+    x_name: text("x_name").notNull(),
+    icon_url: text("icon_url"),
+    profile_text: text("profile_text"),
+    portfolio_contact: text("portfolio_contact"),
+    youtube_channel_url: text("youtube_channel_url"),
+    other_social_links: text("other_social_links"),
+    creative_start_date: integer("creative_start_date"),
+    linked_user_id: text("linked_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    verification_token: text("verification_token"),
+    token_expires_at: integer("token_expires_at"),
+    approval_status: text("approval_status", {
+      enum: ["pending", "approved", "rejected"],
+    }).default("pending"),
+    approval_requested_at: integer("approval_requested_at"),
   },
   (t) => ({
-    // 手動アップロード履歴で同じX ID・icon_urlを二重登録しないためのunique制約。
-    // 投稿由来の候補はvideos.creator_icon_urlから解決し、この履歴表へ二重書込みしない。
-    userUrlUnique: uniqueIndex("x_user_icons_user_url_uniq").on(
-      t.x_user_id,
-      t.icon_url,
-    ),
-    byUserCreated: index("x_user_icons_user_created_idx").on(
-      t.x_user_id,
-      t.created_at,
+    linkedApprovalIdx: index("x_users_linked_approval_idx").on(
+      t.linked_user_id,
+      t.approval_status,
+      t.id,
     ),
   }),
 );
 
-export const xUserYoutubeChannels = sqliteTable(
-  "x_user_youtube_channels",
+export const events = sqliteTable(
+  "events",
   {
     id: text("id").primaryKey(),
-    x_user_id: text("x_user_id").notNull(),
-    youtube_channel_url: text("youtube_channel_url").notNull(),
-    source_video_id: text("source_video_id"),
-    source_type: text("source_type", {
-      enum: ["video", "manual", "legacy"],
+    title: text("title").notNull(),
+    event_type: text("event_type", {
+      enum: ["event", "collabo", "type", "other"],
+    }).default("event"),
+    explanation: text("explanation"),
+    icon_url: text("icon_url"),
+    img_url: text("img_url"),
+    accent_color: text("accent_color"),
+    representative_x_user_id: text("representative_x_user_id"),
+    visibility_status: text("visibility_status", {
+      enum: ["draft", "private", "public", "archived"],
     })
       .notNull()
-      .default("video"),
-    created_at: integer("created_at").notNull(),
-  },
-  (t) => ({
-    userUrlUnique: uniqueIndex("x_user_youtube_channels_user_url_uniq").on(
-      t.x_user_id,
-      t.youtube_channel_url,
+      .default("draft"),
+    allow_user_video_event_links: integer("allow_user_video_event_links")
+      .notNull()
+      .default(0),
+    allow_unslotted_posts: integer("allow_unslotted_posts")
+      .notNull()
+      .default(0),
+    allow_user_video_edits: integer("allow_user_video_edits")
+      .notNull()
+      .default(0),
+    user_video_edit_permission_keys_json: text(
+      "user_video_edit_permission_keys_json",
     ),
-    byUserCreated: index("x_user_youtube_channels_user_created_idx").on(
-      t.x_user_id,
-      t.created_at,
+    slot_type: text("slot_type", { enum: ["time", "count"] }).default(
+      "time",
     ),
-  }),
-);
-
-// ============================================================
-// イベント / スロット
-// ============================================================
-
-export const eventGroups = sqliteTable("event_groups", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  slug: text("slug").notNull(),
-  description: text("description"),
-  group_type: text("group_type", {
-    enum: ["series", "genre", "related", "collection", "other"],
-  })
-    .notNull()
-    .default("series"),
-  icon_url: text("icon_url"),
-  img_url: text("img_url"),
-  accent_color: text("accent_color"),
-  visibility_status: text("visibility_status", {
-    enum: ["public", "private", "archived"],
-  })
-    .notNull()
-    .default("public"),
-  sort_order: integer("sort_order").default(0),
-  created_at: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updated_at: integer("updated_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-}, (t) => ({
-  slugUniq: uniqueIndex("event_groups_slug_uniq").on(t.slug),
-  typeSortIdx: index("event_groups_type_sort_idx").on(t.group_type, t.sort_order),
-  visibilitySortIdx: index("event_groups_visibility_sort_idx").on(t.visibility_status, t.sort_order),
-}));
-
-export const eventGroupEvents = sqliteTable("event_group_events", {
-  event_group_id: text("event_group_id").notNull(),
-  event_id: text("event_id").notNull(),
-  relation_type: text("relation_type", {
-    enum: ["member", "primary", "related"],
-  })
-    .notNull()
-    .default("member"),
-  sort_order: integer("sort_order").notNull().default(0),
-  created_at: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updated_at: integer("updated_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-}, (t) => ({
-  primaryKey: primaryKey({
-    columns: [t.event_group_id, t.event_id],
-  }),
-  eventIdx: index("event_group_events_event_idx").on(t.event_id),
-  groupSortIdx: index("event_group_events_group_sort_idx").on(t.event_group_id, t.sort_order),
-  relationIdx: index("event_group_events_relation_idx").on(t.relation_type),
-}));
-
-export const events = sqliteTable("events", {
-  id: text("id").primaryKey(),
-  title: text("title").notNull(),
-  event_type: text("event_type", {
-    enum: ["event", "collabo", "type", "other"],
-  }).default("event"),
-  explanation: text("explanation"),
-  icon_url: text("icon_url"),
-  img_url: text("img_url"),
-  accent_color: text("accent_color"),
-  representative_x_user_id: text("representative_x_user_id"),
-  visibility_status: text("visibility_status", {
-    enum: ["draft", "private", "public", "archived"],
-  }).notNull().default("draft"),
-  /**
-   * 一般ユーザー (作品投稿者) が、このイベントを既存作品の追加所属イベントとして
-   * 紐付けてよいか。
-   *   0 = 不許可。イベント運営・管理者のみが video_events を追加できる
-   *   1 = 許可。作品投稿者・編集者が「所属イベント」チェックボックスから選べる
-   * デフォルト 0 (運営承認制) で、緩めたいイベントだけ 1 にする。
-   */
-  allow_user_video_event_links: integer("allow_user_video_event_links")
-    .notNull()
-    .default(0),
-  /**
-   * 枠なし投稿 (/entry/unslotted) で一般ユーザーが作品をこのイベントに
-   * 紐づけてよいか。
-   *   0 = 不許可 (既定)
-   *   1 = 許可。受付中かつ公開のイベントが枠なし投稿フォームの候補になる
-   * `allow_user_video_event_links` は既存作品の追加所属用。用途が異なる。
-   */
-  allow_unslotted_posts: integer("allow_unslotted_posts")
-    .notNull()
-    .default(0),
-  /**
-   * このイベントに紐付いた作品について、一般ユーザー (作品オーナーや合作メンバー
-   * 以外) にもイベント単位で編集権限を委譲するか。
-   *   0 = 委譲しない (既定)。動画オーナー / 合作メンバー / イベント運営のみ編集可。
-   *   1 = 委譲する。`user_video_edit_permission_keys_json` で許可キーを限定する。
-   */
-  allow_user_video_edits: integer("allow_user_video_edits")
-    .notNull()
-    .default(0),
-  /**
-   * `allow_user_video_edits = 1` の場合に、ユーザーへ委譲する section_key 一覧。
-   * JSON 配列を文字列で保持する (D1 に JSON 型がないため)。
-   * 例: `["videos.title","videos.music_credit","videos.members","videos.review_data"]`
-   * 危険キー (videos.youtube_id / videos.primary_event / video.identity) は
-   * サーバー側で除外して読み込む。
-   */
-  user_video_edit_permission_keys_json: text("user_video_edit_permission_keys_json"),
-  slot_type: text("slot_type", { enum: ["time", "count"] }).default("time"),
-  slot_visibility_mode: text("slot_visibility_mode", {
-    enum: ["public_name", "anonymous", "hidden"],
-  }).default("public_name"),
-  start_time: integer("start_time"),
-  end_time: integer("end_time"),
-  entry_start_time: integer("entry_start_time"),
-  entry_end_time: integer("entry_end_time"),
-  created_at: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updated_at: integer("updated_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-  max_slots_per_video: integer("max_slots_per_video").notNull().default(1),
-  max_consecutive_slots_per_entry: integer("max_consecutive_slots_per_entry")
-    .notNull()
-    .default(3),
-  review_settings: text("review_settings"),
-  editable_fields: text("editable_fields"),
-  repeat_rules: text("repeat_rules"),
-  /**
-   * スロット表示で「部」を分ける間隔の閾値 (分)。
-   * 実装方針は 15 分。0006 は SQLite/D1 既定値が DEFAULT 30 のままのDBがあるため、
-   * 読み取り時は実値を優先し、NULL/未設定だけアプリ側 fallback 15 として扱う。
-   */
-  slot_part_gap_minutes: integer("slot_part_gap_minutes").default(15),
-  /**
-   * このイベントで作品が選択できる「部」(セクション/カテゴリ) の候補リスト。
-   * JSON 配列の文字列 (例: '["1部","2部"]')。null/空配列なら「部」UI は非表示。
-   * 旧データの type 列に相当する分類項目をイベント単位で定義できる。
-   */
-  parts_json: text("parts_json"),
-  /** 公開イベント API。管理者が ON にするまで 0 */
-  public_api_enabled: integer("public_api_enabled").notNull().default(0),
-  public_api_updated_at: integer("public_api_updated_at"),
-});
-
-/** イベント設定テンプレート（管理者のみ。枠・作品・スタッフは含まない） */
-export const eventTemplates = sqliteTable(
-  "event_templates",
-  {
-    id: text("id").primaryKey(),
-    name: text("name").notNull(),
-    description: text("description"),
-    source_event_id: text("source_event_id"),
-    settings_json: text("settings_json").notNull(),
-    created_by_user_id: text("created_by_user_id").notNull(),
+    slot_visibility_mode: text("slot_visibility_mode", {
+      enum: ["public_name", "anonymous", "hidden"],
+    }).default("public_name"),
+    start_time: integer("start_time"),
+    end_time: integer("end_time"),
+    entry_start_time: integer("entry_start_time"),
+    entry_end_time: integer("entry_end_time"),
     created_at: integer("created_at")
       .notNull()
       .default(sql`(unixepoch())`),
     updated_at: integer("updated_at")
       .notNull()
       .default(sql`(unixepoch())`),
+    max_slots_per_video: integer("max_slots_per_video").notNull().default(1),
+    max_consecutive_slots_per_entry: integer(
+      "max_consecutive_slots_per_entry",
+    )
+      .notNull()
+      .default(3),
+    review_settings: text("review_settings"),
+    editable_fields: text("editable_fields"),
+    repeat_rules: text("repeat_rules"),
+    slot_part_gap_minutes: integer("slot_part_gap_minutes").default(15),
+    parts_json: text("parts_json"),
+    public_api_enabled: integer("public_api_enabled").notNull().default(0),
+    public_api_updated_at: integer("public_api_updated_at"),
   },
   (t) => ({
-    updatedIdx: index("event_templates_updated_idx").on(t.updated_at),
+    visibilityStartIdx: index("events_visibility_start_idx").on(
+      t.visibility_status,
+      t.start_time,
+    ),
   }),
 );
 
-export const eventStaff = sqliteTable(
-  "event_staff",
+export const videos = sqliteTable(
+  "videos",
   {
     id: text("id").primaryKey(),
-    event_id: text("event_id")
-      .notNull()
-      .references(() => events.id, { onDelete: "cascade" }),
-    x_user_id: text("x_user_id").references(() => xUsers.id, {
+    primary_event_id: text("primary_event_id"),
+    creator_x_user_id: text("creator_x_user_id").references(() => xUsers.id, {
       onDelete: "set null",
     }),
-    /** 権限・監査主体に使うAuth.js内部ユーザーID。 */
-    user_id: text("user_id").references(() => users.id, {
-      onDelete: "set null",
-    }),
-    display_name: text("display_name").notNull(),
-    role: text("role", { enum: ["representative", "editor", "staff"] })
-      .notNull()
-      .default("staff"),
-    permission_preset: text("permission_preset", {
-      enum: [
-        "owner",
-        "manager",
-        "slot_manager",
-        "content_editor",
-        "reviewer",
-        "xid_reviewer",
-        "public_staff",
-        "custom",
-      ],
-    })
-      .notNull()
-      .default("public_staff"),
-    custom_permission_keys_json: text("custom_permission_keys_json"),
-    is_public: integer("is_public").notNull().default(0),
-    public_role_label: text("public_role_label"),
-    internal_note: text("internal_note"),
-    approved_by_user_id: text("approved_by_user_id").references(
-      () => users.id,
-      { onDelete: "set null" },
-    ),
-    approved_at: integer("approved_at"),
-    created_at: integer("created_at")
-      .notNull()
-      .default(sql`(unixepoch())`),
-    updated_at: integer("updated_at")
-      .notNull()
-      .default(sql`(unixepoch())`),
-  },
-  (t) => ({
-    eventXUniq: uniqueIndex("event_staff_event_x_uniq").on(
-      t.event_id,
-      t.x_user_id,
-    ),
-    eventUserUniq: uniqueIndex("event_staff_event_user_uniq").on(
-      t.event_id,
-      t.user_id,
-    ),
-    byEvent: index("event_staff_event_idx").on(t.event_id),
-    ownerLookup: index("event_staff_event_preset_idx").on(
-      t.event_id,
-      t.permission_preset,
-    ),
-    publicIdx: index("event_staff_public_idx").on(
-      t.event_id,
-      t.is_public,
-      t.display_name,
-    ),
-    subjectRequired: check(
-      "event_staff_subject_required",
-      sql`${t.user_id} IS NOT NULL OR ${t.x_user_id} IS NOT NULL`,
-    ),
-  }),
-);
-
-export const slots = sqliteTable("slots", {
-  id: text("id").primaryKey(),
-  event_id: text("event_id")
-    .notNull()
-    .references(() => events.id, { onDelete: "cascade" }),
-  reserved_by_user_id: text("reserved_by_user_id").references(
-    () => users.id,
-    { onDelete: "set null" },
-  ),
-  x_user_id: text("x_user_id").references(() => xUsers.id, {
-    onDelete: "set null",
-  }),
-  display_name: text("display_name"),
-  slot_kind: text("slot_kind", { enum: ["time", "count"] }).default("time"),
-  slot_label: text("slot_label"),
-  start_time: integer("start_time"),
-  sort_order: integer("sort_order").default(0),
-  reservation_group_id: text("reservation_group_id"),
-  priority_reclaim_video_id: text("priority_reclaim_video_id"),
-  priority_reclaim_until: integer("priority_reclaim_until"),
-  video_id: text("video_id"),
-  status: text("status", {
-    enum: ["available", "reserved", "submitted"],
-  })
-    .notNull()
-    .default("available"),
-  updated_at: integer("updated_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-  version: integer("version").notNull().default(1),
-}, (t) => ({
-  byEvent: index("slots_event_idx").on(t.event_id, t.start_time),
-  byVideo: index("slots_video_idx").on(t.video_id),
-}));
-
-// ============================================================
-// 作品 / 関連
-// ============================================================
-
-export const videos = sqliteTable("videos", {
-  id: text("id").primaryKey(),
-  // identity / owner
-  primary_event_id: text("primary_event_id"),
-  creator_x_user_id: text("creator_x_user_id").references(() => xUsers.id, {
-    onDelete: "set null",
-  }),
-  submitted_by_user_id: text("submitted_by_user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "restrict" }),
-  // classification
-  collaboration_type: text("collaboration_type", {
-    enum: ["individual", "collab"],
-  })
-    .notNull()
-    .default("individual"),
-  /**
-   * 作品が所属する「部」名 (events.parts_json の候補から選ばれた文字列)。
-   * 旧データの type 列に相当する分類項目で、イベントが parts_json を持つ場合のみ
-   * UI に出る。null なら未設定。
-   */
-  part: text("part"),
-  source_type: text("source_type", {
-    enum: ["youtube", "manual", "external"],
-  })
-    .notNull()
-    .default("youtube"),
-  // creator display snapshot
-  creator_display_name: text("creator_display_name").notNull(),
-  creator_display_name_yomi: text("creator_display_name_yomi"),
-  creator_icon_url: text("creator_icon_url"),
-  creator_youtube_channel_url: text("creator_youtube_channel_url"),
-  // basic content
-  title: text("title").notNull(),
-  music: text("music"),
-  credit: text("credit"),
-  music_reference_url: text("music_reference_url"),
-  closing_comment: text("closing_comment"),
-  youtube_video_id: text("youtube_video_id"),
-  intro_comment: text("intro_comment"),
-  highlights: text("highlights"),
-  production_story: text("production_story"),
-  visibility_status: text("visibility_status", {
-    enum: [
-      "draft",
-      "pending",
-      "public",
-      "limited",
-      "private",
-      "archived",
-      "voided",
-    ],
-  })
-    .notNull()
-    .default("draft"),
-  // scheduling
-  scheduling_type: text("scheduling_type", {
-    enum: ["slotted", "manual"],
-  }).default("slotted"),
-  scheduled_time: integer("scheduled_time"),
-  /** 表示クエリ向けの統計正本。 */
-  app_like_count: integer("app_like_count").notNull().default(0),
-  score: real("score").notNull().default(0),
-  score_updated_at: integer("score_updated_at"),
-  // timestamps
-  created_at: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updated_at: integer("updated_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-}, (t) => ({
-  visibilityStatusIdx: index("videos_visibility_status_idx").on(t.visibility_status),
-  scheduledIdx: index("videos_scheduled_idx").on(t.scheduled_time),
-  primaryEventIdx: index("videos_primary_event_idx").on(t.primary_event_id),
-  submittedByIdx: index("videos_submitted_by_idx").on(t.submitted_by_user_id),
-  creatorXIdx: index("videos_creator_x_idx").on(t.creator_x_user_id),
-  youtubeIdIdx: index("videos_youtube_id_idx").on(t.youtube_video_id),
-  // posting/youtube-id-and-active-x:
-  //   同時投稿レース対策。createFreeVideo / submitSlotVideo / updateVideo は
-  //   SELECT で重複確認してから insert/update しているが、その間に他クライアントが
-  //   同じ youtube_video_id を投稿し得る。voided / 削除済みは別作品扱いなので
-  //   partial unique index で active な行のみ制約する。
-  //   migration: 0007_dapper_slot_events.sql
-  youtubeIdActiveUniq: uniqueIndex("videos_youtube_id_active_uniq")
-    .on(t.youtube_video_id)
-    .where(
-      sql`youtube_video_id IS NOT NULL AND youtube_video_id <> '' AND visibility_status NOT IN ('archived', 'voided')`,
-    ),
-}));
-
-export const videoYoutubeMetadata = sqliteTable("video_youtube_metadata", {
-  video_id: text("video_id")
-    .primaryKey()
-    .references(() => videos.id, { onDelete: "cascade" }),
-  youtube_video_id: text("youtube_video_id"),
-  youtube_privacy_status: text("youtube_privacy_status"),
-  youtube_availability_status: text("youtube_availability_status"),
-  duration_seconds: integer("duration_seconds"),
-  view_count: integer("view_count").notNull().default(0),
-  synced_at: integer("synced_at"),
-  sync_status: text("sync_status", {
-    enum: ["pending", "synced", "failed"],
-  })
-    .notNull()
-    .default("pending"),
-  sync_error: text("sync_error"),
-  updated_at: integer("updated_at").notNull(),
-}, (t) => ({
-  byYoutubeId: index("video_youtube_metadata_youtube_idx").on(t.youtube_video_id),
-  bySync: index("video_youtube_metadata_sync_idx").on(
-    t.sync_status,
-    t.synced_at,
-  ),
-}));
-
-export const videoModerationCases = sqliteTable("video_moderation_cases", {
-  id: text("id").primaryKey(),
-  video_id: text("video_id")
-    .notNull()
-    .references(() => videos.id, { onDelete: "cascade" }),
-  case_type: text("case_type", {
-    enum: ["x_reapply", "void", "duplicate", "rights", "operator"],
-  }).notNull(),
-  status: text("status", {
-    enum: ["open", "resolved", "rejected", "expired", "cancelled"],
-  })
-    .notNull()
-    .default("open"),
-  public_reason: text("public_reason"),
-  private_note: text("private_note"),
-  due_at: integer("due_at"),
-  locked_until: integer("locked_until"),
-  attempt_count: integer("attempt_count").notNull().default(0),
-  related_x_user_id: text("related_x_user_id").references(() => xUsers.id, {
-    onDelete: "set null",
-  }),
-  created_by_user_id: text("created_by_user_id").references(() => users.id, {
-    onDelete: "set null",
-  }),
-  resolved_by_user_id: text("resolved_by_user_id").references(
-    () => users.id,
-    { onDelete: "set null" },
-  ),
-  created_at: integer("created_at").notNull(),
-  resolved_at: integer("resolved_at"),
-}, (t) => ({
-  byVideo: index("video_moderation_cases_video_idx").on(t.video_id, t.created_at),
-  byTypeStatus: index("video_moderation_cases_type_status_idx").on(
-    t.case_type,
-    t.status,
-  ),
-}));
-
-export const videoEvents = sqliteTable(
-  "video_events",
-  {
-    video_id: text("video_id")
-      .notNull()
-      .references(() => videos.id, { onDelete: "cascade" }),
-    event_id: text("event_id")
-      .notNull()
-      .references(() => events.id, { onDelete: "cascade" }),
-  },
-  (t) => ({
-    pk: primaryKey({ columns: [t.video_id, t.event_id] }),
-    byEventVideo: index("video_events_event_video_idx").on(
-      t.event_id,
-      t.video_id,
-    ),
-  }),
-);
-
-export const videoMembers = sqliteTable(
-  "video_members",
-  {
-    id: text("id").primaryKey(),
-    video_id: text("video_id")
-      .notNull()
-      .references(() => videos.id, { onDelete: "cascade" }),
-    x_user_id: text("x_user_id").references(() => xUsers.id, {
-      onDelete: "set null",
-    }),
-    name: text("name").notNull(),
-    role: text("role"),
-    comment: text("comment"),
-    order_index: integer("order_index").notNull().default(0),
-    user_id: text("user_id").references(() => users.id, {
-      onDelete: "set null",
-    }),
-    /**
-     * 1 = この video_member は作品単位の共同編集者として扱う (can_edit ON)。
-     * 範囲は `COLLABORATOR_VIDEO_EDIT_KEYS` で制限される (危険キーは触れない)。
-     * 0 = 表示・担当メンバーではあるが編集権限は無い。
-     */
-    can_edit: integer("can_edit").notNull().default(0),
-    /**
-     * 1 = 公開ページのメンバー欄に表示する。
-     * 0 = 編集権限・チャプター担当用の非公開メンバー。公開メンバー欄には出さない。
-     */
-    is_public_member: integer("is_public_member").notNull().default(1),
-    /** 編集権限を付与した Discord ユーザー ID (history_logs の operator と一致)。 */
-    edit_granted_by_user_id: text("edit_granted_by_user_id"),
-    /** 編集権限が初めて付与された時刻 (unixepoch)。 */
-    edit_granted_at: integer("edit_granted_at"),
-    /** can_edit が最後に変更された時刻 (unixepoch)。 */
-    edit_updated_at: integer("edit_updated_at"),
-    /** メンバー担当チャプター [{ time_seconds, label, note, order_index }] */
-    chapters_json: text("chapters_json"),
-  },
-  (t) => ({
-    // 表示順 (デフォルト) + 名前ソート (MemberSection の列ソート) を高速化する。
-    byVideo: index("video_members_video_order_idx").on(
-      t.video_id,
-      t.order_index,
-    ),
-    byVideoName: index("video_members_video_name_idx").on(
-      t.video_id,
-      t.name,
-    ),
-    byVideoCanEdit: index("video_members_video_can_edit_idx").on(
-      t.video_id,
-      t.can_edit,
-    ),
-    byUser: index("video_members_user_idx").on(t.user_id),
-  }),
-);
-
-export const videoSoftwares = sqliteTable(
-  "video_softwares",
-  {
-    video_id: text("video_id")
-      .notNull()
-      .references(() => videos.id, { onDelete: "cascade" }),
-    software_id: text("software_id")
-      .notNull()
-      .references(() => softwareCatalog.id, { onDelete: "restrict" }),
-    raw_label: text("raw_label").notNull(),
-    order_index: integer("order_index").notNull().default(0),
-  },
-  (t) => ({
-    pk: primaryKey({ columns: [t.video_id, t.software_id] }),
-    bySoftwareVideo: index("video_softwares_software_video_idx").on(
-      t.software_id,
-      t.video_id,
-    ),
-    byVideoOrder: index("video_softwares_video_order_idx").on(
-      t.video_id,
-      t.order_index,
-    ),
-  }),
-);
-
-export const videoChapters = sqliteTable("video_chapters", {
-  id: text("id").primaryKey(),
-  video_id: text("video_id")
-    .notNull()
-    .references(() => videos.id, { onDelete: "cascade" }),
-  x_user_id: text("x_user_id")
-    .notNull()
-    .references(() => xUsers.id, { onDelete: "restrict" }),
-  chapter_time: real("chapter_time").notNull(),
-  chapter_label: text("chapter_label").notNull(),
-  note: text("note"),
-  visibility: text("visibility", { enum: ["private", "public"] }).default(
-    "public",
-  ),
-  show_on_player_bar: integer("show_on_player_bar").default(0),
-  order_index: integer("order_index").default(0),
-  created_at: integer("created_at").notNull(),
-  updated_at: integer("updated_at").notNull(),
-}, (t) => ({
-  byVideoTime: index("video_chapters_video_time_idx").on(
-    t.video_id,
-    t.chapter_time,
-  ),
-}));
-
-export const videoInteractions = sqliteTable(
-  "video_interactions",
-  {
-    id: text("id").primaryKey(),
-    x_user_id: text("x_user_id").notNull(),
-    video_id: text("video_id").notNull(),
-    interaction_type: text("interaction_type", {
-      enum: ["like", "bookmark"],
-    }).notNull(),
-    source: text("source", { enum: ["app", "youtube"] }).default("app"),
-    created_at: integer("created_at").notNull(),
-    synced_at: integer("synced_at"),
-  },
-  (t) => ({
-    uniq: uniqueIndex("video_interactions_uniq").on(
-      t.x_user_id,
-      t.video_id,
-      t.interaction_type,
-    ),
-  }),
-);
-
-// ============================================================
-// 通知・統計
-// ============================================================
-
-export const systemSettings = sqliteTable("system_settings", {
-  id: text("id").primaryKey(),
-  default_editable_fields: text("default_editable_fields"),
-  upcoming_editable_fields: text("upcoming_editable_fields"),
-  history_retention_days: integer("history_retention_days").default(90),
-  operation_mode: text("operation_mode", {
-    enum: ["normal", "economy", "read_only", "static_only", "maintenance"],
-  }).default("normal"),
-  disabled_features_json: text("disabled_features_json"),
-  cost_guard_reason: text("cost_guard_reason"),
-  cost_guard_updated_by_user_id: text("cost_guard_updated_by_user_id"),
-  cost_guard_updated_at: integer("cost_guard_updated_at"),
-  cost_guard_exception_until: integer("cost_guard_exception_until"),
-  cost_guard_exception_features_json: text("cost_guard_exception_features_json"),
-});
-
-/** active baselineと実接続先の一致確認用。id='current' の一行だけを保持する。 */
-export const schemaVersion = sqliteTable("flamenode_schema_meta", {
-  id: text("id").primaryKey(),
-  version: text("version").notNull(),
-  applied_at: integer("applied_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-});
-
-export const xIdMergeRequests = sqliteTable("x_id_merge_requests", {
-  id: text("id").primaryKey(),
-  from_x_user_id: text("from_x_user_id").notNull(),
-  to_x_user_id: text("to_x_user_id").notNull(),
-  requested_by_user_id: text("requested_by_user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "restrict" }),
-  status: text("status", {
-    enum: ["pending", "approved", "rejected", "done"],
-  }).default("pending"),
-  created_at: integer("created_at").notNull(),
-  updated_at: integer("updated_at").notNull(),
-});
-
-export const xIdMergeReverts = sqliteTable("x_id_merge_reverts", {
-  id: text("id").primaryKey(),
-  merge_request_id: text("merge_request_id").notNull(),
-  requested_by_user_id: text("requested_by_user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "restrict" }),
-  status: text("status", {
-    enum: ["pending", "approved", "rejected", "done"],
-  }).default("pending"),
-  restore_snapshot_json: text("restore_snapshot_json").notNull(),
-  revert_deadline_at: integer("revert_deadline_at").notNull(),
-  created_at: integer("created_at").notNull(),
-  updated_at: integer("updated_at").notNull(),
-});
-
-export const notificationOutbox = sqliteTable(
-  "notification_outbox",
-  {
-    id: text("id").primaryKey(),
-    /** 配送先のAuth.js内部ユーザーID。送信時だけusers.discord_idへ解決する。 */
-    recipient_user_id: text("recipient_user_id")
+    submitted_by_user_id: text("submitted_by_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
-    type: text("type").notNull(),
-    payload_json: text("payload_json").notNull(),
-    status: text("status", {
-      enum: [
-        "pending",
-        "processing",
-        "sent",
-        "failed",
-        "cancelled",
-        "dead_letter",
-      ],
-    }).default("pending"),
-    attempt_count: integer("attempt_count").default(0),
-    processing_started_at: integer("processing_started_at"),
-    lease_token: text("lease_token"),
-    lease_expires_at: integer("lease_expires_at"),
-    next_attempt_at: integer("next_attempt_at"),
-    last_error: text("last_error"),
-    processed_at: integer("processed_at"),
-    /** event-scoped 通知 (運営者受信箱用)。null は全体通知。 */
-    event_id: text("event_id"),
-    /** 同一通知の重複 enqueue 防止 (pending/processing/sent で unique) */
-    dedupe_key: text("dedupe_key"),
-    created_at: integer("created_at")
-      .notNull()
-      .default(sql`(unixepoch())`),
-  },
-  (t) => ({
-    // Worker が status='pending' を 5 分ごとに引く + /admin/notifications の絞り込み高速化
-    byStatusCreated: index("notification_outbox_status_created_idx").on(
-      t.status,
-      t.created_at,
-    ),
-    byProcessingStarted: index("notification_outbox_processing_started_idx").on(
-      t.status,
-      t.processing_started_at,
-    ),
-    byLease: index("notification_outbox_lease_idx").on(
-      t.status,
-      t.lease_expires_at,
-    ),
-    // /manage/events/[id] が event_id で絞り込むため
-    byEvent: index("notification_outbox_event_idx").on(t.event_id),
-    byDedupe: index("notification_outbox_dedupe_idx").on(t.dedupe_key),
-    byStatusDedupe: index("notification_outbox_status_dedupe_idx").on(
-      t.status,
-      t.dedupe_key,
-    ),
-    activeDedupeUniq: uniqueIndex("notification_outbox_active_dedupe_uniq")
-      .on(t.dedupe_key)
-      .where(sql`dedupe_key IS NOT NULL AND status IN ('pending', 'processing', 'sent')`),
-  }),
-);
-
-export const announcements = sqliteTable("announcements", {
-  id: text("id").primaryKey(),
-  title: text("title").notNull(),
-  body: text("body").notNull(),
-  severity: text("severity", {
-    enum: ["info", "warning", "danger"],
-  }).default("info"),
-  is_published: integer("is_published").default(0),
-  publish_at: integer("publish_at"),
-  expire_at: integer("expire_at"),
-  target_audience: text("target_audience", {
-    enum: ["all", "creators", "admins"],
-  }).default("all"),
-  created_by_user_id: text("created_by_user_id"),
-  created_at: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updated_at: integer("updated_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-});
-
-// ============================================================
-// 利用規約 / ソフト辞書
-// ============================================================
-
-export const termsVersions = sqliteTable(
-  "terms_versions",
-  {
-    id: text("id").primaryKey(),
-    version_label: text("version_label").notNull(),
-    body_markdown: text("body_markdown").notNull(),
-    status: text("status", { enum: ["draft", "published", "archived"] }).default(
-      "draft",
-    ),
-    severity: text("severity", { enum: ["minor", "major"] }).default("minor"),
-    published_at: integer("published_at"),
-    created_by_user_id: text("created_by_user_id").notNull(),
-    created_at: integer("created_at")
-      .notNull()
-      .default(sql`(unixepoch())`),
-    updated_at: integer("updated_at")
-      .notNull()
-      .default(sql`(unixepoch())`),
-  },
-  (t) => ({
-    severityPublished: index("terms_versions_severity_published_idx").on(
-      t.severity,
-      t.published_at,
-      t.updated_at,
-    ),
-  }),
-);
-
-export const userTosConsents = sqliteTable(
-  "user_tos_consents",
-  {
-    id: text("id").primaryKey(),
-    user_id: text("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    // fallback-currentも保存するため、terms_versionsへのFKは付けない。
-    terms_version_id: text("terms_version_id").notNull(),
-    consented_at: integer("consented_at").notNull(),
-    consent_context: text("consent_context", {
-      enum: ["entry", "post", "edit", "admin"],
-    }).notNull(),
-  },
-  (t) => ({
-    byUserTerms: index("user_tos_consents_user_terms_idx").on(
-      t.user_id,
-      t.terms_version_id,
-    ),
-  }),
-);
-
-export const softwareCatalog = sqliteTable("software_catalog", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  normalized_name: text("normalized_name").notNull(),
-  category: text("category"),
-  usage_count: integer("usage_count").notNull().default(0),
-  is_active: integer("is_active").notNull().default(1),
-  is_verified: integer("is_verified").notNull().default(0),
-  created_at: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updated_at: integer("updated_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-}, (t) => ({
-  normUniq: uniqueIndex("software_catalog_norm_uniq").on(t.normalized_name),
-}));
-
-export const softwareAliases = sqliteTable(
-  "software_aliases",
-  {
-    id: text("id").primaryKey(),
-    software_id: text("software_id").notNull(),
-    alias: text("alias").notNull(),
-    normalized_alias: text("normalized_alias").notNull(),
-  },
-  (t) => ({
-    uniq: uniqueIndex("software_aliases_uniq").on(
-      t.software_id,
-      t.normalized_alias,
-    ),
-    globalAliasUniq: uniqueIndex("software_aliases_global_alias_uniq").on(
-      t.normalized_alias,
-    ),
-  }),
-);
-
-/** R2 公開用静的 JSON の再生成キュー（Next.js ビルドとは無関係） */
-export const staticRebuildQueue = sqliteTable(
-  "static_rebuild_queue",
-  {
-    id: text("id").primaryKey(),
-    target_type: text("target_type").notNull(),
-    target_id: text("target_id").notNull(),
-    reason: text("reason"),
-    priority: text("priority", { enum: ["high", "normal", "low"] })
-      .notNull()
-      .default("normal"),
-    status: text("status", {
-      enum: ["pending", "processing", "done", "failed", "dead_letter"],
+    collaboration_type: text("collaboration_type", {
+      enum: ["individual", "collab"],
     })
       .notNull()
-      .default("pending"),
-    attempt_count: integer("attempt_count").notNull().default(0),
-    requested_by_user_id: text("requested_by_user_id"),
+      .default("individual"),
+    part: text("part"),
+    source_type: text("source_type", {
+      enum: ["youtube", "manual", "external"],
+    })
+      .notNull()
+      .default("youtube"),
+    creator_display_name: text("creator_display_name").notNull(),
+    creator_display_name_yomi: text("creator_display_name_yomi"),
+    creator_icon_url: text("creator_icon_url"),
+    creator_youtube_channel_url: text("creator_youtube_channel_url"),
+    title: text("title").notNull(),
+    music: text("music"),
+    credit: text("credit"),
+    music_reference_url: text("music_reference_url"),
+    closing_comment: text("closing_comment"),
+    youtube_video_id: text("youtube_video_id"),
+    intro_comment: text("intro_comment"),
+    highlights: text("highlights"),
+    production_story: text("production_story"),
+    visibility_status: text("visibility_status", {
+      enum: [
+        "draft",
+        "pending",
+        "public",
+        "limited",
+        "private",
+        "archived",
+        "voided",
+      ],
+    })
+      .notNull()
+      .default("draft"),
+    scheduling_type: text("scheduling_type", {
+      enum: ["slotted", "manual"],
+    }).default("slotted"),
+    scheduled_time: integer("scheduled_time"),
+    app_like_count: integer("app_like_count").notNull().default(0),
+    score: real("score").notNull().default(0),
+    score_updated_at: integer("score_updated_at"),
     created_at: integer("created_at")
       .notNull()
       .default(sql`(unixepoch())`),
     updated_at: integer("updated_at")
       .notNull()
       .default(sql`(unixepoch())`),
-    processing_started_at: integer("processing_started_at"),
-    lease_token: text("lease_token"),
-    lease_expires_at: integer("lease_expires_at"),
-    processed_at: integer("processed_at"),
-    next_retry_at: integer("next_retry_at"),
-    error: text("error"),
   },
   (t) => ({
-    targetPendingUniq: uniqueIndex("static_rebuild_queue_target_pending_uniq")
-      .on(t.target_type, t.target_id)
-      .where(sql`status IN ('pending', 'processing')`),
-    statusPriorityIdx: index("static_rebuild_queue_status_priority_idx").on(
-      t.status,
-      t.priority,
-      t.created_at,
+    visibilityStatusIdx: index("videos_visibility_status_idx").on(
+      t.visibility_status,
     ),
-    nextRetryIdx: index("static_rebuild_queue_next_retry_idx").on(
-      t.status,
-      t.next_retry_at,
+    scheduledIdx: index("videos_scheduled_idx").on(t.scheduled_time),
+    primaryEventIdx: index("videos_primary_event_idx").on(t.primary_event_id),
+    submittedByIdx: index("videos_submitted_by_idx").on(
+      t.submitted_by_user_id,
     ),
-    leaseIdx: index("static_rebuild_queue_lease_idx").on(
-      t.status,
-      t.lease_expires_at,
+    creatorXIdx: index("videos_creator_x_idx").on(t.creator_x_user_id),
+    youtubeIdIdx: index("videos_youtube_id_idx").on(t.youtube_video_id),
+    publicScheduledIdx: index("videos_public_scheduled_idx").on(
+      t.visibility_status,
+      t.scheduled_time,
     ),
+    publicScoreIdx: index("videos_public_score_idx").on(
+      t.visibility_status,
+      t.score,
+      t.scheduled_time,
+    ),
+    creatorFallbackIdx: index("videos_creator_fallback_idx")
+      .on(t.creator_x_user_id, t.collaboration_type, t.created_at)
+      .where(
+        sql`creator_x_user_id IS NOT NULL AND visibility_status NOT IN ('archived', 'voided') AND (creator_icon_url IS NOT NULL OR creator_display_name IS NOT NULL)`,
+      ),
+    youtubeIdActiveUniq: uniqueIndex("videos_youtube_id_active_uniq")
+      .on(t.youtube_video_id)
+      .where(
+        sql`youtube_video_id IS NOT NULL AND youtube_video_id <> '' AND visibility_status NOT IN ('archived', 'voided')`,
+      ),
   }),
 );
 
-/** 公開R2 JSONの実体を追跡し、非公開化・ID変更時に旧keyを安全に削除する。 */
-export const staticArtifacts = sqliteTable(
-  "static_artifacts",
-  {
-    id: text("id").primaryKey(),
-    target_type: text("target_type").notNull(),
-    target_id: text("target_id").notNull(),
-    object_key: text("object_key").notNull(),
-    content_hash: text("content_hash").notNull(),
-    schema_version: integer("schema_version").notNull(),
-    source_updated_at: integer("source_updated_at"),
-    generated_at: integer("generated_at").notNull(),
-    deleted_at: integer("deleted_at"),
-  },
-  (t) => ({
-    targetKeyUnique: uniqueIndex("static_artifacts_target_key_uniq").on(
-      t.target_type,
-      t.target_id,
-      t.object_key,
-    ),
-    liveKeyUnique: uniqueIndex("static_artifacts_live_key_uniq")
-      .on(t.object_key)
-      .where(sql`${t.deleted_at} IS NULL`),
-    targetIdx: index("static_artifacts_target_idx").on(
-      t.target_type,
-      t.target_id,
-      t.deleted_at,
-    ),
-  }),
-);
-
-/** Cronの重複実行を防ぐD1正本のlease。KVをCAS用途に使わない。 */
 export const workerLeases = sqliteTable("worker_leases", {
   job_name: text("job_name").primaryKey(),
   lease_token: text("lease_token").notNull(),
@@ -1108,257 +218,8 @@ export const workerLeases = sqliteTable("worker_leases", {
   updated_at: integer("updated_at")
     .notNull()
     .default(sql`(unixepoch())`),
+  last_started_at: integer("last_started_at"),
+  last_succeeded_at: integer("last_succeeded_at"),
+  last_failed_at: integer("last_failed_at"),
+  last_error_code: text("last_error_code"),
 });
-
-// ============================================================
-// イベント別カスタム質問 / 回答 (正規化テーブル)
-// ============================================================
-
-/**
- * イベントごとのカスタム質問定義。1行 = 1質問。
- * イベントごとのカスタム質問定義。1行 = 1質問。
- */
-export const eventCustomQuestions = sqliteTable(
-  "event_custom_questions",
-  {
-    id: text("id").primaryKey(),
-    event_id: text("event_id").notNull(),
-    question_key: text("question_key").notNull(),
-    label: text("label").notNull(),
-    description: text("description"),
-    type: text("type", {
-      enum: ["text", "textarea", "select", "radio", "checkbox"],
-    })
-      .notNull()
-      .default("textarea"),
-    required: integer("required").notNull().default(0),
-    options_json: text("options_json"),
-    placeholder: text("placeholder"),
-    max_length: integer("max_length"),
-    sort_order: integer("sort_order").notNull().default(0),
-    is_active: integer("is_active").notNull().default(1),
-    visibility: text("visibility", {
-      enum: ["review", "private", "public"],
-    })
-      .notNull()
-      .default("review"),
-    created_at: integer("created_at")
-      .notNull()
-      .default(sql`(unixepoch())`),
-    updated_at: integer("updated_at")
-      .notNull()
-      .default(sql`(unixepoch())`),
-  },
-  (t) => ({
-    eventQuestionKeyUniq: uniqueIndex("event_custom_questions_event_key_uniq")
-      .on(t.event_id, t.question_key),
-    eventSortIdx: index("event_custom_questions_event_sort_idx").on(
-      t.event_id,
-      t.sort_order,
-    ),
-    eventActiveSortIdx: index("event_custom_questions_event_active_sort_idx").on(
-      t.event_id,
-      t.is_active,
-      t.sort_order,
-    ),
-  }),
-);
-
-/**
- * 動画ごとのカスタム質問回答。1行 = 1回答。
- * 動画ごとのカスタム質問回答。1行 = 1回答。
- */
-export const videoCustomAnswers = sqliteTable(
-
-  "video_custom_answers",
-  {
-    video_id: text("video_id").notNull(),
-    event_id: text("event_id").notNull(),
-    question_id: text("question_id").notNull(),
-    answer_text: text("answer_text"),
-    answer_json: text("answer_json"),
-    created_at: integer("created_at")
-      .notNull()
-      .default(sql`(unixepoch())`),
-    updated_at: integer("updated_at")
-      .notNull()
-      .default(sql`(unixepoch())`),
-  },
-  (t) => ({
-    primaryKey: primaryKey({
-      columns: [t.video_id, t.event_id, t.question_id],
-    }),
-    videoIdx: index("video_custom_answers_video_idx").on(t.video_id),
-    eventIdx: index("video_custom_answers_event_idx").on(t.event_id),
-    questionIdx: index("video_custom_answers_question_idx").on(t.question_id),
-    videoEventIdx: index("video_custom_answers_video_event_idx").on(
-      t.video_id,
-      t.event_id,
-    ),
-  }),
-);
-
-// ============================================================
-// 監査ログ
-// ============================================================
-
-/**
- * 監査ログ本体テーブル。
- * 管理操作・重要なデータ変更を記録し、リストア機能を提供する。
- */
-export const auditLogs = sqliteTable("audit_logs", {
-  id: text("id").primaryKey(),
-  table_name: text("table_name").notNull(),
-  target_id: text("target_id").notNull(),
-  operation: text("operation", {
-    enum: ["CREATE", "UPDATE", "DELETE", "RESTORE", "STATUS_CHANGE", "MERGE", "SYSTEM"],
-  }).notNull(),
-  before_json: text("before_json"),
-  after_json: text("after_json"),
-  changed_keys_json: text("changed_keys_json"),
-  inverse_patch_json: text("inverse_patch_json"),
-  actor_user_id: text("actor_user_id").notNull(),
-  actor_snapshot_json: text("actor_snapshot_json"),
-  reason: text("reason"),
-  context: text("context"),
-  retention_class: text("retention_class", {
-    enum: ["normal", "restorable", "long_audit"],
-  }).notNull().default("normal"),
-  restore_strategy: text("restore_strategy", {
-    enum: ["none", "update_before", "delete_created", "recreate_deleted", "custom_adapter"],
-  }).notNull().default("none"),
-  restore_status: text("restore_status", {
-    enum: ["not_restorable", "restorable", "restored", "expired", "blocked", "failed"],
-  }).notNull().default("not_restorable"),
-  restore_unavailable_reason_code: text("restore_unavailable_reason_code"),
-  restore_unavailable_message: text("restore_unavailable_message"),
-  payload_size_bytes: integer("payload_size_bytes").notNull().default(0),
-  expires_at: integer("expires_at"),
-  created_at: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-}, (t) => ({
-  byTableTarget: index("audit_logs_table_target_idx").on(t.table_name, t.target_id),
-  byActorCreated: index("audit_logs_actor_created_idx").on(t.actor_user_id, t.created_at),
-  byRestoreStatus: index("audit_logs_restore_status_idx").on(t.restore_status),
-  byExpires: index("audit_logs_expires_idx").on(t.expires_at),
-  byCreated: index("audit_logs_created_idx").on(t.created_at),
-  byOperation: index("audit_logs_operation_idx").on(t.operation, t.created_at),
-}));
-
-/**
- * リストア実行履歴テーブル。
- */
-export const auditRestoreRuns = sqliteTable("audit_restore_runs", {
-  id: text("id").primaryKey(),
-  audit_log_id: text("audit_log_id").notNull(),
-  executed_by_user_id: text("executed_by_user_id").notNull(),
-  reason: text("reason").notNull(),
-  status: text("status", { enum: ["success", "failed"] }).notNull(),
-  error_message: text("error_message"),
-  executed_at: integer("executed_at").notNull(),
-}, (t) => ({
-  byAuditLog: index("audit_restore_runs_log_idx").on(t.audit_log_id),
-  byExecutedBy: index("audit_restore_runs_user_idx").on(t.executed_by_user_id),
-  byExecutedAt: index("audit_restore_runs_executed_at_idx").on(t.executed_at),
-}));
-
-/**
- * 監査ログ設定テーブル。id='default' の単一行で管理する。
- */
-export const auditLogSettings = sqliteTable("audit_log_settings", {
-  id: text("id").primaryKey(),
-  normal_retention_days: integer("normal_retention_days").notNull().default(30),
-  restorable_retention_days: integer("restorable_retention_days").notNull().default(180),
-  long_audit_retention_days: integer("long_audit_retention_days").notNull().default(365),
-  max_payload_bytes: integer("max_payload_bytes")
-    .notNull()
-    .default(120000),
-  compact_after_days: integer("compact_after_days").notNull().default(30),
-  updated_by_user_id: text("updated_by_user_id"),
-  updated_at: integer("updated_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-});
-
-/** 管理Spreadsheet importの署名済みpreviewを一度だけapplyするための短期run。 */
-export const spreadsheetImportRuns = sqliteTable("spreadsheet_import_runs", {
-  nonce: text("nonce").primaryKey(),
-  operator_user_id: text("operator_user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  table_name: text("table_name").notNull(),
-  mode: text("mode", { enum: ["insert", "upsert"] }).notNull(),
-  payload_hash: text("payload_hash").notNull(),
-  schema_fingerprint: text("schema_fingerprint").notNull(),
-  expires_at: integer("expires_at").notNull(),
-  consumed_at: integer("consumed_at"),
-  created_at: integer("created_at").notNull(),
-}, (t) => ({
-  nonceCheck: check("spreadsheet_import_runs_nonce_check", sql`length(${t.nonce}) = 36 AND substr(${t.nonce}, 9, 1) = '-' AND substr(${t.nonce}, 14, 1) = '-' AND substr(${t.nonce}, 19, 1) = '-' AND substr(${t.nonce}, 24, 1) = '-' AND ${t.nonce} NOT GLOB '*[^0-9a-f-]*'`),
-  tableNameCheck: check("spreadsheet_import_runs_table_name_check", sql`length(${t.table_name}) BETWEEN 1 AND 128`),
-  modeCheck: check("spreadsheet_import_runs_mode_check", sql`${t.mode} IN ('insert', 'upsert')`),
-  payloadHashCheck: check("spreadsheet_import_runs_payload_hash_check", sql`length(${t.payload_hash}) = 64 AND ${t.payload_hash} NOT GLOB '*[^0-9a-f]*'`),
-  schemaHashCheck: check("spreadsheet_import_runs_schema_hash_check", sql`length(${t.schema_fingerprint}) = 64 AND ${t.schema_fingerprint} NOT GLOB '*[^0-9a-f]*'`),
-  expiryCheck: check("spreadsheet_import_runs_expiry_check", sql`${t.expires_at} > ${t.created_at}`),
-  consumedCheck: check("spreadsheet_import_runs_consumed_check", sql`${t.consumed_at} IS NULL OR ${t.consumed_at} >= ${t.created_at}`),
-  byExpiry: index("spreadsheet_import_runs_expires_idx").on(t.expires_at),
-  byConsumedExpiry: index("spreadsheet_import_runs_consumed_expires_idx").on(t.consumed_at, t.expires_at),
-  byOperatorCreated: index("spreadsheet_import_runs_operator_created_idx").on(t.operator_user_id, t.created_at),
-}));
-
-/** 旧データ移行ツールの batch 記録（一回限り移行用）。 */
-export const legacyImportBatches = sqliteTable(
-  "legacy_import_batches",
-  {
-    id: text("id").primaryKey(),
-    status: text("status").notNull(),
-    file_count: integer("file_count").notNull(),
-    file_names_json: text("file_names_json"),
-    file_hash: text("file_hash").notNull(),
-    plan_hash: text("plan_hash").notNull(),
-    parser_version: text("parser_version").notNull(),
-    schema_version: text("schema_version").notNull(),
-    strategy_json: text("strategy_json").notNull(),
-    counts_json: text("counts_json"),
-    warning_count: integer("warning_count").notNull().default(0),
-    error_count: integer("error_count").notNull().default(0),
-    executed_by_user_id: text("executed_by_user_id").notNull(),
-    created_at: integer("created_at").notNull(),
-    applied_at: integer("applied_at"),
-    failed_at: integer("failed_at"),
-    error_summary: text("error_summary"),
-    /** preview で確定した canonical plan。apply request body を正本にしない。 */
-    canonical_plan_json: text("canonical_plan_json"),
-    preview_expires_at: integer("preview_expires_at"),
-    lease_token: text("lease_token"),
-    lease_expires_at: integer("lease_expires_at"),
-    consumed_at: integer("consumed_at"),
-  },
-  (t) => ({
-    createdIdx: index("legacy_import_batches_created_idx").on(t.created_at),
-    fileHashIdx: index("legacy_import_batches_file_hash_idx").on(t.file_hash),
-    leaseIdx: index("legacy_import_batches_lease_idx").on(t.status, t.lease_expires_at),
-  }),
-);
-
-export const legacyImportBatchItems = sqliteTable(
-  "legacy_import_batch_items",
-  {
-    batch_id: text("batch_id").notNull(),
-    target_table: text("target_table").notNull(),
-    target_id: text("target_id").notNull(),
-    action: text("action").notNull(),
-    source_key: text("source_key"),
-    status: text("status").notNull(),
-    warning_count: integer("warning_count").notNull().default(0),
-    created_at: integer("created_at").notNull(),
-  },
-  (t) => ({
-    pk: primaryKey({ columns: [t.batch_id, t.target_table, t.target_id] }),
-    targetIdx: index("legacy_import_batch_items_target_idx").on(
-      t.target_table,
-      t.target_id,
-    ),
-  }),
-);
