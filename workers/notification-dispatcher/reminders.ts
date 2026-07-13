@@ -5,7 +5,7 @@ export interface ReminderEnv {
   NEXT_PUBLIC_APP_URL?: string;
 }
 
-const REMINDER_LIMIT = 6;
+const REMINDER_LIMIT = 3;
 const REMINDER_WINDOW_SEC = 24 * 60 * 60;
 
 type ReminderGroup = {
@@ -48,7 +48,7 @@ function boundedLimit(limit: number): number {
   return Math.min(REMINDER_LIMIT, Math.max(1, Math.floor(limit)));
 }
 
-/** Maximum six user-scoped reminders per invocation. */
+/** Maximum three user-scoped reminders per invocation. */
 export async function enqueueSlotDeadlineReminders(
   env: ReminderEnv,
   limit = REMINDER_LIMIT,
