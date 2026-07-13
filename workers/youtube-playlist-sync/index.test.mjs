@@ -23,10 +23,10 @@ test("mirror adds missing videos and removes videos outside the event", () => {
   assert.deepEqual(diff.removals, [remote[1]]);
 });
 
-test("daily quota stays conservative and bounded", () => {
+test("daily quota stays conservative and follows Pacific Time reset", () => {
   assert.equal(parseDailyQuotaLimit(undefined), 4500);
   assert.equal(parseDailyQuotaLimit("100"), 500);
   assert.equal(parseDailyQuotaLimit("5000"), 5000);
   assert.equal(parseDailyQuotaLimit("10000"), 8000);
-  assert.equal(quotaDayKey(0), "1970-01-01");
+  assert.equal(quotaDayKey(0), "1969-12-31");
 });
