@@ -45,6 +45,9 @@ jobs:
           git fetch --force --depth=1 origin main:refs/remotes/origin/main
           git reset --hard refs/remotes/origin/main
           git apply --index /tmp/file-reduction.patch
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "挙動を維持したまま共通化してファイル数を削減"
 
       - name: 依存関係を取得
         run: npm ci --no-audit --no-fund
@@ -86,14 +89,14 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          /tmp/validate-flamenode.sh 2>&1 | tee validation.log
+          /tmp/validate-flamenode.sh 2>&1 | tee /tmp/validation.log
 
       - name: 検証ログを保存
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: file-reduction-validation-log
-          path: validation.log
+          path: /tmp/validation.log
           retention-days: 1
 
       - name: 最終コミット直前に最新mainへ追従
@@ -101,7 +104,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            current_base="$(git rev-parse HEAD)"
+            current_base="$(git rev-parse HEAD^)"
             git fetch --force --depth=1 origin main:refs/remotes/origin/main
             latest_main="$(git rev-parse refs/remotes/origin/main)"
             if [ "$current_base" = "$latest_main" ]; then
@@ -109,22 +112,18 @@ jobs:
             fi
 
             echo "mainが${current_base}から${latest_main}へ更新されたため再適用・再検証します。"
-            git diff --cached --binary > /tmp/current-refactor.patch
+            git diff --binary HEAD^ HEAD > /tmp/current-refactor.patch
             git reset --hard "$latest_main"
             git apply --3way --index /tmp/current-refactor.patch
+            git commit -m "挙動を維持したまま共通化してファイル数を削減"
             set -o pipefail
-            /tmp/validate-flamenode.sh 2>&1 | tee -a validation.log
+            /tmp/validate-flamenode.sh 2>&1 | tee -a /tmp/validation.log
             set +o pipefail
           done
 
           git fetch --force --depth=1 origin main:refs/remotes/origin/main
-          test "$(git rev-parse HEAD)" = "$(git rev-parse refs/remotes/origin/main)"
+          test "$(git rev-parse HEAD^)" = "$(git rev-parse refs/remotes/origin/main)"
 
-      - name: 日本語コミットで反映
+      - name: 検証済みコミットを反映
         shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "挙動を維持したまま共通化してファイル数を削減"
-          git push --force origin HEAD:agent/maximize-file-reduction
+        run: git push --force origin HEAD:agent/maximize-file-reduction
