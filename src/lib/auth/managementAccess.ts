@@ -10,15 +10,6 @@ export type ManagementAccess = {
   manageableEventCount: number;
 };
 
-export function emptyManagementAccess(): ManagementAccess {
-  return {
-    canAccessAdmin: false,
-    canAccessManage: false,
-    manageableEventIds: [],
-    manageableEventCount: 0,
-  };
-}
-
 export async function getManagementAccess(user: {
   id: string;
   role?: string | null;
@@ -33,11 +24,16 @@ export async function getManagementAccess(user: {
   }
 
   const db = getDatabase();
-  if (!db) return emptyManagementAccess();
+  if (!db) {
+    return {
+      canAccessAdmin: false,
+      canAccessManage: false,
+      manageableEventIds: [],
+      manageableEventCount: 0,
+    };
+  }
 
-  const manageableEventIds = (
-    await getEditableEventIds(db, user.id)
-  ).sort();
+  const manageableEventIds = (await getEditableEventIds(db, user.id)).sort();
   return {
     canAccessAdmin: false,
     canAccessManage: manageableEventIds.length > 0,
