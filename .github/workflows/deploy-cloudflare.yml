@@ -23,16 +23,78 @@ on:
         type: boolean
         default: false
 
+  push:
+    branches: [main]
+
 concurrency:
   group: deploy-cloudflare-production
   cancel-in-progress: false
 
 jobs:
+  release-gate:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.head_commit.message, '[deploy-production]')
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SITE_URL: https://flamenode.invalid
+      AUTH_URL: https://flamenode.invalid
+      AUTH_SECRET: production-candidate-placeholder
+      AUTH_DISCORD_ID: production-candidate-placeholder
+      AUTH_DISCORD_SECRET: production-candidate-placeholder
+      CI: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify dependency tree and lockfile
+        run: |
+          npm ls --depth=0
+          git diff --exit-code -- package-lock.json
+
+      - name: Verify application and workers
+        run: |
+          npm run typecheck
+          npm run lint
+          npm run test:unit
+          npm run test:workers
+          npm run test:cloudflare-ci
+          npm run test:integration
+          npm run build
+          npm run pages:build
+          npm run check:pages-output
+          npm run check:cloudflare-template
+          npm run check:ui-acceptance
+          npm run check:project-docs
+          npm run check:docs
+          npm run check:db-history
+
+      - name: Verify fixture database contracts
+        env:
+          CLOUDFLARE_CONFIG_MODE: fixture
+          FLAMENODE_OWNER_CHECK_DB: .tmp/owner-check.sqlite
+        run: |
+          npm run check:cloudflare-config
+          node scripts/create-owner-check-fixture.mjs
+          npm run check:db-schema
+          npm run check:db-legacy
+          npm run check:event-owners
+
   validate-inputs:
+    needs: release-gate
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - name: Validate inputs and required configuration
+      - name: Validate required production configuration
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -42,7 +104,6 @@ jobs:
           set -euo pipefail
 
           missing=()
-
           [ -n "$CLOUDFLARE_API_TOKEN" ] || missing+=("CLOUDFLARE_API_TOKEN")
           [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing+=("CLOUDFLARE_ACCOUNT_ID")
           [ -n "$CF_IDS_JSON" ] || missing+=("CF_IDS_JSON")
@@ -53,14 +114,15 @@ jobs:
             exit 1
           fi
 
-          if [ "${{ inputs.bootstrap_database }}" = "true" ] &&
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] &&
+             [ "${{ inputs.bootstrap_database }}" = "true" ] &&
              [ "${{ inputs.apply_pending_migrations }}" = "true" ]; then
             echo "::error::bootstrap_database and apply_pending_migrations cannot both be true."
             exit 1
           fi
 
   build-pages-artifact:
-    needs: validate-inputs
+    needs: [release-gate, validate-inputs]
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -77,26 +139,22 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
       - name: Apply Cloudflare resource IDs
         run: |
-          if [ -z "$CF_IDS_JSON" ]; then
-            echo "::error::production Secret CF_IDS_JSON is required."
-            exit 1
-          fi
           node scripts/sync-wrangler-ids.mjs
+          npm run check:cloudflare-config
 
-      - name: Verify production Cloudflare config
-        run: npm run check:cloudflare-config
-
-      - name: Typecheck and Pages build
-        run: |
-          npm run typecheck
-          npm run pages:build
+      - name: Build production Pages artifact
+        run: npm run pages:build
         env:
           NEXT_PUBLIC_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL }}
           NEXT_PUBLIC_SITE_NAME: FlameNode
+          AUTH_URL: ${{ vars.NEXT_PUBLIC_SITE_URL }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          AUTH_DISCORD_ID: ${{ secrets.AUTH_DISCORD_ID }}
+          AUTH_DISCORD_SECRET: ${{ secrets.AUTH_DISCORD_SECRET }}
           CI: "1"
 
       - name: Validate Pages artifact and templates
@@ -113,10 +171,8 @@ jobs:
           retention-days: 1
 
   bootstrap-d1:
-    needs:
-      - validate-inputs
-      - build-pages-artifact
-    if: inputs.bootstrap_database
+    needs: [release-gate, validate-inputs, build-pages-artifact]
+    if: github.event_name == 'workflow_dispatch' && inputs.bootstrap_database
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -126,29 +182,23 @@ jobs:
       CLOUDFLARE_CONFIG_MODE: production
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
-
       - name: Install dependencies and apply IDs
         run: |
-          npm ci
+          npm ci --no-audit --no-fund
           node scripts/sync-wrangler-ids.mjs
           npm run check:cloudflare-config
-
       - name: Verify production D1 is empty
         run: node scripts/check-d1-bootstrap-state.mjs --remote --expect-empty
-
       - name: Bootstrap production D1
         run: npx wrangler d1 migrations apply flamenode_db --remote
 
   migrate-d1:
-    needs:
-      - validate-inputs
-      - build-pages-artifact
-    if: inputs.apply_pending_migrations
+    needs: [release-gate, validate-inputs, build-pages-artifact]
+    if: github.event_name == 'workflow_dispatch' && inputs.apply_pending_migrations
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -158,33 +208,30 @@ jobs:
       CLOUDFLARE_CONFIG_MODE: production
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
-
       - name: Install dependencies and apply IDs
         run: |
-          npm ci
+          npm ci --no-audit --no-fund
           node scripts/sync-wrangler-ids.mjs
           npm run check:cloudflare-config
-
       - name: Verify baseline marker
         run: node scripts/check-d1-bootstrap-state.mjs --remote --expect-initialized
-
       - name: Apply pending migrations
         run: npx wrangler d1 migrations apply flamenode_db --remote
 
   deploy-pages:
-    needs: [validate-inputs, build-pages-artifact, bootstrap-d1, migrate-d1]
+    needs: [release-gate, validate-inputs, build-pages-artifact, bootstrap-d1, migrate-d1]
     if: >-
       always() &&
+      needs.release-gate.result == 'success' &&
       needs.validate-inputs.result == 'success' &&
       needs.build-pages-artifact.result == 'success' &&
       (needs.bootstrap-d1.result == 'success' || needs.bootstrap-d1.result == 'skipped') &&
       (needs.migrate-d1.result == 'success' || needs.migrate-d1.result == 'skipped') &&
-      inputs.deploy_pages
+      (github.event_name == 'push' || inputs.deploy_pages)
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -197,43 +244,38 @@ jobs:
       deployments: write
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
-
-      - name: Install Wrangler
-        run: npm ci --ignore-scripts
-
-      - name: Apply Cloudflare resource IDs
+      - name: Install Wrangler and apply IDs
         run: |
+          npm ci --ignore-scripts --no-audit --no-fund
           node scripts/sync-wrangler-ids.mjs
           npm run check:cloudflare-config
-
       - uses: actions/download-artifact@v4
         with:
           name: pages-${{ github.sha }}
           path: .vercel/output/static
-
       - name: Deploy the verified Pages artifact
         run: >-
           npm run pages:deploy:verified --
           --branch=main
           --commit-hash=${{ github.sha }}
-          --commit-message="Automated deployment ${GITHUB_SHA}"
+          --commit-message="Verified production deployment ${GITHUB_SHA}"
           --commit-dirty=false
 
   deploy-workers:
-    needs: [validate-inputs, build-pages-artifact, bootstrap-d1, migrate-d1, deploy-pages]
+    needs: [release-gate, validate-inputs, build-pages-artifact, bootstrap-d1, migrate-d1, deploy-pages]
     if: >-
       always() &&
+      needs.release-gate.result == 'success' &&
       needs.validate-inputs.result == 'success' &&
       needs.build-pages-artifact.result == 'success' &&
       (needs.bootstrap-d1.result == 'success' || needs.bootstrap-d1.result == 'skipped') &&
       (needs.migrate-d1.result == 'success' || needs.migrate-d1.result == 'skipped') &&
-      (needs.deploy-pages.result == 'success' || needs.deploy-pages.result == 'skipped') &&
-      inputs.deploy_workers
+      needs.deploy-pages.result == 'success' &&
+      (github.event_name == 'push' || inputs.deploy_workers)
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -244,38 +286,33 @@ jobs:
       BUILD_COMMIT_SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
-
       - name: Install dependencies and apply IDs
         run: |
-          npm ci
+          npm ci --no-audit --no-fund
           node scripts/sync-wrangler-ids.mjs
           npm run check:cloudflare-config
           npm run check:cloudflare-template
-
       - name: Deploy the three Cron Workers in fixed order
         run: npm run workers:deploy:verified
 
   smoke-production:
-    needs: [deploy-pages, deploy-workers]
+    needs: [release-gate, deploy-pages, deploy-workers]
     if: >-
       always() &&
-      (needs.deploy-pages.result == 'success' || needs.deploy-workers.result == 'success') &&
-      needs.deploy-pages.result != 'failure' &&
-      needs.deploy-workers.result != 'failure'
+      needs.release-gate.result == 'success' &&
+      needs.deploy-pages.result == 'success' &&
+      needs.deploy-workers.result == 'success'
     runs-on: ubuntu-latest
     environment: production
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
-
       - name: Smoke test deployed resources
         env:
           SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL }}
