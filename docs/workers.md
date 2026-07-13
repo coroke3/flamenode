@@ -8,7 +8,7 @@ Workers FreeのCPU上限はHTTP/Cronともに10msであり、Cron間隔を1時�
 |---|---:|---|---:|
 | `fast-jobs` | `*/5 * * * *` | 締切リマインダー、通知配送 | 通知6件 |
 | `content-jobs` | `*/15 * * * *` | 静的JSON再生成、retention cleanup | target 1件 |
-| `sync-jobs` | `7,22,37,52 * * * *` | YouTube同期、スコア差分再計算 | YouTube 50件、score 250件 |
+| `sync-jobs` | `7,22,37,52 * * * *` | YouTube同期、スコア差分再計算 | YouTube 50件、score 150件 |
 
 旧standalone Worker entrypointは共有モジュールとして残すが、直接deployしない。
 
@@ -17,7 +17,9 @@ Workers FreeのCPU上限はHTTP/Cronともに10msであり、Cron間隔を1時�
 - `fast-jobs`: 通知は最大6件。1件当たりD1 claim、Discord最大2 request、完了更新を行っても50 subrequests以内に収める。
 - `content-jobs`: 1 targetだけ生成する。cleanupはleaseにより1時間に1回だけ実行する。
 - `sync-jobs`: YouTube `videos.list`は最大50 IDを1 requestで取得する。D1保存は8件単位のbulk upsertにまとめる。
-- `score-recalc`: 変更済みまたは24時間以上未更新の公開作品を1 SQLで最大250件更新する。KV cursorと1作品1 queryを使わない。
+- `youtube-sync`: `pending`、開催中期限、通常期限を最大3 queryへ分け、既存indexから最大50件だけ取得する。15分ごとの全作品走査を行わない。
+- `score-recalc`: 変更済みまたは24時間以上未更新の公開作品を1 SQLで最大150件更新する。KV cursorと1作品1 queryを使わない。
+- D1のrows writtenには更新table rowに加えてindex entryも含まれるため、scoreの理論最大を14,400作品/日に抑え、他jobの書込み余地を確保する。
 - Cron重複排除はD1 `worker_leases`を正本とし、無制限loop、全件読込、処理全体の即時retryは禁止する。
 
 ## 大規模データ時の処理能力
@@ -25,7 +27,7 @@ Workers FreeのCPU上限はHTTP/Cronともに10msであり、Cron間隔を1時�
 | 処理 | 最大処理量 | 1万件の初回処理目安 |
 |---|---:|---:|
 | YouTube同期 | 50件/15分 = 4,800件/日 | 約2.1日 |
-| スコア差分更新 | 250件/15分 = 24,000件/日 | 約10時間 |
+| スコア差分更新 | 150件/15分 = 14,400件/日 | 約16時間40分 |
 | 静的JSON target | 1件/15分 = 96件/日 | 優先度順。global targetは重複排除 |
 | 通知 | 6件/5分 = 1,728件/日 | 通常は5分以内 |
 
@@ -41,7 +43,7 @@ Workers FreeのCPU上限はHTTP/Cronともに10msであり、Cron間隔を1時�
 | 静的JSON | queue先頭から15分ごとに1 target |
 | 開催中イベントのYouTube情報 | 1時間以上古い対象を優先 |
 | 通常作品のYouTube情報 | 24時間以上古い対象を順次 |
-| スコア | 変更済み対象を15分ごとに最大250件 |
+| スコア | 変更済み対象を15分ごとに最大150件 |
 
 Queue targetはcanonical値だけを受理する。旧別名や未知値は成功扱いにせず、有限retry後に`failed`として可視化する。
 

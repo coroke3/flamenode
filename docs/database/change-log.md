@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-13
-> Verified against commit: `8cddddaa`
+> Verified against commit: `28bd38d`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
 
 ## 2026-07-13 — `0040_worker_free_tier_scale.sql`
@@ -11,7 +11,7 @@
 | --- | --- |
 | Type | additive |
 | Summary | 大規模データ時のスコア差分更新をbounded index scanにする複合indexを追加 |
-| Reason | 全件ID cursor巡回を廃止し、変更済み・期限切れ作品を最大250件ずつ1 SQLで更新するため |
+| Reason | 全件ID cursor巡回を廃止し、変更済み・期限切れ作品を最大150件ずつ1 SQLで更新し、index entryを含むD1 rows writtenの日次余裕を確保するため |
 | Tables | `videos` |
 | Data migration | なし |
 | Compatibility | migration未適用でも機能するが、大量データではrows readが増える |
