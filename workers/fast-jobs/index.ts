@@ -22,47 +22,69 @@ export interface Env {
 
 const REMINDER_INTERVAL_SEC = 3600;
 const FAST_JOBS_LEASE_SEC = 4 * 60;
+const REMINDER_LEASE_SEC = 4 * 60;
 
 export async function runFastJobs(env: Env): Promise<void> {
-  await runJob("fast-jobs", "cron", async () => {
-    const leased = await withCronLease(
-      env,
-      { jobName: "fast-jobs", leaseSeconds: FAST_JOBS_LEASE_SEC },
-      async () => {
-        let processed = 0;
-        let failed = 0;
-        const lastReminder = await env.KV.get("fast_jobs:reminders:last_run");
-        const now = Math.floor(Date.now() / 1000);
-        if (!lastReminder || now - Number(lastReminder) > REMINDER_INTERVAL_SEC) {
-          const reminders = await runJob("fast-jobs", "slot-deadline-reminders", () =>
-            withBoundedRetry(() => enqueueSlotDeadlineReminders(env), {
-              attempts: 2,
-              delayMs: 100,
-            }),
-          );
-          processed += reminders.processed;
-          failed += reminders.failed;
-          if (reminders.succeeded) {
-            await env.KV.put("fast_jobs:reminders:last_run", String(now), {
-              expirationTtl: 7200,
-            });
-          }
-        } else {
-          await runJob("fast-jobs", "slot-deadline-reminders", async () => ({
-            skipped: 1,
-          }));
-        }
+  await runJob(
+    "fast-jobs",
+    "cron",
+    async () => {
+      const leased = await withCronLease(
+        env,
+        { jobName: "fast-jobs", leaseSeconds: FAST_JOBS_LEASE_SEC },
+        async () => {
+          let processed = 0;
+          let skipped = 0;
+          let failed = 0;
 
-        const notifications = await runJob("fast-jobs", "notification-dispatch", () =>
-          processNotificationQueue(env, { limit: 15 }),
-        );
-        processed += notifications.processed;
-        failed += notifications.failed;
-        return { processed, failed };
-      },
-    );
-    return leased.acquired ? (leased.value ?? { skipped: 1 }) : { skipped: 1 };
-  });
+          const reminderLease = await withCronLease(
+            env,
+            {
+              jobName: "fast-jobs:slot-deadline-reminders",
+              leaseSeconds: REMINDER_LEASE_SEC,
+              minimumIntervalSeconds: REMINDER_INTERVAL_SEC,
+            },
+            () =>
+              runJob(
+                "fast-jobs",
+                "slot-deadline-reminders",
+                () =>
+                  withBoundedRetry(
+                    () => enqueueSlotDeadlineReminders(env),
+                    { attempts: 2, delayMs: 100 },
+                  ),
+                { rethrow: true },
+              ),
+          );
+          if (reminderLease.acquired) {
+            const reminders = reminderLease.value;
+            processed += reminders?.processed ?? 0;
+            skipped += reminders?.skipped ?? 0;
+            failed += reminders?.failed ?? 0;
+          } else {
+            skipped += 1;
+            await runJob("fast-jobs", "slot-deadline-reminders", async () => ({
+              skipped: 1,
+            }));
+          }
+
+          const notifications = await runJob(
+            "fast-jobs",
+            "notification-dispatch",
+            () => processNotificationQueue(env, { limit: 15 }),
+          );
+          processed += notifications.processed;
+          skipped += notifications.skipped;
+          failed += notifications.failed;
+          return { processed, skipped, failed };
+        },
+      );
+      return leased.acquired
+        ? (leased.value ?? { skipped: 1 })
+        : { skipped: 1 };
+    },
+    { rethrow: true },
+  );
 }
 
 export default createCronWorker<Env>({
