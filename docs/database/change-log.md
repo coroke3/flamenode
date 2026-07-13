@@ -2,8 +2,23 @@
 
 > Status: Active
 > Last verified: 2026-07-13
-> Verified against commit: `684bc10`
+> Verified against branch: `agent/cloudflare-free-tier-scale-v2`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
+
+## 2026-07-13 — `0040_worker_free_tier_scale.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | additive |
+| Summary | 大規模データ時のスコア差分更新をbounded index scanにする複合indexを追加 |
+| Reason | 全件ID cursor巡回を廃止し、変更済み・期限切れ作品を最大250件ずつ1 SQLで更新するため |
+| Tables | `videos` |
+| Data migration | なし |
+| Compatibility | migration未適用でも機能するが、大量データではrows readが増える |
+| Data loss | none |
+| Rollback | `videos_score_refresh_idx`を削除 |
+| Validation | schema/history検査、Worker/unit tests、空DBへのactive migration適用 |
+| PR | `agent/cloudflare-free-tier-scale-v2` |
 
 ## 2026-07-13 — `0039_search_relation_indexes.sql`
 
