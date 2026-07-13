@@ -60,7 +60,7 @@ test("quota予約はD1 UPSERTで上限超過を原子的に拒否する", async 
   assert.equal(db.calls.length, 1);
   assert.match(db.calls[0].sql, /ON CONFLICT\(provider, quota_day\)/);
   assert.match(db.calls[0].sql, /used_units \+ excluded\.used_units <= excluded\.limit_units/);
-  assert.deepEqual(db.calls[0].bindings.slice(0, 4), ["youtube", "2025-07-11", 8, 8_000]);
+  assert.deepEqual(db.calls[0].bindings.slice(0, 4), ["youtube", "2025-07-12", 8, 8_000]);
 });
 
 test("日次予算を超える予約はD1を呼ばず拒否する", async () => {
