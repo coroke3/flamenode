@@ -32,28 +32,28 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      - name: Runtime versions
+      - name: 実行環境を表示
         run: |
           node --version
           npm --version
 
-      - name: Install dependencies
+      - name: 依存関係をインストール
         run: npm ci --no-audit --no-fund
 
-      - name: Verify dependency tree
+      - name: 依存関係ツリーを検証
         run: npm ls --depth=0
 
-      - name: Verify lockfile is unchanged
+      - name: lockfileが変更されていないことを検証
         run: git diff --exit-code -- package-lock.json
 
-      - name: Typecheck
+      - name: 型検査
         shell: bash
         run: |
           mkdir -p .tmp
           set -o pipefail
           npm run typecheck 2>&1 | tee .tmp/typecheck.log
 
-      - name: Upload typecheck diagnostics
+      - name: 型検査ログを保存
         if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -65,15 +65,14 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      # test:unit already includes workers/**/*.test.mjs.
-      - name: Unit and worker tests
+      - name: Unitテスト
         shell: bash
         run: |
           mkdir -p .tmp
           set -o pipefail
           npm run test:unit 2>&1 | tee .tmp/unit-tests.log
 
-      - name: Upload unit test diagnostics
+      - name: Unitテストログを保存
         if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -82,21 +81,26 @@ jobs:
           if-no-files-found: warn
           retention-days: 3
 
-      - name: Cloudflare CI contract tests
+      - name: Workerテスト
+        run: npm run test:workers
+
+      - name: Cloudflare CI契約テスト
         run: npm run test:cloudflare-ci
 
-      - name: Integration tests
+      - name: 統合テスト
         run: npm run test:integration
 
-      # next-on-pages performs the production Next build; a separate next build is duplicate work.
-      - name: Cloudflare Pages production build
+      - name: Next.js本番ビルド
+        run: npm run build
+
+      - name: Cloudflare Pagesビルド
         shell: bash
         run: |
           mkdir -p .tmp
           set -o pipefail
           npm run pages:build 2>&1 | tee .tmp/pages-build.log
 
-      - name: Upload Pages build diagnostics
+      - name: Pagesビルドログを保存
         if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -105,21 +109,21 @@ jobs:
           if-no-files-found: warn
           retention-days: 3
 
-      - name: Pages output check
+      - name: Pages成果物を検査
         run: npm run check:pages-output
 
-      - name: Cloudflare template check
+      - name: Cloudflareテンプレートを検査
         run: npm run check:cloudflare-template
 
-      - name: Cloudflare fixture config check
+      - name: Cloudflare fixture設定を検査
         run: npm run check:cloudflare-config
         env:
           CLOUDFLARE_CONFIG_MODE: fixture
 
-      - name: Prepare owner-check fixture database
+      - name: owner検査用DBを準備
         run: node scripts/create-owner-check-fixture.mjs
 
-      - name: DB and owner checks
+      - name: DBとowner不変条件を検査
         env:
           FLAMENODE_OWNER_CHECK_DB: .tmp/owner-check.sqlite
         run: |
@@ -127,13 +131,16 @@ jobs:
           npm run check:db-legacy
           npm run check:event-owners
 
-      - name: UI acceptance contracts
+      - name: UI受入契約を検査
         run: npm run check:ui-acceptance
 
-      - name: Project document checks
+      - name: 公開API漏えいを検査
+        run: npm run check:public-api-leaks
+
+      - name: プロジェクト文書を検査
         run: npm run check:project-docs
 
-      - name: Active documentation and DB history checks
+      - name: Active文書とDB履歴を検査
         run: |
           npm run check:docs
           npm run check:db-history
@@ -150,7 +157,7 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Record result only for the current main HEAD
+      - name: 現在のmainだけ結果を記録
         env:
           CANDIDATE_SHA: ${{ github.sha }}
           VERIFY_RESULT: ${{ needs.verify.result }}
@@ -161,7 +168,7 @@ jobs:
           git fetch origin main
           current_sha="$(git rev-parse origin/main)"
           if [ "$current_sha" != "$CANDIDATE_SHA" ]; then
-            echo "main moved to $current_sha; result for $CANDIDATE_SHA is intentionally not recorded."
+            echo "mainが$current_shaへ更新済みのため、$CANDIDATE_SHAの結果は記録しません。"
             exit 0
           fi
           git reset --hard origin/main
