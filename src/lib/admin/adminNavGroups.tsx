@@ -102,6 +102,11 @@ const ADMIN_NAV_GROUPS_BASE: AdminSidebarGroup[] = [
         label: "静的JSON再生成",
         icon: <Icon name="refresh" size={14} />,
       },
+      {
+        href: "/admin/workers",
+        label: "Worker監視",
+        icon: <Icon name="clock" size={14} />,
+      },
       { href: "/admin/health", label: "ヘルスチェック", icon: <Icon name="check" size={14} /> },
     ],
   },
