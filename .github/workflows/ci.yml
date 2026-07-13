@@ -153,7 +153,20 @@ jobs:
         run: npm run check:public-api-leaks
 
       - name: プロジェクト文書を検査
-        run: npm run check:project-docs
+        shell: bash
+        run: |
+          mkdir -p .tmp
+          set -o pipefail
+          npm run check:project-docs 2>&1 | tee .tmp/project-docs.log
+
+      - name: 文書検査ログを保存
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: project-docs-diagnostics-${{ github.run_id }}
+          path: .tmp/project-docs.log
+          if-no-files-found: warn
+          retention-days: 3
 
       - name: Active文書とDB履歴を検査
         run: |
