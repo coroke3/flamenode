@@ -4,7 +4,7 @@ compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 
 # Workers FreeはCron間隔にかかわらずCPU 10ms。
-# YouTube 50件とscore 150件を15分ごとに小分け処理する。
+# YouTube 50件とscore 250件を15分ごとに小分け処理する。
 [triggers]
 crons = ["7,22,37,52 * * * *"]
 
@@ -19,7 +19,4 @@ id = "00000000000000000000000000000000"
 preview_id = "00000000000000000000000000000000"
 
 [vars]
-# 本番では次の2つをwrangler secretで設定する。
-# YOUTUBE_API_KEY: 主キー
-# YOUTUBE_API_KEY_SECONDARY: credential障害時だけ使う副キー
-# quotaExceeded時の割当量迂回には使用しない。
+# YOUTUBE_API_KEY is set with wrangler secret put.
