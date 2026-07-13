@@ -16,7 +16,7 @@ export interface ScoreBatchOptions {
   now?: number;
 }
 
-export const SCORE_RECALC_BATCH_SIZE = 50;
+export const SCORE_RECALC_BATCH_SIZE = 200;
 const SCORE_INTEGRITY_INTERVAL_SEC = 7 * 24 * 60 * 60;
 
 function boundedLimit(value: number | undefined): number {
