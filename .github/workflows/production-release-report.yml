@@ -49,11 +49,11 @@ jobs:
           > Status: Active
           > Result: ${verdict}
           > Workflow conclusion: ${RUN_CONCLUSION}
-          > Candidate commit: \`${HEAD_SHA}\`
+          > Candidate commit: ${HEAD_SHA}
           > Completed at: ${COMPLETED_AT}
           > Workflow run: ${RUN_URL}
 
-          `Deploy Cloudflare` workflowは、release gate、production設定検査、Pages build/deploy、3 Worker deploy、production smoke testを順番に実行します。ResultがPASSの場合のみ、すべての必須jobが成功しています。
+          Deploy Cloudflare workflowは、release gate、production設定検査、Pages build/deploy、3 Worker deploy、production smoke testを順番に実行します。ResultがPASSの場合のみ、すべての必須jobが成功しています。
 
           D1 bootstrapとpending migration適用は、workflow_dispatchで明示指定した場合のみ実行されます。pushによる本番試験では実行しません。
           EOF
