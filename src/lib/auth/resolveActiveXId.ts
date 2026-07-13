@@ -1,32 +1,15 @@
 import "server-only";
 
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { xUsers } from "@/lib/db/schema";
 import type { DB } from "@/lib/db/client";
 import { normalizeXId } from "@/lib/utils/xid";
+import { xIdApprovalRank } from "@/lib/xid/entries";
 
 type LinkedXRow = {
   id: string;
   approval_status: string | null;
 };
-
-function approvalRank(status: string | null | undefined): number {
-  if (status === "approved") return 0;
-  if (status === "rejected") return 2;
-  return 1;
-}
-
-function pickAutoActiveXId(rows: readonly LinkedXRow[]): string | null {
-  const approved = rows.filter((row) => row.approval_status === "approved");
-  if (approved.length === 1) {
-    return normalizeXId(approved[0]!.id);
-  }
-  return null;
-}
-
-function xUserIdMatches(xUserId: string) {
-  return sql`lower(${xUsers.id}) = ${normalizeXId(xUserId)}`;
-}
 
 /**
  * users.active_x_user_id を連携済み・承認済み X ID の範囲で解決する。
@@ -39,28 +22,6 @@ export async function resolveActiveXUserId(
   currentActive: string | null,
 ): Promise<string | null> {
   const normalizedCurrent = normalizeXId(currentActive) || null;
-
-  if (normalizedCurrent) {
-    const currentRow = (
-      await db
-        .select({
-          id: xUsers.id,
-          approval_status: xUsers.approval_status,
-          linked_user_id: xUsers.linked_user_id,
-        })
-        .from(xUsers)
-        .where(xUserIdMatches(normalizedCurrent))
-        .limit(1)
-    )[0];
-    if (
-      currentRow &&
-      currentRow.approval_status === "approved" &&
-      currentRow.linked_user_id === userId
-    ) {
-      return normalizeXId(currentRow.id);
-    }
-  }
-
   const linkedRows = await db
     .select({
       id: xUsers.id,
@@ -78,21 +39,25 @@ export async function resolveActiveXUserId(
     const existing = byId.get(id);
     if (
       !existing ||
-      approvalRank(row.approval_status) < approvalRank(existing.approval_status)
+      xIdApprovalRank(row.approval_status) <
+        xIdApprovalRank(existing.approval_status)
     ) {
       byId.set(id, { id, approval_status: row.approval_status });
     }
   }
 
-  if (normalizedCurrent) {
-    const current = byId.get(normalizedCurrent);
-    if (current && current.approval_status === "approved") {
-      return normalizedCurrent;
-    }
+  if (
+    normalizedCurrent &&
+    byId.get(normalizedCurrent)?.approval_status === "approved"
+  ) {
+    return normalizedCurrent;
   }
 
-  const autoPick = pickAutoActiveXId(Array.from(byId.values()));
-  if (!autoPick) return null;
-
-  return autoPick;
+  let approvedId: string | null = null;
+  for (const row of byId.values()) {
+    if (row.approval_status !== "approved") continue;
+    if (approvedId) return null;
+    approvedId = row.id;
+  }
+  return approvedId;
 }
