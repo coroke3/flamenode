@@ -88,7 +88,20 @@ jobs:
         run: npm run test:cloudflare-ci
 
       - name: 統合テスト
-        run: npm run test:integration
+        shell: bash
+        run: |
+          mkdir -p .tmp
+          set -o pipefail
+          npm run test:integration 2>&1 | tee .tmp/integration-tests.log
+
+      - name: 統合テストログを保存
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-diagnostics-${{ github.run_id }}
+          path: .tmp/integration-tests.log
+          if-no-files-found: warn
+          retention-days: 3
 
       - name: Next.js本番ビルド
         run: npm run build
@@ -193,5 +206,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add docs/operations/last-main-ci.md
-          git commit -m "CI: mainの検証結果を記録 ${CANDIDATE_SHA:0:7} (${verdict})"
+          git commit -m "CI: mainの検証結果を記録 ${CANDIDATE_SHA:0:7} (${verDICT})"
           git push origin HEAD:main
