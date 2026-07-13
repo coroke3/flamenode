@@ -13,7 +13,10 @@ import {
   type VideoMemberInput,
   type VideoMemberSuggestion,
 } from "@/lib/video/memberInput";
-import { MAX_ATOMIC_VIDEO_MEMBERS } from "@/lib/video/atomicLimits";
+import { MAX_VIDEO_MEMBERS } from "@/lib/video/atomicLimits";
+import {
+  scoreSimpleMemberSuggestion,
+} from "@/lib/video/memberSuggestionRank";
 
 export type {
   VideoMemberChapterInput,
@@ -117,15 +120,24 @@ export function VideoMembersField({
         );
         if (!res.ok) throw new Error("search_failed");
         const json = (await res.json()) as {
-          items?: { id: string; x_name: string | null }[];
+          items?: {
+            id: string;
+            x_name: string | null;
+            score?: number;
+            matchedBy?: string;
+          }[];
           hasMore?: boolean;
           nextOffset?: number | null;
           hint?: string | null;
         };
-        const items = (json.items ?? []).map((r) => ({
-          name: r.x_name ?? r.id,
-          x_user_id: r.id,
-        }));
+        const items = (json.items ?? []).map(
+          (row) => ({
+            name: row.x_name ?? row.id,
+            x_user_id: row.id,
+            score: row.score,
+            matchedBy: row.matchedBy,
+          }),
+        );
         setFetched((prev) => {
           const map = new Map<string, VideoMemberSuggestion>();
           if (offset > 0) {
@@ -174,15 +186,62 @@ export function VideoMembersField({
   }, [disabled, fetchSuggestions, searchQuery]);
 
   // props + fetched を id ベースで重複排除して 1 つの suggestion 配列にまとめる
-  const mergedSuggestions = React.useMemo(() => {
-    const map = new Map<string, VideoMemberSuggestion>();
-    for (const s of suggestions) map.set(normalizeXId(s.x_user_id), s);
-    for (const s of fetched) {
-      const key = normalizeXId(s.x_user_id);
-      if (!map.has(key)) map.set(key, s);
-    }
-    return Array.from(map.values());
-  }, [suggestions, fetched]);
+  const mergedSuggestions =
+    React.useMemo(() => {
+      const map = new Map<
+        string,
+        VideoMemberSuggestion
+      >();
+
+      for (const suggestion of suggestions) {
+        const key = normalizeXId(
+          suggestion.x_user_id,
+        );
+        if (key) map.set(key, suggestion);
+      }
+
+      // API検索結果を優先し、サーバー側scoreを保持
+      for (const suggestion of fetched) {
+        const key = normalizeXId(
+          suggestion.x_user_id,
+        );
+        if (key) map.set(key, suggestion);
+      }
+
+      const query = searchQuery.trim();
+
+      return Array.from(map.values())
+        .map((suggestion) => ({
+          ...suggestion,
+          score:
+            suggestion.score ??
+            scoreSimpleMemberSuggestion(
+              query,
+              suggestion,
+            ),
+        }))
+        .sort(
+          (left, right) =>
+            (right.score ?? 0) -
+              (left.score ?? 0) ||
+            left.name.localeCompare(
+              right.name,
+              "ja",
+            ) ||
+            left.x_user_id.localeCompare(
+              right.x_user_id,
+            ),
+        );
+    }, [
+      suggestions,
+      fetched,
+      searchQuery,
+    ]);
+
+  const visibleSuggestions =
+    searchQuery.trim()
+      ? mergedSuggestions.slice(0, 12)
+      : mergedSuggestions.slice(0, 100);
 
   const suggestionsById = React.useMemo(() => {
     const map = new Map<string, VideoMemberSuggestion>();
@@ -190,28 +249,64 @@ export function VideoMembersField({
     return map;
   }, [mergedSuggestions]);
 
-  const suggestionsByName = React.useMemo(() => {
-    const map = new Map<string, VideoMemberSuggestion>();
-    for (const s of mergedSuggestions) {
-      const key = s.name.trim().toLowerCase();
-      if (key && !map.has(key)) map.set(key, s);
-    }
-    return map;
-  }, [mergedSuggestions]);
+  const suggestionsByName =
+    React.useMemo(() => {
+      const map = new Map<
+        string,
+        VideoMemberSuggestion[]
+      >();
+
+      for (const suggestion of mergedSuggestions) {
+        const key = suggestion.name
+          .trim()
+          .normalize("NFKC")
+          .toLowerCase();
+
+        if (!key) continue;
+
+        const current = map.get(key) ?? [];
+        current.push(suggestion);
+        map.set(key, current);
+      }
+
+      return map;
+    }, [mergedSuggestions]);
 
   const update = (i: number, patch: Partial<VideoMemberInput>) => {
     if (disabled) return;
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   };
 
-  const fillFromName = (i: number, name: string) => {
+  const fillFromName = (
+    index: number,
+    name: string,
+  ) => {
     if (disabled) return;
-    const hit = suggestionsByName.get(name.trim().toLowerCase());
-    if (!hit) return;
-    setRows((prev) =>
-      prev.map((row, idx) =>
-        idx === i && !row.x_user_id
-          ? { ...row, x_user_id: hit.x_user_id, name: row.name || hit.name }
+
+    const key = name
+      .trim()
+      .normalize("NFKC")
+      .toLowerCase();
+
+    const hits =
+      suggestionsByName.get(key) ?? [];
+
+    // 同名が複数存在する場合は自動決定しない
+    if (hits.length !== 1) return;
+
+    const hit = hits[0];
+
+    setRows((previous) =>
+      previous.map((row, rowIndex) =>
+        rowIndex === index &&
+        !row.x_user_id
+          ? {
+              ...row,
+              x_user_id:
+                hit.x_user_id,
+              name:
+                row.name || hit.name,
+            }
           : row,
       ),
     );
@@ -235,7 +330,7 @@ export function VideoMembersField({
   const add = () => {
     if (disabled) return;
     setRows((prev) => {
-      if (normalizeMemberRows(prev).length >= MAX_ATOMIC_VIDEO_MEMBERS) return prev;
+      if (normalizeMemberRows(prev).length >= MAX_VIDEO_MEMBERS) return prev;
       return [...prev, { ...EMPTY_ROW }];
     });
   };
@@ -334,7 +429,7 @@ export function VideoMembersField({
       }
       // 空行 (name/x_user_id どちらも空) は除去
       const normalized = next.filter((r) => r.name || r.x_user_id);
-      return normalized.slice(0, MAX_ATOMIC_VIDEO_MEMBERS);
+      return normalized.slice(0, MAX_VIDEO_MEMBERS);
     });
   }, []);
 
@@ -349,8 +444,8 @@ export function VideoMembersField({
     });
     const stripped = stripCsvEditFlags(csv.members);
     const warnings = [...csv.warnings];
-    if (stripped.length > MAX_ATOMIC_VIDEO_MEMBERS) {
-      warnings.push(`合作メンバーは最大${MAX_ATOMIC_VIDEO_MEMBERS}人です。`);
+    if (stripped.length > MAX_VIDEO_MEMBERS) {
+      warnings.push(`合作メンバーは最大${MAX_VIDEO_MEMBERS}人です。`);
     }
     setCsvWarning(warnings.length > 0 ? warnings.join(" / ") : null);
     if (stripped.length === 0) return;
@@ -397,14 +492,14 @@ export function VideoMembersField({
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <input type="hidden" name={hiddenName} value={payload} />
       <datalist id="member-name-suggestions">
-        {mergedSuggestions.map((s) => (
+        {visibleSuggestions.map((s) => (
           <option key={`${s.x_user_id}-name`} value={s.name}>
             @{s.x_user_id}
           </option>
         ))}
       </datalist>
       <datalist id="member-xid-suggestions">
-        {mergedSuggestions.map((s) => (
+        {visibleSuggestions.map((s) => (
           <option key={`${s.x_user_id}-xid`} value={s.x_user_id}>
             {s.name}
           </option>
@@ -756,12 +851,12 @@ export function VideoMembersField({
           type="button"
           className="fn-btn fn-btn-ghost fn-btn-sm"
           onClick={add}
-          disabled={disabled || normalizedRows.length >= MAX_ATOMIC_VIDEO_MEMBERS}
+          disabled={disabled || normalizedRows.length >= MAX_VIDEO_MEMBERS}
         >
           <Icon name="plus" size={11} aria-hidden /> 行を追加
         </button>
         <span style={{ alignSelf: "center", fontSize: 12, opacity: 0.75 }}>
-          最大{MAX_ATOMIC_VIDEO_MEMBERS}人
+          最大{MAX_VIDEO_MEMBERS}人
         </span>
         {searchHasMore && nextOffset !== null ? (
           <button

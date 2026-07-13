@@ -20,3 +20,5 @@
 - 規約再同意を全user更新ではなく同意履歴とkeyset検索から導出し、必要な索引と`user_tos_consents.user_id` FKを追加。
 - 実測collectorのない自動CostGuard列・snapshot tableを削除し、手動mode/featureと15分overrideへ統一。
 - `0002`は破壊的cleanupを含むため、Remote D1では運用者がbackup確認後に明示適用する。
+- `0003_large_collaboration_support.sql`を追加。
+- 大規模合作向けに`audit_log_settings.max_payload_bytes`のDEFAULT/値を120000へ引き上げる。

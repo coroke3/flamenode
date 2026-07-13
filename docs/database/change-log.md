@@ -5,6 +5,18 @@
 > Verified against commit: `e772cc9`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
 
+## 2026-07-13 — `0003_large_collaboration_support.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | schema |
+| Summary | 大規模合作向けに audit_log_settings.max_payload_bytes の DEFAULT/値を 120000 へ引き上げ |
+| Tables | `audit_log_settings` |
+| Compatibility | runtime fallbackなし。migration未適用時は巨大メンバー集合の監査がペイロード超過になりうる |
+| Data loss | none |
+| Rollback | migration前backupから手動復元 |
+| Validation | schema/history検査、typecheck |
+
 ## 2026-07-13 — `0002_terms_reaccept_manual_cost_guard.sql`
 
 | 項目 | 内容 |

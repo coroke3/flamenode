@@ -1,4 +1,11 @@
-import { and, eq, sql, type SQL } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
+import {
+  and,
+  asc,
+  eq,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import {
   announcements,
@@ -6,12 +13,19 @@ import {
   eventStaff,
   events,
   slots,
+  videoMembers,
   videos,
   xAccountLinkRequests,
 } from "@/lib/db/schema";
 import { isEventOwner } from "@/lib/event/eventOwnershipCore";
 import type { RestoreAdapter, RestoreStrategy } from "./types";
 import { expectedRowCondition as buildExpectedRowCondition } from "./expectedRowCondition";
+import {
+  buildVideoMemberBulkInsertSql,
+  buildVideoMemberSetGuardSql,
+  buildVideoMemberSetSnapshot,
+  parseVideoMemberSetSnapshot,
+} from "@/lib/video/memberSetSnapshot";
 
 export function expectedRowCondition(options: {
   forceOverwrite?: boolean;
@@ -239,6 +253,110 @@ const eventStaffAdapter: RestoreAdapter = {
   },
 };
 
+const videoMembersSetAdapter: RestoreAdapter = {
+  supportedStrategies: ["custom_adapter"],
+
+  async fetchCurrent(db, targetId) {
+    const rows = await db
+      .select()
+      .from(videoMembers)
+      .where(
+        and(
+          eq(videoMembers.video_id, targetId),
+          eq(videoMembers.is_public_member, 1),
+        )!,
+      )
+      .orderBy(
+        asc(videoMembers.order_index),
+        asc(videoMembers.id),
+      );
+
+    return buildVideoMemberSetSnapshot(
+      targetId,
+      rows,
+    ) as unknown as Record<string, unknown>;
+  },
+
+  buildRestoreMutation(
+    db,
+    snapshot,
+    strategy,
+    options,
+  ) {
+    if (strategy !== "custom_adapter") {
+      return unsupported(
+        "video_members_set",
+        strategy,
+      );
+    }
+
+    const target =
+      parseVideoMemberSetSnapshot(snapshot);
+    const expected =
+      parseVideoMemberSetSnapshot(
+        options.expectedCurrent,
+      );
+
+    if (!target || !expected) {
+      throw new Error(
+        "video_members_set_snapshot_invalid",
+      );
+    }
+
+    if (target.id !== expected.id) {
+      throw new Error(
+        "video_members_set_target_mismatch",
+      );
+    }
+
+    const statements: BatchItem<"sqlite">[] = [
+      db.run(
+        buildVideoMemberSetGuardSql(
+          target.id,
+          expected.rows,
+        ),
+      ),
+    ];
+    const expectedMutationChanges: Array<
+      number | null
+    > = [null];
+
+    if (expected.rows.length > 0) {
+      statements.push(
+        db
+          .delete(videoMembers)
+          .where(
+            and(
+              eq(videoMembers.video_id, target.id),
+              eq(videoMembers.is_public_member, 1),
+            )!,
+          ),
+      );
+      expectedMutationChanges.push(
+        expected.rows.length,
+      );
+    }
+
+    if (target.rows.length > 0) {
+      statements.push(
+        db.run(
+          buildVideoMemberBulkInsertSql(
+            target.rows,
+          ),
+        ),
+      );
+      expectedMutationChanges.push(
+        target.rows.length,
+      );
+    }
+
+    return {
+      statements,
+      expectedMutationChanges,
+    };
+  },
+};
+
 export const RESTORE_ADAPTERS = {
   events: eventsAdapter,
   videos: videosAdapter,
@@ -247,6 +365,7 @@ export const RESTORE_ADAPTERS = {
   event_groups: eventGroupsAdapter,
   event_staff: eventStaffAdapter,
   x_account_link_requests: xAccountLinkRequestsAdapter,
+  video_members_set: videoMembersSetAdapter,
 } as const satisfies Record<string, RestoreAdapter>;
 
 export type RegisteredRestoreTableName = keyof typeof RESTORE_ADAPTERS;

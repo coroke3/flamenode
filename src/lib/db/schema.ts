@@ -1271,7 +1271,9 @@ export const auditLogSettings = sqliteTable("audit_log_settings", {
   normal_retention_days: integer("normal_retention_days").notNull().default(30),
   restorable_retention_days: integer("restorable_retention_days").notNull().default(180),
   long_audit_retention_days: integer("long_audit_retention_days").notNull().default(365),
-  max_payload_bytes: integer("max_payload_bytes").notNull().default(20000),
+  max_payload_bytes: integer("max_payload_bytes")
+    .notNull()
+    .default(120000),
   compact_after_days: integer("compact_after_days").notNull().default(30),
   updated_by_user_id: text("updated_by_user_id"),
   updated_at: integer("updated_at")

@@ -141,6 +141,59 @@ describe("normalizeLegacyVideo", () => {
     assert.ok(!result.ok);
   });
 
+  it("combines MM/DD and HH:mm using the timestamp year in JST", () => {
+    const result = normalizeLegacyVideo({
+      title: "日時テスト",
+      tlink: "creator_x",
+      data: "03/27",
+      time: "18:06",
+      timestamp: "2025-03-01T12:00:00+09:00",
+    });
+
+    assert.ok(result.ok);
+    assert.equal(
+      result.video?.scheduled_time,
+      Math.floor(Date.parse("2025-03-27T18:06:00+09:00") / 1000),
+    );
+  });
+
+  it("derives the year from an Excel serial timestamp", () => {
+    const excelSerial =
+      Date.UTC(2025, 2, 1, 0, 0, 0) / 86400000 + 25569;
+
+    const result = normalizeLegacyVideo({
+      title: "Excel日時テスト",
+      tlink: "creator_x",
+      data: "03/27",
+      time: "18:06",
+      timestamp: excelSerial,
+    });
+
+    assert.ok(result.ok);
+    assert.equal(
+      result.video?.scheduled_time,
+      Math.floor(Date.parse("2025-03-27T18:06:00+09:00") / 1000),
+    );
+  });
+
+  it("rejects an invalid legacy clock instead of rolling the date", () => {
+    const result = normalizeLegacyVideo({
+      title: "不正日時",
+      tlink: "creator_x",
+      data: "03/27",
+      time: "25:70",
+      timestamp: "2025-03-01T12:00:00+09:00",
+    });
+
+    assert.ok(result.ok);
+    assert.equal(result.video?.scheduled_time, null);
+    assert.ok(
+      result.warnings.some((warning) =>
+        warning.includes("投稿日時を復元できませんでした"),
+      ),
+    );
+  });
+
   it("uses a stable fallback video id when youtube id is missing", () => {
     const input = { title: "無YT動画", tlink: "creator_x", eventid: "ev1" };
     const a = normalizeLegacyVideo(input);

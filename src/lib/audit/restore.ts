@@ -401,11 +401,22 @@ export async function restoreAuditLog(
     };
   }
 
+  const restoreStatements =
+    restoreMutation.statements != null
+      ? restoreMutation.statements
+      : [restoreMutation.query];
+
+  const restoreExpectedChanges =
+    restoreMutation.expectedMutationChanges != null
+      ? restoreMutation.expectedMutationChanges
+      : restoreMutation.expectedChanges;
+
   const restoreRunId = generateId("rst");
   try {
     await mutateWithAudit(db, {
-      mutationStatements: [restoreMutation.query],
-      expectedMutationChanges: restoreMutation.expectedChanges,
+      mutationStatements: restoreStatements,
+      expectedMutationChanges:
+        restoreExpectedChanges,
       audits: [{
         table_name: log.table_name,
         target_id: log.target_id,

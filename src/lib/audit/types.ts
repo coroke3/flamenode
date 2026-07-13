@@ -94,7 +94,7 @@ export interface AuditLogSettings {
   restorable_retention_days: number;
   /** 長期監査ログの保持日数 (default: 365) */
   long_audit_retention_days: number;
-  /** ペイロード最大バイト数。超過時はリストア不可にする (default: 20000) */
+  /** ペイロード最大バイト数。超過時はリストア不可にする (default: 120000) */
   max_payload_bytes: number;
   /** compact_after 日後に before/after を圧縮済みとしてマーク (default: 30) */
   compact_after_days: number;
@@ -170,6 +170,20 @@ export type RestoreFailureReason =
 // リストアアダプター
 // ============================================================
 
+export type RestoreMutationPlan =
+  | {
+      query: BatchItem<"sqlite">;
+      expectedChanges: number;
+      statements?: never;
+      expectedMutationChanges?: never;
+    }
+  | {
+      statements: BatchItem<"sqlite">[];
+      expectedMutationChanges: Array<number | null>;
+      query?: never;
+      expectedChanges?: never;
+    };
+
 export interface RestoreAdapter {
   /** このアダプターが安全に実装している復元戦略。 */
   supportedStrategies: readonly RestoreStrategy[];
@@ -192,8 +206,5 @@ export interface RestoreAdapter {
       /** 復元前の再検証に使う、読み出し時点の現行行。 */
       expectedCurrent?: Record<string, unknown> | null;
     },
-  ): {
-    query: BatchItem<"sqlite">;
-    expectedChanges: number;
-  };
+  ): RestoreMutationPlan;
 }

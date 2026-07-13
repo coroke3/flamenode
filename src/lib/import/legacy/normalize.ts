@@ -20,6 +20,7 @@ import {
   splitCsvStringPreserveEmpty,
   splitLegacyEventIds,
   submissionTypeFromLegacyVideo,
+  resolveLegacyScheduledTime,
   toUnixSec,
   type LegacyKind,
 } from "./normalizeCore.ts";
@@ -336,12 +337,22 @@ export function normalizeLegacyVideo(input: LegacyVideoInput): LegacyVideoResult
     if (!youtubeId) warnings.push("ylink から YouTube ID を抽出できませんでした。");
   }
 
-  const eventStartYear =
-    input.timestamp && typeof input.timestamp === "string"
-      ? new Date(input.timestamp).getUTCFullYear() || undefined
-      : undefined;
-  const scheduled = toUnixSec(input.time ?? input.data ?? null, eventStartYear, input.time);
   const created = toUnixSec(input.timestamp ?? null);
+
+  const scheduled = resolveLegacyScheduledTime({
+    date: input.data,
+    time: input.time,
+    timestamp: input.timestamp,
+  });
+
+  if (
+    (cleanLegacyString(input.data) || cleanLegacyString(input.time)) &&
+    scheduled === null
+  ) {
+    warnings.push(
+      `投稿日時を復元できませんでした。data="${input.data ?? ""}", time="${input.time ?? ""}"`,
+    );
+  }
 
   let intro = cleanLegacyString(input.comment) ?? "";
   if (!intro && input.beforecomment) intro = cleanLegacyString(input.beforecomment) ?? "";

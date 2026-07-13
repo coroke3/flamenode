@@ -30,10 +30,10 @@ test("query plannerは最大entity planでもanalyze/applyを50 query以内に�
 
 test("entity hard cap超過はDB write前に使えるpure検査で拒否する", () => {
   const plan = emptyPlan();
-  plan.videoMembers = Array.from({ length: 17 }, (_, id) => ({ id }));
+  plan.videoMembers = Array.from({ length: 101 }, (_, id) => ({ id }));
   assert.throws(
     () => assertLegacyImportPlanLimits(plan, "skip_existing", "analyze"),
-    /legacy_import_entity_cap_exceeded:videoMembers:17\/16/,
+    /legacy_import_entity_cap_exceeded:videoMembers:101\/100/,
   );
 });
 

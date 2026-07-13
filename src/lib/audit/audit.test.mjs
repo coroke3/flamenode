@@ -105,7 +105,7 @@ test("AUDIT_CLEANUP_BATCH_LIMIT は 500", () => {
 });
 
 test("payload 超過判定の閾値", () => {
-  const big = "x".repeat(25000);
+  const big = "x".repeat(130_000);
   const size = calculatePayloadSize(JSON.stringify({ data: big }), null);
   assert.ok(size > DEFAULT_AUDIT_LOG_SETTINGS.max_payload_bytes);
 });

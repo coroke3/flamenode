@@ -8,7 +8,7 @@ export const DEFAULT_AUDIT_LOG_SETTINGS: AuditLogSettings = {
   normal_retention_days: 30,
   restorable_retention_days: 180,
   long_audit_retention_days: 365,
-  max_payload_bytes: 20000,
+  max_payload_bytes: 120_000,
   compact_after_days: 30,
 };
 

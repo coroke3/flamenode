@@ -138,41 +138,222 @@ export function splitLegacyEventIds(
   return out;
 }
 
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+function parseLegacyClock(
+  value: string | null | undefined,
+): { hour: number; minute: number; second: number } | null {
+  const match = String(value ?? "")
+    .trim()
+    .match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+
+  if (!match) return null;
+
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const second = Number(match[3] ?? "0");
+
+  if (
+    !Number.isInteger(hour) ||
+    !Number.isInteger(minute) ||
+    !Number.isInteger(second) ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59 ||
+    second < 0 ||
+    second > 59
+  ) {
+    return null;
+  }
+
+  return { hour, minute, second };
+}
+
+function buildJstUnixSec(args: {
+  year: number;
+  month: number;
+  day: number;
+  hour?: number;
+  minute?: number;
+  second?: number;
+}): number | null {
+  const {
+    year,
+    month,
+    day,
+    hour = 0,
+    minute = 0,
+    second = 0,
+  } = args;
+
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day) ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31
+  ) {
+    return null;
+  }
+
+  const utcMs = Date.UTC(
+    year,
+    month - 1,
+    day,
+    hour - 9,
+    minute,
+    second,
+    0,
+  );
+
+  const jstView = new Date(utcMs + JST_OFFSET_MS);
+
+  if (
+    jstView.getUTCFullYear() !== year ||
+    jstView.getUTCMonth() + 1 !== month ||
+    jstView.getUTCDate() !== day ||
+    jstView.getUTCHours() !== hour ||
+    jstView.getUTCMinutes() !== minute ||
+    jstView.getUTCSeconds() !== second
+  ) {
+    return null;
+  }
+
+  return Math.floor(utcMs / 1000);
+}
+
+function parseLegacyDateParts(
+  value: string,
+  fallbackYear?: number,
+): { year: number; month: number; day: number } | null {
+  const ymd = value.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (ymd) {
+    return {
+      year: Number(ymd[1]),
+      month: Number(ymd[2]),
+      day: Number(ymd[3]),
+    };
+  }
+
+  const md = value.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (md && fallbackYear) {
+    return {
+      year: fallbackYear,
+      month: Number(md[1]),
+      day: Number(md[2]),
+    };
+  }
+
+  return null;
+}
+
+function parseLegacyFullDateTime(value: string): number | null {
+  const match = value.match(
+    /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})[T\s](\d{1,2}):(\d{2})(?::(\d{2}))?$/,
+  );
+
+  if (!match) return null;
+
+  return buildJstUnixSec({
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3]),
+    hour: Number(match[4]),
+    minute: Number(match[5]),
+    second: Number(match[6] ?? "0"),
+  });
+}
+
 export function toUnixSec(
   value: string | number | null | undefined,
   fallbackYear?: number,
   timePart?: string | null,
 ): number | null {
   if (value == null || value === "") return null;
+
   if (typeof value === "number") {
-    if (value > 1e6 && value < 1e11) return Math.floor(value);
-    if (value > 1e12) return Math.floor(value / 1000);
-    if (value > 1 && value < 60000) {
-      const ms = (value - 25569) * 86400 * 1000;
-      return Math.floor(ms / 1000);
+    if (!Number.isFinite(value)) return null;
+
+    if (value > 1e6 && value < 1e11) {
+      return Math.floor(value);
     }
+
+    if (value > 1e12) {
+      return Math.floor(value / 1000);
+    }
+
+    // Excel / Google Sheets serial date
+    if (value > 1 && value < 60000) {
+      return Math.floor((value - 25569) * 86400);
+    }
+
     return null;
   }
 
-  const s = String(value).trim();
-  if (!s) return null;
-  const asNumber = Number(s);
-  if (Number.isFinite(asNumber) && /^\d+(\.\d+)?$/.test(s)) {
-    return toUnixSec(asNumber);
-  }
-  const iso = Date.parse(s);
-  if (!Number.isNaN(iso)) return Math.floor(iso / 1000);
+  const raw = String(value).trim();
+  if (!raw) return null;
 
-  const md = s.match(/^(\d{1,2})\/(\d{1,2})$/);
-  if (md && fallbackYear) {
-    const [, mm, dd] = md;
-    const t = timePart && /^\d{1,2}:\d{2}/.test(timePart) ? timePart : "00:00";
-    const d = Date.parse(
-      `${fallbackYear}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}T${t}:00+09:00`,
-    );
-    if (!Number.isNaN(d)) return Math.floor(d / 1000);
+  if (/^\d+(?:\.\d+)?$/.test(raw)) {
+    return toUnixSec(Number(raw));
   }
-  return null;
+
+  const dateParts = parseLegacyDateParts(raw, fallbackYear);
+  if (dateParts) {
+    const trimmedTime = String(timePart ?? "").trim();
+    if (trimmedTime) {
+      const clock = parseLegacyClock(trimmedTime);
+      if (!clock) return null;
+      return buildJstUnixSec({
+        ...dateParts,
+        ...clock,
+      });
+    }
+
+    return buildJstUnixSec(dateParts);
+  }
+
+  const legacyFull = parseLegacyFullDateTime(raw);
+  if (legacyFull !== null) return legacyFull;
+
+  // タイムゾーンを含むISO日時など
+  const parsed = Date.parse(raw);
+  return Number.isNaN(parsed) ? null : Math.floor(parsed / 1000);
+}
+
+export function legacyYearFromTimestamp(
+  value: string | number | null | undefined,
+): number | undefined {
+  const unixSec = toUnixSec(value);
+  if (unixSec === null) return undefined;
+
+  return new Date(unixSec * 1000 + JST_OFFSET_MS).getUTCFullYear();
+}
+
+export function resolveLegacyScheduledTime(args: {
+  date?: string | null;
+  time?: string | null;
+  timestamp?: string | number | null;
+  fallbackYear?: number;
+}): number | null {
+  const date = cleanLegacyString(args.date);
+  const time = cleanLegacyString(args.time);
+
+  // time列自体に完全な日時が格納されている場合
+  if (time && /^\d{4}[-/]\d{1,2}[-/]\d{1,2}[T\s]/.test(time)) {
+    const parsed = toUnixSec(time);
+    if (parsed !== null) return parsed;
+  }
+
+  const year =
+    args.fallbackYear ??
+    legacyYearFromTimestamp(args.timestamp);
+
+  if (!date) return null;
+
+  return toUnixSec(date, year, time);
 }
 
 export function normalizeEventType(

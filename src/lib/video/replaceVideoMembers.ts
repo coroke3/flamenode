@@ -1,16 +1,29 @@
-import { and, eq, inArray, or } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  inArray,
+  sql,
+} from "drizzle-orm";
 import { videoMembers, xUsers } from "@/lib/db/schema";
 import type { DB } from "@/lib/db/client";
 import { generateId } from "@/lib/utils/id";
 import { normalizeXId } from "#utils/xid";
-import type { MemberInput, ParsedMemberChapter } from "@/lib/video/memberInputs";
+import type {
+  MemberInput,
+  ParsedMemberChapter,
+} from "@/lib/video/memberInputs";
 import { serializeMemberChaptersJson } from "@/lib/video/memberChaptersJson";
 import {
   emptyVideoAtomicWritePlan,
   type VideoAtomicWritePlan,
 } from "@/lib/video/atomicWritePlan";
-import { expectedRowCondition } from "@/lib/audit/adapters";
-import { MAX_ATOMIC_VIDEO_MEMBERS } from "@/lib/video/atomicLimits";
+import { MAX_VIDEO_MEMBERS } from "@/lib/video/atomicLimits";
+import {
+  buildVideoMemberBulkInsertSql,
+  buildVideoMemberSetGuardSql,
+  buildVideoMemberSetSnapshot,
+} from "@/lib/video/memberSetSnapshot";
 
 export async function buildReplaceVideoMembersPlan(
   db: DB,
@@ -21,52 +34,109 @@ export async function buildReplaceVideoMembersPlan(
     actorUserId: string;
   },
 ): Promise<VideoAtomicWritePlan> {
-  if (args.members.length > MAX_ATOMIC_VIDEO_MEMBERS) {
-    throw new Error("video_member_atomic_limit_exceeded");
+  if (args.members.length > MAX_VIDEO_MEMBERS) {
+    throw new Error("video_member_limit_exceeded");
   }
+
   const existing = await db
     .select()
     .from(videoMembers)
-    .where(and(
-      eq(videoMembers.video_id, args.videoId),
-      eq(videoMembers.is_public_member, 1),
-    )!)
-    .limit(MAX_ATOMIC_VIDEO_MEMBERS + 1);
-  if (existing.length > MAX_ATOMIC_VIDEO_MEMBERS) {
-    throw new Error("video_member_existing_atomic_limit_exceeded");
+    .where(
+      and(
+        eq(videoMembers.video_id, args.videoId),
+        eq(videoMembers.is_public_member, 1),
+      )!,
+    )
+    .orderBy(
+      asc(videoMembers.order_index),
+      asc(videoMembers.id),
+    )
+    .limit(MAX_VIDEO_MEMBERS + 1);
+
+  if (existing.length > MAX_VIDEO_MEMBERS) {
+    throw new Error("video_member_existing_limit_exceeded");
   }
 
-  const xIds = Array.from(new Set(
-    args.members.map((member) => normalizeXId(member.x_user_id)).filter(Boolean),
-  ));
-  const carryRows = xIds.length > 0
-    ? await db
-        .select()
-        .from(videoMembers)
-        .where(and(
-          eq(videoMembers.video_id, args.videoId),
-          inArray(videoMembers.x_user_id, xIds),
-        )!)
-        .limit(MAX_ATOMIC_VIDEO_MEMBERS * 2 + 1)
-    : [];
-  if (carryRows.length > MAX_ATOMIC_VIDEO_MEMBERS * 2) {
-    throw new Error("video_member_carry_atomic_limit_exceeded");
+  const xIds = Array.from(
+    new Set(
+      args.members
+        .map((member) => normalizeXId(member.x_user_id))
+        .filter(Boolean),
+    ),
+  );
+
+  const carryRows =
+    xIds.length > 0
+      ? await db
+          .select()
+          .from(videoMembers)
+          .where(
+            and(
+              eq(videoMembers.video_id, args.videoId),
+              inArray(videoMembers.x_user_id, xIds),
+            )!,
+          )
+          .limit(MAX_VIDEO_MEMBERS * 2 + 1)
+      : [];
+
+  if (carryRows.length > MAX_VIDEO_MEMBERS * 2) {
+    throw new Error("video_member_carry_limit_exceeded");
   }
-  const carryByXId = new Map<string, (typeof videoMembers.$inferSelect)>();
-  for (const row of carryRows.sort((a, b) => b.can_edit - a.can_edit)) {
+
+  const permissionCarryByXId = new Map<
+    string,
+    typeof videoMembers.$inferSelect
+  >();
+
+  for (const row of [...carryRows].sort(
+    (left, right) => right.can_edit - left.can_edit,
+  )) {
     const xId = normalizeXId(row.x_user_id);
-    if (xId && !carryByXId.has(xId)) carryByXId.set(xId, row);
+    if (xId && !permissionCarryByXId.has(xId)) {
+      permissionCarryByXId.set(xId, row);
+    }
   }
-  const existingXUsers = xIds.length > 0
-    ? await db.select().from(xUsers).where(inArray(xUsers.id, xIds))
-    : [];
-  const existingXIds = new Set(existingXUsers.map((row) => row.id));
+
+  const existingPublicByXId = new Map<
+    string,
+    typeof videoMembers.$inferSelect
+  >();
+  const existingPublicByName = new Map<
+    string,
+    typeof videoMembers.$inferSelect
+  >();
+
+  for (const row of existing) {
+    const xId = normalizeXId(row.x_user_id);
+    if (xId && !existingPublicByXId.has(xId)) {
+      existingPublicByXId.set(xId, row);
+    }
+
+    const nameKey = row.name.trim().toLowerCase();
+    if (nameKey && !existingPublicByName.has(nameKey)) {
+      existingPublicByName.set(nameKey, row);
+    }
+  }
+
+  const existingXUsers =
+    xIds.length > 0
+      ? await db
+          .select()
+          .from(xUsers)
+          .where(inArray(xUsers.id, xIds))
+      : [];
+
+  const existingXIds = new Set(
+    existingXUsers.map((row) => row.id.toLowerCase()),
+  );
+
   const now = Math.floor(Date.now() / 1000);
-  const newXUsers: (typeof xUsers.$inferSelect)[] = [];
-  const nextMembers: (typeof videoMembers.$inferSelect)[] = [];
+  const newXUsers: Array<Record<string, unknown>> = [];
+  const nextMembers: Array<typeof videoMembers.$inferSelect> = [];
 
   for (const [index, member] of args.members.entries()) {
     const xId = normalizeXId(member.x_user_id) || null;
+
     if (xId && !existingXIds.has(xId)) {
       newXUsers.push({
         id: xId,
@@ -85,74 +155,162 @@ export async function buildReplaceVideoMembersPlan(
       });
       existingXIds.add(xId);
     }
-    const carry = xId ? carryByXId.get(xId) : undefined;
-    const chapters = args.chaptersByIndex?.get(index) ?? [];
+
+    const previousPublic = xId
+      ? existingPublicByXId.get(xId)
+      : existingPublicByName.get(
+          member.name.trim().toLowerCase(),
+        );
+
+    const permissionCarry = xId
+      ? permissionCarryByXId.get(xId)
+      : previousPublic;
+
+    const chapters =
+      args.chaptersByIndex?.get(index) ?? [];
+
     nextMembers.push({
-      id: generateId("vm"),
+      id: previousPublic?.id ?? generateId("vm"),
       video_id: args.videoId,
       x_user_id: xId,
-      name: member.name,
+      name:
+        member.name.trim() ||
+        (xId ? `@${xId}` : ""),
       role: member.role || null,
       comment: member.comment || null,
       order_index: index,
-      user_id: carry?.user_id ?? null,
-      can_edit: carry?.can_edit ?? 0,
+      user_id: permissionCarry?.user_id ?? null,
+      can_edit: permissionCarry?.can_edit ?? 0,
       is_public_member: 1,
-      edit_granted_by_user_id: carry?.edit_granted_by_user_id ?? null,
-      edit_granted_at: carry?.edit_granted_at ?? null,
-      edit_updated_at: carry?.edit_updated_at ?? null,
-      chapters_json: serializeMemberChaptersJson(chapters),
+      edit_granted_by_user_id:
+        permissionCarry?.edit_granted_by_user_id ?? null,
+      edit_granted_at:
+        permissionCarry?.edit_granted_at ?? null,
+      edit_updated_at:
+        permissionCarry?.edit_updated_at ?? null,
+      chapters_json:
+        serializeMemberChaptersJson(chapters),
     });
   }
 
+  const beforeSnapshot =
+    buildVideoMemberSetSnapshot(args.videoId, existing);
+  const afterSnapshot =
+    buildVideoMemberSetSnapshot(args.videoId, nextMembers);
+
+  const membersChanged =
+    JSON.stringify(beforeSnapshot.rows) !==
+    JSON.stringify(afterSnapshot.rows);
+
   const plan = emptyVideoAtomicWritePlan();
-  if (existing.length > 0) {
-    plan.statements.push(db.delete(videoMembers).where(or(...existing.map((row) => and(
-      eq(videoMembers.id, row.id),
-      expectedRowCondition({ expectedCurrent: row }),
-    )!))!));
-    plan.expectedChanges.push(existing.length);
-    plan.audits.push(...existing.map((row) => ({
-      table_name: "video_members",
-      target_id: row.id,
-      operation: "DELETE" as const,
-      before: { ...row },
-      after: null,
-      actor_user_id: args.actorUserId,
-      context: "video-save:members",
-      retention_class: "normal" as const,
-      strict: true,
-    })));
+
+  if (!membersChanged && newXUsers.length === 0) {
+    return plan;
   }
+
+  plan.statements.push(
+    db.run(
+      buildVideoMemberSetGuardSql(
+        args.videoId,
+        beforeSnapshot.rows,
+      ),
+    ),
+  );
+  plan.expectedChanges.push(null);
+
   if (newXUsers.length > 0) {
-    plan.statements.push(db.insert(xUsers).values(newXUsers));
+    const payload = JSON.stringify(newXUsers);
+
+    plan.statements.push(
+      db.run(sql`
+        INSERT INTO x_users (
+          id,
+          x_name,
+          icon_url,
+          profile_text,
+          portfolio_contact,
+          youtube_channel_url,
+          other_social_links,
+          creative_start_date,
+          linked_user_id,
+          verification_token,
+          token_expires_at,
+          approval_status,
+          approval_requested_at
+        )
+        SELECT
+          json_extract(value, '$.id'),
+          json_extract(value, '$.x_name'),
+          json_extract(value, '$.icon_url'),
+          json_extract(value, '$.profile_text'),
+          json_extract(value, '$.portfolio_contact'),
+          json_extract(value, '$.youtube_channel_url'),
+          json_extract(value, '$.other_social_links'),
+          json_extract(value, '$.creative_start_date'),
+          json_extract(value, '$.linked_user_id'),
+          json_extract(value, '$.verification_token'),
+          json_extract(value, '$.token_expires_at'),
+          json_extract(value, '$.approval_status'),
+          json_extract(value, '$.approval_requested_at')
+        FROM json_each(${payload})
+      `),
+    );
     plan.expectedChanges.push(newXUsers.length);
-    plan.audits.push(...newXUsers.map((row) => ({
-      table_name: "x_users",
-      target_id: row.id,
-      operation: "CREATE" as const,
+
+    plan.audits.push({
+      table_name: "x_users_member_batch",
+      target_id: args.videoId,
+      operation: "CREATE",
       before: null,
-      after: { ...row },
+      after: {
+        id: args.videoId,
+        rows: newXUsers,
+      },
       actor_user_id: args.actorUserId,
       context: "video-save:member-profile",
-      retention_class: "normal" as const,
+      retention_class: "long_audit",
+      restore_strategy: "none",
       strict: true,
-    })));
+    });
   }
-  if (nextMembers.length > 0) {
-    plan.statements.push(db.insert(videoMembers).values(nextMembers));
-    plan.expectedChanges.push(nextMembers.length);
-    plan.audits.push(...nextMembers.map((row) => ({
-      table_name: "video_members",
-      target_id: row.id,
-      operation: "CREATE" as const,
-      before: null,
-      after: { ...row },
-      actor_user_id: args.actorUserId,
-      context: "video-save:members",
-      retention_class: "normal" as const,
-      strict: true,
-    })));
+
+  if (existing.length > 0) {
+    plan.statements.push(
+      db
+        .delete(videoMembers)
+        .where(
+          and(
+            eq(videoMembers.video_id, args.videoId),
+            eq(videoMembers.is_public_member, 1),
+          )!,
+        ),
+    );
+    plan.expectedChanges.push(existing.length);
   }
+
+  if (afterSnapshot.rows.length > 0) {
+    plan.statements.push(
+      db.run(
+        buildVideoMemberBulkInsertSql(
+          afterSnapshot.rows,
+        ),
+      ),
+    );
+    plan.expectedChanges.push(afterSnapshot.rows.length);
+  }
+
+  plan.audits.push({
+    table_name: "video_members_set",
+    target_id: args.videoId,
+    operation: "MERGE",
+    before: beforeSnapshot,
+    after: afterSnapshot,
+    actor_user_id: args.actorUserId,
+    context: "video-save:members",
+    retention_class: "restorable",
+    restore_strategy: "custom_adapter",
+    strict: true,
+  });
+
   return plan;
 }

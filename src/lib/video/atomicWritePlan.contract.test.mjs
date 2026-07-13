@@ -48,24 +48,67 @@ test("旧逐次write helperとmutation後のDB queue書込みを残さない", (
   }
 });
 
-test("更新・削除planは全scalar snapshot CASを共通利用する", () => {
+test("更新・削除planはscalar CASまたは集合CASを利用する", () => {
   for (const source of helperSources) {
-    if (!/\.update\(|\.delete\(/.test(source)) continue;
-    assert.match(source, /expectedRowCondition\(\{ expectedCurrent:/);
+    if (!/\.update\(|\.delete\(/.test(source)) {
+      continue;
+    }
+
+    if (
+      source.includes(
+        "buildVideoMemberSetGuardSql",
+      )
+    ) {
+      assert.match(
+        source,
+        /buildVideoMemberSetGuardSql/,
+      );
+      continue;
+    }
+
+    assert.match(
+      source,
+      /expectedRowCondition\(\{ expectedCurrent:/,
+    );
   }
-  assert.match(update, /expectedRowCondition\(\{ expectedCurrent: plan\.target \}\)/);
-  assert.match(submit, /expectedRowCondition\(\{ expectedCurrent: existingVideo \}\)/);
-  assert.match(submit, /expectedRowCondition\(\{ expectedCurrent: row \}\)/);
+
+  assert.match(
+    update,
+    /expectedRowCondition\(\{ expectedCurrent: plan\.target \}\)/,
+  );
+  assert.match(
+    submit,
+    /expectedRowCondition\(\{ expectedCurrent: existingVideo \}\)/,
+  );
+  assert.match(
+    submit,
+    /expectedRowCondition\(\{ expectedCurrent: row \}\)/,
+  );
 });
 
-test("1 statementの最悪bind数はD1上限100未満に固定する", () => {
+test("大規模合作はJSON1一括INSERTでbind上限を回避する", () => {
   const limits = read("./atomicLimits.ts");
-  assert.match(limits, /MAX_ATOMIC_VIDEO_MEMBERS = 4/);
-  assert.match(limits, /MAX_ATOMIC_VIDEO_SOFTWARES = 4/);
-  // video_membersは15 scalar列と重複するid条件を含む。
-  assert.ok(4 * 16 < 100);
-  // video_softwaresは4 scalar列と重複する複合PK条件を含む。
-  assert.ok(4 * 6 < 100);
+  const members =
+    read("./replaceVideoMembers.ts");
+  const memberSet =
+    read("./memberSetSnapshot.ts");
+
+  assert.match(
+    limits,
+    /MAX_VIDEO_MEMBERS = 100/,
+  );
+  assert.match(
+    members,
+    /buildVideoMemberBulkInsertSql/,
+  );
+  assert.match(
+    memberSet,
+    /FROM json_each\(\$\{payload\}\)/,
+  );
+  assert.doesNotMatch(
+    members,
+    /db\.insert\(videoMembers\)\.values\(nextMembers\)/,
+  );
 });
 
 test("静的queueはCASE更新とmulti-values INSERTへ集約する", () => {
@@ -87,11 +130,21 @@ test("FormData parserとUIはatomic上限の共通定数を使う", () => {
   const videoSchema = read("./videoFormSchema.ts");
   const videoForm = read("../../components/forms/VideoForm.tsx");
   const memberForm = read("../../components/forms/VideoMembersField.tsx");
-  assert.match(memberParser, /\.max\(\s*MAX_ATOMIC_VIDEO_MEMBERS/);
-  assert.match(videoSchema, /normalizeSoftwareLabels\(value\)\.length <= MAX_ATOMIC_VIDEO_SOFTWARES/);
+  assert.match(
+    memberParser,
+    /\.max\(\s*MAX_VIDEO_MEMBERS/,
+  );
+
+  assert.match(
+    videoSchema,
+    /normalizeSoftwareLabels\(value\)\.length <= MAX_ATOMIC_VIDEO_SOFTWARES/,
+  );
   assert.match(videoForm, /selectedEventIds\.length >= MAX_ATOMIC_VIDEO_EVENTS/);
   assert.match(videoForm, /最大\{MAX_ATOMIC_VIDEO_SOFTWARES\}件/);
-  assert.match(memberForm, /normalizedRows\.length >= MAX_ATOMIC_VIDEO_MEMBERS/);
+  assert.match(
+    memberForm,
+    /normalizedRows\.length >= MAX_VIDEO_MEMBERS/,
+  );
 });
 
 test("主要行の監査は投影ではなく完全なbefore/after rowを保持する", () => {

@@ -38,6 +38,11 @@ import {
 import { buildReplaceEventStaffWithProtection } from "@/lib/event/eventOwnership";
 import { generateId } from "@/lib/utils/id";
 import {
+  buildVideoMemberBulkInsertSql,
+  buildVideoMemberSetGuardSql,
+  buildVideoMemberSetSnapshot,
+} from "@/lib/video/memberSetSnapshot";
+import {
   MAX_D1_AUDIT_ENTRIES,
   MAX_D1_AUDIT_PAYLOAD_BYTES,
   MAX_D1_BATCH_STATEMENTS,
@@ -133,70 +138,128 @@ type LegacyXUserAtomicWork = {
  */
 function buildLegacyXUserAtomicWork(args: {
   db: DB;
-  xUsersById: ReadonlyMap<string, CanonicalXUser>;
-  referencedIds: Iterable<string | null | undefined>;
+  xUsersById: ReadonlyMap<
+    string,
+    CanonicalXUser
+  >;
+  referencedIds: Iterable<
+    string | null | undefined
+  >;
   existingXIds: ReadonlySet<string>;
   actorUserId: string;
   now: number;
+  auditTargetId: string;
 }): LegacyXUserAtomicWork {
-  const requestedIds = [...new Set(
-    Array.from(args.referencedIds, (id) => id?.toLowerCase() ?? "").filter(Boolean),
-  )].sort();
-  const mutationStatements: BatchItem<"sqlite">[] = [];
-  const expectedMutationChanges: Array<number | null> = [];
-  const audits: WriteAuditLogInput[] = [];
-  const createdIds: string[] = [];
+  const requestedIds = [
+    ...new Set(
+      Array.from(
+        args.referencedIds,
+        (id) => id?.toLowerCase() ?? "",
+      ).filter(Boolean),
+    ),
+  ].sort();
+
+  const rows: Array<Record<string, unknown>> = [];
 
   for (const id of requestedIds) {
-    const xUser = args.xUsersById.get(id);
     if (args.existingXIds.has(id)) continue;
+
+    const xUser = args.xUsersById.get(id);
     if (!xUser) {
-      throw new Error(`Referenced X ID is missing from the canonical import plan: ${id}`);
+      throw new Error(
+        `Referenced X ID is missing from the canonical import plan: ${id}`,
+      );
     }
-    const after = {
+
+    rows.push({
       id: xUser.id,
       x_name: xUser.x_name,
       icon_url: null,
       profile_text: xUser.profile_text,
-      portfolio_contact: xUser.portfolio_contact,
-      youtube_channel_url: xUser.youtube_channel_url,
-      other_social_links: xUser.other_social_links,
+      portfolio_contact:
+        xUser.portfolio_contact,
+      youtube_channel_url:
+        xUser.youtube_channel_url,
+      other_social_links:
+        xUser.other_social_links,
       creative_start_date: null,
       linked_user_id: null,
       verification_token: null,
       token_expires_at: null,
       approval_status: "imported",
       approval_requested_at: args.now,
-    };
-    mutationStatements.push(args.db.run(sql`
-      INSERT INTO x_users (
-        id, x_name, icon_url, profile_text, portfolio_contact, youtube_channel_url,
-        other_social_links, creative_start_date, linked_user_id, verification_token,
-        token_expires_at, approval_status, approval_requested_at
-      ) VALUES (
-        ${after.id}, ${after.x_name}, ${after.icon_url}, ${after.profile_text},
-        ${after.portfolio_contact}, ${after.youtube_channel_url}, ${after.other_social_links},
-        ${after.creative_start_date}, ${after.linked_user_id}, ${after.verification_token},
-        ${after.token_expires_at}, ${after.approval_status}, ${after.approval_requested_at}
-      )
-    `));
-    expectedMutationChanges.push(1);
-    audits.push({
-      table_name: "x_users",
-      target_id: after.id,
-      operation: "CREATE",
-      before: null,
-      after,
-      actor_user_id: args.actorUserId,
-      reason: "legacy_import",
-      context: "legacy_import",
-      retention_class: "long_audit",
-      restore_strategy: "delete_created",
-      strict: true,
     });
-    createdIds.push(id);
   }
-  return { mutationStatements, expectedMutationChanges, audits, createdIds };
+
+  if (rows.length === 0) {
+    return {
+      mutationStatements: [],
+      expectedMutationChanges: [],
+      audits: [],
+      createdIds: [],
+    };
+  }
+
+  const payload = JSON.stringify(rows);
+
+  return {
+    mutationStatements: [
+      args.db.run(sql`
+        INSERT INTO x_users (
+          id,
+          x_name,
+          icon_url,
+          profile_text,
+          portfolio_contact,
+          youtube_channel_url,
+          other_social_links,
+          creative_start_date,
+          linked_user_id,
+          verification_token,
+          token_expires_at,
+          approval_status,
+          approval_requested_at
+        )
+        SELECT
+          json_extract(value, '$.id'),
+          json_extract(value, '$.x_name'),
+          json_extract(value, '$.icon_url'),
+          json_extract(value, '$.profile_text'),
+          json_extract(value, '$.portfolio_contact'),
+          json_extract(value, '$.youtube_channel_url'),
+          json_extract(value, '$.other_social_links'),
+          json_extract(value, '$.creative_start_date'),
+          json_extract(value, '$.linked_user_id'),
+          json_extract(value, '$.verification_token'),
+          json_extract(value, '$.token_expires_at'),
+          json_extract(value, '$.approval_status'),
+          json_extract(value, '$.approval_requested_at')
+        FROM json_each(${payload})
+      `),
+    ],
+    expectedMutationChanges: [rows.length],
+    audits: [
+      {
+        table_name: "x_users_import_batch",
+        target_id: args.auditTargetId,
+        operation: "CREATE",
+        before: null,
+        after: {
+          id: args.auditTargetId,
+          rows,
+        },
+        actor_user_id: args.actorUserId,
+        reason: "legacy_import",
+        context: "legacy_import",
+        retention_class: "long_audit",
+        restore_strategy: "none",
+        strict: true,
+      },
+    ],
+    createdIds: rows.map((row) =>
+      String(row.id),
+    ),
+  };
 }
 
 function buildLegacyVideoSnapshot(
@@ -302,7 +365,19 @@ async function buildLegacyVideoAtomicWork(args: {
   beforeRows: LegacyVideoBeforeRows;
 }): Promise<LegacyVideoAtomicResult> {
   const afterVideo = buildLegacyVideoSnapshot(args.video, args.existing, args.now);
-  const beforeMembers = args.existing ? args.beforeRows.members : [];
+  const beforeMembers = args.existing
+    ? args.beforeRows.members
+        .filter(
+          (member) =>
+            member.is_public_member === 1,
+        )
+        .sort(
+          (left, right) =>
+            left.order_index -
+              right.order_index ||
+            left.id.localeCompare(right.id),
+        )
+    : [];
   const beforeEventRows = args.existing ? args.beforeRows.events : [];
   const beforeAnswers = args.existing ? args.beforeRows.answers : [];
   const beforeMetadataRows = args.existing ? args.beforeRows.metadata : [];
@@ -392,6 +467,7 @@ async function buildLegacyVideoAtomicWork(args: {
     existingXIds: args.existingXIds,
     actorUserId: args.actorUserId,
     now: args.now,
+    auditTargetId: `video:${args.video.id}`,
   });
 
   const mutationStatements: BatchItem<"sqlite">[] = [...xUserWork.mutationStatements];
@@ -490,22 +566,65 @@ async function buildLegacyVideoAtomicWork(args: {
     strict: true,
   });
 
-  if (beforeMembers.length > 0) append(args.db.run(sql`DELETE FROM video_members WHERE video_id = ${args.video.id}`), beforeMembers.length);
-  for (const member of afterMembers) {
-    append(args.db.run(sql`
-      INSERT INTO video_members (
-        id, video_id, x_user_id, name, role, comment, order_index, user_id,
-        can_edit, is_public_member, edit_granted_by_user_id, edit_granted_at,
-        edit_updated_at, chapters_json
-      ) VALUES (
-        ${member.id}, ${member.video_id}, ${member.x_user_id}, ${member.name}, ${member.role},
-        ${member.comment}, ${member.order_index}, ${member.user_id}, ${member.can_edit},
-        ${member.is_public_member}, ${member.edit_granted_by_user_id}, ${member.edit_granted_at},
-        ${member.edit_updated_at}, ${member.chapters_json}
-      )
-    `));
+  const beforeMemberSnapshot =
+    buildVideoMemberSetSnapshot(
+      args.video.id,
+      beforeMembers,
+    );
+
+  const afterMemberSnapshot =
+    buildVideoMemberSetSnapshot(
+      args.video.id,
+      afterMembers,
+    );
+
+  append(
+    args.db.run(
+      buildVideoMemberSetGuardSql(
+        args.video.id,
+        beforeMemberSnapshot.rows,
+      ),
+    ),
+    null,
+  );
+
+  if (beforeMembers.length > 0) {
+    append(
+      args.db.run(sql`
+        DELETE FROM video_members
+        WHERE video_id = ${args.video.id}
+          AND is_public_member = 1
+      `),
+      beforeMembers.length,
+    );
   }
-  auditRelation("video_members", beforeMembers, afterMembers);
+
+  if (afterMemberSnapshot.rows.length > 0) {
+    append(
+      args.db.run(
+        buildVideoMemberBulkInsertSql(
+          afterMemberSnapshot.rows,
+        ),
+      ),
+      afterMemberSnapshot.rows.length,
+    );
+  }
+
+  audits.push({
+    table_name: "video_members_set",
+    target_id: args.video.id,
+    operation: args.existing
+      ? "MERGE"
+      : "CREATE",
+    before: beforeMemberSnapshot,
+    after: afterMemberSnapshot,
+    actor_user_id: args.actorUserId,
+    reason: "legacy_import",
+    context: "legacy_import",
+    retention_class: "restorable",
+    restore_strategy: "custom_adapter",
+    strict: true,
+  });
 
   if (beforeEventRows.length > 0) append(args.db.run(sql`DELETE FROM video_events WHERE video_id = ${args.video.id}`), beforeEventRows.length);
   for (const relation of args.eventRows) {
@@ -895,6 +1014,7 @@ export async function applyLegacyImportPlan(
         existingXIds,
         actorUserId: operatorId,
         now,
+        auditTargetId: `event:${ev.id}`,
       });
       if (exists && strategy === "replace_imported") {
         const existingStaffRows = eventStaffByEvent.get(ev.id) ?? [];

@@ -89,6 +89,13 @@ const REGISTRATIONS = {
     requiredBeforeFields: ["id"],
     requiredAfterFields: ["id"],
   },
+  video_members_set: {
+    tableName: "video_members_set",
+    adapter: RESTORE_ADAPTERS.video_members_set,
+    supportedStrategies: ["custom_adapter"],
+    requiredBeforeFields: ["id", "rows"],
+    requiredAfterFields: ["id", "rows"],
+  },
 } as const satisfies Record<
   RegisteredRestoreTableName,
   RestoreAdapterRegistration

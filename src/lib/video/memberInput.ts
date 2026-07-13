@@ -20,6 +20,8 @@ export interface VideoMemberInput {
 export interface VideoMemberSuggestion {
   name: string;
   x_user_id: string;
+  score?: number;
+  matchedBy?: string;
 }
 
 export interface ParsedVideoMemberCsv {

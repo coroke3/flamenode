@@ -8,7 +8,7 @@
 ## 正本
 
 - DB schemaの正本は `src/lib/db/schema.ts`。
-- active migrationは `0000_flame_node_baseline.sql`、`0001_spreadsheet_import_runs.sql`、`0002_terms_reaccept_manual_cost_guard.sql` の番号順で適用する。
+- active migrationは `0000_flame_node_baseline.sql`、`0001_spreadsheet_import_runs.sql`、`0002_terms_reaccept_manual_cost_guard.sql`、`0003_large_collaboration_support.sql` の番号順で適用する。
 - 旧migration本文は `migrations/historical/` に保存する履歴資料であり、現行の適用対象ではない。
 - D1が正本であり、R2/KVの静的JSONは公開配信用キャッシュである。
 
@@ -49,12 +49,16 @@ Remote D1の作成、backup、migration適用、rollbackは運用者がCloudflar
 1. `0000_flame_node_baseline.sql`
 2. `0001_spreadsheet_import_runs.sql`
 3. `0002_terms_reaccept_manual_cost_guard.sql`
+4. `0003_large_collaboration_support.sql`
 
 `0001`適用前はSpreadsheet preview/applyがfail-closedになる。先にコードだけをdeployせず、運用者がbackup、migration、Pagesの順序を確認する。
 
 `0002`は`cost_usage_snapshots`と未使用の自動CostGuard設定列を削除し、
 `user_tos_consents`をFK付きで再構築する。Remote D1では必ず事前backupを取得し、
 孤立した`user_id`がないことを確認してから運用者が明示適用する。Codex/CIは適用しない。
+
+`0003`は`audit_log_settings.max_payload_bytes`のDEFAULTとdefault行の値を
+120000へ引き上げる。大規模合作のメンバー集合監査ログ向け。
 
 本番適用前に、schemaとmigrationの差分、backup、適用対象、復旧手順を記録する。Remote D1の初期化や自動削除は行わない。
 
