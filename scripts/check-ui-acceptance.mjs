@@ -98,7 +98,7 @@ requireMatch(
   "admin/manage共通shellになっていません。",
 );
 
-const requiredWidths = [360, 390, 430, 768, 1024, 1440, 1920];
+const requiredWidths = [360, 390, 430, 640, 768, 1024, 1280, 1440, 1920];
 const acceptanceDoc = read("docs/operations/ui-acceptance.md");
 for (const width of requiredWidths) {
   if (acceptanceDoc && !new RegExp(`\\b${width}px\\b`).test(acceptanceDoc)) {
