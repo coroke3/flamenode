@@ -14,7 +14,11 @@ import {
   assertNoForbiddenKeys,
   pickKeys,
 } from "@/lib/api/publicDto";
-import { checkPublicApiRateLimit, publicJsonResponse } from "@/lib/api/publicApi";
+import {
+  checkPublicApiRateLimit,
+  publicJsonResponse,
+  publicServiceUnavailableResponse,
+} from "@/lib/api/publicApi";
 
 /** 作品一覧の JSON API。`/list` などの軽量クライアント側ロード用。 */
 export async function GET(req: Request): Promise<Response> {
@@ -24,20 +28,32 @@ export async function GET(req: Request): Promise<Response> {
   const q = url.searchParams.get("q") ?? "";
   const sort = parsePublicVideoSort(url.searchParams.get("sort"));
   const eventId = url.searchParams.get("event") ?? "";
-  const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
+  const page = Math.max(
+    1,
+    parseInt(url.searchParams.get("page") ?? "1", 10) || 1,
+  );
   const limit = Math.min(
     MAX_PUBLIC_LIST_LIMIT,
-    Math.max(1, parseInt(url.searchParams.get("limit") ?? "24", 10) || 24),
+    Math.max(
+      1,
+      parseInt(url.searchParams.get("limit") ?? "24", 10) || 24,
+    ),
   );
 
   const db = getDatabase();
-  if (!db) {
-    return publicJsonResponse(req, { items: [], total: 0, page, limit }, "public, max-age=30, s-maxage=60, stale-while-revalidate=120");
-  }
+  if (!db) return publicServiceUnavailableResponse("database_unavailable");
 
-  const params: ListVideoParams = { q, sort, eventId: eventId || undefined };
+  const params: ListVideoParams = {
+    q,
+    sort,
+    eventId: eventId || undefined,
+  };
   const [rows, total] = await Promise.all([
-    fetchPublicVideos(db, { ...params, limit, offset: (page - 1) * limit }),
+    fetchPublicVideos(db, {
+      ...params,
+      limit,
+      offset: (page - 1) * limit,
+    }),
     countPublicVideos(db, params),
   ]);
   // fetchPublicVideos は PUBLIC_VIDEO_KEYS と同列を select 済みだが、
@@ -49,5 +65,9 @@ export async function GET(req: Request): Promise<Response> {
   }));
   const payload = { items, total, page, limit };
   assertNoForbiddenKeys(payload);
-  return publicJsonResponse(req, payload, "public, max-age=30, s-maxage=60, stale-while-revalidate=120");
+  return publicJsonResponse(
+    req,
+    payload,
+    "public, max-age=30, s-maxage=60, stale-while-revalidate=120",
+  );
 }
