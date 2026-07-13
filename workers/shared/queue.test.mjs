@@ -4,6 +4,7 @@ import {
   MAX_QUEUE_ATTEMPTS,
   MAX_QUEUE_BATCH,
   boundedQueueBatch,
+  isRetryableQueueError,
   withBoundedRetry,
 } from "./queue.ts";
 
@@ -19,7 +20,7 @@ test("withBoundedRetry stops at the hard attempt cap", async () => {
     withBoundedRetry(
       async () => {
         calls += 1;
-        throw new Error("transient");
+        throw new Error("transient connection error");
       },
       { attempts: 999 },
     ),
@@ -30,11 +31,52 @@ test("withBoundedRetry stops at the hard attempt cap", async () => {
 
 test("withBoundedRetry returns after a transient failure", async () => {
   let calls = 0;
-  const value = await withBoundedRetry(async () => {
-    calls += 1;
-    if (calls === 1) throw new Error("try again");
-    return "ok";
-  }, { attempts: 2 });
+  const value = await withBoundedRetry(
+    async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("try again");
+      return "ok";
+    },
+    { attempts: 2 },
+  );
+  assert.equal(value, "ok");
+  assert.equal(calls, 2);
+});
+
+test("deterministic schema failures are not retried", async () => {
+  let calls = 0;
+  await assert.rejects(
+    withBoundedRetry(
+      async () => {
+        calls += 1;
+        throw new Error("no such table: audit_logs");
+      },
+      { attempts: 3 },
+    ),
+    /no such table/,
+  );
+  assert.equal(calls, 1);
+});
+
+test("HTTP 429 and 5xx are retryable but 4xx validation errors are not", () => {
+  assert.equal(isRetryableQueueError({ status: 429 }), true);
+  assert.equal(isRetryableQueueError({ statusCode: 503 }), true);
+  assert.equal(isRetryableQueueError({ status: 400, message: "invalid payload" }), false);
+});
+
+test("a custom retry classifier can override the default", async () => {
+  let calls = 0;
+  const value = await withBoundedRetry(
+    async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("domain-specific-retry");
+      return "ok";
+    },
+    {
+      attempts: 2,
+      shouldRetry: (error) => String(error).includes("domain-specific-retry"),
+    },
+  );
   assert.equal(value, "ok");
   assert.equal(calls, 2);
 });
