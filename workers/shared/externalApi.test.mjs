@@ -7,6 +7,18 @@ import {
   parseRetryAfterMs,
 } from "./externalApi.ts";
 
+function abortableFetch(_input, init = {}) {
+  return new Promise((_, reject) => {
+    const signal = init.signal;
+    const rejectAbort = () => reject(new DOMException("Aborted", "AbortError"));
+    if (signal?.aborted) {
+      rejectAbort();
+      return;
+    }
+    signal?.addEventListener("abort", rejectAbort, { once: true });
+  });
+}
+
 test("外部API予算は上限を超えて消費しない", () => {
   const budget = new ExternalRequestBudget(2);
   assert.equal(budget.consume(), true);
@@ -68,4 +80,40 @@ test("fetchWithTimeoutは呼出し前に予算を消費する", async () => {
     /budget/,
   );
   assert.deepEqual(calls, ["https://example.test/one"]);
+});
+
+test("fetchWithTimeoutは呼出し元の中断を共通signalへ伝播する", async () => {
+  const caller = new AbortController();
+  const request = fetchWithTimeout(
+    "https://example.test/caller-abort",
+    { signal: caller.signal },
+    {
+      timeoutMs: 1_000,
+      budget: new ExternalRequestBudget(1),
+      budgetErrorCode: "budget",
+      timeoutErrorCode: "timeout",
+      networkErrorCode: "network",
+    },
+    abortableFetch,
+  );
+  caller.abort();
+  await assert.rejects(request, /network/);
+});
+
+test("fetchWithTimeoutは内部タイマーによる中断だけをtimeoutとして扱う", async () => {
+  await assert.rejects(
+    fetchWithTimeout(
+      "https://example.test/timeout",
+      {},
+      {
+        timeoutMs: 10,
+        budget: new ExternalRequestBudget(1),
+        budgetErrorCode: "budget",
+        timeoutErrorCode: "timeout",
+        networkErrorCode: "network",
+      },
+      abortableFetch,
+    ),
+    /timeout/,
+  );
 });
