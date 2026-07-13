@@ -9,13 +9,15 @@ import {
 } from "drizzle-orm/sqlite-core";
 
 /**
- * FlameNode D1 schema overlay.
+ * FlameNode D1 schemaの唯一の公開正本。
  *
- * 大半の安定した定義は schema.base.ts に保持し、このファイルでは
- * incremental migrationで拡張した高頻度テーブルだけを明示的に上書きする。
- * 明示exportは export * より優先されるため、利用側のimport名は変更しない。
+ * `schema.base.ts`はこのmoduleだけが読む内部定義fragmentであり、アプリ、Worker、
+ * test、文書から直接参照してはいけない。外部利用側は必ずこのfileからimportする。
+ * active migrationで追加された列・indexを含む最終定義は、このmoduleの明示exportを
+ * 優先して確定する。schema検査はfragmentと最終overrideを合成し、active migrationと
+ * 完全一致することを確認する。
  */
-export * from "./schema.base";
+export * from "./schema.base.ts";
 
 export const users = sqliteTable("user", {
   id: text("id").primaryKey(),
