@@ -11,13 +11,36 @@ import {
 import type { EnqueueStaticRebuildInput, StaticRebuildPriority } from "./types";
 
 type HookBase = {
-  db: DB;
   requestedByUserId?: string | null;
   priority?: StaticRebuildPriority;
   reason: string;
 };
 
 export const MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS = 8;
+
+function uniqueEventIds(primary: string | null | undefined, ids: readonly string[]): string[] {
+  const unique = new Set<string>();
+  if (primary) unique.add(primary);
+  for (const id of ids) unique.add(id);
+  return [...unique];
+}
+
+function globalVideoTargets(
+  reason: string,
+  searchPriority?: StaticRebuildPriority,
+): EnqueueStaticRebuildInput[] {
+  return [
+    { targetType: "top", targetId: "global", reason },
+    { targetType: "list_recent", targetId: "global", reason },
+    { targetType: "list_popular", targetId: "global", reason },
+    {
+      targetType: "search_index",
+      targetId: "global",
+      reason,
+      ...(searchPriority ? { priority: searchPriority } : {}),
+    },
+  ];
+}
 
 export async function enqueueAfterVideoCreate(
   db: DB,
@@ -29,10 +52,6 @@ export async function enqueueAfterVideoCreate(
     requestedByUserId?: string | null;
   },
 ): Promise<void> {
-  const eventIdSet = new Set<string>();
-  if (opts.primaryEventId) eventIdSet.add(opts.primaryEventId);
-  for (const eid of opts.eventIds) eventIdSet.add(eid);
-
   const items: EnqueueStaticRebuildInput[] = [
     {
       targetType: "video",
@@ -41,21 +60,12 @@ export async function enqueueAfterVideoCreate(
       priority: "high",
       requestedByUserId: opts.requestedByUserId,
     },
-    { targetType: "top", targetId: "global", reason: "video_create" },
-    { targetType: "list_recent", targetId: "global", reason: "video_create" },
-    { targetType: "list_popular", targetId: "global", reason: "video_create" },
-    { targetType: "search_index", targetId: "global", reason: "video_create" },
+    ...globalVideoTargets("video_create"),
   ];
-
   if (opts.creatorXUserId) {
-    items.push({
-      targetType: "user",
-      targetId: opts.creatorXUserId,
-      reason: "video_create",
-    });
+    items.push({ targetType: "user", targetId: opts.creatorXUserId, reason: "video_create" });
   }
-
-  for (const eventId of eventIdSet) {
+  for (const eventId of uniqueEventIds(opts.primaryEventId, opts.eventIds)) {
     items.push({
       targetType: "event",
       targetId: eventId,
@@ -63,7 +73,6 @@ export async function enqueueAfterVideoCreate(
       priority: "high",
     });
   }
-
   await enqueueStaticRebuildMany(db, items);
 }
 
@@ -89,85 +98,58 @@ export async function enqueueAfterVideoUpdate(
       requestedByUserId: opts.requestedByUserId,
     },
   ];
-
   if (opts.creatorXUserId && opts.identityChanged) {
-    items.push({
-      targetType: "user",
-      targetId: opts.creatorXUserId,
-      reason: "video_identity_update",
-    });
-    items.push({
-      targetType: "search_index",
-      targetId: "global",
-      reason: "video_identity_update",
-      priority: "low",
-    });
-  }
-
-  const listAffecting =
-    opts.visibilityChanged ||
-    opts.eventMembershipChanged ||
-    opts.identityChanged;
-
-  if (listAffecting) {
     items.push(
-      { targetType: "top", targetId: "global", reason: "video_update" },
-      { targetType: "list_recent", targetId: "global", reason: "video_update" },
-      { targetType: "list_popular", targetId: "global", reason: "video_update" },
+      {
+        targetType: "user",
+        targetId: opts.creatorXUserId,
+        reason: "video_identity_update",
+      },
       {
         targetType: "search_index",
         targetId: "global",
-        reason: "video_update",
+        reason: "video_identity_update",
         priority: "low",
       },
     );
   }
 
-  const eventIdSet = new Set<string>();
-  if (opts.primaryEventId) eventIdSet.add(opts.primaryEventId);
-  for (const eid of opts.eventIds) eventIdSet.add(eid);
+  const listAffecting =
+    opts.visibilityChanged || opts.eventMembershipChanged || opts.identityChanged;
+  if (listAffecting) items.push(...globalVideoTargets("video_update", "low"));
 
   if (opts.eventMembershipChanged || opts.visibilityChanged) {
-    for (const eventId of eventIdSet) {
-      items.push({
-        targetType: "event",
-        targetId: eventId,
-        reason: "video_update",
-      });
+    for (const eventId of uniqueEventIds(opts.primaryEventId, opts.eventIds)) {
+      items.push({ targetType: "event", targetId: eventId, reason: "video_update" });
     }
   }
-
   await enqueueStaticRebuildMany(db, items);
 }
 
 export async function enqueueAfterVideoStatusChange(
   db: DB,
-  opts: {
-    videoId: string;
-    requestedByUserId?: string | null;
-  },
+  opts: { videoId: string; requestedByUserId?: string | null },
 ): Promise<void> {
-  const row = (
-    await db
+  const [rows, eventRows] = await Promise.all([
+    db
       .select({
         creator_x_user_id: videos.creator_x_user_id,
         primary_event_id: videos.primary_event_id,
       })
       .from(videos)
       .where(eq(videos.id, opts.videoId))
-      .limit(1)
-  )[0];
-
-  const eventRows = await db
-    .select({ event_id: videoEvents.event_id })
-    .from(videoEvents)
-    .where(eq(videoEvents.video_id, opts.videoId));
-
+      .limit(1),
+    db
+      .select({ event_id: videoEvents.event_id })
+      .from(videoEvents)
+      .where(eq(videoEvents.video_id, opts.videoId)),
+  ]);
+  const row = rows[0];
   await enqueueAfterVideoUpdate(db, {
     videoId: opts.videoId,
     creatorXUserId: row?.creator_x_user_id ?? null,
     primaryEventId: row?.primary_event_id ?? null,
-    eventIds: eventRows.map((r) => r.event_id),
+    eventIds: eventRows.map(({ event_id }) => event_id),
     visibilityChanged: true,
     identityChanged: false,
     eventMembershipChanged: false,
@@ -175,27 +157,30 @@ export async function enqueueAfterVideoStatusChange(
   });
 }
 
-export async function buildAfterVideoStatusChangeQueueBatch(
+export function buildAfterVideoStatusChangeQueueBatch(
   db: DB,
-  opts: { videoId: string; eventIds: string[]; creatorXUserId?: string | null; primaryEventId?: string | null; requestedByUserId?: string | null },
+  opts: {
+    videoId: string;
+    eventIds: string[];
+    creatorXUserId?: string | null;
+    primaryEventId?: string | null;
+    requestedByUserId?: string | null;
+  },
 ): Promise<StaticRebuildQueueBatch> {
-  const eventIds = Array.from(
-    new Set(
-      [opts.primaryEventId, ...opts.eventIds].filter(
-        (id): id is string => Boolean(id),
-      ),
-    ),
-  );
+  const eventIds = uniqueEventIds(opts.primaryEventId, opts.eventIds).filter(Boolean);
   if (eventIds.length > MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS) {
     throw new Error("video_status_rebuild_event_limit_exceeded");
   }
 
   const items: EnqueueStaticRebuildInput[] = [
-    { targetType: "video", targetId: opts.videoId, reason: "video_update", priority: "normal", requestedByUserId: opts.requestedByUserId },
-    { targetType: "top", targetId: "global", reason: "video_update" },
-    { targetType: "list_recent", targetId: "global", reason: "video_update" },
-    { targetType: "list_popular", targetId: "global", reason: "video_update" },
-    { targetType: "search_index", targetId: "global", reason: "video_update", priority: "low" },
+    {
+      targetType: "video",
+      targetId: opts.videoId,
+      reason: "video_update",
+      priority: "normal",
+      requestedByUserId: opts.requestedByUserId,
+    },
+    ...globalVideoTargets("video_update", "low"),
   ];
   if (opts.creatorXUserId) {
     items.push({
@@ -219,7 +204,7 @@ export async function enqueueAfterEventSettingsChange(
   db: DB,
   opts: HookBase & { eventId: string },
 ): Promise<void> {
-  const items: EnqueueStaticRebuildInput[] = [
+  await enqueueStaticRebuildMany(db, [
     {
       targetType: "event",
       targetId: opts.eventId,
@@ -239,22 +224,22 @@ export async function enqueueAfterEventSettingsChange(
       reason: opts.reason,
       priority: "low",
     },
-  ];
-
-  await enqueueStaticRebuildMany(db, items);
+  ]);
 }
 
-export async function buildEventGroupChangeQueueBatch(
+export function buildEventGroupChangeQueueBatch(
   db: DB,
   opts: Pick<HookBase, "reason" | "requestedByUserId">,
 ): Promise<StaticRebuildQueueBatch> {
-  return buildStaticRebuildQueueBatch(db, [{
-    targetType: "events_index",
-    targetId: "global",
-    reason: opts.reason,
-    priority: "low",
-    requestedByUserId: opts.requestedByUserId,
-  }]);
+  return buildStaticRebuildQueueBatch(db, [
+    {
+      targetType: "events_index",
+      targetId: "global",
+      reason: opts.reason,
+      priority: "low",
+      requestedByUserId: opts.requestedByUserId,
+    },
+  ]);
 }
 
 /** 手動再生成（管理画面） */
