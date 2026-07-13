@@ -157,10 +157,15 @@ test("Pages output check rejects Cloudflare ID files without logging IDs", () =>
   }
 });
 
-test("deploy workflow preserves immutable artifact and deployment order", () => {
+test("deploy workflow preserves gated release, immutable artifact, and deployment order", () => {
   const workflow = fs.readFileSync(path.join(root, ".github/workflows/deploy-cloudflare.yml"), "utf8");
-  assert.doesNotMatch(workflow, /^\s+push:\s*$/m);
+  assert.match(workflow, /^\s+push:\s*$/m);
   assert.match(workflow, /^\s+workflow_dispatch:\s*$/m);
+  assert.match(workflow, /contains\(github\.event\.head_commit\.message, '\[deploy-production\]'\)/);
+  assert.match(workflow, /github\.event_name == 'push' \|\| inputs\.deploy_pages/);
+  assert.match(workflow, /github\.event_name == 'push' \|\| inputs\.deploy_workers/);
+  assert.match(workflow, /github\.event_name == 'workflow_dispatch' && inputs\.bootstrap_database/);
+  assert.match(workflow, /github\.event_name == 'workflow_dispatch' && inputs\.apply_pending_migrations/);
   assert.match(workflow, /name: pages-\$\{\{ github\.sha \}\}/);
   assert.match(workflow, /actions\/download-artifact@v4[\s\S]*name: pages-\$\{\{ github\.sha \}\}/);
   assert.ok(workflow.indexOf("migrate-d1:") < workflow.indexOf("deploy-pages:"));
