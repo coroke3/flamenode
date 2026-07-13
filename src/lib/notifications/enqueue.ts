@@ -10,6 +10,7 @@ import { shouldEnqueueUserNotification } from "./context";
 import { validateNotificationPayload } from "./format";
 
 type AnyDb = LibSQLDatabase<any>;
+type InsertResult = { meta?: { changes?: number } };
 export type NotificationDeliveryPolicy = "required_atomic" | "best_effort";
 
 export interface EnqueueNotificationInput {
@@ -96,6 +97,17 @@ function insertNotificationStatement(
 ): BatchItem<"sqlite"> {
   // active dedupe partial uniqueとの競合は「既にenqueue済み」という成功扱い。
   return db.insert(notificationOutbox).values(row).onConflictDoNothing();
+}
+
+async function executeNotificationInsert(
+  db: AnyDb,
+  row: typeof notificationOutbox.$inferSelect,
+): Promise<boolean> {
+  const result = (await db
+    .insert(notificationOutbox)
+    .values(row)
+    .onConflictDoNothing()) as InsertResult;
+  return (result.meta?.changes ?? 0) === 1;
 }
 
 /**
@@ -293,7 +305,7 @@ export async function enqueueNotification(
     );
     if (!recipientUserId) return false;
 
-    const result = await insertNotificationStatement(
+    return executeNotificationInsert(
       db,
       buildNotificationRow(
         prepared,
@@ -301,7 +313,6 @@ export async function enqueueNotification(
         Math.floor(Date.now() / 1000),
       ),
     );
-    return (result.meta?.changes ?? 0) === 1;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn("[enqueueNotification] failed", error);
