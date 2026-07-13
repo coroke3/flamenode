@@ -13,11 +13,10 @@ export interface ScoreBatchResult {
   skipped: number;
 }
 
-type ScoreRow = { id: string };
+export const SCORE_RECALC_BATCH_SIZE = 500;
+export const SCORE_FORCE_REFRESH_SEC = 24 * 60 * 60;
 
-export const SCORE_RECALC_BATCH_SIZE = 25;
-const CURSOR_KEY = "sync-jobs:score:last-video-id";
-
+/** 旧cursor値を読むテスト・移行コード向けの互換関数。再計算本体はcursorを使用しない。 */
 export function normalizeScoreCursor(value: string | null): string {
   if (!value) return "";
   try {
@@ -28,74 +27,53 @@ export function normalizeScoreCursor(value: string | null): string {
   }
 }
 
-async function selectScoreRows(env: Env, cursor: string): Promise<ScoreRow[]> {
-  const select = async (afterId: string) => {
-    const result = await env.DB.prepare(
-      `SELECT id
-         FROM videos
-        WHERE visibility_status = 'public'
-          AND id > ?1
-        ORDER BY id ASC
-        LIMIT ?2`,
-    )
-      .bind(afterId, SCORE_RECALC_BATCH_SIZE)
-      .all<ScoreRow>();
-    return result.results ?? [];
-  };
-
-  const continued = await select(cursor);
-  if (continued.length > 0 || !cursor) return continued;
-  return select("");
-}
-
-async function updateScore(env: Env, videoId: string, now: number): Promise<void> {
-  await env.DB.prepare(
-    `UPDATE videos
-        SET score =
-              COALESCE((
-                SELECT ym.view_count
-                  FROM video_youtube_metadata ym
-                 WHERE ym.video_id = videos.id
-              ), 0) * 1.0
-              + COALESCE(app_like_count, 0) * 5.0
-              + COALESCE(trending_view_count_24h, 0) * 0.5
-              - MAX(0, (?1 - COALESCE(scheduled_time, ?1))) / 86400.0 * 0.1,
-            score_updated_at = ?1,
-            updated_at = ?1
-      WHERE id = ?2 AND visibility_status = 'public'`,
-  )
-    .bind(now, videoId)
-    .run();
-}
-
-/** 1回の実行で最大25件だけを再計算し、続き位置をKVへ保存する。 */
+/**
+ * 変更された作品と24時間以上未更新の作品を優先し、1 SQLで最大500件更新する。
+ * score更新ではvideos.updated_atを変更しない。自己更新で再びdirtyになる循環を防ぐ。
+ */
 export async function recalcScoreBatch(env: Env): Promise<ScoreBatchResult> {
-  const cursor = normalizeScoreCursor(await env.KV.get(CURSOR_KEY));
-  const rows = await selectScoreRows(env, cursor);
-  if (rows.length === 0) {
-    await env.KV.put(CURSOR_KEY, JSON.stringify({ last_video_id: "" }), {
-      expirationTtl: 30 * 24 * 60 * 60,
-    });
-    return { processed: 0, failed: 0, skipped: 1 };
-  }
-
   const now = Math.floor(Date.now() / 1000);
-  let processed = 0;
-  let failed = 0;
-  for (const row of rows) {
-    try {
-      await updateScore(env, row.id, now);
-      processed += 1;
-    } catch (error) {
-      failed += 1;
-      // score は次のサイクルで再試行する。個別IDや生の例外をログへ残さない。
-      void safeErrorSummary(error);
-    }
-  }
+  try {
+    const result = await env.DB.prepare(
+      `UPDATE videos
+          SET score =
+                COALESCE((
+                  SELECT ym.view_count
+                    FROM video_youtube_metadata ym
+                   WHERE ym.video_id = videos.id
+                ), 0) * 1.0
+                + COALESCE(app_like_count, 0) * 5.0
+                + COALESCE(trending_view_count_24h, 0) * 0.5
+                - MAX(0, (?1 - COALESCE(scheduled_time, ?1))) / 86400.0 * 0.1,
+              score_updated_at = ?1
+        WHERE id IN (
+          SELECT v.id
+            FROM videos v
+            LEFT JOIN video_youtube_metadata ym ON ym.video_id = v.id
+           WHERE v.visibility_status = 'public'
+             AND (
+               v.score_updated_at IS NULL
+               OR v.score_updated_at < v.updated_at
+               OR v.score_updated_at < COALESCE(ym.updated_at, 0)
+               OR v.score_updated_at <= ?1 - ?2
+             )
+           ORDER BY
+             CASE WHEN v.score_updated_at IS NULL THEN 0 ELSE 1 END,
+             MAX(v.updated_at, COALESCE(ym.updated_at, 0)) DESC,
+             v.score_updated_at ASC,
+             v.id ASC
+           LIMIT ?3
+        )`,
+    )
+      .bind(now, SCORE_FORCE_REFRESH_SEC, SCORE_RECALC_BATCH_SIZE)
+      .run();
 
-  const lastVideoId = rows[rows.length - 1]?.id ?? "";
-  await env.KV.put(CURSOR_KEY, JSON.stringify({ last_video_id: lastVideoId }), {
-    expirationTtl: 30 * 24 * 60 * 60,
-  });
-  return { processed, failed, skipped: 0 };
+    const processed = Math.max(0, Number(result.meta?.changes ?? 0));
+    return processed > 0
+      ? { processed, failed: 0, skipped: 0 }
+      : { processed: 0, failed: 0, skipped: 1 };
+  } catch (error) {
+    void safeErrorSummary(error);
+    return { processed: 0, failed: 1, skipped: 0 };
+  }
 }
