@@ -15,6 +15,23 @@ import {
 export type { SpreadsheetColumnMeta } from "./apiTypes";
 import type { SpreadsheetColumnMeta } from "./apiTypes";
 
+/** Array互換を維持しつつ、既存のcolumnNames.includesをSet参照へ置き換える。 */
+class IndexedStringArray extends Array<string> {
+  readonly #lookup: ReadonlySet<string>;
+
+  constructor(values: readonly string[]) {
+    super(...values);
+    Object.setPrototypeOf(this, new.target.prototype);
+    this.#lookup = new Set(values);
+  }
+
+  override includes(searchElement: string, fromIndex = 0): boolean {
+    return fromIndex === 0
+      ? this.#lookup.has(searchElement)
+      : super.includes(searchElement, fromIndex);
+  }
+}
+
 export interface SpreadsheetTableContext {
   def: SpreadsheetTableDef;
   columns: SpreadsheetColumnMeta[];
@@ -171,7 +188,10 @@ export async function resolveSpreadsheetTableContext(
     throw new Error("unknown_table");
   }
 
-  const columnNames = columns.map((column) => column.name);
+  const columnNames = new IndexedStringArray(
+    columns.map((column) => column.name),
+  );
+  const columnNameSet = new Set(columnNames);
   const columnByName = new Map(
     columns.map((column) => [column.name, column] as const),
   );
@@ -196,7 +216,7 @@ export async function resolveSpreadsheetTableContext(
     quotedTable: quoteIdent(def.table),
     orderColumn: quoteIdent(primaryKeys[0] ?? columns[0]?.name ?? "rowid"),
     columnNames,
-    columnNameSet: new Set(columnNames),
+    columnNameSet,
     columnByName,
     columnPolicyByName,
     foreignKeys,
