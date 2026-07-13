@@ -1,6 +1,4 @@
-/** sync-jobs から利用する bounded score 再計算モジュール。 */
-
-import { safeErrorSummary } from "../shared/safeLog.ts";
+/** background-jobs から利用する差分スコア再計算モジュール。 */
 
 export interface Env {
   DB: D1Database;
@@ -13,89 +11,75 @@ export interface ScoreBatchResult {
   skipped: number;
 }
 
-type ScoreRow = { id: string };
+export interface ScoreBatchOptions {
+  limit?: number;
+  now?: number;
+}
 
-export const SCORE_RECALC_BATCH_SIZE = 25;
-const CURSOR_KEY = "sync-jobs:score:last-video-id";
+export const SCORE_RECALC_BATCH_SIZE = 50;
+const SCORE_INTEGRITY_INTERVAL_SEC = 7 * 24 * 60 * 60;
 
-export function normalizeScoreCursor(value: string | null): string {
-  if (!value) return "";
+function boundedLimit(value: number | undefined): number {
+  if (!Number.isFinite(value)) return SCORE_RECALC_BATCH_SIZE;
+  return Math.min(
+    SCORE_RECALC_BATCH_SIZE,
+    Math.max(1, Math.floor(value ?? SCORE_RECALC_BATCH_SIZE)),
+  );
+}
+
+/**
+ * dirty作品を優先し、未計算または7日以上古い作品を整合性確認として補完する。
+ * 候補抽出と更新は1 SQLで行い、作品数に比例してD1 query数を増やさない。
+ */
+export async function recalcScoreBatch(
+  env: Env,
+  options: ScoreBatchOptions = {},
+): Promise<ScoreBatchResult> {
+  const now = options.now ?? Math.floor(Date.now() / 1000);
   try {
-    const parsed = JSON.parse(value) as { last_video_id?: unknown };
-    return typeof parsed.last_video_id === "string" ? parsed.last_video_id.trim() : "";
-  } catch {
-    return "";
-  }
-}
-
-async function selectScoreRows(env: Env, cursor: string): Promise<ScoreRow[]> {
-  const select = async (afterId: string) => {
     const result = await env.DB.prepare(
-      `SELECT id
+      `WITH candidates AS (
+         SELECT id
          FROM videos
-        WHERE visibility_status = 'public'
-          AND id > ?1
-        ORDER BY id ASC
-        LIMIT ?2`,
+         WHERE visibility_status = 'public'
+           AND (
+             score_dirty_at IS NOT NULL
+             OR score_updated_at IS NULL
+             OR score_updated_at <= ?1
+           )
+         ORDER BY
+           CASE WHEN score_dirty_at IS NOT NULL THEN 0 ELSE 1 END,
+           COALESCE(score_dirty_at, score_updated_at, 0) ASC,
+           id ASC
+         LIMIT ?2
+       )
+       UPDATE videos
+       SET score =
+             COALESCE((
+               SELECT ym.view_count
+               FROM video_youtube_metadata ym
+               WHERE ym.video_id = videos.id
+             ), 0) * 1.0
+             + COALESCE(app_like_count, 0) * 5.0
+             + COALESCE(trending_view_count_24h, 0) * 0.5
+             - MAX(0, (?3 - COALESCE(scheduled_time, ?3))) / 86400.0 * 0.1,
+           score_updated_at = ?3,
+           score_dirty_at = NULL,
+           updated_at = ?3
+       WHERE id IN (SELECT id FROM candidates)
+         AND visibility_status = 'public'`,
     )
-      .bind(afterId, SCORE_RECALC_BATCH_SIZE)
-      .all<ScoreRow>();
-    return result.results ?? [];
-  };
-
-  const continued = await select(cursor);
-  if (continued.length > 0 || !cursor) return continued;
-  return select("");
-}
-
-async function updateScore(env: Env, videoId: string, now: number): Promise<void> {
-  await env.DB.prepare(
-    `UPDATE videos
-        SET score =
-              COALESCE((
-                SELECT ym.view_count
-                  FROM video_youtube_metadata ym
-                 WHERE ym.video_id = videos.id
-              ), 0) * 1.0
-              + COALESCE(app_like_count, 0) * 5.0
-              + COALESCE(trending_view_count_24h, 0) * 0.5
-              - MAX(0, (?1 - COALESCE(scheduled_time, ?1))) / 86400.0 * 0.1,
-            score_updated_at = ?1,
-            updated_at = ?1
-      WHERE id = ?2 AND visibility_status = 'public'`,
-  )
-    .bind(now, videoId)
-    .run();
-}
-
-/** 1回の実行で最大25件だけを再計算し、続き位置をKVへ保存する。 */
-export async function recalcScoreBatch(env: Env): Promise<ScoreBatchResult> {
-  const cursor = normalizeScoreCursor(await env.KV.get(CURSOR_KEY));
-  const rows = await selectScoreRows(env, cursor);
-  if (rows.length === 0) {
-    await env.KV.put(CURSOR_KEY, JSON.stringify({ last_video_id: "" }), {
-      expirationTtl: 30 * 24 * 60 * 60,
-    });
-    return { processed: 0, failed: 0, skipped: 1 };
+      .bind(
+        now - SCORE_INTEGRITY_INTERVAL_SEC,
+        boundedLimit(options.limit),
+        now,
+      )
+      .run();
+    const processed = Math.max(0, result.meta?.changes ?? 0);
+    return processed > 0
+      ? { processed, failed: 0, skipped: 0 }
+      : { processed: 0, failed: 0, skipped: 1 };
+  } catch {
+    return { processed: 0, failed: 1, skipped: 0 };
   }
-
-  const now = Math.floor(Date.now() / 1000);
-  let processed = 0;
-  let failed = 0;
-  for (const row of rows) {
-    try {
-      await updateScore(env, row.id, now);
-      processed += 1;
-    } catch (error) {
-      failed += 1;
-      // score は次のサイクルで再試行する。個別IDや生の例外をログへ残さない。
-      void safeErrorSummary(error);
-    }
-  }
-
-  const lastVideoId = rows[rows.length - 1]?.id ?? "";
-  await env.KV.put(CURSOR_KEY, JSON.stringify({ last_video_id: lastVideoId }), {
-    expirationTtl: 30 * 24 * 60 * 60,
-  });
-  return { processed, failed, skipped: 0 };
 }
