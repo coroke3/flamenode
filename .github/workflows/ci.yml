@@ -47,7 +47,20 @@ jobs:
         run: git diff --exit-code -- package-lock.json
 
       - name: Typecheck
-        run: npm run typecheck
+        shell: bash
+        run: |
+          mkdir -p .tmp
+          set -o pipefail
+          npm run typecheck 2>&1 | tee .tmp/typecheck.log
+
+      - name: Upload typecheck diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: typecheck-diagnostics-${{ github.run_id }}
+          path: .tmp/typecheck.log
+          if-no-files-found: warn
+          retention-days: 3
 
       - name: Lint
         run: npm run lint
