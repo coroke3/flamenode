@@ -121,45 +121,100 @@ async function fetchYoutubeItems(url: string, fetchImpl: FetchLike): Promise<You
   throw new Error(lastError);
 }
 
-async function selectSyncRows(env: Env, now: number): Promise<SyncRow[]> {
-  const result = await env.DB.prepare(
-    `SELECT v.id, v.youtube_video_id
-       FROM videos v
-       LEFT JOIN video_youtube_metadata ym ON ym.video_id = v.id
-       LEFT JOIN events e ON e.id = v.primary_event_id
-      WHERE v.youtube_video_id IS NOT NULL
-        AND v.youtube_video_id <> ''
-        AND v.visibility_status NOT IN ('archived', 'voided')
-        AND (
-          ym.synced_at IS NULL
-          OR ym.synced_at <= CASE
-            WHEN e.visibility_status = 'public'
-             AND (e.start_time IS NOT NULL OR e.end_time IS NOT NULL)
-             AND (e.start_time IS NULL OR e.start_time <= ?1 + ?4)
-             AND (e.end_time IS NULL OR e.end_time >= ?1 - ?4)
-            THEN ?2 ELSE ?3 END
-        )
-      ORDER BY
-        CASE WHEN ym.synced_at IS NULL THEN 0 ELSE 1 END,
-        CASE
-          WHEN e.visibility_status = 'public'
-           AND (e.start_time IS NOT NULL OR e.end_time IS NOT NULL)
-           AND (e.start_time IS NULL OR e.start_time <= ?1 + ?4)
-           AND (e.end_time IS NULL OR e.end_time >= ?1 - ?4)
-          THEN 0 ELSE 1 END,
-        COALESCE(ym.synced_at, 0) ASC,
-        v.id ASC
-      LIMIT ?5`,
-  )
-    .bind(
-      now,
-      now - ACTIVE_SYNC_INTERVAL_SEC,
-      now - DEFAULT_SYNC_INTERVAL_SEC,
-      ACTIVE_EVENT_GRACE_SEC,
-      YOUTUBE_SYNC_BATCH_SIZE,
-    )
+function appendUniqueRows(target: Map<string, SyncRow>, rows: readonly SyncRow[]): void {
+  for (const row of rows) {
+    if (!row.youtube_video_id || target.has(row.id)) continue;
+    target.set(row.id, row);
+  }
+}
+
+async function querySyncRows(
+  env: Env,
+  sql: string,
+  bindings: readonly (string | number | null)[],
+): Promise<SyncRow[]> {
+  const result = await env.DB.prepare(sql)
+    .bind(...bindings)
     .all<SyncRow>();
-  return (result.results ?? []).filter((row) => row.youtube_video_id);
+  return result.results ?? [];
+}
+
+/**
+ * 未同期・開催中・通常期限を別queryに分け、既存indexを利用する。
+ * OR条件を含む単一queryでvideos全体を走査せず、最大3 query・50件に固定する。
+ */
+async function selectSyncRows(env: Env, now: number): Promise<SyncRow[]> {
+  const selected = new Map<string, SyncRow>();
+
+  appendUniqueRows(
+    selected,
+    await querySyncRows(
+      env,
+      `SELECT v.id, v.youtube_video_id
+         FROM video_youtube_metadata ym
+         INNER JOIN videos v ON v.id = ym.video_id
+        WHERE ym.sync_status = 'pending'
+          AND v.youtube_video_id IS NOT NULL
+          AND v.youtube_video_id <> ''
+          AND v.visibility_status NOT IN ('archived', 'voided')
+        ORDER BY COALESCE(ym.synced_at, 0) ASC, v.id ASC
+        LIMIT ?1`,
+      [YOUTUBE_SYNC_BATCH_SIZE],
+    ),
+  );
+
+  let remaining = YOUTUBE_SYNC_BATCH_SIZE - selected.size;
+  if (remaining > 0) {
+    appendUniqueRows(
+      selected,
+      await querySyncRows(
+        env,
+        `SELECT v.id, v.youtube_video_id
+           FROM events e
+           INNER JOIN videos v ON v.primary_event_id = e.id
+           INNER JOIN video_youtube_metadata ym ON ym.video_id = v.id
+          WHERE e.visibility_status = 'public'
+            AND (e.start_time IS NOT NULL OR e.end_time IS NOT NULL)
+            AND (e.start_time IS NULL OR e.start_time <= ?1 + ?3)
+            AND (e.end_time IS NULL OR e.end_time >= ?1 - ?3)
+            AND v.youtube_video_id IS NOT NULL
+            AND v.youtube_video_id <> ''
+            AND v.visibility_status NOT IN ('archived', 'voided')
+            AND ym.sync_status IN ('synced', 'failed')
+            AND ym.youtube_video_id IS v.youtube_video_id
+            AND ym.synced_at IS NOT NULL
+            AND ym.synced_at <= ?1 - ?2
+          ORDER BY ym.synced_at ASC, v.id ASC
+          LIMIT ?4`,
+        [now, ACTIVE_SYNC_INTERVAL_SEC, ACTIVE_EVENT_GRACE_SEC, remaining],
+      ),
+    );
+  }
+
+  remaining = YOUTUBE_SYNC_BATCH_SIZE - selected.size;
+  if (remaining > 0) {
+    appendUniqueRows(
+      selected,
+      await querySyncRows(
+        env,
+        `SELECT v.id, v.youtube_video_id
+           FROM video_youtube_metadata ym
+           INNER JOIN videos v ON v.id = ym.video_id
+          WHERE ym.sync_status IN ('synced', 'failed')
+            AND ym.synced_at IS NOT NULL
+            AND ym.synced_at <= ?1 - ?2
+            AND ym.youtube_video_id IS v.youtube_video_id
+            AND v.youtube_video_id IS NOT NULL
+            AND v.youtube_video_id <> ''
+            AND v.visibility_status NOT IN ('archived', 'voided')
+          ORDER BY ym.synced_at ASC, v.id ASC
+          LIMIT ?3`,
+        [now, DEFAULT_SYNC_INTERVAL_SEC, remaining],
+      ),
+    );
+  }
+
+  return [...selected.values()];
 }
 
 function buildMetadataWrites(rows: SyncRow[], items: Map<string, YoutubeItem>): MetadataWrite[] {
