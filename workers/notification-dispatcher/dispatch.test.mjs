@@ -31,5 +31,5 @@ test("notification dispatcher uses recipient_user_id and bounded lease-aware sel
   assert.match(sql, /COALESCE\(attempt_count, 0\)/);
   assert.match(sql, /lease_expires_at <= \?1/);
   assert.match(sql, /LIMIT \?3/);
-  assert.equal(MAX_NOTIFICATION_BATCH, 15);
+  assert.equal(MAX_NOTIFICATION_BATCH, 6);
 });
