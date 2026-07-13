@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-13
-> Verified against commit: `59eeb45`
+> Verified against commit: `29f83d8`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `wrangler.toml`, `package.json`
 
 現行のCloudflare構成は Pages + `@cloudflare/next-on-pages`、D1、R2、KV、3本のCron Workerです。
@@ -22,7 +22,7 @@
 | Active | [database/change-log.md](database/change-log.md) | active migrationに対応するDB変更履歴の唯一の正本 |
 | Active | [db-history/README.md](db-history/README.md) | migrationごとの詳細記録とbaseline履歴の索引 |
 | Active | [templates/migration.md](templates/migration.md) | active migrationの記録テンプレート |
-| Planned | [implementation-backlog.md](implementation-backlog.md) | 未着手・ブロック中の要求のみ |
+| Active | [implementation-backlog.md](implementation-backlog.md) | Open、Blocked、Recently completedの現在状態 |
 | Historical | [db-change-history.md](db-change-history.md) | 旧DB変更履歴。現行正本は `database/change-log.md` |
 | Historical | [operations.md](operations.md) | pre-baseline前の運用手順 |
 | Historical | [merge-flow-design.md](merge-flow-design.md) | pre-baseline前のX ID統合設計メモ |
