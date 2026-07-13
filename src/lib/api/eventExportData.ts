@@ -26,6 +26,23 @@ import type {
 
 const EVENT_EXPORT_VIDEO_LIMIT = 500;
 
+export interface EventExportEventRow {
+  id: string;
+  title: string;
+  explanation: string | null;
+  icon_url: string | null;
+  img_url: string | null;
+  accent_color: string | null;
+  event_type: string | null;
+  start_time: number | null;
+  end_time: number | null;
+  entry_start_time: number | null;
+  entry_end_time: number | null;
+  visibility_status: string;
+  public_api_enabled: number;
+  updated_at: number;
+}
+
 function appendGrouped<T>(
   target: Map<string, T[]>,
   key: string,
@@ -36,32 +53,45 @@ function appendGrouped<T>(
   else target.set(key, [value]);
 }
 
+export async function loadEventExportEvent(
+  db: DB,
+  eventId: string,
+): Promise<EventExportEventRow | null> {
+  return (
+    (
+      await db
+        .select({
+          id: events.id,
+          title: events.title,
+          explanation: events.explanation,
+          icon_url: events.icon_url,
+          img_url: events.img_url,
+          accent_color: events.accent_color,
+          event_type: events.event_type,
+          start_time: events.start_time,
+          end_time: events.end_time,
+          entry_start_time: events.entry_start_time,
+          entry_end_time: events.entry_end_time,
+          visibility_status: events.visibility_status,
+          public_api_enabled: events.public_api_enabled,
+          updated_at: events.updated_at,
+        })
+        .from(events)
+        .where(eq(events.id, eventId))
+        .limit(1)
+    )[0] ?? null
+  );
+}
+
 export async function loadEventExportSnapshot(
   db: DB,
   eventId: string,
+  prefetchedEvent?: EventExportEventRow | null,
 ): Promise<EventExportSnapshot | null> {
-  const event = (
-    await db
-      .select({
-        id: events.id,
-        title: events.title,
-        explanation: events.explanation,
-        icon_url: events.icon_url,
-        img_url: events.img_url,
-        accent_color: events.accent_color,
-        event_type: events.event_type,
-        start_time: events.start_time,
-        end_time: events.end_time,
-        entry_start_time: events.entry_start_time,
-        entry_end_time: events.entry_end_time,
-        visibility_status: events.visibility_status,
-        public_api_enabled: events.public_api_enabled,
-        updated_at: events.updated_at,
-      })
-      .from(events)
-      .where(eq(events.id, eventId))
-      .limit(1)
-  )[0];
+  const event =
+    prefetchedEvent === undefined
+      ? await loadEventExportEvent(db, eventId)
+      : prefetchedEvent;
 
   if (
     !event ||
