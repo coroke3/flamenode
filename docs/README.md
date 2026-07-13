@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-13
-> Verified against commit: `agent/free-tier-background-worker`
+> Verified against commit: `fcdf468`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `wrangler.toml`, `workers/background-jobs/wrangler.toml`, `package.json`
 
 現行のCloudflare構成は Pages + `@cloudflare/next-on-pages`、D1、R2、KV、`background-jobs` 1 Worker内の5分・1時間Cronです。
