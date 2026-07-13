@@ -72,7 +72,7 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
     <div>
       <AdminPageHeader
         title="作品情報出力API"
-        description="イベント単位で公開作品情報のJSONリンクを発行します。旧データ互換形式と新形式、リアルタイム更新と節約定期更新を選択できます。"
+        description="イベント単位で公開作品情報の統一JSONリンクを発行します。リアルタイム更新と節約定期更新を選択できます。"
       />
 
       <section
@@ -213,7 +213,7 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
           出力仕様
         </h2>
         <p className="fn-muted fn-text-sm" style={{ margin: 0 }}>
-          新形式はイベント、作品、制作者、メンバー、使用ソフト、公開設定のカスタム回答を構造化して返します。旧形式互換は従来のEventArchives系キーとサムネイル互換キーを持つ配列を返します。非公開作品、内部ユーザーID、権限、監査情報は出力しません。
+          統一形式v3はイベント、公開運営メンバー、作品、全公開所属イベント、制作者、メンバー担当チャプター、公開チャプター、使用ソフト、公開カスタム回答、大小サムネイルを構造化して返します。非公開作品、内部ユーザーID、権限、監査情報は出力しません。
         </p>
       </section>
     </div>
