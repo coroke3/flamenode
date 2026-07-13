@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-13
-> Verified against commit: `d4d5432`
+> Verified against commit: `agent/free-tier-background-worker`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `docs/README.md`, `package.json`
 
 > 映像（フレーム）の結節点（ノード）。YouTube 埋め込みを利用した動画プラットフォーム。
@@ -23,7 +23,7 @@
 - **フレームワーク**: Next.js 15 (App Router) + React 19 + TypeScript
 - **DB**: Cloudflare D1 (SQLite) + Drizzle ORM
 - **ストレージ / キャッシュ**: Cloudflare R2 / KV
-- **背景処理**: Cloudflare Workers（Cron 3本: `fast-jobs` / `content-jobs` / `sync-jobs`）
+- **背景処理**: Cloudflare Workers（`background-jobs` 1本、5分・1時間の2 Cron）
 - **認証**: Auth.js (NextAuth v5) + Discord OAuth
 - **スタイル**: CSS ModulesとCSSカスタムプロパティ。Tailwindは使用しない。Light / Dark / Systemを切り替える。
 - **ホスティング**: Cloudflare Pages + `@cloudflare/next-on-pages`
@@ -41,7 +41,7 @@ src/
   components/        # Reactコンポーネント
   lib/               # DB、認証、権限、Server Actions、通知、公開DTO
   styles/            # CSS
-workers/             # 統合Cron Worker 3本と共有module
+workers/             # background-jobs入口と共有処理module
 migrations/          # active D1 migration。旧本文はhistorical配下
 scripts/             # 運用・検査script
 設計/                 # 製品・UI設計
@@ -86,7 +86,7 @@ npm run check:project-docs
 - **ユーザーエリア**: `/entry`のイベント参加・2系統投稿、スロット提出、作品編集、X ID連携、ライブラリ
 - **イベント運営** `/manage`: 審査、枠、参加者、スタッフ、通知。`permission_preset`を権限正本とする
 - **サイト管理** `/admin`: 作品、ユーザー、イベント、規約、監査・復元、通知、legacy import、DB spreadsheet
-- **背景処理**: 静的JSON、YouTube同期、score、通知、cleanupを3本のbounded Cron Workerで処理
+- **背景処理**: 静的JSON、YouTube同期、score、通知、cleanupを1 Worker内のbounded jobとして処理
 
 ## デザイン原則
 
