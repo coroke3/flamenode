@@ -1,12 +1,11 @@
 import "server-only";
 
-import { getDatabase } from "@/lib/cloudflare";
+import { getDatabase, getEnv } from "@/lib/cloudflare";
 import { getOperationMode } from "@/lib/operationMode/getMode";
 import { getPublicDataStrategy } from "@/lib/operationMode/policy";
 import type { PublicDataStrategy } from "@/lib/operationMode/types";
 import { enqueueStaticRebuild } from "@/lib/staticRebuild/enqueue";
 import type { StaticRebuildTargetType } from "@/lib/staticRebuild/types";
-import { readStaticJson } from "./staticJson";
 import {
   canFallbackToDatabase,
   isMaintenanceStrategy,
@@ -35,6 +34,25 @@ type PublicJsonLoaderConfig<TPayload, TResult> = {
   reason: string;
   normalize: (payload: TPayload) => TResult | null;
 };
+
+async function readStaticJson<T>(key: string): Promise<T | null> {
+  const bucket = getEnv().BUCKET;
+  if (!bucket) return null;
+  const object = await bucket.get(key);
+  if (!object) return null;
+  try {
+    return (await object.json()) as T;
+  } catch {
+    console.warn(
+      JSON.stringify({
+        service: "public-static-json",
+        object_key: key.slice(0, 240),
+        result: "invalid_json",
+      }),
+    );
+    return null;
+  }
+}
 
 export function createPublicJsonLoader<TPayload, TResult>({
   r2Key,
