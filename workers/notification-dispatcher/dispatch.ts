@@ -1,6 +1,5 @@
 /**
- * 通知 outbox の bounded dispatcher。単独 Worker としては deploy せず、
- * fast-jobs からだけ呼び出す。
+ * 通知outboxのbounded dispatcher。background-jobsの高速レーンから呼び出す。
  */
 import { safeErrorSummary } from "../shared/safeLog.ts";
 
@@ -15,15 +14,22 @@ export type Env = {
 const MAX_RETRIES = 4;
 const PROCESSING_LEASE_SEC = 5 * 60;
 const RETRY_BACKOFF_SEC = [60, 300, 900] as const;
-export const MAX_NOTIFICATION_BATCH = 15;
+/** 最悪時でもDiscord 18回、D1 24回程度に収める。 */
+export const MAX_NOTIFICATION_BATCH = 6;
 
 type OutboxRow = {
   id: string;
   recipient_user_id: string;
   discord_id: string | null;
+  discord_dm_channel_id: string | null;
   type: string;
   payload_json: string;
   attempt_count: number;
+};
+
+type DeliveryResult = {
+  delivered: boolean;
+  dmChannelId?: string;
 };
 
 function boundedLimit(value: unknown): number {
@@ -32,7 +38,7 @@ function boundedLimit(value: unknown): number {
   return Math.min(MAX_NOTIFICATION_BATCH, Math.max(1, Math.floor(requested)));
 }
 
-/** 古い lease を有限件だけ救済し、再試行枯渇分は dead_letter に固定する。 */
+/** 古いleaseを有限件だけ救済し、再試行枯渇分はdead_letterに固定する。 */
 async function recoverExpiredLeases(env: Env, now: number, limit: number): Promise<void> {
   await env.DB.prepare(
     `UPDATE notification_outbox
@@ -139,7 +145,22 @@ async function markDeliveryFailure(
     .run();
 }
 
-/** 1 cron あたり最大15件。recipient_user_id を正本に、Discord ID は送信時だけ解決する。 */
+async function cacheDmChannel(
+  env: Env,
+  userId: string,
+  channelId: string,
+): Promise<void> {
+  await env.DB.prepare(
+    `UPDATE "user"
+     SET discord_dm_channel_id = ?1
+     WHERE id = ?2
+       AND discord_dm_channel_id IS NOT ?1`,
+  )
+    .bind(channelId, userId)
+    .run();
+}
+
+/** 1 cronあたり最大6件。通常DMはキャッシュ済みchannelへ1 API呼び出しで送る。 */
 export async function processNotificationQueue(
   env: Env,
   opts?: { limit?: number },
@@ -149,7 +170,12 @@ export async function processNotificationQueue(
   await recoverExpiredLeases(env, now, limit);
 
   const result = await env.DB.prepare(
-    `SELECT n.id, n.recipient_user_id, u.discord_id, n.type, n.payload_json,
+    `SELECT n.id,
+            n.recipient_user_id,
+            u.discord_id,
+            u.discord_dm_channel_id,
+            n.type,
+            n.payload_json,
             COALESCE(n.attempt_count, 0) AS attempt_count
        FROM notification_outbox n
        INNER JOIN "user" u ON u.id = n.recipient_user_id
@@ -175,11 +201,28 @@ export async function processNotificationQueue(
       if (!row.discord_id?.trim() && row.type !== "discord_webhook") {
         throw new Error("notification recipient has no Discord ID");
       }
-      const delivered = await deliver(
-        { type: row.type, payload_json: row.payload_json, discord_id: row.discord_id ?? "" },
+      const delivery = await deliverInternal(
+        {
+          type: row.type,
+          payload_json: row.payload_json,
+          discord_id: row.discord_id ?? "",
+          discord_dm_channel_id: row.discord_dm_channel_id,
+        },
         env,
       );
-      if (!delivered) throw new Error("notification transport unavailable");
+      if (!delivery.delivered) {
+        throw new Error("notification transport unavailable");
+      }
+      if (
+        delivery.dmChannelId &&
+        delivery.dmChannelId !== row.discord_dm_channel_id
+      ) {
+        await cacheDmChannel(
+          env,
+          row.recipient_user_id,
+          delivery.dmChannelId,
+        ).catch(() => undefined);
+      }
       if (await markSent(env, row.id, token, now)) processed += 1;
       else skipped += 1;
     } catch (error) {
@@ -190,39 +233,95 @@ export async function processNotificationQueue(
   return { processed, failed, skipped };
 }
 
-export async function deliver(
-  row: { type: string; payload_json: string; discord_id: string },
+async function sendDiscordMessage(
+  channelId: string,
+  payloadJson: string,
+  botToken: string,
+): Promise<Response> {
+  return fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bot ${botToken}`,
+      "Content-Type": "application/json",
+    },
+    body: payloadJson,
+  });
+}
+
+async function createDiscordDmChannel(
+  discordId: string,
+  botToken: string,
+): Promise<string | null> {
+  const response = await fetch("https://discord.com/api/v10/users/@me/channels", {
+    method: "POST",
+    headers: {
+      Authorization: `Bot ${botToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ recipient_id: discordId }),
+  });
+  if (!response.ok) return null;
+  const channel = (await response.json()) as { id?: string };
+  return channel.id?.trim() || null;
+}
+
+async function deliverInternal(
+  row: {
+    type: string;
+    payload_json: string;
+    discord_id: string;
+    discord_dm_channel_id?: string | null;
+  },
   env: Pick<Env, "DISCORD_WEBHOOK_URL" | "DISCORD_BOT_TOKEN">,
-): Promise<boolean> {
+): Promise<DeliveryResult> {
   if (row.type === "discord_webhook") {
-    if (!env.DISCORD_WEBHOOK_URL) return false;
+    if (!env.DISCORD_WEBHOOK_URL) return { delivered: false };
     const response = await fetch(env.DISCORD_WEBHOOK_URL, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: row.payload_json,
     });
-    return response.ok;
+    return { delivered: response.ok };
   }
-  if (!env.DISCORD_BOT_TOKEN || !row.discord_id) return false;
+  if (!env.DISCORD_BOT_TOKEN || !row.discord_id) {
+    return { delivered: false };
+  }
 
-  const channelResponse = await fetch("https://discord.com/api/v10/users/@me/channels", {
-    method: "POST",
-    headers: {
-      Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ recipient_id: row.discord_id }),
-  });
-  if (!channelResponse.ok) return false;
-  const channel = (await channelResponse.json()) as { id?: string };
-  if (!channel.id) return false;
-  const response = await fetch(`https://discord.com/api/v10/channels/${channel.id}/messages`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-    body: row.payload_json,
-  });
-  return response.ok;
+  const cachedChannel = row.discord_dm_channel_id?.trim();
+  if (cachedChannel) {
+    const cachedResponse = await sendDiscordMessage(
+      cachedChannel,
+      row.payload_json,
+      env.DISCORD_BOT_TOKEN,
+    );
+    if (cachedResponse.ok) {
+      return { delivered: true, dmChannelId: cachedChannel };
+    }
+    if (cachedResponse.status !== 404) {
+      return { delivered: false };
+    }
+  }
+
+  const channelId = await createDiscordDmChannel(
+    row.discord_id,
+    env.DISCORD_BOT_TOKEN,
+  );
+  if (!channelId) return { delivered: false };
+  const response = await sendDiscordMessage(
+    channelId,
+    row.payload_json,
+    env.DISCORD_BOT_TOKEN,
+  );
+  return {
+    delivered: response.ok,
+    ...(response.ok ? { dmChannelId: channelId } : {}),
+  };
+}
+
+/** 既存の単体利用契約を維持するboolean wrapper。 */
+export async function deliver(
+  row: { type: string; payload_json: string; discord_id: string },
+  env: Pick<Env, "DISCORD_WEBHOOK_URL" | "DISCORD_BOT_TOKEN">,
+): Promise<boolean> {
+  return (await deliverInternal(row, env)).delivered;
 }
