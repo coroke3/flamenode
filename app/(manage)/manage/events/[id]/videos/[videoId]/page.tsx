@@ -87,7 +87,7 @@ export default async function ManageEventVideoDetailPage({
           {video.title}
         </h1>
       </header>
-      <ManageEventTabs eventId={id} active="review" isAdmin={isAdmin} />
+      <ManageEventTabs eventId={id} isAdmin={isAdmin} />
 
       <VideoReviewDetailPanel
         video={video}

@@ -33,6 +33,10 @@ export interface AccountMenuUser {
 interface AccountMenuProps {
   user: AccountMenuUser;
   onSwitch?: (xUserId: string) => void;
+  open?: boolean;
+  onOpenChange?: (
+    open: boolean,
+  ) => void;
 }
 
 function dedupeXIds(entries: readonly XIdEntry[]): XIdEntry[] {
@@ -54,10 +58,42 @@ function dedupeXIds(entries: readonly XIdEntry[]): XIdEntry[] {
 export function AccountMenu({
   user,
   onSwitch,
+  open: controlledOpen,
+  onOpenChange,
 }: AccountMenuProps): React.ReactElement {
   const router = useRouter();
   const xIds = React.useMemo(() => dedupeXIds(user.xIds), [user.xIds]);
-  const [open, setOpen] = React.useState(false);
+  const [
+    internalOpen,
+    setInternalOpen,
+  ] = React.useState(false);
+
+  const open =
+    controlledOpen ?? internalOpen;
+
+  const setOpen = React.useCallback(
+    (
+      next:
+        | boolean
+        | ((current: boolean) => boolean),
+    ) => {
+      const resolved =
+        typeof next === "function"
+          ? next(open)
+          : next;
+
+      if (controlledOpen === undefined) {
+        setInternalOpen(resolved);
+      }
+
+      onOpenChange?.(resolved);
+    },
+    [
+      controlledOpen,
+      onOpenChange,
+      open,
+    ],
+  );
   const [error, setError] = React.useState<string | null>(null);
   const [activeId, setActiveId] = React.useState(
     xIds.find((e) => e.is_active)?.x_user_id ?? null,
@@ -85,7 +121,7 @@ export function AccountMenu({
       window.removeEventListener("mousedown", onMouseDown);
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [open]);
+  }, [open, setOpen]);
 
   // activeId に一致する entry のみを「現在のアクティブ」とみなす。
   // approved への暗黙フォールバックは、未選択なのにヘッダーで承認済み X ID が

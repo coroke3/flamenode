@@ -1,8 +1,7 @@
 # CLAUDE.md
 
 > Status: Active
-> Last verified: 2026-07-12
-> Verified against commit: `00be565` + working tree
+> Last verified: 2026-07-13
 > Source of truth: `AGENTS.md`
 
 正本は `AGENTS.md`。まずそれを読む。以下は Claude Code 固有の追記のみ。

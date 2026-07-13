@@ -75,7 +75,7 @@ export default async function ManageEventEditPage({
         backLabel="イベント運営トップへ"
         accent
       />
-      <ManageEventTabs eventId={ev.id} active="edit" isAdmin={isAdmin} />
+      <ManageEventTabs eventId={ev.id} isAdmin={isAdmin} />
 
       <section className="fn-console-section">
         <EventForm

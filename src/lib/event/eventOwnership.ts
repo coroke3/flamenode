@@ -43,9 +43,33 @@ export type EventStaffWriteValues = {
 
 /** event_staff と不可分に確定する補助 mutation（例: 新規 X ID の作成）。 */
 export type EventStaffAtomicExtras = {
-  mutationStatements?: readonly BatchItem<"sqlite">[];
-  audits?: readonly WriteAuditLogInput[];
+  mutationStatements: readonly BatchItem<"sqlite">[];
+  expectedMutationChanges: readonly (number | null)[];
+  audits: readonly WriteAuditLogInput[];
 };
+
+const EMPTY_EVENT_STAFF_ATOMIC_EXTRAS: EventStaffAtomicExtras = {
+  mutationStatements: [],
+  expectedMutationChanges: [],
+  audits: [],
+};
+
+function normalizeEventStaffAtomicExtras(
+  extras: EventStaffAtomicExtras | undefined,
+): EventStaffAtomicExtras {
+  const normalized = extras ?? EMPTY_EVENT_STAFF_ATOMIC_EXTRAS;
+
+  if (
+    normalized.mutationStatements.length !==
+    normalized.expectedMutationChanges.length
+  ) {
+    throw new Error(
+      "イベントスタッフ補助mutationと期待変更件数の数が一致しません。",
+    );
+  }
+
+  return normalized;
+}
 
 /** 一括スタッフ更新で同じ D1 batch に含める補助 mutation。 */
 export type EventStaffBulkAtomicExtras = {
@@ -272,9 +296,11 @@ export async function createEventStaffWithProtection(args: {
     updated_at: args.now,
   };
 
+  const extras = normalizeEventStaffAtomicExtras(args.atomicExtras);
+
   await mutateWithAudit(args.db, {
     mutationStatements: [
-      ...(args.atomicExtras?.mutationStatements ?? []),
+      ...extras.mutationStatements,
       args.db.run(sql`
       INSERT INTO event_staff (
         id, event_id, user_id, x_user_id, display_name, role,
@@ -286,14 +312,17 @@ export async function createEventStaffWithProtection(args: {
         ${row.display_name}, ${row.role}, ${row.permission_preset},
         ${row.custom_permission_keys_json}, ${row.is_public},
         ${row.public_role_label}, ${row.internal_note},
-        ${row.approved_by_user_id}, ${row.approved_at}, ${row.created_at},
-        ${row.updated_at}
+        ${row.approved_by_user_id}, ${row.approved_at},
+        ${row.created_at}, ${row.updated_at}
       )
       `),
     ],
-    expectedMutationChanges: 1,
+    expectedMutationChanges: [
+      ...extras.expectedMutationChanges,
+      1,
+    ],
     audits: [
-      ...(args.atomicExtras?.audits ?? []),
+      ...extras.audits,
       {
       table_name: "event_staff",
       target_id: row.id,
@@ -353,6 +382,7 @@ export async function updateEventStaffWithProtection(args: {
     role: syncLegacyRoleFromPreset(args.values.permission_preset),
     updated_at: args.now,
   };
+  const extras = normalizeEventStaffAtomicExtras(args.atomicExtras);
   const demotesLastOwner =
     isEventOwner(asOwnershipRow(args.existing)) &&
     args.values.permission_preset !== "owner";
@@ -362,23 +392,32 @@ export async function updateEventStaffWithProtection(args: {
 
   await mutateWithAudit(args.db, {
     mutationStatements: [
-      ...(args.atomicExtras?.mutationStatements ?? []),
+      ...extras.mutationStatements,
       args.db.run(sql`
       UPDATE event_staff
-      SET user_id = ${after.user_id}, x_user_id = ${after.x_user_id},
-          display_name = ${after.display_name}, role = ${after.role},
-          permission_preset = ${after.permission_preset},
-          custom_permission_keys_json = ${after.custom_permission_keys_json},
-          is_public = ${after.is_public}, public_role_label = ${after.public_role_label},
-          internal_note = ${after.internal_note}, updated_at = ${after.updated_at}
-      WHERE id = ${args.existing.id} AND event_id = ${args.existing.event_id}
+      SET
+        user_id = ${after.user_id},
+        x_user_id = ${after.x_user_id},
+        display_name = ${after.display_name},
+        role = ${after.role},
+        permission_preset = ${after.permission_preset},
+        custom_permission_keys_json = ${after.custom_permission_keys_json},
+        is_public = ${after.is_public},
+        public_role_label = ${after.public_role_label},
+        internal_note = ${after.internal_note},
+        updated_at = ${after.updated_at}
+      WHERE id = ${args.existing.id}
+        AND event_id = ${args.existing.event_id}
         AND updated_at = ${args.existing.updated_at}
         AND (${ownerCondition})
       `),
     ],
-    expectedMutationChanges: 1,
+    expectedMutationChanges: [
+      ...extras.expectedMutationChanges,
+      1,
+    ],
     audits: [
-      ...(args.atomicExtras?.audits ?? []),
+      ...extras.audits,
       {
       table_name: "event_staff",
       target_id: after.id,

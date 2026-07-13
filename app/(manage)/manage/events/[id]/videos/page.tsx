@@ -145,11 +145,7 @@ export default async function ManageEventVideosPage({
           {statusFilter ? `（${videoVisibilityFilterLabel(statusFilter)}）` : ""}
         </p>
       </header>
-      <ManageEventTabs
-        eventId={id}
-        active={isReviewFilter ? "review" : "submissions"}
-        isAdmin={isAdmin}
-      />
+      <ManageEventTabs eventId={id} isAdmin={isAdmin} />
 
       <div
         className="fn-console-filter-nav"

@@ -16,6 +16,7 @@ export interface Env {
   APP_ORIGIN?: string;
   NEXT_PUBLIC_APP_URL?: string;
   KV: KVNamespace;
+  BUILD_COMMIT_SHA?: string;
 }
 
 const REMINDER_INTERVAL_SEC = 3600;
@@ -71,7 +72,12 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname === "/health") {
-      return Response.json({ ok: true, worker: "fast-jobs" });
+      return Response.json({
+        ok: true,
+        service: "fast-jobs",
+        commit:
+          env.BUILD_COMMIT_SHA ?? "unknown",
+      });
     }
     return new Response("Not Found", { status: 404 });
   },

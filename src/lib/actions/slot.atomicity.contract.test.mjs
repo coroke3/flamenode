@@ -48,7 +48,7 @@ test("slot CASはschemaの全16列とversionを比較し、保存時にversion�
     "version",
   ];
   const cas = source.match(
-    /function expectedRowCondition[\s\S]*?\n}\n\nfunction planSlotUpdate/,
+    /function expectedRowCondition[\s\S]*?function planSlotUpdate/,
   )?.[0] ?? "";
   for (const column of expectedColumns) {
     assert.match(cas, new RegExp(`slots\\.${column}`), column);

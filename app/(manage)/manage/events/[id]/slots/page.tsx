@@ -113,7 +113,7 @@ export default async function ManageEventSlotsPage({
       <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 12 }}>
         枠の生成、空き枠整理、確保済み枠の解放をここで扱えます。{total} 件中、最大 500 件を表示します。
       </p>
-      <ManageEventTabs eventId={id} active="slots" isAdmin={isAdmin} />
+      <ManageEventTabs eventId={id} isAdmin={isAdmin} />
 
       <section
         style={{

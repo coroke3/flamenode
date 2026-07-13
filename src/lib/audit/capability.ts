@@ -1,4 +1,4 @@
-import { getAdapter } from "./adapters";
+import { getRestoreRegistration } from "./registry";
 import {
   RestoreStatus,
   RestoreStrategy,
@@ -34,6 +34,13 @@ export const RESTORE_CAPABILITY_REASON = {
   primaryKeyMissing: "primary_key_missing",
   eventIdMissing: "event_id_missing",
   staffSubjectMissing: "event_staff_subject_missing",
+  requiredFieldMissing: "required_field_missing",
+  expired: "expired",
+  alreadyRestored: "already_restored",
+  targetConflict: "target_conflict",
+  targetMissing: "target_missing",
+  targetAlreadyExists: "target_already_exists",
+  mutationFailed: "mutation_failed",
 } as const;
 
 function unavailable(reasonCode: string, message: string): RestoreCapability {
@@ -200,14 +207,18 @@ export function evaluateRestoreCapability(
     );
   }
 
-  const adapter = getAdapter(input.tableName);
-  if (!adapter) {
+  const registration = getRestoreRegistration(input.tableName);
+
+  if (!registration) {
     return unavailable(
       RESTORE_CAPABILITY_REASON.adapterMissing,
       `テーブル「${input.tableName}」の復元アダプターがありません。`,
     );
   }
-  if (!adapter.supportedStrategies.includes(strategy)) {
+
+  if (
+    !registration.supportedStrategies.includes(strategy as RestoreStrategyValue)
+  ) {
     return unavailable(
       RESTORE_CAPABILITY_REASON.strategyUnsupported,
       `テーブル「${input.tableName}」は ${strategy} をサポートしていません。`,
@@ -244,6 +255,28 @@ export function evaluateRestoreCapability(
   );
   const invalid = validateSnapshot(requiredSnapshot);
   if (invalid) return invalid;
+
+  const requiredFields =
+    strategy === RestoreStrategy.delete_created
+      ? registration.requiredAfterFields
+      : registration.requiredBeforeFields;
+
+  for (const field of requiredFields) {
+    const value = requiredSnapshot?.[field];
+
+    if (
+      value === null ||
+      value === undefined ||
+      value === "" ||
+      value === "[REDACTED]"
+    ) {
+      return unavailable(
+        RESTORE_CAPABILITY_REASON.requiredFieldMissing,
+        `復元スナップショットに必須項目「${field}」がありません。`,
+      );
+    }
+  }
+
   const tableInvalid = validateTableSpecificSnapshot(
     input.tableName,
     requiredSnapshot!,

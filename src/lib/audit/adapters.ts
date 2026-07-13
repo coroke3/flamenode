@@ -20,16 +20,6 @@ export function expectedRowCondition(options: {
   return buildExpectedRowCondition(options);
 }
 
-export const RESTORABLE_TABLES = new Set([
-  "events",
-  "videos",
-  "slots",
-  "announcements",
-  "event_groups",
-  "event_staff",
-  "x_account_link_requests",
-]);
-
 function unsupported(table: string, strategy: RestoreStrategy): never {
   throw new Error(`Unsupported ${table} restore strategy: ${strategy}`);
 }
@@ -249,7 +239,7 @@ const eventStaffAdapter: RestoreAdapter = {
   },
 };
 
-const ADAPTERS: Record<string, RestoreAdapter> = {
+export const RESTORE_ADAPTERS = {
   events: eventsAdapter,
   videos: videosAdapter,
   slots: slotsAdapter,
@@ -257,8 +247,19 @@ const ADAPTERS: Record<string, RestoreAdapter> = {
   event_groups: eventGroupsAdapter,
   event_staff: eventStaffAdapter,
   x_account_link_requests: xAccountLinkRequestsAdapter,
-};
+} as const satisfies Record<string, RestoreAdapter>;
 
-export function getAdapter(tableName: string): RestoreAdapter | null {
-  return ADAPTERS[tableName] ?? null;
+export type RegisteredRestoreTableName = keyof typeof RESTORE_ADAPTERS;
+
+export function getAdapter(
+  tableName: string,
+): RestoreAdapter | null {
+  return Object.prototype.hasOwnProperty.call(
+    RESTORE_ADAPTERS,
+    tableName,
+  )
+    ? RESTORE_ADAPTERS[
+        tableName as RegisteredRestoreTableName
+      ]
+    : null;
 }

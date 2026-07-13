@@ -457,8 +457,29 @@ select {
   }
 
   .fn-shelf[data-mobile-rows="2"] {
-    grid-template-rows: repeat(2, max-content);
-    grid-auto-columns: clamp(150px, 46vw, 190px);
+    --shelf-mobile-rows: 2;
+    display: grid;
+    grid-auto-flow: column;
+    grid-template-rows:
+      repeat(2, minmax(0, auto));
+    grid-auto-columns:
+      clamp(150px, 43vw, 190px);
+    gap: 12px;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    overscroll-behavior-inline:
+      contain;
+    padding-inline-end: 12vw;
+  }
+
+  .fn-shelf[data-mobile-rows="2"] > * {
+    min-width: 0;
+    scroll-snap-align: start;
+  }
+
+  .fn-shelf[data-mobile-rows="1"] {
+    display: flex;
+    flex-wrap: nowrap;
   }
 
   .fn-shelf[data-density="compact"] {

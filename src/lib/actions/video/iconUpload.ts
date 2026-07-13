@@ -1,7 +1,7 @@
 "use server";
 
-import { auditAction } from "@/lib/audit/helpers";
 import { and, eq, sql } from "drizzle-orm";
+import { mutateWithAudit } from "@/lib/audit/mutate";
 import { getDatabase, getEnv } from "@/lib/cloudflare";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { xUserIcons } from "@/lib/db/schema";
@@ -62,33 +62,77 @@ export async function uploadVideoIconCandidate(
   if (!image) {
     return { ok: false, message: "PNG/JPEG/WEBP 画像ファイルのみアップロードできます。" };
   }
-  const key = `video-icons/${activeX}/${generateId("vicon")}.${image.ext}`;
-  await env.BUCKET.put(key, buf, {
-    httpMetadata: { contentType: image.contentType },
-  });
+
+  const iconId = generateId("xicon");
+  const key =
+    `video-icons/${activeX}/${generateId("vicon")}.${image.ext}`;
   const iconUrl = `/api/media/${key}`;
-
   const now = Math.floor(Date.now() / 1000);
-  await db
-    .insert(xUserIcons)
-    .values({
-      id: generateId("xicon"),
-      x_user_id: activeX,
-      icon_url: iconUrl,
-      source_video_id: null,
-      source_type: "manual",
-      created_at: now,
-    })
-    .onConflictDoNothing();
 
-  await auditAction(db, {
-    table_name: "x_user_icons",
-    record_id: activeX,
-    action: "CREATE",
-    after_data: JSON.stringify({ icon_url: iconUrl, source: "video_upload" }),
-    operator_user_id: sessionUser.id,
-    retention_class: "normal",
+  const row = {
+    id: iconId,
+    x_user_id: activeX,
+    icon_url: iconUrl,
+    source_video_id: null,
+    source_type: "manual" as const,
+    created_at: now,
+  } satisfies typeof xUserIcons.$inferInsert;
+
+  await env.BUCKET.put(key, buf, {
+    httpMetadata: {
+      contentType: image.contentType,
+    },
   });
 
-  return { ok: true, message: "アップロードしました。", iconUrl };
+  try {
+    await mutateWithAudit(db, {
+      mutationStatements: [
+        db.insert(xUserIcons).values(row),
+      ],
+      expectedMutationChanges: [1],
+      audits: [
+        {
+          table_name: "x_user_icons",
+          target_id: iconId,
+          operation: "CREATE",
+          before: null,
+          after: row,
+          actor_user_id: sessionUser.id,
+          context: "video-icon-upload",
+          retention_class: "long_audit",
+          restore_strategy: "delete_created",
+          strict: true,
+        },
+      ],
+    });
+  } catch (error) {
+    try {
+      await env.BUCKET.delete(key);
+    } catch (cleanupError) {
+      console.error(
+        JSON.stringify({
+          event: "video_icon_orphan_cleanup_failed",
+          objectKey: key,
+          error:
+            cleanupError instanceof Error
+              ? cleanupError.message
+              : String(cleanupError),
+        }),
+      );
+    }
+
+    return {
+      ok: false,
+      message:
+        error instanceof Error
+          ? `アイコン候補を保存できませんでした: ${error.message}`
+          : "アイコン候補を保存できませんでした。",
+    };
+  }
+
+  return {
+    ok: true,
+    message: "アップロードしました。",
+    iconUrl,
+  };
 }

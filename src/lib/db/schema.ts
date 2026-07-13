@@ -11,12 +11,17 @@ import {
 } from "drizzle-orm/sqlite-core";
 
 /**
- * FlameNode D1 (SQLite) スキーマ Single Source of Truth.
- * 命名規則: snake_case で統一。Auth.js 標準カラムだけ camelCase。
+ * FlameNode D1 (SQLite) schema Single Source of Truth.
  *
- * 実装上の正本はこのファイル。設計書・運用手順・手動 SQL migration は
- * この定義に追従させる。migrations/meta は古い Drizzle snapshot で止まっており、
- * 0010 以降は手動 SQL migration を含むため、docs/operations.md の注意を読むこと。
+ * Active migration:
+ * - migrations/0000_flame_node_baseline.sql
+ * - 0001以降のincremental migration
+ *
+ * migrations/historicalは履歴保管専用であり、
+ * runtime・deploy・新規環境構築では使用しない。
+ *
+ * request-time DDL、起動時schema適用、
+ * 二重schema正本は禁止する。
  */
 
 // ============================================================

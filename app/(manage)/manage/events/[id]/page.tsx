@@ -298,7 +298,7 @@ export default async function ManageEventPage({
         <Stat label="提出済" value={submittedSlots} />
       </section>
 
-      <ManageEventTabs eventId={id} active="overview" isAdmin={isAdmin} />
+      <ManageEventTabs eventId={id} isAdmin={isAdmin} />
 
       {isAdmin ? (
         <section className="fn-console-section">

@@ -16,6 +16,8 @@ interface ShelfProps {
   mobileRows?: 1 | 2;
   /** ユーザー操作後に自動送りを再開するまでの待機時間。 */
   pauseAfterInteractionMs?: number;
+  /** ホイール操作で自動送りを一時停止する。 */
+  pauseOnWheel?: boolean;
 }
 
 /**
@@ -30,6 +32,7 @@ export function Shelf({
   autoScrollSpeed = 18,
   mobileRows = 2,
   pauseAfterInteractionMs = 1400,
+  pauseOnWheel = true,
 }: ShelfProps): React.ReactElement {
   const ref = React.useRef<HTMLDivElement>(null);
   const frameRef = React.useRef<number | null>(null);
@@ -94,7 +97,14 @@ export function Shelf({
 
   React.useEffect(() => {
     const el = ref.current;
-    if (!el || typeof IntersectionObserver === "undefined") return;
+    if (!el) return;
+    if (
+      typeof IntersectionObserver ===
+      "undefined"
+    ) {
+      setInViewport(false);
+      return;
+    }
     const observer = new IntersectionObserver(
       ([entry]) => setInViewport(Boolean(entry?.isIntersecting)),
       { threshold: 0.05 },
@@ -196,6 +206,21 @@ export function Shelf({
         onPointerCancel={() => {
           setPauseReason("pointer", false);
           pauseAfterInteraction();
+        }}
+        onWheel={() => {
+          if (pauseOnWheel) {
+            pauseAfterInteraction();
+          }
+        }}
+        onKeyDown={(event) => {
+          if (
+            event.key === "ArrowLeft" ||
+            event.key === "ArrowRight" ||
+            event.key === "PageUp" ||
+            event.key === "PageDown"
+          ) {
+            pauseAfterInteraction();
+          }
         }}
       >
         {children}

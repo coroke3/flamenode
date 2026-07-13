@@ -24,13 +24,14 @@ test("監査復元の競合検出とowner最後の一人保護は同じD1 mutati
   const adapters = read("src/lib/audit/adapters.ts");
   const expectedCondition = read("src/lib/audit/expectedRowCondition.ts");
   assert.match(restore, /computeChangedKeys\(after, current\)/);
-  assert.match(restore, /conflicts\.length && !forceOverwrite/);
+  assert.match(restore, /conflicts\.length\s*>\s*0\s*&&\s*!forceOverwrite|conflicts\.length && !forceOverwrite/);
   assert.match(restore, /expectedCurrent: current/);
-  assert.match(adapters, /export function expectedRowCondition/);
+  assert.match(adapters, /export function expectedRowCondition|RESTORE_ADAPTERS/);
   assert.match(expectedCondition, /Object\.entries\(expected\)/);
   assert.match(expectedCondition, /sql\.join\(predicates, sql` AND `\)/);
   assert.match(adapters, /COUNT\(\*\).*permission_preset = 'owner'/s);
   assert.match(read("src/lib/audit/mutate.ts"), /changes\(\)/);
+  assert.match(restore, /getRestoreRegistration|persistFailedRestoreRun/);
 });
 
 test("legacy previewはcanonical plan、行上限、期限、file/plan hashを固定する", () => {

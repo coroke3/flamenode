@@ -154,7 +154,7 @@ export default async function ManageEventAudiencePage({
       <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 12 }}>
         {audience.length} 名の参加者 (slot 確保 / 動画提出のいずれかを行った X ID を集約)。読み取り専用。
       </p>
-      <ManageEventTabs eventId={id} active="audience" isAdmin={isAdmin} />
+      <ManageEventTabs eventId={id} isAdmin={isAdmin} />
 
       {audience.length === 0 ? (
         <EmptyState

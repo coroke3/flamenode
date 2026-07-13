@@ -353,17 +353,20 @@ async function rebuildTop(env: Env): Promise<void> {
 async function rebuildListRecent(env: Env): Promise<void> {
   const [rows, totalRow] = await Promise.all([
     env.DB.prepare(
-      `SELECT id, title, youtube_video_id,
-              creator_display_name AS display_name,
-              creator_display_name,
-              creator_x_user_id,
-              creator_icon_url AS icon_url,
-              creator_icon_url,
-              primary_event_id,
-              scheduled_time,
-              visibility_status AS status
-     FROM videos WHERE visibility_status = 'public'
-     ORDER BY scheduled_time DESC LIMIT 120`,
+      `SELECT v.id, v.title, v.youtube_video_id,
+              v.creator_display_name AS display_name,
+              v.creator_display_name,
+              v.creator_x_user_id,
+              v.creator_icon_url AS icon_url,
+              v.creator_icon_url,
+              v.primary_event_id,
+              e.title AS primary_event_title,
+              v.scheduled_time,
+              v.visibility_status AS status
+     FROM videos v
+     LEFT JOIN events e ON e.id = v.primary_event_id
+     WHERE v.visibility_status = 'public'
+     ORDER BY v.scheduled_time DESC LIMIT 120`,
     ).all(),
     env.DB.prepare(
       `SELECT COUNT(*) AS c FROM videos WHERE visibility_status = 'public'`,

@@ -11,11 +11,15 @@ import {
 interface Props {
   auditId: string;
   restoreStatus: string;
+  restoreUnavailableReasonCode?: string | null;
+  restoreUnavailableMessage?: string | null;
 }
 
 export function AuditRestoreForm({
   auditId,
   restoreStatus,
+  restoreUnavailableReasonCode,
+  restoreUnavailableMessage,
 }: Props): React.ReactElement {
   const confirmRequired = `RESTORE ${auditId}`;
 
@@ -81,11 +85,43 @@ export function AuditRestoreForm({
         アプリDB上の状態のみ復元します。YouTube / Discord / 外部APIの状態は復元されません。
       </div>
 
-      {!canRestore && (
-        <p style={{ color: "var(--text-muted)", fontSize: 13 }}>
-          このログは現在リストア対象外です（restore_status: {restoreStatus}）。
-        </p>
-      )}
+      {!canRestore ? (
+        <div
+          style={{
+            display: "grid",
+            gap: 6,
+            padding: 12,
+            border:
+              "1px solid var(--border-subtle)",
+            borderRadius: "var(--radius-md)",
+            background: "var(--bg-elevated)",
+            fontSize: 13,
+          }}
+        >
+          <strong>このログは復元できません。</strong>
+
+          {restoreUnavailableMessage ? (
+            <p style={{ margin: 0 }}>
+              {restoreUnavailableMessage}
+            </p>
+          ) : (
+            <p style={{ margin: 0 }}>
+              復元状態: {restoreStatus}
+            </p>
+          )}
+
+          {restoreUnavailableReasonCode ? (
+            <code
+              style={{
+                color: "var(--text-muted)",
+                fontSize: 11,
+              }}
+            >
+              {restoreUnavailableReasonCode}
+            </code>
+          ) : null}
+        </div>
+      ) : null}
 
       {canRestore && (
         <>

@@ -76,8 +76,9 @@
   }
 
   [data-fn-surface="public"] .fn-intro-copy {
-    font-size: clamp(38px, 10.5vw, 52px);
-    line-height: 0.95;
+    font-size:
+      clamp(32px, 9vw, 44px);
+    line-height: 0.98;
     overflow-wrap: anywhere;
   }
 
@@ -92,23 +93,39 @@
   }
 
   [data-fn-surface="public"] .fn-intro-stats {
-    gap: 16px 24px;
+    display: grid;
+    grid-template-columns:
+      repeat(3, minmax(0, 1fr));
+    gap: 8px;
   }
 
   [data-fn-surface="public"] .fn-stat-v {
-    font-size: 26px;
+    font-size: clamp(20px, 6vw, 26px);
+  }
+
+  [data-fn-surface="public"] .fn-stat-k {
+    font-size: 10px;
   }
 
   [data-fn-surface="public"] .fn-intro-actions {
-    flex-direction: row;
-    align-items: stretch;
+    display: grid;
+    grid-template-columns:
+      minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
   }
 
-  [data-fn-surface="public"] .fn-intro-actions .fn-btn {
-    flex: 1 1 0;
-    width: auto;
+  [data-fn-surface="public"]
+    .fn-intro-actions
+    .fn-btn-primary {
     min-width: 0;
-    padding-inline: 10px;
+  }
+
+  [data-fn-surface="public"]
+    .fn-intro-actions
+    .fn-btn-ghost {
+    width: auto;
+    min-height: 36px;
   }
 
   /* ページ見出し */

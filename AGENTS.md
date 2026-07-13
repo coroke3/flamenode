@@ -10,8 +10,7 @@
 - メインエージェントはサブエージェントの出力をそのまま採用せず、差分とテスト結果を必ず検証する。
 
 > Status: Active
-> Last verified: 2026-07-12
-> Verified against commit: `00be565` + working tree
+> Last verified: 2026-07-13
 > Source of truth: `src/lib/db/schema.ts`, `migrations/0000_flame_node_baseline.sql`, `docs/README.md`
 
 FlameNode: YouTube 埋め込み動画プラットフォーム (イベント参加・スロット・投稿審査)。Cloudflare ネイティブ。

@@ -139,8 +139,12 @@ async function prepareXUserExtras(args: {
     approval_requested_at: args.now,
   };
   return {
-    mutationStatements: [args.db.insert(xUsers).values(after)],
-    audits: [{
+    mutationStatements: [
+      args.db.insert(xUsers).values(after),
+    ],
+    expectedMutationChanges: [1],
+    audits: [
+      {
       table_name: "x_users",
       target_id: args.xUserId,
       operation: "CREATE",
@@ -150,8 +154,10 @@ async function prepareXUserExtras(args: {
       reason: "イベントスタッフ登録に伴う X ID 作成",
       context: args.context,
       retention_class: "long_audit",
+      restore_strategy: "delete_created",
       strict: true,
-    }],
+      },
+    ],
   };
 }
 

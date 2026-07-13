@@ -4,9 +4,9 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import { assertCanEditEvent } from "@/lib/auth/ownership";
+import { writeGuard } from "@/lib/auth/writeGuard";
 import { slots } from "@/lib/db/schema";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { parseJstDatetimeLocal } from "@/lib/utils/dateInput";
@@ -92,24 +92,69 @@ function parseSlotIds(formData: FormData): string[] {
   }
 }
 
-async function ensureCanEditSlots(eventId: string): Promise<
+async function ensureCanEditSlots(
+  eventId: string,
+  feature:
+    | "manage_slot_create"
+    | "manage_slot_update"
+    | "manage_slot_delete",
+): Promise<
   | { ok: true; userId: string }
   | { ok: false; result: SlotActionResult }
 > {
-  const session = await auth().catch(() => null);
-  const u = session?.user as { id?: string; role?: string } | undefined;
-  if (!u?.id) return { ok: false, result: { ok: false, message: "ログインが必要です。" } };
+  const guard = await writeGuard({
+    feature,
+  });
+
+  if (!guard.ok) {
+    return {
+      ok: false,
+      result: {
+        ok: false,
+        message: guard.message,
+      },
+    };
+  }
+
   const db = getDatabase();
-  if (!db) return { ok: false, result: { ok: false, message: "DB に接続できません。" } };
+
+  if (!db) {
+    return {
+      ok: false,
+      result: {
+        ok: false,
+        message: "DB に接続できません。",
+      },
+    };
+  }
+
   try {
-    await assertCanEditEvent(db, { id: u.id, role: u.role ?? null }, eventId, "event.slots");
+    await assertCanEditEvent(
+      db,
+      {
+        id: guard.user.id,
+        role: guard.user.role ?? null,
+      },
+      eventId,
+      "event.slots",
+    );
   } catch (error) {
     return {
       ok: false,
-      result: { ok: false, message: error instanceof Error ? error.message : "権限がありません。" },
+      result: {
+        ok: false,
+        message:
+          error instanceof Error
+            ? error.message
+            : "権限がありません。",
+      },
     };
   }
-  return { ok: true, userId: u.id };
+
+  return {
+    ok: true,
+    userId: guard.user.id,
+  };
 }
 
 function mutationError(error: unknown): SlotActionResult {
@@ -160,7 +205,7 @@ export async function generateSlotsBatch(formData: FormData): Promise<SlotAction
   const parsed = batchSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
   const data = parsed.data;
-  const guard = await ensureCanEditSlots(data.event_id);
+  const guard = await ensureCanEditSlots(data.event_id, "manage_slot_create");
   if (!guard.ok) return guard.result;
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
@@ -241,7 +286,7 @@ export async function generateSlotsBatch(formData: FormData): Promise<SlotAction
 export async function deleteAvailableSlots(formData: FormData): Promise<SlotActionResult> {
   const eventId = String(formData.get("event_id") ?? "").trim();
   if (!eventId) return { ok: false, message: "event_id が必要です。" };
-  const guard = await ensureCanEditSlots(eventId);
+  const guard = await ensureCanEditSlots(eventId, "manage_slot_delete");
   if (!guard.ok) return guard.result;
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
@@ -272,7 +317,7 @@ export async function releaseSlot(formData: FormData): Promise<SlotActionResult>
   if (!db) return { ok: false, message: "DB に接続できません。" };
   const row = await db.select().from(slots).where(eq(slots.id, slotId)).limit(1).then((r) => r[0]);
   if (!row) return { ok: false, message: "枠が見つかりません。" };
-  const guard = await ensureCanEditSlots(row.event_id);
+  const guard = await ensureCanEditSlots(row.event_id, "manage_slot_update");
   if (!guard.ok) return guard.result;
   const groupId = row.reservation_group_id?.trim() || null;
   const rows = groupId
@@ -310,7 +355,7 @@ export async function deleteSlot(formData: FormData): Promise<SlotActionResult> 
   const row = await db.select().from(slots).where(eq(slots.id, slotId)).limit(1).then((r) => r[0]);
   if (!row) return { ok: false, message: "枠が見つかりません。" };
   if (row.status !== "available") return { ok: false, message: "予約済み・投稿済みの枠は削除できません。" };
-  const guard = await ensureCanEditSlots(row.event_id);
+  const guard = await ensureCanEditSlots(row.event_id, "manage_slot_delete");
   if (!guard.ok) return guard.result;
   const queueBatch = await buildEventQueueBatch(db, row.event_id, "slot_admin_delete", guard.userId);
   try {
@@ -330,7 +375,7 @@ export async function batchDeleteAvailableSlots(formData: FormData): Promise<Slo
   const slotIds = parseSlotIds(formData);
   if (!eventId || slotIds.length === 0) return { ok: false, message: "event_id と枠を指定してください。" };
   if (!uniqueIds(slotIds) || slotIds.length > MAX_ATOMIC_SLOT_ROWS) return { ok: false, message: `重複を除く ${MAX_ATOMIC_SLOT_ROWS} 件以内で指定してください。` };
-  const guard = await ensureCanEditSlots(eventId);
+  const guard = await ensureCanEditSlots(eventId, "manage_slot_delete");
   if (!guard.ok) return guard.result;
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
@@ -354,7 +399,7 @@ export async function batchReleaseReservedSlots(formData: FormData): Promise<Slo
   const slotIds = parseSlotIds(formData);
   if (!eventId || slotIds.length === 0) return { ok: false, message: "event_id と枠を指定してください。" };
   if (!uniqueIds(slotIds) || slotIds.length > MAX_ATOMIC_SLOT_ROWS) return { ok: false, message: `重複を除く ${MAX_ATOMIC_SLOT_ROWS} 件以内で指定してください。` };
-  const guard = await ensureCanEditSlots(eventId);
+  const guard = await ensureCanEditSlots(eventId, "manage_slot_update");
   if (!guard.ok) return guard.result;
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
@@ -411,7 +456,7 @@ export async function batchUpdateSlotLabels(formData: FormData): Promise<SlotAct
   const label = String(formData.get("label") ?? "").trim();
   if (!eventId || slotIds.length === 0 || !label) return { ok: false, message: "event_id・枠・ラベルを指定してください。" };
   if (label.length > 200 || !uniqueIds(slotIds) || slotIds.length > MAX_ATOMIC_SLOT_ROWS) return { ok: false, message: `ラベルまたは件数の上限を超えています。` };
-  const guard = await ensureCanEditSlots(eventId);
+  const guard = await ensureCanEditSlots(eventId, "manage_slot_update");
   if (!guard.ok) return guard.result;
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };

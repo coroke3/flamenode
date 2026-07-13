@@ -7,6 +7,7 @@ export interface StaticRecentVideoRow {
   icon_url?: unknown;
   creator_icon_url?: unknown;
   primary_event_id?: unknown;
+  primary_event_title?: unknown;
   scheduled_time?: unknown;
   status?: unknown;
 }
@@ -24,6 +25,7 @@ export interface StaticRecentVideo {
   display_name: string;
   icon_url: string | null;
   primary_event_id: string | null;
+  primary_event_title: string | null;
   scheduled_time: number | null;
   status: "public";
   part: null;
@@ -78,6 +80,7 @@ function normalizeStaticRecentVideoRow(
       normalizeNullableString(row.icon_url) ??
       normalizeNullableString(row.creator_icon_url),
     primary_event_id: normalizeNullableString(row.primary_event_id),
+    primary_event_title: normalizeNullableString(row.primary_event_title),
     scheduled_time: normalizeUnix(row.scheduled_time),
     status: "public",
     part: null,

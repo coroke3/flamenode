@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, exists, or, sql } from "drizzle-orm";
-import { videoChapters, videoMembers, videos, videoEvents, xUsers } from "./schema";
+import { events, videoChapters, videoMembers, videos, videoEvents, xUsers } from "./schema";
 import { coalescedVideoScoreDesc } from "./videoScoreSql";
 import { creatorIconExpr, creatorNameExpr } from "./displayExpr";
 import { resolveMissingIcons } from "./iconResolution";
@@ -122,6 +122,7 @@ const publicVideoListSelect = {
   icon_url: creatorIconExpr,
   creator_x_user_id: videos.creator_x_user_id,
   primary_event_id: videos.primary_event_id,
+  primary_event_title: events.title,
   scheduled_time: videos.scheduled_time,
   status: videos.visibility_status,
   part: videos.part,
@@ -157,6 +158,10 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
       .select(publicVideoListSelect)
       .from(videos)
       .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
+      .leftJoin(
+        events,
+        eq(events.id, videos.primary_event_id),
+      )
       .where(and(...eventFilters)!)
       .orderBy(orderBy)
       .limit(limit)
@@ -168,6 +173,10 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
     .select(publicVideoListSelect)
     .from(videos)
     .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
+    .leftJoin(
+      events,
+      eq(events.id, videos.primary_event_id),
+    )
     .where(and(...filters)!)
     .orderBy(orderBy)
     .limit(limit)
@@ -181,6 +190,10 @@ export async function fetchPublicVideoByIdOrYoutube(db: DB, idOrYoutube: string)
     .select(publicVideoListSelect)
     .from(videos)
     .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
+    .leftJoin(
+      events,
+      eq(events.id, videos.primary_event_id),
+    )
     .where(
       and(
         eq(videos.visibility_status, "public"),

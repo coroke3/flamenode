@@ -1,21 +1,39 @@
 import type { DB } from "@/lib/db/client";
 import { writeAuditLog } from "./logger";
+import { isRegisteredRestoreTable } from "./registry";
 import type { AuditOperation, RetentionClass } from "./types";
 import { RestoreStrategy } from "./types";
 
-const RESTORABLE_TABLES = new Set([
+const ATOMIC_ONLY_TABLES = new Set([
+  "user",
+  "users",
+  "x_users",
+  "x_user_icons",
   "events",
-  "videos",
+  "event_staff",
   "slots",
+  "videos",
   "video_events",
   "video_members",
   "video_chapters",
-  "event_staff",
+  "video_softwares",
+  "video_custom_answers",
+  "event_custom_questions",
   "event_groups",
   "event_group_events",
-  "announcements",
-  "x_account_link_requests",
+  "system_settings",
+  "audit_log_settings",
 ]);
+
+function assertAuditActionAllowed(
+  tableName: string,
+): void {
+  if (ATOMIC_ONLY_TABLES.has(tableName)) {
+    throw new Error(
+      `テーブル「${tableName}」はauditActionを直接使用できません。mutateWithAuditを使用してください。`,
+    );
+  }
+}
 
 const STRICT_TABLES = new Set([
   "users",
@@ -74,7 +92,10 @@ function inferRetentionClass(
   requested: RetentionClass,
 ): RetentionClass {
   if (requested === "long_audit" || requested === "restorable") return requested;
-  if (RESTORABLE_TABLES.has(tableName) && operation !== "CREATE") {
+  if (
+    isRegisteredRestoreTable(tableName) &&
+    operation !== "CREATE"
+  ) {
     return "restorable";
   }
   return "normal";
@@ -115,6 +136,7 @@ export async function auditAction(
   db: DB,
   input: AuditActionInput,
 ): Promise<string | null> {
+  assertAuditActionAllowed(input.table_name);
   const retentionClass = inferRetentionClass(
     input.table_name,
     input.action,

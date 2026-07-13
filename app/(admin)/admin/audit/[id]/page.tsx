@@ -187,6 +187,22 @@ export default async function AdminAuditDetailPage({
             {restoreStatusLabel}
           </span>
         </div>
+        {row.restore_unavailable_message ? (
+          <Meta
+            label="復元不可理由"
+            value={row.restore_unavailable_message}
+          />
+        ) : null}
+
+        {row.restore_unavailable_reason_code ? (
+          <Meta
+            label="理由コード"
+            value={
+              row.restore_unavailable_reason_code
+            }
+            mono
+          />
+        ) : null}
         <Meta label="復元戦略" value={row.restore_strategy} mono />
         <Meta label="retention_class" value={row.retention_class} />
         <Meta label="payload_size_bytes" value={String(row.payload_size_bytes)} mono />
@@ -284,7 +300,16 @@ export default async function AdminAuditDetailPage({
       {/* リストア */}
       <section style={{ marginTop: 32 }}>
         <SectionHeading>リストア</SectionHeading>
-        <AuditRestoreForm auditId={row.id} restoreStatus={row.restore_status} />
+        <AuditRestoreForm
+          auditId={row.id}
+          restoreStatus={row.restore_status}
+          restoreUnavailableReasonCode={
+            row.restore_unavailable_reason_code
+          }
+          restoreUnavailableMessage={
+            row.restore_unavailable_message
+          }
+        />
       </section>
     </div>
   );

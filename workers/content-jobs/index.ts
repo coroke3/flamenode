@@ -14,6 +14,7 @@ export interface Env {
   R2: R2Bucket;
   KV: KVNamespace;
   WORKER_ADMIN_TOKEN?: string;
+  BUILD_COMMIT_SHA?: string;
 }
 
 const CLEANUP_INTERVAL_SEC = 3600;
@@ -72,7 +73,12 @@ export async function handleContentJobsFetch(
 ): Promise<Response> {
   const url = new URL(req.url);
   if (url.pathname === "/health") {
-    return Response.json({ ok: true, worker: "content-jobs" });
+    return Response.json({
+      ok: true,
+      service: "content-jobs",
+      commit:
+        env.BUILD_COMMIT_SHA ?? "unknown",
+    });
   }
   if (url.pathname !== "/rebuild" && url.pathname !== "/process-queue") {
     return new Response("Not Found", { status: 404 });

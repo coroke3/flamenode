@@ -15,6 +15,7 @@ export interface Env {
   DB: D1Database;
   KV: KVNamespace;
   YOUTUBE_API_KEY?: string;
+  BUILD_COMMIT_SHA?: string;
 }
 
 const SYNC_JOBS_LEASE_SEC = 11 * 60 * 60;
@@ -47,9 +48,17 @@ export default {
     ctx.waitUntil(runSyncJobs(env));
   },
 
-  async fetch(req: Request): Promise<Response> {
+  async fetch(
+    req: Request,
+    env: Env,
+  ): Promise<Response> {
     if (new URL(req.url).pathname === "/health") {
-      return Response.json({ ok: true, worker: "sync-jobs" });
+      return Response.json({
+        ok: true,
+        service: "sync-jobs",
+        commit:
+          env.BUILD_COMMIT_SHA ?? "unknown",
+      });
     }
     return new Response("Not Found", { status: 404 });
   },

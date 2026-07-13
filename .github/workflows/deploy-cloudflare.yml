@@ -4,24 +4,63 @@ on:
   workflow_dispatch:
     inputs:
       deploy_workers:
-        description: Workers もデプロイする
+        description: Workersをデプロイする
         type: boolean
         default: true
+
       deploy_pages:
-        description: Pages をデプロイする
+        description: Pagesをデプロイする
         type: boolean
         default: true
-      apply_migrations:
-        description: 本番 D1 に active baseline migration を適用する
+
+      bootstrap_database:
+        description: 空の本番D1を初期構築する
         type: boolean
-        default: true
+        default: false
+
+      apply_pending_migrations:
+        description: 未適用migrationを本番D1へ適用する
+        type: boolean
+        default: false
 
 concurrency:
   group: deploy-cloudflare-production
   cancel-in-progress: false
 
 jobs:
+  validate-inputs:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Validate inputs and required configuration
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_IDS_JSON: ${{ secrets.CF_IDS_JSON }}
+          NEXT_PUBLIC_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL }}
+        run: |
+          set -euo pipefail
+
+          missing=()
+
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing+=("CLOUDFLARE_API_TOKEN")
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing+=("CLOUDFLARE_ACCOUNT_ID")
+          [ -n "$CF_IDS_JSON" ] || missing+=("CF_IDS_JSON")
+          [ -n "$NEXT_PUBLIC_SITE_URL" ] || missing+=("NEXT_PUBLIC_SITE_URL")
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            printf '::error::Missing production configuration: %s\n' "${missing[*]}"
+            exit 1
+          fi
+
+          if [ "${{ inputs.bootstrap_database }}" = "true" ] &&
+             [ "${{ inputs.apply_pending_migrations }}" = "true" ]; then
+            echo "::error::bootstrap_database and apply_pending_migrations cannot both be true."
+            exit 1
+          fi
+
   build-pages-artifact:
+    needs: validate-inputs
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -73,10 +112,11 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  migrate-d1:
-    needs: build-pages-artifact
-    if: >-
-      github.event_name == 'workflow_dispatch' && inputs.apply_migrations
+  bootstrap-d1:
+    needs:
+      - validate-inputs
+      - build-pages-artifact
+    if: inputs.bootstrap_database
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -95,27 +135,56 @@ jobs:
       - name: Install dependencies and apply IDs
         run: |
           npm ci
-          if [ -z "$CF_IDS_JSON" ]; then
-            echo "::error::production Secret CF_IDS_JSON is required."
-            exit 1
-          fi
           node scripts/sync-wrangler-ids.mjs
           npm run check:cloudflare-config
 
-      - name: Apply active D1 baseline migrations
-        uses: cloudflare/wrangler-action@v3
+      - name: Verify production D1 is empty
+        run: node scripts/check-d1-bootstrap-state.mjs --remote --expect-empty
+
+      - name: Bootstrap production D1
+        run: npx wrangler d1 migrations apply flamenode_db --remote
+
+  migrate-d1:
+    needs:
+      - validate-inputs
+      - build-pages-artifact
+    if: inputs.apply_pending_migrations
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_IDS_JSON: ${{ secrets.CF_IDS_JSON }}
+      CLOUDFLARE_CONFIG_MODE: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: d1 migrations apply flamenode_db --remote
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies and apply IDs
+        run: |
+          npm ci
+          node scripts/sync-wrangler-ids.mjs
+          npm run check:cloudflare-config
+
+      - name: Verify baseline marker
+        run: node scripts/check-d1-bootstrap-state.mjs --remote --expect-initialized
+
+      - name: Apply pending migrations
+        run: npx wrangler d1 migrations apply flamenode_db --remote
 
   deploy-pages:
-    needs: [build-pages-artifact, migrate-d1]
+    needs: [validate-inputs, build-pages-artifact, bootstrap-d1, migrate-d1]
     if: >-
       always() &&
+      needs.validate-inputs.result == 'success' &&
       needs.build-pages-artifact.result == 'success' &&
+      (needs.bootstrap-d1.result == 'success' || needs.bootstrap-d1.result == 'skipped') &&
       (needs.migrate-d1.result == 'success' || needs.migrate-d1.result == 'skipped') &&
-      github.event_name == 'workflow_dispatch' && inputs.deploy_pages
+      inputs.deploy_pages
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -139,10 +208,6 @@ jobs:
 
       - name: Apply Cloudflare resource IDs
         run: |
-          if [ -z "$CF_IDS_JSON" ]; then
-            echo "::error::production Secret CF_IDS_JSON is required."
-            exit 1
-          fi
           node scripts/sync-wrangler-ids.mjs
           npm run check:cloudflare-config
 
@@ -153,21 +218,22 @@ jobs:
 
       - name: Deploy the verified Pages artifact
         run: >-
-          npx wrangler pages deploy .vercel/output/static
-          --project-name=flamenode
+          npm run pages:deploy:verified --
           --branch=main
           --commit-hash=${{ github.sha }}
           --commit-message="Automated deployment ${GITHUB_SHA}"
           --commit-dirty=false
 
   deploy-workers:
-    needs: [build-pages-artifact, migrate-d1, deploy-pages]
+    needs: [validate-inputs, build-pages-artifact, bootstrap-d1, migrate-d1, deploy-pages]
     if: >-
       always() &&
+      needs.validate-inputs.result == 'success' &&
       needs.build-pages-artifact.result == 'success' &&
+      (needs.bootstrap-d1.result == 'success' || needs.bootstrap-d1.result == 'skipped') &&
       (needs.migrate-d1.result == 'success' || needs.migrate-d1.result == 'skipped') &&
       (needs.deploy-pages.result == 'success' || needs.deploy-pages.result == 'skipped') &&
-      github.event_name == 'workflow_dispatch' && inputs.deploy_workers
+      inputs.deploy_workers
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -175,6 +241,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CF_IDS_JSON: ${{ secrets.CF_IDS_JSON }}
       CLOUDFLARE_CONFIG_MODE: production
+      BUILD_COMMIT_SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
 
@@ -186,16 +253,12 @@ jobs:
       - name: Install dependencies and apply IDs
         run: |
           npm ci
-          if [ -z "$CF_IDS_JSON" ]; then
-            echo "::error::production Secret CF_IDS_JSON is required."
-            exit 1
-          fi
           node scripts/sync-wrangler-ids.mjs
           npm run check:cloudflare-config
           npm run check:cloudflare-template
 
       - name: Deploy the three Cron Workers in fixed order
-        run: npm run workers:deploy
+        run: npm run workers:deploy:verified
 
   smoke-production:
     needs: [deploy-pages, deploy-workers]
@@ -207,61 +270,17 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - name: Smoke test the deployed Pages and optional Worker endpoints
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Smoke test deployed resources
         env:
           SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL }}
           FAST_JOBS_URL: ${{ vars.FAST_JOBS_URL }}
           CONTENT_JOBS_URL: ${{ vars.CONTENT_JOBS_URL }}
           SYNC_JOBS_URL: ${{ vars.SYNC_JOBS_URL }}
-        run: |
-          set -euo pipefail
-          test -n "$SITE_URL" || { echo "::error::NEXT_PUBLIC_SITE_URL production variable is required for smoke test."; exit 1; }
-          curl_required() {
-            curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --retry-max-time 30 --connect-timeout 10 --max-time 15 --output /dev/null "$1"
-          }
-          curl_status() {
-            curl --show-error --silent --location --retry 3 --retry-delay 2 --retry-max-time 30 --connect-timeout 10 --max-time 15 --output /dev/null --write-out '%{http_code}' "$1"
-          }
-
-          echo "Checking Pages top page"
-          curl_required "${SITE_URL%/}"
-          echo "Checking Pages health"
-          curl_required "${SITE_URL%/}/api/health"
-
-          homepage="$(mktemp)"
-          trap 'rm -f "$homepage"' EXIT
-          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --retry-max-time 30 --connect-timeout 10 --max-time 15 --output "$homepage" "${SITE_URL%/}/"
-          asset="$(grep -Eo '/_next/static/[^"[:space:]]+' "$homepage" | head -n 1 || true)"
-          test -n "$asset" || { echo "::error::homepage did not expose a _next/static asset."; exit 1; }
-          echo "Checking Pages static asset: $asset"
-          curl_required "${SITE_URL%/}${asset}"
-
-          auth_status="$(curl_status "${SITE_URL%/}/api/auth/callback/discord")"
-          case "$auth_status" in
-            5*|000) echo "::error::Auth callback returned an unavailable status: $auth_status"; exit 1 ;;
-          esac
-
-          check_worker_health() {
-            local name="$1"
-            local url="$2"
-            if [ -n "$url" ]; then
-              echo "Checking $name /health"
-              curl_required "${url%/}/health"
-            fi
-          }
-          check_worker_rebuild_rejection() {
-            local name="$1"
-            local url="$2"
-            if [ -n "$url" ]; then
-              local status
-              status="$(curl --show-error --silent --location --request POST --retry 3 --retry-delay 2 --retry-max-time 30 --connect-timeout 10 --max-time 15 --output /dev/null --write-out '%{http_code}' "${url%/}/rebuild")"
-              case "$status" in
-                401|404|405) ;;
-                *) echo "::error::$name /rebuild unauthenticated request returned $status; expected 401, 404, or 405."; exit 1 ;;
-              esac
-            fi
-          }
-          check_worker_health "fast-jobs" "$FAST_JOBS_URL"
-          check_worker_health "content-jobs" "$CONTENT_JOBS_URL"
-          check_worker_health "sync-jobs" "$SYNC_JOBS_URL"
-          check_worker_rebuild_rejection "content-jobs" "$CONTENT_JOBS_URL"
+          BUILD_COMMIT_SHA: ${{ github.sha }}
+        run: node scripts/smoke-cloudflare.mjs

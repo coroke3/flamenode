@@ -1,8 +1,11 @@
 "use server";
 
 import { and, eq, inArray, or } from "drizzle-orm";
-import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
+import {
+  requireAdminWrite,
+  writeGuard,
+} from "@/lib/auth/writeGuard";
 import {
   eventCustomQuestions,
   eventTemplates,
@@ -109,23 +112,22 @@ export interface EventActionResult {
   eventId?: string;
 }
 
-async function requireAdmin(): Promise<
-  | { ok: true; userId: string }
-  | { ok: false; result: EventActionResult }
-> {
-  const session = await auth().catch(() => null);
-  const u = session?.user as { id?: string; role?: string } | undefined;
-  if (!u?.id) return { ok: false, result: { ok: false, message: "ログインが必要です。" } };
-  if (u.role !== "admin")
-    return { ok: false, result: { ok: false, message: "管理者のみ操作できます。" } };
-  return { ok: true, userId: u.id };
-}
-
 export async function createEvent(
   formData: FormData,
 ): Promise<EventActionResult> {
-  const guard = await requireAdmin();
-  if (!guard.ok) return guard.result;
+  const guard =
+    await requireAdminWrite(
+      "admin_event_create",
+    );
+
+  if (!guard.ok) {
+    return {
+      ok: false,
+      message: guard.message,
+    };
+  }
+
+  const actorUserId = guard.user.id;
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
@@ -225,9 +227,9 @@ export async function createEvent(
     return { ok: false, message: "カスタム質問の識別子が重複しています。" };
   }
   const queue = await buildStaticRebuildQueueBatch(db, [
-    { targetType: "event", targetId: id, reason: "event_create", priority: "high", requestedByUserId: guard.userId },
-    { targetType: "events_index", targetId: "global", reason: "event_create", priority: "low", requestedByUserId: guard.userId },
-    { targetType: "search_index", targetId: "global", reason: "event_create", priority: "low", requestedByUserId: guard.userId },
+    { targetType: "event", targetId: id, reason: "event_create", priority: "high", requestedByUserId: actorUserId },
+    { targetType: "events_index", targetId: "global", reason: "event_create", priority: "low", requestedByUserId: actorUserId },
+    { targetType: "search_index", targetId: "global", reason: "event_create", priority: "low", requestedByUserId: actorUserId },
   ]);
   const mutationStatements = [
     db.insert(events).values(createdRow),
@@ -248,7 +250,7 @@ export async function createEvent(
       operation: "CREATE",
       before: null,
       after: createdRow,
-      actor_user_id: guard.userId,
+      actor_user_id: actorUserId,
       retention_class: "normal",
       strict: true,
     },
@@ -258,7 +260,7 @@ export async function createEvent(
       operation: "CREATE" as const,
       before: null,
       after: questionSnapshot(row),
-      actor_user_id: guard.userId,
+      actor_user_id: actorUserId,
       context: "event-create:custom-question",
       retention_class: "normal" as const,
       strict: true,
@@ -281,10 +283,22 @@ export async function createEvent(
 export async function updateEvent(
   formData: FormData,
 ): Promise<EventActionResult> {
-  const session = await auth().catch(() => null);
-  const u = session?.user as { id?: string; role?: string } | undefined;
-  if (!u?.id) return { ok: false, message: "ログインが必要です。" };
-  const actorUserId = u.id;
+  const guard = await writeGuard({
+    feature: "manage_event_update",
+  });
+
+  if (!guard.ok) {
+    return {
+      ok: false,
+      message: guard.message,
+    };
+  }
+
+  const actorUserId = guard.user.id;
+  const user = {
+    id: guard.user.id,
+    role: guard.user.role ?? null,
+  };
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
@@ -294,7 +308,6 @@ export async function updateEvent(
   const data = parsed.data;
   if (!data.id) return { ok: false, message: "id が必要です。" };
 
-  const user = { id: u.id, role: u.role ?? null };
   const permissions = await resolveEventEditPermissions(db, user, data.id);
   if (!hasAnyEventEditPermission(permissions)) {
     return {
@@ -515,8 +528,19 @@ export async function updateEvent(
 export async function deleteEvent(
   formData: FormData,
 ): Promise<EventActionResult> {
-  const guard = await requireAdmin();
-  if (!guard.ok) return guard.result;
+  const guard =
+    await requireAdminWrite(
+      "manage_event_archive",
+    );
+
+  if (!guard.ok) {
+    return {
+      ok: false,
+      message: guard.message,
+    };
+  }
+
+  const actorUserId = guard.user.id;
 
   const eventId = String(formData.get("event_id") ?? "").trim();
   const confirm = String(formData.get("confirm") ?? "").trim();
@@ -536,14 +560,14 @@ export async function deleteEvent(
   if (!before) return { ok: false, message: "イベントが見つかりません。" };
   const after = { ...before, visibility_status: "archived" as const, updated_at: now };
   const queue = await buildStaticRebuildQueueBatch(db, [
-    { targetType: "event", targetId: eventId, reason: "event_archive", priority: "high", requestedByUserId: guard.userId },
-    { targetType: "events_index", targetId: "global", reason: "event_archive", priority: "low", requestedByUserId: guard.userId },
-    { targetType: "search_index", targetId: "global", reason: "event_archive", priority: "low", requestedByUserId: guard.userId },
+    { targetType: "event", targetId: eventId, reason: "event_archive", priority: "high", requestedByUserId: actorUserId },
+    { targetType: "events_index", targetId: "global", reason: "event_archive", priority: "low", requestedByUserId: actorUserId },
+    { targetType: "search_index", targetId: "global", reason: "event_archive", priority: "low", requestedByUserId: actorUserId },
   ]);
   await mutateWithAudit(db, {
     mutationStatements: [db.update(events).set({ visibility_status: "archived", updated_at: now }).where(and(eq(events.id, eventId), eq(events.updated_at, before.updated_at))), ...queue.statements],
     expectedMutationChanges: [1, ...queue.expectedChanges],
-    audits: [{ table_name: "events", target_id: eventId, operation: "UPDATE", before, after, actor_user_id: guard.userId, retention_class: "long_audit", strict: true }],
+    audits: [{ table_name: "events", target_id: eventId, operation: "UPDATE", before, after, actor_user_id: actorUserId, retention_class: "long_audit", strict: true }],
   });
 
   revalidateEventPaths(eventId);

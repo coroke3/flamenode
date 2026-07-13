@@ -125,24 +125,36 @@ export default async function ListPage({
                 className={`fn-cr-seg-btn ${view === "grid" ? "is-active" : ""}`}
                 aria-current={view === "grid" ? "page" : undefined}
                 aria-label="タイル表示"
+                title="タイル表示"
               >
                 <Icon name="grid" size={14} aria-hidden />
+                <span className={styles.viewLabel}>
+                  タイル
+                </span>
               </Link>
               <Link
                 href={`/list?${params({ view: "compact", page: "1" })}`}
                 className={`fn-cr-seg-btn ${view === "compact" ? "is-active" : ""}`}
                 aria-current={view === "compact" ? "page" : undefined}
                 aria-label="コンパクト表示"
+                title="コンパクト表示"
               >
                 <Icon name="compact" size={14} aria-hidden />
+                <span className={styles.viewLabel}>
+                  コンパクト
+                </span>
               </Link>
               <Link
                 href={`/list?${params({ view: "index", page: "1" })}`}
                 className={`fn-cr-seg-btn ${view === "index" ? "is-active" : ""}`}
                 aria-current={view === "index" ? "page" : undefined}
                 aria-label="一覧表示"
+                title="一覧表示"
               >
                 <Icon name="list" size={14} aria-hidden />
+                <span className={styles.viewLabel}>
+                  一覧
+                </span>
               </Link>
             </div>
           </div>
@@ -240,10 +252,10 @@ export default async function ListPage({
                 <thead>
                   <tr>
                     <th className={styles.thumbCol} />
-                    <th>Title</th>
-                    <th>Creator</th>
-                    <th>Event</th>
-                    <th>Posted</th>
+                    <th>作品</th>
+                    <th>クリエイター</th>
+                    <th>イベント</th>
+                    <th>公開日</th>
                     <th aria-label="open" />
                   </tr>
                 </thead>
@@ -278,7 +290,21 @@ export default async function ListPage({
                           </Link>
                         </td>
                         <td className={styles.indexCreator}>{v.display_name}</td>
-                        <td className={styles.codeCell}>{v.primary_event_id ?? "-"}</td>
+                        <td className={styles.eventCell}>
+                          {v.primary_event_id ? (
+                            <Link
+                              href={`/event/${encodeURIComponent(
+                                v.primary_event_id,
+                              )}`}
+                            >
+                              {(v as { primary_event_title?: string | null }).primary_event_title ?? "イベント"}
+                            </Link>
+                          ) : (
+                            <span aria-label="イベントなし">
+                              —
+                            </span>
+                          )}
+                        </td>
                         <td className={styles.codeCell}>
                           {formatUnix(v.scheduled_time, { dateOnly: true })}
                         </td>

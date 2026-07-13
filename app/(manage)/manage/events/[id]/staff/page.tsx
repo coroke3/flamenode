@@ -141,7 +141,7 @@ export default async function ManageEventStaffPage({
         ]}
       />
 
-      <ManageEventTabs eventId={id} active="staff" isAdmin={isAdmin} />
+      <ManageEventTabs eventId={id} isAdmin={isAdmin} />
 
       <section className="fn-console-stat-grid fn-console-section--tight">
         <SummaryCard label="代表者" value={ownerCount} note="イベントの最終管理責任者" />

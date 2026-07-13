@@ -13,6 +13,7 @@ import type { HeaderUser } from "@/lib/auth/headerUser";
 import { PUBLIC_NAV_ITEMS } from "@/lib/navigation/publicNav";
 import { navigateGetForm } from "@/components/forms/AutoSubmitSelect";
 import { sanitizeNextPath } from "#utils/next";
+import { useDismissablePanel } from "./useDismissablePanel";
 
 function isPathActive(pathname: string | null, href: string): boolean {
   if (!pathname) return false;
@@ -34,8 +35,16 @@ interface PublicHeaderProps {
 export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [searchOpen, setSearchOpen] = React.useState(false);
+  const [accountOpen, setAccountOpen] =
+    React.useState(false);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
   const searchPanelRef = React.useRef<HTMLDivElement>(null);
+  const menuButtonRef =
+    React.useRef<HTMLButtonElement>(null);
+  const mobilePanelRef =
+    React.useRef<HTMLElement>(null);
+  const searchButtonRef =
+    React.useRef<HTMLButtonElement>(null);
   const pathname = usePathname();
   const entryNext = sanitizeNextPath(pathname ?? "/", "/");
   const entryHref =
@@ -43,17 +52,28 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
       ? "/entry"
       : `/entry?next=${encodeURIComponent(entryNext)}`;
 
-  React.useEffect(() => {
-    if (!searchOpen) return;
-    searchInputRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setSearchOpen(false);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [searchOpen]);
+  useDismissablePanel({
+    open: mobileOpen,
+    onClose: React.useCallback(
+      () => setMobileOpen(false),
+      [],
+    ),
+    panelRef: mobilePanelRef,
+    triggerRef: menuButtonRef,
+    routeKey: pathname ?? "",
+    lockBody: true,
+  });
+
+  useDismissablePanel({
+    open: searchOpen,
+    onClose: React.useCallback(
+      () => setSearchOpen(false),
+      [],
+    ),
+    panelRef: searchPanelRef,
+    triggerRef: searchButtonRef,
+    routeKey: pathname ?? "",
+  });
 
   const closeMobilePanels = () => {
     setMobileOpen(false);
@@ -72,25 +92,27 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
         </Link>
 
         <div className={`fn-header-right ${styles.right}`}>
-          <div className={`${styles.themeButton} ${styles.barCompactHidden}`}>
+          <div className={`${styles.themeButton}`}>
             <ThemeToggle />
           </div>
 
           {user ? (
-            <div className={`${styles.desktopXId} ${styles.barCompactHidden}`}>
+            <div className={`${styles.desktopXId}`}>
               <XIdSwitcher entries={user.xIds} discordName={user.name} />
             </div>
           ) : null}
 
           <button
             type="button"
-            className={`${styles.searchToggle} ${styles.barCompactHidden}`}
+            ref={searchButtonRef}
+            className={`${styles.searchToggle}`}
             aria-label="作品を検索"
             aria-expanded={searchOpen}
             aria-controls="header-search-panel"
             onClick={() => {
               setSearchOpen((open) => !open);
               setMobileOpen(false);
+              setAccountOpen(false);
             }}
           >
             <Icon name="search" size={18} aria-hidden />
@@ -100,20 +122,31 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
             <>
               <Link
                 href="/entry"
-                className={`fn-btn fn-header-submit ${styles.headerCta} ${styles.postBtn} ${styles.barCompactHidden}`}
+                className={`fn-btn fn-header-submit ${styles.headerCta} ${styles.postBtn}`}
                 data-variant="accent"
               >
                 <Icon name="edit" size={13} aria-hidden />
                 <span>投稿する</span>
               </Link>
-              <div className={`${styles.actionNav} ${styles.barCompactHidden}`}>
-                <AccountMenu user={user} />
+              <div className={`${styles.actionNav}`}>
+                <AccountMenu
+                  user={user}
+                  open={accountOpen}
+                  onOpenChange={(open) => {
+                    setAccountOpen(open);
+
+                    if (open) {
+                      setMobileOpen(false);
+                      setSearchOpen(false);
+                    }
+                  }}
+                />
               </div>
             </>
           ) : (
             <Link
               href={entryHref}
-              className={`fn-btn fn-header-submit ${styles.headerCta} ${styles.joinBtn} ${styles.barCompactHidden}`}
+              className={`fn-btn fn-header-submit ${styles.headerCta} ${styles.joinBtn}`}
               data-variant="accent"
             >
               <Icon name="edit" size={13} aria-hidden />
@@ -123,12 +156,15 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
 
           <button
             type="button"
+            ref={menuButtonRef}
             className={styles.menuToggle}
             aria-label="メニューを開く"
             aria-expanded={mobileOpen}
+            aria-controls="mobile-navigation-panel"
             onClick={() => {
               setMobileOpen((open) => !open);
               setSearchOpen(false);
+              setAccountOpen(false);
             }}
           >
             <Icon name={mobileOpen ? "close" : "menu"} size={18} />
@@ -183,6 +219,11 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
 
       <div className={`${styles.mobile} ${mobileOpen ? styles.mobileOpen : ""}`}>
         <nav
+          id="mobile-navigation-panel"
+          ref={mobilePanelRef}
+          role="dialog"
+          aria-modal="true"
+          tabIndex={-1}
           className={`fn-public-container ${styles.mobileNav}`}
           aria-label="モバイルナビゲーション"
           aria-hidden={!mobileOpen}
@@ -259,6 +300,54 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
             </div>
           ) : (
             <>
+              <div className={styles.mobileUserHeader}>
+                {user.image ? (
+                  <img
+                    src={user.image}
+                    alt=""
+                    className={styles.mobileUserAvatar}
+                  />
+                ) : (
+                  <span
+                    className={
+                      styles.mobileUserAvatarFallback
+                    }
+                  >
+                    <Icon
+                      name="user"
+                      size={20}
+                      aria-hidden
+                    />
+                  </span>
+                )}
+
+                <div>
+                  <strong>{user.name}</strong>
+                  <span>
+                    {user.xIds.find(
+                      (entry) => entry.is_active,
+                    )
+                      ? `@${
+                          user.xIds.find(
+                            (entry) => entry.is_active,
+                          )!.x_user_id
+                        }`
+                      : "Active X ID未選択"}
+                  </span>
+                  <small>
+                    現在の投稿・いいね・コメント主体
+                  </small>
+                </div>
+              </div>
+
+              <div className={styles.mobileIdentityControls}>
+                <XIdSwitcher
+                  entries={user.xIds}
+                  discordName={user.name}
+                />
+                <ThemeToggle variant="segmented" />
+              </div>
+
               <div className={styles.mobileSection}>
                 {PUBLIC_NAV_ITEMS.map((item) => {
                   const active = isPathActive(pathname, item.href);
@@ -325,22 +414,6 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
                   </div>
                 </>
               ) : null}
-
-              <div className={styles.mobileDivider} />
-              <div className={styles.mobileSection}>
-                <div className={styles.mobileSectionTitle}>X ID切替</div>
-                <div className={styles.mobileXIdContainer}>
-                  <XIdSwitcher entries={user.xIds} discordName={user.name} />
-                </div>
-              </div>
-
-              <div className={styles.mobileDivider} />
-              <div className={styles.mobileSection}>
-                <div className={styles.mobileSectionTitle}>テーマ</div>
-                <div className={styles.themeSlot}>
-                  <ThemeToggle variant="segmented" />
-                </div>
-              </div>
 
               <div className={styles.mobileDivider} />
               <div className={styles.mobileSection}>

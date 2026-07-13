@@ -138,7 +138,33 @@ export interface RestoreResult {
     conflicts: string[];
   };
   restore_run_id?: string;
+  reason_code?: RestoreFailureReason | string;
+  restore_status?: RestoreStatus;
 }
+
+export const RestoreFailureReason = {
+  payloadExceeded: "payload_exceeded",
+  strategyNone: "strategy_none",
+  strategyUnsupported: "strategy_unsupported",
+  adapterMissing: "adapter_missing",
+  beforeMissing: "before_missing",
+  afterMissing: "after_missing",
+  snapshotInvalid: "snapshot_invalid",
+  snapshotRedacted: "snapshot_redacted",
+  primaryKeyMissing: "primary_key_missing",
+  requiredFieldMissing: "required_field_missing",
+  expired: "expired",
+  alreadyRestored: "already_restored",
+  targetConflict: "target_conflict",
+  targetMissing: "target_missing",
+  targetAlreadyExists: "target_already_exists",
+  mutationFailed: "mutation_failed",
+  ownerInvariant: "owner_invariant",
+  uniqueConflict: "unique_conflict",
+} as const;
+
+export type RestoreFailureReason =
+  (typeof RestoreFailureReason)[keyof typeof RestoreFailureReason];
 
 // ============================================================
 // リストアアダプター

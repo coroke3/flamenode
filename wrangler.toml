@@ -8,7 +8,7 @@ pages_build_output_dir = ".vercel/output/static"
 # Cloudflare Dashboard → Pages → Settings → Builds と揃える
 # Build command:     npm run pages:build
 # Build output dir:  .vercel/output/static
-# Node version:      20
+# Node version:      22
 
 [observability]
 enabled = true

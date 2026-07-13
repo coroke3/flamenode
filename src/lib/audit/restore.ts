@@ -2,12 +2,13 @@ import { and, eq, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import { auditLogs, auditRestoreRuns, users } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
-import { getAdapter } from "./adapters";
 import { evaluateRestoreCapability } from "./capability";
 import { assertChanges, mutateWithAudit } from "./mutate";
+import { getRestoreRegistration } from "./registry";
 import { computeChangedKeys } from "./snapshot";
 import {
   AuditOperation,
+  RestoreFailureReason,
   RestoreStatus,
   RestoreStrategy,
   type RestoreOptions,
@@ -24,6 +25,108 @@ function parseSnapshot(json: string | null): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+const PERMANENT_RESTORE_REASONS = new Set([
+  "payload_exceeded",
+  "strategy_none",
+  "strategy_unsupported",
+  "adapter_missing",
+  "before_missing",
+  "after_missing",
+  "snapshot_invalid",
+  "snapshot_redacted",
+  "primary_key_missing",
+  "event_id_missing",
+  "event_staff_subject_missing",
+  "required_field_missing",
+]);
+
+function sanitizeRestoreError(
+  error: unknown,
+): string {
+  const raw =
+    error instanceof Error
+      ? error.message
+      : String(error);
+
+  return raw
+    .replace(
+      /(token|secret|authorization|cookie)\s*[:=]\s*[^\s,;]+/gi,
+      "$1=[REDACTED]",
+    )
+    .slice(0, 1000);
+}
+
+async function persistFailedRestoreRun(args: {
+  db: DB;
+  auditId: string;
+  userId: string;
+  reason: string;
+  reasonCode: string;
+  message: string;
+  now: number;
+}): Promise<string> {
+  const runId = generateId("rst");
+
+  await args.db.insert(auditRestoreRuns).values({
+    id: runId,
+    audit_log_id: args.auditId,
+    executed_by_user_id: args.userId,
+    reason: args.reason,
+    status: "failed",
+    error_message: JSON.stringify({
+      code: args.reasonCode,
+      message: sanitizeRestoreError(args.message),
+    }),
+    executed_at: args.now,
+  });
+
+  return runId;
+}
+
+async function persistPermanentRestoreFailure(args: {
+  db: DB;
+  auditId: string;
+  userId: string;
+  reason: string;
+  reasonCode: string;
+  message: string;
+  now: number;
+  status?: RestoreStatus;
+}): Promise<string> {
+  const runId = generateId("rst");
+  const status =
+    args.status ?? RestoreStatus.not_restorable;
+
+  await args.db.batch([
+    args.db
+      .update(auditLogs)
+      .set({
+        restore_status: status,
+        restore_unavailable_reason_code:
+          args.reasonCode,
+        restore_unavailable_message:
+          sanitizeRestoreError(args.message),
+      })
+      .where(eq(auditLogs.id, args.auditId)),
+    args.db.run(assertChanges(1)),
+    args.db.insert(auditRestoreRuns).values({
+      id: runId,
+      audit_log_id: args.auditId,
+      executed_by_user_id: args.userId,
+      reason: args.reason,
+      status: "failed",
+      error_message: JSON.stringify({
+        code: args.reasonCode,
+        message: sanitizeRestoreError(args.message),
+      }),
+      executed_at: args.now,
+    }),
+    args.db.run(assertChanges(1)),
+  ]);
+
+  return runId;
 }
 
 /**
@@ -66,8 +169,42 @@ export async function restoreAuditLog(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  if (log.expires_at !== null && log.expires_at < now) {
-    return { ok: false, message: "このログの復元可能期間は終了しています。" };
+  if (
+    log.expires_at !== null &&
+    log.expires_at < now
+  ) {
+    const message =
+      "このログの復元可能期間は終了しています。";
+
+    if (dry_run) {
+      return {
+        ok: false,
+        message,
+        reason_code: RestoreFailureReason.expired,
+        restore_status: RestoreStatus.expired,
+      };
+    }
+
+    const runId =
+      await persistPermanentRestoreFailure({
+        db,
+        auditId,
+        userId,
+        reason,
+        reasonCode:
+          RestoreFailureReason.expired,
+        message,
+        now,
+        status: RestoreStatus.expired,
+      });
+
+    return {
+      ok: false,
+      message,
+      reason_code: RestoreFailureReason.expired,
+      restore_status: RestoreStatus.expired,
+      restore_run_id: runId,
+    };
   }
 
   const strategy = log.restore_strategy as RestoreStrategy;
@@ -83,11 +220,87 @@ export async function restoreAuditLog(
     payloadExceeded,
   });
   if (!capability.restorable) {
-    return { ok: false, message: capability.message };
+    if (dry_run) {
+      return {
+        ok: false,
+        message: capability.message,
+        reason_code: capability.reasonCode,
+        restore_status: capability.status,
+      };
+    }
+
+    const permanent =
+      PERMANENT_RESTORE_REASONS.has(
+        capability.reasonCode,
+      );
+
+    const runId = permanent
+      ? await persistPermanentRestoreFailure({
+          db,
+          auditId,
+          userId,
+          reason,
+          reasonCode: capability.reasonCode,
+          message: capability.message,
+          now,
+        })
+      : await persistFailedRestoreRun({
+          db,
+          auditId,
+          userId,
+          reason,
+          reasonCode: capability.reasonCode,
+          message: capability.message,
+          now,
+        });
+
+    return {
+      ok: false,
+      message: capability.message,
+      reason_code: capability.reasonCode,
+      restore_status: capability.status,
+      restore_run_id: runId,
+    };
   }
 
-  const adapter = getAdapter(log.table_name);
-  if (!adapter) return { ok: false, message: "復元アダプターが見つかりません。" };
+  const registration =
+    getRestoreRegistration(log.table_name);
+
+  if (!registration) {
+    const message =
+      "復元アダプターが見つかりません。";
+
+    if (dry_run) {
+      return {
+        ok: false,
+        message,
+        reason_code:
+          RestoreFailureReason.adapterMissing,
+      };
+    }
+
+    const runId =
+      await persistPermanentRestoreFailure({
+        db,
+        auditId,
+        userId,
+        reason,
+        reasonCode:
+          RestoreFailureReason.adapterMissing,
+        message,
+        now,
+      });
+
+    return {
+      ok: false,
+      message,
+      reason_code:
+        RestoreFailureReason.adapterMissing,
+      restore_run_id: runId,
+    };
+  }
+
+  const adapter = registration.adapter;
   const target = strategy === RestoreStrategy.delete_created ? after : before;
   if (!target) return { ok: false, message: "復元用スナップショットがありません。" };
   if (target.id !== log.target_id) {
@@ -111,11 +324,37 @@ export async function restoreAuditLog(
       diff: { current, target, conflicts },
     };
   }
-  if (conflicts.length && !forceOverwrite) {
+  if (
+    conflicts.length > 0 &&
+    !forceOverwrite
+  ) {
+    const message =
+      `競合が検出されました: ${conflicts.join(", ")}。`;
+
+    const runId =
+      await persistFailedRestoreRun({
+        db,
+        auditId,
+        userId,
+        reason,
+        reasonCode:
+          RestoreFailureReason.targetConflict,
+        message,
+        now,
+      });
+
     return {
       ok: false,
-      message: `競合が検出されました: ${conflicts.join(", ")}。`,
-      diff: { current, target, conflicts },
+      message,
+      reason_code:
+        RestoreFailureReason.targetConflict,
+      restore_status: log.restore_status,
+      restore_run_id: runId,
+      diff: {
+        current,
+        target,
+        conflicts,
+      },
     };
   }
 
@@ -127,7 +366,39 @@ export async function restoreAuditLog(
       expectedCurrent: current,
     });
   } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : "復元mutationを作成できません。" };
+    const message =
+      error instanceof Error
+        ? error.message
+        : "復元mutationを作成できません。";
+
+    if (dry_run) {
+      return {
+        ok: false,
+        message,
+        reason_code:
+          RestoreFailureReason.mutationFailed,
+      };
+    }
+
+    const runId =
+      await persistFailedRestoreRun({
+        db,
+        auditId,
+        userId,
+        reason,
+        reasonCode:
+          RestoreFailureReason.mutationFailed,
+        message,
+        now,
+      });
+
+    return {
+      ok: false,
+      message,
+      reason_code:
+        RestoreFailureReason.mutationFailed,
+      restore_run_id: runId,
+    };
   }
 
   const restoreRunId = generateId("rst");
@@ -166,9 +437,45 @@ export async function restoreAuditLog(
       ],
     });
   } catch (error) {
+    const message =
+      `復元を確定できませんでした。変更はロールバックされました: ${
+        sanitizeRestoreError(error)
+      }`;
+
+    let failedRunId: string | undefined;
+
+    try {
+      failedRunId =
+        await persistFailedRestoreRun({
+          db,
+          auditId,
+          userId,
+          reason,
+          reasonCode:
+            RestoreFailureReason.mutationFailed,
+          message,
+          now,
+        });
+    } catch (recordError) {
+      console.error(
+        JSON.stringify({
+          event: "restore_failure_record_failed",
+          auditId,
+          error:
+            sanitizeRestoreError(recordError),
+          originalError:
+            sanitizeRestoreError(error),
+        }),
+      );
+    }
+
     return {
       ok: false,
-      message: `復元を確定できませんでした。変更はロールバックされました: ${error instanceof Error ? error.message : String(error)}`,
+      message,
+      reason_code:
+        RestoreFailureReason.mutationFailed,
+      restore_status: log.restore_status,
+      restore_run_id: failedRunId,
     };
   }
 
