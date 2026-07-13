@@ -31,7 +31,7 @@ async function retryRows(db: NonNullable<ReturnType<typeof getDatabase>>, rows: 
 export async function retryFailedStaticRebuild(formData: FormData): Promise<void> {
   const guard = await requireAdminWrite("admin_static_rebuild"); if (!guard.ok) return;
   const id = String(formData.get("queue_id") ?? "").trim(); if (!id || id.length > 128) return;
-  const db = getDatabase(); if (!db) return;
+  const { db } = guard;
   const row = (await db.select().from(staticRebuildQueue).where(eq(staticRebuildQueue.id, id)).limit(1))[0];
   if (!row || row.status !== "failed") return;
   await retryRows(db, [row], guard.user.id);
@@ -44,7 +44,7 @@ export async function enqueueStaticRebuildAdmin(formData: FormData): Promise<voi
   const targetId = String(formData.get("target_id") ?? "").trim();
   const reason = String(formData.get("reason") ?? "manual_rebuild").trim();
   if (!isStaticRebuildTargetType(targetType) || !targetId || targetId.length > 128 || !reason || reason.length > 500) return;
-  const db = getDatabase(); if (!db) return;
+  const { db } = guard;
   const queue = await buildStaticRebuildQueueBatch(db, [{ targetType, targetId, reason, priority: "high", requestedByUserId: guard.user.id }]);
   if (queue.statements.length === 0) return;
   await mutateWithAudit(db, {
@@ -57,7 +57,7 @@ export async function enqueueStaticRebuildAdmin(formData: FormData): Promise<voi
 
 export async function retryAllFailedStaticRebuild(): Promise<void> {
   const guard = await requireAdminWrite("admin_static_rebuild"); if (!guard.ok) return;
-  const db = getDatabase(); if (!db) return;
+  const { db } = guard;
   const rows = await db.select().from(staticRebuildQueue).where(eq(staticRebuildQueue.status, "failed")).orderBy(asc(staticRebuildQueue.created_at)).limit(BULK_RETRY_MAX + 1);
   const targets = rows.slice(0, BULK_RETRY_MAX); if (targets.length === 0) return;
   await retryRows(db, targets, guard.user.id);

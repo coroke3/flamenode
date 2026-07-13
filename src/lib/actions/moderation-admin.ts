@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { getDatabase } from "@/lib/cloudflare";
 import { videoModerationCases, videos } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { expectedRowCondition } from "@/lib/audit/adapters";
@@ -52,8 +51,7 @@ export async function createModerationCase(formData: FormData): Promise<Moderati
   const nextVideoStatus = normalizeModerationVideoStatus(String(formData.get("video_status") ?? ""));
   if (!videoId) return { ok: false, message: "video_id が必要です。" };
   if (!caseType) return { ok: false, message: "不正な case_type です。" };
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const { db } = guard;
   const video = (await db.select().from(videos).where(eq(videos.id, videoId)).limit(1))[0];
   if (!video) return { ok: false, message: "対象作品が見つかりません。" };
   const now = Math.floor(Date.now() / 1000);
@@ -100,8 +98,7 @@ export async function updateModerationCaseStatus(formData: FormData): Promise<Mo
   const nextVideoStatus = normalizeModerationVideoStatus(String(formData.get("video_status") ?? ""));
   if (!id) return { ok: false, message: "id が必要です。" };
   if (!status) return { ok: false, message: "不正な status です。" };
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const { db } = guard;
   const current = (await db.select().from(videoModerationCases).where(eq(videoModerationCases.id, id)).limit(1))[0];
   if (!current) return { ok: false, message: "case が見つかりません。" };
   if (current.status !== "open") return { ok: false, message: `status=${current.status} は更新対象外です。` };

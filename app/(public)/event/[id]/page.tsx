@@ -74,8 +74,8 @@ const dateFormat = {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
   const staticLoaded = await loadStaticEventDetail(id);
-  if (staticLoaded.detail) {
-    const event = staticLoaded.detail.event;
+  if (staticLoaded.data) {
+    const event = staticLoaded.data.event;
     return buildPageMetadata({
       title: event.title,
       description: event.explanation,
@@ -108,8 +108,8 @@ export default async function EventDetailPage({
   const { id } = await params;
   const staticLoaded = await loadStaticEventDetail(id);
   if (!canFallbackToDatabase(staticLoaded.strategy)) {
-    if (!staticLoaded.detail) notFound();
-    return <StaticEventDetailView detail={staticLoaded.detail} />;
+    if (!staticLoaded.data) notFound();
+    return <StaticEventDetailView detail={staticLoaded.data} />;
   }
 
   const bundle =

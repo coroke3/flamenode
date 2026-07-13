@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
-import { getDatabase } from "@/lib/cloudflare";
 import { videos, videoYoutubeMetadata } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { expectedRowCondition } from "@/lib/audit/adapters";
@@ -13,8 +12,7 @@ export async function queueYoutubeMetadataResync(formData: FormData): Promise<vo
   if (!guard.ok) throw new Error(guard.message);
   const videoId = String(formData.get("video_id") ?? "").trim();
   if (!videoId || videoId.length > 128) throw new Error("対象作品が不正です。");
-  const db = getDatabase();
-  if (!db) throw new Error("DBに接続できません。");
+  const { db } = guard;
   const video = (await db.select().from(videos).where(eq(videos.id, videoId)).limit(1))[0];
   if (!video) throw new Error("作品が見つかりません。");
   const before = (await db.select().from(videoYoutubeMetadata).where(eq(videoYoutubeMetadata.video_id, videoId)).limit(1))[0] ?? null;

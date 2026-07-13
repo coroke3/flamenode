@@ -2,19 +2,13 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import styles from "./XIdSwitcher.module.css";
 import { Icon } from "@/components/ui/Icon";
-import { setActiveXId } from "@/lib/actions/xid";
-import { normalizeXId } from "@/lib/utils/xid";
-
-export interface XIdEntry {
-  x_user_id: string;
-  x_name: string;
-  icon_url: string | null;
-  approval_status: "approved" | "pending" | "rejected";
-  is_active: boolean;
-}
+import {
+  sortXIdEntries,
+  type XIdEntry,
+} from "@/lib/xid/entries";
+import { useActiveXSwitcher } from "./useActiveXSwitcher";
 
 interface XIdSwitcherProps {
   entries: XIdEntry[];
@@ -22,40 +16,34 @@ interface XIdSwitcherProps {
   onSwitch?: (xUserId: string) => void;
 }
 
-function dedupeEntries(entries: readonly XIdEntry[]): XIdEntry[] {
-  const seen = new Set<string>();
-  const out: XIdEntry[] = [];
-  for (const entry of entries) {
-    const normalized = normalizeXId(entry.x_user_id);
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    out.push({
-      ...entry,
-      x_user_id: normalized,
-      x_name: entry.x_name?.trim() || `@${normalized}`,
-    });
-  }
-  return out;
-}
-
 export function XIdSwitcher({
   entries,
   discordName,
   onSwitch,
 }: XIdSwitcherProps): React.ReactElement {
-  const router = useRouter();
-  const normalizedEntries = React.useMemo(() => dedupeEntries(entries), [entries]);
   const [open, setOpen] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-  const [activeId, setActiveId] = React.useState(
-    normalizedEntries.find((e) => e.is_active)?.x_user_id ?? null,
-  );
-  const [pending, startTransition] = React.useTransition();
-  const ref = React.useRef<HTMLDivElement>(null);
 
-  React.useEffect(() => {
-    setActiveId(normalizedEntries.find((e) => e.is_active)?.x_user_id ?? null);
-  }, [normalizedEntries]);
+  const closeAfterSwitch =
+    React.useCallback(() => {
+      setOpen(false);
+    }, []);
+
+  const {
+    entries: normalizedEntries,
+    activeId,
+    activeEntry: active,
+    pending,
+    error,
+    clearError,
+    switchTo,
+  } = useActiveXSwitcher({
+    entries,
+    onSwitch,
+    onSuccess: closeAfterSwitch,
+  });
+
+  const ref =
+    React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     if (!open) return;
@@ -75,50 +63,13 @@ export function XIdSwitcher({
     };
   }, [open]);
 
-  const order = (s: XIdEntry["approval_status"]) =>
-    s === "approved" ? 0 : s === "pending" ? 1 : 2;
-
-  const sorted = [...normalizedEntries].sort((a, b) => {
-    if (a.x_user_id === activeId) return -1;
-    if (b.x_user_id === activeId) return 1;
-    return (
-      order(a.approval_status) - order(b.approval_status) ||
-      a.x_name.localeCompare(b.x_name, "ja")
-    );
-  });
-
-  // activeId に一致する entry のみを「現在のアクティブ」とみなす。
-  // approved / entries[0] へのフォールバックは「未選択なのに選択済みに見える」UX 不整合を生むため行わない。
-  const active = normalizedEntries.find((e) => e.x_user_id === activeId) ?? null;
-
-  const switchTo = (entry: XIdEntry) => {
-    setError(null);
-    if (entry.x_user_id === activeId) {
-      setOpen(false);
-      return;
-    }
-    if (entry.approval_status === "rejected") {
-      setError("却下された X ID はアクティブにできません。");
-      return;
-    }
-
-    const prev = activeId;
-    setActiveId(entry.x_user_id);
-    const fd = new FormData();
-    fd.set("x_user_id", entry.x_user_id);
-
-    startTransition(async () => {
-      const res = await setActiveXId(fd);
-      if (res.ok) {
-        onSwitch?.(entry.x_user_id);
-        router.refresh();
-        setOpen(false);
-      } else {
-        setActiveId(prev);
-        setError(res.message ?? "X ID の切り替えに失敗しました。");
-      }
-    });
-  };
+  const sorted = sortXIdEntries(
+    normalizedEntries,
+    {
+      activeId,
+      activeFirst: true,
+    },
+  );
 
   return (
     <div ref={ref} className={styles.root}>
@@ -128,7 +79,7 @@ export function XIdSwitcher({
         aria-expanded={open}
         aria-label="アクティブ X ID を切り替え"
         onClick={() => {
-          setError(null);
+          clearError();
           setOpen((v) => !v);
         }}
         className={styles.trigger}

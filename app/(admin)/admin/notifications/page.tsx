@@ -10,11 +10,9 @@ import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { notificationOutbox } from "@/lib/db/schema";
 import { formatRelative } from "@/lib/utils/format";
-import { NotificationRetryButton } from "@/components/admin/NotificationRetryButton";
+import { NotificationActionButton } from "@/components/admin/NotificationActionButton";
 import { NotificationCancelButton } from "@/components/admin/NotificationCancelButton";
 import { NotificationPayloadButton } from "@/components/admin/NotificationPayloadButton";
-import { NotificationBulkRetryButton } from "@/components/admin/NotificationBulkRetryButton";
-import { NotificationForceResendButton } from "@/components/admin/NotificationForceResendButton";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -220,7 +218,7 @@ export default async function AdminNotificationsPage({
             <strong>failed {counts.failed} 件</strong>
             {" "}— Worker が諦めた通知です。手動リトライまたは Discord 側の状態確認を検討してください。
           </span>
-          <NotificationBulkRetryButton />
+          <NotificationActionButton kind="bulk-retry" />
         </div>
       ) : counts.pending > 0 ? (
         <div
@@ -450,10 +448,16 @@ export default async function AdminNotificationsPage({
                           監査
                         </Link>
                         {r.status === "failed" ? (
-                          <NotificationRetryButton id={r.id} />
+                          <NotificationActionButton
+                            kind="retry"
+                            id={r.id}
+                          />
                         ) : null}
                         {r.status === "sent" || r.status === "failed" ? (
-                          <NotificationForceResendButton id={r.id} />
+                          <NotificationActionButton
+                            kind="force-resend"
+                            id={r.id}
+                          />
                         ) : null}
                         {r.status === "pending" ||
                         r.status === "processing" ||

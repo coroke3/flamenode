@@ -56,8 +56,8 @@ interface Props {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
   const staticLoaded = await loadStaticVideoDetail(id);
-  if (staticLoaded.detail) {
-      const { video } = staticLoaded.detail;
+  if (staticLoaded.data) {
+      const { video } = staticLoaded.data;
       const videoPath = `/${video.youtube_video_id ?? video.id}`;
       const description = compactText(
         video.intro_comment ||
@@ -116,8 +116,8 @@ export default async function VideoDetailPage({
 
   const staticProbe = await loadStaticVideoDetail(rawId);
   if (!canFallbackToDatabase(staticProbe.strategy)) {
-    if (!staticProbe.detail) notFound();
-    return <StaticVideoDetailView detail={staticProbe.detail} rawId={rawId} />;
+    if (!staticProbe.data) notFound();
+    return <StaticVideoDetailView detail={staticProbe.data} rawId={rawId} />;
   }
 
   const viewerUser = await getCurrentUser();

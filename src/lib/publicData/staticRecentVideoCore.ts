@@ -1,3 +1,10 @@
+import {
+  normalizeCount,
+  normalizeNumericUnix as normalizeUnix,
+  normalizePresentString as normalizeNullableString,
+  normalizePresentString as normalizeString,
+} from "./normalize";
+
 export interface StaticRecentVideoRow {
   id?: unknown;
   title?: unknown;
@@ -85,24 +92,4 @@ function normalizeStaticRecentVideoRow(
     status: "public",
     part: null,
   };
-}
-
-function normalizeString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
-function normalizeNullableString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
-function normalizeCount(value: unknown): number | null {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n) || n < 0) return null;
-  return Math.floor(n);
-}
-
-function normalizeUnix(value: unknown): number | null {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n)) return null;
-  return Math.floor(n);
 }

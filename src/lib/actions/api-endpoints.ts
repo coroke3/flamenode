@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
-import { getDatabase } from "@/lib/cloudflare";
 import { events } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { expectedRowCondition } from "@/lib/audit/adapters";
@@ -14,8 +13,7 @@ async function setPublicApi(eventId: string, enabled: 0 | 1): Promise<ApiEndpoin
   const guard = await requireAdminWrite("admin_api_endpoints");
   if (!guard.ok) return { ok: false, message: guard.message };
   if (!eventId || eventId.length > 128) return { ok: false, message: "event_idが不正です。" };
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DBに接続できません。" };
+  const { db } = guard;
   const before = (await db.select().from(events).where(eq(events.id, eventId)).limit(1))[0];
   if (!before) return { ok: false, message: "イベントが見つかりません。" };
   if (enabled === 1 && before.visibility_status !== "public") return { ok: false, message: "公開イベントだけAPIを有効化できます。" };

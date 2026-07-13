@@ -59,8 +59,8 @@ type CreatorVideo = VideoCardData & { score: number };
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const id = normalizeXId((await params).id);
   const staticLoaded = await loadStaticUserProfile(id);
-  if (staticLoaded.profile) {
-    const { user } = staticLoaded.profile;
+  if (staticLoaded.data) {
+    const { user } = staticLoaded.data;
     return buildPageMetadata({
       title: `${user.x_name} - クリエイター`,
       description:
@@ -138,10 +138,10 @@ export default async function UserPage({
   });
   const staticLoaded = await loadStaticUserProfile(id);
   if (!canFallbackToDatabase(staticLoaded.strategy)) {
-    if (!staticLoaded.profile) notFound();
+    if (!staticLoaded.data) notFound();
     return (
       <StaticUserProfileView
-        profile={staticLoaded.profile}
+        profile={staticLoaded.data}
         page={worksPaging.page}
       />
     );

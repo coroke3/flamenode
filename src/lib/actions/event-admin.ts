@@ -1,7 +1,6 @@
 "use server";
 
 import { and, eq, inArray, or } from "drizzle-orm";
-import { getDatabase } from "@/lib/cloudflare";
 import {
   requireAdminWrite,
   writeGuard,
@@ -129,8 +128,7 @@ export async function createEvent(
 
   const actorUserId = guard.user.id;
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const { db } = guard;
 
   const parsed = parseEventForm(formData);
   if (!parsed.ok) return parsed;
@@ -300,8 +298,7 @@ export async function updateEvent(
     role: guard.user.role ?? null,
   };
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const { db } = guard;
 
   const parsed = parseEventForm(formData);
   if (!parsed.ok) return parsed;
@@ -552,8 +549,7 @@ export async function deleteEvent(
     };
   }
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const { db } = guard;
 
   const now = Math.floor(Date.now() / 1000);
   const before = (await db.select().from(events).where(eq(events.id, eventId)).limit(1))[0];

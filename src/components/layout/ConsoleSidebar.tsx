@@ -20,10 +20,43 @@ import {
   videos,
 } from "@/lib/db/schema";
 import { AdminSidebarNav } from "@/components/admin/AdminSidebarNav";
-import { AdminModeBanner } from "@/components/admin/AdminModeBanner";
-import { ManageModeBanner } from "@/components/manage/ManageModeBanner";
+import { ConsoleModeBanner } from "@/components/layout/ConsoleModeBanner";
 import { buildAdminNavGroups } from "@/lib/admin/adminNavGroups";
 import { ManageSidebarNav } from "./ManageSidebarNav";
+
+function SidebarModeBanner({
+  mode,
+}: {
+  mode: "admin" | "manage";
+}): React.ReactElement {
+  if (mode === "admin") {
+    return (
+      <ConsoleModeBanner
+        classPrefix="admin-mode"
+        badge="ADMIN"
+        label="サイト管理"
+      >
+        サイト全体の設定・監査・ユーザー管理を行います。
+        担当イベントの現場運用は
+        <strong> /manage</strong>
+        から行ってください。
+      </ConsoleModeBanner>
+    );
+  }
+
+  return (
+    <ConsoleModeBanner
+      classPrefix="manage-mode"
+      badge="MANAGE"
+      label="イベント運営"
+    >
+      担当イベントの審査・枠・通知を確認できます。
+      サイト全体の管理は管理者のみ
+      <strong> /admin</strong>
+      で行います。
+    </ConsoleModeBanner>
+  );
+}
 
 /**
  * /admin と /manage で共通の左ナビ。
@@ -44,7 +77,7 @@ export async function ConsoleSidebar({
     if (!isAdmin) return null;
     return (
       <aside className="admin-sidebar">
-        <AdminModeBanner />
+        <SidebarModeBanner mode="admin" />
         <AdminSidebarNav groups={buildAdminNavGroups()} />
       </aside>
     );
@@ -148,7 +181,7 @@ export async function ConsoleSidebar({
   const warnActiveX = !isAdmin && shouldWarnManageActiveXMismatch(activeX, manageStaffXIds);
   return (
     <aside className="admin-sidebar">
-      <ManageModeBanner />
+      <SidebarModeBanner mode="manage" />
       <ManageSidebarNav
         events={normalizedEvents}
         showXLinkRequests={showXLinkRequests}

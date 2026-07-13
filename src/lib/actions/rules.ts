@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { and, eq, gt } from "drizzle-orm";
-import { getDatabase } from "@/lib/cloudflare";
 import { termsVersions, users } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { expectedRowCondition } from "@/lib/audit/adapters";
@@ -42,8 +41,7 @@ export async function createTermsVersion(formData: FormData): Promise<RulesResul
   if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
   const d = parsed.data;
   const id = d.id?.trim() || generateId("tv");
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const { db } = guard;
   const now = Math.floor(Date.now() / 1000);
   const after: TermsRow = {
     id, version_label: d.version_label, body_markdown: d.body_markdown,
@@ -68,8 +66,7 @@ export async function updateTermsVersion(formData: FormData): Promise<RulesResul
   if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
   const d = parsed.data;
   if (!d.id) return { ok: false, message: "id が必要です。" };
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const { db } = guard;
   const before = (await db.select().from(termsVersions).where(eq(termsVersions.id, d.id)).limit(1))[0];
   if (!before) return { ok: false, message: "対象が見つかりません。" };
   if (before.status !== "draft") return { ok: false, message: "下書き状態のバージョンのみ編集できます。" };
@@ -91,8 +88,7 @@ export async function publishTermsVersion(formData: FormData): Promise<RulesResu
   if (!guard.ok) return { ok: false, message: guard.message };
   const id = String(formData.get("id") ?? "").trim();
   if (!id) return { ok: false, message: "id が必要です。" };
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const { db } = guard;
   const target = (await db.select().from(termsVersions).where(eq(termsVersions.id, id)).limit(1))[0];
   if (!target) return { ok: false, message: "対象が見つかりません。" };
   if (target.status === "archived") return { ok: false, message: "アーカイブ済みの規約は再公開できません。" };
@@ -135,8 +131,7 @@ export async function broadcastTermsReaccept(formData: FormData): Promise<RulesB
   if (confirm !== "TERMS") return { ok: false, message: "確認文字列 'TERMS' が一致しません。" };
   if (cursor.length > 128) return { ok: false, message: "cursor が長すぎます。" };
   const content = String(formData.get("content") ?? "").trim().slice(0, TERMS_REACCEPT_MAX_CONTENT_LEN);
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const { db } = guard;
   const target = (await db.select().from(termsVersions).where(eq(termsVersions.id, termsId)).limit(1))[0];
   if (!target || target.status !== "published") return { ok: false, message: "公開中の規約だけ通知できます。" };
   const requiredMajor = await getLatestPublishedMajorTerms(db);
@@ -181,8 +176,7 @@ export async function archiveTermsVersion(formData: FormData): Promise<RulesResu
   if (!guard.ok) return { ok: false, message: guard.message };
   const id = String(formData.get("id") ?? "").trim();
   if (!id) return { ok: false, message: "id が必要です。" };
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const { db } = guard;
   const before = (await db.select().from(termsVersions).where(eq(termsVersions.id, id)).limit(1))[0];
   if (!before) return { ok: false, message: "対象が見つかりません。" };
   const after = { ...before, status: "archived" as const, updated_at: Math.floor(Date.now() / 1000) };

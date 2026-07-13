@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { and, eq, gt } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { getDatabase } from "@/lib/cloudflare";
 import {
   announcements,
   users,
@@ -48,8 +47,7 @@ export async function broadcastAnnouncement(formData: FormData): Promise<Broadca
   if (audienceRaw !== "all" && audienceRaw !== "creators" && audienceRaw !== "admins") return { ok: false, message: "audienceが不正です。" };
   const audience: Audience = audienceRaw;
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DBに接続できません。" };
+  const { db } = guard;
   const before = (await db.select().from(announcements).where(eq(announcements.id, announcementId)).limit(1))[0];
   if (!before) return { ok: false, message: "対象のお知らせが見つかりません。" };
 

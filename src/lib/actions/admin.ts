@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { getDatabase } from "@/lib/cloudflare";
 import { videoEvents, videoModerationCases, videos } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { expectedRowCondition } from "@/lib/audit/adapters";
@@ -25,8 +24,7 @@ export async function setVideoStatus(formData: FormData): Promise<AdminActionRes
   if (!videoId || videoId.length > 128) return { ok: false, message: "video_idが不正です。" };
   if (!VALID_STATUS.has(status)) return { ok: false, message: "不正なステータスです。" };
   if (status === "voided" && !reason) return { ok: false, message: "voidedへの変更には理由が必要です。" };
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DBに接続できません。" };
+  const { db } = guard;
   const before = (await db.select().from(videos).where(eq(videos.id, videoId)).limit(1))[0];
   if (!before) return { ok: false, message: "対象作品が見つかりません。" };
   if (before.visibility_status === status) return { ok: true, message: "ステータスは変更されていません。" };

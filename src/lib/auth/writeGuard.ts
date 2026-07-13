@@ -1,5 +1,6 @@
 import "server-only";
 import { eq } from "drizzle-orm";
+import type { DB } from "@/lib/db/client";
 import { getCurrentUser, type CurrentUser } from "./currentUser";
 import { getDatabase } from "@/lib/cloudflare";
 import { xUsers } from "@/lib/db/schema";
@@ -54,6 +55,7 @@ export type WriteGuardDenyReason =
 
 export type WriteGuardSuccess = {
   ok: true;
+  db: DB;
   user: CurrentUser;
   /** requireActiveXId / requireApprovedActiveXId 指定時は必ず非 null。 */
   activeXId: string | null;
@@ -144,7 +146,7 @@ export async function writeGuard(
 
   const approvedXIds = await getApprovedXIds(db, user.id);
 
-  return { ok: true, user, activeXId, approvedXIds };
+  return { ok: true, db, user, activeXId, approvedXIds };
 }
 
 export async function requireAdminWrite(
@@ -166,6 +168,7 @@ export async function requireCostGuardControlAdmin(): Promise<WriteGuardResult> 
   if (identityDeny) return deny(identityDeny);
   return {
     ok: true,
+    db,
     user,
     activeXId: null,
     approvedXIds: [],

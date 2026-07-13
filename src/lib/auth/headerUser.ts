@@ -13,14 +13,9 @@ import {
   applyActiveXIdToEntries,
   fetchHeaderXIdEntries,
 } from "./headerXIds";
+import type { XIdEntry } from "@/lib/xid/entries";
 
-export type HeaderXIdEntry = {
-  x_user_id: string;
-  x_name: string;
-  icon_url: string | null;
-  approval_status: "approved" | "pending" | "rejected";
-  is_active: boolean;
-};
+export type HeaderXIdEntry = XIdEntry;
 
 export type HeaderUser = {
   id: string;

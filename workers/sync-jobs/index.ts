@@ -5,6 +5,7 @@
  *
  * 既存の youtube-sync と score-recalc を統合。
  */
+import { createCronWorker } from "../shared/createCronWorker.ts";
 import { recalcScoreBatch } from "../score-recalc/index.ts";
 import { withCronLease } from "../shared/cronLease.ts";
 import { withBoundedRetry } from "../shared/queue.ts";
@@ -43,23 +44,7 @@ export async function runSyncJobs(env: Env): Promise<void> {
   });
 }
 
-export default {
-  async scheduled(_evt: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(runSyncJobs(env));
-  },
-
-  async fetch(
-    req: Request,
-    env: Env,
-  ): Promise<Response> {
-    if (new URL(req.url).pathname === "/health") {
-      return Response.json({
-        ok: true,
-        service: "sync-jobs",
-        commit:
-          env.BUILD_COMMIT_SHA ?? "unknown",
-      });
-    }
-    return new Response("Not Found", { status: 404 });
-  },
-};
+export default createCronWorker<Env>({
+  service: "sync-jobs",
+  run: runSyncJobs,
+});

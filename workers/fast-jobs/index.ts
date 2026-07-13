@@ -3,6 +3,7 @@
  * - 通知ディスパッチ
  * - スロット締切リマインド enqueue
  */
+import { createCronWorker } from "../shared/createCronWorker.ts";
 import { processNotificationQueue } from "../notification-dispatcher/dispatch.ts";
 import { enqueueSlotDeadlineReminders } from "../notification-dispatcher/reminders.ts";
 import { withCronLease } from "../shared/cronLease.ts";
@@ -64,21 +65,7 @@ export async function runFastJobs(env: Env): Promise<void> {
   });
 }
 
-export default {
-  async scheduled(_evt: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(runFastJobs(env));
-  },
-
-  async fetch(req: Request, env: Env): Promise<Response> {
-    const url = new URL(req.url);
-    if (url.pathname === "/health") {
-      return Response.json({
-        ok: true,
-        service: "fast-jobs",
-        commit:
-          env.BUILD_COMMIT_SHA ?? "unknown",
-      });
-    }
-    return new Response("Not Found", { status: 404 });
-  },
-};
+export default createCronWorker<Env>({
+  service: "fast-jobs",
+  run: runFastJobs,
+});

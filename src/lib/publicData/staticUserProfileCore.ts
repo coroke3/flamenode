@@ -1,5 +1,11 @@
 import type { VideoCardData } from "@/components/video/VideoCard";
 import { isPublicVideoListable } from "./visibility.ts";
+import {
+  normalizeCount,
+  normalizeNumericUnix as normalizeUnix,
+  normalizePresentString as normalizeNullableString,
+  normalizePresentString as normalizeString,
+} from "./normalize";
 
 export interface StaticUserProfilePayload {
   generated_at?: unknown;
@@ -76,23 +82,4 @@ function normalizeVideo(value: unknown): VideoCardData | null {
     status: "public",
     part: normalizeNullableString(row.part),
   };
-}
-
-function normalizeString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
-function normalizeNullableString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
-function normalizeUnix(value: unknown): number | null {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n)) return null;
-  return Math.floor(n);
-}
-
-function normalizeCount(value: unknown): number | null {
-  const n = normalizeUnix(value);
-  return n != null && n >= 0 ? n : null;
 }

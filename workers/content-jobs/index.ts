@@ -3,6 +3,7 @@
  * - static_rebuild_queueを通常最大3件、economy最大1件処理
  * - cleanupは1時間に1回だけ実行
  */
+import { createCronWorker } from "../shared/createCronWorker.ts";
 import { processStaticRebuildQueue } from "../json-generator/queue.ts";
 import { runCleanupWithRetry } from "../cleanup/index.ts";
 import { withCronLease } from "../shared/cronLease.ts";
@@ -72,14 +73,6 @@ export async function handleContentJobsFetch(
   runQueue: QueueRunner = processStaticRebuildQueue,
 ): Promise<Response> {
   const url = new URL(req.url);
-  if (url.pathname === "/health") {
-    return Response.json({
-      ok: true,
-      service: "content-jobs",
-      commit:
-        env.BUILD_COMMIT_SHA ?? "unknown",
-    });
-  }
   if (url.pathname !== "/rebuild" && url.pathname !== "/process-queue") {
     return new Response("Not Found", { status: 404 });
   }
@@ -114,12 +107,8 @@ export async function handleContentJobsFetch(
   return Response.json({ ok: true, ...leaseResult.value });
 }
 
-export default {
-  async scheduled(_evt: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(runContentJobs(env));
-  },
-
-  async fetch(req: Request, env: Env): Promise<Response> {
-    return handleContentJobsFetch(req, env);
-  },
-};
+export default createCronWorker<Env>({
+  service: "content-jobs",
+  run: runContentJobs,
+  fetch: handleContentJobsFetch,
+});

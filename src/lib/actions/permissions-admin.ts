@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
-import { getDatabase } from "@/lib/cloudflare";
 import { systemSettings } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { expectedRowCondition } from "@/lib/audit/adapters";
@@ -17,8 +16,7 @@ function cleanFields(values: FormDataEntryValue[]): string {
 export async function updateGlobalEditableFields(formData: FormData): Promise<PermissionAdminResult> {
   const guard = await requireAdminWrite("admin_permissions");
   if (!guard.ok) return { ok: false, message: guard.message };
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DBに接続できません。" };
+  const { db } = guard;
   const before = (await db.select().from(systemSettings).where(eq(systemSettings.id, "default")).limit(1))[0];
   if (!before) return { ok: false, message: "system_settingsが見つかりません。" };
   const patch = {

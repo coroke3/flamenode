@@ -41,7 +41,7 @@ export async function retryFailedNotification(formData: FormData): Promise<Notif
   if (!guard.ok) return { ok: false, message: guard.message };
   const id = String(formData.get("id") ?? "").trim();
   if (!id || id.length > 128) return { ok: false, message: "idが不正です。" };
-  const db = getDatabase(); if (!db) return { ok: false, message: "DBに接続できません。" };
+  const { db } = guard;
   const row = (await db.select().from(notificationOutbox).where(eq(notificationOutbox.id, id)).limit(1))[0];
   if (!row) return { ok: false, message: "通知が見つかりません。" };
   if (row.status !== "failed") return { ok: false, message: `status=${row.status}はリトライ対象外です。` };
@@ -56,7 +56,7 @@ export async function cancelNotification(formData: FormData): Promise<Notificati
   const id = String(formData.get("id") ?? "").trim();
   const reason = String(formData.get("reason") ?? "").trim();
   if (!id || id.length > 128 || reason.length > 500) return { ok: false, message: "入力が不正です。" };
-  const db = getDatabase(); if (!db) return { ok: false, message: "DBに接続できません。" };
+  const { db } = guard;
   const row = (await db.select().from(notificationOutbox).where(eq(notificationOutbox.id, id)).limit(1))[0];
   if (!row) return { ok: false, message: "通知が見つかりません。" };
   if (row.status === "sent" || row.status === "cancelled") return { ok: false, message: `status=${row.status}はキャンセル対象外です。` };
@@ -70,7 +70,7 @@ export async function forceResendNotification(formData: FormData): Promise<Notif
   if (!guard.ok) return { ok: false, message: guard.message };
   const id = String(formData.get("id") ?? "").trim();
   if (!id || id.length > 128) return { ok: false, message: "idが不正です。" };
-  const db = getDatabase(); if (!db) return { ok: false, message: "DBに接続できません。" };
+  const { db } = guard;
   const source = (await db.select().from(notificationOutbox).where(eq(notificationOutbox.id, id)).limit(1))[0];
   if (!source) return { ok: false, message: "通知が見つかりません。" };
   let payload: Record<string, unknown>;
@@ -87,7 +87,7 @@ export async function forceResendNotification(formData: FormData): Promise<Notif
 export async function retryAllFailedNotifications(_formData: FormData): Promise<NotificationAdminResult & { retried?: number }> {
   const guard = await requireAdminWrite("admin_notifications");
   if (!guard.ok) return { ok: false, message: guard.message };
-  const db = getDatabase(); if (!db) return { ok: false, message: "DBに接続できません。" };
+  const { db } = guard;
   const rows = await db.select().from(notificationOutbox).where(eq(notificationOutbox.status, "failed")).orderBy(asc(notificationOutbox.created_at)).limit(BULK_RETRY_MAX + 1);
   const targets = rows.slice(0, BULK_RETRY_MAX);
   if (targets.length === 0) return { ok: true, message: "failed通知はありません。", retried: 0 };

@@ -65,8 +65,7 @@ export async function saveEventAsTemplate(
     };
   }
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const { db } = guard;
 
   const event = (
     await db
@@ -141,8 +140,7 @@ export async function deleteEventTemplate(
     return { ok: false, message: "template_id が必要です。" };
   }
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const { db } = guard;
 
   const row = (
     await db

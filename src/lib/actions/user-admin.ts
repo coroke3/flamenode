@@ -92,8 +92,7 @@ export async function setUserRole(formData: FormData): Promise<UserAdminResult> 
   if (user_id === guard.user.id && role !== "admin") {
     return { ok: false, message: "自分自身の管理者権限は解除できません。" };
   }
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const { db } = guard;
   const target = await getTargetUser(db, user_id);
   if (!target) return { ok: false, message: "対象ユーザーが見つかりません。" };
   const result = await updateUserAtomic({ db, actorUserId: guard.user.id, target, patch: { role }, retentionClass: "long_audit", context: "admin_user_role" });
@@ -118,8 +117,7 @@ export async function setUserBanned(formData: FormData): Promise<UserAdminResult
   const { user_id, is_banned, reason } = parsed.data;
   if (user_id === guard.user.id && is_banned === 1) return { ok: false, message: "自分自身をBANにはできません。" };
   if (is_banned === 1 && !reason) return { ok: false, message: "BANには理由が必要です。" };
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const { db } = guard;
   const target = await getTargetUser(db, user_id);
   if (!target) return { ok: false, message: "対象ユーザーが見つかりません。" };
   const result = await updateUserAtomic({ db, actorUserId: guard.user.id, target, patch: { is_banned }, retentionClass: "long_audit", context: "admin_user_ban", reason: reason || (is_banned === 0 ? "BAN解除" : null) });
@@ -140,8 +138,7 @@ export async function setUserNotifications(formData: FormData): Promise<UserAdmi
   if (!guard.ok) return { ok: false, message: guard.message };
   const parsed = notifSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const { db } = guard;
   const target = await getTargetUser(db, parsed.data.user_id);
   if (!target) return { ok: false, message: "対象ユーザーが見つかりません。" };
   const result = await updateUserAtomic({ db, actorUserId: guard.user.id, target, patch: { is_notification_enabled: parsed.data.is_notification_enabled }, retentionClass: "normal", context: "admin_user_notifications" });
@@ -159,8 +156,7 @@ export async function setUserCanCreateEvents(formData: FormData): Promise<UserAd
   if (!guard.ok) return { ok: false, message: guard.message };
   const parsed = eventCreateSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const { db } = guard;
   const target = await getTargetUser(db, parsed.data.user_id);
   if (!target) return { ok: false, message: "対象ユーザーが見つかりません。" };
   const result = await updateUserAtomic({ db, actorUserId: guard.user.id, target, patch: { can_create_events: parsed.data.can_create_events }, retentionClass: "long_audit", context: "admin_user_event_create" });
@@ -177,8 +173,7 @@ export async function refreshXUserIcon(formData: FormData): Promise<UserAdminRes
   if (!guard.ok) return { ok: false, message: guard.message };
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   if (!xUserId) return { ok: false, message: "x_user_id が必要です。" };
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const { db } = guard;
   const target = (await db.select().from(xUsers).where(eq(xUsers.id, xUserId)).limit(1))[0];
   if (!target) return { ok: false, message: "対象Xユーザーが見つかりません。" };
   const latest = (await db

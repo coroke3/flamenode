@@ -2,20 +2,14 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import styles from "./AccountMenu.module.css";
 import { Icon } from "@/components/ui/Icon";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
-import { setActiveXId } from "@/lib/actions/xid";
-import { normalizeXId } from "@/lib/utils/xid";
-
-export interface XIdEntry {
-  x_user_id: string;
-  x_name: string;
-  icon_url: string | null;
-  approval_status: "approved" | "pending" | "rejected";
-  is_active: boolean;
-}
+import {
+  sortXIdEntries,
+  type XIdEntry,
+} from "@/lib/xid/entries";
+import { useActiveXSwitcher } from "./useActiveXSwitcher";
 
 export interface AccountMenuUser {
   id: string;
@@ -39,30 +33,12 @@ interface AccountMenuProps {
   ) => void;
 }
 
-function dedupeXIds(entries: readonly XIdEntry[]): XIdEntry[] {
-  const seen = new Set<string>();
-  const out: XIdEntry[] = [];
-  for (const entry of entries) {
-    const normalized = normalizeXId(entry.x_user_id);
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    out.push({
-      ...entry,
-      x_user_id: normalized,
-      x_name: entry.x_name?.trim() || `@${normalized}`,
-    });
-  }
-  return out;
-}
-
 export function AccountMenu({
   user,
   onSwitch,
   open: controlledOpen,
   onOpenChange,
 }: AccountMenuProps): React.ReactElement {
-  const router = useRouter();
-  const xIds = React.useMemo(() => dedupeXIds(user.xIds), [user.xIds]);
   const [
     internalOpen,
     setInternalOpen,
@@ -94,16 +70,21 @@ export function AccountMenu({
       open,
     ],
   );
-  const [error, setError] = React.useState<string | null>(null);
-  const [activeId, setActiveId] = React.useState(
-    xIds.find((e) => e.is_active)?.x_user_id ?? null,
-  );
-  const [pending, startTransition] = React.useTransition();
-  const ref = React.useRef<HTMLDivElement>(null);
 
-  React.useEffect(() => {
-    setActiveId(xIds.find((e) => e.is_active)?.x_user_id ?? null);
-  }, [xIds]);
+  const {
+    entries: xIds,
+    activeId,
+    activeEntry,
+    pending,
+    error,
+    clearError,
+    switchTo,
+  } = useActiveXSwitcher({
+    entries: user.xIds,
+    onSwitch,
+  });
+
+  const ref = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     if (!open) return;
@@ -123,65 +104,30 @@ export function AccountMenu({
     };
   }, [open, setOpen]);
 
-  // activeId に一致する entry のみを「現在のアクティブ」とみなす。
-  // approved への暗黙フォールバックは、未選択なのにヘッダーで承認済み X ID が
-  // アクティブに見える UX 不整合を生むため行わない。
-  const activeEntry =
-    xIds.find((e) => e.x_user_id === activeId) ?? null;
-
-  const switchTo = (entry: XIdEntry) => {
-    setError(null);
-    if (entry.x_user_id === activeId) return;
-    if (entry.approval_status === "rejected") {
-      setError("却下された X ID はアクティブにできません。");
-      return;
-    }
-
-    const prev = activeId;
-    setActiveId(entry.x_user_id);
-    const fd = new FormData();
-    fd.set("x_user_id", entry.x_user_id);
-
-    startTransition(async () => {
-      const res = await setActiveXId(fd);
-      if (res.ok) {
-        onSwitch?.(entry.x_user_id);
-        router.refresh();
-      } else {
-        setActiveId(prev);
-        setError(res.message ?? "X ID の切り替えに失敗しました。");
-      }
-    });
-  };
-
   // トリガー用のアイコンと名前
   const triggerIcon = activeEntry?.icon_url ?? user.image;
   const triggerName = activeEntry ? activeEntry.x_name : user.name?.trim() || "guest";
 
-  const order = (s: XIdEntry["approval_status"]) =>
-    s === "approved" ? 0 : s === "pending" ? 1 : 2;
-
-  const selectableXIds = [...xIds]
-    .filter((entry) => entry.approval_status !== "rejected")
-    .sort(
-      (a, b) =>
-        order(a.approval_status) - order(b.approval_status) ||
-        a.x_name.localeCompare(b.x_name, "ja"),
+  const selectableXIds =
+    sortXIdEntries(
+      xIds.filter(
+        (entry) =>
+          entry.approval_status !==
+          "rejected",
+      ),
     );
 
   const hasPendingOnly =
     xIds.length > 0 &&
     xIds.every((entry) => entry.approval_status === "pending");
 
-  const switchableXIds = activeEntry
-    ? [...xIds]
-        .filter((entry) => entry.x_user_id !== activeId)
-        .sort(
-          (a, b) =>
-            order(a.approval_status) - order(b.approval_status) ||
-            a.x_name.localeCompare(b.x_name, "ja"),
-        )
-    : [];
+  const switchableXIds =
+    sortXIdEntries(
+      xIds.filter(
+        (entry) =>
+          entry.x_user_id !== activeId,
+      ),
+    );
 
   const publicProfileHref =
     activeEntry?.approval_status === "approved"
@@ -218,7 +164,7 @@ export function AccountMenu({
         aria-expanded={open}
         aria-label="アカウントメニューを開く"
         onClick={() => {
-          setError(null);
+          clearError();
           setOpen((v) => !v);
         }}
         className={`${styles.trigger} ${open ? styles.triggerActive : ""}`}

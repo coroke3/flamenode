@@ -2,6 +2,11 @@ import {
   isPublicVideoListable,
   normalizePublicEventVisibility,
 } from "./visibility.ts";
+import {
+  normalizeCoercedString as normalizeNullableString,
+  normalizeNullableUnix as normalizeUnix,
+  normalizeTrimmedString as normalizeString,
+} from "./normalize";
 
 export interface StaticEventDetailPayload {
   generated_at?: unknown;
@@ -158,23 +163,4 @@ function normalizeSlotSummary(value: unknown): StaticEventSlotSummary | null {
   const count = normalizeUnix(row.c);
   if (!status || count == null || count < 0) return null;
   return { status, count };
-}
-
-function normalizeString(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed || null;
-}
-
-function normalizeNullableString(value: unknown): string | null {
-  if (value == null) return null;
-  if (typeof value !== "string") return String(value);
-  const trimmed = value.trim();
-  return trimmed || null;
-}
-
-function normalizeUnix(value: unknown): number | null {
-  if (value == null || value === "") return null;
-  const n = Number(value);
-  return Number.isFinite(n) ? Math.floor(n) : null;
 }
