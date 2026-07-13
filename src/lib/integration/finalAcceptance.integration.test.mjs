@@ -71,14 +71,19 @@ test("静的再生成は無料枠向け上限を持つ", async () => {
   );
 });
 
-test("YouTube同期はtimeoutとRetry-Afterを処理する", async () => {
-  const text = await source(
+test("YouTube同期は共通timeoutとRetry-Afterを処理する", async () => {
+  const youtube = await source(
     "workers/youtube-sync/index.ts",
   );
+  const externalApi = await source(
+    "workers/shared/externalApi.ts",
+  );
 
-  assert.match(text, /AbortController/);
-  assert.match(text, /retry-after/i);
-  assert.match(text, /\b429\b/);
+  assert.match(youtube, /fetchWithTimeout/);
+  assert.match(youtube, /parseSharedRetryAfterMs/);
+  assert.match(youtube, /\b429\b/);
+  assert.match(externalApi, /AbortController/);
+  assert.match(externalApi, /retryAfterMs/);
 });
 
 test("READMEに未実装DOと旧権限正本を残さない", async () => {

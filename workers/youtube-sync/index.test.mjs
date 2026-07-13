@@ -5,6 +5,7 @@ import {
   isRetryableYoutubeStatus,
   parseDuration,
   parseRetryAfterMs,
+  YOUTUBE_MAX_QUOTA_UNITS_PER_RUN,
   YOUTUBE_SYNC_BATCH_SIZE,
   YOUTUBE_SYNC_MAX_ATTEMPTS,
 } from "./index.ts";
@@ -26,10 +27,27 @@ test("Retry-Afterは上限を超えない", () => {
   assert.equal(parseRetryAfterMs("120"), 15_000);
 });
 
-test("YouTube APIは1 Cron最大50 IDだけ処理する", () => {
+test("YouTube APIは1 Cron最大50 ID・2 quota unitsだけ処理する", () => {
   assert.equal(YOUTUBE_SYNC_BATCH_SIZE, 50);
-  assert.ok(YOUTUBE_SYNC_MAX_ATTEMPTS <= 2);
+  assert.equal(YOUTUBE_MAX_QUOTA_UNITS_PER_RUN, 2);
+  assert.ok(YOUTUBE_SYNC_MAX_ATTEMPTS <= YOUTUBE_MAX_QUOTA_UNITS_PER_RUN);
   assert.doesNotMatch(source, /YOUTUBE_SYNC_BATCHES_PER_RUN/);
+});
+
+test("YouTube quota系403はKV cooldownで連続呼出しを止める", () => {
+  assert.match(source, /YOUTUBE_QUOTA_COOLDOWN_KEY/);
+  assert.match(source, /quotaCooldownActive/);
+  assert.match(source, /activateQuotaCooldown/);
+  assert.match(source, /quotaExceeded/);
+  assert.match(source, /dailyLimitExceeded/);
+});
+
+test("YouTube応答は必要なfieldsだけ取得する", () => {
+  assert.match(
+    source,
+    /fields[\s\S]*items\(id,statistics\/viewCount,status\/privacyStatus,contentDetails\/duration\)/,
+  );
+  assert.match(source, /prettyPrint[\s\S]*false/);
 });
 
 test("候補抽出はpending・開催中・通常期限のindex queryへ分離する", () => {

@@ -3,6 +3,16 @@
  * Worker entry point は持たず、Cron 統合 Worker だけが実行する。
  */
 
+import {
+  cancelResponseBody,
+  delay,
+  exponentialBackoffMs,
+  ExternalRequestBudget,
+  fetchWithTimeout,
+  parseRetryAfterMs as parseSharedRetryAfterMs,
+  type FetchLike,
+} from "../shared/externalApi.ts";
+
 export interface Env {
   DB: D1Database;
   KV: KVNamespace;
@@ -38,56 +48,101 @@ export const YOUTUBE_SYNC_BATCH_SIZE = 50;
 export const YOUTUBE_SYNC_FETCH_TIMEOUT_MS = 8_000;
 export const YOUTUBE_SYNC_MAX_ATTEMPTS = 2;
 export const YOUTUBE_SYNC_MAX_RETRY_DELAY_MS = 15_000;
+/** videos.listは1 request = 1 quota unit。retry込みでも1実行2 unitsに固定する。 */
+export const YOUTUBE_MAX_QUOTA_UNITS_PER_RUN = 2;
 
 const ACTIVE_SYNC_INTERVAL_SEC = 60 * 60;
 const DEFAULT_SYNC_INTERVAL_SEC = 24 * 60 * 60;
 const ACTIVE_EVENT_GRACE_SEC = 24 * 60 * 60;
 const BULK_UPSERT_ROWS = 8;
-
-type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+const YOUTUBE_QUOTA_COOLDOWN_SEC = 60 * 60;
+const YOUTUBE_QUOTA_COOLDOWN_KEY = "external-api:youtube:quota-cooldown-until";
 
 const RETRYABLE_YOUTUBE_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
+const YOUTUBE_QUOTA_REASONS = new Set([
+  "quotaExceeded",
+  "dailyLimitExceeded",
+  "dailyLimitExceededUnreg",
+  "rateLimitExceeded",
+  "userRateLimitExceeded",
+]);
 
 export function isRetryableYoutubeStatus(status: number): boolean {
   return RETRYABLE_YOUTUBE_STATUSES.has(status);
 }
 
 export function parseRetryAfterMs(value: string | null, now = Date.now()): number | null {
-  if (!value) return null;
-  const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) {
-    return Math.min(seconds * 1_000, YOUTUBE_SYNC_MAX_RETRY_DELAY_MS);
+  return parseSharedRetryAfterMs(value, YOUTUBE_SYNC_MAX_RETRY_DELAY_MS, now);
+}
+
+async function readYoutubeErrorReason(response: Response): Promise<string | null> {
+  try {
+    const data = (await response.json()) as {
+      error?: { errors?: Array<{ reason?: unknown }> };
+    };
+    const reason = data.error?.errors?.[0]?.reason;
+    return typeof reason === "string" ? reason : null;
+  } catch {
+    await cancelResponseBody(response);
+    return null;
   }
-  const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) return null;
-  return Math.min(Math.max(0, timestamp - now), YOUTUBE_SYNC_MAX_RETRY_DELAY_MS);
 }
 
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+async function quotaCooldownActive(env: Env, now: number): Promise<boolean> {
+  try {
+    const raw = await env.KV.get(YOUTUBE_QUOTA_COOLDOWN_KEY);
+    const until = Number(raw);
+    return Number.isFinite(until) && until > now;
+  } catch {
+    return false;
+  }
 }
 
-async function fetchYoutubeItems(url: string, fetchImpl: FetchLike): Promise<YoutubeItem[]> {
+async function activateQuotaCooldown(env: Env, now: number): Promise<void> {
+  const until = now + YOUTUBE_QUOTA_COOLDOWN_SEC;
+  try {
+    await env.KV.put(YOUTUBE_QUOTA_COOLDOWN_KEY, String(until), {
+      expirationTtl: YOUTUBE_QUOTA_COOLDOWN_SEC,
+    });
+  } catch {
+    // quotaエラー自体を優先して伝播する。KV障害で上書きしない。
+  }
+}
+
+async function fetchYoutubeItems(
+  url: string,
+  env: Env,
+  budget: ExternalRequestBudget,
+  fetchImpl: FetchLike,
+): Promise<YoutubeItem[]> {
   let lastError = "unknown";
+
   for (let attempt = 0; attempt < YOUTUBE_SYNC_MAX_ATTEMPTS; attempt += 1) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), YOUTUBE_SYNC_FETCH_TIMEOUT_MS);
     let response: Response;
     try {
-      response = await fetchImpl(url, {
-        headers: { accept: "application/json" },
-        signal: controller.signal,
-      });
+      response = await fetchWithTimeout(
+        url,
+        { headers: { accept: "application/json" } },
+        {
+          timeoutMs: YOUTUBE_SYNC_FETCH_TIMEOUT_MS,
+          budget,
+          budgetErrorCode: "transient:youtube_api_request_budget_exhausted",
+          timeoutErrorCode: "transient:youtube_api_timeout",
+          networkErrorCode: "transient:youtube_api_network_error",
+        },
+        fetchImpl,
+      );
     } catch (error) {
-      const timeoutError = error instanceof Error && error.name === "AbortError";
-      lastError = timeoutError
-        ? "transient:youtube_api_timeout"
-        : "transient:youtube_api_network_error";
-      if (attempt + 1 >= YOUTUBE_SYNC_MAX_ATTEMPTS) throw new Error(lastError);
-      await wait(Math.min(1_000 * 2 ** attempt, YOUTUBE_SYNC_MAX_RETRY_DELAY_MS));
+      lastError = error instanceof Error ? error.message : "transient:youtube_api_network_error";
+      if (attempt + 1 >= YOUTUBE_SYNC_MAX_ATTEMPTS || budget.remaining <= 0) {
+        throw new Error(lastError);
+      }
+      await delay(
+        exponentialBackoffMs(attempt, {
+          maxDelayMs: YOUTUBE_SYNC_MAX_RETRY_DELAY_MS,
+        }),
+      );
       continue;
-    } finally {
-      clearTimeout(timeout);
     }
 
     if (response.ok) {
@@ -99,14 +154,32 @@ async function fetchYoutubeItems(url: string, fetchImpl: FetchLike): Promise<You
       }
     }
 
+    if (response.status === 403) {
+      const reason = await readYoutubeErrorReason(response);
+      if (reason && YOUTUBE_QUOTA_REASONS.has(reason)) {
+        await activateQuotaCooldown(env, Math.floor(Date.now() / 1000));
+        throw new Error(`quota:youtube_api_${reason}`);
+      }
+      throw new Error(`permanent:youtube_api_http_403${reason ? `_${reason}` : ""}`);
+    }
+
     const retryable = isRetryableYoutubeStatus(response.status);
     lastError = `${retryable ? "transient" : "permanent"}:youtube_api_http_${response.status}`;
-    if (!retryable || attempt + 1 >= YOUTUBE_SYNC_MAX_ATTEMPTS) {
+    if (!retryable || attempt + 1 >= YOUTUBE_SYNC_MAX_ATTEMPTS || budget.remaining <= 0) {
+      await cancelResponseBody(response);
       throw new Error(lastError);
     }
+
     const retryAfter = parseRetryAfterMs(response.headers.get("retry-after"));
-    await wait(retryAfter ?? Math.min(1_000 * 2 ** attempt, YOUTUBE_SYNC_MAX_RETRY_DELAY_MS));
+    await cancelResponseBody(response);
+    await delay(
+      exponentialBackoffMs(attempt, {
+        maxDelayMs: YOUTUBE_SYNC_MAX_RETRY_DELAY_MS,
+        retryAfterMs: retryAfter,
+      }),
+    );
   }
+
   throw new Error(lastError);
 }
 
@@ -285,14 +358,22 @@ export async function syncBatch(
   if (!env.YOUTUBE_API_KEY?.trim()) return { processed: 0, failed: 0, skipped: 1 };
 
   const now = Math.floor(Date.now() / 1000);
+  if (await quotaCooldownActive(env, now)) {
+    return { processed: 0, failed: 0, skipped: 1 };
+  }
+
   const rows = await selectSyncRows(env, now);
   if (rows.length === 0) return { processed: 0, failed: 0, skipped: 1 };
 
   const url = new URL("https://www.googleapis.com/youtube/v3/videos");
   url.searchParams.set("key", env.YOUTUBE_API_KEY);
   url.searchParams.set("part", "statistics,status,contentDetails");
+  url.searchParams.set("fields", "items(id,statistics/viewCount,status/privacyStatus,contentDetails/duration)");
+  url.searchParams.set("prettyPrint", "false");
   url.searchParams.set("id", rows.map((row) => row.youtube_video_id).join(","));
-  const youtubeItems = await fetchYoutubeItems(url.toString(), fetchImpl);
+
+  const budget = new ExternalRequestBudget(YOUTUBE_MAX_QUOTA_UNITS_PER_RUN);
+  const youtubeItems = await fetchYoutubeItems(url.toString(), env, budget, fetchImpl);
   const writes = buildMetadataWrites(
     rows,
     new Map(youtubeItems.map((item) => [item.id, item])),
