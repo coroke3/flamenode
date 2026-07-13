@@ -1,6 +1,6 @@
 /**
  * Cloudflare無料枠向け統合Cron Worker。
- * - 5分Cron: 通知を正本に、締切・優先YouTube・高優先度JSONを時間分散
+ * - 5分Cron: 通知を正本に、締切・YouTube・高優先度JSONを時間分散
  * - 1時間Cron: 通常YouTube、dirtyスコア、通常JSON、cleanupを時間分散
  */
 import { createCronWorker } from "../shared/createCronWorker.ts";
@@ -33,6 +33,9 @@ export const HOURLY_CRON = "0 * * * *";
 const SHORT_LEASE_SEC = 4 * 60;
 const HOURLY_LEASE_SEC = 12 * 60;
 const STATIC_SKIP_NOTIFICATION_COUNT = 4;
+const REALTIME_YOUTUBE_MINUTES = new Set([5, 15, 25, 35, 45, 55]);
+const NORMAL_YOUTUBE_MINUTES = new Set([20, 40]);
+const HIGH_PRIORITY_STATIC_MINUTES = new Set([10, 30, 50]);
 
 async function runLeasedJob(
   env: Env,
@@ -75,7 +78,10 @@ function utcHour(event: ScheduledEvent): number {
   return new Date(event.scheduledTime).getUTCHours();
 }
 
-/** 1回のD1/外部API予算を固定するため、5分枠ごとに補助処理を分散する。 */
+/**
+ * 1 invocationにつきYouTube API系列は最大1本、静的再生成は最大1件に固定する。
+ * 同期枠とR2生成枠を分け、10ms CPU・外部接続・D1 query予算を同時に消費しない。
+ */
 export async function runFastLane(
   env: Env,
   event: ScheduledEvent,
@@ -100,23 +106,34 @@ export async function runFastLane(
   );
   const notificationWork = notifications.processed + notifications.failed;
 
-  if (minute === 10 || minute === 40) {
+  if (REALTIME_YOUTUBE_MINUTES.has(minute)) {
     await runLeasedJob(
       env,
       "youtube-realtime",
       SHORT_LEASE_SEC,
       () =>
         syncBatch(env, {
-          limit: 10,
+          limit: 50,
           realtimeOnly: true,
         }),
-      25 * 60,
+      8 * 60,
+    );
+    return;
+  }
+
+  if (NORMAL_YOUTUBE_MINUTES.has(minute)) {
+    await runLeasedJob(
+      env,
+      "youtube-normal",
+      SHORT_LEASE_SEC,
+      () => syncBatch(env, { limit: 50 }),
+      15 * 60,
     );
     return;
   }
 
   if (
-    minute !== 0 &&
+    HIGH_PRIORITY_STATIC_MINUTES.has(minute) &&
     notificationWork < STATIC_SKIP_NOTIFICATION_COUNT
   ) {
     await runLeasedJob(
@@ -148,13 +165,14 @@ export async function runHourlyLane(
     "youtube-normal",
     HOURLY_LEASE_SEC,
     () => syncBatch(env, { limit: 50 }),
+    15 * 60,
   );
 
   await runLeasedJob(
     env,
     "score-recalc",
     HOURLY_LEASE_SEC,
-    () => recalcScoreBatch(env, { limit: 50 }),
+    () => recalcScoreBatch(env, { limit: 200 }),
   );
 
   if (hour % 6 === 0) {
