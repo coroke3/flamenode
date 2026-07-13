@@ -202,7 +202,7 @@ export async function withCronLease<T>(
       : Math.max(
           1,
           Math.min(
-            lease.leaseSeconds - 1,
+            Math.max(1, lease.leaseSeconds - 1),
             Math.floor(requestedHeartbeat ?? lease.leaseSeconds / 3),
           ),
         );
@@ -217,15 +217,14 @@ export async function withCronLease<T>(
         )
       : Promise.resolve();
 
-  let taskError: unknown;
   try {
     const value = await task();
     heartbeatController.abort();
+    // task 中に lease を失っていた場合はここで失敗として伝播する。
     await heartbeat;
     await markCronLeaseSucceeded(env, lease);
     return { acquired: true, value };
   } catch (error) {
-    taskError = error;
     heartbeatController.abort();
     await heartbeat.catch(() => undefined);
     await markCronLeaseFailed(env, lease, error).catch((markError) => {
@@ -241,9 +240,7 @@ export async function withCronLease<T>(
     throw error;
   } finally {
     heartbeatController.abort();
-    await heartbeat.catch((heartbeatError) => {
-      if (!taskError) taskError = heartbeatError;
-    });
+    await heartbeat.catch(() => undefined);
     try {
       await releaseCronLease(env, lease);
     } catch (releaseError) {
@@ -256,10 +253,6 @@ export async function withCronLease<T>(
           error: `lease release failed: ${safeErrorSummary(releaseError)}`,
         }),
       );
-    }
-    if (taskError && !(taskError instanceof Error && taskError.message === "handled")) {
-      // try/catch ですでに task error を throw 済み。heartbeat 単独失敗だけをここで伝播する。
-      if (!heartbeatController.signal.aborted) throw taskError;
     }
   }
 }
