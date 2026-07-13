@@ -32,6 +32,7 @@ export const FAST_CRON = "*/5 * * * *";
 export const HOURLY_CRON = "0 * * * *";
 const SHORT_LEASE_SEC = 4 * 60;
 const HOURLY_LEASE_SEC = 12 * 60;
+const STATIC_SKIP_NOTIFICATION_COUNT = 4;
 
 async function runLeasedJob(
   env: Env,
@@ -86,17 +87,18 @@ export async function runFastLane(
       env,
       "slot-deadline-reminders",
       SHORT_LEASE_SEC,
-      () => enqueueSlotDeadlineReminders(env, 6),
+      () => enqueueSlotDeadlineReminders(env, 3),
       55 * 60,
     );
   }
 
-  await runLeasedJob(
+  const notifications = await runLeasedJob(
     env,
     "notification-dispatch",
     SHORT_LEASE_SEC,
     () => processNotificationQueue(env, { limit: 6 }),
   );
+  const notificationWork = notifications.processed + notifications.failed;
 
   if (minute === 10 || minute === 40) {
     await runLeasedJob(
@@ -113,7 +115,10 @@ export async function runFastLane(
     return;
   }
 
-  if (minute !== 0) {
+  if (
+    minute !== 0 &&
+    notificationWork < STATIC_SKIP_NOTIFICATION_COUNT
+  ) {
     await runLeasedJob(
       env,
       "static-high-priority",
@@ -169,7 +174,7 @@ export async function runHourlyLane(
     HOURLY_LEASE_SEC,
     () =>
       processStaticRebuildQueue(withDeduplicatingR2(env), {
-        limit: 2,
+        limit: 1,
         reconcile: true,
       }),
   );
