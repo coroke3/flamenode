@@ -1,8 +1,7 @@
 export const runtime = "edge";
 
 import {
-  countPublicVideos,
-  fetchPublicVideos,
+  fetchPublicVideosPage,
   parsePublicVideoSort,
   type ListVideoParams,
 } from "@/lib/db/listQueries";
@@ -20,7 +19,7 @@ import {
   publicServiceUnavailableResponse,
 } from "@/lib/api/publicApi";
 
-/** 作品一覧の JSON API。`/list` などの軽量クライアント側ロード用。 */
+/** 作品一覧のJSON API。`/list`などの軽量クライアント側ロード用。 */
 export async function GET(req: Request): Promise<Response> {
   const limited = checkPublicApiRateLimit(req, "/api/videos");
   if (limited) return limited;
@@ -47,18 +46,12 @@ export async function GET(req: Request): Promise<Response> {
     q,
     sort,
     eventId: eventId || undefined,
+    limit,
+    offset: (page - 1) * limit,
   };
-  const [rows, total] = await Promise.all([
-    fetchPublicVideos(db, {
-      ...params,
-      limit,
-      offset: (page - 1) * limit,
-    }),
-    countPublicVideos(db, params),
-  ]);
-  // fetchPublicVideos は PUBLIC_VIDEO_KEYS と同列を select 済みだが、
-  // ルート層でも明示的に pickKeys を通してホワイトリスト外フィールドを排除する。
-  // visibility_status は public でフィルタ済みのため "public" キャストは安全。
+  const { items: rows, total } = await fetchPublicVideosPage(db, params);
+
+  // DB側で明示列を絞り込んでいるが、ルート層でもホワイトリストを適用する。
   const items: PublicVideoDto[] = rows.map((row) => ({
     ...pickKeys(row, PUBLIC_VIDEO_KEYS),
     status: "public" as const,
