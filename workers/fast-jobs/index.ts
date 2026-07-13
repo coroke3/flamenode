@@ -4,7 +4,10 @@
  * - スロット締切リマインド enqueue
  */
 import { createCronWorker } from "../shared/createCronWorker.ts";
-import { processNotificationQueue } from "../notification-dispatcher/dispatch.ts";
+import {
+  MAX_NOTIFICATION_BATCH,
+  processNotificationQueue,
+} from "../notification-dispatcher/dispatch.ts";
 import { enqueueSlotDeadlineReminders } from "../notification-dispatcher/reminders.ts";
 import { withCronLease } from "../shared/cronLease.ts";
 import { withBoundedRetry } from "../shared/queue.ts";
@@ -23,7 +26,6 @@ export interface Env {
 const REMINDER_INTERVAL_SEC = 3600;
 const FAST_JOBS_LEASE_SEC = 4 * 60;
 const REMINDER_LEASE_SEC = 4 * 60;
-const NOTIFICATION_BATCH_LIMIT = 6;
 
 export async function runFastJobs(env: Env): Promise<void> {
   await runJob(
@@ -66,7 +68,7 @@ export async function runFastJobs(env: Env): Promise<void> {
           const notifications = await runJob(
             "fast-jobs",
             "notification-dispatch",
-            () => processNotificationQueue(env, { limit: NOTIFICATION_BATCH_LIMIT }),
+            () => processNotificationQueue(env, { limit: MAX_NOTIFICATION_BATCH }),
           );
           processed += notifications.processed;
           skipped += notifications.skipped;
