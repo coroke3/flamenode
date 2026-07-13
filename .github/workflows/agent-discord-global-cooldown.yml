@@ -1,0 +1,30 @@
+name: Apply Discord global cooldown
+
+on:
+  push:
+    branches:
+      - agent/external-api-guardrails
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/external-api-guardrails
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Discord global cooldownを適用
+        run: node scripts/agent-discord-global-cooldown.mjs
+      - name: 変更をcommitしてpush
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "最適化: Discord global rate limitを横断制御"
+          git push origin HEAD:agent/external-api-guardrails
