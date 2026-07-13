@@ -6,7 +6,7 @@ Workers FreeのCPU上限はHTTP/Cronともに10msであり、Cron間隔を1時�
 
 | Worker | Cron | 主な責務 | 1実行上限 |
 |---|---:|---|---:|
-| `fast-jobs` | `*/5 * * * *` | 締切リマインダー、通知配送 | 通知6件、Discord外部request最大12 |
+| `fast-jobs` | `*/5 * * * *` | 締切リマインダー、通知配送 | 通知6件、Discord外部request最大12、DM cache KV書込最大2 |
 | `content-jobs` | `*/15 * * * *` | 静的JSON再生成、retention cleanup | target 1件 |
 | `sync-jobs` | `7,22,37,52 * * * *` | YouTube同期、スコア差分再計算 | YouTube 50件・最大2 quota units、score 150件 |
 
@@ -14,7 +14,7 @@ Workers FreeのCPU上限はHTTP/Cronともに10msであり、Cron間隔を1時�
 
 ## 実行予算
 
-- `fast-jobs`: 通知は最大6件。1件当たりD1 claim、KV DM channel cache、Discord最大2 request、完了更新を含めて50 subrequests以内に収める。
+- `fast-jobs`: 通知は最大6件。1件当たりD1 claim、KV DM channel cache、Discord最大2 request、完了更新を含めて50 subrequests以内に収める。DM channelはisolateへ全件cacheし、KVへの永続化だけを1実行2件に制限する。
 - `content-jobs`: 1 targetだけ生成する。cleanupはleaseにより1時間に1回だけ実行する。静的生成中のD1 queryは`withSerializedD1`で直列化し、同時接続枠を浪費しない。
 - `sync-jobs`: YouTube `videos.list`は最大50 IDを1 requestで取得する。D1保存は8件単位のbulk upsertにまとめる。
 - `youtube-sync`: `pending`、開催中期限、通常期限を最大3 queryへ分け、既存indexから最大50件だけ取得する。15分ごとの全作品走査を行わない。
@@ -27,7 +27,7 @@ Workers FreeのCPU上限はHTTP/Cronともに10msであり、Cron間隔を1時�
 | 外部処理 | Provider上限への対応 | FlameNode側の固定上限・削減策 |
 |---|---|---|
 | YouTube Data API `videos.list` | 1 requestあたり1 quota unit。無効requestも最低1 unit。既定10,000 units/day、太平洋時間0時reset | 1 Cron最大50 ID、最大2 attempts=2 units。必要な`fields`だけ取得。quota系403はKVで1時間cooldownし連続失敗を止める |
-| Discord Bot/Webhook | per-route limitは可変。`X-RateLimit-*`と`Retry-After`を正本にし、global limitは50 requests/sec | 1 Cron最大12 external requests。inline retryなし。DM channel IDをisolate/KVへ30日cacheし、通常配送を1 requestへ削減。global 429は全routeへ適用 |
+| Discord Bot/Webhook | per-route limitは可変。`X-RateLimit-*`と`Retry-After`を正本にし、global limitは50 requests/sec | 1 Cron最大12 external requests。inline retryなし。DM channel IDをisolate/KVへ30日cacheし、通常配送を1 requestへ削減。KV書込は最大2/run・576/day。global 429は全routeへ適用 |
 | Google Drive画像 / YouTube thumbnail | 公開画像originの固定quota値へ依存しない | 同一キーの同時missを1 fetchへ集約。ETag/304再検証、negative cache、stale返却、単一objectサイズ上限。request内retryなし |
 | Cloudflare Worker subrequest | Freeは1 invocation 50、同時outgoing connection 6 | 外部fetchだけでなくD1/KV/R2も含め50未満に固定。外部処理は逐次または共有in-flightで重複排除 |
 
