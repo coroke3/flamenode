@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { XLinkRequestTable } from "@/components/admin/XLinkRequestTable";
-import { ManagePageHeader } from "@/components/manage/ManagePageHeader";
+import { ConsolePageHeader as ManagePageHeader } from "@/components/layout/ConsolePageHeader";
 import { Icon } from "@/components/ui/Icon";
 import { requireSession } from "@/lib/auth/guard";
 import { canManageXIdLinkRequests } from "@/lib/auth/ownership";

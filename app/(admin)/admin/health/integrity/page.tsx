@@ -9,7 +9,7 @@ import {
   type IntegrityCheckResult,
   type IntegritySeverity,
 } from "@/lib/admin/integrityChecks";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminSectionTabs } from "@/components/admin/AdminSectionTabs";
 import { Icon } from "@/components/ui/Icon";
 

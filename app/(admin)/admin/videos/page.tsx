@@ -14,7 +14,7 @@ import {
 import { Icon } from "@/components/ui/Icon";
 import { formatRelative } from "@/lib/utils/format";
 import { youtubeThumbUrl } from "@/lib/youtube/id";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminVideoManagementTabs } from "@/components/admin/AdminVideoManagementTabs";
 import { VideoReviewQueueTable } from "@/components/admin/VideoReviewQueueTable";
 import { fetchVideoReviewSummaries } from "@/lib/admin/videoReviewMeta";

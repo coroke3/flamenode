@@ -28,7 +28,7 @@ import {
   eventStatusLabel,
 } from "@/lib/utils/eventStatus";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
-import { ManagePageHeader } from "@/components/manage/ManagePageHeader";
+import { ConsolePageHeader as ManagePageHeader } from "@/components/layout/ConsolePageHeader";
 
 export const metadata: Metadata = { title: "イベント運営" };
 export const dynamic = "force-dynamic";

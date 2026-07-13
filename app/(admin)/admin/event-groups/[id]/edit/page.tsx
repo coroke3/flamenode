@@ -8,7 +8,8 @@ import { Icon } from "@/components/ui/Icon";
 import { EventGroupForm } from "@/components/admin/EventGroupForm";
 import { EventGroupMembersEditor } from "@/components/admin/EventGroupMembersEditor";
 import { DeleteEventGroupForm } from "@/components/admin/DeleteEventGroupForm";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
+import { ConsolePanel } from "@/components/layout/ConsolePanel";
 import { eventGroupPublicHref } from "@/lib/eventGroupRoutes";
 
 export const metadata: Metadata = { title: "イベントグループ編集" };
@@ -72,18 +73,7 @@ export default async function AdminEventGroupEditPage({
         ]}
       />
 
-      <section
-        style={{
-          marginTop: 18,
-          padding: "20px 22px",
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-md)",
-        }}
-      >
-        <h2 style={{ fontSize: 14, fontWeight: 700, margin: "0 0 14px" }}>
-          基本情報
-        </h2>
+      <ConsolePanel title="基本情報">
         <EventGroupForm
           mode="edit"
           initial={{
@@ -97,45 +87,23 @@ export default async function AdminEventGroupEditPage({
             visibility_status: row.visibility_status,
           }}
         />
-      </section>
+      </ConsolePanel>
 
-      <section
-        style={{
-          marginTop: 22,
-          padding: "20px 22px",
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-md)",
-        }}
-      >
-        <h2 style={{ fontSize: 14, fontWeight: 700, margin: "0 0 14px" }}>
-          所属イベント
-        </h2>
+      <ConsolePanel title="所属イベント" separated>
         <EventGroupMembersEditor
           groupId={row.id}
-          members={members.map((m) => ({
-            event_id: m.event_id,
-            title: m.title,
-            start_time: m.start_time,
+          members={members.map((member) => ({
+            event_id: member.event_id,
+            title: member.title,
+            start_time: member.start_time,
           }))}
           eventOptions={eventOptions}
         />
-      </section>
+      </ConsolePanel>
 
-      <section
-        style={{
-          marginTop: 22,
-          padding: "16px 22px",
-          background: "var(--bg-surface)",
-          border: "1px solid var(--accent-danger)",
-          borderRadius: "var(--radius-md)",
-        }}
-      >
-        <h2 style={{ fontSize: 14, fontWeight: 700, color: "var(--accent-danger)" }}>
-          削除
-        </h2>
+      <ConsolePanel title="削除" tone="danger" separated compact>
         <DeleteEventGroupForm id={row.id} name={row.name} />
-      </section>
+      </ConsolePanel>
     </div>
   );
 }

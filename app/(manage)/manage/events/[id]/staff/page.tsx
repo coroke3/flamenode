@@ -8,7 +8,7 @@ import {
   type EventStaffMemberRow,
 } from "@/components/admin/EventStaffManager";
 import { ManageEventTabs } from "@/components/manage/ManageEventTabs";
-import { ManagePageHeader } from "@/components/manage/ManagePageHeader";
+import { ConsolePageHeader as ManagePageHeader } from "@/components/layout/ConsolePageHeader";
 import { Icon } from "@/components/ui/Icon";
 import { requireSession } from "@/lib/auth/guard";
 import { getCollaboratorPermissions } from "@/lib/auth/ownership";

@@ -2,7 +2,7 @@ import * as React from "react";
 import type { Metadata } from "next";
 import { Icon } from "@/components/ui/Icon";
 import { LegacyImportClient } from "@/components/admin/LegacyImportClient";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminVideoManagementTabs } from "@/components/admin/AdminVideoManagementTabs";
 import { isLegacyImportToolEnabled } from "@/lib/import/legacy/featureFlag";
 

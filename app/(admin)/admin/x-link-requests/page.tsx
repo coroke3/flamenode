@@ -14,7 +14,7 @@ import {
 } from "@/lib/db/schema";
 import { XLinkRequestTable } from "@/components/admin/XLinkRequestTable";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminUserManagementTabs } from "@/components/admin/AdminUserManagementTabs";
 import { parseAuditDiff } from "@/lib/audit/diff";
 

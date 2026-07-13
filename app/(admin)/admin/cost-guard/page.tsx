@@ -9,7 +9,7 @@ import { auditLogs, systemSettings } from "@/lib/db/schema";
 import { CostGuardForm } from "@/components/admin/CostGuardForm";
 import { CostGuardOverrideForm } from "@/components/admin/CostGuardOverrideForm";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { parseAuditDiff } from "@/lib/audit/diff";
 import { resolveOperationMode } from "@/lib/operationMode/resolve";
 import type { OperationMode } from "@/lib/operationMode/types";

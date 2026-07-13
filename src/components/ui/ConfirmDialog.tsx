@@ -1,40 +1,19 @@
 "use client";
 
-/**
- * ConfirmDialog – 危険操作確認モーダル
- *
- * 使用例:
- *   <ConfirmDialog
- *     open={isOpen}
- *     title="削除しますか？"
- *     message="この操作は取り消せません。"
- *     confirmLabel="削除"
- *     cancelLabel="キャンセル"
- *     tone="danger"
- *     onConfirm={() => handleDelete()}
- *     onCancel={() => setIsOpen(false)}
- *   />
- */
-
 import * as React from "react";
 import styles from "./ConfirmDialog.module.css";
 
 export interface ConfirmDialogProps {
-  /** モーダルの開閉状態 */
   open: boolean;
-  /** モーダルのタイトル */
   title: string;
-  /** 本文メッセージ */
-  message: string;
-  /** 確認ボタンのラベル (デフォルト: "確認") */
+  message?: React.ReactNode;
+  expectedText?: string;
+  inputLabel?: string;
   confirmLabel?: string;
-  /** キャンセルボタンのラベル (デフォルト: "キャンセル") */
   cancelLabel?: string;
-  /** ボタンの色調 (danger: 赤, default: プライマリ) */
   tone?: "danger" | "default";
-  /** 確認ボタンを押したときのコールバック */
+  busy?: boolean;
   onConfirm: () => void;
-  /** キャンセルボタン or 背景クリック時のコールバック */
   onCancel: () => void;
 }
 
@@ -42,21 +21,37 @@ export function ConfirmDialog({
   open,
   title,
   message,
+  expectedText,
+  inputLabel = "確認のため次の文字列を入力してください",
   confirmLabel = "確認",
   cancelLabel = "キャンセル",
   tone = "default",
+  busy = false,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps): React.ReactElement | null {
-  // ESC キーでキャンセル
+  const [input, setInput] = React.useState("");
+  const titleId = React.useId();
+  const messageId = React.useId();
+  const requiresText = expectedText !== undefined;
+  const canConfirm = !requiresText || input.trim() === expectedText;
+
+  React.useEffect(() => {
+    if (open) setInput("");
+  }, [open, expectedText]);
+
   React.useEffect(() => {
     if (!open) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busy) {
+        onCancel();
+      }
     };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [open, onCancel]);
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [busy, onCancel, open]);
 
   if (!open) return null;
 
@@ -67,41 +62,75 @@ export function ConfirmDialog({
     <div
       className={styles.backdrop}
       role="presentation"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel();
+      onClick={(event) => {
+        if (!busy && event.target === event.currentTarget) {
+          onCancel();
+        }
       }}
     >
       <div
         className={styles.dialog}
         role="alertdialog"
         aria-modal="true"
-        aria-labelledby="confirm-dialog-title"
-        aria-describedby="confirm-dialog-message"
+        aria-labelledby={titleId}
+        aria-describedby={message ? messageId : undefined}
       >
         <div className={styles.body}>
-          <p id="confirm-dialog-title" className={styles.title}>
+          <p id={titleId} className={styles.title}>
             {title}
           </p>
-          <p id="confirm-dialog-message" className={styles.message}>
-            {message}
-          </p>
+
+          {message ? (
+            <div id={messageId} className={styles.message}>
+              {message}
+            </div>
+          ) : null}
+
+          {requiresText ? (
+            <label className={styles.confirmation}>
+              <span className={styles.confirmationLabel}>
+                {inputLabel}: <code>{expectedText}</code>
+              </span>
+              <input
+                type="text"
+                className="fn-input"
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                placeholder={expectedText}
+                autoComplete="off"
+                spellCheck={false}
+                disabled={busy}
+                // eslint-disable-next-line jsx-a11y/no-autofocus
+                autoFocus
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && canConfirm && !busy) {
+                    event.preventDefault();
+                    onConfirm();
+                  }
+                }}
+              />
+            </label>
+          ) : null}
         </div>
+
         <div className={styles.footer}>
           <button
             type="button"
             className="fn-btn fn-btn-ghost"
             onClick={onCancel}
+            disabled={busy}
           >
             {cancelLabel}
           </button>
+
           <button
             type="button"
             className={confirmClassName}
             onClick={onConfirm}
-            // eslint-disable-next-line jsx-a11y/no-autofocus
-            autoFocus
+            disabled={busy || !canConfirm}
+            autoFocus={!requiresText}
           >
-            {confirmLabel}
+            {busy ? "処理中…" : confirmLabel}
           </button>
         </div>
       </div>

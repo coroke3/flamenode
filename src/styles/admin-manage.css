@@ -1812,3 +1812,44 @@
     max-width: 100%;
   }
 }
+
+/* 共通管理画面パネル */
+.fn-console-panel {
+  margin-top: 18px;
+  padding: 20px 22px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  min-width: 0;
+}
+
+.fn-console-panel--separated {
+  margin-top: 22px;
+}
+
+.fn-console-panel--compact {
+  padding: 16px 22px;
+}
+
+.fn-console-panel--danger {
+  border-color: var(--accent-danger);
+}
+
+.fn-console-panel-title {
+  margin: 0 0 14px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.fn-console-panel--danger > .fn-console-panel-title {
+  color: var(--accent-danger);
+}
+
+@media (max-width: 640px) {
+  .fn-console-panel,
+  .fn-console-panel--compact {
+    padding: 16px;
+  }
+}
+

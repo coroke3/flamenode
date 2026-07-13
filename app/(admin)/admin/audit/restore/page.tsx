@@ -7,7 +7,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { auditLogs, auditRestoreRuns } from "@/lib/db/schema";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminSectionTabs } from "@/components/admin/AdminSectionTabs";
 import { FnTable } from "@/components/ui/FnTable";
 

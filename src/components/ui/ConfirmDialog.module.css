@@ -38,6 +38,23 @@
   line-height: 1.6;
 }
 
+.confirmation {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.confirmationLabel {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.confirmationLabel code {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
 .footer {
   display: flex;
   justify-content: flex-end;

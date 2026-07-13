@@ -2,7 +2,8 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { EventForm } from "@/components/admin/EventForm";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
+import { ConsolePanel } from "@/components/layout/ConsolePanel";
 import { Icon } from "@/components/ui/Icon";
 import { getDatabase } from "@/lib/cloudflare";
 import {
@@ -105,21 +106,13 @@ export default async function AdminNewEventPage({
         </section>
       ) : null}
 
-      <section
-        style={{
-          marginTop: 18,
-          padding: "20px 22px",
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-md)",
-        }}
-      >
+      <ConsolePanel>
         <EventForm
           mode="create"
           initial={formInitial}
           templateId={templateId || undefined}
         />
-      </section>
+      </ConsolePanel>
 
       <p style={{ marginTop: 22 }}>
         <Link href="/admin/events" className="fn-btn fn-btn-ghost">

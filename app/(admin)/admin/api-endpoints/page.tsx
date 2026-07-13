@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { and, desc, eq } from "drizzle-orm";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { FnTable } from "@/components/ui/FnTable";
 import { Icon } from "@/components/ui/Icon";
 import {

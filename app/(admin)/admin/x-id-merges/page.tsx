@@ -8,7 +8,7 @@ import {
   xIdMergeRequests,
   xIdMergeReverts,
 } from "@/lib/db/schema";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminUserManagementTabs } from "@/components/admin/AdminUserManagementTabs";
 import { Icon } from "@/components/ui/Icon";
 import {

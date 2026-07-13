@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { desc, eq, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { staticRebuildQueue, systemSettings } from "@/lib/db/schema";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import {
   enqueueStaticRebuildAdmin,
   retryAllFailedStaticRebuild,

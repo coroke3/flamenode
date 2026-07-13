@@ -15,7 +15,7 @@ import {
 } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminUserTabs } from "@/components/admin/AdminUserTabs";
 import {
   getLatestPublishedMajorTerms,

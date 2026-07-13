@@ -16,7 +16,7 @@ import {
   xIdMergeReverts as xIdMergeRevertsTable,
 } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { resolveOperationMode } from "@/lib/operationMode/resolve";
 import type { OperationMode } from "@/lib/operationMode/types";

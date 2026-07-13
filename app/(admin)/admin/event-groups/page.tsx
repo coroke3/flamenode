@@ -6,7 +6,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { eventGroupEvents, eventGroups } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminSectionTabs } from "@/components/admin/AdminSectionTabs";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import { eventGroupPublicHref } from "@/lib/eventGroupRoutes";

@@ -8,7 +8,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { termsVersions, users as usersTable } from "@/lib/db/schema";
 import { formatUnix } from "@/lib/utils/format";
 import { Icon } from "@/components/ui/Icon";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import { TermsReacceptBroadcastButton } from "@/components/admin/TermsReacceptBroadcastButton";
 import {

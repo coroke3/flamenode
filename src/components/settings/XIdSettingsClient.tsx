@@ -13,7 +13,7 @@ import {
   uploadXIdIcon,
   updateXIdProfile,
 } from "@/lib/actions/xid";
-import { ConfirmTextDialog } from "@/components/ui/ConfirmTextDialog";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { YoutubeChannelPicker } from "@/components/settings/YoutubeChannelPicker";
 import { SocialLinksEditor } from "@/components/forms/SocialLinksEditor";
 
@@ -661,31 +661,31 @@ export function DeleteXIdForm({
       </button>
       {error ? <p className={styles.msgErr}>{error}</p> : null}
 
-      <ConfirmTextDialog
+      <ConfirmDialog
         open={confirmOpen}
         title="X ID 連携を削除しますか?"
-        description={
+        message={
           <>
             <p style={{ margin: 0 }}>
-              この X ID <strong>@{xUserId}</strong> と Discord アカウントの紐付けを解除します。
+              この X ID <strong>@{xUserId}</strong> とDiscordアカウントの紐付けを解除します。
             </p>
             <ul
               style={{
                 margin: "8px 0 0",
                 paddingLeft: "1.2em",
                 fontSize: 12,
-                color: "var(--text-secondary)",
               }}
             >
-              <li>X ID 自体・過去の作品・履歴は削除されません。</li>
-              <li>この Discord アカウントからは編集できなくなります。</li>
-              <li>同じ X ID を再連携すれば編集権限は戻ります。</li>
+              <li>X ID自体・過去の作品・履歴は削除されません。</li>
+              <li>このDiscordアカウントからは編集できなくなります。</li>
+              <li>同じX IDを再連携すれば編集権限は戻ります。</li>
             </ul>
           </>
         }
         expectedText={expected}
         confirmLabel="連携を削除する"
         tone="danger"
+        busy={pending}
         onConfirm={() => {
           setConfirmOpen(false);
           doDelete();

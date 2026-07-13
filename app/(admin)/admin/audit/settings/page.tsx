@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { getAuditLogSettings } from "@/lib/audit/settings";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminSectionTabs } from "@/components/admin/AdminSectionTabs";
 import { AuditSettingsForm } from "@/components/admin/AuditSettingsForm";
 

@@ -15,7 +15,7 @@ import { NotificationCancelButton } from "@/components/admin/NotificationCancelB
 import { NotificationPayloadButton } from "@/components/admin/NotificationPayloadButton";
 import { NotificationBulkRetryButton } from "@/components/admin/NotificationBulkRetryButton";
 import { NotificationForceResendButton } from "@/components/admin/NotificationForceResendButton";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { NotificationOutboxSummary } from "@/components/notifications/NotificationOutboxSummary";

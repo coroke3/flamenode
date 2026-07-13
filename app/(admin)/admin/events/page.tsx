@@ -14,7 +14,7 @@ import {
   eventStatusLabel,
   isAcceptingEntries,
 } from "@/lib/utils/eventStatus";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminSectionTabs } from "@/components/admin/AdminSectionTabs";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";

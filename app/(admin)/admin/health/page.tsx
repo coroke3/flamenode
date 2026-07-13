@@ -7,7 +7,7 @@ import { notFound } from "next/navigation";
 import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { runHealthChecks, type HealthCheckResult } from "@/lib/admin/healthChecks";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminSectionTabs } from "@/components/admin/AdminSectionTabs";
 
 export const metadata: Metadata = { title: "DB ヘルスチェック" };

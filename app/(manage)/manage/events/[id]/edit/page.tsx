@@ -11,7 +11,7 @@ import { loadStagePermissionFormSettingsJson } from "@/lib/video/stagePermission
 import { EventForm } from "@/components/admin/EventForm";
 import { DeleteEventForm } from "@/components/admin/DeleteEventForm";
 import { ManageActiveXNotice } from "@/components/layout/ManageActiveXNotice";
-import { ManagePageHeader } from "@/components/manage/ManagePageHeader";
+import { ConsolePageHeader as ManagePageHeader } from "@/components/layout/ConsolePageHeader";
 import { Icon } from "@/components/ui/Icon";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
 import { ManageEventTabs } from "@/components/manage/ManageEventTabs";

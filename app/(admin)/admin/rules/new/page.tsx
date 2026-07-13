@@ -1,7 +1,8 @@
 import * as React from "react";
 import type { Metadata } from "next";
 import { TermsForm } from "@/components/admin/TermsForm";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
+import { ConsolePanel } from "@/components/layout/ConsolePanel";
 import {
   DEFAULT_TERMS_MARKDOWN,
   DEFAULT_TERMS_VERSION_LABEL,
@@ -20,15 +21,7 @@ export default function AdminRulesNewPage(): React.ReactElement {
         backLabel="規約一覧へ"
       />
 
-      <section
-        style={{
-          marginTop: 18,
-          padding: "20px 22px",
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-md)",
-        }}
-      >
+      <ConsolePanel>
         <TermsForm
           mode="create"
           initial={{
@@ -37,7 +30,7 @@ export default function AdminRulesNewPage(): React.ReactElement {
             severity: "major",
           }}
         />
-      </section>
+      </ConsolePanel>
     </div>
   );
 }

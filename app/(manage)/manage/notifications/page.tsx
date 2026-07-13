@@ -26,7 +26,7 @@ import {
 } from "@/lib/notifications/types";
 import { formatRelative, formatUnix } from "@/lib/utils/format";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { ManagePageHeader } from "@/components/manage/ManagePageHeader";
+import { ConsolePageHeader as ManagePageHeader } from "@/components/layout/ConsolePageHeader";
 
 export const metadata: Metadata = { title: "通知センター" };
 export const dynamic = "force-dynamic";

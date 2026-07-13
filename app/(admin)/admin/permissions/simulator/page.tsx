@@ -1,7 +1,7 @@
 import * as React from "react";
 import type { Metadata } from "next";
 import { getDatabase } from "@/lib/cloudflare";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { PermissionSimulatorPanel } from "@/components/admin/PermissionSimulatorPanel";
 import { simulateEventPermissions } from "@/lib/admin/permissionSimulator";
 

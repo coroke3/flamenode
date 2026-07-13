@@ -11,7 +11,7 @@ import {
   videos as videosTable,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AutoSubmitCheckbox, AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import { updateModerationCaseStatus } from "@/lib/actions/moderation-admin";
 import { formatUnix } from "@/lib/utils/format";

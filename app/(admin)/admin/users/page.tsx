@@ -16,7 +16,7 @@ import { Icon } from "@/components/ui/Icon";
 import { resolveMissingIcons } from "@/lib/db/iconResolution";
 import { normalizeXId } from "@/lib/utils/xid";
 import { updateGlobalEditableFields } from "@/lib/actions/permissions-admin";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminUserManagementTabs } from "@/components/admin/AdminUserManagementTabs";
 import { Pagination } from "@/components/ui/Pagination";
 import { clampPaging, escapeLike, totalPagesFor } from "@/lib/utils/sql";

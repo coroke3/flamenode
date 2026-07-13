@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { isAdminSpreadsheetEnabled } from "@/lib/admin/spreadsheet/guard";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminSpreadsheetClient } from "@/components/admin/spreadsheet/AdminSpreadsheetClient";
 
 export const metadata: Metadata = { title: "DB スプレッドシート" };

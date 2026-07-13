@@ -38,5 +38,5 @@
     "**/*.tsx",
     ".next/types/**/*.ts"
   ],
-  "exclude": ["node_modules", "設計", "claudedesign", "workers/**/*"]
+  "exclude": ["node_modules", "設計", "workers/**/*"]
 }

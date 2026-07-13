@@ -5,7 +5,8 @@ import { eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { termsVersions } from "@/lib/db/schema";
 import { TermsForm } from "@/components/admin/TermsForm";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
+import { ConsolePanel } from "@/components/layout/ConsolePanel";
 
 export const metadata: Metadata = { title: "利用規約バージョン編集" };
 export const dynamic = "force-dynamic";
@@ -52,15 +53,7 @@ export default async function AdminRulesEditPage({
         ) : null}
       </p>
 
-      <section
-        style={{
-          marginTop: 18,
-          padding: "20px 22px",
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-md)",
-        }}
-      >
+      <ConsolePanel>
         <TermsForm
           mode="edit"
           initial={{
@@ -68,11 +61,13 @@ export default async function AdminRulesEditPage({
             version_label: row.version_label,
             body_markdown: row.body_markdown,
             severity: (row.severity ?? "minor") as "minor" | "major",
-            status: (row.status ?? "draft") as "draft" | "published" | "archived",
+            status: (row.status ?? "draft") as
+              | "draft"
+              | "published"
+              | "archived",
           }}
         />
-      </section>
-
+      </ConsolePanel>
     </div>
   );
 }

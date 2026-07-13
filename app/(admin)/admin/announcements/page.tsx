@@ -9,7 +9,7 @@ import { announcements } from "@/lib/db/schema";
 import { formatUnix } from "@/lib/utils/format";
 import { Icon } from "@/components/ui/Icon";
 import { AnnouncementBroadcastButton } from "@/components/admin/AnnouncementBroadcastButton";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 
 export const metadata: Metadata = { title: "お知らせ管理" };

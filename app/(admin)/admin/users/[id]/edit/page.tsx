@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { users as usersTable, xUsers as xUsersTable } from "@/lib/db/schema";
 import { UserAdminForm } from "@/components/admin/UserAdminForm";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminUserTabs } from "@/components/admin/AdminUserTabs";
 
 export const metadata: Metadata = { title: "ユーザー編集" };

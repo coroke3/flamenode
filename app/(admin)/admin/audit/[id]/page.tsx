@@ -8,7 +8,7 @@ import { getCurrentUser } from "@/lib/auth/currentUser";
 import { auditLogs } from "@/lib/db/schema";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { Icon } from "@/components/ui/Icon";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AuditDiffDetail } from "@/components/admin/AuditDiffDetail";
 import { AuditRestoreForm } from "@/components/admin/AuditRestoreForm";
 

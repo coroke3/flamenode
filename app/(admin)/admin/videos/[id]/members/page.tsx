@@ -8,7 +8,7 @@ import {
   videos as videosTable,
   xUsers,
 } from "@/lib/db/schema";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminVideoMembersForm } from "@/components/admin/AdminVideoMembersForm";
 import { AdminVideoTabs } from "@/components/admin/AdminVideoTabs";
 import type {

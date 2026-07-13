@@ -3,7 +3,7 @@ import { FnTable } from "@/components/ui/FnTable";
 
 import Link from "next/link";
 import type { Metadata } from "next";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminSectionTabs } from "@/components/admin/AdminSectionTabs";
 import { DeleteEventTemplateButton } from "@/components/admin/DeleteEventTemplateButton";
 import { Icon } from "@/components/ui/Icon";

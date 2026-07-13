@@ -6,7 +6,7 @@ import { notFound } from "next/navigation";
 import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { runSecurityChecks, type SecurityCheckResult } from "@/lib/admin/securityChecks";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 
 export const metadata: Metadata = { title: "セキュリティチェック" };
 export const dynamic = "force-dynamic";

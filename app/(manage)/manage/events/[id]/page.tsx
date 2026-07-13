@@ -36,7 +36,7 @@ import {
   type ManageNotificationFilter,
 } from "@/lib/notifications/types";
 import { NotificationOutboxSummary } from "@/components/notifications/NotificationOutboxSummary";
-import { ManagePageHeader } from "@/components/manage/ManagePageHeader";
+import { ConsolePageHeader as ManagePageHeader } from "@/components/layout/ConsolePageHeader";
 import { ManageEventTabs } from "@/components/manage/ManageEventTabs";
 import { SaveEventTemplateForm } from "@/components/admin/SaveEventTemplateForm";
 import {

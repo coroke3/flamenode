@@ -13,7 +13,7 @@ import {
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { queueYoutubeMetadataResync } from "@/lib/actions/youtube-sync-admin";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminVideoManagementTabs } from "@/components/admin/AdminVideoManagementTabs";
 import { Icon } from "@/components/ui/Icon";
 import {

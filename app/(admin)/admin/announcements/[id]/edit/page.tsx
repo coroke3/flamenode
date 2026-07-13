@@ -7,7 +7,8 @@ import { announcements } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { AnnouncementForm } from "@/components/admin/AnnouncementForm";
 import { DeleteAnnouncementForm } from "@/components/admin/DeleteAnnouncementForm";
-import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
+import { ConsolePanel } from "@/components/layout/ConsolePanel";
 
 export const metadata: Metadata = { title: "お知らせ編集" };
 export const dynamic = "force-dynamic";
@@ -42,15 +43,7 @@ export default async function AdminAnnouncementEditPage({
         ]}
       />
 
-      <section
-        style={{
-          marginTop: 18,
-          padding: "20px 22px",
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-md)",
-        }}
-      >
+      <ConsolePanel>
         <AnnouncementForm
           mode="edit"
           initial={{
@@ -67,23 +60,11 @@ export default async function AdminAnnouncementEditPage({
             expire_at: row.expire_at,
           }}
         />
-      </section>
+      </ConsolePanel>
 
-      <section
-        style={{
-          marginTop: 22,
-          padding: "16px 22px",
-          background: "var(--bg-surface)",
-          border: "1px solid var(--accent-danger)",
-          borderRadius: "var(--radius-md)",
-        }}
-      >
-        <h2 style={{ fontSize: 14, fontWeight: 700, color: "var(--accent-danger)" }}>
-          削除
-        </h2>
+      <ConsolePanel title="削除" tone="danger" separated compact>
         <DeleteAnnouncementForm id={row.id} />
-      </section>
-
+      </ConsolePanel>
     </div>
   );
 }
