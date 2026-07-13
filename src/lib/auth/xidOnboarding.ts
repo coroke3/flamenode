@@ -5,28 +5,24 @@ import { withDatabase } from "@/lib/cloudflare";
 import { xAccountLinkRequests, xUsers } from "@/lib/db/schema";
 import { sanitizeNextPath } from "#utils/next";
 
-const EXEMPT_PATH_PREFIXES = ["/dashboard/settings"];
+const SETTINGS_PATH = "/dashboard/settings";
 
 export function isXIdOnboardingExemptPath(pathname: string): boolean {
   const path = pathname.trim() || "/";
-  return EXEMPT_PATH_PREFIXES.some(
-    (prefix) => path === prefix || path.startsWith(`${prefix}/`),
-  );
+  return path === SETTINGS_PATH || path.startsWith(`${SETTINGS_PATH}/`);
 }
 
 export function buildXIdOnboardingHref(next?: string | null): string {
-  const qs = new URLSearchParams();
-  qs.set("tab", "link");
-  qs.set("onboarding", "1");
+  const qs = new URLSearchParams({ tab: "link", onboarding: "1" });
   const safeNext = next?.trim();
   if (
     safeNext &&
-    safeNext !== "/dashboard/settings" &&
-    !safeNext.startsWith("/dashboard/settings?")
+    safeNext !== SETTINGS_PATH &&
+    !safeNext.startsWith(`${SETTINGS_PATH}?`)
   ) {
     qs.set("next", sanitizeNextPath(safeNext, "/dashboard"));
   }
-  return `/dashboard/settings?${qs.toString()}`;
+  return `${SETTINGS_PATH}?${qs.toString()}`;
 }
 
 /**
@@ -40,26 +36,24 @@ export async function userNeedsXIdOnboarding(
   if (role === "admin" || role === "moderator") return false;
 
   const needs = await withDatabase(async (db) => {
-    const linked = await db
-      .select({ id: xUsers.id })
-      .from(xUsers)
-      .where(eq(xUsers.linked_user_id, userId))
-      .limit(1);
-    if (linked.length > 0) return false;
-
-    const pending = await db
-      .select({ id: xAccountLinkRequests.id })
-      .from(xAccountLinkRequests)
-      .where(
-        and(
-          eq(xAccountLinkRequests.user_id, userId),
-          eq(xAccountLinkRequests.status, "pending"),
-        )!,
-      )
-      .limit(1);
-    if (pending.length > 0) return false;
-
-    return true;
+    const [linked, pending] = await Promise.all([
+      db
+        .select({ id: xUsers.id })
+        .from(xUsers)
+        .where(eq(xUsers.linked_user_id, userId))
+        .limit(1),
+      db
+        .select({ id: xAccountLinkRequests.id })
+        .from(xAccountLinkRequests)
+        .where(
+          and(
+            eq(xAccountLinkRequests.user_id, userId),
+            eq(xAccountLinkRequests.status, "pending"),
+          )!,
+        )
+        .limit(1),
+    ]);
+    return linked.length === 0 && pending.length === 0;
   });
 
   return needs ?? false;

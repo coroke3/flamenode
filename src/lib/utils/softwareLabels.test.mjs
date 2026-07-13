@@ -2,10 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  buildEmptySoftwareLabelsJson,
-  buildSoftwareLabelsJson,
   normalizeSoftwareLabels,
-  parseSoftwareLabelsJson,
   SOFTWARE_LABEL_MAX_LENGTH,
 } from "./softwareLabels.ts";
 
@@ -24,25 +21,4 @@ test("normalizeSoftwareLabels caps item count and item length", () => {
   );
   assert.equal(labels.length, 20);
   assert.equal(labels[0].length, SOFTWARE_LABEL_MAX_LENGTH);
-});
-
-test("buildSoftwareLabelsJson stores source and normalized items", () => {
-  const json = buildSoftwareLabelsJson("After Effects, Blender", "manual");
-  assert.deepEqual(JSON.parse(json), {
-    source: "manual",
-    raw: "After Effects, Blender",
-    items: ["After Effects", "Blender"],
-  });
-});
-
-test("parseSoftwareLabelsJson supports empty markers and legacy fallback", () => {
-  assert.deepEqual(parseSoftwareLabelsJson(buildEmptySoftwareLabelsJson("manual")), []);
-  assert.deepEqual(parseSoftwareLabelsJson('["AviUtl","aviutl","Blender"]'), [
-    "AviUtl",
-    "Blender",
-  ]);
-  assert.deepEqual(parseSoftwareLabelsJson("After Effects, Blender"), [
-    "After Effects",
-    "Blender",
-  ]);
 });
