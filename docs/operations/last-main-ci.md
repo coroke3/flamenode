@@ -3,8 +3,8 @@
 > Status: Active
 > Result: PASS
 > Verify job: success
-> Candidate commit: 08483e08ba2a707a42cb884d6bfac477c327b258
-> Completed at: 2026-07-13T08:07:52Z
-> Workflow run: https://github.com/coroke3/flamenode/actions/runs/29234013709
+> Candidate commit: 8e78bfab393842713502b83d3cc6dbe9e8797e68
+> Completed at: 2026-07-13T08:39:26Z
+> Workflow run: https://github.com/coroke3/flamenode/actions/runs/29235915983
 
 この結果は、workflow完了時点でもCandidate commitがmain HEADだった場合だけ記録されます。
