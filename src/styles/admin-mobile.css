@@ -1,37 +1,390 @@
-/* 管理・運営画面のスマホ最適化（admin-manage.css / mobile-public.css と併用） */
+/* 管理・運営画面のスマホ最適化（admin-manage.css の後段で適用） */
 
-@media (max-width: 640px) {
+@media (max-width: 760px) {
+  [data-admin-shell] .admin-frame,
+  [data-manage-shell] .manage-shell {
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+
+  [data-manage-shell] .manage-shell {
+    padding-top: 10px;
+    padding-bottom: calc(40px + env(safe-area-inset-bottom));
+  }
+
+  [data-admin-shell] .admin-main,
+  [data-manage-shell] .manage-main {
+    width: 100%;
+    min-width: 0;
+    padding: 16px 0 40px;
+    overflow-x: clip;
+  }
+
+  /* 現在地を常に確認できる、コンパクトなモバイルメニューバー */
+  .fn-console-navigation {
+    position: sticky;
+    top: calc(var(--header-h, 56px) + 8px);
+    z-index: 25;
+    min-width: 0;
+  }
+
+  .fn-console-drawer-trigger {
+    min-height: 52px;
+    border-radius: var(--radius-md);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+
+  .fn-console-trigger-copy {
+    flex: 1 1 auto;
+  }
+
+  .fn-console-trigger-copy strong,
+  .fn-console-trigger-copy small {
+    max-width: min(72vw, 420px);
+  }
+
+  /* ドロワーは端末のセーフエリアを含めて全高を使う */
+  .fn-console-drawer-panel {
+    width: min(92vw, 380px);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .fn-console-drawer-head {
+    position: sticky;
+    top: 0;
+    z-index: 4;
+    display: flex;
+    min-height: 58px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: max(10px, env(safe-area-inset-top)) 12px 10px;
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--bg-base) 92%, transparent);
+    border-bottom: 1px solid var(--border-subtle);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+
+  .fn-console-drawer-close {
+    position: static;
+    display: inline-flex;
+    width: auto;
+    height: auto;
+    min-height: 40px;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+  }
+
+  .fn-console-drawer-panel > .admin-sidebar {
+    min-height: auto;
+    padding: 12px 14px 28px;
+    overflow: visible;
+  }
+
+  .fn-console-drawer-panel .admin-mode-banner,
+  .fn-console-drawer-panel .manage-mode-banner {
+    margin-top: 0;
+  }
+
+  .fn-console-drawer-panel nav,
+  .fn-console-drawer-panel .console-manage-nav {
+    gap: 12px;
+  }
+
+  .fn-console-drawer-panel nav a,
+  .fn-console-drawer-panel .console-manage-nav a {
+    min-height: 46px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    border-radius: var(--radius-sm);
+  }
+
+  .fn-console-drawer-panel .console-sidebar-search {
+    position: sticky;
+    top: 58px;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 -2px 4px;
+    padding: 8px;
+    background: color-mix(in srgb, var(--bg-base) 94%, transparent);
+    border-bottom: 1px solid var(--border-subtle);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+
+  .fn-console-drawer-panel .console-sidebar-search input {
+    width: 100%;
+    min-width: 0;
+    font-size: 16px;
+  }
+
+  .fn-console-drawer-panel .console-sidebar-event-group {
+    display: grid;
+    gap: 4px;
+    margin-top: 4px;
+  }
+
+  .fn-console-drawer-panel .console-sidebar-event-group-title {
+    min-height: 32px;
+    padding: 8px 10px 4px;
+  }
+
+  /* ページ見出しと主要操作を狭幅でも過度に縦長にしない */
+  [data-admin-shell] .fn-console-head,
+  [data-manage-shell] .fn-console-head {
+    gap: 10px;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+  }
+
+  [data-admin-shell] .fn-console-title,
+  [data-manage-shell] .fn-console-title {
+    font-size: clamp(20px, 6vw, 24px);
+    overflow-wrap: anywhere;
+  }
+
+  [data-admin-shell] .fn-console-lead,
+  [data-manage-shell] .fn-console-lead {
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+
+  [data-admin-shell] .fn-console-section,
+  [data-manage-shell] .fn-console-section {
+    margin-top: 24px;
+  }
+
+  .fn-console-panel,
+  .fn-console-panel--compact {
+    margin-top: 14px;
+    padding: 16px;
+    border-radius: var(--radius-sm);
+  }
+
+  /* KPI は原則2列。1列化による過剰なスクロールを避ける */
+  .fn-admin-stat-grid,
+  [data-admin-shell] .fn-console-stat-grid,
+  [data-manage-shell] .fn-console-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px;
+  }
+
+  [data-admin-shell] .fn-console-stat,
+  [data-manage-shell] .fn-console-stat {
+    min-width: 0;
+    padding: 11px 12px;
+  }
+
+  [data-admin-shell] .fn-console-stat-value,
+  [data-manage-shell] .fn-console-stat-value {
+    font-size: 18px;
+  }
+
+  /* iOS Safari の入力時自動ズームを防ぎ、入力欄を画面幅に収める */
+  [data-admin-shell] .admin-main input,
+  [data-admin-shell] .admin-main select,
+  [data-admin-shell] .admin-main textarea,
+  [data-manage-shell] .manage-main input,
+  [data-manage-shell] .manage-main select,
+  [data-manage-shell] .manage-main textarea {
+    max-width: 100%;
+    font-size: 16px;
+  }
+
+  [data-admin-shell] .fn-console-filter-form,
+  [data-manage-shell] .fn-console-filter-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    align-items: stretch;
+  }
+
+  [data-admin-shell] .fn-console-filter-form > .fn-input,
+  [data-admin-shell] .fn-console-filter-form > .fn-select,
+  [data-admin-shell] .fn-console-filter-field,
+  [data-manage-shell] .fn-console-filter-form > .fn-input,
+  [data-manage-shell] .fn-console-filter-form > .fn-select,
+  [data-manage-shell] .fn-console-filter-field {
+    width: 100%;
+    min-width: 0;
+  }
+
+  [data-admin-shell] .fn-console-filter-check,
+  [data-manage-shell] .fn-console-filter-check {
+    min-height: 44px;
+  }
+
+  /* 主要操作は2列を基本にし、長いラベルだけ自然に折り返す */
+  [data-admin-shell] .fn-console-actions,
+  [data-manage-shell] .fn-console-actions,
+  [data-manage-shell] .manage-actions {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    align-items: stretch;
+  }
+
+  [data-admin-shell] .fn-console-actions .fn-btn,
+  [data-manage-shell] .fn-console-actions .fn-btn,
+  [data-manage-shell] .manage-actions .fn-btn {
+    width: 100%;
+    min-width: 0;
+    min-height: 42px;
+    justify-content: center;
+    padding-left: 10px;
+    padding-right: 10px;
+    white-space: normal;
+    text-align: center;
+  }
+
+  [data-admin-shell] .fn-console-actions > :last-child:nth-child(odd),
+  [data-manage-shell] .fn-console-actions > :last-child:nth-child(odd),
+  [data-manage-shell] .manage-actions > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+
   [data-admin-shell] .admin-main .fn-btn,
   [data-manage-shell] .manage-main .fn-btn {
-    min-height: 44px;
+    min-height: 42px;
   }
 
   [data-admin-shell] .admin-main .fn-btn-sm,
   [data-manage-shell] .manage-main .fn-btn-sm {
+    min-height: 38px;
+  }
+
+  /* タブは横スクロールに限定し、ページ全体は横に動かさない */
+  [data-admin-shell] .fn-console-resource-tabs,
+  [data-admin-shell] .fn-console-event-tabs,
+  [data-manage-shell] .fn-console-resource-tabs,
+  [data-manage-shell] .fn-console-event-tabs {
+    margin-left: -2px;
+    margin-right: -2px;
+    padding: 0 2px 7px;
+    scroll-snap-type: x proximity;
+    overscroll-behavior-x: contain;
+  }
+
+  [data-admin-shell] .fn-console-resource-tabs .fn-btn,
+  [data-admin-shell] .fn-console-event-tabs .fn-btn,
+  [data-manage-shell] .fn-console-resource-tabs .fn-btn,
+  [data-manage-shell] .fn-console-event-tabs .fn-btn {
     min-height: 40px;
+    scroll-snap-align: start;
   }
 
-  /* 管理トップ等の KPI グリッド */
-  .fn-admin-stat-grid {
-    grid-template-columns: 1fr !important;
+  /* 横長表は表ラッパーだけをスクロールさせる */
+  [data-admin-shell] .admin-main .fn-table-scroll,
+  [data-manage-shell] .manage-main .fn-table-scroll {
+    position: relative;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-gutter: stable;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
   }
 
-  /* 管理ページヘッダー操作 */
-  [data-admin-shell] .admin-main header .fn-btn,
-  [data-manage-shell] .manage-main header .fn-btn {
-    flex: 1 1 auto;
-    justify-content: center;
+  [data-admin-shell] .admin-main table.fn-table,
+  [data-manage-shell] .manage-main table.fn-table {
+    width: 100% !important;
+    min-width: 680px;
   }
 
-  [data-admin-shell] .admin-main header,
-  [data-manage-shell] .manage-main header {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
+  [data-admin-shell] .admin-main .fn-table th,
+  [data-admin-shell] .admin-main .fn-table td,
+  [data-manage-shell] .manage-main .fn-table th,
+  [data-manage-shell] .manage-main .fn-table td {
+    padding: 10px 11px;
   }
 
-  [data-manage-shell] .manage-shell > header {
-    flex-wrap: wrap;
-    gap: 10px;
+  [data-admin-shell] .fn-console-row-actions,
+  [data-manage-shell] .fn-console-row-actions {
+    flex-wrap: nowrap;
+    min-width: max-content;
+  }
+
+  [data-admin-shell] .fn-console-row-actions .fn-btn,
+  [data-manage-shell] .fn-console-row-actions .fn-btn {
+    min-height: 36px;
+    padding-left: 9px;
+    padding-right: 9px;
+  }
+
+  [data-manage-shell] .manage-event-hero.fn-console-head,
+  [data-manage-shell] .manage-event-card {
+    padding: 12px;
+  }
+
+  [data-admin-shell] .admin-mode-banner,
+  [data-manage-shell] .manage-mode-banner {
+    gap: 6px;
+    padding: 10px 12px;
+  }
+
+  [data-admin-shell] .admin-mode-hint,
+  [data-manage-shell] .manage-mode-hint {
+    font-size: 11px;
+    line-height: 1.45;
+  }
+}
+
+@media (max-width: 430px) {
+  [data-admin-shell] .admin-frame,
+  [data-manage-shell] .manage-shell {
+    padding-left: max(10px, env(safe-area-inset-left));
+    padding-right: max(10px, env(safe-area-inset-right));
+  }
+
+  .fn-console-trigger-copy strong,
+  .fn-console-trigger-copy small {
+    max-width: 64vw;
+  }
+
+  [data-admin-shell] .fn-console-actions,
+  [data-manage-shell] .fn-console-actions,
+  [data-manage-shell] .manage-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  [data-admin-shell] .fn-console-actions > :last-child:nth-child(odd),
+  [data-manage-shell] .fn-console-actions > :last-child:nth-child(odd),
+  [data-manage-shell] .manage-actions > :last-child:nth-child(odd) {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 360px) {
+  .fn-admin-stat-grid,
+  [data-admin-shell] .fn-console-stat-grid,
+  [data-manage-shell] .fn-console-stat-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .fn-console-drawer-panel {
+    width: calc(100vw - 16px);
+  }
+}
+
+@media (max-width: 760px) and (pointer: coarse) {
+  [data-admin-shell] .admin-main button,
+  [data-admin-shell] .admin-main a.fn-btn,
+  [data-manage-shell] .manage-main button,
+  [data-manage-shell] .manage-main a.fn-btn,
+  .fn-console-drawer-panel a,
+  .fn-console-drawer-panel button {
+    touch-action: manipulation;
   }
 }
