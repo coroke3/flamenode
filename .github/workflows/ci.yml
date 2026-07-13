@@ -67,7 +67,20 @@ jobs:
         run: npm run build
 
       - name: Cloudflare Pages build
-        run: npm run pages:build
+        shell: bash
+        run: |
+          mkdir -p .tmp
+          set -o pipefail
+          npm run pages:build 2>&1 | tee .tmp/pages-build.log
+
+      - name: Upload Pages build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-build-diagnostics-${{ github.run_id }}
+          path: .tmp/pages-build.log
+          if-no-files-found: warn
+          retention-days: 3
 
       - name: Pages output check
         run: npm run check:pages-output
