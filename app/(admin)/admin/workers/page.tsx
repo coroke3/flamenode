@@ -20,6 +20,19 @@ import { formatCount, formatRelative, formatUnix } from "@/lib/utils/format";
 export const metadata: Metadata = { title: "バックグラウンド処理監視" };
 export const dynamic = "force-dynamic";
 
+const YOUTUBE_KEY_STATUS_KV = "youtube-api:key-status:v1";
+type KeyLabel = "primary" | "secondary";
+type KeyStatus = {
+  configured: KeyLabel[];
+  active: KeyLabel | null;
+  disabled: Partial<Record<KeyLabel, number>>;
+  failoverAt: number | null;
+  failoverFrom: KeyLabel | null;
+  failureKind: string | null;
+  failureReason: string | null;
+  updatedAt: number | null;
+};
+
 function badgeClass(level: MonitorLevel): string {
   if (level === "critical") return "fn-badge-danger";
   if (level === "warn" || level === "running") return "fn-badge-warning";
@@ -48,26 +61,67 @@ function statusStyle(level: Exclude<MonitorLevel, "running">): React.CSSProperti
   return { background: "var(--accent-success-soft, #dcfce7)", borderColor: "var(--accent-success, #16a34a)", color: "var(--accent-success, #166534)" };
 }
 
+function unix(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function keyLabel(value: KeyLabel | null): string {
+  return value === "primary" ? "主キー" : value === "secondary" ? "副キー" : "未確認";
+}
+
+function parseKeyStatus(raw: string | null): KeyStatus | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    const configured = Array.isArray(value.configured)
+      ? value.configured.filter((item): item is KeyLabel => item === "primary" || item === "secondary")
+      : [];
+    const disabled = value.disabled_until && typeof value.disabled_until === "object"
+      ? value.disabled_until as Record<string, unknown>
+      : {};
+    return {
+      configured,
+      active: value.active_key === "primary" || value.active_key === "secondary" ? value.active_key : null,
+      disabled: { primary: unix(disabled.primary) ?? undefined, secondary: unix(disabled.secondary) ?? undefined },
+      failoverAt: unix(value.last_failover_at),
+      failoverFrom: value.last_failover_from === "primary" || value.last_failover_from === "secondary" ? value.last_failover_from : null,
+      failureKind: typeof value.last_failure_kind === "string" ? value.last_failure_kind : null,
+      failureReason: typeof value.last_failure_reason === "string" ? value.last_failure_reason.slice(0, 100) : null,
+      updatedAt: unix(value.updated_at),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function loadKeyStatus(kv: KVNamespace): Promise<KeyStatus | null> {
+  try {
+    return parseKeyStatus(await kv.get(YOUTUBE_KEY_STATUS_KV));
+  } catch {
+    return null;
+  }
+}
+
 export default async function AdminWorkersPage(): Promise<React.ReactElement> {
   const user = await getCurrentUser();
   if (!user || user.role !== "admin") notFound();
 
   const env = getEnv();
   let snapshot: WorkerMonitoringSnapshot | null = null;
+  let keyStatus: KeyStatus | null = null;
   let error: string | null = null;
   try {
     if (!env.DB) throw new Error("DB bindingを取得できませんでした。");
     snapshot = await loadWorkerMonitoring(env.DB);
+    if (env.KV) keyStatus = await loadKeyStatus(env.KV);
   } catch (cause) {
     error = String(cause);
   }
 
   return (
     <div>
-      <AdminPageHeader
-        title="バックグラウンド処理監視"
-        description="Cron Worker、通知、静的JSON、YouTube同期、スコア更新の遅延と失敗をD1の内部記録から確認します。"
-      />
+      <AdminPageHeader title="バックグラウンド処理監視" description="Cron Worker、通知、静的JSON、YouTube同期、スコア更新の遅延と失敗をD1とKVの内部記録から確認します。" />
       <AdminSectionTabs hub="health" />
       <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
         <Link href="/admin/workers" className="fn-btn fn-btn-primary fn-btn-sm">最新状態へ更新</Link>
@@ -80,12 +134,12 @@ export default async function AdminWorkersPage(): Promise<React.ReactElement> {
           監視情報の取得に失敗しました: {error}
         </div>
       ) : null}
-      {snapshot ? <MonitoringContent snapshot={snapshot} /> : null}
+      {snapshot ? <MonitoringContent snapshot={snapshot} keyStatus={keyStatus} /> : null}
     </div>
   );
 }
 
-function MonitoringContent({ snapshot }: { snapshot: WorkerMonitoringSnapshot }): React.ReactElement {
+function MonitoringContent({ snapshot, keyStatus }: { snapshot: WorkerMonitoringSnapshot; keyStatus: KeyStatus | null }): React.ReactElement {
   const criticalJobs = snapshot.jobs.filter((job) => job.level === "critical").length;
   const problemPipelines = snapshot.pipelines.filter((pipeline) => pipeline.level !== "ok").length;
   const totalFailures = snapshot.notifications.failed + snapshot.staticRebuilds.failed + snapshot.youtube.failed;
@@ -94,10 +148,7 @@ function MonitoringContent({ snapshot }: { snapshot: WorkerMonitoringSnapshot })
     <>
       <section role="status" className="fn-card" style={{ marginTop: 18, padding: "14px 16px", borderWidth: 1, borderStyle: "solid", ...statusStyle(snapshot.overallLevel) }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <div>
-            <strong>{levelLabel(snapshot.overallLevel)}</strong>
-            <p style={{ margin: "4px 0 0", fontSize: 13 }}>{snapshot.overallMessage}</p>
-          </div>
+          <div><strong>{levelLabel(snapshot.overallLevel)}</strong><p style={{ margin: "4px 0 0", fontSize: 13 }}>{snapshot.overallMessage}</p></div>
           <div style={{ fontSize: 12 }}>取得: {formatUnix(snapshot.generatedAt)}</div>
         </div>
       </section>
@@ -130,6 +181,8 @@ function MonitoringContent({ snapshot }: { snapshot: WorkerMonitoringSnapshot })
         </div>
       </section>
 
+      <YoutubeKeyCard status={keyStatus} now={snapshot.generatedAt} />
+
       <section style={{ marginTop: 24 }}>
         <h2 style={{ fontSize: 16, fontWeight: 800, marginBottom: 10 }}>グローバル静的JSONの最終生成</h2>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
@@ -145,7 +198,7 @@ function MonitoringContent({ snapshot }: { snapshot: WorkerMonitoringSnapshot })
 
       <section className="fn-card" style={{ marginTop: 24, padding: 16 }}>
         <h2 style={{ fontSize: 16, fontWeight: 800, marginBottom: 6 }}>無料枠の外部監視</h2>
-        <p className="fn-muted fn-text-sm" style={{ margin: "0 0 12px" }}>CPU時間、exceededCpu、アカウント全体のD1日次使用量はアプリDBだけでは取得できません。Cloudflare Dashboardを正本として確認してください。</p>
+        <p className="fn-muted fn-text-sm" style={{ margin: "0 0 12px" }}>CPU時間、exceededCpu、アカウント全体のD1日次使用量はアプリだけでは取得できません。Cloudflare Dashboardを正本として確認してください。</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
           {PLATFORM_LIMITS.map((limit) => (
             <div key={limit.label} style={{ border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)", padding: "10px 12px" }}>
@@ -159,6 +212,24 @@ function MonitoringContent({ snapshot }: { snapshot: WorkerMonitoringSnapshot })
         </div>
       </section>
     </>
+  );
+}
+
+function YoutubeKeyCard({ status, now }: { status: KeyStatus | null; now: number }): React.ReactElement {
+  const disabled = status ? (["primary", "secondary"] as const).filter((label) => Number(status.disabled[label] ?? 0) > now) : [];
+  const level: Exclude<MonitorLevel, "running"> = !status ? "unknown" : status.failureKind === "quota" ? "critical" : disabled.length > 0 || status.active === "secondary" ? "warn" : status.configured.length >= 2 && status.active === "primary" ? "ok" : "unknown";
+  return (
+    <section className="fn-card" style={{ marginTop: 24, padding: 16, borderWidth: 1, borderStyle: "solid", ...statusStyle(level) }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div><h2 style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>YouTube APIキー冗長化</h2><p style={{ margin: "5px 0 0", fontSize: 13 }}>{status ? `登録 ${status.configured.length}個 / 使用中 ${keyLabel(status.active)}` : "同期Workerから状態がまだ記録されていません。"}</p></div>
+        <span className={`fn-badge ${badgeClass(level)}`}>{levelLabel(level)}</span>
+      </div>
+      {status ? <div className="fn-muted fn-text-sm" style={{ marginTop: 10 }}>
+        直近切替: {status.failoverAt == null ? "なし" : `${formatRelative(status.failoverAt)} (${keyLabel(status.failoverFrom)}から)`} / 一時回避: {disabled.length ? disabled.map(keyLabel).join("・") : "なし"} / 更新: {status.updatedAt == null ? "未確認" : formatRelative(status.updatedAt)}
+        {status.failureKind ? <div>直近障害: {status.failureKind}{status.failureReason ? ` / ${status.failureReason}` : ""}</div> : null}
+      </div> : null}
+      <p className="fn-muted fn-text-sm" style={{ margin: "10px 0 0" }}>副キーはcredential障害時だけ使用します。quota超過時は切り替えず、Google Cloud Consoleの割当量を正本として確認します。</p>
+    </section>
   );
 }
 
