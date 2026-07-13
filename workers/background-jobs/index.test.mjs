@@ -23,11 +23,14 @@ test("共通Cron WorkerはScheduledEventをrunnerへ渡す", () => {
   assert.match(source, /service:\s*"background-jobs"/);
 });
 
-test("外部APIとD1予算のため件数を固定する", () => {
+test("外部APIとD1予算のため件数と時間枠を固定する", () => {
   assert.match(source, /processNotificationQueue\(env, \{ limit: 6 \}\)/);
-  assert.match(source, /limit:\s*10[\s\S]*realtimeOnly:\s*true/);
+  assert.match(source, /REALTIME_YOUTUBE_MINUTES\s*=\s*new Set\(\[5, 15, 25, 35, 45, 55\]\)/);
+  assert.match(source, /NORMAL_YOUTUBE_MINUTES\s*=\s*new Set\(\[20, 40\]\)/);
+  assert.match(source, /HIGH_PRIORITY_STATIC_MINUTES\s*=\s*new Set\(\[10, 30, 50\]\)/);
+  assert.match(source, /limit:\s*50[\s\S]*realtimeOnly:\s*true/);
   assert.match(source, /syncBatch\(env, \{ limit: 50 \}\)/);
-  assert.match(source, /recalcScoreBatch\(env, \{ limit: 50 \}\)/);
+  assert.match(source, /recalcScoreBatch\(env, \{ limit: 200 \}\)/);
   assert.match(source, /STATIC_SKIP_NOTIFICATION_COUNT\s*=\s*4/);
   assert.match(source, /processStaticRebuildQueue[\s\S]*limit:\s*1/);
 });
