@@ -1,0 +1,241 @@
+import * as React from "react";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import type { Metadata } from "next";
+import { eq } from "drizzle-orm";
+import { getDatabase } from "@/lib/cloudflare";
+import { requireSession } from "@/lib/auth/guard";
+import { canAccessManageEvent, canEditEvent } from "@/lib/auth/ownership";
+import {
+  eventYoutubePlaylistSync,
+  events as eventsTable,
+} from "@/lib/db/schema";
+import {
+  queueEventYoutubePlaylistSync,
+  saveEventYoutubePlaylistSettings,
+} from "@/lib/actions/event-youtube-playlist";
+import { ManageActiveXNotice } from "@/components/layout/ManageActiveXNotice";
+import { ConsolePageHeader as ManagePageHeader } from "@/components/layout/ConsolePageHeader";
+import { ManageEventTabs } from "@/components/manage/ManageEventTabs";
+import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
+import { formatUnix } from "@/lib/utils/format";
+
+export const metadata: Metadata = { title: "YouTube再生リスト同期" };
+export const dynamic = "force-dynamic";
+
+interface Props {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<{ saved?: string; queued?: string; error?: string }>;
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  disabled: "無効",
+  idle: "実行待ち",
+  scanning: "再生リスト確認中",
+  synced: "同期済み",
+  deferred: "クォータ・分割処理待ち",
+  failed: "同期失敗",
+};
+
+function statusClass(status: string | null | undefined): string {
+  if (status === "failed") return "fn-badge-danger";
+  if (status === "deferred" || status === "scanning") return "fn-badge-warning";
+  if (status === "synced") return "fn-badge-accent";
+  return "fn-badge-soft";
+}
+
+export default async function EventYoutubePlaylistPage({
+  params,
+  searchParams,
+}: Props): Promise<React.ReactElement> {
+  const { id } = await params;
+  const sp = (await searchParams) ?? {};
+  const guard = await requireSession({
+    next: `/manage/events/${encodeURIComponent(id)}/youtube-playlist`,
+  });
+  if (!guard.ok) return guard.element;
+
+  const db = getDatabase();
+  if (!db) notFound();
+  const ev = (
+    await db.select().from(eventsTable).where(eq(eventsTable.id, id)).limit(1)
+  )[0];
+  if (!ev) notFound();
+  if (!(await canAccessManageEvent(db, guard.user, id))) notFound();
+
+  const canEdit = await canEditEvent(
+    db,
+    { id: guard.user.id, role: guard.user.role ?? null },
+    id,
+    "event.publish",
+  );
+  const config = (
+    await db
+      .select()
+      .from(eventYoutubePlaylistSync)
+      .where(eq(eventYoutubePlaylistSync.event_id, id))
+      .limit(1)
+  )[0];
+  const isAdmin = guard.user.role === "admin";
+  const playlistId = config?.playlist_id ?? "";
+  const mode = config?.sync_mode ?? "off";
+  const interval = config?.sync_interval_minutes ?? 720;
+
+  return (
+    <div style={manageEventAccentStyle(ev.accent_color)}>
+      <ManageActiveXNotice
+        userId={guard.user.id}
+        activeXUserId={guard.user.active_x_user_id}
+      />
+      <ManagePageHeader
+        title={`${ev.title} YouTube再生リスト同期`}
+        description="イベントの公開作品を、指定したYouTube再生リストへ差分同期します。"
+        backHref={`/manage/events/${ev.id}`}
+        backLabel="イベント運営トップへ"
+        accent
+      />
+      <ManageEventTabs eventId={ev.id} isAdmin={isAdmin} />
+
+      {sp.saved === "1" ? (
+        <p className="fn-alert fn-alert-success">設定を保存し、次回同期を予約しました。</p>
+      ) : null}
+      {sp.queued === "1" ? (
+        <p className="fn-alert fn-alert-success">次回のWorker実行で同期するよう予約しました。</p>
+      ) : null}
+      {sp.error ? <p className="fn-alert fn-alert-danger">{sp.error}</p> : null}
+
+      <section className="fn-console-section">
+        <h2 style={{ fontSize: 15, fontWeight: 800 }}>同期設定</h2>
+        <p className="fn-muted fn-text-sm">
+          OAuthで認証した1つのYouTubeチャンネルが所有する再生リストを対象にします。
+          この画面で同期方式を有効にしたイベントだけが同期されます。
+        </p>
+
+        <form action={saveEventYoutubePlaylistSettings} style={{ display: "grid", gap: 12 }}>
+          <input type="hidden" name="event_id" value={ev.id} />
+          <div>
+            <label className="fn-label">再生リストURL / ID</label>
+            <input
+              name="playlist_id"
+              className="fn-input"
+              defaultValue={playlistId}
+              placeholder="https://www.youtube.com/playlist?list=..."
+              disabled={!canEdit}
+              maxLength={300}
+            />
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: 12,
+            }}
+          >
+            <div>
+              <label className="fn-label">同期方式</label>
+              <select
+                name="sync_mode"
+                className="fn-select"
+                defaultValue={mode}
+                disabled={!canEdit}
+              >
+                <option value="off">同期しない</option>
+                <option value="append_only">追加のみ（推奨）</option>
+                <option value="mirror">完全同期</option>
+              </select>
+            </div>
+            <div>
+              <label className="fn-label">同期間隔</label>
+              <select
+                name="sync_interval_minutes"
+                className="fn-select"
+                defaultValue={String(interval)}
+                disabled={!canEdit}
+              >
+                <option value="60">1時間</option>
+                <option value="180">3時間</option>
+                <option value="360">6時間</option>
+                <option value="720">12時間（推奨）</option>
+                <option value="1440">24時間</option>
+                <option value="10080">7日</option>
+              </select>
+            </div>
+          </div>
+          <div className="fn-card" style={{ padding: 12 }}>
+            <strong>同期方式と並び順</strong>
+            <p className="fn-muted fn-text-sm" style={{ marginBottom: 0 }}>
+              追加のみは、公開・限定公開になった作品だけを追加し、YouTube側で手動追加した動画を削除しません。
+              完全同期はイベントから外れた項目も削除します。新規追加は作品の公開予定時刻順で挿入し、既存項目の全件並び替えは行いません。
+              時刻順挿入にはYouTube側の再生リストを「手動」並び替えに設定してください。
+            </p>
+          </div>
+          {canEdit ? (
+            <button type="submit" className="fn-btn fn-btn-primary">
+              保存して同期を予約
+            </button>
+          ) : (
+            <p className="fn-muted fn-text-sm">
+              公開設定の編集権限がないため、現在の設定は閲覧のみです。
+            </p>
+          )}
+        </form>
+      </section>
+
+      <section className="fn-console-section">
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <h2 style={{ fontSize: 15, fontWeight: 800 }}>同期状態</h2>
+          <span className={`fn-badge ${statusClass(config?.sync_status)}`}>
+            {STATUS_LABELS[config?.sync_status ?? "disabled"] ?? config?.sync_status}
+          </span>
+        </div>
+        <dl
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(120px, auto) 1fr",
+            gap: "8px 16px",
+            fontSize: 13,
+          }}
+        >
+          <dt className="fn-muted">最終同期</dt>
+          <dd>{config?.last_synced_at ? formatUnix(config.last_synced_at) : "未実行"}</dd>
+          <dt className="fn-muted">最終全件確認</dt>
+          <dd>{config?.last_full_scan_at ? formatUnix(config.last_full_scan_at) : "未実行"}</dd>
+          <dt className="fn-muted">次回予定</dt>
+          <dd>{config?.next_sync_at ? formatUnix(config.next_sync_at) : "なし"}</dd>
+          <dt className="fn-muted">エラー</dt>
+          <dd style={{ wordBreak: "break-word" }}>{config?.last_error ?? "なし"}</dd>
+        </dl>
+        {playlistId ? (
+          <p>
+            <Link
+              href={`https://www.youtube.com/playlist?list=${encodeURIComponent(playlistId)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="fn-btn fn-btn-ghost fn-btn-sm"
+            >
+              YouTubeで再生リストを開く
+            </Link>
+          </p>
+        ) : null}
+        {canEdit && config?.enabled === 1 ? (
+          <form action={queueEventYoutubePlaylistSync}>
+            <input type="hidden" name="event_id" value={ev.id} />
+            <button type="submit" className="fn-btn fn-btn-ghost fn-btn-sm">
+              次回実行へ予約
+            </button>
+          </form>
+        ) : null}
+      </section>
+
+      <section className="fn-console-section">
+        <h2 style={{ fontSize: 15, fontWeight: 800 }}>無料枠向けの制御</h2>
+        <ul className="fn-muted fn-text-sm" style={{ lineHeight: 1.8 }}>
+          <li>既定は12時間間隔・追加のみです。</li>
+          <li>再生リスト全件確認はページ分割し、差分だけを書き込みます。</li>
+          <li>1回のWorker実行と1日あたりのYouTubeクォータに上限を設け、超過分は次回へ繰り越します。</li>
+          <li>OAuthのクライアントID・シークレット・更新トークンはWorker secretだけに保存します。</li>
+        </ul>
+      </section>
+    </div>
+  );
+}
