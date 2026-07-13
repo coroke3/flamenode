@@ -7,7 +7,6 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
-import { users } from "./schema.base";
 
 /**
  * FlameNode D1 schema overlay.
@@ -17,6 +16,40 @@ import { users } from "./schema.base";
  * 明示exportは export * より優先されるため、利用側のimport名は変更しない。
  */
 export * from "./schema.base";
+
+export const users = sqliteTable("user", {
+  id: text("id").primaryKey(),
+  name: text("name"),
+  email: text("email"),
+  emailVerified: integer("emailVerified", { mode: "timestamp_ms" }),
+  image: text("image"),
+  discord_id: text("discord_id"),
+  discord_dm_channel_id: text("discord_dm_channel_id"),
+  role: text("role", { enum: ["user", "admin", "moderator"] }).default("user"),
+  can_create_events: integer("can_create_events").notNull().default(0),
+  is_tos_accepted: integer("is_tos_accepted").default(0),
+  accepted_terms_version_id: text("accepted_terms_version_id"),
+  terms_reaccept_required: integer("terms_reaccept_required").default(0),
+  is_banned: integer("is_banned").default(0),
+  is_notification_enabled: integer("is_notification_enabled").default(1),
+  active_x_user_id: text("active_x_user_id"),
+  onboarding_completed_at: integer("onboarding_completed_at"),
+  last_guild_check: integer("last_guild_check"),
+  created_at: integer("created_at")
+    .notNull()
+    .default(sql`(unixepoch())`),
+}, (t) => ({
+  discordIdUnique: uniqueIndex("user_discord_id_unique").on(t.discord_id),
+  tosReacceptScan: index("user_tos_reaccept_scan_idx").on(
+    t.is_tos_accepted,
+    t.id,
+  ),
+  tosNotifyScan: index("user_tos_notify_scan_idx").on(
+    t.is_notification_enabled,
+    t.is_tos_accepted,
+    t.id,
+  ),
+}));
 
 export const xUsers = sqliteTable(
   "x_users",
@@ -169,8 +202,12 @@ export const videos = sqliteTable(
     }).default("slotted"),
     scheduled_time: integer("scheduled_time"),
     app_like_count: integer("app_like_count").notNull().default(0),
+    trending_view_count_24h: integer("trending_view_count_24h")
+      .notNull()
+      .default(0),
     score: real("score").notNull().default(0),
     score_updated_at: integer("score_updated_at"),
+    score_dirty_at: integer("score_dirty_at"),
     created_at: integer("created_at")
       .notNull()
       .default(sql`(unixepoch())`),
@@ -198,6 +235,12 @@ export const videos = sqliteTable(
       t.score,
       t.scheduled_time,
     ),
+    scoreDirtyIdx: index("videos_score_dirty_idx").on(t.score_dirty_at, t.id),
+    scoreStaleIdx: index("videos_score_stale_idx").on(
+      t.visibility_status,
+      t.score_updated_at,
+      t.id,
+    ),
     creatorPublicIdx: index("videos_creator_public_idx").on(
       t.creator_x_user_id,
       t.visibility_status,
@@ -214,6 +257,43 @@ export const videos = sqliteTable(
       .where(
         sql`youtube_video_id IS NOT NULL AND youtube_video_id <> '' AND visibility_status NOT IN ('archived', 'voided')`,
       ),
+  }),
+);
+
+export const videoYoutubeMetadata = sqliteTable(
+  "video_youtube_metadata",
+  {
+    video_id: text("video_id")
+      .primaryKey()
+      .references(() => videos.id, { onDelete: "cascade" }),
+    youtube_video_id: text("youtube_video_id"),
+    youtube_privacy_status: text("youtube_privacy_status"),
+    youtube_availability_status: text("youtube_availability_status"),
+    duration_seconds: integer("duration_seconds"),
+    view_count: integer("view_count").notNull().default(0),
+    synced_at: integer("synced_at"),
+    next_sync_at: integer("next_sync_at"),
+    consecutive_failures: integer("consecutive_failures").notNull().default(0),
+    sync_status: text("sync_status", {
+      enum: ["pending", "synced", "failed"],
+    })
+      .notNull()
+      .default("pending"),
+    sync_error: text("sync_error"),
+    updated_at: integer("updated_at").notNull(),
+  },
+  (t) => ({
+    byYoutubeId: index("video_youtube_metadata_youtube_idx").on(
+      t.youtube_video_id,
+    ),
+    bySync: index("video_youtube_metadata_sync_idx").on(
+      t.sync_status,
+      t.synced_at,
+    ),
+    byNextSync: index("video_youtube_metadata_next_sync_idx").on(
+      t.next_sync_at,
+      t.video_id,
+    ),
   }),
 );
 
@@ -292,6 +372,70 @@ export const videoChapters = sqliteTable(
       t.video_id,
       t.visibility,
     ),
+  }),
+);
+
+export const notificationOutbox = sqliteTable(
+  "notification_outbox",
+  {
+    id: text("id").primaryKey(),
+    recipient_user_id: text("recipient_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    type: text("type").notNull(),
+    payload_json: text("payload_json").notNull(),
+    status: text("status", {
+      enum: [
+        "pending",
+        "processing",
+        "sent",
+        "failed",
+        "cancelled",
+        "dead_letter",
+      ],
+    }).default("pending"),
+    attempt_count: integer("attempt_count").default(0),
+    processing_started_at: integer("processing_started_at"),
+    lease_token: text("lease_token"),
+    lease_expires_at: integer("lease_expires_at"),
+    next_attempt_at: integer("next_attempt_at"),
+    last_error: text("last_error"),
+    processed_at: integer("processed_at"),
+    event_id: text("event_id"),
+    dedupe_key: text("dedupe_key"),
+    created_at: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    byStatusCreated: index("notification_outbox_status_created_idx").on(
+      t.status,
+      t.created_at,
+    ),
+    byDispatch: index("notification_outbox_dispatch_idx").on(
+      t.status,
+      t.next_attempt_at,
+      t.created_at,
+    ),
+    byProcessingStarted: index("notification_outbox_processing_started_idx").on(
+      t.status,
+      t.processing_started_at,
+    ),
+    byLease: index("notification_outbox_lease_idx").on(
+      t.status,
+      t.lease_expires_at,
+    ),
+    byEvent: index("notification_outbox_event_idx").on(t.event_id),
+    byDedupe: index("notification_outbox_dedupe_idx").on(t.dedupe_key),
+    byStatusDedupe: index("notification_outbox_status_dedupe_idx").on(
+      t.status,
+      t.dedupe_key,
+    ),
+    activeDedupeUniq: uniqueIndex("notification_outbox_active_dedupe_uniq")
+      .on(t.dedupe_key)
+      .where(
+        sql`dedupe_key IS NOT NULL AND status IN ('pending', 'processing', 'sent')`,
+      ),
   }),
 );
 
