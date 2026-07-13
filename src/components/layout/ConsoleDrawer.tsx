@@ -13,6 +13,8 @@ const FOCUSABLE = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(",");
 
+const ACTIVE_LINK = 'a[aria-current="page"], a[data-active="true"]';
+
 function fallbackConsolePageLabel(
   pathname: string,
 ): string {
@@ -106,7 +108,7 @@ export function ConsoleDrawer({
     const frame = window.requestAnimationFrame(() => {
       const activeLink =
         panelRef.current?.querySelector<HTMLElement>(
-          'a[aria-current="page"], a[data-active="true"]',
+          ACTIVE_LINK,
         );
 
       const activeText =
@@ -132,13 +134,23 @@ export function ConsoleDrawer({
   const drawerOpen = isMobile && open;
 
   React.useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    panel.inert = isMobile && !drawerOpen;
+  }, [drawerOpen, isMobile]);
+
+  React.useEffect(() => {
     if (!drawerOpen) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const panel = panelRef.current;
     const trigger = triggerRef.current;
     const first = panel?.querySelector<HTMLElement>(FOCUSABLE);
-    const focusTimer = window.setTimeout(() => first?.focus(), 0);
+    const active = panel?.querySelector<HTMLElement>(ACTIVE_LINK);
+    const focusTimer = window.setTimeout(() => {
+      active?.scrollIntoView({ block: "center" });
+      first?.focus({ preventScroll: true });
+    }, 0);
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -211,14 +223,23 @@ export function ConsoleDrawer({
         data-open={drawerOpen ? "true" : "false"}
         role={drawerOpen ? "dialog" : undefined}
         aria-modal={drawerOpen ? true : undefined}
+        aria-hidden={isMobile && !drawerOpen ? true : undefined}
         aria-label={label}
         tabIndex={-1}
+        onClickCapture={(event) => {
+          if (!drawerOpen) return;
+          const target = event.target;
+          if (target instanceof Element && target.closest("a[href]")) {
+            close(false);
+          }
+        }}
       >
         <div className="fn-console-drawer-head">
           <strong>{label}</strong>
           <button
             type="button"
             className="fn-console-drawer-close"
+            aria-label={`${label}を閉じる`}
             onClick={() => close()}
           >
             <Icon name="close" size={16} aria-hidden />
