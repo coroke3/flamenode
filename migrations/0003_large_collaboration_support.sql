@@ -1,6 +1,6 @@
 -- Migration: 0003_large_collaboration_support.sql
 -- Date: 2026-07-13
--- Type: schema
+-- Type: additive
 -- Summary: Raise audit_log_settings max_payload_bytes for large collaboration member sets
 -- Data loss: none
 -- Rollback: recreate audit_log_settings with max_payload_bytes DEFAULT 20000 and restore prior row values from backup
