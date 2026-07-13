@@ -2,6 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-13
+> Verified against commit: `684bc10`
 > Source of truth: `migrations/0039_search_relation_indexes.sql`, `src/lib/db/schema.ts`
 
 対象migration: `0039_search_relation_indexes.sql`
