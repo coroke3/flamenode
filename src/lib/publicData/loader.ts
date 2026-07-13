@@ -35,22 +35,52 @@ type PublicJsonLoaderConfig<TPayload, TResult> = {
   normalize: (payload: TPayload) => TResult | null;
 };
 
+const staticReadInFlight = new Map<string, Promise<unknown | null>>();
+
+function warnPublicStaticJson(
+  key: string,
+  result: "invalid_json" | "read_failed" | "enqueue_failed",
+  error?: unknown,
+): void {
+  console.warn(
+    JSON.stringify({
+      service: "public-static-json",
+      object_key: key.slice(0, 240),
+      result,
+      error_name: error instanceof Error ? error.name : undefined,
+    }),
+  );
+}
+
 async function readStaticJson<T>(key: string): Promise<T | null> {
-  const bucket = getEnv().BUCKET;
-  if (!bucket) return null;
-  const object = await bucket.get(key);
-  if (!object) return null;
+  const existing = staticReadInFlight.get(key);
+  if (existing) return existing as Promise<T | null>;
+
+  const pending = (async (): Promise<T | null> => {
+    try {
+      const bucket = getEnv().BUCKET;
+      if (!bucket) return null;
+      const object = await bucket.get(key);
+      if (!object) return null;
+      try {
+        return (await object.json()) as T;
+      } catch (error) {
+        warnPublicStaticJson(key, "invalid_json", error);
+        return null;
+      }
+    } catch (error) {
+      warnPublicStaticJson(key, "read_failed", error);
+      return null;
+    }
+  })();
+
+  staticReadInFlight.set(key, pending);
   try {
-    return (await object.json()) as T;
-  } catch {
-    console.warn(
-      JSON.stringify({
-        service: "public-static-json",
-        object_key: key.slice(0, 240),
-        result: "invalid_json",
-      }),
-    );
-    return null;
+    return await pending;
+  } finally {
+    if (staticReadInFlight.get(key) === pending) {
+      staticReadInFlight.delete(key);
+    }
   }
 }
 
@@ -87,20 +117,24 @@ export async function loadPublicJson<T>(
   }
 
   const payload = await readStaticJson<T>(options.r2Key);
-  if (payload) {
+  if (payload !== null) {
     return { data: payload, source: "static", strategy, enqueued: false };
   }
 
   let enqueued = false;
   if (db) {
     const priority = strategy === "static_json_only" ? "high" : "normal";
-    await enqueueStaticRebuild(db, {
-      targetType: options.targetType,
-      targetId: options.targetId,
-      reason: options.reason,
-      priority,
-    });
-    enqueued = true;
+    try {
+      await enqueueStaticRebuild(db, {
+        targetType: options.targetType,
+        targetId: options.targetId,
+        reason: options.reason,
+        priority,
+      });
+      enqueued = true;
+    } catch (error) {
+      warnPublicStaticJson(options.r2Key, "enqueue_failed", error);
+    }
   }
 
   return { data: null, source: "miss", strategy, enqueued };
