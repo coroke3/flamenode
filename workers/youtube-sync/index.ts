@@ -34,13 +34,14 @@ type MetadataWrite = {
   syncError: string | null;
 };
 
+/** YouTube videos.listの上限50 IDに合わせ、1 Cronで1 requestだけ処理する。 */
 export const YOUTUBE_SYNC_BATCH_SIZE = 50;
-export const YOUTUBE_SYNC_BATCHES_PER_RUN = 4;
+export const YOUTUBE_SYNC_BATCHES_PER_RUN = 1;
 export const YOUTUBE_SYNC_FETCH_TIMEOUT_MS = 8_000;
 export const YOUTUBE_SYNC_MAX_ATTEMPTS = 2;
 export const YOUTUBE_SYNC_MAX_RETRY_DELAY_MS = 15_000;
 
-const ACTIVE_SYNC_INTERVAL_SEC = 2 * 60 * 60;
+const ACTIVE_SYNC_INTERVAL_SEC = 60 * 60;
 const DEFAULT_SYNC_INTERVAL_SEC = 24 * 60 * 60;
 const ACTIVE_EVENT_GRACE_SEC = 24 * 60 * 60;
 const BULK_UPSERT_ROWS = 8;
@@ -293,8 +294,8 @@ async function persistMetadataBatch(
 }
 
 /**
- * 1回のCronで最大200件を50件ずつYouTube APIへ問い合わせる。
- * D1は8件単位のbulk upsertにまとめ、1実行50 subrequests以内へ収める。
+ * 1回のCronで最大50件をYouTube APIへ問い合わせる。
+ * D1は8件単位のbulk upsertにまとめ、1実行50 queries/subrequests以内へ収める。
  */
 export async function syncBatch(
   env: Env,
@@ -320,8 +321,6 @@ export async function syncBatch(
     const writes = buildMetadataWrites(rows, items);
     await persistMetadataBatch(env, writes, now);
     processed += writes.length;
-
-    if (rows.length < YOUTUBE_SYNC_BATCH_SIZE) break;
   }
 
   return processed === 0
