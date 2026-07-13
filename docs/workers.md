@@ -6,21 +6,32 @@ Workers FreeのCPU上限はHTTP/Cronともに10msであり、Cron間隔を1時�
 
 | Worker | Cron | 主な責務 | 1実行上限 |
 |---|---:|---|---:|
-| `fast-jobs` | `*/5 * * * *` | 締切リマインダー、通知配送 | 通知6件 |
+| `fast-jobs` | `*/5 * * * *` | 締切リマインダー、通知配送 | 通知6件、Discord外部request最大12、DM cache KV書込最大2 |
 | `content-jobs` | `*/15 * * * *` | 静的JSON再生成、retention cleanup | target 1件 |
-| `sync-jobs` | `7,22,37,52 * * * *` | YouTube同期、スコア差分再計算 | YouTube 50件、score 150件 |
+| `sync-jobs` | `7,22,37,52 * * * *` | YouTube同期、スコア差分再計算 | YouTube 50件・最大2 quota units、score 150件 |
 
 旧standalone Worker entrypointは共有モジュールとして残すが、直接deployしない。
 
 ## 実行予算
 
-- `fast-jobs`: 通知は最大6件。1件当たりD1 claim、Discord最大2 request、完了更新を行っても50 subrequests以内に収める。
+- `fast-jobs`: 通知は最大6件。1件当たりD1 claim、KV DM channel cache、Discord最大2 request、完了更新を含めて50 subrequests以内に収める。DM channelはisolateへ全件cacheし、KVへの永続化だけを1実行2件に制限する。
 - `content-jobs`: 1 targetだけ生成する。cleanupはleaseにより1時間に1回だけ実行する。静的生成中のD1 queryは`withSerializedD1`で直列化し、同時接続枠を浪費しない。
 - `sync-jobs`: YouTube `videos.list`は最大50 IDを1 requestで取得する。D1保存は8件単位のbulk upsertにまとめる。
 - `youtube-sync`: `pending`、開催中期限、通常期限を最大3 queryへ分け、既存indexから最大50件だけ取得する。15分ごとの全作品走査を行わない。
 - `score-recalc`: 変更済みまたは24時間以上未更新の公開作品を1 SQLで最大150件更新する。KV cursorと1作品1 queryを使わない。
 - D1のrows writtenには更新table rowに加えてindex entryも含まれるため、scoreの理論最大を14,400作品/日に抑え、他jobの書込み余地を確保する。
 - Cron重複排除はD1 `worker_leases`を正本とし、無制限loop、全件読込、処理全体の即時retryは禁止する。
+
+## 外部APIガード
+
+| 外部処理 | Provider上限への対応 | FlameNode側の固定上限・削減策 |
+|---|---|---|
+| YouTube Data API `videos.list` | 1 requestあたり1 quota unit。無効requestも最低1 unit。既定10,000 units/day、太平洋時間0時reset | 1 Cron最大50 ID、最大2 attempts=2 units。必要な`fields`だけ取得。quota系403はKVで1時間cooldownし連続失敗を止める |
+| Discord Bot/Webhook | per-route limitは可変。`X-RateLimit-*`と`Retry-After`を正本にし、global limitは50 requests/sec | 1 Cron最大12 external requests。inline retryなし。DM channel IDをisolate/KVへ30日cacheし、通常配送を1 requestへ削減。KV書込は最大2/run・576/day。global 429は全routeへ適用 |
+| Google Drive画像 / YouTube thumbnail | 公開画像originの固定quota値へ依存しない | 同一キーの同時missを1 fetchへ集約。ETag/304再検証、negative cache、stale返却、単一objectサイズ上限。request内retryなし |
+| Cloudflare Worker subrequest | Freeは1 invocation 50、同時outgoing connection 6 | 外部fetchだけでなくD1/KV/R2も含め50未満に固定。外部処理は逐次または共有in-flightで重複排除 |
+
+Providerの429/503を受けた場合、同一invocationで無制限に再試行しない。Providerが返す待機時間をqueueの`next_attempt_at`または短期cooldownへ反映し、後続Cronへ繰り越す。固定値をproviderの実レート上限として仮定しない。
 
 ## 大規模データ時の処理能力
 
@@ -37,7 +48,7 @@ Workers FreeのCPU上限はHTTP/Cronともに10msであり、Cron間隔を1時�
 
 | データ | 反映目標 |
 |---|---:|
-| 通知 | 5分以内 |
+| 通知 | 5分以内。Provider cooldown中は`Retry-After`後のCronへ繰り越し |
 | 投稿・管理画面の確定結果 | 即時（D1正本） |
 | live API | CDN cache 5秒、stale 30秒 |
 | 静的JSON | queue先頭から15分ごとに1 target |
@@ -51,6 +62,8 @@ Queue targetはcanonical値だけを受理する。旧別名や未知値は成�
 
 `/admin/workers`で、Cronの最終開始・成功・失敗・lease、通知と静的queueの固着、YouTubeとscoreのbacklog、理論解消時間、global静的JSONの最終生成時刻、`operation_mode`を確認する。詳細操作は既存の通知配信・静的JSON再生成・YouTube同期ページで行う。
 
+YouTube quota cooldown中は同期がskippedになり、Discord rate limit時は通知outboxの`next_attempt_at`以降へ繰り越される。画像proxyは`x-fn-media-cache`で`hit`、`miss`、`stale`、`coalesced`、`fallback`を区別する。
+
 CPU時間、`exceededCpu`、D1の日次使用量、YouTube API quotaはアプリDBから正確に取得できないため、Cloudflare DashboardおよびGoogle Cloud Consoleを正本とする。
 
 ## 公式上限
@@ -60,3 +73,4 @@ CPU時間、`exceededCpu`、D1の日次使用量、YouTube API quotaはアプリ
 - D1 limits: https://developers.cloudflare.com/d1/platform/limits/
 - D1 pricing: https://developers.cloudflare.com/d1/platform/pricing/
 - YouTube quota: https://developers.google.com/youtube/v3/determine_quota_cost
+- Discord rate limits: https://docs.discord.com/developers/topics/rate-limits
