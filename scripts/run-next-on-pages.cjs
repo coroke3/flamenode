@@ -17,6 +17,15 @@ const env = { ...process.env };
 const requireShimOption = `--require=${shim}`;
 env.NODE_OPTIONS = [env.NODE_OPTIONS, requireShimOption].filter(Boolean).join(" ");
 
+// The repository uses legacy-peer-deps for deterministic top-level npm ci because
+// of Auth.js beta peer ranges. Vercel CLI runs a second npm install while building
+// `.vercel/output`; inheriting legacy-peer-deps makes npm remove auto-installed
+// Vercel builder peers such as @vercel/next, then server-launcher.js cannot be read.
+// Override only the nested Vercel/next-on-pages process and keep the top-level CI
+// install policy unchanged.
+env.npm_config_legacy_peer_deps = "false";
+env.NPM_CONFIG_LEGACY_PEER_DEPS = "false";
+
 if (process.platform === "win32") {
   const toGitBashPath = (value) => {
     const normalized = value.replace(/\\/g, "/");
