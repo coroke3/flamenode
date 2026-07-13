@@ -15,7 +15,7 @@ Workers FreeのCPU上限はHTTP/Cronともに10msであり、Cron間隔を1時�
 ## 実行予算
 
 - `fast-jobs`: 通知は最大6件。1件当たりD1 claim、Discord最大2 request、完了更新を行っても50 subrequests以内に収める。
-- `content-jobs`: 1 targetだけ生成する。cleanupはleaseにより1時間に1回だけ実行する。
+- `content-jobs`: 1 targetだけ生成する。cleanupはleaseにより1時間に1回だけ実行する。静的生成中のD1 queryは`withSerializedD1`で直列化し、同時接続枠を浪費しない。
 - `sync-jobs`: YouTube `videos.list`は最大50 IDを1 requestで取得する。D1保存は8件単位のbulk upsertにまとめる。
 - `youtube-sync`: `pending`、開催中期限、通常期限を最大3 queryへ分け、既存indexから最大50件だけ取得する。15分ごとの全作品走査を行わない。
 - `score-recalc`: 変更済みまたは24時間以上未更新の公開作品を1 SQLで最大150件更新する。KV cursorと1作品1 queryを使わない。
@@ -47,8 +47,16 @@ Workers FreeのCPU上限はHTTP/Cronともに10msであり、Cron間隔を1時�
 
 Queue targetはcanonical値だけを受理する。旧別名や未知値は成功扱いにせず、有限retry後に`failed`として可視化する。
 
+## 監視
+
+`/admin/workers`で、Cronの最終開始・成功・失敗・lease、通知と静的queueの固着、YouTubeとscoreのbacklog、理論解消時間、global静的JSONの最終生成時刻、`operation_mode`を確認する。詳細操作は既存の通知配信・静的JSON再生成・YouTube同期ページで行う。
+
+CPU時間、`exceededCpu`、D1の日次使用量、YouTube API quotaはアプリDBから正確に取得できないため、Cloudflare DashboardおよびGoogle Cloud Consoleを正本とする。
+
 ## 公式上限
 
 - Workers limits: https://developers.cloudflare.com/workers/platform/limits/
 - Cron Triggers: https://developers.cloudflare.com/workers/configuration/cron-triggers/
 - D1 limits: https://developers.cloudflare.com/d1/platform/limits/
+- D1 pricing: https://developers.cloudflare.com/d1/platform/pricing/
+- YouTube quota: https://developers.google.com/youtube/v3/determine_quota_cost
