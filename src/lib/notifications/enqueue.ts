@@ -6,12 +6,10 @@ import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import type { DB } from "@/lib/db/client";
 import { notificationOutbox, users, xUsers } from "@/lib/db/schema";
 import { auditAction } from "@/lib/audit/helpers";
-import { shouldEnqueueUserNotification } from "./context";
 import { validateNotificationPayload } from "./format";
 
 type AnyDb = LibSQLDatabase<any>;
 type InsertResult = { meta?: { changes?: number } };
-export type NotificationDeliveryPolicy = "required_atomic" | "best_effort";
 
 export interface EnqueueNotificationInput {
   /** 送信先の Auth.js 内部ユーザー ID。 */
@@ -25,14 +23,14 @@ export interface EnqueueNotificationInput {
   force?: boolean;
 }
 
-export type KnownRecipientNotificationInput = Omit<
+type KnownRecipientNotificationInput = Omit<
   EnqueueNotificationInput,
   "recipientUserId" | "xUserId" | "force"
 > & {
   recipientUserId: string;
 };
 
-export type NotificationOutboxBatch = {
+type NotificationOutboxBatch = {
   statements: BatchItem<"sqlite">[];
   expectedChanges: null[];
   rows: Array<typeof notificationOutbox.$inferSelect>;
@@ -44,10 +42,6 @@ type PreparedNotification = {
   eventId: string | null;
   dedupeKey: string | null;
 };
-
-function randomId(): string {
-  return crypto.randomUUID();
-}
 
 function prepareNotification(
   input: Pick<
@@ -73,7 +67,7 @@ function buildNotificationRow(
   now: number,
 ): typeof notificationOutbox.$inferSelect {
   return {
-    id: randomId(),
+    id: crypto.randomUUID(),
     recipient_user_id: recipientUserId,
     type: prepared.type,
     payload_json: prepared.payloadJson,
@@ -118,7 +112,7 @@ export async function buildKnownRecipientNotificationBatch(
   db: AnyDb,
   inputs: readonly KnownRecipientNotificationInput[],
 ): Promise<NotificationOutboxBatch> {
-  if (!shouldEnqueueUserNotification() || inputs.length === 0) {
+  if (inputs.length === 0) {
     return { statements: [], expectedChanges: [], rows: [] };
   }
   if (inputs.length > 30) throw new Error("notification_batch_limit_exceeded");
@@ -239,8 +233,6 @@ export async function buildNotificationOutboxStatement(
   db: AnyDb,
   input: EnqueueNotificationInput,
 ): Promise<BatchItem<"sqlite"> | null> {
-  if (!shouldEnqueueUserNotification()) return null;
-
   const prepared = prepareNotification(input);
   if (
     prepared.dedupeKey &&
@@ -275,8 +267,6 @@ export async function enqueueNotification(
   db: AnyDb,
   input: EnqueueNotificationInput,
 ): Promise<boolean> {
-  if (!shouldEnqueueUserNotification()) return false;
-
   let prepared: PreparedNotification;
   try {
     prepared = prepareNotification(input);
