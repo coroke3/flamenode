@@ -3,10 +3,10 @@ main = "index.ts"
 compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Workers Free で1時間以上のCronは長時間CPU枠を利用できる。
-# 1回の処理量を増やし、全件巡回に数か月かかる状態を避ける。
+# Workers FreeはCron間隔にかかわらずCPU 10ms。
+# YouTube 50件とscore 250件を15分ごとに小分け処理する。
 [triggers]
-crons = ["30 * * * *"]
+crons = ["7,22,37,52 * * * *"]
 
 [[d1_databases]]
 binding = "DB"
