@@ -25,10 +25,10 @@ test("Retry-Afterは上限を超えない", () => {
   assert.equal(parseRetryAfterMs("120"), 15_000);
 });
 
-test("YouTube APIの1リクエストは最大50 IDで構成する", () => {
+test("YouTube APIは1 Cron最大50 IDだけ処理する", () => {
   assert.equal(YOUTUBE_SYNC_BATCH_SIZE, 50);
-  assert.equal(YOUTUBE_SYNC_BATCHES_PER_RUN, 4);
-  assert.equal(YOUTUBE_SYNC_BATCH_SIZE * YOUTUBE_SYNC_BATCHES_PER_RUN, 200);
+  assert.equal(YOUTUBE_SYNC_BATCHES_PER_RUN, 1);
+  assert.equal(YOUTUBE_SYNC_BATCH_SIZE * YOUTUBE_SYNC_BATCHES_PER_RUN, 50);
   assert.ok(YOUTUBE_SYNC_MAX_ATTEMPTS <= 2);
 });
 
