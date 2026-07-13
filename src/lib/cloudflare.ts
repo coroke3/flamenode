@@ -27,7 +27,8 @@ let memoizedDb: { ref: D1Database | null; db: DB | null } = {
 };
 
 /** ローカル Miniflare / リモート D1 接続の瞬断で付きやすいコード・メッセージ */
-const TRANSIENT_DB_MARKERS = /ECONNRESET|ECONNREFUSED|ETIMEDOUT|fetch failed|UND_ERR_SOCKET|socket hang up/i;
+const TRANSIENT_DB_MARKERS =
+  /ECONNRESET|ECONNREFUSED|ETIMEDOUT|fetch failed|UND_ERR_SOCKET|socket hang up/i;
 
 function isTransientDbError(err: unknown): boolean {
   let cur: unknown = err;
@@ -37,9 +38,16 @@ function isTransientDbError(err: unknown): boolean {
     seen.add(cur);
     if (typeof cur === "object") {
       const o = cur as { code?: string; message?: string; cause?: unknown };
-      if (o.code === "ECONNRESET" || o.code === "ECONNREFUSED" || o.code === "ETIMEDOUT")
+      if (
+        o.code === "ECONNRESET" ||
+        o.code === "ECONNREFUSED" ||
+        o.code === "ETIMEDOUT"
+      )
         return true;
-      if (typeof o.message === "string" && TRANSIENT_DB_MARKERS.test(o.message))
+      if (
+        typeof o.message === "string" &&
+        TRANSIENT_DB_MARKERS.test(o.message)
+      )
         return true;
       cur = o.cause;
       continue;
@@ -53,92 +61,141 @@ function clearDatabaseMemo(): void {
   memoizedDb = { ref: null, db: null };
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
- * D1 クエリの一時的な接続切断（Miniflare workerd 等）に対して数回リトライする。
- * 同一 Drizzle インスタンスが腐っている場合に備え、失敗時はメモを捨てて作り直す。
+ * 読み取り専用処理向け。瞬断時だけ Drizzle instance を作り直して再試行する。
+ * 書き込み処理を渡してはいけない。再実行により二重書き込みになるため。
  */
-export async function withDatabase<T>(fn: (db: DB) => Promise<T>): Promise<T | null> {
+export async function withDatabaseRead<T>(
+  fn: (db: DB) => Promise<T>,
+): Promise<T | null> {
   const maxAttempts = 4;
   let lastError: unknown;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const db = getDatabase();
     if (!db) return null;
     try {
       return await fn(db);
-    } catch (e) {
-      lastError = e;
-      if (!isTransientDbError(e) || attempt >= maxAttempts - 1) {
-        throw e;
+    } catch (error) {
+      lastError = error;
+      if (!isTransientDbError(error) || attempt >= maxAttempts - 1) {
+        throw error;
       }
       clearDatabaseMemo();
-      await new Promise((r) => setTimeout(r, 30 * 2 ** attempt));
+      await sleep(30 * 2 ** attempt);
     }
   }
   throw lastError;
 }
 
+/**
+ * 書き込み処理向け。コールバックを再実行しない。
+ * retry が必要な処理は、呼び出し側で idempotency key / D1 batch / CAS 条件を持たせる。
+ */
+export async function withDatabaseWrite<T>(
+  fn: (db: DB) => Promise<T>,
+): Promise<T | null> {
+  const db = getDatabase();
+  if (!db) return null;
+  return fn(db);
+}
+
+/**
+ * 後方互換。既存呼び出しはすべて読み取り用途として扱う。
+ * 新規コードでは withDatabaseRead / withDatabaseWrite を明示する。
+ */
+export const withDatabase = withDatabaseRead;
+
 export async function waitForLocalBindings(): Promise<void> {
   const g = globalThis as Record<string | symbol, unknown>;
-  if (g.__FLAMENODE_LOCAL_BINDINGS_PROMISE) {
-    try {
-      await g.__FLAMENODE_LOCAL_BINDINGS_PROMISE;
-    } catch {
-      // ignore
-    }
+  const pending = g.__FLAMENODE_LOCAL_BINDINGS_PROMISE;
+  if (pending && typeof (pending as PromiseLike<unknown>).then === "function") {
+    await pending;
   }
+}
+
+function isD1Database(value: unknown): value is D1Database {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    typeof (value as { prepare?: unknown }).prepare === "function" &&
+    typeof (value as { batch?: unknown }).batch === "function"
+  );
+}
+
+function isR2Bucket(value: unknown): value is R2Bucket {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    typeof (value as { get?: unknown }).get === "function" &&
+    typeof (value as { put?: unknown }).put === "function" &&
+    typeof (value as { delete?: unknown }).delete === "function"
+  );
+}
+
+function isKvNamespace(value: unknown): value is KVNamespace {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    typeof (value as { get?: unknown }).get === "function" &&
+    typeof (value as { put?: unknown }).put === "function" &&
+    typeof (value as { delete?: unknown }).delete === "function"
+  );
+}
+
+function normalizeBindings(
+  candidate: Partial<FlameNodeEnv> | undefined,
+): FlameNodeEnv {
+  return {
+    DB: (isD1Database(candidate?.DB) ? candidate.DB : undefined) as D1Database,
+    BUCKET: (isR2Bucket(candidate?.BUCKET)
+      ? candidate.BUCKET
+      : undefined) as R2Bucket,
+    KV: (isKvNamespace(candidate?.KV) ? candidate.KV : undefined) as KVNamespace,
+    AUTH_SECRET: candidate?.AUTH_SECRET ?? process.env.AUTH_SECRET,
+    AUTH_DISCORD_ID:
+      candidate?.AUTH_DISCORD_ID ?? process.env.AUTH_DISCORD_ID,
+    AUTH_DISCORD_SECRET:
+      candidate?.AUTH_DISCORD_SECRET ?? process.env.AUTH_DISCORD_SECRET,
+    SPREADSHEET_IMPORT_PREVIEW_SECRET:
+      candidate?.SPREADSHEET_IMPORT_PREVIEW_SECRET ??
+      process.env.SPREADSHEET_IMPORT_PREVIEW_SECRET,
+    DISCORD_GUILD_ID:
+      candidate?.DISCORD_GUILD_ID ?? process.env.DISCORD_GUILD_ID,
+    DISCORD_BOT_TOKEN:
+      candidate?.DISCORD_BOT_TOKEN ?? process.env.DISCORD_BOT_TOKEN,
+    YOUTUBE_API_KEY:
+      candidate?.YOUTUBE_API_KEY ?? process.env.YOUTUBE_API_KEY,
+    NEXT_PUBLIC_SITE_URL:
+      candidate?.NEXT_PUBLIC_SITE_URL ?? process.env.NEXT_PUBLIC_SITE_URL,
+  };
 }
 
 export function getEnv(): FlameNodeEnv {
   const g = globalThis as Record<string | symbol, unknown>;
 
-  // 1) Cloudflare Pages ランタイム
+  // 1) Cloudflare Pages runtime
   const ctx = g[Symbol.for("__cloudflare-request-context__")] as
-    | { env?: FlameNodeEnv }
+    | { env?: Partial<FlameNodeEnv> }
     | undefined;
-  if (ctx?.env) return ctx.env as FlameNodeEnv;
+  if (ctx?.env) return normalizeBindings(ctx.env);
 
-  // 2) instrumentation.ts で初期化された Miniflare バインディング
+  // 2) instrumentation.ts で初期化された Miniflare bindings
   const local = g.__FLAMENODE_LOCAL_BINDINGS as
-    | { DB: D1Database; BUCKET: R2Bucket; KV: KVNamespace }
+    | Partial<FlameNodeEnv>
     | undefined;
-  if (local) {
-    return {
-      DB: local.DB,
-      BUCKET: local.BUCKET,
-      KV: local.KV,
-      AUTH_SECRET: process.env.AUTH_SECRET,
-      AUTH_DISCORD_ID: process.env.AUTH_DISCORD_ID,
-      AUTH_DISCORD_SECRET: process.env.AUTH_DISCORD_SECRET,
-      SPREADSHEET_IMPORT_PREVIEW_SECRET:
-        process.env.SPREADSHEET_IMPORT_PREVIEW_SECRET,
-      DISCORD_GUILD_ID: process.env.DISCORD_GUILD_ID,
-      DISCORD_BOT_TOKEN: process.env.DISCORD_BOT_TOKEN,
-      YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY,
-      NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
-    };
-  }
+  if (local) return normalizeBindings(local);
 
-  // 3) process.env から擬似的に組み立てる (どちらも無いとき: D1/R2/KV は使えない)
-  const env = process.env as unknown as Partial<FlameNodeEnv>;
-  return {
-    DB: env.DB as D1Database,
-    BUCKET: env.BUCKET as R2Bucket,
-    KV: env.KV as KVNamespace,
-    AUTH_SECRET: process.env.AUTH_SECRET,
-    AUTH_DISCORD_ID: process.env.AUTH_DISCORD_ID,
-    AUTH_DISCORD_SECRET: process.env.AUTH_DISCORD_SECRET,
-    SPREADSHEET_IMPORT_PREVIEW_SECRET:
-      process.env.SPREADSHEET_IMPORT_PREVIEW_SECRET,
-    DISCORD_GUILD_ID: process.env.DISCORD_GUILD_ID,
-    DISCORD_BOT_TOKEN: process.env.DISCORD_BOT_TOKEN,
-    YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY,
-    NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
-  };
+  // 3) Node の process.env は文字列なので D1/R2/KV binding として扱わない。
+  return normalizeBindings(undefined);
 }
 
 export function getDatabase(): DB | null {
   const env = getEnv();
-  if (!env?.DB) return null;
+  if (!isD1Database(env.DB)) return null;
   if (memoizedDb.ref !== env.DB) {
     memoizedDb = { ref: env.DB, db: getDb(env.DB) };
   }
