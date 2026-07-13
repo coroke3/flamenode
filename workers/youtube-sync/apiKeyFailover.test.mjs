@@ -87,6 +87,28 @@ test("quota超過は副キーへ切り替えない", async () => {
   assert.deepEqual(calls, ["primary-secret"]);
 });
 
+test("恒常エラーも副キーへ切り替えない", async () => {
+  const kv = createKv();
+  const calls = [];
+  const keys = resolveYoutubeApiKeys({
+    YOUTUBE_API_KEY: "primary-secret",
+    YOUTUBE_API_KEY_SECONDARY: "secondary-secret",
+  });
+  await assert.rejects(
+    runWithYoutubeApiKeyFailover(
+      { KV: kv },
+      keys,
+      10_000,
+      async (candidate) => {
+        calls.push(candidate.key);
+        throw new YoutubeApiRequestError("permanent", "badrequest", 400);
+      },
+    ),
+    /permanent:youtube_api_badrequest/,
+  );
+  assert.deepEqual(calls, ["primary-secret"]);
+});
+
 test("主キーのcredential障害時だけ副キーへ切り替える", async () => {
   assert.equal(classifyYoutubeApiError(400, "keyInvalid"), "credential");
   assert.equal(shouldFailoverYoutubeApiKey(400, "keyInvalid"), true);
