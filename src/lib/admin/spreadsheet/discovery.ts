@@ -18,9 +18,13 @@ type SpreadsheetCatalog = {
 };
 
 let catalog: SpreadsheetCatalog | null = null;
+let catalogRefresh: Promise<SpreadsheetCatalog> | null = null;
+let cacheGeneration = 0;
 
 export function invalidateSpreadsheetTableCache(): void {
   catalog = null;
+  catalogRefresh = null;
+  cacheGeneration++;
 }
 
 export function getSpreadsheetSyncWarnings(): {
@@ -50,24 +54,23 @@ async function loadTableNamesFromD1(): Promise<string[]> {
   return (result.results ?? []).map((r) => r.name);
 }
 
-async function refreshCatalog(): Promise<SpreadsheetCatalog> {
-  const [dbNames, schemaNames] = await Promise.all([
-    loadTableNamesFromD1(),
-    Promise.resolve(getDrizzleSchemaTableNames()),
-  ]);
-
+async function refreshCatalog(generation: number): Promise<SpreadsheetCatalog> {
+  const schemaNames = getDrizzleSchemaTableNames();
+  const dbNames = await loadTableNamesFromD1();
   const tables = buildSpreadsheetTableDefs(dbNames, schemaNames);
   const dbSet = new Set(dbNames);
-  const schemaSet = schemaNames;
-
-  catalog = {
+  const nextCatalog = {
     tables,
     byName: new Map(tables.map((t) => [t.table, t])),
     notInSchema: tables.filter((t) => !t.inSchema).map((t) => t.table),
-    inSchemaNotInDb: [...schemaSet].filter((n) => !dbSet.has(n)).sort(),
+    inSchemaNotInDb: [...schemaNames].filter((n) => !dbSet.has(n)).sort(),
     cachedAt: Date.now(),
-  };
-  return catalog;
+  } satisfies SpreadsheetCatalog;
+
+  if (generation === cacheGeneration) {
+    catalog = nextCatalog;
+  }
+  return nextCatalog;
 }
 
 async function getCatalog(): Promise<SpreadsheetCatalog> {
@@ -75,7 +78,18 @@ async function getCatalog(): Promise<SpreadsheetCatalog> {
   if (catalog && now - catalog.cachedAt < CACHE_TTL_MS) {
     return catalog;
   }
-  return refreshCatalog();
+  if (catalogRefresh) {
+    return catalogRefresh;
+  }
+
+  const generation = cacheGeneration;
+  const refresh = refreshCatalog(generation).finally(() => {
+    if (catalogRefresh === refresh) {
+      catalogRefresh = null;
+    }
+  });
+  catalogRefresh = refresh;
+  return refresh;
 }
 
 /** D1 + Drizzle スキーマからテーブル一覧（短時間キャッシュ） */

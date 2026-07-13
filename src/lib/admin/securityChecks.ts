@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import {
   accounts as accountsTable,
@@ -20,6 +20,47 @@ export type SecurityCheckResult = {
 };
 
 type AnyDb = LibSQLDatabase<any>;
+type CountedRow = { total_count?: number | null };
+
+type SecurityCheckDefinition = {
+  id: string;
+  label: string;
+  run: () => SecurityCheckResult | Promise<SecurityCheckResult>;
+};
+
+const LABELS = {
+  accessTokenNotNull: "accounts.access_token が null でない行",
+  rejectedXIdActive: "rejected X ID が active_x_user_id に設定されている",
+  unapprovedCreatorVideos: "未承認 X ID の creator_x_user_id を持つ作品",
+  bannedUserVideos: "BAN ユーザーが owner の作品",
+  tosNotAcceptedUserVideos: "TOS 未同意ユーザーが owner の作品",
+  customPageDangerousHtml: "custom_pages/custom_themes disabled",
+  bannedUserChapters: "BAN ユーザーが投稿したチャプターコメント",
+  orphanApprovedXId: "approved な X ID で linked_user_id が NULL",
+} as const;
+
+function getTotalCount(rows: CountedRow[]): number {
+  return Number(rows[0]?.total_count ?? 0);
+}
+
+async function runCheckSafely(
+  definition: SecurityCheckDefinition,
+): Promise<SecurityCheckResult> {
+  try {
+    return await definition.run();
+  } catch (error) {
+    console.error(`[security-check:${definition.id}] failed`, error);
+    return {
+      id: definition.id,
+      label: definition.label,
+      status: "warn",
+      count: 1,
+      samples: [],
+      note:
+        "検査自体の実行に失敗しました。DB接続、schema適用状況、サーバーログを確認してください。",
+    };
+  }
+}
 
 /** accounts.access_token が null でない件数 */
 async function checkAccessTokenNotNull(
@@ -32,7 +73,7 @@ async function checkAccessTokenNotNull(
   const count = Number(rows[0]?.c ?? 0);
   return {
     id: "access_token_not_null",
-    label: "accounts.access_token が null でない行",
+    label: LABELS.accessTokenNotNull,
     status: count === 0 ? "ok" : "warn",
     count,
     samples: [],
@@ -43,7 +84,11 @@ async function checkAccessTokenNotNull(
 /** rejected な X ID が誰かの active_x_user_id になっている */
 async function checkRejectedXIdActive(db: AnyDb): Promise<SecurityCheckResult> {
   const rows = await db
-    .select({ id: usersTable.id, active_x_user_id: usersTable.active_x_user_id })
+    .select({
+      id: usersTable.id,
+      active_x_user_id: usersTable.active_x_user_id,
+      total_count: sql<number>`COUNT(*) OVER()`,
+    })
     .from(usersTable)
     .innerJoin(xUsersTable, eq(xUsersTable.id, usersTable.active_x_user_id!))
     .where(
@@ -53,10 +98,10 @@ async function checkRejectedXIdActive(db: AnyDb): Promise<SecurityCheckResult> {
       ),
     )
     .limit(10);
-  const count = rows.length;
+  const count = getTotalCount(rows);
   return {
     id: "rejected_xid_active",
-    label: "rejected X ID が active_x_user_id に設定されている",
+    label: LABELS.rejectedXIdActive,
     status: count === 0 ? "ok" : "warn",
     count,
     samples: rows.slice(0, 5).map((r) => `user:${r.id} x:${r.active_x_user_id ?? ""}`),
@@ -68,7 +113,11 @@ async function checkUnapprovedCreatorVideos(
   db: AnyDb,
 ): Promise<SecurityCheckResult> {
   const rows = await db
-    .select({ id: videosTable.id, creator_x_user_id: videosTable.creator_x_user_id })
+    .select({
+      id: videosTable.id,
+      creator_x_user_id: videosTable.creator_x_user_id,
+      total_count: sql<number>`COUNT(*) OVER()`,
+    })
     .from(videosTable)
     .innerJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id!))
     .where(
@@ -78,10 +127,10 @@ async function checkUnapprovedCreatorVideos(
       ),
     )
     .limit(10);
-  const count = rows.length;
+  const count = getTotalCount(rows);
   return {
     id: "unapproved_creator_videos",
-    label: "未承認 X ID の creator_x_user_id を持つ作品",
+    label: LABELS.unapprovedCreatorVideos,
     status: count === 0 ? "ok" : "warn",
     count,
     samples: rows.slice(0, 5).map((r) => `video:${r.id} creator:${r.creator_x_user_id ?? ""}`),
@@ -91,7 +140,11 @@ async function checkUnapprovedCreatorVideos(
 /** BAN ユーザーの書き込み */
 async function checkBannedUserVideos(db: AnyDb): Promise<SecurityCheckResult> {
   const rows = await db
-    .select({ id: videosTable.id, owner: videosTable.submitted_by_user_id })
+    .select({
+      id: videosTable.id,
+      owner: videosTable.submitted_by_user_id,
+      total_count: sql<number>`COUNT(*) OVER()`,
+    })
     .from(videosTable)
     .innerJoin(
       usersTable,
@@ -99,10 +152,10 @@ async function checkBannedUserVideos(db: AnyDb): Promise<SecurityCheckResult> {
     )
     .where(eq(usersTable.is_banned, 1))
     .limit(10);
-  const count = rows.length;
+  const count = getTotalCount(rows);
   return {
     id: "banned_user_videos",
-    label: "BAN ユーザーが owner の作品",
+    label: LABELS.bannedUserVideos,
     status: count === 0 ? "ok" : "warn",
     count,
     samples: rows.slice(0, 5).map((r) => `video:${r.id} owner:${r.owner}`),
@@ -114,7 +167,11 @@ async function checkTosNotAcceptedUserVideos(
   db: AnyDb,
 ): Promise<SecurityCheckResult> {
   const rows = await db
-    .select({ id: videosTable.id, owner: videosTable.submitted_by_user_id })
+    .select({
+      id: videosTable.id,
+      owner: videosTable.submitted_by_user_id,
+      total_count: sql<number>`COUNT(*) OVER()`,
+    })
     .from(videosTable)
     .innerJoin(
       usersTable,
@@ -122,10 +179,10 @@ async function checkTosNotAcceptedUserVideos(
     )
     .where(ne(usersTable.is_tos_accepted, 1))
     .limit(10);
-  const count = rows.length;
+  const count = getTotalCount(rows);
   return {
     id: "tos_not_accepted_user_videos",
-    label: "TOS 未同意ユーザーが owner の作品",
+    label: LABELS.tosNotAcceptedUserVideos,
     status: count === 0 ? "ok" : "warn",
     count,
     samples: rows.slice(0, 5).map((r) => `video:${r.id} owner:${r.owner}`),
@@ -144,20 +201,16 @@ function checkPublicApiLeak(): SecurityCheckResult {
   };
 }
 
-/**
- * Worker と ORM スキーマのテーブル名乖離チェック (静的・読み取り専用)。
- * workers/notification-dispatcher/index.ts に "notifications" 文字列があり、
- * かつ src/lib/db/schema.ts に "notification_outbox" 定義しかない場合は WARN。
- */
+/** Worker と ORM スキーマのテーブル名乖離は CI の静的検査で担保する。 */
 function checkNotificationTableMismatch(): SecurityCheckResult {
   return {
     id: "notification_table_mismatch",
-    label: "??????????? (Worker vs ORM schema)",
+    label: "通知テーブル名の整合性 (Worker / ORM schema)",
     status: "info",
     count: 0,
     samples: [],
     note:
-      "Cloudflare Pages Edge Runtime ????????????????CI ????????????",
+      "Cloudflare Pages Edge Runtime ではソースファイルを参照できないため、CI の静的検査で確認します。",
   };
 }
 
@@ -165,13 +218,11 @@ function checkNotificationTableMismatch(): SecurityCheckResult {
 async function checkBannedUserChapters(
   db: AnyDb,
 ): Promise<SecurityCheckResult> {
-  // x_users.linked_user_id 経由で banned ユーザーが投稿した video_chapters を検出。
-  // raw SQL で `users AS u` を書くと、schema 上 `user` (singular) にマップされている関係で
-  // 実行時に "no such table: users" が出るため drizzle ORM で組む。
   const rows = await db
     .select({
       id: videoChaptersTable.id,
       x_user_id: videoChaptersTable.x_user_id,
+      total_count: sql<number>`COUNT(*) OVER()`,
     })
     .from(videoChaptersTable)
     .innerJoin(
@@ -184,10 +235,10 @@ async function checkBannedUserChapters(
     )
     .where(eq(usersTable.is_banned, 1))
     .limit(10);
-  const count = rows.length;
+  const count = getTotalCount(rows);
   return {
     id: "banned_user_chapters",
-    label: "BAN ユーザーが投稿したチャプターコメント",
+    label: LABELS.bannedUserChapters,
     status: count === 0 ? "ok" : "warn",
     count,
     samples: rows.slice(0, 5).map((r) => `chapter:${r.id} x:${r.x_user_id}`),
@@ -203,7 +254,10 @@ async function checkOrphanApprovedXId(
   db: AnyDb,
 ): Promise<SecurityCheckResult> {
   const rows = await db
-    .select({ id: xUsersTable.id })
+    .select({
+      id: xUsersTable.id,
+      total_count: sql<number>`COUNT(*) OVER()`,
+    })
     .from(xUsersTable)
     .where(
       and(
@@ -212,10 +266,10 @@ async function checkOrphanApprovedXId(
       ),
     )
     .limit(10);
-  const count = rows.length;
+  const count = getTotalCount(rows);
   return {
     id: "orphan_approved_xid",
-    label: "approved な X ID で linked_user_id が NULL",
+    label: LABELS.orphanApprovedXId,
     status: count === 0 ? "ok" : "info",
     count,
     samples: rows.slice(0, 5).map((r) => `x:${r.id}`),
@@ -227,53 +281,66 @@ async function checkOrphanApprovedXId(
 }
 
 /** custom_pages/custom_themes は初期本番では無効化する。 */
-async function checkCustomPageDangerousHtml(
-  _db: AnyDb,
-): Promise<SecurityCheckResult> {
-  void _db;
-  const flagged: { id: string }[] = [];
+function checkCustomPageDangerousHtml(): SecurityCheckResult {
   return {
     id: "custom_page_dangerous_html",
-    label: "custom_pages/custom_themes disabled",
+    label: LABELS.customPageDangerousHtml,
     status: "ok",
-    count: flagged.length,
-    samples: flagged.slice(0, 5).map((r) => `page:${r.id}`),
-    note:
-      "初期本番では custom_pages/custom_themes は無効化されています。",
+    count: 0,
+    samples: [],
+    note: "初期本番では custom_pages/custom_themes は無効化されています。",
   };
 }
 
 export async function runSecurityChecks(
   db: AnyDb,
 ): Promise<SecurityCheckResult[]> {
-  const [
-    accessToken,
-    rejectedXId,
-    unapprovedCreator,
-    bannedUser,
-    tosNotAccepted,
-    customPageDanger,
-    bannedChapters,
-    orphanApprovedX,
-  ] = await Promise.all([
-    checkAccessTokenNotNull(db),
-    checkRejectedXIdActive(db),
-    checkUnapprovedCreatorVideos(db),
-    checkBannedUserVideos(db),
-    checkTosNotAcceptedUserVideos(db),
-    checkCustomPageDangerousHtml(db),
-    checkBannedUserChapters(db),
-    checkOrphanApprovedXId(db),
-  ]);
+  const definitions: SecurityCheckDefinition[] = [
+    {
+      id: "access_token_not_null",
+      label: LABELS.accessTokenNotNull,
+      run: () => checkAccessTokenNotNull(db),
+    },
+    {
+      id: "rejected_xid_active",
+      label: LABELS.rejectedXIdActive,
+      run: () => checkRejectedXIdActive(db),
+    },
+    {
+      id: "unapproved_creator_videos",
+      label: LABELS.unapprovedCreatorVideos,
+      run: () => checkUnapprovedCreatorVideos(db),
+    },
+    {
+      id: "banned_user_videos",
+      label: LABELS.bannedUserVideos,
+      run: () => checkBannedUserVideos(db),
+    },
+    {
+      id: "tos_not_accepted_user_videos",
+      label: LABELS.tosNotAcceptedUserVideos,
+      run: () => checkTosNotAcceptedUserVideos(db),
+    },
+    {
+      id: "custom_page_dangerous_html",
+      label: LABELS.customPageDangerousHtml,
+      run: checkCustomPageDangerousHtml,
+    },
+    {
+      id: "banned_user_chapters",
+      label: LABELS.bannedUserChapters,
+      run: () => checkBannedUserChapters(db),
+    },
+    {
+      id: "orphan_approved_xid",
+      label: LABELS.orphanApprovedXId,
+      run: () => checkOrphanApprovedXId(db),
+    },
+  ];
+
+  const dynamicResults = await Promise.all(definitions.map(runCheckSafely));
   return [
-    accessToken,
-    rejectedXId,
-    unapprovedCreator,
-    bannedUser,
-    tosNotAccepted,
-    customPageDanger,
-    bannedChapters,
-    orphanApprovedX,
+    ...dynamicResults,
     checkPublicApiLeak(),
     checkNotificationTableMismatch(),
   ];
