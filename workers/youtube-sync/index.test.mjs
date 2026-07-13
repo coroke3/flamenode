@@ -2,34 +2,16 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import {
-  isRetryableYoutubeStatus,
   parseDuration,
-  parseRetryAfterMs,
   YOUTUBE_SYNC_BATCH_SIZE,
-  YOUTUBE_SYNC_MAX_ATTEMPTS,
 } from "./index.ts";
 
 const source = await readFile(new URL("./index.ts", import.meta.url), "utf8");
 
-test("429と5xxは再試行対象", () => {
-  assert.equal(isRetryableYoutubeStatus(429), true);
-  assert.equal(isRetryableYoutubeStatus(503), true);
-  assert.equal(isRetryableYoutubeStatus(400), false);
-  assert.equal(isRetryableYoutubeStatus(404), false);
-});
-
-test("Retry-After秒指定をミリ秒へ変換", () => {
-  assert.equal(parseRetryAfterMs("3"), 3_000);
-});
-
-test("Retry-Afterは上限を超えない", () => {
-  assert.equal(parseRetryAfterMs("120"), 15_000);
-});
-
 test("YouTube APIは1 Cron最大50 IDだけ処理する", () => {
   assert.equal(YOUTUBE_SYNC_BATCH_SIZE, 50);
-  assert.ok(YOUTUBE_SYNC_MAX_ATTEMPTS <= 2);
   assert.doesNotMatch(source, /YOUTUBE_SYNC_BATCHES_PER_RUN/);
+  assert.match(source, /fetchYoutubeJsonWithFailover/);
 });
 
 test("候補抽出はpending・開催中・通常期限のindex queryへ分離する", () => {
