@@ -1,6 +1,5 @@
 /** sync-jobs から利用する bounded score 再計算モジュール。 */
 
-import { normalizeLegacyVideoCursor } from "../shared/legacyCursor.ts";
 import { safeErrorSummary } from "../shared/safeLog.ts";
 
 export interface Env {
@@ -21,11 +20,6 @@ export interface ScoreBatchResult {
  */
 export const SCORE_RECALC_BATCH_SIZE = 150;
 export const SCORE_FORCE_REFRESH_SEC = 24 * 60 * 60;
-
-/** 旧cursor値を読むテスト・移行コード向けの互換関数。再計算本体はcursorを使用しない。 */
-export function normalizeScoreCursor(value: string | null): string {
-  return normalizeLegacyVideoCursor(value);
-}
 
 /**
  * 変更された作品と24時間以上未更新の作品を優先し、1 SQLで最大150件更新する。

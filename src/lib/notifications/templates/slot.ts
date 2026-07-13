@@ -1,4 +1,4 @@
-import { appUrl } from "@/lib/url/appUrl";
+import { appUrl } from "../format";
 import type { DiscordNotificationPayload } from "./types";
 
 export function buildSlotVideoSubmittedNotification(args: {

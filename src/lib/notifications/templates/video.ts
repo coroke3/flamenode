@@ -1,4 +1,4 @@
-import { appUrl, videoPublicPath } from "@/lib/url/appUrl";
+import { appUrl, videoPublicPath } from "../format";
 import type { DiscordNotificationPayload } from "./types";
 
 export function buildVideoEditPermissionGrantedNotification(args: {
@@ -89,8 +89,7 @@ export function buildVideoVisibilityChangedNotification(args: {
   reason?: string | null;
 }): DiscordNotificationPayload {
   const videoUrl = appUrl(videoPublicPath(args.videoId, args.youtubeVideoId));
-  const reasonText =
-    args.reason?.trim() || "理由は運営側で確認中です。";
+  const reasonText = args.reason?.trim() || "理由は運営側で確認中です。";
   return {
     content: [
       "作品について確認があります",

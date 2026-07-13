@@ -1,14 +1,29 @@
+/** 通知内で使う絶対URLを組み立てる。 */
+export function appUrl(path: string): string {
+  const origin =
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.APP_ORIGIN ||
+    "http://localhost:3000";
+  return `${origin.replace(/\/$/, "")}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+export function videoPublicPath(
+  videoId: string,
+  youtubeVideoId?: string | null,
+): string {
+  return `/${youtubeVideoId?.trim() || videoId}`;
+}
+
 /**
  * 通知 payload に必須キーが入っているかを検証する純粋関数。
  * enqueue 前のサニティチェックに使う。テスト対象。
  */
-
 export interface NotificationPayloadCheck {
   ok: boolean;
   reason?: string;
 }
 
-const MAX_PAYLOAD_BYTES = 8 * 1024; // 8KB
+const MAX_PAYLOAD_BYTES = 8 * 1024;
 const MAX_TYPE_LENGTH = 64;
 
 /**

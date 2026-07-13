@@ -3,8 +3,6 @@
  * Worker entry point は持たず、Cron 統合 Worker だけが実行する。
  */
 
-import { normalizeLegacyVideoCursor } from "../shared/legacyCursor.ts";
-
 export interface Env {
   DB: D1Database;
   KV: KVNamespace;
@@ -37,7 +35,6 @@ type MetadataWrite = {
 };
 
 export const YOUTUBE_SYNC_BATCH_SIZE = 50;
-export const YOUTUBE_SYNC_BATCHES_PER_RUN = 1;
 export const YOUTUBE_SYNC_FETCH_TIMEOUT_MS = 8_000;
 export const YOUTUBE_SYNC_MAX_ATTEMPTS = 2;
 export const YOUTUBE_SYNC_MAX_RETRY_DELAY_MS = 15_000;
@@ -46,10 +43,6 @@ const ACTIVE_SYNC_INTERVAL_SEC = 60 * 60;
 const DEFAULT_SYNC_INTERVAL_SEC = 24 * 60 * 60;
 const ACTIVE_EVENT_GRACE_SEC = 24 * 60 * 60;
 const BULK_UPSERT_ROWS = 8;
-
-export function normalizeYoutubeSyncCursor(value: string | null): string {
-  return normalizeLegacyVideoCursor(value);
-}
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -291,23 +284,21 @@ export async function syncBatch(
 ): Promise<SyncBatchResult> {
   if (!env.YOUTUBE_API_KEY?.trim()) return { processed: 0, failed: 0, skipped: 1 };
 
-  let processed = 0;
-  for (let batch = 0; batch < YOUTUBE_SYNC_BATCHES_PER_RUN; batch += 1) {
-    const now = Math.floor(Date.now() / 1000);
-    const rows = await selectSyncRows(env, now);
-    if (rows.length === 0) break;
-    const url = new URL("https://www.googleapis.com/youtube/v3/videos");
-    url.searchParams.set("key", env.YOUTUBE_API_KEY);
-    url.searchParams.set("part", "statistics,status,contentDetails");
-    url.searchParams.set("id", rows.map((row) => row.youtube_video_id).join(","));
-    const youtubeItems = await fetchYoutubeItems(url.toString(), fetchImpl);
-    const writes = buildMetadataWrites(rows, new Map(youtubeItems.map((item) => [item.id, item])));
-    await persistMetadataBatch(env, writes, now);
-    processed += writes.length;
-  }
-  return processed === 0
-    ? { processed: 0, failed: 0, skipped: 1 }
-    : { processed, failed: 0, skipped: 0 };
+  const now = Math.floor(Date.now() / 1000);
+  const rows = await selectSyncRows(env, now);
+  if (rows.length === 0) return { processed: 0, failed: 0, skipped: 1 };
+
+  const url = new URL("https://www.googleapis.com/youtube/v3/videos");
+  url.searchParams.set("key", env.YOUTUBE_API_KEY);
+  url.searchParams.set("part", "statistics,status,contentDetails");
+  url.searchParams.set("id", rows.map((row) => row.youtube_video_id).join(","));
+  const youtubeItems = await fetchYoutubeItems(url.toString(), fetchImpl);
+  const writes = buildMetadataWrites(
+    rows,
+    new Map(youtubeItems.map((item) => [item.id, item])),
+  );
+  await persistMetadataBatch(env, writes, now);
+  return { processed: writes.length, failed: 0, skipped: 0 };
 }
 
 export function parseDuration(iso: string): number {
