@@ -30,6 +30,7 @@ type SyncRow = {
   scheduled_time: number | null;
   created_at: number;
   consecutive_failures: number;
+  active_event: number;
 };
 
 type YoutubeItem = {
@@ -243,7 +244,16 @@ async function selectSyncRows(
             v.visibility_status,
             v.scheduled_time,
             v.created_at,
-            COALESCE(ym.consecutive_failures, 0) AS consecutive_failures
+            COALESCE(ym.consecutive_failures, 0) AS consecutive_failures,
+            CASE WHEN EXISTS (
+              SELECT 1
+              FROM video_events active_ve
+              INNER JOIN events active_e ON active_e.id = active_ve.event_id
+              WHERE active_ve.video_id = v.id
+                AND active_e.visibility_status = 'public'
+                AND (active_e.start_time IS NULL OR active_e.start_time <= ?1)
+                AND (active_e.end_time IS NULL OR active_e.end_time >= ?1)
+            ) THEN 1 ELSE 0 END AS active_event
        FROM videos v
        LEFT JOIN video_youtube_metadata ym ON ym.video_id = v.id
       WHERE v.youtube_video_id IS NOT NULL
@@ -275,6 +285,7 @@ async function selectSyncRows(
 }
 
 function successInterval(row: SyncRow, now: number): number {
+  if (row.active_event === 1) return HOUR;
   const recentBoundary = now - 7 * DAY;
   const nearBoundary = now - DAY;
   if (row.created_at >= nearBoundary) return HOUR;
