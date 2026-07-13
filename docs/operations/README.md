@@ -2,10 +2,10 @@
 
 > Status: Active
 > Last verified: 2026-07-13
-> Verified against commit: `f66ae21`
-> Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `wrangler.toml`, `package.json`
+> Verified against commit: `agent/free-tier-background-worker`
+> Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `wrangler.toml`, `workers/background-jobs/wrangler.toml`, `package.json`
 
-FlameNodeは Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、3本のCron Workerで運用する。実Cloudflareへのリソース作成・Remote D1 migration・deployは運用者だけが明示的に実行し、CodexやPR CIは実行しない。
+FlameNodeは Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、`background-jobs` 1 Worker内の5分・1時間Cronで運用する。実Cloudflareへのリソース作成・Remote D1 migration・deployは運用者だけが明示的に実行し、CodexやPR CIは実行しない。
 
 ## 正本と不変条件
 
@@ -19,7 +19,7 @@ FlameNodeは Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、3�
 | 領域 | Active文書 |
 | --- | --- |
 | baseline / local D1 / Remote手動手順 | [migrations.md](migrations.md) |
-| 3本のCron Workerと上限 | [workers.md](workers.md) |
+| 統合Cron Workerと上限 | [workers.md](workers.md) |
 | 監査・復元・owner保護 | [audit-and-restore.md](audit-and-restore.md) |
 | legacy data import | [legacy-import.md](legacy-import.md) |
 | Spreadsheet import | [spreadsheet-import.md](spreadsheet-import.md) |
