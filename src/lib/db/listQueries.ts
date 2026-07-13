@@ -1,5 +1,11 @@
 import { and, asc, desc, eq, exists, or, sql } from "drizzle-orm";
-import { events, videoChapters, videoMembers, videos, videoEvents, xUsers } from "./schema";
+import {
+  events,
+  videoChapters,
+  videoMembers,
+  videos,
+  xUsers,
+} from "./schema";
 import { coalescedVideoScoreDesc } from "./videoScoreSql";
 import { creatorIconExpr, creatorNameExpr } from "./displayExpr";
 import { resolveMissingIcons } from "./iconResolution";
@@ -26,11 +32,7 @@ export function parsePublicVideoSort(
   return "new";
 }
 
-/**
- * SQLite の LIKE で `%` / `_` を ESCAPE '\' 経由でリテラル扱いするための前処理。
- * バックスラッシュ自体も二重化しないと "\X" の X を escape 対象として食ってしまうので
- * `\\` を最初にエスケープする。
- */
+/** SQLite LIKEで `%` / `_` / `\` をリテラル扱いする。 */
 function escapeLikeTerm(value: string): string {
   return value.replace(/[\\%_]/g, "\\$&");
 }
@@ -128,72 +130,92 @@ const publicVideoListSelect = {
   part: videos.part,
 } as const;
 
+const publicVideoPageSelect = {
+  ...publicVideoListSelect,
+  total_count: sql<number>`COUNT(*) OVER()`,
+} as const;
+
 function publicVideoOrderBy(sort: "new" | "old" | "score") {
   if (sort === "old") return asc(videos.scheduled_time);
   if (sort === "score") return coalescedVideoScoreDesc;
   return desc(videos.scheduled_time);
 }
 
-/**
- * 公開作品の汎用一覧取得。検索 / イベント絞り込み / ソート / ページング。
- */
-export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
-  const { q, sort = "new", eventId, limit = 24, offset = 0 } = params;
-
-  const baseWhere = and(eq(videos.visibility_status, "public"));
-
-  const filters = [baseWhere];
-  const searchFilter = buildPublicVideoSearchCondition(db, q);
-  if (searchFilter) filters.push(searchFilter);
-
-  const orderBy = publicVideoOrderBy(sort);
-
-  if (eventId) {
-    const eventFilters = [
+function publicVideoFilters(
+  db: DB,
+  params: Pick<ListVideoParams, "q" | "eventId">,
+) {
+  const searchFilter = buildPublicVideoSearchCondition(db, params.q);
+  if (params.eventId) {
+    return and(
       countablePublicVideoCondition,
-      eventPublicVideoLinkCondition(eventId),
-    ];
-    if (searchFilter) eventFilters.push(searchFilter);
-    const rows = await db
-      .select(publicVideoListSelect)
-      .from(videos)
-      .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
-      .leftJoin(
-        events,
-        eq(events.id, videos.primary_event_id),
-      )
-      .where(and(...eventFilters)!)
-      .orderBy(orderBy)
-      .limit(limit)
-      .offset(offset);
-    return resolveMissingIcons(db, uniqueBy(rows, (row) => row.id));
+      eventPublicVideoLinkCondition(params.eventId),
+      searchFilter,
+    )!;
   }
+  return and(eq(videos.visibility_status, "public"), searchFilter)!;
+}
 
+/** 公開作品の汎用一覧取得。検索 / イベント絞り込み / ソート / ページング。 */
+export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
+  const { sort = "new", limit = 24, offset = 0 } = params;
   const rows = await db
     .select(publicVideoListSelect)
     .from(videos)
     .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
-    .leftJoin(
-      events,
-      eq(events.id, videos.primary_event_id),
-    )
-    .where(and(...filters)!)
-    .orderBy(orderBy)
+    .leftJoin(events, eq(events.id, videos.primary_event_id))
+    .where(publicVideoFilters(db, params))
+    .orderBy(publicVideoOrderBy(sort))
     .limit(limit)
     .offset(offset);
   return resolveMissingIcons(db, uniqueBy(rows, (row) => row.id));
 }
 
+/**
+ * 公開API向け。window countで一覧と総件数を同時取得する。
+ * offsetが総件数を超えた空ページだけ、総数取得を1回追加する。
+ */
+export async function fetchPublicVideosPage(
+  db: DB,
+  params: ListVideoParams,
+): Promise<{
+  items: Awaited<ReturnType<typeof fetchPublicVideos>>;
+  total: number;
+}> {
+  const { sort = "new", limit = 24, offset = 0 } = params;
+  const pageRows = await db
+    .select(publicVideoPageSelect)
+    .from(videos)
+    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
+    .leftJoin(events, eq(events.id, videos.primary_event_id))
+    .where(publicVideoFilters(db, params))
+    .orderBy(publicVideoOrderBy(sort))
+    .limit(limit)
+    .offset(offset);
+
+  const total =
+    pageRows.length > 0
+      ? Number(pageRows[0]?.total_count ?? 0)
+      : offset > 0
+        ? await countPublicVideos(db, params)
+        : 0;
+  const rows = pageRows.map(({ total_count: _totalCount, ...row }) => row);
+  return {
+    items: await resolveMissingIcons(db, uniqueBy(rows, (row) => row.id)),
+    total,
+  };
+}
+
 /** 公開作品の単体取得。UUID / YouTube ID のどちらでも解決する。 */
-export async function fetchPublicVideoByIdOrYoutube(db: DB, idOrYoutube: string) {
+export async function fetchPublicVideoByIdOrYoutube(
+  db: DB,
+  idOrYoutube: string,
+) {
   const rows = await db
     .select(publicVideoListSelect)
     .from(videos)
     .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
-    .leftJoin(
-      events,
-      eq(events.id, videos.primary_event_id),
-    )
+    .leftJoin(events, eq(events.id, videos.primary_event_id))
     .where(
       and(
         eq(videos.visibility_status, "public"),
@@ -204,28 +226,11 @@ export async function fetchPublicVideoByIdOrYoutube(db: DB, idOrYoutube: string)
   return (await resolveMissingIcons(db, rows))[0] ?? null;
 }
 
-/** 公開作品の総数 (ページング用)。 */
+/** 公開作品の総数。範囲外ページと一覧以外の呼び出し向け。 */
 export async function countPublicVideos(db: DB, params: ListVideoParams) {
-  const { q, eventId } = params;
-  const baseWhere = and(eq(videos.visibility_status, "public"));
-  const filters = [baseWhere];
-  const searchFilter = buildPublicVideoSearchCondition(db, q);
-  if (searchFilter) filters.push(searchFilter);
-  if (eventId) {
-    const eventFilters = [
-      countablePublicVideoCondition,
-      eventPublicVideoLinkCondition(eventId),
-    ];
-    if (searchFilter) eventFilters.push(searchFilter);
-    const rows = await db
-      .select({ c: sql<number>`count(*)` })
-      .from(videos)
-      .where(and(...eventFilters)!);
-    return Number(rows[0]?.c ?? 0);
-  }
   const rows = await db
     .select({ c: sql<number>`count(*)` })
     .from(videos)
-    .where(and(...filters)!);
+    .where(publicVideoFilters(db, params));
   return Number(rows[0]?.c ?? 0);
 }
