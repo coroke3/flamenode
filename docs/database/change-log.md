@@ -20,6 +20,21 @@
 | Validation | schema/history検査、Worker/unit tests、空DBへのactive migration適用 |
 | PR | `agent/youtube-single-key-quota-budget` |
 
+## 2026-07-13 — `0042_event_youtube_playlist_sync.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | additive |
+| Summary | イベント単位のYouTube再生リスト同期設定と、差分同期用の再生リスト項目索引を追加 |
+| Reason | 設定済みイベントだけを再生リストへ同期し、メタデータ同期と同じ日次80% quota予算を共有するため |
+| Tables | `event_youtube_playlist_sync`、`event_youtube_playlist_items` |
+| Data migration | なし。全イベントで同期無効から開始 |
+| Compatibility | migration未適用時は設定画面・同期Workerをfail-closed |
+| Data loss | none |
+| Rollback | 同期を無効化後、項目索引テーブル、設定テーブルの順で削除 |
+| Validation | schema/history、playlist parser/diff、共有quota、Worker、Next.js/Pages build |
+| PR | `agent/youtube-playlist-main-integration` |
+
 ## 2026-07-13 — `0040_worker_free_tier_scale.sql`
 
 | 項目 | 内容 |

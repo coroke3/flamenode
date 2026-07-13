@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-13
-> Verified against commit: `29f83d8`
+> Verified against commit: `de329d5d50799b41ac76ada18147592f0bec2700`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `wrangler.toml`, `package.json`
 
 現行のCloudflare構成は Pages + `@cloudflare/next-on-pages`、D1、R2、KV、3本のCron Workerです。
@@ -14,6 +14,7 @@
 | Active | [operations/README.md](operations/README.md) | 運用全体の入口と所有文書 |
 | Active | [operations/migrations.md](operations/migrations.md) | baseline、ローカル適用、Remote D1の手動手順 |
 | Active | [operations/workers.md](operations/workers.md) | 3本のCron Worker、lease、上限、障害対応 |
+| Active | [operations/youtube-playlist-sync.md](operations/youtube-playlist-sync.md) | イベント別YouTube再生リスト同期、OAuth、無料枠制御 |
 | Active | [operations/audit-and-restore.md](operations/audit-and-restore.md) | 監査、復元、owner不変条件 |
 | Active | [operations/legacy-import.md](operations/legacy-import.md) | legacy importのpreview/apply安全手順 |
 | Active | [operations/static-delivery.md](operations/static-delivery.md) | R2静的JSONと公開範囲 |

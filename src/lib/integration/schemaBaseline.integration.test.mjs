@@ -18,6 +18,7 @@ test("active migrations apply cleanly and match schema.ts manifests", () => {
     "0039_search_relation_indexes.sql",
     "0040_worker_free_tier_scale.sql",
     "0041_youtube_quota_budget.sql",
+    "0042_event_youtube_playlist_sync.sql",
   ]);
   assert.ok(result.tableCount > 40);
   assert.ok(result.indexCount > 70);

@@ -54,6 +54,14 @@ function assertSchemaEntryPoint(root) {
   }
 }
 
+/** static parserがindex builderの末尾commaを同一表現として扱えるよう正規化する。 */
+function normalizeSchemaForManifest(schemaText) {
+  return schemaText.replace(
+    /\b(uniqueIndex|index)\s*\(\s*(["'][A-Za-z0-9_]+["'])\s*,\s*\)/g,
+    "$1($2)",
+  );
+}
+
 /**
  * schema.tsを唯一の公開正本として検査する。
  * static parser向けに、schema.tsだけが所有する内部fragmentと最終overrideを
@@ -74,7 +82,7 @@ export function validateDbSchema(root = process.cwd()) {
     const flattened = [
       fs.readFileSync(fragmentPath, "utf8"),
       "\n// ===== schema.ts final overrides =====\n",
-      fs.readFileSync(schemaEntryPath, "utf8"),
+      normalizeSchemaForManifest(fs.readFileSync(schemaEntryPath, "utf8")),
     ].join("\n");
     fs.writeFileSync(path.join(tempDbDir, "schema.ts"), flattened, "utf8");
     return validateBaseSchema(tempRoot);
