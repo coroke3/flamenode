@@ -12,7 +12,14 @@ export interface BoundedRetryOptions {
   attempts?: number;
   /** 再試行間隔の上限。既定値は Cron を長時間占有しない短い待機。 */
   delayMs?: number;
+  /** ジョブ固有の分類が必要な場合だけ上書きする。 */
+  shouldRetry?: (error: unknown, attempt: number) => boolean;
 }
+
+const RETRYABLE_MESSAGE =
+  /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|fetch failed|socket hang up|rate.?limit|too many requests|\b429\b|\b5\d\d\b|temporar(?:y|ily)|transient|try again|timeout/i;
+const FATAL_MESSAGE =
+  /no such table|no such column|schema|constraint failed|foreign key|not null|unique constraint|invalid (?:input|payload|config)|unauthorized|forbidden|missing (?:binding|secret|token|configuration)/i;
 
 function boundedAttempts(value: number | undefined): number {
   if (!Number.isFinite(value)) return MAX_QUEUE_ATTEMPTS;
@@ -24,10 +31,50 @@ function boundedDelay(value: number | undefined): number {
   return Math.min(2_000, Math.max(0, Math.floor(value ?? 0)));
 }
 
-export function boundedQueueBatch(value: number | undefined, fallback = MAX_QUEUE_BATCH): number {
-  const safeFallback = Math.min(MAX_QUEUE_BATCH, Math.max(1, Math.floor(fallback)));
+export function boundedQueueBatch(
+  value: number | undefined,
+  fallback = MAX_QUEUE_BATCH,
+): number {
+  const safeFallback = Math.min(
+    MAX_QUEUE_BATCH,
+    Math.max(1, Math.floor(fallback)),
+  );
   if (!Number.isFinite(value)) return safeFallback;
-  return Math.min(MAX_QUEUE_BATCH, Math.max(1, Math.floor(value ?? safeFallback)));
+  return Math.min(
+    MAX_QUEUE_BATCH,
+    Math.max(1, Math.floor(value ?? safeFallback)),
+  );
+}
+
+/** HTTP・D1・fetchの一時障害だけを再試行対象にする。 */
+export function isRetryableQueueError(error: unknown): boolean {
+  if (error && typeof error === "object") {
+    const candidate = error as {
+      status?: unknown;
+      statusCode?: unknown;
+      code?: unknown;
+      message?: unknown;
+      cause?: unknown;
+    };
+    const status = Number(candidate.status ?? candidate.statusCode);
+    if (status === 408 || status === 425 || status === 429 || status >= 500) {
+      return true;
+    }
+    const code = String(candidate.code ?? "");
+    if (/^(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|UND_ERR_SOCKET)$/.test(code)) {
+      return true;
+    }
+    const message = String(candidate.message ?? "");
+    if (FATAL_MESSAGE.test(message)) return false;
+    if (RETRYABLE_MESSAGE.test(message)) return true;
+    if (candidate.cause && candidate.cause !== error) {
+      return isRetryableQueueError(candidate.cause);
+    }
+    return false;
+  }
+  const message = String(error ?? "");
+  if (FATAL_MESSAGE.test(message)) return false;
+  return RETRYABLE_MESSAGE.test(message);
 }
 
 /**
@@ -40,6 +87,7 @@ export async function withBoundedRetry<T>(
 ): Promise<T> {
   const attempts = boundedAttempts(options.attempts);
   const delayMs = boundedDelay(options.delayMs);
+  const shouldRetry = options.shouldRetry ?? isRetryableQueueError;
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -47,9 +95,11 @@ export async function withBoundedRetry<T>(
       return await task(attempt);
     } catch (error) {
       lastError = error;
-      if (attempt >= attempts) break;
+      if (attempt >= attempts || !shouldRetry(error, attempt)) break;
       const waitMs = Math.min(2_000, delayMs * 2 ** (attempt - 1));
-      if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+      if (waitMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+      }
     }
   }
 
