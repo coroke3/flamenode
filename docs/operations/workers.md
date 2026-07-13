@@ -11,7 +11,7 @@ Workers FreeのCPU上限はCron間隔にかかわらず10msである。1時間�
 
 | Worker | Cron | 上限 |
 | --- | --- | --- |
-| `fast-jobs` | 5分 | 通知最大6件、Discord外部request最大12件。締切リマインダーはleaseで1時間間隔 |
+| `fast-jobs` | 5分 | 通知最大6件、Discord外部request最大12件、DM cache KV書込最大2件。締切リマインダーはleaseで1時間間隔 |
 | `content-jobs` | 15分 | 静的queue 1 target。cleanupはleaseで1時間間隔 |
 | `sync-jobs` | 15分（7/22/37/52分） | YouTube最大50件・最大2 quota units、score最大150件 |
 
@@ -27,7 +27,7 @@ job lockはD1の`worker_leases`、queue/outboxの取得はlease tokenと期限�
 - YouTube APIのレスポンスは`fields`で必要なID・視聴数・公開状態・長さだけ取得する。
 - Discordは固定rate値を仮定せず、`Retry-After`、`X-RateLimit-Remaining`、`X-RateLimit-Reset-After`、global/scope headersを解釈する。
 - Discord 429は同一invocationで再試行せず、outboxの`next_attempt_at`へ反映する。global 429は別routeへの後続呼出しにも適用する。
-- Discord DM channel IDをisolateとKVへ30日cacheし、通常配送を2 requestから1 requestへ削減する。
+- Discord DM channel IDはisolateへ全件、KVへ最大2件/run・576件/dayの範囲で30日cacheし、通常配送を2 requestから1 requestへ削減する。
 - 401/403/404を同じ認証・宛先のまま繰り返さず、復旧不能なものはdead-letterへ移す。
 - 外部画像proxyは同一キーの同時missを1 fetchへまとめ、ETag/304、negative cache、stale返却を使用する。
 - 外部画像はGoogle Drive 8MB、YouTube thumbnail 2MBを1 object上限とし、大きすぎるレスポンスをisolateへ保持しない。
@@ -48,6 +48,7 @@ YouTube `videos.list`の理論最大消費は、15分ごとに最大2 unitsと�
 
 - YouTube quota cooldown中はYouTube同期がskippedになる。Google Cloud Consoleのquotaを正本として確認する。
 - Discord rate limit時は通知が`pending`へ戻り、`next_attempt_at`以降に再処理される。global 429は同一isolate内の全routeを停止する。
+- Discord DM cacheのKV永続化は最大2件/runであり、超過分はisolate cacheのみを使う。通知配送自体は停止しない。
 - 画像proxyは`x-fn-media-cache`の`stale`、`fallback`増加を確認する。
 - CPU時間、`exceededCpu`、アカウント全体のD1日次使用量、YouTube API quotaはアプリDBだけでは正確に取得できないため、Cloudflare DashboardとGoogle Cloud Consoleを正本とする。
 
