@@ -17,6 +17,8 @@ export interface Env {
 
 const STALE_QUEUE_RECONCILE_LIMIT = 20;
 const PROCESSING_LEASE_SEC = 5 * 60;
+const PROCESSING_CONCURRENCY = 2;
+const MAX_ATTEMPTS = 4;
 
 type QueueRow = {
   id: string;
@@ -25,6 +27,8 @@ type QueueRow = {
   priority: string;
   attempt_count: number;
 };
+
+type QueueOutcome = "processed" | "failed" | "skipped";
 
 export async function getOperationMode(env: Env): Promise<OperationMode> {
   const row = (await env.DB.prepare(
@@ -52,52 +56,65 @@ export async function processStaticRebuildQueue(env: Env): Promise<{
     await reconcileStaleQueue(env, now);
   }
 
-  let sql = `
+  let query = `
     SELECT id, target_type, target_id, priority, attempt_count
     FROM static_rebuild_queue
     WHERE status = 'pending'
       AND (next_retry_at IS NULL OR next_retry_at <= ?)
   `;
-  sql += queueModeWhereClause(mode);
-  sql += `
+  query += queueModeWhereClause(mode);
+  query += `
     ORDER BY
       CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END,
       created_at ASC
     LIMIT ?
   `;
 
-  const result = await env.DB.prepare(sql).bind(now, limit).all();
+  const result = await env.DB.prepare(query).bind(now, limit).all();
   const rows = (result.results ?? []) as QueueRow[];
+  const outcomes: QueueOutcome[] = [];
 
-  let processed = 0;
-  let failed = 0;
-  let skipped = 0;
-
-  for (const row of rows) {
-    const token = await markProcessing(env, row.id, now);
-    if (!token) {
-      skipped++;
-      continue;
-    }
-
-    try {
-      if (
-        shouldSkipQueueTarget(mode, row)
-      ) {
-        if (await markDone(env, row.id, token, now)) processed++;
-        else skipped++;
-        continue;
-      }
-      await rebuildTarget(env, row.target_type, row.target_id);
-      if (await markDone(env, row.id, token, now)) processed++;
-      else skipped++;
-    } catch (error) {
-      failed++;
-      await markRetryOrFailed(env, row, token, error, now);
-    }
+  for (let offset = 0; offset < rows.length; offset += PROCESSING_CONCURRENCY) {
+    const chunk = rows.slice(offset, offset + PROCESSING_CONCURRENCY);
+    outcomes.push(
+      ...(await Promise.all(
+        chunk.map((row) => processQueueRow(env, mode, row, now)),
+      )),
+    );
   }
 
-  return { processed, failed, skipped };
+  return outcomes.reduce(
+    (summary, outcome) => {
+      summary[outcome] += 1;
+      return summary;
+    },
+    { processed: 0, failed: 0, skipped: 0 },
+  );
+}
+
+async function processQueueRow(
+  env: Env,
+  mode: OperationMode,
+  row: QueueRow,
+  now: number,
+): Promise<QueueOutcome> {
+  const token = await markProcessing(env, row.id, now);
+  if (!token) return "skipped";
+
+  try {
+    if (shouldSkipQueueTarget(mode, row)) {
+      return (await markDone(env, row.id, token, now))
+        ? "processed"
+        : "skipped";
+    }
+    await rebuildTarget(env, row.target_type, row.target_id);
+    return (await markDone(env, row.id, token, now))
+      ? "processed"
+      : "skipped";
+  } catch (error) {
+    await markRetryOrFailed(env, row, token, error, now);
+    return "failed";
+  }
 }
 
 export async function markProcessing(
@@ -106,7 +123,7 @@ export async function markProcessing(
   now: number,
 ): Promise<string | null> {
   const token = crypto.randomUUID();
-  const r = await env.DB.prepare(
+  const result = await env.DB.prepare(
     `UPDATE static_rebuild_queue
      SET status = 'processing', processing_started_at = ?,
          lease_token = ?, lease_expires_at = ?, updated_at = ?
@@ -114,9 +131,13 @@ export async function markProcessing(
   )
     .bind(now, token, now + PROCESSING_LEASE_SEC, now, id)
     .run();
-  return (r.meta.changes ?? 0) === 1 ? token : null;
+  return (result.meta.changes ?? 0) === 1 ? token : null;
 }
 
+/**
+ * processing 中に enqueue が入ると updated_at が processing_started_at より新しくなる。
+ * その場合は完了行にせず、同じ行を pending へ戻して次の世代を再生成する。
+ */
 export async function markDone(
   env: Env,
   id: string,
@@ -125,25 +146,34 @@ export async function markDone(
 ): Promise<boolean> {
   const result = await env.DB.prepare(
     `UPDATE static_rebuild_queue
-     SET status = 'done', processed_at = ?, updated_at = ?, error = NULL,
-         processing_started_at = NULL, lease_token = NULL,
-         lease_expires_at = NULL, next_retry_at = NULL
+     SET status = CASE
+           WHEN updated_at > COALESCE(processing_started_at, updated_at)
+             THEN 'pending'
+           ELSE 'done'
+         END,
+         processed_at = CASE
+           WHEN updated_at > COALESCE(processing_started_at, updated_at)
+             THEN NULL
+           ELSE ?
+         END,
+         updated_at = CASE
+           WHEN updated_at > COALESCE(processing_started_at, updated_at)
+             THEN updated_at
+           ELSE ?
+         END,
+         attempt_count = 0,
+         error = NULL,
+         processing_started_at = NULL,
+         lease_token = NULL,
+         lease_expires_at = NULL,
+         next_retry_at = NULL
      WHERE id = ? AND status = 'processing' AND lease_token = ?`,
   )
     .bind(now, now, id, token)
     .run();
   if ((result.meta.changes ?? 0) === 1) return true;
 
-  await env.DB.prepare(
-    `UPDATE static_rebuild_queue
-     SET status = 'pending', processing_started_at = NULL,
-         lease_token = NULL, lease_expires_at = NULL,
-         processed_at = NULL, next_retry_at = NULL, error = NULL,
-         updated_at = ?
-     WHERE id = ? AND status = 'processing' AND lease_token IS NULL`,
-  )
-    .bind(now, id)
-    .run();
+  await recoverLeaseInvalidatedProcessing(env, id, now);
   return false;
 }
 
@@ -155,8 +185,8 @@ export async function markRetryOrFailed(
   now: number,
 ): Promise<void> {
   const attempt = Number(row.attempt_count ?? 0) + 1;
-  const message = safeErrorSummary(error);
-  if (attempt >= 4) {
+  const message = safeErrorSummary(error).slice(0, 500);
+  if (attempt >= MAX_ATTEMPTS) {
     const result = await env.DB.prepare(
       `UPDATE static_rebuild_queue
        SET status = 'failed', attempt_count = ?, error = ?, updated_at = ?,
@@ -164,22 +194,23 @@ export async function markRetryOrFailed(
            lease_expires_at = NULL, next_retry_at = NULL
        WHERE id = ? AND status = 'processing' AND lease_token = ?`,
     )
-      .bind(attempt, message.slice(0, 500), now, row.id, token)
+      .bind(attempt, message, now, row.id, token)
       .run();
     if ((result.meta?.changes ?? 0) === 0) {
       await recoverLeaseInvalidatedProcessing(env, row.id, now);
     }
     return;
   }
+
   const delay = attempt === 1 ? 60 : attempt === 2 ? 300 : 900;
   const result = await env.DB.prepare(
     `UPDATE static_rebuild_queue
-       SET status = 'pending', attempt_count = ?, error = ?, next_retry_at = ?,
+     SET status = 'pending', attempt_count = ?, error = ?, next_retry_at = ?,
          processing_started_at = NULL, lease_token = NULL,
          lease_expires_at = NULL, updated_at = ?
-       WHERE id = ? AND status = 'processing' AND lease_token = ?`,
+     WHERE id = ? AND status = 'processing' AND lease_token = ?`,
   )
-    .bind(attempt, message.slice(0, 500), now + delay, now, row.id, token)
+    .bind(attempt, message, now + delay, now, row.id, token)
     .run();
   if ((result.meta?.changes ?? 0) === 0) {
     await recoverLeaseInvalidatedProcessing(env, row.id, now);
@@ -193,51 +224,93 @@ async function recoverLeaseInvalidatedProcessing(
 ): Promise<void> {
   await env.DB.prepare(
     `UPDATE static_rebuild_queue
-    SET status = 'pending', attempt_count = 0, error = NULL,
-         next_retry_at = NULL, processed_at = NULL, processing_started_at = NULL,
-         lease_token = NULL, lease_expires_at = NULL, updated_at = ?
+     SET status = CASE
+           WHEN COALESCE(attempt_count, 0) + 1 >= ? THEN 'failed'
+           ELSE 'pending'
+         END,
+         attempt_count = MIN(COALESCE(attempt_count, 0) + 1, ?),
+         error = 'processing lease invalidated',
+         next_retry_at = CASE
+           WHEN COALESCE(attempt_count, 0) + 1 >= ? THEN NULL
+           ELSE ?
+         END,
+         processed_at = NULL,
+         processing_started_at = NULL,
+         lease_token = NULL,
+         lease_expires_at = NULL,
+         updated_at = ?
      WHERE id = ? AND status = 'processing' AND lease_token IS NULL`,
   )
-    .bind(now, id)
+    .bind(MAX_ATTEMPTS, MAX_ATTEMPTS, MAX_ATTEMPTS, now + 60, now, id)
     .run();
 }
 
-/** 失敗・長時間 pending の取り残し確認（全件再生成はしない） */
+/** 失敗・長時間 processing の取り残し確認（全件再生成はしない） */
 export async function reconcileStaleQueue(env: Env, now: number): Promise<void> {
-  const dayAgo = now - 86400;
   await env.DB.prepare(
     `UPDATE static_rebuild_queue
-     SET status = 'pending', attempt_count = 0, processed_at = NULL,
-         error = NULL, next_retry_at = NULL, processing_started_at = NULL,
-         lease_token = NULL, lease_expires_at = NULL, updated_at = ?
+     SET status = CASE
+           WHEN COALESCE(attempt_count, 0) + 1 >= ? THEN 'failed'
+           ELSE 'pending'
+         END,
+         attempt_count = MIN(COALESCE(attempt_count, 0) + 1, ?),
+         processed_at = NULL,
+         error = 'processing lease missing',
+         next_retry_at = CASE
+           WHEN COALESCE(attempt_count, 0) + 1 >= ? THEN NULL
+           ELSE ?
+         END,
+         processing_started_at = NULL,
+         lease_token = NULL,
+         lease_expires_at = NULL,
+         updated_at = ?
      WHERE status = 'processing' AND lease_token IS NULL
      LIMIT ?`,
   )
-    .bind(now, STALE_QUEUE_RECONCILE_LIMIT)
+    .bind(
+      MAX_ATTEMPTS,
+      MAX_ATTEMPTS,
+      MAX_ATTEMPTS,
+      now + 60,
+      now,
+      STALE_QUEUE_RECONCILE_LIMIT,
+    )
     .run();
 
   await env.DB.prepare(
     `UPDATE static_rebuild_queue
-     SET status = CASE WHEN COALESCE(attempt_count, 0) >= 3 THEN 'failed' ELSE 'pending' END,
-         attempt_count = MIN(COALESCE(attempt_count, 0) + 1, 4),
-         error = CASE WHEN COALESCE(attempt_count, 0) >= 3
-           THEN COALESCE(error, 'processing lease expired')
-           ELSE error END,
-         next_retry_at = NULL, processing_started_at = NULL,
-         lease_token = NULL, lease_expires_at = NULL, updated_at = ?
+     SET status = CASE
+           WHEN COALESCE(attempt_count, 0) + 1 >= ? THEN 'failed'
+           ELSE 'pending'
+         END,
+         attempt_count = MIN(COALESCE(attempt_count, 0) + 1, ?),
+         error = CASE
+           WHEN COALESCE(attempt_count, 0) + 1 >= ?
+             THEN COALESCE(error, 'processing lease expired')
+           ELSE COALESCE(error, 'processing lease expired; retry scheduled')
+         END,
+         next_retry_at = CASE
+           WHEN COALESCE(attempt_count, 0) + 1 >= ? THEN NULL
+           ELSE ?
+         END,
+         processing_started_at = NULL,
+         lease_token = NULL,
+         lease_expires_at = NULL,
+         updated_at = ?
      WHERE status = 'processing'
-       AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?
+       AND lease_expires_at IS NOT NULL
+       AND lease_expires_at <= ?
      LIMIT ?`,
   )
-    .bind(now, now, STALE_QUEUE_RECONCILE_LIMIT)
-    .run();
-
-  await env.DB.prepare(
-    `UPDATE static_rebuild_queue
-     SET priority = 'normal', updated_at = ?
-     WHERE status = 'failed' AND updated_at < ? AND attempt_count < 4
-     LIMIT ?`,
-  )
-    .bind(now, dayAgo, STALE_QUEUE_RECONCILE_LIMIT)
+    .bind(
+      MAX_ATTEMPTS,
+      MAX_ATTEMPTS,
+      MAX_ATTEMPTS,
+      MAX_ATTEMPTS,
+      now + 60,
+      now,
+      now,
+      STALE_QUEUE_RECONCILE_LIMIT,
+    )
     .run();
 }
