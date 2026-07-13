@@ -14,10 +14,11 @@ export interface ScoreBatchResult {
 }
 
 /**
- * D1 Freeの100,000 rows written/dayを越えないよう、15分ごと最大250件に固定する。
- * 初回backlogでも最大24,000動画行/day。index更新を含めても余裕を残す。
+ * videos本体に加え、scoreとscore_updated_atを含む複数indexも書き換わる。
+ * D1 Freeの100,000 rows written/dayへ他のWorker処理を含めた余裕を残すため、
+ * 15分ごと最大160件に固定する。最大15,360動画行/day。
  */
-export const SCORE_RECALC_BATCH_SIZE = 250;
+export const SCORE_RECALC_BATCH_SIZE = 160;
 export const SCORE_FORCE_REFRESH_SEC = 24 * 60 * 60;
 
 /** 旧cursor値を読むテスト・移行コード向けの互換関数。再計算本体はcursorを使用しない。 */
@@ -32,7 +33,7 @@ export function normalizeScoreCursor(value: string | null): string {
 }
 
 /**
- * 変更された作品と24時間以上未更新の作品を優先し、1 SQLで最大250件更新する。
+ * 変更された作品と24時間以上未更新の作品を優先し、1 SQLで最大160件更新する。
  * score更新ではvideos.updated_atを変更しない。自己更新で再びdirtyになる循環を防ぐ。
  */
 export async function recalcScoreBatch(env: Env): Promise<ScoreBatchResult> {
