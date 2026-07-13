@@ -3,6 +3,8 @@
  * Worker entry point は持たず、Cron 統合 Worker だけが実行する。
  */
 
+import { normalizeLegacyVideoCursor } from "../shared/legacyCursor.ts";
+
 export interface Env {
   DB: D1Database;
   KV: KVNamespace;
@@ -46,13 +48,7 @@ const ACTIVE_EVENT_GRACE_SEC = 24 * 60 * 60;
 const BULK_UPSERT_ROWS = 8;
 
 export function normalizeYoutubeSyncCursor(value: string | null): string {
-  if (!value) return "";
-  try {
-    const parsed = JSON.parse(value) as { last_video_id?: unknown };
-    return typeof parsed.last_video_id === "string" ? parsed.last_video_id.trim() : "";
-  } catch {
-    return "";
-  }
+  return normalizeLegacyVideoCursor(value);
 }
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
