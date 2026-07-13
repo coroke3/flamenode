@@ -2,6 +2,7 @@
  * 通知 outbox の bounded dispatcher。単独 Worker としては deploy せず、
  * fast-jobs からだけ呼び出す。
  */
+import { nextAttemptNumber } from "../shared/queue.ts";
 import { safeErrorSummary } from "../shared/safeLog.ts";
 
 export type Env = {
@@ -34,10 +35,17 @@ type OutboxRow = {
 function boundedLimit(value: unknown): number {
   const requested = Number(value ?? MAX_NOTIFICATION_BATCH);
   if (!Number.isFinite(requested)) return MAX_NOTIFICATION_BATCH;
-  return Math.min(MAX_NOTIFICATION_BATCH, Math.max(1, Math.floor(requested)));
+  return Math.min(
+    MAX_NOTIFICATION_BATCH,
+    Math.max(1, Math.floor(requested)),
+  );
 }
 
-async function recoverExpiredLeases(env: Env, now: number, limit: number): Promise<void> {
+async function recoverExpiredLeases(
+  env: Env,
+  now: number,
+  limit: number,
+): Promise<void> {
   await env.DB.prepare(
     `UPDATE notification_outbox
         SET status = 'pending', processing_started_at = NULL,
@@ -49,7 +57,9 @@ async function recoverExpiredLeases(env: Env, now: number, limit: number): Promi
         AND lease_expires_at <= ?1
         AND COALESCE(attempt_count, 0) < ?2
       LIMIT ?3`,
-  ).bind(now, MAX_RETRIES, limit).run();
+  )
+    .bind(now, MAX_RETRIES, limit)
+    .run();
 
   await env.DB.prepare(
     `UPDATE notification_outbox
@@ -61,10 +71,17 @@ async function recoverExpiredLeases(env: Env, now: number, limit: number): Promi
         AND lease_expires_at <= ?1
         AND COALESCE(attempt_count, 0) >= ?2
       LIMIT ?3`,
-  ).bind(now, MAX_RETRIES, limit).run();
+  )
+    .bind(now, MAX_RETRIES, limit)
+    .run();
 }
 
-async function claimOutboxRow(env: Env, row: OutboxRow, token: string, now: number): Promise<boolean> {
+async function claimOutboxRow(
+  env: Env,
+  row: OutboxRow,
+  token: string,
+  now: number,
+): Promise<boolean> {
   const result = await env.DB.prepare(
     `UPDATE notification_outbox
         SET status = 'processing', processing_started_at = ?1,
@@ -72,32 +89,59 @@ async function claimOutboxRow(env: Env, row: OutboxRow, token: string, now: numb
       WHERE id = ?4 AND status = 'pending'
         AND COALESCE(attempt_count, 0) < ?5
         AND (next_attempt_at IS NULL OR next_attempt_at <= ?1)`,
-  ).bind(now, token, now + PROCESSING_LEASE_SEC, row.id, MAX_RETRIES).run();
+  )
+    .bind(now, token, now + PROCESSING_LEASE_SEC, row.id, MAX_RETRIES)
+    .run();
   return (result.meta?.changes ?? 0) === 1;
 }
 
-async function markSent(env: Env, rowId: string, token: string, now: number): Promise<boolean> {
+async function markSent(
+  env: Env,
+  rowId: string,
+  token: string,
+  now: number,
+): Promise<boolean> {
   const result = await env.DB.prepare(
     `UPDATE notification_outbox
         SET status = 'sent', processing_started_at = NULL,
             lease_token = NULL, lease_expires_at = NULL,
             next_attempt_at = NULL, last_error = NULL, processed_at = ?1
       WHERE id = ?2 AND status = 'processing' AND lease_token = ?3`,
-  ).bind(now, rowId, token).run();
+  )
+    .bind(now, rowId, token)
+    .run();
   return (result.meta?.changes ?? 0) === 1;
 }
 
-async function markDeliveryFailure(env: Env, row: OutboxRow, token: string, error: unknown, now: number): Promise<void> {
-  const attempts = Math.max(0, Number(row.attempt_count) || 0) + 1;
+async function markDeliveryFailure(
+  env: Env,
+  row: OutboxRow,
+  token: string,
+  error: unknown,
+  now: number,
+): Promise<void> {
+  const attempts = nextAttemptNumber(row.attempt_count);
   const deadLetter = attempts >= MAX_RETRIES;
-  const delay = RETRY_BACKOFF_SEC[Math.min(attempts - 1, RETRY_BACKOFF_SEC.length - 1)] ?? 900;
+  const delay =
+    RETRY_BACKOFF_SEC[
+      Math.min(attempts - 1, RETRY_BACKOFF_SEC.length - 1)
+    ] ?? 900;
   await env.DB.prepare(
     `UPDATE notification_outbox
         SET attempt_count = ?1, status = ?2,
             processing_started_at = NULL, lease_token = NULL,
             lease_expires_at = NULL, next_attempt_at = ?3, last_error = ?4
       WHERE id = ?5 AND status = 'processing' AND lease_token = ?6`,
-  ).bind(attempts, deadLetter ? "dead_letter" : "pending", deadLetter ? null : now + delay, safeErrorSummary(error), row.id, token).run();
+  )
+    .bind(
+      attempts,
+      deadLetter ? "dead_letter" : "pending",
+      deadLetter ? null : now + delay,
+      safeErrorSummary(error),
+      row.id,
+      token,
+    )
+    .run();
 }
 
 export async function processNotificationQueue(
@@ -117,7 +161,9 @@ export async function processNotificationQueue(
         AND (n.next_attempt_at IS NULL OR n.next_attempt_at <= ?2)
       ORDER BY n.created_at ASC, n.id ASC
       LIMIT ?3`,
-  ).bind(MAX_RETRIES, now, limit).all<OutboxRow>();
+  )
+    .bind(MAX_RETRIES, now, limit)
+    .all<OutboxRow>();
 
   let processed = 0;
   let failed = 0;
@@ -133,10 +179,16 @@ export async function processNotificationQueue(
         throw new Error("notification recipient has no Discord ID");
       }
       const delivered = await deliver(
-        { type: row.type, payload_json: row.payload_json, discord_id: row.discord_id ?? "" },
+        {
+          type: row.type,
+          payload_json: row.payload_json,
+          discord_id: row.discord_id ?? "",
+        },
         env,
       );
-      if (!delivered) throw new Error("notification transport unavailable");
+      if (!delivered) {
+        throw new Error("notification transport unavailable");
+      }
       if (await markSent(env, row.id, token, now)) processed += 1;
       else skipped += 1;
     } catch (error) {
@@ -161,18 +213,30 @@ export async function deliver(
     return response.ok;
   }
   if (!env.DISCORD_BOT_TOKEN || !row.discord_id) return false;
-  const channelResponse = await fetch("https://discord.com/api/v10/users/@me/channels", {
-    method: "POST",
-    headers: { Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ recipient_id: row.discord_id }),
-  });
+  const channelResponse = await fetch(
+    "https://discord.com/api/v10/users/@me/channels",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ recipient_id: row.discord_id }),
+    },
+  );
   if (!channelResponse.ok) return false;
   const channel = (await channelResponse.json()) as { id?: string };
   if (!channel.id) return false;
-  const response = await fetch(`https://discord.com/api/v10/channels/${channel.id}/messages`, {
-    method: "POST",
-    headers: { Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`, "Content-Type": "application/json" },
-    body: row.payload_json,
-  });
+  const response = await fetch(
+    `https://discord.com/api/v10/channels/${channel.id}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: row.payload_json,
+    },
+  );
   return response.ok;
 }

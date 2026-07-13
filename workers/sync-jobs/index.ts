@@ -7,7 +7,11 @@
 import { createCronWorker } from "../shared/createCronWorker.ts";
 import { recalcScoreBatch } from "../score-recalc/index.ts";
 import { withCronLease } from "../shared/cronLease.ts";
-import { runJob } from "../shared/runJob.ts";
+import {
+  combineJobCounters,
+  runJob,
+  throwIfJobFailed,
+} from "../shared/runJob.ts";
 import { syncBatch } from "../youtube-sync/index.ts";
 
 export interface Env {
@@ -35,7 +39,8 @@ async function enqueueScoreDependentRebuilds(
   );
   const results = await env.DB.batch(statements);
   const processed = results.reduce(
-    (sum, result) => sum + Math.max(0, Number(result.meta?.changes ?? 0)),
+    (sum, result) =>
+      sum + Math.max(0, Number(result.meta?.changes ?? 0)),
     0,
   );
   return processed > 0
@@ -66,18 +71,24 @@ export async function runSyncJobs(env: Env): Promise<void> {
             "score-recalc",
             () => recalcScoreBatch(env),
           );
-          const rankingRebuild = score.processed > 0
-            ? await runJob(
-                "sync-jobs",
-                "ranking-rebuild-enqueue",
-                () => enqueueScoreDependentRebuilds(env),
-              )
-            : { succeeded: true, processed: 0, skipped: 1, failed: 0 };
-          return {
-            processed: youtube.processed + score.processed + rankingRebuild.processed,
-            skipped: youtube.skipped + score.skipped + rankingRebuild.skipped,
-            failed: youtube.failed + score.failed + rankingRebuild.failed,
-          };
+          const rankingRebuild =
+            score.processed > 0
+              ? await runJob(
+                  "sync-jobs",
+                  "ranking-rebuild-enqueue",
+                  () => enqueueScoreDependentRebuilds(env),
+                )
+              : {
+                  succeeded: true,
+                  processed: 0,
+                  skipped: 1,
+                  failed: 0,
+                };
+          return throwIfJobFailed(
+            "sync-jobs",
+            "cron",
+            combineJobCounters(youtube, score, rankingRebuild),
+          );
         },
       );
       return leased.acquired
