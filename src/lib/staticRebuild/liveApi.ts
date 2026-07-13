@@ -115,14 +115,18 @@ export async function getLiveEventSubmissions(db: DB, eventId: string) {
       updated_at: videos.updated_at,
     })
     .from(events)
-    .leftJoin(videoEvents, eq(videoEvents.event_id, events.id))
     .leftJoin(
-      videos,
+      videoEvents,
       and(
-        eq(videos.id, videoEvents.video_id),
-        eq(videos.visibility_status, "public"),
+        eq(videoEvents.event_id, events.id),
+        sql`EXISTS (
+          SELECT 1 FROM videos AS public_videos
+          WHERE public_videos.id = ${videoEvents.video_id}
+            AND public_videos.visibility_status = 'public'
+        )`,
       )!,
     )
+    .leftJoin(videos, eq(videos.id, videoEvents.video_id))
     .where(eq(events.id, id))
     .orderBy(sql`${videos.updated_at} DESC`)
     .limit(50);
