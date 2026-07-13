@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import type { DB } from "@/lib/db/client";
@@ -10,6 +10,8 @@ import { shouldEnqueueUserNotification } from "./context";
 import { validateNotificationPayload } from "./format";
 
 type AnyDb = LibSQLDatabase<any>;
+export type NotificationDeliveryPolicy = "required_atomic" | "best_effort";
+
 export interface EnqueueNotificationInput {
   /** 送信先の Auth.js 内部ユーザー ID。 */
   recipientUserId?: string | null;
@@ -35,9 +37,70 @@ export type NotificationOutboxBatch = {
   rows: Array<typeof notificationOutbox.$inferSelect>;
 };
 
+type PreparedNotification = {
+  type: string;
+  payloadJson: string;
+  eventId: string | null;
+  dedupeKey: string | null;
+};
+
+function randomId(): string {
+  return crypto.randomUUID();
+}
+
+function prepareNotification(
+  input: Pick<
+    EnqueueNotificationInput,
+    "type" | "payload" | "eventId" | "dedupeKey"
+  >,
+): PreparedNotification {
+  const check = validateNotificationPayload(input.type, input.payload);
+  if (!check.ok) {
+    throw new Error(`通知 payload が不正です: ${check.reason}`);
+  }
+  return {
+    type: input.type,
+    payloadJson: JSON.stringify(input.payload),
+    eventId: input.eventId ?? null,
+    dedupeKey: input.dedupeKey?.trim() || null,
+  };
+}
+
+function buildNotificationRow(
+  prepared: PreparedNotification,
+  recipientUserId: string,
+  now: number,
+): typeof notificationOutbox.$inferSelect {
+  return {
+    id: randomId(),
+    recipient_user_id: recipientUserId,
+    type: prepared.type,
+    payload_json: prepared.payloadJson,
+    status: "pending",
+    attempt_count: 0,
+    processing_started_at: null,
+    lease_token: null,
+    lease_expires_at: null,
+    next_attempt_at: null,
+    last_error: null,
+    processed_at: null,
+    event_id: prepared.eventId,
+    dedupe_key: prepared.dedupeKey,
+    created_at: now,
+  };
+}
+
+function insertNotificationStatement(
+  db: AnyDb,
+  row: typeof notificationOutbox.$inferSelect,
+): BatchItem<"sqlite"> {
+  // active dedupe partial uniqueとの競合は「既にenqueue済み」という成功扱い。
+  return db.insert(notificationOutbox).values(row).onConflictDoNothing();
+}
+
 /**
- * 事前に権限・通知可否を一括取得済みの宛先向けbuilder。dedupe確認も1 queryに
- * 集約し、管理系broadcastでN+1を発生させない。
+ * 事前に権限・通知可否を一括取得済みの宛先向けbuilder。
+ * required_atomic用途だが、同一dedupeの並行enqueueだけはidempotentに無視する。
  */
 export async function buildKnownRecipientNotificationBatch(
   db: AnyDb,
@@ -48,64 +111,57 @@ export async function buildKnownRecipientNotificationBatch(
   }
   if (inputs.length > 30) throw new Error("notification_batch_limit_exceeded");
 
-  const dedupeKeys = inputs.map((input) => input.dedupeKey?.trim() || null);
-  const nonNullKeys = dedupeKeys.filter((key): key is string => key !== null);
+  const preparedInputs = inputs.map((input) => ({
+    input,
+    prepared: prepareNotification(input),
+  }));
+  const nonNullKeys = preparedInputs
+    .map(({ prepared }) => prepared.dedupeKey)
+    .filter((key): key is string => key !== null);
   if (new Set(nonNullKeys).size !== nonNullKeys.length) {
     throw new Error("notification_batch_duplicate_dedupe_key");
   }
-  const active = nonNullKeys.length === 0
-    ? []
-    : await db
-        .select({ dedupe_key: notificationOutbox.dedupe_key })
-        .from(notificationOutbox)
-        .where(and(
-          inArray(notificationOutbox.dedupe_key, nonNullKeys),
-          inArray(notificationOutbox.status, ["pending", "processing", "sent"]),
-        )!)
-        .limit(inputs.length + 1);
-  const existing = new Set(active.map((row) => row.dedupe_key).filter(Boolean));
+
+  const active =
+    nonNullKeys.length === 0
+      ? []
+      : await db
+          .select({ dedupe_key: notificationOutbox.dedupe_key })
+          .from(notificationOutbox)
+          .where(
+            and(
+              inArray(notificationOutbox.dedupe_key, nonNullKeys),
+              inArray(notificationOutbox.status, [
+                "pending",
+                "processing",
+                "sent",
+              ]),
+            )!,
+          )
+          .limit(inputs.length + 1);
+  const existing = new Set(
+    active
+      .map((row) => row.dedupe_key)
+      .filter((value): value is string => Boolean(value)),
+  );
   const now = Math.floor(Date.now() / 1000);
   const statements: BatchItem<"sqlite">[] = [];
   const rows: Array<typeof notificationOutbox.$inferSelect> = [];
 
-  inputs.forEach((input, index) => {
-    const check = validateNotificationPayload(input.type, input.payload);
-    if (!check.ok) throw new Error(`通知 payload が不正です: ${check.reason}`);
+  for (const { input, prepared } of preparedInputs) {
     const recipientUserId = input.recipientUserId.trim();
     if (!recipientUserId) throw new Error("notification_recipient_required");
-    const dedupeKey = dedupeKeys[index];
-    if (dedupeKey && existing.has(dedupeKey)) return;
-    const row: typeof notificationOutbox.$inferSelect = {
-      id: randomId(),
-      recipient_user_id: recipientUserId,
-      type: input.type,
-      payload_json: JSON.stringify(input.payload),
-      status: "pending",
-      attempt_count: 0,
-      processing_started_at: null,
-      lease_token: null,
-      lease_expires_at: null,
-      next_attempt_at: null,
-      last_error: null,
-      processed_at: null,
-      event_id: input.eventId ?? null,
-      dedupe_key: dedupeKey,
-      created_at: now,
-    };
+    if (prepared.dedupeKey && existing.has(prepared.dedupeKey)) continue;
+    const row = buildNotificationRow(prepared, recipientUserId, now);
     rows.push(row);
-    statements.push(db.insert(notificationOutbox).values(row));
-  });
+    statements.push(insertNotificationStatement(db, row));
+  }
+
   return {
     statements,
-    // Unique raceはbatch全体を失敗させる。changes固定を追加するとD1 50 queryを
-    // 超えるため、idempotent INSERTとしてmutateWithAuditのnull指定を使う。
     expectedChanges: statements.map(() => null),
     rows,
   };
-}
-
-function randomId(): string {
-  return crypto.randomUUID();
 }
 
 async function resolveRecipientUserId(
@@ -115,78 +171,35 @@ async function resolveRecipientUserId(
 ): Promise<string | null> {
   const candidate = input.recipientUserId?.trim();
   if (candidate) {
-    const rows = await db
-      .select({
-        id: users.id,
-        is_notification_enabled: users.is_notification_enabled,
-      })
-      .from(users)
-      .where(eq(users.id, candidate))
-      .limit(1);
-    const row = rows[0];
-    if (!force && row?.is_notification_enabled === 0) return null;
-    return row?.id ?? null;
+    const row = (
+      await db
+        .select({
+          id: users.id,
+          is_notification_enabled: users.is_notification_enabled,
+        })
+        .from(users)
+        .where(eq(users.id, candidate))
+        .limit(1)
+    )[0];
+    if (!row || (!force && row.is_notification_enabled === 0)) return null;
+    return row.id;
   }
 
   const xId = input.xUserId?.trim();
   if (!xId) return null;
-  const xRow = (
+  const row = (
     await db
-      .select({ linked: xUsers.linked_user_id })
+      .select({
+        id: users.id,
+        is_notification_enabled: users.is_notification_enabled,
+      })
       .from(xUsers)
+      .innerJoin(users, eq(users.id, xUsers.linked_user_id))
       .where(eq(xUsers.id, xId))
       .limit(1)
   )[0];
-  const linkedUserId = xRow?.linked?.trim();
-  if (!linkedUserId) return null;
-  const userRow = (
-    await db
-      .select({ id: users.id, is_notification_enabled: users.is_notification_enabled })
-      .from(users)
-      .where(eq(users.id, linkedUserId))
-      .limit(1)
-  )[0];
-  if (!userRow || (!force && userRow.is_notification_enabled === 0)) return null;
-  return userRow.id;
-}
-
-/**
- * 通知の宛先・dedupe・payload を事前検証し、呼び出し側の D1 batch に
- * そのまま追加できる outbox INSERT を返す。INSERT 自体は swallow せず、
- * 本体 mutation と同じ batch の rollback 条件にする。
- */
-export async function buildNotificationOutboxStatement(
-  db: AnyDb,
-  input: EnqueueNotificationInput,
-): Promise<BatchItem<"sqlite"> | null> {
-  if (!shouldEnqueueUserNotification()) return null;
-
-  const check = validateNotificationPayload(input.type, input.payload);
-  if (!check.ok) throw new Error(`通知 payload が不正です: ${check.reason}`);
-
-  const dedupeKey = input.dedupeKey?.trim() || null;
-  if (dedupeKey && !input.force && (await hasActiveDedupe(db, dedupeKey))) {
-    return null;
-  }
-
-  const recipientUserId = await resolveRecipientUserId(db, input, input.force ?? false);
-  if (!recipientUserId) return null;
-
-  const now = Math.floor(Date.now() / 1000);
-  return db.insert(notificationOutbox).values({
-    id: randomId(),
-    recipient_user_id: recipientUserId,
-    type: input.type,
-    payload_json: JSON.stringify(input.payload),
-    status: "pending",
-    attempt_count: 0,
-    processing_started_at: null,
-    next_attempt_at: null,
-    last_error: null,
-    event_id: input.eventId ?? null,
-    dedupe_key: dedupeKey,
-    created_at: now,
-  });
+  if (!row || (!force && row.is_notification_enabled === 0)) return null;
+  return row.id;
 }
 
 async function hasActiveDedupe(
@@ -207,66 +220,91 @@ async function hasActiveDedupe(
 }
 
 /**
- * notification_outbox に 1 件 enqueue する。
- * 失敗してもアプリ操作は止めない (例外を呼び元に投げない)。
+ * required_atomic: 本体mutationと同じD1 batchへ追加するstatementを返す。
+ * payload不正やDB障害は呼び出し側へ伝播する。
+ */
+export async function buildNotificationOutboxStatement(
+  db: AnyDb,
+  input: EnqueueNotificationInput,
+): Promise<BatchItem<"sqlite"> | null> {
+  if (!shouldEnqueueUserNotification()) return null;
+
+  const prepared = prepareNotification(input);
+  if (
+    prepared.dedupeKey &&
+    !input.force &&
+    (await hasActiveDedupe(db, prepared.dedupeKey))
+  ) {
+    return null;
+  }
+
+  const recipientUserId = await resolveRecipientUserId(
+    db,
+    input,
+    input.force ?? false,
+  );
+  if (!recipientUserId) return null;
+
+  return insertNotificationStatement(
+    db,
+    buildNotificationRow(
+      prepared,
+      recipientUserId,
+      Math.floor(Date.now() / 1000),
+    ),
+  );
+}
+
+/**
+ * best_effort: notification_outbox に1件enqueueする。
+ * 失敗してもアプリ操作は止めず、監査ログだけを残す。
  */
 export async function enqueueNotification(
   db: AnyDb,
   input: EnqueueNotificationInput,
 ): Promise<boolean> {
-  if (!shouldEnqueueUserNotification()) {
-    return false;
-  }
+  if (!shouldEnqueueUserNotification()) return false;
 
-  const check = validateNotificationPayload(input.type, input.payload);
-  if (!check.ok) {
-    console.warn("[enqueueNotification] invalid payload:", check.reason, input.type);
+  let prepared: PreparedNotification;
+  try {
+    prepared = prepareNotification(input);
+  } catch (error) {
+    console.warn(
+      "[enqueueNotification] invalid payload",
+      error instanceof Error ? error.message : String(error),
+      input.type,
+    );
     return false;
-  }
-
-  const dedupeKey = input.dedupeKey?.trim() || null;
-  if (dedupeKey && !input.force) {
-    try {
-      if (await hasActiveDedupe(db, dedupeKey)) {
-        return false;
-      }
-    } catch (e) {
-      console.warn("[enqueueNotification] dedupe check failed", e);
-    }
   }
 
   try {
+    if (
+      prepared.dedupeKey &&
+      !input.force &&
+      (await hasActiveDedupe(db, prepared.dedupeKey))
+    ) {
+      return false;
+    }
+
     const recipientUserId = await resolveRecipientUserId(
       db,
       input,
       input.force ?? false,
     );
-    if (!recipientUserId) {
-      return false;
-    }
+    if (!recipientUserId) return false;
 
-    const now = Math.floor(Date.now() / 1000);
-    await db.insert(notificationOutbox).values({
-      id: randomId(),
-      recipient_user_id: recipientUserId,
-      type: input.type,
-      payload_json: JSON.stringify(input.payload),
-      status: "pending",
-      attempt_count: 0,
-      processing_started_at: null,
-      next_attempt_at: null,
-      last_error: null,
-      event_id: input.eventId ?? null,
-      dedupe_key: dedupeKey,
-      created_at: now,
-    });
-    return true;
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (dedupeKey && /UNIQUE|unique/i.test(msg)) {
-      return false;
-    }
-    console.warn("[enqueueNotification] failed", e);
+    const result = await insertNotificationStatement(
+      db,
+      buildNotificationRow(
+        prepared,
+        recipientUserId,
+        Math.floor(Date.now() / 1000),
+      ),
+    );
+    return (result.meta?.changes ?? 0) === 1;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn("[enqueueNotification] failed", error);
     try {
       await auditAction(db as DB, {
         table_name: "notification_outbox",
@@ -274,14 +312,14 @@ export async function enqueueNotification(
         action: "CREATE",
         after_data: JSON.stringify({
           type: input.type,
-          dedupe_key: dedupeKey,
-          error: msg.slice(0, 500),
+          dedupe_key: prepared.dedupeKey,
+          error: message.slice(0, 500),
         }),
         operator_user_id: input.recipientUserId ?? "system",
         retention_class: "normal",
       });
     } catch {
-      // history 失敗は握りつぶす
+      // history失敗はbest-effort経路では握りつぶす。
     }
     return false;
   }
