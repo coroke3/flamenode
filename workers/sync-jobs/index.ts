@@ -1,24 +1,35 @@
 /**
  * sync-jobs: 15分毎の外部API・集計ジョブ。
- * - YouTube メタデータ同期（最大50件）
- * - スコア差分再計算（最大250件、1 SQL）
- * - スコア変更時のトップ・人気一覧再生成enqueue
+ * - 毎時52分台: 設定済みイベントのYouTube再生リスト差分同期
+ * - それ以外: YouTubeメタデータ同期、スコア差分再計算、ランキング再生成予約
+ *
+ * 重い外部API同期を同一invocationで重ねず、Workers FreeのCPU・subrequest枠を守る。
  */
 import { createCronWorker } from "../shared/createCronWorker.ts";
 import { recalcScoreBatch } from "../score-recalc/index.ts";
 import { withCronLease } from "../shared/cronLease.ts";
 import { runJob } from "../shared/runJob.ts";
 import { syncBatch } from "../youtube-sync/index.ts";
+import { syncEventPlaylists } from "../youtube-playlist-sync/index.ts";
 
 export interface Env {
   DB: D1Database;
   KV: KVNamespace;
   YOUTUBE_API_KEY?: string;
+  YOUTUBE_OAUTH_CLIENT_ID?: string;
+  YOUTUBE_OAUTH_CLIENT_SECRET?: string;
+  YOUTUBE_OAUTH_REFRESH_TOKEN?: string;
+  YOUTUBE_PLAYLIST_DAILY_QUOTA_UNITS?: string;
   BUILD_COMMIT_SHA?: string;
 }
 
 const SYNC_JOBS_LEASE_SEC = 14 * 60;
 const SYNC_JOBS_HEARTBEAT_SEC = 4 * 60;
+
+/** Cronは7,22,37,52分。52分台だけを再生リスト専用枠にする。 */
+export function isPlaylistSyncSlot(now = new Date()): boolean {
+  return now.getUTCMinutes() >= 50;
+}
 
 async function enqueueScoreDependentRebuilds(
   env: Env,
@@ -56,6 +67,15 @@ export async function runSyncJobs(env: Env): Promise<void> {
           heartbeatSeconds: SYNC_JOBS_HEARTBEAT_SEC,
         },
         async () => {
+          if (isPlaylistSyncSlot()) {
+            // playlistItems.insertは重複追加を避けるためWorker境界で再試行しない。
+            return runJob(
+              "sync-jobs",
+              "youtube-playlist-sync",
+              () => syncEventPlaylists(env),
+            );
+          }
+
           const youtube = await runJob(
             "sync-jobs",
             "youtube-sync",

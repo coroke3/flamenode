@@ -4,7 +4,7 @@ compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 
 # Workers FreeはCron間隔にかかわらずCPU 10ms。
-# YouTube 50件とscore 250件を15分ごとに小分け処理する。
+# 7/22/37分はmetadata・score、52分は設定済みイベントのplaylist同期に分離する。
 [triggers]
 crons = ["7,22,37,52 * * * *"]
 
@@ -19,4 +19,9 @@ id = "00000000000000000000000000000000"
 preview_id = "00000000000000000000000000000000"
 
 [vars]
-# YOUTUBE_API_KEY is set with wrangler secret put.
+# Secrets:
+# - YOUTUBE_API_KEY
+# - YOUTUBE_OAUTH_CLIENT_ID
+# - YOUTUBE_OAUTH_CLIENT_SECRET
+# - YOUTUBE_OAUTH_REFRESH_TOKEN
+# Optional: YOUTUBE_PLAYLIST_DAILY_QUOTA_UNITS (default 4500, max 8000)

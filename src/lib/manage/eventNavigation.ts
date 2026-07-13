@@ -49,6 +49,9 @@ export function resolveManageEventNav(input: {
     ) ||
     input.pathname.startsWith(
       `${base}/edit`,
+    ) ||
+    input.pathname.startsWith(
+      `${base}/youtube-playlist`,
     )
   ) {
     return "settings";

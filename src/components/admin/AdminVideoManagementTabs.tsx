@@ -10,7 +10,8 @@ import {
 export type AdminVideoManagementTabKey =
   | "all"
   | VideoVisibilityGroupKey
-  | "youtube-sync";
+  | "youtube-sync"
+  | "youtube-playlists";
 
 interface AdminVideoManagementTabsProps {
   q?: string;
@@ -20,14 +21,20 @@ interface AdminVideoManagementTabsProps {
 }
 
 type StatusTab = {
-  key: Exclude<AdminVideoManagementTabKey, "youtube-sync">;
+  key: Exclude<
+    AdminVideoManagementTabKey,
+    "youtube-sync" | "youtube-playlists"
+  >;
   value: string | null;
   label: string;
   icon: IconName;
 };
 
 type ExtraTab = {
-  key: Extract<AdminVideoManagementTabKey, "youtube-sync">;
+  key: Extract<
+    AdminVideoManagementTabKey,
+    "youtube-sync" | "youtube-playlists"
+  >;
   href: string;
   label: string;
   icon: IconName;
@@ -54,8 +61,14 @@ const EXTRA_TABS: ExtraTab[] = [
   {
     key: "youtube-sync",
     href: "/admin/youtube-sync",
-    label: "YouTube同期",
+    label: "メタデータ同期",
     icon: "refresh",
+  },
+  {
+    key: "youtube-playlists",
+    href: "/admin/youtube-sync/playlists",
+    label: "再生リスト同期",
+    icon: "list",
   },
 ];
 
