@@ -198,6 +198,11 @@ export const videos = sqliteTable(
       t.score,
       t.scheduled_time,
     ),
+    scoreRefreshIdx: index("videos_score_refresh_idx").on(
+      t.visibility_status,
+      t.score_updated_at,
+      t.id,
+    ),
     creatorFallbackIdx: index("videos_creator_fallback_idx")
       .on(t.creator_x_user_id, t.collaboration_type, t.created_at)
       .where(
