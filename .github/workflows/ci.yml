@@ -52,7 +52,8 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Unit tests
+      # test:unit already includes workers/**/*.test.mjs.
+      - name: Unit and worker tests
         shell: bash
         run: |
           mkdir -p .tmp
@@ -68,19 +69,14 @@ jobs:
           if-no-files-found: warn
           retention-days: 3
 
-      - name: Worker tests
-        run: npm run test:workers
-
       - name: Cloudflare CI contract tests
         run: npm run test:cloudflare-ci
 
       - name: Integration tests
         run: npm run test:integration
 
-      - name: Production build
-        run: npm run build
-
-      - name: Cloudflare Pages build
+      # next-on-pages performs the production Next build; a separate next build is duplicate work.
+      - name: Cloudflare Pages production build
         shell: bash
         run: |
           mkdir -p .tmp
