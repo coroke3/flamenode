@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-13
-> Verified against commit: `bec4997`
+> Verified against commit: `agent/free-tier-background-worker`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `docs/README.md`, `package.json`, `wrangler.toml`
 
 ## Codex エージェント運用
@@ -18,7 +18,7 @@
 - DB構造: `src/lib/db/schema.ts`
 - active migration: `migrations/`
 - DB変更履歴: `docs/database/change-log.md`
-- Cloudflare binding構造: `wrangler.toml`と`workers/*/wrangler.toml`
+- Cloudflare binding構造: `wrangler.toml`と`workers/background-jobs/wrangler.toml`
 - ローカル手順: `LOCAL.md`
 - デプロイ手順: `DEPLOY.md`と`.github/workflows/deploy-cloudflare.yml`
 - 運用文書: `docs/operations/README.md`
@@ -33,7 +33,7 @@
 - Active codeへ旧列fallback、二重書込み、runtime DDL、deprecated wrapperを戻さない。
 - code変更と該当Active文書の更新を同じ変更で行う。
 - Active文書へ旧識別子や存在しない構成を現行仕様として残さない。
-- Cloudflare Pages + `@cloudflare/next-on-pages`、D1/R2/KV、Cron Worker 3本を維持する。
+- Cloudflare Pages + `@cloudflare/next-on-pages`、D1/R2/KV、`background-jobs` 1 Worker内の5分・1時間Cronを維持する。
 - 実Cloudflare deploy、Remote D1 migration、production secret操作は明示された運用時だけ行う。
 
 ## 完了前の検証
