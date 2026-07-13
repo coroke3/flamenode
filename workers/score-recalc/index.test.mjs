@@ -6,8 +6,8 @@ import {
   SCORE_RECALC_BATCH_SIZE,
 } from "./index.ts";
 
-test("スコア更新は1回250件以下に固定する", () => {
-  assert.equal(SCORE_RECALC_BATCH_SIZE, 250);
+test("スコア更新は1回160件以下に固定する", () => {
+  assert.equal(SCORE_RECALC_BATCH_SIZE, 160);
   assert.equal(SCORE_FORCE_REFRESH_SEC, 24 * 60 * 60);
 });
 
