@@ -21,11 +21,20 @@ import type {
   EventExportMemberSnapshot,
   EventExportSnapshot,
   EventExportSoftwareSnapshot,
-  EventExportStaffSnapshot,
   EventExportVideoSnapshot,
 } from "./eventExportPayload";
 
-export const EVENT_EXPORT_VIDEO_LIMIT = 500;
+const EVENT_EXPORT_VIDEO_LIMIT = 500;
+
+function appendGrouped<T>(
+  target: Map<string, T[]>,
+  key: string,
+  value: T,
+): void {
+  const rows = target.get(key);
+  if (rows) rows.push(value);
+  else target.set(key, [value]);
+}
 
 export async function loadEventExportSnapshot(
   db: DB,
@@ -233,42 +242,32 @@ export async function loadEventExportSnapshot(
       ]);
 
     for (const row of memberRows) {
-      const rows = membersByVideo.get(row.video_id) ?? [];
-      rows.push({
+      appendGrouped(membersByVideo, row.video_id, {
         x_user_id: row.x_user_id,
         name: row.name,
         role_label: row.role_label,
         order_index: row.order_index,
         chapters_json: row.chapters_json,
       });
-      membersByVideo.set(row.video_id, rows);
     }
-
     for (const row of softwareRows) {
-      const rows = softwaresByVideo.get(row.video_id) ?? [];
-      rows.push({
+      appendGrouped(softwaresByVideo, row.video_id, {
         name: row.name,
         raw_label: row.raw_label,
         order_index: row.order_index,
       });
-      softwaresByVideo.set(row.video_id, rows);
     }
-
     for (const row of answerRows) {
-      const rows = answersByVideo.get(row.video_id) ?? [];
-      rows.push({
+      appendGrouped(answersByVideo, row.video_id, {
         key: row.key,
         label: row.label,
         answer_text: row.answer_text,
         answer_json: row.answer_json,
         sort_order: row.sort_order,
       });
-      answersByVideo.set(row.video_id, rows);
     }
-
     for (const row of chapterRows) {
-      const rows = chaptersByVideo.get(row.video_id) ?? [];
-      rows.push({
+      appendGrouped(chaptersByVideo, row.video_id, {
         x_user_id: row.x_user_id,
         chapter_time: row.chapter_time,
         chapter_label: row.chapter_label,
@@ -276,13 +275,9 @@ export async function loadEventExportSnapshot(
         show_on_player_bar: row.show_on_player_bar,
         order_index: row.order_index,
       });
-      chaptersByVideo.set(row.video_id, rows);
     }
-
     for (const row of relationRows) {
-      const rows = eventIdsByVideo.get(row.video_id) ?? [];
-      rows.push(row.event_id);
-      eventIdsByVideo.set(row.video_id, rows);
+      appendGrouped(eventIdsByVideo, row.video_id, row.event_id);
     }
   }
 
@@ -296,14 +291,6 @@ export async function loadEventExportSnapshot(
     softwares: softwaresByVideo.get(video.id) ?? [],
     answers: answersByVideo.get(video.id) ?? [],
     chapters: chaptersByVideo.get(video.id) ?? [],
-  }));
-
-  const publicStaff: EventExportStaffSnapshot[] = staffRows.map((staff) => ({
-    x_user_id: staff.x_user_id,
-    display_name: staff.display_name,
-    public_role_label: staff.public_role_label,
-    x_name: staff.x_name,
-    icon_url: staff.icon_url,
   }));
 
   return {
@@ -320,7 +307,13 @@ export async function loadEventExportSnapshot(
       entry_start_time: event.entry_start_time,
       entry_end_time: event.entry_end_time,
       updated_at: event.updated_at,
-      public_staff: publicStaff,
+      public_staff: staffRows.map((staff) => ({
+        x_user_id: staff.x_user_id,
+        display_name: staff.display_name,
+        public_role_label: staff.public_role_label,
+        x_name: staff.x_name,
+        icon_url: staff.icon_url,
+      })),
     },
     videos: exportVideos,
     limit: EVENT_EXPORT_VIDEO_LIMIT,

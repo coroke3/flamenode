@@ -1,5 +1,6 @@
 import { eq, and, desc, asc, inArray } from "drizzle-orm";
 import { eventGroups, eventGroupEvents, events } from "@/lib/db/schema";
+import type { DB } from "@/lib/db/client";
 import { publicListableEventWhere } from "@/lib/utils/eventStatus";
 
 type EventRow = typeof events.$inferSelect;
@@ -29,39 +30,38 @@ function mergeGroupEvents<T extends { id: string; start_time: number | null }>(
 }
 
 async function fetchPublicEventsByGroupIds(
-  db: any,
+  db: DB,
   groupIds: readonly string[],
 ): Promise<Map<string, EventRow[]>> {
   const eventsByGroup = new Map<string, EventRow[]>();
   if (groupIds.length === 0) return eventsByGroup;
 
-  const listable = publicListableEventWhere();
-
-  const junctionRows = (await db
+  const junctionRows = await db
     .select({
       group_id: eventGroupEvents.event_group_id,
       event: events,
     })
     .from(eventGroupEvents)
     .innerJoin(events, eq(events.id, eventGroupEvents.event_id))
-    .where(and(inArray(eventGroupEvents.event_group_id, groupIds), listable))
-    .orderBy(desc(events.start_time), asc(events.id))) as Array<{
-    group_id: string;
-    event: EventRow;
-  }>;
+    .where(
+      and(
+        inArray(eventGroupEvents.event_group_id, [...groupIds]),
+        publicListableEventWhere(),
+      ),
+    )
+    .orderBy(desc(events.start_time), asc(events.id));
 
   for (const row of junctionRows) {
     mergeGroupEvents(eventsByGroup, row.group_id, row.event);
   }
-
   return eventsByGroup;
 }
 
 /** `/event` 一覧: 公開グループごとに所属イベントを日程新しい順で返す。 */
 export async function fetchEventListGroupSections(
-  db: any,
+  db: DB,
 ): Promise<EventListGroupSection[]> {
-  const groups = (await db
+  const groups = await db
     .select({
       id: eventGroups.id,
       slug: eventGroups.slug,
@@ -74,34 +74,26 @@ export async function fetchEventListGroupSections(
     })
     .from(eventGroups)
     .where(eq(eventGroups.visibility_status, "public"))
-    .orderBy(asc(eventGroups.sort_order), asc(eventGroups.name))) as Array<
-    Omit<EventListGroupSection, "events" | "latest_event_start_time">
-  >;
+    .orderBy(asc(eventGroups.sort_order), asc(eventGroups.name));
   if (groups.length === 0) return [];
 
-  const groupIds = groups.map((group) => group.id);
-  const eventsByGroup = await fetchPublicEventsByGroupIds(db, groupIds);
-
-  const latestByGroup = new Map<string, number | null>();
-  for (const [groupId, groupEvents] of eventsByGroup) {
-    let latest: number | null = null;
-    for (const event of groupEvents) {
-      const start = event.start_time ?? 0;
-      if (latest == null || start > latest) latest = event.start_time;
-    }
-    latestByGroup.set(groupId, latest);
-  }
+  const eventsByGroup = await fetchPublicEventsByGroupIds(
+    db,
+    groups.map((group) => group.id),
+  );
 
   return groups
-    .map((group) => ({
-      ...group,
-      sort_order: group.sort_order ?? 0,
-      latest_event_start_time: latestByGroup.get(group.id) ?? null,
-      events: eventsByGroup.get(group.id) ?? [],
-    }))
+    .map((group) => {
+      const groupEvents = eventsByGroup.get(group.id) ?? [];
+      return {
+        ...group,
+        sort_order: group.sort_order ?? 0,
+        latest_event_start_time: groupEvents[0]?.start_time ?? null,
+        events: groupEvents,
+      };
+    })
     .sort((a, b) => {
-      const sortDiff = (a.sort_order ?? 0) - (b.sort_order ?? 0);
-      if (sortDiff !== 0) return sortDiff;
-      return a.name.localeCompare(b.name, "ja");
+      const sortDiff = a.sort_order - b.sort_order;
+      return sortDiff || a.name.localeCompare(b.name, "ja");
     });
 }

@@ -11,7 +11,7 @@ import {
 import { enqueueSlotDeadlineReminders } from "../notification-dispatcher/reminders.ts";
 import { withCronLease } from "../shared/cronLease.ts";
 import { withBoundedRetry } from "../shared/queue.ts";
-import { runJob } from "../shared/runJob.ts";
+import { combineJobCounters, runJob } from "../shared/runJob.ts";
 
 export interface Env {
   DB: D1Database;
@@ -36,9 +36,6 @@ export async function runFastJobs(env: Env): Promise<void> {
         env,
         { jobName: "fast-jobs", leaseSeconds: FAST_JOBS_LEASE_SEC },
         async () => {
-          let processed = 0;
-          let skipped = 0;
-          let failed = 0;
           const reminderLease = await withCronLease(
             env,
             {
@@ -46,34 +43,31 @@ export async function runFastJobs(env: Env): Promise<void> {
               leaseSeconds: REMINDER_LEASE_SEC,
               minimumIntervalSeconds: REMINDER_INTERVAL_SEC,
             },
-            () => runJob(
-              "fast-jobs",
-              "slot-deadline-reminders",
-              () => withBoundedRetry(
-                () => enqueueSlotDeadlineReminders(env),
-                { attempts: 2, delayMs: 100 },
+            () =>
+              runJob(
+                "fast-jobs",
+                "slot-deadline-reminders",
+                () =>
+                  withBoundedRetry(() => enqueueSlotDeadlineReminders(env), {
+                    attempts: 2,
+                    delayMs: 100,
+                  }),
+                { rethrow: true },
               ),
-              { rethrow: true },
-            ),
           );
-          if (reminderLease.acquired) {
-            const reminders = reminderLease.value;
-            processed += reminders?.processed ?? 0;
-            skipped += reminders?.skipped ?? 0;
-            failed += reminders?.failed ?? 0;
-          } else {
-            skipped += 1;
-            await runJob("fast-jobs", "slot-deadline-reminders", async () => ({ skipped: 1 }));
-          }
+          const reminders = reminderLease.acquired
+            ? (reminderLease.value ?? {})
+            : await runJob(
+                "fast-jobs",
+                "slot-deadline-reminders",
+                async () => ({ skipped: 1 }),
+              );
           const notifications = await runJob(
             "fast-jobs",
             "notification-dispatch",
             () => processNotificationQueue(env, { limit: MAX_NOTIFICATION_BATCH }),
           );
-          processed += notifications.processed;
-          skipped += notifications.skipped;
-          failed += notifications.failed;
-          return { processed, skipped, failed };
+          return combineJobCounters(reminders, notifications);
         },
       );
       return leased.acquired ? (leased.value ?? { skipped: 1 }) : { skipped: 1 };

@@ -47,10 +47,8 @@ export async function loadVideoCollabSubjects(
   }
 }
 
-export type EditPermissionWarningTone = "warning" | "info";
-
-export interface EditPermissionWarning {
-  tone: EditPermissionWarningTone;
+interface EditPermissionWarning {
+  tone: "warning" | "info";
   title: string;
   detail?: string;
 }
@@ -63,8 +61,8 @@ export interface EditPermissionSummary {
   warnings: EditPermissionWarning[];
 }
 
-function editorHasDiscord(s: VideoCollabSubject): boolean {
-  return Boolean(s.user_id?.trim() || s.has_discord_link);
+function editorHasDiscord(subject: VideoCollabSubject): boolean {
+  return Boolean(subject.user_id?.trim() || subject.has_discord_link);
 }
 
 export function computeEditPermissionSummary(
@@ -74,47 +72,38 @@ export function computeEditPermissionSummary(
     ownerDiscordId?: string | null;
   },
 ): EditPermissionSummary {
-  const editors = subjects.filter((s) => s.can_edit === 1);
-  const unlinkedEditors = editors.filter((s) => !editorHasDiscord(s));
-  const notifiableEditors = editors.filter((s) => editorHasDiscord(s));
-  const cannotNotify = editors.filter(
-    (s) => s.x_user_id?.trim() && !editorHasDiscord(s),
-  );
-
-  const names = editors.map((s) => s.display_name).filter(Boolean);
-  let displayNames = "";
-  if (names.length === 0) {
-    displayNames = "";
-  } else if (names.length <= 3) {
-    displayNames = `${names.join("、")} が編集できます。`;
-  } else {
-    displayNames = `${names.slice(0, 3).join("、")}、ほか${names.length - 3}人`;
+  const editors = subjects.filter((subject) => subject.can_edit === 1);
+  const names: string[] = [];
+  let unlinkedEditorCount = 0;
+  for (const editor of editors) {
+    if (editor.display_name) names.push(editor.display_name);
+    if (!editorHasDiscord(editor)) unlinkedEditorCount += 1;
   }
 
+  const displayNames =
+    names.length === 0
+      ? ""
+      : names.length <= 3
+        ? `${names.join("、")} が編集できます。`
+        : `${names.slice(0, 3).join("、")}、ほか${names.length - 3}人`;
+
   const warnings: EditPermissionWarning[] = [];
-  if (unlinkedEditors.length > 0) {
+  if (unlinkedEditorCount > 0) {
     warnings.push({
       tone: "warning",
       title: "未連携の編集者がいます。",
       detail: "Discord連携が完了すると編集できるようになります。",
     });
   }
-  if (cannotNotify.length > 0 && unlinkedEditors.length === 0) {
-    warnings.push({
-      tone: "warning",
-      title: "通知できない編集者がいます。",
-      detail: "Discord 連携後に編集権通知を送れます。",
-    });
-  }
+
   const viewer = options?.viewerDiscordId?.trim();
   const owner = options?.ownerDiscordId?.trim();
-  const otherEditors = editors.filter((s) => {
-    const discord = s.user_id?.trim();
-    if (viewer && discord === viewer) return false;
-    if (owner && discord === owner) return false;
-    return true;
-  });
-  if (otherEditors.length > 0 && editors.length > 0) {
+  if (
+    editors.some((editor) => {
+      const discord = editor.user_id?.trim();
+      return (!viewer || discord !== viewer) && (!owner || discord !== owner);
+    })
+  ) {
     warnings.push({
       tone: "info",
       title: "他のメンバーにも編集権があります。",
@@ -123,8 +112,8 @@ export function computeEditPermissionSummary(
 
   return {
     editorCount: editors.length,
-    unlinkedEditorCount: unlinkedEditors.length,
-    notifiableEditorCount: notifiableEditors.length,
+    unlinkedEditorCount,
+    notifiableEditorCount: editors.length - unlinkedEditorCount,
     displayNames,
     warnings,
   };

@@ -102,12 +102,7 @@ export async function runSyncJobs(env: Env): Promise<void> {
                   "ranking-rebuild-enqueue",
                   () => enqueueScoreDependentRebuilds(env),
                 )
-              : {
-                  succeeded: true,
-                  processed: 0,
-                  skipped: 1,
-                  failed: 0,
-                };
+              : { skipped: 1 };
           return throwIfJobFailed(
             "sync-jobs",
             "cron",
