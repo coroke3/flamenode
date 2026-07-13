@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-13
-> Verified against commit: `37c41a4`
+> Verified against commit: `agent/free-tier-background-worker`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `docs/operations/README.md`, GitHub Actions CI
 
 この文書は未完了事項と直近の完了項目だけを管理します。schema列一覧、完了仕様の全文、将来案の詳細は複製しません。
@@ -24,10 +24,10 @@ DB変更をOpenへ追加する場合の完了条件:
 
 以下はリポジトリ外の権限・resourceが必要で、コード変更だけでは完了できません。
 
-- GitHub `production` EnvironmentへのCloudflare / OAuth secretsとVariables登録
-- Production D1、R2、KV、Pages project、Cron Worker 3本の実resource確認
-- Remote D1のbackup、承認済みmigration適用
-- 手動`Deploy Cloudflare` workflowとproduction smoke test
+- GitHub `production` EnvironmentへのCloudflare / OAuth / Discord / YouTube secretsとVariables登録
+- Production D1、R2、KV、Pages project、`flamenode-background-jobs`の実resource確認
+- Remote D1のbackup、承認済み`0040_free_tier_background_jobs.sql`適用
+- 新Workerのsecret設定、production smoke test、旧3 Workerの削除
 
 これらはsecret不足を成功扱いにせず、production設定検査でfail-closedします。
 
@@ -38,8 +38,9 @@ DB変更をOpenへ追加する場合の完了条件:
 - 完全before/after監査、復元直前再評価、復元本体・run・RESTORE監査のall-or-nothing化
 - 投稿、relation差替、legacy import、spreadsheet、queue/outboxを条件付きSQLとD1 batchへ統一
 - 公開判定、公開DTO、R2 artifact追跡、旧artifact削除、pagination、ETagを共通化
-- Cron Workerを3本へ統合し、bounded LIMIT、cursor、lease、retry、dedupe、safe logを実装
-- Pages + `@cloudflare/next-on-pages`、固定artifact、manual-only production deploy workflow、smoke testを整備
+- Cron処理を1 Worker・2 Cronへ統合し、通知6件、締切3件、YouTube最大50件、スコア50件、静的生成1件の固定予算を実装
+- YouTube同期を`next_sync_at`期限駆動と集合UPSERT、スコアを`score_dirty_at`差分集合UPDATEへ変更
+- Pages + `@cloudflare/next-on-pages`、固定artifact、manual-only production deploy workflow、無停止Worker切替、smoke testを整備
 - `/entry` 2カード、4step投稿、イベントfilter、ライムtheme、Light/Dark/System、ConsoleShell、mobile drawer、Shelfを実装
 - Active / Historical文書、DB change log、migration詳細、文書・DB履歴検査を整理
 
