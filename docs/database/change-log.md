@@ -2,6 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-13
+> Verified against commit: `f45f75c`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
 
 ## 2026-07-13 — `0041_youtube_quota_budget.sql`
