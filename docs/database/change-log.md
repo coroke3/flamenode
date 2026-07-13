@@ -2,8 +2,20 @@
 
 > Status: Active
 > Last verified: 2026-07-13
-> Verified against commit: `e772cc9`
-> Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
+> Verified against commit: `agent/youtube-playlist-free-tier`
+> Source of truth: `migrations/` active path, `src/lib/db/schema.ts`, `src/lib/db/schema.youtube-playlist.ts`
+
+## 2026-07-13 — `0004_event_youtube_playlist_sync.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | schema |
+| Summary | イベント単位のYouTube再生リスト同期設定と、差分同期用の再生リスト項目索引を追加 |
+| Tables | `event_youtube_playlist_sync`、`event_youtube_playlist_items` |
+| Compatibility | runtime fallbackなし。migration未適用時は設定画面・同期Workerをfail-closed |
+| Data loss | none |
+| Rollback | 同期を無効化後、項目索引テーブル、設定テーブルの順で削除 |
+| Validation | schema/history検査、playlist parser/diff unit、typecheck |
 
 ## 2026-07-13 — `0003_large_collaboration_support.sql`
 
