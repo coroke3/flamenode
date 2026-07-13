@@ -2,10 +2,10 @@
 
 > Status: Active
 > Last verified: 2026-07-13
-> Verified against commit: `29f83d8`
-> Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `wrangler.toml`, `package.json`
+> Verified against commit: `agent/free-tier-background-worker`
+> Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `wrangler.toml`, `workers/background-jobs/wrangler.toml`, `package.json`
 
-現行のCloudflare構成は Pages + `@cloudflare/next-on-pages`、D1、R2、KV、3本のCron Workerです。
+現行のCloudflare構成は Pages + `@cloudflare/next-on-pages`、D1、R2、KV、`background-jobs` 1 Worker内の5分・1時間Cronです。
 
 現行実装はコード、DB schema、active migration、Cloudflare設定、Active文書の順に確認します。Historical文書は経緯の保存だけを目的とし、現行実装の根拠には使用しません。
 
@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | Active | [operations/README.md](operations/README.md) | 運用全体の入口と所有文書 |
 | Active | [operations/migrations.md](operations/migrations.md) | baseline、ローカル適用、Remote D1の手動手順 |
-| Active | [operations/workers.md](operations/workers.md) | 3本のCron Worker、lease、上限、障害対応 |
+| Active | [operations/workers.md](operations/workers.md) | 統合Cron Worker、lease、上限、障害対応 |
 | Active | [operations/audit-and-restore.md](operations/audit-and-restore.md) | 監査、復元、owner不変条件 |
 | Active | [operations/legacy-import.md](operations/legacy-import.md) | legacy importのpreview/apply安全手順 |
 | Active | [operations/static-delivery.md](operations/static-delivery.md) | R2静的JSONと公開範囲 |
