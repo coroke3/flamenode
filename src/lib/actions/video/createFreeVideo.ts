@@ -132,8 +132,10 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
     scheduling_type: "manual",
     scheduled_time: now,
     app_like_count: 0,
+    trending_view_count_24h: 0,
     score: 0,
     score_updated_at: null,
+    score_dirty_at: now,
     created_at: now,
     updated_at: now,
   };
