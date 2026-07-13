@@ -1,11 +1,11 @@
-/** Slot deadline reminder enqueue. Delivery is delegated to fast-jobs. */
+/** Slot deadline reminder enqueue. Delivery is delegated to background-jobs. */
 export interface ReminderEnv {
   DB: D1Database;
   APP_ORIGIN?: string;
   NEXT_PUBLIC_APP_URL?: string;
 }
 
-const REMINDER_LIMIT = 50;
+const REMINDER_LIMIT = 6;
 const REMINDER_WINDOW_SEC = 24 * 60 * 60;
 
 type ReminderGroup = {
@@ -48,7 +48,7 @@ function boundedLimit(limit: number): number {
   return Math.min(REMINDER_LIMIT, Math.max(1, Math.floor(limit)));
 }
 
-/** Maximum fifty user-scoped reminders per invocation. */
+/** Maximum six user-scoped reminders per invocation. */
 export async function enqueueSlotDeadlineReminders(
   env: ReminderEnv,
   limit = REMINDER_LIMIT,
