@@ -34,7 +34,7 @@
     "check:db-legacy": "node scripts/check-db-legacy.mjs",
     "repair:video-event-links": "node scripts/repair-video-event-links.mjs",
     "check:public-api-contract": "node --experimental-strip-types scripts/check-public-api-contract.mts",
-    "check:public-api-leaks": "node scripts/check-public-api-leaks.mjs",
+    "check:public-api-leaks": "node --experimental-strip-types scripts/check-public-api-leaks.mjs",
     "check:cloudflare-config": "node scripts/check-cloudflare-config.mjs",
     "check:cloudflare-template": "node scripts/check-cloudflare-template.mjs",
     "check:pages-output": "node scripts/check-pages-output.mjs",

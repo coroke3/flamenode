@@ -1,66 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
+import { findForbiddenPublicKeys } from "../src/lib/api/publicDto.ts";
 
 const root = process.cwd();
 const args = process.argv.slice(2);
 const liveIndex = args.indexOf("--live");
 const liveBaseUrl = liveIndex >= 0 ? args[liveIndex + 1] : null;
-
-const FORBIDDEN_KEYS = new Set([
-  "submitted_by_user_id",
-  "user_id",
-  "actor_user_id",
-  "operator_user_id",
-  "approved_by_user_id",
-  "recipient_user_id",
-  "reserved_by_user_id",
-  "discord_id",
-  "linked_user_id",
-  "active_x_user_id",
-  "creator_x_user_id",
-  "email",
-  "email_verified",
-  "verification_token",
-  "access_token",
-  "refresh_token",
-  "id_token",
-  "session_token",
-  "providerAccountId",
-  "role",
-  "is_banned",
-  "tos_accepted_at",
-  "tos_version",
-  "internal_note",
-  "private_note",
-  "void_detail_private",
-  "history_logs",
-  "notification_payload",
-  "representative_x_user_id",
-  "is_active",
-  "is_entry_open",
-  "is_archived",
-  "custom_questions",
-  "stage_permission",
-]);
-
-function findForbiddenKeys(value, currentPath = "$") {
-  const violations = [];
-  if (value === null || value === undefined) return violations;
-  if (Array.isArray(value)) {
-    value.forEach((item, index) => {
-      violations.push(...findForbiddenKeys(item, `${currentPath}[${index}]`));
-    });
-    return violations;
-  }
-  if (typeof value !== "object") return violations;
-  for (const [key, nested] of Object.entries(value)) {
-    if (FORBIDDEN_KEYS.has(key)) {
-      violations.push({ path: `${currentPath}.${key}`, key });
-    }
-    violations.push(...findForbiddenKeys(nested, `${currentPath}.${key}`));
-  }
-  return violations;
-}
+const LIVE_FETCH_TIMEOUT_MS = 10_000;
 
 function requirePattern(relative, pattern, message, errors) {
   const target = path.join(root, relative);
@@ -120,12 +66,20 @@ function runStaticCheck() {
   );
 }
 
+function fetchWithTimeout(url) {
+  return fetch(url, {
+    signal: AbortSignal.timeout(LIVE_FETCH_TIMEOUT_MS),
+  });
+}
+
 async function checkEndpoint(url) {
   let response;
   try {
-    response = await fetch(url);
+    response = await fetchWithTimeout(url);
   } catch (error) {
-    console.error(`[fetch error] ${url}: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(
+      `[fetch error] ${url}: ${error instanceof Error ? error.message : String(error)}`,
+    );
     return { kind: "fetch_error" };
   }
   if (!response.ok) {
@@ -134,9 +88,11 @@ async function checkEndpoint(url) {
   }
   try {
     const json = await response.json();
-    return { kind: "ok", violations: findForbiddenKeys(json) };
+    return { kind: "ok", violations: findForbiddenPublicKeys(json) };
   } catch (error) {
-    console.error(`[invalid json] ${url}: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(
+      `[invalid json] ${url}: ${error instanceof Error ? error.message : String(error)}`,
+    );
     return { kind: "invalid_json" };
   }
 }
@@ -146,14 +102,16 @@ async function runLiveCheck(baseUrl) {
     console.error("Usage: node scripts/check-public-api-leaks.mjs --live <baseUrl>");
     process.exit(3);
   }
-  const normalized = baseUrl.replace(/\/$/, "");
+  const normalized = baseUrl.replace(/\/+$/, "");
   const endpoints = [
     `${normalized}/api/videos?limit=5`,
     `${normalized}/api/videos?limit=5&page=1`,
     `${normalized}/api/events?limit=5`,
   ];
   try {
-    const listResponse = await fetch(`${normalized}/api/videos?limit=1`);
+    const listResponse = await fetchWithTimeout(
+      `${normalized}/api/videos?limit=1`,
+    );
     if (listResponse.ok) {
       const listJson = await listResponse.json();
       const id = listJson?.items?.[0]?.id;
@@ -186,7 +144,9 @@ async function runLiveCheck(baseUrl) {
     }
   }
   if (exitCode !== 0) process.exit(exitCode);
-  console.log("[check:public-api-leaks] OK: live public API responses contain no forbidden keys.");
+  console.log(
+    "[check:public-api-leaks] OK: live public API responses contain no forbidden keys.",
+  );
 }
 
 if (liveIndex >= 0) await runLiveCheck(liveBaseUrl);

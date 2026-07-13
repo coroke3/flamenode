@@ -15,6 +15,7 @@ import {
 } from "@/lib/api/publicDto";
 import {
   checkPublicApiRateLimit,
+  parseBoundedPositiveInt,
   publicJsonResponse,
   publicServiceUnavailableResponse,
 } from "@/lib/api/publicApi";
@@ -27,16 +28,11 @@ export async function GET(req: Request): Promise<Response> {
   const q = url.searchParams.get("q") ?? "";
   const sort = parsePublicVideoSort(url.searchParams.get("sort"));
   const eventId = url.searchParams.get("event") ?? "";
-  const page = Math.max(
-    1,
-    parseInt(url.searchParams.get("page") ?? "1", 10) || 1,
-  );
-  const limit = Math.min(
+  const page = parseBoundedPositiveInt(url.searchParams.get("page"), 1);
+  const limit = parseBoundedPositiveInt(
+    url.searchParams.get("limit"),
+    24,
     MAX_PUBLIC_LIST_LIMIT,
-    Math.max(
-      1,
-      parseInt(url.searchParams.get("limit") ?? "24", 10) || 24,
-    ),
   );
 
   const db = getDatabase();

@@ -149,27 +149,78 @@ export function pickKeys<T extends object, K extends keyof T>(
   return out;
 }
 
+export interface ForbiddenPublicKeyViolation {
+  path: string;
+  key: string;
+}
+
+function collectForbiddenPublicKeys(
+  value: unknown,
+  path: string,
+  violations: ForbiddenPublicKeyViolation[],
+  limit: number,
+): void {
+  if (
+    violations.length >= limit ||
+    value === null ||
+    value === undefined
+  ) {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      collectForbiddenPublicKeys(
+        value[index],
+        `${path}[${index}]`,
+        violations,
+        limit,
+      );
+      if (violations.length >= limit) return;
+    }
+    return;
+  }
+  if (typeof value !== "object") return;
+
+  for (const [key, nested] of Object.entries(
+    value as Record<string, unknown>,
+  )) {
+    if (FORBIDDEN_PUBLIC_KEYS.has(key)) {
+      violations.push({ path: `${path}.${key}`, key });
+      if (violations.length >= limit) return;
+    }
+    collectForbiddenPublicKeys(
+      nested,
+      `${path}.${key}`,
+      violations,
+      limit,
+    );
+    if (violations.length >= limit) return;
+  }
+}
+
+/** 公開レスポンス内の禁止キーを走査し、検査スクリプトでも同じ正本を使えるようにする。 */
+export function findForbiddenPublicKeys(
+  value: unknown,
+  path: string = "$",
+): ForbiddenPublicKeyViolation[] {
+  const violations: ForbiddenPublicKeyViolation[] = [];
+  collectForbiddenPublicKeys(value, path, violations, Number.POSITIVE_INFINITY);
+  return violations;
+}
+
 /**
  * 公開 API のレスポンスに禁止キーが含まれていないかを再帰的に検査する。
- * 漏洩があれば throw する。本番経路では呼ばず、開発時テストや
- * `scripts/check-public-api-leaks.mjs` の境界判定でのみ使う想定。
+ * 漏洩があれば最初の違反で throw する。
  */
 export function assertNoForbiddenKeys(
   value: unknown,
   path: string = "$",
 ): void {
-  if (value === null || value === undefined) return;
-  if (Array.isArray(value)) {
-    value.forEach((v, i) => assertNoForbiddenKeys(v, `${path}[${i}]`));
-    return;
-  }
-  if (typeof value !== "object") return;
-  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    if (FORBIDDEN_PUBLIC_KEYS.has(k)) {
-      throw new Error(
-        `Public API leak: forbidden key "${k}" at ${path}.${k}`,
-      );
-    }
-    assertNoForbiddenKeys(v, `${path}.${k}`);
-  }
+  const violations: ForbiddenPublicKeyViolation[] = [];
+  collectForbiddenPublicKeys(value, path, violations, 1);
+  const first = violations[0];
+  if (!first) return;
+  throw new Error(
+    `Public API leak: forbidden key "${first.key}" at ${first.path}`,
+  );
 }

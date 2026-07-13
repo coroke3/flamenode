@@ -14,6 +14,7 @@ import {
 import { loadStaticEventsIndex } from "@/lib/publicData/staticEventsIndex";
 import {
   checkPublicApiRateLimit,
+  parseBoundedPositiveInt,
   publicJsonResponse,
   publicServiceUnavailableResponse,
 } from "@/lib/api/publicApi";
@@ -23,16 +24,11 @@ export async function GET(req: Request): Promise<Response> {
   const limited = checkPublicApiRateLimit(req, "/api/events");
   if (limited) return limited;
   const url = new URL(req.url);
-  const page = Math.max(
-    1,
-    parseInt(url.searchParams.get("page") ?? "1", 10) || 1,
-  );
-  const limit = Math.min(
+  const page = parseBoundedPositiveInt(url.searchParams.get("page"), 1);
+  const limit = parseBoundedPositiveInt(
+    url.searchParams.get("limit"),
+    60,
     MAX_PUBLIC_EVENT_LIMIT,
-    Math.max(
-      1,
-      parseInt(url.searchParams.get("limit") ?? "60", 10) || 60,
-    ),
   );
 
   const staticIndex = await loadStaticEventsIndex();

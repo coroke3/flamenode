@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   checkPublicApiRateLimit,
   clearPublicApiRateLimitForTests,
+  parseBoundedPositiveInt,
   publicJsonResponse,
 } from "./publicApi.ts";
 
@@ -13,6 +14,15 @@ function request(ip, headers = {}) {
     headers: { "CF-Connecting-IP": ip, ...headers },
   });
 }
+
+test("parseBoundedPositiveInt preserves existing query normalization", () => {
+  assert.equal(parseBoundedPositiveInt(null, 24, 48), 24);
+  assert.equal(parseBoundedPositiveInt("0", 24, 48), 24);
+  assert.equal(parseBoundedPositiveInt("invalid", 24, 48), 24);
+  assert.equal(parseBoundedPositiveInt("-5", 24, 48), 1);
+  assert.equal(parseBoundedPositiveInt("12items", 24, 48), 12);
+  assert.equal(parseBoundedPositiveInt("999", 24, 48), 48);
+});
 
 test("public JSON response emits stable quoted ETag and returns bodyless 304 for weak/multiple matches", async () => {
   const payload = { items: [{ id: "v1" }], page: 1 };
