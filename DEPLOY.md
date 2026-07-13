@@ -2,6 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-13
+> Verified against commit: `fcdf468`
 > Source of truth: `.github/workflows/deploy-cloudflare.yml`, `package.json`, `wrangler.toml`, `workers/background-jobs/wrangler.toml`
 
 FlameNodeの本番デプロイ正本は **GitHub Actionsの`.github/workflows/deploy-cloudflare.yml`だけ**です。Cloudflare PagesのGit連携による自動deployは無効にし、ローカル端末や別workflowから同じproductionを二重deployしません。
