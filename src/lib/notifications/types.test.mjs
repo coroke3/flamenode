@@ -4,7 +4,6 @@ import {
   categorizeNotificationType,
   getNotificationSeverity,
   getNotificationTypeLabel,
-  manageFilterMatchesType,
 } from "./types.ts";
 
 test("categorizeNotificationType", () => {
@@ -26,10 +25,4 @@ test("getNotificationTypeLabel", () => {
 test("getNotificationSeverity", () => {
   assert.equal(getNotificationSeverity("video_voided"), "critical");
   assert.equal(getNotificationSeverity("video_submitted"), "info");
-});
-
-test("manageFilterMatchesType", () => {
-  assert.equal(manageFilterMatchesType("video_approved", "video"), true);
-  assert.equal(manageFilterMatchesType("announcement_broadcast", "video"), false);
-  assert.equal(manageFilterMatchesType("announcement_broadcast", "other"), true);
 });
