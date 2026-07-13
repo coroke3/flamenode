@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { isPlaylistSyncSlot } from "./index.ts";
 
 const source = await readFile(new URL("./index.ts", import.meta.url), "utf8");
 const sharedSource = await readFile(
@@ -22,4 +23,12 @@ test("score変更時はtopとlist_popularを重複排除付きで再生成予約
   assert.match(source, /INSERT OR IGNORE INTO static_rebuild_queue/);
   assert.match(source, /\["top",\s*"list_popular"\]/);
   assert.match(source, /score\.processed\s*>\s*0/);
+});
+
+test("毎時52分台だけを再生リスト同期の専用枠にする", () => {
+  assert.equal(isPlaylistSyncSlot(new Date("2026-07-13T00:07:00Z")), false);
+  assert.equal(isPlaylistSyncSlot(new Date("2026-07-13T00:22:00Z")), false);
+  assert.equal(isPlaylistSyncSlot(new Date("2026-07-13T00:37:00Z")), false);
+  assert.equal(isPlaylistSyncSlot(new Date("2026-07-13T00:52:00Z")), true);
+  assert.match(source, /youtube-playlist-sync/);
 });

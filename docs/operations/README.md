@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-13
-> Verified against commit: `f66ae21`
+> Verified against commit: `de329d5d50799b41ac76ada18147592f0bec2700`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `wrangler.toml`, `package.json`
 
 FlameNodeは Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、3本のCron Workerで運用する。実Cloudflareへのリソース作成・Remote D1 migration・deployは運用者だけが明示的に実行し、CodexやPR CIは実行しない。
@@ -20,6 +20,7 @@ FlameNodeは Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、3�
 | --- | --- |
 | baseline / local D1 / Remote手動手順 | [migrations.md](migrations.md) |
 | 3本のCron Workerと上限 | [workers.md](workers.md) |
+| YouTube再生リスト同期・OAuth・無料枠制御 | [youtube-playlist-sync.md](youtube-playlist-sync.md) |
 | 監査・復元・owner保護 | [audit-and-restore.md](audit-and-restore.md) |
 | legacy data import | [legacy-import.md](legacy-import.md) |
 | Spreadsheet import | [spreadsheet-import.md](spreadsheet-import.md) |
