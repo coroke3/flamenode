@@ -1,6 +1,6 @@
 /**
  * publicDto.ts の単体テスト。
- * pickKeys と assertNoForbiddenKeys の振る舞いを検証する。
+ * pickKeys と公開禁止キー走査の振る舞いを検証する。
  */
 
 import { test } from "node:test";
@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import {
   pickKeys,
   assertNoForbiddenKeys,
+  findForbiddenPublicKeys,
   FORBIDDEN_PUBLIC_KEYS,
   PUBLIC_VIDEO_KEYS,
   PUBLIC_EVENT_KEYS,
@@ -63,6 +64,27 @@ test("assertNoForbiddenKeys: 配列インデックスもパスに含まれる", 
     () => assertNoForbiddenKeys([{ access_token: "x" }]),
     /\[0\]/,
   );
+});
+
+test("findForbiddenPublicKeys: 全違反を走査順と完全なpath付きで返す", () => {
+  assert.deepEqual(
+    findForbiddenPublicKeys({
+      items: [
+        { id: "1", role: "admin" },
+        { nested: { access_token: "secret" } },
+      ],
+      discord_id: "123",
+    }),
+    [
+      { path: "$.items[0].role", key: "role" },
+      { path: "$.items[1].nested.access_token", key: "access_token" },
+      { path: "$.discord_id", key: "discord_id" },
+    ],
+  );
+});
+
+test("findForbiddenPublicKeys: 安全な値は空配列", () => {
+  assert.deepEqual(findForbiddenPublicKeys({ items: [{ id: "1" }] }), []);
 });
 
 test("FORBIDDEN_PUBLIC_KEYS: 主要な禁止キーが含まれている", () => {
