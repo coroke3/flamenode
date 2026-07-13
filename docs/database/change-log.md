@@ -2,8 +2,23 @@
 
 > Status: Active
 > Last verified: 2026-07-13
-> Verified against commit: `684bc10`
+> Verified against commit: `agent/free-tier-background-worker`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
+
+## 2026-07-13 — `0040_free_tier_background_jobs.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | additive |
+| Summary | 期限駆動YouTube同期、差分スコア更新、Discord DMチャンネル再利用と通知dispatch indexを追加 |
+| Reason | Cloudflare Workers無料枠のCPU・subrequest・D1 query上限内で、必要なリアルタイム性を維持するため |
+| Tables | `user`、`videos`、`video_youtube_metadata`、`notification_outbox` |
+| Data migration | 公開作品をdirty化し、既存YouTubeメタデータを初回同期待ちへ設定 |
+| Compatibility | runtime fallbackなし。新Workerをdeployする前にmigration適用が必要 |
+| Data loss | none |
+| Rollback | 追加index/triggerを削除。追加列の除去はmigration前backupから手動復元 |
+| Validation | schema/history検査、Worker/unit tests、typecheck、空DBへのactive migration適用 |
+| PR | `agent/free-tier-background-worker` |
 
 ## 2026-07-13 — `0039_search_relation_indexes.sql`
 
