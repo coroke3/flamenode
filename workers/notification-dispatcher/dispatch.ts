@@ -15,7 +15,12 @@ export type Env = {
 const MAX_RETRIES = 4;
 const PROCESSING_LEASE_SEC = 5 * 60;
 const RETRY_BACKOFF_SEC = [60, 300, 900] as const;
-export const MAX_NOTIFICATION_BATCH = 15;
+/**
+ * Free plan の1実行50 subrequestsに収める。
+ * 1件あたり claim + Discord最大2回 + 完了更新の最大4 subrequestsを使うため、
+ * lease救済・一覧取得を含めても余裕が残る6件を上限とする。
+ */
+export const MAX_NOTIFICATION_BATCH = 6;
 
 type OutboxRow = {
   id: string;
@@ -32,14 +37,11 @@ function boundedLimit(value: unknown): number {
   return Math.min(MAX_NOTIFICATION_BATCH, Math.max(1, Math.floor(requested)));
 }
 
-/** 古い lease を有限件だけ救済し、再試行枯渇分は dead_letter に固定する。 */
 async function recoverExpiredLeases(env: Env, now: number, limit: number): Promise<void> {
   await env.DB.prepare(
     `UPDATE notification_outbox
-        SET status = 'pending',
-            processing_started_at = NULL,
-            lease_token = NULL,
-            lease_expires_at = NULL,
+        SET status = 'pending', processing_started_at = NULL,
+            lease_token = NULL, lease_expires_at = NULL,
             next_attempt_at = ?1,
             last_error = COALESCE(last_error, 'delivery lease expired')
       WHERE status = 'processing'
@@ -47,99 +49,57 @@ async function recoverExpiredLeases(env: Env, now: number, limit: number): Promi
         AND lease_expires_at <= ?1
         AND COALESCE(attempt_count, 0) < ?2
       LIMIT ?3`,
-  )
-    .bind(now, MAX_RETRIES, limit)
-    .run();
+  ).bind(now, MAX_RETRIES, limit).run();
 
   await env.DB.prepare(
     `UPDATE notification_outbox
-        SET status = 'dead_letter',
-            processing_started_at = NULL,
-            lease_token = NULL,
-            lease_expires_at = NULL,
+        SET status = 'dead_letter', processing_started_at = NULL,
+            lease_token = NULL, lease_expires_at = NULL,
             last_error = COALESCE(last_error, 'delivery retry budget exhausted')
       WHERE status = 'processing'
         AND lease_expires_at IS NOT NULL
         AND lease_expires_at <= ?1
         AND COALESCE(attempt_count, 0) >= ?2
       LIMIT ?3`,
-  )
-    .bind(now, MAX_RETRIES, limit)
-    .run();
+  ).bind(now, MAX_RETRIES, limit).run();
 }
 
-async function claimOutboxRow(
-  env: Env,
-  row: OutboxRow,
-  token: string,
-  now: number,
-): Promise<boolean> {
+async function claimOutboxRow(env: Env, row: OutboxRow, token: string, now: number): Promise<boolean> {
   const result = await env.DB.prepare(
     `UPDATE notification_outbox
-        SET status = 'processing',
-            processing_started_at = ?1,
-            lease_token = ?2,
-            lease_expires_at = ?3
-      WHERE id = ?4
-        AND status = 'pending'
+        SET status = 'processing', processing_started_at = ?1,
+            lease_token = ?2, lease_expires_at = ?3
+      WHERE id = ?4 AND status = 'pending'
         AND COALESCE(attempt_count, 0) < ?5
         AND (next_attempt_at IS NULL OR next_attempt_at <= ?1)`,
-  )
-    .bind(now, token, now + PROCESSING_LEASE_SEC, row.id, MAX_RETRIES)
-    .run();
+  ).bind(now, token, now + PROCESSING_LEASE_SEC, row.id, MAX_RETRIES).run();
   return (result.meta?.changes ?? 0) === 1;
 }
 
 async function markSent(env: Env, rowId: string, token: string, now: number): Promise<boolean> {
   const result = await env.DB.prepare(
     `UPDATE notification_outbox
-        SET status = 'sent',
-            processing_started_at = NULL,
-            lease_token = NULL,
-            lease_expires_at = NULL,
-            next_attempt_at = NULL,
-            last_error = NULL,
-            processed_at = ?1
+        SET status = 'sent', processing_started_at = NULL,
+            lease_token = NULL, lease_expires_at = NULL,
+            next_attempt_at = NULL, last_error = NULL, processed_at = ?1
       WHERE id = ?2 AND status = 'processing' AND lease_token = ?3`,
-  )
-    .bind(now, rowId, token)
-    .run();
+  ).bind(now, rowId, token).run();
   return (result.meta?.changes ?? 0) === 1;
 }
 
-async function markDeliveryFailure(
-  env: Env,
-  row: OutboxRow,
-  token: string,
-  error: unknown,
-  now: number,
-): Promise<void> {
+async function markDeliveryFailure(env: Env, row: OutboxRow, token: string, error: unknown, now: number): Promise<void> {
   const attempts = Math.max(0, Number(row.attempt_count) || 0) + 1;
   const deadLetter = attempts >= MAX_RETRIES;
   const delay = RETRY_BACKOFF_SEC[Math.min(attempts - 1, RETRY_BACKOFF_SEC.length - 1)] ?? 900;
   await env.DB.prepare(
     `UPDATE notification_outbox
-        SET attempt_count = ?1,
-            status = ?2,
-            processing_started_at = NULL,
-            lease_token = NULL,
-            lease_expires_at = NULL,
-            next_attempt_at = ?3,
-            last_error = ?4
+        SET attempt_count = ?1, status = ?2,
+            processing_started_at = NULL, lease_token = NULL,
+            lease_expires_at = NULL, next_attempt_at = ?3, last_error = ?4
       WHERE id = ?5 AND status = 'processing' AND lease_token = ?6`,
-  )
-    .bind(
-      attempts,
-      deadLetter ? "dead_letter" : "pending",
-      deadLetter ? null : now + delay,
-      safeErrorSummary(error),
-      row.id,
-      token,
-    )
-    .run();
+  ).bind(attempts, deadLetter ? "dead_letter" : "pending", deadLetter ? null : now + delay, safeErrorSummary(error), row.id, token).run();
 }
 
-/** 1 cron あたり最大15件。recipient_user_id を正本に、Discord ID は送信時だけ解決する。 */
 export async function processNotificationQueue(
   env: Env,
   opts?: { limit?: number },
@@ -147,7 +107,6 @@ export async function processNotificationQueue(
   const limit = boundedLimit(opts?.limit);
   const now = Math.floor(Date.now() / 1000);
   await recoverExpiredLeases(env, now, limit);
-
   const result = await env.DB.prepare(
     `SELECT n.id, n.recipient_user_id, u.discord_id, n.type, n.payload_json,
             COALESCE(n.attempt_count, 0) AS attempt_count
@@ -158,9 +117,7 @@ export async function processNotificationQueue(
         AND (n.next_attempt_at IS NULL OR n.next_attempt_at <= ?2)
       ORDER BY n.created_at ASC, n.id ASC
       LIMIT ?3`,
-  )
-    .bind(MAX_RETRIES, now, limit)
-    .all<OutboxRow>();
+  ).bind(MAX_RETRIES, now, limit).all<OutboxRow>();
 
   let processed = 0;
   let failed = 0;
@@ -204,13 +161,9 @@ export async function deliver(
     return response.ok;
   }
   if (!env.DISCORD_BOT_TOKEN || !row.discord_id) return false;
-
   const channelResponse = await fetch("https://discord.com/api/v10/users/@me/channels", {
     method: "POST",
-    headers: {
-      Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`,
-      "Content-Type": "application/json",
-    },
+    headers: { Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`, "Content-Type": "application/json" },
     body: JSON.stringify({ recipient_id: row.discord_id }),
   });
   if (!channelResponse.ok) return false;
@@ -218,10 +171,7 @@ export async function deliver(
   if (!channel.id) return false;
   const response = await fetch(`https://discord.com/api/v10/channels/${channel.id}/messages`, {
     method: "POST",
-    headers: {
-      Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`,
-      "Content-Type": "application/json",
-    },
+    headers: { Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`, "Content-Type": "application/json" },
     body: row.payload_json,
   });
   return response.ok;
