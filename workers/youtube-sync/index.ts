@@ -233,7 +233,8 @@ async function selectSyncRows(
            INNER JOIN events e ON e.id = ve.event_id
            WHERE ve.video_id = v.id
              AND e.visibility_status = 'public'
-             AND (e.start_time IS NULL OR e.start_time <= ?1)
+             AND e.start_time IS NOT NULL
+             AND e.start_time <= ?1
              AND (e.end_time IS NULL OR e.end_time >= ?1)
          )
        )`
@@ -251,7 +252,8 @@ async function selectSyncRows(
               INNER JOIN events active_e ON active_e.id = active_ve.event_id
               WHERE active_ve.video_id = v.id
                 AND active_e.visibility_status = 'public'
-                AND (active_e.start_time IS NULL OR active_e.start_time <= ?1)
+                AND active_e.start_time IS NOT NULL
+                AND active_e.start_time <= ?1
                 AND (active_e.end_time IS NULL OR active_e.end_time >= ?1)
             ) THEN 1 ELSE 0 END AS active_event
        FROM videos v
@@ -286,12 +288,17 @@ async function selectSyncRows(
 
 function successInterval(row: SyncRow, now: number): number {
   if (row.active_event === 1) return HOUR;
-  const recentBoundary = now - 7 * DAY;
-  const nearBoundary = now - DAY;
-  if (row.created_at >= nearBoundary) return HOUR;
-  if ((row.scheduled_time ?? 0) >= nearBoundary) return HOUR;
-  if ((row.scheduled_time ?? 0) >= recentBoundary) return 6 * HOUR;
-  return DAY;
+
+  const referenceTime = Math.max(
+    row.created_at,
+    row.scheduled_time ?? 0,
+  );
+  const age = Math.max(0, now - referenceTime);
+  if (age <= DAY) return HOUR;
+  if (age <= 7 * DAY) return 6 * HOUR;
+  if (age <= 30 * DAY) return DAY;
+  if (age <= 180 * DAY) return 3 * DAY;
+  return 30 * DAY;
 }
 
 function failureInterval(failures: number): number {
