@@ -17,6 +17,8 @@ import {
 } from "@/lib/auth/permissions/permissionResolver";
 import { makeCheck, type IntegrityCheckResult, type IntegrityIssue } from "./integrityChecks";
 
+const DISPLAY_LIMIT = 50;
+
 function text(value: unknown): string {
   return value == null ? "" : String(value);
 }
@@ -34,6 +36,7 @@ function finalizeJsCheck(
   recommendation: string,
 ): IntegrityCheckResult | null {
   if (issues.length === 0) return null;
+  const visibleIssues = issues.slice(0, DISPLAY_LIMIT);
   return {
     id,
     title,
@@ -41,144 +44,158 @@ function finalizeJsCheck(
     severity,
     description,
     count: issues.length,
-    issues,
-    moreCount: 0,
+    issues: visibleIssues,
+    moreCount: Math.max(0, issues.length - visibleIssues.length),
     recommendation,
   };
 }
 
-
 export async function buildPermissionIntegrityChecks(
   db: DB,
 ): Promise<IntegrityCheckResult[]> {
-  const sqlChecks = await Promise.all([
-    makeCheck({
-      db,
-      id: "staff_representative_public_staff",
-      area: "event_staff",
-      title: "representative なのに public_staff プリセット",
-      severity: "warning",
-      description: "代表ロールと表示専用プリセットが矛盾しています。",
-      from: sql`event_staff`,
-      where: sql`role = 'representative' AND permission_preset = 'public_staff'`,
-      sampleSelect: {
-        id: sql<string>`id`,
+  const ownerResolved = resolveStaffPermissionKeys({
+    permission_preset: "owner",
+    custom_permission_keys_json: null,
+  });
+  const ownerMissingPermissions = getPresetPermissions("owner").filter(
+    (key) => !ownerResolved.has(key),
+  );
+  const managerResolved = resolveStaffPermissionKeys({
+    permission_preset: "manager",
+    custom_permission_keys_json: null,
+  });
+  const managerDangerousPermissions = DANGEROUS_PERMISSION_KEYS.filter((key) =>
+    managerResolved.has(key),
+  );
+
+  const [sqlChecks, duplicateX, duplicateUser, staffRows] = await Promise.all([
+    Promise.all([
+      makeCheck({
+        db,
+        id: "staff_representative_public_staff",
+        area: "event_staff",
+        title: "representative なのに public_staff プリセット",
+        severity: "warning",
+        description: "代表ロールと表示専用プリセットが矛盾しています。",
+        from: sql`event_staff`,
+        where: sql`role = 'representative' AND permission_preset = 'public_staff'`,
+        sampleSelect: {
+          id: sql<string>`id`,
+          event_id: sql<string>`event_id`,
+          x_user_id: sql<string>`x_user_id`,
+        },
+        recommendation: "代表には owner プリセットを設定してください。",
+        mapIssue: (row) => ({
+          id: text(row.id),
+          title: `@${text(row.x_user_id) || "—"}`,
+          description: `event:${text(row.event_id)}`,
+          adminHref: staffHref(text(row.event_id)),
+        }),
+      }),
+      makeCheck({
+        db,
+        id: "staff_missing_subject_ids",
+        area: "event_staff",
+        title: "X ID / 内部ユーザー ID が両方空",
+        severity: "danger",
+        description: "スタッフ行に紐づくユーザー識別子がありません。",
+        from: sql`event_staff`,
+        where: sql`(x_user_id IS NULL OR trim(x_user_id) = '') AND (user_id IS NULL OR trim(user_id) = '')`,
+        sampleSelect: {
+          id: sql<string>`id`,
+          event_id: sql<string>`event_id`,
+          display_name: sql<string>`display_name`,
+        },
+        recommendation: "スタッフ行を削除するか、識別子を設定してください。",
+        mapIssue: (row) => ({
+          id: text(row.id),
+          title: text(row.display_name) || "未設定",
+          description: `event:${text(row.event_id)}`,
+          adminHref: staffHref(text(row.event_id)),
+        }),
+      }),
+      makeCheck({
+        db,
+        id: "staff_custom_without_keys",
+        area: "event_staff",
+        title: "custom なのに custom_permission_keys_json が空",
+        severity: "warning",
+        description: "custom プリセットなのに追加キーがありません。",
+        from: sql`event_staff`,
+        where: sql`permission_preset = 'custom' AND (custom_permission_keys_json IS NULL OR trim(custom_permission_keys_json) = '' OR trim(custom_permission_keys_json) = '[]')`,
+        sampleSelect: {
+          id: sql<string>`id`,
+          event_id: sql<string>`event_id`,
+          x_user_id: sql<string>`x_user_id`,
+        },
+        recommendation: "custom_permission_keys_json を設定するかプリセットを変更してください。",
+        mapIssue: (row) => ({
+          id: text(row.id),
+          title: `@${text(row.x_user_id) || "—"}`,
+          description: `event:${text(row.event_id)}`,
+          adminHref: staffHref(text(row.event_id)),
+        }),
+      }),
+      makeCheck({
+        db,
+        id: "staff_non_custom_with_custom_json",
+        area: "event_staff",
+        title: "custom 以外なのに custom_permission_keys_json あり",
+        severity: "info",
+        description: "プリセットと custom JSON が併存しています。",
+        from: sql`event_staff`,
+        where: sql`permission_preset <> 'custom' AND custom_permission_keys_json IS NOT NULL AND trim(custom_permission_keys_json) <> '' AND trim(custom_permission_keys_json) <> '[]'`,
+        sampleSelect: {
+          id: sql<string>`id`,
+          event_id: sql<string>`event_id`,
+          x_user_id: sql<string>`x_user_id`,
+          permission_preset: sql<string>`permission_preset`,
+        },
+        recommendation: "不要な custom_permission_keys_json を削除してください。",
+        mapIssue: (row) => ({
+          id: text(row.id),
+          title: `@${text(row.x_user_id) || "—"}`,
+          description: `${text(row.permission_preset)} / event:${text(row.event_id)}`,
+          adminHref: staffHref(text(row.event_id)),
+        }),
+      }),
+    ]),
+    db
+      .select({
         event_id: sql<string>`event_id`,
         x_user_id: sql<string>`x_user_id`,
-      },
-      recommendation: "代表には owner プリセットを設定してください。",
-      mapIssue: (row) => ({
-        id: text(row.id),
-        title: `@${text(row.x_user_id) || "—"}`,
-        description: `event:${text(row.event_id)}`,
-        adminHref: staffHref(text(row.event_id)),
-      }),
-    }),
-    makeCheck({
-      db,
-      id: "staff_missing_subject_ids",
-      area: "event_staff",
-      title: "X ID / 内部ユーザー ID が両方空",
-      severity: "danger",
-      description: "スタッフ行に紐づくユーザー識別子がありません。",
-      from: sql`event_staff`,
-      where: sql`(x_user_id IS NULL OR trim(x_user_id) = '') AND (user_id IS NULL OR trim(user_id) = '')`,
-      sampleSelect: {
-        id: sql<string>`id`,
+        c: sql<number>`COUNT(*)`,
+        total_count: sql<number>`COUNT(*) OVER()`,
+      })
+      .from(sql`event_staff`)
+      .where(sql`x_user_id IS NOT NULL AND trim(x_user_id) <> ''`)
+      .groupBy(sql`event_id`, sql`x_user_id`)
+      .having(sql`COUNT(*) > 1`)
+      .limit(DISPLAY_LIMIT),
+    db
+      .select({
         event_id: sql<string>`event_id`,
-        display_name: sql<string>`display_name`,
-      },
-      recommendation: "スタッフ行を削除するか、識別子を設定してください。",
-      mapIssue: (row) => ({
-        id: text(row.id),
-        title: text(row.display_name) || "未設定",
-        description: `event:${text(row.event_id)}`,
-        adminHref: staffHref(text(row.event_id)),
-      }),
-    }),
-    makeCheck({
-      db,
-      id: "staff_custom_without_keys",
-      area: "event_staff",
-      title: "custom なのに custom_permission_keys_json が空",
-      severity: "warning",
-      description: "custom プリセットなのに追加キーがありません。",
-      from: sql`event_staff`,
-      where: sql`permission_preset = 'custom' AND (custom_permission_keys_json IS NULL OR trim(custom_permission_keys_json) = '' OR trim(custom_permission_keys_json) = '[]')`,
-      sampleSelect: {
-        id: sql<string>`id`,
-        event_id: sql<string>`event_id`,
-        x_user_id: sql<string>`x_user_id`,
-      },
-      recommendation: "custom_permission_keys_json を設定するかプリセットを変更してください。",
-      mapIssue: (row) => ({
-        id: text(row.id),
-        title: `@${text(row.x_user_id) || "—"}`,
-        description: `event:${text(row.event_id)}`,
-        adminHref: staffHref(text(row.event_id)),
-      }),
-    }),
-    makeCheck({
-      db,
-      id: "staff_non_custom_with_custom_json",
-      area: "event_staff",
-      title: "custom 以外なのに custom_permission_keys_json あり",
-      severity: "info",
-      description: "プリセットと custom JSON が併存しています。",
-      from: sql`event_staff`,
-      where: sql`permission_preset <> 'custom' AND custom_permission_keys_json IS NOT NULL AND trim(custom_permission_keys_json) <> '' AND trim(custom_permission_keys_json) <> '[]'`,
-      sampleSelect: {
+        user_id: sql<string>`user_id`,
+        c: sql<number>`COUNT(*)`,
+        total_count: sql<number>`COUNT(*) OVER()`,
+      })
+      .from(sql`event_staff`)
+      .where(sql`user_id IS NOT NULL AND trim(user_id) <> ''`)
+      .groupBy(sql`event_id`, sql`user_id`)
+      .having(sql`COUNT(*) > 1`)
+      .limit(DISPLAY_LIMIT),
+    db
+      .select({
         id: sql<string>`id`,
         event_id: sql<string>`event_id`,
         x_user_id: sql<string>`x_user_id`,
         permission_preset: sql<string>`permission_preset`,
-      },
-      recommendation: "不要な custom_permission_keys_json を削除してください。",
-      mapIssue: (row) => ({
-        id: text(row.id),
-        title: `@${text(row.x_user_id) || "—"}`,
-        description: `${text(row.permission_preset)} / event:${text(row.event_id)}`,
-        adminHref: staffHref(text(row.event_id)),
-      }),
-    }),
+        custom_permission_keys_json: sql<string | null>`custom_permission_keys_json`,
+      })
+      .from(sql`event_staff`)
+      .where(sql`permission_preset IN ('owner', 'manager', 'custom')`)
+      .limit(500),
   ]);
-
-  const duplicateX = await db
-    .select({
-      event_id: sql<string>`event_id`,
-      x_user_id: sql<string>`x_user_id`,
-      c: sql<number>`COUNT(*)`,
-    })
-    .from(sql`event_staff`)
-    .where(
-      sql`x_user_id IS NOT NULL AND trim(x_user_id) <> ''`,
-    )
-    .groupBy(sql`event_id`, sql`x_user_id`)
-    .having(sql`COUNT(*) > 1`)
-    .limit(50);
-
-  const duplicateUser = await db
-    .select({
-      event_id: sql<string>`event_id`,
-      user_id: sql<string>`user_id`,
-      c: sql<number>`COUNT(*)`,
-    })
-    .from(sql`event_staff`)
-    .where(sql`user_id IS NOT NULL AND trim(user_id) <> ''`)
-    .groupBy(sql`event_id`, sql`user_id`)
-    .having(sql`COUNT(*) > 1`)
-    .limit(50);
-
-  const staffRows = await db
-    .select({
-      id: sql<string>`id`,
-      event_id: sql<string>`event_id`,
-      x_user_id: sql<string>`x_user_id`,
-      permission_preset: sql<string>`permission_preset`,
-      custom_permission_keys_json: sql<string | null>`custom_permission_keys_json`,
-    })
-    .from(sql`event_staff`)
-    .limit(500);
 
   const ownerIssues: IntegrityIssue[] = [];
   const managerIssues: IntegrityIssue[] = [];
@@ -202,49 +219,38 @@ export async function buildPermissionIntegrityChecks(
           adminHref: staffHref(eventId),
         });
       }
+      continue;
     }
 
-    const resolved = resolveStaffPermissionKeys({
-      permission_preset: preset,
-      custom_permission_keys_json: customJson,
-    });
-
-    if (preset === "owner") {
-      const missing = getPresetPermissions("owner").filter(
-        (key) => !resolved.has(key),
-      );
-      if (missing.length > 0) {
-        ownerIssues.push({
-          id,
-          title: `@${text(row.x_user_id) || "—"}`,
-          description: `不足: ${missing.join(", ")}`,
-          adminHref: staffHref(eventId),
-        });
-      }
+    if (preset === "owner" && ownerMissingPermissions.length > 0) {
+      ownerIssues.push({
+        id,
+        title: `@${text(row.x_user_id) || "—"}`,
+        description: `不足: ${ownerMissingPermissions.join(", ")}`,
+        adminHref: staffHref(eventId),
+      });
+      continue;
     }
 
-    if (preset === "manager") {
-      const dangerous = DANGEROUS_PERMISSION_KEYS.filter((key) =>
-        resolved.has(key),
-      );
-      if (dangerous.length > 0) {
-        managerIssues.push({
-          id,
-          title: `@${text(row.x_user_id) || "—"}`,
-          description: `危険権限: ${dangerous.join(", ")}`,
-          adminHref: staffHref(eventId),
-        });
-      }
+    if (preset === "manager" && managerDangerousPermissions.length > 0) {
+      managerIssues.push({
+        id,
+        title: `@${text(row.x_user_id) || "—"}`,
+        description: `危険権限: ${managerDangerousPermissions.join(", ")}`,
+        adminHref: staffHref(eventId),
+      });
     }
   }
 
+  const duplicateXCount = Number(duplicateX[0]?.total_count ?? 0);
+  const duplicateUserCount = Number(duplicateUser[0]?.total_count ?? 0);
   const jsChecks = [
     finalizeJsCheck(
       "staff_owner_missing_permissions",
       "owner なのに必要権限が不足",
       "danger",
       "owner プリセットに必要な権限キーが解決できません。",
-      ownerIssues.slice(0, 50),
+      ownerIssues,
       "プリセット定義を確認してください。",
     ),
     finalizeJsCheck(
@@ -252,7 +258,7 @@ export async function buildPermissionIntegrityChecks(
       "manager なのに危険権限あり",
       "warning",
       "manager に危険権限が含まれています。",
-      managerIssues.slice(0, 50),
+      managerIssues,
       "危険権限を外してください。",
     ),
     finalizeJsCheck(
@@ -260,42 +266,42 @@ export async function buildPermissionIntegrityChecks(
       "custom JSON がパース不能",
       "warning",
       "custom_permission_keys_json が壊れています。",
-      invalidCustomIssues.slice(0, 50),
+      invalidCustomIssues,
       "JSON を修正してください。",
     ),
-    duplicateX.length > 0
+    duplicateXCount > 0
       ? {
           id: "staff_duplicate_x_per_event",
           title: "同一イベント内で X ID が重複",
           area: "event_staff",
           severity: "danger" as const,
           description: "同じイベントに同一 X ID のスタッフ行が複数あります。",
-          count: duplicateX.length,
+          count: duplicateXCount,
           issues: duplicateX.map((row) => ({
             id: `${text(row.event_id)}:${text(row.x_user_id)}`,
             title: `@${text(row.x_user_id)}`,
             description: `event:${text(row.event_id)} × ${text(row.c)} 件`,
             adminHref: staffHref(text(row.event_id)),
           })),
-          moreCount: 0,
+          moreCount: Math.max(0, duplicateXCount - duplicateX.length),
           recommendation: "重複行を統合または削除してください。",
         }
       : null,
-    duplicateUser.length > 0
+    duplicateUserCount > 0
       ? {
           id: "staff_duplicate_user_per_event",
           title: "同一イベント内で内部ユーザー ID が重複",
           area: "event_staff",
           severity: "warning" as const,
           description: "同じイベントに同一の内部ユーザー ID を持つスタッフ行が複数あります。",
-          count: duplicateUser.length,
+          count: duplicateUserCount,
           issues: duplicateUser.map((row) => ({
             id: `${text(row.event_id)}:${text(row.user_id)}`,
             title: text(row.user_id),
             description: `event:${text(row.event_id)} × ${text(row.c)} 件`,
             adminHref: staffHref(text(row.event_id)),
           })),
-          moreCount: 0,
+          moreCount: Math.max(0, duplicateUserCount - duplicateUser.length),
           recommendation: "重複行を統合または削除してください。",
         }
       : null,
