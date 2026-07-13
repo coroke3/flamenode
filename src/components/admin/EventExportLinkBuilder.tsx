@@ -7,27 +7,22 @@ interface EventExportLinkBuilderProps {
   eventId: string;
 }
 
-type ExportFormat = "new" | "legacy";
 type UpdateMode = "realtime" | "scheduled";
 
 export function EventExportLinkBuilder({
   eventId,
 }: EventExportLinkBuilderProps): React.ReactElement {
-  const [format, setFormat] = React.useState<ExportFormat>("new");
   const [updateMode, setUpdateMode] = React.useState<UpdateMode>("realtime");
   const [refreshMinutes, setRefreshMinutes] = React.useState("60");
   const [copied, setCopied] = React.useState(false);
 
   const href = React.useMemo(() => {
-    const params = new URLSearchParams({
-      format,
-      update: updateMode,
-    });
+    const params = new URLSearchParams({ update: updateMode });
     if (updateMode === "scheduled") {
       params.set("refresh", refreshMinutes);
     }
     return `/api/event-endpoints/${encodeURIComponent(eventId)}?${params.toString()}`;
-  }, [eventId, format, refreshMinutes, updateMode]);
+  }, [eventId, refreshMinutes, updateMode]);
 
   async function copyUrl(): Promise<void> {
     const absoluteUrl = new URL(href, window.location.origin).toString();
@@ -39,18 +34,6 @@ export function EventExportLinkBuilder({
   return (
     <div style={{ display: "grid", gap: 8, minWidth: 280 }}>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        <label className="fn-field" style={{ minWidth: 110 }}>
-          <span className="fn-label">形式</span>
-          <select
-            className="fn-select"
-            value={format}
-            onChange={(event) => setFormat(event.target.value as ExportFormat)}
-          >
-            <option value="new">新形式 v2</option>
-            <option value="legacy">旧形式互換</option>
-          </select>
-        </label>
-
         <label className="fn-field" style={{ minWidth: 130 }}>
           <span className="fn-label">更新方式</span>
           <select
