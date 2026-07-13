@@ -5,9 +5,9 @@ on:
     branches:
       - main
     types:
-      - opened
-      - reopened
       - synchronize
+    paths:
+      - .github/agent/apply-file-reduction.trigger
 
 permissions:
   contents: write
@@ -26,7 +26,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .github/agent/file-reduction.patch.gz.b64.part-* \
+          cat .github/agent/file-reduction.patch.gz.b64.small-* \
             | base64 --decode \
             | gzip --decompress \
             > /tmp/file-reduction.patch
