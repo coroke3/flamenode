@@ -1,7 +1,7 @@
 /**
  * sync-jobs: 15分毎の外部API・集計ジョブ。
  * - YouTube メタデータ同期（最大50件）
- * - スコア差分再計算（最大250件、1 SQL）
+ * - スコア差分再計算（最大160件、1 SQL）
  * - スコア変更時のトップ・人気一覧再生成enqueue
  */
 import { createCronWorker } from "../shared/createCronWorker.ts";
