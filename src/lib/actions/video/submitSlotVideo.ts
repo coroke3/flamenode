@@ -164,6 +164,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
         closing_comment: parsed.data.closing_comment ?? null,
         collaboration_type: parsed.data.is_collab ? "collab" : "individual",
         part: slotPart,
+        score_dirty_at: now,
         updated_at: now,
       }
     : {
@@ -191,8 +192,10 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
         scheduling_type: "slotted",
         scheduled_time: slotRow.start_time ?? now,
         app_like_count: 0,
+        trending_view_count_24h: 0,
         score: 0,
         score_updated_at: null,
+        score_dirty_at: now,
         created_at: now,
         updated_at: now,
       };

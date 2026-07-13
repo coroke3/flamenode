@@ -292,6 +292,7 @@ function buildLegacyVideoSnapshot(
       visibility_status: video.visibility_status,
       scheduling_type: video.scheduling_type,
       scheduled_time: video.scheduled_time,
+      score_dirty_at: now,
       updated_at: now,
     };
   }
@@ -320,8 +321,10 @@ function buildLegacyVideoSnapshot(
     scheduling_type: video.scheduling_type,
     scheduled_time: video.scheduled_time,
     app_like_count: 0,
+    trending_view_count_24h: 0,
     score: 0,
     score_updated_at: null,
+    score_dirty_at: now,
     created_at: video.created_at ?? now,
     updated_at: now,
   };
@@ -430,6 +433,8 @@ async function buildLegacyVideoAtomicWork(args: {
           duration_seconds: null,
           view_count: 0,
           synced_at: null,
+          next_sync_at: args.now,
+          consecutive_failures: 0,
           sync_status: "pending",
           sync_error: null,
           updated_at: args.now,

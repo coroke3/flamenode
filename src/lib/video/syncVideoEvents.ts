@@ -100,6 +100,8 @@ export async function buildVideoDerivedRowsPlan(
       duration_seconds: null,
       view_count: 0,
       synced_at: null,
+      next_sync_at: args.now,
+      consecutive_failures: 0,
       sync_status: "pending",
       sync_error: null,
       updated_at: args.now,
@@ -124,12 +126,20 @@ export async function buildVideoDerivedRowsPlan(
     ...existing,
     youtube_video_id: args.youtubeVideoId,
     sync_status: "pending",
+    sync_error: null,
+    synced_at: null,
+    next_sync_at: args.now,
+    consecutive_failures: 0,
     updated_at: args.now,
   };
   return {
     statements: [db.update(videoYoutubeMetadata).set({
       youtube_video_id: args.youtubeVideoId,
       sync_status: "pending",
+      sync_error: null,
+      synced_at: null,
+      next_sync_at: args.now,
+      consecutive_failures: 0,
       updated_at: args.now,
     }).where(and(
       eq(videoYoutubeMetadata.video_id, args.videoId),
