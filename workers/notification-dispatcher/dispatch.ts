@@ -30,6 +30,8 @@ const DISCORD_DM_CHANNEL_CACHE_MAX = 1_000;
 const DISCORD_GLOBAL_COOLDOWN_KEY = "discord:global";
 /** 6件 × 未cache時最大2 request。inline retryは行わない。 */
 export const MAX_DISCORD_EXTERNAL_REQUESTS_PER_RUN = 12;
+/** 2 writes/run × 288 runs/day = 最大576 writes/day。KV Freeの余裕を残す。 */
+export const MAX_DISCORD_DM_KV_WRITES_PER_RUN = 2;
 /**
  * Free plan の1実行50 subrequestsに収める。
  * D1 claim/完了更新、KV channel cache、Discord最大2 requestを含めても余裕が残る。
@@ -114,13 +116,18 @@ async function getCachedDmChannel(env: Env, discordId: string): Promise<string |
   }
 }
 
-async function storeDmChannel(env: Env, discordId: string, channelId: string): Promise<void> {
+async function storeDmChannel(
+  env: Env,
+  discordId: string,
+  channelId: string,
+  kvWriteBudget: ExternalRequestBudget,
+): Promise<void> {
   dmChannelCache.set(discordId, {
     channelId,
     expiresAt: Date.now() + DISCORD_DM_CHANNEL_TTL_SEC * 1_000,
   });
   pruneOldest(dmChannelCache, DISCORD_DM_CHANNEL_CACHE_MAX);
-  if (!env.KV) return;
+  if (!env.KV || !kvWriteBudget.consume()) return;
   try {
     await env.KV.put(dmCacheKey(discordId), channelId, {
       expirationTtl: DISCORD_DM_CHANNEL_TTL_SEC,
@@ -130,9 +137,13 @@ async function storeDmChannel(env: Env, discordId: string, channelId: string): P
   }
 }
 
-async function evictDmChannel(env: Env, discordId: string): Promise<void> {
+async function evictDmChannel(
+  env: Env,
+  discordId: string,
+  kvWriteBudget: ExternalRequestBudget,
+): Promise<void> {
   dmChannelCache.delete(discordId);
-  if (!env.KV) return;
+  if (!env.KV || !kvWriteBudget.consume()) return;
   try {
     await env.KV.delete(dmCacheKey(discordId));
   } catch {
@@ -345,6 +356,7 @@ async function deliverWithOutcome(
   row: { type: string; payload_json: string; discord_id: string },
   env: Pick<Env, "KV" | "DISCORD_WEBHOOK_URL" | "DISCORD_BOT_TOKEN">,
   budget: ExternalRequestBudget,
+  kvWriteBudget: ExternalRequestBudget,
   fetchImpl: FetchLike = fetch,
 ): Promise<DeliveryOutcome> {
   if (row.type === "discord_webhook") {
@@ -409,7 +421,7 @@ async function deliverWithOutcome(
     if (!channelId) {
       return { ok: false, errorCode: "discord_dm_channel_missing", retryAfterSeconds: 300 };
     }
-    await storeDmChannel(env, row.discord_id, channelId);
+    await storeDmChannel(env, row.discord_id, channelId, kvWriteBudget);
   }
 
   const messageRoute = `discord:channels:${channelId}:messages`;
@@ -434,7 +446,7 @@ async function deliverWithOutcome(
   }
   if (usedCachedChannel && message.response.status === 404) {
     await cancelResponseBody(message.response);
-    await evictDmChannel(env, row.discord_id);
+    await evictDmChannel(env, row.discord_id, kvWriteBudget);
     return {
       ok: false,
       errorCode: "discord_cached_dm_channel_not_found",
@@ -464,6 +476,7 @@ export async function processNotificationQueue(
   ).bind(MAX_RETRIES, now, limit).all<OutboxRow>();
 
   const budget = new ExternalRequestBudget(MAX_DISCORD_EXTERNAL_REQUESTS_PER_RUN);
+  const kvWriteBudget = new ExternalRequestBudget(MAX_DISCORD_DM_KV_WRITES_PER_RUN);
   let processed = 0;
   let failed = 0;
   let skipped = 0;
@@ -481,6 +494,7 @@ export async function processNotificationQueue(
       },
       env,
       budget,
+      kvWriteBudget,
     );
     if (outcome.ok) {
       if (await markSent(env, row.id, token, now)) processed += 1;
@@ -502,6 +516,7 @@ export async function deliver(
     row,
     env,
     new ExternalRequestBudget(2),
+    new ExternalRequestBudget(1),
   );
   return outcome.ok;
 }
