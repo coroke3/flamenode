@@ -17,6 +17,7 @@ import { users } from "./schema.base";
  * 明示exportは export * より優先されるため、利用側のimport名は変更しない。
  */
 export * from "./schema.base";
+export * from "./schema.youtube-playlist";
 
 export const xUsers = sqliteTable(
   "x_users",
