@@ -22,14 +22,26 @@ export function validateDbSchema(root = process.cwd()) {
 
     const baseSchemaPath = path.join(root, "src", "lib", "db", "schema.base.ts");
     const overlaySchemaPath = path.join(root, "src", "lib", "db", "schema.ts");
+    const youtubePlaylistSchemaPath = path.join(
+      root,
+      "src",
+      "lib",
+      "db",
+      "schema.youtube-playlist.ts",
+    );
     if (!fs.existsSync(baseSchemaPath)) {
       throw new Error("schema.base.tsがありません。");
+    }
+    if (!fs.existsSync(youtubePlaylistSchemaPath)) {
+      throw new Error("schema.youtube-playlist.tsがありません。");
     }
 
     const flattened = [
       fs.readFileSync(baseSchemaPath, "utf8"),
       "\n// ===== runtime schema overlay =====\n",
       fs.readFileSync(overlaySchemaPath, "utf8"),
+      "\n// ===== YouTube playlist schema =====\n",
+      fs.readFileSync(youtubePlaylistSchemaPath, "utf8"),
     ].join("\n");
     fs.writeFileSync(path.join(tempDbDir, "schema.ts"), flattened, "utf8");
     return validateBaseSchema(tempRoot);
