@@ -1,3 +1,11 @@
+-- Migration: 0038_runtime_efficiency_resilience.sql
+-- Date: 2026-07-13
+-- Type: additive
+-- Summary: Worker leaseの実行状態列と公開・認証読取経路の複合indexを追加する
+-- Data loss: none
+-- Rollback: 追加indexを削除し、必要時はmigration前backupからworker_leasesを手動復元する
+-- Change log: docs/database/change-log.md
+
 -- Runtime resilience and read-path efficiency.
 -- Apply before deploying code that reads worker_leases.last_* columns.
 
