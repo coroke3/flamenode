@@ -52,7 +52,20 @@ jobs:
         run: npm run lint
 
       - name: Unit tests
-        run: npm run test:unit
+        shell: bash
+        run: |
+          mkdir -p .tmp
+          set -o pipefail
+          npm run test:unit 2>&1 | tee .tmp/unit-tests.log
+
+      - name: Upload unit test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-diagnostics-${{ github.run_id }}
+          path: .tmp/unit-tests.log
+          if-no-files-found: warn
+          retention-days: 3
 
       - name: Worker tests
         run: npm run test:workers
