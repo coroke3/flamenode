@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-13
-> Verified against branch: `agent/cloudflare-free-tier-scale-v2`
+> Verified against commit: `7552474`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
 
 ## 2026-07-13 — `0040_worker_free_tier_scale.sql`
