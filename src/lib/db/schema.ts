@@ -7,7 +7,7 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
-import { users } from "./schema.base";
+import { users } from "./schema.base.ts";
 
 /**
  * FlameNode D1 schema overlay.
@@ -16,7 +16,7 @@ import { users } from "./schema.base";
  * incremental migrationで拡張した高頻度テーブルだけを明示的に上書きする。
  * 明示exportは export * より優先されるため、利用側のimport名は変更しない。
  */
-export * from "./schema.base";
+export * from "./schema.base.ts";
 
 export const xUsers = sqliteTable(
   "x_users",
