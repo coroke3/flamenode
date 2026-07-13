@@ -47,6 +47,7 @@ const MAX_EVENTS_PER_RUN = 2;
 const MAX_SCAN_PAGES_PER_EVENT = 3;
 const MAX_MUTATIONS_PER_RUN = 8;
 const MAX_SOURCE_VIDEOS = 5000;
+const SCAN_UPSERT_CHUNK_SIZE = 20;
 const FULL_SCAN_INTERVAL_SEC = 24 * 60 * 60;
 const RETRY_DELAY_SEC = 60 * 60;
 const FAILURE_RETRY_SEC = 6 * 60 * 60;
@@ -79,7 +80,14 @@ function unixNow(): number {
 }
 
 export function quotaDayKey(now: number): string {
-  return new Date(now * 1000).toISOString().slice(0, 10);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(now * 1000));
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 export function parseDailyQuotaLimit(raw: string | undefined): number {
@@ -113,16 +121,12 @@ class DailyQuotaBudget {
   static async load(env: PlaylistSyncEnv, now: number): Promise<DailyQuotaBudget> {
     const day = quotaDayKey(now);
     let units = 0;
-    try {
-      const raw = await env.KV.get(QUOTA_STATE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as { day?: unknown; units?: unknown };
-        if (parsed.day === day && Number.isFinite(Number(parsed.units))) {
-          units = Math.max(0, Math.floor(Number(parsed.units)));
-        }
+    const raw = await env.KV.get(QUOTA_STATE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { day?: unknown; units?: unknown };
+      if (parsed.day === day && Number.isFinite(Number(parsed.units))) {
+        units = Math.max(0, Math.floor(Number(parsed.units)));
       }
-    } catch {
-      units = 0;
     }
     return new DailyQuotaBudget(
       env,
@@ -208,13 +212,12 @@ async function youtubeJson<T>(
   cost: number,
 ): Promise<T> {
   quota.spend(cost);
+  const headers = new Headers(init.headers);
+  headers.set("authorization", `Bearer ${accessToken}`);
+  if (!headers.has("content-type")) headers.set("content-type", "application/json");
   const response = await fetchWithTimeout(url.toString(), {
     ...init,
-    headers: {
-      authorization: `Bearer ${accessToken}`,
-      "content-type": "application/json",
-      ...(init.headers ?? {}),
-    },
+    headers,
   });
   if (!response.ok) throw await readApiError(response);
   if (response.status === 204) return undefined as T;
@@ -368,26 +371,28 @@ async function upsertScannedItems(
   items: PlaylistPageItem[],
   seenAt: number,
 ): Promise<void> {
-  if (items.length === 0) return;
-  const placeholders = items.map(() => "(?, ?, ?, ?, 0, ?)").join(", ");
-  const values = items.flatMap((item) => [
-    eventId,
-    item.playlistItemId,
-    item.videoId,
-    seenAt,
-    seenAt,
-  ]);
-  await env.DB.prepare(
-    `INSERT INTO event_youtube_playlist_items (
-       event_id, playlist_item_id, youtube_video_id, seen_at,
-       managed_by_flamenode, created_at
-     ) VALUES ${placeholders}
-     ON CONFLICT(event_id, playlist_item_id) DO UPDATE SET
-       youtube_video_id = excluded.youtube_video_id,
-       seen_at = excluded.seen_at`,
-  )
-    .bind(...values)
-    .run();
+  for (let offset = 0; offset < items.length; offset += SCAN_UPSERT_CHUNK_SIZE) {
+    const chunk = items.slice(offset, offset + SCAN_UPSERT_CHUNK_SIZE);
+    const placeholders = chunk.map(() => "(?, ?, ?, ?, 0, ?)").join(", ");
+    const values = chunk.flatMap((item) => [
+      eventId,
+      item.playlistItemId,
+      item.videoId,
+      seenAt,
+      seenAt,
+    ]);
+    await env.DB.prepare(
+      `INSERT INTO event_youtube_playlist_items (
+         event_id, playlist_item_id, youtube_video_id, seen_at,
+         managed_by_flamenode, created_at
+       ) VALUES ${placeholders}
+       ON CONFLICT(event_id, playlist_item_id) DO UPDATE SET
+         youtube_video_id = excluded.youtube_video_id,
+         seen_at = excluded.seen_at`,
+    )
+      .bind(...values)
+      .run();
+  }
 }
 
 async function markScanStarted(
@@ -413,7 +418,8 @@ async function scanPlaylist(
   quota: DailyQuotaBudget,
   now: number,
 ): Promise<boolean> {
-  const scanStartedAt = config.scan_started_at ?? now;
+  const scanStartedAt =
+    config.scan_started_at ?? Math.max(now, (config.last_full_scan_at ?? 0) + 1);
   let pageToken = config.scan_started_at ? config.scan_page_token : null;
   if (config.scan_started_at == null) {
     await markScanStarted(env, config.event_id, scanStartedAt, now);
@@ -505,7 +511,8 @@ async function markEventError(
   await env.DB.prepare(
     `UPDATE event_youtube_playlist_sync
      SET sync_status = ?1, next_sync_at = ?2,
-         last_error = ?3, updated_at = ?4
+         last_error = ?3, last_full_scan_at = NULL,
+         scan_started_at = NULL, scan_page_token = NULL, updated_at = ?4
      WHERE event_id = ?5`,
   )
     .bind(
