@@ -22,6 +22,17 @@ Workers FreeのCPU上限はHTTP/Cronともに10msであり、Cron間隔を1時�
 - D1のrows writtenには更新table rowに加えてindex entryも含まれるため、scoreの理論最大を14,400作品/日に抑え、他jobの書込み余地を確保する。
 - Cron重複排除はD1 `worker_leases`を正本とし、無制限loop、全件読込、処理全体の即時retryは禁止する。
 
+## YouTube APIキー
+
+- `YOUTUBE_API_KEY`を主キー、`YOUTUBE_API_KEY_SECONDARY`を副キーとして最大2つ登録できる。
+- 通常は主キーを利用し、失効、API未有効化、key restriction不整合などcredential固有の障害時だけ副キーへ切り替える。
+- credential障害になったキーは6時間回避し、その後に再確認する。
+- 使用中キー、直近切替、障害理由は共有KVへ秘密値を含めず記録する。
+- 同一のキー値は重複排除する。
+- `quotaExceeded`、`dailyLimitExceeded`、`rateLimitExceeded`では切り替えない。複数projectのquotaを合算・迂回する設計にはしない。
+- 429と5xxは同じキーで最大2回再試行する。credential障害時の副キー切替を含めても外部requestは最大3回に限定する。
+- quota不足はGoogle Cloud Consoleで実測し、quota extension申請または同期頻度の引き下げで対応する。
+
 ## 大規模データ時の処理能力
 
 | 処理 | 最大処理量 | 1万件の初回処理目安 |
@@ -49,9 +60,9 @@ Queue targetはcanonical値だけを受理する。旧別名や未知値は成�
 
 ## 監視
 
-`/admin/workers`で、Cronの最終開始・成功・失敗・lease、通知と静的queueの固着、YouTubeとscoreのbacklog、理論解消時間、global静的JSONの最終生成時刻、`operation_mode`を確認する。詳細操作は既存の通知配信・静的JSON再生成・YouTube同期ページで行う。
+`/admin/workers`で、Cronの最終開始・成功・失敗・lease、通知と静的queueの固着、YouTubeとscoreのbacklog、YouTube APIの使用中キー区分と直近切替、理論解消時間、global静的JSONの最終生成時刻、`operation_mode`を確認する。詳細操作は既存の通知配信・静的JSON再生成・YouTube同期ページで行う。
 
-CPU時間、`exceededCpu`、D1の日次使用量、YouTube API quotaはアプリDBから正確に取得できないため、Cloudflare DashboardおよびGoogle Cloud Consoleを正本とする。
+CPU時間、`exceededCpu`、D1の日次使用量、YouTube API quotaはアプリから正確に取得できないため、Cloudflare DashboardおよびGoogle Cloud Consoleを正本とする。
 
 ## 公式上限
 
@@ -60,3 +71,4 @@ CPU時間、`exceededCpu`、D1の日次使用量、YouTube API quotaはアプリ
 - D1 limits: https://developers.cloudflare.com/d1/platform/limits/
 - D1 pricing: https://developers.cloudflare.com/d1/platform/pricing/
 - YouTube quota: https://developers.google.com/youtube/v3/determine_quota_cost
+- YouTube API Terms: https://developers.google.com/youtube/terms/api-services-terms-of-service
