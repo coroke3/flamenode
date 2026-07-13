@@ -42,52 +42,83 @@ jobs:
             | base64 --decode \
             | gzip --decompress \
             > /tmp/file-reduction.patch
-          git fetch --depth=1 origin main:refs/remotes/origin/main
+          git fetch --force --depth=1 origin main:refs/remotes/origin/main
           git reset --hard refs/remotes/origin/main
           git apply --index /tmp/file-reduction.patch
 
       - name: 依存関係を取得
         run: npm ci --no-audit --no-fund
 
-      - name: 型検査
-        run: npm run typecheck
+      - name: 正式CI検証スクリプトを準備
+        shell: bash
+        run: |
+          cat > /tmp/validate-flamenode.sh <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          npm ls --depth=0
+          git diff --exit-code -- package-lock.json
+          npm run typecheck
+          npm run lint
+          npm run test:unit
+          npm run test:workers
+          npm run test:cloudflare-ci
+          npm run test:integration
+          npm run build
+          npm run pages:build
+          npm run check:pages-output
+          npm run check:cloudflare-template
+          CLOUDFLARE_CONFIG_MODE=fixture npm run check:cloudflare-config
+          mkdir -p .tmp
+          rm -f .tmp/owner-check.sqlite
+          node scripts/create-owner-check-fixture.mjs
+          FLAMENODE_OWNER_CHECK_DB=.tmp/owner-check.sqlite npm run check:db-schema
+          FLAMENODE_OWNER_CHECK_DB=.tmp/owner-check.sqlite npm run check:db-legacy
+          FLAMENODE_OWNER_CHECK_DB=.tmp/owner-check.sqlite npm run check:event-owners
+          npm run check:ui-acceptance
+          npm run check:public-api-leaks
+          npm run check:project-docs
+          npm run check:docs
+          npm run check:db-history
+          EOF
+          chmod +x /tmp/validate-flamenode.sh
 
-      - name: Lint
-        run: npm run lint
-
-      - name: 単体テスト
-        run: npm run test:unit
-
-      - name: 統合テスト
+      - name: 正式CI相当の全検証
         shell: bash
         run: |
           set -o pipefail
-          npm run test:integration 2>&1 | tee integration-test.log
+          /tmp/validate-flamenode.sh 2>&1 | tee validation.log
 
-      - name: 統合テストログを保存
+      - name: 検証ログを保存
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: integration-test-log
-          path: integration-test.log
+          name: file-reduction-validation-log
+          path: validation.log
           retention-days: 1
 
-      - name: UI契約検査
-        run: npm run check:ui-acceptance
-
-      - name: 本番ビルド
+      - name: 最終コミット直前に最新mainへ追従
         shell: bash
         run: |
-          set -o pipefail
-          npm run build 2>&1 | tee build.log
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            current_base="$(git rev-parse HEAD)"
+            git fetch --force --depth=1 origin main:refs/remotes/origin/main
+            latest_main="$(git rev-parse refs/remotes/origin/main)"
+            if [ "$current_base" = "$latest_main" ]; then
+              break
+            fi
 
-      - name: ビルドログを保存
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: build.log
-          retention-days: 1
+            echo "mainが${current_base}から${latest_main}へ更新されたため再適用・再検証します。"
+            git diff --cached --binary > /tmp/current-refactor.patch
+            git reset --hard "$latest_main"
+            git apply --3way --index /tmp/current-refactor.patch
+            set -o pipefail
+            /tmp/validate-flamenode.sh 2>&1 | tee -a validation.log
+            set +o pipefail
+          done
+
+          git fetch --force --depth=1 origin main:refs/remotes/origin/main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse refs/remotes/origin/main)"
 
       - name: 日本語コミットで反映
         shell: bash
