@@ -12,17 +12,27 @@ import {
   pickKeys,
 } from "@/lib/api/publicDto";
 import { loadStaticEventsIndex } from "@/lib/publicData/staticEventsIndex";
-import { checkPublicApiRateLimit, publicJsonResponse } from "@/lib/api/publicApi";
+import {
+  checkPublicApiRateLimit,
+  publicJsonResponse,
+  publicServiceUnavailableResponse,
+} from "@/lib/api/publicApi";
 
 /** イベント一覧 JSON。 */
 export async function GET(req: Request): Promise<Response> {
   const limited = checkPublicApiRateLimit(req, "/api/events");
   if (limited) return limited;
   const url = new URL(req.url);
-  const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
+  const page = Math.max(
+    1,
+    parseInt(url.searchParams.get("page") ?? "1", 10) || 1,
+  );
   const limit = Math.min(
     MAX_PUBLIC_EVENT_LIMIT,
-    Math.max(1, parseInt(url.searchParams.get("limit") ?? "60", 10) || 60),
+    Math.max(
+      1,
+      parseInt(url.searchParams.get("limit") ?? "60", 10) || 60,
+    ),
   );
 
   const staticIndex = await loadStaticEventsIndex();
@@ -33,11 +43,15 @@ export async function GET(req: Request): Promise<Response> {
       .map((row) => pickKeys(row, PUBLIC_EVENT_KEYS) as PublicEventDto);
     const payload = { items, page, limit };
     assertNoForbiddenKeys(payload);
-    return publicJsonResponse(req, payload, "public, max-age=60, s-maxage=120, stale-while-revalidate=300");
+    return publicJsonResponse(
+      req,
+      payload,
+      "public, max-age=60, s-maxage=120, stale-while-revalidate=300",
+    );
   }
 
   const db = getDatabase();
-  if (!db) return publicJsonResponse(req, { items: [], page, limit }, "public, max-age=60, s-maxage=120, stale-while-revalidate=300");
+  if (!db) return publicServiceUnavailableResponse("database_unavailable");
 
   const rows = await db
     .select({
@@ -56,7 +70,8 @@ export async function GET(req: Request): Promise<Response> {
       start_time: eventsTable.start_time,
       end_time: eventsTable.end_time,
       max_slots_per_video: eventsTable.max_slots_per_video,
-      max_consecutive_slots_per_entry: eventsTable.max_consecutive_slots_per_entry,
+      max_consecutive_slots_per_entry:
+        eventsTable.max_consecutive_slots_per_entry,
     })
     .from(eventsTable)
     .where(publicListableEventWhere())
@@ -65,11 +80,15 @@ export async function GET(req: Request): Promise<Response> {
     .offset((page - 1) * limit);
 
   // DB 側で明示列を絞り込んでいるが、二重防御として pickKeys も通す。
-  const items: PublicEventDto[] = rows.map((row) =>
-    pickKeys(row, PUBLIC_EVENT_KEYS) as PublicEventDto,
+  const items: PublicEventDto[] = rows.map(
+    (row) => pickKeys(row, PUBLIC_EVENT_KEYS) as PublicEventDto,
   );
 
   const payload = { items, page, limit };
   assertNoForbiddenKeys(payload);
-  return publicJsonResponse(req, payload, "public, max-age=60, s-maxage=120, stale-while-revalidate=300");
+  return publicJsonResponse(
+    req,
+    payload,
+    "public, max-age=60, s-maxage=120, stale-while-revalidate=300",
+  );
 }
