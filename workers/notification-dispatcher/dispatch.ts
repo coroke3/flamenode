@@ -15,7 +15,12 @@ export type Env = {
 const MAX_RETRIES = 4;
 const PROCESSING_LEASE_SEC = 5 * 60;
 const RETRY_BACKOFF_SEC = [60, 300, 900] as const;
-export const MAX_NOTIFICATION_BATCH = 15;
+/**
+ * Free plan の1実行50 subrequestsに収める。
+ * 1件あたり claim + Discord最大2回 + 完了更新の最大4 subrequestsを使うため、
+ * lease救済・一覧取得を含めても余裕が残る6件を上限とする。
+ */
+export const MAX_NOTIFICATION_BATCH = 6;
 
 type OutboxRow = {
   id: string;
@@ -139,7 +144,7 @@ async function markDeliveryFailure(
     .run();
 }
 
-/** 1 cron あたり最大15件。recipient_user_id を正本に、Discord ID は送信時だけ解決する。 */
+/** 1 cron あたり最大6件。recipient_user_id を正本に、Discord ID は送信時だけ解決する。 */
 export async function processNotificationQueue(
   env: Env,
   opts?: { limit?: number },
