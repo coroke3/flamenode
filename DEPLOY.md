@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-13
-> Verified against commit: `fcdf468`
+> Verified against commit: `53be503`
 > Source of truth: `.github/workflows/deploy-cloudflare.yml`, `package.json`, `wrangler.toml`, `workers/background-jobs/wrangler.toml`
 
 FlameNodeの本番デプロイ正本は **GitHub Actionsの`.github/workflows/deploy-cloudflare.yml`だけ**です。Cloudflare PagesのGit連携による自動deployは無効にし、ローカル端末や別workflowから同じproductionを二重deployしません。
@@ -204,4 +204,4 @@ migrationが安全に逆操作できない場合は、事前backupから運用�
 
 ## 11. Cloudflare上限
 
-無料枠の数値は固定値としてコードへ埋め込まず、処理件数と外部API回数を保守的に制限します。設計上は通知6件、締切生成3件、優先YouTube10件、通常YouTube50件、スコア50件、静的生成1件を上限とし、D1集合SQLとjob別leaseで負荷を抑えます。release前にCloudflare公式の最新Workers、D1、KV、R2制限を再確認してください。
+無料枠の上限値は固定値としてコードへ埋め込まず、1 invocationの処理件数と外部API系列を保守的に制限します。設計上は通知6件、締切生成3件、YouTube 50件/1 API系列、スコア200件/1集合SQL、静的生成1件を上限とします。5分枠ではYouTubeまたはR2生成の片方だけを動かし、D1 query数、外部subrequest、10ms CPUの同時消費を避けます。release前にCloudflare公式の最新Workers、D1、KV、R2制限を再確認してください。
