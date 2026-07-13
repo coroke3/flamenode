@@ -70,7 +70,6 @@ export async function getLiveEventSlots(db: DB, eventId: string) {
 
   const rows = await db
     .select({
-      event_id: events.id,
       id: slots.id,
       status: slots.status,
       video_id: slots.video_id,
@@ -89,7 +88,7 @@ export async function getLiveEventSlots(db: DB, eventId: string) {
       : [
           {
             id: row.id,
-            status: row.status,
+            status: row.status!,
             video_id: row.video_id,
             display_name: row.display_name,
           },
@@ -110,7 +109,6 @@ export async function getLiveEventSubmissions(db: DB, eventId: string) {
 
   const rows = await db
     .select({
-      event_id: events.id,
       video_id: videos.id,
       title: videos.title,
       creator_display_name: videos.creator_display_name,
@@ -136,9 +134,9 @@ export async function getLiveEventSubmissions(db: DB, eventId: string) {
       : [
           {
             video_id: row.video_id,
-            title: row.title,
+            title: row.title!,
             creator_display_name: row.creator_display_name,
-            updated_at: row.updated_at,
+            updated_at: row.updated_at!,
           },
         ],
   );
