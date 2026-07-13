@@ -139,6 +139,11 @@ export function ManageEventTabs({
             イベント設定
           </Link>
           <Link
+            href={`/manage/events/${encodedId}/youtube-playlist`}
+          >
+            YouTube再生リスト
+          </Link>
+          <Link
             href={`/manage/events/${encodedId}/staff`}
           >
             運営メンバー
