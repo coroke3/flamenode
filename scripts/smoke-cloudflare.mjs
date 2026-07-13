@@ -4,9 +4,7 @@ const siteUrl =
   process.env.SITE_URL?.replace(/\/$/, "");
 
 const workerUrls = [
-  ["fast-jobs", process.env.FAST_JOBS_URL],
-  ["content-jobs", process.env.CONTENT_JOBS_URL],
-  ["sync-jobs", process.env.SYNC_JOBS_URL],
+  ["background-jobs", process.env.BACKGROUND_JOBS_URL],
 ].filter(([, url]) => Boolean(url));
 
 const expectedCommit =
@@ -166,18 +164,18 @@ if (
   );
 }
 
+const backgroundJobs =
+  process.env.BACKGROUND_JOBS_URL
+    ?.replace(/\/$/, "");
+
 for (const endpoint of [
   "/rebuild",
   "/process-queue",
 ]) {
-  const contentJobs =
-    process.env.CONTENT_JOBS_URL
-      ?.replace(/\/$/, "");
-
-  if (!contentJobs) continue;
+  if (!backgroundJobs) continue;
 
   const response = await request(
-    `${contentJobs}${endpoint}`,
+    `${backgroundJobs}${endpoint}`,
     { method: "POST" },
   );
 
