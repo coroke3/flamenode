@@ -9,9 +9,7 @@ const ROOT = path.resolve(
 );
 const WRANGLER_FILES = [
   "wrangler.toml",
-  "workers/fast-jobs/wrangler.toml",
-  "workers/content-jobs/wrangler.toml",
-  "workers/sync-jobs/wrangler.toml",
+  "workers/background-jobs/wrangler.toml",
 ];
 const D1_ZERO = "00000000-0000-0000-0000-000000000000";
 const KV_ZERO = "00000000000000000000000000000000";
