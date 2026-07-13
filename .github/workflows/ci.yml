@@ -91,6 +91,9 @@ jobs:
           npm run check:db-legacy
           npm run check:event-owners
 
+      - name: UI acceptance contracts
+        run: npm run check:ui-acceptance
+
       - name: Project document checks
         run: npm run check:project-docs
 
