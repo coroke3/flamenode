@@ -39,7 +39,9 @@ function dedupeStaticRebuildInputs(
       priority: mergedPriority,
       reason:
         PRIORITY_RANK[mergedPriority] >=
-        PRIORITY_RANK[(existing.priority ?? "normal") as "high" | "normal" | "low"]
+        PRIORITY_RANK[
+          (existing.priority ?? "normal") as "high" | "normal" | "low"
+        ]
           ? item.reason
           : existing.reason,
       requestedByUserId:
@@ -51,6 +53,7 @@ function dedupeStaticRebuildInputs(
 
 const PUBLIC_MISS_COOLDOWN_SEC = 5 * 60;
 const DEFAULT_DONE_COOLDOWN_SEC = 60;
+const ENQUEUE_MANY_CONCURRENCY = 4;
 export const MAX_STATIC_REBUILD_BATCH_TARGETS = 16;
 export const STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT = 2;
 export const STATIC_REBUILD_BULK_UPDATE_ROWS = 6;
@@ -64,6 +67,9 @@ export type StaticRebuildQueueBatch = {
 /**
  * Event Group mutation と同じ D1 batch に queue write を含めるための builder。
  * ここでは書き込みを実行せず、失敗は呼び出し元へ返して batch を rollback させる。
+ *
+ * processing 行へ再投入された場合は lease を無効化せず、updated_at を必ず
+ * processing_started_at より新しくする。Worker は完了時にこの差を見て pending へ戻す。
  */
 export async function buildStaticRebuildQueueBatch(
   db: DB,
@@ -88,16 +94,7 @@ export async function buildStaticRebuildQueueBatch(
       ),
     ),
   )!;
-  const activeRows = await db
-    .select()
-    .from(staticRebuildQueue)
-    .where(
-      and(
-        targetCondition,
-        inArray(staticRebuildQueue.status, ["pending", "processing"]),
-      ),
-    )
-    .limit(MAX_STATIC_REBUILD_BATCH_TARGETS + 1);
+
   const latestUpdate = db
     .select({
       target_type: staticRebuildQueue.target_type,
@@ -111,19 +108,33 @@ export async function buildStaticRebuildQueueBatch(
       staticRebuildQueue.target_id,
     )
     .as("latest_static_rebuild_queue");
-  const latestRows = await db
-    .select({ queue: staticRebuildQueue })
-    .from(staticRebuildQueue)
-    .innerJoin(
-      latestUpdate,
-      and(
-        eq(staticRebuildQueue.target_type, latestUpdate.target_type),
-        eq(staticRebuildQueue.target_id, latestUpdate.target_id),
-        eq(staticRebuildQueue.updated_at, latestUpdate.updated_at),
-      ),
-    )
-    .where(targetCondition)
-    .limit(MAX_STATIC_REBUILD_BATCH_TARGETS + 1);
+
+  const [activeRows, latestRows] = await Promise.all([
+    db
+      .select()
+      .from(staticRebuildQueue)
+      .where(
+        and(
+          targetCondition,
+          inArray(staticRebuildQueue.status, ["pending", "processing"]),
+        ),
+      )
+      .limit(MAX_STATIC_REBUILD_BATCH_TARGETS + 1),
+    db
+      .select({ queue: staticRebuildQueue })
+      .from(staticRebuildQueue)
+      .innerJoin(
+        latestUpdate,
+        and(
+          eq(staticRebuildQueue.target_type, latestUpdate.target_type),
+          eq(staticRebuildQueue.target_id, latestUpdate.target_id),
+          eq(staticRebuildQueue.updated_at, latestUpdate.updated_at),
+        ),
+      )
+      .where(targetCondition)
+      .limit(MAX_STATIC_REBUILD_BATCH_TARGETS + 1),
+  ]);
+
   const activeByTarget = indexUniqueStaticRebuildTargetRows(activeRows, {
     maxRows: MAX_STATIC_REBUILD_BATCH_TARGETS,
     label: "active",
@@ -178,35 +189,77 @@ export async function buildStaticRebuildQueueBatch(
     });
   }
 
-  for (let offset = 0; offset < activeUpdates.length; offset += STATIC_REBUILD_BULK_UPDATE_ROWS) {
-    const chunk = activeUpdates.slice(offset, offset + STATIC_REBUILD_BULK_UPDATE_ROWS);
-    statements.push(db.update(staticRebuildQueue).set({
-      reason: sql<string>`CASE ${staticRebuildQueue.id} ${sql.join(
-        chunk.map((item) => sql`WHEN ${item.row.id} THEN ${item.reason}`),
-        sql` `,
-      )} ELSE ${staticRebuildQueue.reason} END`,
-      priority: sql<"high" | "normal" | "low">`CASE ${staticRebuildQueue.id} ${sql.join(
-        chunk.map((item) => sql`WHEN ${item.row.id} THEN ${item.priority}`),
-        sql` `,
-      )} ELSE ${staticRebuildQueue.priority} END`,
-      requested_by_user_id: sql<string | null>`CASE ${staticRebuildQueue.id} ${sql.join(
-        chunk.map((item) => sql`WHEN ${item.row.id} THEN ${item.requestedByUserId}`),
-        sql` `,
-      )} ELSE ${staticRebuildQueue.requested_by_user_id} END`,
-      lease_token: null,
-      lease_expires_at: null,
-      updated_at: now,
-    }).where(or(...chunk.map((item) => and(
-      eq(staticRebuildQueue.id, item.row.id),
-      eq(staticRebuildQueue.status, item.row.status),
-      eq(staticRebuildQueue.updated_at, item.row.updated_at),
-      item.row.lease_token
-        ? eq(staticRebuildQueue.lease_token, item.row.lease_token)
-        : isNull(staticRebuildQueue.lease_token),
-    )!))!));
+  for (
+    let offset = 0;
+    offset < activeUpdates.length;
+    offset += STATIC_REBUILD_BULK_UPDATE_ROWS
+  ) {
+    const chunk = activeUpdates.slice(
+      offset,
+      offset + STATIC_REBUILD_BULK_UPDATE_ROWS,
+    );
+    statements.push(
+      db
+        .update(staticRebuildQueue)
+        .set({
+          reason: sql<string>`CASE ${staticRebuildQueue.id} ${sql.join(
+            chunk.map(
+              (item) => sql`WHEN ${item.row.id} THEN ${item.reason}`,
+            ),
+            sql` `,
+          )} ELSE ${staticRebuildQueue.reason} END`,
+          priority: sql<"high" | "normal" | "low">`CASE ${
+            staticRebuildQueue.id
+          } ${sql.join(
+            chunk.map(
+              (item) => sql`WHEN ${item.row.id} THEN ${item.priority}`,
+            ),
+            sql` `,
+          )} ELSE ${staticRebuildQueue.priority} END`,
+          requested_by_user_id: sql<string | null>`CASE ${
+            staticRebuildQueue.id
+          } ${sql.join(
+            chunk.map(
+              (item) =>
+                sql`WHEN ${item.row.id} THEN ${item.requestedByUserId}`,
+            ),
+            sql` `,
+          )} ELSE ${staticRebuildQueue.requested_by_user_id} END`,
+          // 秒精度でも processing 開始後の再投入を確実に検出できるよう単調増加させる。
+          updated_at: sql<number>`CASE ${staticRebuildQueue.id} ${sql.join(
+            chunk.map(
+              (item) =>
+                sql`WHEN ${item.row.id} THEN MAX(${item.row.updated_at} + 1, ${now})`,
+            ),
+            sql` `,
+          )} ELSE ${staticRebuildQueue.updated_at} END`,
+        })
+        .where(
+          or(
+            ...chunk.map(
+              (item) =>
+                and(
+                  eq(staticRebuildQueue.id, item.row.id),
+                  eq(staticRebuildQueue.status, item.row.status),
+                  eq(staticRebuildQueue.updated_at, item.row.updated_at),
+                  item.row.lease_token
+                    ? eq(
+                        staticRebuildQueue.lease_token,
+                        item.row.lease_token,
+                      )
+                    : isNull(staticRebuildQueue.lease_token),
+                )!,
+            ),
+          )!,
+        ),
+    );
     expectedChanges.push(chunk.length);
   }
-  for (let offset = 0; offset < inserts.length; offset += STATIC_REBUILD_BULK_INSERT_ROWS) {
+  for (
+    let offset = 0;
+    offset < inserts.length;
+    offset += STATIC_REBUILD_BULK_INSERT_ROWS
+  ) {
     const chunk = inserts.slice(offset, offset + STATIC_REBUILD_BULK_INSERT_ROWS);
     statements.push(db.insert(staticRebuildQueue).values(chunk));
     expectedChanges.push(chunk.length);
@@ -263,6 +316,7 @@ function shouldSkipRecentRow(
 
 /**
  * 静的 JSON 再生成キューへ投入。保存処理は成功させ、enqueue 失敗は warn のみ。
+ * processing 行の lease は維持し、updated_at の単調増加で再実行要求を記録する。
  */
 export async function enqueueStaticRebuild(
   db: DB,
@@ -297,10 +351,7 @@ export async function enqueueStaticRebuild(
         ),
         requested_by_user_id:
           target.requestedByUserId ?? row.requested_by_user_id,
-        ...(row.status === "processing"
-          ? { lease_token: null, lease_expires_at: null }
-          : {}),
-        updated_at: now,
+        updated_at: sql<number>`MAX(${staticRebuildQueue.updated_at} + 1, ${now})`,
       });
       const result = await update.where(
         and(
@@ -322,9 +373,7 @@ export async function enqueueStaticRebuild(
       }
     }
 
-    if (await shouldSkipRecentEnqueue(db, target, now)) {
-      return;
-    }
+    if (await shouldSkipRecentEnqueue(db, target, now)) return;
 
     await db.insert(staticRebuildQueue).values({
       id: generateId("srb"),
@@ -337,8 +386,8 @@ export async function enqueueStaticRebuild(
       created_at: now,
       updated_at: now,
     });
-  } catch (e) {
-    console.warn("[enqueueStaticRebuild] failed", target, e);
+  } catch (error) {
+    console.warn("[enqueueStaticRebuild] failed", target, error);
     try {
       await auditAction(db, {
         table_name: "static_rebuild_queue",
@@ -346,13 +395,16 @@ export async function enqueueStaticRebuild(
         action: "UPDATE",
         after_data: JSON.stringify({
           reason: target.reason,
-          error: e instanceof Error ? e.message : String(e),
+          error: error instanceof Error ? error.message : String(error),
         }),
         operator_user_id: input.requestedByUserId ?? "system",
         retention_class: "normal",
       });
-    } catch (historyErr) {
-      console.warn("[enqueueStaticRebuild] history log failed", historyErr);
+    } catch (historyError) {
+      console.warn(
+        "[enqueueStaticRebuild] history log failed",
+        historyError,
+      );
     }
   }
 }
@@ -361,7 +413,12 @@ export async function enqueueStaticRebuildMany(
   db: DB,
   items: EnqueueStaticRebuildInput[],
 ): Promise<void> {
-  for (const item of dedupeStaticRebuildInputs(items)) {
-    await enqueueStaticRebuild(db, item);
+  const deduped = dedupeStaticRebuildInputs(items);
+  for (let offset = 0; offset < deduped.length; offset += ENQUEUE_MANY_CONCURRENCY) {
+    await Promise.all(
+      deduped
+        .slice(offset, offset + ENQUEUE_MANY_CONCURRENCY)
+        .map((item) => enqueueStaticRebuild(db, item)),
+    );
   }
 }
