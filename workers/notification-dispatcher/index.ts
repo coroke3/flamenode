@@ -5,6 +5,7 @@
 export {
   deliver,
   processNotificationQueue,
+  MAX_DISCORD_EXTERNAL_REQUESTS_PER_RUN,
   MAX_NOTIFICATION_BATCH,
 } from "./dispatch.ts";
 export type { Env } from "./dispatch.ts";
