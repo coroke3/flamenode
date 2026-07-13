@@ -1,10 +1,9 @@
 /**
- * sync-jobs: 1時間毎の外部API・集計ジョブ。
- * - YouTube メタデータ同期
- * - スコア差分再計算
+ * sync-jobs: 15分毎の外部API・集計ジョブ。
+ * - YouTube メタデータ同期（最大50件）
+ * - スコア差分再計算（最大250件、1 SQL）
  *
- * YouTube側に内部retryがあるため、Worker境界では処理全体を再実行しない。
- * Free planの1実行50 subrequestsを超えないことを優先する。
+ * Workers FreeのCPU 10msと1実行50 subrequestsを前提に、全体retryと無制限loopを持たない。
  */
 import { createCronWorker } from "../shared/createCronWorker.ts";
 import { recalcScoreBatch } from "../score-recalc/index.ts";
@@ -19,8 +18,8 @@ export interface Env {
   BUILD_COMMIT_SHA?: string;
 }
 
-const SYNC_JOBS_LEASE_SEC = 50 * 60;
-const SYNC_JOBS_HEARTBEAT_SEC = 10 * 60;
+const SYNC_JOBS_LEASE_SEC = 14 * 60;
+const SYNC_JOBS_HEARTBEAT_SEC = 4 * 60;
 
 export async function runSyncJobs(env: Env): Promise<void> {
   await runJob(
