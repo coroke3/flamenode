@@ -62,6 +62,19 @@ function rateLimitedResponse(retryAfter: number): Response {
   });
 }
 
+/**
+ * 公開一覧APIの正の整数queryを既存仕様どおり正規化する。
+ * 0・非数値はfallback、負数は1、上限超過はmaxへ丸める。
+ */
+export function parseBoundedPositiveInt(
+  value: string | null | undefined,
+  fallback: number,
+  max = Number.POSITIVE_INFINITY,
+): number {
+  const parsed = Number.parseInt(value ?? String(fallback), 10) || fallback;
+  return Math.min(max, Math.max(1, parsed));
+}
+
 async function bodyEtag(body: string): Promise<string> {
   const bytes = new TextEncoder().encode(body);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
