@@ -7,7 +7,7 @@ import { planD1AuditMutationBudget } from "../audit/mutateBudget.ts";
 const read = (relative) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8");
 
 test("header X ID read pathは未連携active行を自動claimしない", () => {
-  const source = read("./headerXIds.ts");
+  const source = read("./headerUser.ts");
   assert.doesNotMatch(source, /\.update\(xUsers\)/);
   assert.doesNotMatch(source, /or\(\.\.\.rowConditions/);
   assert.match(source, /where\(eq\(xUsers\.linked_user_id, userId\)\)/);

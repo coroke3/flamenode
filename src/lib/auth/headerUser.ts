@@ -126,8 +126,7 @@ export async function buildHeaderUser(
 ): Promise<HeaderUser | null> {
   if (!sessionUser?.id) return null;
   const userId = sessionUser.id;
-
-  let activeXId = normalizeXId(sessionUser.active_x_user_id) || null;
+  const activeXId = normalizeXId(sessionUser.active_x_user_id) || null;
   let role = normalizeRole(sessionUser.role);
   let xIds: HeaderXIdEntry[] = [];
 
@@ -158,14 +157,12 @@ export async function buildHeaderUser(
           entry.approval_status !== "rejected" &&
           entry.x_user_id === normalizedActive,
       })),
-      activeXId: resolvedActive,
     };
   });
 
   if (dbPayload) {
     role = dbPayload.role;
     xIds = dbPayload.xIds;
-    activeXId = dbPayload.activeXId;
   }
 
   const management = await getManagementAccess({ id: userId, role });
