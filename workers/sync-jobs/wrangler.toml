@@ -3,8 +3,10 @@ main = "index.ts"
 compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Workers FreeはCron間隔にかかわらずCPU 10ms。
+# YouTube 50件とscore 250件を15分ごとに小分け処理する。
 [triggers]
-crons = ["0 */12 * * *"]
+crons = ["7,22,37,52 * * * *"]
 
 [[d1_databases]]
 binding = "DB"

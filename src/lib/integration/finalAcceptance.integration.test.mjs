@@ -63,7 +63,7 @@ test("静的再生成は無料枠向け上限を持つ", async () => {
 
   assert.match(
     text,
-    /MAX_QUEUE_ITEMS_PER_RUN\s*=\s*3/,
+    /MAX_QUEUE_ITEMS_PER_RUN\s*=\s*1/,
   );
   assert.match(
     text,

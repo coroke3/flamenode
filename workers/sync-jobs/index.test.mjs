@@ -17,3 +17,9 @@ test("sync-jobs health は共通Cron Workerからserviceとcommitを返す", () 
   assert.match(sharedSource, /commit:/);
   assert.match(sharedSource, /env\.BUILD_COMMIT_SHA/);
 });
+
+test("score変更時はtopとlist_popularを重複排除付きで再生成予約する", () => {
+  assert.match(source, /INSERT OR IGNORE INTO static_rebuild_queue/);
+  assert.match(source, /\["top",\s*"list_popular"\]/);
+  assert.match(source, /score\.processed\s*>\s*0/);
+});
