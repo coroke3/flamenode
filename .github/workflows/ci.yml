@@ -15,7 +15,6 @@ jobs:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     env:
-      # 実在しない値だけをPR CIに渡す。Cloudflare IDやOAuth secretは不要。
       NEXT_PUBLIC_SITE_URL: https://flamenode.invalid
       AUTH_URL: https://flamenode.invalid
       AUTH_SECRET: ci-placeholder-not-a-production-secret
@@ -147,7 +146,10 @@ jobs:
       - name: UI受入契約を検査
         run: npm run check:ui-acceptance
 
-      - name: 公開API漏えいを検査
+      - name: 公開API DTO契約を検査
+        run: npm run check:public-api-contract
+
+      - name: 公開API漏えいを静的検査
         run: npm run check:public-api-leaks
 
       - name: プロジェクト文書を検査
