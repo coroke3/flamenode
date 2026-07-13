@@ -30,16 +30,12 @@ export async function resolvePartFromSlot(
     })
     .from(slots)
     .where(eq(slots.event_id, slotRow.event_id));
-  const slotParts = buildSlotParts(
+  const slotPart = buildSlotParts(
     eventSlots,
     (eventRow?.slot_part_gap_minutes ?? 15) * 60,
-  );
-  const slotPart = slotParts.find((part) =>
-    part.rows.some((row) => row.id === slotRow.id),
-  );
-  if (!slotPart) return null;
+  ).find((part) => part.rows.some((row) => row.id === slotRow.id));
 
-  return configuredParts[slotPart.index - 1] ?? null;
+  return slotPart ? (configuredParts[slotPart.index - 1] ?? null) : null;
 }
 
 export async function checkYoutubeVideoDuplicate(
@@ -47,18 +43,18 @@ export async function checkYoutubeVideoDuplicate(
   youtubeId: string,
   excludeVideoId?: string,
 ): Promise<boolean> {
-  const where = excludeVideoId
-    ? and(
-        eq(videos.youtube_video_id, youtubeId),
-        sql`${videos.visibility_status} NOT IN ('archived', 'voided')`,
-        ne(videos.id, excludeVideoId),
-      )
-    : and(
-        eq(videos.youtube_video_id, youtubeId),
-        sql`${videos.visibility_status} NOT IN ('archived', 'voided')`,
-      );
   const row = (
-    await db.select({ id: videos.id }).from(videos).where(where).limit(1)
+    await db
+      .select({ id: videos.id })
+      .from(videos)
+      .where(
+        and(
+          eq(videos.youtube_video_id, youtubeId),
+          sql`${videos.visibility_status} NOT IN ('archived', 'voided')`,
+          excludeVideoId ? ne(videos.id, excludeVideoId) : undefined,
+        )!,
+      )
+      .limit(1)
   )[0];
   return Boolean(row);
 }
