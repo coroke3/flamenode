@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
           ref: agent/maximize-file-reduction
 
       - name: 最新mainへ差分を適用
@@ -30,7 +30,7 @@ jobs:
             | base64 --decode \
             | gzip --decompress \
             > /tmp/file-reduction.patch
-          git fetch origin main
+          git fetch --depth=1 origin main
           git reset --hard origin/main
           git apply --index /tmp/file-reduction.patch
 
@@ -47,7 +47,18 @@ jobs:
         run: npm run test:unit
 
       - name: 統合テスト
-        run: npm run test:integration
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:integration 2>&1 | tee integration-test.log
+
+      - name: 統合テストログを保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-log
+          path: integration-test.log
+          retention-days: 1
 
       - name: UI契約検査
         run: npm run check:ui-acceptance
