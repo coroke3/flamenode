@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-13
-> Verified against commit: `e772cc9`
+> Verified against commit: `4bf6a4c`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `wrangler.toml`, `package.json`
 
 現行のCloudflare構成は Pages + `@cloudflare/next-on-pages`、D1、R2、KV、3本のCron Workerです。
@@ -18,14 +18,14 @@
 | Active | [operations/legacy-import.md](operations/legacy-import.md) | legacy importのpreview/apply安全手順 |
 | Active | [operations/static-delivery.md](operations/static-delivery.md) | R2静的JSONと公開範囲 |
 | Active | [operations/incident-response.md](operations/incident-response.md) | fail-closed時の一次対応 |
-| Historical | [database/README.md](database/README.md) | 旧DB文書。現行入口は `db-history/` と `operations/migrations.md` |
-| Historical | [database/change-log.md](database/change-log.md) | 旧DB変更履歴。現行履歴は `db-change-history.md` |
-| Active | [db-history/README.md](db-history/README.md) | Active / Planned / Historical とbaseline履歴の索引 |
-| Active | [db-change-history.md](db-change-history.md) | 現行DB変更履歴の正本 |
+| Active | [database/README.md](database/README.md) | DB運用方針と正本への入口 |
+| Active | [database/change-log.md](database/change-log.md) | active migrationに対応するDB変更履歴の唯一の正本 |
+| Active | [db-history/README.md](db-history/README.md) | migrationごとの詳細記録とbaseline履歴の索引 |
 | Active | [templates/migration.md](templates/migration.md) | active migrationの記録テンプレート |
 | Planned | [implementation-backlog.md](implementation-backlog.md) | 未着手・ブロック中の要求のみ |
+| Historical | [db-change-history.md](db-change-history.md) | 旧DB変更履歴。現行正本は `database/change-log.md` |
 | Historical | [operations.md](operations.md) | pre-baseline前の運用手順 |
 | Historical | [merge-flow-design.md](merge-flow-design.md) | pre-baseline前のX ID統合設計メモ |
 | Historical | `migrations/historical/` | pre-production前の旧migration本文 |
 
-実装変更時は、該当するActive文書だけを同じ変更へ更新します。schemaの列一覧やWorker実装の複製を別文書へ作らず、正本へリンクしてください。`docs/operations.md` と `docs/database/**` の旧記述はHistorical/旧入口として扱い、現行手順には使用しません。
+実装変更時は、該当するActive文書だけを同じ変更へ更新します。schemaの列一覧やWorker実装の複製を別文書へ作らず、正本へリンクしてください。旧文書はHistorical metadataを付け、現行手順として参照しません。
