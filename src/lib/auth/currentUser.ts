@@ -1,6 +1,7 @@
 import "server-only";
 
 import { cache } from "react";
+import type { Session } from "next-auth";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { withDatabaseRead } from "@/lib/cloudflare";
@@ -41,25 +42,13 @@ export class CurrentUserUnavailableError extends Error {
   }
 }
 
-type AuthSessionLike = {
-  user?: {
-    id?: string | null;
-    name?: string | null;
-    email?: string | null;
-    image?: string | null;
-    role?: string | null;
-    is_banned?: number | null;
-    active_x_user_id?: string | null;
-  };
-} | null;
-
-/** Auth.jsのoverload群からServer Component用の引数なし呼び出しだけを固定する。 */
-const readAuthSession = auth as unknown as () => Promise<AuthSessionLike>;
+// Auth.jsのauthはmiddleware用overloadも持つため、引数なしのServer Component呼出しを明示する。
+const loadAuthSession = auth as unknown as () => Promise<Session | null>;
 
 async function loadCurrentUser(): Promise<CurrentUser | null> {
-  let session: AuthSessionLike;
+  let session: Session | null;
   try {
-    session = await readAuthSession();
+    session = await loadAuthSession();
   } catch (error) {
     throw new CurrentUserUnavailableError(
       "auth_temporarily_unavailable",
@@ -67,7 +56,17 @@ async function loadCurrentUser(): Promise<CurrentUser | null> {
     );
   }
 
-  const sessionUser = session?.user;
+  const sessionUser = session?.user as
+    | {
+        id?: string | null;
+        name?: string | null;
+        email?: string | null;
+        image?: string | null;
+        role?: string | null;
+        is_banned?: number | null;
+        active_x_user_id?: string | null;
+      }
+    | undefined;
 
   // authが正常終了してsessionが無い場合だけ未ログイン扱いにする。
   if (!sessionUser?.id) return null;
