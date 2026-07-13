@@ -9,7 +9,7 @@
 | Provider / endpoint | 1実行予算 | 待機・復旧 | 重複削減 |
 | --- | ---: | --- | --- |
 | YouTube Data API `videos.list` | 50 ID、通常1 request、最大2 quota units | 429/5xxは最大1回retry。quota系403はKVへ1時間cooldown | `fields`で必要列だけ取得。期限到来50件だけ選択 |
-| Discord DM / Webhook | 通知6件、最大12 external requests | rate headersとRetry-Afterを`next_attempt_at`へ反映。global 429は全routeへ適用 | DM channel IDをisolate/KVへ30日cacheし、通常配送を1 request化 |
+| Discord DM / Webhook | 通知6件、最大12 external requests、DM cache KV書込最大2 | rate headersとRetry-Afterを`next_attempt_at`へ反映。global 429は全routeへ適用 | DM channel IDをisolateへ全件、KVへ最大576件/dayの範囲で30日cacheし、通常配送を1 request化 |
 | Google Drive public image | requestごと最大1 upstream fetch | 失敗・Retry-Afterをnegative cacheへ保存しstaleを返す | 同一キーの同時missを1本へ集約。ETag/304再検証 |
 | YouTube thumbnail | requestごと最大1 upstream fetch | 失敗・Retry-Afterをnegative cacheへ保存しstaleを返す | 同一キーの同時missを1本へ集約。ETag/304再検証 |
 
@@ -29,6 +29,8 @@
 - 429は`Retry-After`またはJSONの`retry_after`を使用する。
 - `X-RateLimit-Global`、`X-RateLimit-Scope: global`、JSONの`global`を検出した場合、全Discord routeを停止する。
 - 429をその場でretryせず、通知outboxの次回実行時刻へ反映する。
+- DM channel IDはisolate cacheへ必ず保存する。KVへのput/deleteは1実行最大2件とし、5分Cronで最大576 writes/dayへ抑える。
+- KV予算を使い切った場合も通知配送は継続し、そのisolate内ではchannel IDを再利用する。
 - 401/403/404は同じ認証・宛先のまま繰り返さずdead-letterへ送る。ただしcache済みDM channelの404だけはcacheを削除して次回再作成する。
 
 ### 外部画像
@@ -44,4 +46,5 @@
 - `/admin/workers`でjobの失敗、最終成功時刻、stale lease、queue滞留を確認する。
 - YouTube quota cooldown中はYouTube同期がskippedになる。
 - Discord rate limit時は通知が`pending`へ戻り、`next_attempt_at`以降に再処理される。
+- Discord DM cacheのKV予算超過は配送失敗ではなく、cross-isolate cache永続化だけを見送る。
 - 画像proxyは`x-fn-media-cache`で`hit`、`miss`、`stale`、`coalesced`、`fallback`を区別する。
