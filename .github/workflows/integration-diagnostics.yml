@@ -1,6 +1,7 @@
 name: 統合テスト診断
 
 on:
+  pull_request:
   push:
     branches: [agent/event-export-api]
   workflow_dispatch:
