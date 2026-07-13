@@ -1,17 +1,37 @@
 export const runtime = "edge";
 
-import { eq } from "drizzle-orm";
-import { getDatabase, getEnv } from "@/lib/cloudflare";
-import { events as eventsTable } from "@/lib/db/schema";
-import { loadEventExportSnapshot } from "@/lib/api/eventExportData";
+import { getDatabase } from "@/lib/cloudflare";
 import {
-  buildEventExportPayload,
+  loadEventExportEvent,
+  loadEventExportSnapshot,
+  type EventExportEventRow,
+} from "@/lib/api/eventExportData";
+import {
+  buildEventExportPayloadForFormat,
+  type EventExportFormat,
   type EventExportUpdateMode,
 } from "@/lib/api/eventExportPayload";
+import {
+  EVENT_EXPORT_ACCESS_TTL_SECONDS,
+  eventExportAccessCacheKey,
+  eventExportPayloadCacheKey,
+  getEventExportKv,
+  isEventExportRefreshMinutes,
+  type EventExportRefreshMinutes,
+} from "@/lib/api/eventExportCache";
 import { checkPublicApiRateLimit, publicJsonResponse } from "@/lib/api/publicApi";
 
-const SCHEDULED_REFRESH_MINUTES = new Set([15, 60, 360, 1440]);
-const EXPORT_CACHE_VERSION = 3;
+const inFlightExports = new Map<string, Promise<unknown | null>>();
+
+function parseFormat(value: string | null): EventExportFormat | null {
+  if (value == null || value === "" || value === "new" || value === "v2" || value === "v3") {
+    return "new";
+  }
+  if (value === "legacy" || value === "old" || value === "v1") {
+    return "legacy";
+  }
+  return null;
+}
 
 function parseUpdateMode(value: string | null): EventExportUpdateMode | null {
   if (value === "realtime") return "realtime";
@@ -19,39 +39,86 @@ function parseUpdateMode(value: string | null): EventExportUpdateMode | null {
   return null;
 }
 
-function parseRefreshMinutes(value: string | null): number | null {
+function parseRefreshMinutes(value: string | null): EventExportRefreshMinutes | null {
   if (value == null || value === "") return 60;
   const parsed = Number(value);
-  return Number.isInteger(parsed) && SCHEDULED_REFRESH_MINUTES.has(parsed)
+  return Number.isInteger(parsed) && isEventExportRefreshMinutes(parsed)
     ? parsed
     : null;
 }
 
-function isKvAvailable(value: unknown): value is KVNamespace {
+function isPublicExportEvent(event: EventExportEventRow | null): boolean {
   return (
-    !!value &&
-    typeof value === "object" &&
-    typeof (value as { get?: unknown }).get === "function" &&
-    typeof (value as { put?: unknown }).put === "function"
+    !!event &&
+    event.public_api_enabled === 1 &&
+    event.visibility_status === "public"
   );
 }
 
 async function exportResponse(
   req: Request,
   payload: unknown,
+  format: EventExportFormat,
   updateMode: EventExportUpdateMode,
-  refreshMinutes: number,
+  refreshMinutes: EventExportRefreshMinutes,
   cacheState: "HIT" | "MISS" | "BYPASS",
 ): Promise<Response> {
   const cacheControl =
     updateMode === "realtime"
       ? "no-store"
-      : `public, max-age=60, s-maxage=${refreshMinutes * 60}, stale-while-revalidate=${refreshMinutes * 60}`;
+      : "public, max-age=60, s-maxage=60, stale-while-revalidate=60";
   const response = await publicJsonResponse(req, payload, cacheControl);
-  response.headers.set("X-FlameNode-Schema-Version", "3");
+  response.headers.set(
+    "X-FlameNode-Schema-Version",
+    format === "legacy" ? "1" : "3",
+  );
+  response.headers.set("X-FlameNode-Format", format);
   response.headers.set("X-FlameNode-Update-Mode", updateMode);
+  response.headers.set("X-FlameNode-Refresh-Minutes", String(refreshMinutes));
   response.headers.set("X-FlameNode-Cache", cacheState);
   return response;
+}
+
+async function readCachedPayload(
+  kv: KVNamespace,
+  cacheKey: string,
+  eventId: string,
+): Promise<unknown | null> {
+  try {
+    const cached = await kv.get(cacheKey);
+    if (!cached) return null;
+    return JSON.parse(cached) as unknown;
+  } catch (error) {
+    console.warn("[event-export-api] KV payload read failed", {
+      eventId,
+      cacheKey,
+      error,
+    });
+    try {
+      await kv.delete(cacheKey);
+    } catch {
+      // 壊れたキャッシュ削除の失敗はD1フォールバックを妨げない。
+    }
+    return null;
+  }
+}
+
+async function buildPayloadOnce(
+  key: string,
+  factory: () => Promise<unknown | null>,
+): Promise<unknown | null> {
+  const current = inFlightExports.get(key);
+  if (current) return current;
+
+  const promise = factory();
+  inFlightExports.set(key, promise);
+  try {
+    return await promise;
+  } finally {
+    if (inFlightExports.get(key) === promise) {
+      inFlightExports.delete(key);
+    }
+  }
 }
 
 export async function GET(
@@ -68,30 +135,13 @@ export async function GET(
   }
 
   const url = new URL(req.url);
-  const formatParam = url.searchParams.get("format");
-  if (formatParam === "legacy") {
-    return publicJsonResponse(
-      req,
-      {
-        error: "legacy_format_removed",
-        schema_version: 3,
-        replacement: `/api/event-endpoints/${encodeURIComponent(eventId)}`,
-      },
-      "public, max-age=3600",
-      410,
-    );
-  }
-  if (
-    formatParam !== null &&
-    formatParam !== "new" &&
-    formatParam !== "v2" &&
-    formatParam !== "v3"
-  ) {
+  const format = parseFormat(url.searchParams.get("format"));
+  if (!format) {
     return publicJsonResponse(
       req,
       {
         error: "invalid_format",
-        allowed: ["v3"],
+        allowed: ["new", "legacy"],
       },
       "no-store",
       400,
@@ -106,6 +156,7 @@ export async function GET(
       {
         error: "invalid_export_options",
         allowed: {
+          format: ["new", "legacy"],
           update: ["realtime", "scheduled"],
           refresh: [15, 60, 360, 1440],
         },
@@ -115,79 +166,131 @@ export async function GET(
     );
   }
 
-  const db = getDatabase();
-  if (!db) {
-    return publicJsonResponse(req, { error: "db_unavailable" }, "no-store", 503);
-  }
-
-  const access = (
-    await db
-      .select({
-        id: eventsTable.id,
-        visibility_status: eventsTable.visibility_status,
-        public_api_enabled: eventsTable.public_api_enabled,
-        public_api_updated_at: eventsTable.public_api_updated_at,
-      })
-      .from(eventsTable)
-      .where(eq(eventsTable.id, eventId))
-      .limit(1)
-  )[0];
-
-  if (
-    !access ||
-    access.public_api_enabled !== 1 ||
-    access.visibility_status !== "public"
-  ) {
-    return publicJsonResponse(req, { error: "not_found" }, "public, max-age=60", 404);
-  }
-
-  const env = getEnv();
-  const cacheKey = [
-    "public-event-export",
-    EXPORT_CACHE_VERSION,
+  const kv = updateMode === "scheduled" ? getEventExportKv() : null;
+  const accessKey = eventExportAccessCacheKey(eventId);
+  const payloadCacheKey = eventExportPayloadCacheKey(
     eventId,
-    access.public_api_updated_at ?? 0,
+    format,
     refreshMinutes,
-  ].join(":");
+  );
+  let accessState: string | null = null;
+  let prefetchedEvent: EventExportEventRow | null | undefined;
 
-  if (updateMode === "scheduled" && isKvAvailable(env.KV)) {
+  if (kv) {
     try {
-      const cached = await env.KV.get(cacheKey);
-      if (cached) {
+      accessState = await kv.get(accessKey);
+    } catch (error) {
+      console.warn("[event-export-api] KV access gate read failed", {
+        eventId,
+        error,
+      });
+    }
+
+    if (accessState === "0") {
+      return publicJsonResponse(req, { error: "not_found" }, "public, max-age=60", 404);
+    }
+
+    if (accessState === "1") {
+      const cached = await readCachedPayload(kv, payloadCacheKey, eventId);
+      if (cached !== null) {
         return exportResponse(
           req,
-          JSON.parse(cached) as unknown,
+          cached,
+          format,
           updateMode,
           refreshMinutes,
           "HIT",
         );
       }
-    } catch (error) {
-      console.warn("[event-export-api] KV read failed", { eventId, error });
     }
   }
 
-  const snapshot = await loadEventExportSnapshot(db, eventId);
-  if (!snapshot) {
-    return publicJsonResponse(req, { error: "not_found" }, "public, max-age=60", 404);
+  const db = getDatabase();
+  if (!db) {
+    return publicJsonResponse(req, { error: "db_unavailable" }, "no-store", 503);
+  }
+
+  if (kv && accessState !== "1") {
+    prefetchedEvent = await loadEventExportEvent(db, eventId);
+    const allowed = isPublicExportEvent(prefetchedEvent);
+    try {
+      await kv.put(accessKey, allowed ? "1" : "0", {
+        expirationTtl: EVENT_EXPORT_ACCESS_TTL_SECONDS,
+      });
+    } catch (error) {
+      console.warn("[event-export-api] KV access gate write failed", {
+        eventId,
+        error,
+      });
+    }
+    if (!allowed) {
+      return publicJsonResponse(req, { error: "not_found" }, "public, max-age=60", 404);
+    }
+
+    const cached = await readCachedPayload(kv, payloadCacheKey, eventId);
+    if (cached !== null) {
+      return exportResponse(
+        req,
+        cached,
+        format,
+        updateMode,
+        refreshMinutes,
+        "HIT",
+      );
+    }
   }
 
   const generatedAt = Math.floor(Date.now() / 1000);
-  const payload = buildEventExportPayload(snapshot, generatedAt, updateMode);
+  const payload = await buildPayloadOnce(
+    [eventId, format, updateMode].join(":"),
+    async () => {
+      const snapshot = await loadEventExportSnapshot(db, eventId, prefetchedEvent);
+      return snapshot
+        ? buildEventExportPayloadForFormat(
+            snapshot,
+            format,
+            generatedAt,
+            updateMode,
+          )
+        : null;
+    },
+  );
 
-  if (updateMode === "scheduled" && isKvAvailable(env.KV)) {
-    try {
-      await env.KV.put(cacheKey, JSON.stringify(payload), {
+  if (payload === null) {
+    if (kv) {
+      try {
+        await kv.put(accessKey, "0", {
+          expirationTtl: EVENT_EXPORT_ACCESS_TTL_SECONDS,
+        });
+      } catch {
+        // 404応答を優先する。
+      }
+    }
+    return publicJsonResponse(req, { error: "not_found" }, "public, max-age=60", 404);
+  }
+
+  if (kv) {
+    const writes = await Promise.allSettled([
+      kv.put(payloadCacheKey, JSON.stringify(payload), {
         expirationTtl: refreshMinutes * 60,
+      }),
+      kv.put(accessKey, "1", {
+        expirationTtl: EVENT_EXPORT_ACCESS_TTL_SECONDS,
+      }),
+    ]);
+    if (writes.some((result) => result.status === "rejected")) {
+      console.warn("[event-export-api] KV write partially failed", {
+        eventId,
+        format,
+        refreshMinutes,
       });
-    } catch (error) {
-      console.warn("[event-export-api] KV write failed", { eventId, error });
     }
   }
 
   return exportResponse(
     req,
     payload,
+    format,
     updateMode,
     refreshMinutes,
     updateMode === "scheduled" ? "MISS" : "BYPASS",
