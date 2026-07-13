@@ -164,7 +164,7 @@ test("Cloudflare config check fails closed when a required wrangler file is miss
     });
     assert.match(
       output,
-      /workers\/fast-jobs\/wrangler\.toml: required Cloudflare configuration file is missing/,
+      /workers\/background-jobs\/wrangler\.toml: required Cloudflare configuration file is missing/,
     );
   } finally {
     fs.rmSync(fixtureRoot, { recursive: true, force: true });
@@ -220,11 +220,13 @@ test("deploy workflow is manual-only and preserves immutable deployment order", 
   assert.ok(workflow.indexOf("migrate-d1:") < workflow.indexOf("deploy-pages:"));
   assert.ok(workflow.indexOf("deploy-pages:") < workflow.indexOf("deploy-workers:"));
   assert.ok(workflow.indexOf("deploy-workers:") < workflow.indexOf("smoke-production:"));
+  assert.ok(workflow.indexOf("smoke-production:") < workflow.indexOf("delete-legacy-workers:"));
   assert.match(workflow, /environment: production/);
   assert.match(workflow, /group: deploy-cloudflare-production/);
   assert.match(workflow, /scripts\/smoke-cloudflare\.mjs/);
-  assert.match(workflow, /FAST_JOBS_URL/);
-  assert.match(workflow, /CONTENT_JOBS_URL/);
-  assert.match(workflow, /SYNC_JOBS_URL/);
+  assert.match(workflow, /BACKGROUND_JOBS_URL/);
+  assert.match(workflow, /DISCORD_BOT_TOKEN/);
+  assert.match(workflow, /YOUTUBE_API_KEY/);
+  assert.match(workflow, /WORKER_ADMIN_TOKEN/);
   assert.match(workflow, /BUILD_COMMIT_SHA/);
 });
