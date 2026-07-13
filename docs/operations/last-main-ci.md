@@ -1,10 +1,10 @@
 # 最新mainのCI結果
 
 > Status: Active
-> Result: FAIL
-> Verify job: failure
-> Candidate commit: 7d41a8ee1d6d686702df22d67b77e12da154a19b
-> Completed at: 2026-07-13T05:38:54Z
-> Workflow run: https://github.com/coroke3/flamenode/actions/runs/29226575040
+> Result: PASS
+> Verify job: success
+> Candidate commit: b8de7e2f81b65f79f927d59af7a1667e13eca53e
+> Completed at: 2026-07-13T06:03:08Z
+> Workflow run: https://github.com/coroke3/flamenode/actions/runs/29227596407
 
 この結果は、workflow完了時点でもCandidate commitがmain HEADだった場合だけ記録されます。
