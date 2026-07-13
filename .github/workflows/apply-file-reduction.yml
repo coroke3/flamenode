@@ -1,0 +1,61 @@
+name: 共通化差分を適用
+
+on:
+  push:
+    branches:
+      - agent/maximize-file-reduction
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.head_commit.message == '共通化差分を単一コミットで適用'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: agent/maximize-file-reduction
+
+      - name: 最新mainへ差分を適用
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/agent/file-reduction.patch.gz.b64.part-* \
+            | base64 --decode \
+            | gzip --decompress \
+            > /tmp/file-reduction.patch
+          git fetch origin main
+          git reset --hard origin/main
+          git apply --index /tmp/file-reduction.patch
+
+      - name: 依存関係を取得
+        run: npm ci
+
+      - name: 型検査
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: 単体テスト
+        run: npm run test:unit
+
+      - name: 統合テスト
+        run: npm run test:integration
+
+      - name: UI契約検査
+        run: npm run check:ui-acceptance
+
+      - name: 本番ビルド
+        run: npm run build
+
+      - name: 日本語コミットで反映
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "挙動を維持したまま共通化してファイル数を削減"
+          git push --force origin HEAD:agent/maximize-file-reduction
