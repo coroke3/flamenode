@@ -1,0 +1,42 @@
+name: Diagnose worker tests
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/diagnose-worker-tests.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/youtube-playlist-main-integration
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Run worker tests
+        shell: bash
+        continue-on-error: true
+        run: |
+          set +e
+          npm run test:workers > /tmp/worker-tests.log 2>&1
+          printf '%s\n' "$?" > /tmp/worker-tests-exit-code.txt
+          true
+      - name: Upload worker test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: worker-test-diagnostics
+          path: |
+            /tmp/worker-tests.log
+            /tmp/worker-tests-exit-code.txt
+          if-no-files-found: error
+          retention-days: 1
