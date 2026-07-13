@@ -1,14 +1,14 @@
 # Migration 運用
 
 > Status: Active
-> Last verified: 2026-07-11
-> Verified against commit: `5f48e0f` + working tree
+> Last verified: 2026-07-13
+> Verified against commit: `22e5d52`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/` active path
 
 ## 正本
 
 - DB schemaの正本は `src/lib/db/schema.ts`。
-- active migrationは `0000_flame_node_baseline.sql`、`0001_spreadsheet_import_runs.sql`、`0002_terms_reaccept_manual_cost_guard.sql`、`0003_large_collaboration_support.sql` の番号順で適用する。
+- active migrationはファイル番号順で適用する。
 - 旧migration本文は `migrations/historical/` に保存する履歴資料であり、現行の適用対象ではない。
 - D1が正本であり、R2/KVの静的JSONは公開配信用キャッシュである。
 
@@ -50,6 +50,9 @@ Remote D1の作成、backup、migration適用、rollbackは運用者がCloudflar
 2. `0001_spreadsheet_import_runs.sql`
 3. `0002_terms_reaccept_manual_cost_guard.sql`
 4. `0003_large_collaboration_support.sql`
+5. `0038_runtime_efficiency_resilience.sql`
+6. `0039_search_relation_indexes.sql`
+7. `0040_worker_free_tier_scale.sql`
 
 `0001`適用前はSpreadsheet preview/applyがfail-closedになる。先にコードだけをdeployせず、運用者がbackup、migration、Pagesの順序を確認する。
 
@@ -59,6 +62,11 @@ Remote D1の作成、backup、migration適用、rollbackは運用者がCloudflar
 
 `0003`は`audit_log_settings.max_payload_bytes`のDEFAULTとdefault行の値を
 120000へ引き上げる。大規模合作のメンバー集合監査ログ向け。
+
+`0038`と`0039`は高頻度読み取り・検索経路の複合indexとWorker実行状態列を追加する。
+
+`0040`は公開作品のスコア差分更新を固定件数のindex scanで処理するため、
+`videos(visibility_status, score_updated_at, id)` indexを追加する。既存行の値は変更しない。
 
 本番適用前に、schemaとmigrationの差分、backup、適用対象、復旧手順を記録する。Remote D1の初期化や自動削除は行わない。
 
