@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { CurrentUser } from "./currentUser";
 import {
   xAccountLinkRequests,
@@ -61,55 +61,51 @@ export async function getOnboardingState(
   const activeXId = user.active_x_user_id;
   let hasLinkedXId = false;
   let hasPendingLinkedXId = false;
-  let hasPendingXIdRequest = false;
   let pendingRequestCount = 0;
   let activeXApprovalStatus: XApprovalStatus | null = null;
   let onboardingCompletedAt: number | null = null;
 
   if (db) {
-    const userRow = (
-      await db
+    const [userRows, linkedRows, pendingCountRows, activeRows] = await Promise.all([
+      db
         .select({ onboarding_completed_at: users.onboarding_completed_at })
         .from(users)
         .where(eq(users.id, user.id))
-        .limit(1)
-    )[0];
-    onboardingCompletedAt = userRow?.onboarding_completed_at ?? null;
+        .limit(1),
+      db
+        .select({ approval_status: xUsers.approval_status })
+        .from(xUsers)
+        .where(eq(xUsers.linked_user_id, user.id)),
+      db
+        .select({ count: sql<number>`COUNT(*)` })
+        .from(xAccountLinkRequests)
+        .where(
+          and(
+            eq(xAccountLinkRequests.user_id, user.id),
+            eq(xAccountLinkRequests.status, "pending"),
+          )!,
+        ),
+      activeXId
+        ? db
+            .select({ approval_status: xUsers.approval_status })
+            .from(xUsers)
+            .where(eq(xUsers.id, activeXId))
+            .limit(1)
+        : Promise.resolve([]),
+    ]);
 
-    const linkedRows = await db
-      .select({ approval_status: xUsers.approval_status })
-      .from(xUsers)
-      .where(eq(xUsers.linked_user_id, user.id));
+    onboardingCompletedAt = userRows[0]?.onboarding_completed_at ?? null;
     hasLinkedXId = linkedRows.length > 0;
-    hasPendingLinkedXId = linkedRows.some((row) => row.approval_status === "pending");
-
-    const pendingRequests = await db
-      .select({ id: xAccountLinkRequests.id })
-      .from(xAccountLinkRequests)
-      .where(
-        and(
-          eq(xAccountLinkRequests.user_id, user.id),
-          eq(xAccountLinkRequests.status, "pending"),
-        )!,
-      );
-    pendingRequestCount = pendingRequests.length;
-    hasPendingXIdRequest = pendingRequestCount > 0;
-
-    if (activeXId) {
-      const activeRow = (
-        await db
-          .select({ approval_status: xUsers.approval_status })
-          .from(xUsers)
-          .where(eq(xUsers.id, activeXId))
-          .limit(1)
-      )[0];
-      activeXApprovalStatus = activeRow?.approval_status ?? null;
-    }
+    hasPendingLinkedXId = linkedRows.some(
+      (row) => row.approval_status === "pending",
+    );
+    pendingRequestCount = Number(pendingCountRows[0]?.count ?? 0);
+    activeXApprovalStatus = activeRows[0]?.approval_status ?? null;
   }
 
+  const hasPendingXIdRequest = pendingRequestCount > 0;
   const hasApprovedActiveXId = activeXApprovalStatus === "approved";
-  const hasPendingXId =
-    hasPendingXIdRequest || hasPendingLinkedXId;
+  const hasPendingXId = hasPendingXIdRequest || hasPendingLinkedXId;
   const canPost = !tosPending && hasApprovedActiveXId;
   const isComplete = !tosPending && (hasApprovedActiveXId || hasPendingXId);
 
