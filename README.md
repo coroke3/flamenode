@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-13
-> Verified against commit: `agent/free-tier-background-worker`
+> Verified against commit: `fcdf468`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `docs/README.md`, `package.json`
 
 > 映像（フレーム）の結節点（ノード）。YouTube 埋め込みを利用した動画プラットフォーム。
