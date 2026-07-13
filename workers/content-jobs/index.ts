@@ -9,6 +9,7 @@ import { withDeduplicatingR2 } from "../json-generator/r2Dedup.ts";
 import { runCleanupWithRetry } from "../cleanup/index.ts";
 import { withCronLease } from "../shared/cronLease.ts";
 import { runJob } from "../shared/runJob.ts";
+import { withSerializedD1 } from "../shared/serializedD1.ts";
 import { rejectUnauthorizedWorkerRequest } from "../shared/workerAdminAuth.ts";
 
 export interface Env {
@@ -38,7 +39,7 @@ export async function runContentJobs(env: Env): Promise<void> {
           let processed = 0;
           let skipped = 0;
           let failed = 0;
-          const rebuildEnv = withDeduplicatingR2(env);
+          const rebuildEnv = withDeduplicatingR2(withSerializedD1(env));
 
           const rebuild = await runJob(
             "content-jobs",
@@ -104,7 +105,9 @@ export async function handleContentJobsFetch(
           "content-jobs",
           "manual-static-rebuild",
           async () => {
-            queueResult = await runQueue(withDeduplicatingR2(env));
+            queueResult = await runQueue(
+              withDeduplicatingR2(withSerializedD1(env)),
+            );
             return queueResult;
           },
           { rethrow: true },
