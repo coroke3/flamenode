@@ -28,16 +28,28 @@ const requiredPaths = [
 ];
 const localLinkPattern = /\[[^\]]*\]\(([^)]+)\)/g;
 const npmScriptPattern = /`npm run ([a-zA-Z0-9:_-]+)(?:\s+[^`]*)?`/g;
-const forbiddenActive = [
-  [/runtime[ -]migration/gi, "実行時migration"],
-  [/db:generate/gi, "db:generate"],
-  [/open.?next/gi, "OpenNext"],
-  [/permission_mask/gi, "旧permission_mask"],
-  [/ViewAggregator/gi, "未実装ViewAggregator"],
-  [/Durable Objects?/gi, "未実装Durable Object"],
-  [/バックグラウンドで起動済み|自動セットアップ済み|npm install 完了/gi, "個人PC固有の実施状態"],
+
+// 単語の出現だけでは失敗させない。「使わない」「廃止した」等の禁止・履歴説明は
+// Active文書にも必要である。ここでは現行要件として残ると明確に誤る表現だけを検出する。
+const forbiddenActiveClaims = [
+  [
+    /バックグラウンドで起動済み|自動セットアップ済み|npm install 完了/gi,
+    "個人PC固有の実施状態",
+  ],
   [/Node\.js\s*20|Node\s*20|v20以上/gi, "旧Node.js 20要件"],
   [/0021_slim_mvp_drop_unused_tables/gi, "旧migration固定参照"],
+  [
+    /(?:OpenNext|open-next).{0,40}(?:を採用する|が正式構成|へ移行する)/gi,
+    "OpenNextを現行構成とする記述",
+  ],
+  [
+    /(?:permission_mask).{0,40}(?:が権限正本|を使用する|で判定する)/gi,
+    "旧permission_maskを現行正本とする記述",
+  ],
+  [
+    /(?:runtime[ -]migration|実行時migration).{0,40}(?:を実行する|で適用する|が正本)/gi,
+    "runtime migrationを現行手順とする記述",
+  ],
 ];
 
 function file(relative) {
@@ -48,7 +60,9 @@ function read(relative) {
 }
 function isHistorical(relative, text) {
   return (
-    relative.split(path.sep).some((part) => ["historical", "archive"].includes(part.toLowerCase())) ||
+    relative
+      .split(path.sep)
+      .some((part) => ["historical", "archive"].includes(part.toLowerCase())) ||
     /Status:\s*Historical/i.test(text)
   );
 }
@@ -78,7 +92,9 @@ function checkNpmScripts(relative, text) {
   }
 }
 function checkActiveMetadata(relative, text) {
-  if (!/Status:\s*Active/i.test(text)) errors.push(`${relative}: Status: Active がありません。`);
+  if (!/Status:\s*Active/i.test(text)) {
+    errors.push(`${relative}: Status: Active がありません。`);
+  }
   if (!/Last verified:\s*\d{4}-\d{2}-\d{2}/i.test(text)) {
     errors.push(`${relative}: Last verified metadata がありません。`);
   }
@@ -121,11 +137,15 @@ for (const full of collectMarkdown(file("docs"))) {
   const text = fs.readFileSync(full, "utf8");
   if (isHistorical(relative, text) || !/Status:\s*Active/i.test(text)) continue;
   if (/\+\s*working tree|current working tree/i.test(text)) {
-    errors.push(`${relative}: Active文書へworking treeを検証根拠として記載できません。`);
+    errors.push(
+      `${relative}: Active文書へworking treeを検証根拠として記載できません。`,
+    );
   }
-  for (const [pattern, label] of forbiddenActive) {
+  for (const [pattern, label] of forbiddenActiveClaims) {
     pattern.lastIndex = 0;
-    if (pattern.test(text)) errors.push(`${relative}: Active文書に旧表現 ${label} が残っています。`);
+    if (pattern.test(text)) {
+      errors.push(`${relative}: Active文書に旧現行仕様 ${label} が残っています。`);
+    }
   }
   checkLinks(relative, text);
   checkNpmScripts(relative, text);
@@ -142,9 +162,13 @@ if (!/Cloudflare/i.test(read("docs/README.md"))) {
   errors.push("docs/README.md: 現行Cloudflare構成の記載がありません。");
 }
 if (packageJson.engines?.node !== ">=22 <23") {
-  errors.push(`package.json: Node要件は\">=22 <23\"に統一してください。現在=${packageJson.engines?.node ?? "未設定"}`);
+  errors.push(
+    `package.json: Node要件は\">=22 <23\"に統一してください。現在=${packageJson.engines?.node ?? "未設定"}`,
+  );
 }
-if (read(".nvmrc").trim() !== "22") errors.push(".nvmrc: 22である必要があります。");
+if (read(".nvmrc").trim() !== "22") {
+  errors.push(".nvmrc: 22である必要があります。");
+}
 if (/ViewAggregator|durable_objects/i.test(wrangler)) {
   errors.push("wrangler.toml: 未実装Durable Object設定・コメントを削除してください。");
 }
@@ -165,4 +189,6 @@ if (errors.length > 0) {
   for (const error of errors) console.error(`[check:docs] ${error}`);
   process.exit(1);
 }
-console.log("[check:docs] OK: active documentation metadata, links, npm scripts, vocabulary, and Cloudflare source alignment are valid.");
+console.log(
+  "[check:docs] OK: active documentation metadata, links, npm scripts, vocabulary, and Cloudflare source alignment are valid.",
+);
