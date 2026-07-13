@@ -1,5 +1,6 @@
 /** sync-jobs から利用する bounded score 再計算モジュール。 */
 
+import { normalizeLegacyVideoCursor } from "../shared/legacyCursor.ts";
 import { safeErrorSummary } from "../shared/safeLog.ts";
 
 export interface Env {
@@ -22,13 +23,7 @@ export const SCORE_FORCE_REFRESH_SEC = 24 * 60 * 60;
 
 /** 旧cursor値を読むテスト・移行コード向けの互換関数。再計算本体はcursorを使用しない。 */
 export function normalizeScoreCursor(value: string | null): string {
-  if (!value) return "";
-  try {
-    const parsed = JSON.parse(value) as { last_video_id?: unknown };
-    return typeof parsed.last_video_id === "string" ? parsed.last_video_id.trim() : "";
-  } catch {
-    return "";
-  }
+  return normalizeLegacyVideoCursor(value);
 }
 
 /**
@@ -77,7 +72,14 @@ export async function recalcScoreBatch(env: Env): Promise<ScoreBatchResult> {
       ? { processed, failed: 0, skipped: 0 }
       : { processed: 0, failed: 0, skipped: 1 };
   } catch (error) {
-    void safeErrorSummary(error);
+    console.error(
+      JSON.stringify({
+        worker: "sync-jobs",
+        job: "score-recalc",
+        result: "failed",
+        error: safeErrorSummary(error),
+      }),
+    );
     return { processed: 0, failed: 1, skipped: 0 };
   }
 }
