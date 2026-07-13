@@ -1,6 +1,6 @@
 -- Migration: 0001_spreadsheet_import_runs.sql
 -- Date: 2026-07-13
--- Type: schema
+-- Type: additive
 -- Summary: Spreadsheet import previewの署名nonceを一度だけ原子的に消費する短期runを追加
 -- Data loss: none
 -- Rollback: manual
