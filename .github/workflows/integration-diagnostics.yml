@@ -1,0 +1,47 @@
+name: 統合テスト診断
+
+on:
+  push:
+    branches: [agent/event-export-api]
+  workflow_dispatch:
+
+concurrency:
+  group: integration-diagnostics-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SITE_URL: https://flamenode.invalid
+      AUTH_URL: https://flamenode.invalid
+      AUTH_SECRET: ci-placeholder-not-a-production-secret
+      AUTH_DISCORD_ID: ci-placeholder-id
+      AUTH_DISCORD_SECRET: ci-placeholder-secret
+      CI: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: 依存関係をインストール
+        run: npm ci --no-audit --no-fund
+      - name: 統合テストを実行
+        id: integration
+        continue-on-error: true
+        shell: bash
+        run: |
+          mkdir -p .tmp
+          set -o pipefail
+          npm run test:integration 2>&1 | tee .tmp/integration-tests.log
+      - name: 統合テストログを保存
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-diagnostics-${{ github.run_id }}
+          path: .tmp/integration-tests.log
+          if-no-files-found: error
+          retention-days: 3
+      - name: 統合テスト結果を反映
+        if: steps.integration.outcome != 'success'
+        run: exit 1
