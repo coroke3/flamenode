@@ -35,8 +35,18 @@ test("Retry-Afterは上限を超えない", () => {
   assert.equal(parseRetryAfterMs("120"), 15_000);
 });
 
-test("開催中イベントは最長1時間で次回同期対象へ戻す", () => {
+test("開催中イベントは開始時刻必須で最長1時間更新", () => {
   assert.match(source, /active_event:\s*number/);
   assert.match(source, /AS active_event/);
+  assert.match(source, /e\.start_time IS NOT NULL/);
+  assert.match(source, /active_e\.start_time IS NOT NULL/);
   assert.match(source, /if \(row\.active_event === 1\) return HOUR/);
+});
+
+test("古い作品は30日まで同期を間引く", () => {
+  assert.match(source, /if \(age <= DAY\) return HOUR/);
+  assert.match(source, /if \(age <= 7 \* DAY\) return 6 \* HOUR/);
+  assert.match(source, /if \(age <= 30 \* DAY\) return DAY/);
+  assert.match(source, /if \(age <= 180 \* DAY\) return 3 \* DAY/);
+  assert.match(source, /return 30 \* DAY/);
 });
