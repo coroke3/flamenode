@@ -1,0 +1,49 @@
+name: Diagnose YouTube playlist apply
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/diagnose-youtube-playlist-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout integration branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/youtube-playlist-main-integration
+          fetch-depth: 0
+
+      - name: Trace existing integration script
+        shell: bash
+        continue-on-error: true
+        run: |
+          set +e
+          sed -n '/^        run: |$/,$p' .github/workflows/apply-youtube-playlist-integration.yml \
+            | tail -n +2 \
+            | sed 's/^          //' > /tmp/apply-youtube-playlist.sh
+          bash -x /tmp/apply-youtube-playlist.sh > /tmp/integration.log 2>&1
+          printf '%s\n' "$?" > /tmp/integration-exit-code.txt
+          git status --porcelain=v1 > /tmp/integration-status.txt 2>&1
+          git diff --cc > /tmp/integration-conflicts.diff 2>&1
+          true
+
+      - name: Upload trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-playlist-apply-trace
+          path: |
+            /tmp/integration.log
+            /tmp/integration-exit-code.txt
+            /tmp/integration-status.txt
+            /tmp/integration-conflicts.diff
+            /tmp/apply-youtube-playlist.sh
+          if-no-files-found: error
+          retention-days: 1
