@@ -3,6 +3,9 @@ type DedupEnv = {
   R2: R2Bucket;
 };
 
+type R2PutArgs = Parameters<R2Bucket["put"]>;
+type R2PutResult = Awaited<ReturnType<R2Bucket["put"]>>;
+
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
@@ -39,11 +42,8 @@ export function withDeduplicatingR2<Env extends DedupEnv>(env: Env): Env {
   const wrapped = new Proxy(bucket, {
     get(target, property, receiver) {
       if (property === "put") {
-        return async (
-          key: string,
-          value: ReadableStream | ArrayBuffer | ArrayBufferView | string | Blob | null,
-          options?: R2PutOptions,
-        ): Promise<R2Object | null> => {
+        return async (...args: R2PutArgs): Promise<R2PutResult> => {
+          const [key, value] = args;
           if (typeof value === "string") {
             const nextHash = await sha256Hex(value);
             const storedHash = await currentArtifactHash(env.DB, key);
@@ -52,7 +52,7 @@ export function withDeduplicatingR2<Env extends DedupEnv>(env: Env): Env {
               if (existing) return existing;
             }
           }
-          return bucket.put(key, value, options);
+          return bucket.put(...args);
         };
       }
       const value = Reflect.get(target, property, receiver);
