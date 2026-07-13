@@ -28,7 +28,10 @@ test("監視集約は主要Workerとqueueを読み取り専用で確認する", 
   assert.match(text, /FROM notification_outbox/);
   assert.match(text, /FROM static_rebuild_queue/);
   assert.match(text, /FROM static_artifacts/);
-  assert.doesNotMatch(text, /\b(?:UPDATE|INSERT|DELETE)\s+(?:worker_leases|notification_outbox|static_rebuild_queue)/i);
+  assert.doesNotMatch(
+    text,
+    /\b(?:UPDATE|INSERT|DELETE)\s+(?:worker_leases|notification_outbox|static_rebuild_queue)/i,
+  );
 });
 
 test("D1同時接続と日次書込みへ安全余裕を確保する", async () => {
@@ -41,4 +44,22 @@ test("D1同時接続と日次書込みへ安全余裕を確保する", async () 
   assert.match(serializer, /class AsyncGate/);
   assert.match(score, /SCORE_RECALC_BATCH_SIZE\s*=\s*150/);
   assert.match(monitor, /capacityPerDay:\s*14400/);
+});
+
+test("YouTube API副キーはcredential障害だけを補完する", async () => {
+  const sync = await source("workers/youtube-sync/index.ts");
+  const worker = await source("workers/sync-jobs/index.ts");
+  const vars = await source(".dev.vars.example");
+  const operations = await source("docs/operations/workers.md");
+  const page = await source("app/(admin)/admin/workers/page.tsx");
+
+  assert.match(sync, /YOUTUBE_API_KEY_SECONDARY/);
+  assert.match(worker, /YOUTUBE_API_KEY_SECONDARY/);
+  assert.match(vars, /YOUTUBE_API_KEY_SECONDARY=""/);
+  assert.match(sync, /requestError\?\.kind === "credential"/);
+  assert.match(sync, /quota系を別キーへ逃がすことはしない/);
+  assert.match(operations, /quotaExceeded.*副キーへ切り替えない/);
+  assert.match(sync, /youtube-api:key-status:v1/);
+  assert.match(page, /YouTube APIキー冗長化/);
+  assert.doesNotMatch(page, /candidate\.key|YOUTUBE_API_KEY_SECONDARY/);
 });
