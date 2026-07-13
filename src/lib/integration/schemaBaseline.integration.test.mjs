@@ -14,6 +14,7 @@ test("active migrations apply cleanly and match schema.ts manifests", () => {
     "0001_spreadsheet_import_runs.sql",
     "0002_terms_reaccept_manual_cost_guard.sql",
     "0003_large_collaboration_support.sql",
+    "0004_event_youtube_playlist_sync.sql",
   ]);
   assert.ok(result.tableCount > 40);
   assert.ok(result.indexCount > 70);
