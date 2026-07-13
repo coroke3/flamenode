@@ -2,6 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-13
+> Verified against commit: `f66ae21`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `wrangler.toml`, `package.json`
 
 FlameNodeは Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、3本のCron Workerで運用する。実Cloudflareへのリソース作成・Remote D1 migration・deployは運用者だけが明示的に実行し、CodexやPR CIは実行しない。
@@ -31,17 +32,5 @@ FlameNodeは Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、3�
 - 現行のDB運用: [migrations.md](migrations.md)
 - migrationテンプレート: [../templates/migration.md](../templates/migration.md)
 - DB履歴索引: [../db-history/README.md](../db-history/README.md)
-- DB変更履歴: [../db-change-history.md](../db-change-history.md)
+- DB変更履歴の正本: [../database/change-log.md](../database/change-log.md)
 - Historical資料: [../historical/README.md](../historical/README.md)
-
-Active文書は現行実装の手順だけを扱う。旧migrationや過去の設計本文はHistoricalとして保存し、起動時の自動スキーマ適用、旧列fallback、二重書き込みの運用手順として再利用しない。
-
-## 必須検査
-
-ローカルで変更を統合する前に、少なくとも `npm run typecheck`、`npm run lint`、`npm run test:unit`、`npm run test:workers`、`npm run test:integration`、`npm run build`、`npm run pages:build`、`npm run check:pages-output`、`npm run check:cloudflare-template`、`npm run check:db-schema`、`npm run check:db-legacy`、`npm run check:event-owners`、`npm run check:docs`、`npm run check:db-history`、`npm run check:project-docs` を通す。
-
-`check:cloudflare-config` は実SecretとIDを持たない環境ではfail-closedで失敗する。CIはfixture/template検査を使い、本番設定の成功を偽装しない。
-
-本番デプロイでは `CLOUDFLARE_CONFIG_MODE=production` を使用し、GitHub Environment `production` の `CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`CF_IDS_JSON` を必須とする。CIのfixture検査は `CLOUDFLARE_CONFIG_MODE=fixture` を明示した場合だけ許可され、実リソース設定の検証結果を代用しない。
-
-本番smoke testでは、任意の環境変数 `FAST_JOBS_URL`、`CONTENT_JOBS_URL`、`SYNC_JOBS_URL` を設定すると、対応するWorkerの `/health` も確認する。`CONTENT_JOBS_URL` が設定されている場合は、未認証の `/rebuild` が副作用を起こさず `401`、`404`、`405` のいずれかを返すことも検証する。
