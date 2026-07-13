@@ -1,44 +1,39 @@
 # Migration 運用
 
 > Status: Active
-> Last verified: 2026-07-11
-> Verified against commit: `5f48e0f` + working tree
-> Source of truth: `src/lib/db/schema.ts`, `migrations/` active path
+> Last verified: 2026-07-13
+> Verified against commit: `97a81c3`
+> Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `docs/database/change-log.md`
 
 ## 正本
 
-- DB schemaの正本は `src/lib/db/schema.ts`。
-- active migrationは `0000_flame_node_baseline.sql`、`0001_spreadsheet_import_runs.sql`、`0002_terms_reaccept_manual_cost_guard.sql`、`0003_large_collaboration_support.sql` の番号順で適用する。
+- DB schemaの唯一の公開正本は `src/lib/db/schema.ts`。
+- active migrationは `migrations/` 直下の `NNNN_snake_case.sql` を番号順に適用する。
+- 現在のactive pathは `0000`、`0001`、`0002`、`0003`、`0038`、`0039`、`0040`。
 - 旧migration本文は `migrations/historical/` に保存する履歴資料であり、現行の適用対象ではない。
-- D1が正本であり、R2/KVの静的JSONは公開配信用キャッシュである。
+- DB変更履歴の正本は [`../database/change-log.md`](../database/change-log.md)。migrationごとの詳細は [`../db-history/README.md`](../db-history/README.md) から確認する。
+- D1が整合性の正本であり、R2/KVの静的JSONは公開配信用キャッシュである。
 
 現行コードは旧列・旧tableのruntime fallback、旧方式への二重書き込み、起動時のschema変更を行わない。schema不一致はfail-fastで扱う。
 
-baselineには旧`events.event_group_id`が存在しないため、pre-baseline用の
-`repair:event-group-legacy` scriptはactive pathから削除済みである。Remote D1を
-自動repairせず、旧環境を破棄・再作成する場合も運用者がbackupと対象を確認して行う。
+baselineには旧`events.event_group_id`が存在しない。Remote D1を自動repairせず、旧環境を破棄・再作成する場合も運用者がbackupと対象を確認して行う。
 
 ## ローカル
 
 空のローカルD1には次を実行する。
 
 ```sh
-npm.cmd run db:local-apply
+npm run db:local-apply
 ```
 
 開発サーバーやWorkerはmigration、ALTER、backfillを自動実行しない。変更後は少なくとも次を実行する。
 
 ```sh
-npm.cmd run check:db-schema
-npm.cmd run check:db-history
+npm run check:db-schema
+npm run check:db-history
 ```
 
-`check:db-schema` はactive migrationを番号順に空の`node:sqlite`へ実際に適用し、
-`foreign_keys`、`foreign_key_check`、`integrity_check`、CHECK有効化を確認する。
-さらに`schema.ts`のtable、列名・SQLite型・nullability・PK順・比較可能なdefault、
-named indexのunique属性・列順、foreign key manifestとSQLiteの実体を比較し、
-SQL構文エラー、欠落、余分な定義をfail-closedで検出する。defaultは文字列・数値・
-`sql`リテラルを正規化して比較し、動的式など静的解析不能な値だけを比較対象外とする。
+`check:db-schema`はactive migrationを番号順に空のSQLiteへ実際に適用し、foreign key、integrity、CHECK、table・列・index・default・FK manifestと`schema.ts`の一致をfail-closedで確認する。`schema.base.ts`は`schema.ts`だけが参照できる内部fragmentであり、アプリ、Worker、テストは必ず`schema.ts`からimportする。
 
 ## Remote D1
 
@@ -50,24 +45,25 @@ Remote D1の作成、backup、migration適用、rollbackは運用者がCloudflar
 2. `0001_spreadsheet_import_runs.sql`
 3. `0002_terms_reaccept_manual_cost_guard.sql`
 4. `0003_large_collaboration_support.sql`
+5. `0038_runtime_efficiency_resilience.sql`
+6. `0039_search_relation_indexes.sql`
+7. `0040_free_tier_background_jobs.sql`
 
-`0001`適用前はSpreadsheet preview/applyがfail-closedになる。先にコードだけをdeployせず、運用者がbackup、migration、Pagesの順序を確認する。
+- `0001`はSpreadsheet preview/applyのone-time nonceを追加する。
+- `0002`は規約再同意検索を整備し、未計測の自動CostGuard状態を整理する。table再構築があるため事前backupが必要。
+- `0003`は大規模合作の完全監査snapshot向けにpayload上限を引き上げる。
+- `0038`はWorker lease実行状態列と公開・認証・アイコン補完用indexを追加する。追加列を読むコードより先に適用する。
+- `0039`は公開検索とrelation検索用indexだけを追加し、既存rowを書き換えない。
+- `0040`は期限駆動YouTube同期、dirtyスコア更新、Discord DM channel再利用列とdispatch indexを追加する。統合Workerのdeployより先に適用する。
 
-`0002`は`cost_usage_snapshots`と未使用の自動CostGuard設定列を削除し、
-`user_tos_consents`をFK付きで再構築する。Remote D1では必ず事前backupを取得し、
-孤立した`user_id`がないことを確認してから運用者が明示適用する。Codex/CIは適用しない。
-
-`0003`は`audit_log_settings.max_payload_bytes`のDEFAULTとdefault行の値を
-120000へ引き上げる。大規模合作のメンバー集合監査ログ向け。
-
-本番適用前に、schemaとmigrationの差分、backup、適用対象、復旧手順を記録する。Remote D1の初期化や自動削除は行わない。
+本番適用前にschemaとmigrationの差分、backup、適用対象、復旧手順を記録する。Remote D1の初期化や自動削除は行わない。
 
 ## 変更手順
 
-1. `src/lib/db/schema.ts` を先に更新し、必要なSQLを新しいactive migrationとして追加する。
-2. migrationヘッダーを [migration template](../templates/migration.md) に従って記載する。
-3. [DB変更履歴](../db-change-history.md) と [DB CHANGELOG](../DB-CHANGELOG.md) を同じ変更で更新する。
-4. 旧migrationは書き換えず、必要なら `migrations/historical/` に保持する。
-5. `check:db-schema`、`check:db-history`、`check:project-docs` を実行する。
+1. `src/lib/db/schema.ts`を更新する。
+2. 新しい連番active migrationを追加する。既存migration本文を変更しない。
+3. migrationヘッダーを [migration template](../templates/migration.md) に従って記載する。
+4. [`docs/database/change-log.md`](../database/change-log.md) と対応する `docs/db-history/<migration>.md` を同じ変更で更新する。
+5. `npm run check:db-schema`、`npm run check:db-history`、`npm run check:project-docs`を実行する。
 
 rollbackがSQLだけで安全にできない変更は、backupからの運用者による復旧を手順化し、アプリケーションに旧形式fallbackを戻さない。
