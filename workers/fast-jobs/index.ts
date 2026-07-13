@@ -23,6 +23,7 @@ export interface Env {
 const REMINDER_INTERVAL_SEC = 3600;
 const FAST_JOBS_LEASE_SEC = 4 * 60;
 const REMINDER_LEASE_SEC = 4 * 60;
+const NOTIFICATION_BATCH_LIMIT = 6;
 
 export async function runFastJobs(env: Env): Promise<void> {
   await runJob(
@@ -36,7 +37,6 @@ export async function runFastJobs(env: Env): Promise<void> {
           let processed = 0;
           let skipped = 0;
           let failed = 0;
-
           const reminderLease = await withCronLease(
             env,
             {
@@ -44,17 +44,15 @@ export async function runFastJobs(env: Env): Promise<void> {
               leaseSeconds: REMINDER_LEASE_SEC,
               minimumIntervalSeconds: REMINDER_INTERVAL_SEC,
             },
-            () =>
-              runJob(
-                "fast-jobs",
-                "slot-deadline-reminders",
-                () =>
-                  withBoundedRetry(
-                    () => enqueueSlotDeadlineReminders(env),
-                    { attempts: 2, delayMs: 100 },
-                  ),
-                { rethrow: true },
+            () => runJob(
+              "fast-jobs",
+              "slot-deadline-reminders",
+              () => withBoundedRetry(
+                () => enqueueSlotDeadlineReminders(env),
+                { attempts: 2, delayMs: 100 },
               ),
+              { rethrow: true },
+            ),
           );
           if (reminderLease.acquired) {
             const reminders = reminderLease.value;
@@ -63,15 +61,12 @@ export async function runFastJobs(env: Env): Promise<void> {
             failed += reminders?.failed ?? 0;
           } else {
             skipped += 1;
-            await runJob("fast-jobs", "slot-deadline-reminders", async () => ({
-              skipped: 1,
-            }));
+            await runJob("fast-jobs", "slot-deadline-reminders", async () => ({ skipped: 1 }));
           }
-
           const notifications = await runJob(
             "fast-jobs",
             "notification-dispatch",
-            () => processNotificationQueue(env, { limit: 15 }),
+            () => processNotificationQueue(env, { limit: NOTIFICATION_BATCH_LIMIT }),
           );
           processed += notifications.processed;
           skipped += notifications.skipped;
@@ -79,9 +74,7 @@ export async function runFastJobs(env: Env): Promise<void> {
           return { processed, skipped, failed };
         },
       );
-      return leased.acquired
-        ? (leased.value ?? { skipped: 1 })
-        : { skipped: 1 };
+      return leased.acquired ? (leased.value ?? { skipped: 1 }) : { skipped: 1 };
     },
     { rethrow: true },
   );
