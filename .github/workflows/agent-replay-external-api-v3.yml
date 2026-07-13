@@ -1,0 +1,52 @@
+name: Replay external API guardrails v3
+
+on:
+  push:
+    branches:
+      - agent/external-api-guardrails-v3
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/external-api-guardrails-v3
+          fetch-depth: 0
+      - name: 検証済み差分を取得
+        run: |
+          git fetch origin agent/external-api-guardrails-v2
+          git checkout origin/agent/external-api-guardrails-v2 -- \
+            'app/api/google-drive-image/[id]/route.ts' \
+            'app/api/youtube-thumbnail/[id]/[size]/route.ts' \
+            'docs/operations/external-api-limits.md' \
+            'docs/operations/workers.md' \
+            'docs/workers.md' \
+            'src/lib/ci/externalApiGuardrails.contract.test.mjs' \
+            'src/lib/integration/finalAcceptance.integration.test.mjs' \
+            'src/lib/media/externalImageProxy.test.mjs' \
+            'src/lib/media/externalImageProxy.ts' \
+            'src/lib/media/googleDriveImageCache.contract.test.mjs' \
+            'src/lib/media/youtubeThumbnailCache.contract.test.mjs' \
+            'workers/fast-jobs/index.ts' \
+            'workers/notification-dispatcher/dispatch.test.mjs' \
+            'workers/notification-dispatcher/dispatch.ts' \
+            'workers/notification-dispatcher/index.test.mjs' \
+            'workers/notification-dispatcher/index.ts' \
+            'workers/notification-dispatcher/rateLimit.test.mjs' \
+            'workers/shared/externalApi.test.mjs' \
+            'workers/shared/externalApi.ts' \
+            'workers/youtube-sync/index.test.mjs' \
+            'workers/youtube-sync/index.ts'
+          git rm .github/workflows/agent-replay-external-api-v3.yml
+      - name: 変更をcommitしてpush
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "外部API上限対応を最新mainへ統合"
+          git push origin HEAD:agent/external-api-guardrails-v3
