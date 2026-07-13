@@ -9,7 +9,8 @@ export interface OperationModeRow {
   operation_mode?: string | null;
 }
 
-export const MAX_QUEUE_ITEMS_PER_RUN = 3;
+/** Workers FreeのCPU 10ms内に収めるため、静的生成は常に1 targetずつ処理する。 */
+export const MAX_QUEUE_ITEMS_PER_RUN = 1;
 export const MAX_QUEUE_ITEMS_ECONOMY = 1;
 
 export function isOperationMode(value: unknown): value is OperationMode {
