@@ -28,7 +28,11 @@ function failureOutput(env) {
 
 function runFailure(command, env) {
   try {
-    execFileSync(process.execPath, [command], { cwd: root, env: { ...process.env, ...env }, encoding: "utf8" });
+    execFileSync(process.execPath, [command], {
+      cwd: root,
+      env: { ...process.env, ...env },
+      encoding: "utf8",
+    });
     assert.fail("expected command to fail");
   } catch (error) {
     return `${error.stdout ?? ""}${error.stderr ?? ""}`;
@@ -42,13 +46,19 @@ const productionBase = {
 };
 
 test("production config check rejects malformed JSON without logging its value", () => {
-  const output = failureOutput({ ...productionBase, CF_IDS_JSON: "{malformed-secret-payload" });
+  const output = failureOutput({
+    ...productionBase,
+    CF_IDS_JSON: "{malformed-secret-payload",
+  });
   assert.match(output, /CF_IDS_JSON must be valid JSON/);
   assert.doesNotMatch(output, /malformed-secret-payload/);
 });
 
 test("production config check rejects non-object and wrong-typed ID payloads", () => {
-  const output = failureOutput({ ...productionBase, CF_IDS_JSON: JSON.stringify(["not-an-object"]) });
+  const output = failureOutput({
+    ...productionBase,
+    CF_IDS_JSON: JSON.stringify(["not-an-object"]),
+  });
   assert.match(output, /CF_IDS_JSON must be a plain object/);
 
   const wrongTypes = failureOutput({
@@ -62,7 +72,14 @@ test("production config check rejects non-object and wrong-typed ID payloads", (
       pages_project_name: false,
     }),
   });
-  for (const name of ["d1_database_id", "kv_namespace_id", "kv_preview_id", "d1_database_name", "r2_bucket_name", "pages_project_name"]) {
+  for (const name of [
+    "d1_database_id",
+    "kv_namespace_id",
+    "kv_preview_id",
+    "d1_database_name",
+    "r2_bucket_name",
+    "pages_project_name",
+  ]) {
     assert.match(wrongTypes, new RegExp(`CF_IDS_JSON\\.${name}`));
   }
 });
@@ -87,16 +104,20 @@ test("production config check rejects short and zero IDs", () => {
 });
 
 test("production config check fails closed without Cloudflare secrets", () => {
-  assert.throws(() => run({
-    CLOUDFLARE_CONFIG_MODE: "production",
-    CLOUDFLARE_API_TOKEN: "",
-    CLOUDFLARE_ACCOUNT_ID: "",
-    CF_IDS_JSON: "",
-  }));
+  assert.throws(() =>
+    run({
+      CLOUDFLARE_CONFIG_MODE: "production",
+      CLOUDFLARE_API_TOKEN: "",
+      CLOUDFLARE_ACCOUNT_ID: "",
+      CF_IDS_JSON: "",
+    }),
+  );
 });
 
 test("production config check ignores fixture root override", () => {
-  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flamenode-cloudflare-production-root-"));
+  const fixtureRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), "flamenode-cloudflare-production-root-"),
+  );
   try {
     const output = failureOutput({
       ...productionBase,
@@ -110,7 +131,10 @@ test("production config check ignores fixture root override", () => {
         pages_project_name: "flamenode",
       }),
     });
-    assert.match(output, /wrangler\.toml:\d+: D1 database_id must be a non-zero UUID/);
+    assert.match(
+      output,
+      /wrangler\.toml:\d+: D1 database_id must be a non-zero UUID/,
+    );
     assert.doesNotMatch(output, /required Cloudflare configuration file is missing/);
   } finally {
     fs.rmSync(fixtureRoot, { recursive: true, force: true });
@@ -118,36 +142,55 @@ test("production config check ignores fixture root override", () => {
 });
 
 test("fixture config check is explicitly separate and accepts template IDs", () => {
-  assert.doesNotThrow(() => run({
-    CLOUDFLARE_CONFIG_MODE: "fixture",
-    CLOUDFLARE_API_TOKEN: "",
-    CLOUDFLARE_ACCOUNT_ID: "",
-    CF_IDS_JSON: "",
-  }));
+  assert.doesNotThrow(() =>
+    run({
+      CLOUDFLARE_CONFIG_MODE: "fixture",
+      CLOUDFLARE_API_TOKEN: "",
+      CLOUDFLARE_ACCOUNT_ID: "",
+      CF_IDS_JSON: "",
+    }),
+  );
 });
 
 test("Cloudflare config check fails closed when a required wrangler file is missing", () => {
-  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flamenode-cloudflare-config-"));
+  const fixtureRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), "flamenode-cloudflare-config-"),
+  );
   try {
     fs.writeFileSync(path.join(fixtureRoot, "wrangler.toml"), "# fixture\n");
     const output = runFailure(checker, {
       CLOUDFLARE_CONFIG_MODE: "fixture",
       CLOUDFLARE_CONFIG_ROOT: fixtureRoot,
     });
-    assert.match(output, /workers\/fast-jobs\/wrangler\.toml: required Cloudflare configuration file is missing/);
+    assert.match(
+      output,
+      /workers\/fast-jobs\/wrangler\.toml: required Cloudflare configuration file is missing/,
+    );
   } finally {
     fs.rmSync(fixtureRoot, { recursive: true, force: true });
   }
 });
 
 test("Pages output check rejects Cloudflare ID files without logging IDs", () => {
-  const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flamenode-pages-output-"));
+  const outputRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), "flamenode-pages-output-"),
+  );
   try {
     fs.mkdirSync(path.join(outputRoot, "_next", "static"), { recursive: true });
     fs.mkdirSync(path.join(outputRoot, "cloudflare"), { recursive: true });
     fs.writeFileSync(path.join(outputRoot, "_worker.js"), "export default {};\n");
-    fs.writeFileSync(path.join(outputRoot, "_routes.json"), JSON.stringify({ version: 1, include: ["/*"], exclude: ["/_next/static/*"] }));
-    fs.writeFileSync(path.join(outputRoot, "cloudflare", "ids.json"), JSON.stringify({ d1_database_id: "secret-real-id" }));
+    fs.writeFileSync(
+      path.join(outputRoot, "_routes.json"),
+      JSON.stringify({
+        version: 1,
+        include: ["/*"],
+        exclude: ["/_next/static/*"],
+      }),
+    );
+    fs.writeFileSync(
+      path.join(outputRoot, "cloudflare", "ids.json"),
+      JSON.stringify({ d1_database_id: "secret-real-id" }),
+    );
     const output = runFailure(pagesChecker, { PAGES_OUTPUT_DIR: outputRoot });
     assert.match(output, /cloudflare\/ids\.json/);
     assert.match(output, /remove this file from the Pages artifact/);
@@ -157,17 +200,23 @@ test("Pages output check rejects Cloudflare ID files without logging IDs", () =>
   }
 });
 
-test("deploy workflow preserves gated release, immutable artifact, and deployment order", () => {
-  const workflow = fs.readFileSync(path.join(root, ".github/workflows/deploy-cloudflare.yml"), "utf8");
-  assert.match(workflow, /^\s+push:\s*$/m);
+test("deploy workflow is manual-only and preserves immutable deployment order", () => {
+  const workflow = fs.readFileSync(
+    path.join(root, ".github/workflows/deploy-cloudflare.yml"),
+    "utf8",
+  );
   assert.match(workflow, /^\s+workflow_dispatch:\s*$/m);
-  assert.match(workflow, /contains\(github\.event\.head_commit\.message, '\[deploy-production\]'\)/);
-  assert.match(workflow, /github\.event_name == 'push' \|\| inputs\.deploy_pages/);
-  assert.match(workflow, /github\.event_name == 'push' \|\| inputs\.deploy_workers/);
-  assert.match(workflow, /github\.event_name == 'workflow_dispatch' && inputs\.bootstrap_database/);
-  assert.match(workflow, /github\.event_name == 'workflow_dispatch' && inputs\.apply_pending_migrations/);
+  assert.doesNotMatch(workflow, /^\s+push:\s*$/m);
+  assert.doesNotMatch(workflow, /\[deploy-production\]/);
+  assert.match(workflow, /if: inputs\.bootstrap_database/);
+  assert.match(workflow, /if: inputs\.apply_pending_migrations/);
+  assert.match(workflow, /inputs\.deploy_pages/);
+  assert.match(workflow, /inputs\.deploy_workers/);
   assert.match(workflow, /name: pages-\$\{\{ github\.sha \}\}/);
-  assert.match(workflow, /actions\/download-artifact@v4[\s\S]*name: pages-\$\{\{ github\.sha \}\}/);
+  assert.match(
+    workflow,
+    /actions\/download-artifact@v4[\s\S]*name: pages-\$\{\{ github\.sha \}\}/,
+  );
   assert.ok(workflow.indexOf("migrate-d1:") < workflow.indexOf("deploy-pages:"));
   assert.ok(workflow.indexOf("deploy-pages:") < workflow.indexOf("deploy-workers:"));
   assert.ok(workflow.indexOf("deploy-workers:") < workflow.indexOf("smoke-production:"));
