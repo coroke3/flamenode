@@ -5,9 +5,11 @@ import {
   isRetryableYoutubeStatus,
   parseDuration,
   parseRetryAfterMs,
-  YOUTUBE_MAX_QUOTA_UNITS_PER_RUN,
+  YOUTUBE_MAX_EXTERNAL_REQUESTS_PER_RUN,
   YOUTUBE_SYNC_BATCH_SIZE,
+  YOUTUBE_SYNC_MAX_API_CALLS_PER_RUN,
   YOUTUBE_SYNC_MAX_ATTEMPTS,
+  YOUTUBE_SYNC_MAX_ROWS_PER_RUN,
 } from "./index.ts";
 
 const source = await readFile(new URL("./index.ts", import.meta.url), "utf8");
@@ -27,11 +29,23 @@ test("Retry-Afterは上限を超えない", () => {
   assert.equal(parseRetryAfterMs("120"), 15_000);
 });
 
-test("YouTube APIは1 Cron最大50 ID・2 quota unitsだけ処理する", () => {
+test("YouTube同期は1 Cron最大200 ID・外部request最大8件に固定する", () => {
   assert.equal(YOUTUBE_SYNC_BATCH_SIZE, 50);
-  assert.equal(YOUTUBE_MAX_QUOTA_UNITS_PER_RUN, 2);
-  assert.ok(YOUTUBE_SYNC_MAX_ATTEMPTS <= YOUTUBE_MAX_QUOTA_UNITS_PER_RUN);
-  assert.doesNotMatch(source, /YOUTUBE_SYNC_BATCHES_PER_RUN/);
+  assert.equal(YOUTUBE_SYNC_MAX_API_CALLS_PER_RUN, 4);
+  assert.equal(YOUTUBE_SYNC_MAX_ROWS_PER_RUN, 200);
+  assert.equal(YOUTUBE_SYNC_MAX_ATTEMPTS, 2);
+  assert.equal(YOUTUBE_MAX_EXTERNAL_REQUESTS_PER_RUN, 8);
+  assert.ok(YOUTUBE_MAX_EXTERNAL_REQUESTS_PER_RUN < 50);
+  assert.match(source, /for \(const chunk of chunks\)/);
+  assert.doesNotMatch(source, /Promise\.all\([\s\S]*fetchYoutubeItems/);
+});
+
+test("YouTube quotaはD1の日次80%予算を予約し未使用分を返却する", () => {
+  assert.match(source, /reserveYoutubeQuota/);
+  assert.match(source, /refundYoutubeQuota/);
+  assert.match(source, /reservation\.reservedUnits - budget\.used/);
+  assert.doesNotMatch(source, /YOUTUBE_API_KEY_SECONDARY/);
+  assert.doesNotMatch(source, /runWithYoutubeApiKeyFailover/);
 });
 
 test("YouTube quota系403はKV cooldownで連続呼出しを止める", () => {
@@ -55,7 +69,7 @@ test("候補抽出はpending・開催中・通常期限のindex queryへ分離�
   assert.match(source, /FROM events e[\s\S]*ACTIVE_SYNC_INTERVAL_SEC/);
   assert.match(source, /ym\.synced_at <= \?1 - \?2[\s\S]*DEFAULT_SYNC_INTERVAL_SEC/);
   assert.doesNotMatch(source, /FROM videos v\s+LEFT JOIN video_youtube_metadata/);
-  assert.match(source, /最大3 query・50件/);
+  assert.match(source, /合計200件/);
 });
 
 test("YouTube durationを秒へ変換する", () => {
