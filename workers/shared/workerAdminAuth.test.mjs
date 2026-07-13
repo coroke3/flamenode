@@ -62,9 +62,9 @@ test("worker admin endpoint requires the configured bearer token and empty body"
   assert.equal(accepted, null);
 });
 
-test("checked-in deployment templates contain exactly the three deployed workers", () => {
+test("checked-in deployment templates contain exactly one background worker", () => {
   const root = path.resolve(import.meta.dirname, "../..");
-  const expected = ["content-jobs", "fast-jobs", "sync-jobs"];
+  const expected = ["background-jobs"];
   const actual = fs
     .readdirSync(path.join(root, "workers"), { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(root, "workers", entry.name, "wrangler.toml")))
