@@ -94,8 +94,7 @@ export function getNotificationSeverity(type: string): NotificationSeverity {
 
 export function getNotificationTypeLabel(type: string): string {
   const key = type.trim();
-  if (TYPE_LABELS[key]) return TYPE_LABELS[key];
-  return key.replace(/_/g, " ");
+  return TYPE_LABELS[key] ?? key.replace(/_/g, " ");
 }
 
 export function getNotificationCategoryLabel(
@@ -113,29 +112,6 @@ export function getNotificationCategoryLabel(
     unknown: "その他",
   };
   return map[category];
-}
-
-/** manage UI のフィルタキーへ畳み込む */
-export function toManageNotificationFilter(
-  category: NotificationCategory,
-): Exclude<ManageNotificationFilter, "all"> {
-  if (
-    category === "video" ||
-    category === "slot" ||
-    category === "x_id" ||
-    category === "chapter"
-  ) {
-    return category;
-  }
-  return "other";
-}
-
-export function manageFilterMatchesType(
-  type: string,
-  filter: ManageNotificationFilter,
-): boolean {
-  if (filter === "all") return true;
-  return toManageNotificationFilter(categorizeNotificationType(type)) === filter;
 }
 
 export const MANAGE_NOTIFICATION_FILTER_OPTIONS: ReadonlyArray<{

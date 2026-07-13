@@ -11,7 +11,11 @@ import {
   type ManagementAccess,
 } from "./managementAccess";
 import { resolveActiveXUserId } from "./resolveActiveXId";
-import type { XIdEntry } from "@/lib/xid/entries";
+import {
+  normalizeXIdApprovalStatus,
+  xIdApprovalRank,
+  type XIdEntry,
+} from "@/lib/xid/entries";
 
 export type HeaderUser = {
   id: string;
@@ -37,16 +41,6 @@ function normalizeRole(
   role: string | null | undefined,
 ): HeaderUser["role"] {
   return role === "admin" || role === "moderator" ? role : "user";
-}
-
-function normalizeApprovalStatus(
-  status: string | null | undefined,
-): XIdEntry["approval_status"] {
-  return status === "approved" || status === "rejected" ? status : "pending";
-}
-
-function approvalRank(status: XIdEntry["approval_status"]): number {
-  return status === "approved" ? 0 : status === "pending" ? 1 : 2;
 }
 
 /** ヘッダー用: 明示連携済みX IDと承認待ち申請だけを返す。 */
@@ -83,13 +77,14 @@ async function fetchHeaderXIdEntries(
       x_user_id: normalizedId,
       x_name: row.x_name?.trim() || `@${normalizedId}`,
       icon_url: row.icon_url,
-      approval_status: normalizeApprovalStatus(row.approval_status),
+      approval_status: normalizeXIdApprovalStatus(row.approval_status),
       is_active: false,
     };
     const existing = byNormalizedXId.get(normalizedId);
     if (
       !existing ||
-      approvalRank(entry.approval_status) < approvalRank(existing.approval_status)
+      xIdApprovalRank(entry.approval_status) <
+        xIdApprovalRank(existing.approval_status)
     ) {
       byNormalizedXId.set(normalizedId, entry);
     }
