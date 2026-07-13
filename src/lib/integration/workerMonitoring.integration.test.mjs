@@ -28,7 +28,10 @@ test("監視集約は主要Workerとqueueを読み取り専用で確認する", 
   assert.match(text, /FROM notification_outbox/);
   assert.match(text, /FROM static_rebuild_queue/);
   assert.match(text, /FROM static_artifacts/);
-  assert.doesNotMatch(text, /\b(?:UPDATE|INSERT|DELETE)\s+(?:worker_leases|notification_outbox|static_rebuild_queue)/i);
+  assert.doesNotMatch(
+    text,
+    /\b(?:UPDATE|INSERT|DELETE)\s+(?:worker_leases|notification_outbox|static_rebuild_queue)/i,
+  );
 });
 
 test("D1同時接続と日次書込みへ安全余裕を確保する", async () => {
@@ -41,4 +44,29 @@ test("D1同時接続と日次書込みへ安全余裕を確保する", async () 
   assert.match(serializer, /class AsyncGate/);
   assert.match(score, /SCORE_RECALC_BATCH_SIZE\s*=\s*150/);
   assert.match(monitor, /capacityPerDay:\s*14400/);
+});
+
+test("YouTube API副キーはcredential障害だけを補完する", async () => {
+  const failover = await source("workers/youtube-sync/apiKeyFailover.ts");
+  const sync = await source("workers/youtube-sync/index.ts");
+  const syncJobs = await source("workers/sync-jobs/index.ts");
+  const vars = await source(".dev.vars.example");
+  const operations = await source("docs/operations/workers.md");
+  const nav = await source("src/lib/admin/adminNavGroups.tsx");
+  const page = await source("app/(admin)/admin/youtube-api-keys/page.tsx");
+  const card = await source("src/components/admin/YoutubeApiKeyStatusCard.tsx");
+
+  assert.match(failover, /YOUTUBE_API_KEY_SECONDARY/);
+  assert.match(syncJobs, /YOUTUBE_API_KEY_SECONDARY/);
+  assert.match(vars, /YOUTUBE_API_KEY_SECONDARY=""/);
+  assert.match(failover, /requestError\?\.kind === "credential"/);
+  assert.match(failover, /quota系を別キーへ逃がさない/);
+  assert.match(sync, /ExternalRequestBudget\(YOUTUBE_MAX_QUOTA_UNITS_PER_RUN\)/);
+  assert.match(operations, /quotaExceeded.*副キーへ切り替えない/);
+  assert.match(failover, /youtube-api:key-status:v1/);
+  assert.match(nav, /href:\s*"\/admin\/youtube-api-keys"/);
+  assert.match(page, /YoutubeApiKeyStatusCard/);
+  assert.match(card, /YouTube APIキー冗長化/);
+  assert.doesNotMatch(card, /YOUTUBE_API_KEY(?:_SECONDARY)?/);
+  assert.doesNotMatch(card, /candidate\.key/);
 });
