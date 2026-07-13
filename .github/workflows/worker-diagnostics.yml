@@ -1,0 +1,35 @@
+name: Worker diagnostics
+
+on:
+  push:
+    branches: [agent/youtube-api-secondary-failover-v2]
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Unit後にWorkerテストを再実行
+        shell: bash
+        run: |
+          mkdir -p .tmp
+          set +e
+          npm run test:unit > .tmp/unit.log 2>&1
+          unit_status=$?
+          npm run test:workers > .tmp/worker.log 2>&1
+          worker_status=$?
+          printf 'unit=%s\nworker=%s\n' "$unit_status" "$worker_status" | tee .tmp/status.log
+          exit "$worker_status"
+      - name: 診断ログを保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: worker-diagnostics-${{ github.run_id }}
+          path: .tmp/*.log
+          retention-days: 1
