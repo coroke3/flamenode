@@ -11,16 +11,13 @@ export type SpreadsheetColumnMeta = {
   enumValues?: readonly string[];
 };
 
-export type SpreadsheetTableDefClient = {
+export type SpreadsheetTableDef = {
   table: string;
   label: string;
   group: string;
   mode: "editable" | "readonly";
   inSchema?: boolean;
 };
-
-/** @alias クライアント向け */
-export type SpreadsheetTableDef = SpreadsheetTableDefClient;
 
 export type SpreadsheetPageData = {
   def: SpreadsheetTableDef;
