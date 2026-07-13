@@ -4,6 +4,12 @@ import type { HomeIntroSlotStat } from "@/components/layout/HomeIntroBand";
 import type { HomeStats } from "@/components/layout/homeVisuals";
 import type { VideoCardData } from "@/components/video/VideoCard";
 import type { PublicAnnouncement } from "@/lib/db/announcementQueries";
+import {
+  normalizeCount,
+  normalizeNumericUnix as normalizeUnix,
+  normalizePresentString as normalizeNullableString,
+  normalizePresentString as normalizeString,
+} from "./normalize.ts";
 
 export interface StaticTopPayload {
   generated_at?: unknown;
@@ -230,26 +236,6 @@ function normalizeStats(value: unknown, fallback: HomeStats): HomeStats {
     activeEvents: normalizeCount(row.activeEvents ?? row.active_events) ?? fallback.activeEvents,
     creators: normalizeCount(row.creators) ?? fallback.creators,
   };
-}
-
-function normalizeString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
-function normalizeNullableString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
-function normalizeCount(value: unknown): number | null {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n) || n < 0) return null;
-  return Math.floor(n);
-}
-
-function normalizeUnix(value: unknown): number | null {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n)) return null;
-  return Math.floor(n);
 }
 
 function normalizeEventVisibility(value: unknown): "public" | "archived" {
