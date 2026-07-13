@@ -107,6 +107,11 @@ const ADMIN_NAV_GROUPS_BASE: AdminSidebarGroup[] = [
         label: "Worker監視",
         icon: <Icon name="clock" size={14} />,
       },
+      {
+        href: "/admin/youtube-api-keys",
+        label: "YouTube APIキー",
+        icon: <Icon name="youtube" size={14} />,
+      },
       { href: "/admin/health", label: "ヘルスチェック", icon: <Icon name="check" size={14} /> },
     ],
   },
