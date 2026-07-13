@@ -6,9 +6,9 @@ import {
   queueLimitForMode,
 } from "./queuePolicy.ts";
 
-test("normalは1回最大3件", () => {
-  assert.equal(MAX_QUEUE_ITEMS_PER_RUN, 3);
-  assert.equal(queueLimitForMode("normal"), 3);
+test("normalも1回最大1件", () => {
+  assert.equal(MAX_QUEUE_ITEMS_PER_RUN, 1);
+  assert.equal(queueLimitForMode("normal"), 1);
 });
 
 test("economyは1回最大1件", () => {
@@ -16,9 +16,8 @@ test("economyは1回最大1件", () => {
   assert.equal(queueLimitForMode("economy"), 1);
 });
 
-test("maintenanceは呼び出し側で停止し、上限は通常値を超えない", () => {
-  assert.ok(
-    queueLimitForMode("maintenance") <=
-      MAX_QUEUE_ITEMS_PER_RUN,
-  );
+test("全modeでFree CPU向け上限を超えない", () => {
+  for (const mode of ["normal", "economy", "read_only", "static_only", "maintenance"]) {
+    assert.ok(queueLimitForMode(mode) <= 1);
+  }
 });
