@@ -32,6 +32,7 @@ export type KnownRecipientNotificationInput = Omit<
 export type NotificationOutboxBatch = {
   statements: BatchItem<"sqlite">[];
   expectedChanges: null[];
+  rows: Array<typeof notificationOutbox.$inferSelect>;
 };
 
 /**
@@ -43,7 +44,7 @@ export async function buildKnownRecipientNotificationBatch(
   inputs: readonly KnownRecipientNotificationInput[],
 ): Promise<NotificationOutboxBatch> {
   if (!shouldEnqueueUserNotification() || inputs.length === 0) {
-    return { statements: [], expectedChanges: [] };
+    return { statements: [], expectedChanges: [], rows: [] };
   }
   if (inputs.length > 30) throw new Error("notification_batch_limit_exceeded");
 
@@ -65,6 +66,7 @@ export async function buildKnownRecipientNotificationBatch(
   const existing = new Set(active.map((row) => row.dedupe_key).filter(Boolean));
   const now = Math.floor(Date.now() / 1000);
   const statements: BatchItem<"sqlite">[] = [];
+  const rows: Array<typeof notificationOutbox.$inferSelect> = [];
 
   inputs.forEach((input, index) => {
     const check = validateNotificationPayload(input.type, input.payload);
@@ -73,7 +75,7 @@ export async function buildKnownRecipientNotificationBatch(
     if (!recipientUserId) throw new Error("notification_recipient_required");
     const dedupeKey = dedupeKeys[index];
     if (dedupeKey && existing.has(dedupeKey)) return;
-    statements.push(db.insert(notificationOutbox).values({
+    const row: typeof notificationOutbox.$inferSelect = {
       id: randomId(),
       recipient_user_id: recipientUserId,
       type: input.type,
@@ -81,18 +83,24 @@ export async function buildKnownRecipientNotificationBatch(
       status: "pending",
       attempt_count: 0,
       processing_started_at: null,
+      lease_token: null,
+      lease_expires_at: null,
       next_attempt_at: null,
       last_error: null,
+      processed_at: null,
       event_id: input.eventId ?? null,
       dedupe_key: dedupeKey,
       created_at: now,
-    }));
+    };
+    rows.push(row);
+    statements.push(db.insert(notificationOutbox).values(row));
   });
   return {
     statements,
     // Unique raceはbatch全体を失敗させる。changes固定を追加するとD1 50 queryを
     // 超えるため、idempotent INSERTとしてmutateWithAuditのnull指定を使う。
     expectedChanges: statements.map(() => null),
+    rows,
   };
 }
 

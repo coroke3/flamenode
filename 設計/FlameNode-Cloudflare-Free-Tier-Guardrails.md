@@ -2,7 +2,7 @@
 
 ## 1. 目的
 
-FlameNode を Cloudflare の無料枠を中心に運用し、従量課金が発生しにくい構成にする。使用量が危険水位に近づいた場合は、サイト機能を段階的に自動停止し、管理者が手動で停止・解除・一時許可できるようにする。
+FlameNode を Cloudflare の無料枠を中心に運用し、従量課金が発生しにくい構成にする。使用量は運用者が Cloudflare Dashboard で確認し、必要な場合に管理画面からサイト機能を段階的に制限・解除・一時許可する。
 
 ## 2. 前提となる Cloudflare 無料枠
 
@@ -15,7 +15,7 @@ FlameNode を Cloudflare の無料枠を中心に運用し、従量課金が発�
 | D1 | Free は rows read 5,000,000/day、rows written 100,000/day、storage 5GB total。 | フルスキャン禁止、インデックス必須、一覧は事前生成 JSON を優先する。 |
 | Durable Objects | Free でも SQLite backend の Durable Objects を利用できる。Requests 100,000/day、Duration 13,000 GB-s/day、SQLite rows read 5,000,000/day、rows written 100,000/day が目安。 | 閲覧数の短期集約先に使う。ただし1再生ごとに Worker/DO request は消費するため、バースト時はサンプリングまたは停止する。 |
 | R2 Standard | Free は storage 10GB-month、Class A 1,000,000/month、Class B 10,000,000/month、egress free。 | 動画本体は保存せず YouTube 埋め込み。R2 はアイコン画像、静的JSON、軽量エクスポートに限定する。 |
-| Workers KV | Free は reads 100,000/day、writes/deletes/list 1,000/day、storage 1GB。 | 高頻度更新には使わず、機能フラグ・軽量キャッシュ・ガード状態の保存に限定する。 |
+| Workers KV | Free は reads 100,000/day、writes/deletes/list 1,000/day、storage 1GB。 | 高頻度更新には使わず、Worker cursor・機能フラグ・軽量キャッシュに限定する。 |
 | Queues | Free は 10,000 operations/day、メッセージ保持24時間。通常1メッセージの配送に write/read/delete の3操作がかかる。 | YouTube 同期や通知のキューに使う場合は1日約3,000件程度を安全圏にし、重い一括投入は避ける。 |
 
 ## 3. 基本方針
@@ -24,14 +24,14 @@ FlameNode を Cloudflare の無料枠を中心に運用し、従量課金が発�
 - **D1を読ませすぎない**: 一覧、トップ、おすすめ、イベント作品一覧は定期生成された JSON を読む。D1 は投稿、編集、管理、検索の確定処理に絞る。
 - **R2に置きすぎない**: YouTube 動画本体は保存しない。作品サムネイルも保存せず YouTube サムネイル URL を利用する。Cloudflare にアップロードする画像はアイコン画像のみとし、元ファイルは1ファイル8MBまでに制限する。
 - **KVに書きすぎない**: KV は低頻度のフラグとキャッシュに限定する。アクセスログや詳細な分析は D1 に逐次書かず、サンプリングまたは集計済み保存にする。
-- **Cronを絞る**: Cron は最大5個の無料枠を意識し、JSON生成、スコア更新、使用量監視、クリーンアップを可能な限り統合する。
+- **Cronを絞る**: Cron は最大5個の無料枠を意識し、JSON生成、スコア更新、YouTube同期、クリーンアップを3本の統合 Workerへまとめる。
 - **サードパーティ動画活用**: 動画再生は YouTube iframe を使い、FlameNode 側では再生開始イベントなど最小限の計測に留める。
 
 ## 3-1. 無料枠に収まりそうかの評価
 
 現在の設計は「小〜中規模のコミュニティイベントを静的配信中心で運用する」前提なら無料枠に収まる可能性が高い。ただし、動画詳細ページの再生開始イベント、検索、管理画面の一括インポート、YouTube 同期、R2 の静的JSON/アイコン配信が増えると無料枠を超えやすい。
 
-安全圏の目安は以下とする。固定値ではなく、管理画面のコストガードしきい値で調整できる。
+安全圏の目安は以下とする。アプリが使用量やしきい値を収集・判定するものではなく、運用者が Cloudflare Dashboard を確認するときの判断材料とする。
 
 | 指標 | 無料枠上の主なネック | 安全圏の運用目安 |
 | :--- | :--- | :--- |
@@ -40,31 +40,31 @@ FlameNode を Cloudflare の無料枠を中心に運用し、従量課金が発�
 | D1 reads | 5,000,000 rows/day | 一覧・おすすめ・関連動画で D1 を直接集計しない。検索はインデックス必須、広範囲検索は `economy` で停止。 |
 | D1 writes | 100,000 rows/day | 再生ごとの直接書き込みは禁止。投稿、編集、いいね、コメント、CSVを `read_only` で止める。 |
 | Durable Objects | request 100,000/day、duration、SQLite rows | 集約オブジェクトを短時間で休眠可能にし、1再生1永続書き込みを避ける。未反映カウントは24時間だけ保持。 |
-| KV writes | 1,000 writes/day | ガード状態や低頻度フラグに限定し、閲覧ログや逐次カウントに使わない。 |
+| KV writes | 1,000 writes/day | Worker cursorや低頻度フラグに限定し、閲覧ログや逐次カウントに使わない。 |
 | R2 Class B | 10,000,000/month | 作品サムネイルは YouTube を使い、R2 はアイコンと静的JSONに限定。JSONはHTTP Cacheを長めにする。 |
 | R2 storage | 10GB-month | Cloudflareにアップロードする画像はアイコンのみ、元ファイル8MB、保存前に250x250 WebPへ圧縮。 |
 | Queues | 10,000 operations/day | 1メッセージ約3操作として、同期・通知キューは通常1日3,000件程度を上限目安にする。 |
-| Cron | 5 triggers/account | JSON生成、スコア更新、YouTube同期、使用量監視、クリーンアップをまとめ、Cron数を増やさない。 |
+| Cron | 5 triggers/account | JSON生成、スコア更新、YouTube同期、クリーンアップを3本の統合 Workerへまとめ、Cron数を増やさない。 |
 
 無料枠で最も危ない順は、1. Workers/Pages Functions requests、2. Durable Object requests、3. D1 rows written、4. KV writes、5. R2 Class B operations、6. Queues operations とする。D1 rows read はインデックスと静的JSONで抑えられるが、検索や管理画面の未制限一覧があると急増するため、全一覧に `limit` と cursor を必須にする。
 
 ## 4. 使用量ガードの段階
 
-`system_settings.cost_guard_mode` で現在の制限状態を管理する。
+`system_settings.operation_mode` で現在の制限状態を管理する。使用量collectorや自動しきい値判定は持たず、管理者が理由を入力して手動変更する。
 
-| モード | 発動目安 | 停止・制限する機能 |
+| モード | 手動選択の目安 | 停止・制限する機能 |
 | :--- | :--- | :--- |
 | `normal` | 通常 | 全機能を通常運用する。 |
 | `economy` | 目安70%到達 | パーソナライズ推薦、詳細分析、即時スコア再計算、重い検索を抑制する。閲覧数計測は既定50%サンプリングにする。 |
-| `read_only` | 目安85%到達 | 新規投稿、CSVインポート、アイコン画像アップロード、コメント投稿、チャプター/チャプターマーカー作成、いいね、ブックマーク、閲覧数イベントの新規書き込みを停止する。閲覧は継続する。管理者の一時許可は30分で自動終了し、30分単位で延長できる。 |
+| `read_only` | 目安85%到達 | 新規投稿、CSVインポート、アイコン画像アップロード、コメント投稿、チャプター/チャプターマーカー作成、いいね、ブックマーク、閲覧数イベントの新規書き込みを停止する。閲覧は継続する。管理者の機能別一時許可は厳密に15分で自動終了する。 |
 | `static_only` | 目安95%到達 | Functions を必要とする公開動的機能を停止し、R2/Pages の静的JSONと静的ページ中心に切り替える。 |
-| `maintenance` | 管理者判断または上限超過寸前 | 管理者以外はメンテナンス画面を表示する。管理者は復旧操作のみ可能。 |
+| `maintenance` | 管理者判断 | 管理者以外はメンテナンス画面を表示する。管理者は復旧操作のみ可能。通常モード変更とは別の専用操作で切り替える。 |
 
-発動目安は固定値ではなく、管理画面で変更できる。
+表の比率は運用判断の目安であり、DBにしきい値として保存せず、自動遷移にも使用しない。
 
-停止順序は、まず検索のフルスキャン系を停止し、次に動的推薦、リアルタイムスコア再計算、YouTube同期を落とす。Discord通知キューは運営対応に必要なため優先し、YouTube同期キューより先に処理する。使用量取得に失敗した場合は、楽観的に通常運用へ戻さず、保守的に `economy` へ遷移する。
+制限する場合は、まず検索のフルスキャン系を止め、次に動的推薦、リアルタイムスコア再計算、YouTube同期を抑制する。Discord通知キューは運営対応に必要なため、YouTube同期キューより優先する。使用量を取得するアプリ内処理はなく、モードが自動遷移することはない。
 
-## 5. 自動停止対象
+## 5. モード別停止対象
 
 ### 5-1. 書き込み系
 
@@ -98,92 +98,51 @@ Durable Object が危険水位に入った場合は即停止ではなく、閲�
 
 ## 6. データ設計
 
-### 6-1. system_settings 拡張
+### 6-1. system_settings
 
-`system_settings` に以下を追加する。
+コストガードは `system_settings` の次の列を正本とする。
 
-- **cost_guard_mode**: text DEFAULT `"normal"` (`normal`, `economy`, `read_only`, `static_only`, `maintenance`)
-- **auto_cost_guard_enabled**: integer DEFAULT 1
-- **cost_guard_thresholds_json**: text (JSON Object)
-- **disabled_features_json**: text (JSON Array)
+- **operation_mode**: text DEFAULT `"normal"` (`normal`, `economy`, `read_only`, `static_only`, `maintenance`)
+- **disabled_features_json**: text (JSON Array / 手動停止する機能)
 - **cost_guard_reason**: text | null
 - **cost_guard_updated_by_user_id**: text | null
 - **cost_guard_updated_at**: integer | null
-- **cost_guard_exception_until**: integer | null (管理者一時許可の終了時刻。既定30分)
+- **cost_guard_exception_until**: integer | null (管理者一時許可の終了時刻。設定時刻から厳密に15分)
 - **cost_guard_exception_features_json**: text (JSON Array / 一時許可する機能)
 
-`cost_guard_thresholds_json` の例:
+`auto_cost_guard_enabled` と `cost_guard_thresholds_json` は最終schemaに存在しない。旧列fallbackや二重書き込みも行わない。
 
-```json
-{
-  "workers_requests_daily_ratio": { "economy": 0.70, "read_only": 0.85, "static_only": 0.95 },
-  "d1_rows_read_daily_ratio": { "economy": 0.70, "read_only": 0.85, "static_only": 0.95 },
-  "d1_rows_written_daily_ratio": { "economy": 0.60, "read_only": 0.80, "static_only": 0.92 },
-  "durable_object_requests_daily_ratio": { "economy": 0.65, "read_only": 0.80, "static_only": 0.92 },
-  "r2_class_a_monthly_ratio": { "economy": 0.70, "read_only": 0.85, "static_only": 0.95 },
-  "r2_class_b_monthly_ratio": { "economy": 0.70, "read_only": 0.85, "static_only": 0.95 },
-  "r2_storage_monthly_ratio": { "economy": 0.70, "read_only": 0.85, "static_only": 0.95 },
-  "kv_writes_daily_ratio": { "economy": 0.60, "read_only": 0.80, "static_only": 0.92 },
-  "queues_operations_daily_ratio": { "economy": 0.60, "read_only": 0.80, "static_only": 0.92 }
-}
-```
+### 6-2. 使用量確認（D1スナップショットなし）
 
-### 6-2. cost_usage_snapshots
-
-使用量監視のために日次・時間帯別のスナップショットを保存する。
-
-- **id**: text (Primary Key)
-- **captured_at**: integer NOT NULL
-- **source**: text (`cloudflare_dashboard`, `graphql_analytics`, `estimated_local`)
-- **workers_requests_today**: integer DEFAULT 0
-- **pages_functions_requests_today**: integer DEFAULT 0
-- **d1_rows_read_today**: integer DEFAULT 0
-- **d1_rows_written_today**: integer DEFAULT 0
-- **r2_storage_gb_month_estimate**: real DEFAULT 0
-- **r2_class_a_month**: integer DEFAULT 0
-- **r2_class_b_month**: integer DEFAULT 0
-- **durable_object_requests_today**: integer DEFAULT 0
-- **durable_object_duration_gb_s_today**: real DEFAULT 0
-- **kv_reads_today**: integer DEFAULT 0
-- **kv_writes_today**: integer DEFAULT 0
-- **queues_operations_today**: integer DEFAULT 0
-- **guard_mode_after_check**: text
-- **created_at**: integer NOT NULL DEFAULT (unixepoch())
-
-Cloudflare 公式メトリクスの取得ができない場合でも、アプリ側の推定カウンタを `estimated_local` として保存し、保守的に停止判断する。
+Cloudflare 使用量は Cloudflare Dashboard を運用者が確認する。アプリ内に実測collectorや信頼できる推定器がないため、`cost_usage_snapshots` テーブルは最終schemaに存在せず、KVにも使用量履歴を保存しない。
 
 ## 7. 管理画面
 
-`/admin` に「コストガード」パネルを追加する。
+`/admin/cost-guard` に手動コストガードパネルを置く。
 
-- 現在の `cost_guard_mode`
-- 自動ガード ON/OFF
-- 各サービスの使用率
-- 発動理由
+- 現在の `operation_mode`
+- 現在の停止機能
+- 前回の変更理由・変更者・変更時刻
 - 手動モード変更
-- 一時解除時間（既定30分、30分単位で延長）
-- 機能別停止トグル
-- しきい値編集
-- 直近のガード履歴
-- Discord DM 通知の送信状況
-- 一時許可・延長理由の入力欄
-- 有料化判断ラインに近い指標の2か月推移
+- 15分の機能別一時許可と明示解除
+- 直近の監査ログ
+- メンテナンス専用の移行・解除操作
 
 管理者は以下を実行できる。
 
 - `normal` へ戻す
-- `read_only` へ強制移行
-- `maintenance` へ強制移行
+- `economy` / `read_only` / `static_only` へ手動変更する
+- 専用操作で `maintenance` へ移行・解除する
 - 特定機能だけ停止する
-- CSV インポートやエクスポートなど重い処理を30分だけ一時的に許可する
+- 許可リスト内の機能を1〜8件選び、15分だけ一時的に許可する
 
-`read_only` 中の一時許可・延長は理由入力を必須にし、30分で自動終了する。30分単位の延長は可能だが、二人確認は必須にしない。迅速な復旧を優先し、単独の管理者操作で戻せるようにする。
+モード変更、メンテナンス変更、一時許可、例外解除は理由入力と確認文字列を要求し、完全な before / after を監査ログへ残す。一時許可は設定時刻から厳密に15分で終了し、任意時間への変更や自動延長は行わない。
 
-## 7-1. 通知
+## 7-1. 記録と通知
 
-- `economy`, `read_only`, `static_only`, `maintenance` へ自動遷移した場合、管理者へ Discord DM を送る。
-- 管理画面にも同内容の通知を残し、Discord DM が失敗しても管理者が確認できるようにする。
-- 通知には、現在モード、超過しそうな指標、停止された機能、一時許可の有無、推奨操作を含める。
+- 自動遷移や自動Discord DMは行わない。
+- 管理者による変更は監査ログへ記録し、`/admin/cost-guard` で確認できるようにする。
+- Cloudflare 使用量の警告は Cloudflare 側の通知設定を利用し、FlameNodeのDBへ推定値を取り込まない。
 
 ## 7-2. 静的JSON生成頻度
 

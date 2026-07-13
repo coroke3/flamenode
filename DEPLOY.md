@@ -335,7 +335,7 @@ wrangler d1 execute flamenode_db --remote --command "UPDATE user SET role='admin
 ### 8-2. system_settings の初期化
 
 ```powershell
-wrangler d1 execute flamenode_db --remote --command "INSERT INTO system_settings (id, operation_mode, auto_cost_guard_enabled) VALUES ('default', 'normal', 1) ON CONFLICT(id) DO UPDATE SET operation_mode=excluded.operation_mode, auto_cost_guard_enabled=excluded.auto_cost_guard_enabled;"
+wrangler d1 execute flamenode_db --remote --command "INSERT INTO system_settings (id, operation_mode) VALUES ('default', 'normal') ON CONFLICT(id) DO UPDATE SET operation_mode=excluded.operation_mode;"
 ```
 
 ### 8-3. 利用規約の最初の版
@@ -354,6 +354,7 @@ wrangler d1 execute flamenode_db --remote --command "INSERT INTO system_settings
 - [ ] `/entry` から自由投稿ができる (動画詳細にリダイレクトされる)
 - [ ] `/admin` (管理者ロール) に入れて、コストガード状態が `normal` と表示される
 - [ ] `/admin/cost-guard` から `economy` → `normal` の切替ができる
+- [ ] `/admin/cost-guard` で機能別の一時許可が15分で失効し、設定・解除が監査ログに残る
 - [ ] `wrangler tail` で Pages のリクエストログが出る
 - [ ] `wrangler tail flamenode-content-jobs` で 15 分以内に Cron 起動ログが出る
 - [ ] `https://<本番ドメイン>/maintenance` が表示できる
@@ -364,6 +365,10 @@ wrangler d1 execute flamenode_db --remote --command "INSERT INTO system_settings
 
 ### 10-1. 緊急のメンテナンス切替
 
+通常は管理者が `/admin/cost-guard` のメンテナンス専用操作から、理由を入力して切り替えます。通常のコストガードモード変更とは別の操作で、どちらも監査ログへ記録されます。
+
+管理画面へ入れない緊急時だけ、次の SQL を使用します。直接 SQL はアプリの監査処理を通らないため、実行者・理由・時刻を別途運用記録へ残してください。
+
 ```powershell
 # 即時メンテナンスモード
 wrangler d1 execute flamenode_db --remote --command "UPDATE system_settings SET operation_mode='maintenance' WHERE id='default';"
@@ -372,7 +377,7 @@ wrangler d1 execute flamenode_db --remote --command "UPDATE system_settings SET 
 wrangler d1 execute flamenode_db --remote --command "UPDATE system_settings SET operation_mode='normal' WHERE id='default';"
 ```
 
-UI で操作する場合は管理者で `/admin/cost-guard` を開いてください。
+Cloudflare 使用量を自動収集してモードを切り替える処理はありません。Cloudflare Dashboard の使用量を運用者が確認し、必要な場合だけ `/admin/cost-guard` から手動変更してください。
 
 ### 10-2. 環境変数だけで一時的にメンテナンス画面へ
 

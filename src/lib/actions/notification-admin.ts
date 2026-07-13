@@ -1,283 +1,97 @@
 "use server";
-import { auditAction } from "@/lib/audit/helpers";
 
 import { revalidatePath } from "next/cache";
-import { eq, sql } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { and, asc, eq } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { getDatabase } from "@/lib/cloudflare";
 import { notificationOutbox } from "@/lib/db/schema";
+import { requireAdminWrite } from "@/lib/auth/writeGuard";
+import { expectedRowCondition } from "@/lib/audit/adapters";
+import { mutateWithAudit } from "@/lib/audit/mutate";
+import type { WriteAuditLogInput } from "@/lib/audit/types";
+import { buildKnownRecipientNotificationBatch } from "@/lib/notifications/enqueue";
 
-export interface NotificationAdminResult {
-  ok: boolean;
-  message?: string;
+export interface NotificationAdminResult { ok: boolean; message?: string }
+type Row = typeof notificationOutbox.$inferSelect;
+const BULK_RETRY_MAX = 10;
+
+function failure(error: unknown): NotificationAdminResult {
+  console.error("[notification-admin] atomic mutation failed", error);
+  return { ok: false, message: "通知更新が競合したか監査記録に失敗しました。" };
 }
 
-/**
- * failed の通知を pending に戻し、再試行できるようにする。
- * attempt_count はリセットせず、next_attempt_at は now にする (即時試行)。
- * Worker (notification-dispatcher) が次の cron で拾い直す。
- */
-export async function retryFailedNotification(
-  formData: FormData,
-): Promise<NotificationAdminResult> {
-  const session = await auth().catch(() => null);
-  const u = session?.user as { id?: string; role?: string } | undefined;
-  if (!u?.id || u.role !== "admin") {
-    return { ok: false, message: "管理者のみ操作できます。" };
-  }
-
-  const id = String(formData.get("id") ?? "").trim();
-  if (!id) return { ok: false, message: "id が必要です。" };
-
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
-
-  const target = (
-    await db
-      .select()
-      .from(notificationOutbox)
-      .where(eq(notificationOutbox.id, id))
-      .limit(1)
-  )[0];
-  if (!target) return { ok: false, message: "通知が見つかりません。" };
-  if (target.status !== "failed") {
-    return {
-      ok: false,
-      message: `status=${target.status} の通知はリトライ対象外です。`,
-    };
-  }
-
+async function updateRows(db: NonNullable<ReturnType<typeof getDatabase>>, rows: Row[], actor: string, kind: "retry" | "cancel", reason?: string): Promise<NotificationAdminResult> {
   const now = Math.floor(Date.now() / 1000);
-  // Worker は attempt_count < MAX_RETRIES のみ拾うため、手動リトライでは
-  // attempt_count を 0 にリセットしないと再試行が走らない。
-  // 履歴に直前の attempt_count を残して状況把握できるようにする。
-  const prevAttempt = target.attempt_count ?? 0;
-  await db
-    .update(notificationOutbox)
-    .set({
-      status: "pending",
-      attempt_count: 0,
-      next_attempt_at: now,
-      last_error: null,
-    })
-    .where(eq(notificationOutbox.id, id));
-
-  await auditAction(db, {
-    table_name: "notification_outbox",
-    record_id: id,
-    action: "UPDATE",
-    before_data: JSON.stringify({
-      status: "failed",
-      attempt_count: prevAttempt,
-      last_error: target.last_error,
-    }),
-    after_data: JSON.stringify({
-      status: "pending",
-      attempt_count: 0,
-      manual_retry: true,
-      retried_by: u.id,
-      retried_at: now,
-    }),
-    operator_user_id: u.id,
-    retention_class: "normal",
-  });
-
-  revalidatePath("/admin/notifications");
-  return { ok: true, message: "通知を pending に戻しました。" };
+  const statements: BatchItem<"sqlite">[] = [];
+  const audits: WriteAuditLogInput[] = [];
+  for (const before of rows) {
+    const patch = kind === "retry"
+      ? { status: "pending" as const, attempt_count: 0, processing_started_at: null, lease_token: null, lease_expires_at: null, next_attempt_at: now, last_error: null, processed_at: null }
+      : { status: "cancelled" as const, processing_started_at: null, lease_token: null, lease_expires_at: null, next_attempt_at: null, last_error: reason || "manual cancel" };
+    const after = { ...before, ...patch };
+    statements.push(db.update(notificationOutbox).set(patch).where(and(eq(notificationOutbox.id, before.id), expectedRowCondition({ expectedCurrent: { ...before } }))!));
+    audits.push({ table_name: "notification_outbox", target_id: before.id, operation: "UPDATE", before: { ...before }, after: { ...after }, actor_user_id: actor, context: `admin_notification_${kind}`, reason: reason || (kind === "retry" ? "手動リトライ" : "手動キャンセル"), retention_class: "normal", strict: true });
+  }
+  try { await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: rows.map(() => 1), audits }); return { ok: true }; }
+  catch (error) { return failure(error); }
 }
 
-/**
- * 未送信/失敗/固着通知を手動キャンセルする。
- * レコードは残し、Worker が拾わない status=cancelled に変える。
- */
-export async function cancelNotification(
-  formData: FormData,
-): Promise<NotificationAdminResult> {
-  const session = await auth().catch(() => null);
-  const u = session?.user as { id?: string; role?: string } | undefined;
-  if (!u?.id || u.role !== "admin") {
-    return { ok: false, message: "管理者のみ操作できます。" };
-  }
-
+export async function retryFailedNotification(formData: FormData): Promise<NotificationAdminResult> {
+  const guard = await requireAdminWrite("admin_notifications");
+  if (!guard.ok) return { ok: false, message: guard.message };
   const id = String(formData.get("id") ?? "").trim();
-  const reason = String(formData.get("reason") ?? "").trim().slice(0, 500);
-  if (!id) return { ok: false, message: "id が必要です。" };
-
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
-
-  const target = (
-    await db
-      .select()
-      .from(notificationOutbox)
-      .where(eq(notificationOutbox.id, id))
-      .limit(1)
-  )[0];
-  if (!target) return { ok: false, message: "通知が見つかりません。" };
-  if (target.status === "sent" || target.status === "cancelled") {
-    return {
-      ok: false,
-      message: `status=${target.status} の通知はキャンセル対象外です。`,
-    };
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  await db
-    .update(notificationOutbox)
-    .set({
-      status: "cancelled",
-      processing_started_at: null,
-      next_attempt_at: null,
-      last_error: reason || "manual cancel",
-    })
-    .where(eq(notificationOutbox.id, id));
-
-  await auditAction(db, {
-    table_name: "notification_outbox",
-    record_id: id,
-    action: "UPDATE",
-    before_data: JSON.stringify({
-      status: target.status,
-      attempt_count: target.attempt_count ?? 0,
-      last_error: target.last_error,
-    }),
-    after_data: JSON.stringify({
-      status: "cancelled",
-      manual_cancel: true,
-      reason: reason || null,
-      cancelled_by: u.id,
-      cancelled_at: now,
-    }),
-    operator_user_id: u.id,
-    retention_class: "normal",
-  });
-
-  revalidatePath("/admin/notifications");
-  return { ok: true, message: "通知をキャンセルしました。" };
+  if (!id || id.length > 128) return { ok: false, message: "idが不正です。" };
+  const db = getDatabase(); if (!db) return { ok: false, message: "DBに接続できません。" };
+  const row = (await db.select().from(notificationOutbox).where(eq(notificationOutbox.id, id)).limit(1))[0];
+  if (!row) return { ok: false, message: "通知が見つかりません。" };
+  if (row.status !== "failed") return { ok: false, message: `status=${row.status}はリトライ対象外です。` };
+  const result = await updateRows(db, [row], guard.user.id, "retry");
+  if (result.ok) revalidatePath("/admin/notifications");
+  return result.ok ? { ok: true, message: "通知をpendingに戻しました。" } : result;
 }
 
-/**
- * dedupe を無視して同内容を再 enqueue する (管理者限定)。
- */
-export async function forceResendNotification(
-  formData: FormData,
-): Promise<NotificationAdminResult> {
-  const session = await auth().catch(() => null);
-  const u = session?.user as { id?: string; role?: string } | undefined;
-  if (!u?.id || u.role !== "admin") {
-    return { ok: false, message: "管理者のみ操作できます。" };
-  }
-
+export async function cancelNotification(formData: FormData): Promise<NotificationAdminResult> {
+  const guard = await requireAdminWrite("admin_notifications");
+  if (!guard.ok) return { ok: false, message: guard.message };
   const id = String(formData.get("id") ?? "").trim();
-  if (!id) return { ok: false, message: "id が必要です。" };
+  const reason = String(formData.get("reason") ?? "").trim();
+  if (!id || id.length > 128 || reason.length > 500) return { ok: false, message: "入力が不正です。" };
+  const db = getDatabase(); if (!db) return { ok: false, message: "DBに接続できません。" };
+  const row = (await db.select().from(notificationOutbox).where(eq(notificationOutbox.id, id)).limit(1))[0];
+  if (!row) return { ok: false, message: "通知が見つかりません。" };
+  if (row.status === "sent" || row.status === "cancelled") return { ok: false, message: `status=${row.status}はキャンセル対象外です。` };
+  const result = await updateRows(db, [row], guard.user.id, "cancel", reason);
+  if (result.ok) revalidatePath("/admin/notifications");
+  return result.ok ? { ok: true, message: "通知をキャンセルしました。" } : result;
+}
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
-
-  const target = (
-    await db
-      .select()
-      .from(notificationOutbox)
-      .where(eq(notificationOutbox.id, id))
-      .limit(1)
-  )[0];
-  if (!target) return { ok: false, message: "通知が見つかりません。" };
-
+export async function forceResendNotification(formData: FormData): Promise<NotificationAdminResult> {
+  const guard = await requireAdminWrite("admin_notifications");
+  if (!guard.ok) return { ok: false, message: guard.message };
+  const id = String(formData.get("id") ?? "").trim();
+  if (!id || id.length > 128) return { ok: false, message: "idが不正です。" };
+  const db = getDatabase(); if (!db) return { ok: false, message: "DBに接続できません。" };
+  const source = (await db.select().from(notificationOutbox).where(eq(notificationOutbox.id, id)).limit(1))[0];
+  if (!source) return { ok: false, message: "通知が見つかりません。" };
   let payload: Record<string, unknown>;
+  try { payload = JSON.parse(source.payload_json) as Record<string, unknown>; } catch { return { ok: false, message: "payloadを解析できません。" }; }
+  const batch = await buildKnownRecipientNotificationBatch(db, [{ recipientUserId: source.recipient_user_id, type: source.type, payload, eventId: source.event_id, dedupeKey: `${source.dedupe_key || source.id}:force:${crypto.randomUUID()}` }]);
+  if (batch.rows.length !== 1) return { ok: false, message: "再送通知を構築できません。" };
   try {
-    payload = JSON.parse(target.payload_json) as Record<string, unknown>;
-  } catch {
-    return { ok: false, message: "payload の解析に失敗しました。" };
-  }
-
-  const { enqueueNotification } = await import("@/lib/notifications/enqueue");
-  const { runWithNotificationBehavior } = await import("@/lib/notifications/context");
-  const ok = await runWithNotificationBehavior("user", () =>
-    enqueueNotification(db, {
-      recipientUserId: target.recipient_user_id,
-      type: target.type,
-      payload,
-      eventId: target.event_id,
-      dedupeKey: target.dedupe_key
-        ? `${target.dedupe_key}:force:${Date.now()}`
-        : null,
-      force: true,
-    }),
-  );
-
-  if (!ok) {
-    return { ok: false, message: "再送の enqueue に失敗しました。" };
-  }
-
+    await mutateWithAudit(db, { mutationStatements: batch.statements, expectedMutationChanges: batch.expectedChanges, audits: [{ table_name: "notification_outbox", target_id: batch.rows[0].id, operation: "CREATE", after: { ...batch.rows[0] }, actor_user_id: guard.user.id, context: "admin_notification_force_resend", reason: `通知${source.id}を強制再送`, retention_class: "normal", strict: true }] });
+  } catch (error) { return failure(error); }
   revalidatePath("/admin/notifications");
   return { ok: true, message: "通知を再送キューに追加しました。" };
 }
 
-/**
- * failed 通知の一括リトライ。
- * MAX 件数を上限 (50) で打ち切り、attempt_count を 0 に戻す。
- * 履歴には件数だけ残す (個々の id は残さない、ボリュームが大きいため)。
- */
-const BULK_RETRY_MAX = 50;
-
-export async function retryAllFailedNotifications(
-  _formData: FormData,
-): Promise<NotificationAdminResult & { retried?: number }> {
-  const session = await auth().catch(() => null);
-  const u = session?.user as { id?: string; role?: string } | undefined;
-  if (!u?.id || u.role !== "admin") {
-    return { ok: false, message: "管理者のみ操作できます。" };
-  }
-
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
-
-  // 上限を超えると大量 enqueue になるため、最古から BULK_RETRY_MAX 件のみ拾う。
-  const targets = await db
-    .select({ id: notificationOutbox.id })
-    .from(notificationOutbox)
-    .where(eq(notificationOutbox.status, "failed"))
-    .limit(BULK_RETRY_MAX);
-  if (targets.length === 0) {
-    return { ok: true, message: "failed 通知はありません。", retried: 0 };
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  const ids = targets.map((t) => t.id);
-  // SQLite IN 句で一括 UPDATE
-  await db
-    .update(notificationOutbox)
-    .set({
-      status: "pending",
-      attempt_count: 0,
-      next_attempt_at: now,
-      last_error: null,
-    })
-    .where(
-      sql`${notificationOutbox.id} IN (${sql.join(
-        ids.map((id) => sql`${id}`),
-        sql`, `,
-      )})`,
-    );
-
-  await auditAction(db, {
-    table_name: "notification_outbox",
-    record_id: "bulk_retry",
-    action: "UPDATE",
-    after_data: JSON.stringify({
-      manual_bulk_retry: true,
-      retried_count: ids.length,
-      retried_by: u.id,
-      retried_at: now,
-    }),
-    operator_user_id: u.id,
-    retention_class: "long_audit",
-  });
-
-  revalidatePath("/admin/notifications");
-  return {
-    ok: true,
-    message: `${ids.length} 件の failed を pending に戻しました (上限 ${BULK_RETRY_MAX})。`,
-    retried: ids.length,
-  };
+export async function retryAllFailedNotifications(_formData: FormData): Promise<NotificationAdminResult & { retried?: number }> {
+  const guard = await requireAdminWrite("admin_notifications");
+  if (!guard.ok) return { ok: false, message: guard.message };
+  const db = getDatabase(); if (!db) return { ok: false, message: "DBに接続できません。" };
+  const rows = await db.select().from(notificationOutbox).where(eq(notificationOutbox.status, "failed")).orderBy(asc(notificationOutbox.created_at)).limit(BULK_RETRY_MAX + 1);
+  const targets = rows.slice(0, BULK_RETRY_MAX);
+  if (targets.length === 0) return { ok: true, message: "failed通知はありません。", retried: 0 };
+  const result = await updateRows(db, targets, guard.user.id, "retry");
+  if (result.ok) revalidatePath("/admin/notifications");
+  return result.ok ? { ok: true, message: `${targets.length}件をpendingに戻しました。`, retried: targets.length } : result;
 }

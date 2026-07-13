@@ -3,6 +3,8 @@ import NextAuth, { type NextAuthConfig } from "next-auth";
 import Discord from "next-auth/providers/discord";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { and, eq } from "drizzle-orm";
+import { mutateWithAudit } from "@/lib/audit/mutate";
+import { expectedRowCondition } from "@/lib/audit/expectedRowCondition";
 import { getDatabase, getDatabaseAsync, getEnv, waitForLocalBindings } from "@/lib/cloudflare";
 import { accounts, sessions, users, verificationTokens } from "@/lib/db/schema";
 
@@ -143,19 +145,36 @@ export async function buildAuthConfig(): Promise<NextAuthConfig> {
         ) {
           const eventDb = getDatabase();
           if (!eventDb) throw new Error("AUTH_DATABASE_UNAVAILABLE");
-          await eventDb
-            ?.update(users)
-            .set({ discord_id: account.providerAccountId })
-            .where(eq(users.id, user.id));
-          await eventDb
-            ?.update(accounts)
-            .set({ access_token: null })
-            .where(
-              and(
-                eq(accounts.provider, account.provider),
-                eq(accounts.providerAccountId, account.providerAccountId),
-              )!,
-            );
+          const beforeUser = (
+            await eventDb.select().from(users).where(eq(users.id, user.id)).limit(1)
+          )[0];
+          if (!beforeUser) throw new Error("AUTH_LINK_USER_NOT_FOUND");
+          const afterUser = { ...beforeUser, discord_id: account.providerAccountId };
+          await mutateWithAudit(eventDb, {
+            mutationStatements: [
+              eventDb.update(users).set({ discord_id: account.providerAccountId }).where(
+                expectedRowCondition({ expectedCurrent: beforeUser }),
+              ),
+              eventDb.update(accounts).set({ access_token: null }).where(
+                and(
+                  eq(accounts.provider, account.provider),
+                  eq(accounts.providerAccountId, account.providerAccountId),
+                )!,
+              ),
+            ],
+            expectedMutationChanges: [1, 1],
+            audits: [{
+              table_name: "user",
+              target_id: user.id,
+              operation: "UPDATE",
+              before: { ...beforeUser },
+              after: { ...afterUser },
+              actor_user_id: user.id,
+              reason: "auth_link_discord",
+              context: "auth",
+              retention_class: "long_audit",
+            }],
+          });
         }
       },
     },

@@ -1,131 +1,45 @@
 "use server";
-import { auditAction } from "@/lib/audit/helpers";
 
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { and, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { events } from "@/lib/db/schema";
+import { requireAdminWrite } from "@/lib/auth/writeGuard";
+import { expectedRowCondition } from "@/lib/audit/adapters";
+import { mutateWithAudit } from "@/lib/audit/mutate";
 
-export interface ApiEndpointResult {
-  ok: boolean;
-  message?: string;
-  id?: string;
-}
+export interface ApiEndpointResult { ok: boolean; message?: string; id?: string }
 
-async function requireAdmin(): Promise<
-  { ok: true; userId: string } | { ok: false; result: ApiEndpointResult }
-> {
-  const session = await auth().catch(() => null);
-  const user = session?.user as { id?: string; role?: string } | undefined;
-  if (!user?.id) {
-    return { ok: false, result: { ok: false, message: "Login is required." } };
-  }
-  if (user.role !== "admin") {
-    return { ok: false, result: { ok: false, message: "Admin access is required." } };
-  }
-  return { ok: true, userId: user.id };
-}
-
-export async function createApiEndpoint(
-  formData: FormData,
-): Promise<ApiEndpointResult> {
-  const guard = await requireAdmin();
-  if (!guard.ok) return guard.result;
-
-  const eventId = String(formData.get("event_id") ?? "").trim();
-  if (!eventId) return { ok: false, message: "event_id is required." };
-
+async function setPublicApi(eventId: string, enabled: 0 | 1): Promise<ApiEndpointResult> {
+  const guard = await requireAdminWrite("admin_api_endpoints");
+  if (!guard.ok) return { ok: false, message: guard.message };
+  if (!eventId || eventId.length > 128) return { ok: false, message: "event_idが不正です。" };
   const db = getDatabase();
-  if (!db) return { ok: false, message: "Database is unavailable." };
-
-  const current = (
-    await db
-      .select({
-        id: events.id,
-        visibility_status: events.visibility_status,
-        public_api_enabled: events.public_api_enabled,
-      })
-      .from(events)
-      .where(eq(events.id, eventId))
-      .limit(1)
-  )[0];
-  if (!current) return { ok: false, message: "Event was not found." };
-  if (current.visibility_status !== "public") {
-    return { ok: false, message: "Only public events can expose a public API." };
+  if (!db) return { ok: false, message: "DBに接続できません。" };
+  const before = (await db.select().from(events).where(eq(events.id, eventId)).limit(1))[0];
+  if (!before) return { ok: false, message: "イベントが見つかりません。" };
+  if (enabled === 1 && before.visibility_status !== "public") return { ok: false, message: "公開イベントだけAPIを有効化できます。" };
+  const now = Math.max(Math.floor(Date.now() / 1000), before.updated_at + 1);
+  const after = { ...before, public_api_enabled: enabled, updated_at: now };
+  try {
+    await mutateWithAudit(db, {
+      mutationStatements: [db.update(events).set({ public_api_enabled: enabled, updated_at: now }).where(and(eq(events.id, eventId), expectedRowCondition({ expectedCurrent: { ...before } }))!)],
+      expectedMutationChanges: 1,
+      audits: [{ table_name: "events", target_id: eventId, operation: "UPDATE", before: { ...before }, after: { ...after }, actor_user_id: guard.user.id, context: "admin_api_endpoints", reason: enabled ? "公開APIを有効化" : "公開APIを無効化", retention_class: "long_audit", strict: true }],
+    });
+  } catch (error) {
+    console.error("[api-endpoints] atomic mutation failed", error);
+    return { ok: false, message: "更新が競合したか監査記録に失敗しました。" };
   }
-
-  const now = Math.floor(Date.now() / 1000);
-  await db
-    .update(events)
-    .set({ public_api_enabled: 1, updated_at: now })
-    .where(eq(events.id, eventId));
-  await auditAction(db, {
-    table_name: "events",
-    record_id: eventId,
-    action: "UPDATE",
-    before_data: JSON.stringify({
-      public_api_enabled: current.public_api_enabled ?? 0,
-    }),
-    after_data: JSON.stringify({ public_api_enabled: 1 }),
-    operator_user_id: guard.userId,
-    retention_class: "long_audit",
-  });
-
   revalidatePath("/admin/api-endpoints");
-  return { ok: true, id: eventId, message: "Public API was enabled." };
+  return { ok: true, id: eventId, message: enabled ? "公開APIを有効化しました。" : "公開APIを無効化しました。" };
 }
 
-export async function setApiEndpointActive(
-  formData: FormData,
-): Promise<ApiEndpointResult> {
-  const guard = await requireAdmin();
-  if (!guard.ok) return guard.result;
+export async function createApiEndpoint(formData: FormData): Promise<ApiEndpointResult> {
+  return setPublicApi(String(formData.get("event_id") ?? "").trim(), 1);
+}
 
-  const id = String(formData.get("id") ?? "").trim();
-  const next = Number(formData.get("public_api_enabled") ?? 0) === 1 ? 1 : 0;
-  if (!id) return { ok: false, message: "id is required." };
-
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "Database is unavailable." };
-
-  const current = (
-    await db
-      .select({
-        id: events.id,
-        visibility_status: events.visibility_status,
-        public_api_enabled: events.public_api_enabled,
-      })
-      .from(events)
-      .where(eq(events.id, id))
-      .limit(1)
-  )[0];
-  if (!current) return { ok: false, message: "Event was not found." };
-  if (next === 1 && current.visibility_status !== "public") {
-    return { ok: false, message: "Only public events can expose a public API." };
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  await db
-    .update(events)
-    .set({ public_api_enabled: next, updated_at: now })
-    .where(eq(events.id, id));
-  await auditAction(db, {
-    table_name: "events",
-    record_id: id,
-    action: "UPDATE",
-    before_data: JSON.stringify({
-      public_api_enabled: current.public_api_enabled ?? 0,
-    }),
-    after_data: JSON.stringify({ public_api_enabled: next }),
-    operator_user_id: guard.userId,
-    retention_class: "long_audit",
-  });
-
-  revalidatePath("/admin/api-endpoints");
-  return {
-    ok: true,
-    id,
-    message: next === 1 ? "Public API was enabled." : "Public API was disabled.",
-  };
+export async function setApiEndpointActive(formData: FormData): Promise<ApiEndpointResult> {
+  const enabled = String(formData.get("public_api_enabled") ?? "0") === "1" ? 1 : 0;
+  return setPublicApi(String(formData.get("id") ?? "").trim(), enabled);
 }

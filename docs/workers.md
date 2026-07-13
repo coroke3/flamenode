@@ -5,7 +5,7 @@ FlameNode uses 3 Cron Workers in production.
 | Worker | Cron | Main responsibility | Notes |
 |---|---:|---|---|
 | `fast-jobs` | `*/5 * * * *` | Slot reminder enqueue + notification dispatch | Uses `workers/notification-dispatcher/*` modules |
-| `content-jobs` | `*/15 * * * *` | Cost guard escalation + static JSON rebuild queue + retention cleanup | Writes R2/KV static JSON |
+| `content-jobs` | `*/15 * * * *` | Static JSON rebuild queue + retention cleanup | Writes R2/KV static JSON |
 | `sync-jobs` | `0 */12 * * *` | YouTube sync + score recalculation | Requires `YOUTUBE_API_KEY` for YouTube sync |
 
 Legacy standalone worker entrypoints remain as importable modules, but their `wrangler.toml` files are intentionally removed. Deploy only:
@@ -34,13 +34,12 @@ Static JSON targets currently supported by `content-jobs`:
 Queue targetは上表のcanonical値だけを受理する。旧別名や未知の値を正規化または
 成功扱いにはせず、Workerの有限retry後に`failed`として可視化する。
 
-`content-jobs` queue behavior follows `system_settings.operation_mode`:
-
-Before processing the rebuild queue, `content-jobs` also applies automatic cost
-guard escalation when `system_settings.auto_cost_guard_enabled = 1`. It reads the
-latest `cost_usage_snapshots` row, compares it with
-`system_settings.cost_guard_thresholds_json`, and only moves `operation_mode` to
-a more restrictive mode. It never downgrades automatically.
+`content-jobs` queue behavior follows `system_settings.operation_mode`. The worker
+does not collect Cloudflare usage, calculate thresholds, or change the mode. An
+administrator observes Cloudflare Dashboard and changes `operation_mode` manually
+from `/admin/cost-guard`. Feature-specific overrides expire after exactly 15
+minutes. Entering or leaving `maintenance` uses the dedicated maintenance action,
+not the normal mode-change action.
 
 | Mode | Queue behavior |
 |---|---|

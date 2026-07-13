@@ -207,7 +207,7 @@ npx wrangler d1 execute flamenode_db --local --command "SELECT id, name, role FR
 npx wrangler d1 execute flamenode_db --local --command "UPDATE user SET role='admin' WHERE id='<上で得た id>';"
 
 # system_settings の初期化 (まだ無ければ)
-npx wrangler d1 execute flamenode_db --local --command "INSERT INTO system_settings (id, operation_mode, auto_cost_guard_enabled) VALUES ('default', 'normal', 1) ON CONFLICT(id) DO UPDATE SET operation_mode=excluded.operation_mode, auto_cost_guard_enabled=excluded.auto_cost_guard_enabled;"
+npx wrangler d1 execute flamenode_db --local --command "INSERT INTO system_settings (id, operation_mode) VALUES ('default', 'normal') ON CONFLICT(id) DO UPDATE SET operation_mode=excluded.operation_mode;"
 ```
 
 GUI で見たい場合は Drizzle Studio を使えます (本番 D1 ではなく D1-HTTP 接続なので、ローカル運用では一時的な参照に使う想定です):
@@ -263,11 +263,13 @@ npx wrangler d1 execute flamenode_db --local --command "UPDATE system_settings S
 ```
 
 管理者でログインしている場合は `/admin/cost-guard` から UI で操作できます。
-`/admin/cost-guard` では最新 `cost_usage_snapshots`、推奨 mode、`cost_guard_thresholds_json`、一時例外期限も確認・編集できます。
+`/admin/cost-guard` では現在の `operation_mode`、変更理由、直近の監査ログ、一時例外の期限を確認できます。モードは管理者が手動で変更し、機能別の一時許可は確認文字列と理由を要求したうえで15分だけ有効です。メンテナンスへの移行・解除は通常のモード変更とは分離された専用操作です。
+
+Cloudflare 使用量の自動収集、推奨 mode の自動計算、自動昇格は実装していません。必要な場合は Cloudflare Dashboard を確認して手動で判断してください。
 
 ### 6-3. 管理画面 DB スプレッドシート (オプション)
 
-`.dev.vars` に `ADMIN_SPREADSHEET_ENABLED="true"` を設定し、管理者でログインすると `/admin/spreadsheet` がサイドバーに表示されます。全 D1 テーブルを表形式で閲覧・編集できます（認証トークン列はマスク・編集不可、`audit_logs` / `cost_usage_snapshots` は読み取り専用）。
+`.dev.vars` に `ADMIN_SPREADSHEET_ENABLED="true"` を設定し、管理者でログインすると `/admin/spreadsheet` がサイドバーに表示されます。D1 テーブルを表形式で閲覧・編集できます（認証トークン列はマスク・編集不可、`audit_logs` は読み取り専用）。
 
 CSV / TSV: ツールバーからエクスポート（ダウンロード・クリップボード）とインポート（貼り付け・ファイル・区切り自動/CSV/TSV・ヘッダー行・UPSERT/INSERT）が使えます。インポートは最大 500 行、エクスポートは最大 5000 行です。
 
