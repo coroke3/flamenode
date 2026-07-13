@@ -30,8 +30,10 @@ export default async function AdminYoutubeQuotaPage(): Promise<React.ReactElemen
   const env = getEnv();
   const now = Math.floor(Date.now() / 1000);
   const quotaDay = youtubeQuotaDay(new Date(now * 1_000));
-  const configuredUnits = resolveYoutubeDailyQuotaUnits(env.YOUTUBE_DAILY_QUOTA_LIMIT);
-  const budgetUnits = youtubeDailyBudgetUnits(env.YOUTUBE_DAILY_QUOTA_LIMIT);
+  const configuredFallback = resolveYoutubeDailyQuotaUnits(
+    env.YOUTUBE_DAILY_QUOTA_LIMIT,
+  );
+  const budgetFallback = youtubeDailyBudgetUnits(env.YOUTUBE_DAILY_QUOTA_LIMIT);
   let row: QuotaRow | null = null;
   let error: string | null = null;
 
@@ -50,6 +52,11 @@ export default async function AdminYoutubeQuotaPage(): Promise<React.ReactElemen
     error = String(cause);
   }
 
+  const rowBudget = Number(row?.limit_units ?? 0);
+  const budgetUnits = rowBudget > 0 ? rowBudget : budgetFallback;
+  const configuredUnits = rowBudget > 0
+    ? Math.ceil((rowBudget * 100) / YOUTUBE_TARGET_USAGE_PERCENT)
+    : configuredFallback;
   const usedUnits = Math.max(0, Number(row?.used_units ?? 0));
   const remainingUnits = Math.max(0, budgetUnits - usedUnits);
   const usagePercent = budgetUnits > 0
