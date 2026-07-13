@@ -13,14 +13,12 @@ import {
 import { resolveActiveXUserId } from "./resolveActiveXId";
 import type { XIdEntry } from "@/lib/xid/entries";
 
-export type HeaderXIdEntry = XIdEntry;
-
 export type HeaderUser = {
   id: string;
   name: string;
   image: string | null;
   role: "user" | "admin" | "moderator";
-  xIds: HeaderXIdEntry[];
+  xIds: XIdEntry[];
   management: Pick<
     ManagementAccess,
     "canAccessAdmin" | "canAccessManage" | "manageableEventCount"
@@ -43,11 +41,11 @@ function normalizeRole(
 
 function normalizeApprovalStatus(
   status: string | null | undefined,
-): HeaderXIdEntry["approval_status"] {
+): XIdEntry["approval_status"] {
   return status === "approved" || status === "rejected" ? status : "pending";
 }
 
-function approvalRank(status: HeaderXIdEntry["approval_status"]): number {
+function approvalRank(status: XIdEntry["approval_status"]): number {
   return status === "approved" ? 0 : status === "pending" ? 1 : 2;
 }
 
@@ -55,22 +53,33 @@ function approvalRank(status: HeaderXIdEntry["approval_status"]): number {
 async function fetchHeaderXIdEntries(
   db: DB,
   userId: string,
-): Promise<HeaderXIdEntry[]> {
-  const linkedRows = await db
-    .select({
-      x_user_id: xUsers.id,
-      x_name: xUsers.x_name,
-      icon_url: xUsers.icon_url,
-      approval_status: xUsers.approval_status,
-    })
-    .from(xUsers)
-    .where(eq(xUsers.linked_user_id, userId));
+): Promise<XIdEntry[]> {
+  const [linkedRows, pendingRequests] = await Promise.all([
+    db
+      .select({
+        x_user_id: xUsers.id,
+        x_name: xUsers.x_name,
+        icon_url: xUsers.icon_url,
+        approval_status: xUsers.approval_status,
+      })
+      .from(xUsers)
+      .where(eq(xUsers.linked_user_id, userId)),
+    db
+      .select({ requested_x_id: xAccountLinkRequests.requested_x_id })
+      .from(xAccountLinkRequests)
+      .where(
+        and(
+          eq(xAccountLinkRequests.user_id, userId),
+          eq(xAccountLinkRequests.status, "pending"),
+        )!,
+      ),
+  ]);
 
-  const byNormalizedXId = new Map<string, HeaderXIdEntry>();
+  const byNormalizedXId = new Map<string, XIdEntry>();
   for (const row of linkedRows) {
     const normalizedId = normalizeXId(row.x_user_id);
     if (!normalizedId) continue;
-    const entry: HeaderXIdEntry = {
+    const entry: XIdEntry = {
       x_user_id: normalizedId,
       x_name: row.x_name?.trim() || `@${normalizedId}`,
       icon_url: row.icon_url,
@@ -86,15 +95,6 @@ async function fetchHeaderXIdEntries(
     }
   }
 
-  const pendingRequests = await db
-    .select({ requested_x_id: xAccountLinkRequests.requested_x_id })
-    .from(xAccountLinkRequests)
-    .where(
-      and(
-        eq(xAccountLinkRequests.user_id, userId),
-        eq(xAccountLinkRequests.status, "pending"),
-      )!,
-    );
   for (const request of pendingRequests) {
     const normalizedId = normalizeXId(request.requested_x_id);
     if (!normalizedId || byNormalizedXId.has(normalizedId)) continue;
@@ -126,27 +126,29 @@ export async function buildHeaderUser(
 ): Promise<HeaderUser | null> {
   if (!sessionUser?.id) return null;
   const userId = sessionUser.id;
-  const activeXId = normalizeXId(sessionUser.active_x_user_id) || null;
-  let role = normalizeRole(sessionUser.role);
-  let xIds: HeaderXIdEntry[] = [];
+  const fallbackRole = normalizeRole(sessionUser.role);
+  const fallbackActiveXId = normalizeXId(sessionUser.active_x_user_id) || null;
 
   const dbPayload = await withDatabase(async (db) => {
-    const userRow = (
-      await db
+    const [userRows, entries] = await Promise.all([
+      db
         .select({
           active_x_user_id: users.active_x_user_id,
           role: users.role,
         })
         .from(users)
         .where(eq(users.id, userId))
-        .limit(1)
-    )[0];
-
-    let resolvedActive = normalizeXId(userRow?.active_x_user_id) || activeXId;
-    role = normalizeRole(userRow?.role ?? sessionUser.role);
-    const entries = await fetchHeaderXIdEntries(db, userId);
-    resolvedActive =
-      (await resolveActiveXUserId(db, userId, resolvedActive)) ?? resolvedActive;
+        .limit(1),
+      fetchHeaderXIdEntries(db, userId),
+    ]);
+    const userRow = userRows[0];
+    const role = normalizeRole(userRow?.role ?? sessionUser.role);
+    const resolvedActive =
+      (await resolveActiveXUserId(
+        db,
+        userId,
+        normalizeXId(userRow?.active_x_user_id) || fallbackActiveXId,
+      )) ?? fallbackActiveXId;
     const normalizedActive = normalizeXId(resolvedActive) || null;
 
     return {
@@ -160,18 +162,14 @@ export async function buildHeaderUser(
     };
   });
 
-  if (dbPayload) {
-    role = dbPayload.role;
-    xIds = dbPayload.xIds;
-  }
-
+  const role = dbPayload?.role ?? fallbackRole;
   const management = await getManagementAccess({ id: userId, role });
   return {
     id: userId,
     name: sessionUser.name?.trim() || "guest",
     image: sessionUser.image ?? null,
     role,
-    xIds,
+    xIds: dbPayload?.xIds ?? [],
     management: {
       canAccessAdmin: management.canAccessAdmin,
       canAccessManage: management.canAccessManage,
