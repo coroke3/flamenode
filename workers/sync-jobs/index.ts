@@ -1,14 +1,14 @@
 /**
- * sync-jobs: 12時間毎の外部API同期ジョブ。
+ * sync-jobs: 1時間毎の外部API・集計ジョブ。
  * - YouTube メタデータ同期
- * - スコア再計算
+ * - スコア差分再計算
  *
- * 既存の youtube-sync と score-recalc を統合。
+ * YouTube側に内部retryがあるため、Worker境界では処理全体を再実行しない。
+ * Free planの1実行50 subrequestsを超えないことを優先する。
  */
 import { createCronWorker } from "../shared/createCronWorker.ts";
 import { recalcScoreBatch } from "../score-recalc/index.ts";
 import { withCronLease } from "../shared/cronLease.ts";
-import { withBoundedRetry } from "../shared/queue.ts";
 import { runJob } from "../shared/runJob.ts";
 import { syncBatch } from "../youtube-sync/index.ts";
 
@@ -19,9 +19,8 @@ export interface Env {
   BUILD_COMMIT_SHA?: string;
 }
 
-// 長時間固定leaseではなく、10分leaseをheartbeatで更新する。
-const SYNC_JOBS_LEASE_SEC = 10 * 60;
-const SYNC_JOBS_HEARTBEAT_SEC = 3 * 60;
+const SYNC_JOBS_LEASE_SEC = 50 * 60;
+const SYNC_JOBS_HEARTBEAT_SEC = 10 * 60;
 
 export async function runSyncJobs(env: Env): Promise<void> {
   await runJob(
@@ -36,17 +35,15 @@ export async function runSyncJobs(env: Env): Promise<void> {
           heartbeatSeconds: SYNC_JOBS_HEARTBEAT_SEC,
         },
         async () => {
-          const youtube = await runJob("sync-jobs", "youtube-sync", () =>
-            withBoundedRetry(() => syncBatch(env), {
-              attempts: 2,
-              delayMs: 250,
-            }),
+          const youtube = await runJob(
+            "sync-jobs",
+            "youtube-sync",
+            () => syncBatch(env),
           );
-          const score = await runJob("sync-jobs", "score-recalc", () =>
-            withBoundedRetry(() => recalcScoreBatch(env), {
-              attempts: 2,
-              delayMs: 100,
-            }),
+          const score = await runJob(
+            "sync-jobs",
+            "score-recalc",
+            () => recalcScoreBatch(env),
           );
           return {
             processed: youtube.processed + score.processed,
