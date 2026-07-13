@@ -19,29 +19,48 @@ export interface Env {
   BUILD_COMMIT_SHA?: string;
 }
 
-const SYNC_JOBS_LEASE_SEC = 11 * 60 * 60;
+// 長時間固定leaseではなく、10分leaseをheartbeatで更新する。
+const SYNC_JOBS_LEASE_SEC = 10 * 60;
+const SYNC_JOBS_HEARTBEAT_SEC = 3 * 60;
 
 export async function runSyncJobs(env: Env): Promise<void> {
-  await runJob("sync-jobs", "cron", async () => {
-    const leased = await withCronLease(
-      env,
-      { jobName: "sync-jobs", leaseSeconds: SYNC_JOBS_LEASE_SEC },
-      async () => {
-        const youtube = await runJob("sync-jobs", "youtube-sync", () =>
-          withBoundedRetry(() => syncBatch(env), { attempts: 2, delayMs: 250 }),
-        );
-        const score = await runJob("sync-jobs", "score-recalc", () =>
-          withBoundedRetry(() => recalcScoreBatch(env), { attempts: 2, delayMs: 100 }),
-        );
-        return {
-          processed: youtube.processed + score.processed,
-          skipped: youtube.skipped + score.skipped,
-          failed: youtube.failed + score.failed,
-        };
-      },
-    );
-    return leased.acquired ? (leased.value ?? { skipped: 1 }) : { skipped: 1 };
-  });
+  await runJob(
+    "sync-jobs",
+    "cron",
+    async () => {
+      const leased = await withCronLease(
+        env,
+        {
+          jobName: "sync-jobs",
+          leaseSeconds: SYNC_JOBS_LEASE_SEC,
+          heartbeatSeconds: SYNC_JOBS_HEARTBEAT_SEC,
+        },
+        async () => {
+          const youtube = await runJob("sync-jobs", "youtube-sync", () =>
+            withBoundedRetry(() => syncBatch(env), {
+              attempts: 2,
+              delayMs: 250,
+            }),
+          );
+          const score = await runJob("sync-jobs", "score-recalc", () =>
+            withBoundedRetry(() => recalcScoreBatch(env), {
+              attempts: 2,
+              delayMs: 100,
+            }),
+          );
+          return {
+            processed: youtube.processed + score.processed,
+            skipped: youtube.skipped + score.skipped,
+            failed: youtube.failed + score.failed,
+          };
+        },
+      );
+      return leased.acquired
+        ? (leased.value ?? { skipped: 1 })
+        : { skipped: 1 };
+    },
+    { rethrow: true },
+  );
 }
 
 export default createCronWorker<Env>({
