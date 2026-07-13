@@ -18,6 +18,7 @@ export interface Env {
   DB: D1Database;
   KV: KVNamespace;
   YOUTUBE_API_KEY?: string;
+  YOUTUBE_API_KEY_SECONDARY?: string;
   BUILD_COMMIT_SHA?: string;
 }
 
