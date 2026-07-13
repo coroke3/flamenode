@@ -3,8 +3,10 @@ main = "index.ts"
 compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Workers Free で1時間以上のCronは長時間CPU枠を利用できる。
+# 1回の処理量を増やし、全件巡回に数か月かかる状態を避ける。
 [triggers]
-crons = ["0 */12 * * *"]
+crons = ["30 * * * *"]
 
 [[d1_databases]]
 binding = "DB"
