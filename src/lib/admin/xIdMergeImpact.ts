@@ -1,15 +1,5 @@
-import { eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
-import {
-  eventStaff,
-  slots,
-  videoChapters,
-  videoInteractions,
-  videoMembers,
-  videos,
-  xUserAliases,
-  xUserIcons,
-} from "@/lib/db/schema";
 export {
   summarizeMergeImpact,
   totalMergeImpact,
@@ -19,41 +9,50 @@ import type { XIdMergeImpactItem } from "./xIdMergeImpactCore";
 
 type AnyDb = LibSQLDatabase<any>;
 
+type MergeImpactCounts = {
+  creatorVideos: number;
+  members: number;
+  chapters: number;
+  interactions: number;
+  icons: number;
+  staff: number;
+  aliasesOwned: number;
+  aliasesPointing: number;
+  slotRows: number;
+};
+
+function count(value: unknown): number {
+  return Number(value ?? 0);
+}
+
 export async function fetchXIdMergeImpact(
   db: AnyDb,
   fromXId: string,
 ): Promise<XIdMergeImpactItem[]> {
-  const [
-    creatorVideos,
-    members,
-    chapters,
-    interactions,
-    icons,
-    staff,
-    aliasesOwned,
-    aliasesPointing,
-    slotRows,
-  ] = await Promise.all([
-    db.select({ c: sql<number>`COUNT(*)` }).from(videos).where(eq(videos.creator_x_user_id, fromXId)),
-    db.select({ c: sql<number>`COUNT(*)` }).from(videoMembers).where(eq(videoMembers.x_user_id, fromXId)),
-    db.select({ c: sql<number>`COUNT(*)` }).from(videoChapters).where(eq(videoChapters.x_user_id, fromXId)),
-    db.select({ c: sql<number>`COUNT(*)` }).from(videoInteractions).where(eq(videoInteractions.x_user_id, fromXId)),
-    db.select({ c: sql<number>`COUNT(*)` }).from(xUserIcons).where(eq(xUserIcons.x_user_id, fromXId)),
-    db.select({ c: sql<number>`COUNT(*)` }).from(eventStaff).where(eq(eventStaff.x_user_id, fromXId)),
-    db.select({ c: sql<number>`COUNT(*)` }).from(xUserAliases).where(eq(xUserAliases.x_user_id, fromXId)),
-    db.select({ c: sql<number>`COUNT(*)` }).from(xUserAliases).where(eq(xUserAliases.alias_x_id, fromXId)),
-    db.select({ c: sql<number>`COUNT(*)` }).from(slots).where(eq(slots.x_user_id, fromXId)),
-  ]);
+  const rows = await db
+    .select({
+      creatorVideos: sql<number>`(SELECT COUNT(*) FROM videos WHERE creator_x_user_id = ${fromXId})`,
+      members: sql<number>`(SELECT COUNT(*) FROM video_members WHERE x_user_id = ${fromXId})`,
+      chapters: sql<number>`(SELECT COUNT(*) FROM video_chapters WHERE x_user_id = ${fromXId})`,
+      interactions: sql<number>`(SELECT COUNT(*) FROM video_interactions WHERE x_user_id = ${fromXId})`,
+      icons: sql<number>`(SELECT COUNT(*) FROM x_user_icons WHERE x_user_id = ${fromXId})`,
+      staff: sql<number>`(SELECT COUNT(*) FROM event_staff WHERE x_user_id = ${fromXId})`,
+      aliasesOwned: sql<number>`(SELECT COUNT(*) FROM x_user_aliases WHERE x_user_id = ${fromXId})`,
+      aliasesPointing: sql<number>`(SELECT COUNT(*) FROM x_user_aliases WHERE alias_x_id = ${fromXId})`,
+      slotRows: sql<number>`(SELECT COUNT(*) FROM slots WHERE x_user_id = ${fromXId})`,
+    })
+    .from(sql`(SELECT 1) AS impact_source`);
+  const counts = (rows[0] ?? {}) as Partial<MergeImpactCounts>;
 
   return [
-    { key: "videos.creator_x_user_id", label: "作品投稿者", count: Number(creatorVideos[0]?.c ?? 0) },
-    { key: "video_members.x_user_id", label: "合作メンバー", count: Number(members[0]?.c ?? 0) },
-    { key: "video_chapters.x_user_id", label: "チャプター", count: Number(chapters[0]?.c ?? 0) },
-    { key: "video_interactions.x_user_id", label: "いいね/保存", count: Number(interactions[0]?.c ?? 0) },
-    { key: "x_user_icons.x_user_id", label: "X IDアイコン", count: Number(icons[0]?.c ?? 0) },
-    { key: "event_staff.x_user_id", label: "イベントスタッフ", count: Number(staff[0]?.c ?? 0) },
-    { key: "x_user_aliases.x_user_id", label: "alias所有", count: Number(aliasesOwned[0]?.c ?? 0) },
-    { key: "x_user_aliases.alias_x_id", label: "alias参照", count: Number(aliasesPointing[0]?.c ?? 0) },
-    { key: "slots.x_user_id", label: "予約枠", count: Number(slotRows[0]?.c ?? 0) },
+    { key: "videos.creator_x_user_id", label: "作品投稿者", count: count(counts.creatorVideos) },
+    { key: "video_members.x_user_id", label: "合作メンバー", count: count(counts.members) },
+    { key: "video_chapters.x_user_id", label: "チャプター", count: count(counts.chapters) },
+    { key: "video_interactions.x_user_id", label: "いいね/保存", count: count(counts.interactions) },
+    { key: "x_user_icons.x_user_id", label: "X IDアイコン", count: count(counts.icons) },
+    { key: "event_staff.x_user_id", label: "イベントスタッフ", count: count(counts.staff) },
+    { key: "x_user_aliases.x_user_id", label: "alias所有", count: count(counts.aliasesOwned) },
+    { key: "x_user_aliases.alias_x_id", label: "alias参照", count: count(counts.aliasesPointing) },
+    { key: "slots.x_user_id", label: "予約枠", count: count(counts.slotRows) },
   ];
 }
