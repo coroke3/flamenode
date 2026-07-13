@@ -103,7 +103,7 @@ function validateSnapshot(
       "復元スナップショットに秘匿化済みの値が含まれるため復元できません。",
     );
   }
-  if (!snapshot.id || isRedacted(snapshot.id)) {
+  if (!snapshot.id) {
     return unavailable(
       RESTORE_CAPABILITY_REASON.primaryKeyMissing,
       "復元スナップショットに主キーがありません。",
@@ -118,26 +118,21 @@ function validateTableSpecificSnapshot(
 ): RestoreCapability | null {
   if (tableName !== "event_staff") return null;
 
-  if (!snapshot.event_id || isRedacted(snapshot.event_id)) {
+  if (!snapshot.event_id) {
     return unavailable(
       RESTORE_CAPABILITY_REASON.eventIdMissing,
       "イベントスタッフの復元スナップショットに event_id がありません。",
     );
   }
 
-  const userId = snapshot.user_id;
-  const xUserId = snapshot.x_user_id;
-  if (
-    (!userId || isRedacted(userId)) &&
-    (!xUserId || isRedacted(xUserId))
-  ) {
+  if (!snapshot.user_id && !snapshot.x_user_id) {
     return unavailable(
       RESTORE_CAPABILITY_REASON.staffSubjectMissing,
       "イベントスタッフの復元スナップショットに主体 ID がありません。",
     );
   }
 
-  if (!snapshot.permission_preset || isRedacted(snapshot.permission_preset)) {
+  if (!snapshot.permission_preset) {
     return unavailable(
       RESTORE_CAPABILITY_REASON.snapshotInvalid,
       "イベントスタッフの復元スナップショットに権限プリセットがありません。",
@@ -264,12 +259,7 @@ export function evaluateRestoreCapability(
   for (const field of requiredFields) {
     const value = requiredSnapshot?.[field];
 
-    if (
-      value === null ||
-      value === undefined ||
-      value === "" ||
-      value === "[REDACTED]"
-    ) {
+    if (value === null || value === undefined || value === "") {
       return unavailable(
         RESTORE_CAPABILITY_REASON.requiredFieldMissing,
         `復元スナップショットに必須項目「${field}」がありません。`,
