@@ -134,16 +134,13 @@ export async function saveEventYoutubePlaylistSettings(
       },
     });
 
-  const mutationStatements = [upsert];
-  const expectedMutationChanges: number[] = [1];
-  if (playlistChanged && itemCount > 0) {
-    mutationStatements.push(
-      guard.db
-        .delete(eventYoutubePlaylistItems)
-        .where(eq(eventYoutubePlaylistItems.event_id, eventId)),
-    );
-    expectedMutationChanges.push(itemCount);
-  }
+  const resetItems = guard.db
+    .delete(eventYoutubePlaylistItems)
+    .where(eq(eventYoutubePlaylistItems.event_id, eventId));
+  const mutationStatements =
+    playlistChanged && itemCount > 0 ? [upsert, resetItems] : [upsert];
+  const expectedMutationChanges =
+    playlistChanged && itemCount > 0 ? [1, itemCount] : [1];
 
   try {
     await mutateWithAudit(guard.db, {
