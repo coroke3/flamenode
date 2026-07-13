@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AdminSectionTabs } from "@/components/admin/AdminSectionTabs";
+import { YoutubeApiKeyStatusCard } from "@/components/admin/YoutubeApiKeyStatusCard";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { FnTable } from "@/components/ui/FnTable";
 import { getCurrentUser } from "@/lib/auth/currentUser";
@@ -15,6 +16,10 @@ import {
   type WorkerJobStatus,
   type WorkerMonitoringSnapshot,
 } from "@/lib/admin/workerMonitoring";
+import {
+  loadYoutubeApiKeyStatus,
+  type YoutubeApiKeyRuntimeStatus,
+} from "@/lib/admin/youtubeApiKeyStatus";
 import { formatCount, formatRelative, formatUnix } from "@/lib/utils/format";
 
 export const metadata: Metadata = { title: "バックグラウンド処理監視" };
@@ -54,10 +59,14 @@ export default async function AdminWorkersPage(): Promise<React.ReactElement> {
 
   const env = getEnv();
   let snapshot: WorkerMonitoringSnapshot | null = null;
+  let youtubeApiKeyStatus: YoutubeApiKeyRuntimeStatus | null = null;
   let error: string | null = null;
   try {
     if (!env.DB) throw new Error("DB bindingを取得できませんでした。");
     snapshot = await loadWorkerMonitoring(env.DB);
+    if (env.KV) {
+      youtubeApiKeyStatus = await loadYoutubeApiKeyStatus(env.KV);
+    }
   } catch (cause) {
     error = String(cause);
   }
@@ -66,7 +75,7 @@ export default async function AdminWorkersPage(): Promise<React.ReactElement> {
     <div>
       <AdminPageHeader
         title="バックグラウンド処理監視"
-        description="Cron Worker、通知、静的JSON、YouTube同期、スコア更新の遅延と失敗をD1の内部記録から確認します。"
+        description="Cron Worker、通知、静的JSON、YouTube同期、スコア更新の遅延と失敗をD1とKVの内部記録から確認します。"
       />
       <AdminSectionTabs hub="health" />
       <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -80,12 +89,23 @@ export default async function AdminWorkersPage(): Promise<React.ReactElement> {
           監視情報の取得に失敗しました: {error}
         </div>
       ) : null}
-      {snapshot ? <MonitoringContent snapshot={snapshot} /> : null}
+      {snapshot ? (
+        <MonitoringContent
+          snapshot={snapshot}
+          youtubeApiKeyStatus={youtubeApiKeyStatus}
+        />
+      ) : null}
     </div>
   );
 }
 
-function MonitoringContent({ snapshot }: { snapshot: WorkerMonitoringSnapshot }): React.ReactElement {
+function MonitoringContent({
+  snapshot,
+  youtubeApiKeyStatus,
+}: {
+  snapshot: WorkerMonitoringSnapshot;
+  youtubeApiKeyStatus: YoutubeApiKeyRuntimeStatus | null;
+}): React.ReactElement {
   const criticalJobs = snapshot.jobs.filter((job) => job.level === "critical").length;
   const problemPipelines = snapshot.pipelines.filter((pipeline) => pipeline.level !== "ok").length;
   const totalFailures = snapshot.notifications.failed + snapshot.staticRebuilds.failed + snapshot.youtube.failed;
@@ -130,6 +150,11 @@ function MonitoringContent({ snapshot }: { snapshot: WorkerMonitoringSnapshot })
         </div>
       </section>
 
+      <YoutubeApiKeyStatusCard
+        status={youtubeApiKeyStatus}
+        now={snapshot.generatedAt}
+      />
+
       <section style={{ marginTop: 24 }}>
         <h2 style={{ fontSize: 16, fontWeight: 800, marginBottom: 10 }}>グローバル静的JSONの最終生成</h2>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
@@ -145,7 +170,7 @@ function MonitoringContent({ snapshot }: { snapshot: WorkerMonitoringSnapshot })
 
       <section className="fn-card" style={{ marginTop: 24, padding: 16 }}>
         <h2 style={{ fontSize: 16, fontWeight: 800, marginBottom: 6 }}>無料枠の外部監視</h2>
-        <p className="fn-muted fn-text-sm" style={{ margin: "0 0 12px" }}>CPU時間、exceededCpu、アカウント全体のD1日次使用量はアプリDBだけでは取得できません。Cloudflare Dashboardを正本として確認してください。</p>
+        <p className="fn-muted fn-text-sm" style={{ margin: "0 0 12px" }}>CPU時間、exceededCpu、アカウント全体のD1日次使用量はアプリだけでは取得できません。Cloudflare Dashboardを正本として確認してください。</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
           {PLATFORM_LIMITS.map((limit) => (
             <div key={limit.label} style={{ border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)", padding: "10px 12px" }}>
