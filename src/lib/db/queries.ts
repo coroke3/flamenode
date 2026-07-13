@@ -4,7 +4,6 @@ import {
   eventStaff,
   videos,
   videoEvents,
-  videoMembers,
   xUsers,
 } from "./schema";
 import { creatorIconExpr, creatorNameExpr } from "./displayExpr";
@@ -24,14 +23,12 @@ import {
   sortPickupCreators,
 } from "@/lib/utils/pickupCreators";
 
-
 export const PVSF_SUMMARY_EVENT_ID = "PVSFSummary";
 /**
  * 公開済みかつ表示対象の作品を絞り込む共通条件。
  *  - visibility_status == "public"
  */
 export const publicVideoCondition = eq(videos.visibility_status, "public");
-export const directVideoCondition = sql`${videos.visibility_status} IN ('public', 'limited')`;
 
 export function excludePvsfSummaryVideos() {
   return sql`
@@ -60,7 +57,7 @@ export function eventPublicVideoLinkCondition(eventId: string) {
   )!;
 }
 
-export function publicEventVideoCondition(eventId: string) {
+function publicEventVideoCondition(eventId: string) {
   return and(
     countablePublicVideoCondition,
     eventPublicVideoLinkCondition(eventId),
@@ -176,16 +173,6 @@ export async function fetchAllPublicVideosForEvent(db: DB, eventId: string) {
   return resolveMissingIcons(db, uniqueBy(rows, (row) => row.id));
 }
 
-/** イベントに紐づく作品の先頭 N 件 (棚・プレビュー用)。 */
-export async function fetchVideosForEvent(
-  db: DB,
-  eventId: string,
-  limit = 8,
-) {
-  const rows = await fetchAllPublicVideosForEvent(db, eventId);
-  return limit > 0 ? rows.slice(0, limit) : rows;
-}
-
 export async function countVideosForEvent(
   db: DB,
   eventId: string,
@@ -210,20 +197,6 @@ export async function fetchActiveEvents(db: DB) {
   return rows.sort(compareEventsByUpcomingPriority);
 }
 
-/** YouTubeID または UUID で作品を引く。 */
-export async function fetchVideoByIdOrYoutube(db: DB, idOrYoutube: string) {
-  return db
-    .select()
-    .from(videos)
-    .where(
-      and(
-        or(eq(videos.id, idOrYoutube), eq(videos.youtube_video_id, idOrYoutube))!,
-        directVideoCondition,
-      ),
-    )
-    .limit(1);
-}
-
 /** イベント情報＋編集者一覧。 */
 export async function fetchEventWithEditors(db: DB, eventId: string) {
   const ev = await db
@@ -246,25 +219,6 @@ export async function fetchEventWithEditors(db: DB, eventId: string) {
     .where(eq(eventStaff.event_id, eventId));
   const editorsWithIcons = await resolveMemberIcons(db, editors);
   return { event: ev[0], editors: editorsWithIcons };
-}
-
-/** 作品の合作メンバー一覧。 */
-export async function fetchVideoMembers(db: DB, videoId: string) {
-  return db
-    .select({
-      id: videoMembers.id,
-      x_user_id: videoMembers.x_user_id,
-      name: videoMembers.name,
-      role: videoMembers.role,
-      comment: videoMembers.comment,
-      order_index: videoMembers.order_index,
-      x_name: xUsers.x_name,
-      icon_url: xUsers.icon_url,
-    })
-    .from(videoMembers)
-    .leftJoin(xUsers, eq(xUsers.id, videoMembers.x_user_id))
-    .where(eq(videoMembers.video_id, videoId))
-    .orderBy(videoMembers.order_index);
 }
 
 /** ピックアップクリエイター候補 (個人作1件以上 or 合作参加2件以上)。作品数の多い順。 */
@@ -312,7 +266,7 @@ export async function fetchPickupCreators(db: DB, limit = 40) {
     .limit(candidateLimit);
 
   const picked = sortPickupCreators(rows)
-    .filter((r) => isPickupCreatorEligible(r))
+    .filter((row) => isPickupCreatorEligible(row))
     .slice(0, limit);
   const withIcons = await resolveMemberIcons(
     db,
