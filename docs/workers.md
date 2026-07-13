@@ -26,12 +26,23 @@ Workers FreeのCPU上限はHTTP/Cronともに10msであり、Cron間隔を1時�
 
 | 外部処理 | Provider上限への対応 | FlameNode側の固定上限・削減策 |
 |---|---|---|
-| YouTube Data API `videos.list` | 1 requestあたり1 quota unit。無効requestも最低1 unit。既定10,000 units/day、太平洋時間0時reset | 1 Cron最大50 ID、最大2 attempts=2 units。必要な`fields`だけ取得。quota系403はKVで1時間cooldownし連続失敗を止める |
+| YouTube Data API `videos.list` | 1 requestあたり1 quota unit。無効requestも最低1 unit。既定10,000 units/day、太平洋時間0時reset | 1 Cron最大50 ID、最大2 requests=2 units。必要な`fields`だけ取得。quota系403はKVで1時間cooldownし連続失敗を止める。credential障害時だけ同じ予算内で副キーへ切替 |
 | Discord Bot/Webhook | per-route limitは可変。`X-RateLimit-*`と`Retry-After`を正本にし、global limitは50 requests/sec | 1 Cron最大12 external requests。inline retryなし。DM channel IDをisolate/KVへ30日cacheし、通常配送を1 requestへ削減。KV書込は最大2/run・576/day。global 429は全routeへ適用 |
 | Google Drive画像 / YouTube thumbnail | 公開画像originの固定quota値へ依存しない | 同一キーの同時missを1 fetchへ集約。ETag/304再検証、negative cache、stale返却、単一objectサイズ上限。request内retryなし |
 | Cloudflare Worker subrequest | Freeは1 invocation 50、同時outgoing connection 6 | 外部fetchだけでなくD1/KV/R2も含め50未満に固定。外部処理は逐次または共有in-flightで重複排除 |
 
 Providerの429/503を受けた場合、同一invocationで無制限に再試行しない。Providerが返す待機時間をqueueの`next_attempt_at`または短期cooldownへ反映し、後続Cronへ繰り越す。固定値をproviderの実レート上限として仮定しない。
+
+## YouTube APIキー
+
+- `YOUTUBE_API_KEY`を主キー、`YOUTUBE_API_KEY_SECONDARY`を副キーとして最大2つ登録できる。
+- 通常は主キーを利用し、失効、API未有効化、key restriction不整合などcredential固有の障害時だけ副キーへ切り替える。
+- credential障害になったキーは6時間回避し、その後に再確認する。
+- 使用中キー、直近切替、障害理由は共有KVへ秘密値を含めず記録する。
+- 同一のキー値は重複排除する。
+- `quotaExceeded`、`dailyLimitExceeded`、`rateLimitExceeded`では切り替えない。複数projectのquotaを合算・迂回する設計にはしない。
+- request budgetは2のまま維持する。credential障害は同一キーで再試行せず、主キー失敗1回と副キー成功1回を上限内に収める。
+- quota不足はGoogle Cloud Consoleで実測し、quota extension申請または同期頻度の引き下げで対応する。
 
 ## 大規模データ時の処理能力
 
@@ -60,9 +71,9 @@ Queue targetはcanonical値だけを受理する。旧別名や未知値は成�
 
 ## 監視
 
-`/admin/workers`で、Cronの最終開始・成功・失敗・lease、通知と静的queueの固着、YouTubeとscoreのbacklog、理論解消時間、global静的JSONの最終生成時刻、`operation_mode`を確認する。詳細操作は既存の通知配信・静的JSON再生成・YouTube同期ページで行う。
+`/admin/workers`で、Cronの最終開始・成功・失敗・lease、通知と静的queueの固着、YouTubeとscoreのbacklog、理論解消時間、global静的JSONの最終生成時刻、`operation_mode`を確認する。YouTube API主副キーの状態は`/admin/youtube-api-keys`で確認する。
 
-YouTube quota cooldown中は同期がskippedになり、Discord rate limit時は通知outboxの`next_attempt_at`以降へ繰り越される。画像proxyは`x-fn-media-cache`で`hit`、`miss`、`stale`、`coalesced`、`fallback`を区別する。
+YouTube quota cooldown中は同期がskippedになり、credential障害時は正常な副キーへ切り替わる。Discord rate limit時は通知outboxの`next_attempt_at`以降へ繰り越される。画像proxyは`x-fn-media-cache`で`hit`、`miss`、`stale`、`coalesced`、`fallback`を区別する。
 
 CPU時間、`exceededCpu`、D1の日次使用量、YouTube API quotaはアプリDBから正確に取得できないため、Cloudflare DashboardおよびGoogle Cloud Consoleを正本とする。
 
@@ -73,4 +84,5 @@ CPU時間、`exceededCpu`、D1の日次使用量、YouTube API quotaはアプリ
 - D1 limits: https://developers.cloudflare.com/d1/platform/limits/
 - D1 pricing: https://developers.cloudflare.com/d1/platform/pricing/
 - YouTube quota: https://developers.google.com/youtube/v3/determine_quota_cost
+- YouTube API Terms: https://developers.google.com/youtube/terms/api-services-terms-of-service
 - Discord rate limits: https://docs.discord.com/developers/topics/rate-limits
