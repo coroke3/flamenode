@@ -23,6 +23,7 @@ export interface Env {
 const REMINDER_INTERVAL_SEC = 3600;
 const FAST_JOBS_LEASE_SEC = 4 * 60;
 const REMINDER_LEASE_SEC = 4 * 60;
+const NOTIFICATION_BATCH_LIMIT = 6;
 
 export async function runFastJobs(env: Env): Promise<void> {
   await runJob(
@@ -71,7 +72,7 @@ export async function runFastJobs(env: Env): Promise<void> {
           const notifications = await runJob(
             "fast-jobs",
             "notification-dispatch",
-            () => processNotificationQueue(env, { limit: 15 }),
+            () => processNotificationQueue(env, { limit: NOTIFICATION_BATCH_LIMIT }),
           );
           processed += notifications.processed;
           skipped += notifications.skipped;
