@@ -18,25 +18,78 @@ export interface RunJobOptions {
   rethrow?: boolean;
 }
 
-function toCounters(value: unknown): Required<JobCounters> {
+class JobCountersError extends Error {
+  readonly counters: Required<JobCounters>;
+  readonly logError = "job reported failed operations";
+
+  constructor(message: string, counters: Required<JobCounters>) {
+    super(message);
+    this.name = "JobCountersError";
+    this.counters = counters;
+  }
+}
+
+function normalizeCounter(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, value)
+    : 0;
+}
+
+/** Workerが返す任意形状を、安全な集計値へ正規化する。 */
+export function normalizeJobCounters(value: unknown): Required<JobCounters> {
   if (typeof value === "number") {
-    return { processed: Math.max(0, value), skipped: 0, failed: 0 };
+    return { processed: normalizeCounter(value), skipped: 0, failed: 0 };
   }
   if (value && typeof value === "object") {
     const row = value as JobCounters & { applied?: boolean };
+    const hasProcessed =
+      typeof row.processed === "number" && Number.isFinite(row.processed);
     return {
-      processed:
-        typeof row.processed === "number"
-          ? Math.max(0, row.processed)
-          : row.applied
-            ? 1
-            : 0,
-      skipped:
-        typeof row.skipped === "number" ? Math.max(0, row.skipped) : 0,
-      failed: typeof row.failed === "number" ? Math.max(0, row.failed) : 0,
+      processed: hasProcessed
+        ? normalizeCounter(row.processed)
+        : row.applied
+          ? 1
+          : 0,
+      skipped: normalizeCounter(row.skipped),
+      failed: normalizeCounter(row.failed),
     };
   }
   return { processed: 0, skipped: 0, failed: 0 };
+}
+
+/** 複数の子ジョブ結果を同じ規則で合算する。 */
+export function combineJobCounters(...values: unknown[]): Required<JobCounters> {
+  const total: Required<JobCounters> = {
+    processed: 0,
+    skipped: 0,
+    failed: 0,
+  };
+  for (const value of values) {
+    const counters = normalizeJobCounters(value);
+    total.processed += counters.processed;
+    total.skipped += counters.skipped;
+    total.failed += counters.failed;
+  }
+  return total;
+}
+
+/**
+ * 子ジョブをすべて実行した後、failed件数だけを例外へ変換する。
+ * `runJob` が件数を保持して再ログするため、外部の失敗挙動と集計値は変わらない。
+ */
+export function throwIfJobFailed(
+  worker: string,
+  job: string,
+  value: unknown,
+): Required<JobCounters> {
+  const counters = normalizeJobCounters(value);
+  if (counters.failed > 0) {
+    throw new JobCountersError(
+      `${worker}/${job} reported ${counters.failed} failed operation(s)`,
+      counters,
+    );
+  }
+  return counters;
 }
 
 function failedCounters(): Required<JobCounters> {
@@ -56,9 +109,10 @@ export async function runJob(
 
   let counters: Required<JobCounters>;
   try {
-    counters = toCounters(await task());
+    counters = normalizeJobCounters(await task());
   } catch (error) {
-    counters = failedCounters();
+    counters =
+      error instanceof JobCountersError ? error.counters : failedCounters();
     logWorkerJob({
       worker,
       job,
@@ -67,7 +121,10 @@ export async function runJob(
       ...counters,
       duration_ms: Date.now() - startedMs,
       result: "failed",
-      error: safeErrorSummary(error),
+      error:
+        error instanceof JobCountersError
+          ? error.logError
+          : safeErrorSummary(error),
     });
     if (options.rethrow) throw error;
     return { succeeded: false, ...counters };
@@ -91,7 +148,10 @@ export async function runJob(
   });
 
   if (!succeeded && options.rethrow) {
-    throw new Error(`${worker}/${job} reported ${counters.failed} failed operation(s)`);
+    throw new JobCountersError(
+      `${worker}/${job} reported ${counters.failed} failed operation(s)`,
+      counters,
+    );
   }
   return { succeeded, ...counters };
 }

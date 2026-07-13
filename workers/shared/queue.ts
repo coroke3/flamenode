@@ -23,7 +23,10 @@ const FATAL_MESSAGE =
 
 function boundedAttempts(value: number | undefined): number {
   if (!Number.isFinite(value)) return MAX_QUEUE_ATTEMPTS;
-  return Math.min(MAX_QUEUE_ATTEMPTS, Math.max(1, Math.floor(value ?? 1)));
+  return Math.min(
+    MAX_QUEUE_ATTEMPTS,
+    Math.max(1, Math.floor(value ?? 1)),
+  );
 }
 
 function boundedDelay(value: number | undefined): number {
@@ -35,15 +38,28 @@ export function boundedQueueBatch(
   value: number | undefined,
   fallback = MAX_QUEUE_BATCH,
 ): number {
+  const normalizedFallback = Number.isFinite(fallback)
+    ? fallback
+    : MAX_QUEUE_BATCH;
   const safeFallback = Math.min(
     MAX_QUEUE_BATCH,
-    Math.max(1, Math.floor(fallback)),
+    Math.max(1, Math.floor(normalizedFallback)),
   );
   if (!Number.isFinite(value)) return safeFallback;
   return Math.min(
     MAX_QUEUE_BATCH,
     Math.max(1, Math.floor(value ?? safeFallback)),
   );
+}
+
+/** DB由来の試行回数を非負整数へ閉じ、次回値を返す。 */
+export function nextAttemptNumber(value: unknown): number {
+  const normalized = Number(value);
+  const current =
+    Number.isFinite(normalized) && normalized >= 0
+      ? Math.floor(normalized)
+      : 0;
+  return current + 1;
 }
 
 /** HTTP・D1・fetchの一時障害だけを再試行対象にする。 */
@@ -57,11 +73,20 @@ export function isRetryableQueueError(error: unknown): boolean {
       cause?: unknown;
     };
     const status = Number(candidate.status ?? candidate.statusCode);
-    if (status === 408 || status === 425 || status === 429 || status >= 500) {
+    if (
+      status === 408 ||
+      status === 425 ||
+      status === 429 ||
+      status >= 500
+    ) {
       return true;
     }
     const code = String(candidate.code ?? "");
-    if (/^(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|UND_ERR_SOCKET)$/.test(code)) {
+    if (
+      /^(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|UND_ERR_SOCKET)$/.test(
+        code,
+      )
+    ) {
       return true;
     }
     const message = String(candidate.message ?? "");
@@ -103,5 +128,7 @@ export async function withBoundedRetry<T>(
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error("queue task failed");
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("queue task failed");
 }

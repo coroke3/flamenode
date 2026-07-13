@@ -31,7 +31,10 @@ export const MAX_CRON_LEASE_SECONDS = 24 * 60 * 60;
 
 function boundedLeaseSeconds(value: number): number {
   if (!Number.isFinite(value)) return MAX_CRON_LEASE_SECONDS;
-  return Math.min(MAX_CRON_LEASE_SECONDS, Math.max(1, Math.floor(value)));
+  return Math.min(
+    MAX_CRON_LEASE_SECONDS,
+    Math.max(1, Math.floor(value)),
+  );
 }
 
 function boundedIntervalSeconds(value: number | undefined): number {
@@ -187,6 +190,25 @@ async function runHeartbeat(
   }
 }
 
+type PromiseOutcome =
+  | { succeeded: true }
+  | { succeeded: false; error: unknown };
+
+/** rejection handlerを即時登録し、task実行中の未処理Promiseを防ぐ。 */
+function observePromise(promise: Promise<void>): Promise<PromiseOutcome> {
+  return promise.then<PromiseOutcome>(
+    () => ({ succeeded: true }),
+    (error: unknown) => ({ succeeded: false, error }),
+  );
+}
+
+async function assertPromiseSucceeded(
+  outcomePromise: Promise<PromiseOutcome>,
+): Promise<void> {
+  const outcome = await outcomePromise;
+  if (!outcome.succeeded) throw outcome.error;
+}
+
 export async function withCronLease<T>(
   env: CronLeaseEnv,
   options: CronLeaseOptions,
@@ -216,17 +238,18 @@ export async function withCronLease<T>(
           heartbeatController.signal,
         )
       : Promise.resolve();
+  const heartbeatOutcome = observePromise(heartbeat);
 
   try {
     const value = await task();
     heartbeatController.abort();
     // task 中に lease を失っていた場合はここで失敗として伝播する。
-    await heartbeat;
+    await assertPromiseSucceeded(heartbeatOutcome);
     await markCronLeaseSucceeded(env, lease);
     return { acquired: true, value };
   } catch (error) {
     heartbeatController.abort();
-    await heartbeat.catch(() => undefined);
+    await heartbeatOutcome;
     await markCronLeaseFailed(env, lease, error).catch((markError) => {
       console.error(
         JSON.stringify({
@@ -240,7 +263,7 @@ export async function withCronLease<T>(
     throw error;
   } finally {
     heartbeatController.abort();
-    await heartbeat.catch(() => undefined);
+    await heartbeatOutcome;
     try {
       await releaseCronLease(env, lease);
     } catch (releaseError) {

@@ -7,6 +7,7 @@ import {
   shouldSkipQueueTarget,
   type OperationMode,
 } from "./queuePolicy.ts";
+import { nextAttemptNumber } from "../shared/queue.ts";
 import { safeErrorSummary } from "../shared/safeLog.ts";
 
 export interface Env {
@@ -72,24 +73,21 @@ export async function processStaticRebuildQueue(env: Env): Promise<{
 
   const result = await env.DB.prepare(query).bind(now, limit).all();
   const rows = (result.results ?? []) as QueueRow[];
-  const outcomes: QueueOutcome[] = [];
+  const summary = { processed: 0, failed: 0, skipped: 0 };
 
-  for (let offset = 0; offset < rows.length; offset += PROCESSING_CONCURRENCY) {
+  for (
+    let offset = 0;
+    offset < rows.length;
+    offset += PROCESSING_CONCURRENCY
+  ) {
     const chunk = rows.slice(offset, offset + PROCESSING_CONCURRENCY);
-    outcomes.push(
-      ...(await Promise.all(
-        chunk.map((row) => processQueueRow(env, mode, row, now)),
-      )),
+    const outcomes = await Promise.all(
+      chunk.map((row) => processQueueRow(env, mode, row, now)),
     );
+    for (const outcome of outcomes) summary[outcome] += 1;
   }
 
-  return outcomes.reduce(
-    (summary, outcome) => {
-      summary[outcome] += 1;
-      return summary;
-    },
-    { processed: 0, failed: 0, skipped: 0 },
-  );
+  return summary;
 }
 
 async function processQueueRow(
@@ -131,7 +129,7 @@ export async function markProcessing(
   )
     .bind(now, token, now + PROCESSING_LEASE_SEC, now, id)
     .run();
-  return (result.meta.changes ?? 0) === 1 ? token : null;
+  return (result.meta?.changes ?? 0) === 1 ? token : null;
 }
 
 /**
@@ -171,7 +169,7 @@ export async function markDone(
   )
     .bind(now, now, id, token)
     .run();
-  if ((result.meta.changes ?? 0) === 1) return true;
+  if ((result.meta?.changes ?? 0) === 1) return true;
 
   await recoverLeaseInvalidatedProcessing(env, id, now);
   return false;
@@ -184,7 +182,7 @@ export async function markRetryOrFailed(
   error: unknown,
   now: number,
 ): Promise<void> {
-  const attempt = Number(row.attempt_count ?? 0) + 1;
+  const attempt = nextAttemptNumber(row.attempt_count);
   const message = safeErrorSummary(error).slice(0, 500);
   if (attempt >= MAX_ATTEMPTS) {
     const result = await env.DB.prepare(
@@ -241,12 +239,22 @@ async function recoverLeaseInvalidatedProcessing(
          updated_at = ?
      WHERE id = ? AND status = 'processing' AND lease_token IS NULL`,
   )
-    .bind(MAX_ATTEMPTS, MAX_ATTEMPTS, MAX_ATTEMPTS, now + 60, now, id)
+    .bind(
+      MAX_ATTEMPTS,
+      MAX_ATTEMPTS,
+      MAX_ATTEMPTS,
+      now + 60,
+      now,
+      id,
+    )
     .run();
 }
 
 /** 失敗・長時間 processing の取り残し確認（全件再生成はしない） */
-export async function reconcileStaleQueue(env: Env, now: number): Promise<void> {
+export async function reconcileStaleQueue(
+  env: Env,
+  now: number,
+): Promise<void> {
   await env.DB.prepare(
     `UPDATE static_rebuild_queue
      SET status = CASE

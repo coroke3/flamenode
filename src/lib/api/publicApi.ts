@@ -62,6 +62,21 @@ function rateLimitedResponse(retryAfter: number): Response {
   });
 }
 
+function boundedPositiveInteger(
+  value: number,
+  fallback: number,
+  max = Number.POSITIVE_INFINITY,
+): number {
+  const safeMax = Number.isFinite(max)
+    ? Math.max(1, Math.floor(max))
+    : Number.POSITIVE_INFINITY;
+  const safeFallback = Number.isFinite(fallback)
+    ? Math.min(safeMax, Math.max(1, Math.floor(fallback)))
+    : 1;
+  if (!Number.isFinite(value)) return safeFallback;
+  return Math.min(safeMax, Math.max(1, Math.floor(value)));
+}
+
 /**
  * 公開一覧APIの正の整数queryを既存仕様どおり正規化する。
  * 0・非数値はfallback、負数は1、上限超過はmaxへ丸める。
@@ -71,8 +86,13 @@ export function parseBoundedPositiveInt(
   fallback: number,
   max = Number.POSITIVE_INFINITY,
 ): number {
-  const parsed = Number.parseInt(value ?? String(fallback), 10) || fallback;
-  return Math.min(max, Math.max(1, parsed));
+  const safeFallback = boundedPositiveInteger(
+    Number.NaN,
+    fallback,
+    max,
+  );
+  const parsed = Number.parseInt(value ?? String(safeFallback), 10);
+  return boundedPositiveInteger(parsed || safeFallback, safeFallback, max);
 }
 
 async function bodyEtag(body: string): Promise<string> {
@@ -116,12 +136,16 @@ export function publicServiceUnavailableResponse(
   code = "service_temporarily_unavailable",
   retryAfterSeconds = 30,
 ): Response {
+  const retryAfter = boundedPositiveInteger(
+    retryAfterSeconds,
+    30,
+  );
   return new Response(JSON.stringify({ error: code }), {
     status: 503,
     headers: {
       "Content-Type": "application/json",
       "Cache-Control": "no-store",
-      "Retry-After": String(Math.max(1, Math.floor(retryAfterSeconds))),
+      "Retry-After": String(retryAfter),
     },
   });
 }

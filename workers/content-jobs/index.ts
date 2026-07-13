@@ -8,7 +8,11 @@ import { processStaticRebuildQueue } from "../json-generator/queue.ts";
 import { withDeduplicatingR2 } from "../json-generator/r2Dedup.ts";
 import { runCleanupWithRetry } from "../cleanup/index.ts";
 import { withCronLease } from "../shared/cronLease.ts";
-import { runJob } from "../shared/runJob.ts";
+import {
+  combineJobCounters,
+  runJob,
+  throwIfJobFailed,
+} from "../shared/runJob.ts";
 import { withSerializedD1 } from "../shared/serializedD1.ts";
 import { rejectUnauthorizedWorkerRequest } from "../shared/workerAdminAuth.ts";
 
@@ -40,20 +44,11 @@ export async function runContentJobs(env: Env): Promise<void> {
         env,
         { jobName: "content-jobs", leaseSeconds: CONTENT_JOBS_LEASE_SEC },
         async () => {
-          let processed = 0;
-          let skipped = 0;
-          let failed = 0;
-          const rebuildEnv = rebuildEnvironment(env);
-
           const rebuild = await runJob(
             "content-jobs",
             "static-rebuild-queue",
-            () => processStaticRebuildQueue(rebuildEnv),
+            () => processStaticRebuildQueue(rebuildEnvironment(env)),
           );
-          processed += rebuild.processed;
-          skipped += rebuild.skipped;
-          failed += rebuild.failed;
-
           const cleanupLease = await withCronLease(
             env,
             {
@@ -61,26 +56,31 @@ export async function runContentJobs(env: Env): Promise<void> {
               leaseSeconds: CLEANUP_LEASE_SEC,
               minimumIntervalSeconds: CLEANUP_INTERVAL_SEC,
             },
-            () => runJob(
-              "content-jobs",
-              "cleanup",
-              () => runCleanupWithRetry(env),
-              { rethrow: true },
-            ),
+            () =>
+              runJob(
+                "content-jobs",
+                "cleanup",
+                () => runCleanupWithRetry(env),
+                { rethrow: true },
+              ),
           );
-          if (cleanupLease.acquired) {
-            const cleanup = cleanupLease.value;
-            processed += cleanup?.processed ?? 0;
-            skipped += cleanup?.skipped ?? 0;
-            failed += cleanup?.failed ?? 0;
-          } else {
-            skipped += 1;
-            await runJob("content-jobs", "cleanup", async () => ({ skipped: 1 }));
-          }
-          return { processed, skipped, failed };
+          const cleanup = cleanupLease.acquired
+            ? (cleanupLease.value ?? {})
+            : await runJob(
+                "content-jobs",
+                "cleanup",
+                async () => ({ skipped: 1 }),
+              );
+          return throwIfJobFailed(
+            "content-jobs",
+            "cron",
+            combineJobCounters(rebuild, cleanup),
+          );
         },
       );
-      return leased.acquired ? (leased.value ?? { skipped: 1 }) : { skipped: 1 };
+      return leased.acquired
+        ? (leased.value ?? { skipped: 1 })
+        : { skipped: 1 };
     },
     { rethrow: true },
   );
@@ -118,13 +118,22 @@ export async function handleContentJobsFetch(
       },
     );
   } catch {
-    return Response.json({ ok: false, error: "rebuild_failed" }, { status: 500 });
+    return Response.json(
+      { ok: false, error: "rebuild_failed" },
+      { status: 500 },
+    );
   }
   if (!leaseResult.acquired) {
-    return Response.json({ ok: false, error: "job_already_running" }, { status: 409 });
+    return Response.json(
+      { ok: false, error: "job_already_running" },
+      { status: 409 },
+    );
   }
   if (!leaseResult.value) {
-    return Response.json({ ok: false, error: "rebuild_failed" }, { status: 500 });
+    return Response.json(
+      { ok: false, error: "rebuild_failed" },
+      { status: 500 },
+    );
   }
   return Response.json({ ok: true, ...leaseResult.value });
 }
