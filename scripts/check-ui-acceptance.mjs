@@ -82,6 +82,9 @@ requireAll("src/components/layout/ConsoleDrawer.tsx", [
   [/role=\{drawerOpen \? "dialog"/, "dialog roleがありません。"],
   [/aria-modal=\{drawerOpen \? true/, "aria-modalがありません。"],
   [/document\.body\.style\.overflow = "hidden"/, "開いている間の背面scroll抑止がありません。"],
+  [/panel\.inert = isMobile && !drawerOpen/, "閉じたモバイルドロワーのフォーカス無効化がありません。"],
+  [/scrollIntoView\(\{ block: "center" \}\)/, "現在ページへの自動スクロールがありません。"],
+  [/onClickCapture=\{\(event\) =>/, "リンク選択時にドロワーを閉じる処理がありません。"],
 ]);
 
 requireAll("src/components/layout/Shelf.tsx", [
