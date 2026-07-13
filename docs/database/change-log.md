@@ -2,8 +2,23 @@
 
 > Status: Active
 > Last verified: 2026-07-13
-> Verified against commit: `f858f71`
+> Verified against commit: `684bc10`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
+
+## 2026-07-13 — `0039_search_relation_indexes.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | additive |
+| Summary | 公開作品検索・クリエイター集計・公開チャプター検索の複合indexを追加 |
+| Reason | 既存の検索条件と集計結果を変えず、相関EXISTSとcreator/member集計の走査量を削減するため |
+| Tables | `videos`、`video_members`、`video_chapters` |
+| Data migration | なし |
+| Compatibility | 読み取り結果は不変。migration未適用でも機能するが処理効率が低下する |
+| Data loss | none |
+| Rollback | `videos_creator_public_idx`、`video_members_x_user_video_idx`、`video_chapters_video_visibility_idx`を削除 |
+| Validation | schema/history検査、公開API・Worker・unit tests、空DBへのactive migration適用 |
+| PR | main直接実装 |
 
 ## 2026-07-13 — `0038_runtime_efficiency_resilience.sql`
 
