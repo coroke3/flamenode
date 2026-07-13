@@ -11,6 +11,18 @@ export interface XIdEntry {
   is_active: boolean;
 }
 
+export function normalizeXIdApprovalStatus(
+  status: string | null | undefined,
+): XIdEntry["approval_status"] {
+  return status === "approved" || status === "rejected" ? status : "pending";
+}
+
+export function xIdApprovalRank(status: string | null | undefined): number {
+  if (status === "approved") return 0;
+  if (status === "rejected") return 2;
+  return 1;
+}
+
 export function normalizeXIdEntries(
   entries: readonly XIdEntry[],
 ): XIdEntry[] {
@@ -37,14 +49,6 @@ export function normalizeXIdEntries(
   return normalized;
 }
 
-function approvalOrder(
-  status: XIdEntry["approval_status"],
-): number {
-  if (status === "approved") return 0;
-  if (status === "pending") return 1;
-  return 2;
-}
-
 export function sortXIdEntries(
   entries: readonly XIdEntry[],
   options: {
@@ -64,8 +68,8 @@ export function sortXIdEntries(
     }
 
     return (
-      approvalOrder(a.approval_status) -
-        approvalOrder(b.approval_status) ||
+      xIdApprovalRank(a.approval_status) -
+        xIdApprovalRank(b.approval_status) ||
       a.x_name.localeCompare(b.x_name, "ja")
     );
   });
