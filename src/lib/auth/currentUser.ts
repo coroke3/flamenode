@@ -41,10 +41,25 @@ export class CurrentUserUnavailableError extends Error {
   }
 }
 
+type AuthSessionLike = {
+  user?: {
+    id?: string | null;
+    name?: string | null;
+    email?: string | null;
+    image?: string | null;
+    role?: string | null;
+    is_banned?: number | null;
+    active_x_user_id?: string | null;
+  };
+} | null;
+
+/** Auth.jsのoverload群からServer Component用の引数なし呼び出しだけを固定する。 */
+const readAuthSession = auth as unknown as () => Promise<AuthSessionLike>;
+
 async function loadCurrentUser(): Promise<CurrentUser | null> {
-  let session: Awaited<ReturnType<typeof auth>>;
+  let session: AuthSessionLike;
   try {
-    session = await auth();
+    session = await readAuthSession();
   } catch (error) {
     throw new CurrentUserUnavailableError(
       "auth_temporarily_unavailable",
@@ -52,17 +67,7 @@ async function loadCurrentUser(): Promise<CurrentUser | null> {
     );
   }
 
-  const sessionUser = session?.user as
-    | {
-        id?: string | null;
-        name?: string | null;
-        email?: string | null;
-        image?: string | null;
-        role?: string | null;
-        is_banned?: number | null;
-        active_x_user_id?: string | null;
-      }
-    | undefined;
+  const sessionUser = session?.user;
 
   // authが正常終了してsessionが無い場合だけ未ログイン扱いにする。
   if (!sessionUser?.id) return null;
