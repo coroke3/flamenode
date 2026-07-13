@@ -181,6 +181,11 @@
     body {
       overflow-x: hidden;
     }
+
+    [data-admin-shell] .admin-main,
+    [data-manage-shell] .manage-main {
+      overflow-x: hidden;
+    }
   }
 }
 
