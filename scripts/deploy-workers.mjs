@@ -17,6 +17,7 @@ const LEGACY_WORKERS = [
 
 if (
   process.env.CI === "1" &&
+  process.env.SKIP_BACKGROUND_DEPLOY !== "1" &&
   !process.env.BUILD_COMMIT_SHA &&
   !process.env.GITHUB_SHA
 ) {
@@ -31,10 +32,20 @@ const commitSha =
   "unknown";
 
 function deploy() {
+  if (process.env.SKIP_BACKGROUND_DEPLOY === "1") {
+    console.log("\n[workers:deploy] background-jobsの再deployを省略します。");
+    return;
+  }
+
   const dir = path.join("workers", WORKER);
+  const appOrigin = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  const vars = [
+    `BUILD_COMMIT_SHA:${commitSha}`,
+    ...(appOrigin ? [`APP_ORIGIN:${appOrigin}`] : []),
+  ];
   console.log(`\n=== deploy: ${WORKER} ===`);
   execSync(
-    `npx wrangler deploy --var BUILD_COMMIT_SHA:${commitSha}`,
+    `npx wrangler deploy ${vars.map((value) => `--var ${value}`).join(" ")}`,
     {
       cwd: dir,
       stdio: "inherit",
