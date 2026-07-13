@@ -93,7 +93,7 @@ jobs:
           npm run pages:deploy:verified --
           --branch=main
           --commit-hash=${{ github.sha }}
-          --commit-message="Production test ${GITHUB_SHA}"
+          --commit-message="本番試験 ${GITHUB_SHA}"
           --commit-dirty=false
 
       - name: Deploy three Cron Workers
@@ -147,5 +147,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add docs/operations/last-production-test.md
-          git commit -m "docs: record production test ${CANDIDATE_SHA:0:7} (${verdict})"
+          git commit -m "本番試験: 結果を記録 ${CANDIDATE_SHA:0:7} (${verdict})"
           git push origin HEAD:main
