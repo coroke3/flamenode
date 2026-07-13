@@ -1,6 +1,6 @@
 /**
  * content-jobs: 15分毎の低負荷コンテンツ更新ジョブ。
- * - static_rebuild_queueを通常最大3件、economy最大1件処理
+ * - static_rebuild_queueをoperation modeにかかわらず最大1件処理
  * - cleanupは1時間に1回だけ実行
  */
 import { createCronWorker } from "../shared/createCronWorker.ts";
@@ -56,13 +56,12 @@ export async function runContentJobs(env: Env): Promise<void> {
               leaseSeconds: CLEANUP_LEASE_SEC,
               minimumIntervalSeconds: CLEANUP_INTERVAL_SEC,
             },
-            () =>
-              runJob(
-                "content-jobs",
-                "cleanup",
-                () => runCleanupWithRetry(env),
-                { rethrow: true },
-              ),
+            () => runJob(
+              "content-jobs",
+              "cleanup",
+              () => runCleanupWithRetry(env),
+              { rethrow: true },
+            ),
           );
           if (cleanupLease.acquired) {
             const cleanup = cleanupLease.value;
@@ -71,17 +70,12 @@ export async function runContentJobs(env: Env): Promise<void> {
             failed += cleanup?.failed ?? 0;
           } else {
             skipped += 1;
-            await runJob("content-jobs", "cleanup", async () => ({
-              skipped: 1,
-            }));
+            await runJob("content-jobs", "cleanup", async () => ({ skipped: 1 }));
           }
-
           return { processed, skipped, failed };
         },
       );
-      return leased.acquired
-        ? (leased.value ?? { skipped: 1 })
-        : { skipped: 1 };
+      return leased.acquired ? (leased.value ?? { skipped: 1 }) : { skipped: 1 };
     },
     { rethrow: true },
   );
@@ -96,7 +90,6 @@ export async function handleContentJobsFetch(
   if (url.pathname !== "/rebuild" && url.pathname !== "/process-queue") {
     return new Response("Not Found", { status: 404 });
   }
-
   const rejected = rejectUnauthorizedWorkerRequest(req, env);
   if (rejected) return rejected;
 
@@ -120,22 +113,13 @@ export async function handleContentJobsFetch(
       },
     );
   } catch {
-    return Response.json(
-      { ok: false, error: "rebuild_failed" },
-      { status: 500 },
-    );
+    return Response.json({ ok: false, error: "rebuild_failed" }, { status: 500 });
   }
   if (!leaseResult.acquired) {
-    return Response.json(
-      { ok: false, error: "job_already_running" },
-      { status: 409 },
-    );
+    return Response.json({ ok: false, error: "job_already_running" }, { status: 409 });
   }
   if (!leaseResult.value) {
-    return Response.json(
-      { ok: false, error: "rebuild_failed" },
-      { status: 500 },
-    );
+    return Response.json({ ok: false, error: "rebuild_failed" }, { status: 500 });
   }
   return Response.json({ ok: true, ...leaseResult.value });
 }
