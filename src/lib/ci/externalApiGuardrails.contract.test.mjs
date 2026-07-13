@@ -20,6 +20,7 @@ test("外部API処理は固定予算・timeout・provider cooldownを持つ", ()
   assert.match(youtube, /YOUTUBE_QUOTA_COOLDOWN_KEY/);
   assert.match(youtube, /fields/);
   assert.match(discord, /MAX_DISCORD_EXTERNAL_REQUESTS_PER_RUN = 12/);
+  assert.match(discord, /MAX_DISCORD_DM_KV_WRITES_PER_RUN = 2/);
   assert.match(discord, /DISCORD_GLOBAL_COOLDOWN_KEY/);
   assert.match(discord, /next_attempt_at/);
   assert.match(imageProxy, /inFlight/);
