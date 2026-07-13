@@ -16,11 +16,23 @@ jobs:
   apply:
     if: github.head_ref == 'agent/maximize-file-reduction'
     runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SITE_URL: https://flamenode.invalid
+      AUTH_URL: https://flamenode.invalid
+      AUTH_SECRET: ci-placeholder-not-a-production-secret
+      AUTH_DISCORD_ID: ci-placeholder-id
+      AUTH_DISCORD_SECRET: ci-placeholder-secret
+      CI: "1"
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
           ref: agent/maximize-file-reduction
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
 
       - name: 最新mainへ差分を適用
         shell: bash
@@ -35,7 +47,7 @@ jobs:
           git apply --index /tmp/file-reduction.patch
 
       - name: 依存関係を取得
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
       - name: 型検査
         run: npm run typecheck
