@@ -6,6 +6,7 @@ import { events } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { invalidateEventExportCache } from "@/lib/api/eventExportCache";
 
 export interface ApiEndpointResult {
   ok: boolean;
@@ -78,6 +79,7 @@ async function setPublicApi(
     return { ok: false, message: "更新が競合したか監査記録に失敗しました。" };
   }
 
+  await invalidateEventExportCache(eventId);
   revalidatePath("/admin/api-endpoints");
   return {
     ok: true,
