@@ -11,9 +11,7 @@ const IDS_PATH = path.join(ROOT, "cloudflare", "ids.json");
 
 const WRANGLER_FILES = [
   "wrangler.toml",
-  "workers/fast-jobs/wrangler.toml",
-  "workers/content-jobs/wrangler.toml",
-  "workers/sync-jobs/wrangler.toml",
+  "workers/background-jobs/wrangler.toml",
 ];
 
 const ID_KEYS = [
