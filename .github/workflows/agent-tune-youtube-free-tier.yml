@@ -1,0 +1,30 @@
+name: Tune YouTube free-tier schedule
+
+on:
+  push:
+    branches:
+      - agent/free-tier-background-worker
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/free-tier-background-worker
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: 同期間隔を調整
+        run: node scripts/agent-tune-youtube-free-tier.mjs
+      - name: 変更をcommitしてpush
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Tune YouTube synchronization for free-tier scale"
+          git push origin HEAD:agent/free-tier-background-worker
