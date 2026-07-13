@@ -1,5 +1,8 @@
-import { appUrl, videoPublicPath } from "../format";
-import type { DiscordNotificationPayload } from "./types";
+import {
+  appUrl,
+  videoPublicPath,
+  type DiscordNotificationPayload,
+} from "../format";
 
 export function buildVideoEditPermissionGrantedNotification(args: {
   videoId: string;
@@ -105,13 +108,4 @@ export function buildVideoVisibilityChangedNotification(args: {
     video_id: args.videoId,
     url: videoUrl,
   };
-}
-
-export function buildVideoVoidedNotification(args: {
-  videoId: string;
-  videoTitle: string;
-  youtubeVideoId?: string | null;
-  reason?: string | null;
-}): DiscordNotificationPayload {
-  return buildVideoVisibilityChangedNotification(args);
 }
