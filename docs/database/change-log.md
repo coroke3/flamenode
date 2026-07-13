@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-13
-> Verified against commit: `fcdf468`
+> Verified against commit: `64bd7de`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
 
 ## 2026-07-13 — `0040_free_tier_background_jobs.sql`
@@ -31,7 +31,7 @@
 | Data migration | なし |
 | Compatibility | 読み取り結果は不変。migration未適用でも機能するが処理効率が低下する |
 | Data loss | none |
-| Rollback | `videos_creator_public_idx`、`video_members_x_user_idx`、`video_chapters_video_visibility_idx`を削除 |
+| Rollback | `videos_creator_public_idx`、`video_members_x_user_video_idx`、`video_chapters_video_visibility_idx`を削除 |
 | Validation | schema/history検査、公開API・Worker・unit tests、空DBへのactive migration適用 |
 | PR | main直接実装 |
 
