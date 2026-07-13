@@ -48,13 +48,20 @@ const CREDENTIAL_REASONS = new Set([
 ]);
 
 export class YoutubeApiRequestError extends Error {
+  readonly kind: YoutubeApiErrorKind;
+  readonly reason: string;
+  readonly status: number;
+
   constructor(
-    readonly kind: YoutubeApiErrorKind,
-    readonly reason: string,
-    readonly status: number,
+    kind: YoutubeApiErrorKind,
+    reason: string,
+    status: number,
   ) {
     super(`${kind}:youtube_api_${reason}`);
     this.name = "YoutubeApiRequestError";
+    this.kind = kind;
+    this.reason = reason;
+    this.status = status;
   }
 }
 
