@@ -1,6 +1,6 @@
 /**
  * sync-jobs から利用する YouTube メタデータ同期モジュール。
- * Worker entry point は持たず、Cron 統合 Worker だけが実行する。
+ * Worker entry point は持たず、Cron 統合 Workerだけが実行する。
  */
 
 import {
@@ -13,16 +13,14 @@ import {
   type FetchLike,
 } from "../shared/externalApi.ts";
 import {
-  classifyYoutubeApiError,
-  recordConfiguredYoutubeApiKeys,
-  resolveYoutubeApiKeys,
-  runWithYoutubeApiKeyFailover,
-  YoutubeApiRequestError,
-  type YoutubeApiKeyEnv,
-} from "./apiKeyFailover.ts";
+  refundYoutubeQuota,
+  reserveYoutubeQuota,
+  type YoutubeQuotaEnv,
+} from "./quotaBudget.ts";
 
-export interface Env extends YoutubeApiKeyEnv {
-  DB: D1Database;
+export interface Env extends YoutubeQuotaEnv {
+  KV: KVNamespace;
+  YOUTUBE_API_KEY?: string;
 }
 
 export interface SyncBatchResult {
@@ -51,16 +49,21 @@ type MetadataWrite = {
 };
 
 export const YOUTUBE_SYNC_BATCH_SIZE = 50;
+export const YOUTUBE_SYNC_MAX_API_CALLS_PER_RUN = 4;
+export const YOUTUBE_SYNC_MAX_ROWS_PER_RUN =
+  YOUTUBE_SYNC_BATCH_SIZE * YOUTUBE_SYNC_MAX_API_CALLS_PER_RUN;
 export const YOUTUBE_SYNC_FETCH_TIMEOUT_MS = 8_000;
 export const YOUTUBE_SYNC_MAX_ATTEMPTS = 2;
 export const YOUTUBE_SYNC_MAX_RETRY_DELAY_MS = 15_000;
-/** videos.listは1 request = 1 quota unit。主キー失敗＋副キー成功を含め2 unitsに固定する。 */
-export const YOUTUBE_MAX_QUOTA_UNITS_PER_RUN = 2;
+/** 4 batch x 最大2 attempts。Workers Freeの外部subrequest 50件に対して42件の余裕を残す。 */
+export const YOUTUBE_MAX_EXTERNAL_REQUESTS_PER_RUN =
+  YOUTUBE_SYNC_MAX_API_CALLS_PER_RUN * YOUTUBE_SYNC_MAX_ATTEMPTS;
 
 const ACTIVE_SYNC_INTERVAL_SEC = 60 * 60;
 const DEFAULT_SYNC_INTERVAL_SEC = 24 * 60 * 60;
 const ACTIVE_EVENT_GRACE_SEC = 24 * 60 * 60;
-const BULK_UPSERT_ROWS = 8;
+/** D1の1 query最大100 bindingsに合わせ、10列 x 10行で固定する。 */
+const BULK_UPSERT_ROWS = 10;
 const YOUTUBE_QUOTA_COOLDOWN_SEC = 60 * 60;
 const YOUTUBE_QUOTA_COOLDOWN_KEY = "external-api:youtube:quota-cooldown-until";
 
@@ -105,13 +108,14 @@ async function quotaCooldownActive(env: Env, now: number): Promise<boolean> {
 }
 
 async function activateQuotaCooldown(env: Env, now: number): Promise<void> {
-  const until = now + YOUTUBE_QUOTA_COOLDOWN_SEC;
   try {
-    await env.KV.put(YOUTUBE_QUOTA_COOLDOWN_KEY, String(until), {
-      expirationTtl: YOUTUBE_QUOTA_COOLDOWN_SEC,
-    });
+    await env.KV.put(
+      YOUTUBE_QUOTA_COOLDOWN_KEY,
+      String(now + YOUTUBE_QUOTA_COOLDOWN_SEC),
+      { expirationTtl: YOUTUBE_QUOTA_COOLDOWN_SEC },
+    );
   } catch {
-    // quotaエラー自体を優先して伝播する。KV障害で上書きしない。
+    // quotaエラー自体を優先し、KV障害で上書きしない。
   }
 }
 
@@ -158,39 +162,33 @@ async function fetchYoutubeItems(
         const data = (await response.json()) as { items?: YoutubeItem[] };
         return data.items ?? [];
       } catch {
-        throw new YoutubeApiRequestError("permanent", "invalid_json", response.status);
+        throw new Error("permanent:youtube_api_invalid_json");
       }
     }
 
     const reason = await readYoutubeErrorReason(response);
-    const kind = classifyYoutubeApiError(response.status, reason);
-    const safeReason = (reason ?? `http_${response.status}`).trim().toLowerCase();
-    const requestError = new YoutubeApiRequestError(kind, safeReason, response.status);
-
-    if (kind === "quota" && response.status !== 429) {
+    if (reason && YOUTUBE_QUOTA_REASONS.has(reason) && response.status !== 429) {
       await activateQuotaCooldown(env, Math.floor(Date.now() / 1000));
-      throw requestError;
-    }
-    if (kind === "credential") {
-      throw requestError;
+      throw new Error(`quota:youtube_api_${reason}`);
     }
 
     const retryable = isRetryableYoutubeStatus(response.status);
+    lastError = new Error(
+      `${retryable ? "transient" : "permanent"}:youtube_api_http_${response.status}${reason ? `_${reason}` : ""}`,
+    );
     if (!retryable || attempt + 1 >= YOUTUBE_SYNC_MAX_ATTEMPTS || budget.remaining <= 0) {
-      if (kind === "quota" || (reason && YOUTUBE_QUOTA_REASONS.has(reason))) {
-        await activateQuotaCooldown(env, Math.floor(Date.now() / 1000));
-      }
-      throw requestError;
+      await cancelResponseBody(response);
+      throw lastError;
     }
 
     const retryAfter = parseRetryAfterMs(response.headers.get("retry-after"));
+    await cancelResponseBody(response);
     await delay(
       exponentialBackoffMs(attempt, {
         maxDelayMs: YOUTUBE_SYNC_MAX_RETRY_DELAY_MS,
         retryAfterMs: retryAfter,
       }),
     );
-    lastError = requestError;
   }
 
   throw lastError;
@@ -214,10 +212,7 @@ async function querySyncRows(
   return result.results ?? [];
 }
 
-/**
- * 未同期・開催中・通常期限を別queryに分け、既存indexを利用する。
- * OR条件を含む単一queryでvideos全体を走査せず、最大3 query・50件に固定する。
- */
+/** pending・開催中・通常期限をindex queryへ分け、合計200件まで取得する。 */
 async function selectSyncRows(env: Env, now: number): Promise<SyncRow[]> {
   const selected = new Map<string, SyncRow>();
 
@@ -234,11 +229,11 @@ async function selectSyncRows(env: Env, now: number): Promise<SyncRow[]> {
           AND v.visibility_status NOT IN ('archived', 'voided')
         ORDER BY COALESCE(ym.synced_at, 0) ASC, v.id ASC
         LIMIT ?1`,
-      [YOUTUBE_SYNC_BATCH_SIZE],
+      [YOUTUBE_SYNC_MAX_ROWS_PER_RUN],
     ),
   );
 
-  let remaining = YOUTUBE_SYNC_BATCH_SIZE - selected.size;
+  let remaining = YOUTUBE_SYNC_MAX_ROWS_PER_RUN - selected.size;
   if (remaining > 0) {
     appendUniqueRows(
       selected,
@@ -266,7 +261,7 @@ async function selectSyncRows(env: Env, now: number): Promise<SyncRow[]> {
     );
   }
 
-  remaining = YOUTUBE_SYNC_BATCH_SIZE - selected.size;
+  remaining = YOUTUBE_SYNC_MAX_ROWS_PER_RUN - selected.size;
   if (remaining > 0) {
     appendUniqueRows(
       selected,
@@ -364,12 +359,20 @@ async function persistMetadataBatch(env: Env, writes: MetadataWrite[], now: numb
   if (statements.length > 0) await env.DB.batch(statements);
 }
 
+function splitRows(rows: SyncRow[]): SyncRow[][] {
+  const chunks: SyncRow[][] = [];
+  for (let offset = 0; offset < rows.length; offset += YOUTUBE_SYNC_BATCH_SIZE) {
+    chunks.push(rows.slice(offset, offset + YOUTUBE_SYNC_BATCH_SIZE));
+  }
+  return chunks.slice(0, YOUTUBE_SYNC_MAX_API_CALLS_PER_RUN);
+}
+
 export async function syncBatch(
   env: Env,
   fetchImpl: FetchLike = fetch,
 ): Promise<SyncBatchResult> {
-  const apiKeys = resolveYoutubeApiKeys(env);
-  if (apiKeys.length === 0) return { processed: 0, failed: 0, skipped: 1 };
+  const apiKey = env.YOUTUBE_API_KEY?.trim();
+  if (!apiKey) return { processed: 0, failed: 0, skipped: 1 };
 
   const now = Math.floor(Date.now() / 1000);
   if (await quotaCooldownActive(env, now)) {
@@ -377,34 +380,42 @@ export async function syncBatch(
   }
 
   const rows = await selectSyncRows(env, now);
-  if (rows.length === 0) {
-    await recordConfiguredYoutubeApiKeys(env, apiKeys, now);
-    return { processed: 0, failed: 0, skipped: 1 };
+  if (rows.length === 0) return { processed: 0, failed: 0, skipped: 1 };
+
+  const chunks = splitRows(rows);
+  const plannedQuotaUnits = chunks.length * YOUTUBE_SYNC_MAX_ATTEMPTS;
+  const reservation = await reserveYoutubeQuota(env, plannedQuotaUnits, now);
+  if (!reservation) return { processed: 0, failed: 0, skipped: 1 };
+
+  const budget = new ExternalRequestBudget(YOUTUBE_MAX_EXTERNAL_REQUESTS_PER_RUN);
+  try {
+    const itemMap = new Map<string, YoutubeItem>();
+    for (const chunk of chunks) {
+      const url = new URL("https://www.googleapis.com/youtube/v3/videos");
+      url.searchParams.set("key", apiKey);
+      url.searchParams.set("part", "statistics,status,contentDetails");
+      url.searchParams.set(
+        "fields",
+        "items(id,statistics/viewCount,status/privacyStatus,contentDetails/duration)",
+      );
+      url.searchParams.set("prettyPrint", "false");
+      url.searchParams.set("id", chunk.map((row) => row.youtube_video_id).join(","));
+
+      const items = await fetchYoutubeItems(url.toString(), env, budget, fetchImpl);
+      for (const item of items) itemMap.set(item.id, item);
+    }
+
+    const writes = buildMetadataWrites(rows, itemMap);
+    await persistMetadataBatch(env, writes, now);
+    return { processed: writes.length, failed: 0, skipped: 0 };
+  } finally {
+    await refundYoutubeQuota(
+      env,
+      reservation,
+      reservation.reservedUnits - budget.used,
+      Math.floor(Date.now() / 1000),
+    );
   }
-
-  const url = new URL("https://www.googleapis.com/youtube/v3/videos");
-  url.searchParams.set("part", "statistics,status,contentDetails");
-  url.searchParams.set("fields", "items(id,statistics/viewCount,status/privacyStatus,contentDetails/duration)");
-  url.searchParams.set("prettyPrint", "false");
-  url.searchParams.set("id", rows.map((row) => row.youtube_video_id).join(","));
-
-  const budget = new ExternalRequestBudget(YOUTUBE_MAX_QUOTA_UNITS_PER_RUN);
-  const youtubeItems = await runWithYoutubeApiKeyFailover(
-    env,
-    apiKeys,
-    now,
-    async (candidate) => {
-      const keyedUrl = new URL(url);
-      keyedUrl.searchParams.set("key", candidate.key);
-      return fetchYoutubeItems(keyedUrl.toString(), env, budget, fetchImpl);
-    },
-  );
-  const writes = buildMetadataWrites(
-    rows,
-    new Map(youtubeItems.map((item) => [item.id, item])),
-  );
-  await persistMetadataBatch(env, writes, now);
-  return { processed: writes.length, failed: 0, skipped: 0 };
 }
 
 export function parseDuration(iso: string): number {

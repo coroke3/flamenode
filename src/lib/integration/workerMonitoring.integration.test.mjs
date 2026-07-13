@@ -46,27 +46,29 @@ test("D1同時接続と日次書込みへ安全余裕を確保する", async () 
   assert.match(monitor, /capacityPerDay:\s*14400/);
 });
 
-test("YouTube API副キーはcredential障害だけを補完する", async () => {
-  const failover = await source("workers/youtube-sync/apiKeyFailover.ts");
+test("YouTube APIは単一キーと日次80%予算だけを使う", async () => {
   const sync = await source("workers/youtube-sync/index.ts");
+  const quota = await source("workers/youtube-sync/quotaBudget.ts");
+  const policy = await source("src/lib/youtube/quotaPolicy.ts");
   const syncJobs = await source("workers/sync-jobs/index.ts");
   const vars = await source(".dev.vars.example");
   const operations = await source("docs/operations/workers.md");
   const nav = await source("src/lib/admin/adminNavGroups.tsx");
-  const page = await source("app/(admin)/admin/youtube-api-keys/page.tsx");
-  const card = await source("src/components/admin/YoutubeApiKeyStatusCard.tsx");
+  const page = await source("app/(admin)/admin/youtube-quota/page.tsx");
 
-  assert.match(failover, /YOUTUBE_API_KEY_SECONDARY/);
-  assert.match(syncJobs, /YOUTUBE_API_KEY_SECONDARY/);
-  assert.match(vars, /YOUTUBE_API_KEY_SECONDARY=""/);
-  assert.match(failover, /requestError\?\.kind === "credential"/);
-  assert.match(failover, /quota系を別キーへ逃がさない/);
-  assert.match(sync, /ExternalRequestBudget\(YOUTUBE_MAX_QUOTA_UNITS_PER_RUN\)/);
-  assert.match(operations, /quotaExceeded.*副キーへ切り替えない/);
-  assert.match(failover, /youtube-api:key-status:v1/);
-  assert.match(nav, /href:\s*"\/admin\/youtube-api-keys"/);
-  assert.match(page, /YoutubeApiKeyStatusCard/);
-  assert.match(card, /YouTube APIキー冗長化/);
-  assert.doesNotMatch(card, /YOUTUBE_API_KEY(?:_SECONDARY)?/);
-  assert.doesNotMatch(card, /candidate\.key/);
+  assert.match(sync, /env\.YOUTUBE_API_KEY\?\.trim\(\)/);
+  assert.match(syncJobs, /YOUTUBE_DAILY_QUOTA_LIMIT/);
+  assert.match(vars, /YOUTUBE_API_KEY=""/);
+  assert.match(vars, /YOUTUBE_DAILY_QUOTA_LIMIT="10000"/);
+  assert.doesNotMatch(sync, /YOUTUBE_API_KEY_SECONDARY/);
+  assert.doesNotMatch(syncJobs, /YOUTUBE_API_KEY_SECONDARY/);
+  assert.doesNotMatch(vars, /YOUTUBE_API_KEY_SECONDARY/);
+  assert.match(policy, /YOUTUBE_TARGET_USAGE_PERCENT\s*=\s*80/);
+  assert.match(quota, /external_api_quota_usage/);
+  assert.match(quota, /used_units \+ excluded\.used_units <= excluded\.limit_units/);
+  assert.match(sync, /YOUTUBE_MAX_EXTERNAL_REQUESTS_PER_RUN/);
+  assert.match(operations, /8,000 units/);
+  assert.match(nav, /href:\s*"\/admin\/youtube-quota"/);
+  assert.match(page, /FlameNode上限/);
+  assert.doesNotMatch(page, /YOUTUBE_API_KEY(?:_SECONDARY)?/);
 });

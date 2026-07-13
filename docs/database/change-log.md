@@ -2,8 +2,23 @@
 
 > Status: Active
 > Last verified: 2026-07-13
-> Verified against commit: `28bd38d`
+> Verified against commit: `f45f75c`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
+
+## 2026-07-13 — `0041_youtube_quota_budget.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | additive |
+| Summary | 単一YouTube APIキーの日次quota使用量を太平洋時間の日付単位で原子的に管理するテーブルを追加 |
+| Reason | 標準10,000 units/dayの80%＝8,000 unitsをFlameNode全体の上限にし、同期・将来の再生リスト処理が同じ予算を共有できるようにするため |
+| Tables | `external_api_quota_usage` |
+| Data migration | なし |
+| Compatibility | migration未適用時はYouTube同期を開始せずfail-closedにする |
+| Data loss | none |
+| Rollback | `external_api_quota_usage`を削除 |
+| Validation | schema/history検査、Worker/unit tests、空DBへのactive migration適用 |
+| PR | `agent/youtube-single-key-quota-budget` |
 
 ## 2026-07-13 — `0040_worker_free_tier_scale.sql`
 

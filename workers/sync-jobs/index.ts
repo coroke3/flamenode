@@ -1,6 +1,6 @@
 /**
  * sync-jobs: 15分毎の外部API・集計ジョブ。
- * - YouTube メタデータ同期（最大50件）
+ * - YouTube メタデータ同期（最大200件）
  * - スコア差分再計算（最大150件、1 SQL）
  * - スコア変更時のトップ・人気一覧再生成enqueue
  */
@@ -18,7 +18,7 @@ export interface Env {
   DB: D1Database;
   KV: KVNamespace;
   YOUTUBE_API_KEY?: string;
-  YOUTUBE_API_KEY_SECONDARY?: string;
+  YOUTUBE_DAILY_QUOTA_LIMIT?: string;
   BUILD_COMMIT_SHA?: string;
 }
 

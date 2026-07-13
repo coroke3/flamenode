@@ -14,11 +14,9 @@ DISCORD_GUILD_ID=""
 DISCORD_BOT_TOKEN=""
 
 # YouTube Data API
-# 主キー。既存環境との互換性を維持する。
 YOUTUBE_API_KEY=""
-# 主キーの失効・API未有効化・restriction不整合時だけ使う副キー。
-# quotaExceededを回避する目的では切り替えない。
-YOUTUBE_API_KEY_SECONDARY=""
+# Google Cloud Consoleで設定した1日quota。FlameNodeはこの80%を上限に使う。
+YOUTUBE_DAILY_QUOTA_LIMIT="10000"
 
 # 公開設定
 NEXT_PUBLIC_SITE_URL="http://localhost:3000"

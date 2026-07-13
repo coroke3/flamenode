@@ -2,13 +2,13 @@
 
 FlameNodeは本番で3つのCron Workerだけをdeployする。Workers FreeはWorker数100、Cron Trigger数5のため、1 Workerへ統合すること自体に無料枠節約効果はない。処理障害の分離と、1実行当たりのCPU・D1 query・subrequest予算を優先して3 Workerを維持する。
 
-Workers FreeのCPU上限はHTTP/Cronともに10msであり、Cron間隔を1時間以上にしても増えない。ネットワーク、KV、D1の待機時間はCPU時間へ含まれないが、JSON解析・直列化・配列処理は含まれる。このため、重い処理を長時間実行せず、小さい固定batchへ分割する。
+Workers FreeのCPU上限はHTTP/Cronともに10msである。ネットワーク、KV、D1の待機時間はCPU時間へ含まれないが、JSON解析・直列化・配列処理は含まれる。このため、重い処理を長時間実行せず、小さい固定batchへ分割する。
 
 | Worker | Cron | 主な責務 | 1実行上限 |
 |---|---:|---|---:|
 | `fast-jobs` | `*/5 * * * *` | 締切リマインダー、通知配送 | 通知6件、Discord外部request最大12、DM cache KV書込最大2 |
 | `content-jobs` | `*/15 * * * *` | 静的JSON再生成、retention cleanup | target 1件 |
-| `sync-jobs` | `7,22,37,52 * * * *` | YouTube同期、スコア差分再計算 | YouTube 50件・最大2 quota units、score 150件 |
+| `sync-jobs` | `7,22,37,52 * * * *` | YouTube同期、スコア差分再計算 | YouTube最大200件・外部request最大8、score 150件 |
 
 旧standalone Worker entrypointは共有モジュールとして残すが、直接deployしない。
 
@@ -16,39 +16,39 @@ Workers FreeのCPU上限はHTTP/Cronともに10msであり、Cron間隔を1時�
 
 - `fast-jobs`: 通知は最大6件。1件当たりD1 claim、KV DM channel cache、Discord最大2 request、完了更新を含めて50 subrequests以内に収める。DM channelはisolateへ全件cacheし、KVへの永続化だけを1実行2件に制限する。
 - `content-jobs`: 1 targetだけ生成する。cleanupはleaseにより1時間に1回だけ実行する。静的生成中のD1 queryは`withSerializedD1`で直列化し、同時接続枠を浪費しない。
-- `sync-jobs`: YouTube `videos.list`は最大50 IDを1 requestで取得する。D1保存は8件単位のbulk upsertにまとめる。
-- `youtube-sync`: `pending`、開催中期限、通常期限を最大3 queryへ分け、既存indexから最大50件だけ取得する。15分ごとの全作品走査を行わない。
+- `sync-jobs`: YouTube `videos.list`は50 IDずつ最大4 requestを逐次実行する。各requestの再試行は最大1回で、外部request budgetは最大8に固定する。
+- YouTube metadata保存は10件単位のbulk upsertとし、1 SQLの100 bindings上限に収める。最大200件でも20 write statementsに固定する。
+- `youtube-sync`: `pending`、開催中期限、通常期限を最大3 queryへ分け、既存indexから合計200件だけ取得する。15分ごとの全作品走査を行わない。
 - `score-recalc`: 変更済みまたは24時間以上未更新の公開作品を1 SQLで最大150件更新する。KV cursorと1作品1 queryを使わない。
 - D1のrows writtenには更新table rowに加えてindex entryも含まれるため、scoreの理論最大を14,400作品/日に抑え、他jobの書込み余地を確保する。
 - Cron重複排除はD1 `worker_leases`を正本とし、無制限loop、全件読込、処理全体の即時retryは禁止する。
+
+## YouTube単一キーと日次quota予算
+
+- APIキーは`YOUTUBE_API_KEY`の1つだけを登録する。副キー、ローテーション、quota迂回は実装しない。
+- Google Cloud Consoleの日次quotaは`YOUTUBE_DAILY_QUOTA_LIMIT`へ設定する。未設定・不正値は10,000 units/dayとして扱う。
+- FlameNodeの上限は設定quotaの80%とする。標準10,000 units/dayなら8,000 units/dayで停止し、残り20%を手動対応・計上差・他用途の安全余裕として残す。
+- `external_api_quota_usage`へ太平洋時間の日付単位で使用量を保存する。quota予約はD1 UPSERTの条件で原子的に行い、並行Workerでも上限を超えない。
+- Workerは最大再試行分を先に予約し、実際に外部requestを行わなかった分だけ処理後に返却する。ネットワーク失敗を含む実行済みrequestは消費扱いのまま残す。
+- この台帳は将来の再生リスト同期など高quota処理とも共有する。日次上限まで無意味なrequestを発生させるものではなく、必要な処理がある場合だけ最大80%まで使用できる設計とする。
+- quota系403を受けた場合はKVへ1時間cooldownを保存し、後続Cronの無駄な呼出しを止める。
 
 ## 外部APIガード
 
 | 外部処理 | Provider上限への対応 | FlameNode側の固定上限・削減策 |
 |---|---|---|
-| YouTube Data API `videos.list` | 1 requestあたり1 quota unit。無効requestも最低1 unit。既定10,000 units/day、太平洋時間0時reset | 1 Cron最大50 ID、最大2 requests=2 units。必要な`fields`だけ取得。quota系403はKVで1時間cooldownし連続失敗を止める。credential障害時だけ同じ予算内で副キーへ切替 |
-| Discord Bot/Webhook | per-route limitは可変。`X-RateLimit-*`と`Retry-After`を正本にし、global limitは50 requests/sec | 1 Cron最大12 external requests。inline retryなし。DM channel IDをisolate/KVへ30日cacheし、通常配送を1 requestへ削減。KV書込は最大2/run・576/day。global 429は全routeへ適用 |
-| Google Drive画像 / YouTube thumbnail | 公開画像originの固定quota値へ依存しない | 同一キーの同時missを1 fetchへ集約。ETag/304再検証、negative cache、stale返却、単一objectサイズ上限。request内retryなし |
-| Cloudflare Worker subrequest | Freeは1 invocation 50、同時outgoing connection 6 | 外部fetchだけでなくD1/KV/R2も含め50未満に固定。外部処理は逐次または共有in-flightで重複排除 |
+| YouTube Data API `videos.list` | 1 requestあたり1 quota unit。無効requestも最低1 unit。既定10,000 units/day、太平洋時間0時reset | 単一キー。1 Cron最大4 batch・200 ID、再試行込み外部request最大8。日次8,000 unitsの共有予算。必要な`fields`だけ取得 |
+| Discord Bot/Webhook | per-route limitは可変。`X-RateLimit-*`と`Retry-After`を正本にする | 1 Cron最大12 external requests。inline retryなし。DM channel IDをisolate/KVへ30日cacheし、通常配送を1 requestへ削減 |
+| Google Drive画像 / YouTube thumbnail | 公開画像originの固定quota値へ依存しない | 同一キーの同時missを1 fetchへ集約。ETag/304再検証、negative cache、stale返却、単一objectサイズ上限 |
+| Cloudflare Worker subrequest | Freeは1 invocation 50、同時outgoing connection 6 | YouTubeは最大8 requestを逐次実行し、42 request以上の余裕を残す。D1も別途50 query未満に固定 |
 
-Providerの429/503を受けた場合、同一invocationで無制限に再試行しない。Providerが返す待機時間をqueueの`next_attempt_at`または短期cooldownへ反映し、後続Cronへ繰り越す。固定値をproviderの実レート上限として仮定しない。
-
-## YouTube APIキー
-
-- `YOUTUBE_API_KEY`を主キー、`YOUTUBE_API_KEY_SECONDARY`を副キーとして最大2つ登録できる。
-- 通常は主キーを利用し、失効、API未有効化、key restriction不整合などcredential固有の障害時だけ副キーへ切り替える。
-- credential障害になったキーは6時間回避し、その後に再確認する。
-- 使用中キー、直近切替、障害理由は共有KVへ秘密値を含めず記録する。
-- 同一のキー値は重複排除する。
-- `quotaExceeded`、`dailyLimitExceeded`、`rateLimitExceeded`では切り替えない。複数projectのquotaを合算・迂回する設計にはしない。
-- request budgetは2のまま維持する。credential障害は同一キーで再試行せず、主キー失敗1回と副キー成功1回を上限内に収める。
-- quota不足はGoogle Cloud Consoleで実測し、quota extension申請または同期頻度の引き下げで対応する。
+Providerの429/503を受けた場合、同一invocationで無制限に再試行しない。Providerが返す待機時間を短期cooldownへ反映し、後続Cronへ繰り越す。固定値をproviderの実レート上限として仮定しない。
 
 ## 大規模データ時の処理能力
 
 | 処理 | 最大処理量 | 1万件の初回処理目安 |
 |---|---:|---:|
-| YouTube同期 | 50件/15分 = 4,800件/日 | 約2.1日 |
+| YouTube同期 | 200件/15分 = 19,200件/日 | 約12時間30分 |
 | スコア差分更新 | 150件/15分 = 14,400件/日 | 約16時間40分 |
 | 静的JSON target | 1件/15分 = 96件/日 | 優先度順。global targetは重複排除 |
 | 通知 | 6件/5分 = 1,728件/日 | 通常は5分以内 |
@@ -71,11 +71,9 @@ Queue targetはcanonical値だけを受理する。旧別名や未知値は成�
 
 ## 監視
 
-`/admin/workers`で、Cronの最終開始・成功・失敗・lease、通知と静的queueの固着、YouTubeとscoreのbacklog、理論解消時間、global静的JSONの最終生成時刻、`operation_mode`を確認する。YouTube API主副キーの状態は`/admin/youtube-api-keys`で確認する。
+`/admin/workers`でCron・queue・backlogを確認し、`/admin/youtube-quota`で太平洋時間のquota日、設定値、80%上限、推定使用量、残り予算を確認する。APIキー本体は保存・表示しない。
 
-YouTube quota cooldown中は同期がskippedになり、credential障害時は正常な副キーへ切り替わる。Discord rate limit時は通知outboxの`next_attempt_at`以降へ繰り越される。画像proxyは`x-fn-media-cache`で`hit`、`miss`、`stale`、`coalesced`、`fallback`を区別する。
-
-CPU時間、`exceededCpu`、D1の日次使用量、YouTube API quotaはアプリDBから正確に取得できないため、Cloudflare DashboardおよびGoogle Cloud Consoleを正本とする。
+アプリのquota台帳はFlameNodeが予約・実行した処理だけを表す。Google Cloud Console外の利用やProvider側の実計上を完全には取得できないため、最終的なquota残量はGoogle Cloud Consoleを正本とする。
 
 ## 公式上限
 

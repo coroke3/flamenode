@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   index,
   integer,
+  primaryKey,
   real,
   sqliteTable,
   text,
@@ -314,3 +315,17 @@ export const workerLeases = sqliteTable("worker_leases", {
   last_failed_at: integer("last_failed_at"),
   last_error_code: text("last_error_code"),
 });
+
+export const externalApiQuotaUsage = sqliteTable(
+  "external_api_quota_usage",
+  {
+    provider: text("provider").notNull(),
+    quota_day: text("quota_day").notNull(),
+    used_units: integer("used_units").notNull().default(0),
+    limit_units: integer("limit_units").notNull(),
+    updated_at: integer("updated_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.provider, t.quota_day] }),
+  }),
+);

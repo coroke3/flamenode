@@ -18,6 +18,7 @@ export interface FlameNodeEnv {
   DISCORD_GUILD_ID?: string;
   DISCORD_BOT_TOKEN?: string;
   YOUTUBE_API_KEY?: string;
+  YOUTUBE_DAILY_QUOTA_LIMIT?: string;
   NEXT_PUBLIC_SITE_URL?: string;
 }
 
@@ -169,6 +170,9 @@ function normalizeBindings(
       candidate?.DISCORD_BOT_TOKEN ?? process.env.DISCORD_BOT_TOKEN,
     YOUTUBE_API_KEY:
       candidate?.YOUTUBE_API_KEY ?? process.env.YOUTUBE_API_KEY,
+    YOUTUBE_DAILY_QUOTA_LIMIT:
+      candidate?.YOUTUBE_DAILY_QUOTA_LIMIT ??
+      process.env.YOUTUBE_DAILY_QUOTA_LIMIT,
     NEXT_PUBLIC_SITE_URL:
       candidate?.NEXT_PUBLIC_SITE_URL ?? process.env.NEXT_PUBLIC_SITE_URL,
   };

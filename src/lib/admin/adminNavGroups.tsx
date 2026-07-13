@@ -108,8 +108,8 @@ const ADMIN_NAV_GROUPS_BASE: AdminSidebarGroup[] = [
         icon: <Icon name="clock" size={14} />,
       },
       {
-        href: "/admin/youtube-api-keys",
-        label: "YouTube APIキー",
+        href: "/admin/youtube-quota",
+        label: "YouTube quota",
         icon: <Icon name="youtube" size={14} />,
       },
       { href: "/admin/health", label: "ヘルスチェック", icon: <Icon name="check" size={14} /> },
