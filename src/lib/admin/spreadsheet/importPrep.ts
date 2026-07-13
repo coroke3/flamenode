@@ -1,6 +1,7 @@
 import "server-only";
 
 export {
+  assertSpreadsheetImportColumns,
   buildReadonlyImportColumnWarnings,
   omitReadonlyImportColumns,
   prepareSpreadsheetImportRows,

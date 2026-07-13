@@ -1,3 +1,5 @@
+import { isPublicVideoDirect } from "./visibility.ts";
+
 export interface StaticVideoDetailPayload {
   generated_at?: unknown;
   video?: Record<string, unknown>;
@@ -8,9 +10,10 @@ export interface StaticVideoDetailPayload {
 export interface StaticVideoDetailVideo {
   id: string;
   title: string;
+  /** UI compatibility only; public payloads must not populate this internal key. */
+  creator_x_user_id?: string;
   youtube_video_id: string | null;
   creator_display_name: string | null;
-  creator_x_user_id: string | null;
   creator_icon_url: string | null;
   music: string | null;
   credit: string | null;
@@ -70,13 +73,13 @@ function normalizeVideo(value: unknown): StaticVideoDetailVideo | null {
   const row = value as Record<string, unknown>;
   const id = normalizeString(row.id);
   const title = normalizeString(row.title);
-  if (!id || !title) return null;
+  const visibility = normalizeString(row.visibility_status) ?? "public";
+  if (!id || !title || !isPublicVideoDirect(visibility)) return null;
   return {
     id,
     title,
     youtube_video_id: normalizeNullableString(row.youtube_video_id),
     creator_display_name: normalizeNullableString(row.creator_display_name),
-    creator_x_user_id: normalizeNullableString(row.creator_x_user_id),
     creator_icon_url: normalizeNullableString(row.creator_icon_url),
     music: normalizeNullableString(row.music),
     credit: normalizeNullableString(row.credit),
@@ -84,7 +87,7 @@ function normalizeVideo(value: unknown): StaticVideoDetailVideo | null {
     highlights: normalizeNullableString(row.highlights),
     production_story: normalizeNullableString(row.production_story),
     closing_comment: normalizeNullableString(row.closing_comment),
-    visibility_status: normalizeString(row.visibility_status) ?? "public",
+    visibility_status: visibility,
     scheduled_time: normalizeUnix(row.scheduled_time),
     primary_event_id: normalizeNullableString(row.primary_event_id),
     collaboration_type: normalizeNullableString(row.collaboration_type),

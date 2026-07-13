@@ -71,28 +71,16 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
           <Logo />
         </Link>
 
-        <nav className={`fn-nav ${styles.desktopNav}`} aria-label="公開ナビゲーション">
-          {PUBLIC_NAV_ITEMS.map((item) => {
-            const active = isPathActive(pathname, item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`fn-nav-item fn-nav-ja ${styles.desktopNavLink} ${
-                  active ? `${styles.desktopNavLinkActive} is-active` : ""
-                }`}
-                aria-current={active ? "page" : undefined}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
-
         <div className={`fn-header-right ${styles.right}`}>
           <div className={`${styles.themeButton} ${styles.barCompactHidden}`}>
             <ThemeToggle />
           </div>
+
+          {user ? (
+            <div className={`${styles.desktopXId} ${styles.barCompactHidden}`}>
+              <XIdSwitcher entries={user.xIds} discordName={user.name} />
+            </div>
+          ) : null}
 
           <button
             type="button"
@@ -350,7 +338,7 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
               <div className={styles.mobileSection}>
                 <div className={styles.mobileSectionTitle}>テーマ</div>
                 <div className={styles.themeSlot}>
-                  <ThemeToggle />
+                  <ThemeToggle variant="segmented" />
                 </div>
               </div>
 

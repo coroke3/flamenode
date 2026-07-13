@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, sql, type SQL } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import {
   announcements,
@@ -9,7 +9,16 @@ import {
   videos,
   xAccountLinkRequests,
 } from "@/lib/db/schema";
+import { isEventOwner } from "@/lib/event/eventOwnershipCore";
 import type { RestoreAdapter, RestoreStrategy } from "./types";
+import { expectedRowCondition as buildExpectedRowCondition } from "./expectedRowCondition";
+
+export function expectedRowCondition(options: {
+  forceOverwrite?: boolean;
+  expectedCurrent?: Record<string, unknown> | null;
+}): SQL {
+  return buildExpectedRowCondition(options);
+}
 
 export const RESTORABLE_TABLES = new Set([
   "events",
@@ -25,6 +34,17 @@ function unsupported(table: string, strategy: RestoreStrategy): never {
   throw new Error(`Unsupported ${table} restore strategy: ${strategy}`);
 }
 
+/**
+ * restore の事前 read と確定 write の間に競合が起きても、非 force 操作は
+ * mutation を成立させない。版列を持たない表は明示的な force 以外 fail-closed にする。
+ */
+/**
+ * The preflight read and the restore write must observe the same row.  A
+ * timestamp is useful as an index-friendly fast path, but it is not a proof
+ * of freshness: callers can update a row without changing that timestamp.
+ * Compare every scalar returned by the preflight read in the mutation WHERE
+ * clause so a stale restore becomes a zero-change, fail-closed batch.
+ */
 const eventsAdapter: RestoreAdapter = {
   supportedStrategies: ["update_before"],
   async fetchCurrent(db, targetId) {
@@ -35,7 +55,10 @@ const eventsAdapter: RestoreAdapter = {
     if (strategy !== "update_before") return unsupported("events", strategy);
     const { id, created_at, ...set } = snapshot;
     return {
-      query: db.update(events).set(set as Partial<typeof events.$inferInsert>).where(eq(events.id, id as string)),
+      query: db.update(events).set(set as Partial<typeof events.$inferInsert>).where(and(
+        eq(events.id, id as string),
+        expectedRowCondition(options),
+      )!),
       expectedChanges: 1,
     };
   },
@@ -47,11 +70,14 @@ const videosAdapter: RestoreAdapter = {
     const row = await db.select().from(videos).where(eq(videos.id, targetId)).get();
     return row ? (row as unknown as Record<string, unknown>) : null;
   },
-  buildRestoreMutation(db, snapshot, strategy) {
+  buildRestoreMutation(db, snapshot, strategy, options) {
     if (strategy !== "update_before") return unsupported("videos", strategy);
     const { id, created_at, ...set } = snapshot;
     return {
-      query: db.update(videos).set(set as Partial<typeof videos.$inferInsert>).where(eq(videos.id, id as string)),
+      query: db.update(videos).set(set as Partial<typeof videos.$inferInsert>).where(and(
+        eq(videos.id, id as string),
+        expectedRowCondition(options),
+      )!),
       expectedChanges: 1,
     };
   },
@@ -63,11 +89,14 @@ const slotsAdapter: RestoreAdapter = {
     const row = await db.select().from(slots).where(eq(slots.id, targetId)).get();
     return row ? (row as unknown as Record<string, unknown>) : null;
   },
-  buildRestoreMutation(db, snapshot, strategy) {
+  buildRestoreMutation(db, snapshot, strategy, options) {
     if (strategy === "update_before") {
       const { id, ...set } = snapshot;
       return {
-        query: db.update(slots).set(set as Partial<typeof slots.$inferInsert>).where(eq(slots.id, id as string)),
+        query: db.update(slots).set(set as Partial<typeof slots.$inferInsert>).where(and(
+          eq(slots.id, id as string),
+          expectedRowCondition(options),
+        )!),
         expectedChanges: 1,
       };
     }
@@ -87,11 +116,14 @@ const announcementsAdapter: RestoreAdapter = {
     const row = await db.select().from(announcements).where(eq(announcements.id, targetId)).get();
     return row ? (row as unknown as Record<string, unknown>) : null;
   },
-  buildRestoreMutation(db, snapshot, strategy) {
+  buildRestoreMutation(db, snapshot, strategy, options) {
     if (strategy === "update_before") {
       const { id, created_at, ...set } = snapshot;
       return {
-        query: db.update(announcements).set(set as Partial<typeof announcements.$inferInsert>).where(eq(announcements.id, id as string)),
+        query: db.update(announcements).set(set as Partial<typeof announcements.$inferInsert>).where(and(
+          eq(announcements.id, id as string),
+          expectedRowCondition(options),
+        )!),
         expectedChanges: 1,
       };
     }
@@ -111,11 +143,14 @@ const eventGroupsAdapter: RestoreAdapter = {
     const row = await db.select().from(eventGroups).where(eq(eventGroups.id, targetId)).get();
     return row ? (row as unknown as Record<string, unknown>) : null;
   },
-  buildRestoreMutation(db, snapshot, strategy) {
+  buildRestoreMutation(db, snapshot, strategy, options) {
     if (strategy === "update_before") {
       const { id, created_at, ...set } = snapshot;
       return {
-        query: db.update(eventGroups).set(set as Partial<typeof eventGroups.$inferInsert>).where(eq(eventGroups.id, id as string)),
+        query: db.update(eventGroups).set(set as Partial<typeof eventGroups.$inferInsert>).where(and(
+          eq(eventGroups.id, id as string),
+          expectedRowCondition(options),
+        )!),
         expectedChanges: 1,
       };
     }
@@ -135,11 +170,14 @@ const xAccountLinkRequestsAdapter: RestoreAdapter = {
     const row = await db.select().from(xAccountLinkRequests).where(eq(xAccountLinkRequests.id, targetId)).get();
     return row ? (row as unknown as Record<string, unknown>) : null;
   },
-  buildRestoreMutation(db, snapshot, strategy) {
+  buildRestoreMutation(db, snapshot, strategy, options) {
     if (strategy === "update_before") {
       const { id, ...set } = snapshot;
       return {
-        query: db.update(xAccountLinkRequests).set(set as Partial<typeof xAccountLinkRequests.$inferInsert>).where(eq(xAccountLinkRequests.id, id as string)),
+        query: db.update(xAccountLinkRequests).set(set as Partial<typeof xAccountLinkRequests.$inferInsert>).where(and(
+          eq(xAccountLinkRequests.id, id as string),
+          expectedRowCondition(options),
+        )!),
         expectedChanges: 1,
       };
     }
@@ -162,15 +200,28 @@ const eventStaffAdapter: RestoreAdapter = {
   buildRestoreMutation(db, snapshot, strategy, options) {
     const id = snapshot.id as string;
     const eventId = snapshot.event_id as string;
+    const expectedPreset = options.expectedCurrent?.permission_preset;
+    const hasExpectedPreset = typeof expectedPreset === "string";
+    const currentIsOwner = hasExpectedPreset && isEventOwner({
+      permission_preset: expectedPreset,
+    });
+    const ownerMutationGuard = (nextPreset: string | null): SQL => sql`
+      ${hasExpectedPreset ? 1 : 0} = 1 AND (
+        ${currentIsOwner ? 0 : 1} = 1
+        OR ${nextPreset} = 'owner'
+        OR (
+          SELECT COUNT(*) FROM event_staff
+          WHERE event_id = ${eventId} AND permission_preset = 'owner'
+        ) > 1
+      )
+    `;
     if (strategy === "delete_created") {
       return {
         query: db.delete(eventStaff).where(and(
           eq(eventStaff.id, id),
           eq(eventStaff.event_id, eventId),
-          sql`(${eventStaff.permission_preset} <> 'owner' OR (SELECT COUNT(*) FROM event_staff WHERE event_id = ${eventId} AND permission_preset = 'owner') > 1)`,
-          options.forceOverwrite || options.expectedCurrent?.updated_at === undefined
-            ? sql`1 = 1`
-            : sql`${eventStaff.updated_at} = ${options.expectedCurrent.updated_at as number}`,
+          ownerMutationGuard(null),
+          expectedRowCondition(options),
         )!),
         expectedChanges: 1,
       };
@@ -182,10 +233,8 @@ const eventStaffAdapter: RestoreAdapter = {
         query: db.update(eventStaff).set(set as Partial<typeof eventStaff.$inferInsert>).where(and(
           eq(eventStaff.id, id),
           eq(eventStaff.event_id, eventId),
-          sql`(${eventStaff.permission_preset} <> 'owner' OR ${nextPreset} = 'owner' OR (SELECT COUNT(*) FROM event_staff WHERE event_id = ${eventId} AND permission_preset = 'owner') > 1)`,
-          options.forceOverwrite || options.expectedCurrent?.updated_at === undefined
-            ? sql`1 = 1`
-            : sql`${eventStaff.updated_at} = ${options.expectedCurrent.updated_at as number}`,
+          ownerMutationGuard(nextPreset),
+          expectedRowCondition(options),
         )!),
         expectedChanges: 1,
       };

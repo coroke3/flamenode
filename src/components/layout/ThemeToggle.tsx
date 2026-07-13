@@ -60,7 +60,7 @@ export function ThemeToggle({
 
   if (variant === "segmented") {
     return (
-      <div className={styles.segmented} role="group" aria-label="テーマ">
+      <div className={styles.segmented} role="group" aria-label="テーマ設定">
         {(["light", "dark", "system"] as const).map((item) => (
           <button
             key={item}

@@ -71,7 +71,7 @@ export function buildEventUpdatePayload(args: {
   }
 
   if (permissions.questions) {
-    videoFormSettingsJson = buildVideoFormSettingsJson(formData, data);
+    videoFormSettingsJson = buildVideoFormSettingsJson(formData);
     Object.assign(updatePayload, {
       allow_user_video_edits: data.allow_user_video_edits,
       user_video_edit_permission_keys_json:

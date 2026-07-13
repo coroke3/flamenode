@@ -13,7 +13,7 @@ FlameNode は「映像（フレーム）の結節点（ノード）」を意味�
 - **公開UIの基調**: トップページと動画詳細ページは、旧 EventArchives の高コントラスト、高密度な横スクロール作品棚、右レール関連動画、モバイル上部固定プレイヤーをデザインベースにする。黒基調そのものへ必ず準拠する必要はなく、ライトモードとダークモードのテーマトークンを正とする。正式表記や機能は FlameNode として再構成し、トップの巨大ヒーロー化は避け、作品とイベント導線がファーストビューに入る密度を保つ。詳細は `FlameNode-Design-System.md`、`設計app/(public)/page.md`、`設計app/(public)/[id]/page.md` を正とする。
 
 【インフラ構成方針】 本プラットフォームは Cloudflare Pages (Next.js), D1 (SQL DB), R2 (Storage), KV (Cache) を基盤とする。Firebase サービス（Firestore, Auth, Storage, Functions）は、コストとスケーリング最適化のため使用しない。
-Cloudflare 無料枠・課金抑制・自動停止の詳細は `FlameNode-Cloudflare-Free-Tier-Guardrails.md` を正とする。無料枠では Workers/Pages Functions requests、Durable Object requests、D1 rows written、KV writes、R2 Class B、Queues operations が特にネックになりやすい。
+Cloudflare 無料枠・課金抑制・手動制限の詳細は `FlameNode-Cloudflare-Free-Tier-Guardrails.md` を正とする。無料枠では Workers/Pages Functions requests、Durable Object requests、D1 rows written、KV writes、R2 Class B、Queues operations が特にネックになりやすい。
 
 **命名規則**: テーブル名・カラム名は全て **snake_case** で統一する。Drizzle ORM (`src/lib/db/schema.ts`) を Single Source of Truth とする。
 
@@ -361,19 +361,16 @@ X ID 再申請や void 理由などのケース情報は `videos.x_reapply_*` / 
 - **created_at**: integer NOT NULL DEFAULT (unixepoch())
 
 ### 1-12. system_settings (全体設定)
-- **id**: text (Primary Key: "global")
+- **id**: text (Primary Key: "default")
 - **default_editable_fields**: text (JSON Object: {"title": boolean, "music": boolean, ...})
 - **upcoming_editable_fields**: text (JSON Object) - 枠あり/未公開作品用のデフォルト編集許可設定
-- **is_maintenance_mode**: integer DEFAULT 0
 - **history_retention_days**: integer DEFAULT 90
-- **cost_guard_mode**: text DEFAULT "normal" ("normal", "economy", "read_only", "static_only", "maintenance")
-- **auto_cost_guard_enabled**: integer DEFAULT 1
-- **cost_guard_thresholds_json**: text (JSON Object / Cloudflare 無料枠に対する警戒しきい値)
-- **disabled_features_json**: text (JSON Array / 手動または自動停止中の機能)
+- **operation_mode**: text DEFAULT "normal" ("normal", "economy", "read_only", "static_only", "maintenance")
+- **disabled_features_json**: text (JSON Array / 手動停止中の機能)
 - **cost_guard_reason**: text | null
 - **cost_guard_updated_by_user_id**: text | null
 - **cost_guard_updated_at**: integer | null
-- **cost_guard_exception_until**: integer | null (管理者一時許可の終了時刻。既定30分)
+- **cost_guard_exception_until**: integer | null (管理者一時許可の終了時刻。設定時刻から厳密に15分)
 - **cost_guard_exception_features_json**: text (JSON Array / 一時許可する機能)
 
 ### 1-13. api_endpoints (旧システム互換エンドポイント)
@@ -484,24 +481,9 @@ X ID 再申請や void 理由などのケース情報は `videos.x_reapply_*` / 
 - **created_at**: integer NOT NULL (timestamp)
 - **updated_at**: integer NOT NULL (timestamp)
 
-### 1-24. cost_usage_snapshots (Cloudflare 使用量スナップショット)
-- **id**: text (Primary Key)
-- **captured_at**: integer NOT NULL
-- **source**: text ("cloudflare_dashboard", "graphql_analytics", "estimated_local")
-- **workers_requests_today**: integer DEFAULT 0
-- **pages_functions_requests_today**: integer DEFAULT 0
-- **d1_rows_read_today**: integer DEFAULT 0
-- **d1_rows_written_today**: integer DEFAULT 0
-- **r2_storage_gb_month_estimate**: real DEFAULT 0
-- **r2_class_a_month**: integer DEFAULT 0
-- **r2_class_b_month**: integer DEFAULT 0
-- **durable_object_requests_today**: integer DEFAULT 0
-- **durable_object_duration_gb_s_today**: real DEFAULT 0
-- **kv_reads_today**: integer DEFAULT 0
-- **kv_writes_today**: integer DEFAULT 0
-- **queues_operations_today**: integer DEFAULT 0
-- **guard_mode_after_check**: text
-- **created_at**: integer NOT NULL DEFAULT (unixepoch())
+### 1-24. Cloudflare 使用量の運用 (D1テーブルなし)
+
+Cloudflare 使用量を収集する実装がないため、推定値や使用量スナップショットを D1 に保存しない。運用者が Cloudflare Dashboard を確認し、必要に応じて `/admin/cost-guard` から `operation_mode` を手動変更する。
 
 ### 1-25. terms_versions (利用規約バージョン)
 - **id**: text (Primary Key)
@@ -676,7 +658,7 @@ X ID 再申請や void 理由などのケース情報は `videos.x_reapply_*` / 
 - **バッチ同期**: `youtube-sync` Worker が6時間ごとに50件ずつ同期。
 - **入力時同期**: 投稿・編集フォームで YouTube URL / ID が入力された時点で、11桁IDの正規化、サムネイルURL生成、公開状態・存在確認を即時に試行する。成功すればフォーム上に確認済み表示を出し、ユーザーが投稿直後に状態を確認できるようにする。
 - **ユーザー手動同期**: ログインユーザーは、自分が所有する作品について1作品につき1日1回まで同期要求できる。上限は日本時間 0:00 にリセットする。同期要求は `video_youtube_metadata.sync_status`, 最終要求日、要求者を記録し、連打やクォータ消費を防ぐ。クォータ不足時はキュー投入のみとし、即時同期は保証しない。
-- **管理者・イベント編集許可者の同期**: 管理者と担当イベントのイベント編集許可者による手動同期は、通常ユーザーの1日1回制限の対象外にする。ただし YouTube API クォータと `cost_guard_mode` は尊重し、枯渇時はキュー投入に留める。
+- **管理者・イベント編集許可者の同期**: 管理者と担当イベントのイベント編集許可者による手動同期は、通常ユーザーの1日1回制限の対象外にする。ただし YouTube API クォータと `operation_mode` は尊重し、枯渇時はキュー投入に留める。
 - **クォータ不足時の再実行**: YouTube API クォータ不足で同期できなかったキューは、翌日の日本時間 0:00 以降に自動再実行する。
 - **URL種別**: Shorts URL、通常URL、共有URLはいずれも最終的に11桁の YouTube 動画 ID へ正規化して管理する。
 - **公開状態**: 非公開動画は「YouTube側の公開設定を確認してください」と本人へ表示する。削除済みまたは存在確認失敗は `video_youtube_metadata.sync_status = "failed"` とし、`pending` へ戻さず、YouTube 側の復旧または URL 修正を待つ。
@@ -908,21 +890,21 @@ X ID 再申請や void 理由などのケース情報は `videos.x_reapply_*` / 
 - **D1節約**: 一覧系はフルスキャン禁止。必ずインデックス、ページング、事前集計を使う。`videos.score` や関連動画は Cron でまとめて生成する。
 - **R2節約**: 動画本体は保存せず YouTube 埋め込みを使う。R2 はアイコン画像、静的 JSON、旧形式エクスポートに限定する。`ListObjects` は高コスト操作として一覧表示に使わない。
 - **画像保存**: 作品サムネイルは Cloudflare/R2 に保存せず、YouTube サムネイル URL を使う。Cloudflare にアップロードする画像はユーザー/作品に紐づくアイコン画像のみとし、元ファイルは1ファイル8MBまでにする。
-- **KV節約**: KV はガード状態、軽量フラグ、短期キャッシュに限定する。高頻度ログや閲覧数を逐次書き込まない。
+- **KV節約**: KV は Worker cursor、軽量フラグ、短期キャッシュに限定する。高頻度ログや閲覧数を逐次書き込まない。
 - **Durable Object節約**: 閲覧数集約には Durable Object を使うが、1再生ごとに Worker/DO request は消費するため、`economy` では50%サンプリング、`read_only` では新規計測停止にする。
 - **Queues節約**: YouTube同期やDiscord通知キューは1メッセージあたり複数 operation を消費するため、クォータ不足時は優先度を付け、不要な一括投入を避ける。
-- **自動停止**: 使用量がしきい値を超えた場合、`cost_guard_mode` を `economy` → `read_only` → `static_only` → `maintenance` の順で引き上げる。
+- **手動制限**: 使用量collectorや自動しきい値判定は持たない。運用者が Cloudflare Dashboard を確認し、必要に応じて `operation_mode` を `normal` / `economy` / `read_only` / `static_only` へ手動変更する。
 - **停止順序**: 最初に検索のフルスキャン系を停止し、次に動的推薦・リアルタイムスコア再計算を落とす。Discord通知キューは運営対応に直結するため優先し、YouTube同期キューは一時停止対象にする。
-- **管理者操作**: 管理者は `/admin` のコストガードパネルで、現在モード、自動停止 ON/OFF、機能別停止、しきい値、一時解除を操作できる。
-- **一時許可**: `read_only` 中の管理者一時許可は30分で自動終了する。必要な場合は管理者が30分単位で延長でき、解除・延長は理由必須で監査ログに残す。通常復旧は管理者単独操作でよく、二人確認は不要にする。
+- **管理者操作**: 管理者は `/admin/cost-guard` で現在モード、停止機能、変更理由、直近の監査ログ、一時例外期限を確認し、モード変更と一時許可を操作できる。`maintenance` への移行・解除は通常モード変更とは別の専用操作にする。
+- **一時許可**: `read_only` 中の管理者一時許可は、許可リストにある機能を1〜8件指定し、確認文字列と理由を要求したうえで設定時刻から厳密に15分だけ有効にする。設定・解除は監査ログに残す。
 - **停止対象**: `read_only` 以上では新規投稿、作品編集、コメント、チャプター/チャプターマーカー作成、いいね、ブックマーク、アイコン画像アップロード、CSV インポート、旧形式エクスポート再生成、スロット一括生成を停止する。
-- **通知**: コストガード発動時は管理者へ Discord DM と管理画面通知を送る。
+- **記録**: コストガードとメンテナンスの変更は完全な before / after と理由を監査ログへ記録する。自動遷移や自動通知は行わない。
 - **静的JSON生成**: トップ、一覧、イベント詳細、関連動画、おすすめの静的 JSON は通常1時間ごと、イベント開催中は5〜10分ごとを目安に生成する。
 - **閲覧継続**: 可能な限り公開閲覧は静的ページと静的 JSON で継続し、書き込み・重い動的処理から先に止める。
 - **静的配信退避**: R2 Class B が増えすぎる場合、静的 JSON は Pages Static Assets へ寄せる。`static_only` 中もログインページとセッション検証は最小限残し、`maintenance` 中は事前生成済み静的 HTML/JSON の閲覧だけを可能にする。
 - **画像とJSONの整理**: アイコン画像は新規アップロード時に8MB上限を適用し、古いアイコンは月次ワーカーで最大200KB程度の WebP へ圧縮・上書きする。静的 JSON は直近3世代のみ保持し、古いオブジェクトは自動削除する。
 - **有料化判断**: 月間のD1読み書き、または Pages Functions 要求が無料枠の80%を常に超える状態が2か月続いた場合、有料化または構成見直しの判断ラインにする。
-- **参照設計**: 詳細なしきい値、データ構造、ルート別軽量化は `FlameNode-Cloudflare-Free-Tier-Guardrails.md` に従う。
+- **参照設計**: 詳細なモード別制限とルート別軽量化は `FlameNode-Cloudflare-Free-Tier-Guardrails.md` に従う。
 
 ---
 

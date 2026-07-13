@@ -26,8 +26,6 @@ export const eventSchema = z.object({
   visibility_status: z
     .enum(["draft", "private", "public", "archived"])
     .optional(),
-  is_active: z.coerce.number().min(0).max(1).default(0),
-  is_archived: z.coerce.number().min(0).max(1).default(0),
   allow_user_video_event_links: z.coerce.number().min(0).max(1).default(0),
   allow_unslotted_posts: z.coerce.number().min(0).max(1).default(0),
   allow_user_video_edits: z.coerce.number().min(0).max(1).default(0),
@@ -37,11 +35,6 @@ export const eventSchema = z.object({
     .max(2000)
     .optional()
     .nullable(),
-  stage_permission_enabled: z.coerce.number().min(0).max(1).default(0),
-  stage_permission_required: z.coerce.number().min(0).max(1).default(0),
-  stage_permission_label: z.string().trim().max(120).optional().nullable(),
-  stage_permission_description: z.string().trim().max(1000).optional().nullable(),
-  stage_permission_placeholder: z.string().trim().max(500).optional().nullable(),
   max_slots_per_video: z.coerce.number().min(1).max(20).default(1),
   max_consecutive_slots_per_entry: z.coerce.number().min(1).max(20).default(3),
   slot_part_gap_minutes: z.coerce.number().min(1).max(1440).default(15),
@@ -78,12 +71,9 @@ export function buildPartsJson(raw: string | null | undefined): string | null {
 }
 
 export function resolveSubmittedEventVisibility(
-  data: Pick<EventFormData, "visibility_status" | "is_active" | "is_archived">,
+  data: Pick<EventFormData, "visibility_status">,
 ): EventVisibilityStatus {
-  if (data.visibility_status) return data.visibility_status;
-  if (data.is_archived === 1) return "archived";
-  if (data.is_active === 1) return "public";
-  return "draft";
+  return data.visibility_status ?? "draft";
 }
 
 function boolFormValue(value: FormDataEntryValue | undefined): boolean {
@@ -100,18 +90,15 @@ function cleanQuestionId(value: FormDataEntryValue | undefined, index: number): 
   return cleaned || fallback;
 }
 
-export function buildVideoFormSettingsJson(
-  formData: FormData,
-  data: EventFormData,
-): string {
-  const ids = formData.getAll("stage_permission_question_id");
-  const enabled = formData.getAll("stage_permission_question_enabled");
-  const required = formData.getAll("stage_permission_question_required");
-  const labels = formData.getAll("stage_permission_question_label");
-  const descriptions = formData.getAll("stage_permission_question_description");
-  const placeholders = formData.getAll("stage_permission_question_placeholder");
+export function buildVideoFormSettingsJson(formData: FormData): string {
+  const ids = formData.getAll("custom_question_id");
+  const enabled = formData.getAll("custom_question_enabled");
+  const required = formData.getAll("custom_question_required");
+  const labels = formData.getAll("custom_question_label");
+  const descriptions = formData.getAll("custom_question_description");
+  const placeholders = formData.getAll("custom_question_placeholder");
   const sentQuestionArray =
-    String(formData.get("stage_permission_questions_present") ?? "") === "1";
+    String(formData.get("custom_questions_present") ?? "") === "1";
 
   if (sentQuestionArray || ids.length > 0) {
     const stagePermissions = ids.slice(0, 20).map((id, index) => ({
@@ -131,21 +118,7 @@ export function buildVideoFormSettingsJson(
     return JSON.stringify({ stage_permissions: stagePermissions });
   }
 
-  return JSON.stringify({
-    stage_permission: {
-      enabled: data.stage_permission_enabled === 1,
-      required: data.stage_permission_required === 1,
-      label:
-        data.stage_permission_label?.trim() ||
-        DEFAULT_STAGE_PERMISSION_FIELD.label,
-      description:
-        data.stage_permission_description?.trim() ||
-        DEFAULT_STAGE_PERMISSION_FIELD.description,
-      placeholder:
-        data.stage_permission_placeholder?.trim() ||
-        DEFAULT_STAGE_PERMISSION_FIELD.placeholder,
-    },
-  });
+  return JSON.stringify({ stage_permissions: [] });
 }
 
 export function parseEventForm(

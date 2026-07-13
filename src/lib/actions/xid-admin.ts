@@ -11,9 +11,12 @@ import {
   xUserAliases,
   xUsers,
 } from "@/lib/db/schema";
-import { auditAction } from "@/lib/audit/helpers";
 import { normalizeXId } from "@/lib/utils/xid";
-import { enqueueNotification } from "@/lib/notifications/enqueue";
+import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
+import { mutateWithAudit } from "@/lib/audit/mutate";
+import { expectedRowCondition } from "@/lib/audit/expectedRowCondition";
+import type { BatchItem } from "drizzle-orm/batch";
+import type { WriteAuditLogInput } from "@/lib/audit/types";
 
 export interface XIdAdminResult {
   ok: boolean;
@@ -100,41 +103,10 @@ export async function approveXIdLinkRequest(
         message: "target_x_user_id が別ユーザーに紐づいているため alias 追加できません。",
       };
     }
-    // 既存 alias の重複は composite PK で防がれる
-    await db
-      .insert(xUserAliases)
-      .values({ x_user_id: targetXId, alias_x_id: xid })
-      .onConflictDoNothing();
-
-    const approvedRows = await db
-      .update(xAccountLinkRequests)
-      .set({ status: "approved" })
-      .where(
-        and(
-          eq(xAccountLinkRequests.id, requestId),
-          eq(xAccountLinkRequests.status, "pending"),
-        )!,
-      )
-      .returning({ id: xAccountLinkRequests.id });
-    if (approvedRows.length === 0) {
-      return { ok: false, message: "すでに処理済みの申請です。" };
-    }
-
-    await auditAction(db, {
-      table_name: "x_account_link_requests",
-      record_id: requestId,
-      action: "UPDATE",
-      after_data: {
-        status: "approved",
-        link_type: "alias",
-        target_x_user_id: targetXId,
-        alias_x_id: xid,
-      },
-      operator_user_id: adminId,
-      retention_class: "long_audit",
-    });
-
-    await enqueueNotification(db, {
+    const existingAlias = (await db.select().from(xUserAliases).where(and(
+      eq(xUserAliases.x_user_id, targetXId), eq(xUserAliases.alias_x_id, xid),
+    )!).limit(1))[0];
+    const notification = await buildNotificationOutboxStatement(db, {
       recipientUserId: userId,
       type: "x_id_alias_approved",
       payload: {
@@ -144,6 +116,21 @@ export async function approveXIdLinkRequest(
         request_id: requestId,
       },
     });
+    const afterRequest = { ...reqRow, status: "approved" as const };
+    const statements: BatchItem<"sqlite">[] = [];
+    const expected: Array<number | null> = [];
+    const audits: WriteAuditLogInput[] = [];
+    if (!existingAlias) {
+      const alias = { x_user_id: targetXId, alias_x_id: xid };
+      statements.push(db.insert(xUserAliases).values(alias));
+      expected.push(1);
+      audits.push({ table_name: "x_user_aliases", target_id: `${targetXId}:${xid}`, operation: "CREATE", before: null, after: alias, actor_user_id: adminId, retention_class: "long_audit" });
+    }
+    statements.push(db.update(xAccountLinkRequests).set({ status: "approved" }).where(expectedRowCondition({ expectedCurrent: reqRow })));
+    expected.push(1);
+    if (notification) { statements.push(notification); expected.push(1); }
+    audits.push({ table_name: "x_account_link_requests", target_id: requestId, operation: "UPDATE", before: { ...reqRow }, after: { ...afterRequest }, actor_user_id: adminId, retention_class: "long_audit" });
+    await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits });
 
     revalidatePath("/dashboard/settings");
     revalidatePath("/admin/x-link-requests");
@@ -179,63 +166,43 @@ export async function approveXIdLinkRequest(
     };
   }
 
-  if (!existing) {
-    await db.insert(xUsers).values({
+  const statements: BatchItem<"sqlite">[] = [];
+  const expected: Array<number | null> = [];
+  const audits: WriteAuditLogInput[] = [];
+  const afterXUser = existing ? {
+    ...existing, linked_user_id: userId, approval_status: "approved" as const, approval_requested_at: now,
+  } : {
       id: xid,
       x_name: `@${xid}`,
+      icon_url: null, profile_text: null, portfolio_contact: null, youtube_channel_url: null,
+      other_social_links: null, creative_start_date: null,
       linked_user_id: userId,
-      approval_status: "approved",
+      verification_token: null, token_expires_at: null,
+      approval_status: "approved" as const,
       approval_requested_at: now,
-    });
+  };
+  if (!existing) {
+    statements.push(db.insert(xUsers).values(afterXUser));
   } else {
-    await db
-      .update(xUsers)
-      .set({
-        linked_user_id: userId,
-        approval_status: "approved",
-        approval_requested_at: now,
-      })
-      .where(xUserIdMatches(xid));
+    statements.push(db.update(xUsers).set({ linked_user_id: userId, approval_status: "approved", approval_requested_at: now }).where(expectedRowCondition({ expectedCurrent: existing })));
   }
-
-  const approvedRows = await db
-    .update(xAccountLinkRequests)
-    .set({ status: "approved" })
-    .where(
-      and(
-        eq(xAccountLinkRequests.id, requestId),
-        eq(xAccountLinkRequests.status, "pending"),
-      )!,
-    )
-    .returning({ id: xAccountLinkRequests.id });
-  if (approvedRows.length === 0) {
-    return { ok: false, message: "すでに処理済みの申請です。" };
-  }
+  expected.push(1);
+  audits.push({ table_name: "x_users", target_id: xid, operation: existing ? "UPDATE" : "CREATE", before: existing ? { ...existing } : null, after: { ...afterXUser }, actor_user_id: adminId, retention_class: "long_audit" });
+  const afterRequest = { ...reqRow, status: "approved" as const };
+  statements.push(db.update(xAccountLinkRequests).set({ status: "approved" }).where(expectedRowCondition({ expectedCurrent: reqRow })));
+  expected.push(1);
+  audits.push({ table_name: "x_account_link_requests", target_id: requestId, operation: "UPDATE", before: { ...reqRow }, after: { ...afterRequest }, actor_user_id: adminId, retention_class: "long_audit" });
 
   const userRow = (
     await db.select().from(users).where(eq(users.id, userId)).limit(1)
   )[0];
   if (userRow && !userRow.active_x_user_id) {
-    await db
-      .update(users)
-      .set({ active_x_user_id: xid })
-      .where(eq(users.id, userId));
+    const afterUser = { ...userRow, active_x_user_id: xid };
+    statements.push(db.update(users).set({ active_x_user_id: xid }).where(expectedRowCondition({ expectedCurrent: userRow })));
+    expected.push(1);
+    audits.push({ table_name: "user", target_id: userId, operation: "UPDATE", before: { ...userRow }, after: { ...afterUser }, actor_user_id: adminId, retention_class: "long_audit" });
   }
-
-  await auditAction(db, {
-    table_name: "x_account_link_requests",
-    record_id: requestId,
-    action: "UPDATE",
-    after_data: {
-      status: "approved",
-      link_type: "new",
-      x_user_id: xid,
-    },
-    operator_user_id: adminId,
-    retention_class: "long_audit",
-  });
-
-  await enqueueNotification(db, {
+  const notification = await buildNotificationOutboxStatement(db, {
     recipientUserId: userId,
     type: "x_id_approved",
     payload: {
@@ -244,6 +211,8 @@ export async function approveXIdLinkRequest(
       request_id: requestId,
     },
   });
+  if (notification) { statements.push(notification); expected.push(1); }
+  await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits });
 
   revalidatePath("/dashboard/settings");
   revalidatePath("/admin/x-link-requests");
@@ -281,25 +250,7 @@ export async function rejectXIdLinkRequest(
     return { ok: false, message: "すでに処理済みの申請です。" };
   }
 
-  const now = Math.floor(Date.now() / 1000);
-  await db
-    .update(xAccountLinkRequests)
-    .set({ status: "rejected" })
-    .where(eq(xAccountLinkRequests.id, requestId));
-
-  await auditAction(db, {
-    table_name: "x_account_link_requests",
-    record_id: requestId,
-    action: "UPDATE",
-    after_data: {
-      status: "rejected",
-      reason: reason || null,
-    },
-    operator_user_id: adminId,
-    retention_class: "long_audit",
-  });
-
-  await enqueueNotification(db, {
+  const notification = await buildNotificationOutboxStatement(db, {
     recipientUserId: reqRow.user_id,
     type: "x_id_rejected",
     payload: {
@@ -310,6 +261,15 @@ export async function rejectXIdLinkRequest(
       request_id: requestId,
       reason: reason || null,
     },
+  });
+  const afterRequest = { ...reqRow, status: "rejected" as const };
+  const statements: BatchItem<"sqlite">[] = [db.update(xAccountLinkRequests).set({ status: "rejected" }).where(expectedRowCondition({ expectedCurrent: reqRow }))];
+  const expected = [1];
+  if (notification) { statements.push(notification); expected.push(1); }
+  await mutateWithAudit(db, {
+    mutationStatements: statements,
+    expectedMutationChanges: expected,
+    audits: [{ table_name: "x_account_link_requests", target_id: requestId, operation: "UPDATE", before: { ...reqRow }, after: { ...afterRequest }, actor_user_id: adminId, reason: reason || null, retention_class: "long_audit" }],
   });
 
   revalidatePath("/dashboard/settings");

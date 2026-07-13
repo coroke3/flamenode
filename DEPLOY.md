@@ -1,9 +1,9 @@
 # FlameNode デプロイ手順書
 
 > Status: Active
-> Last verified: 2026-07-11
-> Verified against commit: `5f48e0f` + working tree
-> Source of truth: `package.json`, `wrangler.toml`, `workers/*/wrangler.toml`, `.github/workflows/`
+> Last verified: 2026-07-12
+> Verified against commit: `00be565` + working tree
+> Source of truth: `package.json`, `wrangler.toml`, `workers/*/wrangler.toml`, `docs/operations/migrations.md`
 
 ## Current Worker Layout
 
@@ -145,20 +145,19 @@ wrangler kv namespace create FLAMENODE_KV --preview
 
 ## 3. データベースの初期化
 
+Remote D1の作成、backup、migration適用、rollbackは運用者が対象D1とbackupを確認したうえで手動実行する。CI、Codex、Pages deployはRemote D1を自動変更しない。
+
 ### 3-1. マイグレーション SQL の確認
 
-リポジトリには既に `migrations/0000_brave_iceman.sql` が含まれています。ローカルで再生成する必要は通常ありません。
-スキーマを変えた場合のみ:
-
-```powershell
-npm run db:generate
-```
+リポジトリのactive migrationは `migrations/` 直下を番号順に適用します。現行は `0000_flame_node_baseline.sql`、`0001_spreadsheet_import_runs.sql` です。DB schemaの正本は `src/lib/db/schema.ts` であり、自動生成は使いません。
 
 ### 3-2. 本番 D1 へマイグレーション適用
 
 ```powershell
 wrangler d1 migrations apply flamenode_db --remote
 ```
+
+適用前に `npm.cmd run check:db-schema` と `npm.cmd run check:db-history` を実行し、対象migrationとbackupを記録してください。旧migrationは `migrations/historical/` に保存されたHistorical資料で、現行runtimeのfallbackや二重書き込みには使用しません。
 
 ローカル開発用 (Miniflare) には:
 
@@ -198,6 +197,7 @@ Auth.js (NextAuth v5) は **Discord 1 プロバイダ**だけを使います。
 ```powershell
 # Auth.js
 wrangler pages secret put AUTH_SECRET            # `openssl rand -hex 32` で作成した値
+wrangler pages secret put SPREADSHEET_IMPORT_PREVIEW_SECRET # 独立した32文字以上のランダム値
 wrangler pages secret put AUTH_DISCORD_ID
 wrangler pages secret put AUTH_DISCORD_SECRET
 
@@ -211,6 +211,8 @@ wrangler pages secret put YOUTUBE_API_KEY
 > `wrangler pages secret put <NAME>` は対話式で値を聞いてくるので、コピーして貼り付けてください。
 > Cloudflare Dashboard の **Pages → プロジェクト → Settings → Environment variables** からも追加できます。
 > 必ず **Production** と **Preview** の双方に設定してください。
+
+`SPREADSHEET_IMPORT_PREVIEW_SECRET`は`AUTH_SECRET`やlegacy import用secretと共用しません。未設定時のSpreadsheet dry-run/applyはfail-closedが正しい動作です。
 
 ### 5-2. Workers のシークレット
 
@@ -230,6 +232,15 @@ wrangler secret put DISCORD_WEBHOOK_URL
 wrangler secret put DISCORD_BOT_TOKEN
 cd ../..
 ```
+
+legacy importを一時的に有効化する場合は、Pages側へ次の2値を登録します。通常運用では `ENABLE_LEGACY_IMPORT_TOOL` を未設定または `false` にします。
+
+```powershell
+wrangler pages secret put ENABLE_LEGACY_IMPORT_TOOL
+wrangler pages secret put LEGACY_IMPORT_PREVIEW_SECRET
+```
+
+`LEGACY_IMPORT_PREVIEW_SECRET` は32文字以上のランダム値とし、ログ・監査snapshot・Issueへ出力しません。import完了後はsecretをローテーションまたは無効化します。
 
 ### 5-3. ローカル開発用 `.dev.vars`
 
@@ -324,7 +335,7 @@ wrangler d1 execute flamenode_db --remote --command "UPDATE user SET role='admin
 ### 8-2. system_settings の初期化
 
 ```powershell
-wrangler d1 execute flamenode_db --remote --command "INSERT INTO system_settings (id, operation_mode, auto_cost_guard_enabled) VALUES ('default', 'normal', 1) ON CONFLICT(id) DO UPDATE SET operation_mode=excluded.operation_mode, auto_cost_guard_enabled=excluded.auto_cost_guard_enabled;"
+wrangler d1 execute flamenode_db --remote --command "INSERT INTO system_settings (id, operation_mode) VALUES ('default', 'normal') ON CONFLICT(id) DO UPDATE SET operation_mode=excluded.operation_mode;"
 ```
 
 ### 8-3. 利用規約の最初の版
@@ -343,6 +354,7 @@ wrangler d1 execute flamenode_db --remote --command "INSERT INTO system_settings
 - [ ] `/entry` から自由投稿ができる (動画詳細にリダイレクトされる)
 - [ ] `/admin` (管理者ロール) に入れて、コストガード状態が `normal` と表示される
 - [ ] `/admin/cost-guard` から `economy` → `normal` の切替ができる
+- [ ] `/admin/cost-guard` で機能別の一時許可が15分で失効し、設定・解除が監査ログに残る
 - [ ] `wrangler tail` で Pages のリクエストログが出る
 - [ ] `wrangler tail flamenode-content-jobs` で 15 分以内に Cron 起動ログが出る
 - [ ] `https://<本番ドメイン>/maintenance` が表示できる
@@ -353,6 +365,10 @@ wrangler d1 execute flamenode_db --remote --command "INSERT INTO system_settings
 
 ### 10-1. 緊急のメンテナンス切替
 
+通常は管理者が `/admin/cost-guard` のメンテナンス専用操作から、理由を入力して切り替えます。通常のコストガードモード変更とは別の操作で、どちらも監査ログへ記録されます。
+
+管理画面へ入れない緊急時だけ、次の SQL を使用します。直接 SQL はアプリの監査処理を通らないため、実行者・理由・時刻を別途運用記録へ残してください。
+
 ```powershell
 # 即時メンテナンスモード
 wrangler d1 execute flamenode_db --remote --command "UPDATE system_settings SET operation_mode='maintenance' WHERE id='default';"
@@ -361,7 +377,7 @@ wrangler d1 execute flamenode_db --remote --command "UPDATE system_settings SET 
 wrangler d1 execute flamenode_db --remote --command "UPDATE system_settings SET operation_mode='normal' WHERE id='default';"
 ```
 
-UI で操作する場合は管理者で `/admin/cost-guard` を開いてください。
+Cloudflare 使用量を自動収集してモードを切り替える処理はありません。Cloudflare Dashboard の使用量を運用者が確認し、必要な場合だけ `/admin/cost-guard` から手動変更してください。
 
 ### 10-2. 環境変数だけで一時的にメンテナンス画面へ
 
@@ -382,6 +398,10 @@ wrangler d1 export flamenode_db --remote --output=backup-$(Get-Date -Format yyyy
 
 R2 のオブジェクトは `wrangler r2 object` または `rclone` で別バケット / 外部ストレージへコピーしてください。
 
+### 10-5. Legacy import / cleanup
+
+legacy importはpreview → 承認済みapply → audit確認の順で実行します。対象ファイル、preview、batch結果、警告を記録し、途中失敗時に直接再実行しません。期限切れpreview・一時ファイル・不要な入力artifactはretentionを確認してcleanupし、active D1の正本データやaudit_logsを無差別削除しません。静的JSONの古いartifact cleanupは `content-jobs` の制限付き処理に任せます。
+
 ---
 
 ## 11. ローカル開発フロー (参考)
@@ -401,15 +421,17 @@ npm run pages:dev                    # Pages の本番に近いランタイム�
 
 ---
 
-## 12. CI/CD (任意)
+## 12. CI/CD (検査のみ)
 
-GitHub に push したら自動で Pages へ反映する場合、Cloudflare Dashboard → **Pages → Connect to Git** で本リポジトリを連携し、ビルドコマンドを次のように設定します。
+CIではPages build、文書検査、Worker dry-runなどの検証だけを行います。Remote D1 migrationと本番Pages/Worker deployは、同一commitと検査結果を確認した運用者が手動で実行します。Git連携を使う場合も、Remote D1を自動適用する設定は追加しません。
+
+Cloudflare Dashboard → **Pages → Connect to Git** を使う場合のbuild設定は次のとおりです。
 
 ```text
 Build command:        npx @cloudflare/next-on-pages
 Build output directory: .vercel/output/static
 Root directory:       /
-Environment variables: AUTH_SECRET, AUTH_DISCORD_ID, AUTH_DISCORD_SECRET, NEXTAUTH_URL, YOUTUBE_API_KEY
+Environment variables: AUTH_SECRET, SPREADSHEET_IMPORT_PREVIEW_SECRET, AUTH_DISCORD_ID, AUTH_DISCORD_SECRET, NEXTAUTH_URL, YOUTUBE_API_KEY
 ```
 
 Workers の自動デプロイは GitHub Actions の `cloudflare/wrangler-action@v3` を使うのが簡単です。シークレットは GitHub の Secret に格納し、`CLOUDFLARE_API_TOKEN` (Workers Scripts: Edit 権限) を渡してください。

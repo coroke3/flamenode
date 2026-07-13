@@ -1,14 +1,20 @@
 "use server";
 
-import { auditAction } from "@/lib/audit/helpers";
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
-import { getCurrentUser } from "@/lib/auth/currentUser";
+import { and, eq } from "drizzle-orm";
+import { writeGuard } from "@/lib/auth/writeGuard";
 import { getDatabase } from "@/lib/cloudflare";
 import { videos } from "@/lib/db/schema";
-import { replaceVideoMembers } from "@/lib/video/replaceVideoMembers";
+import { buildReplaceVideoMembersPlan } from "@/lib/video/replaceVideoMembers";
 import { validateVideoMemberSubmission } from "@/lib/video/submissionValidation";
 import type { VideoActionResult } from "@/lib/video/types";
+import { expectedRowCondition } from "@/lib/audit/adapters";
+import {
+  appendVideoAtomicWritePlan,
+  emptyVideoAtomicWritePlan,
+  executeVideoAtomicWritePlan,
+} from "@/lib/video/atomicWritePlan";
+import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 
 function formDataBoolean(formData: FormData, name: string): boolean {
   return formData
@@ -19,8 +25,10 @@ function formDataBoolean(formData: FormData, name: string): boolean {
 export async function updateVideoMembersAdmin(
   formData: FormData,
 ): Promise<VideoActionResult> {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "admin") {
+  const guard = await writeGuard({ feature: "edit_video" });
+  if (!guard.ok) return { ok: false, reason: guard.reason, message: guard.message };
+  const user = guard.user;
+  if (user.role !== "admin") {
     return { ok: false, message: "管理者権限が必要です。" };
   }
 
@@ -43,35 +51,41 @@ export async function updateVideoMembersAdmin(
   const nextCollaborationType = members.length > 0 || isCollab ? "collab" : "individual";
   const now = Math.floor(Date.now() / 1000);
 
-  await db
-    .update(videos)
-    .set({
-      collaboration_type: nextCollaborationType,
-      updated_at: now,
-    })
-    .where(eq(videos.id, videoId));
-  await replaceVideoMembers(
-    db,
+  const after = { ...target, collaboration_type: nextCollaborationType, updated_at: now };
+  const plan = emptyVideoAtomicWritePlan();
+  plan.statements.push(db.update(videos).set({
+    collaboration_type: nextCollaborationType,
+    updated_at: now,
+  }).where(and(
+    eq(videos.id, videoId),
+    expectedRowCondition({ expectedCurrent: target }),
+  )!));
+  plan.expectedChanges.push(1);
+  plan.audits.push({
+    table_name: "videos", target_id: videoId, operation: "UPDATE",
+    before: { ...target }, after, actor_user_id: user.id,
+    context: "admin-video-members", retention_class: "normal", strict: true,
+  });
+  appendVideoAtomicWritePlan(plan, await buildReplaceVideoMembersPlan(db, {
     videoId,
     members,
-    memberValidation.value.chaptersByIndex,
-  );
-
-  await auditAction(db, {
-    table_name: "videos",
-    record_id: videoId,
-    action: "UPDATE",
-    before_data: JSON.stringify({
-      collaboration_type: target.collaboration_type,
-    }),
-    after_data: JSON.stringify({
-      collaboration_type: nextCollaborationType,
-      member_count: members.length,
-      source: "admin_video_members",
-    }),
-    operator_user_id: user.id,
-    retention_class: "normal",
-  });
+    chaptersByIndex: memberValidation.value.chaptersByIndex,
+    actorUserId: user.id,
+  }));
+  const queue = await buildStaticRebuildQueueBatch(db, [
+    { targetType: "video", targetId: videoId, reason: "video_members_update", requestedByUserId: user.id },
+    { targetType: "search_index", targetId: "global", reason: "video_members_update", priority: "low" },
+    ...(target.creator_x_user_id ? [{ targetType: "user" as const, targetId: target.creator_x_user_id, reason: "video_members_update" }] : []),
+    ...(target.primary_event_id ? [{ targetType: "event" as const, targetId: target.primary_event_id, reason: "video_members_update" }] : []),
+  ]);
+  plan.statements.push(...queue.statements);
+  plan.expectedChanges.push(...queue.expectedChanges);
+  try {
+    await executeVideoAtomicWritePlan(db, plan);
+  } catch (error) {
+    console.warn("[updateVideoMembersAdmin] atomic save rejected", error);
+    return { ok: false, message: "保存が競合しました。再読み込みして再試行してください。" };
+  }
 
   revalidatePath(`/admin/videos/${videoId}`);
   revalidatePath(`/admin/videos/${videoId}/members`);

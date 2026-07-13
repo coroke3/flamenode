@@ -2,7 +2,7 @@
 
 ## 概要
 
-FlameNode の監査ログ正本は `audit_logs` テーブル。旧 `history_logs` は互換用に残すが、新規書き込みは `writeAuditLog` / `auditAction` 経由のみ。
+FlameNode の監査ログ正本は `audit_logs` テーブル。削除済みの旧監査テーブルは最終スキーマに含めず、監査対象の書き込みは `mutateWithAudit` または共通監査ロガーを経由する。
 
 Cloudflare D1 Free 枠を前提に、**全件永久保存・巨大 JSON・全表スキャン**を禁止する。
 
@@ -21,9 +21,7 @@ Cloudflare D1 Free 枠を前提に、**全件永久保存・巨大 JSON・全表
 - `audit_logs` — 監査ログ本体
 - `audit_restore_runs` — 復元実行履歴
 - `audit_log_settings` — 保持日数・payload 上限など
-- `history_logs` — **非推奨** (読み取り互換のみ)
-
-マイグレーション: `migrations/0043_audit_logs.sql`
+マイグレーション: `migrations/0000_flame_node_baseline.sql`
 
 ## 共通ロガー
 
@@ -116,7 +114,6 @@ UI に「アプリ DB 上の状態のみ復元」と明記。
 1. `expires_at < now` の audit_logs を **最大500件/回** 削除
 2. 期限切れ前に `restorable` → `expired` へ更新
 3. `compact_after_days` 経過ログの before/after を NULL 化 (復元不可化)
-4. 旧 `history_logs` も従来 TTL で削除 (互換)
 
 ## Cloudflare Free 制約
 

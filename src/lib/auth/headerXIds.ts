@@ -1,15 +1,11 @@
 import "server-only";
 
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import { xAccountLinkRequests, xUsers } from "@/lib/db/schema";
 import { resolveMissingIcons } from "@/lib/db/iconResolution";
 import { normalizeXId } from "@/lib/utils/xid";
 import type { HeaderXIdEntry } from "./headerUser";
-
-function xUserIdMatches(xUserId: string) {
-  return sql`lower(${xUsers.id}) = ${normalizeXId(xUserId)}`;
-}
 
 function normalizeApprovalStatus(
   status: string | null | undefined,
@@ -25,27 +21,15 @@ function fallbackName(value: string | null | undefined, fallback: string): strin
   return value?.trim() || fallback;
 }
 
-function ownsXUserRow(
-  row: { linked_user_id: string | null },
-  userId: string,
-): boolean {
-  return !row.linked_user_id || row.linked_user_id === userId;
-}
-
 /**
- * ヘッダー用: Discord に紐づく X ID、active 行、承認待ち申請をまとめて返す。
- * linked_user_id 欠損時は active 行から自動修復する。
+ * ヘッダー用: 内部user_idに明示連携済みの X ID と承認待ち申請だけを返す。
+ * read pathでは未連携行を自動claimしない。
  */
 export async function fetchHeaderXIdEntries(
   db: DB,
   userId: string,
   activeXId: string | null,
 ): Promise<HeaderXIdEntry[]> {
-  const rowConditions = [eq(xUsers.linked_user_id, userId)];
-  if (activeXId) {
-    rowConditions.push(xUserIdMatches(activeXId));
-  }
-
   const linkedRows = await db
     .select({
       x_user_id: xUsers.id,
@@ -55,22 +39,13 @@ export async function fetchHeaderXIdEntries(
       linked_user_id: xUsers.linked_user_id,
     })
     .from(xUsers)
-    .where(rowConditions.length === 1 ? rowConditions[0] : or(...rowConditions)!);
+    .where(eq(xUsers.linked_user_id, userId));
 
   const byNormalizedXId = new Map<string, HeaderXIdEntry>();
 
   for (const row of linkedRows) {
-    if (!ownsXUserRow(row, userId)) continue;
-
     const normalizedId = normalizeXId(row.x_user_id);
     if (!normalizedId) continue;
-
-    if (!row.linked_user_id) {
-      await db
-        .update(xUsers)
-        .set({ linked_user_id: userId })
-        .where(xUserIdMatches(normalizedId));
-    }
 
     const approvalStatus = normalizeApprovalStatus(row.approval_status);
     const entry: HeaderXIdEntry = {

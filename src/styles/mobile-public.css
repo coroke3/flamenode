@@ -71,8 +71,8 @@
 
   /* トップ intro */
   [data-fn-surface="public"] .fn-intro {
-    padding-block: 28px 32px;
-    gap: 24px;
+    padding-block: 18px 22px;
+    gap: 16px;
   }
 
   [data-fn-surface="public"] .fn-intro-copy {
@@ -83,8 +83,12 @@
 
   [data-fn-surface="public"] .fn-intro-lead {
     font-size: 14px;
-    line-height: 1.75;
+    line-height: 1.55;
     max-width: none;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
   }
 
   [data-fn-surface="public"] .fn-intro-stats {
@@ -96,12 +100,15 @@
   }
 
   [data-fn-surface="public"] .fn-intro-actions {
-    flex-direction: column;
+    flex-direction: row;
     align-items: stretch;
   }
 
   [data-fn-surface="public"] .fn-intro-actions .fn-btn {
-    width: 100%;
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+    padding-inline: 10px;
   }
 
   /* ページ見出し */

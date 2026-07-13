@@ -8,6 +8,7 @@ import {
   deleteAvailableSlots,
   generateSlotsBatch,
 } from "@/lib/actions/slot-admin";
+import { MAX_ATOMIC_SLOT_ROWS } from "@/lib/slots/atomicLimits";
 
 interface SlotBatchFormProps {
   eventId: string;
@@ -142,6 +143,9 @@ export function SlotBatchForm({
                     </button>
                   ))}
                 </div>
+                <p style={{ margin: "6px 0 0", color: "var(--text-muted)", fontSize: 12 }}>
+                  終了日時までの範囲から、一度に最大 {MAX_ATOMIC_SLOT_ROWS} 枠を生成できます。
+                </p>
               </div>
             </div>
           </>
@@ -154,11 +158,14 @@ export function SlotBatchForm({
                   name="count"
                   type="number"
                   min={1}
-                  max={500}
-                  defaultValue={10}
+                  max={MAX_ATOMIC_SLOT_ROWS}
+                  defaultValue={MAX_ATOMIC_SLOT_ROWS}
                   className="fn-input"
                   required
                 />
+                <p style={{ margin: "6px 0 0", color: "var(--text-muted)", fontSize: 12 }}>
+                  一度に最大 {MAX_ATOMIC_SLOT_ROWS} 枠まで生成できます。
+                </p>
               </div>
               <div>
                 <label className="fn-label">ラベル接頭辞</label>

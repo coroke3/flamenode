@@ -12,13 +12,16 @@ import {
   xUserIcons,
   xUsers,
 } from "@/lib/db/schema";
-import { auditAction } from "@/lib/audit/helpers";
+import type { WriteAuditLogInput } from "@/lib/audit/types";
 import { detectSupportedImageUpload } from "@/lib/utils/imageUpload";
 import { generateId } from "@/lib/utils/id";
 import { normalizeHttpUrl } from "@/lib/utils/url";
 import { normalizePortfolioContact } from "@/lib/profileContact";
 import { normalizeXId } from "@/lib/utils/xid";
 import { validateSocialLinksJson } from "@/lib/socialLinks";
+import { mutateWithAudit } from "@/lib/audit/mutate";
+import { expectedRowCondition } from "@/lib/audit/expectedRowCondition";
+import type { BatchItem } from "drizzle-orm/batch";
 
 export interface XIdActionResult {
   ok: boolean;
@@ -47,81 +50,23 @@ async function assertLinkedXUser(db: NonNullable<ReturnType<typeof getDatabase>>
   return row;
 }
 
-function errorText(error: unknown): string {
-  if (error == null) return "";
-  if (error instanceof Error) {
-    const cause = "cause" in error ? errorText(error.cause) : "";
-    return `${error.message}\n${cause}`;
-  }
-  if (typeof error === "object") {
-    const value = error as { message?: unknown; cause?: unknown };
-    const message = typeof value.message === "string" ? value.message : "";
-    return `${message}\n${errorText(value.cause)}`;
-  }
-  return String(error);
-}
-
-async function addColumnIfMissing(statement: string): Promise<void> {
-  try {
-    await getEnv().DB.prepare(statement).run();
-  } catch (error) {
-    const text = errorText(error).toLowerCase();
-    if (
-      text.includes("duplicate column") ||
-      text.includes("already exists") ||
-      text.includes("duplicate column name")
-    ) {
-      return;
-    }
-    throw error;
-  }
-}
-
-async function getXUserColumnNames(): Promise<Set<string> | null> {
-  try {
-    const result = await getEnv().DB.prepare("PRAGMA table_info(x_users)").all<{
-      name: string;
-    }>();
-    return new Set((result.results ?? []).map((row) => row.name));
-  } catch {
-    return null;
-  }
-}
-
-async function ensureXUserProfileColumns(): Promise<Set<string> | null> {
-  await addColumnIfMissing("ALTER TABLE x_users ADD COLUMN profile_text TEXT");
-  await addColumnIfMissing("ALTER TABLE x_users ADD COLUMN portfolio_contact TEXT");
-  await addColumnIfMissing("ALTER TABLE x_users ADD COLUMN youtube_channel_url TEXT");
-  await addColumnIfMissing("ALTER TABLE x_users ADD COLUMN other_social_links TEXT");
-  return getXUserColumnNames();
-}
-
-function buildXUserProfileUpdate(
-  columns: Set<string> | null,
-  values: {
-    displayName: string;
-    profileText: string | null;
-    portfolioContact: string | null;
-    youtubeChannelUrl: string | null;
-    otherSocialLinks: string | null;
-  },
-): Partial<typeof xUsers.$inferInsert> {
-  const updateValues: Partial<typeof xUsers.$inferInsert> = {
+function buildXUserProfileUpdate(values: {
+  displayName: string;
+  profileText: string | null;
+  portfolioContact: string | null;
+  youtubeChannelUrl: string | null;
+  otherSocialLinks: string | null;
+}): Pick<
+  typeof xUsers.$inferInsert,
+  "x_name" | "profile_text" | "portfolio_contact" | "youtube_channel_url" | "other_social_links"
+> {
+  return {
     x_name: values.displayName,
+    profile_text: values.profileText,
+    portfolio_contact: values.portfolioContact,
+    youtube_channel_url: values.youtubeChannelUrl,
+    other_social_links: values.otherSocialLinks,
   };
-  if (columns?.has("profile_text")) {
-    updateValues.profile_text = values.profileText;
-  }
-  if (columns?.has("portfolio_contact")) {
-    updateValues.portfolio_contact = values.portfolioContact;
-  }
-  if (columns?.has("youtube_channel_url")) {
-    updateValues.youtube_channel_url = values.youtubeChannelUrl;
-  }
-  if (columns?.has("other_social_links")) {
-    updateValues.other_social_links = values.otherSocialLinks;
-  }
-  return updateValues;
 }
 
 export async function setActiveXId(
@@ -150,19 +95,15 @@ export async function setActiveXId(
     };
   }
 
-  const now = nowUnix();
-  await db
-    .update(users)
-    .set({ active_x_user_id: xUserId })
-    .where(eq(users.id, userId));
-
-  await auditAction(db, {
-    table_name: "user",
-    record_id: userId,
-    action: "UPDATE",
-    after_data: { active_x_user_id: xUserId },
-    operator_user_id: userId,
-    retention_class: "normal",
+  const beforeUser = (await db.select().from(users).where(eq(users.id, userId)).limit(1))[0];
+  if (!beforeUser) return { ok: false, message: "ユーザーが見つかりません。" };
+  const afterUser = { ...beforeUser, active_x_user_id: xUserId };
+  await mutateWithAudit(db, {
+    mutationStatements: [db.update(users).set({ active_x_user_id: xUserId }).where(
+      expectedRowCondition({ expectedCurrent: beforeUser }),
+    )],
+    expectedMutationChanges: [1],
+    audits: [{ table_name: "user", target_id: userId, operation: "UPDATE", before: { ...beforeUser }, after: { ...afterUser }, actor_user_id: userId, retention_class: "normal" }],
   });
 
   revalidatePath("/");
@@ -257,27 +198,19 @@ export async function requestXIdLink(
 
   const now = nowUnix();
   const id = generateId("xreq");
-  await db.insert(xAccountLinkRequests).values({
+  const afterRequest = {
     id,
     user_id: userId,
     requested_x_id: requestedXId,
     link_type: linkType,
     target_x_user_id: targetXUserId || null,
-    status: "pending",
+    status: "pending" as const,
     requested_at: now,
-  });
-
-  await auditAction(db, {
-    table_name: "x_account_link_requests",
-    record_id: id,
-    action: "CREATE",
-    after_data: {
-      requested_x_id: requestedXId,
-      link_type: linkType,
-      target_x_user_id: targetXUserId || null,
-    },
-    operator_user_id: userId,
-    retention_class: "long_audit",
+  };
+  await mutateWithAudit(db, {
+    mutationStatements: [db.insert(xAccountLinkRequests).values(afterRequest)],
+    expectedMutationChanges: [1],
+    audits: [{ table_name: "x_account_link_requests", target_id: id, operation: "CREATE", before: null, after: { ...afterRequest }, actor_user_id: userId, retention_class: "long_audit" }],
   });
 
   revalidatePath("/dashboard/settings");
@@ -346,40 +279,14 @@ export async function updateXIdProfile(
     youtubeChannelUrl,
     otherSocialLinks: otherSocialLinks.value,
   };
-  const profileColumns = await ensureXUserProfileColumns();
-  const updateValues = buildXUserProfileUpdate(profileColumns, profileValues);
-
-  try {
-    await db
-      .update(xUsers)
-      .set(updateValues)
-      .where(xUserIdMatches(xUserId));
-  } catch (error) {
-    const text = errorText(error).toLowerCase();
-    if (!text.includes("no such column") && !text.includes("unknown column")) {
-      throw error;
-    }
-    const latestColumns = await getXUserColumnNames();
-    await db
-      .update(xUsers)
-      .set(buildXUserProfileUpdate(latestColumns, profileValues))
-      .where(xUserIdMatches(xUserId));
-  }
-
-  const now = nowUnix();
-  await auditAction(db, {
-    table_name: "x_users",
-    record_id: xUserId,
-    action: "UPDATE",
-    after_data: {
-      x_name: displayName,
-      profile_text: profileText || null,
-      portfolio_contact: portfolioContact,
-      youtube_channel_url: youtubeChannelUrl,
-      other_social_links: otherSocialLinks.value,
-    },
-    operator_user_id: userId,
-    retention_class: "long_audit",
+  const updateValues = buildXUserProfileUpdate(profileValues);
+  const after = { ...row, ...updateValues };
+  await mutateWithAudit(db, {
+    mutationStatements: [db.update(xUsers).set(updateValues).where(
+      expectedRowCondition({ expectedCurrent: row }),
+    )],
+    expectedMutationChanges: [1],
+    audits: [{ table_name: "x_users", target_id: row.id, operation: "UPDATE", before: { ...row }, after: { ...after }, actor_user_id: userId, retention_class: "long_audit" }],
   });
 
   revalidatePath("/dashboard/settings");
@@ -434,25 +341,22 @@ export async function deleteLinkedXId(
     return { ok: false, message: "この X ID の連携を削除できません。" };
   }
 
-  await db
-    .update(xUsers)
-    .set({ linked_user_id: null, approval_status: "pending" })
-    .where(xUserIdMatches(xUserId));
-  await db
-    .update(users)
-    .set({ active_x_user_id: null })
-    .where(
-      and(eq(users.id, userId), sql`lower(${users.active_x_user_id}) = ${xUserId}`)!,
-    );
-
-  const now = nowUnix();
-  await auditAction(db, {
-    table_name: "x_users",
-    record_id: xUserId,
-    action: "UPDATE",
-    after_data: { linked_user_id: null },
-    operator_user_id: userId,
-    retention_class: "long_audit",
+  const beforeUser = (await db.select().from(users).where(eq(users.id, userId)).limit(1))[0];
+  if (!beforeUser) return { ok: false, message: "ユーザーが見つかりません。" };
+  const afterXUser = { ...row, linked_user_id: null, approval_status: "pending" as const };
+  const mutationStatements: BatchItem<"sqlite">[] = [db.update(xUsers).set({ linked_user_id: null, approval_status: "pending" }).where(expectedRowCondition({ expectedCurrent: row }))];
+  const expectedMutationChanges = [1];
+  const audits: WriteAuditLogInput[] = [{ table_name: "x_users", target_id: row.id, operation: "UPDATE", before: { ...row }, after: { ...afterXUser }, actor_user_id: userId, retention_class: "long_audit" }];
+  if (normalizeXId(beforeUser.active_x_user_id) === xUserId) {
+    const afterUser = { ...beforeUser, active_x_user_id: null };
+    mutationStatements.push(db.update(users).set({ active_x_user_id: null }).where(expectedRowCondition({ expectedCurrent: beforeUser })));
+    expectedMutationChanges.push(1);
+    audits.push({ table_name: "user", target_id: userId, operation: "UPDATE", before: { ...beforeUser }, after: { ...afterUser }, actor_user_id: userId, retention_class: "long_audit" });
+  }
+  await mutateWithAudit(db, {
+    mutationStatements,
+    expectedMutationChanges,
+    audits,
   });
 
   revalidatePath("/dashboard/settings");
@@ -511,16 +415,11 @@ export async function setXIdIcon(
     return { ok: false, message: "選択できないアイコンです。" };
   }
 
-  await db.update(xUsers).set({ icon_url: iconUrl }).where(xUserIdMatches(xUserId));
-
-  const now = nowUnix();
-  await auditAction(db, {
-    table_name: "x_users",
-    record_id: xUserId,
-    action: "UPDATE",
-    after_data: { icon_url: iconUrl, source: "select" },
-    operator_user_id: userId,
-    retention_class: "long_audit",
+  const after = { ...row, icon_url: iconUrl };
+  await mutateWithAudit(db, {
+    mutationStatements: [db.update(xUsers).set({ icon_url: iconUrl }).where(expectedRowCondition({ expectedCurrent: row }))],
+    expectedMutationChanges: [1],
+    audits: [{ table_name: "x_users", target_id: row.id, operation: "UPDATE", before: { ...row }, after: { ...after }, actor_user_id: userId, reason: "icon_select", retention_class: "long_audit" }],
   });
 
   revalidatePath("/dashboard/settings");
@@ -583,30 +482,45 @@ export async function uploadXIdIcon(
     };
   }
 
-  const key = `xicons/${xUserId}/${generateId("xicon")}.${image.ext}`;
-  await env.BUCKET.put(key, buffer, {
-    httpMetadata: { contentType: image.contentType },
-  });
+  const objectId = generateId("xicon");
+  const stagingKey = `xicons/staging/${userId}/${objectId}.${image.ext}`;
+  const key = `xicons/${xUserId}/${objectId}.${image.ext}`;
   const iconUrl = `/api/media/${key}`;
 
   const now = nowUnix();
-  await db.insert(xUserIcons).values({
-    id: generateId("xicon"),
+  const afterIcon = {
+    id: objectId,
     x_user_id: xUserId,
     icon_url: iconUrl,
     source_video_id: null,
-    source_type: "manual",
+    source_type: "manual" as const,
     created_at: now,
-  });
-  await db.update(xUsers).set({ icon_url: iconUrl }).where(xUserIdMatches(xUserId));
-
-  await auditAction(db, {
-    table_name: "x_users",
-    record_id: xUserId,
-    action: "UPDATE",
-    after_data: { icon_url: iconUrl, source: "upload" },
-    operator_user_id: userId,
-    retention_class: "long_audit",
+  };
+  const afterXUser = { ...row, icon_url: iconUrl };
+  try {
+    await env.BUCKET.put(stagingKey, buffer, {
+      httpMetadata: { contentType: image.contentType },
+    });
+    await env.BUCKET.put(key, buffer, {
+      httpMetadata: { contentType: image.contentType },
+    });
+    await mutateWithAudit(db, {
+      mutationStatements: [
+        db.insert(xUserIcons).values(afterIcon),
+        db.update(xUsers).set({ icon_url: iconUrl }).where(expectedRowCondition({ expectedCurrent: row })),
+      ],
+      expectedMutationChanges: [1, 1],
+      audits: [
+        { table_name: "x_user_icons", target_id: objectId, operation: "CREATE", before: null, after: { ...afterIcon }, actor_user_id: userId, retention_class: "long_audit" },
+        { table_name: "x_users", target_id: row.id, operation: "UPDATE", before: { ...row }, after: { ...afterXUser }, actor_user_id: userId, reason: "icon_upload", retention_class: "long_audit" },
+      ],
+    });
+  } catch (error) {
+    await Promise.allSettled([env.BUCKET.delete(stagingKey), env.BUCKET.delete(key)]);
+    throw error;
+  }
+  await env.BUCKET.delete(stagingKey).catch((error) => {
+    console.warn("[uploadXIdIcon] staging cleanup failed", error);
   });
 
   revalidatePath("/dashboard/settings");

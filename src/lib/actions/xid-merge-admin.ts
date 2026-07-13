@@ -9,7 +9,8 @@ import {
   xIdMergeReverts,
   xUsers,
 } from "@/lib/db/schema";
-import { auditAction } from "@/lib/audit/helpers";
+import { mutateWithAudit } from "@/lib/audit/mutate";
+import { expectedRowCondition } from "@/lib/audit/expectedRowCondition";
 import { fetchXIdMergeImpact, summarizeMergeImpact } from "@/lib/admin/xIdMergeImpact";
 import { mergeXIds } from "@/lib/actions/merge-admin";
 import { generateId } from "@/lib/utils/id";
@@ -46,31 +47,26 @@ export async function createXIdMergeRequest(
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
 
-  const [fromRow, toRow] = await Promise.all([
-    db.select({ id: xUsers.id }).from(xUsers).where(eq(xUsers.id, fromXId)).limit(1),
-    db.select({ id: xUsers.id }).from(xUsers).where(eq(xUsers.id, toXId)).limit(1),
-  ]);
+  const fromRow = await db.select({ id: xUsers.id }).from(xUsers).where(eq(xUsers.id, fromXId)).limit(1);
+  const toRow = await db.select({ id: xUsers.id }).from(xUsers).where(eq(xUsers.id, toXId)).limit(1);
   if (!fromRow[0]) return { ok: false, message: `from @${fromXId} が見つかりません。` };
   if (!toRow[0]) return { ok: false, message: `to @${toXId} が見つかりません。` };
 
   const now = Math.floor(Date.now() / 1000);
   const id = generateId("xmerge");
-  await db.insert(xIdMergeRequests).values({
+  const after = {
     id,
     from_x_user_id: fromXId,
     to_x_user_id: toXId,
     requested_by_user_id: guard.userId,
-    status: "pending",
+    status: "pending" as const,
     created_at: now,
     updated_at: now,
-  });
-  await auditAction(db, {
-    table_name: "x_id_merge_requests",
-    record_id: id,
-    action: "CREATE",
-    after_data: { from_x_user_id: fromXId, to_x_user_id: toXId },
-    operator_user_id: guard.userId,
-    retention_class: "long_audit",
+  };
+  await mutateWithAudit(db, {
+    mutationStatements: [db.insert(xIdMergeRequests).values(after)],
+    expectedMutationChanges: [1],
+    audits: [{ table_name: "x_id_merge_requests", target_id: id, operation: "CREATE", before: null, after: { ...after }, actor_user_id: guard.userId, retention_class: "long_audit" }],
   });
   revalidatePath("/admin/x-id-merges");
   return { ok: true, id, message: "X ID 統合申請を作成しました。" };
@@ -106,18 +102,11 @@ async function setXIdMergeRequestStatus(
     return { ok: false, message: `status=${current.status} は変更できません。` };
   }
   const now = Math.floor(Date.now() / 1000);
-  await db
-    .update(xIdMergeRequests)
-    .set({ status, updated_at: now })
-    .where(eq(xIdMergeRequests.id, id));
-  await auditAction(db, {
-    table_name: "x_id_merge_requests",
-    record_id: id,
-    action: "UPDATE",
-    before_data: { status: current.status },
-    after_data: { status },
-    operator_user_id: guard.userId,
-    retention_class: "long_audit",
+  const after = { ...current, status, updated_at: now };
+  await mutateWithAudit(db, {
+    mutationStatements: [db.update(xIdMergeRequests).set({ status, updated_at: now }).where(expectedRowCondition({ expectedCurrent: current }))],
+    expectedMutationChanges: [1],
+    audits: [{ table_name: "x_id_merge_requests", target_id: id, operation: "UPDATE", before: { ...current }, after: { ...after }, actor_user_id: guard.userId, retention_class: "long_audit" }],
   });
   revalidatePath("/admin/x-id-merges");
   return { ok: true, id, message: status === "approved" ? "承認しました。" : "却下しました。" };
@@ -161,18 +150,14 @@ export async function executeXIdMergeRequest(
   if (!merged.ok) return { ok: false, message: merged.message ?? "統合に失敗しました。" };
 
   const now = Math.floor(Date.now() / 1000);
-  await db
-    .update(xIdMergeRequests)
-    .set({ status: "done", updated_at: now })
-    .where(eq(xIdMergeRequests.id, id));
-  await auditAction(db, {
-    table_name: "x_id_merge_requests",
-    record_id: id,
-    action: "UPDATE",
-    before_data: { status: "approved" },
-    after_data: { status: "done", restore_snapshot: snapshot },
-    operator_user_id: guard.userId,
-    retention_class: "long_audit",
+  const after = { ...request, status: "done" as const, updated_at: now };
+  await mutateWithAudit(db, {
+    mutationStatements: [db.update(xIdMergeRequests).set({ status: "done", updated_at: now }).where(expectedRowCondition({ expectedCurrent: request }))],
+    expectedMutationChanges: [1],
+    audits: [
+      { table_name: "x_id_merge_requests", target_id: id, operation: "UPDATE", before: { ...request }, after: { ...after }, actor_user_id: guard.userId, retention_class: "long_audit" },
+      { table_name: "x_id_merge_requests", target_id: `${id}:restore_snapshot`, operation: "SYSTEM", before: null, after: { restore_snapshot: snapshot }, actor_user_id: guard.userId, reason: "x_id_merge_restore_snapshot", retention_class: "long_audit", restore_strategy: "none" },
+    ],
   });
   revalidatePath("/admin/x-id-merges");
   return { ok: true, id, message: merged.message };
@@ -195,18 +180,11 @@ export async function rejectXIdMergeRevert(
     return { ok: false, message: `status=${current.status} は変更できません。` };
   }
   const now = Math.floor(Date.now() / 1000);
-  await db
-    .update(xIdMergeReverts)
-    .set({ status: "rejected", updated_at: now })
-    .where(eq(xIdMergeReverts.id, id));
-  await auditAction(db, {
-    table_name: "x_id_merge_reverts",
-    record_id: id,
-    action: "UPDATE",
-    before_data: { status: "pending" },
-    after_data: { status: "rejected" },
-    operator_user_id: guard.userId,
-    retention_class: "long_audit",
+  const after = { ...current, status: "rejected" as const, updated_at: now };
+  await mutateWithAudit(db, {
+    mutationStatements: [db.update(xIdMergeReverts).set({ status: "rejected", updated_at: now }).where(expectedRowCondition({ expectedCurrent: current }))],
+    expectedMutationChanges: [1],
+    audits: [{ table_name: "x_id_merge_reverts", target_id: id, operation: "UPDATE", before: { ...current }, after: { ...after }, actor_user_id: guard.userId, retention_class: "long_audit" }],
   });
   revalidatePath("/admin/x-id-merges");
   return { ok: true, message: "取り消し申請を却下しました。" };

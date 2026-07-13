@@ -308,7 +308,7 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
             該当するクリエイターがまだいません。
           </p>
         ) : (
-          <Shelf ariaLabel="ピックアップクリエイター" density="compact">
+          <Shelf ariaLabel="ピックアップクリエイター" density="compact" mobileRows={1}>
             {creators.map((creator, index) => (
               <CreatorCard
                 key={`${creator.id}-creator-${index}`}

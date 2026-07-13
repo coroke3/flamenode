@@ -40,7 +40,7 @@
 ### 3-4. システム・ヘルスボード (System Status)
 システムの健全性を一目で確認できる監視盤。
 - **YouTube API Quota**: 当日のクォータ残量をプログレスバーで表示（枯渇時に警告）。
-- **Cloudflare Free Tier Guard**: Workers、Pages Functions、D1、Durable Objects、R2、KV、Queues の無料枠使用率と現在の `cost_guard_mode` を表示。
+- **Cloudflare Free Tier Guard**: 現在の `operation_mode`、停止機能、変更理由、変更者、変更時刻を表示する。Cloudflare 使用量は自動収集せず、運用者が Cloudflare Dashboard で確認する。
 - **Service Status**: Cloudflare サービスの状態を表示。
   - **D1 (Database)**: 接続性とレイテンシ。
   - **R2 (Storage)**: アップロード/取得の稼働状況。
@@ -48,10 +48,10 @@
 - **History Logs (Audit)**: 直近3件の管理操作ログ（誰が何を更新したか）。
 
 ### 3-5. クイック・アクション & Kill Switch
-- **非常停止スイッチ**: `system_settings.is_maintenance_mode` を切り替える大型ガード付きトグル。
-- **コストガード切替**: `cost_guard_mode` を `normal`, `economy`, `read_only`, `static_only`, `maintenance` から手動選択できる。自動ガード ON/OFF もここで切り替える。
-- **一時許可**: `read_only` 中でも管理者が必要な機能だけ30分許可できる。許可は30分で自動終了し、必要なら30分単位で延長する。
-- **停止順序**: 自動停止では検索のフルスキャン系を最初に止め、次に動的推薦、リアルタイムスコア再計算、YouTube同期を落とす。Discord通知キューは優先して維持する。
+- **非常停止スイッチ**: `system_settings.operation_mode = 'maintenance'` への移行・解除を行う専用のガード付き操作。通常モード変更とは分離する。
+- **コストガード切替**: `operation_mode` を `normal`, `economy`, `read_only`, `static_only` から手動選択できる。使用量による自動昇格・降格は行わない。
+- **一時許可**: `read_only` 中でも管理者が許可リスト内の機能を1〜8件選び、確認文字列と理由を入力して15分だけ許可できる。期限は任意変更せず、自動延長しない。
+- **停止順序**: 手動制限では検索のフルスキャン系を最初に止め、次に動的推薦、リアルタイムスコア再計算、YouTube同期を抑制する。Discord通知キューは優先して維持する。
 - **一時許可理由**: 一時許可と延長には理由入力を必須にし、監査ログへ残す。復旧は管理者単独操作で可能にし、二人確認は不要。
 - **有料化判断ライン**: D1読み書き、または Pages Functions 要求が無料枠80%超えの状態を2か月継続した場合、ダッシュボード上で有料化または構成見直しを提案する。
 - **利用規約管理**: `/admin/rules` へ遷移し、規約の下書き、公開、更新履歴、再同意状態を管理する。
@@ -69,12 +69,12 @@
 ### 4-2. Cloudflare 連携
 - **GraphQL Analytics API**: Cloudflare 経由のトラフィックデータを取得し、フロントエンドでチャート化。
 - **KV 連携**: アクティブユーザー数などの軽量な一時データをキャッシュ。
-- **使用量スナップショット**: Cloudflare 公式メトリクスが取得できる場合はそれを優先し、取得できない場合はアプリ内推定値を `cost_usage_snapshots` に保存する。
+- **使用量確認**: Cloudflare Dashboard を運用者が直接確認する。アプリ内推定値や使用量スナップショットを D1 / KV に保存しない。
 
 ### 4-3. アラートロジック
 - **未審査滞留**: `videos` の `status='pending'` が 10 件を超えた場合、UI全体に警告オーバーレイ（控えめなもの）を表示。
 - **API枯渇**: YouTube API クォータが 10% 以下になった場合、プッシュ通知およびダッシュボードでの警告表示。
-- **無料枠接近**: Workers、Pages Functions、D1、Durable Objects、R2、KV、Queues のいずれかがしきい値を超えた場合、`FlameNode-Cloudflare-Free-Tier-Guardrails.md` に従って `economy`、`read_only`、`static_only`、`maintenance` へ段階移行する。
-- **管理者通知**: 自動停止が発生した場合、管理者へ Discord DM と管理画面通知を送り、ダッシュボード上に停止理由・対象機能・解除ボタンを表示する。
+- **無料枠接近**: Cloudflare 側の通知またはDashboardを根拠に運用者が判断し、`FlameNode-Cloudflare-Free-Tier-Guardrails.md` に従って手動で制限する。
+- **管理者記録**: モード変更、メンテナンス変更、一時許可、例外解除の理由と完全な before / after を監査ログへ残す。自動停止や自動Discord DMは行わない。
 - **タスク優先度**: 要対応タスクは「コストガード」→「X ID再申請」→「YouTube同期失敗」の順に並べる。通知失敗は再送最大3回の結果と一緒に表示する。
 

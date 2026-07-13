@@ -21,6 +21,7 @@ export function ConsoleDrawer({
   children: React.ReactNode;
 }): React.ReactElement {
   const pathname = usePathname();
+  const drawerId = React.useId();
   const triggerRef = React.useRef<HTMLButtonElement>(null);
   const panelRef = React.useRef<HTMLElement>(null);
   const restoreFocusRef = React.useRef(true);
@@ -29,7 +30,15 @@ export function ConsoleDrawer({
 
   React.useEffect(() => {
     const media = window.matchMedia("(max-width: 760px)");
-    const update = () => setIsMobile(media.matches);
+    const update = () => {
+      const mobile = media.matches;
+      setIsMobile(mobile);
+      if (!mobile) {
+        // デスクトップへ戻るとトリガーが非表示になるため、そこへ復帰させない。
+        restoreFocusRef.current = false;
+        setOpen(false);
+      }
+    };
     update();
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
@@ -97,7 +106,8 @@ export function ConsoleDrawer({
         type="button"
         className="fn-console-drawer-trigger"
         aria-expanded={drawerOpen}
-        aria-controls="fn-console-navigation-drawer"
+        aria-controls={drawerId}
+        aria-haspopup="dialog"
         onClick={() => {
           restoreFocusRef.current = true;
           setOpen(true);
@@ -114,12 +124,13 @@ export function ConsoleDrawer({
       />
       <aside
         ref={panelRef}
-        id="fn-console-navigation-drawer"
+        id={drawerId}
         className="fn-console-drawer-panel"
         data-open={drawerOpen ? "true" : "false"}
         role={drawerOpen ? "dialog" : undefined}
         aria-modal={drawerOpen || undefined}
         aria-label={drawerOpen ? label : undefined}
+        aria-hidden={isMobile && !drawerOpen ? true : undefined}
         inert={isMobile && !drawerOpen ? true : undefined}
         tabIndex={-1}
         onClick={(event) => {

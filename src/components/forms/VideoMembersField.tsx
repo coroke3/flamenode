@@ -13,6 +13,7 @@ import {
   type VideoMemberInput,
   type VideoMemberSuggestion,
 } from "@/lib/video/memberInput";
+import { MAX_ATOMIC_VIDEO_MEMBERS } from "@/lib/video/atomicLimits";
 
 export type {
   VideoMemberChapterInput,
@@ -233,7 +234,10 @@ export function VideoMembersField({
 
   const add = () => {
     if (disabled) return;
-    setRows((prev) => [...prev, { ...EMPTY_ROW }]);
+    setRows((prev) => {
+      if (normalizeMemberRows(prev).length >= MAX_ATOMIC_VIDEO_MEMBERS) return prev;
+      return [...prev, { ...EMPTY_ROW }];
+    });
   };
   const remove = (i: number) =>
     !disabled && setRows((prev) => prev.filter((_, idx) => idx !== i));
@@ -329,7 +333,8 @@ export function VideoMembersField({
         }
       }
       // 空行 (name/x_user_id どちらも空) は除去
-      return next.filter((r) => r.name || r.x_user_id);
+      const normalized = next.filter((r) => r.name || r.x_user_id);
+      return normalized.slice(0, MAX_ATOMIC_VIDEO_MEMBERS);
     });
   }, []);
 
@@ -343,7 +348,11 @@ export function VideoMembersField({
       existingMembers: rows,
     });
     const stripped = stripCsvEditFlags(csv.members);
-    setCsvWarning(csv.warnings.length > 0 ? csv.warnings.join(" / ") : null);
+    const warnings = [...csv.warnings];
+    if (stripped.length > MAX_ATOMIC_VIDEO_MEMBERS) {
+      warnings.push(`合作メンバーは最大${MAX_ATOMIC_VIDEO_MEMBERS}人です。`);
+    }
+    setCsvWarning(warnings.length > 0 ? warnings.join(" / ") : null);
     if (stripped.length === 0) return;
 
     const editOn = csv.members.filter((m) => m.can_edit === 1 || m.can_edit === true);
@@ -747,10 +756,13 @@ export function VideoMembersField({
           type="button"
           className="fn-btn fn-btn-ghost fn-btn-sm"
           onClick={add}
-          disabled={disabled}
+          disabled={disabled || normalizedRows.length >= MAX_ATOMIC_VIDEO_MEMBERS}
         >
           <Icon name="plus" size={11} aria-hidden /> 行を追加
         </button>
+        <span style={{ alignSelf: "center", fontSize: 12, opacity: 0.75 }}>
+          最大{MAX_ATOMIC_VIDEO_MEMBERS}人
+        </span>
         {searchHasMore && nextOffset !== null ? (
           <button
             type="button"

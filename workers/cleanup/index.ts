@@ -115,6 +115,19 @@ export async function runCleanup(env: Env): Promise<void> {
     .run();
 
   // audit_logs: 新正本 — expires_at インデックスを使い小分け削除
+  await env.DB.prepare(
+    `DELETE FROM spreadsheet_import_runs
+     WHERE nonce IN (
+       SELECT nonce
+       FROM spreadsheet_import_runs
+       WHERE consumed_at IS NOT NULL OR expires_at < ?1
+       ORDER BY COALESCE(consumed_at, expires_at) ASC
+       LIMIT ?2
+     )`,
+  )
+    .bind(now, AUDIT_CLEANUP_BATCH_LIMIT)
+    .run();
+
   const expiredMark = await env.DB.prepare(
     `UPDATE audit_logs
      SET restore_status = 'expired'

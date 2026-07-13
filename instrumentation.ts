@@ -52,26 +52,32 @@ export async function register(): Promise<void> {
   }
 
   const init = (async () => {
-    const { Miniflare } = await import("miniflare");
-    const miniflare = new Miniflare({
-      modules: true,
-      script: "export default { fetch() { return new Response('ok'); } }",
-      d1Databases: { DB: "flamenode_db" },
-      r2Buckets: { BUCKET: "flamenode-storage" },
-      kvNamespaces: { KV: "FLAMENODE_KV" },
-      d1Persist: ".wrangler/state/v3/d1",
-      r2Persist: ".wrangler/state/v3/r2",
-      kvPersist: ".wrangler/state/v3/kv",
+    // Next の instrumentation は Edge 向けにも解析される。Miniflare はローカル Node
+    // 開発時だけ必要な Node 依存なので、production/Edge bundle に取り込ませない。
+    // `webpackIgnore` により Node runtime が development register 時だけ解決する。
+    const { getPlatformProxy } = await import(
+      /* webpackIgnore: true */ "wrangler"
+    );
+    const platform = await getPlatformProxy<{
+      DB: D1Database;
+      BUCKET: R2Bucket;
+      KV: KVNamespace;
+    }>({
+      configPath: "wrangler.toml",
+      persist: { path: ".wrangler/state/v3" },
+      remoteBindings: false,
+      envFiles: [],
     });
 
-    const [DB, BUCKET, KV] = await Promise.all([
-      miniflare.getD1Database("DB"),
-      miniflare.getR2Bucket("BUCKET"),
-      miniflare.getKVNamespace("KV"),
-    ]);
-    await assertLocalSchemaVersion(DB);
-    globals.__FLAMENODE_LOCAL_BINDINGS = { DB, BUCKET, KV };
-    globals.__FLAMENODE_LOCAL_MINIFLARE = miniflare;
+    try {
+      const { DB, BUCKET, KV } = platform.env;
+      await assertLocalSchemaVersion(DB);
+      globals.__FLAMENODE_LOCAL_BINDINGS = { DB, BUCKET, KV };
+      globals.__FLAMENODE_LOCAL_PLATFORM = platform;
+    } catch (error) {
+      await platform.dispose();
+      throw error;
+    }
   })();
 
   globals.__FLAMENODE_LOCAL_BINDINGS_PROMISE = init;

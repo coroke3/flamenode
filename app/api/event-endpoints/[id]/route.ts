@@ -1,6 +1,5 @@
 export const runtime = "edge";
 
-import { NextResponse } from "next/server";
 import { and, desc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
@@ -13,17 +12,24 @@ import {
   EVENT_API_VIDEO_LIMIT,
 } from "@/lib/api/eventEndpointPayload";
 import { isPublicEventVisible } from "@/lib/utils/eventStatus";
+import { checkPublicApiRateLimit, publicJsonResponse } from "@/lib/api/publicApi";
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  const limited = checkPublicApiRateLimit(req, "/api/event-endpoints/:id");
+  if (limited) return limited;
   const { id } = await params;
   const eventId = id.trim();
-  if (!eventId) return NextResponse.json({ error: "not_found" }, { status: 404 });
+  if (!eventId) {
+    return publicJsonResponse(req, { error: "not_found" }, "public, max-age=60", 404);
+  }
 
   const db = getDatabase();
-  if (!db) return NextResponse.json({ error: "db_unavailable" }, { status: 503 });
+  if (!db) {
+    return publicJsonResponse(req, { error: "db_unavailable" }, "no-store", 503);
+  }
 
   const event = (
     await db
@@ -44,7 +50,7 @@ export async function GET(
   )[0];
 
   if (!event || event.public_api_enabled !== 1 || !isPublicEventVisible(event)) {
-    return NextResponse.json({ error: "not_found" }, { status: 404 });
+    return publicJsonResponse(req, { error: "not_found" }, "public, max-age=60", 404);
   }
 
   const videoRows = await db
@@ -68,9 +74,5 @@ export async function GET(
 
   const payload = buildEventApiPayload(event, videoRows);
 
-  return NextResponse.json(payload, {
-    headers: {
-      "Cache-Control": "public, max-age=300, s-maxage=600, stale-while-revalidate=600",
-    },
-  });
+  return publicJsonResponse(req, payload, "public, max-age=300, s-maxage=600, stale-while-revalidate=600");
 }

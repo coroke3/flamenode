@@ -105,15 +105,14 @@
 ### 17. Cloudflare 無料枠・コストガード
 
 - Cloudflare 無料枠内に収まる運用を優先する。
-- 課金されそうな水位に近づいた場合、`economy`, `read_only`, `static_only`, `maintenance` の順に機能を自動停止する。
-- 管理者は `/admin` で自動停止、手動停止、解除、しきい値変更、一時許可を操作できる。
+- 使用量collectorや自動しきい値判定は持たず、運用者が Cloudflare Dashboard を確認する。
+- 管理者は `/admin/cost-guard` で `normal`, `economy`, `read_only`, `static_only` の手動変更、停止機能、一時許可を操作する。`maintenance` は専用操作で移行・解除する。
 - 詳細は `FlameNode-Cloudflare-Free-Tier-Guardrails.md` を正とする。
 
 ### 18. コストガード通知・一時許可・静的JSON
 
-- コストガードが `economy`, `read_only`, `static_only`, `maintenance` に入った場合、管理者へ Discord DM で通知する。
-- 管理画面内通知も併用し、Discord DM が失敗しても状態を確認できるようにする。
-- `read_only` 中の管理者一時許可は、既定30分で自動終了する。必要な場合は30分単位で延長できる。
+- コストガードとメンテナンスの変更は、理由と完全な before / after を監査ログへ記録する。自動遷移や自動Discord DMは行わない。
+- `read_only` 中の管理者一時許可は、確認文字列と理由を要求し、許可リスト内の機能について厳密に15分で自動終了する。
 - 静的 JSON は通常1時間ごとに生成し、イベント開催中・受付中・公開直後は対象イベントだけ5〜10分ごとに生成する。
 
 ### 19. 画像運用とサムネイル

@@ -27,7 +27,10 @@ import {
   validateVideoMemberSubmission,
 } from "@/lib/video/submissionValidation";
 import type { CustomAnswerDraft } from "@/lib/video/customQuestions";
-import { resolveVideoEventSyncTargetIds } from "@/lib/video/syncVideoEvents";
+import {
+  MAX_ATOMIC_VIDEO_EVENTS,
+  resolveVideoEventSyncTargetIds,
+} from "@/lib/video/syncVideoEvents";
 import {
   applyVideoUpdatePlan,
   buildVideoUpdatePlan,
@@ -59,11 +62,20 @@ export async function updateVideo(
   if (target.primary_event_id && !stageEventIds.includes(target.primary_event_id)) {
     stageEventIds.push(target.primary_event_id);
   }
+  if (stageEventIds.length > MAX_ATOMIC_VIDEO_EVENTS) {
+    return { ok: false, message: "選択イベント数が保存上限を超えています。" };
+  }
   const editStageFields = await getStagePermissionFieldsForEvents(db, stageEventIds);
-  const currentStagePermission = await readStagePermissionCustomAnswers(db, {
-    videoId,
-    eventIds: stageEventIds,
-  });
+  let currentStagePermission: string | null;
+  try {
+    currentStagePermission = await readStagePermissionCustomAnswers(db, {
+      videoId,
+      eventIds: stageEventIds,
+    });
+  } catch (error) {
+    console.warn("[updateVideo] stage permission read rejected", error);
+    return { ok: false, message: "ステージ許諾回答数が保存上限を超えています。" };
+  }
 
   const raw = Object.fromEntries(formData);
   const setDefault = (key: string, value: string | null | undefined) => {
@@ -88,7 +100,6 @@ export async function updateVideo(
   setDefault("highlights", target.highlights);
   setDefault("production_story", target.production_story);
   setDefault("used_software", targetSoftwareLabel);
-  setDefault("stage_permission", currentStagePermission);
   setDefault("closing_comment", target.closing_comment);
   if (!Object.prototype.hasOwnProperty.call(raw, "is_collab")) {
     raw.is_collab = target.collaboration_type === "collab" ? "true" : "false";
@@ -219,29 +230,40 @@ export async function updateVideo(
   if (sections.primary_event && hasEventIdsField) {
     const requestedEventIds = parseEventIdsFromForm(formData);
     const alwaysInclude = target.primary_event_id ? [target.primary_event_id] : [];
-    const previousEventIds = (
-      await db
+    const previousEventRows = await db
         .select({ event_id: videoEvents.event_id })
         .from(videoEvents)
         .where(eq(videoEvents.video_id, videoId))
-    ).map((row) => row.event_id);
-    syncedEventIds = await resolveVideoEventSyncTargetIds(db, videoId, {
-      requested: requestedEventIds,
-      alwaysInclude,
-      user: editUser,
-    });
+        .limit(MAX_ATOMIC_VIDEO_EVENTS + 1);
+    if (previousEventRows.length > MAX_ATOMIC_VIDEO_EVENTS) {
+      return { ok: false, message: "所属イベント数が原子更新上限を超えています。" };
+    }
+    const previousEventIds = previousEventRows.map((row) => row.event_id);
+    try {
+      syncedEventIds = await resolveVideoEventSyncTargetIds(db, videoId, {
+        requested: requestedEventIds,
+        alwaysInclude,
+        user: editUser,
+      });
+    } catch (error) {
+      console.warn("[updateVideo] event plan rejected", error);
+      return { ok: false, message: "選択イベント数が保存上限を超えています。" };
+    }
     stagePermissionDeleteEventIds = computeStagePermissionDeleteIds({
       previousEventIds,
       syncedEventIds,
     });
     customEventIds = syncedEventIds;
   } else if (sections.descriptions) {
-    customEventIds = (
-      await db
+    const customEventRows = await db
         .select({ event_id: videoEvents.event_id })
         .from(videoEvents)
         .where(eq(videoEvents.video_id, videoId))
-    ).map((row) => row.event_id);
+        .limit(MAX_ATOMIC_VIDEO_EVENTS + 1);
+    if (customEventRows.length > MAX_ATOMIC_VIDEO_EVENTS) {
+      return { ok: false, message: "所属イベント数が原子更新上限を超えています。" };
+    }
+    customEventIds = customEventRows.map((row) => row.event_id);
   }
 
   let customAnswerDrafts: CustomAnswerDraft[] = [];
@@ -285,13 +307,16 @@ export async function updateVideo(
     await applyVideoUpdatePlan(db, plan, {
       approvedXIds,
       sessionRole: sessionUser.role,
-      formData,
     });
   } catch (err) {
     if (isYoutubeIdUniqueConstraintError(err)) {
       return { ok: false, message: "この YouTube 動画は既に登録されています。" };
     }
-    throw err;
+    console.warn("[updateVideo] atomic save rejected", err);
+    return {
+      ok: false,
+      message: "保存対象が多すぎるか競合が発生しました。再読み込みして再試行してください。",
+    };
   }
 
   return {

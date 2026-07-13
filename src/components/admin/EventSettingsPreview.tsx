@@ -16,8 +16,6 @@ export interface EventSettingsPreviewValue {
   entry_start_time?: number | string | null;
   entry_end_time?: number | string | null;
   visibility_status?: string | null;
-  is_active?: number | string | null;
-  is_archived?: number | string | null;
   allow_user_video_event_links?: number | string | null;
   allow_unslotted_posts?: number | string | null;
   allow_user_video_edits?: number | string | null;
@@ -52,8 +50,6 @@ function visibilityLabel(event: EventSettingsPreviewValue): {
     case "draft":
       return { label: "下書き", className: "fn-badge-soft" };
     default:
-      if (toBool(event.is_archived)) return { label: "アーカイブ", className: "fn-badge-warning" };
-      if (toBool(event.is_active)) return { label: "公開", className: "fn-badge-accent" };
       return { label: "下書き", className: "fn-badge-soft" };
   }
 }

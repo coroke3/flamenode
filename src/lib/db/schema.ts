@@ -46,6 +46,15 @@ export const users = sqliteTable("user", {
     .default(sql`(unixepoch())`),
 }, (t) => ({
   discordIdUnique: uniqueIndex("user_discord_id_unique").on(t.discord_id),
+  tosReacceptScan: index("user_tos_reaccept_scan_idx").on(
+    t.is_tos_accepted,
+    t.id,
+  ),
+  tosNotifyScan: index("user_tos_notify_scan_idx").on(
+    t.is_notification_enabled,
+    t.is_tos_accepted,
+    t.id,
+  ),
 }));
 
 export const accounts = sqliteTable(
@@ -149,9 +158,8 @@ export const xUserIcons = sqliteTable(
     created_at: integer("created_at").notNull(),
   },
   (t) => ({
-    // 同じ X ID で同じ icon_url を二重登録しないための unique 制約。
-    // recordXIconCandidateFromVideo (作品保存時の候補記録) や
-    // uploadVideoIconCandidate (作品向けアップロード) を onConflictDoNothing で書けるようにする。
+    // 手動アップロード履歴で同じX ID・icon_urlを二重登録しないためのunique制約。
+    // 投稿由来の候補はvideos.creator_icon_urlから解決し、この履歴表へ二重書込みしない。
     userUrlUnique: uniqueIndex("x_user_icons_user_url_uniq").on(
       t.x_user_id,
       t.icon_url,
@@ -784,8 +792,6 @@ export const systemSettings = sqliteTable("system_settings", {
   operation_mode: text("operation_mode", {
     enum: ["normal", "economy", "read_only", "static_only", "maintenance"],
   }).default("normal"),
-  auto_cost_guard_enabled: integer("auto_cost_guard_enabled").default(1),
-  cost_guard_thresholds_json: text("cost_guard_thresholds_json"),
   disabled_features_json: text("disabled_features_json"),
   cost_guard_reason: text("cost_guard_reason"),
   cost_guard_updated_by_user_id: text("cost_guard_updated_by_user_id"),
@@ -916,61 +922,59 @@ export const announcements = sqliteTable("announcements", {
     .default(sql`(unixepoch())`),
 });
 
-export const costUsageSnapshots = sqliteTable("cost_usage_snapshots", {
-  id: text("id").primaryKey(),
-  captured_at: integer("captured_at").notNull(),
-  source: text("source", {
-    enum: ["cloudflare_dashboard", "graphql_analytics", "estimated_local"],
-  }),
-  workers_requests_today: integer("workers_requests_today").default(0),
-  pages_functions_requests_today: integer("pages_functions_requests_today").default(0),
-  d1_rows_read_today: integer("d1_rows_read_today").default(0),
-  d1_rows_written_today: integer("d1_rows_written_today").default(0),
-  r2_storage_gb_month_estimate: real("r2_storage_gb_month_estimate").default(0),
-  r2_class_a_month: integer("r2_class_a_month").default(0),
-  r2_class_b_month: integer("r2_class_b_month").default(0),
-  durable_object_requests_today: integer("durable_object_requests_today").default(0),
-  durable_object_duration_gb_s_today: real("durable_object_duration_gb_s_today").default(0),
-  kv_reads_today: integer("kv_reads_today").default(0),
-  kv_writes_today: integer("kv_writes_today").default(0),
-  queues_operations_today: integer("queues_operations_today").default(0),
-  guard_mode_after_check: text("guard_mode_after_check"),
-  created_at: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-});
-
 // ============================================================
 // 利用規約 / ソフト辞書
 // ============================================================
 
-export const termsVersions = sqliteTable("terms_versions", {
-  id: text("id").primaryKey(),
-  version_label: text("version_label").notNull(),
-  body_markdown: text("body_markdown").notNull(),
-  status: text("status", { enum: ["draft", "published", "archived"] }).default(
-    "draft",
-  ),
-  severity: text("severity", { enum: ["minor", "major"] }).default("minor"),
-  published_at: integer("published_at"),
-  created_by_user_id: text("created_by_user_id").notNull(),
-  created_at: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updated_at: integer("updated_at")
-    .notNull()
-    .default(sql`(unixepoch())`),
-});
+export const termsVersions = sqliteTable(
+  "terms_versions",
+  {
+    id: text("id").primaryKey(),
+    version_label: text("version_label").notNull(),
+    body_markdown: text("body_markdown").notNull(),
+    status: text("status", { enum: ["draft", "published", "archived"] }).default(
+      "draft",
+    ),
+    severity: text("severity", { enum: ["minor", "major"] }).default("minor"),
+    published_at: integer("published_at"),
+    created_by_user_id: text("created_by_user_id").notNull(),
+    created_at: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updated_at: integer("updated_at")
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    severityPublished: index("terms_versions_severity_published_idx").on(
+      t.severity,
+      t.published_at,
+      t.updated_at,
+    ),
+  }),
+);
 
-export const userTosConsents = sqliteTable("user_tos_consents", {
-  id: text("id").primaryKey(),
-  user_id: text("user_id").notNull(),
-  terms_version_id: text("terms_version_id").notNull(),
-  consented_at: integer("consented_at").notNull(),
-  consent_context: text("consent_context", {
-    enum: ["entry", "post", "edit", "admin"],
-  }).notNull(),
-});
+export const userTosConsents = sqliteTable(
+  "user_tos_consents",
+  {
+    id: text("id").primaryKey(),
+    user_id: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // fallback-currentも保存するため、terms_versionsへのFKは付けない。
+    terms_version_id: text("terms_version_id").notNull(),
+    consented_at: integer("consented_at").notNull(),
+    consent_context: text("consent_context", {
+      enum: ["entry", "post", "edit", "admin"],
+    }).notNull(),
+  },
+  (t) => ({
+    byUserTerms: index("user_tos_consents_user_terms_idx").on(
+      t.user_id,
+      t.terms_version_id,
+    ),
+  }),
+);
 
 export const softwareCatalog = sqliteTable("software_catalog", {
   id: text("id").primaryKey(),
@@ -1270,6 +1274,32 @@ export const auditLogSettings = sqliteTable("audit_log_settings", {
     .default(sql`(unixepoch())`),
 });
 
+/** 管理Spreadsheet importの署名済みpreviewを一度だけapplyするための短期run。 */
+export const spreadsheetImportRuns = sqliteTable("spreadsheet_import_runs", {
+  nonce: text("nonce").primaryKey(),
+  operator_user_id: text("operator_user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  table_name: text("table_name").notNull(),
+  mode: text("mode", { enum: ["insert", "upsert"] }).notNull(),
+  payload_hash: text("payload_hash").notNull(),
+  schema_fingerprint: text("schema_fingerprint").notNull(),
+  expires_at: integer("expires_at").notNull(),
+  consumed_at: integer("consumed_at"),
+  created_at: integer("created_at").notNull(),
+}, (t) => ({
+  nonceCheck: check("spreadsheet_import_runs_nonce_check", sql`length(${t.nonce}) = 36 AND substr(${t.nonce}, 9, 1) = '-' AND substr(${t.nonce}, 14, 1) = '-' AND substr(${t.nonce}, 19, 1) = '-' AND substr(${t.nonce}, 24, 1) = '-' AND ${t.nonce} NOT GLOB '*[^0-9a-f-]*'`),
+  tableNameCheck: check("spreadsheet_import_runs_table_name_check", sql`length(${t.table_name}) BETWEEN 1 AND 128`),
+  modeCheck: check("spreadsheet_import_runs_mode_check", sql`${t.mode} IN ('insert', 'upsert')`),
+  payloadHashCheck: check("spreadsheet_import_runs_payload_hash_check", sql`length(${t.payload_hash}) = 64 AND ${t.payload_hash} NOT GLOB '*[^0-9a-f]*'`),
+  schemaHashCheck: check("spreadsheet_import_runs_schema_hash_check", sql`length(${t.schema_fingerprint}) = 64 AND ${t.schema_fingerprint} NOT GLOB '*[^0-9a-f]*'`),
+  expiryCheck: check("spreadsheet_import_runs_expiry_check", sql`${t.expires_at} > ${t.created_at}`),
+  consumedCheck: check("spreadsheet_import_runs_consumed_check", sql`${t.consumed_at} IS NULL OR ${t.consumed_at} >= ${t.created_at}`),
+  byExpiry: index("spreadsheet_import_runs_expires_idx").on(t.expires_at),
+  byConsumedExpiry: index("spreadsheet_import_runs_consumed_expires_idx").on(t.consumed_at, t.expires_at),
+  byOperatorCreated: index("spreadsheet_import_runs_operator_created_idx").on(t.operator_user_id, t.created_at),
+}));
+
 /** 旧データ移行ツールの batch 記録（一回限り移行用）。 */
 export const legacyImportBatches = sqliteTable(
   "legacy_import_batches",
@@ -1291,10 +1321,17 @@ export const legacyImportBatches = sqliteTable(
     applied_at: integer("applied_at"),
     failed_at: integer("failed_at"),
     error_summary: text("error_summary"),
+    /** preview で確定した canonical plan。apply request body を正本にしない。 */
+    canonical_plan_json: text("canonical_plan_json"),
+    preview_expires_at: integer("preview_expires_at"),
+    lease_token: text("lease_token"),
+    lease_expires_at: integer("lease_expires_at"),
+    consumed_at: integer("consumed_at"),
   },
   (t) => ({
     createdIdx: index("legacy_import_batches_created_idx").on(t.created_at),
     fileHashIdx: index("legacy_import_batches_file_hash_idx").on(t.file_hash),
+    leaseIdx: index("legacy_import_batches_lease_idx").on(t.status, t.lease_expires_at),
   }),
 );
 

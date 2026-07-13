@@ -545,14 +545,14 @@
   display: grid;
   grid-template-columns: 0.9fr 1.1fr;
   gap: clamp(40px, 5vw, 56px);
-  padding-block: clamp(48px, 6vw, 64px) clamp(44px, 5vw, 56px);
+  padding-block: clamp(28px, 4vw, 48px) clamp(28px, 4vw, 44px);
   align-items: center;
 }
 
 [data-fn-surface="public"] .fn-intro-meta {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 18px;
 }
 
 [data-fn-surface="public"] .fn-intro-hero {
@@ -620,8 +620,8 @@
 @media (max-width: 1100px) {
   [data-fn-surface="public"] .fn-intro {
     grid-template-columns: 1fr;
-    gap: 32px;
-    padding-block: 36px;
+    gap: 20px;
+    padding-block: 24px 28px;
   }
 }
 

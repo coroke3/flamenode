@@ -2,23 +2,16 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import { systemSettings } from "@/lib/db/schema";
-import { resolveOperationMode } from "@/lib/operationMode/resolve";
+import {
+  evaluateCostGuardCore,
+  type WriteFeatureKey,
+} from "./writeGuardCore";
 
 /**
  * CostGuard の機能キー。
  * slot 系は reserve / release / split / extend / merge の 5 種類を区別する。
  */
-export type CostGuardFeatureKey =
-  | "post_video_unslotted"
-  | "post_video_slotted"
-  | "edit_video"
-  | "like_or_bookmark"
-  | "chapter_comment"
-  | "reserve_slot"
-  | "release_slot"
-  | "split_slot_group"
-  | "extend_slot_group"
-  | "merge_slot_groups";
+export type CostGuardFeatureKey = WriteFeatureKey;
 
 export type CostGuardCheckResult =
   | { blocked: false }
@@ -28,13 +21,10 @@ export type CostGuardCheckResult =
  * CostGuard 判定。常に DB 直読み (本PR範囲ではキャッシュなし)。
  *
  * 判定順:
- * 1. cost_guard_exception_features_json に feature があり、例外期限内 → 通す
- * 2. operation_mode が read_only / static_only / maintenance → mode で停止
- * 3. disabled_features_json に feature があれば → feature で停止
+ * 1. activeで既知featureだけの明示override対象なら通す
+ * 2. operation_mode が不正、または read_only / static_only / maintenance → mode で停止
+ * 3. disabled_features_json が不正、または feature を含む → feature で停止
  * 4. それ以外 → 通す
- *
- * disabled_features_json / cost_guard_exception_features_json の parse 失敗は
- * 全停止を避けるためフェイルオープン。console.warn のみで検知できるようにする。
  */
 export async function evaluateCostGuard(
   db: DB,
@@ -54,51 +44,16 @@ export async function evaluateCostGuard(
       .limit(1)
   )[0];
 
-  if (!row) return { blocked: false };
+  // baselineはdefault行を必ず作る。不在は設定破損としてfail-closedにする。
+  if (!row) return { blocked: true, reason: "mode" };
 
   const now = Math.floor(Date.now() / 1000);
-  const exceptionActive =
-    row.cost_guard_exception_until != null &&
-    row.cost_guard_exception_until > now;
-  if (exceptionActive) {
-    const exceptionFeatures = parseFeatureList(
-      row.cost_guard_exception_features_json,
-      "cost_guard_exception_features_json",
-    );
-    if (exceptionFeatures.includes(feature)) return { blocked: false };
-  }
-
-  const mode = resolveOperationMode(row);
-  if (mode === "read_only" || mode === "static_only" || mode === "maintenance") {
-    return { blocked: true, reason: "mode" };
-  }
-
-  const disabled = parseFeatureList(
-    row.disabled_features_json,
-    "disabled_features_json",
-  );
-  if (disabled.includes(feature)) {
-    return { blocked: true, reason: "feature" };
-  }
-  return { blocked: false };
-}
-
-function parseFeatureList(raw: string | null, column: string): string[] {
-  if (!raw) return [];
-  try {
-    const v = JSON.parse(raw);
-    if (Array.isArray(v) && v.every((x) => typeof x === "string")) {
-      return v as string[];
-    }
-    console.warn(
-      `[costGuard] ${column} is not string[]; treating as empty (fail-open)`,
-    );
-    return [];
-  } catch (e) {
-    console.warn(
-      `[costGuard] failed to parse ${column}; treating as empty (fail-open)`,
-      e,
-    );
-    return [];
-  }
+  return evaluateCostGuardCore({
+    feature,
+    operationMode: row.operation_mode,
+    disabledFeaturesJson: row.disabled_features_json,
+    exceptionUntil: row.cost_guard_exception_until,
+    exceptionFeaturesJson: row.cost_guard_exception_features_json,
+    now,
+  });
 }

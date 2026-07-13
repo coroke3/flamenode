@@ -458,7 +458,7 @@ function StaticEventDetailView({
           </span>
           {accepting ? (
             <Link href={`/event/${event.id}/slots`} className={styles.reserveButton}>
-              枠を見る <Icon name="chevron-right" size={14} aria-hidden />
+              枠を確保する <Icon name="chevron-right" size={14} aria-hidden />
             </Link>
           ) : null}
         </div>
@@ -478,6 +478,14 @@ function StaticEventDetailView({
           value={<>{dayMetric.value}<span>日</span></>}
         />
       </section>
+
+      <EventRecruitCard
+        event={event}
+        available={availableSlots}
+        total={slotTotal}
+        actionHref={accepting ? `/event/${event.id}/slots` : undefined}
+        actionLabel={accepting ? "枠を確保する" : undefined}
+      />
 
       {detail.publicStaff.length > 0 ? (
         <section className={styles.section}>

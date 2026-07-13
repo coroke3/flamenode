@@ -2,17 +2,17 @@
 
 ## 1. 概要
 全体メンテナンス中、または一部機能停止中に表示する案内ページ。
-Cloudflare 無料枠の危険水位により `cost_guard_mode = "maintenance"` へ自動移行した場合も、このページを表示する。
+管理者が専用操作で `system_settings.operation_mode = "maintenance"` へ移行した場合、または Pages 環境変数 `MAINTENANCE_MODE=1` を設定した場合に、このページを表示する。Cloudflare 使用量による自動移行は行わない。
 
 ## 2. 表示内容
 - 現在 FlameNode がメンテナンス中であること。
 - 閲覧、投稿、エントリー、管理機能のどれが停止しているか。
 - 復旧予定時刻または公式告知へのリンク。
-- コストガードによる自動制限の場合は「負荷抑制のため一部機能を停止しています」と表示し、課金や内部事情を過度に詳細化しない。
+- 手動制限の案内が必要な場合は「負荷抑制のため一部機能を停止しています」と表示し、課金や内部事情を過度に詳細化しない。
 
 ## 3. 制御
-- `system_settings.is_maintenance_mode` が有効な場合に表示する。
-- `system_settings.cost_guard_mode = "maintenance"` の場合にも表示する。
+- `system_settings.operation_mode = "maintenance"` の場合に表示する。
+- Pages 環境変数 `MAINTENANCE_MODE=1` の場合にも表示する。
 - 管理者はメンテナンス中でも管理画面へ入れるが、破壊的操作は個別にロックする。
-- 管理者は `/admin` のコストガードパネルから `maintenance` 解除、`read_only` への緩和、自動ガードの一時停止を操作できる。
-- `read_only` 中の一時許可は30分で自動終了し、必要な場合だけ30分単位で延長できる。
+- 管理者は `/admin/cost-guard` のメンテナンス専用操作から、理由と確認文字列を入力して `maintenance` へ移行・解除できる。通常のモード変更操作では `maintenance` を選択できない。
+- `read_only` 中の機能別一時許可はメンテナンス切替とは別の操作で、厳密に15分で自動終了する。

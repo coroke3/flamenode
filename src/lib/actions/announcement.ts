@@ -2,11 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import { announcements } from "@/lib/db/schema";
-import { auditAction } from "@/lib/audit/helpers";
+import { mutateWithAudit } from "@/lib/audit/mutate";
 import { generateId } from "@/lib/utils/id";
 
 export interface AnnouncementResult {
@@ -65,29 +65,14 @@ export async function createAnnouncement(
   if (!db) return { ok: false, message: "DB に接続できません。" };
   const now = Math.floor(Date.now() / 1000);
 
-  await db.insert(announcements).values({
-    id,
-    title: d.title,
-    body: d.body,
-    severity: d.severity,
-    target_audience: d.target_audience,
-    is_published: d.is_published,
-    publish_at: parseDate(d.publish_at),
-    expire_at: parseDate(d.expire_at),
-    created_by_user_id: guard.userId,
-    created_at: now,
-    updated_at: now,
+  await mutateWithAudit(db, {
+    mutationStatements: [db.run(sql`
+      INSERT INTO announcements (id, title, body, severity, target_audience, is_published, publish_at, expire_at, created_by_user_id, created_at, updated_at)
+      VALUES (${id}, ${d.title}, ${d.body}, ${d.severity}, ${d.target_audience}, ${d.is_published}, ${parseDate(d.publish_at)}, ${parseDate(d.expire_at)}, ${guard.userId}, ${now}, ${now})
+    `)],
+    expectedMutationChanges: 1,
+    audits: [{ table_name: "announcements", target_id: id, operation: "CREATE", before: null, after: { id, title: d.title, body: d.body, severity: d.severity, target_audience: d.target_audience, is_published: d.is_published, publish_at: parseDate(d.publish_at), expire_at: parseDate(d.expire_at), created_by_user_id: guard.userId, created_at: now, updated_at: now }, actor_user_id: guard.userId, retention_class: "normal" }],
   });
-
-  await auditAction(db, {
-    table_name: "announcements",
-    record_id: id,
-    action: "CREATE",
-    after_data: { title: d.title, is_published: d.is_published },
-    operator_user_id: guard.userId,
-    retention_class: "normal",
-  });
-
   revalidatePath("/admin/announcements");
   return { ok: true, id };
 }
@@ -107,30 +92,14 @@ export async function updateAnnouncement(
   if (!d.id) return { ok: false, message: "id が必要です。" };
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
+  const existing = (await db.select().from(announcements).where(eq(announcements.id, d.id)).limit(1))[0];
+  if (!existing) return { ok: false, message: "対象のお知らせが見つかりません。" };
   const now = Math.floor(Date.now() / 1000);
-  await db
-    .update(announcements)
-    .set({
-      title: d.title,
-      body: d.body,
-      severity: d.severity,
-      target_audience: d.target_audience,
-      is_published: d.is_published,
-      publish_at: parseDate(d.publish_at),
-      expire_at: parseDate(d.expire_at),
-      updated_at: now,
-    })
-    .where(eq(announcements.id, d.id));
-
-  await auditAction(db, {
-    table_name: "announcements",
-    record_id: d.id,
-    action: "UPDATE",
-    after_data: { title: d.title, is_published: d.is_published },
-    operator_user_id: guard.userId,
-    retention_class: "normal",
+  await mutateWithAudit(db, {
+    mutationStatements: [db.run(sql`UPDATE announcements SET title=${d.title}, body=${d.body}, severity=${d.severity}, target_audience=${d.target_audience}, is_published=${d.is_published}, publish_at=${parseDate(d.publish_at)}, expire_at=${parseDate(d.expire_at)}, updated_at=${now} WHERE id=${d.id} AND updated_at=${existing.updated_at}`)],
+    expectedMutationChanges: 1,
+    audits: [{ table_name: "announcements", target_id: d.id, operation: "UPDATE", before: { ...existing }, after: { ...existing, title: d.title, body: d.body, severity: d.severity, target_audience: d.target_audience, is_published: d.is_published, publish_at: parseDate(d.publish_at), expire_at: parseDate(d.expire_at), updated_at: now }, actor_user_id: guard.userId, retention_class: "normal" }],
   });
-
   revalidatePath("/admin/announcements");
   revalidatePath(`/admin/announcements/${d.id}/edit`);
   return { ok: true, id: d.id };
@@ -145,14 +114,12 @@ export async function deleteAnnouncement(
   if (!id) return { ok: false, message: "id が必要です。" };
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
-  const now = Math.floor(Date.now() / 1000);
-  await db.delete(announcements).where(eq(announcements.id, id));
-  await auditAction(db, {
-    table_name: "announcements",
-    record_id: id,
-    action: "DELETE",
-    operator_user_id: guard.userId,
-    retention_class: "long_audit",
+  const existing = (await db.select().from(announcements).where(eq(announcements.id, id)).limit(1))[0];
+  if (!existing) return { ok: false, message: "対象のお知らせが見つかりません。" };
+  await mutateWithAudit(db, {
+    mutationStatements: [db.run(sql`DELETE FROM announcements WHERE id=${id} AND updated_at=${existing.updated_at}`)],
+    expectedMutationChanges: 1,
+    audits: [{ table_name: "announcements", target_id: id, operation: "DELETE", before: { ...existing }, after: null, actor_user_id: guard.userId, retention_class: "long_audit" }],
   });
   revalidatePath("/admin/announcements");
   return { ok: true };
@@ -168,18 +135,13 @@ export async function setAnnouncementPublished(
   if (!id) return { ok: false, message: "id が必要です。" };
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
+  const existing = (await db.select().from(announcements).where(eq(announcements.id, id)).limit(1))[0];
+  if (!existing) return { ok: false, message: "対象のお知らせが見つかりません。" };
   const now = Math.floor(Date.now() / 1000);
-  await db
-    .update(announcements)
-    .set({ is_published: next, updated_at: now })
-    .where(eq(announcements.id, id));
-  await auditAction(db, {
-    table_name: "announcements",
-    record_id: id,
-    action: "UPDATE",
-    after_data: { is_published: next },
-    operator_user_id: guard.userId,
-    retention_class: "normal",
+  await mutateWithAudit(db, {
+    mutationStatements: [db.run(sql`UPDATE announcements SET is_published=${next}, updated_at=${now} WHERE id=${id} AND updated_at=${existing.updated_at}`)],
+    expectedMutationChanges: 1,
+    audits: [{ table_name: "announcements", target_id: id, operation: "UPDATE", before: { ...existing }, after: { ...existing, is_published: next, updated_at: now }, actor_user_id: guard.userId, retention_class: "normal" }],
   });
   revalidatePath("/admin/announcements");
   return { ok: true };

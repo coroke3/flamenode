@@ -4,8 +4,8 @@ import assert from "node:assert/strict";
 const ACTIVE_GRACE = 86400;
 
 function resolveEventFreshness(event, now) {
-  if (event.is_archived === 1) return "archived";
-  if (event.is_active === 1) return "active";
+  if (event.visibility_status === "archived") return "archived";
+  if (event.visibility_status === "public") return "active";
   const start = event.start_time ?? 0;
   const end = event.end_time ?? 0;
   if (start && end && now >= start && now <= end + ACTIVE_GRACE) return "active";
@@ -37,17 +37,17 @@ function assertNoForbidden(value, path = "root") {
 test("resolveEventFreshness archived", () => {
   assert.equal(
     resolveEventFreshness(
-      { is_archived: 1, is_active: 1, is_entry_open: 1, start_time: 0, end_time: 0 },
+      { visibility_status: "archived", start_time: 0, end_time: 0 },
       1000,
     ),
     "archived",
   );
 });
 
-test("resolveEventFreshness active flag", () => {
+test("resolveEventFreshness public visibility", () => {
   assert.equal(
     resolveEventFreshness(
-      { is_archived: 0, is_active: 1, is_entry_open: 0, start_time: null, end_time: null },
+      { visibility_status: "public", start_time: null, end_time: null },
       1000,
     ),
     "active",
@@ -57,7 +57,7 @@ test("resolveEventFreshness active flag", () => {
 test("resolveEventFreshness ended", () => {
   assert.equal(
     resolveEventFreshness(
-      { is_archived: 0, is_active: 0, is_entry_open: 0, start_time: 100, end_time: 200 },
+      { visibility_status: "private", start_time: 100, end_time: 200 },
       200 + ACTIVE_GRACE + 1,
     ),
     "ended",
@@ -66,7 +66,7 @@ test("resolveEventFreshness ended", () => {
 
 test("no frozen state in freshness union", () => {
   const sample = resolveEventFreshness(
-    { is_archived: 0, is_active: 0, is_entry_open: 0, start_time: 1, end_time: 2 },
+    { visibility_status: "draft", start_time: 1, end_time: 2 },
     999999,
   );
   assert.ok(["active", "ended", "archived"].includes(sample));

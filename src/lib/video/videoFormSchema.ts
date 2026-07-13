@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { normalizeHttpUrl } from "@/lib/utils/url";
 import { validateSocialLinksJson } from "@/lib/socialLinks";
+import { normalizeSoftwareLabels } from "@/lib/utils/softwareLabels";
+import { MAX_ATOMIC_VIDEO_SOFTWARES } from "@/lib/video/atomicLimits";
 
 export function normalizeIconUrl(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
@@ -53,8 +55,19 @@ export const videoFormSchema = z.object({
   intro_comment: z.string().trim().max(500).optional().nullable(),
   highlights: z.string().trim().max(1000).optional().nullable(),
   production_story: z.string().trim().max(1000).optional().nullable(),
-  used_software: z.string().trim().max(200).optional().nullable(),
-  stage_permission: z.string().trim().max(1000).optional().nullable(),
+  used_software: z
+    .string()
+    .trim()
+    .max(200)
+    .optional()
+    .nullable()
+    .superRefine((value, ctx) => {
+      if (normalizeSoftwareLabels(value).length <= MAX_ATOMIC_VIDEO_SOFTWARES) return;
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `使用ソフトは最大${MAX_ATOMIC_VIDEO_SOFTWARES}件です。`,
+      });
+    }),
   closing_comment: z.string().trim().max(500).optional().nullable(),
   is_collab: z
     .union([z.literal("on"), z.literal("true"), z.literal("false"), z.boolean()])

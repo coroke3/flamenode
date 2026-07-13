@@ -24,6 +24,9 @@ export function spreadsheetErrorMessage(error: unknown): string {
 }
 
 export function spreadsheetHttpStatus(message: string): number {
+  if (message.startsWith("unknown_column:") || message.startsWith("column_not_editable:")) {
+    return 400;
+  }
   switch (message) {
     case SPREADSHEET_ERROR.UNKNOWN_TABLE:
     case SPREADSHEET_ERROR.TABLE_READONLY:
@@ -34,6 +37,16 @@ export function spreadsheetHttpStatus(message: string): number {
     case "missing_primary_key":
     case "no_rows":
     case "too_many_rows":
+    case "batch_too_large":
+    case "duplicate_primary_key":
+    case "unsupported_default":
+    case "missing_required_column":
+    case "value_too_long":
+    case "invalid_enum":
+    case "invalid_json_value":
+    case "invalid_url":
+    case "invalid_integer":
+    case "invalid_number":
     case "payload_too_large":
     case "invalid_json":
     case "unique_violation":
@@ -44,6 +57,7 @@ export function spreadsheetHttpStatus(message: string): number {
       return 409;
     case "row_not_found":
       return 404;
+    case "preview_unavailable":
     case SPREADSHEET_ERROR.DB_UNAVAILABLE:
       return 503;
     default:

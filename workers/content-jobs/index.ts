@@ -8,7 +8,6 @@ import { runCleanupWithRetry } from "../cleanup/index.ts";
 import { withCronLease } from "../shared/cronLease.ts";
 import { runJob } from "../shared/runJob.ts";
 import { rejectUnauthorizedWorkerRequest } from "../shared/workerAdminAuth.ts";
-import { applyAutoCostGuard } from "../cost-guard/auto.ts";
 
 export interface Env {
   DB: D1Database;
@@ -32,13 +31,6 @@ export async function runContentJobs(env: Env): Promise<void> {
         let processed = 0;
         let skipped = 0;
         let failed = 0;
-
-        const costGuard = await runJob("content-jobs", "cost-guard", () =>
-          applyAutoCostGuard(env),
-        );
-        processed += costGuard.processed;
-        skipped += costGuard.skipped;
-        failed += costGuard.failed;
 
         const rebuild = await runJob("content-jobs", "static-rebuild-queue", () =>
           processStaticRebuildQueue(env),

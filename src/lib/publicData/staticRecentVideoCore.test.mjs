@@ -33,7 +33,6 @@ test("normalizeStaticRecentVideoPage: R2 recent payload を一覧カード用に
     youtube_video_id: "abcdefghijk",
     display_name: "Creator",
     icon_url: "https://example.com/icon.png",
-    creator_x_user_id: "creator",
     primary_event_id: "event1",
     scheduled_time: 90,
     status: "public",

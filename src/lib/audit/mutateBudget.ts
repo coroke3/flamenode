@@ -1,0 +1,80 @@
+/** D1 の 1 query あたり bind parameter 上限。 */
+export const D1_MAX_BIND_PARAMETERS = 100;
+/** D1 Free の 1 invocation あたり batch query 上限。 */
+export const D1_MAX_BATCH_QUERIES = 50;
+/** caller の権限・対象行取得など、監査関数外の query 用に予約する余裕。 */
+export const D1_RESERVED_CALLER_QUERIES = 10;
+
+const AUDIT_COLUMN_COUNT = 20;
+const AUDIT_CONDITION_BIND_COUNT = 1;
+
+/** 監査INSERT 1 queryへ安全に含められる最大entry数。 */
+export const AUDIT_INSERT_CHUNK_SIZE = Math.floor(
+  (D1_MAX_BIND_PARAMETERS - AUDIT_CONDITION_BIND_COUNT) /
+    (AUDIT_COLUMN_COUNT + AUDIT_CONDITION_BIND_COUNT),
+);
+
+export type D1AuditMutationBudgetInput = {
+  mutationStatementCount: number;
+  mutationAssertionCount: number;
+  auditEntryCount: number;
+  postAuditStatementCount?: number;
+  distinctActorCount: number;
+};
+
+export type D1AuditMutationBudget = {
+  mutationStatementCount: number;
+  mutationAssertionCount: number;
+  auditChunkCount: number;
+  auditQueryCount: number;
+  postAuditStatementCount: number;
+  preparationQueryCount: number;
+  reservedCallerQueryCount: number;
+  batchQueryCount: number;
+  totalQueryCount: number;
+  limit: number;
+  withinLimit: boolean;
+};
+
+/** mutateWithAudit とcallerが共有するD1 query予算の唯一の算定式。 */
+export function planD1AuditMutationBudget(
+  input: D1AuditMutationBudgetInput,
+): D1AuditMutationBudget {
+  const mutationStatementCount = Math.max(0, input.mutationStatementCount);
+  const mutationAssertionCount = Math.max(0, input.mutationAssertionCount);
+  const auditEntryCount = Math.max(0, input.auditEntryCount);
+  const postAuditStatementCount = Math.max(
+    0,
+    input.postAuditStatementCount ?? 0,
+  );
+  const auditChunkCount = auditEntryCount > 0
+    ? Math.ceil(auditEntryCount / AUDIT_INSERT_CHUNK_SIZE)
+    : 0;
+  const auditQueryCount = auditChunkCount * 2;
+  const preparationQueryCount = auditEntryCount > 0
+    ? 1 + Math.max(0, input.distinctActorCount)
+    : 0;
+  const batchQueryCount =
+    mutationStatementCount +
+    mutationAssertionCount +
+    auditQueryCount +
+    postAuditStatementCount;
+  const totalQueryCount =
+    preparationQueryCount +
+    batchQueryCount +
+    D1_RESERVED_CALLER_QUERIES;
+
+  return {
+    mutationStatementCount,
+    mutationAssertionCount,
+    auditChunkCount,
+    auditQueryCount,
+    postAuditStatementCount,
+    preparationQueryCount,
+    reservedCallerQueryCount: D1_RESERVED_CALLER_QUERIES,
+    batchQueryCount,
+    totalQueryCount,
+    limit: D1_MAX_BATCH_QUERIES,
+    withinLimit: totalQueryCount <= D1_MAX_BATCH_QUERIES,
+  };
+}

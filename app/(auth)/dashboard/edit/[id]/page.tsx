@@ -475,7 +475,7 @@ export default async function EditVideoPage({
           credit: video.credit ?? undefined,
           intro_comment: video.intro_comment ?? undefined,
           used_software: softwareLabel ?? undefined,
-          stage_permission: stagePermissionInitial ?? undefined,
+          custom_question_answers_json: stagePermissionInitial ?? undefined,
           highlights: video.highlights ?? undefined,
           production_story: video.production_story ?? undefined,
           closing_comment: video.closing_comment ?? undefined,

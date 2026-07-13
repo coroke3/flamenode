@@ -31,8 +31,6 @@ export interface EventFormInitial {
   entry_start_time?: number | null;
   entry_end_time?: number | null;
   visibility_status?: "draft" | "private" | "public" | "archived" | null;
-  is_active?: number;
-  is_archived?: number;
   allow_user_video_event_links?: number;
   allow_unslotted_posts?: number;
   allow_user_video_edits?: number;
@@ -74,8 +72,6 @@ function resolveInitialVisibility(
   ) {
     return initial.visibility_status;
   }
-  if (initial.is_archived === 1) return "archived";
-  if (initial.is_active === 1) return "public";
   return "draft";
 }
 
@@ -149,10 +145,6 @@ function unixToInputDateTime(ts: number | null | undefined): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function hasCheckedValue(fd: FormData, name: string): boolean {
-  return fd.getAll(name).some((v) => String(v) === "1");
-}
-
 function textValue(fd: FormData, name: string): string {
   const value = fd.get(name);
   return typeof value === "string" ? value : "";
@@ -184,12 +176,12 @@ function buildVideoFormSettingsFromQuestions(
 function readStagePermissionQuestionsFromFormData(
   fd: FormData,
 ): StagePermissionFieldSettings[] {
-  const ids = fd.getAll("stage_permission_question_id");
-  const enabled = fd.getAll("stage_permission_question_enabled");
-  const required = fd.getAll("stage_permission_question_required");
-  const labels = fd.getAll("stage_permission_question_label");
-  const descriptions = fd.getAll("stage_permission_question_description");
-  const placeholders = fd.getAll("stage_permission_question_placeholder");
+  const ids = fd.getAll("custom_question_id");
+  const enabled = fd.getAll("custom_question_enabled");
+  const required = fd.getAll("custom_question_required");
+  const labels = fd.getAll("custom_question_label");
+  const descriptions = fd.getAll("custom_question_description");
+  const placeholders = fd.getAll("custom_question_placeholder");
 
   return ids
     .map((rawId, index): StagePermissionFieldSettings | null => {
@@ -218,21 +210,7 @@ function buildPreviewFormSettings(fd: FormData): string {
   if (questions.length > 0) {
     return buildVideoFormSettingsFromQuestions(questions);
   }
-  return JSON.stringify({
-    stage_permission: {
-      enabled: hasCheckedValue(fd, "stage_permission_enabled"),
-      required: hasCheckedValue(fd, "stage_permission_required"),
-      label:
-        textValue(fd, "stage_permission_label").trim() ||
-        DEFAULT_STAGE_PERMISSION_FIELD.label,
-      description:
-        textValue(fd, "stage_permission_description").trim() ||
-        DEFAULT_STAGE_PERMISSION_FIELD.description,
-      placeholder:
-        textValue(fd, "stage_permission_placeholder").trim() ||
-        DEFAULT_STAGE_PERMISSION_FIELD.placeholder,
-    },
-  });
+  return JSON.stringify({ stage_permissions: [] });
 }
 
 function buildInitialPreview(initial: EventFormInitial): EventSettingsPreviewValue {
@@ -248,8 +226,6 @@ function buildInitialPreview(initial: EventFormInitial): EventSettingsPreviewVal
     entry_start_time: initial.entry_start_time,
     entry_end_time: initial.entry_end_time,
     visibility_status: resolveInitialVisibility(initial),
-    is_active: initial.is_active ?? 0,
-    is_archived: initial.is_archived ?? 0,
     allow_user_video_event_links: initial.allow_user_video_event_links ?? 0,
     allow_unslotted_posts: initial.allow_unslotted_posts ?? 0,
     allow_user_video_edits: initial.allow_user_video_edits ?? 0,
@@ -285,8 +261,6 @@ function buildPreviewFromForm(
     entry_start_time: textValue(fd, "entry_start_time"),
     entry_end_time: textValue(fd, "entry_end_time"),
     visibility_status: textValue(fd, "visibility_status") || "draft",
-    is_active: textValue(fd, "is_active") || "0",
-    is_archived: textValue(fd, "is_archived") || "0",
     allow_user_video_event_links:
       textValue(fd, "allow_user_video_event_links") || "0",
     allow_unslotted_posts: textValue(fd, "allow_unslotted_posts") || "0",
@@ -795,7 +769,7 @@ export function EventForm({
         >
           投稿フォームの追加質問
         </legend>
-        <input type="hidden" name="stage_permission_questions_present" value="1" />
+        <input type="hidden" name="custom_questions_present" value="1" />
         <p className="fn-muted" style={{ margin: "0 0 2px", fontSize: 12, lineHeight: 1.6 }}>
           投稿者に確認しておきたい内容を複数設定できます。各質問は投稿フォームに順番どおり表示されます。
         </p>
@@ -819,17 +793,17 @@ export function EventForm({
             >
               <input
                 type="hidden"
-                name="stage_permission_question_id"
+                name="custom_question_id"
                 value={question.id}
               />
               <input
                 type="hidden"
-                name="stage_permission_question_enabled"
+                name="custom_question_enabled"
                 value={question.enabled ? "1" : "0"}
               />
               <input
                 type="hidden"
-                name="stage_permission_question_required"
+                name="custom_question_required"
                 value={question.required ? "1" : "0"}
               />
               <header
@@ -900,7 +874,7 @@ export function EventForm({
               <div>
                 <label className="fn-label">質問名</label>
                 <input
-                  name="stage_permission_question_label"
+                  name="custom_question_label"
                   type="text"
                   value={question.label}
                   readOnly={!canEditQuestions}
@@ -916,7 +890,7 @@ export function EventForm({
               <div>
                 <label className="fn-label">補足文</label>
                 <textarea
-                  name="stage_permission_question_description"
+                  name="custom_question_description"
                   value={question.description}
                   readOnly={!canEditQuestions}
                   onChange={(ev) =>
@@ -932,7 +906,7 @@ export function EventForm({
               <div>
                 <label className="fn-label">入力例</label>
                 <input
-                  name="stage_permission_question_placeholder"
+                  name="custom_question_placeholder"
                   type="text"
                   value={question.placeholder}
                   readOnly={!canEditQuestions}

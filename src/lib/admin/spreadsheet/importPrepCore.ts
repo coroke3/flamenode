@@ -30,6 +30,7 @@ export type SpreadsheetImportLocalPreview = {
   mappedColumns: string[];
   warnings: string[];
   preview: Record<string, string | null>[];
+  invalidColumns?: string[];
 };
 
 /** UI 用ローカルプレビュー（サーバーと同じパース・検証ルール） */
@@ -49,6 +50,7 @@ export function buildSpreadsheetImportLocalPreview(opts: {
       mappedColumns: [],
       warnings: [formatImportPayloadIssue(preIssue)],
       preview: [],
+      invalidColumns: [],
     };
   }
 
@@ -70,6 +72,7 @@ export function buildSpreadsheetImportLocalPreview(opts: {
     mappedColumns: parsed.mappedColumns,
     warnings,
     preview: parsed.rows.slice(0, 12),
+    invalidColumns: parsed.invalidColumns ?? [],
   };
 }
 
@@ -77,7 +80,29 @@ export type PreparedSpreadsheetImport = {
   rows: Record<string, string | null>[];
   warnings: string[];
   mappedColumns: string[];
+  invalidColumns: string[];
 };
+
+export function assertSpreadsheetImportColumns(opts: {
+  mappedColumns: string[];
+  invalidColumns: string[];
+  columnNames: string[];
+  readonlyColumns: string[];
+}): void {
+  if (opts.invalidColumns.length > 0) {
+    throw new Error(`unknown_column:${opts.invalidColumns.join(",")}`);
+  }
+  const unknown = opts.mappedColumns.filter(
+    (column) => !opts.columnNames.includes(column),
+  );
+  if (unknown.length > 0) throw new Error(`unknown_column:${unknown.join(",")}`);
+  const readonly = opts.mappedColumns.filter((column) =>
+    opts.readonlyColumns.includes(column),
+  );
+  if (readonly.length > 0) {
+    throw new Error(`column_not_editable:${readonly.join(",")}`);
+  }
+}
 
 export function buildReadonlyImportColumnWarnings(opts: {
   rows: Record<string, string | null>[];
@@ -127,6 +152,7 @@ export function prepareSpreadsheetImportRows(opts: {
   let rows = opts.rows ?? null;
   let warnings: string[] = [];
   let mappedColumns: string[] = [];
+  let invalidColumns: string[] = [];
 
   const textSizeIssue = getImportTextSizeIssue(text);
   if (textSizeIssue) {
@@ -150,6 +176,7 @@ export function prepareSpreadsheetImportRows(opts: {
     rows = parsed.rows;
     warnings = parsed.warnings;
     mappedColumns = parsed.mappedColumns;
+    invalidColumns = parsed.invalidColumns ?? [];
   }
 
   if (!rows || rows.length === 0) {
@@ -161,5 +188,5 @@ export function prepareSpreadsheetImportRows(opts: {
     throw new Error(postIssue);
   }
 
-  return { rows, warnings, mappedColumns };
+  return { rows, warnings, mappedColumns, invalidColumns };
 }

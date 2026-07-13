@@ -1,6 +1,5 @@
 export const runtime = "edge";
 
-import { NextResponse } from "next/server";
 import {
   countPublicVideos,
   fetchPublicVideos,
@@ -12,11 +11,15 @@ import {
   MAX_PUBLIC_LIST_LIMIT,
   PUBLIC_VIDEO_KEYS,
   PublicVideoDto,
+  assertNoForbiddenKeys,
   pickKeys,
 } from "@/lib/api/publicDto";
+import { checkPublicApiRateLimit, publicJsonResponse } from "@/lib/api/publicApi";
 
 /** 作品一覧の JSON API。`/list` などの軽量クライアント側ロード用。 */
 export async function GET(req: Request): Promise<Response> {
+  const limited = checkPublicApiRateLimit(req, "/api/videos");
+  if (limited) return limited;
   const url = new URL(req.url);
   const q = url.searchParams.get("q") ?? "";
   const sort = parsePublicVideoSort(url.searchParams.get("sort"));
@@ -29,7 +32,7 @@ export async function GET(req: Request): Promise<Response> {
 
   const db = getDatabase();
   if (!db) {
-    return NextResponse.json({ items: [], total: 0, page, limit });
+    return publicJsonResponse(req, { items: [], total: 0, page, limit }, "public, max-age=30, s-maxage=60, stale-while-revalidate=120");
   }
 
   const params: ListVideoParams = { q, sort, eventId: eventId || undefined };
@@ -44,13 +47,7 @@ export async function GET(req: Request): Promise<Response> {
     ...pickKeys(row, PUBLIC_VIDEO_KEYS),
     status: "public" as const,
   }));
-  return NextResponse.json(
-    { items, total, page, limit },
-    {
-      headers: {
-        "Cache-Control":
-          "public, max-age=30, s-maxage=60, stale-while-revalidate=120",
-      },
-    },
-  );
+  const payload = { items, total, page, limit };
+  assertNoForbiddenKeys(payload);
+  return publicJsonResponse(req, payload, "public, max-age=30, s-maxage=60, stale-while-revalidate=120");
 }

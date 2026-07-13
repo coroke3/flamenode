@@ -94,3 +94,11 @@ export function staffRowHasPermissionKey(
   const keys = resolveStaffPermissionKeys(row);
   return expandPermissionAliases(requiredKey).some((key) => keys.has(key));
 }
+
+/** 管理画面の表示用区分は permission_preset を正本とし、旧 role ミラーを参照しない。 */
+export function getManageStaffRole(
+  row: StaffPermissionRow,
+): "representative" | "editor" | null {
+  if (resolveStaffPermissionKeys(row).size === 0) return null;
+  return row.permission_preset === "owner" ? "representative" : "editor";
+}

@@ -1,8 +1,6 @@
 name: Deploy Cloudflare
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       deploy_workers:
@@ -22,14 +20,15 @@ concurrency:
   group: deploy-cloudflare-production
   cancel-in-progress: false
 
-env:
-  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-  CF_IDS_JSON: ${{ secrets.CF_IDS_JSON }}
-
 jobs:
   build-pages-artifact:
     runs-on: ubuntu-latest
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_IDS_JSON: ${{ secrets.CF_IDS_JSON }}
+      CLOUDFLARE_CONFIG_MODE: production
     steps:
       - uses: actions/checkout@v4
 
@@ -43,8 +42,8 @@ jobs:
 
       - name: Apply Cloudflare resource IDs
         run: |
-          if [ -z "$CF_IDS_JSON" ] && [ ! -f cloudflare/ids.json ]; then
-            echo "::error::CF_IDS_JSON (GitHub Secret) または cloudflare/ids.json が必要です。"
+          if [ -z "$CF_IDS_JSON" ]; then
+            echo "::error::production Secret CF_IDS_JSON is required."
             exit 1
           fi
           node scripts/sync-wrangler-ids.mjs
@@ -77,10 +76,14 @@ jobs:
   migrate-d1:
     needs: build-pages-artifact
     if: >-
-      github.event_name == 'push' ||
-      (github.event_name == 'workflow_dispatch' && inputs.apply_migrations)
+      github.event_name == 'workflow_dispatch' && inputs.apply_migrations
     runs-on: ubuntu-latest
     environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_IDS_JSON: ${{ secrets.CF_IDS_JSON }}
+      CLOUDFLARE_CONFIG_MODE: production
     steps:
       - uses: actions/checkout@v4
 
@@ -92,8 +95,8 @@ jobs:
       - name: Install dependencies and apply IDs
         run: |
           npm ci
-          if [ -z "$CF_IDS_JSON" ] && [ ! -f cloudflare/ids.json ]; then
-            echo "::error::CF_IDS (GitHub Secret) または cloudflare/ids.json が必要です。"
+          if [ -z "$CF_IDS_JSON" ]; then
+            echo "::error::production Secret CF_IDS_JSON is required."
             exit 1
           fi
           node scripts/sync-wrangler-ids.mjs
@@ -112,9 +115,14 @@ jobs:
       always() &&
       needs.build-pages-artifact.result == 'success' &&
       (needs.migrate-d1.result == 'success' || needs.migrate-d1.result == 'skipped') &&
-      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_pages))
+      github.event_name == 'workflow_dispatch' && inputs.deploy_pages
     runs-on: ubuntu-latest
     environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_IDS_JSON: ${{ secrets.CF_IDS_JSON }}
+      CLOUDFLARE_CONFIG_MODE: production
     permissions:
       contents: read
       deployments: write
@@ -131,8 +139,8 @@ jobs:
 
       - name: Apply Cloudflare resource IDs
         run: |
-          if [ -z "$CF_IDS_JSON" ] && [ ! -f cloudflare/ids.json ]; then
-            echo "::error::CF_IDS_JSON (GitHub Secret) または cloudflare/ids.json が必要です。"
+          if [ -z "$CF_IDS_JSON" ]; then
+            echo "::error::production Secret CF_IDS_JSON is required."
             exit 1
           fi
           node scripts/sync-wrangler-ids.mjs
@@ -159,9 +167,14 @@ jobs:
       needs.build-pages-artifact.result == 'success' &&
       (needs.migrate-d1.result == 'success' || needs.migrate-d1.result == 'skipped') &&
       (needs.deploy-pages.result == 'success' || needs.deploy-pages.result == 'skipped') &&
-      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_workers))
+      github.event_name == 'workflow_dispatch' && inputs.deploy_workers
     runs-on: ubuntu-latest
     environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_IDS_JSON: ${{ secrets.CF_IDS_JSON }}
+      CLOUDFLARE_CONFIG_MODE: production
     steps:
       - uses: actions/checkout@v4
 
@@ -173,8 +186,8 @@ jobs:
       - name: Install dependencies and apply IDs
         run: |
           npm ci
-          if [ -z "$CF_IDS_JSON" ] && [ ! -f cloudflare/ids.json ]; then
-            echo "::error::CF_IDS_JSON (GitHub Secret) または cloudflare/ids.json が必要です。"
+          if [ -z "$CF_IDS_JSON" ]; then
+            echo "::error::production Secret CF_IDS_JSON is required."
             exit 1
           fi
           node scripts/sync-wrangler-ids.mjs
@@ -194,9 +207,61 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - name: Smoke test the deployed health endpoint
+      - name: Smoke test the deployed Pages and optional Worker endpoints
         env:
           SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL }}
+          FAST_JOBS_URL: ${{ vars.FAST_JOBS_URL }}
+          CONTENT_JOBS_URL: ${{ vars.CONTENT_JOBS_URL }}
+          SYNC_JOBS_URL: ${{ vars.SYNC_JOBS_URL }}
         run: |
+          set -euo pipefail
           test -n "$SITE_URL" || { echo "::error::NEXT_PUBLIC_SITE_URL production variable is required for smoke test."; exit 1; }
-          curl --fail --show-error --silent --retry 3 --retry-delay 5 "${SITE_URL%/}/api/health"
+          curl_required() {
+            curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --retry-max-time 30 --connect-timeout 10 --max-time 15 --output /dev/null "$1"
+          }
+          curl_status() {
+            curl --show-error --silent --location --retry 3 --retry-delay 2 --retry-max-time 30 --connect-timeout 10 --max-time 15 --output /dev/null --write-out '%{http_code}' "$1"
+          }
+
+          echo "Checking Pages top page"
+          curl_required "${SITE_URL%/}"
+          echo "Checking Pages health"
+          curl_required "${SITE_URL%/}/api/health"
+
+          homepage="$(mktemp)"
+          trap 'rm -f "$homepage"' EXIT
+          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --retry-max-time 30 --connect-timeout 10 --max-time 15 --output "$homepage" "${SITE_URL%/}/"
+          asset="$(grep -Eo '/_next/static/[^"[:space:]]+' "$homepage" | head -n 1 || true)"
+          test -n "$asset" || { echo "::error::homepage did not expose a _next/static asset."; exit 1; }
+          echo "Checking Pages static asset: $asset"
+          curl_required "${SITE_URL%/}${asset}"
+
+          auth_status="$(curl_status "${SITE_URL%/}/api/auth/callback/discord")"
+          case "$auth_status" in
+            5*|000) echo "::error::Auth callback returned an unavailable status: $auth_status"; exit 1 ;;
+          esac
+
+          check_worker_health() {
+            local name="$1"
+            local url="$2"
+            if [ -n "$url" ]; then
+              echo "Checking $name /health"
+              curl_required "${url%/}/health"
+            fi
+          }
+          check_worker_rebuild_rejection() {
+            local name="$1"
+            local url="$2"
+            if [ -n "$url" ]; then
+              local status
+              status="$(curl --show-error --silent --location --request POST --retry 3 --retry-delay 2 --retry-max-time 30 --connect-timeout 10 --max-time 15 --output /dev/null --write-out '%{http_code}' "${url%/}/rebuild")"
+              case "$status" in
+                401|404|405) ;;
+                *) echo "::error::$name /rebuild unauthenticated request returned $status; expected 401, 404, or 405."; exit 1 ;;
+              esac
+            fi
+          }
+          check_worker_health "fast-jobs" "$FAST_JOBS_URL"
+          check_worker_health "content-jobs" "$CONTENT_JOBS_URL"
+          check_worker_health "sync-jobs" "$SYNC_JOBS_URL"
+          check_worker_rebuild_rejection "content-jobs" "$CONTENT_JOBS_URL"

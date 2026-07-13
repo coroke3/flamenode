@@ -1,78 +1,64 @@
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { test } from "node:test";
+import {
+  evaluateCostGuardCore,
+  parseWriteFeatureList,
+} from "./writeGuardCore.ts";
 
-/**
- * costGuardFeatures.ts のテスト。
- *
- * costGuardFeatures.ts は `import "server-only"` を含むため、直接 import できない。
- * parseFeatureList のロジックを再実装してテストする。
- */
+const source = await readFile(new URL("./costGuardFeatures.ts", import.meta.url), "utf8");
 
-function parseFeatureList(raw, column) {
-  if (!raw) return [];
-  try {
-    const v = JSON.parse(raw);
-    if (Array.isArray(v) && v.every((x) => typeof x === "string")) {
-      return v;
-    }
-    console.warn(
-      `[costGuard] ${column} is not string[]; treating as empty (fail-open)`,
-    );
-    return [];
-  } catch (e) {
-    console.warn(
-      `[costGuard] failed to parse ${column}; treating as empty (fail-open)`,
-      e,
-    );
-    return [];
-  }
-}
-
-// --- テスト ---
-
-test("parseFeatureList: null → 空配列", () => {
-  assert.deepEqual(parseFeatureList(null, "test"), []);
+test("CostGuard feature list accepts an empty or valid string array", () => {
+  assert.deepEqual(parseWriteFeatureList(null), { ok: true, features: [] });
+  assert.deepEqual(parseWriteFeatureList(""), { ok: true, features: [] });
+  assert.deepEqual(parseWriteFeatureList('["edit_video"]'), {
+    ok: true,
+    features: ["edit_video"],
+  });
 });
 
-test("parseFeatureList: undefined → 空配列", () => {
-  assert.deepEqual(parseFeatureList(undefined, "test"), []);
-});
-
-test("parseFeatureList: 空文字 → 空配列", () => {
-  assert.deepEqual(parseFeatureList("", "test"), []);
-});
-
-test("parseFeatureList: 有効な JSON 配列 → 配列", () => {
+test("CostGuard feature list is fail-closed when malformed", () => {
+  assert.deepEqual(parseWriteFeatureList("{invalid"), { ok: false });
+  assert.deepEqual(parseWriteFeatureList('{"key":"value"}'), { ok: false });
+  assert.deepEqual(parseWriteFeatureList("[123]"), { ok: false });
   assert.deepEqual(
-    parseFeatureList('["post_video_unslotted", "edit_video"]', "test"),
-    ["post_video_unslotted", "edit_video"],
+    parseWriteFeatureList(JSON.stringify(Array.from({ length: 101 }, () => "edit_video"))),
+    { ok: false },
   );
 });
 
-test("parseFeatureList: 不正な JSON → 空配列 (fail-open)", () => {
-  assert.deepEqual(parseFeatureList("{invalid", "test"), []);
+test("missing system settings and invalid mode are fail-closed", () => {
+  assert.match(source, /if \(!row\) return \{ blocked: true, reason: "mode" \}/);
+  assert.deepEqual(evaluateCostGuardCore({
+    feature: "edit_video",
+    operationMode: "invalid",
+    disabledFeaturesJson: null,
+    exceptionUntil: null,
+    exceptionFeaturesJson: null,
+    now: 100,
+  }), { blocked: true, reason: "mode" });
 });
 
-test("parseFeatureList: 配列でない JSON → 空配列 (fail-open)", () => {
-  assert.deepEqual(parseFeatureList('{"key": "value"}', "test"), []);
+test("active override allows only its explicit known feature", () => {
+  const base = {
+    operationMode: "maintenance",
+    disabledFeaturesJson: null,
+    exceptionUntil: 200,
+    exceptionFeaturesJson: '["edit_video"]',
+    now: 100,
+  };
+  assert.deepEqual(evaluateCostGuardCore({ ...base, feature: "edit_video" }), { blocked: false });
+  assert.deepEqual(evaluateCostGuardCore({ ...base, feature: "post_video_unslotted" }), { blocked: true, reason: "mode" });
 });
 
-test("parseFeatureList: 数値を含む配列 → 空配列 (fail-open)", () => {
-  assert.deepEqual(parseFeatureList('[1, 2, 3]', "test"), []);
-});
-
-test("parseFeatureList: 空配列 → 空配列", () => {
-  assert.deepEqual(parseFeatureList("[]", "test"), []);
-});
-
-// --- セキュリティ: CostGuard のフェイルオープン確認 ---
-
-test("セキュリティ: parseFeatureList は fail-open (全停止を避ける)", () => {
-  const result = parseFeatureList("not-json", "test");
-  assert.deepEqual(result, [], "不正 JSON でも空配列を返す");
-});
-
-test("セキュリティ: parseFeatureList は型チェックを行う", () => {
-  const result = parseFeatureList("[123]", "test");
-  assert.deepEqual(result, [], "数値配列は空配列を返す");
+test("expired, malformed, and unknown overrides never bypass", () => {
+  const base = {
+    feature: "edit_video",
+    operationMode: "maintenance",
+    disabledFeaturesJson: null,
+    now: 100,
+  };
+  assert.deepEqual(evaluateCostGuardCore({ ...base, exceptionUntil: 100, exceptionFeaturesJson: '["edit_video"]' }), { blocked: true, reason: "mode" });
+  assert.deepEqual(evaluateCostGuardCore({ ...base, exceptionUntil: 200, exceptionFeaturesJson: "not-json" }), { blocked: true, reason: "feature" });
+  assert.deepEqual(evaluateCostGuardCore({ ...base, exceptionUntil: 200, exceptionFeaturesJson: '["unknown"]' }), { blocked: true, reason: "feature" });
 });

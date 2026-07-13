@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
@@ -15,7 +15,9 @@ import {
   eventTemplates,
   events,
 } from "@/lib/db/schema";
-import { auditAction } from "@/lib/audit/helpers";
+import { requireAdminWrite } from "@/lib/auth/writeGuard";
+import { expectedRowCondition } from "@/lib/audit/adapters";
+import { mutateWithAudit } from "@/lib/audit/mutate";
 import { loadStagePermissionFormSettingsJson } from "@/lib/video/stagePermissionQuestions";
 import { generateId } from "@/lib/utils/id";
 
@@ -52,8 +54,8 @@ const saveSchema = z.object({
 export async function saveEventAsTemplate(
   formData: FormData,
 ): Promise<EventTemplateActionResult> {
-  const guard = await requireAdmin();
-  if (!guard.ok) return guard.result;
+  const guard = await requireAdminWrite("admin_event_templates");
+  if (!guard.ok) return { ok: false, message: guard.message };
 
   const parsed = saveSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
@@ -106,24 +108,20 @@ export async function saveEventAsTemplate(
   const id = generateId("etmpl");
   const now = Math.floor(Date.now() / 1000);
 
-  await db.insert(eventTemplates).values({
+  const after: typeof eventTemplates.$inferSelect = {
     id,
     name: parsed.data.name,
     description: parsed.data.description?.trim() || null,
     source_event_id: event.id,
     settings_json: JSON.stringify(snapshot),
-    created_by_user_id: guard.userId,
+    created_by_user_id: guard.user.id,
     created_at: now,
     updated_at: now,
-  });
-
-  await auditAction(db, {
-    table_name: "event_templates",
-    record_id: id,
-    action: "CREATE",
-    after_data: { name: parsed.data.name, source_event_id: event.id },
-    operator_user_id: guard.userId,
-    retention_class: "normal",
+  };
+  await mutateWithAudit(db, {
+    mutationStatements: [db.insert(eventTemplates).values(after)],
+    expectedMutationChanges: 1,
+    audits: [{ table_name: "event_templates", target_id: id, operation: "CREATE", after: { ...after }, actor_user_id: guard.user.id, context: "admin_event_templates", reason: "イベントテンプレートを保存", retention_class: "normal", strict: true }],
   });
 
   revalidatePath("/admin/events/templates");
@@ -135,8 +133,8 @@ export async function saveEventAsTemplate(
 export async function deleteEventTemplate(
   formData: FormData,
 ): Promise<EventTemplateActionResult> {
-  const guard = await requireAdmin();
-  if (!guard.ok) return guard.result;
+  const guard = await requireAdminWrite("admin_event_templates");
+  if (!guard.ok) return { ok: false, message: guard.message };
 
   const templateId = String(formData.get("template_id") ?? "").trim();
   if (!templateId) {
@@ -148,7 +146,7 @@ export async function deleteEventTemplate(
 
   const row = (
     await db
-      .select({ id: eventTemplates.id, name: eventTemplates.name })
+      .select()
       .from(eventTemplates)
       .where(eq(eventTemplates.id, templateId))
       .limit(1)
@@ -157,16 +155,10 @@ export async function deleteEventTemplate(
     return { ok: false, message: "テンプレートが見つかりません。" };
   }
 
-  await db.delete(eventTemplates).where(eq(eventTemplates.id, templateId));
-
-  const now = Math.floor(Date.now() / 1000);
-  await auditAction(db, {
-    table_name: "event_templates",
-    record_id: templateId,
-    action: "DELETE",
-    after_data: { name: row.name },
-    operator_user_id: guard.userId,
-    retention_class: "normal",
+  await mutateWithAudit(db, {
+    mutationStatements: [db.delete(eventTemplates).where(and(eq(eventTemplates.id, templateId), expectedRowCondition({ expectedCurrent: { ...row } }))!)],
+    expectedMutationChanges: 1,
+    audits: [{ table_name: "event_templates", target_id: templateId, operation: "DELETE", before: { ...row }, actor_user_id: guard.user.id, context: "admin_event_templates", reason: "イベントテンプレートを削除", retention_class: "normal", strict: true }],
   });
 
   revalidatePath("/admin/events/templates");

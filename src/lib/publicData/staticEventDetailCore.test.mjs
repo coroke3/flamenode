@@ -30,6 +30,7 @@ test("normalizeStaticEventDetail: event detail payload is shaped for static view
         title: "Video 1",
         youtube_video_id: "abcdefghijk",
         creator_display_name: "Creator",
+        visibility_status: "public",
       },
     ],
   });
@@ -47,4 +48,21 @@ test("normalizeStaticEventDetail: rejects payload without event id", () => {
     normalizeStaticEventDetail({ event: { title: "Missing id" } }),
     null,
   );
+});
+
+test("normalizeStaticEventDetail: drops non-public event and video rows", () => {
+  assert.equal(
+    normalizeStaticEventDetail({
+      event: { id: "private-event", title: "Private", visibility_status: "private" },
+    }),
+    null,
+  );
+  const detail = normalizeStaticEventDetail({
+    event: { id: "event1", title: "Event", visibility_status: "public" },
+    public_videos: [
+      { id: "private-video", title: "Private", visibility_status: "private" },
+    ],
+  });
+  assert.ok(detail);
+  assert.equal(detail.publicVideos.length, 0);
 });

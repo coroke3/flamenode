@@ -31,6 +31,10 @@ import {
   resolveStagePermissionFieldsFromJson,
 } from "@/lib/video/formSettings";
 import { redirectForGuardReason } from "@/lib/client/guardRedirect";
+import {
+  MAX_ATOMIC_VIDEO_EVENTS,
+  MAX_ATOMIC_VIDEO_SOFTWARES,
+} from "@/lib/video/atomicLimits";
 
 export interface VideoFormInitialValues {
   display_name?: string;
@@ -46,7 +50,7 @@ export interface VideoFormInitialValues {
   credit?: string;
   intro_comment?: string;
   used_software?: string;
-  stage_permission?: string;
+  custom_question_answers_json?: string;
   highlights?: string;
   production_story?: string;
   closing_comment?: string;
@@ -274,14 +278,14 @@ export function VideoForm({
       for (const question of selectedStagePermissionFields) {
         if (Object.hasOwn(next, question.id)) continue;
         next[question.id] = getStagePermissionAnswerValue(
-          initial.stage_permission,
+          initial.custom_question_answers_json,
           question.id,
         );
         changed = true;
       }
       return changed ? next : current;
     });
-  }, [initial.stage_permission, selectedStagePermissionFields]);
+  }, [initial.custom_question_answers_json, selectedStagePermissionFields]);
 
   const [pending, startTransition] = React.useTransition();
   const [result, setResult] = React.useState<VideoActionResult | null>(null);
@@ -408,7 +412,7 @@ export function VideoForm({
 
       for (const question of selectedStagePermissionFields) {
         if (!question.required) continue;
-        const fieldId = `stage_permission_${question.id}`;
+        const fieldId = `custom_question_${question.id}`;
         const answerValue = stageAnswers[question.id]?.trim() ?? "";
         if (!answerValue) {
           return {
@@ -901,6 +905,8 @@ export function VideoForm({
             <div className={styles.eventOptionGrid}>
               {eventOptions.map((ev) => {
                 const checked = selectedEventIds.includes(ev.id);
+                const atEventLimit =
+                  !checked && selectedEventIds.length >= MAX_ATOMIC_VIDEO_EVENTS;
                 // slot モードでは slot.event_id を固定で含めるため、編集者でも外せない。
                 const locked =
                   !canEditEvents ||
@@ -915,7 +921,7 @@ export function VideoForm({
                     <input
                       type="checkbox"
                       checked={checked}
-                      disabled={locked}
+                      disabled={locked || atEventLimit}
                       onChange={(e) => {
                         if (locked) return;
                         setSelectedEventIds((prev) =>
@@ -938,6 +944,9 @@ export function VideoForm({
                 );
               })}
             </div>
+            <p className={styles.help}>
+              所属イベントは最大{MAX_ATOMIC_VIDEO_EVENTS}件です。
+            </p>
           </div>
         ) : null}
 
@@ -1054,6 +1063,9 @@ export function VideoForm({
             list="used-software-suggestions"
             disabled={fieldDisabled("descriptions.used_software")}
           />
+          <p className={styles.help}>
+            カンマ区切りで最大{MAX_ATOMIC_VIDEO_SOFTWARES}件まで入力できます。
+          </p>
           {softwareSuggestions.length > 0 ? (
             <p className={styles.help}>
               既存データから候補を出しています。該当しない場合はそのまま入力できます。
@@ -1062,7 +1074,7 @@ export function VideoForm({
         </div>
 
         {selectedStagePermissionFields.map((question, index) => {
-          const fieldId = `stage_permission_${question.id}`;
+          const fieldId = `custom_question_${question.id}`;
           return (
             <div
               key={`${question.id}-${index}`}
@@ -1070,7 +1082,7 @@ export function VideoForm({
             >
               <input
                 type="hidden"
-                name="stage_permission_answer_id"
+                name="custom_question_answer_id"
                 value={question.id}
               />
               <label
@@ -1086,7 +1098,7 @@ export function VideoForm({
               ) : null}
               <textarea
                 id={fieldId}
-                name="stage_permission_answer_value"
+                name="custom_question_answer_value"
                 value={stageAnswers[question.id] ?? ""}
                 onChange={(event) => {
                   setStageAnswers((current) => ({

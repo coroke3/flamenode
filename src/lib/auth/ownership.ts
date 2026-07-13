@@ -26,13 +26,18 @@ import {
 import type { SessionUserLike } from "./ownershipCore";
 import { expandPermissionAliases } from "./permissions/aliases";
 import {
+  getManageStaffRole,
   resolveStaffPermissionKeys,
   staffRowHasPermissionKey,
   type StaffPermissionRow,
 } from "./permissions/permissionResolver";
 
 export type { SessionUserLike };
-export { isSafeNormalVideoEditKey, isDangerousAdminVideoEditKey } from "./ownershipCore";
+export {
+  isSafeNormalVideoEditKey,
+  isDangerousAdminVideoEditKey,
+  resolveAdminOrEventVideoPrivilegeMode,
+} from "./ownershipCore";
 
 /**
  * オーナーシップ判定ヘルパー。
@@ -75,19 +80,30 @@ export async function getApprovedXIds(
 export async function getEditableEventIds(
   db: DB,
   userId: string,
+  candidateEventIds?: readonly string[],
 ): Promise<string[]> {
   const xIds = await getApprovedXIds(db, userId);
   const subjectCond =
     xIds.length > 0
       ? or(eq(eventStaff.user_id, userId), inArray(eventStaff.x_user_id, xIds))!
       : eq(eventStaff.user_id, userId);
-  const rows = await db
+  const candidateIds = candidateEventIds
+    ? Array.from(new Set(candidateEventIds.filter(Boolean)))
+    : null;
+  if (candidateIds && candidateIds.length === 0) return [];
+  const rowsQuery = db
     .select({
       event_id: eventStaff.event_id,
       ...staffPermissionSelect,
     })
     .from(eventStaff)
-    .where(subjectCond);
+    .where(candidateIds
+      ? and(subjectCond, inArray(eventStaff.event_id, candidateIds))!
+      : subjectCond);
+  const rows = candidateIds ? await rowsQuery.limit(candidateIds.length * 4 + 1) : await rowsQuery;
+  if (candidateIds && rows.length > candidateIds.length * 4) {
+    throw new Error("editable_event_staff_read_limit_exceeded");
+  }
   return Array.from(
     new Set(
       rows.filter(staffRowHasAnyPermissions).map((r) => r.event_id),
@@ -177,12 +193,11 @@ export async function getManageStaffRoleForEvent(
       : eq(eventStaff.user_id, userId);
   const staff = (
     await db
-      .select({ role: eventStaff.role, ...staffPermissionSelect })
+      .select(staffPermissionSelect)
       .from(eventStaff)
       .where(and(eq(eventStaff.event_id, eventId), subjectCond)!)
   ).find(staffRowHasAnyPermissions);
-  if (!staff) return null;
-  return staff.role === "representative" ? "representative" : "editor";
+  return staff ? getManageStaffRole(staff) : null;
 }
 
 /**
@@ -293,12 +308,9 @@ export async function assertCanEditEvent(
  *   admin 特権は使わない (役割を切り分けるため)。
  *   イベント運営者は自分がオーナーでなくても、そのイベント所属作品を編集できる。
  *
- * - `any` (default): 後方互換。admin / event / owner / collaborator のいずれか
- *   で許可されれば true。明示的にモードを渡さない既存呼び出しはこれを使う。
- *
  * 作品オーナーは privilegeMode に関わらず常に編集可能。
  */
-export type CanEditVideoPrivilegeMode = "normal" | "admin" | "event" | "any";
+export type CanEditVideoPrivilegeMode = "normal" | "admin" | "event";
 
 /**
  * 動画編集権限の判定。`privilegeMode` で評価する権限ソースを切り替える。
@@ -316,17 +328,14 @@ export async function canEditVideo(args: {
     "creator_x_user_id" | "primary_event_id" | "id" | "submitted_by_user_id"
   >;
   requiredKey: VideoEditSectionKey;
-  /** 既定 "any"。詳細は CanEditVideoPrivilegeMode を参照。 */
-  privilegeMode?: CanEditVideoPrivilegeMode;
+  privilegeMode: CanEditVideoPrivilegeMode;
 }): Promise<boolean> {
-  const { db, user, video, requiredKey } = args;
-  const privilegeMode: CanEditVideoPrivilegeMode = args.privilegeMode ?? "any";
+  const { db, user, video, requiredKey, privilegeMode } = args;
 
-  // admin role の全権許容は "admin" / "any" のみ。
+  // admin role の全権許容は "admin" のみ。
   // "normal" モードでは admin role でも safe key だけが通る (後段で判定)。
   if (
-    (privilegeMode === "admin" || privilegeMode === "any") &&
-    user.role === "admin"
+    privilegeMode === "admin" && user.role === "admin"
   ) {
     return true;
   }
@@ -417,7 +426,7 @@ export async function canEditVideo(args: {
   //       一般ログインユーザーが他人の作品を編集できる経路を作らないため。
   if (privilegeMode === "normal" || privilegeMode === "admin") return false;
 
-  // privilegeMode === "event" / "any": イベント運営権限のチェック。
+  // privilegeMode === "event": イベント運営権限のチェック。
   // event_staff の権限キーにより、自分がオーナーでなくても
   // イベント所属作品を編集できる。
   if (eventIds.size === 0) return false;

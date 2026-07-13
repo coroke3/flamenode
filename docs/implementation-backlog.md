@@ -1,73 +1,68 @@
-# FlameNode 実装バックログ (Pre-Production Cleanup)
+# FlameNode 実装状況と残制約
 
-> 2026-07-03 update: CSV / TSV / legacy import flows require a preview before apply. Admin spreadsheet and legacy import APIs reject direct apply without the matching preview token.
-> 2026-07-03 update: `operation_mode` resolution is shared across app reads and static rebuild workers. `content-jobs` now has a tested mode policy. `/list` can read `list/recent.json` in `static_only` mode.
-> 2026-07-03 update: Legacy import reuses the stage-permission answer sync path. Imported `stage_permission` / legacy `righttype` values populate `video_custom_answers` when matching `event_custom_questions` exist.
-> 2026-07-03 update: `/event` index can read R2 `events/index.json` in `static_only` mode. `content-jobs` includes public event group sections in that payload.
-> 2026-07-04 update: Legacy import no longer writes deprecated `videos.custom_answers`; dropped legacy-only values are surfaced as import warnings.
-> 2026-07-04 update: Event templates no longer copy legacy `events.custom_questions`; template snapshots store normalized `custom_question_definitions` and restore them into `event_custom_questions`.
-> 2026-07-04 update: Admin spreadsheet import treats legacy compatibility columns as read-only, including event visibility flags, operation-mode fallbacks, `videos.stage_permission`, and fixed `video_chapters.marker_kind=chapter` inserts.
-> 2026-07-04 update (Prompt 7): `event_group_events` を正本化し `events.event_group_id` の読み取り fallback を削除。`src/lib/publicData/loader.ts` で R2 優先 + DB fallback + 再生成キュー投入。`primary_event_id` ↔ `video_events` 同期と repair script 追加。
+> Status: Planned
+> Last verified: 2026-07-12
+> Verified against commit: `00be565` + working tree
+> Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `docs/operations/README.md`
 
-最終更新: 2026-07-04
+## 統合実装の完了状況
 
-## 概要
+01〜07 統合仕様で要求されたコード上の整理は完了している。D1 を唯一の正本とし、R2 / KV の静的 JSON は再生成可能な配信キャッシュとして扱う。
 
-本格運用前の最終整理として、二重正本・旧仕様・中途半端な実装を整理する。
-D1 を正本、R2/KV の静的 JSON は公開配信用キャッシュとする。
+| 領域 | 現行実装 | 状態 |
+|---|---|---|
+| 最終 schema / ID | `schema.ts` と baseline を一致させ、内部 `user_id`、Discord `discord_id`、X `x_user_id` を分離 | 完了 |
+| event owner / 権限 | `permission_preset='owner'` を代表者の正本とし、最後の owner の削除・降格を service 層で防止 | 完了 |
+| 原子性 / 監査 | 条件付き SQL と D1 batch により mutation・完全な before/after・監査ログを一括確定 | 完了 |
+| 監査復元 | 復元可能性判定、直前競合検証、復元本体・復元履歴・RESTORE監査の一括確定 | 完了 |
+| import / spreadsheet | preview token、lease、件数上限、canonical table への一括適用を実装 | 完了 |
+| 公開範囲 / 静的配信 | 公開判定と whitelist DTO を共通化し、R2 優先・D1 正本・再生成 queue を実装 | 完了 |
+| Worker | `fast-jobs` / `content-jobs` / `sync-jobs` の3本へ統合し、lock、lease、有限 retry、cleanup を実装 | 完了 |
+| Cloudflare Pages / CI | `@cloudflare/next-on-pages`、secret 不要の PR build、成果物検査、fixture 検査、手動 production deploy workflow を実装 | 完了 |
+| UI / responsive | 2カードの `/entry`、ライム accent、light/dark/system、ConsoleShell、モバイル drawer、Shelf、動画詳細のモバイル順を実装 | 完了 |
+| 文書 / 履歴 | Active / Planned / Historical、DB change history、migration / deploy / incident 手順と CI 検査を整備 | 完了 |
 
----
+## 削除・置換済みの旧実装
 
-## 実装状況
+次の要素は最終 schema と runtime write path から除去済みであり、移行予定としては扱わない。
 
-| 項目 | 意図 | 現状 | 分類 | 優先度 | 対応ファイル候補 |
-|------|------|------|------|--------|-----------------|
-| OperationMode 化 | cost_guard_mode / is_maintenance_mode を統一 | resolver / policy / getMode を共通化。旧カラムは互換 fallback のみ | implemented | 高 | system_settings, costGuard.ts, queue.ts |
-| static JSON read layer | 公開ページを R2 静的 JSON に寄せる | `loader.ts` で R2 優先 + overlay 時 DB fallback + miss 時 enqueue。top / `/list` / `/event` / event detail / video detail / user profile を接続済み | implemented | 高 | lib/publicData/, public pages |
-| static rebuild queue policy | mode に応じた queue 処理 | maintenance停止 / economy件数制限 / read_only対象制限 / static_only highのみを policy 化 | implemented | 高 | workers/json-generator/queue.ts |
-| api_endpoints 削除 | events.public_api_enabled に統一 | deprecated 表記済み | partial | 高 | schema.ts, admin pages |
-| video_stats 削除 | videos 側列に統一 | schema.ts に残存 | planned | 高 | schema.ts, score-recalc worker |
-| event_staff 権限正本 | permission_preset / permission_mask / custom_permission_keys_json | mask/preset 実装済み | partial | 高 | permissions/keys.ts, presets.ts, mask.ts |
-| event groups 正式実装 | 複数イベント所属 | `event_group_events` 正本。legacy `events.event_group_id` クリア migration + repair script | implemented | 中 | eventGroups.ts, migrations/0039 |
-| custom questions 本格実装 | event_custom_questions / video_custom_answers | 投稿経路で `replaceGeneralCustomAnswers` 配線済み。EventForm の一般質問 UI は partial | partial | 中 | EventForm, video.ts, customQuestionAnswers.ts |
-| Worker 5→3 統合 | Cron Trigger 削減 | 3本構成に統合済み | implemented | 中 | workers/fast-jobs, content-jobs, sync-jobs |
-| 通知・運営受信箱 | notification-outbox 基盤 | DB 作成済み | partial | 中 | notification-dispatcher |
-| YouTube 同期リトライ | バックオフ / リトライ | 基本実装済み | implemented | 低 | youtube-sync worker |
-| スコア / 推薦 | videos.score を正本 | score-recalc 動作中 | implemented | 低 | score-recalc worker |
-| 管理 / 運営画面 UX | noindex, 影響件数, ラベル | 改善済み | implemented | 中 | admin pages |
-| スマホ UI / 入力 UI | ボタンサイズ, ヒーロー, ガター, 下部バー | 改善済み | implemented | 中 | CSS modules |
-| 危険操作 / 監査ログ | history_logs, 確認 UI | 基本実装済み | partial | 中 | history logs, admin pages |
-| migration / Drizzle meta | 手動 migration と Drizzle meta の同期 | 手動 migration 混在 | partial | 低 | migrations/, instrumentation.ts |
-| CSV import 再設計 | 用途別 import workflow | 運営メンバーCSV / admin spreadsheet / legacy import をプレビュー後保存に統一済み | implemented | 中 | eventStaffCsv, spreadsheet/import, legacy-import |
-| Legacy Import Gateway | 旧データ移行 | `/admin/import` と JSON API を実装済み。apply はプレビュートークン必須 | implemented | 低 | /admin/import, api/admin/legacy-import |
-| D1 schema/runtime fixes | notification-dispatcher, instrumentation, list_popular | 修正済み | implemented | 高 | workers/, instrumentation.ts |
-| Cloudflare deploy | config check, system_settings ID | 整理済み | implemented | 高 | scripts/, package.json |
-| 未使用コード削除 | spreadsheetUtils, safeAccentHex, CSS | 削除済み | implemented | 低 | 多数 |
+| 旧要素 | 現行の正本 |
+|---|---|
+| `api_endpoints` | `events.public_api_enabled` と公開 DTO 層 |
+| `video_stats` | `videos.score` / `videos.app_like_count` / `video_youtube_metadata.view_count` |
+| `event_staff.permission_mask` / `event_staff_permissions` | `permission_preset` / `custom_permission_keys_json` |
+| `events.is_active` / `is_entry_open` / `is_archived` | `visibility_status` と受付期間から導出 |
+| `system_settings.cost_guard_mode` / `is_maintenance_mode` | `operation_mode` |
+| `events.custom_questions` / `videos.custom_answers` / `videos.stage_permission` | `event_custom_questions` / `video_custom_answers` |
+| `videos.used_software_json` | `video_softwares` / `software_catalog` |
+| `video_chapters.marker_kind` / `video_member_id` | chapter 行と `video_members.chapters_json` の明確な役割分離 |
+| request-time DDL / 起動時 schema 適用 | 事前の手動 baseline 適用と schema 不一致時の fail-fast |
 
----
+旧入力名は preview 表示や import 正規化の入口でのみ解釈し、旧 DB 列への読み書きや二重書き込みには使用しない。静的検査は `check:db-legacy` が runtime への再混入を拒否する。
 
-## 削除予定 DB 要素
+## 実環境でのみ必要な作業
 
-| 要素 | 正本 | 削除方針 | ステータス |
-|------|------|---------|-----------|
-| api_endpoints | events.public_api_enabled | テーブル削除 | deprecated |
-| video_stats | videos.score / app_like_count / video_youtube_metadata.view_count | テーブル削除 | planned |
-| event_staff_permissions | event_staff.permission_preset / permission_mask / custom_permission_keys_json | 移行元のみ / 新規書き込み禁止 | mask backfill migration |
-| events.custom_questions (旧 JSON) | event_custom_questions | 新規書き込み禁止。テンプレートは `custom_question_definitions` から正規化テーブルへ復元 | write path removed |
-| videos.custom_answers (旧 JSON) | video_custom_answers | 新規書き込み禁止。legacy import は旧JSON格納値を warning として扱う | write path removed |
-| videos.stage_permission | video_custom_answers | 新規書き込み禁止。0037 で既存値を正規化テーブルへ backfill。汎用 spreadsheet import では読み取り専用 | write path removed |
-| video_softwares | videos.used_software_json + software_catalog | 通常保存と legacy import は JSON 保存へ移行済み。旧テーブルは読み取りフォールバックのみ | implemented |
-| events.is_active / is_entry_open / is_archived | events.visibility_status / entry_start_time / entry_end_time | 互換列。通常保存は同期、汎用 spreadsheet import では読み取り専用 | readonly fallback |
-| system_settings.cost_guard_mode / is_maintenance_mode | system_settings.operation_mode | 互換 fallback。汎用 spreadsheet import では読み取り専用 | readonly fallback |
-| video_chapters.video_member_id / marker_kind | video_members.chapters_json / marker_kind=chapter | メンバーチャプター分離後の互換列。汎用 import では `marker_kind=chapter` を強制 | readonly/fixed |
+これらはコードの未実装ではなく、運用者の権限と実 resource が必要な手動工程である。
 
----
+1. Remote D1 をバックアップし、`docs/operations/migrations.md` に従って baseline を明示適用する。
+2. Cloudflare Pages、D1、R2、KV、3 Worker の resource ID と production secret を Environment に登録する。
+3. Discord Developer Portal の callback URL と OAuth credential を設定する。
+4. 手動 deploy workflow を実行し、Pages、静的 asset、Auth callback、任意の Worker health URL を smoke test する。
 
-## 残作業 (次のPRで対応)
+Remote D1 migration、resource 作成、実デプロイはこのリポジトリの自動検証では実行しない。
 
-1. secondary public pages の static JSON read layer 方針整理 (`/recommend` / `/user` index / `/event/[id]/slots` など)
-2. custom questions 拡張 (select / radio / checkbox UI と表示範囲)
-3. event_staff permission_mask migration
-4. video_stats 削除 (migration)
-5. api_endpoints 削除 (events.public_api_enabled への完全移行)
-6. docs/tests 最終同期
+## 技術的に残る制約
+
+- D1 は一般的な対話型 transaction API を前提にせず、正式な batch と条件付き SQL の範囲で all-or-nothing を保証する。大規模 import は Cloudflare の statement / parameter 制限に合わせて事前に拒否する。
+- 監査 payload が上限を超える操作や、安全な逆操作を構成できない対象は復元可能に見せず、理由付き `not_restorable` とする。
+- R2 / KV は配信キャッシュのため、更新直後に再生成待ちの短い遅延があり得る。整合性判断と repair の正本は常に D1 とする。
+- OAuth、Cloudflare binding、実ドメイン、外部 API の到達性は、credential のない PR CI では確認できない。fixture 検査と production の fail-closed 検査を分離している。
+- `@cloudflare/next-on-pages` 1.13.16 の peer dependency 上限は Next.js 15.5.2 である。Pages 固定条件を維持したまま Next.js を 15.5.16 以上へ上げられないため、Next.js 15.5.16 未満を対象とする high / critical の依存監査警告は残る。
+- Wrangler 4.110 への更新は Node.js 22 と `@cloudflare/workers-types` の同時更新を要する。Pages / 3 Worker の dry-run と型検証を伴う独立した small-batch として実施する。
+
+## 統合完了を妨げない将来拡張
+
+- 任意の `select` / `radio` / `checkbox` カスタム質問を EventForm から新規定義する管理 UI は、正規化 schema と import 対応後のプロダクト拡張として扱う。
+- `/recommend`、`/user` index、`/event/[id]/slots` を専用 static artifact へ広げる場合も、D1 正本と共通公開判定を維持する。
+
+これらを未実装の統合要件や「次の PR で必須」の項目としては扱わない。追加する場合は新しい要求と検証条件を定義する。

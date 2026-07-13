@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { ALL_PERMISSION_KEYS } from "./keys.ts";
 import {
   expandPermissionAliases,
+  getManageStaffRole,
   normalizePermissionKeys,
   resolveStaffPermissionKeys,
   safeParseCustomPermissionKeys,
@@ -90,6 +91,12 @@ test("public_staff preset resolves to empty permissions", () => {
     custom_permission_keys_json: null,
   });
   assert.equal(keys.size, 0);
+});
+
+test("manage staff role uses permission_preset as the owner source of truth", () => {
+  assert.equal(getManageStaffRole({ permission_preset: "owner" }), "representative");
+  assert.equal(getManageStaffRole({ permission_preset: "manager" }), "editor");
+  assert.equal(getManageStaffRole({ permission_preset: "public_staff" }), null);
 });
 
 test("permission key registry stays within project limit", () => {

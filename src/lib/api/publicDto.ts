@@ -47,13 +47,13 @@ export const PUBLIC_EVENT_KEYS = [
   "icon_url",
   "img_url",
   "accent_color",
-  "is_active",
-  "is_entry_open",
-  "is_archived",
+  "visibility_status",
   "slot_type",
   "slot_visibility_mode",
   "start_time",
   "end_time",
+  "entry_start_time",
+  "entry_end_time",
   "max_slots_per_video",
   "max_consecutive_slots_per_entry",
 ] as const;
@@ -69,13 +69,13 @@ export interface PublicEventDto {
   icon_url: string | null;
   img_url: string | null;
   accent_color: string | null;
-  is_active: number;
-  is_entry_open: number;
-  is_archived: number;
+  visibility_status: "public" | "archived";
   slot_type: "time" | "count" | null;
   slot_visibility_mode: "public_name" | "anonymous" | "hidden" | null;
   start_time: number | null;
   end_time: number | null;
+  entry_start_time: number | null;
+  entry_end_time: number | null;
   max_slots_per_video: number;
   max_consecutive_slots_per_entry: number;
 }
@@ -120,6 +120,12 @@ export const FORBIDDEN_PUBLIC_KEYS: ReadonlySet<string> = new Set([
   "notification_payload",
   // 編集者の代理 X user id (公開不可)
   "representative_x_user_id",
+  // events の廃止済み公開・受付フラグと旧 JSON/Fallback
+  "is_active",
+  "is_entry_open",
+  "is_archived",
+  "custom_questions",
+  "stage_permission",
 ]);
 
 /** 公開 API リストに `limit` の絶対上限を掛ける。 */

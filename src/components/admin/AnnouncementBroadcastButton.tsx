@@ -13,8 +13,8 @@ interface Props {
 /**
  * 段階 broadcast UI (Opus #7 Phase 2)。
  *
- * - 1 回 50 件まで enqueue
- * - cursor を UI 側で保持して「次の 50 件」ボタンで進める
+ * - 1回30件までenqueue
+ * - 最後に処理した内部user IDをcursorとして保持
  * - 'BROADCAST' 入力で確認
  * - 完了したら status=failed の Worker リトライを /admin/notifications で確認
  */
@@ -30,7 +30,7 @@ export function AnnouncementBroadcastButton({
   const [audience, setAudience] = React.useState<"all" | "creators" | "admins">(
     defaultAudience,
   );
-  const [cursor, setCursor] = React.useState(0);
+  const [cursor, setCursor] = React.useState("");
   const [confirmText, setConfirmText] = React.useState("");
   const [msg, setMsg] = React.useState<string | null>(null);
   const [enqueuedTotal, setEnqueuedTotal] = React.useState(0);
@@ -101,7 +101,7 @@ export function AnnouncementBroadcastButton({
               段階 broadcast
             </h3>
             <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>
-              1 回 50 件まで enqueue します。続きがあれば cursor を進めて再実行してください。
+              1回30件までenqueueします。続きは最後の内部user IDから再開します。
               Worker の rate-limit を考慮し、cursor 進行は手動で確認しながら行ってください。
             </p>
 
@@ -133,13 +133,13 @@ export function AnnouncementBroadcastButton({
             </label>
 
             <label style={{ fontSize: 12 }}>
-              cursor (OFFSET、続きから再開する場合に増やす)
+              cursor（前回処理した最後の内部user ID。初回は空欄）
               <input
-                type="number"
+                type="text"
                 value={cursor}
-                onChange={(e) => setCursor(Math.max(0, Number(e.target.value) || 0))}
+                onChange={(e) => setCursor(e.target.value.slice(0, 128))}
                 className="fn-input"
-                min={0}
+                maxLength={128}
                 disabled={busy}
                 style={{ marginTop: 4 }}
               />
@@ -194,7 +194,7 @@ export function AnnouncementBroadcastButton({
                 onClick={onSubmit}
                 disabled={busy || confirmText !== "BROADCAST" || !content.trim()}
               >
-                {busy ? "送信中..." : `${50} 件 enqueue`}
+                {busy ? "送信中..." : "30件 enqueue"}
               </button>
             </div>
           </div>

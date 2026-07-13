@@ -1,23 +1,23 @@
 export const runtime = "edge";
 
-import { NextResponse } from "next/server";
 import { desc } from "drizzle-orm";
 import { events as eventsTable } from "@/lib/db/schema";
 import { getDatabase } from "@/lib/cloudflare";
-import {
-  isAcceptingEntries,
-  isEventArchived,
-  publicListableEventWhere,
-} from "@/lib/utils/eventStatus";
+import { publicListableEventWhere } from "@/lib/utils/eventStatus";
 import {
   MAX_PUBLIC_EVENT_LIMIT,
   PUBLIC_EVENT_KEYS,
   PublicEventDto,
+  assertNoForbiddenKeys,
   pickKeys,
 } from "@/lib/api/publicDto";
+import { loadStaticEventsIndex } from "@/lib/publicData/staticEventsIndex";
+import { checkPublicApiRateLimit, publicJsonResponse } from "@/lib/api/publicApi";
 
 /** イベント一覧 JSON。 */
 export async function GET(req: Request): Promise<Response> {
+  const limited = checkPublicApiRateLimit(req, "/api/events");
+  if (limited) return limited;
   const url = new URL(req.url);
   const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
   const limit = Math.min(
@@ -25,8 +25,19 @@ export async function GET(req: Request): Promise<Response> {
     Math.max(1, parseInt(url.searchParams.get("limit") ?? "60", 10) || 60),
   );
 
+  const staticIndex = await loadStaticEventsIndex();
+  if (staticIndex.strategy === "static_json_only" && staticIndex.index) {
+    const offset = (page - 1) * limit;
+    const items: PublicEventDto[] = staticIndex.index.events
+      .slice(offset, offset + limit)
+      .map((row) => pickKeys(row, PUBLIC_EVENT_KEYS) as PublicEventDto);
+    const payload = { items, page, limit };
+    assertNoForbiddenKeys(payload);
+    return publicJsonResponse(req, payload, "public, max-age=60, s-maxage=120, stale-while-revalidate=300");
+  }
+
   const db = getDatabase();
-  if (!db) return NextResponse.json({ items: [], page, limit });
+  if (!db) return publicJsonResponse(req, { items: [], page, limit }, "public, max-age=60, s-maxage=120, stale-while-revalidate=300");
 
   const rows = await db
     .select({
@@ -54,26 +65,11 @@ export async function GET(req: Request): Promise<Response> {
     .offset((page - 1) * limit);
 
   // DB 側で明示列を絞り込んでいるが、二重防御として pickKeys も通す。
-  const now = Math.floor(Date.now() / 1000);
   const items: PublicEventDto[] = rows.map((row) =>
-    pickKeys(
-      {
-        ...row,
-        is_active: row.visibility_status === "public" ? 1 : 0,
-        is_entry_open: isAcceptingEntries(row, now) ? 1 : 0,
-        is_archived: isEventArchived(row) ? 1 : 0,
-      },
-      PUBLIC_EVENT_KEYS,
-    ) as PublicEventDto,
+    pickKeys(row, PUBLIC_EVENT_KEYS) as PublicEventDto,
   );
 
-  return NextResponse.json(
-    { items, page, limit },
-    {
-      headers: {
-        "Cache-Control":
-          "public, max-age=60, s-maxage=120, stale-while-revalidate=300",
-      },
-    },
-  );
+  const payload = { items, page, limit };
+  assertNoForbiddenKeys(payload);
+  return publicJsonResponse(req, payload, "public, max-age=60, s-maxage=120, stale-while-revalidate=300");
 }

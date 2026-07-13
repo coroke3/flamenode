@@ -1,8 +1,16 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { events as eventsTable, videoEvents, videoYoutubeMetadata } from "@/lib/db/schema";
 import type { DB } from "@/lib/db/client";
 import { getEditableEventIds } from "@/lib/auth/ownership";
 import { computeVideoEventSyncTarget } from "@/lib/video/eventSync";
+import type { VideoAtomicWritePlan } from "@/lib/video/atomicWritePlan";
+import {
+  compositeAuditTargetId,
+  emptyVideoAtomicWritePlan,
+} from "@/lib/video/atomicWritePlan";
+import { expectedRowCondition } from "@/lib/audit/adapters";
+import { MAX_ATOMIC_VIDEO_EVENTS } from "@/lib/video/atomicLimits";
+export { MAX_ATOMIC_VIDEO_EVENTS } from "@/lib/video/atomicLimits";
 
 /** 一般ユーザーが video_events を変更できるかの判定に使うイベント列。 */
 export type VideoEventUserLinkPolicy =
@@ -30,6 +38,10 @@ export async function resolveEventSyncTargetForNewVideo(
   const user = args.user;
   const linkPolicy = args.linkPolicy ?? "video_event_links";
   const allowColumn = eventAllowColumn(linkPolicy);
+  const universe = Array.from(new Set([...requested, ...alwaysInclude]));
+  if (universe.length > MAX_ATOMIC_VIDEO_EVENTS) {
+    throw new Error("video_event_atomic_limit_exceeded");
+  }
 
   if (user.role === "admin") {
     return computeVideoEventSyncTarget({
@@ -40,7 +52,6 @@ export async function resolveEventSyncTargetForNewVideo(
     });
   }
 
-  const universe = Array.from(new Set([...requested, ...alwaysInclude]));
   const allowMap = new Map<string, number>();
   if (universe.length > 0) {
     const rows = await db
@@ -52,7 +63,7 @@ export async function resolveEventSyncTargetForNewVideo(
       .where(inArray(eventsTable.id, universe));
     for (const r of rows) allowMap.set(r.id, r.allow);
   }
-  const editableEventIds = new Set(await getEditableEventIds(db, user.id));
+  const editableEventIds = new Set(await getEditableEventIds(db, user.id, universe));
   const userCanModify = (id: string) =>
     allowMap.get(id) === 1 || editableEventIds.has(id);
   return computeVideoEventSyncTarget({
@@ -64,33 +75,79 @@ export async function resolveEventSyncTargetForNewVideo(
   });
 }
 
-export async function ensureVideoDerivedRows(
+export async function buildVideoDerivedRowsPlan(
   db: DB,
   args: {
     videoId: string;
     youtubeVideoId: string | null;
     now: number;
+    actorUserId: string;
   },
-): Promise<void> {
-  await db
-    .insert(videoYoutubeMetadata)
-    .values({
+): Promise<VideoAtomicWritePlan> {
+  const existing = (
+    await db
+      .select()
+      .from(videoYoutubeMetadata)
+      .where(eq(videoYoutubeMetadata.video_id, args.videoId))
+      .limit(1)
+  )[0];
+  if (!existing) {
+    const after: typeof videoYoutubeMetadata.$inferSelect = {
       video_id: args.videoId,
       youtube_video_id: args.youtubeVideoId,
-      sync_status: "pending",
+      youtube_privacy_status: null,
+      youtube_availability_status: null,
+      duration_seconds: null,
       view_count: 0,
+      synced_at: null,
+      sync_status: "pending",
+      sync_error: null,
       updated_at: args.now,
-    })
-    .onConflictDoNothing();
-
-  await db
-    .update(videoYoutubeMetadata)
-    .set({
+    };
+    return {
+      statements: [db.insert(videoYoutubeMetadata).values(after)],
+      expectedChanges: [1],
+      audits: [{
+        table_name: "video_youtube_metadata",
+        target_id: args.videoId,
+        operation: "CREATE",
+        before: null,
+        after: { ...after },
+        actor_user_id: args.actorUserId,
+        context: "video-save:youtube-metadata",
+        retention_class: "normal",
+        strict: true,
+      }],
+    };
+  }
+  const after: typeof videoYoutubeMetadata.$inferSelect = {
+    ...existing,
+    youtube_video_id: args.youtubeVideoId,
+    sync_status: "pending",
+    updated_at: args.now,
+  };
+  return {
+    statements: [db.update(videoYoutubeMetadata).set({
       youtube_video_id: args.youtubeVideoId,
       sync_status: "pending",
       updated_at: args.now,
-    })
-    .where(eq(videoYoutubeMetadata.video_id, args.videoId));
+    }).where(and(
+      eq(videoYoutubeMetadata.video_id, args.videoId),
+      expectedRowCondition({ expectedCurrent: existing }),
+    )!)],
+    expectedChanges: [1],
+    audits: [{
+      table_name: "video_youtube_metadata",
+      target_id: args.videoId,
+      operation: "UPDATE",
+      before: { ...existing },
+      after: { ...after },
+      actor_user_id: args.actorUserId,
+      context: "video-save:youtube-metadata",
+      retention_class: "normal",
+      strict: true,
+    }],
+  };
 }
 
 export async function resolveVideoEventSyncTargetIds(
@@ -112,7 +169,11 @@ export async function resolveVideoEventSyncTargetIds(
   const current = await db
     .select({ event_id: videoEvents.event_id })
     .from(videoEvents)
-    .where(eq(videoEvents.video_id, videoId));
+    .where(eq(videoEvents.video_id, videoId))
+    .limit(MAX_ATOMIC_VIDEO_EVENTS + 1);
+  if (current.length > MAX_ATOMIC_VIDEO_EVENTS) {
+    throw new Error("video_event_existing_atomic_limit_exceeded");
+  }
   const currentIds = current.map((r) => r.event_id);
 
   if (user.role === "admin") {
@@ -127,6 +188,9 @@ export async function resolveVideoEventSyncTargetIds(
   const universe = Array.from(
     new Set([...currentIds, ...requested, ...alwaysInclude]),
   );
+  if (universe.length > MAX_ATOMIC_VIDEO_EVENTS) {
+    throw new Error("video_event_atomic_limit_exceeded");
+  }
   const allowMap = new Map<string, number>();
   if (universe.length > 0) {
     const rows = await db
@@ -138,7 +202,7 @@ export async function resolveVideoEventSyncTargetIds(
       .where(inArray(eventsTable.id, universe));
     for (const r of rows) allowMap.set(r.id, r.allow);
   }
-  const editableEventIds = new Set(await getEditableEventIds(db, user.id));
+  const editableEventIds = new Set(await getEditableEventIds(db, user.id, universe));
   const userCanModify = (id: string) =>
     allowMap.get(id) === 1 || editableEventIds.has(id);
   return computeVideoEventSyncTarget({
@@ -153,45 +217,66 @@ export async function resolveVideoEventSyncTargetIds(
 /**
  * `video_events` を policy 適用 + differential 同期する。
  */
-export async function syncVideoEvents(
+export async function buildSyncVideoEventsPlan(
   db: DB,
   videoId: string,
   args: {
-    requested: string[];
-    alwaysInclude?: string[];
-    user: { id: string; role?: string | null };
-    linkPolicy?: VideoEventUserLinkPolicy;
+    targetEventIds: string[];
+    actorUserId: string;
   },
-): Promise<string[]> {
-  const target = await resolveVideoEventSyncTargetIds(db, videoId, args);
-
+): Promise<VideoAtomicWritePlan> {
+  const target = Array.from(new Set(args.targetEventIds.filter(Boolean)));
+  if (target.length > MAX_ATOMIC_VIDEO_EVENTS) {
+    throw new Error("video_event_atomic_limit_exceeded");
+  }
   const current = await db
-    .select({ event_id: videoEvents.event_id })
+    .select()
     .from(videoEvents)
-    .where(eq(videoEvents.video_id, videoId));
+    .where(eq(videoEvents.video_id, videoId))
+    .limit(MAX_ATOMIC_VIDEO_EVENTS + 1);
+  if (current.length > MAX_ATOMIC_VIDEO_EVENTS) {
+    throw new Error("video_event_existing_atomic_limit_exceeded");
+  }
   const currentIds = current.map((r) => r.event_id);
-
   const currentSet = new Set(currentIds);
   const targetSet = new Set(target);
-  for (const id of currentIds) {
-    if (!targetSet.has(id)) {
-      await db
-        .delete(videoEvents)
-        .where(
-          and(
-            eq(videoEvents.video_id, videoId),
-            eq(videoEvents.event_id, id),
-          )!,
-        );
-    }
+  const removed = current.filter((row) => !targetSet.has(row.event_id));
+  const added: (typeof videoEvents.$inferSelect)[] = target
+    .filter((eventId) => !currentSet.has(eventId))
+    .map((eventId) => ({ video_id: videoId, event_id: eventId }));
+  const plan = emptyVideoAtomicWritePlan();
+  if (removed.length > 0) {
+    plan.statements.push(db.delete(videoEvents).where(or(...removed.map((row) => and(
+      eq(videoEvents.video_id, row.video_id),
+      eq(videoEvents.event_id, row.event_id),
+    )!))!));
+    plan.expectedChanges.push(removed.length);
+    plan.audits.push(...removed.map((row) => ({
+      table_name: "video_events",
+      target_id: compositeAuditTargetId(row.video_id, row.event_id),
+      operation: "DELETE" as const,
+      before: { ...row },
+      after: null,
+      actor_user_id: args.actorUserId,
+      context: "video-save:events",
+      retention_class: "normal" as const,
+      strict: true,
+    })));
   }
-  for (const id of target) {
-    if (!currentSet.has(id)) {
-      await db
-        .insert(videoEvents)
-        .values({ video_id: videoId, event_id: id })
-        .onConflictDoNothing();
-    }
+  if (added.length > 0) {
+    plan.statements.push(db.insert(videoEvents).values(added));
+    plan.expectedChanges.push(added.length);
+    plan.audits.push(...added.map((row) => ({
+      table_name: "video_events",
+      target_id: compositeAuditTargetId(row.video_id, row.event_id),
+      operation: "CREATE" as const,
+      before: null,
+      after: { ...row },
+      actor_user_id: args.actorUserId,
+      context: "video-save:events",
+      retention_class: "normal" as const,
+      strict: true,
+    })));
   }
-  return target;
+  return plan;
 }

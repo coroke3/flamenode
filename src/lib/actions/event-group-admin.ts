@@ -10,8 +10,8 @@ import {
   eventGroups,
   events,
 } from "@/lib/db/schema";
-import { auditAction } from "@/lib/audit/helpers";
-import { enqueueAfterEventGroupChange } from "@/lib/staticRebuild/hooks";
+import { mutateWithAudit } from "@/lib/audit/mutate";
+import { buildEventGroupChangeQueueBatch } from "@/lib/staticRebuild/hooks";
 import { generateId } from "@/lib/utils/id";
 
 export interface EventGroupActionResult {
@@ -28,7 +28,6 @@ const groupTypeEnum = z.enum([
   "other",
 ]);
 const visibilityEnum = z.enum(["public", "private", "archived"]);
-const relationTypeEnum = z.enum(["member", "primary", "related"]);
 
 const groupSchema = z.object({
   id: z.string().trim().optional(),
@@ -81,14 +80,6 @@ function normalizeOptionalColor(raw: string | null | undefined): string | null {
   return v ? v : null;
 }
 
-async function fetchGroupEventIds(db: NonNullable<ReturnType<typeof getDatabase>>, groupId: string): Promise<string[]> {
-  const rows = await db
-    .select({ event_id: eventGroupEvents.event_id })
-    .from(eventGroupEvents)
-    .where(eq(eventGroupEvents.event_group_id, groupId));
-  return rows.map((r) => r.event_id);
-}
-
 async function ensureUniqueSlug(
   db: NonNullable<ReturnType<typeof getDatabase>>,
   slug: string,
@@ -102,6 +93,37 @@ async function ensureUniqueSlug(
     .where(conds.length === 1 ? conds[0] : and(...conds))
     .limit(1);
   return existing.length === 0;
+}
+
+function groupSnapshot(row: typeof eventGroups.$inferSelect): Record<string, unknown> {
+  return { ...row };
+}
+
+function relationSnapshot(
+  row: typeof eventGroupEvents.$inferSelect,
+): Record<string, unknown> {
+  return { ...row };
+}
+
+async function mutateEventGroupWithQueue(
+  db: NonNullable<ReturnType<typeof getDatabase>>,
+  input: {
+    mutationStatements: Parameters<typeof mutateWithAudit>[1]["mutationStatements"];
+    expectedMutationChanges: number[];
+    audits: Parameters<typeof mutateWithAudit>[1]["audits"];
+    reason: string;
+    requestedByUserId: string;
+  },
+): Promise<void> {
+  const queue = await buildEventGroupChangeQueueBatch(db, input);
+  await mutateWithAudit(db, {
+    mutationStatements: [...input.mutationStatements, ...queue.statements],
+    expectedMutationChanges: [
+      ...input.expectedMutationChanges,
+      ...queue.expectedChanges,
+    ],
+    audits: input.audits,
+  });
 }
 
 export async function createEventGroup(
@@ -129,7 +151,7 @@ export async function createEventGroup(
   const id = d.id?.trim() || generateId("egrp");
   const now = Math.floor(Date.now() / 1000);
 
-  await db.insert(eventGroups).values({
+  const createdRow = {
     id,
     name: d.name,
     slug: d.slug,
@@ -142,23 +164,21 @@ export async function createEventGroup(
     sort_order: 0,
     created_at: now,
     updated_at: now,
-  });
+  } satisfies typeof eventGroups.$inferInsert;
 
-  await auditAction(db, {
-    table_name: "event_groups",
-    record_id: id,
-    action: "CREATE",
-    after_data: { name: d.name, slug: d.slug },
-    operator_user_id: guard.userId,
-    retention_class: "normal",
-  });
-
-  await enqueueAfterEventGroupChange(db, {
-    db,
-    slug: d.slug,
+  await mutateEventGroupWithQueue(db, {
+    mutationStatements: [db.insert(eventGroups).values(createdRow)],
+    expectedMutationChanges: [1],
+    audits: [{
+      table_name: "event_groups",
+      target_id: id,
+      operation: "CREATE",
+      after: groupSnapshot(createdRow as typeof eventGroups.$inferSelect),
+      actor_user_id: guard.userId,
+      retention_class: "restorable",
+    }],
     reason: "event_group_create",
     requestedByUserId: guard.userId,
-    priority: "high",
   });
 
   revalidatePath("/admin/event-groups");
@@ -197,11 +217,7 @@ export async function updateEventGroup(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const eventIds = await fetchGroupEventIds(db, id);
-
-  await db
-    .update(eventGroups)
-    .set({
+  const updatedValues = {
       name: d.name,
       slug: d.slug,
       description: d.description?.trim() || null,
@@ -212,27 +228,27 @@ export async function updateEventGroup(
       visibility_status: d.visibility_status,
       sort_order: 0,
       updated_at: now,
-    })
-    .where(eq(eventGroups.id, id));
+  } satisfies Partial<typeof eventGroups.$inferInsert>;
+  const updatedRow = { ...existing, ...updatedValues };
 
-  await auditAction(db, {
-    table_name: "event_groups",
-    record_id: id,
-    action: "UPDATE",
-    before_data: { name: existing.name, slug: existing.slug },
-    after_data: { name: d.name, slug: d.slug },
-    operator_user_id: guard.userId,
-    retention_class: "normal",
-  });
-
-  await enqueueAfterEventGroupChange(db, {
-    db,
-    slug: d.slug,
-    previousSlug: existing.slug,
-    eventIds,
+  await mutateEventGroupWithQueue(db, {
+    mutationStatements: [
+      db.update(eventGroups).set(updatedValues).where(
+        and(eq(eventGroups.id, id), eq(eventGroups.updated_at, existing.updated_at)),
+      ),
+    ],
+    expectedMutationChanges: [1],
+    audits: [{
+      table_name: "event_groups",
+      target_id: id,
+      operation: "UPDATE",
+      before: groupSnapshot(existing),
+      after: groupSnapshot(updatedRow),
+      actor_user_id: guard.userId,
+      retention_class: "restorable",
+    }],
     reason: "event_group_update",
     requestedByUserId: guard.userId,
-    priority: "high",
   });
 
   revalidatePath("/admin/event-groups");
@@ -258,30 +274,40 @@ export async function deleteEventGroup(
   )[0];
   if (!existing) return { ok: false, message: "グループが見つかりません。" };
 
-  const eventIds = await fetchGroupEventIds(db, id);
-  const now = Math.floor(Date.now() / 1000);
-
-  await db
-    .delete(eventGroupEvents)
+  const relationRows = await db
+    .select()
+    .from(eventGroupEvents)
     .where(eq(eventGroupEvents.event_group_id, id));
-  await db.delete(eventGroups).where(eq(eventGroups.id, id));
+  const mutationStatements = [
+    db.delete(eventGroupEvents).where(eq(eventGroupEvents.event_group_id, id)),
+    db.delete(eventGroups).where(
+      and(eq(eventGroups.id, id), eq(eventGroups.updated_at, existing.updated_at)),
+    ),
+  ];
 
-  await auditAction(db, {
-    table_name: "event_groups",
-    record_id: id,
-    action: "DELETE",
-    before_data: { name: existing.name, slug: existing.slug },
-    operator_user_id: guard.userId,
-    retention_class: "normal",
-  });
-
-  await enqueueAfterEventGroupChange(db, {
-    db,
-    slug: existing.slug,
-    eventIds,
+  await mutateEventGroupWithQueue(db, {
+    mutationStatements,
+    expectedMutationChanges: [relationRows.length, 1],
+    audits: [
+      ...relationRows.map((row) => ({
+        table_name: "event_group_events" as const,
+        target_id: `${row.event_group_id}:${row.event_id}`,
+        operation: "DELETE" as const,
+        before: relationSnapshot(row),
+        actor_user_id: guard.userId,
+        retention_class: "restorable" as const,
+      })),
+      {
+        table_name: "event_groups",
+        target_id: id,
+        operation: "DELETE" as const,
+        before: groupSnapshot(existing),
+        actor_user_id: guard.userId,
+        retention_class: "restorable" as const,
+      },
+    ],
     reason: "event_group_delete",
     requestedByUserId: guard.userId,
-    priority: "high",
   });
 
   revalidatePath("/admin/event-groups");
@@ -311,7 +337,7 @@ export async function addEventsToGroup(input: {
   if (!group) return { ok: false, message: "グループが見つかりません。" };
 
   const existingRows = await db
-    .select({ event_id: eventGroupEvents.event_id })
+    .select()
     .from(eventGroupEvents)
     .where(eq(eventGroupEvents.event_group_id, groupId));
   const existingIds = new Set(existingRows.map((r) => r.event_id));
@@ -320,29 +346,36 @@ export async function addEventsToGroup(input: {
     .select({ id: events.id })
     .from(events)
     .where(inArray(events.id, eventIds));
-  const validIdSet = new Set(validRows.map((r) => r.id));
-  const toAdd = eventIds.filter((id) => validIdSet.has(id) && !existingIds.has(id));
+  if (validRows.length !== eventIds.length) {
+    return { ok: false, message: "存在しないイベントは追加できません。" };
+  }
+  const toAdd = eventIds.filter((id) => !existingIds.has(id));
   if (toAdd.length === 0) {
     return { ok: false, message: "追加できるイベントがありません。" };
   }
 
   const now = Math.floor(Date.now() / 1000);
 
-  for (const eventId of toAdd) {
-    await db.insert(eventGroupEvents).values({
+  const insertedRows = toAdd.map((eventId) => ({
       event_group_id: groupId,
       event_id: eventId,
       relation_type: "member",
       sort_order: 0,
       created_at: now,
       updated_at: now,
-    });
-  }
+  } satisfies typeof eventGroupEvents.$inferInsert));
 
-  await enqueueAfterEventGroupChange(db, {
-    db,
-    slug: group.slug,
-    eventIds: toAdd,
+  await mutateEventGroupWithQueue(db, {
+    mutationStatements: [db.insert(eventGroupEvents).values(insertedRows)],
+    expectedMutationChanges: [insertedRows.length],
+    audits: insertedRows.map((row) => ({
+      table_name: "event_group_events" as const,
+      target_id: `${row.event_group_id}:${row.event_id}`,
+      operation: "CREATE" as const,
+      after: relationSnapshot(row as typeof eventGroupEvents.$inferSelect),
+      actor_user_id: guard.userId,
+      retention_class: "restorable" as const,
+    })),
     reason: "event_group_member_add",
     requestedByUserId: guard.userId,
   });
@@ -385,75 +418,40 @@ export async function removeEventFromGroup(input: {
   )[0];
   if (!group) return { ok: false, message: "グループが見つかりません。" };
 
-  await db
-    .delete(eventGroupEvents)
-    .where(
-      and(
-        eq(eventGroupEvents.event_group_id, groupId),
-        eq(eventGroupEvents.event_id, eventId),
-      ),
-    );
-
-  await enqueueAfterEventGroupChange(db, {
-    db,
-    slug: group.slug,
-    eventIds: [eventId],
-    reason: "event_group_member_remove",
-    requestedByUserId: guard.userId,
-  });
-
-  revalidatePath(`/admin/event-groups/${groupId}/edit`);
-  revalidatePath("/event");
-  return { ok: true, id: groupId };
-}
-
-/** @deprecated UI からは未使用。互換のため残す。 */
-export async function updateGroupMemberRelation(input: {
-  groupId: string;
-  eventId: string;
-  relationType: "member" | "primary" | "related";
-  sortOrder: number;
-}): Promise<EventGroupActionResult> {
-  const guard = await requireAdmin();
-  if (!guard.ok) return guard.result;
-
-  const groupId = input.groupId.trim();
-  const eventId = input.eventId.trim();
-  const relationParsed = relationTypeEnum.safeParse(input.relationType);
-  if (!groupId || !eventId || !relationParsed.success) {
-    return { ok: false, message: "入力が不正です。" };
-  }
-
-  const sortOrder = Math.max(0, Math.min(9999, Math.floor(input.sortOrder)));
-
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
-
-  const group = (
-    await db.select().from(eventGroups).where(eq(eventGroups.id, groupId)).limit(1)
+  const relation = (
+    await db
+      .select()
+      .from(eventGroupEvents)
+      .where(
+        and(
+          eq(eventGroupEvents.event_group_id, groupId),
+          eq(eventGroupEvents.event_id, eventId),
+        ),
+      )
+      .limit(1)
   )[0];
-  if (!group) return { ok: false, message: "グループが見つかりません。" };
+  if (!relation) return { ok: false, message: "イベントはグループに追加されていません。" };
 
-  const now = Math.floor(Date.now() / 1000);
-  await db
-    .update(eventGroupEvents)
-    .set({
-      relation_type: relationParsed.data,
-      sort_order: sortOrder,
-      updated_at: now,
-    })
-    .where(
-      and(
-        eq(eventGroupEvents.event_group_id, groupId),
-        eq(eventGroupEvents.event_id, eventId),
+  await mutateEventGroupWithQueue(db, {
+    mutationStatements: [
+      db.delete(eventGroupEvents).where(
+        and(
+          eq(eventGroupEvents.event_group_id, groupId),
+          eq(eventGroupEvents.event_id, eventId),
+          eq(eventGroupEvents.updated_at, relation.updated_at),
+        ),
       ),
-    );
-
-  await enqueueAfterEventGroupChange(db, {
-    db,
-    slug: group.slug,
-    eventIds: [eventId],
-    reason: "event_group_member_update",
+    ],
+    expectedMutationChanges: [1],
+    audits: [{
+      table_name: "event_group_events",
+      target_id: `${groupId}:${eventId}`,
+      operation: "DELETE",
+      before: relationSnapshot(relation),
+      actor_user_id: guard.userId,
+      retention_class: "restorable",
+    }],
+    reason: "event_group_member_remove",
     requestedByUserId: guard.userId,
   });
 

@@ -52,6 +52,12 @@ const FORBIDDEN_KEYS = new Set([
   "notification_payload",
   // 編集者の代理 X user id (公開不可)
   "representative_x_user_id",
+  // events の廃止済み公開・受付フラグと旧 JSON/Fallback
+  "is_active",
+  "is_entry_open",
+  "is_archived",
+  "custom_questions",
+  "stage_permission",
 ]);
 
 /**

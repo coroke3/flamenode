@@ -167,8 +167,8 @@ export default async function ManageEventPage({
     .orderBy(desc(videosTable.created_at))
     .limit(10);
 
-  // 当該イベントの直近 history_logs (events / video_events / slots すべて)
-  const historyEv = await db
+  // 当該イベントの直近 audit_logs を取得する。
+  const eventAuditLogs = await db
     .select()
     .from(auditLogsTable)
     .where(
@@ -461,7 +461,7 @@ export default async function ManageEventPage({
 
       <section className="fn-console-section">
         <h2 className="fn-console-eyebrow">イベント更新履歴</h2>
-        {historyEv.length === 0 ? (
+        {eventAuditLogs.length === 0 ? (
           <EmptyState
             tone="success"
             title="直近の更新はありません"
@@ -485,7 +485,7 @@ export default async function ManageEventPage({
               </tr>
             </thead>
             <tbody>
-              {historyEv.map((h) => (
+              {eventAuditLogs.map((h) => (
                 <tr key={h.id}>
                   <td className="fn-td-nowrap">
                     <div>{formatUnix(h.created_at)}</div>

@@ -79,6 +79,11 @@
   flex-shrink: 0;
 }
 
+.desktopXId {
+  display: none;
+  flex-shrink: 0;
+}
+
 .themeButton button {
   width: var(--header-action-h);
   height: var(--header-action-h);
@@ -405,6 +410,17 @@
 
 .themeSlot {
   padding: 0 8px;
+  min-width: 0;
+}
+
+.themeSlot > div {
+  width: 100%;
+  max-width: 100%;
+}
+
+.themeSlot > div button {
+  flex: 1 1 0;
+  justify-content: center;
 }
 
 @media (max-width: 1000px) {
@@ -434,6 +450,11 @@
 
   .themeButton {
     display: inline-flex;
+  }
+
+  .desktopXId {
+    display: inline-flex;
+    align-items: center;
   }
 
   .menuToggle {

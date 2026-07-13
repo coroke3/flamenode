@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const ROOT = process.cwd();
-const OUTPUT = path.join(ROOT, ".vercel", "output", "static");
+const OUTPUT = path.resolve(process.env.PAGES_OUTPUT_DIR?.trim() || path.join(ROOT, ".vercel", "output", "static"));
 const errors = [];
 
 function file(relative) {
@@ -43,7 +43,7 @@ function assertNoSecrets(files) {
     /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/i,
     /\bAKIA[0-9A-Z]{16}\b/,
     /https:\/\/discord(?:app)?\.com\/api\/webhooks\/\d+\/[A-Za-z0-9_-]{20,}/i,
-    /(?:CLOUDFLARE_API_TOKEN|WORKER_ADMIN_TOKEN|AUTH_SECRET)\s*[:=]\s*["'][^"']{8,}/,
+    /(?:CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID|CF_IDS_JSON|WORKER_ADMIN_TOKEN|AUTH_SECRET|SPREADSHEET_IMPORT_PREVIEW_SECRET|DISCORD_BOT_TOKEN|DISCORD_WEBHOOK_URL|YOUTUBE_API_KEY)\s*[:=]\s*["'][^"']{8,}/,
   ];
   for (const full of files) {
     const extension = path.extname(full).toLowerCase();
@@ -52,6 +52,23 @@ function assertNoSecrets(files) {
     const text = fs.readFileSync(full, "utf8");
     if (suspicious.some((pattern) => pattern.test(text))) {
       errors.push(`${path.relative(ROOT, full)} contains a secret-looking value`);
+    }
+  }
+}
+
+function assertNoCloudflareIdFiles(files) {
+  for (const full of files) {
+    const relative = path.relative(OUTPUT, full);
+    const normalized = relative.replaceAll("\\", "/");
+    const basename = path.basename(full);
+    const looksLikeIdsFile = /^(?:ids|cloudflare[-_]ids)\.json$/i.test(basename);
+    let looksLikeCloudflareIds = false;
+    if (!looksLikeIdsFile && path.extname(full).toLowerCase() === ".json" && fs.statSync(full).size <= 512 * 1024) {
+      const text = fs.readFileSync(full, "utf8");
+      looksLikeCloudflareIds = /"(?:d1_database_id|kv_namespace_id|kv_preview_id)"\s*:/.test(text);
+    }
+    if (looksLikeIdsFile || looksLikeCloudflareIds) {
+      errors.push(`${normalized} contains Cloudflare resource IDs; remove this file from the Pages artifact before deploy`);
     }
   }
 }
@@ -83,8 +100,10 @@ if (!fs.existsSync(OUTPUT)) {
   }
   const files = collectFiles(OUTPUT);
   if (files.some((full) => /(?:^|[\\/])\.dev\.vars$/i.test(full))) {
-    errors.push("Pages output must not contain .dev.vars");
+    const devVars = files.find((full) => /(?:^|[\\/])\.dev\.vars$/i.test(full));
+    errors.push(`${path.relative(OUTPUT, devVars).replaceAll("\\", "/")} contains .dev.vars; remove this file from the Pages artifact before deploy`);
   }
+  assertNoCloudflareIdFiles(files);
   assertNoSecrets(files);
 }
 

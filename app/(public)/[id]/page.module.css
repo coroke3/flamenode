@@ -16,6 +16,26 @@
   min-width: 0;
 }
 
+/* PC と tablet の2カラム構成は維持し、詳細の並び替えは mobile のみ行う。 */
+@media (max-width: 700px) {
+  .main {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .main > .heroLayout {
+    order: 1;
+  }
+
+  .main > .section {
+    order: 2;
+  }
+
+  .main > .relatedMobile {
+    order: 3;
+  }
+}
+
 .heroLayout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

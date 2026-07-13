@@ -456,9 +456,31 @@ select {
     gap: 12px;
   }
 
+  .fn-shelf[data-mobile-rows="2"] {
+    grid-template-rows: repeat(2, max-content);
+    grid-auto-columns: clamp(150px, 46vw, 190px);
+  }
+
   .fn-shelf[data-density="compact"] {
     grid-auto-columns: minmax(104px, 32vw);
     gap: 8px;
+  }
+
+  .fn-shelf[data-density="compact"][data-mobile-rows="2"] {
+    grid-auto-columns: clamp(150px, 46vw, 190px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fn-shelf {
+    scroll-behavior: auto;
+  }
+
+  .fn-shelf-fade-left,
+  .fn-shelf-fade-right,
+  .fn-shelf-arrow,
+  .fn-shelf > * {
+    transition: none;
   }
 }
 

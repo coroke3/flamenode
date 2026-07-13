@@ -30,6 +30,16 @@ test("last owner cannot be deleted or demoted", () => {
   );
 });
 
+test("owner protection allows a change while another owner remains", () => {
+  assert.doesNotThrow(() =>
+    assertEventWillRetainOwner({
+      owners: [owner, { ...owner, id: "staff-owner-2" }],
+      target: owner,
+      nextPreset: "manager",
+    }),
+  );
+});
+
 test("role is a display mirror of permission_preset", () => {
   assert.equal(syncLegacyRoleFromPreset("owner"), "representative");
   assert.equal(syncLegacyRoleFromPreset("manager"), "editor");

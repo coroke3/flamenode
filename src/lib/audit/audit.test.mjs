@@ -4,6 +4,8 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import {
   sanitizeForAudit,
   computeChangedKeys,
@@ -20,6 +22,21 @@ import {
   computeAuditCompactCutoff,
   AUDIT_CLEANUP_BATCH_LIMIT,
 } from "../../../workers/cleanup/retention.ts";
+
+test("audit mutation は D1 batch と変更件数 assertion を同一取引で使う", async () => {
+  const mutateSource = await readFile(
+    fileURLToPath(new URL("./mutate.ts", import.meta.url)),
+    "utf8",
+  );
+
+  // D1 の実環境を必要としない契約テスト。mutation、audit INSERT、
+  // post-audit 更新を db.batch の一回の呼び出しに束ね、changes() を
+  // assertion していることを固定する。
+  assert.match(mutateSource, /await db\.batch\(batchItems/);
+  assert.match(mutateSource, /db\.run\(assertChanges\(perStatementExpectedChanges\[index\]/);
+  assert.match(mutateSource, /auditChunks\.flatMap/);
+  assert.match(mutateSource, /input\.postAuditStatements/);
+});
 
 test("computeChangedKeys: 差分キーを検出", () => {
   const keys = computeChangedKeys(

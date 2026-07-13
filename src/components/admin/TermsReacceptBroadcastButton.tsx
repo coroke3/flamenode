@@ -18,7 +18,7 @@ export function TermsReacceptBroadcastButton({
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [busy, startTransition] = React.useTransition();
-  const [cursor, setCursor] = React.useState(0);
+  const [cursor, setCursor] = React.useState("");
   const [confirmText, setConfirmText] = React.useState("");
   const [message, setMessage] = React.useState<string | null>(null);
   const [enqueuedTotal, setEnqueuedTotal] = React.useState(0);
@@ -98,7 +98,7 @@ export function TermsReacceptBroadcastButton({
               再同意通知 enqueue
             </h3>
             <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 12 }}>
-              対象は terms_reaccept_required=1 のユーザーです。1 回 50 件まで enqueue します。
+              対象は最新major版以降へ未同意のユーザーです。1回30件までenqueueします。
             </p>
 
             <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
@@ -114,15 +114,12 @@ export function TermsReacceptBroadcastButton({
             </label>
 
             <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
-              cursor
+              cursor (前回処理した最後の user_id。初回は空欄)
               <input
                 className="fn-input"
-                type="number"
-                min={0}
                 value={cursor}
-                onChange={(event) =>
-                  setCursor(Math.max(0, Number(event.currentTarget.value) || 0))
-                }
+                maxLength={128}
+                onChange={(event) => setCursor(event.currentTarget.value)}
                 disabled={busy}
               />
             </label>
@@ -182,7 +179,7 @@ export function TermsReacceptBroadcastButton({
                 onClick={onSubmit}
                 disabled={busy || confirmText !== "TERMS" || !content.trim()}
               >
-                {busy ? "送信中..." : "50 件 enqueue"}
+                {busy ? "送信中..." : "30 件 enqueue"}
               </button>
             </div>
           </div>

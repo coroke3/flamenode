@@ -15,6 +15,57 @@ export interface SpreadsheetTableDef {
   inSchema: boolean;
 }
 
+export type SpreadsheetColumnPolicy = {
+  enum?: readonly string[];
+  json?: boolean;
+  url?: boolean;
+  maxLength?: number;
+};
+
+export const SPREADSHEET_COLUMN_POLICIES: Record<string, SpreadsheetColumnPolicy> = {
+  "user.role": { maxLength: 32 },
+  "event_groups.icon_url": { url: true, maxLength: 2048 },
+  "event_groups.img_url": { url: true, maxLength: 2048 },
+  "event_groups.group_type": { maxLength: 32 },
+  "event_groups.visibility_status": { maxLength: 32 },
+  "event_group_events.relation_type": { maxLength: 32 },
+  "events.icon_url": { url: true, maxLength: 2048 },
+  "events.img_url": { url: true, maxLength: 2048 },
+  "events.review_settings": { json: true, maxLength: 100_000 },
+  "events.editable_fields": { json: true, maxLength: 100_000 },
+  "events.repeat_rules": { json: true, maxLength: 100_000 },
+  "events.parts_json": { json: true, maxLength: 100_000 },
+  "videos.music_reference_url": { url: true, maxLength: 2048 },
+  "x_user_icons.icon_url": { url: true, maxLength: 2048 },
+  "x_user_youtube_channels.youtube_channel_url": { url: true, maxLength: 2048 },
+  "system_settings.disabled_features_json": { json: true, maxLength: 100_000 },
+  "events.user_video_edit_permission_keys_json": { json: true, maxLength: 100_000 },
+  "announcements.body": { maxLength: 200_000 },
+  "terms_versions.body_markdown": { maxLength: 200_000 },
+};
+
+export const SPREADSHEET_DEFAULT_MAX_CELL_CHARS = 100_000;
+
+export function getSpreadsheetColumnPolicy(
+  table: string,
+  column: string,
+  enumValues?: readonly string[],
+): SpreadsheetColumnPolicy {
+  return {
+    ...SPREADSHEET_COLUMN_POLICIES[`${table}.${column}`],
+    ...(enumValues && enumValues.length > 0 ? { enum: enumValues } : {}),
+  };
+}
+
+export function primaryKeysFromColumns(
+  columns: Array<{ name: string; pk: number }>,
+): string[] {
+  return columns
+    .filter((column) => column.pk > 0)
+    .sort((a, b) => a.pk - b.pk)
+    .map((column) => column.name);
+}
+
 export type SpreadsheetTableOverride = {
   label?: string;
   group?: string;
@@ -54,7 +105,7 @@ export const SPREADSHEET_TABLE_OVERRIDES: Record<string, SpreadsheetTableOverrid
 
     event_groups: { label: "イベントグループ", group: "イベント", mode: "editable" },
     events: { label: "イベント", group: "イベント", mode: "editable" },
-    event_staff: { label: "イベントスタッフ", group: "イベント", mode: "editable" },
+    event_staff: { label: "イベントスタッフ", group: "イベント", mode: "readonly" },
     slots: { label: "枠", group: "イベント", mode: "editable" },
 
     videos: { label: "作品", group: "作品", mode: "editable" },
@@ -90,11 +141,6 @@ export const SPREADSHEET_TABLE_OVERRIDES: Record<string, SpreadsheetTableOverrid
     },
     audit_logs: { label: "監査ログ", group: "システム", mode: "readonly" },
     system_settings: { label: "システム設定", group: "システム", mode: "editable" },
-    cost_usage_snapshots: {
-      label: "コスト snapshot",
-      group: "システム",
-      mode: "readonly",
-    },
   };
 
 /** スプレッドシートから除外するシステムテーブル */
@@ -103,15 +149,6 @@ export const SPREADSHEET_TABLE_BLOCKLIST = new Set([
   "d1_migrations",
   "sqlite_sequence",
 ]);
-
-export const SPREADSHEET_DEPRECATED_READONLY_TABLES = [
-  "api" + "_endpoints",
-  "dashboard_metrics_cache",
-  "event_staff" + "_permissions",
-  "video" + "_comments",
-  "video" + "_stats",
-  "video" + "_softwares",
-] as const;
 
 /** セル編集禁止（表示はマスク） */
 export const SPREADSHEET_SECRET_COLUMNS = new Set([
@@ -125,56 +162,14 @@ export const SPREADSHEET_SECRET_COLUMNS = new Set([
   "password",
 ]);
 
-export const SPREADSHEET_READONLY_COLUMNS_BY_TABLE: Record<
-  string,
-  readonly string[]
-> = {
-  events: ["custom_questions", "is_active", "is_entry_open", "is_archived"],
-  system_settings: ["is_maintenance_mode", "cost_guard_mode"],
-  video_chapters: ["video_member_id", "marker_kind"],
-  videos: ["custom_answers", "stage_permission"],
-};
-
-export const SPREADSHEET_FORCED_INSERT_VALUES_BY_TABLE: Record<
-  string,
-  Record<string, string>
-> = {
-  video_chapters: { marker_kind: "chapter" },
-};
-
-export function applySpreadsheetForcedInsertValues(
-  table: string,
-  row: Record<string, string | null>,
-): Record<string, string | null> {
-  const forced = SPREADSHEET_FORCED_INSERT_VALUES_BY_TABLE[table];
-  if (!forced) return row;
-  return { ...row, ...forced };
-}
-
-export function isSpreadsheetForcedInsertColumn(
-  table: string,
-  column: string,
-): boolean {
-  return Object.prototype.hasOwnProperty.call(
-    SPREADSHEET_FORCED_INSERT_VALUES_BY_TABLE[table] ?? {},
-    column,
-  );
-}
-
-const DEFAULT_READONLY_TABLES = new Set([
-  "account",
-  "session",
-  "verificationToken",
-  ...SPREADSHEET_DEPRECATED_READONLY_TABLES,
-  "user_tos_consents",
-  "x_id_merge_reverts",
-  "notification_outbox",
-  "audit_logs",
-  "cost_usage_snapshots",
-]);
-
 const SECRET_COLUMN_PATTERN =
   /(?:^|_)(?:token|secret|password|credential)s?$/i;
+
+export function isSpreadsheetSecretColumn(column: string): boolean {
+  return (
+    SPREADSHEET_SECRET_COLUMNS.has(column) || SECRET_COLUMN_PATTERN.test(column)
+  );
+}
 
 export function isValidSqliteTableName(name: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
@@ -210,8 +205,7 @@ function inferGroup(table: string): string {
   if (
     table === "notification_outbox" ||
     table === "audit_logs" ||
-    table === "system_settings" ||
-    table === "cost_usage_snapshots"
+    table === "system_settings"
   ) {
     return "システム";
   }
@@ -220,13 +214,6 @@ function inferGroup(table: string): string {
 
 function inferLabel(table: string): string {
   return table.replace(/_/g, " ");
-}
-
-function inferMode(table: string): SpreadsheetMode {
-  if (DEFAULT_READONLY_TABLES.has(table)) return "readonly";
-  if (table.endsWith("_logs")) return "readonly";
-  if (table.endsWith("_outbox")) return "readonly";
-  return "editable";
 }
 
 export function resolveSpreadsheetTableDef(
@@ -238,7 +225,7 @@ export function resolveSpreadsheetTableDef(
     table,
     label: override?.label ?? inferLabel(table),
     group: override?.group ?? inferGroup(table),
-    mode: override?.mode ?? inferMode(table),
+    mode: override?.mode ?? "readonly",
     inSchema,
   };
 }
@@ -252,7 +239,13 @@ export function buildSpreadsheetTableDefs(
   const names = new Set<string>();
 
   for (const name of dbTableNames) {
-    if (!isSpreadsheetTableBlocklisted(name)) names.add(name);
+    if (
+      !isSpreadsheetTableBlocklisted(name) &&
+      schemaSet.has(name) &&
+      Object.prototype.hasOwnProperty.call(SPREADSHEET_TABLE_OVERRIDES, name)
+    ) {
+      names.add(name);
+    }
   }
 
   return [...names]
@@ -265,10 +258,6 @@ export function isSpreadsheetColumnEditable(
   column: string,
 ): boolean {
   if (def.mode === "readonly") return false;
-  if (SPREADSHEET_READONLY_COLUMNS_BY_TABLE[def.table]?.includes(column)) {
-    return false;
-  }
-  if (SPREADSHEET_SECRET_COLUMNS.has(column)) return false;
-  if (SECRET_COLUMN_PATTERN.test(column)) return false;
+  if (isSpreadsheetSecretColumn(column)) return false;
   return true;
 }

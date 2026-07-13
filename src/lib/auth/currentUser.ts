@@ -6,6 +6,10 @@ import { withDatabase } from "@/lib/cloudflare";
 import { users } from "@/lib/db/schema";
 import { normalizeXId } from "@/lib/utils/xid";
 import { resolveActiveXUserId } from "@/lib/auth/resolveActiveXId";
+import {
+  getLatestPublishedMajorTerms,
+  termsReacceptRequiredValue,
+} from "@/lib/terms/reaccept";
 
 export type CurrentUser = {
   id: string;
@@ -18,7 +22,7 @@ export type CurrentUser = {
   /** TOS 同意状態。1=同意済み, 0=未同意。fallback (DB 読めず) では 0 = 書込フェイルクローズ。 */
   is_tos_accepted: number;
   accepted_terms_version_id: string | null;
-  /** major 改訂時に立つ再同意フラグ。1 のときは writeGuard が tos_reaccept_required で書込を止める。 */
+  /** 最新major版以降の同意履歴から動的に導出する。保存flagは判定に使わない。 */
   terms_reaccept_required: number;
 };
 
@@ -58,6 +62,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   };
 
   const row = await withDatabase(async (db) => {
+    const requiredMajor = await getLatestPublishedMajorTerms(db);
     const res = await db
       .select({
         id: users.id,
@@ -69,7 +74,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
         active_x_user_id: users.active_x_user_id,
         is_tos_accepted: users.is_tos_accepted,
         accepted_terms_version_id: users.accepted_terms_version_id,
-        terms_reaccept_required: users.terms_reaccept_required,
+        terms_reaccept_required: termsReacceptRequiredValue(requiredMajor),
       })
       .from(users)
       .where(eq(users.id, userId))
@@ -102,6 +107,6 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
       resolvedActive ?? (normalizeXId(userRow.active_x_user_id) || null),
     is_tos_accepted: userRow.is_tos_accepted ?? 0,
     accepted_terms_version_id: userRow.accepted_terms_version_id ?? null,
-    terms_reaccept_required: userRow.terms_reaccept_required ?? 0,
+    terms_reaccept_required: userRow.terms_reaccept_required === 1 ? 1 : 0,
   };
 }

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { rejectUnauthorizedWorkerRequest } from "./workerAdminAuth.ts";
+import fs from "node:fs";
+import path from "node:path";
 
 const env = { WORKER_ADMIN_TOKEN: "test-admin-token" };
 
@@ -58,4 +60,15 @@ test("worker admin endpoint requires the configured bearer token and empty body"
     env,
   );
   assert.equal(accepted, null);
+});
+
+test("checked-in deployment templates contain exactly the three deployed workers", () => {
+  const root = path.resolve(import.meta.dirname, "../..");
+  const expected = ["content-jobs", "fast-jobs", "sync-jobs"];
+  const actual = fs
+    .readdirSync(path.join(root, "workers"), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(root, "workers", entry.name, "wrangler.toml")))
+    .map((entry) => entry.name)
+    .sort();
+  assert.deepEqual(actual, expected);
 });

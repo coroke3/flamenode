@@ -40,10 +40,13 @@ export async function validateCustomAnswersForEvents(
     }
   | { ok: false; message: string }
 > {
-  const customQuestionsByEvent = await fetchActiveCustomQuestionsForEvents(
-    db,
-    eventIds,
-  );
+  let customQuestionsByEvent: Awaited<ReturnType<typeof fetchActiveCustomQuestionsForEvents>>;
+  try {
+    customQuestionsByEvent = await fetchActiveCustomQuestionsForEvents(db, eventIds);
+  } catch (error) {
+    console.warn("[submissionValidation] custom question read rejected", error);
+    return { ok: false, message: "カスタム質問数が保存上限を超えています。" };
+  }
   const customAnswerRead = readCustomAnswersFromFormData(
     formData,
     customQuestionsByEvent,

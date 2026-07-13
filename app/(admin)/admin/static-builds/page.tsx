@@ -19,21 +19,12 @@ import {
   OPERATION_MODE_DESCRIPTIONS,
   OPERATION_MODE_LABELS,
 } from "@/lib/operationMode/types";
-import type { StaticRebuildTargetType } from "@/lib/staticRebuild/types";
+import { STATIC_REBUILD_TARGET_TYPES } from "@/lib/staticRebuild/types";
 
 export const metadata: Metadata = { title: "静的JSON再生成" };
 export const dynamic = "force-dynamic";
 
-const TARGET_TYPES: StaticRebuildTargetType[] = [
-  "top",
-  "events_index",
-  "event",
-  "video",
-  "user",
-  "list_recent",
-  "list_popular",
-  "search_index",
-];
+const TARGET_TYPES = STATIC_REBUILD_TARGET_TYPES;
 
 export default async function AdminStaticBuildsPage(): Promise<React.ReactElement> {
   const db = getDatabase();

@@ -15,14 +15,10 @@ import {
   calculatePayloadSize,
   BLOCKED_TABLES,
 } from "./snapshot";
-import { computeExpiresAt } from "./retention";
+import { computeExpiresAt, DEFAULT_AUDIT_LOG_SETTINGS } from "./retention";
 import { getAuditLogSettings } from "./settings";
 import { buildActorSnapshot } from "./actor";
 import { evaluateRestoreCapability } from "./capability";
-
-// ============================================================
-// writeAuditLog
-// ============================================================
 
 export type PreparedAuditLogEntry = {
   id: string;
@@ -47,44 +43,24 @@ export type PreparedAuditLogEntry = {
   created_at: number;
 };
 
-/**
- * 監査 INSERT 用の完全行スナップショットを準備する。
- *
- * 実際の INSERT はこの関数の呼び出し元が D1 batch に含められるよう分離している。
- * これにより本体 mutation と audit_logs INSERT を同じ all-or-nothing 単位にできる。
- */
-export async function prepareAuditLogEntry(
-  db: DB,
-  input: WriteAuditLogInput,
-): Promise<PreparedAuditLogEntry | null> {
-  if (BLOCKED_TABLES.has(input.table_name)) return null;
+const EMPTY_ACTOR_JSON = JSON.stringify({
+  discord_id: null,
+  discord_name: null,
+  x_user_id: null,
+  x_name: null,
+  icon_url: null,
+});
 
-  const operation: AuditOperation = input.operation;
+function buildPreparedAuditLogEntry(
+  input: WriteAuditLogInput,
+  settings: typeof DEFAULT_AUDIT_LOG_SETTINGS,
+  actorJson: string,
+): PreparedAuditLogEntry | null {
+  if (BLOCKED_TABLES.has(input.table_name)) return null;
 
   const retentionClass: RetentionClass = input.retention_class ?? "normal";
   const restoreStrategy: RestoreStrategy =
     input.restore_strategy ?? RestoreStrategy.none;
-
-  let settings;
-  try {
-    settings = await getAuditLogSettings(db);
-  } catch (error) {
-    if (input.strict) throw error;
-    const { DEFAULT_AUDIT_LOG_SETTINGS } = await import("./retention");
-    settings = DEFAULT_AUDIT_LOG_SETTINGS;
-  }
-
-  // アクタースナップショット
-  let actorJson: string | null = null;
-  try {
-    const actor = await buildActorSnapshot(db, input.actor_user_id);
-    actorJson = JSON.stringify(actor);
-  } catch {
-    actorJson = JSON.stringify({ discord_id: null, discord_name: null, x_user_id: null, x_name: null, icon_url: null });
-  }
-
-  // 復元用スナップショットでは任意切り詰めを行わない。上限超過は
-  // payload_size_bytes と restore capability で明示的に not_restorable にする。
   const sanitizedBefore = sanitizeForAudit(
     input.before ?? null,
     Number.MAX_SAFE_INTEGER,
@@ -93,25 +69,17 @@ export async function prepareAuditLogEntry(
     input.after ?? null,
     Number.MAX_SAFE_INTEGER,
   );
-
   const beforeJson = sanitizedBefore ? JSON.stringify(sanitizedBefore) : null;
   const afterJson = sanitizedAfter ? JSON.stringify(sanitizedAfter) : null;
-
-  // 変更キー・逆パッチ
   const changedKeys = computeChangedKeys(sanitizedBefore, sanitizedAfter);
   const inversePatch = buildInversePatch(sanitizedBefore, sanitizedAfter);
-
-  const changedKeysJson = changedKeys.length > 0 ? JSON.stringify(changedKeys) : null;
-  const inversePatchJson = inversePatch ? JSON.stringify(inversePatch) : null;
-
-  // ペイロードサイズチェック
   const payloadSize = calculatePayloadSize(beforeJson, afterJson);
   const payloadExceeded = payloadSize > settings.max_payload_bytes;
-
-  // ペイロード超過時は before/after を null に
+  const changedKeysJson = changedKeys.length > 0 ? JSON.stringify(changedKeys) : null;
+  const inversePatchJson =
+    payloadExceeded || !inversePatch ? null : JSON.stringify(inversePatch);
   const finalBeforeJson = payloadExceeded ? null : beforeJson;
   const finalAfterJson = payloadExceeded ? null : afterJson;
-
   const capability = evaluateRestoreCapability({
     tableName: input.table_name,
     strategy: restoreStrategy,
@@ -119,16 +87,13 @@ export async function prepareAuditLogEntry(
     after: payloadExceeded ? null : sanitizedAfter,
     payloadExceeded,
   });
-
   const now = Math.floor(Date.now() / 1000);
-  const expiresAt = computeExpiresAt(now, retentionClass, settings);
-  const id = generateId("audit");
 
   return {
-    id,
+    id: generateId("audit"),
     table_name: input.table_name,
     target_id: input.target_id,
-    operation,
+    operation: input.operation,
     before_json: finalBeforeJson,
     after_json: finalAfterJson,
     changed_keys_json: changedKeysJson,
@@ -147,14 +112,57 @@ export async function prepareAuditLogEntry(
       ? null
       : capability.message,
     payload_size_bytes: payloadSize,
-    expires_at: expiresAt,
+    expires_at: computeExpiresAt(now, retentionClass, settings),
     created_at: now,
   };
 }
 
-/**
- * 単独の監査記録用。重要 mutation は `mutateWithAudit` を通して D1 batch に含める。
- */
+/** Prepare audit entries with one settings query and one actor query per unique actor. */
+export async function prepareAuditLogEntries(
+  db: DB,
+  inputs: readonly WriteAuditLogInput[],
+): Promise<(PreparedAuditLogEntry | null)[]> {
+  const activeInputs = inputs.filter((input) => !BLOCKED_TABLES.has(input.table_name));
+  if (activeInputs.length === 0) return inputs.map(() => null);
+
+  let settings = DEFAULT_AUDIT_LOG_SETTINGS;
+  try {
+    settings = await getAuditLogSettings(db);
+  } catch (error) {
+    if (inputs.some((input) => input.strict)) throw error;
+  }
+
+  const actorJsonById = new Map<string, string>();
+  for (const actorUserId of new Set(activeInputs.map((input) => input.actor_user_id))) {
+    try {
+      actorJsonById.set(
+        actorUserId,
+        JSON.stringify(await buildActorSnapshot(db, actorUserId)),
+      );
+    } catch (error) {
+      if (inputs.some((input) => input.strict && input.actor_user_id === actorUserId)) {
+        throw error;
+      }
+      actorJsonById.set(actorUserId, EMPTY_ACTOR_JSON);
+    }
+  }
+
+  return inputs.map((input) =>
+    buildPreparedAuditLogEntry(
+      input,
+      settings,
+      actorJsonById.get(input.actor_user_id) ?? EMPTY_ACTOR_JSON,
+    ),
+  );
+}
+
+export async function prepareAuditLogEntry(
+  db: DB,
+  input: WriteAuditLogInput,
+): Promise<PreparedAuditLogEntry | null> {
+  return (await prepareAuditLogEntries(db, [input]))[0] ?? null;
+}
+
 export async function writeAuditLog(
   db: DB,
   input: WriteAuditLogInput,

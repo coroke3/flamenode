@@ -1,14 +1,18 @@
 import { assertNoForbiddenPublicKeys } from "./sanitize.ts";
 import {
   cacheControlForFreshness,
-  enrichEventRowForStaticJson,
   resolveEventFreshness,
 } from "./freshness.ts";
 
 type Env = { DB: D1Database; R2: R2Bucket; KV: KVNamespace };
+type ArtifactTarget = { targetType: string; targetId: string; sourceUpdatedAt?: number | null };
+type ArtifactRow = { object_key: string };
+const STATIC_ARTIFACT_SCHEMA_VERSION = 1;
 
 const EVENT_INDEX_COLUMNS = `
   id, title, explanation, icon_url, img_url, accent_color,
+  event_type, slot_type, slot_visibility_mode,
+  max_slots_per_video, max_consecutive_slots_per_entry,
   start_time, end_time, entry_start_time, entry_end_time,
   visibility_status, created_at
 `;
@@ -48,6 +52,20 @@ export async function rebuildTarget(
     default:
       throw new Error(`Unknown target_type: ${targetType}`);
   }
+  if (["top", "list_recent", "list_popular", "events_index", "search_index"].includes(targetType)) {
+    const keys: Record<string, string> = {
+      top: "top.json",
+      list_recent: "list/recent.json",
+      list_popular: "list/popular.json",
+      events_index: "events/index.json",
+      search_index: "search-index-lite.json",
+    };
+    await reconcileTrackedArtifacts(
+      env,
+      { targetType, targetId: "global" },
+      [keys[targetType]],
+    );
+  }
 }
 
 async function putJson(
@@ -55,14 +73,96 @@ async function putJson(
   key: string,
   body: unknown,
   cacheControl: string,
+  target?: ArtifactTarget,
 ): Promise<void> {
   assertNoForbiddenPublicKeys(body);
-  await env.R2.put(key, JSON.stringify(body), {
+  const serialized = JSON.stringify(body);
+  await env.R2.put(key, serialized, {
     httpMetadata: {
       contentType: "application/json; charset=utf-8",
       cacheControl,
     },
   });
+  if (target) await recordArtifact(env, target, key, serialized);
+}
+
+async function recordArtifact(
+  env: Env,
+  target: ArtifactTarget,
+  objectKey: string,
+  body: string,
+): Promise<void> {
+  const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body));
+  const contentHash = Array.from(new Uint8Array(hashBuffer), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+  const now = Math.floor(Date.now() / 1000);
+  const id = `sta:${target.targetType}:${target.targetId}:${objectKey}`;
+  await env.DB.prepare(
+    `INSERT INTO static_artifacts
+       (id, target_type, target_id, object_key, content_hash, schema_version,
+        source_updated_at, generated_at, deleted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+     ON CONFLICT(target_type, target_id, object_key) DO UPDATE SET
+       content_hash = excluded.content_hash,
+       schema_version = excluded.schema_version,
+       source_updated_at = excluded.source_updated_at,
+       generated_at = excluded.generated_at,
+       deleted_at = NULL`,
+  ).bind(
+    id,
+    target.targetType,
+    target.targetId,
+    objectKey,
+    contentHash,
+    STATIC_ARTIFACT_SCHEMA_VERSION,
+    target.sourceUpdatedAt ?? null,
+    now,
+  ).run();
+}
+
+export async function removeTrackedArtifacts(
+  env: Env,
+  targetType: string,
+  targetId: string,
+  limit = 20,
+): Promise<number> {
+  const rows = await env.DB.prepare(
+    `SELECT object_key FROM static_artifacts
+     WHERE target_type = ? AND target_id = ? AND deleted_at IS NULL
+     ORDER BY generated_at ASC LIMIT ?`,
+  ).bind(targetType, targetId, limit).all<ArtifactRow>();
+  const now = Math.floor(Date.now() / 1000);
+  for (const row of rows.results ?? []) {
+    await env.R2.delete(row.object_key);
+    await env.DB.prepare(
+      `UPDATE static_artifacts SET deleted_at = ?
+       WHERE target_type = ? AND target_id = ? AND object_key = ? AND deleted_at IS NULL`,
+    ).bind(now, targetType, targetId, row.object_key).run();
+  }
+  return rows.results?.length ?? 0;
+}
+
+async function reconcileTrackedArtifacts(
+  env: Env,
+  target: ArtifactTarget,
+  liveKeys: readonly string[],
+  limit = 20,
+): Promise<void> {
+  const rows = await env.DB.prepare(
+    `SELECT object_key FROM static_artifacts
+     WHERE target_type = ? AND target_id = ? AND deleted_at IS NULL
+       AND object_key NOT IN (${liveKeys.length ? liveKeys.map(() => "?").join(",") : "NULL"})
+     ORDER BY generated_at ASC LIMIT ?`,
+  ).bind(target.targetType, target.targetId, ...liveKeys, limit).all<ArtifactRow>();
+  const now = Math.floor(Date.now() / 1000);
+  for (const row of rows.results ?? []) {
+    await env.R2.delete(row.object_key);
+    await env.DB.prepare(
+      `UPDATE static_artifacts SET deleted_at = ?
+       WHERE target_type = ? AND target_id = ? AND object_key = ? AND deleted_at IS NULL`,
+    ).bind(now, target.targetType, target.targetId, row.object_key).run();
+  }
 }
 
 async function rebuildTop(env: Env): Promise<void> {
@@ -220,12 +320,8 @@ async function rebuildTop(env: Env): Promise<void> {
     ).first<{ c?: number }>(),
   ]);
 
-  const activeEventItems = (activeEvents.results ?? []).map((row) =>
-    enrichEventRowForStaticJson(row, now),
-  );
-  const latestEventItems = (latestEvents.results ?? []).map((row) =>
-    enrichEventRowForStaticJson(row, now),
-  );
+  const activeEventItems = activeEvents.results ?? [];
+  const latestEventItems = latestEvents.results ?? [];
   const payload = {
     generated_at: now,
     recommended: recommended.results ?? [],
@@ -242,7 +338,7 @@ async function rebuildTop(env: Env): Promise<void> {
       creators: Number(creatorCount?.c ?? creators.results?.length ?? 0),
     },
   };
-  await putJson(env, "top.json", payload, "public, max-age=60, stale-while-revalidate=300");
+  await putJson(env, "top.json", payload, "public, max-age=60, stale-while-revalidate=300", { targetType: "top", targetId: "global" });
   await env.KV.put(
     "static:top",
     JSON.stringify({
@@ -277,7 +373,7 @@ async function rebuildListRecent(env: Env): Promise<void> {
     generated_at: Math.floor(Date.now() / 1000),
     total: Number(totalRow?.c ?? rows.results?.length ?? 0),
     items: rows.results ?? [],
-  }, "public, max-age=120, stale-while-revalidate=600");
+  }, "public, max-age=120, stale-while-revalidate=600", { targetType: "list_recent", targetId: "global" });
 }
 
 async function rebuildListPopular(env: Env): Promise<void> {
@@ -292,7 +388,7 @@ async function rebuildListPopular(env: Env): Promise<void> {
   await putJson(env, "list/popular.json", {
     generated_at: Math.floor(Date.now() / 1000),
     items: rows.results ?? [],
-  }, "public, max-age=300, stale-while-revalidate=1800");
+  }, "public, max-age=300, stale-while-revalidate=1800", { targetType: "list_popular", targetId: "global" });
 }
 
 async function rebuildEventsIndex(env: Env): Promise<void> {
@@ -308,11 +404,9 @@ async function rebuildEventsIndex(env: Env): Promise<void> {
   ]);
   await putJson(env, "events/index.json", {
     generated_at: Math.floor(Date.now() / 1000),
-    items: (rows.results ?? []).map((row) =>
-      enrichEventRowForStaticJson(row as Record<string, unknown>),
-    ),
+    items: rows.results ?? [],
     group_sections: groupSections,
-  }, "public, max-age=300, stale-while-revalidate=1800");
+  }, "public, max-age=300, stale-while-revalidate=1800", { targetType: "events_index", targetId: "global" });
 }
 
 async function rebuildEventGroupSections(env: Env): Promise<unknown[]> {
@@ -414,7 +508,7 @@ async function rebuildSearchIndexLite(env: Env): Promise<void> {
     generated_at: Math.floor(Date.now() / 1000),
     videos: videos.results ?? [],
     users: users.results ?? [],
-  }, "public, max-age=600, stale-while-revalidate=3600");
+  }, "public, max-age=600, stale-while-revalidate=3600", { targetType: "search_index", targetId: "global" });
 }
 
 async function rebuildEvent(env: Env, eventId: string): Promise<void> {
@@ -422,13 +516,21 @@ async function rebuildEvent(env: Env, eventId: string): Promise<void> {
     await env.DB.prepare(
       `SELECT id, title, explanation, icon_url, img_url, accent_color,
               start_time, end_time, entry_start_time, entry_end_time,
-              visibility_status
+              visibility_status, updated_at
        FROM events WHERE id = ? LIMIT 1`,
     )
       .bind(eventId)
       .first()
   ) as Record<string, unknown> | null;
-  if (!ev) throw new Error(`Event not found: ${eventId}`);
+  if (!ev) {
+    await removeTrackedArtifacts(env, "event", eventId);
+    return;
+  }
+  const visibility = String(ev.visibility_status ?? "");
+  if (visibility !== "public" && visibility !== "archived") {
+    await removeTrackedArtifacts(env, "event", eventId);
+    return;
+  }
 
   const now = Math.floor(Date.now() / 1000);
   const freshness = resolveEventFreshness(
@@ -439,7 +541,7 @@ async function rebuildEvent(env: Env, eventId: string): Promise<void> {
     },
     now,
   );
-  const eventPayload = enrichEventRowForStaticJson(ev, now);
+  const eventPayload = ev;
 
   const staff = await env.DB.prepare(
     `SELECT es.role, es.display_name, es.public_role_label,
@@ -484,7 +586,9 @@ async function rebuildEvent(env: Env, eventId: string): Promise<void> {
     `events/${eventId}.json`,
     payload,
     cacheControlForFreshness(freshness),
+    { targetType: "event", targetId: eventId, sourceUpdatedAt: Number(ev.updated_at ?? 0) || null },
   );
+  await reconcileTrackedArtifacts(env, { targetType: "event", targetId: eventId }, [`events/${eventId}.json`]);
 }
 
 async function rebuildVideo(env: Env, videoId: string): Promise<void> {
@@ -492,7 +596,7 @@ async function rebuildVideo(env: Env, videoId: string): Promise<void> {
     `SELECT id, title, youtube_video_id, creator_display_name, creator_x_user_id,
             creator_icon_url, music, credit, intro_comment, highlights,
             production_story, closing_comment, visibility_status, scheduled_time,
-            primary_event_id, collaboration_type, part
+            primary_event_id, collaboration_type, part, updated_at
      FROM videos
      WHERE id = ? OR youtube_video_id = ?
      ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END
@@ -500,9 +604,22 @@ async function rebuildVideo(env: Env, videoId: string): Promise<void> {
   )
     .bind(videoId, videoId, videoId)
     .first();
-  if (!row) throw new Error(`Video not found: ${videoId}`);
+  if (!row) {
+    await removeTrackedArtifacts(env, "video", videoId);
+    return;
+  }
   const internalVideoId = String((row as { id: unknown }).id ?? "").trim();
   if (!internalVideoId) throw new Error(`Video id missing: ${videoId}`);
+  const videoTarget = {
+    targetType: "video",
+    targetId: internalVideoId,
+    sourceUpdatedAt: Number((row as { updated_at?: unknown }).updated_at ?? 0) || null,
+  };
+  const videoVisibility = String((row as { visibility_status?: unknown }).visibility_status ?? "");
+  if (videoVisibility !== "public" && videoVisibility !== "limited") {
+    await removeTrackedArtifacts(env, "video", internalVideoId);
+    return;
+  }
 
   const events = await env.DB.prepare(
     `SELECT event_id FROM video_events WHERE video_id = ?`,
@@ -530,6 +647,7 @@ async function rebuildVideo(env: Env, videoId: string): Promise<void> {
     `videos/${internalVideoId}.json`,
     payload,
     "public, max-age=300, stale-while-revalidate=1800",
+    videoTarget,
   );
   const youtubeVideoId = String(
     (row as { youtube_video_id?: unknown }).youtube_video_id ?? "",
@@ -540,19 +658,27 @@ async function rebuildVideo(env: Env, videoId: string): Promise<void> {
       `videos/${youtubeVideoId}.json`,
       payload,
       "public, max-age=300, stale-while-revalidate=1800",
+      videoTarget,
     );
   }
+  await reconcileTrackedArtifacts(env, videoTarget, [
+    `videos/${internalVideoId}.json`,
+    ...(youtubeVideoId && youtubeVideoId !== internalVideoId ? [`videos/${youtubeVideoId}.json`] : []),
+  ]);
 }
 
 async function rebuildUser(env: Env, xId: string): Promise<void> {
   const user = await env.DB.prepare(
     `SELECT id, x_name, icon_url, profile_text, portfolio_contact,
-            youtube_channel_url, other_social_links
+            youtube_channel_url, other_social_links, updated_at
      FROM x_users WHERE id = ? AND approval_status = 'approved' LIMIT 1`,
   )
     .bind(xId)
     .first();
-  if (!user) throw new Error(`User not found: ${xId}`);
+  if (!user) {
+    await removeTrackedArtifacts(env, "user", xId);
+    return;
+  }
 
   const [recentVideos, totalRow] = await Promise.all([
     env.DB.prepare(
@@ -586,5 +712,6 @@ async function rebuildUser(env: Env, xId: string): Promise<void> {
     user,
     total_works: Number(totalRow?.c ?? recentVideos.results?.length ?? 0),
     recent_videos: recentVideos.results ?? [],
-  }, "public, max-age=600, stale-while-revalidate=3600");
+  }, "public, max-age=600, stale-while-revalidate=3600", { targetType: "user", targetId: xId, sourceUpdatedAt: Number((user as { updated_at?: unknown }).updated_at ?? 0) || null });
+  await reconcileTrackedArtifacts(env, { targetType: "user", targetId: xId }, [`users/${xId}.json`]);
 }

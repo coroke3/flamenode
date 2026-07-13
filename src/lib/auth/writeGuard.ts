@@ -8,6 +8,7 @@ import {
   evaluateCostGuard,
   type CostGuardFeatureKey,
 } from "./costGuardFeatures";
+import { evaluateWriteIdentity } from "./writeGuardCore";
 
 /**
  * 全書き込み入口で通す共通ガード。
@@ -18,8 +19,8 @@ import {
  *   3. BAN (banned)              ← admin もブロック
  *   4. TOS 未同意 (tos_required) ← admin もブロック
  *   5. TOS 再同意要求 (tos_reaccept_required) ← admin もブロック
- *   6. CostGuard mode (maintenance_mode) ← admin は bypass
- *   7. CostGuard feature (cost_guard_blocked) ← admin は bypass
+ *   6. CostGuard mode (maintenance_mode) ← admin もブロック
+ *   7. CostGuard feature (cost_guard_blocked) ← admin もブロック
  *   8. Active X 未設定 (active_x_required)
  *   9. Active X rejected (active_x_rejected)
  *  10. Active X 未承認 (active_x_not_approved)
@@ -33,8 +34,9 @@ export type WriteGuardOptions = {
   requireActiveXId?: boolean;
   /** active_x_user_id が approved であることを要求する (requireActiveXId も真として扱う)。 */
   requireApprovedActiveXId?: boolean;
-  /** CostGuard 上の機能キー。指定すると mode と disabled_features_json を確認する。 */
-  feature?: CostGuardFeatureKey;
+  /** 必須のCostGuard機能キー。mode と disabled_features_json を確認する。 */
+  feature: CostGuardFeatureKey;
+  requiredRole?: "admin";
 };
 
 export type WriteGuardDenyReason =
@@ -45,6 +47,7 @@ export type WriteGuardDenyReason =
   | "tos_reaccept_required"
   | "maintenance_mode"
   | "cost_guard_blocked"
+  | "forbidden"
   | "active_x_required"
   | "active_x_rejected"
   | "active_x_not_approved";
@@ -76,6 +79,7 @@ const MESSAGES: Record<WriteGuardDenyReason, string> = {
     "現在、書き込みを一時停止しています (コストガード)。しばらく時間をおいてからお試しください。",
   cost_guard_blocked:
     "現在、この機能の書き込みは一時的に無効化されています。",
+  forbidden: "この操作を実行する権限がありません。",
   active_x_required: "X ID を選択してから操作してください。",
   active_x_rejected:
     "選択中の X ID は却下されています。別の X ID を選択してください。",
@@ -89,7 +93,7 @@ function deny(reason: WriteGuardDenyReason): WriteGuardFailure {
 export { getOnboardingHrefForWriteGuardReason } from "./onboardingUrls";
 
 export async function writeGuard(
-  options: WriteGuardOptions = {},
+  options: WriteGuardOptions,
 ): Promise<WriteGuardResult> {
   const user = await getCurrentUser();
   if (!user) return deny("unauthenticated");
@@ -97,21 +101,18 @@ export async function writeGuard(
   const db = getDatabase();
   if (!db) return deny("db_unavailable");
 
-  // BAN / TOS / 再同意は admin もブロック
-  if (user.is_banned === 1) return deny("banned");
-  if (user.is_tos_accepted !== 1) return deny("tos_required");
-  if (user.terms_reaccept_required === 1) {
-    return deny("tos_reaccept_required");
-  }
+  const identityDeny = evaluateWriteIdentity(user, options.requiredRole);
+  if (identityDeny) return deny(identityDeny);
 
-  // CostGuard (admin は bypass)
-  if (options.feature && user.role !== "admin") {
+  try {
     const cg = await evaluateCostGuard(db, options.feature);
     if (cg.blocked) {
       return deny(
         cg.reason === "mode" ? "maintenance_mode" : "cost_guard_blocked",
       );
     }
+  } catch {
+    return deny("cost_guard_blocked");
   }
 
   const needActive =
@@ -144,4 +145,29 @@ export async function writeGuard(
   const approvedXIds = await getApprovedXIds(db, user.id);
 
   return { ok: true, user, activeXId, approvedXIds };
+}
+
+export async function requireAdminWrite(
+  feature: CostGuardFeatureKey,
+): Promise<WriteGuardResult> {
+  return writeGuard({ feature, requiredRole: "admin" });
+}
+
+/**
+ * CostGuardの手動mode/override制御専用。通常mutationから呼んではならない。
+ * mode/feature判定だけを意図的に省き、認証・DB・BAN・TOS・adminはfail-closed。
+ */
+export async function requireCostGuardControlAdmin(): Promise<WriteGuardResult> {
+  const user = await getCurrentUser();
+  if (!user) return deny("unauthenticated");
+  const db = getDatabase();
+  if (!db) return deny("db_unavailable");
+  const identityDeny = evaluateWriteIdentity(user, "admin");
+  if (identityDeny) return deny(identityDeny);
+  return {
+    ok: true,
+    user,
+    activeXId: null,
+    approvedXIds: [],
+  };
 }
