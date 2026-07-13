@@ -1,10 +1,13 @@
 import * as React from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import styles from "./page.module.css";
 import { withDatabase } from "@/lib/cloudflare";
-import { events as eventsTable } from "@/lib/db/schema";
+import {
+  eventStaff,
+  events as eventsTable,
+} from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import {
@@ -41,7 +44,12 @@ interface SearchParams {
 }
 
 type EventRow = typeof eventsTable.$inferSelect;
-type EventListEvent = EventRow | StaticEventIndexEvent;
+type EventListEvent = (
+  | EventRow
+  | StaticEventIndexEvent
+) & {
+  public_operator_names?: string[];
+};
 type EventGroupSectionView = Omit<EventListGroupSection, "events"> &
   Omit<StaticEventGroupSection, "events"> & {
     events: EventListEvent[];
@@ -97,11 +105,17 @@ function textIncludes(value: string | null | undefined, query: string): boolean 
   return !!value && value.toLocaleLowerCase().includes(query);
 }
 
-function matchesEventQuery(event: EventListEvent, query: string): boolean {
+function matchesEventQuery(
+  event: EventListEvent,
+  query: string,
+): boolean {
   return (
     !query ||
     textIncludes(event.title, query) ||
-    textIncludes(event.explanation, query)
+    textIncludes(event.explanation, query) ||
+    event.public_operator_names?.some((name) =>
+      textIncludes(name, query),
+    ) === true
   );
 }
 
@@ -179,28 +193,90 @@ export default async function EventListPage({
 
   const source: EventListSource = canFallbackToDatabase(staticLoaded.strategy)
     ? ((await withDatabase(async (db): Promise<EventListSource> => {
-        const [eventRows, groups] = await Promise.all([
-          db
-            .select()
-            .from(eventsTable)
-            .where(publicListableEventWhere())
-            .orderBy(desc(eventsTable.start_time)),
-          fetchEventListGroupSections(db),
-        ]);
+        const [eventRows, groups, publicStaffRows] =
+          await Promise.all([
+            db
+              .select()
+              .from(eventsTable)
+              .where(publicListableEventWhere())
+              .orderBy(desc(eventsTable.start_time)),
+            fetchEventListGroupSections(db),
+            db
+              .select({
+                event_id: eventStaff.event_id,
+                display_name: eventStaff.display_name,
+              })
+              .from(eventStaff)
+              .where(eq(eventStaff.is_public, 1)),
+          ]);
+
+        const operatorNamesByEvent = new Map<
+          string,
+          string[]
+        >();
+
+        for (const staff of publicStaffRows) {
+          const displayName = staff.display_name.trim();
+          if (!displayName) continue;
+
+          const names =
+            operatorNamesByEvent.get(staff.event_id) ?? [];
+          if (!names.includes(displayName)) {
+            names.push(displayName);
+          }
+          operatorNamesByEvent.set(staff.event_id, names);
+        }
+
+        const attachOperatorNames = <
+          T extends EventListEvent,
+        >(
+          event: T,
+        ): T =>
+          ({
+            ...event,
+            public_operator_names:
+              operatorNamesByEvent.get(event.id) ?? [],
+          }) as T;
+
         return {
-          events: eventRows,
-          groupSections: groups as EventGroupSectionView[],
+          events: eventRows.map(attachOperatorNames),
+          groupSections: groups.map((group) => ({
+            ...group,
+            events: group.events.map(attachOperatorNames),
+          })) as EventGroupSectionView[],
         };
       })) ?? staticSource ?? emptySource)
     : (staticSource ?? emptySource);
   const { events, groupSections } = source;
+
+  const matchingGroupEventIds = new Set(
+    query
+      ? groupSections
+          .filter(
+            (group) =>
+              textIncludes(group.name, query) ||
+              textIncludes(group.description, query),
+          )
+          .flatMap((group) =>
+            group.events.map((event) => event.id),
+          )
+      : [],
+  );
+
+  const hasActiveFilter =
+    Boolean(q) ||
+    status !== "all" ||
+    sort !== "priority";
 
   const filteredEvents = sortEvents(
     events.filter(
       (event) =>
         !isPointEvent(event) &&
         matchesEventStatus(event, status, now) &&
-        matchesEventQuery(event, query),
+        (
+          matchesEventQuery(event, query) ||
+          matchingGroupEventIds.has(event.id)
+        ),
     ),
     sort,
     now,
@@ -232,7 +308,9 @@ export default async function EventListPage({
 
   const hasGrouped = visibleGroupSections.length > 0;
   const hasUngrouped = ungroupedEvents.length > 0;
-  const isEmpty = !hasGrouped && !hasUngrouped;
+  const isEmpty = hasActiveFilter
+    ? filteredEvents.length === 0
+    : !hasGrouped && !hasUngrouped;
 
   return (
     <div className="fn-public-container fn-page">
@@ -252,7 +330,7 @@ export default async function EventListPage({
             type="search"
             name="q"
             defaultValue={q}
-            placeholder="イベント名・説明を検索"
+            placeholder="イベント名・説明・公開運営者を検索"
             autoComplete="off"
           />
         </label>
@@ -306,57 +384,85 @@ export default async function EventListPage({
         </div>
       ) : (
         <>
-          {visibleGroupSections.map((group) => (
-            <EventGroupSection key={group.id} group={group} />
-          ))}
+          {hasActiveFilter ? (
+            <section className="fn-evlist-section">
+              <div className="fn-section-head">
+                <h2 className="fn-display fn-section-title">
+                  検索結果
+                </h2>
+                <span className="fn-mono fn-evlist-count">
+                  {String(filteredEvents.length).padStart(
+                    2,
+                    "0",
+                  )}
+                </span>
+              </div>
 
-          {hasUngrouped ? (
-            hasGrouped ? (
-              <section className="fn-evlist-section">
-                <div className="fn-section-head">
-                  <h2 className="fn-display fn-section-title">その他のイベント</h2>
-                  <span className="fn-mono fn-evlist-count">
-                    {String(ungroupedEvents.length).padStart(2, "0")}
-                  </span>
-                </div>
-                <div className="fn-evlist-grid">
-                  {ungroupedEvents.map((ev) => (
-                    <PublicEventCard
-                      key={ev.id}
-                      event={ev}
-                      category={categorizePublicEvent(ev)}
-                    />
-                  ))}
-                </div>
-              </section>
-            ) : (
-              EVENT_SECTIONS.map((section) => {
-                const items = ungroupedEvents.filter(
-                  (ev) => categorizePublicEvent(ev) === section.id,
-                );
-                if (items.length === 0) return null;
-                return (
-                  <section key={section.id} className="fn-evlist-section">
+              <div className="fn-evlist-grid">
+                {filteredEvents.map((event) => (
+                  <PublicEventCard
+                    key={event.id}
+                    event={event}
+                    category={categorizePublicEvent(event)}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : (
+            <>
+              {visibleGroupSections.map((group) => (
+                <EventGroupSection key={group.id} group={group} />
+              ))}
+
+              {hasUngrouped ? (
+                hasGrouped ? (
+                  <section className="fn-evlist-section">
                     <div className="fn-section-head">
-                      <h2 className="fn-display fn-section-title">{section.title}</h2>
+                      <h2 className="fn-display fn-section-title">その他のイベント</h2>
                       <span className="fn-mono fn-evlist-count">
-                        {String(items.length).padStart(2, "0")}
+                        {String(ungroupedEvents.length).padStart(2, "0")}
                       </span>
                     </div>
                     <div className="fn-evlist-grid">
-                      {items.map((ev) => (
+                      {ungroupedEvents.map((ev) => (
                         <PublicEventCard
                           key={ev.id}
                           event={ev}
-                          category={section.id}
+                          category={categorizePublicEvent(ev)}
                         />
                       ))}
                     </div>
                   </section>
-                );
-              })
-            )
-          ) : null}
+                ) : (
+                  EVENT_SECTIONS.map((section) => {
+                    const items = ungroupedEvents.filter(
+                      (ev) => categorizePublicEvent(ev) === section.id,
+                    );
+                    if (items.length === 0) return null;
+                    return (
+                      <section key={section.id} className="fn-evlist-section">
+                        <div className="fn-section-head">
+                          <h2 className="fn-display fn-section-title">{section.title}</h2>
+                          <span className="fn-mono fn-evlist-count">
+                            {String(items.length).padStart(2, "0")}
+                          </span>
+                        </div>
+                        <div className="fn-evlist-grid">
+                          {items.map((ev) => (
+                            <PublicEventCard
+                              key={ev.id}
+                              event={ev}
+                              category={section.id}
+                            />
+                          ))}
+                        </div>
+                      </section>
+                    );
+                  })
+                )
+              ) : null}
+            </>
+          )}
         </>
       )}
     </div>

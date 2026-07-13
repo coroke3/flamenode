@@ -10,6 +10,7 @@ export interface StaticEventIndexEvent {
   id: string;
   title: string;
   explanation: string | null;
+  public_operator_names: string[];
   icon_url: string | null;
   img_url: string | null;
   accent_color: string | null;
@@ -101,6 +102,9 @@ function normalizeEvent(value: unknown): StaticEventIndexEvent | null {
     id,
     title,
     explanation: normalizeNullableString(row.explanation),
+    public_operator_names: normalizeStringArray(
+      row.public_operator_names,
+    ),
     icon_url: normalizeNullableString(row.icon_url),
     img_url: normalizeNullableString(row.img_url),
     accent_color: normalizeNullableString(row.accent_color),
@@ -157,4 +161,19 @@ function normalizeUnix(value: unknown): number | null {
   const n = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(n)) return null;
   return Math.floor(n);
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+
+  return Array.from(
+    new Set(
+      value
+        .filter(
+          (item): item is string =>
+            typeof item === "string" && item.trim().length > 0,
+        )
+        .map((item) => item.trim()),
+    ),
+  );
 }

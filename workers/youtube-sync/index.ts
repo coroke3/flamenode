@@ -28,6 +28,157 @@ type YoutubeItem = {
 export const YOUTUBE_SYNC_BATCH_SIZE = 25;
 const CURSOR_KEY = "sync-jobs:youtube:last-video-id";
 
+export const YOUTUBE_SYNC_FETCH_TIMEOUT_MS = 8_000;
+export const YOUTUBE_SYNC_MAX_ATTEMPTS = 3;
+export const YOUTUBE_SYNC_MAX_RETRY_DELAY_MS = 15_000;
+
+type FetchLike = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>;
+
+const RETRYABLE_YOUTUBE_STATUSES = new Set([
+  408,
+  425,
+  429,
+  500,
+  502,
+  503,
+  504,
+]);
+
+export function isRetryableYoutubeStatus(
+  status: number,
+): boolean {
+  return RETRYABLE_YOUTUBE_STATUSES.has(status);
+}
+
+export function parseRetryAfterMs(
+  value: string | null,
+  now = Date.now(),
+): number | null {
+  if (!value) return null;
+
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(
+      seconds * 1_000,
+      YOUTUBE_SYNC_MAX_RETRY_DELAY_MS,
+    );
+  }
+
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return null;
+
+  return Math.min(
+    Math.max(0, timestamp - now),
+    YOUTUBE_SYNC_MAX_RETRY_DELAY_MS,
+  );
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) =>
+    setTimeout(resolve, ms),
+  );
+}
+
+async function fetchYoutubeItems(
+  url: string,
+  fetchImpl: FetchLike,
+): Promise<YoutubeItem[]> {
+  let lastError = "unknown";
+
+  for (
+    let attempt = 0;
+    attempt < YOUTUBE_SYNC_MAX_ATTEMPTS;
+    attempt += 1
+  ) {
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      YOUTUBE_SYNC_FETCH_TIMEOUT_MS,
+    );
+
+    let response: Response;
+
+    try {
+      response = await fetchImpl(url, {
+        headers: { accept: "application/json" },
+        signal: controller.signal,
+      });
+    } catch (error) {
+      clearTimeout(timeout);
+
+      const timeoutError =
+        error instanceof Error &&
+        error.name === "AbortError";
+
+      lastError = timeoutError
+        ? "transient:youtube_api_timeout"
+        : "transient:youtube_api_network_error";
+
+      if (
+        attempt + 1 >=
+        YOUTUBE_SYNC_MAX_ATTEMPTS
+      ) {
+        throw new Error(lastError);
+      }
+
+      await wait(
+        Math.min(
+          1_000 * 2 ** attempt,
+          YOUTUBE_SYNC_MAX_RETRY_DELAY_MS,
+        ),
+      );
+      continue;
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (response.ok) {
+      try {
+        const data = (await response.json()) as {
+          items?: YoutubeItem[];
+        };
+        return data.items ?? [];
+      } catch {
+        throw new Error(
+          "permanent:youtube_api_invalid_json",
+        );
+      }
+    }
+
+    const retryable = isRetryableYoutubeStatus(
+      response.status,
+    );
+
+    lastError = `${
+      retryable ? "transient" : "permanent"
+    }:youtube_api_http_${response.status}`;
+
+    if (
+      !retryable ||
+      attempt + 1 >= YOUTUBE_SYNC_MAX_ATTEMPTS
+    ) {
+      throw new Error(lastError);
+    }
+
+    const retryAfter = parseRetryAfterMs(
+      response.headers.get("retry-after"),
+    );
+
+    await wait(
+      retryAfter ??
+        Math.min(
+          1_000 * 2 ** attempt,
+          YOUTUBE_SYNC_MAX_RETRY_DELAY_MS,
+        ),
+    );
+  }
+
+  throw new Error(lastError);
+}
+
 export function normalizeYoutubeSyncCursor(value: string | null): string {
   if (!value) return "";
   try {
@@ -139,7 +290,10 @@ async function markSyncFailure(
 /**
  * 1回の実行で最大25件。APIまたは個別DB書込みの失敗は安全な状態で次回へ回す。
  */
-export async function syncBatch(env: Env): Promise<SyncBatchResult> {
+export async function syncBatch(
+  env: Env,
+  fetchImpl: FetchLike = fetch,
+): Promise<SyncBatchResult> {
   if (!env.YOUTUBE_API_KEY?.trim()) {
     return { processed: 0, failed: 0, skipped: 1 };
   }
@@ -157,21 +311,14 @@ export async function syncBatch(env: Env): Promise<SyncBatchResult> {
   url.searchParams.set("key", env.YOUTUBE_API_KEY);
   url.searchParams.set("part", "statistics,status,contentDetails");
   url.searchParams.set("id", rows.map((row) => row.youtube_video_id).join(","));
-  const response = await fetch(url.toString(), {
-    headers: { accept: "application/json" },
-  });
-  if (!response.ok) {
-    throw new Error(`YouTube API returned HTTP ${response.status}`);
-  }
+  const youtubeItems = await fetchYoutubeItems(
+    url.toString(),
+    fetchImpl,
+  );
 
-  let data: { items?: YoutubeItem[] };
-  try {
-    data = (await response.json()) as { items?: YoutubeItem[] };
-  } catch {
-    throw new Error("YouTube API response was invalid");
-  }
-
-  const items = new Map((data.items ?? []).map((item) => [item.id, item]));
+  const items = new Map(
+    youtubeItems.map((item) => [item.id, item]),
+  );
   const now = Math.floor(Date.now() / 1000);
   let processed = 0;
   let failed = 0;
@@ -180,7 +327,12 @@ export async function syncBatch(env: Env): Promise<SyncBatchResult> {
     const item = items.get(row.youtube_video_id);
     try {
       if (!item) {
-        await markSyncFailure(env, row, "YouTube response did not include the video", now);
+        await markSyncFailure(
+          env,
+          row,
+          "permanent:youtube_video_missing_or_private",
+          now,
+        );
         failed += 1;
         continue;
       }

@@ -16,18 +16,100 @@ const WRANGLER_FILES = [
   "workers/sync-jobs/wrangler.toml",
 ];
 
-function loadIds() {
-  if (process.env.CF_IDS_JSON?.trim()) {
-    return JSON.parse(process.env.CF_IDS_JSON);
+const ID_KEYS = [
+  "d1_database_id",
+  "d1_database_name",
+  "kv_namespace_id",
+  "kv_preview_id",
+  "r2_bucket_name",
+];
+
+function parseIds(label, raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed)
+    ) {
+      throw new Error("JSON objectではありません");
+    }
+    return parsed;
+  } catch (error) {
+    console.error(
+      `[cf:sync-ids] ${label}のJSONが不正です: ${
+        error instanceof Error
+          ? error.message
+          : String(error)
+      }`,
+    );
+    process.exit(1);
   }
-  if (fs.existsSync(IDS_PATH)) {
-    return JSON.parse(fs.readFileSync(IDS_PATH, "utf8"));
-  }
+}
+
+function normalizedIdValue(value) {
+  return typeof value === "string"
+    ? value.trim()
+    : "";
+}
+
+function assertIdsDoNotConflict(envIds, fileIds) {
+  const conflicts = ID_KEYS.filter((key) => {
+    const envValue = normalizedIdValue(envIds[key]);
+    const fileValue = normalizedIdValue(fileIds[key]);
+
+    return (
+      envValue &&
+      fileValue &&
+      envValue !== fileValue
+    );
+  });
+
+  if (conflicts.length === 0) return;
+
   console.error(
-    "[cf:sync-ids] cloudflare/ids.json が見つかりません。\n" +
-      "  cp cloudflare/ids.example.json cloudflare/ids.json\n" +
-      "  を実行し、wrangler で作成した ID を埋めてから再実行してください。\n" +
-      "  CI では環境変数 CF_IDS_JSON に JSON 文字列を渡せます。",
+    [
+      "[cf:sync-ids] CF_IDS_JSONとcloudflare/ids.jsonが一致しません。",
+      ...conflicts.map(
+        (key) =>
+          `  - ${key}: environment=${JSON.stringify(
+            envIds[key],
+          )}, file=${JSON.stringify(fileIds[key])}`,
+      ),
+      "誤ったCloudflareリソースへのデプロイを防ぐため停止しました。",
+    ].join("\n"),
+  );
+  process.exit(1);
+}
+
+function loadIds() {
+  const envRaw =
+    process.env.CF_IDS_JSON?.trim() ?? "";
+  const fileExists = fs.existsSync(IDS_PATH);
+
+  const envIds = envRaw
+    ? parseIds("CF_IDS_JSON", envRaw)
+    : null;
+  const fileIds = fileExists
+    ? parseIds(
+        "cloudflare/ids.json",
+        fs.readFileSync(IDS_PATH, "utf8"),
+      )
+    : null;
+
+  if (envIds && fileIds) {
+    assertIdsDoNotConflict(envIds, fileIds);
+    return envIds;
+  }
+
+  if (envIds) return envIds;
+  if (fileIds) return fileIds;
+
+  console.error(
+    "[cf:sync-ids] Cloudflare ID設定がありません。\n" +
+      "  ローカル: cloudflare/ids.json\n" +
+      "  CI: CF_IDS_JSON\n" +
+      "  のどちらかを設定してください。",
   );
   process.exit(1);
 }

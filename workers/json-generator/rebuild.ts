@@ -395,21 +395,36 @@ async function rebuildListPopular(env: Env): Promise<void> {
 }
 
 async function rebuildEventsIndex(env: Env): Promise<void> {
-  const [rows, groupSections] = await Promise.all([
+  const [rowsResult, groupSections] = await Promise.all([
     env.DB.prepare(
       `SELECT ${EVENT_INDEX_COLUMNS}
-     FROM events
-     WHERE visibility_status IN ('public', 'archived')
-     ORDER BY start_time DESC
-     LIMIT 200`,
-    ).all(),
+       FROM events
+       WHERE visibility_status IN ('public', 'archived')
+       ORDER BY start_time DESC
+       LIMIT 200`,
+    ).all<Record<string, unknown>>(),
     rebuildEventGroupSections(env),
   ]);
-  await putJson(env, "events/index.json", {
-    generated_at: Math.floor(Date.now() / 1000),
-    items: rows.results ?? [],
-    group_sections: groupSections,
-  }, "public, max-age=300, stale-while-revalidate=1800", { targetType: "events_index", targetId: "global" });
+
+  const items = await attachPublicOperatorNames(
+    env,
+    rowsResult.results ?? [],
+  );
+
+  await putJson(
+    env,
+    "events/index.json",
+    {
+      generated_at: Math.floor(Date.now() / 1000),
+      items,
+      group_sections: groupSections,
+    },
+    "public, max-age=300, stale-while-revalidate=1800",
+    {
+      targetType: "events_index",
+      targetId: "global",
+    },
+  );
 }
 
 async function rebuildEventGroupSections(env: Env): Promise<unknown[]> {
@@ -443,8 +458,17 @@ async function rebuildEventGroupSections(env: Env): Promise<unknown[]> {
   )
     .bind(...groupIds)
     .all<Record<string, unknown>>();
-  for (const row of junctionRows.results ?? []) {
-    mergeGroupEvent(eventsByGroup, row.group_id, stripGroupId(row));
+  const enrichedRows = await attachPublicOperatorNames(
+    env,
+    junctionRows.results ?? [],
+  );
+
+  for (const row of enrichedRows) {
+    mergeGroupEvent(
+      eventsByGroup,
+      row.group_id,
+      stripGroupId(row),
+    );
   }
 
   return groupRows.map((group) => {
@@ -471,6 +495,63 @@ function mergeGroupEvent(
   if (current.some((row) => row.id === eventId)) return;
   current.push(event);
   target.set(groupId, current);
+}
+
+async function attachPublicOperatorNames(
+  env: Env,
+  rows: readonly Record<string, unknown>[],
+): Promise<Record<string, unknown>[]> {
+  const eventIds = Array.from(
+    new Set(
+      rows
+        .map((row) => String(row.id ?? "").trim())
+        .filter(Boolean),
+    ),
+  );
+
+  if (eventIds.length === 0) {
+    return rows.map((row) => ({
+      ...row,
+      public_operator_names: [],
+    }));
+  }
+
+  const placeholders = eventIds.map(() => "?").join(",");
+  const result = await env.DB.prepare(
+    `SELECT event_id, display_name
+     FROM event_staff
+     WHERE is_public = 1
+       AND event_id IN (${placeholders})
+     ORDER BY event_id ASC, created_at ASC, id ASC`,
+  )
+    .bind(...eventIds)
+    .all<{
+      event_id: string;
+      display_name: string;
+    }>();
+
+  const namesByEvent = new Map<string, string[]>();
+
+  for (const staff of result.results ?? []) {
+    const eventId = String(staff.event_id ?? "").trim();
+    const displayName = String(staff.display_name ?? "").trim();
+    if (!eventId || !displayName) continue;
+
+    const names = namesByEvent.get(eventId) ?? [];
+    if (!names.includes(displayName)) {
+      names.push(displayName);
+    }
+    namesByEvent.set(eventId, names);
+  }
+
+  return rows.map((row) => {
+    const eventId = String(row.id ?? "").trim();
+    return {
+      ...row,
+      public_operator_names:
+        namesByEvent.get(eventId) ?? [],
+    };
+  });
 }
 
 function stripGroupId(

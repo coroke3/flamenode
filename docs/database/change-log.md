@@ -1,8 +1,8 @@
 # DB Change Log
 
 > Status: Active
-> Last verified: 2026-07-11
-> Verified against commit: `5f48e0f` + working tree
+> Last verified: 2026-07-13
+> Verified against commit: `e772cc9`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
 
 ## 2026-07-13 — `0002_terms_reaccept_manual_cost_guard.sql`

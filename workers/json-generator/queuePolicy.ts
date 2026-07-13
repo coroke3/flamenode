@@ -9,8 +9,8 @@ export interface OperationModeRow {
   operation_mode?: string | null;
 }
 
-const MAX_QUEUE_ITEMS_PER_RUN = 20;
-const MAX_QUEUE_ITEMS_ECONOMY = 5;
+export const MAX_QUEUE_ITEMS_PER_RUN = 3;
+export const MAX_QUEUE_ITEMS_ECONOMY = 1;
 
 export function isOperationMode(value: unknown): value is OperationMode {
   return (

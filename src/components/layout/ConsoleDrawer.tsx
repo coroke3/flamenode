@@ -13,11 +13,60 @@ const FOCUSABLE = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(",");
 
+function fallbackConsolePageLabel(
+  pathname: string,
+): string {
+  const segments = pathname
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => decodeURIComponent(segment));
+
+  if (segments[0] === "manage") {
+    const eventIndex = segments.indexOf("events");
+
+    if (eventIndex >= 0 && segments[eventIndex + 1]) {
+      const eventId = segments[eventIndex + 1];
+      const child = segments[eventIndex + 2];
+
+      const childLabels: Record<string, string> = {
+        staff: "スタッフ",
+        slots: "枠管理",
+        videos: "作品管理",
+        review: "審査",
+        settings: "設定",
+      };
+
+      return child
+        ? `${eventId} / ${
+            childLabels[child] ?? child
+          }`
+        : eventId;
+    }
+
+    return "イベント運営";
+  }
+
+  const adminLabels: Record<string, string> = {
+    admin: "サイト管理",
+    events: "イベント",
+    videos: "作品",
+    users: "ユーザー",
+    audit: "監査ログ",
+    system: "システム",
+    settings: "設定",
+  };
+
+  const last = segments.at(-1) ?? "admin";
+  return adminLabels[last] ?? last;
+}
+
 export function ConsoleDrawer({
   label,
+  modeLabel,
   children,
 }: {
   label: string;
+  modeLabel: string;
   children: React.ReactNode;
 }): React.ReactElement {
   const pathname = usePathname();
@@ -27,6 +76,10 @@ export function ConsoleDrawer({
   const restoreFocusRef = React.useRef(true);
   const [open, setOpen] = React.useState(false);
   const [isMobile, setIsMobile] = React.useState(false);
+  const [currentPageLabel, setCurrentPageLabel] =
+    React.useState(() =>
+      fallbackConsolePageLabel(pathname),
+    );
 
   React.useEffect(() => {
     const media = window.matchMedia("(max-width: 760px)");
@@ -47,6 +100,28 @@ export function ConsoleDrawer({
   React.useEffect(() => {
     restoreFocusRef.current = false;
     setOpen(false);
+  }, [pathname]);
+
+  React.useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const activeLink =
+        panelRef.current?.querySelector<HTMLElement>(
+          'a[aria-current="page"], a[data-active="true"]',
+        );
+
+      const activeText =
+        activeLink?.textContent
+          ?.replace(/\s+/g, " ")
+          .trim() ?? "";
+
+      setCurrentPageLabel(
+        activeText ||
+          fallbackConsolePageLabel(pathname),
+      );
+    });
+
+    return () =>
+      window.cancelAnimationFrame(frame);
   }, [pathname]);
 
   const close = React.useCallback((restoreFocus = true) => {
@@ -108,19 +183,26 @@ export function ConsoleDrawer({
         aria-expanded={drawerOpen}
         aria-controls={drawerId}
         aria-haspopup="dialog"
+        aria-label={`${label}を開く。現在: ${currentPageLabel}`}
         onClick={() => {
           restoreFocusRef.current = true;
           setOpen(true);
         }}
       >
         <Icon name="menu" size={18} aria-hidden />
-        {label}
+        <span className="fn-console-trigger-copy">
+          <span className="fn-console-trigger-mode">
+            {modeLabel}
+          </span>
+          <strong>{currentPageLabel}</strong>
+          <small>{pathname}</small>
+        </span>
       </button>
       <div
         className="fn-console-drawer-backdrop"
         data-open={drawerOpen ? "true" : "false"}
+        onClick={() => close()}
         aria-hidden="true"
-        onMouseDown={() => close()}
       />
       <aside
         ref={panelRef}
@@ -128,25 +210,21 @@ export function ConsoleDrawer({
         className="fn-console-drawer-panel"
         data-open={drawerOpen ? "true" : "false"}
         role={drawerOpen ? "dialog" : undefined}
-        aria-modal={drawerOpen || undefined}
-        aria-label={drawerOpen ? label : undefined}
-        aria-hidden={isMobile && !drawerOpen ? true : undefined}
-        inert={isMobile && !drawerOpen ? true : undefined}
+        aria-modal={drawerOpen ? true : undefined}
+        aria-label={label}
         tabIndex={-1}
-        onClick={(event) => {
-          if (event.target instanceof Element && event.target.closest("a[href]")) {
-            close(false);
-          }
-        }}
       >
-        <button
-          type="button"
-          className="fn-console-drawer-close"
-          onClick={() => close()}
-          aria-label={`${label}を閉じる`}
-        >
-          <Icon name="close" size={18} aria-hidden />
-        </button>
+        <div className="fn-console-drawer-head">
+          <strong>{label}</strong>
+          <button
+            type="button"
+            className="fn-console-drawer-close"
+            onClick={() => close()}
+          >
+            <Icon name="close" size={16} aria-hidden />
+            閉じる
+          </button>
+        </div>
         {children}
       </aside>
     </div>

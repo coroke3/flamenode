@@ -1,66 +1,53 @@
 # FlameNode ローカル動作手順書
 
 > Status: Active
-> Last verified: 2026-07-12
-> Verified against commit: `00be565` + working tree
+> Last verified: 2026-07-13
+> Verified against commit: `e772cc9`
 > Source of truth: `package.json`, `migrations/` active path, `docs/operations/migrations.md`
 
 このドキュメントは、FlameNode を **手元の PC で動かして動作確認する**ための手順をまとめたものです。
 本番デプロイ手順は `DEPLOY.md` を参照してください。ここではローカルで完結する作業だけを扱います。
 
-> **このリポジトリでの実施状況 (自動セットアップ済み)**
->
-> - [x] `npm install` 完了
-> - [x] `.dev.vars` を作成、`AUTH_SECRET` 自動生成済み
-> - [x] Git for Windows (bash 同梱) を `winget install` で導入
-> - [x] `@cloudflare/next-on-pages` を試したが Windows では不安定なため、通常開発は **Miniflare binding** を利用
-> - [x] `instrumentation.ts` を追加し、`next dev` 起動時に Miniflare で D1/R2/KV を自動起動
-> - [ ] ローカルD1へ `migrations/0000_flame_node_baseline.sql` を手動適用（起動時の自動スキーマ適用は行わない）
-> - [x] `npm run dev:local` で起動できる状態 (http://localhost:3000/、`/list`, `/event`, `/api/videos`, `/api/auth/providers` すべて 200 で応答することを確認済み)
-> - [ ] **要対応**: Discord Developer Portal でアプリを作り、`.dev.vars` の `AUTH_DISCORD_ID` / `AUTH_DISCORD_SECRET` を埋める
-> - [ ] **要対応**: ログイン後、自分を `role='admin'` に SQL で昇格 (`/admin` を確認したい場合のみ)
->
-> 残作業はDiscord OAuthと必要時の管理者確認です。詳細は本書の §5 と §7 を参照してください。
+## 最短起動手順
 
----
-
-## ⭐ いま動かす最短手順
-
-開発サーバはすでにバックグラウンドで起動済みです。停止したい/再起動したい場合は次のコマンドを使ってください。
+前提はNode.js 22.xです。
 
 ```powershell
-# 動作中のサーバを止める
-Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match "next.*dev|load-dev-vars" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
-
-# 改めて起動 (Miniflare の D1/R2/KV が立ち上がる。事前にbaselineを適用しておく)
-npm run dev:local
+npm ci
+Copy-Item .dev.vars.example .dev.vars
+npm run db:local-apply
+npm run dev
 ```
 
-ブラウザで http://localhost:3000/ にアクセスすると、トップ・一覧・イベント・規約・メンテナンスがすべて表示されます。
-データはまだ空なので、ログインしてから `/entry` で投稿するとリアルタイムにトップへ反映されます。
+macOS / Linux:
 
-> **想定環境**: Windows (PowerShell 7+) / macOS / Linux。Node.js 20 LTS 以上。
-> ローカル動作モードは目的に応じて 2 種類あります。
->
-> | モード | 起動コマンド | 主な用途 | D1 / R2 / KV / Auth.js |
-> | --- | --- | --- | --- |
-> | A. 通常開発 | `npm run dev` (http://localhost:3000) | 日常の開発全般 (UI・ログイン・投稿・管理画面) | **すべて使える** (`instrumentation.ts` が Miniflare で D1/R2/KV を起動し、schema不一致ならfail-fast) |
-> | B. 本番相当 | `npm run pages:dev` (http://localhost:8788) | next-on-pages ビルド後の edge ランタイム検証、デプロイ前確認 | **すべて使える** (wrangler pages dev + Miniflare) |
->
-> 普段の開発はモード A で完結します。デプロイ前に本番相当のランタイムで確認したいときだけモード B を使います。
-> 両モードとも `.wrangler/state/v3` を共有するため、同じローカル DB を参照します。
-> Miniflare 起動をスキップしたい場合は環境変数 `LOCAL_BINDINGS=0` を設定します。
+```bash
+npm ci
+cp .dev.vars.example .dev.vars
+npm run db:local-apply
+npm run dev
+```
+
+起動後、`http://localhost:3000/`を開きます。
+
+Discordログインを確認する場合は、`.dev.vars`へ次を設定してください。
+
+* `AUTH_SECRET`
+* `AUTH_DISCORD_ID`
+* `AUTH_DISCORD_SECRET`
+* `AUTH_URL`
+* `NEXT_PUBLIC_SITE_URL`
 
 ---
 
 ## 1. 前提ツール
 
-| ツール | バージョン | 確認コマンド | 備考 |
-| --- | --- | --- | --- |
-| Node.js | 20 LTS 以上 | `node -v` | https://nodejs.org/ |
-| npm | 10 以上 | `npm -v` | Node.js に同梱 |
-| wrangler | 3.99 以上 | `npx wrangler --version` | リポジトリの devDependencies で入る |
-| Git | 任意 | `git --version` | クローンに必要 |
+| ツール | バージョン | 確認コマンド |
+| --- | --- | --- |
+| Node.js | 22.x | `node -v` |
+| npm | Node.js 22同梱版 | `npm -v` |
+| wrangler | `package-lock.json`固定版 | `npx wrangler --version` |
+| Git | 任意 | `git --version` |
 
 > グローバルに `wrangler` を入れる必要はありません。本リポジトリは `npx wrangler` で十分動きます。
 

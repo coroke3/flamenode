@@ -1,8 +1,8 @@
 # FlameNode デプロイ手順書
 
 > Status: Active
-> Last verified: 2026-07-12
-> Verified against commit: `00be565` + working tree
+> Last verified: 2026-07-13
+> Verified against commit: `e772cc9`
 > Source of truth: `package.json`, `wrangler.toml`, `workers/*/wrangler.toml`, `docs/operations/migrations.md`
 
 ## Current Worker Layout
@@ -36,7 +36,6 @@ FlameNode は次の構成で動きます。
 | SQL データベース | Cloudflare D1 (`flamenode_db`) | `wrangler d1 create` → `wrangler d1 migrations apply` |
 | オブジェクトストレージ | Cloudflare R2 (`flamenode-storage`) | `wrangler r2 bucket create` |
 | キャッシュ / フラグ | Cloudflare KV (`KV`) | `wrangler kv namespace create` |
-| 閲覧数集約 | Durable Object (`ViewAggregator`) | Pages デプロイで自動定義 |
 | 定期処理 (3 Cron) | Cloudflare Workers + Cron Triggers | `npm run workers:deploy`（`fast-jobs` / `content-jobs` / `sync-jobs`） |
 
 無料枠の Cron は **アカウント全体で 5 個まで**です。本リポジトリは **3 Cron**（統合 Worker 3 本）で運用し、旧 5 本構成のモジュールは `workers/json-generator` などから import するだけです。
@@ -48,11 +47,10 @@ FlameNode は次の構成で動きます。
 ### 1-1. 必要ツールのインストール
 
 ```powershell
-# Node.js 20 LTS 以上 (https://nodejs.org/) を入れた上で:
-node -v          # v20 以上であること
+# Node.js 22.x
+node -v          # v22.x であること
 npm -v
-npm i -g wrangler
-wrangler --version
+npx wrangler --version
 ```
 
 ### 1-2. Cloudflare にログイン
@@ -149,7 +147,17 @@ Remote D1の作成、backup、migration適用、rollbackは運用者が対象D1�
 
 ### 3-1. マイグレーション SQL の確認
 
-リポジトリのactive migrationは `migrations/` 直下を番号順に適用します。現行は `0000_flame_node_baseline.sql`、`0001_spreadsheet_import_runs.sql` です。DB schemaの正本は `src/lib/db/schema.ts` であり、自動生成は使いません。
+active migrationは `migrations/` 直下の `.sql` をファイル名順に適用します。ファイル名を文書へ固定列挙せず、次のコマンドで実体を確認してください。
+
+```powershell
+Get-ChildItem migrations -File -Filter *.sql | Sort-Object Name
+```
+
+```bash
+find migrations -maxdepth 1 -type f -name '*.sql' | sort
+```
+
+DBスキーマの正本は `src/lib/db/schema.ts` です。旧migrationは `migrations/historical/` に保存し、現行環境へ再適用しません。
 
 ### 3-2. 本番 D1 へマイグレーション適用
 
@@ -164,8 +172,6 @@ wrangler d1 migrations apply flamenode_db --remote
 ```powershell
 wrangler d1 migrations apply flamenode_db --local
 ```
-
-本番前MVPでは、`video_comments` と `dashboard_metrics_cache` は `0021_slim_mvp_drop_unused_tables.sql` で削除します。管理トップは対応待ち件数だけを軽量クエリで表示し、公開API・お知らせ・YouTube同期・score再計算は短期キャッシュ/低頻度更新を前提にしてください。
 
 ### 3-3. (任意) 旧データの取り込み
 
@@ -278,9 +284,6 @@ Cloudflare Dashboard → **Pages → flamenode → Settings → Functions** で�
 | D1 database | `DB` | `flamenode_db` |
 | R2 bucket | `BUCKET` | `flamenode-storage` |
 | KV namespace | `KV` | 2-3 で作った KV |
-| Durable Object | `VIEW_AGGREGATOR` | class `ViewAggregator` (script `flamenode`) |
-
-> Durable Object は最初の `wrangler pages deploy` 完了後に Dashboard の選択肢に出てきます。出てこない場合は一度 Pages を再デプロイし、`wrangler.toml` の `[[migrations]]` セクションが取り込まれているか確認してください。
 
 ### 6-3. カスタムドメイン
 

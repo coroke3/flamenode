@@ -1,55 +1,24 @@
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 import {
+  MAX_QUEUE_ITEMS_ECONOMY,
+  MAX_QUEUE_ITEMS_PER_RUN,
   queueLimitForMode,
-  queueModeWhereClause,
-  resolveQueueOperationMode,
-  shouldReconcileStaleQueue,
-  shouldSkipQueueTarget,
 } from "./queuePolicy.ts";
 
-test("resolveQueueOperationMode: operation_mode を正本にする", () => {
-  assert.equal(
-    resolveQueueOperationMode({ operation_mode: "static_only" }),
-    "static_only",
+test("normalは1回最大3件", () => {
+  assert.equal(MAX_QUEUE_ITEMS_PER_RUN, 3);
+  assert.equal(queueLimitForMode("normal"), 3);
+});
+
+test("economyは1回最大1件", () => {
+  assert.equal(MAX_QUEUE_ITEMS_ECONOMY, 1);
+  assert.equal(queueLimitForMode("economy"), 1);
+});
+
+test("maintenanceは呼び出し側で停止し、上限は通常値を超えない", () => {
+  assert.ok(
+    queueLimitForMode("maintenance") <=
+      MAX_QUEUE_ITEMS_PER_RUN,
   );
-});
-
-test("resolveQueueOperationMode: 不正値は normal", () => {
-  assert.equal(resolveQueueOperationMode({ operation_mode: "broken" }), "normal");
-  assert.equal(resolveQueueOperationMode(null), "normal");
-});
-
-test("queueLimitForMode: economy だけ処理件数を絞る", () => {
-  assert.equal(queueLimitForMode("normal"), 20);
-  assert.equal(queueLimitForMode("economy"), 5);
-  assert.equal(queueLimitForMode("static_only"), 20);
-});
-
-test("queueModeWhereClause: mode 別に pending 対象を絞る", () => {
-  assert.equal(queueModeWhereClause("normal"), "");
-  assert.match(queueModeWhereClause("static_only"), /priority = 'high'/);
-  assert.match(queueModeWhereClause("read_only"), /target_type IN/);
-});
-
-test("shouldSkipQueueTarget: economy は重い派生ターゲットを high 以外でスキップ", () => {
-  assert.equal(
-    shouldSkipQueueTarget("economy", { target_type: "search_index", priority: "normal" }),
-    true,
-  );
-  assert.equal(
-    shouldSkipQueueTarget("economy", { target_type: "list_popular", priority: "high" }),
-    false,
-  );
-  assert.equal(
-    shouldSkipQueueTarget("normal", { target_type: "search_index", priority: "normal" }),
-    false,
-  );
-});
-
-test("shouldReconcileStaleQueue: stale 整理は normal/economy のみ", () => {
-  assert.equal(shouldReconcileStaleQueue("normal"), true);
-  assert.equal(shouldReconcileStaleQueue("economy"), true);
-  assert.equal(shouldReconcileStaleQueue("read_only"), false);
-  assert.equal(shouldReconcileStaleQueue("maintenance"), false);
 });

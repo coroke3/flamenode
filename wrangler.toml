@@ -36,14 +36,3 @@ bucket_name = "flamenode-storage"
 binding = "KV"
 id = "00000000000000000000000000000000"
 preview_id = "00000000000000000000000000000000"
-
-# ViewAggregator (Durable Object) は閲覧数集約実装後に有効化する。
-# 現状は未実装のためバインドしない。有効化時は Dashboard の Durable Object 設定も追加すること。
-# [[durable_objects.bindings]]
-# name = "VIEW_AGGREGATOR"
-# class_name = "ViewAggregator"
-# script_name = "flamenode"
-#
-# [[migrations]]
-# tag = "v1"
-# new_classes = ["ViewAggregator"]

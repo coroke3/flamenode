@@ -625,32 +625,12 @@ export default async function VideoDetailPage({
               </div>
             </div>
           </div>
-
-          <aside className={styles.relatedMobile} aria-label="関連動画">
-            <h3 className={styles.relatedHeading}>関連動画</h3>
-            <RelatedList videos={related} firstCount={8} />
-          </aside>
-
-          {members.length > 0 ? (
-            <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>
-                参加メンバー ({members.length})
-              </h2>
-              <MemberSection
-                members={members}
-                memberChapters={memberChapters.map((c) => ({
-                  id: c.id,
-                  chapter_time: c.chapter_time,
-                  chapter_label: c.chapter_label,
-                  note: c.note,
-                  video_member_id: c.video_member_id,
-                }))}
-              />
-            </section>
-          ) : null}
         </article>
 
-        <aside className={styles.aside}>
+        <aside
+          className={styles.chapterRail}
+          aria-label="チャプターとコメント"
+        >
           {playlist && playlistItems.length > 0 ? (
             <PlaylistRail
               label={playlistLabel}
@@ -661,19 +641,21 @@ export default async function VideoDetailPage({
           ) : null}
 
           <ChapterTabs
-            chapters={chapters.map((c) => ({
-              id: c.id,
-              chapter_time: c.chapter_time,
-              chapter_label: c.chapter_label,
-              visibility: (c.visibility ?? "public") as "public" | "private",
+            chapters={chapters.map((chapter) => ({
+              id: chapter.id,
+              chapter_time: chapter.chapter_time,
+              chapter_label: chapter.chapter_label,
+              visibility: (
+                chapter.visibility ?? "public"
+              ) as "public" | "private",
               marker_kind: "comment" as
                 | "comment"
                 | "chapter"
                 | "review"
                 | "system",
-              note: c.note,
-              author_name: c.author_name,
-              author_icon: c.author_icon,
+              note: chapter.note,
+              author_name: chapter.author_name,
+              author_icon: chapter.author_icon,
             }))}
           />
 
@@ -682,26 +664,66 @@ export default async function VideoDetailPage({
               videoId={video.id}
               canPost={viewerXApproved}
               canBulk={false}
-              settingsHref={`/dashboard/settings?next=${encodeURIComponent(`/${rawId}`)}`}
+              settingsHref={`/dashboard/settings?next=${encodeURIComponent(
+                `/${rawId}`,
+              )}`}
             />
           ) : (
             <section className="fn-vd-login-panel">
               <span>
-                <Icon name="info" size={12} aria-hidden /> ログインするとチャプターコメントを投稿できます。
+                <Icon
+                  name="info"
+                  size={12}
+                  aria-hidden
+                />
+                ログインするとチャプターコメントを投稿できます。
               </span>
               <Link
-                href={`/entry?next=${encodeURIComponent(`/${rawId}`)}`}
+                href={`/entry?next=${encodeURIComponent(
+                  `/${rawId}`,
+                )}`}
                 className="fn-btn fn-btn-ghost fn-btn-sm"
               >
                 ログイン
               </Link>
             </section>
           )}
+        </aside>
 
-          <div className={styles.relatedDesktop}>
-            <h3 className={styles.relatedHeading}>関連動画</h3>
-            <RelatedList videos={related} firstCount={18} />
-          </div>
+        {members.length > 0 ? (
+          <section
+            className={`${styles.section} ${styles.membersBlock}`}
+          >
+            <h2 className={styles.sectionTitle}>
+              参加メンバー ({members.length})
+            </h2>
+            <MemberSection
+              members={members}
+              memberChapters={memberChapters.map(
+                (chapter) => ({
+                  id: chapter.id,
+                  chapter_time: chapter.chapter_time,
+                  chapter_label: chapter.chapter_label,
+                  note: chapter.note,
+                  video_member_id:
+                    chapter.video_member_id,
+                }),
+              )}
+            />
+          </section>
+        ) : null}
+
+        <aside
+          className={styles.relatedRail}
+          aria-label="関連動画"
+        >
+          <h3 className={styles.relatedHeading}>
+            関連動画
+          </h3>
+          <RelatedList
+            videos={related}
+            firstCount={18}
+          />
         </aside>
       </div>
     </div>
@@ -849,7 +871,7 @@ function StaticVideoDetailView({
           ) : null}
         </article>
 
-        <aside className={styles.aside}>
+        <aside className={styles.chapterRail}>
           <section className="fn-vd-login-panel">
             <span>
               <Icon name="info" size={12} aria-hidden />

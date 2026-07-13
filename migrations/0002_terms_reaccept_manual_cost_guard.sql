@@ -1,10 +1,10 @@
 -- Migration: 0002_terms_reaccept_manual_cost_guard.sql
 -- Date: 2026-07-13
--- Type: destructive cleanup + additive indexes
+-- Type: cleanup
 -- Summary: 利用規約再同意の索引/FKを追加し、未計測の自動CostGuard正本を削除する
--- Data loss: cost_usage_snapshots と未使用の自動判定設定2列を削除
+-- Data loss: intentional
 -- Rollback: migration前のD1 backupから手動復元
--- Change log: docs/db-change-history.md
+-- Change log: docs/database/change-log.md
 
 DROP TABLE IF EXISTS "cost_usage_snapshots";
 

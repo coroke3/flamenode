@@ -7,33 +7,38 @@
 
 .layout {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "main"
+    "chapters"
+    "members"
+    "related";
   gap: var(--fn-space-block, 30px);
   align-items: start;
 }
 
 .main {
+  grid-area: main;
   min-width: 0;
 }
 
-/* PC と tablet の2カラム構成は維持し、詳細の並び替えは mobile のみ行う。 */
-@media (max-width: 700px) {
-  .main {
-    display: flex;
-    flex-direction: column;
-  }
+.chapterRail {
+  grid-area: chapters;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
 
-  .main > .heroLayout {
-    order: 1;
-  }
+.membersBlock {
+  grid-area: members;
+  min-width: 0;
+  margin-top: 0;
+}
 
-  .main > .section {
-    order: 2;
-  }
-
-  .main > .relatedMobile {
-    order: 3;
-  }
+.relatedRail {
+  grid-area: related;
+  min-width: 0;
 }
 
 .heroLayout {
@@ -328,13 +333,6 @@
   content: none;
 }
 
-.aside {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  min-width: 0;
-}
-
 .relatedHeading {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -381,31 +379,20 @@
   margin-bottom: 6px;
 }
 
-/* モバイル: メイン記事内に出すミニ関連 (デスクトップは aside に出す) */
-.relatedMobile {
-  margin-top: 24px;
-  padding-top: 18px;
-  border-top: 1px dashed var(--border-subtle);
-  display: block;
-}
-
-.relatedDesktop {
-  display: block;
-}
-
 @media (min-width: 1024px) {
   .layout {
-    grid-template-columns: minmax(0, 1fr) clamp(320px, 24vw, 360px);
+    grid-template-columns:
+      minmax(0, 1fr)
+      clamp(320px, 24vw, 360px);
+    grid-template-areas:
+      "main chapters"
+      "members related";
     gap: 28px;
   }
 
-  .aside {
+  .chapterRail {
     position: sticky;
     top: calc(var(--header-h, 64px) + 18px);
-  }
-
-  .relatedMobile {
-    display: none;
   }
 }
 
@@ -420,13 +407,6 @@
   .layout {
     grid-template-columns: minmax(0, 1fr) clamp(360px, 20vw, 430px);
     gap: clamp(36px, 2.4vw, 48px);
-  }
-}
-
-@media (max-width: 1023px) {
-  /* モバイル/タブレットでは aside の関連を非表示にしてミニ関連を本文側に出す */
-  .relatedDesktop {
-    display: none;
   }
 }
 
@@ -527,7 +507,7 @@
     justify-content: flex-start;
   }
 
-  .relatedDesktop .relatedList {
+  .relatedRail .relatedList {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 4px;

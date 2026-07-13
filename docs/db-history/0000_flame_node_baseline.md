@@ -5,18 +5,23 @@
 > Type: baseline
 > Source of truth: `src/lib/db/schema.ts`
 
-## 変更概要
+## 目的
 
 最終canonical schemaを空のD1へ一括作成するpre-production baseline。適用対象は `migrations/0000_flame_node_baseline.sql` で、旧migrationは `migrations/historical/` に保持する。
 
-## 境界
+## 変更内容
 
-- Data loss: intentional。Remote D1や本番データを自動初期化しない。
-- Compatibility: 旧列・旧tableのruntime互換、旧方式へのfallback、二重書き込みは提供しない。
-- Rollback: not safely reversible。必要時は運用者が事前backupから復旧する。
-- D1が正本で、R2/KV静的JSONは配信用キャッシュである。
+最終canonical schemaを空のD1へ一括作成する。旧migrationは `migrations/historical/` に保持し、現行runtimeのfallbackや二重書き込みには使用しない。
 
-## 検査
+## データ損失
+
+intentional。Remote D1や本番データを自動初期化しない。pre-production baselineとして空DBへ適用する前提。
+
+## ロールバック
+
+not safely reversible。必要時は運用者が事前backupから復旧する。
+
+## 検証
 
 ```sh
 npm.cmd run check:db-schema

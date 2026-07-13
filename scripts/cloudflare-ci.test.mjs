@@ -168,12 +168,9 @@ test("deploy workflow preserves immutable artifact and deployment order", () => 
   assert.ok(workflow.indexOf("deploy-workers:") < workflow.indexOf("smoke-production:"));
   assert.match(workflow, /environment: production/);
   assert.match(workflow, /group: deploy-cloudflare-production/);
-  assert.match(workflow, /--retry-max-time 30/);
-  assert.match(workflow, /api\/health/);
-  assert.match(workflow, /_next\/static/);
-  assert.match(workflow, /api\/auth\/callback\/discord/);
+  assert.match(workflow, /scripts\/smoke-cloudflare\.mjs/);
   assert.match(workflow, /FAST_JOBS_URL/);
   assert.match(workflow, /CONTENT_JOBS_URL/);
   assert.match(workflow, /SYNC_JOBS_URL/);
-  assert.match(workflow, /expected 401, 404, or 405/);
+  assert.match(workflow, /BUILD_COMMIT_SHA/);
 });

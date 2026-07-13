@@ -1,8 +1,8 @@
 # Database 運用
 
 > Status: Active
-> Last verified: 2026-07-11
-> Verified against commit: `5f48e0f` + working tree
+> Last verified: 2026-07-13
+> Verified against commit: `e772cc9`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/` active path
 
 `src/lib/db/schema.ts` がDBの唯一の正本です。active migrationは `migrations/` 直下を番号順に適用し、空のD1にはbaseline後にadditive migrationを適用します。以前のmigration本文は改変せず `migrations/historical/` に保存しています。

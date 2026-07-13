@@ -19,7 +19,14 @@ export function ConsoleShell({
   return (
     <div className={isAdmin ? "admin-shell" : "manage-shell"} data-console-mode={consoleMode}>
       <div className={isAdmin ? "admin-frame" : "fn-console-frame"}>
-        <ConsoleDrawer label={label}>{navigation}</ConsoleDrawer>
+        <ConsoleDrawer
+          label={label}
+          modeLabel={
+            isAdmin ? "サイト管理" : "イベント運営"
+          }
+        >
+          {navigation}
+        </ConsoleDrawer>
         {children}
       </div>
     </div>

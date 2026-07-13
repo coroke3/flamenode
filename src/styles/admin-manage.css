@@ -1618,17 +1618,49 @@
   }
 
   .fn-console-drawer-trigger {
-    display: inline-flex;
+    display: flex;
+    width: 100%;
+    min-height: 54px;
     align-items: center;
-    justify-content: center;
-    gap: 7px;
-    min-height: 44px;
+    justify-content: flex-start;
+    gap: 10px;
     padding: 8px 12px;
     color: var(--text-primary);
     border: 1px solid var(--border-subtle);
     background: var(--bg-surface);
-    font-size: 12px;
+    text-align: left;
+  }
+
+  .fn-console-trigger-copy {
+    display: grid;
+    min-width: 0;
+    gap: 1px;
+  }
+
+  .fn-console-trigger-mode {
+    color: var(--accent-primary-strong);
+    font-size: 10px;
     font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .fn-console-trigger-copy strong {
+    overflow: hidden;
+    color: var(--text-primary);
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .fn-console-trigger-copy small {
+    overflow: hidden;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 400;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .fn-console-drawer-trigger:focus-visible,

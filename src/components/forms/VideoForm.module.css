@@ -808,3 +808,68 @@
     flex: 1.4;
   }
 }
+
+.confirmGroups {
+  display: grid;
+  gap: 12px;
+}
+
+.confirmGroup {
+  padding: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.confirmGroupHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.confirmGroupHead h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.confirmEditButton {
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--accent-primary-soft);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.confirmEditButton:hover {
+  background: color-mix(
+    in srgb,
+    var(--accent-primary) 22%,
+    var(--bg-elevated)
+  );
+}
+
+.confirmEditButton:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.confirmYoutube {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 220px);
+  gap: 14px;
+  align-items: start;
+}
+
+@media (max-width: 640px) {
+  .confirmYoutube {
+    grid-template-columns: 1fr;
+  }
+}

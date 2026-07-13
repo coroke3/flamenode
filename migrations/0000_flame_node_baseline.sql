@@ -2,7 +2,7 @@
 -- Date: 2026-07-11
 -- Type: baseline
 -- Summary: FlameNode final canonical schema baseline
--- Data loss: intentional (pre-production baseline; remote D1 is never changed automatically)
+-- Data loss: intentional
 -- Rollback: not safely reversible
 -- Change log: docs/database/change-log.md
 

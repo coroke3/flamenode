@@ -472,6 +472,22 @@ export function VideoForm({
     setCurrentStep((prev) => Math.max(0, prev - 1));
   };
 
+  const jumpToWizardStep = React.useCallback(
+    (key: WizardStepKey) => {
+      const nextIndex = wizardSteps.findIndex(
+        (step) => step.key === key,
+      );
+      if (nextIndex < 0) return;
+
+      setStepError(null);
+      setCurrentStep(nextIndex);
+      setMaxReachedStep((current) =>
+        Math.max(current, nextIndex),
+      );
+    },
+    [wizardSteps],
+  );
+
   React.useEffect(() => {
     if (!stepError || !isWizard) return;
     const index = wizardSteps.findIndex((step) => step.key === stepError.step);
@@ -1289,38 +1305,121 @@ export function VideoForm({
                 入力内容を確認して、問題なければ提出してください。
               </p>
               <div className={styles.confirmSummaryGrid}>
-                <dl className={styles.confirmSummaryList}>
-                  <div>
-                    <dt>X ID</dt>
-                    <dd>@{normalizedActiveXId || normalizedInitialXId || "未設定"}</dd>
-                  </div>
-                  <div>
-                    <dt>表示名</dt>
-                    <dd>{displayNamePreview.trim() || "未入力"}</dd>
-                  </div>
-                  <div>
-                    <dt>タイトル</dt>
-                    <dd>{titlePreview.trim() || "未入力"}</dd>
-                  </div>
-                  <div>
-                    <dt>イベント</dt>
-                    <dd>
-                      {selectedEventLabels.length > 0
-                        ? selectedEventLabels.join(" / ")
-                        : "未選択"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>YouTube</dt>
-                    <dd>{youtubeId ?? "未入力"}</dd>
-                  </div>
-                </dl>
-                {youtubeId ? (
-                  <div className={styles.confirmThumb}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={youtubeThumbUrl(youtubeId, "hqdefault")} alt="" />
-                  </div>
-                ) : null}
+                <div className={styles.confirmGroups}>
+                  <section className={styles.confirmGroup}>
+                    <div className={styles.confirmGroupHead}>
+                      <h3>投稿者情報</h3>
+                      <button
+                        type="button"
+                        className={styles.confirmEditButton}
+                        onClick={() =>
+                          jumpToWizardStep("submitter")
+                        }
+                      >
+                        修正
+                      </button>
+                    </div>
+
+                    <dl className={styles.confirmSummaryList}>
+                      <div>
+                        <dt>X ID</dt>
+                        <dd>
+                          @
+                          {normalizedActiveXId ||
+                            normalizedInitialXId ||
+                            "未設定"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>表示名</dt>
+                        <dd>
+                          {displayNamePreview.trim() || "未入力"}
+                        </dd>
+                      </div>
+                    </dl>
+                  </section>
+
+                  <section className={styles.confirmGroup}>
+                    <div className={styles.confirmGroupHead}>
+                      <h3>作品情報</h3>
+                      <button
+                        type="button"
+                        className={styles.confirmEditButton}
+                        onClick={() => jumpToWizardStep("work")}
+                      >
+                        修正
+                      </button>
+                    </div>
+
+                    <dl className={styles.confirmSummaryList}>
+                      <div>
+                        <dt>タイトル</dt>
+                        <dd>{titlePreview.trim() || "未入力"}</dd>
+                      </div>
+                      <div>
+                        <dt>イベント</dt>
+                        <dd>
+                          {selectedEventLabels.length > 0
+                            ? selectedEventLabels.join(" / ")
+                            : "未選択"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>合作</dt>
+                        <dd>
+                          {isCollab
+                            ? `${memberCount}人の合作`
+                            : "個人作品"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>追加質問</dt>
+                        <dd>
+                          {incompleteRequiredStageQuestionCount > 0
+                            ? `未入力 ${incompleteRequiredStageQuestionCount}件`
+                            : "入力済み"}
+                        </dd>
+                      </div>
+                    </dl>
+                  </section>
+
+                  <section className={styles.confirmGroup}>
+                    <div className={styles.confirmGroupHead}>
+                      <h3>YouTube</h3>
+                      <button
+                        type="button"
+                        className={styles.confirmEditButton}
+                        onClick={() =>
+                          jumpToWizardStep("youtube")
+                        }
+                      >
+                        修正
+                      </button>
+                    </div>
+
+                    <div className={styles.confirmYoutube}>
+                      <dl className={styles.confirmSummaryList}>
+                        <div>
+                          <dt>動画ID</dt>
+                          <dd>{youtubeId ?? "未入力"}</dd>
+                        </div>
+                      </dl>
+
+                      {youtubeId ? (
+                        <div className={styles.confirmThumb}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={youtubeThumbUrl(
+                              youtubeId,
+                              "hqdefault",
+                            )}
+                            alt=""
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  </section>
+                </div>
               </div>
             </div>
           </section>
@@ -1446,9 +1545,13 @@ export function VideoForm({
             pending={incompleteRequiredStageQuestionCount > 0}
           />
           <PreviewCheck
-            ok={!isCollab || Boolean(initial.members?.length)}
-            label={isCollab ? "合作メンバーを確認" : "メンバー入力なし"}
-            pending={isCollab && !initial.members?.length}
+            ok={!isCollab || memberCount > 0}
+            label={
+              isCollab
+                ? `合作メンバー ${memberCount}人`
+                : "メンバー入力なし"
+            }
+            pending={isCollab && memberCount === 0}
           />
         </dl>
         <div className={styles.saveId}>

@@ -16,6 +16,7 @@ import {
   xUsers,
 } from "@/lib/db/schema";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { buildEventStaffMergeAudits } from "@/lib/actions/merge-adminCore";
 import { planXIdMergeEventStaffOwnerProtection } from "@/lib/event/eventOwnershipCore";
 import { normalizeXId } from "@/lib/utils/xid";
 
@@ -216,6 +217,14 @@ export async function mergeXIds(
       return row;
     });
 
+  const eventStaffAudits = buildEventStaffMergeAudits({
+    beforeRows: affectedStaff,
+    afterRows: mergedStaffAfter,
+    actorUserId: u.id,
+    fromXId,
+    toXId,
+  });
+
   try {
     await mutateWithAudit(db, {
       mutationStatements: [
@@ -314,37 +323,43 @@ export async function mergeXIds(
         1,
         linkRequestCount,
       ],
-      audits: [{
-        table_name: "x_users",
-        target_id: fromXId,
-        operation: "MERGE",
-        before: {
-          from_x_user: fromRow[0],
-          to_x_user: toRow[0],
-          event_staff: affectedStaff,
-          counts,
-        },
-        after: {
-          from_x_user: { ...fromRow[0], linked_user_id: null },
-          to_x_user: toRow[0],
-          event_staff: mergedStaffAfter,
-          merged_into: toXId,
-          counts,
-          collision_counts: {
-            video_interactions: interactionCollisionCount,
-            event_staff: collisionCount,
-            promoted_event_staff: promotionCount,
-            x_user_icons: iconCollisionCount,
-            x_user_aliases: aliasCollisionCount,
+      audits: [
+        ...eventStaffAudits,
+        {
+          table_name: "x_users",
+          target_id: fromXId,
+          operation: "MERGE",
+          before: {
+            from_x_user: fromRow[0],
+            to_x_user: toRow[0],
+            event_staff: affectedStaff,
+            counts,
           },
+          after: {
+            from_x_user: {
+              ...fromRow[0],
+              linked_user_id: null,
+            },
+            to_x_user: toRow[0],
+            event_staff: mergedStaffAfter,
+            merged_into: toXId,
+            counts,
+            collision_counts: {
+              video_interactions: interactionCollisionCount,
+              event_staff: collisionCount,
+              promoted_event_staff: promotionCount,
+              x_user_icons: iconCollisionCount,
+              x_user_aliases: aliasCollisionCount,
+            },
+          },
+          actor_user_id: u.id,
+          reason: "管理者による X ID 統合",
+          context: "x-id-merge",
+          retention_class: "long_audit",
+          restore_strategy: "none",
+          strict: true,
         },
-        actor_user_id: u.id,
-        reason: "管理者による X ID 統合",
-        context: "x-id-merge",
-        retention_class: "long_audit",
-        restore_strategy: "none",
-        strict: true,
-      }],
+      ],
     });
   } catch (error) {
     return {

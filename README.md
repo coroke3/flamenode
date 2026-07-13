@@ -1,8 +1,8 @@
 # FlameNode
 
 > Status: Active
-> Last verified: 2026-07-12
-> Verified against commit: `00be565` + working tree
+> Last verified: 2026-07-13
+> Verified against commit: `e772cc9`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/0000_flame_node_baseline.sql`, `docs/README.md`
 
 > 映像（フレーム）の結節点（ノード）。YouTube 埋め込みを利用した動画プラットフォーム。
@@ -21,7 +21,7 @@
 - **フレームワーク**: Next.js 15 (App Router) + React 19 + TypeScript
 - **DB**: Cloudflare D1 (SQLite) + Drizzle ORM（D1 が正本。R2/KV の静的 JSON は配信用キャッシュ）
 - **ストレージ / キャッシュ**: Cloudflare R2 / KV
-- **背景処理**: Cloudflare Workers (Cron 3本: `fast-jobs` / `content-jobs` / `sync-jobs`) + Durable Objects
+- **背景処理**: Cloudflare Workers (Cron 3本: `fast-jobs` / `content-jobs` / `sync-jobs`)
 - **認証**: Auth.js (NextAuth v5) + Discord OAuth
 - **スタイル**: 純粋 CSS (`src/styles/globals.css` のグローバルユーティリティ + 各コンポーネント `*.module.css`) と CSS カスタムプロパティ。Tailwind は使用しない。Light / Dark / System を `data-theme` で切替。
 
@@ -41,7 +41,7 @@ src/
 workers/             # Cloudflare Workers (統合3本 + import 用モジュール)
 migrations/          # D1 マイグレーション
 scripts/             # 運用・検査スクリプト
-instrumentation.ts   # ローカル dev 時に Miniflare で D1/R2/KV を自動起動
+instrumentation.ts   # Next.js instrumentation hook
 設計/                 # 設計仕様 (Single Source of Truth)
 ```
 
@@ -64,7 +64,7 @@ npm run db:local-apply  # ローカル D1 へ migration 適用
 
 - **公開エリア**: トップ / 作品一覧 `/list` / 作品詳細 (独自 YouTube プレイヤー、チャプターコメント) / イベント `/event` / クリエイタープロフィール `/user/[id]` / 規約・お知らせ
 - **ユーザーエリア** (Discord OAuth): ダッシュボード、イベント参加・投稿 `/entry`、スロット提出、作品編集、X ID 連携申請、ライブラリ (いいね・セーブ)
-- **運営エリア** `/manage`: イベントスタッフ向けの受信箱・スロット運営・メンバー管理 (permission_mask による細分権限)
+- **運営エリア** `/manage`: イベントスタッフ向けの受信箱・枠運営・メンバー管理。権限は `permission_preset` を正本とし、例外時だけ `custom_permission_keys_json` を使用。
 - **管理エリア** `/admin`: 作品 / ユーザー / イベント / お知らせ / 規約 / 監査ログ / 通知 / コストガード / health・security チェック / レガシーインポート / DB スプレッドシート
 - **背景処理**: 静的 JSON 再生成 (R2/KV 配信)、YouTube 同期、スコア再計算、通知ディスパッチ、TTL クリーンアップ
 

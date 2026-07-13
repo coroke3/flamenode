@@ -1,7 +1,7 @@
 /**
- * content-jobs: 15分毎のコンテンツ更新ジョブ。
- * - static_rebuild_queue 処理
- * - cleanup (1時間に1回)
+ * content-jobs: 15分毎の低負荷コンテンツ更新ジョブ。
+ * - static_rebuild_queueを通常最大3件、economy最大1件処理
+ * - cleanupは1時間に1回だけ実行
  */
 import { processStaticRebuildQueue } from "../json-generator/queue.ts";
 import { runCleanupWithRetry } from "../cleanup/index.ts";

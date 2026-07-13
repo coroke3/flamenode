@@ -1,7 +1,7 @@
 # FlameNode 運用
 
 > Status: Active
-> Last verified: 2026-07-11
+> Last verified: 2026-07-13
 > Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `wrangler.toml`, `package.json`
 
 FlameNodeは Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、3本のCron Workerで運用する。実Cloudflareへのリソース作成・Remote D1 migration・deployは運用者だけが明示的に実行し、CodexやPR CIは実行しない。
