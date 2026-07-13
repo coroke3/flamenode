@@ -14,10 +14,15 @@ export function videoPublicPath(
   return `/${youtubeVideoId?.trim() || videoId}`;
 }
 
-/**
- * 通知 payload に必須キーが入っているかを検証する純粋関数。
- * enqueue 前のサニティチェックに使う。テスト対象。
- */
+export type DiscordNotificationPayload = {
+  content: string;
+  embeds?: Array<Record<string, unknown>>;
+  video_id?: string;
+  event_id?: string;
+  url?: string;
+};
+
+/** 通知 payload に必須キーが入っているかを検証する。 */
 export interface NotificationPayloadCheck {
   ok: boolean;
   reason?: string;
@@ -26,12 +31,6 @@ export interface NotificationPayloadCheck {
 const MAX_PAYLOAD_BYTES = 8 * 1024;
 const MAX_TYPE_LENGTH = 64;
 
-/**
- * payload と type の最小限の妥当性検査。
- * - type は空でなく 64 文字以内かつ ASCII 英数 + _ のみ
- * - payload は object でシリアライズ後 8KB 以内
- * - content (人間可読本文) があれば 1000 文字以内
- */
 export function validateNotificationPayload(
   type: unknown,
   payload: unknown,
@@ -48,6 +47,7 @@ export function validateNotificationPayload(
   if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
     return { ok: false, reason: "payload はオブジェクトである必要があります" };
   }
+
   let serialized: string;
   try {
     serialized = JSON.stringify(payload);
@@ -57,14 +57,13 @@ export function validateNotificationPayload(
   if (Buffer.byteLength(serialized, "utf8") > MAX_PAYLOAD_BYTES) {
     return { ok: false, reason: `payload が ${MAX_PAYLOAD_BYTES} バイトを超えています` };
   }
-  const obj = payload as Record<string, unknown>;
-  if (obj.content !== undefined) {
-    if (typeof obj.content !== "string") {
-      return { ok: false, reason: "payload.content は文字列である必要があります" };
-    }
-    if (obj.content.length > 1000) {
-      return { ok: false, reason: "payload.content は 1000 文字以内にしてください" };
-    }
+
+  const content = (payload as Record<string, unknown>).content;
+  if (content !== undefined && typeof content !== "string") {
+    return { ok: false, reason: "payload.content は文字列である必要があります" };
+  }
+  if (typeof content === "string" && content.length > 1000) {
+    return { ok: false, reason: "payload.content は 1000 文字以内にしてください" };
   }
   return { ok: true };
 }
