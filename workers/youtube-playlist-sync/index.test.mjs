@@ -7,6 +7,10 @@ const remote = [
   { playlist_item_id: "item-old", youtube_video_id: "video-old" },
 ];
 
+test("worker module loads in Node strip-only mode", () => {
+  assert.equal(typeof calculateSyncDiff, "function");
+});
+
 test("append_only adds missing videos without deleting remote items", () => {
   const diff = calculateSyncDiff(["video-a", "video-b"], remote, "append_only");
   assert.deepEqual(diff.additions, ["video-b"]);
@@ -31,4 +35,3 @@ test("mirror adds missing videos and removes videos outside the event", () => {
   assert.deepEqual(diff.additions, ["video-b"]);
   assert.deepEqual(diff.removals, [remote[1]]);
 });
-
