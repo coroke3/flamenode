@@ -21,7 +21,22 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - name: 最適化パッチを適用
-        run: python3 scripts/agent_full_optimization_pass_9.py
+        shell: bash
+        run: |
+          set +e
+          python3 scripts/agent_full_optimization_pass_9.py > /tmp/patch.log 2>&1
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            git reset --hard HEAD
+            cp /tmp/patch.log .tmp-agent-patch-error.txt
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .tmp-agent-patch-error.txt
+            git commit -m "診断: 第9巡最適化パッチの適用失敗を記録"
+            git push origin HEAD:agent/full-optimization-pass-9
+            cat /tmp/patch.log
+            exit "$status"
+          fi
       - name: 依存関係をインストール
         run: npm ci --no-audit --no-fund
       - name: 型・Lint・Unit・Workerを検証
