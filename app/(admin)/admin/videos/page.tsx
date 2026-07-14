@@ -28,13 +28,16 @@ import {
 import { Pagination } from "@/components/ui/Pagination";
 import { clampPaging, escapeLike, totalPagesFor } from "@/lib/utils/sql";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
+import {
+  firstSearchParamValue,
+  type SearchParamValue,
+} from "#utils/next";
 
 export const metadata: Metadata = { title: "作品管理" };
 export const dynamic = "force-dynamic";
 
 const VIDEO_PAGE_SIZE = 50;
 const EVENT_OPTIONS_LIMIT = 200;
-type SearchParamValue = string | string[] | undefined;
 
 type AdminVideoRow = {
   id: string;
@@ -56,10 +59,10 @@ export default async function AdminVideosPage({
   }>;
 }): Promise<React.ReactElement> {
   const sp = await searchParams;
-  const q = cleanSearchParam(sp.q);
+  const q = firstSearchParamValue(sp.q);
   const statusRaw = sp.status;
-  const event = cleanSearchParam(sp.event);
-  const pageRaw = cleanSearchParam(sp.page) || "1";
+  const event = firstSearchParamValue(sp.event);
+  const pageRaw = firstSearchParamValue(sp.page) || "1";
   const status = normalizeVideoVisibilityFilter(statusRaw);
   const { page, pageSize, offset } = clampPaging({
     page: pageRaw,
@@ -117,7 +120,7 @@ export default async function AdminVideosPage({
       const withEventJoin = event
         ? base.innerJoin(videoEventsTable, eq(videoEventsTable.video_id, videosTable.id))
         : base;
-      rows = await withEventJoin
+      const rowsQuery = withEventJoin
         .where(where)
         .orderBy(desc(videosTable.created_at))
         .limit(pageSize)
@@ -130,15 +133,23 @@ export default async function AdminVideosPage({
       const countWithJoin = event
         ? countBase.innerJoin(videoEventsTable, eq(videoEventsTable.video_id, videosTable.id))
         : countBase;
-      const countRow = (await countWithJoin.where(where).limit(1))[0];
-      total = Number(countRow?.c ?? 0);
+      const countQuery = countWithJoin.where(where).limit(1);
 
-      events = await db
+      const eventsQuery = db
         .select({ id: eventsTable.id, title: eventsTable.title })
         .from(eventsTable)
         .where(ne(eventsTable.visibility_status, "archived"))
         .orderBy(desc(eventsTable.start_time))
         .limit(EVENT_OPTIONS_LIMIT);
+
+      const [pageRows, countRows, eventRows] = await Promise.all([
+        rowsQuery,
+        countQuery,
+        eventsQuery,
+      ]);
+      rows = pageRows;
+      total = Number(countRows[0]?.c ?? 0);
+      events = eventRows;
     } catch (e) {
       console.error("[AdminVideosPage] fetch failed", e);
     }
@@ -346,9 +357,4 @@ export default async function AdminVideosPage({
       />
     </div>
   );
-}
-
-function cleanSearchParam(value: SearchParamValue): string {
-  if (Array.isArray(value)) return (value[0] ?? "").trim();
-  return (value ?? "").trim();
 }

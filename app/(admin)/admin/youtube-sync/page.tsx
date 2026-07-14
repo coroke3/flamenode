@@ -29,13 +29,16 @@ import {
   videoVisibilityLabel,
   videoVisibilityStatusesForFilter,
 } from "@/lib/admin/videoVisibilityLabels";
+import {
+  firstSearchParamValue,
+  type SearchParamValue,
+} from "#utils/next";
 
 export const metadata: Metadata = { title: "YouTube同期状態" };
 export const dynamic = "force-dynamic";
 
 const LIMIT = 100;
 const STALE_SECONDS = 14 * 24 * 60 * 60;
-type SearchParamValue = string | string[] | undefined;
 const FLAMENODE_VISIBILITY_OPTIONS = VIDEO_VISIBILITY_GROUPS.map((group) => ({
   value: group.key,
   label: group.label,
@@ -69,11 +72,6 @@ type YoutubeSyncRow = {
   updated_at: number | null;
 };
 
-function cleanFilter(raw: SearchParamValue): string {
-  if (Array.isArray(raw)) return (raw[0] ?? "").trim();
-  return (raw ?? "").trim();
-}
-
 function statusBadgeClass(status: string | null): string {
   if (status === "failed") return "fn-badge-danger";
   if (status === "pending") return "fn-badge-warning";
@@ -93,13 +91,13 @@ export default async function AdminYoutubeSyncPage({
   if (!user || user.role !== "admin") notFound();
 
   const sp = (await searchParams) ?? {};
-  const syncStatus = cleanFilter(sp.sync_status);
-  const privacy = cleanFilter(sp.privacy);
-  const availability = cleanFilter(sp.availability);
-  const visibility = normalizeVideoVisibilityFilter(cleanFilter(sp.visibility));
-  const failedOnly = cleanFilter(sp.failed) === "1";
-  const staleOnly = cleanFilter(sp.stale) === "1";
-  const missingOnly = cleanFilter(sp.missing) === "1";
+  const syncStatus = firstSearchParamValue(sp.sync_status);
+  const privacy = firstSearchParamValue(sp.privacy);
+  const availability = firstSearchParamValue(sp.availability);
+  const visibility = normalizeVideoVisibilityFilter(sp.visibility);
+  const failedOnly = firstSearchParamValue(sp.failed) === "1";
+  const staleOnly = firstSearchParamValue(sp.stale) === "1";
+  const missingOnly = firstSearchParamValue(sp.missing) === "1";
 
   const db = getDatabase();
   let rows: YoutubeSyncRow[] = [];

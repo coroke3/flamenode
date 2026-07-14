@@ -13,6 +13,19 @@
  */
 const MAX_NEXT_PATH_LEN = 512;
 
+export type SearchParamValue =
+  | string
+  | readonly string[]
+  | null
+  | undefined;
+
+/** Next.js searchParams の先頭値を空文字へ正規化する。 */
+export function firstSearchParamValue(value: SearchParamValue): string {
+  if (typeof value === "string") return value.trim();
+  if (Array.isArray(value)) return (value[0] ?? "").trim();
+  return "";
+}
+
 /**
  * 相対パスとして安全かどうか（オープンリダイレクト・制御文字の排除）。
  */

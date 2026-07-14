@@ -59,46 +59,26 @@ export default async function AdminEventGroupsPage({
     conds.length === 0 ? undefined : conds.length === 1 ? conds[0] : and(...conds);
 
   const rows = db
-    ? await (where
-        ? db
-            .select({
-              id: eventGroups.id,
-              name: eventGroups.name,
-              slug: eventGroups.slug,
-              group_type: eventGroups.group_type,
-              visibility_status: eventGroups.visibility_status,
-              event_count: sql<number>`count(${eventGroupEvents.event_id})`.as(
-                "event_count",
-              ),
-            })
-            .from(eventGroups)
-            .leftJoin(
-              eventGroupEvents,
-              eq(eventGroupEvents.event_group_id, eventGroups.id),
-            )
-            .where(where)
-            .groupBy(eventGroups.id)
-            .orderBy(asc(eventGroups.name))
-            .limit(100)
-        : db
-            .select({
-              id: eventGroups.id,
-              name: eventGroups.name,
-              slug: eventGroups.slug,
-              group_type: eventGroups.group_type,
-              visibility_status: eventGroups.visibility_status,
-              event_count: sql<number>`count(${eventGroupEvents.event_id})`.as(
-                "event_count",
-              ),
-            })
-            .from(eventGroups)
-            .leftJoin(
-              eventGroupEvents,
-              eq(eventGroupEvents.event_group_id, eventGroups.id),
-            )
-            .groupBy(eventGroups.id)
-            .orderBy(asc(eventGroups.name))
-            .limit(100))
+    ? await db
+        .select({
+          id: eventGroups.id,
+          name: eventGroups.name,
+          slug: eventGroups.slug,
+          group_type: eventGroups.group_type,
+          visibility_status: eventGroups.visibility_status,
+          event_count: sql<number>`count(${eventGroupEvents.event_id})`.as(
+            "event_count",
+          ),
+        })
+        .from(eventGroups)
+        .leftJoin(
+          eventGroupEvents,
+          eq(eventGroupEvents.event_group_id, eventGroups.id),
+        )
+        .where(where)
+        .groupBy(eventGroups.id)
+        .orderBy(asc(eventGroups.name))
+        .limit(100)
     : [];
 
   return (
