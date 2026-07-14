@@ -57,12 +57,7 @@ function isPublicExportEvent(event: EventExportEventRow | null): boolean {
 }
 
 function notFoundResponse(req: Request): Promise<Response> {
-  return publicJsonResponse(
-    req,
-    { error: "not_found" },
-    NOT_FOUND_CACHE_CONTROL,
-    404,
-  );
+  return publicJsonResponse(req, { error: "not_found" }, NOT_FOUND_CACHE_CONTROL, 404);
 }
 
 async function exportResponse(
@@ -111,28 +106,6 @@ async function readCachedPayload(
     }
     return null;
   }
-}
-
-async function cachedExportResponse(
-  req: Request,
-  kv: KVNamespace,
-  cacheKey: string,
-  eventId: string,
-  format: EventExportFormat,
-  updateMode: EventExportUpdateMode,
-  refreshMinutes: EventExportRefreshMinutes,
-): Promise<Response | null> {
-  const cached = await readCachedPayload(kv, cacheKey, eventId);
-  return cached === null
-    ? null
-    : exportResponse(
-        req,
-        cached,
-        format,
-        updateMode,
-        refreshMinutes,
-        "HIT",
-      );
 }
 
 async function buildPayloadOnce(
@@ -203,6 +176,13 @@ export async function GET(
     format,
     refreshMinutes,
   );
+  const cachedResponse = async (): Promise<Response | null> => {
+    if (!kv) return null;
+    const cached = await readCachedPayload(kv, payloadCacheKey, eventId);
+    return cached === null
+      ? null
+      : exportResponse(req, cached, format, updateMode, refreshMinutes, "HIT");
+  };
   let accessState: string | null = null;
   let prefetchedEvent: EventExportEventRow | null | undefined;
 
@@ -217,18 +197,9 @@ export async function GET(
     }
 
     if (accessState === "0") return notFoundResponse(req);
-
     if (accessState === "1") {
-      const cachedResponse = await cachedExportResponse(
-        req,
-        kv,
-        payloadCacheKey,
-        eventId,
-        format,
-        updateMode,
-        refreshMinutes,
-      );
-      if (cachedResponse) return cachedResponse;
+      const response = await cachedResponse();
+      if (response) return response;
     }
   }
 
@@ -252,16 +223,8 @@ export async function GET(
     }
     if (!allowed) return notFoundResponse(req);
 
-    const cachedResponse = await cachedExportResponse(
-      req,
-      kv,
-      payloadCacheKey,
-      eventId,
-      format,
-      updateMode,
-      refreshMinutes,
-    );
-    if (cachedResponse) return cachedResponse;
+    const response = await cachedResponse();
+    if (response) return response;
   }
 
   const generatedAt = Math.floor(Date.now() / 1000);
