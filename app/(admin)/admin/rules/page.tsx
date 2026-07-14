@@ -35,33 +35,26 @@ export default async function AdminRulesPage({
       : "any";
 
   const db = getDatabase();
-  const rows = db
-    ? await (statusFilter === "any"
-        ? db
-            .select()
-            .from(termsVersions)
-            .orderBy(desc(termsVersions.updated_at))
-            .limit(20)
-        : db
-            .select()
-            .from(termsVersions)
-            .where(eq(termsVersions.status, statusFilter))
-            .orderBy(desc(termsVersions.updated_at))
-            .limit(20))
-    : [];
-
-  let reacceptRequiredCount = 0;
-  let reacceptCountIsLowerBound = false;
-  const currentPublishedTerms = db
-    ? (
-        await db
+  const [rows, currentPublishedRows] = db
+    ? await Promise.all([
+        db
+          .select()
+          .from(termsVersions)
+          .where(statusFilter === "any" ? undefined : eq(termsVersions.status, statusFilter))
+          .orderBy(desc(termsVersions.updated_at))
+          .limit(20),
+        db
           .select()
           .from(termsVersions)
           .where(eq(termsVersions.status, "published"))
           .orderBy(desc(termsVersions.published_at), desc(termsVersions.updated_at))
-          .limit(1)
-      )[0] ?? null
-    : null;
+          .limit(1),
+      ])
+    : [[], []];
+  const currentPublishedTerms = currentPublishedRows[0] ?? null;
+
+  let reacceptRequiredCount = 0;
+  let reacceptCountIsLowerBound = false;
   if (db) {
     try {
       const requiredMajor = await getLatestPublishedMajorTerms(db);
