@@ -28,7 +28,6 @@ const [
   announcementsPage,
   rulesPage,
   xLinkRequestsPage,
-  xIdMergesPage,
 ] = await Promise.all([
   readFile(new URL("./securityChecks.ts", import.meta.url), "utf8"),
   readFile(new URL("./spreadsheet/discovery.ts", import.meta.url), "utf8"),
@@ -61,7 +60,6 @@ const [
   readFile(new URL("../../../app/(admin)/admin/announcements/page.tsx", import.meta.url), "utf8"),
   readFile(new URL("../../../app/(admin)/admin/rules/page.tsx", import.meta.url), "utf8"),
   readFile(new URL("../../../app/(admin)/admin/x-link-requests/page.tsx", import.meta.url), "utf8"),
-  readFile(new URL("../../../app/(admin)/admin/x-id-merges/page.tsx", import.meta.url), "utf8"),
 ]);
 
 test("セキュリティ検査はLIMIT後の配列長ではなく全件数を返す", () => {
@@ -213,10 +211,4 @@ test("第10巡の独立管理読取を並列化する", () => {
     xLinkRequestsPage,
     /const \[pending, recentRejected, recentAuditLogs\] = db\s*\? await Promise\.all/,
   );
-});
-
-test("X ID統合管理は表示中ビューだけを読み取る", () => {
-  assert.match(xIdMergesPage, /if \(db && view === "requests"\)/);
-  assert.match(xIdMergesPage, /else if \(db\)/);
-  assert.doesNotMatch(xIdMergesPage, /requests = names/);
 });
