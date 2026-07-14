@@ -12,6 +12,7 @@ const [
   permissionPresets,
   permissionResolver,
   eventStaffCsv,
+  eventStaffActions,
   auditCapability,
   legacyImportTypes,
   eventExportRoute,
@@ -25,6 +26,7 @@ const [
   readFile(new URL("../auth/permissions/presets.ts", import.meta.url), "utf8"),
   readFile(new URL("../auth/permissions/permissionResolver.ts", import.meta.url), "utf8"),
   readFile(new URL("./eventStaffCsv.ts", import.meta.url), "utf8"),
+  readFile(new URL("../actions/event-staff-admin.ts", import.meta.url), "utf8"),
   readFile(new URL("../audit/capability.ts", import.meta.url), "utf8"),
   readFile(new URL("../import/legacy/types.ts", import.meta.url), "utf8"),
   readFile(
@@ -99,6 +101,11 @@ test("イベントスタッフプリセットは単一定義から型と検証�
   assert.doesNotMatch(permissionResolver, /value === "owner"/);
   assert.match(eventStaffCsv, /isEventStaffPreset\(value\)/);
   assert.doesNotMatch(eventStaffCsv, /const CSV_PRESETS/);
+  assert.equal(
+    (eventStaffActions.match(/z\.enum\(EVENT_STAFF_PRESETS\)/g) ?? []).length,
+    2,
+  );
+  assert.doesNotMatch(eventStaffActions, /const ALL_STAFF_PRESETS/);
   assert.match(auditCapability, /isEventStaffPreset\(snapshot\.permission_preset\)/);
   assert.doesNotMatch(auditCapability, /"slot_manager",\s*"content_editor"/);
   assert.match(legacyImportTypes, /permission_preset: EventStaffPreset/);
