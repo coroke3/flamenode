@@ -57,30 +57,27 @@ export async function loadEventExportEvent(
   db: DB,
   eventId: string,
 ): Promise<EventExportEventRow | null> {
-  return (
-    (
-      await db
-        .select({
-          id: events.id,
-          title: events.title,
-          explanation: events.explanation,
-          icon_url: events.icon_url,
-          img_url: events.img_url,
-          accent_color: events.accent_color,
-          event_type: events.event_type,
-          start_time: events.start_time,
-          end_time: events.end_time,
-          entry_start_time: events.entry_start_time,
-          entry_end_time: events.entry_end_time,
-          visibility_status: events.visibility_status,
-          public_api_enabled: events.public_api_enabled,
-          updated_at: events.updated_at,
-        })
-        .from(events)
-        .where(eq(events.id, eventId))
-        .limit(1)
-    )[0] ?? null
-  );
+  const rows = await db
+    .select({
+      id: events.id,
+      title: events.title,
+      explanation: events.explanation,
+      icon_url: events.icon_url,
+      img_url: events.img_url,
+      accent_color: events.accent_color,
+      event_type: events.event_type,
+      start_time: events.start_time,
+      end_time: events.end_time,
+      entry_start_time: events.entry_start_time,
+      entry_end_time: events.entry_end_time,
+      visibility_status: events.visibility_status,
+      public_api_enabled: events.public_api_enabled,
+      updated_at: events.updated_at,
+    })
+    .from(events)
+    .where(eq(events.id, eventId))
+    .limit(1);
+  return rows[0] ?? null;
 }
 
 export async function loadEventExportSnapshot(
@@ -161,7 +158,9 @@ export async function loadEventExportSnapshot(
   ]);
 
   const truncated = rawVideos.length > EVENT_EXPORT_VIDEO_LIMIT;
-  const selectedVideos = rawVideos.slice(0, EVENT_EXPORT_VIDEO_LIMIT);
+  const selectedVideos = truncated
+    ? rawVideos.slice(0, EVENT_EXPORT_VIDEO_LIMIT)
+    : rawVideos;
   const videoIds = selectedVideos.map((video) => video.id);
 
   const membersByVideo = new Map<string, EventExportMemberSnapshot[]>();
@@ -337,13 +336,7 @@ export async function loadEventExportSnapshot(
       entry_start_time: event.entry_start_time,
       entry_end_time: event.entry_end_time,
       updated_at: event.updated_at,
-      public_staff: staffRows.map((staff) => ({
-        x_user_id: staff.x_user_id,
-        display_name: staff.display_name,
-        public_role_label: staff.public_role_label,
-        x_name: staff.x_name,
-        icon_url: staff.icon_url,
-      })),
+      public_staff: staffRows,
     },
     videos: exportVideos,
     limit: EVENT_EXPORT_VIDEO_LIMIT,

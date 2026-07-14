@@ -1,5 +1,5 @@
+import { parseDelimited } from "#utils/delimited";
 import { normalizeXId } from "#utils/xid";
-import { parseCsv } from "../utils/csv.ts";
 
 export interface VideoMemberChapterInput {
   time: string;
@@ -126,7 +126,7 @@ export function parseVideoMemberCsv(
   } = {},
 ): ParsedVideoMemberCsv {
   try {
-    let rowsRaw = parseCsv(input);
+    let rowsRaw = parseDelimited(input, ",");
     if (rowsRaw.length === 0) {
       return { members: [], warnings: ["CSVに有効な行がありません。"] };
     }
