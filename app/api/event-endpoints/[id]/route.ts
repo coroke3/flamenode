@@ -13,6 +13,7 @@ import {
 } from "@/lib/api/eventExportPayload";
 import {
   EVENT_EXPORT_ACCESS_TTL_SECONDS,
+  EVENT_EXPORT_REFRESH_MINUTES,
   eventExportAccessCacheKey,
   eventExportPayloadCacheKey,
   getEventExportKv,
@@ -89,12 +90,23 @@ async function readCachedPayload(
   cacheKey: string,
   eventId: string,
 ): Promise<unknown | null> {
+  let cached: string | null;
   try {
-    const cached = await kv.get(cacheKey);
-    if (!cached) return null;
-    return JSON.parse(cached) as unknown;
+    cached = await kv.get(cacheKey);
   } catch (error) {
     console.warn("[event-export-api] KV payload read failed", {
+      eventId,
+      cacheKey,
+      error,
+    });
+    return null;
+  }
+  if (!cached) return null;
+
+  try {
+    return JSON.parse(cached) as unknown;
+  } catch (error) {
+    console.warn("[event-export-api] KV payload JSON is invalid", {
       eventId,
       cacheKey,
       error,
@@ -161,7 +173,7 @@ export async function GET(
         allowed: {
           format: ["new", "legacy"],
           update: ["realtime", "scheduled"],
-          refresh: [15, 60, 360, 1440],
+          refresh: EVENT_EXPORT_REFRESH_MINUTES,
         },
       },
       "no-store",
@@ -211,19 +223,23 @@ export async function GET(
   if (kv && accessState !== "1") {
     prefetchedEvent = await loadEventExportEvent(db, eventId);
     const allowed = isPublicExportEvent(prefetchedEvent);
-    try {
-      await kv.put(accessKey, allowed ? "1" : "0", {
+    const accessWrite = kv
+      .put(accessKey, allowed ? "1" : "0", {
         expirationTtl: EVENT_EXPORT_ACCESS_TTL_SECONDS,
+      })
+      .catch((error) => {
+        console.warn("[event-export-api] KV access gate write failed", {
+          eventId,
+          error,
+        });
       });
-    } catch (error) {
-      console.warn("[event-export-api] KV access gate write failed", {
-        eventId,
-        error,
-      });
-    }
-    if (!allowed) return notFoundResponse(req);
 
-    const response = await cachedResponse();
+    if (!allowed) {
+      await accessWrite;
+      return notFoundResponse(req);
+    }
+
+    const [response] = await Promise.all([cachedResponse(), accessWrite]);
     if (response) return response;
   }
 
