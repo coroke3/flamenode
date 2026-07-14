@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { buildEventExportPayload } from "./api/eventExportPayload.ts";
+import {
+  buildEventExportPayload,
+  buildEventExportPayloadForFormat,
+  buildLegacyEventExportPayload,
+} from "./api/eventExportPayload.ts";
 
 const snapshot = {
   event: {
@@ -86,11 +90,18 @@ const snapshot = {
           sort_order: 0,
         },
         {
+          key: "stage_participation",
+          label: "登壇可否",
+          answer_text: "参加",
+          answer_json: null,
+          sort_order: 1,
+        },
+        {
           key: "production_experience",
           label: "制作歴",
           answer_text: "3年",
           answer_json: null,
-          sort_order: 1,
+          sort_order: 2,
         },
       ],
     },
@@ -99,7 +110,7 @@ const snapshot = {
   truncated: false,
 };
 
-test("統一形式v3は旧形式の意味ある情報を構造化して包含する", () => {
+test("新形式v3は旧形式の意味ある情報を構造化して包含する", () => {
   const payload = buildEventExportPayload(
     snapshot,
     1_700_000_200,
@@ -124,13 +135,48 @@ test("統一形式v3は旧形式の意味ある情報を構造化して包含す
   assert.match(video.source.thumbnails.medium_url, /mqdefault\.jpg$/);
   assert.match(video.source.thumbnails.large_url, /maxresdefault\.jpg$/);
   assert.equal(video.custom_answers_by_key.stage_permission, "可");
+  assert.equal(video.custom_answers_by_key.stage_participation, "参加");
   assert.equal(video.custom_answers_by_key.production_experience, "3年");
   assert.deepEqual(video.creator.other_social_links, {
     portfolio: "https://example.com",
   });
 });
 
-test("統一形式に旧フラットキーと内部情報を含めない", () => {
+test("旧形式互換は正規化済みデータから旧列を復元する", () => {
+  const payload = buildLegacyEventExportPayload(snapshot);
+  assert.equal(payload.length, 1);
+  const row = payload[0];
+  assert.equal(row.eventid, "event-1");
+  assert.equal(row.type1, "複数人");
+  assert.equal(row.type2, "団体");
+  assert.equal(row.creator, "制作者");
+  assert.equal(row.member, "メンバー");
+  assert.equal(row.memberid, "@member_id");
+  assert.equal(row.starts, "12");
+  assert.equal(row.ends, "24");
+  assert.equal(row.righttype, "可");
+  assert.equal(row.toudan, "参加");
+  assert.equal(row.movieyear, "3年");
+  assert.equal(row.soft, "AE");
+  assert.equal(row.beforecomment, "紹介");
+  assert.equal(row.aftercomment, "後書き");
+  assert.match(row.small, /mqdefault\.jpg$/);
+  assert.match(row.largeThumbnail, /maxresdefault\.jpg$/);
+});
+
+test("形式ディスパッチは新旧の応答形を切り替える", () => {
+  const legacy = buildEventExportPayloadForFormat(snapshot, "legacy");
+  const modern = buildEventExportPayloadForFormat(
+    snapshot,
+    "new",
+    1_700_000_200,
+    "realtime",
+  );
+  assert.equal(Array.isArray(legacy), true);
+  assert.equal(modern.schema_version, 3);
+});
+
+test("新形式に旧フラットキーと内部情報を含めない", () => {
   const payload = buildEventExportPayload(snapshot);
   const serialized = JSON.stringify(payload);
   for (const forbidden of [
@@ -154,13 +200,34 @@ test("統一形式に旧フラットキーと内部情報を含めない", () =>
   }
 });
 
-test("イベントAPIは旧レスポンス生成を使用せずlegacy指定を廃止扱いにする", async () => {
+test("イベントAPIは新旧形式と形式別KVキャッシュを提供する", async () => {
   const route = await readFile(
     new URL("../../app/api/event-endpoints/[id]/route.ts", import.meta.url),
     "utf8",
   );
-  assert.doesNotMatch(route, /buildEventApiPayload|EVENT_API_VIDEO_LIMIT/);
-  assert.doesNotMatch(route, /buildLegacyRows/);
-  assert.match(route, /legacy_format_removed/);
-  assert.match(route, /schema_version:\s*3/);
+  assert.doesNotMatch(route, /legacy_format_removed/);
+  assert.match(route, /value === "legacy"/);
+  assert.match(route, /allowed:\s*\["new", "legacy"\]/);
+  assert.match(route, /buildEventExportPayloadForFormat/);
+  assert.match(route, /eventExportPayloadCacheKey\(\s*eventId,\s*format,/);
+  assert.match(route, /eventExportAccessCacheKey/);
+  assert.match(route, /X-FlameNode-Format/);
+  assert.match(route, /s-maxage=60/);
+});
+
+test("管理画面と有効化処理が形式選択と即時キャッシュ破棄に対応する", async () => {
+  const [builder, action] = await Promise.all([
+    readFile(
+      new URL("../components/admin/EventExportLinkBuilder.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("./actions/api-endpoints.ts", import.meta.url),
+      "utf8",
+    ),
+  ]);
+  assert.match(builder, /option value="new"/);
+  assert.match(builder, /option value="legacy"/);
+  assert.match(builder, /new URLSearchParams\(\{ format, update: updateMode \}\)/);
+  assert.match(action, /invalidateEventExportCache\(eventId\)/);
 });
