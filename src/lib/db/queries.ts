@@ -17,7 +17,10 @@ import {
   coalescedVideoScoreDesc,
 } from "./videoScoreSql";
 import { compareEventsByUpcomingPriority } from "@/lib/utils/eventOrdering";
-import { publicListableEventWhere } from "@/lib/utils/eventStatus";
+import {
+  activeEventWhere,
+  publicListableEventWhere,
+} from "@/lib/utils/eventStatus";
 import {
   isPickupCreatorEligible,
   sortPickupCreators,
@@ -29,6 +32,34 @@ export const PVSF_SUMMARY_EVENT_ID = "PVSFSummary";
  *  - visibility_status == "public"
  */
 export const publicVideoCondition = eq(videos.visibility_status, "public");
+
+const publicVideoListSelect = {
+  id: videos.id,
+  title: videos.title,
+  youtube_video_id: videos.youtube_video_id,
+  display_name: creatorNameExpr,
+  icon_url: creatorIconExpr,
+  creator_x_user_id: videos.creator_x_user_id,
+  primary_event_id: videos.primary_event_id,
+  scheduled_time: videos.scheduled_time,
+  part: videos.part,
+} as const;
+
+const scoredPublicVideoListSelect = {
+  ...publicVideoListSelect,
+  video_score: coalescedVideoScore,
+} as const;
+
+const eventPublicVideoListSelect = {
+  id: publicVideoListSelect.id,
+  title: publicVideoListSelect.title,
+  youtube_video_id: publicVideoListSelect.youtube_video_id,
+  display_name: publicVideoListSelect.display_name,
+  icon_url: publicVideoListSelect.icon_url,
+  creator_x_user_id: publicVideoListSelect.creator_x_user_id,
+  scheduled_time: publicVideoListSelect.scheduled_time,
+  part: publicVideoListSelect.part,
+} as const;
 
 export function excludePvsfSummaryVideos() {
   return sql`
@@ -67,18 +98,7 @@ function publicEventVideoCondition(eventId: string) {
 /** トップページのおすすめ作品候補（score 上位）。 */
 export async function fetchRecommendedVideos(db: DB, limit = 40) {
   const rows = await db
-    .select({
-      id: videos.id,
-      title: videos.title,
-      youtube_video_id: videos.youtube_video_id,
-      display_name: creatorNameExpr,
-      icon_url: creatorIconExpr,
-      creator_x_user_id: videos.creator_x_user_id,
-      primary_event_id: videos.primary_event_id,
-      scheduled_time: videos.scheduled_time,
-      part: videos.part,
-      video_score: coalescedVideoScore,
-    })
+    .select(scoredPublicVideoListSelect)
     .from(videos)
     .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
     .where(publicVideoCondition)
@@ -101,18 +121,7 @@ export async function fetchRecommendedVideos(db: DB, limit = 40) {
  */
 export async function fetchUnderratedVideos(db: DB, limit = 60) {
   const rows = await db
-    .select({
-      id: videos.id,
-      title: videos.title,
-      youtube_video_id: videos.youtube_video_id,
-      display_name: creatorNameExpr,
-      icon_url: creatorIconExpr,
-      creator_x_user_id: videos.creator_x_user_id,
-      primary_event_id: videos.primary_event_id,
-      scheduled_time: videos.scheduled_time,
-      part: videos.part,
-      video_score: coalescedVideoScore,
-    })
+    .select(scoredPublicVideoListSelect)
     .from(videos)
     .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
     .where(publicVideoCondition)
@@ -124,17 +133,7 @@ export async function fetchUnderratedVideos(db: DB, limit = 60) {
 /** 最新作品 (scheduled_time 降順)。 */
 export async function fetchLatestVideos(db: DB, limit = 30) {
   const rows = await db
-    .select({
-      id: videos.id,
-      title: videos.title,
-      youtube_video_id: videos.youtube_video_id,
-      display_name: creatorNameExpr,
-      icon_url: creatorIconExpr,
-      creator_x_user_id: videos.creator_x_user_id,
-      primary_event_id: videos.primary_event_id,
-      scheduled_time: videos.scheduled_time,
-      part: videos.part,
-    })
+    .select(publicVideoListSelect)
     .from(videos)
     .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
     .where(publicVideoCondition)
@@ -156,16 +155,7 @@ export async function fetchLatestEvents(db: DB, limit = 3) {
 /** イベント詳細など: 紐づく公開作品を上映順ですべて返す。 */
 export async function fetchAllPublicVideosForEvent(db: DB, eventId: string) {
   const rows = await db
-    .select({
-      id: videos.id,
-      title: videos.title,
-      youtube_video_id: videos.youtube_video_id,
-      display_name: creatorNameExpr,
-      icon_url: creatorIconExpr,
-      creator_x_user_id: videos.creator_x_user_id,
-      scheduled_time: videos.scheduled_time,
-      part: videos.part,
-    })
+    .select(eventPublicVideoListSelect)
     .from(videos)
     .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
     .where(publicEventVideoCondition(eventId))
@@ -188,7 +178,6 @@ export async function countVideosForEvent(
 
 /** 開催中イベント (visibility_status=public かつ期間内かつ非アーカイブ)。 */
 export async function fetchActiveEvents(db: DB) {
-  const { activeEventWhere } = await import("@/lib/utils/eventStatus");
   const rows = await db
     .select()
     .from(events)

@@ -17,12 +17,15 @@ import { AdminVideoManagementTabs } from "@/components/admin/AdminVideoManagemen
 import { FnTable } from "@/components/ui/FnTable";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
+import {
+  firstSearchParamValue,
+  type SearchParamValue,
+} from "#utils/next";
 
 export const metadata: Metadata = { title: "イベント再生リスト同期" };
 export const dynamic = "force-dynamic";
 
 const LIMIT = 100;
-type SearchParamValue = string | string[] | undefined;
 
 interface Props {
   searchParams?: Promise<{
@@ -48,10 +51,6 @@ type PlaylistSyncAdminRow = {
   synced_count: number;
 };
 
-function clean(raw: SearchParamValue): string {
-  return (Array.isArray(raw) ? raw[0] : raw ?? "").trim();
-}
-
 function statusBadgeClass(status: string): string {
   if (status === "failed") return "fn-badge-danger";
   if (status === "deferred" || status === "scanning") return "fn-badge-warning";
@@ -73,8 +72,8 @@ export default async function AdminYoutubePlaylistSyncPage({
   if (!user || user.role !== "admin") notFound();
 
   const sp = (await searchParams) ?? {};
-  const enabledFilter = clean(sp.enabled);
-  const statusFilter = clean(sp.status);
+  const enabledFilter = firstSearchParamValue(sp.enabled);
+  const statusFilter = firstSearchParamValue(sp.status);
   const db = getDatabase();
   let rows: PlaylistSyncAdminRow[] = [];
   let hasMore = false;
