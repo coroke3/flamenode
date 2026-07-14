@@ -7,7 +7,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { videoModerationCases } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
-import { AdminVideoStatusForm } from "@/components/admin/AdminVideoStatusForm";
+import { AdminVideoStatusForm } from "@/components/video/VideoStatusForm";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminVideoTabs } from "@/components/admin/AdminVideoTabs";
 import { VideoReviewDetailPanel } from "@/components/admin/VideoReviewDetailPanel";

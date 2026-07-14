@@ -63,7 +63,7 @@ requireAll("app/(public)/list/page.tsx", [
   [/Pagination/, "ページングUIがありません。"],
 ]);
 
-requireAll("src/components/layout/ThemeBootstrap.tsx", [
+requireAll("app/layout.tsx", [
   [/prefers-color-scheme: dark/, "OSテーマ判定がありません。"],
   [/fn-theme/, "保存済みテーマの読込がありません。"],
   [/data-theme-preference/, "テーマ選択状態がDOMへ反映されません。"],

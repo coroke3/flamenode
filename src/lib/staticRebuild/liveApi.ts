@@ -2,7 +2,31 @@ import "server-only";
 import { and, eq, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import { events, slots, videos, videoEvents } from "@/lib/db/schema";
-import { resolveEventFreshness } from "./freshness";
+import type { EventFreshness } from "./types";
+import { getEventVisibility } from "#utils/event-status-core";
+
+const ACTIVE_GRACE_AFTER_END_SEC = 86400;
+
+function resolveEventFreshness(
+  event: {
+    visibility_status?: string | null;
+    start_time: number | null;
+    end_time: number | null;
+  },
+  now: number,
+): EventFreshness {
+  const visibility = getEventVisibility(event);
+  if (visibility === "archived") return "archived";
+  if (visibility === "public") return "active";
+  const start = event.start_time ?? 0;
+  const end = event.end_time ?? 0;
+  return start &&
+    end &&
+    now >= start &&
+    now <= end + ACTIVE_GRACE_AFTER_END_SEC
+    ? "active"
+    : "ended";
+}
 
 const MAX_EVENT_ID_LEN = 128;
 /** 1 イベントあたりの live slots 取得上限（D1 負荷・レスポンス肥大化の防止） */

@@ -42,9 +42,9 @@ import {
   eventStatusLabel,
   isAcceptingEntries,
 } from "@/lib/utils/eventStatus";
-import { loadStaticVideoDetail } from "@/lib/publicData/staticVideoDetail";
+import { loadStaticVideoDetail } from "@/lib/publicData/loader";
 import { canFallbackToDatabase } from "@/lib/publicData/loader";
-import type { StaticVideoDetail } from "@/lib/publicData/staticVideoDetailCore";
+import type { StaticVideoDetail } from "@/lib/publicData/loader";
 
 export const dynamic = "force-dynamic";
 

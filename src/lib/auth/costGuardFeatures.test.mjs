@@ -6,7 +6,7 @@ import {
   parseWriteFeatureList,
 } from "./writeGuardCore.ts";
 
-const source = await readFile(new URL("./costGuardFeatures.ts", import.meta.url), "utf8");
+const source = await readFile(new URL("./writeGuard.ts", import.meta.url), "utf8");
 
 test("CostGuard feature list accepts an empty or valid string array", () => {
   assert.deepEqual(parseWriteFeatureList(null), { ok: true, features: [] });

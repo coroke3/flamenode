@@ -34,9 +34,9 @@ import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 import { formatCount } from "@/lib/utils/format";
 import { absoluteUrl, buildPageMetadata, compactText } from "@/lib/seo";
 import { buildSlotParts, formatSlotPartLabel } from "@/lib/utils/slotGrouping";
-import { loadStaticEventDetail } from "@/lib/publicData/staticEventDetail";
+import { loadStaticEventDetail } from "@/lib/publicData/loader";
 import { canFallbackToDatabase } from "@/lib/publicData/loader";
-import type { StaticEventDetail } from "@/lib/publicData/staticEventDetailCore";
+import type { StaticEventDetail } from "@/lib/publicData/loader";
 
 export const dynamic = "force-dynamic";
 

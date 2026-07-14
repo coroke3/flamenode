@@ -33,15 +33,14 @@ import {
   type CellPos,
   type ColumnMeta,
 } from "./spreadsheetGridUtils";
-import {
-  SPREADSHEET_GRID_DEFAULT_COL_WIDTH,
-  SPREADSHEET_GRID_MAX_COL_WIDTH,
-  SPREADSHEET_GRID_MIN_COL_WIDTH,
-} from "./spreadsheetGridConstants";
 import { SpreadsheetGridFindBar } from "./SpreadsheetGridFindBar";
 import { SpreadsheetGridFormulaBar } from "./SpreadsheetGridFormulaBar";
 import { SpreadsheetGridStatusBar } from "./SpreadsheetGridStatusBar";
 import { cellMatchesFind } from "@/lib/admin/spreadsheet/cellFormat";
+
+const SPREADSHEET_GRID_DEFAULT_COL_WIDTH = 110;
+const SPREADSHEET_GRID_MIN_COL_WIDTH = 56;
+const SPREADSHEET_GRID_MAX_COL_WIDTH = 420;
 
 type EditState = {
   rowIndex: number;

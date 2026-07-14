@@ -34,9 +34,9 @@ import { CreatorCard } from "@/components/user/CreatorCard";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { type HomeStats } from "@/components/layout/homeVisuals";
 import type { PublicEventCategory } from "@/components/event/PublicEventCard";
-import { loadStaticTopPage } from "@/lib/publicData/staticTop";
+import { loadStaticTopPage } from "@/lib/publicData/loader";
 import { canFallbackToDatabase } from "@/lib/publicData/loader";
-import type { StaticTopData } from "@/lib/publicData/staticTopCore";
+import type { StaticTopData } from "@/lib/publicData/loader";
 
 export const dynamic = "force-dynamic";
 

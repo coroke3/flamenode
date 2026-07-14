@@ -20,9 +20,28 @@ import {
   videos,
 } from "@/lib/db/schema";
 import { AdminSidebarNav } from "@/components/admin/AdminSidebarNav";
-import { ConsoleModeBanner } from "@/components/layout/ConsoleModeBanner";
 import { buildAdminNavGroups } from "@/lib/admin/adminNavGroups";
 import { ManageSidebarNav } from "./ManageSidebarNav";
+
+function ConsoleModeBanner({
+  classPrefix,
+  badge,
+  label,
+  children,
+}: {
+  classPrefix: "admin-mode" | "manage-mode";
+  badge: string;
+  label: string;
+  children: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <div className={`${classPrefix}-banner`}>
+      <span className={`${classPrefix}-badge`}>{badge}</span>
+      <span className={`${classPrefix}-label`}>{label}</span>
+      <p className={`${classPrefix}-hint`}>{children}</p>
+    </div>
+  );
+}
 
 function SidebarModeBanner({
   mode,
@@ -83,11 +102,13 @@ export async function ConsoleSidebar({
     );
   }
 
-  const editableEventIds = isAdmin ? [] : await getEditableEventIds(db, u.id);
-  const showXLinkRequests = await canManageXIdLinkRequests(db, {
-    id: u.id,
-    role: u.role ?? null,
-  });
+  const [editableEventIds, showXLinkRequests] = await Promise.all([
+    isAdmin ? Promise.resolve([]) : getEditableEventIds(db, u.id),
+    canManageXIdLinkRequests(db, {
+      id: u.id,
+      role: u.role ?? null,
+    }),
+  ]);
   if (!isAdmin && editableEventIds.length === 0 && !showXLinkRequests) {
     return null;
   }

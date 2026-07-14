@@ -27,12 +27,12 @@ import {
   type EventListGroupSection,
 } from "@/lib/db/eventGroups";
 import { eventGroupAnchorId } from "@/lib/eventGroupRoutes";
-import { loadStaticEventsIndex } from "@/lib/publicData/staticEventsIndex";
+import { loadStaticEventsIndex } from "@/lib/publicData/loader";
 import { canFallbackToDatabase } from "@/lib/publicData/loader";
 import type {
   StaticEventGroupSection,
   StaticEventIndexEvent,
-} from "@/lib/publicData/staticEventsIndexCore";
+} from "@/lib/publicData/loader";
 
 export const metadata: Metadata = { title: "イベント" };
 export const dynamic = "force-dynamic";

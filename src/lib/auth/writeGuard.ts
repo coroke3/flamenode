@@ -3,13 +3,13 @@ import { eq } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import { getCurrentUser, type CurrentUser } from "./currentUser";
 import { getDatabase } from "@/lib/cloudflare";
-import { xUsers } from "@/lib/db/schema";
+import { systemSettings, xUsers } from "@/lib/db/schema";
 import { getApprovedXIds } from "./ownership";
 import {
-  evaluateCostGuard,
-  type CostGuardFeatureKey,
-} from "./costGuardFeatures";
-import { evaluateWriteIdentity } from "./writeGuardCore";
+  evaluateCostGuardCore,
+  evaluateWriteIdentity,
+  type WriteFeatureKey,
+} from "./writeGuardCore";
 
 /**
  * 全書き込み入口で通す共通ガード。
@@ -29,6 +29,41 @@ import { evaluateWriteIdentity } from "./writeGuardCore";
  * 成功時は user, 正規化済み activeXId, 自分の承認済み X ID 一覧を返す。
  * 呼出元は戻り値の reason / message をそのまま VideoActionResult 等に詰められる。
  */
+
+export type CostGuardFeatureKey = WriteFeatureKey;
+
+type CostGuardCheckResult =
+  | { blocked: false }
+  | { blocked: true; reason: "mode" | "feature" };
+
+async function evaluateCostGuard(
+  db: DB,
+  feature: CostGuardFeatureKey,
+): Promise<CostGuardCheckResult> {
+  const row = (
+    await db
+      .select({
+        operation_mode: systemSettings.operation_mode,
+        disabled_features_json: systemSettings.disabled_features_json,
+        cost_guard_exception_until: systemSettings.cost_guard_exception_until,
+        cost_guard_exception_features_json:
+          systemSettings.cost_guard_exception_features_json,
+      })
+      .from(systemSettings)
+      .where(eq(systemSettings.id, "default"))
+      .limit(1)
+  )[0];
+
+  if (!row) return { blocked: true, reason: "mode" };
+  return evaluateCostGuardCore({
+    feature,
+    operationMode: row.operation_mode,
+    disabledFeaturesJson: row.disabled_features_json,
+    exceptionUntil: row.cost_guard_exception_until,
+    exceptionFeaturesJson: row.cost_guard_exception_features_json,
+    now: Math.floor(Date.now() / 1000),
+  });
+}
 
 export type WriteGuardOptions = {
   /** active_x_user_id が存在することを要求する。 */

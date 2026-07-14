@@ -1,16 +1,13 @@
 import "server-only";
 
 import { and, eq } from "drizzle-orm";
-import { withDatabase } from "@/lib/cloudflare";
+import { getDatabase, withDatabase } from "@/lib/cloudflare";
 import type { DB } from "@/lib/db/client";
 import { xAccountLinkRequests, xUsers, users } from "@/lib/db/schema";
 import { resolveMissingIcons } from "@/lib/db/iconResolution";
 import { normalizeXId } from "@/lib/utils/xid";
-import {
-  getManagementAccess,
-  type ManagementAccess,
-} from "./managementAccess";
 import { resolveActiveXUserId } from "./resolveActiveXId";
+import { getEditableEventIds } from "./ownership";
 import {
   normalizeXIdApprovalStatus,
   xIdApprovalRank,
@@ -23,10 +20,11 @@ export type HeaderUser = {
   image: string | null;
   role: "user" | "admin" | "moderator";
   xIds: XIdEntry[];
-  management: Pick<
-    ManagementAccess,
-    "canAccessAdmin" | "canAccessManage" | "manageableEventCount"
-  >;
+  management: {
+    canAccessAdmin: boolean;
+    canAccessManage: boolean;
+    manageableEventCount: number;
+  };
 };
 
 type SessionUserLike = {
@@ -36,6 +34,33 @@ type SessionUserLike = {
   role?: string | null;
   active_x_user_id?: string | null;
 };
+
+async function getManagementAccess(user: {
+  id: string;
+  role?: string | null;
+}): Promise<HeaderUser["management"]> {
+  if (user.role === "admin") {
+    return {
+      canAccessAdmin: true,
+      canAccessManage: true,
+      manageableEventCount: 0,
+    };
+  }
+  const db = getDatabase();
+  if (!db) {
+    return {
+      canAccessAdmin: false,
+      canAccessManage: false,
+      manageableEventCount: 0,
+    };
+  }
+  const manageableEventCount = (await getEditableEventIds(db, user.id)).length;
+  return {
+    canAccessAdmin: false,
+    canAccessManage: manageableEventCount > 0,
+    manageableEventCount,
+  };
+}
 
 function normalizeRole(
   role: string | null | undefined,
