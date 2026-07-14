@@ -41,31 +41,34 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
   let eventOptions: Array<{ id: string; title: string; enabled: number }> = [];
 
   if (db) {
-    rows = await db
-      .select({
-        id: eventsTable.id,
-        event_id: eventsTable.id,
-        public_api_enabled: eventsTable.public_api_enabled,
-        public_api_updated_at: eventsTable.public_api_updated_at,
-        created_at: eventsTable.created_at,
-        event_title: eventsTable.title,
-        event_visibility_status: eventsTable.visibility_status,
-      })
-      .from(eventsTable)
-      .where(eq(eventsTable.public_api_enabled, 1))
-      .orderBy(desc(eventsTable.public_api_updated_at), desc(eventsTable.created_at))
-      .limit(100);
-
-    eventOptions = await db
-      .select({
-        id: eventsTable.id,
-        title: eventsTable.title,
-        enabled: eventsTable.public_api_enabled,
-      })
-      .from(eventsTable)
-      .where(eq(eventsTable.visibility_status, "public"))
-      .orderBy(desc(eventsTable.created_at))
-      .limit(100);
+    const [enabledRows, publicEvents] = await Promise.all([
+      db
+        .select({
+          id: eventsTable.id,
+          event_id: eventsTable.id,
+          public_api_enabled: eventsTable.public_api_enabled,
+          public_api_updated_at: eventsTable.public_api_updated_at,
+          created_at: eventsTable.created_at,
+          event_title: eventsTable.title,
+          event_visibility_status: eventsTable.visibility_status,
+        })
+        .from(eventsTable)
+        .where(eq(eventsTable.public_api_enabled, 1))
+        .orderBy(desc(eventsTable.public_api_updated_at), desc(eventsTable.created_at))
+        .limit(100),
+      db
+        .select({
+          id: eventsTable.id,
+          title: eventsTable.title,
+          enabled: eventsTable.public_api_enabled,
+        })
+        .from(eventsTable)
+        .where(eq(eventsTable.visibility_status, "public"))
+        .orderBy(desc(eventsTable.created_at))
+        .limit(100),
+    ]);
+    rows = enabledRows;
+    eventOptions = publicEvents;
   }
 
   return (
