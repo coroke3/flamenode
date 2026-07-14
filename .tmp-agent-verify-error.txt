@@ -1,0 +1,1934 @@
+===== npm run typecheck =====
+
+> flamenode@0.1.0 typecheck
+> tsc --noEmit
+
+===== npm run lint =====
+
+> flamenode@0.1.0 lint
+> next lint
+
+[load-dev-vars] .dev.vars not found. Copy from .dev.vars.example first.
+Attention: Next.js now collects completely anonymous telemetry regarding usage.
+This information is used to shape Next.js' roadmap and prioritize features.
+You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+https://nextjs.org/telemetry
+
+✔ No ESLint warnings or errors
+===== npm run test:unit =====
+
+> flamenode@0.1.0 test:unit
+> node --test --experimental-strip-types src/**/*.test.mjs
+
+TAP version 13
+# Subtest: 新形式v3は旧形式の意味ある情報を構造化して包含する
+ok 1 - 新形式v3は旧形式の意味ある情報を構造化して包含する
+  ---
+  duration_ms: 2.455221
+  type: 'test'
+  ...
+# Subtest: 旧形式互換は正規化済みデータから旧列を復元する
+ok 2 - 旧形式互換は正規化済みデータから旧列を復元する
+  ---
+  duration_ms: 0.611088
+  type: 'test'
+  ...
+# Subtest: 形式ディスパッチは新旧の応答形を切り替える
+ok 3 - 形式ディスパッチは新旧の応答形を切り替える
+  ---
+  duration_ms: 0.355309
+  type: 'test'
+  ...
+# Subtest: 新形式に旧フラットキーと内部情報を含めない
+ok 4 - 新形式に旧フラットキーと内部情報を含めない
+  ---
+  duration_ms: 0.307838
+  type: 'test'
+  ...
+# Subtest: イベントAPIは新旧形式と形式別KVキャッシュを提供する
+ok 5 - イベントAPIは新旧形式と形式別KVキャッシュを提供する
+  ---
+  duration_ms: 13.65243
+  type: 'test'
+  ...
+# Subtest: 管理画面と有効化処理が形式選択と即時キャッシュ破棄に対応する
+ok 6 - 管理画面と有効化処理が形式選択と即時キャッシュ破棄に対応する
+  ---
+  duration_ms: 3.534636
+  type: 'test'
+  ...
+# Subtest: route group layouts use canonical data-fn-surface values
+ok 7 - route group layouts use canonical data-fn-surface values
+  ---
+  duration_ms: 0.999917
+  type: 'test'
+  ...
+# Subtest: admin and manage layouts do not masquerade as public surface
+ok 8 - admin and manage layouts do not masquerade as public surface
+  ---
+  duration_ms: 0.374096
+  type: 'test'
+  ...
+# Subtest: SOCIAL_LINK_TYPE_OPTIONS includes extended profile link types
+ok 9 - SOCIAL_LINK_TYPE_OPTIONS includes extended profile link types
+  ---
+  duration_ms: 0.856564
+  type: 'test'
+  ...
+# Subtest: parseSocialLinks normalizes Tumblr spelling and accepts Discord URLs
+ok 10 - parseSocialLinks normalizes Tumblr spelling and accepts Discord URLs
+  ---
+  duration_ms: 0.915311
+  type: 'test'
+  ...
+# Subtest: serializeSocialLinks stores bare email as mailto for Email links
+ok 11 - serializeSocialLinks stores bare email as mailto for Email links
+  ---
+  duration_ms: 0.240558
+  type: 'test'
+  ...
+# Subtest: validateSocialLinksJson rejects non-url Discord handles
+ok 12 - validateSocialLinksJson rejects non-url Discord handles
+  ---
+  duration_ms: 0.279586
+  type: 'test'
+  ...
+# Subtest: social link display helpers use dedicated icons where available
+ok 13 - social link display helpers use dedicated icons where available
+  ---
+  duration_ms: 0.310362
+  type: 'test'
+  ...
+# Subtest: profileHeaderSocialLinks removes only the primary X profile link
+ok 14 - profileHeaderSocialLinks removes only the primary X profile link
+  ---
+  duration_ms: 0.425764
+  type: 'test'
+  ...
+1..14
+# tests 14
+# suites 0
+# pass 14
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 286.465392
+===== npm run test:workers =====
+
+> flamenode@0.1.0 test:workers
+> node --test --experimental-strip-types workers/**/*.test.mjs
+
+TAP version 13
+# {"worker":"content-jobs","job":"cleanup-retention-settings","result":"fallback","error":"D1 unavailable"}
+# {"worker":"content-jobs","job":"cleanup-retention-settings","result":"fallback","error":"Too many requests"}
+# {"worker":"content-jobs","job":"cleanup-retry","run_id":"19ee86f5-775b-4db9-b00a-8b1829e053d8","started_at":"2026-07-14T08:10:02.308Z","processed":0,"skipped":0,"failed":1,"duration_ms":0,"result":"failed","error":"schema_error:no such table: audit_logs"}
+# {"worker":"content-jobs","job":"cleanup-give-up","run_id":"19ee86f5-775b-4db9-b00a-8b1829e053d8","started_at":"2026-07-14T08:10:02.308Z","processed":0,"skipped":0,"failed":1,"duration_ms":0,"result":"failed","error":"no such table: audit_logs"}
+# Subtest: runCleanup: audit_logs と通知・スロットのクリーンアップ SQL を発行する
+ok 1 - runCleanup: audit_logs と通知・スロットのクリーンアップ SQL を発行する
+  ---
+  duration_ms: 1.449676
+  type: 'test'
+  ...
+# Subtest: runCleanup: compact_after_days を audit_log_settings から読む
+ok 2 - runCleanup: compact_after_days を audit_log_settings から読む
+  ---
+  duration_ms: 0.334086
+  type: 'test'
+  ...
+# Subtest: runCleanup: audit_log_settings 未作成時は compact 30 日フォールバック
+ok 3 - runCleanup: audit_log_settings 未作成時は compact 30 日フォールバック
+  ---
+  duration_ms: 0.347677
+  type: 'test'
+  ...
+# Subtest: readHistoryRetentionDays: first() errors fall back to defaults
+ok 4 - readHistoryRetentionDays: first() errors fall back to defaults
+  ---
+  duration_ms: 1.37219
+  type: 'test'
+  ...
+# Subtest: runCleanupWithRetry: transient errors are retried
+ok 5 - runCleanupWithRetry: transient errors are retried
+  ---
+  duration_ms: 3.798988
+  type: 'test'
+  ...
+# Subtest: runCleanupWithRetry: schema errors are not retried
+ok 6 - runCleanupWithRetry: schema errors are not retried
+  ---
+  duration_ms: 0.84057
+  type: 'test'
+  ...
+# Subtest: runCleanup: mutating slot queries bind current time
+ok 7 - runCleanup: mutating slot queries bind current time
+  ---
+  duration_ms: 0.43688
+  type: 'test'
+  ...
+# Subtest: computeRetentionDays: null/undefined はデフォルト
+ok 8 - computeRetentionDays: null/undefined はデフォルト
+  ---
+  duration_ms: 1.593099
+  type: 'test'
+  ...
+# Subtest: computeRetentionDays: 異常値はデフォルトにフォールバック
+ok 9 - computeRetentionDays: 異常値はデフォルトにフォールバック
+  ---
+  duration_ms: 0.163514
+  type: 'test'
+  ...
+# Subtest: computeRetentionDays: 範囲内の値を受け入れる
+ok 10 - computeRetentionDays: 範囲内の値を受け入れる
+  ---
+  duration_ms: 0.151405
+  type: 'test'
+  ...
+# Subtest: computeRetentionDays: 大きな値は long_audit を normal*4 に追従させる
+ok 11 - computeRetentionDays: 大きな値は long_audit を normal*4 に追従させる
+  ---
+  duration_ms: 0.119547
+  type: 'test'
+  ...
+# Subtest: computeRetentionDays: 範囲外 (下限/上限) クランプ
+ok 12 - computeRetentionDays: 範囲外 (下限/上限) クランプ
+  ---
+  duration_ms: 0.221048
+  type: 'test'
+  ...
+# Subtest: computeNotificationCutoffs: now から正しく引き算
+ok 13 - computeNotificationCutoffs: now から正しく引き算
+  ---
+  duration_ms: 0.191644
+  type: 'test'
+  ...
+# Subtest: computeHistoryCutoffs: retention 日数を秒に変換
+ok 14 - computeHistoryCutoffs: retention 日数を秒に変換
+  ---
+  duration_ms: 0.192566
+  type: 'test'
+  ...
+# Subtest: computeVoidedVideoHideCutoff: 30日前
+ok 15 - computeVoidedVideoHideCutoff: 30日前
+  ---
+  duration_ms: 0.114961
+  type: 'test'
+  ...
+# Subtest: shouldRetryCleanupError: max 到達なら false
+ok 16 - shouldRetryCleanupError: max 到達なら false
+  ---
+  duration_ms: 0.422118
+  type: 'test'
+  ...
+# Subtest: shouldRetryCleanupError: スキーマエラーは即諦める
+ok 17 - shouldRetryCleanupError: スキーマエラーは即諦める
+  ---
+  duration_ms: 0.416519
+  type: 'test'
+  ...
+# Subtest: shouldRetryCleanupError: 一時エラーはリトライ
+ok 18 - shouldRetryCleanupError: 一時エラーはリトライ
+  ---
+  duration_ms: 0.303871
+  type: 'test'
+  ...
+# Subtest: shouldRetryCleanupError: 不明エラーもリトライ (max 未満)
+ok 19 - shouldRetryCleanupError: 不明エラーもリトライ (max 未満)
+  ---
+  duration_ms: 0.127179
+  type: 'test'
+  ...
+# Subtest: shouldRetryCleanupError: error が null でも落ちない
+ok 20 - shouldRetryCleanupError: error が null でも落ちない
+  ---
+  duration_ms: 0.086168
+  type: 'test'
+  ...
+# Subtest: content-jobs health は service と commit を返す
+ok 21 - content-jobs health は service と commit を返す
+  ---
+  duration_ms: 0.822173
+  type: 'test'
+  ...
+# Subtest: 無認証 rebuild / process-queue を拒否する
+ok 22 - 無認証 rebuild / process-queue を拒否する
+  ---
+  duration_ms: 0.156643
+  type: 'test'
+  ...
+# Subtest: fast-jobs health は共通Cron Workerからserviceとcommitを返す
+ok 23 - fast-jobs health は共通Cron Workerからserviceとcommitを返す
+  ---
+  duration_ms: 0.797015
+  type: 'test'
+  ...
+# Subtest: markProcessing treats missing D1 metadata as an unclaimed row
+ok 24 - markProcessing treats missing D1 metadata as an unclaimed row
+  ---
+  duration_ms: 5.127254
+  type: 'test'
+  ...
+# Subtest: markRetryOrFailed normalizes malformed attempt_count before binding
+ok 25 - markRetryOrFailed normalizes malformed attempt_count before binding
+  ---
+  duration_ms: 1.172293
+  type: 'test'
+  ...
+# Subtest: claim and normal completion use one lease token
+ok 26 - claim and normal completion use one lease token
+  ---
+  duration_ms: 5.663531
+  type: 'test'
+  ...
+# Subtest: processing中の再enqueueは完了時にpendingへ戻す
+ok 27 - processing中の再enqueueは完了時にpendingへ戻す
+  ---
+  duration_ms: 0.372284
+  type: 'test'
+  ...
+# Subtest: stale completion returns an invalidated processing row to pending
+ok 28 - stale completion returns an invalidated processing row to pending
+  ---
+  duration_ms: 0.427155
+  type: 'test'
+  ...
+# Subtest: a newer lease cannot be completed by an old token
+ok 29 - a newer lease cannot be completed by an old token
+  ---
+  duration_ms: 0.267307
+  type: 'test'
+  ...
+# Subtest: retry and terminal failure clear the processing lease
+ok 30 - retry and terminal failure clear the processing lease
+  ---
+  duration_ms: 1.346562
+  type: 'test'
+  ...
+# Subtest: retry CAS loss caused by enqueue increments bounded attempts
+ok 31 - retry CAS loss caused by enqueue increments bounded attempts
+  ---
+  duration_ms: 0.368257
+  type: 'test'
+  ...
+# Subtest: expired processing leases are recovered with bounded attempts
+ok 32 - expired processing leases are recovered with bounded attempts
+  ---
+  duration_ms: 0.508666
+  type: 'test'
+  ...
+# Subtest: invalidated processing crash is recovered and claimable in the same cron cycle
+ok 33 - invalidated processing crash is recovered and claimable in the same cron cycle
+  ---
+  duration_ms: 0.450469
+  type: 'test'
+  ...
+# Subtest: normalも1回最大1件
+ok 34 - normalも1回最大1件
+  ---
+  duration_ms: 1.746356
+  type: 'test'
+  ...
+# Subtest: economyは1回最大1件
+ok 35 - economyは1回最大1件
+  ---
+  duration_ms: 0.133509
+  type: 'test'
+  ...
+# Subtest: 全modeでFree CPU向け上限を超えない
+ok 36 - 全modeでFree CPU向け上限を超えない
+  ---
+  duration_ms: 0.193598
+  type: 'test'
+  ...
+# Subtest: DB hashとR2実体が一致する場合はPUTを省略する
+ok 37 - DB hashとR2実体が一致する場合はPUTを省略する
+  ---
+  duration_ms: 7.496046
+  type: 'test'
+  ...
+# Subtest: DB hashが一致してもR2実体が欠落していればPUTする
+ok 38 - DB hashが一致してもR2実体が欠落していればPUTする
+  ---
+  duration_ms: 3.126359
+  type: 'test'
+  ...
+# Subtest: 非文字列bodyは比較せず通常PUTする
+ok 39 - 非文字列bodyは比較せず通常PUTする
+  ---
+  duration_ms: 0.274678
+  type: 'test'
+  ...
+# Subtest: 非公開化は静的JSONを再生成せず、追跡artifactを削除する
+ok 40 - 非公開化は静的JSONを再生成せず、追跡artifactを削除する
+  ---
+  duration_ms: 2.74394
+  type: 'test'
+  ...
+# Subtest: archived event detail artifact is regenerated
+ok 41 - archived event detail artifact is regenerated
+  ---
+  duration_ms: 8.960263
+  type: 'test'
+  ...
+# Subtest: limited video detail artifact is regenerated
+ok 42 - limited video detail artifact is regenerated
+  ---
+  duration_ms: 1.895218
+  type: 'test'
+  ...
+# Subtest: YouTube ID変更は新keyを生成し、旧keyを追跡削除する
+ok 43 - YouTube ID変更は新keyを生成し、旧keyを追跡削除する
+  ---
+  duration_ms: 1.529935
+  type: 'test'
+  ...
+# Subtest: R2 delete失敗時はdeleted_atを更新せず、再試行成功後にだけ更新する
+ok 44 - R2 delete失敗時はdeleted_atを更新せず、再試行成功後にだけ更新する
+  ---
+  duration_ms: 0.760731
+  type: 'test'
+  ...
+# file:///home/runner/work/flamenode/flamenode/workers/notification-dispatcher/dispatch.test.mjs:41
+#   const sql = statements.join("
+#                               ^
+# SyntaxError: Invalid or unexpected token
+#     at compileSourceTextModule (node:internal/modules/esm/utils:346:16)
+#     at ModuleLoader.moduleStrategy (node:internal/modules/esm/translators:110:18)
+#     at \#translate (node:internal/modules/esm/loader:559:20)
+#     at afterLoad (node:internal/modules/esm/loader:612:29)
+#     at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:617:12)
+#     at \#createModuleJob (node:internal/modules/esm/loader:640:36)
+#     at \#getJobFromResolveResult (node:internal/modules/esm/loader:353:34)
+#     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:321:41)
+#     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:680:25)
+# Node.js v22.23.1
+# Subtest: workers/notification-dispatcher/dispatch.test.mjs
+not ok 10 - workers/notification-dispatcher/dispatch.test.mjs
+  ---
+  duration_ms: 34.044591
+  type: 'test'
+  location: '/home/runner/work/flamenode/flamenode/workers/notification-dispatcher/dispatch.test.mjs:1:1'
+  failureType: 'testCodeFailure'
+  exitCode: 1
+  signal: ~
+  error: 'test failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: スコア更新は1回150件以下に固定する
+ok 46 - スコア更新は1回150件以下に固定する
+  ---
+  duration_ms: 0.696896
+  type: 'test'
+  ...
+# Subtest: acquireCronLease uses the final lease_expires_at schema contract
+ok 47 - acquireCronLease uses the final lease_expires_at schema contract
+  ---
+  duration_ms: 3.055202
+  type: 'test'
+  ...
+# Subtest: acquireCronLease returns null when another run owns an active lease
+ok 48 - acquireCronLease returns null when another run owns an active lease
+  ---
+  duration_ms: 0.231093
+  type: 'test'
+  ...
+# Subtest: acquireCronLease caps an invalidly long lease
+ok 49 - acquireCronLease caps an invalidly long lease
+  ---
+  duration_ms: 0.219717
+  type: 'test'
+  ...
+# Subtest: withCronLease propagates a lost heartbeat and records failure
+ok 50 - withCronLease propagates a lost heartbeat and records failure
+  ---
+  duration_ms: 1101.603773
+  type: 'test'
+  ...
+# Subtest: 外部API予算は上限を超えて消費しない
+ok 51 - 外部API予算は上限を超えて消費しない
+  ---
+  duration_ms: 0.921711
+  type: 'test'
+  ...
+# Subtest: Retry-Afterは秒とHTTP-dateを上限付きで解釈する
+ok 52 - Retry-Afterは秒とHTTP-dateを上限付きで解釈する
+  ---
+  duration_ms: 0.19488
+  type: 'test'
+  ...
+# Subtest: 指数バックオフはprovider指定を優先し上限を超えない
+ok 53 - 指数バックオフはprovider指定を優先し上限を超えない
+  ---
+  duration_ms: 0.244474
+  type: 'test'
+  ...
+# Subtest: fetchWithTimeoutは呼出し前に予算を消費する
+ok 54 - fetchWithTimeoutは呼出し前に予算を消費する
+  ---
+  duration_ms: 25.506215
+  type: 'test'
+  ...
+# Subtest: fetchWithTimeoutは呼出し元の中断を共通signalへ伝播する
+ok 55 - fetchWithTimeoutは呼出し元の中断を共通signalへ伝播する
+  ---
+  duration_ms: 0.445131
+  type: 'test'
+  ...
+# Subtest: fetchWithTimeoutは内部タイマーによる中断だけをtimeoutとして扱う
+ok 56 - fetchWithTimeoutは内部タイマーによる中断だけをtimeoutとして扱う
+  ---
+  duration_ms: 10.789173
+  type: 'test'
+  ...
+# Subtest: queue limits are always bounded and positive
+ok 57 - queue limits are always bounded and positive
+  ---
+  duration_ms: 0.893629
+  type: 'test'
+  ...
+# Subtest: nextAttemptNumber normalizes malformed DB values
+ok 58 - nextAttemptNumber normalizes malformed DB values
+  ---
+  duration_ms: 0.168471
+  type: 'test'
+  ...
+# Subtest: withBoundedRetry stops at the hard attempt cap
+ok 59 - withBoundedRetry stops at the hard attempt cap
+  ---
+  duration_ms: 1.307594
+  type: 'test'
+  ...
+# Subtest: withBoundedRetry returns after a transient failure
+ok 60 - withBoundedRetry returns after a transient failure
+  ---
+  duration_ms: 0.303982
+  type: 'test'
+  ...
+# Subtest: deterministic schema failures are not retried
+ok 61 - deterministic schema failures are not retried
+  ---
+  duration_ms: 0.22143
+  type: 'test'
+  ...
+# Subtest: HTTP 429 and 5xx are retryable but 4xx validation errors are not
+ok 62 - HTTP 429 and 5xx are retryable but 4xx validation errors are not
+  ---
+  duration_ms: 0.126047
+  type: 'test'
+  ...
+# Subtest: a custom retry classifier can override the default
+ok 63 - a custom retry classifier can override the default
+  ---
+  duration_ms: 0.291894
+  type: 'test'
+  ...
+# {"worker":"worker","job":"cron","run_id":"e1482842-7929-45e0-bfa9-3c4cccbd1ead","started_at":"2026-07-14T08:10:04.775Z","processed":4,"skipped":2,"failed":1,"duration_ms":2,"result":"failed","error":"job reported failed operations"}
+# {"worker":"worker","job":"cron","run_id":"1db1e115-b782-40c6-bec9-2be93607b613","started_at":"2026-07-14T08:10:04.778Z","processed":1,"skipped":0,"failed":2,"duration_ms":0,"result":"failed","error":"job reported failed operations"}
+# Subtest: normalizeJobCounters preserves finite counters and clamps invalid values
+ok 64 - normalizeJobCounters preserves finite counters and clamps invalid values
+  ---
+  duration_ms: 1.442214
+  type: 'test'
+  ...
+# Subtest: combineJobCounters aggregates normalized child results
+ok 65 - combineJobCounters aggregates normalized child results
+  ---
+  duration_ms: 0.194078
+  type: 'test'
+  ...
+# Subtest: runJob keeps reported counters when a child summary is promoted to failure
+ok 66 - runJob keeps reported counters when a child summary is promoted to failure
+  ---
+  duration_ms: 2.943867
+  type: 'test'
+  ...
+# Subtest: throwIfJobFailed preserves the existing rethrow message
+ok 67 - throwIfJobFailed preserves the existing rethrow message
+  ---
+  duration_ms: 1.012105
+  type: 'test'
+  ...
+# Subtest: safeErrorSummary redacts credentials from worker logs
+ok 68 - safeErrorSummary redacts credentials from worker logs
+  ---
+  duration_ms: 2.506226
+  type: 'test'
+  ...
+# Subtest: Promise.allで開始されたD1 queryも1本ずつ実行する
+ok 69 - Promise.allで開始されたD1 queryも1本ずつ実行する
+  ---
+  duration_ms: 18.608759
+  type: 'test'
+  ...
+# Subtest: bind済みstatementをbatchへ渡せる
+ok 70 - bind済みstatementをbatchへ渡せる
+  ---
+  duration_ms: 0.409159
+  type: 'test'
+  ...
+# Subtest: worker admin endpoint rejects all methods except POST
+ok 71 - worker admin endpoint rejects all methods except POST
+  ---
+  duration_ms: 26.167398
+  type: 'test'
+  ...
+# Subtest: worker admin endpoint is hidden when its token is unset
+ok 72 - worker admin endpoint is hidden when its token is unset
+  ---
+  duration_ms: 0.362339
+  type: 'test'
+  ...
+# Subtest: worker admin endpoint requires the configured bearer token and empty body
+ok 73 - worker admin endpoint requires the configured bearer token and empty body
+  ---
+  duration_ms: 1.259002
+  type: 'test'
+  ...
+# Subtest: checked-in deployment templates contain exactly the three deployed workers
+ok 74 - checked-in deployment templates contain exactly the three deployed workers
+  ---
+  duration_ms: 1.312371
+  type: 'test'
+  ...
+# Subtest: sync-jobs health は共通Cron Workerからserviceとcommitを返す
+ok 75 - sync-jobs health は共通Cron Workerからserviceとcommitを返す
+  ---
+  duration_ms: 1.176429
+  type: 'test'
+  ...
+# Subtest: score変更時はtopとlist_popularを重複排除付きで再生成予約する
+ok 76 - score変更時はtopとlist_popularを重複排除付きで再生成予約する
+  ---
+  duration_ms: 0.348188
+  type: 'test'
+  ...
+# Subtest: 毎時52分台だけを再生リスト同期の専用枠にする
+ok 77 - 毎時52分台だけを再生リスト同期の専用枠にする
+  ---
+  duration_ms: 0.257943
+  type: 'test'
+  ...
+# Subtest: worker module loads in Node strip-only mode
+ok 78 - worker module loads in Node strip-only mode
+  ---
+  duration_ms: 0.865948
+  type: 'test'
+  ...
+# Subtest: append_only adds missing videos without deleting remote items
+ok 79 - append_only adds missing videos without deleting remote items
+  ---
+  duration_ms: 0.703486
+  type: 'test'
+  ...
+# Subtest: missing videos preserve source schedule order
+ok 80 - missing videos preserve source schedule order
+  ---
+  duration_ms: 0.258765
+  type: 'test'
+  ...
+# Subtest: mirror adds missing videos and removes videos outside the event
+ok 81 - mirror adds missing videos and removes videos outside the event
+  ---
+  duration_ms: 0.136332
+  type: 'test'
+  ...
+# Subtest: playlist外部呼出しは共通timeoutと固定予算を使う
+ok 82 - playlist外部呼出しは共通timeoutと固定予算を使う
+  ---
+  duration_ms: 0.22847
+  type: 'test'
+  ...
+# Subtest: OAuth tokenをisolate内で期限付き再利用し401で破棄する
+ok 83 - OAuth tokenをisolate内で期限付き再利用し401で破棄する
+  ---
+  duration_ms: 0.128251
+  type: 'test'
+  ...
+# Subtest: playlist APIはpartial responseとcompact JSONを使う
+ok 84 - playlist APIはpartial responseとcompact JSONを使う
+  ---
+  duration_ms: 0.289781
+  type: 'test'
+  ...
+# Subtest: source重複排除とD1保存はDB側でまとめる
+not ok 85 - source重複排除とD1保存はDB側でまとめる
+  ---
+  duration_ms: 2.038841
+  type: 'test'
+  location: '/home/runner/work/flamenode/flamenode/workers/youtube-playlist-sync/index.test.mjs:61:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    The input did not match the regular expression /DELETE FROM event_youtube_playlist_items[\s\S]*env\.DB\.batch/. Input:
+    
+    'import {\n' +
+      '  loadYoutubeQuotaSnapshot,\n' +
+      '  reserveYoutubeQuota,\n' +
+      '  type YoutubeQuotaEnv,\n' +
+      '} from "../youtube-sync/quotaBudget.ts";\n' +
+      'import {\n' +
+      '  cancelResponseBody,\n' +
+      '  ExternalRequestBudget,\n' +
+      '  fetchWithTimeout,\n' +
+      '} from "../shared/externalApi.ts";\n' +
+      '\n' +
+      'export interface PlaylistSyncEnv extends YoutubeQuotaEnv {\n' +
+      '  KV: KVNamespace;\n' +
+      '  YOUTUBE_OAUTH_CLIENT_ID?: string;\n' +
+      '  YOUTUBE_OAUTH_CLIENT_SECRET?: string;\n' +
+      '  YOUTUBE_OAUTH_REFRESH_TOKEN?: string;\n' +
+      '}\n' +
+      '\n' +
+      'export type PlaylistSyncMode = "append_only" | "mirror";\n' +
+      '\n' +
+      'interface SyncConfigRow {\n' +
+      '  event_id: string;\n' +
+      '  playlist_id: string;\n' +
+      '  sync_mode: PlaylistSyncMode;\n' +
+      '  sync_interval_minutes: number;\n' +
+      '  sync_status: string;\n' +
+      '  next_sync_at: number | null;\n' +
+      '  last_synced_at: number | null;\n' +
+      '  last_full_scan_at: number | null;\n' +
+      '  scan_started_at: number | null;\n' +
+      '  scan_page_token: string | null;\n' +
+      '}\n' +
+      '\n' +
+      'interface RemoteItemRow {\n' +
+      '  playlist_item_id: string;\n' +
+      '  youtube_video_id: string;\n' +
+      '}\n' +
+      '\n' +
+      'interface PlaylistPageItem {\n' +
+      '  playlistItemId: string;\n' +
+      '  videoId: string;\n' +
+      '}\n' +
+      '\n' +
+      'interface PlaylistPage {\n' +
+      '  items: PlaylistPageItem[];\n' +
+      '  nextPageToken: string | null;\n' +
+      '}\n' +
+      '\n' +
+      'interface InsertedPlaylistItem {\n' +
+      '  id: string;\n' +
+      '  ordered: boolean;\n' +
+      '}\n' +
+      '\n' +
+      'export interface PlaylistSyncBatchResult {\n' +
+      '  processed: number;\n' +
+      '  skipped: number;\n' +
+      '  failed: number;\n' +
+      '}\n' +
+      '\n' +
+      'const MAX_EVENTS_PER_RUN = 1;\n' +
+      'const MAX_SCAN_PAGES_PER_EVENT = 3;\n' +
+      'const MAX_MUTATIONS_PER_RUN = 4;\n' +
+      'const MAX_SOURCE_VIDEOS = 5000;\n' +
+      'const SCAN_UPSERT_CHUNK_SIZE = 20;\n' +
+      'const FULL_SCAN_INTERVAL_SEC = 24 * 60 * 60;\n' +
+      'const RETRY_DELAY_SEC = 60 * 60;\n' +
+      'const FAILURE_RETRY_SEC = 6 * 60 * 60;\n' +
+      'const API_TIMEOUT_MS = 10_000;\n' +
+      '/** OAuth 1 + scan 3 + insertion fallback込みmutation 8。 */\n' +
+      'const MAX_EXTERNAL_REQUESTS_PER_RUN = 12;\n' +
+      'const OAUTH_TOKEN_SAFETY_MS = 60_000;\n' +
+      '\n' +
+      'class QuotaDeferredError extends Error {\n' +
+      '  constructor() {\n' +
+      '    super("youtube_playlist_quota_deferred");\n' +
+      '    this.name = "QuotaDeferredError";\n' +
+      '  }\n' +
+      '}\n' +
+      '\n' +
+      'class YouTubeApiError extends Error {\n' +
+      '  readonly status: number;\n' +
+      '  readonly reason: string;\n' +
+      '\n' +
+      '  constructor(status: number, reason: string) {\n' +
+      '    super(`youtube_api_${status}_${reason}`);\n' +
+      '    this.name = "YouTubeApiError";\n' +
+      '    this.status = status;\n' +
+      '    this.reason = reason;\n' +
+      '  }\n' +
+      '}\n' +
+      '\n' +
+      'function unixNow(): number {\n' +
+      '  return Math.floor(Date.now() / 1000);\n' +
+      '}\n' +
+      '\n' +
+      'class DailyQuotaBudget {\n' +
+      '  private readonly env: PlaylistSyncEnv;\n' +
+      '  private readonly now: number;\n' +
+      '  private remainingUnits: number;\n' +
+      '\n' +
+      '  private constructor(\n' +
+      '    env: PlaylistSyncEnv,\n' +
+      '    now: number,\n' +
+      '    remainingUnits: number,\n' +
+      '  ) {\n' +
+      '    this.env = env;\n' +
+      '    this.now = now;\n' +
+      '    this.remainingUnits = remainingUnits;\n' +
+      '  }\n' +
+      '\n' +
+      '  static async load(env: PlaylistSyncEnv, now: number): Promise<DailyQuotaBudget> {\n' +
+      '    const snapshot = await loadYoutubeQuotaSnapshot(env, now);\n' +
+      '    return new DailyQuotaBudget(env, now, snapshot.remainingUnits);\n' +
+      '  }\n' +
+      '\n' +
+      '  canSpend(cost: number): boolean {\n' +
+      '    return cost > 0 && cost <= this.remainingUnits;\n' +
+      '  }\n' +
+      '\n' +
+      '  async spend(cost: number): Promise<void> {\n' +
+      '    if (!this.canSpend(cost)) throw new QuotaDeferredError();\n' +
+      '    const reservation = await reserveYoutubeQuota(this.env, cost, this.now);\n' +
+      '    if (!reservation) {\n' +
+      '      this.remainingUnits = 0;\n' +
+      '      throw new QuotaDeferredError();\n' +
+      '    }\n' +
+      '    this.remainingUnits = Math.max(\n' +
+      '      0,\n' +
+      '      reservation.dailyBudgetUnits - reservation.usedUnits,\n' +
+      '    );\n' +
+      '  }\n' +
+      '\n' +
+      '}\n' +
+      '\n' +
+      'async function readApiError(response: Response): Promise<YouTubeApiError> {\n' +
+      '  let reason = "request_failed";\n' +
+      '  try {\n' +
+      '    const body = (await response.json()) as {\n' +
+      '      error?: { errors?: Array<{ reason?: string }>; status?: string };\n' +
+      '    };\n' +
+      '    reason =\n' +
+      '      body.error?.errors?.[0]?.reason ??\n' +
+      '      body.error?.status?.toLowerCase() ??\n' +
+      '      reason;\n' +
+      '  } catch {\n' +
+      '    await cancelResponseBody(response);\n' +
+      '    // API本文をログやDBへ保存しない。\n' +
+      '  }\n' +
+      '  return new YouTubeApiError(response.status, reason.slice(0, 80));\n' +
+      '}\n' +
+      '\n' +
+      'type CachedAccessToken = { value: string; expiresAt: number };\n' +
+      'const tokenState = globalThis as typeof globalThis & {\n' +
+      '  __flamenodeYoutubePlaylistAccessToken?: CachedAccessToken;\n' +
+      '};\n' +
+      '\n' +
+      'function clearCachedAccessToken(): void {\n' +
+      '  delete tokenState.__flamenodeYoutubePlaylistAccessToken;\n' +
+      '}\n' +
+      '\n' +
+      'async function refreshAccessToken(\n' +
+      '  env: PlaylistSyncEnv,\n' +
+      '  requestBudget: ExternalRequestBudget,\n' +
+      '): Promise<string> {\n' +
+      '  const now = Date.now();\n' +
+      '  const cached = tokenState.__flamenodeYoutubePlaylistAccessToken;\n' +
+      '  if (cached && cached.expiresAt - now > OAUTH_TOKEN_SAFETY_MS) {\n' +
+      '    return cached.value;\n' +
+      '  }\n' +
+      '\n' +
+      '  const response = await fetchWithTimeout(\n' +
+      '    "https://oauth2.googleapis.com/token",\n' +
+      '    {\n' +
+      '      method: "POST",\n' +
+      '      headers: { "content-type": "application/x-www-form-urlencoded" },\n' +
+      '      body: new URLSearchParams({\n' +
+      '        client_id: env.YOUTUBE_OAUTH_CLIENT_ID ?? "",\n' +
+      '        client_secret: env.YOUTUBE_OAUTH_CLIENT_SECRET ?? "",\n' +
+      '        refresh_token: env.YOUTUBE_OAUTH_REFRESH_TOKEN ?? "",\n' +
+      '        grant_type: "refresh_token",\n' +
+      '      }),\n' +
+      '    },\n' +
+      '    {\n' +
+      '      timeoutMs: API_TIMEOUT_MS,\n' +
+      '      budget: requestBudget,\n' +
+      '      budgetErrorCode: "youtube_playlist_request_budget_exhausted",\n' +
+      '      timeoutErrorCode: "youtube_oauth_timeout",\n' +
+      '      networkErrorCode: "youtube_oauth_network_error",\n' +
+      '    },\n' +
+      '  );\n' +
+      '  if (!response.ok) throw await readApiError(response);\n' +
+      '  const body = (await response.json()) as {\n' +
+      '    access_token?: unknown;\n' +
+      '    expires_in?: unknown;\n' +
+      '  };\n' +
+      '  if (typeof body.access_token !== "string" || !body.access_token) {\n' +
+      '    throw new Error("youtube_oauth_access_token_missing");\n' +
+      '  }\n' +
+      '  const expiresIn = Number(body.expires_in);\n' +
+      '  tokenState.__flamenodeYoutubePlaylistAccessToken = {\n' +
+      '    value: body.access_token,\n' +
+      '    expiresAt:\n' +
+      '      now + (Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 3600) * 1000,\n' +
+      '  };\n' +
+      '  return body.access_token;\n' +
+      '}\n' +
+      '\n' +
+      'async function youtubeJson<T>(\n' +
+      '  url: URL,\n' +
+      '  init: RequestInit,\n' +
+      '  accessToken: string,\n' +
+      '  quota: DailyQuotaBudget,\n' +
+      '  requestBudget: ExternalRequestBudget,\n' +
+      '  cost: number,\n' +
+      '): Promise<T> {\n' +
+      '  await quota.spend(cost);\n' +
+      '  const headers = new Headers(init.headers);\n' +
+      '  headers.set("authorization", `Bearer ${accessToken}`);\n' +
+      '  if (!headers.has("content-type")) headers.set("content-type", "application/json");\n' +
+      '  const response = await fetchWithTimeout(\n' +
+      '    url,\n' +
+      '    { ...init, headers },\n' +
+      '    {\n' +
+      '      timeoutMs: API_TIMEOUT_MS,\n' +
+      '      budget: requestBudget,\n' +
+      '      budgetErrorCode: "youtube_playlist_request_budget_exhausted",\n' +
+      '      timeoutErrorCode: "youtube_playlist_api_timeout",\n' +
+      '      networkErrorCode: "youtube_playlist_api_network_error",\n' +
+      '    },\n' +
+      '  );\n' +
+      '  if (!response.ok) {\n' +
+      '    const error = await readApiError(response);\n' +
+      '    if (response.status === 401) clearCachedAccessToken();\n' +
+      '    throw error;\n' +
+      '  }\n' +
+      '  if (response.status === 204) return undefined as T;\n' +
+      '  return (await response.json()) as T;\n' +
+      '}\n' +
+      '\n' +
+      'async function listPlaylistPage(\n' +
+      '  playlistId: string,\n' +
+      '  pageToken: string | null,\n' +
+      '  accessToken: string,\n' +
+      '  quota: DailyQuotaBudget,\n' +
+      '  requestBudget: ExternalRequestBudget,\n' +
+      '): Promise<PlaylistPage> {\n' +
+      '  const url = new URL("https://www.googleapis.com/youtube/v3/playlistItems");\n' +
+      '  url.searchParams.set("part", "snippet");\n' +
+      '  url.searchParams.set("playlistId", playlistId);\n' +
+      '  url.searchParams.set("maxResults", "50");\n' +
+      '  url.searchParams.set(\n' +
+      '    "fields",\n' +
+      '    "nextPageToken,items(id,snippet/resourceId/videoId)",\n' +
+      '  );\n' +
+      '  url.searchParams.set("prettyPrint", "false");\n' +
+      '  if (pageToken) url.searchParams.set("pageToken", pageToken);\n' +
+      '\n' +
+      '  const body = await youtubeJson<{\n' +
+      '    nextPageToken?: string;\n' +
+      '    items?: Array<{\n' +
+      '      id?: string;\n' +
+      '      snippet?: { resourceId?: { videoId?: string } };\n' +
+      '    }>;\n' +
+      '  }>(url, { method: "GET" }, accessToken, quota, requestBudget, 1);\n' +
+      '\n' +
+      '  const items = (body.items ?? []).flatMap((item) => {\n' +
+      '    const playlistItemId = item.id?.trim();\n' +
+      '    const videoId = item.snippet?.resourceId?.videoId?.trim();\n' +
+      '    return playlistItemId && videoId ? [{ playlistItemId, videoId }] : [];\n' +
+      '  });\n' +
+      '  return {\n' +
+      '    items,\n' +
+      '    nextPageToken: body.nextPageToken?.trim() || null,\n' +
+      '  };\n' +
+      '}\n' +
+      '\n' +
+      'async function postPlaylistItem(\n' +
+      '  playlistId: string,\n' +
+      '  videoId: string,\n' +
+      '  position: number | null,\n' +
+      '  accessToken: string,\n' +
+      '  quota: DailyQuotaBudget,\n' +
+      '  requestBudget: ExternalRequestBudget,\n' +
+      '): Promise<string> {\n' +
+      '  const url = new URL("https://www.googleapis.com/youtube/v3/playlistItems");\n' +
+      '  url.searchParams.set("part", "snippet");\n' +
+      '  url.searchParams.set("fields", "id");\n' +
+      '  url.searchParams.set("prettyPrint", "false");\n' +
+      '  const snippet: Record<string, unknown> = {\n' +
+      '    playlistId,\n' +
+      '    resourceId: { kind: "youtube#video", videoId },\n' +
+      '  };\n' +
+      '  if (position != null) snippet.position = position;\n' +
+      '\n' +
+      '  const body = await youtubeJson<{ id?: string }>(\n' +
+      '    url,\n' +
+      '    {\n' +
+      '      method: "POST",\n' +
+      '      body: JSON.stringify({ snippet }),\n' +
+      '    },\n' +
+      '    accessToken,\n' +
+      '    quota,\n' +
+      '    requestBudget,\n' +
+      '    50,\n' +
+      '  );\n' +
+      '  if (!body.id) throw new Error("youtube_playlist_item_id_missing");\n' +
+      '  return body.id;\n' +
+      '}\n' +
+      '\n' +
+      'async function insertPlaylistItem(\n' +
+      '  playlistId: string,\n' +
+      '  videoId: string,\n' +
+      '  position: number,\n' +
+      '  accessToken: string,\n' +
+      '  quota: DailyQuotaBudget,\n' +
+      '  requestBudget: ExternalRequestBudget,\n' +
+      '): Promise<InsertedPlaylistItem> {\n' +
+      '  try {\n' +
+      '    return {\n' +
+      '      id: await postPlaylistItem(\n' +
+      '        playlistId,\n' +
+      '        videoId,\n' +
+      '        position,\n' +
+      '        accessToken,\n' +
+      '        quota,\n' +
+      '        requestBudget,\n' +
+      '      ),\n' +
+      '      ordered: true,\n' +
+      '    };\n' +
+      '  } catch (error) {\n' +
+      '    const canFallback =\n' +
+      '      error instanceof YouTubeApiError &&\n' +
+      '      (error.reason === "manualSortRequired" ||\n' +
+      '        error.reason === "invalidPlaylistItemPosition");\n' +
+      '    if (!canFallback) throw error;\n' +
+      '\n' +
+      '    return {\n' +
+      '      id: await postPlaylistItem(\n' +
+      '        playlistId,\n' +
+      '        videoId,\n' +
+      '        null,\n' +
+      '        accessToken,\n' +
+      '        quota,\n' +
+      '        requestBudget,\n' +
+      '      ),\n' +
+      '      ordered: false,\n' +
+      '    };\n' +
+      '  }\n' +
+      '}\n' +
+      '\n' +
+      'async function deletePlaylistItem(\n' +
+      '  playlistItemId: string,\n' +
+      '  accessToken: string,\n' +
+      '  quota: DailyQuotaBudget,\n' +
+      '  requestBudget: ExternalRequestBudget,\n' +
+      '): Promise<void> {\n' +
+      '  const url = new URL("https://www.googleapis.com/youtube/v3/playlistItems");\n' +
+      '  url.searchParams.set("id", playlistItemId);\n' +
+      '  url.searchParams.set("prettyPrint", "false");\n' +
+      '  try {\n' +
+      '    await youtubeJson<void>(\n' +
+      '      url,\n' +
+      '      { method: "DELETE" },\n' +
+      '      accessToken,\n' +
+      '      quota,\n' +
+      '      requestBudget,\n' +
+      '      50,\n' +
+      '    )'... 12514 more characters
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual: |-
+    import {
+      loadYoutubeQuotaSnapshot,
+      reserveYoutubeQuota,
+      type YoutubeQuotaEnv,
+    } from "../youtube-sync/quotaBudget.ts";
+    import {
+      cancelResponseBody,
+      ExternalRequestBudget,
+      fetchWithTimeout,
+    } from "../shared/externalApi.ts";
+    
+    export interface PlaylistSyncEnv extends YoutubeQuotaEnv {
+      KV: KVNamespace;
+      YOUTUBE_OAUTH_CLIENT_ID?: string;
+      YOUTUBE_OAUTH_CLIENT_SECRET?: string;
+      YOUTUBE_OAUTH_REFRESH_TOKEN?: string;
+    }
+    
+    export type PlaylistSyncMode = "append_only" | "mirror";
+    
+    interface SyncConfigRow {
+      event_id: string;
+      playlist_id: string;
+      sync_mode: PlaylistSyncMode;
+      sync_interval_minutes: number;
+      sync_status: string;
+      next_sync_at: number | null;
+      last_synced_at: number | null;
+      last_full_scan_at: number | null;
+      scan_started_at: number | null;
+      scan_page_token: string | null;
+    }
+    
+    interface RemoteItemRow {
+      playlist_item_id: string;
+      youtube_video_id: string;
+    }
+    
+    interface PlaylistPageItem {
+      playlistItemId: string;
+      videoId: string;
+    }
+    
+    interface PlaylistPage {
+      items: PlaylistPageItem[];
+      nextPageToken: string | null;
+    }
+    
+    interface InsertedPlaylistItem {
+      id: string;
+      ordered: boolean;
+    }
+    
+    export interface PlaylistSyncBatchResult {
+      processed: number;
+      skipped: number;
+      failed: number;
+    }
+    
+    const MAX_EVENTS_PER_RUN = 1;
+    const MAX_SCAN_PAGES_PER_EVENT = 3;
+    const MAX_MUTATIONS_PER_RUN = 4;
+    const MAX_SOURCE_VIDEOS = 5000;
+    const SCAN_UPSERT_CHUNK_SIZE = 20;
+    const FULL_SCAN_INTERVAL_SEC = 24 * 60 * 60;
+    const RETRY_DELAY_SEC = 60 * 60;
+    const FAILURE_RETRY_SEC = 6 * 60 * 60;
+    const API_TIMEOUT_MS = 10_000;
+    /** OAuth 1 + scan 3 + insertion fallback込みmutation 8。 */
+    const MAX_EXTERNAL_REQUESTS_PER_RUN = 12;
+    const OAUTH_TOKEN_SAFETY_MS = 60_000;
+    
+    class QuotaDeferredError extends Error {
+      constructor() {
+        super("youtube_playlist_quota_deferred");
+        this.name = "QuotaDeferredError";
+      }
+    }
+    
+    class YouTubeApiError extends Error {
+      readonly status: number;
+      readonly reason: string;
+    
+      constructor(status: number, reason: string) {
+        super(`youtube_api_${status}_${reason}`);
+        this.name = "YouTubeApiError";
+        this.status = status;
+        this.reason = reason;
+      }
+    }
+    
+    function unixNow(): number {
+      return Math.floor(Date.now() / 1000);
+    }
+    
+    class DailyQuotaBudget {
+      private readonly env: PlaylistSyncEnv;
+      private readonly now: number;
+      private remainingUnits: number;
+    
+      private constructor(
+        env: PlaylistSyncEnv,
+        now: number,
+        remainingUnits: number,
+      ) {
+        this.env = env;
+        this.now = now;
+        this.remainingUnits = remainingUnits;
+      }
+    
+      static async load(env: PlaylistSyncEnv, now: number): Promise<DailyQuotaBudget> {
+        const snapshot = await loadYoutubeQuotaSnapshot(env, now);
+        return new DailyQuotaBudget(env, now, snapshot.remainingUnits);
+      }
+    
+      canSpend(cost: number): boolean {
+        return cost > 0 && cost <= this.remainingUnits;
+      }
+    
+      async spend(cost: number): Promise<void> {
+        if (!this.canSpend(cost)) throw new QuotaDeferredError();
+        const reservation = await reserveYoutubeQuota(this.env, cost, this.now);
+        if (!reservation) {
+          this.remainingUnits = 0;
+          throw new QuotaDeferredError();
+        }
+        this.remainingUnits = Math.max(
+          0,
+          reservation.dailyBudgetUnits - reservation.usedUnits,
+        );
+      }
+    
+    }
+    
+    async function readApiError(response: Response): Promise<YouTubeApiError> {
+      let reason = "request_failed";
+      try {
+        const body = (await response.json()) as {
+          error?: { errors?: Array<{ reason?: string }>; status?: string };
+        };
+        reason =
+          body.error?.errors?.[0]?.reason ??
+          body.error?.status?.toLowerCase() ??
+          reason;
+      } catch {
+        await cancelResponseBody(response);
+        // API本文をログやDBへ保存しない。
+      }
+      return new YouTubeApiError(response.status, reason.slice(0, 80));
+    }
+    
+    type CachedAccessToken = { value: string; expiresAt: number };
+    const tokenState = globalThis as typeof globalThis & {
+      __flamenodeYoutubePlaylistAccessToken?: CachedAccessToken;
+    };
+    
+    function clearCachedAccessToken(): void {
+      delete tokenState.__flamenodeYoutubePlaylistAccessToken;
+    }
+    
+    async function refreshAccessToken(
+      env: PlaylistSyncEnv,
+      requestBudget: ExternalRequestBudget,
+    ): Promise<string> {
+      const now = Date.now();
+      const cached = tokenState.__flamenodeYoutubePlaylistAccessToken;
+      if (cached && cached.expiresAt - now > OAUTH_TOKEN_SAFETY_MS) {
+        return cached.value;
+      }
+    
+      const response = await fetchWithTimeout(
+        "https://oauth2.googleapis.com/token",
+        {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            client_id: env.YOUTUBE_OAUTH_CLIENT_ID ?? "",
+            client_secret: env.YOUTUBE_OAUTH_CLIENT_SECRET ?? "",
+            refresh_token: env.YOUTUBE_OAUTH_REFRESH_TOKEN ?? "",
+            grant_type: "refresh_token",
+          }),
+        },
+        {
+          timeoutMs: API_TIMEOUT_MS,
+          budget: requestBudget,
+          budgetErrorCode: "youtube_playlist_request_budget_exhausted",
+          timeoutErrorCode: "youtube_oauth_timeout",
+          networkErrorCode: "youtube_oauth_network_error",
+        },
+      );
+      if (!response.ok) throw await readApiError(response);
+      const body = (await response.json()) as {
+        access_token?: unknown;
+        expires_in?: unknown;
+      };
+      if (typeof body.access_token !== "string" || !body.access_token) {
+        throw new Error("youtube_oauth_access_token_missing");
+      }
+      const expiresIn = Number(body.expires_in);
+      tokenState.__flamenodeYoutubePlaylistAccessToken = {
+        value: body.access_token,
+        expiresAt:
+          now + (Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 3600) * 1000,
+      };
+      return body.access_token;
+    }
+    
+    async function youtubeJson<T>(
+      url: URL,
+      init: RequestInit,
+      accessToken: string,
+      quota: DailyQuotaBudget,
+      requestBudget: ExternalRequestBudget,
+      cost: number,
+    ): Promise<T> {
+      await quota.spend(cost);
+      const headers = new Headers(init.headers);
+      headers.set("authorization", `Bearer ${accessToken}`);
+      if (!headers.has("content-type")) headers.set("content-type", "application/json");
+      const response = await fetchWithTimeout(
+        url,
+        { ...init, headers },
+        {
+          timeoutMs: API_TIMEOUT_MS,
+          budget: requestBudget,
+          budgetErrorCode: "youtube_playlist_request_budget_exhausted",
+          timeoutErrorCode: "youtube_playlist_api_timeout",
+          networkErrorCode: "youtube_playlist_api_network_error",
+        },
+      );
+      if (!response.ok) {
+        const error = await readApiError(response);
+        if (response.status === 401) clearCachedAccessToken();
+        throw error;
+      }
+      if (response.status === 204) return undefined as T;
+      return (await response.json()) as T;
+    }
+    
+    async function listPlaylistPage(
+      playlistId: string,
+      pageToken: string | null,
+      accessToken: string,
+      quota: DailyQuotaBudget,
+      requestBudget: ExternalRequestBudget,
+    ): Promise<PlaylistPage> {
+      const url = new URL("https://www.googleapis.com/youtube/v3/playlistItems");
+      url.searchParams.set("part", "snippet");
+      url.searchParams.set("playlistId", playlistId);
+      url.searchParams.set("maxResults", "50");
+      url.searchParams.set(
+        "fields",
+        "nextPageToken,items(id,snippet/resourceId/videoId)",
+      );
+      url.searchParams.set("prettyPrint", "false");
+      if (pageToken) url.searchParams.set("pageToken", pageToken);
+    
+      const body = await youtubeJson<{
+        nextPageToken?: string;
+        items?: Array<{
+          id?: string;
+          snippet?: { resourceId?: { videoId?: string } };
+        }>;
+      }>(url, { method: "GET" }, accessToken, quota, requestBudget, 1);
+    
+      const items = (body.items ?? []).flatMap((item) => {
+        const playlistItemId = item.id?.trim();
+        const videoId = item.snippet?.resourceId?.videoId?.trim();
+        return playlistItemId && videoId ? [{ playlistItemId, videoId }] : [];
+      });
+      return {
+        items,
+        nextPageToken: body.nextPageToken?.trim() || null,
+      };
+    }
+    
+    async function postPlaylistItem(
+      playlistId: string,
+      videoId: string,
+      position: number | null,
+      accessToken: string,
+      quota: DailyQuotaBudget,
+      requestBudget: ExternalRequestBudget,
+    ): Promise<string> {
+      const url = new URL("https://www.googleapis.com/youtube/v3/playlistItems");
+      url.searchParams.set("part", "snippet");
+      url.searchParams.set("fields", "id");
+      url.searchParams.set("prettyPrint", "false");
+      const snippet: Record<string, unknown> = {
+        playlistId,
+        resourceId: { kind: "youtube#video", videoId },
+      };
+      if (position != null) snippet.position = position;
+    
+      const body = await youtubeJson<{ id?: string }>(
+        url,
+        {
+          method: "POST",
+          body: JSON.stringify({ snippet }),
+        },
+        accessToken,
+        quota,
+        requestBudget,
+        50,
+      );
+      if (!body.id) throw new Error("youtube_playlist_item_id_missing");
+      return body.id;
+    }
+    
+    async function insertPlaylistItem(
+      playlistId: string,
+      videoId: string,
+      position: number,
+      accessToken: string,
+      quota: DailyQuotaBudget,
+      requestBudget: ExternalRequestBudget,
+    ): Promise<InsertedPlaylistItem> {
+      try {
+        return {
+          id: await postPlaylistItem(
+            playlistId,
+            videoId,
+            position,
+            accessToken,
+            quota,
+            requestBudget,
+          ),
+          ordered: true,
+        };
+      } catch (error) {
+        const canFallback =
+          error instanceof YouTubeApiError &&
+          (error.reason === "manualSortRequired" ||
+            error.reason === "invalidPlaylistItemPosition");
+        if (!canFallback) throw error;
+    
+        return {
+          id: await postPlaylistItem(
+            playlistId,
+            videoId,
+            null,
+            accessToken,
+            quota,
+            requestBudget,
+          ),
+          ordered: false,
+        };
+      }
+    }
+    
+    async function deletePlaylistItem(
+      playlistItemId: string,
+      accessToken: string,
+      quota: DailyQuotaBudget,
+      requestBudget: ExternalRequestBudget,
+    ): Promise<void> {
+      const url = new URL("https://www.googleapis.com/youtube/v3/playlistItems");
+      url.searchParams.set("id", playlistItemId);
+      url.searchParams.set("prettyPrint", "false");
+      try {
+        await youtubeJson<void>(
+          url,
+          { method: "DELETE" },
+          accessToken,
+          quota,
+          requestBudget,
+          50,
+        );
+      } catch (error) {
+        if (error instanceof YouTubeApiError && error.status === 404) return;
+        throw error;
+      }
+    }
+    
+    async function loadDueConfigs(
+      env: PlaylistSyncEnv,
+      now: number,
+    ): Promise<SyncConfigRow[]> {
+      const result = await env.DB.prepare(
+        `SELECT event_id, playlist_id, sync_mode, sync_interval_minutes,
+                sync_status, next_sync_at, last_synced_at, last_full_scan_at,
+                scan_started_at, scan_page_token
+         FROM event_youtube_playlist_sync
+         WHERE enabled = 1
+           AND playlist_id IS NOT NULL
+           AND playlist_id <> ''
+           AND sync_mode IN ('append_only', 'mirror')
+           AND COALESCE(next_sync_at, 0) <= ?1
+         ORDER BY CASE WHEN scan_started_at IS NULL THEN 1 ELSE 0 END,
+                  COALESCE(next_sync_at, 0), event_id
+         LIMIT ?2`,
+      )
+        .bind(now, MAX_EVENTS_PER_RUN)
+        .all<SyncConfigRow>();
+      return result.results ?? [];
+    }
+    
+    async function loadSourceVideoIds(
+      env: PlaylistSyncEnv,
+      eventId: string,
+    ): Promise<string[]> {
+      const result = await env.DB.prepare(
+        `SELECT v.youtube_video_id
+         FROM video_events ve
+         INNER JOIN videos v ON v.id = ve.video_id
+         WHERE ve.event_id = ?1
+           AND v.youtube_video_id IS NOT NULL
+           AND v.youtube_video_id <> ''
+           AND v.visibility_status IN ('public', 'limited')
+         GROUP BY v.youtube_video_id
+         ORDER BY MIN(COALESCE(v.scheduled_time, v.created_at)), MIN(v.id)
+         LIMIT ?2`,
+      )
+        .bind(eventId, MAX_SOURCE_VIDEOS + 1)
+        .all<{ youtube_video_id: string }>();
+      const rows = result.results ?? [];
+      if (rows.length > MAX_SOURCE_VIDEOS) {
+        throw new Error("youtube_playlist_source_limit_exceeded");
+      }
+      return rows.map((row) => row.youtube_video_id);
+    }
+    
+    async function loadRemoteItems(
+      env: PlaylistSyncEnv,
+      eventId: string,
+    ): Promise<RemoteItemRow[]> {
+      const result = await env.DB.prepare(
+        `SELECT playlist_item_id, youtube_video_id
+         FROM event_youtube_playlist_items
+         WHERE event_id = ?1
+         ORDER BY created_at, playlist_item_id`,
+      )
+        .bind(eventId)
+        .all<RemoteItemRow>();
+      return result.results ?? [];
+    }
+    
+    async function upsertScannedItems(
+      env: PlaylistSyncEnv,
+      eventId: string,
+      items: PlaylistPageItem[],
+      seenAt: number,
+    ): Promise<void> {
+      const statements: D1PreparedStatement[] = [];
+      for (let offset = 0; offset < items.length; offset += SCAN_UPSERT_CHUNK_SIZE) {
+        const chunk = items.slice(offset, offset + SCAN_UPSERT_CHUNK_SIZE);
+        const placeholders = chunk.map(() => "(?, ?, ?, ?, 0, ?)").join(", ");
+        const values = chunk.flatMap((item) => [
+          eventId,
+          item.playlistItemId,
+          item.videoId,
+          seenAt,
+          seenAt,
+        ]);
+        statements.push(
+          env.DB.prepare(
+            `INSERT INTO event_youtube_playlist_items (
+               event_id, playlist_item_id, youtube_video_id, seen_at,
+               managed_by_flamenode, created_at
+             ) VALUES ${placeholders}
+             ON CONFLICT(event_id, playlist_item_id) DO UPDATE SET
+               youtube_video_id = excluded.youtube_video_id,
+               seen_at = excluded.seen_at`,
+          ).bind(...values),
+        );
+      }
+      if (statements.length > 0) await env.DB.batch(statements);
+    }
+    
+    async function markScanStarted(
+      env: PlaylistSyncEnv,
+      eventId: string,
+      scanStartedAt: number,
+      now: number,
+    ): Promise<void> {
+      await env.DB.prepare(
+        `UPDATE event_youtube_playlist_sync
+         SET sync_status = 'scanning', scan_started_at = ?1,
+             scan_page_token = NULL, last_error = NULL, updated_at = ?2
+         WHERE event_id = ?3`,
+      )
+        .bind(scanStartedAt, now, eventId)
+        .run();
+    }
+    
+    async function scanPlaylist(
+      env: PlaylistSyncEnv,
+      config: SyncConfigRow,
+      accessToken: string,
+      quota: DailyQuotaBudget,
+      requestBudget: ExternalRequestBudget,
+      now: number,
+    ): Promise<boolean> {
+      const scanStartedAt =
+        config.scan_started_at ?? Math.max(now, (config.last_full_scan_at ?? 0) + 1);
+      let pageToken = config.scan_started_at ? config.scan_page_token : null;
+      if (config.scan_started_at == null) {
+        await markScanStarted(env, config.event_id, scanStartedAt, now);
+      }
+    
+      for (let page = 0; page < MAX_SCAN_PAGES_PER_EVENT; page += 1) {
+        const result = await listPlaylistPage(
+          config.playlist_id,
+          pageToken,
+          accessToken,
+          quota,
+          requestBudget,
+        );
+        await upsertScannedItems(env, config.event_id, result.items, scanStartedAt);
+        pageToken = result.nextPageToken;
+        if (!pageToken) {
+          await env.DB.batch([
+            env.DB.prepare(
+              `DELETE FROM event_youtube_playlist_items
+               WHERE event_id = ?1 AND seen_at <> ?2`,
+            ).bind(config.event_id, scanStartedAt),
+            env.DB.prepare(
+              `UPDATE event_youtube_playlist_sync
+               SET sync_status = 'idle', last_full_scan_at = ?1,
+                   scan_started_at = NULL, scan_page_token = NULL,
+                   next_sync_at = ?1, last_error = NULL, updated_at = ?1
+               WHERE event_id = ?2`,
+            ).bind(now, config.event_id),
+          ]);
+          return true;
+        }
+      }
+    
+      await env.DB.prepare(
+        `UPDATE event_youtube_playlist_sync
+         SET sync_status = 'scanning', scan_started_at = ?1,
+             scan_page_token = ?2, next_sync_at = ?3,
+             last_error = 'playlist_scan_continuing', updated_at = ?4
+         WHERE event_id = ?5`,
+      )
+        .bind(scanStartedAt, pageToken, now + RETRY_DELAY_SEC, now, config.event_id)
+        .run();
+      return false;
+    }
+    
+    export function calculateSyncDiff(
+      sourceVideoIds: readonly string[],
+      remoteItems: readonly RemoteItemRow[],
+      mode: PlaylistSyncMode,
+    ): { additions: string[]; removals: RemoteItemRow[] } {
+      const sourceSet = new Set(sourceVideoIds);
+      const remoteVideoSet = new Set(remoteItems.map((item) => item.youtube_video_id));
+      return {
+        additions: sourceVideoIds.filter((videoId) => !remoteVideoSet.has(videoId)),
+        removals:
+          mode === "mirror"
+            ? remoteItems.filter((item) => !sourceSet.has(item.youtube_video_id))
+            : [],
+      };
+    }
+    
+    function errorCode(error: unknown): string {
+      if (error instanceof QuotaDeferredError) return "youtube_quota_budget_deferred";
+      if (error instanceof YouTubeApiError) {
+        return `youtube_api_${error.status}_${error.reason}`.slice(0, 160);
+      }
+      if (error instanceof Error) return error.message.slice(0, 160);
+      return "youtube_playlist_sync_failed";
+    }
+    
+    function isQuotaError(error: unknown): boolean {
+      return (
+        error instanceof QuotaDeferredError ||
+        (error instanceof YouTubeApiError &&
+          (error.status === 429 ||
+            error.reason === "quotaExceeded" ||
+            error.reason === "dailyLimitExceeded"))
+      );
+    }
+    
+    async function markEventError(
+      env: PlaylistSyncEnv,
+      eventId: string,
+      error: unknown,
+      now: number,
+    ): Promise<void> {
+      const deferred = isQuotaError(error);
+      await env.DB.prepare(
+        `UPDATE event_youtube_playlist_sync
+         SET sync_status = ?1, next_sync_at = ?2,
+             last_error = ?3, last_full_scan_at = NULL,
+             scan_started_at = NULL, scan_page_token = NULL, updated_at = ?4
+         WHERE event_id = ?5`,
+      )
+        .bind(
+          deferred ? "deferred" : "failed",
+          now + (deferred ? FULL_SCAN_INTERVAL_SEC : FAILURE_RETRY_SEC),
+          errorCode(error),
+          now,
+          eventId,
+        )
+        .run();
+    }
+    
+    async function insertLocalItem(
+      env: PlaylistSyncEnv,
+      eventId: string,
+      playlistItemId: string,
+      videoId: string,
+      now: number,
+    ): Promise<void> {
+      await env.DB.prepare(
+        `INSERT INTO event_youtube_playlist_items (
+           event_id, playlist_item_id, youtube_video_id, seen_at,
+           managed_by_flamenode, created_at
+         ) VALUES (?1, ?2, ?3, ?4, 1, ?4)
+         ON CONFLICT(event_id, playlist_item_id) DO UPDATE SET
+           youtube_video_id = excluded.youtube_video_id,
+           seen_at = excluded.seen_at,
+           managed_by_flamenode = 1`,
+      )
+        .bind(eventId, playlistItemId, videoId, now)
+        .run();
+    }
+    
+    async function syncOneEvent(
+      env: PlaylistSyncEnv,
+      config: SyncConfigRow,
+      accessToken: string,
+      quota: DailyQuotaBudget,
+      requestBudget: ExternalRequestBudget,
+      mutationBudget: { remaining: number },
+      now: number,
+    ): Promise<void> {
+      const sourceVideoIds = await loadSourceVideoIds(env, config.event_id);
+      const scanRequired =
+        config.scan_started_at != null ||
+        config.last_full_scan_at == null ||
+        now - config.last_full_scan_at >= FULL_SCAN_INTERVAL_SEC;
+    
+      if (scanRequired) {
+        const scanComplete = await scanPlaylist(
+          env,
+          config,
+          accessToken,
+          quota,
+          requestBudget,
+          now,
+        );
+        if (!scanComplete) return;
+      }
+    
+      const remoteItems = await loadRemoteItems(env, config.event_id);
+      const { additions, removals } = calculateSyncDiff(
+        sourceVideoIds,
+        remoteItems,
+        config.sync_mode,
+      );
+      let added = 0;
+      let removed = 0;
+      let orderFallback = false;
+      const sourcePositions = new Map(
+        sourceVideoIds.map((videoId, index) => [videoId, index]),
+      );
+    
+      for (const videoId of additions) {
+        // position指定失敗時の末尾追加まで含め、最大100 unitsを確保してから開始する。
+        if (mutationBudget.remaining <= 0 || !quota.canSpend(100)) break;
+        const position = sourcePositions.get(videoId) ?? 0;
+        const inserted = await insertPlaylistItem(
+          config.playlist_id,
+          videoId,
+          Math.max(0, position),
+          accessToken,
+          quota,
+          requestBudget,
+        );
+        mutationBudget.remaining -= 1;
+        orderFallback ||= !inserted.ordered;
+        await insertLocalItem(env, config.event_id, inserted.id, videoId, now);
+        added += 1;
+      }
+    
+      for (const item of removals) {
+        if (mutationBudget.remaining <= 0 || !quota.canSpend(50)) break;
+        await deletePlaylistItem(
+          item.playlist_item_id,
+          accessToken,
+          quota,
+          requestBudget,
+        );
+        mutationBudget.remaining -= 1;
+        await env.DB.prepare(
+          `DELETE FROM event_youtube_playlist_items
+           WHERE event_id = ?1 AND playlist_item_id = ?2`,
+        )
+          .bind(config.event_id, item.playlist_item_id)
+          .run();
+        removed += 1;
+      }
+    
+      const hasRemaining =
+        added < additions.length || removed < removals.length;
+      const lastError = hasRemaining
+        ? "playlist_mutation_batch_continuing"
+        : orderFallback
+          ? "playlist_order_fallback_manual_sort_required"
+          : null;
+      await env.DB.prepare(
+        `UPDATE event_youtube_playlist_sync
+         SET sync_status = ?1, next_sync_at = ?2,
+             last_synced_at = ?3, last_error = ?4, updated_at = ?5
+         WHERE event_id = ?6`,
+      )
+        .bind(
+          hasRemaining ? "deferred" : "synced",
+          hasRemaining
+            ? now + RETRY_DELAY_SEC
+            : now + Math.max(60, config.sync_interval_minutes) * 60,
+          hasRemaining ? config.last_synced_at : now,
+          lastError,
+          now,
+          config.event_id,
+        )
+        .run();
+      return;
+    }
+    
+    async function markOAuthFailure(
+      env: PlaylistSyncEnv,
+      configs: readonly SyncConfigRow[],
+      error: unknown,
+      now: number,
+    ): Promise<void> {
+      const code = errorCode(error);
+      for (const config of configs) {
+        await env.DB.prepare(
+          `UPDATE event_youtube_playlist_sync
+           SET sync_status = 'failed', next_sync_at = ?1,
+               last_error = ?2, updated_at = ?3
+           WHERE event_id = ?4`,
+        )
+          .bind(now + FAILURE_RETRY_SEC, code, now, config.event_id)
+          .run();
+      }
+    }
+    
+    export async function syncEventPlaylists(
+      env: PlaylistSyncEnv,
+    ): Promise<PlaylistSyncBatchResult> {
+      const hasOAuth =
+        Boolean(env.YOUTUBE_OAUTH_CLIENT_ID) &&
+        Boolean(env.YOUTUBE_OAUTH_CLIENT_SECRET) &&
+        Boolean(env.YOUTUBE_OAUTH_REFRESH_TOKEN);
+      if (!hasOAuth) return { processed: 0, skipped: 1, failed: 0 };
+    
+      const now = unixNow();
+      const configs = await loadDueConfigs(env, now);
+      if (configs.length === 0) return { processed: 0, skipped: 1, failed: 0 };
+    
+      const quota = await DailyQuotaBudget.load(env, now);
+      const requestBudget = new ExternalRequestBudget(MAX_EXTERNAL_REQUESTS_PER_RUN);
+      let accessToken: string;
+      try {
+        accessToken = await refreshAccessToken(env, requestBudget);
+      } catch (error) {
+        await markOAuthFailure(env, configs, error, now);
+        return { processed: 0, skipped: 0, failed: configs.length };
+      }
+    
+      let processed = 0;
+      let failed = 0;
+      const mutationBudget = { remaining: MAX_MUTATIONS_PER_RUN };
+      for (const config of configs) {
+        try {
+          await syncOneEvent(
+            env,
+            config,
+            accessToken,
+            quota,
+            requestBudget,
+            mutationBudget,
+            now,
+          );
+          processed += 1;
+        } catch (error) {
+          await markEventError(env, config.event_id, error, now);
+          failed += 1;
+          if (isQuotaError(error)) break;
+        }
+      }
+    
+      return { processed, skipped: 0, failed };
+    }
+    
+  operator: 'match'
+  stack: |-
+    TestContext.<anonymous> (file:///home/runner/work/flamenode/flamenode/workers/youtube-playlist-sync/index.test.mjs:65:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: 無効な制御処理と線形indexOfを残さない
+ok 86 - 無効な制御処理と線形indexOfを残さない
+  ---
+  duration_ms: 0.472152
+  type: 'test'
+  ...
+# Subtest: 429と5xxは再試行対象
+ok 87 - 429と5xxは再試行対象
+  ---
+  duration_ms: 0.914179
+  type: 'test'
+  ...
+# Subtest: Retry-After秒指定をミリ秒へ変換
+ok 88 - Retry-After秒指定をミリ秒へ変換
+  ---
+  duration_ms: 0.190093
+  type: 'test'
+  ...
+# Subtest: Retry-Afterは上限を超えない
+ok 89 - Retry-Afterは上限を超えない
+  ---
+  duration_ms: 0.166858
+  type: 'test'
+  ...
+# Subtest: YouTube同期は1 Cron最大200 ID・外部request最大8件に固定する
+ok 90 - YouTube同期は1 Cron最大200 ID・外部request最大8件に固定する
+  ---
+  duration_ms: 0.330031
+  type: 'test'
+  ...
+# Subtest: YouTube quotaはD1の日次80%予算を予約し未使用分を返却する
+ok 91 - YouTube quotaはD1の日次80%予算を予約し未使用分を返却する
+  ---
+  duration_ms: 0.236171
+  type: 'test'
+  ...
+# Subtest: YouTube quota系403はKV cooldownで連続呼出しを止める
+ok 92 - YouTube quota系403はKV cooldownで連続呼出しを止める
+  ---
+  duration_ms: 0.138976
+  type: 'test'
+  ...
+# Subtest: YouTube応答は必要なfieldsだけ取得する
+ok 93 - YouTube応答は必要なfieldsだけ取得する
+  ---
+  duration_ms: 0.284954
+  type: 'test'
+  ...
+# Subtest: 候補抽出はpending・開催中・通常期限のindex queryへ分離する
+ok 94 - 候補抽出はpending・開催中・通常期限のindex queryへ分離する
+  ---
+  duration_ms: 0.267928
+  type: 'test'
+  ...
+# Subtest: YouTube durationを秒へ変換する
+ok 95 - YouTube durationを秒へ変換する
+  ---
+  duration_ms: 0.495176
+  type: 'test'
+  ...
+# Subtest: 標準quota 10000の80%をFlameNode上限にする
+ok 96 - 標準quota 10000の80%をFlameNode上限にする
+  ---
+  duration_ms: 0.904966
+  type: 'test'
+  ...
+# Subtest: quota日付は太平洋時間0時で切り替わる
+ok 97 - quota日付は太平洋時間0時で切り替わる
+  ---
+  duration_ms: 13.469077
+  type: 'test'
+  ...
+# Subtest: quota予約はD1 UPSERTで上限超過を原子的に拒否する
+ok 98 - quota予約はD1 UPSERTで上限超過を原子的に拒否する
+  ---
+  duration_ms: 1.120125
+  type: 'test'
+  ...
+# Subtest: 日次予算を超える予約はD1を呼ばず拒否する
+ok 99 - 日次予算を超える予約はD1を呼ばず拒否する
+  ---
+  duration_ms: 0.244263
+  type: 'test'
+  ...
+# Subtest: 未使用予約だけを同じquota日へ返却する
+ok 100 - 未使用予約だけを同じquota日へ返却する
+  ---
+  duration_ms: 0.243432
+  type: 'test'
+  ...
+1..100
+# tests 100
+# suites 0
+# pass 98
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3446.976493
