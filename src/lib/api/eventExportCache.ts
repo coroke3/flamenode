@@ -1,13 +1,13 @@
 import "server-only";
 
 import { getEnv } from "@/lib/cloudflare";
+import type { EventExportFormat } from "./eventExportPayload";
 
-export const EVENT_EXPORT_CACHE_VERSION = 4;
-export const EVENT_EXPORT_ACCESS_CACHE_VERSION = 1;
+const EVENT_EXPORT_CACHE_VERSION = 4;
+const EVENT_EXPORT_ACCESS_CACHE_VERSION = 1;
 export const EVENT_EXPORT_ACCESS_TTL_SECONDS = 60;
 export const EVENT_EXPORT_REFRESH_MINUTES = [15, 60, 360, 1440] as const;
 
-export type EventExportCacheFormat = "legacy" | "new";
 export type EventExportRefreshMinutes =
   (typeof EVENT_EXPORT_REFRESH_MINUTES)[number];
 
@@ -29,7 +29,7 @@ export function eventExportAccessCacheKey(eventId: string): string {
 
 export function eventExportPayloadCacheKey(
   eventId: string,
-  format: EventExportCacheFormat,
+  format: EventExportFormat,
   refreshMinutes: EventExportRefreshMinutes,
 ): string {
   return [
@@ -42,12 +42,12 @@ export function eventExportPayloadCacheKey(
 }
 
 function isKvNamespace(value: unknown): value is KVNamespace {
+  if (!value || typeof value !== "object") return false;
+  const kv = value as Partial<KVNamespace>;
   return (
-    !!value &&
-    typeof value === "object" &&
-    typeof (value as { get?: unknown }).get === "function" &&
-    typeof (value as { put?: unknown }).put === "function" &&
-    typeof (value as { delete?: unknown }).delete === "function"
+    typeof kv.get === "function" &&
+    typeof kv.put === "function" &&
+    typeof kv.delete === "function"
   );
 }
 
@@ -71,12 +71,14 @@ export async function invalidateEventExportCache(
     ),
   ];
 
-  const results = await Promise.allSettled(keys.map((key) => kv.delete(key)));
-  const rejected = results.filter((result) => result.status === "rejected");
-  if (rejected.length > 0) {
+  let failed = 0;
+  for (const result of await Promise.allSettled(keys.map((key) => kv.delete(key)))) {
+    if (result.status === "rejected") failed += 1;
+  }
+  if (failed > 0) {
     console.warn("[event-export-api] cache invalidation partially failed", {
       eventId,
-      failed: rejected.length,
+      failed,
     });
   }
 }
