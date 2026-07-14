@@ -21,6 +21,7 @@ import {
 } from "@/lib/api/eventExportCache";
 import { checkPublicApiRateLimit, publicJsonResponse } from "@/lib/api/publicApi";
 
+const NOT_FOUND_CACHE_CONTROL = "public, max-age=60";
 const inFlightExports = new Map<string, Promise<unknown | null>>();
 
 function parseFormat(value: string | null): EventExportFormat | null {
@@ -52,6 +53,15 @@ function isPublicExportEvent(event: EventExportEventRow | null): boolean {
     !!event &&
     event.public_api_enabled === 1 &&
     event.visibility_status === "public"
+  );
+}
+
+function notFoundResponse(req: Request): Promise<Response> {
+  return publicJsonResponse(
+    req,
+    { error: "not_found" },
+    NOT_FOUND_CACHE_CONTROL,
+    404,
   );
 }
 
@@ -103,6 +113,28 @@ async function readCachedPayload(
   }
 }
 
+async function cachedExportResponse(
+  req: Request,
+  kv: KVNamespace,
+  cacheKey: string,
+  eventId: string,
+  format: EventExportFormat,
+  updateMode: EventExportUpdateMode,
+  refreshMinutes: EventExportRefreshMinutes,
+): Promise<Response | null> {
+  const cached = await readCachedPayload(kv, cacheKey, eventId);
+  return cached === null
+    ? null
+    : exportResponse(
+        req,
+        cached,
+        format,
+        updateMode,
+        refreshMinutes,
+        "HIT",
+      );
+}
+
 async function buildPayloadOnce(
   key: string,
   factory: () => Promise<unknown | null>,
@@ -130,9 +162,7 @@ export async function GET(
 
   const { id } = await params;
   const eventId = id.trim();
-  if (!eventId) {
-    return publicJsonResponse(req, { error: "not_found" }, "public, max-age=60", 404);
-  }
+  if (!eventId) return notFoundResponse(req);
 
   const url = new URL(req.url);
   const format = parseFormat(url.searchParams.get("format"));
@@ -186,22 +216,19 @@ export async function GET(
       });
     }
 
-    if (accessState === "0") {
-      return publicJsonResponse(req, { error: "not_found" }, "public, max-age=60", 404);
-    }
+    if (accessState === "0") return notFoundResponse(req);
 
     if (accessState === "1") {
-      const cached = await readCachedPayload(kv, payloadCacheKey, eventId);
-      if (cached !== null) {
-        return exportResponse(
-          req,
-          cached,
-          format,
-          updateMode,
-          refreshMinutes,
-          "HIT",
-        );
-      }
+      const cachedResponse = await cachedExportResponse(
+        req,
+        kv,
+        payloadCacheKey,
+        eventId,
+        format,
+        updateMode,
+        refreshMinutes,
+      );
+      if (cachedResponse) return cachedResponse;
     }
   }
 
@@ -223,21 +250,18 @@ export async function GET(
         error,
       });
     }
-    if (!allowed) {
-      return publicJsonResponse(req, { error: "not_found" }, "public, max-age=60", 404);
-    }
+    if (!allowed) return notFoundResponse(req);
 
-    const cached = await readCachedPayload(kv, payloadCacheKey, eventId);
-    if (cached !== null) {
-      return exportResponse(
-        req,
-        cached,
-        format,
-        updateMode,
-        refreshMinutes,
-        "HIT",
-      );
-    }
+    const cachedResponse = await cachedExportResponse(
+      req,
+      kv,
+      payloadCacheKey,
+      eventId,
+      format,
+      updateMode,
+      refreshMinutes,
+    );
+    if (cachedResponse) return cachedResponse;
   }
 
   const generatedAt = Math.floor(Date.now() / 1000);
@@ -266,7 +290,7 @@ export async function GET(
         // 404応答を優先する。
       }
     }
-    return publicJsonResponse(req, { error: "not_found" }, "public, max-age=60", 404);
+    return notFoundResponse(req);
   }
 
   if (kv) {
