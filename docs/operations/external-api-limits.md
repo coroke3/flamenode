@@ -1,7 +1,7 @@
 # External API Limits
 
 > Status: Active
-> Last verified: 2026-07-13
+> Last verified: 2026-07-14
 > Source of truth: `workers/shared/externalApi.ts`、`workers/youtube-sync/index.ts`、`workers/youtube-playlist-sync/index.ts`、`workers/notification-dispatcher/dispatch.ts`、`src/lib/media/externalImageProxy.ts`
 
 外部サービスのrate limit値をアプリ側で固定推測せず、Providerが返すquota・rate limit・Retry-Afterを優先する。全処理は1回のWorker invocation内で固定予算を持ち、無制限retry、無制限並列、全件再取得を禁止する。
