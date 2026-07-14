@@ -1,0 +1,27 @@
+name: Repository Audit Snapshot Latest
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/repo-audit-snapshot-latest.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Pack repository source
+        run: |
+          tar --exclude='.git' --exclude='node_modules' --exclude='.next' --exclude='.vercel' --exclude='.tmp' -czf /tmp/flamenode-latest-source.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flamenode-latest-source-${{ github.sha }}
+          path: /tmp/flamenode-latest-source.tar.gz
+          if-no-files-found: error
+          retention-days: 1
