@@ -8,7 +8,7 @@ import {
 } from "./aliases.ts";
 import {
   getPresetPermissions,
-  type EventStaffPreset,
+  isEventStaffPreset,
 } from "./presets.ts";
 
 export { expandPermissionAliases };
@@ -30,19 +30,6 @@ export function normalizePermissionKeys(
     out.add(key);
   }
   return Array.from(out);
-}
-
-function isEventStaffPreset(value: string | null | undefined): value is EventStaffPreset {
-  return (
-    value === "owner" ||
-    value === "manager" ||
-    value === "slot_manager" ||
-    value === "content_editor" ||
-    value === "reviewer" ||
-    value === "xid_reviewer" ||
-    value === "public_staff" ||
-    value === "custom"
-  );
 }
 
 export function safeParseCustomPermissionKeys(
@@ -76,10 +63,7 @@ export function resolveStaffPermissionKeys(
     }
     return keys;
   }
-  if (
-    isEventStaffPreset(row.permission_preset) &&
-    row.permission_preset !== "custom"
-  ) {
+  if (isEventStaffPreset(row.permission_preset)) {
     for (const key of getPresetPermissions(row.permission_preset)) {
       keys.add(key);
     }
