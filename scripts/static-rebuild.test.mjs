@@ -1,16 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-
-const ACTIVE_GRACE = 86400;
-
-function resolveEventFreshness(event, now) {
-  if (event.visibility_status === "archived") return "archived";
-  if (event.visibility_status === "public") return "active";
-  const start = event.start_time ?? 0;
-  const end = event.end_time ?? 0;
-  if (start && end && now >= start && now <= end + ACTIVE_GRACE) return "active";
-  return "ended";
-}
+import { resolveEventFreshness } from "../workers/json-generator/freshness.ts";
 
 test("resolveEventFreshness archived", () => {
   assert.equal(
@@ -36,7 +26,7 @@ test("resolveEventFreshness ended", () => {
   assert.equal(
     resolveEventFreshness(
       { visibility_status: "private", start_time: 100, end_time: 200 },
-      200 + ACTIVE_GRACE + 1,
+      200 + 86400 + 1,
     ),
     "ended",
   );
