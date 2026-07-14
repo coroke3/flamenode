@@ -5,22 +5,12 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { desc, eq, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
-import {
-  auditLogs as auditLogsTable,
-  users as usersTable,
-  videoInteractions as videoInteractionsTable,
-  videos as videosTable,
-  xAccountLinkRequests as xAccountLinkRequestsTable,
-  xUsers as xUsersTable,
-} from "@/lib/db/schema";
-import { Icon } from "@/components/ui/Icon";
+import { auditLogs as auditLogsTable, users as usersTable, videoInteractions as videoInteractionsTable, videos as videosTable, xAccountLinkRequests as xAccountLinkRequestsTable, xUsers as xUsersTable } from "@/lib/db/schema";
+
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminUserTabs } from "@/components/admin/AdminUserTabs";
-import {
-  getLatestPublishedMajorTerms,
-  termsReacceptRequiredValue,
-} from "@/lib/terms/reaccept";
+import { getLatestPublishedMajorTerms, termsReacceptRequiredValue } from "@/lib/terms/reaccept";
 
 export const metadata: Metadata = { title: "ユーザー詳細" };
 export const dynamic = "force-dynamic";

@@ -124,25 +124,3 @@ export async function deleteAnnouncement(
   revalidatePath("/admin/announcements");
   return { ok: true };
 }
-
-export async function setAnnouncementPublished(
-  formData: FormData,
-): Promise<AnnouncementResult> {
-  const guard = await requireAdmin();
-  if (!guard.ok) return guard.result;
-  const id = String(formData.get("id") ?? "").trim();
-  const next = Number(formData.get("is_published") ?? 0);
-  if (!id) return { ok: false, message: "id が必要です。" };
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
-  const existing = (await db.select().from(announcements).where(eq(announcements.id, id)).limit(1))[0];
-  if (!existing) return { ok: false, message: "対象のお知らせが見つかりません。" };
-  const now = Math.floor(Date.now() / 1000);
-  await mutateWithAudit(db, {
-    mutationStatements: [db.run(sql`UPDATE announcements SET is_published=${next}, updated_at=${now} WHERE id=${id} AND updated_at=${existing.updated_at}`)],
-    expectedMutationChanges: 1,
-    audits: [{ table_name: "announcements", target_id: id, operation: "UPDATE", before: { ...existing }, after: { ...existing, is_published: next, updated_at: now }, actor_user_id: guard.userId, retention_class: "normal" }],
-  });
-  revalidatePath("/admin/announcements");
-  return { ok: true };
-}

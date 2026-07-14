@@ -4,15 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import styles from "./XIdSettingsClient.module.css";
 import { Icon } from "@/components/ui/Icon";
-import {
-  deleteLinkedXId,
-  enablePortfolio,
-  requestXIdLink,
-  setXIdIcon,
-  setActiveXId,
-  uploadXIdIcon,
-  updateXIdProfile,
-} from "@/lib/actions/xid";
+import { deleteLinkedXId, requestXIdLink, setXIdIcon, setActiveXId, uploadXIdIcon, updateXIdProfile } from "@/lib/actions/xid";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { YoutubeChannelPicker } from "@/components/settings/YoutubeChannelPicker";
 import { SocialLinksEditor } from "@/components/forms/SocialLinksEditor";
@@ -305,131 +297,7 @@ export function XIdCompactProfileForm({
       {error ? <p className={styles.msgErr}>{error}</p> : null}
     </form>
   );
-}
-
-export function XIdProfileForm({
-  x,
-  iconCandidates,
-  channelCandidates,
-}: {
-  x: {
-    id: string;
-    x_name: string;
-    icon_url: string | null;
-    profile_text: string | null;
-    portfolio_contact: string | null;
-    youtube_channel_url: string | null;
-    other_social_links: string | null;
-  };
-  iconCandidates: string[];
-  channelCandidates: string[];
-}): React.ReactElement {
-  const router = useRouter();
-  const [pending, startTransition] = React.useTransition();
-  const [message, setMessage] = React.useState<string | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
-
-  const run = (
-    form: HTMLFormElement,
-    action: (fd: FormData) => Promise<{ ok: boolean; message?: string }>,
-  ) => {
-    const fd = new FormData(form);
-    fd.set("x_user_id", x.id);
-    setMessage(null);
-    setError(null);
-    startTransition(async () => {
-      const result = await action(fd);
-      if (!result.ok) {
-        setError(result.message ?? "更新に失敗しました。");
-        return;
-      }
-      setMessage(result.message ?? "更新しました。");
-      router.refresh();
-    });
-  };
-
-  return (
-    <form
-      key={x.id}
-      className={styles.stack}
-      onSubmit={(ev) => {
-        ev.preventDefault();
-        run(ev.currentTarget, updateXIdProfile);
-      }}
-    >
-      <input type="hidden" name="x_user_id" value={x.id} />
-      <div className={styles.stack}>
-        <label className={styles.compactLabel}>アイコン</label>
-        <XIdIconPicker
-          key={x.id}
-          xUserId={x.id}
-          currentIconUrl={x.icon_url}
-          candidates={iconCandidates}
-        />
-      </div>
-      <div className={styles.row}>
-        <input
-          name="x_name"
-          className={styles.input}
-          defaultValue={x.x_name}
-          placeholder="表示名 / 活動名"
-          maxLength={80}
-          required
-        />
-      </div>
-      <textarea
-        name="profile_text"
-        className={styles.textarea}
-        defaultValue={x.profile_text ?? ""}
-        rows={3}
-        maxLength={2000}
-        placeholder="プロフィール・概要"
-      />
-      <textarea
-        name="portfolio_contact"
-        className={styles.textarea}
-        defaultValue={x.portfolio_contact ?? ""}
-        rows={2}
-        maxLength={1200}
-        placeholder="Contact / 連絡先"
-      />
-      <div className={styles.fieldGrid}>
-        <div className={styles.field}>
-          <span className={styles.compactLabel}>
-            YouTube チャンネル（過去の作品から候補を表示）
-          </span>
-          <YoutubeChannelPicker
-            key={x.id}
-            defaultValue={x.youtube_channel_url}
-            candidates={channelCandidates}
-            disabled={pending}
-          />
-        </div>
-      </div>
-      <SocialLinksEditor key={x.id} initialValue={x.other_social_links} />
-      <div className={styles.row}>
-        <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm" disabled={pending}>
-          <Icon name="check" size={12} aria-hidden /> プロフィールを保存
-        </button>
-        <button
-          type="button"
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-          disabled={pending}
-          onClick={(ev) => {
-            const form = ev.currentTarget.form;
-            if (form) run(form, enablePortfolio);
-          }}
-        >
-          <Icon name="grid" size={12} aria-hidden /> ポートフォリオを有効化
-        </button>
-      </div>
-      {message ? <p className={styles.msgOk}>{message}</p> : null}
-      {error ? <p className={styles.msgErr}>{error}</p> : null}
-    </form>
-  );
-}
-
-function XIdIconPicker({
+}function XIdIconPicker({
   xUserId,
   currentIconUrl,
   candidates,

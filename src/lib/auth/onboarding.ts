@@ -144,7 +144,6 @@ export {
   onboardingHref,
   onboardingRulesHref,
   entryLoginRedirectTo,
-  getOnboardingHrefForWriteGuardReason,
 } from "./onboardingUrls";
 
 export function resolveOnboardingStepStatuses(

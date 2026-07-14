@@ -1,15 +1,6 @@
-import {
-  detectDelimiter,
-  parseDelimited,
-  serializeDelimited,
-  stripBom,
-} from "@/lib/utils/delimited";
+import { serializeDelimited } from "@/lib/utils/delimited";
 import type { SpreadsheetColumnMeta } from "@/lib/admin/spreadsheet/apiTypes";
-import {
-  formatSpreadsheetCellValue,
-  matchSpreadsheetColumnName,
-  parseSpreadsheetCellInput,
-} from "@/lib/admin/spreadsheet/cellFormat";
+import { formatSpreadsheetCellValue, matchSpreadsheetColumnName, parseSpreadsheetCellInput } from "@/lib/admin/spreadsheet/cellFormat";
 import { canEditSpreadsheetGridCell } from "@/lib/admin/spreadsheet/validation";
 
 export { formatSpreadsheetCellValue as formatCellValue, parseSpreadsheetCellInput };
@@ -257,22 +248,7 @@ export function buildGridPasteCellsFromGrid(
     }
   }
   return out;
-}
-
-export function buildGridPasteCells(
-  text: string,
-  columns: ColumnMeta[],
-  start: CellPos,
-  rowCount: number,
-): GridPasteCell[] {
-  const trimmed = stripBom(text).trim();
-  if (!trimmed) return [];
-  const delimiter = detectDelimiter(trimmed);
-  const grid = parseDelimited(trimmed, delimiter);
-  return buildGridPasteCellsFromGrid(grid, columns, start, rowCount);
-}
-
-/** クリップボードへ TSV を書き込む（フォールバック付き） */
+}/** クリップボードへ TSV を書き込む（フォールバック付き） */
 export async function writeTextToClipboard(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);

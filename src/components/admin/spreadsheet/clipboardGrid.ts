@@ -7,7 +7,6 @@ export {
   parseClipboardContent,
   looksLikeTabularClipboard,
 } from "@/lib/utils/clipboardParse";
-export { parseHtmlClipboardTable } from "@/lib/utils/clipboardHtml";
 
 import {
   parseClipboardContent,

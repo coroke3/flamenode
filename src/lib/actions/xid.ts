@@ -292,34 +292,7 @@ export async function updateXIdProfile(
   revalidatePath("/dashboard/settings");
   revalidatePath(`/user/${xUserId}`);
   return { ok: true, message: "X ID のプロフィールを更新しました。" };
-}
-
-export async function enablePortfolio(
-  formData: FormData,
-): Promise<XIdActionResult> {
-  const userId = await getSessionUserId();
-  if (!userId) return { ok: false, message: "ログインが必要です。" };
-
-  const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
-  if (!xUserId) return { ok: false, message: "X ID が必要です。" };
-
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
-  const row = await assertLinkedXUser(db, xUserId, userId);
-  if (!row) {
-    return { ok: false, message: "この X ID を編集する権限がありません。" };
-  }
-
-  revalidatePath("/dashboard/settings");
-  revalidatePath(`/user/${xUserId}`);
-  revalidatePath(`/user/${xUserId}/portfolio`);
-  return {
-    ok: true,
-    message: "公開ポートフォリオを有効化しました。",
-  };
-}
-
-export async function deleteLinkedXId(
+}export async function deleteLinkedXId(
   formData: FormData,
 ): Promise<XIdActionResult> {
   const userId = await getSessionUserId();

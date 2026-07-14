@@ -1,5 +1,3 @@
-export const PLAYLIST_SYNC_INTERVALS = [60, 180, 360, 720, 1440, 10080] as const;
-
 export type PlaylistSyncMode = "off" | "append_only" | "mirror";
 
 const PLAYLIST_ID_PATTERN = /^[A-Za-z0-9_-]{10,100}$/;
@@ -26,10 +24,4 @@ export function parsePlaylistSyncInterval(raw: string | null | undefined): numbe
   const value = Number(raw);
   if (!Number.isInteger(value)) return 720;
   return Math.min(10080, Math.max(60, value));
-}
-
-export function playlistSyncModeLabel(mode: PlaylistSyncMode): string {
-  if (mode === "append_only") return "追加のみ";
-  if (mode === "mirror") return "完全同期";
-  return "同期しない";
 }

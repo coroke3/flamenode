@@ -1,6 +1,6 @@
 import "server-only";
 
-import * as React from "react";
+
 import { Icon } from "@/components/ui/Icon";
 import type { AdminSidebarGroup } from "@/components/admin/AdminSidebarNav";
 import { isLegacyImportToolEnabled } from "@/lib/import/legacy/featureFlag";

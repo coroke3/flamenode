@@ -5,16 +5,8 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
-import {
-  parseEventTemplateSnapshot,
-  snapshotFromEvent,
-  type EventTemplateSnapshot,
-} from "@/lib/admin/eventTemplateSettings";
-import {
-  eventCustomQuestions,
-  eventTemplates,
-  events,
-} from "@/lib/db/schema";
+import { snapshotFromEvent } from "@/lib/admin/eventTemplateSettings";
+import { eventCustomQuestions, eventTemplates, events } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { mutateWithAudit } from "@/lib/audit/mutate";
@@ -162,29 +154,7 @@ export async function deleteEventTemplate(
   revalidatePath("/admin/events/templates");
   revalidatePath("/admin/events/new");
   return { ok: true, message: "テンプレートを削除しました。" };
-}
-
-export async function loadEventTemplateSnapshot(
-  templateId: string,
-): Promise<EventTemplateSnapshot | null> {
-  const guard = await requireAdmin();
-  if (!guard.ok) return null;
-
-  const db = getDatabase();
-  if (!db) return null;
-
-  const row = (
-    await db
-      .select({ settings_json: eventTemplates.settings_json })
-      .from(eventTemplates)
-      .where(eq(eventTemplates.id, templateId))
-      .limit(1)
-  )[0];
-  if (!row) return null;
-  return parseEventTemplateSnapshot(row.settings_json);
-}
-
-export async function listEventTemplatesForAdmin(): Promise<
+}export async function listEventTemplatesForAdmin(): Promise<
   Array<{
     id: string;
     name: string;

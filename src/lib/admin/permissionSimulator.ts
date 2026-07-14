@@ -1,13 +1,10 @@
 import "server-only";
 
-import { and, eq, or } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import { eventStaff } from "@/lib/db/schema";
 import { resolveStaffPermissionKeys } from "@/lib/auth/permissions/permissionResolver";
-import {
-  PRESET_DEFINITIONS,
-  type EventStaffPreset,
-} from "@/lib/auth/permissions/presets";
+import { PRESET_DEFINITIONS, type EventStaffPreset } from "@/lib/auth/permissions/presets";
 import { formatPermissionKeyLabel } from "@/lib/admin/permissionIntegrityChecks";
 import type { PermissionKey } from "@/lib/auth/permissions/keys";
 

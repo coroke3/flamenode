@@ -1,18 +1,4 @@
-import { sanitizeNextPath } from "#utils/next";
-
-export type GuardRedirectReason =
-  | "unauthenticated"
-  | "db_unavailable"
-  | "banned"
-  | "tos_required"
-  | "tos_reaccept_required"
-  | "maintenance_mode"
-  | "cost_guard_blocked"
-  | "active_x_required"
-  | "active_x_rejected"
-  | "active_x_not_approved";
-
-export interface GuardRouter {
+import { sanitizeNextPath } from "#utils/next";export interface GuardRouter {
   push(path: string): void;
 }
 

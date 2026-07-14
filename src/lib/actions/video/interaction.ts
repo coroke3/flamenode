@@ -189,14 +189,3 @@ export async function toggleVideoInteraction(
 ): Promise<VideoActionResult & { active?: boolean }> {
   return mutateVideoInteraction(formData, "toggle");
 }
-
-/** 明示的に on/off を指定する。FormData の `active` に "true" / "false" を渡す。 */
-export async function setVideoInteraction(
-  formData: FormData,
-): Promise<VideoActionResult & { active?: boolean }> {
-  const raw = String(formData.get("active") ?? "");
-  if (raw !== "true" && raw !== "false") {
-    return { ok: false, message: "active の指定が不正です。" };
-  }
-  return mutateVideoInteraction(formData, raw === "true");
-}

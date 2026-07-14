@@ -1,15 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, desc, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
-import {
-  eventGroupEvents,
-  eventGroups,
-  events,
-} from "@/lib/db/schema";
+import { eventGroupEvents, eventGroups, events } from "@/lib/db/schema";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { buildEventGroupChangeQueueBatch } from "@/lib/staticRebuild/hooks";
 import { generateId } from "@/lib/utils/id";
@@ -383,21 +379,7 @@ export async function addEventsToGroup(input: {
   revalidatePath(`/admin/event-groups/${groupId}/edit`);
   revalidatePath("/event");
   return { ok: true, id: groupId, added: toAdd.length };
-}
-
-export async function addEventToGroup(input: {
-  groupId: string;
-  eventId: string;
-  relationType?: "member" | "primary" | "related";
-}): Promise<EventGroupActionResult> {
-  const r = await addEventsToGroup({
-    groupId: input.groupId,
-    eventIds: [input.eventId],
-  });
-  return { ok: r.ok, message: r.message, id: r.id };
-}
-
-export async function removeEventFromGroup(input: {
+}export async function removeEventFromGroup(input: {
   groupId: string;
   eventId: string;
 }): Promise<EventGroupActionResult> {

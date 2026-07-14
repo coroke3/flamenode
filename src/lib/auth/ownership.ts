@@ -1,36 +1,12 @@
 import "server-only";
 import { and, eq, inArray, or } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
-import {
-  eventStaff,
-  events as eventsTable,
-  videoMembers,
-  videoEvents,
-  xUsers,
-  type videos,
-} from "@/lib/db/schema";
-import type {
-  CollaboratorPermissionKey,
-  VideoEditSectionKey,
-} from "./videoEditSections";
-import {
-  VIDEO_PERMISSION_ALIASES,
-  NORMAL_SAFE_VIDEO_EDIT_KEYS,
-  DANGEROUS_ADMIN_VIDEO_EDIT_KEYS,
-  COLLABORATOR_VIDEO_EDIT_KEYS,
-  isSafeNormalVideoEditKey,
-  isDangerousAdminVideoEditKey,
-  isUserDelegatableKey,
-  parseDelegatablePermissionKeys,
-} from "./ownershipCore";
+import { eventStaff, events as eventsTable, videoMembers, videoEvents, xUsers, type videos } from "@/lib/db/schema";
+import type { CollaboratorPermissionKey, VideoEditSectionKey } from "./videoEditSections";
+import { VIDEO_PERMISSION_ALIASES, COLLABORATOR_VIDEO_EDIT_KEYS, isSafeNormalVideoEditKey, isDangerousAdminVideoEditKey, isUserDelegatableKey, parseDelegatablePermissionKeys } from "./ownershipCore";
 import type { SessionUserLike } from "./ownershipCore";
 import { expandPermissionAliases } from "./permissions/aliases";
-import {
-  getManageStaffRole,
-  resolveStaffPermissionKeys,
-  staffRowHasPermissionKey,
-  type StaffPermissionRow,
-} from "./permissions/permissionResolver";
+import { getManageStaffRole, resolveStaffPermissionKeys, staffRowHasPermissionKey, type StaffPermissionRow } from "./permissions/permissionResolver";
 
 export type { SessionUserLike };
 export {

@@ -4,11 +4,8 @@ import type { BatchItem } from "drizzle-orm/batch";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { and, eq, inArray } from "drizzle-orm";
 import { notificationOutbox, users } from "@/lib/db/schema";
-import { enqueueNotification } from "./enqueue";
-import {
-  buildVideoApprovedNotification,
-  buildVideoVisibilityChangedNotification,
-} from "./templates/video";
+
+import { buildVideoApprovedNotification, buildVideoVisibilityChangedNotification } from "./templates/video";
 
 type AnyDb = LibSQLDatabase<any>;
 type VideoStatusNotificationArgs = {
@@ -122,23 +119,4 @@ export async function buildVideoStatusChangeNotificationBatch(
     created_at: Math.floor(Date.now() / 1000),
   };
   return { statements: [db.insert(notificationOutbox).values(row)], expectedChanges: [1] };
-}
-
-/** 作品の公開状態変更時に投稿者へ通知を enqueue する。 */
-export async function enqueueVideoStatusChangeNotification(
-  db: AnyDb,
-  args: VideoStatusNotificationArgs,
-): Promise<void> {
-  if (!args.recipientUserId?.trim()) return;
-  const spec = notificationSpec(args);
-  if (!spec) return;
-
-  await enqueueNotification(db, {
-    recipientUserId: args.recipientUserId,
-    type: spec.type,
-    dedupeKey: spec.dedupeKey,
-    payload: spec.payload,
-    eventId: args.eventId ?? null,
-    force: spec.type === "video_status_changed" ? true : undefined,
-  });
 }

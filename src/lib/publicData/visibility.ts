@@ -11,13 +11,7 @@ export function isPublicVideoDirect(
   value: unknown,
 ): value is PublicVideoVisibility {
   return value === "public" || value === "limited";
-}
-
-export function normalizePublicVideoVisibility(value: unknown): "public" | null {
-  return isPublicVideoListable(value) ? "public" : null;
-}
-
-export function normalizePublicEventVisibility(
+}export function normalizePublicEventVisibility(
   value: unknown,
 ): PublicEventVisibility | null {
   if (value === "public" || value === "archived") return value;

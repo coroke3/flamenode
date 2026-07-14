@@ -16,7 +16,7 @@ import type {
   SpreadsheetPageData,
 } from "./spreadsheetTypes";
 
-export { SpreadsheetApiError, spreadsheetUserMessage } from "./spreadsheetErrors";
+export { spreadsheetUserMessage } from "./spreadsheetErrors";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { cache: "no-store", ...init });

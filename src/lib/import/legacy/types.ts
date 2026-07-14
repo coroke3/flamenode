@@ -106,30 +106,12 @@ export interface CanonicalVideoCustomAnswer {
   question_id: string;
   question_key: string;
   answer_text: string | null;
-}
-
-/** video_softwares テーブル行 */
-export interface CanonicalVideoSoftware {
-  video_id: string;
-  software_id: string;
-  raw_label: string;
-  order_index: number;
-}
-
-/** software_catalog テーブル行 */
+}/** software_catalog テーブル行 */
 export interface SoftwareCatalogEntry {
   id: string;
   name: string;
   normalized_name: string;
-}
-
-/** software_aliases テーブル行 */
-export interface SoftwareAliasEntry {
-  software_id: string;
-  normalized_alias: string;
-}
-
-/** x_users テーブル行 (approval_status = "imported") */
+}/** x_users テーブル行 (approval_status = "imported") */
 export interface CanonicalXUser {
   id: string;
   x_name: string;

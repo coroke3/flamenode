@@ -1,12 +1,4 @@
-import {
-  ALL_PERMISSION_KEYS,
-  PERMISSION_DEFINITIONS,
-  type PermissionKey,
-} from "@/lib/auth/permissions/keys";
-
-export const COLLABORATOR_PERMISSION_KEYS = [...ALL_PERMISSION_KEYS] as const;
-
-export type LegacyCollaboratorPermissionKey =
+import { PERMISSION_DEFINITIONS, type PermissionKey } from "@/lib/auth/permissions/keys";export type LegacyCollaboratorPermissionKey =
   | "videos.title"
   | "videos.music_credit"
   | "videos.members"

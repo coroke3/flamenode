@@ -1,13 +1,8 @@
 import "server-only";
-import { eq } from "drizzle-orm";
+
 import type { DB } from "@/lib/db/client";
-import { videoEvents, videos } from "@/lib/db/schema";
-import {
-  buildStaticRebuildQueueBatch,
-  enqueueStaticRebuild,
-  enqueueStaticRebuildMany,
-  type StaticRebuildQueueBatch,
-} from "./enqueue";
+
+import { buildStaticRebuildQueueBatch, enqueueStaticRebuildMany, type StaticRebuildQueueBatch } from "./enqueue";
 import type { EnqueueStaticRebuildInput, StaticRebuildPriority } from "./types";
 
 type HookBase = {
@@ -124,40 +119,7 @@ export async function enqueueAfterVideoUpdate(
     }
   }
   await enqueueStaticRebuildMany(db, items);
-}
-
-export async function enqueueAfterVideoStatusChange(
-  db: DB,
-  opts: { videoId: string; requestedByUserId?: string | null },
-): Promise<void> {
-  const [rows, eventRows] = await Promise.all([
-    db
-      .select({
-        creator_x_user_id: videos.creator_x_user_id,
-        primary_event_id: videos.primary_event_id,
-      })
-      .from(videos)
-      .where(eq(videos.id, opts.videoId))
-      .limit(1),
-    db
-      .select({ event_id: videoEvents.event_id })
-      .from(videoEvents)
-      .where(eq(videoEvents.video_id, opts.videoId)),
-  ]);
-  const row = rows[0];
-  await enqueueAfterVideoUpdate(db, {
-    videoId: opts.videoId,
-    creatorXUserId: row?.creator_x_user_id ?? null,
-    primaryEventId: row?.primary_event_id ?? null,
-    eventIds: eventRows.map(({ event_id }) => event_id),
-    visibilityChanged: true,
-    identityChanged: false,
-    eventMembershipChanged: false,
-    requestedByUserId: opts.requestedByUserId,
-  });
-}
-
-export function buildAfterVideoStatusChangeQueueBatch(
+}export function buildAfterVideoStatusChangeQueueBatch(
   db: DB,
   opts: {
     videoId: string;
@@ -198,36 +160,7 @@ export function buildAfterVideoStatusChangeQueueBatch(
     });
   }
   return buildStaticRebuildQueueBatch(db, items);
-}
-
-export async function enqueueAfterEventSettingsChange(
-  db: DB,
-  opts: HookBase & { eventId: string },
-): Promise<void> {
-  await enqueueStaticRebuildMany(db, [
-    {
-      targetType: "event",
-      targetId: opts.eventId,
-      reason: opts.reason,
-      priority: opts.priority ?? "normal",
-      requestedByUserId: opts.requestedByUserId,
-    },
-    {
-      targetType: "events_index",
-      targetId: "global",
-      reason: opts.reason,
-      priority: "low",
-    },
-    {
-      targetType: "search_index",
-      targetId: "global",
-      reason: opts.reason,
-      priority: "low",
-    },
-  ]);
-}
-
-export function buildEventGroupChangeQueueBatch(
+}export function buildEventGroupChangeQueueBatch(
   db: DB,
   opts: Pick<HookBase, "reason" | "requestedByUserId">,
 ): Promise<StaticRebuildQueueBatch> {
@@ -240,16 +173,4 @@ export function buildEventGroupChangeQueueBatch(
       requestedByUserId: opts.requestedByUserId,
     },
   ]);
-}
-
-/** 手動再生成（管理画面） */
-export async function enqueueManualStaticRebuild(
-  db: DB,
-  input: Omit<EnqueueStaticRebuildInput, "priority">,
-): Promise<void> {
-  await enqueueStaticRebuild(db, {
-    ...input,
-    priority: "high",
-    reason: input.reason || "manual_rebuild",
-  });
 }

@@ -105,11 +105,3 @@ export function isEventStaffPreset(value: unknown): value is EventStaffPreset {
 export function getPresetPermissions(preset: EventStaffPreset): PermissionKey[] {
   return [...PRESET_DEFINITIONS[preset].permissions];
 }
-
-export function legacyRoleToPreset(
-  role: "representative" | "editor" | "staff" | string | null | undefined,
-): EventStaffPreset {
-  if (role === "representative") return "owner";
-  if (role === "editor") return "manager";
-  return "public_staff";
-}

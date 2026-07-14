@@ -16,9 +16,6 @@ export interface AuthSessionUser {
   terms_reaccept_required: number;
 }
 
-/** 管理者かどうか。 */
-export const isAdmin = (u: { role?: string }): boolean => u.role === "admin";
-
 export interface RequireSessionOptions {
   /**
    * ログイン後に戻したいパス。未指定の場合は `/dashboard` にフォールバックする。

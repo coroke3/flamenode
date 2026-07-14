@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { and, asc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { VideoPublicMemberCandidate } from "@/components/admin/VideoCollabPermsManager";
 import { AdminVideoTabs } from "@/components/admin/AdminVideoTabs";
 import { VideoCollabPermsManager } from "@/components/admin/VideoCollabPermsManager";

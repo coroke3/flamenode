@@ -119,6 +119,3 @@ export function isRegisteredRestoreTable(
 ): tableName is RegisteredRestoreTableName {
   return getRestoreRegistration(tableName) !== null;
 }
-
-export const REGISTERED_RESTORE_TABLES =
-  Object.keys(REGISTRATIONS) as RegisteredRestoreTableName[];
