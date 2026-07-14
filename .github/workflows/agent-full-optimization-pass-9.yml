@@ -1,9 +1,9 @@
 name: Apply full optimization pass 9
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/full-optimization-pass-9
+      - main
 
 permissions:
   contents: write
@@ -23,7 +23,7 @@ jobs:
       - name: 最適化パッチを適用
         run: python3 scripts/agent_full_optimization_pass_9.py
       - name: 依存関係をインストール
-        run: npm ci
+        run: npm ci --no-audit --no-fund
       - name: 型・Lint・Unit・Workerを検証
         run: |
           npm run typecheck
