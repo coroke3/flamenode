@@ -20,11 +20,7 @@ export const PUBLIC_VIDEO_KEYS = [
   "primary_event_id",
   "scheduled_time",
   "status",
-] as const;
-
-export type PublicVideoKey = (typeof PUBLIC_VIDEO_KEYS)[number];
-
-/** クライアントへ返す公開作品 DTO。 */
+] as const;/** クライアントへ返す公開作品 DTO。 */
 export interface PublicVideoDto {
   id: string;
   title: string;
@@ -56,11 +52,7 @@ export const PUBLIC_EVENT_KEYS = [
   "entry_end_time",
   "max_slots_per_video",
   "max_consecutive_slots_per_entry",
-] as const;
-
-export type PublicEventKey = (typeof PUBLIC_EVENT_KEYS)[number];
-
-/** クライアントへ返す公開イベント DTO。 */
+] as const;/** クライアントへ返す公開イベント DTO。 */
 export interface PublicEventDto {
   id: string;
   title: string;

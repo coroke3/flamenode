@@ -1,31 +1,11 @@
 import type { BatchItem } from "drizzle-orm/batch";
-import {
-  and,
-  asc,
-  eq,
-  sql,
-  type SQL,
-} from "drizzle-orm";
-import type { DB } from "@/lib/db/client";
-import {
-  announcements,
-  eventGroups,
-  eventStaff,
-  events,
-  slots,
-  videoMembers,
-  videos,
-  xAccountLinkRequests,
-} from "@/lib/db/schema";
+import { and, asc, eq, sql, type SQL } from "drizzle-orm";
+
+import { announcements, eventGroups, eventStaff, events, slots, videoMembers, videos, xAccountLinkRequests } from "@/lib/db/schema";
 import { isEventOwner } from "@/lib/event/eventOwnershipCore";
 import type { RestoreAdapter, RestoreStrategy } from "./types";
 import { expectedRowCondition as buildExpectedRowCondition } from "./expectedRowCondition";
-import {
-  buildVideoMemberBulkInsertSql,
-  buildVideoMemberSetGuardSql,
-  buildVideoMemberSetSnapshot,
-  parseVideoMemberSetSnapshot,
-} from "@/lib/video/memberSetSnapshot";
+import { buildVideoMemberBulkInsertSql, buildVideoMemberSetGuardSql, buildVideoMemberSetSnapshot, parseVideoMemberSetSnapshot } from "@/lib/video/memberSetSnapshot";
 
 export function expectedRowCondition(options: {
   forceOverwrite?: boolean;

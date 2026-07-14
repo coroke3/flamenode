@@ -3,7 +3,7 @@ export const runtime = "edge";
 import { NextResponse } from "next/server";
 import { withDatabase } from "@/lib/cloudflare";
 import { softwareCatalog, softwareAliases } from "@/lib/db/schema";
-import { eq, or, like, desc, sql } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 
 export async function GET(req: Request): Promise<NextResponse> {
   const url = new URL(req.url);

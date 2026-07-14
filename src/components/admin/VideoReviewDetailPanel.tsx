@@ -1,13 +1,10 @@
 import * as React from "react";
-import Link from "next/link";
+
 import { Icon } from "@/components/ui/Icon";
 import { youtubeThumbUrl, youtubeWatchUrl } from "@/lib/youtube/id";
 import { formatUnix } from "@/lib/utils/format";
 import type { VideoReviewDetail } from "@/lib/admin/videoReviewDetail";
-import {
-  videoVisibilityBadgeClass,
-  videoVisibilityLabel,
-} from "@/lib/admin/videoVisibilityLabels";
+import { videoVisibilityBadgeClass, videoVisibilityLabel } from "@/lib/admin/videoVisibilityLabels";
 
 interface VideoReviewDetailPanelProps {
   video: VideoReviewDetail;

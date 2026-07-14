@@ -191,6 +191,6 @@ export async function buildAuthConfig(): Promise<NextAuthConfig> {
   };
 }
 
-export const { handlers, auth, signIn, signOut } = NextAuth(async () =>
+export const { handlers, auth, signIn } = NextAuth(async () =>
   await buildAuthConfig(),
 );

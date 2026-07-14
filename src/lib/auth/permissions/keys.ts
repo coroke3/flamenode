@@ -71,18 +71,7 @@ export const DANGEROUS_PERMISSION_KEYS: readonly PermissionKey[] = [
   "video.primary_event",
   "video.youtube_id",
   "video.identity",
-];
-
-export const ADMIN_ONLY_PERMISSION_KEYS: readonly PermissionKey[] = [
-  "xid.link_requests",
-  "event.public_api",
-  "event.static_rebuild",
-  "video.primary_event",
-  "video.youtube_id",
-  "video.identity",
-];
-
-export const PERMISSION_DEFINITIONS: Record<PermissionKey, PermissionDefinition> = {
+];export const PERMISSION_DEFINITIONS: Record<PermissionKey, PermissionDefinition> = {
   "event.basic": {
     key: "event.basic",
     label: "イベント基本情報",
@@ -209,14 +198,7 @@ export const PERMISSION_DEFINITIONS: Record<PermissionKey, PermissionDefinition>
     dangerous: true,
     adminOnly: true,
   },
-};
-
-export const PERMISSION_KEY_LABELS: Record<PermissionKey, string> =
-  Object.fromEntries(
-    Object.entries(PERMISSION_DEFINITIONS).map(([key, def]) => [key, def.label]),
-  ) as Record<PermissionKey, string>;
-
-export function isDangerousKey(key: PermissionKey): boolean {
+};export function isDangerousKey(key: PermissionKey): boolean {
   return PERMISSION_DEFINITIONS[key].dangerous === true;
 }
 
@@ -226,10 +208,4 @@ export function isAdminOnlyKey(key: PermissionKey): boolean {
 
 export function isValidPermissionKey(key: string): key is PermissionKey {
   return (ALL_PERMISSION_KEYS as readonly string[]).includes(key);
-}
-
-export function getPermissionDefinition(
-  key: PermissionKey,
-): PermissionDefinition {
-  return PERMISSION_DEFINITIONS[key];
 }

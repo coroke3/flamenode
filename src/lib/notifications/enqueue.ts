@@ -3,9 +3,9 @@ import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
-import type { DB } from "@/lib/db/client";
+
 import { notificationOutbox, users, xUsers } from "@/lib/db/schema";
-import { auditAction } from "@/lib/audit/helpers";
+
 import { validateNotificationPayload } from "./format";
 
 type AnyDb = LibSQLDatabase<any>;
@@ -257,71 +257,4 @@ export async function buildNotificationOutboxStatement(
       Math.floor(Date.now() / 1000),
     ),
   );
-}
-
-/**
- * best_effort: notification_outbox に1件enqueueする。
- * 失敗してもアプリ操作は止めず、監査ログだけを残す。
- */
-export async function enqueueNotification(
-  db: AnyDb,
-  input: EnqueueNotificationInput,
-): Promise<boolean> {
-  let prepared: PreparedNotification;
-  try {
-    prepared = prepareNotification(input);
-  } catch (error) {
-    console.warn(
-      "[enqueueNotification] invalid payload",
-      error instanceof Error ? error.message : String(error),
-      input.type,
-    );
-    return false;
-  }
-
-  try {
-    if (
-      prepared.dedupeKey &&
-      !input.force &&
-      (await hasActiveDedupe(db, prepared.dedupeKey))
-    ) {
-      return false;
-    }
-
-    const recipientUserId = await resolveRecipientUserId(
-      db,
-      input,
-      input.force ?? false,
-    );
-    if (!recipientUserId) return false;
-
-    return executeNotificationInsert(
-      db,
-      buildNotificationRow(
-        prepared,
-        recipientUserId,
-        Math.floor(Date.now() / 1000),
-      ),
-    );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn("[enqueueNotification] failed", error);
-    try {
-      await auditAction(db as DB, {
-        table_name: "notification_outbox",
-        record_id: "enqueue_failed",
-        action: "CREATE",
-        after_data: JSON.stringify({
-          type: input.type,
-          dedupe_key: prepared.dedupeKey,
-          error: message.slice(0, 500),
-        }),
-        operator_user_id: input.recipientUserId ?? "system",
-        retention_class: "normal",
-      });
-    } catch {
-      // history失敗はbest-effort経路では握りつぶす。
-    }
-    return false;
-  }
 }

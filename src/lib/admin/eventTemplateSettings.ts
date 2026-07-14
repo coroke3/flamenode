@@ -209,24 +209,7 @@ export function parseEventTemplateSnapshot(
   } catch {
     return null;
   }
-}
-
-function partsJsonToText(value: string | null | undefined): string {
-  if (!value) return "";
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed)) return "";
-    return parsed
-      .filter((v): v is string => typeof v === "string")
-      .map((v) => v.trim())
-      .filter(Boolean)
-      .join("\n");
-  } catch {
-    return "";
-  }
-}
-
-/** 新規イベントフォーム用の初期値（日時は空、公開状態は下書き）。 */
+}/** 新規イベントフォーム用の初期値（日時は空、公開状態は下書き）。 */
 export function snapshotToFormInitial(
   snapshot: EventTemplateSnapshot,
 ): EventFormInitial {
@@ -257,5 +240,3 @@ export function snapshotToFormInitial(
     review_settings: snapshot.review_settings,
   };
 }
-
-export { partsJsonToText };

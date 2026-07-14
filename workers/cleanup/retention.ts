@@ -93,17 +93,7 @@ export interface AuditLogSettingsRow {
   long_audit_retention_days: number;
   max_payload_bytes: number;
   compact_after_days: number;
-}
-
-export const DEFAULT_AUDIT_LOG_SETTINGS_ROW: AuditLogSettingsRow = {
-  normal_retention_days: AUDIT_NORMAL_DAYS_DEFAULT,
-  restorable_retention_days: AUDIT_RESTORABLE_DAYS_DEFAULT,
-  long_audit_retention_days: AUDIT_LONG_AUDIT_DAYS_DEFAULT,
-  max_payload_bytes: 20000,
-  compact_after_days: 30,
-};
-
-function clampAuditDays(
+}function clampAuditDays(
   value: unknown,
   min: number,
   max: number,

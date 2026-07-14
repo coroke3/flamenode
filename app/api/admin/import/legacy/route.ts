@@ -5,53 +5,18 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getDatabase } from "@/lib/cloudflare";
 import type { DB } from "@/lib/db/client";
-import {
-  eventCustomQuestions,
-  eventStaff,
-  events,
-  legacyImportBatches,
-  slots,
-  videoCustomAnswers,
-  videoEvents,
-  videoMembers,
-  videoSoftwares,
-  videoYoutubeMetadata,
-  videos,
-  xUsers,
-} from "@/lib/db/schema";
-import {
-  getLegacyImportPreviewSecret,
-  isLegacyImportToolEnabled,
-} from "@/lib/import/legacy/featureFlag";
+import { eventCustomQuestions, eventStaff, events, legacyImportBatches, slots, videoCustomAnswers, videoEvents, videoMembers, videoSoftwares, videoYoutubeMetadata, videos, xUsers } from "@/lib/db/schema";
+import { getLegacyImportPreviewSecret, isLegacyImportToolEnabled } from "@/lib/import/legacy/featureFlag";
 import { parseLegacyImportText } from "@/lib/import/legacy/parse";
 import { splitLegacyPayload } from "@/lib/import/legacy/payload";
 import { normalizeEventInfo, normalizeLegacyVideo } from "@/lib/import/legacy/normalize";
-import {
-  assertLegacyImportPlanLimits,
-  buildLegacyImportPlan,
-} from "@/lib/import/legacy/plan";
+import { assertLegacyImportPlanLimits, buildLegacyImportPlan } from "@/lib/import/legacy/plan";
 import { buildDryRunResult } from "@/lib/import/legacy/dryRun";
-import {
-  applyLegacyImportPlan,
-  cleanupExpiredLegacyImportBatches,
-} from "@/lib/import/legacy/apply";
-import {
-  buildPreviewToken,
-  LEGACY_IMPORT_PREVIEW_TTL_SECONDS,
-  verifyPreviewToken,
-} from "@/lib/import/legacy/previewToken";
+import { applyLegacyImportPlan, cleanupExpiredLegacyImportBatches } from "@/lib/import/legacy/apply";
+import { buildPreviewToken, LEGACY_IMPORT_PREVIEW_TTL_SECONDS, verifyPreviewToken } from "@/lib/import/legacy/previewToken";
 import { hashFiles, stableSha256 } from "@/lib/import/legacy/hash";
 import { generateId } from "@/lib/utils/id";
-import {
-  MAX_IMPORT_FILES,
-  MAX_IMPORT_TOTAL_BYTES,
-  MAX_CANONICAL_PLAN_BYTES,
-  MAX_IN_CLAUSE,
-  MAX_PREVIEW_ROWS,
-  LEGACY_IMPORT_LEASE_SECONDS,
-  PARSER_VERSION,
-  SCHEMA_VERSION,
-} from "@/lib/import/legacy/constants";
+import { MAX_IMPORT_FILES, MAX_IMPORT_TOTAL_BYTES, MAX_CANONICAL_PLAN_BYTES, MAX_IN_CLAUSE, LEGACY_IMPORT_LEASE_SECONDS, PARSER_VERSION, SCHEMA_VERSION } from "@/lib/import/legacy/constants";
 import type { ImportMode, ImportStrategy, LegacyImportPlan } from "@/lib/import/legacy/types";
 
 interface JsonRequest {

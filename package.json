@@ -51,7 +51,7 @@
     "test:notif": "node --test --experimental-strip-types src/lib/notifications/format.test.mjs",
     "test:youtube": "node --test --experimental-strip-types src/lib/youtube/id.test.mjs",
     "test:unit": "node --test --experimental-strip-types src/**/*.test.mjs",
-    "test:integration": "node --test src/**/*.integration.test.mjs",
+    "test:integration": "node --test --experimental-strip-types src/**/*.integration.test.mjs",
     "test:cloudflare-ci": "node --test scripts/cloudflare-ci.test.mjs",
     "test:static-rebuild": "node --test scripts/static-rebuild.test.mjs",
     "pages:build": "node scripts/run-next-on-pages.cjs && node scripts/pages-postbuild.mjs",

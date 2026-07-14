@@ -8,16 +8,14 @@ import { eq, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDatabase } from "@/lib/cloudflare";
 import { canEditVideo } from "@/lib/auth/ownership";
+
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { videoChapters, videos } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
 import { parseChapterTime } from "@/lib/utils/chapterTime";
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
-import {
-  MAX_ATOMIC_CHAPTER_BULK_ROWS,
-  parseChapterBulkCsv,
-} from "./chapterLimits";
+import { MAX_ATOMIC_CHAPTER_BULK_ROWS, parseChapterBulkCsv } from "./chapterLimits";
 
 export interface ChapterActionResult {
   ok: boolean;
@@ -149,142 +147,7 @@ export async function createChapter(
 
   revalidatePath(`/${target.youtube_video_id ?? data.video_id}`);
   return { ok: true, chapterId: id };
-}
-
-const updateSchema = createSchema.extend({
-  chapter_id: z.string().trim().min(1),
-});
-
-export async function updateChapter(
-  formData: FormData,
-): Promise<ChapterActionResult> {
-  // 編集は admin / 動画オーナー / 本人いずれも通る可能性があるため
-  // writeGuard では Active X を強制しない。BAN/TOS/CostGuard だけ集約する。
-  const guard = await writeGuard({ feature: "chapter_comment" });
-  if (!guard.ok) return { ok: false, message: guard.message };
-  const sUser = guard.user;
-  const approvedXIds = guard.approvedXIds;
-
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
-
-  const parsed = updateSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) {
-    return {
-      ok: false,
-      message: parsed.error.issues[0]?.message ?? "入力エラー",
-    };
-  }
-  const data = parsed.data;
-
-  const existing = (
-    await db
-      .select()
-      .from(videoChapters)
-      .where(eq(videoChapters.id, data.chapter_id))
-      .limit(1)
-  )[0];
-  if (!existing) return { ok: false, message: "チャプターが見つかりません。" };
-  const target = (
-    await db.select().from(videos).where(eq(videos.id, existing.video_id)).limit(1)
-  )[0];
-  if (!target) return { ok: false, message: "動画が見つかりません。" };
-
-  // 編集権限: 作成者本人 (Active X 切替後でも approvedXIds 経由で本人判定する) or
-  // 動画オーナー (canEditVideo) or admin。
-  // approvedXIds.includes(existing.x_user_id) でチェックすることで、
-  // 過去に別 X ID で投稿したコメントを Active 切替後にも本人として扱える。
-  let canMod =
-    sUser.role === "admin" ||
-    (existing.x_user_id != null && approvedXIds.includes(existing.x_user_id));
-  if (!canMod) {
-    canMod = await canEditVideo({
-      db,
-      user: { id: sUser.id, role: sUser.role ?? null },
-      video: target,
-      requiredKey: "video.chapter_admin",
-      privilegeMode: "event",
-    });
-  }
-  if (!canMod) return { ok: false, message: "編集権限がありません。" };
-
-  // updateChapter は通常チャプターコメント専用。video_member_id は触らない。
-  const now = Math.floor(Date.now() / 1000);
-  const after = { ...existing, chapter_time: data.chapter_time, chapter_label: data.chapter_label, note: data.note ?? null, visibility: data.visibility, show_on_player_bar: data.show_on_player_bar, updated_at: now };
-  const queue = await buildStaticRebuildQueueBatch(db, [{
-    targetType: "video",
-    targetId: existing.video_id,
-    reason: "chapter_update",
-    requestedByUserId: sUser.id,
-  }]);
-  await mutateWithAudit(db, {
-    mutationStatements: [db.run(sql`UPDATE video_chapters SET chapter_time=${data.chapter_time}, chapter_label=${data.chapter_label}, note=${data.note ?? null}, visibility=${data.visibility}, show_on_player_bar=${data.show_on_player_bar}, updated_at=${now} WHERE ${expectedRowCondition({ expectedCurrent: existing })}`), ...queue.statements],
-    expectedMutationChanges: [1, ...queue.expectedChanges],
-    audits: [{ table_name: "video_chapters", target_id: data.chapter_id, operation: "UPDATE", before: { ...existing }, after: { ...after }, actor_user_id: sUser.id, retention_class: "normal" }],
-  });
-  revalidatePath(`/${target.youtube_video_id ?? existing.video_id}`);
-  return { ok: true, chapterId: data.chapter_id };
-}
-
-export async function deleteChapter(
-  formData: FormData,
-): Promise<ChapterActionResult> {
-  const guard = await writeGuard({ feature: "chapter_comment" });
-  if (!guard.ok) return { ok: false, message: guard.message };
-  const sUser = guard.user;
-  const approvedXIds = guard.approvedXIds;
-
-  const chapterId = String(formData.get("chapter_id") ?? "").trim();
-  if (!chapterId) return { ok: false, message: "chapter_id が必要です。" };
-
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
-
-  const existing = (
-    await db
-      .select()
-      .from(videoChapters)
-      .where(eq(videoChapters.id, chapterId))
-      .limit(1)
-  )[0];
-  if (!existing) return { ok: false, message: "チャプターが見つかりません。" };
-  const target = (
-    await db.select().from(videos).where(eq(videos.id, existing.video_id)).limit(1)
-  )[0];
-  if (!target) return { ok: false, message: "動画が見つかりません。" };
-
-  // 削除権限: 作成者本人 (Active X 切替後でも approvedXIds 経由で本人判定する) or
-  // 動画オーナー (canEditVideo) or admin。
-  let canMod =
-    sUser.role === "admin" ||
-    (existing.x_user_id != null && approvedXIds.includes(existing.x_user_id));
-  if (!canMod) {
-    canMod = await canEditVideo({
-      db,
-      user: { id: sUser.id, role: sUser.role ?? null },
-      video: target,
-      requiredKey: "video.chapter_admin",
-      privilegeMode: "event",
-    });
-  }
-  if (!canMod) return { ok: false, message: "削除権限がありません。" };
-
-  const queue = await buildStaticRebuildQueueBatch(db, [{
-    targetType: "video",
-    targetId: existing.video_id,
-    reason: "chapter_delete",
-    requestedByUserId: sUser.id,
-  }]);
-  await mutateWithAudit(db, {
-    mutationStatements: [db.run(sql`DELETE FROM video_chapters WHERE ${expectedRowCondition({ expectedCurrent: existing })}`), ...queue.statements],
-    expectedMutationChanges: [1, ...queue.expectedChanges],
-    audits: [{ table_name: "video_chapters", target_id: chapterId, operation: "DELETE", before: { ...existing }, after: null, actor_user_id: sUser.id, retention_class: "normal" }],
-  });
-  revalidatePath(`/${target.youtube_video_id ?? existing.video_id}`);
-  return { ok: true };
-}
-
-/**
+}/**
  * CSV からチャプターを一括投稿する。
  *
  * 入力 CSV のフォーマット (ヘッダー任意):

@@ -147,14 +147,7 @@ export async function getEventOwners(
         eq(eventStaff.permission_preset, "owner"),
       )!,
     );
-}
-
-export async function countEventOwners(db: DB, eventId: string): Promise<number> {
-  const rows = await getEventOwners(db, eventId);
-  return rows.length;
-}
-
-export async function getApprovedXIdsForUser(
+}export async function getApprovedXIdsForUser(
   db: DB,
   userId: string,
 ): Promise<string[]> {
@@ -883,34 +876,7 @@ export async function buildReplaceEventStaffWithProtection(args: {
     expectedMutationChanges,
     audits,
   };
-}
-
-/**
- * event_staff の全置換を単独で確定する通常入口。
- * import/spreadsheet のように大きな単位で原子化する経路は
- * buildReplaceEventStaffWithProtection を利用して同じ batch に組み込む。
- */
-export async function replaceEventStaffWithProtection(args: {
-  db: DB;
-  eventId: string;
-  actorUserId: string;
-  reason: string;
-  context?: string | null;
-  now: number;
-  replacements: readonly EventStaffReplacement[];
-  confirmText?: string | null;
-  atomicExtras?: EventStaffBulkAtomicExtras;
-}): Promise<EventStaffRow[]> {
-  const work = await buildReplaceEventStaffWithProtection(args);
-  await mutateWithAudit(args.db, {
-    mutationStatements: work.mutationStatements,
-    expectedMutationChanges: work.expectedMutationChanges,
-    audits: work.audits,
-  });
-  return work.afterRows;
-}
-
-export async function transferEventOwnership(args: {
+}export async function transferEventOwnership(args: {
   db: DB;
   eventId: string;
   fromStaffId: string;

@@ -1,21 +1,8 @@
 import "server-only";
 
-import { and, desc, eq, gte, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
-import {
-  events as eventsTable,
-  auditLogs as auditLogsTable,
-  notificationOutbox as notificationOutboxTable,
-  slots as slotsTable,
-  systemSettings,
-  videoChapters as videoChaptersTable,
-  videoEvents as videoEventsTable,
-  videoInteractions as videoInteractionsTable,
-  videoModerationCases as videoModerationCasesTable,
-  videoYoutubeMetadata as videoYoutubeMetadataTable,
-  videos as videosTable,
-  xIdMergeRequests as xIdMergeRequestsTable,
-} from "@/lib/db/schema";
+import { events as eventsTable, auditLogs as auditLogsTable, notificationOutbox as notificationOutboxTable, slots as slotsTable, systemSettings, videoEvents as videoEventsTable, videoInteractions as videoInteractionsTable, videoModerationCases as videoModerationCasesTable, videoYoutubeMetadata as videoYoutubeMetadataTable, videos as videosTable, xIdMergeRequests as xIdMergeRequestsTable } from "@/lib/db/schema";
 
 export type HealthCheckResult = {
   id: string;

@@ -1,4 +1,4 @@
-import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, desc, isNotNull, sql } from "drizzle-orm";
 import { normalizeYoutubeChannelInput } from "@/lib/utils/youtubeChannel";
 import type { DB } from "./client";
 import { videos, xUserYoutubeChannels, xUsers } from "./schema";

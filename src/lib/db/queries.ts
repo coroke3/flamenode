@@ -3,7 +3,6 @@ import {
   events,
   eventStaff,
   videos,
-  videoEvents,
   xUsers,
 } from "./schema";
 import { creatorIconExpr, creatorNameExpr } from "./displayExpr";

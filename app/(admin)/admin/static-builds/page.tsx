@@ -1,24 +1,14 @@
 import * as React from "react";
 import type { Metadata } from "next";
-import { desc, eq, sql } from "drizzle-orm";
+import { desc, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { staticRebuildQueue, systemSettings } from "@/lib/db/schema";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
-import {
-  enqueueStaticRebuildAdmin,
-  retryAllFailedStaticRebuild,
-} from "@/lib/actions/static-rebuild-admin";
+import { enqueueStaticRebuildAdmin, retryAllFailedStaticRebuild } from "@/lib/actions/static-rebuild-admin";
 import { StaticRebuildQueuePanel } from "@/components/admin/StaticRebuildQueuePanel";
-import {
-  staticRebuildStatusLabel,
-  staticRebuildTargetIdHint,
-  staticRebuildTargetLabel,
-} from "@/lib/admin/staticRebuildLabels";
+import { staticRebuildStatusLabel, staticRebuildTargetIdHint, staticRebuildTargetLabel } from "@/lib/admin/staticRebuildLabels";
 import { resolveOperationMode } from "@/lib/operationMode/resolve";
-import {
-  OPERATION_MODE_DESCRIPTIONS,
-  OPERATION_MODE_LABELS,
-} from "@/lib/operationMode/types";
+import { OPERATION_MODE_DESCRIPTIONS, OPERATION_MODE_LABELS } from "@/lib/operationMode/types";
 import { STATIC_REBUILD_TARGET_TYPES } from "@/lib/staticRebuild/types";
 
 export const metadata: Metadata = { title: "静的JSON再生成" };

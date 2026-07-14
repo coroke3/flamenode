@@ -30,15 +30,7 @@ export function getEventVisibility(ev: EventStatusInput): EventVisibilityStatus 
     return ev.visibility_status;
   }
   return "draft";
-}
-
-/** 公開サイトの一覧・詳細に載せてよい visibility。 */
-export const PUBLICLY_LISTABLE_EVENT_VISIBILITIES = [
-  "public",
-  "archived",
-] as const satisfies readonly EventVisibilityStatus[];
-
-export function isPubliclyListableEventVisibility(
+}export function isPubliclyListableEventVisibility(
   visibility: EventVisibilityStatus | string | null | undefined,
 ): boolean {
   return (

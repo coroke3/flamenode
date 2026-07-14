@@ -17,45 +17,13 @@ import type { BatchItem } from "drizzle-orm/batch";
 import type { DB } from "@/lib/db/client";
 import type { WriteAuditLogInput } from "@/lib/audit/types";
 import { mutateWithAudit } from "@/lib/audit/mutate";
-import {
-  eventCustomQuestions,
-  eventStaff,
-  events,
-  legacyImportBatchItems,
-  legacyImportBatches,
-  slots,
-  softwareAliases,
-  softwareCatalog,
-  videoCustomAnswers,
-  videoEvents,
-  videoMembers,
-  videoSoftwares,
-  videoYoutubeMetadata,
-  videos,
-  users,
-  xUsers,
-} from "@/lib/db/schema";
+import { eventCustomQuestions, eventStaff, events, legacyImportBatchItems, legacyImportBatches, slots, videoCustomAnswers, videoEvents, videoMembers, videoSoftwares, videoYoutubeMetadata, videos, xUsers } from "@/lib/db/schema";
 import { buildReplaceEventStaffWithProtection } from "@/lib/event/eventOwnership";
 import { generateId } from "@/lib/utils/id";
-import {
-  buildVideoMemberBulkInsertSql,
-  buildVideoMemberSetGuardSql,
-  buildVideoMemberSetSnapshot,
-} from "@/lib/video/memberSetSnapshot";
-import {
-  MAX_D1_AUDIT_ENTRIES,
-  MAX_D1_AUDIT_PAYLOAD_BYTES,
-  MAX_D1_BATCH_STATEMENTS,
-  MAX_IN_CLAUSE,
-} from "./constants";
+import { buildVideoMemberBulkInsertSql, buildVideoMemberSetGuardSql, buildVideoMemberSetSnapshot } from "@/lib/video/memberSetSnapshot";
+import { MAX_D1_AUDIT_ENTRIES, MAX_D1_AUDIT_PAYLOAD_BYTES, MAX_D1_BATCH_STATEMENTS, MAX_IN_CLAUSE } from "./constants";
 import { stableSha256 } from "./hash";
-import type {
-  CanonicalVideo,
-  CanonicalXUser,
-  DryRunResult,
-  ImportStrategy,
-  LegacyImportPlan,
-} from "./types";
+import type { CanonicalVideo, CanonicalXUser, DryRunResult, ImportStrategy, LegacyImportPlan } from "./types";
 
 export interface ApplyOptions {
   strategy: ImportStrategy;
@@ -101,22 +69,7 @@ async function fetchImportedIds(db: DB, ids: string[]): Promise<Set<string>> {
     for (const r of rows) imported.add(r.target_id);
   }
   return imported;
-}
-
-async function fetchExistingIds<T extends { id: string }>(
-  db: DB,
-  table: { id: { name: string } },
-  ids: string[],
-  selector: (db: DB, chunk: string[]) => Promise<{ id: string }[]>,
-): Promise<Set<string>> {
-  const existing = new Set<string>();
-  for (const chunk of chunked(ids, MAX_IN_CLAUSE)) {
-    const rows = await selector(db, chunk);
-    for (const r of rows) existing.add(r.id);
-  }
-  return existing;
-}
-function normalizeSoftwareName(label: string): string {
+}function normalizeSoftwareName(label: string): string {
   return label.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
