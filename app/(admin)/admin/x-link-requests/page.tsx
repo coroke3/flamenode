@@ -42,93 +42,87 @@ export default async function AdminXLinkRequestsPage({
           eq(xAccountLinkRequests.status, "pending"),
           eq(xAccountLinkRequests.link_type, linkTypeFilter),
         )!;
-  const pending = db
-    ? await db
-        .select({
-          id: xAccountLinkRequests.id,
-          requested_x_id: xAccountLinkRequests.requested_x_id,
-          user_id: xAccountLinkRequests.user_id,
-          discord_name: users.name,
-          discord_image: users.image,
-          requested_at: xAccountLinkRequests.requested_at,
-          link_type: xAccountLinkRequests.link_type,
-          target_x_user_id: xAccountLinkRequests.target_x_user_id,
-          requested_x_name: sql<string | null>`(
-            SELECT ${xUsers.x_name}
-            FROM ${xUsers}
-            WHERE lower(${xUsers.id}) = lower(${xAccountLinkRequests.requested_x_id})
-            LIMIT 1
-          )`,
-          requested_icon_url: sql<string | null>`COALESCE(
-            (
-              SELECT ${xUsers.icon_url}
+  const [pending, recentRejected, recentAuditLogs] = db
+    ? await Promise.all([
+        db
+          .select({
+            id: xAccountLinkRequests.id,
+            requested_x_id: xAccountLinkRequests.requested_x_id,
+            user_id: xAccountLinkRequests.user_id,
+            discord_name: users.name,
+            discord_image: users.image,
+            requested_at: xAccountLinkRequests.requested_at,
+            link_type: xAccountLinkRequests.link_type,
+            target_x_user_id: xAccountLinkRequests.target_x_user_id,
+            requested_x_name: sql<string | null>`(
+              SELECT ${xUsers.x_name}
               FROM ${xUsers}
               WHERE lower(${xUsers.id}) = lower(${xAccountLinkRequests.requested_x_id})
               LIMIT 1
-            ),
-            (
-              SELECT ${xUserIcons.icon_url}
-              FROM ${xUserIcons}
-              WHERE lower(${xUserIcons.x_user_id}) = lower(${xAccountLinkRequests.requested_x_id})
-              ORDER BY ${xUserIcons.created_at} DESC
-              LIMIT 1
-            )
-          )`,
-          target_icon_url: sql<string | null>`COALESCE(
-            (
-              SELECT ${xUsers.icon_url}
-              FROM ${xUsers}
-              WHERE lower(${xUsers.id}) = lower(${xAccountLinkRequests.target_x_user_id})
-              LIMIT 1
-            ),
-            (
-              SELECT ${xUserIcons.icon_url}
-              FROM ${xUserIcons}
-              WHERE lower(${xUserIcons.x_user_id}) = lower(${xAccountLinkRequests.target_x_user_id})
-              ORDER BY ${xUserIcons.created_at} DESC
-              LIMIT 1
-            )
-          )`,
-        })
-        .from(xAccountLinkRequests)
-        .leftJoin(users, eq(users.id, xAccountLinkRequests.user_id))
-        .where(pendingWhere)
-        .orderBy(desc(xAccountLinkRequests.requested_at))
-    : [];
-
-  // 直近の却下リクエスト (履歴の参照用)
-  const recentRejected = db
-    ? await db
-        .select({
-          id: xAccountLinkRequests.id,
-          requested_x_id: xAccountLinkRequests.requested_x_id,
-          user_id: xAccountLinkRequests.user_id,
-          link_type: xAccountLinkRequests.link_type,
-          requested_at: xAccountLinkRequests.requested_at,
-        })
-        .from(xAccountLinkRequests)
-        .where(eq(xAccountLinkRequests.status, "rejected"))
-        .orderBy(desc(xAccountLinkRequests.requested_at))
-        .limit(10)
-    : [];
-
-  // 直近の承認/却下監査を audit_logs (table_name 'x_account_link_requests' / 'x_users') から取得
-  const recentAuditLogs = db
-    ? await db
-        .select()
-        .from(auditLogs)
-        .where(
-          and(
-            inArray(auditLogs.table_name, [
-              "x_account_link_requests",
-              "x_users",
-            ]),
-            inArray(auditLogs.operation, ["UPDATE", "CREATE"]),
-          )!,
-        )
-        .orderBy(desc(auditLogs.created_at))
-        .limit(RECENT_HISTORY_LIMIT)
-    : [];
+            )`,
+            requested_icon_url: sql<string | null>`COALESCE(
+              (
+                SELECT ${xUsers.icon_url}
+                FROM ${xUsers}
+                WHERE lower(${xUsers.id}) = lower(${xAccountLinkRequests.requested_x_id})
+                LIMIT 1
+              ),
+              (
+                SELECT ${xUserIcons.icon_url}
+                FROM ${xUserIcons}
+                WHERE lower(${xUserIcons.x_user_id}) = lower(${xAccountLinkRequests.requested_x_id})
+                ORDER BY ${xUserIcons.created_at} DESC
+                LIMIT 1
+              )
+            )`,
+            target_icon_url: sql<string | null>`COALESCE(
+              (
+                SELECT ${xUsers.icon_url}
+                FROM ${xUsers}
+                WHERE lower(${xUsers.id}) = lower(${xAccountLinkRequests.target_x_user_id})
+                LIMIT 1
+              ),
+              (
+                SELECT ${xUserIcons.icon_url}
+                FROM ${xUserIcons}
+                WHERE lower(${xUserIcons.x_user_id}) = lower(${xAccountLinkRequests.target_x_user_id})
+                ORDER BY ${xUserIcons.created_at} DESC
+                LIMIT 1
+              )
+            )`,
+          })
+          .from(xAccountLinkRequests)
+          .leftJoin(users, eq(users.id, xAccountLinkRequests.user_id))
+          .where(pendingWhere)
+          .orderBy(desc(xAccountLinkRequests.requested_at)),
+        db
+          .select({
+            id: xAccountLinkRequests.id,
+            requested_x_id: xAccountLinkRequests.requested_x_id,
+            user_id: xAccountLinkRequests.user_id,
+            link_type: xAccountLinkRequests.link_type,
+            requested_at: xAccountLinkRequests.requested_at,
+          })
+          .from(xAccountLinkRequests)
+          .where(eq(xAccountLinkRequests.status, "rejected"))
+          .orderBy(desc(xAccountLinkRequests.requested_at))
+          .limit(10),
+        db
+          .select()
+          .from(auditLogs)
+          .where(
+            and(
+              inArray(auditLogs.table_name, [
+                "x_account_link_requests",
+                "x_users",
+              ]),
+              inArray(auditLogs.operation, ["UPDATE", "CREATE"]),
+            )!,
+          )
+          .orderBy(desc(auditLogs.created_at))
+          .limit(RECENT_HISTORY_LIMIT),
+      ])
+    : [[], [], []];
 
   return (
     <div>
