@@ -13,16 +13,21 @@ import {
 } from "@/lib/api/eventExportPayload";
 import {
   EVENT_EXPORT_ACCESS_TTL_SECONDS,
+  EVENT_EXPORT_REFRESH_MINUTES,
   eventExportAccessCacheKey,
   eventExportPayloadCacheKey,
   getEventExportKv,
   isEventExportRefreshMinutes,
   type EventExportRefreshMinutes,
 } from "@/lib/api/eventExportCache";
-import { checkPublicApiRateLimit, publicJsonResponse } from "@/lib/api/publicApi";
+import {
+  checkPublicApiRateLimit,
+  publicJsonBodyResponse,
+  publicJsonResponse,
+} from "@/lib/api/publicApi";
 
 const NOT_FOUND_CACHE_CONTROL = "public, max-age=60";
-const inFlightExports = new Map<string, Promise<unknown | null>>();
+const inFlightExports = new Map<string, Promise<string | null>>();
 
 function parseFormat(value: string | null): EventExportFormat | null {
   if (value == null || value === "" || value === "new" || value === "v2" || value === "v3") {
@@ -62,7 +67,7 @@ function notFoundResponse(req: Request): Promise<Response> {
 
 async function exportResponse(
   req: Request,
-  payload: unknown,
+  body: string,
   format: EventExportFormat,
   updateMode: EventExportUpdateMode,
   refreshMinutes: EventExportRefreshMinutes,
@@ -72,7 +77,7 @@ async function exportResponse(
     updateMode === "realtime"
       ? "no-store"
       : "public, max-age=60, s-maxage=60, stale-while-revalidate=60";
-  const response = await publicJsonResponse(req, payload, cacheControl);
+  const response = await publicJsonBodyResponse(req, body, cacheControl);
   response.headers.set(
     "X-FlameNode-Schema-Version",
     format === "legacy" ? "1" : "3",
@@ -88,13 +93,24 @@ async function readCachedPayload(
   kv: KVNamespace,
   cacheKey: string,
   eventId: string,
-): Promise<unknown | null> {
+): Promise<string | null> {
+  let cached: string | null;
   try {
-    const cached = await kv.get(cacheKey);
-    if (!cached) return null;
-    return JSON.parse(cached) as unknown;
+    cached = await kv.get(cacheKey);
   } catch (error) {
     console.warn("[event-export-api] KV payload read failed", {
+      eventId,
+      cacheKey,
+      error,
+    });
+    return null;
+  }
+  if (!cached) return null;
+  try {
+    JSON.parse(cached);
+    return cached;
+  } catch (error) {
+    console.warn("[event-export-api] invalid KV payload evicted", {
       eventId,
       cacheKey,
       error,
@@ -110,8 +126,8 @@ async function readCachedPayload(
 
 async function buildPayloadOnce(
   key: string,
-  factory: () => Promise<unknown | null>,
-): Promise<unknown | null> {
+  factory: () => Promise<string | null>,
+): Promise<string | null> {
   const current = inFlightExports.get(key);
   if (current) return current;
 
@@ -161,7 +177,7 @@ export async function GET(
         allowed: {
           format: ["new", "legacy"],
           update: ["realtime", "scheduled"],
-          refresh: [15, 60, 360, 1440],
+          refresh: EVENT_EXPORT_REFRESH_MINUTES,
         },
       },
       "no-store",
@@ -228,22 +244,24 @@ export async function GET(
   }
 
   const generatedAt = Math.floor(Date.now() / 1000);
-  const payload = await buildPayloadOnce(
+  const body = await buildPayloadOnce(
     [eventId, format, updateMode].join(":"),
     async () => {
       const snapshot = await loadEventExportSnapshot(db, eventId, prefetchedEvent);
       return snapshot
-        ? buildEventExportPayloadForFormat(
-            snapshot,
-            format,
-            generatedAt,
-            updateMode,
+        ? JSON.stringify(
+            buildEventExportPayloadForFormat(
+              snapshot,
+              format,
+              generatedAt,
+              updateMode,
+            ),
           )
         : null;
     },
   );
 
-  if (payload === null) {
+  if (body === null) {
     if (kv) {
       try {
         await kv.put(accessKey, "0", {
@@ -258,7 +276,7 @@ export async function GET(
 
   if (kv) {
     const writes = await Promise.allSettled([
-      kv.put(payloadCacheKey, JSON.stringify(payload), {
+      kv.put(payloadCacheKey, body, {
         expirationTtl: refreshMinutes * 60,
       }),
       kv.put(accessKey, "1", {
@@ -276,7 +294,7 @@ export async function GET(
 
   return exportResponse(
     req,
-    payload,
+    body,
     format,
     updateMode,
     refreshMinutes,

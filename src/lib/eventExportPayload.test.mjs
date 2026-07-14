@@ -213,6 +213,9 @@ test("イベントAPIは新旧形式と形式別KVキャッシュを提供する
   assert.match(route, /eventExportAccessCacheKey/);
   assert.match(route, /X-FlameNode-Format/);
   assert.match(route, /s-maxage=60/);
+  assert.match(route, /publicJsonBodyResponse/);
+  assert.match(route, /kv\.put\(payloadCacheKey, body/);
+  assert.doesNotMatch(route, /kv\.put\(payloadCacheKey, JSON\.stringify/);
 });
 
 test("管理画面と有効化処理が形式選択と即時キャッシュ破棄に対応する", async () => {

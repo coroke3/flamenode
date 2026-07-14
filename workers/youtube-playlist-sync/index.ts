@@ -3,6 +3,11 @@ import {
   reserveYoutubeQuota,
   type YoutubeQuotaEnv,
 } from "../youtube-sync/quotaBudget.ts";
+import {
+  cancelResponseBody,
+  ExternalRequestBudget,
+  fetchWithTimeout,
+} from "../shared/externalApi.ts";
 
 export interface PlaylistSyncEnv extends YoutubeQuotaEnv {
   KV: KVNamespace;
@@ -61,6 +66,9 @@ const FULL_SCAN_INTERVAL_SEC = 24 * 60 * 60;
 const RETRY_DELAY_SEC = 60 * 60;
 const FAILURE_RETRY_SEC = 6 * 60 * 60;
 const API_TIMEOUT_MS = 10_000;
+/** OAuth 1 + scan 3 + insertion fallback込みmutation 8。 */
+const MAX_EXTERNAL_REQUESTS_PER_RUN = 12;
+const OAUTH_TOKEN_SAFETY_MS = 60_000;
 
 class QuotaDeferredError extends Error {
   constructor() {
@@ -122,22 +130,6 @@ class DailyQuotaBudget {
     );
   }
 
-  async persist(): Promise<void> {
-    // 各API呼び出し直前にD1へ原子的に予約するため追加保存は不要。
-  }
-}
-
-async function fetchWithTimeout(
-  input: string,
-  init: RequestInit,
-): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
-  try {
-    return await fetch(input, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-  }
 }
 
 async function readApiError(response: Response): Promise<YouTubeApiError> {
@@ -151,27 +143,65 @@ async function readApiError(response: Response): Promise<YouTubeApiError> {
       body.error?.status?.toLowerCase() ??
       reason;
   } catch {
+    await cancelResponseBody(response);
     // API本文をログやDBへ保存しない。
   }
   return new YouTubeApiError(response.status, reason.slice(0, 80));
 }
 
-async function refreshAccessToken(env: PlaylistSyncEnv): Promise<string> {
-  const response = await fetchWithTimeout("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: env.YOUTUBE_OAUTH_CLIENT_ID ?? "",
-      client_secret: env.YOUTUBE_OAUTH_CLIENT_SECRET ?? "",
-      refresh_token: env.YOUTUBE_OAUTH_REFRESH_TOKEN ?? "",
-      grant_type: "refresh_token",
-    }),
-  });
+type CachedAccessToken = { value: string; expiresAt: number };
+const tokenState = globalThis as typeof globalThis & {
+  __flamenodeYoutubePlaylistAccessToken?: CachedAccessToken;
+};
+
+function clearCachedAccessToken(): void {
+  delete tokenState.__flamenodeYoutubePlaylistAccessToken;
+}
+
+async function refreshAccessToken(
+  env: PlaylistSyncEnv,
+  requestBudget: ExternalRequestBudget,
+): Promise<string> {
+  const now = Date.now();
+  const cached = tokenState.__flamenodeYoutubePlaylistAccessToken;
+  if (cached && cached.expiresAt - now > OAUTH_TOKEN_SAFETY_MS) {
+    return cached.value;
+  }
+
+  const response = await fetchWithTimeout(
+    "https://oauth2.googleapis.com/token",
+    {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: env.YOUTUBE_OAUTH_CLIENT_ID ?? "",
+        client_secret: env.YOUTUBE_OAUTH_CLIENT_SECRET ?? "",
+        refresh_token: env.YOUTUBE_OAUTH_REFRESH_TOKEN ?? "",
+        grant_type: "refresh_token",
+      }),
+    },
+    {
+      timeoutMs: API_TIMEOUT_MS,
+      budget: requestBudget,
+      budgetErrorCode: "youtube_playlist_request_budget_exhausted",
+      timeoutErrorCode: "youtube_oauth_timeout",
+      networkErrorCode: "youtube_oauth_network_error",
+    },
+  );
   if (!response.ok) throw await readApiError(response);
-  const body = (await response.json()) as { access_token?: unknown };
+  const body = (await response.json()) as {
+    access_token?: unknown;
+    expires_in?: unknown;
+  };
   if (typeof body.access_token !== "string" || !body.access_token) {
     throw new Error("youtube_oauth_access_token_missing");
   }
+  const expiresIn = Number(body.expires_in);
+  tokenState.__flamenodeYoutubePlaylistAccessToken = {
+    value: body.access_token,
+    expiresAt:
+      now + (Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 3600) * 1000,
+  };
   return body.access_token;
 }
 
@@ -180,17 +210,29 @@ async function youtubeJson<T>(
   init: RequestInit,
   accessToken: string,
   quota: DailyQuotaBudget,
+  requestBudget: ExternalRequestBudget,
   cost: number,
 ): Promise<T> {
   await quota.spend(cost);
   const headers = new Headers(init.headers);
   headers.set("authorization", `Bearer ${accessToken}`);
   if (!headers.has("content-type")) headers.set("content-type", "application/json");
-  const response = await fetchWithTimeout(url.toString(), {
-    ...init,
-    headers,
-  });
-  if (!response.ok) throw await readApiError(response);
+  const response = await fetchWithTimeout(
+    url,
+    { ...init, headers },
+    {
+      timeoutMs: API_TIMEOUT_MS,
+      budget: requestBudget,
+      budgetErrorCode: "youtube_playlist_request_budget_exhausted",
+      timeoutErrorCode: "youtube_playlist_api_timeout",
+      networkErrorCode: "youtube_playlist_api_network_error",
+    },
+  );
+  if (!response.ok) {
+    const error = await readApiError(response);
+    if (response.status === 401) clearCachedAccessToken();
+    throw error;
+  }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
@@ -200,11 +242,17 @@ async function listPlaylistPage(
   pageToken: string | null,
   accessToken: string,
   quota: DailyQuotaBudget,
+  requestBudget: ExternalRequestBudget,
 ): Promise<PlaylistPage> {
   const url = new URL("https://www.googleapis.com/youtube/v3/playlistItems");
   url.searchParams.set("part", "snippet");
   url.searchParams.set("playlistId", playlistId);
   url.searchParams.set("maxResults", "50");
+  url.searchParams.set(
+    "fields",
+    "nextPageToken,items(id,snippet/resourceId/videoId)",
+  );
+  url.searchParams.set("prettyPrint", "false");
   if (pageToken) url.searchParams.set("pageToken", pageToken);
 
   const body = await youtubeJson<{
@@ -213,7 +261,7 @@ async function listPlaylistPage(
       id?: string;
       snippet?: { resourceId?: { videoId?: string } };
     }>;
-  }>(url, { method: "GET" }, accessToken, quota, 1);
+  }>(url, { method: "GET" }, accessToken, quota, requestBudget, 1);
 
   const items = (body.items ?? []).flatMap((item) => {
     const playlistItemId = item.id?.trim();
@@ -232,9 +280,12 @@ async function postPlaylistItem(
   position: number | null,
   accessToken: string,
   quota: DailyQuotaBudget,
+  requestBudget: ExternalRequestBudget,
 ): Promise<string> {
   const url = new URL("https://www.googleapis.com/youtube/v3/playlistItems");
   url.searchParams.set("part", "snippet");
+  url.searchParams.set("fields", "id");
+  url.searchParams.set("prettyPrint", "false");
   const snippet: Record<string, unknown> = {
     playlistId,
     resourceId: { kind: "youtube#video", videoId },
@@ -249,6 +300,7 @@ async function postPlaylistItem(
     },
     accessToken,
     quota,
+    requestBudget,
     50,
   );
   if (!body.id) throw new Error("youtube_playlist_item_id_missing");
@@ -261,6 +313,7 @@ async function insertPlaylistItem(
   position: number,
   accessToken: string,
   quota: DailyQuotaBudget,
+  requestBudget: ExternalRequestBudget,
 ): Promise<InsertedPlaylistItem> {
   try {
     return {
@@ -270,6 +323,7 @@ async function insertPlaylistItem(
         position,
         accessToken,
         quota,
+        requestBudget,
       ),
       ordered: true,
     };
@@ -287,6 +341,7 @@ async function insertPlaylistItem(
         null,
         accessToken,
         quota,
+        requestBudget,
       ),
       ordered: false,
     };
@@ -297,15 +352,18 @@ async function deletePlaylistItem(
   playlistItemId: string,
   accessToken: string,
   quota: DailyQuotaBudget,
+  requestBudget: ExternalRequestBudget,
 ): Promise<void> {
   const url = new URL("https://www.googleapis.com/youtube/v3/playlistItems");
   url.searchParams.set("id", playlistItemId);
+  url.searchParams.set("prettyPrint", "false");
   try {
     await youtubeJson<void>(
       url,
       { method: "DELETE" },
       accessToken,
       quota,
+      requestBudget,
       50,
     );
   } catch (error) {
@@ -349,7 +407,8 @@ async function loadSourceVideoIds(
        AND v.youtube_video_id IS NOT NULL
        AND v.youtube_video_id <> ''
        AND v.visibility_status IN ('public', 'limited')
-     ORDER BY COALESCE(v.scheduled_time, v.created_at), v.id
+     GROUP BY v.youtube_video_id
+     ORDER BY MIN(COALESCE(v.scheduled_time, v.created_at)), MIN(v.id)
      LIMIT ?2`,
   )
     .bind(eventId, MAX_SOURCE_VIDEOS + 1)
@@ -358,7 +417,7 @@ async function loadSourceVideoIds(
   if (rows.length > MAX_SOURCE_VIDEOS) {
     throw new Error("youtube_playlist_source_limit_exceeded");
   }
-  return [...new Set(rows.map((row) => row.youtube_video_id).filter(Boolean))];
+  return rows.map((row) => row.youtube_video_id);
 }
 
 async function loadRemoteItems(
@@ -382,6 +441,7 @@ async function upsertScannedItems(
   items: PlaylistPageItem[],
   seenAt: number,
 ): Promise<void> {
+  const statements: D1PreparedStatement[] = [];
   for (let offset = 0; offset < items.length; offset += SCAN_UPSERT_CHUNK_SIZE) {
     const chunk = items.slice(offset, offset + SCAN_UPSERT_CHUNK_SIZE);
     const placeholders = chunk.map(() => "(?, ?, ?, ?, 0, ?)").join(", ");
@@ -392,18 +452,19 @@ async function upsertScannedItems(
       seenAt,
       seenAt,
     ]);
-    await env.DB.prepare(
-      `INSERT INTO event_youtube_playlist_items (
-         event_id, playlist_item_id, youtube_video_id, seen_at,
-         managed_by_flamenode, created_at
-       ) VALUES ${placeholders}
-       ON CONFLICT(event_id, playlist_item_id) DO UPDATE SET
-         youtube_video_id = excluded.youtube_video_id,
-         seen_at = excluded.seen_at`,
-    )
-      .bind(...values)
-      .run();
+    statements.push(
+      env.DB.prepare(
+        `INSERT INTO event_youtube_playlist_items (
+           event_id, playlist_item_id, youtube_video_id, seen_at,
+           managed_by_flamenode, created_at
+         ) VALUES ${placeholders}
+         ON CONFLICT(event_id, playlist_item_id) DO UPDATE SET
+           youtube_video_id = excluded.youtube_video_id,
+           seen_at = excluded.seen_at`,
+      ).bind(...values),
+    );
   }
+  if (statements.length > 0) await env.DB.batch(statements);
 }
 
 async function markScanStarted(
@@ -427,6 +488,7 @@ async function scanPlaylist(
   config: SyncConfigRow,
   accessToken: string,
   quota: DailyQuotaBudget,
+  requestBudget: ExternalRequestBudget,
   now: number,
 ): Promise<boolean> {
   const scanStartedAt =
@@ -442,25 +504,24 @@ async function scanPlaylist(
       pageToken,
       accessToken,
       quota,
+      requestBudget,
     );
     await upsertScannedItems(env, config.event_id, result.items, scanStartedAt);
     pageToken = result.nextPageToken;
     if (!pageToken) {
-      await env.DB.prepare(
-        `DELETE FROM event_youtube_playlist_items
-         WHERE event_id = ?1 AND seen_at <> ?2`,
-      )
-        .bind(config.event_id, scanStartedAt)
-        .run();
-      await env.DB.prepare(
-        `UPDATE event_youtube_playlist_sync
-         SET sync_status = 'idle', last_full_scan_at = ?1,
-             scan_started_at = NULL, scan_page_token = NULL,
-             next_sync_at = ?1, last_error = NULL, updated_at = ?1
-         WHERE event_id = ?2`,
-      )
-        .bind(now, config.event_id)
-        .run();
+      await env.DB.batch([
+        env.DB.prepare(
+          `DELETE FROM event_youtube_playlist_items
+           WHERE event_id = ?1 AND seen_at <> ?2`,
+        ).bind(config.event_id, scanStartedAt),
+        env.DB.prepare(
+          `UPDATE event_youtube_playlist_sync
+           SET sync_status = 'idle', last_full_scan_at = ?1,
+               scan_started_at = NULL, scan_page_token = NULL,
+               next_sync_at = ?1, last_error = NULL, updated_at = ?1
+           WHERE event_id = ?2`,
+        ).bind(now, config.event_id),
+      ]);
       return true;
     }
   }
@@ -562,9 +623,10 @@ async function syncOneEvent(
   config: SyncConfigRow,
   accessToken: string,
   quota: DailyQuotaBudget,
+  requestBudget: ExternalRequestBudget,
   mutationBudget: { remaining: number },
   now: number,
-): Promise<"done" | "continued"> {
+): Promise<void> {
   const sourceVideoIds = await loadSourceVideoIds(env, config.event_id);
   const scanRequired =
     config.scan_started_at != null ||
@@ -577,9 +639,10 @@ async function syncOneEvent(
       config,
       accessToken,
       quota,
+      requestBudget,
       now,
     );
-    if (!scanComplete) return "continued";
+    if (!scanComplete) return;
   }
 
   const remoteItems = await loadRemoteItems(env, config.event_id);
@@ -591,17 +654,21 @@ async function syncOneEvent(
   let added = 0;
   let removed = 0;
   let orderFallback = false;
+  const sourcePositions = new Map(
+    sourceVideoIds.map((videoId, index) => [videoId, index]),
+  );
 
   for (const videoId of additions) {
     // position指定失敗時の末尾追加まで含め、最大100 unitsを確保してから開始する。
     if (mutationBudget.remaining <= 0 || !quota.canSpend(100)) break;
-    const position = sourceVideoIds.indexOf(videoId);
+    const position = sourcePositions.get(videoId) ?? 0;
     const inserted = await insertPlaylistItem(
       config.playlist_id,
       videoId,
       Math.max(0, position),
       accessToken,
       quota,
+      requestBudget,
     );
     mutationBudget.remaining -= 1;
     orderFallback ||= !inserted.ordered;
@@ -611,7 +678,12 @@ async function syncOneEvent(
 
   for (const item of removals) {
     if (mutationBudget.remaining <= 0 || !quota.canSpend(50)) break;
-    await deletePlaylistItem(item.playlist_item_id, accessToken, quota);
+    await deletePlaylistItem(
+      item.playlist_item_id,
+      accessToken,
+      quota,
+      requestBudget,
+    );
     mutationBudget.remaining -= 1;
     await env.DB.prepare(
       `DELETE FROM event_youtube_playlist_items
@@ -646,7 +718,7 @@ async function syncOneEvent(
       config.event_id,
     )
     .run();
-  return hasRemaining ? "continued" : "done";
+  return;
 }
 
 async function markOAuthFailure(
@@ -682,9 +754,10 @@ export async function syncEventPlaylists(
   if (configs.length === 0) return { processed: 0, skipped: 1, failed: 0 };
 
   const quota = await DailyQuotaBudget.load(env, now);
+  const requestBudget = new ExternalRequestBudget(MAX_EXTERNAL_REQUESTS_PER_RUN);
   let accessToken: string;
   try {
-    accessToken = await refreshAccessToken(env);
+    accessToken = await refreshAccessToken(env, requestBudget);
   } catch (error) {
     await markOAuthFailure(env, configs, error, now);
     return { processed: 0, skipped: 0, failed: configs.length };
@@ -693,26 +766,23 @@ export async function syncEventPlaylists(
   let processed = 0;
   let failed = 0;
   const mutationBudget = { remaining: MAX_MUTATIONS_PER_RUN };
-  try {
-    for (const config of configs) {
-      try {
-        await syncOneEvent(
-          env,
-          config,
-          accessToken,
-          quota,
-          mutationBudget,
-          now,
-        );
-        processed += 1;
-      } catch (error) {
-        await markEventError(env, config.event_id, error, now);
-        failed += 1;
-        if (isQuotaError(error)) break;
-      }
+  for (const config of configs) {
+    try {
+      await syncOneEvent(
+        env,
+        config,
+        accessToken,
+        quota,
+        requestBudget,
+        mutationBudget,
+        now,
+      );
+      processed += 1;
+    } catch (error) {
+      await markEventError(env, config.event_id, error, now);
+      failed += 1;
+      if (isQuotaError(error)) break;
     }
-  } finally {
-    await quota.persist();
   }
 
   return { processed, skipped: 0, failed };
