@@ -2,7 +2,7 @@ from pathlib import Path
 
 path = Path("scripts/agent_full_optimization_pass_9.py")
 text = path.read_text(encoding="utf-8")
-needle = '''replace_once(
+needle = """replace_once(
     "workers/youtube-playlist-sync/index.ts",
     '''      accessToken,
       quota,
@@ -14,10 +14,10 @@ needle = '''replace_once(
     );
 ''',
 )
-'''
+"""
 if text.count(needle) != 2:
     raise RuntimeError(f"expected two ambiguous replacements, found {text.count(needle)}")
-scan_replacement = '''replace_once(
+scan_replacement = """replace_once(
     "workers/youtube-playlist-sync/index.ts",
     '''    const result = await listPlaylistPage(
       config.playlist_id,
@@ -35,8 +35,8 @@ scan_replacement = '''replace_once(
     );
 ''',
 )
-'''
-insert_replacement = '''replace_once(
+"""
+insert_replacement = """replace_once(
     "workers/youtube-playlist-sync/index.ts",
     '''    const inserted = await insertPlaylistItem(
       config.playlist_id,
@@ -56,7 +56,7 @@ insert_replacement = '''replace_once(
     );
 ''',
 )
-'''
+"""
 text = text.replace(needle, scan_replacement, 1)
 text = text.replace(needle, insert_replacement, 1)
 cleanup = '''Path("scripts/agent_full_optimization_pass_9.py").unlink()
