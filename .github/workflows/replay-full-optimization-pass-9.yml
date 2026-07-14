@@ -1,0 +1,56 @@
+name: Replay full optimization pass 9
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  replay:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/full-optimization-pass-9-v2
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: 検証済み非競合差分を取得
+        run: |
+          git fetch origin agent/full-optimization-pass-9
+          git checkout origin/agent/full-optimization-pass-9 -- \
+            docs/operations/external-api-limits.md \
+            docs/workers.md \
+            src/lib/api/eventExportCache.ts \
+            src/lib/api/publicApi.ts \
+            src/lib/eventExportPayload.test.mjs \
+            workers/notification-dispatcher/dispatch.test.mjs \
+            workers/youtube-playlist-sync/index.test.mjs \
+            workers/youtube-playlist-sync/index.ts
+          git rm \
+            workers/notification-dispatcher/index.test.mjs \
+            workers/notification-dispatcher/index.ts \
+            workers/notification-dispatcher/rateLimit.test.mjs
+      - name: 最新mainのイベントAPIへ最適化を統合
+        run: python3 scripts/replay_full_optimization_pass_9.py
+      - name: 依存関係をインストール
+        run: npm ci --no-audit --no-fund
+      - name: 基本検証
+        run: |
+          npm run typecheck
+          npm run lint
+          npm run test:unit
+          npm run test:workers
+      - name: 変更をcommitしてpush
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "挙動維持で外部同期・公開API・通知構造を第9巡最適化"
+          git push origin HEAD:agent/full-optimization-pass-9-v2
