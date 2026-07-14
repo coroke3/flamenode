@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { parseCsv } from "./csv.ts";
+import { parseDelimited } from "./delimited.ts";
+
+const parseCsv = (input) => parseDelimited(input, ",");
 
 test("parseCsv: 単純なカンマ区切り", () => {
   const r = parseCsv("a,b,c\n1,2,3");
