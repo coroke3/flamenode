@@ -6,9 +6,9 @@ export const EVENT_STAFF_PRESETS = [
   "slot_manager",
   "content_editor",
   "reviewer",
+  "xid_reviewer",
   "public_staff",
   "custom",
-  "xid_reviewer",
 ] as const;
 
 export type EventStaffPreset = (typeof EVENT_STAFF_PRESETS)[number];
