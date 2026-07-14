@@ -1,15 +1,56 @@
 import * as React from "react";
 import type { Metadata } from "next";
+import {
+  Hanken_Grotesk,
+  JetBrains_Mono,
+  Manrope,
+  Noto_Sans_JP,
+} from "next/font/google";
 import "@/styles/globals.css";
 import "@/styles/mobile-hardening.css";
-import { redesignFontClassName } from "@/components/layout/RedesignFonts";
-import { ThemeBootstrap } from "@/components/layout/ThemeBootstrap";
 import {
   SITE_DESCRIPTION,
   SITE_NAME,
   absoluteUrl,
   getSiteUrl,
 } from "@/lib/seo";
+
+const hankenGrotesk = Hanken_Grotesk({
+  subsets: ["latin", "latin-ext"],
+  weight: ["400", "500", "600", "700", "800", "900"],
+  variable: "--font-hanken",
+  display: "swap",
+});
+
+const manrope = Manrope({
+  subsets: ["latin", "latin-ext"],
+  weight: ["400", "500", "600", "700", "800"],
+  variable: "--font-manrope",
+  display: "swap",
+});
+
+const notoSansJp = Noto_Sans_JP({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "900"],
+  variable: "--font-noto-jp",
+  display: "swap",
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin", "latin-ext"],
+  weight: ["400", "500", "600"],
+  variable: "--font-jetbrains",
+  display: "swap",
+});
+
+const redesignFontClassName = [
+  hankenGrotesk.variable,
+  manrope.variable,
+  notoSansJp.variable,
+  jetbrainsMono.variable,
+].join(" ");
+
+const themeBootstrapCode = `(()=>{var d=document.documentElement;var q=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)');var read=function(){try{var v=localStorage.getItem('fn-theme');return v==='light'||v==='dark'||v==='system'?v:'system'}catch(_){return'system'}};var apply=function(mode){var resolved=mode==='system'?(q&&q.matches?'dark':'light'):mode;d.setAttribute('data-theme',resolved);d.setAttribute('data-theme-preference',mode)};var mode=read();apply(mode);if(q&&mode==='system'){var onChange=function(){if((d.getAttribute('data-theme-preference')||'system')==='system')apply('system')};if(q.addEventListener)q.addEventListener('change',onChange);else if(q.addListener)q.addListener(onChange)}})();`;
 
 export const runtime = "edge";
 
@@ -72,7 +113,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <head>
-        <ThemeBootstrap />
+        <script dangerouslySetInnerHTML={{ __html: themeBootstrapCode }} />
       </head>
       <body className="min-h-screen flex flex-col">{children}</body>
     </html>

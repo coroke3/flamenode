@@ -1,6 +1,7 @@
 "use server";
 
 import { and, eq, inArray, or } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
 import {
   requireAdminWrite,
   writeGuard,
@@ -30,13 +31,25 @@ import {
 } from "@/lib/event/eventForm";
 import { buildEventUpdatePayload, parseDateInput } from "@/lib/event/eventPayload";
 import {
-  revalidateEventListPaths,
-  revalidateEventPaths,
-} from "@/lib/event/eventRevalidate";
-import {
   hasAnyEventEditPermission,
   resolveEventEditPermissions,
 } from "@/lib/event/eventEditPermissions";
+
+function revalidateEventPaths(eventId: string): void {
+  revalidatePath("/admin/events");
+  revalidatePath(`/admin/events/${eventId}`);
+  revalidatePath("/manage");
+  revalidatePath(`/manage/events/${eventId}`);
+  revalidatePath(`/manage/events/${eventId}/edit`);
+  revalidatePath("/event");
+  revalidatePath(`/event/${eventId}`);
+}
+
+function revalidateEventListPaths(): void {
+  revalidatePath("/admin/events");
+  revalidatePath("/manage");
+  revalidatePath("/event");
+}
 
 type PlannedQuestion = typeof eventCustomQuestions.$inferInsert;
 

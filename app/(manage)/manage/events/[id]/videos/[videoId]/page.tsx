@@ -14,7 +14,7 @@ import {
   videos as videosTable,
   videoEvents as videoEventsTable,
 } from "@/lib/db/schema";
-import { ManageVideoStatusForm } from "@/components/manage/ManageVideoStatusForm";
+import { ManageVideoStatusForm } from "@/components/video/VideoStatusForm";
 import { Icon } from "@/components/ui/Icon";
 import { ManageEventTabs } from "@/components/manage/ManageEventTabs";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";

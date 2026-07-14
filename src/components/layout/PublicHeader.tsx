@@ -5,16 +5,25 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import styles from "./PublicHeader.module.css";
 import { Logo } from "@/components/ui/Logo";
-import { Icon } from "@/components/ui/Icon";
+import { Icon, type IconName } from "@/components/ui/Icon";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { XIdSwitcher } from "@/components/user/XIdSwitcher";
 import type { XIdEntry } from "@/lib/xid/entries";
 import { AccountMenu } from "@/components/user/AccountMenu";
 import type { HeaderUser } from "@/lib/auth/headerUser";
-import { PUBLIC_NAV_ITEMS } from "@/lib/navigation/publicNav";
 import { navigateGetForm } from "@/components/forms/AutoSubmitSelect";
 import { sanitizeNextPath } from "#utils/next";
 import { useDismissablePanel } from "./useDismissablePanel";
+
+const PUBLIC_NAV_ITEMS: {
+  href: string;
+  label: string;
+  iconName: IconName;
+}[] = [
+  { href: "/list", label: "作品", iconName: "grid" },
+  { href: "/event", label: "イベント", iconName: "calendar" },
+  { href: "/user", label: "クリエイター", iconName: "users" },
+];
 
 function isPathActive(pathname: string | null, href: string): boolean {
   if (!pathname) return false;

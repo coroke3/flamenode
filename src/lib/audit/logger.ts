@@ -1,11 +1,13 @@
+import { eq } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
-import { auditLogs } from "@/lib/db/schema";
+import { auditLogs, users, xUsers } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
 import type {
   AuditOperation,
   RetentionClass,
   RestoreStatus,
   WriteAuditLogInput,
+  ActorSnapshot,
 } from "./types";
 import { RestoreStrategy } from "./types";
 import {
@@ -17,8 +19,44 @@ import {
 } from "./snapshot";
 import { computeExpiresAt, DEFAULT_AUDIT_LOG_SETTINGS } from "./retention";
 import { getAuditLogSettings } from "./settings";
-import { buildActorSnapshot } from "./actor";
 import { evaluateRestoreCapability } from "./capability";
+
+async function buildActorSnapshot(
+  db: DB,
+  userId: string,
+): Promise<ActorSnapshot> {
+  const row = await db
+    .select({
+      discord_id: users.discord_id,
+      discord_name: users.name,
+      active_x_user_id: users.active_x_user_id,
+      user_image: users.image,
+      x_name: xUsers.x_name,
+      x_icon_url: xUsers.icon_url,
+    })
+    .from(users)
+    .leftJoin(xUsers, eq(xUsers.id, users.active_x_user_id))
+    .where(eq(users.id, userId))
+    .get();
+
+  if (!row) {
+    return {
+      discord_id: null,
+      discord_name: null,
+      x_user_id: null,
+      x_name: null,
+      icon_url: null,
+    };
+  }
+
+  return {
+    discord_id: row.discord_id ?? null,
+    discord_name: row.discord_name ?? null,
+    x_user_id: row.active_x_user_id ?? null,
+    x_name: row.x_name ?? null,
+    icon_url: row.x_icon_url || row.user_image || null,
+  };
+}
 
 export type PreparedAuditLogEntry = {
   id: string;
@@ -133,18 +171,29 @@ export async function prepareAuditLogEntries(
   }
 
   const actorJsonById = new Map<string, string>();
-  for (const actorUserId of new Set(activeInputs.map((input) => input.actor_user_id))) {
-    try {
-      actorJsonById.set(
-        actorUserId,
-        JSON.stringify(await buildActorSnapshot(db, actorUserId)),
-      );
-    } catch (error) {
-      if (inputs.some((input) => input.strict && input.actor_user_id === actorUserId)) {
-        throw error;
-      }
-      actorJsonById.set(actorUserId, EMPTY_ACTOR_JSON);
-    }
+  const actorUserIds = [
+    ...new Set(activeInputs.map((input) => input.actor_user_id)),
+  ];
+  for (let offset = 0; offset < actorUserIds.length; offset += 4) {
+    await Promise.all(
+      actorUserIds.slice(offset, offset + 4).map(async (actorUserId) => {
+        try {
+          actorJsonById.set(
+            actorUserId,
+            JSON.stringify(await buildActorSnapshot(db, actorUserId)),
+          );
+        } catch (error) {
+          if (
+            inputs.some(
+              (input) => input.strict && input.actor_user_id === actorUserId,
+            )
+          ) {
+            throw error;
+          }
+          actorJsonById.set(actorUserId, EMPTY_ACTOR_JSON);
+        }
+      }),
+    );
   }
 
   return inputs.map((input) =>

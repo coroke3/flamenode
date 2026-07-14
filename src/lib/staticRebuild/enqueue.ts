@@ -5,12 +5,27 @@ import type { DB } from "@/lib/db/client";
 import { staticRebuildQueue } from "@/lib/db/schema";
 import { auditAction } from "@/lib/audit/helpers";
 import { generateId } from "@/lib/utils/id";
-import { pickHigherPriority } from "./priority";
 import {
   indexUniqueStaticRebuildTargetRows,
   staticRebuildTargetKey,
 } from "./queueBatchCore";
-import type { EnqueueStaticRebuildInput } from "./types";
+import type {
+  EnqueueStaticRebuildInput,
+  StaticRebuildPriority,
+} from "./types";
+
+const PRIORITY_ORDER: Record<StaticRebuildPriority, number> = {
+  high: 0,
+  normal: 1,
+  low: 2,
+};
+
+function pickHigherPriority(
+  a: StaticRebuildPriority,
+  b: StaticRebuildPriority,
+): StaticRebuildPriority {
+  return PRIORITY_ORDER[a] <= PRIORITY_ORDER[b] ? a : b;
+}
 
 const PRIORITY_RANK: Record<"high" | "normal" | "low", number> = {
   high: 3,

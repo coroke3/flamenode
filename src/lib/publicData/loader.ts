@@ -1,15 +1,64 @@
 import "server-only";
 
+import { eq } from "drizzle-orm";
 import { getDatabase, getEnv } from "@/lib/cloudflare";
-import { getOperationMode } from "@/lib/operationMode/getMode";
+import type { DB } from "@/lib/db/client";
+import { systemSettings } from "@/lib/db/schema";
 import { getPublicDataStrategy } from "@/lib/operationMode/policy";
-import type { PublicDataStrategy } from "@/lib/operationMode/types";
+import { resolveOperationMode } from "@/lib/operationMode/resolve";
+import type {
+  OperationMode,
+  PublicDataStrategy,
+} from "@/lib/operationMode/types";
 import { enqueueStaticRebuild } from "@/lib/staticRebuild/enqueue";
 import type { StaticRebuildTargetType } from "@/lib/staticRebuild/types";
+import {
+  normalizeStaticEventDetail,
+  type StaticEventDetail,
+  type StaticEventDetailPayload,
+} from "./staticEventDetailCore";
+import {
+  normalizeStaticEventsIndex,
+  type StaticEventsIndex,
+  type StaticEventsIndexPayload,
+} from "./staticEventsIndexCore";
+import {
+  normalizeStaticRecentVideoPage,
+  type StaticRecentVideoPage,
+  type StaticRecentVideosPayload,
+} from "./staticRecentVideoCore";
+import {
+  normalizeStaticTop,
+  type StaticTopData,
+  type StaticTopPayload,
+} from "./staticTopCore";
+import {
+  normalizeStaticUserProfile,
+  type StaticUserProfile,
+  type StaticUserProfilePayload,
+} from "./staticUserProfileCore";
+import {
+  normalizeStaticVideoDetail,
+  type StaticVideoDetail,
+  type StaticVideoDetailPayload,
+} from "./staticVideoDetailCore";
 import {
   canFallbackToDatabase,
   isMaintenanceStrategy,
 } from "./loaderPolicy";
+
+async function getOperationMode(db: DB): Promise<OperationMode> {
+  try {
+    const row = await db
+      .select({ operation_mode: systemSettings.operation_mode })
+      .from(systemSettings)
+      .where(eq(systemSettings.id, "default"))
+      .limit(1);
+    return resolveOperationMode(row[0]);
+  } catch {
+    return "normal";
+  }
+}
 
 export { canFallbackToDatabase, isMaintenanceStrategy };
 
@@ -139,3 +188,98 @@ export async function loadPublicJson<T>(
 
   return { data: null, source: "miss", strategy, enqueued };
 }
+
+export const loadStaticEventDetail = createPublicJsonLoader<
+  StaticEventDetailPayload,
+  StaticEventDetail
+>({
+  r2Key: (eventId) => `events/${eventId}.json`,
+  targetType: "event",
+  reason: "public_event_detail_miss",
+  normalize: normalizeStaticEventDetail,
+});
+
+export async function loadStaticEventsIndex(): Promise<{
+  index: StaticEventsIndex | null;
+  strategy: PublicDataStrategy;
+  enqueued: boolean;
+}> {
+  const result = await loadPublicJson<StaticEventsIndexPayload>({
+    r2Key: "events/index.json",
+    targetType: "events_index",
+    targetId: "global",
+    reason: "public_events_index_miss",
+  });
+  return {
+    index: result.data ? normalizeStaticEventsIndex(result.data) : null,
+    strategy: result.strategy,
+    enqueued: result.enqueued,
+  };
+}
+
+export async function loadStaticRecentVideosPage(params: {
+  page: number;
+  pageSize: number;
+}): Promise<
+  PublicJsonLoadResult<StaticRecentVideoPage> & {
+    page: StaticRecentVideoPage | null;
+  }
+> {
+  const result = await loadPublicJson<StaticRecentVideosPayload>({
+    r2Key: "list/recent.json",
+    targetType: "list_recent",
+    targetId: "global",
+    reason: "public_list_miss",
+  });
+  const page = result.data
+    ? normalizeStaticRecentVideoPage(result.data, params.page, params.pageSize)
+    : null;
+  return { ...result, data: page, page };
+}
+
+export async function loadStaticTopPage(): Promise<
+  PublicJsonLoadResult<StaticTopData> & { top: StaticTopData | null }
+> {
+  const result = await loadPublicJson<StaticTopPayload>({
+    r2Key: "top.json",
+    targetType: "top",
+    targetId: "global",
+    reason: "public_top_miss",
+  });
+  const top = result.data ? normalizeStaticTop(result.data) : null;
+  return { ...result, data: top, top };
+}
+
+export const loadStaticUserProfile = createPublicJsonLoader<
+  StaticUserProfilePayload,
+  StaticUserProfile
+>({
+  r2Key: (xUserId) => `users/${xUserId}.json`,
+  targetType: "user",
+  reason: "public_user_profile_miss",
+  normalize: normalizeStaticUserProfile,
+});
+
+export const loadStaticVideoDetail = createPublicJsonLoader<
+  StaticVideoDetailPayload,
+  StaticVideoDetail
+>({
+  r2Key: (videoId) => `videos/${videoId}.json`,
+  targetType: "video",
+  reason: "public_video_detail_miss",
+  normalize: normalizeStaticVideoDetail,
+});
+
+export type {
+  StaticEventDetail,
+  StaticEventDetailVideo,
+} from "./staticEventDetailCore";
+export type {
+  StaticEventGroupSection,
+  StaticEventIndexEvent,
+  StaticEventsIndex,
+} from "./staticEventsIndexCore";
+export type { StaticRecentVideoPage } from "./staticRecentVideoCore";
+export type { StaticTopData } from "./staticTopCore";
+export type { StaticUserProfile } from "./staticUserProfileCore";
+export type { StaticVideoDetail } from "./staticVideoDetailCore";

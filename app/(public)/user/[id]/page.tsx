@@ -25,9 +25,9 @@ import { normalizePortfolioContact } from "@/lib/profileContact";
 import { countablePublicVideoCondition } from "@/lib/db/queries";
 import { storedCreatorNameExpr } from "@/lib/db/displayExpr";
 import { ProfileSocialLinks } from "@/components/user/ProfileSocialLinks";
-import { loadStaticUserProfile } from "@/lib/publicData/staticUserProfile";
+import { loadStaticUserProfile } from "@/lib/publicData/loader";
 import { canFallbackToDatabase } from "@/lib/publicData/loader";
-import type { StaticUserProfile } from "@/lib/publicData/staticUserProfileCore";
+import type { StaticUserProfile } from "@/lib/publicData/loader";
 
 export const dynamic = "force-dynamic";
 

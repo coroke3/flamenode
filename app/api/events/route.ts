@@ -11,7 +11,7 @@ import {
   assertNoForbiddenKeys,
   pickKeys,
 } from "@/lib/api/publicDto";
-import { loadStaticEventsIndex } from "@/lib/publicData/staticEventsIndex";
+import { loadStaticEventsIndex } from "@/lib/publicData/loader";
 import {
   checkPublicApiRateLimit,
   parseBoundedPositiveInt,

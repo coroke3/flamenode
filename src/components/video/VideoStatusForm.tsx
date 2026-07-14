@@ -3,6 +3,8 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
+import { setVideoStatus } from "@/lib/actions/admin";
+import { setManageVideoStatus } from "@/lib/actions/manage-video";
 import {
   VIDEO_STATUS_LABELS,
   VOID_REASON_LABELS,
@@ -28,6 +30,62 @@ interface VideoStatusFormProps {
   hiddenFields?: Record<string, string>;
   allowVoidReason?: boolean;
   showMessageIcons?: boolean;
+}
+
+const ADMIN_STATUS_VALUES = [
+  "pending",
+  "public",
+  "private",
+  "archived",
+  "voided",
+] as const;
+
+const MANAGE_STATUS_VALUES = ["pending", "public", "private"] as const;
+
+export function AdminVideoStatusForm({
+  videoId,
+  currentStatus,
+}: {
+  videoId: string;
+  currentStatus: string;
+}): React.ReactElement {
+  return (
+    <VideoStatusForm
+      videoId={videoId}
+      currentStatus={currentStatus}
+      statuses={ADMIN_STATUS_VALUES}
+      action={setVideoStatus}
+      formIdPrefix="admin-video"
+      statusLabel="変更先ステータス"
+      submitLabel="適用"
+      optionDescription
+      allowVoidReason
+      showMessageIcons
+    />
+  );
+}
+
+export function ManageVideoStatusForm({
+  eventId,
+  videoId,
+  currentStatus,
+}: {
+  eventId: string;
+  videoId: string;
+  currentStatus: string;
+}): React.ReactElement {
+  return (
+    <VideoStatusForm
+      videoId={videoId}
+      currentStatus={currentStatus}
+      statuses={MANAGE_STATUS_VALUES}
+      action={setManageVideoStatus}
+      formIdPrefix={`manage-video-${videoId}`}
+      statusLabel="公開状態を変更"
+      submitLabel="審査結果を保存"
+      hiddenFields={{ event_id: eventId }}
+    />
+  );
 }
 
 const REASON_CATEGORIES = [

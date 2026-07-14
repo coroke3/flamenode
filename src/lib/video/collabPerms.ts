@@ -1,8 +1,40 @@
 import { eq } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
-import { isMissingDbObjectError } from "@/lib/db/optionalObjects";
 import { videoMembers, xUsers } from "@/lib/db/schema";
 import type { VideoCollabSubject } from "@/components/admin/VideoCollabPermsManager";
+
+function isMissingDbObjectError(
+  error: unknown,
+  objectName: string,
+): boolean {
+  const seen = new Set<unknown>();
+  const collect = (value: unknown): string => {
+    if (value == null || seen.has(value)) return "";
+    seen.add(value);
+    if (typeof value === "string") return value;
+    if (value instanceof Error) {
+      return `${value.name}\n${value.message}\n${value.stack ?? ""}\n${collect(value.cause)}`;
+    }
+    if (typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      return [
+        typeof record.message === "string" ? record.message : "",
+        typeof record.stack === "string" ? record.stack : "",
+        collect(record.cause),
+      ].filter(Boolean).join("\n");
+    }
+    return String(value);
+  };
+
+  const text = collect(error).toLowerCase();
+  const object = objectName.toLowerCase();
+  return (
+    text.includes(`no such table: ${object}`) ||
+    text.includes(`no such column: ${object}`) ||
+    (text.includes("no such table") && text.includes(object)) ||
+    (text.includes("no such column") && text.includes(object))
+  );
+}
 
 type AnyDb = LibSQLDatabase<any>;
 

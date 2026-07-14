@@ -425,11 +425,16 @@ export async function bulkUpsertEventStaffFromCsv(
 
   const knownXIds = new Set(knownXRows.map((row) => row.id));
   const now = Math.floor(Date.now() / 1000);
+  const pendingXIds = new Set<string>();
   const newXRows = normalizedRows
-    .filter((row) => row.xUserId && !knownXIds.has(row.xUserId))
-    .filter((row, index, rows) =>
-      rows.findIndex((candidate) => candidate.xUserId === row.xUserId) === index,
-    )
+    .filter((row) => {
+      const xUserId = row.xUserId;
+      if (!xUserId || knownXIds.has(xUserId) || pendingXIds.has(xUserId)) {
+        return false;
+      }
+      pendingXIds.add(xUserId);
+      return true;
+    })
     .map((row) => ({
       id: row.xUserId!,
       x_name: row.displayName || `@${row.xUserId}`,

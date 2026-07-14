@@ -5,7 +5,7 @@ import type { SpreadsheetDelimiterMode } from "@/lib/admin/spreadsheet/paste";
 import {
   assertSpreadsheetImportColumns,
   prepareSpreadsheetImportRows,
-} from "@/lib/admin/spreadsheet/importPrep";
+} from "@/lib/admin/spreadsheet/importPrepCore";
 import {
   readSpreadsheetJsonBody,
   requireSpreadsheetAdmin,

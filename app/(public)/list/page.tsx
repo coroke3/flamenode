@@ -18,7 +18,7 @@ import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import { formatUnix } from "@/lib/utils/format";
 import { buildPageMetadata } from "@/lib/seo";
 import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
-import { loadStaticRecentVideosPage } from "@/lib/publicData/staticRecentVideos";
+import { loadStaticRecentVideosPage } from "@/lib/publicData/loader";
 import { canFallbackToDatabase } from "@/lib/publicData/loader";
 
 export const metadata: Metadata = buildPageMetadata({
