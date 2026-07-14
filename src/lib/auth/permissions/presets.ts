@@ -1,14 +1,17 @@
 import type { PermissionKey } from "./keys.ts";
 
-export type EventStaffPreset =
-  | "owner"
-  | "manager"
-  | "reviewer"
-  | "slot_manager"
-  | "content_editor"
-  | "xid_reviewer"
-  | "public_staff"
-  | "custom";
+export const EVENT_STAFF_PRESETS = [
+  "owner",
+  "manager",
+  "slot_manager",
+  "content_editor",
+  "reviewer",
+  "public_staff",
+  "custom",
+  "xid_reviewer",
+] as const;
+
+export type EventStaffPreset = (typeof EVENT_STAFF_PRESETS)[number];
 
 export type PresetDefinition = {
   label: string;
@@ -96,6 +99,23 @@ export const PRESET_DEFINITIONS: Record<EventStaffPreset, PresetDefinition> = {
     permissions: [],
   },
 };
+
+const NON_ADMIN_EVENT_STAFF_PRESETS = EVENT_STAFF_PRESETS.filter(
+  (preset) => preset !== "xid_reviewer",
+);
+
+export function isEventStaffPreset(value: unknown): value is EventStaffPreset {
+  return (
+    typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(PRESET_DEFINITIONS, value)
+  );
+}
+
+export function getVisibleEventStaffPresets(
+  isSiteAdmin: boolean,
+): readonly EventStaffPreset[] {
+  return isSiteAdmin ? EVENT_STAFF_PRESETS : NON_ADMIN_EVENT_STAFF_PRESETS;
+}
 
 export function getPresetPermissions(preset: EventStaffPreset): PermissionKey[] {
   return [...PRESET_DEFINITIONS[preset].permissions];
