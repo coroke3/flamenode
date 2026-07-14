@@ -1,0 +1,39 @@
+name: Apply full optimization pass 9
+
+on:
+  push:
+    branches:
+      - agent/full-optimization-pass-9
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/full-optimization-pass-9
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: 最適化パッチを適用
+        run: python3 scripts/agent_full_optimization_pass_9.py
+      - name: 依存関係をインストール
+        run: npm ci
+      - name: 型・Lint・Unit・Workerを検証
+        run: |
+          npm run typecheck
+          npm run lint
+          npm run test:unit
+          npm run test:workers
+      - name: 変更をcommitしてpush
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "挙動維持で外部同期・公開API・通知構造を第9巡最適化"
+          git push origin HEAD:agent/full-optimization-pass-9
