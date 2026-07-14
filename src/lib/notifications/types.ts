@@ -70,20 +70,16 @@ const SEVERITY_BY_TYPE: Record<string, NotificationSeverity> = {
   video_draft: "silent",
 };
 
-function prefixCategory(type: string, prefix: string): boolean {
-  return type.startsWith(prefix);
-}
-
 export function categorizeNotificationType(type: string): NotificationCategory {
   const t = type.trim();
   if (!t) return "unknown";
-  if (prefixCategory(t, "video_")) return "video";
-  if (prefixCategory(t, "slot_")) return "slot";
-  if (prefixCategory(t, "x_id_")) return "x_id";
-  if (prefixCategory(t, "chapter_")) return "chapter";
-  if (prefixCategory(t, "moderation_")) return "moderation";
-  if (prefixCategory(t, "announcement_")) return "announcement";
-  if (prefixCategory(t, "event_")) return "event";
+  if (t.startsWith("video_")) return "video";
+  if (t.startsWith("slot_")) return "slot";
+  if (t.startsWith("x_id_")) return "x_id";
+  if (t.startsWith("chapter_")) return "chapter";
+  if (t.startsWith("moderation_")) return "moderation";
+  if (t.startsWith("announcement_")) return "announcement";
+  if (t.startsWith("event_")) return "event";
   if (t === "discord_webhook") return "system";
   return "unknown";
 }
