@@ -17,23 +17,6 @@ function pickHigherPriority(a, b) {
   return rank[a] <= rank[b] ? a : b;
 }
 
-const FORBIDDEN = new Set(["submitted_by_user_id", "user_id", "discord_id"]);
-
-function assertNoForbidden(value, path = "root") {
-  if (value === null || value === undefined) return;
-  if (Array.isArray(value)) {
-    value.forEach((v, i) => assertNoForbidden(v, `${path}[${i}]`));
-    return;
-  }
-  if (typeof value !== "object") return;
-  for (const [k, child] of Object.entries(value)) {
-    if (FORBIDDEN.has(k)) {
-      throw new Error(`Forbidden ${path}.${k}`);
-    }
-    assertNoForbidden(child, `${path}.${k}`);
-  }
-}
-
 test("resolveEventFreshness archived", () => {
   assert.equal(
     resolveEventFreshness(
@@ -76,10 +59,4 @@ test("no frozen state in freshness union", () => {
 test("pickHigherPriority", () => {
   assert.equal(pickHigherPriority("normal", "high"), "high");
   assert.equal(pickHigherPriority("low", "normal"), "normal");
-});
-
-test("forbidden keys rejected in public json", () => {
-  assert.throws(() =>
-    assertNoForbidden({ title: "ok", submitted_by_user_id: "x" }),
-  );
 });

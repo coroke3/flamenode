@@ -145,9 +145,10 @@ test("イベント出力APIは404とキャッシュヒット応答を共通化�
   );
 });
 
-test("メンバーCSV解析は区切り文字共通実装へ集約する", () => {
-  assert.match(memberInput, /import \{ parseCsv \} from "\.\.\/utils\/csv\.ts"/);
-  assert.doesNotMatch(memberInput, /function parseCsv/);
+test("メンバーCSV解析は区切り文字共通実装へ直接集約する", () => {
+  assert.match(memberInput, /import \{ parseDelimited \} from "#utils\/delimited"/);
+  assert.match(memberInput, /parseDelimited\(input, ","\)/);
+  assert.doesNotMatch(memberInput, /parseCsv/);
 });
 
 test("管理画面の独立DB読取を並列化する", () => {
