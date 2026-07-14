@@ -1,3 +1,18 @@
+import type { StaticRebuildPriority } from "./types";
+
+const PRIORITY_RANK: Record<StaticRebuildPriority, number> = {
+  high: 0,
+  normal: 1,
+  low: 2,
+};
+
+export function pickHigherPriority(
+  a: StaticRebuildPriority,
+  b: StaticRebuildPriority,
+): StaticRebuildPriority {
+  return PRIORITY_RANK[a] <= PRIORITY_RANK[b] ? a : b;
+}
+
 export type StaticRebuildTargetRow = {
   target_type: string;
   target_id: string;
