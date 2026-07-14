@@ -44,11 +44,31 @@ jobs:
       - name: 依存関係をインストール
         run: npm ci --no-audit --no-fund
       - name: 型・Lint・Unit・Workerを検証
+        shell: bash
         run: |
-          npm run typecheck
-          npm run lint
-          npm run test:unit
-          npm run test:workers
+          set +e
+          : > /tmp/verify.log
+          for command in \
+            "npm run typecheck" \
+            "npm run lint" \
+            "npm run test:unit" \
+            "npm run test:workers"
+          do
+            echo "===== $command =====" | tee -a /tmp/verify.log
+            bash -lc "$command" 2>&1 | tee -a /tmp/verify.log
+            status=${PIPESTATUS[0]}
+            if [ "$status" -ne 0 ]; then
+              git reset --hard HEAD
+              rm -f .tmp-agent-patch-error.txt
+              cp /tmp/verify.log .tmp-agent-verify-error.txt
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git add -A
+              git commit -m "診断: 第9巡最適化の検証失敗を記録"
+              git push origin HEAD:agent/full-optimization-pass-9
+              exit "$status"
+            fi
+          done
       - name: 変更をcommitしてpush
         run: |
           git config user.name "github-actions[bot]"
