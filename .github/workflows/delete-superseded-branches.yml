@@ -1,0 +1,100 @@
+name: Delete superseded branches
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/delete-superseded-branches.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/delete-superseded-branches-20260714
+          fetch-depth: 0
+
+      - name: Delete audited superseded branches
+        shell: bash
+        run: |
+          set -uo pipefail
+          out="$RUNNER_TEMP/branch-cleanup"
+          mkdir -p "$out"
+          : > "$out/deleted.txt"
+          : > "$out/already-absent.txt"
+          : > "$out/failed.txt"
+
+          branches=(
+            'agent/branch-inventory-20260714'
+            'agent/code-reduction-pass-9'
+            'agent/code-reduction-round7-20260713'
+            'agent/code-reduction-round8-20260714'
+            'agent/code-reduction-round8-final'
+            'agent/code-reduction-round8-rebased'
+            'agent/code-reduction-round9-20260714'
+            'agent/event-export-dual-format'
+            'agent/full-optimization-pass-9'
+            'agent/full-optimization-pass-9-v2'
+            'agent/full-reduction-20260714'
+            'agent/full-reduction-32da-20260714'
+            'agent/ninth-round-code-reduction'
+            'agent/ninth-round-code-reduction-final'
+            'agent/ninth-round-code-reduction-rebased'
+            'agent/optimization-round7-20260713'
+            'agent/optimization-round8-20260713'
+            'agent/repo-audit-snapshot-20260714'
+            'agent/repo-audit-snapshot-32da-20260714'
+            'agent/repo-audit-snapshot-f8-20260714'
+            'agent/repo-audit-snapshot-latest-20260714'
+            'agent/tenth-round-code-reduction'
+          )
+
+          git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'
+          for branch in "${branches[@]}"; do
+            if ! git show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+              echo "$branch" >> "$out/already-absent.txt"
+              continue
+            fi
+            if git push origin --delete "$branch"; then
+              echo "$branch" >> "$out/deleted.txt"
+            else
+              echo "$branch" >> "$out/failed.txt"
+            fi
+          done
+
+          # 実行用ブランチは最後に削除する。
+          if git push origin --delete agent/delete-superseded-branches-20260714; then
+            echo 'agent/delete-superseded-branches-20260714' >> "$out/deleted.txt"
+          else
+            echo 'agent/delete-superseded-branches-20260714' >> "$out/failed.txt"
+          fi
+
+          git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*' || true
+          git for-each-ref --format='%(refname:strip=3)' refs/remotes/origin \
+            | grep -v '^HEAD$' \
+            | sort > "$out/remaining.txt"
+
+          printf 'deleted=%s\n' "$(wc -l < "$out/deleted.txt")" > "$out/summary.txt"
+          printf 'already_absent=%s\n' "$(wc -l < "$out/already-absent.txt")" >> "$out/summary.txt"
+          printf 'failed=%s\n' "$(wc -l < "$out/failed.txt")" >> "$out/summary.txt"
+          cat "$out/summary.txt"
+          echo '--- remaining ---'
+          cat "$out/remaining.txt"
+
+          if [ -s "$out/failed.txt" ]; then
+            exit 1
+          fi
+
+      - name: Upload cleanup result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: branch-cleanup-result
+          path: ${{ runner.temp }}/branch-cleanup
+          if-no-files-found: error
+          retention-days: 1
