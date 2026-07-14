@@ -1,5 +1,4 @@
-import * as React from "react";
-import { FnTable } from "@/components/ui/FnTable";
+import * as React from "react";import { FnTable } from "@/components/ui/FnTable";
 
 import Link from "next/link";
 import type { Metadata } from "next";
@@ -72,27 +71,28 @@ export default async function AdminXIdMergesPage({
   }> = [];
   let reverts: Array<typeof xIdMergeReverts.$inferSelect> = [];
 
-  if (db && view === "requests") {
+  if (db) {
     const requestRows = await db
       .select()
       .from(xIdMergeRequests)
       .orderBy(desc(xIdMergeRequests.updated_at))
       .limit(50);
-    requests = await Promise.all(
+    const names = await Promise.all(
       requestRows.map(async (row, index) => {
         const shouldPreviewImpact =
           index < 20 && (row.status === "pending" || row.status === "approved");
+        const impact = shouldPreviewImpact
+          ? await fetchXIdMergeImpact(db, row.from_x_user_id)
+          : [];
         return {
           ...row,
           from_name: null,
           to_name: null,
-          impact: shouldPreviewImpact
-            ? await fetchXIdMergeImpact(db, row.from_x_user_id)
-            : [],
+          impact,
         };
       }),
     );
-  } else if (db) {
+    requests = names;
     reverts = await db
       .select()
       .from(xIdMergeReverts)
