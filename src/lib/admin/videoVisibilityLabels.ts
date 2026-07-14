@@ -1,7 +1,10 @@
 import type { VideoVisibilityStatus } from "@/lib/constants/collaborator-permissions";
+import {
+  firstSearchParamValue,
+  type SearchParamValue,
+} from "#utils/next";
 
 export type VideoVisibilityGroupKey = "review" | "public" | "private" | "closed";
-type SearchParamValue = string | readonly string[] | null | undefined;
 
 type VideoVisibilityGroup = {
   key: VideoVisibilityGroupKey;
@@ -78,12 +81,6 @@ export function normalizeVideoVisibilityFilter(
     return normalized;
   }
   return fallback;
-}
-
-function firstSearchParamValue(value: SearchParamValue): string {
-  if (typeof value === "string") return value.trim();
-  if (Array.isArray(value)) return (value[0] ?? "").trim();
-  return "";
 }
 
 export function videoVisibilityLabel(status: string): string {
