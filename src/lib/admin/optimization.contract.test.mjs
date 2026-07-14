@@ -25,6 +25,10 @@ const [
   videoVisibilityLabels,
   youtubeSync,
   youtubePlaylists,
+  announcementsPage,
+  rulesPage,
+  xLinkRequestsPage,
+  xIdMergesPage,
 ] = await Promise.all([
   readFile(new URL("./securityChecks.ts", import.meta.url), "utf8"),
   readFile(new URL("./spreadsheet/discovery.ts", import.meta.url), "utf8"),
@@ -54,6 +58,10 @@ const [
     new URL("../../../app/(admin)/admin/youtube-sync/playlists/page.tsx", import.meta.url),
     "utf8",
   ),
+  readFile(new URL("../../../app/(admin)/admin/announcements/page.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../../../app/(admin)/admin/rules/page.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../../../app/(admin)/admin/x-link-requests/page.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../../../app/(admin)/admin/x-id-merges/page.tsx", import.meta.url), "utf8"),
 ]);
 
 test("セキュリティ検査はLIMIT後の配列長ではなく全件数を返す", () => {
@@ -184,4 +192,31 @@ test("公開作品選択列を共通化し動的importを不要化する", () =>
     dbQueries,
     /await import\("@\/lib\/utils\/eventStatus"\)/,
   );
+});
+
+test("第10巡の一覧画面は条件有無でSQLを二重定義しない", () => {
+  assert.equal((announcementsPage.match(/\.from\(announcements\)/g) ?? []).length, 1);
+  assert.match(announcementsPage, /\.where\(where\)/);
+  assert.doesNotMatch(announcementsPage, /await \(where\s*\?/);
+  assert.match(
+    rulesPage,
+    /\.where\(statusFilter === "any" \? undefined : eq\(termsVersions\.status, statusFilter\)\)/,
+  );
+});
+
+test("第10巡の独立管理読取を並列化する", () => {
+  assert.match(
+    rulesPage,
+    /const \[rows, currentPublishedRows\] = db\s*\? await Promise\.all/,
+  );
+  assert.match(
+    xLinkRequestsPage,
+    /const \[pending, recentRejected, recentAuditLogs\] = db\s*\? await Promise\.all/,
+  );
+});
+
+test("X ID統合管理は表示中ビューだけを読み取る", () => {
+  assert.match(xIdMergesPage, /if \(db && view === "requests"\)/);
+  assert.match(xIdMergesPage, /else if \(db\)/);
+  assert.doesNotMatch(xIdMergesPage, /requests = names/);
 });
