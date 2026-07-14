@@ -12,11 +12,6 @@ function resolveEventFreshness(event, now) {
   return "ended";
 }
 
-function pickHigherPriority(a, b) {
-  const rank = { high: 0, normal: 1, low: 2 };
-  return rank[a] <= rank[b] ? a : b;
-}
-
 test("resolveEventFreshness archived", () => {
   assert.equal(
     resolveEventFreshness(
@@ -54,9 +49,4 @@ test("no frozen state in freshness union", () => {
   );
   assert.ok(["active", "ended", "archived"].includes(sample));
   assert.notEqual(sample, "frozen");
-});
-
-test("pickHigherPriority", () => {
-  assert.equal(pickHigherPriority("normal", "high"), "high");
-  assert.equal(pickHigherPriority("low", "normal"), "normal");
 });
