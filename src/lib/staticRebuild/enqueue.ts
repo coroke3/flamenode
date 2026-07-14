@@ -5,18 +5,12 @@ import type { DB } from "@/lib/db/client";
 import { staticRebuildQueue } from "@/lib/db/schema";
 import { auditAction } from "@/lib/audit/helpers";
 import { generateId } from "@/lib/utils/id";
-import { pickHigherPriority } from "./priority";
 import {
   indexUniqueStaticRebuildTargetRows,
+  pickHigherPriority,
   staticRebuildTargetKey,
 } from "./queueBatchCore";
 import type { EnqueueStaticRebuildInput } from "./types";
-
-const PRIORITY_RANK: Record<"high" | "normal" | "low", number> = {
-  high: 3,
-  normal: 2,
-  low: 1,
-};
 
 function dedupeStaticRebuildInputs(
   items: EnqueueStaticRebuildInput[],
@@ -29,21 +23,14 @@ function dedupeStaticRebuildInputs(
       byKey.set(key, item);
       continue;
     }
-    const mergedPriority = pickHigherPriority(
-      (existing.priority ?? "normal") as "high" | "normal" | "low",
-      (item.priority ?? "normal") as "high" | "normal" | "low",
-    );
     byKey.set(key, {
       ...existing,
       ...item,
-      priority: mergedPriority,
-      reason:
-        PRIORITY_RANK[mergedPriority] >=
-        PRIORITY_RANK[
-          (existing.priority ?? "normal") as "high" | "normal" | "low"
-        ]
-          ? item.reason
-          : existing.reason,
+      priority: pickHigherPriority(
+        existing.priority ?? "normal",
+        item.priority ?? "normal",
+      ),
+      reason: item.reason,
       requestedByUserId:
         item.requestedByUserId ?? existing.requestedByUserId,
     });
