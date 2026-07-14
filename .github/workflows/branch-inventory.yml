@@ -1,0 +1,57 @@
+name: Branch inventory
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/branch-inventory.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch every branch and build inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'
+          out="$RUNNER_TEMP/branch-inventory"
+          mkdir -p "$out"
+          printf 'branch\tsha\tahead_main\tbehind_main\tchanged_files\tmerge_base\n' > "$out/branches.tsv"
+          git for-each-ref --format='%(refname:strip=3)' refs/remotes/origin \
+            | grep -v '^HEAD$' \
+            | grep -v '^main$' \
+            | sort > "$out/branch-names.txt"
+          while IFS= read -r branch; do
+            [ -n "$branch" ] || continue
+            sha="$(git rev-parse "origin/$branch")"
+            ahead="$(git rev-list --count "origin/main..origin/$branch")"
+            behind="$(git rev-list --count "origin/$branch..origin/main")"
+            changed="$(git diff --name-only "origin/main...origin/$branch" | wc -l | tr -d ' ')"
+            base="$(git merge-base origin/main "origin/$branch")"
+            printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$branch" "$sha" "$ahead" "$behind" "$changed" "$base" >> "$out/branches.tsv"
+            {
+              echo "## $branch"
+              echo "sha=$sha ahead=$ahead behind=$behind changed_files=$changed merge_base=$base"
+              git log --format='%H%x09%s' --no-merges "origin/main..origin/$branch" | head -n 30 || true
+              echo
+              echo '-- diff stat --'
+              git diff --stat "origin/main...origin/$branch" || true
+              echo
+            } > "$out/${branch//\//__}.txt"
+          done < "$out/branch-names.txt"
+          cat "$out/branches.tsv"
+      - name: Upload branch inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: branch-inventory
+          path: ${{ runner.temp }}/branch-inventory
+          if-no-files-found: error
+          retention-days: 1
