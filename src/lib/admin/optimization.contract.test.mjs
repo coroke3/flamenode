@@ -11,7 +11,7 @@ const [
   publicDataLoader,
   memberInput,
   adminVideos,
-  apiEndpoints,
+  externalApiPage,
   eventGroupsPage,
   dbQueries,
   nextUtils,
@@ -105,7 +105,7 @@ test("管理画面の独立DB読取を並列化する", () => {
     /const \[pageRows, countRows, eventRows\] = await Promise\.all/,
   );
   assert.match(
-    apiEndpoints,
+    externalApiPage,
     /const \[enabledRows, publicEvents\] = await Promise\.all/,
   );
 });
