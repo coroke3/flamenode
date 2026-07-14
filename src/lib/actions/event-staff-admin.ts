@@ -8,7 +8,11 @@ import { assertCanEditEvent } from "@/lib/auth/ownership";
 import { canonicalizePermissionKey } from "@/lib/auth/permissions/aliases";
 import { isAdminOnlyKey, type PermissionKey } from "@/lib/auth/permissions/keys";
 import { normalizePermissionKeys } from "@/lib/auth/permissions/permissionResolver";
-import { getPresetPermissions, type EventStaffPreset } from "@/lib/auth/permissions/presets";
+import {
+  EVENT_STAFF_PRESETS,
+  getPresetPermissions,
+  type EventStaffPreset,
+} from "@/lib/auth/permissions/presets";
 import { getDatabase } from "@/lib/cloudflare";
 import { eventStaff, users, xUsers } from "@/lib/db/schema";
 import {
@@ -31,17 +35,6 @@ export interface StaffActionResult {
 }
 
 type DB = NonNullable<ReturnType<typeof getDatabase>>;
-
-const ALL_STAFF_PRESETS = [
-  "owner",
-  "manager",
-  "slot_manager",
-  "content_editor",
-  "reviewer",
-  "xid_reviewer",
-  "public_staff",
-  "custom",
-] as const satisfies readonly EventStaffPreset[];
 
 async function ensureEventManager(eventId: string): Promise<
   | { ok: true; userId: string; role: string | null; db: DB }
@@ -145,17 +138,17 @@ async function prepareXUserExtras(args: {
     expectedMutationChanges: [1],
     audits: [
       {
-      table_name: "x_users",
-      target_id: args.xUserId,
-      operation: "CREATE",
-      before: null,
-      after,
-      actor_user_id: args.actorUserId,
-      reason: "イベントスタッフ登録に伴う X ID 作成",
-      context: args.context,
-      retention_class: "long_audit",
-      restore_strategy: "delete_created",
-      strict: true,
+        table_name: "x_users",
+        target_id: args.xUserId,
+        operation: "CREATE",
+        before: null,
+        after,
+        actor_user_id: args.actorUserId,
+        reason: "イベントスタッフ登録に伴う X ID 作成",
+        context: args.context,
+        retention_class: "long_audit",
+        restore_strategy: "delete_created",
+        strict: true,
       },
     ],
   };
@@ -167,7 +160,7 @@ const staffMemberSchema = z.object({
   display_name: z.string().trim().min(1).max(80),
   x_user_id: z.string().trim().regex(/^[A-Za-z0-9_]{1,32}$/).optional().nullable(),
   user_id: z.string().trim().min(1).optional().nullable(),
-  permission_preset: z.enum(ALL_STAFF_PRESETS).default("public_staff"),
+  permission_preset: z.enum(EVENT_STAFF_PRESETS).default("public_staff"),
   permission_keys: z.string().trim().optional().nullable(),
   is_public: z.coerce.number().min(0).max(1).default(0),
   public_role_label: z.string().trim().max(40).optional().nullable(),
@@ -280,7 +273,7 @@ const csvImportRowSchema = z.object({
   display_name: z.string().trim().min(1).max(80),
   x_user_id: z.string().trim().max(64),
   user_id: z.string().trim().max(255),
-  permission_preset: z.enum(ALL_STAFF_PRESETS),
+  permission_preset: z.enum(EVENT_STAFF_PRESETS),
   permission_keys: z.array(z.string().trim().min(1).max(100)).max(64),
   is_public_staff: z.enum(["0", "1"]),
   public_role_label: z.string().trim().max(40),
