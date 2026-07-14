@@ -43,18 +43,12 @@ export default async function AdminAnnouncementsPage({
   ].filter((c): c is NonNullable<typeof c> => c !== undefined);
   const where = conds.length === 0 ? undefined : conds.length === 1 ? conds[0] : and(...conds);
   const rows = db
-    ? await (where
-        ? db
-            .select()
-            .from(announcements)
-            .where(where)
-            .orderBy(desc(announcements.created_at))
-            .limit(50)
-        : db
-            .select()
-            .from(announcements)
-            .orderBy(desc(announcements.created_at))
-            .limit(50))
+    ? await db
+        .select()
+        .from(announcements)
+        .where(where)
+        .orderBy(desc(announcements.created_at))
+        .limit(50)
     : [];
 
   return (
