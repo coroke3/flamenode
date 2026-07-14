@@ -1,3 +1,4 @@
+import type { EventStaffPreset } from "../../auth/permissions/presets.ts";
 import type { EventVisibilityStatus } from "../../utils/eventStatusCore.ts";
 
 // ============================================================
@@ -35,15 +36,7 @@ export interface CanonicalEventStaff {
   x_user_id: string;
   display_name: string;
   /** イベント代表者は必ず owner、その他は必要最小限のプリセットにする。 */
-  permission_preset:
-    | "owner"
-    | "manager"
-    | "slot_manager"
-    | "content_editor"
-    | "reviewer"
-    | "xid_reviewer"
-    | "public_staff"
-    | "custom";
+  permission_preset: EventStaffPreset;
   is_public: 0 | 1;
   public_role_label: string | null;
 }

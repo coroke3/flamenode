@@ -1,3 +1,4 @@
+import { isEventStaffPreset } from "../auth/permissions/presets.ts";
 import { getRestoreRegistration } from "./registry";
 import {
   RestoreStatus,
@@ -138,18 +139,7 @@ function validateTableSpecificSnapshot(
       "イベントスタッフの復元スナップショットに権限プリセットがありません。",
     );
   }
-  if (
-    ![
-      "owner",
-      "manager",
-      "slot_manager",
-      "content_editor",
-      "reviewer",
-      "xid_reviewer",
-      "public_staff",
-      "custom",
-    ].includes(String(snapshot.permission_preset))
-  ) {
+  if (!isEventStaffPreset(snapshot.permission_preset)) {
     return unavailable(
       RESTORE_CAPABILITY_REASON.snapshotInvalid,
       "イベントスタッフの復元スナップショットの権限プリセットが不正です。",

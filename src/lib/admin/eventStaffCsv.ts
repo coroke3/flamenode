@@ -5,6 +5,7 @@ import {
   type PermissionKey,
 } from "../auth/permissions/keys.ts";
 import {
+  isEventStaffPreset,
   PRESET_DEFINITIONS,
   type EventStaffPreset,
 } from "../auth/permissions/presets.ts";
@@ -55,21 +56,6 @@ export const EVENT_STAFF_CSV_SAMPLE = [
   "作品修正担当,tanaka,,content_editor,0,",
 ].join("\n");
 
-const CSV_PRESETS = [
-  "owner",
-  "manager",
-  "slot_manager",
-  "content_editor",
-  "reviewer",
-  "xid_reviewer",
-  "public_staff",
-  "custom",
-] as const satisfies readonly EventStaffCsvPreset[];
-
-function isCsvPreset(value: string): value is EventStaffCsvPreset {
-  return (CSV_PRESETS as readonly string[]).includes(value);
-}
-
 function normalizeXIdForCsv(raw: string): string {
   return raw.replace(/^@+/, "").trim().toLowerCase();
 }
@@ -83,7 +69,7 @@ function parseAssignment(raw: string): {
   if (!value) {
     return { preset: "public_staff", keys: [], errors: [] };
   }
-  if (isCsvPreset(value)) {
+  if (isEventStaffPreset(value)) {
     return { preset: value, keys: [], errors: [] };
   }
 

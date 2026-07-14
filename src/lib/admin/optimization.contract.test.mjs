@@ -9,6 +9,13 @@ const [
   permissionIntegrityChecks,
   liveApi,
   publicDataLoader,
+  permissionPresets,
+  permissionResolver,
+  eventStaffCsv,
+  eventStaffActions,
+  auditCapability,
+  legacyImportTypes,
+  eventExportRoute,
 ] = await Promise.all([
   readFile(new URL("./securityChecks.ts", import.meta.url), "utf8"),
   readFile(new URL("./spreadsheet/discovery.ts", import.meta.url), "utf8"),
@@ -16,6 +23,16 @@ const [
   readFile(new URL("./permissionIntegrityChecks.ts", import.meta.url), "utf8"),
   readFile(new URL("../staticRebuild/liveApi.ts", import.meta.url), "utf8"),
   readFile(new URL("../publicData/loader.ts", import.meta.url), "utf8"),
+  readFile(new URL("../auth/permissions/presets.ts", import.meta.url), "utf8"),
+  readFile(new URL("../auth/permissions/permissionResolver.ts", import.meta.url), "utf8"),
+  readFile(new URL("./eventStaffCsv.ts", import.meta.url), "utf8"),
+  readFile(new URL("../actions/event-staff-admin.ts", import.meta.url), "utf8"),
+  readFile(new URL("../audit/capability.ts", import.meta.url), "utf8"),
+  readFile(new URL("../import/legacy/types.ts", import.meta.url), "utf8"),
+  readFile(
+    new URL("../../../app/api/event-endpoints/[id]/route.ts", import.meta.url),
+    "utf8",
+  ),
 ]);
 
 test("セキュリティ検査はLIMIT後の配列長ではなく全件数を返す", () => {
@@ -71,4 +88,38 @@ test("公開静的JSONは同時読取を集約しR2とenqueue障害を分離す�
   assert.match(publicDataLoader, /read_failed/);
   assert.match(publicDataLoader, /enqueue_failed/);
   assert.match(publicDataLoader, /if \(payload !== null\)/);
+});
+
+test("イベントスタッフプリセットは単一定義から型と検証を派生する", () => {
+  assert.match(permissionPresets, /export const EVENT_STAFF_PRESETS = \[/);
+  assert.match(
+    permissionPresets,
+    /export type EventStaffPreset = \(typeof EVENT_STAFF_PRESETS\)\[number\]/,
+  );
+  assert.match(permissionPresets, /export function isEventStaffPreset/);
+  assert.match(permissionResolver, /isEventStaffPreset\(row\.permission_preset\)/);
+  assert.doesNotMatch(permissionResolver, /value === "owner"/);
+  assert.match(eventStaffCsv, /isEventStaffPreset\(value\)/);
+  assert.doesNotMatch(eventStaffCsv, /const CSV_PRESETS/);
+  assert.equal(
+    (eventStaffActions.match(/z\.enum\(EVENT_STAFF_PRESETS\)/g) ?? []).length,
+    2,
+  );
+  assert.doesNotMatch(eventStaffActions, /const ALL_STAFF_PRESETS/);
+  assert.match(auditCapability, /isEventStaffPreset\(snapshot\.permission_preset\)/);
+  assert.doesNotMatch(auditCapability, /"slot_manager",\s*"content_editor"/);
+  assert.match(legacyImportTypes, /permission_preset: EventStaffPreset/);
+});
+
+test("イベント出力APIは404とキャッシュヒット応答を共通化する", () => {
+  assert.match(eventExportRoute, /function notFoundResponse/);
+  assert.match(eventExportRoute, /const cachedResponse = async/);
+  assert.ok(
+    (eventExportRoute.match(/return notFoundResponse\(req\)/g) ?? []).length >= 4,
+  );
+  assert.equal(
+    (eventExportRoute.match(/readCachedPayload\(kv, payloadCacheKey, eventId\)/g) ?? [])
+      .length,
+    1,
+  );
 });

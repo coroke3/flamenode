@@ -1,14 +1,17 @@
 import type { PermissionKey } from "./keys.ts";
 
-export type EventStaffPreset =
-  | "owner"
-  | "manager"
-  | "reviewer"
-  | "slot_manager"
-  | "content_editor"
-  | "xid_reviewer"
-  | "public_staff"
-  | "custom";
+export const EVENT_STAFF_PRESETS = [
+  "owner",
+  "manager",
+  "slot_manager",
+  "content_editor",
+  "reviewer",
+  "xid_reviewer",
+  "public_staff",
+  "custom",
+] as const;
+
+export type EventStaffPreset = (typeof EVENT_STAFF_PRESETS)[number];
 
 export type PresetDefinition = {
   label: string;
@@ -57,17 +60,12 @@ export const PRESET_DEFINITIONS: Record<EventStaffPreset, PresetDefinition> = {
   reviewer: {
     label: "レビュー担当",
     description: "投稿内容の確認と公開状態の審査向けです。イベント設定やスタッフ管理はできません。",
-    permissions: [
-      "event.review",
-      "video.status",
-    ],
+    permissions: ["event.review", "video.status"],
   },
   slot_manager: {
     label: "枠管理担当",
     description: "枠作成・変更を担当します。作品本文やスタッフ管理はできません。",
-    permissions: [
-      "event.slots",
-    ],
+    permissions: ["event.slots"],
   },
   content_editor: {
     label: "作品修正担当",
@@ -96,6 +94,13 @@ export const PRESET_DEFINITIONS: Record<EventStaffPreset, PresetDefinition> = {
     permissions: [],
   },
 };
+
+export function isEventStaffPreset(value: unknown): value is EventStaffPreset {
+  return (
+    typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(PRESET_DEFINITIONS, value)
+  );
+}
 
 export function getPresetPermissions(preset: EventStaffPreset): PermissionKey[] {
   return [...PRESET_DEFINITIONS[preset].permissions];
