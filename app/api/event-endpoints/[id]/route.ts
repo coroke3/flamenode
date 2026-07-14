@@ -227,19 +227,23 @@ export async function GET(
   if (kv && accessState !== "1") {
     prefetchedEvent = await loadEventExportEvent(db, eventId);
     const allowed = isPublicExportEvent(prefetchedEvent);
-    try {
-      await kv.put(accessKey, allowed ? "1" : "0", {
+    const accessWrite = kv
+      .put(accessKey, allowed ? "1" : "0", {
         expirationTtl: EVENT_EXPORT_ACCESS_TTL_SECONDS,
+      })
+      .catch((error) => {
+        console.warn("[event-export-api] KV access gate write failed", {
+          eventId,
+          error,
+        });
       });
-    } catch (error) {
-      console.warn("[event-export-api] KV access gate write failed", {
-        eventId,
-        error,
-      });
-    }
-    if (!allowed) return notFoundResponse(req);
 
-    const response = await cachedResponse();
+    if (!allowed) {
+      await accessWrite;
+      return notFoundResponse(req);
+    }
+
+    const [response] = await Promise.all([cachedResponse(), accessWrite]);
     if (response) return response;
   }
 
