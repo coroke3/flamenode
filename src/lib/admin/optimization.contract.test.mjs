@@ -106,13 +106,13 @@ test("イベントスタッフプリセットは単一定義から型と検証�
 
 test("イベント出力APIは404とキャッシュヒット応答を共通化する", () => {
   assert.match(eventExportRoute, /function notFoundResponse/);
-  assert.match(eventExportRoute, /async function cachedExportResponse/);
+  assert.match(eventExportRoute, /const cachedResponse = async/);
   assert.ok(
     (eventExportRoute.match(/return notFoundResponse\(req\)/g) ?? []).length >= 4,
   );
   assert.equal(
     (eventExportRoute.match(/readCachedPayload\(kv, payloadCacheKey, eventId\)/g) ?? [])
       .length,
-    0,
+    1,
   );
 });
