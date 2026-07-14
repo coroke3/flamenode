@@ -2,19 +2,21 @@
 
 import * as React from "react";
 import Link from "next/link";
+import type {
+  EventExportFormat,
+  EventExportUpdateMode,
+} from "@/lib/api/eventExportPayload";
 
 interface EventExportLinkBuilderProps {
   eventId: string;
 }
 
-type ExportFormat = "new" | "legacy";
-type UpdateMode = "realtime" | "scheduled";
-
 export function EventExportLinkBuilder({
   eventId,
 }: EventExportLinkBuilderProps): React.ReactElement {
-  const [format, setFormat] = React.useState<ExportFormat>("new");
-  const [updateMode, setUpdateMode] = React.useState<UpdateMode>("realtime");
+  const [format, setFormat] = React.useState<EventExportFormat>("new");
+  const [updateMode, setUpdateMode] =
+    React.useState<EventExportUpdateMode>("realtime");
   const [refreshMinutes, setRefreshMinutes] = React.useState("60");
   const [copied, setCopied] = React.useState(false);
 
@@ -41,7 +43,9 @@ export function EventExportLinkBuilder({
           <select
             className="fn-select"
             value={format}
-            onChange={(event) => setFormat(event.target.value as ExportFormat)}
+            onChange={(event) =>
+              setFormat(event.target.value as EventExportFormat)
+            }
           >
             <option value="new">新形式 v3</option>
             <option value="legacy">旧形式互換</option>
@@ -54,7 +58,7 @@ export function EventExportLinkBuilder({
             className="fn-select"
             value={updateMode}
             onChange={(event) =>
-              setUpdateMode(event.target.value as UpdateMode)
+              setUpdateMode(event.target.value as EventExportUpdateMode)
             }
           >
             <option value="realtime">リアルタイム</option>
