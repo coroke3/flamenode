@@ -25,6 +25,7 @@
 - APIキー、quota error本文、URL queryをログへ出さない。
 - 再生リスト同期はOAuth access tokenをisolate内で期限付き再利用し、Cronごとのtoken endpoint呼出しを避ける。
 - 再生リスト一覧・追加はpartial responseを使用し、1実行の外部requestを最大12に固定する。
+- 再生対象の重複排除はSQLの`GROUP BY`で行い、スキャン結果のD1保存は複数statementを`batch`へまとめる。
 
 ### Discord
 
