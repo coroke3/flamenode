@@ -2,13 +2,14 @@
 
 > Status: Active
 > Last verified: 2026-07-13
-> Source of truth: `workers/shared/externalApi.ts`、`workers/youtube-sync/index.ts`、`workers/notification-dispatcher/dispatch.ts`、`src/lib/media/externalImageProxy.ts`
+> Source of truth: `workers/shared/externalApi.ts`、`workers/youtube-sync/index.ts`、`workers/youtube-playlist-sync/index.ts`、`workers/notification-dispatcher/dispatch.ts`、`src/lib/media/externalImageProxy.ts`
 
 外部サービスのrate limit値をアプリ側で固定推測せず、Providerが返すquota・rate limit・Retry-Afterを優先する。全処理は1回のWorker invocation内で固定予算を持ち、無制限retry、無制限並列、全件再取得を禁止する。
 
 | Provider / endpoint | 1実行予算 | 待機・復旧 | 重複削減 |
 | --- | ---: | --- | --- |
 | YouTube Data API `videos.list` | 50 ID、通常1 request、最大2 quota units | 429/5xxは最大1回retry。quota系403はKVへ1時間cooldown | `fields`で必要列だけ取得。期限到来50件だけ選択 |
+| YouTube playlist / OAuth | 1実行最大12 external requests、mutation最大4 | quota予約後に実行。401時はtoken cacheを破棄し次回Cronで再取得 | OAuth tokenをisolate内で期限付き再利用。playlist responseは`fields`で縮小 |
 | Discord DM / Webhook | 通知6件、最大12 external requests、DM cache KV書込最大2 | rate headersとRetry-Afterを`next_attempt_at`へ反映。global 429は全routeへ適用 | DM channel IDをisolateへ全件、KVへ最大576件/dayの範囲で30日cacheし、通常配送を1 request化 |
 | Google Drive public image | requestごと最大1 upstream fetch | 失敗・Retry-Afterをnegative cacheへ保存しstaleを返す | 同一キーの同時missを1本へ集約。ETag/304再検証 |
 | YouTube thumbnail | requestごと最大1 upstream fetch | 失敗・Retry-Afterをnegative cacheへ保存しstaleを返す | 同一キーの同時missを1本へ集約。ETag/304再検証 |
@@ -22,6 +23,9 @@
 - 15分間隔のため通常96 units/day、全回で1回retryしても最大192 units/dayとなる。
 - quota系403を受けた場合、同じCronや直後のCronで呼び続けない。
 - APIキー、quota error本文、URL queryをログへ出さない。
+- 再生リスト同期はOAuth access tokenをisolate内で期限付き再利用し、Cronごとのtoken endpoint呼出しを避ける。
+- 再生リスト一覧・追加はpartial responseを使用し、1実行の外部requestを最大12に固定する。
+- 再生対象の重複排除はSQLの`GROUP BY`で行い、スキャン結果のD1保存は複数statementを`batch`へまとめる。
 
 ### Discord
 
