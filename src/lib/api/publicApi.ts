@@ -113,13 +113,12 @@ function etagMatches(request: Request, etag: string): boolean {
   });
 }
 
-export async function publicJsonResponse(
+export async function publicJsonBodyResponse(
   request: Request,
-  payload: unknown,
+  body: string,
   cacheControl: string,
   status = 200,
 ): Promise<Response> {
-  const body = JSON.stringify(payload);
   const etag = await bodyEtag(body);
   const headers = { "Cache-Control": cacheControl, ETag: etag };
   if (status === 200 && etagMatches(request, etag)) {
@@ -129,6 +128,20 @@ export async function publicJsonResponse(
     status,
     headers: { ...headers, "Content-Type": "application/json" },
   });
+}
+
+export function publicJsonResponse(
+  request: Request,
+  payload: unknown,
+  cacheControl: string,
+  status = 200,
+): Promise<Response> {
+  return publicJsonBodyResponse(
+    request,
+    JSON.stringify(payload),
+    cacheControl,
+    status,
+  );
 }
 
 /** DB/R2 binding 障害を空配列の正常応答としてキャッシュしない。 */
