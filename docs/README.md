@@ -1,32 +1,57 @@
 # FlameNode ドキュメント索引
 
 > Status: Active
-> Last verified: 2026-07-13
-> Verified against commit: `de329d5d50799b41ac76ada18147592f0bec2700`
-> Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `wrangler.toml`, `package.json`
+> Last verified: 2026-07-14
+> Verified against commit: `6dbe07a`
+> Source of truth: `src/lib/db/schema.ts`, `migrations/`, `wrangler.toml`, `package.json`
 
-現行のCloudflare構成は Pages + `@cloudflare/next-on-pages`、D1、R2、KV、3本のCron Workerです。
+## AIの読取順
 
-現行実装はコード、DB schema、active migration、Cloudflare設定、Active文書の順に確認します。Historical文書は経緯の保存だけを目的とし、現行実装の根拠には使用しません。
+1. [`../AGENTS.md`](../AGENTS.md)
+2. [`AI_CONTEXT.md`](AI_CONTEXT.md)の該当タスク行
+3. 対象コードと関連test
+4. 必要なActive文書1件
 
-| 区分 | 文書 | 責務 |
-| --- | --- | --- |
-| Active | [operations/README.md](operations/README.md) | 運用全体の入口と所有文書 |
-| Active | [operations/migrations.md](operations/migrations.md) | baseline、ローカル適用、Remote D1の手動手順 |
-| Active | [operations/workers.md](operations/workers.md) | 3本のCron Worker、lease、上限、障害対応 |
-| Active | [operations/youtube-playlist-sync.md](operations/youtube-playlist-sync.md) | イベント別YouTube再生リスト同期、OAuth、無料枠制御 |
-| Active | [operations/audit-and-restore.md](operations/audit-and-restore.md) | 監査、復元、owner不変条件 |
-| Active | [operations/legacy-import.md](operations/legacy-import.md) | legacy importのpreview/apply安全手順 |
-| Active | [operations/static-delivery.md](operations/static-delivery.md) | R2静的JSONと公開範囲 |
-| Active | [operations/incident-response.md](operations/incident-response.md) | fail-closed時の一次対応 |
-| Active | [database/README.md](database/README.md) | DB運用方針と正本への入口 |
-| Active | [database/change-log.md](database/change-log.md) | active migrationに対応するDB変更履歴の唯一の正本 |
-| Active | [db-history/README.md](db-history/README.md) | migrationごとの詳細記録とbaseline履歴の索引 |
-| Active | [templates/migration.md](templates/migration.md) | active migrationの記録テンプレート |
-| Active | [implementation-backlog.md](implementation-backlog.md) | Open、Blocked、Recently completedの現在状態 |
-| Historical | [db-change-history.md](db-change-history.md) | 旧DB変更履歴。現行正本は `database/change-log.md` |
-| Historical | [operations.md](operations.md) | pre-baseline前の運用手順 |
-| Historical | [merge-flow-design.md](merge-flow-design.md) | pre-baseline前のX ID統合設計メモ |
-| Historical | `migrations/historical/` | pre-production前の旧migration本文 |
+Historical、archive、旧監査資料は現行仕様の根拠にしない。長い文書は該当見出しだけを読む。
 
-実装変更時は、該当するActive文書だけを同じ変更へ更新します。schemaの列一覧やWorker実装の複製を別文書へ作らず、正本へリンクしてください。旧文書はHistorical metadataを付け、現行手順として参照しません。
+## 現行構成
+
+Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、Cron Worker 3本を使用する。正確な状態はコード、schema、active migration、Cloudflare設定を優先する。
+
+## Active文書
+
+| 目的 | 文書 |
+| --- | --- |
+| AI作業判断 | [AI_CONTEXT.md](AI_CONTEXT.md) |
+| 運用入口 | [operations/README.md](operations/README.md) |
+| DB運用入口 | [database/README.md](database/README.md) |
+| DB変更履歴の正本 | [database/change-log.md](database/change-log.md) |
+| migration詳細索引 | [db-history/README.md](db-history/README.md) |
+| 未完了事項 | [implementation-backlog.md](implementation-backlog.md) |
+| ローカル起動 | [../LOCAL.md](../LOCAL.md) |
+| デプロイ | [../DEPLOY.md](../DEPLOY.md) |
+
+## 運用文書
+
+| タスク | 文書 |
+| --- | --- |
+| migration | [operations/migrations.md](operations/migrations.md) |
+| Cron Worker | [operations/workers.md](operations/workers.md) |
+| YouTube同期 | [operations/youtube-playlist-sync.md](operations/youtube-playlist-sync.md) |
+| 監査・復元・owner保護 | [operations/audit-and-restore.md](operations/audit-and-restore.md) |
+| legacy import | [operations/legacy-import.md](operations/legacy-import.md) |
+| spreadsheet import | [operations/spreadsheet-import.md](operations/spreadsheet-import.md) |
+| R2静的配信 | [operations/static-delivery.md](operations/static-delivery.md) |
+| 障害対応 | [operations/incident-response.md](operations/incident-response.md) |
+| UI受入基準 | [operations/ui-acceptance.md](operations/ui-acceptance.md) |
+| 外部API上限 | [operations/external-api-limits.md](operations/external-api-limits.md) |
+
+## Historical
+
+- [historical/README.md](historical/README.md): 過去資料の入口
+- [db-change-history.md](db-change-history.md): 旧DB変更履歴
+- [operations.md](operations.md): pre-baseline運用手順
+- [merge-flow-design.md](merge-flow-design.md): 旧X ID統合設計
+- `.claude/flamenode/`: 完了済み修正キャンペーン資料
+
+実装変更時は該当Active文書だけを更新する。schema列一覧、実装コード、設定値をMarkdownへ複製せず、正本へリンクする。

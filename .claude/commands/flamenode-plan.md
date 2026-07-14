@@ -1,42 +1,42 @@
 # /flamenode-plan
 
-FlameNode実装前の調査・計画コマンド。
+コード変更前に、対象範囲と検証方法だけを決める。
 
-## 実行内容
+## 読むもの
 
-次を順に読んでください。
+1. `AGENTS.md`
+2. `docs/AI_CONTEXT.md`の該当タスク行
+3. 対象コードと関連test
 
-1. `CLAUDE.md`
-2. `claude-code-subagent-assignment.md`
-3. `.claude/flamenode/README.md`
-4. `.claude/flamenode/requirements-map.md`
-5. `.claude/flamenode/phases/00-repo-cartography.md`
-6. `.claude/flamenode/source/flamenode_final_detailed_design.md`
-7. `.claude/flamenode/source/flamenode_final_implementation_checklist.md`
-8. `.claude/flamenode/source/flamenode_final_consistency_audit.md`
+旧`source/`、`archive/`、完了済みphaseは通常読まない。
 
-コード変更はまだしないでください。
+## 手順
+
+1. 依頼を1文で言い換える。
+2. 対象と非対象を分ける。
+3. 関連ファイル、呼出元、testを確認する。
+4. 維持する既存挙動を明示する。
+5. 最小変更順と検査を決める。
+6. DB、権限、security、公開API、破壊的変更は上位モデル対象にする。
 
 ## 出力
 
 ```md
-# FlameNode 実装前計画
+## 結論
 
-## 読んだファイル
+## 対象 / 非対象
 
-## 関連ファイル地図
-| 領域 | 関連ファイル | 責務 | 対応要求ID | リスク | 推奨モデル |
-|---|---|---|---|---|---|
+## 維持する挙動
 
-## 4原典カバレッジ確認
-| 原典 | 反映状況 | 不足 |
-|---|---|---|
+## 変更候補
+| ファイル | 変更 | 根拠 | リスク |
+| --- | --- | --- | --- |
 
-## 推奨PR分割
+## 実装順
 
-## 最初のPR
+## 検査
 
-## Opus判断が必要な箇所
-
-## コード変更していないことの確認
+## 上位モデルへ上げる項目
 ```
+
+このコマンドではファイルを変更しない。

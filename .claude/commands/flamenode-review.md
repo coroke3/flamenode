@@ -1,76 +1,48 @@
 # /flamenode-review
 
-FlameNode実装後の最終レビューコマンド。
+現在の差分を、現行コード・不変条件・testに照らしてレビューする。
 
-## 実行内容
+## 読むもの
 
-次を読む。
+1. `AGENTS.md`
+2. `docs/AI_CONTEXT.md`の該当タスク行
+3. 変更差分、対象コード、関連test
+4. 必要なActive文書
 
-1. `CLAUDE.md`
-2. `claude-code-subagent-assignment.md`
-3. `.claude/flamenode/README.md`
-4. `.claude/flamenode/requirements-map.md`
-5. `.claude/flamenode/phases/09-final-review.md`
-6. `.claude/flamenode/source/flamenode_final_detailed_design.md`
-7. `.claude/flamenode/source/flamenode_final_implementation_checklist.md`
-8. `.claude/flamenode/source/flamenode_final_consistency_audit.md`
+旧キャンペーン資料は、過去要件との回帰確認を明示された場合だけ読む。
 
-その上で、現在の差分を4原典に照らしてレビューしてください。
+## 確認順
 
-## 推奨モデル
+1. 依頼範囲外の変更がないか。
+2. 既存挙動が維持されているか。
+3. UI迂回時も権限が守られるか。
+4. DB、owner、監査、公開APIの不変条件を破らないか。
+5. Active文書がコードと一致するか。
+6. 必要な検査が成功しているか。
 
-Opus。
+## マージ不可
 
-## 必ず確認するコマンド
-
-```sh
-npm run typecheck
-npm run build
-```
-
-DB変更がある場合は、package.jsonを見てDB migrationコマンドも確認してください。
-
-## ブロッカー
-
-以下がある場合はマージ不可。
-
-- フロントだけで権限制御している。
-- API直叩きで権限なし更新ができる。
-- Discord IDとX IDの主体が混ざっている。
-- 未承認X IDで投稿・チャプターコメント・いいね・セーブ・ライブラリができる。
-- owner_discord_user_idだけで作品編集できる。
-- contact_x_id自由入力で即公開できる。
-- 連続枠の部分解放・拡張でグループ整合性が壊れる。
-- submitted枠を通常解放できる。
-- 部番号が前方追加や休憩閾値で再計算されない。
-- video_commentsを新規利用している。
-- marker_kind依存の分岐を増やしている。
-- 公開APIで内部情報を返している。
-- build/typecheckが通らない。
+- 未認証・未許可の更新
+- 既適用migration本文の変更
+- runtime DDL、旧列fallback、二重書込みの再導入
+- owner不在
+- 内部情報の公開API漏洩
+- data loss経路の保護不足
+- 必須検査失敗
 
 ## 出力
 
 ```md
-# FlameNode 最終レビュー
-
 ## 結論
 - マージ可 / 要修正 / 追加調査
 
-## 実行コマンド
-
-## 4原典カバレッジ
-| 原典 | 反映状況 | 不足 |
-|---|---|---|
-
-## 要求IDカバレッジ
-| 要求ID | 状態 | 備考 |
-|---|---|---|
-
 ## ブロッカー
+| ファイル | 問題 | 影響 | 修正 |
+| --- | --- | --- | --- |
 
 ## 非ブロッカー
 
-## 次PRへ回してよい項目
+## 検査結果
 
-## 修正指示
+## 残余リスク
 ```

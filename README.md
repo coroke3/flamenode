@@ -1,50 +1,44 @@
 # FlameNode
 
 > Status: Active
-> Last verified: 2026-07-13
-> Verified against commit: `d4d5432`
-> Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `docs/README.md`, `package.json`
+> Last verified: 2026-07-14
+> Verified against commit: `6dbe07a`
+> Source of truth: `src/lib/db/schema.ts`, `migrations/`, `docs/README.md`, `package.json`
 
-> 映像（フレーム）の結節点（ノード）。YouTube 埋め込みを利用した動画プラットフォーム。
+YouTube埋め込みを使い、イベント参加、枠確保、投稿審査、上映、アーカイブを一体で扱うCloudflareネイティブな動画プラットフォーム。
 
-イベント参加手続き、スロット確保、投稿審査、振り返り上映、第三者イベント開催を一体で扱う、Cloudflare ネイティブな動画アーカイブサイトです。
+## 最初に読む
 
-- 現行文書の索引: [`docs/README.md`](./docs/README.md)
-- 設計仕様: [`設計/`](./設計) 配下
-- ローカル動作手順: [`LOCAL.md`](./LOCAL.md)
-- デプロイ手順: [`DEPLOY.md`](./DEPLOY.md)
-- 運用手順: [`docs/operations/README.md`](./docs/operations/README.md)
-- DB変更履歴の正本: [`docs/database/change-log.md`](./docs/database/change-log.md)
-- migration詳細索引: [`docs/db-history/README.md`](./docs/db-history/README.md)
-- AIエージェント向けガイド: [`AGENTS.md`](./AGENTS.md)
+- AI作業: [`AGENTS.md`](AGENTS.md) → [`docs/AI_CONTEXT.md`](docs/AI_CONTEXT.md)の該当タスク行
+- 文書索引: [`docs/README.md`](docs/README.md)
+- ローカル起動: [`LOCAL.md`](LOCAL.md)
+- デプロイ: [`DEPLOY.md`](DEPLOY.md)
+- 運用: [`docs/operations/README.md`](docs/operations/README.md)
+- DB変更履歴: [`docs/database/change-log.md`](docs/database/change-log.md)
 
-## 技術スタック
+長い資料やHistorical文書を先に一括読込せず、対象コードと関連testを優先する。
 
-- **フレームワーク**: Next.js 15 (App Router) + React 19 + TypeScript
-- **DB**: Cloudflare D1 (SQLite) + Drizzle ORM
-- **ストレージ / キャッシュ**: Cloudflare R2 / KV
-- **背景処理**: Cloudflare Workers（Cron 3本: `fast-jobs` / `content-jobs` / `sync-jobs`）
-- **認証**: Auth.js (NextAuth v5) + Discord OAuth
-- **スタイル**: CSS ModulesとCSSカスタムプロパティ。Tailwindは使用しない。Light / Dark / Systemを切り替える。
-- **ホスティング**: Cloudflare Pages + `@cloudflare/next-on-pages`
+## 現行構成
 
-## ディレクトリ構成
+| 領域 | 構成 |
+| --- | --- |
+| Web | Next.js 15 App Router、React 19、TypeScript |
+| Hosting | Cloudflare Pages + `@cloudflare/next-on-pages` |
+| Data | D1 + Drizzle ORM、R2、KV |
+| Background | Cron Worker 3本: `fast-jobs` / `content-jobs` / `sync-jobs` |
+| Auth | Auth.js v5 + Discord OAuth |
+| UI | CSS Modules + CSS custom properties。Tailwind不使用 |
+
+## 主要ディレクトリ
 
 ```text
-app/                 # Next.js App Router
-  (public)/          # 公開エリア
-  (auth)/            # ログイン利用者エリア
-  (manage)/          # イベント運営エリア
-  (admin)/           # サイト管理エリア
-  api/               # Route Handlers / Auth.js
-src/
-  components/        # Reactコンポーネント
-  lib/               # DB、認証、権限、Server Actions、通知、公開DTO
-  styles/            # CSS
-workers/             # 統合Cron Worker 3本と共有module
-migrations/          # active D1 migration。旧本文はhistorical配下
-scripts/             # 運用・検査script
-設計/                 # 製品・UI設計
+app/          # public / auth / manage / admin / API
+src/          # components / lib / styles
+workers/      # Cron Worker 3本と共有module
+migrations/   # active D1 migration
+scripts/      # 検査・運用script
+docs/         # Active運用文書と履歴索引
+設計/         # 製品・UI設計
 ```
 
 ## 最短ローカル起動
@@ -56,41 +50,25 @@ npm run db:local-apply
 npm run dev
 ```
 
-詳細は [`LOCAL.md`](./LOCAL.md) を参照してください。DB変更時は自動生成へ戻さず、schema、追加migration、DB変更履歴、詳細文書、テストを同時に更新します。
+詳細とPowerShell手順は[`LOCAL.md`](LOCAL.md)を参照する。
 
-## 必須検査
+## 不変条件
 
-```sh
-npm run typecheck
-npm run lint
-npm run test:unit
-npm run test:workers
-npm run test:integration
-npm run build
-npm run pages:build
-npm run check:pages-output
-npm run check:cloudflare-template
-npm run check:db-schema
-npm run check:db-legacy
-npm run check:event-owners
-npm run check:ui-acceptance
-npm run check:public-api-leaks
-npm run check:docs
-npm run check:db-history
-npm run check:project-docs
-```
+- DB正本は`src/lib/db/schema.ts`。既適用migration本文を変更しない。
+- `event_staff.permission_preset = 'owner'`をイベント代表者の正本とする。
+- 権限はUIだけでなくServer ActionまたはRoute Handlerで検証する。
+- 公開APIは明示DTOだけを返す。
+- 旧列fallback、二重書込み、runtime DDLをActive codeへ戻さない。
+- Pages、D1、R2、KV、Cron Worker 3本の構成を維持する。
 
 ## 主な機能
 
-- **公開エリア**: トップ、作品一覧、作品詳細、イベント、クリエイタープロフィール、規約・お知らせ
-- **ユーザーエリア**: `/entry`のイベント参加・2系統投稿、スロット提出、作品編集、X ID連携、ライブラリ
-- **イベント運営** `/manage`: 審査、枠、参加者、スタッフ、通知。`permission_preset`を権限正本とする
-- **サイト管理** `/admin`: 作品、ユーザー、イベント、規約、監査・復元、通知、legacy import、DB spreadsheet
-- **背景処理**: 静的JSON、YouTube同期、score、通知、cleanupを3本のbounded Cron Workerで処理
+- 公開: トップ、作品、イベント、クリエイター、規約・告知
+- ユーザー: イベント参加、2系統投稿、枠提出、作品編集、X ID、ライブラリ
+- 運営 `/manage`: 審査、枠、参加者、スタッフ、通知
+- 管理 `/admin`: 作品、ユーザー、イベント、監査・復元、import、DB運用
+- 背景処理: 静的JSON、YouTube同期、score、通知、cleanup
 
-## デザイン原則
+## 検査
 
-- 作品優先・高密度。作品カードの情報量を増やさない。
-- ライムを正式アクセントとし、イベント別accentがある画面ではcontrastを確保して併用する。
-- Light / Dark / Systemで同じ配置と操作を維持する。
-- UIへ絵文字を使わず、既存のSVGアイコンを使用する。
+変更種別ごとの検査は[`docs/AI_CONTEXT.md`](docs/AI_CONTEXT.md)を使う。全検査一覧は[`AGENTS.md`](AGENTS.md)に集約する。
