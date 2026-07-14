@@ -41,19 +41,8 @@ export function eventExportPayloadCacheKey(
   ].join(":");
 }
 
-function isKvNamespace(value: unknown): value is KVNamespace {
-  return (
-    !!value &&
-    typeof value === "object" &&
-    typeof (value as { get?: unknown }).get === "function" &&
-    typeof (value as { put?: unknown }).put === "function" &&
-    typeof (value as { delete?: unknown }).delete === "function"
-  );
-}
-
 export function getEventExportKv(): KVNamespace | null {
-  const kv = getEnv().KV;
-  return isKvNamespace(kv) ? kv : null;
+  return getEnv().KV ?? null;
 }
 
 export async function invalidateEventExportCache(
@@ -71,12 +60,17 @@ export async function invalidateEventExportCache(
     ),
   ];
 
-  const results = await Promise.allSettled(keys.map((key) => kv.delete(key)));
-  const rejected = results.filter((result) => result.status === "rejected");
-  if (rejected.length > 0) {
+  let failed = 0;
+  for (let offset = 0; offset < keys.length; offset += 6) {
+    const results = await Promise.allSettled(
+      keys.slice(offset, offset + 6).map((key) => kv.delete(key)),
+    );
+    failed += results.filter((result) => result.status === "rejected").length;
+  }
+  if (failed > 0) {
     console.warn("[event-export-api] cache invalidation partially failed", {
       eventId,
-      failed: rejected.length,
+      failed,
     });
   }
 }
