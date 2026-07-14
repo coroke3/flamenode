@@ -1,0 +1,23 @@
+name: Repository Audit Snapshot F8
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/repo-audit-snapshot-f8.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - run: tar --exclude='.git' --exclude='node_modules' --exclude='.next' --exclude='.vercel' --exclude='.tmp' -czf /tmp/flamenode-f8-source.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flamenode-f8-source-${{ github.sha }}
+          path: /tmp/flamenode-f8-source.tar.gz
+          retention-days: 1
