@@ -60,17 +60,12 @@ export const PRESET_DEFINITIONS: Record<EventStaffPreset, PresetDefinition> = {
   reviewer: {
     label: "レビュー担当",
     description: "投稿内容の確認と公開状態の審査向けです。イベント設定やスタッフ管理はできません。",
-    permissions: [
-      "event.review",
-      "video.status",
-    ],
+    permissions: ["event.review", "video.status"],
   },
   slot_manager: {
     label: "枠管理担当",
     description: "枠作成・変更を担当します。作品本文やスタッフ管理はできません。",
-    permissions: [
-      "event.slots",
-    ],
+    permissions: ["event.slots"],
   },
   content_editor: {
     label: "作品修正担当",
@@ -100,21 +95,11 @@ export const PRESET_DEFINITIONS: Record<EventStaffPreset, PresetDefinition> = {
   },
 };
 
-const NON_ADMIN_EVENT_STAFF_PRESETS = EVENT_STAFF_PRESETS.filter(
-  (preset) => preset !== "xid_reviewer",
-);
-
 export function isEventStaffPreset(value: unknown): value is EventStaffPreset {
   return (
     typeof value === "string" &&
     Object.prototype.hasOwnProperty.call(PRESET_DEFINITIONS, value)
   );
-}
-
-export function getVisibleEventStaffPresets(
-  isSiteAdmin: boolean,
-): readonly EventStaffPreset[] {
-  return isSiteAdmin ? EVENT_STAFF_PRESETS : NON_ADMIN_EVENT_STAFF_PRESETS;
 }
 
 export function getPresetPermissions(preset: EventStaffPreset): PermissionKey[] {
