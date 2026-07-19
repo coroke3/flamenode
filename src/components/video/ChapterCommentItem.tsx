@@ -41,14 +41,13 @@ export function ChapterCommentItem({
   onDeleteRequest,
   className,
 }: ChapterCommentItemProps): React.ReactElement {
-  const outOfRange = duration ? chapter.chapter_time > duration : false;
+  const outOfRange = duration != null && chapter.chapter_time > duration;
   const canSeek = Boolean(onSeek && !outOfRange);
+  const formattedTime = formatDuration(chapter.chapter_time);
 
   const content = (
     <>
-      <span className={styles.timeBadge}>
-        {formatDuration(chapter.chapter_time)}
-      </span>
+      <span className={styles.timeBadge}>{formattedTime}</span>
       <span className={styles.body}>
         <span className={styles.titleRow}>
           <Icon
@@ -57,7 +56,9 @@ export function ChapterCommentItem({
             className={styles.icon}
             aria-hidden
           />
-          <span className={styles.title}>{chapter.chapter_label}</span>
+          <span className={styles.title} title={chapter.chapter_label}>
+            {chapter.chapter_label}
+          </span>
           {chapter.visibility === "private" ? (
             <span className="fn-badge fn-badge-neutral">非公開</span>
           ) : null}
@@ -104,7 +105,7 @@ export function ChapterCommentItem({
           type="button"
           className={styles.seekTarget}
           onClick={() => onSeek?.(chapter.chapter_time)}
-          aria-label={`${formatDuration(chapter.chapter_time)}へ移動: ${chapter.chapter_label}`}
+          aria-label={`${formattedTime}へ移動: ${chapter.chapter_label}`}
         >
           {content}
         </button>
