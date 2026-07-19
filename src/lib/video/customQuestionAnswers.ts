@@ -1,4 +1,4 @@
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, asc, eq, inArray, or } from "drizzle-orm";
 import type { getDatabase } from "@/lib/cloudflare";
 import {
   eventCustomQuestions,
@@ -17,11 +17,23 @@ import {
 } from "@/lib/video/atomicWritePlan";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS } from "@/lib/video/atomicLimits";
-import { MAX_VIDEO_CUSTOM_QUESTIONS } from "@/lib/video/customQuestionLimits";
+import {
+  MAX_EVENT_CUSTOM_QUESTIONS,
+  MAX_VIDEO_CUSTOM_QUESTIONS,
+} from "@/lib/video/customQuestionLimits";
 
 export const MAX_VIDEO_CUSTOM_QUESTIONS_READ = MAX_VIDEO_CUSTOM_QUESTIONS;
+const CUSTOM_QUESTION_EVENT_ID_BATCH_SIZE = 40;
 
 type DB = NonNullable<ReturnType<typeof getDatabase>>;
+
+function chunkValues<T>(values: readonly T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
 
 export async function buildReplaceGeneralCustomAnswersPlan(
   db: DB,
@@ -165,6 +177,10 @@ export async function buildReplaceGeneralCustomAnswersPlan(
   return plan;
 }
 
+/**
+ * 候補表示用に、指定イベントそれぞれの有効質問を取得する。
+ * 投稿時の合計8件制限とは分離し、イベント単位で最大8件を検証する。
+ */
 export async function fetchActiveCustomQuestionsForEvents(
   db: DB,
   eventIds: readonly string[],
@@ -173,26 +189,37 @@ export async function fetchActiveCustomQuestionsForEvents(
   const out = new Map<string, CustomQuestion[]>();
   if (ids.length === 0) return out;
 
-  const rows = await db
-    .select()
-    .from(eventCustomQuestions)
-    .where(
-      and(
-        inArray(eventCustomQuestions.event_id, ids),
-        eq(eventCustomQuestions.is_active, 1),
-      )!,
-    )
-    .orderBy(eventCustomQuestions.sort_order)
-    .limit(MAX_VIDEO_CUSTOM_QUESTIONS_READ + 1);
-  if (rows.length > MAX_VIDEO_CUSTOM_QUESTIONS_READ) {
-    throw new Error("video_custom_question_read_limit_exceeded");
+  for (const idChunk of chunkValues(ids, CUSTOM_QUESTION_EVENT_ID_BATCH_SIZE)) {
+    const maxRows = idChunk.length * MAX_EVENT_CUSTOM_QUESTIONS;
+    const rows = await db
+      .select()
+      .from(eventCustomQuestions)
+      .where(
+        and(
+          inArray(eventCustomQuestions.event_id, idChunk),
+          eq(eventCustomQuestions.is_active, 1),
+        )!,
+      )
+      .orderBy(
+        asc(eventCustomQuestions.event_id),
+        asc(eventCustomQuestions.sort_order),
+        asc(eventCustomQuestions.question_key),
+      )
+      .limit(maxRows + 1);
+    if (rows.length > maxRows) {
+      throw new Error("event_custom_question_limit_exceeded");
+    }
+
+    for (const row of rows) {
+      const list = out.get(row.event_id) ?? [];
+      if (list.length >= MAX_EVENT_CUSTOM_QUESTIONS) {
+        throw new Error("event_custom_question_limit_exceeded");
+      }
+      list.push(rowToQuestion(row));
+      out.set(row.event_id, list);
+    }
   }
 
-  for (const row of rows) {
-    const list = out.get(row.event_id) ?? [];
-    list.push(rowToQuestion(row));
-    out.set(row.event_id, list);
-  }
   return out;
 }
 
@@ -206,6 +233,9 @@ export async function readCustomAnswerValuesForVideo(
   const questionsByEvent = await fetchActiveCustomQuestionsForEvents(db, args.eventIds);
   const questions = [...questionsByEvent.values()].flat();
   if (questions.length === 0) return null;
+  if (questions.length > MAX_VIDEO_CUSTOM_QUESTIONS) {
+    throw new Error("video_custom_question_read_limit_exceeded");
+  }
 
   const answers = await db
     .select({
