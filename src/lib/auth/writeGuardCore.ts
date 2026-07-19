@@ -7,7 +7,6 @@ export const WRITE_FEATURE_KEYS = [
   "admin_terms_update", "admin_terms_publish", "admin_terms_archive",
   "admin_terms_broadcast", "admin_moderation_create",
   "admin_moderation_update",
-  "admin_announcement_broadcast",
   "admin_video_status", "admin_api_endpoints", "admin_event_templates",
   "admin_permissions", "admin_youtube_sync", "admin_notifications",
   "admin_static_rebuild", "admin_video_collab_permissions",
