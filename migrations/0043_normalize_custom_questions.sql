@@ -74,10 +74,16 @@ SELECT
   COALESCE(e.created_at, unixepoch()),
   unixepoch()
 FROM events AS e
-JOIN json_each(e.video_form_settings_json, '$.stage_permissions') AS question
+JOIN json_each(
+  CASE
+    WHEN json_valid(e.video_form_settings_json) = 1
+      THEN e.video_form_settings_json
+    ELSE '{}'
+  END,
+  '$.stage_permissions'
+) AS question
 WHERE e.video_form_settings_json IS NOT NULL
   AND json_valid(e.video_form_settings_json) = 1
-  AND json_type(e.video_form_settings_json, '$.stage_permissions') = 'array'
   AND json_extract(question.value, '$.enabled') = 1
   AND CAST(question.key AS INTEGER) < 8;
 
