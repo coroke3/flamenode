@@ -1,4 +1,4 @@
-import { and, eq, inArray, not, or } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import type { getDatabase } from "@/lib/cloudflare";
 import {
   eventCustomQuestions,
@@ -7,9 +7,9 @@ import {
 import {
   type CustomAnswerDraft,
   type CustomQuestion,
+  parseOptionsJson,
   rowToQuestion,
 } from "./customQuestions";
-import { stagePermissionQuestionKeyCondition } from "./stagePermissionAnswers";
 import {
   compositeAuditTargetId,
   emptyVideoAtomicWritePlan,
@@ -17,7 +17,9 @@ import {
 } from "@/lib/video/atomicWritePlan";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS } from "@/lib/video/atomicLimits";
-export const MAX_VIDEO_CUSTOM_QUESTIONS_READ = 18;
+import { MAX_VIDEO_CUSTOM_QUESTIONS } from "@/lib/video/customQuestionLimits";
+
+export const MAX_VIDEO_CUSTOM_QUESTIONS_READ = MAX_VIDEO_CUSTOM_QUESTIONS;
 
 type DB = NonNullable<ReturnType<typeof getDatabase>>;
 
@@ -26,55 +28,84 @@ export async function buildReplaceGeneralCustomAnswersPlan(
   args: {
     videoId: string;
     eventIds: readonly string[];
+    deleteEventIds?: readonly string[];
     drafts: CustomAnswerDraft[];
     now: number;
     actorUserId: string;
   },
 ): Promise<VideoAtomicWritePlan> {
   const eventIds = Array.from(new Set(args.eventIds.filter(Boolean)));
-  if (eventIds.length === 0) return emptyVideoAtomicWritePlan();
+  const deleteEventIds = Array.from(new Set(
+    (args.deleteEventIds ?? []).filter((eventId) => eventId && !eventIds.includes(eventId)),
+  ));
+  if (eventIds.length === 0 && deleteEventIds.length === 0) {
+    return emptyVideoAtomicWritePlan();
+  }
   if (args.drafts.length > MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS) {
     throw new Error("video_custom_answer_atomic_limit_exceeded");
   }
 
-  const questions = await db
-    .select({
-      id: eventCustomQuestions.id,
-      event_id: eventCustomQuestions.event_id,
-      question_key: eventCustomQuestions.question_key,
-    })
-    .from(eventCustomQuestions)
-    .where(
-      and(
-        inArray(eventCustomQuestions.event_id, eventIds),
-        eq(eventCustomQuestions.is_active, 1),
-        not(stagePermissionQuestionKeyCondition()),
-      )!,
-    )
-    .limit(MAX_VIDEO_CUSTOM_QUESTIONS_READ + 1);
+  const questions = eventIds.length > 0
+    ? await db
+        .select({
+          id: eventCustomQuestions.id,
+          event_id: eventCustomQuestions.event_id,
+          question_key: eventCustomQuestions.question_key,
+        })
+        .from(eventCustomQuestions)
+        .where(
+          and(
+            inArray(eventCustomQuestions.event_id, eventIds),
+            eq(eventCustomQuestions.is_active, 1),
+          )!,
+        )
+        .limit(MAX_VIDEO_CUSTOM_QUESTIONS_READ + 1)
+    : [];
   if (questions.length > MAX_VIDEO_CUSTOM_QUESTIONS_READ) {
     throw new Error("video_custom_question_read_limit_exceeded");
   }
 
-  if (questions.length === 0) return emptyVideoAtomicWritePlan();
+  const questionIds = questions.map((question) => question.id);
+  const existingActive = questionIds.length > 0
+    ? await db
+        .select()
+        .from(videoCustomAnswers)
+        .where(and(
+          eq(videoCustomAnswers.video_id, args.videoId),
+          inArray(videoCustomAnswers.question_id, questionIds),
+        )!)
+        .limit(MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS + 1)
+    : [];
+  if (existingActive.length > MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS) {
+    throw new Error("video_custom_answer_existing_atomic_limit_exceeded");
+  }
 
-  const questionIds = questions.map((q) => q.id);
+  const removedEventAnswers = deleteEventIds.length > 0
+    ? await db
+        .select()
+        .from(videoCustomAnswers)
+        .where(and(
+          eq(videoCustomAnswers.video_id, args.videoId),
+          inArray(videoCustomAnswers.event_id, deleteEventIds),
+        )!)
+        .limit(MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS + 1)
+    : [];
+  if (removedEventAnswers.length > MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS) {
+    throw new Error("video_custom_answer_removed_event_limit_exceeded");
+  }
+
+  const existingByTarget = new Map<string, typeof videoCustomAnswers.$inferSelect>();
+  for (const row of [...existingActive, ...removedEventAnswers]) {
+    existingByTarget.set(
+      compositeAuditTargetId(row.video_id, row.event_id, row.question_id),
+      row,
+    );
+  }
+  const existing = [...existingByTarget.values()];
   const draftByQuestionId = new Map(
     args.drafts.map((draft) => [draft.question_id, draft]),
   );
 
-  const existing = await db
-    .select()
-    .from(videoCustomAnswers)
-    .where(and(
-      eq(videoCustomAnswers.video_id, args.videoId),
-      inArray(videoCustomAnswers.event_id, eventIds),
-      inArray(videoCustomAnswers.question_id, questionIds),
-    )!)
-    .limit(MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS + 1);
-  if (existing.length > MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS) {
-    throw new Error("video_custom_answer_existing_atomic_limit_exceeded");
-  }
   const next: (typeof videoCustomAnswers.$inferSelect)[] = [];
   for (const question of questions) {
     const draft = draftByQuestionId.get(question.id);
@@ -93,6 +124,7 @@ export async function buildReplaceGeneralCustomAnswersPlan(
       updated_at: args.now,
     });
   }
+
   const plan = emptyVideoAtomicWritePlan();
   if (existing.length > 0) {
     plan.statements.push(db.delete(videoCustomAnswers).where(or(...existing.map((row) => and(
@@ -147,7 +179,6 @@ export async function fetchActiveCustomQuestionsForEvents(
       and(
         inArray(eventCustomQuestions.event_id, ids),
         eq(eventCustomQuestions.is_active, 1),
-        not(stagePermissionQuestionKeyCondition()),
       )!,
     )
     .orderBy(eventCustomQuestions.sort_order)
@@ -162,4 +193,44 @@ export async function fetchActiveCustomQuestionsForEvents(
     out.set(row.event_id, list);
   }
   return out;
+}
+
+export async function readCustomAnswerValuesForVideo(
+  db: DB,
+  args: {
+    videoId: string;
+    eventIds: readonly string[];
+  },
+): Promise<string | null> {
+  const questionsByEvent = await fetchActiveCustomQuestionsForEvents(db, args.eventIds);
+  const questions = [...questionsByEvent.values()].flat();
+  if (questions.length === 0) return null;
+
+  const answers = await db
+    .select({
+      question_id: videoCustomAnswers.question_id,
+      answer_text: videoCustomAnswers.answer_text,
+      answer_json: videoCustomAnswers.answer_json,
+    })
+    .from(videoCustomAnswers)
+    .where(and(
+      eq(videoCustomAnswers.video_id, args.videoId),
+      inArray(videoCustomAnswers.question_id, questions.map((question) => question.id)),
+    )!)
+    .limit(MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS + 1);
+  if (answers.length > MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS) {
+    throw new Error("video_custom_answer_read_limit_exceeded");
+  }
+
+  const values: Record<string, string | string[]> = {};
+  for (const answer of answers) {
+    const text = answer.answer_text?.trim();
+    if (text) {
+      values[answer.question_id] = text;
+      continue;
+    }
+    const selected = parseOptionsJson(answer.answer_json);
+    if (selected.length > 0) values[answer.question_id] = selected;
+  }
+  return Object.keys(values).length > 0 ? JSON.stringify(values) : null;
 }
