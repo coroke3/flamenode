@@ -9,7 +9,7 @@ import {
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
-import { loadStagePermissionFormSettingsJsonByEvents } from "@/lib/video/stagePermissionQuestions";
+import { fetchActiveCustomQuestionsForEvents } from "@/lib/video/customQuestionAnswers";
 import { Icon } from "@/components/ui/Icon";
 import { VideoForm } from "@/components/forms/VideoForm";
 import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
@@ -27,26 +27,23 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
   const user = guard.user;
   const db = getDatabase();
   const activeX = user.active_x_user_id;
-  const xRow =
-    db && activeX
-      ? (
-          await db
-            .select()
-            .from(xUsersTable)
-            .where(eq(xUsersTable.id, activeX))
-            .limit(1)
-        )[0]
-      : null;
+  const xRow = db && activeX
+    ? (
+        await db
+          .select()
+          .from(xUsersTable)
+          .where(eq(xUsersTable.id, activeX))
+          .limit(1)
+      )[0]
+    : null;
   const xIdOptions = db
     ? await db
         .select({ id: xUsersTable.id, x_name: xUsersTable.x_name })
         .from(xUsersTable)
-        .where(
-          and(
-            eq(xUsersTable.linked_user_id, user.id),
-            eq(xUsersTable.approval_status, "approved"),
-          )!,
-        )
+        .where(and(
+          eq(xUsersTable.linked_user_id, user.id),
+          eq(xUsersTable.approval_status, "approved"),
+        )!)
         .orderBy(asc(xUsersTable.x_name))
     : [];
   const memberSuggestions = db
@@ -57,42 +54,38 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
         .limit(2000)
     : [];
   const softwareSuggestions = db ? await getUsedSoftwareSuggestions(db) : [];
-  // 所属イベント候補: 受付中かつ「枠なし投稿の紐づけ = 許可」のイベントのみ。
+
   const eventOptions = db
     ? await db
         .select()
         .from(eventsTable)
         .where(eq(eventsTable.visibility_status, "public"))
-        .then((rows) =>
-          rows
-            .filter(
-              (ev) =>
-                isAcceptingEntries(ev) && ev.allow_unslotted_posts === 1,
-            )
-            .map((ev) => ({
-              id: ev.id,
-              title: ev.title,
-              parts_json: ev.parts_json,
-            })),
-        )
+        .then((rows) => rows
+          .filter((event) =>
+            isAcceptingEntries(event) && event.allow_unslotted_posts === 1,
+          )
+          .map((event) => ({
+            id: event.id,
+            title: event.title,
+            parts_json: event.parts_json,
+          })))
     : [];
-  const formSettingsByEvent = db
-    ? await loadStagePermissionFormSettingsJsonByEvents(
+  const questionsByEvent = db
+    ? await fetchActiveCustomQuestionsForEvents(
         db,
         eventOptions.map((option) => option.id),
       )
-    : new Map<string, string | null>();
+    : new Map();
   const enrichedEventOptions = eventOptions.map((option) => ({
     ...option,
-    video_form_settings_json: formSettingsByEvent.get(option.id) ?? null,
+    custom_questions: questionsByEvent.get(option.id) ?? [],
   }));
-  const iconCandidates =
-    db && activeX ? await getXIconCandidates(db, activeX) : [];
-  const channelCandidates =
-    db && activeX ? await getYoutubeChannelCandidates(db, activeX) : [];
 
-  // 投稿は writeGuard で active_x_user_id が approved であることを要求するため、
-  // フォーム送信前に同じ条件を判定して「押せるけど失敗する」状態を防ぐ。
+  const iconCandidates = db && activeX ? await getXIconCandidates(db, activeX) : [];
+  const channelCandidates = db && activeX
+    ? await getYoutubeChannelCandidates(db, activeX)
+    : [];
+
   const activeXApprovalStatus = xRow?.approval_status ?? null;
   const submitBlockedReason: string | undefined = !activeX
     ? "投稿にはActive X IDの選択が必要です。設定画面から連携・選択してください。"
@@ -116,25 +109,21 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
           </p>
         </div>
         <div className="fn-page-head-actions">
-          <Link href="/entry" className="fn-btn fn-btn-ghost">
-            投稿方法を選択
-          </Link>
+          <Link href="/entry" className="fn-btn fn-btn-ghost">投稿方法を選択</Link>
         </div>
       </header>
 
       <StatusPanel
         title={canPost ? "投稿前チェック" : "まだ投稿できません"}
         tone={canPost ? "success" : "warning"}
-        action={
-          !canPost ? (
-            <Link
-              href={`/dashboard/settings?next=${encodeURIComponent("/entry/unslotted")}`}
-              className="fn-btn fn-btn-primary"
-            >
-              X ID設定を確認
-            </Link>
-          ) : null
-        }
+        action={!canPost ? (
+          <Link
+            href={`/dashboard/settings?next=${encodeURIComponent("/entry/unslotted")}`}
+            className="fn-btn fn-btn-primary"
+          >
+            X ID設定を確認
+          </Link>
+        ) : null}
       >
         {canPost
           ? `投稿者X ID: @${activeX} / 表示名: ${xRow?.x_name ?? user.name ?? "未設定"}`
@@ -159,16 +148,14 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
         channelCandidates={channelCandidates}
         eventOptions={enrichedEventOptions}
       />
-      <p
-        style={{
-          marginTop: 20,
-          color: "var(--text-muted)",
-          fontSize: 12,
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 6,
-        }}
-      >
+      <p style={{
+        marginTop: 20,
+        color: "var(--text-muted)",
+        fontSize: 12,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+      }}>
         <Icon name="info" size={12} aria-hidden />
         利用規約への再同意は提出時に確認します。
       </p>
