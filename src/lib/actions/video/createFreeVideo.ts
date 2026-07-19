@@ -5,9 +5,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { videos } from "@/lib/db/schema";
 import { buildReplaceVideoSoftwarePlan } from "@/lib/db/software";
-import {
-  snapshotYoutubeChannelUrl,
-} from "@/lib/db/youtubeChannelCandidates";
+import { snapshotYoutubeChannelUrl } from "@/lib/db/youtubeChannelCandidates";
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { buildFreeVideoSubmittedNotification } from "@/lib/notifications/templates/video";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
@@ -23,11 +21,6 @@ import { buildReplaceGeneralCustomAnswersPlan } from "@/lib/video/customQuestion
 import { buildSubmissionXUserPlan } from "@/lib/video/ensureSubmissionXUser";
 import { parseEventIdsFromForm } from "@/lib/video/parseEventIds";
 import { buildReplaceVideoMembersPlan } from "@/lib/video/replaceVideoMembers";
-import {
-  buildStagePermissionSubmission,
-  getStagePermissionFieldsForEvents,
-} from "@/lib/video/stagePermissionSubmission";
-import { buildReplaceStagePermissionAnswersPlan } from "@/lib/video/stagePermissionAnswers";
 import {
   validateCustomAnswersForEvents,
   validateVideoMemberSubmission,
@@ -67,9 +60,6 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
   if (requestedEventIds.length > MAX_ATOMIC_VIDEO_EVENTS) {
     return { ok: false, message: "選択イベント数が保存上限を超えています。" };
   }
-  const stageFields = await getStagePermissionFieldsForEvents(db, requestedEventIds);
-  const stagePermissionResult = buildStagePermissionSubmission(formData, stageFields);
-  if (!stagePermissionResult.ok) return stagePermissionResult;
   if (await checkYoutubeVideoDuplicate(db, youtubeId)) {
     return { ok: false, message: "このYouTube動画は既に登録されています。" };
   }
@@ -78,6 +68,7 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
     parsed.data.is_collab ?? false,
   );
   if (!memberValidation.ok) return memberValidation;
+
   let syncedEventIds: string[];
   try {
     syncedEventIds = await resolveEventSyncTargetForNewVideo(db, {
@@ -95,6 +86,7 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
   ) {
     return { ok: false, message: "選択したイベントの一部には投稿できません。" };
   }
+
   const customValidation = await validateCustomAnswersForEvents(
     db,
     formData,
@@ -163,7 +155,10 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
       strict: true,
     });
     appendVideoAtomicWritePlan(plan, await buildVideoDerivedRowsPlan(db, {
-      videoId, youtubeVideoId: youtubeId, now, actorUserId: userId,
+      videoId,
+      youtubeVideoId: youtubeId,
+      now,
+      actorUserId: userId,
     }));
     appendVideoAtomicWritePlan(plan, await buildReplaceVideoMembersPlan(db, {
       videoId,
@@ -172,16 +167,12 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
       actorUserId: userId,
     }));
     appendVideoAtomicWritePlan(plan, await buildReplaceVideoSoftwarePlan(db, {
-      videoId, raw: parsed.data.used_software ?? null, actorUserId: userId,
+      videoId,
+      raw: parsed.data.used_software ?? null,
+      actorUserId: userId,
     }));
     appendVideoAtomicWritePlan(plan, await buildSyncVideoEventsPlan(db, videoId, {
-      targetEventIds: syncedEventIds, actorUserId: userId,
-    }));
-    appendVideoAtomicWritePlan(plan, await buildReplaceStagePermissionAnswersPlan(db, {
-      videoId,
-      eventIds: syncedEventIds,
-      stagePermission: stagePermissionResult.value,
-      now,
+      targetEventIds: syncedEventIds,
       actorUserId: userId,
     }));
     appendVideoAtomicWritePlan(plan, await buildReplaceGeneralCustomAnswersPlan(db, {
