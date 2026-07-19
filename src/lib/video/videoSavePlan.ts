@@ -16,7 +16,7 @@ import { buildReplaceGeneralCustomAnswersPlan } from "@/lib/video/customQuestion
 import type { VideoFormData } from "@/lib/video/videoFormSchema";
 import type { AllowedVideoEditSections } from "@/lib/video/computeEditSections";
 import type { ValidatedMemberSubmission } from "@/lib/video/submissionValidation";
-import { computeStagePermissionAnswerDeleteEventIds } from "@/lib/video/eventSync";
+import { computeCustomAnswerDeleteScopeEventIds } from "@/lib/video/eventSync";
 import {
   computeStaticRebuildFlags,
   computeVideoRevalidatePaths,
@@ -239,7 +239,7 @@ export function computeCustomAnswerDeleteEventIds(args: {
   previousEventIds: string[];
   syncedEventIds: string[];
 }): string[] {
-  return computeStagePermissionAnswerDeleteEventIds({
+  return computeCustomAnswerDeleteScopeEventIds({
     previousEventIds: args.previousEventIds,
     targetEventIds: args.syncedEventIds,
   });
