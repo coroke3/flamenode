@@ -10,8 +10,10 @@ const action = read("./chapter.ts");
 const composer = read("../../components/video/ChapterComposer.tsx");
 const item = read("../../components/video/ChapterCommentItem.tsx");
 const tabs = read("../../components/video/ChapterTabs.tsx");
+const tabsCss = read("../../components/video/ChapterTabs.module.css");
+const composerCss = read("../../components/video/ChapterComposer.module.css");
 
-test("通常チャプターの作成と削除は監査・静的再生成を同一mutationで保存する", () => {
+ test("通常チャプターの作成と削除は監査・静的再生成を同一mutationで保存する", () => {
   assert.equal((action.match(/await mutateWithAudit\(db,/g) ?? []).length, 2);
   assert.equal(
     (action.match(/await buildStaticRebuildQueueBatch\(/g) ?? []).length,
@@ -53,14 +55,33 @@ test("削除操作は権限取得後だけ表示し専用確認ダイアログ�
   assert.doesNotMatch(tabs, /window\.confirm/);
 });
 
+test("削除ダイアログはフォーカスを閉じ込め、削除中も状態を保つ", () => {
+  assert.match(tabs, /FOCUSABLE_SELECTOR/);
+  assert.match(tabs, /event\.key !== "Tab"/);
+  assert.match(tabs, /deletingRef\.current/);
+  assert.match(tabs, /aria-busy=\{deleting\}/);
+  assert.match(tabsCss, /prefers-reduced-motion/);
+});
+
 test("シーク領域と削除ボタンを別のbuttonとして描画する", () => {
   assert.match(item, /className=\{styles\.seekTarget\}/);
   assert.match(item, /className=\{styles\.deleteButton\}/);
   assert.match(item, /name="trash"/);
+  assert.match(item, /duration != null && chapter\.chapter_time > duration/);
 });
 
 test("公開範囲は説明付きのradio選択になっている", () => {
   assert.match(composer, /name="chapter_visibility"/);
   assert.match(composer, /type="radio"/);
   assert.match(composer, /自分と作品管理者だけに表示します/);
+});
+
+test("投稿フォームは開いた時だけ文脈を取得し、失敗時に再取得できる", () => {
+  assert.match(composer, /!open \|\|/);
+  assert.match(composer, /const loadContext = React\.useCallback/);
+  assert.match(composer, /onClick=\{loadContext\}/);
+  assert.match(composer, /チャプターコメントを投稿しました/);
+  assert.match(composer, /\^\\d\+\(\?:\\\.\\d\{1,3\}\)\?\$/);
+  assert.match(composerCss, /submitSuccess/);
+  assert.match(composerCss, /prefers-reduced-motion/);
 });
