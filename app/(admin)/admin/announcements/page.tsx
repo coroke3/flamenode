@@ -8,7 +8,6 @@ import { getDatabase } from "@/lib/cloudflare";
 import { announcements } from "@/lib/db/schema";
 import { formatUnix } from "@/lib/utils/format";
 import { Icon } from "@/components/ui/Icon";
-import { AnnouncementBroadcastButton } from "@/components/admin/AnnouncementBroadcastButton";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 
@@ -55,7 +54,7 @@ export default async function AdminAnnouncementsPage({
     <div>
       <AdminPageHeader
         title="お知らせ管理"
-        description="ユーザー向けお知らせの作成・配信・状態管理を行います。"
+        description="サイト内に掲載するユーザー向けお知らせの作成・公開・状態管理を行います。"
         actions={[
           {
             href: "/admin/announcements/new",
@@ -105,13 +104,8 @@ export default async function AdminAnnouncementsPage({
         </strong>
         <ul style={{ margin: "6px 0 0", paddingLeft: 18, lineHeight: 1.7 }}>
           <li>公開側は <code>is_published=1</code> かつ掲載期間内の <code>target_audience=all</code> を最大3件だけ取得します。</li>
-          <li>Discord 配信は段階 enqueue のみで、1操作あたり最大50件です。</li>
-          <li>対象者数の全件 COUNT は無料枠保護のため管理トップでは実行しません。</li>
+          <li>Discordへの告知はこの画面から行わず、運営Discordで個別に配信します。</li>
         </ul>
-        <p style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
-          公開後の Discord 配信は各行の broadcast ボタンから段階実行します。
-          Worker の送信結果は通知管理で確認できます。
-        </p>
       </section>
 
       <FnTable style={{ marginTop: 18 }}>
@@ -154,15 +148,6 @@ export default async function AdminAnnouncementsPage({
                   >
                     編集
                   </Link>
-                  {a.is_published === 1 ? (
-                    <AnnouncementBroadcastButton
-                      announcementId={a.id}
-                      defaultContent={`${a.title}\n\n${a.body.slice(0, 800)}`}
-                      defaultAudience={
-                        (a.target_audience as "all" | "creators" | "admins") ?? "creators"
-                      }
-                    />
-                  ) : null}
                   <Link
                     href={`/admin/audit?table=announcements&record=${encodeURIComponent(a.id)}`}
                     className="fn-btn fn-btn-ghost fn-btn-sm"
