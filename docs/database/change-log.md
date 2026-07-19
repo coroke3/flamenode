@@ -1,9 +1,24 @@
 # DB Change Log
 
 > Status: Active
-> Last verified: 2026-07-13
-> Verified against commit: `f45f75c`
+> Last verified: 2026-07-19
+> Verified against commit: `agent/unify-custom-questions`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
+
+## 2026-07-19 — `0043_normalize_custom_questions.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | data normalization |
+| Summary | 旧`events.video_form_settings_json`の有効な追加質問を`event_custom_questions`へ移行し、旧JSONを空にする |
+| Reason | 質問定義を正規化テーブルへ一本化し、投稿UI・保存処理・審査・テンプレートの二重実装を廃止するため |
+| Tables | `events`、`event_custom_questions` |
+| Data migration | 有効な旧`stage_permissions`を最大8件、既存の同一`event_id + question_key`を優先して移行 |
+| Compatibility | 新コードは`video_form_settings_json`を参照しない。旧テンプレートJSONのみ読み込み時に変換する |
+| Data loss | 不正JSON、無効化済み質問、9件目以降の旧質問は移行対象外 |
+| Rollback | migration前backupから`events.video_form_settings_json`を復元 |
+| Validation | 空DB migration、旧JSON変換、質問上限、checkbox回答、テンプレート往復、typecheck/build |
+| PR | #87 `agent/unify-custom-questions` |
 
 ## 2026-07-13 — `0041_youtube_quota_budget.sql`
 
