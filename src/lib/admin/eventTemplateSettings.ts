@@ -2,11 +2,18 @@ import type { events } from "@/lib/db/schema";
 import type { EventFormInitial } from "@/components/admin/EventForm";
 import {
   normalizeQuestionKey,
+  parseOptionsJson,
   parseQuestionType,
   parseVisibility,
   type CustomQuestionType,
   type CustomQuestionVisibility,
+  type EditableCustomQuestion,
 } from "../video/customQuestions.ts";
+import {
+  getStagePermissionQuestions,
+  parseVideoFormSettings,
+} from "../video/formSettings.ts";
+import { MAX_EVENT_CUSTOM_QUESTIONS } from "../video/customQuestionLimits.ts";
 
 export type EventRow = typeof events.$inferSelect;
 export type EventTemplateQuestionRow = {
@@ -38,9 +45,11 @@ export interface EventTemplateQuestionDefinition {
 }
 
 /**
- * テンプレートに保存する設定（開催日時・枠・作品・スタッフ承認は含めない）
+ * テンプレートに保存する設定（開催日時・枠・作品・スタッフ承認は含めない）。
+ * 質問は custom_question_definitions のみを正本とし、旧フォームJSONへ二重保存しない。
  */
 export interface EventTemplateSnapshot {
+  schema_version: 2;
   event_type: "event" | "collabo" | "type" | "other";
   explanation: string | null;
   icon_url: string | null;
@@ -50,7 +59,6 @@ export interface EventTemplateSnapshot {
   allow_unslotted_posts: number;
   allow_user_video_edits: number;
   user_video_edit_permission_keys_json: string | null;
-  video_form_settings_json: string | null;
   max_slots_per_video: number;
   max_consecutive_slots_per_entry: number;
   slot_part_gap_minutes: number;
@@ -90,9 +98,16 @@ function normalizeTemplateQuestionDefinition(
   const questionKey = normalizeQuestionKey(item.question_key);
   const label = typeof item.label === "string" ? item.label.trim().slice(0, 120) : "";
   if (!questionKey || !label) return null;
-  const optionsJson = typeof item.options_json === "string" && item.options_json.trim()
-    ? item.options_json
-    : null;
+  const type = parseQuestionType(item.type);
+  const parsedOptions = typeof item.options_json === "string"
+    ? parseOptionsJson(item.options_json)
+    : Array.isArray(item.options)
+      ? item.options.filter((value): value is string => typeof value === "string")
+      : [];
+  const optionsJson = parsedOptions.length > 0 ? JSON.stringify(parsedOptions) : null;
+  if ((type === "select" || type === "radio" || type === "checkbox") && !optionsJson) {
+    return null;
+  }
   const maxLength = typeof item.max_length === "number" && Number.isFinite(item.max_length)
     ? Math.max(1, Math.min(5000, Math.floor(item.max_length)))
     : null;
@@ -106,11 +121,11 @@ function normalizeTemplateQuestionDefinition(
     description: typeof item.description === "string"
       ? item.description.trim().slice(0, 1000) || null
       : null,
-    type: parseQuestionType(item.type),
+    type,
     required: item.required === true || item.required === 1 || item.required === "1",
     options_json: optionsJson,
     placeholder: typeof item.placeholder === "string"
-      ? item.placeholder.trim().slice(0, 1000) || null
+      ? item.placeholder.trim().slice(0, 500) || null
       : null,
     max_length: maxLength,
     sort_order: sortOrder,
@@ -130,16 +145,38 @@ export function normalizeTemplateQuestionDefinitions(
     if (!normalized || seen.has(normalized.question_key)) continue;
     seen.add(normalized.question_key);
     definitions.push(normalized);
+    if (definitions.length >= MAX_EVENT_CUSTOM_QUESTIONS) break;
   }
   return definitions;
+}
+
+function legacyQuestionsFromVideoFormSettings(raw: unknown): EventTemplateQuestionDefinition[] {
+  if (typeof raw !== "string" || !raw.trim()) return [];
+  return getStagePermissionQuestions(parseVideoFormSettings(raw))
+    .filter((question) => question.enabled)
+    .slice(0, MAX_EVENT_CUSTOM_QUESTIONS)
+    .map((question, index) => ({
+      question_key: normalizeQuestionKey(question.id),
+      label: question.label.trim().slice(0, 120),
+      description: question.description.trim().slice(0, 1000) || null,
+      type: "textarea" as const,
+      required: question.required,
+      options_json: null,
+      placeholder: question.placeholder.trim().slice(0, 500) || null,
+      max_length: 1000,
+      sort_order: index,
+      is_active: true,
+      visibility: "review" as const,
+    }))
+    .filter((question) => question.question_key && question.label);
 }
 
 export function snapshotFromEvent(
   event: EventRow,
   customQuestions: EventTemplateQuestionRow[] = [],
-  videoFormSettingsJson: string | null = null,
 ): EventTemplateSnapshot {
   return {
+    schema_version: 2,
     event_type: (event.event_type ?? "event") as EventTemplateSnapshot["event_type"],
     explanation: event.explanation,
     icon_url: event.icon_url,
@@ -150,7 +187,6 @@ export function snapshotFromEvent(
     allow_user_video_edits: event.allow_user_video_edits,
     user_video_edit_permission_keys_json:
       event.user_video_edit_permission_keys_json,
-    video_form_settings_json: videoFormSettingsJson,
     max_slots_per_video: event.max_slots_per_video,
     max_consecutive_slots_per_entry: event.max_consecutive_slots_per_entry,
     slot_part_gap_minutes: event.slot_part_gap_minutes ?? 15,
@@ -160,7 +196,10 @@ export function snapshotFromEvent(
       | "anonymous"
       | "hidden",
     parts_json: event.parts_json,
-    custom_question_definitions: customQuestions.map(questionRowToTemplateDefinition),
+    custom_question_definitions: customQuestions
+      .filter((question) => question.is_active === 1)
+      .slice(0, MAX_EVENT_CUSTOM_QUESTIONS)
+      .map(questionRowToTemplateDefinition),
     review_settings: event.review_settings,
     editable_fields: event.editable_fields,
     repeat_rules: event.repeat_rules,
@@ -171,45 +210,85 @@ export function parseEventTemplateSnapshot(
   raw: string,
 ): EventTemplateSnapshot | null {
   try {
-    const parsed = JSON.parse(raw) as EventTemplateSnapshot & {
-      custom_question_definitions?: unknown;
-    };
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (!parsed || typeof parsed !== "object") return null;
-    if (!parsed.event_type || !parsed.slot_type) return null;
-    const { custom_question_definitions } = parsed;
-    const snapshot: Omit<EventTemplateSnapshot, "custom_question_definitions"> = {
-      event_type: parsed.event_type,
-      explanation: parsed.explanation ?? null,
-      icon_url: parsed.icon_url ?? null,
-      img_url: parsed.img_url ?? null,
-      accent_color: parsed.accent_color ?? null,
-      allow_user_video_event_links: parsed.allow_user_video_event_links ?? 0,
-      allow_unslotted_posts: parsed.allow_unslotted_posts ?? 0,
-      allow_user_video_edits: parsed.allow_user_video_edits ?? 0,
-      user_video_edit_permission_keys_json:
-        parsed.user_video_edit_permission_keys_json ?? null,
-      video_form_settings_json: parsed.video_form_settings_json ?? null,
-      max_slots_per_video: parsed.max_slots_per_video ?? 1,
-      max_consecutive_slots_per_entry:
-        parsed.max_consecutive_slots_per_entry ?? 3,
-      slot_part_gap_minutes: parsed.slot_part_gap_minutes ?? 15,
-      slot_type: parsed.slot_type,
-      slot_visibility_mode: parsed.slot_visibility_mode ?? "public_name",
-      parts_json: parsed.parts_json ?? null,
-      review_settings: parsed.review_settings ?? null,
-      editable_fields: parsed.editable_fields ?? null,
-      repeat_rules: parsed.repeat_rules ?? null,
-    };
+    const eventType = parsed.event_type;
+    const slotType = parsed.slot_type;
+    if (
+      eventType !== "event" && eventType !== "collabo" &&
+      eventType !== "type" && eventType !== "other"
+    ) return null;
+    if (slotType !== "time" && slotType !== "count") return null;
+
+    const normalized = normalizeTemplateQuestionDefinitions(
+      parsed.custom_question_definitions,
+    );
+    const legacy = legacyQuestionsFromVideoFormSettings(parsed.video_form_settings_json);
+    const seen = new Set(normalized.map((question) => question.question_key));
+    const questions = [...normalized];
+    for (const question of legacy) {
+      if (seen.has(question.question_key)) continue;
+      seen.add(question.question_key);
+      questions.push(question);
+      if (questions.length >= MAX_EVENT_CUSTOM_QUESTIONS) break;
+    }
+
+    const visibilityMode = parsed.slot_visibility_mode;
     return {
-      ...snapshot,
-      custom_question_definitions: normalizeTemplateQuestionDefinitions(
-        custom_question_definitions,
-      ),
+      schema_version: 2,
+      event_type: eventType,
+      explanation: typeof parsed.explanation === "string" ? parsed.explanation : null,
+      icon_url: typeof parsed.icon_url === "string" ? parsed.icon_url : null,
+      img_url: typeof parsed.img_url === "string" ? parsed.img_url : null,
+      accent_color: typeof parsed.accent_color === "string" ? parsed.accent_color : null,
+      allow_user_video_event_links: Number(parsed.allow_user_video_event_links) === 1 ? 1 : 0,
+      allow_unslotted_posts: Number(parsed.allow_unslotted_posts) === 1 ? 1 : 0,
+      allow_user_video_edits: Number(parsed.allow_user_video_edits) === 1 ? 1 : 0,
+      user_video_edit_permission_keys_json:
+        typeof parsed.user_video_edit_permission_keys_json === "string"
+          ? parsed.user_video_edit_permission_keys_json
+          : null,
+      max_slots_per_video: Number(parsed.max_slots_per_video) || 1,
+      max_consecutive_slots_per_entry:
+        Number(parsed.max_consecutive_slots_per_entry) || 3,
+      slot_part_gap_minutes: Number(parsed.slot_part_gap_minutes) || 15,
+      slot_type: slotType,
+      slot_visibility_mode:
+        visibilityMode === "anonymous" || visibilityMode === "hidden"
+          ? visibilityMode
+          : "public_name",
+      parts_json: typeof parsed.parts_json === "string" ? parsed.parts_json : null,
+      custom_question_definitions: questions,
+      review_settings: typeof parsed.review_settings === "string" ? parsed.review_settings : null,
+      editable_fields: typeof parsed.editable_fields === "string" ? parsed.editable_fields : null,
+      repeat_rules: typeof parsed.repeat_rules === "string" ? parsed.repeat_rules : null,
     };
   } catch {
     return null;
   }
-}/** 新規イベントフォーム用の初期値（日時は空、公開状態は下書き）。 */
+}
+
+function definitionToEditableQuestion(
+  definition: EventTemplateQuestionDefinition,
+  index: number,
+): EditableCustomQuestion {
+  return {
+    id: `template_${index}_${definition.question_key}`,
+    question_key: definition.question_key,
+    label: definition.label,
+    description: definition.description,
+    type: definition.type,
+    required: definition.required,
+    options: parseOptionsJson(definition.options_json),
+    placeholder: definition.placeholder,
+    max_length: definition.max_length,
+    sort_order: definition.sort_order,
+    is_active: definition.is_active,
+    visibility: definition.visibility,
+  };
+}
+
+/** 新規イベントフォーム用の初期値（日時は空、公開状態は下書き）。 */
 export function snapshotToFormInitial(
   snapshot: EventTemplateSnapshot,
 ): EventFormInitial {
@@ -225,11 +304,11 @@ export function snapshotToFormInitial(
     entry_end_time: null,
     visibility_status: "draft",
     allow_user_video_event_links: snapshot.allow_user_video_event_links,
-    allow_unslotted_posts: snapshot.allow_unslotted_posts ?? 0,
+    allow_unslotted_posts: snapshot.allow_unslotted_posts,
     allow_user_video_edits: snapshot.allow_user_video_edits,
     user_video_edit_permission_keys_json:
       snapshot.user_video_edit_permission_keys_json,
-    video_form_settings_json: snapshot.video_form_settings_json,
+    custom_questions: snapshot.custom_question_definitions.map(definitionToEditableQuestion),
     max_slots_per_video: snapshot.max_slots_per_video,
     max_consecutive_slots_per_entry: snapshot.max_consecutive_slots_per_entry,
     slot_part_gap_minutes: snapshot.slot_part_gap_minutes,
