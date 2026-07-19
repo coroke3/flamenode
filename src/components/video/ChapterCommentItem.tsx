@@ -2,24 +2,14 @@
 
 import * as React from "react";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import styles from "./ChapterCommentItem.module.css";
 import { Icon } from "@/components/ui/Icon";
 import { formatDuration } from "@/lib/utils/format";
 import { cn } from "@/lib/utils/cn";
+import { deleteChapter } from "@/lib/actions/chapter";
 
-/**
- * 動画詳細ページ内で「チャプター = 1 件のコメント」を統一表示するコンポーネント。
- *
- * 用途:
- *   1) ChapterTabs (チャプターコメント一覧)
- *   2) MemberSection の "担当チャプター" 表示 (video_member_id でグループ化したもの)
- *
- * 既存仕様維持:
- *   - 可視性バッジ (private = 非公開)
- *   - 範囲外 (動画 duration 超え) は色を落とす
- *   - クリックで onSeek(chapter_time) を発火
- *   - marker_kind には依存しない (CLAUDE.md 方針)
- */
+/** 動画詳細ページ内で通常チャプターコメントを表示する。 */
 export interface ChapterCommentItemEntry {
   id: string;
   chapter_time: number;
@@ -34,7 +24,7 @@ interface ChapterCommentItemProps {
   chapter: ChapterCommentItemEntry;
   /** 動画の長さ (秒)。chapter_time がこれを超えていれば「範囲外」表示。 */
   duration?: number | null;
-  /** 投稿者の表示有無。MemberSection ではメンバー側で表示しているので false。 */
+  /** 投稿者の表示有無。 */
   showAuthor?: boolean;
   /** クリックで動画をシークするコールバック。範囲外のときは発火しない。 */
   onSeek?: (time: number) => void;
@@ -48,11 +38,39 @@ export function ChapterCommentItem({
   onSeek,
   className,
 }: ChapterCommentItemProps): React.ReactElement {
+  const router = useRouter();
+  const [deleteError, setDeleteError] = React.useState<string | null>(null);
+  const [deleting, startDeleteTransition] = React.useTransition();
   const outOfRange = duration ? chapter.chapter_time > duration : false;
+
   const handleClick = React.useCallback(() => {
     if (outOfRange) return;
     onSeek?.(chapter.chapter_time);
   }, [outOfRange, onSeek, chapter.chapter_time]);
+
+  const handleDelete = React.useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setDeleteError(null);
+
+      if (!window.confirm(`「${chapter.chapter_label}」を削除しますか？`)) {
+        return;
+      }
+
+      const formData = new FormData();
+      formData.set("chapter_id", chapter.id);
+      startDeleteTransition(async () => {
+        const result = await deleteChapter(formData);
+        if (!result.ok) {
+          setDeleteError(result.message ?? "削除に失敗しました。");
+          return;
+        }
+        router.refresh();
+      });
+    },
+    [chapter.chapter_label, chapter.id, router],
+  );
 
   return (
     <div
@@ -67,9 +85,9 @@ export function ChapterCommentItem({
       onClick={onSeek ? handleClick : undefined}
       onKeyDown={
         onSeek
-          ? (e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
+          ? (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
                 handleClick();
               }
             }
@@ -94,7 +112,19 @@ export function ChapterCommentItem({
           {outOfRange ? (
             <span className="fn-badge fn-badge-neutral">範囲外</span>
           ) : null}
+          <button
+            type="button"
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+            disabled={deleting}
+            title="投稿者本人、作品管理者、管理者のみ削除できます"
+            onClick={handleDelete}
+            onKeyDown={(event) => event.stopPropagation()}
+            style={{ marginLeft: "auto" }}
+          >
+            {deleting ? "削除中…" : "削除"}
+          </button>
         </div>
+
         {showAuthor && chapter.author_name ? (
           <div className={styles.authorRow}>
             {chapter.author_icon ? (
@@ -114,8 +144,19 @@ export function ChapterCommentItem({
             <span className={styles.authorName}>{chapter.author_name}</span>
           </div>
         ) : null}
-        {chapter.note ? (
-          <p className={styles.note}>{chapter.note}</p>
+
+        {chapter.note ? <p className={styles.note}>{chapter.note}</p> : null}
+        {deleteError ? (
+          <p
+            role="alert"
+            style={{
+              margin: "6px 0 0",
+              fontSize: 11,
+              color: "var(--accent-danger)",
+            }}
+          >
+            {deleteError}
+          </p>
         ) : null}
       </div>
     </div>
