@@ -1,4 +1,9 @@
 import type { eventCustomQuestions, videoCustomAnswers } from "@/lib/db/schema";
+import {
+  MAX_CUSTOM_QUESTION_OPTIONS,
+  MAX_CUSTOM_QUESTION_TEXTAREA_LENGTH,
+  MAX_CUSTOM_QUESTION_TEXT_LENGTH,
+} from "@/lib/video/customQuestionLimits";
 
 export type CustomQuestionType = "text" | "textarea" | "select" | "radio" | "checkbox";
 export type CustomQuestionVisibility = "review" | "private" | "public";
@@ -22,6 +27,9 @@ export interface CustomQuestion {
   visibility: CustomQuestionVisibility;
 }
 
+export type EditableCustomQuestion = Omit<CustomQuestion, "event_id">;
+export type CustomAnswerValue = string | string[];
+
 export interface CustomAnswerDraft {
   event_id: string;
   question_id: string;
@@ -37,7 +45,6 @@ const VALID_VISIBILITY: ReadonlySet<string> = new Set([
   "review", "private", "public",
 ]);
 const KEY_MAX_LEN = 64;
-const MAX_OPTIONS = 50;
 const OPTION_MAX_LEN = 200;
 
 export function normalizeQuestionKey(raw: unknown): string {
@@ -72,7 +79,7 @@ export function parseOptionsJson(raw: string | null | undefined): string[] {
       if (!trimmed || seen.has(trimmed)) continue;
       seen.add(trimmed);
       out.push(trimmed);
-      if (out.length >= MAX_OPTIONS) break;
+      if (out.length >= MAX_CUSTOM_QUESTION_OPTIONS) break;
     }
     return out;
   } catch {
@@ -98,6 +105,51 @@ export function rowToQuestion(row: CustomQuestionRow): CustomQuestion {
   };
 }
 
+export function parseCustomAnswerValuesJson(
+  raw: string | null | undefined,
+): Record<string, CustomAnswerValue> {
+  if (!raw || !raw.trim()) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      const legacy: Record<string, CustomAnswerValue> = {};
+      for (const item of parsed) {
+        if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+        const row = item as Record<string, unknown>;
+        if (typeof row.id !== "string") continue;
+        if (Array.isArray(row.value)) {
+          legacy[row.id] = row.value.filter((value): value is string => typeof value === "string");
+        } else if (typeof row.value === "string") {
+          legacy[row.id] = row.value;
+        }
+      }
+      return legacy;
+    }
+    if (!parsed || typeof parsed !== "object") return {};
+    const values: Record<string, CustomAnswerValue> = {};
+    for (const [questionId, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value === "string") {
+        values[questionId] = value;
+      } else if (Array.isArray(value)) {
+        values[questionId] = value.filter((item): item is string => typeof item === "string");
+      }
+    }
+    return values;
+  } catch {
+    return {};
+  }
+}
+
+export function formatCustomAnswerValue(
+  answerText: string | null | undefined,
+  answerJson: string | null | undefined,
+): string {
+  const text = answerText?.trim();
+  if (text) return text;
+  const values = parseOptionsJson(answerJson);
+  return values.join("、");
+}
+
 type AnswerValidationResult =
   | { ok: true; drafts: CustomAnswerDraft[] }
   | { ok: false; message: string };
@@ -106,7 +158,7 @@ export function validateAnswerInput(
   question: CustomQuestion,
   values: string[],
 ): AnswerValidationResult {
-  const filtered = values.filter((v) => v.trim());
+  const filtered = Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 
   if (question.required && filtered.length === 0) {
     return { ok: false, message: `${question.label}を入力してください。` };
@@ -118,7 +170,11 @@ export function validateAnswerInput(
 
   if (question.type === "text" || question.type === "textarea") {
     const value = filtered[0];
-    const maxLen = question.max_length ?? (question.type === "text" ? 200 : 1000);
+    const maxLen = question.max_length ?? (
+      question.type === "text"
+        ? MAX_CUSTOM_QUESTION_TEXT_LENGTH
+        : MAX_CUSTOM_QUESTION_TEXTAREA_LENGTH
+    );
     if (value.length > maxLen) {
       return {
         ok: false,
@@ -139,7 +195,7 @@ export function validateAnswerInput(
 
   if (question.type === "select" || question.type === "radio") {
     const value = filtered[0];
-    if (question.options.length > 0 && !question.options.includes(value)) {
+    if (question.options.length === 0 || !question.options.includes(value)) {
       return { ok: false, message: `${question.label}は選択肢から選んでください。` };
     }
     return {
@@ -155,8 +211,11 @@ export function validateAnswerInput(
   }
 
   if (question.type === "checkbox") {
-    for (const v of filtered) {
-      if (question.options.length > 0 && !question.options.includes(v)) {
+    if (question.options.length === 0) {
+      return { ok: false, message: `${question.label}の選択肢が設定されていません。` };
+    }
+    for (const value of filtered) {
+      if (!question.options.includes(value)) {
         return { ok: false, message: `${question.label}は選択肢から選んでください。` };
       }
     }
@@ -183,14 +242,14 @@ export function readCustomAnswersFromFormData(
   const errors: string[] = [];
 
   for (const [eventId, questions] of questionsByEventId) {
-    for (const q of questions) {
-      if (!q.is_active) continue;
-      const name = `custom_answer:${eventId}:${q.question_key}`;
-      const allValues = formData.getAll(name).map((v) =>
-        typeof v === "string" ? v.trim() : ""
+    for (const question of questions) {
+      if (!question.is_active) continue;
+      const name = `custom_answer:${eventId}:${question.question_key}`;
+      const allValues = formData.getAll(name).map((value) =>
+        typeof value === "string" ? value.trim() : ""
       ).filter(Boolean);
 
-      const result = validateAnswerInput(q, allValues);
+      const result = validateAnswerInput(question, allValues);
       if (!result.ok) {
         errors.push(result.message);
         continue;
