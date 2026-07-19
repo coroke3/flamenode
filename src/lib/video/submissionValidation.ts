@@ -4,6 +4,7 @@ import {
   readCustomAnswersFromFormData,
   type CustomAnswerDraft,
 } from "@/lib/video/customQuestions";
+import { MAX_VIDEO_CUSTOM_QUESTIONS } from "@/lib/video/customQuestionLimits";
 import {
   type MemberInput,
   type ParsedMemberChapter,
@@ -47,8 +48,20 @@ export async function validateCustomAnswersForEvents(
     customQuestionsByEvent = await fetchActiveCustomQuestionsForEvents(db, eventIds);
   } catch (error) {
     console.warn("[submissionValidation] custom question read rejected", error);
-    return { ok: false, message: "カスタム質問数が保存上限を超えています。" };
+    return { ok: false, message: "イベントのカスタム質問設定が上限を超えています。" };
   }
+
+  const questionCount = [...customQuestionsByEvent.values()].reduce(
+    (total, questions) => total + questions.length,
+    0,
+  );
+  if (questionCount > MAX_VIDEO_CUSTOM_QUESTIONS) {
+    return {
+      ok: false,
+      message: `選択イベントのカスタム質問は合計${MAX_VIDEO_CUSTOM_QUESTIONS}件までです。`,
+    };
+  }
+
   const customAnswerRead = readCustomAnswersFromFormData(
     formData,
     customQuestionsByEvent,
