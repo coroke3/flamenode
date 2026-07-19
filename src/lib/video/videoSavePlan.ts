@@ -11,10 +11,6 @@ import {
   MAX_ATOMIC_VIDEO_EVENTS,
 } from "@/lib/video/syncVideoEvents";
 import { buildReplaceVideoMembersPlan } from "@/lib/video/replaceVideoMembers";
-import {
-  buildReplaceStagePermissionAnswersPlan,
-  readStagePermissionCustomAnswers,
-} from "@/lib/video/stagePermissionAnswers";
 import type { CustomAnswerDraft } from "@/lib/video/customQuestions";
 import { buildReplaceGeneralCustomAnswersPlan } from "@/lib/video/customQuestionAnswers";
 import type { VideoFormData } from "@/lib/video/videoFormSchema";
@@ -33,7 +29,6 @@ import {
 } from "@/lib/video/atomicWritePlan";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import type { EnqueueStaticRebuildInput } from "@/lib/staticRebuild/types";
-
 import {
   buildVideoAuditSnapshot,
   type VideoAuditSnapshot,
@@ -69,11 +64,10 @@ export interface VideoSavePlan {
   youtubeChanged: boolean;
   nextCreatorX: string;
   usedSoftware: string | null;
-  stagePermission: string | null;
   memberSubmission: ValidatedMemberSubmission | null;
   customAnswerDrafts: CustomAnswerDraft[];
   syncedEventIds: string[] | null;
-  stagePermissionDeleteEventIds: string[] | undefined;
+  customAnswerDeleteEventIds: string[] | undefined;
   auditBefore: VideoAuditSnapshot;
   auditAfter: VideoAuditSnapshot;
   revalidatePaths: string[];
@@ -152,12 +146,11 @@ export function buildVideoUpdatePlan(args: {
   youtubeId: string;
   youtubeChanged: boolean;
   nextCreatorX: string;
-  nextStagePermission: string | null;
   creatorYoutubeChannelUrl: string | null;
   memberSubmission: ValidatedMemberSubmission | null;
   customAnswerDrafts: VideoSavePlan["customAnswerDrafts"];
   syncedEventIds: string[] | null;
-  stagePermissionDeleteEventIds: string[] | undefined;
+  customAnswerDeleteEventIds: string[] | undefined;
   hasEventIdsField: boolean;
   now: number;
 }): VideoSavePlan {
@@ -172,7 +165,11 @@ export function buildVideoUpdatePlan(args: {
     creatorYoutubeChannelUrl: args.creatorYoutubeChannelUrl,
   });
 
-  const auditBefore = buildVideoAuditSnapshot(args.target, undefined, args.targetSoftwareLabel);
+  const auditBefore = buildVideoAuditSnapshot(
+    args.target,
+    undefined,
+    args.targetSoftwareLabel,
+  );
   const auditAfter = buildVideoAuditSnapshot(args.target, {
     title: payload.title,
     youtube_video_id: payload.youtube_video_id,
@@ -204,24 +201,26 @@ export function buildVideoUpdatePlan(args: {
     youtubeChanged: args.youtubeChanged,
     nextCreatorX: args.nextCreatorX,
     usedSoftware: args.parsed.used_software ?? null,
-    stagePermission: args.nextStagePermission,
     memberSubmission: args.memberSubmission,
     customAnswerDrafts: args.customAnswerDrafts,
     syncedEventIds: args.syncedEventIds,
-    stagePermissionDeleteEventIds: args.stagePermissionDeleteEventIds,
+    customAnswerDeleteEventIds: args.customAnswerDeleteEventIds,
     auditBefore,
     auditAfter,
     revalidatePaths: computeVideoRevalidatePaths({
       videoId: args.videoId,
       previousYoutubeVideoId: args.target.youtube_video_id,
-      nextYoutubeVideoId: args.sections.youtube ? args.youtubeId : args.target.youtube_video_id,
+      nextYoutubeVideoId: args.sections.youtube
+        ? args.youtubeId
+        : args.target.youtube_video_id,
       primaryEventId: args.target.primary_event_id,
       youtubeChanged: args.youtubeChanged,
     }),
     rebuildFlags: computeStaticRebuildFlags({
       canEditIdentity: args.sections.identity,
       allowSubmitterChange: args.allowSubmitterChange,
-      displayNameChanged: args.parsed.display_name !== args.target.creator_display_name,
+      displayNameChanged:
+        args.parsed.display_name !== args.target.creator_display_name,
       iconChanged:
         (args.parsed.icon_url || null) !== (args.target.creator_icon_url || null),
       canEditPrimaryEvent: args.sections.primary_event,
@@ -236,7 +235,7 @@ export function buildVideoUpdatePlan(args: {
   };
 }
 
-export function computeStagePermissionDeleteIds(args: {
+export function computeCustomAnswerDeleteEventIds(args: {
   previousEventIds: string[];
   syncedEventIds: string[];
 }): string[] {
@@ -325,34 +324,28 @@ export async function applyVideoUpdatePlan(
     }));
   }
   if (plan.syncedEventIds) {
-    appendVideoAtomicWritePlan(atomic, await buildSyncVideoEventsPlan(db, plan.videoId, {
-      targetEventIds,
-      actorUserId: plan.operatorUserId,
-    }));
+    appendVideoAtomicWritePlan(
+      atomic,
+      await buildSyncVideoEventsPlan(db, plan.videoId, {
+        targetEventIds,
+        actorUserId: plan.operatorUserId,
+      }),
+    );
   }
-  if (sections.descriptions || plan.stagePermissionDeleteEventIds) {
-    const stagePermission = sections.descriptions
-      ? plan.stagePermission
-      : await readStagePermissionCustomAnswers(db, {
-          videoId: plan.videoId,
-          eventIds: targetEventIds,
-        });
-    appendVideoAtomicWritePlan(atomic, await buildReplaceStagePermissionAnswersPlan(db, {
-      videoId: plan.videoId,
-      eventIds: targetEventIds,
-      deleteEventIds: plan.stagePermissionDeleteEventIds,
-      stagePermission,
-      now: payload.updated_at,
-      actorUserId: plan.operatorUserId,
-    }));
-    appendVideoAtomicWritePlan(atomic, await buildReplaceGeneralCustomAnswersPlan(db, {
-      videoId: plan.videoId,
-      eventIds: targetEventIds,
-      drafts: plan.customAnswerDrafts,
-      now: payload.updated_at,
-      actorUserId: plan.operatorUserId,
-    }));
+  if (sections.descriptions || (plan.customAnswerDeleteEventIds?.length ?? 0) > 0) {
+    appendVideoAtomicWritePlan(
+      atomic,
+      await buildReplaceGeneralCustomAnswersPlan(db, {
+        videoId: plan.videoId,
+        eventIds: targetEventIds,
+        deleteEventIds: plan.customAnswerDeleteEventIds,
+        drafts: sections.descriptions ? plan.customAnswerDrafts : [],
+        now: payload.updated_at,
+        actorUserId: plan.operatorUserId,
+      }),
+    );
   }
+
   const queueItems: EnqueueStaticRebuildInput[] = [{
     targetType: "video",
     targetId: plan.videoId,
@@ -374,7 +367,11 @@ export async function applyVideoUpdatePlan(
     });
   }
   if (plan.rebuildFlags.eventMembershipChanged) {
-    for (const eventId of new Set([plan.primaryEventId, ...existingEventIds, ...targetEventIds])) {
+    for (const eventId of new Set([
+      plan.primaryEventId,
+      ...existingEventIds,
+      ...targetEventIds,
+    ])) {
       if (!eventId) continue;
       queueItems.push({
         targetType: "event",
