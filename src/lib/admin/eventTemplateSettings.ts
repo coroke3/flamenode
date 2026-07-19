@@ -9,10 +9,6 @@ import {
   type CustomQuestionVisibility,
   type EditableCustomQuestion,
 } from "../video/customQuestions.ts";
-import {
-  getStagePermissionQuestions,
-  parseVideoFormSettings,
-} from "../video/formSettings.ts";
 import { MAX_EVENT_CUSTOM_QUESTIONS } from "../video/customQuestionLimits.ts";
 
 export type EventRow = typeof events.$inferSelect;
@@ -46,7 +42,7 @@ export interface EventTemplateQuestionDefinition {
 
 /**
  * テンプレートに保存する設定（開催日時・枠・作品・スタッフ承認は含めない）。
- * 質問は custom_question_definitions のみを正本とし、旧フォームJSONへ二重保存しない。
+ * 質問は custom_question_definitions のみを正本とする。
  */
 export interface EventTemplateSnapshot {
   schema_version: 2;
@@ -150,27 +146,6 @@ export function normalizeTemplateQuestionDefinitions(
   return definitions;
 }
 
-function legacyQuestionsFromVideoFormSettings(raw: unknown): EventTemplateQuestionDefinition[] {
-  if (typeof raw !== "string" || !raw.trim()) return [];
-  return getStagePermissionQuestions(parseVideoFormSettings(raw))
-    .filter((question) => question.enabled)
-    .slice(0, MAX_EVENT_CUSTOM_QUESTIONS)
-    .map((question, index) => ({
-      question_key: normalizeQuestionKey(question.id),
-      label: question.label.trim().slice(0, 120),
-      description: question.description.trim().slice(0, 1000) || null,
-      type: "textarea" as const,
-      required: question.required,
-      options_json: null,
-      placeholder: question.placeholder.trim().slice(0, 500) || null,
-      max_length: 1000,
-      sort_order: index,
-      is_active: true,
-      visibility: "review" as const,
-    }))
-    .filter((question) => question.question_key && question.label);
-}
-
 export function snapshotFromEvent(
   event: EventRow,
   customQuestions: EventTemplateQuestionRow[] = [],
@@ -212,6 +187,7 @@ export function parseEventTemplateSnapshot(
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (!parsed || typeof parsed !== "object") return null;
+    if (parsed.schema_version !== 2) return null;
     const eventType = parsed.event_type;
     const slotType = parsed.slot_type;
     if (
@@ -219,19 +195,6 @@ export function parseEventTemplateSnapshot(
       eventType !== "type" && eventType !== "other"
     ) return null;
     if (slotType !== "time" && slotType !== "count") return null;
-
-    const normalized = normalizeTemplateQuestionDefinitions(
-      parsed.custom_question_definitions,
-    );
-    const legacy = legacyQuestionsFromVideoFormSettings(parsed.video_form_settings_json);
-    const seen = new Set(normalized.map((question) => question.question_key));
-    const questions = [...normalized];
-    for (const question of legacy) {
-      if (seen.has(question.question_key)) continue;
-      seen.add(question.question_key);
-      questions.push(question);
-      if (questions.length >= MAX_EVENT_CUSTOM_QUESTIONS) break;
-    }
 
     const visibilityMode = parsed.slot_visibility_mode;
     return {
@@ -258,7 +221,9 @@ export function parseEventTemplateSnapshot(
           ? visibilityMode
           : "public_name",
       parts_json: typeof parsed.parts_json === "string" ? parsed.parts_json : null,
-      custom_question_definitions: questions,
+      custom_question_definitions: normalizeTemplateQuestionDefinitions(
+        parsed.custom_question_definitions,
+      ),
       review_settings: typeof parsed.review_settings === "string" ? parsed.review_settings : null,
       editable_fields: typeof parsed.editable_fields === "string" ? parsed.editable_fields : null,
       repeat_rules: typeof parsed.repeat_rules === "string" ? parsed.repeat_rules : null,
