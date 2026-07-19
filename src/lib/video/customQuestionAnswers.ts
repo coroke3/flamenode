@@ -24,6 +24,7 @@ import {
 
 export const MAX_VIDEO_CUSTOM_QUESTIONS_READ = MAX_VIDEO_CUSTOM_QUESTIONS;
 const CUSTOM_QUESTION_EVENT_ID_BATCH_SIZE = 40;
+const CUSTOM_ANSWER_DELETE_CHUNK_SIZE = MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS;
 
 type DB = NonNullable<ReturnType<typeof getDatabase>>;
 
@@ -139,14 +140,16 @@ export async function buildReplaceGeneralCustomAnswersPlan(
   }
 
   const plan = emptyVideoAtomicWritePlan();
-  if (existing.length > 0) {
-    plan.statements.push(db.delete(videoCustomAnswers).where(or(...existing.map((row) => and(
+  for (const deleteChunk of chunkValues(existing, CUSTOM_ANSWER_DELETE_CHUNK_SIZE)) {
+    plan.statements.push(db.delete(videoCustomAnswers).where(or(...deleteChunk.map((row) => and(
       eq(videoCustomAnswers.video_id, row.video_id),
       eq(videoCustomAnswers.event_id, row.event_id),
       eq(videoCustomAnswers.question_id, row.question_id),
       expectedRowCondition({ expectedCurrent: row }),
     )!))!));
-    plan.expectedChanges.push(existing.length);
+    plan.expectedChanges.push(deleteChunk.length);
+  }
+  if (existing.length > 0) {
     plan.audits.push(...existing.map((row) => ({
       table_name: "video_custom_answers",
       target_id: compositeAuditTargetId(row.video_id, row.event_id, row.question_id),
