@@ -1,32 +1,49 @@
 .item {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
   border-bottom: 1px solid var(--border-subtle);
   transition: background-color 0.15s ease;
   width: 100%;
-  text-align: left;
 }
 
 .item:last-child {
   border-bottom: 0;
 }
 
-.clickable {
-  cursor: pointer;
-}
-
-.clickable:hover {
+.item:hover,
+.item:focus-within {
   background-color: var(--accent-primary-soft);
 }
 
-.clickable:focus-visible {
-  outline: 2px solid var(--accent-primary);
-  outline-offset: -2px;
+.seekTarget,
+.staticTarget {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
+  padding: 10px 12px;
+  color: inherit;
+  text-align: left;
 }
 
-.outOfRange {
+.seekTarget {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.seekTarget:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}
+
+.outOfRange .staticTarget {
   opacity: 0.55;
 }
 
@@ -41,22 +58,30 @@
   padding: 2px 6px;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
-  border-color: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 35%, transparent);
+  border-color: color-mix(
+    in srgb,
+    var(--event-accent, var(--accent-primary)) 35%,
+    transparent
+  );
 }
 
 .body {
   flex: 1;
   min-width: 0;
+  display: block;
 }
 
 .titleRow {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   flex-wrap: wrap;
 }
 
 .title {
+  min-width: 0;
+  flex: 1 1 120px;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
@@ -71,6 +96,7 @@
 }
 
 .note {
+  display: block;
   margin-top: 4px;
   font-size: 12px;
   color: var(--text-muted);
@@ -112,4 +138,50 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 140px;
+}
+
+.deleteButton {
+  align-self: center;
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-right: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.15s ease,
+    color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.item:hover .deleteButton,
+.item:focus-within .deleteButton {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.deleteButton:hover {
+  color: var(--accent-danger);
+  background: color-mix(in srgb, var(--accent-danger) 10%, transparent);
+}
+
+.deleteButton:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  outline: 2px solid var(--accent-danger);
+  outline-offset: -2px;
+}
+
+@media (hover: none), (max-width: 768px) {
+  .deleteButton {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
