@@ -4,28 +4,17 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
-import { createChapter, createChaptersBulk } from "@/lib/actions/chapter";
-import {
-  MAX_ATOMIC_CHAPTER_BULK_ROWS,
-  parseChapterBulkCsv,
-} from "@/lib/actions/chapterLimits";
+import { createChapter } from "@/lib/actions/chapter";
 
 interface ChapterComposerProps {
   videoId: string;
   /** active_x_user_id が承認済か。false なら disabled 案内のみ。 */
   canPost: boolean;
-  /**
-   * `canPost = false` のときに「X ID設定へ」リンクとして使う URL。
-   * 未指定なら CTA は出さず案内文だけ表示する。
-   * 呼び出し側で `/dashboard/settings?next=...` を組み立てて渡す。
-   */
+  /** canPost=false のときに表示する X ID 設定画面へのリンク。 */
   settingsHref?: string;
-  /** 動画オーナー / admin のみ CSV 一括登録 UI を出す。 */
+  /** 旧呼び出し側との型互換用。通常チャプターのCSV一括登録は廃止済み。 */
   canBulk?: boolean;
-  /**
-   * true のとき、単発投稿フォームを描画せず CSV 一括登録 UI だけ表示する。
-   * 編集ページ側のチャプター一括登録パネル用。動画詳細ページからは false (既定)。
-   */
+  /** 旧呼び出し側との型互換用。true の場合も一括登録UIは表示しない。 */
   bulkOnly?: boolean;
 }
 
@@ -33,29 +22,34 @@ function parseTimeInput(raw: string): number {
   const s = raw.trim();
   if (!s) return 0;
   if (/^\d+$/.test(s)) return Number(s);
-  const m = s.match(/^(\d{1,2}):([0-5]\d)(?:[.:](\d{1,3}))?$/);
-  if (m) {
-    const min = Number(m[1]);
-    const sec = Number(m[2]);
-    const ms = m[3] ? Number(m[3].padEnd(3, "0")) : 0;
+
+  const mmss = s.match(/^(\d{1,2}):([0-5]\d)(?:[.:](\d{1,3}))?$/);
+  if (mmss) {
+    const min = Number(mmss[1]);
+    const sec = Number(mmss[2]);
+    const ms = mmss[3] ? Number(mmss[3].padEnd(3, "0")) : 0;
     return min * 60 + sec + ms / 1000;
   }
-  const mh = s.match(/^(\d{1,2}):([0-5]\d):([0-5]\d)$/);
-  if (mh) {
-    return Number(mh[1]) * 3600 + Number(mh[2]) * 60 + Number(mh[3]);
+
+  const hhmmss = s.match(/^(\d{1,2}):([0-5]\d):([0-5]\d)$/);
+  if (hhmmss) {
+    return (
+      Number(hhmmss[1]) * 3600 +
+      Number(hhmmss[2]) * 60 +
+      Number(hhmmss[3])
+    );
   }
+
   const n = Number(s);
   return Number.isFinite(n) ? n : 0;
 }
 
-/**
- * チャプター投稿フォーム。動画詳細ページ右レール下に置く想定。
- */
+/** 動画詳細ページから通常チャプターコメントを1件投稿するフォーム。 */
 export function ChapterComposer({
   videoId,
   canPost,
   settingsHref,
-  canBulk = false,
+  canBulk: _canBulk,
   bulkOnly = false,
 }: ChapterComposerProps): React.ReactElement {
   const router = useRouter();
@@ -67,38 +61,7 @@ export function ChapterComposer({
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
 
-  const [bulkOpen, setBulkOpen] = React.useState(false);
-  const [bulkCsv, setBulkCsv] = React.useState("");
-  const [bulkBusy, startBulkTransition] = React.useTransition();
-  const [bulkMessage, setBulkMessage] = React.useState<string | null>(null);
-  const [bulkErrors, setBulkErrors] = React.useState<string[]>([]);
-
-  const submitBulk = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setBulkMessage(null);
-    setBulkErrors([]);
-    if (!bulkCsv.trim()) {
-      setBulkMessage("CSV を貼り付けてください。");
-      return;
-    }
-    const dataRowCount = parseChapterBulkCsv(bulkCsv).length;
-    if (dataRowCount > MAX_ATOMIC_CHAPTER_BULK_ROWS) {
-      setBulkMessage(`CSVは一度に最大${MAX_ATOMIC_CHAPTER_BULK_ROWS}行まで登録できます。`);
-      return;
-    }
-    const fd = new FormData();
-    fd.set("video_id", videoId);
-    fd.set("csv", bulkCsv);
-    startBulkTransition(async () => {
-      const r = await createChaptersBulk(fd);
-      setBulkMessage(r.message ?? null);
-      setBulkErrors(r.errors ?? []);
-      if (r.ok && (r.inserted ?? 0) > 0) {
-        setBulkCsv("");
-        router.refresh();
-      }
-    });
-  };
+  void _canBulk;
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -110,20 +73,22 @@ export function ChapterComposer({
       setError("ラベルを入力してください。");
       return;
     }
+
     const seconds = parseTimeInput(timeStr);
     setError(null);
+
     const fd = new FormData();
     fd.set("video_id", videoId);
     fd.set("chapter_time", String(seconds));
     fd.set("chapter_label", label.trim());
     fd.set("note", note.trim());
     fd.set("visibility", isPublic ? "public" : "private");
-    fd.set("marker_kind", "chapter");
     fd.set("show_on_player_bar", "0");
+
     startTransition(async () => {
-      const r = await createChapter(fd);
-      if (!r.ok) {
-        setError(r.message ?? "投稿に失敗しました。");
+      const result = await createChapter(fd);
+      if (!result.ok) {
+        setError(result.message ?? "投稿に失敗しました。");
         return;
       }
       setLabel("");
@@ -133,9 +98,9 @@ export function ChapterComposer({
     });
   };
 
-  // 単発フォームを使わない bulkOnly モードでは、canPost ガード (X ID 設定への案内) を
-  // 出さない。CSV 一括登録 UI も canBulk が false なら何も描画しない。
-  if (!canPost && !bulkOnly) {
+  if (bulkOnly) return <></>;
+
+  if (!canPost) {
     return (
       <section
         style={{
@@ -166,9 +131,6 @@ export function ChapterComposer({
       </section>
     );
   }
-  if (bulkOnly && !canBulk) {
-    return <></>;
-  }
 
   return (
     <section
@@ -179,34 +141,27 @@ export function ChapterComposer({
         padding: 12,
       }}
     >
-      {!bulkOnly ? (
-        <header
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: open ? 10 : 0,
-          }}
+      <header
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: open ? 10 : 0,
+        }}
+      >
+        <strong style={{ fontSize: 12, letterSpacing: "0.08em" }}>
+          チャプターコメント投稿
+        </strong>
+        <button
+          type="button"
+          className="fn-btn fn-btn-ghost fn-btn-sm"
+          onClick={() => setOpen((value) => !value)}
         >
-          <strong style={{ fontSize: 12, letterSpacing: "0.08em" }}>
-            チャプターコメント投稿
-          </strong>
-          <button
-            type="button"
-            className="fn-btn fn-btn-ghost fn-btn-sm"
-            onClick={() => setOpen((v) => !v)}
-          >
-            {open ? "閉じる" : "開く"}
-          </button>
-        </header>
-      ) : (
-        <header style={{ marginBottom: 6 }}>
-          <strong style={{ fontSize: 12, letterSpacing: "0.08em" }}>
-            チャプターコメント CSV 一括登録
-          </strong>
-        </header>
-      )}
-      {open && !bulkOnly ? (
+          {open ? "閉じる" : "開く"}
+        </button>
+      </header>
+
+      {open ? (
         <form
           onSubmit={onSubmit}
           style={{ display: "flex", flexDirection: "column", gap: 8 }}
@@ -222,8 +177,11 @@ export function ChapterComposer({
               maxLength={9}
               required
             />
-            <span className="fn-badge fn-badge-neutral">チャプターコメント</span>
+            <span className="fn-badge fn-badge-neutral">
+              チャプターコメント
+            </span>
           </div>
+
           <input
             type="text"
             value={label}
@@ -233,6 +191,7 @@ export function ChapterComposer({
             maxLength={120}
             required
           />
+
           <textarea
             value={note}
             onChange={(e) => setNote(e.target.value)}
@@ -241,31 +200,25 @@ export function ChapterComposer({
             rows={2}
             maxLength={1000}
           />
-          <div
+
+          <label
             style={{
-              display: "flex",
-              gap: 12,
-              flexWrap: "wrap",
+              display: "inline-flex",
+              gap: 4,
+              alignItems: "center",
+              cursor: "pointer",
               fontSize: 11,
               color: "var(--text-secondary)",
             }}
           >
-            <label
-              style={{
-                display: "inline-flex",
-                gap: 4,
-                alignItems: "center",
-                cursor: "pointer",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={isPublic}
-                onChange={(e) => setIsPublic(e.target.checked)}
-              />
-              公開
-            </label>
-          </div>
+            <input
+              type="checkbox"
+              checked={isPublic}
+              onChange={(e) => setIsPublic(e.target.checked)}
+            />
+            公開
+          </label>
+
           {error ? (
             <p
               role="alert"
@@ -274,6 +227,7 @@ export function ChapterComposer({
               <Icon name="warning" size={11} aria-hidden /> {error}
             </p>
           ) : null}
+
           <button
             type="submit"
             className="fn-btn fn-btn-primary fn-btn-sm"
@@ -283,94 +237,6 @@ export function ChapterComposer({
             {busy ? "送信中…" : "投稿"}
           </button>
         </form>
-      ) : null}
-
-      {canBulk ? (
-        <details
-          style={{
-            // bulkOnly のときは独立カードとして使うので、上区切り線は不要。
-            marginTop: bulkOnly ? 0 : open ? 12 : 8,
-            borderTop: bulkOnly ? undefined : "1px solid var(--border-subtle)",
-            paddingTop: bulkOnly ? 0 : 8,
-          }}
-          // bulkOnly 時は最初から開いた状態にする (専用パネルとして利用される文脈)
-          open={bulkOnly || bulkOpen}
-          onToggle={(e) => setBulkOpen((e.target as HTMLDetailsElement).open)}
-        >
-          <summary
-            style={{
-              fontSize: 11.5,
-              color: "var(--text-muted)",
-              cursor: "pointer",
-              fontWeight: 600,
-            }}
-          >
-            <Icon name="upload" size={11} aria-hidden /> CSV で一括登録 (動画オーナーのみ)
-          </summary>
-          <form
-            onSubmit={submitBulk}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 6,
-              marginTop: 8,
-            }}
-          >
-            <p style={{ fontSize: 11, color: "var(--text-muted)", margin: 0 }}>
-              列: <code>time,label,note,visibility,member</code> /
-              time は <code>mm:ss</code> または <code>hh:mm:ss</code> /
-              最大 {MAX_ATOMIC_CHAPTER_BULK_ROWS} 行。member 列は互換入力として受け付けますが登録には使用しません。
-            </p>
-            <textarea
-              className="fn-input"
-              rows={5}
-              style={{ fontFamily: "monospace", fontSize: 12 }}
-              placeholder={"0:30,オープニング,,public,\n1:45,Aパート,音響担当,public,sato_design"}
-              value={bulkCsv}
-              onChange={(e) => setBulkCsv(e.target.value)}
-              disabled={bulkBusy}
-            />
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <button
-                type="submit"
-                className="fn-btn fn-btn-primary fn-btn-sm"
-                disabled={bulkBusy}
-              >
-                <Icon name="plus" size={11} aria-hidden />
-                {bulkBusy ? "登録中…" : "一括登録"}
-              </button>
-              {bulkMessage ? (
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: bulkErrors.length > 0
-                      ? "var(--accent-danger)"
-                      : "var(--text-secondary)",
-                  }}
-                >
-                  {bulkMessage}
-                </span>
-              ) : null}
-            </div>
-            {bulkErrors.length > 0 ? (
-              <ul
-                style={{
-                  margin: 0,
-                  paddingLeft: 18,
-                  fontSize: 11,
-                  color: "var(--accent-danger)",
-                }}
-              >
-                {bulkErrors.slice(0, 8).map((er, i) => (
-                  <li key={i}>{er}</li>
-                ))}
-                {bulkErrors.length > 8 ? (
-                  <li>...他 {bulkErrors.length - 8} 件</li>
-                ) : null}
-              </ul>
-            ) : null}
-          </form>
-        </details>
       ) : null}
     </section>
   );
