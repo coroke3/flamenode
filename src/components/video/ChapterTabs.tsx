@@ -26,6 +26,15 @@ interface ChapterTabsProps {
   onSeek?: (time: number) => void;
 }
 
+const FOCUSABLE_SELECTOR = [
+  "button:not([disabled])",
+  "[href]",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
+
 export function ChapterTabs({
   chapters,
   duration,
@@ -44,8 +53,11 @@ export function ChapterTabs({
   const [toast, setToast] = React.useState<string | null>(null);
   const [, startCapabilityTransition] = React.useTransition();
   const [deleting, startDeleteTransition] = React.useTransition();
+  const dialogRef = React.useRef<HTMLElement>(null);
   const cancelButtonRef = React.useRef<HTMLButtonElement>(null);
   const previousFocusRef = React.useRef<HTMLElement | null>(null);
+  const deletingRef = React.useRef(false);
+  const capabilityRequestRef = React.useRef(0);
 
   const chapterIdsKey = React.useMemo(
     () => chapters.map((chapter) => chapter.id).join("\u001f"),
@@ -53,8 +65,14 @@ export function ChapterTabs({
   );
 
   React.useEffect(() => {
-    let cancelled = false;
+    deletingRef.current = deleting;
+  }, [deleting]);
+
+  React.useEffect(() => {
+    const requestId = capabilityRequestRef.current + 1;
+    capabilityRequestRef.current = requestId;
     const ids = chapterIdsKey ? chapterIdsKey.split("\u001f") : [];
+
     if (ids.length === 0) {
       setDeletableIds(new Set());
       return;
@@ -62,15 +80,21 @@ export function ChapterTabs({
 
     startCapabilityTransition(async () => {
       const result = await getChapterDeleteCapabilities(ids);
-      if (!cancelled) {
-        setDeletableIds(new Set(result.ok ? result.deletableIds : []));
-      }
+      if (capabilityRequestRef.current !== requestId) return;
+      setDeletableIds(new Set(result.ok ? result.deletableIds : []));
     });
-
-    return () => {
-      cancelled = true;
-    };
   }, [chapterIdsKey]);
+
+  React.useEffect(() => {
+    setHiddenIds((current) => {
+      if (current.size === 0) return current;
+      const sourceIds = new Set(chapters.map((chapter) => chapter.id));
+      const next = new Set(
+        Array.from(current).filter((chapterId) => sourceIds.has(chapterId)),
+      );
+      return next.size === current.size ? current : next;
+    });
+  }, [chapters]);
 
   React.useEffect(() => {
     if (!toast) return;
@@ -87,39 +111,69 @@ export function ChapterTabs({
     const frame = window.requestAnimationFrame(() => cancelButtonRef.current?.focus());
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !deleting) {
+      if (event.key === "Escape" && !deletingRef.current) {
         event.preventDefault();
         setPendingDelete(null);
         setDeleteError(null);
+        return;
+      }
+
+      if (event.key !== "Tab") return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+      ).filter((element) => !element.hasAttribute("disabled"));
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable.at(-1)!;
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || !dialog.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
       }
     };
-    document.addEventListener("keydown", onKeyDown);
 
+    document.addEventListener("keydown", onKeyDown);
     return () => {
       window.cancelAnimationFrame(frame);
       document.removeEventListener("keydown", onKeyDown);
       document.body.style.overflow = previousOverflow;
       previousFocusRef.current?.focus();
     };
-  }, [pendingDelete, deleting]);
+  }, [pendingDelete]);
 
-  const visibleChapters = chapters.filter((chapter) => !hiddenIds.has(chapter.id));
+  const visibleChapters = React.useMemo(
+    () => chapters.filter((chapter) => !hiddenIds.has(chapter.id)),
+    [chapters, hiddenIds],
+  );
 
-  const requestDelete = React.useCallback((chapter: ChapterCommentItemEntry) => {
-    const matched = chapters.find((entry) => entry.id === chapter.id);
-    if (!matched) return;
-    setDeleteError(null);
-    setPendingDelete(matched);
-  }, [chapters]);
+  const requestDelete = React.useCallback(
+    (chapter: ChapterCommentItemEntry) => {
+      const matched = chapters.find((entry) => entry.id === chapter.id);
+      if (!matched || hiddenIds.has(matched.id)) return;
+      setDeleteError(null);
+      setPendingDelete(matched);
+    },
+    [chapters, hiddenIds],
+  );
 
   const closeDialog = React.useCallback(() => {
-    if (deleting) return;
+    if (deletingRef.current) return;
     setPendingDelete(null);
     setDeleteError(null);
-  }, [deleting]);
+  }, []);
 
   const confirmDelete = React.useCallback(() => {
-    if (!pendingDelete) return;
+    if (!pendingDelete || deletingRef.current) return;
 
     const target = pendingDelete;
     const formData = new FormData();
@@ -150,7 +204,7 @@ export function ChapterTabs({
   }, [pendingDelete, router]);
 
   return (
-    <div className={styles.root}>
+    <section className={styles.root} aria-labelledby="chapter-comments-heading">
       <div className={styles.tabs}>
         <TabButton
           icon="chapter"
@@ -158,10 +212,14 @@ export function ChapterTabs({
           count={visibleChapters.length}
         />
       </div>
-      <div className={styles.list}>
+      <div className={styles.list} aria-live="polite">
         {visibleChapters.length === 0 ? (
           <div className={styles.listEmpty}>
-            チャプターコメントはまだありません。
+            <span className={styles.listEmptyIcon} aria-hidden>
+              <Icon name="chapter" size={16} />
+            </span>
+            <strong>チャプターコメントはまだありません</strong>
+            <span>動画内の時刻に、見どころや補足を残せます。</span>
           </div>
         ) : (
           visibleChapters.map((chapter) => (
@@ -187,11 +245,14 @@ export function ChapterTabs({
           }}
         >
           <section
+            ref={dialogRef}
             className={styles.dialog}
             role="alertdialog"
             aria-modal="true"
             aria-labelledby="chapter-delete-dialog-title"
             aria-describedby="chapter-delete-dialog-description"
+            aria-busy={deleting}
+            tabIndex={-1}
           >
             <div className={styles.dialogIcon} aria-hidden>
               <Icon name="trash" size={18} />
@@ -245,7 +306,7 @@ export function ChapterTabs({
           {toast}
         </div>
       ) : null}
-    </div>
+    </section>
   );
 }
 
@@ -259,10 +320,17 @@ function TabButton({
   count: number;
 }): React.ReactElement {
   return (
-    <div className={cn(styles.tab, styles.tabActive)}>
+    <div
+      id="chapter-comments-heading"
+      className={cn(styles.tab, styles.tabActive)}
+      role="heading"
+      aria-level={2}
+    >
       <Icon name={icon} size={13} aria-hidden />
-      {label}
-      <span className={styles.tabCount}>({count})</span>
+      <span>{label}</span>
+      <span className={styles.tabCount} aria-label={`${count}件`}>
+        {count}
+      </span>
     </div>
   );
 }
