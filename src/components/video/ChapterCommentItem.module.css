@@ -144,9 +144,9 @@
   align-self: center;
   display: inline-grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
-  margin-right: 4px;
+  width: 44px;
+  height: 44px;
+  margin-right: 2px;
   padding: 0;
   border: 0;
   border-radius: var(--radius-sm);
@@ -158,7 +158,8 @@
   transition:
     opacity 0.15s ease,
     color 0.15s ease,
-    background-color 0.15s ease;
+    background-color 0.15s ease,
+    transform 0.15s ease;
 }
 
 .item:hover .deleteButton,
@@ -172,6 +173,10 @@
   background: color-mix(in srgb, var(--accent-danger) 10%, transparent);
 }
 
+.deleteButton:active {
+  transform: scale(0.96);
+}
+
 .deleteButton:focus-visible {
   opacity: 1;
   pointer-events: auto;
@@ -183,5 +188,31 @@
   .deleteButton {
     opacity: 1;
     pointer-events: auto;
+  }
+}
+
+@media (max-width: 520px) {
+  .seekTarget,
+  .staticTarget {
+    padding: 11px 8px 11px 10px;
+    gap: 8px;
+  }
+
+  .title {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .deleteButton {
+    margin-right: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .item,
+  .deleteButton {
+    transition: none;
   }
 }
