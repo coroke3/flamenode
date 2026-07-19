@@ -4,7 +4,12 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
-import { createChapter } from "@/lib/actions/chapter";
+import {
+  createChapter,
+  getChapterPostingContext,
+} from "@/lib/actions/chapter";
+import { formatDuration } from "@/lib/utils/format";
+import styles from "./ChapterComposer.module.css";
 
 interface ChapterComposerProps {
   videoId: string;
@@ -18,20 +23,22 @@ interface ChapterComposerProps {
   bulkOnly?: boolean;
 }
 
-function parseTimeInput(raw: string): number {
-  const s = raw.trim();
-  if (!s) return 0;
-  if (/^\d+$/.test(s)) return Number(s);
+function parseTimeInput(raw: string): number | null {
+  const value = raw.trim();
+  if (!value) return null;
+  if (/^\d+$/.test(value)) return Number(value);
 
-  const mmss = s.match(/^(\d{1,2}):([0-5]\d)(?:[.:](\d{1,3}))?$/);
+  const mmss = value.match(/^(\d{1,3}):([0-5]\d)(?:[.:](\d{1,3}))?$/);
   if (mmss) {
-    const min = Number(mmss[1]);
-    const sec = Number(mmss[2]);
-    const ms = mmss[3] ? Number(mmss[3].padEnd(3, "0")) : 0;
-    return min * 60 + sec + ms / 1000;
+    const minutes = Number(mmss[1]);
+    const seconds = Number(mmss[2]);
+    const milliseconds = mmss[3]
+      ? Number(mmss[3].padEnd(3, "0"))
+      : 0;
+    return minutes * 60 + seconds + milliseconds / 1000;
   }
 
-  const hhmmss = s.match(/^(\d{1,2}):([0-5]\d):([0-5]\d)$/);
+  const hhmmss = value.match(/^(\d{1,2}):([0-5]\d):([0-5]\d)$/);
   if (hhmmss) {
     return (
       Number(hhmmss[1]) * 3600 +
@@ -40,8 +47,7 @@ function parseTimeInput(raw: string): number {
     );
   }
 
-  const n = Number(s);
-  return Number.isFinite(n) ? n : 0;
+  return null;
 }
 
 /** 動画詳細ページから通常チャプターコメントを1件投稿するフォーム。 */
@@ -57,36 +63,89 @@ export function ChapterComposer({
   const [timeStr, setTimeStr] = React.useState("0:00");
   const [label, setLabel] = React.useState("");
   const [note, setNote] = React.useState("");
-  const [isPublic, setIsPublic] = React.useState(true);
+  const [visibility, setVisibility] = React.useState<"public" | "private">(
+    "public",
+  );
+  const [durationSeconds, setDurationSeconds] = React.useState<number | null>(
+    null,
+  );
+  const [contextError, setContextError] = React.useState<string | null>(null);
   const [busy, startTransition] = React.useTransition();
+  const [contextLoading, startContextTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
 
   void _canBulk;
 
-  const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
+  React.useEffect(() => {
+    if (!canPost || bulkOnly) return;
+    let cancelled = false;
+    setContextError(null);
+
+    startContextTransition(async () => {
+      const result = await getChapterPostingContext(videoId);
+      if (cancelled) return;
+      if (!result.ok || result.durationSeconds == null) {
+        setDurationSeconds(null);
+        setContextError(
+          result.message ?? "動画時間を取得できないため投稿できません。",
+        );
+        return;
+      }
+      setDurationSeconds(result.durationSeconds);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bulkOnly, canPost, videoId]);
+
+  const parsedTime = React.useMemo(() => parseTimeInput(timeStr), [timeStr]);
+  const timeError = React.useMemo(() => {
+    if (parsedTime == null) {
+      return "時刻は 1:23、0:01:23、または秒数で入力してください。";
+    }
+    if (durationSeconds != null && parsedTime > durationSeconds) {
+      return `動画時間 ${formatDuration(durationSeconds)} を超えています。`;
+    }
+    return null;
+  }, [durationSeconds, parsedTime]);
+
+  const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     if (!canPost) {
       setError("チャプター投稿には承認済み X ID が必要です。");
       return;
     }
     if (!label.trim()) {
-      setError("ラベルを入力してください。");
+      setError("見出しを入力してください。");
+      return;
+    }
+    if (parsedTime == null) {
+      setError("時刻の形式を確認してください。");
+      return;
+    }
+    if (durationSeconds == null) {
+      setError(
+        contextError ?? "動画時間を確認できないため、現在は投稿できません。",
+      );
+      return;
+    }
+    if (parsedTime > durationSeconds) {
+      setError(`動画時間 ${formatDuration(durationSeconds)} を超えています。`);
       return;
     }
 
-    const seconds = parseTimeInput(timeStr);
     setError(null);
-
-    const fd = new FormData();
-    fd.set("video_id", videoId);
-    fd.set("chapter_time", String(seconds));
-    fd.set("chapter_label", label.trim());
-    fd.set("note", note.trim());
-    fd.set("visibility", isPublic ? "public" : "private");
-    fd.set("show_on_player_bar", "0");
+    const formData = new FormData();
+    formData.set("video_id", videoId);
+    formData.set("chapter_time", String(parsedTime));
+    formData.set("chapter_label", label.trim());
+    formData.set("note", note.trim());
+    formData.set("visibility", visibility);
+    formData.set("show_on_player_bar", "0");
 
     startTransition(async () => {
-      const result = await createChapter(fd);
+      const result = await createChapter(formData);
       if (!result.ok) {
         setError(result.message ?? "投稿に失敗しました。");
         return;
@@ -94,6 +153,7 @@ export function ChapterComposer({
       setLabel("");
       setNote("");
       setTimeStr("0:00");
+      setVisibility("public");
       router.refresh();
     });
   };
@@ -102,29 +162,13 @@ export function ChapterComposer({
 
   if (!canPost) {
     return (
-      <section
-        style={{
-          border: "1px solid var(--border-subtle)",
-          background: "var(--bg-card)",
-          borderRadius: "var(--radius-md)",
-          padding: 12,
-          fontSize: 12,
-          color: "var(--text-muted)",
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          flexWrap: "wrap",
-        }}
-      >
+      <section className={styles.disabledPanel}>
         <span>
           <Icon name="info" size={12} aria-hidden /> 承認済み X ID を選択すると
           チャプターを投稿できます。
         </span>
         {settingsHref ? (
-          <Link
-            href={settingsHref}
-            className="fn-btn fn-btn-ghost fn-btn-sm"
-          >
+          <Link href={settingsHref} className="fn-btn fn-btn-ghost fn-btn-sm">
             X ID設定へ
           </Link>
         ) : null}
@@ -132,30 +176,24 @@ export function ChapterComposer({
     );
   }
 
+  const submitDisabled =
+    busy ||
+    contextLoading ||
+    durationSeconds == null ||
+    parsedTime == null ||
+    parsedTime > durationSeconds ||
+    !label.trim();
+
   return (
-    <section
-      style={{
-        border: "1px solid var(--border-subtle)",
-        background: "var(--bg-card)",
-        borderRadius: "var(--radius-md)",
-        padding: 12,
-      }}
-    >
-      <header
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: open ? 10 : 0,
-        }}
-      >
-        <strong style={{ fontSize: 12, letterSpacing: "0.08em" }}>
-          チャプターコメント投稿
-        </strong>
+    <section className={styles.root}>
+      <header className={styles.header}>
+        <strong className={styles.heading}>チャプターコメント投稿</strong>
         <button
           type="button"
           className="fn-btn fn-btn-ghost fn-btn-sm"
           onClick={() => setOpen((value) => !value)}
+          aria-expanded={open}
+          aria-controls="chapter-comment-form"
         >
           {open ? "閉じる" : "開く"}
         </button>
@@ -163,78 +201,141 @@ export function ChapterComposer({
 
       {open ? (
         <form
+          id="chapter-comment-form"
           onSubmit={onSubmit}
-          style={{ display: "flex", flexDirection: "column", gap: 8 }}
+          className={styles.form}
         >
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <input
-              type="text"
-              value={timeStr}
-              onChange={(e) => setTimeStr(e.target.value)}
-              placeholder="mm:ss"
-              className="fn-input"
-              style={{ width: 90 }}
-              maxLength={9}
-              required
-            />
-            <span className="fn-badge fn-badge-neutral">
-              チャプターコメント
-            </span>
+          <div className={styles.field}>
+            <label htmlFor="chapter-comment-time" className={styles.label}>
+              時刻
+            </label>
+            <div className={styles.timeRow}>
+              <input
+                id="chapter-comment-time"
+                type="text"
+                inputMode="numeric"
+                value={timeStr}
+                onChange={(event) => {
+                  setTimeStr(event.target.value);
+                  setError(null);
+                }}
+                placeholder="1:23"
+                className="fn-input"
+                aria-invalid={Boolean(timeError)}
+                aria-describedby="chapter-comment-time-help"
+                maxLength={10}
+                required
+              />
+              <span className={styles.durationText}>
+                / 動画時間 {contextLoading ? "確認中…" : durationSeconds != null ? formatDuration(durationSeconds) : "未取得"}
+              </span>
+            </div>
+            <p
+              id="chapter-comment-time-help"
+              className={timeError ? styles.fieldError : styles.fieldHelp}
+            >
+              {timeError ?? "例: 1:23、0:01:23、83"}
+            </p>
           </div>
 
-          <input
-            type="text"
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            placeholder="ラベル (例: サビ前 / 振り返りメモ)"
-            className="fn-input"
-            maxLength={120}
-            required
-          />
-
-          <textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="補足メモ (任意, 1000文字以内)"
-            className="fn-input"
-            rows={2}
-            maxLength={1000}
-          />
-
-          <label
-            style={{
-              display: "inline-flex",
-              gap: 4,
-              alignItems: "center",
-              cursor: "pointer",
-              fontSize: 11,
-              color: "var(--text-secondary)",
-            }}
-          >
+          <div className={styles.field}>
+            <label htmlFor="chapter-comment-label" className={styles.label}>
+              見出し
+            </label>
             <input
-              type="checkbox"
-              checked={isPublic}
-              onChange={(e) => setIsPublic(e.target.checked)}
+              id="chapter-comment-label"
+              type="text"
+              value={label}
+              onChange={(event) => {
+                setLabel(event.target.value);
+                setError(null);
+              }}
+              placeholder="例: サビ前 / 振り返りメモ"
+              className="fn-input"
+              maxLength={120}
+              required
             />
-            公開
-          </label>
+          </div>
+
+          <div className={styles.field}>
+            <label htmlFor="chapter-comment-note" className={styles.label}>
+              補足コメント <span className={styles.optional}>任意</span>
+            </label>
+            <textarea
+              id="chapter-comment-note"
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              placeholder="1000文字以内"
+              className="fn-input"
+              rows={3}
+              maxLength={1000}
+            />
+            <span className={styles.characterCount}>{note.length} / 1000</span>
+          </div>
+
+          <fieldset className={styles.visibilityFieldset}>
+            <legend className={styles.label}>公開範囲</legend>
+            <div className={styles.visibilityOptions}>
+              <label
+                className={
+                  visibility === "public"
+                    ? styles.visibilityOptionActive
+                    : styles.visibilityOption
+                }
+              >
+                <input
+                  type="radio"
+                  name="chapter_visibility"
+                  value="public"
+                  checked={visibility === "public"}
+                  onChange={() => setVisibility("public")}
+                />
+                <span>
+                  <strong>公開</strong>
+                  <small>この作品を見られる全員に表示します</small>
+                </span>
+              </label>
+              <label
+                className={
+                  visibility === "private"
+                    ? styles.visibilityOptionActive
+                    : styles.visibilityOption
+                }
+              >
+                <input
+                  type="radio"
+                  name="chapter_visibility"
+                  value="private"
+                  checked={visibility === "private"}
+                  onChange={() => setVisibility("private")}
+                />
+                <span>
+                  <strong>非公開</strong>
+                  <small>自分と作品管理者だけに表示します</small>
+                </span>
+              </label>
+            </div>
+          </fieldset>
+
+          {contextError ? (
+            <p className={styles.contextWarning} role="status">
+              <Icon name="info" size={12} aria-hidden /> {contextError}
+            </p>
+          ) : null}
 
           {error ? (
-            <p
-              role="alert"
-              style={{ fontSize: 11, color: "var(--accent-danger)" }}
-            >
-              <Icon name="warning" size={11} aria-hidden /> {error}
+            <p className={styles.submitError} role="alert">
+              <Icon name="warning" size={12} aria-hidden /> {error}
             </p>
           ) : null}
 
           <button
             type="submit"
             className="fn-btn fn-btn-primary fn-btn-sm"
-            disabled={busy}
+            disabled={submitDisabled}
           >
             <Icon name="plus" size={11} aria-hidden />
-            {busy ? "送信中…" : "投稿"}
+            {busy ? "送信中…" : contextLoading ? "動画時間を確認中…" : "投稿"}
           </button>
         </form>
       ) : null}
