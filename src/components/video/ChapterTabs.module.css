@@ -53,3 +53,164 @@
   font-size: 12px;
   color: var(--text-muted);
 }
+
+.dialogBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(0 0 0 / 62%);
+  backdrop-filter: blur(3px);
+}
+
+.dialog {
+  width: min(100%, 430px);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  padding: 20px;
+  border: 1px solid color-mix(in srgb, var(--accent-danger) 45%, var(--border-subtle));
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  box-shadow: 0 24px 70px rgb(0 0 0 / 40%);
+}
+
+.dialogIcon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--accent-danger);
+  background: color-mix(in srgb, var(--accent-danger) 12%, transparent);
+}
+
+.dialogBody {
+  min-width: 0;
+}
+
+.dialogTitle {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.dialogDescription {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.dialogDescription strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--event-accent, var(--accent-primary));
+}
+
+.dialogWarning {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--accent-danger);
+}
+
+.dialogError {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-danger) 10%, transparent);
+  color: var(--accent-danger);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.dialogActions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.confirmDeleteButton {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 14px;
+  border: 1px solid var(--accent-danger);
+  border-radius: var(--radius-sm);
+  background: var(--accent-danger);
+  color: white;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.confirmDeleteButton:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.confirmDeleteButton:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 2px;
+}
+
+.confirmDeleteButton:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: max(22px, env(safe-area-inset-bottom));
+  z-index: 130;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: calc(100vw - 32px);
+  padding: 10px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  box-shadow: 0 12px 36px rgb(0 0 0 / 28%);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.toast svg {
+  color: var(--accent-primary);
+}
+
+@media (max-width: 520px) {
+  .dialog {
+    grid-template-columns: 1fr;
+    padding: 18px;
+  }
+
+  .dialogIcon {
+    width: 34px;
+    height: 34px;
+  }
+
+  .dialogActions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .dialogActions > * {
+    width: 100%;
+  }
+}
