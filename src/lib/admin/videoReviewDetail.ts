@@ -5,6 +5,7 @@ import type { DB } from "@/lib/db/client";
 import {
   eventCustomQuestions,
   videoCustomAnswers,
+  videoEvents,
   videoMembers,
   videos,
   xUsers,
@@ -12,7 +13,11 @@ import {
 import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { parseMemberChaptersJson } from "@/lib/video/memberChaptersJson";
 import { formatCustomAnswerValue } from "@/lib/video/customQuestions";
-import { MAX_VIDEO_CUSTOM_QUESTIONS } from "@/lib/video/customQuestionLimits";
+import { MAX_ATOMIC_VIDEO_EVENTS } from "@/lib/video/atomicLimits";
+
+const MAX_HISTORICAL_QUESTIONS_PER_EVENT = 64;
+
+export type VideoReviewQuestionScope = "admin" | "review";
 
 export type VideoReviewCustomAnswer = {
   id: string;
@@ -59,10 +64,38 @@ function formatMemberChaptersSummary(
     .join(" / ");
 }
 
+function uniqueEventIds(values: readonly string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+async function resolveReviewEventIds(
+  db: DB,
+  videoId: string,
+  primaryEventId: string | null,
+  explicitEventIds?: readonly string[],
+): Promise<string[]> {
+  const explicit = uniqueEventIds(explicitEventIds ?? []);
+  if (explicit.length > 0) return explicit;
+
+  const linkedRows = await db
+    .select({ event_id: videoEvents.event_id })
+    .from(videoEvents)
+    .where(eq(videoEvents.video_id, videoId))
+    .limit(MAX_ATOMIC_VIDEO_EVENTS + 1);
+  if (linkedRows.length > MAX_ATOMIC_VIDEO_EVENTS) {
+    throw new Error("video_review_event_limit_exceeded");
+  }
+
+  const linked = uniqueEventIds(linkedRows.map((row) => row.event_id));
+  if (primaryEventId && !linked.includes(primaryEventId)) linked.unshift(primaryEventId);
+  return linked;
+}
+
 export async function fetchVideoReviewDetail(
   db: DB,
   videoId: string,
   eventIds?: readonly string[],
+  questionScope: VideoReviewQuestionScope = "admin",
 ): Promise<VideoReviewDetail | null> {
   const video = (
     await db
@@ -97,29 +130,43 @@ export async function fetchVideoReviewDetail(
       )[0]
     : null;
 
-  const linkedEventIds = eventIds && eventIds.length > 0
-    ? [...new Set(eventIds)]
-    : video.primary_event_id
-      ? [video.primary_event_id]
-      : [];
+  const linkedEventIds = await resolveReviewEventIds(
+    db,
+    video.id,
+    video.primary_event_id,
+    eventIds,
+  );
+  const maxQuestionRows = Math.max(1, linkedEventIds.length) *
+    MAX_HISTORICAL_QUESTIONS_PER_EVENT;
+  const scopeCondition = questionScope === "admin"
+    ? undefined
+    : inArray(eventCustomQuestions.visibility, ["review", "public"]);
 
   const questions = linkedEventIds.length > 0
     ? await db
         .select({
           id: eventCustomQuestions.id,
+          event_id: eventCustomQuestions.event_id,
           label: eventCustomQuestions.label,
           required: eventCustomQuestions.required,
           sort_order: eventCustomQuestions.sort_order,
           is_active: eventCustomQuestions.is_active,
         })
         .from(eventCustomQuestions)
-        .where(inArray(eventCustomQuestions.event_id, linkedEventIds))
+        .where(and(
+          inArray(eventCustomQuestions.event_id, linkedEventIds),
+          scopeCondition,
+        )!)
         .orderBy(
+          asc(eventCustomQuestions.event_id),
           asc(eventCustomQuestions.sort_order),
           asc(eventCustomQuestions.created_at),
         )
-        .limit(MAX_VIDEO_CUSTOM_QUESTIONS * linkedEventIds.length + 1)
+        .limit(maxQuestionRows + 1)
     : [];
+  if (questions.length > maxQuestionRows) {
+    throw new Error("video_review_question_limit_exceeded");
+  }
 
   const answers = questions.length > 0
     ? await db
@@ -143,6 +190,10 @@ export async function fetchVideoReviewDetail(
       formatCustomAnswerValue(answer.answer_text, answer.answer_json),
     ]),
   );
+  const visibleQuestions = questions.filter(
+    (question) => question.is_active === 1 || answerMap.has(question.id),
+  );
+  const showEventId = linkedEventIds.length > 1;
 
   const members = await db
     .select({
@@ -175,9 +226,11 @@ export async function fetchVideoReviewDetail(
     visibility_status: video.visibility_status,
     software_label: softwareLabel,
     event_ids: linkedEventIds,
-    customAnswers: questions.map((question) => ({
+    customAnswers: visibleQuestions.map((question) => ({
       id: question.id,
-      label: question.label,
+      label: showEventId
+        ? `${question.label}（${question.event_id}）`
+        : question.label,
       required: question.required === 1,
       active: question.is_active === 1,
       answer: answerMap.get(question.id)?.trim() || "（未回答）",
