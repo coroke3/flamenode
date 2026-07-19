@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import {
   requireAdminWrite,
@@ -17,23 +17,22 @@ import {
 } from "@/lib/audit/mutate";
 import {
   parseEventTemplateSnapshot,
+  type EventTemplateQuestionDefinition,
 } from "@/lib/admin/eventTemplateSettings";
 import { generateId } from "@/lib/utils/id";
-import { resolveStagePermissionFieldsFromJson } from "@/lib/video/formSettings";
-import { stagePermissionQuestionKeyCondition } from "@/lib/video/stagePermissionAnswers";
-import { videoCustomAnswers } from "@/lib/db/schema";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import {
   buildPartsJson,
-  buildVideoFormSettingsJson,
   parseEventForm,
   resolveSubmittedEventVisibility,
 } from "@/lib/event/eventForm";
+import { readCustomQuestionDefinitions } from "@/lib/event/customQuestionForm";
 import { buildEventUpdatePayload, parseDateInput } from "@/lib/event/eventPayload";
 import {
   hasAnyEventEditPermission,
   resolveEventEditPermissions,
 } from "@/lib/event/eventEditPermissions";
+import { MAX_EVENT_CUSTOM_QUESTIONS } from "@/lib/video/customQuestionLimits";
 
 function revalidateEventPaths(eventId: string): void {
   revalidatePath("/admin/events");
@@ -52,10 +51,10 @@ function revalidateEventListPaths(): void {
 }
 
 type PlannedQuestion = typeof eventCustomQuestions.$inferInsert;
+type SelectedQuestion = typeof eventCustomQuestions.$inferSelect;
 
-const MAX_EVENT_CUSTOM_QUESTIONS = 18;
-const MAX_EVENT_CUSTOM_ANSWER_DELETE_ROWS = 20;
 const MAX_QUESTIONS_PER_INSERT = 6;
+const MAX_HISTORICAL_EVENT_QUESTIONS = 64;
 
 function questionSnapshot(row: PlannedQuestion): Record<string, unknown> {
   return { ...row };
@@ -75,9 +74,7 @@ function fitsD1AtomicBatchBudget(
   }).withinLimit;
 }
 
-function questionInsertChunks(
-  rows: PlannedQuestion[],
-): PlannedQuestion[][] {
+function questionInsertChunks(rows: PlannedQuestion[]): PlannedQuestion[][] {
   const chunks: PlannedQuestion[][] = [];
   for (let index = 0; index < rows.length; index += MAX_QUESTIONS_PER_INSERT) {
     chunks.push(rows.slice(index, index + MAX_QUESTIONS_PER_INSERT));
@@ -86,7 +83,7 @@ function questionInsertChunks(
 }
 
 function sameQuestionDefinition(
-  current: typeof eventCustomQuestions.$inferSelect,
+  current: SelectedQuestion,
   next: PlannedQuestion,
 ): boolean {
   return (
@@ -104,18 +101,56 @@ function sameQuestionDefinition(
   );
 }
 
-function stageQuestionRows(
+function templateQuestionDefinitions(
+  definitions: readonly EventTemplateQuestionDefinition[],
+) {
+  return definitions
+    .filter((definition) => definition.is_active)
+    .slice(0, MAX_EVENT_CUSTOM_QUESTIONS)
+    .map((definition, index) => ({
+      ...definition,
+      sort_order: index,
+      is_active: true,
+    }));
+}
+
+function buildQuestionRows(
   eventId: string,
-  settingsJson: string,
+  definitions: readonly {
+    question_key: string;
+    label: string;
+    description: string | null;
+    type: PlannedQuestion["type"];
+    required: boolean;
+    options_json: string | null;
+    placeholder: string | null;
+    max_length: number | null;
+    sort_order: number;
+    is_active: boolean;
+    visibility: PlannedQuestion["visibility"];
+  }[],
   now: number,
 ): PlannedQuestion[] {
-  return resolveStagePermissionFieldsFromJson([settingsJson]).map((field, index) => ({
-    id: generateId("ecq"), event_id: eventId, question_key: field.id,
-    label: field.label, description: field.description || null, type: "textarea" as const,
-    required: field.required ? 1 : 0, options_json: null, placeholder: field.placeholder || null,
-    max_length: 1000, sort_order: index, is_active: 1, visibility: "review" as const,
-    created_at: now, updated_at: now,
-  }));
+  return definitions
+    .filter((definition) => definition.is_active)
+    .slice(0, MAX_EVENT_CUSTOM_QUESTIONS)
+    .map((definition, index) => ({
+      id: generateId("ecq"),
+      event_id: eventId,
+      question_key: definition.question_key,
+      label: definition.label,
+      description: definition.description,
+      type: definition.type,
+      required: definition.required ? 1 : 0,
+      options_json: definition.options_json,
+      placeholder: definition.placeholder,
+      max_length: definition.max_length,
+      sort_order: index,
+      is_active: 1,
+      visibility: definition.visibility,
+      created_at: now,
+      updated_at: now,
+    }));
 }
 
 export interface EventActionResult {
@@ -127,22 +162,13 @@ export interface EventActionResult {
 export async function createEvent(
   formData: FormData,
 ): Promise<EventActionResult> {
-  const guard =
-    await requireAdminWrite(
-      "admin_event_create",
-    );
-
+  const guard = await requireAdminWrite("admin_event_create");
   if (!guard.ok) {
-    return {
-      ok: false,
-      message: guard.message,
-    };
+    return { ok: false, message: guard.message };
   }
 
   const actorUserId = guard.user.id;
-
   const { db } = guard;
-
   const parsed = parseEventForm(formData);
   if (!parsed.ok) return parsed;
   const data = parsed.data;
@@ -152,28 +178,39 @@ export async function createEvent(
   let templateSnapshot = null;
   const templateId = data.template_id?.trim();
   if (templateId) {
-    const tmpl = (
+    const template = (
       await db
         .select({ settings_json: eventTemplates.settings_json })
         .from(eventTemplates)
         .where(eq(eventTemplates.id, templateId))
         .limit(1)
     )[0];
-    if (!tmpl) {
+    if (!template) {
       return { ok: false, message: "指定したテンプレートが見つかりません。" };
     }
-    templateSnapshot = parseEventTemplateSnapshot(tmpl.settings_json);
+    templateSnapshot = parseEventTemplateSnapshot(template.settings_json);
     if (!templateSnapshot) {
       return { ok: false, message: "テンプレートの設定データが不正です。" };
     }
   }
 
-  const dup = (
+  const duplicate = (
     await db.select({ id: events.id }).from(events).where(eq(events.id, id)).limit(1)
   )[0];
-  if (dup) return { ok: false, message: `ID「${id}」は既に存在します。` };
+  if (duplicate) return { ok: false, message: `ID「${id}」は既に存在します。` };
 
-  const videoFormSettingsJson = buildVideoFormSettingsJson(formData);
+  const submittedQuestions = readCustomQuestionDefinitions(formData);
+  if (!submittedQuestions.ok) return submittedQuestions;
+  const definitions = submittedQuestions.submitted
+    ? submittedQuestions.definitions
+    : templateQuestionDefinitions(templateSnapshot?.custom_question_definitions ?? []);
+  if (definitions.length > MAX_EVENT_CUSTOM_QUESTIONS) {
+    return {
+      ok: false,
+      message: `カスタム質問は最大${MAX_EVENT_CUSTOM_QUESTIONS}件です。`,
+    };
+  }
+
   const visibilityStatus = resolveSubmittedEventVisibility(data);
   const createdRow = {
     id,
@@ -208,35 +245,9 @@ export async function createEvent(
     public_api_enabled: 0,
     public_api_updated_at: null,
   } satisfies typeof events.$inferInsert;
-  const templateQuestions = (
-    templateSnapshot?.custom_question_definitions ?? []
-  ).map((definition) => ({
-    id: generateId("ecq"),
-    event_id: id,
-    question_key: definition.question_key,
-    label: definition.label,
-    description: definition.description,
-    type: definition.type,
-    required: definition.required ? 1 : 0,
-    options_json: definition.options_json,
-    placeholder: definition.placeholder,
-    max_length: definition.max_length,
-    sort_order: definition.sort_order,
-    is_active: definition.is_active ? 1 : 0,
-    visibility: definition.visibility,
-    created_at: now,
-    updated_at: now,
-  } satisfies PlannedQuestion));
-  const questions = [...templateQuestions, ...stageQuestionRows(id, videoFormSettingsJson, now)];
-  if (questions.length > MAX_EVENT_CUSTOM_QUESTIONS) {
-    return {
-      ok: false,
-      message: `カスタム質問はステージ質問を含めて最大${MAX_EVENT_CUSTOM_QUESTIONS}件です。`,
-    };
-  }
-  if (new Set(questions.map((row) => row.question_key)).size !== questions.length) {
-    return { ok: false, message: "カスタム質問の識別子が重複しています。" };
-  }
+  const questions = buildQuestionRows(id, definitions, now);
+  const insertChunks = questionInsertChunks(questions);
+
   const queue = await buildStaticRebuildQueueBatch(db, [
     { targetType: "event", targetId: id, reason: "event_create", priority: "high", requestedByUserId: actorUserId },
     { targetType: "events_index", targetId: "global", reason: "event_create", priority: "low", requestedByUserId: actorUserId },
@@ -244,14 +255,12 @@ export async function createEvent(
   ]);
   const mutationStatements = [
     db.insert(events).values(createdRow),
-    ...questionInsertChunks(questions).map((chunk) =>
-      db.insert(eventCustomQuestions).values(chunk),
-    ),
+    ...insertChunks.map((chunk) => db.insert(eventCustomQuestions).values(chunk)),
     ...queue.statements,
   ];
   const expectedMutationChanges = [
     1,
-    ...questionInsertChunks(questions).map((chunk) => chunk.length),
+    ...insertChunks.map((chunk) => chunk.length),
     ...queue.expectedChanges,
   ];
   const audits: Parameters<typeof mutateWithAudit>[1]["audits"] = [
@@ -294,25 +303,14 @@ export async function createEvent(
 export async function updateEvent(
   formData: FormData,
 ): Promise<EventActionResult> {
-  const guard = await writeGuard({
-    feature: "manage_event_update",
-  });
-
+  const guard = await writeGuard({ feature: "manage_event_update" });
   if (!guard.ok) {
-    return {
-      ok: false,
-      message: guard.message,
-    };
+    return { ok: false, message: guard.message };
   }
 
   const actorUserId = guard.user.id;
-  const user = {
-    id: guard.user.id,
-    role: guard.user.role ?? null,
-  };
-
+  const user = { id: guard.user.id, role: guard.user.role ?? null };
   const { db } = guard;
-
   const parsed = parseEventForm(formData);
   if (!parsed.ok) return parsed;
   const data = parsed.data;
@@ -320,10 +318,7 @@ export async function updateEvent(
 
   const permissions = await resolveEventEditPermissions(db, user, data.id);
   if (!hasAnyEventEditPermission(permissions)) {
-    return {
-      ok: false,
-      message: "このイベント設定を変更する権限がありません。",
-    };
+    return { ok: false, message: "このイベント設定を変更する権限がありません。" };
   }
 
   const before = (
@@ -335,186 +330,142 @@ export async function updateEvent(
   const built = buildEventUpdatePayload({
     data,
     before,
-    formData,
     permissions,
     now,
   });
-
   const after = { ...before, ...built.payload } as typeof events.$inferSelect;
-  const mutations: Array<Parameters<typeof mutateWithAudit>[1]["mutationStatements"][number]> = [db.update(events).set(built.payload).where(and(eq(events.id, data.id), eq(events.updated_at, before.updated_at)))];
+  const mutations: Array<Parameters<typeof mutateWithAudit>[1]["mutationStatements"][number]> = [
+    db.update(events)
+      .set(built.payload)
+      .where(and(eq(events.id, data.id), eq(events.updated_at, before.updated_at))),
+  ];
   const expected = [1];
   const audits: Array<Parameters<typeof mutateWithAudit>[1]["audits"][number]> = [{
-    table_name: "events", target_id: data.id, operation: "UPDATE" as const,
-    before, after, actor_user_id: actorUserId, retention_class: "normal" as const, strict: true,
+    table_name: "events",
+    target_id: data.id,
+    operation: "UPDATE",
+    before,
+    after,
+    actor_user_id: actorUserId,
+    retention_class: "normal",
+    strict: true,
   }];
 
-  if (permissions.questions && built.videoFormSettingsJson != null) {
-    const existing = await db
-      .select()
-      .from(eventCustomQuestions)
-      .where(
-        and(
-          eq(eventCustomQuestions.event_id, data.id),
-          stagePermissionQuestionKeyCondition(),
-        ),
-      )
-      .limit(MAX_EVENT_CUSTOM_QUESTIONS + 1);
-    if (existing.length > MAX_EVENT_CUSTOM_QUESTIONS) {
-      return {
-        ok: false,
-        message: "既存のカスタム質問数が上限を超えているため更新できません。",
-      };
-    }
-    const next = stageQuestionRows(data.id, built.videoFormSettingsJson, now);
-    if (next.length > MAX_EVENT_CUSTOM_QUESTIONS) {
-      return {
-        ok: false,
-        message: `カスタム質問は最大${MAX_EVENT_CUSTOM_QUESTIONS}件です。`,
-      };
-    }
-    if (new Set(next.map((row) => row.question_key)).size !== next.length) {
-      return { ok: false, message: "カスタム質問の識別子が重複しています。" };
-    }
-    const nextByKey = new Map(next.map((row) => [row.question_key, row]));
-    const obsoleteQuestions = existing.filter(
-      (row) => !nextByKey.has(row.question_key),
-    );
-    const obsoleteQuestionIds = obsoleteQuestions.map((row) => row.id);
-    const deletedAnswers = obsoleteQuestionIds.length > 0
-      ? await db
-          .select()
-          .from(videoCustomAnswers)
-          .where(inArray(videoCustomAnswers.question_id, obsoleteQuestionIds))
-          .limit(MAX_EVENT_CUSTOM_ANSWER_DELETE_ROWS + 1)
-      : [];
-    if (deletedAnswers.length > MAX_EVENT_CUSTOM_ANSWER_DELETE_ROWS) {
-      return {
-        ok: false,
-        message: "削除対象の回答数が上限を超えているため更新できません。",
-      };
-    }
-    if (deletedAnswers.length > 0) {
-      mutations.push(
-        db
-          .delete(videoCustomAnswers)
-          .where(
-            or(
-              ...deletedAnswers.map((answer) =>
-                and(
-                  eq(videoCustomAnswers.video_id, answer.video_id),
-                  eq(videoCustomAnswers.event_id, answer.event_id),
-                  eq(videoCustomAnswers.question_id, answer.question_id),
-                  eq(videoCustomAnswers.updated_at, answer.updated_at),
-                ),
-              ),
-            ),
-          ),
-      );
-      expected.push(deletedAnswers.length);
-      audits.push(
-        ...deletedAnswers.map((answer) => ({
-          table_name: "video_custom_answers",
-          target_id: `${answer.video_id}:${answer.event_id}:${answer.question_id}`,
-          operation: "DELETE" as const,
-          before: answer,
-          after: null,
-          actor_user_id: actorUserId,
-          context: "event-update:removed-stage-question-answer",
-          retention_class: "normal" as const,
-          strict: true,
-        })),
-      );
-    }
-    if (obsoleteQuestionIds.length > 0) {
-      mutations.push(
-        db
-          .delete(eventCustomQuestions)
-          .where(
-            or(
-              ...obsoleteQuestions.map((row) =>
-                and(
-                  eq(eventCustomQuestions.id, row.id),
-                  eq(eventCustomQuestions.updated_at, row.updated_at),
-                ),
-              ),
-            ),
-          ),
-      );
-      expected.push(obsoleteQuestionIds.length);
-      audits.push(
-        ...obsoleteQuestions.map((row) => ({
-          table_name: "event_custom_questions",
-          target_id: row.id,
-          operation: "DELETE" as const,
-          before: row,
-          after: null,
-          actor_user_id: actorUserId,
-          context: "event-update:removed-stage-question",
-          retention_class: "normal" as const,
-          strict: true,
-        })),
-      );
-    }
+  if (permissions.questions) {
+    const submittedQuestions = readCustomQuestionDefinitions(formData);
+    if (!submittedQuestions.ok) return submittedQuestions;
+    if (submittedQuestions.submitted) {
+      const existing = await db
+        .select()
+        .from(eventCustomQuestions)
+        .where(eq(eventCustomQuestions.event_id, data.id))
+        .limit(MAX_HISTORICAL_EVENT_QUESTIONS + 1);
+      if (existing.length > MAX_HISTORICAL_EVENT_QUESTIONS) {
+        return {
+          ok: false,
+          message: "既存の質問履歴が多すぎるため、管理者による整理が必要です。",
+        };
+      }
 
-    for (const row of existing) {
-      const replacement = nextByKey.get(row.question_key);
-      if (!replacement) {
-        continue;
+      const definitions = submittedQuestions.definitions.filter((definition) => definition.is_active);
+      if (definitions.length > MAX_EVENT_CUSTOM_QUESTIONS) {
+        return {
+          ok: false,
+          message: `カスタム質問は最大${MAX_EVENT_CUSTOM_QUESTIONS}件です。`,
+        };
       }
-      nextByKey.delete(row.question_key);
-      if (sameQuestionDefinition(row, replacement)) {
-        continue;
-      }
-      const { id: _id, event_id: _eventId, created_at: _createdAt, ...updateValues } = replacement;
-      const updated = { ...row, ...replacement, id: row.id, created_at: row.created_at };
-      mutations.push(
-        db
-          .update(eventCustomQuestions)
-          .set(updateValues)
-          .where(
-            and(
+      const nextRows = buildQuestionRows(data.id, definitions, now);
+      const existingByKey = new Map(existing.map((row) => [row.question_key, row]));
+      const submittedKeys = new Set(nextRows.map((row) => row.question_key));
+
+      for (const row of existing) {
+        if (row.is_active !== 1 || submittedKeys.has(row.question_key)) continue;
+        const next = { ...row, is_active: 0, updated_at: now };
+        mutations.push(
+          db.update(eventCustomQuestions)
+            .set({ is_active: 0, updated_at: now })
+            .where(and(
               eq(eventCustomQuestions.id, row.id),
               eq(eventCustomQuestions.updated_at, row.updated_at),
-            ),
-          ),
-      );
-      expected.push(1);
-      audits.push({
-        table_name: "event_custom_questions",
-        target_id: row.id,
-        operation: "UPDATE",
-        before: row,
-        after: updated,
-        actor_user_id: actorUserId,
-        context: "event-update:stage-question",
-        retention_class: "normal",
-        strict: true,
-      });
-    }
-    const insertedQuestions = [...nextByKey.values()];
-    if (insertedQuestions.length > 0) {
-      const insertChunks = questionInsertChunks(insertedQuestions);
-      mutations.push(
-        ...insertChunks.map((chunk) =>
-          db.insert(eventCustomQuestions).values(chunk),
-        ),
-      );
-      expected.push(...insertChunks.map((chunk) => chunk.length));
-      audits.push(
-        ...insertedQuestions.map((row) => ({
+            )),
+        );
+        expected.push(1);
+        audits.push({
+          table_name: "event_custom_questions",
+          target_id: row.id,
+          operation: "UPDATE",
+          before: row,
+          after: next,
+          actor_user_id: actorUserId,
+          context: "event-update:disable-custom-question",
+          retention_class: "normal",
+          strict: true,
+        });
+      }
+
+      const inserted: PlannedQuestion[] = [];
+      for (const proposed of nextRows) {
+        const current = existingByKey.get(proposed.question_key);
+        if (!current) {
+          inserted.push(proposed);
+          continue;
+        }
+        const replacement: PlannedQuestion = {
+          ...proposed,
+          id: current.id,
+          created_at: current.created_at,
+        };
+        if (sameQuestionDefinition(current, replacement)) continue;
+        const {
+          id: _id,
+          event_id: _eventId,
+          created_at: _createdAt,
+          ...updateValues
+        } = replacement;
+        const updated = { ...current, ...replacement };
+        mutations.push(
+          db.update(eventCustomQuestions)
+            .set(updateValues)
+            .where(and(
+              eq(eventCustomQuestions.id, current.id),
+              eq(eventCustomQuestions.updated_at, current.updated_at),
+            )),
+        );
+        expected.push(1);
+        audits.push({
+          table_name: "event_custom_questions",
+          target_id: current.id,
+          operation: "UPDATE",
+          before: current,
+          after: updated,
+          actor_user_id: actorUserId,
+          context: "event-update:custom-question",
+          retention_class: "normal",
+          strict: true,
+        });
+      }
+
+      const insertChunks = questionInsertChunks(inserted);
+      if (inserted.length > 0) {
+        mutations.push(
+          ...insertChunks.map((chunk) => db.insert(eventCustomQuestions).values(chunk)),
+        );
+        expected.push(...insertChunks.map((chunk) => chunk.length));
+        audits.push(...inserted.map((row) => ({
           table_name: "event_custom_questions",
           target_id: row.id,
           operation: "CREATE" as const,
           before: null,
           after: row,
           actor_user_id: actorUserId,
-          context: "event-update:stage-question",
+          context: "event-update:custom-question",
           retention_class: "normal" as const,
           strict: true,
-        })),
-      );
+        })));
+      }
     }
   }
+
   const queue = await buildStaticRebuildQueueBatch(db, [
     { targetType: "event", targetId: data.id, reason: "event_settings_update", requestedByUserId: actorUserId },
     { targetType: "events_index", targetId: "global", reason: "event_settings_update", priority: "low", requestedByUserId: actorUserId },
@@ -531,27 +482,18 @@ export async function updateEvent(
   });
 
   revalidateEventPaths(data.id);
-
   return { ok: true, eventId: data.id };
 }
 
 export async function deleteEvent(
   formData: FormData,
 ): Promise<EventActionResult> {
-  const guard =
-    await requireAdminWrite(
-      "manage_event_archive",
-    );
-
+  const guard = await requireAdminWrite("manage_event_archive");
   if (!guard.ok) {
-    return {
-      ok: false,
-      message: guard.message,
-    };
+    return { ok: false, message: guard.message };
   }
 
   const actorUserId = guard.user.id;
-
   const eventId = String(formData.get("event_id") ?? "").trim();
   const confirm = String(formData.get("confirm") ?? "").trim();
   if (!eventId) return { ok: false, message: "event_id が必要です。" };
@@ -563,9 +505,10 @@ export async function deleteEvent(
   }
 
   const { db } = guard;
-
   const now = Math.floor(Date.now() / 1000);
-  const before = (await db.select().from(events).where(eq(events.id, eventId)).limit(1))[0];
+  const before = (
+    await db.select().from(events).where(eq(events.id, eventId)).limit(1)
+  )[0];
   if (!before) return { ok: false, message: "イベントが見つかりません。" };
   const after = { ...before, visibility_status: "archived" as const, updated_at: now };
   const queue = await buildStaticRebuildQueueBatch(db, [
@@ -574,9 +517,23 @@ export async function deleteEvent(
     { targetType: "search_index", targetId: "global", reason: "event_archive", priority: "low", requestedByUserId: actorUserId },
   ]);
   await mutateWithAudit(db, {
-    mutationStatements: [db.update(events).set({ visibility_status: "archived", updated_at: now }).where(and(eq(events.id, eventId), eq(events.updated_at, before.updated_at))), ...queue.statements],
+    mutationStatements: [
+      db.update(events)
+        .set({ visibility_status: "archived", updated_at: now })
+        .where(and(eq(events.id, eventId), eq(events.updated_at, before.updated_at))),
+      ...queue.statements,
+    ],
     expectedMutationChanges: [1, ...queue.expectedChanges],
-    audits: [{ table_name: "events", target_id: eventId, operation: "UPDATE", before, after, actor_user_id: actorUserId, retention_class: "long_audit", strict: true }],
+    audits: [{
+      table_name: "events",
+      target_id: eventId,
+      operation: "UPDATE",
+      before,
+      after,
+      actor_user_id: actorUserId,
+      retention_class: "long_audit",
+      strict: true,
+    }],
   });
 
   revalidateEventPaths(eventId);
