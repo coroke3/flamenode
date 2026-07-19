@@ -14,11 +14,6 @@ import { checkYoutubeVideoDuplicate } from "@/lib/video/slotPart";
 import { parseVideoForm } from "@/lib/video/videoFormSchema";
 import { parseEventIdsFromForm } from "@/lib/video/parseEventIds";
 import {
-  buildStagePermissionSubmission,
-  getStagePermissionFieldsForEvents,
-} from "@/lib/video/stagePermissionSubmission";
-import { readStagePermissionCustomAnswers } from "@/lib/video/stagePermissionAnswers";
-import {
   computeAllowedVideoEditSections,
   hasAnyVideoEditSection,
 } from "@/lib/video/computeEditSections";
@@ -34,7 +29,7 @@ import {
 import {
   applyVideoUpdatePlan,
   buildVideoUpdatePlan,
-  computeStagePermissionDeleteIds,
+  computeCustomAnswerDeleteEventIds,
 } from "@/lib/video/videoSavePlan";
 import type { VideoActionResult } from "@/lib/video/types";
 
@@ -58,23 +53,12 @@ export async function updateVideo(
   if (!target) return { ok: false, message: "対象作品が見つかりません。" };
 
   const targetSoftwareLabel = await getVideoSoftwareLabel(db, videoId);
-  const stageEventIds = parseEventIdsFromForm(formData);
-  if (target.primary_event_id && !stageEventIds.includes(target.primary_event_id)) {
-    stageEventIds.push(target.primary_event_id);
+  const submittedEventIds = parseEventIdsFromForm(formData);
+  if (target.primary_event_id && !submittedEventIds.includes(target.primary_event_id)) {
+    submittedEventIds.push(target.primary_event_id);
   }
-  if (stageEventIds.length > MAX_ATOMIC_VIDEO_EVENTS) {
+  if (submittedEventIds.length > MAX_ATOMIC_VIDEO_EVENTS) {
     return { ok: false, message: "選択イベント数が保存上限を超えています。" };
-  }
-  const editStageFields = await getStagePermissionFieldsForEvents(db, stageEventIds);
-  let currentStagePermission: string | null;
-  try {
-    currentStagePermission = await readStagePermissionCustomAnswers(db, {
-      videoId,
-      eventIds: stageEventIds,
-    });
-  } catch (error) {
-    console.warn("[updateVideo] stage permission read rejected", error);
-    return { ok: false, message: "ステージ許諾回答数が保存上限を超えています。" };
   }
 
   const raw = Object.fromEntries(formData);
@@ -109,14 +93,6 @@ export async function updateVideo(
   if (!parsed.ok) return parsed;
   const youtubeId = extractYoutubeId(parsed.data.youtube_url);
   if (!youtubeId) return { ok: false, message: "YouTube URL が解析できません。" };
-
-  const nextStagePermissionResult = buildStagePermissionSubmission(
-    formData,
-    editStageFields,
-    currentStagePermission,
-  );
-  if (!nextStagePermissionResult.ok) return nextStagePermissionResult;
-  const nextStagePermission = nextStagePermissionResult.value;
 
   const rawPrivilegeMode = String(formData.get("edit_privilege_mode") ?? "").trim();
   let privilegeMode: CanEditVideoPrivilegeMode = "normal";
@@ -194,7 +170,6 @@ export async function updateVideo(
       changed(parsed.data.highlights, target.highlights) ||
       changed(parsed.data.production_story, target.production_story) ||
       changed(parsed.data.used_software, targetSoftwareLabel) ||
-      changed(nextStagePermission, currentStagePermission) ||
       changed(parsed.data.closing_comment, target.closing_comment))
   ) {
     return { ok: false, message: "紹介文・振り返り項目を編集する権限がありません。" };
@@ -224,17 +199,17 @@ export async function updateVideo(
 
   const hasEventIdsField = formData.has("event_ids");
   let syncedEventIds: string[] | null = null;
-  let stagePermissionDeleteEventIds: string[] | undefined;
-  let customEventIds = stageEventIds;
+  let customAnswerDeleteEventIds: string[] | undefined;
+  let customEventIds = submittedEventIds;
 
   if (sections.primary_event && hasEventIdsField) {
     const requestedEventIds = parseEventIdsFromForm(formData);
     const alwaysInclude = target.primary_event_id ? [target.primary_event_id] : [];
     const previousEventRows = await db
-        .select({ event_id: videoEvents.event_id })
-        .from(videoEvents)
-        .where(eq(videoEvents.video_id, videoId))
-        .limit(MAX_ATOMIC_VIDEO_EVENTS + 1);
+      .select({ event_id: videoEvents.event_id })
+      .from(videoEvents)
+      .where(eq(videoEvents.video_id, videoId))
+      .limit(MAX_ATOMIC_VIDEO_EVENTS + 1);
     if (previousEventRows.length > MAX_ATOMIC_VIDEO_EVENTS) {
       return { ok: false, message: "所属イベント数が原子更新上限を超えています。" };
     }
@@ -249,17 +224,17 @@ export async function updateVideo(
       console.warn("[updateVideo] event plan rejected", error);
       return { ok: false, message: "選択イベント数が保存上限を超えています。" };
     }
-    stagePermissionDeleteEventIds = computeStagePermissionDeleteIds({
+    customAnswerDeleteEventIds = computeCustomAnswerDeleteEventIds({
       previousEventIds,
       syncedEventIds,
     });
     customEventIds = syncedEventIds;
   } else if (sections.descriptions) {
     const customEventRows = await db
-        .select({ event_id: videoEvents.event_id })
-        .from(videoEvents)
-        .where(eq(videoEvents.video_id, videoId))
-        .limit(MAX_ATOMIC_VIDEO_EVENTS + 1);
+      .select({ event_id: videoEvents.event_id })
+      .from(videoEvents)
+      .where(eq(videoEvents.video_id, videoId))
+      .limit(MAX_ATOMIC_VIDEO_EVENTS + 1);
     if (customEventRows.length > MAX_ATOMIC_VIDEO_EVENTS) {
       return { ok: false, message: "所属イベント数が原子更新上限を超えています。" };
     }
@@ -267,7 +242,6 @@ export async function updateVideo(
   }
 
   let customAnswerDrafts: CustomAnswerDraft[] = [];
-
   if (sections.descriptions) {
     const customValidation = await validateCustomAnswersForEvents(
       db,
@@ -291,14 +265,13 @@ export async function updateVideo(
     youtubeId,
     youtubeChanged,
     nextCreatorX,
-    nextStagePermission,
     creatorYoutubeChannelUrl: snapshotYoutubeChannelUrl(
       parsed.data.youtube_channel_url,
     ),
     memberSubmission,
     customAnswerDrafts,
     syncedEventIds,
-    stagePermissionDeleteEventIds,
+    customAnswerDeleteEventIds,
     hasEventIdsField,
     now,
   });
@@ -322,7 +295,9 @@ export async function updateVideo(
   return {
     ok: true,
     videoId,
-    youtubeVideoId: sections.youtube ? youtubeId : (target.youtube_video_id ?? undefined),
+    youtubeVideoId: sections.youtube
+      ? youtubeId
+      : (target.youtube_video_id ?? undefined),
     eventId: target.primary_event_id ?? undefined,
   };
 }
