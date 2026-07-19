@@ -2,12 +2,10 @@
 
 import * as React from "react";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
 import styles from "./ChapterCommentItem.module.css";
 import { Icon } from "@/components/ui/Icon";
 import { formatDuration } from "@/lib/utils/format";
 import { cn } from "@/lib/utils/cn";
-import { deleteChapter } from "@/lib/actions/chapter";
 
 /** 動画詳細ページ内で通常チャプターコメントを表示する。 */
 export interface ChapterCommentItemEntry {
@@ -28,6 +26,9 @@ interface ChapterCommentItemProps {
   showAuthor?: boolean;
   /** クリックで動画をシークするコールバック。範囲外のときは発火しない。 */
   onSeek?: (time: number) => void;
+  /** 投稿者本人・作品管理者・管理者の場合のみ true。 */
+  canDelete?: boolean;
+  onDeleteRequest?: (chapter: ChapterCommentItemEntry) => void;
   className?: string;
 }
 
@@ -36,69 +37,20 @@ export function ChapterCommentItem({
   duration,
   showAuthor = false,
   onSeek,
+  canDelete = false,
+  onDeleteRequest,
   className,
 }: ChapterCommentItemProps): React.ReactElement {
-  const router = useRouter();
-  const [deleteError, setDeleteError] = React.useState<string | null>(null);
-  const [deleting, startDeleteTransition] = React.useTransition();
   const outOfRange = duration ? chapter.chapter_time > duration : false;
+  const canSeek = Boolean(onSeek && !outOfRange);
 
-  const handleClick = React.useCallback(() => {
-    if (outOfRange) return;
-    onSeek?.(chapter.chapter_time);
-  }, [outOfRange, onSeek, chapter.chapter_time]);
-
-  const handleDelete = React.useCallback(
-    (event: React.MouseEvent<HTMLButtonElement>) => {
-      event.preventDefault();
-      event.stopPropagation();
-      setDeleteError(null);
-
-      if (!window.confirm(`「${chapter.chapter_label}」を削除しますか？`)) {
-        return;
-      }
-
-      const formData = new FormData();
-      formData.set("chapter_id", chapter.id);
-      startDeleteTransition(async () => {
-        const result = await deleteChapter(formData);
-        if (!result.ok) {
-          setDeleteError(result.message ?? "削除に失敗しました。");
-          return;
-        }
-        router.refresh();
-      });
-    },
-    [chapter.chapter_label, chapter.id, router],
-  );
-
-  return (
-    <div
-      className={cn(
-        styles.item,
-        outOfRange && styles.outOfRange,
-        onSeek && !outOfRange && styles.clickable,
-        className,
-      )}
-      role={onSeek ? "button" : undefined}
-      tabIndex={onSeek ? 0 : undefined}
-      onClick={onSeek ? handleClick : undefined}
-      onKeyDown={
-        onSeek
-          ? (event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                handleClick();
-              }
-            }
-          : undefined
-      }
-    >
+  const content = (
+    <>
       <span className={styles.timeBadge}>
         {formatDuration(chapter.chapter_time)}
       </span>
-      <div className={styles.body}>
-        <div className={styles.titleRow}>
+      <span className={styles.body}>
+        <span className={styles.titleRow}>
           <Icon
             name="chapter"
             size={11}
@@ -112,21 +64,10 @@ export function ChapterCommentItem({
           {outOfRange ? (
             <span className="fn-badge fn-badge-neutral">範囲外</span>
           ) : null}
-          <button
-            type="button"
-            className="fn-btn fn-btn-ghost fn-btn-sm"
-            disabled={deleting}
-            title="投稿者本人、作品管理者、管理者のみ削除できます"
-            onClick={handleDelete}
-            onKeyDown={(event) => event.stopPropagation()}
-            style={{ marginLeft: "auto" }}
-          >
-            {deleting ? "削除中…" : "削除"}
-          </button>
-        </div>
+        </span>
 
         {showAuthor && chapter.author_name ? (
-          <div className={styles.authorRow}>
+          <span className={styles.authorRow}>
             {chapter.author_icon ? (
               <Image
                 src={chapter.author_icon}
@@ -142,23 +83,46 @@ export function ChapterCommentItem({
               </span>
             )}
             <span className={styles.authorName}>{chapter.author_name}</span>
-          </div>
+          </span>
         ) : null}
 
-        {chapter.note ? <p className={styles.note}>{chapter.note}</p> : null}
-        {deleteError ? (
-          <p
-            role="alert"
-            style={{
-              margin: "6px 0 0",
-              fontSize: 11,
-              color: "var(--accent-danger)",
-            }}
-          >
-            {deleteError}
-          </p>
-        ) : null}
-      </div>
+        {chapter.note ? <span className={styles.note}>{chapter.note}</span> : null}
+      </span>
+    </>
+  );
+
+  return (
+    <div
+      className={cn(
+        styles.item,
+        outOfRange && styles.outOfRange,
+        className,
+      )}
+    >
+      {canSeek ? (
+        <button
+          type="button"
+          className={styles.seekTarget}
+          onClick={() => onSeek?.(chapter.chapter_time)}
+          aria-label={`${formatDuration(chapter.chapter_time)}へ移動: ${chapter.chapter_label}`}
+        >
+          {content}
+        </button>
+      ) : (
+        <div className={styles.staticTarget}>{content}</div>
+      )}
+
+      {canDelete && onDeleteRequest ? (
+        <button
+          type="button"
+          className={styles.deleteButton}
+          onClick={() => onDeleteRequest(chapter)}
+          aria-label={`チャプターコメント「${chapter.chapter_label}」を削除`}
+          title="削除"
+        >
+          <Icon name="trash" size={15} aria-hidden />
+        </button>
+      ) : null}
     </div>
   );
 }
