@@ -8,6 +8,7 @@ import {
 
 function baseEvent(overrides = {}) {
   return {
+    schema_version: 2,
     event_type: "event",
     explanation: null,
     icon_url: null,
@@ -17,13 +18,13 @@ function baseEvent(overrides = {}) {
     allow_unslotted_posts: 0,
     allow_user_video_edits: 1,
     user_video_edit_permission_keys_json: null,
-    video_form_settings_json: null,
     max_slots_per_video: 1,
     max_consecutive_slots_per_entry: 3,
     slot_part_gap_minutes: 15,
     slot_type: "time",
     slot_visibility_mode: "public_name",
     parts_json: null,
+    custom_question_definitions: [],
     review_settings: null,
     editable_fields: null,
     repeat_rules: null,
@@ -49,11 +50,7 @@ function checkboxQuestion(overrides = {}) {
 }
 
 test("snapshotFromEvent stores active normalized questions once", () => {
-  const snapshot = snapshotFromEvent(baseEvent({
-    video_form_settings_json: JSON.stringify({
-      stage_permissions: [{ id: "legacy", enabled: true }],
-    }),
-  }), [
+  const snapshot = snapshotFromEvent(baseEvent(), [
     checkboxQuestion(),
     checkboxQuestion({
       question_key: "disabled",
@@ -93,44 +90,18 @@ test("template round trip restores checkbox options to the event form", () => {
   assert.equal(initial.custom_questions[0].required, true);
 });
 
-test("legacy stage permission JSON is converted only while reading old templates", () => {
+test("parseEventTemplateSnapshot rejects old template schema", () => {
   const snapshot = parseEventTemplateSnapshot(JSON.stringify({
     ...baseEvent(),
-    video_form_settings_json: JSON.stringify({
-      stage_permissions: [
-        {
-          id: "stage_permission",
-          enabled: true,
-          required: true,
-          label: "権利確認",
-          description: "確認内容を入力",
-          placeholder: "確認済み",
-        },
-      ],
-    }),
+    schema_version: 1,
   }));
 
-  assert.ok(snapshot);
-  assert.equal(snapshot.schema_version, 2);
-  assert.deepEqual(snapshot.custom_question_definitions, [
-    {
-      question_key: "stage_permission",
-      label: "権利確認",
-      description: "確認内容を入力",
-      type: "textarea",
-      required: true,
-      options_json: null,
-      placeholder: "確認済み",
-      max_length: 1000,
-      sort_order: 0,
-      is_active: true,
-      visibility: "review",
-    },
-  ]);
+  assert.equal(snapshot, null);
 });
 
 test("parseEventTemplateSnapshot normalizes an absent question definition list", () => {
-  const snapshot = parseEventTemplateSnapshot(JSON.stringify(baseEvent()));
+  const { custom_question_definitions: _questions, ...withoutQuestions } = baseEvent();
+  const snapshot = parseEventTemplateSnapshot(JSON.stringify(withoutQuestions));
 
   assert.ok(snapshot);
   assert.deepEqual(snapshot.custom_question_definitions, []);
