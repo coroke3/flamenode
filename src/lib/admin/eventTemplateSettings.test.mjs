@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   parseEventTemplateSnapshot,
   snapshotFromEvent,
+  snapshotToFormInitial,
 } from "./eventTemplateSettings.ts";
 
 function baseEvent(overrides = {}) {
@@ -30,36 +31,100 @@ function baseEvent(overrides = {}) {
   };
 }
 
-test("snapshotFromEvent stores normalized custom questions instead of legacy JSON", () => {
-  const snapshot = snapshotFromEvent(baseEvent(), [
-    {
-      question_key: "extra_note",
-      label: "Extra note",
-      description: null,
-      type: "text",
-      required: 1,
-      options_json: null,
-      placeholder: "Write here",
-      max_length: 200,
-      sort_order: 2,
+function checkboxQuestion(overrides = {}) {
+  return {
+    question_key: "rights_checked",
+    label: "確認済みの権利",
+    description: "該当する項目をすべて選択",
+    type: "checkbox",
+    required: 1,
+    options_json: JSON.stringify(["素材", "楽曲", "モデル"]),
+    placeholder: null,
+    max_length: null,
+    sort_order: 0,
+    is_active: 1,
+    visibility: "review",
+    ...overrides,
+  };
+}
+
+test("snapshotFromEvent stores active normalized questions once", () => {
+  const snapshot = snapshotFromEvent(baseEvent({
+    video_form_settings_json: JSON.stringify({
+      stage_permissions: [{ id: "legacy", enabled: true }],
+    }),
+  }), [
+    checkboxQuestion(),
+    checkboxQuestion({
+      question_key: "disabled",
+      label: "無効質問",
       is_active: 0,
-      visibility: "private",
-    },
+    }),
   ]);
 
+  assert.equal(snapshot.schema_version, 2);
+  assert.equal("video_form_settings_json" in snapshot, false);
   assert.deepEqual(snapshot.custom_question_definitions, [
     {
-      question_key: "extra_note",
-      label: "Extra note",
-      description: null,
-      type: "text",
+      question_key: "rights_checked",
+      label: "確認済みの権利",
+      description: "該当する項目をすべて選択",
+      type: "checkbox",
+      required: true,
+      options_json: JSON.stringify(["素材", "楽曲", "モデル"]),
+      placeholder: null,
+      max_length: null,
+      sort_order: 0,
+      is_active: true,
+      visibility: "review",
+    },
+  ]);
+});
+
+test("template round trip restores checkbox options to the event form", () => {
+  const snapshot = snapshotFromEvent(baseEvent(), [checkboxQuestion()]);
+  const parsed = parseEventTemplateSnapshot(JSON.stringify(snapshot));
+
+  assert.ok(parsed);
+  const initial = snapshotToFormInitial(parsed);
+  assert.equal(initial.custom_questions.length, 1);
+  assert.equal(initial.custom_questions[0].type, "checkbox");
+  assert.deepEqual(initial.custom_questions[0].options, ["素材", "楽曲", "モデル"]);
+  assert.equal(initial.custom_questions[0].required, true);
+});
+
+test("legacy stage permission JSON is converted only while reading old templates", () => {
+  const snapshot = parseEventTemplateSnapshot(JSON.stringify({
+    ...baseEvent(),
+    video_form_settings_json: JSON.stringify({
+      stage_permissions: [
+        {
+          id: "stage_permission",
+          enabled: true,
+          required: true,
+          label: "権利確認",
+          description: "確認内容を入力",
+          placeholder: "確認済み",
+        },
+      ],
+    }),
+  }));
+
+  assert.ok(snapshot);
+  assert.equal(snapshot.schema_version, 2);
+  assert.deepEqual(snapshot.custom_question_definitions, [
+    {
+      question_key: "stage_permission",
+      label: "権利確認",
+      description: "確認内容を入力",
+      type: "textarea",
       required: true,
       options_json: null,
-      placeholder: "Write here",
-      max_length: 200,
-      sort_order: 2,
-      is_active: false,
-      visibility: "private",
+      placeholder: "確認済み",
+      max_length: 1000,
+      sort_order: 0,
+      is_active: true,
+      visibility: "review",
     },
   ]);
 });
