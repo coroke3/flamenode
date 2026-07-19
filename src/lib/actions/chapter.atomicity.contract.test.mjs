@@ -2,67 +2,47 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { planD1AuditMutationBudget } from "../audit/mutateBudget.ts";
 
-const read = (relative) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8");
+const read = (relative) =>
+  readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8");
+
 const action = read("./chapter.ts");
-const limits = read("./chapterLimits.ts");
 const composer = read("../../components/video/ChapterComposer.tsx");
+const item = read("../../components/video/ChapterCommentItem.tsx");
 
-test("全チャプターwriteは各1回のmutateWithAuditでqueueまで保存する", () => {
-  assert.equal((action.match(/await mutateWithAudit\(db,/g) ?? []).length, 4);
-  assert.equal((action.match(/await buildStaticRebuildQueueBatch\(db,/g) ?? []).length, 4);
-  assert.doesNotMatch(action, /enqueueNotification\(/);
-  assert.match(action, /buildNotificationOutboxStatement/);
-  assert.match(action, /mutationStatements\.push\(notification\)/);
-  assert.match(action, /mutationStatements\.push\(\.\.\.queue\.statements\)/);
-});
-
-test("更新と削除は全scalar snapshot CASと完全な監査snapshotを使う", () => {
+test("通常チャプターの作成と削除は監査・静的再生成を同一mutationで保存する", () => {
+  assert.equal((action.match(/await mutateWithAudit\(db,/g) ?? []).length, 2);
   assert.equal(
-    (action.match(/expectedRowCondition\(\{ expectedCurrent: existing \}\)/g) ?? []).length,
+    (action.match(/await buildStaticRebuildQueueBatch\(db,/g) ?? []).length,
     2,
   );
-  assert.match(action, /operation: "UPDATE", before: \{ \.\.\.existing \}, after: \{ \.\.\.after \}/);
-  assert.match(action, /operation: "DELETE", before: \{ \.\.\.existing \}, after: null/);
-  assert.match(action, /operation: "CREATE", before: null, after: \{ \.\.\.after \}/);
+  assert.match(action, /operation: "CREATE"/);
+  assert.match(action, /operation: "DELETE"/);
 });
 
-test("CSV上限はサーバーとUIで共通化され、書込み前に拒否する", () => {
-  assert.match(limits, /MAX_ATOMIC_CHAPTER_BULK_ROWS = 8/);
-  assert.match(action, /rowsRaw\.length > MAX_ATOMIC_CHAPTER_BULK_ROWS/);
-  assert.match(composer, /parseChapterBulkCsv\(bulkCsv\)\.length/);
-  assert.match(composer, /dataRowCount > MAX_ATOMIC_CHAPTER_BULK_ROWS/);
-  assert.match(composer, /最大 \{MAX_ATOMIC_CHAPTER_BULK_ROWS\} 行/);
-  assert.ok(
-    action.indexOf("rowsRaw.length > MAX_ATOMIC_CHAPTER_BULK_ROWS") <
-      action.indexOf("const pendingRows"),
+test("チャプター削除はvideo_chaptersの物理削除とCASを使う", () => {
+  assert.match(action, /\.delete\(videoChapters\)/);
+  assert.match(
+    action,
+    /expectedRowCondition\(\{ expectedCurrent: existing \}\)/,
   );
-  assert.match(action, /VALUES \$\{sql\.join\(pendingRows\.map/);
-  assert.match(action, /expectedMutationChanges: \[inserted, \.\.\.queue\.expectedChanges\]/);
+  assert.doesNotMatch(action, /deleted_at|is_deleted|soft_delete/i);
 });
 
-test("D1 bind/query予算はbulk上限8でも制約内に収まる", () => {
-  // chapter INSERT は全11列を明示するため、8行で88 bind。
-  assert.ok(8 * 11 < 100);
-  const createBudget = planD1AuditMutationBudget({
-    mutationStatementCount: 3,
-    mutationAssertionCount: 3,
-    auditEntryCount: 1,
-    distinctActorCount: 1,
-  });
-  const bulkBudget = planD1AuditMutationBudget({
-    mutationStatementCount: 2,
-    mutationAssertionCount: 2,
-    auditEntryCount: 8,
-    distinctActorCount: 1,
-  });
-  assert.deepEqual(
-    { total: createBudget.totalQueryCount, withinLimit: createBudget.withinLimit },
-    { total: 20, withinLimit: true },
-  );
-  assert.deepEqual(
-    { total: bulkBudget.totalQueryCount, withinLimit: bulkBudget.withinLimit },
-    { total: 20, withinLimit: true },
-  );
+test("動画時間が未取得または範囲外なら投稿を拒否する", () => {
+  assert.match(action, /videoYoutubeMetadata\.duration_seconds/);
+  assert.match(action, /durationSeconds == null \|\| durationSeconds <= 0/);
+  assert.match(action, /data\.chapter_time > durationSeconds/);
+});
+
+test("通常チャプターのCSV一括登録は撤去されている", () => {
+  assert.doesNotMatch(action, /createChaptersBulk|parseChapterBulkCsv/);
+  assert.doesNotMatch(composer, /createChaptersBulk|CSV で一括登録|bulkCsv/);
+});
+
+test("通常画面のコメント項目から削除Server Actionを呼び出す", () => {
+  assert.match(item, /import \{ deleteChapter \}/);
+  assert.match(item, /formData\.set\("chapter_id", chapter\.id\)/);
+  assert.match(item, /await deleteChapter\(formData\)/);
+  assert.match(item, /window\.confirm/);
 });
