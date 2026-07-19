@@ -38,14 +38,15 @@ export async function buildReplaceGeneralCustomAnswersPlan(
   const deleteEventIds = Array.from(new Set(
     (args.deleteEventIds ?? []).filter((eventId) => eventId && !eventIds.includes(eventId)),
   ));
-  if (eventIds.length === 0 && deleteEventIds.length === 0) {
+  const replaceTargetAnswers = args.drafts.length > 0;
+  if (!replaceTargetAnswers && deleteEventIds.length === 0) {
     return emptyVideoAtomicWritePlan();
   }
   if (args.drafts.length > MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS) {
     throw new Error("video_custom_answer_atomic_limit_exceeded");
   }
 
-  const questions = eventIds.length > 0
+  const questions = replaceTargetAnswers && eventIds.length > 0
     ? await db
         .select({
           id: eventCustomQuestions.id,
