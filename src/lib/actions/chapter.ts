@@ -4,7 +4,7 @@ import { mutateWithAudit } from "@/lib/audit/mutate";
 import { expectedRowCondition } from "@/lib/audit/expectedRowCondition";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { canEditVideo } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
@@ -17,6 +17,18 @@ export interface ChapterActionResult {
   ok: boolean;
   message?: string;
   chapterId?: string;
+}
+
+export interface ChapterDeleteCapabilitiesResult {
+  ok: boolean;
+  deletableIds: string[];
+  message?: string;
+}
+
+export interface ChapterPostingContextResult {
+  ok: boolean;
+  durationSeconds: number | null;
+  message?: string;
 }
 
 const createSchema = z.object({
@@ -79,7 +91,8 @@ export async function createChapter(
   if (durationSeconds == null || durationSeconds <= 0) {
     return {
       ok: false,
-      message: "動画時間を確認できないため、チャプターコメントを投稿できません。YouTube情報の同期後に再度お試しください。",
+      message:
+        "動画時間を確認できないため、チャプターコメントを投稿できません。YouTube情報の同期後に再度お試しください。",
     };
   }
   if (data.chapter_time > durationSeconds) {
@@ -134,7 +147,7 @@ export async function createChapter(
     }
   }
 
-  const queue = await buildStaticRebuildQueueBatch(db, [
+  const queue = await buildStaticRebuildQueueBatch(guard.db, [
     {
       targetType: "video",
       targetId: data.video_id,
@@ -163,6 +176,129 @@ export async function createChapter(
 
   revalidatePath(`/${target.youtube_video_id ?? data.video_id}`);
   return { ok: true, chapterId: id };
+}
+
+/** 投稿フォームに動画時間と現在の投稿可否を返す。 */
+export async function getChapterPostingContext(
+  videoId: string,
+): Promise<ChapterPostingContextResult> {
+  const guard = await writeGuard({
+    requireApprovedActiveXId: true,
+    feature: "chapter_comment",
+  });
+  if (!guard.ok) {
+    return { ok: false, durationSeconds: null, message: guard.message };
+  }
+
+  const parsed = z.string().trim().min(1).max(128).safeParse(videoId);
+  if (!parsed.success) {
+    return { ok: false, durationSeconds: null, message: "動画IDが不正です。" };
+  }
+
+  const target = (
+    await guard.db
+      .select({
+        id: videos.id,
+        visibility_status: videos.visibility_status,
+      })
+      .from(videos)
+      .where(eq(videos.id, parsed.data))
+      .limit(1)
+  )[0];
+  if (!target) {
+    return { ok: false, durationSeconds: null, message: "動画が見つかりません。" };
+  }
+  if (target.visibility_status !== "public" && target.visibility_status !== "limited") {
+    return {
+      ok: false,
+      durationSeconds: null,
+      message: "この動画にはチャプターコメントを投稿できません。",
+    };
+  }
+
+  const metadata = (
+    await guard.db
+      .select({ duration_seconds: videoYoutubeMetadata.duration_seconds })
+      .from(videoYoutubeMetadata)
+      .where(eq(videoYoutubeMetadata.video_id, parsed.data))
+      .limit(1)
+  )[0];
+  const durationSeconds = metadata?.duration_seconds ?? null;
+  if (durationSeconds == null || durationSeconds <= 0) {
+    return {
+      ok: false,
+      durationSeconds: null,
+      message:
+        "動画時間を確認できないため投稿できません。YouTube情報の同期後に再度お試しください。",
+    };
+  }
+
+  return { ok: true, durationSeconds };
+}
+
+/**
+ * 画面に表示中のチャプターについて、現在の利用者が削除できるIDだけを返す。
+ * 実際の削除時にも deleteChapter で同じ権限を再検証する。
+ */
+export async function getChapterDeleteCapabilities(
+  chapterIds: string[],
+): Promise<ChapterDeleteCapabilitiesResult> {
+  const guard = await writeGuard({ feature: "chapter_comment" });
+  if (!guard.ok) {
+    return { ok: false, deletableIds: [], message: guard.message };
+  }
+
+  const parsed = z
+    .array(z.string().trim().min(1).max(128))
+    .max(200)
+    .safeParse(Array.from(new Set(chapterIds)));
+  if (!parsed.success) {
+    return { ok: false, deletableIds: [], message: "チャプター一覧が不正です。" };
+  }
+  if (parsed.data.length === 0) return { ok: true, deletableIds: [] };
+
+  const rows = await guard.db
+    .select()
+    .from(videoChapters)
+    .where(inArray(videoChapters.id, parsed.data));
+
+  const deletable = new Set(
+    rows
+      .filter((row) => guard.approvedXIds.includes(row.x_user_id))
+      .map((row) => row.id),
+  );
+
+  const remainingVideoIds = Array.from(
+    new Set(
+      rows
+        .filter((row) => !deletable.has(row.id))
+        .map((row) => row.video_id),
+    ),
+  ).slice(0, 10);
+
+  for (const videoId of remainingVideoIds) {
+    const target = (
+      await guard.db.select().from(videos).where(eq(videos.id, videoId)).limit(1)
+    )[0];
+    if (!target) continue;
+
+    const canModerate =
+      guard.user.role === "admin" ||
+      (await canEditVideo({
+        db: guard.db,
+        user: { id: guard.user.id, role: guard.user.role ?? null },
+        video: target,
+        requiredKey: "video.chapter_admin",
+        privilegeMode: "event",
+      }));
+    if (!canModerate) continue;
+
+    for (const row of rows) {
+      if (row.video_id === videoId) deletable.add(row.id);
+    }
+  }
+
+  return { ok: true, deletableIds: Array.from(deletable) };
 }
 
 const deleteSchema = z.object({
