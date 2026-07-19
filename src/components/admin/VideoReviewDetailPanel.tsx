@@ -8,6 +8,7 @@ import {
   videoVisibilityBadgeClass,
   videoVisibilityLabel,
 } from "@/lib/admin/videoVisibilityLabels";
+import styles from "./VideoReviewDetailPanel.module.css";
 
 interface VideoReviewDetailPanelProps {
   video: VideoReviewDetail;
@@ -24,8 +25,8 @@ function Field({
 }): React.ReactElement {
   return (
     <>
-      <dt className="fn-muted" style={{ fontSize: 12 }}>{label}</dt>
-      <dd style={{ margin: 0, fontSize: 13, whiteSpace: "pre-wrap" }}>{value}</dd>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
     </>
   );
 }
@@ -36,45 +37,21 @@ export function VideoReviewDetailPanel({
   footerLinks,
 }: VideoReviewDetailPanelProps): React.ReactElement {
   return (
-    <div style={{
-      display: "grid",
-      gridTemplateColumns: "minmax(0, 1.4fr) minmax(280px, 0.8fr)",
-      gap: 24,
-      marginTop: 8,
-    }}>
-      <section>
-        <div style={{
-          width: "100%",
-          aspectRatio: "16 / 9",
-          background: "var(--bg-elevated)",
-          borderRadius: "var(--radius-md)",
-          overflow: "hidden",
-        }}>
+    <div className={styles.layout}>
+      <section className={styles.main}>
+        <div className={styles.media}>
           {video.youtube_video_id ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={youtubeThumbUrl(video.youtube_video_id, "maxresdefault") ?? ""}
               alt=""
-              style={{ width: "100%", height: "100%", objectFit: "cover" }}
             />
           ) : (
-            <div style={{
-              display: "grid",
-              placeItems: "center",
-              height: "100%",
-              color: "var(--text-muted)",
-            }}>
-              <Icon name="youtube" size={28} aria-hidden />
-            </div>
+            <Icon name="youtube" size={28} aria-hidden />
           )}
         </div>
 
-        <dl style={{
-          marginTop: 16,
-          display: "grid",
-          gridTemplateColumns: "120px 1fr",
-          gap: "8px 12px",
-        }}>
+        <dl className={styles.details}>
           <Field
             label="状態"
             value={(
@@ -99,51 +76,34 @@ export function VideoReviewDetailPanel({
               </a>
             ) : "なし"}
           />
+          <Field
+            label="所属イベント"
+            value={video.event_ids.length > 0 ? video.event_ids.join(" / ") : "—"}
+          />
           <Field label="楽曲" value={video.music ?? "—"} />
           <Field label="クレジット" value={video.credit ?? "—"} />
           <Field label="使用ソフト" value={video.software_label ?? "—"} />
-          <Field label="intro_comment" value={video.intro_comment ?? "—"} />
-          <Field label="highlights" value={video.highlights ?? "—"} />
-          <Field label="production_story" value={video.production_story ?? "—"} />
+          <Field label="紹介コメント" value={video.intro_comment ?? "—"} />
+          <Field label="みどころ" value={video.highlights ?? "—"} />
+          <Field label="制作エピソード" value={video.production_story ?? "—"} />
         </dl>
 
         {video.customAnswers.length > 0 ? (
-          <section style={{ marginTop: 18 }}>
-            <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
-              カスタム質問回答
-            </h2>
-            <dl style={{ display: "grid", gap: 10 }}>
+          <section className={styles.section}>
+            <h2 className={styles.sectionTitle}>カスタム質問回答</h2>
+            <dl className={styles.answerList}>
               {video.customAnswers.map((item) => (
-                <div
-                  key={item.id}
-                  style={{
-                    padding: 10,
-                    border: "1px solid var(--border-subtle)",
-                    borderRadius: "var(--radius-sm)",
-                  }}
-                >
-                  <dt style={{ fontSize: 12, fontWeight: 700 }}>
-                    {item.label}
+                <div key={item.id} className={styles.answerCard}>
+                  <dt className={styles.answerTitle}>
+                    <span>{item.label}</span>
                     {item.required ? (
-                      <span
-                        className="fn-badge fn-badge-warning"
-                        style={{ marginLeft: 6 }}
-                      >
-                        必須
-                      </span>
+                      <span className="fn-badge fn-badge-warning">必須</span>
                     ) : null}
                     {!item.active ? (
-                      <span
-                        className="fn-badge fn-badge-soft"
-                        style={{ marginLeft: 6 }}
-                      >
-                        現在は無効
-                      </span>
+                      <span className="fn-badge fn-badge-soft">現在は無効</span>
                     ) : null}
                   </dt>
-                  <dd style={{ margin: "6px 0 0", fontSize: 13, whiteSpace: "pre-wrap" }}>
-                    {item.answer}
-                  </dd>
+                  <dd className={styles.answerValue}>{item.answer}</dd>
                 </div>
               ))}
             </dl>
@@ -151,59 +111,52 @@ export function VideoReviewDetailPanel({
         ) : null}
 
         {video.members.length > 0 ? (
-          <section style={{ marginTop: 18 }}>
-            <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
-              メンバー
-            </h2>
-            <table className="fn-table">
-              <thead>
-                <tr>
-                  <th>名前</th>
-                  <th>役割</th>
-                  <th>X ID</th>
-                  <th>チャプター</th>
-                </tr>
-              </thead>
-              <tbody>
-                {video.members.map((member, index) => (
-                  <tr key={`${member.name}-${index}`}>
-                    <td>
-                      {member.name}
-                      {!member.is_public_member ? (
-                        <span
-                          className="fn-badge fn-badge-soft"
-                          style={{ marginLeft: 4 }}
-                        >
-                          非公開
-                        </span>
-                      ) : null}
-                    </td>
-                    <td>{member.role ?? "—"}</td>
-                    <td>{member.x_user_id ? `@${member.x_user_id}` : "—"}</td>
-                    <td style={{ fontSize: 12 }}>{member.chapters ?? "—"}</td>
+          <section className={styles.section}>
+            <h2 className={styles.sectionTitle}>メンバー</h2>
+            <div className={styles.tableWrap}>
+              <table className="fn-table">
+                <thead>
+                  <tr>
+                    <th>名前</th>
+                    <th>役割</th>
+                    <th>X ID</th>
+                    <th>チャプター</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {video.members.map((member, index) => (
+                    <tr key={`${member.name}-${index}`}>
+                      <td>
+                        {member.name}
+                        {!member.is_public_member ? (
+                          <span className="fn-badge fn-badge-soft" style={{ marginLeft: 4 }}>
+                            非公開
+                          </span>
+                        ) : null}
+                      </td>
+                      <td>{member.role ?? "—"}</td>
+                      <td>{member.x_user_id ? `@${member.x_user_id}` : "—"}</td>
+                      <td style={{ fontSize: 12 }}>{member.chapters ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </section>
         ) : null}
       </section>
 
-      <aside>
-        <section className="fn-card" style={{ marginBottom: 16 }}>
-          <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>
-            状態変更
-          </h2>
-          <p style={{ marginBottom: 12, fontSize: 12 }}>
+      <aside className={styles.aside}>
+        <section className={`fn-card ${styles.statusCard}`}>
+          <h2 className={styles.statusTitle}>状態変更</h2>
+          <p className={`fn-muted ${styles.registeredAt}`}>
             登録: {formatUnix(video.created_at)}
           </p>
           {statusForm}
         </section>
 
         {footerLinks ? (
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {footerLinks}
-          </div>
+          <div className={styles.footerLinks}>{footerLinks}</div>
         ) : null}
       </aside>
     </div>
