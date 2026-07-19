@@ -1,0 +1,156 @@
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.72fr);
+  gap: 24px;
+  margin-top: 8px;
+  align-items: start;
+}
+
+.main,
+.aside {
+  min-width: 0;
+}
+
+.media {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+.media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.details {
+  margin: 16px 0 0;
+  display: grid;
+  grid-template-columns: minmax(100px, 120px) minmax(0, 1fr);
+  gap: 8px 12px;
+}
+
+.details dt {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.details dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.section {
+  margin-top: 20px;
+}
+
+.sectionTitle {
+  margin: 0 0 9px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.answerList {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.answerCard {
+  padding: 11px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+}
+
+.answerTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.answerValue {
+  margin: 7px 0 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tableWrap {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.tableWrap table {
+  min-width: 620px;
+  margin: 0;
+}
+
+.aside {
+  position: sticky;
+  top: calc(var(--header-h, 64px) + 16px);
+}
+
+.statusCard {
+  margin-bottom: 16px;
+}
+
+.statusTitle {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.registeredAt {
+  margin: 0 0 12px;
+  font-size: 12px;
+}
+
+.footerLinks {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+
+  .aside {
+    position: static;
+  }
+}
+
+@media (max-width: 520px) {
+  .details {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
+  }
+
+  .details dd {
+    margin-bottom: 9px;
+  }
+
+  .answerCard {
+    padding: 10px;
+  }
+}
