@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readCustomQuestionDefinitions } from "./customQuestionForm.ts";
-import { MAX_EVENT_CUSTOM_QUESTIONS } from "../video/customQuestionLimits.ts";
+import {
+  MAX_CUSTOM_QUESTION_LABEL_LENGTH,
+  MAX_CUSTOM_QUESTION_OPTIONS,
+  MAX_EVENT_CUSTOM_QUESTIONS,
+} from "../video/customQuestionLimits.ts";
 
 function appendQuestion(formData, index, overrides = {}) {
   formData.append("custom_question_key", overrides.key ?? `question_${index}`);
@@ -16,9 +20,14 @@ function appendQuestion(formData, index, overrides = {}) {
   formData.append("custom_question_visibility", overrides.visibility ?? "review");
 }
 
-test("normalized question form reads checkbox options", () => {
+function questionForm() {
   const formData = new FormData();
   formData.set("custom_questions_present", "1");
+  return formData;
+}
+
+test("normalized question form reads checkbox options", () => {
+  const formData = questionForm();
   appendQuestion(formData, 1, {
     key: "rights",
     label: "確認済みの権利",
@@ -50,8 +59,7 @@ test("normalized question form reads checkbox options", () => {
 
 test("select, radio and checkbox require options", () => {
   for (const type of ["select", "radio", "checkbox"]) {
-    const formData = new FormData();
-    formData.set("custom_questions_present", "1");
+    const formData = questionForm();
     appendQuestion(formData, 1, { type, label: `${type}質問` });
 
     const result = readCustomQuestionDefinitions(formData);
@@ -61,8 +69,7 @@ test("select, radio and checkbox require options", () => {
 });
 
 test("question keys must be unique", () => {
-  const formData = new FormData();
-  formData.set("custom_questions_present", "1");
+  const formData = questionForm();
   appendQuestion(formData, 1, { key: "duplicate" });
   appendQuestion(formData, 2, { key: "duplicate" });
 
@@ -72,8 +79,7 @@ test("question keys must be unique", () => {
 });
 
 test("question count uses the shared limit", () => {
-  const formData = new FormData();
-  formData.set("custom_questions_present", "1");
+  const formData = questionForm();
   for (let index = 0; index <= MAX_EVENT_CUSTOM_QUESTIONS; index += 1) {
     appendQuestion(formData, index);
   }
@@ -81,4 +87,63 @@ test("question count uses the shared limit", () => {
   const result = readCustomQuestionDefinitions(formData);
   assert.equal(result.ok, false);
   assert.match(result.message, new RegExp(`最大${MAX_EVENT_CUSTOM_QUESTIONS}件`));
+});
+
+test("invalid question keys are rejected instead of silently normalized", () => {
+  const formData = questionForm();
+  appendQuestion(formData, 1, { key: "rights question!" });
+
+  const result = readCustomQuestionDefinitions(formData);
+  assert.equal(result.ok, false);
+  assert.match(result.message, /半角英数字/);
+});
+
+test("parallel question fields must stay aligned", () => {
+  const formData = questionForm();
+  appendQuestion(formData, 1);
+  formData.delete("custom_question_visibility");
+
+  const result = readCustomQuestionDefinitions(formData);
+  assert.equal(result.ok, false);
+  assert.match(result.message, /送信データが不正/);
+});
+
+test("overlong question text is rejected instead of truncated", () => {
+  const formData = questionForm();
+  appendQuestion(formData, 1, {
+    label: "a".repeat(MAX_CUSTOM_QUESTION_LABEL_LENGTH + 1),
+  });
+
+  const result = readCustomQuestionDefinitions(formData);
+  assert.equal(result.ok, false);
+  assert.match(result.message, new RegExp(`${MAX_CUSTOM_QUESTION_LABEL_LENGTH}文字以内`));
+});
+
+test("option count over the shared limit is rejected", () => {
+  const formData = questionForm();
+  appendQuestion(formData, 1, {
+    type: "checkbox",
+    options: Array.from(
+      { length: MAX_CUSTOM_QUESTION_OPTIONS + 1 },
+      (_, index) => `option-${index}`,
+    ).join("\n"),
+  });
+
+  const result = readCustomQuestionDefinitions(formData);
+  assert.equal(result.ok, false);
+  assert.match(result.message, new RegExp(`最大${MAX_CUSTOM_QUESTION_OPTIONS}件`));
+});
+
+test("invalid type and visibility are rejected", () => {
+  const invalidType = questionForm();
+  appendQuestion(invalidType, 1, { type: "unknown" });
+  const typeResult = readCustomQuestionDefinitions(invalidType);
+  assert.equal(typeResult.ok, false);
+  assert.match(typeResult.message, /回答形式が不正/);
+
+  const invalidVisibility = questionForm();
+  appendQuestion(invalidVisibility, 1, { visibility: "unknown" });
+  const visibilityResult = readCustomQuestionDefinitions(invalidVisibility);
+  assert.equal(visibilityResult.ok, false);
+  assert.match(visibilityResult.message, /公開範囲が不正/);
 });
