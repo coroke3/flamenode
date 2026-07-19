@@ -13,7 +13,7 @@ const tabs = read("../../components/video/ChapterTabs.tsx");
 const tabsCss = read("../../components/video/ChapterTabs.module.css");
 const composerCss = read("../../components/video/ChapterComposer.module.css");
 
- test("通常チャプターの作成と削除は監査・静的再生成を同一mutationで保存する", () => {
+test("通常チャプターの作成と削除は監査・静的再生成を同一mutationで保存する", () => {
   assert.equal((action.match(/await mutateWithAudit\(db,/g) ?? []).length, 2);
   assert.equal(
     (action.match(/await buildStaticRebuildQueueBatch\(/g) ?? []).length,
