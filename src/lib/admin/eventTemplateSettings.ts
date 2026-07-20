@@ -215,7 +215,7 @@ export function parseEventTemplateSnapshot(
   }
 }
 
-/** 新規イベントフォーム用の初期値。日時は空、公開状態は下書き。 */
+/** 新規イベントフォーム用の初期値。日時は空、公開状態は非公開。 */
 export function snapshotToFormInitial(
   snapshot: EventTemplateSnapshot,
 ): EventFormInitial {

@@ -131,7 +131,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           )!,
         )
         .limit(50);
-      const groupedSlots = collapseReservationGroups(slotRows as SlotBase[]);
+      const groupedSlots = collapseReservationGroups(slotRows);
       const sortedSlots = sortSlotsChronologically(groupedSlots);
       mySlot = sortedSlots[0] ?? null;
       if (mySlot && mySlot.event_id) {
