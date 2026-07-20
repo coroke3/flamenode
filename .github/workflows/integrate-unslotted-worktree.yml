@@ -1,4 +1,4 @@
-name: Integrate unslotted worktree
+name: Integrate remaining worktrees
 
 on:
   pull_request:
@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: integrate-unslotted-${{ github.event.pull_request.number }}
+  group: integrate-remaining-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -35,7 +35,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin agent/unslotted-event-affiliation
+          git fetch origin agent/unslotted-event-affiliation agent/chapter-comment-delete-and-validation
           git checkout origin/agent/unslotted-event-affiliation -- \
             'app/(auth)/entry/unslotted/page.tsx' \
             'src/components/forms/UnslottedPostForm.tsx' \
@@ -43,6 +43,14 @@ jobs:
             'src/lib/event/unslottedPostPolicy.ts' \
             'src/lib/event/unslottedPostPolicy.test.mjs' \
             'src/lib/video/resolveUnslottedEventSyncTarget.ts'
+
+          git checkout origin/agent/chapter-comment-delete-and-validation -- \
+            'app/api/event-endpoints/[id]/route.ts' \
+            'src/components/admin/EventExportLinkBuilder.tsx' \
+            'src/lib/api/eventExportCache.ts' \
+            'src/lib/api/eventExportData.ts' \
+            'src/lib/api/eventExportPayload.ts' \
+            'src/lib/eventExportPayload.test.mjs'
           git diff --cached --check
 
       - uses: actions/setup-node@v4
@@ -63,14 +71,14 @@ jobs:
           rm -f .github/workflows/integrate-unslotted-worktree.yml
           git add -A
           git diff --cached --check
-          git commit -m "枠なし投稿を単一イベント所属の正本モデルへ統合"
+          git commit -m "枠なし投稿とイベント公開APIを新正本へ統合"
           git push --force-with-lease origin HEAD:agent/db-canonical-migration-v2
 
       - name: 失敗時ログ
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: unslotted-worktree-${{ github.run_id }}
+          name: remaining-worktrees-${{ github.run_id }}
           path: |
             .
             !.git/**
