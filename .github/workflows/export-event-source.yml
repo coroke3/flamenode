@@ -1,9 +1,10 @@
 name: Export event branch source
 
 on:
-  pull_request:
+  push:
     branches:
-      - agent/db-canonical-migration-v2
+      - agent/db-canonical-events
+  workflow_dispatch:
 
 permissions:
   contents: read
