@@ -4,7 +4,7 @@
 > Last verified: 2026-07-20
 > Implementation: PR #88
 > Depends on: PR #89 / `0043_db_canonical_migration.sql`
-> Parent verified at: `1bd7031`
+> Parent synchronization: CI開始時に`agent/db-canonical-migration-v2`の最新headを取り込む
 > Compatibility: 旧状態を一括変換し、旧default由来の`draft`だけを即時正規化する。その他の旧状態の新規書き込みは拒否する。
 > Source of truth: `migrations/0044_simplify_visibility_statuses.sql`, `src/lib/db/schema.canonical.ts`, `src/lib/constants/collaborator-permissions.ts`, `src/lib/utils/eventStatusCore.ts`
 
@@ -38,13 +38,18 @@
 - イベント作成は`x_user_account_links`からowner X名義を解決し、イベントとownerを同じ監査mutationで登録します。
 - イベントの非公開化は`visibility_status = private`へ更新し、廃止済み`archived`を書き込みません。
 - テンプレートと管理編集画面から廃止済み`max_consecutive_slots_per_entry`を除去し、`events.max_slots_per_video`を維持します。
-- 枠の部判定・公開表示・共通枠型から`slots.slot_kind`と優先再取得列を除去します。
-- ダッシュボードは新しい枠行型をそのまま時系列整列し、旧枠型へのキャストを行いません。
+- 枠の部判定・公開表示では`slots.slot_kind`と優先再取得列を使用しません。
+- 共通枠型はDB正本列を意味のある値として扱い、部分SELECTを許容するUI境界だけを任意項目にします。
 - YouTube重複判定は現行状態では`voided`だけを対象外とし、IDの正本を`videos.youtube_video_id`へ維持します。
 
-## 検証境界
+## 親PR同期
 
-PR #88はPR #89をbaseとするスタックPRです。PR #89側のイベント・作品・監査・旧形式インポートのランタイム統合が完了するまでは、リポジトリ全体の型検査は親PR由来の旧カラム参照で停止します。PR #88が変更するファイルの型エラーを0件にした後、親PRの検証済みheadを取り込んで全検査を実施します。
+PR #88はPR #89をbaseとするスタックPRです。PR #89の更新で古いruntimeが残らないよう、PR #88のCIは検査開始前に`agent/db-canonical-migration-v2`の最新headをマージします。
+
+- 親側の非競合変更はそのまま取り込む
+- 状態整理と競合するファイルはPR #88側を優先する
+- 同期コミットではCIワークフローを親版へ戻し、一時同期処理を最終差分へ残さない
+- 同期後の作業ツリーに対して型検査、全テスト、Next.js/Pages build、DB・公開API・文書検査を実行する
 
 ## 適用前条件
 
