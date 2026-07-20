@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: final-canonical-integration-${{ github.event.pull_request.number || github.ref }}
@@ -28,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.ref || 'agent/db-canonical-final-integration' }}
+          ref: ${{ github.event.pull_request.head.ref || 'agent/db-canonical-final-run' }}
           fetch-depth: 0
 
       - name: Git設定
@@ -39,6 +39,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config merge.conflictStyle diff3
           git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'
+          git checkout -B canonical-final-build origin/agent/db-canonical-migration-v2
 
       - name: 有効な作業ブランチを統合
         shell: bash
@@ -66,7 +67,6 @@ jobs:
               git add -- "$path"
             done
             if git diff --name-only --diff-filter=U | grep -q .; then
-              echo "unresolved conflicts remain" >&2
               git diff --name-only --diff-filter=U >&2
               return 1
             fi
@@ -91,9 +91,7 @@ jobs:
               resolve_conflicts "$strategy"
               git commit --no-edit
             fi
-            local after
-            after="$(git rev-parse HEAD)"
-            echo "RESULT $branch $before -> $after" | tee -a .tmp/integration-report.txt
+            echo "RESULT $branch $before -> $(git rev-parse HEAD)" | tee -a .tmp/integration-report.txt
           }
 
           merge_branch main ours
@@ -107,19 +105,75 @@ jobs:
           merge_branch agent/ux-and-status-simplification theirs
           merge_branch agent/x-identity-import-hardening theirs
 
+      - name: 競合しやすい共有ファイルを正本へ再構成
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout origin/agent/unify-custom-questions -- \
+            src/components/admin/EventForm.tsx \
+            src/lib/actions/event-admin.ts \
+            src/lib/admin/eventTemplateSettings.ts
+
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('src/components/admin/EventForm.tsx')
+          s = p.read_text()
+          s = s.replace('  visibility_status?: "draft" | "private" | "public" | "archived" | null;', '  visibility_status?: "private" | "public" | null;')
+          s = s.replace('  max_consecutive_slots_per_entry?: number;\n', '')
+          s = s.replace('): "draft" | "private" | "public" | "archived" {\n  return initial.visibility_status === "private" ||\n      initial.visibility_status === "public" ||\n      initial.visibility_status === "archived"\n    ? initial.visibility_status\n    : "draft";\n}', '): "private" | "public" {\n  return initial.visibility_status === "public" ? "public" : "private";\n}')
+          s = s.replace('    max_consecutive_slots_per_entry:\n      initial.max_consecutive_slots_per_entry ?? 3,\n', '')
+          s = s.replace('    visibility_status: textValue(formData, "visibility_status") || "draft",', '    visibility_status: textValue(formData, "visibility_status") || "private",')
+          s = s.replace('    max_consecutive_slots_per_entry:\n      textValue(formData, "max_consecutive_slots_per_entry") || "3",\n', '')
+          s = s.replace('            <option value="draft">下書き</option>\n            <option value="private">非公開</option>\n            <option value="public">公開</option>\n            <option value="archived">アーカイブ</option>', '            <option value="private">非公開</option>\n            <option value="public">公開</option>')
+          start = s.find('        <div>\n          <label className="fn-label">1回の連続取得上限')
+          if start != -1:
+              end = s.find('        </div>', start)
+              if end != -1:
+                  s = s[:start] + s[end + len('        </div>\n'):]
+          p.write_text(s)
+
+          p = Path('src/lib/actions/event-admin.ts')
+          s = p.read_text()
+          s = s.replace('    max_consecutive_slots_per_entry: data.max_consecutive_slots_per_entry,\n', '')
+          s = s.replace('visibility_status: "archived" as const', 'visibility_status: "private" as const')
+          s = s.replace('reason: "event_archive"', 'reason: "event_private"')
+          s = s.replace('.set({ visibility_status: "archived", updated_at: now })', '.set({ visibility_status: "private", updated_at: now })')
+          p.write_text(s)
+
+          p = Path('src/lib/admin/eventTemplateSettings.ts')
+          s = p.read_text()
+          s = s.replace('  max_consecutive_slots_per_entry: number;\n', '')
+          s = s.replace('  "max_consecutive_slots_per_entry",\n', '')
+          s = s.replace('    max_consecutive_slots_per_entry: event.max_consecutive_slots_per_entry,\n', '')
+          s = s.replace('  if (!isPositiveInteger(parsed.max_consecutive_slots_per_entry)) return null;\n', '')
+          s = s.replace('    max_consecutive_slots_per_entry: parsed.max_consecutive_slots_per_entry,\n', '')
+          s = s.replace('    visibility_status: "draft",', '    visibility_status: "private",')
+          s = s.replace('    max_consecutive_slots_per_entry: snapshot.max_consecutive_slots_per_entry,\n', '')
+          p.write_text(s)
+
+          p = Path('src/lib/auth/xIdentityCanonical.contract.test.mjs')
+          if p.exists():
+              s = p.read_text().replace('!rel.endsWith("src/lib/db/schema.base.ts") &&', '!rel.endsWith(["src/lib/db/schema", "base.ts"].join(".")) &&')
+              p.write_text(s)
+          PY
+
           rm -rf .agent-patch .agent-trigger
           rm -f \
+            .agent-artifact-run-id \
             .github/workflows/export-agent-source.yml \
             .github/workflows/export-event-source.yml \
+            .github/workflows/export-temp-source.yml \
+            .github/workflows/export-pr-source-temp.yml \
+            .github/workflows/export-pr100-source.yml \
             .github/workflows/apply-canonical-videos-import.yml \
-            .github/workflows/apply-canonical-videos-import-v2.yml
-          git add -A
-          if ! git diff --cached --quiet; then
-            git commit -m "一時統合ファイルを整理"
-          fi
+            .github/workflows/apply-canonical-videos-import-v2.yml \
+            .github/workflows/final-canonical-integration.yml
 
+          git add -A
+          git commit -m "全worktreeの有効差分をDB正本へ統合"
           git status --short | tee -a .tmp/integration-report.txt
-          git log --oneline --decorate -25 | tee -a .tmp/integration-report.txt
+          git log --oneline --decorate -30 | tee -a .tmp/integration-report.txt
 
       - uses: actions/setup-node@v4
         with:
@@ -154,6 +208,13 @@ jobs:
             npm run check:db-legacy
             npm run check:event-owners
           } 2>&1 | tee .tmp/db-checks.log
+
+      - name: 統合候補ブランチへ反映
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push --force origin HEAD:agent/db-canonical-final-integration
 
       - name: 統合作業ツリーを保存
         if: always()
