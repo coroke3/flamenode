@@ -15,24 +15,12 @@ import type {
   VideoMemberInput,
   VideoMemberSuggestion,
 } from "@/components/forms/VideoMembersField";
-import { formatChapterTime } from "@/lib/utils/chapterTime";
-import { parseMemberChaptersJson } from "@/lib/video/memberChaptersJson";
 
 export const metadata: Metadata = { title: "参加者設定" };
 export const dynamic = "force-dynamic";
 
 interface Props {
   params: Promise<{ id: string }>;
-}
-
-function parseMemberChapters(
-  chaptersJson: string | null,
-): VideoMemberInput["chapters"] {
-  return parseMemberChaptersJson(chaptersJson).map((row) => ({
-    time: formatChapterTime(row.time_seconds),
-    label: row.label,
-    note: row.note ?? "",
-  }));
 }
 
 export default async function AdminVideoMembersPage({
@@ -58,7 +46,6 @@ export default async function AdminVideoMembersPage({
 
   const memberRows = await db
     .select({
-      id: videoMembers.id,
       name: videoMembers.name,
       x_user_id: videoMembers.x_user_id,
       role: videoMembers.role,
@@ -66,7 +53,6 @@ export default async function AdminVideoMembersPage({
       order_index: videoMembers.order_index,
       can_edit: videoMembers.can_edit,
       is_public_member: videoMembers.is_public_member,
-      chapters_json: videoMembers.chapters_json,
     })
     .from(videoMembers)
     .where(eq(videoMembers.video_id, video.id))
@@ -77,30 +63,26 @@ export default async function AdminVideoMembersPage({
     x_user_id: member.x_user_id ?? "",
     role: member.role ?? "",
     comment: member.comment ?? "",
-    chapters: parseMemberChapters(member.chapters_json),
     order_index: member.order_index,
     can_edit: member.can_edit,
     is_public_member: member.is_public_member,
   }));
 
   const suggestionRows = await db
-    .select({
-      name: xUsers.x_name,
-      x_user_id: xUsers.id,
-    })
+    .select({ name: xUsers.x_name, x_user_id: xUsers.id })
     .from(xUsers)
     .orderBy(xUsers.id)
     .limit(2000);
-  const memberSuggestions: VideoMemberSuggestion[] = suggestionRows.map((x) => ({
-    name: x.name,
-    x_user_id: x.x_user_id,
+  const memberSuggestions: VideoMemberSuggestion[] = suggestionRows.map((row) => ({
+    name: row.name,
+    x_user_id: row.x_user_id,
   }));
 
   return (
     <div>
       <AdminPageHeader
         title={`${video.title} の参加者設定`}
-        description="公開参加者、合作フラグ、メンバーチャプターを管理します。"
+        description="公開参加者と合作設定を管理します。チャプターは作品詳細の専用機能で管理します。"
         backHref={`/admin/videos/${video.id}`}
         backLabel="作品詳細へ"
       />
