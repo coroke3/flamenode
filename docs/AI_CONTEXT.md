@@ -2,6 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-20
+> Verified against commit: `8de170c`
 > Source of truth: `AGENTS.md`, `src/lib/db/schema.ts`, `migrations/`, `package.json`, `wrangler.toml`
 
 軽量モデルを含むAIは、リポジトリ全体を先に読まない。`AGENTS.md`と、この文書の該当行だけを読み、次に対象コードを確認する。
