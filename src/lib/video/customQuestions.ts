@@ -254,6 +254,16 @@ export function readCustomAnswersFromFormData(
         errors.push(result.message);
         continue;
       }
+      if (result.drafts.length === 0) {
+        drafts.push({
+          event_id: question.event_id,
+          question_id: question.id,
+          question_key: question.question_key,
+          answer_text: null,
+          answer_json: null,
+        });
+        continue;
+      }
       drafts.push(...result.drafts);
     }
   }
