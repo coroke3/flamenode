@@ -85,7 +85,7 @@ test("一般承認と統合・差し戻しは権限境界を分離する", () =>
   assert.match(admin, /統合・差し戻し申請は X ID 統合管理/);
   assert.match(mergeAdmin, /user\.role !== "admin"/);
   assert.match(mergeAdmin, /isRevertDeadlineOpen/);
-  assert.match(mergeAdmin, /restoreXIdMerge/);
+  assert.match(mergeAdmin, /restoreApprovedXIdMergeRevertRequest/);
 });
 
 test("公開DTOは認証ID・復元情報・内部申請情報を禁止する", () => {
