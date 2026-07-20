@@ -46,23 +46,25 @@ type ClaimOptions = {
   claimId?: string;
 };
 
+type LegacyImportPreviewErrorCode =
+  | "bucket_unavailable"
+  | "invalid_token"
+  | "not_found"
+  | "expired"
+  | "owner_mismatch"
+  | "hash_mismatch"
+  | "already_claimed"
+  | "claim_conflict"
+  | "invalid_record"
+  | "plan_too_large";
+
 export class LegacyImportPreviewError extends Error {
-  constructor(
-    message: string,
-    readonly code:
-      | "bucket_unavailable"
-      | "invalid_token"
-      | "not_found"
-      | "expired"
-      | "owner_mismatch"
-      | "hash_mismatch"
-      | "already_claimed"
-      | "claim_conflict"
-      | "invalid_record"
-      | "plan_too_large",
-  ) {
+  readonly code: LegacyImportPreviewErrorCode;
+
+  constructor(message: string, code: LegacyImportPreviewErrorCode) {
     super(message);
     this.name = "LegacyImportPreviewError";
+    this.code = code;
   }
 }
 
