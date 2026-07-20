@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - agent/db-canonical-migration-v2
+      - agent/db-canonical-events
   pull_request:
     branches:
       - main
