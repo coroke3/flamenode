@@ -6,10 +6,36 @@ const SCAN_DIRS = ["src", "app", "workers"];
 const SCAN_EXTENSIONS = new Set([".ts", ".tsx", ".mjs", ".cjs", ".js"]);
 const SKIP_FILES = new Set(["instrumentation.ts"]);
 
+const LEGACY_IMPORT_BOUNDARY_PREFIXES = [
+  "src/lib/import/legacy/",
+  "app/api/admin/import/legacy/",
+  "app/(admin)/admin/import/",
+];
+const LEGACY_IMPORT_BOUNDARY_FILES = new Set([
+  "src/components/admin/LegacyCanonicalImportClient.tsx",
+  "src/lib/admin/adminNavGroups.tsx",
+]);
+const LEGACY_INPUT_RULE_IDS = new Set([
+  "legacy-import-runtime",
+  "legacy-event-flags",
+  "legacy-permission-mask",
+  "legacy-event-staff-permissions-table",
+  "legacy-used-software-json",
+  "legacy-video-member-chapters-table",
+  "legacy-video-chapter-member-id",
+  "legacy-event-group-id",
+  "legacy-custom-question-json",
+  "legacy-custom-answer-json",
+  "legacy-video-form-settings-json",
+  "legacy-stage-permission",
+  "deleted-tables",
+  "legacy-event-visibility-sync",
+]);
+
 const RULES = [
   {
     id: "legacy-import-runtime",
-    label: "削除済み旧形式インポート機能",
+    label: "専用境界外の旧形式インポート参照",
     pattern:
       /src\/lib\/import\/legacy|@\/lib\/import\/legacy|\/admin\/import\b|\/api\/admin\/import\/legacy\b|ENABLE_LEGACY_IMPORT_TOOL|LEGACY_IMPORT_PREVIEW_SECRET/g,
   },
@@ -134,6 +160,13 @@ function toPosix(path) {
   return path.split(sep).join("/");
 }
 
+function isLegacyImportBoundary(relativePath) {
+  return (
+    LEGACY_IMPORT_BOUNDARY_FILES.has(relativePath) ||
+    LEGACY_IMPORT_BOUNDARY_PREFIXES.some((prefix) => relativePath.startsWith(prefix))
+  );
+}
+
 function walk(directory, files = []) {
   let entries;
   try {
@@ -179,6 +212,7 @@ for (const directory of SCAN_DIRS) {
     for (const rule of RULES) {
       if (rule.allowFiles?.has(relativePath)) continue;
       if (rule.allowPrefixes?.some((prefix) => relativePath.startsWith(prefix))) continue;
+      if (isLegacyImportBoundary(relativePath) && LEGACY_INPUT_RULE_IDS.has(rule.id)) continue;
 
       rule.pattern.lastIndex = 0;
       let match;
@@ -196,7 +230,7 @@ for (const directory of SCAN_DIRS) {
 }
 
 if (violations.length === 0) {
-  console.log("OK: no deprecated DB or compatibility runtime usage detected.");
+  console.log("OK: legacy input identifiers are isolated to the admin import boundary.");
   process.exit(0);
 }
 

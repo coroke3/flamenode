@@ -116,6 +116,11 @@ const ADMIN_NAV_GROUPS_BASE: AdminSidebarGroup[] = [
         label: "公開API管理",
         icon: <Icon name="external" size={14} />,
       },
+      {
+        href: "/admin/import",
+        label: "旧形式インポート",
+        icon: <Icon name="upload" size={14} />,
+      },
     ],
   },
 ];
