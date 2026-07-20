@@ -3,7 +3,7 @@ name: Agent source export
 on:
   push:
     branches:
-      - agent/db-canonical-migration-v2
+      - agent/db-canonical-x-identity
   pull_request:
     branches:
       - main
