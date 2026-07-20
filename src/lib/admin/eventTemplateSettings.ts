@@ -37,9 +37,7 @@ export interface EventTemplateQuestionDefinition {
   visibility: CustomQuestionVisibility;
 }
 
-/**
- * テンプレートに保存する設定（開催日時・枠・作品・スタッフ承認は含めない）
- */
+/** テンプレートに保存する設定。開催日時・スタッフ承認は含めない。 */
 export interface EventTemplateSnapshot {
   event_type: "event" | "collabo" | "type" | "other";
   explanation: string | null;
@@ -52,7 +50,6 @@ export interface EventTemplateSnapshot {
   user_video_edit_permission_keys_json: string | null;
   video_form_settings_json: string | null;
   max_slots_per_video: number;
-  max_consecutive_slots_per_entry: number;
   slot_part_gap_minutes: number;
   slot_type: "time" | "count";
   slot_visibility_mode: "public_name" | "anonymous" | "hidden";
@@ -88,33 +85,43 @@ function normalizeTemplateQuestionDefinition(
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const item = raw as Record<string, unknown>;
   const questionKey = normalizeQuestionKey(item.question_key);
-  const label = typeof item.label === "string" ? item.label.trim().slice(0, 120) : "";
+  const label =
+    typeof item.label === "string" ? item.label.trim().slice(0, 120) : "";
   if (!questionKey || !label) return null;
-  const optionsJson = typeof item.options_json === "string" && item.options_json.trim()
-    ? item.options_json
-    : null;
-  const maxLength = typeof item.max_length === "number" && Number.isFinite(item.max_length)
-    ? Math.max(1, Math.min(5000, Math.floor(item.max_length)))
-    : null;
-  const sortOrder = typeof item.sort_order === "number" && Number.isFinite(item.sort_order)
-    ? Math.floor(item.sort_order)
-    : index;
+  const optionsJson =
+    typeof item.options_json === "string" && item.options_json.trim()
+      ? item.options_json
+      : null;
+  const maxLength =
+    typeof item.max_length === "number" && Number.isFinite(item.max_length)
+      ? Math.max(1, Math.min(5000, Math.floor(item.max_length)))
+      : null;
+  const sortOrder =
+    typeof item.sort_order === "number" && Number.isFinite(item.sort_order)
+      ? Math.floor(item.sort_order)
+      : index;
 
   return {
     question_key: questionKey,
     label,
-    description: typeof item.description === "string"
-      ? item.description.trim().slice(0, 1000) || null
-      : null,
+    description:
+      typeof item.description === "string"
+        ? item.description.trim().slice(0, 1000) || null
+        : null,
     type: parseQuestionType(item.type),
-    required: item.required === true || item.required === 1 || item.required === "1",
+    required:
+      item.required === true || item.required === 1 || item.required === "1",
     options_json: optionsJson,
-    placeholder: typeof item.placeholder === "string"
-      ? item.placeholder.trim().slice(0, 1000) || null
-      : null,
+    placeholder:
+      typeof item.placeholder === "string"
+        ? item.placeholder.trim().slice(0, 1000) || null
+        : null,
     max_length: maxLength,
     sort_order: sortOrder,
-    is_active: item.is_active !== false && item.is_active !== 0 && item.is_active !== "0",
+    is_active:
+      item.is_active !== false &&
+      item.is_active !== 0 &&
+      item.is_active !== "0",
     visibility: parseVisibility(item.visibility),
   };
 }
@@ -152,7 +159,6 @@ export function snapshotFromEvent(
       event.user_video_edit_permission_keys_json,
     video_form_settings_json: videoFormSettingsJson,
     max_slots_per_video: event.max_slots_per_video,
-    max_consecutive_slots_per_entry: event.max_consecutive_slots_per_entry,
     slot_part_gap_minutes: event.slot_part_gap_minutes ?? 15,
     slot_type: (event.slot_type ?? "time") as "time" | "count",
     slot_visibility_mode: (event.slot_visibility_mode ?? "public_name") as
@@ -190,8 +196,6 @@ export function parseEventTemplateSnapshot(
         parsed.user_video_edit_permission_keys_json ?? null,
       video_form_settings_json: parsed.video_form_settings_json ?? null,
       max_slots_per_video: parsed.max_slots_per_video ?? 1,
-      max_consecutive_slots_per_entry:
-        parsed.max_consecutive_slots_per_entry ?? 3,
       slot_part_gap_minutes: parsed.slot_part_gap_minutes ?? 15,
       slot_type: parsed.slot_type,
       slot_visibility_mode: parsed.slot_visibility_mode ?? "public_name",
@@ -209,7 +213,9 @@ export function parseEventTemplateSnapshot(
   } catch {
     return null;
   }
-}/** 新規イベントフォーム用の初期値（日時は空、公開状態は下書き）。 */
+}
+
+/** 新規イベントフォーム用の初期値。日時は空、公開状態は下書き。 */
 export function snapshotToFormInitial(
   snapshot: EventTemplateSnapshot,
 ): EventFormInitial {
@@ -231,7 +237,6 @@ export function snapshotToFormInitial(
       snapshot.user_video_edit_permission_keys_json,
     video_form_settings_json: snapshot.video_form_settings_json,
     max_slots_per_video: snapshot.max_slots_per_video,
-    max_consecutive_slots_per_entry: snapshot.max_consecutive_slots_per_entry,
     slot_part_gap_minutes: snapshot.slot_part_gap_minutes,
     slot_type: snapshot.slot_type,
     slot_visibility_mode: snapshot.slot_visibility_mode,
