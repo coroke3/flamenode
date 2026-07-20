@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   formatCustomAnswerValue,
   parseCustomAnswerValuesJson,
+  readCustomAnswersFromFormData,
   validateAnswerInput,
 } from "./customQuestions.ts";
 
@@ -61,6 +62,26 @@ test("required checkbox rejects an empty answer", () => {
   assert.deepEqual(result, {
     ok: false,
     message: "確認済みの権利を入力してください。",
+  });
+});
+
+test("optional empty answer becomes an explicit deletion draft", () => {
+  const question = checkboxQuestion({ required: false });
+  const formData = new FormData();
+  const result = readCustomAnswersFromFormData(
+    formData,
+    new Map([[question.event_id, [question]]]),
+  );
+
+  assert.deepEqual(result, {
+    errors: [],
+    drafts: [{
+      event_id: "event-1",
+      question_id: "question-rights",
+      question_key: "rights",
+      answer_text: null,
+      answer_json: null,
+    }],
   });
 });
 
