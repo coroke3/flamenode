@@ -36,8 +36,10 @@
 ## 正本担当実装との接続
 
 - イベント作成は`x_user_account_links`からowner X名義を解決し、イベントとownerを同じ監査mutationで登録します。
-- テンプレートから廃止済み`max_consecutive_slots_per_entry`を除去し、`events.max_slots_per_video`を維持します。
-- 枠の部判定から廃止済み`slots.slot_kind`を除去します。
+- イベントの非公開化は`visibility_status = private`へ更新し、廃止済み`archived`を書き込みません。
+- テンプレートと管理編集画面から廃止済み`max_consecutive_slots_per_entry`を除去し、`events.max_slots_per_video`を維持します。
+- 枠の部判定・公開表示から`slots.slot_kind`と優先再取得列を除去します。
+- ダッシュボードは新しい枠行型をそのまま時系列整列し、旧枠型へのキャストを行いません。
 - YouTube重複判定は現行状態では`voided`だけを対象外とし、IDの正本を`videos.youtube_video_id`へ維持します。
 
 ## 適用前条件
