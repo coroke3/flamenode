@@ -4,13 +4,15 @@ on:
   push:
     branches:
       - agent/x-identity-import-hardening
+  pull_request:
+    branches:
+      - agent/db-canonical-migration-v2
 
 permissions:
   contents: read
 
 jobs:
   export:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
