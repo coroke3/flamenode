@@ -97,6 +97,7 @@ export function ChapterComposer({
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
   const contextRequestRef = React.useRef(0);
+  const contextLoadingRef = React.useRef(false);
   const submittingRef = React.useRef(false);
 
   void _canBulk;
@@ -107,27 +108,44 @@ export function ChapterComposer({
   }, []);
 
   const loadContext = React.useCallback(() => {
-    if (contextLoading) return;
+    if (contextLoadingRef.current) return;
     const requestId = contextRequestRef.current + 1;
     contextRequestRef.current = requestId;
+    contextLoadingRef.current = true;
     setContextError(null);
     setDurationSeconds(null);
 
     startContextTransition(async () => {
-      const result = await getChapterPostingContext(videoId);
-      if (contextRequestRef.current !== requestId) return;
-      if (!result.ok || result.durationSeconds == null) {
+      try {
+        const result = await getChapterPostingContext(videoId);
+        if (contextRequestRef.current !== requestId) return;
+        if (!result.ok || result.durationSeconds == null) {
+          setContextError(
+            result.message ?? "動画時間を取得できないため投稿できません。",
+          );
+          return;
+        }
+        setDurationSeconds(result.durationSeconds);
+      } catch (error) {
+        if (contextRequestRef.current !== requestId) return;
         setContextError(
-          result.message ?? "動画時間を取得できないため投稿できません。",
+          "動画時間の取得に失敗しました。接続を確認して再取得してください。",
         );
-        return;
+        console.error("chapter posting context request failed", {
+          videoId,
+          errorName: error instanceof Error ? error.name : "unknown",
+        });
+      } finally {
+        if (contextRequestRef.current === requestId) {
+          contextLoadingRef.current = false;
+        }
       }
-      setDurationSeconds(result.durationSeconds);
     });
-  }, [contextLoading, videoId]);
+  }, [videoId]);
 
   React.useEffect(() => {
     contextRequestRef.current += 1;
+    contextLoadingRef.current = false;
     submittingRef.current = false;
     setOpen(false);
     setDurationSeconds(null);
@@ -215,6 +233,14 @@ export function ChapterComposer({
         setVisibility("public");
         setSuccess("チャプターコメントを投稿しました。");
         router.refresh();
+      } catch (error) {
+        setError(
+          "通信に失敗しました。入力内容を保持したまま、もう一度送信できます。",
+        );
+        console.error("chapter comment create request failed", {
+          videoId,
+          errorName: error instanceof Error ? error.name : "unknown",
+        });
       } finally {
         submittingRef.current = false;
       }
