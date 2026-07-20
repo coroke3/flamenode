@@ -8,6 +8,7 @@ on:
   pull_request:
     branches:
       - main
+      - agent/db-canonical-migration-v2
 
 permissions:
   contents: read
