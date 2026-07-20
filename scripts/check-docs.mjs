@@ -14,6 +14,7 @@ const requiredActive = [
   "DEPLOY.md",
   "docs/README.md",
   "docs/operations/README.md",
+  "docs/operations/legacy-import.md",
   "docs/database/README.md",
   "docs/database/change-log.md",
 ];
@@ -24,12 +25,6 @@ const requiredPaths = [
   "docs/operations/static-delivery.md",
   "docs/operations/incident-response.md",
   "docs/operations/ui-acceptance.md",
-];
-const removedLegacyRuntimePaths = [
-  "docs/operations/legacy-import.md",
-  "app/(admin)/admin/import/page.tsx",
-  "app/api/admin/import/legacy/route.ts",
-  "src/lib/import/legacy",
 ];
 const localLinkPattern = /\[[^\]]*\]\(([^)]+)\)/g;
 const npmScriptPattern = /`npm run ([a-zA-Z0-9:_-]+)(?:\s+[^`]*)?`/g;
@@ -56,8 +51,8 @@ const forbiddenActiveClaims = [
     "runtime migrationを現行手順とする記述",
   ],
   [
-    /(?:legacy import|旧形式インポート|旧データ移行ツール).{0,60}(?:を有効化する|を使用する|を提供する|から取り込む)/gi,
-    "削除済み旧形式インポートを現行機能とする記述",
+    /(?:旧形式インポート|旧JSON|旧CSV|旧TSV).{0,100}(?:通常ランタイム|公開API|Worker).{0,80}(?:で受理する|へ混在させる|で提供する)/gi,
+    "旧形式入力を専用管理境界外で扱う記述",
   ],
 ];
 
@@ -140,11 +135,6 @@ for (const relative of requiredActive) {
 for (const relative of requiredPaths) {
   if (!fs.existsSync(file(relative))) errors.push(`${relative} がありません。`);
 }
-for (const relative of removedLegacyRuntimePaths) {
-  if (fs.existsSync(file(relative))) {
-    errors.push(`${relative}: 削除済み旧形式インポート経路を再導入しないでください。`);
-  }
-}
 
 for (const full of collectMarkdown(file("docs"))) {
   const relative = path.relative(root, full);
@@ -177,7 +167,7 @@ if (!/Cloudflare/i.test(read("docs/README.md"))) {
 }
 if (packageJson.engines?.node !== ">=22 <23") {
   errors.push(
-    `package.json: Node要件は">=22 <23"に統一してください。現在=${packageJson.engines?.node ?? "未設定"}`,
+    `package.json: Node要件は\">=22 <23\"に統一してください。現在=${packageJson.engines?.node ?? "未設定"}`,
   );
 }
 if (read(".nvmrc").trim() !== "22") {
@@ -204,5 +194,5 @@ if (errors.length > 0) {
   process.exit(1);
 }
 console.log(
-  "[check:docs] OK: active documentation metadata, links, npm scripts, vocabulary, Cloudflare source alignment, and removed legacy surfaces are valid.",
+  "[check:docs] OK: active documentation metadata, links, npm scripts, Cloudflare source alignment, and the isolated legacy import boundary are valid.",
 );
