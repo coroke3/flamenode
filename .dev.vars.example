@@ -27,7 +27,5 @@ MAINTENANCE_MODE="0"
 
 # 管理画面: D1 スプレッドシート (/admin/spreadsheet)。本番では原則 false
 ADMIN_SPREADSHEET_ENABLED="true"
-# 旧 EventArchives 移行ツール (/admin/import)。ローカル検証時のみ true 推奨
-ENABLE_LEGACY_IMPORT_TOOL="true"
 # 1ページあたりの取得行数（未設定時は 500、上限 5000）
 ADMIN_SPREADSHEET_PAGE_SIZE="500"
