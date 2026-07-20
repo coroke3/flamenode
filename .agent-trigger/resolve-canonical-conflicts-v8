@@ -1,2 +1,2 @@
 trigger v9 latest-candidate assembly
-sync: latest-base-rebased
+sync: base-workflow-registered
