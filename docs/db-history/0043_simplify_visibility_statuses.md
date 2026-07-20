@@ -4,7 +4,7 @@
 > Last verified: 2026-07-20
 > Implementation: PR #88
 > Compatibility: 旧状態をmigrationで一括変換し、旧defaultは即時正規化、UPDATEで再流入を拒否
-> Review: DB・保存処理・Worker・公開キャッシュ・管理UIを横断し、active baseline不変も確認
+> Review: DB・保存処理・Worker・公開キャッシュ・管理UIを横断し、active baseline不変と整理後のPR差分も確認
 > Source of truth: `migrations/0043_simplify_visibility_statuses.sql`, `src/lib/db/schema.ts`
 
 ## 目的
