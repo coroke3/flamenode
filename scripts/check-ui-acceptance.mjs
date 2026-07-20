@@ -36,8 +36,8 @@ requireAll("app/(auth)/entry/page.tsx", [
 
 requireAll("src/components/forms/VideoForm.tsx", [
   [/"submitter"\s*\|\s*"work"\s*\|\s*"youtube"\s*\|\s*"confirm"/, "4段階投稿フローがありません。"],
-  [/aria-current=\{index === currentStep \? "step"/, "現在ステップのアクセシビリティ表現がありません。"],
-  [/scrollIntoView\(\{ behavior: "smooth", block: "center" \}\)/, "入力エラー箇所への移動がありません。"],
+  [/aria-current=\{(?:isCurrent|index === currentStep)\s*\?\s*"step"/, "現在ステップのアクセシビリティ表現がありません。"],
+  [/scrollIntoView\(\{\s*behavior:\s*"smooth",\s*block:\s*"center",?\s*\}\)/, "入力エラー箇所への移動がありません。"],
   [/setDirty\(true\)/, "未保存変更の追跡がありません。"],
 ]);
 
