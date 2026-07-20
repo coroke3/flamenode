@@ -6,6 +6,7 @@ type ApiResponse = {
   ok: boolean;
   message?: string;
   mode?: "preview" | "apply";
+  previewToken?: string | null;
   summary?: Record<string, number>;
   warnings?: string[];
   errors?: string[];
@@ -20,29 +21,35 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
   const formRef = React.useRef<HTMLFormElement>(null);
   const [result, setResult] = React.useState<ApiResponse | null>(null);
   const [pending, setPending] = React.useState<"preview" | "apply" | null>(null);
-  const [previewed, setPreviewed] = React.useState(false);
+  const [previewToken, setPreviewToken] = React.useState<string | null>(null);
+
+  function invalidatePreview(): void {
+    setPreviewToken(null);
+  }
 
   async function submit(mode: "preview" | "apply"): Promise<void> {
     const form = formRef.current;
     if (!form || pending) return;
-    if (mode === "apply" && !previewed) {
+    if (mode === "apply" && !previewToken) {
       setResult({ ok: false, message: "先にプレビューを実行してください。" });
       return;
     }
-    if (mode === "apply" && !window.confirm("表示中の設定で旧形式データを新正本へ書き込みます。続行しますか？")) {
+    if (mode === "apply" && !window.confirm("プレビュー済みの内容を新正本へ書き込みます。続行しますか？")) {
       return;
     }
     setPending(mode);
     const body = new FormData(form);
     body.set("mode", mode);
+    if (mode === "apply" && previewToken) body.set("preview_token", previewToken);
     try {
       const response = await fetch("/api/admin/import/legacy", { method: "POST", body });
       const json = (await response.json()) as ApiResponse;
       setResult(json);
-      if (mode === "preview") setPreviewed(json.ok);
-      if (mode === "apply" && json.ok) setPreviewed(false);
+      if (mode === "preview") setPreviewToken(json.ok ? json.previewToken ?? null : null);
+      if (mode === "apply") setPreviewToken(null);
     } catch {
       setResult({ ok: false, message: "通信に失敗しました。入力内容は変更されていません。" });
+      if (mode === "apply") setPreviewToken(null);
     } finally {
       setPending(null);
     }
@@ -52,7 +59,7 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
     <div style={{ display: "grid", gap: 18 }}>
       <form
         ref={formRef}
-        onChange={() => setPreviewed(false)}
+        onChange={invalidatePreview}
         style={{ display: "grid", gap: 14, padding: 18, border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)", background: "var(--bg-surface)" }}
       >
         <label style={{ display: "grid", gap: 6 }}>
@@ -86,13 +93,16 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
           </label>
         </div>
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <button type="button" className="fn-btn fn-btn-primary" disabled={!!pending} onClick={() => void submit("preview")}>
             {pending === "preview" ? "解析中…" : "プレビュー"}
           </button>
-          <button type="button" className="fn-btn fn-btn-danger" disabled={!!pending || !previewed} onClick={() => void submit("apply")}>
+          <button type="button" className="fn-btn fn-btn-danger" disabled={!!pending || !previewToken} onClick={() => void submit("apply")}>
             {pending === "apply" ? "書き込み中…" : "新正本へ書き込む"}
           </button>
+          <span className="fn-muted fn-text-sm">
+            {previewToken ? "プレビュー内容は15分間固定されています。" : "ファイルまたは設定を変更すると再プレビューが必要です。"}
+          </span>
         </div>
       </form>
 
