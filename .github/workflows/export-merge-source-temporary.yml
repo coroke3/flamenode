@@ -61,8 +61,7 @@ jobs:
           git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'
 
           merge_branch() {
-            local branch="$1"
-            local default_side="$2"
+            local branch="$1" default_side="$2"
             set +e
             git merge --no-ff --no-edit -X"$default_side" "origin/$branch"
             local status=$?
@@ -100,8 +99,20 @@ jobs:
           patch_status=$?
           set -e
           if (( patch_status != 0 )); then
-            git diff --name-only --diff-filter=U | tee .tmp/videos-patch-conflicts.txt
-            exit 1
+            mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
+            printf '%s\n' "${conflicts[@]}" | tee .tmp/videos-patch-conflicts.txt
+            for path in "${conflicts[@]}"; do
+              case "$path" in
+                LOCAL.md|docs/operations.md|docs/operations/README.md|docs/operations/audit-and-restore.md)
+                  git checkout --ours -- "$path"
+                  ;;
+                *)
+                  git checkout --theirs -- "$path"
+                  ;;
+              esac
+              git add -- "$path"
+            done
+            ! git diff --name-only --diff-filter=U | grep -q .
           fi
           git diff --cached --check
           git commit -m "作品・YouTube・監査ランタイムを新正本へ適用"
