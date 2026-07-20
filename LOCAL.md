@@ -2,6 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-20
+> Verified against commit: `8de170c`
 > Source of truth: `package.json`, `.dev.vars.example`, `migrations/` active path, `wrangler.toml`, `docs/operations/migrations.md`
 
 この文書は個人PCの実施済み状態を前提にせず、空の作業環境からFlameNodeを再現する手順だけを扱います。本番操作は [`DEPLOY.md`](./DEPLOY.md) を参照してください。
