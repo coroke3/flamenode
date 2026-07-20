@@ -47,6 +47,50 @@ jobs:
         run: npm run check:db-d1-legacy
       - name: 旧形式インポート専用境界を検査
         run: node --test --experimental-strip-types src/lib/import/legacy/canonicalImport.test.mjs
+      - name: X名義旧識別子のmerge ref診断を作成
+        shell: bash
+        run: |
+          mkdir -p .tmp
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('.')
+          tokens = [
+              'x_account_link_requests',
+              'x_id_merge_requests',
+              'x_id_merge_reverts',
+              'linked_user_id',
+              'approval_requested_at',
+              'x_user_icons',
+              'x_user_youtube_channels',
+          ]
+          legacy_boundaries = (
+              'src/lib/import/legacy/',
+              'app/api/admin/import/legacy/',
+              'app/(admin)/admin/import/',
+          )
+          non_runtime = re.compile(r'(?:\.test|\.contract\.test|\.integration\.test)\.mjs$')
+          violations = []
+          for base in ('src', 'app', 'workers'):
+              for path in (root / base).rglob('*'):
+                  if not path.is_file() or path.suffix not in {'.ts', '.tsx', '.mjs'}:
+                      continue
+                  rel = path.as_posix()
+                  if rel.endswith('src/lib/db/schema.base.ts'):
+                      continue
+                  if non_runtime.search(rel) or 'historical' in rel:
+                      continue
+                  if any(rel.startswith(boundary) for boundary in legacy_boundaries):
+                      continue
+                  source = path.read_text(encoding='utf-8')
+                  for token in tokens:
+                      if token in source:
+                          violations.append(f'{rel}: {token}')
+          output = '\n'.join(violations)
+          Path('.tmp/x-identity-violations.txt').write_text(output + ('\n' if output else ''), encoding='utf-8')
+          print(output or 'no violations')
+          PY
       - name: X名義ランタイム旧識別子を検査
         run: node --test --experimental-strip-types --test-name-pattern="X名義ランタイム" src/lib/auth/xIdentityCanonical.contract.test.mjs
       - name: X名義多対多リンク契約を検査
@@ -57,3 +101,11 @@ jobs:
         run: node --test --experimental-strip-types --test-name-pattern="公開DTOは認証ID" src/lib/auth/xIdentityCanonical.contract.test.mjs
       - name: 最終受入契約を検査
         run: node --test --experimental-strip-types src/lib/integration/finalAcceptance.integration.test.mjs
+      - name: X名義診断を保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: x-identity-canonical-diagnostics-${{ github.run_id }}
+          path: .tmp/x-identity-violations.txt
+          if-no-files-found: error
+          retention-days: 1
