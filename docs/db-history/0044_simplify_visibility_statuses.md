@@ -33,6 +33,13 @@
 - `limited / archived / hidden`などの旧状態を新規INSERT・UPDATEする処理はDB triggerで拒否します。
 - migration末尾で旧状態が0件であることを検証し、残存時は明示的に失敗します。
 
+## 正本担当実装との接続
+
+- イベント作成は`x_user_account_links`からowner X名義を解決し、イベントとownerを同じ監査mutationで登録します。
+- テンプレートから廃止済み`max_consecutive_slots_per_entry`を除去し、`events.max_slots_per_video`を維持します。
+- 枠の部判定から廃止済み`slots.slot_kind`を除去します。
+- YouTube重複判定は現行状態では`voided`だけを対象外とし、IDの正本を`videos.youtube_video_id`へ維持します。
+
 ## 適用前条件
 
 - `0043_db_canonical_migration.sql`が完了していること。
