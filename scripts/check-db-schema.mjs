@@ -143,9 +143,14 @@ const isMain =
 if (isMain) {
   try {
     const result = validateDbSchema(process.cwd());
+    if (result.tableCount !== 41 || result.columnCount !== 409) {
+      throw new Error(
+        `正本件数不一致: expected=41 tables/409 columns actual=${result.tableCount} tables/${result.columnCount} columns`,
+      );
+    }
     console.log(
       `[check:db-schema] OK: schema.ts is the sole public entrypoint; ${result.migrations.length} migrations, ` +
-        `${result.tableCount} tables, ${result.indexCount} indexes, ` +
+        `${result.tableCount} tables, ${result.columnCount} columns, ${result.indexCount} indexes, ` +
         `${result.foreignKeyCount} foreign keys, ${result.checkCount} checks.`,
     );
   } catch (error) {

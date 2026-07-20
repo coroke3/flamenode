@@ -140,8 +140,15 @@ jobs:
           FLAMENODE_OWNER_CHECK_DB: .tmp/owner-check.sqlite
         run: |
           npm run check:db-schema
+          npm run check:db-migration
           npm run check:db-legacy
           npm run check:event-owners
+
+      - name: D1空DBマイグレーションを検査
+        run: npm run check:db-d1-empty
+
+      - name: D1旧DBマイグレーションを検査
+        run: npm run check:db-d1-legacy
 
       - name: UI受入契約を検査
         run: npm run check:ui-acceptance

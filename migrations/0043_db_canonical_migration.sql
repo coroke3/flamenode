@@ -5,32 +5,253 @@
 -- Data loss: intentional
 -- Rollback: 適用前のD1バックアップを復元し、0043適用前のアプリケーションへ戻す。
 -- Change log: docs/database/change-log.md
-PRAGMA foreign_keys = OFF;
+-- This migration is intentionally amended while PR #89 is still unmerged.
+-- Once merged to main, follow-up changes must use a new migration number.
+PRAGMA foreign_keys = ON;
+
+-- Fail before any destructive step unless this is exactly the supported legacy schema.
+-- The in-progress marker makes a non-transactional partial application detectable.
+CREATE TABLE _migration_0043_schema_guard (
+  ok INTEGER NOT NULL,
+  CONSTRAINT migration_0043_expected_legacy_schema CHECK (ok = 1)
+);
+INSERT INTO _migration_0043_schema_guard (ok)
+SELECT CASE WHEN
+  (SELECT version FROM flamenode_schema_meta WHERE id = 'current') = '2026-07-11-baseline-1'
+  AND (SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN (
+    'audit_log_settings',
+    'legacy_import_batch_items',
+    'legacy_import_batches',
+    'x_account_link_requests',
+    'x_id_merge_reverts',
+    'x_id_merge_requests',
+    'x_user_icons',
+    'x_user_youtube_channels'
+  )) = 8
+  AND NOT EXISTS (
+    SELECT 1 FROM sqlite_master
+    WHERE type = 'table'
+      AND (
+        name IN ('x_identity_requests', 'x_user_account_links')
+        OR name LIKE '%\_new' ESCAPE '\'
+      )
+  )
+THEN 1 ELSE 0 END;
+DROP TABLE _migration_0043_schema_guard;
+
+CREATE TABLE _migration_0043_fk_guard (
+  ok INTEGER NOT NULL,
+  CONSTRAINT migration_0043_legacy_foreign_keys_valid CHECK (ok = 1)
+);
+INSERT INTO _migration_0043_fk_guard (ok)
+SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM pragma_foreign_key_check) THEN 1 ELSE 0 END;
+DROP TABLE _migration_0043_fk_guard;
+
+CREATE TABLE _migration_0043_chapter_json_guard (
+  ok INTEGER NOT NULL,
+  CONSTRAINT migration_0043_valid_chapters_json_array CHECK (ok = 1)
+);
+INSERT INTO _migration_0043_chapter_json_guard (ok)
+SELECT CASE WHEN NOT EXISTS (
+  SELECT 1
+  FROM video_members
+  WHERE chapters_json IS NOT NULL
+    AND trim(chapters_json) <> ''
+    AND (
+      json_valid(chapters_json) = 0
+      OR json_type(CASE WHEN json_valid(chapters_json) = 1 THEN chapters_json ELSE '[]' END) <> 'array'
+    )
+) THEN 1 ELSE 0 END;
+DROP TABLE _migration_0043_chapter_json_guard;
+
+CREATE TABLE _migration_0043_youtube_guard (
+  ok INTEGER NOT NULL,
+  CONSTRAINT migration_0043_youtube_ids_resolved CHECK (ok = 1)
+);
+INSERT INTO _migration_0043_youtube_guard (ok)
+SELECT CASE WHEN
+  NOT EXISTS (
+    SELECT 1
+    FROM videos v
+    JOIN video_youtube_metadata m ON m.video_id = v.id
+    WHERE NULLIF(trim(v.youtube_video_id), '') IS NOT NULL
+      AND NULLIF(trim(m.youtube_video_id), '') IS NOT NULL
+      AND trim(v.youtube_video_id) <> trim(m.youtube_video_id)
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM (
+      SELECT
+        COALESCE(NULLIF(trim(v.youtube_video_id), ''), NULLIF(trim(m.youtube_video_id), '')) AS youtube_video_id
+      FROM videos v
+      LEFT JOIN video_youtube_metadata m ON m.video_id = v.id
+      WHERE v.visibility_status NOT IN ('archived', 'voided')
+    ) ids
+    WHERE youtube_video_id IS NOT NULL
+    GROUP BY youtube_video_id
+    HAVING COUNT(*) > 1
+  )
+THEN 1 ELSE 0 END;
+DROP TABLE _migration_0043_youtube_guard;
+
+CREATE TABLE _migration_0043_event_staff_guard (
+  ok INTEGER NOT NULL,
+  CONSTRAINT migration_0043_event_staff_identity_unique CHECK (ok = 1)
+);
+INSERT INTO _migration_0043_event_staff_guard (ok)
+SELECT CASE WHEN NOT EXISTS (
+  SELECT 1
+  FROM event_staff
+  GROUP BY
+    event_id,
+    COALESCE(
+      NULLIF(trim(x_user_id), ''),
+      CASE WHEN user_id IS NOT NULL AND trim(user_id) <> '' THEN 'legacy_auth:' || user_id END,
+      'legacy_event_staff:' || id
+    )
+  HAVING COUNT(*) > 1
+) THEN 1 ELSE 0 END;
+DROP TABLE _migration_0043_event_staff_guard;
+
+CREATE TABLE _migration_0043_software_alias_guard (
+  ok INTEGER NOT NULL,
+  CONSTRAINT migration_0043_software_alias_global_unique CHECK (ok = 1)
+);
+INSERT INTO _migration_0043_software_alias_guard (ok)
+SELECT CASE WHEN NOT EXISTS (
+  SELECT normalized_alias
+  FROM software_aliases
+  GROUP BY normalized_alias
+  HAVING COUNT(DISTINCT software_id) > 1
+) THEN 1 ELSE 0 END;
+DROP TABLE _migration_0043_software_alias_guard;
+
+CREATE TABLE _migration_0043_expected_counts (
+  request_count INTEGER NOT NULL,
+  account_link_count INTEGER NOT NULL,
+  event_count INTEGER NOT NULL,
+  video_count INTEGER NOT NULL,
+  video_member_count INTEGER NOT NULL,
+  youtube_metadata_count INTEGER NOT NULL,
+  chapter_count INTEGER NOT NULL
+);
+INSERT INTO _migration_0043_expected_counts (
+  request_count,
+  account_link_count,
+  event_count,
+  video_count,
+  video_member_count,
+  youtube_metadata_count,
+  chapter_count
+)
+SELECT
+  (SELECT COUNT(*) FROM x_account_link_requests)
+    + (SELECT COUNT(*) FROM x_id_merge_requests)
+    + (SELECT COUNT(*) FROM x_id_merge_reverts),
+  (
+    SELECT COUNT(*)
+    FROM (
+      SELECT id AS x_user_id, linked_user_id AS auth_user_id
+      FROM x_users
+      WHERE linked_user_id IS NOT NULL AND trim(linked_user_id) <> ''
+      UNION
+      SELECT
+        COALESCE(
+          NULLIF(trim(x_user_id), ''),
+          CASE WHEN user_id IS NOT NULL AND trim(user_id) <> '' THEN 'legacy_auth:' || user_id END
+        ),
+        user_id
+      FROM event_staff
+      WHERE user_id IS NOT NULL AND trim(user_id) <> ''
+      UNION
+      SELECT
+        COALESCE(
+          NULLIF(trim(x_user_id), ''),
+          CASE WHEN user_id IS NOT NULL AND trim(user_id) <> '' THEN 'legacy_auth:' || user_id END
+        ),
+        user_id
+      FROM video_members
+      WHERE user_id IS NOT NULL AND trim(user_id) <> ''
+    ) links
+  ),
+  (SELECT COUNT(*) FROM events),
+  (SELECT COUNT(*) FROM videos),
+  (SELECT COUNT(*) FROM video_members),
+  (SELECT COUNT(*) FROM video_youtube_metadata),
+  (SELECT COUNT(*) FROM video_chapters)
+  + (
+    SELECT COUNT(*)
+    FROM video_members vm
+    JOIN json_each(
+      CASE
+        WHEN vm.chapters_json IS NOT NULL
+          AND trim(vm.chapters_json) <> ''
+          AND json_valid(vm.chapters_json) = 1
+        THEN vm.chapters_json
+        ELSE '[]'
+      END
+    ) je
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM video_chapters vc
+      WHERE vc.video_id = vm.video_id
+        AND COALESCE(vc.x_user_id, '') = COALESCE(
+        NULLIF(trim(vm.x_user_id), ''),
+        CASE WHEN vm.user_id IS NOT NULL AND trim(vm.user_id) <> '' THEN 'legacy_auth:' || vm.user_id END,
+        ''
+      )
+        AND vc.chapter_time = COALESCE(
+          CAST(json_extract(je.value, '$.time_seconds') AS REAL),
+          CAST(json_extract(je.value, '$.time') AS REAL),
+          CAST(json_extract(je.value, '$.chapter_time') AS REAL),
+          0
+        )
+        AND vc.chapter_label = COALESCE(
+          NULLIF(trim(CAST(json_extract(je.value, '$.label') AS TEXT)), ''),
+          NULLIF(trim(CAST(json_extract(je.value, '$.chapter_label') AS TEXT)), ''),
+          '担当'
+        )
+    )
+  );
+
+CREATE TABLE _migration_0043_event_limits AS
+SELECT id AS event_id, max_slots_per_video
+FROM events;
+
+UPDATE flamenode_schema_meta
+SET version = '2026-07-20-canonical-1-in-progress', applied_at = unixepoch()
+WHERE id = 'current' AND version = '2026-07-11-baseline-1';
+
+-- D1 does not allow disabling foreign keys. Defer enforcement until the migration transaction commits.
+PRAGMA defer_foreign_keys = ON;
 INSERT OR IGNORE INTO "user" (
   id, name, role, can_create_events, is_notification_enabled, created_at
 ) VALUES (
   'system_db_migration', 'DB migration system', 'user', 0, 0, unixepoch()
 );
+CREATE TABLE _migration_0043_x_user_refs (
+  x_id TEXT PRIMARY KEY
+);
+INSERT OR IGNORE INTO _migration_0043_x_user_refs
+SELECT x_user_id FROM event_staff WHERE x_user_id IS NOT NULL AND trim(x_user_id) <> '';
+INSERT OR IGNORE INTO _migration_0043_x_user_refs
+SELECT x_user_id FROM video_members WHERE x_user_id IS NOT NULL AND trim(x_user_id) <> '';
+INSERT OR IGNORE INTO _migration_0043_x_user_refs
+SELECT x_user_id FROM video_chapters WHERE x_user_id IS NOT NULL AND trim(x_user_id) <> '';
+INSERT OR IGNORE INTO _migration_0043_x_user_refs
+SELECT representative_x_user_id FROM events WHERE representative_x_user_id IS NOT NULL AND trim(representative_x_user_id) <> '';
+INSERT OR IGNORE INTO _migration_0043_x_user_refs
+SELECT requested_x_id FROM x_account_link_requests WHERE requested_x_id IS NOT NULL AND trim(requested_x_id) <> '';
+INSERT OR IGNORE INTO _migration_0043_x_user_refs
+SELECT target_x_user_id FROM x_account_link_requests WHERE target_x_user_id IS NOT NULL AND trim(target_x_user_id) <> '';
+INSERT OR IGNORE INTO _migration_0043_x_user_refs
+SELECT from_x_user_id FROM x_id_merge_requests WHERE from_x_user_id IS NOT NULL AND trim(from_x_user_id) <> '';
+INSERT OR IGNORE INTO _migration_0043_x_user_refs
+SELECT to_x_user_id FROM x_id_merge_requests WHERE to_x_user_id IS NOT NULL AND trim(to_x_user_id) <> '';
 INSERT OR IGNORE INTO x_users (id, x_name, approval_status)
-SELECT DISTINCT x_id, x_id, 'pending'
-FROM (
-  SELECT x_user_id AS x_id FROM event_staff WHERE x_user_id IS NOT NULL AND trim(x_user_id) <> ''
-  UNION ALL
-  SELECT x_user_id FROM video_members WHERE x_user_id IS NOT NULL AND trim(x_user_id) <> ''
-  UNION ALL
-  SELECT x_user_id FROM video_chapters WHERE x_user_id IS NOT NULL AND trim(x_user_id) <> ''
-  UNION ALL
-  SELECT representative_x_user_id FROM events WHERE representative_x_user_id IS NOT NULL AND trim(representative_x_user_id) <> ''
-  UNION ALL
-  SELECT requested_x_id FROM x_account_link_requests WHERE requested_x_id IS NOT NULL AND trim(requested_x_id) <> ''
-  UNION ALL
-  SELECT target_x_user_id FROM x_account_link_requests WHERE target_x_user_id IS NOT NULL AND trim(target_x_user_id) <> ''
-  UNION ALL
-  SELECT from_x_user_id FROM x_id_merge_requests WHERE from_x_user_id IS NOT NULL AND trim(from_x_user_id) <> ''
-  UNION ALL
-  SELECT to_x_user_id FROM x_id_merge_requests WHERE to_x_user_id IS NOT NULL AND trim(to_x_user_id) <> ''
-) refs
-WHERE x_id IS NOT NULL AND trim(x_id) <> '';
+SELECT x_id, x_id, 'pending'
+FROM _migration_0043_x_user_refs;
+DROP TABLE _migration_0043_x_user_refs;
 INSERT OR IGNORE INTO x_users (id, x_name, approval_status)
 SELECT
   'legacy_auth:' || u.id,
@@ -42,6 +263,14 @@ WHERE EXISTS (
   UNION ALL
   SELECT 1 FROM video_members vm WHERE vm.user_id = u.id AND vm.x_user_id IS NULL
 );
+INSERT OR IGNORE INTO x_users (id, x_name, approval_status)
+SELECT
+  'legacy_event_staff:' || es.id,
+  COALESCE(NULLIF(trim(es.display_name), ''), 'Legacy event staff'),
+  'pending'
+FROM event_staff es
+WHERE (es.x_user_id IS NULL OR trim(es.x_user_id) = '')
+  AND (es.user_id IS NULL OR trim(es.user_id) = '');
 UPDATE videos
 SET youtube_video_id = (
   SELECT m.youtube_video_id
@@ -55,6 +284,170 @@ WHERE (youtube_video_id IS NULL OR trim(youtube_video_id) = '')
       AND m.youtube_video_id IS NOT NULL
       AND trim(m.youtube_video_id) <> ''
   );
+CREATE TABLE _migration_0043_account_links_source (
+  x_user_id TEXT NOT NULL,
+  auth_user_id TEXT NOT NULL,
+  link_role TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (x_user_id, auth_user_id)
+);
+INSERT OR IGNORE INTO _migration_0043_account_links_source
+  (x_user_id, auth_user_id, link_role, created_at, updated_at)
+SELECT id, linked_user_id, 'owner', unixepoch(), unixepoch()
+FROM x_users
+WHERE linked_user_id IS NOT NULL AND trim(linked_user_id) <> '';
+INSERT OR IGNORE INTO _migration_0043_account_links_source
+  (x_user_id, auth_user_id, link_role, created_at, updated_at)
+SELECT COALESCE(NULLIF(trim(x_user_id), ''), 'legacy_auth:' || user_id), user_id,
+       'manager', COALESCE(created_at, unixepoch()), COALESCE(updated_at, unixepoch())
+FROM event_staff
+WHERE user_id IS NOT NULL AND trim(user_id) <> '';
+INSERT OR IGNORE INTO _migration_0043_account_links_source
+  (x_user_id, auth_user_id, link_role, created_at, updated_at)
+SELECT COALESCE(NULLIF(trim(x_user_id), ''), 'legacy_auth:' || user_id), user_id,
+       CASE WHEN can_edit = 1 THEN 'manager' ELSE 'owner' END,
+       COALESCE(edit_granted_at, unixepoch()), COALESCE(edit_updated_at, unixepoch())
+FROM video_members
+WHERE user_id IS NOT NULL AND trim(user_id) <> '';
+
+-- D1 keeps foreign keys enabled. Preserve all inbound x_users references, clear them,
+-- rebuild the parent, then restore them before any dependent table is converted.
+CREATE TABLE _migration_0043_x_user_refs (
+  table_name TEXT NOT NULL,
+  row_id TEXT NOT NULL,
+  x_user_id TEXT NOT NULL,
+  PRIMARY KEY (table_name, row_id)
+);
+INSERT INTO _migration_0043_x_user_refs
+SELECT 'event_staff', id, x_user_id FROM event_staff WHERE x_user_id IS NOT NULL;
+INSERT INTO _migration_0043_x_user_refs
+SELECT 'slots', id, x_user_id FROM slots WHERE x_user_id IS NOT NULL;
+CREATE TABLE _migration_0043_video_chapters_source AS
+SELECT * FROM video_chapters;
+DELETE FROM video_chapters;
+INSERT INTO _migration_0043_x_user_refs
+SELECT 'video_members', id, x_user_id FROM video_members WHERE x_user_id IS NOT NULL;
+INSERT INTO _migration_0043_x_user_refs
+SELECT 'video_moderation_cases', id, related_x_user_id
+FROM video_moderation_cases WHERE related_x_user_id IS NOT NULL;
+INSERT INTO _migration_0043_x_user_refs
+SELECT 'videos', id, creator_x_user_id FROM videos WHERE creator_x_user_id IS NOT NULL;
+UPDATE event_staff SET x_user_id = NULL WHERE x_user_id IS NOT NULL;
+UPDATE slots SET x_user_id = NULL WHERE x_user_id IS NOT NULL;
+UPDATE video_members SET x_user_id = NULL WHERE x_user_id IS NOT NULL;
+UPDATE video_moderation_cases SET related_x_user_id = NULL WHERE related_x_user_id IS NOT NULL;
+UPDATE videos SET creator_x_user_id = NULL WHERE creator_x_user_id IS NOT NULL;
+
+CREATE TABLE x_users_new (
+  id TEXT PRIMARY KEY NOT NULL,
+  x_name TEXT NOT NULL,
+  icon_url TEXT,
+  profile_text TEXT,
+  portfolio_contact TEXT,
+  youtube_channel_url TEXT,
+  other_social_links TEXT,
+  creative_start_date INTEGER,
+  approval_status TEXT DEFAULT 'pending'
+);
+INSERT INTO x_users_new (
+  id, x_name, icon_url, profile_text, portfolio_contact, youtube_channel_url,
+  other_social_links, creative_start_date, approval_status
+)
+SELECT
+  xu.id,
+  xu.x_name,
+  COALESCE(
+    NULLIF(trim(xu.icon_url), ''),
+    (SELECT NULLIF(trim(xui.icon_url), '') FROM x_user_icons xui
+     WHERE xui.x_user_id = xu.id ORDER BY xui.created_at DESC, xui.id DESC LIMIT 1)
+  ),
+  xu.profile_text,
+  xu.portfolio_contact,
+  COALESCE(
+    NULLIF(trim(xu.youtube_channel_url), ''),
+    (SELECT NULLIF(trim(xyc.youtube_channel_url), '') FROM x_user_youtube_channels xyc
+     WHERE xyc.x_user_id = xu.id ORDER BY xyc.created_at DESC, xyc.id DESC LIMIT 1)
+  ),
+  xu.other_social_links,
+  xu.creative_start_date,
+  COALESCE(xu.approval_status, 'pending')
+FROM x_users xu;
+CREATE TABLE _migration_0043_x_users_assert (
+  ok INTEGER NOT NULL,
+  CONSTRAINT migration_0043_x_users_complete CHECK (ok = 1)
+);
+INSERT INTO _migration_0043_x_users_assert (ok)
+SELECT CASE WHEN
+  (SELECT COUNT(*) FROM x_users_new) = (SELECT COUNT(*) FROM x_users)
+  AND (SELECT COUNT(*) FROM _migration_0043_account_links_source)
+    = (SELECT account_link_count FROM _migration_0043_expected_counts)
+  AND NOT EXISTS (
+    SELECT 1
+    FROM _migration_0043_account_links_source l
+    LEFT JOIN x_users_new xu ON xu.id = l.x_user_id
+    LEFT JOIN "user" u ON u.id = l.auth_user_id
+    WHERE xu.id IS NULL OR u.id IS NULL
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM _migration_0043_x_user_refs r
+    LEFT JOIN x_users_new xu ON xu.id = r.x_user_id
+    WHERE xu.id IS NULL
+  )
+THEN 1 ELSE 0 END;
+DROP TABLE _migration_0043_x_users_assert;
+DROP TABLE x_users;
+ALTER TABLE x_users_new RENAME TO x_users;
+UPDATE event_staff
+SET x_user_id = (SELECT r.x_user_id FROM _migration_0043_x_user_refs r
+                 WHERE r.table_name = 'event_staff' AND r.row_id = event_staff.id)
+WHERE EXISTS (SELECT 1 FROM _migration_0043_x_user_refs r
+              WHERE r.table_name = 'event_staff' AND r.row_id = event_staff.id);
+UPDATE slots
+SET x_user_id = (SELECT r.x_user_id FROM _migration_0043_x_user_refs r
+                 WHERE r.table_name = 'slots' AND r.row_id = slots.id)
+WHERE EXISTS (SELECT 1 FROM _migration_0043_x_user_refs r
+              WHERE r.table_name = 'slots' AND r.row_id = slots.id);
+INSERT INTO video_chapters
+SELECT * FROM _migration_0043_video_chapters_source;
+DROP TABLE _migration_0043_video_chapters_source;
+UPDATE video_members
+SET x_user_id = (SELECT r.x_user_id FROM _migration_0043_x_user_refs r
+                 WHERE r.table_name = 'video_members' AND r.row_id = video_members.id)
+WHERE EXISTS (SELECT 1 FROM _migration_0043_x_user_refs r
+              WHERE r.table_name = 'video_members' AND r.row_id = video_members.id);
+UPDATE video_moderation_cases
+SET related_x_user_id = (SELECT r.x_user_id FROM _migration_0043_x_user_refs r
+                         WHERE r.table_name = 'video_moderation_cases'
+                           AND r.row_id = video_moderation_cases.id)
+WHERE EXISTS (SELECT 1 FROM _migration_0043_x_user_refs r
+              WHERE r.table_name = 'video_moderation_cases'
+                AND r.row_id = video_moderation_cases.id);
+UPDATE videos
+SET creator_x_user_id = (SELECT r.x_user_id FROM _migration_0043_x_user_refs r
+                         WHERE r.table_name = 'videos' AND r.row_id = videos.id)
+WHERE EXISTS (SELECT 1 FROM _migration_0043_x_user_refs r
+              WHERE r.table_name = 'videos' AND r.row_id = videos.id);
+CREATE TABLE _migration_0043_x_user_refs_assert (
+  ok INTEGER NOT NULL,
+  CONSTRAINT migration_0043_x_user_refs_restored CHECK (ok = 1)
+);
+INSERT INTO _migration_0043_x_user_refs_assert (ok)
+SELECT CASE WHEN NOT EXISTS (
+  SELECT 1 FROM _migration_0043_x_user_refs r
+  WHERE CASE r.table_name
+    WHEN 'event_staff' THEN COALESCE((SELECT x_user_id FROM event_staff WHERE id = r.row_id), '')
+    WHEN 'slots' THEN COALESCE((SELECT x_user_id FROM slots WHERE id = r.row_id), '')
+    WHEN 'video_members' THEN COALESCE((SELECT x_user_id FROM video_members WHERE id = r.row_id), '')
+    WHEN 'video_moderation_cases' THEN COALESCE((SELECT related_x_user_id FROM video_moderation_cases WHERE id = r.row_id), '')
+    WHEN 'videos' THEN COALESCE((SELECT creator_x_user_id FROM videos WHERE id = r.row_id), '')
+    ELSE ''
+  END <> r.x_user_id
+) THEN 1 ELSE 0 END;
+DROP TABLE _migration_0043_x_user_refs_assert;
+DROP TABLE _migration_0043_x_user_refs;
+
 CREATE TABLE x_identity_requests (
   id TEXT PRIMARY KEY NOT NULL,
   request_type TEXT NOT NULL,
@@ -93,59 +486,27 @@ INSERT INTO x_identity_requests (
 )
 SELECT
   'link:' || id,
-  CASE link_type
-    WHEN 'new' THEN 'new_link'
-    WHEN 'alias' THEN 'alias'
-    ELSE 'existing_link'
-  END,
-  user_id,
-  requested_x_id,
-  NULL,
-  target_x_user_id,
-  NULL,
-  NULL,
-  NULL,
-  COALESCE(status, 'pending'),
-  requested_at,
-  requested_at
+  CASE link_type WHEN 'new' THEN 'new_link' WHEN 'alias' THEN 'alias' ELSE 'existing_link' END,
+  user_id, requested_x_id, NULL, target_x_user_id, NULL, NULL, NULL,
+  COALESCE(status, 'pending'), requested_at, requested_at
 FROM x_account_link_requests;
 INSERT INTO x_identity_requests (
   id, request_type, requested_by_auth_user_id, requested_x_id,
   source_x_user_id, target_x_user_id, parent_request_id,
   restore_snapshot_json, revert_deadline_at, status, requested_at, updated_at
 )
-SELECT
-  'merge:' || id,
-  'merge',
-  requested_by_user_id,
-  NULL,
-  from_x_user_id,
-  to_x_user_id,
-  NULL,
-  NULL,
-  NULL,
-  COALESCE(status, 'pending'),
-  created_at,
-  updated_at
+SELECT 'merge:' || id, 'merge', requested_by_user_id, NULL,
+       from_x_user_id, to_x_user_id, NULL, NULL, NULL,
+       COALESCE(status, 'pending'), created_at, updated_at
 FROM x_id_merge_requests;
 INSERT INTO x_identity_requests (
   id, request_type, requested_by_auth_user_id, requested_x_id,
   source_x_user_id, target_x_user_id, parent_request_id,
   restore_snapshot_json, revert_deadline_at, status, requested_at, updated_at
 )
-SELECT
-  'revert:' || id,
-  'revert_merge',
-  requested_by_user_id,
-  NULL,
-  NULL,
-  NULL,
-  'merge:' || merge_request_id,
-  restore_snapshot_json,
-  revert_deadline_at,
-  COALESCE(status, 'pending'),
-  created_at,
-  updated_at
+SELECT 'revert:' || id, 'revert_merge', requested_by_user_id, NULL,
+       NULL, NULL, 'merge:' || merge_request_id, restore_snapshot_json,
+       revert_deadline_at, COALESCE(status, 'pending'), created_at, updated_at
 FROM x_id_merge_reverts;
 CREATE TABLE x_user_account_links (
   x_user_id TEXT NOT NULL,
@@ -163,63 +524,29 @@ CREATE INDEX x_user_account_links_auth_user_idx
   ON x_user_account_links (auth_user_id, link_role, x_user_id);
 CREATE INDEX x_user_account_links_x_user_idx
   ON x_user_account_links (x_user_id, link_role, auth_user_id);
-INSERT OR IGNORE INTO x_user_account_links (
+INSERT INTO x_user_account_links (
   x_user_id, auth_user_id, link_role, created_by_request_id, created_at, updated_at
 )
-SELECT id, linked_user_id, 'owner', NULL, unixepoch(), unixepoch()
-FROM x_users
-WHERE linked_user_id IS NOT NULL;
-INSERT OR IGNORE INTO x_user_account_links (
-  x_user_id, auth_user_id, link_role, created_by_request_id, created_at, updated_at
-)
-SELECT COALESCE(x_user_id, 'legacy_auth:' || user_id), user_id, 'manager', NULL,
-       COALESCE(created_at, unixepoch()), COALESCE(updated_at, unixepoch())
-FROM event_staff
-WHERE user_id IS NOT NULL;
-INSERT OR IGNORE INTO x_user_account_links (
-  x_user_id, auth_user_id, link_role, created_by_request_id, created_at, updated_at
-)
-SELECT COALESCE(x_user_id, 'legacy_auth:' || user_id), user_id,
-       CASE WHEN can_edit = 1 THEN 'manager' ELSE 'owner' END,
-       NULL, COALESCE(edit_granted_at, unixepoch()), COALESCE(edit_updated_at, unixepoch())
-FROM video_members
-WHERE user_id IS NOT NULL;
-CREATE TABLE x_users_new (
-  id TEXT PRIMARY KEY NOT NULL,
-  x_name TEXT NOT NULL,
-  icon_url TEXT,
-  profile_text TEXT,
-  portfolio_contact TEXT,
-  youtube_channel_url TEXT,
-  other_social_links TEXT,
-  creative_start_date INTEGER,
-  approval_status TEXT DEFAULT 'pending'
+SELECT x_user_id, auth_user_id, link_role, NULL, created_at, updated_at
+FROM _migration_0043_account_links_source;
+CREATE TABLE _migration_0043_x_links_assert (
+  ok INTEGER NOT NULL,
+  CONSTRAINT migration_0043_x_account_links_complete CHECK (ok = 1)
 );
-INSERT INTO x_users_new (
-  id, x_name, icon_url, profile_text, portfolio_contact, youtube_channel_url,
-  other_social_links, creative_start_date, approval_status
-)
-SELECT
-  xu.id,
-  xu.x_name,
-  COALESCE(
-    NULLIF(trim(xu.icon_url), ''),
-    (SELECT NULLIF(trim(xui.icon_url), '') FROM x_user_icons xui
-     WHERE xui.x_user_id = xu.id ORDER BY xui.created_at DESC, xui.id DESC LIMIT 1)
-  ),
-  xu.profile_text,
-  xu.portfolio_contact,
-  COALESCE(
-    NULLIF(trim(xu.youtube_channel_url), ''),
-    (SELECT NULLIF(trim(xyc.youtube_channel_url), '') FROM x_user_youtube_channels xyc
-     WHERE xyc.x_user_id = xu.id ORDER BY xyc.created_at DESC, xyc.id DESC LIMIT 1)
-  ),
-  xu.other_social_links,
-  xu.creative_start_date,
-  COALESCE(xu.approval_status, 'pending')
-FROM x_users xu;
-DROP TABLE x_users;
-ALTER TABLE x_users_new RENAME TO x_users;
+INSERT INTO _migration_0043_x_links_assert (ok)
+SELECT CASE WHEN
+  (SELECT COUNT(*) FROM x_user_account_links)
+    = (SELECT account_link_count FROM _migration_0043_expected_counts)
+  AND NOT EXISTS (
+    SELECT 1
+    FROM x_user_account_links l
+    LEFT JOIN x_users xu ON xu.id = l.x_user_id
+    LEFT JOIN "user" u ON u.id = l.auth_user_id
+    WHERE xu.id IS NULL OR u.id IS NULL
+  )
+THEN 1 ELSE 0 END;
+DROP TABLE _migration_0043_x_links_assert;
+DROP TABLE _migration_0043_account_links_source;
 CREATE TABLE event_group_events_new (
   event_group_id TEXT NOT NULL,
   event_id TEXT NOT NULL,
@@ -239,59 +566,29 @@ ALTER TABLE event_group_events_new RENAME TO event_group_events;
 CREATE INDEX event_group_events_event_idx ON event_group_events (event_id);
 CREATE INDEX event_group_events_group_relation_idx
   ON event_group_events (event_group_id, relation_type);
-CREATE TABLE events_new (
-  id TEXT PRIMARY KEY NOT NULL,
-  title TEXT NOT NULL,
-  event_type TEXT DEFAULT 'event',
-  explanation TEXT,
-  icon_url TEXT,
-  img_url TEXT,
-  accent_color TEXT,
-  visibility_status TEXT NOT NULL DEFAULT 'draft',
-  allow_user_video_event_links INTEGER NOT NULL DEFAULT 0,
-  allow_unslotted_posts INTEGER NOT NULL DEFAULT 0,
-  allow_user_video_edits INTEGER NOT NULL DEFAULT 0,
-  user_video_edit_permission_keys_json TEXT,
-  slot_type TEXT DEFAULT 'time',
-  slot_visibility_mode TEXT DEFAULT 'public_name',
-  start_time INTEGER,
-  end_time INTEGER,
-  entry_start_time INTEGER,
-  entry_end_time INTEGER,
-  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  max_slots_per_video INTEGER NOT NULL DEFAULT 1,
-  review_settings TEXT,
-  editable_fields TEXT,
-  repeat_rules TEXT,
-  slot_part_gap_minutes INTEGER DEFAULT 15,
-  parts_json TEXT,
-  public_api_enabled INTEGER NOT NULL DEFAULT 0
-);
-INSERT INTO events_new (
-  id, title, event_type, explanation, icon_url, img_url, accent_color,
-  visibility_status, allow_user_video_event_links, allow_unslotted_posts,
-  allow_user_video_edits, user_video_edit_permission_keys_json, slot_type,
-  slot_visibility_mode, start_time, end_time, entry_start_time, entry_end_time,
-  created_at, updated_at, max_slots_per_video, review_settings, editable_fields,
-  repeat_rules, slot_part_gap_minutes, parts_json, public_api_enabled
-)
-SELECT
-  id, title, event_type, explanation, icon_url, img_url, accent_color,
-  visibility_status, allow_user_video_event_links, allow_unslotted_posts,
-  allow_user_video_edits, user_video_edit_permission_keys_json, slot_type,
-  slot_visibility_mode, start_time, end_time, entry_start_time, entry_end_time,
-  created_at, updated_at, max_slots_per_video, review_settings, editable_fields,
-  repeat_rules, slot_part_gap_minutes, parts_json, public_api_enabled
-FROM events;
-CREATE TEMP TABLE _migration_event_representatives AS
+CREATE TABLE _migration_event_representatives AS
 SELECT id AS event_id, representative_x_user_id
 FROM events
 WHERE representative_x_user_id IS NOT NULL AND trim(representative_x_user_id) <> '';
-DROP TABLE events;
-ALTER TABLE events_new RENAME TO events;
-CREATE INDEX events_visibility_start_idx
-  ON events (visibility_status, start_time);
+ALTER TABLE events DROP COLUMN representative_x_user_id;
+ALTER TABLE events DROP COLUMN max_consecutive_slots_per_entry;
+ALTER TABLE events DROP COLUMN public_api_updated_at;
+CREATE TABLE _migration_0043_events_assert (
+  ok INTEGER NOT NULL,
+  CONSTRAINT migration_0043_events_preserved CHECK (ok = 1)
+);
+INSERT INTO _migration_0043_events_assert (ok)
+SELECT CASE WHEN
+  (SELECT COUNT(*) FROM events) = (SELECT event_count FROM _migration_0043_expected_counts)
+  AND NOT EXISTS (
+    SELECT 1
+    FROM _migration_0043_event_limits before
+    LEFT JOIN events after ON after.id = before.event_id
+    WHERE after.id IS NULL
+      OR after.max_slots_per_video <> before.max_slots_per_video
+  )
+THEN 1 ELSE 0 END;
+DROP TABLE _migration_0043_events_assert;
 CREATE TABLE event_staff_new (
   id TEXT PRIMARY KEY NOT NULL,
   event_id TEXT NOT NULL,
@@ -317,7 +614,11 @@ INSERT INTO event_staff_new (
 SELECT
   es.id,
   es.event_id,
-  COALESCE(es.x_user_id, 'legacy_auth:' || es.user_id),
+  COALESCE(
+    NULLIF(trim(es.x_user_id), ''),
+    CASE WHEN es.user_id IS NOT NULL AND trim(es.user_id) <> '' THEN 'legacy_auth:' || es.user_id END,
+    'legacy_event_staff:' || es.id
+  ),
   es.display_name,
   CASE
     WHEN es.permission_preset = 'owner' THEN 'owner'
@@ -325,7 +626,11 @@ SELECT
     WHEN EXISTS (
       SELECT 1 FROM _migration_event_representatives r
       WHERE r.event_id = es.event_id
-        AND r.representative_x_user_id = COALESCE(es.x_user_id, 'legacy_auth:' || es.user_id)
+        AND r.representative_x_user_id = COALESCE(
+          NULLIF(trim(es.x_user_id), ''),
+          CASE WHEN es.user_id IS NOT NULL AND trim(es.user_id) <> '' THEN 'legacy_auth:' || es.user_id END,
+          'legacy_event_staff:' || es.id
+        )
     ) THEN 'owner'
     ELSE COALESCE(es.permission_preset, 'public_staff')
   END,
@@ -337,8 +642,7 @@ SELECT
   es.approved_at,
   es.created_at,
   es.updated_at
-FROM event_staff es
-WHERE COALESCE(es.x_user_id, CASE WHEN es.user_id IS NOT NULL THEN 'legacy_auth:' || es.user_id END) IS NOT NULL;
+FROM event_staff es;
 INSERT INTO event_staff_new (
   id, event_id, x_user_id, display_name, permission_preset,
   custom_permission_keys_json, is_public, public_role_label,
@@ -392,12 +696,54 @@ WHERE id IN (
     WHERE owner.event_id = e.id AND owner.permission_preset = 'owner'
   )
 );
+CREATE TABLE _migration_0043_event_staff_assert (
+  ok INTEGER NOT NULL,
+  CONSTRAINT migration_0043_event_staff_complete CHECK (ok = 1)
+);
+INSERT INTO _migration_0043_event_staff_assert (ok)
+SELECT CASE WHEN
+  NOT EXISTS (
+    SELECT 1
+    FROM event_staff old
+    LEFT JOIN event_staff_new next ON next.id = old.id
+    WHERE next.id IS NULL
+      OR COALESCE(next.approved_by_auth_user_id, '') <> COALESCE(old.approved_by_user_id, '')
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM events e
+    WHERE NOT EXISTS (
+      SELECT 1 FROM event_staff_new es
+      WHERE es.event_id = e.id AND es.permission_preset = 'owner'
+    )
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM event_staff_new es
+    LEFT JOIN events e ON e.id = es.event_id
+    LEFT JOIN x_users xu ON xu.id = es.x_user_id
+    WHERE e.id IS NULL OR xu.id IS NULL
+  )
+THEN 1 ELSE 0 END;
+DROP TABLE _migration_0043_event_staff_assert;
 DROP TABLE event_staff;
 ALTER TABLE event_staff_new RENAME TO event_staff;
 CREATE UNIQUE INDEX event_staff_event_x_uniq ON event_staff (event_id, x_user_id);
 CREATE INDEX event_staff_event_idx ON event_staff (event_id);
 CREATE INDEX event_staff_event_preset_idx ON event_staff (event_id, permission_preset);
 CREATE INDEX event_staff_public_idx ON event_staff (event_id, is_public, display_name);
+CREATE TABLE _migration_0043_video_events_source AS SELECT * FROM video_events;
+CREATE TABLE _migration_0043_video_members_source AS SELECT * FROM video_members;
+CREATE TABLE _migration_0043_video_chapters_parent_source AS SELECT * FROM video_chapters;
+CREATE TABLE _migration_0043_video_moderation_cases_source AS SELECT * FROM video_moderation_cases;
+CREATE TABLE _migration_0043_video_softwares_source AS SELECT * FROM video_softwares;
+CREATE TABLE _migration_0043_video_youtube_metadata_source AS SELECT * FROM video_youtube_metadata;
+DELETE FROM video_chapters;
+DELETE FROM video_events;
+DELETE FROM video_members;
+DELETE FROM video_moderation_cases;
+DELETE FROM video_softwares;
+DELETE FROM video_youtube_metadata;
 CREATE TABLE videos_new (
   id TEXT PRIMARY KEY NOT NULL,
   primary_event_id TEXT,
@@ -463,6 +809,41 @@ CREATE INDEX videos_creator_fallback_idx
 CREATE UNIQUE INDEX videos_youtube_id_active_uniq ON videos (youtube_video_id)
   WHERE youtube_video_id IS NOT NULL AND youtube_video_id <> ''
     AND visibility_status NOT IN ('archived', 'voided');
+INSERT INTO video_events SELECT * FROM _migration_0043_video_events_source;
+INSERT INTO video_members SELECT * FROM _migration_0043_video_members_source;
+INSERT INTO video_chapters SELECT * FROM _migration_0043_video_chapters_parent_source;
+INSERT INTO video_moderation_cases SELECT * FROM _migration_0043_video_moderation_cases_source;
+INSERT INTO video_softwares SELECT * FROM _migration_0043_video_softwares_source;
+INSERT INTO video_youtube_metadata SELECT * FROM _migration_0043_video_youtube_metadata_source;
+DROP TABLE _migration_0043_video_events_source;
+DROP TABLE _migration_0043_video_members_source;
+DROP TABLE _migration_0043_video_chapters_parent_source;
+DROP TABLE _migration_0043_video_moderation_cases_source;
+DROP TABLE _migration_0043_video_softwares_source;
+DROP TABLE _migration_0043_video_youtube_metadata_source;
+CREATE TABLE _migration_0043_videos_assert (
+  ok INTEGER NOT NULL,
+  CONSTRAINT migration_0043_videos_and_youtube_ids_complete CHECK (ok = 1)
+);
+INSERT INTO _migration_0043_videos_assert (ok)
+SELECT CASE WHEN
+  (SELECT COUNT(*) FROM videos) = (SELECT video_count FROM _migration_0043_expected_counts)
+  AND NOT EXISTS (
+    SELECT 1
+    FROM video_youtube_metadata m
+    JOIN videos v ON v.id = m.video_id
+    WHERE NULLIF(trim(m.youtube_video_id), '') IS NOT NULL
+      AND NULLIF(trim(v.youtube_video_id), '') IS NULL
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM video_youtube_metadata m
+    JOIN videos v ON v.id = m.video_id
+    WHERE NULLIF(trim(m.youtube_video_id), '') IS NOT NULL
+      AND trim(v.youtube_video_id) <> trim(m.youtube_video_id)
+  )
+THEN 1 ELSE 0 END;
+DROP TABLE _migration_0043_videos_assert;
 CREATE TABLE slots_new (
   id TEXT PRIMARY KEY NOT NULL,
   event_id TEXT NOT NULL,
@@ -514,11 +895,20 @@ SELECT video_id, youtube_privacy_status, youtube_availability_status,
        duration_seconds, view_count, synced_at, sync_status, sync_error, updated_at
 FROM video_youtube_metadata
 WHERE EXISTS (SELECT 1 FROM videos v WHERE v.id = video_youtube_metadata.video_id);
+CREATE TABLE _migration_0043_youtube_metadata_assert (
+  ok INTEGER NOT NULL,
+  CONSTRAINT migration_0043_youtube_metadata_complete CHECK (ok = 1)
+);
+INSERT INTO _migration_0043_youtube_metadata_assert (ok)
+SELECT CASE WHEN
+  (SELECT COUNT(*) FROM video_youtube_metadata_new)
+    = (SELECT youtube_metadata_count FROM _migration_0043_expected_counts)
+THEN 1 ELSE 0 END;
+DROP TABLE _migration_0043_youtube_metadata_assert;
 DROP TABLE video_youtube_metadata;
 ALTER TABLE video_youtube_metadata_new RENAME TO video_youtube_metadata;
 CREATE INDEX video_youtube_metadata_sync_idx
   ON video_youtube_metadata (sync_status, synced_at);
-CREATE TEMP TABLE _migration_video_members_source AS SELECT * FROM video_members;
 CREATE TABLE video_members_new (
   id TEXT PRIMARY KEY NOT NULL,
   video_id TEXT NOT NULL,
@@ -540,17 +930,11 @@ INSERT INTO video_members_new (
   id, video_id, x_user_id, name, role, comment, order_index, can_edit,
   is_public_member, edit_granted_by_auth_user_id, edit_granted_at, edit_updated_at
 )
-SELECT id, video_id, COALESCE(x_user_id, CASE WHEN user_id IS NOT NULL THEN 'legacy_auth:' || user_id END),
+SELECT id, video_id, COALESCE(NULLIF(trim(x_user_id), ''), CASE WHEN user_id IS NOT NULL AND trim(user_id) <> '' THEN 'legacy_auth:' || user_id END),
        name, role, comment, order_index, can_edit, is_public_member,
        edit_granted_by_user_id, edit_granted_at, edit_updated_at
 FROM video_members
 WHERE EXISTS (SELECT 1 FROM videos v WHERE v.id = video_members.video_id);
-DROP TABLE video_members;
-ALTER TABLE video_members_new RENAME TO video_members;
-CREATE INDEX video_members_video_order_idx ON video_members (video_id, order_index);
-CREATE INDEX video_members_video_name_idx ON video_members (video_id, name);
-CREATE INDEX video_members_video_can_edit_idx ON video_members (video_id, can_edit);
-CREATE INDEX video_members_x_user_video_idx ON video_members (x_user_id, video_id);
 CREATE TABLE video_chapters_new (
   id TEXT PRIMARY KEY NOT NULL,
   video_id TEXT NOT NULL,
@@ -577,7 +961,10 @@ INSERT INTO video_chapters_new (
 SELECT
   vm.id || ':legacy:' || CAST(je.key AS TEXT),
   vm.video_id,
-  vm.x_user_id,
+  COALESCE(
+    NULLIF(trim(vm.x_user_id), ''),
+    CASE WHEN vm.user_id IS NOT NULL AND trim(vm.user_id) <> '' THEN 'legacy_auth:' || vm.user_id END
+  ),
   COALESCE(
     CAST(json_extract(je.value, '$.time_seconds') AS REAL),
     CAST(json_extract(je.value, '$.time') AS REAL),
@@ -593,15 +980,27 @@ SELECT
   'public',
   unixepoch(),
   unixepoch()
-FROM _migration_video_members_source vm
-JOIN json_each(vm.chapters_json) je
+FROM video_members vm
+JOIN json_each(
+  CASE
+    WHEN vm.chapters_json IS NOT NULL
+      AND trim(vm.chapters_json) <> ''
+      AND json_valid(vm.chapters_json) = 1
+    THEN vm.chapters_json
+    ELSE '[]'
+  END
+) je
 WHERE vm.chapters_json IS NOT NULL
   AND trim(vm.chapters_json) <> ''
   AND json_valid(vm.chapters_json) = 1
   AND NOT EXISTS (
     SELECT 1 FROM video_chapters_new vc
     WHERE vc.video_id = vm.video_id
-      AND COALESCE(vc.x_user_id, '') = COALESCE(vm.x_user_id, '')
+      AND COALESCE(vc.x_user_id, '') = COALESCE(
+        NULLIF(trim(vm.x_user_id), ''),
+        CASE WHEN vm.user_id IS NOT NULL AND trim(vm.user_id) <> '' THEN 'legacy_auth:' || vm.user_id END,
+        ''
+      )
       AND vc.chapter_time = COALESCE(
         CAST(json_extract(je.value, '$.time_seconds') AS REAL),
         CAST(json_extract(je.value, '$.time') AS REAL),
@@ -614,11 +1013,43 @@ WHERE vm.chapters_json IS NOT NULL
         '担当'
       )
   );
+CREATE TABLE _migration_0043_members_chapters_assert (
+  ok INTEGER NOT NULL,
+  CONSTRAINT migration_0043_members_and_chapters_complete CHECK (ok = 1)
+);
+INSERT INTO _migration_0043_members_chapters_assert (ok)
+SELECT CASE WHEN
+  (SELECT COUNT(*) FROM video_members_new)
+    = (SELECT video_member_count FROM _migration_0043_expected_counts)
+  AND (SELECT COUNT(*) FROM video_chapters_new)
+    = (SELECT chapter_count FROM _migration_0043_expected_counts)
+  AND NOT EXISTS (
+    SELECT 1
+    FROM video_members old
+    LEFT JOIN video_members_new next ON next.id = old.id
+    WHERE next.id IS NULL
+      OR COALESCE(next.edit_granted_by_auth_user_id, '')
+         <> COALESCE(old.edit_granted_by_user_id, '')
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM video_chapters old
+    LEFT JOIN video_chapters_new next ON next.id = old.id
+    WHERE next.id IS NULL
+  )
+THEN 1 ELSE 0 END;
+DROP TABLE _migration_0043_members_chapters_assert;
 DROP TABLE video_chapters;
 ALTER TABLE video_chapters_new RENAME TO video_chapters;
 CREATE INDEX video_chapters_video_time_idx ON video_chapters (video_id, chapter_time);
 CREATE INDEX video_chapters_video_visibility_idx
   ON video_chapters (video_id, visibility, chapter_time);
+DROP TABLE video_members;
+ALTER TABLE video_members_new RENAME TO video_members;
+CREATE INDEX video_members_video_order_idx ON video_members (video_id, order_index);
+CREATE INDEX video_members_video_name_idx ON video_members (video_id, name);
+CREATE INDEX video_members_video_can_edit_idx ON video_members (video_id, can_edit);
+CREATE INDEX video_members_x_user_video_idx ON video_members (x_user_id, video_id);
 CREATE TABLE video_softwares_new (
   video_id TEXT NOT NULL,
   software_id TEXT NOT NULL,
@@ -722,6 +1153,34 @@ WHERE id = 'default'
 INSERT INTO system_settings_new (id)
 SELECT 'default'
 WHERE NOT EXISTS (SELECT 1 FROM system_settings_new);
+CREATE TABLE _migration_0043_audit_settings_assert (
+  ok INTEGER NOT NULL,
+  CONSTRAINT migration_0043_audit_settings_complete CHECK (ok = 1)
+);
+INSERT INTO _migration_0043_audit_settings_assert (ok)
+SELECT CASE WHEN
+  NOT EXISTS (
+    SELECT 1
+    FROM system_settings old
+    LEFT JOIN system_settings_new next ON next.id = old.id
+    WHERE next.id IS NULL
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM audit_log_settings old
+    JOIN system_settings_new next ON next.id = 'default'
+    WHERE old.id = 'default'
+      AND (
+        next.audit_normal_retention_days <> old.normal_retention_days
+        OR next.audit_restorable_retention_days <> old.restorable_retention_days
+        OR next.audit_long_retention_days <> old.long_audit_retention_days
+        OR next.audit_max_payload_bytes <> old.max_payload_bytes
+        OR next.audit_compact_after_days <> old.compact_after_days
+        OR COALESCE(next.audit_updated_by_auth_user_id, '') <> COALESCE(old.updated_by_user_id, '')
+      )
+  )
+THEN 1 ELSE 0 END;
+DROP TABLE _migration_0043_audit_settings_assert;
 DROP TABLE system_settings;
 ALTER TABLE system_settings_new RENAME TO system_settings;
 CREATE INDEX system_settings_operation_mode_idx ON system_settings (operation_mode);
@@ -740,6 +1199,32 @@ DROP TABLE software_aliases;
 ALTER TABLE software_aliases_new RENAME TO software_aliases;
 CREATE UNIQUE INDEX software_aliases_global_alias_uniq
   ON software_aliases (normalized_alias);
+CREATE TABLE _migration_0043_requests_assert (
+  ok INTEGER NOT NULL,
+  CONSTRAINT migration_0043_identity_requests_complete CHECK (ok = 1)
+);
+INSERT INTO _migration_0043_requests_assert (ok)
+SELECT CASE WHEN
+  (SELECT COUNT(*) FROM x_identity_requests)
+    = (SELECT request_count FROM _migration_0043_expected_counts)
+  AND NOT EXISTS (
+    SELECT 1 FROM x_account_link_requests old
+    LEFT JOIN x_identity_requests next ON next.id = 'link:' || old.id
+    WHERE next.id IS NULL
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM x_id_merge_requests old
+    LEFT JOIN x_identity_requests next ON next.id = 'merge:' || old.id
+    WHERE next.id IS NULL
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM x_id_merge_reverts old
+    LEFT JOIN x_identity_requests next ON next.id = 'revert:' || old.id
+    WHERE next.id IS NULL
+  )
+THEN 1 ELSE 0 END;
+DROP TABLE _migration_0043_requests_assert;
+
 DROP TABLE audit_log_settings;
 DROP TABLE legacy_import_batch_items;
 DROP TABLE legacy_import_batches;
@@ -749,17 +1234,12 @@ DROP TABLE x_id_merge_requests;
 DROP TABLE x_user_icons;
 DROP TABLE x_user_youtube_channels;
 DROP TABLE _migration_event_representatives;
-DROP TABLE _migration_video_members_source;
-UPDATE flamenode_schema_meta
-SET version = '2026-07-20-canonical-1', applied_at = unixepoch()
-WHERE id = 'current';
-INSERT INTO flamenode_schema_meta (id, version, applied_at)
-SELECT 'current', '2026-07-20-canonical-1', unixepoch()
-WHERE NOT EXISTS (SELECT 1 FROM flamenode_schema_meta WHERE id = 'current');
-CREATE TEMP TABLE _migration_owner_assert (
-  ok INTEGER NOT NULL CHECK (ok = 1)
+
+CREATE TABLE _migration_0043_owner_assert (
+  ok INTEGER NOT NULL,
+  CONSTRAINT migration_0043_owner_required CHECK (ok = 1)
 );
-INSERT INTO _migration_owner_assert (ok)
+INSERT INTO _migration_0043_owner_assert (ok)
 SELECT CASE WHEN NOT EXISTS (
   SELECT 1
   FROM events e
@@ -768,6 +1248,130 @@ SELECT CASE WHEN NOT EXISTS (
     WHERE es.event_id = e.id AND es.permission_preset = 'owner'
   )
 ) THEN 1 ELSE 0 END;
-DROP TABLE _migration_owner_assert;
+DROP TABLE _migration_0043_owner_assert;
+
 PRAGMA foreign_keys = ON;
-PRAGMA foreign_key_check;
+CREATE TABLE _migration_0043_final_fk_assert (
+  ok INTEGER NOT NULL,
+  CONSTRAINT migration_0043_foreign_keys_valid CHECK (ok = 1)
+);
+INSERT INTO _migration_0043_final_fk_assert (ok)
+SELECT CASE WHEN
+  (SELECT foreign_keys FROM pragma_foreign_keys) = 1
+  AND NOT EXISTS (SELECT 1 FROM pragma_foreign_key_check)
+THEN 1 ELSE 0 END;
+DROP TABLE _migration_0043_final_fk_assert;
+DROP TABLE _migration_0043_expected_counts;
+DROP TABLE _migration_0043_event_limits;
+
+CREATE TABLE _migration_0043_removed_columns (
+  table_name TEXT NOT NULL,
+  column_name TEXT NOT NULL,
+  PRIMARY KEY (table_name, column_name)
+);
+INSERT INTO _migration_0043_removed_columns VALUES ('x_users', 'linked_user_id');
+INSERT INTO _migration_0043_removed_columns VALUES ('x_users', 'verification_token');
+INSERT INTO _migration_0043_removed_columns VALUES ('x_users', 'token_expires_at');
+INSERT INTO _migration_0043_removed_columns VALUES ('x_users', 'approval_requested_at');
+INSERT INTO _migration_0043_removed_columns VALUES ('event_group_events', 'sort_order');
+INSERT INTO _migration_0043_removed_columns VALUES ('event_staff', 'user_id');
+INSERT INTO _migration_0043_removed_columns VALUES ('event_staff', 'role');
+INSERT INTO _migration_0043_removed_columns VALUES ('event_staff', 'internal_note');
+INSERT INTO _migration_0043_removed_columns VALUES ('events', 'representative_x_user_id');
+INSERT INTO _migration_0043_removed_columns VALUES ('events', 'max_consecutive_slots_per_entry');
+INSERT INTO _migration_0043_removed_columns VALUES ('events', 'public_api_updated_at');
+INSERT INTO _migration_0043_removed_columns VALUES ('slots', 'slot_kind');
+INSERT INTO _migration_0043_removed_columns VALUES ('slots', 'priority_reclaim_video_id');
+INSERT INTO _migration_0043_removed_columns VALUES ('slots', 'priority_reclaim_until');
+INSERT INTO _migration_0043_removed_columns VALUES ('video_youtube_metadata', 'youtube_video_id');
+INSERT INTO _migration_0043_removed_columns VALUES ('video_members', 'user_id');
+INSERT INTO _migration_0043_removed_columns VALUES ('video_members', 'chapters_json');
+INSERT INTO _migration_0043_removed_columns VALUES ('video_softwares', 'order_index');
+INSERT INTO _migration_0043_removed_columns VALUES ('video_chapters', 'show_on_player_bar');
+INSERT INTO _migration_0043_removed_columns VALUES ('video_chapters', 'order_index');
+INSERT INTO _migration_0043_removed_columns VALUES ('video_interactions', 'id');
+INSERT INTO _migration_0043_removed_columns VALUES ('video_interactions', 'source');
+INSERT INTO _migration_0043_removed_columns VALUES ('video_interactions', 'synced_at');
+INSERT INTO _migration_0043_removed_columns VALUES ('system_settings', 'history_retention_days');
+INSERT INTO _migration_0043_removed_columns VALUES ('software_aliases', 'id');
+
+CREATE TABLE _migration_0043_final_shape_assert (
+  ok INTEGER NOT NULL,
+  CONSTRAINT migration_0043_exact_41_tables_409_columns CHECK (ok = 1)
+);
+INSERT INTO _migration_0043_final_shape_assert (ok)
+SELECT CASE WHEN
+  (
+    SELECT COUNT(*)
+    FROM sqlite_master
+    WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+      AND name <> 'd1_migrations'
+      AND substr(name, 1, 4) <> '_cf_'
+      AND substr(name, 1, 11) <> '_migration_'
+  ) = 41
+  AND (
+    SELECT COUNT(*)
+    FROM sqlite_master tables
+    JOIN pragma_table_info(tables.name) columns
+    WHERE tables.type = 'table' AND tables.name NOT LIKE 'sqlite_%'
+      AND tables.name <> 'd1_migrations'
+      AND substr(tables.name, 1, 4) <> '_cf_'
+      AND substr(tables.name, 1, 11) <> '_migration_'
+  ) = 409
+  AND NOT EXISTS (
+    SELECT 1 FROM sqlite_master
+    WHERE type = 'table' AND name IN (
+      'audit_log_settings',
+      'legacy_import_batch_items',
+      'legacy_import_batches',
+      'x_account_link_requests',
+      'x_id_merge_reverts',
+      'x_id_merge_requests',
+      'x_user_icons',
+      'x_user_youtube_channels'
+    )
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM _migration_0043_removed_columns removed
+    JOIN pragma_table_info(removed.table_name) columns
+      ON columns.name = removed.column_name
+  )
+  AND EXISTS (
+    SELECT 1 FROM pragma_table_info('event_staff')
+    WHERE name = 'approved_by_auth_user_id'
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM pragma_table_info('event_staff')
+    WHERE name = 'approved_by_user_id'
+  )
+  AND EXISTS (
+    SELECT 1 FROM pragma_table_info('video_members')
+    WHERE name = 'edit_granted_by_auth_user_id'
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM pragma_table_info('video_members')
+    WHERE name = 'edit_granted_by_user_id'
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM pragma_quick_check
+    WHERE lower(quick_check) <> 'ok'
+  )
+THEN 1 ELSE 0 END;
+DROP TABLE _migration_0043_final_shape_assert;
+DROP TABLE _migration_0043_removed_columns;
+
+UPDATE flamenode_schema_meta
+SET version = '2026-07-20-canonical-1', applied_at = unixepoch()
+WHERE id = 'current' AND version = '2026-07-20-canonical-1-in-progress';
+
+CREATE TABLE _migration_0043_version_assert (
+  ok INTEGER NOT NULL,
+  CONSTRAINT migration_0043_version_committed CHECK (ok = 1)
+);
+INSERT INTO _migration_0043_version_assert (ok)
+SELECT CASE WHEN
+  (SELECT version FROM flamenode_schema_meta WHERE id = 'current')
+    = '2026-07-20-canonical-1'
+THEN 1 ELSE 0 END;
+DROP TABLE _migration_0043_version_assert;

@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-20
-> Verified against commit: `3672fca`
+> Verified against commit: `4ff09c9`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
 
 ## 2026-07-20 — `0043_db_canonical_migration.sql`
@@ -17,7 +17,7 @@
 | Compatibility | 一般ランタイムの後方互換は提供しない。旧形式インポートは入力をcanonical planへ変換し、新正本だけへ保存 |
 | Data loss | intentional。廃止済み機能、外部由来interaction、候補履歴、旧移行管理テーブルを削除 |
 | Rollback | 適用前D1バックアップと0043適用前アプリケーションを同時に復元 |
-| Validation | schema/history検査、41テーブル409カラム、owner不変条件、外部キー、旧形式インポート回帰 |
+| Validation | Node SQLiteの空DB・旧fixture・不正旧データ・途中状態4系統に加え、WranglerローカルD1で空DB/旧fixtureを適用。41テーブル409カラム、旧8テーブル/旧25カラム/旧名称2件不存在、owner/FK違反0、件数・名称変更・max_slots一致 |
 | PR | `agent/db-canonical-migration-v2` |
 
 ## 2026-07-13 — `0041_youtube_quota_budget.sql`
