@@ -67,13 +67,13 @@ async function requireAdmin(): Promise<
 }
 
 function normalizeOptionalUrl(raw: string | null | undefined): string | null {
-  const v = raw?.trim();
-  return v ? v : null;
+  const value = raw?.trim();
+  return value ? value : null;
 }
 
 function normalizeOptionalColor(raw: string | null | undefined): string | null {
-  const v = raw?.trim();
-  return v ? v : null;
+  const value = raw?.trim();
+  return value ? value : null;
 }
 
 async function ensureUniqueSlug(
@@ -81,17 +81,19 @@ async function ensureUniqueSlug(
   slug: string,
   excludeId?: string,
 ): Promise<boolean> {
-  const conds = [eq(eventGroups.slug, slug)];
-  if (excludeId) conds.push(ne(eventGroups.id, excludeId));
+  const conditions = [eq(eventGroups.slug, slug)];
+  if (excludeId) conditions.push(ne(eventGroups.id, excludeId));
   const existing = await db
     .select({ id: eventGroups.id })
     .from(eventGroups)
-    .where(conds.length === 1 ? conds[0] : and(...conds))
+    .where(conditions.length === 1 ? conditions[0] : and(...conditions))
     .limit(1);
   return existing.length === 0;
 }
 
-function groupSnapshot(row: typeof eventGroups.$inferSelect): Record<string, unknown> {
+function groupSnapshot(
+  row: typeof eventGroups.$inferSelect,
+): Record<string, unknown> {
   return { ...row };
 }
 
@@ -139,25 +141,24 @@ export async function createEventGroup(
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
 
-  const d = parsed.data;
-  if (!(await ensureUniqueSlug(db, d.slug))) {
+  const data = parsed.data;
+  if (!(await ensureUniqueSlug(db, data.slug))) {
     return { ok: false, message: "このスラッグは既に使われています。" };
   }
 
-  const id = d.id?.trim() || generateId("egrp");
+  const id = data.id?.trim() || generateId("egrp");
   const now = Math.floor(Date.now() / 1000);
-
   const createdRow = {
     id,
-    name: d.name,
-    slug: d.slug,
-    description: d.description?.trim() || null,
-    group_type: d.group_type,
-    icon_url: normalizeOptionalUrl(d.icon_url),
+    name: data.name,
+    slug: data.slug,
+    description: data.description?.trim() || null,
+    group_type: data.group_type,
+    icon_url: normalizeOptionalUrl(data.icon_url),
     img_url: null,
-    accent_color: normalizeOptionalColor(d.accent_color),
-    visibility_status: d.visibility_status,
-    sort_order: 0,
+    accent_color: normalizeOptionalColor(data.accent_color),
+    visibility_status: data.visibility_status,
+    sort_order: data.sort_order ?? 0,
     created_at: now,
     updated_at: now,
   } satisfies typeof eventGroups.$inferInsert;
@@ -165,14 +166,16 @@ export async function createEventGroup(
   await mutateEventGroupWithQueue(db, {
     mutationStatements: [db.insert(eventGroups).values(createdRow)],
     expectedMutationChanges: [1],
-    audits: [{
-      table_name: "event_groups",
-      target_id: id,
-      operation: "CREATE",
-      after: groupSnapshot(createdRow as typeof eventGroups.$inferSelect),
-      actor_user_id: guard.userId,
-      retention_class: "restorable",
-    }],
+    audits: [
+      {
+        table_name: "event_groups",
+        target_id: id,
+        operation: "CREATE",
+        after: groupSnapshot(createdRow as typeof eventGroups.$inferSelect),
+        actor_user_id: guard.userId,
+        retention_class: "restorable",
+      },
+    ],
     reason: "event_group_create",
     requestedByUserId: guard.userId,
   });
@@ -207,42 +210,47 @@ export async function updateEventGroup(
   )[0];
   if (!existing) return { ok: false, message: "グループが見つかりません。" };
 
-  const d = parsed.data;
-  if (!(await ensureUniqueSlug(db, d.slug, id))) {
+  const data = parsed.data;
+  if (!(await ensureUniqueSlug(db, data.slug, id))) {
     return { ok: false, message: "このスラッグは既に使われています。" };
   }
 
   const now = Math.floor(Date.now() / 1000);
   const updatedValues = {
-      name: d.name,
-      slug: d.slug,
-      description: d.description?.trim() || null,
-      group_type: d.group_type,
-      icon_url: normalizeOptionalUrl(d.icon_url),
-      img_url: null,
-      accent_color: normalizeOptionalColor(d.accent_color),
-      visibility_status: d.visibility_status,
-      sort_order: 0,
-      updated_at: now,
+    name: data.name,
+    slug: data.slug,
+    description: data.description?.trim() || null,
+    group_type: data.group_type,
+    icon_url: normalizeOptionalUrl(data.icon_url),
+    img_url: null,
+    accent_color: normalizeOptionalColor(data.accent_color),
+    visibility_status: data.visibility_status,
+    sort_order: data.sort_order ?? existing.sort_order,
+    updated_at: now,
   } satisfies Partial<typeof eventGroups.$inferInsert>;
   const updatedRow = { ...existing, ...updatedValues };
 
   await mutateEventGroupWithQueue(db, {
     mutationStatements: [
-      db.update(eventGroups).set(updatedValues).where(
-        and(eq(eventGroups.id, id), eq(eventGroups.updated_at, existing.updated_at)),
-      ),
+      db
+        .update(eventGroups)
+        .set(updatedValues)
+        .where(
+          and(eq(eventGroups.id, id), eq(eventGroups.updated_at, existing.updated_at)),
+        ),
     ],
     expectedMutationChanges: [1],
-    audits: [{
-      table_name: "event_groups",
-      target_id: id,
-      operation: "UPDATE",
-      before: groupSnapshot(existing),
-      after: groupSnapshot(updatedRow),
-      actor_user_id: guard.userId,
-      retention_class: "restorable",
-    }],
+    audits: [
+      {
+        table_name: "event_groups",
+        target_id: id,
+        operation: "UPDATE",
+        before: groupSnapshot(existing),
+        after: groupSnapshot(updatedRow),
+        actor_user_id: guard.userId,
+        retention_class: "restorable",
+      },
+    ],
     reason: "event_group_update",
     requestedByUserId: guard.userId,
   });
@@ -274,15 +282,15 @@ export async function deleteEventGroup(
     .select()
     .from(eventGroupEvents)
     .where(eq(eventGroupEvents.event_group_id, id));
-  const mutationStatements = [
-    db.delete(eventGroupEvents).where(eq(eventGroupEvents.event_group_id, id)),
-    db.delete(eventGroups).where(
-      and(eq(eventGroups.id, id), eq(eventGroups.updated_at, existing.updated_at)),
-    ),
-  ];
-
   await mutateEventGroupWithQueue(db, {
-    mutationStatements,
+    mutationStatements: [
+      db.delete(eventGroupEvents).where(eq(eventGroupEvents.event_group_id, id)),
+      db
+        .delete(eventGroups)
+        .where(
+          and(eq(eventGroups.id, id), eq(eventGroups.updated_at, existing.updated_at)),
+        ),
+    ],
     expectedMutationChanges: [relationRows.length, 1],
     audits: [
       ...relationRows.map((row) => ({
@@ -336,8 +344,7 @@ export async function addEventsToGroup(input: {
     .select()
     .from(eventGroupEvents)
     .where(eq(eventGroupEvents.event_group_id, groupId));
-  const existingIds = new Set(existingRows.map((r) => r.event_id));
-
+  const existingIds = new Set(existingRows.map((row) => row.event_id));
   const validRows = await db
     .select({ id: events.id })
     .from(events)
@@ -351,15 +358,16 @@ export async function addEventsToGroup(input: {
   }
 
   const now = Math.floor(Date.now() / 1000);
-
-  const insertedRows = toAdd.map((eventId) => ({
-      event_group_id: groupId,
-      event_id: eventId,
-      relation_type: "member",
-      sort_order: 0,
-      created_at: now,
-      updated_at: now,
-  } satisfies typeof eventGroupEvents.$inferInsert));
+  const insertedRows = toAdd.map(
+    (eventId) =>
+      ({
+        event_group_id: groupId,
+        event_id: eventId,
+        relation_type: "member",
+        created_at: now,
+        updated_at: now,
+      }) satisfies typeof eventGroupEvents.$inferInsert,
+  );
 
   await mutateEventGroupWithQueue(db, {
     mutationStatements: [db.insert(eventGroupEvents).values(insertedRows)],
@@ -379,7 +387,9 @@ export async function addEventsToGroup(input: {
   revalidatePath(`/admin/event-groups/${groupId}/edit`);
   revalidatePath("/event");
   return { ok: true, id: groupId, added: toAdd.length };
-}export async function removeEventFromGroup(input: {
+}
+
+export async function removeEventFromGroup(input: {
   groupId: string;
   eventId: string;
 }): Promise<EventGroupActionResult> {
@@ -412,27 +422,33 @@ export async function addEventsToGroup(input: {
       )
       .limit(1)
   )[0];
-  if (!relation) return { ok: false, message: "イベントはグループに追加されていません。" };
+  if (!relation) {
+    return { ok: false, message: "イベントはグループに追加されていません。" };
+  }
 
   await mutateEventGroupWithQueue(db, {
     mutationStatements: [
-      db.delete(eventGroupEvents).where(
-        and(
-          eq(eventGroupEvents.event_group_id, groupId),
-          eq(eventGroupEvents.event_id, eventId),
-          eq(eventGroupEvents.updated_at, relation.updated_at),
+      db
+        .delete(eventGroupEvents)
+        .where(
+          and(
+            eq(eventGroupEvents.event_group_id, groupId),
+            eq(eventGroupEvents.event_id, eventId),
+            eq(eventGroupEvents.updated_at, relation.updated_at),
+          ),
         ),
-      ),
     ],
     expectedMutationChanges: [1],
-    audits: [{
-      table_name: "event_group_events",
-      target_id: `${groupId}:${eventId}`,
-      operation: "DELETE",
-      before: relationSnapshot(relation),
-      actor_user_id: guard.userId,
-      retention_class: "restorable",
-    }],
+    audits: [
+      {
+        table_name: "event_group_events",
+        target_id: `${groupId}:${eventId}`,
+        operation: "DELETE",
+        before: relationSnapshot(relation),
+        actor_user_id: guard.userId,
+        retention_class: "restorable",
+      },
+    ],
     reason: "event_group_member_remove",
     requestedByUserId: guard.userId,
   });

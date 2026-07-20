@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDatabase } from "@/lib/cloudflare";
 import { assertCanEditEvent } from "@/lib/auth/ownership";
@@ -21,10 +21,7 @@ export interface SlotActionResult {
   created?: number;
 }
 
-// D1 Free の 50 query / statement あたり 100 bind を超えない caller 側上限。
-// 3行時の最大は条件付き slot INSERT 54 bind、strict audit INSERT 60 bind。
-// batch release の最悪経路も、権限・対象・audit・notification・queue の事前 query と
-// mutation/assert/audit/notification/queue の batch statement を合わせて 27 query に収まる。
+type DB = NonNullable<ReturnType<typeof getDatabase>>;
 type SlotRow = typeof slots.$inferSelect;
 
 const batchSchema = z.object({
@@ -38,17 +35,14 @@ const batchSchema = z.object({
   start_index: z.coerce.number().min(0).max(9999).default(1),
 });
 
-function parseDateInput(raw: string | null | undefined): number | null {
-  return parseJstDatetimeLocal(raw);
-}
-
 function revalidateEventSlotPaths(eventId: string): void {
   revalidatePath(`/manage/events/${eventId}/slots`);
   revalidatePath(`/manage/events/${eventId}`);
-  revalidatePath(`/manage`);
+  revalidatePath("/manage");
   revalidatePath(`/admin/events/${eventId}/slots`);
   revalidatePath(`/admin/events/${eventId}`);
   revalidatePath(`/event/${eventId}`);
+  revalidatePath(`/event/${eventId}/slots`);
 }
 
 function snapshot(row: SlotRow): Record<string, unknown> {
@@ -60,24 +54,19 @@ function versionedWhere(
   rows: readonly SlotRow[],
   status?: "available" | "reserved" | "submitted",
 ) {
-  const versions = or(
-    ...rows.map((row) =>
-      and(
-        eq(slots.id, row.id),
-        eq(slots.version, row.version),
-        eq(slots.updated_at, row.updated_at),
-      ),
-    ),
-  );
   return and(
     eq(slots.event_id, eventId),
     status ? eq(slots.status, status) : undefined,
-    versions,
+    or(
+      ...rows.map((row) =>
+        and(
+          eq(slots.id, row.id),
+          eq(slots.version, row.version),
+          eq(slots.updated_at, row.updated_at),
+        ),
+      ),
+    ),
   )!;
-}
-
-function uniqueIds(ids: readonly string[]): boolean {
-  return new Set(ids).size === ids.length;
 }
 
 function parseSlotIds(formData: FormData): string[] {
@@ -85,8 +74,9 @@ function parseSlotIds(formData: FormData): string[] {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map((id) => String(id).trim()).filter(Boolean);
+    return Array.isArray(parsed)
+      ? Array.from(new Set(parsed.map((id) => String(id).trim()).filter(Boolean)))
+      : [];
   } catch {
     return [];
   }
@@ -99,42 +89,21 @@ async function ensureCanEditSlots(
     | "manage_slot_update"
     | "manage_slot_delete",
 ): Promise<
-  | { ok: true; userId: string }
+  | { ok: true; userId: string; db: DB }
   | { ok: false; result: SlotActionResult }
 > {
-  const guard = await writeGuard({
-    feature,
-  });
-
+  const guard = await writeGuard({ feature });
   if (!guard.ok) {
-    return {
-      ok: false,
-      result: {
-        ok: false,
-        message: guard.message,
-      },
-    };
+    return { ok: false, result: { ok: false, message: guard.message } };
   }
-
   const db = getDatabase();
-
   if (!db) {
-    return {
-      ok: false,
-      result: {
-        ok: false,
-        message: "DB に接続できません。",
-      },
-    };
+    return { ok: false, result: { ok: false, message: "DB に接続できません。" } };
   }
-
   try {
     await assertCanEditEvent(
       db,
-      {
-        id: guard.user.id,
-        role: guard.user.role ?? null,
-      },
+      { id: guard.user.id, role: guard.user.role ?? null },
       eventId,
       "event.slots",
     );
@@ -143,137 +112,172 @@ async function ensureCanEditSlots(
       ok: false,
       result: {
         ok: false,
-        message:
-          error instanceof Error
-            ? error.message
-            : "権限がありません。",
+        message: error instanceof Error ? error.message : "権限がありません。",
       },
     };
   }
-
-  return {
-    ok: true,
-    userId: guard.user.id,
-  };
+  return { ok: true, userId: guard.user.id, db };
 }
 
 function mutationError(error: unknown): SlotActionResult {
   return {
     ok: false,
-    message: error instanceof Error ? `スロット更新を取り消しました: ${error.message}` : "スロット更新を取り消しました。",
+    message:
+      error instanceof Error
+        ? `スロット更新を取り消しました: ${error.message}`
+        : "スロット更新を取り消しました。",
   };
 }
 
-async function buildEventQueueBatch(
-  db: NonNullable<ReturnType<typeof getDatabase>>,
+async function eventQueue(
+  db: DB,
   eventId: string,
   reason: string,
-  requestedByUserId: string,
+  userId: string,
 ) {
-  return buildStaticRebuildQueueBatch(db, [{
-    targetType: "event",
-    targetId: eventId,
-    reason,
-    priority: "high",
-    requestedByUserId,
-  }]);
+  return buildStaticRebuildQueueBatch(db, [
+    {
+      targetType: "event",
+      targetId: eventId,
+      reason,
+      priority: "high",
+      requestedByUserId: userId,
+    },
+  ]);
 }
 
-async function buildReleaseNotification(
-  db: NonNullable<ReturnType<typeof getDatabase>>,
+async function releaseNotification(
+  db: DB,
   row: SlotRow,
-  targetIds: readonly string[],
-  groupId: string | null,
-) {
+): Promise<BatchItem<"sqlite"> | null> {
   if (!row.reserved_by_user_id) return null;
   return buildNotificationOutboxStatement(db, {
     recipientUserId: row.reserved_by_user_id,
     type: "slot_force_released",
-    dedupeKey: `slot_force_released:${row.event_id}:${row.id}:${groupId ?? "solo"}`,
+    dedupeKey: `slot_force_released:${row.event_id}:${row.id}:${row.version}`,
     payload: {
-      content: `運営によりイベント枠 (${targetIds.length}件) が解放されました。`,
-      slot_ids: [...targetIds],
+      content: "運営によりイベント枠が解放されました。",
+      slot_ids: [row.id],
       event_id: row.event_id,
-      reservation_group_id: groupId,
+      reservation_group_id: null,
     },
     eventId: row.event_id,
   });
 }
 
-/** スロット一括生成。生成行・監査・通知を一つの D1 batch にする。 */
-export async function generateSlotsBatch(formData: FormData): Promise<SlotActionResult> {
+export async function generateSlotsBatch(
+  formData: FormData,
+): Promise<SlotActionResult> {
   const parsed = batchSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
+  }
   const data = parsed.data;
   const guard = await ensureCanEditSlots(data.event_id, "manage_slot_create");
   if (!guard.ok) return guard.result;
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
 
   const now = Math.floor(Date.now() / 1000);
   const newRows: SlotRow[] = [];
   if (data.mode === "time") {
-    const startTs = parseDateInput(data.start_at);
-    const endTs = parseDateInput(data.end_at);
-    if (!startTs || !endTs || endTs <= startTs) return { ok: false, message: "開始・終了日時を正しく指定してください。" };
-    const intervalSec = data.interval_minutes * 60;
-    for (let cursor = startTs, order = 0; cursor + intervalSec <= endTs; cursor += intervalSec, order += 1) {
-      if (newRows.length >= MAX_ATOMIC_SLOT_ROWS) return { ok: false, message: `一度に作成できる枠は ${MAX_ATOMIC_SLOT_ROWS} 件までです。` };
+    const start = parseJstDatetimeLocal(data.start_at);
+    const end = parseJstDatetimeLocal(data.end_at);
+    if (!start || !end || end <= start) {
+      return { ok: false, message: "開始・終了日時を正しく指定してください。" };
+    }
+    const interval = data.interval_minutes * 60;
+    for (let cursor = start, order = 0; cursor + interval <= end; cursor += interval) {
+      if (newRows.length >= MAX_ATOMIC_SLOT_ROWS) {
+        return {
+          ok: false,
+          message: `一度に作成できる枠は ${MAX_ATOMIC_SLOT_ROWS} 件までです。`,
+        };
+      }
       newRows.push({
-        id: generateId("slot"), event_id: data.event_id, reserved_by_user_id: null, x_user_id: null,
-        display_name: null, slot_kind: "time", slot_label: null, start_time: cursor, sort_order: order,
-        reservation_group_id: null, priority_reclaim_video_id: null, priority_reclaim_until: null, video_id: null,
-        status: "available", updated_at: now, version: 1,
+        id: generateId("slot"),
+        event_id: data.event_id,
+        reserved_by_user_id: null,
+        x_user_id: null,
+        display_name: null,
+        slot_label: null,
+        start_time: cursor,
+        sort_order: order++,
+        reservation_group_id: null,
+        video_id: null,
+        status: "available",
+        updated_at: now,
+        version: 1,
       });
     }
   } else {
-    if (data.count > MAX_ATOMIC_SLOT_ROWS) return { ok: false, message: `一度に作成できる枠は ${MAX_ATOMIC_SLOT_ROWS} 件までです。` };
-    const prefix = (data.label_prefix ?? "").trim() || "No.";
+    const prefix = data.label_prefix?.trim() || "No.";
     const startIndex = Math.max(1, data.start_index || 1);
-    for (let i = 0; i < data.count; i += 1) {
-      const sortOrder = startIndex + i;
+    for (let index = 0; index < data.count; index += 1) {
+      const order = startIndex + index;
       newRows.push({
-        id: generateId("slot"), event_id: data.event_id, reserved_by_user_id: null, x_user_id: null,
-        display_name: null, slot_kind: "count", slot_label: `${prefix}${sortOrder}`, start_time: null, sort_order: sortOrder,
-        reservation_group_id: null, priority_reclaim_video_id: null, priority_reclaim_until: null, video_id: null,
-        status: "available", updated_at: now, version: 1,
+        id: generateId("slot"),
+        event_id: data.event_id,
+        reserved_by_user_id: null,
+        x_user_id: null,
+        display_name: null,
+        slot_label: `${prefix}${order}`,
+        start_time: null,
+        sort_order: order,
+        reservation_group_id: null,
+        video_id: null,
+        status: "available",
+        updated_at: now,
+        version: 1,
       });
     }
   }
-  if (newRows.length === 0) return { ok: false, message: "作成対象の枠がありません。" };
+  if (newRows.length === 0) {
+    return { ok: false, message: "作成対象の枠がありません。" };
+  }
 
-  const conflictRows = await db.select({ id: slots.id }).from(slots).where(
-    and(
-      eq(slots.event_id, data.event_id),
-      data.mode === "time"
-        ? inArray(slots.start_time, newRows.map((row) => row.start_time).filter((value): value is number => value !== null))
-        : inArray(slots.sort_order, newRows.map((row) => row.sort_order).filter((value): value is number => value !== null)),
-    )!,
-  );
-  if (conflictRows.length > 0) return { ok: false, message: "同じ時刻または順序の枠が既に存在します。" };
+  const conflicts = await guard.db
+    .select({ id: slots.id })
+    .from(slots)
+    .where(
+      and(
+        eq(slots.event_id, data.event_id),
+        data.mode === "time"
+          ? inArray(
+              slots.start_time,
+              newRows
+                .map((row) => row.start_time)
+                .filter((value): value is number => value !== null),
+            )
+          : inArray(
+              slots.sort_order,
+              newRows
+                .map((row) => row.sort_order)
+                .filter((value): value is number => value !== null),
+            ),
+      )!,
+    );
+  if (conflicts.length > 0) {
+    return { ok: false, message: "同じ時刻または順序の枠が既に存在します。" };
+  }
 
-  const slotColumns = sql.raw("id, event_id, reserved_by_user_id, x_user_id, display_name, slot_kind, slot_label, start_time, sort_order, reservation_group_id, priority_reclaim_video_id, priority_reclaim_until, video_id, status, updated_at, version");
-  const insertCandidates = sql.join(
-    newRows.map((row) => sql`
-      SELECT ${row.id}, ${row.event_id}, ${row.reserved_by_user_id}, ${row.x_user_id}, ${row.display_name},
-             ${row.slot_kind}, ${row.slot_label}, ${row.start_time}, ${row.sort_order}, ${row.reservation_group_id},
-             ${row.priority_reclaim_video_id}, ${row.priority_reclaim_until}, ${row.video_id}, ${row.status},
-             ${row.updated_at}, ${row.version}
-      WHERE NOT EXISTS (
-        SELECT 1 FROM slots
-        WHERE event_id = ${row.event_id}
-          AND ${data.mode === "time" ? sql`start_time = ${row.start_time}` : sql`sort_order = ${row.sort_order}`}
-      )
-    `),
-    sql` UNION ALL `,
+  const queue = await eventQueue(
+    guard.db,
+    data.event_id,
+    "slot_admin_generate",
+    guard.userId,
   );
-  const insert = db.run(sql`INSERT INTO slots (${slotColumns}) ${insertCandidates}`);
-  const queueBatch = await buildEventQueueBatch(db, data.event_id, "slot_admin_generate", guard.userId);
   try {
-    await mutateWithAudit(db, {
-      mutationStatements: [insert, ...queueBatch.statements],
-      expectedMutationChanges: [newRows.length, ...queueBatch.expectedChanges],
-      audits: newRows.map((row) => ({ table_name: "slots", target_id: row.id, operation: "CREATE", after: snapshot(row), actor_user_id: guard.userId, retention_class: "normal", strict: true })),
+    await mutateWithAudit(guard.db, {
+      mutationStatements: [guard.db.insert(slots).values(newRows), ...queue.statements],
+      expectedMutationChanges: [newRows.length, ...queue.expectedChanges],
+      audits: newRows.map((row) => ({
+        table_name: "slots",
+        target_id: row.id,
+        operation: "CREATE",
+        after: snapshot(row),
+        actor_user_id: guard.userId,
+        retention_class: "normal",
+        strict: true,
+      })),
     });
   } catch (error) {
     return mutationError(error);
@@ -282,195 +286,258 @@ export async function generateSlotsBatch(formData: FormData): Promise<SlotAction
   return { ok: true, created: newRows.length };
 }
 
-/** available 枠を一括削除。snapshot/CAS/audit を一つの D1 batch にする。 */
-export async function deleteAvailableSlots(formData: FormData): Promise<SlotActionResult> {
+export async function deleteAvailableSlots(
+  formData: FormData,
+): Promise<SlotActionResult> {
   const eventId = String(formData.get("event_id") ?? "").trim();
   if (!eventId) return { ok: false, message: "event_id が必要です。" };
   const guard = await ensureCanEditSlots(eventId, "manage_slot_delete");
   if (!guard.ok) return guard.result;
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
-  const rows = await db
+  const rows = await guard.db
     .select()
     .from(slots)
     .where(and(eq(slots.event_id, eventId), eq(slots.status, "available"))!)
     .limit(MAX_ATOMIC_SLOT_ROWS + 1);
   if (rows.length === 0) return { ok: true, created: 0 };
-  if (rows.length > MAX_ATOMIC_SLOT_ROWS) return { ok: false, message: `一度に処理できる枠は ${MAX_ATOMIC_SLOT_ROWS} 件までです。` };
-  const queueBatch = await buildEventQueueBatch(db, eventId, "slot_admin_delete_available", guard.userId);
+  if (rows.length > MAX_ATOMIC_SLOT_ROWS) {
+    return {
+      ok: false,
+      message: `一度に処理できる枠は ${MAX_ATOMIC_SLOT_ROWS} 件までです。`,
+    };
+  }
+  return deleteRows(guard.db, eventId, rows, guard.userId, "slot_admin_delete_available");
+}
+
+async function deleteRows(
+  db: DB,
+  eventId: string,
+  rows: SlotRow[],
+  userId: string,
+  reason: string,
+): Promise<SlotActionResult> {
+  const queue = await eventQueue(db, eventId, reason, userId);
   try {
     await mutateWithAudit(db, {
-      mutationStatements: [db.delete(slots).where(versionedWhere(eventId, rows, "available")), ...queueBatch.statements],
-      expectedMutationChanges: [rows.length, ...queueBatch.expectedChanges],
-      audits: rows.map((row) => ({ table_name: "slots", target_id: row.id, operation: "DELETE", before: snapshot(row), actor_user_id: guard.userId, retention_class: "normal", strict: true })),
+      mutationStatements: [
+        db.delete(slots).where(versionedWhere(eventId, rows, "available")),
+        ...queue.statements,
+      ],
+      expectedMutationChanges: [rows.length, ...queue.expectedChanges],
+      audits: rows.map((row) => ({
+        table_name: "slots",
+        target_id: row.id,
+        operation: "DELETE",
+        before: snapshot(row),
+        actor_user_id: userId,
+        retention_class: "normal",
+        strict: true,
+      })),
     });
-  } catch (error) { return mutationError(error); }
+  } catch (error) {
+    return mutationError(error);
+  }
   revalidateEventSlotPaths(eventId);
   return { ok: true, created: rows.length };
 }
 
-/** 単体または reservation_group 全体を、全行snapshot/CAS付きで解放する。 */
-export async function releaseSlot(formData: FormData): Promise<SlotActionResult> {
+export async function releaseSlot(
+  formData: FormData,
+): Promise<SlotActionResult> {
   const slotId = String(formData.get("slot_id") ?? "").trim();
   if (!slotId) return { ok: false, message: "slot_id が必要です。" };
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
-  const row = await db.select().from(slots).where(eq(slots.id, slotId)).limit(1).then((r) => r[0]);
+  const row = (
+    await db.select().from(slots).where(eq(slots.id, slotId)).limit(1)
+  )[0];
   if (!row) return { ok: false, message: "枠が見つかりません。" };
   const guard = await ensureCanEditSlots(row.event_id, "manage_slot_update");
   if (!guard.ok) return guard.result;
-  const groupId = row.reservation_group_id?.trim() || null;
-  const rows = groupId
-    ? await db
-        .select()
-        .from(slots)
-        .where(and(eq(slots.event_id, row.event_id), eq(slots.reservation_group_id, groupId), row.reserved_by_user_id ? eq(slots.reserved_by_user_id, row.reserved_by_user_id) : isNull(slots.reserved_by_user_id), row.x_user_id ? eq(slots.x_user_id, row.x_user_id) : isNull(slots.x_user_id))!)
-        .limit(MAX_ATOMIC_SLOT_ROWS + 1)
-    : [row];
-  if (rows.length === 0 || rows.some((candidate) => candidate.status !== "reserved")) return { ok: false, message: "対象グループ全体が予約中ではありません。" };
-  if (rows.length > MAX_ATOMIC_SLOT_ROWS) return { ok: false, message: `一度に解放できる枠は ${MAX_ATOMIC_SLOT_ROWS} 件までです。` };
+  if (row.status !== "reserved") {
+    return { ok: false, message: "予約中の枠だけ解放できます。" };
+  }
+  return releaseRows(guard.db, row.event_id, [row], guard.userId);
+}
+
+async function releaseRows(
+  db: DB,
+  eventId: string,
+  rows: SlotRow[],
+  userId: string,
+): Promise<SlotActionResult> {
   const now = Math.floor(Date.now() / 1000);
-  const after = (candidate: SlotRow): Record<string, unknown> => ({ ...candidate, status: "available", reserved_by_user_id: null, x_user_id: null, display_name: null, reservation_group_id: null, video_id: null, updated_at: now, version: candidate.version + 1 });
-  const targetIds = rows.map((candidate) => candidate.id);
-  const notification = await buildReleaseNotification(db, row, targetIds, groupId);
-  const queueBatch = await buildEventQueueBatch(db, row.event_id, "slot_admin_release", guard.userId);
-  try {
-    await mutateWithAudit(db, {
-      mutationStatements: [db.update(slots).set({ status: "available", reserved_by_user_id: null, x_user_id: null, display_name: null, reservation_group_id: null, video_id: null, updated_at: now, version: sql`${slots.version} + 1` }).where(versionedWhere(row.event_id, rows, "reserved")), ...queueBatch.statements],
-      expectedMutationChanges: [rows.length, ...queueBatch.expectedChanges],
-      audits: rows.map((candidate) => ({ table_name: "slots", target_id: candidate.id, operation: "UPDATE", before: snapshot(candidate), after: after(candidate), actor_user_id: guard.userId, retention_class: "long_audit", strict: true })),
-      postAuditStatements: notification ? [notification] : [],
-    });
-  } catch (error) { return mutationError(error); }
-  revalidateEventSlotPaths(row.event_id);
-  return { ok: true };
-}
-
-/** available 枠を一件削除する単一batch版。 */
-export async function deleteSlot(formData: FormData): Promise<SlotActionResult> {
-  const slotId = String(formData.get("slot_id") ?? "").trim();
-  if (!slotId) return { ok: false, message: "slot_id が必要です。" };
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
-  const row = await db.select().from(slots).where(eq(slots.id, slotId)).limit(1).then((r) => r[0]);
-  if (!row) return { ok: false, message: "枠が見つかりません。" };
-  if (row.status !== "available") return { ok: false, message: "予約済み・投稿済みの枠は削除できません。" };
-  const guard = await ensureCanEditSlots(row.event_id, "manage_slot_delete");
-  if (!guard.ok) return guard.result;
-  const queueBatch = await buildEventQueueBatch(db, row.event_id, "slot_admin_delete", guard.userId);
-  try {
-    await mutateWithAudit(db, {
-      mutationStatements: [db.delete(slots).where(versionedWhere(row.event_id, [row], "available")), ...queueBatch.statements],
-      expectedMutationChanges: [1, ...queueBatch.expectedChanges],
-      audits: [{ table_name: "slots", target_id: row.id, operation: "DELETE", before: snapshot(row), actor_user_id: guard.userId, retention_class: "normal", strict: true }],
-    });
-  } catch (error) { return mutationError(error); }
-  revalidateEventSlotPaths(row.event_id);
-  return { ok: true };
-}
-
-/** 選択された available 枠を一括削除する。 */
-export async function batchDeleteAvailableSlots(formData: FormData): Promise<SlotActionResult> {
-  const eventId = String(formData.get("event_id") ?? "").trim();
-  const slotIds = parseSlotIds(formData);
-  if (!eventId || slotIds.length === 0) return { ok: false, message: "event_id と枠を指定してください。" };
-  if (!uniqueIds(slotIds) || slotIds.length > MAX_ATOMIC_SLOT_ROWS) return { ok: false, message: `重複を除く ${MAX_ATOMIC_SLOT_ROWS} 件以内で指定してください。` };
-  const guard = await ensureCanEditSlots(eventId, "manage_slot_delete");
-  if (!guard.ok) return guard.result;
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
-  const rows = await db.select().from(slots).where(and(eq(slots.event_id, eventId), inArray(slots.id, slotIds))!);
-  if (rows.length !== slotIds.length || rows.some((row) => row.status !== "available")) return { ok: false, message: "対象に available 以外または存在しない枠があります。" };
-  const queueBatch = await buildEventQueueBatch(db, eventId, "slot_admin_batch_delete", guard.userId);
-  try {
-    await mutateWithAudit(db, {
-      mutationStatements: [db.delete(slots).where(versionedWhere(eventId, rows, "available")), ...queueBatch.statements],
-      expectedMutationChanges: [rows.length, ...queueBatch.expectedChanges],
-      audits: rows.map((row) => ({ table_name: "slots", target_id: row.id, operation: "DELETE", before: snapshot(row), actor_user_id: guard.userId, retention_class: "normal", strict: true })),
-    });
-  } catch (error) { return mutationError(error); }
-  revalidateEventSlotPaths(eventId);
-  return { ok: true, message: `${rows.length}件の空き枠を削除しました。` };
-}
-
-/** 選択枠とその reservation_group 全体を一括解放する。 */
-export async function batchReleaseReservedSlots(formData: FormData): Promise<SlotActionResult> {
-  const eventId = String(formData.get("event_id") ?? "").trim();
-  const slotIds = parseSlotIds(formData);
-  if (!eventId || slotIds.length === 0) return { ok: false, message: "event_id と枠を指定してください。" };
-  if (!uniqueIds(slotIds) || slotIds.length > MAX_ATOMIC_SLOT_ROWS) return { ok: false, message: `重複を除く ${MAX_ATOMIC_SLOT_ROWS} 件以内で指定してください。` };
-  const guard = await ensureCanEditSlots(eventId, "manage_slot_update");
-  if (!guard.ok) return guard.result;
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
-  const selected = await db.select().from(slots).where(and(eq(slots.event_id, eventId), inArray(slots.id, slotIds))!);
-  if (selected.length !== slotIds.length || selected.some((row) => row.status !== "reserved")) return { ok: false, message: "対象に予約中以外または存在しない枠があります。" };
-  const groupIds = [...new Set(selected.map((row) => row.reservation_group_id).filter((id): id is string => Boolean(id)))];
-  const grouped = groupIds.length > 0
-    ? await db
-        .select()
-        .from(slots)
-        .where(and(eq(slots.event_id, eventId), inArray(slots.reservation_group_id, groupIds))!)
-        .limit(MAX_ATOMIC_SLOT_ROWS + 1)
-    : [];
-  const byId = new Map<string, SlotRow>(selected.map((row) => [row.id, row]));
-  for (const row of grouped) byId.set(row.id, row);
-  const rows = [...byId.values()];
-  if (rows.length > MAX_ATOMIC_SLOT_ROWS) return { ok: false, message: `reservation_group を含む処理対象は ${MAX_ATOMIC_SLOT_ROWS} 件以内にしてください。` };
-  if (rows.some((row) => row.status !== "reserved")) return { ok: false, message: "reservation_group 全体が予約中ではありません。" };
   const notifications: BatchItem<"sqlite">[] = [];
-  for (const groupId of groupIds) {
-    const representative = rows.find((row) => row.reservation_group_id === groupId);
-    if (representative) {
-      const statement = await buildReleaseNotification(
-        db,
-        representative,
-        rows.filter((row) => row.reservation_group_id === groupId).map((row) => row.id),
-        groupId,
-      );
-      if (statement) notifications.push(statement);
-    }
+  for (const row of rows) {
+    const notification = await releaseNotification(db, row);
+    if (notification) notifications.push(notification);
   }
-  for (const row of selected.filter((candidate) => !candidate.reservation_group_id)) {
-    const statement = await buildReleaseNotification(db, row, [row.id], null);
-    if (statement) notifications.push(statement);
-  }
-  const now = Math.floor(Date.now() / 1000);
-  const queueBatch = await buildEventQueueBatch(db, eventId, "slot_admin_batch_release", guard.userId);
+  const queue = await eventQueue(db, eventId, "slot_admin_release", userId);
   try {
     await mutateWithAudit(db, {
-      mutationStatements: [db.update(slots).set({ status: "available", x_user_id: null, reserved_by_user_id: null, display_name: null, reservation_group_id: null, video_id: null, updated_at: now, version: sql`${slots.version} + 1` }).where(versionedWhere(eventId, rows, "reserved")), ...queueBatch.statements],
-      expectedMutationChanges: [rows.length, ...queueBatch.expectedChanges],
-      audits: rows.map((row) => ({ table_name: "slots", target_id: row.id, operation: "UPDATE", before: snapshot(row), after: { ...snapshot(row), status: "available", x_user_id: null, reserved_by_user_id: null, display_name: null, reservation_group_id: null, video_id: null, updated_at: now, version: row.version + 1 }, actor_user_id: guard.userId, retention_class: "long_audit", strict: true })),
+      mutationStatements: [
+        db
+          .update(slots)
+          .set({
+            status: "available",
+            reserved_by_user_id: null,
+            x_user_id: null,
+            display_name: null,
+            reservation_group_id: null,
+            video_id: null,
+            updated_at: now,
+            version: sql`${slots.version} + 1`,
+          })
+          .where(versionedWhere(eventId, rows, "reserved")),
+        ...queue.statements,
+      ],
+      expectedMutationChanges: [rows.length, ...queue.expectedChanges],
+      audits: rows.map((row) => ({
+        table_name: "slots",
+        target_id: row.id,
+        operation: "UPDATE",
+        before: snapshot(row),
+        after: {
+          ...snapshot(row),
+          status: "available",
+          reserved_by_user_id: null,
+          x_user_id: null,
+          display_name: null,
+          reservation_group_id: null,
+          video_id: null,
+          updated_at: now,
+          version: row.version + 1,
+        },
+        actor_user_id: userId,
+        retention_class: "long_audit",
+        strict: true,
+      })),
       postAuditStatements: notifications,
     });
-  } catch (error) { return mutationError(error); }
+  } catch (error) {
+    return mutationError(error);
+  }
   revalidateEventSlotPaths(eventId);
   return { ok: true, message: `${rows.length}件の予約枠を解放しました。` };
 }
 
-/** 選択枠のラベルを一括更新する。 */
-export async function batchUpdateSlotLabels(formData: FormData): Promise<SlotActionResult> {
+export async function deleteSlot(
+  formData: FormData,
+): Promise<SlotActionResult> {
+  const slotId = String(formData.get("slot_id") ?? "").trim();
+  if (!slotId) return { ok: false, message: "slot_id が必要です。" };
+  const db = getDatabase();
+  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const row = (
+    await db.select().from(slots).where(eq(slots.id, slotId)).limit(1)
+  )[0];
+  if (!row) return { ok: false, message: "枠が見つかりません。" };
+  if (row.status !== "available") {
+    return { ok: false, message: "予約済み・投稿済みの枠は削除できません。" };
+  }
+  const guard = await ensureCanEditSlots(row.event_id, "manage_slot_delete");
+  if (!guard.ok) return guard.result;
+  return deleteRows(guard.db, row.event_id, [row], guard.userId, "slot_admin_delete");
+}
+
+export async function batchDeleteAvailableSlots(
+  formData: FormData,
+): Promise<SlotActionResult> {
+  const eventId = String(formData.get("event_id") ?? "").trim();
+  const slotIds = parseSlotIds(formData);
+  if (!eventId || slotIds.length === 0 || slotIds.length > MAX_ATOMIC_SLOT_ROWS) {
+    return { ok: false, message: "event_id と処理上限内の枠を指定してください。" };
+  }
+  const guard = await ensureCanEditSlots(eventId, "manage_slot_delete");
+  if (!guard.ok) return guard.result;
+  const rows = await guard.db
+    .select()
+    .from(slots)
+    .where(and(eq(slots.event_id, eventId), inArray(slots.id, slotIds))!);
+  if (rows.length !== slotIds.length || rows.some((row) => row.status !== "available")) {
+    return { ok: false, message: "対象に空き枠以外または存在しない枠があります。" };
+  }
+  return deleteRows(guard.db, eventId, rows, guard.userId, "slot_admin_batch_delete");
+}
+
+export async function batchReleaseReservedSlots(
+  formData: FormData,
+): Promise<SlotActionResult> {
+  const eventId = String(formData.get("event_id") ?? "").trim();
+  const slotIds = parseSlotIds(formData);
+  if (!eventId || slotIds.length === 0 || slotIds.length > MAX_ATOMIC_SLOT_ROWS) {
+    return { ok: false, message: "event_id と処理上限内の枠を指定してください。" };
+  }
+  const guard = await ensureCanEditSlots(eventId, "manage_slot_update");
+  if (!guard.ok) return guard.result;
+  const rows = await guard.db
+    .select()
+    .from(slots)
+    .where(and(eq(slots.event_id, eventId), inArray(slots.id, slotIds))!);
+  if (rows.length !== slotIds.length || rows.some((row) => row.status !== "reserved")) {
+    return { ok: false, message: "対象に予約中以外または存在しない枠があります。" };
+  }
+  return releaseRows(guard.db, eventId, rows, guard.userId);
+}
+
+export async function batchUpdateSlotLabels(
+  formData: FormData,
+): Promise<SlotActionResult> {
   const eventId = String(formData.get("event_id") ?? "").trim();
   const slotIds = parseSlotIds(formData);
   const label = String(formData.get("label") ?? "").trim();
-  if (!eventId || slotIds.length === 0 || !label) return { ok: false, message: "event_id・枠・ラベルを指定してください。" };
-  if (label.length > 200 || !uniqueIds(slotIds) || slotIds.length > MAX_ATOMIC_SLOT_ROWS) return { ok: false, message: `ラベルまたは件数の上限を超えています。` };
+  if (
+    !eventId ||
+    !label ||
+    label.length > 200 ||
+    slotIds.length === 0 ||
+    slotIds.length > MAX_ATOMIC_SLOT_ROWS
+  ) {
+    return { ok: false, message: "event_id・枠・上限内のラベルを指定してください。" };
+  }
   const guard = await ensureCanEditSlots(eventId, "manage_slot_update");
   if (!guard.ok) return guard.result;
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
-  const rows = await db.select().from(slots).where(and(eq(slots.event_id, eventId), inArray(slots.id, slotIds))!);
-  if (rows.length !== slotIds.length) return { ok: false, message: "存在しない枠が含まれています。" };
+  const rows = await guard.db
+    .select()
+    .from(slots)
+    .where(and(eq(slots.event_id, eventId), inArray(slots.id, slotIds))!);
+  if (rows.length !== slotIds.length) {
+    return { ok: false, message: "存在しない枠が含まれています。" };
+  }
   const now = Math.floor(Date.now() / 1000);
-  const queueBatch = await buildEventQueueBatch(db, eventId, "slot_admin_label_update", guard.userId);
+  const queue = await eventQueue(guard.db, eventId, "slot_admin_label_update", guard.userId);
   try {
-    await mutateWithAudit(db, {
-      mutationStatements: [db.update(slots).set({ slot_label: label, updated_at: now, version: sql`${slots.version} + 1` }).where(versionedWhere(eventId, rows)), ...queueBatch.statements],
-      expectedMutationChanges: [rows.length, ...queueBatch.expectedChanges],
-      audits: rows.map((row) => ({ table_name: "slots", target_id: row.id, operation: "UPDATE", before: snapshot(row), after: { ...snapshot(row), slot_label: label, updated_at: now, version: row.version + 1 }, actor_user_id: guard.userId, retention_class: "normal", strict: true })),
+    await mutateWithAudit(guard.db, {
+      mutationStatements: [
+        guard.db
+          .update(slots)
+          .set({
+            slot_label: label,
+            updated_at: now,
+            version: sql`${slots.version} + 1`,
+          })
+          .where(versionedWhere(eventId, rows)),
+        ...queue.statements,
+      ],
+      expectedMutationChanges: [rows.length, ...queue.expectedChanges],
+      audits: rows.map((row) => ({
+        table_name: "slots",
+        target_id: row.id,
+        operation: "UPDATE",
+        before: snapshot(row),
+        after: {
+          ...snapshot(row),
+          slot_label: label,
+          updated_at: now,
+          version: row.version + 1,
+        },
+        actor_user_id: guard.userId,
+        retention_class: "normal",
+        strict: true,
+      })),
     });
-  } catch (error) { return mutationError(error); }
+  } catch (error) {
+    return mutationError(error);
+  }
   revalidateEventSlotPaths(eventId);
   return { ok: true, message: `${rows.length}件のラベルを更新しました。` };
 }
