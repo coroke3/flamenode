@@ -650,28 +650,28 @@ export async function deleteEvent(
   if (!before) return { ok: false, message: "イベントが見つかりません。" };
   const after = {
     ...before,
-    visibility_status: "archived" as const,
+    visibility_status: "private" as const,
     updated_at: now,
   };
   const queue = await buildStaticRebuildQueueBatch(db, [
     {
       targetType: "event",
       targetId: eventId,
-      reason: "event_archive",
+      reason: "event_private",
       priority: "high",
       requestedByUserId: actorUserId,
     },
     {
       targetType: "events_index",
       targetId: "global",
-      reason: "event_archive",
+      reason: "event_private",
       priority: "low",
       requestedByUserId: actorUserId,
     },
     {
       targetType: "search_index",
       targetId: "global",
-      reason: "event_archive",
+      reason: "event_private",
       priority: "low",
       requestedByUserId: actorUserId,
     },
@@ -680,7 +680,7 @@ export async function deleteEvent(
     mutationStatements: [
       db
         .update(events)
-        .set({ visibility_status: "archived", updated_at: now })
+        .set({ visibility_status: "private", updated_at: now })
         .where(and(eq(events.id, eventId), eq(events.updated_at, before.updated_at))),
       ...queue.statements,
     ],

@@ -19,7 +19,6 @@ import { getOnboardingState, onboardingHref } from "@/lib/auth/onboarding";
 import {
   collapseReservationGroups,
   sortSlotsChronologically,
-  type SlotBase,
   type SlotGroupRow,
 } from "@/lib/utils/slotGrouping";
 import { Icon } from "@/components/ui/Icon";

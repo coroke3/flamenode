@@ -54,7 +54,7 @@ type SlotFillStat = {
   filled: number;
   pct: number;
 };
-type SlotVisualStatus = SlotRow["status"] | "priority";
+type SlotVisualStatus = SlotRow["status"];
 
 const JST = { timeZone: "Asia/Tokyo" } as const;
 const eventSectionHeaderClasses = {
@@ -691,19 +691,11 @@ function slotDisplayName(slot: SlotRow): string {
   return slot.display_name ?? slot.x_user_id ?? "確保済み";
 }
 
-function slotVisualStatus(slot: SlotRow, now: number): SlotVisualStatus {
-  if (
-    slot.priority_reclaim_until != null &&
-    slot.priority_reclaim_until > now &&
-    slot.status !== "available"
-  ) {
-    return "priority";
-  }
+function slotVisualStatus(slot: SlotRow, _now: number): SlotVisualStatus {
   return slot.status;
 }
 
 function slotStatusLabel(status: SlotVisualStatus): string {
-  if (status === "priority") return "優先再取得中";
   if (status === "submitted") return "提出済み";
   if (status === "reserved") return "確保済み";
   return "選択可";

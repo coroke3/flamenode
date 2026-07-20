@@ -110,8 +110,6 @@ export default async function ManageEventEditPage({
               ev.user_video_edit_permission_keys_json,
             video_form_settings_json: videoFormSettingsJson,
             max_slots_per_video: ev.max_slots_per_video,
-            max_consecutive_slots_per_entry:
-              ev.max_consecutive_slots_per_entry,
             slot_part_gap_minutes: ev.slot_part_gap_minutes,
             slot_type: (ev.slot_type ?? "time") as "time" | "count",
             slot_visibility_mode: (ev.slot_visibility_mode ??
