@@ -1,0 +1,140 @@
+name: Agent PR88 apply canonical status
+
+on:
+  push:
+    branches:
+      - agent/ux-and-status-simplification
+    paths:
+      - .github/workflows/agent-pr88-apply-canonical-status.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/ux-and-status-simplification
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply status model on canonical schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          schema = Path('src/lib/db/schema.canonical.ts')
+          text = schema.read_text()
+          old_event = '''    visibility_status: text("visibility_status", {
+                enum: ["draft", "private", "public", "archived"],
+              })
+                .notNull()
+                .default("draft"),'''
+          new_event = '''    visibility_status: text("visibility_status", {
+                enum: ["private", "public"],
+              })
+                .notNull()
+                // 0043の物理defaultはdraft。0044がINSERT直後にprivateへ正規化する。
+                .default("draft" as "private"),'''
+          old_video = '''    visibility_status: text("visibility_status", {
+                enum: [
+                  "draft",
+                  "pending",
+                  "public",
+                  "limited",
+                  "private",
+                  "archived",
+                  "voided",
+                ],
+              })
+                .notNull()
+                .default("draft"),'''
+          new_video = '''    visibility_status: text("visibility_status", {
+                enum: ["pending", "public", "private", "voided"],
+              })
+                .notNull()
+                // 0043の物理defaultはdraft。0044がINSERT直後にpendingへ正規化する。
+                .default("draft" as "pending"),'''
+          if old_event not in text:
+              raise SystemExit('event visibility block did not match')
+          if old_video not in text:
+              raise SystemExit('video visibility block did not match')
+          text = text.replace(old_event, new_event, 1).replace(old_video, new_video, 1)
+          schema.write_text(text)
+
+          baseline = Path('src/lib/integration/schemaBaseline.integration.test.mjs')
+          text = baseline.read_text()
+          needle = '    "0043_db_canonical_migration.sql",\n'
+          replacement = needle + '    "0044_simplify_visibility_statuses.sql",\n'
+          if '0044_simplify_visibility_statuses.sql' not in text:
+              if needle not in text:
+                  raise SystemExit('migration list did not match')
+              text = text.replace(needle, replacement, 1)
+          baseline.write_text(text)
+
+          status_test = Path('src/lib/integration/statusModel.integration.test.mjs')
+          text = status_test.read_text()
+          if 'getTableColumns' not in text:
+              text = text.replace(
+                  'import { DatabaseSync } from "node:sqlite";\n',
+                  'import { DatabaseSync } from "node:sqlite";\nimport { getTableColumns } from "drizzle-orm";\nimport { events, videos } from "../db/schema.ts";\n',
+                  1,
+              )
+          marker = 'test("0044 is additive to the canonical DB and does not redefine YouTube ID ownership", () => {'
+          enum_test = '''test("canonical schema exposes only the current visibility states", () => {
+            assert.deepEqual(getTableColumns(events).visibility_status.enumValues, [
+              "private",
+              "public",
+            ]);
+            assert.deepEqual(getTableColumns(videos).visibility_status.enumValues, [
+              "pending",
+              "public",
+              "private",
+              "voided",
+            ]);
+          });
+
+          '''
+          if 'canonical schema exposes only the current visibility states' not in text:
+              if marker not in text:
+                  raise SystemExit('status test insertion marker did not match')
+              text = text.replace(marker, enum_test + marker, 1)
+          status_test.write_text(text)
+
+          change_log = Path('docs/database/change-log.md')
+          text = change_log.read_text()
+          if '`0044_simplify_visibility_statuses.sql`' not in text:
+              marker = '## 2026-07-20 — `0043_db_canonical_migration.sql`\n'
+              block = '''## 2026-07-20 — `0044_simplify_visibility_statuses.sql`
+
+          | 項目 | 内容 |
+          | --- | --- |
+          | Type | cleanup |
+          | Summary | 修正後DB正本への移行後に、作品・イベントのアプリ運用状態を整理し、YouTube限定公開をYouTubeメタデータへ分離 |
+          | Reason | FlameNode内の公開範囲とYouTube上の公開区分を混在させず、下書き・アーカイブの重複した役割を廃止するため |
+          | Tables | `videos`、`video_youtube_metadata`、`video_moderation_cases`、`events` |
+          | Data migration | 動画`limited`を`public`へ移しYouTube公開区分を`unlisted`として保存。動画`draft / archived / hidden`を原則`private`、イベント`draft`を`private`、`archived`を`public`へ移行。`archived`から`private`への変換で既存部分一意制約に抵触する行だけ、YouTube IDを保持したまま監査付きで`voided`へ振り分け |
+          | Compatibility | `0043_db_canonical_migration.sql`完了をguardで確認。旧物理default由来の`draft`だけをINSERT後に正規化し、その他の旧状態のINSERT・UPDATEを拒否 |
+          | Data loss | none。作品・イベント行と`videos.youtube_video_id`は削除しない |
+          | Rollback | 状態の意味が変わるため、migration適用前のD1バックアップから復元 |
+          | Validation | 41テーブル409カラムの正本検査、誤順序適用のfail-fast、SQLite integration、typecheck、Lint、unit、Worker、Cloudflare契約、Next.js/Pages build、公開API検査 |
+          | PR | `#88`（`#89`に依存） |
+
+          '''
+              if marker not in text:
+                  raise SystemExit('change log insertion marker did not match')
+              text = text.replace(marker, block + marker, 1)
+          change_log.write_text(text)
+          PY
+          rm .github/workflows/agent-pr88-apply-canonical-status.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "新DB正本へ状態モデルを接続"
+          git push origin HEAD:agent/ux-and-status-simplification
