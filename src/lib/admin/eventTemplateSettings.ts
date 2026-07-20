@@ -306,19 +306,15 @@ export function parseEventTemplateSnapshot(
   if (!isPositiveInteger(parsed.max_slots_per_video)) return null;
   if (!isPositiveInteger(parsed.max_consecutive_slots_per_entry)) return null;
   if (!isNonNegativeInteger(parsed.slot_part_gap_minutes)) return null;
-
-  const nullableStrings = [
-    parsed.explanation,
-    parsed.icon_url,
-    parsed.img_url,
-    parsed.accent_color,
-    parsed.user_video_edit_permission_keys_json,
-    parsed.parts_json,
-    parsed.review_settings,
-    parsed.editable_fields,
-    parsed.repeat_rules,
-  ];
-  if (!nullableStrings.every(isNullableString)) return null;
+  if (!isNullableString(parsed.explanation)) return null;
+  if (!isNullableString(parsed.icon_url)) return null;
+  if (!isNullableString(parsed.img_url)) return null;
+  if (!isNullableString(parsed.accent_color)) return null;
+  if (!isNullableString(parsed.user_video_edit_permission_keys_json)) return null;
+  if (!isNullableString(parsed.parts_json)) return null;
+  if (!isNullableString(parsed.review_settings)) return null;
+  if (!isNullableString(parsed.editable_fields)) return null;
+  if (!isNullableString(parsed.repeat_rules)) return null;
   if (!Array.isArray(parsed.custom_question_definitions)) return null;
   if (parsed.custom_question_definitions.length > MAX_EVENT_CUSTOM_QUESTIONS) return null;
 
