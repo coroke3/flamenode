@@ -8,6 +8,7 @@ import {
   type LegacyImportStrategy,
 } from "@/lib/import/legacy/normalize";
 import { applyLegacyImportPlan } from "@/lib/import/legacy/apply";
+import { preflightLegacyImportPlan } from "@/lib/import/legacy/preflight";
 import {
   claimLegacyImportPreview,
   createLegacyImportPreview,
@@ -97,6 +98,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     try {
+      await preflightLegacyImportPlan(db, claimed.plan, claimed.strategy);
       const result = await applyLegacyImportPlan(db, claimed.plan, {
         actorAuthUserId: user.id,
         strategy: claimed.strategy,
@@ -114,7 +116,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       const baseMessage = cause instanceof Error ? cause.message : "インポートを確定できませんでした。";
       const createOnlyRecovery =
         claimed.strategy === "create_only"
-          ? " 一部が書き込まれた可能性があります。同じファイルを再プレビューし、「過去の旧形式インポート行だけ置換」で再開してください。"
+          ? " 書き込み前検査または適用中に停止しました。部分書き込みが疑われる場合は、同じファイルを再プレビューし、「過去の旧形式インポート行だけ置換」で再開してください。"
           : " preview planは保持されています。同じ内容で再試行できます。";
       return error(`${baseMessage}${createOnlyRecovery}`, 409, {
         retryable: claimed.strategy !== "create_only",
