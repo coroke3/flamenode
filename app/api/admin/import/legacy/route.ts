@@ -1,13 +1,18 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getDatabase } from "@/lib/cloudflare";
-import { parseLegacyImportText } from "@/lib/import/legacy/parse";
+import { getDatabase, getEnv } from "@/lib/cloudflare";
+import { parseLegacyImportText, type LegacyParsedFile } from "@/lib/import/legacy/parse";
 import {
   normalizeLegacyFiles,
   type CanonicalVisibility,
   type LegacyImportStrategy,
 } from "@/lib/import/legacy/normalize";
 import { applyLegacyImportPlan } from "@/lib/import/legacy/apply";
+import {
+  createLegacyImportPreviewToken,
+  fingerprintLegacyImport,
+  verifyLegacyImportPreviewToken,
+} from "@/lib/import/legacy/previewToken";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -43,7 +48,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (files.length > MAX_FILES) return error(`ファイル数は最大${MAX_FILES}件です。`);
 
   let totalBytes = 0;
-  const parsed = [];
+  const parsed: LegacyParsedFile[] = [];
   for (const file of files) {
     if (file.size > MAX_FILE_BYTES) return error(`${file.name}: 1ファイル5MBまでです。`);
     totalBytes += file.size;
@@ -56,10 +61,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
   }
 
-  const plan = normalizeLegacyFiles(parsed, {
-    eventVisibility: visibility(formData.get("event_visibility")),
-    videoVisibility: visibility(formData.get("video_visibility")),
-  });
+  const eventVisibility = visibility(formData.get("event_visibility"));
+  const videoVisibility = visibility(formData.get("video_visibility"));
+  const importStrategy = strategy(formData.get("strategy"));
+  const plan = normalizeLegacyFiles(parsed, { eventVisibility, videoVisibility });
   const rowCount = parsed.reduce((sum, file) => sum + file.rows.length, 0);
   if (rowCount > MAX_ROWS) return error(`1回の入力は最大${MAX_ROWS}行です。`);
 
@@ -77,12 +82,29 @@ export async function POST(request: Request): Promise<NextResponse> {
     warnings: plan.warnings.length,
     errors: plan.errors.length,
   };
+  const secret = getEnv().AUTH_SECRET;
+  if (!secret) return error("AUTH_SECRETが未設定のため安全なプレビューを作成できません。", 503);
+  const fingerprint = await fingerprintLegacyImport({
+    plan,
+    eventVisibility,
+    videoVisibility,
+    strategy: importStrategy,
+  });
   const mode = formData.get("mode") === "apply" ? "apply" : "preview";
   if (mode === "preview") {
+    const previewToken =
+      plan.errors.length === 0
+        ? await createLegacyImportPreviewToken({
+            secret,
+            actorAuthUserId: user.id,
+            fingerprint,
+          })
+        : null;
     return NextResponse.json({
       ok: plan.errors.length === 0,
       mode,
       summary,
+      previewToken,
       warnings: plan.warnings.slice(0, 100),
       errors: plan.errors.slice(0, 100),
       preview: {
@@ -97,13 +119,25 @@ export async function POST(request: Request): Promise<NextResponse> {
     });
   }
   if (plan.errors.length > 0) return error("入力エラーを修正してから実行してください。", 422);
+  const previewToken = String(formData.get("preview_token") ?? "");
+  if (
+    !previewToken ||
+    !(await verifyLegacyImportPreviewToken({
+      token: previewToken,
+      secret,
+      actorAuthUserId: user.id,
+      fingerprint,
+    }))
+  ) {
+    return error("プレビュー後にファイルまたは設定が変更されたか、プレビューの有効期限が切れています。", 409);
+  }
   const db = getDatabase();
   if (!db) return error("DBに接続できません。", 503);
 
   try {
     const result = await applyLegacyImportPlan(db, plan, {
       actorAuthUserId: user.id,
-      strategy: strategy(formData.get("strategy")),
+      strategy: importStrategy,
     });
     return NextResponse.json({ ok: true, mode, summary, result });
   } catch (cause) {
