@@ -16,7 +16,10 @@ import {
   mutateWithAudit,
   planD1AuditMutationBudget,
 } from "@/lib/audit/mutate";
-import { parseEventTemplateSnapshot } from "@/lib/admin/eventTemplateSettings";
+import {
+  parseEventTemplateSnapshot,
+  type EventTemplateSnapshot,
+} from "@/lib/admin/eventTemplateSettings";
 import { generateId } from "@/lib/utils/id";
 import { resolveStagePermissionFieldsFromJson } from "@/lib/video/formSettings";
 import { stagePermissionQuestionKeyCondition } from "@/lib/video/stagePermissionAnswers";
@@ -106,20 +109,20 @@ function stageQuestionRows(
   now: number,
 ): PlannedQuestion[] {
   return resolveStagePermissionFieldsFromJson([settingsJson]).map(
-    (field, index) => ({
+    (field, index): PlannedQuestion => ({
       id: generateId("ecq"),
       event_id: eventId,
       question_key: field.id,
       label: field.label,
       description: field.description || null,
-      type: "textarea" as const,
+      type: "textarea",
       required: field.required ? 1 : 0,
       options_json: null,
       placeholder: field.placeholder || null,
       max_length: 1000,
       sort_order: index,
       is_active: 1,
-      visibility: "review" as const,
+      visibility: "review",
       created_at: now,
       updated_at: now,
     }),
@@ -146,7 +149,7 @@ export async function createEvent(
   const id = data.id?.trim() || generateId("ev");
   const now = Math.floor(Date.now() / 1000);
 
-  let templateSnapshot = null;
+  let templateSnapshot: EventTemplateSnapshot | null = null;
   const templateId = data.template_id?.trim();
   if (templateId) {
     const template = (
@@ -235,25 +238,27 @@ export async function createEvent(
     updated_at: now,
   } satisfies typeof eventStaff.$inferInsert;
 
-  const templateQuestions = (
+  const templateQuestions: PlannedQuestion[] = (
     templateSnapshot?.custom_question_definitions ?? []
-  ).map((definition) => ({
-    id: generateId("ecq"),
-    event_id: id,
-    question_key: definition.question_key,
-    label: definition.label,
-    description: definition.description,
-    type: definition.type,
-    required: definition.required ? 1 : 0,
-    options_json: definition.options_json,
-    placeholder: definition.placeholder,
-    max_length: definition.max_length,
-    sort_order: definition.sort_order,
-    is_active: definition.is_active ? 1 : 0,
-    visibility: definition.visibility,
-    created_at: now,
-    updated_at: now,
-  }) satisfies PlannedQuestion[];
+  ).map(
+    (definition): PlannedQuestion => ({
+      id: generateId("ecq"),
+      event_id: id,
+      question_key: definition.question_key,
+      label: definition.label,
+      description: definition.description,
+      type: definition.type,
+      required: definition.required ? 1 : 0,
+      options_json: definition.options_json,
+      placeholder: definition.placeholder,
+      max_length: definition.max_length,
+      sort_order: definition.sort_order,
+      is_active: definition.is_active ? 1 : 0,
+      visibility: definition.visibility,
+      created_at: now,
+      updated_at: now,
+    }),
+  );
   const questions = [
     ...templateQuestions,
     ...stageQuestionRows(id, videoFormSettingsJson, now),
