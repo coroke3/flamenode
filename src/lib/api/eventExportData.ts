@@ -190,6 +190,7 @@ export async function loadEventExportSnapshot(
         db
           .select({
             video_id: videoSoftwares.video_id,
+            software_id: videoSoftwares.software_id,
             name: softwareCatalog.name,
             raw_label: videoSoftwares.raw_label,
           })
@@ -201,8 +202,7 @@ export async function loadEventExportSnapshot(
           .where(inArray(videoSoftwares.video_id, videoIds))
           .orderBy(
             asc(videoSoftwares.video_id),
-            asc(softwareCatalog.name),
-            asc(videoSoftwares.raw_label),
+            asc(videoSoftwares.software_id),
           ),
         db
           .select({
@@ -252,7 +252,6 @@ export async function loadEventExportSnapshot(
           .orderBy(
             asc(videoChapters.video_id),
             asc(videoChapters.chapter_time),
-            asc(videoChapters.id),
           ),
         db
           .select({
@@ -283,7 +282,6 @@ export async function loadEventExportSnapshot(
       appendGrouped(softwaresByVideo, row.video_id, {
         name: row.name,
         raw_label: row.raw_label,
-        order_index: orderIndex,
       });
     }
     for (const row of answerRows) {

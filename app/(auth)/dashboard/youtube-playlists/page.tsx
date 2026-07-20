@@ -34,8 +34,8 @@ interface PlaylistStatusRow {
 
 function waitingReason(row: PlaylistStatusRow): string {
   if (!row.youtube_video_id) return "YouTube URLの確認後に同期されます";
-  if (!['public', 'limited'].includes(row.visibility_status)) {
-    return "作品が公開・限定公開になった後に同期されます";
+  if (row.visibility_status !== "public") {
+    return "作品が公開された後に同期されます";
   }
   if (row.event_sync_status === "failed") return "運営が同期エラーを確認しています";
   if (row.event_sync_status === "scanning") return "再生リストを確認中です";
@@ -93,7 +93,6 @@ export default async function DashboardYoutubePlaylistsPage(): Promise<React.Rea
         .where(
           and(
             inArray(videosTable.creator_x_user_id, approvedXIds),
-            ne(videosTable.visibility_status, "archived"),
             ne(videosTable.visibility_status, "voided"),
           ),
         )

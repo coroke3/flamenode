@@ -1,20 +1,32 @@
 /** 投稿枠の表示順・区切り・予約グループ表示に使う純粋ロジック。 */
 
+/**
+ * 枠UIが受け取る最小形。
+ *
+ * DB正本の列だけを意味のあるプロパティとして扱う。画面や集計ごとに部分SELECTを
+ * 使用できるよう、グループ化に不要な列は任意とする。
+ * `priority_reclaim_*` は旧UIを段階的に除去する間だけ許可する読み取り境界であり、
+ * DB正本・書き込み対象・グループ判定には使用しない。
+ */
 export type SlotBase = {
   id: string;
-  event_id: string;
+  event_id?: string;
   slot_label: string | null;
   start_time: number | null;
-  sort_order: number | null;
+  sort_order?: number | null;
   status: "available" | "reserved" | "submitted";
   display_name: string | null;
   x_user_id: string | null;
-  reserved_by_user_id: string | null;
-  reservation_group_id: string | null;
-  video_id: string | null;
-  updated_at: number;
+  reserved_by_user_id?: string | null;
+  reservation_group_id?: string | null;
+  video_id?: string | null;
+  updated_at?: number;
   version?: number;
   event_title?: string | null;
+  /** @deprecated 旧UI読取境界。DB正本には存在しない。 */
+  priority_reclaim_video_id?: string | null;
+  /** @deprecated 旧UI読取境界。DB正本には存在しない。 */
+  priority_reclaim_until?: number | null;
 };
 
 export type SlotPart<T extends { start_time: number | null }> = {
@@ -126,7 +138,7 @@ export function collapseReservationGroups(rows: SlotBase[]): SlotGroupRow[] {
 
   const seen = new Set<string>();
   return sorted.flatMap((row): SlotGroupRow[] => {
-    const groupId = row.reservation_group_id;
+    const groupId = row.reservation_group_id ?? null;
     if (!groupId) {
       return [{ ...row, slot_ids: [row.id], group_id: null, group_size: 1, is_group: false }];
     }

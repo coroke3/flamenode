@@ -18,7 +18,7 @@ import { requireSession } from "@/lib/auth/guard";
 import { getOnboardingState, onboardingHref } from "@/lib/auth/onboarding";
 import {
   sortSlotsChronologically,
-  type SlotBase,
+  type SlotGroupRow,
 } from "@/lib/utils/slotGrouping";
 import { Icon } from "@/components/ui/Icon";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
@@ -97,7 +97,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
               activeGalleryXId
                 ? eq(videosTable.creator_x_user_id, activeGalleryXId)
                 : sql`0 = 1`,
-              ne(videosTable.visibility_status, "archived"),
+              ne(videosTable.visibility_status, "voided"),
             )!,
           )
           .orderBy(desc(videosTable.created_at))) as VideoCardData[];
@@ -142,16 +142,16 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           )!,
         )
         .limit(50);
-      mySlot = sortSlotsChronologically(slotRows as SlotBase[])[0] ?? null;
-      if (mySlot) {
-        mySlotEvent =
-          (
-            await db
-              .select()
-              .from(eventsTable)
-              .where(eq(eventsTable.id, mySlot.event_id))
-              .limit(1)
-          )[0] ?? null;
+      const groupedSlots = collapseReservationGroups(slotRows);
+      const sortedSlots = sortSlotsChronologically(groupedSlots);
+      mySlot = sortedSlots[0] ?? null;
+      if (mySlot && mySlot.event_id) {
+        const ev = await db
+          .select()
+          .from(eventsTable)
+          .where(eq(eventsTable.id, mySlot.event_id))
+          .limit(1);
+        mySlotEvent = ev[0] ?? null;
       }
 
       if (approvedXIds.length > 0) {
@@ -170,7 +170,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           .where(
             and(
               inArray(videosTable.creator_x_user_id, approvedXIds),
-              ne(videosTable.visibility_status, "archived"),
+              ne(videosTable.visibility_status, "voided"),
               excludePvsfSummaryVideos(),
             )!,
           );

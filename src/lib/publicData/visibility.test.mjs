@@ -6,21 +6,16 @@ import {
   normalizePublicEventVisibility,
 } from "./visibility.ts";
 
-test("public visibility keeps list and direct scopes distinct", () => {
+test("FlameNode public visibility accepts public only", () => {
   assert.equal(isPublicVideoListable("public"), true);
-  assert.equal(isPublicVideoListable("limited"), false);
-  assert.equal(isPublicVideoDirect("limited"), true);
+  assert.equal(isPublicVideoDirect("public"), true);
+  assert.equal(isPublicVideoDirect("limited"), false);
   assert.equal(isPublicVideoDirect("private"), false);
 });
 
-test("static public data keeps private events and limited videos out of list scopes", () => {
-  assert.equal(normalizePublicEventVisibility("draft"), null);
-  assert.equal(isPublicVideoListable("limited"), false);
-  assert.equal(isPublicVideoDirect("limited"), true);
-});
-
-test("public event visibility rejects unlisted states", () => {
+test("event public data accepts public only", () => {
   assert.equal(normalizePublicEventVisibility("public"), "public");
-  assert.equal(normalizePublicEventVisibility("archived"), "archived");
+  assert.equal(normalizePublicEventVisibility("archived"), null);
+  assert.equal(normalizePublicEventVisibility("draft"), null);
   assert.equal(normalizePublicEventVisibility("private"), null);
 });

@@ -49,7 +49,7 @@ export interface PublicEventDto {
   icon_url: string | null;
   img_url: string | null;
   accent_color: string | null;
-  visibility_status: "public" | "archived";
+  visibility_status: "public";
   slot_type: "time" | "count" | null;
   slot_visibility_mode: "public_name" | "anonymous" | "hidden" | null;
   start_time: number | null;

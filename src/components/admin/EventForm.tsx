@@ -33,7 +33,7 @@ export interface EventFormInitial {
   end_time?: number | null;
   entry_start_time?: number | null;
   entry_end_time?: number | null;
-  visibility_status?: "draft" | "private" | "public" | "archived" | null;
+  visibility_status?: string | null;
   allow_user_video_event_links?: number;
   allow_unslotted_posts?: number;
   allow_user_video_edits?: number;
@@ -84,12 +84,8 @@ function unixToInputDateTime(timestamp: number | null | undefined): string {
 
 function resolveInitialVisibility(
   initial: EventFormInitial,
-): "draft" | "private" | "public" | "archived" {
-  return initial.visibility_status === "private" ||
-      initial.visibility_status === "public" ||
-      initial.visibility_status === "archived"
-    ? initial.visibility_status
-    : "draft";
+): "private" | "public" {
+  return initial.visibility_status === "public" ? "public" : "private";
 }
 
 function inputGateProps(
@@ -200,17 +196,17 @@ function buildPreviewFromForm(
 ): EventSettingsPreviewValue {
   const questions = readQuestions(formData);
   return {
-    title: textValue(formData, "title"),
-    event_type: textValue(formData, "event_type") || "event",
-    explanation: textValue(formData, "explanation"),
-    icon_url: textValue(formData, "icon_url"),
-    img_url: textValue(formData, "img_url"),
-    accent_color: textValue(formData, "accent_color"),
-    start_time: textValue(formData, "start_time"),
-    end_time: textValue(formData, "end_time"),
-    entry_start_time: textValue(formData, "entry_start_time"),
-    entry_end_time: textValue(formData, "entry_end_time"),
-    visibility_status: textValue(formData, "visibility_status") || "draft",
+    title: textValue(fd, "title"),
+    event_type: textValue(fd, "event_type") || "event",
+    explanation: textValue(fd, "explanation"),
+    icon_url: textValue(fd, "icon_url"),
+    img_url: textValue(fd, "img_url"),
+    accent_color: textValue(fd, "accent_color"),
+    start_time: textValue(fd, "start_time"),
+    end_time: textValue(fd, "end_time"),
+    entry_start_time: textValue(fd, "entry_start_time"),
+    entry_end_time: textValue(fd, "entry_end_time"),
+    visibility_status: textValue(fd, "visibility_status") || "private",
     allow_user_video_event_links:
       textValue(formData, "allow_user_video_event_links") || "0",
     allow_unslotted_posts:
@@ -691,10 +687,8 @@ export function EventForm({
             defaultValue={resolveInitialVisibility(initial)}
             className="fn-select"
           >
-            <option value="draft">下書き</option>
-            <option value="private">非公開</option>
+            <option value="private">非公開・準備中</option>
             <option value="public">公開</option>
-            <option value="archived">アーカイブ</option>
           </GatedSelect>
         </div>
         <div>

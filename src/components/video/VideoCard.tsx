@@ -71,15 +71,13 @@ export function VideoCard({
           </div>
         )}
         <span className="fn-thumb-grid" aria-hidden />
-        {video.status === "limited" ? (
+        {video.status === "private" ? (
           <span className={cn("fn-badge", "fn-badge-soft", styles.statusBadge)}>
-            限定公開
+            非公開
           </span>
-        ) : video.status === "hidden" ? (
-          <span
-            className={cn("fn-badge", "fn-badge-warning", styles.statusBadge)}
-          >
-            調整中
+        ) : video.status === "voided" ? (
+          <span className={cn("fn-badge", "fn-badge-neutral", styles.statusBadge)}>
+            無効
           </span>
         ) : null}
         {video.part ? (

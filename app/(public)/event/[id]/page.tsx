@@ -55,6 +55,7 @@ type SlotFillStat = {
   filled: number;
   pct: number;
 };
+type SlotVisualStatus = SlotRow["status"];
 
 const JST = { timeZone: "Asia/Tokyo" } as const;
 const eventSectionHeaderClasses = {
@@ -207,6 +208,9 @@ function EventDetailView({
   const now = Math.floor(Date.now() / 1000);
   const status = computeEventStatus(event);
   const accepting = isAcceptingEntries(event);
+  const showRecruitCard = status !== "ended" && status !== "private";
+  const publicEditors = editors.filter((editor) => editor.is_public === 1);
+  const now = Math.floor(Date.now() / 1000);
   const slotTotal = slotRows.length;
   const availableSlots = slotRows.filter((slot) => slot.status === "available").length;
   const filledSlots = slotTotal - availableSlots;
@@ -466,4 +470,64 @@ function buildSlotSummary(rows: SlotRow[], gapSec: number) {
       toStat(formatSlotPartLabel(part, "short"), part.rows as SlotRow[]),
     ),
   };
+}
+
+function buildSlotPreview(slots: SlotRow[]) {
+  const timed = slots.filter((slot) => slot.start_time != null);
+  if (timed.length === 0) return null;
+  const dates = unique(timed.map((slot) => slotDateKey(slot.start_time ?? 0)))
+    .slice(0, 3)
+    .map((key) => ({ key, label: slotDateLabel(key) }));
+  const dateKeys = new Set(dates.map((date) => date.key));
+  const times = unique(
+    timed
+      .filter((slot) => dateKeys.has(slotDateKey(slot.start_time ?? 0)))
+      .map((slot) => slotTimeKey(slot.start_time ?? 0)),
+  )
+    .slice(0, 8);
+  const timeKeys = new Set(times);
+  const cells = new Map<string, SlotRow>();
+  for (const slot of timed) {
+    const dateKey = slotDateKey(slot.start_time ?? 0);
+    const timeKey = slotTimeKey(slot.start_time ?? 0);
+    if (!dateKeys.has(dateKey) || !timeKeys.has(timeKey)) {
+      continue;
+    }
+    cells.set(`${dateKey}:${timeKey}`, slot);
+  }
+  return { dates, times: times.map((key) => ({ key, label: key })), cells };
+}
+
+function unique(values: string[]): string[] {
+  return Array.from(new Set(values));
+}
+
+function slotDateKey(ts: number): string {
+  return dateFormat.slotDateKey.format(new Date(ts * 1000));
+}
+
+function slotDateLabel(key: string): string {
+  const [year, month, day] = key.split("/");
+  const date = new Date(`${year}-${month}-${day}T00:00:00+09:00`);
+  const weekday = dateFormat.weekday.format(date);
+  return `${month}/${day} ${weekday}`;
+}
+
+function slotTimeKey(ts: number): string {
+  return dateFormat.slotTime.format(new Date(ts * 1000));
+}
+
+function slotDisplayName(slot: SlotRow): string {
+  if (slot.status === "available") return "空き枠";
+  return slot.display_name ?? slot.x_user_id ?? "確保済み";
+}
+
+function slotVisualStatus(slot: SlotRow, _now: number): SlotVisualStatus {
+  return slot.status;
+}
+
+function slotStatusLabel(status: SlotVisualStatus): string {
+  if (status === "submitted") return "提出済み";
+  if (status === "reserved") return "確保済み";
+  return "選択可";
 }

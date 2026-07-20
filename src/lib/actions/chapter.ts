@@ -113,8 +113,9 @@ async function canModerateChapterVideo(params: {
 }
 
 /**
- * 動画内の時刻に紐づくチャプターコメントを新正本 video_chapters に作成する。
- * チャプターは video_chapters のみへ保存する。
+ * チャプター (動画マーカー) を作成する。
+ * 主体 = `user.active_x_user_id` で `approval_status === 'approved'` を要求。
+ * 対象動画は FlameNode 内 public のみ投稿可。
  */
 export async function createChapter(
   formData: FormData,
@@ -145,7 +146,15 @@ export async function createChapter(
   }
   const { target, durationSeconds } = postingTarget;
 
-  if (data.chapter_time > durationSeconds) {
+  const target = (
+    await db.select().from(videos).where(eq(videos.id, data.video_id)).limit(1)
+  )[0];
+  if (!target) return { ok: false, message: "動画が見つかりません。" };
+
+  // 対象動画状態チェック (Batch A 最小実装)。
+  // FlameNode 内 public のみ投稿可。
+  // (YouTube 側 unlisted で FlameNode 内 public のケースも status === 'public' で吸収される)。
+  if (target.visibility_status !== "public") {
     return {
       ok: false,
       message: `動画時間（${durationSeconds}秒）を超える位置には投稿できません。`,
@@ -252,7 +261,140 @@ export async function getChapterPostingContext(
       message: postingTarget.message,
     };
   }
-  return { ok: true, durationSeconds: postingTarget.durationSeconds };
+  const { video_id, csv } = parsed.data;
+
+  const target = (
+    await db.select().from(videos).where(eq(videos.id, video_id)).limit(1)
+  )[0];
+  if (!target) return { ok: false, message: "動画が見つかりません。" };
+
+  // 編集権限: 動画オーナー or admin。バルクは個別投稿よりも強い権限を要求。
+  const canMod =
+    sUser.role === "admin" ||
+    (await canEditVideo({
+      db,
+      user: { id: sUser.id, role: sUser.role ?? null },
+      video: target,
+      requiredKey: "video.chapter_admin",
+      privilegeMode: "event",
+    }));
+  if (!canMod) {
+    return { ok: false, message: "この動画のチャプター一括登録権限がありません。" };
+  }
+  if (target.visibility_status !== "public") {
+    return {
+      ok: false,
+      message: "この動画にはチャプターコメントを投稿できません。",
+    };
+  }
+
+  // createChaptersBulk は通常チャプターコメント専用なので、メンバー解決マップは不要。
+  // メンバーチャプターは VideoMembersField + replaceVideoMembers 経路で別途扱う。
+
+  const rowsRaw = parseChapterBulkCsv(csv);
+  if (rowsRaw.length === 0) {
+    return { ok: false, message: "CSV にデータがありません。" };
+  }
+  if (rowsRaw.length > MAX_ATOMIC_CHAPTER_BULK_ROWS) {
+    return {
+      ok: false,
+      message: `CSVは一度に最大${MAX_ATOMIC_CHAPTER_BULK_ROWS}行まで登録できます。`,
+      inserted: 0,
+      skipped: rowsRaw.length,
+      errors: [`データ行を${MAX_ATOMIC_CHAPTER_BULK_ROWS}行以内に分割してください。`],
+    };
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const errors: string[] = [];
+  let inserted = 0;
+  let skipped = 0;
+  const pendingRows: Array<{
+    id: string;
+    chapter_time: number;
+    chapter_label: string;
+    note: string | null;
+    visibility: "public" | "private";
+  }> = [];
+
+  for (let i = 0; i < rowsRaw.length; i++) {
+    const cols = rowsRaw[i]!;
+    const rawTime = (cols[0] ?? "").trim();
+    const rawLabel = (cols[1] ?? "").trim();
+    const rawNote = (cols[2] ?? "").trim();
+    const rawVisibility = (cols[3] ?? "").trim().toLowerCase();
+    const rawMember = (cols[4] ?? "").trim();
+
+    if (!rawTime && !rawLabel) {
+      skipped += 1;
+      continue;
+    }
+    const time = parseChapterTime(rawTime);
+    if (time === null) {
+      errors.push(`行 ${i + 1}: 時刻の形式が不正です ("${rawTime}")`);
+      skipped += 1;
+      continue;
+    }
+    if (rawLabel.length === 0 || rawLabel.length > 120) {
+      errors.push(`行 ${i + 1}: ラベルが必須 (1〜120文字)`);
+      skipped += 1;
+      continue;
+    }
+    if (rawNote.length > 1000) {
+      errors.push(`行 ${i + 1}: コメントが 1000 文字を超えています`);
+      skipped += 1;
+      continue;
+    }
+    const visibility: "public" | "private" =
+      rawVisibility === "private" ? "private" : "public";
+    // 5 列目 (rawMember) は旧仕様で「担当メンバー名/XID」だったが、メンバーチャプター
+    // 分離に伴い無視する。互換のため CSV としては受け付けるが、video_chapters には
+    // 反映しない。
+    void rawMember;
+
+    const id = generateId("ch");
+    pendingRows.push({ id, chapter_time: time, chapter_label: rawLabel, note: rawNote || null, visibility });
+    inserted += 1;
+  }
+
+  if (inserted > 0) {
+    const queue = await buildStaticRebuildQueueBatch(db, [{
+      targetType: "video",
+      targetId: video_id,
+      reason: "chapter_bulk_create",
+      requestedByUserId: sUser.id,
+    }]);
+    await mutateWithAudit(db, {
+      mutationStatements: [db.run(sql`
+        INSERT INTO video_chapters (
+          id, video_id, x_user_id, chapter_time, chapter_label, note,
+          visibility, show_on_player_bar, order_index, created_at, updated_at
+        ) VALUES ${sql.join(pendingRows.map((row) => sql`(${row.id}, ${video_id}, ${activeX}, ${row.chapter_time}, ${row.chapter_label}, ${row.note}, ${row.visibility}, 1, 0, ${now}, ${now})`), sql`, `)}
+      `), ...queue.statements],
+      expectedMutationChanges: [inserted, ...queue.expectedChanges],
+      audits: pendingRows.map((row) => ({
+        table_name: "video_chapters" as const,
+        target_id: row.id,
+        operation: "CREATE" as const,
+        before: null,
+        after: { id: row.id, video_id, x_user_id: activeX, chapter_time: row.chapter_time, chapter_label: row.chapter_label, note: row.note, visibility: row.visibility, show_on_player_bar: 1, order_index: 0, created_at: now, updated_at: now },
+        actor_user_id: sUser.id,
+        retention_class: "normal" as const,
+      })),
+    });
+  }
+
+  revalidatePath(`/${target.youtube_video_id ?? video_id}`);
+  return {
+    ok: inserted > 0,
+    message:
+      inserted > 0
+        ? `${inserted} 件追加 / ${skipped} 件スキップ`
+        : "登録できる行がありませんでした。",
+    inserted,
+    skipped,
+    errors,
+  };
 }
 
 /**

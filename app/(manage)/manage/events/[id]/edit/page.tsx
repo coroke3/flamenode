@@ -119,17 +119,12 @@ export default async function ManageEventEditPage({
             allow_unslotted_posts: event.allow_unslotted_posts,
             allow_user_video_edits: event.allow_user_video_edits,
             user_video_edit_permission_keys_json:
-              event.user_video_edit_permission_keys_json,
-            custom_questions: customQuestions.map((question) => {
-              const { event_id: _eventId, ...editable } = rowToQuestion(question);
-              return editable;
-            }),
-            max_slots_per_video: event.max_slots_per_video,
-            max_consecutive_slots_per_entry:
-              event.max_consecutive_slots_per_entry,
-            slot_part_gap_minutes: event.slot_part_gap_minutes,
-            slot_type: (event.slot_type ?? "time") as "time" | "count",
-            slot_visibility_mode: (event.slot_visibility_mode ??
+              ev.user_video_edit_permission_keys_json,
+            video_form_settings_json: videoFormSettingsJson,
+            max_slots_per_video: ev.max_slots_per_video,
+            slot_part_gap_minutes: ev.slot_part_gap_minutes,
+            slot_type: (ev.slot_type ?? "time") as "time" | "count",
+            slot_visibility_mode: (ev.slot_visibility_mode ??
               "public_name") as "public_name" | "anonymous" | "hidden",
             parts_json: event.parts_json,
             editable_fields: event.editable_fields,
@@ -151,7 +146,7 @@ export default async function ManageEventEditPage({
             危険操作
           </h2>
           <p className="fn-muted fn-text-sm">
-            イベントを削除すると、募集枠・イベント管理設定が停止されます。作品本体は残ります。
+            イベントを非公開にすると、公開ページと新規募集を停止します。枠・運営設定・作品との紐付けは保持されます。
           </p>
           <DeleteEventForm eventId={event.id} redirectHref="/manage" />
         </section>

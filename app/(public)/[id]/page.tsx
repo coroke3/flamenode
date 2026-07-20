@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { and, desc, eq, inArray, ne } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { buildAccentVars } from "@/lib/theme/accent";
 import styles from "./page.module.css";
 import { getCurrentUser } from "@/lib/auth/currentUser";
@@ -235,7 +235,7 @@ export default async function VideoDetailPage({
               .where(
                 and(
                   inArray(videosTable.id, ids),
-                  ne(videosTable.visibility_status, "archived"),
+                  eq(videosTable.visibility_status, "public"),
                 )!,
               )
               .orderBy(desc(videosTable.scheduled_time));
@@ -503,11 +503,6 @@ export default async function VideoDetailPage({
                 この作品は現在「調整中」です。投稿者本人と運営による確認後に公開状態が更新されます。
               </span>
             </div>
-          ) : video.visibility_status === "limited" ? (
-            <div className={styles.warningBar}>
-              <Icon name="info" size={14} aria-hidden />
-              <span>限定公開作品です。リンクを知っている人のみ閲覧できます。</span>
-            </div>
           ) : null}
 
           {primaryEvent ? (
@@ -726,7 +721,7 @@ function StaticVideoDetailView({
   rawId: string;
 }): React.ReactElement {
   const { video } = detail;
-  if (video.visibility_status !== "public" && video.visibility_status !== "limited") {
+  if (video.visibility_status !== "public") {
     notFound();
   }
   const creatorIcon = video.creator_icon_url ?? null;

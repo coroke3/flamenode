@@ -69,7 +69,7 @@ OR (
     OR EXISTS (
       SELECT 1 FROM videos v
       WHERE v.creator_icon_url = ?3
-        AND v.visibility_status IN ('public', 'limited')
+        AND v.visibility_status = 'public'
       LIMIT 1
     )
   )
@@ -80,7 +80,7 @@ OR (
     EXISTS (
       SELECT 1 FROM events e
       WHERE (e.icon_url = ?3 OR e.img_url = ?3)
-        AND e.visibility_status IN ('public', 'archived')
+        AND e.visibility_status = 'public'
       LIMIT 1
     )
     OR EXISTS (

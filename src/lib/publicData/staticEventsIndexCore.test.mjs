@@ -36,11 +36,11 @@ test("normalizeStaticEventsIndex normalizes events and group sections", () => {
   assert.equal(index.events.length, 1);
   assert.equal(index.events[0].visibility_status, "public");
 
-  const archived = normalizeStaticEventsIndex({
+  const legacyArchived = normalizeStaticEventsIndex({
     items: [{ id: "event2", title: "Event 2", visibility_status: "archived" }],
   });
-  assert.ok(archived);
-  assert.equal(archived.events[0].visibility_status, "archived");
+  assert.ok(legacyArchived);
+  assert.equal(legacyArchived.events.length, 0);
 
   assert.equal(index.groupSections.length, 1);
   assert.equal(index.groupSections[0].events.length, 1);

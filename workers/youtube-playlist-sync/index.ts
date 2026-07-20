@@ -406,7 +406,7 @@ async function loadSourceVideoIds(
      WHERE ve.event_id = ?1
        AND v.youtube_video_id IS NOT NULL
        AND v.youtube_video_id <> ''
-       AND v.visibility_status IN ('public', 'limited')
+       AND v.visibility_status = 'public'
      GROUP BY v.youtube_video_id
      ORDER BY MIN(COALESCE(v.scheduled_time, v.created_at)), MIN(v.id)
      LIMIT ?2`,

@@ -188,14 +188,14 @@ export async function runIntegrityChecks(
       severity: "danger",
       description: "schema で想定されていない公開状態の作品。",
       from: sql`videos`,
-      where: sql`visibility_status NOT IN ('draft','pending','public','limited','private','hidden','archived','voided')`,
+      where: sql`visibility_status NOT IN ('pending','public','private','voided')`,
       sampleSelect: {
         id: sql<string>`id`,
         title: sql<string>`title`,
         status: sql<string>`visibility_status`,
       },
       recommendation:
-        "公開状態を draft/pending/public/limited/private/hidden/archived/voided のいずれかに修正してください。",
+        "公開状態を pending/public/private/voided のいずれかに修正してください。",
       sqlPreview:
         "UPDATE videos SET visibility_status = 'pending' WHERE id = '<video_id>';",
       mapIssue: (r) => ({
@@ -213,16 +213,16 @@ export async function runIntegrityChecks(
       severity: "danger",
       description: "イベント公開状態の正本に想定外の値が入っています。",
       from: sql`events`,
-      where: sql`visibility_status NOT IN ('draft','private','public','archived')`,
+      where: sql`visibility_status NOT IN ('private','public')`,
       sampleSelect: {
         id: sql<string>`id`,
         title: sql<string>`title`,
         status: sql<string>`visibility_status`,
       },
       recommendation:
-        "visibility_status を draft/private/public/archived のいずれかに修正してください。",
+        "visibility_status を private/public のいずれかに修正してください。",
       sqlPreview:
-        "UPDATE events SET visibility_status = 'draft' WHERE id = '<event_id>';",
+        "UPDATE events SET visibility_status = 'private' WHERE id = '<event_id>';",
       mapIssue: (r) => ({
         id: text(r.id),
         title: text(r.title),
