@@ -8,6 +8,17 @@ import { validateDbSchema as validateBaseSchema } from "./check-db-schema.base.m
 export * from "./check-db-schema.base.mjs";
 
 const FRAGMENT_IMPORT_PATTERN = /(?:from\s+|import\s*\()?["'][^"']*schema\.base(?:\.ts)?["']/;
+const TABLE_PATTERN = /export\s+const\s+([A-Za-z_$][\w$]*)\s*=\s*sqliteTable\s*\(\s*["']([A-Za-z0-9_]+)["']/g;
+const REMOVED_TABLES = new Set([
+  "audit_log_settings",
+  "legacy_import_batch_items",
+  "legacy_import_batches",
+  "x_account_link_requests",
+  "x_id_merge_requests",
+  "x_id_merge_reverts",
+  "x_user_icons",
+  "x_user_youtube_channels",
+]);
 
 function collectSourceFiles(dir, result = []) {
   if (!fs.existsSync(dir)) return result;
@@ -25,19 +36,28 @@ function collectSourceFiles(dir, result = []) {
 function assertSchemaEntryPoint(root) {
   const entryPath = path.join(root, "src", "lib", "db", "schema.ts");
   const fragmentPath = path.join(root, "src", "lib", "db", "schema.base.ts");
+  const canonicalPath = path.join(root, "src", "lib", "db", "schema.canonical.ts");
   if (!fs.existsSync(entryPath)) throw new Error("src/lib/db/schema.tsがありません。");
   if (!fs.existsSync(fragmentPath)) throw new Error("内部schema fragmentがありません。");
+  if (!fs.existsSync(canonicalPath)) throw new Error("確定schema定義がありません。");
 
   const entry = fs.readFileSync(entryPath, "utf8");
   if (!/唯一の公開正本/.test(entry)) {
     throw new Error("schema.tsへ唯一の公開正本であることを明示してください。");
   }
-  if (!/export\s+\*\s+from\s+["']\.\/schema\.base\.ts["']/.test(entry)) {
-    throw new Error("schema.tsは内部fragmentを最終entrypointとして再exportする必要があります。");
+  if (/export\s+\*\s+from\s+["']\.\/schema\.base\.ts["']/.test(entry)) {
+    throw new Error("schema.tsからschema.base.tsを一括再exportできません。確定テーブルだけを明示exportしてください。");
+  }
+  if (!/from\s+["']\.\/schema\.base\.ts["']/.test(entry)) {
+    throw new Error("schema.tsは未変更テーブルをschema.base.tsから明示exportしてください。");
+  }
+  if (!/from\s+["']\.\/schema\.canonical\.ts["']/.test(entry)) {
+    throw new Error("schema.tsは確定テーブルをschema.canonical.tsから明示exportしてください。");
   }
 
   const allowed = new Set([
     path.normalize(entryPath),
+    path.normalize(canonicalPath),
     path.normalize(path.join(root, "scripts", "check-db-schema.mjs")),
   ]);
   for (const sourceRoot of ["app", "src", "workers", "scripts"]) {
@@ -54,7 +74,29 @@ function assertSchemaEntryPoint(root) {
   }
 }
 
-/** static parserがindex builderの末尾commaを同一表現として扱えるよう正規化する。 */
+function readTableSegments(source) {
+  const matches = [...source.matchAll(TABLE_PATTERN)];
+  return matches.map((match, index) => ({
+    variable: match[1],
+    table: match[2],
+    start: match.index,
+    end: matches[index + 1]?.index ?? source.length,
+  }));
+}
+
+function removeOverriddenAndRemovedTables(baseText, canonicalText) {
+  const canonicalTables = new Set(readTableSegments(canonicalText).map((entry) => entry.table));
+  const segments = readTableSegments(baseText);
+  if (segments.length === 0) throw new Error("schema.base.tsのテーブル定義を解析できません。");
+
+  let output = baseText.slice(0, segments[0].start);
+  for (const segment of segments) {
+    if (canonicalTables.has(segment.table) || REMOVED_TABLES.has(segment.table)) continue;
+    output += baseText.slice(segment.start, segment.end);
+  }
+  return output;
+}
+
 function normalizeSchemaForManifest(schemaText) {
   return schemaText.replace(
     /\b(uniqueIndex|index)\s*\(\s*(["'][A-Za-z0-9_]+["'])\s*,\s*\)/g,
@@ -62,11 +104,6 @@ function normalizeSchemaForManifest(schemaText) {
   );
 }
 
-/**
- * schema.tsを唯一の公開正本として検査する。
- * static parser向けに、schema.tsだけが所有する内部fragmentと最終overrideを
- * 一時fileへ合成し、active migrationとの完全一致を確認する。
- */
 export function validateDbSchema(root = process.cwd()) {
   assertSchemaEntryPoint(root);
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flamenode-schema-check-"));
@@ -77,12 +114,20 @@ export function validateDbSchema(root = process.cwd()) {
     const tempDbDir = path.join(tempRoot, "src", "lib", "db");
     fs.mkdirSync(tempDbDir, { recursive: true });
 
-    const fragmentPath = path.join(root, "src", "lib", "db", "schema.base.ts");
-    const schemaEntryPath = path.join(root, "src", "lib", "db", "schema.ts");
+    const fragmentText = fs.readFileSync(
+      path.join(root, "src", "lib", "db", "schema.base.ts"),
+      "utf8",
+    );
+    const canonicalText = normalizeSchemaForManifest(
+      fs.readFileSync(
+        path.join(root, "src", "lib", "db", "schema.canonical.ts"),
+        "utf8",
+      ),
+    );
     const flattened = [
-      fs.readFileSync(fragmentPath, "utf8"),
-      "\n// ===== schema.ts final overrides =====\n",
-      normalizeSchemaForManifest(fs.readFileSync(schemaEntryPath, "utf8")),
+      removeOverriddenAndRemovedTables(fragmentText, canonicalText),
+      "\n// ===== schema.canonical.ts final definitions =====\n",
+      canonicalText,
     ].join("\n");
     fs.writeFileSync(path.join(tempDbDir, "schema.ts"), flattened, "utf8");
     return validateBaseSchema(tempRoot);
