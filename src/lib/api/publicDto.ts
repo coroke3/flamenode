@@ -1,16 +1,5 @@
-/**
- * 公開 API ホワイトリスト DTO。
- *
- * `/api/videos` と `/api/events` が返してよいフィールドだけを明示する。
- * 内部用 ID (user_id / active_x_user_id / linked_user_id)、認証関連
- * (verification_token / access_token / refresh_token)、運用情報 (internal_note
- * / private note / void_detail_private / is_banned / TOS / role / email) などは
- * 一切公開してはならない。
- *
- * 参照: `.claude/flamenode/phases/06-public-api-health-security.md`
- */
+/** 公開 API ホワイトリスト DTO。 */
 
-/** /api/videos が返してよい列のキー。 */
 export const PUBLIC_VIDEO_KEYS = [
   "id",
   "title",
@@ -20,17 +9,16 @@ export const PUBLIC_VIDEO_KEYS = [
   "primary_event_id",
   "scheduled_time",
   "status",
-] as const;/** クライアントへ返す公開作品 DTO。 */
+] as const;
+
 export interface PublicVideoDto {
   id: string;
   title: string;
-  /** YouTube 側が unlisted でも FlameNode 上 public なら値を含む。 */
   youtube_video_id: string | null;
   display_name: string | null;
   icon_url: string | null;
   primary_event_id: string | null;
   scheduled_time: number | null;
-  /** 常に "public"。FlameNode 内の公開状態のみを返す。 */
   status: "public";
 }
 
@@ -51,8 +39,8 @@ export const PUBLIC_EVENT_KEYS = [
   "entry_start_time",
   "entry_end_time",
   "max_slots_per_video",
-  "max_consecutive_slots_per_entry",
-] as const;/** クライアントへ返す公開イベント DTO。 */
+] as const;
+
 export interface PublicEventDto {
   id: string;
   title: string;
@@ -69,27 +57,23 @@ export interface PublicEventDto {
   entry_start_time: number | null;
   entry_end_time: number | null;
   max_slots_per_video: number;
-  max_consecutive_slots_per_entry: number;
 }
 
-/**
- * 絶対に公開 API から返してはならないキーの一覧。
- * `assertNoForbiddenKeys` が再帰的に検査する。
- */
 export const FORBIDDEN_PUBLIC_KEYS: ReadonlySet<string> = new Set([
-  // 個人特定 ID
   "submitted_by_user_id",
   "creator_x_user_id",
   "user_id",
+  "auth_user_id",
   "actor_user_id",
   "operator_user_id",
   "approved_by_user_id",
+  "approved_by_auth_user_id",
+  "requested_by_auth_user_id",
   "recipient_user_id",
   "reserved_by_user_id",
   "discord_id",
   "linked_user_id",
   "active_x_user_id",
-  // 認証関連
   "email",
   "email_verified",
   "verification_token",
@@ -98,21 +82,25 @@ export const FORBIDDEN_PUBLIC_KEYS: ReadonlySet<string> = new Set([
   "id_token",
   "session_token",
   "providerAccountId",
-  // 権限・状態
   "role",
+  "permission_preset",
+  "custom_permission_keys_json",
   "is_banned",
   "tos_accepted_at",
   "tos_version",
-  // 運用ノート
   "internal_note",
   "private_note",
   "void_detail_private",
-  // 管理者向け履歴 / 通知 payload
   "history_logs",
+  "audit_logs",
   "notification_payload",
-  // 編集者の代理 X user id (公開不可)
   "representative_x_user_id",
-  // events の廃止済み公開・受付フラグと旧 JSON/Fallback
+  "public_api_updated_at",
+  "max_consecutive_slots_per_entry",
+  "priority_reclaim_video_id",
+  "priority_reclaim_until",
+  "slot_kind",
+  "sort_order",
   "is_active",
   "is_entry_open",
   "is_archived",
@@ -120,24 +108,15 @@ export const FORBIDDEN_PUBLIC_KEYS: ReadonlySet<string> = new Set([
   "stage_permission",
 ]);
 
-/** 公開 API リストに `limit` の絶対上限を掛ける。 */
 export const MAX_PUBLIC_LIST_LIMIT = 48;
-
-/** /api/events の `limit` 絶対上限 (イベントは変更頻度が低いため作品より大きい値を許容)。 */
 export const MAX_PUBLIC_EVENT_LIMIT = 60;
 
-/**
- * 与えられたオブジェクトを `keys` だけに絞った浅いコピーで返す。
- * 余分なキーはここで完全に落ちる。
- */
 export function pickKeys<T extends object, K extends keyof T>(
   source: T,
   keys: readonly K[],
 ): Pick<T, K> {
   const out = {} as Pick<T, K>;
-  for (const k of keys) {
-    out[k] = source[k];
-  }
+  for (const key of keys) out[key] = source[key];
   return out;
 }
 
@@ -190,20 +169,20 @@ function collectForbiddenPublicKeys(
   }
 }
 
-/** 公開レスポンス内の禁止キーを走査し、検査スクリプトでも同じ正本を使えるようにする。 */
 export function findForbiddenPublicKeys(
   value: unknown,
   path: string = "$",
 ): ForbiddenPublicKeyViolation[] {
   const violations: ForbiddenPublicKeyViolation[] = [];
-  collectForbiddenPublicKeys(value, path, violations, Number.POSITIVE_INFINITY);
+  collectForbiddenPublicKeys(
+    value,
+    path,
+    violations,
+    Number.POSITIVE_INFINITY,
+  );
   return violations;
 }
 
-/**
- * 公開 API のレスポンスに禁止キーが含まれていないかを再帰的に検査する。
- * 漏洩があれば最初の違反で throw する。
- */
 export function assertNoForbiddenKeys(
   value: unknown,
   path: string = "$",
