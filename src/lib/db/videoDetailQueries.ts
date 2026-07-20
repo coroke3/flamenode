@@ -23,7 +23,6 @@ import {
 import type { DB } from "./client";
 import { uniqueBy } from "@/lib/utils/unique";
 import { normalizeXId } from "@/lib/utils/xid";
-import { parseMemberChaptersJson } from "@/lib/video/memberChaptersJson";
 import {
   clampRelatedLimit,
   enforceDiversity,
@@ -37,27 +36,6 @@ import { storedCreatorNameExpr } from "./displayExpr";
 import { resolveMemberIcons, resolveMemberNames } from "./xIconResolution";
 
 const videoScoreExpr = coalescedVideoScore;
-
-function memberChaptersFromJson(
-  memberId: string,
-  chaptersJson: string | null,
-): {
-  id: string;
-  video_member_id: string;
-  chapter_time: number;
-  chapter_label: string;
-  note: string | null;
-  order_index: number;
-}[] {
-  return parseMemberChaptersJson(chaptersJson).map((row, index) => ({
-    id: `${memberId}-ch-${index}`,
-    video_member_id: memberId,
-    chapter_time: row.time_seconds,
-    chapter_label: row.label,
-    note: row.note || null,
-    order_index: row.order_index,
-  }));
-}
 
 /**
  * 作品詳細関連の集約クエリ。
@@ -131,7 +109,6 @@ export async function fetchVideoDetail(
       role: videoMembers.role,
       comment: videoMembers.comment,
       order_index: videoMembers.order_index,
-      chapters_json: videoMembers.chapters_json,
       x_name: xUsers.x_name,
       icon_url: xUsers.icon_url,
     })
@@ -150,7 +127,7 @@ export async function fetchVideoDetail(
   const membersWithIcons = await resolveMemberIcons(db, rawMembers);
   const members = await resolveMemberNames(db, membersWithIcons);
 
-  // 5) チャプター (再生バー点表示の元データ)
+  // 5) チャプター。移行後の唯一の読み取り元は video_chapters。
   // 可視性ポリシー: public は全員可。private は admin / 動画オーナー (canEditChapters) /
   //                 投稿者本人 (approvedXIds に c.x_user_id を含む) のみ。
   const canSeeAllPrivate =
@@ -170,14 +147,12 @@ export async function fetchVideoDetail(
   } else {
     chapterVisibilityCond = eq(videoChapters.visibility, "public");
   }
-  // 通常チャプターコメントは video_chapters から取得。
   const chapters = await db
     .select({
       id: videoChapters.id,
       chapter_time: videoChapters.chapter_time,
       chapter_label: videoChapters.chapter_label,
       visibility: videoChapters.visibility,
-      show_on_player_bar: videoChapters.show_on_player_bar,
       note: videoChapters.note,
       x_user_id: videoChapters.x_user_id,
       author_name: xUsers.x_name,
@@ -191,17 +166,18 @@ export async function fetchVideoDetail(
         chapterVisibilityCond ? chapterVisibilityCond : sql`1=1`,
       )!,
     )
-    .orderBy(videoChapters.chapter_time);
+    .orderBy(asc(videoChapters.chapter_time), asc(videoChapters.id));
 
-  const memberChapters = members
-    .flatMap((member) =>
-      memberChaptersFromJson(member.id, member.chapters_json ?? null),
-    )
-    .sort(
-      (a, b) =>
-        a.chapter_time - b.chapter_time ||
-        a.video_member_id.localeCompare(b.video_member_id),
-    );
+  // 旧メンバー専用タブの返却形は移行期間中だけ空配列で維持する。
+  // データ自体は migration で video_chapters へ展開済みであり、旧JSONは読まない。
+  const memberChapters: Array<{
+    id: string;
+    video_member_id: string;
+    chapter_time: number;
+    chapter_label: string;
+    note: string | null;
+    order_index: number;
+  }> = [];
 
   return {
     video,
