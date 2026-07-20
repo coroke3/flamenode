@@ -151,10 +151,11 @@ export async function GET(
       {
         error: "format_parameter_removed",
         schema_version: 4,
-        message: "出力形式はv4に統一されています。formatパラメータを削除してください。",
+        message:
+          "旧形式は廃止されました。formatパラメータを削除し、v4形式を利用してください。",
       },
       "no-store",
-      400,
+      410,
     );
   }
 
