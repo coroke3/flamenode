@@ -168,7 +168,6 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
     appendVideoAtomicWritePlan(plan, await buildReplaceVideoMembersPlan(db, {
       videoId,
       members: memberValidation.value.members,
-      chaptersByIndex: memberValidation.value.chaptersByIndex,
       actorUserId: userId,
     }));
     appendVideoAtomicWritePlan(plan, await buildReplaceVideoSoftwarePlan(db, {
