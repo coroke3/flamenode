@@ -87,7 +87,6 @@ try {
         event_id: issue.event_id,
         event_title: issue.event_title,
         staff_id: issue.staff_id,
-        user_id: issue.user_id,
         x_user_id: issue.x_user_id,
       }),
     );
