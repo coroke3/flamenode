@@ -35,15 +35,12 @@ function requireAll(relative, checks) {
 requireAll("app/(auth)/entry/page.tsx", [
   [/イベントに参加する/, "イベント参加カードがありません。"],
   [/過去の自分の作品を投稿する/, "枠なし投稿カードがありません。"],
-  [/reservedSlots\.map\(\(slot\) =>/, "確保済み枠の1枠単位表示がありません。"],
-  [/const aNeeds = !a\.video_id && a\.status === "reserved"/, "未提出枠の優先表示がありません。"],
+  [/collapseReservationGroups/, "確保済み連続枠の表示統合がありません。"],
+  [/groupedReservedSlots\.map\(\(slot\) =>/, "確保済み枠の統合表示がありません。"],
+  [/const aNeedsSubmission = !a\.video_id && a\.status === "reserved"/, "未提出枠の優先表示がありません。"],
   [/const needsSubmission =\s*!slot\.video_id && slot\.status === "reserved"/s, "未提出枠の提出導線がありません。"],
+  [/slot\.is_group.*slot\.group_size/s, "連続枠数の表示がありません。"],
 ]);
-forbidMatch(
-  "app/(auth)/entry/page.tsx",
-  /collapseReservationGroups/,
-  "廃止した連続枠の表示統合を再導入しています。",
-);
 
 requireAll("src/components/forms/VideoForm.tsx", [
   [/"submitter"\s*\|\s*"work"\s*\|\s*"youtube"\s*\|\s*"confirm"/, "4段階投稿フローがありません。"],
@@ -125,4 +122,4 @@ if (errors.length > 0) {
   process.exit(1);
 }
 
-console.log("[check:ui-acceptance] OK: entry, posting, lists, theme, console drawer, Shelf, and breakpoint contracts are present.");
+console.log("[check:ui-acceptance] OK: entry grouping, posting, lists, theme, console drawer, Shelf, and breakpoint contracts are present.");
