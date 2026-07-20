@@ -38,13 +38,14 @@ const LEGACY_IMPORT_BOUNDARIES = [
   "app/api/admin/import/legacy/",
   "app/(admin)/admin/import/",
 ];
+const NON_RUNTIME_FILE_PATTERN = /(?:\.test|\.contract\.test|\.integration\.test)\.mjs$/;
 
 test("X名義ランタイムは旧申請表・単一リンク列・旧候補表を参照しない", () => {
   const files = ["src", "app", "workers"].flatMap(runtimeFiles).filter((path) => {
     const rel = relative(root, path).replaceAll("\\", "/");
     return (
       !rel.endsWith(SCHEMA_BASE_PATH) &&
-      !rel.endsWith("src/lib/auth/xIdentityCanonical.contract.test.mjs") &&
+      !NON_RUNTIME_FILE_PATTERN.test(rel) &&
       !rel.includes("historical") &&
       !LEGACY_IMPORT_BOUNDARIES.some((boundary) => rel.startsWith(boundary))
     );
@@ -58,7 +59,7 @@ test("X名義ランタイムは旧申請表・単一リンク列・旧候補表�
       }
     }
   }
-  assert.deepEqual(violations, []);
+  assert.deepEqual(violations, [], violations.join("\n"));
 });
 
 test("X名義と認証ユーザーは複合主キーで多対多、承認時に由来とroleを保存する", () => {
