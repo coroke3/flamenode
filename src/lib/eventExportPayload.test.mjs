@@ -154,13 +154,14 @@ test("イベント公開APIに旧形式フィールドと内部情報を含め�
   }
 });
 
-test("イベントAPIはformatパラメータを拒否しv4だけを返す", async () => {
+test("イベントAPIはformatパラメータを410で拒否しv4だけを返す", async () => {
   const route = await readFile(
     new URL("../../app/api/event-endpoints/[id]/route.ts", import.meta.url),
     "utf8",
   );
   assert.match(route, /format_parameter_removed/);
   assert.match(route, /schema_version:\s*4/);
+  assert.match(route, /"no-store",\s*410/);
   assert.match(route, /X-FlameNode-Schema-Version\", \"4\"/);
   assert.match(route, /buildEventExportPayload/);
   assert.doesNotMatch(route, /buildEventExportPayloadForFormat/);
