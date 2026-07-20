@@ -8,19 +8,19 @@ import {
   type NotificationCategory,
   type NotificationSeverity,
 } from "./types";
+import {
+  isTerminalNotificationFailure,
+  type NotificationOutboxStatus,
+} from "./status";
 
-export type OutboxStatus =
-  | "pending"
-  | "processing"
-  | "sent"
-  | "failed"
-  | "cancelled";
+export type OutboxStatus = NotificationOutboxStatus;
 
 const STATUS_LABELS: Record<OutboxStatus, string> = {
   pending: "配信待ち",
   processing: "送信中",
   sent: "送信済み",
   failed: "失敗",
+  dead_letter: "最終失敗",
   cancelled: "キャンセル",
 };
 
@@ -36,7 +36,7 @@ export interface NotificationFailureGuidance {
   nextSteps: string[];
 }
 
-/** 運営者向け: 失敗・滞留時の次アクション */
+/** 運営者向け: 失敗・滞留・運用キャンセル時の次アクション。 */
 export function getNotificationFailureGuidance(input: {
   status: string | null | undefined;
   lastError: string | null | undefined;
@@ -50,7 +50,7 @@ export function getNotificationFailureGuidance(input: {
     return {
       summary: "次の dispatcher 実行を待っています。",
       nextSteps: [
-        "5分以内に processing / sent へ進むか確認する",
+        "通常は5分以内に processing / sent へ進むか確認する",
         "長時間 pending の場合は Worker cron と D1 接続を確認する",
       ],
     };
@@ -58,75 +58,107 @@ export function getNotificationFailureGuidance(input: {
 
   if (status === "processing") {
     return {
-      summary: "送信中です。15分超で固着した場合は rescue されます。",
+      summary: "送信処理中です。配送リースは5分で失効します。",
       nextSteps: [
-        "15分経過後も processing のままなら手動キャンセルまたは再試行",
-        "同時刻帯に大量 enqueue が無いか確認する",
+        "リース期限超過後は次の5分cronで自動回収される",
+        "10分以上 processing のままなら Worker と D1 を確認する",
       ],
     };
   }
 
   if (status === "cancelled") {
+    if (err.includes("notification disabled")) {
+      return {
+        summary: "宛先の通知設定がOFFになったため、配送前に停止しました。",
+        nextSteps: ["再送が必要な場合だけ通知設定を確認して強制再送する"],
+      };
+    }
     return {
-      summary: "手動または運用でキャンセル済みです。",
+      summary: "手動または運用ルールでキャンセル済みです。",
       nextSteps: ["再送が必要なら管理者画面から強制再送する"],
     };
   }
 
-  if (status !== "failed") return null;
+  if (!isTerminalNotificationFailure(status)) return null;
 
-  if (err.includes("processing timeout")) {
+  if (err.includes("delivery lease expired") || err.includes("processing timeout")) {
     return {
-      summary: "送信処理がタイムアウトしました。",
+      summary: "送信処理のリースが期限切れになりました。",
       nextSteps: [
-        "再試行で pending に戻す",
-        "Discord API の障害状況を確認する",
+        "Worker の実行履歴とD1接続を確認する",
+        "原因解消後に通知を再試行する",
       ],
     };
   }
-  if (err.includes("401") || err.includes("unauthorized")) {
+
+  if (
+    err.includes("bot_token_unconfigured") ||
+    err.includes("401") ||
+    err.includes("unauthorized")
+  ) {
     return {
-      summary: "Discord Bot トークンが無効の可能性があります。",
+      summary: "Discord Bot の認証設定に問題があります。",
       nextSteps: [
         "DISCORD_BOT_TOKEN を確認する",
-        "修正後に failed を再試行する",
+        "設定修正後に失敗通知を再試行する",
       ],
     };
   }
+
   if (err.includes("403") || err.includes("cannot send")) {
     return {
-      summary: "ユーザーが DM を受け取れない可能性があります。",
+      summary: "宛先がBotのDMを受け取れない可能性があります。",
       nextSteps: [
-        "宛先ユーザーが Bot とサーバー共有・DM 許可しているか確認",
-        "必要ならサイト内で別途連絡する",
+        "宛先がBotとサーバーを共有し、DMを許可しているか確認する",
+        "必要ならサイト内または運営Discordで別途連絡する",
       ],
     };
   }
-  if (err.includes("404")) {
+
+  if (err.includes("recipient_missing") || err.includes("404")) {
     return {
-      summary: "Discord ユーザーが見つかりません。",
+      summary: "有効なDiscord宛先を解決できませんでした。",
       nextSteps: [
-        "recipient_user_id と users の紐付きを確認",
-        "連携解除済みなら通知をキャンセルする",
+        "ユーザーのDiscord連携状態を確認する",
+        "連携解除済みなら再送せずキャンセルする",
       ],
     };
   }
-  if (err.includes("rate") || err.includes("429")) {
+
+  if (
+    err.includes("rate") ||
+    err.includes("429") ||
+    err.includes("cooldown")
+  ) {
     return {
-      summary: "Discord のレート制限に達した可能性があります。",
+      summary: "Discordのレート制限に達した可能性があります。",
       nextSteps: [
-        "しばらく待ってから再試行する",
-        "短時間の大量配信を避ける",
+        "Discord指定の待機時間を空ける",
+        "短時間に通知が集中していないか確認する",
+      ],
+    };
+  }
+
+  if (
+    err.includes("timeout") ||
+    err.includes("network") ||
+    err.includes("request_budget")
+  ) {
+    return {
+      summary: "Discord通信または無料枠内の実行予算で失敗しました。",
+      nextSteps: [
+        "一時障害なら時間を空けて再試行する",
+        "繰り返す場合はWorkerログと外部通信件数を確認する",
       ],
     };
   }
 
   return {
-    summary: `最大試行回数に達しました (試行 ${attempts} 回)。`,
+    summary: `配送を完了できませんでした（試行 ${attempts} 回）。`,
     nextSteps: [
-      "payload を確認し文面・URL が妥当か見る",
-      "再試行または強制再送で pending に戻す",
-      "繰り返す場合は Discord 側のエラーログを確認する",
+      "payloadと宛先のDiscord連携状態を確認する",
+      "原因解消後に再試行する",
+      "繰り返す場合はDiscord側の応答とWorkerログを確認する",
     ],
   };
 }
@@ -138,15 +170,13 @@ export function summarizeNotificationPayload(
     const obj = JSON.parse(payloadJson) as Record<string, unknown>;
     const content =
       typeof obj.content === "string" ? obj.content.trim() : "";
-    const firstLine = content.split("\n").find((l) => l.trim()) ?? "";
+    const firstLine = content.split("\n").find((line) => line.trim()) ?? "";
     const preview =
       firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine || "—";
     return {
       preview,
-      videoId:
-        typeof obj.video_id === "string" ? obj.video_id : undefined,
-      eventId:
-        typeof obj.event_id === "string" ? obj.event_id : undefined,
+      videoId: typeof obj.video_id === "string" ? obj.video_id : undefined,
+      eventId: typeof obj.event_id === "string" ? obj.event_id : undefined,
     };
   } catch {
     return { preview: "—" };
@@ -173,6 +203,7 @@ export function statusBadgeClass(status: string | null | undefined): string {
     case "sent":
       return "fn-badge-accent";
     case "failed":
+    case "dead_letter":
       return "fn-badge-danger";
     case "processing":
       return "fn-badge-warning";
@@ -181,7 +212,7 @@ export function statusBadgeClass(status: string | null | undefined): string {
   }
 }
 
-/** Drizzle: カテゴリで type を絞る (event_id 条件は呼び元で AND) */
+/** Drizzle: カテゴリで type を絞る (event_id 条件は呼び元で AND)。 */
 export function drizzleNotificationCategoryCondition(
   category: NotificationCategory,
   typeColumn: typeof notificationOutbox.type,
@@ -219,7 +250,7 @@ export function drizzleNotificationCategoryCondition(
   }
 }
 
-/** /manage: other = video/slot/x_id/chapter 以外 */
+/** /manage: other = video/slot/x_id/chapter 以外。 */
 export function drizzleManageNotificationFilter(
   filter: Exclude<import("./types").ManageNotificationFilter, "all">,
   typeColumn: typeof notificationOutbox.type,
