@@ -2,6 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-20
+> Verified against commit: `8de170c`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/`, `wrangler.toml`, `package.json`
 
 Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、Cron Worker 3本で運用する。実Cloudflare操作、Remote D1、production secret操作は運用者が明示した場合だけ行う。
