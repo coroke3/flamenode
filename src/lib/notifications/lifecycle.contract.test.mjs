@@ -31,12 +31,14 @@ test("failed and dead_letter share one terminal failure policy", () => {
   assert.match(managePageSource, /TERMINAL_NOTIFICATION_FAILURE_STATUSES/);
 });
 
-test("notification opt-out cancels pending deliveries atomically", () => {
+test("notification opt-out cancels the exact pending delivery count atomically", () => {
+  assert.match(userAdminSource, /select\(\{ count: sql<number>`COUNT\(\*\)` \}\)/);
   assert.match(userAdminSource, /update\(notificationOutbox\)/);
   assert.match(userAdminSource, /eq\(notificationOutbox\.status, "pending"\)/);
   assert.match(userAdminSource, /status: "cancelled"/);
   assert.match(userAdminSource, /notification disabled before delivery/);
-  assert.match(userAdminSource, /extraExpectedChanges: pendingCancellation \? \[null\]/);
+  assert.match(userAdminSource, /extraExpectedChanges: pendingCancellation \? \[pendingCount\]/);
+  assert.doesNotMatch(userAdminSource, /extraExpectedChanges: pendingCancellation \? \[null\]/);
 });
 
 test("admin notification UI matches the free-plan dispatcher contract", () => {
