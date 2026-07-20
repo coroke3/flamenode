@@ -1,10 +1,11 @@
 "use server";
 
-import { and, eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { expectedRowCondition } from "@/lib/audit/expectedRowCondition";
 import { getDatabase, getEnv } from "@/lib/cloudflare";
 import { writeGuard } from "@/lib/auth/writeGuard";
-import { xUserIcons } from "@/lib/db/schema";
+import { xUsers } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
 import { detectSupportedImageUpload } from "@/lib/utils/imageUpload";
 import { normalizeXId } from "@/lib/utils/xid";
@@ -25,114 +26,53 @@ export async function uploadVideoIconCandidate(
   }
 
   const file = formData.get("icon_file");
-  if (!(file instanceof File)) {
-    return { ok: false, message: "画像ファイルが必要です。" };
-  }
-  if (file.size > 2 * 1024 * 1024) {
-    return { ok: false, message: "2MB 以内の画像を選んでください。" };
-  }
+  if (!(file instanceof File)) return { ok: false, message: "画像ファイルが必要です。" };
+  if (file.size > 2 * 1024 * 1024) return { ok: false, message: "2MB 以内の画像を選んでください。" };
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
-
-  const manualIconCount = await db
-    .select({ count: sql<number>`COUNT(*)` })
-    .from(xUserIcons)
-    .where(
-      and(
-        eq(xUserIcons.x_user_id, activeX),
-        eq(xUserIcons.source_type, "manual"),
-      )!,
-    );
-  if (Number(manualIconCount[0]?.count ?? 0) >= 24) {
-    return {
-      ok: false,
-      message:
-        "手動アップロードの候補が上限に達しています。既存候補から選択してください。",
-    };
-  }
+  const xUser = (await db.select().from(xUsers).where(eq(xUsers.id, activeX)).limit(1))[0];
+  if (!xUser) return { ok: false, message: "X ID が見つかりません。" };
 
   const env = getEnv();
-  if (!env.BUCKET) {
-    return { ok: false, message: "ストレージが利用できません。" };
-  }
+  if (!env.BUCKET) return { ok: false, message: "ストレージが利用できません。" };
+  const buffer = await file.arrayBuffer();
+  const image = detectSupportedImageUpload(buffer);
+  if (!image) return { ok: false, message: "PNG/JPEG/WEBP 画像ファイルのみアップロードできます。" };
 
-  const buf = await file.arrayBuffer();
-  const image = detectSupportedImageUpload(buf);
-  if (!image) {
-    return { ok: false, message: "PNG/JPEG/WEBP 画像ファイルのみアップロードできます。" };
-  }
-
-  const iconId = generateId("xicon");
-  const key =
-    `video-icons/${activeX}/${generateId("vicon")}.${image.ext}`;
+  const key = `video-icons/${activeX}/${generateId("vicon")}.${image.ext}`;
   const iconUrl = `/api/media/${key}`;
-  const now = Math.floor(Date.now() / 1000);
-
-  const row = {
-    id: iconId,
-    x_user_id: activeX,
-    icon_url: iconUrl,
-    source_video_id: null,
-    source_type: "manual" as const,
-    created_at: now,
-  } satisfies typeof xUserIcons.$inferInsert;
-
-  await env.BUCKET.put(key, buf, {
-    httpMetadata: {
-      contentType: image.contentType,
-    },
-  });
-
+  const after = { ...xUser, icon_url: iconUrl };
+  await env.BUCKET.put(key, buffer, { httpMetadata: { contentType: image.contentType } });
   try {
     await mutateWithAudit(db, {
       mutationStatements: [
-        db.insert(xUserIcons).values(row),
+        db
+          .update(xUsers)
+          .set({ icon_url: iconUrl })
+          .where(expectedRowCondition({ expectedCurrent: xUser })),
       ],
       expectedMutationChanges: [1],
       audits: [
         {
-          table_name: "x_user_icons",
-          target_id: iconId,
-          operation: "CREATE",
-          before: null,
-          after: row,
+          table_name: "x_users",
+          target_id: activeX,
+          operation: "UPDATE",
+          before: xUser,
+          after,
           actor_user_id: sessionUser.id,
           context: "video-icon-upload",
+          reason: "代表アイコンを手動アップロード",
           retention_class: "long_audit",
-          restore_strategy: "delete_created",
           strict: true,
         },
       ],
     });
   } catch (error) {
-    try {
-      await env.BUCKET.delete(key);
-    } catch (cleanupError) {
-      console.error(
-        JSON.stringify({
-          event: "video_icon_orphan_cleanup_failed",
-          objectKey: key,
-          error:
-            cleanupError instanceof Error
-              ? cleanupError.message
-              : String(cleanupError),
-        }),
-      );
-    }
-
-    return {
-      ok: false,
-      message:
-        error instanceof Error
-          ? `アイコン候補を保存できませんでした: ${error.message}`
-          : "アイコン候補を保存できませんでした。",
-    };
+    await env.BUCKET.delete(key).catch((cleanupError) => {
+      console.error("video_icon_orphan_cleanup_failed", cleanupError);
+    });
+    throw error;
   }
-
-  return {
-    ok: true,
-    message: "アップロードしました。",
-    iconUrl,
-  };
+  return { ok: true, message: "代表アイコンを更新しました。", iconUrl };
 }

@@ -1,9 +1,24 @@
 # DB Change Log
 
 > Status: Active
-> Last verified: 2026-07-13
-> Verified against commit: `f45f75c`
+> Last verified: 2026-07-20
+> Verified against commit: `4ff09c9`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
+
+## 2026-07-20 — `0043_db_canonical_migration.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | destructive |
+| Summary | X名義・申請・イベントowner・作品関連・監査設定を41テーブル409カラムの修正後正本へ移行し、旧テーブル8件・旧カラム25件・旧名称2件を削除 |
+| Reason | 本格運用前に重複正本と直接FKを廃止し、一般ランタイムを新正本だけへ統一するため |
+| Tables | `x_identity_requests`、`x_user_account_links`、`x_users`、`events`、`event_staff`、`videos`、`video_members`、`video_chapters`、`system_settings`ほか |
+| Data migration | 旧X申請・直接userリンク・owner・JSONチャプター・YouTube動画ID・監査設定を新正本へ変換。`events.max_slots_per_video`は保持 |
+| Compatibility | 一般ランタイムの後方互換は提供しない。旧形式インポートは入力をcanonical planへ変換し、新正本だけへ保存 |
+| Data loss | intentional。廃止済み機能、外部由来interaction、候補履歴、旧移行管理テーブルを削除 |
+| Rollback | 適用前D1バックアップと0043適用前アプリケーションを同時に復元 |
+| Validation | Node SQLiteの空DB・旧fixture・不正旧データ・途中状態4系統に加え、WranglerローカルD1で空DB/旧fixtureを適用。41テーブル409カラム、旧8テーブル/旧25カラム/旧名称2件不存在、owner/FK違反0、件数・名称変更・max_slots一致 |
+| PR | `agent/db-canonical-migration-v2` |
 
 ## 2026-07-13 — `0041_youtube_quota_budget.sql`
 
@@ -62,7 +77,7 @@
 | Compatibility | 読み取り結果は不変。migration未適用でも機能するが処理効率が低下する |
 | Data loss | none |
 | Rollback | `videos_creator_public_idx`、`video_members_x_user_video_idx`、`video_chapters_video_visibility_idx`を削除 |
-| Validation | schema/history検査、公開API・Worker・unit tests、空DBへのactive migration適用 |
+| Validation | schema/history検査、公開API・Worker・unit tests、空SQLiteへのactive migration適用 |
 | PR | main直接実装 |
 
 ## 2026-07-13 — `0038_runtime_efficiency_resilience.sql`
@@ -140,4 +155,4 @@
 | Validation | `check:db-schema`、`check:db-history`、空SQLiteへのbaseline適用。 |
 | PR | main直接実装 |
 
-Legacy import staging: `legacy_import_batches` persists canonical plan JSON, preview expiry, one-time lease, and consumed timestamp. The apply request is never the canonical source.
+旧形式インポートのpreviewは `spreadsheet_import_runs` の一度限りnonceとR2上のcanonical planで保護する。apply request bodyや旧DBテーブルを正本にしない。

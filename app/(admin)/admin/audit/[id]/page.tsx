@@ -222,7 +222,7 @@ export default async function AdminAuditDetailPage({
                 return `/manage/events/${encodeURIComponent(targetId)}/edit`;
               case "users":
                 return `/admin/users/${encodeURIComponent(targetId)}`;
-              case "x_account_link_requests":
+              case "x_identity_requests":
                 return `/admin/x-link-requests`;
               case "notification_outbox":
                 return `/admin/notifications?status=failed`;

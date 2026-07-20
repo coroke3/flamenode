@@ -2,16 +2,12 @@ import "server-only";
 
 import { and, eq, isNull, sql } from "drizzle-orm";
 import type { CurrentUser } from "./currentUser";
-import {
-  xAccountLinkRequests,
-  xUsers,
-  users,
-} from "@/lib/db/schema";
+import { xIdentityRequests, users } from "@/lib/db/schema";
+import { getLinkedXUsersForAuthUser } from "./xIdentity";
 
 type DrizzleDb = NonNullable<ReturnType<typeof import("@/lib/cloudflare").getDatabase>>;
 
 export type XApprovalStatus = "approved" | "pending" | "rejected" | "imported";
-
 export type OnboardingStepStatus = "done" | "action" | "pending" | "waiting";
 
 export type OnboardingState = {
@@ -29,10 +25,9 @@ export type OnboardingState = {
   onboardingCompletedAt: number | null;
 };
 
-function needsTosAccept(user: Pick<
-  CurrentUser,
-  "is_tos_accepted" | "terms_reaccept_required"
->): boolean {
+function needsTosAccept(
+  user: Pick<CurrentUser, "is_tos_accepted" | "terms_reaccept_required">,
+): boolean {
   return user.is_tos_accepted !== 1 || user.terms_reaccept_required === 1;
 }
 
@@ -54,7 +49,6 @@ export async function getOnboardingState(
     pendingRequestCount: 0,
     onboardingCompletedAt: null,
   };
-
   if (!user) return empty;
 
   const tosPending = needsTosAccept(user);
@@ -66,41 +60,32 @@ export async function getOnboardingState(
   let onboardingCompletedAt: number | null = null;
 
   if (db) {
-    const [userRows, linkedRows, pendingCountRows, activeRows] = await Promise.all([
+    const [userRows, linkedRows, pendingCountRows] = await Promise.all([
       db
         .select({ onboarding_completed_at: users.onboarding_completed_at })
         .from(users)
         .where(eq(users.id, user.id))
         .limit(1),
-      db
-        .select({ approval_status: xUsers.approval_status })
-        .from(xUsers)
-        .where(eq(xUsers.linked_user_id, user.id)),
+      getLinkedXUsersForAuthUser(db, user.id),
       db
         .select({ count: sql<number>`COUNT(*)` })
-        .from(xAccountLinkRequests)
+        .from(xIdentityRequests)
         .where(
           and(
-            eq(xAccountLinkRequests.user_id, user.id),
-            eq(xAccountLinkRequests.status, "pending"),
+            eq(xIdentityRequests.requested_by_auth_user_id, user.id),
+            eq(xIdentityRequests.status, "pending"),
           )!,
         ),
-      activeXId
-        ? db
-            .select({ approval_status: xUsers.approval_status })
-            .from(xUsers)
-            .where(eq(xUsers.id, activeXId))
-            .limit(1)
-        : Promise.resolve([]),
     ]);
-
     onboardingCompletedAt = userRows[0]?.onboarding_completed_at ?? null;
     hasLinkedXId = linkedRows.length > 0;
-    hasPendingLinkedXId = linkedRows.some(
-      (row) => row.approval_status === "pending",
-    );
+    hasPendingLinkedXId = linkedRows.some((row) => row.approval_status === "pending");
     pendingRequestCount = Number(pendingCountRows[0]?.count ?? 0);
-    activeXApprovalStatus = activeRows[0]?.approval_status ?? null;
+    activeXApprovalStatus =
+      (linkedRows.find((row) => row.x_user_id === activeXId)?.approval_status as
+        | XApprovalStatus
+        | null
+        | undefined) ?? null;
   }
 
   const hasPendingXIdRequest = pendingRequestCount > 0;
@@ -127,82 +112,35 @@ export async function getOnboardingState(
 
 export async function maybeMarkOnboardingComplete(
   db: DrizzleDb,
-  userId: string,
+  authUserId: string,
   state: OnboardingState,
 ): Promise<void> {
   if (!state.isComplete || state.onboardingCompletedAt != null) return;
-  const now = Math.floor(Date.now() / 1000);
   await db
     .update(users)
-    .set({ onboarding_completed_at: now })
-    .where(
-      and(eq(users.id, userId), isNull(users.onboarding_completed_at))!,
-    );
+    .set({ onboarding_completed_at: Math.floor(Date.now() / 1000) })
+    .where(and(eq(users.id, authUserId), isNull(users.onboarding_completed_at))!);
 }
 
-export {
-  onboardingHref,
-  onboardingRulesHref,
-  entryLoginRedirectTo,
-} from "./onboardingUrls";
+export { onboardingHref, onboardingRulesHref, entryLoginRedirectTo } from "./onboardingUrls";
 
-export function resolveOnboardingStepStatuses(
-  state: OnboardingState,
-): {
+export function resolveOnboardingStepStatuses(state: OnboardingState): {
   login: OnboardingStepStatus;
   terms: OnboardingStepStatus;
   xId: OnboardingStepStatus;
   ready: OnboardingStepStatus;
 } {
   if (!state.isLoggedIn) {
-    return {
-      login: "action",
-      terms: "waiting",
-      xId: "waiting",
-      ready: "waiting",
-    };
+    return { login: "action", terms: "waiting", xId: "waiting", ready: "waiting" };
   }
-
   if (state.needsTosAccept) {
-    return {
-      login: "done",
-      terms: "action",
-      xId: "waiting",
-      ready: "waiting",
-    };
+    return { login: "done", terms: "action", xId: "waiting", ready: "waiting" };
   }
-
   if (state.hasApprovedActiveXId) {
-    return {
-      login: "done",
-      terms: "done",
-      xId: "done",
-      ready: state.canPost ? "done" : "action",
-    };
+    return { login: "done", terms: "done", xId: "done", ready: state.canPost ? "done" : "action" };
   }
-
   if (state.hasPendingXIdRequest || state.hasPendingLinkedXId) {
-    return {
-      login: "done",
-      terms: "done",
-      xId: "pending",
-      ready: "waiting",
-    };
+    return { login: "done", terms: "done", xId: "pending", ready: "waiting" };
   }
-
-  if (state.activeXApprovalStatus === "rejected") {
-    return {
-      login: "done",
-      terms: "done",
-      xId: "action",
-      ready: "waiting",
-    };
-  }
-
-  return {
-    login: "done",
-    terms: "done",
-    xId: "action",
-    ready: "waiting",
-  };
+  return { login: "done", terms: "done", xId: "action", ready: "waiting" };
 }

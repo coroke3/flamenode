@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
-import { videos, xUsers, xUserIcons } from "./schema";
+import { videos, xUsers } from "./schema";
 import type { DB } from "./client";
 
 const FALLBACK_CHUNK_SIZE = 25;
@@ -197,20 +197,6 @@ export async function getXIconCandidates(
     candidates.push(xRow.icon_url);
     seen.add(xRow.icon_url);
     if (candidates.length >= limit) return candidates;
-  }
-
-  const iconRows = await db
-    .select({ icon_url: xUserIcons.icon_url })
-    .from(xUserIcons)
-    .where(eq(xUserIcons.x_user_id, xId))
-    .orderBy(desc(xUserIcons.created_at))
-    .limit(limit * 2);
-  for (const row of iconRows) {
-    if (row.icon_url && !seen.has(row.icon_url)) {
-      candidates.push(row.icon_url);
-      seen.add(row.icon_url);
-      if (candidates.length >= limit) return candidates;
-    }
   }
 
   const videoRows = await db

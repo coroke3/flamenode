@@ -1,5 +1,7 @@
 import "server-only";
 
+import { getLinkedXUserIdsForAuthUser } from "@/lib/auth/xIdentity";
+
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DB } from "@/lib/db/client";
@@ -149,18 +151,9 @@ export async function getEventOwners(
     );
 }export async function getApprovedXIdsForUser(
   db: DB,
-  userId: string,
+  authUserId: string,
 ): Promise<string[]> {
-  const rows = await db
-    .select({ id: xUsers.id })
-    .from(xUsers)
-    .where(
-      and(
-        eq(xUsers.linked_user_id, userId),
-        eq(xUsers.approval_status, "approved"),
-      )!,
-    );
-  return rows.map((row) => row.id);
+  return getLinkedXUserIdsForAuthUser(db, authUserId, { approvedOnly: true });
 }
 
 export async function assertEventWillRetainOwner(args: {

@@ -16,6 +16,7 @@ import {
   writeGuard,
   type WriteGuardDenyReason,
 } from "@/lib/auth/writeGuard";
+import { isAuthUserLinkedToXUser } from "@/lib/auth/xIdentity";
 import { getDatabase } from "@/lib/cloudflare";
 import { events, slots, xUsers } from "@/lib/db/schema";
 import { MAX_ATOMIC_SLOT_ROWS } from "@/lib/slots/atomicLimits";
@@ -357,20 +358,7 @@ async function ownsSlot(
 ): Promise<boolean> {
   if (row.x_user_id) {
     if (row.x_user_id === activeXId) return true;
-    return Boolean(
-      (
-        await db
-          .select({ id: xUsers.id })
-          .from(xUsers)
-          .where(
-            and(
-              eq(xUsers.id, row.x_user_id),
-              eq(xUsers.linked_user_id, userId),
-            )!,
-          )
-          .limit(1)
-      )[0],
-    );
+    return isAuthUserLinkedToXUser(db, userId, row.x_user_id);
   }
   return row.reserved_by_user_id === userId;
 }

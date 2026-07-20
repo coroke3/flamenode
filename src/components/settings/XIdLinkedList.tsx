@@ -12,7 +12,7 @@ export type SettingsXIdRow = {
   x_name: string;
   icon_url: string | null;
   approval_status: XApprovalStatus;
-  approval_requested_at: number | null;
+  requested_at: number | null;
   profile_text: string | null;
   portfolio_contact: string | null;
   youtube_channel_url: string | null;

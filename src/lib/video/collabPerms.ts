@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
-import { videoMembers, xUsers } from "@/lib/db/schema";
+import { videoMembers, xUserAccountLinks } from "@/lib/db/schema";
 import type { VideoCollabSubject } from "@/components/admin/VideoCollabPermsManager";
 
 function isMissingDbObjectError(
@@ -46,14 +46,15 @@ export async function loadVideoCollabSubjects(
     const rows = await db
       .select({
         x_user_id: videoMembers.x_user_id,
-        user_id: videoMembers.user_id,
         display_name: videoMembers.name,
         can_edit: videoMembers.can_edit,
         is_public_member: videoMembers.is_public_member,
-        linked_user_id: xUsers.linked_user_id,
+        has_account_link: sql<number>`EXISTS (
+          SELECT 1 FROM ${xUserAccountLinks} link
+          WHERE link.x_user_id = ${videoMembers.x_user_id}
+        )`,
       })
       .from(videoMembers)
-      .leftJoin(xUsers, eq(videoMembers.x_user_id, xUsers.id))
       .where(eq(videoMembers.video_id, videoId));
 
     return {
@@ -62,13 +63,11 @@ export async function loadVideoCollabSubjects(
         .filter((row) => row.can_edit === 1 || row.is_public_member === 0)
         .map((row) => ({
           x_user_id: row.x_user_id,
-          user_id: row.user_id,
+          user_id: null,
           display_name: row.display_name,
           can_edit: row.can_edit,
           is_public_member: row.is_public_member,
-          has_discord_link: Boolean(
-            row.user_id?.trim() || row.linked_user_id?.trim(),
-          ),
+          has_discord_link: row.has_account_link === 1,
         })),
     };
   } catch (error) {

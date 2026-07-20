@@ -147,11 +147,7 @@ export async function buildReplaceVideoMembersPlan(
         youtube_channel_url: null,
         other_social_links: null,
         creative_start_date: null,
-        linked_user_id: null,
-        verification_token: null,
-        token_expires_at: null,
         approval_status: "pending",
-        approval_requested_at: now,
       });
       existingXIds.add(xId);
     }
@@ -232,11 +228,7 @@ export async function buildReplaceVideoMembersPlan(
           youtube_channel_url,
           other_social_links,
           creative_start_date,
-          linked_user_id,
-          verification_token,
-          token_expires_at,
-          approval_status,
-          approval_requested_at
+          approval_status
         )
         SELECT
           json_extract(value, '$.id'),
@@ -247,11 +239,7 @@ export async function buildReplaceVideoMembersPlan(
           json_extract(value, '$.youtube_channel_url'),
           json_extract(value, '$.other_social_links'),
           json_extract(value, '$.creative_start_date'),
-          json_extract(value, '$.linked_user_id'),
-          json_extract(value, '$.verification_token'),
-          json_extract(value, '$.token_expires_at'),
-          json_extract(value, '$.approval_status'),
-          json_extract(value, '$.approval_requested_at')
+          json_extract(value, '$.approval_status')
         FROM json_each(${payload})
       `),
     );

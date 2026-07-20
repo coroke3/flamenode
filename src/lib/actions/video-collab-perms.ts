@@ -18,26 +18,11 @@ import { buildVideoEditPermissionGrantedNotification } from "@/lib/notifications
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import type { WriteAuditLogInput } from "@/lib/audit/types";
-
-/**
- * 作品単位の共同編集者権限を管理する Server Action 群。
- *
- * 旧テーブル `video_collaborators` は廃止済み。
- * 正本は `video_members.can_edit = 1` の行。これにより表示メンバー・チャプター担当・
- * 共同編集者を 1 テーブルで管理する。
- *
- * 仕様:
- *   - 粒度は can_edit ON/OFF のみ。範囲は COLLABORATOR_VIDEO_EDIT_KEYS で制限される。
- *   - 操作者は `video.identity` 権限を持つ必要がある (作者本人 / admin / event
- *     identity 権限保持者)。
- *   - subject は X ID (連携前でも先付与可) または user_id で指定。
- *   - 既存の表示メンバーに subject が含まれていれば、その行に can_edit を立てる。
- *     含まれていなければ非公開メンバー (is_public_member = 0) として新規追加。
- *   - 監査ログは audit_logs に retention_class=long_audit で記録。
- *
- * 関数名は旧テーブル時代の名前 (`upsertVideoCollaborator` 等) を一旦維持。
- * UI / import 側を書き換えるタイミングで `*VideoMemberPerm` 系へ改名する想定。
- */
+import {
+  getAuthUserIdsForXUser,
+  getLinkedXUserIdsForAuthUser,
+  isAuthUserLinkedToXUser,
+} from "@/lib/auth/xIdentity";
 
 export interface VideoCollabResult {
   ok: boolean;
@@ -46,38 +31,23 @@ export interface VideoCollabResult {
 
 const upsertSchema = z.object({
   video_id: z.string().trim().min(1).max(64),
-  x_user_id: z
-    .string()
-    .trim()
-    .max(32)
-    .optional()
-    .transform((s) => normalizeXId(s ?? "")),
+  x_user_id: z.string().trim().max(32).optional().transform((value) => normalizeXId(value ?? "")),
   user_id: z.string().trim().max(128).optional().nullable(),
   display_name: z.string().trim().min(1).max(80),
   can_edit: z
     .union([z.literal("1"), z.literal("0"), z.literal("true"), z.literal("false")])
     .optional()
-    .transform((v) => v === "1" || v === "true" || v === undefined),
-  notify: z
-    .union([z.literal("1"), z.literal("0")])
-    .optional()
-    .transform((v) => v === "1"),
+    .transform((value) => value === "1" || value === "true" || value === undefined),
+  notify: z.union([z.literal("1"), z.literal("0")]).optional().transform((value) => value === "1"),
 });
 
+type DB = NonNullable<ReturnType<typeof getDatabase>>;
+
 async function loadEditableVideo(
-  db: NonNullable<ReturnType<typeof getDatabase>>,
+  db: DB,
   user: { id: string; role?: string | null },
   videoId: string,
-): Promise<
-  | {
-      id: string;
-      title: string;
-      primary_event_id: string | null;
-      creator_x_user_id: string | null;
-      submitted_by_user_id: string | null;
-    }
-  | null
-> {
+) {
   const row = (
     await db
       .select({
@@ -92,279 +62,266 @@ async function loadEditableVideo(
       .limit(1)
   )[0];
   if (!row) return null;
-  const ok = await canEditVideo({
+  const allowed = await canEditVideo({
     db,
     user,
     video: row,
     requiredKey: "video.identity",
     privilegeMode: resolveAdminOrEventVideoPrivilegeMode(user.role),
   });
-  if (!ok) return null;
-  return row;
+  return allowed ? row : null;
 }
 
-/** 既存の video_members 行を「同じ subject (x_user_id or user_id)」で検索する。 */
-async function findMemberRowForSubject(
-  db: NonNullable<ReturnType<typeof getDatabase>>,
-  videoId: string,
+async function resolveSubjectXUserId(
+  db: DB,
   xUserId: string | null,
-  userId: string | null,
-): Promise<typeof videoMembers.$inferSelect | null> {
+  authUserId: string | null,
+): Promise<{ ok: true; xUserId: string } | { ok: false; message: string }> {
   if (xUserId) {
-    const rows = await db
+    if (authUserId && !(await isAuthUserLinkedToXUser(db, authUserId, xUserId))) {
+      return { ok: false, message: "指定した認証ユーザーはその X ID に紐づいていません。" };
+    }
+    return { ok: true, xUserId };
+  }
+  if (!authUserId) return { ok: false, message: "共同編集者の X ID が必要です。" };
+  const linked = await getLinkedXUserIdsForAuthUser(db, authUserId, { approvedOnly: true });
+  if (linked.length === 0) {
+    return { ok: false, message: "指定した認証ユーザーに承認済み X ID がありません。" };
+  }
+  if (linked.length > 1) {
+    return { ok: false, message: "複数の X ID が紐づいているため、共同編集者の X ID を明示してください。" };
+  }
+  return { ok: true, xUserId: linked[0] };
+}
+
+async function findMemberRowForXUser(db: DB, videoId: string, xUserId: string) {
+  return (
+    await db
       .select()
       .from(videoMembers)
       .where(
         and(
           eq(videoMembers.video_id, videoId),
           isNotNull(videoMembers.x_user_id),
-          sql`lower(${videoMembers.x_user_id}) = ${xUserId.toLowerCase()}`,
+          sql`lower(${videoMembers.x_user_id}) = ${xUserId}`,
         )!,
       )
-      .limit(1);
-    if (rows[0]) return rows[0];
-  }
-  if (userId) {
-    const rows = await db
-      .select()
-      .from(videoMembers)
-      .where(
-        and(
-          eq(videoMembers.video_id, videoId),
-          eq(videoMembers.user_id, userId),
-        )!,
-      )
-      .limit(1);
-    if (rows[0]) return rows[0];
-  }
-  return null;
-}
-
-async function resolveSubjectRecipientUserId(
-  db: NonNullable<ReturnType<typeof getDatabase>>,
-  xUserId: string | null,
-  userId: string | null,
-): Promise<string | null> {
-  if (userId?.trim()) return userId.trim();
-  if (!xUserId) return null;
-  const xRow = (
-    await db
-      .select({ linked: xUsers.linked_user_id })
-      .from(xUsers)
-      .where(eq(xUsers.id, xUserId))
       .limit(1)
-  )[0];
-  return xRow?.linked?.trim() || null;
+  )[0] ?? null;
 }
 
-/**
- * 共同編集者の権限を upsert する。
- *
- * - 既存の video_members 行が同じ subject にあれば、その行の can_edit と
- *   表示名・user_id・edit_* タイムスタンプを更新する。
- * - 無ければ新規 video_members 行を **is_public_member = 0** で追加 (非公開編集者)。
- */
-export async function upsertVideoCollaborator(
-  formData: FormData,
-): Promise<VideoCollabResult> {
+export async function upsertVideoCollaborator(formData: FormData): Promise<VideoCollabResult> {
   const guard = await writeGuard({ feature: "edit_video" });
   if (!guard.ok) return { ok: false, message: guard.message };
-  const user = { id: guard.user.id, role: guard.user.role ?? null };
-
+  const actor = { id: guard.user.id, role: guard.user.role ?? null };
   const parsed = upsertSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
-    return {
-      ok: false,
-      message: parsed.error.issues[0]?.message ?? "入力エラー",
-    };
-  }
-  const xUserId = parsed.data.x_user_id || null;
-  const subjectUserId = parsed.data.user_id?.trim() || null;
-  if (!xUserId && !subjectUserId) {
-    return {
-      ok: false,
-      message: "X ID かユーザー ID のいずれかを指定してください。",
-    };
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
   }
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
+  const video = await loadEditableVideo(db, actor, parsed.data.video_id);
+  if (!video) return { ok: false, message: "対象作品が見つからない、または権限がありません。" };
 
-  const video = await loadEditableVideo(db, user, parsed.data.video_id);
-  if (!video) {
-    return {
-      ok: false,
-      message: "対象作品が見つからない、または権限がありません。",
-    };
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  const canEditValue = parsed.data.can_edit ? 1 : 0;
-  const shouldNotify = String(formData.get("notify") ?? "1") !== "0";
-  const existing = await findMemberRowForSubject(
+  const resolved = await resolveSubjectXUserId(
     db,
-    video.id,
-    xUserId,
-    subjectUserId,
+    parsed.data.x_user_id || null,
+    parsed.data.user_id?.trim() || null,
   );
+  if (!resolved.ok) return { ok: false, message: resolved.message };
+  const xUserId = resolved.xUserId;
+  const now = Math.floor(Date.now() / 1000);
+  const canEdit = parsed.data.can_edit ? 1 : 0;
+  const existing = await findMemberRowForXUser(db, video.id, xUserId);
 
   const statements: BatchItem<"sqlite">[] = [];
-  const expected: (number | null)[] = [];
+  const expected: Array<number | null> = [];
   const audits: WriteAuditLogInput[] = [];
-  let xRow: typeof xUsers.$inferSelect | null = null;
-  if (xUserId) {
-    xRow = (
-      await db.select().from(xUsers).where(eq(xUsers.id, xUserId)).limit(1)
-    )[0];
-    if (!xRow) {
-      const xAfter: typeof xUsers.$inferSelect = { id: xUserId, x_name: parsed.data.display_name || `@${xUserId}`, icon_url: null, profile_text: null, portfolio_contact: null, youtube_channel_url: null, other_social_links: null, creative_start_date: null, linked_user_id: null, verification_token: null, token_expires_at: null, approval_status: "pending", approval_requested_at: now };
-      statements.push(db.insert(xUsers).values(xAfter)); expected.push(1);
-      audits.push({ table_name: "x_users", target_id: xUserId, operation: "CREATE", after: { ...xAfter }, actor_user_id: user.id, context: "video_collab_permissions", reason: "共同編集者X IDをpending作成", retention_class: "long_audit", strict: true });
-    }
+  const existingX = (await db.select().from(xUsers).where(eq(xUsers.id, xUserId)).limit(1))[0];
+  if (!existingX) {
+    const xAfter: typeof xUsers.$inferInsert = {
+      id: xUserId,
+      x_name: parsed.data.display_name || `@${xUserId}`,
+      icon_url: null,
+      profile_text: null,
+      portfolio_contact: null,
+      youtube_channel_url: null,
+      other_social_links: null,
+      creative_start_date: null,
+      approval_status: "pending",
+    };
+    statements.push(db.insert(xUsers).values(xAfter));
+    expected.push(1);
+    audits.push({
+      table_name: "x_users",
+      target_id: xUserId,
+      operation: "CREATE",
+      before: null,
+      after: xAfter,
+      actor_user_id: actor.id,
+      context: "video_collab_permissions",
+      reason: "共同編集者X IDをpending作成",
+      retention_class: "long_audit",
+      strict: true,
+    });
   }
 
+  const wasCanEdit = existing?.can_edit === 1;
   let memberAfter: typeof videoMembers.$inferSelect;
   if (existing) {
     const patch = {
-        name: parsed.data.display_name,
-        can_edit: canEditValue,
-        user_id: subjectUserId ?? existing.user_id ?? null,
-        edit_granted_by_user_id:
-          canEditValue === 1 ? user.id : existing.edit_granted_by_user_id,
-        edit_granted_at:
-          canEditValue === 1 && existing.edit_granted_at == null
-            ? now
-            : existing.edit_granted_at,
-        edit_updated_at: now,
-      };
+      name: parsed.data.display_name,
+      can_edit: canEdit,
+      edit_granted_by_auth_user_id:
+        canEdit === 1 ? actor.id : existing.edit_granted_by_auth_user_id,
+      edit_granted_at:
+        canEdit === 1 && existing.edit_granted_at == null ? now : existing.edit_granted_at,
+      edit_updated_at: now,
+    };
     memberAfter = { ...existing, ...patch };
-    statements.push(db.update(videoMembers).set(patch).where(and(eq(videoMembers.id, existing.id), expectedRowCondition({ expectedCurrent: { ...existing } }))!)); expected.push(1);
-    audits.push({ table_name: "video_members", target_id: existing.id, operation: "UPDATE", before: { ...existing }, after: { ...memberAfter }, actor_user_id: user.id, context: "video_collab_permissions", reason: "共同編集権限を更新", retention_class: "long_audit", strict: true });
+    statements.push(
+      db
+        .update(videoMembers)
+        .set(patch)
+        .where(
+          and(
+            eq(videoMembers.id, existing.id),
+            expectedRowCondition({ expectedCurrent: { ...existing } }),
+          )!,
+        ),
+    );
+    expected.push(1);
+    audits.push({
+      table_name: "video_members",
+      target_id: existing.id,
+      operation: "UPDATE",
+      before: { ...existing },
+      after: memberAfter,
+      actor_user_id: actor.id,
+      context: "video_collab_permissions",
+      reason: "共同編集権限を更新",
+      retention_class: "long_audit",
+      strict: true,
+    });
   } else {
     memberAfter = {
       id: generateId("vm"),
       video_id: video.id,
       x_user_id: xUserId,
-      user_id: subjectUserId,
       name: parsed.data.display_name,
       role: null,
       comment: null,
       order_index: 9999,
-      can_edit: canEditValue,
-      // 「表示しないが編集権限だけ持つ人」を表現する。公開メンバー欄には出さない。
+      can_edit: canEdit,
       is_public_member: 0,
-      edit_granted_by_user_id: canEditValue === 1 ? user.id : null,
-      edit_granted_at: canEditValue === 1 ? now : null,
+      edit_granted_by_auth_user_id: canEdit === 1 ? actor.id : null,
+      edit_granted_at: canEdit === 1 ? now : null,
       edit_updated_at: now,
-      chapters_json: null,
     };
-    statements.push(db.insert(videoMembers).values(memberAfter)); expected.push(1);
-    audits.push({ table_name: "video_members", target_id: memberAfter.id, operation: "CREATE", after: { ...memberAfter }, actor_user_id: user.id, context: "video_collab_permissions", reason: "共同編集権限を作成", retention_class: "long_audit", strict: true });
+    statements.push(db.insert(videoMembers).values(memberAfter));
+    expected.push(1);
+    audits.push({
+      table_name: "video_members",
+      target_id: memberAfter.id,
+      operation: "CREATE",
+      before: null,
+      after: memberAfter,
+      actor_user_id: actor.id,
+      context: "video_collab_permissions",
+      reason: "共同編集権限を作成",
+      retention_class: "long_audit",
+      strict: true,
+    });
   }
 
-  const wasCanEdit = existing?.can_edit === 1;
-  const isNewGrant = canEditValue === 1 && !wasCanEdit;
-  if (
-    isNewGrant &&
-    shouldNotify
-  ) {
-    const recipientUserId =
-      memberAfter.user_id?.trim() ||
-      (await resolveSubjectRecipientUserId(
+  if (canEdit === 1 && !wasCanEdit && parsed.data.notify) {
+    const recipientIds = (await getAuthUserIdsForXUser(db, xUserId)).filter((id) => id !== actor.id);
+    if (recipientIds.length > 0) {
+      const notification = await buildKnownRecipientNotificationBatch(
         db,
-        memberAfter.x_user_id ?? xUserId,
-        subjectUserId,
-      ));
-    const subjectX = memberAfter.x_user_id ?? xUserId;
-    const dedupeSubject = subjectX
-      ? `x:${subjectX}`
-      : recipientUserId
-        ? `user:${recipientUserId}`
-        : null;
-    if (recipientUserId && recipientUserId !== user.id && dedupeSubject) {
-      const notification = await buildKnownRecipientNotificationBatch(db, [{
-        recipientUserId,
-        type: "video_edit_permission_granted",
-        dedupeKey: `video_edit_permission_granted:${video.id}:${dedupeSubject}`,
-        payload: buildVideoEditPermissionGrantedNotification({
-          videoId: video.id,
-          videoTitle: video.title,
-        }),
-        eventId: video.primary_event_id,
-      }]);
-      statements.push(...notification.statements); expected.push(...notification.expectedChanges);
+        recipientIds.map((recipientUserId) => ({
+          recipientUserId,
+          type: "video_edit_permission_granted",
+          dedupeKey: `video_edit_permission_granted:${video.id}:x:${xUserId}:user:${recipientUserId}`,
+          payload: buildVideoEditPermissionGrantedNotification({ videoId: video.id, videoTitle: video.title }),
+          eventId: video.primary_event_id,
+        })),
+      );
+      statements.push(...notification.statements);
+      expected.push(...notification.expectedChanges);
     }
   }
 
-  try { await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits }); }
-  catch (error) { console.error("[video-collab-perms] atomic mutation failed", error); return { ok: false, message: "共同編集権限・通知・監査の更新に失敗しました。" }; }
-
+  try {
+    await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits });
+  } catch (error) {
+    console.error("[video-collab-perms] atomic mutation failed", error);
+    return { ok: false, message: "共同編集権限・通知・監査の更新に失敗しました。" };
+  }
   revalidatePath(`/dashboard/edit/${video.id}`);
-  return {
-    ok: true,
-    message: canEditValue
-      ? "作品編集への参加を付与しました。"
-      : "作品編集への参加を無効化しました。",
-  };
+  return { ok: true, message: canEdit ? "作品編集への参加を付与しました。" : "作品編集への参加を無効化しました。" };
 }
 
-/**
- * 共同編集者の編集権限を解除する。
- *
- * - 対象が非公開メンバー (is_public_member = 0) の場合は **行ごと削除** する。
- *   非公開メンバーは「権限のためだけにあった行」なので、権限を外したら残す意味がない。
- * - 公開メンバー (is_public_member = 1) の場合は **can_edit = 0 にするだけ** で
- *   行は残す (表示・チャプター担当には引き続き必要なため)。
- */
-export async function deleteVideoCollaborator(
-  formData: FormData,
-): Promise<VideoCollabResult> {
+export async function deleteVideoCollaborator(formData: FormData): Promise<VideoCollabResult> {
   const guard = await writeGuard({ feature: "edit_video" });
   if (!guard.ok) return { ok: false, message: guard.message };
-  const user = { id: guard.user.id, role: guard.user.role ?? null };
-
+  const actor = { id: guard.user.id, role: guard.user.role ?? null };
   const videoId = String(formData.get("video_id") ?? "").trim();
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
-  const subjectUserId = String(formData.get("user_id") ?? "").trim() || null;
-  if (!videoId) return { ok: false, message: "video_id がありません。" };
-  if (!xUserId && !subjectUserId) {
-    return { ok: false, message: "対象 subject が指定されていません。" };
-  }
+  if (!videoId || !xUserId) return { ok: false, message: "video_id と X ID が必要です。" };
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
-
-  const video = await loadEditableVideo(db, user, videoId);
-  if (!video) {
-    return {
-      ok: false,
-      message: "対象作品が見つからない、または権限がありません。",
-    };
-  }
-
-  const existing = await findMemberRowForSubject(
-    db,
-    video.id,
-    xUserId || null,
-    subjectUserId,
-  );
-  if (!existing) {
-    return { ok: true, message: "該当する権限行はすでにありません。" };
-  }
+  const video = await loadEditableVideo(db, actor, videoId);
+  if (!video) return { ok: false, message: "対象作品が見つからない、または権限がありません。" };
+  const existing = await findMemberRowForXUser(db, video.id, xUserId);
+  if (!existing) return { ok: true, message: "該当する権限行はすでにありません。" };
 
   const now = Math.floor(Date.now() / 1000);
-  let statement: BatchItem<"sqlite">;
-  let after: Record<string, unknown> | null = null;
-  if (existing.is_public_member === 0) {
-    statement = db.delete(videoMembers).where(and(eq(videoMembers.id, existing.id), expectedRowCondition({ expectedCurrent: { ...existing } }))!);
-  } else {
-    after = { ...existing, can_edit: 0, edit_updated_at: now };
-    statement = db.update(videoMembers).set({ can_edit: 0, edit_updated_at: now }).where(and(eq(videoMembers.id, existing.id), expectedRowCondition({ expectedCurrent: { ...existing } }))!);
-  }
+  const deleteRow = existing.is_public_member === 0;
+  const after = deleteRow ? null : { ...existing, can_edit: 0, edit_updated_at: now };
+  const statement = deleteRow
+    ? db
+        .delete(videoMembers)
+        .where(
+          and(
+            eq(videoMembers.id, existing.id),
+            expectedRowCondition({ expectedCurrent: { ...existing } }),
+          )!,
+        )
+    : db
+        .update(videoMembers)
+        .set({ can_edit: 0, edit_updated_at: now })
+        .where(
+          and(
+            eq(videoMembers.id, existing.id),
+            expectedRowCondition({ expectedCurrent: { ...existing } }),
+          )!,
+        );
   try {
-    await mutateWithAudit(db, { mutationStatements: [statement], expectedMutationChanges: 1, audits: [{ table_name: "video_members", target_id: existing.id, operation: existing.is_public_member === 0 ? "DELETE" : "UPDATE", before: { ...existing }, after, actor_user_id: user.id, context: "video_collab_permissions", reason: "共同編集権限を解除", retention_class: "long_audit", strict: true }] });
-  } catch (error) { console.error("[video-collab-perms] revoke failed", error); return { ok: false, message: "共同編集権限の解除に失敗しました。" }; }
-
+    await mutateWithAudit(db, {
+      mutationStatements: [statement],
+      expectedMutationChanges: 1,
+      audits: [
+        {
+          table_name: "video_members",
+          target_id: existing.id,
+          operation: deleteRow ? "DELETE" : "UPDATE",
+          before: existing,
+          after,
+          actor_user_id: actor.id,
+          context: "video_collab_permissions",
+          reason: "共同編集権限を解除",
+          retention_class: "long_audit",
+          strict: true,
+        },
+      ],
+    });
+  } catch (error) {
+    console.error("[video-collab-perms] revoke failed", error);
+    return { ok: false, message: "共同編集権限の解除に失敗しました。" };
+  }
   revalidatePath(`/dashboard/edit/${video.id}`);
   return { ok: true, message: "作品編集への参加を解除しました。" };
 }
