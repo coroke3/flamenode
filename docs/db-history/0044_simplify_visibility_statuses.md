@@ -38,9 +38,13 @@
 - イベント作成は`x_user_account_links`からowner X名義を解決し、イベントとownerを同じ監査mutationで登録します。
 - イベントの非公開化は`visibility_status = private`へ更新し、廃止済み`archived`を書き込みません。
 - テンプレートと管理編集画面から廃止済み`max_consecutive_slots_per_entry`を除去し、`events.max_slots_per_video`を維持します。
-- 枠の部判定・公開表示から`slots.slot_kind`と優先再取得列を除去します。
+- 枠の部判定・公開表示・共通枠型から`slots.slot_kind`と優先再取得列を除去します。
 - ダッシュボードは新しい枠行型をそのまま時系列整列し、旧枠型へのキャストを行いません。
 - YouTube重複判定は現行状態では`voided`だけを対象外とし、IDの正本を`videos.youtube_video_id`へ維持します。
+
+## 検証境界
+
+PR #88はPR #89をbaseとするスタックPRです。PR #89側のイベント・作品・監査・旧形式インポートのランタイム統合が完了するまでは、リポジトリ全体の型検査は親PR由来の旧カラム参照で停止します。PR #88が変更するファイルの型エラーを0件にした後、親PRの検証済みheadを取り込んで全検査を実施します。
 
 ## 適用前条件
 
