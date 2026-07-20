@@ -41,6 +41,10 @@ export function ChapterTabs({
   onSeek = seekToTime,
 }: ChapterTabsProps): React.ReactElement {
   const router = useRouter();
+  const headingId = React.useId();
+  const dialogTitleId = React.useId();
+  const dialogDescriptionId = React.useId();
+  const dialogWarningId = React.useId();
   const [deletableIds, setDeletableIds] = React.useState<Set<string>>(
     () => new Set(),
   );
@@ -54,6 +58,7 @@ export function ChapterTabs({
   const [, startCapabilityTransition] = React.useTransition();
   const [deleting, startDeleteTransition] = React.useTransition();
   const dialogRef = React.useRef<HTMLElement>(null);
+  const listRef = React.useRef<HTMLDivElement>(null);
   const cancelButtonRef = React.useRef<HTMLButtonElement>(null);
   const previousFocusRef = React.useRef<HTMLElement | null>(null);
   const deletingRef = React.useRef(false);
@@ -108,7 +113,9 @@ export function ChapterTabs({
     previousFocusRef.current = document.activeElement as HTMLElement | null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    const frame = window.requestAnimationFrame(() => cancelButtonRef.current?.focus());
+    const focusFrame = window.requestAnimationFrame(() =>
+      cancelButtonRef.current?.focus(),
+    );
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !deletingRef.current) {
@@ -123,7 +130,10 @@ export function ChapterTabs({
       if (!dialog) return;
       const focusable = Array.from(
         dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-      ).filter((element) => !element.hasAttribute("disabled"));
+      ).filter(
+        (element) =>
+          !element.hasAttribute("disabled") && element.getClientRects().length > 0,
+      );
       if (focusable.length === 0) {
         event.preventDefault();
         dialog.focus();
@@ -144,10 +154,17 @@ export function ChapterTabs({
 
     document.addEventListener("keydown", onKeyDown);
     return () => {
-      window.cancelAnimationFrame(frame);
+      window.cancelAnimationFrame(focusFrame);
       document.removeEventListener("keydown", onKeyDown);
       document.body.style.overflow = previousOverflow;
-      previousFocusRef.current?.focus();
+      window.requestAnimationFrame(() => {
+        const previous = previousFocusRef.current;
+        if (previous?.isConnected) {
+          previous.focus();
+        } else {
+          listRef.current?.focus();
+        }
+      });
     };
   }, [pendingDelete]);
 
@@ -159,7 +176,7 @@ export function ChapterTabs({
   const requestDelete = React.useCallback(
     (chapter: ChapterCommentItemEntry) => {
       const matched = chapters.find((entry) => entry.id === chapter.id);
-      if (!matched || hiddenIds.has(matched.id)) return;
+      if (!matched || hiddenIds.has(matched.id) || deletingRef.current) return;
       setDeleteError(null);
       setPendingDelete(matched);
     },
@@ -179,40 +196,51 @@ export function ChapterTabs({
     const formData = new FormData();
     formData.set("chapter_id", target.id);
     setDeleteError(null);
+    deletingRef.current = true;
 
     startDeleteTransition(async () => {
-      const result = await deleteChapter(formData);
-      if (!result.ok) {
-        setDeleteError(result.message ?? "削除に失敗しました。");
-        return;
-      }
+      try {
+        const result = await deleteChapter(formData);
+        if (!result.ok) {
+          setDeleteError(result.message ?? "削除に失敗しました。");
+          return;
+        }
 
-      setHiddenIds((current) => {
-        const next = new Set(current);
-        next.add(target.id);
-        return next;
-      });
-      setDeletableIds((current) => {
-        const next = new Set(current);
-        next.delete(target.id);
-        return next;
-      });
-      setPendingDelete(null);
-      setToast("チャプターコメントを削除しました");
-      router.refresh();
+        setHiddenIds((current) => {
+          const next = new Set(current);
+          next.add(target.id);
+          return next;
+        });
+        setDeletableIds((current) => {
+          const next = new Set(current);
+          next.delete(target.id);
+          return next;
+        });
+        setPendingDelete(null);
+        setToast(result.message ?? "チャプターコメントを削除しました");
+        router.refresh();
+      } finally {
+        deletingRef.current = false;
+      }
     });
   }, [pendingDelete, router]);
 
   return (
-    <section className={styles.root} aria-labelledby="chapter-comments-heading">
+    <section className={styles.root} aria-labelledby={headingId}>
       <div className={styles.tabs}>
         <TabButton
+          headingId={headingId}
           icon="chapter"
           label="チャプターコメント"
           count={visibleChapters.length}
         />
       </div>
-      <div className={styles.list} aria-live="polite">
+      <div
+        ref={listRef}
+        className={styles.list}
+        aria-label="チャプターコメント一覧"
+        tabIndex={-1}
+      >
         {visibleChapters.length === 0 ? (
           <div className={styles.listEmpty}>
             <span className={styles.listEmptyIcon} aria-hidden>
@@ -240,7 +268,7 @@ export function ChapterTabs({
         <div
           className={styles.dialogBackdrop}
           role="presentation"
-          onMouseDown={(event) => {
+          onPointerDown={(event) => {
             if (event.target === event.currentTarget) closeDialog();
           }}
         >
@@ -249,8 +277,8 @@ export function ChapterTabs({
             className={styles.dialog}
             role="alertdialog"
             aria-modal="true"
-            aria-labelledby="chapter-delete-dialog-title"
-            aria-describedby="chapter-delete-dialog-description"
+            aria-labelledby={dialogTitleId}
+            aria-describedby={`${dialogDescriptionId} ${dialogWarningId}`}
             aria-busy={deleting}
             tabIndex={-1}
           >
@@ -258,17 +286,16 @@ export function ChapterTabs({
               <Icon name="trash" size={18} />
             </div>
             <div className={styles.dialogBody}>
-              <h3 id="chapter-delete-dialog-title" className={styles.dialogTitle}>
+              <h3 id={dialogTitleId} className={styles.dialogTitle}>
                 チャプターコメントを削除しますか？
               </h3>
-              <p
-                id="chapter-delete-dialog-description"
-                className={styles.dialogDescription}
-              >
+              <p id={dialogDescriptionId} className={styles.dialogDescription}>
                 <strong>{formatDuration(pendingDelete.chapter_time)}</strong>
                 <span>「{pendingDelete.chapter_label}」</span>
               </p>
-              <p className={styles.dialogWarning}>この操作は取り消せません。</p>
+              <p id={dialogWarningId} className={styles.dialogWarning}>
+                この操作は取り消せません。
+              </p>
               {deleteError ? (
                 <p className={styles.dialogError} role="alert">
                   <Icon name="warning" size={12} aria-hidden />
@@ -311,17 +338,19 @@ export function ChapterTabs({
 }
 
 function TabButton({
+  headingId,
   label,
   icon,
   count,
 }: {
+  headingId: string;
   label: string;
   icon: "chapter";
   count: number;
 }): React.ReactElement {
   return (
     <div
-      id="chapter-comments-heading"
+      id={headingId}
       className={cn(styles.tab, styles.tabActive)}
       role="heading"
       aria-level={2}
