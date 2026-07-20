@@ -41,7 +41,7 @@ async function updateUserAtomic(input: {
   context: string;
   reason?: string | null;
   extraStatements?: BatchItem<"sqlite">[];
-  extraExpectedChanges?: Array<number | null>;
+  extraExpectedChanges?: number[];
 }): Promise<UserAdminResult> {
   const after = { ...input.target, ...input.patch };
   const userUpdate = input.db
@@ -53,7 +53,10 @@ async function updateUserAtomic(input: {
         expectedRowCondition({ expectedCurrent: snapshot(input.target) }),
       )!,
     );
-  const statements = [userUpdate, ...(input.extraStatements ?? [])];
+  const statements: BatchItem<"sqlite">[] = [
+    userUpdate,
+    ...(input.extraStatements ?? []),
+  ];
   const expected = [1, ...(input.extraExpectedChanges ?? [])];
 
   try {
@@ -182,6 +185,21 @@ export async function setUserNotifications(
 
   const disabling = parsed.data.is_notification_enabled === 0;
   const now = Math.floor(Date.now() / 1000);
+  const pendingCount = disabling
+    ? Number(
+        (
+          await db
+            .select({ count: sql<number>`COUNT(*)` })
+            .from(notificationOutbox)
+            .where(
+              and(
+                eq(notificationOutbox.recipient_user_id, target.id),
+                eq(notificationOutbox.status, "pending"),
+              ),
+            )
+        )[0]?.count ?? 0,
+      )
+    : 0;
   const pendingCancellation = disabling
     ? db
         .update(notificationOutbox)
@@ -210,11 +228,10 @@ export async function setUserNotifications(
     retentionClass: "normal",
     context: "admin_user_notifications",
     reason: disabling
-      ? "通知をOFFにし、未送信のpending通知をキャンセル"
+      ? `通知をOFFにし、未送信のpending通知${pendingCount}件をキャンセル`
       : "通知をONに変更",
     extraStatements: pendingCancellation ? [pendingCancellation] : [],
-    // pending通知が0件でも正常。ユーザー設定のCASだけを厳密に確認する。
-    extraExpectedChanges: pendingCancellation ? [null] : [],
+    extraExpectedChanges: pendingCancellation ? [pendingCount] : [],
   });
 
   if (result.ok) {
