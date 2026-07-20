@@ -1,0 +1,97 @@
+name: Restore canonical legacy import adapter
+
+on:
+  push:
+    branches:
+      - agent/db-canonical-migration-v2
+    paths:
+      - .github/workflows/restore-canonical-legacy-import.yml
+      - .agent-trigger/restore-canonical-legacy-import
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: restore-canonical-legacy-import
+  cancel-in-progress: true
+
+jobs:
+  restore:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/db-canonical-migration-v2
+          fetch-depth: 0
+
+      - name: Revert incompatible legacy import removal
+        shell: bash
+        run: |
+          set -euo pipefail
+          removal_commit=2b23cbedfe0fcd804f8c3cf124126e87e992b25a
+          if ! git merge-base --is-ancestor "$removal_commit" HEAD; then
+            echo "撤去コミットが現在ブランチの祖先ではありません" >&2
+            exit 1
+          fi
+          parent_count="$(git show -s --format=%P "$removal_commit" | wc -w | tr -d ' ')"
+          if [[ "$parent_count" == "2" ]]; then
+            git -c user.name='github-actions[bot]' \
+                -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+                revert -m 1 --no-edit "$removal_commit"
+          elif [[ "$parent_count" == "1" ]]; then
+            git -c user.name='github-actions[bot]' \
+                -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+                revert --no-edit "$removal_commit"
+          else
+            echo "撤去コミットの親数が不正です: $parent_count" >&2
+            exit 1
+          fi
+
+          required=(
+            'app/(admin)/admin/import/page.tsx'
+            'app/api/admin/import/legacy/route.ts'
+            'src/components/admin/LegacyImportClient.tsx'
+            'src/lib/import/legacy/parse.ts'
+            'src/lib/import/legacy/normalize.ts'
+            'src/lib/import/legacy/plan.ts'
+            'src/lib/import/legacy/apply.ts'
+            'src/lib/import/legacy/previewToken.ts'
+            'docs/operations/legacy-import.md'
+          )
+          for path in "${required[@]}"; do
+            [[ -f "$path" ]] || { echo "復元されていません: $path" >&2; exit 1; }
+          done
+          git diff HEAD^ --check
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate restored import adapter
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --experimental-strip-types \
+            src/lib/import/legacy/parse.test.mjs \
+            src/lib/import/legacy/normalize.test.mjs \
+            src/lib/import/legacy/plan.test.mjs \
+            src/lib/import/legacy/previewToken.test.mjs \
+            src/lib/import/legacy/queryBudget.test.mjs \
+            src/lib/import/legacy/dryRun.contract.test.mjs
+          npm run check:docs
+          npm run check:project-docs
+
+      - name: Remove temporary restore workflow and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm -f .github/workflows/restore-canonical-legacy-import.yml
+          rm -f .agent-trigger/restore-canonical-legacy-import
+          git add -A
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit --amend --no-edit
+          git push origin HEAD:agent/db-canonical-migration-v2
