@@ -34,3 +34,8 @@ test("無効質問は回答が残っている場合だけ審査画面へ残す",
     /question\.is_active === 1 \|\| answerMap\.has\(question\.id\)/,
   );
 });
+
+test("複数イベント回答は内部IDではなくイベント名で識別する", () => {
+  assert.match(detail, /select\(\{ id: events\.id, title: events\.title \}\)/);
+  assert.match(detail, /eventTitleById\.get\(question\.event_id\)/);
+});
