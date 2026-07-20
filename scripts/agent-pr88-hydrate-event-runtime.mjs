@@ -6,7 +6,8 @@ if (process.env.GITHUB_ACTIONS !== "true") {
 }
 
 const branch = "agent/ux-and-status-simplification";
-const source = "origin/agent/db-canonical-events";
+const eventSource = "origin/agent/db-canonical-events";
+const parentSource = "origin/agent/db-canonical-migration-v2";
 const files = [
   "app/(admin)/admin/api-endpoints/page.tsx",
   "app/(auth)/entry/page.tsx",
@@ -30,8 +31,14 @@ function git(args) {
   execFileSync("git", args, { stdio: "inherit" });
 }
 
-git(["fetch", "origin", "agent/db-canonical-events"]);
-git(["checkout", source, "--", ...files]);
+git([
+  "fetch",
+  "origin",
+  "agent/db-canonical-events",
+  "agent/db-canonical-migration-v2",
+]);
+git(["checkout", eventSource, "--", ...files]);
+git(["checkout", parentSource, "--", ".github/workflows/ci.yml"]);
 
 const packagePath = "package.json";
 const packageJson = JSON.parse(readFileSync(packagePath, "utf8"));
