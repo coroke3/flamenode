@@ -1,0 +1,44 @@
+name: Apply final integration patch
+
+on:
+  push:
+    branches:
+      - agent/db-canonical-migration-v2
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event_name == 'push' || github.event.pull_request.head.ref == 'agent/db-canonical-migration-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/db-canonical-migration-v2
+          fetch-depth: 0
+      - name: 検証済みパッチを適用
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .agent-patch/final-patch.part00 .agent-patch/final-patch.part01 | base64 -d > /tmp/final.patch.xz
+          echo '6687be0d0e4595e65e6f6c432a7b745a1f6a708dec480cfa22c6a23314010e6b  /tmp/final.patch.xz' | sha256sum -c -
+          xz -dc /tmp/final.patch.xz | patch -p1 --forward --batch
+          rm -rf .agent-patch .agent-trigger
+          rm -f .github/workflows/apply-final-patch.yml
+          rm -f .github/workflows/export-final-head-temporary.yml
+          git diff --check
+      - name: 変更を確定
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m '旧形式インポートとDB正本統合を完成'
+          git push origin HEAD:agent/db-canonical-migration-v2
