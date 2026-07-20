@@ -45,3 +45,14 @@ test("履歴読み取りは8件の書き込み上限と分離する", () => {
     /limit\(MAX_VIDEO_CUSTOM_QUESTION_HISTORY_READ \+ 1\)/,
   );
 });
+
+test("複数イベント解除時は履歴上限まで回答を読み、8件ずつ削除する", () => {
+  assert.match(
+    source,
+    /const removedEventAnswers =[\s\S]*?limit\(MAX_VIDEO_CUSTOM_QUESTION_HISTORY_READ \+ 1\)/,
+  );
+  assert.match(
+    source,
+    /removedEventAnswers\.length > MAX_VIDEO_CUSTOM_QUESTION_HISTORY_READ/,
+  );
+});
