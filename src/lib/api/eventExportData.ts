@@ -89,7 +89,6 @@ export async function loadEventExportSnapshot(
     prefetchedEvent === undefined
       ? await loadEventExportEvent(db, eventId)
       : prefetchedEvent;
-
   if (
     !event ||
     event.public_api_enabled !== 1 ||
@@ -179,7 +178,6 @@ export async function loadEventExportSnapshot(
             name: videoMembers.name,
             role_label: videoMembers.role,
             order_index: videoMembers.order_index,
-            chapters_json: videoMembers.chapters_json,
           })
           .from(videoMembers)
           .where(
@@ -194,7 +192,6 @@ export async function loadEventExportSnapshot(
             video_id: videoSoftwares.video_id,
             name: softwareCatalog.name,
             raw_label: videoSoftwares.raw_label,
-            order_index: videoSoftwares.order_index,
           })
           .from(videoSoftwares)
           .innerJoin(
@@ -202,7 +199,11 @@ export async function loadEventExportSnapshot(
             eq(softwareCatalog.id, videoSoftwares.software_id),
           )
           .where(inArray(videoSoftwares.video_id, videoIds))
-          .orderBy(asc(videoSoftwares.video_id), asc(videoSoftwares.order_index)),
+          .orderBy(
+            asc(videoSoftwares.video_id),
+            asc(softwareCatalog.name),
+            asc(videoSoftwares.raw_label),
+          ),
         db
           .select({
             video_id: videoCustomAnswers.video_id,
@@ -234,13 +235,12 @@ export async function loadEventExportSnapshot(
           ),
         db
           .select({
+            id: videoChapters.id,
             video_id: videoChapters.video_id,
             x_user_id: videoChapters.x_user_id,
             chapter_time: videoChapters.chapter_time,
             chapter_label: videoChapters.chapter_label,
             note: videoChapters.note,
-            show_on_player_bar: videoChapters.show_on_player_bar,
-            order_index: videoChapters.order_index,
           })
           .from(videoChapters)
           .where(
@@ -252,7 +252,7 @@ export async function loadEventExportSnapshot(
           .orderBy(
             asc(videoChapters.video_id),
             asc(videoChapters.chapter_time),
-            asc(videoChapters.order_index),
+            asc(videoChapters.id),
           ),
         db
           .select({
@@ -276,14 +276,14 @@ export async function loadEventExportSnapshot(
         name: row.name,
         role_label: row.role_label,
         order_index: row.order_index,
-        chapters_json: row.chapters_json,
       });
     }
     for (const row of softwareRows) {
+      const orderIndex = softwaresByVideo.get(row.video_id)?.length ?? 0;
       appendGrouped(softwaresByVideo, row.video_id, {
         name: row.name,
         raw_label: row.raw_label,
-        order_index: row.order_index,
+        order_index: orderIndex,
       });
     }
     for (const row of answerRows) {
@@ -297,12 +297,11 @@ export async function loadEventExportSnapshot(
     }
     for (const row of chapterRows) {
       appendGrouped(chaptersByVideo, row.video_id, {
+        id: row.id,
         x_user_id: row.x_user_id,
         chapter_time: row.chapter_time,
         chapter_label: row.chapter_label,
         note: row.note,
-        show_on_player_bar: row.show_on_player_bar,
-        order_index: row.order_index,
       });
     }
     for (const row of relationRows) {
