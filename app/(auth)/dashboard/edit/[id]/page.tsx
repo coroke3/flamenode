@@ -21,6 +21,7 @@ import {
   loadVideoCollabSubjects,
 } from "@/lib/video/collabPerms";
 import { requireSession } from "@/lib/auth/guard";
+import { getLinkedXUsersForAuthUser } from "@/lib/auth/xIdentity";
 import { canEditVideo } from "@/lib/auth/ownership";
 import { VideoForm } from "@/components/forms/VideoForm";
 import { AdminVideoTabs } from "@/components/admin/AdminVideoTabs";
@@ -289,16 +290,9 @@ export default async function EditVideoPage({
   // 編集権限を持つユーザー向けにこの編集ページから行う。
   // 投稿主体は active X ID なので、ChapterComposer 内部の writeGuard と同じ条件で
   // X 承認状態を計算する。
-  const xIdOptions = await db
-    .select({ id: xUsersTable.id, x_name: xUsersTable.x_name })
-    .from(xUsersTable)
-    .where(
-      and(
-        eq(xUsersTable.linked_user_id, user.id),
-        eq(xUsersTable.approval_status, "approved"),
-      )!,
-    )
-    .orderBy(asc(xUsersTable.x_name));
+  const xIdOptions = (await getLinkedXUsersForAuthUser(db, user.id, { approvedOnly: true }))
+    .map((row) => ({ id: row.x_user_id, x_name: row.x_name }))
+    .sort((a, b) => a.x_name.localeCompare(b.x_name, "ja"));
 
   const editUser = { id: user.id, role: user.role ?? null };
   const [

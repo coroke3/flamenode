@@ -135,7 +135,7 @@ interface VideoFormProps {
   submitBlockedReason?: string;
   /**
    * 作品アイコンの候補リスト。サーバー側で `getXIconCandidates(db, xId)` から取得する。
-   * x_users.icon_url / x_user_icons / 同 X ID の過去 videos.creator_icon_url を新しい順で含む。
+   * x_users.icon_url / 同 X ID の過去 videos.creator_icon_url を新しい順で含む。
    */
   iconCandidates?: string[];
   /**

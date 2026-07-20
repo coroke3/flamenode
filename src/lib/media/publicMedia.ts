@@ -67,12 +67,6 @@ OR (
       LIMIT 1
     )
     OR EXISTS (
-      SELECT 1 FROM x_user_icons xui
-      INNER JOIN x_users xu ON xu.id = xui.x_user_id
-      WHERE xui.icon_url = ?3 AND xu.approval_status = 'approved'
-      LIMIT 1
-    )
-    OR EXISTS (
       SELECT 1 FROM videos v
       WHERE v.creator_icon_url = ?3
         AND v.visibility_status IN ('public', 'limited')

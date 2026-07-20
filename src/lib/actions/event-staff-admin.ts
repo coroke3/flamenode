@@ -129,7 +129,6 @@ async function prepareXUserExtras(args: {
     id: args.xUserId,
     x_name: args.displayName || `@${args.xUserId}`,
     approval_status: "pending" as const,
-    approval_requested_at: args.now,
   };
   return {
     mutationStatements: [
@@ -444,11 +443,7 @@ export async function bulkUpsertEventStaffFromCsv(
       youtube_channel_url: null,
       other_social_links: null,
       creative_start_date: null,
-      linked_user_id: null,
-      verification_token: null,
-      token_expires_at: null,
       approval_status: "pending" as const,
-      approval_requested_at: now,
     }));
   const context = `event-staff-csv:${generateId("batch")}`;
   const xUserAudits = newXRows.map<WriteAuditLogInput>((row) => ({

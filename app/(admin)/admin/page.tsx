@@ -11,9 +11,7 @@ import {
   videoModerationCases as videoModerationCasesTable,
   videoYoutubeMetadata as videoYoutubeMetadataTable,
   videos as videosTable,
-  xAccountLinkRequests as xAccountLinkRequestsTable,
-  xIdMergeRequests as xIdMergeRequestsTable,
-  xIdMergeReverts as xIdMergeRevertsTable,
+  xIdentityRequests as xIdentityRequestsTable,
 } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
@@ -82,16 +80,16 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
           .where(eq(videosTable.visibility_status, "pending")),
         db
           .select({ c: sql<number>`COUNT(*)` })
-          .from(xAccountLinkRequestsTable)
-          .where(eq(xAccountLinkRequestsTable.status, "pending")),
+          .from(xIdentityRequestsTable)
+          .where(and(eq(xIdentityRequestsTable.status, "pending"), sql`${xIdentityRequestsTable.request_type} IN ('new_link','existing_link','alias')`)),
         db
           .select({ c: sql<number>`COUNT(*)` })
-          .from(xIdMergeRequestsTable)
-          .where(eq(xIdMergeRequestsTable.status, "pending")),
+          .from(xIdentityRequestsTable)
+          .where(and(eq(xIdentityRequestsTable.status, "pending"), eq(xIdentityRequestsTable.request_type, "merge"))),
         db
           .select({ c: sql<number>`COUNT(*)` })
-          .from(xIdMergeRevertsTable)
-          .where(eq(xIdMergeRevertsTable.status, "pending")),
+          .from(xIdentityRequestsTable)
+          .where(and(eq(xIdentityRequestsTable.status, "pending"), eq(xIdentityRequestsTable.request_type, "revert_merge"))),
         db
           .select({ c: sql<number>`COUNT(*)` })
           .from(notificationOutboxTable)

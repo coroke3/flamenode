@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { and, asc, eq } from "drizzle-orm";
 import { requireSession } from "@/lib/auth/guard";
+import { getLinkedXUsersForAuthUser } from "@/lib/auth/xIdentity";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   events as eventsTable,
@@ -38,16 +39,9 @@ export default async function UnslottedPostPage(): Promise<React.ReactElement> {
         )[0]
       : null;
   const xIdOptions = db
-    ? await db
-        .select({ id: xUsersTable.id, x_name: xUsersTable.x_name })
-        .from(xUsersTable)
-        .where(
-          and(
-            eq(xUsersTable.linked_user_id, user.id),
-            eq(xUsersTable.approval_status, "approved"),
-          )!,
-        )
-        .orderBy(asc(xUsersTable.x_name))
+    ? (await getLinkedXUsersForAuthUser(db, user.id, { approvedOnly: true }))
+        .map((row) => ({ id: row.x_user_id, x_name: row.x_name }))
+        .sort((a, b) => a.x_name.localeCompare(b.x_name, "ja"))
     : [];
   const memberSuggestions = db
     ? await db

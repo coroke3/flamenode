@@ -64,7 +64,7 @@ src/lib/audit/
 - `slots`
 - `announcements`
 - `event_groups`
-- `x_account_link_requests`
+- `x_identity_requests`
 
 戦略:
 
@@ -73,7 +73,7 @@ src/lib/audit/
 | `update_before` | UPDATE を before に戻す |
 | `delete_created` | CREATE を取り消し (events/videos は archived) |
 | `recreate_deleted` | DELETE を before から復元 |
-| `custom_adapter` | X ID merge 等 (未実装は dry-run のみ) |
+| `custom_adapter` | X ID統合の期限内差し戻しなど |
 
 ### 復元しないもの
 

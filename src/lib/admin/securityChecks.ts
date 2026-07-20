@@ -7,6 +7,7 @@ import {
   users as usersTable,
   videoChapters as videoChaptersTable,
   videos as videosTable,
+  xUserAccountLinks as xUserAccountLinksTable,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 
@@ -36,7 +37,7 @@ const LABELS = {
   tosNotAcceptedUserVideos: "TOS 未同意ユーザーが owner の作品",
   customPageDangerousHtml: "custom_pages/custom_themes disabled",
   bannedUserChapters: "BAN ユーザーが投稿したチャプターコメント",
-  orphanApprovedXId: "approved な X ID で linked_user_id が NULL",
+  orphanApprovedXId: "approved な X ID で認証ユーザー紐付けがない",
 } as const;
 
 function getTotalCount(rows: CountedRow[]): number {
@@ -225,15 +226,13 @@ async function checkBannedUserChapters(
       total_count: sql<number>`COUNT(*) OVER()`,
     })
     .from(videoChaptersTable)
-    .innerJoin(
-      xUsersTable,
-      eq(xUsersTable.id, videoChaptersTable.x_user_id),
-    )
-    .innerJoin(
-      usersTable,
-      eq(usersTable.id, xUsersTable.linked_user_id!),
-    )
-    .where(eq(usersTable.is_banned, 1))
+    .where(sql`EXISTS (
+      SELECT 1
+      FROM ${xUserAccountLinksTable} link
+      INNER JOIN ${usersTable} auth_user ON auth_user.id = link.auth_user_id
+      WHERE link.x_user_id = ${videoChaptersTable.x_user_id}
+        AND auth_user.is_banned = 1
+    )`)
     .limit(10);
   const count = getTotalCount(rows);
   return {
@@ -249,7 +248,7 @@ async function checkBannedUserChapters(
   };
 }
 
-/** approved な X ID が存在するのに linked_user_id が NULL (孤立) */
+/** approved な X ID が存在するのに account link がない (孤立) */
 async function checkOrphanApprovedXId(
   db: AnyDb,
 ): Promise<SecurityCheckResult> {
@@ -262,7 +261,10 @@ async function checkOrphanApprovedXId(
     .where(
       and(
         eq(xUsersTable.approval_status, "approved"),
-        isNull(xUsersTable.linked_user_id),
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${xUserAccountLinksTable} link
+          WHERE link.x_user_id = ${xUsersTable.id}
+        )`,
       ),
     )
     .limit(10);
@@ -275,7 +277,7 @@ async function checkOrphanApprovedXId(
     samples: rows.slice(0, 5).map((r) => `x:${r.id}`),
     note:
       count > 0
-        ? "Discord 紐付けが失われた approved X ID。legacy import 由来の可能性、または手動で承認したケース。"
+        ? "認証ユーザー紐付けがない approved X ID。公開名義として意図されたものか確認してください。"
         : undefined,
   };
 }

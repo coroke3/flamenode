@@ -36,8 +36,8 @@ export const SPREADSHEET_COLUMN_POLICIES: Record<string, SpreadsheetColumnPolicy
   "events.repeat_rules": { json: true, maxLength: 100_000 },
   "events.parts_json": { json: true, maxLength: 100_000 },
   "videos.music_reference_url": { url: true, maxLength: 2048 },
-  "x_user_icons.icon_url": { url: true, maxLength: 2048 },
-  "x_user_youtube_channels.youtube_channel_url": { url: true, maxLength: 2048 },
+  "x_users.icon_url": { url: true, maxLength: 2048 },
+  "x_users.youtube_channel_url": { url: true, maxLength: 2048 },
   "system_settings.disabled_features_json": { json: true, maxLength: 100_000 },
   "events.user_video_edit_permission_keys_json": { json: true, maxLength: 100_000 },
   "announcements.body": { maxLength: 200_000 },
@@ -86,19 +86,13 @@ export const SPREADSHEET_TABLE_OVERRIDES: Record<string, SpreadsheetTableOverrid
 
     x_users: { label: "X ID", group: "X ID", mode: "editable" },
     x_user_aliases: { label: "X ID エイリアス", group: "X ID", mode: "editable" },
-    x_account_link_requests: {
-      label: "X 連携申請",
+    x_identity_requests: {
+      label: "X ID申請",
       group: "X ID",
-      mode: "editable",
+      mode: "readonly",
     },
-    x_user_icons: { label: "X アイコン", group: "X ID", mode: "editable" },
-    x_id_merge_requests: {
-      label: "X ID 統合申請",
-      group: "X ID",
-      mode: "editable",
-    },
-    x_id_merge_reverts: {
-      label: "X ID 統合取消",
+    x_user_account_links: {
+      label: "X名義・認証ユーザー紐付け",
       group: "X ID",
       mode: "readonly",
     },

@@ -9,6 +9,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import {
   users as usersTable,
   systemSettings,
+  xUserAccountLinks,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { formatRelative } from "@/lib/utils/format";
@@ -46,10 +47,11 @@ type AdminXUserRow = {
   x_name: string;
   icon_url: string | null;
   approval_status: "pending" | "approved" | "rejected" | "imported" | null;
-  linked_user_id: string | null;
-  linked_user_name: string | null;
-  linked_user_image: string | null;
-  active_holder_id: string | null;
+  primary_auth_user_id: string | null;
+  primary_auth_user_name: string | null;
+  primary_auth_user_image: string | null;
+  linked_auth_user_count: number;
+  active_holder_count: number;
 };
 
 type CurrentLinkedXRow = {
@@ -186,8 +188,12 @@ export default async function AdminUsersPage({
       const xTerm = `%${escapedX.toLowerCase()}%`;
       const activeXJoin = and(
         sql`lower(${xUsersTable.id}) = lower(${usersTable.active_x_user_id})`,
-        eq(xUsersTable.linked_user_id, usersTable.id),
         eq(xUsersTable.approval_status, "approved"),
+        sql`EXISTS (
+          SELECT 1 FROM ${xUserAccountLinks} active_link
+          WHERE active_link.x_user_id = ${xUsersTable.id}
+            AND active_link.auth_user_id = ${usersTable.id}
+        )`,
       )!;
 
       const queryFilter = q
@@ -275,8 +281,16 @@ export default async function AdminUsersPage({
         ? or(
             like(sql<string>`lower(${xUsersTable.id})`, xTerm),
             like(sql<string>`lower(${xUsersTable.x_name})`, lowerTerm),
-            like(sql<string>`lower(${usersTable.name})`, lowerTerm),
-          eq(xUsersTable.linked_user_id, q),
+            sql`EXISTS (
+              SELECT 1
+              FROM ${xUserAccountLinks} link
+              INNER JOIN ${usersTable} auth_user ON auth_user.id = link.auth_user_id
+              WHERE link.x_user_id = ${xUsersTable.id}
+                AND (
+                  lower(COALESCE(auth_user.name, '')) LIKE ${lowerTerm}
+                  OR auth_user.id = ${rawQuery}
+                )
+            )`,
           )
         : undefined;
       const xLimit = activeView === "xid" ? pageSize : USERS_PAGE_SIZE * 2;
@@ -287,13 +301,44 @@ export default async function AdminUsersPage({
           x_name: xUsersTable.x_name,
           icon_url: xUsersTable.icon_url,
           approval_status: xUsersTable.approval_status,
-          linked_user_id: xUsersTable.linked_user_id,
-          linked_user_name: usersTable.name,
-          linked_user_image: usersTable.image,
-          active_holder_id: usersTable.active_x_user_id,
+          primary_auth_user_id: sql<string | null>`(
+            SELECT link.auth_user_id
+            FROM ${xUserAccountLinks} link
+            WHERE link.x_user_id = ${xUsersTable.id}
+            ORDER BY CASE WHEN link.link_role = 'owner' THEN 0 ELSE 1 END, link.created_at, link.auth_user_id
+            LIMIT 1
+          )`,
+          primary_auth_user_name: sql<string | null>`(
+            SELECT auth_user.name
+            FROM ${xUserAccountLinks} link
+            INNER JOIN ${usersTable} auth_user ON auth_user.id = link.auth_user_id
+            WHERE link.x_user_id = ${xUsersTable.id}
+            ORDER BY CASE WHEN link.link_role = 'owner' THEN 0 ELSE 1 END, link.created_at, link.auth_user_id
+            LIMIT 1
+          )`,
+          primary_auth_user_image: sql<string | null>`(
+            SELECT auth_user.image
+            FROM ${xUserAccountLinks} link
+            INNER JOIN ${usersTable} auth_user ON auth_user.id = link.auth_user_id
+            WHERE link.x_user_id = ${xUsersTable.id}
+            ORDER BY CASE WHEN link.link_role = 'owner' THEN 0 ELSE 1 END, link.created_at, link.auth_user_id
+            LIMIT 1
+          )`,
+          linked_auth_user_count: sql<number>`(
+            SELECT COUNT(*) FROM ${xUserAccountLinks} link
+            WHERE link.x_user_id = ${xUsersTable.id}
+          )`,
+          active_holder_count: sql<number>`(
+            SELECT COUNT(*) FROM ${usersTable} active_holder
+            WHERE lower(active_holder.active_x_user_id) = lower(${xUsersTable.id})
+              AND EXISTS (
+                SELECT 1 FROM ${xUserAccountLinks} active_link
+                WHERE active_link.x_user_id = ${xUsersTable.id}
+                  AND active_link.auth_user_id = active_holder.id
+              )
+          )`,
         })
         .from(xUsersTable)
-        .leftJoin(usersTable, eq(usersTable.id, xUsersTable.linked_user_id))
         .where(xFilter)
         .orderBy(xUsersTable.id)
         .limit(xLimit)
@@ -303,7 +348,6 @@ export default async function AdminUsersPage({
           await db
             .select({ c: sql<number>`COUNT(*)` })
             .from(xUsersTable)
-            .leftJoin(usersTable, eq(usersTable.id, xUsersTable.linked_user_id))
             .where(xFilter)
             .limit(1)
         )[0];
@@ -325,16 +369,17 @@ export default async function AdminUsersPage({
         visibleUserIds.length > 0
           ? await db
               .select({
-                user_id: xUsersTable.linked_user_id,
+                user_id: xUserAccountLinks.auth_user_id,
                 x_user_id: xUsersTable.id,
                 x_name: xUsersTable.x_name,
                 icon_url: xUsersTable.icon_url,
                 approval_status: xUsersTable.approval_status,
               })
-              .from(xUsersTable)
+              .from(xUserAccountLinks)
+              .innerJoin(xUsersTable, eq(xUsersTable.id, xUserAccountLinks.x_user_id))
               .where(
                 and(
-                  inArray(xUsersTable.linked_user_id, visibleUserIds),
+                  inArray(xUserAccountLinks.auth_user_id, visibleUserIds),
                   eq(xUsersTable.approval_status, "approved"),
                 )!,
               )
@@ -635,11 +680,14 @@ function XIdTable({ rows }: { rows: AdminXUserRow[] }): React.ReactElement {
                 </div>
               </td>
               <td>
-                {x.linked_user_id ? (
+                {x.primary_auth_user_id ? (
                   <span>
-                    <strong>{x.linked_user_name ?? "Discord user"}</strong>
+                    <strong>{x.primary_auth_user_name ?? "認証ユーザー"}</strong>
                     <span style={{ display: "block", fontSize: 11, color: "var(--text-muted)" }}>
-                      {x.linked_user_id.slice(0, 14)}...
+                      {x.primary_auth_user_id.slice(0, 14)}...
+                      {x.linked_auth_user_count > 1
+                        ? ` ほか ${x.linked_auth_user_count - 1}件`
+                        : ""}
                     </span>
                   </span>
                 ) : (
@@ -658,16 +706,16 @@ function XIdTable({ rows }: { rows: AdminXUserRow[] }): React.ReactElement {
                 >
                   {approvalStatusLabel(x.approval_status)}
                 </span>
-                {normalizeXId(x.active_holder_id) === normalizeXId(x.id) ? (
+                {x.active_holder_count > 0 ? (
                   <span className="fn-badge fn-badge-soft" style={{ marginLeft: 6 }}>
                     active
                   </span>
                 ) : null}
               </td>
               <td>
-                {x.linked_user_id ? (
+                {x.primary_auth_user_id ? (
                   <Link
-                      href={`/admin/users/${x.linked_user_id}`}
+                    href={`/admin/users/${x.primary_auth_user_id}`}
                     className="fn-btn fn-btn-ghost fn-btn-sm"
                   >
                     詳細

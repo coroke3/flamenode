@@ -2,7 +2,7 @@ import * as React from "react";
 import { Icon } from "@/components/ui/Icon";
 import pageStyles from "./settings-page.module.css";
 
-export type XApprovalStatus = "approved" | "pending" | "rejected";
+export type XApprovalStatus = "approved" | "pending" | "rejected" | "imported";
 
 const META: Record<
   XApprovalStatus,
@@ -11,6 +11,7 @@ const META: Record<
   approved: { tone: "ok", label: "承認済み", icon: "check" },
   pending: { tone: "warn", label: "申請中", dot: true },
   rejected: { tone: "muted", label: "却下", dot: true },
+  imported: { tone: "ok", label: "移行済み", icon: "check" },
 };
 
 export function SettingsStatusPill({
@@ -22,7 +23,7 @@ export function SettingsStatusPill({
 }): React.ReactElement {
   const m = META[status];
   const className =
-    status === "approved"
+    status === "approved" || status === "imported"
       ? "fn-badge fn-badge-neutral"
       : status === "pending"
         ? "fn-badge fn-badge-warning"

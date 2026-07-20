@@ -9,6 +9,7 @@ import {
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth/guard";
+import { getLinkedXUsersForAuthUser } from "@/lib/auth/xIdentity";
 import { creatorIconExpr, creatorNameExpr } from "@/lib/db/displayExpr";
 import { resolveMissingIcons } from "@/lib/db/iconResolution";
 import { Icon } from "@/components/ui/Icon";
@@ -39,10 +40,10 @@ export default async function DashboardLibraryPage({
   let activeXApproved = false;
 
   if (db) {
-    const linkedRows = await db
-      .select({ id: xUsersTable.id, approval_status: xUsersTable.approval_status })
-      .from(xUsersTable)
-      .where(eq(xUsersTable.linked_user_id, user.id));
+    const linkedRows = (await getLinkedXUsersForAuthUser(db, user.id)).map((row) => ({
+      id: row.x_user_id,
+      approval_status: row.approval_status,
+    }));
     linkedXCount = linkedRows.length;
 
     const activeX = user.active_x_user_id;

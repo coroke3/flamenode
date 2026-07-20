@@ -3,10 +3,8 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { and, desc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
-import {
-  xAccountLinkRequests as linkReqTable,
-  xUsers as xUsersTable,
-} from "@/lib/db/schema";
+import { xIdentityRequests as linkReqTable } from "@/lib/db/schema";
+import { getLinkedXUsersForAuthUser } from "@/lib/auth/xIdentity";
 import { requireSession } from "@/lib/auth/guard";
 import { Icon } from "@/components/ui/Icon";
 import { XIdLinkForm } from "@/components/settings/XIdSettingsClient";
@@ -78,12 +76,7 @@ export default async function SettingsPage({
   const user = guard.user;
 
   const db = getDatabase();
-  const xIdsRaw = db
-    ? await db
-        .select()
-        .from(xUsersTable)
-        .where(eq(xUsersTable.linked_user_id, user.id))
-    : [];
+  const xIdsRaw = db ? await getLinkedXUsersForAuthUser(db, user.id) : [];
 
   const pendingLinkRequests = db
     ? await db
@@ -91,7 +84,7 @@ export default async function SettingsPage({
         .from(linkReqTable)
         .where(
           and(
-            eq(linkReqTable.user_id, user.id),
+            eq(linkReqTable.requested_by_auth_user_id, user.id),
             eq(linkReqTable.status, "pending"),
           )!,
         )
@@ -99,16 +92,17 @@ export default async function SettingsPage({
     : [];
 
   const xIds: SettingsXIdRow[] = xIdsRaw.map((x) => ({
-    id: x.id,
+    id: x.x_user_id,
     x_name: x.x_name,
     icon_url: x.icon_url,
     approval_status:
       x.approval_status === "approved" ||
       x.approval_status === "pending" ||
-      x.approval_status === "rejected"
+      x.approval_status === "rejected" ||
+      x.approval_status === "imported"
         ? x.approval_status
         : "pending",
-    approval_requested_at: x.approval_requested_at,
+    requested_at: x.request_requested_at ?? x.created_at,
     profile_text: x.profile_text,
     portfolio_contact: normalizePortfolioContact(x.portfolio_contact),
     youtube_channel_url: x.youtube_channel_url,
@@ -116,13 +110,15 @@ export default async function SettingsPage({
   }));
 
   const linkedIds = new Set(xIds.map((x) => x.id.toLowerCase()));
-  const pendingOnly: PendingLinkRequestRow[] = pendingLinkRequests
-    .filter((r) => !linkedIds.has(r.requested_x_id.toLowerCase()))
-    .map((r) => ({
-      id: r.id,
-      requested_x_id: r.requested_x_id,
-      requested_at: r.requested_at,
-    }));
+  const pendingOnly: PendingLinkRequestRow[] = pendingLinkRequests.flatMap((request) => {
+    const requestedXId = request.requested_x_id;
+    if (!requestedXId || linkedIds.has(requestedXId.toLowerCase())) return [];
+    return [{
+      id: request.id,
+      requested_x_id: requestedXId,
+      requested_at: request.requested_at,
+    }];
+  });
 
   const iconCandidatesById: Record<string, string[]> = {};
   const channelCandidatesById: Record<string, string[]> = {};
