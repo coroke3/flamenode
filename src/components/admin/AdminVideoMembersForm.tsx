@@ -47,7 +47,11 @@ export function AdminVideoMembersForm({
   };
 
   return (
-    <form onSubmit={onSubmit} className="fn-card" style={{ display: "grid", gap: 18 }}>
+    <form
+      onSubmit={onSubmit}
+      className="fn-card"
+      style={{ display: "grid", gap: 18 }}
+    >
       <input type="hidden" name="video_id" value={video.id} />
       <input type="hidden" name="is_collab" value="false" />
 
@@ -55,8 +59,7 @@ export function AdminVideoMembersForm({
         <span className="fn-badge fn-badge-soft">Participants</span>
         <h2 style={{ margin: 0, fontSize: 20 }}>参加者設定</h2>
         <p className="fn-muted" style={{ margin: 0, lineHeight: 1.8 }}>
-          複数人参加作品の公開メンバーとメンバーチャプターを管理します。
-          既存メンバーがある作品は合作作品として扱います。
+          複数人参加作品の公開メンバーを管理します。チャプターコメントは作品詳細の専用機能へ統一されています。
         </p>
       </header>
 
@@ -78,7 +81,7 @@ export function AdminVideoMembersForm({
           name="is_collab"
           value="true"
           checked={isCollab}
-          onChange={(e) => setIsCollab(e.target.checked)}
+          onChange={(event) => setIsCollab(event.target.checked)}
           disabled={pending}
         />
         この作品を合作作品として登録する
@@ -99,14 +102,18 @@ export function AdminVideoMembersForm({
             color: "var(--text-muted)",
           }}
         >
-          合作をOFFにすると、保存時に公開参加者とメンバーチャプターを空にします。
+          合作をOFFにすると、保存時に公開参加者を空にします。
         </section>
       )}
 
       {result ? (
         <p
           role="status"
-          className={result.ok ? "fn-badge fn-badge-accent" : "fn-badge fn-badge-danger"}
+          className={
+            result.ok
+              ? "fn-badge fn-badge-accent"
+              : "fn-badge fn-badge-danger"
+          }
           style={{ justifySelf: "start" }}
         >
           {result.message ?? (result.ok ? "保存しました。" : "保存に失敗しました。")}
