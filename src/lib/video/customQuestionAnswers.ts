@@ -107,10 +107,10 @@ export async function buildReplaceGeneralCustomAnswersPlan(
           eq(videoCustomAnswers.video_id, args.videoId),
           inArray(videoCustomAnswers.event_id, deleteEventIds),
         )!)
-        .limit(MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS + 1)
+        .limit(MAX_VIDEO_CUSTOM_QUESTION_HISTORY_READ + 1)
     : [];
-  if (removedEventAnswers.length > MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS) {
-    throw new Error("video_custom_answer_removed_event_limit_exceeded");
+  if (removedEventAnswers.length > MAX_VIDEO_CUSTOM_QUESTION_HISTORY_READ) {
+    throw new Error("video_custom_answer_removed_event_history_limit_exceeded");
   }
 
   const existingByTarget = new Map<string, typeof videoCustomAnswers.$inferSelect>();
