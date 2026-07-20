@@ -1,0 +1,170 @@
+name: Final canonical integration
+
+on:
+  pull_request:
+    branches:
+      - agent/db-canonical-migration-v2
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: final-canonical-integration-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integrate:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.pull_request.head.ref, 'agent/db-canonical-final-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      NEXT_PUBLIC_SITE_URL: https://flamenode.invalid
+      AUTH_URL: https://flamenode.invalid
+      AUTH_SECRET: ci-placeholder-not-a-production-secret
+      AUTH_DISCORD_ID: ci-placeholder-id
+      AUTH_DISCORD_SECRET: ci-placeholder-secret
+      CI: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || 'agent/db-canonical-final-integration' }}
+          fetch-depth: 0
+
+      - name: Git設定
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config merge.conflictStyle diff3
+          git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'
+
+      - name: 有効な作業ブランチを統合
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .tmp
+          : > .tmp/integration-report.txt
+
+          resolve_conflicts() {
+            local default_side="$1"
+            mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
+            if (( ${#conflicts[@]} == 0 )); then
+              echo "merge failed without conflict files" >&2
+              return 1
+            fi
+            for path in "${conflicts[@]}"; do
+              case "$path" in
+                .github/workflows/ci.yml|.github/workflows/final-canonical-integration.yml|migrations/0043_db_canonical_migration.sql|src/lib/db/schema.ts|src/lib/db/schema.canonical.ts|docs/database/canonical-migration-plan.md|docs/db-history/0043_db_canonical_migration.md)
+                  git checkout --ours -- "$path"
+                  ;;
+                *)
+                  git checkout --"$default_side" -- "$path"
+                  ;;
+              esac
+              git add -- "$path"
+            done
+            if git diff --name-only --diff-filter=U | grep -q .; then
+              echo "unresolved conflicts remain" >&2
+              git diff --name-only --diff-filter=U >&2
+              return 1
+            fi
+          }
+
+          merge_branch() {
+            local branch="$1"
+            local strategy="$2"
+            local ref="origin/$branch"
+            if ! git show-ref --verify --quiet "refs/remotes/$ref"; then
+              echo "SKIP missing $branch" | tee -a .tmp/integration-report.txt
+              return 0
+            fi
+            local before
+            before="$(git rev-parse HEAD)"
+            echo "MERGE $branch ($strategy) $(git rev-parse "$ref")" | tee -a .tmp/integration-report.txt
+            set +e
+            git merge --no-ff --no-edit -X"$strategy" "$ref"
+            local status=$?
+            set -e
+            if (( status != 0 )); then
+              resolve_conflicts "$strategy"
+              git commit --no-edit
+            fi
+            local after
+            after="$(git rev-parse HEAD)"
+            echo "RESULT $branch $before -> $after" | tee -a .tmp/integration-report.txt
+          }
+
+          merge_branch main ours
+          merge_branch agent/db-canonical-foundation theirs
+          merge_branch agent/db-canonical-x-identity theirs
+          merge_branch agent/db-canonical-videos-import theirs
+          merge_branch agent/db-canonical-events theirs
+          merge_branch agent/unslotted-event-affiliation theirs
+          merge_branch agent/chapter-comment-delete-and-validation theirs
+          merge_branch agent/unify-custom-questions theirs
+          merge_branch agent/ux-and-status-simplification theirs
+          merge_branch agent/x-identity-import-hardening theirs
+
+          rm -rf .agent-patch .agent-trigger
+          rm -f \
+            .github/workflows/export-agent-source.yml \
+            .github/workflows/export-event-source.yml \
+            .github/workflows/apply-canonical-videos-import.yml \
+            .github/workflows/apply-canonical-videos-import-v2.yml
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "一時統合ファイルを整理"
+          fi
+
+          git status --short | tee -a .tmp/integration-report.txt
+          git log --oneline --decorate -25 | tee -a .tmp/integration-report.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: 依存関係をインストール
+        run: npm ci --no-audit --no-fund
+
+      - name: 型検査
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run typecheck 2>&1 | tee .tmp/typecheck.log
+
+      - name: Lint
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run lint 2>&1 | tee .tmp/lint.log
+
+      - name: DB正本検査
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            npm run check:db-schema
+            npm run check:db-migration
+            npm run check:db-legacy
+            npm run check:event-owners
+          } 2>&1 | tee .tmp/db-checks.log
+
+      - name: 統合作業ツリーを保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-canonical-integration-${{ github.run_id }}
+          path: |
+            .
+            !.git/**
+            !node_modules/**
+            !.next/**
+            !.vercel/**
+          include-hidden-files: true
+          retention-days: 3
