@@ -4,6 +4,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import {
   eventCustomQuestions,
+  events,
   videoCustomAnswers,
   videoEvents,
   videoMembers,
@@ -136,6 +137,13 @@ export async function fetchVideoReviewDetail(
     video.primary_event_id,
     eventIds,
   );
+  const eventRows = linkedEventIds.length > 0
+    ? await db
+        .select({ id: events.id, title: events.title })
+        .from(events)
+        .where(inArray(events.id, linkedEventIds))
+    : [];
+  const eventTitleById = new Map(eventRows.map((event) => [event.id, event.title]));
   const maxQuestionRows = Math.max(1, linkedEventIds.length) *
     MAX_HISTORICAL_QUESTIONS_PER_EVENT;
   const scopeCondition = questionScope === "admin"
@@ -193,7 +201,7 @@ export async function fetchVideoReviewDetail(
   const visibleQuestions = questions.filter(
     (question) => question.is_active === 1 || answerMap.has(question.id),
   );
-  const showEventId = linkedEventIds.length > 1;
+  const showEventName = linkedEventIds.length > 1;
 
   const members = await db
     .select({
@@ -228,8 +236,8 @@ export async function fetchVideoReviewDetail(
     event_ids: linkedEventIds,
     customAnswers: visibleQuestions.map((question) => ({
       id: question.id,
-      label: showEventId
-        ? `${question.label}（${question.event_id}）`
+      label: showEventName
+        ? `${question.label}（${eventTitleById.get(question.event_id) ?? question.event_id}）`
         : question.label,
       required: question.required === 1,
       active: question.is_active === 1,
