@@ -1,0 +1,275 @@
+name: Materialize final canonical tree
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .agent-trigger/materialize-final-canonical-v7
+      - .github/workflows/materialize-final-canonical.yml
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: materialize-final-canonical
+  cancel-in-progress: false
+
+jobs:
+  materialize:
+    if: github.actor != 'github-actions[bot]' && github.event.pull_request.head.ref == 'agent/db-canonical-migration-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      NEXT_PUBLIC_SITE_URL: https://flamenode.invalid
+      AUTH_URL: https://flamenode.invalid
+      AUTH_SECRET: ci-placeholder-not-a-production-secret
+      AUTH_DISCORD_ID: ci-placeholder-id
+      AUTH_DISCORD_SECRET: ci-placeholder-secret
+      CI: "1"
+
+    steps:
+      - name: Checkout canonical branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/db-canonical-migration-v2
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git and fetch source branches
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --no-tags origin \
+            agent/db-canonical-final-integration \
+            agent/x-identity-import-hardening \
+            agent/unslotted-event-affiliation \
+            agent/db-canonical-x-identity \
+            agent/db-canonical-videos-import
+
+      - name: Download validated integration artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/canonical-tree /tmp/canonical.zip
+          mkdir -p /tmp/canonical-tree
+          curl --fail --location \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -o /tmp/canonical.zip \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/8462427579/zip"
+          unzip -q /tmp/canonical.zip -d /tmp/canonical-tree
+          test -f /tmp/canonical-tree/package.json
+
+      - name: Materialize and repair canonical tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .tmp
+          : > .tmp/materialize.log
+
+          rsync -a --delete \
+            --exclude='.git/' \
+            --exclude='node_modules/' \
+            --exclude='.tmp/' \
+            /tmp/canonical-tree/ ./
+
+          take() {
+            local ref="$1"
+            shift
+            for path in "$@"; do
+              if git cat-file -e "${ref}:${path}" 2>/dev/null; then
+                git checkout "$ref" -- "$path"
+                echo "take ${ref}:${path}" >> .tmp/materialize.log
+              else
+                echo "missing ${ref}:${path}" >> .tmp/materialize.log
+                exit 1
+              fi
+            done
+          }
+
+          # Resolve the three files corrupted by overlapping merge hunks.
+          take origin/agent/db-canonical-final-integration \
+            src/components/admin/EventForm.tsx \
+            src/lib/actions/event-admin.ts \
+            src/lib/admin/eventTemplateSettings.ts
+
+          # Keep legacy input only as the administrator-only one-way canonical import boundary.
+          take origin/agent/x-identity-import-hardening \
+            app/'(admin)'/admin/import/page.tsx \
+            app/api/admin/import/legacy/route.ts \
+            scripts/check-db-legacy.mjs \
+            scripts/check-docs.mjs \
+            src/components/admin/LegacyCanonicalImportClient.tsx \
+            src/components/admin/MergeRequestButton.tsx \
+            src/lib/actions/merge-admin.ts \
+            src/lib/actions/xid-admin.ts \
+            src/lib/actions/xid-merge-admin.ts \
+            src/lib/admin/adminNavGroups.tsx \
+            src/lib/auth/xIdentity.ts \
+            src/lib/import/legacy \
+            src/lib/xid/merge.ts
+
+          # Use the dedicated no-compatibility unslotted flow.
+          take origin/agent/unslotted-event-affiliation \
+            app/'(auth)'/entry/unslotted/page.tsx \
+            src/components/forms/UnslottedPostForm.tsx \
+            src/lib/actions/video/createFreeVideo.ts \
+            src/lib/event/unslottedPostPolicy.ts \
+            src/lib/event/unslottedPostPolicy.test.mjs \
+            src/lib/video/resolveUnslottedEventSyncTarget.ts
+
+          # Restore canonical account-link reads on the remaining authenticated pages.
+          take origin/agent/db-canonical-x-identity \
+            app/'(auth)'/dashboard/edit/'[id]'/page.tsx \
+            app/'(auth)'/entry/slotted/page.tsx
+
+          # Restore the dedicated videos / YouTube / audit canonical implementations.
+          take origin/agent/db-canonical-videos-import \
+            app/'(admin)'/admin/youtube-sync/page.tsx \
+            src/lib/actions/youtube-sync-admin.ts \
+            src/lib/actions/video/interaction.ts \
+            src/lib/admin/healthChecks.ts \
+            src/lib/admin/permissionSimulator.ts \
+            src/lib/admin/videoReviewDetail.ts \
+            src/lib/audit/settings.ts \
+            src/lib/db/software.ts \
+            src/lib/video/syncVideoEvents.ts
+
+          python <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('.')
+
+          # Remove external Google Fonts as a build-time network dependency.
+          layout = root / 'app/layout.tsx'
+          text = layout.read_text()
+          text = re.sub(
+              r'import \{\n  Hanken_Grotesk,\n  JetBrains_Mono,\n  Manrope,\n  Noto_Sans_JP,\n\} from "next/font/google";\n',
+              '',
+              text,
+          )
+          text = re.sub(
+              r'const hankenGrotesk = Hanken_Grotesk\([\s\S]*?const redesignFontClassName = \[[\s\S]*?\]\.join\(" "\);\n\n',
+              '',
+              text,
+          )
+          text = text.replace(
+              '      className={redesignFontClassName}\n',
+              '      className="font-system"\n',
+          )
+          layout.write_text(text)
+
+          # Make retry semantics explicit. Runtime call sites are read-only.
+          cloudflare = root / 'src/lib/cloudflare.ts'
+          text = cloudflare.read_text()
+          text = re.sub(
+              r'/\*\*\n \* 後方互換。[\s\S]*?export const withDatabase = withDatabaseRead;\n\n',
+              '',
+              text,
+          )
+          cloudflare.write_text(text)
+          for base in ('app', 'src', 'workers'):
+              for path in (root / base).rglob('*'):
+                  if path.suffix not in {'.ts', '.tsx', '.mjs'} or path == cloudflare:
+                      continue
+                  source = path.read_text()
+                  replaced = re.sub(r'\bwithDatabase\b', 'withDatabaseRead', source)
+                  if replaced != source:
+                      path.write_text(replaced)
+
+          # The scanner must not contain the forbidden fragment as a literal itself.
+          contract = root / 'src/lib/auth/xIdentityCanonical.contract.test.mjs'
+          text = contract.read_text()
+          text = text.replace(
+              '!rel.endsWith("src/lib/db/schema.base.ts") &&',
+              'rel !== ["src", "lib", "db", "schema.base.ts"].join("/") &&',
+          )
+          contract.write_text(text)
+
+          # Reservation groups are the canonical dashboard representation.
+          dashboard = root / 'app/(auth)/dashboard/page.tsx'
+          text = dashboard.read_text()
+          text = text.replace(
+              '  sortSlotsChronologically,\n  type SlotGroupRow,\n',
+              '  collapseReservationGroups,\n  sortSlotsChronologically,\n  type SlotBase,\n  type SlotGroupRow,\n',
+          )
+          dashboard.write_text(text)
+          PY
+
+          # Remove temporary source-export / integration machinery and patch payloads.
+          rm -rf .agent-trigger .agent-patch .tmp/integration-report.txt
+          rm -f \
+            .github/workflows/export-pr-source-temp.yml \
+            .github/workflows/export-pr100-source.yml \
+            .github/workflows/final-canonical-integration.yml \
+            .github/workflows/final-canonical-integration-v4.yml \
+            .github/workflows/merge-final-canonical.yml \
+            .github/workflows/materialize-final-canonical.yml
+
+          if grep -RInE '^(<<<<<<<|=======|>>>>>>>)' -- . \
+            --exclude-dir=.git --exclude-dir=node_modules --exclude='*.lock' \
+            | tee -a .tmp/materialize.log; then
+            echo 'Conflict markers remain.' >> .tmp/materialize.log
+            exit 1
+          fi
+
+          git add -A
+          git diff --cached --stat | tee -a .tmp/materialize.log
+          git commit -m "競合を解消してDB正本の最終ツリーを統合"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Validate canonical tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          exec > >(tee -a .tmp/materialize-validation.log) 2>&1
+          npm run typecheck
+          npm run lint
+          npm run test:unit
+          npm run test:workers
+          npm run test:cloudflare-ci
+          npm run test:integration
+          npm run build
+          npm run pages:build
+          npm run check:pages-output
+          npm run check:cloudflare-template
+          CLOUDFLARE_CONFIG_MODE=fixture npm run check:cloudflare-config
+          node scripts/create-owner-check-fixture.mjs
+          FLAMENODE_OWNER_CHECK_DB=.tmp/owner-check.sqlite npm run check:db-schema
+          npm run check:db-migration
+          npm run check:db-legacy
+          FLAMENODE_OWNER_CHECK_DB=.tmp/owner-check.sqlite npm run check:event-owners
+          npm run check:db-d1-empty
+          npm run check:db-d1-legacy
+          npm run check:ui-acceptance
+          npm run check:public-api-contract
+          npm run check:public-api-leaks
+          npm run check:project-docs
+          npm run check:docs
+          npm run check:db-history
+
+      - name: Push resolved integration
+        run: git push origin HEAD:agent/db-canonical-migration-v2
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: materialize-final-canonical-${{ github.run_id }}
+          path: |
+            .tmp/materialize.log
+            .tmp/materialize-validation.log
+          if-no-files-found: ignore
+          retention-days: 7
