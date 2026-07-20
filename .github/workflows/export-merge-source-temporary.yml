@@ -118,10 +118,18 @@ jobs:
           git commit -m "作品・YouTube・監査ランタイムを新正本へ適用"
 
           merge_branch agent/x-identity-import-hardening theirs
+
+          base64 -d scripts/final-canonical-fixes.patch.gz.b64 \
+            | gzip -d > /tmp/final-canonical-fixes.patch
+          patch --batch --forward -p1 < /tmp/final-canonical-fixes.patch
+          rm -f scripts/final-canonical-fixes.patch.gz.b64
           rm -rf .agent-patch .agent-trigger
           rm -f .github/workflows/apply-canonical-videos-import.yml .github/workflows/apply-canonical-videos-import-v2.yml
           git add -A
-          if ! git diff --cached --quiet; then git commit -m "旧形式インポートを新正本入力境界へ統合"; fi
+          git diff --cached --check
+          if ! git diff --cached --quiet; then
+            git commit -m "旧形式インポートと正本ランタイムの残差を解消"
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
