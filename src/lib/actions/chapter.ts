@@ -31,13 +31,18 @@ export interface ChapterPostingContextResult {
   message?: string;
 }
 
+const chapterTimeSchema = z.preprocess((value) => {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  return trimmed === "" ? value : Number(trimmed);
+}, z.number().finite().min(0).max(60 * 60 * 24));
+
 const createSchema = z.object({
-  video_id: z.string().trim().min(1),
-  chapter_time: z.coerce.number().min(0).max(60 * 60 * 24),
+  video_id: z.string().trim().min(1).max(128),
+  chapter_time: chapterTimeSchema,
   chapter_label: z.string().trim().min(1).max(120),
   note: z.string().trim().max(1000).optional().nullable(),
   visibility: z.enum(["public", "private"]).default("public"),
-  show_on_player_bar: z.coerce.number().min(0).max(1).default(1),
 });
 
 /**
@@ -104,15 +109,17 @@ export async function createChapter(
 
   const id = generateId("ch");
   const now = Math.floor(Date.now() / 1000);
+  const chapterTime = Math.round(data.chapter_time * 1000) / 1000;
   const after = {
     id,
     video_id: data.video_id,
     x_user_id: activeX,
-    chapter_time: data.chapter_time,
+    chapter_time: chapterTime,
     chapter_label: data.chapter_label,
     note: data.note || null,
     visibility: data.visibility,
-    show_on_player_bar: data.show_on_player_bar,
+    // 通常コメントはプレイヤーバーへ表示しない。クライアント入力では変更不可。
+    show_on_player_bar: 0,
     order_index: 0,
     created_at: now,
     updated_at: now,
@@ -135,7 +142,7 @@ export async function createChapter(
         content: `作品「${target.title}」に新しいチャプターコメント「${data.chapter_label}」が追加されました。`,
         video_id: data.video_id,
         chapter_id: id,
-        chapter_time: data.chapter_time,
+        chapter_time: chapterTime,
         author_x_user_id: activeX,
       },
       eventId: target.primary_event_id ?? null,
@@ -147,7 +154,7 @@ export async function createChapter(
     }
   }
 
-  const queue = await buildStaticRebuildQueueBatch(guard.db, [
+  const queue = await buildStaticRebuildQueueBatch(db, [
     {
       targetType: "video",
       targetId: data.video_id,
@@ -258,7 +265,11 @@ export async function getChapterDeleteCapabilities(
   if (parsed.data.length === 0) return { ok: true, deletableIds: [] };
 
   const rows = await guard.db
-    .select()
+    .select({
+      id: videoChapters.id,
+      video_id: videoChapters.video_id,
+      x_user_id: videoChapters.x_user_id,
+    })
     .from(videoChapters)
     .where(inArray(videoChapters.id, parsed.data));
 
@@ -302,7 +313,7 @@ export async function getChapterDeleteCapabilities(
 }
 
 const deleteSchema = z.object({
-  chapter_id: z.string().trim().min(1),
+  chapter_id: z.string().trim().min(1).max(128),
 });
 
 /**
@@ -329,7 +340,7 @@ export async function deleteChapter(
       .limit(1)
   )[0];
   if (!existing) {
-    return { ok: false, message: "チャプターコメントが見つかりません。" };
+    return { ok: true, message: "チャプターコメントはすでに削除されています。" };
   }
 
   const target = (
@@ -341,14 +352,15 @@ export async function deleteChapter(
 
   const isAuthor = guard.approvedXIds.includes(existing.x_user_id);
   const canModerate =
-    guard.user.role === "admin" ||
-    (await canEditVideo({
-      db,
-      user: { id: guard.user.id, role: guard.user.role ?? null },
-      video: target,
-      requiredKey: "video.chapter_admin",
-      privilegeMode: "event",
-    }));
+    !isAuthor &&
+    (guard.user.role === "admin" ||
+      (await canEditVideo({
+        db,
+        user: { id: guard.user.id, role: guard.user.role ?? null },
+        video: target,
+        requiredKey: "video.chapter_admin",
+        privilegeMode: "event",
+      })));
 
   if (!isAuthor && !canModerate) {
     return {
