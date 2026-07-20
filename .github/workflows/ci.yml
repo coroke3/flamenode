@@ -2,187 +2,224 @@ name: CI
 
 on:
   pull_request:
-
-permissions:
-  contents: write
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 concurrency:
-  group: ci-final-candidate-repair-${{ github.event.pull_request.number }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   verify:
-    if: github.event.pull_request.head.ref == 'agent/db-canonical-final-integration' && github.actor != 'github-actions[bot]'
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SITE_URL: https://flamenode.invalid
+      AUTH_URL: https://flamenode.invalid
+      AUTH_SECRET: ci-placeholder-not-a-production-secret
+      AUTH_DISCORD_ID: ci-placeholder-id
+      AUTH_DISCORD_SECRET: ci-placeholder-secret
+      CI: "1"
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: agent/db-canonical-final-integration
           fetch-depth: 0
 
-      - name: 最終統合候補を正本へ修復
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: 実行環境を表示
+        run: |
+          node --version
+          npm --version
+
+      - name: 依存関係をインストール
+        run: npm ci --no-audit --no-fund
+
+      - name: 依存関係ツリーを検証
+        run: npm ls --depth=0
+
+      - name: lockfileが変更されていないことを検証
+        run: git diff --exit-code -- package-lock.json
+
+      - name: 型検査
+        shell: bash
+        run: |
+          mkdir -p .tmp
+          set -o pipefail
+          npm run typecheck 2>&1 | tee .tmp/typecheck.log
+
+      - name: 型検査ログを保存
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: typecheck-diagnostics-${{ github.run_id }}
+          path: .tmp/typecheck.log
+          if-no-files-found: warn
+          retention-days: 3
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unitテスト
+        shell: bash
+        run: |
+          mkdir -p .tmp
+          set -o pipefail
+          npm run test:unit 2>&1 | tee .tmp/unit-tests.log
+
+      - name: Unitテストログを保存
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-diagnostics-${{ github.run_id }}
+          path: .tmp/unit-tests.log
+          if-no-files-found: warn
+          retention-days: 3
+
+      - name: Workerテスト
+        run: npm run test:workers
+
+      - name: Cloudflare CI契約テスト
+        run: npm run test:cloudflare-ci
+
+      - name: 統合テスト
+        shell: bash
+        run: |
+          mkdir -p .tmp
+          set -o pipefail
+          npm run test:integration 2>&1 | tee .tmp/integration-tests.log
+
+      - name: 統合テストログを保存
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-diagnostics-${{ github.run_id }}
+          path: .tmp/integration-tests.log
+          if-no-files-found: warn
+          retention-days: 3
+
+      - name: Next.js本番ビルド
+        run: npm run build
+
+      - name: Cloudflare Pagesビルド
+        shell: bash
+        run: |
+          mkdir -p .tmp
+          set -o pipefail
+          npm run pages:build 2>&1 | tee .tmp/pages-build.log
+
+      - name: Pagesビルドログを保存
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-build-diagnostics-${{ github.run_id }}
+          path: .tmp/pages-build.log
+          if-no-files-found: warn
+          retention-days: 3
+
+      - name: Pages成果物を検査
+        run: npm run check:pages-output
+
+      - name: Cloudflareテンプレートを検査
+        run: npm run check:cloudflare-template
+
+      - name: Cloudflare fixture設定を検査
+        run: npm run check:cloudflare-config
+        env:
+          CLOUDFLARE_CONFIG_MODE: fixture
+
+      - name: owner検査用DBを準備
+        run: node scripts/create-owner-check-fixture.mjs
+
+      - name: DBとowner不変条件を検査
+        env:
+          FLAMENODE_OWNER_CHECK_DB: .tmp/owner-check.sqlite
+        run: |
+          npm run check:db-schema
+          npm run check:db-legacy
+          npm run check:event-owners
+
+      - name: UI受入契約を検査
+        run: npm run check:ui-acceptance
+
+      - name: 公開API DTO契約を検査
+        run: npm run check:public-api-contract
+
+      - name: 公開API漏えいを静的検査
+        run: npm run check:public-api-leaks
+
+      - name: プロジェクト文書を検査
+        shell: bash
+        run: |
+          mkdir -p .tmp
+          set -o pipefail
+          npm run check:project-docs 2>&1 | tee .tmp/project-docs.log
+
+      - name: 文書検査ログを保存
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: project-docs-diagnostics-${{ github.run_id }}
+          path: .tmp/project-docs.log
+          if-no-files-found: warn
+          retention-days: 3
+
+      - name: Active文書とDB履歴を検査
+        run: |
+          npm run check:docs
+          npm run check:db-history
+
+  report-main:
+    if: always() && github.event_name == 'push' && github.actor != 'github-actions[bot]'
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: 現在のmainだけ結果を記録
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         shell: bash
         run: |
           set -euo pipefail
+          git fetch origin main
+          current_sha="$(git rev-parse origin/main)"
+          if [ "$current_sha" != "$CANDIDATE_SHA" ]; then
+            echo "mainが$current_shaへ更新済みのため、$CANDIDATE_SHAの結果は記録しません。"
+            exit 0
+          fi
+          git reset --hard origin/main
+          if [ "$VERIFY_RESULT" = "success" ]; then
+            verdict="PASS"
+          else
+            verdict="FAIL"
+          fi
+          completed_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          cat > docs/operations/last-main-ci.md <<EOF
+          # 最新mainのCI結果
+
+          > Status: Active
+          > Result: ${verdict}
+          > Verify job: ${VERIFY_RESULT}
+          > Candidate commit: ${CANDIDATE_SHA}
+          > Completed at: ${completed_at}
+          > Workflow run: ${RUN_URL}
+
+          この結果は、workflow完了時点でもCandidate commitがmain HEADだった場合だけ記録されます。
+          EOF
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          python - <<'PY'
-          from pathlib import Path
-          import re
-
-          page = Path("app/(public)/[id]/page.tsx")
-          text = page.read_text().replace(
-              "detail: { video, creator, events, members, chapters, memberChapters },",
-              "detail: { video, creator, events, members, chapters },",
-          )
-          text = re.sub(
-              r"<MemberSection\s+members=\{members\}\s+memberChapters=.*?\s*/>",
-              "<MemberSection members={members} />",
-              text,
-              flags=re.S,
-          )
-          if "memberChapters" in text:
-              raise SystemExit("public page still references memberChapters")
-          page.write_text(text)
-
-          queries = Path("src/lib/db/videoDetailQueries.ts")
-          text = re.sub(
-              r"\n\s*// 旧メンバー専用タブの返却形.*?\n\s*return \{",
-              "\n\n  return {",
-              queries.read_text(),
-              flags=re.S,
-          ).replace("    chapters,\n    memberChapters,", "    chapters,")
-          if "memberChapters" in text:
-              raise SystemExit("videoDetailQueries still references memberChapters")
-          queries.write_text(text)
-
-          section = Path("src/components/video/MemberSection.tsx")
-          text = section.read_text().replace(
-              "  /** 呼び出し元の切替完了まで受け取るが、表示・処理には使用しない。 */\n  memberChapters?: readonly unknown[];\n",
-              "",
-          )
-          if "memberChapters" in text:
-              raise SystemExit("MemberSection still references memberChapters")
-          section.write_text(text)
-
-          event_admin = Path("src/lib/actions/event-admin.ts")
-          text = event_admin.read_text().replace(
-              "  eventCustomQuestions,\n  eventTemplates,\n  events,",
-              "  eventCustomQuestions,\n  eventStaff,\n  eventTemplates,\n  events,\n  xUserAccountLinks,\n  xUsers,",
-          )
-          duplicate = '''  const duplicate = (
-    await db.select({ id: events.id }).from(events).where(eq(events.id, id)).limit(1)
-  )[0];
-  if (duplicate) return { ok: false, message: `ID「${id}」は既に存在します。` };
-'''
-          if "const ownerIdentity" not in text:
-              owner_lookup = duplicate + '''
-  const ownerIdentity = (
-    await db
-      .select({
-        x_user_id: xUserAccountLinks.x_user_id,
-        display_name: xUsers.x_name,
-      })
-      .from(xUserAccountLinks)
-      .innerJoin(xUsers, eq(xUsers.id, xUserAccountLinks.x_user_id))
-      .where(eq(xUserAccountLinks.auth_user_id, actorUserId))
-      .limit(1)
-  )[0];
-  if (!ownerIdentity) {
-    return {
-      ok: false,
-      message: "イベント作成には認証ユーザーへ紐付いた X 名義が必要です。",
-    };
-  }
-'''
-              if duplicate not in text:
-                  raise SystemExit("event duplicate anchor missing")
-              text = text.replace(duplicate, owner_lookup, 1)
-          for obsolete in (
-              "    max_consecutive_slots_per_entry: data.max_consecutive_slots_per_entry,\n",
-              "    representative_x_user_id: null,\n",
-              "    public_api_updated_at: null,\n",
-          ):
-              text = text.replace(obsolete, "")
-          row_anchor = "  } satisfies typeof events.$inferInsert;\n  const questions = buildQuestionRows(id, definitions, now);"
-          if "const ownerRow" not in text:
-              owner_row = '''  } satisfies typeof events.$inferInsert;
-  const ownerRow = {
-    id: generateId("es"),
-    event_id: id,
-    x_user_id: ownerIdentity.x_user_id,
-    display_name: ownerIdentity.display_name,
-    permission_preset: "owner" as const,
-    custom_permission_keys_json: null,
-    is_public: 1,
-    public_role_label: "主催",
-    approved_by_auth_user_id: actorUserId,
-    approved_at: now,
-    created_at: now,
-    updated_at: now,
-  } satisfies typeof eventStaff.$inferInsert;
-  const questions = buildQuestionRows(id, definitions, now);'''
-              if row_anchor not in text:
-                  raise SystemExit("event owner row anchor missing")
-              text = text.replace(row_anchor, owner_row, 1)
-          text = text.replace(
-              "    db.insert(events).values(createdRow),\n    ...insertChunks",
-              "    db.insert(events).values(createdRow),\n    db.insert(eventStaff).values(ownerRow),\n    ...insertChunks",
-              1,
-          ).replace(
-              "    1,\n    ...insertChunks.map",
-              "    1,\n    1,\n    ...insertChunks.map",
-              1,
-          )
-          audit_anchor = '''    {
-      table_name: "events",
-      target_id: id,
-      operation: "CREATE",
-      before: null,
-      after: createdRow,
-      actor_user_id: actorUserId,
-      retention_class: "normal",
-      strict: true,
-    },
-'''
-          if 'context: "event-create:owner"' not in text:
-              owner_audit = audit_anchor + '''    {
-      table_name: "event_staff",
-      target_id: ownerRow.id,
-      operation: "CREATE",
-      before: null,
-      after: ownerRow,
-      actor_user_id: actorUserId,
-      context: "event-create:owner",
-      reason: "イベント作成者をownerとして登録",
-      retention_class: "long_audit",
-      restore_strategy: "delete_created",
-      strict: true,
-    },
-'''
-              if audit_anchor not in text:
-                  raise SystemExit("event owner audit anchor missing")
-              text = text.replace(audit_anchor, owner_audit, 1)
-          event_admin.write_text(text)
-
-          for relative in (
-              ".agent-trigger/final-candidate-fix",
-              ".agent-trigger/ci-fix",
-              ".agent-artifact-run-id",
-              ".tmp/integration-report.txt",
-              ".github/workflows/export-current-source-temporary.yml",
-              ".github/workflows/export-pr-source-temp.yml",
-              ".github/workflows/export-temp-source.yml",
-              ".github/workflows/final-canonical-integration-v2.yml",
-              ".github/workflows/final-canonical-integration-v3.yml",
-              ".github/workflows/final-canonical-integration-v4.yml",
-              ".github/workflows/final-canonical-integration-v5.yml",
-          ):
-              Path(relative).unlink(missing_ok=True)
-          PY
-
-          git add -A
-          git diff --cached --check
-          git commit -m "最終統合候補のowner・チャプター境界を正本化"
-          git push origin HEAD:agent/db-canonical-final-integration
+          git add docs/operations/last-main-ci.md
+          git commit -m "CI: mainの検証結果を記録 ${CANDIDATE_SHA:0:7} (${verdict})"
+          git push origin HEAD:main
