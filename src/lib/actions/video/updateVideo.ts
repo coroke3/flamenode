@@ -22,6 +22,7 @@ import {
   validateVideoMemberSubmission,
 } from "@/lib/video/submissionValidation";
 import type { CustomAnswerDraft } from "@/lib/video/customQuestions";
+import { fetchActiveCustomQuestionsForEvents } from "@/lib/video/customQuestionAnswers";
 import {
   MAX_ATOMIC_VIDEO_EVENTS,
   resolveVideoEventSyncTargetIds,
@@ -224,6 +225,24 @@ export async function updateVideo(
       console.warn("[updateVideo] event plan rejected", error);
       return { ok: false, message: "選択イベント数が保存上限を超えています。" };
     }
+
+    const addedEventIds = syncedEventIds.filter(
+      (eventId) => !previousEventIds.includes(eventId),
+    );
+    if (!sections.descriptions && addedEventIds.length > 0) {
+      const questionsByEvent = await fetchActiveCustomQuestionsForEvents(db, addedEventIds);
+      const requiredQuestion = addedEventIds
+        .flatMap((eventId) => questionsByEvent.get(eventId) ?? [])
+        .find((question) => question.required);
+      if (requiredQuestion) {
+        return {
+          ok: false,
+          message:
+            `「${requiredQuestion.label}」への回答が必要なため、紹介文・追加質問の編集権限なしではこのイベントを追加できません。`,
+        };
+      }
+    }
+
     customAnswerDeleteEventIds = computeCustomAnswerDeleteEventIds({
       previousEventIds,
       syncedEventIds,
