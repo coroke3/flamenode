@@ -1,0 +1,164 @@
+name: Merge final canonical integration
+
+on:
+  push:
+    branches:
+      - agent/db-canonical-migration-v2
+    paths:
+      - .agent-trigger/merge-final-integration-v6
+
+permissions:
+  contents: write
+
+concurrency:
+  group: merge-final-canonical
+  cancel-in-progress: false
+
+jobs:
+  integrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout canonical branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/db-canonical-migration-v2
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch integration sources
+        run: |
+          git fetch --no-tags origin \
+            agent/db-canonical-final-integration \
+            agent/x-identity-import-hardening \
+            agent/unify-custom-questions
+
+      - name: Merge and resolve conflicts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .tmp
+          : > .tmp/final-merge.log
+
+          set +e
+          git merge --no-ff --no-commit -X theirs origin/agent/db-canonical-final-integration 2>&1 | tee -a .tmp/final-merge.log
+          merge_status=${PIPESTATUS[0]}
+          set -e
+
+          mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
+          if ((${#conflicts[@]} > 0)); then
+            printf 'Resolving %s conflicted paths\n' "${#conflicts[@]}" | tee -a .tmp/final-merge.log
+            for path in "${conflicts[@]}"; do
+              case "$path" in
+                .github/workflows/*|.agent-trigger/*|.tmp/*)
+                  git checkout --ours -- "$path" 2>/dev/null || git rm -f --ignore-unmatch -- "$path"
+                  ;;
+                *)
+                  git checkout --theirs -- "$path"
+                  ;;
+              esac
+              git add -A -- "$path"
+            done
+          fi
+
+          if git diff --name-only --diff-filter=U | grep -q .; then
+            echo 'Unresolved conflicts remain.' | tee -a .tmp/final-merge.log
+            git diff --name-only --diff-filter=U | tee -a .tmp/final-merge.log
+            exit 1
+          fi
+
+          if grep -RInE '^(<<<<<<<|=======|>>>>>>>)' -- . \
+            --exclude-dir=.git --exclude-dir=node_modules --exclude='*.lock' \
+            | tee -a .tmp/final-merge.log; then
+            echo 'Conflict markers remain.' | tee -a .tmp/final-merge.log
+            exit 1
+          fi
+
+          # Keep the validated custom-question implementation for the three files
+          # that were previously corrupted by overlapping merges.
+          git checkout origin/agent/unify-custom-questions -- \
+            src/components/admin/EventForm.tsx \
+            src/lib/actions/event-admin.ts \
+            src/lib/admin/eventTemplateSettings.ts
+
+          # The final integration branch contains the canonical private/public patch.
+          git checkout origin/agent/db-canonical-final-integration -- \
+            src/components/admin/EventForm.tsx \
+            src/lib/actions/event-admin.ts \
+            src/lib/admin/eventTemplateSettings.ts
+
+          # Preserve the sole one-way legacy import boundary and atomic X-ID merge.
+          git checkout origin/agent/x-identity-import-hardening -- \
+            app/api/admin/import/legacy/route.ts \
+            app/'(admin)'/admin/import/page.tsx \
+            src/components/admin/LegacyCanonicalImportClient.tsx \
+            src/lib/import/legacy \
+            src/lib/actions/xid-merge-admin.ts \
+            src/lib/xid/merge.ts
+
+          # Remove all temporary integration/export machinery from the resulting branch.
+          rm -rf .tmp/integration-report.txt .agent-trigger
+          rm -f \
+            .github/workflows/export-pr-source-temp.yml \
+            .github/workflows/final-canonical-integration.yml \
+            .github/workflows/final-canonical-integration-v4.yml \
+            .github/workflows/merge-final-canonical.yml
+
+          git add -A
+          git status --short | tee .tmp/final-merge-status.txt
+          git commit -m "全worktreeの有効差分をDB正本へ統合"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate integrated tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .tmp
+          exec > >(tee -a .tmp/final-validation.log) 2>&1
+          npm run typecheck
+          npm run lint
+          npm run test:unit
+          npm run test:workers
+          npm run test:cloudflare-ci
+          npm run test:integration
+          npm run check:db-schema
+          npm run check:db-migration
+          npm run check:db-d1-empty
+          npm run check:db-d1-legacy
+          npm run check:event-owners
+          npm run check:public-api-contract
+          npm run check:public-api-leaks
+          npm run check:docs
+          npm run check:db-history
+          npm run check:project-docs
+          npm run build
+
+      - name: Push integrated branch
+        run: git push origin HEAD:agent/db-canonical-migration-v2
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-canonical-merge-${{ github.run_id }}
+          path: |
+            .tmp/final-merge.log
+            .tmp/final-merge-status.txt
+            .tmp/final-validation.log
+          if-no-files-found: ignore
+          retention-days: 7
