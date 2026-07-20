@@ -19,6 +19,11 @@ function requireMatch(relative, pattern, message) {
   if (body && !pattern.test(body)) errors.push(`${relative}: ${message}`);
 }
 
+function forbidMatch(relative, pattern, message) {
+  const body = read(relative);
+  if (body && pattern.test(body)) errors.push(`${relative}: ${message}`);
+}
+
 function requireAll(relative, checks) {
   const body = read(relative);
   if (!body) return;
@@ -30,9 +35,15 @@ function requireAll(relative, checks) {
 requireAll("app/(auth)/entry/page.tsx", [
   [/イベントに参加する/, "イベント参加カードがありません。"],
   [/過去の自分の作品を投稿する/, "枠なし投稿カードがありません。"],
-  [/collapseReservationGroups/, "連続枠の表示統合がありません。"],
-  [/aNeedsSubmission/, "未提出枠の優先表示がありません。"],
+  [/reservedSlots\.map\(\(slot\) =>/, "確保済み枠の1枠単位表示がありません。"],
+  [/const aNeeds = !a\.video_id && a\.status === "reserved"/, "未提出枠の優先表示がありません。"],
+  [/const needsSubmission =\s*!slot\.video_id && slot\.status === "reserved"/s, "未提出枠の提出導線がありません。"],
 ]);
+forbidMatch(
+  "app/(auth)/entry/page.tsx",
+  /collapseReservationGroups/,
+  "廃止した連続枠の表示統合を再導入しています。",
+);
 
 requireAll("src/components/forms/VideoForm.tsx", [
   [/"submitter"\s*\|\s*"work"\s*\|\s*"youtube"\s*\|\s*"confirm"/, "4段階投稿フローがありません。"],
