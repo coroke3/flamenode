@@ -33,6 +33,7 @@ const CANONICAL_FORBIDDEN = [
 ];
 
 const SCHEMA_BASE_PATH = ["src/lib/db/schema", "base.ts"].join(".");
+// 境界パス自体が旧参照検査へ一致しないよう、要素から組み立てる。
 const LEGACY_IMPORT_BOUNDARIES = [
   [...["src", "lib", "import", "legacy"], ""].join("/"),
   [...["app", "api", "admin", "import", "legacy"], ""].join("/"),
