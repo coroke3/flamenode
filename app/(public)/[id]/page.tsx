@@ -282,7 +282,7 @@ export default async function VideoDetailPage({
 
   if (!bundle) notFound();
   const {
-    detail: { video, creator, events, members, chapters, memberChapters },
+    detail: { video, creator, events, members, chapters },
     related,
     likeActive,
     bookmarkActive,
@@ -697,19 +697,7 @@ export default async function VideoDetailPage({
             <h2 className={styles.sectionTitle}>
               参加メンバー ({members.length})
             </h2>
-            <MemberSection
-              members={members}
-              memberChapters={memberChapters.map(
-                (chapter) => ({
-                  id: chapter.id,
-                  chapter_time: chapter.chapter_time,
-                  chapter_label: chapter.chapter_label,
-                  note: chapter.note,
-                  video_member_id:
-                    chapter.video_member_id,
-                }),
-              )}
-            />
+            <MemberSection members={members} />
           </section>
         ) : null}
 

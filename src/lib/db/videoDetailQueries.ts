@@ -168,24 +168,12 @@ export async function fetchVideoDetail(
     )
     .orderBy(asc(videoChapters.chapter_time), asc(videoChapters.id));
 
-  // 旧メンバー専用タブの返却形は移行期間中だけ空配列で維持する。
-  // データ自体は migration で video_chapters へ展開済みであり、旧JSONは読まない。
-  const memberChapters: Array<{
-    id: string;
-    video_member_id: string;
-    chapter_time: number;
-    chapter_label: string;
-    note: string | null;
-    order_index: number;
-  }> = [];
-
   return {
     video,
     creator,
     events: eventRows,
     members,
     chapters,
-    memberChapters,
   };
 }
 

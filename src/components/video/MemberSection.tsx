@@ -19,8 +19,6 @@ export interface MemberSectionMember {
 
 interface MemberSectionProps {
   members: readonly MemberSectionMember[];
-  /** 呼び出し元の切替完了まで受け取るが、表示・処理には使用しない。 */
-  memberChapters?: readonly unknown[];
 }
 
 type ViewMode = "cards" | "table";

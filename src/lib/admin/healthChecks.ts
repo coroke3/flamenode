@@ -502,43 +502,6 @@ async function checkOrphanVideoMember(
   };
 }
 
-/** video_members.chapters_json が現行の配列形式を満たすか */
-async function checkVideoMemberChaptersJsonInvalid(
-  db: AnyDb,
-): Promise<HealthCheckResult> {
-  const where = sql`
-    chapters_json IS NOT NULL
-    AND trim(chapters_json) <> ''
-    AND CASE
-      WHEN json_valid(chapters_json) = 1 THEN json_type(chapters_json) <> 'array'
-      ELSE 1
-    END
-  `;
-  const [countRows, sampleRows] = await Promise.all([
-    db
-      .select({ c: sql<number>`COUNT(*)` })
-      .from(sql`video_members`)
-      .where(where),
-    db
-      .select({ id: sql<string>`id` })
-      .from(sql`video_members`)
-      .where(where)
-      .limit(10),
-  ]);
-  const count = Number(countRows[0]?.c ?? 0);
-  return {
-    id: "video_members_chapters_json_invalid",
-    label: "video_members.chapters_json がJSON配列ではない",
-    status: count === 0 ? "ok" : "warn",
-    count,
-    samples: sampleRows.slice(0, 5).map((r) => r.id),
-    note:
-      count > 0
-        ? "chapters_json を空またはJSON配列に正規化してください。"
-        : undefined,
-  };
-}
-
 /** notification_outbox の processing が固着していないか */
 async function checkNotificationProcessingStuck(
   db: AnyDb,
@@ -752,7 +715,6 @@ export async function runHealthChecks(db: AnyDb): Promise<HealthCheckResult[]> {
     checkVideosOutroComment(db),
     checkChapterNonChapterMarker(db),
     checkOrphanVideoMember(db),
-    checkVideoMemberChaptersJsonInvalid(db),
     checkNotificationProcessingStuck(db),
     checkNotificationFailedVolume(db),
     checkOpenModerationCasesOverdue(db),

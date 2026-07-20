@@ -114,7 +114,7 @@ async function canModerateChapterVideo(params: {
 
 /**
  * 動画内の時刻に紐づくチャプターコメントを新正本 video_chapters に作成する。
- * 旧 video_members.chapters_json には書き込まない。
+ * チャプターは video_chapters のみへ保存する。
  */
 export async function createChapter(
   formData: FormData,
