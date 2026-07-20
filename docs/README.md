@@ -1,8 +1,7 @@
 # FlameNode ドキュメント索引
 
 > Status: Active
-> Last verified: 2026-07-14
-> Verified against commit: `6dbe07a`
+> Last verified: 2026-07-20
 > Source of truth: `src/lib/db/schema.ts`, `migrations/`, `wrangler.toml`, `package.json`
 
 ## AIの読取順
@@ -39,7 +38,6 @@ Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、Cron Worker 3本
 | Cron Worker | [operations/workers.md](operations/workers.md) |
 | YouTube同期 | [operations/youtube-playlist-sync.md](operations/youtube-playlist-sync.md) |
 | 監査・復元・owner保護 | [operations/audit-and-restore.md](operations/audit-and-restore.md) |
-| legacy import | [operations/legacy-import.md](operations/legacy-import.md) |
 | spreadsheet import | [operations/spreadsheet-import.md](operations/spreadsheet-import.md) |
 | R2静的配信 | [operations/static-delivery.md](operations/static-delivery.md) |
 | 障害対応 | [operations/incident-response.md](operations/incident-response.md) |
