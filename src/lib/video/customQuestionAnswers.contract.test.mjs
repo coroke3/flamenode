@@ -15,7 +15,7 @@ test("カスタム回答のCAS削除は8行単位に分割する", () => {
   );
   assert.match(
     source,
-    /chunkValues\(existing, CUSTOM_ANSWER_DELETE_CHUNK_SIZE\)/,
+    /chunkValues\(stale, CUSTOM_ANSWER_DELETE_CHUNK_SIZE\)/,
   );
   assert.match(
     source,
@@ -25,9 +25,31 @@ test("カスタム回答のCAS削除は8行単位に分割する", () => {
 
 test("現在回答と解除イベント回答は監査対象IDで重複排除する", () => {
   assert.match(source, /const existingByTarget = new Map/);
+  assert.match(source, /answerTargetId\(row\)/);
+});
+
+test("回答更新は登録日時を保持し、変更行だけUPSERTする", () => {
   assert.match(
     source,
-    /compositeAuditTargetId\(row\.video_id, row\.event_id, row\.question_id\)/,
+    /created_at: current\?\.created_at \?\? args\.now/,
+  );
+  assert.match(source, /const changed = next\.filter/);
+  assert.match(source, /onConflictDoUpdate/);
+  assert.match(source, /updated_at: sql`excluded\.updated_at`/);
+});
+
+test("回答監査は作成・更新・削除を実際の差分に合わせる", () => {
+  assert.match(
+    source,
+    /operation: current \? "UPDATE" as const : "CREATE" as const/,
+  );
+  assert.match(
+    source,
+    /operation: "DELETE" as const/,
+  );
+  assert.doesNotMatch(
+    source,
+    /chunkValues\(existing, CUSTOM_ANSWER_DELETE_CHUNK_SIZE\)/,
   );
 });
 
