@@ -6,7 +6,11 @@ type ApiResponse = {
   ok: boolean;
   message?: string;
   mode?: "preview" | "apply";
-  previewToken?: string | null;
+  preview_token?: string;
+  plan_hash?: string;
+  expires_at?: number;
+  requires_repreview?: boolean;
+  retryable?: boolean;
   summary?: Record<string, number>;
   warnings?: string[];
   errors?: string[];
@@ -17,43 +21,72 @@ type ApiResponse = {
   result?: unknown;
 };
 
+type PreviewCredential = {
+  token: string;
+  planHash: string;
+  expiresAt: number;
+};
+
 export function LegacyCanonicalImportClient(): React.ReactElement {
   const formRef = React.useRef<HTMLFormElement>(null);
   const [result, setResult] = React.useState<ApiResponse | null>(null);
   const [pending, setPending] = React.useState<"preview" | "apply" | null>(null);
-  const [previewToken, setPreviewToken] = React.useState<string | null>(null);
+  const [credential, setCredential] = React.useState<PreviewCredential | null>(null);
 
   function invalidatePreview(): void {
-    setPreviewToken(null);
+    setCredential(null);
   }
 
   async function submit(mode: "preview" | "apply"): Promise<void> {
     const form = formRef.current;
     if (!form || pending) return;
-    if (mode === "apply" && !previewToken) {
+    if (mode === "apply" && !credential) {
       setResult({ ok: false, message: "先にプレビューを実行してください。" });
       return;
     }
-    if (mode === "apply" && !window.confirm("プレビュー済みの内容を新正本へ書き込みます。続行しますか？")) {
+    if (mode === "apply" && credential && credential.expiresAt <= Math.floor(Date.now() / 1000)) {
+      setCredential(null);
+      setResult({ ok: false, message: "プレビューの有効期限が切れました。再度プレビューしてください。" });
       return;
     }
+    if (mode === "apply" && !window.confirm("R2に保存したプレビュー済みplanを新正本へ書き込みます。続行しますか？")) {
+      return;
+    }
+
     setPending(mode);
-    const body = new FormData(form);
+    const body = mode === "preview" ? new FormData(form) : new FormData();
     body.set("mode", mode);
-    if (mode === "apply" && previewToken) body.set("preview_token", previewToken);
+    if (mode === "apply" && credential) {
+      body.set("preview_token", credential.token);
+      body.set("plan_hash", credential.planHash);
+    }
+
     try {
       const response = await fetch("/api/admin/import/legacy", { method: "POST", body });
       const json = (await response.json()) as ApiResponse;
       setResult(json);
-      if (mode === "preview") setPreviewToken(json.ok ? json.previewToken ?? null : null);
-      if (mode === "apply") setPreviewToken(null);
+      if (mode === "preview") {
+        setCredential(
+          json.ok && json.preview_token && json.plan_hash && json.expires_at
+            ? { token: json.preview_token, planHash: json.plan_hash, expiresAt: json.expires_at }
+            : null,
+        );
+      } else if (json.ok || json.requires_repreview) {
+        setCredential(null);
+      }
     } catch {
-      setResult({ ok: false, message: "通信に失敗しました。入力内容は変更されていません。" });
-      if (mode === "apply") setPreviewToken(null);
+      setResult({
+        ok: false,
+        message: "通信結果を確認できませんでした。二重送信を避けるため、少し待ってから同じpreviewで再試行してください。",
+      });
     } finally {
       setPending(null);
     }
   }
+
+  const expiresLabel = credential
+    ? new Date(credential.expiresAt * 1000).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })
+    : null;
 
   return (
     <div style={{ display: "grid", gap: 18 }}>
@@ -95,13 +128,15 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <button type="button" className="fn-btn fn-btn-primary" disabled={!!pending} onClick={() => void submit("preview")}>
-            {pending === "preview" ? "解析中…" : "プレビュー"}
+            {pending === "preview" ? "解析・保存中…" : "プレビュー"}
           </button>
-          <button type="button" className="fn-btn fn-btn-danger" disabled={!!pending || !previewToken} onClick={() => void submit("apply")}>
+          <button type="button" className="fn-btn fn-btn-danger" disabled={!!pending || !credential} onClick={() => void submit("apply")}>
             {pending === "apply" ? "書き込み中…" : "新正本へ書き込む"}
           </button>
           <span className="fn-muted fn-text-sm">
-            {previewToken ? "プレビュー内容は15分間固定されています。" : "ファイルまたは設定を変更すると再プレビューが必要です。"}
+            {credential
+              ? `planはR2へ固定済みです。有効期限: ${expiresLabel}`
+              : "ファイルまたは設定を変更すると再プレビューが必要です。"}
           </span>
         </div>
       </form>
@@ -116,6 +151,7 @@ function ImportResult({ result }: { result: ApiResponse }): React.ReactElement {
     <section aria-live="polite" style={{ display: "grid", gap: 12, padding: 18, border: `1px solid ${result.ok ? "var(--border-subtle)" : "var(--danger)"}`, borderRadius: "var(--radius-md)", background: "var(--bg-surface)" }}>
       <h2 style={{ fontSize: 16, fontWeight: 700 }}>{result.ok ? (result.mode === "apply" ? "インポート完了" : "プレビュー結果") : "確認が必要です"}</h2>
       {result.message ? <p>{result.message}</p> : null}
+      {result.plan_hash ? <p className="fn-muted fn-text-sm">plan hash: <code>{result.plan_hash}</code></p> : null}
       {result.summary ? (
         <dl style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
           {Object.entries(result.summary).map(([key, value]) => (
