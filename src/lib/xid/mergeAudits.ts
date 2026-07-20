@@ -25,8 +25,7 @@ function sameEventStaffSnapshot(
     before.x_user_id === after.x_user_id &&
     before.display_name === after.display_name &&
     before.permission_preset === after.permission_preset &&
-    before.custom_permission_keys_json ===
-      after.custom_permission_keys_json &&
+    before.custom_permission_keys_json === after.custom_permission_keys_json &&
     before.is_public === after.is_public &&
     before.public_role_label === after.public_role_label &&
     before.approved_by_auth_user_id === after.approved_by_auth_user_id &&
@@ -49,7 +48,6 @@ export function buildEventStaffMergeAudits(input: {
 
   return input.beforeRows.flatMap((before): WriteAuditLogInput[] => {
     const after = afterById.get(before.id) ?? null;
-
     if (!after) {
       return [
         {
@@ -67,11 +65,7 @@ export function buildEventStaffMergeAudits(input: {
         },
       ];
     }
-
-    if (sameEventStaffSnapshot(before, after)) {
-      return [];
-    }
-
+    if (sameEventStaffSnapshot(before, after)) return [];
     return [
       {
         table_name: "event_staff",

@@ -16,6 +16,7 @@ import {
   xUsers,
 } from "@/lib/db/schema";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { buildEventStaffMergeAudits } from "./mergeAudits";
 
 export const X_ID_MERGE_REVERT_WINDOW_SECONDS = 7 * 24 * 60 * 60;
 
@@ -308,6 +309,27 @@ export async function executeApprovedXIdMergeRequest(
     `),
   ];
 
+  const promotedTargetStaffIds = new Set(
+    promotedTargetStaff.map((row) => row.id),
+  );
+  const eventStaffAfterRows = snapshot.event_staff.flatMap((row) => {
+    if (row.x_user_id === source) {
+      if (targetStaffByEvent.has(row.event_id)) return [];
+      return [{ ...row, x_user_id: target, updated_at: now }];
+    }
+    if (row.x_user_id === target && promotedTargetStaffIds.has(row.id)) {
+      return [{ ...row, permission_preset: "owner", updated_at: now }];
+    }
+    return [{ ...row }];
+  });
+  const eventStaffAudits = buildEventStaffMergeAudits({
+    beforeRows: snapshot.event_staff,
+    afterRows: eventStaffAfterRows,
+    actorUserId: input.actorAuthUserId,
+    fromXId: source,
+    toXId: target,
+  });
+
   await mutateWithAudit(db, {
     mutationStatements: statements,
     expectedMutationChanges: [
@@ -331,6 +353,7 @@ export async function executeApprovedXIdMergeRequest(
       1,
     ],
     audits: [
+      ...eventStaffAudits,
       {
         table_name: "x_users",
         target_id: source,
