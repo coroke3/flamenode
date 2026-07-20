@@ -1,0 +1,63 @@
+name: Agent PR88 fix local type errors
+
+on:
+  push:
+    branches:
+      - agent/ux-and-status-simplification
+    paths:
+      - .github/workflows/agent-pr88-fix-local-type-errors.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/ux-and-status-simplification
+          fetch-depth: 0
+      - name: Apply canonical event files and status adjustments
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin agent/db-canonical-events
+          git checkout origin/agent/db-canonical-events -- \
+            src/lib/actions/event-admin.ts \
+            src/lib/admin/eventTemplateSettings.ts \
+            src/lib/video/slotPart.ts
+
+          python - <<'PY'
+          from pathlib import Path
+
+          template = Path('src/lib/admin/eventTemplateSettings.ts')
+          text = template.read_text()
+          text = text.replace('visibility_status: "draft",', 'visibility_status: "private",')
+          template.write_text(text)
+
+          slot_part = Path('src/lib/video/slotPart.ts')
+          text = slot_part.read_text()
+          text = text.replace(
+              "sql`${videos.visibility_status} NOT IN ('archived', 'voided')`,",
+              "ne(videos.visibility_status, \"voided\"),",
+          )
+          text = text.replace('import { and, eq, ne, sql } from "drizzle-orm";', 'import { and, eq, ne } from "drizzle-orm";')
+          slot_part.write_text(text)
+
+          icons = Path('src/lib/db/xIconResolution.ts')
+          text = icons.read_text()
+          old = 'import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";'
+          new = 'import { and, desc, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm";'
+          if old not in text:
+              raise SystemExit('xIconResolution import did not match')
+          icons.write_text(text.replace(old, new, 1))
+          PY
+
+          rm .github/workflows/agent-pr88-fix-local-type-errors.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "イベント正本実装へ状態整理を接続"
+          git push origin HEAD:agent/ux-and-status-simplification
