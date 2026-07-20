@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, or } from "drizzle-orm";
+import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
 import type { getDatabase } from "@/lib/cloudflare";
 import {
   eventCustomQuestions,
@@ -32,6 +32,7 @@ const CUSTOM_QUESTION_EVENT_ID_BATCH_SIZE = 40;
 const CUSTOM_ANSWER_DELETE_CHUNK_SIZE = MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS;
 
 type DB = NonNullable<ReturnType<typeof getDatabase>>;
+type CustomAnswerRow = typeof videoCustomAnswers.$inferSelect;
 
 function chunkValues<T>(values: readonly T[], size: number): T[][] {
   const chunks: T[][] = [];
@@ -39,6 +40,14 @@ function chunkValues<T>(values: readonly T[], size: number): T[][] {
     chunks.push(values.slice(index, index + size));
   }
   return chunks;
+}
+
+function answerTargetId(row: Pick<CustomAnswerRow, "video_id" | "event_id" | "question_id">): string {
+  return compositeAuditTargetId(row.video_id, row.event_id, row.question_id);
+}
+
+function sameStoredAnswer(current: CustomAnswerRow, next: CustomAnswerRow): boolean {
+  return current.answer_text === next.answer_text && current.answer_json === next.answer_json;
 }
 
 export async function buildReplaceGeneralCustomAnswersPlan(
@@ -113,19 +122,16 @@ export async function buildReplaceGeneralCustomAnswersPlan(
     throw new Error("video_custom_answer_removed_event_history_limit_exceeded");
   }
 
-  const existingByTarget = new Map<string, typeof videoCustomAnswers.$inferSelect>();
+  const existingByTarget = new Map<string, CustomAnswerRow>();
   for (const row of [...existingActive, ...removedEventAnswers]) {
-    existingByTarget.set(
-      compositeAuditTargetId(row.video_id, row.event_id, row.question_id),
-      row,
-    );
+    existingByTarget.set(answerTargetId(row), row);
   }
   const existing = [...existingByTarget.values()];
   const draftByQuestionId = new Map(
     args.drafts.map((draft) => [draft.question_id, draft]),
   );
 
-  const next: (typeof videoCustomAnswers.$inferSelect)[] = [];
+  const next: CustomAnswerRow[] = [];
   for (const question of questions) {
     const draft = draftByQuestionId.get(question.id);
     if (!draft) continue;
@@ -133,19 +139,28 @@ export async function buildReplaceGeneralCustomAnswersPlan(
     const hasJson = Boolean(draft.answer_json?.trim());
     if (!hasText && !hasJson) continue;
 
+    const targetId = compositeAuditTargetId(args.videoId, question.event_id, question.id);
+    const current = existingByTarget.get(targetId);
     next.push({
       video_id: args.videoId,
       event_id: question.event_id,
       question_id: question.id,
       answer_text: draft.answer_text,
       answer_json: draft.answer_json,
-      created_at: args.now,
+      created_at: current?.created_at ?? args.now,
       updated_at: args.now,
     });
   }
 
+  const nextTargetIds = new Set(next.map(answerTargetId));
+  const stale = existing.filter((row) => !nextTargetIds.has(answerTargetId(row)));
+  const changed = next.filter((row) => {
+    const current = existingByTarget.get(answerTargetId(row));
+    return !current || !sameStoredAnswer(current, row);
+  });
+
   const plan = emptyVideoAtomicWritePlan();
-  for (const deleteChunk of chunkValues(existing, CUSTOM_ANSWER_DELETE_CHUNK_SIZE)) {
+  for (const deleteChunk of chunkValues(stale, CUSTOM_ANSWER_DELETE_CHUNK_SIZE)) {
     plan.statements.push(db.delete(videoCustomAnswers).where(or(...deleteChunk.map((row) => and(
       eq(videoCustomAnswers.video_id, row.video_id),
       eq(videoCustomAnswers.event_id, row.event_id),
@@ -154,10 +169,10 @@ export async function buildReplaceGeneralCustomAnswersPlan(
     )!))!));
     plan.expectedChanges.push(deleteChunk.length);
   }
-  if (existing.length > 0) {
-    plan.audits.push(...existing.map((row) => ({
+  if (stale.length > 0) {
+    plan.audits.push(...stale.map((row) => ({
       table_name: "video_custom_answers",
-      target_id: compositeAuditTargetId(row.video_id, row.event_id, row.question_id),
+      target_id: answerTargetId(row),
       operation: "DELETE" as const,
       before: { ...row },
       after: null,
@@ -167,20 +182,39 @@ export async function buildReplaceGeneralCustomAnswersPlan(
       strict: true,
     })));
   }
-  if (next.length > 0) {
-    plan.statements.push(db.insert(videoCustomAnswers).values(next));
-    plan.expectedChanges.push(next.length);
-    plan.audits.push(...next.map((row) => ({
-      table_name: "video_custom_answers",
-      target_id: compositeAuditTargetId(row.video_id, row.event_id, row.question_id),
-      operation: "CREATE" as const,
-      before: null,
-      after: { ...row },
-      actor_user_id: args.actorUserId,
-      context: "video-save:custom-answers",
-      retention_class: "normal" as const,
-      strict: true,
-    })));
+
+  if (changed.length > 0) {
+    plan.statements.push(
+      db.insert(videoCustomAnswers)
+        .values(changed)
+        .onConflictDoUpdate({
+          target: [
+            videoCustomAnswers.video_id,
+            videoCustomAnswers.event_id,
+            videoCustomAnswers.question_id,
+          ],
+          set: {
+            answer_text: sql`excluded.answer_text`,
+            answer_json: sql`excluded.answer_json`,
+            updated_at: sql`excluded.updated_at`,
+          },
+        }),
+    );
+    plan.expectedChanges.push(changed.length);
+    plan.audits.push(...changed.map((row) => {
+      const current = existingByTarget.get(answerTargetId(row));
+      return {
+        table_name: "video_custom_answers",
+        target_id: answerTargetId(row),
+        operation: current ? "UPDATE" as const : "CREATE" as const,
+        before: current ? { ...current } : null,
+        after: { ...row },
+        actor_user_id: args.actorUserId,
+        context: "video-save:custom-answers",
+        retention_class: "normal" as const,
+        strict: true,
+      };
+    }));
   }
   return plan;
 }
