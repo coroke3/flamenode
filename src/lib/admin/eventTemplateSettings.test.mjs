@@ -8,7 +8,7 @@ import {
 
 function baseEvent(overrides = {}) {
   return {
-    schema_version: 2,
+    schema_version: 3,
     event_type: "event",
     explanation: null,
     icon_url: null,
@@ -49,7 +49,24 @@ function checkboxQuestion(overrides = {}) {
   };
 }
 
-test("snapshotFromEvent stores active normalized questions once", () => {
+function canonicalTemplateQuestion(overrides = {}) {
+  return {
+    question_key: "rights_checked",
+    label: "確認済みの権利",
+    description: "該当する項目をすべて選択",
+    type: "checkbox",
+    required: true,
+    options_json: JSON.stringify(["素材", "楽曲", "モデル"]),
+    placeholder: null,
+    max_length: null,
+    sort_order: 0,
+    is_active: true,
+    visibility: "review",
+    ...overrides,
+  };
+}
+
+test("snapshotFromEvent stores only active canonical questions in schema v3", () => {
   const snapshot = snapshotFromEvent(baseEvent(), [
     checkboxQuestion(),
     checkboxQuestion({
@@ -59,26 +76,14 @@ test("snapshotFromEvent stores active normalized questions once", () => {
     }),
   ]);
 
-  assert.equal(snapshot.schema_version, 2);
+  assert.equal(snapshot.schema_version, 3);
   assert.equal("video_form_settings_json" in snapshot, false);
   assert.deepEqual(snapshot.custom_question_definitions, [
-    {
-      question_key: "rights_checked",
-      label: "確認済みの権利",
-      description: "該当する項目をすべて選択",
-      type: "checkbox",
-      required: true,
-      options_json: JSON.stringify(["素材", "楽曲", "モデル"]),
-      placeholder: null,
-      max_length: null,
-      sort_order: 0,
-      is_active: true,
-      visibility: "review",
-    },
+    canonicalTemplateQuestion(),
   ]);
 });
 
-test("template round trip restores checkbox options to the event form", () => {
+test("schema v3 round trip restores checkbox options to the event form", () => {
   const snapshot = snapshotFromEvent(baseEvent(), [checkboxQuestion()]);
   const parsed = parseEventTemplateSnapshot(JSON.stringify(snapshot));
 
@@ -90,19 +95,41 @@ test("template round trip restores checkbox options to the event form", () => {
   assert.equal(initial.custom_questions[0].required, true);
 });
 
-test("parseEventTemplateSnapshot rejects old template schema", () => {
-  const snapshot = parseEventTemplateSnapshot(JSON.stringify({
-    ...baseEvent(),
-    schema_version: 1,
-  }));
-
-  assert.equal(snapshot, null);
+test("old template schemas are rejected without conversion", () => {
+  for (const schemaVersion of [1, 2]) {
+    const snapshot = parseEventTemplateSnapshot(JSON.stringify({
+      ...baseEvent(),
+      schema_version: schemaVersion,
+    }));
+    assert.equal(snapshot, null);
+  }
 });
 
-test("parseEventTemplateSnapshot normalizes an absent question definition list", () => {
+test("missing question definitions are rejected instead of defaulting to empty", () => {
   const { custom_question_definitions: _questions, ...withoutQuestions } = baseEvent();
-  const snapshot = parseEventTemplateSnapshot(JSON.stringify(withoutQuestions));
+  assert.equal(parseEventTemplateSnapshot(JSON.stringify(withoutQuestions)), null);
+});
 
-  assert.ok(snapshot);
-  assert.deepEqual(snapshot.custom_question_definitions, []);
+test("legacy option arrays and coercible booleans are rejected", () => {
+  const legacyOptions = {
+    ...canonicalTemplateQuestion(),
+    options: ["素材", "楽曲"],
+  };
+  delete legacyOptions.options_json;
+  assert.equal(parseEventTemplateSnapshot(JSON.stringify({
+    ...baseEvent(),
+    custom_question_definitions: [legacyOptions],
+  })), null);
+
+  assert.equal(parseEventTemplateSnapshot(JSON.stringify({
+    ...baseEvent(),
+    custom_question_definitions: [canonicalTemplateQuestion({ required: 1 })],
+  })), null);
+});
+
+test("template question order must match the array order", () => {
+  assert.equal(parseEventTemplateSnapshot(JSON.stringify({
+    ...baseEvent(),
+    custom_question_definitions: [canonicalTemplateQuestion({ sort_order: 4 })],
+  })), null);
 });
