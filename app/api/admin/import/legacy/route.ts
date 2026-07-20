@@ -9,10 +9,10 @@ import {
 } from "@/lib/import/legacy/normalize";
 import { applyLegacyImportPlan } from "@/lib/import/legacy/apply";
 import {
-  createLegacyImportPreviewToken,
-  fingerprintLegacyImport,
-  verifyLegacyImportPreviewToken,
-} from "@/lib/import/legacy/previewToken";
+  claimLegacyImportPreview,
+  createLegacyImportPreview,
+  LegacyImportPreviewError,
+} from "@/lib/import/legacy/previewStore";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -22,8 +22,12 @@ const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 12 * 1024 * 1024;
 const MAX_ROWS = 5000;
 
-function error(message: string, status = 400): NextResponse {
-  return NextResponse.json({ ok: false, message }, { status });
+function error(
+  message: string,
+  status = 400,
+  extra: Record<string, unknown> = {},
+): NextResponse {
+  return NextResponse.json({ ok: false, message, ...extra }, { status });
 }
 
 function visibility(value: FormDataEntryValue | null): CanonicalVisibility {
@@ -35,6 +39,29 @@ function strategy(value: FormDataEntryValue | null): LegacyImportStrategy {
   return "create_only";
 }
 
+function stringField(formData: FormData, key: string): string {
+  const value = formData.get(key);
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function previewErrorResponse(cause: unknown): NextResponse {
+  if (!(cause instanceof LegacyImportPreviewError)) {
+    return error("preview planを確認できませんでした。再度プレビューしてください。", 409);
+  }
+  const status = cause.code === "bucket_unavailable" ? 503 : cause.code === "already_claimed" ? 423 : 409;
+  return error(cause.message, status, {
+    preview_error_code: cause.code,
+    requires_repreview: [
+      "not_found",
+      "expired",
+      "owner_mismatch",
+      "hash_mismatch",
+      "invalid_record",
+      "invalid_token",
+    ].includes(cause.code),
+  });
+}
+
 export async function POST(request: Request): Promise<NextResponse> {
   const session = await auth().catch(() => null);
   const user = session?.user as { id?: string; role?: string } | undefined;
@@ -43,6 +70,61 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const formData = await request.formData().catch(() => null);
   if (!formData) return error("multipart/form-data を読み取れませんでした。");
+  const mode = formData.get("mode") === "apply" ? "apply" : "preview";
+
+  if (mode === "apply") {
+    const previewToken = stringField(formData, "preview_token");
+    const planHash = stringField(formData, "plan_hash");
+    if (!previewToken || !planHash) {
+      return error("先にプレビューを実行してください。", 409, { requires_repreview: true });
+    }
+
+    let claimed: Awaited<ReturnType<typeof claimLegacyImportPreview>>;
+    try {
+      claimed = await claimLegacyImportPreview(getEnv().BUCKET, {
+        authUserId: user.id,
+        previewToken,
+        planHash,
+      });
+    } catch (cause) {
+      return previewErrorResponse(cause);
+    }
+
+    const db = getDatabase();
+    if (!db) {
+      await claimed.release().catch(() => undefined);
+      return error("DBに接続できません。preview planは保持されています。", 503);
+    }
+
+    try {
+      const result = await applyLegacyImportPlan(db, claimed.plan, {
+        actorAuthUserId: user.id,
+        strategy: claimed.strategy,
+      });
+      await claimed.complete();
+      return NextResponse.json({
+        ok: true,
+        mode,
+        plan_hash: claimed.planHash,
+        attempt: claimed.attempt,
+        result,
+      });
+    } catch (cause) {
+      await claimed.release().catch(() => undefined);
+      const baseMessage = cause instanceof Error ? cause.message : "インポートを確定できませんでした。";
+      const createOnlyRecovery =
+        claimed.strategy === "create_only"
+          ? " 一部が書き込まれた可能性があります。同じファイルを再プレビューし、「過去の旧形式インポート行だけ置換」で再開してください。"
+          : " preview planは保持されています。同じ内容で再試行できます。";
+      return error(`${baseMessage}${createOnlyRecovery}`, 409, {
+        retryable: claimed.strategy !== "create_only",
+        requires_repreview: claimed.strategy === "create_only",
+        plan_hash: claimed.planHash,
+        attempt: claimed.attempt,
+      });
+    }
+  }
+
   const files = formData.getAll("files").filter((value): value is File => value instanceof File);
   if (files.length === 0) return error("JSON・CSV・TSVファイルを選択してください。");
   if (files.length > MAX_FILES) return error(`ファイル数は最大${MAX_FILES}件です。`);
@@ -61,10 +143,11 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
   }
 
-  const eventVisibility = visibility(formData.get("event_visibility"));
-  const videoVisibility = visibility(formData.get("video_visibility"));
-  const importStrategy = strategy(formData.get("strategy"));
-  const plan = normalizeLegacyFiles(parsed, { eventVisibility, videoVisibility });
+  const selectedStrategy = strategy(formData.get("strategy"));
+  const plan = normalizeLegacyFiles(parsed, {
+    eventVisibility: visibility(formData.get("event_visibility")),
+    videoVisibility: visibility(formData.get("video_visibility")),
+  });
   const rowCount = parsed.reduce((sum, file) => sum + file.rows.length, 0);
   if (rowCount > MAX_ROWS) return error(`1回の入力は最大${MAX_ROWS}行です。`);
 
@@ -82,65 +165,49 @@ export async function POST(request: Request): Promise<NextResponse> {
     warnings: plan.warnings.length,
     errors: plan.errors.length,
   };
-  const secret = getEnv().AUTH_SECRET;
-  if (!secret) return error("AUTH_SECRETが未設定のため安全なプレビューを作成できません。", 503);
-  const fingerprint = await fingerprintLegacyImport({
-    plan,
-    eventVisibility,
-    videoVisibility,
-    strategy: importStrategy,
-  });
-  const mode = formData.get("mode") === "apply" ? "apply" : "preview";
-  if (mode === "preview") {
-    const previewToken =
-      plan.errors.length === 0
-        ? await createLegacyImportPreviewToken({
-            secret,
-            actorAuthUserId: user.id,
-            fingerprint,
-          })
-        : null;
-    return NextResponse.json({
-      ok: plan.errors.length === 0,
-      mode,
-      summary,
-      previewToken,
-      warnings: plan.warnings.slice(0, 100),
-      errors: plan.errors.slice(0, 100),
-      preview: {
-        events: plan.events.slice(0, 20).map(({ id, title, visibility_status }) => ({ id, title, visibility_status })),
-        videos: plan.videos.slice(0, 50).map(({ id, title, creator_display_name, visibility_status }) => ({
-          id,
-          title,
-          creator_display_name,
-          visibility_status,
-        })),
-      },
-    });
-  }
-  if (plan.errors.length > 0) return error("入力エラーを修正してから実行してください。", 422);
-  const previewToken = String(formData.get("preview_token") ?? "");
-  if (
-    !previewToken ||
-    !(await verifyLegacyImportPreviewToken({
-      token: previewToken,
-      secret,
-      actorAuthUserId: user.id,
-      fingerprint,
-    }))
-  ) {
-    return error("プレビュー後にファイルまたは設定が変更されたか、プレビューの有効期限が切れています。", 409);
-  }
-  const db = getDatabase();
-  if (!db) return error("DBに接続できません。", 503);
 
-  try {
-    const result = await applyLegacyImportPlan(db, plan, {
-      actorAuthUserId: user.id,
-      strategy: importStrategy,
-    });
-    return NextResponse.json({ ok: true, mode, summary, result });
-  } catch (cause) {
-    return error(cause instanceof Error ? cause.message : "インポートを確定できませんでした。", 409);
+  if (plan.errors.length > 0) {
+    return NextResponse.json(
+      {
+        ok: false,
+        mode,
+        summary,
+        warnings: plan.warnings.slice(0, 100),
+        errors: plan.errors.slice(0, 100),
+      },
+      { status: 422 },
+    );
   }
+
+  let credential;
+  try {
+    credential = await createLegacyImportPreview(getEnv().BUCKET, {
+      authUserId: user.id,
+      strategy: selectedStrategy,
+      plan,
+    });
+  } catch (cause) {
+    return previewErrorResponse(cause);
+  }
+
+  return NextResponse.json({
+    ok: true,
+    mode,
+    summary,
+    warnings: plan.warnings.slice(0, 100),
+    errors: [],
+    preview_token: credential.previewToken,
+    plan_hash: credential.planHash,
+    expires_at: credential.expiresAt,
+    strategy: selectedStrategy,
+    preview: {
+      events: plan.events.slice(0, 20).map(({ id, title, visibility_status }) => ({ id, title, visibility_status })),
+      videos: plan.videos.slice(0, 50).map(({ id, title, creator_display_name, visibility_status }) => ({
+        id,
+        title,
+        creator_display_name,
+        visibility_status,
+      })),
+    },
+  });
 }
