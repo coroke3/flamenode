@@ -84,6 +84,16 @@ test("削除ダイアログは連打防止・動的ID・フォーカス復元を
   assert.match(tabsCss, /prefers-reduced-motion/);
 });
 
+test("Server ActionのrejectをUIで処理し再試行可能な状態へ戻す", () => {
+  assert.ok((tabs.match(/catch \(error\)/g) ?? []).length >= 2);
+  assert.match(tabs, /通信に失敗しました。接続を確認して/);
+  assert.ok((composer.match(/catch \(error\)/g) ?? []).length >= 2);
+  assert.match(composer, /入力内容を保持したまま、もう一度送信できます/);
+  assert.match(composer, /contextLoadingRef\.current/);
+  assert.match(composer, /submittingRef\.current = false/);
+  assert.match(tabs, /deletingRef\.current = false/);
+});
+
 test("シーク領域と削除ボタンを別のbuttonとして描画する", () => {
   assert.match(item, /className=\{styles\.seekTarget\}/);
   assert.match(item, /className=\{styles\.deleteButton\}/);
