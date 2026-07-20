@@ -18,7 +18,6 @@ import {
   loadVideoCollabSubjects,
 } from "@/lib/video/collabPerms";
 import { requireSession } from "@/lib/auth/guard";
-import { canEditVideo } from "@/lib/auth/ownership";
 import { VideoForm } from "@/components/forms/VideoForm";
 import { AdminVideoTabs } from "@/components/admin/AdminVideoTabs";
 import { Icon } from "@/components/ui/Icon";
@@ -31,6 +30,10 @@ import {
   fetchActiveCustomQuestionsForEvents,
   readCustomAnswerValuesForVideo,
 } from "@/lib/video/customQuestionAnswers";
+import {
+  computeAllowedVideoEditSections,
+  hasAnyVideoEditSection,
+} from "@/lib/video/computeEditSections";
 
 export const metadata: Metadata = { title: "作品を編集" };
 export const dynamic = "force-dynamic";
@@ -155,6 +158,52 @@ export default async function EditVideoPage({
   )[0];
   if (!video) notFound();
 
+  const editUser = { id: user.id, role: user.role ?? null };
+  const sections = await computeAllowedVideoEditSections({
+    db,
+    user: editUser,
+    video,
+    privilegeMode,
+  });
+  const canEditAnySection = hasAnyVideoEditSection(sections);
+  const eventModeSections = privilegeMode === "event"
+    ? sections
+    : await computeAllowedVideoEditSections({
+        db,
+        user: editUser,
+        video,
+        privilegeMode: "event",
+      });
+  const canOfferAdminMode = user.role === "admin" && privilegeMode !== "admin";
+  const canOfferEventMode =
+    privilegeMode !== "event" && hasAnyVideoEditSection(eventModeSections);
+  const canShowPrivilegeSwitchOnly =
+    !canEditAnySection && (canOfferAdminMode || canOfferEventMode);
+
+  if (!canEditAnySection && !canShowPrivilegeSwitchOnly) {
+    return (
+      <div className="fn-public-container fn-page fn-guard-shell">
+        <div className="fn-status-panel fn-status-panel--center fn-status-panel--warn">
+          <h1 className="fn-guard-title fn-guard-title--warn">編集権限がありません</h1>
+          <p className="fn-status-panel-lead">
+            この作品の作者本人、または担当イベントの運営のみが編集できます。
+          </p>
+          <div className="fn-panel-actions fn-panel-actions--row">
+            <Link href="/dashboard" className="fn-btn fn-btn-ghost">
+              ダッシュボードへ
+            </Link>
+            <Link
+              href={`/${video.youtube_video_id ?? video.id}`}
+              className="fn-btn fn-btn-primary"
+            >
+              公開ページを見る
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const memberRows = await db
     .select({
       x_user_id: videoMembers.x_user_id,
@@ -275,69 +324,13 @@ export default async function EditVideoPage({
     )!)
     .orderBy(asc(xUsersTable.x_name));
 
-  const editUser = { id: user.id, role: user.role ?? null };
-  const [
-    canEditIdentity,
-    canEditBasics,
-    canEditYoutube,
-    canEditCredits,
-    canEditDescriptions,
-    canEditMembers,
-  ] = await Promise.all([
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.identity", privilegeMode }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.basics", privilegeMode }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.youtube_id", privilegeMode }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.credits", privilegeMode }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.descriptions", privilegeMode }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.members", privilegeMode }),
-  ]);
-  const canEditAnySection =
-    canEditIdentity ||
-    canEditBasics ||
-    canEditYoutube ||
-    canEditCredits ||
-    canEditDescriptions ||
-    canEditMembers;
-  const canOfferAdminMode = user.role === "admin" && privilegeMode !== "admin";
-
-  let canOfferEventMode = false;
-  if (privilegeMode === "normal" && !canEditAnySection) {
-    const eventProbe = await Promise.all([
-      canEditVideo({ db, user: editUser, video, requiredKey: "video.identity", privilegeMode: "event" }),
-      canEditVideo({ db, user: editUser, video, requiredKey: "video.basics", privilegeMode: "event" }),
-      canEditVideo({ db, user: editUser, video, requiredKey: "video.youtube_id", privilegeMode: "event" }),
-      canEditVideo({ db, user: editUser, video, requiredKey: "video.credits", privilegeMode: "event" }),
-      canEditVideo({ db, user: editUser, video, requiredKey: "video.descriptions", privilegeMode: "event" }),
-      canEditVideo({ db, user: editUser, video, requiredKey: "video.members", privilegeMode: "event" }),
-    ]);
-    canOfferEventMode = eventProbe.some(Boolean);
-  }
-
-  const canShowPrivilegeSwitchOnly =
-    !canEditAnySection && (canOfferAdminMode || canOfferEventMode);
-  if (!canEditAnySection && !canShowPrivilegeSwitchOnly) {
-    return (
-      <div className="fn-public-container fn-page fn-guard-shell">
-        <div className="fn-status-panel fn-status-panel--center fn-status-panel--warn">
-          <h1 className="fn-guard-title fn-guard-title--warn">編集権限がありません</h1>
-          <p className="fn-status-panel-lead">
-            この作品の作者本人、または担当イベントの運営のみが編集できます。
-          </p>
-          <div className="fn-panel-actions fn-panel-actions--row">
-            <Link href="/dashboard" className="fn-btn fn-btn-ghost">
-              ダッシュボードへ
-            </Link>
-            <Link
-              href={`/${video.youtube_video_id ?? video.id}`}
-              className="fn-btn fn-btn-primary"
-            >
-              公開ページを見る
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const canEditIdentity = sections.identity;
+  const canEditBasics = sections.basics;
+  const canEditYoutube = sections.youtube;
+  const canEditCredits = sections.credits;
+  const canEditDescriptions = sections.descriptions;
+  const canEditMembers = sections.members;
+  const canEditPrimaryEvent = sections.primary_event;
 
   const submitBlockedReason = !canEditAnySection
     ? canOfferAdminMode
@@ -444,7 +437,7 @@ export default async function EditVideoPage({
         memberSuggestions={memberSuggestions}
         softwareSuggestions={softwareSuggestions}
         eventOptions={eventOptions}
-        canEditEvents={canEditIdentity}
+        canEditEvents={canEditPrimaryEvent}
         canChangeSubmitter={privilegeMode === "admin" && user.role === "admin"}
         iconCandidates={iconCandidates}
         channelCandidates={channelCandidates}
