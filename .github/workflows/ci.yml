@@ -14,6 +14,8 @@ jobs:
   verify:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       NEXT_PUBLIC_SITE_URL: https://flamenode.invalid
       AUTH_URL: https://flamenode.invalid
@@ -25,6 +27,21 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: 最終競合解消用ソースを保存
+        if: github.event_name == 'pull_request' && github.event.pull_request.number == 89
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr89-final-source-${{ github.event.pull_request.head.sha }}
+          path: |
+            .
+            !.git/**
+            !node_modules/**
+            !.next/**
+            !.vercel/**
+            !.tmp/**
+          include-hidden-files: true
+          retention-days: 1
 
       - uses: actions/setup-node@v4
         with:
@@ -70,6 +87,9 @@ jobs:
           mkdir -p .tmp
           set -o pipefail
           npm run test:unit 2>&1 | tee .tmp/unit-tests.log
+
+      - name: 旧形式インポート境界を検査
+        run: node --test --experimental-strip-types src/lib/import/legacy/*.test.mjs
 
       - name: Unitテストログを保存
         if: failure()
@@ -135,13 +155,20 @@ jobs:
       - name: owner検査用DBを準備
         run: node scripts/create-owner-check-fixture.mjs
 
-      - name: DBとowner不変条件を検査
+      - name: DB正本とowner不変条件を検査
         env:
           FLAMENODE_OWNER_CHECK_DB: .tmp/owner-check.sqlite
         run: |
           npm run check:db-schema
+          npm run check:db-migration
           npm run check:db-legacy
           npm run check:event-owners
+
+      - name: D1空DBマイグレーションを検査
+        run: npm run check:db-d1-empty
+
+      - name: D1旧DBマイグレーションを検査
+        run: npm run check:db-d1-legacy
 
       - name: UI受入契約を検査
         run: npm run check:ui-acceptance
