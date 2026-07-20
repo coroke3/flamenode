@@ -1,8 +1,8 @@
 # FlameNode AI作業コンテキスト
 
 > Status: Active
-> Last verified: 2026-07-14
-> Verified against commit: `6dbe07a`
+> Last verified: 2026-07-20
+> Verified against commit: `89b8889`
 > Source of truth: `AGENTS.md`, `src/lib/db/schema.ts`, `migrations/`, `package.json`, `wrangler.toml`
 
 軽量モデルを含むAIは、リポジトリ全体を先に読まない。`AGENTS.md`と、この文書の該当行だけを読み、次に対象コードを確認する。
@@ -25,7 +25,7 @@ Historical資料は経緯確認専用で、現行仕様の根拠にしない。
 2. 下表から読む文書を最大3件選ぶ。
 3. 対象コードとテストを直接読む。
 4. 推測で不足を埋めず、正本を確認する。
-5. 変更範囲を最小化し、既存挙動を維持する。
+5. 変更範囲を最小化し、現行正本を維持する。
 
 同じ内容を複数文書から集めない。巨大な`source/`、`archive/`、完了済みphase資料を一括読込しない。
 
@@ -35,21 +35,24 @@ Historical資料は経緯確認専用で、現行仕様の根拠にしない。
 | --- | --- | --- |
 | 一般実装・不具合修正 | `AGENTS.md`、対象ファイル | 関連test、`package.json` |
 | DB・migration | `docs/database/README.md`、`docs/operations/migrations.md` | `src/lib/db/schema.ts`、`migrations/`、`docs/database/change-log.md` |
+| DB正本移行・旧データ変換 | `docs/database/canonical-migration-plan.md` | `migrations/0043_db_canonical_migration.sql`、移行fixture、検証script |
 | 認証・権限・owner | `AGENTS.md`、関連Active運用文書 | `src/lib/auth/`、権限判定コード、関連integration test |
 | 公開API・DTO | `AGENTS.md` | Route Handler、`src/lib/api/publicDto.ts`、漏洩test |
 | Worker・Cron・外部API | `docs/operations/workers.md` | `workers/`、各`wrangler.toml`、worker test |
 | YouTube同期 | `docs/operations/youtube-playlist-sync.md` | 同期Worker、quota管理コード、関連migration |
 | UI・フォーム | `docs/operations/ui-acceptance.md` | 対象page/component、CSS、関連test |
-| legacy import | `docs/operations/legacy-import.md` | import route/action、検証script、fixture |
 | 監査・復元 | `docs/operations/audit-and-restore.md` | mutation、audit helper、復元test |
 | ローカル起動 | `LOCAL.md` | `package.json`、`.dev.vars.example` |
 | デプロイ | `DEPLOY.md` | `.github/workflows/deploy-cloudflare.yml`、wrangler群 |
 | 過去仕様の調査 | `docs/historical/README.md` | 必要な資料1件だけ |
 
+旧形式インポートは現行機能ではない。旧JSON、CSV、TSVの常設取込機能を追加せず、必要な旧データ変換は正本migrationで一度だけ実施する。
+
 ## 4. 不変条件
 
 - DB正本は`src/lib/db/schema.ts`。既適用migration本文を変更しない。
 - Active codeへ旧列fallback、二重書込み、runtime DDLを戻さない。
+- `/admin/import`、`/api/admin/import/legacy`、`src/lib/import/legacy/`を再導入しない。
 - `event_staff.permission_preset = 'owner'`をイベント代表者の正本とし、ownerを0人にしない。
 - 権限はUIだけでなくServer ActionまたはRoute Handlerで検証する。
 - 公開APIは明示したDTOだけを返し、内部情報を漏らさない。
@@ -67,7 +70,7 @@ Historical資料は経緯確認専用で、現行仕様の根拠にしない。
 ## 6. 変更手順
 
 1. 対象と非対象を決める。
-2. 既存testから維持すべき挙動を確認する。
+2. 既存testから維持すべき現行挙動を確認する。
 3. 最小差分で変更する。
 4. Active文書だけを必要に応じて更新する。
 5. 変更種別に必要な検査を実行する。

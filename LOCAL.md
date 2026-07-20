@@ -1,8 +1,8 @@
 # FlameNode ローカル動作手順書
 
 > Status: Active
-> Last verified: 2026-07-13
-> Verified against commit: `c15b889`
+> Last verified: 2026-07-20
+> Verified against commit: `agent/remove-legacy-compat`
 > Source of truth: `package.json`, `.dev.vars.example`, `migrations/` active path, `wrangler.toml`, `docs/operations/migrations.md`
 
 この文書は個人PCの実施済み状態を前提にせず、空の作業環境からFlameNodeを再現する手順だけを扱います。本番操作は [`DEPLOY.md`](./DEPLOY.md) を参照してください。
@@ -50,14 +50,11 @@ AUTH_URL="http://localhost:3000"
 NEXT_PUBLIC_SITE_URL="http://localhost:3000"
 NEXT_PUBLIC_SITE_NAME="FlameNode"
 SPREADSHEET_IMPORT_PREVIEW_SECRET="AUTH_SECRETとは別の32文字以上の値"
-ENABLE_LEGACY_IMPORT_TOOL="false"
-LEGACY_IMPORT_PREVIEW_SECRET=""
 ```
 
 - `AUTH_URL`と`NEXT_PUBLIC_SITE_URL`は同じ正式originにする。
 - `AUTH_TRUST_HOST`は設定しない。Host headerへの暗黙fallbackを使わない。
 - secret、token、Cloudflare IDをGitへ追加しない。
-- Legacy importを試す場合だけ`ENABLE_LEGACY_IMPORT_TOOL=true`と独立secretを設定し、確認後に無効へ戻す。
 
 ## 4. ローカルD1
 
@@ -157,7 +154,7 @@ npx wrangler d1 execute flamenode_db --local --command "UPDATE system_settings S
 npx wrangler d1 execute flamenode_db --local --command "UPDATE system_settings SET operation_mode='normal' WHERE id='default';"
 ```
 
-Legacy importは`/admin/import`からpreview、署名token、one-time nonce、atomic applyの順を確認します。管理spreadsheetもdry runと署名tokenを経由し、直接DBへ未検証値を書き込みません。
+管理スプレッドシートはdry runと署名tokenを経由し、直接DBへ未検証値を書き込みません。
 
 ## 9. トラブルシューティング
 
