@@ -248,7 +248,6 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     appendVideoAtomicWritePlan(plan, await buildReplaceVideoMembersPlan(db, {
       videoId,
       members: memberValidation.value.members,
-      chaptersByIndex: memberValidation.value.chaptersByIndex,
       actorUserId: userId,
     }));
     for (const row of submittedSlots) {
