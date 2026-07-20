@@ -3,7 +3,7 @@ import "server-only";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DB } from "@/lib/db/client";
-import { eventStaff, xUsers } from "@/lib/db/schema";
+import { eventStaff, xUserAccountLinks } from "@/lib/db/schema";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import type { WriteAuditLogInput } from "@/lib/audit/types";
 import { generateId } from "@/lib/utils/id";
@@ -14,7 +14,6 @@ import {
   isActorTargetingSelf,
   isEventOwner,
   LAST_OWNER_ERROR,
-  syncLegacyRoleFromPreset,
   validateEventStaffSubject,
   validateEventStaffUniqueness as validateRowsForUniqueness,
   type EventStaffOwnershipRow,
@@ -24,24 +23,20 @@ import {
 export {
   isActorTargetingSelf,
   LAST_OWNER_ERROR,
-  syncLegacyRoleFromPreset,
   type EventStaffPreset,
 } from "./eventOwnershipCore";
 
 export type EventStaffRow = typeof eventStaff.$inferSelect;
 
 export type EventStaffWriteValues = {
-  user_id: string | null;
-  x_user_id: string | null;
+  x_user_id: string;
   display_name: string;
   permission_preset: EventStaffPreset;
   custom_permission_keys_json: string | null;
   is_public: number;
   public_role_label: string | null;
-  internal_note: string | null;
 };
 
-/** event_staff と不可分に確定する補助 mutation（例: 新規 X ID の作成）。 */
 export type EventStaffAtomicExtras = {
   mutationStatements: readonly BatchItem<"sqlite">[];
   expectedMutationChanges: readonly (number | null)[];
@@ -58,7 +53,6 @@ function normalizeEventStaffAtomicExtras(
   extras: EventStaffAtomicExtras | undefined,
 ): EventStaffAtomicExtras {
   const normalized = extras ?? EMPTY_EVENT_STAFF_ATOMIC_EXTRAS;
-
   if (
     normalized.mutationStatements.length !==
     normalized.expectedMutationChanges.length
@@ -67,18 +61,11 @@ function normalizeEventStaffAtomicExtras(
       "イベントスタッフ補助mutationと期待変更件数の数が一致しません。",
     );
   }
-
   return normalized;
 }
 
-/** 一括スタッフ更新で同じ D1 batch に含める補助 mutation。 */
-export type EventStaffBulkAtomicExtras = {
-  mutationStatements: readonly BatchItem<"sqlite">[];
-  expectedMutationChanges: readonly (number | null)[];
-  audits: readonly WriteAuditLogInput[];
-};
+export type EventStaffBulkAtomicExtras = EventStaffAtomicExtras;
 
-/** 全置換を外部のより大きな D1 batch に組み込むための確定前 work。 */
 export type EventStaffReplaceAtomicWork = {
   afterRows: EventStaffRow[];
   mutationStatements: BatchItem<"sqlite">[];
@@ -87,17 +74,11 @@ export type EventStaffReplaceAtomicWork = {
 };
 
 export type EventStaffBulkUpsert = {
-  /** 新規行では発行済みの ID、更新行では既存 ID。 */
   id: string;
-  /** null は新規作成、文字列は同じイベント内の既存行を更新する。 */
   existingId: string | null;
   values: EventStaffWriteValues;
 };
 
-/**
- * イベントのスタッフ集合を置換するための正規化済み行。
- * import / spreadsheet のように delete → insert が必要な入口も、この型を経由する。
- */
 export type EventStaffReplacement = {
   id: string;
   values: EventStaffWriteValues;
@@ -107,10 +88,8 @@ function asOwnershipRow(row: EventStaffRow): EventStaffOwnershipRow {
   return {
     id: row.id,
     event_id: row.event_id,
-    user_id: row.user_id,
     x_user_id: row.x_user_id,
     permission_preset: row.permission_preset,
-    role: row.role,
   };
 }
 
@@ -118,16 +97,13 @@ function snapshot(row: EventStaffRow): Record<string, unknown> {
   return {
     id: row.id,
     event_id: row.event_id,
-    user_id: row.user_id,
     x_user_id: row.x_user_id,
     display_name: row.display_name,
-    role: row.role,
     permission_preset: row.permission_preset,
     custom_permission_keys_json: row.custom_permission_keys_json,
     is_public: row.is_public,
     public_role_label: row.public_role_label,
-    internal_note: row.internal_note,
-    approved_by_user_id: row.approved_by_user_id,
+    approved_by_auth_user_id: row.approved_by_auth_user_id,
     approved_at: row.approved_at,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -147,20 +123,18 @@ export async function getEventOwners(
         eq(eventStaff.permission_preset, "owner"),
       )!,
     );
-}export async function getApprovedXIdsForUser(
+}
+
+/** 認証ユーザーに紐づく全X名義を正本リンクから解決する。 */
+export async function getApprovedXIdsForUser(
   db: DB,
-  userId: string,
+  authUserId: string,
 ): Promise<string[]> {
   const rows = await db
-    .select({ id: xUsers.id })
-    .from(xUsers)
-    .where(
-      and(
-        eq(xUsers.linked_user_id, userId),
-        eq(xUsers.approval_status, "approved"),
-      )!,
-    );
-  return rows.map((row) => row.id);
+    .select({ x_user_id: xUserAccountLinks.x_user_id })
+    .from(xUserAccountLinks)
+    .where(eq(xUserAccountLinks.auth_user_id, authUserId));
+  return Array.from(new Set(rows.map((row) => row.x_user_id)));
 }
 
 export async function assertEventWillRetainOwner(args: {
@@ -179,12 +153,9 @@ export async function assertEventWillRetainOwner(args: {
 export async function validateEventStaffUniqueness(args: {
   db: DB;
   eventId: string;
-  candidate: Pick<EventStaffRow, "id" | "user_id" | "x_user_id">;
+  candidate: Pick<EventStaffRow, "id" | "x_user_id">;
 }): Promise<void> {
-  validateEventStaffSubject({
-    userId: args.candidate.user_id,
-    xUserId: args.candidate.x_user_id,
-  });
+  validateEventStaffSubject({ xUserId: args.candidate.x_user_id });
   const rows = await args.db
     .select()
     .from(eventStaff)
@@ -194,7 +165,6 @@ export async function validateEventStaffUniqueness(args: {
     candidate: {
       id: args.candidate.id,
       event_id: args.eventId,
-      user_id: args.candidate.user_id,
       x_user_id: args.candidate.x_user_id,
     },
   });
@@ -207,15 +177,14 @@ export async function assertActorMayAssignOwner(args: {
   isSiteAdmin: boolean;
 }): Promise<void> {
   if (args.isSiteAdmin) return;
-  const [owners, approvedXIds] = await Promise.all([
+  const [owners, linkedXIds] = await Promise.all([
     getEventOwners(args.db, args.eventId),
     getApprovedXIdsForUser(args.db, args.actorUserId),
   ]);
   const isOwner = owners.some((owner) =>
     isActorTargetingSelf({
-      actorUserId: args.actorUserId,
       target: asOwnershipRow(owner),
-      approvedXIds,
+      linkedXIds,
     }),
   );
   if (!isOwner) {
@@ -232,11 +201,10 @@ export async function assertSelfChangeRequirements(args: {
   confirmText: string | null | undefined;
   reason: string | null | undefined;
 }): Promise<void> {
-  const approvedXIds = await getApprovedXIdsForUser(args.db, args.actorUserId);
+  const linkedXIds = await getApprovedXIdsForUser(args.db, args.actorUserId);
   const selfTarget = isActorTargetingSelf({
-    actorUserId: args.actorUserId,
     target: asOwnershipRow(args.target),
-    approvedXIds,
+    linkedXIds,
   });
   const losesMemberPermission =
     isEventOwner(asOwnershipRow(args.target)) && args.nextPreset !== "owner";
@@ -264,70 +232,57 @@ export async function createEventStaffWithProtection(args: {
   await validateEventStaffUniqueness({
     db: args.db,
     eventId: args.eventId,
-    candidate: {
-      id: args.id,
-      user_id: args.values.user_id,
-      x_user_id: args.values.x_user_id,
-    },
+    candidate: { id: args.id, x_user_id: args.values.x_user_id },
   });
 
   const row: EventStaffRow = {
     id: args.id,
     event_id: args.eventId,
-    user_id: args.values.user_id,
     x_user_id: args.values.x_user_id,
     display_name: args.values.display_name,
-    role: syncLegacyRoleFromPreset(args.values.permission_preset),
     permission_preset: args.values.permission_preset,
     custom_permission_keys_json: args.values.custom_permission_keys_json,
     is_public: args.values.is_public,
     public_role_label: args.values.public_role_label,
-    internal_note: args.values.internal_note,
-    approved_by_user_id: args.actorUserId,
+    approved_by_auth_user_id: args.actorUserId,
     approved_at: args.now,
     created_at: args.now,
     updated_at: args.now,
   };
-
   const extras = normalizeEventStaffAtomicExtras(args.atomicExtras);
 
   await mutateWithAudit(args.db, {
     mutationStatements: [
       ...extras.mutationStatements,
       args.db.run(sql`
-      INSERT INTO event_staff (
-        id, event_id, user_id, x_user_id, display_name, role,
-        permission_preset, custom_permission_keys_json, is_public,
-        public_role_label, internal_note, approved_by_user_id, approved_at,
-        created_at, updated_at
-      ) VALUES (
-        ${row.id}, ${row.event_id}, ${row.user_id}, ${row.x_user_id},
-        ${row.display_name}, ${row.role}, ${row.permission_preset},
-        ${row.custom_permission_keys_json}, ${row.is_public},
-        ${row.public_role_label}, ${row.internal_note},
-        ${row.approved_by_user_id}, ${row.approved_at},
-        ${row.created_at}, ${row.updated_at}
-      )
+        INSERT INTO event_staff (
+          id, event_id, x_user_id, display_name, permission_preset,
+          custom_permission_keys_json, is_public, public_role_label,
+          approved_by_auth_user_id, approved_at, created_at, updated_at
+        ) VALUES (
+          ${row.id}, ${row.event_id}, ${row.x_user_id}, ${row.display_name},
+          ${row.permission_preset}, ${row.custom_permission_keys_json},
+          ${row.is_public}, ${row.public_role_label},
+          ${row.approved_by_auth_user_id}, ${row.approved_at},
+          ${row.created_at}, ${row.updated_at}
+        )
       `),
     ],
-    expectedMutationChanges: [
-      ...extras.expectedMutationChanges,
-      1,
-    ],
+    expectedMutationChanges: [...extras.expectedMutationChanges, 1],
     audits: [
       ...extras.audits,
       {
-      table_name: "event_staff",
-      target_id: row.id,
-      operation: "CREATE",
-      before: null,
-      after: snapshot(row),
-      actor_user_id: args.actorUserId,
-      reason: args.reason,
-      context: args.context ?? null,
-      retention_class: "long_audit",
-      restore_strategy: "delete_created",
-      strict: true,
+        table_name: "event_staff",
+        target_id: row.id,
+        operation: "CREATE",
+        before: null,
+        after: snapshot(row),
+        actor_user_id: args.actorUserId,
+        reason: args.reason,
+        context: args.context ?? null,
+        retention_class: "long_audit",
+        restore_strategy: "delete_created",
+        strict: true,
       },
     ],
   });
@@ -348,11 +303,7 @@ export async function updateEventStaffWithProtection(args: {
   await validateEventStaffUniqueness({
     db: args.db,
     eventId: args.existing.event_id,
-    candidate: {
-      id: args.existing.id,
-      user_id: args.values.user_id,
-      x_user_id: args.values.x_user_id,
-    },
+    candidate: { id: args.existing.id, x_user_id: args.values.x_user_id },
   });
   await assertEventWillRetainOwner({
     db: args.db,
@@ -372,14 +323,13 @@ export async function updateEventStaffWithProtection(args: {
   const after: EventStaffRow = {
     ...args.existing,
     ...args.values,
-    role: syncLegacyRoleFromPreset(args.values.permission_preset),
     updated_at: args.now,
   };
   const extras = normalizeEventStaffAtomicExtras(args.atomicExtras);
-  const demotesLastOwner =
-    isEventOwner(asOwnershipRow(args.existing)) &&
+  const demotesOwner =
+    args.existing.permission_preset === "owner" &&
     args.values.permission_preset !== "owner";
-  const ownerCondition = demotesLastOwner
+  const ownerCondition = demotesOwner
     ? sql`(SELECT COUNT(*) FROM event_staff WHERE event_id = ${args.existing.event_id} AND permission_preset = 'owner') > 1`
     : sql`1 = 1`;
 
@@ -387,42 +337,35 @@ export async function updateEventStaffWithProtection(args: {
     mutationStatements: [
       ...extras.mutationStatements,
       args.db.run(sql`
-      UPDATE event_staff
-      SET
-        user_id = ${after.user_id},
-        x_user_id = ${after.x_user_id},
-        display_name = ${after.display_name},
-        role = ${after.role},
-        permission_preset = ${after.permission_preset},
-        custom_permission_keys_json = ${after.custom_permission_keys_json},
-        is_public = ${after.is_public},
-        public_role_label = ${after.public_role_label},
-        internal_note = ${after.internal_note},
-        updated_at = ${after.updated_at}
-      WHERE id = ${args.existing.id}
-        AND event_id = ${args.existing.event_id}
-        AND updated_at = ${args.existing.updated_at}
-        AND (${ownerCondition})
+        UPDATE event_staff
+        SET x_user_id = ${after.x_user_id},
+            display_name = ${after.display_name},
+            permission_preset = ${after.permission_preset},
+            custom_permission_keys_json = ${after.custom_permission_keys_json},
+            is_public = ${after.is_public},
+            public_role_label = ${after.public_role_label},
+            updated_at = ${after.updated_at}
+        WHERE id = ${args.existing.id}
+          AND event_id = ${args.existing.event_id}
+          AND updated_at = ${args.existing.updated_at}
+          AND (${ownerCondition})
       `),
     ],
-    expectedMutationChanges: [
-      ...extras.expectedMutationChanges,
-      1,
-    ],
+    expectedMutationChanges: [...extras.expectedMutationChanges, 1],
     audits: [
       ...extras.audits,
       {
-      table_name: "event_staff",
-      target_id: after.id,
-      operation: "UPDATE",
-      before: snapshot(args.existing),
-      after: snapshot(after),
-      actor_user_id: args.actorUserId,
-      reason: args.reason,
-      context: args.context ?? null,
-      retention_class: "long_audit",
-      restore_strategy: "update_before",
-      strict: true,
+        table_name: "event_staff",
+        target_id: after.id,
+        operation: "UPDATE",
+        before: snapshot(args.existing),
+        after: snapshot(after),
+        actor_user_id: args.actorUserId,
+        reason: args.reason,
+        context: args.context ?? null,
+        retention_class: "long_audit",
+        restore_strategy: "update_before",
+        strict: true,
       },
     ],
   });
@@ -451,14 +394,15 @@ export async function deleteEventStaffWithProtection(args: {
     confirmText: args.confirmText,
     reason: args.reason,
   });
-  const ownerCondition = isEventOwner(asOwnershipRow(args.existing))
+  const ownerCondition = args.existing.permission_preset === "owner"
     ? sql`(SELECT COUNT(*) FROM event_staff WHERE event_id = ${args.existing.event_id} AND permission_preset = 'owner') > 1`
     : sql`1 = 1`;
 
   await mutateWithAudit(args.db, {
     mutationStatements: [args.db.run(sql`
       DELETE FROM event_staff
-      WHERE id = ${args.existing.id} AND event_id = ${args.existing.event_id}
+      WHERE id = ${args.existing.id}
+        AND event_id = ${args.existing.event_id}
         AND updated_at = ${args.existing.updated_at}
         AND (${ownerCondition})
     `)],
@@ -479,11 +423,6 @@ export async function deleteEventStaffWithProtection(args: {
   });
 }
 
-/**
- * CSV 等の複数スタッフ登録を、全行・補助 mutation・監査ログを一つの D1 batch
- * で確定する。代表者変更と自分自身の変更は、明示確認付きの個別操作/移譲操作に
- * 限定するためこの API では拒否する。
- */
 export async function bulkUpsertEventStaffWithProtection(args: {
   db: DB;
   eventId: string;
@@ -497,14 +436,7 @@ export async function bulkUpsertEventStaffWithProtection(args: {
   if (args.upserts.length === 0) {
     throw new Error("一括スタッフ更新に対象行がありません。");
   }
-  if (
-    args.atomicExtras &&
-    args.atomicExtras.mutationStatements.length !==
-      args.atomicExtras.expectedMutationChanges.length
-  ) {
-    throw new Error("一括スタッフ更新の補助 mutation の件数検査が不正です。");
-  }
-
+  const extras = normalizeEventStaffAtomicExtras(args.atomicExtras);
   const existingRows = await args.db
     .select()
     .from(eventStaff)
@@ -519,11 +451,7 @@ export async function bulkUpsertEventStaffWithProtection(args: {
       throw new Error("一括スタッフ更新に重複した行があります。");
     }
     mutatedIds.add(upsert.id);
-    validateEventStaffSubject({
-      userId: upsert.values.user_id,
-      xUserId: upsert.values.x_user_id,
-    });
-
+    validateEventStaffSubject({ xUserId: upsert.values.x_user_id });
     const existing = upsert.existingId
       ? existingById.get(upsert.existingId) ?? null
       : null;
@@ -541,27 +469,13 @@ export async function bulkUpsertEventStaffWithProtection(args: {
         "代表者の追加・変更は一括更新では行えません。専用の代表者移譲操作を使用してください。",
       );
     }
-
     const after: EventStaffRow = existing
-      ? {
-          ...existing,
-          ...upsert.values,
-          role: syncLegacyRoleFromPreset(upsert.values.permission_preset),
-          updated_at: args.now,
-        }
+      ? { ...existing, ...upsert.values, updated_at: args.now }
       : {
           id: upsert.id,
           event_id: args.eventId,
-          user_id: upsert.values.user_id,
-          x_user_id: upsert.values.x_user_id,
-          display_name: upsert.values.display_name,
-          role: syncLegacyRoleFromPreset(upsert.values.permission_preset),
-          permission_preset: upsert.values.permission_preset,
-          custom_permission_keys_json: upsert.values.custom_permission_keys_json,
-          is_public: upsert.values.is_public,
-          public_role_label: upsert.values.public_role_label,
-          internal_note: upsert.values.internal_note,
-          approved_by_user_id: args.actorUserId,
+          ...upsert.values,
+          approved_by_auth_user_id: args.actorUserId,
           approved_at: args.now,
           created_at: args.now,
           updated_at: args.now,
@@ -570,39 +484,21 @@ export async function bulkUpsertEventStaffWithProtection(args: {
     afterRows.push({ before: existing, after });
   }
 
-  const xSubjectOwners = new Map<string, string>();
-  const userSubjectOwners = new Map<string, string>();
+  const xSubjects = new Map<string, string>();
   let ownerCount = 0;
   for (const row of prospectiveById.values()) {
     if (row.permission_preset === "owner") ownerCount += 1;
-    if (row.x_user_id) {
-      const duplicate = xSubjectOwners.get(row.x_user_id);
-      if (duplicate && duplicate !== row.id) {
-        throw new Error("同じイベントに同一 X ID のスタッフを重複登録できません。");
-      }
-      xSubjectOwners.set(row.x_user_id, row.id);
+    const duplicate = xSubjects.get(row.x_user_id);
+    if (duplicate && duplicate !== row.id) {
+      throw new Error("同じイベントに同一 X ID のスタッフを重複登録できません。");
     }
-    if (row.user_id) {
-      const duplicate = userSubjectOwners.get(row.user_id);
-      if (duplicate && duplicate !== row.id) {
-        throw new Error("同じイベントに同一の内部ユーザー ID を重複登録できません。");
-      }
-      userSubjectOwners.set(row.user_id, row.id);
-    }
+    xSubjects.set(row.x_user_id, row.id);
   }
-  if (ownerCount < 1) {
-    throw new Error(LAST_OWNER_ERROR);
-  }
+  if (ownerCount < 1) throw new Error(LAST_OWNER_ERROR);
 
-  const approvedXIds = await getApprovedXIdsForUser(args.db, args.actorUserId);
+  const linkedXIds = await getApprovedXIdsForUser(args.db, args.actorUserId);
   for (const { after } of afterRows) {
-    if (
-      isActorTargetingSelf({
-        actorUserId: args.actorUserId,
-        target: asOwnershipRow(after),
-        approvedXIds,
-      })
-    ) {
+    if (isActorTargetingSelf({ target: asOwnershipRow(after), linkedXIds })) {
       throw new Error(
         "自分自身のスタッフ権限は一括更新できません。個別の確認付き操作を使用してください。",
       );
@@ -610,43 +506,43 @@ export async function bulkUpsertEventStaffWithProtection(args: {
   }
 
   const mutationStatements: BatchItem<"sqlite">[] = [
-    ...(args.atomicExtras?.mutationStatements ?? []),
+    ...extras.mutationStatements,
     ...afterRows.map(({ before, after }) =>
       before
         ? args.db.run(sql`
             UPDATE event_staff
-            SET user_id = ${after.user_id}, x_user_id = ${after.x_user_id},
-                display_name = ${after.display_name}, role = ${after.role},
+            SET x_user_id = ${after.x_user_id},
+                display_name = ${after.display_name},
                 permission_preset = ${after.permission_preset},
                 custom_permission_keys_json = ${after.custom_permission_keys_json},
-                is_public = ${after.is_public}, public_role_label = ${after.public_role_label},
-                internal_note = ${after.internal_note}, updated_at = ${after.updated_at}
-            WHERE id = ${before.id} AND event_id = ${args.eventId}
+                is_public = ${after.is_public},
+                public_role_label = ${after.public_role_label},
+                updated_at = ${after.updated_at}
+            WHERE id = ${before.id}
+              AND event_id = ${args.eventId}
               AND updated_at = ${before.updated_at}
           `)
         : args.db.run(sql`
             INSERT INTO event_staff (
-              id, event_id, user_id, x_user_id, display_name, role,
-              permission_preset, custom_permission_keys_json, is_public,
-              public_role_label, internal_note, approved_by_user_id, approved_at,
-              created_at, updated_at
+              id, event_id, x_user_id, display_name, permission_preset,
+              custom_permission_keys_json, is_public, public_role_label,
+              approved_by_auth_user_id, approved_at, created_at, updated_at
             ) VALUES (
-              ${after.id}, ${after.event_id}, ${after.user_id}, ${after.x_user_id},
-              ${after.display_name}, ${after.role}, ${after.permission_preset},
+              ${after.id}, ${after.event_id}, ${after.x_user_id},
+              ${after.display_name}, ${after.permission_preset},
               ${after.custom_permission_keys_json}, ${after.is_public},
-              ${after.public_role_label}, ${after.internal_note},
-              ${after.approved_by_user_id}, ${after.approved_at}, ${after.created_at},
-              ${after.updated_at}
+              ${after.public_role_label}, ${after.approved_by_auth_user_id},
+              ${after.approved_at}, ${after.created_at}, ${after.updated_at}
             )
           `),
     ),
   ];
   const expectedMutationChanges = [
-    ...(args.atomicExtras?.expectedMutationChanges ?? []),
+    ...extras.expectedMutationChanges,
     ...afterRows.map(() => 1),
   ];
   const audits: WriteAuditLogInput[] = [
-    ...(args.atomicExtras?.audits ?? []),
+    ...extras.audits,
     ...afterRows.map<WriteAuditLogInput>(({ before, after }) => ({
       table_name: "event_staff",
       target_id: after.id,
@@ -678,19 +574,18 @@ function eventStaffVersionGuard(args: {
     (row) => sql`
       EXISTS (
         SELECT 1 FROM event_staff
-        WHERE id = ${row.id} AND event_id = ${args.eventId}
+        WHERE id = ${row.id}
+          AND event_id = ${args.eventId}
           AND updated_at = ${row.updated_at}
       )
     `,
   );
-  const exactSet =
-    args.rows.length === 0
-      ? sql`NOT EXISTS (SELECT 1 FROM event_staff WHERE event_id = ${args.eventId})`
-      : sql`
-          (SELECT COUNT(*) FROM event_staff WHERE event_id = ${args.eventId}) = ${args.rows.length}
-          AND ${sql.join(rowPredicates, sql` AND `)}
-        `;
-
+  const exactSet = args.rows.length === 0
+    ? sql`NOT EXISTS (SELECT 1 FROM event_staff WHERE event_id = ${args.eventId})`
+    : sql`
+        (SELECT COUNT(*) FROM event_staff WHERE event_id = ${args.eventId}) = ${args.rows.length}
+        AND ${sql.join(rowPredicates, sql` AND `)}
+      `;
   return sql`
     SELECT CASE
       WHEN (${exactSet}) THEN 1
@@ -699,12 +594,6 @@ function eventStaffVersionGuard(args: {
   `;
 }
 
-/**
- * event_staff の全置換を単一の D1 batch で行う。
- *
- * delete → insert の途中状態を外へ出さず、最終集合の subject 一意性と owner 最低 1 人を
- * 先に検証する。legacy import と spreadsheet apply は直接 table を操作せずこの入口を使う。
- */
 export async function buildReplaceEventStaffWithProtection(args: {
   db: DB;
   eventId: string;
@@ -713,31 +602,20 @@ export async function buildReplaceEventStaffWithProtection(args: {
   context?: string | null;
   now: number;
   replacements: readonly EventStaffReplacement[];
-  /** 既存の本人スタッフを降格・削除する場合だけ必要。 */
   confirmText?: string | null;
   atomicExtras?: EventStaffBulkAtomicExtras;
 }): Promise<EventStaffReplaceAtomicWork> {
   if (!args.reason.trim()) {
     throw new Error("スタッフ一括置換には理由が必要です。");
   }
-  if (args.replacements.length === 0) {
-    throw new Error(LAST_OWNER_ERROR);
-  }
-  if (
-    args.atomicExtras &&
-    args.atomicExtras.mutationStatements.length !==
-      args.atomicExtras.expectedMutationChanges.length
-  ) {
-    throw new Error("一括スタッフ置換の補助 mutation と変更件数が一致しません。");
-  }
-
+  if (args.replacements.length === 0) throw new Error(LAST_OWNER_ERROR);
+  const extras = normalizeEventStaffAtomicExtras(args.atomicExtras);
   const beforeRows = await args.db
     .select()
     .from(eventStaff)
     .where(eq(eventStaff.event_id, args.eventId));
   const ids = new Set<string>();
-  const xSubjectOwners = new Map<string, string>();
-  const userSubjectOwners = new Map<string, string>();
+  const xSubjects = new Set<string>();
   let ownerCount = 0;
   const afterRows: EventStaffRow[] = [];
 
@@ -746,38 +624,17 @@ export async function buildReplaceEventStaffWithProtection(args: {
       throw new Error("一括スタッフ置換に重複または空のスタッフ ID があります。");
     }
     ids.add(replacement.id);
-    validateEventStaffSubject({
-      userId: replacement.values.user_id,
-      xUserId: replacement.values.x_user_id,
-    });
-    if (replacement.values.x_user_id) {
-      const duplicate = xSubjectOwners.get(replacement.values.x_user_id);
-      if (duplicate) {
-        throw new Error("同一イベントに同一 X ID のスタッフを重複登録できません。");
-      }
-      xSubjectOwners.set(replacement.values.x_user_id, replacement.id);
+    validateEventStaffSubject({ xUserId: replacement.values.x_user_id });
+    if (xSubjects.has(replacement.values.x_user_id)) {
+      throw new Error("同一イベントに同一 X ID のスタッフを重複登録できません。");
     }
-    if (replacement.values.user_id) {
-      const duplicate = userSubjectOwners.get(replacement.values.user_id);
-      if (duplicate) {
-        throw new Error("同一イベントに同一内部ユーザー ID のスタッフを重複登録できません。");
-      }
-      userSubjectOwners.set(replacement.values.user_id, replacement.id);
-    }
+    xSubjects.add(replacement.values.x_user_id);
     if (replacement.values.permission_preset === "owner") ownerCount += 1;
     afterRows.push({
       id: replacement.id,
       event_id: args.eventId,
-      user_id: replacement.values.user_id,
-      x_user_id: replacement.values.x_user_id,
-      display_name: replacement.values.display_name,
-      role: syncLegacyRoleFromPreset(replacement.values.permission_preset),
-      permission_preset: replacement.values.permission_preset,
-      custom_permission_keys_json: replacement.values.custom_permission_keys_json,
-      is_public: replacement.values.is_public,
-      public_role_label: replacement.values.public_role_label,
-      internal_note: replacement.values.internal_note,
-      approved_by_user_id: args.actorUserId,
+      ...replacement.values,
+      approved_by_auth_user_id: args.actorUserId,
       approved_at: args.now,
       created_at: args.now,
       updated_at: args.now,
@@ -785,22 +642,10 @@ export async function buildReplaceEventStaffWithProtection(args: {
   }
   if (ownerCount < 1) throw new Error(LAST_OWNER_ERROR);
 
-  const approvedXIds = await getApprovedXIdsForUser(args.db, args.actorUserId);
+  const linkedXIds = await getApprovedXIdsForUser(args.db, args.actorUserId);
   for (const before of beforeRows) {
-    if (
-      !isActorTargetingSelf({
-        actorUserId: args.actorUserId,
-        target: asOwnershipRow(before),
-        approvedXIds,
-      })
-    ) {
-      continue;
-    }
-    const next = afterRows.find(
-      (after) =>
-        (after.user_id !== null && after.user_id === before.user_id) ||
-        (after.x_user_id !== null && after.x_user_id === before.x_user_id),
-    );
+    if (!isActorTargetingSelf({ target: asOwnershipRow(before), linkedXIds })) continue;
+    const next = afterRows.find((after) => after.x_user_id === before.x_user_id);
     assertSelfChangeConfirmation({
       eventId: args.eventId,
       isSelfTarget: true,
@@ -813,35 +658,33 @@ export async function buildReplaceEventStaffWithProtection(args: {
   }
 
   const mutationStatements: BatchItem<"sqlite">[] = [
-    ...(args.atomicExtras?.mutationStatements ?? []),
+    ...extras.mutationStatements,
     args.db.run(eventStaffVersionGuard({ eventId: args.eventId, rows: beforeRows })),
     args.db.run(sql`DELETE FROM event_staff WHERE event_id = ${args.eventId}`),
     ...afterRows.map((after) =>
       args.db.run(sql`
         INSERT INTO event_staff (
-          id, event_id, user_id, x_user_id, display_name, role,
-          permission_preset, custom_permission_keys_json, is_public,
-          public_role_label, internal_note, approved_by_user_id, approved_at,
-          created_at, updated_at
+          id, event_id, x_user_id, display_name, permission_preset,
+          custom_permission_keys_json, is_public, public_role_label,
+          approved_by_auth_user_id, approved_at, created_at, updated_at
         ) VALUES (
-          ${after.id}, ${after.event_id}, ${after.user_id}, ${after.x_user_id},
-          ${after.display_name}, ${after.role}, ${after.permission_preset},
+          ${after.id}, ${after.event_id}, ${after.x_user_id},
+          ${after.display_name}, ${after.permission_preset},
           ${after.custom_permission_keys_json}, ${after.is_public},
-          ${after.public_role_label}, ${after.internal_note},
-          ${after.approved_by_user_id}, ${after.approved_at}, ${after.created_at},
-          ${after.updated_at}
+          ${after.public_role_label}, ${after.approved_by_auth_user_id},
+          ${after.approved_at}, ${after.created_at}, ${after.updated_at}
         )
       `),
     ),
   ];
   const expectedMutationChanges: Array<number | null> = [
-    ...(args.atomicExtras?.expectedMutationChanges ?? []),
+    ...extras.expectedMutationChanges,
     null,
     beforeRows.length,
     ...afterRows.map(() => 1),
   ];
   const audits: WriteAuditLogInput[] = [
-    ...(args.atomicExtras?.audits ?? []),
+    ...extras.audits,
     ...beforeRows.map<WriteAuditLogInput>((before) => ({
       table_name: "event_staff",
       target_id: before.id,
@@ -870,13 +713,10 @@ export async function buildReplaceEventStaffWithProtection(args: {
     })),
   ];
 
-  return {
-    afterRows,
-    mutationStatements,
-    expectedMutationChanges,
-    audits,
-  };
-}export async function transferEventOwnership(args: {
+  return { afterRows, mutationStatements, expectedMutationChanges, audits };
+}
+
+export async function transferEventOwnership(args: {
   db: DB;
   eventId: string;
   fromStaffId: string;
@@ -906,13 +746,10 @@ export async function buildReplaceEventStaffWithProtection(args: {
     confirmText: args.confirmText,
     reason: args.reason,
   });
-  const approvedXIds = await getApprovedXIdsForUser(args.db, args.actorUserId);
+
+  const linkedXIds = await getApprovedXIdsForUser(args.db, args.actorUserId);
   const actorIsFrom = from
-    ? isActorTargetingSelf({
-        actorUserId: args.actorUserId,
-        target: asOwnershipRow(from),
-        approvedXIds,
-      })
+    ? isActorTargetingSelf({ target: asOwnershipRow(from), linkedXIds })
     : false;
   assertSelfChangeConfirmation({
     eventId: args.eventId,
@@ -929,14 +766,12 @@ export async function buildReplaceEventStaffWithProtection(args: {
     ...from!,
     permission_preset: "manager",
     custom_permission_keys_json: null,
-    role: syncLegacyRoleFromPreset("manager"),
     updated_at: now,
   };
   const afterTo: EventStaffRow = {
     ...to!,
     permission_preset: "owner",
     custom_permission_keys_json: null,
-    role: syncLegacyRoleFromPreset("owner"),
     updated_at: now,
   };
   const context = args.context ?? `ownership-transfer:${transferRunId}`;
@@ -952,11 +787,6 @@ export async function buildReplaceEventStaffWithProtection(args: {
           custom_permission_keys_json = CASE
             WHEN id IN (${args.toStaffId}, ${args.fromStaffId}) THEN NULL
             ELSE custom_permission_keys_json
-          END,
-          role = CASE
-            WHEN id = ${args.toStaffId} THEN 'representative'
-            WHEN id = ${args.fromStaffId} THEN 'editor'
-            ELSE role
           END,
           updated_at = ${now}
       WHERE event_id = ${args.eventId}
