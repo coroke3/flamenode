@@ -7,11 +7,13 @@ import { getDatabase } from "@/lib/cloudflare";
 import { xIdentityRequests, xUsers } from "@/lib/db/schema";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { expectedRowCondition } from "@/lib/audit/expectedRowCondition";
-import { mergeXIds } from "@/lib/actions/merge-admin";
 import { generateId } from "@/lib/utils/id";
 import { normalizeXId } from "@/lib/utils/xid";
 import { isRevertDeadlineOpen, validateXIdentityRequestShape } from "@/lib/auth/xIdentityRequestCore";
-import { restoreXIdMerge } from "@/lib/xid/merge";
+import {
+  executeApprovedXIdMergeRequest,
+  restoreApprovedXIdMergeRevertRequest,
+} from "@/lib/xid/merge";
 
 export interface XIdMergeAdminResult {
   ok: boolean;
@@ -36,11 +38,15 @@ async function requireAdmin(): Promise<
   return { ok: true, authUserId: user.id, db };
 }
 
-function revalidateMergePaths(): void {
+function revalidateMergePaths(sourceXUserId?: string | null, targetXUserId?: string | null): void {
   revalidatePath("/admin/x-id-merges");
   revalidatePath("/admin/x-link-requests");
+  revalidatePath("/admin/users");
   revalidatePath("/manage/x-link-requests");
+  revalidatePath("/dashboard");
   revalidatePath("/dashboard/settings");
+  if (sourceXUserId) revalidatePath(`/user/${sourceXUserId}`);
+  if (targetXUserId) revalidatePath(`/user/${targetXUserId}`);
 }
 
 export async function createXIdMergeRequest(formData: FormData): Promise<XIdMergeAdminResult> {
@@ -89,11 +95,13 @@ export async function createXIdMergeRequest(formData: FormData): Promise<XIdMerg
         before: null,
         after: row,
         actor_user_id: guard.authUserId,
+        reason: "管理者がX ID統合申請を作成",
+        context: "x-id-merge:request",
         retention_class: "long_audit",
       },
     ],
   });
-  revalidateMergePaths();
+  revalidateMergePaths(sourceXUserId, targetXUserId);
   return { ok: true, id, message: "X ID 統合申請を作成しました。" };
 }
 
@@ -145,11 +153,13 @@ async function setRequestStatus(
         before: current,
         after,
         actor_user_id: guard.authUserId,
+        reason: status === "approved" ? "X ID申請を承認" : "X ID申請を却下",
+        context: "x-id-merge:request",
         retention_class: "long_audit",
       },
     ],
   });
-  revalidateMergePaths();
+  revalidateMergePaths(current.source_x_user_id, current.target_x_user_id);
   return { ok: true, id, message: status === "approved" ? "承認しました。" : "却下しました。" };
 }
 
@@ -167,7 +177,6 @@ export async function executeXIdMergeRequest(formData: FormData): Promise<XIdMer
   if (!request || request.request_type !== "merge") {
     return { ok: false, message: "統合申請が見つかりません。" };
   }
-  if (request.status !== "approved") return { ok: false, message: "先に承認してください。" };
   const shapeError = validateXIdentityRequestShape({
     requestType: "merge",
     sourceXUserId: request.source_x_user_id,
@@ -175,52 +184,24 @@ export async function executeXIdMergeRequest(formData: FormData): Promise<XIdMer
   });
   if (shapeError) return { ok: false, message: shapeError };
 
-  const mergeForm = new FormData();
-  mergeForm.set("from", request.source_x_user_id!);
-  mergeForm.set("to", request.target_x_user_id!);
-  mergeForm.set("confirm", "MERGE");
-  const merged = await mergeXIds(mergeForm);
-  if (!merged.ok || !merged.restoreSnapshotJson || !merged.revertDeadlineAt) {
-    return { ok: false, message: merged.message ?? "統合に失敗しました。" };
+  try {
+    const result = await executeApprovedXIdMergeRequest(guard.db, {
+      request,
+      actorAuthUserId: guard.authUserId,
+    });
+    revalidateMergePaths(request.source_x_user_id, request.target_x_user_id);
+    return {
+      ok: true,
+      id,
+      message: `@${request.source_x_user_id} → @${request.target_x_user_id} に統合しました（${Object.values(result.counts).reduce((sum, value) => sum + value, 0)}件更新）。`,
+    };
+  } catch (cause) {
+    return {
+      ok: false,
+      id,
+      message: cause instanceof Error ? cause.message : "X ID統合を安全に確定できませんでした。",
+    };
   }
-
-  const now = Math.floor(Date.now() / 1000);
-  const after = {
-    ...request,
-    status: "done" as const,
-    restore_snapshot_json: merged.restoreSnapshotJson,
-    revert_deadline_at: merged.revertDeadlineAt,
-    updated_at: now,
-  };
-  await mutateWithAudit(guard.db, {
-    mutationStatements: [
-      guard.db
-        .update(xIdentityRequests)
-        .set({
-          status: "done",
-          restore_snapshot_json: merged.restoreSnapshotJson,
-          revert_deadline_at: merged.revertDeadlineAt,
-          updated_at: now,
-        })
-        .where(expectedRowCondition({ expectedCurrent: request })),
-    ],
-    expectedMutationChanges: [1],
-    audits: [
-      {
-        table_name: "x_identity_requests",
-        target_id: id,
-        operation: "UPDATE",
-        before: request,
-        after,
-        actor_user_id: guard.authUserId,
-        reason: "X ID統合を実行し復元情報と期限を保存",
-        retention_class: "long_audit",
-        restore_strategy: "none",
-      },
-    ],
-  });
-  revalidateMergePaths();
-  return { ok: true, id, message: merged.message };
 }
 
 export async function approveXIdMergeRevert(formData: FormData): Promise<XIdMergeAdminResult> {
@@ -237,9 +218,6 @@ export async function approveXIdMergeRevert(formData: FormData): Promise<XIdMerg
   if (!request || request.request_type !== "revert_merge") {
     return { ok: false, message: "差し戻し申請が見つかりません。" };
   }
-  if (request.status !== "pending" && request.status !== "approved") {
-    return { ok: false, message: "この差し戻し申請は処理できません。" };
-  }
   const now = Math.floor(Date.now() / 1000);
   const shapeError = validateXIdentityRequestShape({
     requestType: "revert_merge",
@@ -251,34 +229,32 @@ export async function approveXIdMergeRevert(formData: FormData): Promise<XIdMerg
   if (!isRevertDeadlineOpen(request.revert_deadline_at, now)) {
     return { ok: false, message: "統合の差し戻し期限を過ぎています。" };
   }
+  const parentRequest = (
+    await guard.db
+      .select()
+      .from(xIdentityRequests)
+      .where(eq(xIdentityRequests.id, request.parent_request_id!))
+      .limit(1)
+  )[0];
+  if (!parentRequest) return { ok: false, message: "親統合申請が見つかりません。" };
 
-  const counts = await restoreXIdMerge(guard.db, {
-    restoreSnapshotJson: request.restore_snapshot_json!,
-    actorAuthUserId: guard.authUserId,
-  });
-  const after = { ...request, status: "done" as const, updated_at: now };
-  await mutateWithAudit(guard.db, {
-    mutationStatements: [
-      guard.db
-        .update(xIdentityRequests)
-        .set({ status: "done", updated_at: now })
-        .where(expectedRowCondition({ expectedCurrent: request })),
-    ],
-    expectedMutationChanges: [1],
-    audits: [
-      {
-        table_name: "x_identity_requests",
-        target_id: request.id,
-        operation: "UPDATE",
-        before: request,
-        after: { ...after, restored_counts: counts },
-        actor_user_id: guard.authUserId,
-        reason: "X ID統合を期限内に差し戻し",
-        retention_class: "long_audit",
-        restore_strategy: "none",
-      },
-    ],
-  });
-  revalidateMergePaths();
-  return { ok: true, id, message: "X ID統合を差し戻しました。" };
+  try {
+    const counts = await restoreApprovedXIdMergeRevertRequest(guard.db, {
+      request,
+      parentRequest,
+      actorAuthUserId: guard.authUserId,
+    });
+    revalidateMergePaths(parentRequest.source_x_user_id, parentRequest.target_x_user_id);
+    return {
+      ok: true,
+      id,
+      message: `X ID統合を差し戻しました（${Object.values(counts).reduce((sum, value) => sum + value, 0)}件復元）。`,
+    };
+  } catch (cause) {
+    return {
+      ok: false,
+      id,
+      message: cause instanceof Error ? cause.message : "X ID統合を安全に差し戻せませんでした。",
+    };
+  }
 }
