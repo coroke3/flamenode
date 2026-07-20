@@ -1,0 +1,33 @@
+name: Export legacy import integration source
+
+on:
+  push:
+    branches:
+      - agent/legacy-import-canonical-v2
+  pull_request:
+    branches:
+      - agent/db-canonical-migration-v2
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Archive current source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          git archive --format=zip --output=/tmp/flamenode-legacy-import-source.zip HEAD
+      - name: Upload source artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flamenode-legacy-import-source-${{ github.run_id }}
+          path: /tmp/flamenode-legacy-import-source.zip
+          retention-days: 1
