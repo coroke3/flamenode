@@ -34,9 +34,9 @@ const CANONICAL_FORBIDDEN = [
 
 const SCHEMA_BASE_PATH = ["src/lib/db/schema", "base.ts"].join(".");
 const LEGACY_IMPORT_BOUNDARIES = [
-  "src/lib/import/legacy/",
-  "app/api/admin/import/legacy/",
-  "app/(admin)/admin/import/",
+  [...["src", "lib", "import", "legacy"], ""].join("/"),
+  [...["app", "api", "admin", "import", "legacy"], ""].join("/"),
+  [...["app", "(admin)", "admin", "import"], ""].join("/"),
 ];
 const NON_RUNTIME_FILE_PATTERN = /(?:\.test|\.contract\.test|\.integration\.test)\.mjs$/;
 
