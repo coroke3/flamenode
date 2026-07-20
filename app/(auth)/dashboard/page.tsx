@@ -12,14 +12,14 @@ import {
   videoChapters as videoChaptersTable,
   videoYoutubeMetadata,
   videos as videosTable,
+  xUserAccountLinks,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth/guard";
 import { getOnboardingState, onboardingHref } from "@/lib/auth/onboarding";
 import {
-  collapseReservationGroups,
   sortSlotsChronologically,
-  type SlotGroupRow,
+  type SlotBase,
 } from "@/lib/utils/slotGrouping";
 import { Icon } from "@/components/ui/Icon";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
@@ -28,6 +28,13 @@ import { excludePvsfSummaryVideos } from "@/lib/db/queries";
 
 export const metadata: Metadata = { title: "ダッシュボード" };
 export const dynamic = "force-dynamic";
+
+type LinkedXRow = {
+  id: string;
+  x_name: string;
+  icon_url: string | null;
+  approval_status: "pending" | "approved" | "rejected" | "imported" | null;
+};
 
 export default async function DashboardPage(): Promise<React.ReactElement> {
   const guard = await requireSession({ next: "/dashboard" });
@@ -38,11 +45,11 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
   const activeX = user.active_x_user_id ?? null;
   let activeGalleryXId: string | null = null;
 
-  let xIds: Array<{ id: string; x_name: string; icon_url: string | null; approval_status: string | null }> = [];
+  let xIds: LinkedXRow[] = [];
   let myVideos: VideoCardData[] = [];
-  let mySlot: SlotGroupRow | null = null;
+  let mySlot: SlotBase | null = null;
   let mySlotEvent: typeof eventsTable.$inferSelect | null = null;
-  let myChapters: {
+  let myChapters: Array<{
     id: string;
     video_id: string;
     youtube_video_id: string | null;
@@ -51,24 +58,26 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
     chapter_label: string;
     visibility: "private" | "public" | null;
     created_at: number;
-  }[] = [];
+  }> = [];
   let stats = { likes: 0, views: 0, video_count: 0, event_count: 0 };
 
   if (db) {
     try {
-      xIds = (await getLinkedXUsersForAuthUser(db, user.id)).map((row) => ({
-        id: row.x_user_id,
-        x_name: row.x_name,
-        icon_url: row.icon_url,
-        approval_status: row.approval_status,
-      }));
+      xIds = await db
+        .select({
+          id: xUsersTable.id,
+          x_name: xUsersTable.x_name,
+          icon_url: xUsersTable.icon_url,
+          approval_status: xUsersTable.approval_status,
+        })
+        .from(xUserAccountLinks)
+        .innerJoin(xUsersTable, eq(xUsersTable.id, xUserAccountLinks.x_user_id))
+        .where(eq(xUserAccountLinks.auth_user_id, user.id));
 
-      // マイ・ギャラリーは現在の活動名義を確認する場所なので、
-      // 表示対象をアクティブかつ承認済みの X ID に固定する。
-      // チャプターと集計はアカウント全体の履歴として承認済み X ID 全件を使う。
       const approvedXIds = await getApprovedXIds(db, user.id);
       activeGalleryXId =
         activeX && approvedXIds.includes(activeX) ? activeX : null;
+
       if (approvedXIds.length > 0) {
         myVideos = (await db
           .select({
@@ -76,9 +85,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
             title: videosTable.title,
             youtube_video_id: videosTable.youtube_video_id,
             display_name: sql<string>`COALESCE(${videosTable.creator_display_name}, ${xUsersTable.x_name}, '@' || ${videosTable.creator_x_user_id})`,
-            icon_url: sql<
-              string | null
-            >`COALESCE(${videosTable.creator_icon_url}, ${xUsersTable.icon_url})`,
+            icon_url: sql<string | null>`COALESCE(${videosTable.creator_icon_url}, ${xUsersTable.icon_url})`,
             creator_x_user_id: videosTable.creator_x_user_id,
             primary_event_id: videosTable.primary_event_id,
             scheduled_time: videosTable.scheduled_time,
@@ -114,11 +121,13 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           .limit(80);
       }
 
-      // 直近のアクティブスロット (reserved or x_reapply_required)
       const slotOwnerWhere = activeX
         ? or(
             eq(slotsTable.x_user_id, activeX),
-            and(isNull(slotsTable.x_user_id), eq(slotsTable.reserved_by_user_id, user.id))!,
+            and(
+              isNull(slotsTable.x_user_id),
+              eq(slotsTable.reserved_by_user_id, user.id),
+            )!,
           )
         : eq(slotsTable.reserved_by_user_id, user.id);
       const slotRows = await db
@@ -127,23 +136,25 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
         .where(
           and(
             slotOwnerWhere,
-            or(eq(slotsTable.status, "reserved"), eq(slotsTable.status, "submitted"))!,
+            or(
+              eq(slotsTable.status, "reserved"),
+              eq(slotsTable.status, "submitted"),
+            )!,
           )!,
         )
         .limit(50);
-      const groupedSlots = collapseReservationGroups(slotRows);
-      const sortedSlots = sortSlotsChronologically(groupedSlots);
-      mySlot = sortedSlots[0] ?? null;
-      if (mySlot && mySlot.event_id) {
-        const ev = await db
-          .select()
-          .from(eventsTable)
-          .where(eq(eventsTable.id, mySlot.event_id))
-          .limit(1);
-        mySlotEvent = ev[0] ?? null;
+      mySlot = sortSlotsChronologically(slotRows as SlotBase[])[0] ?? null;
+      if (mySlot) {
+        mySlotEvent =
+          (
+            await db
+              .select()
+              .from(eventsTable)
+              .where(eq(eventsTable.id, mySlot.event_id))
+              .limit(1)
+          )[0] ?? null;
       }
 
-      // 集計 (承認済み X ID 全件横断)
       if (approvedXIds.length > 0) {
         const aggRows = await db
           .select({
@@ -171,8 +182,8 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           event_count: Number(aggRows[0]?.ec ?? 0),
         };
       }
-    } catch (e) {
-      console.error("[DashboardPage] fetch failed", e);
+    } catch (error) {
+      console.error("[DashboardPage] fetch failed", error);
     }
   }
 
@@ -203,10 +214,16 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
       <header className={`fn-dash-head ${styles.accountHeader}`}>
         <div className={`fn-dash-id ${styles.accountIdentity}`}>
           {dashboardIcon ? (
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img src={dashboardIcon} alt="" className={`fn-dash-avatar ${styles.accountAvatar}`} />
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={dashboardIcon}
+              alt=""
+              className={`fn-dash-avatar ${styles.accountAvatar}`}
+            />
           ) : (
-            <span className={`fn-dash-avatar-fallback ${styles.accountAvatarFallback}`}>
+            <span
+              className={`fn-dash-avatar-fallback ${styles.accountAvatarFallback}`}
+            >
               {dashboardInitial}
             </span>
           )}
@@ -218,22 +235,16 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
         </div>
         <div className={`fn-dash-actions ${styles.accountActions}`}>
           <Link href="/dashboard/settings" className="fn-btn fn-btn-ghost fn-btn-sm">
-            <Icon name="settings" size={13} aria-hidden />
-            設定
+            <Icon name="settings" size={13} aria-hidden /> 設定
           </Link>
           <Link href="/entry" className="fn-btn fn-btn-primary fn-btn-lg">
-            <Icon name="plus" size={14} aria-hidden />
-            新規投稿
+            <Icon name="plus" size={14} aria-hidden /> 新規投稿
           </Link>
         </div>
       </header>
 
       {!onboarding.isComplete ? (
-        <div
-          className="fn-pc-status-banner"
-          role="status"
-          style={{ marginBottom: 20 }}
-        >
+        <div className="fn-pc-status-banner" role="status" style={{ marginBottom: 20 }}>
           <Icon name="alert" size={18} aria-hidden />
           <div>
             <h3 className="fn-jp">初期設定が未完了です</h3>
@@ -253,7 +264,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
       {!db ? (
         <div className="fn-empty" role="status">
           <p className="fn-empty-message">
-            データを読み込めませんでした。しばらくしてからページを再読み込みしてください。
+            データを読み込めませんでした。ページを再読み込みしてください。
           </p>
         </div>
       ) : null}
@@ -272,9 +283,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
         {xIds.length === 0 ? (
           <div className="fn-empty">
             <Icon name="user" size={20} aria-hidden />
-            <p className="fn-empty-message">
-              X ID がまだ連携されていません。
-            </p>
+            <p className="fn-empty-message">X ID がまだ連携されていません。</p>
             <Link
               href={onboarding.isComplete ? "/dashboard/settings" : onboardingHref("/dashboard")}
               className="fn-btn fn-btn-primary fn-mt-md"
@@ -284,10 +293,10 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           </div>
         ) : (
           <div className={styles.xidList}>
-            {xIds.map((x, index) => (
-              <div key={`${x.id}-xid-${index}`} className={styles.xidCard}>
+            {xIds.map((x) => (
+              <div key={x.id} className={styles.xidCard}>
                 {x.icon_url ? (
-                  /* eslint-disable-next-line @next/next/no-img-element */
+                  // eslint-disable-next-line @next/next/no-img-element
                   <img src={x.icon_url} alt="" className={styles.xidIcon} />
                 ) : (
                   <span className={styles.xidIconFb}>
@@ -316,9 +325,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
         {myVideos.length === 0 ? (
           <div className="fn-empty">
             <Icon name="grid" size={20} aria-hidden />
-            <p className="fn-empty-message">
-              {galleryEmptyMessage}
-            </p>
+            <p className="fn-empty-message">{galleryEmptyMessage}</p>
             <Link
               href={xIds.length === 0 ? "/dashboard/settings" : "/entry"}
               className="fn-btn fn-btn-primary fn-mt-md"
@@ -328,17 +335,21 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           </div>
         ) : (
           <div className={`fn-gallery-grid ${styles.galleryGrid}`}>
-            {myVideos.map((v, index) => (
-              <div key={`${v.id}-video-${index}`}>
-                <VideoCard video={v} href={`/dashboard/edit/${v.id}`} />
-              </div>
+            {myVideos.map((video) => (
+              <VideoCard
+                key={video.id}
+                video={video}
+                href={`/dashboard/edit/${video.id}`}
+              />
             ))}
           </div>
         )}
       </section>
 
       <section className={`fn-dash-section ${styles.section}`}>
-        <h2 className={`fn-dash-section-title ${styles.sectionTitle}`}>自分のチャプターコメント</h2>
+        <h2 className={`fn-dash-section-title ${styles.sectionTitle}`}>
+          自分のチャプターコメント
+        </h2>
         {myChapters.length === 0 ? (
           <div className="fn-empty">
             <Icon name="chapter" size={20} aria-hidden />
@@ -358,7 +369,13 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
                   <strong className="fn-stack-item-title">
                     {chapter.chapter_label}
                   </strong>
-                  <span className={`fn-badge ${chapter.visibility === "private" ? "fn-badge-warning" : "fn-badge-accent"}`}>
+                  <span
+                    className={`fn-badge ${
+                      chapter.visibility === "private"
+                        ? "fn-badge-warning"
+                        : "fn-badge-accent"
+                    }`}
+                  >
                     {chapter.visibility === "private" ? "非公開" : "公開"}
                   </span>
                 </div>
@@ -374,13 +391,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
   );
 }
 
-function Stat({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}): React.ReactElement {
+function Stat({ label, value }: { label: string; value: string }): React.ReactElement {
   return (
     <div className={`fn-dash-kpi ${styles.statCard}`}>
       <span className="fn-dash-kpi-v">{value}</span>
@@ -393,7 +404,7 @@ function HeroCard({
   slot,
   event,
 }: {
-  slot: SlotGroupRow | null;
+  slot: SlotBase | null;
   event: typeof eventsTable.$inferSelect | null;
 }): React.ReactElement {
   if (!slot || !event) {
@@ -414,14 +425,6 @@ function HeroCard({
     );
   }
 
-  const cardStyles =
-    slot.status === "submitted"
-      ? "fn-card-accent"
-      : slot.priority_reclaim_until
-        ? "fn-card-warning"
-        : "";
-  const groupMeta = slot as typeof slot & { is_group?: boolean; group_size?: number };
-
   return (
     <section
       style={
@@ -430,7 +433,11 @@ function HeroCard({
           : undefined
       }
     >
-      <div className={`fn-card fn-highlight-card ${cardStyles}`}>
+      <div
+        className={`fn-card fn-highlight-card ${
+          slot.status === "submitted" ? "fn-card-accent" : ""
+        }`}
+      >
         <div className="fn-card-body">
           <div className="fn-highlight-card-kicker">
             <Icon name="alert" size={12} aria-hidden /> アクティブ枠
@@ -445,10 +452,6 @@ function HeroCard({
               : (slot.slot_label ?? "未指定")}
             {" · "}
             <span>状態: {slot.status}</span>
-            {groupMeta.is_group ? ` · ${groupMeta.group_size ?? 0}連続` : ""}
-            {slot.priority_reclaim_until
-              ? ` · 確保期限 ${formatRelative(slot.priority_reclaim_until)}`
-              : ""}
           </p>
           <div className="fn-highlight-card-actions">
             {slot.status === "submitted" && slot.video_id ? (

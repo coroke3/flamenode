@@ -2,7 +2,7 @@ export type EventExportFormat = "legacy" | "new";
 export type EventExportUpdateMode = "realtime" | "scheduled";
 
 export interface EventExportStaffSnapshot {
-  x_user_id: string | null;
+  x_user_id: string;
   display_name: string;
   public_role_label: string | null;
   x_name: string | null;
@@ -30,13 +30,11 @@ export interface EventExportMemberSnapshot {
   name: string;
   role_label: string | null;
   order_index: number;
-  chapters_json: string | null;
 }
 
 export interface EventExportSoftwareSnapshot {
   name: string;
   raw_label: string;
-  order_index: number;
 }
 
 export interface EventExportAnswerSnapshot {
@@ -48,12 +46,10 @@ export interface EventExportAnswerSnapshot {
 }
 
 export interface EventExportChapterSnapshot {
-  x_user_id: string;
+  x_user_id: string | null;
   chapter_time: number;
   chapter_label: string;
   note: string | null;
-  show_on_player_bar: number | null;
-  order_index: number | null;
 }
 
 export interface EventExportVideoSnapshot {
@@ -100,9 +96,14 @@ function youtubeUrl(id: string | null): string | null {
   return id ? `https://www.youtube.com/watch?v=${id}` : null;
 }
 
-function youtubeThumbnail(id: string | null, size: "medium" | "large"): string | null {
+function youtubeThumbnail(
+  id: string | null,
+  size: "medium" | "large",
+): string | null {
   if (!id) return null;
-  return `https://i.ytimg.com/vi/${id}/${size === "large" ? "maxresdefault" : "mqdefault"}.jpg`;
+  return `https://i.ytimg.com/vi/${id}/${
+    size === "large" ? "maxresdefault" : "mqdefault"
+  }.jpg`;
 }
 
 function xProfileUrl(xId: string | null): string | null {
@@ -140,8 +141,13 @@ function answerText(video: EventExportVideoSnapshot, key: string): string {
   }
 }
 
-function legacyDateParts(value: number | null): { date: string; time: string } {
-  if (value == null || !Number.isFinite(value)) return { date: "", time: "" };
+function legacyDateParts(value: number | null): {
+  date: string;
+  time: string;
+} {
+  if (value == null || !Number.isFinite(value)) {
+    return { date: "", time: "" };
+  }
   const date = new Date((value + 9 * 60 * 60) * 1000);
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
   const day = String(date.getUTCDate()).padStart(2, "0");
@@ -150,37 +156,18 @@ function legacyDateParts(value: number | null): { date: string; time: string } {
   return { date: `${month}/${day}`, time: `${hour}:${minute}` };
 }
 
-function memberChapterBounds(chaptersJson: string | null): {
-  start: string;
-  end: string;
-} {
-  const parsed = parseJson(chaptersJson);
-  if (!Array.isArray(parsed) || parsed.length === 0) {
-    return { start: "", end: "" };
-  }
-  const first = parsed[0];
-  if (!first || typeof first !== "object") {
-    return { start: "", end: "" };
-  }
-  const chapter = first as { time_seconds?: unknown; end_seconds?: unknown };
-  const start = Number(chapter.time_seconds);
-  const end = Number(chapter.end_seconds);
-  return {
-    start: Number.isFinite(start) && start >= 0 ? String(start) : "",
-    end: Number.isFinite(end) && end >= 0 ? String(end) : "",
-  };
-}
-
+/** 旧形式は入力互換用の公開データだけを再構成し、旧DB列へ依存しない。 */
 export function buildLegacyEventExportPayload(
   snapshot: EventExportSnapshot,
 ): Array<Record<string, unknown>> {
   return snapshot.videos.map((video) => {
     const schedule = legacyDateParts(video.scheduled_time);
-    const chapterBounds = video.members.map((member) =>
-      memberChapterBounds(member.chapters_json),
-    );
     const isCollaboration =
       video.collaboration_type === "collab" || video.members.length > 1;
+    const chapterTimes = video.chapters
+      .map((chapter) => chapter.chapter_time)
+      .filter((time) => Number.isFinite(time) && time >= 0)
+      .map(String);
 
     return {
       id: video.id,
@@ -200,6 +187,7 @@ export function buildLegacyEventExportPayload(
       memberid: video.members
         .map((member) => (member.x_user_id ? `@${member.x_user_id}` : ""))
         .join(","),
+      memberchapter: chapterTimes.join(","),
       data: schedule.date,
       time: schedule.time,
       title: video.title,
@@ -220,8 +208,8 @@ export function buildLegacyEventExportPayload(
         .join(","),
       toudan: answerText(video, "stage_participation"),
       hitokoto: video.highlights ?? "",
-      starts: chapterBounds.map((chapter) => chapter.start).join(","),
-      ends: chapterBounds.map((chapter) => chapter.end).join(","),
+      starts: chapterTimes.join(","),
+      ends: "",
       startm: "",
       endm: "",
       ycomment: video.highlights ?? "",
@@ -342,23 +330,21 @@ export function buildEventExportPayload(
           x_url: xProfileUrl(member.x_user_id),
           role_label: member.role_label,
           order: member.order_index,
-          chapters: parseJson(member.chapters_json),
         })),
-        chapters: video.chapters.map((chapter) => ({
+        chapters: video.chapters.map((chapter, index) => ({
           time_seconds: chapter.chapter_time,
           label: chapter.chapter_label,
           note: chapter.note,
-          show_on_player_bar: chapter.show_on_player_bar === 1,
-          order: chapter.order_index ?? 0,
+          order: index,
           author: {
             x_id: chapter.x_user_id,
             x_url: xProfileUrl(chapter.x_user_id),
           },
         })),
-        softwares: video.softwares.map((software) => ({
+        softwares: video.softwares.map((software, index) => ({
           name: software.name,
           source_label: software.raw_label,
-          order: software.order_index,
+          order: index,
         })),
         custom_answers: customAnswers,
         custom_answers_by_key: Object.fromEntries(
