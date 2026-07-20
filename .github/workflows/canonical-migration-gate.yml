@@ -1,0 +1,54 @@
+name: Canonical migration gate
+
+on:
+  push:
+    branches:
+      - agent/db-canonical-migration-v2
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: canonical-migration-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify-canonical-migration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NEXT_PUBLIC_SITE_URL: https://flamenode.invalid
+      AUTH_URL: https://flamenode.invalid
+      AUTH_SECRET: ci-placeholder-not-a-production-secret
+      AUTH_DISCORD_ID: ci-placeholder-id
+      AUTH_DISCORD_SECRET: ci-placeholder-secret
+      CI: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: 一時統合物が残っていないことを検査
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e .agent-patch
+          test ! -e .agent-trigger
+          test ! -e .github/workflows/apply-final-patch.yml
+      - name: DB正本migrationを検査
+        run: npm run check:db-migration
+      - name: D1空DBmigrationを検査
+        run: npm run check:db-d1-empty
+      - name: D1旧DBmigrationを検査
+        run: npm run check:db-d1-legacy
+      - name: 旧形式インポート専用境界を検査
+        run: node --test --experimental-strip-types src/lib/import/legacy/canonicalImport.test.mjs
+      - name: X名義正本契約を検査
+        run: node --test --experimental-strip-types src/lib/auth/xIdentityCanonical.contract.test.mjs src/lib/integration/finalAcceptance.integration.test.mjs
