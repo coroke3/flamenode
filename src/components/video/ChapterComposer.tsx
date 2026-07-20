@@ -27,6 +27,7 @@ interface ChapterComposerProps {
 type ChapterVisibility = "public" | "private";
 
 interface VisibilityOptionProps {
+  name: string;
   value: ChapterVisibility;
   current: ChapterVisibility;
   title: string;
@@ -35,6 +36,7 @@ interface VisibilityOptionProps {
 }
 
 function VisibilityOption({
+  name,
   value,
   current,
   title,
@@ -50,7 +52,7 @@ function VisibilityOption({
     >
       <input
         type="radio"
-        name="chapter_visibility"
+        name={name}
         value={value}
         checked={active}
         onChange={() => onChange(value)}
@@ -72,6 +74,14 @@ export function ChapterComposer({
   bulkOnly = false,
 }: ChapterComposerProps): React.ReactElement {
   const router = useRouter();
+  const componentId = React.useId();
+  const formId = `${componentId}-form`;
+  const timeId = `${componentId}-time`;
+  const timeHelpId = `${componentId}-time-help`;
+  const labelId = `${componentId}-label`;
+  const noteId = `${componentId}-note`;
+  const visibilityName = `${componentId}-visibility`;
+
   const [open, setOpen] = React.useState(false);
   const [timeStr, setTimeStr] = React.useState("0:00");
   const [label, setLabel] = React.useState("");
@@ -97,6 +107,7 @@ export function ChapterComposer({
   }, []);
 
   const loadContext = React.useCallback(() => {
+    if (contextLoading) return;
     const requestId = contextRequestRef.current + 1;
     contextRequestRef.current = requestId;
     setContextError(null);
@@ -106,7 +117,6 @@ export function ChapterComposer({
       const result = await getChapterPostingContext(videoId);
       if (contextRequestRef.current !== requestId) return;
       if (!result.ok || result.durationSeconds == null) {
-        setDurationSeconds(null);
         setContextError(
           result.message ?? "動画時間を取得できないため投稿できません。",
         );
@@ -114,38 +124,17 @@ export function ChapterComposer({
       }
       setDurationSeconds(result.durationSeconds);
     });
-  }, [videoId]);
+  }, [contextLoading, videoId]);
 
   React.useEffect(() => {
     contextRequestRef.current += 1;
     submittingRef.current = false;
+    setOpen(false);
     setDurationSeconds(null);
     setContextError(null);
     setError(null);
     setSuccess(null);
   }, [videoId]);
-
-  React.useEffect(() => {
-    if (
-      !open ||
-      !canPost ||
-      bulkOnly ||
-      contextLoading ||
-      durationSeconds != null ||
-      contextError
-    ) {
-      return;
-    }
-    loadContext();
-  }, [
-    bulkOnly,
-    canPost,
-    contextError,
-    contextLoading,
-    durationSeconds,
-    loadContext,
-    open,
-  ]);
 
   const parsedTime = React.useMemo(
     () => parseChapterTimeInput(timeStr),
@@ -160,6 +149,21 @@ export function ChapterComposer({
     }
     return null;
   }, [durationSeconds, parsedTime]);
+
+  const toggleForm = () => {
+    if (busy) return;
+    const nextOpen = !open;
+    setOpen(nextOpen);
+    clearFeedback();
+    if (
+      nextOpen &&
+      durationSeconds == null &&
+      !contextError &&
+      !contextLoading
+    ) {
+      loadContext();
+    }
+  };
 
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -244,25 +248,22 @@ export function ChapterComposer({
     !label.trim();
 
   return (
-    <section className={styles.root} aria-labelledby="chapter-composer-heading">
+    <section className={styles.root} aria-labelledby={`${componentId}-heading`}>
       <header className={styles.header}>
         <span className={styles.headingGroup}>
           <span className={styles.headingIcon} aria-hidden>
             <Icon name="comment" size={13} />
           </span>
-          <strong id="chapter-composer-heading" className={styles.heading}>
+          <strong id={`${componentId}-heading`} className={styles.heading}>
             チャプターコメント投稿
           </strong>
         </span>
         <button
           type="button"
           className={styles.toggleButton}
-          onClick={() => {
-            setOpen((value) => !value);
-            clearFeedback();
-          }}
+          onClick={toggleForm}
           aria-expanded={open}
-          aria-controls="chapter-comment-form"
+          aria-controls={formId}
           disabled={busy}
         >
           <span>{open ? "閉じる" : "投稿する"}</span>
@@ -276,18 +277,18 @@ export function ChapterComposer({
 
       {open ? (
         <form
-          id="chapter-comment-form"
+          id={formId}
           onSubmit={onSubmit}
           className={styles.form}
           aria-busy={busy || contextLoading}
         >
           <div className={styles.field}>
-            <label htmlFor="chapter-comment-time" className={styles.label}>
+            <label htmlFor={timeId} className={styles.label}>
               時刻
             </label>
             <div className={styles.timeRow}>
               <input
-                id="chapter-comment-time"
+                id={timeId}
                 type="text"
                 value={timeStr}
                 onChange={(event) => {
@@ -297,7 +298,7 @@ export function ChapterComposer({
                 placeholder="1:23"
                 className="fn-input"
                 aria-invalid={Boolean(timeError)}
-                aria-describedby="chapter-comment-time-help"
+                aria-describedby={timeHelpId}
                 autoComplete="off"
                 autoCapitalize="none"
                 spellCheck={false}
@@ -315,7 +316,7 @@ export function ChapterComposer({
               </span>
             </div>
             <p
-              id="chapter-comment-time-help"
+              id={timeHelpId}
               className={timeError ? styles.fieldError : styles.fieldHelp}
             >
               {timeError ?? "例: 1:23、1:23:45、83、83.5"}
@@ -323,11 +324,11 @@ export function ChapterComposer({
           </div>
 
           <div className={styles.field}>
-            <label htmlFor="chapter-comment-label" className={styles.label}>
+            <label htmlFor={labelId} className={styles.label}>
               見出し
             </label>
             <input
-              id="chapter-comment-label"
+              id={labelId}
               type="text"
               value={label}
               onChange={(event) => {
@@ -343,11 +344,11 @@ export function ChapterComposer({
           </div>
 
           <div className={styles.field}>
-            <label htmlFor="chapter-comment-note" className={styles.label}>
+            <label htmlFor={noteId} className={styles.label}>
               補足コメント <span className={styles.optional}>任意</span>
             </label>
             <textarea
-              id="chapter-comment-note"
+              id={noteId}
               value={note}
               onChange={(event) => {
                 setNote(event.target.value);
@@ -366,6 +367,7 @@ export function ChapterComposer({
             <legend className={styles.label}>公開範囲</legend>
             <div className={styles.visibilityOptions}>
               <VisibilityOption
+                name={visibilityName}
                 value="public"
                 current={visibility}
                 title="公開"
@@ -376,6 +378,7 @@ export function ChapterComposer({
                 }}
               />
               <VisibilityOption
+                name={visibilityName}
                 value="private"
                 current={visibility}
                 title="非公開"
