@@ -19,21 +19,33 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Archive integration source
+      - name: Archive integration sources
         shell: bash
         run: |
           set -euo pipefail
-          git archive --format=zip --output=/tmp/flamenode-pr-source.zip HEAD
-          git archive --format=zip --output=/tmp/flamenode-main-source.zip origin/main
-          git archive --format=zip --output=/tmp/flamenode-x-identity-source.zip origin/agent/db-canonical-x-identity
-          git archive --format=zip --output=/tmp/flamenode-events-source.zip origin/agent/db-canonical-events
+          mkdir -p /tmp/flamenode-integration-sources
+          git for-each-ref --format='%(refname:short) %(objectname)' refs/remotes/origin \
+            | sort > /tmp/flamenode-integration-sources/branches.txt
+          refs=(
+            main
+            agent/db-canonical-migration-v2
+            agent/db-canonical-events
+            agent/db-canonical-foundation
+            agent/db-canonical-x-identity
+            agent/db-canonical-videos-import
+            agent/chapter-comment-delete-and-validation
+            agent/ux-and-status-simplification
+            agent/unify-custom-questions
+          )
+          for ref in "${refs[@]}"; do
+            if git show-ref --verify --quiet "refs/remotes/origin/${ref}"; then
+              safe_name="${ref//\//__}"
+              git archive --format=zip --output="/tmp/flamenode-integration-sources/${safe_name}.zip" "origin/${ref}"
+            fi
+          done
       - name: Upload source artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: flamenode-integration-sources-${{ github.run_id }}
-          path: |
-            /tmp/flamenode-pr-source.zip
-            /tmp/flamenode-main-source.zip
-            /tmp/flamenode-x-identity-source.zip
-            /tmp/flamenode-events-source.zip
+          name: flamenode-all-integration-sources-${{ github.run_id }}
+          path: /tmp/flamenode-integration-sources
           retention-days: 1
