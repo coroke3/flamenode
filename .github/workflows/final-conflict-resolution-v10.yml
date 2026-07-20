@@ -1,0 +1,817 @@
+name: Final canonical conflict resolution v10
+
+on:
+  push:
+    branches:
+      - agent/db-canonical-final-conflicts-v10
+    paths:
+      - .agent-trigger/final-conflict-resolution-v10
+  pull_request:
+    branches:
+      - agent/db-canonical-migration-v2
+    paths:
+      - .agent-trigger/final-conflict-resolution-v10
+      - .github/workflows/final-conflict-resolution-v10.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: final-canonical-conflict-resolution-v10
+  cancel-in-progress: false
+
+jobs:
+  resolve-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      NEXT_PUBLIC_SITE_URL: https://flamenode.invalid
+      AUTH_URL: https://flamenode.invalid
+      AUTH_SECRET: ci-placeholder-not-a-production-secret
+      AUTH_DISCORD_ID: ci-placeholder-id
+      AUTH_DISCORD_SECRET: ci-placeholder-secret
+      CI: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/db-canonical-final-conflicts-v10
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply final semantic conflict resolutions
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdir -p .tmp src/lib/xid
+
+          cat > workers/cleanup/retention.ts <<'EOF'
+          /** cleanup Worker の保持期限・リトライ計算。 */
+
+          export const SENT_TTL_SEC = 14 * 24 * 60 * 60;
+          export const FAILED_TTL_SEC = 30 * 24 * 60 * 60;
+          export const AUDIT_COMPACT_AFTER_DAYS_DEFAULT = 30;
+          export const AUDIT_CLEANUP_BATCH_LIMIT = 500;
+          export const CLEANUP_MAX_RETRIES = 3;
+
+          export interface NotificationCutoffs {
+            sentCutoff: number;
+            failedCutoff: number;
+          }
+
+          export interface AuditCleanupSettings {
+            compactAfterDays: number;
+          }
+
+          export interface RetryDecision {
+            shouldRetry: boolean;
+            reason: string;
+          }
+
+          function clampPositiveInteger(
+            value: unknown,
+            min: number,
+            max: number,
+            fallback: number,
+          ): number {
+            const raw = Number(value ?? fallback);
+            if (!Number.isFinite(raw) || raw <= 0) return fallback;
+            return Math.min(Math.max(Math.floor(raw), min), max);
+          }
+
+          export function computeNotificationCutoffs(now: number): NotificationCutoffs {
+            return {
+              sentCutoff: now - SENT_TTL_SEC,
+              failedCutoff: now - FAILED_TTL_SEC,
+            };
+          }
+
+          export function normalizeAuditCleanupSettings(
+            row:
+              | { audit_compact_after_days?: unknown }
+              | null
+              | undefined,
+          ): AuditCleanupSettings {
+            return {
+              compactAfterDays: clampPositiveInteger(
+                row?.audit_compact_after_days,
+                1,
+                365,
+                AUDIT_COMPACT_AFTER_DAYS_DEFAULT,
+              ),
+            };
+          }
+
+          export function computeAuditCompactCutoff(
+            now: number,
+            compactAfterDays: number,
+          ): number {
+            const days = clampPositiveInteger(
+              compactAfterDays,
+              1,
+              365,
+              AUDIT_COMPACT_AFTER_DAYS_DEFAULT,
+            );
+            return now - days * 86400;
+          }
+
+          export function shouldRetryCleanupError(
+            attemptCount: number,
+            error: unknown,
+          ): RetryDecision {
+            if (attemptCount >= CLEANUP_MAX_RETRIES) {
+              return { shouldRetry: false, reason: "max_retries_reached" };
+            }
+            const message = String(
+              (error as { message?: unknown })?.message ?? error ?? "",
+            ).toLowerCase();
+            if (
+              message.includes("no such column") ||
+              message.includes("no such table") ||
+              message.includes("syntax error")
+            ) {
+              return { shouldRetry: false, reason: "schema_error" };
+            }
+            if (
+              message.includes("too many") ||
+              message.includes("rate") ||
+              message.includes("timeout") ||
+              message.includes("network") ||
+              message.includes("429") ||
+              message.includes("503")
+            ) {
+              return { shouldRetry: true, reason: "transient_error" };
+            }
+            return { shouldRetry: true, reason: "unknown_error" };
+          }
+          EOF
+
+          cat > workers/cleanup/index.ts <<'EOF'
+          /** 通知・インポートpreview・監査ログの期限切れデータを削除する。 */
+          import {
+            computeAuditCompactCutoff,
+            computeNotificationCutoffs,
+            normalizeAuditCleanupSettings,
+            shouldRetryCleanupError,
+            AUDIT_CLEANUP_BATCH_LIMIT,
+            AUDIT_COMPACT_AFTER_DAYS_DEFAULT,
+            CLEANUP_MAX_RETRIES,
+            type AuditCleanupSettings,
+          } from "./retention.ts";
+          import { logWorkerJob, safeErrorSummary } from "../shared/safeLog.ts";
+
+          export interface Env {
+            DB: D1Database;
+          }
+
+          export async function runCleanupWithRetry(
+            env: Env,
+          ): Promise<{ processed: number; failed: number }> {
+            const startedMs = Date.now();
+            const runId = crypto.randomUUID();
+            let attempt = 0;
+            let lastError: unknown = null;
+            while (attempt < CLEANUP_MAX_RETRIES) {
+              try {
+                await runCleanup(env);
+                return { processed: 1, failed: 0 };
+              } catch (error) {
+                attempt += 1;
+                lastError = error;
+                const decision = shouldRetryCleanupError(attempt, error);
+                logWorkerJob({
+                  worker: "content-jobs",
+                  job: "cleanup-retry",
+                  run_id: runId,
+                  started_at: new Date(startedMs).toISOString(),
+                  processed: 0,
+                  skipped: 0,
+                  failed: 1,
+                  duration_ms: Date.now() - startedMs,
+                  result: "failed",
+                  error: `${decision.reason}:${safeErrorSummary(error)}`,
+                });
+                if (!decision.shouldRetry) break;
+                await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+              }
+            }
+            logWorkerJob({
+              worker: "content-jobs",
+              job: "cleanup-give-up",
+              run_id: runId,
+              started_at: new Date(startedMs).toISOString(),
+              processed: 0,
+              skipped: 0,
+              failed: 1,
+              duration_ms: Date.now() - startedMs,
+              result: "failed",
+              error: safeErrorSummary(lastError),
+            });
+            return { processed: 0, failed: 1 };
+          }
+
+          export async function readAuditCleanupSettings(
+            env: Env,
+          ): Promise<AuditCleanupSettings> {
+            try {
+              const row = await env.DB.prepare(
+                `SELECT audit_compact_after_days
+                 FROM system_settings
+                 WHERE id = 'default'
+                 LIMIT 1`,
+              ).first<{ audit_compact_after_days: number | null }>();
+              return normalizeAuditCleanupSettings(row);
+            } catch (error) {
+              console.warn(
+                JSON.stringify({
+                  worker: "content-jobs",
+                  job: "cleanup-audit-settings",
+                  result: "fallback",
+                  error: safeErrorSummary(error),
+                }),
+              );
+              return { compactAfterDays: AUDIT_COMPACT_AFTER_DAYS_DEFAULT };
+            }
+          }
+
+          export async function runCleanup(env: Env): Promise<void> {
+            const now = Math.floor(Date.now() / 1000);
+            const { sentCutoff, failedCutoff } = computeNotificationCutoffs(now);
+            const { compactAfterDays } = await readAuditCleanupSettings(env);
+            const compactCutoff = computeAuditCompactCutoff(now, compactAfterDays);
+
+            await env.DB.prepare(
+              `DELETE FROM notification_outbox
+               WHERE status = 'sent' AND created_at IS NOT NULL AND created_at < ?1
+               LIMIT ?2`,
+            ).bind(sentCutoff, AUDIT_CLEANUP_BATCH_LIMIT).run();
+
+            await env.DB.prepare(
+              `DELETE FROM notification_outbox
+               WHERE status IN ('failed', 'dead_letter')
+                 AND created_at IS NOT NULL
+                 AND created_at < ?1
+               LIMIT ?2`,
+            ).bind(failedCutoff, AUDIT_CLEANUP_BATCH_LIMIT).run();
+
+            await env.DB.prepare(
+              `DELETE FROM spreadsheet_import_runs
+               WHERE nonce IN (
+                 SELECT nonce
+                 FROM spreadsheet_import_runs
+                 WHERE consumed_at IS NOT NULL OR expires_at < ?1
+                 ORDER BY COALESCE(consumed_at, expires_at) ASC
+                 LIMIT ?2
+               )`,
+            ).bind(now, AUDIT_CLEANUP_BATCH_LIMIT).run();
+
+            await env.DB.prepare(
+              `UPDATE audit_logs
+               SET restore_status = 'expired'
+               WHERE restore_status = 'restorable'
+                 AND expires_at IS NOT NULL
+                 AND expires_at < ?1
+               LIMIT ?2`,
+            ).bind(now, AUDIT_CLEANUP_BATCH_LIMIT).run();
+
+            await env.DB.prepare(
+              `DELETE FROM audit_logs
+               WHERE expires_at IS NOT NULL AND expires_at < ?1
+               LIMIT ?2`,
+            ).bind(now, AUDIT_CLEANUP_BATCH_LIMIT).run();
+
+            await env.DB.prepare(
+              `UPDATE audit_logs
+               SET before_json = NULL,
+                   after_json = NULL,
+                   inverse_patch_json = NULL,
+                   restore_status = CASE
+                     WHEN restore_status = 'restorable' THEN 'not_restorable'
+                     ELSE restore_status
+                   END
+               WHERE created_at < ?1
+                 AND (before_json IS NOT NULL OR after_json IS NOT NULL)
+               LIMIT ?2`,
+            ).bind(compactCutoff, AUDIT_CLEANUP_BATCH_LIMIT).run();
+          }
+          EOF
+
+          cat > workers/cleanup/retention.test.mjs <<'EOF'
+          import { test } from "node:test";
+          import assert from "node:assert/strict";
+          import {
+            computeAuditCompactCutoff,
+            computeNotificationCutoffs,
+            normalizeAuditCleanupSettings,
+            shouldRetryCleanupError,
+            AUDIT_COMPACT_AFTER_DAYS_DEFAULT,
+            CLEANUP_MAX_RETRIES,
+            SENT_TTL_SEC,
+            FAILED_TTL_SEC,
+          } from "./retention.ts";
+
+          test("通知保持期限を現在時刻から計算する", () => {
+            const now = 2_000_000_000;
+            const cutoffs = computeNotificationCutoffs(now);
+            assert.equal(cutoffs.sentCutoff, now - SENT_TTL_SEC);
+            assert.equal(cutoffs.failedCutoff, now - FAILED_TTL_SEC);
+          });
+
+          test("system_settings.audit_compact_after_daysを正規化する", () => {
+            assert.deepEqual(normalizeAuditCleanupSettings(null), {
+              compactAfterDays: AUDIT_COMPACT_AFTER_DAYS_DEFAULT,
+            });
+            assert.equal(
+              normalizeAuditCleanupSettings({ audit_compact_after_days: 14 })
+                .compactAfterDays,
+              14,
+            );
+            assert.equal(
+              normalizeAuditCleanupSettings({ audit_compact_after_days: -1 })
+                .compactAfterDays,
+              AUDIT_COMPACT_AFTER_DAYS_DEFAULT,
+            );
+          });
+
+          test("監査payload軽量化cutoffを計算する", () => {
+            const now = 2_000_000_000;
+            assert.equal(computeAuditCompactCutoff(now, 14), now - 14 * 86400);
+          });
+
+          test("cleanupリトライ判定はschema errorを再試行しない", () => {
+            assert.equal(
+              shouldRetryCleanupError(0, new Error("no such column: old_column"))
+                .shouldRetry,
+              false,
+            );
+            assert.equal(
+              shouldRetryCleanupError(CLEANUP_MAX_RETRIES, new Error("timeout"))
+                .shouldRetry,
+              false,
+            );
+            assert.equal(
+              shouldRetryCleanupError(0, new Error("HTTP 503")).shouldRetry,
+              true,
+            );
+          });
+          EOF
+
+          cat > workers/cleanup/index.test.mjs <<'EOF'
+          import { test } from "node:test";
+          import assert from "node:assert/strict";
+          import {
+            runCleanup,
+            runCleanupWithRetry,
+            readAuditCleanupSettings,
+          } from "./index.ts";
+
+          function makePreparedMock(sql, recorder, firstReturn) {
+            return {
+              bind(...args) {
+                this.binds = args;
+                return this;
+              },
+              async first() {
+                recorder.push({ sql, op: "first", binds: this.binds ?? [] });
+                return firstReturn ?? null;
+              },
+              async run() {
+                recorder.push({ sql, op: "run", binds: this.binds ?? [] });
+                return { success: true };
+              },
+            };
+          }
+
+          function makeEnv(options = {}) {
+            const recorder = [];
+            return {
+              recorder,
+              env: {
+                DB: {
+                  prepare(sql) {
+                    const firstReturn = sql.includes("audit_compact_after_days")
+                      ? options.settings ?? { audit_compact_after_days: 30 }
+                      : null;
+                    return makePreparedMock(sql, recorder, firstReturn);
+                  },
+                },
+              },
+            };
+          }
+
+          test("cleanupはsystem_settings.audit_*だけを設定正本として使う", async () => {
+            const { env, recorder } = makeEnv({
+              settings: { audit_compact_after_days: 14 },
+            });
+            await runCleanup(env);
+            const sql = recorder.map((entry) => entry.sql).join("\n");
+            assert.match(sql, /audit_compact_after_days/);
+            assert.doesNotMatch(sql, /history_retention_days/);
+            assert.doesNotMatch(sql, /audit_log_settings/);
+            assert.doesNotMatch(sql, /priority_reclaim_until/);
+            assert.match(sql, /DELETE FROM notification_outbox/);
+            assert.match(sql, /DELETE FROM spreadsheet_import_runs/);
+            assert.match(sql, /DELETE FROM audit_logs/);
+            const compact = recorder.find(
+              (entry) => entry.sql.includes("before_json = NULL"),
+            );
+            assert.ok(compact);
+            const expected = Math.floor(Date.now() / 1000) - 14 * 86400;
+            assert.ok(Math.abs(compact.binds[0] - expected) <= 5);
+          });
+
+          test("設定読取失敗時は監査compact既定値へ戻す", async () => {
+            const env = {
+              DB: {
+                prepare() {
+                  return {
+                    async first() {
+                      throw new Error("D1 unavailable");
+                    },
+                  };
+                },
+              },
+            };
+            assert.deepEqual(await readAuditCleanupSettings(env), {
+              compactAfterDays: 30,
+            });
+          });
+
+          test("一時エラーは再試行しschema errorは再試行しない", async () => {
+            let firstCalls = 0;
+            const transientEnv = {
+              DB: {
+                prepare() {
+                  return {
+                    bind() { return this; },
+                    async first() {
+                      firstCalls += 1;
+                      if (firstCalls === 1) throw new Error("Too many requests");
+                      return { audit_compact_after_days: 30 };
+                    },
+                    async run() { return { success: true }; },
+                  };
+                },
+              },
+            };
+            const result = await runCleanupWithRetry(transientEnv);
+            assert.equal(result.failed, 0);
+            assert.ok(firstCalls >= 2);
+          });
+          EOF
+
+          cat > src/lib/xid/mergeAudits.ts <<'EOF'
+          import type { WriteAuditLogInput } from "../audit/types.ts";
+
+          export type EventStaffSnapshot = {
+            id: string;
+            event_id: string;
+            x_user_id: string;
+            display_name: string;
+            permission_preset: string;
+            custom_permission_keys_json: string | null;
+            is_public: number;
+            public_role_label: string | null;
+            approved_by_auth_user_id: string | null;
+            approved_at: number | null;
+            created_at: number;
+            updated_at: number;
+          };
+
+          function sameSnapshot(
+            before: EventStaffSnapshot,
+            after: EventStaffSnapshot,
+          ): boolean {
+            return Object.keys(before).every(
+              (key) =>
+                before[key as keyof EventStaffSnapshot] ===
+                after[key as keyof EventStaffSnapshot],
+            );
+          }
+
+          export function buildEventStaffMergeAudits(input: {
+            beforeRows: readonly EventStaffSnapshot[];
+            afterRows: readonly EventStaffSnapshot[];
+            actorUserId: string;
+            fromXId: string;
+            toXId: string;
+          }): WriteAuditLogInput[] {
+            const afterById = new Map(
+              input.afterRows.map((row) => [row.id, row] as const),
+            );
+            return input.beforeRows.flatMap((before): WriteAuditLogInput[] => {
+              const after = afterById.get(before.id) ?? null;
+              if (!after) {
+                return [{
+                  table_name: "event_staff",
+                  target_id: before.id,
+                  operation: "DELETE",
+                  before: { ...before },
+                  after: null,
+                  actor_user_id: input.actorUserId,
+                  reason: `X ID統合によるスタッフ重複解消: @${input.fromXId} → @${input.toXId}`,
+                  context: "x-id-merge:event-staff",
+                  retention_class: "restorable",
+                  restore_strategy: "recreate_deleted",
+                  strict: true,
+                }];
+              }
+              if (sameSnapshot(before, after)) return [];
+              return [{
+                table_name: "event_staff",
+                target_id: before.id,
+                operation: "UPDATE",
+                before: { ...before },
+                after: { ...after },
+                actor_user_id: input.actorUserId,
+                reason: `X ID統合によるスタッフ更新: @${input.fromXId} → @${input.toXId}`,
+                context: "x-id-merge:event-staff",
+                retention_class: "restorable",
+                restore_strategy: "update_before",
+                strict: true,
+              }];
+            });
+          }
+          EOF
+
+          cat > src/lib/xid/mergeAudits.test.mjs <<'EOF'
+          import assert from "node:assert/strict";
+          import { test } from "node:test";
+          import { buildEventStaffMergeAudits } from "./mergeAudits.ts";
+
+          function staff(overrides = {}) {
+            return {
+              id: "staff-1",
+              event_id: "event-1",
+              x_user_id: "old-id",
+              display_name: "Operator",
+              permission_preset: "public_staff",
+              custom_permission_keys_json: null,
+              is_public: 0,
+              public_role_label: null,
+              approved_by_auth_user_id: null,
+              approved_at: null,
+              created_at: 100,
+              updated_at: 100,
+              ...overrides,
+            };
+          }
+
+          test("X ID変更は復元可能なUPDATE監査になる", () => {
+            const before = staff();
+            const after = staff({ x_user_id: "new-id", updated_at: 200 });
+            const [audit] = buildEventStaffMergeAudits({
+              beforeRows: [before],
+              afterRows: [after],
+              actorUserId: "admin-1",
+              fromXId: "old-id",
+              toXId: "new-id",
+            });
+            assert.equal(audit.operation, "UPDATE");
+            assert.equal(audit.restore_strategy, "update_before");
+            assert.deepEqual(audit.before, before);
+            assert.deepEqual(audit.after, after);
+          });
+
+          test("重複削除は復元可能なDELETE監査になる", () => {
+            const before = staff();
+            const [audit] = buildEventStaffMergeAudits({
+              beforeRows: [before],
+              afterRows: [],
+              actorUserId: "admin-1",
+              fromXId: "old-id",
+              toXId: "new-id",
+            });
+            assert.equal(audit.operation, "DELETE");
+            assert.equal(audit.restore_strategy, "recreate_deleted");
+            assert.equal(audit.after, null);
+          });
+          EOF
+
+          cat > src/lib/admin/permissionSimulator.ts <<'EOF'
+          import "server-only";
+          import { and, eq } from "drizzle-orm";
+          import type { DB } from "@/lib/db/client";
+          import { eventStaff } from "@/lib/db/schema";
+          import { resolveStaffPermissionKeys } from "@/lib/auth/permissions/permissionResolver";
+          import { PRESET_DEFINITIONS, type EventStaffPreset } from "@/lib/auth/permissions/presets";
+          import { formatPermissionKeyLabel } from "@/lib/admin/permissionIntegrityChecks";
+          import type { PermissionKey } from "@/lib/auth/permissions/keys";
+
+          const SPOTLIGHT_KEYS: PermissionKey[] = [
+            "event.basic", "event.slots", "event.review", "event.members",
+            "video.status", "video.descriptions", "event.notifications",
+          ];
+
+          export type PermissionSimulationResult = {
+            found: boolean;
+            eventId: string;
+            xUserId: string | null;
+            displayName: string | null;
+            preset: EventStaffPreset | null;
+            presetLabel: string | null;
+            resolvedKeys: PermissionKey[];
+            resolvedLabels: string[];
+            spotlight: Array<{ key: PermissionKey; label: string; allowed: boolean }>;
+          };
+
+          export async function simulateEventPermissions(
+            db: DB,
+            input: { eventId: string; xUserId: string },
+          ): Promise<PermissionSimulationResult> {
+            const eventId = input.eventId.trim();
+            const xUserId = input.xUserId.trim().replace(/^@/, "") || null;
+            const empty: PermissionSimulationResult = {
+              found: false,
+              eventId,
+              xUserId,
+              displayName: null,
+              preset: null,
+              presetLabel: null,
+              resolvedKeys: [],
+              resolvedLabels: [],
+              spotlight: SPOTLIGHT_KEYS.map((key) => ({
+                key,
+                label: formatPermissionKeyLabel(key),
+                allowed: false,
+              })),
+            };
+            if (!eventId || !xUserId) return empty;
+            const row = (
+              await db.select().from(eventStaff).where(
+                and(
+                  eq(eventStaff.event_id, eventId),
+                  eq(eventStaff.x_user_id, xUserId),
+                )!,
+              ).limit(1)
+            )[0];
+            if (!row) return empty;
+            const preset = (row.permission_preset ?? "public_staff") as EventStaffPreset;
+            const resolved = resolveStaffPermissionKeys(row);
+            const resolvedKeys = [...resolved].sort();
+            return {
+              found: true,
+              eventId,
+              xUserId: row.x_user_id,
+              displayName: row.display_name,
+              preset,
+              presetLabel: PRESET_DEFINITIONS[preset]?.label ?? preset,
+              resolvedKeys,
+              resolvedLabels: listResolvedPermissionLabels(resolvedKeys),
+              spotlight: SPOTLIGHT_KEYS.map((key) => ({
+                key,
+                label: formatPermissionKeyLabel(key),
+                allowed: resolved.has(key),
+              })),
+            };
+          }
+
+          export function listResolvedPermissionLabels(keys: PermissionKey[]): string[] {
+            return keys.map((key) => formatPermissionKeyLabel(key));
+          }
+          EOF
+
+          cat > 'app/(admin)/admin/permissions/simulator/page.tsx' <<'EOF'
+          import * as React from "react";
+          import type { Metadata } from "next";
+          import { getDatabase } from "@/lib/cloudflare";
+          import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
+          import { PermissionSimulatorPanel } from "@/components/admin/PermissionSimulatorPanel";
+          import { simulateEventPermissions } from "@/lib/admin/permissionSimulator";
+
+          export const metadata: Metadata = { title: "権限シミュレーター" };
+          export const dynamic = "force-dynamic";
+
+          export default async function PermissionSimulatorPage({
+            searchParams,
+          }: {
+            searchParams: Promise<{ event_id?: string; x_user_id?: string }>;
+          }): Promise<React.ReactElement> {
+            const sp = await searchParams;
+            const eventId = (sp.event_id ?? "").trim();
+            const xUserId = (sp.x_user_id ?? "").trim();
+            const db = getDatabase();
+            const result =
+              db && eventId && xUserId
+                ? await simulateEventPermissions(db, { eventId, xUserId })
+                : null;
+            return (
+              <div>
+                <AdminPageHeader
+                  title="権限シミュレーター"
+                  description="イベントスタッフのプリセットとカスタム権限をX IDから確認します。"
+                />
+                <PermissionSimulatorPanel
+                  eventId={eventId}
+                  xUserId={xUserId}
+                  result={result}
+                />
+              </div>
+            );
+          }
+          EOF
+
+          python <<'PY'
+          from pathlib import Path
+
+          panel = Path("src/components/admin/PermissionSimulatorPanel.tsx")
+          text = panel.read_text()
+          text = text.replace("  userId: string;\n", "")
+          text = text.replace("  userId,\n", "")
+          start = '''        <label className="fn-label">\n          ユーザー ID\n          <input\n            name="user_id"\n            className="fn-input"\n            defaultValue={userId}\n            placeholder="Auth.js 内部ユーザー ID"\n          />\n        </label>\n'''
+          text = text.replace(start, "")
+          text = text.replace(
+              "X ID またはユーザー ID のどちらか一方を入力してください。イベントスタッフ登録を参照します。",
+              "X IDを入力してください。イベントスタッフ登録の正本を参照します。",
+          )
+          result_user = '''              <dt className="fn-muted">ユーザー ID</dt>\n              <dd style={{ margin: 0 }}>{result.userId ?? "—"}</dd>\n'''
+          text = text.replace(result_user, "")
+          panel.write_text(text)
+
+          merge = Path("src/lib/xid/merge.ts")
+          text = merge.read_text()
+          import_anchor = 'import { mutateWithAudit } from "@/lib/audit/mutate";\n'
+          if 'from "./mergeAudits"' not in text:
+              text = text.replace(
+                  import_anchor,
+                  import_anchor + 'import { buildEventStaffMergeAudits } from "./mergeAudits";\n',
+              )
+          audit_anchor = '''  await mutateWithAudit(db, {\n    mutationStatements: statements,\n'''
+          projection = '''  const promotedTargetStaffIds = new Set(\n    promotedTargetStaff.map((row) => row.id),\n  );\n  const eventStaffAfterRows = snapshot.event_staff.flatMap((row) => {\n    if (row.x_user_id === source) {\n      if (targetStaffByEvent.has(row.event_id)) return [];\n      return [{ ...row, x_user_id: target, updated_at: now }];\n    }\n    if (row.x_user_id === target && promotedTargetStaffIds.has(row.id)) {\n      return [{ ...row, permission_preset: "owner", updated_at: now }];\n    }\n    return [{ ...row }];\n  });\n  const eventStaffAudits = buildEventStaffMergeAudits({\n    beforeRows: snapshot.event_staff,\n    afterRows: eventStaffAfterRows,\n    actorUserId: input.actorAuthUserId,\n    fromXId: source,\n    toXId: target,\n  });\n\n'''
+          if "const eventStaffAudits = buildEventStaffMergeAudits" not in text:
+              text = text.replace(audit_anchor, projection + audit_anchor, 1)
+          audits_anchor = '''    audits: [\n      {\n        table_name: "x_users",\n'''
+          if "...eventStaffAudits," not in text:
+              text = text.replace(
+                  audits_anchor,
+                  '''    audits: [\n      ...eventStaffAudits,\n      {\n        table_name: "x_users",\n''',
+                  1,
+              )
+          merge.write_text(text)
+          PY
+
+          rm -f src/lib/actions/merge-adminCore.ts src/lib/actions/merge-admin.test.mjs
+          rm -rf .agent-trigger
+          rm -f .github/workflows/final-conflict-resolution-v10.yml
+
+          ! rg -n 'history_retention_days|priority_reclaim_until|audit_log_settings' workers/cleanup
+          ! rg -n 'merge-adminCore' src app workers
+          ! rg -n '\buser_id\b' src/lib/admin/permissionSimulator.ts src/components/admin/PermissionSimulatorPanel.tsx 'app/(admin)/admin/permissions/simulator/page.tsx'
+          rg -n 'buildEventStaffMergeAudits|eventStaffAudits' src/lib/xid/merge.ts src/lib/xid/mergeAudits.ts
+
+          git add -A
+          git diff --cached --check
+          git commit -m "残存競合を解消し監査・CleanupをDB正本へ統一"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: Full merge gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .tmp
+          exec > >(tee .tmp/final-conflict-validation.log) 2>&1
+          npm run typecheck
+          npm run lint
+          npm run test:unit
+          npm run test:workers
+          npm run test:cloudflare-ci
+          npm run test:integration
+          npm run build
+          npm run pages:build
+          npm run check:pages-output
+          npm run check:cloudflare-template
+          CLOUDFLARE_CONFIG_MODE=fixture npm run check:cloudflare-config
+          node scripts/create-owner-check-fixture.mjs
+          FLAMENODE_OWNER_CHECK_DB=.tmp/owner-check.sqlite npm run check:db-schema
+          npm run check:db-migration
+          npm run check:db-legacy
+          FLAMENODE_OWNER_CHECK_DB=.tmp/owner-check.sqlite npm run check:event-owners
+          npm run check:db-d1-empty
+          npm run check:db-d1-legacy
+          npm run check:ui-acceptance
+          npm run check:public-api-contract
+          npm run check:public-api-leaks
+          npm run check:project-docs
+          npm run check:docs
+          npm run check:db-history
+
+      - name: Push verified resolution
+        run: git push origin HEAD:agent/db-canonical-final-conflicts-v10
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-conflict-resolution-v10-${{ github.run_id }}
+          path: .tmp/final-conflict-validation.log
+          if-no-files-found: ignore
+          retention-days: 7
