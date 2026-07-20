@@ -1,2 +1,2 @@
 Apply the deterministic canonical candidate repair after disabling duplicate integration workflows.
-Trigger: final stable run.
+Trigger: indexed v2 repair workflow.
