@@ -2,11 +2,7 @@
 
 import * as React from "react";
 import type { SlotRow } from "./SlotGrid";
-import {
-  buildSlotParts,
-  formatSlotPartLabel,
-  sortSlotsChronologically,
-} from "@/lib/utils/slotGrouping";
+import { buildSlotParts, formatSlotPartLabel } from "@/lib/utils/slotGrouping";
 import { formatUnix } from "@/lib/utils/format";
 import styles from "./SlotStatusBoard.module.css";
 
@@ -25,14 +21,7 @@ interface PartStat {
 }
 
 const SLOT_PREVIEW_EVENT = "flamenode:slot-preview";
-
 type SlotStatus = SlotRow["status"];
-
-function resolveStatus(rows: SlotRow[]): SlotStatus {
-  if (rows.some((row) => row.status === "submitted")) return "submitted";
-  if (rows.some((row) => row.status === "reserved")) return "reserved";
-  return "available";
-}
 
 function statusLabel(status: SlotStatus): string {
   switch (status) {
@@ -58,36 +47,24 @@ function statusHint(status: SlotStatus): string {
   }
 }
 
-function slotOwnerLabel(rows: SlotRow[]): string | null {
-  const displayName = rows.find((row) => row.display_name)?.display_name?.trim();
+function slotOwnerLabel(slot: SlotRow | null): string | null {
+  const displayName = slot?.display_name?.trim();
   if (displayName) return displayName;
-  const xId = rows.find((row) => row.x_user_id)?.x_user_id?.trim();
-  if (xId) return `@${xId}`;
-  return null;
+  const xId = slot?.x_user_id?.trim();
+  return xId ? `@${xId}` : null;
 }
 
 function slotTimeLabel(slot: SlotRow | null): string {
   if (!slot) return "-";
-  if (slot.start_time != null) return formatUnix(slot.start_time, { timeOnly: true });
+  if (slot.start_time != null) {
+    return formatUnix(slot.start_time, { timeOnly: true });
+  }
   return slot.slot_label ?? `#${slot.sort_order ?? "?"}`;
 }
 
 function slotDateLabel(slot: SlotRow | null): string | null {
   if (slot?.start_time == null) return null;
   return formatUnix(slot.start_time, { dateOnly: true });
-}
-
-function slotRangeLabel(rows: SlotRow[]): string {
-  const first = rows[0];
-  const last = rows[rows.length - 1] ?? first;
-  if (!first) return "-";
-  if (first.start_time == null) {
-    return first.slot_label ?? `#${first.sort_order ?? "?"}`;
-  }
-  const start = formatUnix(first.start_time, { timeOnly: true });
-  const end = last.start_time;
-  if (rows.length <= 1 || end == null || end <= first.start_time) return start;
-  return `${start} - ${formatUnix(end, { timeOnly: true })}`;
 }
 
 export function SlotStatusBoard({
@@ -119,64 +96,54 @@ export function SlotStatusBoard({
     return buildSlotParts(slots, slotPartGapSec).map((part) => ({
       label: formatSlotPartLabel(part, "short"),
       total: part.rows.length,
-      filled: part.rows.filter((s) => s.status !== "available").length,
+      filled: part.rows.filter((slot) => slot.status !== "available").length,
     }));
   }, [slots, slotPartGapSec]);
 
   const total = slots.length;
-  const filled = slots.filter((s) => s.status !== "available").length;
+  const filled = slots.filter((slot) => slot.status !== "available").length;
   if (total === 0) return <></>;
 
-  const pct = (n: number, d: number) => (d === 0 ? 0 : Math.round((n / d) * 100));
+  const pct = (numerator: number, denominator: number) =>
+    denominator === 0 ? 0 : Math.round((numerator / denominator) * 100);
   const fillPct = pct(filled, total);
   const nextAvailable = slots.find((slot) => slot.status === "available");
   const manuallySelected = selectedSlotId
     ? slots.find((slot) => slot.id === selectedSlotId)
     : null;
   const selected = manuallySelected ?? nextAvailable ?? slots[0] ?? null;
-  const selectedGroupRows = selected
-    ? sortSlotsChronologically(
-        selected.reservation_group_id
-          ? slots.filter((slot) => slot.reservation_group_id === selected.reservation_group_id)
-          : [selected],
-      )
-    : [];
-  const selectedStatus = resolveStatus(selectedGroupRows);
-  const selectedOwner = slotOwnerLabel(selectedGroupRows);
+  const selectedOwner = slotOwnerLabel(selected);
   const selectedTime = slotTimeLabel(selected);
   const selectedDate = slotDateLabel(selected);
-  const selectedRange = slotRangeLabel(selectedGroupRows);
 
   return (
     <section className={styles.board} aria-label="枠の状態">
       <p className={styles.eyebrow}>
         {manuallySelected ? "選択中の枠" : nextAvailable ? "次の空き枠" : "受付状況"}
       </p>
-      <div className={styles.selected} data-status={selectedStatus} aria-live="polite">
+      <div
+        className={styles.selected}
+        data-status={selected?.status ?? "available"}
+        aria-live="polite"
+      >
         <strong>{selectedTime}</strong>
         {selectedDate ? <span>{selectedDate}</span> : null}
-        <small>{statusHint(selectedStatus)}</small>
+        <small>{statusHint(selected?.status ?? "available")}</small>
       </div>
 
       <dl className={styles.slotDetails} aria-label="選択中の枠の詳細">
         <div>
           <dt>状態</dt>
-          <dd>{statusLabel(selectedStatus)}</dd>
+          <dd>{statusLabel(selected?.status ?? "available")}</dd>
         </div>
         <div>
           <dt>時刻</dt>
-          <dd>{selectedRange}</dd>
+          <dd>{selectedTime}</dd>
         </div>
         {selectedOwner ? (
           <div>
             <dt>名義</dt>
             <dd>{selectedOwner}</dd>
-          </div>
-        ) : null}
-        {selectedGroupRows.length > 1 ? (
-          <div>
-            <dt>連続枠</dt>
-            <dd>{selectedGroupRows.length}枠</dd>
           </div>
         ) : null}
       </dl>
@@ -190,10 +157,7 @@ export function SlotStatusBoard({
           </strong>
         </div>
         <span className={styles.summaryBar} aria-hidden>
-          <span
-            className={styles.summaryBarFill}
-            style={{ width: `${fillPct}%` }}
-          />
+          <span className={styles.summaryBarFill} style={{ width: `${fillPct}%` }} />
         </span>
         <p>{fillPct}% 埋まり</p>
       </div>
@@ -230,16 +194,16 @@ export function SlotStatusBoard({
       </div>
 
       <div className={styles.parts}>
-        {partitioned.map((p, i) => (
-          <div key={i} className={styles.partRow}>
-            <span>{p.label}</span>
+        {partitioned.map((part) => (
+          <div key={part.label} className={styles.partRow}>
+            <span>{part.label}</span>
             <strong>
-              {p.filled}
-              <small> / {p.total}</small>
+              {part.filled}
+              <small> / {part.total}</small>
             </strong>
-            <em>{pct(p.filled, p.total)}%</em>
+            <em>{pct(part.filled, part.total)}%</em>
             <i className={styles.partMeter} aria-hidden>
-              <b style={{ width: `${pct(p.filled, p.total)}%` }} />
+              <b style={{ width: `${pct(part.filled, part.total)}%` }} />
             </i>
           </div>
         ))}
