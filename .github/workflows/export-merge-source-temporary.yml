@@ -1,0 +1,30 @@
+name: Export merge source temporary
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    if: github.event.pull_request.head.ref == 'agent/db-canonical-migration-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: merge-source-${{ github.event.pull_request.head.sha }}
+          path: |
+            .
+            !.git/**
+            !node_modules/**
+            !.next/**
+            !.vercel/**
+            !.tmp/**
+          include-hidden-files: true
+          retention-days: 1
