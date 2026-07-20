@@ -56,7 +56,7 @@ export async function getApprovedXIds(
   const rows = await db
     .select({ x_user_id: xUserAccountLinks.x_user_id })
     .from(xUserAccountLinks)
-    .where(eq(xUserAccountLinks.auth_user_id, userId));
+    .where(eq(xUserAccountLinks.auth_user_id, authUserId));
   return Array.from(new Set(rows.map((row) => row.x_user_id)));
 }
 

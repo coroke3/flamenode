@@ -1,8 +1,8 @@
 import "server-only";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
-import { eventStaff } from "@/lib/db/schema";
+import { eventStaff, xUserAccountLinks } from "@/lib/db/schema";
 import { resolveStaffPermissionKeys } from "@/lib/auth/permissions/permissionResolver";
 import { PRESET_DEFINITIONS, type EventStaffPreset } from "@/lib/auth/permissions/presets";
 import { formatPermissionKeyLabel } from "@/lib/admin/permissionIntegrityChecks";
@@ -62,15 +62,26 @@ export async function simulateEventPermissions(
 
   if (!eventId || (!xUserId && !userId)) return empty;
 
-  const subjectCond = xUserId
-    ? eq(eventStaff.x_user_id, xUserId)
-    : eq(eventStaff.user_id, userId!);
+  const subjectXUserIds = xUserId
+    ? [xUserId]
+    : (
+        await db
+          .select({ x_user_id: xUserAccountLinks.x_user_id })
+          .from(xUserAccountLinks)
+          .where(eq(xUserAccountLinks.auth_user_id, userId!))
+      ).map((row) => row.x_user_id);
+  if (subjectXUserIds.length === 0) return empty;
 
   const row = (
     await db
       .select()
       .from(eventStaff)
-      .where(and(eq(eventStaff.event_id, eventId), subjectCond)!)
+      .where(
+        and(
+          eq(eventStaff.event_id, eventId),
+          inArray(eventStaff.x_user_id, subjectXUserIds),
+        )!,
+      )
       .limit(1)
   )[0];
 
@@ -84,7 +95,7 @@ export async function simulateEventPermissions(
     found: true,
     eventId,
     xUserId: row.x_user_id,
-    userId: row.user_id,
+    userId,
     displayName: row.display_name,
     preset,
     presetLabel: PRESET_DEFINITIONS[preset]?.label ?? preset,

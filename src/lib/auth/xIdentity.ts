@@ -170,7 +170,9 @@ export async function filterLinkedXUserIdsForAuthUser(
   const canonicalIds = await Promise.all(
     candidateXUserIds.map((candidate) => resolveCanonicalXUserId(db, candidate)),
   );
-  const normalized = Array.from(new Set(canonicalIds.filter(Boolean)));
+  const normalized = Array.from(
+    new Set(canonicalIds.filter((value): value is string => Boolean(value))),
+  );
   if (normalized.length === 0) return [];
   const rows = await db
     .select({ x_user_id: xUserAccountLinks.x_user_id })

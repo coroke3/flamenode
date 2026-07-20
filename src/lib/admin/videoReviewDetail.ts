@@ -4,6 +4,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import {
   eventCustomQuestions,
+  videoChapters,
   videoCustomAnswers,
   videoMembers,
   videos,
@@ -11,6 +12,7 @@ import {
 } from "@/lib/db/schema";
 import { readStagePermissionCustomAnswers } from "@/lib/video/stagePermissionAnswers";
 import { getVideoSoftwareLabel } from "@/lib/db/software";
+import { formatChapterTime } from "@/lib/utils/chapterTime";
 
 export type VideoReviewCustomAnswer = {
   label: string;
@@ -23,6 +25,7 @@ export type VideoReviewMember = {
   role: string | null;
   x_user_id: string | null;
   is_public_member: boolean;
+  chapters: string | null;
 };
 
 export type VideoReviewDetail = {
@@ -144,6 +147,23 @@ export async function fetchVideoReviewDetail(
     .where(eq(videoMembers.video_id, videoId))
     .orderBy(asc(videoMembers.order_index));
 
+  const chapters = await db
+    .select({
+      x_user_id: videoChapters.x_user_id,
+      chapter_time: videoChapters.chapter_time,
+      chapter_label: videoChapters.chapter_label,
+    })
+    .from(videoChapters)
+    .where(eq(videoChapters.video_id, videoId))
+    .orderBy(asc(videoChapters.chapter_time), asc(videoChapters.id));
+  const chaptersByXUserId = new Map<string, string[]>();
+  for (const chapter of chapters) {
+    if (!chapter.x_user_id) continue;
+    const labels = chaptersByXUserId.get(chapter.x_user_id) ?? [];
+    labels.push(`${formatChapterTime(chapter.chapter_time)} ${chapter.chapter_label}`);
+    chaptersByXUserId.set(chapter.x_user_id, labels);
+  }
+
   return {
     id: video.id,
     title: video.title,
@@ -171,6 +191,9 @@ export async function fetchVideoReviewDetail(
       role: member.role,
       x_user_id: member.x_user_id,
       is_public_member: member.is_public_member === 1,
+      chapters: member.x_user_id
+        ? chaptersByXUserId.get(member.x_user_id)?.join(", ") ?? null
+        : null,
     })),
   };
 }

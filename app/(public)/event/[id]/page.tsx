@@ -278,7 +278,7 @@ function EventDetailView({
         <StatCard label={dayMetric.label} value={<>{dayMetric.value}<span>日</span></>} />
       </section>
 
-      {status !== "ended" && status !== "archived" ? (
+      {status !== "ended" ? (
         <EventRecruitCard
           event={event}
           available={availableSlots}
