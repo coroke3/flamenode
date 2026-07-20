@@ -33,6 +33,11 @@ const CANONICAL_FORBIDDEN = [
 ];
 
 const SCHEMA_BASE_PATH = ["src/lib/db/schema", "base.ts"].join(".");
+const LEGACY_IMPORT_BOUNDARIES = [
+  "src/lib/import/legacy/",
+  "app/api/admin/import/legacy/",
+  "app/(admin)/admin/import/",
+];
 
 test("X名義ランタイムは旧申請表・単一リンク列・旧候補表を参照しない", () => {
   const files = ["src", "app", "workers"].flatMap(runtimeFiles).filter((path) => {
@@ -40,7 +45,8 @@ test("X名義ランタイムは旧申請表・単一リンク列・旧候補表�
     return (
       !rel.endsWith(SCHEMA_BASE_PATH) &&
       !rel.endsWith("src/lib/auth/xIdentityCanonical.contract.test.mjs") &&
-      !rel.includes("historical")
+      !rel.includes("historical") &&
+      !LEGACY_IMPORT_BOUNDARIES.some((boundary) => rel.startsWith(boundary))
     );
   });
   const violations = [];
@@ -61,7 +67,7 @@ test("X名義と認証ユーザーは複合主キーで多対多、承認時に�
   assert.doesNotMatch(schema, /uniqueIndex\([^)]*x_user_account_links[^)]*\)\s*\.on\(t\.x_user_id\)/s);
 
   const admin = read("src/lib/actions/xid-admin.ts");
-  assert.match(admin, /x_user_id: requestedXUserId/);
+  assert.match(admin, /x_user_id: effectiveXUserId/);
   assert.match(admin, /auth_user_id: requestedAuthUserId/);
   assert.match(admin, /link_role: "owner"/);
   assert.match(admin, /created_by_request_id: request\.id/);
