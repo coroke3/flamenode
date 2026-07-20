@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
 import { videos, xUsers } from "./schema";
 import type { DB } from "./client";
 
@@ -67,7 +67,7 @@ async function fetchLatestCreatorSnapshots(
                   isNotNull(videos.creator_icon_url),
                   isNotNull(videos.creator_display_name),
                 ),
-                sql`${videos.visibility_status} NOT IN ('archived', 'voided')`,
+                ne(videos.visibility_status, "voided"),
               )!,
             )
             .as("ranked_creator_snapshots");

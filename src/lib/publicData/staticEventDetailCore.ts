@@ -40,7 +40,7 @@ export interface StaticEventDetailEvent {
   end_time: number | null;
   entry_start_time: number | null;
   entry_end_time: number | null;
-  visibility_status: "public" | "archived";
+  visibility_status: "public";
 }
 
 export interface StaticEventDetailStaff {

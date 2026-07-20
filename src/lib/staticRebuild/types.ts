@@ -19,7 +19,7 @@ export function isStaticRebuildTargetType(value: string): value is StaticRebuild
 
 export type StaticRebuildPriority = "high" | "normal" | "low";
 
-export type EventFreshness = "active" | "ended" | "archived";
+export type EventFreshness = "active" | "ended";
 
 export type EnqueueStaticRebuildInput = {
   targetType: StaticRebuildTargetType;

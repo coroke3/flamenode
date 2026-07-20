@@ -1,4 +1,4 @@
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { events as eventsTable, slots, videos } from "@/lib/db/schema";
 import type { DB } from "@/lib/db/client";
 import { buildSlotParts } from "@/lib/utils/slotGroupingCore";
@@ -25,7 +25,6 @@ export async function resolvePartFromSlot(
     .select({
       id: slots.id,
       start_time: slots.start_time,
-      slot_kind: slots.slot_kind,
       sort_order: slots.sort_order,
     })
     .from(slots)
@@ -50,7 +49,7 @@ export async function checkYoutubeVideoDuplicate(
       .where(
         and(
           eq(videos.youtube_video_id, youtubeId),
-          sql`${videos.visibility_status} NOT IN ('archived', 'voided')`,
+          ne(videos.visibility_status, "voided"),
           excludeVideoId ? ne(videos.id, excludeVideoId) : undefined,
         )!,
       )

@@ -32,7 +32,7 @@ test("normalizeStaticTop: top payload をトップページ用 DTO に整形す�
       {
         id: "event-2",
         title: "Archive",
-        visibility_status: "archived",
+        visibility_status: "public",
       },
     ],
     creators: [
@@ -61,7 +61,7 @@ test("normalizeStaticTop: top payload をトップページ用 DTO に整形す�
   assert.equal(top.recommended[0].display_name, "Creator");
   assert.equal(top.latest[0].title, "Latest");
   assert.equal(top.activeEvents[0].id, "event-1");
-  assert.equal(top.latestEvents[0].visibility_status, "archived");
+  assert.equal(top.latestEvents[0].visibility_status, "public");
   assert.equal(top.creators[0].video_count, 2);
   assert.equal(top.announcements[0].severity, "info");
   assert.deepEqual(top.topSlotStats.get("event-1"), { available: 3, total: 5 });

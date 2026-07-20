@@ -14,12 +14,9 @@ export const MODERATION_CASE_RESOLUTION_STATUSES = [
 ] as const;
 
 export const MODERATION_VIDEO_STATUSES = [
-  "draft",
   "pending",
   "public",
-  "limited",
   "private",
-  "archived",
   "voided",
 ] as const;
 

@@ -30,11 +30,7 @@ const TYPE_LABELS: Record<string, string> = {
   video_approved: "作品が公開されました",
   video_voided: "作品について確認があります",
   video_pending: "作品が審査待ちになりました",
-  video_draft: "作品が下書きになりました",
-  video_limited: "作品の公開範囲が変更されました",
   video_private: "作品の公開範囲が変更されました",
-  video_hidden: "作品の公開範囲が変更されました",
-  video_archived: "作品のアーカイブ状態が変更されました",
   video_status_changed: "作品の状態が変更されました",
   video_edit_permission_granted: "編集権限が付与されました",
   slot_video_submitted: "枠投稿を受け付けました",
@@ -67,7 +63,6 @@ const SEVERITY_BY_TYPE: Record<string, NotificationSeverity> = {
   announcement_broadcast: "info",
   terms_reaccept_required: "info",
   video_pending: "silent",
-  video_draft: "silent",
 };
 
 export function categorizeNotificationType(type: string): NotificationCategory {

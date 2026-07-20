@@ -40,18 +40,10 @@ function visibilityLabel(event: EventSettingsPreviewValue): {
   label: string;
   className: string;
 } {
-  switch (event.visibility_status) {
-    case "public":
-      return { label: "公開", className: "fn-badge-accent" };
-    case "private":
-      return { label: "非公開", className: "fn-badge-soft" };
-    case "archived":
-      return { label: "アーカイブ", className: "fn-badge-warning" };
-    case "draft":
-      return { label: "下書き", className: "fn-badge-soft" };
-    default:
-      return { label: "下書き", className: "fn-badge-soft" };
+  if (event.visibility_status === "public") {
+    return { label: "公開", className: "fn-badge-accent" };
   }
+  return { label: "非公開・準備中", className: "fn-badge-soft" };
 }
 
 function displayDate(value: number | string | null | undefined): string {

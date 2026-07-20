@@ -54,7 +54,7 @@ type SlotFillStat = {
   filled: number;
   pct: number;
 };
-type SlotVisualStatus = SlotRow["status"] | "priority";
+type SlotVisualStatus = SlotRow["status"];
 
 const JST = { timeZone: "Asia/Tokyo" } as const;
 const eventSectionHeaderClasses = {
@@ -198,7 +198,7 @@ export default async function EventDetailPage({
   } as React.CSSProperties;
   const status = computeEventStatus(event);
   const accepting = isAcceptingEntries(event);
-  const showRecruitCard = status !== "ended" && status !== "archived";
+  const showRecruitCard = status !== "ended" && status !== "private";
   const publicEditors = editors.filter((editor) => editor.is_public === 1);
   const now = Math.floor(Date.now() / 1000);
   const slotTotal = slotRows.length;
@@ -691,19 +691,11 @@ function slotDisplayName(slot: SlotRow): string {
   return slot.display_name ?? slot.x_user_id ?? "確保済み";
 }
 
-function slotVisualStatus(slot: SlotRow, now: number): SlotVisualStatus {
-  if (
-    slot.priority_reclaim_until != null &&
-    slot.priority_reclaim_until > now &&
-    slot.status !== "available"
-  ) {
-    return "priority";
-  }
+function slotVisualStatus(slot: SlotRow, _now: number): SlotVisualStatus {
   return slot.status;
 }
 
 function slotStatusLabel(status: SlotVisualStatus): string {
-  if (status === "priority") return "優先再取得中";
   if (status === "submitted") return "提出済み";
   if (status === "reserved") return "確保済み";
   return "選択可";

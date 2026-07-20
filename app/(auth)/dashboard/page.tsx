@@ -19,7 +19,6 @@ import { getOnboardingState, onboardingHref } from "@/lib/auth/onboarding";
 import {
   collapseReservationGroups,
   sortSlotsChronologically,
-  type SlotBase,
   type SlotGroupRow,
 } from "@/lib/utils/slotGrouping";
 import { Icon } from "@/components/ui/Icon";
@@ -92,7 +91,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
               activeGalleryXId
                 ? eq(videosTable.creator_x_user_id, activeGalleryXId)
                 : sql`0 = 1`,
-              ne(videosTable.visibility_status, "archived"),
+              ne(videosTable.visibility_status, "voided"),
             )!,
           )
           .orderBy(desc(videosTable.created_at))) as VideoCardData[];
@@ -132,7 +131,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           )!,
         )
         .limit(50);
-      const groupedSlots = collapseReservationGroups(slotRows as SlotBase[]);
+      const groupedSlots = collapseReservationGroups(slotRows);
       const sortedSlots = sortSlotsChronologically(groupedSlots);
       mySlot = sortedSlots[0] ?? null;
       if (mySlot && mySlot.event_id) {
@@ -161,7 +160,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           .where(
             and(
               inArray(videosTable.creator_x_user_id, approvedXIds),
-              ne(videosTable.visibility_status, "archived"),
+              ne(videosTable.visibility_status, "voided"),
               excludePvsfSummaryVideos(),
             )!,
           );

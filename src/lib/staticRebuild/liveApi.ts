@@ -16,16 +16,9 @@ function resolveEventFreshness(
   now: number,
 ): EventFreshness {
   const visibility = getEventVisibility(event);
-  if (visibility === "archived") return "archived";
-  if (visibility === "public") return "active";
-  const start = event.start_time ?? 0;
+  if (visibility !== "public") return "ended";
   const end = event.end_time ?? 0;
-  return start &&
-    end &&
-    now >= start &&
-    now <= end + ACTIVE_GRACE_AFTER_END_SEC
-    ? "active"
-    : "ended";
+  return end && now > end + ACTIVE_GRACE_AFTER_END_SEC ? "ended" : "active";
 }
 
 const MAX_EVENT_ID_LEN = 128;
