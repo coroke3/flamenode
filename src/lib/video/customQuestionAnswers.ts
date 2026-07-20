@@ -16,13 +16,18 @@ import {
   type VideoAtomicWritePlan,
 } from "@/lib/video/atomicWritePlan";
 import { expectedRowCondition } from "@/lib/audit/adapters";
-import { MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS } from "@/lib/video/atomicLimits";
+import {
+  MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS,
+  MAX_ATOMIC_VIDEO_EVENTS,
+} from "@/lib/video/atomicLimits";
 import {
   MAX_EVENT_CUSTOM_QUESTIONS,
   MAX_VIDEO_CUSTOM_QUESTIONS,
 } from "@/lib/video/customQuestionLimits";
 
 export const MAX_VIDEO_CUSTOM_QUESTIONS_READ = MAX_VIDEO_CUSTOM_QUESTIONS;
+export const MAX_VIDEO_CUSTOM_QUESTION_HISTORY_READ =
+  MAX_ATOMIC_VIDEO_EVENTS * MAX_EVENT_CUSTOM_QUESTIONS;
 const CUSTOM_QUESTION_EVENT_ID_BATCH_SIZE = 40;
 const CUSTOM_ANSWER_DELETE_CHUNK_SIZE = MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS;
 
@@ -236,8 +241,8 @@ export async function readCustomAnswerValuesForVideo(
   const questionsByEvent = await fetchActiveCustomQuestionsForEvents(db, args.eventIds);
   const questions = [...questionsByEvent.values()].flat();
   if (questions.length === 0) return null;
-  if (questions.length > MAX_VIDEO_CUSTOM_QUESTIONS) {
-    throw new Error("video_custom_question_read_limit_exceeded");
+  if (questions.length > MAX_VIDEO_CUSTOM_QUESTION_HISTORY_READ) {
+    throw new Error("video_custom_question_history_read_limit_exceeded");
   }
 
   const answers = await db
@@ -251,9 +256,9 @@ export async function readCustomAnswerValuesForVideo(
       eq(videoCustomAnswers.video_id, args.videoId),
       inArray(videoCustomAnswers.question_id, questions.map((question) => question.id)),
     )!)
-    .limit(MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS + 1);
-  if (answers.length > MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS) {
-    throw new Error("video_custom_answer_read_limit_exceeded");
+    .limit(MAX_VIDEO_CUSTOM_QUESTION_HISTORY_READ + 1);
+  if (answers.length > MAX_VIDEO_CUSTOM_QUESTION_HISTORY_READ) {
+    throw new Error("video_custom_answer_history_read_limit_exceeded");
   }
 
   const values: Record<string, string | string[]> = {};
