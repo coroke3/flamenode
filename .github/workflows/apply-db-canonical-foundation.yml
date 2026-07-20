@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/db-canonical-foundation
+  pull_request:
+    branches:
+      - agent/db-canonical-migration-v2
 
 permissions:
   contents: write
