@@ -7,8 +7,7 @@ import {
   type EventExportEventRow,
 } from "@/lib/api/eventExportData";
 import {
-  buildEventExportPayloadForFormat,
-  type EventExportFormat,
+  buildEventExportPayload,
   type EventExportUpdateMode,
 } from "@/lib/api/eventExportPayload";
 import {
@@ -29,23 +28,15 @@ import {
 const NOT_FOUND_CACHE_CONTROL = "public, max-age=60";
 const inFlightExports = new Map<string, Promise<string | null>>();
 
-function parseFormat(value: string | null): EventExportFormat | null {
-  if (value == null || value === "" || value === "new" || value === "v2" || value === "v3") {
-    return "new";
-  }
-  if (value === "legacy" || value === "old" || value === "v1") {
-    return "legacy";
-  }
-  return null;
-}
-
 function parseUpdateMode(value: string | null): EventExportUpdateMode | null {
   if (value === "realtime") return "realtime";
-  if (value === "scheduled" || value === "economy") return "scheduled";
+  if (value === "scheduled") return "scheduled";
   return null;
 }
 
-function parseRefreshMinutes(value: string | null): EventExportRefreshMinutes | null {
+function parseRefreshMinutes(
+  value: string | null,
+): EventExportRefreshMinutes | null {
   if (value == null || value === "") return 60;
   const parsed = Number(value);
   return Number.isInteger(parsed) && isEventExportRefreshMinutes(parsed)
@@ -62,13 +53,17 @@ function isPublicExportEvent(event: EventExportEventRow | null): boolean {
 }
 
 function notFoundResponse(req: Request): Promise<Response> {
-  return publicJsonResponse(req, { error: "not_found" }, NOT_FOUND_CACHE_CONTROL, 404);
+  return publicJsonResponse(
+    req,
+    { error: "not_found" },
+    NOT_FOUND_CACHE_CONTROL,
+    404,
+  );
 }
 
 async function exportResponse(
   req: Request,
   body: string,
-  format: EventExportFormat,
   updateMode: EventExportUpdateMode,
   refreshMinutes: EventExportRefreshMinutes,
   cacheState: "HIT" | "MISS" | "BYPASS",
@@ -78,11 +73,8 @@ async function exportResponse(
       ? "no-store"
       : "public, max-age=60, s-maxage=60, stale-while-revalidate=60";
   const response = await publicJsonBodyResponse(req, body, cacheControl);
-  response.headers.set(
-    "X-FlameNode-Schema-Version",
-    format === "legacy" ? "1" : "3",
-  );
-  response.headers.set("X-FlameNode-Format", format);
+  response.headers.set("X-FlameNode-Schema-Version", "4");
+  response.headers.set("X-FlameNode-Format", "flamenode-event-export");
   response.headers.set("X-FlameNode-Update-Mode", updateMode);
   response.headers.set("X-FlameNode-Refresh-Minutes", String(refreshMinutes));
   response.headers.set("X-FlameNode-Cache", cacheState);
@@ -107,7 +99,8 @@ async function readCachedPayload(
   }
   if (!cached) return null;
   try {
-    JSON.parse(cached);
+    const parsed = JSON.parse(cached) as { schema_version?: unknown };
+    if (parsed.schema_version !== 4) throw new Error("stale_schema");
     return cached;
   } catch (error) {
     console.warn("[event-export-api] invalid KV payload evicted", {
@@ -118,7 +111,7 @@ async function readCachedPayload(
     try {
       await kv.delete(cacheKey);
     } catch {
-      // 壊れたキャッシュ削除の失敗はD1フォールバックを妨げない。
+      // D1からの再生成を優先する。
     }
     return null;
   }
@@ -136,9 +129,7 @@ async function buildPayloadOnce(
   try {
     return await promise;
   } finally {
-    if (inFlightExports.get(key) === promise) {
-      inFlightExports.delete(key);
-    }
+    if (inFlightExports.get(key) === promise) inFlightExports.delete(key);
   }
 }
 
@@ -154,20 +145,22 @@ export async function GET(
   if (!eventId) return notFoundResponse(req);
 
   const url = new URL(req.url);
-  const format = parseFormat(url.searchParams.get("format"));
-  if (!format) {
+  if (url.searchParams.has("format")) {
     return publicJsonResponse(
       req,
       {
-        error: "invalid_format",
-        allowed: ["new", "legacy"],
+        error: "format_parameter_removed",
+        schema_version: 4,
+        message: "出力形式はv4に統一されています。formatパラメータを削除してください。",
       },
       "no-store",
       400,
     );
   }
 
-  const updateMode = parseUpdateMode(url.searchParams.get("update") ?? "realtime");
+  const updateMode = parseUpdateMode(
+    url.searchParams.get("update") ?? "realtime",
+  );
   const refreshMinutes = parseRefreshMinutes(url.searchParams.get("refresh"));
   if (!updateMode || refreshMinutes == null) {
     return publicJsonResponse(
@@ -175,7 +168,6 @@ export async function GET(
       {
         error: "invalid_export_options",
         allowed: {
-          format: ["new", "legacy"],
           update: ["realtime", "scheduled"],
           refresh: EVENT_EXPORT_REFRESH_MINUTES,
         },
@@ -189,7 +181,6 @@ export async function GET(
   const accessKey = eventExportAccessCacheKey(eventId);
   const payloadCacheKey = eventExportPayloadCacheKey(
     eventId,
-    format,
     refreshMinutes,
   );
   const cachedResponse = async (): Promise<Response | null> => {
@@ -197,11 +188,17 @@ export async function GET(
     const cached = await readCachedPayload(kv, payloadCacheKey, eventId);
     return cached === null
       ? null
-      : exportResponse(req, cached, format, updateMode, refreshMinutes, "HIT");
+      : exportResponse(
+          req,
+          cached,
+          updateMode,
+          refreshMinutes,
+          "HIT",
+        );
   };
+
   let accessState: string | null = null;
   let prefetchedEvent: EventExportEventRow | null | undefined;
-
   if (kv) {
     try {
       accessState = await kv.get(accessKey);
@@ -211,7 +208,6 @@ export async function GET(
         error,
       });
     }
-
     if (accessState === "0") return notFoundResponse(req);
     if (accessState === "1") {
       const response = await cachedResponse();
@@ -221,7 +217,12 @@ export async function GET(
 
   const db = getDatabase();
   if (!db) {
-    return publicJsonResponse(req, { error: "db_unavailable" }, "no-store", 503);
+    return publicJsonResponse(
+      req,
+      { error: "db_unavailable" },
+      "no-store",
+      503,
+    );
   }
 
   if (kv && accessState !== "1") {
@@ -249,17 +250,16 @@ export async function GET(
 
   const generatedAt = Math.floor(Date.now() / 1000);
   const body = await buildPayloadOnce(
-    [eventId, format, updateMode].join(":"),
+    [eventId, updateMode].join(":"),
     async () => {
-      const snapshot = await loadEventExportSnapshot(db, eventId, prefetchedEvent);
+      const snapshot = await loadEventExportSnapshot(
+        db,
+        eventId,
+        prefetchedEvent,
+      );
       return snapshot
         ? JSON.stringify(
-            buildEventExportPayloadForFormat(
-              snapshot,
-              format,
-              generatedAt,
-              updateMode,
-            ),
+            buildEventExportPayload(snapshot, generatedAt, updateMode),
           )
         : null;
     },
@@ -290,7 +290,6 @@ export async function GET(
     if (writes.some((result) => result.status === "rejected")) {
       console.warn("[event-export-api] KV write partially failed", {
         eventId,
-        format,
         refreshMinutes,
       });
     }
@@ -299,7 +298,6 @@ export async function GET(
   return exportResponse(
     req,
     body,
-    format,
     updateMode,
     refreshMinutes,
     updateMode === "scheduled" ? "MISS" : "BYPASS",

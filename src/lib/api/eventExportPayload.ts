@@ -1,4 +1,3 @@
-export type EventExportFormat = "legacy" | "new";
 export type EventExportUpdateMode = "realtime" | "scheduled";
 
 export interface EventExportStaffSnapshot {
@@ -46,6 +45,7 @@ export interface EventExportAnswerSnapshot {
 }
 
 export interface EventExportChapterSnapshot {
+  id: string;
   x_user_id: string | null;
   chapter_time: number;
   chapter_label: string;
@@ -125,111 +125,23 @@ function parseJson(value: string | null): unknown {
 }
 
 function answerValue(answer: EventExportAnswerSnapshot): unknown {
-  return answer.answer_json ? parseJson(answer.answer_json) : answer.answer_text;
+  return answer.answer_json
+    ? parseJson(answer.answer_json)
+    : answer.answer_text;
 }
 
-function answerText(video: EventExportVideoSnapshot, key: string): string {
-  const answer = video.answers.find((candidate) => candidate.key === key);
-  if (!answer) return "";
-  const value = answerValue(answer);
-  if (value == null) return "";
-  if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
-function legacyDateParts(value: number | null): {
-  date: string;
-  time: string;
-} {
-  if (value == null || !Number.isFinite(value)) {
-    return { date: "", time: "" };
-  }
-  const date = new Date((value + 9 * 60 * 60) * 1000);
-  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(date.getUTCDate()).padStart(2, "0");
-  const hour = String(date.getUTCHours()).padStart(2, "0");
-  const minute = String(date.getUTCMinutes()).padStart(2, "0");
-  return { date: `${month}/${day}`, time: `${hour}:${minute}` };
-}
-
-/** 旧形式は入力互換用の公開データだけを再構成し、旧DB列へ依存しない。 */
-export function buildLegacyEventExportPayload(
-  snapshot: EventExportSnapshot,
-): Array<Record<string, unknown>> {
-  return snapshot.videos.map((video) => {
-    const schedule = legacyDateParts(video.scheduled_time);
-    const isCollaboration =
-      video.collaboration_type === "collab" || video.members.length > 1;
-    const chapterTimes = video.chapters
-      .map((chapter) => chapter.chapter_time)
-      .filter((time) => Number.isFinite(time) && time >= 0)
-      .map(String);
-
-    return {
-      id: video.id,
-      eventid: snapshot.event.id,
-      timestamp:
-        isoFromUnix(video.created_at) ?? isoFromUnix(video.scheduled_time) ?? "",
-      type1: isCollaboration ? "複数人" : "個人",
-      type2: isCollaboration ? "団体" : "個人",
-      type: video.part ?? "",
-      creator: video.creator_display_name,
-      yomi: video.creator_display_name_yomi ?? "",
-      movieyear: answerText(video, "production_experience"),
-      tlink: video.creator_x_user_id ?? "",
-      ychlink: video.creator_youtube_channel_url ?? "",
-      icon: video.creator_icon_url ?? "",
-      member: video.members.map((member) => member.name).join(","),
-      memberid: video.members
-        .map((member) => (member.x_user_id ? `@${member.x_user_id}` : ""))
-        .join(","),
-      memberchapter: chapterTimes.join(","),
-      data: schedule.date,
-      time: schedule.time,
-      title: video.title,
-      music: video.music ?? "",
-      credit: video.credit ?? "",
-      ymulink: video.music_reference_url ?? "",
-      up: "",
-      othersns: video.creator_other_social_links ?? "",
-      righttype: answerText(video, "stage_permission"),
-      comment: video.intro_comment ?? "",
-      ylink: youtubeUrl(video.youtube_video_id) ?? "",
-      "": "",
-      beforecomment: video.intro_comment ?? "",
-      aftercomment: video.closing_comment ?? "",
-      soft: video.softwares
-        .map((software) => software.raw_label || software.name)
-        .filter(Boolean)
-        .join(","),
-      toudan: answerText(video, "stage_participation"),
-      hitokoto: video.highlights ?? "",
-      starts: chapterTimes.join(","),
-      ends: "",
-      startm: "",
-      endm: "",
-      ycomment: video.highlights ?? "",
-      status: "public",
-      small: youtubeThumbnail(video.youtube_video_id, "medium") ?? "",
-      largeThumbnail: youtubeThumbnail(video.youtube_video_id, "large") ?? "",
-      link: xProfileUrl(video.creator_x_user_id) ?? "",
-      fu: video.part ?? "",
-    };
-  });
-}
-
+/**
+ * FlameNodeイベント公開APIの唯一の出力形式。
+ * 旧形式変換は提供せず、DB正本の概念だけを返す。
+ */
 export function buildEventExportPayload(
   snapshot: EventExportSnapshot,
   generatedAt = Math.floor(Date.now() / 1000),
   updateMode: EventExportUpdateMode = "realtime",
 ) {
   return {
-    schema_version: 3,
-    format: "flamenode-event-export",
+    schema_version: 4,
+    format: "flamenode-event-export" as const,
     generated_at: isoFromUnix(generatedAt),
     generated_at_unix: generatedAt,
     update_mode: updateMode,
@@ -331,11 +243,11 @@ export function buildEventExportPayload(
           role_label: member.role_label,
           order: member.order_index,
         })),
-        chapters: video.chapters.map((chapter, index) => ({
+        chapters: video.chapters.map((chapter) => ({
+          id: chapter.id,
           time_seconds: chapter.chapter_time,
           label: chapter.chapter_label,
           note: chapter.note,
-          order: index,
           author: {
             x_id: chapter.x_user_id,
             x_url: xProfileUrl(chapter.x_user_id),
@@ -358,15 +270,4 @@ export function buildEventExportPayload(
       truncated: snapshot.truncated,
     },
   };
-}
-
-export function buildEventExportPayloadForFormat(
-  snapshot: EventExportSnapshot,
-  format: EventExportFormat,
-  generatedAt = Math.floor(Date.now() / 1000),
-  updateMode: EventExportUpdateMode = "realtime",
-): unknown {
-  return format === "legacy"
-    ? buildLegacyEventExportPayload(snapshot)
-    : buildEventExportPayload(snapshot, generatedAt, updateMode);
 }

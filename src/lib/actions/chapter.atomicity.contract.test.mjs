@@ -2,67 +2,140 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { planD1AuditMutationBudget } from "../audit/mutateBudget.ts";
 
-const read = (relative) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8");
+const read = (relative) =>
+  readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8");
+
 const action = read("./chapter.ts");
-const limits = read("./chapterLimits.ts");
+const detailQuery = read("../db/videoDetailQueries.ts");
 const composer = read("../../components/video/ChapterComposer.tsx");
+const item = read("../../components/video/ChapterCommentItem.tsx");
+const tabs = read("../../components/video/ChapterTabs.tsx");
+const tabsCss = read("../../components/video/ChapterTabs.module.css");
+const composerCss = read("../../components/video/ChapterComposer.module.css");
 
-test("全チャプターwriteは各1回のmutateWithAuditでqueueまで保存する", () => {
-  assert.equal((action.match(/await mutateWithAudit\(db,/g) ?? []).length, 4);
-  assert.equal((action.match(/await buildStaticRebuildQueueBatch\(db,/g) ?? []).length, 4);
-  assert.doesNotMatch(action, /enqueueNotification\(/);
-  assert.match(action, /buildNotificationOutboxStatement/);
-  assert.match(action, /mutationStatements\.push\(notification\)/);
-  assert.match(action, /mutationStatements\.push\(\.\.\.queue\.statements\)/);
-});
-
-test("更新と削除は全scalar snapshot CASと完全な監査snapshotを使う", () => {
+test("通常チャプターの作成と削除は監査・静的再生成を同一mutationで保存する", () => {
+  assert.equal((action.match(/await mutateWithAudit\(db,/g) ?? []).length, 2);
   assert.equal(
-    (action.match(/expectedRowCondition\(\{ expectedCurrent: existing \}\)/g) ?? []).length,
+    (action.match(/await buildStaticRebuildQueueBatch\(db,/g) ?? []).length,
     2,
   );
-  assert.match(action, /operation: "UPDATE", before: \{ \.\.\.existing \}, after: \{ \.\.\.after \}/);
-  assert.match(action, /operation: "DELETE", before: \{ \.\.\.existing \}, after: null/);
-  assert.match(action, /operation: "CREATE", before: null, after: \{ \.\.\.after \}/);
+  assert.match(action, /operation: "CREATE"/);
+  assert.match(action, /operation: "DELETE"/);
 });
 
-test("CSV上限はサーバーとUIで共通化され、書込み前に拒否する", () => {
-  assert.match(limits, /MAX_ATOMIC_CHAPTER_BULK_ROWS = 8/);
-  assert.match(action, /rowsRaw\.length > MAX_ATOMIC_CHAPTER_BULK_ROWS/);
-  assert.match(composer, /parseChapterBulkCsv\(bulkCsv\)\.length/);
-  assert.match(composer, /dataRowCount > MAX_ATOMIC_CHAPTER_BULK_ROWS/);
-  assert.match(composer, /最大 \{MAX_ATOMIC_CHAPTER_BULK_ROWS\} 行/);
-  assert.ok(
-    action.indexOf("rowsRaw.length > MAX_ATOMIC_CHAPTER_BULK_ROWS") <
-      action.indexOf("const pendingRows"),
+test("チャプター削除は物理削除・CAS・同時削除の再確認を使う", () => {
+  assert.match(action, /\.delete\(videoChapters\)/);
+  assert.match(
+    action,
+    /expectedRowCondition\(\{ expectedCurrent: existing \}\)/,
   );
-  assert.match(action, /VALUES \$\{sql\.join\(pendingRows\.map/);
-  assert.match(action, /expectedMutationChanges: \[inserted, \.\.\.queue\.expectedChanges\]/);
+  assert.match(action, /catch \(error\)/);
+  assert.match(action, /if \(!current\)/);
+  assert.match(action, /すでに削除されています/);
+  assert.doesNotMatch(action, /deleted_at|is_deleted|soft_delete/i);
 });
 
-test("D1 bind/query予算はbulk上限8でも制約内に収まる", () => {
-  // chapter INSERT は全11列を明示するため、8行で88 bind。
-  assert.ok(8 * 11 < 100);
-  const createBudget = planD1AuditMutationBudget({
-    mutationStatementCount: 3,
-    mutationAssertionCount: 3,
-    auditEntryCount: 1,
-    distinctActorCount: 1,
-  });
-  const bulkBudget = planD1AuditMutationBudget({
-    mutationStatementCount: 2,
-    mutationAssertionCount: 2,
-    auditEntryCount: 8,
-    distinctActorCount: 1,
-  });
-  assert.deepEqual(
-    { total: createBudget.totalQueryCount, withinLimit: createBudget.withinLimit },
-    { total: 20, withinLimit: true },
+test("投稿対象と動画時間の判定は共通化されている", () => {
+  assert.match(action, /async function loadPostingTarget/);
+  assert.equal((action.match(/loadPostingTarget\(/g) ?? []).length, 3);
+  assert.match(action, /videoYoutubeMetadata\.duration_seconds/);
+  assert.match(action, /durationSeconds == null \|\| durationSeconds <= 0/);
+  assert.match(action, /data\.chapter_time > durationSeconds/);
+  assert.match(action, /z\.number\(\)\.finite\(\)/);
+  assert.match(composer, /parsedTime > durationSeconds/);
+});
+
+test("削除権限判定は共通化し、単一作品の一覧だけ受理する", () => {
+  assert.match(action, /async function canModerateChapterVideo/);
+  assert.equal((action.match(/canModerateChapterVideo\(/g) ?? []).length, 3);
+  assert.match(action, /videoIds\.size !== 1/);
+  assert.match(action, /複数作品のチャプターを同時に判定できません/);
+  assert.match(action, /row\.x_user_id != null/);
+  assert.match(action, /existing\.x_user_id != null/);
+});
+
+test("チャプター作成は9カラム正本だけへ書き込む", () => {
+  assert.match(action, /const after: typeof videoChapters\.\$inferInsert/);
+  assert.doesNotMatch(action, /show_on_player_bar|order_index/);
+  assert.doesNotMatch(composer, /formData\.set\("show_on_player_bar"/);
+  assert.match(action, /旧 video_members\.chapters_json には書き込まない/);
+});
+
+test("詳細表示は旧JSON・旧列を読まず時刻順で取得する", () => {
+  assert.doesNotMatch(detailQuery, /chapters_json|show_on_player_bar/);
+  assert.match(detailQuery, /唯一の読み取り元は video_chapters/);
+  assert.match(
+    detailQuery,
+    /orderBy\(asc\(videoChapters\.chapter_time\), asc\(videoChapters\.id\)\)/,
   );
-  assert.deepEqual(
-    { total: bulkBudget.totalQueryCount, withinLimit: bulkBudget.withinLimit },
-    { total: 20, withinLimit: true },
-  );
+});
+
+test("通常チャプターのCSV一括登録は撤去されている", () => {
+  assert.doesNotMatch(action, /createChaptersBulk|parseChapterBulkCsv/);
+  assert.doesNotMatch(composer, /createChaptersBulk|CSV で一括登録|bulkCsv/);
+});
+
+test("削除操作は権限取得後だけ表示しネイティブdialogを使う", () => {
+  assert.match(action, /getChapterDeleteCapabilities/);
+  assert.match(tabs, /await getChapterDeleteCapabilities\(ids\)/);
+  assert.match(tabs, /canDelete=\{deletableIds\.has\(chapter\.id\)\}/);
+  assert.match(tabs, /<dialog/);
+  assert.match(tabs, /dialog\.showModal\(\)/);
+  assert.match(tabs, /onCancel=/);
+  assert.match(tabs, /await deleteChapter\(formData\)/);
+  assert.doesNotMatch(item, /window\.confirm|deleteChapter/);
+  assert.doesNotMatch(tabs, /window\.confirm|FOCUSABLE_SELECTOR|addEventListener\("keydown"/);
+  assert.match(tabsCss, /\.dialog::backdrop/);
+});
+
+test("削除ダイアログは連打防止・動的ID・フォーカス復元を備える", () => {
+  assert.match(tabs, /deletingRef\.current = true/);
+  assert.match(tabs, /previous\?\.isConnected/);
+  assert.match(tabs, /React\.useId\(\)/);
+  assert.match(tabs, /aria-busy=\{deleting\}/);
+  assert.match(tabsCss, /prefers-reduced-motion/);
+});
+
+test("Server ActionのrejectをUIで処理し再試行可能な状態へ戻す", () => {
+  assert.ok((tabs.match(/catch \(error\)/g) ?? []).length >= 2);
+  assert.match(tabs, /通信に失敗しました。接続を確認して/);
+  assert.ok((composer.match(/catch \(error\)/g) ?? []).length >= 2);
+  assert.match(composer, /入力内容を保持したまま、もう一度送信できます/);
+  assert.match(composer, /contextLoadingRef\.current/);
+  assert.match(composer, /submittingRef\.current = false/);
+  assert.match(tabs, /deletingRef\.current = false/);
+});
+
+test("シーク領域と削除ボタンを別のbuttonとして描画する", () => {
+  assert.match(item, /className=\{styles\.seekTarget\}/);
+  assert.match(item, /className=\{styles\.deleteButton\}/);
+  assert.match(item, /name="trash"/);
+  assert.match(item, /duration != null && chapter\.chapter_time > duration/);
+});
+
+test("投稿フォームは共通時刻解析と二重送信防止を使う", () => {
+  assert.match(composer, /parseChapterTimeInput/);
+  assert.match(composer, /submittingRef\.current/);
+  assert.match(composer, /disabled=\{busy\}/);
+  assert.match(composer, /チャプターコメントを投稿しました/);
+  assert.doesNotMatch(composer, /function parseTimeInput/);
+});
+
+test("投稿フォームのIDとradio名はインスタンスごとに分離される", () => {
+  assert.match(composer, /const componentId = React\.useId\(\)/);
+  assert.match(composer, /const visibilityName =/);
+  assert.match(composer, /name=\{name\}/);
+  assert.match(composer, /aria-controls=\{formId\}/);
+  assert.match(composer, /自分と作品管理者だけに表示します/);
+});
+
+test("投稿フォームは開いた時だけ文脈を取得し、失敗時に再取得できる", () => {
+  assert.match(composer, /const nextOpen = !open/);
+  assert.match(composer, /nextOpen &&/);
+  assert.match(composer, /const loadContext = React\.useCallback/);
+  assert.match(composer, /onClick=\{loadContext\}/);
+  assert.match(composer, /setOpen\(false\)/);
+  assert.match(composerCss, /submitSuccess/);
+  assert.match(composerCss, /prefers-reduced-motion/);
 });

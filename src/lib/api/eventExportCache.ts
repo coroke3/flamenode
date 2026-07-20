@@ -1,9 +1,8 @@
 import "server-only";
 
 import { getEnv } from "@/lib/cloudflare";
-import type { EventExportFormat } from "./eventExportPayload";
 
-const EVENT_EXPORT_CACHE_VERSION = 4;
+const EVENT_EXPORT_CACHE_VERSION = 5;
 const EVENT_EXPORT_ACCESS_CACHE_VERSION = 1;
 export const EVENT_EXPORT_ACCESS_TTL_SECONDS = 60;
 export const EVENT_EXPORT_REFRESH_MINUTES = [15, 60, 360, 1440] as const;
@@ -29,14 +28,12 @@ export function eventExportAccessCacheKey(eventId: string): string {
 
 export function eventExportPayloadCacheKey(
   eventId: string,
-  format: EventExportFormat,
   refreshMinutes: EventExportRefreshMinutes,
 ): string {
   return [
     "public-event-export",
     EVENT_EXPORT_CACHE_VERSION,
     encodeURIComponent(eventId),
-    format,
     refreshMinutes,
   ].join(":");
 }
@@ -53,10 +50,8 @@ export async function invalidateEventExportCache(
 
   const keys = [
     eventExportAccessCacheKey(eventId),
-    ...(["legacy", "new"] as const).flatMap((format) =>
-      EVENT_EXPORT_REFRESH_MINUTES.map((refreshMinutes) =>
-        eventExportPayloadCacheKey(eventId, format, refreshMinutes),
-      ),
+    ...EVENT_EXPORT_REFRESH_MINUTES.map((refreshMinutes) =>
+      eventExportPayloadCacheKey(eventId, refreshMinutes),
     ),
   ];
 

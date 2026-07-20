@@ -5,11 +5,7 @@ import Link from "next/link";
 import styles from "./MemberSection.module.css";
 import { Icon } from "@/components/ui/Icon";
 import { cn } from "@/lib/utils/cn";
-import { formatDuration } from "@/lib/utils/format";
 import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
-import { MemberChapterItem } from "./MemberChapterItem";
-import type { MemberChapterItemEntry } from "./MemberChapterItem";
-import { seekToTime } from "./playerBridge";
 
 export interface MemberSectionMember {
   id: string;
@@ -21,19 +17,12 @@ export interface MemberSectionMember {
   icon_url: string | null;
 }
 
-export interface MemberSectionChapter extends MemberChapterItemEntry {
-  video_member_id: string;
-}
-
 interface MemberSectionProps {
   members: readonly MemberSectionMember[];
-  memberChapters?: readonly MemberSectionChapter[];
-  duration?: number | null;
-  onSeek?: (time: number) => void;
 }
 
-type ViewMode = "cards" | "table" | "chapters";
-type SortKey = "order" | "name" | "handle" | "role" | "chapters";
+type ViewMode = "cards" | "table";
+type SortKey = "order" | "name" | "handle" | "role";
 type SortDirection = "asc" | "desc";
 
 interface SortState {
@@ -49,38 +38,6 @@ function memberHandle(member: MemberSectionMember): string {
   return member.x_user_id ?? "";
 }
 
-function chapterCountMap(
-  chapters: readonly MemberSectionChapter[],
-): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const chapter of chapters) {
-    if (!chapter.video_member_id) continue;
-    map.set(
-      chapter.video_member_id,
-      (map.get(chapter.video_member_id) ?? 0) + 1,
-    );
-  }
-  return map;
-}
-
-function chapterTimesMap(
-  chapters: readonly MemberSectionChapter[],
-): Map<string, string[]> {
-  const map = new Map<string, number[]>();
-  for (const chapter of chapters) {
-    if (!chapter.video_member_id) continue;
-    const list = map.get(chapter.video_member_id) ?? [];
-    list.push(chapter.chapter_time);
-    map.set(chapter.video_member_id, list);
-  }
-  return new Map(
-    Array.from(map.entries()).map(([id, times]) => [
-      id,
-      times.sort((a, b) => a - b).map((time) => formatDuration(time)),
-    ]),
-  );
-}
-
 function compareText(a: string | null, b: string | null): number {
   return (a ?? "").localeCompare(b ?? "", "ja", {
     numeric: true,
@@ -91,41 +48,33 @@ function compareText(a: string | null, b: string | null): number {
 function sortMembers(
   members: readonly MemberSectionMember[],
   sort: SortState | null,
-  counts: Map<string, number>,
 ): MemberSectionMember[] {
   const withIndex = members.map((member, index) => ({ member, index }));
   if (!sort) return withIndex.map((entry) => entry.member);
 
   const direction = sort.direction === "asc" ? 1 : -1;
-  withIndex.sort((a, b) => {
+  withIndex.sort((left, right) => {
     let result = 0;
-    if (sort.key === "order") {
-      result = a.index - b.index;
-    } else if (sort.key === "name") {
-      result = compareText(memberDisplayName(a.member), memberDisplayName(b.member));
+    if (sort.key === "order") result = left.index - right.index;
+    else if (sort.key === "name") {
+      result = compareText(
+        memberDisplayName(left.member),
+        memberDisplayName(right.member),
+      );
     } else if (sort.key === "handle") {
-      result = compareText(memberHandle(a.member), memberHandle(b.member));
-    } else if (sort.key === "role") {
-      result = compareText(a.member.role, b.member.role);
+      result = compareText(memberHandle(left.member), memberHandle(right.member));
     } else {
-      result = (counts.get(a.member.id) ?? 0) - (counts.get(b.member.id) ?? 0);
+      result = compareText(left.member.role, right.member.role);
     }
-    return result === 0 ? a.index - b.index : result * direction;
+    return result === 0 ? left.index - right.index : result * direction;
   });
-
   return withIndex.map((entry) => entry.member);
 }
 
 export function MemberSection({
   members,
-  memberChapters,
-  duration,
-  onSeek = seekToTime,
 }: MemberSectionProps): React.ReactElement | null {
   const [mode, setMode] = React.useState<ViewMode>("cards");
-  const chapters = memberChapters ?? [];
-  const hasMemberChapters = chapters.length > 0;
-
   if (members.length === 0) return null;
 
   return (
@@ -143,28 +92,9 @@ export function MemberSection({
           active={mode === "table"}
           onClick={() => setMode("table")}
         />
-        {hasMemberChapters ? (
-          <TabButton
-            icon="chapter"
-            label="メンバーチャプター"
-            active={mode === "chapters"}
-            onClick={() => setMode("chapters")}
-          />
-        ) : null}
       </div>
-
       {mode === "cards" ? <CardsView members={members} /> : null}
-      {mode === "table" ? (
-        <TableView members={members} memberChapters={chapters} />
-      ) : null}
-      {mode === "chapters" && hasMemberChapters ? (
-        <ChaptersView
-          members={members}
-          chapters={chapters}
-          duration={duration}
-          onSeek={onSeek}
-        />
-      ) : null}
+      {mode === "table" ? <TableView members={members} /> : null}
     </div>
   );
 }
@@ -175,7 +105,7 @@ function TabButton({
   active,
   onClick,
 }: {
-  icon: "users" | "list" | "chapter";
+  icon: "users" | "list";
   label: string;
   active: boolean;
   onClick: () => void;
@@ -221,7 +151,6 @@ function MemberCard({
     ? `https://x.com/${encodeURIComponent(member.x_user_id)}`
     : null;
   const iconUrl = cachedGoogleImageUrl(member.icon_url);
-
   const avatar = (
     <span className={styles.avatar} aria-hidden>
       {iconUrl ? (
@@ -232,7 +161,6 @@ function MemberCard({
       )}
     </span>
   );
-
   const nameBlock = (
     <span className={styles.nameBlock}>
       <span className={styles.name}>{displayName}</span>
@@ -299,7 +227,6 @@ function SortHeader({
       ? "ascending"
       : "descending"
     : "none";
-
   return (
     <span role="columnheader" aria-sort={ariaSort} className={className}>
       <button
@@ -318,32 +245,19 @@ function SortHeader({
 
 function TableView({
   members,
-  memberChapters,
 }: {
   members: readonly MemberSectionMember[];
-  memberChapters: readonly MemberSectionChapter[];
 }): React.ReactElement {
   const [sort, setSort] = React.useState<SortState | null>(null);
-  const counts = React.useMemo(
-    () => chapterCountMap(memberChapters),
-    [memberChapters],
-  );
-  const chapterTimes = React.useMemo(
-    () => chapterTimesMap(memberChapters),
-    [memberChapters],
-  );
   const sortedMembers = React.useMemo(
-    () => sortMembers(members, sort, counts),
-    [members, sort, counts],
+    () => sortMembers(members, sort),
+    [members, sort],
   );
-
-  // デフォルト順のインデックスマップ（ソート中にも元の番号を表示するため）
   const defaultIndexMap = React.useMemo(() => {
     const map = new Map<string, number>();
-    members.forEach((m, i) => map.set(m.id, i + 1));
+    members.forEach((member, index) => map.set(member.id, index + 1));
     return map;
   }, [members]);
-
   const handleSort = React.useCallback((key: SortKey) => {
     setSort((current) => {
       if (key === "order") return null;
@@ -360,72 +274,30 @@ function TableView({
       aria-label="参加メンバー"
     >
       <div className={styles.tableHeader} role="row">
-        <SortHeader
-          label="No."
-          sortKey="order"
-          activeSort={sort}
-          onSort={handleSort}
-          className={styles.tColNo}
-        />
-        <SortHeader
-          label="活動名"
-          sortKey="name"
-          activeSort={sort}
-          onSort={handleSort}
-          className={styles.tColName}
-        />
-        <SortHeader
-          label="ID"
-          sortKey="handle"
-          activeSort={sort}
-          onSort={handleSort}
-          className={styles.tColHandle}
-        />
-        <SortHeader
-          label="チャプター"
-          sortKey="chapters"
-          activeSort={sort}
-          onSort={handleSort}
-          className={styles.tColChapters}
-        />
-        <SortHeader
-          label="役割"
-          sortKey="role"
-          activeSort={sort}
-          onSort={handleSort}
-          className={styles.tColRole}
-        />
-        <span role="columnheader" className={styles.tColComment}>
-          コメント
-        </span>
+        <SortHeader label="No." sortKey="order" activeSort={sort} onSort={handleSort} className={styles.tColNo} />
+        <SortHeader label="活動名" sortKey="name" activeSort={sort} onSort={handleSort} className={styles.tColName} />
+        <SortHeader label="ID" sortKey="handle" activeSort={sort} onSort={handleSort} className={styles.tColHandle} />
+        <SortHeader label="役割" sortKey="role" activeSort={sort} onSort={handleSort} className={styles.tColRole} />
+        <span role="columnheader" className={styles.tColComment}>コメント</span>
       </div>
-      {sortedMembers.map((member, sortIndex) => {
+      {sortedMembers.map((member) => {
         const displayName = memberDisplayName(member);
         const iconUrl = cachedGoogleImageUrl(member.icon_url);
-        const internalHref = member.x_user_id ? `/user/${member.x_user_id}` : null;
-        const externalHref = member.x_user_id
-          ? `https://x.com/${encodeURIComponent(member.x_user_id)}`
-          : null;
-        const times = chapterTimes.get(member.id) ?? [];
-        const rowNum = defaultIndexMap.get(member.id) ?? sortIndex + 1;
-
         return (
-          <div role="row" key={member.id} className={styles.tableRow}>
-            <span role="cell" className={styles.tColNo} data-label="No.">
-              {sort ? sortIndex + 1 : rowNum}
-            </span>
-            <span role="cell" className={styles.tColName} data-label="活動名">
+          <div className={styles.tableRow} role="row" key={member.id}>
+            <span role="cell" className={styles.tColNo}>{defaultIndexMap.get(member.id)}</span>
+            <span role="cell" className={styles.tColName}>
               <span className={styles.tNameCell}>
                 <span className={styles.tAvatar} aria-hidden>
                   {iconUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={iconUrl} alt="" width={24} height={24} />
                   ) : (
-                    <Icon name="user" size={11} aria-hidden />
+                    <Icon name="user" size={12} aria-hidden />
                   )}
                 </span>
-                {internalHref ? (
-                  <Link href={internalHref} className={styles.tNameLink}>
+                {member.x_user_id ? (
+                  <Link href={`/user/${member.x_user_id}`} className={styles.tNameLink}>
                     <span className={styles.tName}>{displayName}</span>
                   </Link>
                 ) : (
@@ -433,145 +305,20 @@ function TableView({
                 )}
               </span>
             </span>
-            <span role="cell" className={styles.tColHandle} data-label="ID">
-              {externalHref ? (
-                <a
-                  href={externalHref}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={styles.tHandleLink}
-                >
+            <span role="cell" className={styles.tColHandle}>
+              {member.x_user_id ? (
+                <a href={`https://x.com/${encodeURIComponent(member.x_user_id)}`} target="_blank" rel="noopener noreferrer" className={styles.tHandleLink}>
                   @{member.x_user_id}
-                  <Icon name="external" size={10} aria-hidden />
                 </a>
               ) : (
                 <span className={styles.tMuted}>—</span>
               )}
             </span>
-            <span
-              role="cell"
-              className={styles.tColChapters}
-              data-label="チャプター"
-            >
-              {times.length > 0 ? (
-                <span className={styles.chapterTimes}>{times.join(" / ")}</span>
-              ) : (
-                <span className={styles.tMuted}>—</span>
-              )}
-            </span>
-            <span role="cell" className={styles.tColRole} data-label="役割">
-              {member.role ?? <span className={styles.tMuted}>—</span>}
-            </span>
-            <span
-              role="cell"
-              className={styles.tColComment}
-              data-label="コメント"
-            >
-              {member.comment ?? <span className={styles.tMuted}>—</span>}
-            </span>
+            <span role="cell" className={styles.tColRole}>{member.role || <span className={styles.tMuted}>—</span>}</span>
+            <span role="cell" className={styles.tColComment}>{member.comment || <span className={styles.tMuted}>—</span>}</span>
           </div>
         );
       })}
-    </div>
-  );
-}
-
-function ChaptersView({
-  members,
-  chapters,
-  duration,
-  onSeek,
-}: {
-  members: readonly MemberSectionMember[];
-  chapters: readonly MemberSectionChapter[];
-  duration?: number | null;
-  onSeek?: (time: number) => void;
-}): React.ReactElement {
-  const grouped = React.useMemo(() => {
-    const map = new Map<string, MemberSectionChapter[]>();
-    for (const chapter of chapters) {
-      const key = chapter.video_member_id || "__unassigned__";
-      const list = map.get(key) ?? [];
-      list.push(chapter);
-      map.set(key, list);
-    }
-    for (const list of map.values()) {
-      list.sort((a, b) => a.chapter_time - b.chapter_time);
-    }
-    return map;
-  }, [chapters]);
-
-  const unassigned = grouped.get("__unassigned__") ?? [];
-
-  return (
-    <div className={styles.chaptersWrap}>
-      {members.map((member) => {
-        const list = grouped.get(member.id) ?? [];
-        const displayName = memberDisplayName(member);
-        const iconUrl = cachedGoogleImageUrl(member.icon_url);
-        const headerLabel = member.x_user_id
-          ? `${displayName}(@${member.x_user_id})`
-          : displayName;
-
-        return (
-          <section key={member.id} className={styles.chapterGroup}>
-            <header className={styles.chapterGroupHead}>
-              <span className={styles.avatarSmall} aria-hidden>
-                {iconUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={iconUrl} alt="" width={24} height={24} />
-                ) : (
-                  <Icon name="user" size={11} aria-hidden />
-                )}
-              </span>
-              <span className={styles.chapterGroupName}>{headerLabel}</span>
-              {member.role ? (
-                <span className={styles.chapterGroupRole}>{member.role}</span>
-              ) : null}
-              <span className={styles.chapterGroupCount}>{list.length}</span>
-            </header>
-            {list.length === 0 ? (
-              <div className={styles.chapterGroupEmpty}>
-                メンバーチャプターなし
-              </div>
-            ) : (
-              <div className={styles.chapterGroupList}>
-                {list.map((chapter, index) => (
-                  <MemberChapterItem
-                    key={`${chapter.id}-member-${index}`}
-                    chapter={chapter}
-                    duration={duration}
-                    onSeek={onSeek}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-        );
-      })}
-      {unassigned.length > 0 ? (
-        <section className={styles.chapterGroup}>
-          <header className={styles.chapterGroupHead}>
-            <span className={styles.avatarSmall} aria-hidden>
-              <Icon name="user" size={11} aria-hidden />
-            </span>
-            <span className={styles.chapterGroupName}>未割当</span>
-            <span className={styles.chapterGroupCount}>
-              {unassigned.length}
-            </span>
-          </header>
-          <div className={styles.chapterGroupList}>
-            {unassigned.map((chapter, index) => (
-              <MemberChapterItem
-                key={`${chapter.id}-unassigned-${index}`}
-                chapter={chapter}
-                duration={duration}
-                onSeek={onSeek}
-              />
-            ))}
-          </div>
-        </section>
-      ) : null}
     </div>
   );
 }
