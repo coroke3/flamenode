@@ -9,6 +9,7 @@ on:
   pull_request:
     branches:
       - agent/db-canonical-migration-v2
+      - agent/db-canonical-final-conflicts-v10
     paths:
       - .agent-trigger/connect-xid-audits-v11
       - .github/workflows/connect-xid-audits-v11.yml
@@ -22,7 +23,7 @@ concurrency:
 
 jobs:
   connect-and-verify:
-    if: github.actor != 'github-actions[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.ref == 'agent/db-canonical-final-conflicts-v10')
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
