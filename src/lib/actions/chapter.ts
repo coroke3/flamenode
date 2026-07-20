@@ -8,6 +8,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { canEditVideo } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
+import type { DB } from "@/lib/db/client";
 import { videoChapters, videoYoutubeMetadata, videos } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
@@ -31,6 +32,12 @@ export interface ChapterPostingContextResult {
   message?: string;
 }
 
+type VideoRow = typeof videos.$inferSelect;
+
+type PostingTargetResult =
+  | { ok: true; target: VideoRow; durationSeconds: number }
+  | { ok: false; message: string };
+
 const chapterTimeSchema = z.preprocess((value) => {
   if (typeof value !== "string") return value;
   const trimmed = value.trim();
@@ -44,6 +51,66 @@ const createSchema = z.object({
   note: z.string().trim().max(1000).optional().nullable(),
   visibility: z.enum(["public", "private"]).default("public"),
 });
+
+const deleteSchema = z.object({
+  chapter_id: z.string().trim().min(1).max(128),
+});
+
+function acceptsChapterComments(video: VideoRow): boolean {
+  return (
+    video.visibility_status === "public" ||
+    video.visibility_status === "limited"
+  );
+}
+
+async function loadPostingTarget(
+  db: DB,
+  videoId: string,
+): Promise<PostingTargetResult> {
+  const target = (
+    await db.select().from(videos).where(eq(videos.id, videoId)).limit(1)
+  )[0];
+  if (!target) return { ok: false, message: "動画が見つかりません。" };
+  if (!acceptsChapterComments(target)) {
+    return {
+      ok: false,
+      message: "この動画にはチャプターコメントを投稿できません。",
+    };
+  }
+
+  const metadata = (
+    await db
+      .select({ duration_seconds: videoYoutubeMetadata.duration_seconds })
+      .from(videoYoutubeMetadata)
+      .where(eq(videoYoutubeMetadata.video_id, videoId))
+      .limit(1)
+  )[0];
+  const durationSeconds = metadata?.duration_seconds ?? null;
+  if (durationSeconds == null || durationSeconds <= 0) {
+    return {
+      ok: false,
+      message:
+        "動画時間を確認できないため、チャプターコメントを投稿できません。YouTube情報の同期後に再度お試しください。",
+    };
+  }
+
+  return { ok: true, target, durationSeconds };
+}
+
+async function canModerateChapterVideo(params: {
+  db: DB;
+  user: { id: string; role: string | null };
+  video: VideoRow;
+}): Promise<boolean> {
+  if (params.user.role === "admin") return true;
+  return canEditVideo({
+    db: params.db,
+    user: params.user,
+    video: params.video,
+    requiredKey: "video.chapter_admin",
+    privilegeMode: "event",
+  });
+}
 
 /**
  * 動画内の時刻に紐づく通常チャプターコメントを作成する。
@@ -72,34 +139,12 @@ export async function createChapter(
   }
   const data = parsed.data;
   const db = guard.db;
-
-  const target = (
-    await db.select().from(videos).where(eq(videos.id, data.video_id)).limit(1)
-  )[0];
-  if (!target) return { ok: false, message: "動画が見つかりません。" };
-
-  if (target.visibility_status !== "public" && target.visibility_status !== "limited") {
-    return {
-      ok: false,
-      message: "この動画にはチャプターコメントを投稿できません。",
-    };
+  const postingTarget = await loadPostingTarget(db, data.video_id);
+  if (!postingTarget.ok) {
+    return { ok: false, message: postingTarget.message };
   }
+  const { target, durationSeconds } = postingTarget;
 
-  const metadata = (
-    await db
-      .select({ duration_seconds: videoYoutubeMetadata.duration_seconds })
-      .from(videoYoutubeMetadata)
-      .where(eq(videoYoutubeMetadata.video_id, data.video_id))
-      .limit(1)
-  )[0];
-  const durationSeconds = metadata?.duration_seconds ?? null;
-  if (durationSeconds == null || durationSeconds <= 0) {
-    return {
-      ok: false,
-      message:
-        "動画時間を確認できないため、チャプターコメントを投稿できません。YouTube情報の同期後に再度お試しください。",
-    };
-  }
   if (data.chapter_time > durationSeconds) {
     return {
       ok: false,
@@ -202,50 +247,20 @@ export async function getChapterPostingContext(
     return { ok: false, durationSeconds: null, message: "動画IDが不正です。" };
   }
 
-  const target = (
-    await guard.db
-      .select({
-        id: videos.id,
-        visibility_status: videos.visibility_status,
-      })
-      .from(videos)
-      .where(eq(videos.id, parsed.data))
-      .limit(1)
-  )[0];
-  if (!target) {
-    return { ok: false, durationSeconds: null, message: "動画が見つかりません。" };
-  }
-  if (target.visibility_status !== "public" && target.visibility_status !== "limited") {
+  const postingTarget = await loadPostingTarget(guard.db, parsed.data);
+  if (!postingTarget.ok) {
     return {
       ok: false,
       durationSeconds: null,
-      message: "この動画にはチャプターコメントを投稿できません。",
+      message: postingTarget.message,
     };
   }
-
-  const metadata = (
-    await guard.db
-      .select({ duration_seconds: videoYoutubeMetadata.duration_seconds })
-      .from(videoYoutubeMetadata)
-      .where(eq(videoYoutubeMetadata.video_id, parsed.data))
-      .limit(1)
-  )[0];
-  const durationSeconds = metadata?.duration_seconds ?? null;
-  if (durationSeconds == null || durationSeconds <= 0) {
-    return {
-      ok: false,
-      durationSeconds: null,
-      message:
-        "動画時間を確認できないため投稿できません。YouTube情報の同期後に再度お試しください。",
-    };
-  }
-
-  return { ok: true, durationSeconds };
+  return { ok: true, durationSeconds: postingTarget.durationSeconds };
 }
 
 /**
- * 画面に表示中のチャプターについて、現在の利用者が削除できるIDだけを返す。
- * 実際の削除時にも deleteChapter で同じ権限を再検証する。
+ * 画面に表示中の単一動画のチャプターについて、削除できるIDだけを返す。
+ * 実際の削除時にも deleteChapter で権限を再検証する。
  */
 export async function getChapterDeleteCapabilities(
   chapterIds: string[],
@@ -272,49 +287,43 @@ export async function getChapterDeleteCapabilities(
     })
     .from(videoChapters)
     .where(inArray(videoChapters.id, parsed.data));
+  if (rows.length === 0) return { ok: true, deletableIds: [] };
+
+  const videoIds = new Set(rows.map((row) => row.video_id));
+  if (videoIds.size !== 1) {
+    return {
+      ok: false,
+      deletableIds: [],
+      message: "複数作品のチャプターを同時に判定できません。",
+    };
+  }
 
   const deletable = new Set(
     rows
       .filter((row) => guard.approvedXIds.includes(row.x_user_id))
       .map((row) => row.id),
   );
+  if (deletable.size === rows.length) {
+    return { ok: true, deletableIds: Array.from(deletable) };
+  }
 
-  const remainingVideoIds = Array.from(
-    new Set(
-      rows
-        .filter((row) => !deletable.has(row.id))
-        .map((row) => row.video_id),
-    ),
-  ).slice(0, 10);
-
-  for (const videoId of remainingVideoIds) {
-    const target = (
-      await guard.db.select().from(videos).where(eq(videos.id, videoId)).limit(1)
-    )[0];
-    if (!target) continue;
-
-    const canModerate =
-      guard.user.role === "admin" ||
-      (await canEditVideo({
-        db: guard.db,
-        user: { id: guard.user.id, role: guard.user.role ?? null },
-        video: target,
-        requiredKey: "video.chapter_admin",
-        privilegeMode: "event",
-      }));
-    if (!canModerate) continue;
-
-    for (const row of rows) {
-      if (row.video_id === videoId) deletable.add(row.id);
-    }
+  const videoId = rows[0].video_id;
+  const target = (
+    await guard.db.select().from(videos).where(eq(videos.id, videoId)).limit(1)
+  )[0];
+  if (
+    target &&
+    (await canModerateChapterVideo({
+      db: guard.db,
+      user: { id: guard.user.id, role: guard.user.role ?? null },
+      video: target,
+    }))
+  ) {
+    for (const row of rows) deletable.add(row.id);
   }
 
   return { ok: true, deletableIds: Array.from(deletable) };
 }
-
-const deleteSchema = z.object({
-  chapter_id: z.string().trim().min(1).max(128),
-});
 
 /**
  * 通常チャプターコメントを video_chapters から物理削除する。
@@ -353,15 +362,11 @@ export async function deleteChapter(
   const isAuthor = guard.approvedXIds.includes(existing.x_user_id);
   const canModerate =
     !isAuthor &&
-    (guard.user.role === "admin" ||
-      (await canEditVideo({
-        db,
-        user: { id: guard.user.id, role: guard.user.role ?? null },
-        video: target,
-        requiredKey: "video.chapter_admin",
-        privilegeMode: "event",
-      })));
-
+    (await canModerateChapterVideo({
+      db,
+      user: { id: guard.user.id, role: guard.user.role ?? null },
+      video: target,
+    }));
   if (!isAuthor && !canModerate) {
     return {
       ok: false,
@@ -378,32 +383,50 @@ export async function deleteChapter(
     },
   ]);
 
-  await mutateWithAudit(db, {
-    mutationStatements: [
-      db
-        .delete(videoChapters)
-        .where(
-          and(
-            eq(videoChapters.id, existing.id),
-            expectedRowCondition({ expectedCurrent: existing }),
-          )!,
-        ),
-      ...queue.statements,
-    ],
-    expectedMutationChanges: [1, ...queue.expectedChanges],
-    audits: [
-      {
-        table_name: "video_chapters",
-        target_id: existing.id,
-        operation: "DELETE",
-        before: { ...existing },
-        after: null,
-        actor_user_id: guard.user.id,
-        reason: isAuthor ? "投稿者による削除" : "管理権限による削除",
-        retention_class: "normal",
-      },
-    ],
-  });
+  try {
+    await mutateWithAudit(db, {
+      mutationStatements: [
+        db
+          .delete(videoChapters)
+          .where(
+            and(
+              eq(videoChapters.id, existing.id),
+              expectedRowCondition({ expectedCurrent: existing }),
+            )!,
+          ),
+        ...queue.statements,
+      ],
+      expectedMutationChanges: [1, ...queue.expectedChanges],
+      audits: [
+        {
+          table_name: "video_chapters",
+          target_id: existing.id,
+          operation: "DELETE",
+          before: { ...existing },
+          after: null,
+          actor_user_id: guard.user.id,
+          reason: isAuthor ? "投稿者による削除" : "管理権限による削除",
+          retention_class: "normal",
+        },
+      ],
+    });
+  } catch (error) {
+    const current = (
+      await db
+        .select({ id: videoChapters.id })
+        .from(videoChapters)
+        .where(eq(videoChapters.id, existing.id))
+        .limit(1)
+    )[0];
+    if (!current) {
+      return { ok: true, message: "チャプターコメントはすでに削除されています。" };
+    }
+    console.error("chapter comment delete failed", {
+      chapterId: existing.id,
+      errorName: error instanceof Error ? error.name : "unknown",
+    });
+    return { ok: false, message: "削除に失敗しました。もう一度お試しください。" };
+  }
 
   revalidatePath(`/${target.youtube_video_id ?? existing.video_id}`);
   return { ok: true, message: "チャプターコメントを削除しました。" };
