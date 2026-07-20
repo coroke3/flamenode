@@ -1,6 +1,9 @@
 name: Export PR source temporary
 
 on:
+  push:
+    branches:
+      - agent/db-canonical-x-identity
   pull_request:
     branches:
       - agent/db-canonical-migration-v2
