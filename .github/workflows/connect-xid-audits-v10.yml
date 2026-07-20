@@ -1,4 +1,5 @@
 name: Connect X ID audits v10
+# UI受入検査の正本更新後に最終ゲートを再実行する。
 
 on:
   push:
