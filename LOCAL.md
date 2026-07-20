@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-20
-> Verified against commit: `agent/remove-legacy-compat`
+> Verified against commit: `4789dc6`
 > Source of truth: `package.json`, `.dev.vars.example`, `migrations/` active path, `wrangler.toml`, `docs/operations/migrations.md`
 
 この文書は個人PCの実施済み状態を前提にせず、空の作業環境からFlameNodeを再現する手順だけを扱います。本番操作は [`DEPLOY.md`](./DEPLOY.md) を参照してください。
@@ -117,6 +117,7 @@ npm run lint
 npm run test:unit
 npm run test:workers
 npm run test:integration
+node --test src/lib/import/legacy/canonicalImport.test.mjs
 npm run build
 npm run pages:build
 npm run check:pages-output
