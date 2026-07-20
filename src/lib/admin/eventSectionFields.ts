@@ -47,7 +47,6 @@ export function snapshotEventSection(
       return {
         slot_type: row.slot_type,
         max_slots_per_video: row.max_slots_per_video,
-        max_consecutive_slots_per_entry: row.max_consecutive_slots_per_entry,
         slot_part_gap_minutes: row.slot_part_gap_minutes,
         slot_visibility_mode: row.slot_visibility_mode,
         parts_json: row.parts_json,

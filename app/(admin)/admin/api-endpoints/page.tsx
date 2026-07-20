@@ -33,7 +33,7 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
     id: string;
     event_id: string;
     public_api_enabled: number;
-    public_api_updated_at: number | null;
+    updated_at: number;
     created_at: number;
     event_title: string;
     event_visibility_status: string;
@@ -47,14 +47,14 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
           id: eventsTable.id,
           event_id: eventsTable.id,
           public_api_enabled: eventsTable.public_api_enabled,
-          public_api_updated_at: eventsTable.public_api_updated_at,
+          updated_at: eventsTable.updated_at,
           created_at: eventsTable.created_at,
           event_title: eventsTable.title,
           event_visibility_status: eventsTable.visibility_status,
         })
         .from(eventsTable)
         .where(eq(eventsTable.public_api_enabled, 1))
-        .orderBy(desc(eventsTable.public_api_updated_at), desc(eventsTable.created_at))
+        .orderBy(desc(eventsTable.updated_at), desc(eventsTable.created_at))
         .limit(100),
       db
         .select({
@@ -98,7 +98,8 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
             <option value="">公開イベントを選択</option>
             {eventOptions.map((event) => (
               <option key={event.id} value={event.id}>
-                {event.title} ({event.id}){event.enabled === 1 ? " / 発行済み" : ""}
+                {event.title} ({event.id})
+                {event.enabled === 1 ? " / 発行済み" : ""}
               </option>
             ))}
           </select>
@@ -187,7 +188,10 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
               <tr key={row.id}>
                 <td>
                   <span className="fn-badge fn-badge-accent">有効</span>
-                  <span className="fn-badge fn-badge-soft" style={{ marginLeft: 6 }}>
+                  <span
+                    className="fn-badge fn-badge-soft"
+                    style={{ marginLeft: 6 }}
+                  >
                     {row.event_visibility_status}
                   </span>
                 </td>
@@ -202,9 +206,7 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
                 <td>
                   <EventExportLinkBuilder eventId={row.event_id} />
                 </td>
-                <td className="fn-muted">
-                  {formatUnix(row.public_api_updated_at ?? row.created_at)}
-                </td>
+                <td className="fn-muted">{formatUnix(row.updated_at)}</td>
                 <td>
                   <form action={setApiEndpointActiveAction}>
                     <input type="hidden" name="id" value={row.id} />

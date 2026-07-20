@@ -9,13 +9,11 @@ export type VideoMemberSnapshotRow = {
   role: string | null;
   comment: string | null;
   order_index: number;
-  user_id: string | null;
   can_edit: number;
   is_public_member: number;
-  edit_granted_by_user_id: string | null;
+  edit_granted_by_auth_user_id: string | null;
   edit_granted_at: number | null;
   edit_updated_at: number | null;
-  chapters_json: string | null;
 };
 
 export type VideoMemberSetSnapshot = {
@@ -34,13 +32,11 @@ export function toVideoMemberSnapshotRow(
     role: row.role,
     comment: row.comment,
     order_index: row.order_index,
-    user_id: row.user_id,
     can_edit: row.can_edit,
     is_public_member: row.is_public_member,
-    edit_granted_by_user_id: row.edit_granted_by_user_id,
+    edit_granted_by_auth_user_id: row.edit_granted_by_auth_user_id,
     edit_granted_at: row.edit_granted_at,
     edit_updated_at: row.edit_updated_at,
-    chapters_json: row.chapters_json,
   };
 }
 
@@ -49,8 +45,7 @@ function sortRows(
 ): VideoMemberSnapshotRow[] {
   return [...rows].sort(
     (left, right) =>
-      left.order_index - right.order_index ||
-      left.id.localeCompare(right.id),
+      left.order_index - right.order_index || left.id.localeCompare(right.id),
   );
 }
 
@@ -76,14 +71,9 @@ export function parseVideoMemberSetSnapshot(
   }
 
   const rows: VideoMemberSnapshotRow[] = [];
-
   for (const raw of value.rows) {
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-      return null;
-    }
-
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
     const row = raw as Record<string, unknown>;
-
     if (
       typeof row.id !== "string" ||
       typeof row.video_id !== "string" ||
@@ -98,40 +88,25 @@ export function parseVideoMemberSetSnapshot(
     rows.push({
       id: row.id,
       video_id: row.video_id,
-      x_user_id:
-        typeof row.x_user_id === "string" ? row.x_user_id : null,
+      x_user_id: typeof row.x_user_id === "string" ? row.x_user_id : null,
       name: row.name,
       role: typeof row.role === "string" ? row.role : null,
-      comment:
-        typeof row.comment === "string" ? row.comment : null,
+      comment: typeof row.comment === "string" ? row.comment : null,
       order_index: row.order_index,
-      user_id:
-        typeof row.user_id === "string" ? row.user_id : null,
       can_edit: row.can_edit,
       is_public_member: row.is_public_member,
-      edit_granted_by_user_id:
-        typeof row.edit_granted_by_user_id === "string"
-          ? row.edit_granted_by_user_id
+      edit_granted_by_auth_user_id:
+        typeof row.edit_granted_by_auth_user_id === "string"
+          ? row.edit_granted_by_auth_user_id
           : null,
       edit_granted_at:
-        typeof row.edit_granted_at === "number"
-          ? row.edit_granted_at
-          : null,
+        typeof row.edit_granted_at === "number" ? row.edit_granted_at : null,
       edit_updated_at:
-        typeof row.edit_updated_at === "number"
-          ? row.edit_updated_at
-          : null,
-      chapters_json:
-        typeof row.chapters_json === "string"
-          ? row.chapters_json
-          : null,
+        typeof row.edit_updated_at === "number" ? row.edit_updated_at : null,
     });
   }
 
-  return {
-    id: value.id,
-    rows: sortRows(rows),
-  };
+  return { id: value.id, rows: sortRows(rows) };
 }
 
 export function buildVideoMemberSetGuardSql(
@@ -139,14 +114,10 @@ export function buildVideoMemberSetGuardSql(
   expectedRows: readonly VideoMemberSnapshotRow[],
 ): SQL {
   const expectedJson = JSON.stringify(sortRows(expectedRows));
-
   return sql`
     SELECT CASE
       WHEN (
-        SELECT COALESCE(
-          json_group_array(json(row_json)),
-          json('[]')
-        )
+        SELECT COALESCE(json_group_array(json(row_json)), json('[]'))
         FROM (
           SELECT json_object(
             'id', id,
@@ -156,13 +127,11 @@ export function buildVideoMemberSetGuardSql(
             'role', role,
             'comment', comment,
             'order_index', order_index,
-            'user_id', user_id,
             'can_edit', can_edit,
             'is_public_member', is_public_member,
-            'edit_granted_by_user_id', edit_granted_by_user_id,
+            'edit_granted_by_auth_user_id', edit_granted_by_auth_user_id,
             'edit_granted_at', edit_granted_at,
-            'edit_updated_at', edit_updated_at,
-            'chapters_json', chapters_json
+            'edit_updated_at', edit_updated_at
           ) AS row_json
           FROM video_members
           WHERE video_id = ${videoId}
@@ -179,10 +148,7 @@ export function buildVideoMemberSetGuardSql(
 export function buildVideoMemberBulkInsertSql(
   rows: readonly VideoMemberSnapshotRow[],
 ): SQL {
-  if (rows.length === 0) {
-    throw new Error("video_member_bulk_insert_empty");
-  }
-
+  if (rows.length === 0) throw new Error("video_member_bulk_insert_empty");
   const payload = JSON.stringify(sortRows(rows));
 
   return sql`
@@ -194,13 +160,11 @@ export function buildVideoMemberBulkInsertSql(
       role,
       comment,
       order_index,
-      user_id,
       can_edit,
       is_public_member,
-      edit_granted_by_user_id,
+      edit_granted_by_auth_user_id,
       edit_granted_at,
-      edit_updated_at,
-      chapters_json
+      edit_updated_at
     )
     SELECT
       json_extract(value, '$.id'),
@@ -210,13 +174,11 @@ export function buildVideoMemberBulkInsertSql(
       json_extract(value, '$.role'),
       json_extract(value, '$.comment'),
       json_extract(value, '$.order_index'),
-      json_extract(value, '$.user_id'),
       json_extract(value, '$.can_edit'),
       json_extract(value, '$.is_public_member'),
-      json_extract(value, '$.edit_granted_by_user_id'),
+      json_extract(value, '$.edit_granted_by_auth_user_id'),
       json_extract(value, '$.edit_granted_at'),
-      json_extract(value, '$.edit_updated_at'),
-      json_extract(value, '$.chapters_json')
+      json_extract(value, '$.edit_updated_at')
     FROM json_each(${payload})
   `;
 }

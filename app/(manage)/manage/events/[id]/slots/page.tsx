@@ -33,36 +33,36 @@ export default async function ManageEventSlotsPage({
   searchParams,
 }: Props): Promise<React.ReactElement> {
   const { id } = await params;
-  const sp = (await searchParams) ?? {};
+  const search = (await searchParams) ?? {};
   const statusFilter: "all" | "available" | "reserved" | "submitted" =
-    sp.status === "available" ||
-    sp.status === "reserved" ||
-    sp.status === "submitted"
-      ? sp.status
+    search.status === "available" ||
+    search.status === "reserved" ||
+    search.status === "submitted"
+      ? search.status
       : "all";
-
   const guard = await requireSession({
     next: `/manage/events/${encodeURIComponent(id)}/slots`,
   });
   if (!guard.ok) return guard.element;
-  const user = guard.user;
-
   const db = getDatabase();
   if (!db) notFound();
 
-  const ev = (
+  const event = (
     await db.select().from(eventsTable).where(eq(eventsTable.id, id)).limit(1)
   )[0];
-  if (!ev) notFound();
-
-  const isAdmin = user.role === "admin";
-  const canManageSlots = await canEditEvent(
-    db,
-    { id: user.id, role: user.role ?? null },
-    id,
-    "event.slots",
-  );
-  if (!canManageSlots && !isAdmin) notFound();
+  if (!event) notFound();
+  const isAdmin = guard.user.role === "admin";
+  if (
+    !isAdmin &&
+    !(await canEditEvent(
+      db,
+      { id: guard.user.id, role: guard.user.role ?? null },
+      id,
+      "event.slots",
+    ))
+  ) {
+    notFound();
+  }
 
   const where =
     statusFilter === "all"
@@ -74,7 +74,7 @@ export default async function ManageEventSlotsPage({
   const rows = await db
     .select({
       id: slotsTable.id,
-      slot_kind: slotsTable.slot_kind,
+      event_id: slotsTable.event_id,
       slot_label: slotsTable.slot_label,
       start_time: slotsTable.start_time,
       sort_order: slotsTable.sort_order,
@@ -84,6 +84,8 @@ export default async function ManageEventSlotsPage({
       reserved_by_user_id: slotsTable.reserved_by_user_id,
       reservation_group_id: slotsTable.reservation_group_id,
       video_id: slotsTable.video_id,
+      updated_at: slotsTable.updated_at,
+      version: slotsTable.version,
     })
     .from(slotsTable)
     .where(where)
@@ -91,53 +93,34 @@ export default async function ManageEventSlotsPage({
     .limit(500);
 
   const countRows = await db
-    .select({
-      status: slotsTable.status,
-      c: sql<number>`COUNT(*)`,
-    })
+    .select({ status: slotsTable.status, count: sql<number>`COUNT(*)` })
     .from(slotsTable)
     .where(eq(slotsTable.event_id, id))
     .groupBy(slotsTable.status);
-  const counts: Record<string, number> = {};
-  for (const r of countRows) counts[r.status ?? "unknown"] = Number(r.c ?? 0);
-  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  const counts = Object.fromEntries(
+    countRows.map((row) => [row.status, Number(row.count ?? 0)]),
+  );
+  const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
 
   return (
-    <div style={manageEventAccentStyle(ev.accent_color)}>
+    <div style={manageEventAccentStyle(event.accent_color)}>
       <p style={{ marginBottom: 8, fontSize: 12 }}>
         <Link href={`/manage/events/${id}`}>← イベント運営トップへ</Link>
       </p>
-      <h1 style={{ fontSize: 22, fontWeight: 700 }}>
-        枠運営: {ev.title}
-      </h1>
-      <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 12 }}>
-        枠の生成、空き枠整理、確保済み枠の解放をここで扱えます。{total} 件中、最大 500 件を表示します。
+      <h1 style={{ fontSize: 22, fontWeight: 700 }}>枠運営: {event.title}</h1>
+      <p className="fn-muted fn-text-sm">
+        枠の生成、空き枠整理、予約枠の解放を行います。全{total}件中、最大500件を表示します。
       </p>
       <ManageEventTabs eventId={id} isAdmin={isAdmin} />
 
-      <section
-        style={{
-          marginTop: 18,
-          padding: "20px 22px",
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-md)",
-        }}
-      >
-        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
-          一括生成 / 空き枠整理
-        </h2>
-        <SlotBatchForm eventId={ev.id} />
+      <section className="fn-console-section">
+        <h2 style={{ fontSize: 14, fontWeight: 700 }}>一括生成 / 空き枠整理</h2>
+        <SlotBatchForm eventId={event.id} />
       </section>
 
       <nav
         aria-label="状態フィルタ"
-        style={{
-          marginTop: 22,
-          display: "flex",
-          gap: 6,
-          flexWrap: "wrap",
-        }}
+        style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 18 }}
       >
         {(
           [
@@ -146,69 +129,43 @@ export default async function ManageEventSlotsPage({
             ["reserved", "確保済"],
             ["submitted", "提出済"],
           ] as const
-        ).map(([key, label]) => {
-          const count = key === "all" ? total : (counts[key] ?? 0);
-          const href =
-            key === "all"
-              ? `/manage/events/${id}/slots`
-              : `/manage/events/${id}/slots?status=${key}`;
-          return (
-            <Link
-              key={key}
-              href={href}
-              className={`fn-btn fn-btn-sm ${statusFilter === key ? "fn-btn-primary" : "fn-btn-ghost"}`}
-            >
-              {label} ({count})
-            </Link>
-          );
-        })}
+        ).map(([key, label]) => (
+          <Link
+            key={key}
+            href={
+              key === "all"
+                ? `/manage/events/${id}/slots`
+                : `/manage/events/${id}/slots?status=${key}`
+            }
+            className={`fn-btn fn-btn-sm ${
+              statusFilter === key ? "fn-btn-primary" : "fn-btn-ghost"
+            }`}
+          >
+            {label} ({key === "all" ? total : (counts[key] ?? 0)})
+          </Link>
+        ))}
       </nav>
 
-      <section
-        style={{
-          marginTop: 14,
-          padding: "20px 22px",
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-md)",
-        }}
-      >
-        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
-          枠一覧 ({rows.length})
-        </h2>
+      <section className="fn-console-section">
+        <h2 style={{ fontSize: 14, fontWeight: 700 }}>枠一覧 ({rows.length})</h2>
         {total === 0 ? (
           <EmptyState
             tone="warning"
             title="枠はまだありません"
-            description="このイベントにはまだ投稿枠が設定されていません。上のフォームから一括生成してください。"
+            description="上のフォームから作成してください。"
             actions={[
-              ...(isAdmin
-                ? [
-                    {
-                      href: `/manage/events/${id}/slots`,
-                      label: "管理者用枠編集へ",
-                      variant: "primary" as const,
-                    },
-                  ]
-                : [
-                    {
-                      href: `/manage/events/${id}`,
-                      label: "イベント運営トップへ",
-                      variant: "ghost" as const,
-                    },
-                    {
-                      href: `/event/${id}`,
-                      label: "公開ページを見る",
-                      variant: "ghost" as const,
-                    },
-                  ]),
+              {
+                href: `/manage/events/${id}`,
+                label: "イベント運営トップへ",
+                variant: "ghost",
+              },
             ]}
           />
         ) : (
           <SlotList
             eventId={id}
             slots={rows}
-            slotPartGapSec={(ev.slot_part_gap_minutes ?? 15) * 60}
+            slotPartGapSec={(event.slot_part_gap_minutes ?? 15) * 60}
           />
         )}
       </section>
