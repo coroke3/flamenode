@@ -16,10 +16,6 @@ import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 import { sanitizeNextPath } from "#utils/next";
 import {
-  collapseReservationGroups,
-  type SlotGroupRow,
-} from "@/lib/utils/slotGrouping";
-import {
   entryLoginRedirectTo,
   getOnboardingState,
   onboardingHref,
@@ -42,11 +38,6 @@ type ReservedSlot = {
   display_name: string | null;
   reservation_group_id: string | null;
   updated_at: number;
-  event_title: string | null;
-  event_entry_end_time: number | null;
-};
-
-type ReservedSlotGroup = SlotGroupRow & {
   event_title: string | null;
   event_entry_end_time: number | null;
 };
@@ -141,13 +132,10 @@ export default async function EntryPage({
       .orderBy(slotsTable.start_time, slotsTable.sort_order)
       .limit(24);
   }
-  const groupedReservedSlots = collapseReservationGroups(reservedSlots).map(
-    (slot) => slot as ReservedSlotGroup,
-  );
-  groupedReservedSlots.sort((a, b) => {
-    const aNeedsSubmission = !a.video_id && a.status === "reserved";
-    const bNeedsSubmission = !b.video_id && b.status === "reserved";
-    if (aNeedsSubmission !== bNeedsSubmission) return aNeedsSubmission ? -1 : 1;
+  reservedSlots.sort((a, b) => {
+    const aNeeds = !a.video_id && a.status === "reserved";
+    const bNeeds = !b.video_id && b.status === "reserved";
+    if (aNeeds !== bNeeds) return aNeeds ? -1 : 1;
     const deadlineDiff =
       (a.event_entry_end_time ?? Number.POSITIVE_INFINITY) -
       (b.event_entry_end_time ?? Number.POSITIVE_INFINITY);
@@ -233,14 +221,14 @@ export default async function EntryPage({
             受付中のイベントの枠を確保して、作品を投稿できます。
           </p>
 
-          {groupedReservedSlots.length > 0 ? (
+          {reservedSlots.length > 0 ? (
             <div className={`${styles.slotPanel} ${styles.slotPanelProminent}`}>
               <div className={styles.slotPanelHeader}>
                 <h3 className={styles.slotPanelTitle}>確保済み枠に提出する</h3>
-                <span className={styles.slotPanelCount}>{groupedReservedSlots.length}件</span>
+                <span className={styles.slotPanelCount}>{reservedSlots.length}件</span>
               </div>
               <ul className="fn-pc-slot-list">
-                {groupedReservedSlots.map((slot) => {
+                {reservedSlots.map((slot) => {
                   const needsSubmission =
                     !slot.video_id && slot.status === "reserved";
                   const href = resolveWriteHref(`/entry/slotted?slot=${slot.id}`);
@@ -260,11 +248,6 @@ export default async function EntryPage({
                                   )}`
                                 : (slot.slot_label ?? "件数枠")}
                             </span>
-                            {slot.is_group ? (
-                              <span className={styles.slotDeadline}>
-                                連続 {slot.group_size} 枠
-                              </span>
-                            ) : null}
                             {slot.event_entry_end_time != null ? (
                               <span className={styles.slotDeadline}>
                                 提出期限: {formatUnix(slot.event_entry_end_time)}
