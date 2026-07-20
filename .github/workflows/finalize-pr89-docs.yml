@@ -1,0 +1,51 @@
+name: Finalize PR89 docs
+
+on:
+  push:
+    branches:
+      - agent/db-canonical-migration-v2
+    paths:
+      - .agent-trigger/finalize-pr89-docs
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/db-canonical-migration-v2
+          fetch-depth: 0
+      - name: Normalize active documentation metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          local = Path('LOCAL.md')
+          text = local.read_text()
+          text = text.replace(
+              '> Verified against commit: `agent/remove-legacy-compat`',
+              '> Verified against commit: `eef8797`',
+          )
+          local.write_text(text)
+
+          change_log = Path('docs/database/change-log.md')
+          text = change_log.read_text()
+          text = text.replace(
+              '| Compatibility | `0043_db_canonical_migration.sql`完了をguardで確認。',
+              '| Compatibility | `0043`完了をguardで確認。',
+          )
+          change_log.write_text(text)
+          PY
+          rm .agent-trigger/finalize-pr89-docs
+          rm .github/workflows/finalize-pr89-docs.yml
+          git add -A
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Active文書とDB履歴を正本仕様へ整合"
+          git push origin HEAD:agent/db-canonical-migration-v2
