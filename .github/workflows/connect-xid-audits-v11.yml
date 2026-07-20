@@ -1,4 +1,5 @@
 name: Connect X ID audits v11
+# 最新運用文書同期後の最終検証を実行する。
 
 on:
   push:
