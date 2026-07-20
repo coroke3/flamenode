@@ -71,9 +71,17 @@ export function ChapterTabs({
     }
 
     startCapabilityTransition(async () => {
-      const result = await getChapterDeleteCapabilities(ids);
-      if (capabilityRequestRef.current !== requestId) return;
-      setDeletableIds(new Set(result.ok ? result.deletableIds : []));
+      try {
+        const result = await getChapterDeleteCapabilities(ids);
+        if (capabilityRequestRef.current !== requestId) return;
+        setDeletableIds(new Set(result.ok ? result.deletableIds : []));
+      } catch (error) {
+        if (capabilityRequestRef.current !== requestId) return;
+        setDeletableIds(new Set());
+        console.error("chapter delete capability request failed", {
+          errorName: error instanceof Error ? error.name : "unknown",
+        });
+      }
     });
   }, [chapterIdsKey]);
 
@@ -166,6 +174,14 @@ export function ChapterTabs({
         setPendingDelete(null);
         setToast(result.message ?? "チャプターコメントを削除しました");
         router.refresh();
+      } catch (error) {
+        setDeleteError(
+          "通信に失敗しました。接続を確認して、もう一度お試しください。",
+        );
+        console.error("chapter comment delete request failed", {
+          chapterId: target.id,
+          errorName: error instanceof Error ? error.name : "unknown",
+        });
       } finally {
         deletingRef.current = false;
       }
