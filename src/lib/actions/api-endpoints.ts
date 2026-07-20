@@ -37,7 +37,6 @@ async function setPublicApi(
   const after = {
     ...before,
     public_api_enabled: enabled,
-    public_api_updated_at: now,
     updated_at: now,
   };
 
@@ -46,11 +45,7 @@ async function setPublicApi(
       mutationStatements: [
         db
           .update(events)
-          .set({
-            public_api_enabled: enabled,
-            public_api_updated_at: now,
-            updated_at: now,
-          })
+          .set({ public_api_enabled: enabled, updated_at: now })
           .where(
             and(
               eq(events.id, eventId),
