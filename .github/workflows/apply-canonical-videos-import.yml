@@ -4,56 +4,75 @@ on:
   push:
     branches:
       - agent/db-canonical-migration-v2
+    paths:
+      - .agent-patch/**
+      - .agent-trigger/canonical-videos-import
+      - .github/workflows/apply-canonical-videos-import.yml
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: canonical-videos-import-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   apply:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
           ref: agent/db-canonical-migration-v2
           fetch-depth: 0
 
-      - name: Reconstruct and verify patch
+      - name: Detect pending patch
+        id: pending
         shell: bash
         run: |
           set -euo pipefail
-          cat .agent-patch/part-* | base64 -d | gzip -d > /tmp/flamenode.patch
+          shopt -s nullglob
+          parts=(.agent-patch/part-*)
+          if (( ${#parts[@]} == 0 )); then
+            echo "存在する分割パッチがありません。すでに適用済みとして終了します。"
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf '%s\n' "${parts[@]}" | sort -V > /tmp/patch-parts.txt
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+
+      - name: Reconstruct and verify patch
+        if: steps.pending.outputs.exists == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/canonical-videos-import-diagnostics
+          while IFS= read -r part; do
+            cat "$part"
+          done < /tmp/patch-parts.txt | base64 -d | gzip -d > /tmp/flamenode.patch
           echo "08ec23c94c21c429615e0d525a9ce151e1522f91f37c48edf0719db6f88b2151  /tmp/flamenode.patch" | sha256sum -c -
+          cp /tmp/flamenode.patch /tmp/canonical-videos-import-diagnostics/flamenode.patch
           git apply --3way --index /tmp/flamenode.patch
+          git diff --cached --check
+          git diff --cached --name-status > /tmp/canonical-videos-import-diagnostics/staged-files.txt
           if git diff --cached --name-only | grep -Eq '^(migrations/|src/lib/db/schema(\.canonical)?\.ts$)'; then
             echo "担当外のDBスキーマまたはマイグレーション変更を検出しました" >&2
             exit 1
           fi
 
-      - name: Upload integration diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: canonical-videos-import-diagnostics-${{ github.run_id }}
-          path: |
-            .
-            /tmp/flamenode.patch
-            !.git/**
-            !node_modules/**
-            !.next/**
-            !.vercel/**
-          include-hidden-files: true
-          retention-days: 1
-
       - name: Install dependencies
+        if: steps.pending.outputs.exists == 'true'
         run: npm ci
 
-      - name: Validate scoped changes
+      - name: Validate canonical runtime changes
+        if: steps.pending.outputs.exists == 'true'
         shell: bash
         run: |
           set -euo pipefail
+          npm run typecheck
+          npm run lint
           node --test --experimental-strip-types \
             src/lib/import/legacy/*.test.mjs \
             src/lib/video/*.test.mjs \
@@ -66,12 +85,33 @@ jobs:
           npm run check:db-legacy
           npm run check:public-api-contract
 
+      - name: Collect diagnostics
+        if: failure() && steps.pending.outputs.exists == 'true'
+        shell: bash
+        run: |
+          set +e
+          mkdir -p /tmp/canonical-videos-import-diagnostics
+          git status --short > /tmp/canonical-videos-import-diagnostics/git-status.txt
+          git diff --cached > /tmp/canonical-videos-import-diagnostics/staged.diff
+          git diff > /tmp/canonical-videos-import-diagnostics/working-tree.diff
+          find . -name '*.rej' -o -name '*.orig' | sort > /tmp/canonical-videos-import-diagnostics/conflict-files.txt
+
+      - name: Upload integration diagnostics
+        if: failure() && steps.pending.outputs.exists == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: canonical-videos-import-diagnostics-${{ github.run_id }}
+          path: /tmp/canonical-videos-import-diagnostics
+          retention-days: 3
+
       - name: Commit canonical runtime migration
+        if: steps.pending.outputs.exists == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf .agent-patch .github/workflows/apply-canonical-videos-import.yml
+          rm -rf .agent-patch .agent-trigger/canonical-videos-import .github/workflows/apply-canonical-videos-import.yml
           git add -A
+          git diff --cached --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "作品・監査・旧形式インポートを新正本へ切り替え"
