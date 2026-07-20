@@ -17,6 +17,7 @@ import { formatCustomAnswerValue } from "@/lib/video/customQuestions";
 import { MAX_ATOMIC_VIDEO_EVENTS } from "@/lib/video/atomicLimits";
 
 const MAX_HISTORICAL_QUESTIONS_PER_EVENT = 64;
+const CUSTOM_ANSWER_QUESTION_ID_BATCH_SIZE = 80;
 
 export type VideoReviewQuestionScope = "admin" | "review";
 
@@ -55,6 +56,12 @@ export type VideoReviewDetail = {
   members: VideoReviewMember[];
 };
 
+type ReviewAnswerRow = {
+  question_id: string;
+  answer_text: string | null;
+  answer_json: string | null;
+};
+
 function formatMemberChaptersSummary(
   chaptersJson: string | null,
 ): string | null {
@@ -69,6 +76,20 @@ function uniqueEventIds(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
+function chunkValues<T>(values: readonly T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function assertReviewEventLimit(eventIds: readonly string[]): void {
+  if (eventIds.length > MAX_ATOMIC_VIDEO_EVENTS) {
+    throw new Error("video_review_event_limit_exceeded");
+  }
+}
+
 async function resolveReviewEventIds(
   db: DB,
   videoId: string,
@@ -76,7 +97,10 @@ async function resolveReviewEventIds(
   explicitEventIds?: readonly string[],
 ): Promise<string[]> {
   const explicit = uniqueEventIds(explicitEventIds ?? []);
-  if (explicit.length > 0) return explicit;
+  if (explicit.length > 0) {
+    assertReviewEventLimit(explicit);
+    return explicit;
+  }
 
   const linkedRows = await db
     .select({ event_id: videoEvents.event_id })
@@ -89,6 +113,7 @@ async function resolveReviewEventIds(
 
   const linked = uniqueEventIds(linkedRows.map((row) => row.event_id));
   if (primaryEventId && !linked.includes(primaryEventId)) linked.unshift(primaryEventId);
+  assertReviewEventLimit(linked);
   return linked;
 }
 
@@ -176,22 +201,32 @@ export async function fetchVideoReviewDetail(
     throw new Error("video_review_question_limit_exceeded");
   }
 
-  const answers = questions.length > 0
-    ? await db
-        .select({
-          question_id: videoCustomAnswers.question_id,
-          answer_text: videoCustomAnswers.answer_text,
-          answer_json: videoCustomAnswers.answer_json,
-        })
-        .from(videoCustomAnswers)
-        .where(and(
-          eq(videoCustomAnswers.video_id, videoId),
-          inArray(
-            videoCustomAnswers.question_id,
-            questions.map((question) => question.id),
-          ),
-        )!)
-    : [];
+  const answers: ReviewAnswerRow[] = [];
+  for (const questionIdChunk of chunkValues(
+    questions.map((question) => question.id),
+    CUSTOM_ANSWER_QUESTION_ID_BATCH_SIZE,
+  )) {
+    const rows = await db
+      .select({
+        question_id: videoCustomAnswers.question_id,
+        answer_text: videoCustomAnswers.answer_text,
+        answer_json: videoCustomAnswers.answer_json,
+      })
+      .from(videoCustomAnswers)
+      .where(and(
+        eq(videoCustomAnswers.video_id, videoId),
+        inArray(videoCustomAnswers.question_id, questionIdChunk),
+      )!)
+      .limit(questionIdChunk.length + 1);
+    if (rows.length > questionIdChunk.length) {
+      throw new Error("video_review_answer_limit_exceeded");
+    }
+    answers.push(...rows);
+  }
+  if (answers.length > questions.length) {
+    throw new Error("video_review_answer_limit_exceeded");
+  }
+
   const answerMap = new Map(
     answers.map((answer) => [
       answer.question_id,
