@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: final-main-integration-v9
@@ -41,17 +42,42 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Apply verified integration patch
+      - name: Restore verified conflict-resolved source
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          test -f .agent-patch/final-integration.patch.gz.b64
-          base64 --decode .agent-patch/final-integration.patch.gz.b64 \
+          cp .agent-patch/final-integration.patch.gz.b64 /tmp/final-integration.patch.gz.b64
+          rm -rf /tmp/resolved-artifact /tmp/resolved-source /tmp/resolved-source.zip
+          mkdir -p /tmp/resolved-artifact /tmp/resolved-source
+          curl --fail --location \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -o /tmp/resolved-source.zip \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/8464226272/zip"
+          unzip -q /tmp/resolved-source.zip -d /tmp/resolved-artifact
+          source_tar="$(find /tmp/resolved-artifact -name 'resolved-source.tar.gz' -print -quit)"
+          test -n "${source_tar}"
+          tar -xzf "${source_tar}" -C /tmp/resolved-source
+          test -f /tmp/resolved-source/package.json
+          rsync -a --delete --exclude='.git/' /tmp/resolved-source/ ./
+
+      - name: Apply verified integration fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode /tmp/final-integration.patch.gz.b64 \
             | gzip --decompress > /tmp/final-integration.patch
           git apply --check /tmp/final-integration.patch
           git apply /tmp/final-integration.patch
-          rm -rf .agent-patch
-          rm -f .github/workflows/final-main-integration-v9.yml
+          rm -rf .agent-trigger .agent-patch
+          rm -f \
+            .github/workflows/final-main-integration-v9.yml \
+            .github/workflows/export-pr-source-temp.yml \
+            .github/workflows/export-pr100-source.yml \
+            .github/workflows/resolve-canonical-conflicts.yml
           if grep -RInE '^(<<<<<<<|=======|>>>>>>>)' -- . \
             --exclude-dir=.git --exclude-dir=node_modules --exclude='*.lock'; then
             echo 'Conflict markers remain.'
