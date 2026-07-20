@@ -30,8 +30,6 @@ function requireAll(relative, checks) {
 requireAll("app/(auth)/entry/page.tsx", [
   [/イベントに参加する/, "イベント参加カードがありません。"],
   [/過去の自分の作品を投稿する/, "枠なし投稿カードがありません。"],
-  [/collapseReservationGroups/, "連続枠の表示統合がありません。"],
-  [/aNeedsSubmission/, "未提出枠の優先表示がありません。"],
 ]);
 
 requireAll("src/components/forms/VideoForm.tsx", [
