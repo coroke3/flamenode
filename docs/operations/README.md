@@ -15,8 +15,8 @@ Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、Cron Worker 3本
 
 - DB正本は`src/lib/db/schema.ts`。active migrationは`migrations/`直下を番号順に適用する。
 - 旧migration本文は`migrations/historical/`へ保存し、旧列fallback、runtime DDL、二重書込みを提供しない。
-- 旧形式インポートのUI、API、runtime module、環境変数を提供しない。
-- 旧データ変換は正本migrationの一回限りの処理とする。
+- 旧JSON / CSV / TSVの解釈は管理者専用インポート境界へ隔離し、通常ランタイム、公開API、Workerへ持ち込まない。
+- インポートはcanonical planを経由して新正本だけへ保存し、旧DB fallback、dual-read、dual-write、旧形式出力を提供しない。
 - 内部ユーザーIDは`user_id`、Discord Snowflakeは`discord_id`。
 - `event_staff.permission_preset = 'owner'`がイベント代表者の正本で、ownerを0人にしない。
 - 重要mutationと監査ログは同じ原子的処理で確定する。
@@ -31,6 +31,7 @@ Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、Cron Worker 3本
 | YouTube再生リスト同期 | [youtube-playlist-sync.md](youtube-playlist-sync.md) |
 | 監査・復元・owner保護 | [audit-and-restore.md](audit-and-restore.md) |
 | spreadsheet import | [spreadsheet-import.md](spreadsheet-import.md) |
+| 旧JSON / CSV / TSVの一方向取込 | [legacy-import.md](legacy-import.md) |
 | R2静的JSON、公開DTO | [static-delivery.md](static-delivery.md) |
 | 障害の一次対応 | [incident-response.md](incident-response.md) |
 | X ID統合 | [x-id-merge.md](x-id-merge.md) |
