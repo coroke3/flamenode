@@ -16,14 +16,19 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Archive current source
+      - name: Archive integration source
         shell: bash
         run: |
           set -euo pipefail
           git archive --format=zip --output=/tmp/flamenode-pr-source.zip HEAD
-      - name: Upload source artifact
+          git archive --format=zip --output=/tmp/flamenode-x-identity-source.zip origin/agent/db-canonical-x-identity
+          git archive --format=zip --output=/tmp/flamenode-events-source.zip origin/agent/db-canonical-events
+      - name: Upload source artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: flamenode-pr-source-${{ github.run_id }}
-          path: /tmp/flamenode-pr-source.zip
+          name: flamenode-integration-sources-${{ github.run_id }}
+          path: |
+            /tmp/flamenode-pr-source.zip
+            /tmp/flamenode-x-identity-source.zip
+            /tmp/flamenode-events-source.zip
           retention-days: 1
