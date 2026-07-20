@@ -1,13 +1,17 @@
 import "server-only";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
-import { eventStaff, xUserAccountLinks } from "@/lib/db/schema";
+import { eventStaff } from "@/lib/db/schema";
 import { resolveStaffPermissionKeys } from "@/lib/auth/permissions/permissionResolver";
-import { PRESET_DEFINITIONS, type EventStaffPreset } from "@/lib/auth/permissions/presets";
+import {
+  PRESET_DEFINITIONS,
+  type EventStaffPreset,
+} from "@/lib/auth/permissions/presets";
 import { formatPermissionKeyLabel } from "@/lib/admin/permissionIntegrityChecks";
 import type { PermissionKey } from "@/lib/auth/permissions/keys";
 
+// event_staff.x_user_idを唯一のスタッフ権限主体として扱う。
 const SPOTLIGHT_KEYS: PermissionKey[] = [
   "event.basic",
   "event.slots",
@@ -22,7 +26,6 @@ export type PermissionSimulationResult = {
   found: boolean;
   eventId: string;
   xUserId: string | null;
-  userId: string | null;
   displayName: string | null;
   preset: EventStaffPreset | null;
   presetLabel: string | null;
@@ -33,21 +36,15 @@ export type PermissionSimulationResult = {
 
 export async function simulateEventPermissions(
   db: DB,
-  input: {
-    eventId: string;
-    xUserId?: string;
-    userId?: string;
-  },
+  input: { eventId: string; xUserId: string },
 ): Promise<PermissionSimulationResult> {
   const eventId = input.eventId.trim();
-  const xUserId = input.xUserId?.trim().replace(/^@/, "") || null;
-  const userId = input.userId?.trim() || null;
+  const xUserId = input.xUserId.trim().replace(/^@/, "") || null;
 
   const empty: PermissionSimulationResult = {
     found: false,
     eventId,
     xUserId,
-    userId,
     displayName: null,
     preset: null,
     presetLabel: null,
@@ -60,17 +57,7 @@ export async function simulateEventPermissions(
     })),
   };
 
-  if (!eventId || (!xUserId && !userId)) return empty;
-
-  const subjectXUserIds = xUserId
-    ? [xUserId]
-    : (
-        await db
-          .select({ x_user_id: xUserAccountLinks.x_user_id })
-          .from(xUserAccountLinks)
-          .where(eq(xUserAccountLinks.auth_user_id, userId!))
-      ).map((row) => row.x_user_id);
-  if (subjectXUserIds.length === 0) return empty;
+  if (!eventId || !xUserId) return empty;
 
   const row = (
     await db
@@ -79,7 +66,7 @@ export async function simulateEventPermissions(
       .where(
         and(
           eq(eventStaff.event_id, eventId),
-          inArray(eventStaff.x_user_id, subjectXUserIds),
+          eq(eventStaff.x_user_id, xUserId),
         )!,
       )
       .limit(1)
@@ -95,7 +82,6 @@ export async function simulateEventPermissions(
     found: true,
     eventId,
     xUserId: row.x_user_id,
-    userId,
     displayName: row.display_name,
     preset,
     presetLabel: PRESET_DEFINITIONS[preset]?.label ?? preset,

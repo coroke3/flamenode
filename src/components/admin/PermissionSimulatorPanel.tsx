@@ -7,14 +7,12 @@ import type { PermissionSimulationResult } from "@/lib/admin/permissionSimulator
 interface PermissionSimulatorPanelProps {
   eventId: string;
   xUserId: string;
-  userId: string;
   result: PermissionSimulationResult | null;
 }
 
 export function PermissionSimulatorPanel({
   eventId,
   xUserId,
-  userId,
   result,
 }: PermissionSimulatorPanelProps): React.ReactElement {
   return (
@@ -37,15 +35,7 @@ export function PermissionSimulatorPanel({
             className="fn-input"
             defaultValue={xUserId}
             placeholder="@screen_name"
-          />
-        </label>
-        <label className="fn-label">
-          ユーザー ID
-          <input
-            name="user_id"
-            className="fn-input"
-            defaultValue={userId}
-            placeholder="Auth.js 内部ユーザー ID"
+            required
           />
         </label>
         <button type="submit" className="fn-btn fn-btn-primary">
@@ -54,7 +44,7 @@ export function PermissionSimulatorPanel({
       </form>
 
       <p className="fn-muted fn-text-sm" style={{ margin: 0 }}>
-        X ID またはユーザー ID のどちらか一方を入力してください。イベントスタッフ登録を参照します。
+        X IDを入力してください。イベントスタッフ登録の正本を参照します。
       </p>
 
       {!result ? (
@@ -66,7 +56,9 @@ export function PermissionSimulatorPanel({
       ) : (
         <div style={{ display: "grid", gap: 16 }}>
           <section className="fn-card">
-            <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>スタッフ情報</h2>
+            <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>
+              スタッフ情報
+            </h2>
             <dl
               style={{
                 display: "grid",
@@ -83,9 +75,9 @@ export function PermissionSimulatorPanel({
                 <code>{result.preset}</code>
               </dd>
               <dt className="fn-muted">X ID</dt>
-              <dd style={{ margin: 0 }}>{result.xUserId ? `@${result.xUserId}` : "—"}</dd>
-              <dt className="fn-muted">ユーザー ID</dt>
-              <dd style={{ margin: 0 }}>{result.userId ?? "—"}</dd>
+              <dd style={{ margin: 0 }}>
+                {result.xUserId ? `@${result.xUserId}` : "—"}
+              </dd>
             </dl>
             <p style={{ marginTop: 12 }}>
               <Link
@@ -98,7 +90,9 @@ export function PermissionSimulatorPanel({
           </section>
 
           <section className="fn-card">
-            <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>主要権限</h2>
+            <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>
+              主要権限
+            </h2>
             <table className="fn-table">
               <thead>
                 <tr>

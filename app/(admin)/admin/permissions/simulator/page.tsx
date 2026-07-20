@@ -11,37 +11,27 @@ export const dynamic = "force-dynamic";
 export default async function PermissionSimulatorPage({
   searchParams,
 }: {
-  searchParams: Promise<{
-    event_id?: string;
-    x_user_id?: string;
-    user_id?: string;
-  }>;
+  searchParams: Promise<{ event_id?: string; x_user_id?: string }>;
 }): Promise<React.ReactElement> {
   const sp = await searchParams;
   const eventId = (sp.event_id ?? "").trim();
   const xUserId = (sp.x_user_id ?? "").trim();
-  const userId = (sp.user_id ?? "").trim();
 
   const db = getDatabase();
   const result =
-    db && eventId && (xUserId || userId)
-      ? await simulateEventPermissions(db, {
-          eventId,
-          xUserId: xUserId || undefined,
-          userId: userId || undefined,
-        })
+    db && eventId && xUserId
+      ? await simulateEventPermissions(db, { eventId, xUserId })
       : null;
 
   return (
     <div>
       <AdminPageHeader
         title="権限シミュレーター"
-        description="イベントスタッフのプリセット / カスタム権限を、X ID またはユーザー ID から確認します。"
+        description="イベントスタッフのプリセットとカスタム権限をX IDから確認します。"
       />
       <PermissionSimulatorPanel
         eventId={eventId}
         xUserId={xUserId}
-        userId={userId}
         result={result}
       />
     </div>
