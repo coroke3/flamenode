@@ -1,0 +1,133 @@
+name: Connect X ID audits v11
+
+on:
+  push:
+    branches:
+      - agent/db-canonical-final-conflicts-v10
+    paths:
+      - .agent-trigger/connect-xid-audits-v11
+
+permissions:
+  contents: write
+
+concurrency:
+  group: connect-xid-audits-v11-${{ github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  connect-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      NEXT_PUBLIC_SITE_URL: https://flamenode.invalid
+      AUTH_URL: https://flamenode.invalid
+      AUTH_SECRET: ci-placeholder-not-a-production-secret
+      AUTH_DISCORD_ID: ci-placeholder-id
+      AUTH_DISCORD_SECRET: ci-placeholder-secret
+      CI: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/db-canonical-final-conflicts-v10
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Connect row audits and remove superseded files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python <<'PY'
+          from pathlib import Path
+
+          path = Path("src/lib/xid/merge.ts")
+          text = path.read_text()
+
+          import_anchor = 'import { mutateWithAudit } from "@/lib/audit/mutate";\n'
+          import_line = 'import { buildEventStaffMergeAudits } from "./mergeAudits";\n'
+          if import_line not in text:
+              if import_anchor not in text:
+                  raise SystemExit("mutateWithAudit import anchor not found")
+              text = text.replace(import_anchor, import_anchor + import_line, 1)
+
+          mutate_anchor = '''  await mutateWithAudit(db, {\n    mutationStatements: statements,\n'''
+          projection = '''  const promotedTargetStaffIds = new Set(\n    promotedTargetStaff.map((row) => row.id),\n  );\n  const eventStaffAfterRows = snapshot.event_staff.flatMap((row) => {\n    if (row.x_user_id === source) {\n      if (targetStaffByEvent.has(row.event_id)) return [];\n      return [{ ...row, x_user_id: target, updated_at: now }];\n    }\n    if (row.x_user_id === target && promotedTargetStaffIds.has(row.id)) {\n      return [{ ...row, permission_preset: "owner", updated_at: now }];\n    }\n    return [{ ...row }];\n  });\n  const eventStaffAudits = buildEventStaffMergeAudits({\n    beforeRows: snapshot.event_staff,\n    afterRows: eventStaffAfterRows,\n    actorUserId: input.actorAuthUserId,\n    fromXId: source,\n    toXId: target,\n  });\n\n'''
+          if "const eventStaffAudits = buildEventStaffMergeAudits" not in text:
+              if mutate_anchor not in text:
+                  raise SystemExit("merge mutation anchor not found")
+              text = text.replace(mutate_anchor, projection + mutate_anchor, 1)
+
+          audits_anchor = '''    audits: [\n      {\n        table_name: "x_users",\n'''
+          audits_replacement = '''    audits: [\n      ...eventStaffAudits,\n      {\n        table_name: "x_users",\n'''
+          if "...eventStaffAudits," not in text:
+              if audits_anchor not in text:
+                  raise SystemExit("audit list anchor not found")
+              text = text.replace(audits_anchor, audits_replacement, 1)
+
+          path.write_text(text)
+          PY
+
+          rm -f src/lib/actions/merge-adminCore.ts src/lib/actions/merge-admin.test.mjs
+          rm -f .ignore
+          rm -rf .agent-trigger
+          rm -f \
+            .github/workflows/final-conflict-resolution-v10.yml \
+            .github/workflows/connect-xid-audits-v10.yml \
+            .github/workflows/connect-xid-audits-v11.yml
+
+          git add -A
+          git diff --cached --check
+          git commit -m "X ID統合の行監査を接続し残存競合を解消"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: Full merge gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .tmp
+          exec > >(tee .tmp/connect-xid-validation.log) 2>&1
+          npm run typecheck
+          npm run lint
+          npm run test:unit
+          npm run test:workers
+          npm run test:cloudflare-ci
+          npm run test:integration
+          npm run build
+          npm run pages:build
+          npm run check:pages-output
+          npm run check:cloudflare-template
+          CLOUDFLARE_CONFIG_MODE=fixture npm run check:cloudflare-config
+          node scripts/create-owner-check-fixture.mjs
+          FLAMENODE_OWNER_CHECK_DB=.tmp/owner-check.sqlite npm run check:db-schema
+          npm run check:db-migration
+          npm run check:db-legacy
+          FLAMENODE_OWNER_CHECK_DB=.tmp/owner-check.sqlite npm run check:event-owners
+          npm run check:db-d1-empty
+          npm run check:db-d1-legacy
+          npm run check:ui-acceptance
+          npm run check:public-api-contract
+          npm run check:public-api-leaks
+          npm run check:project-docs
+          npm run check:docs
+          npm run check:db-history
+
+      - name: Push verified branch
+        run: git push origin HEAD:agent/db-canonical-final-conflicts-v10
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: connect-xid-audits-v11-${{ github.run_id }}
+          path: .tmp/connect-xid-validation.log
+          if-no-files-found: ignore
+          retention-days: 7
