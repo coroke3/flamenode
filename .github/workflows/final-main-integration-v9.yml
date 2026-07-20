@@ -5,7 +5,7 @@ on:
     branches:
       - agent/db-canonical-migration-v2
     paths:
-      - .agent-patch/final-integration.patch.gz.b64
+      - .agent-patch/final-integration.part*
       - .github/workflows/final-main-integration-v9.yml
   workflow_dispatch:
 
@@ -42,13 +42,25 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      - name: Reassemble and verify integration patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat \
+            .agent-patch/final-integration.part00 \
+            .agent-patch/final-integration.part01 \
+            .agent-patch/final-integration.part02 \
+            .agent-patch/final-integration.part03 \
+            > /tmp/final-integration.patch.gz.b64
+          test "$(wc -c < /tmp/final-integration.patch.gz.b64)" -eq 27820
+          test "$(git hash-object /tmp/final-integration.patch.gz.b64)" = "ed99a10501dd2d6f29795da65b8b10e47fe2a232"
+
       - name: Restore verified conflict-resolved source
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          cp .agent-patch/final-integration.patch.gz.b64 /tmp/final-integration.patch.gz.b64
           rm -rf /tmp/resolved-artifact /tmp/resolved-source /tmp/resolved-source.zip
           mkdir -p /tmp/resolved-artifact /tmp/resolved-source
           curl --fail --location \
