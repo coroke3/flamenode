@@ -1,19 +1,20 @@
 /** 公開データ層で使う visibility の唯一の判定入口。 */
-export type PublicVideoVisibility = "public" | "limited";
-export type PublicEventVisibility = "public" | "archived";
+export type PublicVideoVisibility = "public";
+export type PublicEventVisibility = "public";
 
 export function isPublicVideoListable(value: unknown): value is "public" {
   return value === "public";
 }
 
-/** limited は直接URLのみで表示でき、一覧・検索へは出さない。 */
+/** YouTube の限定公開はメタデータで管理し、FlameNode 上は public として扱う。 */
 export function isPublicVideoDirect(
   value: unknown,
 ): value is PublicVideoVisibility {
-  return value === "public" || value === "limited";
-}export function normalizePublicEventVisibility(
+  return value === "public";
+}
+
+export function normalizePublicEventVisibility(
   value: unknown,
 ): PublicEventVisibility | null {
-  if (value === "public" || value === "archived") return value;
-  return null;
+  return value === "public" ? value : null;
 }

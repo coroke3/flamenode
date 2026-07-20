@@ -1,22 +1,14 @@
-/** Workers 向け: visibility_status から公開状態を解釈する（DB 旧列非依存）。 */
+/** Workers 向け: イベント公開設定と日時由来の鮮度を解釈する。 */
 
-export type EventVisibilityStatus = "draft" | "private" | "public" | "archived";
+export type EventVisibilityStatus = "private" | "public";
 
 export function normalizeEventVisibility(
   raw: string | null | undefined,
 ): EventVisibilityStatus {
-  if (
-    raw === "draft" ||
-    raw === "private" ||
-    raw === "public" ||
-    raw === "archived"
-  ) {
-    return raw;
-  }
-  return "draft";
+  return raw === "public" ? "public" : "private";
 }
 
-export type EventFreshness = "active" | "ended" | "archived";
+export type EventFreshness = "active" | "ended";
 
 const ACTIVE_GRACE_AFTER_END_SEC = 86400;
 
@@ -29,14 +21,9 @@ export function resolveEventFreshness(
   now: number,
 ): EventFreshness {
   const visibility = normalizeEventVisibility(event.visibility_status);
-  if (visibility === "archived") return "archived";
-  if (visibility === "public") return "active";
-  const start = event.start_time ?? 0;
+  if (visibility !== "public") return "ended";
   const end = event.end_time ?? 0;
-  if (start && end && now >= start && now <= end + ACTIVE_GRACE_AFTER_END_SEC) {
-    return "active";
-  }
-  return "ended";
+  return end && now > end + ACTIVE_GRACE_AFTER_END_SEC ? "ended" : "active";
 }
 
 export function cacheControlForFreshness(freshness: EventFreshness): string {

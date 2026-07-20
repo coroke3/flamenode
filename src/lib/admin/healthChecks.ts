@@ -2,7 +2,7 @@ import "server-only";
 
 import { and, desc, eq, gte, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
-import { events as eventsTable, auditLogs as auditLogsTable, notificationOutbox as notificationOutboxTable, slots as slotsTable, systemSettings, videoEvents as videoEventsTable, videoInteractions as videoInteractionsTable, videoModerationCases as videoModerationCasesTable, videoYoutubeMetadata as videoYoutubeMetadataTable, videos as videosTable, xIdMergeRequests as xIdMergeRequestsTable } from "@/lib/db/schema";
+import { events as eventsTable, auditLogs as auditLogsTable, notificationOutbox as notificationOutboxTable, slots as slotsTable, systemSettings, videoEvents as videoEventsTable, videoInteractions as videoInteractionsTable, videoModerationCases as videoModerationCasesTable, videoYoutubeMetadata as videoYoutubeMetadataTable, videos as videosTable, xIdentityRequests as xIdentityRequestsTable } from "@/lib/db/schema";
 
 export type HealthCheckResult = {
   id: string;
@@ -245,12 +245,7 @@ async function checkSlotDuplicateStartTime(db: AnyDb): Promise<HealthCheckResult
       reservation_group_id: slotsTable.reservation_group_id,
     })
     .from(slotsTable)
-    .where(
-      and(
-        eq(slotsTable.slot_kind, "time"),
-        isNotNull(slotsTable.start_time),
-      ),
-    );
+    .where(isNotNull(slotsTable.start_time));
 
   // Group by event_id before comparing start_time.
   const byEvent = new Map<string, typeof rows>();
@@ -502,43 +497,6 @@ async function checkOrphanVideoMember(
   };
 }
 
-/** video_members.chapters_json が現行の配列形式を満たすか */
-async function checkVideoMemberChaptersJsonInvalid(
-  db: AnyDb,
-): Promise<HealthCheckResult> {
-  const where = sql`
-    chapters_json IS NOT NULL
-    AND trim(chapters_json) <> ''
-    AND CASE
-      WHEN json_valid(chapters_json) = 1 THEN json_type(chapters_json) <> 'array'
-      ELSE 1
-    END
-  `;
-  const [countRows, sampleRows] = await Promise.all([
-    db
-      .select({ c: sql<number>`COUNT(*)` })
-      .from(sql`video_members`)
-      .where(where),
-    db
-      .select({ id: sql<string>`id` })
-      .from(sql`video_members`)
-      .where(where)
-      .limit(10),
-  ]);
-  const count = Number(countRows[0]?.c ?? 0);
-  return {
-    id: "video_members_chapters_json_invalid",
-    label: "video_members.chapters_json がJSON配列ではない",
-    status: count === 0 ? "ok" : "warn",
-    count,
-    samples: sampleRows.slice(0, 5).map((r) => r.id),
-    note:
-      count > 0
-        ? "chapters_json を空またはJSON配列に正規化してください。"
-        : undefined,
-  };
-}
-
 /** notification_outbox の processing が固着していないか */
 async function checkNotificationProcessingStuck(
   db: AnyDb,
@@ -664,20 +622,21 @@ async function checkXIdMergePendingStale(
 ): Promise<HealthCheckResult> {
   const cutoff = Math.floor(Date.now() / 1000) - 7 * 86400;
   const where = and(
-    eq(xIdMergeRequestsTable.status, "pending"),
-    lt(xIdMergeRequestsTable.created_at, cutoff),
+    eq(xIdentityRequestsTable.request_type, "merge"),
+    eq(xIdentityRequestsTable.status, "pending"),
+    lt(xIdentityRequestsTable.requested_at, cutoff),
   );
   const [countRows, sampleRows] = await Promise.all([
-    db.select({ c: sql<number>`COUNT(*)` }).from(xIdMergeRequestsTable).where(where),
+    db.select({ c: sql<number>`COUNT(*)` }).from(xIdentityRequestsTable).where(where),
     db
       .select({
-        id: xIdMergeRequestsTable.id,
-        from_x_user_id: xIdMergeRequestsTable.from_x_user_id,
-        to_x_user_id: xIdMergeRequestsTable.to_x_user_id,
+        id: xIdentityRequestsTable.id,
+        from_x_user_id: xIdentityRequestsTable.source_x_user_id,
+        to_x_user_id: xIdentityRequestsTable.target_x_user_id,
       })
-      .from(xIdMergeRequestsTable)
+      .from(xIdentityRequestsTable)
       .where(where)
-      .orderBy(xIdMergeRequestsTable.created_at)
+      .orderBy(xIdentityRequestsTable.requested_at)
       .limit(10),
   ]);
   const count = Number(countRows[0]?.c ?? 0);
@@ -701,7 +660,7 @@ async function checkAuditLogsRetentionCandidates(
   db: AnyDb,
 ): Promise<HealthCheckResult> {
   const settings = await db.select().from(systemSettings).limit(1);
-  const days = Math.max(7, Number(settings[0]?.history_retention_days ?? 90) || 90);
+  const days = Math.max(7, Number(settings[0]?.audit_normal_retention_days ?? 30) || 30);
   const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
   const where = and(
     or(isNull(auditLogsTable.retention_class), eq(auditLogsTable.retention_class, "normal")),
@@ -752,7 +711,6 @@ export async function runHealthChecks(db: AnyDb): Promise<HealthCheckResult[]> {
     checkVideosOutroComment(db),
     checkChapterNonChapterMarker(db),
     checkOrphanVideoMember(db),
-    checkVideoMemberChaptersJsonInvalid(db),
     checkNotificationProcessingStuck(db),
     checkNotificationFailedVolume(db),
     checkOpenModerationCasesOverdue(db),

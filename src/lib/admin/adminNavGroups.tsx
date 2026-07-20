@@ -1,20 +1,12 @@
 import "server-only";
 
-
 import { Icon } from "@/components/ui/Icon";
 import type { AdminSidebarGroup } from "@/components/admin/AdminSidebarNav";
-import { isLegacyImportToolEnabled } from "@/lib/import/legacy/featureFlag";
 
 function isAdminSpreadsheetNavEnabled(): boolean {
   const v = process.env.ADMIN_SPREADSHEET_ENABLED?.trim().toLowerCase();
   return v === "1" || v === "true" || v === "yes";
 }
-
-const ADMIN_NAV_LEGACY_IMPORT_ITEM = {
-  href: "/admin/import",
-  label: "旧データ移行",
-  icon: <Icon name="upload" size={14} />,
-} as const;
 
 const ADMIN_NAV_SPREADSHEET_ITEM = {
   href: "/admin/spreadsheet",
@@ -124,6 +116,11 @@ const ADMIN_NAV_GROUPS_BASE: AdminSidebarGroup[] = [
         label: "公開API管理",
         icon: <Icon name="external" size={14} />,
       },
+      {
+        href: "/admin/import",
+        label: "旧形式インポート",
+        icon: <Icon name="upload" size={14} />,
+      },
     ],
   },
 ];
@@ -137,17 +134,6 @@ export function buildAdminNavGroups(): AdminSidebarGroup[] {
         ? {
             ...group,
             items: [...group.items, ADMIN_NAV_SPREADSHEET_ITEM],
-          }
-        : group,
-    );
-  }
-
-  if (isLegacyImportToolEnabled()) {
-    groups = groups.map((group) =>
-      group.title === "高度な管理"
-        ? {
-            ...group,
-            items: [...group.items, ADMIN_NAV_LEGACY_IMPORT_ITEM],
           }
         : group,
     );

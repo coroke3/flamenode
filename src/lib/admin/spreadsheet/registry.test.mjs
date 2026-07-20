@@ -46,9 +46,9 @@ test("editable canonical enum columns come from schema metadata", () => {
       visibility_status: ["public", "private", "archived"],
     },
     event_group_events: { relation_type: ["member", "primary", "related"] },
-    events: { visibility_status: ["draft", "private", "public", "archived"] },
+    events: { visibility_status: ["private", "public"] },
     videos: {
-      visibility_status: ["draft", "pending", "public", "limited", "private", "archived", "voided"],
+      visibility_status: ["pending", "public", "private", "voided"],
     },
   };
   const tables = { event_groups: eventGroups, event_group_events: eventGroupEvents, events, videos };

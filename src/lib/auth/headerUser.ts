@@ -3,11 +3,12 @@ import "server-only";
 import { and, eq } from "drizzle-orm";
 import { getDatabase, withDatabase } from "@/lib/cloudflare";
 import type { DB } from "@/lib/db/client";
-import { xAccountLinkRequests, xUsers, users } from "@/lib/db/schema";
+import { xIdentityRequests, users } from "@/lib/db/schema";
 import { resolveMissingIcons } from "@/lib/db/iconResolution";
 import { normalizeXId } from "@/lib/utils/xid";
 import { resolveActiveXUserId } from "./resolveActiveXId";
 import { getEditableEventIds } from "./ownership";
+import { getLinkedXUsersForAuthUser } from "./xIdentity";
 import {
   normalizeXIdApprovalStatus,
   xIdApprovalRank,
@@ -40,20 +41,10 @@ async function getManagementAccess(user: {
   role?: string | null;
 }): Promise<HeaderUser["management"]> {
   if (user.role === "admin") {
-    return {
-      canAccessAdmin: true,
-      canAccessManage: true,
-      manageableEventCount: 0,
-    };
+    return { canAccessAdmin: true, canAccessManage: true, manageableEventCount: 0 };
   }
   const db = getDatabase();
-  if (!db) {
-    return {
-      canAccessAdmin: false,
-      canAccessManage: false,
-      manageableEventCount: 0,
-    };
-  }
+  if (!db) return { canAccessAdmin: false, canAccessManage: false, manageableEventCount: 0 };
   const manageableEventCount = (await getEditableEventIds(db, user.id)).length;
   return {
     canAccessAdmin: false,
@@ -62,34 +53,20 @@ async function getManagementAccess(user: {
   };
 }
 
-function normalizeRole(
-  role: string | null | undefined,
-): HeaderUser["role"] {
+function normalizeRole(role: string | null | undefined): HeaderUser["role"] {
   return role === "admin" || role === "moderator" ? role : "user";
 }
 
-/** ヘッダー用: 明示連携済みX IDと承認待ち申請だけを返す。 */
-async function fetchHeaderXIdEntries(
-  db: DB,
-  userId: string,
-): Promise<XIdEntry[]> {
+async function fetchHeaderXIdEntries(db: DB, authUserId: string): Promise<XIdEntry[]> {
   const [linkedRows, pendingRequests] = await Promise.all([
+    getLinkedXUsersForAuthUser(db, authUserId),
     db
-      .select({
-        x_user_id: xUsers.id,
-        x_name: xUsers.x_name,
-        icon_url: xUsers.icon_url,
-        approval_status: xUsers.approval_status,
-      })
-      .from(xUsers)
-      .where(eq(xUsers.linked_user_id, userId)),
-    db
-      .select({ requested_x_id: xAccountLinkRequests.requested_x_id })
-      .from(xAccountLinkRequests)
+      .select({ requested_x_id: xIdentityRequests.requested_x_id })
+      .from(xIdentityRequests)
       .where(
         and(
-          eq(xAccountLinkRequests.user_id, userId),
-          eq(xAccountLinkRequests.status, "pending"),
+          eq(xIdentityRequests.requested_by_auth_user_id, authUserId),
+          eq(xIdentityRequests.status, "pending"),
         )!,
       ),
   ]);
@@ -106,11 +83,7 @@ async function fetchHeaderXIdEntries(
       is_active: false,
     };
     const existing = byNormalizedXId.get(normalizedId);
-    if (
-      !existing ||
-      xIdApprovalRank(entry.approval_status) <
-        xIdApprovalRank(existing.approval_status)
-    ) {
+    if (!existing || xIdApprovalRank(entry.approval_status) < xIdApprovalRank(existing.approval_status)) {
       byNormalizedXId.set(normalizedId, entry);
     }
   }
@@ -130,10 +103,7 @@ async function fetchHeaderXIdEntries(
   const entries = Array.from(byNormalizedXId.values());
   const withIconFallback = await resolveMissingIcons(
     db,
-    entries.map((entry) => ({
-      creator_x_user_id: entry.x_user_id,
-      icon_url: entry.icon_url,
-    })),
+    entries.map((entry) => ({ creator_x_user_id: entry.x_user_id, icon_url: entry.icon_url })),
   );
   return entries.map((entry, index) => ({
     ...entry,
@@ -145,55 +115,45 @@ export async function buildHeaderUser(
   sessionUser: SessionUserLike | null | undefined,
 ): Promise<HeaderUser | null> {
   if (!sessionUser?.id) return null;
-  const userId = sessionUser.id;
+  const authUserId = sessionUser.id;
   const fallbackRole = normalizeRole(sessionUser.role);
   const fallbackActiveXId = normalizeXId(sessionUser.active_x_user_id) || null;
 
   const dbPayload = await withDatabase(async (db) => {
     const [userRows, entries] = await Promise.all([
       db
-        .select({
-          active_x_user_id: users.active_x_user_id,
-          role: users.role,
-        })
+        .select({ active_x_user_id: users.active_x_user_id, role: users.role })
         .from(users)
-        .where(eq(users.id, userId))
+        .where(eq(users.id, authUserId))
         .limit(1),
-      fetchHeaderXIdEntries(db, userId),
+      fetchHeaderXIdEntries(db, authUserId),
     ]);
     const userRow = userRows[0];
     const role = normalizeRole(userRow?.role ?? sessionUser.role);
-    const resolvedActive =
-      (await resolveActiveXUserId(
-        db,
-        userId,
-        normalizeXId(userRow?.active_x_user_id) || fallbackActiveXId,
-      )) ?? fallbackActiveXId;
+    const resolvedActive = await resolveActiveXUserId(
+      db,
+      authUserId,
+      normalizeXId(userRow?.active_x_user_id) || fallbackActiveXId,
+    );
     const normalizedActive = normalizeXId(resolvedActive) || null;
-
     return {
       role,
       xIds: entries.map((entry) => ({
         ...entry,
         is_active:
-          entry.approval_status !== "rejected" &&
-          entry.x_user_id === normalizedActive,
+          entry.approval_status !== "rejected" && entry.x_user_id === normalizedActive,
       })),
     };
   });
 
   const role = dbPayload?.role ?? fallbackRole;
-  const management = await getManagementAccess({ id: userId, role });
+  const management = await getManagementAccess({ id: authUserId, role });
   return {
-    id: userId,
+    id: authUserId,
     name: sessionUser.name?.trim() || "guest",
     image: sessionUser.image ?? null,
     role,
     xIds: dbPayload?.xIds ?? [],
-    management: {
-      canAccessAdmin: management.canAccessAdmin,
-      canAccessManage: management.canAccessManage,
-      manageableEventCount: management.manageableEventCount,
-    },
+    management,
   };
 }

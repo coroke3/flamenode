@@ -14,6 +14,7 @@ const requiredActive = [
   "DEPLOY.md",
   "docs/README.md",
   "docs/operations/README.md",
+  "docs/operations/legacy-import.md",
   "docs/database/README.md",
   "docs/database/change-log.md",
 ];
@@ -21,7 +22,6 @@ const requiredPaths = [
   "docs/operations/migrations.md",
   "docs/operations/workers.md",
   "docs/operations/audit-and-restore.md",
-  "docs/operations/legacy-import.md",
   "docs/operations/static-delivery.md",
   "docs/operations/incident-response.md",
   "docs/operations/ui-acceptance.md",
@@ -49,6 +49,10 @@ const forbiddenActiveClaims = [
   [
     /(?:runtime[ -]migration|実行時migration).{0,40}(?:を実行する|で適用する|が正本)/gi,
     "runtime migrationを現行手順とする記述",
+  ],
+  [
+    /(?:旧形式インポート|旧JSON|旧CSV|旧TSV).{0,100}(?:通常ランタイム|公開API|Worker).{0,80}(?:で受理する|へ混在させる|で提供する)/gi,
+    "旧形式入力を専用管理境界外で扱う記述",
   ],
 ];
 
@@ -190,5 +194,5 @@ if (errors.length > 0) {
   process.exit(1);
 }
 console.log(
-  "[check:docs] OK: active documentation metadata, links, npm scripts, vocabulary, and Cloudflare source alignment are valid.",
+  "[check:docs] OK: active documentation metadata, links, npm scripts, Cloudflare source alignment, and the isolated legacy import boundary are valid.",
 );

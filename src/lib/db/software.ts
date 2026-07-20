@@ -77,7 +77,6 @@ export async function buildReplaceVideoSoftwarePlan(
       video_id: args.videoId,
       software_id: softwareId,
       raw_label: label,
-      order_index: nextLinks.length,
     });
   }
 
@@ -141,8 +140,15 @@ export async function getVideoSoftwareLabels(
   const rows = await db
     .select({ raw_label: videoSoftwares.raw_label })
     .from(videoSoftwares)
+    .innerJoin(
+      softwareCatalog,
+      eq(softwareCatalog.id, videoSoftwares.software_id),
+    )
     .where(eq(videoSoftwares.video_id, videoId))
-    .orderBy(asc(videoSoftwares.order_index));
+    .orderBy(
+      asc(softwareCatalog.name),
+      asc(videoSoftwares.raw_label),
+    );
   return rows.map((row) => row.raw_label);
 }
 

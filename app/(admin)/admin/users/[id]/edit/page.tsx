@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
-import { users as usersTable, xUsers as xUsersTable } from "@/lib/db/schema";
+import { users as usersTable } from "@/lib/db/schema";
+import { getLinkedXUserIdsForAuthUser } from "@/lib/auth/xIdentity";
 import { UserAdminForm } from "@/components/admin/UserAdminForm";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminUserTabs } from "@/components/admin/AdminUserTabs";
@@ -26,10 +27,7 @@ export default async function AdminUserEditPage({
   )[0];
   if (!user) notFound();
 
-  const xIds = await db
-    .select({ id: xUsersTable.id })
-    .from(xUsersTable)
-    .where(eq(xUsersTable.linked_user_id, user.id));
+  const xIds = await getLinkedXUserIdsForAuthUser(db, user.id);
 
   return (
     <div>
@@ -58,7 +56,7 @@ export default async function AdminUserEditPage({
             can_create_events: user.can_create_events ?? 0,
             is_notification_enabled: user.is_notification_enabled ?? 1,
           }}
-          xUserIds={xIds.map((x) => x.id)}
+          xUserIds={xIds}
         />
       </section>
 

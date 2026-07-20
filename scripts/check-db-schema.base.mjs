@@ -244,7 +244,7 @@ function readSchemaManifest(schemaText) {
         default: readExpectedDefault(chunk),
       });
       const reference = chunk.match(
-        /\.references\s*\(\s*\(\)\s*=>\s*([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)/,
+        /\.references\s*\(\s*\(\s*\)\s*(?::[^=]+)?=>\s*([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)/,
       );
       if (reference) {
         const onDelete =
@@ -323,6 +323,24 @@ function readSchemaManifest(schemaText) {
   };
 }
 
+
+function executeMigration(db, migrationName, sqlText) {
+  if (migrationName !== "0043_db_canonical_migration.sql") {
+    db.exec(sqlText);
+    return;
+  }
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.exec(sqlText);
+    db.exec("COMMIT");
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {}
+    throw error;
+  }
+}
+
 function foreignKeyKey(foreignKey) {
   return [
     foreignKey.fromTable,
@@ -374,7 +392,7 @@ export function validateDbSchema(root = process.cwd()) {
     for (const migrationName of activeFiles) {
       const sqlText = fs.readFileSync(path.join(migrationsDir, migrationName), "utf8");
       try {
-        db.exec(sqlText);
+        executeMigration(db, migrationName, sqlText);
       } catch (error) {
         throw new Error(
           `${migrationName} の空SQLite適用に失敗: ${error instanceof Error ? error.message : String(error)}`,
@@ -476,6 +494,11 @@ export function validateDbSchema(root = process.cwd()) {
     return {
       migrations: activeFiles,
       tableCount: actualTables.length,
+      columnCount: actualTables.reduce(
+        (total, tableName) =>
+          total + db.prepare(`PRAGMA table_info("${tableName.replaceAll('"', '""')}")`).all().length,
+        0,
+      ),
       indexCount: actualIndexes.length,
       foreignKeyCount: actualForeignKeys.length,
       checkCount: actualCheckCount,
@@ -492,7 +515,7 @@ if (isMain) {
     const result = validateDbSchema(process.cwd());
     console.log(
       `[check:db-schema] OK: ${result.migrations.length} migrations, ` +
-        `${result.tableCount} tables, ${result.indexCount} indexes, ` +
+        `${result.tableCount} tables, ${result.columnCount} columns, ${result.indexCount} indexes, ` +
         `${result.foreignKeyCount} foreign keys, ${result.checkCount} checks.`,
     );
   } catch (error) {

@@ -1,8 +1,8 @@
 # FlameNode ドキュメント索引
 
 > Status: Active
-> Last verified: 2026-07-14
-> Verified against commit: `6dbe07a`
+> Last verified: 2026-07-20
+> Verified against commit: `89b8889`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/`, `wrangler.toml`, `package.json`
 
 ## AIの読取順
@@ -25,6 +25,7 @@ Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、Cron Worker 3本
 | AI作業判断 | [AI_CONTEXT.md](AI_CONTEXT.md) |
 | 運用入口 | [operations/README.md](operations/README.md) |
 | DB運用入口 | [database/README.md](database/README.md) |
+| DB正本移行仕様 | [database/canonical-migration-plan.md](database/canonical-migration-plan.md) |
 | DB変更履歴の正本 | [database/change-log.md](database/change-log.md) |
 | migration詳細索引 | [db-history/README.md](db-history/README.md) |
 | 未完了事項 | [implementation-backlog.md](implementation-backlog.md) |
@@ -39,12 +40,13 @@ Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、Cron Worker 3本
 | Cron Worker | [operations/workers.md](operations/workers.md) |
 | YouTube同期 | [operations/youtube-playlist-sync.md](operations/youtube-playlist-sync.md) |
 | 監査・復元・owner保護 | [operations/audit-and-restore.md](operations/audit-and-restore.md) |
-| legacy import | [operations/legacy-import.md](operations/legacy-import.md) |
 | spreadsheet import | [operations/spreadsheet-import.md](operations/spreadsheet-import.md) |
 | R2静的配信 | [operations/static-delivery.md](operations/static-delivery.md) |
 | 障害対応 | [operations/incident-response.md](operations/incident-response.md) |
 | UI受入基準 | [operations/ui-acceptance.md](operations/ui-acceptance.md) |
 | 外部API上限 | [operations/external-api-limits.md](operations/external-api-limits.md) |
+
+旧形式インポートは提供しない。旧データ変換は`0043_db_canonical_migration.sql`の一回限りのmigrationとして扱う。
 
 ## Historical
 

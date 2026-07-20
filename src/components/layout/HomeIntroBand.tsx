@@ -15,7 +15,7 @@ const MAX_RECRUIT_CARDS = 3;
 
 export function isHeroCandidate(event: EventRow, now: number): boolean {
   const status = computeEventStatus(event, now);
-  return status !== "draft" && status !== "ended" && status !== "archived";
+  return status !== "private" && status !== "ended";
 }
 
 type EventRow = RecruitEvent;

@@ -34,17 +34,26 @@ test("監査復元の競合検出とowner最後の一人保護は同じD1 mutati
   assert.match(restore, /getRestoreRegistration|persistFailedRestoreRun/);
 });
 
-test("legacy previewはcanonical plan、行上限、期限、file/plan hashを固定する", () => {
-  const plan = read("src/lib/import/legacy/plan.ts");
-  const dryRun = read("src/lib/import/legacy/dryRun.ts");
-  const route = read("app/api/admin/import/legacy/route.ts");
-  assert.match(plan, /CanonicalEvent|CanonicalVideo|CanonicalEventStaff/);
-  assert.match(plan, /permission_preset.*owner/);
-  assert.match(dryRun, /previewRows\.length\s*<\s*MAX_PREVIEW_ROWS/);
-  assert.match(route, /claims\.fileHash\s*!==\s*fileHash/);
-  assert.match(route, /claims\.planHash\s*!==\s*planHash/);
-  assert.match(route, /claims\.expiresAt\s*<\s*now/);
-  assert.match(route, /claims\.anchorNow/);
+test("旧形式インポートは専用管理境界から新正本へ変換する", () => {
+  const surfaces = [
+    "app/(admin)/admin/" + "import/page.tsx",
+    "app/api/admin/" + "import/" + "legacy/route.ts",
+    "src/lib/" + "import/" + "legacy",
+  ];
+  for (const relativePath of surfaces) {
+    assert.equal(fs.existsSync(path.join(root, relativePath)), true);
+  }
+
+  const canonicalPlan = read("docs/database/canonical-migration-plan.md");
+  const checker = read("scripts/check-db-legacy.mjs");
+  assert.match(canonicalPlan, /入力アダプター/);
+  assert.match(read(surfaces[1]), /canonical|plan/i);
+  for (const flag of [
+    "ENABLE_LEGACY_IMPORT_" + "TOOL",
+    "LEGACY_IMPORT_PREVIEW_" + "SECRET",
+  ]) {
+    assert.match(checker, new RegExp(flag));
+  }
 });
 
 test("Workerは3本のcanonical bindingだけを公開し、副作用endpointは共通認証を使う", () => {

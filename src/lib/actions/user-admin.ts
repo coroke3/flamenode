@@ -294,7 +294,7 @@ export async function refreshXUserIcon(formData: FormData): Promise<UserAdminRes
           eq(videos.creator_x_user_id, xUserId),
           isNotNull(videos.creator_icon_url),
           inArray(videos.collaboration_type, ["individual", "collab"]),
-          ne(videos.visibility_status, "archived"),
+          ne(videos.visibility_status, "voided"),
         )!,
       )
       .orderBy(

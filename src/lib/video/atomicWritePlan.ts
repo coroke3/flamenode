@@ -15,7 +15,7 @@ export {
 
 /*
  * 投稿時のアイコン・YouTubeチャンネル候補は、videosのsnapshotから候補読取側が導出する。
- * x_user_icons / x_user_youtube_channelsへ投稿保存と重複する履歴行は書かず、
+ * 旧候補テーブルへ投稿保存と重複する履歴行は書かず、
  * 原子的保存のDB mutation数と二重正本を増やさない。
  */
 

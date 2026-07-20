@@ -14,7 +14,6 @@ const [
   eventStaffCsv,
   eventStaffActions,
   auditCapability,
-  legacyImportTypes,
   eventExportRoute,
   memberInput,
   adminVideos,
@@ -40,7 +39,6 @@ const [
   readFile(new URL("./eventStaffCsv.ts", import.meta.url), "utf8"),
   readFile(new URL("../actions/event-staff-admin.ts", import.meta.url), "utf8"),
   readFile(new URL("../audit/capability.ts", import.meta.url), "utf8"),
-  readFile(new URL("../import/legacy/types.ts", import.meta.url), "utf8"),
   readFile(
     new URL("../../../app/api/event-endpoints/[id]/route.ts", import.meta.url),
     "utf8",
@@ -84,10 +82,7 @@ test("表計算カタログの同時更新は単一Promiseへ集約する", () =
 
 test("X ID統合影響件数は単一DB読取で取得する", () => {
   assert.doesNotMatch(xIdMergeImpact, /Promise\.all/);
-  assert.equal(
-    (xIdMergeImpact.match(/SELECT COUNT\(\*\)/g) ?? []).length,
-    9,
-  );
+  assert.equal((xIdMergeImpact.match(/SELECT COUNT\(\*\)/g) ?? []).length, 9);
   assert.match(xIdMergeImpact, /impact_source/);
 });
 
@@ -96,9 +91,7 @@ test("権限整合性検査は独立読取を並列化し総件数を保持す�
     permissionIntegrityChecks,
     /const \[sqlChecks, duplicateX, duplicateUser, staffRows\] = await Promise\.all/,
   );
-  assert.ok(
-    (permissionIntegrityChecks.match(/COUNT\(\*\) OVER\(\)/g) ?? []).length >= 2,
-  );
+  assert.ok((permissionIntegrityChecks.match(/COUNT\(\*\) OVER\(\)/g) ?? []).length >= 2);
   assert.match(permissionIntegrityChecks, /permission_preset IN \('owner', 'manager', 'custom'\)/);
   assert.match(permissionIntegrityChecks, /moreCount: Math\.max/);
 });
@@ -128,25 +121,18 @@ test("イベントスタッフプリセットは単一定義から型と検証�
   assert.doesNotMatch(permissionResolver, /value === "owner"/);
   assert.match(eventStaffCsv, /isEventStaffPreset\(value\)/);
   assert.doesNotMatch(eventStaffCsv, /const CSV_PRESETS/);
-  assert.equal(
-    (eventStaffActions.match(/z\.enum\(EVENT_STAFF_PRESETS\)/g) ?? []).length,
-    2,
-  );
+  assert.equal((eventStaffActions.match(/z\.enum\(EVENT_STAFF_PRESETS\)/g) ?? []).length, 2);
   assert.doesNotMatch(eventStaffActions, /const ALL_STAFF_PRESETS/);
   assert.match(auditCapability, /isEventStaffPreset\(snapshot\.permission_preset\)/);
   assert.doesNotMatch(auditCapability, /"slot_manager",\s*"content_editor"/);
-  assert.match(legacyImportTypes, /permission_preset: EventStaffPreset/);
 });
 
 test("イベント出力APIは404とキャッシュヒット応答を共通化する", () => {
   assert.match(eventExportRoute, /function notFoundResponse/);
   assert.match(eventExportRoute, /const cachedResponse = async/);
-  assert.ok(
-    (eventExportRoute.match(/return notFoundResponse\(req\)/g) ?? []).length >= 4,
-  );
+  assert.ok((eventExportRoute.match(/return notFoundResponse\(req\)/g) ?? []).length >= 4);
   assert.equal(
-    (eventExportRoute.match(/readCachedPayload\(kv, payloadCacheKey, eventId\)/g) ?? [])
-      .length,
+    (eventExportRoute.match(/readCachedPayload\(kv, payloadCacheKey, eventId\)/g) ?? []).length,
     1,
   );
 });
@@ -158,14 +144,8 @@ test("メンバーCSV解析は区切り文字共通実装へ直接集約する",
 });
 
 test("管理画面の独立DB読取を並列化する", () => {
-  assert.match(
-    adminVideos,
-    /const \[pageRows, countRows, eventRows\] = await Promise\.all/,
-  );
-  assert.match(
-    externalApiPage,
-    /const \[enabledRows, publicEvents\] = await Promise\.all/,
-  );
+  assert.match(adminVideos, /const \[pageRows, countRows, eventRows\] = await Promise\.all/);
+  assert.match(externalApiPage, /const \[enabledRows, publicEvents\] = await Promise\.all/);
 });
 
 test("イベントグループ一覧は同一クエリ構築を重複しない", () => {
@@ -184,13 +164,8 @@ test("検索パラメータ先頭値の正規化を共通化する", () => {
 test("公開作品選択列を共通化し動的importを不要化する", () => {
   assert.match(dbQueries, /const publicVideoListSelect/);
   assert.match(dbQueries, /const scoredPublicVideoListSelect/);
-  assert.ok(
-    (dbQueries.match(/\.select\(scoredPublicVideoListSelect\)/g) ?? []).length >= 2,
-  );
-  assert.doesNotMatch(
-    dbQueries,
-    /await import\("@\/lib\/utils\/eventStatus"\)/,
-  );
+  assert.ok((dbQueries.match(/\.select\(scoredPublicVideoListSelect\)/g) ?? []).length >= 2);
+  assert.doesNotMatch(dbQueries, /await import\("@\/lib\/utils\/eventStatus"\)/);
 });
 
 test("第10巡の一覧画面は条件有無でSQLを二重定義しない", () => {

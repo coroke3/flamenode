@@ -79,9 +79,9 @@ const REGISTRATIONS = {
       "permission_preset",
     ],
   },
-  x_account_link_requests: {
-    tableName: "x_account_link_requests",
-    adapter: RESTORE_ADAPTERS.x_account_link_requests,
+  x_identity_requests: {
+    tableName: "x_identity_requests",
+    adapter: RESTORE_ADAPTERS.x_identity_requests,
     supportedStrategies: [
       "update_before",
       "recreate_deleted",

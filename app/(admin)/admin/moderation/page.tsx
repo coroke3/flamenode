@@ -200,10 +200,10 @@ export default async function AdminModerationPage({
                         </select>
                         <select name="video_status" className="fn-select fn-input-sm" defaultValue="">
                           <option value="">作品状態は変更しない</option>
-                          <option value="pending">pending</option>
-                          <option value="public">public</option>
-                          <option value="voided">voided</option>
-                          <option value="archived">archived</option>
+                          <option value="pending">承認待ち</option>
+                          <option value="public">公開</option>
+                          <option value="private">非公開</option>
+                          <option value="voided">無効</option>
                         </select>
                         <textarea
                           name="private_note"

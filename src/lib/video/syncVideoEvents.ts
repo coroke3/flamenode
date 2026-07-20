@@ -84,6 +84,8 @@ export async function buildVideoDerivedRowsPlan(
     actorUserId: string;
   },
 ): Promise<VideoAtomicWritePlan> {
+  // YouTube IDの唯一の正本はvideos.youtube_video_id。metadataへは保存しない。
+  void args.youtubeVideoId;
   const existing = (
     await db
       .select()
@@ -94,7 +96,6 @@ export async function buildVideoDerivedRowsPlan(
   if (!existing) {
     const after: typeof videoYoutubeMetadata.$inferSelect = {
       video_id: args.videoId,
-      youtube_video_id: args.youtubeVideoId,
       youtube_privacy_status: null,
       youtube_availability_status: null,
       duration_seconds: null,
@@ -122,13 +123,11 @@ export async function buildVideoDerivedRowsPlan(
   }
   const after: typeof videoYoutubeMetadata.$inferSelect = {
     ...existing,
-    youtube_video_id: args.youtubeVideoId,
     sync_status: "pending",
     updated_at: args.now,
   };
   return {
     statements: [db.update(videoYoutubeMetadata).set({
-      youtube_video_id: args.youtubeVideoId,
       sync_status: "pending",
       updated_at: args.now,
     }).where(and(

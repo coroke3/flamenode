@@ -9,7 +9,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { videos, videoInteractions } from "@/lib/db/schema";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
-import { generateId } from "@/lib/utils/id";
+import { compositeAuditTargetId } from "@/lib/video/atomicWritePlanCore";
 import type { VideoActionResult } from "@/lib/video/types";
 
 type InteractionKind = "like" | "bookmark";
@@ -70,13 +70,10 @@ async function mutateVideoInteraction(
   const now = Math.floor(Date.now() / 1000);
   const interactionAfter = active
     ? {
-        id: generateId("vi"),
         x_user_id: activeX,
         video_id: videoId,
         interaction_type: kind,
-        source: "app" as const,
         created_at: now,
-        synced_at: null,
       }
     : null;
   const interactionStatement = active
@@ -85,7 +82,6 @@ async function mutateVideoInteraction(
         .delete(videoInteractions)
         .where(
           and(
-            eq(videoInteractions.id, existing!.id),
             eq(videoInteractions.x_user_id, existing!.x_user_id),
             eq(videoInteractions.video_id, existing!.video_id),
             eq(videoInteractions.interaction_type, existing!.interaction_type),
@@ -98,7 +94,7 @@ async function mutateVideoInteraction(
   const audits: WriteAuditLogInput[] = [
     {
       table_name: "video_interactions",
-      target_id: active ? interactionAfter!.id : existing!.id,
+      target_id: compositeAuditTargetId(activeX, videoId, kind),
       operation: active ? ("CREATE" as const) : ("DELETE" as const),
       before: existing ? { ...existing } : null,
       after: interactionAfter ? { ...interactionAfter } : null,

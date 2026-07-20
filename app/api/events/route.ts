@@ -7,7 +7,7 @@ import { publicListableEventWhere } from "@/lib/utils/eventStatus";
 import {
   MAX_PUBLIC_EVENT_LIMIT,
   PUBLIC_EVENT_KEYS,
-  PublicEventDto,
+  type PublicEventDto,
   assertNoForbiddenKeys,
   pickKeys,
 } from "@/lib/api/publicDto";
@@ -19,7 +19,7 @@ import {
   publicServiceUnavailableResponse,
 } from "@/lib/api/publicApi";
 
-/** イベント一覧 JSON。 */
+/** 明示DTOだけを返すイベント一覧 JSON。 */
 export async function GET(req: Request): Promise<Response> {
   const limited = checkPublicApiRateLimit(req, "/api/events");
   if (limited) return limited;
@@ -66,20 +66,16 @@ export async function GET(req: Request): Promise<Response> {
       start_time: eventsTable.start_time,
       end_time: eventsTable.end_time,
       max_slots_per_video: eventsTable.max_slots_per_video,
-      max_consecutive_slots_per_entry:
-        eventsTable.max_consecutive_slots_per_entry,
     })
     .from(eventsTable)
     .where(publicListableEventWhere())
-    .orderBy(desc(eventsTable.start_time))
+    .orderBy(desc(eventsTable.start_time), desc(eventsTable.created_at))
     .limit(limit)
     .offset((page - 1) * limit);
 
-  // DB 側で明示列を絞り込んでいるが、二重防御として pickKeys も通す。
   const items: PublicEventDto[] = rows.map(
     (row) => pickKeys(row, PUBLIC_EVENT_KEYS) as PublicEventDto,
   );
-
   const payload = { items, page, limit };
   assertNoForbiddenKeys(payload);
   return publicJsonResponse(

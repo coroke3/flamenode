@@ -1,7 +1,7 @@
 import type { BatchItem } from "drizzle-orm/batch";
 import { and, asc, eq, sql, type SQL } from "drizzle-orm";
 
-import { announcements, eventGroups, eventStaff, events, slots, videoMembers, videos, xAccountLinkRequests } from "@/lib/db/schema";
+import { announcements, eventGroups, eventStaff, events, slots, videoMembers, videos, xIdentityRequests } from "@/lib/db/schema";
 import { isEventOwner } from "@/lib/event/eventOwnershipCore";
 import type { RestoreAdapter, RestoreStrategy } from "./types";
 import { expectedRowCondition as buildExpectedRowCondition } from "./expectedRowCondition";
@@ -148,18 +148,18 @@ const eventGroupsAdapter: RestoreAdapter = {
   },
 };
 
-const xAccountLinkRequestsAdapter: RestoreAdapter = {
+const xIdentityRequestsAdapter: RestoreAdapter = {
   supportedStrategies: ["update_before", "recreate_deleted"],
   async fetchCurrent(db, targetId) {
-    const row = await db.select().from(xAccountLinkRequests).where(eq(xAccountLinkRequests.id, targetId)).get();
+    const row = await db.select().from(xIdentityRequests).where(eq(xIdentityRequests.id, targetId)).get();
     return row ? (row as unknown as Record<string, unknown>) : null;
   },
   buildRestoreMutation(db, snapshot, strategy, options) {
     if (strategy === "update_before") {
       const { id, ...set } = snapshot;
       return {
-        query: db.update(xAccountLinkRequests).set(set as Partial<typeof xAccountLinkRequests.$inferInsert>).where(and(
-          eq(xAccountLinkRequests.id, id as string),
+        query: db.update(xIdentityRequests).set(set as Partial<typeof xIdentityRequests.$inferInsert>).where(and(
+          eq(xIdentityRequests.id, id as string),
           expectedRowCondition(options),
         )!),
         expectedChanges: 1,
@@ -167,11 +167,11 @@ const xAccountLinkRequestsAdapter: RestoreAdapter = {
     }
     if (strategy === "recreate_deleted") {
       return {
-        query: db.insert(xAccountLinkRequests).values(snapshot as typeof xAccountLinkRequests.$inferInsert),
+        query: db.insert(xIdentityRequests).values(snapshot as typeof xIdentityRequests.$inferInsert),
         expectedChanges: 1,
       };
     }
-    return unsupported("x_account_link_requests", strategy);
+    return unsupported("x_identity_requests", strategy);
   },
 };
 
@@ -344,7 +344,7 @@ export const RESTORE_ADAPTERS = {
   announcements: announcementsAdapter,
   event_groups: eventGroupsAdapter,
   event_staff: eventStaffAdapter,
-  x_account_link_requests: xAccountLinkRequestsAdapter,
+  x_identity_requests: xIdentityRequestsAdapter,
   video_members_set: videoMembersSetAdapter,
 } as const satisfies Record<string, RestoreAdapter>;
 

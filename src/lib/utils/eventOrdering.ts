@@ -20,7 +20,7 @@ function priorityGroup(ev: EventStatusInput, now: number): number {
   if (isAcceptingEntries(ev, now)) return 1;
   if (status === "active") return 2;
   if (status === "published") return 3;
-  if (status === "draft") return 4;
+  if (status === "private") return 4;
   if (status === "ended") return 5;
   return 6;
 }

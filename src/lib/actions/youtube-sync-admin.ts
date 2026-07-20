@@ -18,10 +18,10 @@ export async function queueYoutubeMetadataResync(formData: FormData): Promise<vo
   const before = (await db.select().from(videoYoutubeMetadata).where(eq(videoYoutubeMetadata.video_id, videoId)).limit(1))[0] ?? null;
   const now = Math.max(Math.floor(Date.now() / 1000), (before?.updated_at ?? 0) + 1);
   const after: typeof videoYoutubeMetadata.$inferSelect = before
-    ? { ...before, youtube_video_id: video.youtube_video_id, sync_status: "pending", sync_error: null, synced_at: null, updated_at: now }
-    : { video_id: videoId, youtube_video_id: video.youtube_video_id, youtube_privacy_status: null, youtube_availability_status: null, duration_seconds: null, view_count: 0, synced_at: null, sync_status: "pending", sync_error: null, updated_at: now };
+    ? { ...before, sync_status: "pending", sync_error: null, synced_at: null, updated_at: now }
+    : { video_id: videoId, youtube_privacy_status: null, youtube_availability_status: null, duration_seconds: null, view_count: 0, synced_at: null, sync_status: "pending", sync_error: null, updated_at: now };
   const statement = before
-    ? db.update(videoYoutubeMetadata).set({ youtube_video_id: video.youtube_video_id, sync_status: "pending", sync_error: null, synced_at: null, updated_at: now }).where(and(eq(videoYoutubeMetadata.video_id, videoId), expectedRowCondition({ expectedCurrent: { ...before } }))!)
+    ? db.update(videoYoutubeMetadata).set({ sync_status: "pending", sync_error: null, synced_at: null, updated_at: now }).where(and(eq(videoYoutubeMetadata.video_id, videoId), expectedRowCondition({ expectedCurrent: { ...before } }))!)
     : db.insert(videoYoutubeMetadata).values(after);
   await mutateWithAudit(db, {
     mutationStatements: [statement],

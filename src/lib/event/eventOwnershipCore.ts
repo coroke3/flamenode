@@ -8,15 +8,11 @@ export type EventStaffPreset =
   | "public_staff"
   | "custom";
 
-export type EventStaffRole = "representative" | "editor" | "staff";
-
 export type EventStaffOwnershipRow = {
   id: string;
   event_id: string;
-  user_id: string | null;
-  x_user_id: string | null;
+  x_user_id: string;
   permission_preset: string | null;
-  role: string | null;
 };
 
 export const LAST_OWNER_ERROR =
@@ -28,41 +24,26 @@ export function isEventOwner(
   return row.permission_preset === "owner";
 }
 
-/** 表示専用 role を permission_preset から一方向に同期する。 */
-export function syncLegacyRoleFromPreset(
-  preset: EventStaffPreset,
-): EventStaffRole {
-  if (preset === "owner") return "representative";
-  if (preset === "manager") return "editor";
-  return "staff";
-}
-
 export function validateEventStaffSubject(input: {
-  userId: string | null | undefined;
   xUserId: string | null | undefined;
 }): void {
-  if (!input.userId?.trim() && !input.xUserId?.trim()) {
-    throw new Error("スタッフには内部ユーザー ID または X ID が必要です。");
+  if (!input.xUserId?.trim()) {
+    throw new Error("イベントスタッフには X ID が必要です。");
   }
 }
 
 export function validateEventStaffUniqueness(input: {
   rows: readonly EventStaffOwnershipRow[];
-  candidate: Pick<EventStaffOwnershipRow, "id" | "event_id" | "user_id" | "x_user_id">;
+  candidate: Pick<EventStaffOwnershipRow, "id" | "event_id" | "x_user_id">;
 }): void {
-  const duplicate = input.rows.find((row) => {
-    if (row.id === input.candidate.id || row.event_id !== input.candidate.event_id) {
-      return false;
-    }
-    return (
-      (!!input.candidate.user_id &&
-        row.user_id === input.candidate.user_id) ||
-      (!!input.candidate.x_user_id &&
-        row.x_user_id === input.candidate.x_user_id)
-    );
-  });
+  const duplicate = input.rows.find(
+    (row) =>
+      row.id !== input.candidate.id &&
+      row.event_id === input.candidate.event_id &&
+      row.x_user_id === input.candidate.x_user_id,
+  );
   if (duplicate) {
-    throw new Error("このイベントには同じスタッフ主体が既に登録されています。");
+    throw new Error("このイベントには同じ X ID のスタッフが既に登録されています。");
   }
 }
 
@@ -78,8 +59,8 @@ export function assertEventWillRetainOwner(input: {
 }
 
 /**
- * X ID 統合で同一イベントのスタッフ主体が衝突したとき、削除される source owner
- * を既存の target 行へ移して最後の owner を失わないための計画を返す。
+ * X ID 統合で同一イベントのスタッフ主体が衝突した場合に、source owner の権限を
+ * target 行へ移して最後の owner を失わないための計画を返す。
  */
 export function planXIdMergeEventStaffOwnerProtection(input: {
   rows: readonly EventStaffOwnershipRow[];
@@ -105,21 +86,14 @@ export function planXIdMergeEventStaffOwnerProtection(input: {
       promotedTargetStaffIds.push(target.id);
     }
   }
-  return {
-    collidedSourceStaffIds,
-    promotedTargetStaffIds,
-  };
+  return { collidedSourceStaffIds, promotedTargetStaffIds };
 }
 
 export function isActorTargetingSelf(input: {
-  actorUserId: string;
-  target: Pick<EventStaffOwnershipRow, "user_id" | "x_user_id">;
-  approvedXIds: readonly string[];
+  target: Pick<EventStaffOwnershipRow, "x_user_id">;
+  linkedXIds: readonly string[];
 }): boolean {
-  if (input.target.user_id && input.target.user_id === input.actorUserId) {
-    return true;
-  }
-  return !!input.target.x_user_id && input.approvedXIds.includes(input.target.x_user_id);
+  return input.linkedXIds.includes(input.target.x_user_id);
 }
 
 export function assertSelfChangeConfirmation(input: {
@@ -138,9 +112,6 @@ export function assertSelfChangeConfirmation(input: {
     ? `REMOVE SELF ${input.eventId}`
     : `SELF CHANGE ${input.eventId}`;
   if (input.confirmText?.trim() !== required) {
-    throw new Error(`確認のため「${required}」と入力してください。`);
-  }
-  if (input.losesMemberPermission && !input.confirmText?.trim()) {
     throw new Error(`確認のため「${required}」と入力してください。`);
   }
 }

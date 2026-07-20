@@ -28,16 +28,13 @@ const createSchema = z.object({
   chapter_time: z.coerce.number().min(0).max(60 * 60 * 24),
   chapter_label: z.string().trim().min(1).max(120),
   note: z.string().trim().max(1000).optional().nullable(),
-  // 旧仕様の video_member_id は chapter.ts では扱わない (メンバーチャプターは
-  // video_members.chapters_json + replaceVideoMembers 経路で管理)。
   visibility: z.enum(["public", "private"]).default("public"),
-  show_on_player_bar: z.coerce.number().min(0).max(1).default(1),
 });
 
 /**
  * チャプター (動画マーカー) を作成する。
  * 主体 = `user.active_x_user_id` で `approval_status === 'approved'` を要求。
- * 対象動画は FlameNode 内 public または unlisted のみ投稿可。
+ * 対象動画は FlameNode 内 public のみ投稿可。
  */
 export async function createChapter(
   formData: FormData,
@@ -71,9 +68,9 @@ export async function createChapter(
   if (!target) return { ok: false, message: "動画が見つかりません。" };
 
   // 対象動画状態チェック (Batch A 最小実装)。
-  // FlameNode 内 public / unlisted のみ投稿可。
+  // FlameNode 内 public のみ投稿可。
   // (YouTube 側 unlisted で FlameNode 内 public のケースも status === 'public' で吸収される)。
-  if (target.visibility_status !== "public" && target.visibility_status !== "limited") {
+  if (target.visibility_status !== "public") {
     return {
       ok: false,
       message: "この動画にはチャプターコメントを投稿できません。",
@@ -90,19 +87,17 @@ export async function createChapter(
     chapter_label: data.chapter_label,
     note: data.note ?? null,
     visibility: data.visibility,
-    show_on_player_bar: data.show_on_player_bar,
-    order_index: 0,
     created_at: now,
     updated_at: now,
   };
   const mutationStatements: BatchItem<"sqlite">[] = [db.run(sql`
     INSERT INTO video_chapters (
       id, video_id, x_user_id, chapter_time, chapter_label, note,
-      visibility, show_on_player_bar, order_index, created_at, updated_at
+      visibility, created_at, updated_at
     ) VALUES (
       ${after.id}, ${after.video_id}, ${after.x_user_id}, ${after.chapter_time},
       ${after.chapter_label}, ${after.note}, ${after.visibility},
-      ${after.show_on_player_bar}, ${after.order_index}, ${after.created_at}, ${after.updated_at}
+      ${after.created_at}, ${after.updated_at}
     )
   `)];
   const expectedMutationChanges = [1];
@@ -147,7 +142,176 @@ export async function createChapter(
 
   revalidatePath(`/${target.youtube_video_id ?? data.video_id}`);
   return { ok: true, chapterId: id };
-}/**
+}
+const updateSchema = createSchema.extend({
+  chapter_id: z.string().trim().min(1),
+});
+
+const deleteSchema = z.object({
+  chapter_id: z.string().trim().min(1),
+});
+
+async function canManageChapter(
+  db: NonNullable<ReturnType<typeof getDatabase>>,
+  user: { id: string; role: string | null },
+  activeXId: string,
+  chapter: typeof videoChapters.$inferSelect,
+  video: typeof videos.$inferSelect,
+): Promise<boolean> {
+  if (chapter.x_user_id === activeXId || user.role === "admin") return true;
+  return canEditVideo({
+    db,
+    user,
+    video,
+    requiredKey: "video.chapter_admin",
+    privilegeMode: "event",
+  });
+}
+
+/** 自分のチャプター、または動画管理権限があるチャプターを更新する。 */
+export async function updateChapter(
+  formData: FormData,
+): Promise<ChapterActionResult> {
+  const guard = await writeGuard({
+    requireApprovedActiveXId: true,
+    feature: "chapter_comment",
+  });
+  if (!guard.ok) return { ok: false, message: guard.message };
+  const activeX = guard.activeXId;
+  if (!activeX) return { ok: false, message: "X ID を選択してから操作してください。" };
+
+  const parsed = updateSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
+  }
+  const db = getDatabase();
+  if (!db) return { ok: false, message: "DB に接続できません。" };
+
+  const existing = (
+    await db.select().from(videoChapters).where(eq(videoChapters.id, parsed.data.chapter_id)).limit(1)
+  )[0];
+  if (!existing) return { ok: false, message: "チャプターが見つかりません。" };
+  const target = (
+    await db.select().from(videos).where(eq(videos.id, existing.video_id)).limit(1)
+  )[0];
+  if (!target) return { ok: false, message: "動画が見つかりません。" };
+  if (!(await canManageChapter(
+    db,
+    { id: guard.user.id, role: guard.user.role ?? null },
+    activeX,
+    existing,
+    target,
+  ))) {
+    return { ok: false, message: "このチャプターを更新する権限がありません。" };
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const after = {
+    ...existing,
+    chapter_time: parsed.data.chapter_time,
+    chapter_label: parsed.data.chapter_label,
+    note: parsed.data.note ?? null,
+    visibility: parsed.data.visibility,
+    updated_at: now,
+  };
+  const queue = await buildStaticRebuildQueueBatch(db, [{
+    targetType: "video",
+    targetId: existing.video_id,
+    reason: "chapter_update",
+    requestedByUserId: guard.user.id,
+  }]);
+  await mutateWithAudit(db, {
+    mutationStatements: [
+      db.update(videoChapters).set({
+        chapter_time: after.chapter_time,
+        chapter_label: after.chapter_label,
+        note: after.note,
+        visibility: after.visibility,
+        updated_at: after.updated_at,
+      }).where(expectedRowCondition({ expectedCurrent: existing })),
+      ...queue.statements,
+    ],
+    expectedMutationChanges: [1, ...queue.expectedChanges],
+    audits: [{
+      table_name: "video_chapters",
+      target_id: existing.id,
+      operation: "UPDATE",
+      before: { ...existing },
+      after: { ...after },
+      actor_user_id: guard.user.id,
+      retention_class: "normal",
+    }],
+  });
+
+  revalidatePath(`/${target.youtube_video_id ?? target.id}`);
+  return { ok: true, chapterId: existing.id, message: "チャプターを更新しました。" };
+}
+
+/** 自分のチャプター、または動画管理権限があるチャプターを完全削除する。 */
+export async function deleteChapter(
+  formData: FormData,
+): Promise<ChapterActionResult> {
+  const guard = await writeGuard({
+    requireApprovedActiveXId: true,
+    feature: "chapter_comment",
+  });
+  if (!guard.ok) return { ok: false, message: guard.message };
+  const activeX = guard.activeXId;
+  if (!activeX) return { ok: false, message: "X ID を選択してから操作してください。" };
+
+  const parsed = deleteSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
+  }
+  const db = getDatabase();
+  if (!db) return { ok: false, message: "DB に接続できません。" };
+
+  const existing = (
+    await db.select().from(videoChapters).where(eq(videoChapters.id, parsed.data.chapter_id)).limit(1)
+  )[0];
+  if (!existing) return { ok: false, message: "チャプターが見つかりません。" };
+  const target = (
+    await db.select().from(videos).where(eq(videos.id, existing.video_id)).limit(1)
+  )[0];
+  if (!target) return { ok: false, message: "動画が見つかりません。" };
+  if (!(await canManageChapter(
+    db,
+    { id: guard.user.id, role: guard.user.role ?? null },
+    activeX,
+    existing,
+    target,
+  ))) {
+    return { ok: false, message: "このチャプターを削除する権限がありません。" };
+  }
+
+  const queue = await buildStaticRebuildQueueBatch(db, [{
+    targetType: "video",
+    targetId: existing.video_id,
+    reason: "chapter_delete",
+    requestedByUserId: guard.user.id,
+  }]);
+  await mutateWithAudit(db, {
+    mutationStatements: [
+      db.delete(videoChapters).where(expectedRowCondition({ expectedCurrent: existing })),
+      ...queue.statements,
+    ],
+    expectedMutationChanges: [1, ...queue.expectedChanges],
+    audits: [{
+      table_name: "video_chapters",
+      target_id: existing.id,
+      operation: "DELETE",
+      before: { ...existing },
+      after: null,
+      actor_user_id: guard.user.id,
+      retention_class: "normal",
+    }],
+  });
+
+  revalidatePath(`/${target.youtube_video_id ?? target.id}`);
+  return { ok: true, chapterId: existing.id, message: "チャプターを削除しました。" };
+}
+
+/**
  * CSV からチャプターを一括投稿する。
  *
  * 入力 CSV のフォーマット (ヘッダー任意):
@@ -219,7 +383,7 @@ export async function createChaptersBulk(
   if (!canMod) {
     return { ok: false, message: "この動画のチャプター一括登録権限がありません。" };
   }
-  if (target.visibility_status !== "public" && target.visibility_status !== "limited") {
+  if (target.visibility_status !== "public") {
     return {
       ok: false,
       message: "この動画にはチャプターコメントを投稿できません。",
@@ -306,8 +470,8 @@ export async function createChaptersBulk(
       mutationStatements: [db.run(sql`
         INSERT INTO video_chapters (
           id, video_id, x_user_id, chapter_time, chapter_label, note,
-          visibility, show_on_player_bar, order_index, created_at, updated_at
-        ) VALUES ${sql.join(pendingRows.map((row) => sql`(${row.id}, ${video_id}, ${activeX}, ${row.chapter_time}, ${row.chapter_label}, ${row.note}, ${row.visibility}, 1, 0, ${now}, ${now})`), sql`, `)}
+          visibility, created_at, updated_at
+        ) VALUES ${sql.join(pendingRows.map((row) => sql`(${row.id}, ${video_id}, ${activeX}, ${row.chapter_time}, ${row.chapter_label}, ${row.note}, ${row.visibility}, ${now}, ${now})`), sql`, `)}
       `), ...queue.statements],
       expectedMutationChanges: [inserted, ...queue.expectedChanges],
       audits: pendingRows.map((row) => ({
@@ -315,7 +479,7 @@ export async function createChaptersBulk(
         target_id: row.id,
         operation: "CREATE" as const,
         before: null,
-        after: { id: row.id, video_id, x_user_id: activeX, chapter_time: row.chapter_time, chapter_label: row.chapter_label, note: row.note, visibility: row.visibility, show_on_player_bar: 1, order_index: 0, created_at: now, updated_at: now },
+        after: { id: row.id, video_id, x_user_id: activeX, chapter_time: row.chapter_time, chapter_label: row.chapter_label, note: row.note, visibility: row.visibility, created_at: now, updated_at: now },
         actor_user_id: sUser.id,
         retention_class: "normal" as const,
       })),

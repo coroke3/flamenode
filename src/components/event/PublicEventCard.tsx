@@ -19,7 +19,7 @@ export type PublicEventCardEvent = EventStatusInput & {
   entry_end_time?: number | null;
 };
 
-export type PublicEventCategory = "open" | "upcoming" | "ended" | "archive";
+export type PublicEventCategory = "open" | "upcoming" | "ended";
 
 interface PublicEventCardProps {
   event: PublicEventCardEvent;

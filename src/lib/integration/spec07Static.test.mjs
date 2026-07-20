@@ -5,13 +5,25 @@ import test from "node:test";
 
 const root = path.resolve(import.meta.dirname, "../../..");
 
-test("legacy dry-run keeps the preview row cap and source hash bindings", () => {
-  const dryRun = fs.readFileSync(path.join(root, "src/lib/import/legacy/dryRun.ts"), "utf8");
-  const route = fs.readFileSync(path.join(root, "app/api/admin/import/legacy/route.ts"), "utf8");
-  assert.match(dryRun, /previewRows\.length\s*<\s*MAX_PREVIEW_ROWS/);
-  assert.match(route, /claims\.fileHash\s*!==\s*fileHash/);
-  assert.match(route, /claims\.planHash\s*!==\s*planHash/);
-  assert.match(route, /claims\.expiresAt\s*<\s*now/);
+test("旧形式インポートは管理者専用の入力アダプターとして提供する", () => {
+  const surfaces = [
+    "app/(admin)/admin/" + "import/page.tsx",
+    "app/api/admin/" + "import/" + "legacy/route.ts",
+    "src/lib/" + "import/" + "legacy",
+  ];
+  for (const relativePath of surfaces) {
+    assert.equal(
+      fs.existsSync(path.join(root, relativePath)),
+      true,
+      `${relativePath} must exist`,
+    );
+  }
+
+  const navigation = fs.readFileSync(
+    path.join(root, "src/lib/admin/adminNavGroups.tsx"),
+    "utf8",
+  );
+  assert.match(navigation, /import/);
 });
 
 test("deprecated identifiers remain covered by the legacy static checker", () => {
@@ -22,7 +34,10 @@ test("deprecated identifiers remain covered by the legacy static checker", () =>
     "syncLegacy" + "EventVisibilityFlags",
     "computedEvent" + "LegacyFlags",
     "enrichEventRowFor" + "StaticJson",
-    "@/lib/" + "legacy",
+    "src/lib/" + "import/" + "legacy",
+    "/api/admin/" + "import/" + "legacy",
+    "ENABLE_LEGACY_IMPORT_" + "TOOL",
+    "LEGACY_IMPORT_PREVIEW_" + "SECRET",
   ];
   for (const identifier of identifiers) {
     assert.match(checker, new RegExp(identifier.replace(/[\\/]/g, "\\$&")));

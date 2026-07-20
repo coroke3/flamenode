@@ -5,7 +5,8 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { desc, eq, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
-import { auditLogs as auditLogsTable, users as usersTable, videoInteractions as videoInteractionsTable, videos as videosTable, xAccountLinkRequests as xAccountLinkRequestsTable, xUsers as xUsersTable } from "@/lib/db/schema";
+import { auditLogs as auditLogsTable, users as usersTable, videoInteractions as videoInteractionsTable, videos as videosTable, xIdentityRequests as xIdentityRequestsTable } from "@/lib/db/schema";
+import { getLinkedXUsersForAuthUser } from "@/lib/auth/xIdentity";
 
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
@@ -43,10 +44,12 @@ export default async function AdminUserDetailPage({
     terms_reaccept_required: userResult.reaccept_required === 1 ? 1 : 0,
   };
 
-  const xIds = await db
-    .select()
-    .from(xUsersTable)
-    .where(eq(xUsersTable.linked_user_id, user.id));
+  const xIds = (await getLinkedXUsersForAuthUser(db, user.id)).map((row) => ({
+    id: row.x_user_id,
+    x_name: row.x_name,
+    icon_url: row.icon_url,
+    approval_status: row.approval_status,
+  }));
 
   const recentVideos = await db
     .select({
@@ -96,16 +99,16 @@ export default async function AdminUserDetailPage({
   // X ID 連携申請履歴 (このユーザーが申請したもの)
   const linkRequests = await db
     .select({
-      id: xAccountLinkRequestsTable.id,
-      requested_x_id: xAccountLinkRequestsTable.requested_x_id,
-      link_type: xAccountLinkRequestsTable.link_type,
-      target_x_user_id: xAccountLinkRequestsTable.target_x_user_id,
-      status: xAccountLinkRequestsTable.status,
-      requested_at: xAccountLinkRequestsTable.requested_at,
+      id: xIdentityRequestsTable.id,
+      requested_x_id: xIdentityRequestsTable.requested_x_id,
+      link_type: xIdentityRequestsTable.request_type,
+      target_x_user_id: xIdentityRequestsTable.target_x_user_id,
+      status: xIdentityRequestsTable.status,
+      requested_at: xIdentityRequestsTable.requested_at,
     })
-    .from(xAccountLinkRequestsTable)
-    .where(eq(xAccountLinkRequestsTable.user_id, user.id))
-    .orderBy(desc(xAccountLinkRequestsTable.requested_at))
+    .from(xIdentityRequestsTable)
+    .where(eq(xIdentityRequestsTable.requested_by_auth_user_id, user.id))
+    .orderBy(desc(xIdentityRequestsTable.requested_at))
     .limit(10);
 
   return (

@@ -1,173 +1,145 @@
-import { detectDelimiter, parseDelimited, stripBom } from "#utils/delimited";
+export type LegacyParsedFile = {
+  name: string;
+  rows: Record<string, unknown>[];
+};
 
-export function parseLegacyImportText(name: string | undefined, content: string): unknown {
-  const filename = name ?? "";
-  if (/\.(csv|tsv)$/i.test(filename)) return parseCsv(content);
-
-  const text = content.replace(/^\uFEFF/, "");
-  try {
-    return JSON.parse(text);
-  } catch {
-    const looseRows = parseLooseJsonObjectArray(text);
-    if (looseRows.length > 0) return looseRows;
-    throw new Error("not-json");
-  }
+function stripBom(value: string): string {
+  return value.replace(/^\uFEFF/, "");
 }
 
-export function parseCsv(text: string): Record<string, string>[] {
-  const normalized = stripBom(text);
-  const grid = parseDelimited(normalized, detectDelimiter(normalized));
-  const rows = grid.filter((r) => r.some((c) => c.trim()));
-  const [headerRow, ...bodyRows] = rows;
+function detectDelimiter(text: string): "," | "\t" {
+  const firstLine = stripBom(text).split(/\r?\n/, 1)[0] ?? "";
+  return (firstLine.match(/\t/g)?.length ?? 0) > (firstLine.match(/,/g)?.length ?? 0)
+    ? "\t"
+    : ",";
+}
+
+function parseDelimited(text: string, delimiter: "," | "\t"): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let quoted = false;
+
+  const pushField = () => {
+    row.push(field);
+    field = "";
+  };
+  const pushRow = () => {
+    pushField();
+    rows.push(row);
+    row = [];
+  };
+
+  const source = stripBom(text);
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    const next = source[index + 1];
+    if (quoted) {
+      if (char === '"' && next === '"') {
+        field += '"';
+        index += 1;
+      } else if (char === '"') {
+        quoted = false;
+      } else {
+        field += char;
+      }
+      continue;
+    }
+    if (char === '"') {
+      quoted = true;
+    } else if (char === delimiter) {
+      pushField();
+    } else if (char === "\n") {
+      pushRow();
+    } else if (char !== "\r") {
+      field += char;
+    }
+  }
+  if (field.length > 0 || row.length > 0) pushRow();
+  if (quoted) throw new Error("引用符が閉じられていません。");
+  return rows;
+}
+
+function parseCsv(text: string): Record<string, unknown>[] {
+  const grid = parseDelimited(text, detectDelimiter(text)).filter((row) =>
+    row.some((cell) => cell.trim() !== ""),
+  );
+  const [headerRow, ...bodyRows] = grid;
   if (!headerRow) return [];
-  const headers = headerRow.map((h) => h.trim());
+  const headers = headerRow.map((header) => header.trim());
   return bodyRows.map((cells) => {
-    const obj: Record<string, string> = {};
+    const row: Record<string, unknown> = {};
     headers.forEach((header, index) => {
-      if (header) obj[header] = (cells[index] ?? "").trim();
+      if (header) row[header] = (cells[index] ?? "").trim();
     });
-    return obj;
+    return row;
   });
 }
 
-function parseLooseJsonObjectArray(text: string): Record<string, unknown>[] {
-  const chunks = extractObjectChunksByLine(text);
-  return chunks
-    .map(parseLooseObject)
-    .filter((row): row is Record<string, unknown> => row != null);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-function extractObjectChunksByLine(text: string): string[] {
-  const chunks: string[] = [];
-  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
-  let current: string[] | null = null;
+function unwrapJson(value: unknown): Record<string, unknown>[] {
+  if (Array.isArray(value)) return value.filter(isRecord);
+  if (!isRecord(value)) return [];
+  for (const key of ["events", "videos", "data", "items", "rows"]) {
+    const rows = value[key];
+    if (Array.isArray(rows)) return rows.filter(isRecord);
+  }
+  return [value];
+}
 
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!current && trimmed === "{") {
-      current = [line];
+function parseLooseJsonObjects(text: string): Record<string, unknown>[] {
+  const rows: Record<string, unknown>[] = [];
+  let depth = 0;
+  let quoted = false;
+  let escaped = false;
+  let start = -1;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
       continue;
     }
-    if (!current) continue;
-    current.push(line);
-    if (trimmed === "}" || trimmed === "},") {
-      chunks.push(current.join("\n"));
-      current = null;
-    }
-  }
-
-  return chunks;
-}
-
-function parseLooseObject(chunk: string): Record<string, unknown> | null {
-  const obj: Record<string, unknown> = {};
-  let i = 0;
-  let seen = 0;
-
-  while (i < chunk.length) {
-    const keyStart = chunk.indexOf('"', i);
-    if (keyStart < 0) break;
-    const key = readLooseQuotedString(chunk, keyStart, "key");
-    if (!key) break;
-
-    i = skipWhitespace(chunk, key.end);
-    if (chunk[i] !== ":") {
-      i = key.end;
-      continue;
-    }
-    i = skipWhitespace(chunk, i + 1);
-
-    const value = readLooseValue(chunk, i);
-    obj[key.value] = value.value;
-    seen += 1;
-    i = value.end;
-  }
-
-  return seen > 0 ? obj : null;
-}
-
-function readLooseValue(
-  text: string,
-  start: number,
-): { value: unknown; end: number } {
-  if (text[start] === '"') {
-    const str = readLooseQuotedString(text, start, "value");
-    if (!str) return { value: "", end: text.length };
-    return { value: str.value, end: skipToNextField(text, str.end) };
-  }
-
-  let end = start;
-  while (end < text.length && text[end] !== "," && text[end] !== "\n" && text[end] !== "}") {
-    end += 1;
-  }
-  const raw = text.slice(start, end).trim();
-  return { value: parseLooseScalar(raw), end: skipToNextField(text, end) };
-}
-
-function readLooseQuotedString(
-  text: string,
-  start: number,
-  mode: "key" | "value",
-): { value: string; end: number } | null {
-  if (text[start] !== '"') return null;
-  let out = "";
-  for (let i = start + 1; i < text.length; i++) {
-    const ch = text[i];
-    const next = text[i + 1];
-
-    if (ch === "\\" && next != null) {
-      out += unescapeJsonChar(next);
-      i += 1;
-      continue;
-    }
-
-    if (ch === '"') {
-      if (mode === "key") return { value: out, end: i + 1 };
-      const nextSig = nextSignificantChar(text, i + 1);
-      if (nextSig == null || nextSig === "," || nextSig === "}") {
-        return { value: out.trim(), end: i + 1 };
+    if (char === '"') quoted = true;
+    else if (char === "{") {
+      if (depth === 0) start = index;
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        const chunk = text.slice(start, index + 1).replace(/,\s*$/, "");
+        try {
+          const parsed = JSON.parse(chunk);
+          if (isRecord(parsed)) rows.push(parsed);
+        } catch {
+          // 壊れた断片は行単位で無視し、最終的に0件なら明示エラーにする。
+        }
+        start = -1;
       }
-      out += ch;
-      continue;
     }
-
-    out += ch;
   }
-  return { value: out.trim(), end: text.length };
+  return rows;
 }
 
-function unescapeJsonChar(ch: string): string {
-  if (ch === "n") return "\n";
-  if (ch === "r") return "\r";
-  if (ch === "t") return "\t";
-  return ch;
-}
-
-function nextSignificantChar(text: string, start: number): string | null {
-  for (let i = start; i < text.length; i++) {
-    if (!/\s/.test(text[i])) return text[i];
+export function parseLegacyImportText(name: string, content: string): LegacyParsedFile {
+  const normalizedName = name || "legacy-data.json";
+  const text = stripBom(content);
+  let rows: Record<string, unknown>[];
+  if (/\.(csv|tsv)$/i.test(normalizedName)) {
+    rows = parseCsv(text);
+  } else {
+    try {
+      rows = unwrapJson(JSON.parse(text));
+    } catch {
+      rows = parseLooseJsonObjects(text);
+    }
   }
-  return null;
-}
-
-function skipWhitespace(text: string, start: number): number {
-  let i = start;
-  while (i < text.length && /\s/.test(text[i])) i += 1;
-  return i;
-}
-
-function skipToNextField(text: string, start: number): number {
-  let i = start;
-  while (i < text.length && text[i] !== "," && text[i] !== "}") i += 1;
-  if (text[i] === ",") i += 1;
-  return i;
-}
-
-function parseLooseScalar(raw: string): unknown {
-  if (!raw) return "";
-  if (raw === "null") return null;
-  if (raw === "true") return true;
-  if (raw === "false") return false;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : raw;
+  if (rows.length === 0) {
+    throw new Error(`${normalizedName}: 取り込める行を検出できませんでした。`);
+  }
+  return { name: normalizedName, rows };
 }

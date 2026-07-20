@@ -225,7 +225,7 @@ export async function loadWorkerMonitoring(
          INNER JOIN videos v ON v.id = ym.video_id
         WHERE ym.sync_status = 'pending'
           AND v.youtube_video_id IS NOT NULL AND v.youtube_video_id <> ''
-          AND v.visibility_status NOT IN ('archived', 'voided')
+          AND v.visibility_status <> 'voided'
        UNION
        SELECT v.id
          FROM events e
@@ -236,7 +236,7 @@ export async function loadWorkerMonitoring(
           AND (e.start_time IS NULL OR e.start_time <= ?1 + 86400)
           AND (e.end_time IS NULL OR e.end_time >= ?1 - 86400)
           AND v.youtube_video_id IS NOT NULL AND v.youtube_video_id <> ''
-          AND v.visibility_status NOT IN ('archived', 'voided')
+          AND v.visibility_status <> 'voided'
           AND ym.sync_status IN ('synced', 'failed')
           AND ym.youtube_video_id IS v.youtube_video_id
           AND ym.synced_at IS NOT NULL AND ym.synced_at <= ?1 - 3600
@@ -248,10 +248,10 @@ export async function loadWorkerMonitoring(
           AND ym.synced_at IS NOT NULL AND ym.synced_at <= ?1 - 86400
           AND ym.youtube_video_id IS v.youtube_video_id
           AND v.youtube_video_id IS NOT NULL AND v.youtube_video_id <> ''
-          AND v.visibility_status NOT IN ('archived', 'voided')
+          AND v.visibility_status <> 'voided'
      )
      SELECT
-       (SELECT COUNT(*) FROM videos v WHERE v.youtube_video_id IS NOT NULL AND v.youtube_video_id <> '' AND v.visibility_status NOT IN ('archived', 'voided')) AS eligible,
+       (SELECT COUNT(*) FROM videos v WHERE v.youtube_video_id IS NOT NULL AND v.youtube_video_id <> '' AND v.visibility_status <> 'voided') AS eligible,
        (SELECT COUNT(*) FROM stale_candidates) AS stale,
        (SELECT COUNT(*) FROM video_youtube_metadata WHERE sync_status = 'failed') AS failed,
        (SELECT MIN(synced_at) FROM video_youtube_metadata) AS oldest_synced_at`,

@@ -13,7 +13,6 @@ export function categorizePublicEvent(
   now = Math.floor(Date.now() / 1000),
 ): PublicEventCategory {
   const status = computeEventStatus(event, now);
-  if (status === "archived") return "archive";
   if (status === "ended") return "ended";
   if (isAcceptingEntries(event, now) || status === "active" || status === "published") {
     return "open";

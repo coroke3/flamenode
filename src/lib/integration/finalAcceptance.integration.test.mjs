@@ -9,26 +9,16 @@ async function source(path) {
   );
 }
 
-test("X ID統合はevent_staff行監査を作成する", async () => {
-  const text = await source(
-    "src/lib/actions/merge-admin.ts",
-  );
-  const core = await source(
-    "src/lib/actions/merge-adminCore.ts",
-  );
+test("X ID統合はevent_staffを原子的に統合・復元し監査へ件数を残す", async () => {
+  const text = await source("src/lib/xid/merge.ts");
 
-  assert.match(
-    text,
-    /buildEventStaffMergeAudits/,
-  );
-  assert.match(
-    core,
-    /restore_strategy:\s*"recreate_deleted"/,
-  );
-  assert.match(
-    core,
-    /restore_strategy:\s*"update_before"/,
-  );
+  assert.match(text, /UPDATE event_staff/);
+  assert.match(text, /DELETE FROM event_staff/);
+  assert.match(text, /INSERT INTO event_staff/);
+  assert.match(text, /collision_counts:\s*\{[\s\S]*event_staff:/);
+  assert.match(text, /context:\s*"x-id-merge"/);
+  assert.match(text, /context:\s*"x-id-merge-revert"/);
+  assert.match(text, /snapshot\.event_staff\.length/);
 });
 
 test("イベント検索は公開運営者名を対象に含める", async () => {

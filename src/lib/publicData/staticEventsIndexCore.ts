@@ -18,12 +18,11 @@ export interface StaticEventIndexEvent {
   slot_type: "time" | "count" | null;
   slot_visibility_mode: "public_name" | "anonymous" | "hidden" | null;
   max_slots_per_video: number;
-  max_consecutive_slots_per_entry: number;
   start_time: number | null;
   end_time: number | null;
   entry_start_time: number | null;
   entry_end_time: number | null;
-  visibility_status: "public" | "archived";
+  visibility_status: "public";
 }
 
 export interface StaticEventGroupSection {
@@ -102,20 +101,14 @@ function normalizeEvent(value: unknown): StaticEventIndexEvent | null {
     id,
     title,
     explanation: normalizeNullableString(row.explanation),
-    public_operator_names: normalizeStringArray(
-      row.public_operator_names,
-    ),
+    public_operator_names: normalizeStringArray(row.public_operator_names),
     icon_url: normalizeNullableString(row.icon_url),
     img_url: normalizeNullableString(row.img_url),
     accent_color: normalizeNullableString(row.accent_color),
     event_type: normalizeEventType(row.event_type),
     slot_type: normalizeSlotType(row.slot_type),
     slot_visibility_mode: normalizeSlotVisibilityMode(row.slot_visibility_mode),
-    max_slots_per_video: normalizePositiveInteger(row.max_slots_per_video, 0),
-    max_consecutive_slots_per_entry: normalizePositiveInteger(
-      row.max_consecutive_slots_per_entry,
-      0,
-    ),
+    max_slots_per_video: normalizePositiveInteger(row.max_slots_per_video, 1),
     start_time: normalizeUnix(row.start_time),
     end_time: normalizeUnix(row.end_time),
     entry_start_time: normalizeUnix(row.entry_start_time),
@@ -135,7 +128,10 @@ function normalizeNullableString(value: unknown): string | null {
 function normalizeEventType(
   value: unknown,
 ): StaticEventIndexEvent["event_type"] {
-  return value === "event" || value === "collabo" || value === "type" || value === "other"
+  return value === "event" ||
+    value === "collabo" ||
+    value === "type" ||
+    value === "other"
     ? value
     : null;
 }
@@ -153,19 +149,17 @@ function normalizeSlotVisibilityMode(
 }
 
 function normalizePositiveInteger(value: unknown, fallback: number): number {
-  const n = normalizeUnix(value);
-  return n != null && n >= 0 ? n : fallback;
+  const number = normalizeUnix(value);
+  return number != null && number >= 1 ? number : fallback;
 }
 
 function normalizeUnix(value: unknown): number | null {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n)) return null;
-  return Math.floor(n);
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? Math.floor(number) : null;
 }
 
 function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
-
   return Array.from(
     new Set(
       value
