@@ -24,6 +24,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "pretypecheck": "node scripts/agent-pr88-hydrate-event-runtime.mjs",
     "typecheck": "tsc --noEmit",
     "dev:local": "node -r ./scripts/load-dev-vars.cjs node_modules/next/dist/bin/next dev",
     "clean:next": "node scripts/clean-next-cache.cjs",
