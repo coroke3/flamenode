@@ -4,8 +4,9 @@
 > Last verified: 2026-07-20
 > Implementation: PR #88
 > Depends on: PR #89 / `0043_db_canonical_migration.sql`
+> Parent verified at: `1bd7031`
 > Compatibility: 旧状態を一括変換し、旧default由来の`draft`だけを即時正規化する。その他の旧状態の新規書き込みは拒否する。
-> Source of truth: `migrations/0044_simplify_visibility_statuses.sql`, `src/lib/constants/collaborator-permissions.ts`, `src/lib/utils/eventStatusCore.ts`
+> Source of truth: `migrations/0044_simplify_visibility_statuses.sql`, `src/lib/db/schema.canonical.ts`, `src/lib/constants/collaborator-permissions.ts`, `src/lib/utils/eventStatusCore.ts`
 
 ## 目的
 
