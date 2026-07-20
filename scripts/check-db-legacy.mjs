@@ -1,336 +1,209 @@
-/**
- * legacy / deleted DB 利用検査 (静的ソース解析、DB 不要)。
- * 旧互換が残っていたら失敗する。
- *
- * Usage:
- *   node scripts/check-db-legacy.mjs
- *
- * exit 0 = OK, exit 1 = 違反検出
- */
-
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { extname, join, relative, sep } from "node:path";
 
 const ROOT = process.cwd();
 const SCAN_DIRS = ["src", "app", "workers"];
-const SCAN_EXT = new Set([".ts", ".tsx", ".mjs", ".cjs", ".js"]);
-
-const FULL_ALLOW = new Set([
-  "scripts/check-db-legacy.mjs",
-]);
-
-const PREFIX_ALLOW = [
-  "migrations/",
-  "docs/",
-];
-
-const FILE_ALLOW = new Set([
-  "instrumentation.ts",
-]);
-
-const DB_REDUCTION_RULES = [
-  {
-    id: "events-legacy-flags",
-    label: "events.is_active / is_entry_open / is_archived column usage",
-    pattern:
-      /\b(?:events|eventsTable)\.(?:is_active|is_entry_open|is_archived)\b|\bsql`(?=[^`]*\b(?:FROM|UPDATE|JOIN)\s+events\b)[^`]*\b(?:is_active|is_entry_open|is_archived)\b[^`]*`/g,
-    prefixAllow: [...PREFIX_ALLOW, "src/lib/import/legacy/"],
-  },
-  {
-    id: "permission-mask",
-    label: "event_staff.permission_mask / number bitmask usage",
-    pattern:
-      /\b(?:eventStaff|event_staff)\.permission_mask\b|\bsql`[^`]*\bevent_staff\.permission_mask\b[^`]*`/g,
-    prefixAllow: PREFIX_ALLOW,
-    fileAllow: new Set(["instrumentation.ts", "src/lib/import/legacy/types.ts", "src/lib/import/legacy/plan.test.mjs"]),
-  },
-  {
-    id: "event-staff-permissions-table",
-    label: "event_staff_permissions usage (removed)",
-    pattern: /\b(eventStaffPermissions|event_staff_permissions)\b/g,
-    prefixAllow: PREFIX_ALLOW,
-  },
-  {
-    id: "used-software-json",
-    label: "videos.used_software_json usage (removed; use video_softwares)",
-    pattern:
-      /\b(?:videos|videosTable)\.used_software_json\b|\bsql`[^`]*\bvideos\.used_software_json\b[^`]*`/g,
-    prefixAllow: [...PREFIX_ALLOW, "src/lib/import/legacy/"],
-  },
-  {
-    id: "video-member-chapters-table",
-    label: "video_member_chapters / videoMemberChapters usage (removed)",
-    pattern:
-      /\bvideoMemberChapters\b|\bsql`[^`]*\bvideo_member_chapters\b[^`]*`/g,
-    prefixAllow: PREFIX_ALLOW,
-  },
-  {
-    id: "video-chapters-member-id",
-    label: "video_chapters.video_member_id usage (removed)",
-    pattern:
-      /\bvideoChapters\.video_member_id\b|\bsql`[^`]*\bvideo_chapters\.video_member_id\b[^`]*`/g,
-    prefixAllow: PREFIX_ALLOW,
-  },
-  {
-    id: "event-group-id-column",
-    label: "events.event_group_id usage (removed; use event_group_events)",
-    pattern:
-      /\b(?:events|eventsTable)\.event_group_id\b|\bsql`[^`]*\bevents\.event_group_id\b[^`]*`/g,
-    prefixAllow: PREFIX_ALLOW,
-  },
-  {
-    id: "custom-questions-json",
-    label: "events.custom_questions JSON column usage",
-    pattern:
-      /\b(?:events|eventsTable)\.custom_questions\b|\bsql`[^`]*\bevents\.custom_questions\b[^`]*`/g,
-    prefixAllow: PREFIX_ALLOW,
-  },
-  {
-    id: "custom-answers-json",
-    label: "videos.custom_answers JSON column usage",
-    pattern:
-      /\b(?:videos|videosTable)\.custom_answers\b|\bsql`[^`]*\bvideos\.custom_answers\b[^`]*`/g,
-    prefixAllow: PREFIX_ALLOW,
-  },
-  {
-    id: "video-form-settings-json",
-    label: "events.video_form_settings_json column usage",
-    pattern:
-      /\b(?:events|eventsTable)\.video_form_settings_json\b|\bsql`[^`]*\bevents\.video_form_settings_json\b[^`]*`/g,
-    prefixAllow: PREFIX_ALLOW,
-  },
-  {
-    id: "videos-stage-permission-column",
-    label: "videos.stage_permission column usage",
-    pattern:
-      /\b(?:videos|videosTable)\.stage_permission\b|\bsql`[^`]*\bvideos\.stage_permission\b[^`]*`/g,
-    prefixAllow: [...PREFIX_ALLOW, "src/lib/import/legacy/"],
-  },
-  {
-    id: "cost-guard-mode",
-    label: "system_settings.cost_guard_mode (use operation_mode)",
-    pattern:
-      /\b(?:systemSettings|system_settings)\.cost_guard_mode\b|\bsql`[^`]*\bsystem_settings\.cost_guard_mode\b[^`]*`/g,
-    prefixAllow: PREFIX_ALLOW,
-  },
-  {
-    id: "is-maintenance-mode",
-    label: "system_settings.is_maintenance_mode (use operation_mode)",
-    pattern:
-      /\b(?:systemSettings|system_settings)\.is_maintenance_mode\b|\bsql`[^`]*\bsystem_settings\.is_maintenance_mode\b[^`]*`/g,
-    prefixAllow: PREFIX_ALLOW,
-  },
-  {
-    id: "query-fallback",
-    label: "withMissingColumnFallback / withVideoScoreFallback usage",
-    pattern: /\b(withMissingColumnFallback|withVideoScoreFallback|queryFallback)\b/g,
-    prefixAllow: PREFIX_ALLOW,
-  },
-  {
-    id: "legacy-import",
-    label: "legacy import module usage (@/lib/legacy)",
-    // @/lib/legacy (旧モジュール) を禁止。新モジュールは @/lib/import/legacy
-    pattern: /@\/lib\/legacy\b/g,
-    prefixAllow: [],
-  },
-  {
-    id: "legacy-import-old-api",
-    label: "旧 legacy-import API ルート参照 (廃止済み)",
-    // 旧 /api/admin/legacy-import 参照を禁止 (410 stub 自体は許可)
-    pattern: /\/api\/admin\/legacy-import/g,
-    prefixAllow: [],
-  },
-  {
-    id: "runtime-schema-ddl",
-    label: "runtime schema DDL (use migrations or explicit operations scripts)",
-    pattern: /\b(?:ALTER\s+TABLE|CREATE\s+TABLE|CREATE\s+INDEX|DROP\s+TABLE|DROP\s+INDEX)\b/gi,
-    prefixAllow: ["src/lib/integration/"],
-  },
-  {
-    id: "runtime-backfill",
-    label: "runtime backfill (use migrations or explicit operations scripts)",
-    pattern: /\bbackfill(?:ing)?\b/gi,
-    prefixAllow: ["src/lib/integration/"],
-    fileAllow: new Set(),
-  },
-];
+const SCAN_EXTENSIONS = new Set([".ts", ".tsx", ".mjs", ".cjs", ".js"]);
+const SKIP_FILES = new Set(["instrumentation.ts"]);
 
 const RULES = [
   {
-    id: "video-comments-usage",
-    label: "削除済み video_comments / videoComments 利用",
-    pattern: /\b(videoComments|video_comments)\b/g,
+    id: "legacy-import-runtime",
+    label: "削除済み旧形式インポート機能",
+    pattern:
+      /src\/lib\/import\/legacy|@\/lib\/import\/legacy|\/admin\/import\b|\/api\/admin\/import\/legacy\b|ENABLE_LEGACY_IMPORT_TOOL|LEGACY_IMPORT_PREVIEW_SECRET/g,
   },
   {
-    id: "video-stats-usage",
-    label: "video_stats / videoStats usage (removed)",
-    pattern: /\b(videoStats|video_stats)\b/g,
+    id: "legacy-query-fallback",
+    label: "旧schema向けquery fallback",
+    pattern: /\b(withMissingColumnFallback|withVideoScoreFallback|queryFallback)\b/g,
   },
   {
-    id: "api-endpoints-usage",
-    label: "api_endpoints / apiEndpoints usage (removed)",
-    pattern: /\b(apiEndpoints|api_endpoints)\b/g,
+    id: "legacy-event-flags",
+    label: "削除済みevents状態フラグ",
+    pattern:
+      /\b(?:events|eventsTable)\.(?:is_active|is_entry_open|is_archived)\b|\bsql`(?=[^`]*\b(?:FROM|UPDATE|JOIN)\s+events\b)[^`]*\b(?:is_active|is_entry_open|is_archived)\b[^`]*`/g,
   },
   {
-    id: "history-logs-usage",
-    label: "history_logs / historyLogs usage (removed; use audit_logs)",
-    pattern: /\bhistoryLogs\b|\bsql`[^`]*\bhistory_logs\b[^`]*`/g,
-    prefixAllow: [],
-    fileAllow: new Set(["src/lib/audit/helpers.ts"]),
+    id: "legacy-permission-mask",
+    label: "削除済みevent_staff.permission_mask",
+    pattern:
+      /\b(?:eventStaff|event_staff)\.permission_mask\b|\bsql`[^`]*\bevent_staff\.permission_mask\b[^`]*`/g,
   },
   {
-    id: "outro-comment-write",
-    label: "outro_comment 新規書き込み",
-    pattern: /\boutro_comment\s*:/g,
+    id: "legacy-event-staff-permissions-table",
+    label: "削除済みevent_staff_permissions",
+    pattern: /\b(eventStaffPermissions|event_staff_permissions)\b/g,
   },
   {
-    id: "sync-legacy-event-visibility",
-    label: "syncLegacyEventVisibilityFlags usage (removed)",
+    id: "legacy-used-software-json",
+    label: "削除済みvideos.used_software_json",
+    pattern:
+      /\b(?:videos|videosTable)\.used_software_json\b|\bsql`[^`]*\bvideos\.used_software_json\b[^`]*`/g,
+  },
+  {
+    id: "legacy-video-member-chapters-table",
+    label: "削除済みvideo_member_chapters",
+    pattern: /\bvideoMemberChapters\b|\bsql`[^`]*\bvideo_member_chapters\b[^`]*`/g,
+  },
+  {
+    id: "legacy-video-chapter-member-id",
+    label: "削除済みvideo_chapters.video_member_id",
+    pattern:
+      /\bvideoChapters\.video_member_id\b|\bsql`[^`]*\bvideo_chapters\.video_member_id\b[^`]*`/g,
+  },
+  {
+    id: "legacy-event-group-id",
+    label: "削除済みevents.event_group_id",
+    pattern:
+      /\b(?:events|eventsTable)\.event_group_id\b|\bsql`[^`]*\bevents\.event_group_id\b[^`]*`/g,
+  },
+  {
+    id: "legacy-custom-question-json",
+    label: "削除済みevents.custom_questions",
+    pattern:
+      /\b(?:events|eventsTable)\.custom_questions\b|\bsql`[^`]*\bevents\.custom_questions\b[^`]*`/g,
+  },
+  {
+    id: "legacy-custom-answer-json",
+    label: "削除済みvideos.custom_answers",
+    pattern:
+      /\b(?:videos|videosTable)\.custom_answers\b|\bsql`[^`]*\bvideos\.custom_answers\b[^`]*`/g,
+  },
+  {
+    id: "legacy-video-form-settings-json",
+    label: "削除済みevents.video_form_settings_json",
+    pattern:
+      /\b(?:events|eventsTable)\.video_form_settings_json\b|\bsql`[^`]*\bevents\.video_form_settings_json\b[^`]*`/g,
+  },
+  {
+    id: "legacy-stage-permission",
+    label: "削除済みstage_permission",
+    pattern:
+      /\b(?:videos|videosTable)\.stage_permission\b|\bstage_permission_(?:enabled|required|label|description|placeholder|question|answer)(?:_[a-z]+)?\b/g,
+  },
+  {
+    id: "legacy-cost-guard",
+    label: "削除済みsystem_settings cost guard列",
+    pattern:
+      /\b(?:systemSettings|system_settings)\.(?:cost_guard_mode|is_maintenance_mode)\b|\bsql`[^`]*\bsystem_settings\.(?:cost_guard_mode|is_maintenance_mode)\b[^`]*`/g,
+  },
+  {
+    id: "deleted-tables",
+    label: "削除済みテーブル",
+    pattern:
+      /\b(videoComments|video_comments|videoStats|video_stats|apiEndpoints|api_endpoints|eventStaffPermissions|event_staff_permissions)\b/g,
+  },
+  {
+    id: "legacy-event-visibility-sync",
+    label: "削除済みイベント状態同期helper",
     pattern:
       /\b(?:syncLegacyEventVisibilityFlags|computedEventLegacyFlags|enrichEventRowForStaticJson)\b/g,
   },
   {
-    id: "legacy-event-form-fields",
-    label: "legacy event/video FormData compatibility fields",
-    pattern:
-      /\bstage_permission_(?:enabled|required|label|description|placeholder|question|answer)(?:_[a-z]+)?\b/g,
+    id: "legacy-permission-api",
+    label: "削除済みpermission互換API",
+    pattern: /\bLEGACY_PERMISSION_ALIASES\b|\bhasPermission\s*\(/g,
   },
   {
-    id: "legacy-permission-aliases",
-    label: "LEGACY_PERMISSION_ALIASES usage (removed)",
-    pattern: /\bLEGACY_PERMISSION_ALIASES\b/g,
+    id: "outro-comment-write",
+    label: "廃止済みoutro_commentへの書き込み",
+    pattern: /\boutro_comment\s*:/g,
   },
   {
-    id: "has-permission-mask",
-    label: "hasPermission(number mask) usage (removed)",
-    pattern: /\bhasPermission\s*\(/g,
+    id: "runtime-schema-ddl",
+    label: "通常ランタイム内のschema DDL",
+    pattern: /\b(?:ALTER\s+TABLE|CREATE\s+TABLE|CREATE\s+INDEX|DROP\s+TABLE|DROP\s+INDEX)\b/gi,
+    allowPrefixes: ["src/lib/integration/"],
+  },
+  {
+    id: "runtime-backfill",
+    label: "通常ランタイム内のbackfill",
+    pattern: /\bbackfill(?:ing)?\b/gi,
+    allowPrefixes: ["src/lib/integration/"],
+  },
+  {
+    id: "history-logs",
+    label: "削除済みhistory_logs",
+    pattern: /\bhistoryLogs\b|\bsql`[^`]*\bhistory_logs\b[^`]*`/g,
+    allowFiles: new Set(["src/lib/audit/helpers.ts"]),
   },
 ];
 
-function walk(dir, files = []) {
+function toPosix(path) {
+  return path.split(sep).join("/");
+}
+
+function walk(directory, files = []) {
   let entries;
   try {
-    entries = readdirSync(dir);
+    entries = readdirSync(directory);
   } catch {
     return files;
   }
+
   for (const entry of entries) {
-    const full = join(dir, entry);
-    let st;
+    if (entry === "node_modules" || entry === ".next" || entry === ".git") continue;
+    const fullPath = join(directory, entry);
+    let stat;
     try {
-      st = statSync(full);
+      stat = statSync(fullPath);
     } catch {
       continue;
     }
-    if (st.isDirectory()) {
-      if (entry === "node_modules" || entry === ".next" || entry === ".git") {
-        continue;
-      }
-      walk(full, files);
-    } else if (st.isFile()) {
-      const ext = full.slice(full.lastIndexOf("."));
-      if (SCAN_EXT.has(ext)) files.push(full);
+    if (stat.isDirectory()) {
+      walk(fullPath, files);
+    } else if (stat.isFile() && SCAN_EXTENSIONS.has(extname(fullPath))) {
+      files.push(fullPath);
     }
   }
   return files;
 }
 
-function toPosix(p) {
-  return p.split(sep).join("/");
-}
-
-function isPrefixAllowed(relPath, prefixes) {
-  return prefixes.some((p) => relPath === p || relPath.startsWith(p));
-}
-
-function isAllowed(relPath) {
-  return (
-    FULL_ALLOW.has(relPath) ||
-    FILE_ALLOW.has(relPath) ||
-    isPrefixAllowed(relPath, PREFIX_ALLOW)
-  );
-}
-
-function isRuleAllowed(relPath, rule) {
-  return (
-    isAllowed(relPath) ||
-    isPrefixAllowed(relPath, rule.prefixAllow ?? []) ||
-    (rule.fileAllow?.has(relPath) ?? false)
-  );
-}
-
-function lineNumber(src, index) {
+function lineNumber(source, index) {
   let line = 1;
-  for (let i = 0; i < index && i < src.length; i++) {
-    if (src.charCodeAt(i) === 10) line++;
+  for (let cursor = 0; cursor < index; cursor += 1) {
+    if (source.charCodeAt(cursor) === 10) line += 1;
   }
   return line;
 }
 
-function lineAt(src, index) {
-  const start = src.lastIndexOf("\n", index) + 1;
-  const end = src.indexOf("\n", index);
-  return src.slice(start, end === -1 ? undefined : end);
-}
+const violations = [];
 
-let violations = 0;
-const all = [];
+for (const directory of SCAN_DIRS) {
+  for (const file of walk(join(ROOT, directory))) {
+    const relativePath = toPosix(relative(ROOT, file));
+    if (SKIP_FILES.has(relativePath)) continue;
 
-for (const sub of SCAN_DIRS) {
-  const abs = join(ROOT, sub);
-  for (const file of walk(abs)) {
-    const rel = toPosix(relative(ROOT, file));
-    if (isAllowed(rel)) continue;
-    let src;
-    try {
-      src = readFileSync(file, "utf-8");
-    } catch {
-      continue;
-    }
+    const source = readFileSync(file, "utf8");
     for (const rule of RULES) {
-      if (isRuleAllowed(rel, rule)) continue;
+      if (rule.allowFiles?.has(relativePath)) continue;
+      if (rule.allowPrefixes?.some((prefix) => relativePath.startsWith(prefix))) continue;
+
       rule.pattern.lastIndex = 0;
-      let m;
-      while ((m = rule.pattern.exec(src)) !== null) {
-        const line = lineNumber(src, m.index);
-        all.push({ rule: rule.id, label: rule.label, file: rel, line, hit: m[0] });
-        violations++;
-      }
-    }
-    for (const rule of DB_REDUCTION_RULES) {
-      if (isRuleAllowed(rel, rule)) continue;
-      rule.pattern.lastIndex = 0;
-      let m;
-      while ((m = rule.pattern.exec(src)) !== null) {
-        if (rule.skipLine?.(lineAt(src, m.index))) continue;
-        const line = lineNumber(src, m.index);
-        all.push({ rule: rule.id, label: rule.label, file: rel, line, hit: m[0] });
-        violations++;
+      let match;
+      while ((match = rule.pattern.exec(source)) !== null) {
+        violations.push({
+          rule: rule.id,
+          label: rule.label,
+          file: relativePath,
+          line: lineNumber(source, match.index),
+          hit: match[0],
+        });
       }
     }
   }
 }
 
-if (violations === 0) {
-  console.log("OK: no deprecated DB usage detected.");
+if (violations.length === 0) {
+  console.log("OK: no deprecated DB or compatibility runtime usage detected.");
   process.exit(0);
 }
 
-console.error(`Detected ${violations} deprecated DB usage hit(s):\n`);
-const byRule = new Map();
-for (const v of all) {
-  let list = byRule.get(v.rule);
-  if (!list) {
-    list = { label: v.label, items: [] };
-    byRule.set(v.rule, list);
-  }
-  list.items.push(v);
-}
-for (const [id, { label, items }] of byRule) {
-  console.error(`[${id}] ${label}: ${items.length} hit(s)`);
-  for (const it of items) {
-    console.error(`  - ${it.file}:${it.line}  ${it.hit}`);
-  }
-  console.error("");
+console.error(`Detected ${violations.length} deprecated runtime usage hit(s):\n`);
+for (const violation of violations) {
+  console.error(
+    `[${violation.rule}] ${violation.file}:${violation.line} ${violation.label}: ${violation.hit}`,
+  );
 }
 process.exit(1);

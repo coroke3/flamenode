@@ -4,8 +4,8 @@ import { Icon } from "@/components/ui/Icon";
 import type { AdminSidebarGroup } from "@/components/admin/AdminSidebarNav";
 
 function isAdminSpreadsheetNavEnabled(): boolean {
-  const value = process.env.ADMIN_SPREADSHEET_ENABLED?.trim().toLowerCase();
-  return value === "1" || value === "true" || value === "yes";
+  const v = process.env.ADMIN_SPREADSHEET_ENABLED?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
 }
 
 const ADMIN_NAV_SPREADSHEET_ITEM = {
@@ -18,11 +18,7 @@ const ADMIN_NAV_GROUPS_BASE: AdminSidebarGroup[] = [
   {
     title: "概要",
     items: [
-      {
-        href: "/admin",
-        label: "ダッシュボード",
-        icon: <Icon name="grid" size={14} />,
-      },
+      { href: "/admin", label: "ダッシュボード", icon: <Icon name="grid" size={14} /> },
     ],
   },
   {
@@ -48,11 +44,7 @@ const ADMIN_NAV_GROUPS_BASE: AdminSidebarGroup[] = [
   {
     title: "コンテンツ",
     items: [
-      {
-        href: "/admin/videos",
-        label: "作品管理",
-        icon: <Icon name="youtube" size={14} />,
-      },
+      { href: "/admin/videos", label: "作品管理", icon: <Icon name="youtube" size={14} /> },
       {
         href: "/admin/youtube-sync",
         label: "YouTube同期",
@@ -68,21 +60,13 @@ const ADMIN_NAV_GROUPS_BASE: AdminSidebarGroup[] = [
   {
     title: "イベント",
     items: [
-      {
-        href: "/admin/events",
-        label: "イベント管理",
-        icon: <Icon name="calendar" size={14} />,
-      },
+      { href: "/admin/events", label: "イベント管理", icon: <Icon name="calendar" size={14} /> },
     ],
   },
   {
     title: "ユーザー・権限",
     items: [
-      {
-        href: "/admin/users",
-        label: "ユーザー / X ID",
-        icon: <Icon name="users" size={14} />,
-      },
+      { href: "/admin/users", label: "ユーザー / X ID", icon: <Icon name="users" size={14} /> },
       {
         href: "/admin/permissions/simulator",
         label: "権限シミュレーター",
@@ -98,16 +82,8 @@ const ADMIN_NAV_GROUPS_BASE: AdminSidebarGroup[] = [
         label: "通知配信",
         icon: <Icon name="alert" size={14} />,
       },
-      {
-        href: "/admin/rules",
-        label: "規約管理",
-        icon: <Icon name="info" size={14} />,
-      },
-      {
-        href: "/admin/audit",
-        label: "監査ログ",
-        icon: <Icon name="clock" size={14} />,
-      },
+      { href: "/admin/rules", label: "規約管理", icon: <Icon name="info" size={14} /> },
+      { href: "/admin/audit", label: "監査ログ", icon: <Icon name="clock" size={14} /> },
       {
         href: "/admin/cost-guard",
         label: "operation_mode",
@@ -128,21 +104,13 @@ const ADMIN_NAV_GROUPS_BASE: AdminSidebarGroup[] = [
         label: "YouTube quota",
         icon: <Icon name="youtube" size={14} />,
       },
-      {
-        href: "/admin/health",
-        label: "ヘルスチェック",
-        icon: <Icon name="check" size={14} />,
-      },
+      { href: "/admin/health", label: "ヘルスチェック", icon: <Icon name="check" size={14} /> },
     ],
   },
   {
     title: "高度な管理",
     items: [
-      {
-        href: "/admin/security",
-        label: "セキュリティ",
-        icon: <Icon name="settings" size={14} />,
-      },
+      { href: "/admin/security", label: "セキュリティ", icon: <Icon name="settings" size={14} /> },
       {
         href: "/admin/api-endpoints",
         label: "公開API管理",
@@ -153,13 +121,18 @@ const ADMIN_NAV_GROUPS_BASE: AdminSidebarGroup[] = [
 ];
 
 export function buildAdminNavGroups(): AdminSidebarGroup[] {
-  if (!isAdminSpreadsheetNavEnabled()) return ADMIN_NAV_GROUPS_BASE;
-  return ADMIN_NAV_GROUPS_BASE.map((group) =>
-    group.title === "高度な管理"
-      ? {
-          ...group,
-          items: [...group.items, ADMIN_NAV_SPREADSHEET_ITEM],
-        }
-      : group,
-  );
+  let groups = ADMIN_NAV_GROUPS_BASE;
+
+  if (isAdminSpreadsheetNavEnabled()) {
+    groups = groups.map((group) =>
+      group.title === "高度な管理"
+        ? {
+            ...group,
+            items: [...group.items, ADMIN_NAV_SPREADSHEET_ITEM],
+          }
+        : group,
+    );
+  }
+
+  return groups;
 }

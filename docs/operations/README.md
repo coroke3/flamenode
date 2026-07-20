@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-20
-> Verified against commit: `8de170c`
+> Verified against commit: `89b8889`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/`, `wrangler.toml`, `package.json`
 
 Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、Cron Worker 3本で運用する。実Cloudflare操作、Remote D1、production secret操作は運用者が明示した場合だけ行う。
@@ -14,8 +14,9 @@ Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、Cron Worker 3本
 ## 不変条件
 
 - DB正本は`src/lib/db/schema.ts`。active migrationは`migrations/`直下を番号順に適用する。
-- 旧migration本文は`migrations/historical/`へ保存し、旧列fallback、旧形式パーサー、runtime DDL、二重書込みを提供しない。
-- 本格運用前のデータ変更は正本へ一括移行し、常設の後方互換機能を追加しない。
+- 旧migration本文は`migrations/historical/`へ保存し、旧列fallback、runtime DDL、二重書込みを提供しない。
+- 旧形式インポートのUI、API、runtime module、環境変数を提供しない。
+- 旧データ変換は正本migrationの一回限りの処理とする。
 - 内部ユーザーIDは`user_id`、Discord Snowflakeは`discord_id`。
 - `event_staff.permission_preset = 'owner'`がイベント代表者の正本で、ownerを0人にしない。
 - 重要mutationと監査ログは同じ原子的処理で確定する。
@@ -25,6 +26,7 @@ Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、Cron Worker 3本
 | タスク | Active文書 |
 | --- | --- |
 | baseline / local D1 / Remote手動手順 | [migrations.md](migrations.md) |
+| DB正本移行・旧データ変換 | [../database/canonical-migration-plan.md](../database/canonical-migration-plan.md) |
 | Cron Worker、lease、上限 | [workers.md](workers.md) |
 | YouTube再生リスト同期 | [youtube-playlist-sync.md](youtube-playlist-sync.md) |
 | 監査・復元・owner保護 | [audit-and-restore.md](audit-and-restore.md) |

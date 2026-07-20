@@ -3,9 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const root = process.cwd();
-const packageJson = JSON.parse(
-  fs.readFileSync(path.join(root, "package.json"), "utf8"),
-);
+const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 const packageScripts = new Set(Object.keys(packageJson.scripts ?? {}));
 const errors = [];
 
@@ -27,9 +25,17 @@ const requiredPaths = [
   "docs/operations/incident-response.md",
   "docs/operations/ui-acceptance.md",
 ];
+const removedLegacyRuntimePaths = [
+  "docs/operations/legacy-import.md",
+  "app/(admin)/admin/import/page.tsx",
+  "app/api/admin/import/legacy/route.ts",
+  "src/lib/import/legacy",
+];
 const localLinkPattern = /\[[^\]]*\]\(([^)]+)\)/g;
 const npmScriptPattern = /`npm run ([a-zA-Z0-9:_-]+)(?:\s+[^`]*)?`/g;
 
+// 単語の出現だけでは失敗させない。「使わない」「廃止した」等の禁止・履歴説明は
+// Active文書にも必要である。ここでは現行要件として残ると明確に誤る表現だけを検出する。
 const forbiddenActiveClaims = [
   [
     /バックグラウンドで起動済み|自動セットアップ済み|npm install 完了/gi,
@@ -50,8 +56,8 @@ const forbiddenActiveClaims = [
     "runtime migrationを現行手順とする記述",
   ],
   [
-    /(?:legacy import|旧形式インポート).{0,40}(?:を有効化|を使用する|から投入する|を実行する)/gi,
-    "廃止済み旧形式インポートを現行機能とする記述",
+    /(?:legacy import|旧形式インポート|旧データ移行ツール).{0,60}(?:を有効化する|を使用する|を提供する|から取り込む)/gi,
+    "削除済み旧形式インポートを現行機能とする記述",
   ],
 ];
 
@@ -134,6 +140,11 @@ for (const relative of requiredActive) {
 for (const relative of requiredPaths) {
   if (!fs.existsSync(file(relative))) errors.push(`${relative} がありません。`);
 }
+for (const relative of removedLegacyRuntimePaths) {
+  if (fs.existsSync(file(relative))) {
+    errors.push(`${relative}: 削除済み旧形式インポート経路を再導入しないでください。`);
+  }
+}
 
 for (const full of collectMarkdown(file("docs"))) {
   const relative = path.relative(root, full);
@@ -158,11 +169,7 @@ const wrangler = read("wrangler.toml");
 if (!packageJson.devDependencies?.["@cloudflare/next-on-pages"]) {
   errors.push("package.json: Pages adapter がありません。");
 }
-if (
-  !/^pages_build_output_dir\s*=\s*"\.vercel\/output\/static"\s*$/m.test(
-    wrangler,
-  )
-) {
+if (!/^pages_build_output_dir\s*=\s*"\.vercel\/output\/static"\s*$/m.test(wrangler)) {
   errors.push("wrangler.toml: Pages output 設定が現行値ではありません。");
 }
 if (!/Cloudflare/i.test(read("docs/README.md"))) {
@@ -170,7 +177,7 @@ if (!/Cloudflare/i.test(read("docs/README.md"))) {
 }
 if (packageJson.engines?.node !== ">=22 <23") {
   errors.push(
-    `package.json: Node要件は\">=22 <23\"に統一してください。現在=${packageJson.engines?.node ?? "未設定"}`,
+    `package.json: Node要件は">=22 <23"に統一してください。現在=${packageJson.engines?.node ?? "未設定"}`,
   );
 }
 if (read(".nvmrc").trim() !== "22") {
@@ -188,11 +195,7 @@ if (/Durable Objects?/i.test(read("README.md"))) {
 if (/Node(?:\.js)?\s*20|v20以上/i.test(read("DEPLOY.md"))) {
   errors.push("DEPLOY.md: Node.js要件を22.xへ統一してください。");
 }
-if (
-  /自動セットアップ済み|バックグラウンドで起動済み|npm install 完了/i.test(
-    read("LOCAL.md"),
-  )
-) {
+if (/自動セットアップ済み|バックグラウンドで起動済み|npm install 完了/i.test(read("LOCAL.md"))) {
   errors.push("LOCAL.md: 個人PC固有の実施済み状態を削除してください。");
 }
 
@@ -201,5 +204,5 @@ if (errors.length > 0) {
   process.exit(1);
 }
 console.log(
-  "[check:docs] OK: active documentation metadata, links, npm scripts, vocabulary, and Cloudflare source alignment are valid.",
+  "[check:docs] OK: active documentation metadata, links, npm scripts, vocabulary, Cloudflare source alignment, and removed legacy surfaces are valid.",
 );
