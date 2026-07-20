@@ -9,6 +9,7 @@ import {
   getChapterPostingContext,
 } from "@/lib/actions/chapter";
 import { formatDuration } from "@/lib/utils/format";
+import { parseChapterTimeInput } from "@/lib/video/chapterTime";
 import styles from "./ChapterComposer.module.css";
 
 interface ChapterComposerProps {
@@ -23,31 +24,43 @@ interface ChapterComposerProps {
   bulkOnly?: boolean;
 }
 
-function parseTimeInput(raw: string): number | null {
-  const value = raw.trim();
-  if (!value) return null;
-  if (/^\d+(?:\.\d{1,3})?$/.test(value)) return Number(value);
+type ChapterVisibility = "public" | "private";
 
-  const mmss = value.match(/^(\d{1,3}):([0-5]\d)(?:[.:](\d{1,3}))?$/);
-  if (mmss) {
-    const minutes = Number(mmss[1]);
-    const seconds = Number(mmss[2]);
-    const milliseconds = mmss[3]
-      ? Number(mmss[3].padEnd(3, "0"))
-      : 0;
-    return minutes * 60 + seconds + milliseconds / 1000;
-  }
+interface VisibilityOptionProps {
+  value: ChapterVisibility;
+  current: ChapterVisibility;
+  title: string;
+  description: string;
+  onChange: (value: ChapterVisibility) => void;
+}
 
-  const hhmmss = value.match(/^(\d{1,2}):([0-5]\d):([0-5]\d)$/);
-  if (hhmmss) {
-    return (
-      Number(hhmmss[1]) * 3600 +
-      Number(hhmmss[2]) * 60 +
-      Number(hhmmss[3])
-    );
-  }
-
-  return null;
+function VisibilityOption({
+  value,
+  current,
+  title,
+  description,
+  onChange,
+}: VisibilityOptionProps): React.ReactElement {
+  const active = value === current;
+  return (
+    <label
+      className={
+        active ? styles.visibilityOptionActive : styles.visibilityOption
+      }
+    >
+      <input
+        type="radio"
+        name="chapter_visibility"
+        value={value}
+        checked={active}
+        onChange={() => onChange(value)}
+      />
+      <span>
+        <strong>{title}</strong>
+        <small>{description}</small>
+      </span>
+    </label>
+  );
 }
 
 /** 動画詳細ページから通常チャプターコメントを1件投稿するフォーム。 */
@@ -63,9 +76,8 @@ export function ChapterComposer({
   const [timeStr, setTimeStr] = React.useState("0:00");
   const [label, setLabel] = React.useState("");
   const [note, setNote] = React.useState("");
-  const [visibility, setVisibility] = React.useState<"public" | "private">(
-    "public",
-  );
+  const [visibility, setVisibility] =
+    React.useState<ChapterVisibility>("public");
   const [durationSeconds, setDurationSeconds] = React.useState<number | null>(
     null,
   );
@@ -75,8 +87,14 @@ export function ChapterComposer({
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
   const contextRequestRef = React.useRef(0);
+  const submittingRef = React.useRef(false);
 
   void _canBulk;
+
+  const clearFeedback = React.useCallback(() => {
+    setError(null);
+    setSuccess(null);
+  }, []);
 
   const loadContext = React.useCallback(() => {
     const requestId = contextRequestRef.current + 1;
@@ -100,6 +118,7 @@ export function ChapterComposer({
 
   React.useEffect(() => {
     contextRequestRef.current += 1;
+    submittingRef.current = false;
     setDurationSeconds(null);
     setContextError(null);
     setError(null);
@@ -128,10 +147,13 @@ export function ChapterComposer({
     open,
   ]);
 
-  const parsedTime = React.useMemo(() => parseTimeInput(timeStr), [timeStr]);
+  const parsedTime = React.useMemo(
+    () => parseChapterTimeInput(timeStr),
+    [timeStr],
+  );
   const timeError = React.useMemo(() => {
     if (parsedTime == null) {
-      return "時刻は 1:23、0:01:23、または秒数で入力してください。";
+      return "時刻は 1:23、1:23:45、または秒数で入力してください。";
     }
     if (durationSeconds != null && parsedTime > durationSeconds) {
       return `動画時間 ${formatDuration(durationSeconds)} を超えています。`;
@@ -139,13 +161,10 @@ export function ChapterComposer({
     return null;
   }, [durationSeconds, parsedTime]);
 
-  const clearFeedback = React.useCallback(() => {
-    setError(null);
-    setSuccess(null);
-  }, []);
-
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submittingRef.current) return;
+
     setSuccess(null);
     if (!canPost) {
       setError("チャプター投稿には承認済み X ID が必要です。");
@@ -170,27 +189,31 @@ export function ChapterComposer({
       return;
     }
 
-    setError(null);
     const formData = new FormData();
     formData.set("video_id", videoId);
     formData.set("chapter_time", String(parsedTime));
     formData.set("chapter_label", label.trim());
     formData.set("note", note.trim());
     formData.set("visibility", visibility);
-    formData.set("show_on_player_bar", "0");
 
+    setError(null);
+    submittingRef.current = true;
     startTransition(async () => {
-      const result = await createChapter(formData);
-      if (!result.ok) {
-        setError(result.message ?? "投稿に失敗しました。");
-        return;
+      try {
+        const result = await createChapter(formData);
+        if (!result.ok) {
+          setError(result.message ?? "投稿に失敗しました。");
+          return;
+        }
+        setLabel("");
+        setNote("");
+        setTimeStr("0:00");
+        setVisibility("public");
+        setSuccess("チャプターコメントを投稿しました。");
+        router.refresh();
+      } finally {
+        submittingRef.current = false;
       }
-      setLabel("");
-      setNote("");
-      setTimeStr("0:00");
-      setVisibility("public");
-      setSuccess("チャプターコメントを投稿しました。");
-      router.refresh();
     });
   };
 
@@ -236,14 +259,18 @@ export function ChapterComposer({
           className={styles.toggleButton}
           onClick={() => {
             setOpen((value) => !value);
-            setError(null);
-            setSuccess(null);
+            clearFeedback();
           }}
           aria-expanded={open}
           aria-controls="chapter-comment-form"
+          disabled={busy}
         >
           <span>{open ? "閉じる" : "投稿する"}</span>
-          <Icon name={open ? "chevron-up" : "chevron-down"} size={13} aria-hidden />
+          <Icon
+            name={open ? "chevron-up" : "chevron-down"}
+            size={13}
+            aria-hidden
+          />
         </button>
       </header>
 
@@ -274,7 +301,7 @@ export function ChapterComposer({
                 autoComplete="off"
                 autoCapitalize="none"
                 spellCheck={false}
-                maxLength={10}
+                maxLength={12}
                 disabled={busy}
                 required
               />
@@ -291,7 +318,7 @@ export function ChapterComposer({
               id="chapter-comment-time-help"
               className={timeError ? styles.fieldError : styles.fieldHelp}
             >
-              {timeError ?? "例: 1:23、0:01:23、83、83.5"}
+              {timeError ?? "例: 1:23、1:23:45、83、83.5"}
             </p>
           </div>
 
@@ -338,50 +365,26 @@ export function ChapterComposer({
           <fieldset className={styles.visibilityFieldset} disabled={busy}>
             <legend className={styles.label}>公開範囲</legend>
             <div className={styles.visibilityOptions}>
-              <label
-                className={
-                  visibility === "public"
-                    ? styles.visibilityOptionActive
-                    : styles.visibilityOption
-                }
-              >
-                <input
-                  type="radio"
-                  name="chapter_visibility"
-                  value="public"
-                  checked={visibility === "public"}
-                  onChange={() => {
-                    setVisibility("public");
-                    clearFeedback();
-                  }}
-                />
-                <span>
-                  <strong>公開</strong>
-                  <small>この作品を見られる全員に表示します</small>
-                </span>
-              </label>
-              <label
-                className={
-                  visibility === "private"
-                    ? styles.visibilityOptionActive
-                    : styles.visibilityOption
-                }
-              >
-                <input
-                  type="radio"
-                  name="chapter_visibility"
-                  value="private"
-                  checked={visibility === "private"}
-                  onChange={() => {
-                    setVisibility("private");
-                    clearFeedback();
-                  }}
-                />
-                <span>
-                  <strong>非公開</strong>
-                  <small>自分と作品管理者だけに表示します</small>
-                </span>
-              </label>
+              <VisibilityOption
+                value="public"
+                current={visibility}
+                title="公開"
+                description="この作品を見られる全員に表示します"
+                onChange={(value) => {
+                  setVisibility(value);
+                  clearFeedback();
+                }}
+              />
+              <VisibilityOption
+                value="private"
+                current={visibility}
+                title="非公開"
+                description="自分と作品管理者だけに表示します"
+                onChange={(value) => {
+                  setVisibility(value);
+                  clearFeedback();
+                }}
+              />
             </div>
           </fieldset>
 
@@ -394,7 +397,7 @@ export function ChapterComposer({
                 type="button"
                 className="fn-btn fn-btn-ghost fn-btn-sm"
                 onClick={loadContext}
-                disabled={contextLoading}
+                disabled={contextLoading || busy}
               >
                 <Icon name="refresh" size={11} aria-hidden />
                 再取得
