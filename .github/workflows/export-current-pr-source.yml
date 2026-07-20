@@ -21,6 +21,7 @@ jobs:
         run: |
           set -euo pipefail
           git archive --format=zip --output=/tmp/flamenode-pr-source.zip HEAD
+          git archive --format=zip --output=/tmp/flamenode-main-source.zip origin/main
           git archive --format=zip --output=/tmp/flamenode-x-identity-source.zip origin/agent/db-canonical-x-identity
           git archive --format=zip --output=/tmp/flamenode-events-source.zip origin/agent/db-canonical-events
       - name: Upload source artifacts
@@ -29,6 +30,7 @@ jobs:
           name: flamenode-integration-sources-${{ github.run_id }}
           path: |
             /tmp/flamenode-pr-source.zip
+            /tmp/flamenode-main-source.zip
             /tmp/flamenode-x-identity-source.zip
             /tmp/flamenode-events-source.zip
           retention-days: 1
