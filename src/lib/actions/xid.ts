@@ -1,15 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { getDatabase, getEnv } from "@/lib/cloudflare";
 import {
   users,
-  videos,
-  xAccountLinkRequests,
-  xUserIcons,
+  xIdentityRequests,
+  xUserAccountLinks,
   xUsers,
 } from "@/lib/db/schema";
 import type { WriteAuditLogInput } from "@/lib/audit/types";
@@ -22,11 +21,22 @@ import { validateSocialLinksJson } from "@/lib/socialLinks";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { expectedRowCondition } from "@/lib/audit/expectedRowCondition";
 import type { BatchItem } from "drizzle-orm/batch";
+import {
+  getLinkedXUserForAuthUser,
+  isAuthUserLinkedToXUser,
+} from "@/lib/auth/xIdentity";
+import {
+  validateXIdentityRequestShape,
+  type XIdentityRequestType,
+} from "@/lib/auth/xIdentityRequestCore";
+import { getXIconCandidates } from "@/lib/db/xIconResolution";
 
 export interface XIdActionResult {
   ok: boolean;
   message?: string;
 }
+
+type DB = NonNullable<ReturnType<typeof getDatabase>>;
 
 function nowUnix(): number {
   return Math.floor(Date.now() / 1000);
@@ -36,18 +46,14 @@ function xUserIdMatches(xUserId: string) {
   return sql`lower(${xUsers.id}) = ${normalizeXId(xUserId)}`;
 }
 
-async function getSessionUserId(): Promise<string | null> {
+async function getSessionAuthUserId(): Promise<string | null> {
   const session = await auth().catch(() => null);
   const user = session?.user as { id?: string } | undefined;
   return user?.id ?? null;
 }
 
-async function assertLinkedXUser(db: NonNullable<ReturnType<typeof getDatabase>>, xUserId: string, userId: string) {
-  const row = (
-    await db.select().from(xUsers).where(xUserIdMatches(xUserId)).limit(1)
-  )[0];
-  if (!row || row.linked_user_id !== userId) return null;
-  return row;
+async function getLinkedXUser(db: DB, xUserId: string, authUserId: string) {
+  return getLinkedXUserForAuthUser(db, authUserId, xUserId);
 }
 
 function buildXUserProfileUpdate(values: {
@@ -69,11 +75,19 @@ function buildXUserProfileUpdate(values: {
   };
 }
 
-export async function setActiveXId(
-  formData: FormData,
-): Promise<XIdActionResult> {
-  const userId = await getSessionUserId();
-  if (!userId) return { ok: false, message: "ログインが必要です。" };
+function revalidateXIdentityPaths(xUserId?: string): void {
+  revalidatePath("/");
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/settings");
+  revalidatePath("/onboarding");
+  revalidatePath("/admin/x-link-requests");
+  revalidatePath("/manage/x-link-requests");
+  if (xUserId) revalidatePath(`/user/${xUserId}`);
+}
+
+export async function setActiveXId(formData: FormData): Promise<XIdActionResult> {
+  const authUserId = await getSessionAuthUserId();
+  if (!authUserId) return { ok: false, message: "ログインが必要です。" };
 
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   if (!xUserId) return { ok: false, message: "X ID が指定されていません。" };
@@ -81,118 +95,146 @@ export async function setActiveXId(
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
 
-  const xRow = await assertLinkedXUser(db, xUserId, userId);
+  const xRow = await getLinkedXUser(db, xUserId, authUserId);
   if (!xRow) {
-    return {
-      ok: false,
-      message: "この X ID は現在のアカウントに紐づいていません。",
-    };
+    return { ok: false, message: "この X ID は現在のアカウントに紐づいていません。" };
   }
-  if (xRow.approval_status === "rejected") {
-    return {
-      ok: false,
-      message: "却下された X ID はアクティブにできません。",
-    };
+  if (xRow.approval_status !== "approved") {
+    return { ok: false, message: "承認済みの X ID だけをアクティブにできます。" };
   }
 
-  const beforeUser = (await db.select().from(users).where(eq(users.id, userId)).limit(1))[0];
+  const beforeUser = (
+    await db.select().from(users).where(eq(users.id, authUserId)).limit(1)
+  )[0];
   if (!beforeUser) return { ok: false, message: "ユーザーが見つかりません。" };
+  if (normalizeXId(beforeUser.active_x_user_id) === xUserId) {
+    return { ok: true, message: "すでにこの X ID がアクティブです。" };
+  }
+
   const afterUser = { ...beforeUser, active_x_user_id: xUserId };
   await mutateWithAudit(db, {
-    mutationStatements: [db.update(users).set({ active_x_user_id: xUserId }).where(
-      expectedRowCondition({ expectedCurrent: beforeUser }),
-    )],
+    mutationStatements: [
+      db
+        .update(users)
+        .set({ active_x_user_id: xUserId })
+        .where(expectedRowCondition({ expectedCurrent: beforeUser })),
+    ],
     expectedMutationChanges: [1],
-    audits: [{ table_name: "user", target_id: userId, operation: "UPDATE", before: { ...beforeUser }, after: { ...afterUser }, actor_user_id: userId, retention_class: "normal" }],
+    audits: [
+      {
+        table_name: "user",
+        target_id: authUserId,
+        operation: "UPDATE",
+        before: { ...beforeUser },
+        after: { ...afterUser },
+        actor_user_id: authUserId,
+        retention_class: "normal",
+      },
+    ],
   });
 
-  revalidatePath("/");
-  revalidatePath("/dashboard");
-  revalidatePath("/dashboard/settings");
+  revalidateXIdentityPaths(xUserId);
   return { ok: true, message: "アクティブ X ID を切り替えました。" };
 }
 
-export async function requestXIdLink(
-  formData: FormData,
-): Promise<XIdActionResult> {
-  const userId = await getSessionUserId();
-  if (!userId) return { ok: false, message: "ログインが必要です。" };
+const requestKindSchema = z.enum(["new", "existing", "alias", "merge"]);
 
-  const requestedXId = normalizeXId(String(formData.get("x_id") ?? ""));
-  if (!requestedXId || !/^[a-z0-9_]{1,20}$/.test(requestedXId)) {
+export async function requestXIdLink(formData: FormData): Promise<XIdActionResult> {
+  const authUserId = await getSessionAuthUserId();
+  if (!authUserId) return { ok: false, message: "ログインが必要です。" };
+
+  const requestedXUserId = normalizeXId(String(formData.get("x_id") ?? ""));
+  if (!requestedXUserId || !/^[a-z0-9_]{1,20}$/.test(requestedXUserId)) {
     return {
       ok: false,
       message: "X ID は英数字とアンダースコア 1 から 20 文字で入力してください。",
     };
   }
 
-  const parsedLinkType = z
-    .enum(["new", "merge", "alias"])
-    .safeParse(String(formData.get("link_type") ?? "new"));
-  if (!parsedLinkType.success) {
-    return { ok: false, message: "不正な連携種別です。" };
-  }
-  const linkType = parsedLinkType.data;
-  const targetXUserId = normalizeXId(
-    String(formData.get("target_x_user_id") ?? ""),
+  const parsedKind = requestKindSchema.safeParse(
+    String(formData.get("request_type") ?? formData.get("link_type") ?? "new"),
   );
+  if (!parsedKind.success) return { ok: false, message: "不正な申請種別です。" };
 
+  const targetXUserId = normalizeXId(String(formData.get("target_x_user_id") ?? ""));
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
 
-  const existingUser = (
-    await db.select().from(xUsers).where(xUserIdMatches(requestedXId)).limit(1)
+  const existingXUser = (
+    await db.select().from(xUsers).where(xUserIdMatches(requestedXUserId)).limit(1)
   )[0];
-  if (existingUser?.linked_user_id === userId) {
-    return {
-      ok: false,
-      message: "この X ID はすでに現在のアカウントに紐づいています。",
-    };
-  }
-  if (
-    existingUser?.linked_user_id &&
-    existingUser.linked_user_id !== userId &&
-    linkType !== "merge"
-  ) {
-    return {
-      ok: false,
-      message: "この X ID は別の Discord アカウントに紐づいています。統合申請を選んでください。",
-    };
+
+  let requestType: XIdentityRequestType;
+  let sourceXUserId: string | null = null;
+  let requestedXId: string | null = requestedXUserId;
+
+  if (parsedKind.data === "alias") {
+    requestType = "alias";
+    if (!targetXUserId) return { ok: false, message: "別名の追加先 X ID が必要です。" };
+    if (!(await isAuthUserLinkedToXUser(db, authUserId, targetXUserId))) {
+      return { ok: false, message: "自分に紐づく X ID にだけ別名を追加できます。" };
+    }
+    if (existingXUser) {
+      return { ok: false, message: "別名として申請する X ID はすでに登録されています。" };
+    }
+  } else if (parsedKind.data === "merge") {
+    requestType = "merge";
+    sourceXUserId = requestedXUserId;
+    requestedXId = null;
+    if (!targetXUserId) return { ok: false, message: "統合先 X ID が必要です。" };
+    if (!existingXUser) return { ok: false, message: "統合元 X ID が見つかりません。" };
+    const [ownsSource, ownsTarget] = await Promise.all([
+      isAuthUserLinkedToXUser(db, authUserId, sourceXUserId),
+      isAuthUserLinkedToXUser(db, authUserId, targetXUserId),
+    ]);
+    if (!ownsSource || !ownsTarget) {
+      return { ok: false, message: "自分に紐づく X ID 同士だけを統合申請できます。" };
+    }
+  } else {
+    requestType = existingXUser ? "existing_link" : "new_link";
+    if (await isAuthUserLinkedToXUser(db, authUserId, requestedXUserId)) {
+      return { ok: false, message: "この X ID はすでに現在のアカウントに紐づいています。" };
+    }
   }
 
-  const dupPending = (
+  const shapeError = validateXIdentityRequestShape({
+    requestType,
+    requestedXId,
+    sourceXUserId,
+    targetXUserId: targetXUserId || null,
+  });
+  if (shapeError) return { ok: false, message: shapeError };
+
+  const duplicateConditions = [
+    eq(xIdentityRequests.requested_by_auth_user_id, authUserId),
+    eq(xIdentityRequests.request_type, requestType),
+    eq(xIdentityRequests.status, "pending"),
+  ];
+  if (requestedXId) duplicateConditions.push(eq(xIdentityRequests.requested_x_id, requestedXId));
+  if (sourceXUserId) duplicateConditions.push(eq(xIdentityRequests.source_x_user_id, sourceXUserId));
+  if (targetXUserId) duplicateConditions.push(eq(xIdentityRequests.target_x_user_id, targetXUserId));
+  const duplicate = (
     await db
-      .select()
-      .from(xAccountLinkRequests)
-      .where(
-        and(
-          eq(xAccountLinkRequests.user_id, userId),
-          sql`lower(${xAccountLinkRequests.requested_x_id}) = ${requestedXId}`,
-          eq(xAccountLinkRequests.status, "pending"),
-        )!,
-      )
+      .select({ id: xIdentityRequests.id })
+      .from(xIdentityRequests)
+      .where(and(...duplicateConditions)!)
       .limit(1)
   )[0];
-  if (dupPending) {
-    return {
-      ok: true,
-      message: "同じ X ID の連携申請がすでに承認待ちです。",
-    };
-  }
+  if (duplicate) return { ok: true, message: "同じ内容の申請がすでに承認待ちです。" };
 
   const pendingCountRows = await db
     .select({ count: sql<number>`COUNT(*)` })
-    .from(xAccountLinkRequests)
+    .from(xIdentityRequests)
     .where(
       and(
-        eq(xAccountLinkRequests.user_id, userId),
-        eq(xAccountLinkRequests.status, "pending"),
+        eq(xIdentityRequests.requested_by_auth_user_id, authUserId),
+        eq(xIdentityRequests.status, "pending"),
       )!,
     );
   if (Number(pendingCountRows[0]?.count ?? 0) >= 5) {
     return {
       ok: false,
-      message: "未処理の X ID 申請が多すぎます。承認または却下を待ってから再申請してください。",
+      message: "未処理の X ID 申請が多すぎます。処理を待ってから再申請してください。",
     };
   }
 
@@ -200,292 +242,334 @@ export async function requestXIdLink(
   const id = generateId("xreq");
   const afterRequest = {
     id,
-    user_id: userId,
+    request_type: requestType,
+    requested_by_auth_user_id: authUserId,
     requested_x_id: requestedXId,
-    link_type: linkType,
+    source_x_user_id: sourceXUserId,
     target_x_user_id: targetXUserId || null,
+    parent_request_id: null,
+    restore_snapshot_json: null,
+    revert_deadline_at: null,
     status: "pending" as const,
     requested_at: now,
+    updated_at: now,
   };
   await mutateWithAudit(db, {
-    mutationStatements: [db.insert(xAccountLinkRequests).values(afterRequest)],
+    mutationStatements: [db.insert(xIdentityRequests).values(afterRequest)],
     expectedMutationChanges: [1],
-    audits: [{ table_name: "x_account_link_requests", target_id: id, operation: "CREATE", before: null, after: { ...afterRequest }, actor_user_id: userId, retention_class: "long_audit" }],
+    audits: [
+      {
+        table_name: "x_identity_requests",
+        target_id: id,
+        operation: "CREATE",
+        before: null,
+        after: { ...afterRequest },
+        actor_user_id: authUserId,
+        retention_class: "long_audit",
+      },
+    ],
   });
 
-  revalidatePath("/dashboard/settings");
-  revalidatePath("/onboarding");
-  return {
-    ok: true,
-    message: "連携申請を受け付けました。承認後、一覧に表示されます。",
-  };
+  revalidateXIdentityPaths(requestedXUserId);
+  return { ok: true, message: "X ID 申請を受け付けました。" };
 }
 
-export async function updateXIdProfile(
-  formData: FormData,
-): Promise<XIdActionResult> {
-  const userId = await getSessionUserId();
-  if (!userId) return { ok: false, message: "ログインが必要です。" };
+export async function requestXIdMergeRevert(formData: FormData): Promise<XIdActionResult> {
+  const authUserId = await getSessionAuthUserId();
+  if (!authUserId) return { ok: false, message: "ログインが必要です。" };
+  const parentRequestId = String(formData.get("parent_request_id") ?? "").trim();
+  if (!parentRequestId) return { ok: false, message: "統合申請 ID が必要です。" };
+
+  const db = getDatabase();
+  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const parent = (
+    await db.select().from(xIdentityRequests).where(eq(xIdentityRequests.id, parentRequestId)).limit(1)
+  )[0];
+  if (!parent || parent.request_type !== "merge" || parent.status !== "done") {
+    return { ok: false, message: "差し戻し可能な統合申請が見つかりません。" };
+  }
+  const now = nowUnix();
+  if (!parent.restore_snapshot_json || !parent.revert_deadline_at || parent.revert_deadline_at < now) {
+    return { ok: false, message: "統合の差し戻し期限を過ぎています。" };
+  }
+  if (!parent.target_x_user_id || !(await isAuthUserLinkedToXUser(db, authUserId, parent.target_x_user_id))) {
+    return { ok: false, message: "この統合を差し戻す権限がありません。" };
+  }
+  const existing = (
+    await db
+      .select({ id: xIdentityRequests.id })
+      .from(xIdentityRequests)
+      .where(
+        and(
+          eq(xIdentityRequests.request_type, "revert_merge"),
+          eq(xIdentityRequests.parent_request_id, parentRequestId),
+          eq(xIdentityRequests.status, "pending"),
+        )!,
+      )
+      .limit(1)
+  )[0];
+  if (existing) return { ok: true, message: "差し戻し申請はすでに承認待ちです。" };
+
+  const id = generateId("xrevert");
+  const afterRequest = {
+    id,
+    request_type: "revert_merge" as const,
+    requested_by_auth_user_id: authUserId,
+    requested_x_id: null,
+    source_x_user_id: parent.source_x_user_id,
+    target_x_user_id: parent.target_x_user_id,
+    parent_request_id: parent.id,
+    restore_snapshot_json: parent.restore_snapshot_json,
+    revert_deadline_at: parent.revert_deadline_at,
+    status: "pending" as const,
+    requested_at: now,
+    updated_at: now,
+  };
+  await mutateWithAudit(db, {
+    mutationStatements: [db.insert(xIdentityRequests).values(afterRequest)],
+    expectedMutationChanges: [1],
+    audits: [
+      {
+        table_name: "x_identity_requests",
+        target_id: id,
+        operation: "CREATE",
+        before: null,
+        after: { ...afterRequest },
+        actor_user_id: authUserId,
+        retention_class: "long_audit",
+      },
+    ],
+  });
+  revalidateXIdentityPaths(parent.target_x_user_id ?? undefined);
+  revalidatePath("/admin/x-id-merges");
+  return { ok: true, message: "統合の差し戻し申請を受け付けました。" };
+}
+
+export async function updateXIdProfile(formData: FormData): Promise<XIdActionResult> {
+  const authUserId = await getSessionAuthUserId();
+  if (!authUserId) return { ok: false, message: "ログインが必要です。" };
 
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   const xName = String(formData.get("x_name") ?? "").trim().slice(0, 80);
-  const profileText = String(formData.get("profile_text") ?? "")
-    .trim()
-    .slice(0, 2000);
+  const profileText = String(formData.get("profile_text") ?? "").trim().slice(0, 2000);
   const portfolioContact = normalizePortfolioContact(
     String(formData.get("portfolio_contact") ?? "").slice(0, 1200),
   );
-  const youtubeChannelRaw = String(
-    formData.get("youtube_channel_url") ?? "",
-  ).trim();
-  const otherSocialLinksRaw = String(
-    formData.get("other_social_links") ?? "",
-  ).trim();
+  const youtubeChannelRaw = String(formData.get("youtube_channel_url") ?? "").trim();
+  const otherSocialLinksRaw = String(formData.get("other_social_links") ?? "").trim();
   const youtubeChannelUrl = youtubeChannelRaw
     ? normalizeHttpUrl(youtubeChannelRaw, { maxLength: 500 })
     : null;
   const otherSocialLinks = validateSocialLinksJson(otherSocialLinksRaw);
 
-  if (!xUserId) {
-    return { ok: false, message: "X ID が必要です。" };
-  }
+  if (!xUserId) return { ok: false, message: "X ID が必要です。" };
   if (youtubeChannelRaw && !youtubeChannelUrl) {
-    return {
-      ok: false,
-      message: "YouTube チャンネル URL は http/https の有効な URL を入力してください。",
-    };
+    return { ok: false, message: "YouTube チャンネル URL が不正です。" };
   }
   if (!otherSocialLinks.ok) {
-    return {
-      ok: false,
-      message:
-        otherSocialLinks.message ??
-        "SNS リンクには http/https または mailto の有効な URL を入力してください。",
-    };
+    return { ok: false, message: otherSocialLinks.message ?? "SNS リンクが不正です。" };
   }
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
-  const row = await assertLinkedXUser(db, xUserId, userId);
-  if (!row) {
-    return { ok: false, message: "この X ID を編集する権限がありません。" };
-  }
-  const displayName = xName || String(row.x_name ?? "").trim() || xUserId;
+  const linked = await getLinkedXUser(db, xUserId, authUserId);
+  if (!linked) return { ok: false, message: "この X ID を編集する権限がありません。" };
+  const row = (await db.select().from(xUsers).where(eq(xUsers.id, xUserId)).limit(1))[0];
+  if (!row) return { ok: false, message: "X ID が見つかりません。" };
 
-  const profileValues = {
-    displayName,
+  const updateValues = buildXUserProfileUpdate({
+    displayName: xName || row.x_name?.trim() || `@${xUserId}`,
     profileText: profileText || null,
     portfolioContact,
     youtubeChannelUrl,
     otherSocialLinks: otherSocialLinks.value,
-  };
-  const updateValues = buildXUserProfileUpdate(profileValues);
+  });
   const after = { ...row, ...updateValues };
   await mutateWithAudit(db, {
-    mutationStatements: [db.update(xUsers).set(updateValues).where(
-      expectedRowCondition({ expectedCurrent: row }),
-    )],
+    mutationStatements: [
+      db.update(xUsers).set(updateValues).where(expectedRowCondition({ expectedCurrent: row })),
+    ],
     expectedMutationChanges: [1],
-    audits: [{ table_name: "x_users", target_id: row.id, operation: "UPDATE", before: { ...row }, after: { ...after }, actor_user_id: userId, retention_class: "long_audit" }],
+    audits: [
+      {
+        table_name: "x_users",
+        target_id: row.id,
+        operation: "UPDATE",
+        before: { ...row },
+        after: { ...after },
+        actor_user_id: authUserId,
+        retention_class: "long_audit",
+      },
+    ],
   });
 
-  revalidatePath("/dashboard/settings");
-  revalidatePath(`/user/${xUserId}`);
+  revalidateXIdentityPaths(xUserId);
   return { ok: true, message: "X ID のプロフィールを更新しました。" };
-}export async function deleteLinkedXId(
-  formData: FormData,
-): Promise<XIdActionResult> {
-  const userId = await getSessionUserId();
-  if (!userId) return { ok: false, message: "ログインが必要です。" };
+}
 
+export async function deleteLinkedXId(formData: FormData): Promise<XIdActionResult> {
+  const authUserId = await getSessionAuthUserId();
+  if (!authUserId) return { ok: false, message: "ログインが必要です。" };
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   const confirm = String(formData.get("confirm") ?? "").trim();
   if (!xUserId || confirm !== `DELETE ${xUserId}`) {
-    return {
-      ok: false,
-      message: `確認のため DELETE ${xUserId} と入力してください。`,
-    };
+    return { ok: false, message: `確認のため DELETE ${xUserId} と入力してください。` };
   }
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
-  const row = await assertLinkedXUser(db, xUserId, userId);
-  if (!row) {
-    return { ok: false, message: "この X ID の連携を削除できません。" };
-  }
+  const link = (
+    await db
+      .select()
+      .from(xUserAccountLinks)
+      .where(
+        and(
+          eq(xUserAccountLinks.x_user_id, xUserId),
+          eq(xUserAccountLinks.auth_user_id, authUserId),
+        )!,
+      )
+      .limit(1)
+  )[0];
+  if (!link) return { ok: false, message: "この X ID の連携を削除できません。" };
 
-  const beforeUser = (await db.select().from(users).where(eq(users.id, userId)).limit(1))[0];
+  const beforeUser = (
+    await db.select().from(users).where(eq(users.id, authUserId)).limit(1)
+  )[0];
   if (!beforeUser) return { ok: false, message: "ユーザーが見つかりません。" };
-  const afterXUser = { ...row, linked_user_id: null, approval_status: "pending" as const };
-  const mutationStatements: BatchItem<"sqlite">[] = [db.update(xUsers).set({ linked_user_id: null, approval_status: "pending" }).where(expectedRowCondition({ expectedCurrent: row }))];
-  const expectedMutationChanges = [1];
-  const audits: WriteAuditLogInput[] = [{ table_name: "x_users", target_id: row.id, operation: "UPDATE", before: { ...row }, after: { ...afterXUser }, actor_user_id: userId, retention_class: "long_audit" }];
+  const mutationStatements: BatchItem<"sqlite">[] = [
+    db
+      .delete(xUserAccountLinks)
+      .where(
+        and(
+          eq(xUserAccountLinks.x_user_id, xUserId),
+          eq(xUserAccountLinks.auth_user_id, authUserId),
+        )!,
+      ),
+  ];
+  const expectedMutationChanges: Array<number | null> = [1];
+  const audits: WriteAuditLogInput[] = [
+    {
+      table_name: "x_user_account_links",
+      target_id: `${xUserId}:${authUserId}`,
+      operation: "DELETE",
+      before: { ...link },
+      after: null,
+      actor_user_id: authUserId,
+      retention_class: "long_audit",
+    },
+  ];
   if (normalizeXId(beforeUser.active_x_user_id) === xUserId) {
     const afterUser = { ...beforeUser, active_x_user_id: null };
-    mutationStatements.push(db.update(users).set({ active_x_user_id: null }).where(expectedRowCondition({ expectedCurrent: beforeUser })));
+    mutationStatements.push(
+      db
+        .update(users)
+        .set({ active_x_user_id: null })
+        .where(expectedRowCondition({ expectedCurrent: beforeUser })),
+    );
     expectedMutationChanges.push(1);
-    audits.push({ table_name: "user", target_id: userId, operation: "UPDATE", before: { ...beforeUser }, after: { ...afterUser }, actor_user_id: userId, retention_class: "long_audit" });
+    audits.push({
+      table_name: "user",
+      target_id: authUserId,
+      operation: "UPDATE",
+      before: { ...beforeUser },
+      after: { ...afterUser },
+      actor_user_id: authUserId,
+      retention_class: "long_audit",
+    });
   }
-  await mutateWithAudit(db, {
-    mutationStatements,
-    expectedMutationChanges,
-    audits,
-  });
-
-  revalidatePath("/dashboard/settings");
-  revalidatePath("/dashboard");
-  revalidatePath("/");
-  revalidatePath(`/user/${xUserId}`);
-  return { ok: true, message: "X ID 連携を削除しました。" };
+  await mutateWithAudit(db, { mutationStatements, expectedMutationChanges, audits });
+  revalidateXIdentityPaths(xUserId);
+  return { ok: true, message: "現在の認証アカウントとの X ID 連携を削除しました。" };
 }
 
-export async function setXIdIcon(
-  formData: FormData,
-): Promise<XIdActionResult> {
-  const userId = await getSessionUserId();
-  if (!userId) return { ok: false, message: "ログインが必要です。" };
-
+export async function setXIdIcon(formData: FormData): Promise<XIdActionResult> {
+  const authUserId = await getSessionAuthUserId();
+  if (!authUserId) return { ok: false, message: "ログインが必要です。" };
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   const iconUrl = String(formData.get("icon_url") ?? "").trim();
-  if (!xUserId || !iconUrl) {
-    return { ok: false, message: "X ID とアイコンが必要です。" };
-  }
+  if (!xUserId || !iconUrl) return { ok: false, message: "X ID とアイコンが必要です。" };
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
-  const row = await assertLinkedXUser(db, xUserId, userId);
-  if (!row) {
+  if (!(await getLinkedXUser(db, xUserId, authUserId))) {
     return { ok: false, message: "この X ID を編集する権限がありません。" };
   }
-
-  const candidates = new Set<string>();
-  if (row.icon_url) candidates.add(row.icon_url);
-
-  const iconRows = await db
-    .select({ icon_url: xUserIcons.icon_url })
-    .from(xUserIcons)
-    .where(sql`lower(${xUserIcons.x_user_id}) = ${xUserId}`)
-    .orderBy(desc(xUserIcons.created_at))
-    .limit(40);
-  iconRows.forEach((r) => candidates.add(r.icon_url));
-
-  const videoRows = await db
-    .select({ icon_url: videos.creator_icon_url })
-    .from(videos)
-    .where(
-      and(
-        sql`lower(${videos.creator_x_user_id}) = ${xUserId}`,
-        isNotNull(videos.creator_icon_url),
-      )!,
-    )
-    .orderBy(desc(videos.created_at))
-    .limit(40);
-  videoRows.forEach((r) => {
-    if (r.icon_url) candidates.add(r.icon_url);
-  });
-
-  if (!candidates.has(iconUrl)) {
-    return { ok: false, message: "選択できないアイコンです。" };
-  }
+  const row = (await db.select().from(xUsers).where(eq(xUsers.id, xUserId)).limit(1))[0];
+  if (!row) return { ok: false, message: "X ID が見つかりません。" };
+  const candidates = await getXIconCandidates(db, xUserId, 40);
+  if (!candidates.includes(iconUrl)) return { ok: false, message: "選択できないアイコンです。" };
 
   const after = { ...row, icon_url: iconUrl };
   await mutateWithAudit(db, {
-    mutationStatements: [db.update(xUsers).set({ icon_url: iconUrl }).where(expectedRowCondition({ expectedCurrent: row }))],
+    mutationStatements: [
+      db.update(xUsers).set({ icon_url: iconUrl }).where(expectedRowCondition({ expectedCurrent: row })),
+    ],
     expectedMutationChanges: [1],
-    audits: [{ table_name: "x_users", target_id: row.id, operation: "UPDATE", before: { ...row }, after: { ...after }, actor_user_id: userId, reason: "icon_select", retention_class: "long_audit" }],
+    audits: [
+      {
+        table_name: "x_users",
+        target_id: row.id,
+        operation: "UPDATE",
+        before: { ...row },
+        after: { ...after },
+        actor_user_id: authUserId,
+        reason: "icon_select",
+        retention_class: "long_audit",
+      },
+    ],
   });
-
-  revalidatePath("/dashboard/settings");
-  revalidatePath("/dashboard");
-  revalidatePath("/");
-  revalidatePath(`/user/${xUserId}`);
+  revalidateXIdentityPaths(xUserId);
   return { ok: true, message: "アイコンを更新しました。" };
 }
 
 export async function uploadXIdIcon(
   formData: FormData,
 ): Promise<XIdActionResult & { iconUrl?: string }> {
-  const userId = await getSessionUserId();
-  if (!userId) return { ok: false, message: "ログインが必要です。" };
-
+  const authUserId = await getSessionAuthUserId();
+  if (!authUserId) return { ok: false, message: "ログインが必要です。" };
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   const file = formData.get("icon_file");
-  if (!xUserId || !(file instanceof File)) {
-    return { ok: false, message: "画像ファイルが必要です。" };
-  }
+  if (!xUserId || !(file instanceof File)) return { ok: false, message: "画像ファイルが必要です。" };
+  if (file.size > 2 * 1024 * 1024) return { ok: false, message: "2MB 以内の画像を選んでください。" };
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
-  const row = await assertLinkedXUser(db, xUserId, userId);
-  if (!row) {
+  if (!(await getLinkedXUser(db, xUserId, authUserId))) {
     return { ok: false, message: "この X ID を編集する権限がありません。" };
   }
-
-  if (file.size > 2 * 1024 * 1024) {
-    return { ok: false, message: "2MB 以内の画像を選んでください。" };
-  }
-
-  const manualIconCount = await db
-    .select({ count: sql<number>`COUNT(*)` })
-    .from(xUserIcons)
-    .where(
-      and(
-        sql`lower(${xUserIcons.x_user_id}) = ${xUserId}`,
-        eq(xUserIcons.source_type, "manual"),
-      )!,
-    );
-  if (Number(manualIconCount[0]?.count ?? 0) >= 24) {
-    return {
-      ok: false,
-      message: "手動アップロードの候補が上限に達しています。既存候補から選択してください。",
-    };
-  }
+  const row = (await db.select().from(xUsers).where(eq(xUsers.id, xUserId)).limit(1))[0];
+  if (!row) return { ok: false, message: "X ID が見つかりません。" };
 
   const env = getEnv();
-  if (!env.BUCKET) {
-    return { ok: false, message: "ストレージが利用できません。" };
-  }
-
+  if (!env.BUCKET) return { ok: false, message: "ストレージが利用できません。" };
   const buffer = await file.arrayBuffer();
   const image = detectSupportedImageUpload(buffer);
-  if (!image) {
-    return {
-      ok: false,
-      message: "PNG/JPEG/WEBP 画像ファイルのみアップロードできます。",
-    };
-  }
+  if (!image) return { ok: false, message: "PNG/JPEG/WEBP 画像ファイルのみアップロードできます。" };
 
   const objectId = generateId("xicon");
-  const stagingKey = `xicons/staging/${userId}/${objectId}.${image.ext}`;
+  const stagingKey = `xicons/staging/${authUserId}/${objectId}.${image.ext}`;
   const key = `xicons/${xUserId}/${objectId}.${image.ext}`;
   const iconUrl = `/api/media/${key}`;
-
-  const now = nowUnix();
-  const afterIcon = {
-    id: objectId,
-    x_user_id: xUserId,
-    icon_url: iconUrl,
-    source_video_id: null,
-    source_type: "manual" as const,
-    created_at: now,
-  };
-  const afterXUser = { ...row, icon_url: iconUrl };
+  const after = { ...row, icon_url: iconUrl };
   try {
-    await env.BUCKET.put(stagingKey, buffer, {
-      httpMetadata: { contentType: image.contentType },
-    });
-    await env.BUCKET.put(key, buffer, {
-      httpMetadata: { contentType: image.contentType },
-    });
+    await env.BUCKET.put(stagingKey, buffer, { httpMetadata: { contentType: image.contentType } });
+    await env.BUCKET.put(key, buffer, { httpMetadata: { contentType: image.contentType } });
     await mutateWithAudit(db, {
       mutationStatements: [
-        db.insert(xUserIcons).values(afterIcon),
         db.update(xUsers).set({ icon_url: iconUrl }).where(expectedRowCondition({ expectedCurrent: row })),
       ],
-      expectedMutationChanges: [1, 1],
+      expectedMutationChanges: [1],
       audits: [
-        { table_name: "x_user_icons", target_id: objectId, operation: "CREATE", before: null, after: { ...afterIcon }, actor_user_id: userId, retention_class: "long_audit" },
-        { table_name: "x_users", target_id: row.id, operation: "UPDATE", before: { ...row }, after: { ...afterXUser }, actor_user_id: userId, reason: "icon_upload", retention_class: "long_audit" },
+        {
+          table_name: "x_users",
+          target_id: row.id,
+          operation: "UPDATE",
+          before: { ...row },
+          after: { ...after },
+          actor_user_id: authUserId,
+          reason: "icon_upload",
+          retention_class: "long_audit",
+        },
       ],
     });
   } catch (error) {
@@ -495,14 +579,6 @@ export async function uploadXIdIcon(
   await env.BUCKET.delete(stagingKey).catch((error) => {
     console.warn("[uploadXIdIcon] staging cleanup failed", error);
   });
-
-  revalidatePath("/dashboard/settings");
-  revalidatePath("/dashboard");
-  revalidatePath("/");
-  revalidatePath(`/user/${xUserId}`);
-  return {
-    ok: true,
-    message: "アイコンをアップロードしました。",
-    iconUrl,
-  };
+  revalidateXIdentityPaths(xUserId);
+  return { ok: true, message: "アイコンをアップロードしました。", iconUrl };
 }

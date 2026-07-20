@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { and, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { getApprovedXIds } from "@/lib/auth/ownership";
+import { getLinkedXUsersForAuthUser } from "@/lib/auth/xIdentity";
 import styles from "./page.module.css";
 import { getDatabase } from "@/lib/cloudflare";
 import {
@@ -38,7 +39,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
   const activeX = user.active_x_user_id ?? null;
   let activeGalleryXId: string | null = null;
 
-  let xIds: (typeof xUsersTable.$inferSelect)[] = [];
+  let xIds: Array<{ id: string; x_name: string; icon_url: string | null; approval_status: string | null }> = [];
   let myVideos: VideoCardData[] = [];
   let mySlot: SlotGroupRow | null = null;
   let mySlotEvent: typeof eventsTable.$inferSelect | null = null;
@@ -56,10 +57,12 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
 
   if (db) {
     try {
-      xIds = await db
-        .select()
-        .from(xUsersTable)
-        .where(eq(xUsersTable.linked_user_id, user.id));
+      xIds = (await getLinkedXUsersForAuthUser(db, user.id)).map((row) => ({
+        id: row.x_user_id,
+        x_name: row.x_name,
+        icon_url: row.icon_url,
+        approval_status: row.approval_status,
+      }));
 
       // マイ・ギャラリーは現在の活動名義を確認する場所なので、
       // 表示対象をアクティブかつ承認済みの X ID に固定する。

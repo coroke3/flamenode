@@ -20,7 +20,6 @@ test("active migrations apply cleanly and match schema.ts manifests", () => {
     "0041_youtube_quota_budget.sql",
     "0042_event_youtube_playlist_sync.sql",
     "0043_db_canonical_migration.sql",
-    "0044_simplify_visibility_statuses.sql",
   ]);
   assert.equal(result.tableCount, 41);
   assert.equal(result.columnCount, 409);

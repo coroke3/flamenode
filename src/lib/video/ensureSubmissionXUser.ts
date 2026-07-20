@@ -24,7 +24,6 @@ export async function buildSubmissionXUserPlan(
   if (!args.xId || args.allowProfileUpdate === false) {
     return emptyVideoAtomicWritePlan();
   }
-  const now = Math.floor(Date.now() / 1000);
   const hasSocialLinksInput = args.socialLinks != null;
   const socialLinks = hasSocialLinksInput
     ? normalizeSocialLinksForStorage(args.socialLinks)
@@ -43,11 +42,7 @@ export async function buildSubmissionXUserPlan(
       youtube_channel_url: args.youtubeChannelUrl || null,
       other_social_links: socialLinks,
       creative_start_date: null,
-      linked_user_id: null,
-      verification_token: null,
-      token_expires_at: null,
       approval_status: "pending",
-      approval_requested_at: now,
     };
     return {
       statements: [db.insert(xUsers).values(after)],

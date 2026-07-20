@@ -47,10 +47,11 @@ function git(args) {
 }
 
 function checkAppliedMigrationChanges(migrationFiles) {
-  const baseBranch = process.env.GITHUB_BASE_REF?.trim();
+  // PRのbaseが統合作業ブランチでも、main未適用migrationは修正可能にする。
+  // mainへ既に存在するactive migrationだけを不変として扱う。
   const explicitBase = process.env.DB_HISTORY_BASE_REF?.trim();
-  const baseRef = explicitBase || (baseBranch ? `origin/${baseBranch}` : "");
-  if (!baseRef) return;
+  const baseRef = explicitBase || "origin/main";
+  if (git(["rev-parse", "--verify", baseRef]) === null) return;
 
   for (const migrationName of migrationFiles) {
     const baseBody = git(["show", `${baseRef}:migrations/${migrationName}`]);
@@ -58,7 +59,7 @@ function checkAppliedMigrationChanges(migrationFiles) {
     const currentBody = fs.readFileSync(path.join(migrationsDir, migrationName), "utf8").trim();
     if (baseBody.trim() !== currentBody) {
       errors.push(
-        `${migrationName}: base ref ${baseRef} に存在するactive migrationは変更できません。新しい連番migrationを追加してください。`,
+        `${migrationName}: ${baseRef}へ適用済みのactive migrationは変更できません。新しい連番migrationを追加してください。`,
       );
     }
   }

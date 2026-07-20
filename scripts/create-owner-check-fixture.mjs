@@ -7,17 +7,34 @@ import { DatabaseSync } from "node:sqlite";
 const root = process.cwd();
 const outDir = path.join(root, ".tmp");
 const outPath = path.join(outDir, "owner-check.sqlite");
-const baselinePath = path.join(
-  root,
-  "migrations/0000_flame_node_baseline.sql",
-);
+const migrationsDir = path.join(root, "migrations");
 
 fs.mkdirSync(outDir, { recursive: true });
 if (fs.existsSync(outPath)) fs.unlinkSync(outPath);
 
 const db = new DatabaseSync(outPath);
-const baseline = fs.readFileSync(baselinePath, "utf8");
-db.exec(baseline);
+db.exec("PRAGMA foreign_keys = ON");
+for (const migrationName of fs
+  .readdirSync(migrationsDir, { withFileTypes: true })
+  .filter((entry) => entry.isFile() && entry.name.endsWith(".sql"))
+  .map((entry) => entry.name)
+  .sort()) {
+  const sqlText = fs.readFileSync(path.join(migrationsDir, migrationName), "utf8");
+  if (migrationName !== "0043_db_canonical_migration.sql") {
+    db.exec(sqlText);
+    continue;
+  }
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.exec(sqlText);
+    db.exec("COMMIT");
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {}
+    throw error;
+  }
+}
 
 const now = Math.floor(Date.now() / 1000);
 db.prepare(
@@ -27,32 +44,34 @@ db.prepare(
     created_at
   ) VALUES (?, ?, ?, NULL, NULL, 'user', '1', 0, 1, 0, 0, ?)`,
 ).run("usr_owner", "Owner", "owner@example.com", now);
-
 db.prepare(
-  `INSERT INTO x_users (
-    id, x_name, approval_status, approval_requested_at
-  ) VALUES (?, ?, 'approved', ?)`,
-).run("owner_x", "@owner_x", now);
-
+  `INSERT INTO x_users (id, x_name, approval_status)
+   VALUES (?, ?, 'approved')`,
+).run("owner_x", "@owner_x");
+db.prepare(
+  `INSERT INTO x_user_account_links (
+    x_user_id, auth_user_id, link_role, created_at, updated_at
+  ) VALUES (?, ?, 'owner', ?, ?)`,
+).run("owner_x", "usr_owner", now, now);
 db.prepare(
   `INSERT INTO events (
     id, title, event_type, visibility_status, allow_user_video_event_links,
     allow_unslotted_posts, allow_user_video_edits, max_slots_per_video,
-    max_consecutive_slots_per_entry, slot_part_gap_minutes, slot_type,
-    slot_visibility_mode, created_at, updated_at, public_api_enabled
+    slot_part_gap_minutes, slot_type, slot_visibility_mode, created_at,
+    updated_at, public_api_enabled
   ) VALUES (
-    'ev_ok', '健全イベント', 'event', 'public', 0, 0, 0, 1, 1, 0, 'time', 'public_name', ?, ?, 0
+    'ev_ok', '健全イベント', 'event', 'public', 0, 0, 0, 1, 0,
+    'time', 'public_name', ?, ?, 0
   )`,
 ).run(now, now);
-
 db.prepare(
   `INSERT INTO event_staff (
-    id, event_id, user_id, x_user_id, display_name, role, permission_preset,
-    custom_permission_keys_json, is_public, public_role_label, internal_note,
-    approved_by_user_id, approved_at, created_at, updated_at
+    id, event_id, x_user_id, display_name, permission_preset,
+    custom_permission_keys_json, is_public, public_role_label,
+    approved_by_auth_user_id, approved_at, created_at, updated_at
   ) VALUES (
-    'es_owner', 'ev_ok', 'usr_owner', 'owner_x', 'Owner', 'representative', 'owner',
-    NULL, 1, NULL, NULL, 'usr_owner', ?, ?, ?
+    'es_owner', 'ev_ok', 'owner_x', 'Owner', 'owner', NULL, 1, '代表',
+    'usr_owner', ?, ?, ?
   )`,
 ).run(now, now, now);
 

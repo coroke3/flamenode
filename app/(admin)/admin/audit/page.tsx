@@ -75,10 +75,10 @@ const COMMON_TABLES = [
   "video_chapters",
   "video_members",
   "event_staff",
-  "x_account_link_requests",
+  "x_identity_requests",
   "notification_outbox",
   "system_settings",
-  "audit_log_settings",
+  "system_settings",
 ] as const;
 
 function diffSummary(row: AuditRow): { keys: string[]; count: number } {

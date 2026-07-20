@@ -6,6 +6,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import {
   announcements,
   users,
+  xUserAccountLinks,
   xUsers,
 } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
@@ -64,7 +65,8 @@ export async function broadcastAnnouncement(formData: FormData): Promise<Broadca
       .where(and(...baseConditions, eq(users.role, "admin"))!).orderBy(users.id).limit(BROADCAST_BATCH_SIZE + 1);
   } else {
     rows = await db.selectDistinct({ user_id: users.id }).from(users)
-      .innerJoin(xUsers, and(eq(xUsers.linked_user_id, users.id), eq(xUsers.approval_status, "approved"))!)
+      .innerJoin(xUserAccountLinks, eq(xUserAccountLinks.auth_user_id, users.id))
+      .innerJoin(xUsers, and(eq(xUsers.id, xUserAccountLinks.x_user_id), eq(xUsers.approval_status, "approved"))!)
       .where(and(...baseConditions)!).orderBy(users.id).limit(BROADCAST_BATCH_SIZE + 1);
   }
   const targets = rows.slice(0, BROADCAST_BATCH_SIZE);

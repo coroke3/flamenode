@@ -51,7 +51,6 @@ interface ProfileUser {
   youtube_channel_url: string | null;
   other_social_links: string | null;
   creative_start_date: number | null;
-  approval_requested_at: number | null;
 }
 
 type CreatorVideo = VideoCardData & { score: number };
@@ -167,7 +166,6 @@ export default async function UserPage({
             youtube_channel_url: sql<string | null>`NULL`,
             other_social_links: sql<string | null>`NULL`,
             creative_start_date: sql<number | null>`NULL`,
-            approval_requested_at: sql<number | null>`NULL`,
           })
           .from(videos)
           .where(and(publicVideoBase, sql`lower(${videos.creator_x_user_id}) = ${id}`)!)
@@ -184,7 +182,6 @@ export default async function UserPage({
           youtube_channel_url: userRow[0].youtube_channel_url,
           other_social_links: userRow[0].other_social_links,
           creative_start_date: userRow[0].creative_start_date,
-          approval_requested_at: userRow[0].approval_requested_at,
         }
       : (fallbackUserRows[0] ?? null);
     if (!user) return null;

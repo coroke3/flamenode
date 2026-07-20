@@ -42,7 +42,6 @@ test("public media access SQLはprivate/unknownを拒否し公開entityだけを
   db.exec(`
     ${createTable} static_artifacts (object_key TEXT, target_type TEXT, deleted_at INTEGER);
     ${createTable} x_users (id TEXT, icon_url TEXT, approval_status TEXT);
-    ${createTable} x_user_icons (x_user_id TEXT, icon_url TEXT);
     ${createTable} videos (creator_icon_url TEXT, visibility_status TEXT);
     ${createTable} events (icon_url TEXT, img_url TEXT, visibility_status TEXT);
     ${createTable} event_groups (icon_url TEXT, img_url TEXT, visibility_status TEXT);
@@ -58,7 +57,7 @@ test("public media access SQLはprivate/unknownを拒否し公開entityだけを
   `);
   const lookup = db.prepare(PUBLIC_MEDIA_ACCESS_SQL);
   const allowed = (key, namespace) =>
-    lookup.get(key, namespace, `/api/media/${key}`)?.allowed ?? null;
+    lookup.get({ 1: key, 2: namespace, 3: `/api/media/${key}` })?.allowed ?? null;
   assert.equal(allowed("event-icons/public/a.png", "event-icons"), 1);
   assert.equal(allowed("event-icons/private/a.png", "event-icons"), null);
   assert.equal(allowed("xicons/approved/a.png", "xicons"), 1);
