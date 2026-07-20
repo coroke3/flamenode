@@ -2,7 +2,7 @@
 
 > Status: Active  
 > Last verified: 2026-07-20  
-> Verified against commit: `2b23cbe`  
+> Verified against commit: `3df6c12`  
 > Source of truth: `src/lib/db/schema.ts`, `src/lib/db/schema.canonical.ts`, `migrations/0043_db_canonical_migration.sql`  
 > Canonical schema version: `2026-07-20-canonical-1`
 
@@ -10,7 +10,7 @@
 
 FlameNodeは本格運用前のため、旧DB構造、旧入力形式、旧API、旧状態値に対するランタイム後方互換を提供しない。
 
-過去データの変換はD1 migrationの一回限りの処理として実施する。migration完了後、アプリケーションは新正本だけを読み書きし、旧形式を受け付けるUI・API・feature flag・parser・変換plan・二重書き込みを残さない。
+旧DBからの既存データ変換はD1 migrationで一回限り実施する。加えて、移行後に保管済みの旧JSON / CSV / TSVを取り込む必要がある場合だけ、管理者専用の`/admin/import`と`/api/admin/import/legacy`を使用する。通常ランタイム、公開API、Workerは新正本だけを読み書きし、旧列fallback、旧DTO出力、旧状態の自動補正、dual-read、dual-writeを残さない。
 
 矛盾がある場合は次の順で判断する。
 
@@ -34,17 +34,22 @@ FlameNodeは本格運用前のため、旧DB構造、旧入力形式、旧API、
 
 次の機能・分岐は正本移行と同時に削除する。
 
-- `/admin/import`
-- `/api/admin/import/legacy`
-- `src/lib/import/legacy/`
-- `ENABLE_LEGACY_IMPORT_TOOL`
-- `LEGACY_IMPORT_PREVIEW_SECRET`
-- 旧JSON / CSV / TSVの常設入力アダプター
-- 旧状態を新規書き込み時に自動補正するランタイム分岐
+- 旧状態を通常フォームや公開APIで受理し、自動補正するランタイム分岐
 - 旧テーブル・旧カラムが存在する場合だけ処理を変えるfallback
 - 新旧両方へ書き込むdual-write
 - 新旧DTOを同時に公開する互換レスポンス
+- `format=legacy`などの旧形式出力
 - 削除済みカラムを許容する型、optional property、`any` cast
+- 旧形式を管理者専用インポート境界の外で解釈する共通ヘルパー
+
+旧形式入力は次の境界だけに隔離する。
+
+- 管理画面: `/admin/import`
+- 管理者API: `/api/admin/import/legacy`
+- 実装名前空間: `src/lib/import/legacy/`
+- 処理順: parse → normalize → preview → preflight → apply
+- 保存先: 新41テーブルの正本だけ
+- 安全条件: 管理者限定、preview必須、利用者・plan hash固定、容量・行数・D1上限、監査、手動作成データの非上書き
 
 Historical migration、移行fixture、削除確認スクリプトは、移行検証と監査証跡のために残してよい。ただし通常ランタイムから参照してはならない。
 
@@ -71,7 +76,7 @@ Historical migration、移行fixture、削除確認スクリプトは、移行�
 - `video_members.chapters_json`を照合なしで破棄しない。
 - `videos.visibility_status='archived'`を根拠なしで一律変換しない。
 - 旧構造の存在を前提にしたランタイムfallbackを追加しない。
-- 旧形式インポートを再実装しない。
+- 旧形式インポートを管理者専用境界の外へ広げず、旧列・旧テーブルへ書き戻さない。
 - 未確定のテーブル追加、削除、統合、名称変更を0043へ混ぜない。
 
 ## 6. 状態モデル
@@ -114,7 +119,7 @@ Historical migration、移行fixture、削除確認スクリプトは、移行�
 | YouTube動画ID | `videos.youtube_video_id` | `video_youtube_metadata.youtube_video_id` |
 | いいね・保存 | `(x_user_id, video_id, interaction_type)` | 独立ID、外部同期列 |
 | 監査設定 | `system_settings.audit_*` | `audit_log_settings`、`history_retention_days` |
-| データ投入 | 管理スプレッドシートまたは正本API | 旧形式インポート機能 |
+| データ投入 | 管理スプレッドシート、正本API、管理者専用旧形式インポート | 通常ランタイムでの旧形式解釈 |
 
 ## 8. 正本テーブル
 
@@ -175,8 +180,8 @@ Historical migration、移行fixture、削除確認スクリプトは、移行�
 | `x_id_merge_reverts` | `x_identity_requests` |
 | `x_user_icons` | `x_users.icon_url`、`videos.creator_icon_url` |
 | `x_user_youtube_channels` | `x_users.youtube_channel_url`、`videos.creator_youtube_channel_url` |
-| `legacy_import_batch_items` | 削除。必要な証跡はmigration fixture・バックアップで保持 |
-| `legacy_import_batches` | 削除。常設インポート機能は提供しない |
+| `legacy_import_batch_items` | 削除。インポート計画はR2の短期previewと監査ログで保持 |
+| `legacy_import_batches` | 削除。インポート実行状態を旧DB表へ保存しない |
 | `audit_log_settings` | `system_settings.audit_*` |
 
 ## 10. 削除対象旧カラム
@@ -196,9 +201,11 @@ Historical migration、移行fixture、削除確認スクリプトは、移行�
 - 廃止テーブル8件が存在しない。
 - 削除対象旧カラム25件が存在しない。
 - 旧名称2件が存在せず、新名称2件が存在する。
-- `src`、`app`、`workers`に旧構造・旧インポートへの参照がない。
-- `/admin/import`と`/api/admin/import/legacy`が存在しない。
-- 旧インポート用環境変数が存在しない。
+- 通常ランタイム、公開API、Workerに旧構造・旧形式分岐がない。
+- `/admin/import`、`/api/admin/import/legacy`、`src/lib/import/legacy/`が管理者専用境界として存在する。
+- JSON / CSV / TSVのparse・normalize・preview・preflight・applyテストが成功する。
+- インポート結果が新正本だけへ保存され、手動作成データを`replace_imported`で上書きしない。
+- 旧インポート専用DBテーブルと旧列への書き戻しがない。
 - 外部キー違反、孤児、複合主キー重複が0件である。
 - 全イベントにownerが1人以上存在する。
 - `events.max_slots_per_video`の既存値が一致する。
