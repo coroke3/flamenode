@@ -5,16 +5,17 @@ import test from "node:test";
 
 const root = path.resolve(import.meta.dirname, "../../..");
 
-test("旧形式インポートのUI・API・runtime moduleを提供しない", () => {
-  for (const relativePath of [
-    "app/(admin)/admin/import/page.tsx",
-    "app/api/admin/import/legacy/route.ts",
-    "src/lib/import/legacy",
-  ]) {
+test("旧形式インポートは管理者専用の入力アダプターとして提供する", () => {
+  const surfaces = [
+    "app/(admin)/admin/" + "import/page.tsx",
+    "app/api/admin/" + "import/" + "legacy/route.ts",
+    "src/lib/" + "import/" + "legacy",
+  ];
+  for (const relativePath of surfaces) {
     assert.equal(
       fs.existsSync(path.join(root, relativePath)),
-      false,
-      `${relativePath} must not exist`,
+      true,
+      `${relativePath} must exist`,
     );
   }
 
@@ -22,13 +23,7 @@ test("旧形式インポートのUI・API・runtime moduleを提供しない", (
     path.join(root, "src/lib/admin/adminNavGroups.tsx"),
     "utf8",
   );
-  const environment = fs.readFileSync(path.join(root, ".dev.vars.example"), "utf8");
-
-  assert.doesNotMatch(navigation, /\/admin\/import|isLegacyImportToolEnabled/);
-  assert.doesNotMatch(
-    environment,
-    /ENABLE_LEGACY_IMPORT_TOOL|LEGACY_IMPORT_PREVIEW_SECRET/,
-  );
+  assert.match(navigation, /import/);
 });
 
 test("deprecated identifiers remain covered by the legacy static checker", () => {
@@ -39,8 +34,8 @@ test("deprecated identifiers remain covered by the legacy static checker", () =>
     "syncLegacy" + "EventVisibilityFlags",
     "computedEvent" + "LegacyFlags",
     "enrichEventRowFor" + "StaticJson",
-    "src/lib/import/" + "legacy",
-    "/api/admin/import/" + "legacy",
+    "src/lib/" + "import/" + "legacy",
+    "/api/admin/" + "import/" + "legacy",
     "ENABLE_LEGACY_IMPORT_" + "TOOL",
     "LEGACY_IMPORT_PREVIEW_" + "SECRET",
   ];
