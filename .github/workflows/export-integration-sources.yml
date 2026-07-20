@@ -6,6 +6,11 @@ on:
       - agent/db-canonical-migration-v2
     paths:
       - .github/workflows/export-integration-sources.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/export-integration-sources.yml
 
 permissions:
   contents: read
