@@ -30,7 +30,7 @@ export interface EventFormInitial {
   end_time?: number | null;
   entry_start_time?: number | null;
   entry_end_time?: number | null;
-  visibility_status?: "draft" | "private" | "public" | "archived" | null;
+  visibility_status?: string | null;
   allow_user_video_event_links?: number;
   allow_unslotted_posts?: number;
   allow_user_video_edits?: number;
@@ -63,16 +63,8 @@ function partsJsonToText(value: string | null | undefined): string {
 
 function resolveInitialVisibility(
   initial: EventFormInitial,
-): "draft" | "private" | "public" | "archived" {
-  if (
-    initial.visibility_status === "draft" ||
-    initial.visibility_status === "private" ||
-    initial.visibility_status === "public" ||
-    initial.visibility_status === "archived"
-  ) {
-    return initial.visibility_status;
-  }
-  return "draft";
+): "private" | "public" {
+  return initial.visibility_status === "public" ? "public" : "private";
 }
 
 function inputGateProps(allowed: boolean): React.InputHTMLAttributes<HTMLInputElement> {
@@ -260,7 +252,7 @@ function buildPreviewFromForm(
     end_time: textValue(fd, "end_time"),
     entry_start_time: textValue(fd, "entry_start_time"),
     entry_end_time: textValue(fd, "entry_end_time"),
-    visibility_status: textValue(fd, "visibility_status") || "draft",
+    visibility_status: textValue(fd, "visibility_status") || "private",
     allow_user_video_event_links:
       textValue(fd, "allow_user_video_event_links") || "0",
     allow_unslotted_posts: textValue(fd, "allow_unslotted_posts") || "0",
@@ -601,10 +593,8 @@ export function EventForm({
             defaultValue={resolveInitialVisibility(initial)}
             className="fn-select"
           >
-            <option value="draft">下書き</option>
-            <option value="private">非公開</option>
+            <option value="private">非公開・準備中</option>
             <option value="public">公開</option>
-            <option value="archived">アーカイブ</option>
           </GatedSelect>
         </div>
         <div>

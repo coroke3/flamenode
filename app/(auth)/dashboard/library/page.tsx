@@ -88,7 +88,7 @@ export default async function DashboardLibraryPage({
           .where(
             and(
               inArray(videosTable.id, targetIds),
-              ne(videosTable.visibility_status, "archived"),
+              ne(videosTable.visibility_status, "voided"),
             )!,
           )
           .orderBy(desc(videosTable.scheduled_time));

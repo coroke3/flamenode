@@ -13,7 +13,7 @@ interface PreviewRow {
   title: string;
   action: "create" | "replace" | "skip";
   conflict: boolean;
-  visibility_status?: "draft" | "private" | "public" | "archived";
+  visibility_status?: "private" | "public";
   softwareCount: number;
   memberCount: number;
   warnings: string[];

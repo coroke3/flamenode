@@ -1,6 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-
 import {
   normalizeVideoVisibilityFilter,
   videoVisibilityFilterLabel,
@@ -8,40 +7,29 @@ import {
   videoVisibilityStatusesForFilter,
 } from "./videoVisibilityLabels.ts";
 
-test("videoVisibilityStatusesForFilter groups simplified public statuses", () => {
+test("video visibility groups contain the four canonical states", () => {
   assert.deepEqual(videoVisibilityStatusesForFilter("review"), ["pending"]);
-  assert.deepEqual(videoVisibilityStatusesForFilter("public"), [
-    "public",
-    "limited",
-  ]);
-  assert.deepEqual(videoVisibilityStatusesForFilter("private"), [
-    "draft",
-    "private",
-  ]);
-  assert.deepEqual(videoVisibilityStatusesForFilter("closed"), [
-    "archived",
-    "voided",
-  ]);
+  assert.deepEqual(videoVisibilityStatusesForFilter("public"), ["public"]);
+  assert.deepEqual(videoVisibilityStatusesForFilter("private"), ["private"]);
+  assert.deepEqual(videoVisibilityStatusesForFilter("closed"), ["voided"]);
 });
 
-test("videoVisibilityStatusesForFilter accepts canonical raw statuses and rejects removed ones", () => {
-  assert.deepEqual(videoVisibilityStatusesForFilter("limited"), ["limited"]);
-  assert.equal(videoVisibilityGroupForFilter("limited"), "public");
-  assert.equal(videoVisibilityStatusesForFilter("hidden"), null);
-  assert.equal(videoVisibilityGroupForFilter("hidden"), null);
+test("removed statuses are rejected", () => {
+  for (const value of ["draft", "limited", "hidden", "archived"]) {
+    assert.equal(videoVisibilityStatusesForFilter(value), null);
+    assert.equal(videoVisibilityGroupForFilter(value), null);
+  }
 });
 
-test("normalizeVideoVisibilityFilter prevents unknown query values becoming all rows", () => {
+test("visibility query normalization rejects unknown values", () => {
   assert.equal(normalizeVideoVisibilityFilter("all"), "");
   assert.equal(normalizeVideoVisibilityFilter(" public "), "public");
-  assert.equal(normalizeVideoVisibilityFilter([" hidden ", "public"]), "");
-  assert.equal(normalizeVideoVisibilityFilter("bad-status"), "");
+  assert.equal(normalizeVideoVisibilityFilter("limited"), "");
   assert.equal(normalizeVideoVisibilityFilter("bad-status", "review"), "review");
-  assert.equal(normalizeVideoVisibilityFilter(["bad-status"], "review"), "review");
 });
 
-test("videoVisibilityFilterLabel uses simplified labels for groups", () => {
+test("group labels use the simplified wording", () => {
   assert.equal(videoVisibilityFilterLabel("review"), "審査待ち");
-  assert.equal(videoVisibilityFilterLabel("closed"), "終了・無効");
-  assert.equal(videoVisibilityFilterLabel("limited"), "限定公開");
+  assert.equal(videoVisibilityFilterLabel("closed"), "無効");
+  assert.equal(videoVisibilityFilterLabel("public"), "公開");
 });

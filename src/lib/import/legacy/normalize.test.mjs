@@ -25,7 +25,7 @@ describe("normalizeEventInfo", () => {
     assert.ok(result.ok);
     assert.equal(result.event?.id, "event1");
     assert.equal(result.event?.title, "テストイベント");
-    assert.equal(result.event?.visibility_status, "archived");
+    assert.equal(result.event?.visibility_status, "public");
     // is_active / is_entry_open / is_archived は出力しない
     assert.ok(!("is_active" in (result.event ?? {})));
     assert.ok(!("is_entry_open" in (result.event ?? {})));

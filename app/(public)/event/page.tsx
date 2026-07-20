@@ -18,7 +18,6 @@ import { categorizePublicEvent } from "@/lib/utils/categorizePublicEvent";
 import {
   computeEventStatus,
   isAcceptingEntries,
-  isEventArchived,
   publicListableEventWhere,
 } from "@/lib/utils/eventStatus";
 import { compareEventsByUpcomingPriority } from "@/lib/utils/eventOrdering";
@@ -75,7 +74,6 @@ const EVENT_SECTIONS: {
   { id: "open", title: "募集中", sub: "Open for entry" },
   { id: "upcoming", title: "開催前", sub: "Upcoming" },
   { id: "ended", title: "開催済み", sub: "Past events" },
-  { id: "archive", title: "アーカイブ", sub: "Always-on archive" },
 ];
 
 const EVENT_FILTER_STATUSES = [
@@ -83,7 +81,6 @@ const EVENT_FILTER_STATUSES = [
   { value: "open", label: "受付中" },
   { value: "upcoming", label: "開催前" },
   { value: "ended", label: "終了済み" },
-  { value: "archive", label: "アーカイブ" },
 ] as const;
 
 type EventFilterStatus = (typeof EVENT_FILTER_STATUSES)[number]["value"];
@@ -125,7 +122,6 @@ function matchesEventStatus(
   now: number,
 ): boolean {
   if (status === "all") return true;
-  if (status === "archive") return isEventArchived(event);
   if (status === "open") return isAcceptingEntries(event, now);
   if (status === "upcoming") return computeEventStatus(event, now) === "scheduled";
   return computeEventStatus(event, now) === "ended";

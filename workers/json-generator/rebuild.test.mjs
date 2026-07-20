@@ -50,7 +50,7 @@ function eventEnv({ visibility = "public" } = {}) {
     ? { id: "event-1", visibility_status: visibility, updated_at: 456 }
     : null;
   state.all = (sql) => sql.includes("FROM static_artifacts")
-    ? { results: [] }
+    ? { results: [{ object_key: "events/event-1.json" }] }
     : { results: [] };
   const puts = [];
   const deletes = [];
@@ -75,17 +75,17 @@ test("非公開化は静的JSONを再生成せず、追跡artifactを削除す�
   assert.equal(env.state.runs.filter((sql) => sql.includes("SET deleted_at")).length, 1);
 });
 
-test("archived event detail artifact is regenerated", async () => {
+test("旧archivedイベントは公開対象にせずartifactを削除する", async () => {
   const env = eventEnv({ visibility: "archived" });
   await rebuildTarget(env, "event", "event-1");
-  assert.deepEqual(env.puts, ["events/event-1.json"]);
-  assert.deepEqual(env.deletes, []);
+  assert.deepEqual(env.puts, []);
+  assert.deepEqual(env.deletes, ["events/event-1.json"]);
 });
 
-test("limited video detail artifact is regenerated", async () => {
+test("旧limited作品は公開対象にせずartifactを削除する", async () => {
   const env = videoEnv({ visibility: "limited" });
   await rebuildTarget(env, "video", "video-1");
-  assert.deepEqual(env.puts, ["videos/video-1.json", "videos/new-youtube.json"]);
+  assert.deepEqual(env.puts, []);
   assert.deepEqual(env.deletes, ["videos/old-youtube.json"]);
 });
 

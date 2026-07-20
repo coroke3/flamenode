@@ -2,8 +2,8 @@ import type { EventVisibilityStatus } from "../../utils/eventStatusCore.ts";
 import type { ImportMode } from "./types.ts";
 
 /**
- * 旧データのイベントを取り込む際の visibility_status のみを解決する。
- * 旧互換フラグ (is_active/is_entry_open/is_archived) は一切出力しない。
+ * 旧データのイベントを取り込む際の公開設定を private / public へ正規化する。
+ * 終了済みかどうかは日時から別途算出する。
  */
 export function resolveImportedVisibility(
   mode: ImportMode,
@@ -11,16 +11,11 @@ export function resolveImportedVisibility(
   endTime: number | null,
   now: number,
 ): EventVisibilityStatus {
-  if (mode === "draft") return "draft";
-  if (mode === "active_event") return "public";
-  if (mode === "archive") return "archived";
+  if (mode === "draft") return "private";
+  if (mode === "active_event" || mode === "archive") return "public";
 
-  // mode === "preserve": 日時から推定
-  const end = endTime ?? null;
-  const start = startTime ?? null;
-
-  if (end && end < now) return "archived";
-  if (start && start <= now && (!end || end >= now)) return "public";
-  if (start && start > now) return "draft";
-  return "archived";
+  // preserve: 開始済み・終了済みのイベントは公開履歴として保持する。
+  if (endTime != null && endTime < now) return "public";
+  if (startTime != null && startTime <= now) return "public";
+  return "private";
 }

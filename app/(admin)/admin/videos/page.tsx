@@ -3,7 +3,7 @@ import { FnTable } from "@/components/ui/FnTable";
 
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq, inArray, like, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, like, or, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   events as eventsTable,
@@ -138,7 +138,7 @@ export default async function AdminVideosPage({
       const eventsQuery = db
         .select({ id: eventsTable.id, title: eventsTable.title })
         .from(eventsTable)
-        .where(ne(eventsTable.visibility_status, "archived"))
+        .where(eq(eventsTable.visibility_status, "public"))
         .orderBy(desc(eventsTable.start_time))
         .limit(EVENT_OPTIONS_LIMIT);
 

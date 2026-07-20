@@ -223,7 +223,7 @@ export function snapshotToFormInitial(
     end_time: null,
     entry_start_time: null,
     entry_end_time: null,
-    visibility_status: "draft",
+    visibility_status: "private",
     allow_user_video_event_links: snapshot.allow_user_video_event_links,
     allow_unslotted_posts: snapshot.allow_unslotted_posts ?? 0,
     allow_user_video_edits: snapshot.allow_user_video_edits,

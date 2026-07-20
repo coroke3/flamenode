@@ -32,8 +32,8 @@ test("public media objectはMIMEと5MiB上限をfail-closedで検査する", () 
 test("public media access queryはartifactとentity visibilityを1 statementで照合する", () => {
   assert.match(PUBLIC_MEDIA_ACCESS_SQL, /static_artifacts[\s\S]+deleted_at IS NULL/);
   assert.match(PUBLIC_MEDIA_ACCESS_SQL, /x_users[\s\S]+approval_status = 'approved'/);
-  assert.match(PUBLIC_MEDIA_ACCESS_SQL, /videos[\s\S]+visibility_status IN \('public', 'limited'\)/);
-  assert.match(PUBLIC_MEDIA_ACCESS_SQL, /events[\s\S]+visibility_status IN \('public', 'archived'\)/);
+  assert.match(PUBLIC_MEDIA_ACCESS_SQL, /videos[\s\S]+visibility_status = 'public'/);
+  assert.match(PUBLIC_MEDIA_ACCESS_SQL, /events[\s\S]+visibility_status = 'public'/);
 });
 
 test("public media access SQLはprivate/unknownを拒否し公開entityだけを許可する", () => {

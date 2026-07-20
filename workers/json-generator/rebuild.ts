@@ -232,7 +232,7 @@ async function rebuildTop(env: Env): Promise<void> {
     env.DB.prepare(
       `SELECT ${EVENT_INDEX_COLUMNS}
        FROM events
-       WHERE visibility_status IN ('public', 'archived')
+       WHERE visibility_status = 'public'
        ORDER BY start_time DESC
        LIMIT 12`,
     ).all<Record<string, unknown>>(),
@@ -399,7 +399,7 @@ async function rebuildEventsIndex(env: Env): Promise<void> {
     env.DB.prepare(
       `SELECT ${EVENT_INDEX_COLUMNS}
        FROM events
-       WHERE visibility_status IN ('public', 'archived')
+       WHERE visibility_status = 'public'
        ORDER BY start_time DESC
        LIMIT 200`,
     ).all<Record<string, unknown>>(),
@@ -453,7 +453,7 @@ async function rebuildEventGroupSections(env: Env): Promise<unknown[]> {
      FROM event_group_events ege
      INNER JOIN events e ON e.id = ege.event_id
      WHERE ege.event_group_id IN (${placeholders})
-       AND e.visibility_status IN ('public', 'archived')
+       AND e.visibility_status = 'public'
      ORDER BY e.start_time DESC, e.id ASC`,
   )
     .bind(...groupIds)
@@ -611,7 +611,7 @@ async function rebuildEvent(env: Env, eventId: string): Promise<void> {
     return;
   }
   const visibility = String(ev.visibility_status ?? "");
-  if (visibility !== "public" && visibility !== "archived") {
+  if (visibility !== "public") {
     await removeTrackedArtifacts(env, "event", eventId);
     return;
   }
@@ -700,7 +700,7 @@ async function rebuildVideo(env: Env, videoId: string): Promise<void> {
     sourceUpdatedAt: Number((row as { updated_at?: unknown }).updated_at ?? 0) || null,
   };
   const videoVisibility = String((row as { visibility_status?: unknown }).visibility_status ?? "");
-  if (videoVisibility !== "public" && videoVisibility !== "limited") {
+  if (videoVisibility !== "public") {
     await removeTrackedArtifacts(env, "video", internalVideoId);
     return;
   }

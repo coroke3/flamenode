@@ -198,7 +198,7 @@ export default async function EventDetailPage({
   } as React.CSSProperties;
   const status = computeEventStatus(event);
   const accepting = isAcceptingEntries(event);
-  const showRecruitCard = status !== "ended" && status !== "archived";
+  const showRecruitCard = status !== "ended" && status !== "private";
   const publicEditors = editors.filter((editor) => editor.is_public === 1);
   const now = Math.floor(Date.now() / 1000);
   const slotTotal = slotRows.length;

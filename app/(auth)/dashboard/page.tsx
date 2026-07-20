@@ -89,7 +89,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
               activeGalleryXId
                 ? eq(videosTable.creator_x_user_id, activeGalleryXId)
                 : sql`0 = 1`,
-              ne(videosTable.visibility_status, "archived"),
+              ne(videosTable.visibility_status, "voided"),
             )!,
           )
           .orderBy(desc(videosTable.created_at))) as VideoCardData[];
@@ -158,7 +158,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           .where(
             and(
               inArray(videosTable.creator_x_user_id, approvedXIds),
-              ne(videosTable.visibility_status, "archived"),
+              ne(videosTable.visibility_status, "voided"),
               excludePvsfSummaryVideos(),
             )!,
           );

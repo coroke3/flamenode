@@ -138,7 +138,7 @@ export default async function ManageEventEditPage({
             危険操作
           </h2>
           <p className="fn-muted fn-text-sm">
-            イベントを削除すると、募集枠・イベント管理設定が停止されます。作品本体は残ります。
+            イベントを非公開にすると、公開ページと新規募集を停止します。枠・運営設定・作品との紐付けは保持されます。
           </p>
           <DeleteEventForm eventId={ev.id} redirectHref="/manage" />
         </section>

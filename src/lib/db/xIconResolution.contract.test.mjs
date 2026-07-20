@@ -39,10 +39,10 @@ test("最新の非NULLアイコンと表示名を独立して選ぶ", () => {
   assert.match(source, /name_rank === 1/);
 });
 
-test("archivedとvoidedを補完元から除外する", () => {
+test("voidedを補完元から除外する", () => {
   assert.match(
     source,
-    /visibility_status[^\n]*NOT IN \('archived', 'voided'\)/,
+    /ne\(videos\.visibility_status, ["']voided["']\)/,
   );
 });
 

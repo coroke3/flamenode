@@ -567,14 +567,14 @@ export async function deleteEvent(
   const now = Math.floor(Date.now() / 1000);
   const before = (await db.select().from(events).where(eq(events.id, eventId)).limit(1))[0];
   if (!before) return { ok: false, message: "イベントが見つかりません。" };
-  const after = { ...before, visibility_status: "archived" as const, updated_at: now };
+  const after = { ...before, visibility_status: "private" as const, updated_at: now };
   const queue = await buildStaticRebuildQueueBatch(db, [
-    { targetType: "event", targetId: eventId, reason: "event_archive", priority: "high", requestedByUserId: actorUserId },
-    { targetType: "events_index", targetId: "global", reason: "event_archive", priority: "low", requestedByUserId: actorUserId },
-    { targetType: "search_index", targetId: "global", reason: "event_archive", priority: "low", requestedByUserId: actorUserId },
+    { targetType: "event", targetId: eventId, reason: "event_private", priority: "high", requestedByUserId: actorUserId },
+    { targetType: "events_index", targetId: "global", reason: "event_private", priority: "low", requestedByUserId: actorUserId },
+    { targetType: "search_index", targetId: "global", reason: "event_private", priority: "low", requestedByUserId: actorUserId },
   ]);
   await mutateWithAudit(db, {
-    mutationStatements: [db.update(events).set({ visibility_status: "archived", updated_at: now }).where(and(eq(events.id, eventId), eq(events.updated_at, before.updated_at))), ...queue.statements],
+    mutationStatements: [db.update(events).set({ visibility_status: "private", updated_at: now }).where(and(eq(events.id, eventId), eq(events.updated_at, before.updated_at))), ...queue.statements],
     expectedMutationChanges: [1, ...queue.expectedChanges],
     audits: [{ table_name: "events", target_id: eventId, operation: "UPDATE", before, after, actor_user_id: actorUserId, retention_class: "long_audit", strict: true }],
   });

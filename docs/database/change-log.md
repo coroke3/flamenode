@@ -1,9 +1,24 @@
 # DB Change Log
 
 > Status: Active
-> Last verified: 2026-07-13
-> Verified against commit: `f45f75c`
+> Last verified: 2026-07-20
+> Verified against commit: `3d85540`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
+
+## 2026-07-20 — `0043_simplify_visibility_statuses.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | cleanup |
+| Summary | 作品とイベントの公開状態を簡素化し、YouTube限定公開をYouTubeメタデータへ分離 |
+| Reason | FlameNode内の公開範囲とYouTube上の公開区分を混在させず、下書き・アーカイブの重複した役割を廃止するため |
+| Tables | `videos`、`video_youtube_metadata`、`video_moderation_cases`、`events` |
+| Data migration | 動画`limited`を`public`へ移しYouTube公開区分を`unlisted`として保存。動画`draft / archived / hidden`を`private`、イベント`draft`を`private`、`archived`を`public`へ移行。旧partial unique indexで許されていた全YouTube ID重複を順位付けし、代表以外は行を保持したまま`voided`へ移してIDを解除し、理由と元IDをモデレーション履歴へ記録 |
+| Compatibility | runtimeで旧状態を読み替えない。active baselineは変更せず、旧defaultをINSERT直後にcanonicalへ正規化し、UPDATEで旧状態を拒否するtriggerを追加 |
+| Data loss | none。作品・イベント行は削除せず、解除した重複YouTube IDも監査可能な形で保持 |
+| Rollback | 状態の意味と全状態共通unique indexが変わるため、migration適用前のD1バックアップから復元 |
+| Validation | typecheck、Lint、unit、Worker、Cloudflare契約、SQLite integration、Next.js/Pages build、schema/history、公開API検査 |
+| PR | `#88` |
 
 ## 2026-07-13 — `0041_youtube_quota_budget.sql`
 
