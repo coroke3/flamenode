@@ -5,10 +5,10 @@ import path from "node:path";
 import { parseLegacyImportText } from "./parse.ts";
 import { normalizeLegacyFiles } from "./normalize.ts";
 import {
-  createLegacyImportPreviewToken,
-  fingerprintLegacyImport,
-  verifyLegacyImportPreviewToken,
-} from "./previewToken.ts";
+  claimLegacyImportPreview,
+  createLegacyImportPreview,
+  LegacyImportPreviewError,
+} from "./previewStore.ts";
 
 const eventJson = JSON.stringify([
   {
@@ -39,6 +39,33 @@ function fixturePlan() {
       now: 1_700_000_000,
     },
   );
+}
+
+class FakeR2Bucket {
+  #objects = new Map();
+  #version = 0;
+
+  async put(key, body, options = {}) {
+    const current = this.#objects.get(key);
+    const expected = options.onlyIf?.etagMatches;
+    if (expected && current?.etag !== expected) return null;
+    const etag = `etag-${++this.#version}`;
+    this.#objects.set(key, { body: String(body), etag });
+    return { etag };
+  }
+
+  async get(key) {
+    const current = this.#objects.get(key);
+    if (!current) return null;
+    return {
+      etag: current.etag,
+      text: async () => current.body,
+    };
+  }
+
+  async delete(key) {
+    this.#objects.delete(key);
+  }
 }
 
 test("JSON/CSVを同じcanonical planへ変換する", () => {
@@ -80,62 +107,122 @@ test("旧DB列をcanonical planへ残さない", () => {
   }
 });
 
-test("preview tokenは利用者・内容・期限に束縛される", async () => {
-  const plan = fixturePlan();
-  const args = {
-    plan,
-    eventVisibility: "public",
-    videoVisibility: "private",
-    strategy: "create_only",
-  };
-  const fingerprint = await fingerprintLegacyImport(args);
-  const token = await createLegacyImportPreviewToken({
-    secret: "test-secret",
-    actorAuthUserId: "auth-user-1",
-    fingerprint,
-    now: 1000,
-  });
-  assert.equal(
-    await verifyLegacyImportPreviewToken({
-      token,
-      secret: "test-secret",
-      actorAuthUserId: "auth-user-1",
-      fingerprint,
-      now: 1001,
-    }),
-    true,
+test("R2へ保存した同一planだけを一回限りclaimできる", async () => {
+  const bucket = new FakeR2Bucket();
+  const previewToken = "a".repeat(32);
+  const credential = await createLegacyImportPreview(
+    bucket,
+    {
+      authUserId: "auth-user-1",
+      strategy: "create_only",
+      plan: fixturePlan(),
+    },
+    { now: 1_000, previewToken },
   );
-  assert.equal(
-    await verifyLegacyImportPreviewToken({
-      token,
-      secret: "test-secret",
-      actorAuthUserId: "auth-user-2",
-      fingerprint,
-      now: 1001,
-    }),
-    false,
+  assert.equal(credential.previewToken, previewToken);
+  assert.match(credential.planHash, /^[a-f0-9]{64}$/);
+  assert.equal(credential.expiresAt, 1_900);
+
+  await assert.rejects(
+    claimLegacyImportPreview(
+      bucket,
+      {
+        authUserId: "auth-user-1",
+        previewToken,
+        planHash: "0".repeat(64),
+      },
+      { now: 1_001 },
+    ),
+    (error) => error instanceof LegacyImportPreviewError && error.code === "hash_mismatch",
   );
-  const changedFingerprint = await fingerprintLegacyImport({ ...args, strategy: "skip_existing" });
-  assert.equal(
-    await verifyLegacyImportPreviewToken({
-      token,
-      secret: "test-secret",
-      actorAuthUserId: "auth-user-1",
-      fingerprint: changedFingerprint,
-      now: 1001,
-    }),
-    false,
+
+  const first = await claimLegacyImportPreview(
+    bucket,
+    {
+      authUserId: "auth-user-1",
+      previewToken,
+      planHash: credential.planHash,
+    },
+    { now: 1_002, claimId: "b".repeat(32) },
   );
-  assert.equal(
-    await verifyLegacyImportPreviewToken({
-      token,
-      secret: "test-secret",
-      actorAuthUserId: "auth-user-1",
-      fingerprint,
-      now: 2000,
-    }),
-    false,
+  assert.equal(first.attempt, 1);
+  assert.equal(first.strategy, "create_only");
+
+  await assert.rejects(
+    claimLegacyImportPreview(
+      bucket,
+      {
+        authUserId: "auth-user-1",
+        previewToken,
+        planHash: credential.planHash,
+      },
+      { now: 1_003 },
+    ),
+    (error) => error instanceof LegacyImportPreviewError && error.code === "already_claimed",
   );
+
+  await first.release();
+  const second = await claimLegacyImportPreview(
+    bucket,
+    {
+      authUserId: "auth-user-1",
+      previewToken,
+      planHash: credential.planHash,
+    },
+    { now: 1_004, claimId: "c".repeat(32) },
+  );
+  assert.equal(second.attempt, 2);
+  await second.complete();
+
+  await assert.rejects(
+    claimLegacyImportPreview(
+      bucket,
+      {
+        authUserId: "auth-user-1",
+        previewToken,
+        planHash: credential.planHash,
+      },
+      { now: 1_005 },
+    ),
+    (error) => error instanceof LegacyImportPreviewError && error.code === "not_found",
+  );
+});
+
+test("期限切れpreview planを削除して拒否する", async () => {
+  const bucket = new FakeR2Bucket();
+  const credential = await createLegacyImportPreview(
+    bucket,
+    {
+      authUserId: "auth-user-expired",
+      strategy: "skip_existing",
+      plan: fixturePlan(),
+    },
+    { now: 100, previewToken: "d".repeat(32) },
+  );
+  await assert.rejects(
+    claimLegacyImportPreview(
+      bucket,
+      {
+        authUserId: "auth-user-expired",
+        previewToken: credential.previewToken,
+        planHash: credential.planHash,
+      },
+      { now: 1_000 },
+    ),
+    (error) => error instanceof LegacyImportPreviewError && error.code === "expired",
+  );
+});
+
+test("apply時にファイルを再解析せずR2保存planを使用する", () => {
+  const root = path.resolve(import.meta.dirname, "../../../..");
+  const route = fs.readFileSync(path.join(root, "app/api/admin/import/legacy/route.ts"), "utf8");
+  const client = fs.readFileSync(path.join(root, "src/components/admin/LegacyCanonicalImportClient.tsx"), "utf8");
+  assert.ok(route.indexOf('mode === "apply"') < route.indexOf('formData.getAll("files")'));
+  assert.match(route, /claimLegacyImportPreview/);
+  assert.match(route, /createLegacyImportPreview/);
+  assert.doesNotMatch(route, /fingerprintLegacyImport|verifyLegacyImportPreviewToken/);
+  assert.match(client, /new FormData\(\)/);
+  assert.match(client, /plan_hash/);
 });
 
 test("ランタイム側に旧テーブル・dual-writeを導入しない", () => {
@@ -143,6 +230,7 @@ test("ランタイム側に旧テーブル・dual-writeを導入しない", () =
   const files = [
     "src/lib/import/legacy/apply.ts",
     "app/api/admin/import/legacy/route.ts",
+    "src/lib/import/legacy/previewStore.ts",
   ];
   const source = files.map((file) => fs.readFileSync(path.join(root, file), "utf8")).join("\n");
   for (const forbidden of [
@@ -151,6 +239,8 @@ test("ランタイム側に旧テーブル・dual-writeを導入しない", () =
     "x_id_merge_reverts",
     "x_users.linked_user_id",
     "video_members.chapters_json",
+    "legacy_import_batches",
+    "legacy_import_batch_items",
   ]) {
     assert.equal(source.includes(forbidden), false, forbidden);
   }
