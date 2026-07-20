@@ -290,18 +290,22 @@ export default async function EditVideoPage({
   }
 
   const eventOptionRows = Array.from(acceptingEventMap.values());
-  const questionsByEvent = await fetchActiveCustomQuestionsForEvents(
-    db,
-    eventOptionRows.map((event) => event.id),
-  );
+  const questionsByEvent = sections.descriptions
+    ? await fetchActiveCustomQuestionsForEvents(
+        db,
+        eventOptionRows.map((event) => event.id),
+      )
+    : new Map();
   const eventOptions = eventOptionRows.map((event) => ({
     ...event,
     custom_questions: questionsByEvent.get(event.id) ?? [],
   }));
-  const customAnswerValues = await readCustomAnswerValuesForVideo(db, {
-    videoId: video.id,
-    eventIds: currentEventIds,
-  });
+  const customAnswerValues = sections.descriptions
+    ? await readCustomAnswerValuesForVideo(db, {
+        videoId: video.id,
+        eventIds: currentEventIds,
+      })
+    : null;
 
   const {
     subjects: videoCollabSubjects,
