@@ -1,0 +1,30 @@
+name: Export final merge source
+
+on:
+  push:
+    branches:
+      - agent/db-canonical-migration-v2
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: final-merge-source-${{ github.sha }}
+          path: |
+            .
+            !.git/**
+            !node_modules/**
+            !.next/**
+            !.vercel/**
+            !.tmp/**
+          include-hidden-files: true
+          retention-days: 1
