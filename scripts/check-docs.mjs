@@ -21,10 +21,15 @@ const requiredPaths = [
   "docs/operations/migrations.md",
   "docs/operations/workers.md",
   "docs/operations/audit-and-restore.md",
-  "docs/operations/legacy-import.md",
   "docs/operations/static-delivery.md",
   "docs/operations/incident-response.md",
   "docs/operations/ui-acceptance.md",
+];
+const removedLegacyRuntimePaths = [
+  "docs/operations/legacy-import.md",
+  "app/(admin)/admin/import/page.tsx",
+  "app/api/admin/import/legacy/route.ts",
+  "src/lib/import/legacy",
 ];
 const localLinkPattern = /\[[^\]]*\]\(([^)]+)\)/g;
 const npmScriptPattern = /`npm run ([a-zA-Z0-9:_-]+)(?:\s+[^`]*)?`/g;
@@ -49,6 +54,10 @@ const forbiddenActiveClaims = [
   [
     /(?:runtime[ -]migration|実行時migration).{0,40}(?:を実行する|で適用する|が正本)/gi,
     "runtime migrationを現行手順とする記述",
+  ],
+  [
+    /(?:legacy import|旧形式インポート|旧データ移行ツール).{0,60}(?:を有効化する|を使用する|を提供する|から取り込む)/gi,
+    "削除済み旧形式インポートを現行機能とする記述",
   ],
 ];
 
@@ -131,6 +140,11 @@ for (const relative of requiredActive) {
 for (const relative of requiredPaths) {
   if (!fs.existsSync(file(relative))) errors.push(`${relative} がありません。`);
 }
+for (const relative of removedLegacyRuntimePaths) {
+  if (fs.existsSync(file(relative))) {
+    errors.push(`${relative}: 削除済み旧形式インポート経路を再導入しないでください。`);
+  }
+}
 
 for (const full of collectMarkdown(file("docs"))) {
   const relative = path.relative(root, full);
@@ -163,7 +177,7 @@ if (!/Cloudflare/i.test(read("docs/README.md"))) {
 }
 if (packageJson.engines?.node !== ">=22 <23") {
   errors.push(
-    `package.json: Node要件は\">=22 <23\"に統一してください。現在=${packageJson.engines?.node ?? "未設定"}`,
+    `package.json: Node要件は">=22 <23"に統一してください。現在=${packageJson.engines?.node ?? "未設定"}`,
   );
 }
 if (read(".nvmrc").trim() !== "22") {
@@ -190,5 +204,5 @@ if (errors.length > 0) {
   process.exit(1);
 }
 console.log(
-  "[check:docs] OK: active documentation metadata, links, npm scripts, vocabulary, and Cloudflare source alignment are valid.",
+  "[check:docs] OK: active documentation metadata, links, npm scripts, vocabulary, Cloudflare source alignment, and removed legacy surfaces are valid.",
 );
