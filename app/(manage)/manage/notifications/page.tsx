@@ -1,6 +1,4 @@
 import * as React from "react";
-import { FnTable } from "@/components/ui/FnTable";
-
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
@@ -15,6 +13,10 @@ import {
 import { ManageActiveXNotice } from "@/components/layout/ManageActiveXNotice";
 import { NotificationOutboxSummary } from "@/components/notifications/NotificationOutboxSummary";
 import { drizzleManageNotificationFilter } from "@/lib/notifications/display";
+import {
+  isTerminalNotificationFailure,
+  TERMINAL_NOTIFICATION_FAILURE_STATUSES,
+} from "@/lib/notifications/status";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import {
   lookupNotificationRecipients,
@@ -26,6 +28,7 @@ import {
 } from "@/lib/notifications/types";
 import { formatRelative, formatUnix } from "@/lib/utils/format";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { FnTable } from "@/components/ui/FnTable";
 import { ConsolePageHeader as ManagePageHeader } from "@/components/layout/ConsolePageHeader";
 
 export const metadata: Metadata = { title: "通知センター" };
@@ -71,11 +74,11 @@ export default async function ManageNotificationsPage({
           .where(inArray(eventsTable.id, editableIds))
       : [];
 
-  let eventIds = eventFilter ? [eventFilter] : managedEvents.map((e) => e.id);
+  let eventIds = eventFilter ? [eventFilter] : managedEvents.map((event) => event.id);
   if (eventFilter) {
     if (!editableIds.includes(eventFilter)) {
-      const ok = await canAccessManageEvent(db, user, eventFilter);
-      if (!ok) notFound();
+      const allowed = await canAccessManageEvent(db, user, eventFilter);
+      if (!allowed) notFound();
     }
     eventIds = [eventFilter];
   }
@@ -85,28 +88,33 @@ export default async function ManageNotificationsPage({
 
   if (eventIds.length > 0) {
     try {
-      const conds = [inArray(notificationOutboxTable.event_id, eventIds)];
+      const conditions = [inArray(notificationOutboxTable.event_id, eventIds)];
       if (notifFilter !== "all") {
-        conds.push(
+        conditions.push(
           drizzleManageNotificationFilter(
             notifFilter,
             notificationOutboxTable.type,
           ),
         );
       }
-      if (
+      if (statusFilter === "failed") {
+        conditions.push(
+          inArray(notificationOutboxTable.status, [
+            ...TERMINAL_NOTIFICATION_FAILURE_STATUSES,
+          ]),
+        );
+      } else if (
         statusFilter === "pending" ||
         statusFilter === "processing" ||
         statusFilter === "sent" ||
-        statusFilter === "failed" ||
         statusFilter === "cancelled"
       ) {
-        conds.push(eq(notificationOutboxTable.status, statusFilter));
+        conditions.push(eq(notificationOutboxTable.status, statusFilter));
       }
       rows = await db
         .select()
         .from(notificationOutboxTable)
-        .where(and(...conds)!)
+        .where(and(...conditions)!)
         .orderBy(desc(notificationOutboxTable.created_at))
         .limit(50);
     } catch {
@@ -118,12 +126,16 @@ export default async function ManageNotificationsPage({
   if (rows.length > 0) {
     recipientMap = await lookupNotificationRecipients(
       db,
-      rows.map((r) => r.recipient_user_id),
+      rows.map((row) => row.recipient_user_id),
     );
   }
 
-  const failedCount = rows.filter((r) => r.status === "failed").length;
-  const eventTitleById = new Map(managedEvents.map((e) => [e.id, e.title]));
+  const failedCount = rows.filter((row) =>
+    isTerminalNotificationFailure(row.status),
+  ).length;
+  const eventTitleById = new Map(
+    managedEvents.map((event) => [event.id, event.title]),
+  );
 
   return (
     <div>
@@ -133,7 +145,7 @@ export default async function ManageNotificationsPage({
       />
       <ManagePageHeader
         title="通知センター"
-        description="担当イベントに紐づく Discord 通知の配信状況です（直近 50 件）。復旧操作は管理者が /admin/notifications で行います。"
+        description="担当イベントに紐づくDiscord通知の配信状況です（直近50件）。最終失敗の復旧操作はサイト管理者が行います。"
         backHref="/manage"
         backLabel="イベント運営トップへ"
       />
@@ -147,7 +159,8 @@ export default async function ManageNotificationsPage({
 
       {failedCount > 0 ? (
         <div role="status" className="fn-alert fn-alert--danger">
-          <strong>配信失敗 {failedCount} 件</strong> — 内容と次の操作を各行で確認してください。
+          <strong>最終失敗 {failedCount} 件</strong>
+          {" "}— 内容と案内を各行で確認してください。
           {isAdmin ? (
             <>
               {" "}
@@ -167,27 +180,39 @@ export default async function ManageNotificationsPage({
           alignItems: "center",
         }}
       >
-        <AutoSubmitSelect name="event" defaultValue={eventFilter} className="fn-input fn-input-sm">
+        <AutoSubmitSelect
+          name="event"
+          defaultValue={eventFilter}
+          className="fn-input fn-input-sm"
+        >
           <option value="">すべての担当イベント</option>
-          {managedEvents.map((e) => (
-            <option key={e.id} value={e.id}>
-              {e.title}
+          {managedEvents.map((event) => (
+            <option key={event.id} value={event.id}>
+              {event.title}
             </option>
           ))}
         </AutoSubmitSelect>
-        <AutoSubmitSelect name="notif" defaultValue={notifFilter} className="fn-input fn-input-sm">
-          {MANAGE_NOTIFICATION_FILTER_OPTIONS.map((o) => (
-            <option key={o.key} value={o.key}>
-              {o.label}
+        <AutoSubmitSelect
+          name="notif"
+          defaultValue={notifFilter}
+          className="fn-input fn-input-sm"
+        >
+          {MANAGE_NOTIFICATION_FILTER_OPTIONS.map((option) => (
+            <option key={option.key} value={option.key}>
+              {option.label}
             </option>
           ))}
         </AutoSubmitSelect>
-        <AutoSubmitSelect name="status" defaultValue={statusFilter} className="fn-input fn-input-sm">
+        <AutoSubmitSelect
+          name="status"
+          defaultValue={statusFilter}
+          className="fn-input fn-input-sm"
+        >
           <option value="">すべての状態</option>
           <option value="pending">配信待ち</option>
           <option value="processing">送信中</option>
           <option value="sent">送信済み</option>
-          <option value="failed">失敗</option>
+          <option value="failed">最終失敗</option>
           <option value="cancelled">キャンセル</option>
         </AutoSubmitSelect>
       </form>
@@ -209,25 +234,27 @@ export default async function ManageNotificationsPage({
             </tr>
           </thead>
           <tbody>
-            {rows.map((n) => (
-              <tr key={n.id}>
+            {rows.map((notification) => (
+              <tr key={notification.id}>
                 <td style={{ verticalAlign: "top" }}>
-                  <div>{formatUnix(n.created_at)}</div>
+                  <div>{formatUnix(notification.created_at)}</div>
                   <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                    {formatRelative(n.created_at)}
+                    {formatRelative(notification.created_at)}
                   </div>
                 </td>
                 <td>
                   <NotificationOutboxSummary
-                    row={n}
-                    recipient={recipientMap.get(n.recipient_user_id) ?? null}
+                    row={notification}
+                    recipient={
+                      recipientMap.get(notification.recipient_user_id) ?? null
+                    }
                   />
                 </td>
                 <td style={{ verticalAlign: "top", fontSize: 12 }}>
-                  {n.event_id ? (
-                    <Link href={`/manage/events/${n.event_id}`}>
-                      {eventTitleById.get(n.event_id)?.slice(0, 20) ??
-                        `${n.event_id.slice(0, 8)}…`}
+                  {notification.event_id ? (
+                    <Link href={`/manage/events/${notification.event_id}`}>
+                      {eventTitleById.get(notification.event_id)?.slice(0, 20) ??
+                        `${notification.event_id.slice(0, 8)}…`}
                     </Link>
                   ) : (
                     "—"

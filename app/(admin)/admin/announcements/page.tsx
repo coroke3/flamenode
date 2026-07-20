@@ -1,14 +1,12 @@
 import * as React from "react";
-import { FnTable } from "@/components/ui/FnTable";
-
 import Link from "next/link";
 import type { Metadata } from "next";
 import { and, desc, eq } from "drizzle-orm";
+import { FnTable } from "@/components/ui/FnTable";
 import { getDatabase } from "@/lib/cloudflare";
 import { announcements } from "@/lib/db/schema";
 import { formatUnix } from "@/lib/utils/format";
 import { Icon } from "@/components/ui/Icon";
-import { AnnouncementBroadcastButton } from "@/components/admin/AnnouncementBroadcastButton";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 
@@ -31,7 +29,7 @@ export default async function AdminAnnouncementsPage({
     sp.status === "published" || sp.status === "draft" ? sp.status : "any";
 
   const db = getDatabase();
-  const conds = [
+  const conditions = [
     audienceFilter !== "any"
       ? eq(announcements.target_audience, audienceFilter)
       : undefined,
@@ -40,8 +38,13 @@ export default async function AdminAnnouncementsPage({
       : statusFilter === "draft"
         ? eq(announcements.is_published, 0)
         : undefined,
-  ].filter((c): c is NonNullable<typeof c> => c !== undefined);
-  const where = conds.length === 0 ? undefined : conds.length === 1 ? conds[0] : and(...conds);
+  ].filter((condition): condition is NonNullable<typeof condition> => condition !== undefined);
+  const where =
+    conditions.length === 0
+      ? undefined
+      : conditions.length === 1
+        ? conditions[0]
+        : and(...conditions);
   const rows = db
     ? await db
         .select()
@@ -55,7 +58,7 @@ export default async function AdminAnnouncementsPage({
     <div>
       <AdminPageHeader
         title="お知らせ管理"
-        description="ユーザー向けお知らせの作成・配信・状態管理を行います。"
+        description="サイト内に掲載するユーザー向けお知らせの作成・公開・状態管理を行います。"
         actions={[
           {
             href: "/admin/announcements/new",
@@ -76,13 +79,21 @@ export default async function AdminAnnouncementsPage({
           alignItems: "center",
         }}
       >
-        <AutoSubmitSelect name="audience" className="fn-select" defaultValue={audienceFilter}>
+        <AutoSubmitSelect
+          name="audience"
+          className="fn-select"
+          defaultValue={audienceFilter}
+        >
           <option value="any">対象すべて</option>
           <option value="all">all</option>
           <option value="creators">creators</option>
           <option value="admins">admins</option>
         </AutoSubmitSelect>
-        <AutoSubmitSelect name="status" className="fn-select" defaultValue={statusFilter}>
+        <AutoSubmitSelect
+          name="status"
+          className="fn-select"
+          defaultValue={statusFilter}
+        >
           <option value="any">公開状態すべて</option>
           <option value="published">公開のみ</option>
           <option value="draft">下書きのみ</option>
@@ -100,18 +111,14 @@ export default async function AdminAnnouncementsPage({
           color: "var(--text-secondary)",
         }}
       >
-        <strong style={{ color: "var(--text-primary)" }}>
-          公開側の取得方針
-        </strong>
+        <strong style={{ color: "var(--text-primary)" }}>公開側の取得方針</strong>
         <ul style={{ margin: "6px 0 0", paddingLeft: 18, lineHeight: 1.7 }}>
-          <li>公開側は <code>is_published=1</code> かつ掲載期間内の <code>target_audience=all</code> を最大3件だけ取得します。</li>
-          <li>Discord 配信は段階 enqueue のみで、1操作あたり最大50件です。</li>
-          <li>対象者数の全件 COUNT は無料枠保護のため管理トップでは実行しません。</li>
+          <li>
+            公開側は <code>is_published=1</code> かつ掲載期間内の{" "}
+            <code>target_audience=all</code> を最大3件だけ取得します。
+          </li>
+          <li>Discordへの告知はこの画面から行わず、運営Discord上で行います。</li>
         </ul>
-        <p style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
-          公開後の Discord 配信は各行の broadcast ボタンから段階実行します。
-          Worker の送信結果は通知管理で確認できます。
-        </p>
       </section>
 
       <FnTable style={{ marginTop: 18 }}>
@@ -125,46 +132,41 @@ export default async function AdminAnnouncementsPage({
           </tr>
         </thead>
         <tbody>
-          {rows.map((a) => (
-            <tr key={a.id}>
+          {rows.map((announcement) => (
+            <tr key={announcement.id}>
               <td>
-                <strong>{a.title}</strong>
+                <strong>{announcement.title}</strong>
                 <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                  {a.id.slice(0, 12)}…
+                  {announcement.id.slice(0, 12)}…
                 </div>
               </td>
               <td>
-                {a.is_published === 1 ? (
+                {announcement.is_published === 1 ? (
                   <span className="fn-badge fn-badge-accent">公開</span>
                 ) : (
                   <span className="fn-badge fn-badge-soft">下書き</span>
                 )}
               </td>
               <td>
-                {a.publish_at ? formatUnix(a.publish_at, { dateOnly: true }) : "—"}
+                {announcement.publish_at
+                  ? formatUnix(announcement.publish_at, { dateOnly: true })
+                  : "—"}
                 {" 〜 "}
-                {a.expire_at ? formatUnix(a.expire_at, { dateOnly: true }) : "—"}
+                {announcement.expire_at
+                  ? formatUnix(announcement.expire_at, { dateOnly: true })
+                  : "—"}
               </td>
-              <td>{formatUnix(a.updated_at)}</td>
+              <td>{formatUnix(announcement.updated_at)}</td>
               <td>
                 <div style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
                   <Link
-                    href={`/admin/announcements/${a.id}/edit`}
+                    href={`/admin/announcements/${announcement.id}/edit`}
                     className="fn-btn fn-btn-ghost fn-btn-sm"
                   >
                     編集
                   </Link>
-                  {a.is_published === 1 ? (
-                    <AnnouncementBroadcastButton
-                      announcementId={a.id}
-                      defaultContent={`${a.title}\n\n${a.body.slice(0, 800)}`}
-                      defaultAudience={
-                        (a.target_audience as "all" | "creators" | "admins") ?? "creators"
-                      }
-                    />
-                  ) : null}
                   <Link
-                    href={`/admin/audit?table=announcements&record=${encodeURIComponent(a.id)}`}
+                    href={`/admin/audit?table=announcements&record=${encodeURIComponent(announcement.id)}`}
                     className="fn-btn fn-btn-ghost fn-btn-sm"
                     title="このお知らせの監査ログ"
                   >
