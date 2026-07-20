@@ -30,3 +30,18 @@ test("現在回答と解除イベント回答は監査対象IDで重複排除す
     /compositeAuditTargetId\(row\.video_id, row\.event_id, row\.question_id\)/,
   );
 });
+
+test("履歴読み取りは8件の書き込み上限と分離する", () => {
+  assert.match(
+    source,
+    /MAX_VIDEO_CUSTOM_QUESTION_HISTORY_READ =\s*MAX_ATOMIC_VIDEO_EVENTS \* MAX_EVENT_CUSTOM_QUESTIONS/,
+  );
+  assert.match(
+    source,
+    /questions\.length > MAX_VIDEO_CUSTOM_QUESTION_HISTORY_READ/,
+  );
+  assert.match(
+    source,
+    /limit\(MAX_VIDEO_CUSTOM_QUESTION_HISTORY_READ \+ 1\)/,
+  );
+});
