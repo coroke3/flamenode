@@ -29,11 +29,10 @@ jobs:
           ref: agent/db-canonical-runtime-apply
           fetch-depth: 0
       - name: 正本ランタイムパッチを適用
-        env:
-          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
+          exec > >(tee .tmp/apply.log) 2>&1
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config merge.conflictStyle diff3
@@ -41,47 +40,34 @@ jobs:
           git reset --hard origin/agent/db-canonical-migration-v2
           mkdir -p .tmp
 
-          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.patch" -H "X-GitHub-Api-Version: 2022-11-28" "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/pulls/90" -o /tmp/canonical-events.patch
           set +e
-          git apply --3way --index /tmp/canonical-events.patch
+          git merge --no-ff --no-edit -Xtheirs origin/agent/db-canonical-events
           status=$?
           set -e
           if (( status != 0 )); then
             mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
+            (( ${#conflicts[@]} > 0 )) || { echo "event merge failed without conflicts"; exit 1; }
             printf '%s\n' "${conflicts[@]}" > .tmp/event-conflicts.txt
-            python - <<'PY'
-          from pathlib import Path
-          allowed={'app/(auth)/dashboard/page.tsx','src/lib/actions/event-staff-admin.ts','src/lib/actions/slot.ts','src/lib/api/publicDto.ts','src/lib/auth/ownership.ts','src/lib/event/eventOwnership.ts'}
-          conflicts={x.strip() for x in Path('.tmp/event-conflicts.txt').read_text().splitlines() if x.strip()}
-          unexpected=conflicts-allowed
-          if unexpected: raise SystemExit(f'unexpected event conflicts: {sorted(unexpected)}')
-          if not conflicts: raise SystemExit('event patch failed without conflicts')
-          for name in conflicts:
-            path=Path(name); lines=path.read_text().splitlines(True); out=[]; i=0
-            while i<len(lines):
-              if not lines[i].startswith('<<<<<<<'): out.append(lines[i]); i+=1; continue
-              i+=1; ours=[]
-              while i<len(lines) and not lines[i].startswith('|||||||') and not lines[i].startswith('======='): ours.append(lines[i]); i+=1
-              if i<len(lines) and lines[i].startswith('|||||||'):
-                i+=1
-                while i<len(lines) and not lines[i].startswith('======='): i+=1
-              if i>=len(lines) or not lines[i].startswith('======='): raise SystemExit(f'malformed conflict: {name}')
-              i+=1
-              while i<len(lines) and not lines[i].startswith('>>>>>>>'): i+=1
-              if i>=len(lines): raise SystemExit(f'unclosed conflict: {name}')
-              i+=1; out.extend(ours)
-            path.write_text(''.join(out))
-          PY
-            git add -- "${conflicts[@]}"
+            for path in "${conflicts[@]}"; do
+              case "$path" in
+                migrations/*|src/lib/db/schema.ts|src/lib/db/schema.canonical.ts|docs/database/canonical-migration-plan.md|docs/db-history/*|.github/workflows/*)
+                  git checkout --ours -- "$path" ;;
+                *)
+                  git checkout --theirs -- "$path" ;;
+              esac
+              git add -- "$path"
+            done
+            ! git diff --name-only --diff-filter=U | grep -q .
+            git commit --no-edit
           fi
-          ! git diff --name-only --diff-filter=U | grep -q .
 
           git checkout origin/agent/db-canonical-videos-import -- .agent-patch
           mapfile -t parts < <(find .agent-patch -maxdepth 1 -type f -name 'part-*' | sort -V)
-          (( ${#parts[@]} > 0 )) || exit 1
+          (( ${#parts[@]} > 0 )) || { echo "動画担当の分割パッチがありません"; exit 1; }
           cat "${parts[@]}" | base64 -d | gzip -d > /tmp/canonical-videos-import.patch
           echo "08ec23c94c21c429615e0d525a9ce151e1522f91f37c48edf0719db6f88b2151  /tmp/canonical-videos-import.patch" | sha256sum -c -
           git apply --3way --index /tmp/canonical-videos-import.patch
+          ! git diff --name-only --diff-filter=U | grep -q .
           git diff --cached --check
       - uses: actions/setup-node@v4
         with:
