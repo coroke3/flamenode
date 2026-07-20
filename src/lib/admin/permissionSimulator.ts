@@ -11,6 +11,7 @@ import {
 import { formatPermissionKeyLabel } from "@/lib/admin/permissionIntegrityChecks";
 import type { PermissionKey } from "@/lib/auth/permissions/keys";
 
+// event_staff.x_user_idを唯一のスタッフ権限主体として扱う。
 const SPOTLIGHT_KEYS: PermissionKey[] = [
   "event.basic",
   "event.slots",
