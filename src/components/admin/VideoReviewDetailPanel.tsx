@@ -4,7 +4,10 @@ import { Icon } from "@/components/ui/Icon";
 import { youtubeThumbUrl, youtubeWatchUrl } from "@/lib/youtube/id";
 import { formatUnix } from "@/lib/utils/format";
 import type { VideoReviewDetail } from "@/lib/admin/videoReviewDetail";
-import { videoVisibilityBadgeClass, videoVisibilityLabel } from "@/lib/admin/videoVisibilityLabels";
+import {
+  videoVisibilityBadgeClass,
+  videoVisibilityLabel,
+} from "@/lib/admin/videoVisibilityLabels";
 
 interface VideoReviewDetailPanelProps {
   video: VideoReviewDetail;
@@ -24,7 +27,9 @@ function Field({
       <dt className="fn-muted" style={{ fontSize: 12 }}>
         {label}
       </dt>
-      <dd style={{ margin: 0, fontSize: 13, whiteSpace: "pre-wrap" }}>{value}</dd>
+      <dd style={{ margin: 0, fontSize: 13, whiteSpace: "pre-wrap" }}>
+        {value}
+      </dd>
     </>
   );
 }
@@ -82,12 +87,24 @@ export function VideoReviewDetailPanel({
             gap: "8px 12px",
           }}
         >
-          <Field label="状態" value={
-            <span className={`fn-badge ${videoVisibilityBadgeClass(video.visibility_status)}`}>
-              {videoVisibilityLabel(video.visibility_status)}
-            </span>
-          } />
-          <Field label="作者" value={`${video.creator_name}${video.creator_x_user_id ? ` (@${video.creator_x_user_id})` : ""}`} />
+          <Field
+            label="状態"
+            value={
+              <span
+                className={`fn-badge ${videoVisibilityBadgeClass(
+                  video.visibility_status,
+                )}`}
+              >
+                {videoVisibilityLabel(video.visibility_status)}
+              </span>
+            }
+          />
+          <Field
+            label="作者"
+            value={`${video.creator_name}${
+              video.creator_x_user_id ? ` (@${video.creator_x_user_id})` : ""
+            }`}
+          />
           <Field
             label="YouTube ID"
             value={
@@ -109,7 +126,10 @@ export function VideoReviewDetailPanel({
           <Field label="使用ソフト" value={video.software_label ?? "—"} />
           <Field label="intro_comment" value={video.intro_comment ?? "—"} />
           <Field label="highlights" value={video.highlights ?? "—"} />
-          <Field label="production_story" value={video.production_story ?? "—"} />
+          <Field
+            label="production_story"
+            value={video.production_story ?? "—"}
+          />
           <Field label="権利確認" value={video.stagePermission ?? "—"} />
         </dl>
 
@@ -131,12 +151,21 @@ export function VideoReviewDetailPanel({
                   <dt style={{ fontSize: 12, fontWeight: 700 }}>
                     {item.label}
                     {item.required ? (
-                      <span className="fn-badge fn-badge-warning" style={{ marginLeft: 6 }}>
+                      <span
+                        className="fn-badge fn-badge-warning"
+                        style={{ marginLeft: 6 }}
+                      >
                         必須
                       </span>
                     ) : null}
                   </dt>
-                  <dd style={{ margin: "6px 0 0", fontSize: 13, whiteSpace: "pre-wrap" }}>
+                  <dd
+                    style={{
+                      margin: "6px 0 0",
+                      fontSize: 13,
+                      whiteSpace: "pre-wrap",
+                    }}
+                  >
                     {item.answer}
                   </dd>
                 </div>
@@ -156,7 +185,6 @@ export function VideoReviewDetailPanel({
                   <th>名前</th>
                   <th>役割</th>
                   <th>X ID</th>
-                  <th>チャプター</th>
                 </tr>
               </thead>
               <tbody>
@@ -165,14 +193,16 @@ export function VideoReviewDetailPanel({
                     <td>
                       {member.name}
                       {!member.is_public_member ? (
-                        <span className="fn-badge fn-badge-soft" style={{ marginLeft: 4 }}>
+                        <span
+                          className="fn-badge fn-badge-soft"
+                          style={{ marginLeft: 4 }}
+                        >
                           非公開
                         </span>
                       ) : null}
                     </td>
                     <td>{member.role ?? "—"}</td>
                     <td>{member.x_user_id ? `@${member.x_user_id}` : "—"}</td>
-                    <td style={{ fontSize: 12 }}>{member.chapters ?? "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -193,7 +223,9 @@ export function VideoReviewDetailPanel({
         </section>
 
         {footerLinks ? (
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{footerLinks}</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {footerLinks}
+          </div>
         ) : null}
       </aside>
     </div>
