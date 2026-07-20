@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { desc, eq } from "drizzle-orm";
 import styles from "./page.module.css";
-import { withDatabase } from "@/lib/cloudflare";
+import { withDatabaseRead } from "@/lib/cloudflare";
 import {
   eventStaff,
   events as eventsTable,
@@ -188,7 +188,7 @@ export default async function EventListPage({
     : null;
 
   const source: EventListSource = canFallbackToDatabase(staticLoaded.strategy)
-    ? ((await withDatabase(async (db): Promise<EventListSource> => {
+    ? ((await withDatabaseRead(async (db): Promise<EventListSource> => {
         const [eventRows, groups, publicStaffRows] =
           await Promise.all([
             db

@@ -196,7 +196,7 @@ export async function fetchEventWithEditors(db: DB, eventId: string) {
   const editors = await db
     .select({
       x_user_id: eventStaff.x_user_id,
-      role: eventStaff.permission_preset,
+      role: eventStaff.public_role_label,
       is_public: eventStaff.is_public,
       public_role_label: eventStaff.public_role_label,
       x_name: xUsers.x_name,

@@ -4,373 +4,457 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
-import { createChapter, createChaptersBulk } from "@/lib/actions/chapter";
 import {
-  MAX_ATOMIC_CHAPTER_BULK_ROWS,
-  parseChapterBulkCsv,
-} from "@/lib/actions/chapterLimits";
+  createChapter,
+  getChapterPostingContext,
+} from "@/lib/actions/chapter";
+import { formatDuration } from "@/lib/utils/format";
+import { parseChapterTimeInput } from "@/lib/video/chapterTime";
+import styles from "./ChapterComposer.module.css";
 
 interface ChapterComposerProps {
   videoId: string;
   /** active_x_user_id が承認済か。false なら disabled 案内のみ。 */
   canPost: boolean;
-  /**
-   * `canPost = false` のときに「X ID設定へ」リンクとして使う URL。
-   * 未指定なら CTA は出さず案内文だけ表示する。
-   * 呼び出し側で `/dashboard/settings?next=...` を組み立てて渡す。
-   */
+  /** canPost=false のときに表示する X ID 設定画面へのリンク。 */
   settingsHref?: string;
-  /** 動画オーナー / admin のみ CSV 一括登録 UI を出す。 */
+  /** 旧呼び出し側との型互換用。通常チャプターのCSV一括登録は廃止済み。 */
   canBulk?: boolean;
-  /**
-   * true のとき、単発投稿フォームを描画せず CSV 一括登録 UI だけ表示する。
-   * 編集ページ側のチャプター一括登録パネル用。動画詳細ページからは false (既定)。
-   */
+  /** 旧呼び出し側との型互換用。true の場合も一括登録UIは表示しない。 */
   bulkOnly?: boolean;
 }
 
-function parseTimeInput(raw: string): number {
-  const s = raw.trim();
-  if (!s) return 0;
-  if (/^\d+$/.test(s)) return Number(s);
-  const m = s.match(/^(\d{1,2}):([0-5]\d)(?:[.:](\d{1,3}))?$/);
-  if (m) {
-    const min = Number(m[1]);
-    const sec = Number(m[2]);
-    const ms = m[3] ? Number(m[3].padEnd(3, "0")) : 0;
-    return min * 60 + sec + ms / 1000;
-  }
-  const mh = s.match(/^(\d{1,2}):([0-5]\d):([0-5]\d)$/);
-  if (mh) {
-    return Number(mh[1]) * 3600 + Number(mh[2]) * 60 + Number(mh[3]);
-  }
-  const n = Number(s);
-  return Number.isFinite(n) ? n : 0;
+type ChapterVisibility = "public" | "private";
+
+interface VisibilityOptionProps {
+  name: string;
+  value: ChapterVisibility;
+  current: ChapterVisibility;
+  title: string;
+  description: string;
+  onChange: (value: ChapterVisibility) => void;
 }
 
-/**
- * チャプター投稿フォーム。動画詳細ページ右レール下に置く想定。
- */
+function VisibilityOption({
+  name,
+  value,
+  current,
+  title,
+  description,
+  onChange,
+}: VisibilityOptionProps): React.ReactElement {
+  const active = value === current;
+  return (
+    <label
+      className={
+        active ? styles.visibilityOptionActive : styles.visibilityOption
+      }
+    >
+      <input
+        type="radio"
+        name={name}
+        value={value}
+        checked={active}
+        onChange={() => onChange(value)}
+      />
+      <span>
+        <strong>{title}</strong>
+        <small>{description}</small>
+      </span>
+    </label>
+  );
+}
+
+/** 動画詳細ページから通常チャプターコメントを1件投稿するフォーム。 */
 export function ChapterComposer({
   videoId,
   canPost,
   settingsHref,
-  canBulk = false,
+  canBulk: _canBulk,
   bulkOnly = false,
 }: ChapterComposerProps): React.ReactElement {
   const router = useRouter();
+  const componentId = React.useId();
+  const formId = `${componentId}-form`;
+  const timeId = `${componentId}-time`;
+  const timeHelpId = `${componentId}-time-help`;
+  const labelId = `${componentId}-label`;
+  const noteId = `${componentId}-note`;
+  const visibilityName = `${componentId}-visibility`;
+
   const [open, setOpen] = React.useState(false);
   const [timeStr, setTimeStr] = React.useState("0:00");
   const [label, setLabel] = React.useState("");
   const [note, setNote] = React.useState("");
-  const [isPublic, setIsPublic] = React.useState(true);
+  const [visibility, setVisibility] =
+    React.useState<ChapterVisibility>("public");
+  const [durationSeconds, setDurationSeconds] = React.useState<number | null>(
+    null,
+  );
+  const [contextError, setContextError] = React.useState<string | null>(null);
   const [busy, startTransition] = React.useTransition();
+  const [contextLoading, startContextTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
+  const [success, setSuccess] = React.useState<string | null>(null);
+  const contextRequestRef = React.useRef(0);
+  const contextLoadingRef = React.useRef(false);
+  const submittingRef = React.useRef(false);
 
-  const [bulkOpen, setBulkOpen] = React.useState(false);
-  const [bulkCsv, setBulkCsv] = React.useState("");
-  const [bulkBusy, startBulkTransition] = React.useTransition();
-  const [bulkMessage, setBulkMessage] = React.useState<string | null>(null);
-  const [bulkErrors, setBulkErrors] = React.useState<string[]>([]);
+  void _canBulk;
 
-  const submitBulk = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setBulkMessage(null);
-    setBulkErrors([]);
-    if (!bulkCsv.trim()) {
-      setBulkMessage("CSV を貼り付けてください。");
-      return;
-    }
-    const dataRowCount = parseChapterBulkCsv(bulkCsv).length;
-    if (dataRowCount > MAX_ATOMIC_CHAPTER_BULK_ROWS) {
-      setBulkMessage(`CSVは一度に最大${MAX_ATOMIC_CHAPTER_BULK_ROWS}行まで登録できます。`);
-      return;
-    }
-    const fd = new FormData();
-    fd.set("video_id", videoId);
-    fd.set("csv", bulkCsv);
-    startBulkTransition(async () => {
-      const r = await createChaptersBulk(fd);
-      setBulkMessage(r.message ?? null);
-      setBulkErrors(r.errors ?? []);
-      if (r.ok && (r.inserted ?? 0) > 0) {
-        setBulkCsv("");
-        router.refresh();
+  const clearFeedback = React.useCallback(() => {
+    setError(null);
+    setSuccess(null);
+  }, []);
+
+  const loadContext = React.useCallback(() => {
+    if (contextLoadingRef.current) return;
+    const requestId = contextRequestRef.current + 1;
+    contextRequestRef.current = requestId;
+    contextLoadingRef.current = true;
+    setContextError(null);
+    setDurationSeconds(null);
+
+    startContextTransition(async () => {
+      try {
+        const result = await getChapterPostingContext(videoId);
+        if (contextRequestRef.current !== requestId) return;
+        if (!result.ok || result.durationSeconds == null) {
+          setContextError(
+            result.message ?? "動画時間を取得できないため投稿できません。",
+          );
+          return;
+        }
+        setDurationSeconds(result.durationSeconds);
+      } catch (error) {
+        if (contextRequestRef.current !== requestId) return;
+        setContextError(
+          "動画時間の取得に失敗しました。接続を確認して再取得してください。",
+        );
+        console.error("chapter posting context request failed", {
+          videoId,
+          errorName: error instanceof Error ? error.name : "unknown",
+        });
+      } finally {
+        if (contextRequestRef.current === requestId) {
+          contextLoadingRef.current = false;
+        }
       }
     });
+  }, [videoId]);
+
+  React.useEffect(() => {
+    contextRequestRef.current += 1;
+    contextLoadingRef.current = false;
+    submittingRef.current = false;
+    setOpen(false);
+    setDurationSeconds(null);
+    setContextError(null);
+    setError(null);
+    setSuccess(null);
+  }, [videoId]);
+
+  const parsedTime = React.useMemo(
+    () => parseChapterTimeInput(timeStr),
+    [timeStr],
+  );
+  const timeError = React.useMemo(() => {
+    if (parsedTime == null) {
+      return "時刻は 1:23、1:23:45、または秒数で入力してください。";
+    }
+    if (durationSeconds != null && parsedTime > durationSeconds) {
+      return `動画時間 ${formatDuration(durationSeconds)} を超えています。`;
+    }
+    return null;
+  }, [durationSeconds, parsedTime]);
+
+  const toggleForm = () => {
+    if (busy) return;
+    const nextOpen = !open;
+    setOpen(nextOpen);
+    clearFeedback();
+    if (
+      nextOpen &&
+      durationSeconds == null &&
+      !contextError &&
+      !contextLoading
+    ) {
+      loadContext();
+    }
   };
 
-  const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
+  const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (submittingRef.current) return;
+
+    setSuccess(null);
     if (!canPost) {
       setError("チャプター投稿には承認済み X ID が必要です。");
       return;
     }
     if (!label.trim()) {
-      setError("ラベルを入力してください。");
+      setError("見出しを入力してください。");
       return;
     }
-    const seconds = parseTimeInput(timeStr);
+    if (parsedTime == null) {
+      setError("時刻の形式を確認してください。");
+      return;
+    }
+    if (durationSeconds == null) {
+      setError(
+        contextError ?? "動画時間を確認できないため、現在は投稿できません。",
+      );
+      return;
+    }
+    if (parsedTime > durationSeconds) {
+      setError(`動画時間 ${formatDuration(durationSeconds)} を超えています。`);
+      return;
+    }
+
+    const formData = new FormData();
+    formData.set("video_id", videoId);
+    formData.set("chapter_time", String(parsedTime));
+    formData.set("chapter_label", label.trim());
+    formData.set("note", note.trim());
+    formData.set("visibility", visibility);
+
     setError(null);
-    const fd = new FormData();
-    fd.set("video_id", videoId);
-    fd.set("chapter_time", String(seconds));
-    fd.set("chapter_label", label.trim());
-    fd.set("note", note.trim());
-    fd.set("visibility", isPublic ? "public" : "private");
-    fd.set("marker_kind", "chapter");
-    fd.set("show_on_player_bar", "0");
+    submittingRef.current = true;
     startTransition(async () => {
-      const r = await createChapter(fd);
-      if (!r.ok) {
-        setError(r.message ?? "投稿に失敗しました。");
-        return;
+      try {
+        const result = await createChapter(formData);
+        if (!result.ok) {
+          setError(result.message ?? "投稿に失敗しました。");
+          return;
+        }
+        setLabel("");
+        setNote("");
+        setTimeStr("0:00");
+        setVisibility("public");
+        setSuccess("チャプターコメントを投稿しました。");
+        router.refresh();
+      } catch (error) {
+        setError(
+          "通信に失敗しました。入力内容を保持したまま、もう一度送信できます。",
+        );
+        console.error("chapter comment create request failed", {
+          videoId,
+          errorName: error instanceof Error ? error.name : "unknown",
+        });
+      } finally {
+        submittingRef.current = false;
       }
-      setLabel("");
-      setNote("");
-      setTimeStr("0:00");
-      router.refresh();
     });
   };
 
-  // 単発フォームを使わない bulkOnly モードでは、canPost ガード (X ID 設定への案内) を
-  // 出さない。CSV 一括登録 UI も canBulk が false なら何も描画しない。
-  if (!canPost && !bulkOnly) {
+  if (bulkOnly) return <></>;
+
+  if (!canPost) {
     return (
-      <section
-        style={{
-          border: "1px solid var(--border-subtle)",
-          background: "var(--bg-card)",
-          borderRadius: "var(--radius-md)",
-          padding: 12,
-          fontSize: 12,
-          color: "var(--text-muted)",
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          flexWrap: "wrap",
-        }}
-      >
+      <section className={styles.disabledPanel}>
         <span>
           <Icon name="info" size={12} aria-hidden /> 承認済み X ID を選択すると
           チャプターを投稿できます。
         </span>
         {settingsHref ? (
-          <Link
-            href={settingsHref}
-            className="fn-btn fn-btn-ghost fn-btn-sm"
-          >
+          <Link href={settingsHref} className="fn-btn fn-btn-ghost fn-btn-sm">
             X ID設定へ
           </Link>
         ) : null}
       </section>
     );
   }
-  if (bulkOnly && !canBulk) {
-    return <></>;
-  }
+
+  const submitDisabled =
+    busy ||
+    contextLoading ||
+    durationSeconds == null ||
+    parsedTime == null ||
+    parsedTime > durationSeconds ||
+    !label.trim();
 
   return (
-    <section
-      style={{
-        border: "1px solid var(--border-subtle)",
-        background: "var(--bg-card)",
-        borderRadius: "var(--radius-md)",
-        padding: 12,
-      }}
-    >
-      {!bulkOnly ? (
-        <header
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: open ? 10 : 0,
-          }}
-        >
-          <strong style={{ fontSize: 12, letterSpacing: "0.08em" }}>
+    <section className={styles.root} aria-labelledby={`${componentId}-heading`}>
+      <header className={styles.header}>
+        <span className={styles.headingGroup}>
+          <span className={styles.headingIcon} aria-hidden>
+            <Icon name="comment" size={13} />
+          </span>
+          <strong id={`${componentId}-heading`} className={styles.heading}>
             チャプターコメント投稿
           </strong>
-          <button
-            type="button"
-            className="fn-btn fn-btn-ghost fn-btn-sm"
-            onClick={() => setOpen((v) => !v)}
-          >
-            {open ? "閉じる" : "開く"}
-          </button>
-        </header>
-      ) : (
-        <header style={{ marginBottom: 6 }}>
-          <strong style={{ fontSize: 12, letterSpacing: "0.08em" }}>
-            チャプターコメント CSV 一括登録
-          </strong>
-        </header>
-      )}
-      {open && !bulkOnly ? (
-        <form
-          onSubmit={onSubmit}
-          style={{ display: "flex", flexDirection: "column", gap: 8 }}
+        </span>
+        <button
+          type="button"
+          className={styles.toggleButton}
+          onClick={toggleForm}
+          aria-expanded={open}
+          aria-controls={formId}
+          disabled={busy}
         >
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <span>{open ? "閉じる" : "投稿する"}</span>
+          <Icon
+            name={open ? "chevron-up" : "chevron-down"}
+            size={13}
+            aria-hidden
+          />
+        </button>
+      </header>
+
+      {open ? (
+        <form
+          id={formId}
+          onSubmit={onSubmit}
+          className={styles.form}
+          aria-busy={busy || contextLoading}
+        >
+          <div className={styles.field}>
+            <label htmlFor={timeId} className={styles.label}>
+              時刻
+            </label>
+            <div className={styles.timeRow}>
+              <input
+                id={timeId}
+                type="text"
+                value={timeStr}
+                onChange={(event) => {
+                  setTimeStr(event.target.value);
+                  clearFeedback();
+                }}
+                placeholder="1:23"
+                className="fn-input"
+                aria-invalid={Boolean(timeError)}
+                aria-describedby={timeHelpId}
+                autoComplete="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                maxLength={12}
+                disabled={busy}
+                required
+              />
+              <span className={styles.durationText}>
+                / 動画時間{" "}
+                {contextLoading
+                  ? "確認中…"
+                  : durationSeconds != null
+                    ? formatDuration(durationSeconds)
+                    : "未取得"}
+              </span>
+            </div>
+            <p
+              id={timeHelpId}
+              className={timeError ? styles.fieldError : styles.fieldHelp}
+            >
+              {timeError ?? "例: 1:23、1:23:45、83、83.5"}
+            </p>
+          </div>
+
+          <div className={styles.field}>
+            <label htmlFor={labelId} className={styles.label}>
+              見出し
+            </label>
             <input
+              id={labelId}
               type="text"
-              value={timeStr}
-              onChange={(e) => setTimeStr(e.target.value)}
-              placeholder="mm:ss"
+              value={label}
+              onChange={(event) => {
+                setLabel(event.target.value);
+                clearFeedback();
+              }}
+              placeholder="例: サビ前 / 振り返りメモ"
               className="fn-input"
-              style={{ width: 90 }}
-              maxLength={9}
+              maxLength={120}
+              disabled={busy}
               required
             />
-            <span className="fn-badge fn-badge-neutral">チャプターコメント</span>
           </div>
-          <input
-            type="text"
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            placeholder="ラベル (例: サビ前 / 振り返りメモ)"
-            className="fn-input"
-            maxLength={120}
-            required
-          />
-          <textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="補足メモ (任意, 1000文字以内)"
-            className="fn-input"
-            rows={2}
-            maxLength={1000}
-          />
-          <div
-            style={{
-              display: "flex",
-              gap: 12,
-              flexWrap: "wrap",
-              fontSize: 11,
-              color: "var(--text-secondary)",
-            }}
-          >
-            <label
-              style={{
-                display: "inline-flex",
-                gap: 4,
-                alignItems: "center",
-                cursor: "pointer",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={isPublic}
-                onChange={(e) => setIsPublic(e.target.checked)}
-              />
-              公開
+
+          <div className={styles.field}>
+            <label htmlFor={noteId} className={styles.label}>
+              補足コメント <span className={styles.optional}>任意</span>
             </label>
+            <textarea
+              id={noteId}
+              value={note}
+              onChange={(event) => {
+                setNote(event.target.value);
+                clearFeedback();
+              }}
+              placeholder="コメントや補足を入力"
+              className="fn-input"
+              rows={3}
+              maxLength={1000}
+              disabled={busy}
+            />
+            <span className={styles.characterCount}>{note.length} / 1000</span>
           </div>
+
+          <fieldset className={styles.visibilityFieldset} disabled={busy}>
+            <legend className={styles.label}>公開範囲</legend>
+            <div className={styles.visibilityOptions}>
+              <VisibilityOption
+                name={visibilityName}
+                value="public"
+                current={visibility}
+                title="公開"
+                description="この作品を見られる全員に表示します"
+                onChange={(value) => {
+                  setVisibility(value);
+                  clearFeedback();
+                }}
+              />
+              <VisibilityOption
+                name={visibilityName}
+                value="private"
+                current={visibility}
+                title="非公開"
+                description="自分と作品管理者だけに表示します"
+                onChange={(value) => {
+                  setVisibility(value);
+                  clearFeedback();
+                }}
+              />
+            </div>
+          </fieldset>
+
+          {contextError ? (
+            <div className={styles.contextWarning} role="alert">
+              <span>
+                <Icon name="info" size={12} aria-hidden /> {contextError}
+              </span>
+              <button
+                type="button"
+                className="fn-btn fn-btn-ghost fn-btn-sm"
+                onClick={loadContext}
+                disabled={contextLoading || busy}
+              >
+                <Icon name="refresh" size={11} aria-hidden />
+                再取得
+              </button>
+            </div>
+          ) : null}
+
           {error ? (
-            <p
-              role="alert"
-              style={{ fontSize: 11, color: "var(--accent-danger)" }}
-            >
-              <Icon name="warning" size={11} aria-hidden /> {error}
+            <p className={styles.submitError} role="alert">
+              <Icon name="warning" size={12} aria-hidden /> {error}
             </p>
           ) : null}
+
+          {success ? (
+            <p className={styles.submitSuccess} role="status" aria-live="polite">
+              <Icon name="check" size={12} aria-hidden /> {success}
+            </p>
+          ) : null}
+
           <button
             type="submit"
-            className="fn-btn fn-btn-primary fn-btn-sm"
-            disabled={busy}
+            className={`fn-btn fn-btn-primary fn-btn-sm ${styles.submitButton}`}
+            disabled={submitDisabled}
           >
             <Icon name="plus" size={11} aria-hidden />
-            {busy ? "送信中…" : "投稿"}
+            {busy ? "送信中…" : contextLoading ? "動画時間を確認中…" : "投稿"}
           </button>
         </form>
-      ) : null}
-
-      {canBulk ? (
-        <details
-          style={{
-            // bulkOnly のときは独立カードとして使うので、上区切り線は不要。
-            marginTop: bulkOnly ? 0 : open ? 12 : 8,
-            borderTop: bulkOnly ? undefined : "1px solid var(--border-subtle)",
-            paddingTop: bulkOnly ? 0 : 8,
-          }}
-          // bulkOnly 時は最初から開いた状態にする (専用パネルとして利用される文脈)
-          open={bulkOnly || bulkOpen}
-          onToggle={(e) => setBulkOpen((e.target as HTMLDetailsElement).open)}
-        >
-          <summary
-            style={{
-              fontSize: 11.5,
-              color: "var(--text-muted)",
-              cursor: "pointer",
-              fontWeight: 600,
-            }}
-          >
-            <Icon name="upload" size={11} aria-hidden /> CSV で一括登録 (動画オーナーのみ)
-          </summary>
-          <form
-            onSubmit={submitBulk}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 6,
-              marginTop: 8,
-            }}
-          >
-            <p style={{ fontSize: 11, color: "var(--text-muted)", margin: 0 }}>
-              列: <code>time,label,note,visibility,member</code> /
-              time は <code>mm:ss</code> または <code>hh:mm:ss</code> /
-              最大 {MAX_ATOMIC_CHAPTER_BULK_ROWS} 行。member 列は互換入力として受け付けますが登録には使用しません。
-            </p>
-            <textarea
-              className="fn-input"
-              rows={5}
-              style={{ fontFamily: "monospace", fontSize: 12 }}
-              placeholder={"0:30,オープニング,,public,\n1:45,Aパート,音響担当,public,sato_design"}
-              value={bulkCsv}
-              onChange={(e) => setBulkCsv(e.target.value)}
-              disabled={bulkBusy}
-            />
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <button
-                type="submit"
-                className="fn-btn fn-btn-primary fn-btn-sm"
-                disabled={bulkBusy}
-              >
-                <Icon name="plus" size={11} aria-hidden />
-                {bulkBusy ? "登録中…" : "一括登録"}
-              </button>
-              {bulkMessage ? (
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: bulkErrors.length > 0
-                      ? "var(--accent-danger)"
-                      : "var(--text-secondary)",
-                  }}
-                >
-                  {bulkMessage}
-                </span>
-              ) : null}
-            </div>
-            {bulkErrors.length > 0 ? (
-              <ul
-                style={{
-                  margin: 0,
-                  paddingLeft: 18,
-                  fontSize: 11,
-                  color: "var(--accent-danger)",
-                }}
-              >
-                {bulkErrors.slice(0, 8).map((er, i) => (
-                  <li key={i}>{er}</li>
-                ))}
-                {bulkErrors.length > 8 ? (
-                  <li>...他 {bulkErrors.length - 8} 件</li>
-                ) : null}
-              </ul>
-            ) : null}
-          </form>
-        </details>
       ) : null}
     </section>
   );

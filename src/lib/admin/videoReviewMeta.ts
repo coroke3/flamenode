@@ -1,22 +1,23 @@
 import "server-only";
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import {
   eventCustomQuestions,
   videoCustomAnswers,
   videoEvents,
 } from "@/lib/db/schema";
-import { readStagePermissionCustomAnswers } from "@/lib/video/stagePermissionAnswers";
+import { formatCustomAnswerValue } from "@/lib/video/customQuestions";
 
 export type VideoReviewSummary = {
+  /** 互換フィールド名。内容は最初のカスタム回答概要。 */
   stage_permission_summary: string;
   required_unanswered_count: number;
 };
 
-function summarizeStagePermission(raw: string | null | undefined): string {
+function summarizeAnswer(raw: string | null | undefined): string {
   const text = (raw ?? "").trim();
-  if (!text) return "未入力";
+  if (!text) return "—";
   if (text.length <= 24) return text;
   return `${text.slice(0, 23)}…`;
 }
@@ -26,45 +27,23 @@ export async function fetchVideoReviewSummaries(
   videoIds: readonly string[],
   eventId?: string,
 ): Promise<Map<string, VideoReviewSummary>> {
+  const ids = [...new Set(videoIds.filter(Boolean))];
   const out = new Map<string, VideoReviewSummary>();
-  if (videoIds.length === 0) return out;
-
-  const eventLinks = await db
-    .select({
-      video_id: videoEvents.video_id,
-      event_id: videoEvents.event_id,
-    })
-    .from(videoEvents)
-    .where(
-      and(
-        inArray(videoEvents.video_id, [...videoIds]),
-        eventId ? eq(videoEvents.event_id, eventId) : undefined,
-      )!,
-    );
-
-  const eventIdsByVideo = new Map<string, string[]>();
-  for (const row of eventLinks) {
-    const list = eventIdsByVideo.get(row.video_id) ?? [];
-    list.push(row.event_id);
-    eventIdsByVideo.set(row.video_id, list);
-  }
-
-  for (const videoId of videoIds) {
-    const eventIds = eventIdsByVideo.get(videoId) ?? [];
-    const stagePermission = await readStagePermissionCustomAnswers(db, {
-      videoId,
-      eventIds,
-    });
+  for (const videoId of ids) {
     out.set(videoId, {
-      stage_permission_summary: summarizeStagePermission(stagePermission),
+      stage_permission_summary: "—",
       required_unanswered_count: 0,
     });
   }
+  if (ids.length === 0) return out;
 
-  const missingRows = await db
+  const rows = await db
     .select({
       video_id: videoEvents.video_id,
-      missing_count: sql<number>`COUNT(DISTINCT ${eventCustomQuestions.id})`,
+      question_id: eventCustomQuestions.id,
+      required: eventCustomQuestions.required,
+      answer_text: videoCustomAnswers.answer_text,
+      answer_json: videoCustomAnswers.answer_json,
     })
     .from(videoEvents)
     .innerJoin(
@@ -72,35 +51,41 @@ export async function fetchVideoReviewSummaries(
       and(
         eq(eventCustomQuestions.event_id, videoEvents.event_id),
         eq(eventCustomQuestions.is_active, 1),
-        eq(eventCustomQuestions.required, 1),
       )!,
     )
     .leftJoin(
       videoCustomAnswers,
       and(
         eq(videoCustomAnswers.video_id, videoEvents.video_id),
+        eq(videoCustomAnswers.event_id, videoEvents.event_id),
         eq(videoCustomAnswers.question_id, eventCustomQuestions.id),
-        sql`trim(coalesce(${videoCustomAnswers.answer_text}, '')) <> ''`,
       )!,
     )
     .where(
       and(
-        inArray(videoEvents.video_id, [...videoIds]),
+        inArray(videoEvents.video_id, ids),
         eventId ? eq(videoEvents.event_id, eventId) : undefined,
-        sql`${videoCustomAnswers.video_id} IS NULL`,
       )!,
     )
-    .groupBy(videoEvents.video_id);
+    .orderBy(
+      asc(videoEvents.video_id),
+      asc(eventCustomQuestions.sort_order),
+      asc(eventCustomQuestions.id),
+    );
 
-  for (const row of missingRows) {
+  for (const row of rows) {
     const current = out.get(row.video_id) ?? {
       stage_permission_summary: "—",
       required_unanswered_count: 0,
     };
-    out.set(row.video_id, {
-      ...current,
-      required_unanswered_count: Number(row.missing_count ?? 0),
-    });
+    const answer = formatCustomAnswerValue(row.answer_text, row.answer_json);
+    if (current.stage_permission_summary === "—" && answer) {
+      current.stage_permission_summary = summarizeAnswer(answer);
+    }
+    if (row.required === 1 && !answer) {
+      current.required_unanswered_count += 1;
+    }
+    out.set(row.video_id, current);
   }
 
   return out;

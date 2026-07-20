@@ -8,10 +8,9 @@ import { AuditOperation } from "./types";
 
 const SETTINGS_ID = "default";
 
-function mapAuditSettings(
-  row: typeof systemSettings.$inferSelect | null | undefined,
+function toAuditLogSettings(
+  row: typeof systemSettings.$inferSelect,
 ): AuditLogSettings {
-  if (!row) return { ...DEFAULT_AUDIT_LOG_SETTINGS };
   return {
     normal_retention_days: row.audit_normal_retention_days,
     restorable_retention_days: row.audit_restorable_retention_days,
@@ -21,17 +20,17 @@ function mapAuditSettings(
   };
 }
 
-/** system_settings.audit_* だけを監査設定の正本として読む。 */
+/** system_settings の監査設定列を唯一の正本として読み取る。 */
 export async function getAuditLogSettings(db: DB): Promise<AuditLogSettings> {
   const row = await db
     .select()
     .from(systemSettings)
     .where(eq(systemSettings.id, SETTINGS_ID))
     .get();
-  return mapAuditSettings(row);
+  return row ? toAuditLogSettings(row) : { ...DEFAULT_AUDIT_LOG_SETTINGS };
 }
 
-/** system_settings.audit_* を監査付きで部分更新する。 */
+/** system_settings の監査設定列を監査付きで更新する。 */
 export async function updateAuditLogSettings(
   db: DB,
   userId: string,
@@ -43,23 +42,26 @@ export async function updateAuditLogSettings(
     .from(systemSettings)
     .where(eq(systemSettings.id, SETTINGS_ID))
     .get();
-  const base = mapAuditSettings(before);
-  const settingsAfter: AuditLogSettings = {
+  const current = before
+    ? toAuditLogSettings(before)
+    : { ...DEFAULT_AUDIT_LOG_SETTINGS };
+  const next: AuditLogSettings = {
     normal_retention_days:
-      patch.normal_retention_days ?? base.normal_retention_days,
+      patch.normal_retention_days ?? current.normal_retention_days,
     restorable_retention_days:
-      patch.restorable_retention_days ?? base.restorable_retention_days,
+      patch.restorable_retention_days ?? current.restorable_retention_days,
     long_audit_retention_days:
-      patch.long_audit_retention_days ?? base.long_audit_retention_days,
-    max_payload_bytes: patch.max_payload_bytes ?? base.max_payload_bytes,
-    compact_after_days: patch.compact_after_days ?? base.compact_after_days,
+      patch.long_audit_retention_days ?? current.long_audit_retention_days,
+    max_payload_bytes: patch.max_payload_bytes ?? current.max_payload_bytes,
+    compact_after_days:
+      patch.compact_after_days ?? current.compact_after_days,
   };
   const values = {
-    audit_normal_retention_days: settingsAfter.normal_retention_days,
-    audit_restorable_retention_days: settingsAfter.restorable_retention_days,
-    audit_long_retention_days: settingsAfter.long_audit_retention_days,
-    audit_max_payload_bytes: settingsAfter.max_payload_bytes,
-    audit_compact_after_days: settingsAfter.compact_after_days,
+    audit_normal_retention_days: next.normal_retention_days,
+    audit_restorable_retention_days: next.restorable_retention_days,
+    audit_long_retention_days: next.long_audit_retention_days,
+    audit_max_payload_bytes: next.max_payload_bytes,
+    audit_compact_after_days: next.compact_after_days,
     audit_updated_by_auth_user_id: userId,
     audit_updated_at: now,
   };

@@ -5,7 +5,7 @@ import { sql } from "drizzle-orm";
 import styles from "./page.module.css";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Logo } from "@/components/ui/Logo";
-import { withDatabase } from "@/lib/cloudflare";
+import { withDatabaseRead } from "@/lib/cloudflare";
 import { countablePublicVideoCondition } from "@/lib/db/queries";
 import {
   events as eventsTable,
@@ -126,7 +126,7 @@ const ENTRY_POINTS: Array<{
 
 async function loadAboutStats(): Promise<AboutStats | null> {
   try {
-    return await withDatabase(async (db) => {
+    return await withDatabaseRead(async (db) => {
       const [videoRows, creatorRows, eventRows] = await Promise.all([
         db
           .select({ count: sql<number>`COUNT(*)` })

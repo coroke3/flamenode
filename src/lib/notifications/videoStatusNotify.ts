@@ -27,6 +27,7 @@ type NotificationSpec = {
 
 const VISIBILITY_NOTIFICATION_TYPES: Record<string, string> = {
   voided: "video_voided",
+  private: "video_private",
 };
 
 /** 通常の公開範囲整理ではDMしない状態。forceNotify指定時も送信しない。 */
@@ -41,10 +42,7 @@ export type VideoStatusNotificationBatch = {
 function notificationSpec(args: VideoStatusNotificationArgs): NotificationSpec | null {
   const status = args.nextStatus;
   const force = args.forceNotify === true;
-  if (args.prevStatus === status || SILENT_VISIBILITY_STATUSES.has(status)) {
-    return null;
-  }
-  if (!force && (status === "pending" || status === "draft")) {
+  if (args.prevStatus === status || (!force && status === "pending")) {
     return null;
   }
 

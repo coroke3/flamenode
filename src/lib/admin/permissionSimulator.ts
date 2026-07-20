@@ -62,7 +62,7 @@ export async function simulateEventPermissions(
 
   if (!eventId || (!xUserId && !userId)) return empty;
 
-  const subjectXUserIds = xUserId
+  const subjectXIds = xUserId
     ? [xUserId]
     : (
         await db
@@ -70,7 +70,7 @@ export async function simulateEventPermissions(
           .from(xUserAccountLinks)
           .where(eq(xUserAccountLinks.auth_user_id, userId!))
       ).map((row) => row.x_user_id);
-  if (subjectXUserIds.length === 0) return empty;
+  if (subjectXIds.length === 0) return empty;
 
   const row = (
     await db
@@ -79,7 +79,7 @@ export async function simulateEventPermissions(
       .where(
         and(
           eq(eventStaff.event_id, eventId),
-          inArray(eventStaff.x_user_id, subjectXUserIds),
+          inArray(eventStaff.x_user_id, subjectXIds),
         )!,
       )
       .limit(1)

@@ -10,7 +10,6 @@ import { eventCustomQuestions, eventTemplates, events } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { mutateWithAudit } from "@/lib/audit/mutate";
-import { loadStagePermissionFormSettingsJson } from "@/lib/video/stagePermissionQuestions";
 import { generateId } from "@/lib/utils/id";
 
 export interface EventTemplateActionResult {
@@ -24,17 +23,17 @@ async function requireAdmin(): Promise<
   | { ok: false; result: EventTemplateActionResult }
 > {
   const session = await auth().catch(() => null);
-  const u = session?.user as { id?: string; role?: string } | undefined;
-  if (!u?.id) {
+  const user = session?.user as { id?: string; role?: string } | undefined;
+  if (!user?.id) {
     return { ok: false, result: { ok: false, message: "ログインが必要です。" } };
   }
-  if (u.role !== "admin") {
+  if (user.role !== "admin") {
     return {
       ok: false,
       result: { ok: false, message: "管理者のみ操作できます。" },
     };
   }
-  return { ok: true, userId: u.id };
+  return { ok: true, userId: user.id };
 }
 
 const saveSchema = z.object({
@@ -58,7 +57,6 @@ export async function saveEventAsTemplate(
   }
 
   const { db } = guard;
-
   const event = (
     await db
       .select()
@@ -85,17 +83,18 @@ export async function saveEventAsTemplate(
       visibility: eventCustomQuestions.visibility,
     })
     .from(eventCustomQuestions)
-    .where(eq(eventCustomQuestions.event_id, event.id))
+    .where(
+      and(
+        eq(eventCustomQuestions.event_id, event.id),
+        eq(eventCustomQuestions.is_active, 1),
+      )!,
+    )
     .orderBy(
       asc(eventCustomQuestions.sort_order),
       asc(eventCustomQuestions.question_key),
     );
 
-  const snapshot = snapshotFromEvent(
-    event,
-    customQuestions,
-    await loadStagePermissionFormSettingsJson(db, event.id),
-  );
+  const snapshot = snapshotFromEvent(event, customQuestions);
   const id = generateId("etmpl");
   const now = Math.floor(Date.now() / 1000);
 
@@ -112,7 +111,17 @@ export async function saveEventAsTemplate(
   await mutateWithAudit(db, {
     mutationStatements: [db.insert(eventTemplates).values(after)],
     expectedMutationChanges: 1,
-    audits: [{ table_name: "event_templates", target_id: id, operation: "CREATE", after: { ...after }, actor_user_id: guard.user.id, context: "admin_event_templates", reason: "イベントテンプレートを保存", retention_class: "normal", strict: true }],
+    audits: [{
+      table_name: "event_templates",
+      target_id: id,
+      operation: "CREATE",
+      after: { ...after },
+      actor_user_id: guard.user.id,
+      context: "admin_event_templates",
+      reason: "イベントテンプレートを保存",
+      retention_class: "normal",
+      strict: true,
+    }],
   });
 
   revalidatePath("/admin/events/templates");
@@ -133,7 +142,6 @@ export async function deleteEventTemplate(
   }
 
   const { db } = guard;
-
   const row = (
     await db
       .select()
@@ -146,15 +154,32 @@ export async function deleteEventTemplate(
   }
 
   await mutateWithAudit(db, {
-    mutationStatements: [db.delete(eventTemplates).where(and(eq(eventTemplates.id, templateId), expectedRowCondition({ expectedCurrent: { ...row } }))!)],
+    mutationStatements: [
+      db.delete(eventTemplates).where(and(
+        eq(eventTemplates.id, templateId),
+        expectedRowCondition({ expectedCurrent: { ...row } }),
+      )!),
+    ],
     expectedMutationChanges: 1,
-    audits: [{ table_name: "event_templates", target_id: templateId, operation: "DELETE", before: { ...row }, actor_user_id: guard.user.id, context: "admin_event_templates", reason: "イベントテンプレートを削除", retention_class: "normal", strict: true }],
+    audits: [{
+      table_name: "event_templates",
+      target_id: templateId,
+      operation: "DELETE",
+      before: { ...row },
+      actor_user_id: guard.user.id,
+      context: "admin_event_templates",
+      reason: "イベントテンプレートを削除",
+      retention_class: "normal",
+      strict: true,
+    }],
   });
 
   revalidatePath("/admin/events/templates");
   revalidatePath("/admin/events/new");
   return { ok: true, message: "テンプレートを削除しました。" };
-}export async function listEventTemplatesForAdmin(): Promise<
+}
+
+export async function listEventTemplatesForAdmin(): Promise<
   Array<{
     id: string;
     name: string;

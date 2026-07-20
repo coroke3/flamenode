@@ -8,6 +8,7 @@ import {
   writeGuard,
   type WriteGuardDenyReason,
 } from "@/lib/auth/writeGuard";
+import { isAuthUserLinkedToXUser } from "@/lib/auth/xIdentity";
 import { getDatabase } from "@/lib/cloudflare";
 import { events, slots, xUserAccountLinks } from "@/lib/db/schema";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";

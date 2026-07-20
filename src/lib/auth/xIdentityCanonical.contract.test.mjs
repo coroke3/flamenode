@@ -32,13 +32,11 @@ const CANONICAL_FORBIDDEN = [
   "x_user_youtube_channels",
 ];
 
-const SCHEMA_BASE_PATH = ["src/lib/db/schema", "base.ts"].join(".");
-
 test("X名義ランタイムは旧申請表・単一リンク列・旧候補表を参照しない", () => {
   const files = ["src", "app", "workers"].flatMap(runtimeFiles).filter((path) => {
     const rel = relative(root, path).replaceAll("\\", "/");
     return (
-      !rel.endsWith(SCHEMA_BASE_PATH) &&
+      rel !== ["src", "lib", "db", ["schema", "base.ts"].join(".")].join("/") &&
       !rel.endsWith("src/lib/auth/xIdentityCanonical.contract.test.mjs") &&
       !rel.includes("historical")
     );

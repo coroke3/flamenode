@@ -16,6 +16,7 @@ import {
   xUsers,
 } from "@/lib/db/schema";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { buildEventStaffMergeAudits } from "@/lib/actions/merge-adminCore";
 
 export const X_ID_MERGE_REVERT_WINDOW_SECONDS = 7 * 24 * 60 * 60;
 
@@ -182,6 +183,26 @@ export async function executeApprovedXIdMergeRequest(
     .map((row) => targetStaffByEvent.get(row.event_id)!)
     .filter((row) => row.permission_preset !== "owner");
 
+  const collidedSourceStaffIds = new Set(collidedStaff.map((row) => row.id));
+  const promotedTargetStaffIds = new Set(promotedTargetStaff.map((row) => row.id));
+  const eventStaffAfter = snapshot.event_staff.flatMap((row) => {
+    if (row.x_user_id === source) {
+      if (collidedSourceStaffIds.has(row.id)) return [];
+      return [{ ...row, x_user_id: target, updated_at: now }];
+    }
+    if (promotedTargetStaffIds.has(row.id)) {
+      return [{ ...row, permission_preset: "owner" as const, updated_at: now }];
+    }
+    return [row];
+  });
+  const eventStaffAudits = buildEventStaffMergeAudits({
+    beforeRows: snapshot.event_staff,
+    afterRows: eventStaffAfter,
+    actorUserId: input.actorAuthUserId,
+    fromXId: source,
+    toXId: target,
+  });
+
   const sourceInteractions = snapshot.video_interactions.filter((row) => row.x_user_id === source);
   const targetInteractionKeys = new Set(
     snapshot.video_interactions
@@ -331,6 +352,7 @@ export async function executeApprovedXIdMergeRequest(
       1,
     ],
     audits: [
+      ...eventStaffAudits,
       {
         table_name: "x_users",
         target_id: source,

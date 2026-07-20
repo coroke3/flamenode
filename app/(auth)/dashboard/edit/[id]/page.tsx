@@ -31,8 +31,10 @@ import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
 import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
 import { getYoutubeChannelCandidates } from "@/lib/db/youtubeChannelCandidates";
-import { readStagePermissionCustomAnswers } from "@/lib/video/stagePermissionAnswers";
-import { loadStagePermissionFormSettingsJsonByEvents } from "@/lib/video/stagePermissionQuestions";
+import {
+  fetchActiveCustomQuestionsForEvents,
+  readCustomAnswerValuesForVideo,
+} from "@/lib/video/customQuestionAnswers";
 
 export const metadata: Metadata = { title: "作品を編集" };
 export const dynamic = "force-dynamic";
@@ -236,7 +238,6 @@ export default async function EditVideoPage({
     {
       id: string;
       title: string;
-      video_form_settings_json?: string | null;
       parts_json?: string | null;
     }
   >();
@@ -263,15 +264,15 @@ export default async function EditVideoPage({
       .where(inArray(eventsTable.id, currentEventIds));
     for (const ev of attached) acceptingEventMap.set(ev.id, ev);
   }
-  const formSettingsByEvent = await loadStagePermissionFormSettingsJsonByEvents(
+  const customQuestionsByEvent = await fetchActiveCustomQuestionsForEvents(
     db,
     Array.from(acceptingEventMap.keys()),
   );
   const eventOptions = Array.from(acceptingEventMap.values()).map((event) => ({
     ...event,
-    video_form_settings_json: formSettingsByEvent.get(event.id) ?? null,
+    custom_questions: customQuestionsByEvent.get(event.id) ?? [],
   }));
-  const stagePermissionInitial = await readStagePermissionCustomAnswers(db, {
+  const customAnswerInitial = await readCustomAnswerValuesForVideo(db, {
     videoId: video.id,
     eventIds: currentEventIds,
   });
@@ -469,7 +470,7 @@ export default async function EditVideoPage({
           credit: video.credit ?? undefined,
           intro_comment: video.intro_comment ?? undefined,
           used_software: softwareLabel ?? undefined,
-          custom_question_answers_json: stagePermissionInitial ?? undefined,
+          custom_question_answers_json: customAnswerInitial ?? undefined,
           highlights: video.highlights ?? undefined,
           production_story: video.production_story ?? undefined,
           closing_comment: video.closing_comment ?? undefined,

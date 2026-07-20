@@ -1,209 +1,76 @@
 # FlameNode DB正本移行仕様
 
-> Status: Active  
-> Last verified: 2026-07-20  
-> Verified against commit: `2b23cbe`  
-> Source of truth: `src/lib/db/schema.ts`, `src/lib/db/schema.canonical.ts`, `migrations/0043_db_canonical_migration.sql`  
+> Status: Active
+> Canonical schema: 41 tables / 409 columns
 > Canonical schema version: `2026-07-20-canonical-1`
 
 ## 1. 方針
 
-FlameNodeは本格運用前のため、旧DB構造、旧入力形式、旧API、旧状態値に対するランタイム後方互換を提供しない。
+FlameNodeは本格運用前のため、旧DB構造、旧API、旧状態値に対するランタイム後方互換を提供しない。
 
-過去データの変換はD1 migrationの一回限りの処理として実施する。migration完了後、アプリケーションは新正本だけを読み書きし、旧形式を受け付けるUI・API・feature flag・parser・変換plan・二重書き込みを残さない。
+通常ランタイム、公開API、Workerは後方互換を持たず、新正本だけを読み書きする。旧JSON・CSV・TSVが必要な場合は、管理者専用インポート境界で `parse → normalize → preview → apply` を行い、新正本へ一方向変換する。旧形式の型・列・状態を専用境界の外へ出さず、旧構造への二重書き込みを行わない。
 
-矛盾がある場合は次の順で判断する。
+## 適用対象と事前条件
 
-1. 本書の禁止事項と不変条件
-2. `src/lib/db/schema.canonical.ts`
-3. `migrations/0043_db_canonical_migration.sql`
-4. 現行ランタイムコード
-5. Historical文書と過去migration
+`0043_db_canonical_migration.sql`は、`flamenode_schema_meta.version='2026-07-11-baseline-1'`で、廃止予定8テーブルがすべて存在し、canonical新規テーブルや`*_new`途中テーブルが存在しないDBだけを受け付ける。
+
+破壊処理より前に次を検査し、満たさない場合はCHECK制約名を含むエラーで停止する。
+
+- 旧DBの外部キー違反が0件。
+- `video_members.chapters_json`が有効なJSON配列。
+- `videos.youtube_video_id`と旧メタデータの動画IDに不一致・有効作品間重複がない。
+- canonical化後の`event_staff(event_id, x_user_id)`が重複しない。
+- `software_aliases.normalized_alias`が複数softwareへ重複しない。
+
+事前検査後にschema versionを`2026-07-20-canonical-1-in-progress`へ更新する。再適用や途中状態は事前条件を満たさないため、正常な正本として扱わず明示的に停止する。
+
+## 移行順序
+
+1. 事前条件・旧データ整合性を検査し、移行元件数と`events.max_slots_per_video`を一時保存する。
+2. `x_identity_requests`と`x_user_account_links`を作成し、旧X申請3テーブルと直接userリンクをバックフィルする。
+3. Xプロフィール候補、イベント、owner、作品、YouTube動画IDをcanonical構造へ移す。
+4. 旧`video_members`を残したまま`video_chapters_new`へJSONチャプターを展開し、件数・時刻・担当X名義を照合する。
+5. 監査設定と複合主キー対象テーブルを再作成する。
+6. 移行元・移行先件数、名称変更値、owner、外部キーを検査してから旧テーブル8件を削除する。
+7. 41テーブル・409カラム、旧カラム25件不存在、名称変更2件、`quick_check`/FKを検査する。
+8. 全検査合格後だけschema versionを`2026-07-20-canonical-1`へ確定する。
+
+## 不変条件
+
+- `events.max_slots_per_video`を削除せず、イベント単位で値を完全一致させる。
+- 各イベントに`permission_preset='owner'`が1人以上必要。
+- YouTube動画IDは`videos.youtube_video_id`のみを正本とする。
+- X名義と認証ユーザーの関係は`x_user_account_links`のみを正本とする。
+- チャプターは`video_chapters`のみを正本とし、時刻昇順で表示する。
+- スタッフ権限は`permission_preset`、公開肩書は`public_role_label`を使用する。
+- `x_user_account_links(x_user_id, auth_user_id)`、`software_aliases(software_id, normalized_alias)`、`video_interactions(x_user_id, video_id, interaction_type)`を複合主キーとする。
+
+## D1適用方式
+
+D1では`PRAGMA foreign_keys=OFF`と一時テーブル作成を使用できないため、`PRAGMA defer_foreign_keys=ON`とmigration専用の通常テーブルを使用する。親テーブル再作成時は参照行を退避・復元し、すべてのmigration専用テーブルを最終検査前後に削除する。D1内部の`d1_migrations`と`_cf_*`は41テーブル・409カラムの集計対象外とする。
+
+D1が禁止する`PRAGMA integrity_check`はmigration内で実行せず、D1で許可される`PRAGMA quick_check`を使用する。完全な`integrity_check`はNode SQLite側のCI検査で実行する。
+
+## 機械検証
+
+`npm run check:db-migration`、`npm run check:db-d1-empty`、`npm run check:db-d1-legacy`で次を検証する。
+
+- Node SQLiteとWranglerローカルD1の両方で、空DBへactive migration全件を適用できる。
+- Node SQLiteとWranglerローカルD1の両方で、旧申請・直接userリンク・owner不在・JSONチャプター・監査設定・YouTube IDを含むfixtureを移行できる。
+- 移行後が41テーブル・409カラムで、旧テーブル8件・旧カラム25件・旧名称2件を含まない。
+- 外部キー違反とowner不在が0件で、移行元件数・`max_slots_per_video`・名称変更値が一致する。
+- 不正JSONでは破壊前に失敗し、旧schema versionと旧構造を維持する。
+- 完了済みDBへの再適用と`in-progress`途中状態を拒否する。
+
+## ロールバック
+
+逆migrationは提供しない。適用前のD1バックアップと0043適用前アプリケーションを同時に復元する。`in-progress`を検知した場合も、残存構造へ追加操作せず同じ手順で復元する。
 
 ## 2. 確定値
 
-| 項目 | 値 |
-| --- | ---: |
-| 正本テーブル | 41 |
-| 正本カラム | 409 |
-| 廃止・統合テーブル | 8 |
-| 削除対象旧カラム | 25 |
-| 名称変更 | 2 |
-
-## 3. 後方互換を残さない対象
-
-次の機能・分岐は正本移行と同時に削除する。
-
-- `/admin/import`
-- `/api/admin/import/legacy`
-- `src/lib/import/legacy/`
-- `ENABLE_LEGACY_IMPORT_TOOL`
-- `LEGACY_IMPORT_PREVIEW_SECRET`
-- 旧JSON / CSV / TSVの常設入力アダプター
-- 旧状態を新規書き込み時に自動補正するランタイム分岐
-- 旧テーブル・旧カラムが存在する場合だけ処理を変えるfallback
-- 新旧両方へ書き込むdual-write
-- 新旧DTOを同時に公開する互換レスポンス
-- 削除済みカラムを許容する型、optional property、`any` cast
-
-Historical migration、移行fixture、削除確認スクリプトは、移行検証と監査証跡のために残してよい。ただし通常ランタイムから参照してはならない。
-
-## 4. 移行順序
-
-1. 0043適用前のD1バックアップを取得する。
-2. 旧schema version、外部キー、重複、owner、状態値、JSONチャプター、YouTube IDを検査する。
-3. 新テーブル・新カラムを作成する。
-4. 旧データを新正本へバックフィルする。
-5. 件数、主キー、外部キー、値、owner、チャプター、YouTube IDを照合する。
-6. schema versionを`2026-07-20-canonical-1-in-progress`としてランタイム切替前状態を明示する。
-7. アプリケーションの読み書きを新正本だけへ切り替える。
-8. 旧構造へのランタイム参照が0件であることを検査する。
-9. 旧テーブル・旧カラム・旧indexを削除する。
-10. 全検査成功後だけschema versionを`2026-07-20-canonical-1`へ確定する。
-
-旧構造削除後のアプリケーションrollbackは提供しない。問題発生時はD1バックアップと0043適用前アプリケーションを同時に復元する。
-
-## 5. 禁止事項
-
-- `events.max_slots_per_video`を削除または別用途化しない。
-- 最後のイベントownerを削除、降格、退出、無効化しない。
-- YouTube動画IDを複数テーブルへ二重保存しない。
-- `video_members.chapters_json`を照合なしで破棄しない。
-- `videos.visibility_status='archived'`を根拠なしで一律変換しない。
-- 旧構造の存在を前提にしたランタイムfallbackを追加しない。
-- 旧形式インポートを再実装しない。
-- 未確定のテーブル追加、削除、統合、名称変更を0043へ混ぜない。
-
-## 6. 状態モデル
-
-### イベント
-
-保存値は`private`と`public`だけとする。
-
-| 旧値 | 新値 |
-| --- | --- |
-| `draft` | `private` |
-| `private` | `private` |
-| `public` | `public` |
-| `archived` | `public` |
-
-開始前、開催中、終了済みは`start_time`と`end_time`から算出する。募集前、募集中、募集終了は`entry_start_time`と`entry_end_time`から算出する。段階値をDBへ重複保存しない。
-
-### 作品
-
-- `draft`は原則`private`へ移行する。
-- `archived`は件数、理由、参照状況を確認し、各行を`private`または`voided`へ分類する。
-- 分類不能な`archived`が1件でも残る場合、破壊処理を停止する。
-- YouTube限定公開はFlameNode公開状態と分離し、YouTubeプライバシー情報として保存する。
-- migration後に`draft`、`limited`、`hidden`、`archived`を受け付ける互換分岐を残さない。
-
-## 7. 横断的不変条件
-
-| 領域 | 正本 | 廃止する表現 |
-| --- | --- | --- |
-| X名義と認証ユーザー | `x_user_account_links` | `x_users.linked_user_id`、`event_staff.user_id`、`video_members.user_id` |
-| X ID申請 | `x_identity_requests` | 旧申請3テーブル |
-| イベントowner | `event_staff.permission_preset='owner'` | `events.representative_x_user_id` |
-| スタッフ権限 | `permission_preset` | `event_staff.role` |
-| 公開肩書 | `public_role_label` | 権限値との兼用 |
-| イベントグループ順 | `events.start_time DESC, events.created_at DESC` | `event_group_events.sort_order` |
-| 枠上限 | `events.max_slots_per_video` | `max_consecutive_slots_per_entry` |
-| 公開API更新判定 | `events.updated_at`と`audit_logs` | `events.public_api_updated_at` |
-| チャプター | `video_chapters`、`chapter_time ASC, id ASC` | `chapters_json`、`show_on_player_bar`、`order_index` |
-| 使用ソフト順 | `software_catalog.name ASC, raw_label ASC` | `video_softwares.order_index` |
-| YouTube動画ID | `videos.youtube_video_id` | `video_youtube_metadata.youtube_video_id` |
-| いいね・保存 | `(x_user_id, video_id, interaction_type)` | 独立ID、外部同期列 |
-| 監査設定 | `system_settings.audit_*` | `audit_log_settings`、`history_retention_days` |
-| データ投入 | 管理スプレッドシートまたは正本API | 旧形式インポート機能 |
-
-## 8. 正本テーブル
-
-正確な型、NULL制約、外部キー、CHECK、indexは`src/lib/db/schema.canonical.ts`を参照する。
-
-| 領域 | テーブル | カラム |
-| --- | --- | ---: |
-| X | `x_identity_requests` | 12 |
-| X | `x_user_account_links` | 6 |
-| X | `x_user_aliases` | 2 |
-| X | `x_users` | 9 |
-| イベント | `event_group_events` | 5 |
-| イベント | `event_groups` | 12 |
-| イベント | `event_staff` | 12 |
-| イベント | `event_templates` | 8 |
-| イベント | `events` | 27 |
-| イベント | `slots` | 13 |
-| システム | `flamenode_schema_meta` | 3 |
-| システム | `system_settings` | 17 |
-| ソフト | `software_aliases` | 3 |
-| ソフト | `software_catalog` | 9 |
-| 作品 | `video_chapters` | 9 |
-| 作品 | `video_events` | 2 |
-| 作品 | `video_interactions` | 4 |
-| 作品 | `video_members` | 12 |
-| 作品 | `video_moderation_cases` | 14 |
-| 作品 | `video_softwares` | 3 |
-| 作品 | `video_youtube_metadata` | 9 |
-| 作品 | `videos` | 28 |
-| 外部連携 | `event_youtube_playlist_items` | 6 |
-| 外部連携 | `event_youtube_playlist_sync` | 14 |
-| 外部連携 | `external_api_quota_usage` | 5 |
-| 投稿フォーム | `event_custom_questions` | 15 |
-| 投稿フォーム | `video_custom_answers` | 7 |
-| 監査 | `audit_logs` | 20 |
-| 監査 | `audit_restore_runs` | 7 |
-| インポート | `spreadsheet_import_runs` | 9 |
-| 規約 | `terms_versions` | 9 |
-| 規約 | `user_tos_consents` | 5 |
-| 認証 | `account` | 11 |
-| 認証 | `session` | 3 |
-| 認証 | `user` | 17 |
-| 認証 | `verificationToken` | 3 |
-| 通知 | `announcements` | 11 |
-| 通知 | `notification_outbox` | 15 |
-| Worker | `static_artifacts` | 9 |
-| Worker | `static_rebuild_queue` | 16 |
-| Worker | `worker_leases` | 8 |
-
-**合計: 41テーブル / 409カラム**
-
-## 9. 廃止テーブル
-
-| 旧テーブル | 移行先 |
-| --- | --- |
-| `x_account_link_requests` | `x_identity_requests` |
-| `x_id_merge_requests` | `x_identity_requests` |
-| `x_id_merge_reverts` | `x_identity_requests` |
-| `x_user_icons` | `x_users.icon_url`、`videos.creator_icon_url` |
-| `x_user_youtube_channels` | `x_users.youtube_channel_url`、`videos.creator_youtube_channel_url` |
-| `legacy_import_batch_items` | 削除。必要な証跡はmigration fixture・バックアップで保持 |
-| `legacy_import_batches` | 削除。常設インポート機能は提供しない |
-| `audit_log_settings` | `system_settings.audit_*` |
-
-## 10. 削除対象旧カラム
-
-`x_users.linked_user_id`、`x_users.verification_token`、`x_users.token_expires_at`、`x_users.approval_requested_at`、`event_group_events.sort_order`、`event_staff.user_id`、`event_staff.role`、`event_staff.internal_note`、`events.representative_x_user_id`、`events.max_consecutive_slots_per_entry`、`events.public_api_updated_at`、`slots.slot_kind`、`slots.priority_reclaim_video_id`、`slots.priority_reclaim_until`、`system_settings.history_retention_days`、`software_aliases.id`、`video_chapters.show_on_player_bar`、`video_chapters.order_index`、`video_interactions.id`、`video_interactions.source`、`video_interactions.synced_at`、`video_members.user_id`、`video_members.chapters_json`、`video_softwares.order_index`、`video_youtube_metadata.youtube_video_id`
-
-### 名称変更
-
-| 旧名 | 新名 |
-| --- | --- |
-| `event_staff.approved_by_user_id` | `approved_by_auth_user_id` |
-| `video_members.edit_granted_by_user_id` | `edit_granted_by_auth_user_id` |
-
-## 11. 完了条件
-
-- 実DBとDrizzleが41テーブル・409カラムで一致する。
-- 廃止テーブル8件が存在しない。
-- 削除対象旧カラム25件が存在しない。
-- 旧名称2件が存在せず、新名称2件が存在する。
-- `src`、`app`、`workers`に旧構造・旧インポートへの参照がない。
-- `/admin/import`と`/api/admin/import/legacy`が存在しない。
-- 旧インポート用環境変数が存在しない。
-- 外部キー違反、孤児、複合主キー重複が0件である。
-- 全イベントにownerが1人以上存在する。
-- `events.max_slots_per_video`の既存値が一致する。
-- チャプター移行件数、時刻、担当者が一致する。
-- YouTube動画IDの正本が`videos.youtube_video_id`だけである。
-- typecheck、lint、unit、worker、integration、Next.js build、Cloudflare Pages buildが成功する。
-- 空DBと旧データ入りDBの両方でmigrationが成功する。
-- バックアップからの復元手順を確認する。
+- 旧入力形式の解析・正規化は維持する。
+- previewは短期nonceとplan hashで保護する。
+- canonical plan本体はR2に短期保存する。
+- applyは新正本テーブルだけへ書き込む。
+- 適用結果・不一致・警告は`audit_logs`に残す。
+- `legacy_import_batches`と`legacy_import_batch_items`は使用しない。

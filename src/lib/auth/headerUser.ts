@@ -1,7 +1,7 @@
 import "server-only";
 
 import { and, eq } from "drizzle-orm";
-import { getDatabase, withDatabase } from "@/lib/cloudflare";
+import { getDatabase, withDatabaseRead } from "@/lib/cloudflare";
 import type { DB } from "@/lib/db/client";
 import { xIdentityRequests, users } from "@/lib/db/schema";
 import { resolveMissingIcons } from "@/lib/db/iconResolution";
@@ -119,7 +119,7 @@ export async function buildHeaderUser(
   const fallbackRole = normalizeRole(sessionUser.role);
   const fallbackActiveXId = normalizeXId(sessionUser.active_x_user_id) || null;
 
-  const dbPayload = await withDatabase(async (db) => {
+  const dbPayload = await withDatabaseRead(async (db) => {
     const [userRows, entries] = await Promise.all([
       db
         .select({ active_x_user_id: users.active_x_user_id, role: users.role })

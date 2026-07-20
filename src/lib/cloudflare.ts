@@ -104,12 +104,6 @@ export async function withDatabaseWrite<T>(
   return fn(db);
 }
 
-/**
- * 後方互換。既存呼び出しはすべて読み取り用途として扱う。
- * 新規コードでは withDatabaseRead / withDatabaseWrite を明示する。
- */
-export const withDatabase = withDatabaseRead;
-
 export async function waitForLocalBindings(): Promise<void> {
   const g = globalThis as Record<string | symbol, unknown>;
   const pending = g.__FLAMENODE_LOCAL_BINDINGS_PROMISE;

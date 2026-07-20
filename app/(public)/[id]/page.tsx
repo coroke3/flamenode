@@ -11,7 +11,7 @@ import {
   canEditVideo,
   resolveAdminOrEventVideoPrivilegeMode,
 } from "@/lib/auth/ownership";
-import { withDatabase } from "@/lib/cloudflare";
+import { withDatabaseRead } from "@/lib/cloudflare";
 import {
   videoInteractions,
   videos as videosTable,
@@ -80,7 +80,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
         noIndex: video.visibility_status !== "public",
       });
   }
-  const detail = await withDatabase(async (db) => {
+  const detail = await withDatabaseRead(async (db) => {
     return fetchVideoDetail(db, id);
   });
   if (!detail) return { title: id };
@@ -123,7 +123,7 @@ export default async function VideoDetailPage({
   const viewerUser = await getCurrentUser();
   const viewerActiveX = viewerUser?.active_x_user_id ?? null;
 
-  const bundle = await withDatabase(async (db) => {
+  const bundle = await withDatabaseRead(async (db) => {
     const viewerApprovedXIds = viewerUser
       ? await getApprovedXIds(db, viewerUser.id)
       : [];

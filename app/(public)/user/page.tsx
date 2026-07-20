@@ -3,7 +3,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { and, eq, isNull, like, ne, or, sql } from "drizzle-orm";
 import styles from "./page.module.css";
-import { withDatabase } from "@/lib/cloudflare";
+import { withDatabaseRead } from "@/lib/cloudflare";
 import { videos, xUsers } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { Pagination } from "@/components/ui/Pagination";
@@ -37,7 +37,7 @@ export default async function UserListPage({
   const pageNum = Math.max(1, Number.parseInt(page, 10) || 1);
 
   const creators =
-    (await withDatabase(async (db) => {
+    (await withDatabaseRead(async (db) => {
       const keyword = q.trim();
       const filters = [
         or(

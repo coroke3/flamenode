@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { and, asc, eq, sql } from "drizzle-orm";
 import styles from "./page.module.css";
-import { withDatabase } from "@/lib/cloudflare";
+import { withDatabaseRead } from "@/lib/cloudflare";
 import {
   eventStaff,
   events as eventsTable,
@@ -55,6 +55,7 @@ type SlotFillStat = {
   filled: number;
   pct: number;
 };
+type SlotVisualStatus = SlotRow["status"];
 
 const JST = { timeZone: "Asia/Tokyo" } as const;
 const eventSectionHeaderClasses = {
@@ -69,6 +70,24 @@ const monthDay = new Intl.DateTimeFormat("ja-JP", {
   month: "2-digit",
   day: "2-digit",
 });
+const dateFormat = {
+  slotDateKey: new Intl.DateTimeFormat("ja-JP", {
+    ...JST,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }),
+  weekday: new Intl.DateTimeFormat("ja-JP", {
+    ...JST,
+    weekday: "short",
+  }),
+  slotTime: new Intl.DateTimeFormat("ja-JP", {
+    ...JST,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }),
+} as const;
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
@@ -83,7 +102,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       noIndex: !isPublicEventVisible(event),
     });
   }
-  const event = await withDatabase(async (db) =>
+  const event = await withDatabaseRead(async (db) =>
     (
       await db.select().from(eventsTable).where(eq(eventsTable.id, id)).limit(1)
     )[0] ?? null,
@@ -108,7 +127,7 @@ export default async function EventDetailPage({
     return <StaticEventDetailView detail={staticLoaded.data} />;
   }
 
-  const bundle = await withDatabase(async (db) => {
+  const bundle = await withDatabaseRead(async (db) => {
     const event = (
       await db.select().from(eventsTable).where(eq(eventsTable.id, id)).limit(1)
     )[0];
@@ -466,4 +485,64 @@ function buildSlotSummary(rows: SlotRow[], gapSec: number) {
       toStat(formatSlotPartLabel(part, "short"), part.rows as SlotRow[]),
     ),
   };
+}
+
+function buildSlotPreview(slots: SlotRow[]) {
+  const timed = slots.filter((slot) => slot.start_time != null);
+  if (timed.length === 0) return null;
+  const dates = unique(timed.map((slot) => slotDateKey(slot.start_time ?? 0)))
+    .slice(0, 3)
+    .map((key) => ({ key, label: slotDateLabel(key) }));
+  const dateKeys = new Set(dates.map((date) => date.key));
+  const times = unique(
+    timed
+      .filter((slot) => dateKeys.has(slotDateKey(slot.start_time ?? 0)))
+      .map((slot) => slotTimeKey(slot.start_time ?? 0)),
+  )
+    .slice(0, 8);
+  const timeKeys = new Set(times);
+  const cells = new Map<string, SlotRow>();
+  for (const slot of timed) {
+    const dateKey = slotDateKey(slot.start_time ?? 0);
+    const timeKey = slotTimeKey(slot.start_time ?? 0);
+    if (!dateKeys.has(dateKey) || !timeKeys.has(timeKey)) {
+      continue;
+    }
+    cells.set(`${dateKey}:${timeKey}`, slot);
+  }
+  return { dates, times: times.map((key) => ({ key, label: key })), cells };
+}
+
+function unique(values: string[]): string[] {
+  return Array.from(new Set(values));
+}
+
+function slotDateKey(ts: number): string {
+  return dateFormat.slotDateKey.format(new Date(ts * 1000));
+}
+
+function slotDateLabel(key: string): string {
+  const [year, month, day] = key.split("/");
+  const date = new Date(`${year}-${month}-${day}T00:00:00+09:00`);
+  const weekday = dateFormat.weekday.format(date);
+  return `${month}/${day} ${weekday}`;
+}
+
+function slotTimeKey(ts: number): string {
+  return dateFormat.slotTime.format(new Date(ts * 1000));
+}
+
+function slotDisplayName(slot: SlotRow): string {
+  if (slot.status === "available") return "空き枠";
+  return slot.display_name ?? slot.x_user_id ?? "確保済み";
+}
+
+function slotVisualStatus(slot: SlotRow, _now: number): SlotVisualStatus {
+  return slot.status;
+}
+
+function slotStatusLabel(status: SlotVisualStatus): string {
+  if (status === "submitted") return "提出済み";
+  if (status === "reserved") return "確保済み";
+  return "選択可";
 }

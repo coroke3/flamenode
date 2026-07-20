@@ -9,7 +9,6 @@ import { getDatabase } from "@/lib/cloudflare";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { videos, videoInteractions } from "@/lib/db/schema";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
-import { compositeAuditTargetId } from "@/lib/video/atomicWritePlanCore";
 import type { VideoActionResult } from "@/lib/video/types";
 
 type InteractionKind = "like" | "bookmark";
@@ -94,7 +93,7 @@ async function mutateVideoInteraction(
   const audits: WriteAuditLogInput[] = [
     {
       table_name: "video_interactions",
-      target_id: compositeAuditTargetId(activeX, videoId, kind),
+      target_id: `${activeX}:${videoId}:${kind}`,
       operation: active ? ("CREATE" as const) : ("DELETE" as const),
       before: existing ? { ...existing } : null,
       after: interactionAfter ? { ...interactionAfter } : null,

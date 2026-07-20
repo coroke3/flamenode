@@ -171,7 +171,7 @@ export async function filterLinkedXUserIdsForAuthUser(
     candidateXUserIds.map((candidate) => resolveCanonicalXUserId(db, candidate)),
   );
   const normalized = Array.from(
-    new Set(canonicalIds.filter((value): value is string => Boolean(value))),
+    new Set(canonicalIds.filter((value): value is string => value !== null)),
   );
   if (normalized.length === 0) return [];
   const rows = await db

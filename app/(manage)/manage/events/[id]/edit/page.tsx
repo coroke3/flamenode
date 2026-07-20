@@ -2,12 +2,15 @@ import * as React from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
 import { canEditEvent } from "@/lib/auth/ownership";
-import { events as eventsTable } from "@/lib/db/schema";
-import { loadStagePermissionFormSettingsJson } from "@/lib/video/stagePermissionQuestions";
+import {
+  eventCustomQuestions,
+  events as eventsTable,
+} from "@/lib/db/schema";
+import { rowToQuestion } from "@/lib/video/customQuestions";
 import { EventForm } from "@/components/admin/EventForm";
 import { DeleteEventForm } from "@/components/admin/DeleteEventForm";
 import { ManageActiveXNotice } from "@/components/layout/ManageActiveXNotice";
@@ -41,14 +44,25 @@ export default async function ManageEventEditPage({
   )[0];
   if (!event) notFound();
 
-  const videoFormSettingsJson = await loadStagePermissionFormSettingsJson(db, id);
-  const editor = { id: user.id, role: user.role ?? null };
+  const customQuestions = await db
+    .select()
+    .from(eventCustomQuestions)
+    .where(and(
+      eq(eventCustomQuestions.event_id, id),
+      eq(eventCustomQuestions.is_active, 1),
+    )!)
+    .orderBy(
+      asc(eventCustomQuestions.sort_order),
+      asc(eventCustomQuestions.question_key),
+    );
+
+  const eventEditor = { id: user.id, role: user.role ?? null };
   const [canManageBasic, canManagePublish, canManageQuestions, canManageSlots] =
     await Promise.all([
-      canEditEvent(db, editor, id, "event.basic"),
-      canEditEvent(db, editor, id, "event.publish"),
-      canEditEvent(db, editor, id, "event.questions"),
-      canEditEvent(db, editor, id, "event.slots"),
+      canEditEvent(db, eventEditor, id, "event.basic"),
+      canEditEvent(db, eventEditor, id, "event.publish"),
+      canEditEvent(db, eventEditor, id, "event.questions"),
+      canEditEvent(db, eventEditor, id, "event.slots"),
     ]);
   if (
     !canManageBasic &&
@@ -106,7 +120,11 @@ export default async function ManageEventEditPage({
             allow_user_video_edits: event.allow_user_video_edits,
             user_video_edit_permission_keys_json:
               event.user_video_edit_permission_keys_json,
-            video_form_settings_json: videoFormSettingsJson,
+            custom_questions: customQuestions.map((question) => {
+              const parsed = rowToQuestion(question);
+              const { event_id: _eventId, ...editable } = parsed;
+              return editable;
+            }),
             max_slots_per_video: event.max_slots_per_video,
             slot_part_gap_minutes: event.slot_part_gap_minutes,
             slot_type: (event.slot_type ?? "time") as "time" | "count",
@@ -124,13 +142,11 @@ export default async function ManageEventEditPage({
           className="fn-console-section"
           style={{ borderColor: "var(--accent-danger)" }}
         >
-          <h2
-            style={{
-              fontSize: 14,
-              fontWeight: 700,
-              color: "var(--accent-danger)",
-            }}
-          >
+          <h2 style={{
+            fontSize: 14,
+            fontWeight: 700,
+            color: "var(--accent-danger)",
+          }}>
             危険操作
           </h2>
           <p className="fn-muted fn-text-sm">

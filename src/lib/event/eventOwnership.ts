@@ -1,5 +1,7 @@
 import "server-only";
 
+import { getLinkedXUserIdsForAuthUser } from "@/lib/auth/xIdentity";
+
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DB } from "@/lib/db/client";

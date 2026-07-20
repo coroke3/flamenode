@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-20
-> Verified against commit: `89b8889`
+> Verified against commit: `8de170c`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/`, `wrangler.toml`, `package.json`
 
 ## AIの読取順
@@ -46,7 +46,7 @@ Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、Cron Worker 3本
 | UI受入基準 | [operations/ui-acceptance.md](operations/ui-acceptance.md) |
 | 外部API上限 | [operations/external-api-limits.md](operations/external-api-limits.md) |
 
-旧形式インポートは提供しない。旧データ変換は`0043_db_canonical_migration.sql`の一回限りのmigrationとして扱う。
+旧形式入力は管理者専用インポート境界でのみ受理し、新正本へ一方向変換する。通常ランタイムでは旧形式を扱わない。
 
 ## Historical
 

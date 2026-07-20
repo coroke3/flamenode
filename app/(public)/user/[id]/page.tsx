@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { and, desc, eq, sql } from "drizzle-orm";
 import styles from "./page.module.css";
-import { withDatabase } from "@/lib/cloudflare";
+import { withDatabaseRead } from "@/lib/cloudflare";
 import {
   videoMembers,
   videos,
@@ -69,7 +69,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       image: cachedGoogleImageUrl(user.icon_url),
     });
   }
-  const data = await withDatabase(async (db) => {
+  const data = await withDatabaseRead(async (db) => {
     const u = await db
       .select()
       .from(xUsers)
@@ -146,7 +146,7 @@ export default async function UserPage({
     );
   }
 
-  const bundle = await withDatabase(async (db) => {
+  const bundle = await withDatabaseRead(async (db) => {
     const userRow = await db
       .select()
       .from(xUsers)

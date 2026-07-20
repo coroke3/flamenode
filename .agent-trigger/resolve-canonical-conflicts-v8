@@ -1,2 +1,0 @@
-trigger v9 latest-candidate assembly
-sync: base-workflow-registered

@@ -43,7 +43,7 @@ export function VideoReviewQueueTable({
           <th>公開状態</th>
           <th>登録日時</th>
           <th>YouTube</th>
-          <th>ステージ許可</th>
+          <th>回答概要</th>
           <th>必須未回答</th>
           <th></th>
         </tr>

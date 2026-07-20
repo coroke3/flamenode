@@ -14,7 +14,7 @@
 | Reason | FlameNode内の公開範囲とYouTube上の公開区分を混在させず、下書き・アーカイブの重複した役割を廃止するため |
 | Tables | `videos`、`video_youtube_metadata`、`video_moderation_cases`、`events` |
 | Data migration | 動画`limited`を`public`へ移しYouTube公開区分を`unlisted`として保存。動画`draft / archived / hidden`を原則`private`、イベント`draft`を`private`、`archived`を`public`へ移行。`archived`から`private`への変換で既存部分一意制約に抵触する行だけ、YouTube IDを保持したまま監査付きで`voided`へ振り分け |
-| Compatibility | `0043_db_canonical_migration.sql`完了をguardで確認。旧物理default由来の`draft`だけをINSERT後に正規化し、その他の旧状態のINSERT・UPDATEを拒否 |
+| Compatibility | `0043`正本migration完了をguardで確認。旧物理default由来の`draft`だけをINSERT後に正規化し、その他の旧状態のINSERT・UPDATEを拒否 |
 | Data loss | none。作品・イベント行と`videos.youtube_video_id`は削除しない |
 | Rollback | 状態の意味が変わるため、migration適用前のD1バックアップから復元 |
 | Validation | 41テーブル409カラムの正本検査、誤順序適用のfail-fast、SQLite integration、typecheck、Lint、unit、Worker、Cloudflare契約、Next.js/Pages build、公開API検査 |

@@ -25,16 +25,17 @@ import { VideoIconPicker } from "@/components/forms/VideoIconPicker";
 import { SocialLinksEditor } from "@/components/forms/SocialLinksEditor";
 import { YoutubeChannelPicker } from "@/components/settings/YoutubeChannelPicker";
 import { normalizeXId } from "@/lib/utils/xid";
-import { ErrorCallout } from "@/components/ui/ErrorCallout";
-import {
-  getStagePermissionAnswerValue,
-  resolveStagePermissionFieldsFromJson,
-} from "@/lib/video/formSettings";
 import { redirectForGuardReason } from "@/lib/client/guardRedirect";
 import {
   MAX_ATOMIC_VIDEO_EVENTS,
   MAX_ATOMIC_VIDEO_SOFTWARES,
 } from "@/lib/video/atomicLimits";
+import {
+  parseCustomAnswerValuesJson,
+  type CustomAnswerValue,
+  type CustomQuestion,
+} from "@/lib/video/customQuestions";
+import { MAX_VIDEO_CUSTOM_QUESTIONS } from "@/lib/video/customQuestionLimits";
 
 export interface VideoFormInitialValues {
   display_name?: string;
@@ -56,53 +57,21 @@ export interface VideoFormInitialValues {
   closing_comment?: string;
   is_collab?: boolean;
   members?: VideoMemberInput[];
-  /** この作品が所属するイベント ID 一覧 (video_events 経由)。 */
   event_ids?: string[];
-  /** 作品が選択した「部」(events.parts_json の候補から)。未設定なら null/空文字。 */
   part?: string | null;
 }
 
-/** VideoForm のイベント選択肢。 */
 export interface EventOption {
   id: string;
   title: string;
-  video_form_settings_json?: string | null;
-  /** イベントに設定された「部」候補 (JSON 文字列)。null/空配列なら部 UI を出さない。 */
+  custom_questions?: CustomQuestion[];
   parts_json?: string | null;
-}
-
-function parsePartsJson(value: string | null | undefined): string[] {
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
-  } catch {
-    return [];
-  }
 }
 
 export interface XIdOption {
   id: string;
   x_name: string;
 }
-
-type WizardStepKey = "submitter" | "work" | "youtube" | "confirm";
-
-export type WizardValidationError = {
-  message: string;
-  fieldId?: string;
-  step: WizardStepKey;
-};
-
-const WIZARD_STEPS_SLOT: { key: WizardStepKey; label: string }[] = [
-  { key: "submitter", label: "提出者情報" },
-  { key: "work", label: "作品情報" },
-  { key: "youtube", label: "YouTube URL" },
-  { key: "confirm", label: "確認・送信" },
-];
-
-const WIZARD_STEPS_FREE = WIZARD_STEPS_SLOT;
 
 interface VideoFormProps {
   mode: "free" | "slot" | "edit";
@@ -113,62 +82,49 @@ interface VideoFormProps {
   softwareSuggestions?: string[];
   xIdOptions?: XIdOption[];
   activeXId?: string | null;
-  /**
-   * 編集権限がない section の key 一覧。
-   * 指定された section は opacity / pointer-events で不活性化され、
-   * 内部の input 類に disabled 属性が付与される。
-   *
-   * 取りうる値: "submitter" | "video" | "descriptions" | "members"
-   *
-   * 省略時はすべて編集可能 (既存動作を維持)。
-   *
-   * 注意: これはフロント表示の補助のみ。
-   * サーバー側権限チェック (updateVideo Server Action) は独立して実行される。
-   */
   disabledSections?: string[];
   disabledFields?: string[];
-  /**
-   * 投稿ボタンを押せないようにする理由文。
-   * 未承認 Active X ID など、サーバー側 writeGuard で必ず弾かれる状態のとき、
-   * 「押せるけど失敗する」UX を避けるためにフォーム側で表示・無効化する。
-   */
   submitBlockedReason?: string;
-  /**
-   * 作品アイコンの候補リスト。サーバー側で `getXIconCandidates(db, xId)` から取得する。
-   * x_users.icon_url / 同 X ID の過去 videos.creator_icon_url を新しい順で含む。
-   */
   iconCandidates?: string[];
-  /**
-   * YouTube チャンネル URL の候補。`getYoutubeChannelCandidates(db, xId)` から取得
-   * (当該 X ID が creator の作品投稿時に記録した URL を含む。アクティブ X ID とは無関係)。
-   */
   channelCandidates?: string[];
-  /**
-   * 所属イベントの選択肢 (受付中のイベント等)。複数チェック可能で、
-   * 出力は hidden input `event_ids` (改行区切り) で渡される。
-   * 未指定なら所属イベント選択 UI は表示しない (現在の挙動互換)。
-   */
   eventOptions?: EventOption[];
-  /**
-   * 所属イベントの編集権限。false なら表示のみ (チェックボックス操作不可)。
-   * デフォルト true。slot モードでは slot.event_id は固定で含まれる。
-   */
   canEditEvents?: boolean;
-  /**
-   * 提出主体 X ID を変更できるか。デフォルト false。
-   * true でも UI は「解除チェックボックス → <select>」の二段階で、
-   * 解除した時のみ hidden `allow_submitter_change=1` が送信される。
-   * サーバー側でも `role === "admin"` を再検証するため、UI 操作だけでは突破できない。
-   */
   canChangeSubmitter?: boolean;
-  /**
-   * 編集モード時のクライアント側 privilegeMode。サーバー側 hidden として
-   * `edit_privilege_mode` で送信される。サーバーは別途 URL/セッションから再検証する。
-   */
   editPrivilegeMode?: "normal" | "admin" | "event";
 }
 
-/** section key が disabledSections に含まれているか確認する小関数。 */
+type WizardStepKey = "submitter" | "work" | "youtube" | "confirm";
+
+type WizardValidationError = {
+  step: WizardStepKey;
+  message: string;
+  fieldId?: string;
+};
+
+const WIZARD_STEPS: Array<{
+  key: WizardStepKey;
+  label: string;
+  icon: React.ComponentProps<typeof Icon>["name"];
+}> = [
+  { key: "submitter", label: "提出者", icon: "user" },
+  { key: "work", label: "作品情報", icon: "edit" },
+  { key: "youtube", label: "YouTube", icon: "youtube" },
+  { key: "confirm", label: "確認", icon: "check" },
+];
+
+function parsePartsJson(value: string | null | undefined): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (item): item is string => typeof item === "string" && item.trim().length > 0,
+    );
+  } catch {
+    return [];
+  }
+}
+
 function isSectionDisabled(
   disabledSections: string[] | undefined,
   key: string,
@@ -183,16 +139,188 @@ function isFieldDisabled(
   return Array.isArray(disabledFields) && disabledFields.includes(key);
 }
 
-/** CSS クラス名を条件結合する軽量ヘルパー。外部依存不要。 */
 function cx(...classes: (string | false | null | undefined)[]): string {
   return classes.filter(Boolean).join(" ");
 }
 
-/**
- * 作品投稿/編集フォーム。
- * 設計図 (post/page.md, post/slotted/page.md, edit/[id]/page.md) を統合。
- * Server Action と React 19 の `useTransition` で進行中状態と結果を扱う。
- */
+function answerAsString(value: CustomAnswerValue | undefined): string {
+  return typeof value === "string" ? value : "";
+}
+
+function answerAsArray(value: CustomAnswerValue | undefined): string[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function customFieldName(question: CustomQuestion): string {
+  return `custom_answer:${question.event_id}:${question.question_key}`;
+}
+
+function customFieldId(question: CustomQuestion): string {
+  return `custom_question_${question.id}`;
+}
+
+function questionCountForEvents(
+  eventOptions: EventOption[],
+  eventIds: readonly string[],
+): number {
+  const selected = new Set(eventIds);
+  return eventOptions.reduce(
+    (total, event) => total + (
+      selected.has(event.id)
+        ? (event.custom_questions ?? []).filter((question) => question.is_active).length
+        : 0
+    ),
+    0,
+  );
+}
+
+function CustomQuestionInput({
+  question,
+  value,
+  disabled,
+  invalid,
+  onChange,
+}: {
+  question: CustomQuestion;
+  value: CustomAnswerValue | undefined;
+  disabled: boolean;
+  invalid: boolean;
+  onChange: (value: CustomAnswerValue) => void;
+}): React.ReactElement {
+  const name = customFieldName(question);
+  const id = customFieldId(question);
+  const maxLength = question.max_length ?? (question.type === "text" ? 200 : 1000);
+
+  return (
+    <div className={cx(styles.field, styles.editableField)}>
+      <label
+        className={`${styles.label} ${question.required ? styles.required : ""}`}
+        htmlFor={id}
+      >
+        {question.label}
+      </label>
+      {question.description ? (
+        <p className={styles.help}>{question.description}</p>
+      ) : null}
+
+      {question.type === "text" ? (
+        <input
+          id={id}
+          name={name}
+          type="text"
+          value={answerAsString(value)}
+          onChange={(event) => onChange(event.target.value)}
+          className="fn-input"
+          placeholder={question.placeholder ?? undefined}
+          maxLength={maxLength}
+          required={question.required}
+          disabled={disabled}
+          aria-invalid={invalid || undefined}
+        />
+      ) : null}
+
+      {question.type === "textarea" ? (
+        <textarea
+          id={id}
+          name={name}
+          value={answerAsString(value)}
+          onChange={(event) => onChange(event.target.value)}
+          className="fn-input"
+          placeholder={question.placeholder ?? undefined}
+          maxLength={maxLength}
+          rows={4}
+          required={question.required}
+          disabled={disabled}
+          aria-invalid={invalid || undefined}
+        />
+      ) : null}
+
+      {question.type === "select" ? (
+        <select
+          id={id}
+          name={name}
+          value={answerAsString(value)}
+          onChange={(event) => onChange(event.target.value)}
+          className="fn-select"
+          required={question.required}
+          disabled={disabled}
+          aria-invalid={invalid || undefined}
+        >
+          <option value="">選択してください</option>
+          {question.options.map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      ) : null}
+
+      {question.type === "radio" ? (
+        <fieldset
+          id={id}
+          style={{ border: 0, padding: 0, margin: 0 }}
+          aria-invalid={invalid || undefined}
+        >
+          <div style={{ display: "grid", gap: 8 }}>
+            {question.options.map((option, index) => (
+              <label
+                key={option}
+                style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13 }}
+              >
+                <input
+                  type="radio"
+                  name={name}
+                  value={option}
+                  checked={answerAsString(value) === option}
+                  onChange={() => onChange(option)}
+                  required={question.required && index === 0}
+                  disabled={disabled}
+                />
+                <span>{option}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      ) : null}
+
+      {question.type === "checkbox" ? (
+        <fieldset
+          id={id}
+          style={{ border: 0, padding: 0, margin: 0 }}
+          aria-invalid={invalid || undefined}
+        >
+          <div style={{ display: "grid", gap: 8 }}>
+            {question.options.map((option) => {
+              const selected = answerAsArray(value);
+              return (
+                <label
+                  key={option}
+                  style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13 }}
+                >
+                  <input
+                    type="checkbox"
+                    name={name}
+                    value={option}
+                    checked={selected.includes(option)}
+                    onChange={(event) => onChange(
+                      event.target.checked
+                        ? Array.from(new Set([...selected, option]))
+                        : selected.filter((item) => item !== option),
+                    )}
+                    disabled={disabled}
+                  />
+                  <span>{option}</span>
+                </label>
+              );
+            })}
+          </div>
+          {question.required ? (
+            <p className={styles.help}>1件以上選択してください。</p>
+          ) : null}
+        </fieldset>
+      ) : null}
+    </div>
+  );
+}
+
 export function VideoForm({
   mode,
   initial = {},
@@ -214,11 +342,13 @@ export function VideoForm({
 }: VideoFormProps): React.ReactElement {
   const router = useRouter();
   const formRef = React.useRef<HTMLFormElement>(null);
-  const isWizard = mode === "slot" || mode === "free";
-  const wizardSteps = mode === "slot" ? WIZARD_STEPS_SLOT : WIZARD_STEPS_FREE;
-  const [currentStep, setCurrentStep] = React.useState(0);
-  const [maxReachedStep, setMaxReachedStep] = React.useState(0);
+  const isWizard = mode !== "edit";
+  const [currentStep, setCurrentStep] = React.useState<WizardStepKey>("submitter");
+  const [maxReachedStepIndex, setMaxReachedStepIndex] = React.useState(0);
   const [stepError, setStepError] = React.useState<WizardValidationError | null>(null);
+  const [pending, startTransition] = React.useTransition();
+  const [result, setResult] = React.useState<VideoActionResult | null>(null);
+  const [dirty, setDirty] = React.useState(false);
   const [youtubeUrl, setYoutubeUrl] = React.useState(initial.youtube_url ?? "");
   const [titlePreview, setTitlePreview] = React.useState(initial.title ?? "");
   const [displayNamePreview, setDisplayNamePreview] = React.useState(
@@ -230,310 +360,211 @@ export function VideoForm({
   const [members, setMembers] = React.useState<VideoMemberInput[]>(
     initial.members ?? [],
   );
-  // 所属イベントの選択状態。slot モードでは slot.event_id が initial.event_ids
-  // に含まれている前提で、固定として扱う (UI でも変更不可)。
   const [selectedEventIds, setSelectedEventIds] = React.useState<string[]>(
     initial.event_ids ?? [],
   );
-  // 部 (作品の分類)。所属イベントの parts_json から選ぶ。
-  const [selectedPart, setSelectedPart] = React.useState<string>(
-    initial.part ?? "",
+  const [selectedPart, setSelectedPart] = React.useState(initial.part ?? "");
+  const [customAnswers, setCustomAnswers] = React.useState<
+    Record<string, CustomAnswerValue>
+  >(() => parseCustomAnswerValuesJson(initial.custom_question_answers_json));
+  const [unlockSubmitter, setUnlockSubmitter] = React.useState(false);
+  const [editedSubmitter, setEditedSubmitter] = React.useState(
+    normalizeXId(initial.creator_x_user_id ?? ""),
   );
-  // 所属イベントの parts_json から、選択可能な部の候補 (重複排除) を作る。
-  const availableParts = React.useMemo(() => {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const event of eventOptions) {
-      if (!selectedEventIds.includes(event.id)) continue;
-      for (const part of parsePartsJson(event.parts_json)) {
-        if (seen.has(part)) continue;
-        seen.add(part);
-        out.push(part);
-      }
-    }
-    return out;
-  }, [eventOptions, selectedEventIds]);
-  // 選択中の部が、現在の候補に含まれていない場合は自動でクリアする。
-  // (イベント所属を外したときに古い値が残らないようにする)
-  React.useEffect(() => {
-    if (selectedPart && !availableParts.includes(selectedPart)) {
-      setSelectedPart("");
-    }
-  }, [availableParts, selectedPart]);
-  const selectedStagePermissionFields = React.useMemo(
-    () =>
-      resolveStagePermissionFieldsFromJson(
-        eventOptions
-          .filter((event) => selectedEventIds.includes(event.id))
-          .map((event) => event.video_form_settings_json),
-      ),
-    [eventOptions, selectedEventIds],
-  );
-  const [stageAnswers, setStageAnswers] = React.useState<Record<string, string>>({});
 
   React.useEffect(() => {
-    setStageAnswers((current) => {
-      let changed = false;
-      const next = { ...current };
-      for (const question of selectedStagePermissionFields) {
-        if (Object.hasOwn(next, question.id)) continue;
-        next[question.id] = getStagePermissionAnswerValue(
-          initial.custom_question_answers_json,
-          question.id,
-        );
-        changed = true;
-      }
-      return changed ? next : current;
-    });
-  }, [initial.custom_question_answers_json, selectedStagePermissionFields]);
-
-  const [pending, startTransition] = React.useTransition();
-  const [result, setResult] = React.useState<VideoActionResult | null>(null);
-  // 未保存変更がある状態でブラウザを離れようとしたときに警告を出すための dirty 判定。
-  // 入力長文 (紹介文・メンバー編集・アイコン選択) を持つフォームなので、
-  // 誤ってリロード / タブ閉じが起きると入力が失われる事故を避ける。
-  const [dirty, setDirty] = React.useState(false);
-
-  React.useEffect(() => {
-    const handler = (e: BeforeUnloadEvent) => {
-      // 送信中・送信完了直後・dirty でない場合は警告しない。
+    const handler = (event: BeforeUnloadEvent) => {
       if (!dirty || pending) return;
-      e.preventDefault();
-      // Chrome 系では returnValue を空文字でも default 警告を出す。
-      e.returnValue = "";
+      event.preventDefault();
+      event.returnValue = "";
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [dirty, pending]);
 
-  const normalizedInitialXId = normalizeXId(initial.creator_x_user_id || activeXId || "");
-  const normalizedActiveXId = normalizeXId(activeXId || "");
-  const hasSelectableXIds = xIdOptions.length > 0;
-  const initialIsSelectable = xIdOptions.some(
-    (opt) => normalizeXId(opt.id) === normalizedInitialXId,
-  );
-  const selectedDefault =
-    (initialIsSelectable && normalizedInitialXId) ||
-    (xIdOptions[0] ? normalizeXId(xIdOptions[0].id) : "");
-  // free/slot モードでは Active X ID が投稿主体に固定される。
-  // edit モードでは admin のみ変更可。
-  const isActiveXFixed = mode === "free" || mode === "slot";
-  const canSubmit =
-    !submitBlockedReason &&
-    ((isActiveXFixed && !!normalizedActiveXId) ||
-      (!isActiveXFixed && (hasSelectableXIds || !!normalizedInitialXId)));
+  const selectedQuestions = React.useMemo(() => {
+    const selected = new Set(selectedEventIds);
+    return eventOptions
+      .filter((event) => selected.has(event.id))
+      .flatMap((event) => event.custom_questions ?? [])
+      .filter((question) => question.is_active)
+      .sort((a, b) => {
+        const eventOrder = selectedEventIds.indexOf(a.event_id) - selectedEventIds.indexOf(b.event_id);
+        return eventOrder !== 0 ? eventOrder : a.sort_order - b.sort_order;
+      });
+  }, [eventOptions, selectedEventIds]);
 
-  const youtubeId = extractYoutubeId(youtubeUrl);
-  const selectedEventLabels = eventOptions
-    .filter((event) => selectedEventIds.includes(event.id))
-    .map((event) => event.title);
-  const sidePreviewTitle = titlePreview.trim() || "作品タイトル未入力";
-  const sidePreviewName =
-    displayNamePreview.trim() ||
-    normalizedActiveXId ||
-    normalizedInitialXId ||
-    "提出者未設定";
+  const availableParts = React.useMemo(() => {
+    const seen = new Set<string>();
+    const parts: string[] = [];
+    for (const event of eventOptions) {
+      if (!selectedEventIds.includes(event.id)) continue;
+      for (const part of parsePartsJson(event.parts_json)) {
+        if (seen.has(part)) continue;
+        seen.add(part);
+        parts.push(part);
+      }
+    }
+    return parts;
+  }, [eventOptions, selectedEventIds]);
+
+  React.useEffect(() => {
+    if (selectedPart && !availableParts.includes(selectedPart)) {
+      setSelectedPart("");
+    }
+  }, [availableParts, selectedPart]);
+
+  const normalizedActiveXId = normalizeXId(activeXId ?? "");
+  const normalizedInitialXId = normalizeXId(initial.creator_x_user_id ?? "");
+  const fixedSubmitter = mode === "free" || mode === "slot";
   const submitterDisabled = isSectionDisabled(disabledSections, "submitter");
   const videoSectionDisabled = isSectionDisabled(disabledSections, "video");
   const descriptionsDisabled = isSectionDisabled(disabledSections, "descriptions");
   const membersDisabled = isSectionDisabled(disabledSections, "members");
-  const fieldDisabled = (key: string) =>
+  const fieldDisabled = (key: string): boolean =>
     isFieldDisabled(disabledFields, key) ||
     (key.startsWith("submitter.") && submitterDisabled) ||
     (key.startsWith("video.") && videoSectionDisabled) ||
     (key.startsWith("descriptions.") && descriptionsDisabled) ||
     (key.startsWith("members.") && membersDisabled);
-  const incompleteRequiredStageQuestionCount = selectedStagePermissionFields.filter(
-    (question) => question.required && !stageAnswers[question.id]?.trim(),
-  ).length;
+
+  const canSubmit = !submitBlockedReason && (
+    fixedSubmitter ? Boolean(normalizedActiveXId) : Boolean(normalizedInitialXId || editedSubmitter)
+  );
+  const youtubeId = extractYoutubeId(youtubeUrl);
+  const selectedEventLabels = eventOptions
+    .filter((event) => selectedEventIds.includes(event.id))
+    .map((event) => event.title);
   const memberCount = members.filter(
     (member) => member.name.trim() || member.x_user_id.trim(),
   ).length;
-  const handleMembersChange = React.useCallback((next: VideoMemberInput[]) => {
-    setMembers(next);
-  }, []);
+  const currentStepIndex = WIZARD_STEPS.findIndex((step) => step.key === currentStep);
 
-  const currentStepKey = isWizard ? wizardSteps[currentStep]?.key : null;
-  const isWizardLastStep = isWizard && currentStep === wizardSteps.length - 1;
-  const isWizardFirstStep = isWizard && currentStep === 0;
-  const showSidePreview =
-    !isWizard ||
-    currentStepKey === "youtube" ||
-    currentStepKey === "confirm";
+  const isStepVisible = (step: WizardStepKey): boolean =>
+    !isWizard || currentStep === step;
 
-  const isStepVisible = (key: WizardStepKey): boolean => {
-    if (!isWizard) return true;
-    if (key === "confirm") {
-      return currentStepKey === key;
+  const customAnswerError = (): WizardValidationError | null => {
+    if (selectedQuestions.length > MAX_VIDEO_CUSTOM_QUESTIONS) {
+      return {
+        step: "work",
+        message: `カスタム質問は合計${MAX_VIDEO_CUSTOM_QUESTIONS}件までです。`,
+      };
     }
-    if (key === "submitter") return currentStepKey === "submitter";
-    if (key === "work") return currentStepKey === "work";
-    if (key === "youtube") return currentStepKey === "youtube";
-    return false;
-  };
-
-  const validateWizardStep = (
-    stepKey: WizardStepKey,
-  ): WizardValidationError | null => {
-    const form = formRef.current;
-
-    if (stepKey === "submitter") {
-      if (isActiveXFixed && !normalizedActiveXId) {
-        return {
-          step: "submitter",
-          fieldId: "creator_x_user_id",
-          message: "承認済み X ID がありません。設定画面から連携してください。",
-        };
-      }
-      const displayName = form?.elements.namedItem("display_name");
-      const displayValue =
-        displayName instanceof HTMLInputElement ? displayName.value.trim() : "";
-      if (!displayValue) {
-        return {
-          step: "submitter",
-          fieldId: "display_name",
-          message: "表示名 / 活動名 / 団体名を入力してください。",
-        };
-      }
-      return null;
-    }
-
-    if (stepKey === "work") {
-      const titleEl = form?.elements.namedItem("title");
-      const titleValue =
-        titleEl instanceof HTMLInputElement ? titleEl.value.trim() : "";
-      if (!titleValue) {
+    for (const question of selectedQuestions) {
+      if (!question.required) continue;
+      const value = customAnswers[question.id];
+      const answered = Array.isArray(value)
+        ? value.length > 0
+        : Boolean(value?.trim());
+      if (!answered) {
         return {
           step: "work",
-          fieldId: "title",
-          message: "作品タイトルを入力してください。",
+          message: `「${question.label}」を入力してください。`,
+          fieldId: customFieldId(question),
         };
       }
-
-      for (const question of selectedStagePermissionFields) {
-        if (!question.required) continue;
-        const fieldId = `custom_question_${question.id}`;
-        const answerValue = stageAnswers[question.id]?.trim() ?? "";
-        if (!answerValue) {
-          return {
-            step: "work",
-            fieldId,
-            message: `「${question.label}」を入力してください。`,
-          };
-        }
-      }
-      return null;
     }
-
-    if (stepKey === "youtube") {
-      const trimmed = youtubeUrl.trim();
-      if (!trimmed) {
-        return {
-          step: "youtube",
-          fieldId: "youtube_url",
-          message: "YouTube URL を入力してください。",
-        };
-      }
-      if (!extractYoutubeId(trimmed)) {
-        return {
-          step: "youtube",
-          fieldId: "youtube_url",
-          message: "有効な YouTube URL または動画 ID を入力してください。",
-        };
-      }
-      return null;
-    }
-
     return null;
   };
 
-  const goToWizardStep = (index: number) => {
-    if (!isWizard || index > maxReachedStep || index === currentStep) return;
-    setStepError(null);
-    setCurrentStep(index);
+  const validateStep = (step: WizardStepKey): WizardValidationError | null => {
+    const formData = formRef.current ? new FormData(formRef.current) : new FormData();
+    if (step === "submitter") {
+      const displayName = String(formData.get("display_name") ?? "").trim();
+      if (!displayName) {
+        return { step, message: "表示名を入力してください。", fieldId: "display_name" };
+      }
+      if (fixedSubmitter && !normalizedActiveXId) {
+        return { step, message: "承認済みのActive X IDを選択してください。", fieldId: "creator_x_user_id" };
+      }
+    }
+    if (step === "work") {
+      const title = String(formData.get("title") ?? "").trim();
+      if (!title) {
+        return { step, message: "作品タイトルを入力してください。", fieldId: "title" };
+      }
+      const questionError = customAnswerError();
+      if (questionError) return questionError;
+      if (isCollab && memberCount === 0) {
+        return { step, message: "合作作品には1人以上のメンバーを入力してください。" };
+      }
+    }
+    if (step === "youtube") {
+      if (!extractYoutubeId(youtubeUrl)) {
+        return { step, message: "有効なYouTube URLを入力してください。", fieldId: "youtube_url" };
+      }
+    }
+    if (step === "confirm" && mode !== "edit") {
+      if (String(formData.get("accept_policy") ?? "") !== "1") {
+        return { step, message: "投稿内容と利用条件の確認に同意してください。", fieldId: "accept_policy" };
+      }
+    }
+    return null;
   };
 
-  const goWizardNext = () => {
-    if (!isWizard || !currentStepKey) return;
-    const err = validateWizardStep(currentStepKey);
-    if (err) {
-      setStepError(err);
+  const focusValidationError = (error: WizardValidationError) => {
+    setStepError(error);
+    setCurrentStep(error.step);
+    window.setTimeout(() => {
+      if (error.fieldId) document.getElementById(error.fieldId)?.focus();
+      document.getElementById("wizard-validation-error")?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 0);
+  };
+
+  const goNext = () => {
+    const error = validateStep(currentStep);
+    if (error) {
+      focusValidationError(error);
       return;
     }
     setStepError(null);
-    const next = Math.min(currentStep + 1, wizardSteps.length - 1);
-    setCurrentStep(next);
-    setMaxReachedStep((prev) => Math.max(prev, next));
+    const nextIndex = Math.min(currentStepIndex + 1, WIZARD_STEPS.length - 1);
+    setMaxReachedStepIndex((current) => Math.max(current, nextIndex));
+    setCurrentStep(WIZARD_STEPS[nextIndex].key);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const goWizardBack = () => {
-    if (!isWizard || isWizardFirstStep) return;
+  const goBack = () => {
     setStepError(null);
-    setCurrentStep((prev) => Math.max(0, prev - 1));
+    const previousIndex = Math.max(currentStepIndex - 1, 0);
+    setCurrentStep(WIZARD_STEPS[previousIndex].key);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const jumpToWizardStep = React.useCallback(
-    (key: WizardStepKey) => {
-      const nextIndex = wizardSteps.findIndex(
-        (step) => step.key === key,
-      );
-      if (nextIndex < 0) return;
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    for (const step of WIZARD_STEPS) {
+      const error = validateStep(step.key);
+      if (error) {
+        focusValidationError(error);
+        return;
+      }
+    }
 
-      setStepError(null);
-      setCurrentStep(nextIndex);
-      setMaxReachedStep((current) =>
-        Math.max(current, nextIndex),
-      );
-    },
-    [wizardSteps],
-  );
-
-  React.useEffect(() => {
-    if (!stepError || !isWizard) return;
-    const index = wizardSteps.findIndex((step) => step.key === stepError.step);
-    if (index >= 0) setCurrentStep(index);
-    const frame = window.requestAnimationFrame(() => {
-      const target = stepError.fieldId
-        ? document.getElementById(stepError.fieldId)
-        : null;
-      if (!(target instanceof HTMLElement)) return;
-      target.scrollIntoView({ behavior: "smooth", block: "center" });
-      target.focus();
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [isWizard, stepError, wizardSteps]);
-
-  const handleSubmit = (ev: React.FormEvent<HTMLFormElement>) => {
-    ev.preventDefault();
-    const formData = new FormData(ev.currentTarget);
+    const formData = new FormData(event.currentTarget);
     setResult(null);
+    setStepError(null);
     startTransition(async () => {
-      const action =
-        mode === "slot"
-          ? submitSlotVideo
-          : mode === "edit"
-            ? updateVideo
-            : createFreeVideo;
-      const r = await action(formData);
-      const currentPath =
-        typeof window === "undefined"
-          ? "/"
-          : `${window.location.pathname}${window.location.search}`;
-      if (!r.ok && redirectForGuardReason(router, r.reason, currentPath)) {
-        // リダイレクトで離脱するので dirty 警告は不要にする。
+      const action = mode === "slot"
+        ? submitSlotVideo
+        : mode === "edit"
+          ? updateVideo
+          : createFreeVideo;
+      const response = await action(formData);
+      const currentPath = typeof window === "undefined"
+        ? "/"
+        : `${window.location.pathname}${window.location.search}`;
+      if (!response.ok && redirectForGuardReason(router, response.reason, currentPath)) {
         setDirty(false);
         return;
       }
-      setResult(r);
-      if (r.ok) {
-        // 保存成功時は dirty を解除し、編集画面遷移時の警告を抑制する。
+      setResult(response);
+      if (response.ok) {
         setDirty(false);
-      }
-      // 新規投稿後は自動遷移をやめて成功 CTA (公開ページ / イベント / 編集を続ける) を出す。
-      // 「投稿できた → 公開ページ確認したい」「→ イベントに戻りたい」を選べるようにする。
-      // 編集モードはその場に留まり、router.refresh で最新値を反映する。
-      if (r.ok && mode === "edit") {
-        router.refresh();
+        if (mode === "edit") router.refresh();
       }
     });
   };
@@ -543,1080 +574,628 @@ export function VideoForm({
       ref={formRef}
       className={styles.form}
       onSubmit={handleSubmit}
-      onChange={() => {
-        if (!dirty) setDirty(true);
-      }}
+      onChange={() => setDirty(true)}
+      noValidate={isWizard}
     >
       {slotId ? <input type="hidden" name="slot_id" value={slotId} /> : null}
       {videoId ? <input type="hidden" name="video_id" value={videoId} /> : null}
       <input type="hidden" name="mode" value={mode} />
       {mode === "edit" && editPrivilegeMode ? (
-        <input
-          type="hidden"
-          name="edit_privilege_mode"
-          value={editPrivilegeMode}
-        />
+        <input type="hidden" name="edit_privilege_mode" value={editPrivilegeMode} />
       ) : null}
       {softwareSuggestions.length > 0 ? (
         <datalist id="used-software-suggestions">
           {softwareSuggestions.map((name, index) => (
-            <option key={`${name}-software-${index}`} value={name} />
+            <option key={`${name}-${index}`} value={name} />
           ))}
         </datalist>
       ) : null}
 
       {isWizard ? (
-        <nav className={styles.stepProgress} aria-label="投稿ステップ">
-          <ol className={styles.stepProgressList}>
-            {wizardSteps.map((step, index) => {
-              const state =
-                index < currentStep
-                  ? "done"
-                  : index === currentStep
-                    ? "current"
-                    : "pending";
-              const clickable = index <= maxReachedStep && index !== currentStep;
-              return (
-                <li key={step.key} className={styles.stepProgressItem}>
-                  <button
-                    type="button"
-                    className={styles.stepProgressButton}
-                    data-state={state}
-                    data-clickable={clickable ? "true" : undefined}
-                    disabled={!clickable}
-                    onClick={() => goToWizardStep(index)}
-                    aria-current={index === currentStep ? "step" : undefined}
-                  >
-                    <span className={styles.stepProgressIndex} aria-hidden>
-                      {state === "done" ? (
-                        <Icon name="check" size={11} />
-                      ) : (
-                        index + 1
-                      )}
-                    </span>
-                    <span>{step.label}</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
+        <nav className={styles.stepper} aria-label="投稿手順">
+          <div
+            className={styles.stepProgress}
+            style={{
+              width: `${(currentStepIndex / (WIZARD_STEPS.length - 1)) * 100}%`,
+            }}
+            aria-hidden
+          />
+          {WIZARD_STEPS.map((step, index) => {
+            const isCurrent = step.key === currentStep;
+            const isComplete = index < currentStepIndex;
+            const isReachable = index <= maxReachedStepIndex;
+            return (
+              <button
+                key={step.key}
+                type="button"
+                className={cx(
+                  styles.stepItem,
+                  isCurrent && styles.stepCurrent,
+                  isComplete && styles.stepComplete,
+                  !isCurrent && !isComplete && styles.stepUpcoming,
+                )}
+                aria-current={isCurrent ? "step" : undefined}
+                disabled={!isReachable}
+                onClick={() => {
+                  if (!isReachable) return;
+                  setStepError(null);
+                  setCurrentStep(step.key);
+                }}
+              >
+                <span className={styles.stepDot}>
+                  <Icon name={isComplete ? "check" : step.icon} size={13} aria-hidden />
+                </span>
+                <span className={styles.stepLabel}>{step.label}</span>
+              </button>
+            );
+          })}
         </nav>
       ) : null}
 
-      <div className={styles.formMain}>
-
       {stepError ? (
-        <div id="wizard-validation-error" className={styles.stepError} role="alert">
-          <Icon name="warning" size={13} aria-hidden />
-          <span>{stepError.message}</span>
+        <div
+          id="wizard-validation-error"
+          role="alert"
+          className="fn-status-panel fn-status-panel--warn"
+          style={{ marginBottom: 12 }}
+        >
+          <Icon name="warning" size={13} aria-hidden /> {stepError.message}
         </div>
       ) : null}
 
-      <div
-        className={cx(
-          styles.stepPanel,
-          isWizard && !isStepVisible("submitter") && styles.stepPanelHidden,
-        )}
-        hidden={isWizard ? !isStepVisible("submitter") : undefined}
-      >
-      <section
-        className={cx(
-          styles.section,
-          submitterDisabled && styles.sectionDisabled,
-        )}
-        data-disabled={submitterDisabled || undefined}
-      >
-        <h2 className={styles.sectionTitle}>
-          <Icon name="user" size={14} aria-hidden /> 提出者情報
-          {submitterDisabled ? (
-            <span className={styles.sectionDisabledBadge} aria-label="編集不可">
-              <Icon name="alert" size={11} aria-hidden /> 編集権限なし
-            </span>
-          ) : null}
-        </h2>
-        <p className={styles.help}>
-          この作品で表示する X ID、活動名、団体名を確認してください。X ID 設定の既定値を使いつつ、作品ごとに上書きできます。
-        </p>
-        <div className={`${styles.row} ${styles.cols2}`}>
-          <div className={cx(styles.field, styles.editableField)}>
-            <label className={`${styles.label} ${styles.required}`} htmlFor="creator_x_user_id">
-              提出主体 X ID
-            </label>
-            {isActiveXFixed ? (
-              // free / slot モード: Active X ID に固定。変更不可。
-              normalizedActiveXId ? (
-                <>
+      <div className={styles.formMain}>
+        <div
+          className={cx(styles.stepPanel, !isStepVisible("submitter") && styles.stepPanelHidden)}
+          hidden={!isStepVisible("submitter")}
+        >
+          <section
+            className={cx(styles.section, submitterDisabled && styles.sectionDisabled)}
+            data-disabled={submitterDisabled || undefined}
+          >
+            <h2 className={styles.sectionTitle}>
+              <Icon name="user" size={14} aria-hidden /> 提出者情報
+              {submitterDisabled ? (
+                <span className={styles.sectionDisabledBadge}>編集権限なし</span>
+              ) : null}
+            </h2>
+
+            <div className={`${styles.row} ${styles.cols2}`}>
+              <div className={cx(styles.field, styles.editableField)}>
+                <label className={`${styles.label} ${styles.required}`} htmlFor="creator_x_user_id">
+                  提出主体 X ID
+                </label>
+                {fixedSubmitter ? (
                   <input
                     id="creator_x_user_id"
                     name="creator_x_user_id"
-                    type="text"
                     value={normalizedActiveXId}
                     readOnly
                     className="fn-input"
-                    aria-readonly="true"
-                    disabled={fieldDisabled("submitter.creator_x_user_id")}
-                    style={{ opacity: 0.75, cursor: "default" }}
+                    required
                   />
-                  <p className={styles.help} style={{ marginTop: 4 }}>
-                    提出主体は現在の Active X ID に固定されます。変更する場合は上部バーから X ID を切り替えてください。
-                  </p>
-                </>
-              ) : (
-                <div className="fn-muted fn-text-sm">
-                  承認済み X ID がありません。
-                  <Link href="/dashboard/settings" style={{ marginLeft: 6 }}>
-                    設定で連携
-                  </Link>
-                </div>
-              )
-            ) : mode === "edit" ? (
-              // edit モード: 既定では readOnly で表示し、admin が明示的に解錠した場合のみ
-              // <select> を出して提出主体 X ID を変更できる。
-              // 解錠時は allow_submitter_change=1 を hidden で送り、サーバー側でも
-              // role==="admin" と二重ゲートで検証する。
-              <EditSubmitterField
-                initialXId={normalizedInitialXId}
-                xIdOptions={xIdOptions}
-                hasSelectableXIds={hasSelectableXIds}
-                selectedDefault={selectedDefault}
-                disabled={fieldDisabled("submitter.creator_x_user_id")}
-                sectionDisabled={isSectionDisabled(disabledSections, "submitter")}
-                canChangeSubmitter={canChangeSubmitter}
-              />
-            ) : null}
-          </div>
-          <div className={cx(styles.field, styles.editableField)}>
-            <label className={`${styles.label} ${styles.required}`} htmlFor="display_name">
-              表示名 / 活動名 / 団体名
-            </label>
-            <input
-              id="display_name"
-              name="display_name"
-              type="text"
-              defaultValue={initial.display_name}
-              className="fn-input"
-              maxLength={80}
-              required
-              onChange={(e) => {
-                setDisplayNamePreview(e.target.value);
-                setDirty(true);
-              }}
-              aria-invalid={stepError?.fieldId === "display_name" || undefined}
-              aria-describedby={
-                stepError?.fieldId === "display_name"
-                  ? "wizard-validation-error"
-                  : undefined
-              }
-              readOnly={fieldDisabled("submitter.display_name")}
-              aria-readonly={fieldDisabled("submitter.display_name") || undefined}
-              style={fieldDisabled("submitter.display_name") ? { opacity: 0.65, cursor: "default" } : undefined}
-            />
-          </div>
-        </div>
-        <div className={cx(styles.field, styles.editableField)}>
-          <label className={styles.label}>作品アイコン</label>
-          <p className={styles.help}>
-            この作品で表示するアイコンを選択します。X ID 既定アイコンは変更されません。
-          </p>
-          <VideoIconPicker
-            candidates={iconCandidates}
-            initialIconUrl={initial.icon_url}
-            disabled={fieldDisabled("submitter.icon_url")}
-          />
-        </div>
-        <div className={cx(styles.field, styles.editableField)}>
-          <label className={styles.label} htmlFor="profile_text">
-            自分・団体の概要
-          </label>
-          <textarea
-            id="profile_text"
-            name="profile_text"
-            defaultValue={initial.profile_text}
-            className="fn-input"
-            rows={3}
-            maxLength={1000}
-            disabled={fieldDisabled("submitter.profile_text")}
-          />
-        </div>
-        <div className={cx(styles.field, styles.editableField)}>
-          <span className={styles.label}>YouTube チャンネル</span>
-          <YoutubeChannelPicker
-            defaultValue={initial.youtube_channel_url ?? null}
-            candidates={channelCandidates}
-            disabled={fieldDisabled("submitter.youtube_channel_url")}
-          />
-        </div>
-        <div className={cx(styles.field, styles.editableField)}>
-          <SocialLinksEditor
-            initialValue={initial.other_social_links ?? null}
-            disabled={fieldDisabled("submitter.other_social_links")}
-          />
-        </div>
-      </section>
-      </div>
-
-      <div
-        className={cx(
-          styles.stepPanel,
-          isWizard && !isStepVisible("work") && styles.stepPanelHidden,
-        )}
-        hidden={isWizard ? !isStepVisible("work") : undefined}
-      >
-      <section
-        className={cx(
-          styles.section,
-          videoSectionDisabled && styles.sectionDisabled,
-        )}
-        data-disabled={videoSectionDisabled || undefined}
-      >
-        <h2 className={styles.sectionTitle}>
-          <Icon name="youtube" size={14} aria-hidden /> 動画と基本情報
-          {videoSectionDisabled ? (
-            <span className={styles.sectionDisabledBadge} aria-label="編集不可">
-              <Icon name="alert" size={11} aria-hidden /> 編集権限なし
-            </span>
-          ) : null}
-        </h2>
-
-        <div className={cx(styles.field, styles.editableField)}>
-          <label className={`${styles.label} ${styles.required}`} htmlFor="title">
-            作品タイトル
-          </label>
-          <input
-            id="title"
-            name="title"
-            type="text"
-            defaultValue={initial.title}
-            className="fn-input"
-            placeholder="例: First Light - 春の輪"
-            maxLength={120}
-              required
-              onChange={(e) => {
-                setTitlePreview(e.target.value);
-                setDirty(true);
-              }}
-              aria-invalid={stepError?.fieldId === "title" || undefined}
-              aria-describedby={
-                stepError?.fieldId === "title"
-                  ? "wizard-validation-error"
-                  : undefined
-              }
-            readOnly={fieldDisabled("video.title")}
-            aria-readonly={fieldDisabled("video.title") || undefined}
-            style={fieldDisabled("video.title") ? { opacity: 0.65, cursor: "default" } : undefined}
-          />
-        </div>
-
-        {!isWizard ? (
-        <div className={cx(styles.field, styles.editableField)}>
-          <label
-            className={`${styles.label} ${styles.required}`}
-            htmlFor="youtube_url"
-          >
-            YouTube URL
-          </label>
-          <input
-            id="youtube_url"
-            name="youtube_url"
-            type="url"
-            value={youtubeUrl}
-            onChange={(e) => setYoutubeUrl(e.target.value)}
-            className="fn-input"
-            placeholder="https://www.youtube.com/watch?v=..."
-            required
-            readOnly={fieldDisabled("video.youtube_url")}
-            aria-readonly={fieldDisabled("video.youtube_url") || undefined}
-            style={fieldDisabled("video.youtube_url") ? { opacity: 0.65, cursor: "default" } : undefined}
-          />
-          <p className={styles.help}>
-            限定公開でも登録可能ですが、編集時の動画 ID 変更は管理者の事前承認が必要です。
-          </p>
-          {youtubeId ? (
-            <div className={styles.preview}>
-              <div className={styles.previewThumb}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={youtubeThumbUrl(youtubeId, "hqdefault")} alt="" />
-              </div>
-              <div className={styles.previewBody}>
-                <strong style={{ color: "var(--text-primary)" }}>
-                  YouTube ID: {youtubeId}
-                </strong>
-                <br />
-                <a
-                  href={youtubeWatchUrl(youtubeId)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  YouTube で確認 →
-                </a>
-              </div>
-            </div>
-          ) : null}
-        </div>
-        ) : null}
-
-        <div className={`${styles.row} ${styles.cols2}`}>
-          <div className={cx(styles.field, styles.editableField)}>
-            <label className={styles.label} htmlFor="music">
-              使用楽曲
-            </label>
-            <input
-              id="music"
-              name="music"
-              type="text"
-              defaultValue={initial.music}
-              className="fn-input"
-              placeholder="アーティスト名 - 曲名"
-              maxLength={200}
-              disabled={fieldDisabled("video.music")}
-            />
-            <input
-              id="music_reference_url"
-              name="music_reference_url"
-              type="url"
-              defaultValue={initial.music_reference_url}
-              className="fn-input"
-              placeholder="楽曲リンク URL (任意, https://...)"
-              maxLength={500}
-              disabled={fieldDisabled("video.music")}
-              style={{ marginTop: 6 }}
-            />
-            <p className={styles.help}>
-              楽曲ページ・ニコニコ動画・YouTube などのリンクを入れると、視聴者に楽曲ページへ飛んでもらえます。
-            </p>
-          </div>
-          <div className={cx(styles.field, styles.editableField)}>
-            <label className={styles.label} htmlFor="credit">
-              クレジット
-            </label>
-            <input
-              id="credit"
-              name="credit"
-              type="text"
-              defaultValue={initial.credit}
-              className="fn-input"
-              placeholder="提供 / 作詞作曲 など"
-              maxLength={200}
-              disabled={fieldDisabled("video.credit")}
-            />
-          </div>
-        </div>
-
-        {eventOptions.length > 0 ? (
-          <div className={cx(styles.field, styles.editableField)}>
-            <label className={styles.label}>所属イベント</label>
-            <p className={styles.help}>
-              この作品を関連付けるイベントを選択します。複数選択可。
-              {slotId
-                ? " 確保した枠のイベントは固定で含まれます。"
-                : mode === "free"
-                  ? " 枠なし投稿を受け付けるイベントのみ表示されます。"
-                  : ""}
-            </p>
-            <input
-              type="hidden"
-              name="event_ids"
-              value={selectedEventIds.join(",")}
-            />
-            <div className={styles.eventOptionGrid}>
-              {eventOptions.map((ev) => {
-                const checked = selectedEventIds.includes(ev.id);
-                const atEventLimit =
-                  !checked && selectedEventIds.length >= MAX_ATOMIC_VIDEO_EVENTS;
-                // slot モードでは slot.event_id を固定で含めるため、編集者でも外せない。
-                const locked =
-                  !canEditEvents ||
-                  (mode === "slot" &&
-                    !!initial.event_ids?.includes(ev.id) &&
-                    initial.event_ids.length === 1);
-                return (
-                  <label
-                    key={ev.id}
-                    className={`${styles.eventOption} ${checked ? styles.eventOptionChecked : ""} ${locked ? styles.eventOptionLocked : ""}`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      disabled={locked || atEventLimit}
-                      onChange={(e) => {
-                        if (locked) return;
-                        setSelectedEventIds((prev) =>
-                          e.target.checked
-                            ? Array.from(new Set([...prev, ev.id]))
-                            : prev.filter((id) => id !== ev.id),
-                        );
-                      }}
-                    />
-                    <span style={{ flex: 1, minWidth: 0 }}>{ev.title}</span>
-                    {locked ? (
-                      <Icon
-                        name="alert"
-                        size={11}
-                        aria-hidden
-                        title="このイベントは固定です"
+                ) : canChangeSubmitter ? (
+                  <>
+                    {!unlockSubmitter ? (
+                      <input
+                        id="creator_x_user_id"
+                        name="creator_x_user_id"
+                        value={normalizedInitialXId}
+                        readOnly
+                        className="fn-input"
                       />
-                    ) : null}
-                  </label>
-                );
-              })}
+                    ) : (
+                      <>
+                        <input type="hidden" name="allow_submitter_change" value="1" />
+                        <select
+                          id="creator_x_user_id"
+                          name="creator_x_user_id"
+                          value={editedSubmitter}
+                          onChange={(event) => setEditedSubmitter(event.target.value)}
+                          className="fn-select"
+                          required
+                        >
+                          {xIdOptions.map((option) => (
+                            <option key={option.id} value={normalizeXId(option.id)}>
+                              {option.x_name} (@{normalizeXId(option.id)})
+                            </option>
+                          ))}
+                        </select>
+                      </>
+                    )}
+                    <label style={{ display: "flex", gap: 7, marginTop: 7, fontSize: 12 }}>
+                      <input
+                        type="checkbox"
+                        checked={unlockSubmitter}
+                        onChange={(event) => setUnlockSubmitter(event.target.checked)}
+                      />
+                      管理者権限で提出主体を変更する
+                    </label>
+                  </>
+                ) : (
+                  <input
+                    id="creator_x_user_id"
+                    name="creator_x_user_id"
+                    value={normalizedInitialXId}
+                    readOnly
+                    className="fn-input"
+                  />
+                )}
+              </div>
+
+              <div className={cx(styles.field, styles.editableField)}>
+                <label className={`${styles.label} ${styles.required}`} htmlFor="display_name">
+                  表示名 / 活動名 / 団体名
+                </label>
+                <input
+                  id="display_name"
+                  name="display_name"
+                  type="text"
+                  defaultValue={initial.display_name}
+                  onChange={(event) => setDisplayNamePreview(event.target.value)}
+                  className="fn-input"
+                  maxLength={80}
+                  required
+                  readOnly={fieldDisabled("submitter.display_name")}
+                  aria-invalid={stepError?.fieldId === "display_name" || undefined}
+                />
+              </div>
             </div>
-            <p className={styles.help}>
-              所属イベントは最大{MAX_ATOMIC_VIDEO_EVENTS}件です。
-            </p>
-          </div>
-        ) : null}
 
-        {mode === "slot" ? (
-          <input type="hidden" name="part" value={initial.part ?? ""} />
-        ) : availableParts.length > 0 ? (
-          <div className={cx(styles.field, styles.editableField)}>
-            <label className={styles.label} htmlFor="part">
-              部
-            </label>
-            <p className={styles.help}>
-              所属イベントで設定された「部」(セクション/カテゴリ) から 1 つ選択します。
-              未選択でも投稿できます。
-            </p>
-            <select
-              id="part"
-              name="part"
-              className="fn-select"
-              value={selectedPart}
-              onChange={(e) => {
-                setSelectedPart(e.target.value);
-                setDirty(true);
-              }}
-              disabled={fieldDisabled("video.part")}
-            >
-              <option value="">(未設定)</option>
-              {availableParts.map((part) => (
-                <option key={part} value={part}>
-                  {part}
-                </option>
-              ))}
-            </select>
-          </div>
-        ) : (
-          // フォーム送信時に常に part キーを含めるため、UI 非表示時も hidden で送る。
-          <input type="hidden" name="part" value="" />
-        )}
-      </section>
-
-      <section
-        className={cx(
-          styles.section,
-          descriptionsDisabled && styles.sectionDisabled,
-        )}
-        data-disabled={descriptionsDisabled || undefined}
-      >
-        <h2 className={styles.sectionTitle}>
-          <Icon name="edit" size={14} aria-hidden /> 紹介文
-          {descriptionsDisabled ? (
-            <span className={styles.sectionDisabledBadge} aria-label="編集不可">
-              <Icon name="alert" size={11} aria-hidden /> 編集権限なし
-            </span>
-          ) : null}
-        </h2>
-
-        <div className={cx(styles.field, styles.editableField)}>
-          <label className={styles.label} htmlFor="intro_comment">
-            紹介コメント
-          </label>
-          <textarea
-            id="intro_comment"
-            name="intro_comment"
-            defaultValue={initial.intro_comment}
-            className="fn-input"
-            rows={3}
-            maxLength={500}
-            placeholder="作品の見どころを 1〜2 行で。"
-            disabled={fieldDisabled("descriptions.intro_comment")}
-          />
-        </div>
-
-        <div className={cx(styles.field, styles.editableField)}>
-          <label className={styles.label} htmlFor="highlights">
-            みどころ
-          </label>
-          <textarea
-            id="highlights"
-            name="highlights"
-            defaultValue={initial.highlights}
-            className="fn-input"
-            rows={4}
-            maxLength={1000}
-            disabled={fieldDisabled("descriptions.highlights")}
-          />
-        </div>
-
-        <div className={cx(styles.field, styles.editableField)}>
-          <label className={styles.label} htmlFor="production_story">
-            制作エピソード
-          </label>
-          <textarea
-            id="production_story"
-            name="production_story"
-            defaultValue={initial.production_story}
-            className="fn-input"
-            rows={4}
-            maxLength={1000}
-            disabled={fieldDisabled("descriptions.production_story")}
-          />
-        </div>
-
-        <div className={cx(styles.field, styles.editableField)}>
-          <label className={styles.label} htmlFor="used_software">
-            使用ソフト
-          </label>
-          <input
-            id="used_software"
-            name="used_software"
-            type="text"
-            defaultValue={initial.used_software}
-            className="fn-input"
-            maxLength={200}
-            placeholder="AviUtl, After Effects, Vegas など"
-            list="used-software-suggestions"
-            disabled={fieldDisabled("descriptions.used_software")}
-          />
-          <p className={styles.help}>
-            カンマ区切りで最大{MAX_ATOMIC_VIDEO_SOFTWARES}件まで入力できます。
-          </p>
-          {softwareSuggestions.length > 0 ? (
-            <p className={styles.help}>
-              既存データから候補を出しています。該当しない場合はそのまま入力できます。
-            </p>
-          ) : null}
-        </div>
-
-        {selectedStagePermissionFields.map((question, index) => {
-          const fieldId = `custom_question_${question.id}`;
-          return (
-            <div
-              key={`${question.id}-${index}`}
-              className={cx(styles.field, styles.editableField)}
-            >
-              <input
-                type="hidden"
-                name="custom_question_answer_id"
-                value={question.id}
+            <div className={cx(styles.field, styles.editableField)}>
+              <label className={styles.label}>作品アイコン</label>
+              <VideoIconPicker
+                candidates={iconCandidates}
+                initialIconUrl={initial.icon_url}
+                disabled={fieldDisabled("submitter.icon_url")}
               />
-              <label
-                className={`${styles.label} ${
-                  question.required ? styles.required : ""
-                }`}
-                htmlFor={fieldId}
-              >
-                {question.label}
-              </label>
-              {question.description ? (
-                <p className={styles.help}>{question.description}</p>
-              ) : null}
+            </div>
+
+            <div className={cx(styles.field, styles.editableField)}>
+              <label className={styles.label} htmlFor="profile_text">自分・団体の概要</label>
               <textarea
-                id={fieldId}
-                name="custom_question_answer_value"
-                value={stageAnswers[question.id] ?? ""}
-                onChange={(event) => {
-                  setStageAnswers((current) => ({
-                    ...current,
-                    [question.id]: event.target.value,
-                  }));
-                  setDirty(true);
-                }}
+                id="profile_text"
+                name="profile_text"
+                defaultValue={initial.profile_text}
                 className="fn-input"
                 rows={3}
                 maxLength={1000}
-                required={question.required}
-                placeholder={question.placeholder}
-                disabled={fieldDisabled("descriptions.stage_permission")}
-                aria-invalid={stepError?.fieldId === fieldId || undefined}
-                aria-describedby={
-                  stepError?.fieldId === fieldId
-                    ? "wizard-validation-error"
-                    : undefined
-                }
+                disabled={fieldDisabled("submitter.profile_text")}
               />
             </div>
-          );
-        })}
 
-        <div className={cx(styles.field, styles.editableField)}>
-          <label className={styles.label} htmlFor="closing_comment">
-            あとがき
-          </label>
-          <textarea
-            id="closing_comment"
-            name="closing_comment"
-            defaultValue={initial.closing_comment}
-            className="fn-input"
-            rows={3}
-            maxLength={500}
-            disabled={fieldDisabled("descriptions.closing_comment")}
-          />
+            <div className={cx(styles.field, styles.editableField)}>
+              <span className={styles.label}>YouTube チャンネル</span>
+              <YoutubeChannelPicker
+                defaultValue={initial.youtube_channel_url ?? null}
+                candidates={channelCandidates}
+                disabled={fieldDisabled("submitter.youtube_channel_url")}
+              />
+            </div>
+
+            <div className={cx(styles.field, styles.editableField)}>
+              <SocialLinksEditor
+                initialValue={initial.other_social_links ?? null}
+                disabled={fieldDisabled("submitter.other_social_links")}
+              />
+            </div>
+          </section>
         </div>
-      </section>
 
-      <section
-        className={cx(
-          styles.section,
-          membersDisabled && styles.sectionDisabled,
-        )}
-        data-disabled={membersDisabled || undefined}
-      >
-        <h2 className={styles.sectionTitle}>
-          <Icon name="users" size={14} aria-hidden /> 合作メンバー
-          {membersDisabled ? (
-            <span className={styles.sectionDisabledBadge} aria-label="編集不可">
-              <Icon name="alert" size={11} aria-hidden /> 編集権限なし
-            </span>
-          ) : null}
-        </h2>
-        <label
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            cursor: membersDisabled ? "default" : "pointer",
-            fontSize: 13,
-          }}
-        >
-          <input type="hidden" name="is_collab" value="false" />
-          <input
-            type="checkbox"
-            name="is_collab"
-            value="true"
-            checked={isCollab}
-            onChange={(e) => setIsCollab(e.target.checked)}
-            disabled={membersDisabled}
-          />
-          合作作品として登録する
-        </label>
-        {isCollab ? (
-          <div style={{ marginTop: 12 }}>
-            <VideoMembersField
-              initialMembers={initial.members}
-              suggestions={memberSuggestions}
-              disabled={membersDisabled}
-              onChange={handleMembersChange}
-              collabPermsHref="#video-collab-perms"
-            />
-            <p className={styles.help} style={{ marginTop: 8 }}>
-              X ID 欄は @ 抜きで入力します。未承認 X ID も受け付け、後で本人連携時に紐付け可能です。
-            </p>
-          </div>
-        ) : null}
-      </section>
-      </div>
-
-      {isWizard ? (
         <div
-          className={cx(
-            styles.stepPanel,
-            !isStepVisible("youtube") && styles.stepPanelHidden,
-          )}
+          className={cx(styles.stepPanel, !isStepVisible("work") && styles.stepPanelHidden)}
+          hidden={!isStepVisible("work")}
+        >
+          <section
+            className={cx(styles.section, videoSectionDisabled && styles.sectionDisabled)}
+            data-disabled={videoSectionDisabled || undefined}
+          >
+            <h2 className={styles.sectionTitle}>
+              <Icon name="edit" size={14} aria-hidden /> 作品基本情報
+              {videoSectionDisabled ? (
+                <span className={styles.sectionDisabledBadge}>編集権限なし</span>
+              ) : null}
+            </h2>
+
+            <div className={cx(styles.field, styles.editableField)}>
+              <label className={`${styles.label} ${styles.required}`} htmlFor="title">
+                作品タイトル
+              </label>
+              <input
+                id="title"
+                name="title"
+                type="text"
+                defaultValue={initial.title}
+                onChange={(event) => setTitlePreview(event.target.value)}
+                className="fn-input"
+                maxLength={120}
+                required
+                readOnly={fieldDisabled("video.title")}
+                aria-invalid={stepError?.fieldId === "title" || undefined}
+              />
+            </div>
+
+            <div className={`${styles.row} ${styles.cols2}`}>
+              <div className={cx(styles.field, styles.editableField)}>
+                <label className={styles.label} htmlFor="music">使用楽曲</label>
+                <input
+                  id="music"
+                  name="music"
+                  type="text"
+                  defaultValue={initial.music}
+                  className="fn-input"
+                  placeholder="アーティスト名 - 曲名"
+                  maxLength={200}
+                  readOnly={fieldDisabled("video.music")}
+                />
+                <input
+                  id="music_reference_url"
+                  name="music_reference_url"
+                  type="url"
+                  defaultValue={initial.music_reference_url}
+                  className="fn-input"
+                  placeholder="楽曲リンク URL"
+                  maxLength={500}
+                  readOnly={fieldDisabled("video.music")}
+                  style={{ marginTop: 6 }}
+                />
+              </div>
+              <div className={cx(styles.field, styles.editableField)}>
+                <label className={styles.label} htmlFor="credit">クレジット</label>
+                <input
+                  id="credit"
+                  name="credit"
+                  type="text"
+                  defaultValue={initial.credit}
+                  className="fn-input"
+                  maxLength={200}
+                  readOnly={fieldDisabled("video.credit")}
+                />
+              </div>
+            </div>
+
+            {eventOptions.length > 0 ? (
+              <div className={cx(styles.field, styles.editableField)}>
+                <label className={styles.label}>所属イベント</label>
+                <p className={styles.help}>
+                  複数選択できます。選択イベントをまたぐ追加質問は合計
+                  {MAX_VIDEO_CUSTOM_QUESTIONS}件までです。
+                </p>
+                <input type="hidden" name="event_ids" value={selectedEventIds.join(",")} />
+                <div className={styles.eventOptionGrid}>
+                  {eventOptions.map((event) => {
+                    const checked = selectedEventIds.includes(event.id);
+                    const nextIds = checked
+                      ? selectedEventIds
+                      : [...selectedEventIds, event.id];
+                    const exceedsEventLimit = !checked && selectedEventIds.length >= MAX_ATOMIC_VIDEO_EVENTS;
+                    const exceedsQuestionLimit = !checked &&
+                      questionCountForEvents(eventOptions, nextIds) > MAX_VIDEO_CUSTOM_QUESTIONS;
+                    const locked = !canEditEvents || (
+                      mode === "slot" && Boolean(initial.event_ids?.includes(event.id))
+                    );
+                    return (
+                      <label
+                        key={event.id}
+                        className={`${styles.eventOption} ${checked ? styles.eventOptionChecked : ""} ${locked ? styles.eventOptionLocked : ""}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={locked || exceedsEventLimit || exceedsQuestionLimit}
+                          onChange={(changeEvent) => {
+                            if (locked) return;
+                            setSelectedEventIds((current) => changeEvent.target.checked
+                              ? Array.from(new Set([...current, event.id]))
+                              : current.filter((eventId) => eventId !== event.id));
+                          }}
+                        />
+                        <span style={{ flex: 1, minWidth: 0 }}>{event.title}</span>
+                        {(event.custom_questions?.length ?? 0) > 0 ? (
+                          <span className="fn-badge fn-badge-soft">
+                            質問 {event.custom_questions?.length}件
+                          </span>
+                        ) : null}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+
+            {mode === "slot" ? (
+              <input type="hidden" name="part" value={initial.part ?? ""} />
+            ) : availableParts.length > 0 ? (
+              <div className={cx(styles.field, styles.editableField)}>
+                <label className={styles.label} htmlFor="part">部</label>
+                <select
+                  id="part"
+                  name="part"
+                  className="fn-select"
+                  value={selectedPart}
+                  onChange={(event) => setSelectedPart(event.target.value)}
+                  disabled={fieldDisabled("video.part")}
+                >
+                  <option value="">(未設定)</option>
+                  {availableParts.map((part) => (
+                    <option key={part} value={part}>{part}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <input type="hidden" name="part" value="" />
+            )}
+          </section>
+
+          <section
+            className={cx(styles.section, descriptionsDisabled && styles.sectionDisabled)}
+            data-disabled={descriptionsDisabled || undefined}
+          >
+            <h2 className={styles.sectionTitle}>
+              <Icon name="edit" size={14} aria-hidden /> 紹介文・追加質問
+              {descriptionsDisabled ? (
+                <span className={styles.sectionDisabledBadge}>編集権限なし</span>
+              ) : null}
+            </h2>
+
+            <div className={cx(styles.field, styles.editableField)}>
+              <label className={styles.label} htmlFor="intro_comment">紹介コメント</label>
+              <textarea
+                id="intro_comment"
+                name="intro_comment"
+                defaultValue={initial.intro_comment}
+                className="fn-input"
+                rows={3}
+                maxLength={500}
+                disabled={fieldDisabled("descriptions.intro_comment")}
+              />
+            </div>
+
+            <div className={cx(styles.field, styles.editableField)}>
+              <label className={styles.label} htmlFor="highlights">みどころ</label>
+              <textarea
+                id="highlights"
+                name="highlights"
+                defaultValue={initial.highlights}
+                className="fn-input"
+                rows={4}
+                maxLength={1000}
+                disabled={fieldDisabled("descriptions.highlights")}
+              />
+            </div>
+
+            <div className={cx(styles.field, styles.editableField)}>
+              <label className={styles.label} htmlFor="production_story">制作エピソード</label>
+              <textarea
+                id="production_story"
+                name="production_story"
+                defaultValue={initial.production_story}
+                className="fn-input"
+                rows={4}
+                maxLength={1000}
+                disabled={fieldDisabled("descriptions.production_story")}
+              />
+            </div>
+
+            <div className={cx(styles.field, styles.editableField)}>
+              <label className={styles.label} htmlFor="used_software">使用ソフト</label>
+              <input
+                id="used_software"
+                name="used_software"
+                type="text"
+                defaultValue={initial.used_software}
+                className="fn-input"
+                maxLength={200}
+                list="used-software-suggestions"
+                disabled={fieldDisabled("descriptions.used_software")}
+              />
+              <p className={styles.help}>
+                カンマ区切りで最大{MAX_ATOMIC_VIDEO_SOFTWARES}件です。
+              </p>
+            </div>
+
+            {selectedQuestions.length > 0 ? (
+              <div style={{
+                display: "grid",
+                gap: 14,
+                margin: "18px 0",
+                padding: 14,
+                border: "1px solid var(--border-subtle)",
+                borderRadius: "var(--radius-sm)",
+                background: "var(--bg-elevated)",
+              }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 14 }}>イベント追加質問</h3>
+                  <p className={styles.help} style={{ marginTop: 4 }}>
+                    選択したイベントに設定された質問です。
+                  </p>
+                </div>
+                {selectedQuestions.map((question) => (
+                  <CustomQuestionInput
+                    key={question.id}
+                    question={question}
+                    value={customAnswers[question.id]}
+                    disabled={descriptionsDisabled}
+                    invalid={stepError?.fieldId === customFieldId(question)}
+                    onChange={(value) => {
+                      setCustomAnswers((current) => ({
+                        ...current,
+                        [question.id]: value,
+                      }));
+                      setDirty(true);
+                    }}
+                  />
+                ))}
+              </div>
+            ) : null}
+
+            <div className={cx(styles.field, styles.editableField)}>
+              <label className={styles.label} htmlFor="closing_comment">あとがき</label>
+              <textarea
+                id="closing_comment"
+                name="closing_comment"
+                defaultValue={initial.closing_comment}
+                className="fn-input"
+                rows={3}
+                maxLength={500}
+                disabled={fieldDisabled("descriptions.closing_comment")}
+              />
+            </div>
+          </section>
+
+          <section
+            className={cx(styles.section, membersDisabled && styles.sectionDisabled)}
+            data-disabled={membersDisabled || undefined}
+          >
+            <h2 className={styles.sectionTitle}>
+              <Icon name="users" size={14} aria-hidden /> 合作メンバー
+              {membersDisabled ? (
+                <span className={styles.sectionDisabledBadge}>編集権限なし</span>
+              ) : null}
+            </h2>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+              <input type="hidden" name="is_collab" value="false" />
+              <input
+                type="checkbox"
+                name="is_collab"
+                value="true"
+                checked={isCollab}
+                onChange={(event) => setIsCollab(event.target.checked)}
+                disabled={membersDisabled}
+              />
+              合作作品として登録する
+            </label>
+            {isCollab ? (
+              <div style={{ marginTop: 12 }}>
+                <VideoMembersField
+                  initialMembers={initial.members}
+                  suggestions={memberSuggestions}
+                  disabled={membersDisabled}
+                  onChange={setMembers}
+                  collabPermsHref="#video-collab-perms"
+                />
+              </div>
+            ) : null}
+          </section>
+        </div>
+
+        <div
+          className={cx(styles.stepPanel, !isStepVisible("youtube") && styles.stepPanelHidden)}
           hidden={!isStepVisible("youtube")}
         >
           <section className={styles.section}>
             <h2 className={styles.sectionTitle}>
               <Icon name="youtube" size={14} aria-hidden /> YouTube URL 登録
             </h2>
-            <div className={styles.youtubeStepSection}>
-              <div className={cx(styles.field, styles.editableField)}>
-                <label
-                  className={`${styles.label} ${styles.required}`}
-                  htmlFor="youtube_url"
-                >
-                  YouTube URL
-                </label>
-                <input
-                  id="youtube_url"
-                  name="youtube_url"
-                  type="url"
-                  value={youtubeUrl}
-                  onChange={(e) => {
-                    setYoutubeUrl(e.target.value);
-                    setDirty(true);
-                  }}
-                  className="fn-input"
-                  placeholder="https://www.youtube.com/watch?v=..."
-                  required
-                  readOnly={fieldDisabled("video.youtube_url")}
-                  aria-readonly={fieldDisabled("video.youtube_url") || undefined}
-                  style={
-                    fieldDisabled("video.youtube_url")
-                      ? { opacity: 0.65, cursor: "default" }
-                      : undefined
-                  }
-                  aria-invalid={stepError?.fieldId === "youtube_url" || undefined}
-                  aria-describedby={
-                    stepError?.fieldId === "youtube_url"
-                      ? "wizard-validation-error"
-                      : undefined
-                  }
-                />
-                <p className={styles.help}>
-                  限定公開でも登録可能です。URL を入力すると下にサムネイルが表示されます。
-                </p>
-              </div>
+            <div className={cx(styles.field, styles.editableField)}>
+              <label className={`${styles.label} ${styles.required}`} htmlFor="youtube_url">
+                YouTube URL
+              </label>
+              <input
+                id="youtube_url"
+                name="youtube_url"
+                type="url"
+                value={youtubeUrl}
+                onChange={(event) => setYoutubeUrl(event.target.value)}
+                className="fn-input"
+                placeholder="https://www.youtube.com/watch?v=..."
+                required
+                readOnly={fieldDisabled("video.youtube_url")}
+                aria-invalid={stepError?.fieldId === "youtube_url" || undefined}
+              />
               {youtubeId ? (
-                <div className={styles.youtubeStepPreview}>
-                  <div className={styles.youtubeStepThumb}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={youtubeThumbUrl(youtubeId, "hqdefault")} alt="" />
-                  </div>
-                  <div className={styles.youtubeStepMeta}>
-                    <strong style={{ color: "var(--text-primary)" }}>
-                      YouTube ID: {youtubeId}
-                    </strong>
-                    <br />
-                    <a
-                      href={youtubeWatchUrl(youtubeId)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      YouTube で確認 →
-                    </a>
-                  </div>
+                <div style={{ marginTop: 12, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={youtubeThumbUrl(youtubeId)}
+                    alt="YouTube サムネイル"
+                    style={{ width: 240, maxWidth: "100%", borderRadius: 8 }}
+                  />
+                  <a
+                    href={youtubeWatchUrl(youtubeId)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="fn-btn fn-btn-ghost fn-btn-sm"
+                  >
+                    YouTube で確認
+                  </a>
                 </div>
               ) : (
-                <p className={styles.help}>
-                  動画の URL または 11 桁の動画 ID を入力してください。
-                </p>
+                <p className={styles.help}>URLを入力すると動画IDとサムネイルを確認します。</p>
               )}
             </div>
           </section>
         </div>
-      ) : null}
 
-      {isWizard ? (
         <div
-          className={cx(
-            styles.stepPanel,
-            !isStepVisible("confirm") && styles.stepPanelHidden,
-          )}
+          className={cx(styles.stepPanel, !isStepVisible("confirm") && styles.stepPanelHidden)}
           hidden={!isStepVisible("confirm")}
         >
           <section className={styles.section}>
             <h2 className={styles.sectionTitle}>
-              <Icon name="check" size={14} aria-hidden /> 確認・送信
+              <Icon name="check" size={14} aria-hidden /> 投稿内容の確認
             </h2>
-            <div className={styles.confirmSummary}>
-              <p className={styles.help}>
-                入力内容を確認して、問題なければ提出してください。
-              </p>
-              <div className={styles.confirmSummaryGrid}>
-                <div className={styles.confirmGroups}>
-                  <section className={styles.confirmGroup}>
-                    <div className={styles.confirmGroupHead}>
-                      <h3>投稿者情報</h3>
-                      <button
-                        type="button"
-                        className={styles.confirmEditButton}
-                        onClick={() =>
-                          jumpToWizardStep("submitter")
-                        }
-                      >
-                        修正
-                      </button>
-                    </div>
-
-                    <dl className={styles.confirmSummaryList}>
-                      <div>
-                        <dt>X ID</dt>
-                        <dd>
-                          @
-                          {normalizedActiveXId ||
-                            normalizedInitialXId ||
-                            "未設定"}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>表示名</dt>
-                        <dd>
-                          {displayNamePreview.trim() || "未入力"}
-                        </dd>
-                      </div>
-                    </dl>
-                  </section>
-
-                  <section className={styles.confirmGroup}>
-                    <div className={styles.confirmGroupHead}>
-                      <h3>作品情報</h3>
-                      <button
-                        type="button"
-                        className={styles.confirmEditButton}
-                        onClick={() => jumpToWizardStep("work")}
-                      >
-                        修正
-                      </button>
-                    </div>
-
-                    <dl className={styles.confirmSummaryList}>
-                      <div>
-                        <dt>タイトル</dt>
-                        <dd>{titlePreview.trim() || "未入力"}</dd>
-                      </div>
-                      <div>
-                        <dt>イベント</dt>
-                        <dd>
-                          {selectedEventLabels.length > 0
-                            ? selectedEventLabels.join(" / ")
-                            : "未選択"}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>合作</dt>
-                        <dd>
-                          {isCollab
-                            ? `${memberCount}人の合作`
-                            : "個人作品"}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>追加質問</dt>
-                        <dd>
-                          {incompleteRequiredStageQuestionCount > 0
-                            ? `未入力 ${incompleteRequiredStageQuestionCount}件`
-                            : "入力済み"}
-                        </dd>
-                      </div>
-                    </dl>
-                  </section>
-
-                  <section className={styles.confirmGroup}>
-                    <div className={styles.confirmGroupHead}>
-                      <h3>YouTube</h3>
-                      <button
-                        type="button"
-                        className={styles.confirmEditButton}
-                        onClick={() =>
-                          jumpToWizardStep("youtube")
-                        }
-                      >
-                        修正
-                      </button>
-                    </div>
-
-                    <div className={styles.confirmYoutube}>
-                      <dl className={styles.confirmSummaryList}>
-                        <div>
-                          <dt>動画ID</dt>
-                          <dd>{youtubeId ?? "未入力"}</dd>
-                        </div>
-                      </dl>
-
-                      {youtubeId ? (
-                        <div className={styles.confirmThumb}>
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={youtubeThumbUrl(
-                              youtubeId,
-                              "hqdefault",
-                            )}
-                            alt=""
-                          />
-                        </div>
-                      ) : null}
-                    </div>
-                  </section>
-                </div>
-              </div>
+            <div style={{ display: "grid", gap: 10, fontSize: 13 }}>
+              <p style={{ margin: 0 }}><strong>作品:</strong> {titlePreview.trim() || "未入力"}</p>
+              <p style={{ margin: 0 }}><strong>表示名:</strong> {displayNamePreview.trim() || "未入力"}</p>
+              <p style={{ margin: 0 }}><strong>イベント:</strong> {selectedEventLabels.join(" / ") || "所属なし"}</p>
+              <p style={{ margin: 0 }}><strong>追加質問:</strong> {selectedQuestions.length}件</p>
+              <p style={{ margin: 0 }}><strong>合作メンバー:</strong> {memberCount}人</p>
+              <p style={{ margin: 0 }}><strong>YouTube:</strong> {youtubeId ?? "未入力"}</p>
             </div>
+            {youtubeId ? (
+              <Link
+                href={youtubeWatchUrl(youtubeId)}
+                target="_blank"
+                className="fn-btn fn-btn-ghost fn-btn-sm"
+                style={{ marginTop: 12, justifySelf: "start" }}
+              >
+                YouTube動画を確認
+              </Link>
+            ) : null}
+            {mode !== "edit" ? (
+              <label style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 16, fontSize: 13 }}>
+                <input id="accept_policy" name="accept_policy" type="checkbox" value="1" />
+                <span>投稿内容と利用条件を確認し、この内容で送信することに同意します。</span>
+              </label>
+            ) : null}
           </section>
         </div>
-      ) : null}
-
-      {result && !result.ok ? (
-        <ErrorCallout
-          reason={result.reason}
-          message={result.message ?? "提出に失敗しました。"}
-        />
-      ) : null}
-      {result && result.ok ? (
-        <div
-          role="status"
-          style={{
-            padding: "12px 14px",
-            border: "1px solid var(--accent-primary)",
-            borderRadius: "var(--radius-sm)",
-            background: "var(--accent-primary-soft)",
-            color: "var(--text-primary)",
-            fontSize: 13,
-            display: "grid",
-            gap: 10,
-          }}
-        >
-          <div>
-            <Icon name="check" size={13} aria-hidden />{" "}
-            {mode === "edit"
-              ? "保存しました。"
-              : "提出が完了しました。続けて以下から進めてください。"}
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {result.youtubeVideoId || result.videoId ? (
-              <Link
-                href={`/${result.youtubeVideoId ?? result.videoId}`}
-                className="fn-btn fn-btn-primary fn-btn-sm"
-              >
-                <Icon name="external" size={12} aria-hidden /> 公開ページを見る
-              </Link>
-            ) : null}
-            {result.eventId ? (
-              <Link
-                href={`/event/${result.eventId}`}
-                className="fn-btn fn-btn-ghost fn-btn-sm"
-              >
-                <Icon name="calendar" size={12} aria-hidden /> イベントへ戻る
-              </Link>
-            ) : null}
-            {mode !== "edit" && result.videoId ? (
-              <Link
-                href={`/dashboard/edit/${result.videoId}`}
-                className="fn-btn fn-btn-ghost fn-btn-sm"
-              >
-                <Icon name="edit" size={12} aria-hidden /> 編集を続ける
-              </Link>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-      {submitBlockedReason ? (
-        <div
-          role="alert"
-          style={{
-            padding: "12px 14px",
-            border: "1px solid var(--accent-warning, #c08a00)",
-            borderRadius: "var(--radius-sm)",
-            background: "var(--accent-warning-soft, rgba(255, 200, 0, 0.08))",
-            color: "var(--text-primary)",
-            fontSize: 13,
-            display: "flex",
-            alignItems: "flex-start",
-            gap: 8,
-          }}
-        >
-          <Icon name="warning" size={13} aria-hidden />
-          <span>{submitBlockedReason}</span>
-        </div>
-      ) : null}
       </div>
 
-      <aside
-        className={cx(
-          styles.sidePreview,
-          isWizard && !showSidePreview && styles.sidePreviewHidden,
-        )}
-        aria-label="投稿内容プレビュー"
-        hidden={isWizard ? !showSidePreview : undefined}
-      >
-        <span className={styles.sideEyebrow}>live preview</span>
-        <div className={styles.previewCard}>
-          <div className={styles.previewVisual}>
-            {youtubeId ? (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img src={youtubeThumbUrl(youtubeId, "hqdefault")} alt="" />
-            ) : null}
-            <span className={styles.previewCode}>
-              {youtubeId ? `yt / ${youtubeId}` : "youtube url"}
-            </span>
-            <span className={styles.previewPlay} aria-hidden>
-              <Icon name="play" size={18} />
-            </span>
-          </div>
-          <div className={styles.previewInfo}>
-            <h3>{sidePreviewTitle}</h3>
-            <p>{sidePreviewName}</p>
-            <span>{isCollab ? "合作作品" : "個人作品"}</span>
-          </div>
+      {submitBlockedReason ? (
+        <p role="alert" style={{ color: "var(--accent-danger)", fontSize: 13 }}>
+          <Icon name="warning" size={13} aria-hidden /> {submitBlockedReason}
+        </p>
+      ) : null}
+      {result ? (
+        <div
+          role={result.ok ? "status" : "alert"}
+          className={result.ok ? "fn-status-panel" : "fn-status-panel fn-status-panel--warn"}
+        >
+          <p style={{ margin: 0 }}>{result.message ?? (result.ok ? "保存しました。" : "保存できませんでした。")}</p>
+          {result.ok && result.videoId ? (
+            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+              <Link href={`/${result.youtubeVideoId ?? result.videoId}`} className="fn-btn fn-btn-primary fn-btn-sm">
+                公開ページを見る
+              </Link>
+              <Link href={`/dashboard/edit/${result.videoId}`} className="fn-btn fn-btn-ghost fn-btn-sm">
+                編集を続ける
+              </Link>
+            </div>
+          ) : null}
         </div>
-        <dl className={styles.previewChecklist}>
-          <PreviewCheck ok={Boolean(youtubeId)} label="YouTube URL" />
-          <PreviewCheck ok={Boolean(titlePreview.trim())} label="作品タイトル" />
-          <PreviewCheck ok={Boolean(displayNamePreview.trim())} label="表示名" />
-          <PreviewCheck
-            ok={incompleteRequiredStageQuestionCount === 0}
-            label={
-              incompleteRequiredStageQuestionCount > 0
-                ? `追加質問 ${incompleteRequiredStageQuestionCount} 件は入力必須`
-                : selectedStagePermissionFields.length > 0
-                  ? `追加質問 ${selectedStagePermissionFields.length} 件は任意`
-                  : "追加質問なし"
-            }
-            pending={incompleteRequiredStageQuestionCount > 0}
-          />
-          <PreviewCheck
-            ok={!isCollab || memberCount > 0}
-            label={
-              isCollab
-                ? `合作メンバー ${memberCount}人`
-                : "メンバー入力なし"
-            }
-            pending={isCollab && memberCount === 0}
-          />
-        </dl>
-        <div className={styles.saveId}>
-          <span className={styles.sideEyebrow}>保存名義 / active X ID</span>
-          <div className={styles.saveIdRow}>
-            <span className={styles.saveIdAvatar}>
-              {sidePreviewName.slice(0, 1).toLowerCase()}
-            </span>
-            <span>
-              <strong>{sidePreviewName}</strong>
-              <small>
-                @{normalizedActiveXId || normalizedInitialXId || "not-selected"}
-              </small>
-            </span>
-          </div>
-        </div>
-        {selectedEventLabels.length > 0 ? (
-          <div className={styles.previewEvents}>
-            <span className={styles.sideEyebrow}>events</span>
-            {selectedEventLabels.slice(0, 3).map((label) => (
-              <span key={label}>{label}</span>
-            ))}
-            {selectedEventLabels.length > 3 ? (
-              <span>ほか {selectedEventLabels.length - 3} 件</span>
-            ) : null}
-          </div>
-        ) : null}
-      </aside>
+      ) : null}
 
-      <div className={styles.actions}>
-        {isWizard ? (
-          <div className={styles.wizardNav}>
-            <button
-              type="button"
-              className="fn-btn fn-btn-ghost"
-              onClick={goWizardBack}
-              disabled={isWizardFirstStep || pending}
-            >
-              戻る
-            </button>
-            <span className={styles.wizardNavHint}>
-              {wizardSteps[currentStep]?.label ?? ""}
-            </span>
-            {isWizardLastStep ? (
-              <button
-                type="submit"
-                className="fn-btn fn-btn-primary"
-                disabled={pending || !canSubmit}
-                aria-busy={pending}
-              >
-                <Icon name="upload" size={14} aria-hidden />
-                {pending ? "送信中…" : "提出する"}
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="fn-btn fn-btn-primary"
-                onClick={goWizardNext}
-                disabled={pending}
-              >
-                次へ
-                <Icon name="chevron-right" size={14} aria-hidden />
-              </button>
-            )}
-          </div>
+      <div className={cx(styles.actions, isWizard && styles.bottomNav)}>
+        {isWizard && currentStepIndex > 0 ? (
+          <button type="button" className="fn-btn fn-btn-ghost" onClick={goBack} disabled={pending}>
+            戻る
+          </button>
+        ) : null}
+        {isWizard && currentStepIndex < WIZARD_STEPS.length - 1 ? (
+          <button type="button" className="fn-btn fn-btn-primary" onClick={goNext} disabled={pending}>
+            次へ
+          </button>
         ) : (
           <button
             type="submit"
@@ -1624,212 +1203,11 @@ export function VideoForm({
             disabled={pending || !canSubmit}
             aria-busy={pending}
           >
-            <Icon name="upload" size={14} aria-hidden />
-            {pending ? "送信中…" : "提出する"}
+            <Icon name="check" size={13} aria-hidden />
+            {pending ? "保存中…" : mode === "edit" ? "変更を保存" : "作品を投稿"}
           </button>
         )}
       </div>
-
-      {isWizard ? (
-        <div className={styles.mobileWizardBar} aria-label="ステップ操作">
-          <button
-            type="button"
-            className="fn-btn fn-btn-ghost"
-            onClick={goWizardBack}
-            disabled={isWizardFirstStep || pending}
-          >
-            戻る
-          </button>
-          {isWizardLastStep ? (
-            <button
-              type="submit"
-              className="fn-btn fn-btn-primary"
-              disabled={pending || !canSubmit}
-              aria-busy={pending}
-            >
-              {pending ? "送信中…" : "提出する"}
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="fn-btn fn-btn-primary"
-              onClick={goWizardNext}
-              disabled={pending}
-            >
-              次へ
-            </button>
-          )}
-        </div>
-      ) : (
-      <div className={styles.mobileSubmitBar} aria-label="送信操作">
-        <span className={styles.mobileSubmitHint}>
-          {submitBlockedReason
-            ? "投稿できません"
-            : pending
-              ? "送信中…"
-              : mode === "edit"
-                ? "変更を保存できます"
-                : "入力後に提出できます"}
-        </span>
-        <button
-          type="submit"
-          className="fn-btn fn-btn-primary"
-          disabled={pending || !canSubmit}
-          aria-busy={pending}
-        >
-          {pending ? "送信中…" : mode === "edit" ? "保存する" : "提出する"}
-        </button>
-      </div>
-      )}
     </form>
-  );
-}
-
-function PreviewCheck({
-  ok,
-  pending = false,
-  label,
-}: {
-  ok: boolean;
-  pending?: boolean;
-  label: string;
-}): React.ReactElement {
-  const mark = ok ? "✓" : pending ? "!" : "·";
-  return (
-    <div className={ok ? styles.checkOk : pending ? styles.checkPending : styles.checkTodo}>
-      <dt>{mark}</dt>
-      <dd>{label}</dd>
-    </div>
-  );
-}
-
-/**
- * 編集モードの提出主体 X ID フィールド。
- *
- * 既定状態:
- *   - 既存の creator_x_user_id / creator_x_user_id を **readOnly** で表示。
- *   - 一切送信されない (hidden name="creator_x_user_id" を出さない) わけにはいかない
- *     ので、視覚的に readOnly な input を出しつつサーバー側が現在値を維持する。
- *
- * 解錠 (admin がチェックボックスを ON):
- *   - <select> に切り替えて xIdOptions から選択させる。
- *   - hidden `allow_submitter_change=1` を一緒に送る。サーバー側は
- *     `role === "admin"` と二重ゲートで検証するので、UI 操作だけでは突破できない。
- *
- * 操作可能な admin がいないケース (xIdOptions が空) では unlock UI 自体を出さない。
- */
-function EditSubmitterField({
-  initialXId,
-  xIdOptions,
-  hasSelectableXIds,
-  selectedDefault,
-  disabled,
-  sectionDisabled,
-  canChangeSubmitter,
-}: {
-  initialXId: string;
-  xIdOptions: readonly XIdOption[];
-  hasSelectableXIds: boolean;
-  selectedDefault: string;
-  disabled: boolean;
-  sectionDisabled: boolean;
-  canChangeSubmitter: boolean;
-}): React.ReactElement {
-  const [unlocked, setUnlocked] = React.useState(false);
-
-  if (!initialXId && !hasSelectableXIds) {
-    return (
-      <div className="fn-muted fn-text-sm">提出主体 X ID が設定されていません。</div>
-    );
-  }
-
-  // 非 admin (canChangeSubmitter === false) は unlock UI を一切出さず、
-  // 既存の提出主体 X ID を読み取り専用で表示するだけ。
-  if (!unlocked) {
-    return (
-      <>
-        <input
-          id="creator_x_user_id"
-          name="creator_x_user_id"
-          type="text"
-          defaultValue={initialXId}
-          className="fn-input"
-          readOnly
-          aria-readonly="true"
-          disabled={sectionDisabled}
-          style={{ opacity: 0.75, cursor: "default" }}
-        />
-        {canChangeSubmitter && hasSelectableXIds ? (
-          <label
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              marginTop: 6,
-              fontSize: 11,
-              color: "var(--text-muted)",
-              cursor: "pointer",
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={false}
-              onChange={() => setUnlocked(true)}
-              disabled={disabled || sectionDisabled}
-            />
-            提出主体 X ID を変更する (管理者のみ)
-          </label>
-        ) : (
-          <p className="fn-text-sm" style={{ marginTop: 4, color: "var(--text-muted)" }}>
-            提出主体 X ID は変更できません。
-          </p>
-        )}
-      </>
-    );
-  }
-
-  return (
-    <>
-      <input type="hidden" name="allow_submitter_change" value="1" />
-      <select
-        id="creator_x_user_id"
-        name="creator_x_user_id"
-        className="fn-select"
-        defaultValue={selectedDefault}
-        required
-        disabled={disabled}
-      >
-        {xIdOptions.map((opt, index) => (
-          <option
-            key={`${opt.id}-xid-option-${index}`}
-            value={normalizeXId(opt.id)}
-          >
-            @{opt.id} ({opt.x_name})
-          </option>
-        ))}
-      </select>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          marginTop: 6,
-          flexWrap: "wrap",
-          fontSize: 11,
-          color: "var(--accent-danger, #b91c1c)",
-        }}
-      >
-        <Icon name="alert" size={11} aria-hidden />
-        提出主体 X ID を変更しようとしています。サーバー側でも管理者権限を再検証します。
-        <button
-          type="button"
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-          onClick={() => setUnlocked(false)}
-          style={{ marginLeft: "auto" }}
-        >
-          キャンセル
-        </button>
-      </div>
-    </>
   );
 }

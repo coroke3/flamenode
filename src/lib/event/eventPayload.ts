@@ -6,7 +6,6 @@ import {
 } from "@/lib/admin/eventSectionFields";
 import {
   buildPartsJson,
-  buildVideoFormSettingsJson,
   resolveSubmittedEventVisibility,
   type EventFormData,
 } from "@/lib/event/eventForm";
@@ -27,20 +26,17 @@ export interface EventEditPermissions {
 export function buildEventUpdatePayload(args: {
   data: EventFormData;
   before: typeof events.$inferSelect;
-  formData: FormData;
   permissions: EventEditPermissions;
   now: number;
 }): {
   payload: EventUpdatePayload;
   updatedSections: EventEditSection[];
   changedByPermission: Record<EventEditSection, string>;
-  videoFormSettingsJson: string | null;
 } {
-  const { data, before, formData, permissions, now } = args;
+  const { data, before, permissions, now } = args;
   const updatePayload: EventUpdatePayload = { updated_at: now };
   const updatedSections: EventEditSection[] = [];
   const changedByPermission = {} as Record<EventEditSection, string>;
-  let videoFormSettingsJson: string | null = null;
 
   if (permissions.basic) {
     Object.assign(updatePayload, {
@@ -71,7 +67,6 @@ export function buildEventUpdatePayload(args: {
   }
 
   if (permissions.questions) {
-    videoFormSettingsJson = buildVideoFormSettingsJson(formData);
     Object.assign(updatePayload, {
       allow_user_video_edits: data.allow_user_video_edits,
       user_video_edit_permission_keys_json:
@@ -99,6 +94,5 @@ export function buildEventUpdatePayload(args: {
     payload: updatePayload,
     updatedSections,
     changedByPermission,
-    videoFormSettingsJson,
   };
 }

@@ -1,7 +1,7 @@
 import * as React from "react";
 import type { Metadata } from "next";
 import { desc, eq } from "drizzle-orm";
-import { withDatabase } from "@/lib/cloudflare";
+import { withDatabaseRead } from "@/lib/cloudflare";
 import { termsVersions } from "@/lib/db/schema";
 import { acceptLatestTerms } from "@/lib/actions/terms";
 import { Icon } from "@/components/ui/Icon";
@@ -41,7 +41,7 @@ export default async function RulesPage({
 }): Promise<React.ReactElement> {
   const params = await searchParams;
   const next = sanitizeNextPath(params?.next);
-  const data = await withDatabase(async (db) => {
+  const data = await withDatabaseRead(async (db) => {
     const rows = await db
       .select()
       .from(termsVersions)

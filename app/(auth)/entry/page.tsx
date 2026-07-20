@@ -15,6 +15,7 @@ import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 import { sanitizeNextPath } from "#utils/next";
+import { collapseReservationGroups } from "@/lib/utils/slotGrouping";
 import {
   entryLoginRedirectTo,
   getOnboardingState,
@@ -132,10 +133,20 @@ export default async function EntryPage({
       .orderBy(slotsTable.start_time, slotsTable.sort_order)
       .limit(24);
   }
-  reservedSlots.sort((a, b) => {
-    const aNeeds = !a.video_id && a.status === "reserved";
-    const bNeeds = !b.video_id && b.status === "reserved";
-    if (aNeeds !== bNeeds) return aNeeds ? -1 : 1;
+  const groupedReservedSlots = collapseReservationGroups(reservedSlots).map(
+    (group) => ({
+      ...group,
+      event_entry_end_time:
+        reservedSlots.find((slot) => slot.id === group.id)?.event_entry_end_time ??
+        null,
+    }),
+  );
+  groupedReservedSlots.sort((a, b) => {
+    const aNeedsSubmission = !a.video_id && a.status === "reserved";
+    const bNeedsSubmission = !b.video_id && b.status === "reserved";
+    if (aNeedsSubmission !== bNeedsSubmission) {
+      return aNeedsSubmission ? -1 : 1;
+    }
     const deadlineDiff =
       (a.event_entry_end_time ?? Number.POSITIVE_INFINITY) -
       (b.event_entry_end_time ?? Number.POSITIVE_INFINITY);
@@ -221,14 +232,14 @@ export default async function EntryPage({
             受付中のイベントの枠を確保して、作品を投稿できます。
           </p>
 
-          {reservedSlots.length > 0 ? (
+          {groupedReservedSlots.length > 0 ? (
             <div className={`${styles.slotPanel} ${styles.slotPanelProminent}`}>
               <div className={styles.slotPanelHeader}>
                 <h3 className={styles.slotPanelTitle}>確保済み枠に提出する</h3>
-                <span className={styles.slotPanelCount}>{reservedSlots.length}件</span>
+                <span className={styles.slotPanelCount}>{groupedReservedSlots.length}件</span>
               </div>
               <ul className="fn-pc-slot-list">
-                {reservedSlots.map((slot) => {
+                {groupedReservedSlots.map((slot) => {
                   const needsSubmission =
                     !slot.video_id && slot.status === "reserved";
                   const href = resolveWriteHref(`/entry/slotted?slot=${slot.id}`);
@@ -240,6 +251,11 @@ export default async function EntryPage({
                             <span className="fn-pc-slot-label">
                               {slot.event_title ?? slot.event_id}
                             </span>
+                            {slot.is_group ? (
+                              <span className="fn-badge fn-badge-soft">
+                                連続枠 {slot.group_size}枠
+                              </span>
+                            ) : null}
                             <span className="fn-mono fn-pc-slot-event">
                               {slot.start_time
                                 ? `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(

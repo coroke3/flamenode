@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-20
-> Verified against commit: `agent/remove-legacy-compat`
+> Verified against commit: `8de170c`
 > Source of truth: `package.json`, `.dev.vars.example`, `migrations/` active path, `wrangler.toml`, `docs/operations/migrations.md`
 
 この文書は個人PCの実施済み状態を前提にせず、空の作業環境からFlameNodeを再現する手順だけを扱います。本番操作は [`DEPLOY.md`](./DEPLOY.md) を参照してください。
@@ -154,7 +154,7 @@ npx wrangler d1 execute flamenode_db --local --command "UPDATE system_settings S
 npx wrangler d1 execute flamenode_db --local --command "UPDATE system_settings SET operation_mode='normal' WHERE id='default';"
 ```
 
-管理スプレッドシートはdry runと署名tokenを経由し、直接DBへ未検証値を書き込みません。
+管理spreadsheetはdry runと署名tokenを経由し、直接DBへ未検証値を書き込みません。旧形式データが必要な場合は常設画面を追加せず、レビュー可能な一度限りのmigrationで正本へ変換します。
 
 ## 9. トラブルシューティング
 

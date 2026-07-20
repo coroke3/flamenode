@@ -11,16 +11,13 @@ async function source(path) {
 
 test("X ID統合はevent_staff行監査を作成する", async () => {
   const text = await source(
-    "src/lib/actions/merge-admin.ts",
+    "src/lib/xid/merge.ts",
   );
   const core = await source(
     "src/lib/actions/merge-adminCore.ts",
   );
 
-  assert.match(
-    text,
-    /buildEventStaffMergeAudits/,
-  );
+  assert.match(text, /buildEventStaffMergeAudits/);
   assert.match(
     core,
     /restore_strategy:\s*"recreate_deleted"/,
@@ -48,7 +45,15 @@ test("合作メンバー判定は現在値を使う", async () => {
 
   assert.match(
     text,
-    /memberCount\s*>\s*0/,
+    /const \[members, setMembers\] = React\.useState/,
+  );
+  assert.match(
+    text,
+    /const memberCount = members\.filter/,
+  );
+  assert.match(
+    text,
+    /onChange=\{setMembers\}/,
   );
   assert.doesNotMatch(
     text,

@@ -1,7 +1,7 @@
 import * as React from "react";
 import styles from "./page.module.css";
 import { sql } from "drizzle-orm";
-import { withDatabase } from "@/lib/cloudflare";
+import { withDatabaseRead } from "@/lib/cloudflare";
 import {
   countablePublicVideoCondition,
   countVideosForEvent,
@@ -49,7 +49,7 @@ function shuffle<T>(items: T[]): T[] {
 }
 
 async function fetchTopPageFromDatabase(): Promise<StaticTopData | null> {
-  return withDatabase(async (db) => {
+  return withDatabaseRead(async (db) => {
     const [
       activeEvents,
       recommendedRaw,

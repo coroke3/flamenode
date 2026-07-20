@@ -18,7 +18,7 @@ import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
 import { getYoutubeChannelCandidates } from "@/lib/db/youtubeChannelCandidates";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
-import { loadStagePermissionFormSettingsJsonByEvents } from "@/lib/video/stagePermissionQuestions";
+import { fetchActiveCustomQuestionsForEvents } from "@/lib/video/customQuestionAnswers";
 import { AppShell } from "@/components/ui/AppShell";
 import { StatusPanel } from "@/components/ui/StatusPanel";
 
@@ -141,13 +141,13 @@ export default async function SlottedPostPage({
   const rawEventOptions = acceptingEvents.some((o) => o.id === ev.id)
     ? acceptingEvents
     : [slotEventOption, ...acceptingEvents];
-  const formSettingsByEvent = await loadStagePermissionFormSettingsJsonByEvents(
+  const customQuestionsByEvent = await fetchActiveCustomQuestionsForEvents(
     db,
     rawEventOptions.map((option) => option.id),
   );
   const eventOptions = rawEventOptions.map((option) => ({
     ...option,
-    video_form_settings_json: formSettingsByEvent.get(option.id) ?? null,
+    custom_questions: customQuestionsByEvent.get(option.id) ?? [],
   }));
   const initialEventIds = [ev.id];
 

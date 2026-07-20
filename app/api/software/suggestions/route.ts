@@ -1,7 +1,7 @@
 export const runtime = "edge";
 
 import { NextResponse } from "next/server";
-import { withDatabase } from "@/lib/cloudflare";
+import { withDatabaseRead } from "@/lib/cloudflare";
 import { softwareCatalog, softwareAliases } from "@/lib/db/schema";
 import { eq, desc, sql } from "drizzle-orm";
 
@@ -10,7 +10,7 @@ export async function GET(req: Request): Promise<NextResponse> {
   const q = url.searchParams.get("q")?.trim() ?? "";
   const limit = Math.min(Number(url.searchParams.get("limit") ?? "20"), 50);
 
-  const results = await withDatabase(async (db) => {
+  const results = await withDatabaseRead(async (db) => {
     if (!q) {
       return db
         .select({

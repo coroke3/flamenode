@@ -84,8 +84,6 @@ export async function buildVideoDerivedRowsPlan(
     actorUserId: string;
   },
 ): Promise<VideoAtomicWritePlan> {
-  // YouTube IDの唯一の正本はvideos.youtube_video_id。metadataへは保存しない。
-  void args.youtubeVideoId;
   const existing = (
     await db
       .select()

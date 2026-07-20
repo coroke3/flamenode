@@ -3,7 +3,7 @@ export const runtime = "edge";
 import type { MetadataRoute } from "next";
 import { desc, eq, sql } from "drizzle-orm";
 import { publicListableEventWhere } from "@/lib/utils/eventStatus";
-import { withDatabase } from "@/lib/cloudflare";
+import { withDatabaseRead } from "@/lib/cloudflare";
 import { events, videos, xUsers } from "@/lib/db/schema";
 import { absoluteUrl } from "@/lib/seo";
 
@@ -43,7 +43,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   ];
 
   const dynamicEntries =
-    (await withDatabase(async (db) => {
+    (await withDatabaseRead(async (db) => {
       const [videoRows, eventRows, creatorRows] = await Promise.all([
         db
           .select({

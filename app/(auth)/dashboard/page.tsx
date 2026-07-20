@@ -18,8 +18,10 @@ import {
 import { requireSession } from "@/lib/auth/guard";
 import { getOnboardingState, onboardingHref } from "@/lib/auth/onboarding";
 import {
+  collapseReservationGroups,
   sortSlotsChronologically,
   type SlotBase,
+  type SlotGroupRow,
 } from "@/lib/utils/slotGrouping";
 import { Icon } from "@/components/ui/Icon";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
@@ -143,16 +145,16 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           )!,
         )
         .limit(50);
-      mySlot = sortSlotsChronologically(slotRows as SlotBase[])[0] ?? null;
-      if (mySlot) {
-        mySlotEvent =
-          (
-            await db
-              .select()
-              .from(eventsTable)
-              .where(eq(eventsTable.id, mySlot.event_id))
-              .limit(1)
-          )[0] ?? null;
+      const groupedSlots = collapseReservationGroups(slotRows);
+      const sortedSlots = sortSlotsChronologically(groupedSlots);
+      mySlot = sortedSlots[0] ?? null;
+      if (mySlot && mySlot.event_id) {
+        const ev = await db
+          .select()
+          .from(eventsTable)
+          .where(eq(eventsTable.id, mySlot.event_id))
+          .limit(1);
+        mySlotEvent = ev[0] ?? null;
       }
 
       if (approvedXIds.length > 0) {

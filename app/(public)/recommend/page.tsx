@@ -1,7 +1,7 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { withDatabase } from "@/lib/cloudflare";
+import { withDatabaseRead } from "@/lib/cloudflare";
 import {
   fetchLatestVideos,
   fetchPickupCreators,
@@ -141,7 +141,7 @@ const FILTER_CHIPS: FilterChip[] = [
 ];
 
 export default async function RecommendPage(): Promise<React.ReactElement> {
-  const data = await withDatabase(async (db) => {
+  const data = await withDatabaseRead(async (db) => {
     const [recommended, latest, underrated, creators] = await Promise.all([
       fetchRecommendedVideos(db, 180),
       fetchLatestVideos(db, 120),

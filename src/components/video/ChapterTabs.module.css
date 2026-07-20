@@ -1,4 +1,5 @@
 .root {
+  position: relative;
   background-color: transparent;
 }
 
@@ -19,11 +20,11 @@
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 6px;
+  gap: 7px;
   min-height: 44px;
   padding: 10px 0;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text-secondary);
   background-color: transparent;
   transition: color 0.15s ease, background-color 0.15s ease;
@@ -38,18 +39,292 @@
 }
 
 .tabCount {
-  font-size: 11px;
+  min-width: 22px;
+  height: 20px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  font-size: 10px;
+  line-height: 1;
   color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .list {
   max-height: 420px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-subtle) transparent;
+}
+
+.list:focus-visible {
+  outline: 2px solid var(--event-accent, var(--accent-primary));
+  outline-offset: -2px;
+}
+
+.list::-webkit-scrollbar {
+  width: 7px;
+}
+
+.list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--border-subtle);
+  background-clip: padding-box;
 }
 
 .listEmpty {
-  padding: 12px 0 28px;
+  min-height: 148px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 6px;
+  padding: 24px 16px 30px;
   text-align: center;
-  font-size: 12px;
   color: var(--text-muted);
+}
+
+.listEmpty strong {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.listEmpty > span:last-child {
+  max-width: 260px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.listEmptyIcon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 2px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+.dialog {
+  width: min(calc(100% - 40px), 430px);
+  max-height: min(90dvh, 560px);
+  overflow-y: auto;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  margin: auto;
+  padding: 20px;
+  border: 1px solid color-mix(in srgb, var(--accent-danger) 45%, var(--border-subtle));
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  box-shadow: 0 24px 70px rgb(0 0 0 / 42%);
+}
+
+.dialog[open] {
+  display: grid;
+  animation: chapter-dialog-in 0.18s ease-out;
+}
+
+.dialog::backdrop {
+  background: rgb(0 0 0 / 64%);
+  backdrop-filter: blur(3px);
+  animation: chapter-dialog-backdrop-in 0.16s ease-out;
+}
+
+.dialog:focus {
+  outline: none;
+}
+
+.dialogIcon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--accent-danger);
+  background: color-mix(in srgb, var(--accent-danger) 12%, transparent);
+}
+
+.dialogBody {
+  min-width: 0;
+}
+
+.dialogTitle {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.dialogDescription {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.dialogDescription strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--event-accent, var(--accent-primary));
+  font-variant-numeric: tabular-nums;
+}
+
+.dialogDescription span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.dialogWarning {
+  margin: 8px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-danger);
+}
+
+.dialogError {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-danger) 10%, transparent);
+  color: var(--accent-danger);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.dialogActions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.confirmDeleteButton {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 15px;
+  border: 1px solid var(--accent-danger);
+  border-radius: var(--radius-sm);
+  background: var(--accent-danger);
+  color: white;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
+}
+
+.confirmDeleteButton:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.confirmDeleteButton:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.confirmDeleteButton:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 2px;
+}
+
+.confirmDeleteButton:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: max(22px, env(safe-area-inset-bottom));
+  z-index: 130;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: calc(100vw - 32px);
+  padding: 10px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  box-shadow: 0 12px 36px rgb(0 0 0 / 28%);
+  font-size: 12px;
+  font-weight: 600;
+  animation: chapter-toast-in 0.2s ease-out;
+}
+
+.toast svg {
+  color: var(--accent-primary);
+}
+
+@keyframes chapter-dialog-backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes chapter-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+}
+
+@keyframes chapter-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+}
+
+@media (max-width: 520px) {
+  .dialog {
+    width: calc(100% - 24px);
+    grid-template-columns: 1fr;
+    margin: auto 12px max(12px, env(safe-area-inset-bottom));
+    padding: 18px;
+    border-radius: var(--radius-md);
+  }
+
+  .dialogIcon {
+    width: 34px;
+    height: 34px;
+  }
+
+  .dialogActions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .dialogActions > * {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dialog,
+  .dialog::backdrop,
+  .toast,
+  .confirmDeleteButton {
+    animation: none;
+    transition: none;
+  }
 }

@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { and, desc, sql } from "drizzle-orm";
 import styles from "./page.module.css";
-import { withDatabase } from "@/lib/cloudflare";
+import { withDatabaseRead } from "@/lib/cloudflare";
 import { videos, xUsers } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
@@ -39,7 +39,7 @@ interface PortfolioUser {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const id = normalizeXId((await params).id);
-  const data = await withDatabase(async (db) => {
+  const data = await withDatabaseRead(async (db) => {
     const row = (
       await db
         .select({
@@ -71,7 +71,7 @@ export default async function PortfolioPage({
   const id = normalizeXId((await params).id);
   if (!id) notFound();
 
-  const bundle = await withDatabase(async (db) => {
+  const bundle = await withDatabaseRead(async (db) => {
     const userRow = (
       await db
         .select()

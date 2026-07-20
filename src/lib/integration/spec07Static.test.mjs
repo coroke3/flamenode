@@ -5,13 +5,13 @@ import test from "node:test";
 
 const root = path.resolve(import.meta.dirname, "../../..");
 
-test("旧形式インポートは管理者専用の入力アダプターとして提供する", () => {
-  const surfaces = [
-    "app/(admin)/admin/" + "import/page.tsx",
-    "app/api/admin/" + "import/" + "legacy/route.ts",
-    "src/lib/" + "import/" + "legacy",
+test("旧形式インポートは管理者専用UI・API・専用moduleへ隔離する", () => {
+  const importPaths = [
+    ["app", "(admin)", "admin", "import", "page.tsx"].join("/"),
+    ["app", "api", "admin", "import", "legacy", "route.ts"].join("/"),
+    ["src", "lib", "import", "legacy"].join("/"),
   ];
-  for (const relativePath of surfaces) {
+  for (const relativePath of importPaths) {
     assert.equal(
       fs.existsSync(path.join(root, relativePath)),
       true,
@@ -23,7 +23,21 @@ test("旧形式インポートは管理者専用の入力アダプターとし�
     path.join(root, "src/lib/admin/adminNavGroups.tsx"),
     "utf8",
   );
-  assert.match(navigation, /import/);
+  const route = fs.readFileSync(path.join(root, importPaths[1]), "utf8");
+  const environment = fs.readFileSync(path.join(root, ".dev.vars.example"), "utf8");
+
+  assert.match(navigation, new RegExp(["admin", "import"].join("\/")));
+  assert.match(route, /user\.role !== "admin"/);
+  assert.match(route, /createLegacyImportPreview/);
+  assert.match(route, /claimLegacyImportPreview/);
+  assert.doesNotMatch(
+    environment,
+    new RegExp(["ENABLE", "LEGACY", "IMPORT", "TOOL"].join("_")),
+  );
+  assert.doesNotMatch(
+    environment,
+    new RegExp(["LEGACY", "IMPORT", "PREVIEW", "SECRET"].join("_")),
+  );
 });
 
 test("deprecated identifiers remain covered by the legacy static checker", () => {
@@ -34,8 +48,8 @@ test("deprecated identifiers remain covered by the legacy static checker", () =>
     "syncLegacy" + "EventVisibilityFlags",
     "computedEvent" + "LegacyFlags",
     "enrichEventRowFor" + "StaticJson",
-    "src/lib/" + "import/" + "legacy",
-    "/api/admin/" + "import/" + "legacy",
+    "src/lib/import/" + "legacy",
+    ["", "api", "admin", "import", "legacy"].join("/"),
     "ENABLE_LEGACY_IMPORT_" + "TOOL",
     "LEGACY_IMPORT_PREVIEW_" + "SECRET",
   ];

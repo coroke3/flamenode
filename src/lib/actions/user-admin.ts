@@ -285,27 +285,18 @@ export async function refreshXUserIcon(formData: FormData): Promise<UserAdminRes
     await db.select().from(xUsers).where(eq(xUsers.id, xUserId)).limit(1)
   )[0];
   if (!target) return { ok: false, message: "対象Xユーザーが見つかりません。" };
-  const latest = (
-    await db
-      .select({ icon_url: videos.creator_icon_url })
-      .from(videos)
-      .where(
-        and(
-          eq(videos.creator_x_user_id, xUserId),
-          isNotNull(videos.creator_icon_url),
-          inArray(videos.collaboration_type, ["individual", "collab"]),
-          ne(videos.visibility_status, "voided"),
-        )!,
-      )
-      .orderBy(
-        sql`CASE WHEN ${videos.collaboration_type} = 'individual' THEN 0 ELSE 1 END`,
-        desc(videos.created_at),
-      )
-      .limit(1)
-  )[0];
-  if (!latest?.icon_url) {
-    return { ok: false, message: "候補アイコンが見つかりませんでした。" };
-  }
+  const latest = (await db
+    .select({ icon_url: videos.creator_icon_url })
+    .from(videos)
+    .where(and(
+      eq(videos.creator_x_user_id, xUserId),
+      isNotNull(videos.creator_icon_url),
+      inArray(videos.collaboration_type, ["individual", "collab"]),
+      ne(videos.visibility_status, "voided"),
+    )!)
+    .orderBy(sql`CASE WHEN ${videos.collaboration_type} = 'individual' THEN 0 ELSE 1 END`, desc(videos.created_at))
+    .limit(1))[0];
+  if (!latest?.icon_url) return { ok: false, message: "候補アイコンが見つかりませんでした。" };
   const after = { ...target, icon_url: latest.icon_url };
   const queue = await buildStaticRebuildQueueBatch(db, [
     {

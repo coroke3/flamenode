@@ -3,7 +3,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { eq } from "drizzle-orm";
 import styles from "./page.module.css";
-import { withDatabase } from "@/lib/cloudflare";
+import { withDatabaseRead } from "@/lib/cloudflare";
 import {
   countPublicVideos,
   fetchPublicVideos,
@@ -67,7 +67,7 @@ export default async function ListPage({
     ? { videos: staticLoad.page.videos, total: staticLoad.page.total, eventInfo: null }
     : staticLoad && !canFallbackToDatabase(staticLoad.strategy)
       ? { videos: [], total: 0, eventInfo: null }
-      : await withDatabase(async (db) => {
+      : await withDatabaseRead(async (db) => {
         const [videos, total, eventInfo] = await Promise.all([
           fetchPublicVideos(db, {
             q,

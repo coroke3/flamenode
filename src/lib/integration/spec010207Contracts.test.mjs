@@ -34,25 +34,35 @@ test("監査復元の競合検出とowner最後の一人保護は同じD1 mutati
   assert.match(restore, /getRestoreRegistration|persistFailedRestoreRun/);
 });
 
-test("旧形式インポートは専用管理境界から新正本へ変換する", () => {
-  const surfaces = [
-    "app/(admin)/admin/" + "import/page.tsx",
-    "app/api/admin/" + "import/" + "legacy/route.ts",
-    "src/lib/" + "import/" + "legacy",
+test("旧形式入力は管理者専用の一方向変換境界だけで受け付ける", () => {
+  const importPaths = [
+    ["app", "(admin)", "admin", "import", "page.tsx"].join("/"),
+    ["app", "api", "admin", "import", "legacy", "route.ts"].join("/"),
+    ["src", "lib", "import", "legacy"].join("/"),
   ];
-  for (const relativePath of surfaces) {
+  for (const relativePath of importPaths) {
     assert.equal(fs.existsSync(path.join(root, relativePath)), true);
   }
 
+  const route = read(importPaths[1]);
+  assert.match(route, /user\.role !== "admin"/);
+  assert.match(route, /createLegacyImportPreview/);
+  assert.match(route, /claimLegacyImportPreview/);
+  assert.match(route, /preflightLegacyImportPlan/);
+  assert.match(route, /applyLegacyImportPlan/);
+
   const canonicalPlan = read("docs/database/canonical-migration-plan.md");
+  assert.match(canonicalPlan, /管理者専用/);
+  assert.match(canonicalPlan, /一方向/);
+  assert.match(canonicalPlan, /通常ランタイム.*後方互換/);
+
   const checker = read("scripts/check-db-legacy.mjs");
-  assert.match(canonicalPlan, /入力アダプター/);
-  assert.match(read(surfaces[1]), /canonical|plan/i);
-  for (const flag of [
-    "ENABLE_LEGACY_IMPORT_" + "TOOL",
-    "LEGACY_IMPORT_PREVIEW_" + "SECRET",
+  for (const identifier of [
+    "legacy-import-" + "runtime",
+    "src/lib/import/" + "legacy",
+    ["", "api", "admin", "import", "legacy"].join("/"),
   ]) {
-    assert.match(checker, new RegExp(flag));
+    assert.match(checker, new RegExp(identifier.replace(/[\/]/g, "\\$&")));
   }
 });
 

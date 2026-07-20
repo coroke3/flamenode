@@ -89,7 +89,6 @@ export async function loadEventExportSnapshot(
     prefetchedEvent === undefined
       ? await loadEventExportEvent(db, eventId)
       : prefetchedEvent;
-
   if (
     !event ||
     event.public_api_enabled !== 1 ||
@@ -203,7 +202,8 @@ export async function loadEventExportSnapshot(
           .where(inArray(videoSoftwares.video_id, videoIds))
           .orderBy(
             asc(videoSoftwares.video_id),
-            asc(videoSoftwares.software_id),
+            asc(softwareCatalog.name),
+            asc(videoSoftwares.raw_label),
           ),
         db
           .select({
@@ -236,6 +236,7 @@ export async function loadEventExportSnapshot(
           ),
         db
           .select({
+            id: videoChapters.id,
             video_id: videoChapters.video_id,
             x_user_id: videoChapters.x_user_id,
             chapter_time: videoChapters.chapter_time,
@@ -252,6 +253,7 @@ export async function loadEventExportSnapshot(
           .orderBy(
             asc(videoChapters.video_id),
             asc(videoChapters.chapter_time),
+            asc(videoChapters.id),
           ),
         db
           .select({
@@ -294,6 +296,7 @@ export async function loadEventExportSnapshot(
     }
     for (const row of chapterRows) {
       appendGrouped(chaptersByVideo, row.video_id, {
+        id: row.id,
         x_user_id: row.x_user_id,
         chapter_time: row.chapter_time,
         chapter_label: row.chapter_label,

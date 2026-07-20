@@ -1,7 +1,7 @@
 import "server-only";
 
 import { and, eq } from "drizzle-orm";
-import { withDatabase } from "@/lib/cloudflare";
+import { withDatabaseRead } from "@/lib/cloudflare";
 import { xIdentityRequests } from "@/lib/db/schema";
 import { sanitizeNextPath } from "#utils/next";
 import { getLinkedXUserIdsForAuthUser } from "./xIdentity";
@@ -36,7 +36,7 @@ export async function userNeedsXIdOnboarding(
 ): Promise<boolean> {
   if (role === "admin" || role === "moderator") return false;
 
-  const needs = await withDatabase(async (db) => {
+  const needs = await withDatabaseRead(async (db) => {
     const [linkedXUserIds, pending] = await Promise.all([
       getLinkedXUserIdsForAuthUser(db, authUserId),
       db

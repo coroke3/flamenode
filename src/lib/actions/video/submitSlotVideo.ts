@@ -12,9 +12,7 @@ import {
   xUsers,
 } from "@/lib/db/schema";
 import { buildReplaceVideoSoftwarePlan } from "@/lib/db/software";
-import {
-  snapshotYoutubeChannelUrl,
-} from "@/lib/db/youtubeChannelCandidates";
+import { snapshotYoutubeChannelUrl } from "@/lib/db/youtubeChannelCandidates";
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { buildSlotVideoSubmittedNotification } from "@/lib/notifications/templates/slot";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
@@ -30,11 +28,6 @@ import { buildReplaceGeneralCustomAnswersPlan } from "@/lib/video/customQuestion
 import { buildSubmissionXUserPlan } from "@/lib/video/ensureSubmissionXUser";
 import { parseEventIdsFromForm } from "@/lib/video/parseEventIds";
 import { buildReplaceVideoMembersPlan } from "@/lib/video/replaceVideoMembers";
-import {
-  buildStagePermissionSubmission,
-  getStagePermissionFieldsForEvents,
-} from "@/lib/video/stagePermissionSubmission";
-import { buildReplaceStagePermissionAnswersPlan } from "@/lib/video/stagePermissionAnswers";
 import {
   validateCustomAnswersForEvents,
   validateVideoMemberSubmission,
@@ -98,9 +91,6 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     return { ok: false, message: "投稿主体のX IDは予約時のIDに固定されています。" };
   }
 
-  const stageFields = await getStagePermissionFieldsForEvents(db, [slotRow.event_id]);
-  const stageResult = buildStagePermissionSubmission(formData, stageFields);
-  if (!stageResult.ok) return stageResult;
   const slotPart = await resolvePartFromSlot(db, slotRow);
   if (await checkYoutubeVideoDuplicate(db, youtubeId, existingVideo?.id)) {
     return { ok: false, message: "このYouTube動画は既に登録されています。" };
@@ -110,6 +100,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     parsed.data.is_collab ?? false,
   );
   if (!memberValidation.ok) return memberValidation;
+
   const requestedEventIds = parseEventIdsFromForm(formData);
   let syncedEventIds: string[];
   try {
@@ -141,11 +132,13 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
   if (submittedSlots.length === 0 || submittedSlots.length > MAX_ATOMIC_SUBMITTED_SLOTS) {
     return { ok: false, message: "同時に更新する枠数が上限を超えています。" };
   }
+
   const now = Math.floor(Date.now() / 1000);
   const xProfile = (
     await db.select().from(xUsers).where(eq(xUsers.id, activeX)).limit(1)
   )[0];
-  const displayName = parsed.data.display_name || slotRow.display_name || xProfile?.x_name || sessionUser.name || "anonymous";
+  const displayName = parsed.data.display_name || slotRow.display_name ||
+    xProfile?.x_name || sessionUser.name || "anonymous";
   const videoAfter: typeof videos.$inferSelect = existingVideo
     ? {
         ...existingVideo,
@@ -229,28 +222,33 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
       strict: true,
     });
     appendVideoAtomicWritePlan(plan, await buildVideoDerivedRowsPlan(db, {
-      videoId, youtubeVideoId: youtubeId, now, actorUserId: userId,
+      videoId,
+      youtubeVideoId: youtubeId,
+      now,
+      actorUserId: userId,
     }));
     appendVideoAtomicWritePlan(plan, await buildReplaceVideoSoftwarePlan(db, {
-      videoId, raw: parsed.data.used_software ?? null, actorUserId: userId,
+      videoId,
+      raw: parsed.data.used_software ?? null,
+      actorUserId: userId,
     }));
     appendVideoAtomicWritePlan(plan, await buildSyncVideoEventsPlan(db, videoId, {
-      targetEventIds: syncedEventIds, actorUserId: userId,
-    }));
-    appendVideoAtomicWritePlan(plan, await buildReplaceStagePermissionAnswersPlan(db, {
-      videoId, eventIds: syncedEventIds, stagePermission: stageResult.value, now,
+      targetEventIds: syncedEventIds,
       actorUserId: userId,
     }));
     appendVideoAtomicWritePlan(plan, await buildReplaceGeneralCustomAnswersPlan(db, {
-      videoId, eventIds: syncedEventIds, drafts: customValidation.drafts, now,
+      videoId,
+      eventIds: syncedEventIds,
+      drafts: customValidation.drafts,
+      now,
       actorUserId: userId,
     }));
     appendVideoAtomicWritePlan(plan, await buildReplaceVideoMembersPlan(db, {
       videoId,
       members: memberValidation.value.members,
-      chaptersByIndex: memberValidation.value.chaptersByIndex,
       actorUserId: userId,
     }));
+
     for (const row of submittedSlots) {
       const after = {
         ...row,
@@ -304,6 +302,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
         plan.expectedChanges.push(1);
       }
     }
+
     const queue = await buildStaticRebuildQueueBatch(db, [
       { targetType: "video", targetId: videoId, reason: existingVideo ? "video_update" : "video_create", priority: "high", requestedByUserId: userId },
       { targetType: "top", targetId: "global", reason: "video_submit" },
@@ -326,7 +325,10 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
       return { ok: false, message: "このYouTube動画は既に登録されています。" };
     }
     console.warn("[submitSlotVideo] atomic save rejected", error);
-    return { ok: false, message: "保存対象が多すぎるか競合が発生しました。再読み込みして再試行してください。" };
+    return {
+      ok: false,
+      message: "保存対象が多すぎるか競合が発生しました。再読み込みして再試行してください。",
+    };
   }
 
   revalidatePath("/");

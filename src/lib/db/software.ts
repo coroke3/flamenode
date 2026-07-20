@@ -140,15 +140,8 @@ export async function getVideoSoftwareLabels(
   const rows = await db
     .select({ raw_label: videoSoftwares.raw_label })
     .from(videoSoftwares)
-    .innerJoin(
-      softwareCatalog,
-      eq(softwareCatalog.id, videoSoftwares.software_id),
-    )
     .where(eq(videoSoftwares.video_id, videoId))
-    .orderBy(
-      asc(softwareCatalog.name),
-      asc(videoSoftwares.raw_label),
-    );
+    .orderBy(asc(videoSoftwares.raw_label), asc(videoSoftwares.software_id));
   return rows.map((row) => row.raw_label);
 }
 

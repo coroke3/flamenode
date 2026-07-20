@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { asc, eq } from "drizzle-orm";
 import styles from "./page.module.css";
-import { withDatabase } from "@/lib/cloudflare";
+import { withDatabaseRead } from "@/lib/cloudflare";
 import {
   events as eventsTable,
   slots as slotsTable,
@@ -30,7 +30,7 @@ interface Props {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
-  const event = await withDatabase(async (db) =>
+  const event = await withDatabaseRead(async (db) =>
     (
       await db
         .select({ title: eventsTable.title })
@@ -46,7 +46,7 @@ export default async function EventSlotsPage({
   params,
 }: Props): Promise<React.ReactElement> {
   const { id } = await params;
-  const bundle = await withDatabase(async (db) => {
+  const bundle = await withDatabaseRead(async (db) => {
     const event = (
       await db.select().from(eventsTable).where(eq(eventsTable.id, id)).limit(1)
     )[0];
