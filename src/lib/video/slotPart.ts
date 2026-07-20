@@ -25,7 +25,6 @@ export async function resolvePartFromSlot(
     .select({
       id: slots.id,
       start_time: slots.start_time,
-      slot_kind: slots.slot_kind,
       sort_order: slots.sort_order,
     })
     .from(slots)
@@ -50,6 +49,7 @@ export async function checkYoutubeVideoDuplicate(
       .where(
         and(
           eq(videos.youtube_video_id, youtubeId),
+          ne(videos.visibility_status, "voided"),
           excludeVideoId ? ne(videos.id, excludeVideoId) : undefined,
         )!,
       )
