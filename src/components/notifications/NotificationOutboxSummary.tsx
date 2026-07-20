@@ -8,14 +8,19 @@ import {
   statusBadgeClass,
   summarizeNotificationPayload,
 } from "@/lib/notifications/display";
-import { formatRecipientDisplay, type RecipientLookup } from "@/lib/notifications/recipient";
+import { isTerminalNotificationFailure } from "@/lib/notifications/status";
+import {
+  formatRecipientDisplay,
+  type RecipientLookup,
+} from "@/lib/notifications/recipient";
+
 
 type Row = typeof notificationOutbox.$inferSelect;
 
 interface Props {
   row: Row;
   recipient?: RecipientLookup | null;
-  /** manage では操作ボタンを出さない */
+  /** manage では操作ボタンを出さない。 */
   showTechnicalType?: boolean;
 }
 
@@ -31,6 +36,10 @@ export function NotificationOutboxSummary({
     lastError: row.last_error,
     attemptCount: row.attempt_count,
   });
+  const terminalFailure = isTerminalNotificationFailure(row.status);
+  const showGuidance =
+    guidance != null &&
+    (terminalFailure || row.status === "processing" || row.status === "cancelled");
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -48,23 +57,27 @@ export function NotificationOutboxSummary({
           </span>
         ) : null}
       </div>
+
       <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
         宛先: {formatRecipientDisplay(row.recipient_user_id, recipient)}
         {recipient?.notificationsEnabled === false ? (
           <span style={{ marginLeft: 6, color: "var(--accent-warning)" }}>
-            (通知OFF)
+            （通知OFF）
           </span>
         ) : null}
       </div>
+
       {payload.preview !== "—" ? (
         <div style={{ fontSize: 12, lineHeight: 1.45 }}>{payload.preview}</div>
       ) : null}
+
       {row.dedupe_key ? (
         <div style={{ fontSize: 10, color: "var(--text-muted)", wordBreak: "break-all" }}>
           重複防止キー: {row.dedupe_key}
         </div>
       ) : null}
-      {guidance && (row.status === "failed" || row.status === "processing") ? (
+
+      {showGuidance ? (
         <div
           style={{
             marginTop: 4,
@@ -77,17 +90,18 @@ export function NotificationOutboxSummary({
         >
           <div style={{ fontWeight: 600 }}>{guidance.summary}</div>
           <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
-            {guidance.nextSteps.map((s) => (
-              <li key={s}>{s}</li>
+            {guidance.nextSteps.map((step) => (
+              <li key={step}>{step}</li>
             ))}
           </ul>
         </div>
       ) : null}
-      {row.last_error && row.status === "failed" ? (
+
+      {row.last_error && (terminalFailure || row.status === "cancelled") ? (
         <div
           style={{
             fontSize: 10,
-            color: "var(--accent-danger)",
+            color: terminalFailure ? "var(--accent-danger)" : "var(--text-muted)",
             wordBreak: "break-all",
           }}
         >
