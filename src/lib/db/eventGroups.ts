@@ -49,7 +49,7 @@ async function fetchPublicEventsByGroupIds(
         publicListableEventWhere(),
       ),
     )
-    .orderBy(desc(events.start_time), asc(events.id));
+    .orderBy(desc(events.start_time), desc(events.created_at));
 
   for (const row of junctionRows) {
     mergeGroupEvents(eventsByGroup, row.group_id, row.event);
@@ -57,7 +57,7 @@ async function fetchPublicEventsByGroupIds(
   return eventsByGroup;
 }
 
-/** `/event` 一覧: 公開グループごとに所属イベントを日程新しい順で返す。 */
+/** `/event` 一覧: 公開グループごとに所属イベントを正本順で返す。 */
 export async function fetchEventListGroupSections(
   db: DB,
 ): Promise<EventListGroupSection[]> {

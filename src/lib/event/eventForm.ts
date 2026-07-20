@@ -11,11 +11,17 @@ export const eventSchema = z.object({
     .default("event"),
   explanation: z.string().trim().max(4000).optional().nullable(),
   icon_url: z.preprocess(
-    (val) => (typeof val === "string" ? normalizeHttpUrl(val, { maxLength: 500 }) : val),
+    (value) =>
+      typeof value === "string"
+        ? normalizeHttpUrl(value, { maxLength: 500 })
+        : value,
     z.string().trim().max(500).optional().nullable(),
   ),
   img_url: z.preprocess(
-    (val) => (typeof val === "string" ? normalizeHttpUrl(val, { maxLength: 500 }) : val),
+    (value) =>
+      typeof value === "string"
+        ? normalizeHttpUrl(value, { maxLength: 500 })
+        : value,
     z.string().trim().max(500).optional().nullable(),
   ),
   accent_color: z.string().trim().max(20).optional().nullable(),
@@ -36,7 +42,6 @@ export const eventSchema = z.object({
     .optional()
     .nullable(),
   max_slots_per_video: z.coerce.number().min(1).max(20).default(1),
-  max_consecutive_slots_per_entry: z.coerce.number().min(1).max(20).default(3),
   slot_part_gap_minutes: z.coerce.number().min(1).max(1440).default(15),
   slot_type: z.enum(["time", "count"]).default("time"),
   slot_visibility_mode: z
@@ -66,8 +71,7 @@ export function buildPartsJson(raw: string | null | undefined): string | null {
     parts.push(truncated);
     if (parts.length >= PART_MAX_COUNT) break;
   }
-  if (parts.length === 0) return null;
-  return JSON.stringify(parts);
+  return parts.length === 0 ? null : JSON.stringify(parts);
 }
 
 export function resolveSubmittedEventVisibility(
@@ -80,7 +84,10 @@ function boolFormValue(value: FormDataEntryValue | undefined): boolean {
   return String(value ?? "") === "1";
 }
 
-function cleanQuestionId(value: FormDataEntryValue | undefined, index: number): string {
+function cleanQuestionId(
+  value: FormDataEntryValue | undefined,
+  index: number,
+): string {
   const fallback =
     index === 0 ? "stage_permission" : `stage_permission_${index + 1}`;
   const cleaned = String(value ?? "")
@@ -126,7 +133,10 @@ export function parseEventForm(
 ): { ok: true; data: EventFormData } | { ok: false; message: string } {
   const parsed = eventSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
-    return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
+    return {
+      ok: false,
+      message: parsed.error.issues[0]?.message ?? "入力エラー",
+    };
   }
   return { ok: true, data: parsed.data };
 }

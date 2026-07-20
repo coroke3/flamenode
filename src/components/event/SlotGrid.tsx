@@ -5,22 +5,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { releaseOwnSlot, reserveSlot, extendOwnSlotGroup, mergeOwnSlotGroups } from "@/lib/actions/slot";
-import { MAX_ATOMIC_SLOT_ROWS } from "@/lib/slots/atomicLimits";
+import { releaseOwnSlot, reserveSlot } from "@/lib/actions/slot";
 import { formatUnix } from "@/lib/utils/format";
-import { cn } from "@/lib/utils/cn";
-import {
-  buildSlotParts,
-  collapseReservationGroups,
-  formatSlotPartLabel,
-  type SlotBase,
-  type SlotGroupRow,
-} from "@/lib/utils/slotGrouping";
+import { buildSlotParts, formatSlotPartLabel } from "@/lib/utils/slotGrouping";
 import styles from "./SlotGrid.module.css";
 
 export interface SlotRow {
   id: string;
-  slot_kind: "time" | "count" | null;
+  event_id: string;
   slot_label: string | null;
   start_time: number | null;
   sort_order: number | null;
@@ -28,195 +20,78 @@ export interface SlotRow {
   display_name: string | null;
   x_user_id: string | null;
   reserved_by_user_id: string | null;
-  reservation_group_id?: string | null;
+  reservation_group_id: string | null;
+  video_id: string | null;
+  updated_at: number;
+  version: number;
 }
 
 export interface SlotGridProps {
   slots: SlotRow[];
   viewerXId: string | null;
-  viewerDiscordId?: string | null;
-  viewerActiveX?: string | null;
   canReserve: boolean;
-  slotKind: "time" | "count";
-  maxConsecutiveSlots?: number;
-  /** 「部」分割閾値 (秒)。events.slot_part_gap_minutes から派生。未指定で 15 分。 */
+  slotType: "time" | "count";
   slotPartGapSec?: number;
 }
 
-interface SlotGroup {
-  label: string;
-  rows: SlotDisplayRow[];
-}
-
-type SlotDisplayRow =
-  | { kind: "slot"; slot: SlotGroupRow }
-  | { kind: "break"; id: string; detail: string | null };
-
-interface ConfirmExtend {
-  slotId: string;
-  direction: "forward" | "backward";
-}
-
-interface ConfirmMerge {
-  gapSlotId: string;
-  defaultName: string;
-}
-
-interface ReserveTarget {
-  slot: SlotGroupRow;
-  label: string;
-}
-
-const SLOT_PREVIEW_EVENT = "flamenode:slot-preview";
-
-function formatBreakDetail(end: number | null, start: number | null): string | null {
-  if (end == null || start == null || start <= end) return null;
-  return `${formatUnix(end, { timeOnly: true })} - ${formatUnix(start, { timeOnly: true })}`;
-}
+type ConfirmState =
+  | { kind: "reserve"; slot: SlotRow; displayName: string }
+  | { kind: "release"; slot: SlotRow }
+  | null;
 
 export function SlotGrid({
   slots,
   viewerXId,
-  viewerDiscordId = null,
-  viewerActiveX = null,
   canReserve,
-  slotKind,
-  maxConsecutiveSlots = 1,
-  slotPartGapSec,
+  slotType,
+  slotPartGapSec = 15 * 60,
 }: SlotGridProps): React.ReactElement {
   const router = useRouter();
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
-  const [reservedSlotId, setReservedSlotId] = React.useState<string | null>(null);
-  const [confirmReleaseId, setConfirmReleaseId] = React.useState<string | null>(null);
-  const [confirmExtend, setConfirmExtend] = React.useState<ConfirmExtend | null>(null);
-  const [confirmMerge, setConfirmMerge] = React.useState<ConfirmMerge | null>(null);
-  const [reserveTarget, setReserveTarget] = React.useState<ReserveTarget | null>(null);
-  const [actionMenuSlotId, setActionMenuSlotId] = React.useState<string | null>(null);
-  const [mergeDisplayName, setMergeDisplayName] = React.useState<string>("");
-  const [reserveDisplayName, setReserveDisplayName] = React.useState<string>("");
-  const [reserveCount, setReserveCount] = React.useState("1");
-  const [savedName, setSavedName] = React.useState<string>("");
-  const atomicMaxConsecutiveSlots = Math.min(
-    Math.max(Math.floor(maxConsecutiveSlots), 1),
-    MAX_ATOMIC_SLOT_ROWS,
-  );
-
-  const redirectForGuardReason = React.useCallback(
-    (reason?: string): boolean => {
-      if (typeof window === "undefined") return false;
-      const next = `${window.location.pathname}${window.location.search}`;
-      if (reason === "tos_required" || reason === "tos_reaccept_required") {
-        router.push(`/rules?next=${encodeURIComponent(next)}`);
-        return true;
-      }
-      if (reason === "unauthenticated") {
-        router.push(`/entry?next=${encodeURIComponent(next)}`);
-        return true;
-      }
-      return false;
-    },
-    [router],
-  );
+  const [confirm, setConfirm] = React.useState<ConfirmState>(null);
+  const [savedName, setSavedName] = React.useState("");
 
   React.useEffect(() => {
     try {
-      const v = window.localStorage.getItem("fn:lastSlotDisplayName");
-      if (v) setSavedName(v);
+      setSavedName(window.localStorage.getItem("fn:lastSlotDisplayName") ?? "");
     } catch {
-      // localStorage 利用不可な環境では何もしない
+      setSavedName("");
     }
   }, []);
-  const displayRows = React.useMemo(
-    () => collapseReservationGroups(slots as SlotBase[]),
-    [slots],
-  );
 
-  const groups = React.useMemo<SlotGroup[]>(() => {
-    if (slotKind !== "time") {
-      return [{
-        label: "枠",
-        rows: displayRows.map((slot) => ({ kind: "slot", slot })),
-      }];
+  const groups = React.useMemo(() => {
+    if (slotType === "count") {
+      return [{ label: "枠", rows: slots }];
     }
+    return buildSlotParts(slots, slotPartGapSec).map((part) => ({
+      label: formatSlotPartLabel(part, "short"),
+      rows: part.rows,
+    }));
+  }, [slots, slotType, slotPartGapSec]);
 
-    const parts = buildSlotParts(displayRows, slotPartGapSec);
-    const nextGroups: SlotGroup[] = [];
-    let currentDateKey: string | null = null;
-    let currentGroup: SlotGroup | null = null;
-    let previousPartEnd: number | null = null;
-
-    for (const part of parts) {
-      const dateKey = part.start_time
-        ? formatUnix(part.start_time, { dateOnly: true })
-        : formatSlotPartLabel(part, "short");
-
-      if (!currentGroup || currentDateKey !== dateKey) {
-        currentDateKey = dateKey;
-        currentGroup = { label: dateKey, rows: [] };
-        nextGroups.push(currentGroup);
-        previousPartEnd = null;
-      } else if (currentGroup.rows.length > 0) {
-        currentGroup.rows.push({
-          kind: "break",
-          id: `break-${dateKey}-${part.index}`,
-          detail: formatBreakDetail(previousPartEnd, part.start_time),
-        });
-      }
-
-      currentGroup.rows.push(
-        ...part.rows.map((slot): SlotDisplayRow => ({ kind: "slot", slot })),
-      );
-      previousPartEnd = part.last_start_time ?? part.start_time ?? previousPartEnd;
+  const redirectForGuardReason = (reason?: string): boolean => {
+    if (typeof window === "undefined") return false;
+    const next = `${window.location.pathname}${window.location.search}`;
+    if (reason === "tos_required" || reason === "tos_reaccept_required") {
+      router.push(`/rules?next=${encodeURIComponent(next)}`);
+      return true;
     }
-
-    return nextGroups;
-  }, [displayRows, slotKind, slotPartGapSec]);
-
-  const canTakeSlot = canReserve && !!viewerXId;
-
-  const formatSlotLabel = (slot: SlotGroupRow): string => {
-    if (slot.start_time) {
-      return `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(slot.start_time, { timeOnly: true })}`;
+    if (reason === "unauthenticated") {
+      router.push(`/entry?next=${encodeURIComponent(next)}`);
+      return true;
     }
-    return slot.slot_label ?? `#${slot.sort_order ?? "?"}`;
+    return false;
   };
 
-  const openReserveDialog = (slot: SlotGroupRow) => {
-    setError(null);
-    setSuccess(null);
-    setReserveTarget({ slot, label: formatSlotLabel(slot) });
-    setReserveDisplayName(savedName);
-    setReserveCount("1");
-  };
-
-  const previewSlot = React.useCallback((slotId: string) => {
-    window.dispatchEvent(
-      new CustomEvent(SLOT_PREVIEW_EVENT, { detail: { slotId } }),
-    );
-  }, []);
-
-  const onReserve = (
-    slotId: string,
-    displayName: string,
-    consecutiveCount: string,
-  ) => {
-    setError(null);
-    setSuccess(null);
+  const runReserve = (slot: SlotRow, displayName: string): void => {
     const fd = new FormData();
-    fd.set("slot_id", slotId);
+    fd.set("slot_id", slot.id);
     fd.set("display_name", displayName);
-    fd.set("consecutive_count", consecutiveCount);
-    const dn = displayName.trim();
-    if (dn) {
-      try {
-        window.localStorage.setItem("fn:lastSlotDisplayName", dn);
-        setSavedName(dn);
-      } catch {
-        // localStorage 利用不可な環境では何もしない
-      }
-    }
+    fd.set("consecutive_count", "1");
+    setError(null);
+    setSuccess(null);
     startTransition(async () => {
       const result = await reserveSlot(fd);
       if (!result.ok) {
@@ -224,18 +99,22 @@ export function SlotGrid({
         setError(result.message ?? "枠の確保に失敗しました。");
         return;
       }
-      setSuccess("枠を確保しました。続けて作品情報を登録できます。");
-      setReservedSlotId(result.slotId ?? slotId);
-      setReserveTarget(null);
+      try {
+        window.localStorage.setItem("fn:lastSlotDisplayName", displayName);
+      } catch {
+        // 保存不可環境では無視する。
+      }
+      setSavedName(displayName);
+      setSuccess("枠を確保しました。");
       router.refresh();
     });
   };
 
-  const onRelease = (slotId: string) => {
+  const runRelease = (slot: SlotRow): void => {
+    const fd = new FormData();
+    fd.set("slot_id", slot.id);
     setError(null);
     setSuccess(null);
-    const fd = new FormData();
-    fd.set("slot_id", slotId);
     startTransition(async () => {
       const result = await releaseOwnSlot(fd);
       if (!result.ok) {
@@ -244,542 +123,115 @@ export function SlotGrid({
         return;
       }
       setSuccess("枠を解放しました。");
-      setReservedSlotId(null);
       router.refresh();
     });
   };
-
-  const onExtend = (slotId: string, direction: "forward" | "backward") => {
-    setError(null);
-    setSuccess(null);
-    const fd = new FormData();
-    fd.set("slot_id", slotId);
-    fd.set("direction", direction);
-    startTransition(async () => {
-      const result = await extendOwnSlotGroup(fd);
-      if (!result.ok) {
-        if (redirectForGuardReason(result.reason)) return;
-        setError(result.message ?? "枠の拡張に失敗しました。");
-        return;
-      }
-      setSuccess("枠を拡張しました。");
-      router.refresh();
-    });
-  };
-
-  const onMerge = (gapSlotId: string, displayName: string) => {
-    setError(null);
-    setSuccess(null);
-    const fd = new FormData();
-    fd.set("gap_slot_id", gapSlotId);
-    fd.set("display_name", displayName);
-    startTransition(async () => {
-      const result = await mergeOwnSlotGroups(fd);
-      if (!result.ok) {
-        if (redirectForGuardReason(result.reason)) return;
-        setError(result.message ?? "枠の結合に失敗しました。");
-        return;
-      }
-      setSuccess("枠を結合しました。");
-      router.refresh();
-    });
-  };
-
-  /**
-   * available 枠の直前・直後が同じ viewerActiveX の reserved 枠かどうかを
-   * 元の slots 配列 (collapsed 前) で確認する。
-   */
-  const isMergeTarget = React.useCallback(
-    (gapSlot: SlotGroupRow): boolean => {
-      if (!viewerActiveX) return false;
-      if (gapSlot.status !== "available") return false;
-      const sorted = [...slots].sort((a, b) => {
-        const aKey = a.sort_order ?? a.start_time ?? 0;
-        const bKey = b.sort_order ?? b.start_time ?? 0;
-        return aKey - bKey;
-      });
-      const idx = sorted.findIndex((s) => s.id === gapSlot.id);
-      if (idx < 0) return false;
-      const left = sorted[idx - 1];
-      const right = sorted[idx + 1];
-      if (!left || !right) return false;
-      return (
-        left.status === "reserved" &&
-        left.x_user_id === viewerActiveX &&
-        right.status === "reserved" &&
-        right.x_user_id === viewerActiveX
-      );
-    },
-    [slots, viewerActiveX],
-  );
-
-  /**
-   * merge ボタン押下時に使う display_name のデフォルト値を
-   * 隣接 reserved 枠から取得する。
-   */
-  const getMergeDefaultName = React.useCallback(
-    (gapSlot: SlotGroupRow): string => {
-      const sorted = [...slots].sort((a, b) => {
-        const aKey = a.sort_order ?? a.start_time ?? 0;
-        const bKey = b.sort_order ?? b.start_time ?? 0;
-        return aKey - bKey;
-      });
-      const idx = sorted.findIndex((s) => s.id === gapSlot.id);
-      if (idx < 0) return "";
-      const left = sorted[idx - 1];
-      return left?.display_name ?? "";
-    },
-    [slots],
-  );
-
-  if (slots.length === 0) {
-    return (
-      <p className="fn-muted fn-text-sm" style={{ padding: 16 }}>
-        まだ枠が作成されていません。
-      </p>
-    );
-  }
-
-  const hasMineSlot =
-    !!viewerActiveX &&
-    slots.some(
-      (s) => s.status === "reserved" && s.x_user_id === viewerActiveX,
-    );
 
   return (
-    <div className={styles.wrap}>
+    <div className={styles.root}>
       {error ? (
-        <p role="alert" className={styles.errorBar}>
+        <p className="fn-alert fn-alert--danger" role="alert">
           <Icon name="warning" size={12} aria-hidden /> {error}
         </p>
       ) : null}
-      {success ? (
-        <div role="status" className={styles.successCard}>
-          <div className={styles.successCardBody}>
-            <p className={styles.successCardMessage}>
-              <Icon name="check" size={14} aria-hidden /> {success}
-            </p>
-            {reservedSlotId ? (
-              <>
-                <Link
-                  href={`/entry/slotted?slot=${reservedSlotId}`}
-                  className="fn-btn fn-btn-primary"
+      {success ? <p className="fn-alert fn-alert--success">{success}</p> : null}
+
+      {groups.map((group) => (
+        <section key={group.label} className={styles.group}>
+          <h2 className={styles.groupTitle}>{group.label}</h2>
+          <div className={styles.grid}>
+            {group.rows.map((slot) => {
+              const isOwn = Boolean(
+                viewerXId && slot.x_user_id === viewerXId,
+              );
+              const label = slot.start_time
+                ? `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(
+                    slot.start_time,
+                    { timeOnly: true },
+                  )}`
+                : (slot.slot_label ?? `#${slot.sort_order ?? "?"}`);
+              return (
+                <article
+                  key={slot.id}
+                  className={styles.slot}
+                  data-status={slot.status}
                 >
-                  次へ: 作品情報を登録する
-                  <Icon name="chevron-right" size={14} aria-hidden />
-                </Link>
-                <Link
-                  href="/dashboard"
-                  className={styles.successCardSecondary}
-                >
-                  あとで登録する (ダッシュボードから再開できます)
-                </Link>
-              </>
-            ) : null}
+                  <div className={styles.slotMain}>
+                    <strong>{label}</strong>
+                    <span className="fn-muted fn-text-sm">
+                      {slot.status === "available"
+                        ? "空き"
+                        : slot.status === "reserved"
+                          ? (slot.display_name ?? `@${slot.x_user_id ?? "予約済み"}`)
+                          : "提出済み"}
+                    </span>
+                  </div>
+                  <div className={styles.slotActions}>
+                    {slot.status === "available" ? (
+                      <button
+                        type="button"
+                        className="fn-btn fn-btn-primary fn-btn-sm"
+                        disabled={!canReserve || !viewerXId || busy}
+                        onClick={() => {
+                          const displayName = window.prompt(
+                            "枠に表示する名前を入力してください。",
+                            savedName || (viewerXId ? `@${viewerXId}` : ""),
+                          );
+                          if (!displayName?.trim()) return;
+                          setConfirm({
+                            kind: "reserve",
+                            slot,
+                            displayName: displayName.trim(),
+                          });
+                        }}
+                      >
+                        確保
+                      </button>
+                    ) : isOwn && slot.status === "reserved" ? (
+                      <button
+                        type="button"
+                        className="fn-btn fn-btn-ghost fn-btn-sm"
+                        disabled={busy}
+                        onClick={() => setConfirm({ kind: "release", slot })}
+                      >
+                        解放
+                      </button>
+                    ) : null}
+                    {isOwn && slot.status === "reserved" ? (
+                      <Link
+                        className="fn-btn fn-btn-ghost fn-btn-sm"
+                        href={`/submit?slot=${encodeURIComponent(slot.id)}`}
+                      >
+                        作品登録
+                      </Link>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })}
           </div>
-        </div>
-      ) : null}
-
-      {hasMineSlot && atomicMaxConsecutiveSlots > 1 ? (
-        <p className={styles.ownerHelp}>
-          <strong>連続枠の操作:</strong>{" "}
-          自分の枠の右側にある「<strong>前を追加</strong>」「<strong>後を追加</strong>」で
-          隣接する空き枠を 1 つずつ取り込めます。
-          自分の枠で挟まれた空き枠には「<strong>ここを埋めて結合</strong>」が表示され、
-          1 グループにまとめられます。連続上限は {atomicMaxConsecutiveSlots} 枠です。
-        </p>
-      ) : null}
-
-      <div className={styles.legend} aria-label="枠の凡例">
-        <span><i className={styles.legendAvailable} />空き</span>
-        <span><i className={styles.legendReserved} />確保済</span>
-        <span><i className={styles.legendPriority} />優先再取得中</span>
-      </div>
-
-      <div className={styles.partsRow}>
-        {groups.map((group, index) => (
-          <section key={`part-${index}`} className={styles.partColumn}>
-            <header className={styles.partHeader}>{group.label}</header>
-            <table className={styles.table}>
-              <colgroup>
-                <col className={styles.timeCol} />
-                <col />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th>{slotKind === "time" ? "日時" : "枠"}</th>
-                  <th>状態 / 操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {group.rows.map((item) => {
-                  if (item.kind === "break") {
-                    return (
-                      <tr key={item.id} className={styles.breakRow}>
-                        <td colSpan={2} className={styles.breakCell}>
-                          <span>休憩</span>
-                          {item.detail ? <em>{item.detail}</em> : null}
-                        </td>
-                      </tr>
-                    );
-                  }
-
-                  const slot = item.slot;
-                  const isMine =
-                    (!!viewerXId && slot.x_user_id === viewerXId) ||
-                    (!slot.x_user_id && !!viewerDiscordId && slot.reserved_by_user_id === viewerDiscordId);
-                  const filled = slot.status !== "available";
-                  return (
-                    <tr
-                      key={slot.id}
-                      className={cn(
-                        styles.row,
-                        filled && styles.rowFilled,
-                        isMine && styles.rowMine,
-                      )}
-                      onPointerEnter={() => previewSlot(slot.id)}
-                      onMouseEnter={() => previewSlot(slot.id)}
-                      onClick={() => previewSlot(slot.id)}
-                    >
-                      <td className={styles.cellTime}>
-                        {slot.start_time ? (
-                          <span className={styles.timeStack}>
-                            <span>{formatUnix(slot.start_time, { dateOnly: true })}</span>
-                            <strong>
-                              {formatUnix(slot.start_time, { timeOnly: true })}
-                            </strong>
-                          </span>
-                        ) : (
-                          (slot.slot_label ?? `#${slot.sort_order ?? "?"}`)
-                        )}
-                      </td>
-                      <td className={styles.cellSlot}>
-                        {filled ? (
-                          <div className={styles.slotTaken}>
-                            <div className={styles.slotIdentity}>
-                              <span
-                                className={cn(
-                                  styles.slotName,
-                                  isMine && slot.status === "reserved" && styles.slotNameMine,
-                                )}
-                              >
-                                {slot.display_name ?? (slot.x_user_id ? `@${slot.x_user_id}` : "確保済み")}
-                              </span>
-                            </div>
-                            {isMine && slot.status === "reserved" ? (
-                              <div className={styles.slotActions}>
-                                <button
-                                  type="button"
-                                  className={styles.editSlotButton}
-                                  aria-expanded={actionMenuSlotId === slot.id}
-                                  disabled={busy}
-                                  onClick={() =>
-                                    setActionMenuSlotId((current) =>
-                                      current === slot.id ? null : slot.id,
-                                    )
-                                  }
-                                >
-                                  編集
-                                </button>
-                                {actionMenuSlotId === slot.id ? (
-                                  <div className={styles.slotActionMenu}>
-                                    <Link
-                                      href={`/entry/slotted?slot=${slot.id}`}
-                                      className={styles.slotActionMenuItem}
-                                      onClick={() => setActionMenuSlotId(null)}
-                                    >
-                                      <Icon name="upload" size={12} aria-hidden /> 作品登録
-                                    </Link>
-                                    <button
-                                      type="button"
-                                      className={styles.slotActionMenuItem}
-                                      disabled={busy}
-                                      onClick={() => {
-                                        setActionMenuSlotId(null);
-                                        setConfirmReleaseId(slot.id);
-                                      }}
-                                    >
-                                      <Icon name="trash" size={12} aria-hidden /> 解放
-                                    </button>
-                                    {viewerActiveX ? (
-                                      <>
-                                        <button
-                                          type="button"
-                                          className={styles.slotActionMenuItem}
-                                          disabled={busy || slot.group_size >= atomicMaxConsecutiveSlots}
-                                          onClick={() => {
-                                            setActionMenuSlotId(null);
-                                            setConfirmExtend({
-                                              slotId: slot.slot_ids[0] ?? slot.id,
-                                              direction: "backward",
-                                            });
-                                          }}
-                                        >
-                                          前を追加
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className={styles.slotActionMenuItem}
-                                          disabled={busy || slot.group_size >= atomicMaxConsecutiveSlots}
-                                          onClick={() => {
-                                            setActionMenuSlotId(null);
-                                            setConfirmExtend({
-                                              slotId: slot.slot_ids[slot.slot_ids.length - 1] ?? slot.id,
-                                              direction: "forward",
-                                            });
-                                          }}
-                                        >
-                                          後を追加
-                                        </button>
-                                      </>
-                                    ) : null}
-                                  </div>
-                                ) : null}
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : isMergeTarget(slot) ? (
-                          <button
-                            type="button"
-                            className={cn(styles.emptySlotButton, styles.emptySlotButtonMerge)}
-                            disabled={busy}
-                            onClick={() => {
-                              const defaultName = getMergeDefaultName(slot);
-                              setMergeDisplayName(defaultName);
-                              setConfirmMerge({ gapSlotId: slot.id, defaultName });
-                            }}
-                            aria-label={`${formatSlotLabel(slot)} を埋めて結合`}
-                            title="ここを埋めて結合"
-                          >
-                            <span className={styles.emptyCircle} aria-hidden />
-                          </button>
-                        ) : canTakeSlot ? (
-                          <button
-                            type="button"
-                            className={styles.emptySlotButton}
-                            disabled={busy}
-                            onClick={() => openReserveDialog(slot)}
-                            aria-label={`${formatSlotLabel(slot)} を確保`}
-                            title="枠を確保"
-                          >
-                            <span className={styles.emptyCircle} aria-hidden />
-                          </button>
-                        ) : canReserve ? (
-                          <span
-                            className={cn(styles.emptySlot, styles.emptySlotUnavailable)}
-                            aria-label={viewerDiscordId ? "空き。X ID 未選択" : "空き。ログインが必要です"}
-                            title={viewerDiscordId ? "X ID 未選択" : "ログインが必要です"}
-                          >
-                            <span className={styles.emptyCircle} aria-hidden />
-                          </span>
-                        ) : (
-                          <span
-                            className={cn(styles.emptySlot, styles.emptySlotUnavailable)}
-                            aria-label="空き"
-                            title="空き"
-                          >
-                            <span className={styles.emptyCircle} aria-hidden />
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </section>
-        ))}
-      </div>
+        </section>
+      ))}
 
       <ConfirmDialog
-        open={confirmReleaseId !== null}
-        title="枠を解放しますか?"
-        message="この枠を解放します。よろしいですか?"
-        confirmLabel="解放する"
-        tone="danger"
-        onConfirm={() => {
-          const id = confirmReleaseId;
-          setConfirmReleaseId(null);
-          if (id) onRelease(id);
-        }}
-        onCancel={() => setConfirmReleaseId(null)}
-      />
-
-      <ConfirmDialog
-        open={confirmExtend !== null}
-        title={confirmExtend?.direction === "backward" ? "前の枠を追加しますか?" : "後ろの枠を追加しますか?"}
+        open={confirm !== null}
+        title={confirm?.kind === "release" ? "枠を解放しますか?" : "枠を確保しますか?"}
         message={
-          confirmExtend?.direction === "backward"
-            ? "自分のグループに前方の空き枠を 1 つ追加します。"
-            : "自分のグループに後方の空き枠を 1 つ追加します。"
+          confirm?.kind === "release"
+            ? "この予約を取り消して枠を空き状態へ戻します。"
+            : "選択した1枠を確保します。"
         }
-        confirmLabel="追加する"
-        tone="default"
+        confirmLabel={confirm?.kind === "release" ? "解放する" : "確保する"}
+        tone={confirm?.kind === "release" ? "danger" : "default"}
+        onCancel={() => setConfirm(null)}
         onConfirm={() => {
-          const info = confirmExtend;
-          setConfirmExtend(null);
-          if (info) onExtend(info.slotId, info.direction);
+          if (!confirm) return;
+          const state = confirm;
+          setConfirm(null);
+          if (state.kind === "release") runRelease(state.slot);
+          else runReserve(state.slot, state.displayName);
         }}
-        onCancel={() => setConfirmExtend(null)}
       />
-
-      {confirmMerge !== null ? (
-        <div
-          className={styles.mergeDialogBackdrop}
-          role="presentation"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setConfirmMerge(null);
-          }}
-        >
-          <div
-            className={styles.mergeDialog}
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="merge-dialog-title"
-          >
-            <p id="merge-dialog-title" className={styles.mergeDialogTitle}>
-              ここを埋めて結合しますか?
-            </p>
-            <p className={styles.mergeDialogMessage}>
-              空き枠を確保して左右の枠を 1 グループに結合します。
-              表示名を確認してください。
-            </p>
-            <input
-              type="text"
-              className="fn-input"
-              value={mergeDisplayName}
-              onChange={(e) => setMergeDisplayName(e.target.value)}
-              maxLength={80}
-              placeholder="表示名・団体名"
-              aria-label="表示名"
-            />
-            <div className={styles.mergeDialogFooter}>
-              <button
-                type="button"
-                className="fn-btn fn-btn-ghost"
-                onClick={() => setConfirmMerge(null)}
-              >
-                キャンセル
-              </button>
-              <button
-                type="button"
-                className="fn-btn fn-btn-primary"
-                disabled={busy || mergeDisplayName.trim().length === 0}
-                onClick={() => {
-                  const info = confirmMerge;
-                  setConfirmMerge(null);
-                  if (info) onMerge(info.gapSlotId, mergeDisplayName.trim());
-                }}
-                // eslint-disable-next-line jsx-a11y/no-autofocus
-                autoFocus
-              >
-                結合する
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {reserveTarget !== null ? (
-        <div
-          className={styles.reserveDialogBackdrop}
-          role="presentation"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setReserveTarget(null);
-          }}
-        >
-          <form
-            className={styles.reserveDialog}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="reserve-dialog-title"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const name = reserveDisplayName.trim();
-              if (!name) {
-                setError("表示名・団体名を入力してください。");
-                return;
-              }
-              onReserve(reserveTarget.slot.id, name, reserveCount);
-            }}
-          >
-            <div>
-              <p id="reserve-dialog-title" className={styles.reserveDialogTitle}>
-                枠を確保
-              </p>
-              <p className={styles.reserveDialogMessage}>
-                {reserveTarget.label}
-              </p>
-            </div>
-            <div className={styles.reserveDialogField}>
-              <label className="fn-label" htmlFor="reserve-display-name">
-                表示名・団体名
-              </label>
-              <input
-                id="reserve-display-name"
-                type="text"
-                className="fn-input"
-                value={reserveDisplayName}
-                onChange={(e) => setReserveDisplayName(e.target.value)}
-                maxLength={80}
-                placeholder="例: FlameNode制作部"
-                required
-                // eslint-disable-next-line jsx-a11y/no-autofocus
-                autoFocus
-              />
-            </div>
-            <div className={styles.reserveDialogField}>
-              <label className="fn-label" htmlFor="reserve-count">
-                取得する枠数
-              </label>
-              <select
-                id="reserve-count"
-                className="fn-select"
-                value={reserveCount}
-                onChange={(e) => setReserveCount(e.target.value)}
-              >
-                {Array.from(
-                  { length: atomicMaxConsecutiveSlots },
-                  (_, i) => i + 1,
-                ).map((n) => (
-                  <option key={n} value={n}>
-                    {n === 1 ? "単枠で確保" : `${n}連続で確保`}
-                  </option>
-                ))}
-              </select>
-              {atomicMaxConsecutiveSlots > 1 ? (
-                <p className={styles.reserveDialogHint}>
-                  連続枠は空きが隣接している場合だけまとめて確保されます。上限は {atomicMaxConsecutiveSlots} 枠です。
-                </p>
-              ) : null}
-            </div>
-            {viewerActiveX ? (
-              <p className={styles.reserveDialogHint}>
-                提出主体: <strong>@{viewerActiveX}</strong>
-              </p>
-            ) : null}
-            <div className={styles.reserveDialogFooter}>
-              <button
-                type="button"
-                className="fn-btn fn-btn-ghost"
-                onClick={() => setReserveTarget(null)}
-                disabled={busy}
-              >
-                キャンセル
-              </button>
-              <button
-                type="submit"
-                className="fn-btn fn-btn-primary"
-                disabled={busy || reserveDisplayName.trim().length === 0}
-                aria-busy={busy}
-              >
-                <Icon name="plus" size={12} aria-hidden />
-                {busy ? "確保中..." : "確保する"}
-              </button>
-            </div>
-          </form>
-        </div>
-      ) : null}
     </div>
   );
 }
