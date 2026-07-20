@@ -1,0 +1,58 @@
+name: Agent PR88 fix slot consumers
+
+on:
+  push:
+    branches:
+      - agent/ux-and-status-simplification
+    paths:
+      - .github/workflows/agent-pr88-fix-slot-consumers.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/ux-and-status-simplification
+          fetch-depth: 0
+      - name: Apply canonical slot consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin agent/db-canonical-events
+          git checkout origin/agent/db-canonical-events -- \
+            src/components/admin/SlotList.tsx \
+            src/components/event/SlotGrid.tsx
+
+          python - <<'PY'
+          from pathlib import Path
+          dashboard = Path('app/(auth)/dashboard/page.tsx')
+          text = dashboard.read_text()
+          text = text.replace(
+              '''              {slot.priority_reclaim_until && slot.priority_reclaim_until > now ? (
+                <span className="fn-status fn-status-warning">優先再取得中</span>
+              ) : null}
+''',
+              '',
+          )
+          text = text.replace(
+              '''                  {slot.priority_reclaim_until &&
+                  slot.priority_reclaim_until > now
+                    ? ` · 優先再取得期限 ${formatRelative(slot.priority_reclaim_until)}`
+                    : ""}
+''',
+              '',
+          )
+          dashboard.write_text(text)
+          PY
+
+          rm .github/workflows/agent-pr88-fix-slot-consumers.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "枠UIを修正後DB正本へ切替"
+          git push origin HEAD:agent/ux-and-status-simplification
