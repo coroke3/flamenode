@@ -1,0 +1,36 @@
+name: Apply PR89 canonical runtime fix
+
+on:
+  push:
+    branches:
+      - agent/db-canonical-migration-v2
+    paths:
+      - .agent-patch/pr89-runtime-fix.b64
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/db-canonical-migration-v2
+          fetch-depth: 0
+      - name: Apply canonical runtime fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d .agent-patch/pr89-runtime-fix.b64 | gzip -d > /tmp/pr89-runtime-fix.patch
+          echo "cbb57576276e0788f6d9f0154d3e081b1d0f030ea1791f55403558a625b52e31  /tmp/pr89-runtime-fix.patch" | sha256sum -c -
+          git apply --index /tmp/pr89-runtime-fix.patch
+          rm .agent-patch/pr89-runtime-fix.b64
+          rm .github/workflows/apply-pr89-canonical-runtime-fix.yml
+          git add -A
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "正本移行後の残存runtime参照を解消"
+          git push origin HEAD:agent/db-canonical-migration-v2
