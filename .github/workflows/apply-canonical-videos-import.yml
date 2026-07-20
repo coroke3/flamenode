@@ -3,7 +3,7 @@ name: Apply canonical videos import patch
 on:
   push:
     branches:
-      - agent/db-canonical-videos-import
+      - agent/db-canonical-migration-v2
   workflow_dispatch:
 
 permissions:
@@ -17,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: agent/db-canonical-videos-import
+          ref: agent/db-canonical-migration-v2
           fetch-depth: 0
 
       - name: Reconstruct and verify patch
@@ -26,11 +26,26 @@ jobs:
           set -euo pipefail
           cat .agent-patch/part-* | base64 -d | gzip -d > /tmp/flamenode.patch
           echo "08ec23c94c21c429615e0d525a9ce151e1522f91f37c48edf0719db6f88b2151  /tmp/flamenode.patch" | sha256sum -c -
-          git apply --index /tmp/flamenode.patch
+          git apply --3way --index /tmp/flamenode.patch
           if git diff --cached --name-only | grep -Eq '^(migrations/|src/lib/db/schema(\.canonical)?\.ts$)'; then
             echo "担当外のDBスキーマまたはマイグレーション変更を検出しました" >&2
             exit 1
           fi
+
+      - name: Upload integration diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canonical-videos-import-diagnostics-${{ github.run_id }}
+          path: |
+            .
+            /tmp/flamenode.patch
+            !.git/**
+            !node_modules/**
+            !.next/**
+            !.vercel/**
+          include-hidden-files: true
+          retention-days: 1
 
       - name: Install dependencies
         run: npm ci
@@ -60,4 +75,4 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "作品・監査・旧形式インポートを新正本へ切り替え"
-          git push origin HEAD:agent/db-canonical-videos-import
+          git push origin HEAD:agent/db-canonical-migration-v2
