@@ -41,7 +41,7 @@ export function DeleteEventForm({
     startTransition(async () => {
       const r = await deleteEvent(fd);
       if (!r.ok) {
-        setError(r.message ?? "削除に失敗しました。");
+        setError(r.message ?? "非公開化に失敗しました。");
         return;
       }
       router.push(redirectHref);
@@ -96,7 +96,7 @@ export function DeleteEventForm({
         disabled={busy || confirm !== eventId}
       >
         <Icon name="trash" size={12} aria-hidden />
-        {busy ? "削除中…" : "イベントを削除"}
+        {busy ? "非公開化中…" : "イベントを非公開にする"}
       </button>
     </form>
   );

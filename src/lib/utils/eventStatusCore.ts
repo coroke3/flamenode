@@ -1,19 +1,21 @@
 /**
  * Event display state helpers shared by public UI and admin views.
+ *
+ * DB上の公開設定は private / public の2種類だけを正本とし、
+ * 開催段階と募集段階は日時から算出する。
  */
 
 export type EventDisplayStatus =
-  | "draft"
+  | "private"
   | "published"
   | "scheduled"
   | "active"
-  | "ended"
-  | "archived";
+  | "ended";
 
-export type EventVisibilityStatus = "draft" | "private" | "public" | "archived";
+export type EventVisibilityStatus = "private" | "public";
 
 export interface EventStatusInput {
-  visibility_status?: EventVisibilityStatus | string | null;
+  visibility_status?: string | null;
   start_time: number | null;
   end_time: number | null;
   entry_start_time?: number | null;
@@ -21,91 +23,60 @@ export interface EventStatusInput {
 }
 
 export function getEventVisibility(ev: EventStatusInput): EventVisibilityStatus {
-  if (
-    ev.visibility_status === "draft" ||
-    ev.visibility_status === "private" ||
-    ev.visibility_status === "public" ||
-    ev.visibility_status === "archived"
-  ) {
-    return ev.visibility_status;
-  }
-  return "draft";
-}export function isPubliclyListableEventVisibility(
-  visibility: EventVisibilityStatus | string | null | undefined,
+  return ev.visibility_status === "public" ? "public" : "private";
+}
+
+export function isPubliclyListableEventVisibility(
+  visibility: string | null | undefined,
 ): boolean {
-  return (
-    visibility === "public" ||
-    visibility === "archived"
-  );
+  return visibility === "public";
 }
 
 export function isPublicEventVisible(ev: EventStatusInput): boolean {
-  return isPubliclyListableEventVisibility(getEventVisibility(ev));
-}
-
-export function isEventArchived(ev: EventStatusInput): boolean {
-  return getEventVisibility(ev) === "archived";
+  return getEventVisibility(ev) === "public";
 }
 
 export function getEffectiveEventEnd(ev: EventStatusInput): number | null {
-  if (ev.end_time != null) return ev.end_time;
-  if (ev.start_time != null) return ev.start_time;
-  return null;
+  return ev.end_time ?? null;
 }
 
 export function getEffectiveEventStart(ev: EventStatusInput): number | null {
-  if (ev.start_time != null) return ev.start_time;
-  if (ev.end_time != null) return ev.end_time;
-  return null;
+  return ev.start_time ?? null;
 }
 
 export function computeEventStatus(
   ev: EventStatusInput,
   now: number = Math.floor(Date.now() / 1000),
 ): EventDisplayStatus {
-  const visibility = getEventVisibility(ev);
-  if (visibility === "archived") return "archived";
-  if (visibility !== "public") return "draft";
+  if (getEventVisibility(ev) !== "public") return "private";
 
   const effectiveEnd = getEffectiveEventEnd(ev);
   if (effectiveEnd != null && effectiveEnd <= now) return "ended";
 
   const effectiveStart = getEffectiveEventStart(ev);
   if (effectiveStart != null && effectiveStart > now) return "scheduled";
-  if (effectiveStart != null && effectiveEnd != null) return "active";
 
+  if (effectiveStart != null || effectiveEnd != null) return "active";
   return "published";
 }
 
 export function eventStatusLabel(s: EventDisplayStatus): string {
   switch (s) {
-    case "draft":
-      return "下書き";
-    case "published":
-      return "公開";
-    case "scheduled":
-      return "開始前";
-    case "active":
-      return "開催中";
-    case "ended":
-      return "終了済";
-    case "archived":
-      return "アーカイブ";
+    case "private": return "非公開";
+    case "published": return "公開";
+    case "scheduled": return "開始前";
+    case "active": return "開催中";
+    case "ended": return "終了済";
   }
 }
 
 export function eventStatusBadgeClass(s: EventDisplayStatus): string {
   switch (s) {
     case "active":
-    case "published":
-      return "fn-badge-accent";
-    case "scheduled":
-      return "fn-badge-warning";
-    case "ended":
-    case "archived":
-      return "fn-badge-neutral";
-    case "draft":
-      return "fn-badge-soft";
+    case "published": return "fn-badge-accent";
+    case "scheduled": return "fn-badge-warning";
+    case "ended": return "fn-badge-neutral";
+    case "private": return "fn-badge-soft";
   }
 }
 
@@ -114,11 +85,9 @@ export function isAcceptingEntries(
   now: number = Math.floor(Date.now() / 1000),
 ): boolean {
   const status = computeEventStatus(ev, now);
-  if (!(status === "active" || status === "scheduled" || status === "published")) {
-    return false;
-  }
+  if (status === "private" || status === "ended") return false;
   if (ev.entry_start_time == null && ev.entry_end_time == null) return false;
   if (ev.entry_start_time != null && now < ev.entry_start_time) return false;
-  if (ev.entry_end_time != null && now > ev.entry_end_time) return false;
+  if (ev.entry_end_time != null && now >= ev.entry_end_time) return false;
   return true;
 }

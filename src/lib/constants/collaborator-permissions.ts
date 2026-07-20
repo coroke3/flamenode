@@ -1,4 +1,6 @@
-import { PERMISSION_DEFINITIONS, type PermissionKey } from "@/lib/auth/permissions/keys";export type LegacyCollaboratorPermissionKey =
+import { PERMISSION_DEFINITIONS, type PermissionKey } from "@/lib/auth/permissions/keys";
+
+export type LegacyCollaboratorPermissionKey =
   | "videos.title"
   | "videos.music_credit"
   | "videos.members"
@@ -51,42 +53,29 @@ export const COLLABORATOR_PERMISSION_LABELS: Record<
   },
 };
 
+/** FlameNode 内の公開・審査状態。YouTube の公開区分は video_youtube_metadata で別管理する。 */
 export type VideoVisibilityStatus =
-  | "draft"
   | "pending"
   | "public"
-  | "limited"
   | "private"
-  | "archived"
   | "voided";
 
 export const VIDEO_STATUS_LABELS: Record<
   VideoVisibilityStatus,
   { label: string; description: string }
 > = {
-  draft: {
-    label: "下書き",
-    description: "投稿者本人だけが見られる作業中の状態です。",
-  },
   pending: {
     label: "公開待ち",
     description: "提出済みで運営確認や公開処理を待っている状態です。",
   },
   public: {
     label: "公開",
-    description: "一覧やイベントページから閲覧できる通常公開です。",
-  },
-  limited: {
-    label: "限定公開",
-    description: "直接 URL からのみ閲覧でき、公開一覧には出ない状態です。",
+    description:
+      "一覧やイベントページから閲覧できる通常公開です。YouTube限定公開の動画もこの状態で扱います。",
   },
   private: {
     label: "非公開",
     description: "投稿者本人と管理者だけが閲覧できる状態です。",
-  },
-  archived: {
-    label: "アーカイブ",
-    description: "論理削除され、通常導線から除外された状態です。",
   },
   voided: {
     label: "無効化",

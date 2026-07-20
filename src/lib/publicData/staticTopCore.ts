@@ -10,6 +10,7 @@ import {
   normalizePresentString as normalizeNullableString,
   normalizePresentString as normalizeString,
 } from "./normalize.ts";
+import { normalizePublicEventVisibility } from "./visibility.ts";
 
 export interface StaticTopPayload {
   generated_at?: unknown;
@@ -134,7 +135,8 @@ function normalizeEvent(value: unknown): StaticTopEvent | null {
   const row = value as Record<string, unknown>;
   const id = normalizeString(row.id);
   const title = normalizeString(row.title);
-  if (!id || !title) return null;
+  const visibility = normalizePublicEventVisibility(row.visibility_status);
+  if (!id || !title || !visibility) return null;
   return {
     id,
     title,
@@ -142,7 +144,7 @@ function normalizeEvent(value: unknown): StaticTopEvent | null {
     icon_url: normalizeNullableString(row.icon_url),
     img_url: normalizeNullableString(row.img_url),
     accent_color: normalizeNullableString(row.accent_color),
-    visibility_status: normalizeEventVisibility(row.visibility_status),
+    visibility_status: visibility,
     start_time: normalizeUnix(row.start_time),
     end_time: normalizeUnix(row.end_time),
     entry_start_time: normalizeUnix(row.entry_start_time),
@@ -236,10 +238,6 @@ function normalizeStats(value: unknown, fallback: HomeStats): HomeStats {
     activeEvents: normalizeCount(row.activeEvents ?? row.active_events) ?? fallback.activeEvents,
     creators: normalizeCount(row.creators) ?? fallback.creators,
   };
-}
-
-function normalizeEventVisibility(value: unknown): "public" | "archived" {
-  return normalizeString(value) === "archived" ? "archived" : "public";
 }
 
 function normalizeSeverity(value: unknown): PublicAnnouncement["severity"] {

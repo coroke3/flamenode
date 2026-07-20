@@ -226,7 +226,7 @@ async function selectSyncRows(env: Env, now: number): Promise<SyncRow[]> {
         WHERE ym.sync_status = 'pending'
           AND v.youtube_video_id IS NOT NULL
           AND v.youtube_video_id <> ''
-          AND v.visibility_status NOT IN ('archived', 'voided')
+          AND v.visibility_status <> 'voided'
         ORDER BY COALESCE(ym.synced_at, 0) ASC, v.id ASC
         LIMIT ?1`,
       [YOUTUBE_SYNC_MAX_ROWS_PER_RUN],
@@ -249,7 +249,7 @@ async function selectSyncRows(env: Env, now: number): Promise<SyncRow[]> {
             AND (e.end_time IS NULL OR e.end_time >= ?1 - ?3)
             AND v.youtube_video_id IS NOT NULL
             AND v.youtube_video_id <> ''
-            AND v.visibility_status NOT IN ('archived', 'voided')
+            AND v.visibility_status <> 'voided'
             AND ym.sync_status IN ('synced', 'failed')
             AND ym.youtube_video_id IS v.youtube_video_id
             AND ym.synced_at IS NOT NULL
@@ -276,7 +276,7 @@ async function selectSyncRows(env: Env, now: number): Promise<SyncRow[]> {
             AND ym.youtube_video_id IS v.youtube_video_id
             AND v.youtube_video_id IS NOT NULL
             AND v.youtube_video_id <> ''
-            AND v.visibility_status NOT IN ('archived', 'voided')
+            AND v.visibility_status <> 'voided'
           ORDER BY ym.synced_at ASC, v.id ASC
           LIMIT ?3`,
         [now, DEFAULT_SYNC_INTERVAL_SEC, remaining],

@@ -97,7 +97,7 @@ function resolveState(
   now: number,
 ): RecruitState {
   const status = computeEventStatus(event, now);
-  if (status === "archived" || status === "ended") return "ended";
+  if (status === "ended" || status === "private") return "ended";
   if (isAcceptingEntries(event, now)) {
     return available === 0 ? "full" : "accepting";
   }

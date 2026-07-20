@@ -13,7 +13,7 @@ import { buildAfterVideoStatusChangeQueueBatch, MAX_VIDEO_STATUS_REBUILD_EVENT_T
 import { generateId } from "@/lib/utils/id";
 
 export interface AdminActionResult { ok: boolean; message?: string }
-const VALID_STATUS = new Set(["draft", "pending", "public", "limited", "private", "hidden", "archived", "voided"]);
+const VALID_STATUS = new Set(["pending", "public", "private", "voided"]);
 
 export async function setVideoStatus(formData: FormData): Promise<AdminActionResult> {
   const guard = await requireAdminWrite("admin_video_status");

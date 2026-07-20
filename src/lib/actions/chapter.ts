@@ -37,7 +37,7 @@ const createSchema = z.object({
 /**
  * チャプター (動画マーカー) を作成する。
  * 主体 = `user.active_x_user_id` で `approval_status === 'approved'` を要求。
- * 対象動画は FlameNode 内 public または unlisted のみ投稿可。
+ * 対象動画は FlameNode 内 public のみ投稿可。
  */
 export async function createChapter(
   formData: FormData,
@@ -71,9 +71,9 @@ export async function createChapter(
   if (!target) return { ok: false, message: "動画が見つかりません。" };
 
   // 対象動画状態チェック (Batch A 最小実装)。
-  // FlameNode 内 public / unlisted のみ投稿可。
+  // FlameNode 内 public のみ投稿可。
   // (YouTube 側 unlisted で FlameNode 内 public のケースも status === 'public' で吸収される)。
-  if (target.visibility_status !== "public" && target.visibility_status !== "limited") {
+  if (target.visibility_status !== "public") {
     return {
       ok: false,
       message: "この動画にはチャプターコメントを投稿できません。",
@@ -219,7 +219,7 @@ export async function createChaptersBulk(
   if (!canMod) {
     return { ok: false, message: "この動画のチャプター一括登録権限がありません。" };
   }
-  if (target.visibility_status !== "public" && target.visibility_status !== "limited") {
+  if (target.visibility_status !== "public") {
     return {
       ok: false,
       message: "この動画にはチャプターコメントを投稿できません。",

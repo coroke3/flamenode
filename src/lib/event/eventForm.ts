@@ -23,9 +23,7 @@ export const eventSchema = z.object({
   end_time: z.string().trim().optional().nullable(),
   entry_start_time: z.string().trim().optional().nullable(),
   entry_end_time: z.string().trim().optional().nullable(),
-  visibility_status: z
-    .enum(["draft", "private", "public", "archived"])
-    .optional(),
+  visibility_status: z.enum(["private", "public"]).optional(),
   allow_user_video_event_links: z.coerce.number().min(0).max(1).default(0),
   allow_unslotted_posts: z.coerce.number().min(0).max(1).default(0),
   allow_user_video_edits: z.coerce.number().min(0).max(1).default(0),
@@ -73,7 +71,7 @@ export function buildPartsJson(raw: string | null | undefined): string | null {
 export function resolveSubmittedEventVisibility(
   data: Pick<EventFormData, "visibility_status">,
 ): EventVisibilityStatus {
-  return data.visibility_status ?? "draft";
+  return data.visibility_status ?? "private";
 }
 
 function boolFormValue(value: FormDataEntryValue | undefined): boolean {

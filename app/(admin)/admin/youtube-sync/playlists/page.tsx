@@ -106,16 +106,16 @@ export default async function AdminYoutubePlaylistSyncPage({
         last_error: eventYoutubePlaylistSync.last_error,
         linked_count: sql<number>`COUNT(DISTINCT CASE
           WHEN ${videosTable.id} IS NOT NULL
-           AND ${videosTable.visibility_status} NOT IN ('archived', 'voided')
+           AND ${videosTable.visibility_status} <> 'voided'
           THEN ${videosTable.id} END)`,
         eligible_count: sql<number>`COUNT(DISTINCT CASE
-          WHEN ${videosTable.visibility_status} IN ('public', 'limited')
+          WHEN ${videosTable.visibility_status} = 'public'
            AND ${videosTable.youtube_video_id} IS NOT NULL
            AND ${videosTable.youtube_video_id} <> ''
           THEN ${videosTable.id} END)`,
         synced_count: sql<number>`COUNT(DISTINCT CASE
           WHEN ${eventYoutubePlaylistItems.playlist_item_id} IS NOT NULL
-           AND ${videosTable.visibility_status} IN ('public', 'limited')
+           AND ${videosTable.visibility_status} = 'public'
           THEN ${videosTable.id} END)`,
       })
       .from(eventYoutubePlaylistSync)

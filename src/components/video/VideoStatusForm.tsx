@@ -36,7 +36,6 @@ const ADMIN_STATUS_VALUES = [
   "pending",
   "public",
   "private",
-  "archived",
   "voided",
 ] as const;
 
