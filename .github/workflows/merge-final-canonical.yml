@@ -1,6 +1,12 @@
 name: Merge final canonical integration
 
 on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .agent-trigger/merge-final-integration-v6
+      - .github/workflows/merge-final-canonical.yml
   push:
     branches:
       - agent/db-canonical-migration-v2
@@ -16,7 +22,7 @@ concurrency:
 
 jobs:
   integrate:
-    if: github.actor != 'github-actions[bot]'
+    if: github.actor != 'github-actions[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.ref == 'agent/db-canonical-migration-v2')
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -81,20 +87,11 @@ jobs:
             exit 1
           fi
 
-          # Keep the validated custom-question implementation for the three files
-          # that were previously corrupted by overlapping merges.
-          git checkout origin/agent/unify-custom-questions -- \
-            src/components/admin/EventForm.tsx \
-            src/lib/actions/event-admin.ts \
-            src/lib/admin/eventTemplateSettings.ts
-
-          # The final integration branch contains the canonical private/public patch.
           git checkout origin/agent/db-canonical-final-integration -- \
             src/components/admin/EventForm.tsx \
             src/lib/actions/event-admin.ts \
             src/lib/admin/eventTemplateSettings.ts
 
-          # Preserve the sole one-way legacy import boundary and atomic X-ID merge.
           git checkout origin/agent/x-identity-import-hardening -- \
             app/api/admin/import/legacy/route.ts \
             app/'(admin)'/admin/import/page.tsx \
@@ -103,7 +100,6 @@ jobs:
             src/lib/actions/xid-merge-admin.ts \
             src/lib/xid/merge.ts
 
-          # Remove all temporary integration/export machinery from the resulting branch.
           rm -rf .tmp/integration-report.txt .agent-trigger
           rm -f \
             .github/workflows/export-pr-source-temp.yml \
