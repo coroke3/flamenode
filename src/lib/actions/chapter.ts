@@ -113,8 +113,8 @@ async function canModerateChapterVideo(params: {
 }
 
 /**
- * 動画内の時刻に紐づく通常チャプターコメントを作成する。
- * メンバー担当チャプターは video_members.chapters_json の別経路で管理する。
+ * 動画内の時刻に紐づくチャプターコメントを新正本 video_chapters に作成する。
+ * 旧 video_members.chapters_json には書き込まない。
  */
 export async function createChapter(
   formData: FormData,
@@ -155,7 +155,7 @@ export async function createChapter(
   const id = generateId("ch");
   const now = Math.floor(Date.now() / 1000);
   const chapterTime = Math.round(data.chapter_time * 1000) / 1000;
-  const after = {
+  const after: typeof videoChapters.$inferInsert = {
     id,
     video_id: data.video_id,
     x_user_id: activeX,
@@ -163,9 +163,6 @@ export async function createChapter(
     chapter_label: data.chapter_label,
     note: data.note || null,
     visibility: data.visibility,
-    // 通常コメントはプレイヤーバーへ表示しない。クライアント入力では変更不可。
-    show_on_player_bar: 0,
-    order_index: 0,
     created_at: now,
     updated_at: now,
   };
@@ -300,7 +297,10 @@ export async function getChapterDeleteCapabilities(
 
   const deletable = new Set(
     rows
-      .filter((row) => guard.approvedXIds.includes(row.x_user_id))
+      .filter(
+        (row) =>
+          row.x_user_id != null && guard.approvedXIds.includes(row.x_user_id),
+      )
       .map((row) => row.id),
   );
   if (deletable.size === rows.length) {
@@ -359,7 +359,9 @@ export async function deleteChapter(
     return { ok: false, message: "対象動画が見つかりません。" };
   }
 
-  const isAuthor = guard.approvedXIds.includes(existing.x_user_id);
+  const isAuthor =
+    existing.x_user_id != null &&
+    guard.approvedXIds.includes(existing.x_user_id);
   const canModerate =
     !isAuthor &&
     (await canModerateChapterVideo({
