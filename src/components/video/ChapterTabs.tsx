@@ -26,15 +26,6 @@ interface ChapterTabsProps {
   onSeek?: (time: number) => void;
 }
 
-const FOCUSABLE_SELECTOR = [
-  "button:not([disabled])",
-  "[href]",
-  "input:not([disabled])",
-  "select:not([disabled])",
-  "textarea:not([disabled])",
-  '[tabindex]:not([tabindex="-1"])',
-].join(",");
-
 export function ChapterTabs({
   chapters,
   duration,
@@ -57,7 +48,7 @@ export function ChapterTabs({
   const [toast, setToast] = React.useState<string | null>(null);
   const [, startCapabilityTransition] = React.useTransition();
   const [deleting, startDeleteTransition] = React.useTransition();
-  const dialogRef = React.useRef<HTMLElement>(null);
+  const dialogRef = React.useRef<HTMLDialogElement>(null);
   const listRef = React.useRef<HTMLDivElement>(null);
   const cancelButtonRef = React.useRef<HTMLButtonElement>(null);
   const previousFocusRef = React.useRef<HTMLElement | null>(null);
@@ -68,10 +59,6 @@ export function ChapterTabs({
     () => chapters.map((chapter) => chapter.id).join("\u001f"),
     [chapters],
   );
-
-  React.useEffect(() => {
-    deletingRef.current = deleting;
-  }, [deleting]);
 
   React.useEffect(() => {
     const requestId = capabilityRequestRef.current + 1;
@@ -109,54 +96,18 @@ export function ChapterTabs({
 
   React.useEffect(() => {
     if (!pendingDelete) return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
 
     previousFocusRef.current = document.activeElement as HTMLElement | null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    if (!dialog.open) dialog.showModal();
     const focusFrame = window.requestAnimationFrame(() =>
       cancelButtonRef.current?.focus(),
     );
 
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !deletingRef.current) {
-        event.preventDefault();
-        setPendingDelete(null);
-        setDeleteError(null);
-        return;
-      }
-
-      if (event.key !== "Tab") return;
-      const dialog = dialogRef.current;
-      if (!dialog) return;
-      const focusable = Array.from(
-        dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-      ).filter(
-        (element) =>
-          !element.hasAttribute("disabled") && element.getClientRects().length > 0,
-      );
-      if (focusable.length === 0) {
-        event.preventDefault();
-        dialog.focus();
-        return;
-      }
-
-      const first = focusable[0];
-      const last = focusable.at(-1)!;
-      const active = document.activeElement;
-      if (event.shiftKey && (active === first || !dialog.contains(active))) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && active === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener("keydown", onKeyDown);
     return () => {
       window.cancelAnimationFrame(focusFrame);
-      document.removeEventListener("keydown", onKeyDown);
-      document.body.style.overflow = previousOverflow;
+      if (dialog.open) dialog.close();
       window.requestAnimationFrame(() => {
         const previous = previousFocusRef.current;
         if (previous?.isConnected) {
@@ -206,11 +157,7 @@ export function ChapterTabs({
           return;
         }
 
-        setHiddenIds((current) => {
-          const next = new Set(current);
-          next.add(target.id);
-          return next;
-        });
+        setHiddenIds((current) => new Set(current).add(target.id));
         setDeletableIds((current) => {
           const next = new Set(current);
           next.delete(target.id);
@@ -265,66 +212,59 @@ export function ChapterTabs({
       </div>
 
       {pendingDelete ? (
-        <div
-          className={styles.dialogBackdrop}
-          role="presentation"
-          onPointerDown={(event) => {
-            if (event.target === event.currentTarget) closeDialog();
+        <dialog
+          ref={dialogRef}
+          className={styles.dialog}
+          aria-labelledby={dialogTitleId}
+          aria-describedby={`${dialogDescriptionId} ${dialogWarningId}`}
+          aria-busy={deleting}
+          onCancel={(event) => {
+            event.preventDefault();
+            closeDialog();
           }}
         >
-          <section
-            ref={dialogRef}
-            className={styles.dialog}
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby={dialogTitleId}
-            aria-describedby={`${dialogDescriptionId} ${dialogWarningId}`}
-            aria-busy={deleting}
-            tabIndex={-1}
-          >
-            <div className={styles.dialogIcon} aria-hidden>
-              <Icon name="trash" size={18} />
-            </div>
-            <div className={styles.dialogBody}>
-              <h3 id={dialogTitleId} className={styles.dialogTitle}>
-                チャプターコメントを削除しますか？
-              </h3>
-              <p id={dialogDescriptionId} className={styles.dialogDescription}>
-                <strong>{formatDuration(pendingDelete.chapter_time)}</strong>
-                <span>「{pendingDelete.chapter_label}」</span>
+          <div className={styles.dialogIcon} aria-hidden>
+            <Icon name="trash" size={18} />
+          </div>
+          <div className={styles.dialogBody}>
+            <h3 id={dialogTitleId} className={styles.dialogTitle}>
+              チャプターコメントを削除しますか？
+            </h3>
+            <p id={dialogDescriptionId} className={styles.dialogDescription}>
+              <strong>{formatDuration(pendingDelete.chapter_time)}</strong>
+              <span>「{pendingDelete.chapter_label}」</span>
+            </p>
+            <p id={dialogWarningId} className={styles.dialogWarning}>
+              この操作は取り消せません。
+            </p>
+            {deleteError ? (
+              <p className={styles.dialogError} role="alert">
+                <Icon name="warning" size={12} aria-hidden />
+                {deleteError}
               </p>
-              <p id={dialogWarningId} className={styles.dialogWarning}>
-                この操作は取り消せません。
-              </p>
-              {deleteError ? (
-                <p className={styles.dialogError} role="alert">
-                  <Icon name="warning" size={12} aria-hidden />
-                  {deleteError}
-                </p>
-              ) : null}
-            </div>
-            <div className={styles.dialogActions}>
-              <button
-                ref={cancelButtonRef}
-                type="button"
-                className="fn-btn fn-btn-ghost"
-                onClick={closeDialog}
-                disabled={deleting}
-              >
-                キャンセル
-              </button>
-              <button
-                type="button"
-                className={styles.confirmDeleteButton}
-                onClick={confirmDelete}
-                disabled={deleting}
-              >
-                <Icon name="trash" size={14} aria-hidden />
-                {deleting ? "削除中…" : "削除する"}
-              </button>
-            </div>
-          </section>
-        </div>
+            ) : null}
+          </div>
+          <div className={styles.dialogActions}>
+            <button
+              ref={cancelButtonRef}
+              type="button"
+              className="fn-btn fn-btn-ghost"
+              onClick={closeDialog}
+              disabled={deleting}
+            >
+              キャンセル
+            </button>
+            <button
+              type="button"
+              className={styles.confirmDeleteButton}
+              onClick={confirmDelete}
+              disabled={deleting}
+            >
+              <Icon name="trash" size={14} aria-hidden />
+              {deleting ? "削除中…" : "削除する"}
+            </button>
+          </div>
+        </dialog>
       ) : null}
 
       {toast ? (
