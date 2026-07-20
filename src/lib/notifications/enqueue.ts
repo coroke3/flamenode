@@ -4,7 +4,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 
-import { notificationOutbox, users, xUsers } from "@/lib/db/schema";
+import { notificationOutbox, users, xUserAccountLinks } from "@/lib/db/schema";
 
 import { validateNotificationPayload } from "./format";
 
@@ -14,7 +14,7 @@ type InsertResult = { meta?: { changes?: number } };
 export interface EnqueueNotificationInput {
   /** 送信先の Auth.js 内部ユーザー ID。 */
   recipientUserId?: string | null;
-  /** x_users.id 指定時は linked_user_id を解決 */
+  /** x_users.id 指定時は x_user_account_links から通知先を解決 */
   xUserId?: string | null;
   type: string;
   payload: Record<string, unknown>;
@@ -199,9 +199,10 @@ async function resolveRecipientUserId(
         id: users.id,
         is_notification_enabled: users.is_notification_enabled,
       })
-      .from(xUsers)
-      .innerJoin(users, eq(users.id, xUsers.linked_user_id))
-      .where(eq(xUsers.id, xId))
+      .from(xUserAccountLinks)
+      .innerJoin(users, eq(users.id, xUserAccountLinks.auth_user_id))
+      .where(eq(xUserAccountLinks.x_user_id, xId))
+      .orderBy(xUserAccountLinks.link_role, xUserAccountLinks.auth_user_id)
       .limit(1)
   )[0];
   if (!row || (!force && row.is_notification_enabled === 0)) return null;

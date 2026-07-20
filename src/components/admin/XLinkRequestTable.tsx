@@ -3,18 +3,17 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { approveXIdLinkRequest, rejectXIdLinkRequest } from "@/lib/actions/xid-admin";
-import { MergeRequestButton } from "@/components/admin/MergeRequestButton";
 import { formatUnix } from "@/lib/utils/format";
 import { Icon } from "@/components/ui/Icon";
 
 export interface XLinkRequestRow {
   id: string;
   requested_x_id: string;
-  user_id: string;
+  requested_by_auth_user_id: string;
   discord_name: string | null;
   discord_image: string | null;
   requested_at: number;
-  link_type?: "new" | "merge" | "alias" | null;
+  request_type: "new_link" | "existing_link" | "alias" | "merge" | "revert_merge";
   target_x_user_id?: string | null;
   requested_x_name?: string | null;
   requested_icon_url?: string | null;
@@ -188,14 +187,14 @@ export function XLinkRequestTable({
               <td>
                 <span
                   className={`fn-badge ${
-                    r.link_type === "merge"
+                    r.request_type === "merge"
                       ? "fn-badge-danger"
-                      : r.link_type === "alias"
+                      : r.request_type === "alias"
                         ? "fn-badge-warning"
                         : "fn-badge-soft"
                   }`}
                 >
-                  {r.link_type ?? "new"}
+                  {r.request_type}
                 </span>
                 {r.target_x_user_id ? (
                   <div style={{ marginTop: 8 }}>
@@ -242,7 +241,7 @@ export function XLinkRequestTable({
                         color: "var(--text-muted)",
                       }}
                     >
-                      {r.user_id}
+                      {r.requested_by_auth_user_id}
                     </span>
                   </span>
                 </div>
@@ -253,21 +252,14 @@ export function XLinkRequestTable({
               </td>
               <td>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {r.link_type === "merge" ? (
-                    <MergeRequestButton
-                      fromXId={r.requested_x_id}
-                      toXId={r.target_x_user_id ?? null}
-                    />
-                  ) : (
-                    <button
-                      type="button"
-                      className="fn-btn fn-btn-primary fn-btn-sm"
-                      disabled={pending}
-                      onClick={() => run(approveXIdLinkRequest, r.id)}
-                    >
-                      承認
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className="fn-btn fn-btn-primary fn-btn-sm"
+                    disabled={pending}
+                    onClick={() => run(approveXIdLinkRequest, r.id)}
+                  >
+                    承認
+                  </button>
                   <button
                     type="button"
                     className="fn-btn fn-btn-ghost fn-btn-sm"

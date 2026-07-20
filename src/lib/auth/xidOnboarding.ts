@@ -2,8 +2,9 @@ import "server-only";
 
 import { and, eq } from "drizzle-orm";
 import { withDatabase } from "@/lib/cloudflare";
-import { xAccountLinkRequests, xUsers } from "@/lib/db/schema";
+import { xIdentityRequests } from "@/lib/db/schema";
 import { sanitizeNextPath } from "#utils/next";
+import { getLinkedXUserIdsForAuthUser } from "./xIdentity";
 
 const SETTINGS_PATH = "/dashboard/settings";
 
@@ -30,30 +31,26 @@ export function buildXIdOnboardingHref(next?: string | null): string {
  * admin / moderator は運用アカウントのため除外する。
  */
 export async function userNeedsXIdOnboarding(
-  userId: string,
+  authUserId: string,
   role?: string | null,
 ): Promise<boolean> {
   if (role === "admin" || role === "moderator") return false;
 
   const needs = await withDatabase(async (db) => {
-    const [linked, pending] = await Promise.all([
+    const [linkedXUserIds, pending] = await Promise.all([
+      getLinkedXUserIdsForAuthUser(db, authUserId),
       db
-        .select({ id: xUsers.id })
-        .from(xUsers)
-        .where(eq(xUsers.linked_user_id, userId))
-        .limit(1),
-      db
-        .select({ id: xAccountLinkRequests.id })
-        .from(xAccountLinkRequests)
+        .select({ id: xIdentityRequests.id })
+        .from(xIdentityRequests)
         .where(
           and(
-            eq(xAccountLinkRequests.user_id, userId),
-            eq(xAccountLinkRequests.status, "pending"),
+            eq(xIdentityRequests.requested_by_auth_user_id, authUserId),
+            eq(xIdentityRequests.status, "pending"),
           )!,
         )
         .limit(1),
     ]);
-    return linked.length === 0 && pending.length === 0;
+    return linkedXUserIds.length === 0 && pending.length === 0;
   });
 
   return needs ?? false;

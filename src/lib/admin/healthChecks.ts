@@ -2,7 +2,7 @@ import "server-only";
 
 import { and, desc, eq, gte, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
-import { events as eventsTable, auditLogs as auditLogsTable, notificationOutbox as notificationOutboxTable, slots as slotsTable, systemSettings, videoEvents as videoEventsTable, videoInteractions as videoInteractionsTable, videoModerationCases as videoModerationCasesTable, videoYoutubeMetadata as videoYoutubeMetadataTable, videos as videosTable, xIdMergeRequests as xIdMergeRequestsTable } from "@/lib/db/schema";
+import { events as eventsTable, auditLogs as auditLogsTable, notificationOutbox as notificationOutboxTable, slots as slotsTable, systemSettings, videoEvents as videoEventsTable, videoInteractions as videoInteractionsTable, videoModerationCases as videoModerationCasesTable, videoYoutubeMetadata as videoYoutubeMetadataTable, videos as videosTable, xIdentityRequests as xIdentityRequestsTable } from "@/lib/db/schema";
 
 export type HealthCheckResult = {
   id: string;
@@ -658,26 +658,27 @@ async function checkActiveApiEndpointsOrphanEvent(
     note: "events.public_api_enabled is canonical.",
   };
 }
-/** x_id_merge_requests の pending が放置されていないか */
+/** x_identity_requests の統合申請 pending が放置されていないか */
 async function checkXIdMergePendingStale(
   db: AnyDb,
 ): Promise<HealthCheckResult> {
   const cutoff = Math.floor(Date.now() / 1000) - 7 * 86400;
   const where = and(
-    eq(xIdMergeRequestsTable.status, "pending"),
-    lt(xIdMergeRequestsTable.created_at, cutoff),
+    eq(xIdentityRequestsTable.request_type, "merge"),
+    eq(xIdentityRequestsTable.status, "pending"),
+    lt(xIdentityRequestsTable.requested_at, cutoff),
   );
   const [countRows, sampleRows] = await Promise.all([
-    db.select({ c: sql<number>`COUNT(*)` }).from(xIdMergeRequestsTable).where(where),
+    db.select({ c: sql<number>`COUNT(*)` }).from(xIdentityRequestsTable).where(where),
     db
       .select({
-        id: xIdMergeRequestsTable.id,
-        from_x_user_id: xIdMergeRequestsTable.from_x_user_id,
-        to_x_user_id: xIdMergeRequestsTable.to_x_user_id,
+        id: xIdentityRequestsTable.id,
+        from_x_user_id: xIdentityRequestsTable.source_x_user_id,
+        to_x_user_id: xIdentityRequestsTable.target_x_user_id,
       })
-      .from(xIdMergeRequestsTable)
+      .from(xIdentityRequestsTable)
       .where(where)
-      .orderBy(xIdMergeRequestsTable.created_at)
+      .orderBy(xIdentityRequestsTable.requested_at)
       .limit(10),
   ]);
   const count = Number(countRows[0]?.c ?? 0);

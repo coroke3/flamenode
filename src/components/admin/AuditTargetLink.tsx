@@ -10,7 +10,7 @@ import { Icon } from "@/components/ui/Icon";
  * - events: /manage/events/{id}/edit (運営) + /event/{id} (公開)
  * - users: /admin/users/{id}
  * - x_users: /admin/users?view=xid&q={id} (検索結果ジャンプ)
- * - x_account_link_requests: /admin/x-link-requests
+ * - x_identity_requests: /admin/x-link-requests
  * - slots / video_chapters 等: 親 record の管理画面にフォールバック
  *
  * 不明なテーブル名はリンクなしの素のテキストを返す。
@@ -47,7 +47,7 @@ const TABLE_LINKS: Record<
   }),
   event_staff: () => ({}),
   notification_outbox: () => ({}),
-  x_account_link_requests: (id) => ({
+  x_identity_requests: (id) => ({
     adminHref: `/admin/x-link-requests?record=${encodeURIComponent(id)}`,
   }),
 };

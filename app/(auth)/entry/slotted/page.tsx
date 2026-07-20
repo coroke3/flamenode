@@ -10,6 +10,7 @@ import {
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth/guard";
+import { getLinkedXUsersForAuthUser } from "@/lib/auth/xIdentity";
 import { VideoForm } from "@/components/forms/VideoForm";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
@@ -102,16 +103,9 @@ export default async function SlottedPostPage({
           .limit(1)
       )[0]
     : null;
-  const xIdOptions = await db
-    .select({ id: xUsersTable.id, x_name: xUsersTable.x_name })
-    .from(xUsersTable)
-    .where(
-      and(
-        eq(xUsersTable.linked_user_id, user.id),
-        eq(xUsersTable.approval_status, "approved"),
-      )!,
-    )
-    .orderBy(asc(xUsersTable.x_name));
+  const xIdOptions = (await getLinkedXUsersForAuthUser(db, user.id, { approvedOnly: true }))
+    .map((row) => ({ id: row.x_user_id, x_name: row.x_name }))
+    .sort((a, b) => a.x_name.localeCompare(b.x_name, "ja"));
   const memberSuggestions = await db
     .select({ name: xUsersTable.x_name, x_user_id: xUsersTable.id })
     .from(xUsersTable)

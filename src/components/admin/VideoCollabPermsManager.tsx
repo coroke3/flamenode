@@ -21,7 +21,7 @@ export interface VideoCollabSubject {
   display_name: string;
   can_edit: number;
   is_public_member: number;
-  /** x_users に行があり linked_user_id がある */
+  /** x_user_account_links に認証ユーザー紐付けがある */
   has_discord_link?: boolean;
 }
 

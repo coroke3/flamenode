@@ -1,7 +1,7 @@
 import { and, desc, isNotNull, sql } from "drizzle-orm";
 import { normalizeYoutubeChannelInput } from "@/lib/utils/youtubeChannel";
 import type { DB } from "./client";
-import { videos, xUserYoutubeChannels, xUsers } from "./schema";
+import { videos, xUsers } from "./schema";
 
 function xUserIdLower(xId: string): string {
   return xId.trim().toLowerCase();
@@ -11,9 +11,6 @@ function creatorXUserIdMatches(xId: string) {
   return sql`lower(${videos.creator_x_user_id}) = ${xUserIdLower(xId)}`;
 }
 
-function xUserYoutubeChannelUserMatches(xId: string) {
-  return sql`lower(${xUserYoutubeChannels.x_user_id}) = ${xUserIdLower(xId)}`;
-}
 
 /** 作品スナップショット用にチャンネル URL を正規化する。 */
 export function snapshotYoutubeChannelUrl(
@@ -35,8 +32,7 @@ export function snapshotYoutubeChannelUrl(
  *
  * 候補ソース (指定 X ID のみ、重複除去・新しい順):
  *   1. x_users.youtube_channel_url (プロフィール正本)
- *   2. x_user_youtube_channels (投稿・手動記録履歴)
- *   3. videos.creator_youtube_channel_url (過去作品スナップショット)
+ *   2. videos.creator_youtube_channel_url (過去作品スナップショット)
  */
 export async function getYoutubeChannelCandidates(
   db: DB,
@@ -64,17 +60,6 @@ export async function getYoutubeChannelCandidates(
       .limit(1)
   )[0];
   push(row?.youtube_channel_url);
-
-  const historyRows = await db
-    .select({ youtube_channel_url: xUserYoutubeChannels.youtube_channel_url })
-    .from(xUserYoutubeChannels)
-    .where(xUserYoutubeChannelUserMatches(xId))
-    .orderBy(desc(xUserYoutubeChannels.created_at))
-    .limit(limit * 2);
-  for (const historyRow of historyRows) {
-    push(historyRow.youtube_channel_url);
-    if (out.length >= limit) return out;
-  }
 
   const videoRows = await db
     .select({ youtube_channel_url: videos.creator_youtube_channel_url })

@@ -8,7 +8,6 @@ const ATOMIC_ONLY_TABLES = new Set([
   "user",
   "users",
   "x_users",
-  "x_user_icons",
   "events",
   "event_staff",
   "slots",
@@ -22,7 +21,6 @@ const ATOMIC_ONLY_TABLES = new Set([
   "event_groups",
   "event_group_events",
   "system_settings",
-  "audit_log_settings",
 ]);
 
 function assertAuditActionAllowed(
@@ -39,8 +37,7 @@ const STRICT_TABLES = new Set([
   "users",
   "event_staff",
   "system_settings",
-  "audit_log_settings",
-  "x_id_merge_requests",
+  "x_identity_requests",
   "x_users",
 ]);
 

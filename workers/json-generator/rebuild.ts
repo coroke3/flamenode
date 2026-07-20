@@ -586,7 +586,7 @@ async function rebuildSearchIndexLite(env: Env): Promise<void> {
   const users = await env.DB.prepare(
     `SELECT id, x_name FROM x_users
      WHERE approval_status = 'approved'
-     ORDER BY approval_requested_at DESC, id ASC LIMIT 500`,
+     ORDER BY id ASC LIMIT 500`,
   ).all();
   await putJson(env, "search-index-lite.json", {
     generated_at: Math.floor(Date.now() / 1000),

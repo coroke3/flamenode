@@ -63,7 +63,7 @@ export function SettingsXAccountPanel({
           <span className={pageStyles.activeHandle}>
             <Icon name="x" size={11} aria-hidden />@{x.id}
           </span>
-          <span className={pageStyles.rowDate}>{linkedLabel(x.approval_requested_at)}</span>
+          <span className={pageStyles.rowDate}>{linkedLabel(x.requested_at)}</span>
         </div>
         <div className={pageStyles.activeBadges}>
           <SettingsStatusPill status={x.approval_status} />
