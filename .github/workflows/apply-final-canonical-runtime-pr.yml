@@ -32,13 +32,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p .tmp
           exec > >(tee .tmp/apply.log) 2>&1
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config merge.conflictStyle diff3
           git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'
           git reset --hard origin/agent/db-canonical-migration-v2
-          mkdir -p .tmp
 
           set +e
           git merge --no-ff --no-edit -Xtheirs origin/agent/db-canonical-events
@@ -50,10 +50,16 @@ jobs:
             printf '%s\n' "${conflicts[@]}" > .tmp/event-conflicts.txt
             for path in "${conflicts[@]}"; do
               case "$path" in
-                migrations/*|src/lib/db/schema.ts|src/lib/db/schema.canonical.ts|docs/database/canonical-migration-plan.md|docs/db-history/*|.github/workflows/*)
-                  git checkout --ours -- "$path" ;;
+                .github/workflows/*)
+                  git rm -f -- "$path" || true
+                  continue
+                  ;;
+                migrations/*|src/lib/db/schema.ts|src/lib/db/schema.canonical.ts|docs/database/canonical-migration-plan.md|docs/db-history/*)
+                  git checkout --ours -- "$path"
+                  ;;
                 *)
-                  git checkout --theirs -- "$path" ;;
+                  git checkout --theirs -- "$path"
+                  ;;
               esac
               git add -- "$path"
             done
