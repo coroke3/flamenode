@@ -29,6 +29,45 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }}
           fetch-depth: 0
 
+      - name: PR89最新headを同期
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'agent/ux-and-status-simplification'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin agent/db-canonical-migration-v2
+          if git merge-base --is-ancestor origin/agent/db-canonical-migration-v2 HEAD; then
+            echo 'PR89最新headは取り込み済みです。'
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          set +e
+          git merge --no-commit --no-ff -X ours origin/agent/db-canonical-migration-v2
+          merge_status=$?
+          set -e
+          if [ "$merge_status" -ne 0 ]; then
+            mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
+            if [ "${#conflicts[@]}" -eq 0 ]; then
+              echo '親ブランチの統合に失敗しましたが競合ファイルを取得できませんでした。' >&2
+              exit 1
+            fi
+            git checkout --ours -- "${conflicts[@]}"
+            git add -- "${conflicts[@]}"
+          fi
+          if git diff --name-only --diff-filter=U | grep -q .; then
+            echo '未解決の親ブランチ競合が残っています。' >&2
+            git diff --name-only --diff-filter=U >&2
+            exit 1
+          fi
+
+          git checkout origin/agent/db-canonical-migration-v2 -- \
+            .github/workflows/ci.yml \
+            .github/workflows/export-current-pr-source.yml
+          git add -A
+          git commit -m "PR89最新headへ状態整理を載せ直し"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+
       - name: Canonical runtime patchesを統合
         if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'agent/db-canonical-migration-v2' && hashFiles('.agent-patch/part-*') != ''
         env:
