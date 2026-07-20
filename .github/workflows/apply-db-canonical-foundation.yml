@@ -26,21 +26,20 @@ jobs:
           gzip --decompress --stdout /tmp/db-canonical-foundation.patch.gz > /tmp/db-canonical-foundation.patch
           echo "2d749659cb29c97b5524bbec443d06cb0248bdc84716fb0d3646f7323a68b436  /tmp/db-canonical-foundation.patch" | sha256sum --check
 
-      - name: Apply patch
+      - name: Apply non-workflow patch
         shell: bash
-        run: git apply --index /tmp/db-canonical-foundation.patch
+        run: git apply --index --exclude=.github/workflows/ci.yml /tmp/db-canonical-foundation.patch
 
-      - name: Commit final DB foundation
+      - name: Commit DB foundation
         shell: bash
         run: |
           set -euo pipefail
           rm -rf .agent
-          rm -f .github/workflows/apply-db-canonical-foundation.yml
           git add -A
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "DB正本移行の安全性検証を強化"
 
-      - name: Push final DB foundation
+      - name: Push DB foundation
         shell: bash
         run: git push origin HEAD:agent/db-canonical-foundation
