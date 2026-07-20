@@ -17,8 +17,8 @@ permissions:
   contents: write
 
 concurrency:
-  group: connect-xid-audits-v10
-  cancel-in-progress: false
+  group: connect-xid-audits-v10-${{ github.sha }}
+  cancel-in-progress: true
 
 jobs:
   connect-and-verify:
