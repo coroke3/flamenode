@@ -2,6 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-20
+> Verified against commit: `8de170c`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/`, `wrangler.toml`, `package.json`
 
 ## AIの読取順
