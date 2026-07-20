@@ -78,7 +78,7 @@ test("設定読取失敗時は監査compact既定値へ戻す", async () => {
   });
 });
 
-test("一時エラーは再試行する", async () => {
+test("設定読取の一時エラーは既定値へフォールバックしcleanupを継続する", async () => {
   let firstCalls = 0;
   const env = {
     DB: {
@@ -89,8 +89,7 @@ test("一時エラーは再試行する", async () => {
           },
           async first() {
             firstCalls += 1;
-            if (firstCalls === 1) throw new Error("Too many requests");
-            return { audit_compact_after_days: 30 };
+            throw new Error("Too many requests");
           },
           async run() {
             return { success: true };
@@ -101,5 +100,5 @@ test("一時エラーは再試行する", async () => {
   };
   const result = await runCleanupWithRetry(env);
   assert.equal(result.failed, 0);
-  assert.ok(firstCalls >= 2);
+  assert.equal(firstCalls, 1);
 });
