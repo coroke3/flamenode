@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   formatCustomAnswerValue,
   parseCustomAnswerValuesJson,
+  parseOptionsJson,
   readCustomAnswersFromFormData,
   validateAnswerInput,
 } from "./customQuestions.ts";
@@ -26,10 +27,10 @@ function checkboxQuestion(overrides = {}) {
   };
 }
 
-test("checkbox answer removes duplicates and stores a JSON array", () => {
+test("checkbox answer removes duplicates and stores configured option order", () => {
   const result = validateAnswerInput(
     checkboxQuestion(),
-    ["素材", "楽曲", "素材"],
+    ["楽曲", "素材", "楽曲"],
   );
 
   assert.equal(result.ok, true);
@@ -85,7 +86,7 @@ test("optional empty answer becomes an explicit deletion draft", () => {
   });
 });
 
-test("checkbox JSON is restored to the edit form and review text", () => {
+test("canonical answer JSON is restored to the edit form and review text", () => {
   const json = JSON.stringify({
     "question-rights": ["素材", "モデル"],
   });
@@ -97,4 +98,36 @@ test("checkbox JSON is restored to the edit form and review text", () => {
     formatCustomAnswerValue(null, JSON.stringify(["素材", "モデル"])),
     "素材、モデル",
   );
+});
+
+test("legacy array answer JSON is rejected instead of converted", () => {
+  assert.throws(
+    () => parseCustomAnswerValuesJson(JSON.stringify([
+      { id: "question-rights", value: ["素材"] },
+    ])),
+    /invalid_custom_answer_values_json/,
+  );
+});
+
+test("malformed option JSON is rejected instead of truncated or skipped", () => {
+  assert.throws(
+    () => parseOptionsJson(JSON.stringify(["素材", " 素材 "])),
+    /invalid_custom_question_options_json/,
+  );
+  assert.throws(
+    () => parseOptionsJson(JSON.stringify(["素材", 1])),
+    /invalid_custom_question_options_json/,
+  );
+});
+
+test("single-value controls reject forged multiple values", () => {
+  const textQuestion = checkboxQuestion({
+    type: "text",
+    options: [],
+    max_length: 200,
+  });
+  assert.deepEqual(validateAnswerInput(textQuestion, ["A", "B"]), {
+    ok: false,
+    message: "確認済みの権利の送信形式が不正です。",
+  });
 });
