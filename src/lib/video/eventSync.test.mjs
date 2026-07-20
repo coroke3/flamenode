@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  computeStagePermissionAnswerDeleteEventIds,
+  computeCustomAnswerDeleteScopeEventIds,
   computeVideoEventSyncTarget,
 } from "./eventSync.ts";
 
@@ -55,9 +55,9 @@ test("computeVideoEventSyncTarget ignores unmodifiable requested events", () => 
   );
 });
 
-test("computeStagePermissionAnswerDeleteEventIds includes removed events", () => {
+test("computeCustomAnswerDeleteScopeEventIds includes removed events", () => {
   assert.deepEqual(
-    computeStagePermissionAnswerDeleteEventIds({
+    computeCustomAnswerDeleteScopeEventIds({
       previousEventIds: ["old", "kept", "old"],
       targetEventIds: ["kept", "new"],
     }),
@@ -65,9 +65,9 @@ test("computeStagePermissionAnswerDeleteEventIds includes removed events", () =>
   );
 });
 
-test("computeStagePermissionAnswerDeleteEventIds trims empty values", () => {
+test("computeCustomAnswerDeleteScopeEventIds trims empty values", () => {
   assert.deepEqual(
-    computeStagePermissionAnswerDeleteEventIds({
+    computeCustomAnswerDeleteScopeEventIds({
       previousEventIds: [" old ", "", "  "],
       targetEventIds: ["new", " old "],
     }),

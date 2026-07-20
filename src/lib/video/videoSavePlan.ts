@@ -11,16 +11,12 @@ import {
   MAX_ATOMIC_VIDEO_EVENTS,
 } from "@/lib/video/syncVideoEvents";
 import { buildReplaceVideoMembersPlan } from "@/lib/video/replaceVideoMembers";
-import {
-  buildReplaceStagePermissionAnswersPlan,
-  readStagePermissionCustomAnswers,
-} from "@/lib/video/stagePermissionAnswers";
 import type { CustomAnswerDraft } from "@/lib/video/customQuestions";
 import { buildReplaceGeneralCustomAnswersPlan } from "@/lib/video/customQuestionAnswers";
 import type { VideoFormData } from "@/lib/video/videoFormSchema";
 import type { AllowedVideoEditSections } from "@/lib/video/computeEditSections";
 import type { ValidatedMemberSubmission } from "@/lib/video/submissionValidation";
-import { computeStagePermissionAnswerDeleteEventIds } from "@/lib/video/eventSync";
+import { computeCustomAnswerDeleteScopeEventIds } from "@/lib/video/eventSync";
 import {
   computeStaticRebuildFlags,
   computeVideoRevalidatePaths,
@@ -33,7 +29,6 @@ import {
 } from "@/lib/video/atomicWritePlan";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import type { EnqueueStaticRebuildInput } from "@/lib/staticRebuild/types";
-
 import {
   buildVideoAuditSnapshot,
   type VideoAuditSnapshot,
@@ -69,11 +64,10 @@ export interface VideoSavePlan {
   youtubeChanged: boolean;
   nextCreatorX: string;
   usedSoftware: string | null;
-  stagePermission: string | null;
   memberSubmission: ValidatedMemberSubmission | null;
   customAnswerDrafts: CustomAnswerDraft[];
   syncedEventIds: string[] | null;
-  stagePermissionDeleteEventIds: string[] | undefined;
+  customAnswerDeleteEventIds: string[] | undefined;
   auditBefore: VideoAuditSnapshot;
   auditAfter: VideoAuditSnapshot;
   revalidatePaths: string[];
@@ -160,12 +154,11 @@ export function buildVideoUpdatePlan(args: {
   youtubeId: string;
   youtubeChanged: boolean;
   nextCreatorX: string;
-  nextStagePermission: string | null;
   creatorYoutubeChannelUrl: string | null;
   memberSubmission: ValidatedMemberSubmission | null;
   customAnswerDrafts: VideoSavePlan["customAnswerDrafts"];
   syncedEventIds: string[] | null;
-  stagePermissionDeleteEventIds: string[] | undefined;
+  customAnswerDeleteEventIds: string[] | undefined;
   hasEventIdsField: boolean;
   now: number;
 }): VideoSavePlan {
@@ -216,11 +209,10 @@ export function buildVideoUpdatePlan(args: {
     youtubeChanged: args.youtubeChanged,
     nextCreatorX: args.nextCreatorX,
     usedSoftware: args.parsed.used_software ?? null,
-    stagePermission: args.nextStagePermission,
     memberSubmission: args.memberSubmission,
     customAnswerDrafts: args.customAnswerDrafts,
     syncedEventIds: args.syncedEventIds,
-    stagePermissionDeleteEventIds: args.stagePermissionDeleteEventIds,
+    customAnswerDeleteEventIds: args.customAnswerDeleteEventIds,
     auditBefore,
     auditAfter,
     revalidatePaths: computeVideoRevalidatePaths({
@@ -252,11 +244,11 @@ export function buildVideoUpdatePlan(args: {
   };
 }
 
-export function computeStagePermissionDeleteIds(args: {
+export function computeCustomAnswerDeleteEventIds(args: {
   previousEventIds: string[];
   syncedEventIds: string[];
 }): string[] {
-  return computeStagePermissionAnswerDeleteEventIds({
+  return computeCustomAnswerDeleteScopeEventIds({
     previousEventIds: args.previousEventIds,
     targetEventIds: args.syncedEventIds,
   });
@@ -366,44 +358,26 @@ export async function applyVideoUpdatePlan(
       }),
     );
   }
-  if (sections.descriptions || plan.stagePermissionDeleteEventIds) {
-    const stagePermission = sections.descriptions
-      ? plan.stagePermission
-      : await readStagePermissionCustomAnswers(db, {
-          videoId: plan.videoId,
-          eventIds: targetEventIds,
-        });
-    appendVideoAtomicWritePlan(
-      atomic,
-      await buildReplaceStagePermissionAnswersPlan(db, {
-        videoId: plan.videoId,
-        eventIds: targetEventIds,
-        deleteEventIds: plan.stagePermissionDeleteEventIds,
-        stagePermission,
-        now: payload.updated_at,
-        actorUserId: plan.operatorUserId,
-      }),
-    );
+  if (sections.descriptions || (plan.customAnswerDeleteEventIds?.length ?? 0) > 0) {
     appendVideoAtomicWritePlan(
       atomic,
       await buildReplaceGeneralCustomAnswersPlan(db, {
         videoId: plan.videoId,
         eventIds: targetEventIds,
-        drafts: plan.customAnswerDrafts,
+        deleteEventIds: plan.customAnswerDeleteEventIds,
+        drafts: sections.descriptions ? plan.customAnswerDrafts : [],
         now: payload.updated_at,
         actorUserId: plan.operatorUserId,
       }),
     );
   }
 
-  const queueItems: EnqueueStaticRebuildInput[] = [
-    {
-      targetType: "video",
-      targetId: plan.videoId,
-      reason: "video_update",
-      requestedByUserId: plan.operatorUserId,
-    },
-  ];
+  const queueItems: EnqueueStaticRebuildInput[] = [{
+    targetType: "video",
+    targetId: plan.videoId,
+    reason: "video_update",
+    requestedByUserId: plan.operatorUserId,
+  }];
   if (plan.rebuildFlags.identityChanged && payload.creator_x_user_id) {
     queueItems.push({
       targetType: "user",

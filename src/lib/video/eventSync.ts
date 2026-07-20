@@ -6,7 +6,7 @@ export interface VideoEventSyncTargetArgs {
   modifiableEventIds?: Iterable<string>;
 }
 
-export interface StagePermissionAnswerDeleteScopeArgs {
+export interface CustomAnswerDeleteScopeArgs {
   targetEventIds: string[];
   previousEventIds?: string[];
 }
@@ -49,8 +49,12 @@ export function computeVideoEventSyncTarget(
   return Array.from(target);
 }
 
-export function computeStagePermissionAnswerDeleteEventIds(
-  args: StagePermissionAnswerDeleteScopeArgs,
+/**
+ * 回答置換の対象候補を返す。
+ * 保存側で現在のイベントを除外し、紐付け解除されたイベントの回答だけを削除する。
+ */
+export function computeCustomAnswerDeleteScopeEventIds(
+  args: CustomAnswerDeleteScopeArgs,
 ): string[] {
   return unique([...(args.previousEventIds ?? []), ...args.targetEventIds]);
 }

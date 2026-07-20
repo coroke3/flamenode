@@ -67,7 +67,7 @@ export default async function ManageEventVideoDetailPage({
   )[0];
   if (!linked) notFound();
 
-  const video = await fetchVideoReviewDetail(db, videoId, [id]);
+  const video = await fetchVideoReviewDetail(db, videoId, [id], "review");
   if (!video) notFound();
 
   const isAdmin = user.role === "admin";

@@ -1,10 +1,16 @@
 import type { DB } from "@/lib/db/client";
 import { fetchActiveCustomQuestionsForEvents } from "@/lib/video/customQuestionAnswers";
-import { readCustomAnswersFromFormData } from "@/lib/video/customQuestions";
+import {
+  readCustomAnswersFromFormData,
+  type CustomAnswerDraft,
+} from "@/lib/video/customQuestions";
+import { MAX_VIDEO_CUSTOM_QUESTIONS } from "@/lib/video/customQuestionLimits";
 import {
   type MemberInput,
   parseVideoMemberInputs,
 } from "@/lib/video/memberInputs";
+
+export const CUSTOM_ANSWER_REPLACE_SENTINEL_ID = "__replace_custom_answers__";
 
 export interface ValidatedMemberSubmission {
   members: MemberInput[];
@@ -26,10 +32,7 @@ export async function validateCustomAnswersForEvents(
   formData: FormData,
   eventIds: string[],
 ): Promise<
-  | {
-      ok: true;
-      drafts: ReturnType<typeof readCustomAnswersFromFormData>["drafts"];
-    }
+  | { ok: true; drafts: CustomAnswerDraft[] }
   | { ok: false; message: string }
 > {
   let customQuestionsByEvent: Awaited<
@@ -39,8 +42,20 @@ export async function validateCustomAnswersForEvents(
     customQuestionsByEvent = await fetchActiveCustomQuestionsForEvents(db, eventIds);
   } catch (error) {
     console.warn("[submissionValidation] custom question read rejected", error);
-    return { ok: false, message: "カスタム質問数が保存上限を超えています。" };
+    return { ok: false, message: "イベントのカスタム質問設定が上限を超えています。" };
   }
+
+  const questionCount = [...customQuestionsByEvent.values()].reduce(
+    (total, questions) => total + questions.length,
+    0,
+  );
+  if (questionCount > MAX_VIDEO_CUSTOM_QUESTIONS) {
+    return {
+      ok: false,
+      message: `選択イベントのカスタム質問は合計${MAX_VIDEO_CUSTOM_QUESTIONS}件までです。`,
+    };
+  }
+
   const customAnswerRead = readCustomAnswersFromFormData(
     formData,
     customQuestionsByEvent,
@@ -48,5 +63,17 @@ export async function validateCustomAnswersForEvents(
   if (customAnswerRead.errors.length > 0) {
     return { ok: false, message: customAnswerRead.errors[0] };
   }
-  return { ok: true, drafts: customAnswerRead.drafts };
+
+  // 回答が0件でも「回答フォームを明示的に送信した」ことを保存計画へ伝える。
+  // イベント紐付けのみ変更したケースと区別し、任意回答を全消去できるようにする。
+  const drafts = customAnswerRead.drafts.length > 0
+    ? customAnswerRead.drafts
+    : [{
+        event_id: "",
+        question_id: CUSTOM_ANSWER_REPLACE_SENTINEL_ID,
+        question_key: CUSTOM_ANSWER_REPLACE_SENTINEL_ID,
+        answer_text: null,
+        answer_json: null,
+      }];
+  return { ok: true, drafts };
 }

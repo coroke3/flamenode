@@ -19,13 +19,6 @@ import { buildReplaceGeneralCustomAnswersPlan } from "@/lib/video/customQuestion
 import { buildSubmissionXUserPlan } from "@/lib/video/ensureSubmissionXUser";
 import { buildReplaceVideoMembersPlan } from "@/lib/video/replaceVideoMembers";
 import {
-  UnslottedEventSyncError,
-  buildUnslottedEventEligibilityAssertionPlan,
-  buildUnslottedVideoEventPlan,
-  parseUnslottedEventIdFromForm,
-  resolveUnslottedEventIdForNewVideo,
-} from "@/lib/video/resolveUnslottedEventSyncTarget";
-import {
   validateCustomAnswersForEvents,
   validateVideoMemberSubmission,
 } from "@/lib/video/submissionValidation";
@@ -58,34 +51,6 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
   if (!youtubeId) {
     return { ok: false, message: "YouTube URLを解析できません。" };
   }
-
-  let requestedEventId: string | null;
-  try {
-    requestedEventId = parseUnslottedEventIdFromForm(formData);
-  } catch (error) {
-    console.warn("[createFreeVideo] invalid event selection", error);
-    return { ok: false, message: "枠なし投稿で所属できるイベントは1件までです。" };
-  }
-
-  let eventId: string | null;
-  try {
-    eventId = await resolveUnslottedEventIdForNewVideo(db, requestedEventId);
-  } catch (error) {
-    console.warn("[createFreeVideo] event affiliation rejected", error);
-    if (
-      error instanceof UnslottedEventSyncError &&
-      error.code === "unslotted_event_selection_invalid"
-    ) {
-      return { ok: false, message: "枠なし投稿で所属できるイベントは1件までです。" };
-    }
-    return {
-      ok: false,
-      message:
-        "選択したイベントは枠なし投稿を受け付けていません。公開状態・終了日時・イベント設定を確認してください。",
-    };
-  }
-  const eventIds = eventId ? [eventId] : [];
-
   if (await checkYoutubeVideoDuplicate(db, youtubeId)) {
     return { ok: false, message: "このYouTube動画は既に登録されています。" };
   }
@@ -96,7 +61,24 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
   );
   if (!memberValidation.ok) return memberValidation;
 
-  // 質問定義・回答は event_custom_questions / video_custom_answers だけを使用する。
+  let syncedEventIds: string[];
+  try {
+    syncedEventIds = await resolveEventSyncTargetForNewVideo(db, {
+      requested: requestedEventIds,
+      user: { id: userId, role: sessionUser.role ?? null },
+      linkPolicy: "unslotted_posts",
+    });
+  } catch (error) {
+    console.warn("[createFreeVideo] event plan rejected", error);
+    return { ok: false, message: "選択イベント数が保存上限を超えています。" };
+  }
+  if (
+    sessionUser.role !== "admin" &&
+    requestedEventIds.some((eventId) => !syncedEventIds.includes(eventId))
+  ) {
+    return { ok: false, message: "選択したイベントの一部には投稿できません。" };
+  }
+
   const customValidation = await validateCustomAnswersForEvents(
     db,
     formData,
@@ -171,48 +153,34 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
       retention_class: "normal",
       strict: true,
     });
-
-    appendVideoAtomicWritePlan(
-      plan,
-      await buildVideoDerivedRowsPlan(db, {
-        videoId,
-        youtubeVideoId: youtubeId,
-        now,
-        actorUserId: userId,
-      }),
-    );
-    appendVideoAtomicWritePlan(
-      plan,
-      await buildReplaceVideoMembersPlan(db, {
-        videoId,
-        members: memberValidation.value.members,
-        chaptersByIndex: memberValidation.value.chaptersByIndex,
-        actorUserId: userId,
-      }),
-    );
-    appendVideoAtomicWritePlan(
-      plan,
-      await buildReplaceVideoSoftwarePlan(db, {
-        videoId,
-        raw: parsed.data.used_software ?? null,
-        actorUserId: userId,
-      }),
-    );
-    appendVideoAtomicWritePlan(
-      plan,
-      buildUnslottedVideoEventPlan(db, { videoId, eventId, actorUserId: userId }),
-    );
-    appendVideoAtomicWritePlan(
-      plan,
-      await buildReplaceGeneralCustomAnswersPlan(db, {
-        videoId,
-        eventIds,
-        drafts: customValidation.drafts,
-        now,
-        actorUserId: userId,
-      }),
-    );
-
+    appendVideoAtomicWritePlan(plan, await buildVideoDerivedRowsPlan(db, {
+      videoId,
+      youtubeVideoId: youtubeId,
+      now,
+      actorUserId: userId,
+    }));
+    appendVideoAtomicWritePlan(plan, await buildReplaceVideoMembersPlan(db, {
+      videoId,
+      members: memberValidation.value.members,
+      chaptersByIndex: memberValidation.value.chaptersByIndex,
+      actorUserId: userId,
+    }));
+    appendVideoAtomicWritePlan(plan, await buildReplaceVideoSoftwarePlan(db, {
+      videoId,
+      raw: parsed.data.used_software ?? null,
+      actorUserId: userId,
+    }));
+    appendVideoAtomicWritePlan(plan, await buildSyncVideoEventsPlan(db, videoId, {
+      targetEventIds: syncedEventIds,
+      actorUserId: userId,
+    }));
+    appendVideoAtomicWritePlan(plan, await buildReplaceGeneralCustomAnswersPlan(db, {
+      videoId,
+      eventIds: syncedEventIds,
+      drafts: customValidation.drafts,
+      now,
+      actorUserId: userId,
+    }));
     const notification = await buildNotificationOutboxStatement(db, {
       recipientUserId: userId,
       type: "video_submitted",

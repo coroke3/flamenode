@@ -48,7 +48,15 @@ test("合作メンバー判定は現在値を使う", async () => {
 
   assert.match(
     text,
-    /memberCount\s*>\s*0/,
+    /const \[members, setMembers\] = React\.useState/,
+  );
+  assert.match(
+    text,
+    /const memberCount = members\.filter/,
+  );
+  assert.match(
+    text,
+    /onChange=\{setMembers\}/,
   );
   assert.doesNotMatch(
     text,

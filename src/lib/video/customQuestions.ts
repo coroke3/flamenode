@@ -1,4 +1,15 @@
 import type { eventCustomQuestions, videoCustomAnswers } from "@/lib/db/schema";
+import {
+  MAX_CUSTOM_QUESTION_CONFIGURED_LENGTH,
+  MAX_CUSTOM_QUESTION_DESCRIPTION_LENGTH,
+  MAX_CUSTOM_QUESTION_KEY_LENGTH,
+  MAX_CUSTOM_QUESTION_LABEL_LENGTH,
+  MAX_CUSTOM_QUESTION_OPTION_LENGTH,
+  MAX_CUSTOM_QUESTION_OPTIONS,
+  MAX_CUSTOM_QUESTION_PLACEHOLDER_LENGTH,
+  MAX_CUSTOM_QUESTION_TEXTAREA_LENGTH,
+  MAX_CUSTOM_QUESTION_TEXT_LENGTH,
+} from "@/lib/video/customQuestionLimits";
 
 export type CustomQuestionType = "text" | "textarea" | "select" | "radio" | "checkbox";
 export type CustomQuestionVisibility = "review" | "private" | "public";
@@ -22,6 +33,9 @@ export interface CustomQuestion {
   visibility: CustomQuestionVisibility;
 }
 
+export type EditableCustomQuestion = Omit<CustomQuestion, "event_id">;
+export type CustomAnswerValue = string | string[];
+
 export interface CustomAnswerDraft {
   event_id: string;
   question_id: string;
@@ -36,66 +50,202 @@ const VALID_TYPES: ReadonlySet<string> = new Set([
 const VALID_VISIBILITY: ReadonlySet<string> = new Set([
   "review", "private", "public",
 ]);
-const KEY_MAX_LEN = 64;
-const MAX_OPTIONS = 50;
-const OPTION_MAX_LEN = 200;
+const QUESTION_KEY_PATTERN = /^[A-Za-z0-9_-]+$/;
 
-export function normalizeQuestionKey(raw: unknown): string {
-  if (typeof raw !== "string") return "";
-  return raw.trim().replace(/[^A-Za-z0-9_-]/g, "_").slice(0, KEY_MAX_LEN);
+export function isCustomQuestionType(value: unknown): value is CustomQuestionType {
+  return typeof value === "string" && VALID_TYPES.has(value);
 }
 
-export function parseQuestionType(value: unknown): CustomQuestionType {
-  if (typeof value === "string" && VALID_TYPES.has(value)) {
-    return value as CustomQuestionType;
-  }
-  return "textarea";
+export function isCustomQuestionVisibility(
+  value: unknown,
+): value is CustomQuestionVisibility {
+  return typeof value === "string" && VALID_VISIBILITY.has(value);
 }
 
-export function parseVisibility(value: unknown): CustomQuestionVisibility {
-  if (typeof value === "string" && VALID_VISIBILITY.has(value)) {
-    return value as CustomQuestionVisibility;
+export function isValidCustomQuestionKey(value: unknown): value is string {
+  return typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= MAX_CUSTOM_QUESTION_KEY_LENGTH &&
+    value === value.trim() &&
+    QUESTION_KEY_PATTERN.test(value);
+}
+
+function assertNullableBoundedText(
+  value: string | null,
+  maxLength: number,
+  errorCode: string,
+): void {
+  if (value === null) return;
+  if (!value || value.length > maxLength || value !== value.trim()) {
+    throw new Error(errorCode);
   }
-  return "review";
+}
+
+function parseStringArray(
+  value: unknown,
+  errorCode: string,
+): string[] {
+  if (!Array.isArray(value) || value.length > MAX_CUSTOM_QUESTION_OPTIONS) {
+    throw new Error(errorCode);
+  }
+
+  const seen = new Set<string>();
+  const values: string[] = [];
+  for (const item of value) {
+    if (
+      typeof item !== "string" ||
+      !item ||
+      item !== item.trim() ||
+      item.length > MAX_CUSTOM_QUESTION_OPTION_LENGTH ||
+      seen.has(item)
+    ) {
+      throw new Error(errorCode);
+    }
+    seen.add(item);
+    values.push(item);
+  }
+  return values;
 }
 
 export function parseOptionsJson(raw: string | null | undefined): string[] {
-  if (!raw || !raw.trim()) return [];
+  if (raw === null || raw === undefined) return [];
+  if (!raw) throw new Error("invalid_custom_question_options_json");
   try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const item of parsed) {
-      if (typeof item !== "string") continue;
-      const trimmed = item.trim().slice(0, OPTION_MAX_LEN);
-      if (!trimmed || seen.has(trimmed)) continue;
-      seen.add(trimmed);
-      out.push(trimmed);
-      if (out.length >= MAX_OPTIONS) break;
+    return parseStringArray(
+      JSON.parse(raw) as unknown,
+      "invalid_custom_question_options_json",
+    );
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === "invalid_custom_question_options_json"
+    ) {
+      throw error;
     }
-    return out;
-  } catch {
-    return [];
+    throw new Error("invalid_custom_question_options_json");
   }
 }
 
 export function rowToQuestion(row: CustomQuestionRow): CustomQuestion {
+  if (!isValidCustomQuestionKey(row.question_key)) {
+    throw new Error("invalid_custom_question_key");
+  }
+  if (
+    !row.label ||
+    row.label !== row.label.trim() ||
+    row.label.length > MAX_CUSTOM_QUESTION_LABEL_LENGTH
+  ) {
+    throw new Error("invalid_custom_question_label");
+  }
+  assertNullableBoundedText(
+    row.description,
+    MAX_CUSTOM_QUESTION_DESCRIPTION_LENGTH,
+    "invalid_custom_question_description",
+  );
+  assertNullableBoundedText(
+    row.placeholder,
+    MAX_CUSTOM_QUESTION_PLACEHOLDER_LENGTH,
+    "invalid_custom_question_placeholder",
+  );
+  if (!isCustomQuestionType(row.type)) {
+    throw new Error("invalid_custom_question_type");
+  }
+  if (!isCustomQuestionVisibility(row.visibility)) {
+    throw new Error("invalid_custom_question_visibility");
+  }
+  if (row.required !== 0 && row.required !== 1) {
+    throw new Error("invalid_custom_question_required");
+  }
+  if (row.is_active !== 0 && row.is_active !== 1) {
+    throw new Error("invalid_custom_question_active");
+  }
+  if (!Number.isSafeInteger(row.sort_order) || row.sort_order < 0) {
+    throw new Error("invalid_custom_question_sort_order");
+  }
+  if (
+    row.max_length !== null &&
+    (!Number.isSafeInteger(row.max_length) ||
+      row.max_length < 1 ||
+      row.max_length > MAX_CUSTOM_QUESTION_CONFIGURED_LENGTH)
+  ) {
+    throw new Error("invalid_custom_question_max_length");
+  }
+
+  const options = parseOptionsJson(row.options_json);
+  const usesOptions = row.type === "select" || row.type === "radio" || row.type === "checkbox";
+  if (usesOptions && options.length === 0) {
+    throw new Error("custom_question_options_required");
+  }
+  if (!usesOptions && options.length > 0) {
+    throw new Error("custom_question_options_not_allowed");
+  }
+  if (!usesOptions && row.type !== "text" && row.type !== "textarea") {
+    throw new Error("invalid_custom_question_type");
+  }
+  if (usesOptions && row.max_length !== null) {
+    throw new Error("custom_question_max_length_not_allowed");
+  }
+
   return {
     id: row.id,
     event_id: row.event_id,
     question_key: row.question_key,
     label: row.label,
     description: row.description,
-    type: parseQuestionType(row.type),
+    type: row.type,
     required: row.required === 1,
-    options: parseOptionsJson(row.options_json),
+    options,
     placeholder: row.placeholder,
     max_length: row.max_length,
     sort_order: row.sort_order,
     is_active: row.is_active === 1,
-    visibility: parseVisibility(row.visibility),
+    visibility: row.visibility,
   };
+}
+
+export function parseCustomAnswerValuesJson(
+  raw: string | null | undefined,
+): Record<string, CustomAnswerValue> {
+  if (raw === null || raw === undefined || raw === "") return {};
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error("invalid_custom_answer_values_json");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("invalid_custom_answer_values_json");
+  }
+
+  const values: Record<string, CustomAnswerValue> = {};
+  for (const [questionId, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!questionId || questionId !== questionId.trim()) {
+      throw new Error("invalid_custom_answer_values_json");
+    }
+    if (typeof value === "string") {
+      if (!value || value !== value.trim()) {
+        throw new Error("invalid_custom_answer_values_json");
+      }
+      values[questionId] = value;
+      continue;
+    }
+    const selected = parseStringArray(value, "invalid_custom_answer_values_json");
+    if (selected.length === 0) {
+      throw new Error("invalid_custom_answer_values_json");
+    }
+    values[questionId] = selected;
+  }
+  return values;
+}
+
+export function formatCustomAnswerValue(
+  answerText: string | null | undefined,
+  answerJson: string | null | undefined,
+): string {
+  const text = answerText?.trim();
+  if (text) return text;
+  return parseOptionsJson(answerJson).join("、");
 }
 
 type AnswerValidationResult =
@@ -106,7 +256,7 @@ export function validateAnswerInput(
   question: CustomQuestion,
   values: string[],
 ): AnswerValidationResult {
-  const filtered = values.filter((v) => v.trim());
+  const filtered = Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 
   if (question.required && filtered.length === 0) {
     return { ok: false, message: `${question.label}を入力してください。` };
@@ -117,8 +267,15 @@ export function validateAnswerInput(
   }
 
   if (question.type === "text" || question.type === "textarea") {
+    if (filtered.length !== 1) {
+      return { ok: false, message: `${question.label}の送信形式が不正です。` };
+    }
     const value = filtered[0];
-    const maxLen = question.max_length ?? (question.type === "text" ? 200 : 1000);
+    const maxLen = question.max_length ?? (
+      question.type === "text"
+        ? MAX_CUSTOM_QUESTION_TEXT_LENGTH
+        : MAX_CUSTOM_QUESTION_TEXTAREA_LENGTH
+    );
     if (value.length > maxLen) {
       return {
         ok: false,
@@ -138,8 +295,7 @@ export function validateAnswerInput(
   }
 
   if (question.type === "select" || question.type === "radio") {
-    const value = filtered[0];
-    if (question.options.length > 0 && !question.options.includes(value)) {
+    if (filtered.length !== 1 || !question.options.includes(filtered[0])) {
       return { ok: false, message: `${question.label}は選択肢から選んでください。` };
     }
     return {
@@ -148,31 +304,26 @@ export function validateAnswerInput(
         event_id: question.event_id,
         question_id: question.id,
         question_key: question.question_key,
-        answer_text: value,
+        answer_text: filtered[0],
         answer_json: null,
       }],
     };
   }
 
-  if (question.type === "checkbox") {
-    for (const v of filtered) {
-      if (question.options.length > 0 && !question.options.includes(v)) {
-        return { ok: false, message: `${question.label}は選択肢から選んでください。` };
-      }
-    }
-    return {
-      ok: true,
-      drafts: [{
-        event_id: question.event_id,
-        question_id: question.id,
-        question_key: question.question_key,
-        answer_text: null,
-        answer_json: JSON.stringify(filtered),
-      }],
-    };
+  const selected = question.options.filter((option) => filtered.includes(option));
+  if (selected.length !== filtered.length) {
+    return { ok: false, message: `${question.label}は選択肢から選んでください。` };
   }
-
-  return { ok: true, drafts: [] };
+  return {
+    ok: true,
+    drafts: [{
+      event_id: question.event_id,
+      question_id: question.id,
+      question_key: question.question_key,
+      answer_text: null,
+      answer_json: JSON.stringify(selected),
+    }],
+  };
 }
 
 export function readCustomAnswersFromFormData(
@@ -183,16 +334,26 @@ export function readCustomAnswersFromFormData(
   const errors: string[] = [];
 
   for (const [eventId, questions] of questionsByEventId) {
-    for (const q of questions) {
-      if (!q.is_active) continue;
-      const name = `custom_answer:${eventId}:${q.question_key}`;
-      const allValues = formData.getAll(name).map((v) =>
-        typeof v === "string" ? v.trim() : ""
+    for (const question of questions) {
+      if (!question.is_active) continue;
+      const name = `custom_answer:${eventId}:${question.question_key}`;
+      const allValues = formData.getAll(name).map((value) =>
+        typeof value === "string" ? value.trim() : ""
       ).filter(Boolean);
 
-      const result = validateAnswerInput(q, allValues);
+      const result = validateAnswerInput(question, allValues);
       if (!result.ok) {
         errors.push(result.message);
+        continue;
+      }
+      if (result.drafts.length === 0) {
+        drafts.push({
+          event_id: question.event_id,
+          question_id: question.id,
+          question_key: question.question_key,
+          answer_text: null,
+          answer_json: null,
+        });
         continue;
       }
       drafts.push(...result.drafts);

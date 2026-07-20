@@ -1,8 +1,5 @@
 import * as React from "react";
-import {
-  parseVideoFormSettings,
-  resolveStagePermissionFields,
-} from "@/lib/video/formSettings";
+import type { EditableCustomQuestion } from "@/lib/video/customQuestions";
 
 export interface EventSettingsPreviewValue {
   title?: string | null;
@@ -20,7 +17,7 @@ export interface EventSettingsPreviewValue {
   allow_unslotted_posts?: number | string | null;
   allow_user_video_edits?: number | string | null;
   user_video_edit_permission_keys_json?: string | null;
-  video_form_settings_json?: string | null;
+  custom_questions?: EditableCustomQuestion[];
   max_slots_per_video?: number | string | null;
   slot_type?: string | null;
   slot_visibility_mode?: string | null;
@@ -40,15 +37,10 @@ function visibilityLabel(event: EventSettingsPreviewValue): {
   className: string;
 } {
   switch (event.visibility_status) {
-    case "public":
-      return { label: "公開", className: "fn-badge-accent" };
-    case "private":
-      return { label: "非公開", className: "fn-badge-soft" };
-    case "archived":
-      return { label: "アーカイブ", className: "fn-badge-warning" };
-    case "draft":
-    default:
-      return { label: "下書き", className: "fn-badge-soft" };
+    case "public": return { label: "公開", className: "fn-badge-accent" };
+    case "private": return { label: "非公開", className: "fn-badge-soft" };
+    case "archived": return { label: "アーカイブ", className: "fn-badge-warning" };
+    default: return { label: "下書き", className: "fn-badge-soft" };
   }
 }
 
@@ -83,8 +75,7 @@ function parseParts(value: EventSettingsPreviewValue): {
     }
     return {
       parts: parsed.filter(
-        (item): item is string =>
-          typeof item === "string" && item.trim().length > 0,
+        (item): item is string => typeof item === "string" && item.trim().length > 0,
       ),
       error: null,
     };
@@ -122,14 +113,25 @@ function Field({
   );
 }
 
+function questionTypeLabel(type: EditableCustomQuestion["type"]): string {
+  switch (type) {
+    case "text": return "1行テキスト";
+    case "textarea": return "長文テキスト";
+    case "select": return "プルダウン";
+    case "radio": return "ラジオ";
+    case "checkbox": return "複数チェック";
+  }
+}
+
 export function EventSettingsPreview({
   event,
 }: {
   event: EventSettingsPreviewValue;
 }): React.ReactElement {
   const accent = event.accent_color?.trim() || "var(--accent-primary)";
-  const formSettings = parseVideoFormSettings(event.video_form_settings_json);
-  const stageQuestions = resolveStagePermissionFields([formSettings]);
+  const questions = (event.custom_questions ?? [])
+    .filter((question) => question.is_active)
+    .sort((a, b) => a.sort_order - b.sort_order);
   const parts = parseParts(event);
   const slotType = event.slot_type ?? "time";
   const visibility = visibilityLabel(event);
@@ -154,15 +156,13 @@ export function EventSettingsPreview({
         <h2 style={{ margin: 0, fontSize: 16 }}>イベント設定プレビュー</h2>
       </header>
 
-      <article
-        style={{
-          border: "1px solid var(--border-subtle)",
-          borderTop: `4px solid ${accent}`,
-          borderRadius: "var(--radius-sm)",
-          overflow: "hidden",
-          background: "var(--bg-surface)",
-        }}
-      >
+      <article style={{
+        border: "1px solid var(--border-subtle)",
+        borderTop: `4px solid ${accent}`,
+        borderRadius: "var(--radius-sm)",
+        overflow: "hidden",
+        background: "var(--bg-surface)",
+      }}>
         {event.img_url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -192,47 +192,35 @@ export function EventSettingsPreview({
               </p>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <span className={`fn-badge ${visibility.className}`}>
-              {visibility.label}
-            </span>
-          </div>
+          <span className={`fn-badge ${visibility.className}`} style={{ justifySelf: "start" }}>
+            {visibility.label}
+          </span>
           <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7 }}>
             {(event.explanation || "イベント説明は未入力です。").slice(0, 180)}
             {(event.explanation?.length ?? 0) > 180 ? "…" : ""}
           </p>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-              gap: 10,
-            }}
-          >
-            <Field
-              label="開催期間"
-              value={`${displayDate(event.start_time)} - ${displayDate(event.end_time)}`}
-            />
-            <Field
-              label="受付期間"
-              value={`${displayDate(event.entry_start_time)} - ${displayDate(event.entry_end_time)}`}
-            />
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+            gap: 10,
+          }}>
+            <Field label="開催期間" value={`${displayDate(event.start_time)} - ${displayDate(event.end_time)}`} />
+            <Field label="受付期間" value={`${displayDate(event.entry_start_time)} - ${displayDate(event.entry_end_time)}`} />
           </div>
         </div>
       </article>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: 12,
-        }}
-      >
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+        gap: 12,
+      }}>
         <article className="fn-card" style={{ padding: 12 }}>
           <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>投稿フォーム項目</h3>
-          {stageQuestions.length > 0 ? (
-            <div style={{ display: "grid", gap: 10 }}>
-              {stageQuestions.map((question, index) => (
-                <div key={question.id} style={{ display: "grid", gap: 6 }}>
+          {questions.length > 0 ? (
+            <div style={{ display: "grid", gap: 12 }}>
+              {questions.map((question, index) => (
+                <div key={question.id} style={{ display: "grid", gap: 5 }}>
                   <span
                     className={`fn-badge ${
                       question.required ? "fn-badge-warning" : "fn-badge-soft"
@@ -242,8 +230,12 @@ export function EventSettingsPreview({
                     質問 {index + 1} / {question.required ? "必須" : "任意"}
                   </span>
                   <Field label="ラベル" value={question.label} />
-                  <Field label="説明" value={question.description} />
-                  <Field label="プレースホルダー" value={question.placeholder} />
+                  <Field label="形式" value={questionTypeLabel(question.type)} />
+                  <Field label="説明" value={question.description || "なし"} />
+                  {question.options.length > 0 ? (
+                    <Field label="選択肢" value={question.options.join(" / ")} />
+                  ) : null}
+                  <Field label="公開範囲" value={question.visibility} />
                 </div>
               ))}
             </div>
@@ -261,9 +253,7 @@ export function EventSettingsPreview({
           ) : parts.parts.length > 0 ? (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {parts.parts.map((part) => (
-                <span key={part} className="fn-badge fn-badge-soft">
-                  {part}
-                </span>
+                <span key={part} className="fn-badge fn-badge-soft">{part}</span>
               ))}
             </div>
           ) : (
@@ -276,30 +266,11 @@ export function EventSettingsPreview({
         <article className="fn-card" style={{ padding: 12 }}>
           <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>枠設定</h3>
           <div style={{ display: "grid", gap: 6 }}>
-            <Field
-              label="枠タイプ"
-              value={slotType === "count" ? "件数枠" : "時間枠"}
-            />
-            <Field
-              label="確保者表示"
-              value={event.slot_visibility_mode ?? "public_name"}
-            />
-            <Field
-              label="1作品あたり最大枠数"
-              value={event.max_slots_per_video ?? 1}
-            />
-            <Field
-              label="部の分割閾値"
-              value={`${event.slot_part_gap_minutes ?? 15} 分`}
-            />
-            <Field
-              label="見え方"
-              value={
-                slotType === "count"
-                  ? "番号付きの件数枠として表示"
-                  : "開始・終了時刻付きで表示"
-              }
-            />
+            <Field label="枠タイプ" value={slotType === "count" ? "件数枠" : "時間枠"} />
+            <Field label="確保者表示" value={event.slot_visibility_mode ?? "public_name"} />
+            <Field label="1作品あたり最大枠数" value={event.max_slots_per_video ?? 1} />
+            <Field label="連続取得上限" value={event.max_consecutive_slots_per_entry ?? 3} />
+            <Field label="部の分割閾値" value={`${event.slot_part_gap_minutes ?? 15} 分`} />
           </div>
         </article>
 

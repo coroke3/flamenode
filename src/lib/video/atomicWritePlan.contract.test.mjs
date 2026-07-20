@@ -14,7 +14,6 @@ const helperSources = [
   read("./replaceVideoMembers.ts"),
   read("../db/software.ts"),
   read("./customQuestionAnswers.ts"),
-  read("./stagePermissionAnswers.ts"),
 ];
 
 test("投稿・枠投稿・編集・管理メンバー更新は各1回だけatomic planを実行する", () => {
@@ -28,8 +27,8 @@ test("投稿・枠投稿・編集・管理メンバー更新は各1回だけatom
   assert.match(submit, /plan\.statements\.push\(\.\.\.queue\.statements\)/);
 });
 
-test("旧逐次write helperとmutation後のDB queue書込みを残さない", () => {
-  const combined = [create, submit, update].join("\n");
+test("旧逐次write helperと旧質問専用helperを残さない", () => {
+  const combined = [create, submit, update, ...helperSources].join("\n");
   for (const obsolete of [
     "ensureSubmissionXUser(",
     "ensureVideoDerivedRows(",
@@ -37,6 +36,8 @@ test("旧逐次write helperとmutation後のDB queue書込みを残さない", (
     "replaceVideoSoftwareLabels(",
     "syncVideoEvents(",
     "replaceStagePermissionCustomAnswers(",
+    "buildReplaceStagePermissionAnswersPlan(",
+    "readStagePermissionCustomAnswers(",
     "replaceGeneralCustomAnswers(",
     "recordXIconCandidateFromVideo(",
     "recordYoutubeChannelCandidateFromVideo(",
@@ -130,6 +131,7 @@ test("FormData parserとUIはatomic上限の共通定数を使う", () => {
   const videoSchema = read("./videoFormSchema.ts");
   const videoForm = read("../../components/forms/VideoForm.tsx");
   const memberForm = read("../../components/forms/VideoMembersField.tsx");
+  const questionLimits = read("./customQuestionLimits.ts");
   assert.match(
     memberParser,
     /\.max\(\s*MAX_VIDEO_MEMBERS/,
@@ -140,6 +142,8 @@ test("FormData parserとUIはatomic上限の共通定数を使う", () => {
     /normalizeSoftwareLabels\(value\)\.length <= MAX_ATOMIC_VIDEO_SOFTWARES/,
   );
   assert.match(videoForm, /selectedEventIds\.length >= MAX_ATOMIC_VIDEO_EVENTS/);
+  assert.match(videoForm, /MAX_VIDEO_CUSTOM_QUESTIONS/);
+  assert.match(questionLimits, /MAX_EVENT_CUSTOM_QUESTIONS = 8/);
   assert.match(videoForm, /最大\{MAX_ATOMIC_VIDEO_SOFTWARES\}件/);
   assert.match(
     memberForm,

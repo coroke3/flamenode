@@ -1,0 +1,36 @@
+name: Export temporary source
+
+on:
+  push:
+    branches:
+      - agent/unify-custom-questions
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: temp-source-${{ github.run_id }}
+          path: |
+            .
+            !.git/**
+            !node_modules/**
+            !.next/**
+            !.vercel/**
+          include-hidden-files: true
+          retention-days: 1
+      - name: 実行IDを記録
+        shell: bash
+        run: |
+          printf '%s\n' '${{ github.run_id }}' > .agent-artifact-run-id
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .agent-artifact-run-id
+          git commit -m '一時ソースartifact実行IDを記録'
+          git push origin HEAD:agent/unify-custom-questions

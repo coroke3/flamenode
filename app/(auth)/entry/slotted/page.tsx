@@ -18,7 +18,7 @@ import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
 import { getYoutubeChannelCandidates } from "@/lib/db/youtubeChannelCandidates";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
-import { loadStagePermissionFormSettingsJsonByEvents } from "@/lib/video/stagePermissionQuestions";
+import { fetchActiveCustomQuestionsForEvents } from "@/lib/video/customQuestionAnswers";
 import { AppShell } from "@/components/ui/AppShell";
 import { StatusPanel } from "@/components/ui/StatusPanel";
 
@@ -33,7 +33,6 @@ export default async function SlottedPostPage({
   searchParams,
 }: Props): Promise<React.ReactElement> {
   const { slot: slotId = "" } = await searchParams;
-  // ログイン誘導後に slot 付きの URL に戻れるように next を組み立てる。
   const nextPath = slotId
     ? `/entry/slotted?slot=${encodeURIComponent(slotId)}`
     : "/entry/slotted";
@@ -48,15 +47,19 @@ export default async function SlottedPostPage({
   const slotOwnerWhere = activeXId
     ? or(
         eq(slotsTable.x_user_id, activeXId),
-        and(isNull(slotsTable.x_user_id), eq(slotsTable.reserved_by_user_id, user.id))!,
+        and(
+          isNull(slotsTable.x_user_id),
+          eq(slotsTable.reserved_by_user_id, user.id),
+        )!,
       )
     : eq(slotsTable.reserved_by_user_id, user.id);
-  const rows = await db
-    .select()
-    .from(slotsTable)
-    .where(and(eq(slotsTable.id, slotId), slotOwnerWhere)!)
-    .limit(1);
-  const slot = rows[0];
+  const slot = (
+    await db
+      .select()
+      .from(slotsTable)
+      .where(and(eq(slotsTable.id, slotId), slotOwnerWhere)!)
+      .limit(1)
+  )[0];
   if (!slot) notFound();
   if (slot.status === "submitted" && slot.video_id) {
     redirect(`/dashboard/edit/${slot.video_id}`);
@@ -65,6 +68,7 @@ export default async function SlottedPostPage({
   if (slot.x_user_id && activeXId && slot.x_user_id !== activeXId) {
     redirect("/entry");
   }
+
   const ev = (
     await db
       .select()
@@ -73,6 +77,7 @@ export default async function SlottedPostPage({
       .limit(1)
   )[0];
   if (!ev) notFound();
+
   let slotStart = slot.start_time;
   let slotEnd = slot.start_time;
   let groupSize = 1;
@@ -84,15 +89,15 @@ export default async function SlottedPostPage({
     if (groupRows.length > 0) {
       groupSize = groupRows.length;
       const starts = groupRows
-        .map((r) => r.start_time)
-        .filter((v): v is number => typeof v === "number");
-      const ends = groupRows
-        .map((r) => r.start_time)
-        .filter((v): v is number => typeof v === "number");
-      if (starts.length > 0) slotStart = Math.min(...starts);
-      if (ends.length > 0) slotEnd = Math.max(...ends);
+        .map((row) => row.start_time)
+        .filter((value): value is number => typeof value === "number");
+      if (starts.length > 0) {
+        slotStart = Math.min(...starts);
+        slotEnd = Math.max(...starts);
+      }
     }
   }
+
   const activeX = slot.x_user_id ?? activeXId;
   const xRow = activeX
     ? (
@@ -103,9 +108,14 @@ export default async function SlottedPostPage({
           .limit(1)
       )[0]
     : null;
-  const xIdOptions = (await getLinkedXUsersForAuthUser(db, user.id, { approvedOnly: true }))
-    .map((row) => ({ id: row.x_user_id, x_name: row.x_name }))
-    .sort((a, b) => a.x_name.localeCompare(b.x_name, "ja"));
+  const xIdOptions = await db
+    .select({ id: xUsersTable.id, x_name: xUsersTable.x_name })
+    .from(xUsersTable)
+    .where(and(
+      eq(xUsersTable.linked_user_id, user.id),
+      eq(xUsersTable.approval_status, "approved"),
+    )!)
+    .orderBy(asc(xUsersTable.x_name));
   const memberSuggestions = await db
     .select({ name: xUsersTable.x_name, x_user_id: xUsersTable.id })
     .from(xUsersTable)
@@ -113,48 +123,41 @@ export default async function SlottedPostPage({
     .limit(2000);
   const softwareSuggestions = await getUsedSoftwareSuggestions(db);
   const iconCandidates = activeX ? await getXIconCandidates(db, activeX) : [];
-  const channelCandidates =
-    activeX && db ? await getYoutubeChannelCandidates(db, activeX) : [];
-  // 所属イベント候補: 「許可フラグ付き」かつ受付中のイベント + スロットのイベント (常時固定)。
+  const channelCandidates = activeX
+    ? await getYoutubeChannelCandidates(db, activeX)
+    : [];
+
   const acceptingEvents = await db
     .select()
     .from(eventsTable)
     .where(eq(eventsTable.visibility_status, "public"))
-    .then((rows) =>
-      rows
-        .filter(
-          (event) =>
-            isAcceptingEntries(event) &&
-            event.allow_user_video_event_links === 1,
-        )
-        .map((event) => ({
-          id: event.id,
-          title: event.title,
-          parts_json: event.parts_json,
-        })),
-    );
+    .then((rows) => rows
+      .filter((event) =>
+        isAcceptingEntries(event) && event.allow_user_video_event_links === 1,
+      )
+      .map((event) => ({
+        id: event.id,
+        title: event.title,
+        parts_json: event.parts_json,
+      })));
   const slotEventOption = {
     id: ev.id,
     title: ev.title,
     parts_json: ev.parts_json,
   };
-  const rawEventOptions = acceptingEvents.some((o) => o.id === ev.id)
+  const rawEventOptions = acceptingEvents.some((option) => option.id === ev.id)
     ? acceptingEvents
     : [slotEventOption, ...acceptingEvents];
-  const formSettingsByEvent = await loadStagePermissionFormSettingsJsonByEvents(
+  const questionsByEvent = await fetchActiveCustomQuestionsForEvents(
     db,
     rawEventOptions.map((option) => option.id),
   );
   const eventOptions = rawEventOptions.map((option) => ({
     ...option,
-    video_form_settings_json: formSettingsByEvent.get(option.id) ?? null,
+    custom_questions: questionsByEvent.get(option.id) ?? [],
   }));
   const initialEventIds = [ev.id];
 
-  // 投稿は writeGuard で active_x_user_id が approved であることを要求するため、
-  // フォーム送信前に同じ条件を判定して「押せるけど失敗する」状態を防ぐ。
-  // 注: writeGuard は session の active_x_user_id を見るため、ここでは activeXId
-  // (= user.active_x_user_id) の有無もブロック条件にする (slot.x_user_id だけでは不可)。
   const activeXApprovalStatus = xRow?.approval_status ?? null;
   const submitBlockedReason: string | undefined = !activeXId
     ? "投稿にはActive X IDの選択が必要です。設定画面から連携・選択してください。"
@@ -187,16 +190,14 @@ export default async function SlottedPostPage({
       <StatusPanel
         title={canPost ? "投稿前チェック" : "まだ投稿できません"}
         tone={canPost ? "success" : "warning"}
-        action={
-          !canPost ? (
-            <Link
-              href={`/dashboard/settings?next=${encodeURIComponent(nextPath)}`}
-              className="fn-btn fn-btn-primary"
-            >
-              X ID設定を確認
-            </Link>
-          ) : null
-        }
+        action={!canPost ? (
+          <Link
+            href={`/dashboard/settings?next=${encodeURIComponent(nextPath)}`}
+            className="fn-btn fn-btn-primary"
+          >
+            X ID設定を確認
+          </Link>
+        ) : null}
       >
         {canPost
           ? `イベント: ${ev.title} / 投稿者X ID: @${activeX ?? "未設定"} / 連続枠: ${groupSize}`
