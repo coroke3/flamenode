@@ -1,16 +1,13 @@
-/**
- * 期限切れスロット解放 / 古い通知削除 / 監査ログクリーンアップを担当するスケジュールワーカー。
- */
+/** 通知・インポートpreview・監査ログの期限切れデータを削除する。 */
 import {
-  computeHistoryCutoffs,
+  computeAuditCompactCutoff,
   computeNotificationCutoffs,
-  computeRetentionDays,
+  normalizeAuditCleanupSettings,
   shouldRetryCleanupError,
-  CLEANUP_MAX_RETRIES,
-  HISTORY_NORMAL_DAYS_DEFAULT,
-  HISTORY_LONG_AUDIT_DAYS_DEFAULT,
   AUDIT_CLEANUP_BATCH_LIMIT,
-  type RetentionDays,
+  AUDIT_COMPACT_AFTER_DAYS_DEFAULT,
+  CLEANUP_MAX_RETRIES,
+  type AuditCleanupSettings,
 } from "./retention.ts";
 import { logWorkerJob, safeErrorSummary } from "../shared/safeLog.ts";
 
@@ -18,9 +15,6 @@ export interface Env {
   DB: D1Database;
 }
 
-/**
- * runCleanup を最大 CLEANUP_MAX_RETRIES 回まで即時リトライする。
- */
 export async function runCleanupWithRetry(
   env: Env,
 ): Promise<{ processed: number; failed: number }> {
@@ -32,10 +26,10 @@ export async function runCleanupWithRetry(
     try {
       await runCleanup(env);
       return { processed: 1, failed: 0 };
-    } catch (e) {
+    } catch (error) {
       attempt += 1;
-      lastError = e;
-      const decision = shouldRetryCleanupError(attempt, e);
+      lastError = error;
+      const decision = shouldRetryCleanupError(attempt, error);
       logWorkerJob({
         worker: "content-jobs",
         job: "cleanup-retry",
@@ -46,10 +40,10 @@ export async function runCleanupWithRetry(
         failed: 1,
         duration_ms: Date.now() - startedMs,
         result: "failed",
-        error: `${decision.reason}:${safeErrorSummary(e)}`,
+        error: `${decision.reason}:${safeErrorSummary(error)}`,
       });
       if (!decision.shouldRetry) break;
-      await new Promise((r) => setTimeout(r, 100 * attempt));
+      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
     }
   }
   logWorkerJob({
@@ -67,42 +61,35 @@ export async function runCleanupWithRetry(
   return { processed: 0, failed: 1 };
 }
 
-export async function readHistoryRetentionDays(env: Env): Promise<RetentionDays> {
+export async function readAuditCleanupSettings(
+  env: Env,
+): Promise<AuditCleanupSettings> {
   try {
     const row = await env.DB.prepare(
-      `SELECT history_retention_days FROM system_settings LIMIT 1`,
-    ).first<{ history_retention_days: number | null }>();
-    return computeRetentionDays(row?.history_retention_days);
+      `SELECT audit_compact_after_days
+       FROM system_settings
+       WHERE id = 'default'
+       LIMIT 1`,
+    ).first<{ audit_compact_after_days: number | null }>();
+    return normalizeAuditCleanupSettings(row);
   } catch (error) {
     console.warn(
       JSON.stringify({
         worker: "content-jobs",
-        job: "cleanup-retention-settings",
+        job: "cleanup-audit-settings",
         result: "fallback",
         error: safeErrorSummary(error),
       }),
     );
-    return {
-      normalDays: HISTORY_NORMAL_DAYS_DEFAULT,
-      longAuditDays: HISTORY_LONG_AUDIT_DAYS_DEFAULT,
-    };
+    return { compactAfterDays: AUDIT_COMPACT_AFTER_DAYS_DEFAULT };
   }
 }
 
 export async function runCleanup(env: Env): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
-  const retentionDays = await readHistoryRetentionDays(env);
   const { sentCutoff, failedCutoff } = computeNotificationCutoffs(now);
-  const { normalCutoff, longAuditCutoff } = computeHistoryCutoffs(now, retentionDays);
-
-  await env.DB.prepare(
-    `UPDATE slots
-     SET priority_reclaim_until = NULL, updated_at = ?1
-     WHERE priority_reclaim_until IS NOT NULL AND priority_reclaim_until < ?1
-     LIMIT ?2`,
-  )
-    .bind(now, AUDIT_CLEANUP_BATCH_LIMIT)
-    .run();
+  const { compactAfterDays } = await readAuditCleanupSettings(env);
+  const compactCutoff = computeAuditCompactCutoff(now, compactAfterDays);
 
   await env.DB.prepare(
     `DELETE FROM notification_outbox
@@ -114,13 +101,14 @@ export async function runCleanup(env: Env): Promise<void> {
 
   await env.DB.prepare(
     `DELETE FROM notification_outbox
-     WHERE status IN ('failed', 'dead_letter') AND created_at IS NOT NULL AND created_at < ?1
+     WHERE status IN ('failed', 'dead_letter')
+       AND created_at IS NOT NULL
+       AND created_at < ?1
      LIMIT ?2`,
   )
     .bind(failedCutoff, AUDIT_CLEANUP_BATCH_LIMIT)
     .run();
 
-  // audit_logs: 新正本 — expires_at インデックスを使い小分け削除
   await env.DB.prepare(
     `DELETE FROM spreadsheet_import_runs
      WHERE nonce IN (
@@ -147,33 +135,11 @@ export async function runCleanup(env: Env): Promise<void> {
 
   await env.DB.prepare(
     `DELETE FROM audit_logs
-     WHERE expires_at IS NOT NULL
-       AND expires_at < ?1
+     WHERE expires_at IS NOT NULL AND expires_at < ?1
      LIMIT ?2`,
   )
     .bind(now, AUDIT_CLEANUP_BATCH_LIMIT)
     .run();
-
-  // compact: 古いログの before/after を軽量化 (復元不可化)
-  let compactCutoff = now - 30 * 86400;
-  try {
-    const settingsRow = await env.DB.prepare(
-      `SELECT compact_after_days FROM audit_log_settings WHERE id = 'default' LIMIT 1`,
-    ).first<{ compact_after_days: number | null }>();
-    const days = Number(settingsRow?.compact_after_days ?? 30);
-    if (Number.isFinite(days) && days > 0) {
-      compactCutoff = now - Math.floor(days) * 86400;
-    }
-  } catch (error) {
-    console.warn(
-      JSON.stringify({
-        worker: "content-jobs",
-        job: "cleanup-compact-settings",
-        result: "fallback",
-        error: safeErrorSummary(error),
-      }),
-    );
-  }
 
   await env.DB.prepare(
     `UPDATE audit_logs
@@ -190,7 +156,4 @@ export async function runCleanup(env: Env): Promise<void> {
   )
     .bind(compactCutoff, AUDIT_CLEANUP_BATCH_LIMIT)
     .run();
-
-  void normalCutoff;
-  void longAuditCutoff;
 }
