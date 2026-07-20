@@ -4,21 +4,25 @@ on:
   push:
     branches:
       - agent/db-canonical-migration-v2
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
 
 jobs:
   export:
+    if: github.event_name == 'push' || github.event.pull_request.head.ref == 'agent/db-canonical-migration-v2'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/upload-artifact@v4
         with:
-          name: final-merge-source-${{ github.sha }}
+          name: final-merge-source-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             .
             !.git/**
