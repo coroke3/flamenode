@@ -2,10 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import type {
-  EventExportFormat,
-  EventExportUpdateMode,
-} from "@/lib/api/eventExportPayload";
+import type { EventExportUpdateMode } from "@/lib/api/eventExportPayload";
 
 interface EventExportLinkBuilderProps {
   eventId: string;
@@ -14,19 +11,16 @@ interface EventExportLinkBuilderProps {
 export function EventExportLinkBuilder({
   eventId,
 }: EventExportLinkBuilderProps): React.ReactElement {
-  const [format, setFormat] = React.useState<EventExportFormat>("new");
   const [updateMode, setUpdateMode] =
     React.useState<EventExportUpdateMode>("realtime");
   const [refreshMinutes, setRefreshMinutes] = React.useState("60");
   const [copied, setCopied] = React.useState(false);
 
   const href = React.useMemo(() => {
-    const params = new URLSearchParams({ format, update: updateMode });
-    if (updateMode === "scheduled") {
-      params.set("refresh", refreshMinutes);
-    }
+    const params = new URLSearchParams({ update: updateMode });
+    if (updateMode === "scheduled") params.set("refresh", refreshMinutes);
     return `/api/event-endpoints/${encodeURIComponent(eventId)}?${params.toString()}`;
-  }, [eventId, format, refreshMinutes, updateMode]);
+  }, [eventId, refreshMinutes, updateMode]);
 
   async function copyUrl(): Promise<void> {
     const absoluteUrl = new URL(href, window.location.origin).toString();
@@ -37,22 +31,11 @@ export function EventExportLinkBuilder({
 
   return (
     <div style={{ display: "grid", gap: 8, minWidth: 280 }}>
+      <p className="fn-muted" style={{ margin: 0, fontSize: 12 }}>
+        出力形式はFlameNodeイベントAPI v4に統一されています。
+      </p>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        <label className="fn-field" style={{ minWidth: 140 }}>
-          <span className="fn-label">データ形式</span>
-          <select
-            className="fn-select"
-            value={format}
-            onChange={(event) =>
-              setFormat(event.target.value as EventExportFormat)
-            }
-          >
-            <option value="new">新形式 v3</option>
-            <option value="legacy">旧形式互換</option>
-          </select>
-        </label>
-
-        <label className="fn-field" style={{ minWidth: 130 }}>
+        <label className="fn-field" style={{ minWidth: 150 }}>
           <span className="fn-label">更新方式</span>
           <select
             className="fn-select"
