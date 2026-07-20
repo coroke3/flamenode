@@ -3,7 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 const root = process.cwd();
-const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+const packageJson = JSON.parse(
+  fs.readFileSync(path.join(root, "package.json"), "utf8"),
+);
 const packageScripts = new Set(Object.keys(packageJson.scripts ?? {}));
 const errors = [];
 
@@ -21,7 +23,6 @@ const requiredPaths = [
   "docs/operations/migrations.md",
   "docs/operations/workers.md",
   "docs/operations/audit-and-restore.md",
-  "docs/operations/legacy-import.md",
   "docs/operations/static-delivery.md",
   "docs/operations/incident-response.md",
   "docs/operations/ui-acceptance.md",
@@ -29,8 +30,6 @@ const requiredPaths = [
 const localLinkPattern = /\[[^\]]*\]\(([^)]+)\)/g;
 const npmScriptPattern = /`npm run ([a-zA-Z0-9:_-]+)(?:\s+[^`]*)?`/g;
 
-// 単語の出現だけでは失敗させない。「使わない」「廃止した」等の禁止・履歴説明は
-// Active文書にも必要である。ここでは現行要件として残ると明確に誤る表現だけを検出する。
 const forbiddenActiveClaims = [
   [
     /バックグラウンドで起動済み|自動セットアップ済み|npm install 完了/gi,
@@ -49,6 +48,10 @@ const forbiddenActiveClaims = [
   [
     /(?:runtime[ -]migration|実行時migration).{0,40}(?:を実行する|で適用する|が正本)/gi,
     "runtime migrationを現行手順とする記述",
+  ],
+  [
+    /(?:legacy import|旧形式インポート).{0,40}(?:を有効化|を使用する|から投入する|を実行する)/gi,
+    "廃止済み旧形式インポートを現行機能とする記述",
   ],
 ];
 
@@ -155,7 +158,11 @@ const wrangler = read("wrangler.toml");
 if (!packageJson.devDependencies?.["@cloudflare/next-on-pages"]) {
   errors.push("package.json: Pages adapter がありません。");
 }
-if (!/^pages_build_output_dir\s*=\s*"\.vercel\/output\/static"\s*$/m.test(wrangler)) {
+if (
+  !/^pages_build_output_dir\s*=\s*"\.vercel\/output\/static"\s*$/m.test(
+    wrangler,
+  )
+) {
   errors.push("wrangler.toml: Pages output 設定が現行値ではありません。");
 }
 if (!/Cloudflare/i.test(read("docs/README.md"))) {
@@ -181,7 +188,11 @@ if (/Durable Objects?/i.test(read("README.md"))) {
 if (/Node(?:\.js)?\s*20|v20以上/i.test(read("DEPLOY.md"))) {
   errors.push("DEPLOY.md: Node.js要件を22.xへ統一してください。");
 }
-if (/自動セットアップ済み|バックグラウンドで起動済み|npm install 完了/i.test(read("LOCAL.md"))) {
+if (
+  /自動セットアップ済み|バックグラウンドで起動済み|npm install 完了/i.test(
+    read("LOCAL.md"),
+  )
+) {
   errors.push("LOCAL.md: 個人PC固有の実施済み状態を削除してください。");
 }
 
