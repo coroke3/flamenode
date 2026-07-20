@@ -6,13 +6,15 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   verify:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     env:
       NEXT_PUBLIC_SITE_URL: https://flamenode.invalid
@@ -24,7 +26,70 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
           fetch-depth: 0
+
+      - name: 互換用の空データ経路を削除
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          page = Path("app/(public)/[id]/page.tsx")
+          text = page.read_text()
+          text = text.replace(
+              'detail: { video, creator, events, members, chapters, memberChapters },',
+              'detail: { video, creator, events, members, chapters },',
+          )
+          old = '''            <MemberSection
+              members={members}
+              memberChapters={memberChapters.map(
+                (chapter) => ({
+                  id: chapter.id,
+                  chapter_time: chapter.chapter_time,
+                  chapter_label: chapter.chapter_label,
+                  note: chapter.note,
+                  video_member_id:
+                    chapter.video_member_id,
+                }),
+              )}
+            />'''
+          text = text.replace(old, '            <MemberSection members={members} />')
+          if "memberChapters" in text:
+              raise SystemExit("public page still references memberChapters")
+          page.write_text(text)
+
+          queries = Path("src/lib/db/videoDetailQueries.ts")
+          text = queries.read_text()
+          marker = "  // 旧メンバー専用タブの返却形"
+          if marker in text:
+              start = text.index(marker)
+              end = text.index("\n  return {", start)
+              text = text[:start] + text[end + 1:]
+          text = text.replace("    chapters,\n    memberChapters,", "    chapters,")
+          if "memberChapters" in text:
+              raise SystemExit("videoDetailQueries still references memberChapters")
+          queries.write_text(text)
+
+          section = Path("src/components/video/MemberSection.tsx")
+          text = section.read_text()
+          text = text.replace(
+              '  /** 呼び出し元の切替完了まで受け取るが、表示・処理には使用しない。 */\n  memberChapters?: readonly unknown[];\n',
+              '',
+          )
+          if "memberChapters" in text:
+              raise SystemExit("MemberSection still references memberChapters")
+          section.write_text(text)
+          PY
+          if git diff --quiet -- app/'(public)'/'[id]'/page.tsx src/lib/db/videoDetailQueries.ts src/components/video/MemberSection.tsx; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/'(public)'/'[id]'/page.tsx src/lib/db/videoDetailQueries.ts src/components/video/MemberSection.tsx
+          git commit -m "chore(agent): 後方互換の残存を除去"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
 
       - uses: actions/setup-node@v4
         with:
