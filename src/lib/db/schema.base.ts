@@ -273,11 +273,8 @@ export const events = sqliteTable("events", {
   accent_color: text("accent_color"),
   representative_x_user_id: text("representative_x_user_id"),
   visibility_status: text("visibility_status", {
-    enum: ["private", "public"],
-  })
-    .notNull()
-    // 0000 baselineの物理default。0043がINSERT直後にprivateへ正規化する。
-    .default("draft" as "private"),
+    enum: ["draft", "private", "public", "archived"],
+  }).notNull().default("draft"),
   /**
    * 一般ユーザー (作品投稿者) が、このイベントを既存作品の追加所属イベントとして
    * 紐付けてよいか。
@@ -531,11 +528,18 @@ export const videos = sqliteTable("videos", {
   highlights: text("highlights"),
   production_story: text("production_story"),
   visibility_status: text("visibility_status", {
-    enum: ["pending", "public", "private", "voided"],
+    enum: [
+      "draft",
+      "pending",
+      "public",
+      "limited",
+      "private",
+      "archived",
+      "voided",
+    ],
   })
     .notNull()
-    // 0000 baselineの物理default。0043がINSERT直後にpendingへ正規化する。
-    .default("draft" as "pending"),
+    .default("draft"),
   // scheduling
   scheduling_type: text("scheduling_type", {
     enum: ["slotted", "manual"],
@@ -562,13 +566,13 @@ export const videos = sqliteTable("videos", {
   // posting/youtube-id-and-active-x:
   //   同時投稿レース対策。createFreeVideo / submitSlotVideo / updateVideo は
   //   SELECT で重複確認してから insert/update しているが、その間に他クライアントが
-  //   同じ youtube_video_id を投稿し得る。状態に関係なく同一YouTube動画は1作品だけにし、
-  //   DBのunique indexを最終防衛線にする。
+  //   同じ youtube_video_id を投稿し得る。voided / 削除済みは別作品扱いなので
+  //   partial unique index で active な行のみ制約する。
   //   migration: 0007_dapper_slot_events.sql
   youtubeIdActiveUniq: uniqueIndex("videos_youtube_id_active_uniq")
     .on(t.youtube_video_id)
     .where(
-      sql`youtube_video_id IS NOT NULL AND youtube_video_id <> ''`,
+      sql`youtube_video_id IS NOT NULL AND youtube_video_id <> '' AND visibility_status NOT IN ('archived', 'voided')`,
     ),
 }));
 

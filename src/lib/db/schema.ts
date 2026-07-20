@@ -65,11 +65,10 @@ export const events = sqliteTable(
     accent_color: text("accent_color"),
     representative_x_user_id: text("representative_x_user_id"),
     visibility_status: text("visibility_status", {
-      enum: ["private", "public"],
+      enum: ["draft", "private", "public", "archived"],
     })
       .notNull()
-      // 0000 baselineの物理default。0043がINSERT直後にprivateへ正規化する。
-      .default("draft" as "private"),
+      .default("draft"),
     allow_user_video_event_links: integer("allow_user_video_event_links")
       .notNull()
       .default(0),
@@ -232,11 +231,18 @@ export const videos = sqliteTable(
     highlights: text("highlights"),
     production_story: text("production_story"),
     visibility_status: text("visibility_status", {
-      enum: ["pending", "public", "private", "voided"],
+      enum: [
+        "draft",
+        "pending",
+        "public",
+        "limited",
+        "private",
+        "archived",
+        "voided",
+      ],
     })
       .notNull()
-      // 0000 baselineの物理default。0043がINSERT直後にpendingへ正規化する。
-      .default("draft" as "pending"),
+      .default("draft"),
     scheduling_type: text("scheduling_type", {
       enum: ["slotted", "manual"],
     }).default("slotted"),
@@ -285,12 +291,12 @@ export const videos = sqliteTable(
     creatorFallbackIdx: index("videos_creator_fallback_idx")
       .on(t.creator_x_user_id, t.collaboration_type, t.created_at)
       .where(
-        sql`creator_x_user_id IS NOT NULL AND visibility_status <> 'voided' AND (creator_icon_url IS NOT NULL OR creator_display_name IS NOT NULL)`,
+        sql`creator_x_user_id IS NOT NULL AND visibility_status NOT IN ('archived', 'voided') AND (creator_icon_url IS NOT NULL OR creator_display_name IS NOT NULL)`,
       ),
     youtubeIdActiveUniq: uniqueIndex("videos_youtube_id_active_uniq")
       .on(t.youtube_video_id)
       .where(
-        sql`youtube_video_id IS NOT NULL AND youtube_video_id <> ''`,
+        sql`youtube_video_id IS NOT NULL AND youtube_video_id <> '' AND visibility_status NOT IN ('archived', 'voided')`,
       ),
   }),
 );
