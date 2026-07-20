@@ -47,7 +47,13 @@ jobs:
         run: npm run check:db-d1-legacy
       - name: 旧形式インポート専用境界を検査
         run: node --test --experimental-strip-types src/lib/import/legacy/canonicalImport.test.mjs
-      - name: X名義正本契約を検査
-        run: node --test --experimental-strip-types src/lib/auth/xIdentityCanonical.contract.test.mjs
+      - name: X名義ランタイム旧識別子を検査
+        run: node --test --experimental-strip-types --test-name-pattern="X名義ランタイム" src/lib/auth/xIdentityCanonical.contract.test.mjs
+      - name: X名義多対多リンク契約を検査
+        run: node --test --experimental-strip-types --test-name-pattern="X名義と認証ユーザー" src/lib/auth/xIdentityCanonical.contract.test.mjs
+      - name: X名義権限境界を検査
+        run: node --test --experimental-strip-types --test-name-pattern="一般承認と統合" src/lib/auth/xIdentityCanonical.contract.test.mjs
+      - name: X名義公開DTO契約を検査
+        run: node --test --experimental-strip-types --test-name-pattern="公開DTOは認証ID" src/lib/auth/xIdentityCanonical.contract.test.mjs
       - name: 最終受入契約を検査
         run: node --test --experimental-strip-types src/lib/integration/finalAcceptance.integration.test.mjs
