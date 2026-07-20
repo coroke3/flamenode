@@ -166,17 +166,17 @@ export default async function EditVideoPage({
     privilegeMode,
   });
   const canEditAnySection = hasAnyVideoEditSection(sections);
-  const eventModeSections = privilegeMode === "event"
-    ? sections
-    : await computeAllowedVideoEditSections({
-        db,
-        user: editUser,
-        video,
-        privilegeMode: "event",
-      });
   const canOfferAdminMode = user.role === "admin" && privilegeMode !== "admin";
-  const canOfferEventMode =
-    privilegeMode !== "event" && hasAnyVideoEditSection(eventModeSections);
+  let canOfferEventMode = false;
+  if (privilegeMode === "normal" && !canEditAnySection) {
+    const eventModeSections = await computeAllowedVideoEditSections({
+      db,
+      user: editUser,
+      video,
+      privilegeMode: "event",
+    });
+    canOfferEventMode = hasAnyVideoEditSection(eventModeSections);
+  }
   const canShowPrivilegeSwitchOnly =
     !canEditAnySection && (canOfferAdminMode || canOfferEventMode);
 
