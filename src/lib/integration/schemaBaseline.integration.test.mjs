@@ -19,9 +19,11 @@ test("active migrations apply cleanly and match schema.ts manifests", () => {
     "0040_worker_free_tier_scale.sql",
     "0041_youtube_quota_budget.sql",
     "0042_event_youtube_playlist_sync.sql",
-    "0043_simplify_visibility_statuses.sql",
+    "0043_db_canonical_migration.sql",
+    "0044_simplify_visibility_statuses.sql",
   ]);
-  assert.ok(result.tableCount > 40);
+  assert.equal(result.tableCount, 41);
+  assert.equal(result.columnCount, 409);
   assert.ok(result.indexCount > 70);
   assert.ok(result.foreignKeyCount > 20);
   assert.ok(result.checkCount > 20);
