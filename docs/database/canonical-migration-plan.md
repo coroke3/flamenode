@@ -2,7 +2,7 @@
 
 > Status: Active  
 > Last verified: 2026-07-20  
-> Verified against branch: `agent/remove-legacy-compat`  
+> Verified against commit: `2b23cbe`  
 > Source of truth: `src/lib/db/schema.ts`, `src/lib/db/schema.canonical.ts`, `migrations/0043_db_canonical_migration.sql`  
 > Canonical schema version: `2026-07-20-canonical-1`
 
