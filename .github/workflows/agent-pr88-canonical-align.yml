@@ -1,0 +1,36 @@
+name: Agent PR88 canonical align
+
+on:
+  push:
+    branches:
+      - agent/ux-and-status-simplification
+    paths:
+      - .github/workflows/agent-pr88-canonical-align.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  align:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/ux-and-status-simplification
+          fetch-depth: 0
+      - name: Remove duplicated DB schema edits
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout origin/main -- src/lib/db/schema.ts src/lib/db/schema.base.ts
+          rm .github/workflows/agent-pr88-canonical-align.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/db/schema.ts src/lib/db/schema.base.ts .github/workflows/agent-pr88-canonical-align.yml
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "DB正本との重複差分を除去"
+          git push origin HEAD:agent/ux-and-status-simplification
