@@ -23,22 +23,33 @@ test("通常チャプターの作成と削除は監査・静的再生成を同�
   assert.match(action, /operation: "DELETE"/);
 });
 
-test("チャプター削除は物理削除・CAS・冪等応答を使う", () => {
+test("チャプター削除は物理削除・CAS・同時削除の再確認を使う", () => {
   assert.match(action, /\.delete\(videoChapters\)/);
   assert.match(
     action,
     /expectedRowCondition\(\{ expectedCurrent: existing \}\)/,
   );
+  assert.match(action, /catch \(error\)/);
+  assert.match(action, /if \(!current\)/);
   assert.match(action, /すでに削除されています/);
   assert.doesNotMatch(action, /deleted_at|is_deleted|soft_delete/i);
 });
 
-test("動画時間が未取得または範囲外なら投稿を拒否する", () => {
+test("投稿対象と動画時間の判定は共通化されている", () => {
+  assert.match(action, /async function loadPostingTarget/);
+  assert.equal((action.match(/loadPostingTarget\(/g) ?? []).length, 3);
   assert.match(action, /videoYoutubeMetadata\.duration_seconds/);
   assert.match(action, /durationSeconds == null \|\| durationSeconds <= 0/);
   assert.match(action, /data\.chapter_time > durationSeconds/);
   assert.match(action, /z\.number\(\)\.finite\(\)/);
   assert.match(composer, /parsedTime > durationSeconds/);
+});
+
+test("削除権限判定は共通化し、単一作品の一覧だけ受理する", () => {
+  assert.match(action, /async function canModerateChapterVideo/);
+  assert.equal((action.match(/canModerateChapterVideo\(/g) ?? []).length, 3);
+  assert.match(action, /videoIds\.size !== 1/);
+  assert.match(action, /複数作品のチャプターを同時に判定できません/);
 });
 
 test("通常コメントはプレイヤーバー非表示をServer Actionで固定する", () => {
@@ -52,19 +63,20 @@ test("通常チャプターのCSV一括登録は撤去されている", () => {
   assert.doesNotMatch(composer, /createChaptersBulk|CSV で一括登録|bulkCsv/);
 });
 
-test("削除操作は権限取得後だけ表示し専用確認ダイアログを使う", () => {
+test("削除操作は権限取得後だけ表示しネイティブdialogを使う", () => {
   assert.match(action, /getChapterDeleteCapabilities/);
   assert.match(tabs, /await getChapterDeleteCapabilities\(ids\)/);
   assert.match(tabs, /canDelete=\{deletableIds\.has\(chapter\.id\)\}/);
-  assert.match(tabs, /role="alertdialog"/);
+  assert.match(tabs, /<dialog/);
+  assert.match(tabs, /dialog\.showModal\(\)/);
+  assert.match(tabs, /onCancel=/);
   assert.match(tabs, /await deleteChapter\(formData\)/);
   assert.doesNotMatch(item, /window\.confirm|deleteChapter/);
-  assert.doesNotMatch(tabs, /window\.confirm/);
+  assert.doesNotMatch(tabs, /window\.confirm|FOCUSABLE_SELECTOR|addEventListener\("keydown"/);
+  assert.match(tabsCss, /\.dialog::backdrop/);
 });
 
-test("削除ダイアログはフォーカスを閉じ込め、連打を防止する", () => {
-  assert.match(tabs, /FOCUSABLE_SELECTOR/);
-  assert.match(tabs, /event\.key !== "Tab"/);
+test("削除ダイアログは連打防止・動的ID・フォーカス復元を備える", () => {
   assert.match(tabs, /deletingRef\.current = true/);
   assert.match(tabs, /previous\?\.isConnected/);
   assert.match(tabs, /React\.useId\(\)/);
@@ -87,16 +99,20 @@ test("投稿フォームは共通時刻解析と二重送信防止を使う", ()
   assert.doesNotMatch(composer, /function parseTimeInput/);
 });
 
-test("公開範囲は説明付きのradio選択になっている", () => {
-  assert.match(composer, /name="chapter_visibility"/);
-  assert.match(composer, /type="radio"/);
+test("投稿フォームのIDとradio名はインスタンスごとに分離される", () => {
+  assert.match(composer, /const componentId = React\.useId\(\)/);
+  assert.match(composer, /const visibilityName =/);
+  assert.match(composer, /name=\{name\}/);
+  assert.match(composer, /aria-controls=\{formId\}/);
   assert.match(composer, /自分と作品管理者だけに表示します/);
 });
 
 test("投稿フォームは開いた時だけ文脈を取得し、失敗時に再取得できる", () => {
-  assert.match(composer, /!open \|\|/);
+  assert.match(composer, /const nextOpen = !open/);
+  assert.match(composer, /nextOpen &&/);
   assert.match(composer, /const loadContext = React\.useCallback/);
   assert.match(composer, /onClick=\{loadContext\}/);
+  assert.match(composer, /setOpen\(false\)/);
   assert.match(composerCss, /submitSuccess/);
   assert.match(composerCss, /prefers-reduced-motion/);
 });
