@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-20
-> Verified against commit: `89b8889`
+> Verified against commit: `4789dc6`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/`, `wrangler.toml`, `package.json`
 
 Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、Cron Worker 3本で運用する。実Cloudflare操作、Remote D1、production secret操作は運用者が明示した場合だけ行う。
@@ -15,8 +15,8 @@ Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、Cron Worker 3本
 
 - DB正本は`src/lib/db/schema.ts`。active migrationは`migrations/`直下を番号順に適用する。
 - 旧migration本文は`migrations/historical/`へ保存し、旧列fallback、runtime DDL、二重書込みを提供しない。
-- 旧形式インポートのUI、API、runtime module、環境変数を提供しない。
-- 旧データ変換は正本migrationの一回限りの処理とする。
+- 旧DB変換は正本migrationで一回限り実施し、保管済み旧JSON / CSV / TSVだけを管理者専用インポート境界で受け付ける。
+- 通常ランタイム、公開API、Workerへ旧形式分岐、旧列fallback、dual-read、dual-writeを持ち込まない。
 - 内部ユーザーIDは`user_id`、Discord Snowflakeは`discord_id`。
 - `event_staff.permission_preset = 'owner'`がイベント代表者の正本で、ownerを0人にしない。
 - 重要mutationと監査ログは同じ原子的処理で確定する。
@@ -31,6 +31,7 @@ Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、Cron Worker 3本
 | YouTube再生リスト同期 | [youtube-playlist-sync.md](youtube-playlist-sync.md) |
 | 監査・復元・owner保護 | [audit-and-restore.md](audit-and-restore.md) |
 | spreadsheet import | [spreadsheet-import.md](spreadsheet-import.md) |
+| 旧JSON / CSV / TSVの管理者インポート | [legacy-import.md](legacy-import.md) |
 | R2静的JSON、公開DTO | [static-delivery.md](static-delivery.md) |
 | 障害の一次対応 | [incident-response.md](incident-response.md) |
 | X ID統合 | [x-id-merge.md](x-id-merge.md) |
