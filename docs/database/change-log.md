@@ -2,23 +2,38 @@
 
 > Status: Active
 > Last verified: 2026-07-20
-> Verified against commit: `3d85540`
+> Verified against commit: `d12eabf` + PR #88
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
 
-## 2026-07-20 — `0043_simplify_visibility_statuses.sql`
+## 2026-07-20 — `0044_simplify_visibility_statuses.sql`
 
 | 項目 | 内容 |
 | --- | --- |
 | Type | cleanup |
-| Summary | 作品とイベントの公開状態を簡素化し、YouTube限定公開をYouTubeメタデータへ分離 |
+| Summary | 修正後DB正本への移行後に、作品・イベントのアプリ運用状態を整理し、YouTube限定公開をYouTubeメタデータへ分離 |
 | Reason | FlameNode内の公開範囲とYouTube上の公開区分を混在させず、下書き・アーカイブの重複した役割を廃止するため |
 | Tables | `videos`、`video_youtube_metadata`、`video_moderation_cases`、`events` |
-| Data migration | 動画`limited`を`public`へ移しYouTube公開区分を`unlisted`として保存。動画`draft / archived / hidden`を`private`、イベント`draft`を`private`、`archived`を`public`へ移行。旧partial unique indexで許されていた全YouTube ID重複を順位付けし、代表以外は行を保持したまま`voided`へ移してIDを解除し、理由と元IDをモデレーション履歴へ記録 |
-| Compatibility | runtimeで旧状態を読み替えない。active baselineは変更せず、旧defaultをINSERT直後にcanonicalへ正規化し、UPDATEで旧状態を拒否するtriggerを追加 |
-| Data loss | none。作品・イベント行は削除せず、解除した重複YouTube IDも監査可能な形で保持 |
-| Rollback | 状態の意味と全状態共通unique indexが変わるため、migration適用前のD1バックアップから復元 |
-| Validation | typecheck、Lint、unit、Worker、Cloudflare契約、SQLite integration、Next.js/Pages build、schema/history、公開API検査 |
-| PR | `#88` |
+| Data migration | 動画`limited`を`public`へ移しYouTube公開区分を`unlisted`として保存。動画`draft / archived / hidden`を原則`private`、イベント`draft`を`private`、`archived`を`public`へ移行。`archived`から`private`への変換で既存部分一意制約に抵触する行だけ、YouTube IDを保持したまま監査付きで`voided`へ振り分け |
+| Compatibility | `0043_db_canonical_migration.sql`完了をguardで確認。旧物理default由来の`draft`だけをINSERT後に正規化し、その他の旧状態のINSERT・UPDATEを拒否 |
+| Data loss | none。作品・イベント行と`videos.youtube_video_id`は削除しない |
+| Rollback | 状態の意味が変わるため、migration適用前のD1バックアップから復元 |
+| Validation | 41テーブル409カラムの正本検査、誤順序適用のfail-fast、SQLite integration、typecheck、Lint、unit、Worker、Cloudflare契約、Next.js/Pages build、公開API検査 |
+| PR | `#88`（`#89`に依存） |
+
+## 2026-07-20 — `0043_db_canonical_migration.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | destructive |
+| Summary | X名義・申請・イベントowner・作品関連・監査設定を41テーブル409カラムの修正後正本へ移行し、旧テーブル8件・旧カラム25件・旧名称2件を削除 |
+| Reason | 本格運用前に重複正本と直接FKを廃止し、一般ランタイムを新正本だけへ統一するため |
+| Tables | `x_identity_requests`、`x_user_account_links`、`x_users`、`events`、`event_staff`、`videos`、`video_members`、`video_chapters`、`system_settings`ほか |
+| Data migration | 旧X申請・直接userリンク・owner・JSONチャプター・YouTube動画ID・監査設定を新正本へ変換。`events.max_slots_per_video`は保持 |
+| Compatibility | 一般ランタイムの後方互換は提供しない。旧形式インポートは入力をcanonical planへ変換し、新正本だけへ保存 |
+| Data loss | intentional。廃止済み機能、外部由来interaction、候補履歴、旧移行管理テーブルを削除 |
+| Rollback | 適用前D1バックアップと0043適用前アプリケーションを同時に復元 |
+| Validation | Node SQLiteの空DB・旧fixture・不正旧データ・途中状態4系統に加え、WranglerローカルD1で空DB/旧fixtureを適用。41テーブル409カラム、旧8テーブル/旧25カラム/旧名称2件不存在、owner/FK違反0、件数・名称変更・max_slots一致 |
+| PR | `agent/db-canonical-migration-v2` |
 
 ## 2026-07-13 — `0041_youtube_quota_budget.sql`
 
@@ -77,7 +92,7 @@
 | Compatibility | 読み取り結果は不変。migration未適用でも機能するが処理効率が低下する |
 | Data loss | none |
 | Rollback | `videos_creator_public_idx`、`video_members_x_user_video_idx`、`video_chapters_video_visibility_idx`を削除 |
-| Validation | schema/history検査、公開API・Worker・unit tests、空DBへのactive migration適用 |
+| Validation | schema/history検査、公開API・Worker・unit tests、空SQLiteへのactive migration適用 |
 | PR | main直接実装 |
 
 ## 2026-07-13 — `0038_runtime_efficiency_resilience.sql`
@@ -155,4 +170,4 @@
 | Validation | `check:db-schema`、`check:db-history`、空SQLiteへのbaseline適用。 |
 | PR | main直接実装 |
 
-Legacy import staging: `legacy_import_batches` persists canonical plan JSON, preview expiry, one-time lease, and consumed timestamp. The apply request is never the canonical source.
+旧形式インポートのpreviewは `spreadsheet_import_runs` の一度限りnonceとR2上のcanonical planで保護する。apply request bodyや旧DBテーブルを正本にしない。
