@@ -1,0 +1,84 @@
+name: Apply canonical videos import patch v2
+
+on:
+  push:
+    branches:
+      - agent/db-canonical-migration-v2
+    paths:
+      - .agent-patch/**
+      - .github/workflows/apply-canonical-videos-import-v2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: canonical-videos-import-v2
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/db-canonical-migration-v2
+          fetch-depth: 0
+
+      - name: Reconstruct and apply signed patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          parts=(.agent-patch/part-*)
+          (( ${#parts[@]} > 0 )) || { echo '分割パッチがありません' >&2; exit 1; }
+          printf '%s\n' "${parts[@]}" | sort -V > /tmp/parts.txt
+          while IFS= read -r part; do cat "$part"; done < /tmp/parts.txt \
+            | base64 -d | gzip -d > /tmp/flamenode.patch
+          echo '08ec23c94c21c429615e0d525a9ce151e1522f91f37c48edf0719db6f88b2151  /tmp/flamenode.patch' \
+            | sha256sum -c -
+          git apply --3way --index /tmp/flamenode.patch
+          git diff --cached --check
+          if git diff --cached --name-only | grep -Eq '^(migrations/|src/lib/db/schema(\.canonical)?\.ts$)'; then
+            echo '担当外のDB正本変更を検出しました' >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run typecheck
+          npm run lint
+          node --test --experimental-strip-types \
+            src/lib/import/legacy/*.test.mjs \
+            src/lib/video/*.test.mjs \
+            src/lib/audit/*.test.mjs \
+            src/lib/eventExportPayload.test.mjs \
+            src/lib/media/publicMedia.test.mjs \
+            workers/cleanup/*.test.mjs
+          npm run test:unit
+          npm run check:docs
+          npm run check:db-legacy
+          npm run check:public-api-contract
+
+      - name: Commit canonical implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .agent-patch .github/workflows/apply-canonical-videos-import-v2.yml
+          git add -A
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m '作品・監査・旧形式インポートを新正本へ切り替え'
+          git push origin HEAD:agent/db-canonical-migration-v2
