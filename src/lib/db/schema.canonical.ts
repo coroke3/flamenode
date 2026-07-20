@@ -165,10 +165,11 @@ export const events = sqliteTable(
     img_url: text("img_url"),
     accent_color: text("accent_color"),
     visibility_status: text("visibility_status", {
-      enum: ["draft", "private", "public", "archived"],
+      enum: ["private", "public"],
     })
       .notNull()
-      .default("draft"),
+      // 0043の物理defaultはdraft。0044がINSERT直後にprivateへ正規化する。
+      .default("draft" as "private"),
     allow_user_video_event_links: integer("allow_user_video_event_links")
       .notNull()
       .default(0),
@@ -299,18 +300,11 @@ export const videos = sqliteTable(
     highlights: text("highlights"),
     production_story: text("production_story"),
     visibility_status: text("visibility_status", {
-      enum: [
-        "draft",
-        "pending",
-        "public",
-        "limited",
-        "private",
-        "archived",
-        "voided",
-      ],
+      enum: ["pending", "public", "private", "voided"],
     })
       .notNull()
-      .default("draft"),
+      // 0043の物理defaultはdraft。0044がINSERT直後にpendingへ正規化する。
+      .default("draft" as "pending"),
     scheduling_type: text("scheduling_type", {
       enum: ["slotted", "manual"],
     }).default("slotted"),

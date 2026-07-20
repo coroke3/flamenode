@@ -2,11 +2,26 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
+import { getTableColumns } from "drizzle-orm";
+import { events, videos } from "../db/schema.ts";
 
 const migrationSql = readFileSync(
   new URL("../../../migrations/0044_simplify_visibility_statuses.sql", import.meta.url),
   "utf8",
 );
+
+test("canonical schema exposes only the current visibility states", () => {
+  assert.deepEqual(getTableColumns(events).visibility_status.enumValues, [
+    "private",
+    "public",
+  ]);
+  assert.deepEqual(getTableColumns(videos).visibility_status.enumValues, [
+    "pending",
+    "public",
+    "private",
+    "voided",
+  ]);
+});
 
 test("0044 is additive to the canonical DB and does not redefine YouTube ID ownership", () => {
   assert.doesNotMatch(migrationSql, /video_youtube_metadata[\s\S]*youtube_video_id\s*=\s*NULL/);
