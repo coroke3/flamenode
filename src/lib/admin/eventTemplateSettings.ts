@@ -13,8 +13,6 @@ import {
   MAX_CUSTOM_QUESTION_CONFIGURED_LENGTH,
   MAX_CUSTOM_QUESTION_DESCRIPTION_LENGTH,
   MAX_CUSTOM_QUESTION_LABEL_LENGTH,
-  MAX_CUSTOM_QUESTION_OPTION_LENGTH,
-  MAX_CUSTOM_QUESTION_OPTIONS,
   MAX_CUSTOM_QUESTION_PLACEHOLDER_LENGTH,
   MAX_EVENT_CUSTOM_QUESTIONS,
 } from "../video/customQuestionLimits.ts";
@@ -40,15 +38,17 @@ export interface EventTemplateQuestionDefinition {
   description: string | null;
   type: CustomQuestionType;
   required: boolean;
-  options: string[];
+  options_json: string | null;
   placeholder: string | null;
   max_length: number | null;
+  sort_order: number;
+  is_active: true;
   visibility: CustomQuestionVisibility;
 }
 
 /**
  * テンプレートに保存する設定（開催日時・枠・作品・スタッフ承認は含めない）。
- * 質問は配列順を表示順とし、DB向けのsort_order / is_active / options_jsonを持ち込まない。
+ * schema v3だけを受理し、旧schemaや別形式への補正は行わない。
  */
 export interface EventTemplateSnapshot {
   schema_version: 3;
@@ -104,9 +104,11 @@ const QUESTION_KEYS = new Set([
   "description",
   "type",
   "required",
-  "options",
+  "options_json",
   "placeholder",
   "max_length",
+  "sort_order",
+  "is_active",
   "visibility",
 ]);
 
@@ -158,28 +160,23 @@ function isSlotVisibilityMode(
   return value === "public_name" || value === "anonymous" || value === "hidden";
 }
 
-function parseTemplateOptions(value: unknown): string[] | null {
-  if (!Array.isArray(value) || value.length > MAX_CUSTOM_QUESTION_OPTIONS) return null;
-  const seen = new Set<string>();
-  const options: string[] = [];
-  for (const option of value) {
-    if (
-      typeof option !== "string" ||
-      !option ||
-      option !== option.trim() ||
-      option.length > MAX_CUSTOM_QUESTION_OPTION_LENGTH ||
-      seen.has(option)
-    ) {
-      return null;
-    }
-    seen.add(option);
-    options.push(option);
+function validateQuestionOptions(
+  type: CustomQuestionType,
+  optionsJson: string | null,
+): boolean {
+  let options: string[];
+  try {
+    options = parseOptionsJson(optionsJson);
+  } catch {
+    return false;
   }
-  return options;
+  const usesOptions = type === "select" || type === "radio" || type === "checkbox";
+  return usesOptions ? options.length > 0 : options.length === 0;
 }
 
 function parseTemplateQuestionDefinition(
   value: unknown,
+  index: number,
 ): EventTemplateQuestionDefinition | null {
   if (!isRecord(value) || !hasExactKeys(value, QUESTION_KEYS)) return null;
   if (!isValidCustomQuestionKey(value.question_key)) return null;
@@ -198,17 +195,16 @@ function parseTemplateQuestionDefinition(
   if (!isCustomQuestionType(value.type)) return null;
   if (!isCustomQuestionVisibility(value.visibility)) return null;
   if (typeof value.required !== "boolean") return null;
-
-  const options = parseTemplateOptions(value.options);
-  if (!options) return null;
-  const usesOptions = value.type === "select" || value.type === "radio" || value.type === "checkbox";
-  if (usesOptions ? options.length === 0 : options.length !== 0) return null;
+  if (value.options_json !== null && typeof value.options_json !== "string") return null;
+  if (!validateQuestionOptions(value.type, value.options_json)) return null;
+  if (value.is_active !== true || value.sort_order !== index) return null;
 
   const maxLength = value.max_length;
   if (
     maxLength !== null &&
     (!isPositiveInteger(maxLength) || maxLength > MAX_CUSTOM_QUESTION_CONFIGURED_LENGTH)
   ) return null;
+  const usesOptions = value.type === "select" || value.type === "radio" || value.type === "checkbox";
   if (usesOptions && maxLength !== null) return null;
 
   return {
@@ -217,74 +213,34 @@ function parseTemplateQuestionDefinition(
     description: value.description,
     type: value.type,
     required: value.required,
-    options,
+    options_json: value.options_json,
     placeholder: value.placeholder,
     max_length: maxLength,
+    sort_order: index,
+    is_active: true,
     visibility: value.visibility,
   };
 }
 
 function questionRowToTemplateDefinition(
   row: EventTemplateQuestionRow,
+  index: number,
 ): EventTemplateQuestionDefinition {
-  if (!isValidCustomQuestionKey(row.question_key)) {
-    throw new Error("invalid_event_template_question_key");
-  }
-  if (
-    !row.label ||
-    row.label !== row.label.trim() ||
-    row.label.length > MAX_CUSTOM_QUESTION_LABEL_LENGTH
-  ) {
-    throw new Error("invalid_event_template_question_label");
-  }
-  if (!isCanonicalNullableText(row.description, MAX_CUSTOM_QUESTION_DESCRIPTION_LENGTH)) {
-    throw new Error("invalid_event_template_question_description");
-  }
-  if (!isCanonicalNullableText(row.placeholder, MAX_CUSTOM_QUESTION_PLACEHOLDER_LENGTH)) {
-    throw new Error("invalid_event_template_question_placeholder");
-  }
-  if (!isCustomQuestionType(row.type)) {
-    throw new Error("invalid_event_template_question_type");
-  }
-  if (!isCustomQuestionVisibility(row.visibility)) {
-    throw new Error("invalid_event_template_question_visibility");
-  }
-  if (row.required !== 0 && row.required !== 1) {
-    throw new Error("invalid_event_template_question_required");
-  }
-  if (row.is_active !== 1) {
-    throw new Error("inactive_event_template_question");
-  }
-  if (!isNonNegativeInteger(row.sort_order)) {
-    throw new Error("invalid_event_template_question_sort_order");
-  }
-
-  const options = parseOptionsJson(row.options_json);
-  const usesOptions = row.type === "select" || row.type === "radio" || row.type === "checkbox";
-  if (usesOptions ? options.length === 0 : options.length !== 0) {
-    throw new Error("invalid_event_template_question_options");
-  }
-  if (
-    row.max_length !== null &&
-    (!isPositiveInteger(row.max_length) || row.max_length > MAX_CUSTOM_QUESTION_CONFIGURED_LENGTH)
-  ) {
-    throw new Error("invalid_event_template_question_max_length");
-  }
-  if (usesOptions && row.max_length !== null) {
-    throw new Error("invalid_event_template_question_max_length");
-  }
-
-  return {
+  const definition = parseTemplateQuestionDefinition({
     question_key: row.question_key,
     label: row.label,
     description: row.description,
     type: row.type,
     required: row.required === 1,
-    options,
+    options_json: row.options_json,
     placeholder: row.placeholder,
     max_length: row.max_length,
+    sort_order: index,
+    is_active: row.is_active === 1,
     visibility: row.visibility,
-  };
+  }, index);
+  if (!definition) throw new Error("invalid_event_template_question_row");
+  return definition;
 }
 
 export function snapshotFromEvent(
@@ -368,8 +324,8 @@ export function parseEventTemplateSnapshot(
 
   const seen = new Set<string>();
   const definitions: EventTemplateQuestionDefinition[] = [];
-  for (const value of parsed.custom_question_definitions) {
-    const definition = parseTemplateQuestionDefinition(value);
+  for (const [index, value] of parsed.custom_question_definitions.entries()) {
+    const definition = parseTemplateQuestionDefinition(value, index);
     if (!definition || seen.has(definition.question_key)) return null;
     seen.add(definition.question_key);
     definitions.push(definition);
@@ -411,7 +367,7 @@ function definitionToEditableQuestion(
     description: definition.description,
     type: definition.type,
     required: definition.required,
-    options: [...definition.options],
+    options: parseOptionsJson(definition.options_json),
     placeholder: definition.placeholder,
     max_length: definition.max_length,
     sort_order: index,
