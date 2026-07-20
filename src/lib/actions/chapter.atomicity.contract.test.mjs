@@ -16,19 +16,20 @@ const composerCss = read("../../components/video/ChapterComposer.module.css");
 test("通常チャプターの作成と削除は監査・静的再生成を同一mutationで保存する", () => {
   assert.equal((action.match(/await mutateWithAudit\(db,/g) ?? []).length, 2);
   assert.equal(
-    (action.match(/await buildStaticRebuildQueueBatch\(/g) ?? []).length,
+    (action.match(/await buildStaticRebuildQueueBatch\(db,/g) ?? []).length,
     2,
   );
   assert.match(action, /operation: "CREATE"/);
   assert.match(action, /operation: "DELETE"/);
 });
 
-test("チャプター削除はvideo_chaptersの物理削除とCASを使う", () => {
+test("チャプター削除は物理削除・CAS・冪等応答を使う", () => {
   assert.match(action, /\.delete\(videoChapters\)/);
   assert.match(
     action,
     /expectedRowCondition\(\{ expectedCurrent: existing \}\)/,
   );
+  assert.match(action, /すでに削除されています/);
   assert.doesNotMatch(action, /deleted_at|is_deleted|soft_delete/i);
 });
 
@@ -36,8 +37,14 @@ test("動画時間が未取得または範囲外なら投稿を拒否する", ()
   assert.match(action, /videoYoutubeMetadata\.duration_seconds/);
   assert.match(action, /durationSeconds == null \|\| durationSeconds <= 0/);
   assert.match(action, /data\.chapter_time > durationSeconds/);
-  assert.match(composer, /getChapterPostingContext/);
+  assert.match(action, /z\.number\(\)\.finite\(\)/);
   assert.match(composer, /parsedTime > durationSeconds/);
+});
+
+test("通常コメントはプレイヤーバー非表示をServer Actionで固定する", () => {
+  assert.match(action, /show_on_player_bar: 0/);
+  assert.doesNotMatch(composer, /formData\.set\("show_on_player_bar"/);
+  assert.doesNotMatch(action, /show_on_player_bar: z\./);
 });
 
 test("通常チャプターのCSV一括登録は撤去されている", () => {
@@ -55,10 +62,12 @@ test("削除操作は権限取得後だけ表示し専用確認ダイアログ�
   assert.doesNotMatch(tabs, /window\.confirm/);
 });
 
-test("削除ダイアログはフォーカスを閉じ込め、削除中も状態を保つ", () => {
+test("削除ダイアログはフォーカスを閉じ込め、連打を防止する", () => {
   assert.match(tabs, /FOCUSABLE_SELECTOR/);
   assert.match(tabs, /event\.key !== "Tab"/);
-  assert.match(tabs, /deletingRef\.current/);
+  assert.match(tabs, /deletingRef\.current = true/);
+  assert.match(tabs, /previous\?\.isConnected/);
+  assert.match(tabs, /React\.useId\(\)/);
   assert.match(tabs, /aria-busy=\{deleting\}/);
   assert.match(tabsCss, /prefers-reduced-motion/);
 });
@@ -68,6 +77,14 @@ test("シーク領域と削除ボタンを別のbuttonとして描画する", ()
   assert.match(item, /className=\{styles\.deleteButton\}/);
   assert.match(item, /name="trash"/);
   assert.match(item, /duration != null && chapter\.chapter_time > duration/);
+});
+
+test("投稿フォームは共通時刻解析と二重送信防止を使う", () => {
+  assert.match(composer, /parseChapterTimeInput/);
+  assert.match(composer, /submittingRef\.current/);
+  assert.match(composer, /disabled=\{busy\}/);
+  assert.match(composer, /チャプターコメントを投稿しました/);
+  assert.doesNotMatch(composer, /function parseTimeInput/);
 });
 
 test("公開範囲は説明付きのradio選択になっている", () => {
@@ -80,8 +97,6 @@ test("投稿フォームは開いた時だけ文脈を取得し、失敗時に�
   assert.match(composer, /!open \|\|/);
   assert.match(composer, /const loadContext = React\.useCallback/);
   assert.match(composer, /onClick=\{loadContext\}/);
-  assert.match(composer, /チャプターコメントを投稿しました/);
-  assert.match(composer, /\^\\d\+\(\?:\\\.\\d\{1,3\}\)\?\$/);
   assert.match(composerCss, /submitSuccess/);
   assert.match(composerCss, /prefers-reduced-motion/);
 });
