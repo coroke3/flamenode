@@ -7,6 +7,7 @@ const read = (relative) =>
   readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8");
 
 const action = read("./chapter.ts");
+const detailQuery = read("../db/videoDetailQueries.ts");
 const composer = read("../../components/video/ChapterComposer.tsx");
 const item = read("../../components/video/ChapterCommentItem.tsx");
 const tabs = read("../../components/video/ChapterTabs.tsx");
@@ -50,12 +51,24 @@ test("削除権限判定は共通化し、単一作品の一覧だけ受理す�
   assert.equal((action.match(/canModerateChapterVideo\(/g) ?? []).length, 3);
   assert.match(action, /videoIds\.size !== 1/);
   assert.match(action, /複数作品のチャプターを同時に判定できません/);
+  assert.match(action, /row\.x_user_id != null/);
+  assert.match(action, /existing\.x_user_id != null/);
 });
 
-test("通常コメントはプレイヤーバー非表示をServer Actionで固定する", () => {
-  assert.match(action, /show_on_player_bar: 0/);
+test("チャプター作成は9カラム正本だけへ書き込む", () => {
+  assert.match(action, /const after: typeof videoChapters\.\$inferInsert/);
+  assert.doesNotMatch(action, /show_on_player_bar|order_index/);
   assert.doesNotMatch(composer, /formData\.set\("show_on_player_bar"/);
-  assert.doesNotMatch(action, /show_on_player_bar: z\./);
+  assert.match(action, /旧 video_members\.chapters_json には書き込まない/);
+});
+
+test("詳細表示は旧JSON・旧列を読まず時刻順で取得する", () => {
+  assert.doesNotMatch(detailQuery, /chapters_json|show_on_player_bar/);
+  assert.match(detailQuery, /唯一の読み取り元は video_chapters/);
+  assert.match(
+    detailQuery,
+    /orderBy\(asc\(videoChapters\.chapter_time\), asc\(videoChapters\.id\)\)/,
+  );
 });
 
 test("通常チャプターのCSV一括登録は撤去されている", () => {
