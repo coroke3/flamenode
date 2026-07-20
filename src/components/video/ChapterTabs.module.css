@@ -61,6 +61,11 @@
   scrollbar-color: var(--border-subtle) transparent;
 }
 
+.list:focus-visible {
+  outline: 2px solid var(--event-accent, var(--accent-primary));
+  outline-offset: -2px;
+}
+
 .list::-webkit-scrollbar {
   width: 7px;
 }
@@ -110,32 +115,30 @@
   color: var(--text-muted);
 }
 
-.dialogBackdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 120;
-  display: grid;
-  place-items: center;
-  padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right))
-    max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
-  background: rgb(0 0 0 / 64%);
-  backdrop-filter: blur(3px);
-  animation: chapter-dialog-backdrop-in 0.16s ease-out;
-}
-
 .dialog {
-  width: min(100%, 430px);
-  max-height: min(90vh, 560px);
+  width: min(calc(100% - 40px), 430px);
+  max-height: min(90dvh, 560px);
   overflow-y: auto;
-  display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 14px;
+  margin: auto;
   padding: 20px;
   border: 1px solid color-mix(in srgb, var(--accent-danger) 45%, var(--border-subtle));
   border-radius: var(--radius-md);
   background: var(--bg-surface);
+  color: var(--text-primary);
   box-shadow: 0 24px 70px rgb(0 0 0 / 42%);
+}
+
+.dialog[open] {
+  display: grid;
   animation: chapter-dialog-in 0.18s ease-out;
+}
+
+.dialog::backdrop {
+  background: rgb(0 0 0 / 64%);
+  backdrop-filter: blur(3px);
+  animation: chapter-dialog-backdrop-in 0.16s ease-out;
 }
 
 .dialog:focus {
@@ -293,15 +296,10 @@
 }
 
 @media (max-width: 520px) {
-  .dialogBackdrop {
-    align-items: end;
-    padding: 12px;
-    padding-bottom: max(12px, env(safe-area-inset-bottom));
-  }
-
   .dialog {
-    width: 100%;
+    width: calc(100% - 24px);
     grid-template-columns: 1fr;
+    margin: auto 12px max(12px, env(safe-area-inset-bottom));
     padding: 18px;
     border-radius: var(--radius-md);
   }
@@ -322,8 +320,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dialogBackdrop,
   .dialog,
+  .dialog::backdrop,
   .toast,
   .confirmDeleteButton {
     animation: none;
