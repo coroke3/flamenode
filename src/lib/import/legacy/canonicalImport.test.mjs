@@ -4,6 +4,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseLegacyImportText } from "./parse.ts";
 import { normalizeLegacyFiles } from "./normalize.ts";
+import {
+  createLegacyImportPreviewToken,
+  fingerprintLegacyImport,
+  verifyLegacyImportPreviewToken,
+} from "./previewToken.ts";
 
 const eventJson = JSON.stringify([
   {
@@ -22,16 +27,22 @@ const videoCsv = [
   "pvsf-test,作品A,Creator,creator_x,https://youtu.be/abcdefghijk,Creator,creator_x,0,After Effects,2026/07/20,19:00",
 ].join("\n");
 
+function fixturePlan() {
+  return normalizeLegacyFiles(
+    [
+      parseLegacyImportText("events.json", eventJson),
+      parseLegacyImportText("videos.csv", videoCsv),
+    ],
+    {
+      eventVisibility: "public",
+      videoVisibility: "private",
+      now: 1_700_000_000,
+    },
+  );
+}
+
 test("JSON/CSVを同じcanonical planへ変換する", () => {
-  const files = [
-    parseLegacyImportText("events.json", eventJson),
-    parseLegacyImportText("videos.csv", videoCsv),
-  ];
-  const plan = normalizeLegacyFiles(files, {
-    eventVisibility: "public",
-    videoVisibility: "private",
-    now: 1_700_000_000,
-  });
+  const plan = fixturePlan();
   assert.deepEqual(plan.errors, []);
   assert.equal(plan.events.length, 1);
   assert.equal(plan.events[0].visibility_status, "public");
@@ -44,12 +55,19 @@ test("JSON/CSVを同じcanonical planへ変換する", () => {
   assert.equal(plan.videoChapters[0].chapter_time, 0);
 });
 
+test("TSVと引用符付きCSVを解析できる", () => {
+  const tsv = "eventid\teventname\tmember\tmemberid\nfoo\tFoo Event\tMochi\tmochi\n";
+  const parsedTsv = parseLegacyImportText("events.tsv", tsv);
+  assert.equal(parsedTsv.rows[0].eventname, "Foo Event");
+
+  const quoted = 'title,creator,tlink,credit\n"作品, A",Creator,creator_x,"line1\nline2"\n';
+  const parsedCsv = parseLegacyImportText("videos.csv", quoted);
+  assert.equal(parsedCsv.rows[0].title, "作品, A");
+  assert.equal(parsedCsv.rows[0].credit, "line1\nline2");
+});
+
 test("旧DB列をcanonical planへ残さない", () => {
-  const plan = normalizeLegacyFiles([parseLegacyImportText("videos.csv", videoCsv)], {
-    eventVisibility: "public",
-    videoVisibility: "public",
-  });
-  const serialized = JSON.stringify(plan);
+  const serialized = JSON.stringify(fixturePlan());
   for (const forbidden of [
     "linked_user_id",
     "representative_x_user_id",
@@ -60,6 +78,64 @@ test("旧DB列をcanonical planへ残さない", () => {
   ]) {
     assert.equal(serialized.includes(forbidden), false, forbidden);
   }
+});
+
+test("preview tokenは利用者・内容・期限に束縛される", async () => {
+  const plan = fixturePlan();
+  const args = {
+    plan,
+    eventVisibility: "public",
+    videoVisibility: "private",
+    strategy: "create_only",
+  };
+  const fingerprint = await fingerprintLegacyImport(args);
+  const token = await createLegacyImportPreviewToken({
+    secret: "test-secret",
+    actorAuthUserId: "auth-user-1",
+    fingerprint,
+    now: 1000,
+  });
+  assert.equal(
+    await verifyLegacyImportPreviewToken({
+      token,
+      secret: "test-secret",
+      actorAuthUserId: "auth-user-1",
+      fingerprint,
+      now: 1001,
+    }),
+    true,
+  );
+  assert.equal(
+    await verifyLegacyImportPreviewToken({
+      token,
+      secret: "test-secret",
+      actorAuthUserId: "auth-user-2",
+      fingerprint,
+      now: 1001,
+    }),
+    false,
+  );
+  const changedFingerprint = await fingerprintLegacyImport({ ...args, strategy: "skip_existing" });
+  assert.equal(
+    await verifyLegacyImportPreviewToken({
+      token,
+      secret: "test-secret",
+      actorAuthUserId: "auth-user-1",
+      fingerprint: changedFingerprint,
+      now: 1001,
+    }),
+    false,
+  );
+  assert.equal(
+    await verifyLegacyImportPreviewToken({
+      token,
+      secret: "test-secret",
+      actorAuthUserId: "auth-user-1",
+      fingerprint,
+      now: 2000,
+    }),
+    false,
+  );
 });
 
 test("ランタイム側に旧テーブル・dual-writeを導入しない", () => {
@@ -78,4 +154,15 @@ test("ランタイム側に旧テーブル・dual-writeを導入しない", () =
   ]) {
     assert.equal(source.includes(forbidden), false, forbidden);
   }
+});
+
+test("X ID統合は承認申請だけを入口にし、直接Actionを残さない", () => {
+  const root = path.resolve(import.meta.dirname, "../../../..");
+  assert.equal(fs.existsSync(path.join(root, "src/lib/actions/merge-admin.ts")), false);
+  assert.equal(fs.existsSync(path.join(root, "src/components/admin/MergeRequestButton.tsx")), false);
+  const mergeSource = fs.readFileSync(path.join(root, "src/lib/xid/merge.ts"), "utf8");
+  assert.match(mergeSource, /executeApprovedXIdMergeRequest/);
+  assert.match(mergeSource, /UPDATE x_identity_requests/);
+  assert.match(mergeSource, /SET active_x_user_id = \$\{target\}/);
+  assert.match(mergeSource, /approval_status = 'rejected'/);
 });
