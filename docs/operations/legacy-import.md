@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-20
-> Verified against commit: `4789dc6`
+> Verified against commit: `6be5485`
 > Source of truth: `app/(admin)/admin/import/`, `app/api/admin/import/legacy/`, `src/lib/import/legacy/`
 
 旧JSON・CSV・TSVは、管理者専用の入力境界で新DB正本へ一方向変換します。通常ランタイム、公開API、Workerは旧形式を解釈しません。
