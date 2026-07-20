@@ -164,6 +164,7 @@ export async function createLegacyImportPreview(
   options: CreateOptions = {},
 ): Promise<LegacyImportPreviewCredential> {
   assertBucket(bucket);
+  const safeBucket = bucket;
   const now = options.now ?? nowSeconds();
   const previewToken = (options.previewToken ?? randomToken()).toLowerCase();
   if (!TOKEN_PATTERN.test(previewToken)) {
@@ -190,7 +191,7 @@ export async function createLegacyImportPreview(
     );
   }
   const key = await previewKey(input.authUserId, previewToken);
-  const stored = await bucket.put(key, serialized, putOptions(record));
+  const stored = await safeBucket.put(key, serialized, putOptions(record));
   if (!stored) {
     throw new LegacyImportPreviewError("preview planをR2へ保存できませんでした。", "claim_conflict");
   }
@@ -207,12 +208,13 @@ export async function claimLegacyImportPreview(
   options: ClaimOptions = {},
 ): Promise<ClaimedLegacyImportPreview> {
   assertBucket(bucket);
+  const safeBucket = bucket;
   const previewToken = input.previewToken.toLowerCase();
   if (!TOKEN_PATTERN.test(previewToken) || !/^[a-f0-9]{64}$/.test(input.planHash)) {
     throw new LegacyImportPreviewError("preview tokenまたはplan hashが不正です。", "invalid_token");
   }
   const key = await previewKey(input.authUserId, previewToken);
-  const object = await bucket.get(key);
+  const object = await safeBucket.get(key);
   if (!object) {
     throw new LegacyImportPreviewError(
       "preview planが見つかりません。再度プレビューしてください。",
@@ -222,7 +224,7 @@ export async function claimLegacyImportPreview(
   const record = parseStoredPreview(await object.text());
   const now = options.now ?? nowSeconds();
   if (record.expiresAt <= now) {
-    await bucket.delete(key);
+    await safeBucket.delete(key);
     throw new LegacyImportPreviewError(
       "previewの有効期限が切れました。再度プレビューしてください。",
       "expired",
@@ -253,7 +255,7 @@ export async function claimLegacyImportPreview(
     claimId,
     claimExpiresAt: Math.min(record.expiresAt, now + CLAIM_TTL_SECONDS),
   };
-  const claimedObject = await bucket.put(
+  const claimedObject = await safeBucket.put(
     key,
     JSON.stringify(claimed),
     putOptions(claimed, object.etag),
@@ -267,7 +269,7 @@ export async function claimLegacyImportPreview(
 
   let settled = false;
   async function currentClaim(): Promise<{ object: R2ObjectBody; record: StoredPreview } | null> {
-    const current = await bucket.get(key);
+    const current = await safeBucket.get(key);
     if (!current) return null;
     const currentRecord = parseStoredPreview(await current.text());
     if (currentRecord.claimId !== claimId || currentRecord.status !== "claimed") return null;
@@ -288,7 +290,7 @@ export async function claimLegacyImportPreview(
           "claim_conflict",
         );
       }
-      await bucket.delete(key);
+      await safeBucket.delete(key);
       settled = true;
     },
     release: async () => {
@@ -301,7 +303,17 @@ export async function claimLegacyImportPreview(
         claimId: undefined,
         claimExpiresAt: undefined,
       };
-      await bucket.put(key, JSON.stringify(ready), putOptions(ready, current.object.etag));
+      const released = await safeBucket.put(
+        key,
+        JSON.stringify(ready),
+        putOptions(ready, current.object.etag),
+      );
+      if (!released) {
+        throw new LegacyImportPreviewError(
+          "preview planのclaimを安全に解放できませんでした。期限切れ後に再プレビューしてください。",
+          "claim_conflict",
+        );
+      }
       settled = true;
     },
   };
