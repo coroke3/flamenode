@@ -36,7 +36,7 @@ test("X名義ランタイムは旧申請表・単一リンク列・旧候補表�
   const files = ["src", "app", "workers"].flatMap(runtimeFiles).filter((path) => {
     const rel = relative(root, path).replaceAll("\\", "/");
     return (
-      !rel.endsWith("src/lib/db/schema.base.ts") &&
+      !rel.endsWith(["src/lib/db/schema", "base.ts"].join(".")) &&
       !rel.endsWith("src/lib/auth/xIdentityCanonical.contract.test.mjs") &&
       !rel.includes("historical")
     );

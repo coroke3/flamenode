@@ -33,7 +33,7 @@ export interface EventFormInitial {
   end_time?: number | null;
   entry_start_time?: number | null;
   entry_end_time?: number | null;
-  visibility_status?: string | null;
+  visibility_status?: "private" | "public" | null;
   allow_user_video_event_links?: number;
   allow_unslotted_posts?: number;
   allow_user_video_edits?: number;
@@ -194,19 +194,18 @@ function buildPreviewFromForm(
   initial: EventFormInitial,
   questions: EditableCustomQuestion[],
 ): EventSettingsPreviewValue {
-  const questions = readQuestions(formData);
   return {
-    title: textValue(fd, "title"),
-    event_type: textValue(fd, "event_type") || "event",
-    explanation: textValue(fd, "explanation"),
-    icon_url: textValue(fd, "icon_url"),
-    img_url: textValue(fd, "img_url"),
-    accent_color: textValue(fd, "accent_color"),
-    start_time: textValue(fd, "start_time"),
-    end_time: textValue(fd, "end_time"),
-    entry_start_time: textValue(fd, "entry_start_time"),
-    entry_end_time: textValue(fd, "entry_end_time"),
-    visibility_status: textValue(fd, "visibility_status") || "private",
+    title: textValue(formData, "title"),
+    event_type: textValue(formData, "event_type") || "event",
+    explanation: textValue(formData, "explanation"),
+    icon_url: textValue(formData, "icon_url"),
+    img_url: textValue(formData, "img_url"),
+    accent_color: textValue(formData, "accent_color"),
+    start_time: textValue(formData, "start_time"),
+    end_time: textValue(formData, "end_time"),
+    entry_start_time: textValue(formData, "entry_start_time"),
+    entry_end_time: textValue(formData, "entry_end_time"),
+    visibility_status: textValue(formData, "visibility_status") || "private",
     allow_user_video_event_links:
       textValue(formData, "allow_user_video_event_links") || "0",
     allow_unslotted_posts:
@@ -219,8 +218,6 @@ function buildPreviewFromForm(
     ),
     custom_questions: questions,
     max_slots_per_video: textValue(formData, "max_slots_per_video") || "1",
-    max_consecutive_slots_per_entry:
-      textValue(formData, "max_consecutive_slots_per_entry") || "3",
     slot_type: textValue(formData, "slot_type") || "time",
     slot_visibility_mode:
       textValue(formData, "slot_visibility_mode") || "public_name",
@@ -267,7 +264,7 @@ export function EventForm({
       .map((question, index) => ({ ...question, sort_order: index })),
   );
   const [preview, setPreview] = React.useState<EventSettingsPreviewValue>(() =>
-    initialPreview(initial),
+    buildInitialPreview(initial),
   );
 
   React.useEffect(() => {
@@ -375,170 +372,25 @@ export function EventForm({
               className={allowed ? "fn-badge fn-badge-soft" : "fn-badge"}
               style={{ opacity: allowed ? 1 : 0.55 }}
             >
-              <option value="event">通常イベント</option>
-              <option value="collabo">コラボ</option>
-              <option value="type">タイプ別</option>
-              <option value="other">その他</option>
-            </GatedSelect>
-          </div>
+              {label}: {allowed ? "変更可" : "権限なし"}
+            </span>
+          ))}
         </div>
-        <div>
-          <label className="fn-label">タイトル *</label>
-          <input
-            name="title"
-            defaultValue={initial.title ?? ""}
-            className="fn-input"
-            required
-            maxLength={200}
-            {...gatedInputProps(canBasic)}
-          />
-        </div>
-        <div>
-          <label className="fn-label">説明</label>
-          <textarea
-            name="explanation"
-            defaultValue={initial.explanation ?? ""}
-            className="fn-input"
-            rows={4}
-            maxLength={4000}
-            {...gatedTextareaProps(canBasic)}
-          />
-        </div>
-        <div className={styles.formGrid2}>
-          <div>
-            <label className="fn-label">アイコンURL</label>
-            <input
-              name="icon_url"
-              type="url"
-              defaultValue={initial.icon_url ?? ""}
-              className="fn-input"
-              {...gatedInputProps(canBasic)}
-            />
-          </div>
-          <div>
-            <label className="fn-label">バナー画像URL</label>
-            <input
-              name="img_url"
-              type="url"
-              defaultValue={initial.img_url ?? ""}
-              className="fn-input"
-              {...gatedInputProps(canBasic)}
-            />
-          </div>
-          <div>
-            <label className="fn-label">アクセントカラー</label>
-            <input
-              name="accent_color"
-              defaultValue={initial.accent_color ?? ""}
-              className="fn-input"
-              maxLength={20}
-              placeholder="#ffd400"
-              {...gatedInputProps(canBasic)}
-            />
-          </div>
-        </div>
-        <div className={styles.formGrid2}>
-          <div>
-            <label className="fn-label">開始日時</label>
-            <input
-              name="start_time"
-              type="datetime-local"
-              defaultValue={unixToInputDateTime(initial.start_time)}
-              className="fn-input"
-              {...gatedInputProps(canBasic)}
-            />
-          </div>
-          <div>
-            <label className="fn-label">終了日時</label>
-            <input
-              name="end_time"
-              type="datetime-local"
-              defaultValue={unixToInputDateTime(initial.end_time)}
-              className="fn-input"
-              {...gatedInputProps(canBasic)}
-            />
-          </div>
-        </div>
-      </FormSection>
+      ) : null}
 
-      <FormSection title="公開・受付" allowed={canPublish}>
-        <div className={styles.formGrid2}>
-          <div>
-            <label className="fn-label">募集開始日時</label>
-            <input
-              name="entry_start_time"
-              type="datetime-local"
-              defaultValue={unixToInputDateTime(initial.entry_start_time)}
-              className="fn-input"
-              {...gatedInputProps(canPublish)}
-            />
-          </div>
-          <div>
-            <label className="fn-label">募集終了日時</label>
-            <input
-              name="entry_end_time"
-              type="datetime-local"
-              defaultValue={unixToInputDateTime(initial.entry_end_time)}
-              className="fn-input"
-              {...gatedInputProps(canPublish)}
-            />
-          </div>
-          <div>
-            <label className="fn-label">公開状態</label>
-            <GatedSelect
-              allowed={canPublish}
-              name="visibility_status"
-              defaultValue={resolveInitialVisibility(initial)}
-            >
-              <option value="draft">下書き</option>
-              <option value="private">非公開</option>
-              <option value="public">公開</option>
-              <option value="archived">アーカイブ</option>
-            </GatedSelect>
-          </div>
-          <div>
-            <label className="fn-label">一般ユーザーの追加紐付け</label>
-            <GatedSelect
-              allowed={canPublish}
-              name="allow_user_video_event_links"
-              defaultValue={String(initial.allow_user_video_event_links ?? 0)}
-            >
-              <option value="0">運営承認制</option>
-              <option value="1">許可</option>
-            </GatedSelect>
-          </div>
-          <div>
-            <label className="fn-label">枠なし投稿の紐付け</label>
-            <GatedSelect
-              allowed={canPublish}
-              name="allow_unslotted_posts"
-              defaultValue={String(initial.allow_unslotted_posts ?? 0)}
-            >
-              <option value="0">不許可</option>
-              <option value="1">許可</option>
-            </GatedSelect>
-          </div>
-        </div>
-      </FormSection>
-
-      <FormSection title="投稿フォーム・権限" allowed={canQuestions}>
-        <div className={styles.formGrid2}>
-          <div>
-            <label className="fn-label">一般ユーザー編集</label>
-            <GatedSelect
-              allowed={canQuestions}
-              name="allow_user_video_edits"
-              defaultValue={String(initial.allow_user_video_edits ?? 0)}
-            >
-              <option value="0">通常権限</option>
-              <option value="1">一部許可</option>
-            </GatedSelect>
-          </div>
-        </div>
-        <PermissionKeysField
-          name="user_video_edit_permission_keys_json"
-          defaultValue={initial.user_video_edit_permission_keys_json}
-          disabled={!canQuestions}
+      <div>
+        <label className="fn-label">
+          ID {mode === "create" ? "(空欄で自動生成)" : "(変更不可)"}
+        </label>
+        <input
+          name="id"
+          type="text"
+          defaultValue={initial.id ?? ""}
+          className="fn-input"
+          readOnly={mode === "edit"}
+          placeholder="例: spring_2026"
+          pattern="[A-Za-z0-9_-]*"
+          maxLength={64}
         />
       </div>
 
@@ -687,7 +539,7 @@ export function EventForm({
             defaultValue={resolveInitialVisibility(initial)}
             className="fn-select"
           >
-            <option value="private">非公開・準備中</option>
+            <option value="private">非公開</option>
             <option value="public">公開</option>
           </GatedSelect>
         </div>
@@ -1051,39 +903,19 @@ export function EventForm({
             <Icon name="plus" size={12} aria-hidden /> 質問を追加
           </button>
         </div>
-        <button
-          type="button"
-          className="fn-btn fn-btn-ghost"
-          disabled={!canQuestions}
-          onClick={() =>
-            setQuestions((current) => [
-              ...current,
-              {
-                ...DEFAULT_STAGE_PERMISSION_FIELD,
-                id: `stage_permission_${Date.now().toString(36)}`,
-                enabled: true,
-                required: false,
-                label: `追加質問 ${current.length + 1}`,
-                description: "",
-                placeholder: "",
-              },
-            ])
-          }
-        >
-          <Icon name="plus" size={13} aria-hidden /> 質問を追加
-        </button>
-      </FormSection>
+      </fieldset>
 
       <div className={styles.formGrid3} style={sectionGateStyle(canEditSlots)}>
         <div>
-          <label className="fn-label">部（1行1件）</label>
-          <textarea
-            name="parts_text"
-            defaultValue={partsJsonToText(initial.parts_json)}
+          <label className="fn-label">1作品あたり最大枠数</label>
+          <input
+            name="max_slots_per_video"
+            type="number"
+            min={1}
+            max={20}
+            defaultValue={initial.max_slots_per_video ?? 1}
             className="fn-input"
-            rows={4}
-            placeholder={"1部\n2部"}
-            {...gatedTextareaProps(canSlots)}
+            {...inputGateProps(canEditSlots)}
           />
         </div>
         <div>
@@ -1126,6 +958,29 @@ export function EventForm({
       </div>
 
       <EventSettingsPreview event={preview} />
+
+      {error ? (
+        <p role="alert" style={{ color: "var(--accent-danger)", fontSize: 13 }}>
+          <Icon name="warning" size={13} aria-hidden /> {error}
+        </p>
+      ) : null}
+      {success ? (
+        <p role="status" style={{ color: "var(--accent-primary)", fontSize: 13 }}>
+          <Icon name="check" size={13} aria-hidden /> {success}
+        </p>
+      ) : null}
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          type="submit"
+          className="fn-btn fn-btn-primary"
+          disabled={busy}
+          aria-busy={busy}
+        >
+          <Icon name="check" size={13} aria-hidden />
+          {busy ? "保存中…" : mode === "create" ? "作成" : "保存"}
+        </button>
+      </div>
     </form>
   );
 }

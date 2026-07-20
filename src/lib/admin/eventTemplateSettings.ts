@@ -46,7 +46,10 @@ export interface EventTemplateQuestionDefinition {
   visibility: CustomQuestionVisibility;
 }
 
-/** テンプレートに保存する設定。開催日時・スタッフ承認は含めない。 */
+/**
+ * テンプレートに保存する設定（開催日時・枠・作品・スタッフ承認は含めない）。
+ * schema v3だけを受理し、旧schemaや別形式への補正は行わない。
+ */
 export interface EventTemplateSnapshot {
   schema_version: 3;
   event_type: "event" | "collabo" | "type" | "other";
@@ -83,7 +86,6 @@ const SNAPSHOT_KEYS = new Set([
   "allow_user_video_edits",
   "user_video_edit_permission_keys_json",
   "max_slots_per_video",
-  "max_consecutive_slots_per_entry",
   "slot_part_gap_minutes",
   "slot_type",
   "slot_visibility_mode",
@@ -233,71 +235,10 @@ function questionRowToTemplateDefinition(
     max_length: row.max_length,
     sort_order: index,
     is_active: row.is_active === 1,
-    visibility: parseVisibility(row.visibility),
-  };
-}
-
-function normalizeTemplateQuestionDefinition(
-  raw: unknown,
-  index: number,
-): EventTemplateQuestionDefinition | null {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const item = raw as Record<string, unknown>;
-  const questionKey = normalizeQuestionKey(item.question_key);
-  const label =
-    typeof item.label === "string" ? item.label.trim().slice(0, 120) : "";
-  if (!questionKey || !label) return null;
-  const optionsJson =
-    typeof item.options_json === "string" && item.options_json.trim()
-      ? item.options_json
-      : null;
-  const maxLength =
-    typeof item.max_length === "number" && Number.isFinite(item.max_length)
-      ? Math.max(1, Math.min(5000, Math.floor(item.max_length)))
-      : null;
-  const sortOrder =
-    typeof item.sort_order === "number" && Number.isFinite(item.sort_order)
-      ? Math.floor(item.sort_order)
-      : index;
-
-  return {
-    question_key: questionKey,
-    label,
-    description:
-      typeof item.description === "string"
-        ? item.description.trim().slice(0, 1000) || null
-        : null,
-    type: parseQuestionType(item.type),
-    required:
-      item.required === true || item.required === 1 || item.required === "1",
-    options_json: optionsJson,
-    placeholder:
-      typeof item.placeholder === "string"
-        ? item.placeholder.trim().slice(0, 1000) || null
-        : null,
-    max_length: maxLength,
-    sort_order: sortOrder,
-    is_active:
-      item.is_active !== false &&
-      item.is_active !== 0 &&
-      item.is_active !== "0",
-    visibility: parseVisibility(item.visibility),
-  };
-}
-
-export function normalizeTemplateQuestionDefinitions(
-  raw: unknown,
-): EventTemplateQuestionDefinition[] {
-  if (!Array.isArray(raw)) return [];
-  const seen = new Set<string>();
-  const definitions: EventTemplateQuestionDefinition[] = [];
-  for (const [index, item] of raw.entries()) {
-    const normalized = normalizeTemplateQuestionDefinition(item, index);
-    if (!normalized || seen.has(normalized.question_key)) continue;
-    seen.add(normalized.question_key);
-    definitions.push(normalized);
-  }
-  return definitions;
+    visibility: row.visibility,
+  }, index);
+  if (!definition) throw new Error("invalid_event_template_question_row");
+  return definition;
 }
 
 export function snapshotFromEvent(
@@ -331,12 +272,9 @@ export function snapshotFromEvent(
     user_video_edit_permission_keys_json:
       event.user_video_edit_permission_keys_json,
     max_slots_per_video: event.max_slots_per_video,
-    slot_part_gap_minutes: event.slot_part_gap_minutes ?? 15,
-    slot_type: (event.slot_type ?? "time") as "time" | "count",
-    slot_visibility_mode: (event.slot_visibility_mode ?? "public_name") as
-      | "public_name"
-      | "anonymous"
-      | "hidden",
+    slot_part_gap_minutes: event.slot_part_gap_minutes,
+    slot_type: event.slot_type,
+    slot_visibility_mode: event.slot_visibility_mode,
     parts_json: event.parts_json,
     custom_question_definitions: activeQuestions.map(questionRowToTemplateDefinition),
     review_settings: event.review_settings,
@@ -350,45 +288,86 @@ export function parseEventTemplateSnapshot(
 ): EventTemplateSnapshot | null {
   let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw) as EventTemplateSnapshot & {
-      custom_question_definitions?: unknown;
-    };
-    if (!parsed || typeof parsed !== "object") return null;
-    if (!parsed.event_type || !parsed.slot_type) return null;
-    const { custom_question_definitions } = parsed;
-    const snapshot: Omit<EventTemplateSnapshot, "custom_question_definitions"> = {
-      event_type: parsed.event_type,
-      explanation: parsed.explanation ?? null,
-      icon_url: parsed.icon_url ?? null,
-      img_url: parsed.img_url ?? null,
-      accent_color: parsed.accent_color ?? null,
-      allow_user_video_event_links: parsed.allow_user_video_event_links ?? 0,
-      allow_unslotted_posts: parsed.allow_unslotted_posts ?? 0,
-      allow_user_video_edits: parsed.allow_user_video_edits ?? 0,
-      user_video_edit_permission_keys_json:
-        parsed.user_video_edit_permission_keys_json ?? null,
-      video_form_settings_json: parsed.video_form_settings_json ?? null,
-      max_slots_per_video: parsed.max_slots_per_video ?? 1,
-      slot_part_gap_minutes: parsed.slot_part_gap_minutes ?? 15,
-      slot_type: parsed.slot_type,
-      slot_visibility_mode: parsed.slot_visibility_mode ?? "public_name",
-      parts_json: parsed.parts_json ?? null,
-      review_settings: parsed.review_settings ?? null,
-      editable_fields: parsed.editable_fields ?? null,
-      repeat_rules: parsed.repeat_rules ?? null,
-    };
-    return {
-      ...snapshot,
-      custom_question_definitions: normalizeTemplateQuestionDefinitions(
-        custom_question_definitions,
-      ),
-    };
+    parsed = JSON.parse(raw) as unknown;
   } catch {
     return null;
   }
+  if (!isRecord(parsed) || !hasExactKeys(parsed, SNAPSHOT_KEYS)) return null;
+  if (parsed.schema_version !== 3) return null;
+  if (!isEventType(parsed.event_type)) return null;
+  if (!isSlotType(parsed.slot_type)) return null;
+  if (!isSlotVisibilityMode(parsed.slot_visibility_mode)) return null;
+  if (!isFlag(parsed.allow_user_video_event_links)) return null;
+  if (!isFlag(parsed.allow_unslotted_posts)) return null;
+  if (!isFlag(parsed.allow_user_video_edits)) return null;
+  if (!isPositiveInteger(parsed.max_slots_per_video)) return null;
+  if (!isNonNegativeInteger(parsed.slot_part_gap_minutes)) return null;
+  if (!isNullableString(parsed.explanation)) return null;
+  if (!isNullableString(parsed.icon_url)) return null;
+  if (!isNullableString(parsed.img_url)) return null;
+  if (!isNullableString(parsed.accent_color)) return null;
+  if (!isNullableString(parsed.user_video_edit_permission_keys_json)) return null;
+  if (!isNullableString(parsed.parts_json)) return null;
+  if (!isNullableString(parsed.review_settings)) return null;
+  if (!isNullableString(parsed.editable_fields)) return null;
+  if (!isNullableString(parsed.repeat_rules)) return null;
+  if (!Array.isArray(parsed.custom_question_definitions)) return null;
+  if (parsed.custom_question_definitions.length > MAX_EVENT_CUSTOM_QUESTIONS) return null;
+
+  const seen = new Set<string>();
+  const definitions: EventTemplateQuestionDefinition[] = [];
+  for (const [index, value] of parsed.custom_question_definitions.entries()) {
+    const definition = parseTemplateQuestionDefinition(value, index);
+    if (!definition || seen.has(definition.question_key)) return null;
+    seen.add(definition.question_key);
+    definitions.push(definition);
+  }
+
+  return {
+    schema_version: 3,
+    event_type: parsed.event_type,
+    explanation: parsed.explanation,
+    icon_url: parsed.icon_url,
+    img_url: parsed.img_url,
+    accent_color: parsed.accent_color,
+    allow_user_video_event_links: parsed.allow_user_video_event_links,
+    allow_unslotted_posts: parsed.allow_unslotted_posts,
+    allow_user_video_edits: parsed.allow_user_video_edits,
+    user_video_edit_permission_keys_json:
+      parsed.user_video_edit_permission_keys_json,
+    max_slots_per_video: parsed.max_slots_per_video,
+    slot_part_gap_minutes: parsed.slot_part_gap_minutes,
+    slot_type: parsed.slot_type,
+    slot_visibility_mode: parsed.slot_visibility_mode,
+    parts_json: parsed.parts_json,
+    custom_question_definitions: definitions,
+    review_settings: parsed.review_settings,
+    editable_fields: parsed.editable_fields,
+    repeat_rules: parsed.repeat_rules,
+  };
 }
 
-/** 新規イベントフォーム用の初期値。日時は空、公開状態は非公開。 */
+function definitionToEditableQuestion(
+  definition: EventTemplateQuestionDefinition,
+  index: number,
+): EditableCustomQuestion {
+  return {
+    id: `template_${index}_${definition.question_key}`,
+    question_key: definition.question_key,
+    label: definition.label,
+    description: definition.description,
+    type: definition.type,
+    required: definition.required,
+    options: parseOptionsJson(definition.options_json),
+    placeholder: definition.placeholder,
+    max_length: definition.max_length,
+    sort_order: index,
+    is_active: true,
+    visibility: definition.visibility,
+  };
+}
+
+/** 新規イベントフォーム用の初期値（日時は空、公開状態は下書き）。 */
 export function snapshotToFormInitial(
   snapshot: EventTemplateSnapshot,
 ): EventFormInitial {
