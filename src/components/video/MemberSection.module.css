@@ -14,40 +14,46 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-height: 40px;
   padding: 8px 12px;
   border: 0;
   border-bottom: 2px solid transparent;
   color: var(--text-secondary);
   background: transparent;
-  font-size: 12.5px;
-  font-weight: 600;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
   cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease;
 }
 
 .tab:hover {
   color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: -2px;
 }
 
 .tabActive {
   color: var(--text-primary);
-  border-bottom-color: var(--event-accent, var(--accent-primary));
+  border-bottom-color: var(--accent-primary);
 }
 
 .cardGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .card {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   background: var(--bg-surface);
 }
@@ -55,29 +61,34 @@
 .cardHead {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .cardLink {
   display: flex;
-  align-items: center;
-  gap: 10px;
   min-width: 0;
   flex: 1;
+  align-items: center;
+  gap: 9px;
   color: inherit;
   text-decoration: none;
 }
 
+.cardLink:hover .name {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .avatar,
-.avatarSmall,
 .tAvatar {
-  flex: 0 0 auto;
-  overflow: hidden;
   display: grid;
+  flex: 0 0 auto;
   place-items: center;
-  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 50%;
+  background: var(--bg-inset);
   color: var(--text-muted);
-  background: var(--bg-elevated);
 }
 
 .avatar {
@@ -85,14 +96,7 @@
   height: 36px;
 }
 
-.avatarSmall,
-.tAvatar {
-  width: 24px;
-  height: 24px;
-}
-
 .avatar img,
-.avatarSmall img,
 .tAvatar img {
   width: 100%;
   height: 100%;
@@ -101,265 +105,156 @@
 
 .nameBlock {
   display: grid;
-  gap: 1px;
   min-width: 0;
-  flex: 1;
+  gap: 2px;
 }
 
-.name,
-.tName {
+.name {
   overflow: hidden;
-  font-weight: 700;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 750;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.name {
-  font-size: 13px;
-}
-
-.tName {
-  font-size: 12.5px;
-}
-
 .handle {
+  overflow: hidden;
   color: var(--text-muted);
   font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cardMeta {
-  margin: 0;
-  padding-left: 46px;
-  color: var(--text-muted);
-  font-size: 11.5px;
-  line-height: 1.55;
+  margin: 9px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
 }
 
 .tableWrap {
-  display: grid;
-  gap: 1px;
-  overflow-x: auto;
+  min-width: 720px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  background: var(--border-subtle);
+  background: var(--bg-surface);
 }
 
 .tableHeader,
 .tableRow {
   display: grid;
-  grid-template-columns:
-    40px
-    minmax(190px, 1.25fr)
-    minmax(120px, 0.9fr)
-    minmax(120px, 0.8fr)
-    minmax(86px, 0.75fr)
-    minmax(160px, 1.4fr);
-  min-width: 720px;
-  background: var(--bg-surface);
+  grid-template-columns: 54px minmax(180px, 1.1fr) minmax(130px, 0.8fr) minmax(120px, 0.75fr) minmax(200px, 1.4fr);
+  align-items: center;
 }
 
 .tableHeader {
+  min-height: 38px;
+  border-bottom: 1px solid var(--border-subtle);
   color: var(--text-muted);
-  background: var(--bg-elevated);
+  background: var(--bg-inset);
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
-.tableHeader > span,
-.tableRow > span {
-  display: flex;
-  align-items: center;
+.tableRow {
+  min-height: 48px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.tableRow:last-child {
+  border-bottom: 0;
+}
+
+.tableRow:hover {
+  background: var(--bg-hover);
+}
+
+.tColNo,
+.tColName,
+.tColHandle,
+.tColRole,
+.tColComment {
   min-width: 0;
-  padding: 8px 9px;
-  font-size: 12.5px;
+  padding: 8px 10px;
+  overflow-wrap: anywhere;
 }
 
-.tableRow > span {
-  color: var(--text-primary);
+.tColNo {
+  text-align: center;
 }
 
 .sortButton {
-  display: inline-flex;
+  display: flex;
+  width: 100%;
   align-items: center;
-  gap: 5px;
-  min-width: 0;
+  justify-content: space-between;
+  gap: 6px;
   padding: 0;
   border: 0;
   color: inherit;
   background: transparent;
   font: inherit;
-  letter-spacing: inherit;
-  text-transform: inherit;
   cursor: pointer;
 }
 
-.sortButton:hover {
-  color: var(--text-primary);
+.sortButton:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
 }
 
 .sortMark {
-  color: var(--event-accent, var(--accent-primary));
-  font-size: 11px;
-  line-height: 1;
+  opacity: 0.7;
 }
 
-.tNameLink {
-  display: inline-flex;
+.tNameCell {
+  display: flex;
+  min-width: 0;
   align-items: center;
+  gap: 8px;
+}
+
+.tAvatar {
+  width: 24px;
+  height: 24px;
+}
+
+.tNameLink,
+.tHandleLink {
   min-width: 0;
   color: inherit;
   text-decoration: none;
 }
 
-.tNameCell {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
 .tNameLink:hover,
 .tHandleLink:hover {
-  color: var(--event-accent, var(--accent-primary));
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
-.tColNo {
-  width: 40px;
-  min-width: 40px;
-  text-align: center;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.tColName,
-.tColHandle,
-.tColRole,
-.tColComment,
-.tColChapters {
-  min-width: 0;
-}
-
-.tHandleLink {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
+.tName {
   overflow: hidden;
-  color: var(--text-secondary);
-  font-size: 12px;
-  text-decoration: none;
+  color: var(--text-primary);
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.tColComment {
-  overflow-wrap: anywhere;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.55;
 }
 
 .tMuted {
   color: var(--text-muted);
 }
 
-.chapterTimes {
-  color: var(--event-accent, var(--accent-primary));
-  font-size: 12px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-.chaptersWrap {
-  display: grid;
-  gap: 12px;
-}
-
-.chapterGroup {
-  overflow: hidden;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--bg-surface);
-}
-
-.chapterGroupHead {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
-  font-size: 12.5px;
-}
-
-.chapterGroupName {
-  overflow: hidden;
-  color: var(--text-primary);
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chapterGroupRole {
-  padding-left: 4px;
-  border-left: 1px solid var(--border-subtle);
-  color: var(--text-muted);
-  font-size: 11px;
-}
-
-.chapterGroupCount {
-  margin-left: auto;
-  padding: 2px 8px;
-  border-radius: 999px;
-  color: var(--text-muted);
-  background: var(--bg-surface);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-
-.chapterGroupEmpty {
-  padding: 14px 12px;
-  color: var(--text-muted);
-  font-size: 12px;
-  text-align: center;
-}
-
-.chapterGroupList {
-  display: flex;
-  flex-direction: column;
-}
-
 @media (max-width: 640px) {
-  .tableWrap {
-    overflow-x: auto;
+  .cardGrid {
+    grid-template-columns: 1fr;
   }
 
-  .tableHeader,
-  .tableRow {
-    display: grid;
-    grid-template-columns:
-      minmax(170px, 1.2fr)
-      minmax(112px, 0.9fr)
-      minmax(104px, 0.8fr)
-      minmax(78px, 0.7fr)
-      minmax(146px, 1.35fr);
-    min-width: 620px;
-  }
-
-  .tableRow > span {
-    display: flex;
-    padding: 7px 8px;
-    font-size: 11.5px;
-    line-height: 1.55;
-  }
-
-  .tableRow > span::before {
-    content: none;
-  }
-
-  .tColComment {
-    font-size: 11.5px;
+  .tab {
+    min-height: 44px;
+    flex: 1;
+    justify-content: center;
   }
 }
