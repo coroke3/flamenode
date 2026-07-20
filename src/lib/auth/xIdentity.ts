@@ -2,7 +2,12 @@ import "server-only";
 
 import { and, eq, inArray } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
-import { xIdentityRequests, xUserAccountLinks, xUsers } from "@/lib/db/schema";
+import {
+  xIdentityRequests,
+  xUserAccountLinks,
+  xUserAliases,
+  xUsers,
+} from "@/lib/db/schema";
 import { normalizeXId } from "@/lib/utils/xid";
 
 export type AuthUserId = string;
@@ -24,6 +29,35 @@ export type LinkedXUser = {
   updated_at: number;
   request_requested_at: number | null;
 };
+
+/**
+ * 入力X IDを現在の正本X名義へ解決する。
+ * 統合済み旧IDはx_user_aliasesを優先し、無効化された旧x_users行を再利用しない。
+ */
+export async function resolveCanonicalXUserId(
+  db: DB,
+  candidateXUserId: string | null | undefined,
+): Promise<XUserId | null> {
+  const normalized = normalizeXId(candidateXUserId);
+  if (!normalized) return null;
+  const alias = (
+    await db
+      .select({ x_user_id: xUserAliases.x_user_id })
+      .from(xUserAliases)
+      .where(eq(xUserAliases.alias_x_id, normalized))
+      .limit(1)
+  )[0];
+  if (alias?.x_user_id) return alias.x_user_id;
+  const exact = (
+    await db
+      .select({ id: xUsers.id, approval_status: xUsers.approval_status })
+      .from(xUsers)
+      .where(eq(xUsers.id, normalized))
+      .limit(1)
+  )[0];
+  if (!exact || exact.approval_status === "rejected") return null;
+  return exact.id;
+}
 
 export async function getLinkedXUsersForAuthUser(
   db: DB,
@@ -73,8 +107,8 @@ export async function getLinkedXUserForAuthUser(
   authUserId: AuthUserId,
   xUserId: XUserId,
 ): Promise<LinkedXUser | null> {
-  const normalizedXUserId = normalizeXId(xUserId);
-  if (!normalizedXUserId) return null;
+  const canonicalXUserId = await resolveCanonicalXUserId(db, xUserId);
+  if (!canonicalXUserId) return null;
   const rows = await db
     .select({
       x_user_id: xUsers.id,
@@ -100,7 +134,7 @@ export async function getLinkedXUserForAuthUser(
     .where(
       and(
         eq(xUserAccountLinks.auth_user_id, authUserId),
-        eq(xUserAccountLinks.x_user_id, normalizedXUserId),
+        eq(xUserAccountLinks.x_user_id, canonicalXUserId),
       )!,
     )
     .limit(1);
@@ -119,12 +153,12 @@ export async function getAuthUserIdsForXUser(
   db: DB,
   xUserId: XUserId,
 ): Promise<AuthUserId[]> {
-  const normalizedXUserId = normalizeXId(xUserId);
-  if (!normalizedXUserId) return [];
+  const canonicalXUserId = await resolveCanonicalXUserId(db, xUserId);
+  if (!canonicalXUserId) return [];
   const rows = await db
     .select({ auth_user_id: xUserAccountLinks.auth_user_id })
     .from(xUserAccountLinks)
-    .where(eq(xUserAccountLinks.x_user_id, normalizedXUserId));
+    .where(eq(xUserAccountLinks.x_user_id, canonicalXUserId));
   return Array.from(new Set(rows.map((row) => row.auth_user_id)));
 }
 
@@ -133,9 +167,10 @@ export async function filterLinkedXUserIdsForAuthUser(
   authUserId: AuthUserId,
   candidateXUserIds: readonly string[],
 ): Promise<XUserId[]> {
-  const normalized = Array.from(
-    new Set(candidateXUserIds.map(normalizeXId).filter(Boolean)),
+  const canonicalIds = await Promise.all(
+    candidateXUserIds.map((candidate) => resolveCanonicalXUserId(db, candidate)),
   );
+  const normalized = Array.from(new Set(canonicalIds.filter(Boolean)));
   if (normalized.length === 0) return [];
   const rows = await db
     .select({ x_user_id: xUserAccountLinks.x_user_id })
