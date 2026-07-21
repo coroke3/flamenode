@@ -19,8 +19,6 @@ export function resolveTheme(
   return prefersDark ? "dark" : "light";
 }
 
-export function nextThemeMode(mode: ThemeMode): ThemeMode {
-  if (mode === "system") return "light";
-  if (mode === "light") return "dark";
-  return "system";
+export function nextThemeMode(mode: ResolvedTheme): ResolvedTheme {
+  return mode === "light" ? "dark" : "light";
 }

@@ -26,7 +26,7 @@ export function SettingsNoXIdOnboarding({
         {pendingCount > 0 ? (
           <p className={pageStyles.onboardingPending}>
             <Icon name="clock" size={13} aria-hidden />
-            承認待ちの申請が {pendingCount} 件あります。「申請中」タブで確認できます。
+            承認待ちの申請が {pendingCount} 件あります。「申請履歴」タブで確認できます。
           </p>
         ) : null}
       </div>
@@ -45,7 +45,7 @@ export function SettingsPageLead({
     return (
       <p className="fn-page-lead">
         まず X ID を連携してください。承認後にプロフィール編集や投稿ができます。
-        {pendingCount > 0 ? " 申請中の連携は「申請中」タブで確認できます。" : ""}
+        {pendingCount > 0 ? " 申請中の連携は「申請履歴」タブで確認できます。" : ""}
       </p>
     );
   }

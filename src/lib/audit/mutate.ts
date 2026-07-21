@@ -64,7 +64,7 @@ export function assertChanges(expectedChanges: number): SQL {
       WHEN changes() = ${expectedChanges} THEN 1
       ELSE json_extract('not-valid-json', '$')
     END
-  `;
+  `.inlineParams();
 }
 
 function auditSelect(
@@ -97,7 +97,7 @@ function assertionSql(entries: readonly PreparedAuditLogEntry[]): SQL {
       THEN 1
       ELSE json_extract('not-valid-json', '$')
     END
-  `;
+  `.inlineParams();
 }
 
 function chunkEntries(
@@ -118,7 +118,7 @@ function auditInsertSql(
   return sql`
     INSERT INTO audit_logs (${AUDIT_COLUMNS})
     ${sql.join(selects, sql` UNION ALL `)}
-  `;
+  `.inlineParams();
 }
 
 /**

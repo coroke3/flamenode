@@ -1,22 +1,28 @@
 # X ID申請とアカウントリンク
 
 > Status: Active
-> Last verified: 2026-07-20
-> Source of truth: `src/lib/actions/xid.ts`, `src/lib/actions/xid-admin.ts`, `src/lib/auth/xIdentity.ts`
+> Last verified: 2026-07-21
+> Source of truth: `src/lib/actions/xid.ts`, `src/lib/actions/xid-admin.ts`, `src/lib/auth/xIdentity.ts`, `src/lib/utils/xid.ts`
 
 X ID申請は `x_identity_requests`、X名義とAuth.jsユーザーの関係は `x_user_account_links` を唯一の正本とする。
 
 ## 申請種類
 
+一般ユーザーの連携画面は、初回・2件目以降とも「X IDを連携」の1フローだけを提供する。入力されたX IDが登録済みかどうかはサーバー側で判定し、内部の`new_link`または`existing_link`へ変換する。別名申請は新規作成せず、既存データの管理処理だけを維持する。統合申請は設定画面で、承認済みの自分のX ID同士を選択して行う。
+
 | request_type | 用途 | 必須項目 |
 | --- | --- | --- |
 | `new_link` | 未登録X IDを新規作成して紐付ける | `requested_x_id` |
 | `existing_link` | 既存X名義へ認証ユーザーを追加する | `requested_x_id` |
-| `alias` | 既存X名義へ別名を追加する | `requested_x_id`, `target_x_user_id` |
+| `alias` | 既存申請の互換・管理処理のみ（一般ユーザーから新規申請しない） | `requested_x_id`, `target_x_user_id` |
 | `merge` | 2つのX名義を統合する | `source_x_user_id`, `target_x_user_id` |
 | `revert_merge` | 統合を期限内に差し戻す | `parent_request_id`, `restore_snapshot_json`, `revert_deadline_at` |
 
 申請日時は常に `requested_at` を使用する。X名義行には申請日時を保持しない。
+
+申請者本人は設定画面の「申請履歴」と、申請済みの場合の初回連携画面から、自分が申請した連携・統合申請の対象、種別、状態、申請日時を直近50件まで確認できる。取得条件はログイン中の`requested_by_auth_user_id`に限定し、認証ユーザーID、親申請ID、復元JSON、差し戻し期限は画面へ渡さない。
+
+X IDは入力時の大文字・小文字を区別せず、`@`と前後空白を除去したうえで常に小文字へ正規化して保存・比較する。
 
 ## アカウントリンク
 

@@ -137,7 +137,7 @@ export async function setActiveXId(formData: FormData): Promise<XIdActionResult>
   return { ok: true, message: "アクティブ X ID を切り替えました。" };
 }
 
-const requestKindSchema = z.enum(["new", "existing", "alias", "merge"]);
+const requestKindSchema = z.enum(["link", "merge"]);
 
 export async function requestXIdLink(formData: FormData): Promise<XIdActionResult> {
   const authUserId = await getSessionAuthUserId();
@@ -152,7 +152,7 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
   }
 
   const parsedKind = requestKindSchema.safeParse(
-    String(formData.get("request_type") ?? formData.get("link_type") ?? "new"),
+    String(formData.get("request_type") ?? formData.get("link_type") ?? "link"),
   );
   if (!parsedKind.success) return { ok: false, message: "不正な申請種別です。" };
 
@@ -168,16 +168,7 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
   let sourceXUserId: string | null = null;
   let requestedXId: string | null = requestedXUserId;
 
-  if (parsedKind.data === "alias") {
-    requestType = "alias";
-    if (!targetXUserId) return { ok: false, message: "別名の追加先 X ID が必要です。" };
-    if (!(await isAuthUserLinkedToXUser(db, authUserId, targetXUserId))) {
-      return { ok: false, message: "自分に紐づく X ID にだけ別名を追加できます。" };
-    }
-    if (existingXUser) {
-      return { ok: false, message: "別名として申請する X ID はすでに登録されています。" };
-    }
-  } else if (parsedKind.data === "merge") {
+  if (parsedKind.data === "merge") {
     requestType = "merge";
     sourceXUserId = requestedXUserId;
     requestedXId = null;

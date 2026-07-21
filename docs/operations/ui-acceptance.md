@@ -27,7 +27,7 @@
 - custom answerと合作memberの進捗が現在値から更新される。
 - イベント一覧は検索、状態、並び替えをURLで保持し、static JSONとDB fallbackで同じfilter結果になる。
 - 作品一覧はタイル、コンパクト、一覧を切り替え、queryを保持したままページングできる。
-- テーマはライト、ダーク、OS設定を切り替え、再読込後も選択が維持される。
+- テーマの初期値はOS設定に追従し、画面上ではライトとダークの2択を切り替える。明示選択後は再読込後も選択が維持される。
 - モバイル管理drawerはEscape、背景クリック、閉じるボタンで閉じ、開いている間はフォーカスが内部に留まる。
 - Shelfはhover、focus、pointer、touch、wheel操作中に停止し、reduced motion、viewport外、非表示tabでは自動送りしない。
 - `/admin`と`/manage`のナビ項目が混在しない。

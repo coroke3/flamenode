@@ -81,10 +81,15 @@ requireAll("app/layout.tsx", [
 ]);
 
 requireAll("src/components/layout/ThemeToggle.tsx", [
-  [/\["light", "dark", "system"\]/, "light/dark/systemの3状態がありません。"],
+  [/\["light", "dark"\]/, "light/darkの2状態がありません。"],
   [/localStorage\.setItem/, "テーマ設定の保存がありません。"],
   [/aria-pressed/, "テーマ選択のアクセシビリティ表現がありません。"],
 ]);
+forbidMatch(
+  "src/components/layout/ThemeToggle.tsx",
+  /OS設定/,
+  "OS設定を明示する選択肢または文言が残っています。",
+);
 
 requireAll("src/components/layout/ConsoleDrawer.tsx", [
   [/max-width: 760px/, "760px以下のモバイル判定がありません。"],

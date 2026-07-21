@@ -1,5 +1,4 @@
 import * as React from "react";
-import Link from "next/link";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -7,7 +6,6 @@ import { auth } from "@/lib/auth";
 import { PublicHeader, type PublicHeaderUser } from "@/components/layout/PublicHeader";
 import { PublicFooter } from "@/components/layout/PublicFooter";
 import { CostGuardBanner } from "@/components/layout/CostGuardBanner";
-import { Icon } from "@/components/ui/Icon";
 import { buildHeaderUser } from "@/lib/auth/headerUser";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import {
@@ -58,26 +56,10 @@ export default async function AuthLayout({
     }
   }
 
-  const showDashboardSyncLink =
-    Boolean(sessionUser) &&
-    pathname.startsWith("/dashboard") &&
-    pathname !== "/dashboard/youtube-playlists";
-
   return (
     <div data-fn-surface="personal" className="fn-personal-shell fn-app">
       <CostGuardBanner />
       <PublicHeader user={user} />
-      {showDashboardSyncLink ? (
-        <div className="fn-public-container" style={{ paddingTop: 10 }}>
-          <Link
-            href="/dashboard/youtube-playlists"
-            className="fn-btn fn-btn-ghost fn-btn-sm"
-          >
-            <Icon name="list" size={12} aria-hidden />
-            再生リスト同期状況
-          </Link>
-        </div>
-      ) : null}
       <main className="fn-main flex-1 w-full">{children}</main>
       <PublicFooter />
     </div>

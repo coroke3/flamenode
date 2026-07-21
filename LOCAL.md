@@ -53,7 +53,7 @@ SPREADSHEET_IMPORT_PREVIEW_SECRET="AUTH_SECRETとは別の32文字以上の値"
 ```
 
 - `AUTH_URL`と`NEXT_PUBLIC_SITE_URL`は同じ正式originにする。
-- `AUTH_TRUST_HOST`は設定しない。Host headerへの暗黙fallbackを使わない。
+- `AUTH_TRUST_HOST`はローカル開発時だけ明示的に`true`にする。productionではHost headerへの暗黙fallbackを使わない。
 - secret、token、Cloudflare IDをGitへ追加しない。
 
 ## 4. ローカルD1

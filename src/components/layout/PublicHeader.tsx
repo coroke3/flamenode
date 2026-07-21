@@ -106,12 +106,6 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
             <ThemeToggle />
           </div>
 
-          {user ? (
-            <div className={`${styles.desktopXId}`}>
-              <XIdSwitcher entries={user.xIds} discordName={user.name} />
-            </div>
-          ) : null}
-
           <button
             type="button"
             ref={searchButtonRef}

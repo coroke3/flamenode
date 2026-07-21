@@ -1,16 +1,18 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { xIdentityRequests as linkReqTable } from "@/lib/db/schema";
 import { getLinkedXUsersForAuthUser } from "@/lib/auth/xIdentity";
 import { requireSession } from "@/lib/auth/guard";
 import { Icon } from "@/components/ui/Icon";
-import { XIdLinkForm } from "@/components/settings/XIdSettingsClient";
 import {
-  PendingLinkRequestList,
-  type PendingLinkRequestRow,
+  XIdLinkForm,
+  XIdMergeForm,
+} from "@/components/settings/XIdSettingsClient";
+import {
+  XIdentityRequestHistoryList,
   type SettingsXIdRow,
 } from "@/components/settings/XIdLinkedList";
 import { SettingsXAccountPanel } from "@/components/settings/SettingsXAccountPanel";
@@ -27,10 +29,11 @@ import { normalizePortfolioContact } from "@/lib/profileContact";
 export const metadata: Metadata = { title: "設定" };
 export const dynamic = "force-dynamic";
 
-type UtilityTabId = "discord" | "link" | "pending";
+type UtilityTabId = "discord" | "link" | "history";
 
 function parseUtilityTab(value: string | undefined): UtilityTabId | null {
-  if (value === "discord" || value === "link" || value === "pending") {
+  if (value === "pending") return "history";
+  if (value === "discord" || value === "link" || value === "history") {
     return value;
   }
   return null;
@@ -78,17 +81,21 @@ export default async function SettingsPage({
   const db = getDatabase();
   const xIdsRaw = db ? await getLinkedXUsersForAuthUser(db, user.id) : [];
 
-  const pendingLinkRequests = db
+  const requestHistory = db
     ? await db
-        .select()
+        .select({
+          id: linkReqTable.id,
+          request_type: linkReqTable.request_type,
+          requested_x_id: linkReqTable.requested_x_id,
+          source_x_user_id: linkReqTable.source_x_user_id,
+          target_x_user_id: linkReqTable.target_x_user_id,
+          status: linkReqTable.status,
+          requested_at: linkReqTable.requested_at,
+        })
         .from(linkReqTable)
-        .where(
-          and(
-            eq(linkReqTable.requested_by_auth_user_id, user.id),
-            eq(linkReqTable.status, "pending"),
-          )!,
-        )
+        .where(eq(linkReqTable.requested_by_auth_user_id, user.id))
         .orderBy(desc(linkReqTable.requested_at))
+        .limit(50)
     : [];
 
   const xIds: SettingsXIdRow[] = xIdsRaw.map((x) => ({
@@ -109,17 +116,6 @@ export default async function SettingsPage({
     other_social_links: x.other_social_links,
   }));
 
-  const linkedIds = new Set(xIds.map((x) => x.id.toLowerCase()));
-  const pendingOnly: PendingLinkRequestRow[] = pendingLinkRequests.flatMap((request) => {
-    const requestedXId = request.requested_x_id;
-    if (!requestedXId || linkedIds.has(requestedXId.toLowerCase())) return [];
-    return [{
-      id: request.id,
-      requested_x_id: requestedXId,
-      requested_at: request.requested_at,
-    }];
-  });
-
   const iconCandidatesById: Record<string, string[]> = {};
   const channelCandidatesById: Record<string, string[]> = {};
   if (db && xIds.length > 0) {
@@ -130,7 +126,12 @@ export default async function SettingsPage({
   }
 
   const hasLinkedXIds = xIds.length > 0;
-  const pendingRequestCount = pendingOnly.length;
+  const mergeCandidates = xIds
+    .filter((x) => x.approval_status === "approved")
+    .map((x) => ({ id: x.id, label: `@${x.id}` }));
+  const pendingRequestCount = requestHistory.filter(
+    (request) => request.status === "pending",
+  ).length;
 
   const sortedXIds = sortXIds(xIds, user.active_x_user_id);
   const requestedX = params?.x?.trim() ?? null;
@@ -151,10 +152,10 @@ export default async function SettingsPage({
     isOnboarding
       ? "link"
       : utilityTab ??
-        (xIds.length === 0 && pendingOnly.length === 0
+        (xIds.length === 0 && requestHistory.length === 0
           ? "link"
-          : xIds.length === 0 && pendingOnly.length > 0
-            ? "pending"
+          : xIds.length === 0 && requestHistory.length > 0
+            ? "history"
             : null);
 
   const buildSettingsHref = (opts: {
@@ -246,14 +247,14 @@ export default async function SettingsPage({
             );
           })}
 
-          {pendingOnly.length > 0 ? (
+          {requestHistory.length > 0 ? (
             <Link
-              href={buildSettingsHref({ tab: "pending" })}
+              href={buildSettingsHref({ tab: "history" })}
               role="tab"
-              aria-selected={showUtilityTab === "pending"}
-              aria-controls="settings-panel-pending"
+              aria-selected={showUtilityTab === "history"}
+              aria-controls="settings-panel-history"
               className={`${pageStyles.tab} ${
-                showUtilityTab === "pending" ? pageStyles.tabActive : ""
+                showUtilityTab === "history" ? pageStyles.tabActive : ""
               }`}
             >
               <span
@@ -263,8 +264,12 @@ export default async function SettingsPage({
                 <Icon name="clock" size={16} />
               </span>
               <span className={pageStyles.tabBody}>
-                <span className={pageStyles.tabLabel}>申請中</span>
-                <span className={pageStyles.tabMeta}>{pendingOnly.length}件</span>
+                <span className={pageStyles.tabLabel}>申請履歴</span>
+                <span className={pageStyles.tabMeta}>
+                  {pendingRequestCount > 0
+                    ? `${pendingRequestCount}件申請中`
+                    : `${requestHistory.length}件`}
+                </span>
               </span>
             </Link>
           ) : null}
@@ -351,22 +356,22 @@ export default async function SettingsPage({
         </section>
       ) : null}
 
-      {showUtilityTab === "pending" ? (
+      {showUtilityTab === "history" ? (
         <section
-          id="settings-panel-pending"
+          id="settings-panel-history"
           role="tabpanel"
           className={pageStyles.card}
-          aria-labelledby="settings-pending-h"
+          aria-labelledby="settings-history-h"
         >
           <div className={`${pageStyles.cardHd} ${pageStyles.cardHdBordered}`}>
-            <h2 id="settings-pending-h" className={pageStyles.cardTitle}>
-              承認待ちの申請
+            <h2 id="settings-history-h" className={pageStyles.cardTitle}>
+              X ID申請履歴
             </h2>
             <p className={pageStyles.cardDesc}>
-              運営が確認中の X ID 連携申請です。承認されると左のタブに表示されます。
+              連携・統合申請の状態を新しいものから最大50件確認できます。
             </p>
           </div>
-          <PendingLinkRequestList rows={pendingOnly} />
+          <XIdentityRequestHistoryList rows={requestHistory} />
         </section>
       ) : null}
 
@@ -397,6 +402,21 @@ export default async function SettingsPage({
               }
             />
           </div>
+          {isOnboarding && requestHistory.length > 0 ? (
+            <div className={pageStyles.addBox}>
+              <h3 className={pageStyles.cardTitle}>申請履歴</h3>
+              <p className={pageStyles.cardDesc}>
+                申請済みのX IDと現在の状態を確認できます。
+              </p>
+              <XIdentityRequestHistoryList rows={requestHistory} />
+            </div>
+          ) : null}
+          {mergeCandidates.length >= 2 ? (
+            <div className={pageStyles.addBox}>
+              <h3 className={pageStyles.cardTitle}>X ID統合申請</h3>
+              <XIdMergeForm linkedXIds={mergeCandidates} />
+            </div>
+          ) : null}
         </section>
       ) : null}
 

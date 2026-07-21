@@ -9,7 +9,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { YoutubeChannelPicker } from "@/components/settings/YoutubeChannelPicker";
 import { SocialLinksEditor } from "@/components/forms/SocialLinksEditor";
 
-/** X ID申請フォーム。新規/既存連携、別名、統合を同じ正本へ送る。 */
+/** 初回・追加を問わず同じ入力で送るX ID連携申請フォーム。 */
 export function XIdLinkForm({
   compact = false,
   onSuccessRedirect,
@@ -19,7 +19,6 @@ export function XIdLinkForm({
 } = {}): React.ReactElement {
   const router = useRouter();
   const [pending, startTransition] = React.useTransition();
-  const [requestType, setRequestType] = React.useState<"new" | "alias" | "merge">("new");
   const [okMsg, setOkMsg] = React.useState<string | null>(null);
   const [errMsg, setErrMsg] = React.useState<string | null>(null);
 
@@ -27,7 +26,7 @@ export function XIdLinkForm({
     ev.preventDefault();
     const form = ev.currentTarget;
     const fd = new FormData(form);
-    fd.set("request_type", requestType);
+    fd.set("request_type", "link");
     setOkMsg(null);
     setErrMsg(null);
     startTransition(async () => {
@@ -35,7 +34,6 @@ export function XIdLinkForm({
       if (result.ok) {
         setOkMsg(result.message ?? "X ID申請を受け付けました。");
         form.reset();
-        setRequestType("new");
         if (onSuccessRedirect) router.push(onSuccessRedirect);
         else router.refresh();
       } else {
@@ -44,37 +42,17 @@ export function XIdLinkForm({
     });
   };
 
-  const primaryLabel =
-    requestType === "alias"
-      ? "追加する別名 X ID"
-      : requestType === "merge"
-        ? "統合元 X ID"
-        : "連携する X ID";
-
   return (
     <form className={styles.stack} onSubmit={onSubmit} aria-labelledby="xid-link-heading">
       {!compact ? (
         <p id="xid-link-heading" className={styles.introNote}>
-          X IDの新規・既存連携、別名追加、統合申請を送信します。すべて運営承認後に反映されます。
+          X IDを連携します。2件目以降も同じ方法で申請でき、運営承認後に反映されます。
         </p>
       ) : (
-        <span id="xid-link-heading" className="fn-sr-only">X IDを申請</span>
+        <span id="xid-link-heading" className="fn-sr-only">X IDを連携</span>
       )}
-      <label className={styles.compactLabel}>
-        申請種別
-        <select
-          className={styles.input}
-          value={requestType}
-          onChange={(event) => setRequestType(event.target.value as "new" | "alias" | "merge")}
-          disabled={pending}
-        >
-          <option value="new">X IDを連携（新規・既存を自動判定）</option>
-          <option value="alias">別名を追加</option>
-          <option value="merge">X IDを統合</option>
-        </select>
-      </label>
       <label className={styles.compactLabel} htmlFor="xid-input">
-        {primaryLabel}
+        連携する X ID
       </label>
       <div className={styles.row}>
         <span aria-hidden className={styles.atMark}>@</span>
@@ -92,21 +70,6 @@ export function XIdLinkForm({
           disabled={pending}
         />
       </div>
-      {requestType === "alias" || requestType === "merge" ? (
-        <label className={styles.compactLabel}>
-          {requestType === "alias" ? "別名の追加先 X ID" : "統合先 X ID"}
-          <input
-            name="target_x_user_id"
-            type="text"
-            placeholder="target_x_id"
-            required
-            maxLength={20}
-            pattern="[A-Za-z0-9_]{1,20}"
-            className={styles.input}
-            disabled={pending}
-          />
-        </label>
-      ) : null}
       <button
         type="submit"
         className="fn-btn fn-btn-primary fn-btn-sm"
@@ -114,7 +77,83 @@ export function XIdLinkForm({
         aria-busy={pending}
       >
         <Icon name="plus" size={12} aria-hidden />
-        {pending ? "送信中…" : "申請を送信"}
+        {pending ? "送信中…" : "X IDを連携"}
+      </button>
+      {okMsg ? <p className={styles.msgOk} role="status"><Icon name="check" size={13} aria-hidden /> {okMsg}</p> : null}
+      {errMsg ? <p className={styles.msgErr} role="alert"><Icon name="warning" size={13} aria-hidden /> {errMsg}</p> : null}
+    </form>
+  );
+}
+
+/** 承認済みの自分のX ID同士を統合申請する設定画面専用フォーム。 */
+export function XIdMergeForm({
+  linkedXIds,
+}: {
+  linkedXIds: readonly { id: string; label: string }[];
+}): React.ReactElement | null {
+  const router = useRouter();
+  const [pending, startTransition] = React.useTransition();
+  const [okMsg, setOkMsg] = React.useState<string | null>(null);
+  const [errMsg, setErrMsg] = React.useState<string | null>(null);
+
+  if (linkedXIds.length < 2) return null;
+
+  const onSubmit = (ev: React.FormEvent<HTMLFormElement>) => {
+    ev.preventDefault();
+    const fd = new FormData(ev.currentTarget);
+    fd.set("request_type", "merge");
+    setOkMsg(null);
+    setErrMsg(null);
+    startTransition(async () => {
+      const result = await requestXIdLink(fd);
+      if (result.ok) {
+        setOkMsg(result.message ?? "X ID統合申請を受け付けました。");
+        router.refresh();
+      } else {
+        setErrMsg(result.message ?? "統合申請に失敗しました。");
+      }
+    });
+  };
+
+  return (
+    <form className={styles.stack} onSubmit={onSubmit} aria-labelledby="xid-merge-heading">
+      <p id="xid-merge-heading" className={styles.introNote}>
+        連携済みのX ID同士を1つの名義へ統合します。運営承認後に反映されます。
+      </p>
+      <label className={styles.compactLabel}>
+        統合元 X ID
+        <select
+          name="x_id"
+          className={styles.input}
+          defaultValue={linkedXIds[0].id}
+          disabled={pending}
+        >
+          {linkedXIds.map((x) => (
+            <option key={x.id} value={x.id}>{x.label}</option>
+          ))}
+        </select>
+      </label>
+      <label className={styles.compactLabel}>
+        統合先 X ID
+        <select
+          name="target_x_user_id"
+          className={styles.input}
+          defaultValue={linkedXIds[1].id}
+          disabled={pending}
+        >
+          {linkedXIds.map((x) => (
+            <option key={x.id} value={x.id}>{x.label}</option>
+          ))}
+        </select>
+      </label>
+      <button
+        type="submit"
+        className="fn-btn fn-btn-ghost fn-btn-sm"
+        disabled={pending}
+        aria-busy={pending}
+      >
+        <Icon name="refresh" size={12} aria-hidden />
+        {pending ? "送信中…" : "統合を申請"}
       </button>
       {okMsg ? <p className={styles.msgOk} role="status"><Icon name="check" size={13} aria-hidden /> {okMsg}</p> : null}
       {errMsg ? <p className={styles.msgErr} role="alert"><Icon name="warning" size={13} aria-hidden /> {errMsg}</p> : null}

@@ -38,7 +38,7 @@ YouTube Data APIの全処理は `YOUTUBE_DAILY_QUOTA_LIMIT` の80%を共有上�
 2. Workerをデプロイします。
 3. `/manage/events/{eventId}/youtube-playlist` を開きます。
 4. 再生リストURLまたはID、同期方式、同期間隔を保存します。
-5. 全体状況は `/admin/youtube-sync/playlists`、ユーザー自身の作品状況は `/dashboard/youtube-playlists` で確認します。
+5. 管理者は全体状況を `/admin/youtube-sync/playlists`、イベント運営は担当イベントの `/manage/events/{eventId}/youtube-playlist` で確認します。一般ユーザー向けの同期状況画面は提供しません。
 
 ## 同期方式
 

@@ -26,8 +26,12 @@ if (process.env.FLAMENODE_SCALAR_EXECUTION !== "1") {
   });
   const dbFor = (failure) => {
     const state = { batches: [], committed: false };
+    const selectChain = {
+      leftJoin: () => selectChain,
+      where: () => ({ get: async () => undefined }),
+    };
     const db = {
-      select: () => ({ from: () => ({ where: () => ({ get: async () => undefined }) }) }),
+      select: () => ({ from: () => selectChain }),
       run: (query) => ({ query }),
       batch: async (items) => {
         state.batches.push(items);

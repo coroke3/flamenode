@@ -19,8 +19,7 @@ test("theme mode: system は OS 設定へ解決する", () => {
   assert.equal(resolveTheme("dark", false), "dark");
 });
 
-test("theme mode: 切替は system を含む3状態を巡回する", () => {
-  assert.equal(nextThemeMode("system"), "light");
+test("theme mode: 明示切替はライトとダークの2状態を巡回する", () => {
   assert.equal(nextThemeMode("light"), "dark");
-  assert.equal(nextThemeMode("dark"), "system");
+  assert.equal(nextThemeMode("dark"), "light");
 });

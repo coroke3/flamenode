@@ -77,7 +77,11 @@ export async function buildAuthConfig(): Promise<NextAuthConfig> {
     envValue(env.AUTH_DISCORD_SECRET);
   const baseConfig: NextAuthConfig = {
     secret: authSecret,
-    trustHost: false,
+    // ローカル開発で明示的に許可した場合だけHostを信頼する。
+    // productionではAUTH_TRUST_HOSTを有効化せず、AUTH_URLの固定originを使う。
+    trustHost:
+      process.env.NODE_ENV !== "production" &&
+      envValue(process.env.AUTH_TRUST_HOST)?.toLowerCase() === "true",
     session: { strategy: "database" },
     providers: [
       Discord({

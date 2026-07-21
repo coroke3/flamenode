@@ -21,6 +21,8 @@ if (!runningWithTsx) {
   if (result.error) throw result.error;
   if (result.status !== 0) process.exitCode = result.status ?? 1;
 } else {
+  const { sql } = await import("drizzle-orm");
+  const { drizzle } = await import("drizzle-orm/d1");
   const {
     AUDIT_INSERT_CHUNK_SIZE,
     D1_MAX_BATCH_QUERIES,
@@ -38,16 +40,17 @@ if (!runningWithTsx) {
 
   const makeDb = ({ failOnAuditAssertion = false, failOnMutationAssertion = false, failGetAt = 0 } = {}) => {
     const state = { committed: false, batches: [], gets: 0 };
+    const get = async () => {
+      state.gets += 1;
+      if (state.gets === failGetAt) throw new Error("simulated preparation query failure");
+      return undefined;
+    };
+    const selectChain = {
+      leftJoin: () => selectChain,
+      where: () => ({ get }),
+    };
     const db = {
-      select: () => ({
-        from: () => ({
-          where: () => ({ get: async () => {
-            state.gets += 1;
-            if (state.gets === failGetAt) throw new Error("simulated preparation query failure");
-            return undefined;
-          } }),
-        }),
-      }),
+      select: () => ({ from: () => selectChain }),
       run: (query) => ({ kind: "query", query }),
       batch: async (items) => {
         state.batches.push(items);
@@ -76,6 +79,43 @@ if (!runningWithTsx) {
     assert.equal(state.batches[0].length, 6);
     assert.equal(state.gets, 2);
     assert.equal(state.committed, true);
+  });
+
+  test("D1 batchへ渡すraw SQLはbind依存を避けるためinline化する", async () => {
+    const { db, state } = makeDb();
+    await mutateWithAudit(db, {
+      mutationStatements: [{ kind: "mutation" }],
+      expectedMutationChanges: 1,
+      audits: [makeAudit(0)],
+    });
+    const [, mutationAssertion, auditInsert, auditAssertion] = state.batches[0];
+    assert.equal(mutationAssertion.query.shouldInlineParams, true);
+    assert.equal(auditInsert.query.shouldInlineParams, true);
+    assert.equal(auditAssertion.query.shouldInlineParams, true);
+  });
+
+  test("Drizzle D1のraw batchでinline済みSQLをprepareできる", async () => {
+    const prepared = [];
+    const client = {
+      prepare: (query) => ({
+        bind: (...params) => {
+          const statement = { query, params };
+          prepared.push(statement);
+          return statement;
+        },
+      }),
+      batch: async (statements) =>
+        statements.map(() => ({ success: true, results: [], meta: {} })),
+    };
+    const db = drizzle(client);
+
+    await db.batch([
+      db.run(sql`SELECT ${"bound-value"} AS value`.inlineParams()),
+    ]);
+
+    assert.equal(prepared.length, 1);
+    assert.equal(prepared[0].params.length, 0);
+    assert.match(prepared[0].query, /bound-value/);
   });
 
   test("複数actorでは設定1回とunique actorごとのqueryになる", async () => {

@@ -8,6 +8,7 @@ import {
   nextThemeMode,
   normalizeThemeMode,
   resolveTheme,
+  type ResolvedTheme,
   type ThemeMode,
 } from "@/lib/theme/mode";
 
@@ -15,16 +16,18 @@ function getPrefersDark(): boolean {
   return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
 }
 
-function applyTheme(mode: ThemeMode, persist = true): void {
+function applyTheme(mode: ThemeMode, persist = true): ResolvedTheme {
   const resolved = resolveTheme(mode, getPrefersDark());
   document.documentElement.setAttribute("data-theme", resolved);
   document.documentElement.setAttribute("data-theme-preference", mode);
-  if (!persist) return;
-  try {
-    localStorage.setItem(THEME_STORAGE_KEY, mode);
-  } catch {
-    /* noop */
+  if (persist) {
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, mode);
+    } catch {
+      /* noop */
+    }
   }
+  return resolved;
 }
 
 export function ThemeToggle({
@@ -33,6 +36,8 @@ export function ThemeToggle({
   variant?: "cycle" | "segmented";
 }): React.ReactElement {
   const [mode, setMode] = React.useState<ThemeMode>("system");
+  const [resolvedMode, setResolvedMode] =
+    React.useState<ResolvedTheme>("light");
 
   React.useEffect(() => {
     let initial: ThemeMode = "system";
@@ -42,40 +47,40 @@ export function ThemeToggle({
       /* noop */
     }
     setMode(initial);
-    applyTheme(initial, false);
+    setResolvedMode(applyTheme(initial, false));
   }, []);
 
   React.useEffect(() => {
     if (mode !== "system") return;
     const query = window.matchMedia?.("(prefers-color-scheme: dark)");
-    const onChange = () => applyTheme("system", false);
+    const onChange = () => setResolvedMode(applyTheme("system", false));
     query?.addEventListener?.("change", onChange);
     return () => query?.removeEventListener?.("change", onChange);
   }, [mode]);
 
-  const select = (next: ThemeMode) => {
+  const select = (next: ResolvedTheme) => {
     setMode(next);
-    applyTheme(next);
+    setResolvedMode(applyTheme(next));
   };
 
   if (variant === "segmented") {
     return (
       <div className={styles.segmented} role="group" aria-label="テーマ設定">
-        {(["light", "dark", "system"] as const).map((item) => (
+        {(["light", "dark"] as const).map((item) => (
           <button
             key={item}
             type="button"
             className={styles.segment}
-            data-active={item === mode || undefined}
-            aria-pressed={item === mode}
+            data-active={item === resolvedMode || undefined}
+            aria-pressed={item === resolvedMode}
             onClick={() => select(item)}
           >
             <Icon
-              name={item === "light" ? "sun" : item === "dark" ? "moon" : "settings"}
+              name={item === "light" ? "sun" : "moon"}
               size={13}
               aria-hidden
             />
-            {item === "light" ? "ライト" : item === "dark" ? "ダーク" : "OS設定"}
+            {item === "light" ? "ライト" : "ダーク"}
           </button>
         ))}
       </div>
@@ -83,11 +88,9 @@ export function ThemeToggle({
   }
 
   const label =
-    mode === "system"
-      ? "現在はOS設定に追従中。ライトテーマへ切り替え"
-      : mode === "light"
-        ? "現在はライトテーマ。ダークテーマへ切り替え"
-        : "現在はダークテーマ。OS設定に追従へ切り替え";
+    resolvedMode === "light"
+      ? "現在はライトテーマ。ダークテーマへ切り替え"
+      : "現在はダークテーマ。ライトテーマへ切り替え";
 
   return (
     <button
@@ -96,11 +99,11 @@ export function ThemeToggle({
       title={label}
       className={styles.button}
       onClick={() => {
-        select(nextThemeMode(mode));
+        select(nextThemeMode(resolvedMode));
       }}
     >
       <Icon
-        name={mode === "system" ? "settings" : mode === "dark" ? "moon" : "sun"}
+        name={resolvedMode === "dark" ? "moon" : "sun"}
         size={15}
       />
       <span className={styles.dot} aria-hidden />

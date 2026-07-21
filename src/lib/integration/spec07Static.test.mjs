@@ -70,7 +70,14 @@ test("audit restore source contains payload, stale-snapshot, and atomic failure 
 
 test("local development shares Wrangler bindings and persistence with migration commands", () => {
   const instrumentation = fs.readFileSync(path.join(root, "instrumentation.ts"), "utf8");
+  const nextConfig = fs.readFileSync(path.join(root, "next.config.mjs"), "utf8");
   const grantAdmin = fs.readFileSync(path.join(root, "scripts/grant-admin.cjs"), "utf8");
+
+  assert.match(nextConfig, /setupDevPlatform/);
+  assert.match(nextConfig, /configPath:\s*"wrangler\.toml"/);
+  assert.match(nextConfig, /persist:\s*\{\s*path:\s*"\.wrangler\/state\/v3"\s*\}/);
+  assert.match(nextConfig, /remoteBindings:\s*false/);
+  assert.match(nextConfig, /envFiles:\s*\[\]/);
 
   for (const source of [instrumentation, grantAdmin]) {
     assert.match(source, /getPlatformProxy/);

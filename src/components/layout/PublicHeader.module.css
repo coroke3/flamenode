@@ -79,11 +79,6 @@
   flex-shrink: 0;
 }
 
-.desktopXId {
-  display: none;
-  flex-shrink: 0;
-}
-
 .themeButton button {
   width: var(--header-action-h);
   height: var(--header-action-h);
@@ -434,8 +429,7 @@
     gap: 6px;
   }
 
-  .themeButton,
-  .desktopXId {
+  .themeButton {
     display: none;
   }
 
@@ -463,11 +457,6 @@
 
   .themeButton {
     display: inline-flex;
-  }
-
-  .desktopXId {
-    display: inline-flex;
-    align-items: center;
   }
 
   .menuToggle {
