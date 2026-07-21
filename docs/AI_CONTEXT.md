@@ -43,7 +43,7 @@ Historical資料は経緯確認専用で、現行仕様の根拠にしない。
 | UI・フォーム | `docs/operations/ui-acceptance.md` | 対象page/component、CSS、関連test |
 | 監査・復元 | `docs/operations/audit-and-restore.md` | mutation、audit helper、復元test |
 | ローカル起動 | `LOCAL.md` | `package.json`、`.dev.vars.example` |
-| デプロイ | `DEPLOY.md` | `package.json`の`cf:*`、`scripts/cloudflare-*.mjs`、wrangler群 |
+| デプロイ | `DEPLOY.md`、`docs/operations/deploy-setup-report.md` | `package.json`の`cf:*`、`scripts/cloudflare-*.mjs`、wrangler群 |
 | 過去仕様の調査 | `docs/historical/README.md` | 必要な資料1件だけ |
 
 旧形式インポートは通常ランタイムの互換機能ではない。保管済みの旧JSON、CSV、TSVを新正本へ一度だけ取り込む場合は、既存の管理者専用境界 `/admin/import`、`/api/admin/import/legacy`、`src/lib/import/legacy/` に限定する。通常ランタイム、公開API、Workerへ旧形式分岐を追加しない。

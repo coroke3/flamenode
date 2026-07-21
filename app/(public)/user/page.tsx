@@ -14,10 +14,12 @@ import {
   PVSF_SUMMARY_EVENT_ID,
 } from "@/lib/db/queries";
 import { publicListableXApprovalWhere } from "@/lib/utils/publicXUserWhere";
+import { buildPageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = buildPageMetadata({
+  path: "/user",
   title: "クリエイターを見つける",
-};
+});
 
 export const dynamic = "force-dynamic";
 

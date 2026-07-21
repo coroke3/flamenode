@@ -22,7 +22,9 @@ import { preflightLegacyImportPlan } from "@/lib/import/legacy/preflight";
 import {
   claimLegacyImportPreview,
   createLegacyImportPreview,
+  estimateLegacyImportStoredPlanBytes,
   LegacyImportPreviewError,
+  LEGACY_IMPORT_PLAN_WARN_BYTES,
   type LegacyImportApplyProgress,
 } from "@/lib/import/legacy/previewStore";
 import type { CanonicalLegacyPlan } from "@/lib/import/legacy/normalize";
@@ -354,11 +356,23 @@ export async function POST(request: Request): Promise<NextResponse> {
     return previewErrorResponse(cause);
   }
 
+  const previewWarnings = plan.warnings.slice(0, 100);
+  const storedPlanBytes = estimateLegacyImportStoredPlanBytes({
+    authUserId: user.id,
+    strategy: selectedStrategy,
+    plan,
+  });
+  if (storedPlanBytes > LEGACY_IMPORT_PLAN_WARN_BYTES) {
+    previewWarnings.unshift(
+      `正規化後の plan が大きいです（約 ${Math.ceil(storedPlanBytes / (1024 * 1024)).toLocaleString()} MB / 上限 24 MB）。ファイル分割または作品数の削減を検討してください。`,
+    );
+  }
+
   return NextResponse.json({
     ok: true,
     mode,
     summary,
-    warnings: plan.warnings.slice(0, 100),
+    warnings: previewWarnings,
     errors: [],
     preview_token: credential.previewToken,
     plan_hash: credential.planHash,

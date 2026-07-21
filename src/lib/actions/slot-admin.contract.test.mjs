@@ -102,6 +102,7 @@ test("slot生成のUIとserverは同じ上限を案内・検証する", () => {
     formSource,
     /最大 \{MAX_SLOT_BATCH_GENERATE_COUNT\} 枠まで一度に生成できます/,
   );
+  assert.match(formSource, /内部では 3 件ずつ分割実行されます/);
   assert.match(source, /chunkRows\(newRows, MAX_ATOMIC_SLOT_ROWS\)/);
 });
 

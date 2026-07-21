@@ -3,7 +3,8 @@ import type { CanonicalLegacyPlan, LegacyImportStrategy } from "./normalize";
 const PREVIEW_VERSION = 3 as const;
 const PREVIEW_TTL_SECONDS = 15 * 60;
 const CLAIM_TTL_SECONDS = 10 * 60;
-const MAX_STORED_PLAN_BYTES = 24 * 1024 * 1024;
+export const MAX_STORED_PLAN_BYTES = 24 * 1024 * 1024;
+export const LEGACY_IMPORT_PLAN_WARN_BYTES = Math.floor(MAX_STORED_PLAN_BYTES * 0.8);
 const TOKEN_PATTERN = /^[a-f0-9]{32}$/;
 const PLAN_HASH_PATTERN = /^[a-f0-9]{64}$/;
 const X_USER_STEP_SIZE = 40;
@@ -324,6 +325,45 @@ function parseStoredPreview(raw: string): StoredPreview {
 
 function serializedBytes(value: string): number {
   return new TextEncoder().encode(value).byteLength;
+}
+
+export function estimateLegacyImportStoredPlanBytes(input: {
+  authUserId: string;
+  strategy: LegacyImportStrategy;
+  plan: CanonicalLegacyPlan;
+}): number {
+  const record: StoredPreview = {
+    version: PREVIEW_VERSION,
+    previewToken: "0".repeat(32),
+    authUserId: input.authUserId,
+    strategy: input.strategy,
+    planHash: "0".repeat(64),
+    plan: input.plan,
+    createdAt: 0,
+    expiresAt: 0,
+    status: "ready",
+    attempt: 0,
+    progress: {
+      stage: "system_user",
+      index: 0,
+      counts: {
+        createdEvents: 0,
+        replacedEvents: 0,
+        skippedEvents: 0,
+        createdVideos: 0,
+        replacedVideos: 0,
+        skippedVideos: 0,
+        createdXUsers: 0,
+        createdAuthUsers: 0,
+        createdSoftwares: 0,
+        createdCustomQuestions: 0,
+        reusedCustomQuestions: 0,
+      },
+      skipExistingEventIds: [],
+      skipExistingVideoIds: [],
+    },
+  };
+  return serializedBytes(JSON.stringify(record));
 }
 
 function putOptions(record: StoredPreview, etagMatches?: string): R2PutOptions {

@@ -2,8 +2,13 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { Icon } from "@/components/ui/Icon";
+import { buildPageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = { title: "メンテナンス中" };
+export const metadata: Metadata = buildPageMetadata({
+  path: "/maintenance",
+  title: "メンテナンス中",
+  noIndex: true,
+});
 
 export default function MaintenancePage(): React.ReactElement {
   return (

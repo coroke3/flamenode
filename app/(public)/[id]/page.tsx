@@ -78,6 +78,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
           ? youtubeThumbUrl(metadataYoutubeId, "maxresdefault")
           : video.creator_icon_url,
         noIndex: video.visibility_status !== "public",
+        ogType: "video.other",
       });
   }
   const detail = await withDatabase(async (db) => {
@@ -104,6 +105,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       ? youtubeThumbUrl(metadataYoutubeId, "maxresdefault")
       : detail.video.creator_icon_url,
     noIndex: detail.video.visibility_status !== "public",
+    ogType: "video.other",
   });
 }
 

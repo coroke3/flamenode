@@ -27,6 +27,7 @@ WebはCloudflare Workers + OpenNext + Workers Static Assets、背景処理はCro
 
 | タスク | Active文書 |
 | --- | --- |
+| 初回デプロイ準備・設定チェック | [deploy-setup-report.md](deploy-setup-report.md) |
 | baseline / local D1 / Remote手動手順 | [migrations.md](migrations.md) |
 | DB正本移行・旧データ変換 | [../database/canonical-migration-plan.md](../database/canonical-migration-plan.md) |
 | Cron Worker、lease、上限 | [workers.md](workers.md) |

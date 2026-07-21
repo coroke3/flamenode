@@ -14,14 +14,16 @@ import {
 } from "@/lib/db/schema";
 import { publicListableEventWhere } from "@/lib/utils/eventStatus";
 import { publicListableXApprovalWhere } from "@/lib/utils/publicXUserWhere";
+import { buildPageMetadata } from "@/lib/seo";
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = buildPageMetadata({
+  path: "/about",
   title: "FlameNode について",
   description:
     "FlameNode は、個人制作映像のアーカイブとイベント参加・投稿・運営の記録をつなぐサイトです。",
-};
+});
 
 type AboutStats = {
   publicVideos: number;

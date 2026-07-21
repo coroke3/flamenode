@@ -62,6 +62,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       `FlameNodeで公開されている${name}のポートフォリオ。`,
     path: `/user/${id}/portfolio`,
     image: cachedGoogleImageUrl(data?.icon_url),
+    noIndex: true,
   });
 }
 

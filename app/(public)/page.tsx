@@ -1,4 +1,5 @@
 import * as React from "react";
+import type { Metadata } from "next";
 import styles from "./page.module.css";
 import { sql } from "drizzle-orm";
 import { withDatabase } from "@/lib/cloudflare";
@@ -37,6 +38,19 @@ import { type HomeStats } from "@/components/layout/homeVisuals";
 import { loadStaticTopPage } from "@/lib/publicData/loader";
 import { canFallbackToDatabase } from "@/lib/publicData/loader";
 import type { StaticTopData } from "@/lib/publicData/loader";
+import { JsonLd } from "@/components/seo/JsonLd";
+import {
+  SITE_DESCRIPTION,
+  SITE_NAME,
+  absoluteUrl,
+  buildPageMetadata,
+} from "@/lib/seo";
+
+export const metadata: Metadata = buildPageMetadata({
+  path: "/",
+  title: SITE_NAME,
+  description: SITE_DESCRIPTION,
+});
 
 export const dynamic = "force-dynamic";
 
@@ -155,8 +169,26 @@ export default async function TopPage(): Promise<React.ReactElement> {
     ? topSlotStats.get(primaryHeroEvent.id)
     : undefined;
 
+  const websiteJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    name: SITE_NAME,
+    url: absoluteUrl("/"),
+    description: SITE_DESCRIPTION,
+    inLanguage: "ja",
+    potentialAction: {
+      "@type": "SearchAction",
+      target: {
+        "@type": "EntryPoint",
+        urlTemplate: absoluteUrl("/list?q={search_term_string}"),
+      },
+      "query-input": "required name=search_term_string",
+    },
+  };
+
   return (
     <div className={`fn-main ${styles.page}`}>
+      <JsonLd data={websiteJsonLd} />
       <HomeTopIntro
         stats={stats}
         primaryEvent={primaryHeroEvent}

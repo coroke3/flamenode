@@ -21,6 +21,7 @@ YOUTUBE_DAILY_QUOTA_LIMIT="10000"
 # 公開設定
 NEXT_PUBLIC_SITE_URL="http://localhost:3000"
 NEXT_PUBLIC_SITE_NAME="FlameNode"
+NEXT_PUBLIC_SITE_DESCRIPTION="映像作品とクリエイター、イベントをつなぐ動画プラットフォーム。"
 
 # メンテナンス強制 (1 で全ページを /maintenance へ。本番は Pages 環境変数で設定)
 MAINTENANCE_MODE="0"

@@ -145,6 +145,7 @@ export function SlotBatchForm({
                 </div>
                 <p style={{ margin: "6px 0 0", color: "var(--text-muted)", fontSize: 12 }}>
                   終了日時までの範囲から、最大 {MAX_SLOT_BATCH_GENERATE_COUNT} 枠まで生成できます。
+                  D1 の原子上限のため、内部では 3 件ずつ分割実行されます。
                 </p>
               </div>
             </div>
@@ -165,6 +166,7 @@ export function SlotBatchForm({
                 />
                 <p style={{ margin: "6px 0 0", color: "var(--text-muted)", fontSize: 12 }}>
                   最大 {MAX_SLOT_BATCH_GENERATE_COUNT} 枠まで一度に生成できます。
+                  D1 の原子上限のため、内部では 3 件ずつ分割実行されます。
                 </p>
               </div>
               <div>

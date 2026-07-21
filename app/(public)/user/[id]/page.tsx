@@ -68,6 +68,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
         `FlameNodeで公開されている${user.x_name}の作品。`,
       path: `/user/${id}`,
       image: cachedGoogleImageUrl(user.icon_url),
+      ogType: "profile",
     });
   }
   const data = await withDatabase(async (db) => {
@@ -116,6 +117,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       `FlameNodeで公開されている${data?.title ?? id}の作品。`,
     path: `/user/${id}`,
     image: data?.image,
+    ogType: "profile",
   });
 }
 

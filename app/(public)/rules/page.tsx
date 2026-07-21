@@ -12,8 +12,12 @@ import {
   DEFAULT_TERMS_MARKDOWN,
   DEFAULT_TERMS_VERSION_LABEL,
 } from "@/lib/terms/defaultTerms";
+import { buildPageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = { title: "利用規約" };
+export const metadata: Metadata = buildPageMetadata({
+  path: "/rules",
+  title: "利用規約",
+});
 export const dynamic = "force-dynamic";
 
 function renderMarkdown(markdown: string): React.ReactNode[] {

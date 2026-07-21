@@ -1,7 +1,8 @@
 
 import type { MetadataRoute } from "next";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { publicListableEventWhere } from "@/lib/utils/eventStatus";
+import { publicListableXApprovalWhere } from "@/lib/utils/publicXUserWhere";
 import { withDatabase } from "@/lib/cloudflare";
 import { events, videos, xUsers } from "@/lib/db/schema";
 import { absoluteUrl } from "@/lib/seo";
@@ -72,7 +73,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
           })
           .from(xUsers)
           .innerJoin(videos, eq(videos.creator_x_user_id, xUsers.id))
-          .where(eq(videos.visibility_status, "public"))
+          .where(
+            and(
+              eq(videos.visibility_status, "public"),
+              publicListableXApprovalWhere(),
+            ),
+          )
           .groupBy(xUsers.id)
           .orderBy(desc(sql`MAX(COALESCE(${videos.updated_at}, ${videos.scheduled_time}, ${videos.created_at}))`))
           .limit(300),

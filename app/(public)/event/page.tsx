@@ -35,8 +35,12 @@ import type {
   StaticEventGroupSection,
   StaticEventIndexEvent,
 } from "@/lib/publicData/loader";
+import { buildPageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = { title: "イベント" };
+export const metadata: Metadata = buildPageMetadata({
+  path: "/event",
+  title: "イベント",
+});
 export const dynamic = "force-dynamic";
 
 interface SearchParams {

@@ -64,12 +64,14 @@ export function buildPageMetadata({
   path,
   image,
   noIndex = false,
+  ogType = "website",
 }: {
   title: string;
   description?: string | null;
   path: string;
   image?: string | null;
   noIndex?: boolean;
+  ogType?: "website" | "video.other" | "profile";
 }): Metadata {
   const cleanTitle = readableTitle(title, path);
   const cleanDescription = compactText(description);
@@ -84,7 +86,7 @@ export function buildPageMetadata({
       title: cleanTitle,
       description: cleanDescription,
       url: canonical,
-      type: "website",
+      type: ogType,
       images: [{ url: imageUrl, alt: cleanTitle }],
     },
     twitter: {

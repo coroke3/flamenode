@@ -4,8 +4,13 @@ import type { Metadata } from "next";
 import settingsStyles from "@/components/settings/settings-page.module.css";
 import videoStyles from "@/components/forms/VideoForm.module.css";
 import socialStyles from "@/components/forms/SocialLinksEditor.module.css";
+import { buildPageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = { title: "UI surfaces preview (dev)" };
+export const metadata: Metadata = buildPageMetadata({
+  path: "/dev/ui-surfaces",
+  title: "UI surfaces preview (dev)",
+  noIndex: true,
+});
 export const dynamic = "force-dynamic";
 
 /**

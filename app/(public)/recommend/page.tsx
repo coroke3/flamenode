@@ -13,8 +13,12 @@ import { CreatorCard } from "@/components/user/CreatorCard";
 import { Shelf } from "@/components/layout/Shelf";
 import { Icon } from "@/components/ui/Icon";
 import styles from "./page.module.css";
+import { buildPageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = { title: "おすすめ" };
+export const metadata: Metadata = buildPageMetadata({
+  path: "/recommend",
+  title: "おすすめ",
+});
 export const dynamic = "force-dynamic";
 
 const LIST_HREF = "/list";

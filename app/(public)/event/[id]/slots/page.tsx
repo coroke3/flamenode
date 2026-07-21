@@ -21,6 +21,7 @@ import { buildAccentVars } from "@/lib/theme/accent";
 import { Icon } from "@/components/ui/Icon";
 import { SlotGrid, type SlotRow } from "@/components/event/SlotGrid";
 import { SlotStatusBoard } from "@/components/event/SlotStatusBoard";
+import { buildPageMetadata } from "@/lib/seo";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +45,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
         .limit(1)
     )[0] ?? null,
   );
-  return { title: event?.title ? `${event.title} 枠確保` : "枠確保" };
+  return buildPageMetadata({
+    path: `/event/${id}/slots`,
+    title: event?.title ? `${event.title} 枠確保` : "枠確保",
+    noIndex: true,
+  });
 }
 
 export default async function EventSlotsPage({

@@ -201,16 +201,21 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
         const json = (await response.json()) as ApiResponse;
         setResult(json);
         const formUnchanged = formRevisionRef.current === submittedFormRevision;
-        if (formUnchanged && json.video_custom_field_candidates?.length) {
-          setFieldCandidates(json.video_custom_field_candidates);
-          setFieldDecisionDrafts((current) => {
-            const next = new Map<string, VideoCustomFieldDecisionDraft>();
-            for (const candidate of json.video_custom_field_candidates ?? []) {
-              const existing = current.get(candidate.source_key);
-              if (existing) next.set(candidate.source_key, existing);
-            }
-            return next;
-          });
+        if (formUnchanged && json.ok) {
+          const candidates = json.video_custom_field_candidates ?? [];
+          setFieldCandidates(candidates);
+          if (candidates.length === 0) {
+            setFieldDecisionDrafts(new Map());
+          } else {
+            setFieldDecisionDrafts((current) => {
+              const next = new Map<string, VideoCustomFieldDecisionDraft>();
+              for (const candidate of candidates) {
+                const existing = current.get(candidate.source_key);
+                if (existing) next.set(candidate.source_key, existing);
+              }
+              return next;
+            });
+          }
         }
         setCredential(
           formUnchanged &&
@@ -447,6 +452,15 @@ function ImportResult({ result }: { result: ApiResponse }): React.ReactElement {
         <p className="fn-muted fn-text-sm">
           進捗: {result.progress.completed.toLocaleString()} / {result.progress.total.toLocaleString()}
           （{result.progress.stage}:{result.progress.index}）
+        </p>
+      ) : null}
+      {result.ok && result.mode === "preview" && result.summary ? (
+        <p className="fn-muted fn-text-sm">
+          カスタム質問 {(result.summary.customQuestions ?? 0).toLocaleString()} 件、
+          カスタム回答 {(result.summary.customAnswers ?? 0).toLocaleString()} 件をプレビュー plan に含めました。
+          {(result.summary.customQuestions ?? 0) > 0 || (result.summary.customAnswers ?? 0) > 0
+            ? " 列の割り当ては確定済みです。"
+            : " 追加列をカスタム質問にする場合は列を指定して再プレビューしてください。"}
         </p>
       ) : null}
       {result.summary ? (

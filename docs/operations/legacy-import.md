@@ -1,7 +1,7 @@
 # 旧形式インポート運用
 
 > Status: Active
-> Last verified: 2026-07-21
+> Last verified: 2026-07-22
 > Verified against commit: `33b9b7b6`
 > Source of truth: `app/(admin)/admin/import/`, `app/api/admin/import/legacy/`, `src/lib/import/legacy/`
 
@@ -36,6 +36,18 @@
 ## 競合方針
 
 既存ID競合は停止、スキップ、旧形式インポート由来行だけ置換のいずれかを明示します。`replace_imported`でも手動作成データは上書きしません。
+
+## 運用目安
+
+- 入力上限は 5,000 行だが、1 回あたりの実用目安は作品約 2,000 件までとする。これを超えると R2 保存 plan のサイズ、apply の HTTP 回数、所要時間が急増する。
+- preview は正規化後 plan を R2 へ固定する。plan サイズが 24 MB の 80% を超えると警告を返す。上限超過時は保存に失敗するため、ファイル分割または作品数削減が必要。
+- apply は作品 1 件 / ステップで進み、途中失敗後も同じ preview token から再開できる。import 全体の all-or-nothing ロールバックはない。各 D1 batch 内だけが原子的。
+- 作品 2,000 件の目安: apply リクエストはおおよそ 2,000 回超（イベント・X 名義・質問の前処理を含む）、ブラウザからの連続 POST で数十分〜 1 時間程度を見込む。D1 rows written は作品あたり十数〜数十行規模となり、合計で数万〜十数万行に達しうる。
+- カスタム質問は未対応列のみ指定できる。`title` や `ylink` など正規カラムへ対応する列は割り当て不可。列と質問文 Q を指定したうえで再プレビューし、plan に含まれた件数を確認してから apply する。
+
+## 枠一括生成（参考）
+
+管理画面の枠一括生成は最大 100 件まで要求できる。D1 の bind / query 上限を守るため、内部では 3 件ずつ原子的に chunk 実行する。`MAX_ATOMIC_SLOT_ROWS` は引き上げない。
 
 ## 失敗時
 
