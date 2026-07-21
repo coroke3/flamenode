@@ -112,6 +112,11 @@
   --text-meta: 12px;
   --text-micro: 11px;
 
+  /* personal 面の標準コントロール寸法 */
+  --fn-control-h: 38px;
+  --fn-control-h-sm: 32px;
+  --fn-control-h-touch: 44px;
+
   /* 影の段階 token (PR46): 主役だけに使う。カード hover では --shadow-1 まで。 */
   --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.04), 0 4px 12px -8px rgba(0, 0, 0, 0.18);
   --shadow-1: 0 1px 0 rgba(0, 0, 0, 0.04), 0 4px 12px -8px rgba(0, 0, 0, 0.18);
@@ -547,11 +552,14 @@ select {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 8px 14px;
+  height: var(--fn-control-h);
+  min-height: var(--fn-control-h);
+  padding: 0 14px;
   border-radius: var(--radius-pill);
   font-weight: 600;
   font-size: 14px;
   line-height: 1;
+  box-sizing: border-box;
   transition:
     background-color 0.15s ease,
     color 0.15s ease,
@@ -633,12 +641,16 @@ select {
 }
 
 .fn-btn-sm {
-  padding: 6px 10px;
+  height: var(--fn-control-h-sm);
+  min-height: var(--fn-control-h-sm);
+  padding: 0 10px;
   font-size: 12px;
 }
 
 .fn-btn-lg {
-  padding: 11px 18px;
+  height: auto;
+  min-height: calc(var(--fn-control-h) + 6px);
+  padding: 0 18px;
   font-size: 15px;
 }
 
@@ -717,15 +729,32 @@ select {
  * ---------------------------------------------------------- */
 
 .fn-input,
-.fn-textarea,
 .fn-select {
   width: 100%;
-  padding: 9px 12px;
+  height: var(--fn-control-h);
+  min-height: var(--fn-control-h);
+  padding: 0 12px;
   border-radius: 8px;
   border: 1px solid var(--border-subtle);
   background-color: color-mix(in srgb, var(--bg-base) 86%, var(--bg-elevated));
   color: var(--text-primary);
   font-size: 14px;
+  line-height: 1.25;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.fn-textarea {
+  width: 100%;
+  min-height: calc(var(--fn-control-h) * 3);
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  background-color: color-mix(in srgb, var(--bg-base) 86%, var(--bg-elevated));
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.5;
+  box-sizing: border-box;
   transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
@@ -745,7 +774,7 @@ select {
 }
 
 .fn-input-sm {
-  min-height: 32px;
+  min-height: var(--fn-control-h-sm);
   padding: 6px 9px;
   font-size: 12px;
 }

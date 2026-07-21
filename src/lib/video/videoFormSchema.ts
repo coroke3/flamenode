@@ -13,7 +13,32 @@ export function normalizeIconUrl(raw: unknown): string | null {
   return normalizeHttpUrl(s, { maxLength: 500 });
 }
 
-export const videoFormSchema = z.object({
+function preprocessYoutubeUrl(val: unknown): unknown {
+  if (typeof val === "string") {
+    return normalizeHttpUrl(val, { maxLength: 500 }) ?? val;
+  }
+  return val;
+}
+
+function preprocessOptionalYoutubeUrl(val: unknown): unknown {
+  if (val === null || val === undefined) return "";
+  if (typeof val !== "string") return val;
+  const trimmed = val.trim();
+  if (!trimmed) return "";
+  return normalizeHttpUrl(trimmed, { maxLength: 500 }) ?? trimmed;
+}
+
+const youtubeUrlRequiredField = z.preprocess(
+  preprocessYoutubeUrl,
+  z.string().trim().url(),
+);
+
+const youtubeUrlOptionalField = z.preprocess(
+  preprocessOptionalYoutubeUrl,
+  z.union([z.literal(""), z.string().trim().url()]),
+);
+
+const videoFormBaseSchema = z.object({
   display_name: z.string().trim().min(1).max(80),
   creator_x_user_id: z.string().trim().max(32).optional().nullable(),
   icon_url: z.preprocess(
@@ -42,10 +67,6 @@ export const videoFormSchema = z.object({
       });
     }),
   title: z.string().trim().min(1).max(120),
-  youtube_url: z.preprocess(
-    (val) => (typeof val === "string" ? normalizeHttpUrl(val, { maxLength: 500 }) ?? val : val),
-    z.string().trim().url(),
-  ),
   music: z.string().trim().max(200).optional().nullable(),
   music_reference_url: z.preprocess(
     (val) => (typeof val === "string" ? normalizeHttpUrl(val, { maxLength: 500 }) : val),
@@ -76,14 +97,38 @@ export const videoFormSchema = z.object({
   part: z.string().trim().max(40).optional().nullable(),
 });
 
+export const videoFormSchema = videoFormBaseSchema.extend({
+  youtube_url: youtubeUrlRequiredField,
+});
+
 export type VideoFormData = z.infer<typeof videoFormSchema>;
+
+export type ParseVideoFormOptions = {
+  youtubeRequired?: boolean;
+};
+
+function buildVideoFormSchema(youtubeRequired: boolean) {
+  return videoFormBaseSchema.extend({
+    youtube_url: youtubeRequired ? youtubeUrlRequiredField : youtubeUrlOptionalField,
+  });
+}
 
 export function parseVideoForm(
   raw: Record<string, unknown>,
+  options?: ParseVideoFormOptions,
 ):
   | { ok: true; data: VideoFormData }
   | { ok: false; message: string } {
-  const parsed = videoFormSchema.safeParse(raw);
+  const youtubeRequired = options?.youtubeRequired ?? true;
+  const input = youtubeRequired
+    ? raw
+    : {
+        ...raw,
+        youtube_url: Object.prototype.hasOwnProperty.call(raw, "youtube_url")
+          ? raw.youtube_url
+          : "",
+      };
+  const parsed = buildVideoFormSchema(youtubeRequired).safeParse(input);
   if (!parsed.success) {
     return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
   }

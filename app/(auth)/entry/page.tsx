@@ -170,7 +170,7 @@ export default async function EntryPage({
               }}
               className={styles.btnRow}
             >
-              <button type="submit" className="fn-btn fn-btn-primary fn-btn-lg">
+              <button type="submit" className="fn-btn fn-btn-primary">
                 <Icon name="discord" size={14} aria-hidden /> Discord でログイン
               </button>
             </form>
@@ -305,7 +305,7 @@ export default async function EntryPage({
           <div className={styles.btnRow}>
             <Link
               href={resolveWriteHref("/entry/unslotted")}
-              className="fn-btn"
+              className="fn-btn fn-btn-primary"
             >
               <Icon name="edit" size={14} aria-hidden />
               {writeCtaLabel(isLoggedIn ? "枠なし投稿" : "ログインして枠なし投稿")}

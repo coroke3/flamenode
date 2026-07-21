@@ -63,10 +63,9 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
   const userId = sessionUser.id;
   const slotId = String(formData.get("slot_id") ?? "");
   if (!slotId) return { ok: false, message: "枠IDがありません。" };
-  const parsed = parseVideoForm(Object.fromEntries(formData));
+  const parsed = parseVideoForm(Object.fromEntries(formData), { youtubeRequired: false });
   if (!parsed.ok) return parsed;
-  const youtubeId = extractYoutubeId(parsed.data.youtube_url);
-  if (!youtubeId) return { ok: false, message: "YouTube URLを解析できません。" };
+  const youtubeId = extractYoutubeId(parsed.data.youtube_url) ?? null;
   const db = getDatabase();
   if (!db) return { ok: false, message: "DBに接続できません。" };
 
@@ -102,7 +101,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
   const stageResult = buildStagePermissionSubmission(formData, stageFields);
   if (!stageResult.ok) return stageResult;
   const slotPart = await resolvePartFromSlot(db, slotRow);
-  if (await checkYoutubeVideoDuplicate(db, youtubeId, existingVideo?.id)) {
+  if (youtubeId && await checkYoutubeVideoDuplicate(db, youtubeId, existingVideo?.id)) {
     return { ok: false, message: "このYouTube動画は既に登録されています。" };
   }
   const memberValidation = validateVideoMemberSubmission(
@@ -165,7 +164,8 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     ? {
         ...existingVideo,
         title: parsed.data.title,
-        youtube_video_id: youtubeId,
+        // 空送信では既存 ID を維持（updateVideo と同じ）。新規追加・変更時のみ上書き。
+        youtube_video_id: youtubeId ?? existingVideo.youtube_video_id,
         creator_x_user_id: activeX,
         creator_display_name: parsed.data.display_name,
         creator_icon_url: parsed.data.icon_url || null,
@@ -243,9 +243,11 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
       retention_class: "normal",
       strict: true,
     });
-    appendVideoAtomicWritePlan(plan, await buildVideoDerivedRowsPlan(db, {
-      videoId, youtubeVideoId: youtubeId, now, actorUserId: userId,
-    }));
+    if (youtubeId) {
+      appendVideoAtomicWritePlan(plan, await buildVideoDerivedRowsPlan(db, {
+        videoId, youtubeVideoId: youtubeId, now, actorUserId: userId,
+      }));
+    }
     appendVideoAtomicWritePlan(plan, await buildReplaceVideoSoftwarePlan(db, {
       videoId, raw: parsed.data.used_software ?? null, actorUserId: userId,
     }));
@@ -344,5 +346,5 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
   revalidatePath(`/event/${slotRow.event_id}`);
   revalidatePath(`/event/${slotRow.event_id}/slots`);
   revalidatePath("/dashboard");
-  return { ok: true, videoId, youtubeVideoId: youtubeId, eventId: slotRow.event_id };
+  return { ok: true, videoId, youtubeVideoId: youtubeId ?? undefined, eventId: slotRow.event_id };
 }

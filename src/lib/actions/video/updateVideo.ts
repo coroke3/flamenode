@@ -105,10 +105,17 @@ export async function updateVideo(
     raw.is_collab = target.collaboration_type === "collab" ? "true" : "false";
   }
 
-  const parsed = parseVideoForm(raw);
+  const parsed = parseVideoForm(raw, { youtubeRequired: false });
   if (!parsed.ok) return parsed;
-  const youtubeId = extractYoutubeId(parsed.data.youtube_url);
-  if (!youtubeId) return { ok: false, message: "YouTube URL が解析できません。" };
+
+  const rawYoutubeUrl = parsed.data.youtube_url.trim();
+  let youtubeId: string | null;
+  if (rawYoutubeUrl) {
+    youtubeId = extractYoutubeId(rawYoutubeUrl);
+    if (!youtubeId) return { ok: false, message: "YouTube URL が解析できません。" };
+  } else {
+    youtubeId = target.youtube_video_id ?? null;
+  }
 
   const nextStagePermissionResult = buildStagePermissionSubmission(
     formData,
@@ -176,7 +183,7 @@ export async function updateVideo(
   if (!sections.basics && parsed.data.title !== target.title) {
     return { ok: false, message: "作品タイトルを編集する権限がありません。" };
   }
-  const youtubeChanged = youtubeId !== (target.youtube_video_id ?? "");
+  const youtubeChanged = (youtubeId ?? "") !== (target.youtube_video_id ?? "");
   if (!sections.youtube && youtubeChanged) {
     return { ok: false, message: "YouTube ID を編集する権限がありません。" };
   }
@@ -206,7 +213,7 @@ export async function updateVideo(
     return { ok: false, message: "合作メンバーを編集する権限がありません。" };
   }
 
-  if (sections.youtube && youtubeChanged) {
+  if (sections.youtube && youtubeChanged && youtubeId) {
     if (await checkYoutubeVideoDuplicate(db, youtubeId, videoId)) {
       return { ok: false, message: "この YouTube 動画は既に登録されています。" };
     }
@@ -322,7 +329,7 @@ export async function updateVideo(
   return {
     ok: true,
     videoId,
-    youtubeVideoId: sections.youtube ? youtubeId : (target.youtube_video_id ?? undefined),
+    youtubeVideoId: sections.youtube ? (youtubeId ?? undefined) : (target.youtube_video_id ?? undefined),
     eventId: target.primary_event_id ?? undefined,
   };
 }

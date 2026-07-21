@@ -1,4 +1,10 @@
-/* 管理・運営画面のスマホ最適化（admin-manage.css の後段で適用） */
+/* 管理・運営画面のスマホ最適化（admin-manage.css の後段で適用）
+ *
+ * 高さの意図（admin-manage.css のトークン）:
+ *   --fn-console-control-h = var(--fn-control-h, 38px) … filter / 表内 / タブ
+ *   --fn-console-touch-h = 44px … page-head / toolbar 主要操作
+ * 640px 境界では mobile-hardening.css の横スクロール規則と共存する。
+ * 旧来の「全 .fn-btn を 42px」上書きは廃止し、スコープを絞る。 */
 
 @media (max-width: 760px) {
   [data-admin-shell],
@@ -216,20 +222,52 @@
 
   [data-admin-shell] .fn-console-filter-form > .fn-input,
   [data-admin-shell] .fn-console-filter-form > .fn-select,
-  [data-admin-shell] .fn-console-filter-field,
+  [data-admin-shell] .fn-console-filter-field .fn-input,
+  [data-admin-shell] .fn-console-filter-field .fn-select,
   [data-manage-shell] .fn-console-filter-form > .fn-input,
   [data-manage-shell] .fn-console-filter-form > .fn-select,
+  [data-manage-shell] .fn-console-filter-field .fn-input,
+  [data-manage-shell] .fn-console-filter-field .fn-select {
+    width: 100%;
+    min-width: 0;
+    height: var(--fn-console-control-h);
+    min-height: var(--fn-console-control-h);
+  }
+
+  [data-admin-shell] .fn-console-filter-form .fn-btn,
+  [data-admin-shell] .fn-console-filter-action.fn-btn,
+  [data-manage-shell] .fn-console-filter-form .fn-btn,
+  [data-manage-shell] .fn-console-filter-action.fn-btn {
+    width: 100%;
+    height: var(--fn-console-control-h);
+    min-height: var(--fn-console-control-h);
+    justify-content: center;
+  }
+
+  [data-admin-shell] .fn-console-filter-field,
   [data-manage-shell] .fn-console-filter-field {
     width: 100%;
     min-width: 0;
   }
 
+  /* filter 行の checkbox ラベルは control 高さに揃える（44px にはしない） */
   [data-admin-shell] .fn-console-filter-check,
   [data-manage-shell] .fn-console-filter-check {
-    min-height: 44px;
+    min-height: var(--fn-console-control-h);
+  }
+
+  /* 760px 以下: page-head / toolbar の主要操作だけ touch 高さ（44px） */
+  [data-admin-shell] .fn-console-head-actions .fn-btn,
+  [data-manage-shell] .fn-console-head-actions .fn-btn,
+  [data-admin-shell] .fn-console-actions .fn-btn,
+  [data-manage-shell] .fn-console-actions .fn-btn,
+  [data-manage-shell] .manage-actions .fn-btn {
+    min-height: var(--fn-console-touch-h);
   }
 
   /* 主要操作は2列を基本にし、長いラベルだけ自然に折り返す */
+  [data-admin-shell] .fn-console-head-actions,
+  [data-manage-shell] .fn-console-head-actions,
   [data-admin-shell] .fn-console-actions,
   [data-manage-shell] .fn-console-actions,
   [data-manage-shell] .manage-actions {
@@ -240,12 +278,13 @@
     align-items: stretch;
   }
 
+  [data-admin-shell] .fn-console-head-actions .fn-btn,
+  [data-manage-shell] .fn-console-head-actions .fn-btn,
   [data-admin-shell] .fn-console-actions .fn-btn,
   [data-manage-shell] .fn-console-actions .fn-btn,
   [data-manage-shell] .manage-actions .fn-btn {
     width: 100%;
     min-width: 0;
-    min-height: 42px;
     justify-content: center;
     padding-left: 10px;
     padding-right: 10px;
@@ -253,20 +292,22 @@
     text-align: center;
   }
 
+  [data-admin-shell] .fn-console-head-actions > :last-child:nth-child(odd),
+  [data-manage-shell] .fn-console-head-actions > :last-child:nth-child(odd),
   [data-admin-shell] .fn-console-actions > :last-child:nth-child(odd),
   [data-manage-shell] .fn-console-actions > :last-child:nth-child(odd),
   [data-manage-shell] .manage-actions > :last-child:nth-child(odd) {
     grid-column: 1 / -1;
   }
 
-  [data-admin-shell] .admin-main .fn-btn,
-  [data-manage-shell] .manage-main .fn-btn {
-    min-height: 42px;
-  }
-
-  [data-admin-shell] .admin-main .fn-btn-sm,
-  [data-manage-shell] .manage-main .fn-btn-sm {
-    min-height: 38px;
+  /* 表内 ghost / sm は control 高さ（38px）に固定。全 .fn-btn への一括上書きはしない */
+  [data-admin-shell] .admin-main .fn-table .fn-btn,
+  [data-admin-shell] .admin-main .fn-console-row-actions .fn-btn,
+  [data-manage-shell] .manage-main .fn-table .fn-btn,
+  [data-manage-shell] .manage-main .fn-console-row-actions .fn-btn {
+    min-height: var(--fn-console-control-h);
+    padding-left: 9px;
+    padding-right: 9px;
   }
 
   /* タブは横スクロールに限定し、ページ全体は横に動かさない */
@@ -285,7 +326,7 @@
   [data-admin-shell] .fn-console-event-tabs .fn-btn,
   [data-manage-shell] .fn-console-resource-tabs .fn-btn,
   [data-manage-shell] .fn-console-event-tabs .fn-btn {
-    min-height: 40px;
+    min-height: var(--fn-console-control-h);
     scroll-snap-align: start;
   }
 
@@ -321,13 +362,6 @@
   [data-manage-shell] .fn-console-row-actions {
     flex-wrap: nowrap;
     min-width: max-content;
-  }
-
-  [data-admin-shell] .fn-console-row-actions .fn-btn,
-  [data-manage-shell] .fn-console-row-actions .fn-btn {
-    min-height: 36px;
-    padding-left: 9px;
-    padding-right: 9px;
   }
 
   [data-manage-shell] .manage-event-hero.fn-console-head,
@@ -366,12 +400,16 @@
     max-width: 64vw;
   }
 
+  [data-admin-shell] .fn-console-head-actions,
+  [data-manage-shell] .fn-console-head-actions,
   [data-admin-shell] .fn-console-actions,
   [data-manage-shell] .fn-console-actions,
   [data-manage-shell] .manage-actions {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  [data-admin-shell] .fn-console-head-actions > :last-child:nth-child(odd),
+  [data-manage-shell] .fn-console-head-actions > :last-child:nth-child(odd),
   [data-admin-shell] .fn-console-actions > :last-child:nth-child(odd),
   [data-manage-shell] .fn-console-actions > :last-child:nth-child(odd),
   [data-manage-shell] .manage-actions > :last-child:nth-child(odd) {

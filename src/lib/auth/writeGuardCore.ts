@@ -19,6 +19,7 @@ export const WRITE_FEATURE_KEYS = [
   "manage_slot_update",
   "manage_slot_delete",
   "manage_event_staff",
+  "manage_video_status",
 ] as const;
 
 export type WriteFeatureKey = (typeof WRITE_FEATURE_KEYS)[number];

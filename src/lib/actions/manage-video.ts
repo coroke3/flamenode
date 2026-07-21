@@ -38,7 +38,7 @@ export const MANAGE_VIDEO_STATUS_CALLER_QUERY_COUNT =
 export async function setManageVideoStatus(
   formData: FormData,
 ): Promise<ManageVideoActionResult> {
-  const identity = await writeGuard({ feature: "admin_video_status" });
+  const identity = await writeGuard({ feature: "manage_video_status" });
   if (!identity.ok) return { ok: false, message: identity.message };
   const u = identity.user;
 

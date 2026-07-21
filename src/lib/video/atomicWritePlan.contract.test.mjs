@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const read = (relative) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8");
 const create = read("../actions/video/createFreeVideo.ts");
 const submit = read("../actions/video/submitSlotVideo.ts");
+const updateVideoAction = read("../actions/video/updateVideo.ts");
 const update = read("./videoSavePlan.ts");
 const adminMembers = read("../actions/video/adminMembers.ts");
 const helperSources = [
@@ -16,6 +17,17 @@ const helperSources = [
   read("./customQuestionAnswers.ts"),
   read("./stagePermissionAnswers.ts"),
 ];
+
+test("YouTube IDがあるときだけderived rows planを追加する", () => {
+  assert.match(submit, /if \(youtubeId\) \{[\s\S]*buildVideoDerivedRowsPlan/);
+  assert.match(update, /if \(sections\.youtube && plan\.youtubeId\) \{[\s\S]*buildVideoDerivedRowsPlan/);
+});
+
+test("枠投稿と編集はYouTube任意パースを使う", () => {
+  assert.match(submit, /parseVideoForm\([\s\S]*youtubeRequired: false/);
+  assert.match(updateVideoAction, /parseVideoForm\(raw, \{ youtubeRequired: false \}\)/);
+  assert.match(updateVideoAction, /if \(sections\.youtube && youtubeChanged && youtubeId\)/);
+});
 
 test("投稿・枠投稿・編集・管理メンバー更新は各1回だけatomic planを実行する", () => {
   for (const source of [create, submit, update, adminMembers]) {

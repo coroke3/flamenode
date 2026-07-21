@@ -64,8 +64,9 @@
   font: inherit;
   font-size: 12px;
   font-weight: 700;
-  min-height: 30px;
-  padding: 0 10px;
+  min-height: var(--fn-control-h);
+  padding: 0 12px;
+  box-sizing: border-box;
 }
 
 .modeButton:hover:not(:disabled),
@@ -178,18 +179,25 @@
 
 .customInput {
   width: 100%;
-  min-height: 38px;
-  padding: 8px 11px;
-  border: 0;
-  border-radius: var(--radius-md);
-  background: var(--bg-elevated);
+  min-height: var(--fn-control-h);
+  padding: 9px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-base) 86%, var(--bg-elevated));
   color: var(--text-primary);
   font-size: 14px;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.customInput:hover {
+  border-color: var(--border-strong);
 }
 
 .customInput:focus {
   outline: none;
-  box-shadow: inset 0 0 0 1.5px var(--accent-primary);
+  border-color: var(--accent-primary);
+  box-shadow: none;
 }
 
 .customActions {

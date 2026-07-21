@@ -33,7 +33,8 @@ export function SettingsXAccountPanel({
   next?: string | null;
 }): React.ReactElement {
   const approved = x.approval_status === "approved";
-  const publicHref = approved ? publicUserHref(x.id) : null;
+  const imported = x.approval_status === "imported";
+  const publicHref = approved || imported ? publicUserHref(x.id) : null;
 
   return (
     <div className={pageStyles.accountPanel}>
@@ -128,11 +129,15 @@ export function SettingsXAccountPanel({
         <p className={pageStyles.accountNote}>
           運営の承認後、この X ID をアクティブに設定して投稿できます。
         </p>
-      ) : (
+      ) : imported ? (
+        <p className={pageStyles.accountNote}>
+          旧データから移行された X ID です。公開ページでは表示されますが、プロフィールの編集は運営の承認後に行えます。
+        </p>
+      ) : x.approval_status === "rejected" ? (
         <p className={pageStyles.accountNote}>
           却下された X ID です。再審査が必要な場合は運営にお問い合わせください。
         </p>
-      )}
+      ) : null}
     </div>
   );
 }

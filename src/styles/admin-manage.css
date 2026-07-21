@@ -194,6 +194,14 @@
   --fn-personal-card-pad: clamp(20px, 2.6vw, 24px);
 }
 
+[data-fn-surface="personal"] .fn-input,
+[data-fn-surface="personal"] .fn-select,
+[data-fn-surface="personal"] .fn-btn:not(.fn-btn-sm):not(.fn-btn-icon) {
+  height: var(--fn-control-h);
+  min-height: var(--fn-control-h);
+  box-sizing: border-box;
+}
+
 [data-fn-surface="personal"] .fn-public-container {
   width: 100%;
   max-width: var(--fn-page-max);
@@ -267,7 +275,7 @@
 
   [data-fn-surface="personal"] .fn-page-head-actions .fn-btn {
     width: 100%;
-    min-height: 44px;
+    min-height: var(--fn-control-h-touch);
     justify-content: center;
   }
 }
@@ -639,7 +647,7 @@
   [data-fn-surface="personal"] .fn-dash-actions .fn-btn {
     width: 100%;
     justify-content: center;
-    min-height: 44px;
+    min-height: var(--fn-control-h-touch);
   }
 
   [data-fn-surface="personal"] .fn-gallery-grid {
@@ -819,7 +827,10 @@
 [data-manage-shell] {
   --fn-console-gutter-inline-start: var(--fn-page-gutter-inline-start);
   --fn-console-gutter-inline-end: var(--fn-page-gutter-inline-end);
-  --fn-console-control-h: 38px;
+  /* デスクトップ / filter / 表内の標準高さ。globals の --fn-control-h があればそれを優先 */
+  --fn-console-control-h: var(--fn-control-h, 38px);
+  /* モバイル主要操作（page-head actions 等）のタップ領域 */
+  --fn-console-touch-h: 44px;
 }
 
 [data-admin-shell] {
@@ -1145,6 +1156,14 @@
   margin-top: 10px;
 }
 
+[data-admin-shell] .fn-console-head-actions .fn-btn,
+[data-manage-shell] .fn-console-head-actions .fn-btn,
+[data-admin-shell] .fn-console-actions .fn-btn,
+[data-manage-shell] .fn-console-actions .fn-btn {
+  min-height: var(--fn-console-control-h);
+  box-sizing: border-box;
+}
+
 [data-admin-shell] .fn-console-actions,
 [data-manage-shell] .fn-console-actions {
   display: flex;
@@ -1253,7 +1272,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  align-items: flex-end;
+  align-items: center;
   margin-top: 16px;
 }
 
@@ -1271,6 +1290,7 @@
 [data-manage-shell] .fn-console-filter-form > .fn-select {
   flex: 1 1 220px;
   min-width: min(100%, 220px);
+  height: var(--fn-console-control-h);
   min-height: var(--fn-console-control-h);
   box-sizing: border-box;
 }
@@ -1295,6 +1315,7 @@
 [data-manage-shell] .fn-console-filter-field .fn-input,
 [data-manage-shell] .fn-console-filter-field .fn-select {
   min-width: 0;
+  height: var(--fn-console-control-h);
   min-height: var(--fn-console-control-h);
   box-sizing: border-box;
 }
@@ -1303,6 +1324,7 @@
 [data-manage-shell] .fn-console-filter-form .fn-btn,
 [data-admin-shell] .fn-console-filter-action.fn-btn,
 [data-manage-shell] .fn-console-filter-action.fn-btn {
+  height: var(--fn-console-control-h);
   min-height: var(--fn-console-control-h);
   box-sizing: border-box;
 }
@@ -1339,6 +1361,8 @@
 [data-manage-shell] .fn-console-resource-tabs .fn-btn,
 [data-manage-shell] .fn-console-event-tabs .fn-btn {
   flex: 0 0 auto;
+  min-height: var(--fn-console-control-h);
+  box-sizing: border-box;
 }
 
 [data-admin-shell] .fn-console-kv-grid,
@@ -1570,10 +1594,13 @@
     align-items: stretch;
   }
 
+  /* 560px 以下: 主要操作は touch 高さ。filter / 表内は --fn-console-control-h のまま */
+  [data-admin-shell] .fn-console-head-actions .fn-btn,
+  [data-manage-shell] .fn-console-head-actions .fn-btn,
   [data-admin-shell] .fn-console-actions .fn-btn,
   [data-manage-shell] .fn-console-actions .fn-btn {
     width: 100%;
-    min-height: 44px;
+    min-height: var(--fn-console-touch-h);
     justify-content: center;
   }
 
@@ -1631,6 +1658,14 @@
 }
 
 /* 管理・運営テーブル: 行アクションは枠なし、罫線も弱める */
+[data-admin-shell] .admin-main .fn-table .fn-btn,
+[data-manage-shell] .manage-main .fn-table .fn-btn,
+[data-admin-shell] .admin-main .fn-console-row-actions .fn-btn,
+[data-manage-shell] .manage-main .fn-console-row-actions .fn-btn {
+  min-height: var(--fn-console-control-h);
+  box-sizing: border-box;
+}
+
 [data-admin-shell] .admin-main .fn-table .fn-btn-ghost,
 [data-manage-shell] .manage-main .fn-table .fn-btn-ghost,
 [data-admin-shell] .admin-main .fn-console-row-actions .fn-btn,

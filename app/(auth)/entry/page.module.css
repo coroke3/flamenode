@@ -1,12 +1,13 @@
 .choiceGrid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
   gap: clamp(18px, 2.6vw, 28px);
 }
 
 .choiceCard {
   position: relative;
-  min-height: 230px;
+  height: 100%;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -70,11 +71,12 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  align-items: center;
+  align-items: stretch;
 }
 
 .choiceCard .btnRow {
   margin-top: auto;
+  width: 100%;
 }
 
 :global(.fn-entry-status-body) .btnRow {
@@ -84,6 +86,7 @@
 .btnRow > a,
 .btnRow > button {
   justify-content: center;
+  min-height: var(--fn-control-h);
 }
 
 .btnRow > a :global(svg),
@@ -285,10 +288,6 @@
 }
 
 @media (max-width: 640px) {
-  .choiceCard {
-    min-height: 0;
-  }
-
   .cardTitle {
     align-items: flex-start;
     font-size: 22px;
@@ -301,7 +300,7 @@
   .btnRow > a,
   .btnRow > button {
     width: 100%;
-    min-height: 44px;
+    min-height: var(--fn-control-h-touch);
     justify-content: center;
   }
 
@@ -318,7 +317,7 @@
 
   .slotRow > :global(.fn-btn) {
     width: 100%;
-    min-height: 44px;
+    min-height: var(--fn-control-h-touch);
     justify-content: center;
   }
 }

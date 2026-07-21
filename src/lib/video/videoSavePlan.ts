@@ -65,7 +65,7 @@ export interface VideoSavePlan {
   allowSubmitterChange: boolean;
   sections: AllowedVideoEditSections;
   payload: VideoUpdatePayload;
-  youtubeId: string;
+  youtubeId: string | null;
   youtubeChanged: boolean;
   nextCreatorX: string;
   usedSoftware: string | null;
@@ -89,7 +89,7 @@ export interface VideoSavePlan {
 export function buildVideoUpdatePayload(args: {
   target: typeof videos.$inferSelect;
   parsed: VideoFormData;
-  youtubeId: string;
+  youtubeId: string | null;
   nextCreatorX: string;
   allowSubmitterChange: boolean;
   sections: AllowedVideoEditSections;
@@ -149,7 +149,7 @@ export function buildVideoUpdatePlan(args: {
   target: typeof videos.$inferSelect;
   targetSoftwareLabel: string | null;
   parsed: VideoFormData;
-  youtubeId: string;
+  youtubeId: string | null;
   youtubeChanged: boolean;
   nextCreatorX: string;
   nextStagePermission: string | null;
@@ -301,7 +301,7 @@ export async function applyVideoUpdatePlan(
     strict: true,
   });
 
-  if (sections.youtube) {
+  if (sections.youtube && plan.youtubeId) {
     appendVideoAtomicWritePlan(atomic, await buildVideoDerivedRowsPlan(db, {
       videoId: plan.videoId,
       youtubeVideoId: plan.youtubeId,

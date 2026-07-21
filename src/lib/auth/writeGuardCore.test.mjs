@@ -27,3 +27,8 @@ test("spreadsheet and legacy import keep separate CostGuard feature keys", () =>
   assert.equal(isWriteFeatureKey("admin_spreadsheet"), true);
   assert.equal(isWriteFeatureKey("admin_legacy_import"), true);
 });
+
+test("manage and admin video status keep separate CostGuard feature keys", () => {
+  assert.equal(isWriteFeatureKey("manage_video_status"), true);
+  assert.equal(isWriteFeatureKey("admin_video_status"), true);
+});

@@ -43,7 +43,7 @@
   [data-fn-surface="personal"] .fn-btn-primary,
   [data-fn-surface="personal"] .fn-btn-danger,
   [data-fn-surface="personal"] .fn-btn-warning {
-    min-height: 44px;
+    min-height: var(--fn-control-h-touch);
   }
 
   [data-fn-surface="public"] .fn-header-inner,
@@ -173,7 +173,7 @@
   [data-manage-shell] .fn-console-resource-tabs .fn-btn,
   [data-manage-shell] .fn-console-event-tabs .fn-btn {
     flex: 0 0 auto;
-    min-height: 40px;
+    min-height: var(--fn-console-control-h, 38px);
   }
 
   [data-admin-shell] .admin-sidebar,

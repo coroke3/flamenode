@@ -343,6 +343,19 @@ export function VideoForm({
     (key.startsWith("video.") && videoSectionDisabled) ||
     (key.startsWith("descriptions.") && descriptionsDisabled) ||
     (key.startsWith("members.") && membersDisabled);
+  const hasInitialYoutube = Boolean(initial.youtube_url?.trim());
+  const isYoutubeUrlRequired =
+    mode === "free" || (mode === "edit" && hasInitialYoutube);
+  const isYoutubeFieldDisabled = fieldDisabled("video.youtube_url");
+  const showYoutubeAddBlockedHint =
+    mode === "edit" &&
+    !hasInitialYoutube &&
+    !youtubeUrl.trim() &&
+    isFieldDisabled(disabledFields, "video.youtube_url");
+  const youtubePreviewOptional = mode === "slot" && !youtubeUrl.trim();
+  const youtubePreviewOk = Boolean(youtubeId) || youtubePreviewOptional;
+  const youtubePreviewPending =
+    !youtubePreviewOk && (mode === "free" || Boolean(youtubeUrl.trim()));
   const incompleteRequiredStageQuestionCount = selectedStagePermissionFields.filter(
     (question) => question.required && !stageAnswers[question.id]?.trim(),
   ).length;
@@ -428,6 +441,7 @@ export function VideoForm({
     if (stepKey === "youtube") {
       const trimmed = youtubeUrl.trim();
       if (!trimmed) {
+        if (mode === "slot") return null;
         return {
           step: "youtube",
           fieldId: "youtube_url",
@@ -828,7 +842,7 @@ export function VideoForm({
         {!isWizard ? (
         <div className={cx(styles.field, styles.editableField)}>
           <label
-            className={`${styles.label} ${styles.required}`}
+            className={`${styles.label} ${isYoutubeUrlRequired ? styles.required : ""}`}
             htmlFor="youtube_url"
           >
             YouTube URL
@@ -841,14 +855,22 @@ export function VideoForm({
             onChange={(e) => setYoutubeUrl(e.target.value)}
             className="fn-input"
             placeholder="https://www.youtube.com/watch?v=..."
-            required
-            readOnly={fieldDisabled("video.youtube_url")}
-            aria-readonly={fieldDisabled("video.youtube_url") || undefined}
-            style={fieldDisabled("video.youtube_url") ? { opacity: 0.65, cursor: "default" } : undefined}
+            required={isYoutubeUrlRequired}
+            readOnly={isYoutubeFieldDisabled}
+            aria-readonly={isYoutubeFieldDisabled || undefined}
+            style={isYoutubeFieldDisabled ? { opacity: 0.65, cursor: "default" } : undefined}
           />
-          <p className={styles.help}>
-            限定公開でも登録可能ですが、編集時の動画 ID 変更は管理者の事前承認が必要です。
-          </p>
+          {showYoutubeAddBlockedHint ? (
+            <p className={styles.help}>
+              YouTube URL は未登録です。追加する権限がありません。
+            </p>
+          ) : (
+            <p className={styles.help}>
+              {isYoutubeUrlRequired
+                ? "限定公開でも登録可能ですが、編集時の動画 ID 変更は管理者の事前承認が必要です。"
+                : "任意。後から追加できます。限定公開でも登録可能です。"}
+            </p>
+          )}
           {youtubeId ? (
             <div className={styles.preview}>
               <div className={styles.previewThumb}>
@@ -1241,7 +1263,7 @@ export function VideoForm({
             <div className={styles.youtubeStepSection}>
               <div className={cx(styles.field, styles.editableField)}>
                 <label
-                  className={`${styles.label} ${styles.required}`}
+                  className={`${styles.label} ${mode !== "slot" ? styles.required : ""}`}
                   htmlFor="youtube_url"
                 >
                   YouTube URL
@@ -1257,11 +1279,11 @@ export function VideoForm({
                   }}
                   className="fn-input"
                   placeholder="https://www.youtube.com/watch?v=..."
-                  required
-                  readOnly={fieldDisabled("video.youtube_url")}
-                  aria-readonly={fieldDisabled("video.youtube_url") || undefined}
+                  required={mode !== "slot"}
+                  readOnly={isYoutubeFieldDisabled}
+                  aria-readonly={isYoutubeFieldDisabled || undefined}
                   style={
-                    fieldDisabled("video.youtube_url")
+                    isYoutubeFieldDisabled
                       ? { opacity: 0.65, cursor: "default" }
                       : undefined
                   }
@@ -1273,7 +1295,9 @@ export function VideoForm({
                   }
                 />
                 <p className={styles.help}>
-                  限定公開でも登録可能です。URL を入力すると下にサムネイルが表示されます。
+                  {mode === "slot"
+                    ? "任意。後から編集で追加できます。入力すると下にサムネイルが表示されます。"
+                    : "限定公開でも登録可能です。URL を入力すると下にサムネイルが表示されます。"}
                 </p>
               </div>
               {youtubeId ? (
@@ -1296,6 +1320,10 @@ export function VideoForm({
                     </a>
                   </div>
                 </div>
+              ) : mode === "slot" ? (
+                <p className={styles.help}>
+                  未入力のまま次へ進めます。後から編集で追加できます。
+                </p>
               ) : (
                 <p className={styles.help}>
                   動画の URL または 11 桁の動画 ID を入力してください。
@@ -1419,7 +1447,12 @@ export function VideoForm({
                       <dl className={styles.confirmSummaryList}>
                         <div>
                           <dt>動画ID</dt>
-                          <dd>{youtubeId ?? "未入力"}</dd>
+                          <dd>
+                            {youtubeId ??
+                              (mode === "slot"
+                                ? "未入力（後から追加可）"
+                                : "未入力")}
+                          </dd>
                         </div>
                       </dl>
 
@@ -1548,7 +1581,15 @@ export function VideoForm({
           </div>
         </div>
         <dl className={styles.previewChecklist}>
-          <PreviewCheck ok={Boolean(youtubeId)} label="YouTube URL" />
+          <PreviewCheck
+            ok={youtubePreviewOk}
+            pending={youtubePreviewPending}
+            label={
+              youtubePreviewOptional
+                ? "YouTube URL (任意)"
+                : "YouTube URL"
+            }
+          />
           <PreviewCheck ok={Boolean(titlePreview.trim())} label="作品タイトル" />
           <PreviewCheck ok={Boolean(displayNamePreview.trim())} label="表示名" />
           <PreviewCheck

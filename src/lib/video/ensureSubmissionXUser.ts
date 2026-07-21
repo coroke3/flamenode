@@ -32,6 +32,10 @@ export async function buildSubmissionXUserPlan(
     await db.select().from(xUsers).where(eq(xUsers.id, args.xId)).limit(1)
   )[0];
 
+  if (existing && existing.approval_status !== "approved") {
+    return emptyVideoAtomicWritePlan();
+  }
+
   if (!existing) {
     const after: typeof xUsers.$inferSelect = {
       id: args.xId,

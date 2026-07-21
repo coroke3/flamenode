@@ -101,6 +101,19 @@
   gap: 8px;
 }
 
+.stepActions :global(.fn-btn) {
+  min-height: var(--fn-control-h);
+  box-sizing: border-box;
+}
+
+@media (max-width: 640px) {
+  .stepActions :global(.fn-btn) {
+    width: 100%;
+    min-height: var(--fn-control-h-touch);
+    justify-content: center;
+  }
+}
+
 .completeBanner {
   display: flex;
   flex-wrap: wrap;

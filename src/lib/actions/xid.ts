@@ -65,6 +65,15 @@ async function getLinkedXUser(db: DB, xUserId: string, authUserId: string) {
   return getLinkedXUserForAuthUser(db, authUserId, xUserId);
 }
 
+function requireApprovedForEdit(row: {
+  approval_status: string | null;
+}): XIdActionResult | null {
+  if (row.approval_status !== "approved") {
+    return { ok: false, message: "承認済みの X ID だけを編集できます。" };
+  }
+  return null;
+}
+
 function buildXUserProfileUpdate(values: {
   displayName: string;
   profileText: string | null;
@@ -389,6 +398,8 @@ export async function updateXIdProfile(formData: FormData): Promise<XIdActionRes
   if (!linked) return { ok: false, message: "この X ID を編集する権限がありません。" };
   const row = (await db.select().from(xUsers).where(eq(xUsers.id, xUserId)).limit(1))[0];
   if (!row) return { ok: false, message: "X ID が見つかりません。" };
+  const notApproved = requireApprovedForEdit(row);
+  if (notApproved) return notApproved;
 
   const updateValues = buildXUserProfileUpdate({
     displayName: xName || row.x_name?.trim() || `@${xUserId}`,
@@ -509,6 +520,8 @@ export async function setXIdIcon(formData: FormData): Promise<XIdActionResult> {
   }
   const row = (await db.select().from(xUsers).where(eq(xUsers.id, xUserId)).limit(1))[0];
   if (!row) return { ok: false, message: "X ID が見つかりません。" };
+  const notApproved = requireApprovedForEdit(row);
+  if (notApproved) return notApproved;
   const candidates = await getXIconCandidates(db, xUserId, 40);
   if (!candidates.includes(iconUrl)) return { ok: false, message: "選択できないアイコンです。" };
 
@@ -552,6 +565,8 @@ export async function uploadXIdIcon(
   }
   const row = (await db.select().from(xUsers).where(eq(xUsers.id, xUserId)).limit(1))[0];
   if (!row) return { ok: false, message: "X ID が見つかりません。" };
+  const notApproved = requireApprovedForEdit(row);
+  if (notApproved) return notApproved;
 
   const env = getEnv();
   if (!env.BUCKET) return { ok: false, message: "ストレージが利用できません。" };

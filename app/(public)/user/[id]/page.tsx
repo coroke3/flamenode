@@ -28,6 +28,7 @@ import { ProfileSocialLinks } from "@/components/user/ProfileSocialLinks";
 import { loadStaticUserProfile } from "@/lib/publicData/loader";
 import { canFallbackToDatabase } from "@/lib/publicData/loader";
 import type { StaticUserProfile } from "@/lib/publicData/loader";
+import { publicListableXApprovalWhere } from "@/lib/utils/publicXUserWhere";
 
 export const dynamic = "force-dynamic";
 
@@ -73,7 +74,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     const u = await db
       .select()
       .from(xUsers)
-      .where(sql`lower(${xUsers.id}) = ${id}`)
+      .where(
+        and(
+          sql`lower(${xUsers.id}) = ${id}`,
+          publicListableXApprovalWhere(),
+        )!,
+      )
       .limit(1);
     if (u[0]) {
       return {
@@ -150,7 +156,12 @@ export default async function UserPage({
     const userRow = await db
       .select()
       .from(xUsers)
-      .where(sql`lower(${xUsers.id}) = ${id}`)
+      .where(
+        and(
+          sql`lower(${xUsers.id}) = ${id}`,
+          publicListableXApprovalWhere(),
+        )!,
+      )
       .limit(1);
     const publicVideoBase = countablePublicVideoCondition;
 

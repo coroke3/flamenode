@@ -36,6 +36,15 @@ test("一般X ID lifecycleは逐次audit writeを残さずCAS付きatomic batch�
   assert.match(source, /Promise\.allSettled\(\[env\.BUCKET\.delete\(stagingKey\), env\.BUCKET\.delete\(key\)\]\)/);
 });
 
+test("imported 等の非 approved X ID はプロフィール・アイコン更新を拒否する", () => {
+  const source = read("../actions/xid.ts");
+  assert.match(source, /function requireApprovedForEdit/);
+  assert.match(source, /承認済みの X ID だけを編集できます。/);
+  assert.match(source, /updateXIdProfile[\s\S]*requireApprovedForEdit\(row\)/);
+  assert.match(source, /setXIdIcon[\s\S]*requireApprovedForEdit\(row\)/);
+  assert.match(source, /uploadXIdIcon[\s\S]*requireApprovedForEdit\(row\)/);
+});
+
 test("管理X ID lifecycleは通知を含むatomic batch、merge状態はCAS付き監査を使う", () => {
   const admin = read("../actions/xid-admin.ts");
   const merge = read("../actions/xid-merge-admin.ts");
