@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-22
-> Verified against commit: `47e6cee`
+> Verified against commit: `f9c6642`
 > Source of truth: `package.json`, `scripts/cloudflare-*.mjs`, `wrangler.toml`, `workers/*/wrangler.toml`
 
 初回デプロイ準備の横断チェックリストは [`docs/operations/deploy-setup-report.md`](./docs/operations/deploy-setup-report.md) を参照する。
