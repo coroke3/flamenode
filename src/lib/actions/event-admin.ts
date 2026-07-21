@@ -24,6 +24,7 @@ import { generateId } from "@/lib/utils/id";
 import { resolveStagePermissionFieldsFromJson } from "@/lib/video/formSettings";
 import { stagePermissionQuestionKeyCondition } from "@/lib/video/stagePermissionAnswers";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
+import { invalidateEventExportCache } from "@/lib/api/eventExportCache";
 import {
   buildPartsJson,
   buildVideoFormSettingsJson,
@@ -173,6 +174,13 @@ export async function createEvent(
   )[0];
   if (duplicate) return { ok: false, message: `ID「${id}」は既に存在します。` };
 
+  const activeXUserId = guard.user.active_x_user_id?.trim() || null;
+  if (!activeXUserId) {
+    return {
+      ok: false,
+      message: "イベント作成には承認済みの Active X ID が必要です。",
+    };
+  }
   const ownerIdentity = (
     await db
       .select({
@@ -181,7 +189,13 @@ export async function createEvent(
       })
       .from(xUserAccountLinks)
       .innerJoin(xUsers, eq(xUsers.id, xUserAccountLinks.x_user_id))
-      .where(eq(xUserAccountLinks.auth_user_id, actorUserId))
+      .where(
+        and(
+          eq(xUserAccountLinks.auth_user_id, actorUserId),
+          eq(xUserAccountLinks.x_user_id, activeXUserId),
+          eq(xUsers.approval_status, "approved"),
+        )!,
+      )
       .limit(1)
   )[0];
   if (!ownerIdentity) {
@@ -621,6 +635,9 @@ export async function updateEvent(
     audits,
   });
 
+  if (after.visibility_status !== "public") {
+    await invalidateEventExportCache(data.id);
+  }
   revalidateEventPaths(data.id);
   return { ok: true, eventId: data.id };
 }
@@ -699,6 +716,7 @@ export async function deleteEvent(
     ],
   });
 
+  await invalidateEventExportCache(eventId);
   revalidateEventPaths(eventId);
   return { ok: true };
 }

@@ -46,6 +46,10 @@ function git(args) {
   return result.status === 0 ? result.stdout.trim() : null;
 }
 
+function normalizeTrackedText(body) {
+  return body.replace(/\r\n?/g, "\n").trim();
+}
+
 function checkAppliedMigrationChanges(migrationFiles) {
   // PRのbaseが統合作業ブランチでも、main未適用migrationは修正可能にする。
   // mainへ既に存在するactive migrationだけを不変として扱う。
@@ -56,8 +60,8 @@ function checkAppliedMigrationChanges(migrationFiles) {
   for (const migrationName of migrationFiles) {
     const baseBody = git(["show", `${baseRef}:migrations/${migrationName}`]);
     if (baseBody === null) continue;
-    const currentBody = fs.readFileSync(path.join(migrationsDir, migrationName), "utf8").trim();
-    if (baseBody.trim() !== currentBody) {
+    const currentBody = fs.readFileSync(path.join(migrationsDir, migrationName), "utf8");
+    if (normalizeTrackedText(baseBody) !== normalizeTrackedText(currentBody)) {
       errors.push(
         `${migrationName}: ${baseRef}へ適用済みのactive migrationは変更できません。新しい連番migrationを追加してください。`,
       );

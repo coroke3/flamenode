@@ -18,7 +18,7 @@ import {
   DEFAULT_AUDIT_LOG_SETTINGS,
 } from "./retention.ts";
 import {
-  normalizeAuditLogSettingsRow,
+  normalizeAuditCleanupSettings,
   computeAuditCompactCutoff,
   AUDIT_CLEANUP_BATCH_LIMIT,
 } from "../../../workers/cleanup/retention.ts";
@@ -84,14 +84,13 @@ test("buildInversePatch: update_before 用パッチ", () => {
   assert.equal(patch?.status, undefined);
 });
 
-test("normalizeAuditLogSettingsRow: デフォルトとクランプ", () => {
-  const row = normalizeAuditLogSettingsRow({
-    normal_retention_days: 1,
-    restorable_retention_days: 2000,
-  });
-  assert.equal(row.normal_retention_days, 7);
-  assert.equal(row.restorable_retention_days, 1095);
-  assert.equal(row.long_audit_retention_days, 365);
+test("normalizeAuditCleanupSettings: デフォルトとクランプ", () => {
+  assert.equal(
+    normalizeAuditCleanupSettings({ audit_compact_after_days: 500 })
+      .compactAfterDays,
+    365,
+  );
+  assert.equal(normalizeAuditCleanupSettings(null).compactAfterDays, 30);
 });
 
 test("computeAuditCompactCutoff", () => {

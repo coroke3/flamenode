@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import styles from "./page.module.css";
 import { withDatabase } from "@/lib/cloudflare";
 import {
@@ -35,7 +35,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       await db
         .select({ title: eventsTable.title })
         .from(eventsTable)
-        .where(eq(eventsTable.id, id))
+        .where(
+          and(
+            eq(eventsTable.id, id),
+            eq(eventsTable.visibility_status, "public"),
+          ),
+        )
         .limit(1)
     )[0] ?? null,
   );
@@ -48,11 +53,43 @@ export default async function EventSlotsPage({
   const { id } = await params;
   const bundle = await withDatabase(async (db) => {
     const event = (
-      await db.select().from(eventsTable).where(eq(eventsTable.id, id)).limit(1)
+      await db
+        .select({
+          id: eventsTable.id,
+          title: eventsTable.title,
+          accent_color: eventsTable.accent_color,
+          visibility_status: eventsTable.visibility_status,
+          start_time: eventsTable.start_time,
+          end_time: eventsTable.end_time,
+          entry_start_time: eventsTable.entry_start_time,
+          entry_end_time: eventsTable.entry_end_time,
+          slot_type: eventsTable.slot_type,
+          slot_visibility_mode: eventsTable.slot_visibility_mode,
+          max_slots_per_video: eventsTable.max_slots_per_video,
+          slot_part_gap_minutes: eventsTable.slot_part_gap_minutes,
+        })
+        .from(eventsTable)
+        .where(
+          and(
+            eq(eventsTable.id, id),
+            eq(eventsTable.visibility_status, "public"),
+          ),
+        )
+        .limit(1)
     )[0];
     if (!event) return null;
     const slotRows = await db
-      .select()
+      .select({
+        id: slotsTable.id,
+        slot_label: slotsTable.slot_label,
+        start_time: slotsTable.start_time,
+        sort_order: slotsTable.sort_order,
+        status: slotsTable.status,
+        display_name: slotsTable.display_name,
+        x_user_id: slotsTable.x_user_id,
+        reserved_by_user_id: slotsTable.reserved_by_user_id,
+        reservation_group_id: slotsTable.reservation_group_id,
+      })
       .from(slotsTable)
       .where(eq(slotsTable.event_id, id))
       .orderBy(asc(slotsTable.start_time), asc(slotsTable.sort_order));
@@ -76,21 +113,36 @@ export default async function EventSlotsPage({
     event.entry_end_time != null &&
     now > event.entry_end_time;
 
-  const slotsForUi: SlotRow[] = slotRows.map((slot) => ({
-    id: slot.id,
-    event_id: slot.event_id,
-    slot_label: slot.slot_label,
-    start_time: slot.start_time,
-    sort_order: slot.sort_order,
-    status: slot.status,
-    display_name: slot.display_name,
-    x_user_id: slot.x_user_id,
-    reserved_by_user_id: slot.reserved_by_user_id,
-    reservation_group_id: slot.reservation_group_id,
-    video_id: slot.video_id,
-    updated_at: slot.updated_at,
-    version: slot.version,
-  }));
+  const groupKeys = new Map<string, string>();
+  const slotsForUi: SlotRow[] = slotRows.map((slot) => {
+    const isOwnedByViewer = Boolean(
+      viewer &&
+        ((viewer.active_x_user_id &&
+          slot.x_user_id === viewer.active_x_user_id) ||
+          slot.reserved_by_user_id === viewer.id),
+    );
+    let groupKey: string | null = null;
+    if (slot.reservation_group_id) {
+      groupKey = groupKeys.get(slot.reservation_group_id) ?? null;
+      if (!groupKey) {
+        groupKey = `group-${groupKeys.size + 1}`;
+        groupKeys.set(slot.reservation_group_id, groupKey);
+      }
+    }
+    return {
+      id: slot.id,
+      slot_label: slot.slot_label,
+      start_time: slot.start_time,
+      sort_order: slot.sort_order,
+      status: slot.status,
+      display_name:
+        isOwnedByViewer || event.slot_visibility_mode === "public_name"
+          ? slot.display_name
+          : null,
+      is_owned_by_viewer: isOwnedByViewer,
+      group_key: groupKey,
+    };
+  });
   const slotTotal = slotRows.length;
   const availableSlots = slotRows.filter(
     (slot) => slot.status === "available",
@@ -180,8 +232,10 @@ export default async function EventSlotsPage({
           <SlotGrid
             slots={slotsForUi}
             viewerXId={viewer?.active_x_user_id ?? null}
+            isAuthenticated={Boolean(viewer?.id)}
             canReserve={accepting}
             slotType={(event.slot_type ?? "time") as "time" | "count"}
+            maxSlotsPerVideo={event.max_slots_per_video ?? 1}
             slotPartGapSec={slotPartGapSec}
           />
         </div>

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { evaluateWriteIdentity } from "./writeGuardCore.ts";
+import {
+  evaluateWriteIdentity,
+  isWriteFeatureKey,
+} from "./writeGuardCore.ts";
 
 const validAdmin = {
   role: "admin",
@@ -18,4 +21,9 @@ test("admin write identity never bypasses BAN or terms checks", () => {
 test("admin write rejects non-admin and accepts a valid admin", () => {
   assert.equal(evaluateWriteIdentity({ ...validAdmin, role: "moderator" }, "admin"), "forbidden");
   assert.equal(evaluateWriteIdentity(validAdmin, "admin"), null);
+});
+
+test("spreadsheet and legacy import keep separate CostGuard feature keys", () => {
+  assert.equal(isWriteFeatureKey("admin_spreadsheet"), true);
+  assert.equal(isWriteFeatureKey("admin_legacy_import"), true);
 });

@@ -3,8 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
-import { auth } from "@/lib/auth";
-import { getDatabase } from "@/lib/cloudflare";
+import { requireAdminWrite } from "@/lib/auth/writeGuard";
+import type { DB } from "@/lib/db/client";
 import { eventGroupEvents, eventGroups, events } from "@/lib/db/schema";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { buildEventGroupChangeQueueBatch } from "@/lib/staticRebuild/hooks";
@@ -50,20 +50,14 @@ const groupSchema = z.object({
 });
 
 async function requireAdmin(): Promise<
-  { ok: true; userId: string } | { ok: false; result: EventGroupActionResult }
+  | { ok: true; userId: string; db: DB }
+  | { ok: false; result: EventGroupActionResult }
 > {
-  const session = await auth().catch(() => null);
-  const u = session?.user as { id?: string; role?: string } | undefined;
-  if (!u?.id) {
-    return { ok: false, result: { ok: false, message: "ログインが必要です。" } };
+  const guard = await requireAdminWrite("admin_event_create");
+  if (!guard.ok) {
+    return { ok: false, result: { ok: false, message: guard.message } };
   }
-  if (u.role !== "admin") {
-    return {
-      ok: false,
-      result: { ok: false, message: "管理者のみ操作できます。" },
-    };
-  }
-  return { ok: true, userId: u.id };
+  return { ok: true, userId: guard.user.id, db: guard.db };
 }
 
 function normalizeOptionalUrl(raw: string | null | undefined): string | null {
@@ -77,7 +71,7 @@ function normalizeOptionalColor(raw: string | null | undefined): string | null {
 }
 
 async function ensureUniqueSlug(
-  db: NonNullable<ReturnType<typeof getDatabase>>,
+  db: DB,
   slug: string,
   excludeId?: string,
 ): Promise<boolean> {
@@ -104,7 +98,7 @@ function relationSnapshot(
 }
 
 async function mutateEventGroupWithQueue(
-  db: NonNullable<ReturnType<typeof getDatabase>>,
+  db: DB,
   input: {
     mutationStatements: Parameters<typeof mutateWithAudit>[1]["mutationStatements"];
     expectedMutationChanges: number[];
@@ -138,8 +132,7 @@ export async function createEventGroup(
     };
   }
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = guard.db;
 
   const data = parsed.data;
   if (!(await ensureUniqueSlug(db, data.slug))) {
@@ -202,8 +195,7 @@ export async function updateEventGroup(
   const id = parsed.data.id?.trim();
   if (!id) return { ok: false, message: "ID が必要です。" };
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = guard.db;
 
   const existing = (
     await db.select().from(eventGroups).where(eq(eventGroups.id, id)).limit(1)
@@ -270,8 +262,7 @@ export async function deleteEventGroup(
   const id = groupId.trim();
   if (!id) return { ok: false, message: "ID が必要です。" };
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = guard.db;
 
   const existing = (
     await db.select().from(eventGroups).where(eq(eventGroups.id, id)).limit(1)
@@ -332,8 +323,7 @@ export async function addEventsToGroup(input: {
     return { ok: false, message: "追加するイベントを選択してください。" };
   }
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = guard.db;
 
   const group = (
     await db.select().from(eventGroups).where(eq(eventGroups.id, groupId)).limit(1)
@@ -402,8 +392,7 @@ export async function removeEventFromGroup(input: {
     return { ok: false, message: "グループとイベントを指定してください。" };
   }
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = guard.db;
 
   const group = (
     await db.select().from(eventGroups).where(eq(eventGroups.id, groupId)).limit(1)

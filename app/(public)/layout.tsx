@@ -13,6 +13,8 @@ import {
   userNeedsXIdOnboarding,
 } from "@/lib/auth/xidOnboarding";
 
+export const dynamic = "force-dynamic";
+
 function isPublicOnboardingExemptPath(pathname: string): boolean {
   if (isXIdOnboardingExemptPath(pathname)) return true;
   return pathname === "/rules" || pathname.startsWith("/rules/");
@@ -23,15 +25,9 @@ export default async function PublicLayout({
 }: {
   children: React.ReactNode;
 }): Promise<React.ReactElement> {
-  let headerUser: PublicHeaderUser | null = null;
   const sessionUser = await getCurrentUser();
-
-  try {
-    const session = await auth();
-    headerUser = await buildHeaderUser(session?.user);
-  } catch {
-    headerUser = null;
-  }
+  const session = await auth();
+  const headerUser: PublicHeaderUser | null = await buildHeaderUser(session?.user);
 
   if (sessionUser && sessionUser.is_banned !== 1) {
     const hdrs = await headers();

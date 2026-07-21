@@ -1,11 +1,11 @@
 # FlameNode 運用
 
 > Status: Active
-> Last verified: 2026-07-20
-> Verified against commit: `89b8889`
+> Last verified: 2026-07-21
+> Verified against commit: `47e6cee`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/`, `wrangler.toml`, `package.json`
 
-Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、Cron Worker 3本で運用する。実Cloudflare操作、Remote D1、production secret操作は運用者が明示した場合だけ行う。
+WebはCloudflare Workers + OpenNext + Workers Static Assets、背景処理はCron Worker 3本で運用する。本番デプロイ正本はCloudflare Workers Buildsだけとする。実Cloudflare操作、Remote D1、production secret操作は運用者が明示した場合だけ行う。
 
 ## AI読取ルール
 
@@ -20,6 +20,8 @@ Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、Cron Worker 3本
 - 内部ユーザーIDは`user_id`、Discord Snowflakeは`discord_id`。
 - `event_staff.permission_preset = 'owner'`がイベント代表者の正本で、ownerを0人にしない。
 - 重要mutationと監査ログは同じ原子的処理で確定する。
+- production deployはWeb→fast→content→sync→smokeの固定順とし、commit SHA・binding・secret名・schemaの不一致をfail-closedにする。
+- Remote D1はdeploy前にread-only検査する。migrationの自動適用は行わない。
 
 ## タスク別入口
 

@@ -125,6 +125,21 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
   const customValidation = await validateCustomAnswersForEvents(db, formData, syncedEventIds);
   if (!customValidation.ok) return customValidation;
 
+  const eventConfig = (
+    await db
+      .select({
+        title: eventsTable.title,
+        max_slots_per_video: eventsTable.max_slots_per_video,
+      })
+      .from(eventsTable)
+      .where(eq(eventsTable.id, slotRow.event_id))
+      .limit(1)
+  )[0];
+  if (!eventConfig) return { ok: false, message: "イベントが見つかりません。" };
+  const eventSlotLimit = Math.min(
+    Math.max(1, Number(eventConfig.max_slots_per_video ?? 1)),
+    MAX_ATOMIC_SUBMITTED_SLOTS,
+  );
   const slotGroupWhere = slotRow.reservation_group_id
     ? and(
         eq(slots.reservation_group_id, slotRow.reservation_group_id),
@@ -138,7 +153,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     .from(slots)
     .where(slotGroupWhere)
     .limit(MAX_ATOMIC_SUBMITTED_SLOTS + 1);
-  if (submittedSlots.length === 0 || submittedSlots.length > MAX_ATOMIC_SUBMITTED_SLOTS) {
+  if (submittedSlots.length === 0 || submittedSlots.length > eventSlotLimit) {
     return { ok: false, message: "同時に更新する枠数が上限を超えています。" };
   }
   const now = Math.floor(Date.now() / 1000);
@@ -283,10 +298,6 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     }
 
     if (!existingVideo) {
-      const eventRow = (
-        await db.select({ title: eventsTable.title }).from(eventsTable)
-          .where(eq(eventsTable.id, slotRow.event_id)).limit(1)
-      )[0];
       const notification = await buildNotificationOutboxStatement(db, {
         recipientUserId: userId,
         type: "slot_video_submitted",
@@ -295,7 +306,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
           videoId,
           videoTitle: parsed.data.title,
           eventId: slotRow.event_id,
-          eventTitle: eventRow?.title ?? "イベント",
+          eventTitle: eventConfig.title ?? "イベント",
         }),
         eventId: slotRow.event_id,
       });

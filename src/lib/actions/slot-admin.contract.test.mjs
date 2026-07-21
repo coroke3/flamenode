@@ -24,10 +24,12 @@ test("slot-admin の全 mutation が canonical atomic helper を使う", () => {
   ]) {
     assert.match(source, new RegExp(`export async function ${name}`));
   }
-  assert.equal((source.match(/mutateWithAudit\(/g) ?? []).length, 7);
-  assert.equal((source.match(/buildEventQueueBatch\(/g) ?? []).length, 8);
-  assert.equal((source.match(/\.\.\.queueBatch\.statements/g) ?? []).length, 7);
-  assert.equal((source.match(/\.\.\.queueBatch\.expectedChanges/g) ?? []).length, 7);
+  assert.equal((source.match(/mutateWithAudit\(/g) ?? []).length, 4);
+  assert.equal((source.match(/eventQueue\(/g) ?? []).length, 5);
+  assert.equal((source.match(/\.\.\.queue\.statements/g) ?? []).length, 4);
+  assert.equal((source.match(/\.\.\.queue\.expectedChanges/g) ?? []).length, 4);
+  assert.equal((source.match(/return deleteRows\(/g) ?? []).length, 3);
+  assert.equal((source.match(/return releaseRows\(/g) ?? []).length, 2);
   assert.doesNotMatch(source, /auditAction\(/);
 });
 
@@ -36,7 +38,7 @@ test("slot-admin は競合時に部分生成せず full snapshot と二重 CAS �
   assert.match(source, /INSERT INTO slots/);
   assert.match(source, /NOT EXISTS \(/);
   assert.match(source, /UNION ALL/);
-  assert.match(source, /expectedMutationChanges: \[newRows\.length, \.\.\.queueBatch\.expectedChanges\]/);
+  assert.match(source, /expectedMutationChanges: \[newRows\.length, \.\.\.queue\.expectedChanges\]/);
   assert.match(source, /eq\(slots\.version, row\.version\)/);
   assert.match(source, /eq\(slots\.updated_at, row\.updated_at\)/);
   assert.match(source, /before: snapshot\(/);
@@ -44,9 +46,8 @@ test("slot-admin は競合時に部分生成せず full snapshot と二重 CAS �
 });
 
 test("queue は mutation 側、解放通知は同じ audit batch の post-audit 側に入る", () => {
-  assert.doesNotMatch(source, /postAuditStatements:\s*(?:queueBatch|\[\.\.\.queueBatch)/);
-  assert.equal((source.match(/postAuditStatements:/g) ?? []).length, 2);
-  assert.match(source, /postAuditStatements: notification \? \[notification\] : \[\]/);
+  assert.doesNotMatch(source, /postAuditStatements:\s*(?:queue|\[\.\.\.queue)/);
+  assert.equal((source.match(/postAuditStatements:/g) ?? []).length, 1);
   assert.match(source, /postAuditStatements: notifications/);
 });
 

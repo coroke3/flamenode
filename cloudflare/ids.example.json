@@ -1,10 +1,9 @@
 {
-  "$comment": "wrangler でリソース作成後、cloudflare/ids.json にコピーして npm run cf:sync-ids を実行する",
-  "account_id": "",
-  "d1_database_id": "00000000-0000-0000-0000-000000000000",
-  "kv_namespace_id": "00000000000000000000000000000000",
-  "kv_preview_id": "00000000000000000000000000000000",
-  "pages_project_name": "flamenode",
-  "r2_bucket_name": "flamenode-storage",
-  "d1_database_name": "flamenode_db"
+  "$comment": "Example names only. Do not copy this file to ids.json or store production IDs in the repository. Configure these as Cloudflare Workers Builds variables.",
+  "NODE_VERSION": "22",
+  "SKIP_DEPENDENCY_INSTALL": "true",
+  "CLOUDFLARE_ACCOUNT_ID": "00000000000000000000000000000000",
+  "CF_D1_DATABASE_ID": "00000000-0000-0000-0000-000000000000",
+  "CF_KV_NAMESPACE_ID": "00000000000000000000000000000000",
+  "CF_R2_BUCKET_NAME": "flamenode-storage"
 }

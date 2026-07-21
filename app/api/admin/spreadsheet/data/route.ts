@@ -1,4 +1,3 @@
-export const runtime = "edge";
 
 import { NextResponse } from "next/server";
 import {
@@ -10,6 +9,7 @@ import {
 import {
   readSpreadsheetJsonBody,
   requireSpreadsheetAdmin,
+  requireSpreadsheetAdminWrite,
   spreadsheetErrorResponse,
 } from "@/lib/admin/spreadsheet/routeHandler";
 import {
@@ -47,7 +47,7 @@ export async function GET(req: Request): Promise<Response> {
 }
 
 export async function PATCH(req: Request): Promise<Response> {
-  const guard = await requireSpreadsheetAdmin();
+  const guard = await requireSpreadsheetAdminWrite(req);
   if (!guard.ok) return guard.response;
 
   let body: {
@@ -86,7 +86,7 @@ export async function PATCH(req: Request): Promise<Response> {
 }
 
 export async function POST(req: Request): Promise<Response> {
-  const guard = await requireSpreadsheetAdmin();
+  const guard = await requireSpreadsheetAdminWrite(req);
   if (!guard.ok) return guard.response;
 
   let body: { table?: string; row?: Record<string, string | null> };
@@ -117,7 +117,7 @@ export async function POST(req: Request): Promise<Response> {
 }
 
 export async function DELETE(req: Request): Promise<Response> {
-  const guard = await requireSpreadsheetAdmin();
+  const guard = await requireSpreadsheetAdminWrite(req);
   if (!guard.ok) return guard.response;
 
   let body: { table?: string; primaryKey?: Record<string, string> };

@@ -2,7 +2,7 @@
 
 ## 1. 目的
 
-FlameNode を Cloudflare の無料枠を中心に運用し、従量課金が発生しにくい構成にする。使用量は運用者が Cloudflare Dashboard で確認し、必要な場合に管理画面からサイト機能を段階的に制限・解除・一時許可する。
+FlameNode を Cloudflare の無料枠を中心に運用し、従量課金が発生しにくい構成にする。Webは `flamenode-web`（OpenNext）と Workers Static Assets、デプロイは Workers Builds を現行正本とする。使用量は運用者が Cloudflare Dashboard で確認し、必要な場合に管理画面からサイト機能を段階的に制限・解除・一時許可する。
 
 ## 2. 前提となる Cloudflare 無料枠
 
@@ -10,8 +10,8 @@ FlameNode を Cloudflare の無料枠を中心に運用し、従量課金が発�
 
 | サービス | 無料枠・注意点 | FlameNodeでの扱い |
 | :--- | :--- | :--- |
-| Workers / Pages Functions | Workers Free は 100,000 requests/day、CPU 10ms/invocation、Cron Triggers 5個/account。Pages Functions も Workers 枠を消費する。 | 動的処理を極力減らし、公開ページは静的生成・R2/KVキャッシュを優先する。 |
-| Pages Static Assets | 静的アセットリクエストは無料・無制限扱い。Functions を呼ばないルートに寄せる。 | トップ、一覧、イベント詳細、静的JSONは可能な限り静的配信にする。 |
+| Workers | Workers Free は 100,000 requests/day、CPU 10ms/invocation、Cron Triggers 5個/account。 | 動的処理を極力減らし、公開ページは静的生成・R2/KVキャッシュを優先する。 |
+| Workers Static Assets | 静的アセットリクエストは無料・無制限扱い。`run_worker_first`を全体へ適用せず、公開アセットをWorker invocationなしで配信する。 | `_next/static`などビルド時に固定できるファイルを `.open-next/assets` から配信する。 |
 | D1 | Free は rows read 5,000,000/day、rows written 100,000/day、storage 5GB total。 | フルスキャン禁止、インデックス必須、一覧は事前生成 JSON を優先する。 |
 | Durable Objects | Free でも SQLite backend の Durable Objects を利用できる。Requests 100,000/day、Duration 13,000 GB-s/day、SQLite rows read 5,000,000/day、rows written 100,000/day が目安。 | 閲覧数の短期集約先に使う。ただし1再生ごとに Worker/DO request は消費するため、バースト時はサンプリングまたは停止する。 |
 | R2 Standard | Free は storage 10GB-month、Class A 1,000,000/month、Class B 10,000,000/month、egress free。 | 動画本体は保存せず YouTube 埋め込み。R2 はアイコン画像、静的JSON、軽量エクスポートに限定する。 |
@@ -20,7 +20,7 @@ FlameNode を Cloudflare の無料枠を中心に運用し、従量課金が発�
 
 ## 3. 基本方針
 
-- **静的ファースト**: 公開閲覧導線は Pages Static Assets、R2 に書き出した JSON、HTTP Cache を優先し、Functions を呼ぶ回数を減らす。
+- **静的ファースト**: 公開閲覧導線は Workers Static Assets、R2 に書き出した JSON、HTTP Cache を優先し、Web Worker を呼ぶ回数を減らす。
 - **D1を読ませすぎない**: 一覧、トップ、おすすめ、イベント作品一覧は定期生成された JSON を読む。D1 は投稿、編集、管理、検索の確定処理に絞る。
 - **R2に置きすぎない**: YouTube 動画本体は保存しない。作品サムネイルも保存せず YouTube サムネイル URL を利用する。Cloudflare にアップロードする画像はアイコン画像のみとし、元ファイルは1ファイル8MBまでに制限する。
 - **KVに書きすぎない**: KV は低頻度のフラグとキャッシュに限定する。アクセスログや詳細な分析は D1 に逐次書かず、サンプリングまたは集計済み保存にする。
@@ -35,7 +35,7 @@ FlameNode を Cloudflare の無料枠を中心に運用し、従量課金が発�
 
 | 指標 | 無料枠上の主なネック | 安全圏の運用目安 |
 | :--- | :--- | :--- |
-| 公開ページ閲覧 | Workers/Pages Functions 100,000 requests/day | トップ、一覧、イベント詳細は静的アセットまたはR2 JSON配信に寄せ、Functions を呼ぶ閲覧を1日3万回未満に抑える。 |
+| 公開ページ閲覧 | Workers 100,000 requests/day | トップ、一覧、イベント詳細は静的アセットまたはR2 JSON配信に寄せ、Web Worker を呼ぶ閲覧を1日3万回未満に抑える。 |
 | 動画再生開始イベント | Workers request と Durable Object request の両方を消費 | 通常時も6時間セッション重複排除を行い、`economy` では50%サンプリング、`read_only` では新規計測停止。 |
 | D1 reads | 5,000,000 rows/day | 一覧・おすすめ・関連動画で D1 を直接集計しない。検索はインデックス必須、広範囲検索は `economy` で停止。 |
 | D1 writes | 100,000 rows/day | 再生ごとの直接書き込みは禁止。投稿、編集、いいね、コメント、CSVを `read_only` で止める。 |
@@ -46,7 +46,7 @@ FlameNode を Cloudflare の無料枠を中心に運用し、従量課金が発�
 | Queues | 10,000 operations/day | 1メッセージ約3操作として、同期・通知キューは通常1日3,000件程度を上限目安にする。 |
 | Cron | 5 triggers/account | JSON生成、スコア更新、YouTube同期、クリーンアップを3本の統合 Workerへまとめ、Cron数を増やさない。 |
 
-無料枠で最も危ない順は、1. Workers/Pages Functions requests、2. Durable Object requests、3. D1 rows written、4. KV writes、5. R2 Class B operations、6. Queues operations とする。D1 rows read はインデックスと静的JSONで抑えられるが、検索や管理画面の未制限一覧があると急増するため、全一覧に `limit` と cursor を必須にする。
+無料枠で最も危ない順は、1. Workers requests、2. Durable Object requests、3. D1 rows written、4. KV writes、5. R2 Class B operations、6. Queues operations とする。D1 rows read はインデックスと静的JSONで抑えられるが、検索や管理画面の未制限一覧があると急増するため、全一覧に `limit` と cursor を必須にする。
 
 ## 4. 使用量ガードの段階
 
@@ -57,7 +57,7 @@ FlameNode を Cloudflare の無料枠を中心に運用し、従量課金が発�
 | `normal` | 通常 | 全機能を通常運用する。 |
 | `economy` | 目安70%到達 | パーソナライズ推薦、詳細分析、即時スコア再計算、重い検索を抑制する。閲覧数計測は既定50%サンプリングにする。 |
 | `read_only` | 目安85%到達 | 新規投稿、CSVインポート、アイコン画像アップロード、コメント投稿、チャプター/チャプターマーカー作成、いいね、ブックマーク、閲覧数イベントの新規書き込みを停止する。閲覧は継続する。管理者の機能別一時許可は厳密に15分で自動終了する。 |
-| `static_only` | 目安95%到達 | Functions を必要とする公開動的機能を停止し、R2/Pages の静的JSONと静的ページ中心に切り替える。 |
+| `static_only` | 目安95%到達 | Worker を必要とする公開動的機能を停止し、R2/Workers Static Assets の静的JSONと静的ページ中心に切り替える。 |
 | `maintenance` | 管理者判断 | 管理者以外はメンテナンス画面を表示する。管理者は復旧操作のみ可能。通常モード変更とは別の専用操作で切り替える。 |
 
 表の比率は運用判断の目安であり、DBにしきい値として保存せず、自動遷移にも使用しない。
@@ -149,7 +149,7 @@ Cloudflare 使用量は Cloudflare Dashboard を運用者が確認する。ア�
 - 通常時はトップ、一覧、イベント詳細、おすすめ、関連動画の静的 JSON を1時間ごとに生成する。
 - イベント開催中、受付中、または公開直後のイベントは、対象イベントの JSON だけ5〜10分ごとに生成する。
 - `static_only` では新規生成より既存 JSON 配信を優先し、生成処理自体が無料枠を圧迫する場合は停止する。
-- R2 Class B が増えすぎた場合、静的JSONは Pages Static Assets へ寄せる。JSONは直近3世代のみ保持し、古い世代は自動削除する。
+- R2 Class B が増えすぎた場合、ビルド時に固定できる公開ファイルは Workers Static Assets へ寄せる。更新されるJSONはR2のままHTTP Cacheと生成頻度を調整し、直近3世代だけを保持する。
 
 ## 8. ルート別の軽量化
 
@@ -181,13 +181,13 @@ Cloudflare 使用量は Cloudflare Dashboard を運用者が確認する。ア�
 - 内部閲覧数は `POST /api/videos/[id]/view` から D1 を直接更新しない。Durable Object を正の短期集約先として動画ID・時間帯単位でプールし、Cron Worker が1時間ごとに D1 へバルク反映する。KV 時間帯バケットは主経路にせず、緊急時のフォールバックに留める。どの方式でも1再生1書き込みは禁止する。未反映カウントは24時間保持し、反映できないまま期限を迎える場合は管理者通知と監査ログに残す。
 - 内部閲覧数や推薦シグナルは全件保存せず、6時間セッション単位の重複排除とサンプリングを行う。`economy` 以上では既定50%サンプリングにし、`read_only` 以上では新規計測を書き込まない。`read_only` 中に止めた閲覧数イベントは後から補完しない。
 - Cron は統合し、1回の処理で JSON 生成、古い一時ファイル削除、使用量チェックをまとめる。
-- 月間の D1 読み書き、または Pages Functions 要求が無料枠の80%を常に超える状態が2か月続いた場合、有料化または構成見直しの判断ラインにする。
+- 月間の D1 読み書き、または Workers 要求が無料枠の80%を常に超える状態が2か月続いた場合、有料化または構成見直しの判断ラインにする。
 
 ## 10. 参照元
 
 - Cloudflare Workers Limits: https://developers.cloudflare.com/workers/platform/limits/
 - Cloudflare Workers Pricing: https://developers.cloudflare.com/workers/platform/pricing/
-- Cloudflare Pages Functions Pricing: https://developers.cloudflare.com/pages/functions/pricing/
+- Cloudflare Workers Static Assets Billing and limitations: https://developers.cloudflare.com/workers/static-assets/billing-and-limitations/
 - Cloudflare D1 Pricing: https://developers.cloudflare.com/d1/platform/pricing/
 - Cloudflare Durable Objects Pricing: https://developers.cloudflare.com/durable-objects/platform/pricing/
 - Cloudflare R2 Pricing: https://developers.cloudflare.com/r2/pricing/

@@ -15,18 +15,48 @@ export interface Env {
   DB: D1Database;
 }
 
+type CleanupMetrics = { d1Changes: number };
+
+function recordD1Changes(
+  result: D1Result<unknown>,
+  metrics?: CleanupMetrics,
+): number {
+  const changes = Math.max(0, Number(result.meta?.changes ?? 0));
+  if (metrics) metrics.d1Changes += changes;
+  return changes;
+}
+
 export async function runCleanupWithRetry(
   env: Env,
-): Promise<{ processed: number; failed: number }> {
+  signal?: AbortSignal,
+): Promise<{
+  processed: number;
+  failed: number;
+  d1_changes: number;
+  retry_count: number;
+  external_api_calls: 0;
+  quota_stopped: false;
+}> {
   const startedMs = Date.now();
   const runId = crypto.randomUUID();
   let attempt = 0;
+  let retryCount = 0;
   let lastError: unknown = null;
+  const metrics: CleanupMetrics = { d1Changes: 0 };
   while (attempt < CLEANUP_MAX_RETRIES) {
     try {
-      await runCleanup(env);
-      return { processed: 1, failed: 0 };
+      throwIfAborted(signal, "cleanup aborted");
+      await runCleanup(env, signal, metrics);
+      return {
+        processed: 1,
+        failed: 0,
+        d1_changes: metrics.d1Changes,
+        retry_count: retryCount,
+        external_api_calls: 0,
+        quota_stopped: false,
+      };
     } catch (error) {
+      if (signal?.aborted) throw error;
       attempt += 1;
       lastError = error;
       const decision = shouldRetryCleanupError(attempt, error);
@@ -43,7 +73,8 @@ export async function runCleanupWithRetry(
         error: `${decision.reason}:${safeErrorSummary(error)}`,
       });
       if (!decision.shouldRetry) break;
-      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+      retryCount += 1;
+      await abortableDelay(100 * attempt, signal);
     }
   }
   logWorkerJob({
@@ -58,13 +89,42 @@ export async function runCleanupWithRetry(
     result: "failed",
     error: safeErrorSummary(lastError),
   });
-  return { processed: 0, failed: 1 };
+  return {
+    processed: 0,
+    failed: 1,
+    d1_changes: metrics.d1Changes,
+    retry_count: retryCount,
+    external_api_calls: 0,
+    quota_stopped: false,
+  };
+}
+
+function throwIfAborted(signal: AbortSignal | undefined, fallback: string): void {
+  if (!signal?.aborted) return;
+  if (signal.reason instanceof Error) throw signal.reason;
+  throw new Error(signal.reason === undefined ? fallback : String(signal.reason));
+}
+
+function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) return new Promise((resolve) => setTimeout(resolve, ms));
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, ms);
+    function done(): void {
+      signal.removeEventListener("abort", done);
+      clearTimeout(timer);
+      resolve();
+    }
+    signal.addEventListener("abort", done, { once: true });
+  });
 }
 
 export async function readAuditCleanupSettings(
   env: Env,
+  signal?: AbortSignal,
 ): Promise<AuditCleanupSettings> {
   try {
+    throwIfAborted(signal, "cleanup aborted");
     const row = await env.DB.prepare(
       `SELECT audit_compact_after_days
        FROM system_settings
@@ -73,6 +133,7 @@ export async function readAuditCleanupSettings(
     ).first<{ audit_compact_after_days: number | null }>();
     return normalizeAuditCleanupSettings(row);
   } catch (error) {
+    if (signal?.aborted) throw error;
     console.warn(
       JSON.stringify({
         worker: "content-jobs",
@@ -85,21 +146,30 @@ export async function readAuditCleanupSettings(
   }
 }
 
-export async function runCleanup(env: Env): Promise<void> {
+export async function runCleanup(
+  env: Env,
+  signal?: AbortSignal,
+  metrics?: CleanupMetrics,
+): Promise<number> {
+  throwIfAborted(signal, "cleanup aborted");
   const now = Math.floor(Date.now() / 1000);
   const { sentCutoff, failedCutoff } = computeNotificationCutoffs(now);
-  const { compactAfterDays } = await readAuditCleanupSettings(env);
+  const { compactAfterDays } = await readAuditCleanupSettings(env, signal);
   const compactCutoff = computeAuditCompactCutoff(now, compactAfterDays);
+  let d1Changes = 0;
 
-  await env.DB.prepare(
+  throwIfAborted(signal, "cleanup aborted");
+  const sentResult = await env.DB.prepare(
     `DELETE FROM notification_outbox
      WHERE status = 'sent' AND created_at IS NOT NULL AND created_at < ?1
      LIMIT ?2`,
   )
     .bind(sentCutoff, AUDIT_CLEANUP_BATCH_LIMIT)
     .run();
+  d1Changes += recordD1Changes(sentResult, metrics);
 
-  await env.DB.prepare(
+  throwIfAborted(signal, "cleanup aborted");
+  const failedResult = await env.DB.prepare(
     `DELETE FROM notification_outbox
      WHERE status IN ('failed', 'dead_letter')
        AND created_at IS NOT NULL
@@ -108,8 +178,10 @@ export async function runCleanup(env: Env): Promise<void> {
   )
     .bind(failedCutoff, AUDIT_CLEANUP_BATCH_LIMIT)
     .run();
+  d1Changes += recordD1Changes(failedResult, metrics);
 
-  await env.DB.prepare(
+  throwIfAborted(signal, "cleanup aborted");
+  const importsResult = await env.DB.prepare(
     `DELETE FROM spreadsheet_import_runs
      WHERE nonce IN (
        SELECT nonce
@@ -121,8 +193,10 @@ export async function runCleanup(env: Env): Promise<void> {
   )
     .bind(now, AUDIT_CLEANUP_BATCH_LIMIT)
     .run();
+  d1Changes += recordD1Changes(importsResult, metrics);
 
-  await env.DB.prepare(
+  throwIfAborted(signal, "cleanup aborted");
+  const restoreResult = await env.DB.prepare(
     `UPDATE audit_logs
      SET restore_status = 'expired'
      WHERE restore_status = 'restorable'
@@ -132,16 +206,20 @@ export async function runCleanup(env: Env): Promise<void> {
   )
     .bind(now, AUDIT_CLEANUP_BATCH_LIMIT)
     .run();
+  d1Changes += recordD1Changes(restoreResult, metrics);
 
-  await env.DB.prepare(
+  throwIfAborted(signal, "cleanup aborted");
+  const auditDeleteResult = await env.DB.prepare(
     `DELETE FROM audit_logs
      WHERE expires_at IS NOT NULL AND expires_at < ?1
      LIMIT ?2`,
   )
     .bind(now, AUDIT_CLEANUP_BATCH_LIMIT)
     .run();
+  d1Changes += recordD1Changes(auditDeleteResult, metrics);
 
-  await env.DB.prepare(
+  throwIfAborted(signal, "cleanup aborted");
+  const compactResult = await env.DB.prepare(
     `UPDATE audit_logs
      SET before_json = NULL,
          after_json = NULL,
@@ -156,4 +234,6 @@ export async function runCleanup(env: Env): Promise<void> {
   )
     .bind(compactCutoff, AUDIT_CLEANUP_BATCH_LIMIT)
     .run();
+  d1Changes += recordD1Changes(compactResult, metrics);
+  return d1Changes;
 }

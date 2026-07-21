@@ -36,7 +36,7 @@ export type XIdentityRequestHistoryRow = {
 const REQUEST_TYPE_LABELS: Record<XIdentityRequestType, string> = {
   new_link: "X ID連携",
   existing_link: "X ID連携",
-  alias: "別名追加",
+  alias: "旧別名申請",
   merge: "X ID統合",
   revert_merge: "統合取消",
 };
@@ -60,7 +60,7 @@ function requestTarget(row: XIdentityRequestHistoryRow): string {
       ? `@${row.requested_x_id} → @${row.target_x_user_id}`
       : row.requested_x_id
         ? `@${row.requested_x_id}`
-        : "別名追加";
+        : "旧別名申請";
   }
   if (row.request_type === "revert_merge") return "統合取消申請";
   return row.requested_x_id ? `@${row.requested_x_id}` : "X ID連携";

@@ -69,6 +69,7 @@ function dedupeStaticRebuildInputs(
 const PUBLIC_MISS_COOLDOWN_SEC = 5 * 60;
 const DEFAULT_DONE_COOLDOWN_SEC = 60;
 const ENQUEUE_MANY_CONCURRENCY = 4;
+const ENQUEUE_CONFLICT_RETRY_LIMIT = 3;
 export const MAX_STATIC_REBUILD_BATCH_TARGETS = 16;
 export const STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT = 2;
 export const STATIC_REBUILD_BULK_UPDATE_ROWS = 6;
@@ -342,7 +343,11 @@ export async function enqueueStaticRebuild(
   const priority = target.priority ?? "normal";
 
   try {
-    for (let enqueueAttempt = 0; enqueueAttempt < 2; enqueueAttempt += 1) {
+    for (
+      let enqueueAttempt = 0;
+      enqueueAttempt < ENQUEUE_CONFLICT_RETRY_LIMIT;
+      enqueueAttempt += 1
+    ) {
       const existing = await db
         .select()
         .from(staticRebuildQueue)
@@ -356,51 +361,56 @@ export async function enqueueStaticRebuild(
         .limit(1);
 
       const row = existing[0];
-      if (!row) break;
-
-      const update = db.update(staticRebuildQueue).set({
-        reason: target.reason,
-        priority: pickHigherPriority(
-          row.priority as "high" | "normal" | "low",
-          priority,
-        ),
-        requested_by_user_id:
-          target.requestedByUserId ?? row.requested_by_user_id,
-        updated_at: sql<number>`MAX(${staticRebuildQueue.updated_at} + 1, ${now})`,
-      });
-      const result = await update.where(
-        and(
-          eq(staticRebuildQueue.id, row.id),
-          eq(staticRebuildQueue.status, row.status),
-          eq(staticRebuildQueue.updated_at, row.updated_at),
-          ...(row.status === "processing"
-            ? [
-                row.lease_token
-                  ? eq(staticRebuildQueue.lease_token, row.lease_token)
-                  : isNull(staticRebuildQueue.lease_token),
-              ]
-            : []),
-        )!,
-      );
-      if ((result.meta?.changes ?? 0) === 1) return;
-      if (enqueueAttempt === 1) {
-        throw new Error("static rebuild queue active row changed during enqueue");
+      if (row) {
+        const update = db.update(staticRebuildQueue).set({
+          reason: target.reason,
+          priority: pickHigherPriority(
+            row.priority as "high" | "normal" | "low",
+            priority,
+          ),
+          requested_by_user_id:
+            target.requestedByUserId ?? row.requested_by_user_id,
+          updated_at: sql<number>`MAX(${staticRebuildQueue.updated_at} + 1, ${now})`,
+        });
+        const result = await update.where(
+          and(
+            eq(staticRebuildQueue.id, row.id),
+            eq(staticRebuildQueue.status, row.status),
+            eq(staticRebuildQueue.updated_at, row.updated_at),
+            ...(row.status === "processing"
+              ? [
+                  row.lease_token
+                    ? eq(staticRebuildQueue.lease_token, row.lease_token)
+                    : isNull(staticRebuildQueue.lease_token),
+                ]
+              : []),
+          )!,
+        );
+        if ((result.meta?.changes ?? 0) === 1) return;
+        continue;
       }
+
+      if (await shouldSkipRecentEnqueue(db, target, now)) return;
+
+      const insertResult = await db
+        .insert(staticRebuildQueue)
+        .values({
+          id: generateId("srb"),
+          target_type: target.targetType,
+          target_id: target.targetId,
+          reason: target.reason,
+          priority,
+          status: "pending",
+          requested_by_user_id: target.requestedByUserId ?? null,
+          created_at: now,
+          updated_at: now,
+        })
+        .onConflictDoNothing();
+      if ((insertResult.meta?.changes ?? 0) === 1) return;
+      // A concurrent request inserted the partial-unique active row. Loop once
+      // more so priority/reason are merged through the same CAS update path.
     }
-
-    if (await shouldSkipRecentEnqueue(db, target, now)) return;
-
-    await db.insert(staticRebuildQueue).values({
-      id: generateId("srb"),
-      target_type: target.targetType,
-      target_id: target.targetId,
-      reason: target.reason,
-      priority,
-      status: "pending",
-      requested_by_user_id: target.requestedByUserId ?? null,
-      created_at: now,
-      updated_at: now,
-    });
+    throw new Error("static rebuild queue changed during enqueue retries");
   } catch (error) {
     console.warn("[enqueueStaticRebuild] failed", target, error);
     try {

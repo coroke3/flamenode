@@ -11,23 +11,17 @@ import { ConsoleSidebar } from "@/components/layout/ConsoleSidebar";
 export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
+export const dynamic = "force-dynamic";
 
 export default async function AdminLayout({
   children,
 }: {
   children: React.ReactNode;
 }): Promise<React.ReactElement> {
-  let user: PublicHeaderUser | null = null;
-
-  try {
-    const session = await auth();
-    if (session?.user) {
-      const headerUser = await buildHeaderUser(session.user);
-      if (headerUser) user = headerUser;
-    }
-  } catch {
-    user = null;
-  }
+  const session = await auth();
+  const user: PublicHeaderUser | null = session?.user
+    ? await buildHeaderUser(session.user)
+    : null;
 
   if (!user) redirect("/entry");
   if (user.role !== "admin") redirect("/dashboard");

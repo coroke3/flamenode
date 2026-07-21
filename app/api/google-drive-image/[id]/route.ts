@@ -1,6 +1,5 @@
 import { proxyExternalImage } from "@/lib/media/externalImageProxy";
 
-export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 const GOOGLE_DRIVE_ID_RE = /^[A-Za-z0-9_-]{6,}$/;

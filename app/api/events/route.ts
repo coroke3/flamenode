@@ -1,4 +1,3 @@
-export const runtime = "edge";
 
 import { desc } from "drizzle-orm";
 import { events as eventsTable } from "@/lib/db/schema";

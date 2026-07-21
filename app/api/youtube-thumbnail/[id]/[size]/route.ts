@@ -4,7 +4,6 @@ import {
   type YoutubeThumbSize,
 } from "@/lib/youtube/id";
 
-export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 const YOUTUBE_ID_RE = /^[A-Za-z0-9_-]{11}$/;

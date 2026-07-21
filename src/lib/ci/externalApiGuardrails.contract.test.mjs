@@ -6,6 +6,14 @@ const youtube = await readFile(
   new URL("../../../workers/youtube-sync/index.ts", import.meta.url),
   "utf8",
 );
+const youtubeQuota = await readFile(
+  new URL("../../../workers/youtube-sync/quotaBudget.ts", import.meta.url),
+  "utf8",
+);
+const youtubeQuotaPolicy = await readFile(
+  new URL("../youtube/quotaPolicy.ts", import.meta.url),
+  "utf8",
+);
 const discord = await readFile(
   new URL("../../../workers/notification-dispatcher/dispatch.ts", import.meta.url),
   "utf8",
@@ -16,7 +24,13 @@ const imageProxy = await readFile(
 );
 
 test("外部API処理は固定予算・timeout・provider cooldownを持つ", () => {
-  assert.match(youtube, /YOUTUBE_MAX_QUOTA_UNITS_PER_RUN = 2/);
+  assert.match(youtube, /YOUTUBE_MAX_EXTERNAL_REQUESTS_PER_RUN/);
+  assert.match(
+    youtube,
+    /reserveYoutubeQuota\(\s*env,\s*plannedQuotaUnits,\s*now,\s*signal,\s*\)/,
+  );
+  assert.match(youtubeQuota, /external_api_quota_usage/);
+  assert.match(youtubeQuotaPolicy, /YOUTUBE_TARGET_USAGE_PERCENT = 80/);
   assert.match(youtube, /YOUTUBE_QUOTA_COOLDOWN_KEY/);
   assert.match(youtube, /fields/);
   assert.match(discord, /MAX_DISCORD_EXTERNAL_REQUESTS_PER_RUN = 12/);

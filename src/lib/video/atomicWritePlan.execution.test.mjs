@@ -1,27 +1,9 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { runTestWithTsx } from "../testing/runTestWithTsx.mjs";
 
-const runningWithTsx = process.env.FLAMENODE_VIDEO_PLAN_EXECUTION === "1";
-
-if (!runningWithTsx) {
-  const result = spawnSync(
-    process.execPath,
-    ["--import", "tsx", "--test", fileURLToPath(import.meta.url)],
-    {
-      stdio: "inherit",
-      env: {
-        ...process.env,
-        NODE_TEST_CONTEXT: undefined,
-        FLAMENODE_VIDEO_PLAN_EXECUTION: "1",
-      },
-    },
-  );
-  if (result.error) throw result.error;
-  if (result.status !== 0) process.exitCode = result.status ?? 1;
-} else {
+if (runTestWithTsx(import.meta.url)) {
   const {
     executeVideoAtomicWritePlan,
     inspectVideoAtomicWritePlanBudget,
@@ -112,8 +94,13 @@ if (!runningWithTsx) {
       INSERT INTO slots VALUES ('slot-1', 'reserved');
     `);
     let generated = 0;
+    const get = async () => undefined;
+    const selectChain = {
+      leftJoin: () => selectChain,
+      where: () => ({ get }),
+    };
     const db = {
-      select: () => ({ from: () => ({ where: () => ({ get: async () => undefined }) }) }),
+      select: () => ({ from: () => selectChain }),
       run: (query) => ({ kind: "generated", query }),
       batch: async (items) => {
         sqlite.exec("BEGIN IMMEDIATE");

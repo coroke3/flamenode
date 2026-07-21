@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-20
-> Verified against commit: `89b8889`
+> Verified against commit: `47e6cee`
 > Source of truth: `AGENTS.md`, `src/lib/db/schema.ts`, `migrations/`, `package.json`, `wrangler.toml`
 
 軽量モデルを含むAIは、リポジトリ全体を先に読まない。`AGENTS.md`と、この文書の該当行だけを読み、次に対象コードを確認する。
@@ -43,20 +43,22 @@ Historical資料は経緯確認専用で、現行仕様の根拠にしない。
 | UI・フォーム | `docs/operations/ui-acceptance.md` | 対象page/component、CSS、関連test |
 | 監査・復元 | `docs/operations/audit-and-restore.md` | mutation、audit helper、復元test |
 | ローカル起動 | `LOCAL.md` | `package.json`、`.dev.vars.example` |
-| デプロイ | `DEPLOY.md` | `.github/workflows/deploy-cloudflare.yml`、wrangler群 |
+| デプロイ | `DEPLOY.md` | `package.json`の`cf:*`、`scripts/cloudflare-*.mjs`、wrangler群 |
 | 過去仕様の調査 | `docs/historical/README.md` | 必要な資料1件だけ |
 
-旧形式インポートは現行機能ではない。旧JSON、CSV、TSVの常設取込機能を追加せず、必要な旧データ変換は正本migrationで一度だけ実施する。
+旧形式インポートは通常ランタイムの互換機能ではない。保管済みの旧JSON、CSV、TSVを新正本へ一度だけ取り込む場合は、既存の管理者専用境界 `/admin/import`、`/api/admin/import/legacy`、`src/lib/import/legacy/` に限定する。通常ランタイム、公開API、Workerへ旧形式分岐を追加しない。
 
 ## 4. 不変条件
 
 - DB正本は`src/lib/db/schema.ts`。既適用migration本文を変更しない。
 - Active codeへ旧列fallback、二重書込み、runtime DDLを戻さない。
-- `/admin/import`、`/api/admin/import/legacy`、`src/lib/import/legacy/`を再導入しない。
+- 旧形式入力は `/admin/import`、`/api/admin/import/legacy`、`src/lib/import/legacy/` の管理者専用境界から広げず、別経路を再導入しない。
 - `event_staff.permission_preset = 'owner'`をイベント代表者の正本とし、ownerを0人にしない。
 - 権限はUIだけでなくServer ActionまたはRoute Handlerで検証する。
 - 公開APIは明示したDTOだけを返し、内部情報を漏らさない。
-- Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、Cron Worker 3本を維持する。
+- Cloudflare Workers + OpenNext + Workers Static Assets、D1、R2、KV、Cron Worker 3本を維持する。
+- productionはCloudflare Workers Buildsの単一Git連携だけを正本とし、GitHub ActionsやWorker別Git連携を追加しない。
+- Remote D1 migrationは自動適用せず、read-only preflightと運用者の明示適用を分離する。
 - 実Cloudflare操作、Remote D1操作、production secret操作は明示依頼時だけ行う。
 
 ## 5. モデル選択
@@ -82,6 +84,6 @@ Historical資料は経緯確認専用で、現行仕様の根拠にしない。
 - TypeScript/UI: `npm run typecheck`、`npm run lint`、関連test、`npm run build`
 - Worker: 上記に加えて`npm run test:workers`
 - DB/権限/API: 上記に加えて関連checkとintegration test
-- release影響: `npm run pages:build`とCloudflare関連check
+- release影響: `npm run verify:fast`、`npm run cf:build`、`npm run check:open-next-output`とCloudflare関連check
 
 全検査一覧が必要な場合だけ`AGENTS.md`を参照する。

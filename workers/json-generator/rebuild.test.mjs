@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { rebuildTarget, removeTrackedArtifacts } from "./rebuild.ts";
+import {
+  EVENTS_INDEX_MAX_ROWS,
+  EVENT_GROUP_EVENT_MAX_PER_GROUP,
+  EVENT_GROUP_EVENT_MAX_ROWS,
+  EVENT_GROUP_MAX_ROWS,
+  PUBLIC_STAFF_EVENT_ID_CHUNK_SIZE,
+  PUBLIC_STAFF_MAX_PER_EVENT,
+  rebuildTarget,
+  removeTrackedArtifacts,
+} from "./rebuild.ts";
+
+const source = await readFile(new URL("./rebuild.ts", import.meta.url), "utf8");
 
 function statement(sql, state) {
   return {
@@ -113,4 +125,76 @@ test("R2 delete失敗時はdeleted_atを更新せず、再試行成功後にだ�
   assert.equal(state.runs.filter((sql) => sql.includes("SET deleted_at")).length, 0);
   await removeTrackedArtifacts(env, "video", "video-1");
   assert.equal(state.runs.filter((sql) => sql.includes("SET deleted_at")).length, 1);
+});
+
+test("static JSON queryはcanonical列だけを使う", () => {
+  assert.doesNotMatch(source, /max_consecutive_slots_per_entry/);
+  assert.doesNotMatch(source, /es\.role/);
+  assert.doesNotMatch(source, /other_social_links, updated_at/);
+  assert.match(source, /staticArtifactContentHash\(body\)/);
+});
+
+test("public static JSON queries exclude private event relations", () => {
+  assert.match(
+    source,
+    /FROM slots AS s[\s\S]*INNER JOIN events AS e[\s\S]*e\.visibility_status = 'public'/,
+  );
+  assert.ok(
+    (source.match(/THEN v\.primary_event_id ELSE NULL END AS primary_event_id/g) ?? [])
+      .length >= 4,
+  );
+  assert.match(
+    source,
+    /e\.id AS primary_event_id[\s\S]*LEFT JOIN events e[\s\S]*e\.visibility_status = 'public'/,
+  );
+  assert.match(
+    source,
+    /SELECT ve\.event_id[\s\S]*INNER JOIN events AS e[\s\S]*e\.visibility_status = 'public'/,
+  );
+});
+
+test("event groupとjunctionの取得件数を固定する", () => {
+  assert.equal(EVENTS_INDEX_MAX_ROWS, 200);
+  assert.equal(EVENT_GROUP_MAX_ROWS, 50);
+  assert.equal(EVENT_GROUP_EVENT_MAX_PER_GROUP, 20);
+  assert.equal(EVENT_GROUP_EVENT_MAX_ROWS, 1000);
+  assert.match(source, /FROM event_groups[\s\S]*LIMIT \?/);
+  assert.match(source, /ROW_NUMBER\(\) OVER \([\s\S]*PARTITION BY ege\.event_group_id/);
+  assert.match(source, /WHERE group_rank <= \?[\s\S]*LIMIT \?/);
+});
+
+test("200イベントの公開運営取得はD1 bind上限未満にchunkする", async () => {
+  const eventRows = Array.from({ length: EVENTS_INDEX_MAX_ROWS }, (_, index) => ({
+    id: `event-${index + 1}`,
+  }));
+  const state = {
+    binds: [],
+    runs: [],
+    first: () => null,
+    all(sql) {
+      if (sql.includes("FROM events") && !sql.includes("event_group_events")) {
+        return { results: eventRows };
+      }
+      return { results: [] };
+    },
+  };
+  const env = {
+    DB: { prepare: (sql) => statement(sql, state) },
+    R2: { put: async () => ({}), delete: async () => {} },
+    KV: { put: async () => {} },
+  };
+
+  await rebuildTarget(env, "events_index", "global");
+
+  const staffQueries = state.binds.filter(({ sql }) =>
+    sql.includes("ranked_public_staff"),
+  );
+  assert.equal(PUBLIC_STAFF_EVENT_ID_CHUNK_SIZE, 90);
+  assert.equal(PUBLIC_STAFF_MAX_PER_EVENT, 20);
+  assert.equal(staffQueries.length, 3);
+  assert.ok(
+    staffQueries.every(({ args }) =>
+      args.length <= PUBLIC_STAFF_EVENT_ID_CHUNK_SIZE + 1),
+  );
+  assert.ok(staffQueries.every(({ args }) => args.at(-1) === PUBLIC_STAFF_MAX_PER_EVENT));
 });

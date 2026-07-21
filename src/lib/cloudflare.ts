@@ -1,10 +1,18 @@
 import "server-only";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getDb, type DB } from "./db/client";
 
+declare global {
+  interface CloudflareEnv {
+    DB: D1Database;
+    BUCKET: R2Bucket;
+    KV: KVNamespace;
+  }
+}
+
 /**
- * Cloudflare Pages (Next.js) の RuntimeContext から D1 / R2 / KV を取り出す。
- * `@cloudflare/next-on-pages` 環境では `getRequestContext` が提供されるが、
- * 開発時 (`next dev`) では未定義のことがあるため両対応する。
+ * OpenNext の request context から D1 / R2 / KV を取り出す。
+ * 本番requestでは3 bindingを必須とし、設定漏れを曖昧なnullへ変換しない。
  */
 export interface FlameNodeEnv {
   DB: D1Database;
@@ -19,13 +27,26 @@ export interface FlameNodeEnv {
   DISCORD_BOT_TOKEN?: string;
   YOUTUBE_API_KEY?: string;
   YOUTUBE_DAILY_QUOTA_LIMIT?: string;
+  BUILD_COMMIT_SHA?: string;
+  WORKER_ADMIN_TOKEN?: string;
+  AUTH_URL?: string;
   NEXT_PUBLIC_SITE_URL?: string;
+  FLAMENODE_LOCAL_PREVIEW?: string;
 }
 
-let memoizedDb: { ref: D1Database | null; db: DB | null } = {
-  ref: null,
-  db: null,
-};
+type BindingName = "DB" | "BUCKET" | "KV" | "context";
+
+export class CloudflareBindingsUnavailableError extends Error {
+  readonly missing: readonly BindingName[];
+
+  constructor(missing: readonly BindingName[], cause?: unknown) {
+    super(`CLOUDFLARE_BINDINGS_UNAVAILABLE:${missing.join(",")}`, { cause });
+    this.name = "CloudflareBindingsUnavailableError";
+    this.missing = [...missing];
+  }
+}
+
+const memoizedDbs = new WeakMap<D1Database, DB>();
 
 /** ローカル Miniflare / リモート D1 接続の瞬断で付きやすいコード・メッセージ */
 const TRANSIENT_DB_MARKERS =
@@ -58,8 +79,8 @@ function isTransientDbError(err: unknown): boolean {
   return false;
 }
 
-function clearDatabaseMemo(): void {
-  memoizedDb = { ref: null, db: null };
+function clearDatabaseMemo(binding: D1Database): void {
+  memoizedDbs.delete(binding);
 }
 
 function sleep(ms: number): Promise<void> {
@@ -76,16 +97,16 @@ export async function withDatabaseRead<T>(
   const maxAttempts = 4;
   let lastError: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const db = getDatabase();
-    if (!db) return null;
+    const resolved = resolveDatabaseSync();
+    if (!resolved) return null;
     try {
-      return await fn(db);
+      return await fn(resolved.db);
     } catch (error) {
       lastError = error;
       if (!isTransientDbError(error) || attempt >= maxAttempts - 1) {
         throw error;
       }
-      clearDatabaseMemo();
+      clearDatabaseMemo(resolved.binding);
       await sleep(30 * 2 ** attempt);
     }
   }
@@ -99,9 +120,9 @@ export async function withDatabaseRead<T>(
 export async function withDatabaseWrite<T>(
   fn: (db: DB) => Promise<T>,
 ): Promise<T | null> {
-  const db = getDatabase();
-  if (!db) return null;
-  return fn(db);
+  const resolved = resolveDatabaseSync();
+  if (!resolved) return null;
+  return fn(resolved.db);
 }
 
 /**
@@ -111,6 +132,7 @@ export async function withDatabaseWrite<T>(
 export const withDatabase = withDatabaseRead;
 
 export async function waitForLocalBindings(): Promise<void> {
+  if (!isLocalOrBuildPhase()) return;
   const g = globalThis as Record<string | symbol, unknown>;
   const pending = g.__FLAMENODE_LOCAL_BINDINGS_PROMISE;
   if (pending && typeof (pending as PromiseLike<unknown>).then === "function") {
@@ -147,66 +169,190 @@ function isKvNamespace(value: unknown): value is KVNamespace {
   );
 }
 
-function normalizeBindings(
-  candidate: Partial<FlameNodeEnv> | undefined,
-): FlameNodeEnv {
+function isLocalOrBuildPhase(): boolean {
+  return (
+    process.env.NODE_ENV !== "production" ||
+    process.env.NEXT_PHASE === "phase-production-build"
+  );
+}
+
+function recordValue(
+  candidate: Record<string, unknown> | undefined,
+  key: string,
+): unknown {
+  return candidate?.[key];
+}
+
+function stringValue(
+  candidate: Record<string, unknown> | undefined,
+  key: string,
+  allowProcessFallback: boolean,
+): string | undefined {
+  const binding = recordValue(candidate, key);
+  if (typeof binding === "string" && binding.trim()) return binding.trim();
+  if (!allowProcessFallback) return undefined;
+  const fallback = process.env[key]?.trim();
+  return fallback || undefined;
+}
+
+function normalizeBindings(candidate: unknown): FlameNodeEnv {
+  const record =
+    candidate && typeof candidate === "object"
+      ? (candidate as Record<string, unknown>)
+      : undefined;
+  const db = recordValue(record, "DB");
+  const bucket = recordValue(record, "BUCKET");
+  const kv = recordValue(record, "KV");
+  const validDb = isD1Database(db) ? db : undefined;
+  const validBucket = isR2Bucket(bucket) ? bucket : undefined;
+  const validKv = isKvNamespace(kv) ? kv : undefined;
+  if (!validDb || !validBucket || !validKv) {
+    throw new CloudflareBindingsUnavailableError([
+      ...(!validDb ? (["DB"] as const) : []),
+      ...(!validBucket ? (["BUCKET"] as const) : []),
+      ...(!validKv ? (["KV"] as const) : []),
+    ]);
+  }
+
+  const allowProcessFallback = isLocalOrBuildPhase();
   return {
-    DB: (isD1Database(candidate?.DB) ? candidate.DB : undefined) as D1Database,
-    BUCKET: (isR2Bucket(candidate?.BUCKET)
-      ? candidate.BUCKET
-      : undefined) as R2Bucket,
-    KV: (isKvNamespace(candidate?.KV) ? candidate.KV : undefined) as KVNamespace,
-    AUTH_SECRET: candidate?.AUTH_SECRET ?? process.env.AUTH_SECRET,
-    AUTH_DISCORD_ID:
-      candidate?.AUTH_DISCORD_ID ?? process.env.AUTH_DISCORD_ID,
-    AUTH_DISCORD_SECRET:
-      candidate?.AUTH_DISCORD_SECRET ?? process.env.AUTH_DISCORD_SECRET,
+    DB: validDb,
+    BUCKET: validBucket,
+    KV: validKv,
+    AUTH_SECRET: stringValue(record, "AUTH_SECRET", allowProcessFallback),
+    AUTH_DISCORD_ID: stringValue(
+      record,
+      "AUTH_DISCORD_ID",
+      allowProcessFallback,
+    ),
+    AUTH_DISCORD_SECRET: stringValue(
+      record,
+      "AUTH_DISCORD_SECRET",
+      allowProcessFallback,
+    ),
     SPREADSHEET_IMPORT_PREVIEW_SECRET:
-      candidate?.SPREADSHEET_IMPORT_PREVIEW_SECRET ??
-      process.env.SPREADSHEET_IMPORT_PREVIEW_SECRET,
-    DISCORD_GUILD_ID:
-      candidate?.DISCORD_GUILD_ID ?? process.env.DISCORD_GUILD_ID,
-    DISCORD_BOT_TOKEN:
-      candidate?.DISCORD_BOT_TOKEN ?? process.env.DISCORD_BOT_TOKEN,
-    YOUTUBE_API_KEY:
-      candidate?.YOUTUBE_API_KEY ?? process.env.YOUTUBE_API_KEY,
-    YOUTUBE_DAILY_QUOTA_LIMIT:
-      candidate?.YOUTUBE_DAILY_QUOTA_LIMIT ??
-      process.env.YOUTUBE_DAILY_QUOTA_LIMIT,
-    NEXT_PUBLIC_SITE_URL:
-      candidate?.NEXT_PUBLIC_SITE_URL ?? process.env.NEXT_PUBLIC_SITE_URL,
+      stringValue(
+        record,
+        "SPREADSHEET_IMPORT_PREVIEW_SECRET",
+        allowProcessFallback,
+      ),
+    DISCORD_GUILD_ID: stringValue(
+      record,
+      "DISCORD_GUILD_ID",
+      allowProcessFallback,
+    ),
+    DISCORD_BOT_TOKEN: stringValue(
+      record,
+      "DISCORD_BOT_TOKEN",
+      allowProcessFallback,
+    ),
+    YOUTUBE_API_KEY: stringValue(
+      record,
+      "YOUTUBE_API_KEY",
+      allowProcessFallback,
+    ),
+    YOUTUBE_DAILY_QUOTA_LIMIT: stringValue(
+      record,
+      "YOUTUBE_DAILY_QUOTA_LIMIT",
+      allowProcessFallback,
+    ),
+    BUILD_COMMIT_SHA: stringValue(
+      record,
+      "BUILD_COMMIT_SHA",
+      allowProcessFallback,
+    ),
+    WORKER_ADMIN_TOKEN: stringValue(
+      record,
+      "WORKER_ADMIN_TOKEN",
+      allowProcessFallback,
+    ),
+    AUTH_URL: stringValue(record, "AUTH_URL", allowProcessFallback),
+    NEXT_PUBLIC_SITE_URL: stringValue(
+      record,
+      "NEXT_PUBLIC_SITE_URL",
+      allowProcessFallback,
+    ),
+    FLAMENODE_LOCAL_PREVIEW: stringValue(
+      record,
+      "FLAMENODE_LOCAL_PREVIEW",
+      allowProcessFallback,
+    ),
   };
 }
 
-export function getEnv(): FlameNodeEnv {
+function localBindings(): unknown {
+  if (!isLocalOrBuildPhase()) return undefined;
   const g = globalThis as Record<string | symbol, unknown>;
+  return g.__FLAMENODE_LOCAL_BINDINGS;
+}
 
-  // 1) Cloudflare Pages runtime
-  const ctx = g[Symbol.for("__cloudflare-request-context__")] as
-    | { env?: Partial<FlameNodeEnv> }
-    | undefined;
-  if (ctx?.env) return normalizeBindings(ctx.env);
+function contextUnavailable(cause: unknown): CloudflareBindingsUnavailableError {
+  return new CloudflareBindingsUnavailableError(["context"], cause);
+}
 
-  // 2) instrumentation.ts で初期化された Miniflare bindings
-  const local = g.__FLAMENODE_LOCAL_BINDINGS as
-    | Partial<FlameNodeEnv>
-    | undefined;
-  if (local) return normalizeBindings(local);
+export function getEnv(): FlameNodeEnv {
+  try {
+    return normalizeBindings(getCloudflareContext().env);
+  } catch (error) {
+    const local = localBindings();
+    if (local) return normalizeBindings(local);
+    if (error instanceof CloudflareBindingsUnavailableError) throw error;
+    throw contextUnavailable(error);
+  }
+}
 
-  // 3) Node の process.env は文字列なので D1/R2/KV binding として扱わない。
-  return normalizeBindings(undefined);
+export async function getEnvAsync(): Promise<FlameNodeEnv> {
+  await waitForLocalBindings();
+  try {
+    return normalizeBindings(
+      (await getCloudflareContext({ async: true })).env,
+    );
+  } catch (error) {
+    const local = localBindings();
+    if (local) return normalizeBindings(local);
+    if (error instanceof CloudflareBindingsUnavailableError) throw error;
+    throw contextUnavailable(error);
+  }
+}
+
+function databaseForBinding(binding: D1Database): DB {
+  const cached = memoizedDbs.get(binding);
+  if (cached) return cached;
+  const db = getDb(binding);
+  memoizedDbs.set(binding, db);
+  return db;
+}
+
+function resolveDatabaseSync(): { binding: D1Database; db: DB } | null {
+  try {
+    const binding = getEnv().DB;
+    return { binding, db: databaseForBinding(binding) };
+  } catch (error) {
+    if (
+      isLocalOrBuildPhase() &&
+      error instanceof CloudflareBindingsUnavailableError
+    ) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 export function getDatabase(): DB | null {
-  const env = getEnv();
-  if (!isD1Database(env.DB)) return null;
-  if (memoizedDb.ref !== env.DB) {
-    memoizedDb = { ref: env.DB, db: getDb(env.DB) };
-  }
-  return memoizedDb.db;
+  return resolveDatabaseSync()?.db ?? null;
 }
 
 export async function getDatabaseAsync(): Promise<DB | null> {
-  await waitForLocalBindings();
-  return getDatabase();
+  try {
+    const binding = (await getEnvAsync()).DB;
+    return databaseForBinding(binding);
+  } catch (error) {
+    if (
+      isLocalOrBuildPhase() &&
+      error instanceof CloudflareBindingsUnavailableError
+    ) {
+      return null;
+    }
+    throw error;
+  }
 }

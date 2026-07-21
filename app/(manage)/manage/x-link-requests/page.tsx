@@ -56,7 +56,7 @@ export default async function ManageXLinkRequestsPage(): Promise<React.ReactElem
     .where(
       and(
         eq(xIdentityRequests.status, "pending"),
-        inArray(xIdentityRequests.request_type, ["new_link", "existing_link", "alias"]),
+        inArray(xIdentityRequests.request_type, ["new_link", "existing_link"]),
       )!,
     )
     .orderBy(desc(xIdentityRequests.requested_at));
@@ -65,7 +65,7 @@ export default async function ManageXLinkRequestsPage(): Promise<React.ReactElem
     <div>
       <ManagePageHeader
         title="X ID 申請"
-        description="新規・既存連携と別名追加を承認・却下します。統合操作は管理者画面に限定されます。"
+        description="X ID連携申請を承認・却下します。統合操作は管理者画面に限定されます。"
         backHref="/manage"
         backLabel="イベント運営トップへ"
         accent

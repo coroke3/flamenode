@@ -7,10 +7,12 @@ import {
 
 const source = await readFile(new URL("./enqueue.ts", import.meta.url), "utf8");
 
-test("通常 enqueue は active row の CAS 失敗を最大1回だけ再試行する", () => {
-  assert.match(source, /for \(let enqueueAttempt = 0; enqueueAttempt < 2;/);
+test("通常 enqueue は active row のCASと同時insert競合を有限回だけ再試行する", () => {
+  assert.match(source, /ENQUEUE_CONFLICT_RETRY_LIMIT = 3/);
   assert.match(source, /result\.meta\?\.changes/);
-  assert.match(source, /static rebuild queue active row changed during enqueue/);
+  assert.match(source, /\.onConflictDoNothing\(\)/);
+  assert.match(source, /insertResult\.meta\?\.changes/);
+  assert.match(source, /static rebuild queue changed during enqueue retries/);
   assert.match(source, /eq\(staticRebuildQueue\.updated_at, row\.updated_at\)/g);
 });
 

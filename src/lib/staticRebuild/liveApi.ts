@@ -4,6 +4,7 @@ import type { DB } from "@/lib/db/client";
 import { events, slots, videos, videoEvents } from "@/lib/db/schema";
 import type { EventFreshness } from "./types";
 import { getEventVisibility } from "#utils/event-status-core";
+import { projectLiveSlotIdentity } from "./liveApiCore";
 
 const ACTIVE_GRACE_AFTER_END_SEC = 86400;
 
@@ -54,17 +55,9 @@ export async function getLiveEventSummary(db: DB, eventId: string) {
         WHERE live_slots.event_id = ${events.id}
           AND live_slots.status = 'submitted'
       )`,
-      pending_review: sql<number>`(
-        SELECT COUNT(*)
-        FROM videos AS live_videos
-        INNER JOIN video_events AS live_video_events
-          ON live_video_events.video_id = live_videos.id
-        WHERE live_video_events.event_id = ${events.id}
-          AND live_videos.visibility_status = 'pending'
-      )`,
     })
     .from(events)
-    .where(eq(events.id, id))
+    .where(and(eq(events.id, id), eq(events.visibility_status, "public")))
     .limit(1);
   const event = rows[0];
   if (!event) return null;
@@ -76,7 +69,6 @@ export async function getLiveEventSummary(db: DB, eventId: string) {
     open_slots: Number(event.open_slots ?? 0),
     reserved_slots: Number(event.reserved_slots ?? 0),
     submitted: Number(event.submitted ?? 0),
-    pending_review: Number(event.pending_review ?? 0),
     generated_at: now,
   };
 }
@@ -87,14 +79,22 @@ export async function getLiveEventSlots(db: DB, eventId: string) {
 
   const rows = await db
     .select({
+      slot_visibility_mode: events.slot_visibility_mode,
       id: slots.id,
       status: slots.status,
-      video_id: slots.video_id,
+      public_video_id: videos.id,
       display_name: slots.display_name,
     })
     .from(events)
     .leftJoin(slots, eq(slots.event_id, events.id))
-    .where(eq(events.id, id))
+    .leftJoin(
+      videos,
+      and(
+        eq(videos.id, slots.video_id),
+        eq(videos.visibility_status, "public"),
+      )!,
+    )
+    .where(and(eq(events.id, id), eq(events.visibility_status, "public")))
     .orderBy(slots.start_time)
     .limit(MAX_LIVE_SLOTS);
   if (rows.length === 0) return null;
@@ -106,8 +106,11 @@ export async function getLiveEventSlots(db: DB, eventId: string) {
           {
             id: row.id,
             status: row.status!,
-            video_id: row.video_id,
-            display_name: row.display_name,
+            ...projectLiveSlotIdentity(
+              row.slot_visibility_mode,
+              row.public_video_id,
+              row.display_name,
+            ),
           },
         ],
   );
@@ -144,7 +147,7 @@ export async function getLiveEventSubmissions(db: DB, eventId: string) {
       )!,
     )
     .leftJoin(videos, eq(videos.id, videoEvents.video_id))
-    .where(eq(events.id, id))
+    .where(and(eq(events.id, id), eq(events.visibility_status, "public")))
     .orderBy(sql`${videos.updated_at} DESC`)
     .limit(50);
   if (rows.length === 0) return null;

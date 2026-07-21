@@ -89,6 +89,8 @@ test("acquireCronLease caps an invalidly long lease", async () => {
 
 test("withCronLease propagates a lost heartbeat and records failure", async () => {
   const statements = [];
+  let callbackSignal;
+  let sideEffectAfterAbort = false;
   const env = {
     DB: {
       prepare(sql) {
@@ -122,11 +124,62 @@ test("withCronLease propagates a lost heartbeat and records failure", async () =
         leaseSeconds: 2,
         heartbeatSeconds: 1,
       },
-      () => new Promise((resolve) => setTimeout(resolve, 1_100)),
+      async (signal) => {
+        callbackSignal = signal;
+        await new Promise((resolve) =>
+          signal.addEventListener("abort", resolve, { once: true }),
+        );
+        signal.throwIfAborted();
+        sideEffectAfterAbort = true;
+      },
     ),
     /cron lease lost: heartbeat-test/,
   );
 
+  assert.ok(callbackSignal instanceof AbortSignal);
+  assert.equal(callbackSignal.aborted, true);
+  assert.equal(sideEffectAfterAbort, false);
   assert.ok(statements.some((sql) => sql.includes("last_failed_at")));
   assert.ok(statements.some((sql) => sql.includes("lease_token = ''")));
+});
+
+test("withCronLeaseはsuccess CASが0件ならlease喪失として成功記録しない", async () => {
+  const statements = [];
+  const env = {
+    DB: {
+      prepare(sql) {
+        return {
+          bind() {
+            return this;
+          },
+          async run() {
+            statements.push(sql);
+            if (sql.includes("INSERT INTO worker_leases")) {
+              return { meta: { changes: 1 } };
+            }
+            if (sql.includes("SET last_succeeded_at")) {
+              return { meta: { changes: 0 } };
+            }
+            return { meta: { changes: 1 } };
+          },
+        };
+      },
+    },
+  };
+
+  await assert.rejects(
+    withCronLease(
+      env,
+      {
+        jobName: "success-cas-test",
+        leaseSeconds: 60,
+        heartbeatSeconds: 0,
+      },
+      async () => "done",
+    ),
+    /cron lease lost before success: success-cas-test/,
+  );
+
+  assert.ok(statements.some((sql) => sql.includes("lease_expires_at > ?1")));
+  assert.ok(statements.some((sql) => sql.includes("last_failed_at")));
 });

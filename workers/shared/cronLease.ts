@@ -24,6 +24,8 @@ export interface CronLeaseOptions {
   /** 未指定時は leaseSeconds / 3。0 を指定すると heartbeat 無効。 */
   heartbeatSeconds?: number;
   now?: number;
+  /** 呼出し元のwall-clock deadlineをtaskへ伝播する。 */
+  signal?: AbortSignal;
 }
 
 /** A bad configuration must not leave a lease held indefinitely. */
@@ -110,16 +112,19 @@ async function markCronLeaseSucceeded(
   env: CronLeaseEnv,
   lease: CronLease,
   now = unixNow(),
-): Promise<void> {
-  await env.DB.prepare(
+): Promise<boolean> {
+  const result = await env.DB.prepare(
     `UPDATE worker_leases
      SET last_succeeded_at = ?1,
          last_error_code = NULL,
          updated_at = ?1
-     WHERE job_name = ?2 AND lease_token = ?3`,
+     WHERE job_name = ?2
+       AND lease_token = ?3
+       AND lease_expires_at > ?1`,
   )
     .bind(now, lease.jobName, lease.token)
     .run();
+  return (result.meta?.changes ?? 0) === 1;
 }
 
 async function markCronLeaseFailed(
@@ -209,11 +214,20 @@ async function assertPromiseSucceeded(
   if (!outcome.succeeded) throw outcome.error;
 }
 
+function abortError(signal: AbortSignal, fallback: string): Error {
+  if (signal.reason instanceof Error) return signal.reason;
+  if (signal.reason !== undefined) return new Error(String(signal.reason));
+  return new Error(fallback);
+}
+
 export async function withCronLease<T>(
   env: CronLeaseEnv,
   options: CronLeaseOptions,
-  task: () => Promise<T>,
+  task: (signal?: AbortSignal) => Promise<T>,
 ): Promise<{ acquired: boolean; value?: T }> {
+  if (options.signal?.aborted) {
+    throw abortError(options.signal, `cron task aborted: ${options.jobName}`);
+  }
   const lease = await acquireCronLease(env, options);
   if (!lease) return { acquired: false };
 
@@ -238,14 +252,45 @@ export async function withCronLease<T>(
           heartbeatController.signal,
         )
       : Promise.resolve();
-  const heartbeatOutcome = observePromise(heartbeat);
+  const taskController = new AbortController();
+  const abortTaskFromCaller = (): void => {
+    if (!taskController.signal.aborted) {
+      taskController.abort(
+        options.signal
+          ? abortError(options.signal, `cron task aborted: ${lease.jobName}`)
+          : new Error(`cron task aborted: ${lease.jobName}`),
+      );
+    }
+    heartbeatController.abort();
+  };
+  options.signal?.addEventListener("abort", abortTaskFromCaller, { once: true });
+  if (options.signal?.aborted) abortTaskFromCaller();
+
+  const heartbeatOutcome = observePromise(heartbeat).then((outcome) => {
+    if (!outcome.succeeded && !taskController.signal.aborted) {
+      taskController.abort(
+        outcome.error instanceof Error
+          ? outcome.error
+          : new Error(`cron lease lost: ${lease.jobName}`),
+      );
+    }
+    return outcome;
+  });
 
   try {
-    const value = await task();
+    const value = await task(taskController.signal);
+    if (taskController.signal.aborted) {
+      throw abortError(
+        taskController.signal,
+        `cron task aborted: ${lease.jobName}`,
+      );
+    }
     heartbeatController.abort();
     // task 中に lease を失っていた場合はここで失敗として伝播する。
     await assertPromiseSucceeded(heartbeatOutcome);
-    await markCronLeaseSucceeded(env, lease);
+    if (!(await markCronLeaseSucceeded(env, lease))) {
+      throw new Error(`cron lease lost before success: ${lease.jobName}`);
+    }
     return { acquired: true, value };
   } catch (error) {
     heartbeatController.abort();
@@ -262,6 +307,7 @@ export async function withCronLease<T>(
     });
     throw error;
   } finally {
+    options.signal?.removeEventListener("abort", abortTaskFromCaller);
     heartbeatController.abort();
     await heartbeatOutcome;
     try {

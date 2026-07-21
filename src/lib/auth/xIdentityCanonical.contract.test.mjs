@@ -83,7 +83,8 @@ test("一般承認と統合・差し戻しは権限境界を分離する", () =>
   const mergeAdmin = read("src/lib/actions/xid-merge-admin.ts");
   assert.match(admin, /canManageXIdLinkRequests/);
   assert.match(admin, /統合・差し戻し申請は X ID 統合管理/);
-  assert.match(mergeAdmin, /user\.role !== "admin"/);
+  assert.match(mergeAdmin, /requireAdminWrite\("xid_links"\)/);
+  assert.doesNotMatch(mergeAdmin, /from "@\/lib\/auth"/);
   assert.match(mergeAdmin, /isRevertDeadlineOpen/);
   assert.match(mergeAdmin, /restoreApprovedXIdMergeRevertRequest/);
 });

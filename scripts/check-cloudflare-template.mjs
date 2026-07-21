@@ -1,67 +1,212 @@
 #!/usr/bin/env node
-/** Validate checked-in Pages and Cron Worker templates. Placeholder IDs are allowed here. */
+/** Validate the checked-in OpenNext Worker and Cron Worker templates. */
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
-const ROOT = process.cwd();
-const errors = [];
+const ZERO_D1_ID = "00000000-0000-0000-0000-000000000000";
+const ZERO_KV_ID = "00000000000000000000000000000000";
+const TOML_SCAN_EXCLUDED_DIRECTORIES = new Set([
+  ".cloudflare",
+  ".git",
+  ".next",
+  ".open-next",
+  "node_modules",
+]);
+
 const expectedWorkers = new Map([
   ["fast-jobs", { name: "flamenode-fast-jobs", d1: true, r2: false, kv: true }],
   ["content-jobs", { name: "flamenode-content-jobs", d1: true, r2: true, kv: true }],
   ["sync-jobs", { name: "flamenode-sync-jobs", d1: true, r2: false, kv: true }],
 ]);
 
-function read(relative) {
-  const full = path.join(ROOT, relative);
-  if (!fs.existsSync(full)) {
-    errors.push(`${relative} is missing`);
+function requirePattern(errors, text, relative, pattern, description) {
+  pattern.lastIndex = 0;
+  if (!pattern.test(text)) errors.push(`${relative}: ${description}`);
+}
+
+function rejectPattern(errors, text, relative, pattern, description) {
+  pattern.lastIndex = 0;
+  if (pattern.test(text)) errors.push(`${relative}: ${description}`);
+}
+
+function readFile(root, relative, errors) {
+  const full = path.join(root, relative);
+  if (!fs.existsSync(full) || !fs.statSync(full).isFile()) {
+    errors.push(`${relative}: required file is missing`);
     return "";
   }
   return fs.readFileSync(full, "utf8");
 }
 
-function requirePattern(text, relative, pattern, description) {
-  if (!pattern.test(text)) errors.push(`${relative}: ${description}`);
+function checkPlaceholderIds(errors, text, relative) {
+  for (const match of text.matchAll(/^\s*(database_id|id|preview_id)\s*=\s*"([^"]*)"\s*$/gm)) {
+    const expected = match[1] === "database_id" ? ZERO_D1_ID : ZERO_KV_ID;
+    if (match[2] !== expected) {
+      errors.push(
+        `${relative}: tracked ${match[1]} must remain the zero placeholder; production IDs are injected only into ignored temporary configs`,
+      );
+    }
+  }
 }
 
-function checkWorker(directory, expected) {
-  const relative = path.join("workers", directory, "wrangler.toml");
-  const text = read(relative);
-  requirePattern(text, relative, new RegExp(`^name\\s*=\\s*"${expected.name}"\\s*$`, "m"), "wrong worker name");
-  requirePattern(text, relative, /^main\s*=\s*"index\.ts"\s*$/m, "main must be index.ts");
-  requirePattern(text, relative, /^compatibility_date\s*=\s*"\d{4}-\d{2}-\d{2}"\s*$/m, "compatibility_date is required");
-  requirePattern(text, relative, /compatibility_flags\s*=\s*\[[^\]]*"nodejs_compat"/m, "nodejs_compat is required");
-  requirePattern(text, relative, /\[triggers\][\s\S]*?crons\s*=\s*\[[^\]]+\]/m, "one cron trigger is required");
-  if (expected.d1) requirePattern(text, relative, /\[\[d1_databases\]\][\s\S]*?binding\s*=\s*"DB"/m, "D1 binding DB is required");
-  if (expected.r2) requirePattern(text, relative, /\[\[r2_buckets\]\][\s\S]*?binding\s*=\s*"R2"/m, "R2 binding R2 is required");
-  if (expected.kv) requirePattern(text, relative, /\[\[kv_namespaces\]\][\s\S]*?binding\s*=\s*"KV"/m, "KV binding KV is required");
-  if (/\b(?:token|secret)\s*=/i.test(text)) errors.push(`${relative}: secrets must not be committed`);
+function trackedTomlFiles(root) {
+  const files = [];
+  const pending = [root];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      if (entry.isDirectory() && TOML_SCAN_EXCLUDED_DIRECTORIES.has(entry.name)) continue;
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) pending.push(fullPath);
+      else if (entry.isFile() && entry.name.toLowerCase().endsWith(".toml")) files.push(fullPath);
+    }
+  }
+  return files.sort();
 }
 
-const rootToml = read("wrangler.toml");
-requirePattern(rootToml, "wrangler.toml", /^name\s*=\s*"flamenode"\s*$/m, "Pages project name is required");
-requirePattern(rootToml, "wrangler.toml", /^pages_build_output_dir\s*=\s*"\.vercel\/output\/static"\s*$/m, "Pages output must be .vercel/output/static");
-requirePattern(rootToml, "wrangler.toml", /^compatibility_date\s*=\s*"\d{4}-\d{2}-\d{2}"\s*$/m, "compatibility_date is required");
-requirePattern(rootToml, "wrangler.toml", /compatibility_flags\s*=\s*\[[^\]]*"nodejs_compat"/m, "nodejs_compat is required");
-requirePattern(rootToml, "wrangler.toml", /\[\[d1_databases\]\][\s\S]*?binding\s*=\s*"DB"/m, "D1 binding DB is required");
-requirePattern(rootToml, "wrangler.toml", /\[\[r2_buckets\]\][\s\S]*?binding\s*=\s*"BUCKET"/m, "R2 binding BUCKET is required");
-requirePattern(rootToml, "wrangler.toml", /\[\[kv_namespaces\]\][\s\S]*?binding\s*=\s*"KV"/m, "KV binding KV is required");
-if (/opennext|workers\s+sites/i.test(rootToml)) errors.push("wrangler.toml must remain a Pages + next-on-pages template");
-
-const workerDirectories = fs
-  .readdirSync(path.join(ROOT, "workers"), { withFileTypes: true })
-  .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(ROOT, "workers", entry.name, "wrangler.toml")))
-  .map((entry) => entry.name)
-  .sort();
-const expectedDirectories = [...expectedWorkers.keys()].sort();
-if (workerDirectories.join(",") !== expectedDirectories.join(",")) {
-  errors.push(`exactly three deployed worker templates are required: ${expectedDirectories.join(", ")}`);
+function checkAllTrackedTomlIds(errors, root) {
+  for (const filePath of trackedTomlFiles(root)) {
+    const relative = path.relative(root, filePath).replaceAll("\\", "/");
+    checkPlaceholderIds(errors, fs.readFileSync(filePath, "utf8"), relative);
+  }
 }
-for (const [directory, expected] of expectedWorkers) checkWorker(directory, expected);
 
-if (errors.length) {
-  console.error("[check:cloudflare-template] FAILED");
-  for (const error of errors) console.error(`- ${error}`);
-  process.exit(1);
+function checkExactlyOneCron(errors, text, relative) {
+  const declarations = [...text.matchAll(/^\s*crons\s*=\s*\[([^\]]*)\]\s*$/gm)];
+  if (declarations.length !== 1) {
+    errors.push(`${relative}: exactly one cron declaration is required`);
+    return;
+  }
+  const entries = [...declarations[0][1].matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+  const residual = declarations[0][1].replace(/"[^"]+"/g, "").replace(/[\s,]/g, "");
+  if (entries.length !== 1 || residual) {
+    errors.push(`${relative}: exactly one valid cron expression is required`);
+  }
 }
-console.log("[check:cloudflare-template] OK (placeholder IDs accepted for CI template validation)");
+
+function checkWorker(errors, root, directory, expected) {
+  const relative = path.posix.join("workers", directory, "wrangler.toml");
+  const text = readFile(root, relative, errors);
+  requirePattern(errors, text, relative, new RegExp(`^name\\s*=\\s*"${expected.name}"\\s*$`, "m"), "wrong Worker name");
+  requirePattern(errors, text, relative, /^main\s*=\s*"index\.ts"\s*$/m, "main must be index.ts");
+  requirePattern(errors, text, relative, /^compatibility_date\s*=\s*"\d{4}-\d{2}-\d{2}"\s*$/m, "compatibility_date is required");
+  requirePattern(errors, text, relative, /compatibility_flags\s*=\s*\[[^\]]*"nodejs_compat"/m, "nodejs_compat is required");
+  if (expected.d1) requirePattern(errors, text, relative, /\[\[d1_databases\]\][\s\S]*?binding\s*=\s*"DB"/m, "D1 binding DB is required");
+  if (expected.r2) requirePattern(errors, text, relative, /\[\[r2_buckets\]\][\s\S]*?binding\s*=\s*"R2"/m, "R2 binding R2 is required");
+  if (expected.kv) requirePattern(errors, text, relative, /\[\[kv_namespaces\]\][\s\S]*?binding\s*=\s*"KV"/m, "KV binding KV is required");
+  checkExactlyOneCron(errors, text, relative);
+  rejectPattern(errors, text, relative, /\b(?:token|secret|password|api_key)\s*=\s*"/i, "secret assignments must not be committed");
+  rejectPattern(errors, text, relative, /pages_build_output_dir|\.vercel\/output|wrangler\s+pages/i, "legacy Pages configuration is forbidden");
+}
+
+function workerTemplateDirectories(root) {
+  const workerRoot = path.join(root, "workers");
+  if (!fs.existsSync(workerRoot)) return [];
+  return fs
+    .readdirSync(workerRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(workerRoot, entry.name, "wrangler.toml")))
+    .map((entry) => entry.name)
+    .sort();
+}
+
+export function checkCloudflareTemplate({ root = process.cwd() } = {}) {
+  const errors = [];
+  const rootToml = readFile(root, "wrangler.toml", errors);
+  requirePattern(errors, rootToml, "wrangler.toml", /^name\s*=\s*"flamenode-web"\s*$/m, "Worker name must be flamenode-web");
+  requirePattern(errors, rootToml, "wrangler.toml", /^main\s*=\s*"\.open-next\/worker\.js"\s*$/m, "main must be .open-next/worker.js");
+  requirePattern(errors, rootToml, "wrangler.toml", /^compatibility_date\s*=\s*"\d{4}-\d{2}-\d{2}"\s*$/m, "compatibility_date is required");
+  requirePattern(errors, rootToml, "wrangler.toml", /compatibility_flags\s*=\s*\[[^\]]*"nodejs_compat"/m, "nodejs_compat is required");
+  requirePattern(errors, rootToml, "wrangler.toml", /compatibility_flags\s*=\s*\[[^\]]*"global_fetch_strictly_public"/m, "global_fetch_strictly_public is required");
+  requirePattern(errors, rootToml, "wrangler.toml", /\[assets\][\s\S]*?directory\s*=\s*"\.open-next\/assets"/m, "assets directory must be .open-next/assets");
+  requirePattern(errors, rootToml, "wrangler.toml", /\[assets\][\s\S]*?binding\s*=\s*"ASSETS"/m, "assets binding ASSETS is required");
+  requirePattern(errors, rootToml, "wrangler.toml", /\[assets\][\s\S]*?run_worker_first\s*=\s*false/m, "assets.run_worker_first must be false");
+  requirePattern(errors, rootToml, "wrangler.toml", /\[\[services\]\][\s\S]*?binding\s*=\s*"WORKER_SELF_REFERENCE"/m, "OpenNext self-service binding is required");
+  requirePattern(errors, rootToml, "wrangler.toml", /\[\[services\]\][\s\S]*?service\s*=\s*"flamenode-web"/m, "OpenNext self-service target must be flamenode-web");
+  requirePattern(errors, rootToml, "wrangler.toml", /\[\[d1_databases\]\][\s\S]*?binding\s*=\s*"DB"/m, "D1 binding DB is required");
+  requirePattern(errors, rootToml, "wrangler.toml", /\[\[r2_buckets\]\][\s\S]*?binding\s*=\s*"BUCKET"/m, "R2 binding BUCKET is required");
+  requirePattern(errors, rootToml, "wrangler.toml", /\[\[r2_buckets\]\][\s\S]*?binding\s*=\s*"NEXT_INC_CACHE_R2_BUCKET"/m, "OpenNext R2 incremental-cache binding is required");
+  requirePattern(errors, rootToml, "wrangler.toml", /\[\[kv_namespaces\]\][\s\S]*?binding\s*=\s*"KV"/m, "KV binding KV is required");
+  rejectPattern(errors, rootToml, "wrangler.toml", /pages_build_output_dir|\.vercel\/output|wrangler\s+pages/i, "legacy Pages configuration is forbidden");
+  rejectPattern(errors, rootToml, "wrangler.toml", /^\s*crons\s*=/m, "the web Worker must not define a cron trigger");
+  rejectPattern(errors, rootToml, "wrangler.toml", /\[durable_objects\]|\[\[migrations\]\]/i, "unapproved Durable Object bindings are forbidden");
+  rejectPattern(errors, rootToml, "wrangler.toml", /\b(?:token|secret|password|api_key)\s*=\s*"/i, "secret assignments must not be committed");
+  rejectPattern(errors, rootToml, "wrangler.toml", /FLAMENODE_LOCAL_PREVIEW/, "local preview allowance must not be tracked in the Worker template");
+
+  const directories = workerTemplateDirectories(root);
+  const expectedDirectories = [...expectedWorkers.keys()].sort();
+  if (directories.join(",") !== expectedDirectories.join(",")) {
+    errors.push(`exactly three Cron Worker templates are required: ${expectedDirectories.join(", ")}`);
+  }
+  for (const [directory, expected] of expectedWorkers) checkWorker(errors, root, directory, expected);
+  checkAllTrackedTomlIds(errors, root);
+
+  const packageSource = readFile(root, "package.json", errors);
+  let packageJson = {};
+  try {
+    packageJson = JSON.parse(packageSource);
+  } catch {
+    errors.push("package.json: malformed JSON");
+  }
+  const allDependencies = { ...(packageJson.dependencies ?? {}), ...(packageJson.devDependencies ?? {}) };
+  if (!allDependencies["@opennextjs/cloudflare"]) errors.push("package.json: @opennextjs/cloudflare is required");
+  if (allDependencies["@cloudflare/next-on-pages"]) errors.push("package.json: @cloudflare/next-on-pages must be removed");
+  if (packageJson.engines?.node !== ">=22 <23") errors.push('package.json: engines.node must be ">=22 <23"');
+  const scriptsSource = JSON.stringify(packageJson.scripts ?? {});
+  if (Object.keys(packageJson.scripts ?? {}).some((name) => name.startsWith("pages:"))) {
+    errors.push("package.json: legacy pages:* scripts must be removed");
+  }
+  rejectPattern(errors, scriptsSource, "package.json", /next-on-pages|wrangler\s+pages|\.vercel\/output/i, "legacy Pages build or deploy command is forbidden");
+
+  const nvmrc = readFile(root, ".nvmrc", errors).trim();
+  if (nvmrc !== "22") errors.push(".nvmrc: Node 22 is required");
+  const openNext = readFile(root, "open-next.config.ts", errors);
+  requirePattern(errors, openNext, "open-next.config.ts", /@opennextjs\/cloudflare/, "OpenNext Cloudflare adapter import is required");
+  requirePattern(errors, openNext, "open-next.config.ts", /defineCloudflareConfig/, "defineCloudflareConfig is required");
+
+  const nextConfigPath = path.join(root, "next.config.mjs");
+  if (fs.existsSync(nextConfigPath)) {
+    rejectPattern(errors, fs.readFileSync(nextConfigPath, "utf8"), "next.config.mjs", /@cloudflare\/next-on-pages|setupDevPlatform/, "legacy next-on-pages development setup is forbidden");
+  }
+
+  const idsExampleSource = readFile(root, "cloudflare/ids.example.json", errors);
+  if (idsExampleSource) {
+    try {
+      const example = JSON.parse(idsExampleSource);
+      if (example.NODE_VERSION !== "22") errors.push("cloudflare/ids.example.json: NODE_VERSION must be 22");
+      if (example.SKIP_DEPENDENCY_INSTALL !== "true") {
+        errors.push("cloudflare/ids.example.json: SKIP_DEPENDENCY_INSTALL must be true");
+      }
+      if (example.CLOUDFLARE_ACCOUNT_ID !== ZERO_KV_ID) {
+        errors.push("cloudflare/ids.example.json: CLOUDFLARE_ACCOUNT_ID must remain the zero placeholder");
+      }
+      if (example.CF_D1_DATABASE_ID !== ZERO_D1_ID) {
+        errors.push("cloudflare/ids.example.json: CF_D1_DATABASE_ID must remain the zero placeholder");
+      }
+      if (example.CF_KV_NAMESPACE_ID !== ZERO_KV_ID) {
+        errors.push("cloudflare/ids.example.json: CF_KV_NAMESPACE_ID must remain the zero placeholder");
+      }
+      if (Object.hasOwn(example, "pages_project_name") || Object.hasOwn(example, "kv_preview_id")) {
+        errors.push("cloudflare/ids.example.json: legacy Pages or preview-ID fields are forbidden");
+      }
+    } catch {
+      errors.push("cloudflare/ids.example.json: malformed JSON");
+    }
+  }
+  return errors;
+}
+
+function isMain() {
+  return Boolean(process.argv[1]) && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
+}
+
+if (isMain()) {
+  const errors = checkCloudflareTemplate();
+  if (errors.length) {
+    console.error("[check:cloudflare-template] FAILED");
+    for (const error of errors) console.error(`- ${error}`);
+    process.exitCode = 1;
+  } else {
+    console.log("[check:cloudflare-template] OK (OpenNext Worker + exactly three Cron Workers; tracked IDs are placeholders)");
+  }
+}

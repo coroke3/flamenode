@@ -15,6 +15,9 @@
     "#spreadsheet/validation": "./src/lib/admin/spreadsheet/validation.ts",
     "#spreadsheet/paste": "./src/lib/admin/spreadsheet/paste.ts"
   },
+  "overrides": {
+    "workerd": "1.20260721.1"
+  },
   "description": "FlameNode - 個人制作映像とイベントをつなぐ動画プラットフォーム。",
   "engines": {
     "node": ">=22 <23"
@@ -37,7 +40,7 @@
     "check:public-api-leaks": "node --experimental-strip-types scripts/check-public-api-leaks.mjs",
     "check:cloudflare-config": "node scripts/check-cloudflare-config.mjs",
     "check:cloudflare-template": "node scripts/check-cloudflare-template.mjs",
-    "check:pages-output": "node scripts/check-pages-output.mjs",
+    "check:open-next-output": "node scripts/check-open-next-output.mjs",
     "check:db-schema": "node scripts/check-db-schema.mjs",
     "check:db-migration": "node scripts/check-db-canonical-migration.mjs",
     "check:event-owners": "node scripts/check-event-owners.mjs",
@@ -45,48 +48,48 @@
     "check:db-history": "node scripts/check-db-change-history.mjs",
     "check:project-docs": "node scripts/check-project-docs.mjs",
     "check:ui-acceptance": "node scripts/check-ui-acceptance.mjs",
-    "cf:preflight": "npm run cf:sync-ids && npm run check:cloudflare-config && npm run typecheck && npm run lint && npm run test:unit && npm run test:workers && npm run test:cloudflare-ci && npm run test:integration && npm run build && npm run pages:build && npm run check:pages-output && npm run check:cloudflare-template && npm run check:db-schema && npm run check:db-migration && npm run check:db-legacy && npm run check:event-owners && npm run check:ui-acceptance && npm run check:public-api-contract && npm run check:public-api-leaks && npm run check:docs && npm run check:db-history && npm run check:project-docs",
+    "verify:fast": "node scripts/cloudflare-verify-fast.mjs",
+    "verify:full": "npm run verify:fast && npm run test:unit && npm run test:integration && npm run check:db-schema && npm run check:db-migration && npm run check:db-legacy && npm run check:event-owners && npm run check:ui-acceptance && npm run check:public-api-contract && npm run check:docs && npm run check:db-history && npm run check:project-docs",
+    "cf:build": "node scripts/cloudflare-build.mjs",
+    "cf:deploy-production": "node scripts/cloudflare-deploy-production.mjs",
+    "cf:smoke-production": "node scripts/smoke-cloudflare.mjs",
+    "cf:cloud-build": "npm run verify:fast && npm run cf:build",
+    "cf:preflight": "npm run verify:full && npm run cf:build",
     "cf:verify-deploy": "npm run cf:preflight",
     "merge:dry-run": "node scripts/merge-dry-run.mjs",
     "test:workers": "node --test --experimental-strip-types workers/**/*.test.mjs",
+    "test:critical": "node --test --experimental-strip-types app/api/health/route.test.mjs src/lib/health/deepHealth.test.mjs src/lib/api/eventExportAuthorization.contract.test.mjs src/lib/api/publicApi.test.mjs src/lib/api/publicSlotsPage.contract.test.mjs src/lib/auth/accountLinkAdapter.execution.test.mjs src/lib/auth/origin.test.mjs src/lib/auth/ownership.test.mjs src/lib/auth/permissions/permissionResolver.test.mjs src/lib/auth/routeApiSecurity.contract.test.mjs src/lib/auth/runtimeAuth.contract.test.mjs src/lib/auth/serverActionAvailability.contract.test.mjs src/lib/auth/writeGuardCore.test.mjs src/lib/auth/xIdLifecycle.contract.test.mjs src/lib/auth/xIdUserFlow.contract.test.mjs src/lib/staticRebuild/liveApiCore.test.mjs",
     "test:notif": "node --test --experimental-strip-types src/lib/notifications/format.test.mjs",
     "test:youtube": "node --test --experimental-strip-types src/lib/youtube/id.test.mjs",
     "test:unit": "node --test --experimental-strip-types src/**/*.test.mjs",
     "test:integration": "node --test --experimental-strip-types src/**/*.integration.test.mjs",
     "test:cloudflare-ci": "node --test scripts/cloudflare-ci.test.mjs",
     "test:static-rebuild": "node --test scripts/static-rebuild.test.mjs",
-    "pages:build": "node scripts/run-next-on-pages.cjs && node scripts/pages-postbuild.mjs",
-    "pages:build:docker": "node scripts/pages-build-docker.mjs",
-    "pages:dev": "npm run pages:build && wrangler pages dev .vercel/output/static --compatibility-flag=nodejs_compat --d1=DB --r2=BUCKET --kv=KV",
-    "pages:deploy": "npm run cf:preflight && wrangler pages deploy .vercel/output/static --project-name=flamenode",
-    "workers:deploy": "npm run cf:preflight && node scripts/deploy-workers.mjs",
-    "workers:deploy:verified": "node scripts/deploy-workers.mjs",
-    "pages:deploy:verified": "wrangler pages deploy .vercel/output/static --project-name=flamenode",
     "cf:bootstrap": "node scripts/cloudflare-bootstrap.mjs",
-    "cf:sync-ids": "node scripts/sync-wrangler-ids.mjs",
-    "preview": "npm run pages:dev",
+    "preview": "node scripts/cloudflare-preview.mjs",
+    "wrangler:types": "wrangler types",
     "check:db-d1-empty": "node scripts/check-db-d1-migration.mjs empty",
     "check:db-d1-legacy": "node scripts/check-db-d1-migration.mjs legacy"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.7.4",
+    "@opennextjs/cloudflare": "1.20.1",
     "drizzle-orm": "^0.45.2",
-    "next": "15.1.6",
+    "next": "15.5.20",
     "next-auth": "^5.0.0-beta.31",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@cloudflare/next-on-pages": "^1.13.16",
     "@cloudflare/workers-types": "^4.20250109.0",
     "@types/node": "^22.10.5",
     "@types/react": "^19.0.4",
     "@types/react-dom": "^19.0.2",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.18.0",
-    "eslint-config-next": "15.1.6",
+    "eslint-config-next": "15.5.20",
     "typescript": "^5.7.3",
-    "wrangler": "4.92.0"
+    "wrangler": "4.112.0"
   }
 }

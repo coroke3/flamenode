@@ -12,6 +12,7 @@ import type {
 } from "@/lib/operationMode/types";
 import { enqueueStaticRebuild } from "@/lib/staticRebuild/enqueue";
 import type { StaticRebuildTargetType } from "@/lib/staticRebuild/types";
+import { publicStaticTargetExists } from "./staticMissPolicy";
 import {
   normalizeStaticEventDetail,
   type StaticEventDetail,
@@ -88,7 +89,11 @@ const staticReadInFlight = new Map<string, Promise<unknown | null>>();
 
 function warnPublicStaticJson(
   key: string,
-  result: "invalid_json" | "read_failed" | "enqueue_failed",
+  result:
+    | "invalid_json"
+    | "read_failed"
+    | "target_probe_failed"
+    | "enqueue_failed",
   error?: unknown,
 ): void {
   console.warn(
@@ -172,17 +177,32 @@ export async function loadPublicJson<T>(
 
   let enqueued = false;
   if (db) {
-    const priority = strategy === "static_json_only" ? "high" : "normal";
+    let targetExists = false;
     try {
-      await enqueueStaticRebuild(db, {
-        targetType: options.targetType,
-        targetId: options.targetId,
-        reason: options.reason,
-        priority,
-      });
-      enqueued = true;
+      targetExists = await publicStaticTargetExists(
+        db,
+        options.targetType,
+        options.targetId,
+      );
     } catch (error) {
-      warnPublicStaticJson(options.r2Key, "enqueue_failed", error);
+      // Do not turn a public cache miss into a write when the read-only
+      // existence probe is unavailable. The normal-mode DB fallback remains.
+      warnPublicStaticJson(options.targetType, "target_probe_failed", error);
+    }
+
+    if (targetExists) {
+      const priority = strategy === "static_json_only" ? "high" : "normal";
+      try {
+        await enqueueStaticRebuild(db, {
+          targetType: options.targetType,
+          targetId: options.targetId,
+          reason: options.reason,
+          priority,
+        });
+        enqueued = true;
+      } catch (error) {
+        warnPublicStaticJson(options.r2Key, "enqueue_failed", error);
+      }
     }
   }
 

@@ -19,6 +19,7 @@ import {
 export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
+export const dynamic = "force-dynamic";
 
 /**
  * /manage — イベント運営者向けの現場運用（審査・枠・スタッフ等）。
@@ -30,14 +31,9 @@ export default async function ManageLayout({
 }: {
   children: React.ReactNode;
 }): Promise<React.ReactElement> {
-  let user: PublicHeaderUser | null = null;
   const sessionUser = await getCurrentUser();
-  try {
-    const session = await auth();
-    user = await buildHeaderUser(session?.user);
-  } catch {
-    user = null;
-  }
+  const session = await auth();
+  const user: PublicHeaderUser | null = await buildHeaderUser(session?.user);
 
   if (!user) redirect("/entry");
   if (!user.management.canAccessAdmin && !user.management.canAccessManage) {

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { withDeduplicatingR2 } from "./r2Dedup.ts";
+import {
+  staticArtifactContentHash,
+  withDeduplicatingR2,
+} from "./r2Dedup.ts";
 
 async function hash(value) {
   const digest = await crypto.subtle.digest(
@@ -65,6 +68,30 @@ test("非文字列bodyは比較せず通常PUTする", async () => {
   const fixture = createEnv({ storedHash: null });
   const wrapped = withDeduplicatingR2(fixture.env);
   await wrapped.R2.put("binary.bin", new Uint8Array([1, 2, 3]));
+  assert.equal(fixture.calls.head, 0);
+  assert.equal(fixture.calls.put, 1);
+});
+
+test("generated_atだけが変わったJSONはR2 PUTを省略する", async () => {
+  const previous = JSON.stringify({ generated_at: 100, items: [{ id: "v1" }] });
+  const next = JSON.stringify({ generated_at: 200, items: [{ id: "v1" }] });
+  const fixture = createEnv({
+    storedHash: await staticArtifactContentHash(previous),
+  });
+  const wrapped = withDeduplicatingR2(fixture.env);
+  await wrapped.R2.put("top.json", next);
+  assert.equal(fixture.calls.head, 1);
+  assert.equal(fixture.calls.put, 0);
+});
+
+test("意味内容が変わったJSONはR2 PUTする", async () => {
+  const previous = JSON.stringify({ generated_at: 100, items: [{ id: "v1" }] });
+  const next = JSON.stringify({ generated_at: 200, items: [{ id: "v2" }] });
+  const fixture = createEnv({
+    storedHash: await staticArtifactContentHash(previous),
+  });
+  const wrapped = withDeduplicatingR2(fixture.env);
+  await wrapped.R2.put("top.json", next);
   assert.equal(fixture.calls.head, 0);
   assert.equal(fixture.calls.put, 1);
 });

@@ -1,4 +1,3 @@
-export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
@@ -12,7 +11,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { requireRouteUser } from "@/lib/auth/routeGuard";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   videoMembers,
@@ -65,17 +64,11 @@ interface CandidateAccumulator
 export async function GET(
   request: Request,
 ): Promise<Response> {
-  const session = await auth().catch(
-    () => null,
-  );
-  const user = session?.user as
-    | { id?: string }
-    | undefined;
-
-  if (!user?.id) {
+  const userGuard = await requireRouteUser();
+  if (!userGuard.ok) {
     return NextResponse.json(
-      { error: "unauthorized" },
-      { status: 401 },
+      { error: userGuard.error },
+      { status: userGuard.status },
     );
   }
 

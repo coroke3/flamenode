@@ -616,7 +616,7 @@ async function checkActiveApiEndpointsOrphanEvent(
     note: "events.public_api_enabled is canonical.",
   };
 }
-/** x_id_merge_requests の pending が放置されていないか */
+/** x_identity_requests の merge pending が放置されていないか */
 async function checkXIdMergePendingStale(
   db: AnyDb,
 ): Promise<HealthCheckResult> {

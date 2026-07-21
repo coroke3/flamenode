@@ -1,9 +1,9 @@
 # FlameNode 実装backlog
 
 > Status: Active
-> Last verified: 2026-07-13
-> Verified against commit: `37c41a4`
-> Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `docs/operations/README.md`, GitHub Actions CI
+> Last verified: 2026-07-21
+> Verified against commit: `47e6cee`
+> Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `docs/operations/README.md`, Cloudflare Workers Builds
 
 この文書は未完了事項と直近の完了項目だけを管理します。schema列一覧、完了仕様の全文、将来案の詳細は複製しません。
 
@@ -24,10 +24,12 @@ DB変更をOpenへ追加する場合の完了条件:
 
 以下はリポジトリ外の権限・resourceが必要で、コード変更だけでは完了できません。
 
-- GitHub `production` EnvironmentへのCloudflare / OAuth secretsとVariables登録
-- Production D1、R2、KV、Pages project、Cron Worker 3本の実resource確認
+- Cloudflare Workers Buildsへの単一Git接続、Build Variables / Secrets、main-only・Preview/PR無効設定
+- Production D1、R2、KV、`flamenode-web`、Cron Worker 3本の実resource確認
+- 各Worker Runtime Secretの登録とname-only preflight
 - Remote D1のbackup、承認済みmigration適用
-- 手動`Deploy Cloudflare` workflowとproduction smoke test
+- 最初のWorkers Build、`workers.dev` production smoke、custom domain切替
+- 移行観測期間後の旧Pages project削除
 
 これらはsecret不足を成功扱いにせず、production設定検査でfail-closedします。
 
@@ -37,9 +39,9 @@ DB変更をOpenへ追加する場合の完了条件:
 - `permission_preset='owner'`を代表者の正本にし、最後のowner削除・降格、自己変更、代表移譲を原子的に保護
 - 完全before/after監査、復元直前再評価、復元本体・run・RESTORE監査のall-or-nothing化
 - 投稿、relation差替、legacy import、spreadsheet、queue/outboxを条件付きSQLとD1 batchへ統一
-- 公開判定、公開DTO、R2 artifact追跡、旧artifact削除、pagination、ETagを共通化
+- 公開判定、公開DTO、R2 artifact追跡、旧artifact削除、pagination、ETagを共通化し、公開R2 missの再生成は実在する公開対象だけへ制限
 - Cron Workerを3本へ統合し、bounded LIMIT、cursor、lease、retry、dedupe、safe logを実装
-- Pages + `@cloudflare/next-on-pages`、固定artifact、manual-only production deploy workflow、smoke testを整備
+- Cloudflare Workers + OpenNext + Static Assets、Workers Builds単一正本、Web→Cron 3本の固定順deploy、fail-closed smokeを整備
 - `/entry` 2カード、4step投稿、イベントfilter、ライムtheme、Light/Dark/System、ConsoleShell、mobile drawer、Shelfを実装
 - Active / Historical文書、DB change log、migration詳細、文書・DB履歴検査を整理
 

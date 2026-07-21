@@ -150,6 +150,5 @@ test("PUBLIC_EVENT_KEYS は canonical visibility と受付期間だけを公開�
     "entry_start_time",
     "entry_end_time",
     "max_slots_per_video",
-    "max_consecutive_slots_per_entry",
   ]);
 });

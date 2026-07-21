@@ -1,9 +1,9 @@
 name = "flamenode-sync-jobs"
 main = "index.ts"
-compatibility_date = "2026-01-01"
+compatibility_date = "2026-07-21"
 compatibility_flags = ["nodejs_compat"]
 
-# Workers FreeはCron間隔にかかわらずCPU 10ms。
+# 現行のCloudflare上限は運用文書の公式リンクを正本とする。
 # 7/22/37分はmetadata・score、52分は設定済みイベントのplaylist同期に分離する。
 [triggers]
 crons = ["7,22,37,52 * * * *"]

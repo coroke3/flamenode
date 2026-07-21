@@ -1,123 +1,77 @@
 #!/usr/bin/env node
 /**
- * Cloudflare 上に FlameNode 用リソース (D1 / R2 / KV) を作成し、
- * cloudflare/ids.json を生成して wrangler.toml 群へ同期する。
- *
- * 前提: wrangler login 済み
- * 使い方: npm run cf:bootstrap
+ * Provision the three shared Cloudflare data resources without persisting or
+ * printing their production IDs. This command never creates a Pages project,
+ * applies a D1 migration, deploys a Worker, or writes a repository file.
  */
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
-const ROOT = process.cwd();
-const IDS_PATH = path.join(ROOT, "cloudflare", "ids.json");
-const EXAMPLE_PATH = path.join(ROOT, "cloudflare", "ids.example.json");
+export const BOOTSTRAP_STEPS = Object.freeze([
+  Object.freeze({ label: "D1 database", args: ["d1", "create", "flamenode_db"] }),
+  Object.freeze({ label: "R2 bucket", args: ["r2", "bucket", "create", "flamenode-storage"] }),
+  Object.freeze({ label: "KV namespace", args: ["kv", "namespace", "create", "FLAMENODE_KV"] }),
+]);
 
-const D1_NAME = "flamenode_db";
-const R2_NAME = "flamenode-storage";
-const KV_NAME = "FLAMENODE_KV";
-const PAGES_PROJECT = "flamenode";
-
-function run(cmd) {
-  console.log(`\n> ${cmd}`);
-  return execSync(cmd, { encoding: "utf8", stdio: ["pipe", "pipe", "inherit"] });
+function localWranglerCli(root) {
+  const cli = path.join(root, "node_modules", "wrangler", "bin", "wrangler.js");
+  if (!fs.existsSync(cli) || !fs.statSync(cli).isFile()) {
+    throw new Error("local Wrangler CLI is missing; run npm ci before bootstrap");
+  }
+  return cli;
 }
 
-function parseD1Id(output) {
-  const m = output.match(/database_id\s*=\s*"([^"]+)"/);
-  return m?.[1] ?? null;
-}
-
-function parseKvId(output) {
-  const m = output.match(/id\s*=\s*"([^"]+)"/);
-  return m?.[1] ?? null;
-}
-
-function ensureWranglerLogin() {
+function runWrangler({ root, args }) {
+  const cli = localWranglerCli(root);
   try {
-    run("npx wrangler whoami");
+    // stdout/stderr can contain account or resource IDs. Capture and discard it.
+    execFileSync(process.execPath, [cli, ...args], {
+      cwd: root,
+      encoding: "utf8",
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
   } catch {
+    throw new Error("Wrangler command failed; child output was suppressed to avoid leaking Cloudflare identifiers");
+  }
+}
+
+export function bootstrapCloudflareResources({ root = process.cwd(), run = runWrangler } = {}) {
+  run({ root, args: ["whoami"] });
+  for (const step of BOOTSTRAP_STEPS) {
+    console.log(`[cf:bootstrap] creating ${step.label}`);
+    run({ root, args: [...step.args] });
+    console.log(`[cf:bootstrap] ${step.label} created (identifier intentionally not printed or saved)`);
+  }
+}
+
+function isMain() {
+  return Boolean(process.argv[1]) && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
+}
+
+if (isMain()) {
+  if (!process.argv.includes("--confirm-create")) {
     console.error(
-      "[cf:bootstrap] wrangler にログインしていません。先に `npx wrangler login` を実行してください。",
+      "[cf:bootstrap] No changes made. Re-run with --confirm-create only when you intend to create D1, R2, and KV resources.",
     );
-    process.exit(1);
-  }
-}
-
-function loadExistingIds() {
-  if (fs.existsSync(IDS_PATH)) {
-    return JSON.parse(fs.readFileSync(IDS_PATH, "utf8"));
-  }
-  if (fs.existsSync(EXAMPLE_PATH)) {
-    return JSON.parse(fs.readFileSync(EXAMPLE_PATH, "utf8"));
-  }
-  return {};
-}
-
-function isPlaceholder(id) {
-  return !id || /^0+$/.test(String(id).replace(/-/g, ""));
-}
-
-function main() {
-  ensureWranglerLogin();
-
-  const ids = loadExistingIds();
-  ids.d1_database_name = D1_NAME;
-  ids.r2_bucket_name = R2_NAME;
-  ids.pages_project_name = PAGES_PROJECT;
-
-  if (isPlaceholder(ids.d1_database_id)) {
-    console.log("[cf:bootstrap] D1 を作成します…");
-    const out = run(`npx wrangler d1 create ${D1_NAME}`);
-    const created = parseD1Id(out);
-    if (created) ids.d1_database_id = created;
+    process.exitCode = 1;
   } else {
-    console.log(`[cf:bootstrap] D1 は既存 ID を使用: ${ids.d1_database_id}`);
+    try {
+      bootstrapCloudflareResources();
+      console.log(
+        [
+          "[cf:bootstrap] Resource creation finished.",
+          "Copy the identifiers from the Cloudflare Dashboard directly into Workers Builds variables:",
+          "CLOUDFLARE_ACCOUNT_ID, CF_D1_DATABASE_ID, CF_KV_NAMESPACE_ID, and CF_R2_BUCKET_NAME.",
+          "Also set NODE_VERSION=22 and SKIP_DEPENDENCY_INSTALL=true.",
+          "No Pages project, migration, deployment, secret update, or local ID artifact was created.",
+        ].join("\n"),
+      );
+    } catch (error) {
+      console.error(`[cf:bootstrap] FAILED: ${error instanceof Error ? error.message : "unknown error"}`);
+      process.exitCode = 1;
+    }
   }
-
-  console.log("[cf:bootstrap] R2 バケットを作成します (既存ならスキップ)…");
-  try {
-    run(`npx wrangler r2 bucket create ${R2_NAME}`);
-  } catch {
-    console.log("[cf:bootstrap] R2 バケットは既に存在する可能性があります。");
-  }
-
-  if (isPlaceholder(ids.kv_namespace_id)) {
-    console.log("[cf:bootstrap] KV (本番) を作成します…");
-    const out = run(`npx wrangler kv namespace create ${KV_NAME}`);
-    const created = parseKvId(out);
-    if (created) ids.kv_namespace_id = created;
-  } else {
-    console.log(`[cf:bootstrap] KV 本番は既存 ID を使用: ${ids.kv_namespace_id}`);
-  }
-
-  if (isPlaceholder(ids.kv_preview_id)) {
-    console.log("[cf:bootstrap] KV (プレビュー) を作成します…");
-    const out = run(`npx wrangler kv namespace create ${KV_NAME} --preview`);
-    const created = parseKvId(out);
-    if (created) ids.kv_preview_id = created;
-  } else {
-    console.log(`[cf:bootstrap] KV プレビューは既存 ID を使用: ${ids.kv_preview_id}`);
-  }
-
-  fs.mkdirSync(path.dirname(IDS_PATH), { recursive: true });
-  fs.writeFileSync(IDS_PATH, JSON.stringify(ids, null, 2) + "\n");
-  console.log(`[cf:bootstrap] wrote ${IDS_PATH}`);
-
-  run("node scripts/sync-wrangler-ids.mjs");
-
-  console.log(`
-[cf:bootstrap] 完了。次のステップ:
-  1. wrangler d1 migrations apply ${D1_NAME} --remote
-  2. .dev.vars を用意 (cp .dev.vars.example .dev.vars)
-  3. wrangler pages secret put … で Auth 系シークレットを登録
-  4. npm run pages:deploy
-  5. Dashboard → Pages → ${PAGES_PROJECT} → Functions で D1/R2/KV をバインド
-  6. npm run workers:deploy
-
-詳細は DEPLOY.md を参照してください。
-`);
 }
-
-main();

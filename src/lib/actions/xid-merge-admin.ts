@@ -2,8 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
-import { auth } from "@/lib/auth";
-import { getDatabase } from "@/lib/cloudflare";
+import { requireAdminWrite } from "@/lib/auth/writeGuard";
+import type { DB } from "@/lib/db/client";
 import { xIdentityRequests, xUsers } from "@/lib/db/schema";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { expectedRowCondition } from "@/lib/audit/expectedRowCondition";
@@ -21,21 +21,15 @@ export interface XIdMergeAdminResult {
   id?: string;
 }
 
-type DB = NonNullable<ReturnType<typeof getDatabase>>;
-
 async function requireAdmin(): Promise<
   | { ok: true; authUserId: string; db: DB }
   | { ok: false; result: XIdMergeAdminResult }
 > {
-  const session = await auth().catch(() => null);
-  const user = session?.user as { id?: string; role?: string } | undefined;
-  if (!user?.id) return { ok: false, result: { ok: false, message: "ログインが必要です。" } };
-  if (user.role !== "admin") {
-    return { ok: false, result: { ok: false, message: "管理者のみ操作できます。" } };
+  const guard = await requireAdminWrite("xid_links");
+  if (!guard.ok) {
+    return { ok: false, result: { ok: false, message: guard.message } };
   }
-  const db = getDatabase();
-  if (!db) return { ok: false, result: { ok: false, message: "DB に接続できません。" } };
-  return { ok: true, authUserId: user.id, db };
+  return { ok: true, authUserId: guard.user.id, db: guard.db };
 }
 
 function revalidateMergePaths(sourceXUserId?: string | null, targetXUserId?: string | null): void {

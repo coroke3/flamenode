@@ -1,4 +1,3 @@
-export const runtime = "edge";
 
 import { getLiveEventSummary } from "@/lib/staticRebuild/liveApi";
 import { handleLiveApiGet } from "@/lib/staticRebuild/liveGuard";

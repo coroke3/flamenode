@@ -49,9 +49,7 @@ function statusHint(status: SlotStatus): string {
 
 function slotOwnerLabel(slot: SlotRow | null): string | null {
   const displayName = slot?.display_name?.trim();
-  if (displayName) return displayName;
-  const xId = slot?.x_user_id?.trim();
-  return xId ? `@${xId}` : null;
+  return displayName || null;
 }
 
 function slotTimeLabel(slot: SlotRow | null): string {

@@ -14,6 +14,7 @@ export type YoutubeQuotaReservation = {
   reservedUnits: number;
   usedUnits: number;
   dailyBudgetUnits: number;
+  d1Changes: number;
 };
 
 export type YoutubeQuotaSnapshot = {
@@ -35,13 +36,15 @@ export async function reserveYoutubeQuota(
   env: YoutubeQuotaEnv,
   requestedUnits: number,
   nowSec: number,
+  signal?: AbortSignal,
 ): Promise<YoutubeQuotaReservation | null> {
+  signal?.throwIfAborted();
   const requested = positiveInteger(requestedUnits);
   const dailyBudgetUnits = youtubeDailyBudgetUnits(env.YOUTUBE_DAILY_QUOTA_LIMIT);
   if (requested <= 0 || requested > dailyBudgetUnits) return null;
 
   const quotaDay = youtubeQuotaDay(new Date(nowSec * 1_000));
-  const row = await env.DB.prepare(
+  const result = await env.DB.prepare(
     `INSERT INTO external_api_quota_usage (
        provider, quota_day, used_units, limit_units, updated_at
      ) VALUES (?1, ?2, ?3, ?4, ?5)
@@ -53,14 +56,17 @@ export async function reserveYoutubeQuota(
      RETURNING used_units`,
   )
     .bind(YOUTUBE_PROVIDER_KEY, quotaDay, requested, dailyBudgetUnits, nowSec)
-    .first<{ used_units: number }>();
+    .all<{ used_units: number }>();
+  signal?.throwIfAborted();
 
+  const row = result.results?.[0];
   if (!row) return null;
   return {
     quotaDay,
     reservedUnits: requested,
     usedUnits: Number(row.used_units ?? 0),
     dailyBudgetUnits,
+    d1Changes: Math.max(0, Number(result.meta?.changes ?? 0)),
   };
 }
 
@@ -70,14 +76,16 @@ export async function refundYoutubeQuota(
   reservation: YoutubeQuotaReservation,
   unusedUnits: number,
   nowSec: number,
-): Promise<void> {
+  signal?: AbortSignal,
+): Promise<number> {
+  signal?.throwIfAborted();
   const unused = Math.min(
     reservation.reservedUnits,
     positiveInteger(unusedUnits),
   );
-  if (unused <= 0) return;
+  if (unused <= 0) return 0;
 
-  await env.DB.prepare(
+  const result = await env.DB.prepare(
     `UPDATE external_api_quota_usage
         SET used_units = MAX(0, used_units - ?3),
             updated_at = ?4
@@ -86,12 +94,16 @@ export async function refundYoutubeQuota(
   )
     .bind(YOUTUBE_PROVIDER_KEY, reservation.quotaDay, unused, nowSec)
     .run();
+  signal?.throwIfAborted();
+  return Math.max(0, Number(result.meta?.changes ?? 0));
 }
 
 export async function loadYoutubeQuotaSnapshot(
   env: YoutubeQuotaEnv,
   nowSec: number,
+  signal?: AbortSignal,
 ): Promise<YoutubeQuotaSnapshot> {
+  signal?.throwIfAborted();
   const quotaDay = youtubeQuotaDay(new Date(nowSec * 1_000));
   const dailyBudgetUnits = youtubeDailyBudgetUnits(env.YOUTUBE_DAILY_QUOTA_LIMIT);
   const row = await env.DB.prepare(
@@ -103,6 +115,7 @@ export async function loadYoutubeQuotaSnapshot(
   )
     .bind(YOUTUBE_PROVIDER_KEY, quotaDay)
     .first<{ used_units: number }>();
+  signal?.throwIfAborted();
   const usedUnits = Math.max(0, Number(row?.used_units ?? 0));
   return {
     quotaDay,

@@ -1,0 +1,75 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { test } from "node:test";
+
+const [cloudflare, auth, authRoute, authRouteError, origin, currentUser, ...routeLayouts] = await Promise.all([
+  readFile(new URL("../cloudflare.ts", import.meta.url), "utf8"),
+  readFile(new URL("./index.ts", import.meta.url), "utf8"),
+  readFile(new URL("../../../app/api/auth/[...nextauth]/route.ts", import.meta.url), "utf8"),
+  readFile(new URL("./authRouteError.ts", import.meta.url), "utf8"),
+  readFile(new URL("./origin.ts", import.meta.url), "utf8"),
+  readFile(new URL("./currentUser.ts", import.meta.url), "utf8"),
+  readFile(new URL("../../../app/(public)/layout.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../../../app/(auth)/layout.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../../../app/(manage)/layout.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../../../app/(admin)/layout.tsx", import.meta.url), "utf8"),
+]);
+
+test("Auth routeは既知のlazy config障害だけをGET/POST共通の503へ変換する", () => {
+  assert.match(authRoute, /handleAuthRouteRequest\(handlers\.GET, request\)/);
+  assert.match(authRoute, /handleAuthRouteRequest\(handlers\.POST, request\)/);
+  assert.doesNotMatch(authRoute, /export const \{ GET, POST \} = handlers/);
+  assert.match(authRouteError, /AUTH_SECRET_MISSING/);
+  assert.match(authRouteError, /NEXT_PUBLIC_SITE_URL_MISSING/);
+  assert.match(authRouteError, /CloudflareBindingsUnavailableError/);
+  assert.match(authRouteError, /auth_temporarily_unavailable/);
+  assert.match(authRouteError, /status: 503/);
+  assert.match(authRouteError, /"Cache-Control": "no-store"/);
+  assert.match(authRouteError, /if \(!isAuthRouteTemporarilyUnavailable\(error\)\) throw error/);
+});
+
+test("runtime bindingはOpenNext contextを使いPages symbolとrequired型castを残さない", () => {
+  assert.match(cloudflare, /from "@opennextjs\/cloudflare"/);
+  assert.match(cloudflare, /getCloudflareContext\(\)\.env/);
+  assert.match(cloudflare, /getCloudflareContext\(\{ async: true \}\)/);
+  assert.doesNotMatch(cloudflare, /__cloudflare-request-context__/);
+  assert.doesNotMatch(cloudflare, /as D1Database|as R2Bucket|as KVNamespace/);
+  assert.match(cloudflare, /CloudflareBindingsUnavailableError/);
+  assert.match(cloudflare, /new WeakMap<D1Database, DB>\(\)/);
+  assert.match(cloudflare, /memoizedDbs\.delete\(binding\)/);
+});
+
+test("Auth origin・Host・Discord scopeは固定設定をfail-closedで使う", () => {
+  assert.doesNotMatch(auth, /process\.env\.(AUTH_URL|NEXTAUTH_URL|AUTH_SECRET)\s*=/);
+  assert.match(auth, /configuredHttpOrigin\(env\.AUTH_URL, "AUTH_URL", \{/);
+  assert.match(auth, /configuredHttpOrigin\([\s\S]*env\.NEXT_PUBLIC_SITE_URL/);
+  assert.match(auth, /AUTH_ORIGIN_MISMATCH/);
+  assert.match(auth, /env\.FLAMENODE_LOCAL_PREVIEW === "1"/);
+  assert.match(origin, /LOCALHOST_FORBIDDEN/);
+  assert.match(auth, /trustHost: true/);
+  assert.doesNotMatch(auth, /AUTH_TRUST_HOST/);
+  assert.match(auth, /params: \{ scope: "identify email" \}/);
+  assert.doesNotMatch(auth, /identify email guilds/);
+  assert.doesNotMatch(auth, /redirect\(\{ url, baseUrl \}\)/);
+});
+
+test("DBから消失したsession userをsession内roleへfallbackしない", () => {
+  assert.match(currentUser, /if \(loaded\.kind === "missing"\) return null/);
+  assert.match(
+    currentUser,
+    /throw new CurrentUserUnavailableError\("database_unavailable", error\)/,
+  );
+  assert.doesNotMatch(
+    currentUser,
+    /if \(loaded\.kind === "missing"\) return fallback/,
+  );
+});
+
+test("認証layoutは動的renderを明示しNext.js制御フロー例外を握り潰さない", () => {
+  assert.match(currentUser, /unstable_rethrow\(error\)/);
+  for (const layout of routeLayouts) {
+    assert.match(layout, /export const dynamic = "force-dynamic"/);
+    assert.doesNotMatch(layout, /catch \(error\)/);
+    assert.match(layout, /await buildHeaderUser/);
+  }
+});

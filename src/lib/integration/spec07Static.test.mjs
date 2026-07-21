@@ -73,23 +73,23 @@ test("local development shares Wrangler bindings and persistence with migration 
   const nextConfig = fs.readFileSync(path.join(root, "next.config.mjs"), "utf8");
   const grantAdmin = fs.readFileSync(path.join(root, "scripts/grant-admin.cjs"), "utf8");
 
-  assert.match(nextConfig, /setupDevPlatform/);
+  assert.match(nextConfig, /initOpenNextCloudflareForDev/);
   assert.match(nextConfig, /configPath:\s*"wrangler\.toml"/);
   assert.match(nextConfig, /persist:\s*\{\s*path:\s*"\.wrangler\/state\/v3"\s*\}/);
   assert.match(nextConfig, /remoteBindings:\s*false/);
   assert.match(nextConfig, /envFiles:\s*\[\]/);
 
-  for (const source of [instrumentation, grantAdmin]) {
-    assert.match(source, /getPlatformProxy/);
-    assert.match(source, /configPath:\s*"wrangler\.toml"/);
-    assert.match(source, /persist:\s*\{\s*path:\s*"\.wrangler\/state\/v3"\s*\}/);
-    assert.match(source, /remoteBindings:\s*false/);
-    assert.match(source, /envFiles:\s*\[\]/);
-    assert.doesNotMatch(source, /d1Databases|DB:\s*"flamenode_db"/);
-  }
+  assert.match(instrumentation, /getCloudflareContext\(\{ async:\s*true \}\)/);
+  assert.match(instrumentation, /await assertLocalSchemaVersion\(env\.DB\)/);
+  assert.match(instrumentation, /2026-07-20-canonical-1/);
+  assert.doesNotMatch(instrumentation, /getPlatformProxy|__FLAMENODE_LOCAL_PLATFORM/);
 
-  assert.match(instrumentation, /await assertLocalSchemaVersion\(DB\)/);
-  assert.match(instrumentation, /__FLAMENODE_LOCAL_PLATFORM\s*=\s*platform/);
+  assert.match(grantAdmin, /getPlatformProxy/);
+  assert.match(grantAdmin, /configPath:\s*"wrangler\.toml"/);
+  assert.match(grantAdmin, /persist:\s*\{\s*path:\s*"\.wrangler\/state\/v3"\s*\}/);
+  assert.match(grantAdmin, /remoteBindings:\s*false/);
+  assert.match(grantAdmin, /envFiles:\s*\[\]/);
+  assert.doesNotMatch(grantAdmin, /d1Databases|DB:\s*"flamenode_db"/);
   assert.match(grantAdmin, /const db = platform\.env\.DB/);
   assert.match(grantAdmin, /finally\s*\{\s*await platform\.dispose\(\)/s);
 });

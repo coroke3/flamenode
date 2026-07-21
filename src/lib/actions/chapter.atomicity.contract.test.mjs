@@ -9,6 +9,27 @@ const action = read("./chapter.ts");
 const limits = read("./chapterLimits.ts");
 const composer = read("../../components/video/ChapterComposer.tsx");
 
+function actionSection(startMarker, endMarker) {
+  const start = action.indexOf(startMarker);
+  const end = action.indexOf(endMarker, start + startMarker.length);
+  assert.notEqual(start, -1, `${startMarker} が見つかりません`);
+  assert.notEqual(end, -1, `${endMarker} が見つかりません`);
+  return action.slice(start, end);
+}
+
+const createAction = actionSection(
+  "export async function createChapter",
+  "export async function updateChapter",
+);
+const updateAction = actionSection(
+  "export async function updateChapter",
+  "export async function deleteChapter",
+);
+const deleteAction = actionSection(
+  "export async function deleteChapter",
+  "export async function createChaptersBulk",
+);
+
 test("全チャプターwriteは各1回のmutateWithAuditでqueueまで保存する", () => {
   assert.equal((action.match(/await mutateWithAudit\(db,/g) ?? []).length, 4);
   assert.equal((action.match(/await buildStaticRebuildQueueBatch\(db,/g) ?? []).length, 4);
@@ -23,9 +44,26 @@ test("更新と削除は全scalar snapshot CASと完全な監査snapshotを使�
     (action.match(/expectedRowCondition\(\{ expectedCurrent: existing \}\)/g) ?? []).length,
     2,
   );
-  assert.match(action, /operation: "UPDATE", before: \{ \.\.\.existing \}, after: \{ \.\.\.after \}/);
-  assert.match(action, /operation: "DELETE", before: \{ \.\.\.existing \}, after: null/);
-  assert.match(action, /operation: "CREATE", before: null, after: \{ \.\.\.after \}/);
+  assert.match(
+    updateAction,
+    /expectedMutationChanges:\s*\[\s*1,\s*\.\.\.queue\.expectedChanges\s*\]/,
+  );
+  assert.match(
+    deleteAction,
+    /expectedMutationChanges:\s*\[\s*1,\s*\.\.\.queue\.expectedChanges\s*\]/,
+  );
+  assert.match(
+    updateAction,
+    /operation:\s*"UPDATE",[\s\S]*?before:\s*\{\s*\.\.\.existing\s*\},[\s\S]*?after:\s*\{\s*\.\.\.after\s*\}/,
+  );
+  assert.match(
+    deleteAction,
+    /operation:\s*"DELETE",[\s\S]*?before:\s*\{\s*\.\.\.existing\s*\},[\s\S]*?after:\s*null/,
+  );
+  assert.match(
+    createAction,
+    /operation:\s*"CREATE",[\s\S]*?before:\s*null,[\s\S]*?after:\s*\{\s*\.\.\.after\s*\}/,
+  );
 });
 
 test("CSV上限はサーバーとUIで共通化され、書込み前に拒否する", () => {

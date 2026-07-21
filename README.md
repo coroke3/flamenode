@@ -1,8 +1,8 @@
 # FlameNode
 
 > Status: Active
-> Last verified: 2026-07-14
-> Verified against commit: `6dbe07a`
+> Last verified: 2026-07-21
+> Verified against commit: `47e6cee`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/`, `docs/README.md`, `package.json`
 
 YouTube埋め込みを使い、イベント参加、枠確保、投稿審査、上映、アーカイブを一体で扱うCloudflareネイティブな動画プラットフォーム。
@@ -23,9 +23,10 @@ YouTube埋め込みを使い、イベント参加、枠確保、投稿審査、�
 | 領域 | 構成 |
 | --- | --- |
 | Web | Next.js 15 App Router、React 19、TypeScript |
-| Hosting | Cloudflare Pages + `@cloudflare/next-on-pages` |
+| Hosting | Cloudflare Workers + Workers Static Assets + `@opennextjs/cloudflare` |
 | Data | D1 + Drizzle ORM、R2、KV |
 | Background | Cron Worker 3本: `fast-jobs` / `content-jobs` / `sync-jobs` |
+| CI/CD | Cloudflare Workers Builds。`main`の単一BuildからWeb→Cron 3本を固定順deploy |
 | Auth | Auth.js v5 + Discord OAuth |
 | UI | CSS Modules + CSS custom properties。Tailwind不使用 |
 
@@ -59,7 +60,9 @@ npm run dev
 - 権限はUIだけでなくServer ActionまたはRoute Handlerで検証する。
 - 公開APIは明示DTOだけを返す。
 - 旧列fallback、二重書込み、runtime DDLをActive codeへ戻さない。
-- Pages、D1、R2、KV、Cron Worker 3本の構成を維持する。
+- Webは`flamenode-web` + OpenNext + Workers Static Assets、背景処理はCron Worker 3本を維持する。
+- 本番デプロイ正本はCloudflare Workers Buildsだけとし、GitHub Actionsや個別WorkerのGit連携を追加しない。
+- 本番D1 migrationは自動適用せず、read-only preflight後に運用者が明示適用する。
 
 ## 主な機能
 

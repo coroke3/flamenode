@@ -6,7 +6,7 @@ import {
   readAuditCleanupSettings,
 } from "./index.ts";
 
-function makePreparedMock(sql, recorder, firstReturn) {
+function makePreparedMock(sql, recorder, firstReturn, runResult = { success: true }) {
   return {
     bind(...args) {
       this.binds = args;
@@ -18,13 +18,14 @@ function makePreparedMock(sql, recorder, firstReturn) {
     },
     async run() {
       recorder.push({ sql, op: "run", binds: this.binds ?? [] });
-      return { success: true };
+      return runResult;
     },
   };
 }
 
 function makeEnv(options = {}) {
   const recorder = [];
+  let mutationIndex = 0;
   return {
     recorder,
     env: {
@@ -33,7 +34,10 @@ function makeEnv(options = {}) {
           const firstReturn = sql.includes("audit_compact_after_days")
             ? options.settings ?? { audit_compact_after_days: 30 }
             : null;
-          return makePreparedMock(sql, recorder, firstReturn);
+          const runResult = sql.includes("audit_compact_after_days")
+            ? { success: true }
+            : { success: true, meta: { changes: options.changes?.[mutationIndex++] ?? 0 } };
+          return makePreparedMock(sql, recorder, firstReturn, runResult);
         },
       },
     },
@@ -101,4 +105,85 @@ test("設定読取の一時エラーは既定値へフォールバックしclean
   const result = await runCleanupWithRetry(env);
   assert.equal(result.failed, 0);
   assert.equal(firstCalls, 1);
+});
+
+test("cleanup changes sum", async () => {
+  const { env } = makeEnv({ changes: [1, 2, 3, 5, 8, 13] });
+  assert.equal(await runCleanup(env), 32);
+});
+
+test("cleanup retries once and reports metrics", async () => {
+  let runCalls = 0;
+  const env = {
+    DB: {
+      prepare(sql) {
+        return {
+          bind() { return this; },
+          async first() {
+            return sql.includes("audit_compact_after_days") ? { audit_compact_after_days: 30 } : null;
+          },
+          async run() {
+            runCalls += 1;
+            if (runCalls === 1) throw new Error("network unavailable");
+            return { success: true, meta: { changes: 4 } };
+          },
+        };
+      },
+    },
+  };
+  assert.deepEqual(await runCleanupWithRetry(env), {
+    processed: 1, failed: 0, d1_changes: 24, retry_count: 1,
+    external_api_calls: 0, quota_stopped: false,
+  });
+});
+
+test("cleanup gives up on schema errors", async () => {
+  const env = {
+    DB: {
+      prepare(sql) {
+        return {
+          bind() { return this; },
+          async first() {
+            return sql.includes("audit_compact_after_days") ? { audit_compact_after_days: 30 } : null;
+          },
+          async run() { throw new Error("no such table: audit_logs"); },
+        };
+      },
+    },
+  };
+  assert.deepEqual(await runCleanupWithRetry(env), {
+    processed: 0, failed: 1, d1_changes: 0, retry_count: 0,
+    external_api_calls: 0, quota_stopped: false,
+  });
+});
+
+test("cleanup reports committed changes from an attempt that later gives up", async () => {
+  let runCalls = 0;
+  const env = {
+    DB: {
+      prepare(sql) {
+        return {
+          bind() { return this; },
+          async first() {
+            return sql.includes("audit_compact_after_days")
+              ? { audit_compact_after_days: 30 }
+              : null;
+          },
+          async run() {
+            runCalls += 1;
+            if (runCalls === 1) return { meta: { changes: 2 } };
+            throw new Error("no such table: audit_logs");
+          },
+        };
+      },
+    },
+  };
+  assert.deepEqual(await runCleanupWithRetry(env), {
+    processed: 0,
+    failed: 1,
+    d1_changes: 2,
+    retry_count: 0,
+    external_api_calls: 0,
+    quota_stopped: false,
+  });
 });

@@ -28,10 +28,13 @@ const DISCORD_MAX_RETRY_AFTER_MS = 15 * 60 * 1_000;
 const DISCORD_DM_CHANNEL_TTL_SEC = 30 * 24 * 60 * 60;
 const DISCORD_DM_CHANNEL_CACHE_MAX = 1_000;
 const DISCORD_GLOBAL_COOLDOWN_KEY = "discord:global";
+const DISCORD_COOLDOWN_KV_PREFIX = "external-api:discord:cooldown:";
 /** 6件 × 未cache時最大2 request。inline retryは行わない。 */
 export const MAX_DISCORD_EXTERNAL_REQUESTS_PER_RUN = 12;
 /** 2 writes/run × 288 runs/day = 最大576 writes/day。KV Freeの余裕を残す。 */
 export const MAX_DISCORD_DM_KV_WRITES_PER_RUN = 2;
+/** 429発生時だけ共有cooldownを保存する。通常runでは0 write。 */
+export const MAX_DISCORD_COOLDOWN_KV_WRITES_PER_RUN = 2;
 /**
  * Free plan の1実行50 subrequestsに収める。
  * D1 claim/完了更新、KV channel cache、Discord最大2 requestを含めても余裕が残る。
@@ -74,6 +77,28 @@ const discordCooldowns =
 globalState.__flamenodeDiscordDmChannels = dmChannelCache;
 globalState.__flamenodeDiscordCooldowns = discordCooldowns;
 
+function abortReason(signal: AbortSignal, fallback = "notification queue aborted"): Error {
+  if (signal.reason instanceof Error) return signal.reason;
+  const error = new Error(
+    signal.reason === undefined ? fallback : String(signal.reason),
+  );
+  error.name = "AbortError";
+  return error;
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortReason(signal);
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+function rethrowAbort(error: unknown, signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortReason(signal);
+  if (isAbortError(error)) throw error;
+}
+
 function boundedLimit(value: unknown): number {
   const requested = Number(value ?? MAX_NOTIFICATION_BATCH);
   if (!Number.isFinite(requested)) return MAX_NOTIFICATION_BATCH;
@@ -92,7 +117,12 @@ function dmCacheKey(discordId: string): string {
   return `external-api:discord:dm-channel:${discordId}`;
 }
 
-async function getCachedDmChannel(env: Env, discordId: string): Promise<string | null> {
+async function getCachedDmChannel(
+  env: Env,
+  discordId: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  throwIfAborted(signal);
   const now = Date.now();
   const local = dmChannelCache.get(discordId);
   if (local && local.expiresAt > now) {
@@ -101,9 +131,12 @@ async function getCachedDmChannel(env: Env, discordId: string): Promise<string |
     return local.channelId;
   }
   if (local) dmChannelCache.delete(discordId);
+  throwIfAborted(signal);
   if (!env.KV) return null;
   try {
+    throwIfAborted(signal);
     const channelId = (await env.KV.get(dmCacheKey(discordId)))?.trim();
+    throwIfAborted(signal);
     if (!channelId) return null;
     dmChannelCache.set(discordId, {
       channelId,
@@ -111,7 +144,8 @@ async function getCachedDmChannel(env: Env, discordId: string): Promise<string |
     });
     pruneOldest(dmChannelCache, DISCORD_DM_CHANNEL_CACHE_MAX);
     return channelId;
-  } catch {
+  } catch (error) {
+    rethrowAbort(error, signal);
     return null;
   }
 }
@@ -121,18 +155,24 @@ async function storeDmChannel(
   discordId: string,
   channelId: string,
   kvWriteBudget: ExternalRequestBudget,
+  signal?: AbortSignal,
 ): Promise<void> {
+  throwIfAborted(signal);
   dmChannelCache.set(discordId, {
     channelId,
     expiresAt: Date.now() + DISCORD_DM_CHANNEL_TTL_SEC * 1_000,
   });
   pruneOldest(dmChannelCache, DISCORD_DM_CHANNEL_CACHE_MAX);
+  throwIfAborted(signal);
   if (!env.KV || !kvWriteBudget.consume()) return;
   try {
+    throwIfAborted(signal);
     await env.KV.put(dmCacheKey(discordId), channelId, {
       expirationTtl: DISCORD_DM_CHANNEL_TTL_SEC,
     });
-  } catch {
+    throwIfAborted(signal);
+  } catch (error) {
+    rethrowAbort(error, signal);
     // cache保存失敗でも今回の配送は継続する。
   }
 }
@@ -141,12 +181,18 @@ async function evictDmChannel(
   env: Env,
   discordId: string,
   kvWriteBudget: ExternalRequestBudget,
+  signal?: AbortSignal,
 ): Promise<void> {
+  throwIfAborted(signal);
   dmChannelCache.delete(discordId);
+  throwIfAborted(signal);
   if (!env.KV || !kvWriteBudget.consume()) return;
   try {
+    throwIfAborted(signal);
     await env.KV.delete(dmCacheKey(discordId));
-  } catch {
+    throwIfAborted(signal);
+  } catch (error) {
+    rethrowAbort(error, signal);
     // 次回の404で再度回復できるためbest effort。
   }
 }
@@ -160,39 +206,132 @@ function activeCooldownUntil(key: string, now: number): number {
   return until;
 }
 
-function cooldownSeconds(routeKey: string, now = Date.now()): number {
+async function cooldownKvKey(routeKey: string): Promise<string> {
+  if (routeKey === DISCORD_GLOBAL_COOLDOWN_KEY) {
+    return `${DISCORD_COOLDOWN_KV_PREFIX}global`;
+  }
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(routeKey),
+  );
+  const hash = [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return `${DISCORD_COOLDOWN_KV_PREFIX}route:${hash}`;
+}
+
+async function sharedCooldownUntil(
+  env: Pick<Env, "KV">,
+  key: string,
+  now: number,
+  readCache: Map<string, number>,
+  signal?: AbortSignal,
+): Promise<number> {
+  throwIfAborted(signal);
+  const cached = readCache.get(key);
+  if (cached !== undefined) return cached > now ? cached : 0;
+  if (!env.KV) return 0;
+  try {
+    const raw = await env.KV.get(await cooldownKvKey(key));
+    throwIfAborted(signal);
+    const parsed = Number(raw);
+    const until =
+      Number.isFinite(parsed) && parsed > now
+        ? Math.min(parsed, now + DISCORD_MAX_RETRY_AFTER_MS)
+        : 0;
+    readCache.set(key, until);
+    return until;
+  } catch (error) {
+    rethrowAbort(error, signal);
+    readCache.set(key, 0);
+    return 0;
+  }
+}
+
+async function cooldownSeconds(
+  env: Pick<Env, "KV">,
+  routeKey: string,
+  readCache: Map<string, number>,
+  now = Date.now(),
+  signal?: AbortSignal,
+): Promise<number> {
+  const [sharedGlobal, sharedRoute] = await Promise.all([
+    sharedCooldownUntil(env, DISCORD_GLOBAL_COOLDOWN_KEY, now, readCache, signal),
+    sharedCooldownUntil(env, routeKey, now, readCache, signal),
+  ]);
+  throwIfAborted(signal);
   const until = Math.max(
     activeCooldownUntil(DISCORD_GLOBAL_COOLDOWN_KEY, now),
     activeCooldownUntil(routeKey, now),
+    sharedGlobal,
+    sharedRoute,
   );
   return until > 0 ? Math.max(1, Math.ceil((until - now) / 1_000)) : 0;
 }
 
-function setCooldown(routeKey: string, delayMs: number): void {
+async function setCooldown(
+  env: Pick<Env, "KV">,
+  routeKey: string,
+  delayMs: number,
+  kvWriteBudget: ExternalRequestBudget,
+  signal?: AbortSignal,
+): Promise<void> {
   if (delayMs <= 0) return;
-  discordCooldowns.set(routeKey, Date.now() + delayMs);
+  const until = Date.now() + Math.min(DISCORD_MAX_RETRY_AFTER_MS, delayMs);
+  discordCooldowns.set(routeKey, until);
   pruneOldest(discordCooldowns, 512);
+  throwIfAborted(signal);
+  if (!env.KV || !kvWriteBudget.consume()) return;
+  try {
+    await env.KV.put(await cooldownKvKey(routeKey), String(until), {
+      expirationTtl: Math.max(60, Math.ceil(delayMs / 1_000) + 60),
+    });
+    throwIfAborted(signal);
+  } catch (error) {
+    rethrowAbort(error, signal);
+    // D1 outbox leaseとnext_attempt_atが正本。KV共有失敗時も配送結果を上書きしない。
+  }
 }
 
-function recordDiscordRateHeaders(routeKey: string, response: Response): void {
+async function recordDiscordRateHeaders(
+  env: Pick<Env, "KV">,
+  routeKey: string,
+  response: Response,
+  kvWriteBudget: ExternalRequestBudget,
+  signal?: AbortSignal,
+): Promise<void> {
   const remaining = Number(response.headers.get("x-ratelimit-remaining"));
   const resetAfterSeconds = Number(response.headers.get("x-ratelimit-reset-after"));
   if (remaining === 0 && Number.isFinite(resetAfterSeconds) && resetAfterSeconds > 0) {
-    setCooldown(
+    await setCooldown(
+      env,
       routeKey,
       Math.min(DISCORD_MAX_RETRY_AFTER_MS, Math.ceil(resetAfterSeconds * 1_000)),
+      kvWriteBudget,
+      signal,
     );
   }
 }
 
 async function discordRequest(
+  env: Pick<Env, "KV">,
   routeKey: string,
   input: string,
   init: RequestInit,
   budget: ExternalRequestBudget,
+  cooldownKvWriteBudget: ExternalRequestBudget,
+  cooldownReadCache: Map<string, number>,
   fetchImpl: FetchLike = fetch,
+  signal?: AbortSignal,
 ): Promise<DiscordRequestResult> {
-  const deferredSeconds = cooldownSeconds(routeKey);
+  throwIfAborted(signal);
+  const deferredSeconds = await cooldownSeconds(
+    env,
+    routeKey,
+    cooldownReadCache,
+    Date.now(),
+    signal,
+  );
   if (deferredSeconds > 0) {
     return {
       deferred: {
@@ -202,10 +341,11 @@ async function discordRequest(
       },
     };
   }
+  throwIfAborted(signal);
   try {
     const response = await fetchWithTimeout(
       input,
-      init,
+      { ...init, signal },
       {
         timeoutMs: DISCORD_FETCH_TIMEOUT_MS,
         budget,
@@ -215,9 +355,20 @@ async function discordRequest(
       },
       fetchImpl,
     );
-    recordDiscordRateHeaders(routeKey, response);
+    if (signal?.aborted) {
+      await cancelResponseBody(response);
+      throw abortReason(signal);
+    }
+    await recordDiscordRateHeaders(
+      env,
+      routeKey,
+      response,
+      cooldownKvWriteBudget,
+      signal,
+    );
     return { response };
   } catch (error) {
+    rethrowAbort(error, signal);
     return {
       deferred: {
         ok: false,
@@ -229,10 +380,14 @@ async function discordRequest(
 }
 
 async function discordFailure(
+  env: Pick<Env, "KV">,
   routeKey: string,
   response: Response,
   fallbackCode: string,
+  cooldownKvWriteBudget: ExternalRequestBudget,
+  signal?: AbortSignal,
 ): Promise<DeliveryOutcome> {
+  throwIfAborted(signal);
   let retryAfterMs = parseRetryAfterMs(
     response.headers.get("retry-after"),
     DISCORD_MAX_RETRY_AFTER_MS,
@@ -254,15 +409,26 @@ async function discordFailure(
           Math.ceil(seconds * 1_000),
         );
       }
-    } catch {
+      throwIfAborted(signal);
+    } catch (error) {
+      rethrowAbort(error, signal);
       await cancelResponseBody(response);
+      throwIfAborted(signal);
     }
   } else {
     await cancelResponseBody(response);
+    throwIfAborted(signal);
   }
 
+  throwIfAborted(signal);
   if (retryAfterMs != null && retryAfterMs > 0) {
-    setCooldown(globalLimit ? DISCORD_GLOBAL_COOLDOWN_KEY : routeKey, retryAfterMs);
+    await setCooldown(
+      env,
+      globalLimit ? DISCORD_GLOBAL_COOLDOWN_KEY : routeKey,
+      retryAfterMs,
+      cooldownKvWriteBudget,
+      signal,
+    );
   }
   const permanent = response.status === 401 || response.status === 403 || response.status === 404;
   return {
@@ -274,8 +440,14 @@ async function discordFailure(
   };
 }
 
-async function recoverExpiredLeases(env: Env, now: number, limit: number): Promise<void> {
-  await env.DB.prepare(
+async function recoverExpiredLeases(
+  env: Env,
+  now: number,
+  limit: number,
+  signal?: AbortSignal,
+): Promise<number> {
+  throwIfAborted(signal);
+  const pendingResult = await env.DB.prepare(
     `UPDATE notification_outbox
         SET status = 'pending', processing_started_at = NULL,
             lease_token = NULL, lease_expires_at = NULL,
@@ -287,8 +459,10 @@ async function recoverExpiredLeases(env: Env, now: number, limit: number): Promi
         AND COALESCE(attempt_count, 0) < ?2
       LIMIT ?3`,
   ).bind(now, MAX_RETRIES, limit).run();
+  throwIfAborted(signal);
 
-  await env.DB.prepare(
+  throwIfAborted(signal);
+  const deadLetterResult = await env.DB.prepare(
     `UPDATE notification_outbox
         SET status = 'dead_letter', processing_started_at = NULL,
             lease_token = NULL, lease_expires_at = NULL,
@@ -299,9 +473,21 @@ async function recoverExpiredLeases(env: Env, now: number, limit: number): Promi
         AND COALESCE(attempt_count, 0) >= ?2
       LIMIT ?3`,
   ).bind(now, MAX_RETRIES, limit).run();
+  throwIfAborted(signal);
+  return (
+    Math.max(0, Number(pendingResult.meta?.changes ?? 0)) +
+    Math.max(0, Number(deadLetterResult.meta?.changes ?? 0))
+  );
 }
 
-async function claimOutboxRow(env: Env, row: OutboxRow, token: string, now: number): Promise<boolean> {
+async function claimOutboxRow(
+  env: Env,
+  row: OutboxRow,
+  token: string,
+  now: number,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  throwIfAborted(signal);
   const result = await env.DB.prepare(
     `UPDATE notification_outbox
         SET status = 'processing', processing_started_at = ?1,
@@ -310,10 +496,18 @@ async function claimOutboxRow(env: Env, row: OutboxRow, token: string, now: numb
         AND COALESCE(attempt_count, 0) < ?5
         AND (next_attempt_at IS NULL OR next_attempt_at <= ?1)`,
   ).bind(now, token, now + PROCESSING_LEASE_SEC, row.id, MAX_RETRIES).run();
+  throwIfAborted(signal);
   return (result.meta?.changes ?? 0) === 1;
 }
 
-async function markSent(env: Env, rowId: string, token: string, now: number): Promise<boolean> {
+async function markSent(
+  env: Env,
+  rowId: string,
+  token: string,
+  now: number,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  throwIfAborted(signal);
   const result = await env.DB.prepare(
     `UPDATE notification_outbox
         SET status = 'sent', processing_started_at = NULL,
@@ -321,6 +515,7 @@ async function markSent(env: Env, rowId: string, token: string, now: number): Pr
             next_attempt_at = NULL, last_error = NULL, processed_at = ?1
       WHERE id = ?2 AND status = 'processing' AND lease_token = ?3`,
   ).bind(now, rowId, token).run();
+  throwIfAborted(signal);
   return (result.meta?.changes ?? 0) === 1;
 }
 
@@ -330,13 +525,15 @@ async function markDeliveryFailure(
   token: string,
   outcome: DeliveryOutcome,
   now: number,
-): Promise<void> {
+  signal?: AbortSignal,
+): Promise<number> {
+  throwIfAborted(signal);
   const attempts = Math.max(0, Number(row.attempt_count) || 0) + 1;
   const deadLetter = outcome.permanent === true || attempts >= MAX_RETRIES;
   const defaultDelay =
     RETRY_BACKOFF_SEC[Math.min(attempts - 1, RETRY_BACKOFF_SEC.length - 1)] ?? 900;
   const delaySeconds = Math.max(1, outcome.retryAfterSeconds ?? defaultDelay);
-  await env.DB.prepare(
+  const result = await env.DB.prepare(
     `UPDATE notification_outbox
         SET attempt_count = ?1, status = ?2,
             processing_started_at = NULL, lease_token = NULL,
@@ -350,6 +547,8 @@ async function markDeliveryFailure(
     row.id,
     token,
   ).run();
+  throwIfAborted(signal);
+  return Math.max(0, Number(result.meta?.changes ?? 0));
 }
 
 async function deliverWithOutcome(
@@ -357,14 +556,19 @@ async function deliverWithOutcome(
   env: Pick<Env, "KV" | "DISCORD_WEBHOOK_URL" | "DISCORD_BOT_TOKEN">,
   budget: ExternalRequestBudget,
   kvWriteBudget: ExternalRequestBudget,
+  cooldownKvWriteBudget: ExternalRequestBudget,
+  cooldownReadCache: Map<string, number>,
   fetchImpl: FetchLike = fetch,
+  signal?: AbortSignal,
 ): Promise<DeliveryOutcome> {
+  throwIfAborted(signal);
   if (row.type === "discord_webhook") {
     if (!env.DISCORD_WEBHOOK_URL) {
       return { ok: false, errorCode: "discord_webhook_unconfigured", retryAfterSeconds: 900 };
     }
     const routeKey = `webhook:${env.DISCORD_WEBHOOK_URL}`;
     const request = await discordRequest(
+      env,
       routeKey,
       env.DISCORD_WEBHOOK_URL,
       {
@@ -373,16 +577,29 @@ async function deliverWithOutcome(
         body: row.payload_json,
       },
       budget,
+      cooldownKvWriteBudget,
+      cooldownReadCache,
       fetchImpl,
+      signal,
     );
+    throwIfAborted(signal);
     if (request.deferred) return request.deferred;
     if (request.response.ok) {
       await cancelResponseBody(request.response);
+      throwIfAborted(signal);
       return { ok: true };
     }
-    return await discordFailure(routeKey, request.response, "discord_webhook_http");
+    return await discordFailure(
+      env,
+      routeKey,
+      request.response,
+      "discord_webhook_http",
+      cooldownKvWriteBudget,
+      signal,
+    );
   }
 
+  throwIfAborted(signal);
   if (!row.discord_id) {
     return { ok: false, errorCode: "discord_recipient_missing", permanent: true };
   }
@@ -390,11 +607,13 @@ async function deliverWithOutcome(
     return { ok: false, errorCode: "discord_bot_token_unconfigured", retryAfterSeconds: 900 };
   }
 
-  let channelId = await getCachedDmChannel(env, row.discord_id);
+  let channelId = await getCachedDmChannel(env, row.discord_id, signal);
+  throwIfAborted(signal);
   const usedCachedChannel = Boolean(channelId);
   if (!channelId) {
     const openRoute = "discord:users:@me:channels";
     const open = await discordRequest(
+      env,
       openRoute,
       "https://discord.com/api/v10/users/@me/channels",
       {
@@ -406,26 +625,42 @@ async function deliverWithOutcome(
         body: JSON.stringify({ recipient_id: row.discord_id }),
       },
       budget,
+      cooldownKvWriteBudget,
+      cooldownReadCache,
       fetchImpl,
+      signal,
     );
+    throwIfAborted(signal);
     if (open.deferred) return open.deferred;
     if (!open.response.ok) {
-      return await discordFailure(openRoute, open.response, "discord_dm_open_http");
+      return await discordFailure(
+        env,
+        openRoute,
+        open.response,
+        "discord_dm_open_http",
+        cooldownKvWriteBudget,
+        signal,
+      );
     }
     try {
       const channel = (await open.response.json()) as { id?: unknown };
+      throwIfAborted(signal);
       channelId = typeof channel.id === "string" ? channel.id : null;
-    } catch {
+    } catch (error) {
+      rethrowAbort(error, signal);
       return { ok: false, errorCode: "discord_dm_open_invalid_json", retryAfterSeconds: 300 };
     }
     if (!channelId) {
       return { ok: false, errorCode: "discord_dm_channel_missing", retryAfterSeconds: 300 };
     }
-    await storeDmChannel(env, row.discord_id, channelId, kvWriteBudget);
+    await storeDmChannel(env, row.discord_id, channelId, kvWriteBudget, signal);
+    throwIfAborted(signal);
   }
 
+  throwIfAborted(signal);
   const messageRoute = `discord:channels:${channelId}:messages`;
   const message = await discordRequest(
+    env,
     messageRoute,
     `https://discord.com/api/v10/channels/${channelId}/messages`,
     {
@@ -437,32 +672,57 @@ async function deliverWithOutcome(
       body: row.payload_json,
     },
     budget,
+    cooldownKvWriteBudget,
+    cooldownReadCache,
     fetchImpl,
+    signal,
   );
+  throwIfAborted(signal);
   if (message.deferred) return message.deferred;
   if (message.response.ok) {
     await cancelResponseBody(message.response);
+    throwIfAborted(signal);
     return { ok: true };
   }
   if (usedCachedChannel && message.response.status === 404) {
     await cancelResponseBody(message.response);
-    await evictDmChannel(env, row.discord_id, kvWriteBudget);
+    throwIfAborted(signal);
+    await evictDmChannel(env, row.discord_id, kvWriteBudget, signal);
+    throwIfAborted(signal);
     return {
       ok: false,
       errorCode: "discord_cached_dm_channel_not_found",
       retryAfterSeconds: 60,
     };
   }
-  return await discordFailure(messageRoute, message.response, "discord_message_http");
+  return await discordFailure(
+    env,
+    messageRoute,
+    message.response,
+    "discord_message_http",
+    cooldownKvWriteBudget,
+    signal,
+  );
 }
 
 export async function processNotificationQueue(
   env: Env,
-  opts?: { limit?: number },
-): Promise<{ processed: number; failed: number; skipped: number }> {
+  opts?: { limit?: number; signal?: AbortSignal },
+): Promise<{
+  processed: number;
+  failed: number;
+  skipped: number;
+  external_api_calls: number;
+  d1_changes: number;
+  retry_count: number;
+  quota_stopped: boolean;
+}> {
+  const signal = opts?.signal;
+  throwIfAborted(signal);
   const limit = boundedLimit(opts?.limit);
   const now = Math.floor(Date.now() / 1000);
-  await recoverExpiredLeases(env, now, limit);
+  let d1Changes = await recoverExpiredLeases(env, now, limit, signal);
+  throwIfAborted(signal);
   const result = await env.DB.prepare(
     `SELECT n.id, n.recipient_user_id, u.discord_id, n.type, n.payload_json,
             COALESCE(n.attempt_count, 0) AS attempt_count
@@ -474,18 +734,27 @@ export async function processNotificationQueue(
       ORDER BY n.created_at ASC, n.id ASC
       LIMIT ?3`,
   ).bind(MAX_RETRIES, now, limit).all<OutboxRow>();
+  throwIfAborted(signal);
 
   const budget = new ExternalRequestBudget(MAX_DISCORD_EXTERNAL_REQUESTS_PER_RUN);
   const kvWriteBudget = new ExternalRequestBudget(MAX_DISCORD_DM_KV_WRITES_PER_RUN);
+  const cooldownKvWriteBudget = new ExternalRequestBudget(
+    MAX_DISCORD_COOLDOWN_KV_WRITES_PER_RUN,
+  );
+  // global/routeごとの共有cooldownは1 invocation内で一度だけ読む。
+  const cooldownReadCache = new Map<string, number>();
   let processed = 0;
   let failed = 0;
   let skipped = 0;
   for (const row of result.results ?? []) {
+    throwIfAborted(signal);
     const token = crypto.randomUUID();
-    if (!(await claimOutboxRow(env, row, token, now))) {
+    if (!(await claimOutboxRow(env, row, token, now, signal))) {
       skipped += 1;
       continue;
     }
+    d1Changes += 1;
+    throwIfAborted(signal);
     const outcome = await deliverWithOutcome(
       {
         type: row.type,
@@ -495,16 +764,33 @@ export async function processNotificationQueue(
       env,
       budget,
       kvWriteBudget,
+      cooldownKvWriteBudget,
+      cooldownReadCache,
+      fetch,
+      signal,
     );
+    throwIfAborted(signal);
     if (outcome.ok) {
-      if (await markSent(env, row.id, token, now)) processed += 1;
-      else skipped += 1;
+      if (await markSent(env, row.id, token, now, signal)) {
+        d1Changes += 1;
+        processed += 1;
+      } else skipped += 1;
       continue;
     }
+    throwIfAborted(signal);
     failed += 1;
-    await markDeliveryFailure(env, row, token, outcome, now);
+    d1Changes += await markDeliveryFailure(env, row, token, outcome, now, signal);
   }
-  return { processed, failed, skipped };
+  throwIfAborted(signal);
+  return {
+    processed,
+    failed,
+    skipped,
+    external_api_calls: budget.used,
+    d1_changes: d1Changes,
+    retry_count: 0,
+    quota_stopped: false,
+  };
 }
 
 /** 既存テスト・呼出し互換用。詳細なrate limit情報はdispatcher内部で扱う。 */
@@ -517,6 +803,8 @@ export async function deliver(
     env,
     new ExternalRequestBudget(2),
     new ExternalRequestBudget(1),
+    new ExternalRequestBudget(1),
+    new Map<string, number>(),
   );
   return outcome.ok;
 }

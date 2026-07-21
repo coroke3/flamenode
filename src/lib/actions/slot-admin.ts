@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDatabase } from "@/lib/cloudflare";
 import { assertCanEditEvent } from "@/lib/auth/ownership";
@@ -149,17 +149,19 @@ async function eventQueue(
 async function releaseNotification(
   db: DB,
   row: SlotRow,
+  targetIds: readonly string[],
+  groupId: string | null,
 ): Promise<BatchItem<"sqlite"> | null> {
   if (!row.reserved_by_user_id) return null;
   return buildNotificationOutboxStatement(db, {
     recipientUserId: row.reserved_by_user_id,
     type: "slot_force_released",
-    dedupeKey: `slot_force_released:${row.event_id}:${row.id}:${row.version}`,
+    dedupeKey: `slot_force_released:${row.event_id}:${row.id}:${groupId ?? "solo"}:${row.version}`,
     payload: {
-      content: "運営によりイベント枠が解放されました。",
-      slot_ids: [row.id],
+      content: `運営によりイベント枠 (${targetIds.length}件) が解放されました。`,
+      slot_ids: [...targetIds],
       event_id: row.event_id,
-      reservation_group_id: null,
+      reservation_group_id: groupId,
     },
     eventId: row.event_id,
   });
@@ -259,6 +261,32 @@ export async function generateSlotsBatch(
     return { ok: false, message: "同じ時刻または順序の枠が既に存在します。" };
   }
 
+  const slotColumns = sql.raw(
+    "id, event_id, reserved_by_user_id, x_user_id, display_name, slot_label, start_time, sort_order, reservation_group_id, video_id, status, updated_at, version",
+  );
+  const insertCandidates = sql.join(
+    newRows.map(
+      (row) => sql`
+        SELECT ${row.id}, ${row.event_id}, ${row.reserved_by_user_id}, ${row.x_user_id},
+               ${row.display_name}, ${row.slot_label}, ${row.start_time}, ${row.sort_order},
+               ${row.reservation_group_id}, ${row.video_id}, ${row.status},
+               ${row.updated_at}, ${row.version}
+        WHERE NOT EXISTS (
+          SELECT 1 FROM slots
+          WHERE event_id = ${row.event_id}
+            AND ${
+              data.mode === "time"
+                ? sql`start_time = ${row.start_time}`
+                : sql`sort_order = ${row.sort_order}`
+            }
+        )
+      `,
+    ),
+    sql` UNION ALL `,
+  );
+  const insert = guard.db.run(
+    sql`INSERT INTO slots (${slotColumns}) ${insertCandidates}`,
+  );
   const queue = await eventQueue(
     guard.db,
     data.event_id,
@@ -267,7 +295,7 @@ export async function generateSlotsBatch(
   );
   try {
     await mutateWithAudit(guard.db, {
-      mutationStatements: [guard.db.insert(slots).values(newRows), ...queue.statements],
+      mutationStatements: [insert, ...queue.statements],
       expectedMutationChanges: [newRows.length, ...queue.expectedChanges],
       audits: newRows.map((row) => ({
         table_name: "slots",
@@ -356,7 +384,36 @@ export async function releaseSlot(
   if (row.status !== "reserved") {
     return { ok: false, message: "予約中の枠だけ解放できます。" };
   }
-  return releaseRows(guard.db, row.event_id, [row], guard.userId);
+  const groupId = row.reservation_group_id?.trim() || null;
+  const rows = groupId
+    ? await guard.db
+        .select()
+        .from(slots)
+        .where(
+          and(
+            eq(slots.event_id, row.event_id),
+            eq(slots.reservation_group_id, groupId),
+          )!,
+        )
+        .limit(MAX_ATOMIC_SLOT_ROWS + 1)
+    : [row];
+  if (rows.length === 0 || rows.length > MAX_ATOMIC_SLOT_ROWS) {
+    return {
+      ok: false,
+      message: `一度に解放できる枠は ${MAX_ATOMIC_SLOT_ROWS} 件までです。`,
+    };
+  }
+  if (
+    rows.some(
+      (candidate) =>
+        candidate.status !== "reserved" ||
+        candidate.reserved_by_user_id !== row.reserved_by_user_id ||
+        candidate.x_user_id !== row.x_user_id,
+    )
+  ) {
+    return { ok: false, message: "対象グループ全体が同一利用者の予約中ではありません。" };
+  }
+  return releaseRows(guard.db, row.event_id, rows, guard.userId);
 }
 
 async function releaseRows(
@@ -367,8 +424,23 @@ async function releaseRows(
 ): Promise<SlotActionResult> {
   const now = Math.floor(Date.now() / 1000);
   const notifications: BatchItem<"sqlite">[] = [];
+  const grouped = new Map<string, SlotRow[]>();
   for (const row of rows) {
-    const notification = await releaseNotification(db, row);
+    const key = row.reservation_group_id?.trim() || `solo:${row.id}`;
+    const current = grouped.get(key) ?? [];
+    current.push(row);
+    grouped.set(key, current);
+  }
+  for (const groupRows of grouped.values()) {
+    const representative = groupRows[0];
+    if (!representative) continue;
+    const groupId = representative.reservation_group_id?.trim() || null;
+    const notification = await releaseNotification(
+      db,
+      representative,
+      groupRows.map((candidate) => candidate.id),
+      groupId,
+    );
     if (notification) notifications.push(notification);
   }
   const queue = await eventQueue(db, eventId, "slot_admin_release", userId);
@@ -476,7 +548,54 @@ export async function batchReleaseReservedSlots(
   if (rows.length !== slotIds.length || rows.some((row) => row.status !== "reserved")) {
     return { ok: false, message: "対象に予約中以外または存在しない枠があります。" };
   }
-  return releaseRows(guard.db, eventId, rows, guard.userId);
+  const groupIds = Array.from(
+    new Set(
+      rows
+        .map((row) => row.reservation_group_id?.trim() || null)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  );
+  const groupRows = groupIds.length
+    ? await guard.db
+        .select()
+        .from(slots)
+        .where(
+          and(
+            eq(slots.event_id, eventId),
+            inArray(slots.reservation_group_id, groupIds),
+          )!,
+        )
+        .limit(MAX_ATOMIC_SLOT_ROWS + 1)
+    : [];
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  for (const row of groupRows) byId.set(row.id, row);
+  const releaseTargets = [...byId.values()];
+  if (releaseTargets.length > MAX_ATOMIC_SLOT_ROWS) {
+    return {
+      ok: false,
+      message: `reservation_group を含む処理対象は ${MAX_ATOMIC_SLOT_ROWS} 件以内にしてください。`,
+    };
+  }
+  if (releaseTargets.some((row) => row.status !== "reserved")) {
+    return { ok: false, message: "reservation_group 全体が予約中ではありません。" };
+  }
+  for (const groupId of groupIds) {
+    const members = releaseTargets.filter(
+      (row) => row.reservation_group_id === groupId,
+    );
+    const representative = members[0];
+    if (
+      representative &&
+      members.some(
+        (row) =>
+          row.reserved_by_user_id !== representative.reserved_by_user_id ||
+          row.x_user_id !== representative.x_user_id,
+      )
+    ) {
+      return { ok: false, message: "reservation_group に複数の利用者が混在しています。" };
+    }
+  }
+  return releaseRows(guard.db, eventId, releaseTargets, guard.userId);
 }
 
 export async function batchUpdateSlotLabels(

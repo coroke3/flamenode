@@ -3,10 +3,10 @@ import * as schema from "./schema";
 
 /**
  * D1 (Drizzle) クライアント。
- * Cloudflare Pages / Workers のランタイムから `env.DB` を取得して接続する。
+ * Cloudflare Workers / OpenNext のランタイムから `env.DB` を取得して接続する。
  *
- * Next.js (App Router) では `getRequestContext().env.DB` を使うのが
- * Cloudflare Pages の推奨ルートだが、本ファイルでは引数として D1 を受け取り、
+ * Next.js (App Router) では `getCloudflareContext().env.DB` からbindingを取得するが、
+ * 本ファイルでは引数として D1 を受け取り、
  * 各 Server Action / RSC が `getDb(env.DB)` の形で利用する。
  */
 export type DB = ReturnType<typeof drizzle<typeof schema>>;

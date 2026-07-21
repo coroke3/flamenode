@@ -105,10 +105,18 @@ test("manage statusは共通queue lease semanticsとcaller予約内のbounded re
 
   assert.match(enqueue, /MAX_STATIC_REBUILD_BATCH_TARGETS\s*=\s*16/);
   assert.match(enqueue, /STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT\s*=\s*2/);
-  assert.match(enqueue, /const activeRows = await db/);
-  assert.match(enqueue, /const latestRows = await db/);
-  assert.match(enqueue, /lease_token:\s*null/);
-  assert.match(enqueue, /eq\(staticRebuildQueue\.lease_token, row\.lease_token\)/);
+  assert.match(enqueue, /const \[activeRows, latestRows\] = await Promise\.all\(/);
+  assert.equal(
+    (enqueue.match(/\.limit\(MAX_STATIC_REBUILD_BATCH_TARGETS \+ 1\)/g) ?? [])
+      .length,
+    2,
+  );
+  assert.doesNotMatch(enqueue, /lease_token:\s*null/);
+  assert.match(
+    enqueue,
+    /eq\([\s\S]*?staticRebuildQueue\.lease_token,[\s\S]*?item\.row\.lease_token/,
+  );
+  assert.match(enqueue, /isNull\(staticRebuildQueue\.lease_token\)/);
 
   const ownActionReads = 3;
   const permissionReads = 2;

@@ -19,7 +19,6 @@ import { requireSession } from "@/lib/auth/guard";
 import { getOnboardingState, onboardingHref } from "@/lib/auth/onboarding";
 import {
   sortSlotsChronologically,
-  type SlotBase,
 } from "@/lib/utils/slotGrouping";
 import { Icon } from "@/components/ui/Icon";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
@@ -47,7 +46,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
 
   let xIds: LinkedXRow[] = [];
   let myVideos: VideoCardData[] = [];
-  let mySlot: SlotBase | null = null;
+  let mySlot: typeof slotsTable.$inferSelect | null = null;
   let mySlotEvent: typeof eventsTable.$inferSelect | null = null;
   let myChapters: Array<{
     id: string;
@@ -143,7 +142,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           )!,
         )
         .limit(50);
-      mySlot = sortSlotsChronologically(slotRows as SlotBase[])[0] ?? null;
+      mySlot = sortSlotsChronologically(slotRows)[0] ?? null;
       if (mySlot) {
         mySlotEvent =
           (
@@ -404,7 +403,7 @@ function HeroCard({
   slot,
   event,
 }: {
-  slot: SlotBase | null;
+  slot: typeof slotsTable.$inferSelect | null;
   event: typeof eventsTable.$inferSelect | null;
 }): React.ReactElement {
   if (!slot || !event) {

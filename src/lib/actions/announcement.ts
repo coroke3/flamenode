@@ -3,8 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { eq, sql } from "drizzle-orm";
-import { auth } from "@/lib/auth";
-import { getDatabase } from "@/lib/cloudflare";
+import { requireAdminWrite } from "@/lib/auth/writeGuard";
+import type { DB } from "@/lib/db/client";
 import { announcements } from "@/lib/db/schema";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { generateId } from "@/lib/utils/id";
@@ -34,18 +34,14 @@ function parseDate(raw: string | null | undefined): number | null {
 }
 
 async function requireAdmin(): Promise<
-  { ok: true; userId: string } | { ok: false; result: AnnouncementResult }
+  | { ok: true; userId: string; db: DB }
+  | { ok: false; result: AnnouncementResult }
 > {
-  const session = await auth().catch(() => null);
-  const u = session?.user as { id?: string; role?: string } | undefined;
-  if (!u?.id)
-    return { ok: false, result: { ok: false, message: "ログインが必要です。" } };
-  if (u.role !== "admin")
-    return {
-      ok: false,
-      result: { ok: false, message: "管理者のみ操作できます。" },
-    };
-  return { ok: true, userId: u.id };
+  const guard = await requireAdminWrite("admin_announcement_broadcast");
+  if (!guard.ok) {
+    return { ok: false, result: { ok: false, message: guard.message } };
+  }
+  return { ok: true, userId: guard.user.id, db: guard.db };
 }
 
 export async function createAnnouncement(
@@ -61,8 +57,7 @@ export async function createAnnouncement(
     };
   const d = parsed.data;
   const id = (d.id?.trim() || generateId("anc"));
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = guard.db;
   const now = Math.floor(Date.now() / 1000);
 
   await mutateWithAudit(db, {
@@ -90,8 +85,7 @@ export async function updateAnnouncement(
     };
   const d = parsed.data;
   if (!d.id) return { ok: false, message: "id が必要です。" };
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = guard.db;
   const existing = (await db.select().from(announcements).where(eq(announcements.id, d.id)).limit(1))[0];
   if (!existing) return { ok: false, message: "対象のお知らせが見つかりません。" };
   const now = Math.floor(Date.now() / 1000);
@@ -112,8 +106,7 @@ export async function deleteAnnouncement(
   if (!guard.ok) return guard.result;
   const id = String(formData.get("id") ?? "").trim();
   if (!id) return { ok: false, message: "id が必要です。" };
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = guard.db;
   const existing = (await db.select().from(announcements).where(eq(announcements.id, id)).limit(1))[0];
   if (!existing) return { ok: false, message: "対象のお知らせが見つかりません。" };
   await mutateWithAudit(db, {

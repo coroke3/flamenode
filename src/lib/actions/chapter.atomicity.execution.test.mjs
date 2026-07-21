@@ -78,11 +78,40 @@ if (!runningWithTsx) {
       ${scenario.initial}
     `);
     let generatedItems = 0;
+    const preparationQueries = {
+      settings: 0,
+      actor: 0,
+      actorLeftJoins: 0,
+    };
     const db = {
-      select: () => ({
-        from: () => ({
-          where: () => ({ get: async () => undefined }),
-        }),
+      select: (projection) => ({
+        from: () => {
+          let joinedActorXUser = false;
+          const query = {
+            leftJoin: () => {
+              if (projection === undefined) {
+                throw new Error("settings query must not join actor X user");
+              }
+              joinedActorXUser = true;
+              preparationQueries.actorLeftJoins += 1;
+              return query;
+            },
+            where: () => ({
+              get: async () => {
+                if (projection === undefined) {
+                  preparationQueries.settings += 1;
+                } else {
+                  if (!joinedActorXUser) {
+                    throw new Error("actor snapshot query must join active X user");
+                  }
+                  preparationQueries.actor += 1;
+                }
+                return undefined;
+              },
+            }),
+          };
+          return query;
+        },
       }),
       run: (query) => ({ kind: "generated", query }),
       batch: async (items) => {
@@ -111,11 +140,11 @@ if (!runningWithTsx) {
         return [];
       },
     };
-    return { db, sqlite };
+    return { db, sqlite, preparationQueries };
   }
 
   async function execute(scenario, failAt) {
-    const { db, sqlite } = createHarness(scenario, failAt);
+    const { db, sqlite, preparationQueries } = createHarness(scenario, failAt);
     const promise = mutateWithAudit(db, {
       mutationStatements: scenario.statements,
       expectedMutationChanges: scenario.statements.map(() => 1),
@@ -129,6 +158,11 @@ if (!runningWithTsx) {
       })),
     });
     await assert.rejects(promise, new RegExp(`injected:${failAt}`));
+    assert.deepEqual(preparationQueries, {
+      settings: 1,
+      actor: 1,
+      actorLeftJoins: 1,
+    });
     return sqlite;
   }
 

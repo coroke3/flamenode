@@ -2,6 +2,7 @@ import "server-only";
 
 import { cache } from "react";
 import type { Session } from "next-auth";
+import { unstable_rethrow } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { withDatabaseRead } from "@/lib/cloudflare";
@@ -50,6 +51,7 @@ async function loadCurrentUser(): Promise<CurrentUser | null> {
   try {
     session = await loadAuthSession();
   } catch (error) {
+    unstable_rethrow(error);
     throw new CurrentUserUnavailableError(
       "auth_temporarily_unavailable",
       error,
@@ -88,41 +90,48 @@ async function loadCurrentUser(): Promise<CurrentUser | null> {
     terms_reaccept_required: 0,
   };
 
-  const loaded = await withDatabaseRead(async (db) => {
-    const requiredMajor = await getLatestPublishedMajorTerms(db);
-    const userRow = (
-      await db
-        .select({
-          id: users.id,
-          name: users.name,
-          email: users.email,
-          image: users.image,
-          role: users.role,
-          is_banned: users.is_banned,
-          active_x_user_id: users.active_x_user_id,
-          is_tos_accepted: users.is_tos_accepted,
-          accepted_terms_version_id: users.accepted_terms_version_id,
-          terms_reaccept_required: termsReacceptRequiredValue(requiredMajor),
-        })
-        .from(users)
-        .where(eq(users.id, userId))
-        .limit(1)
-    )[0];
+  const loaded = await (async () => {
+    try {
+      return await withDatabaseRead(async (db) => {
+        const requiredMajor = await getLatestPublishedMajorTerms(db);
+        const userRow = (
+          await db
+            .select({
+              id: users.id,
+              name: users.name,
+              email: users.email,
+              image: users.image,
+              role: users.role,
+              is_banned: users.is_banned,
+              active_x_user_id: users.active_x_user_id,
+              is_tos_accepted: users.is_tos_accepted,
+              accepted_terms_version_id: users.accepted_terms_version_id,
+              terms_reaccept_required: termsReacceptRequiredValue(requiredMajor),
+            })
+            .from(users)
+            .where(eq(users.id, userId))
+            .limit(1)
+        )[0];
 
-    if (!userRow) return { kind: "missing" as const };
-    const resolvedActive = await resolveActiveXUserId(
-      db,
-      userId,
-      normalizeXId(userRow.active_x_user_id) || null,
-    );
-    return { kind: "found" as const, userRow, resolvedActive };
-  });
+        if (!userRow) return { kind: "missing" as const };
+        const resolvedActive = await resolveActiveXUserId(
+          db,
+          userId,
+          normalizeXId(userRow.active_x_user_id) || null,
+        );
+        return { kind: "found" as const, userRow, resolvedActive };
+      });
+    } catch (error) {
+      unstable_rethrow(error);
+      throw new CurrentUserUnavailableError("database_unavailable", error);
+    }
+  })();
 
   if (loaded === null) {
     throw new CurrentUserUnavailableError("database_unavailable");
   }
-  // Auth.js側にsessionが残りDB行だけ欠落した場合は書込みをfail-closedにする。
-  if (loaded.kind === "missing") return fallback;
+  // Auth.js側に古いsessionが残っていても、消失したDB userのroleを復活させない。
+  if (loaded.kind === "missing") return null;
 
   const { userRow, resolvedActive } = loaded;
   return {

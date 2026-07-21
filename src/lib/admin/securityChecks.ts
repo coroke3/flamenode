@@ -211,7 +211,7 @@ function checkNotificationTableMismatch(): SecurityCheckResult {
     count: 0,
     samples: [],
     note:
-      "Cloudflare Pages Edge Runtime ではソースファイルを参照できないため、CI の静的検査で確認します。",
+      "Cloudflare Workers / OpenNext runtime ではソースファイルを参照できないため、CI の静的検査で確認します。",
   };
 }
 

@@ -17,6 +17,7 @@ import {
 export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
+export const dynamic = "force-dynamic";
 
 /**
  * 認証エリア共通レイアウト。
@@ -29,16 +30,10 @@ export default async function AuthLayout({
 }: {
   children: React.ReactNode;
 }): Promise<React.ReactElement> {
-  let user: PublicHeaderUser | null = null;
   const sessionUser = await getCurrentUser();
   let pathname = "";
-
-  try {
-    const session = await auth();
-    user = await buildHeaderUser(session?.user);
-  } catch {
-    user = null;
-  }
+  const session = await auth();
+  const user: PublicHeaderUser | null = await buildHeaderUser(session?.user);
 
   if (sessionUser && sessionUser.is_banned !== 1) {
     const hdrs = await headers();

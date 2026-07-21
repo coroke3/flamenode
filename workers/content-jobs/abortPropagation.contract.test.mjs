@@ -1,0 +1,39 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { test } from "node:test";
+
+const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
+
+test("content cron propagates its deadline signal through queue and cleanup", async () => {
+  const content = await read("./index.ts");
+  const queue = await read("../json-generator/queue.ts");
+  const cleanup = await read("../cleanup/index.ts");
+  const sync = await read("../sync-jobs/index.ts");
+
+  assert.match(content, /signal: context\.signal/);
+  assert.match(content, /processStaticRebuildQueue\([\s\S]*signal/);
+  assert.match(content, /runCleanupWithRetry\(env, cleanupSignal\)/);
+  assert.match(queue, /throwIfAborted\(signal/);
+  assert.match(queue, /rebuildTarget\(env, row\.target_type, row\.target_id, signal\)/);
+  assert.match(queue, /markRetryOrFailed\(env, row, token, error, now, metrics\)/);
+  assert.match(cleanup, /runCleanup\(env, signal, metrics\)/);
+  assert.match(cleanup, /if \(signal\?\.aborted\) throw error/);
+  assert.match(sync, /recalcScoreBatch\(env, signal\)/);
+});
+
+test("aborted deadline is rejected before score or static rebuild side effects", async () => {
+  const { recalcScoreBatch } = await import("../score-recalc/index.ts");
+  const { rebuildTarget } = await import("../json-generator/rebuild.ts");
+  const controller = new AbortController();
+  controller.abort(new Error("deadline"));
+  let prepareCalls = 0;
+  const env = {
+    DB: { prepare() { prepareCalls += 1; throw new Error("unexpected D1 call"); } },
+    R2: { put() { throw new Error("unexpected R2 put"); }, delete() { throw new Error("unexpected R2 delete"); } },
+    KV: { put() { throw new Error("unexpected KV put"); } },
+  };
+
+  await assert.rejects(() => recalcScoreBatch(env, controller.signal), /deadline/);
+  await assert.rejects(() => rebuildTarget(env, "top", "global", controller.signal), /deadline/);
+  assert.equal(prepareCalls, 0);
+});

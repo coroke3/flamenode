@@ -5,7 +5,61 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { validateNotificationPayload } from "./format.ts";
+import {
+  appUrl,
+  notificationSiteOrigin,
+  validateNotificationPayload,
+} from "./format.ts";
+
+test("通知URLはNEXT_PUBLIC_SITE_URLだけをorigin正本にする", () => {
+  const env = {
+    NODE_ENV: "production",
+    NEXT_PUBLIC_SITE_URL: "https://flamenode.example/",
+    NEXT_PUBLIC_APP_URL: "https://ignored.example",
+    APP_ORIGIN: "https://ignored.example",
+  };
+  assert.equal(notificationSiteOrigin(env), "https://flamenode.example");
+  assert.equal(
+    appUrl("/dashboard/edit/video-1", env),
+    "https://flamenode.example/dashboard/edit/video-1",
+  );
+});
+
+test("通知origin欠落・不正scheme・本番localhostをfail-closedで拒否する", () => {
+  assert.throws(() => notificationSiteOrigin({ NODE_ENV: "production" }), /MISSING/);
+  assert.throws(
+    () =>
+      notificationSiteOrigin({
+        NODE_ENV: "production",
+        NEXT_PUBLIC_SITE_URL: "javascript:alert(1)",
+      }),
+    /INVALID_ORIGIN/,
+  );
+  assert.throws(
+    () =>
+      notificationSiteOrigin({
+        NODE_ENV: "production",
+        NEXT_PUBLIC_SITE_URL: "http://localhost:3000",
+      }),
+    /LOCALHOST_FORBIDDEN/,
+  );
+  assert.equal(
+    notificationSiteOrigin({
+      NODE_ENV: "development",
+      NEXT_PUBLIC_SITE_URL: "http://localhost:3000",
+    }),
+    "http://localhost:3000",
+  );
+});
+
+test("通知pathから外部originへ切り替えられない", () => {
+  const env = {
+    NODE_ENV: "production",
+    NEXT_PUBLIC_SITE_URL: "https://flamenode.example",
+  };
+  assert.throws(() => appUrl("https://evil.example/path", env), /MUST_BE_RELATIVE/);
+  assert.throws(() => appUrl("//evil.example/path", env), /MUST_BE_RELATIVE/);
+});
 
 test("正常系: 最小限の type + payload で OK", () => {
   const r = validateNotificationPayload("video_approved", { content: "ok" });

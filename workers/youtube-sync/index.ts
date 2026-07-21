@@ -13,6 +13,10 @@ import {
   type FetchLike,
 } from "../shared/externalApi.ts";
 import {
+  jobFailureWithCounters,
+  type JobFailureWithCounters,
+} from "../shared/runJob.ts";
+import {
   refundYoutubeQuota,
   reserveYoutubeQuota,
   type YoutubeQuotaEnv,
@@ -27,6 +31,11 @@ export interface SyncBatchResult {
   processed: number;
   failed: number;
   skipped: number;
+  external_api_calls: number;
+  d1_changes: number;
+  retry_count: number;
+  quota_stopped: boolean;
+  quota_stop_reason: string | null;
 }
 
 type SyncRow = { id: string; youtube_video_id: string };
@@ -39,7 +48,6 @@ type YoutubeItem = {
 
 type MetadataWrite = {
   videoId: string;
-  youtubeVideoId: string;
   privacyStatus: string | null;
   availabilityStatus: string | null;
   durationSeconds: number;
@@ -62,7 +70,7 @@ export const YOUTUBE_MAX_EXTERNAL_REQUESTS_PER_RUN =
 const ACTIVE_SYNC_INTERVAL_SEC = 60 * 60;
 const DEFAULT_SYNC_INTERVAL_SEC = 24 * 60 * 60;
 const ACTIVE_EVENT_GRACE_SEC = 24 * 60 * 60;
-/** D1の1 query最大100 bindingsに合わせ、10列 x 10行で固定する。 */
+/** D1の1 query最大100 bindings未満になるよう、9列 x 10行（90 bindings）で固定する。 */
 const BULK_UPSERT_ROWS = 10;
 const YOUTUBE_QUOTA_COOLDOWN_SEC = 60 * 60;
 const YOUTUBE_QUOTA_COOLDOWN_KEY = "external-api:youtube:quota-cooldown-until";
@@ -84,37 +92,85 @@ export function parseRetryAfterMs(value: string | null, now = Date.now()): numbe
   return parseSharedRetryAfterMs(value, YOUTUBE_SYNC_MAX_RETRY_DELAY_MS, now);
 }
 
-async function readYoutubeErrorReason(response: Response): Promise<string | null> {
+async function delayWithSignal(
+  ms: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!signal) {
+    await delay(ms);
+    return;
+  }
+  signal.throwIfAborted();
+  if (ms <= 0) return;
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(done, ms);
+    function cleanup(): void {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", aborted);
+    }
+    function done(): void {
+      cleanup();
+      resolve();
+    }
+    function aborted(): void {
+      cleanup();
+      reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+    }
+    signal.addEventListener("abort", aborted, { once: true });
+  });
+}
+
+async function readYoutubeErrorReason(
+  response: Response,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  signal?.throwIfAborted();
   try {
     const data = (await response.json()) as {
       error?: { errors?: Array<{ reason?: unknown }> };
     };
+    signal?.throwIfAborted();
     const reason = data.error?.errors?.[0]?.reason;
     return typeof reason === "string" ? reason : null;
   } catch {
+    signal?.throwIfAborted();
     await cancelResponseBody(response);
     return null;
   }
 }
 
-async function quotaCooldownActive(env: Env, now: number): Promise<boolean> {
+async function quotaCooldownActive(
+  env: Env,
+  now: number,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  signal?.throwIfAborted();
   try {
     const raw = await env.KV.get(YOUTUBE_QUOTA_COOLDOWN_KEY);
+    signal?.throwIfAborted();
     const until = Number(raw);
     return Number.isFinite(until) && until > now;
   } catch {
+    signal?.throwIfAborted();
     return false;
   }
 }
 
-async function activateQuotaCooldown(env: Env, now: number): Promise<void> {
+async function activateQuotaCooldown(
+  env: Env,
+  now: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  signal?.throwIfAborted();
   try {
     await env.KV.put(
       YOUTUBE_QUOTA_COOLDOWN_KEY,
       String(now + YOUTUBE_QUOTA_COOLDOWN_SEC),
       { expirationTtl: YOUTUBE_QUOTA_COOLDOWN_SEC },
     );
+    signal?.throwIfAborted();
   } catch {
+    signal?.throwIfAborted();
     // quotaエラー自体を優先し、KV障害で上書きしない。
   }
 }
@@ -124,15 +180,17 @@ async function fetchYoutubeItems(
   env: Env,
   budget: ExternalRequestBudget,
   fetchImpl: FetchLike,
+  signal?: AbortSignal,
 ): Promise<YoutubeItem[]> {
   let lastError: Error = new Error("transient:youtube_api_unknown");
 
   for (let attempt = 0; attempt < YOUTUBE_SYNC_MAX_ATTEMPTS; attempt += 1) {
+    signal?.throwIfAborted();
     let response: Response;
     try {
       response = await fetchWithTimeout(
         url,
-        { headers: { accept: "application/json" } },
+        { headers: { accept: "application/json" }, signal },
         {
           timeoutMs: YOUTUBE_SYNC_FETCH_TIMEOUT_MS,
           budget,
@@ -142,17 +200,20 @@ async function fetchYoutubeItems(
         },
         fetchImpl,
       );
+      signal?.throwIfAborted();
     } catch (error) {
+      signal?.throwIfAborted();
       lastError = error instanceof Error
         ? error
         : new Error("transient:youtube_api_network_error");
       if (attempt + 1 >= YOUTUBE_SYNC_MAX_ATTEMPTS || budget.remaining <= 0) {
         throw lastError;
       }
-      await delay(
+      await delayWithSignal(
         exponentialBackoffMs(attempt, {
           maxDelayMs: YOUTUBE_SYNC_MAX_RETRY_DELAY_MS,
         }),
+        signal,
       );
       continue;
     }
@@ -160,15 +221,21 @@ async function fetchYoutubeItems(
     if (response.ok) {
       try {
         const data = (await response.json()) as { items?: YoutubeItem[] };
+        signal?.throwIfAborted();
         return data.items ?? [];
       } catch {
+        signal?.throwIfAborted();
         throw new Error("permanent:youtube_api_invalid_json");
       }
     }
 
-    const reason = await readYoutubeErrorReason(response);
+    const reason = await readYoutubeErrorReason(response, signal);
     if (reason && YOUTUBE_QUOTA_REASONS.has(reason) && response.status !== 429) {
-      await activateQuotaCooldown(env, Math.floor(Date.now() / 1000));
+      await activateQuotaCooldown(
+        env,
+        Math.floor(Date.now() / 1000),
+        signal,
+      );
       throw new Error(`quota:youtube_api_${reason}`);
     }
 
@@ -183,11 +250,12 @@ async function fetchYoutubeItems(
 
     const retryAfter = parseRetryAfterMs(response.headers.get("retry-after"));
     await cancelResponseBody(response);
-    await delay(
+    await delayWithSignal(
       exponentialBackoffMs(attempt, {
         maxDelayMs: YOUTUBE_SYNC_MAX_RETRY_DELAY_MS,
         retryAfterMs: retryAfter,
       }),
+      signal,
     );
   }
 
@@ -205,15 +273,23 @@ async function querySyncRows(
   env: Env,
   sql: string,
   bindings: readonly (string | number | null)[],
+  signal?: AbortSignal,
 ): Promise<SyncRow[]> {
+  signal?.throwIfAborted();
   const result = await env.DB.prepare(sql)
     .bind(...bindings)
     .all<SyncRow>();
+  signal?.throwIfAborted();
   return result.results ?? [];
 }
 
 /** pending・開催中・通常期限をindex queryへ分け、合計200件まで取得する。 */
-async function selectSyncRows(env: Env, now: number): Promise<SyncRow[]> {
+async function selectSyncRows(
+  env: Env,
+  now: number,
+  signal?: AbortSignal,
+): Promise<SyncRow[]> {
+  signal?.throwIfAborted();
   const selected = new Map<string, SyncRow>();
 
   appendUniqueRows(
@@ -230,6 +306,7 @@ async function selectSyncRows(env: Env, now: number): Promise<SyncRow[]> {
         ORDER BY COALESCE(ym.synced_at, 0) ASC, v.id ASC
         LIMIT ?1`,
       [YOUTUBE_SYNC_MAX_ROWS_PER_RUN],
+      signal,
     ),
   );
 
@@ -251,12 +328,12 @@ async function selectSyncRows(env: Env, now: number): Promise<SyncRow[]> {
             AND v.youtube_video_id <> ''
             AND v.visibility_status <> 'voided'
             AND ym.sync_status IN ('synced', 'failed')
-            AND ym.youtube_video_id IS v.youtube_video_id
             AND ym.synced_at IS NOT NULL
             AND ym.synced_at <= ?1 - ?2
           ORDER BY ym.synced_at ASC, v.id ASC
           LIMIT ?4`,
         [now, ACTIVE_SYNC_INTERVAL_SEC, ACTIVE_EVENT_GRACE_SEC, remaining],
+        signal,
       ),
     );
   }
@@ -273,13 +350,13 @@ async function selectSyncRows(env: Env, now: number): Promise<SyncRow[]> {
           WHERE ym.sync_status IN ('synced', 'failed')
             AND ym.synced_at IS NOT NULL
             AND ym.synced_at <= ?1 - ?2
-            AND ym.youtube_video_id IS v.youtube_video_id
             AND v.youtube_video_id IS NOT NULL
             AND v.youtube_video_id <> ''
             AND v.visibility_status <> 'voided'
           ORDER BY ym.synced_at ASC, v.id ASC
           LIMIT ?3`,
         [now, DEFAULT_SYNC_INTERVAL_SEC, remaining],
+        signal,
       ),
     );
   }
@@ -293,7 +370,6 @@ function buildMetadataWrites(rows: SyncRow[], items: Map<string, YoutubeItem>): 
     if (!item) {
       return {
         videoId: row.id,
-        youtubeVideoId: row.youtube_video_id,
         privacyStatus: null,
         availabilityStatus: null,
         durationSeconds: 0,
@@ -304,7 +380,6 @@ function buildMetadataWrites(rows: SyncRow[], items: Map<string, YoutubeItem>): 
     }
     return {
       videoId: row.id,
-      youtubeVideoId: row.youtube_video_id,
       privacyStatus: item.status?.privacyStatus ?? null,
       availabilityStatus: item.status?.privacyStatus ?? null,
       durationSeconds: parseDuration(item.contentDetails?.duration ?? ""),
@@ -315,14 +390,20 @@ function buildMetadataWrites(rows: SyncRow[], items: Map<string, YoutubeItem>): 
   });
 }
 
-async function persistMetadataBatch(env: Env, writes: MetadataWrite[], now: number): Promise<void> {
+async function persistMetadataBatch(
+  env: Env,
+  writes: MetadataWrite[],
+  now: number,
+  signal?: AbortSignal,
+): Promise<number> {
+  signal?.throwIfAborted();
   const statements: D1PreparedStatement[] = [];
   for (let offset = 0; offset < writes.length; offset += BULK_UPSERT_ROWS) {
+    signal?.throwIfAborted();
     const chunk = writes.slice(offset, offset + BULK_UPSERT_ROWS);
-    const placeholders = chunk.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
+    const placeholders = chunk.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
     const values = chunk.flatMap((row) => [
       row.videoId,
-      row.youtubeVideoId,
       row.privacyStatus,
       row.availabilityStatus,
       row.durationSeconds,
@@ -335,12 +416,11 @@ async function persistMetadataBatch(env: Env, writes: MetadataWrite[], now: numb
     statements.push(
       env.DB.prepare(
         `INSERT INTO video_youtube_metadata (
-           video_id, youtube_video_id, youtube_privacy_status,
+           video_id, youtube_privacy_status,
            youtube_availability_status, duration_seconds, view_count,
            synced_at, sync_status, sync_error, updated_at
          ) VALUES ${placeholders}
          ON CONFLICT(video_id) DO UPDATE SET
-           youtube_video_id = excluded.youtube_video_id,
            youtube_privacy_status = CASE WHEN excluded.sync_status = 'synced'
              THEN excluded.youtube_privacy_status ELSE video_youtube_metadata.youtube_privacy_status END,
            youtube_availability_status = CASE WHEN excluded.sync_status = 'synced'
@@ -356,7 +436,13 @@ async function persistMetadataBatch(env: Env, writes: MetadataWrite[], now: numb
       ).bind(...values),
     );
   }
-  if (statements.length > 0) await env.DB.batch(statements);
+  signal?.throwIfAborted();
+  if (statements.length > 0) {
+    const results = await env.DB.batch(statements);
+    signal?.throwIfAborted();
+    return results.reduce((sum, result) => sum + Math.max(0, Number(result?.meta?.changes ?? 0)), 0);
+  }
+  return 0;
 }
 
 function splitRows(rows: SyncRow[]): SyncRow[][] {
@@ -370,27 +456,40 @@ function splitRows(rows: SyncRow[]): SyncRow[][] {
 export async function syncBatch(
   env: Env,
   fetchImpl: FetchLike = fetch,
+  signal?: AbortSignal,
 ): Promise<SyncBatchResult> {
+  signal?.throwIfAborted();
+  const empty = (result: Pick<SyncBatchResult, "processed" | "failed" | "skipped">, extra: Partial<SyncBatchResult> = {}): SyncBatchResult => ({ external_api_calls: 0, d1_changes: 0, retry_count: 0, quota_stopped: false, quota_stop_reason: null, ...result, ...extra });
   const apiKey = env.YOUTUBE_API_KEY?.trim();
-  if (!apiKey) return { processed: 0, failed: 0, skipped: 1 };
+  if (!apiKey) return empty({ processed: 0, failed: 0, skipped: 1 });
 
   const now = Math.floor(Date.now() / 1000);
-  if (await quotaCooldownActive(env, now)) {
-    return { processed: 0, failed: 0, skipped: 1 };
+  if (await quotaCooldownActive(env, now, signal)) {
+    return empty({ processed: 0, failed: 0, skipped: 1 }, { quota_stopped: true, quota_stop_reason: "youtube_quota_cooldown" });
   }
 
-  const rows = await selectSyncRows(env, now);
-  if (rows.length === 0) return { processed: 0, failed: 0, skipped: 1 };
+  const rows = await selectSyncRows(env, now, signal);
+  if (rows.length === 0) return empty({ processed: 0, failed: 0, skipped: 1 });
 
   const chunks = splitRows(rows);
   const plannedQuotaUnits = chunks.length * YOUTUBE_SYNC_MAX_ATTEMPTS;
-  const reservation = await reserveYoutubeQuota(env, plannedQuotaUnits, now);
-  if (!reservation) return { processed: 0, failed: 0, skipped: 1 };
+  const reservation = await reserveYoutubeQuota(
+    env,
+    plannedQuotaUnits,
+    now,
+    signal,
+  );
+  if (!reservation) return empty({ processed: 0, failed: 0, skipped: 1 }, { quota_stopped: true, quota_stop_reason: "youtube_quota_reservation_denied" });
 
   const budget = new ExternalRequestBudget(YOUTUBE_MAX_EXTERNAL_REQUESTS_PER_RUN);
+  let reportedResult: SyncBatchResult | undefined;
+  let reportedFailure: JobFailureWithCounters | undefined;
+  let startedChunks = 0;
   try {
     const itemMap = new Map<string, YoutubeItem>();
     for (const chunk of chunks) {
+      signal?.throwIfAborted();
+      startedChunks += 1;
       const url = new URL("https://www.googleapis.com/youtube/v3/videos");
       url.searchParams.set("key", apiKey);
       url.searchParams.set("part", "statistics,status,contentDetails");
@@ -401,20 +500,67 @@ export async function syncBatch(
       url.searchParams.set("prettyPrint", "false");
       url.searchParams.set("id", chunk.map((row) => row.youtube_video_id).join(","));
 
-      const items = await fetchYoutubeItems(url.toString(), env, budget, fetchImpl);
+      const items = await fetchYoutubeItems(
+        url.toString(),
+        env,
+        budget,
+        fetchImpl,
+        signal,
+      );
+      signal?.throwIfAborted();
       for (const item of items) itemMap.set(item.id, item);
     }
 
+    signal?.throwIfAborted();
     const writes = buildMetadataWrites(rows, itemMap);
-    await persistMetadataBatch(env, writes, now);
-    return { processed: writes.length, failed: 0, skipped: 0 };
-  } finally {
-    await refundYoutubeQuota(
-      env,
-      reservation,
-      reservation.reservedUnits - budget.used,
-      Math.floor(Date.now() / 1000),
+    const d1Changes = await persistMetadataBatch(env, writes, now, signal);
+    reportedResult = empty(
+      { processed: writes.length, failed: 0, skipped: 0 },
+      {
+          external_api_calls: budget.used,
+          d1_changes: d1Changes,
+          retry_count: Math.max(0, budget.used - startedChunks),
+      },
     );
+    return reportedResult;
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("quota:youtube_api_")) {
+      reportedResult = empty(
+        { processed: 0, failed: 0, skipped: 1 },
+        {
+          external_api_calls: budget.used,
+          retry_count: Math.max(0, budget.used - startedChunks),
+          quota_stopped: true,
+          quota_stop_reason: "youtube_api_error",
+        },
+      );
+      return reportedResult;
+    }
+    signal?.throwIfAborted();
+    reportedFailure = jobFailureWithCounters(error, {
+      failed: 1,
+      external_api_calls: budget.used,
+      d1_changes: reservation.d1Changes,
+      retry_count: Math.max(0, budget.used - startedChunks),
+    });
+    throw reportedFailure;
+  } finally {
+    if (!signal?.aborted) {
+      const refundChanges = await refundYoutubeQuota(
+        env,
+        reservation,
+        reservation.reservedUnits - budget.used,
+        Math.floor(Date.now() / 1000),
+        signal,
+      );
+      if (reportedResult) {
+        reportedResult.d1_changes += reservation.d1Changes + refundChanges;
+      }
+      if (reportedFailure) {
+        reportedFailure.counters.d1_changes =
+          (reportedFailure.counters.d1_changes ?? 0) + refundChanges;
+      }
+    }
   }
 }
 

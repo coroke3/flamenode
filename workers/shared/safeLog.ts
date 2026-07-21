@@ -50,6 +50,36 @@ export interface WorkerJobLog {
   duration_ms: number;
   result: "ok" | "failed" | "skipped";
   error?: string;
+  external_api_calls?: number;
+  d1_changes?: number;
+  retry_count?: number;
+  quota_stopped?: boolean;
+  quota_stop_reason?: string;
+  commit_sha?: string;
+}
+
+const QUOTA_REASONS = new Set([
+  "external_api",
+  "d1",
+  "retry",
+  "budget",
+  "rate_limit",
+  "daily_limit",
+  "monthly_limit",
+  "concurrency",
+  "manual",
+  "youtube_quota_cooldown",
+  "youtube_quota_reservation_denied",
+  "youtube_api_error",
+  "youtube_quota_deferred",
+  "unknown",
+]);
+
+/** Keep quota reasons to a small, non-sensitive internal vocabulary. */
+export function normalizeQuotaStopReason(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const reason = value.trim().toLowerCase();
+  return QUOTA_REASONS.has(reason) ? reason : "unknown";
 }
 
 /** 1 job あたり1行だけの構造化ログを出す。 */

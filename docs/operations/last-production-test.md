@@ -1,35 +1,37 @@
 # 最新の本番試験結果
 
 > Status: Active
-> Result: BLOCKED (production configuration missing)
-> Candidate commit: `8273a9cb0d3610e4e82075ee418375dbc26baae3`
-> Completed at: 2026-07-13T04:22:41Z
-> Workflow run: `29223776574`
+> Last verified: 2026-07-21
+> Result: NOT RUN (Cloudflare Workers migration candidate)
+> Candidate commit: 未確定
+> Source of truth: Cloudflare Workers Buildsのproduction Build結果と`cf:smoke-production`出力
 
 ## 結果
 
-本番試験workflowは起動しましたが、Cloudflareへの接続前にproduction設定検査でfail-closedしました。Pages、fast-jobs、content-jobs、sync-jobsのデプロイとproduction smoke testは実行されていません。
+Cloudflare Workers + OpenNextへ移行した現行候補について、実Cloudflare deploy、custom domain切替、production smokeはまだ実行していません。成功した本番試験として扱える結果はありません。
 
-不足していたGitHub Actions Secrets:
+次も未実施です。
 
-- `CLOUDFLARE_API_TOKEN`
-- `CLOUDFLARE_ACCOUNT_ID`
-- `CF_IDS_JSON`
-- `AUTH_SECRET`
-- `AUTH_DISCORD_ID`
-- `AUTH_DISCORD_SECRET`
+- `flamenode-web`とCron Worker 3本の実deploy
+- 4 Workerのproduction commit一致確認
+- `workers.dev`でのproduction smoke
+- 保護deep healthによるRemote D1/KV/R2/schemaのread-only確認
+- Discord OAuth callbackとSecure Cookieの実ブラウザ確認
+- custom domainへのtraffic切替
+- 旧Pages projectの削除
 
-不足していたGitHub Actions Variables:
+## 実行前提
 
-- `NEXT_PUBLIC_SITE_URL`
-- `FAST_JOBS_URL`
-- `CONTENT_JOBS_URL`
-- `SYNC_JOBS_URL`
+- Workers Buildsを`flamenode-web`だけへ接続し、`main`、Preview/PR build無効、Node 22、Build/Deploy commandを[`../../DEPLOY.md`](../../DEPLOY.md)どおり設定する。
+- production Build Variables、`CLOUDFLARE_API_TOKEN`、smoke用`WORKER_ADMIN_TOKEN`を設定する。
+- 各Workerへ必要なRuntime Secret名を登録する。他のRuntime Secret値をBuild環境へ複製しない。
+- D1/R2/KVの実resourceを準備し、D1 migrationをbackup・レビュー後に手動適用する。
+- WebとCron 3本の`workers.dev` URLを設定する。
 
-## コード側検証
+## 合格条件
 
-production候補と同じ実装について、依存関係、lockfile、typecheck、lint、unit tests、Worker tests、Cloudflare契約test、integration tests、Next.js production build、Cloudflare Pages build、Pages成果物、Cloudflare fixture、DB/owner、UI受入、文書・DB履歴の全CI工程が成功しています。
+Workers Buildsの1回の実行で高速検査、OpenNext build、成果物検査、remote secret名検査、D1 read-only preflight、Web→fast→content→sync、production smokeがすべて成功し、4 Workerが同じ40桁commitを返すこと。失敗または未実施項目を成功として補完しません。
 
 ## D1
 
-この試験ではRemote D1のbootstrap、migration適用、データ変更を実行していません。
+この移行作業中にRemote D1のbootstrap、migration適用、データ変更は実行していません。本番試験のread-only preflightも未実施です。

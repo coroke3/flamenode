@@ -22,6 +22,8 @@ test("X ID連携は初回・追加で同じ小文字化フローを使い、統�
   assert.match(settings, /<XIdentityRequestHistoryList rows=\{requestHistory\}/);
   assert.match(settings, /isOnboarding && requestHistory\.length > 0/);
   assert.match(settings, /申請履歴/);
+  assert.doesNotMatch(settings, /新規連携|新しい X ID を連携|自動判定/);
+  assert.match(settings, /初回・2件目以降とも同じ手順/);
 });
 
 test("再生リスト同期状況は一般ダッシュボードへ公開せず運営・管理画面に限定する", () => {

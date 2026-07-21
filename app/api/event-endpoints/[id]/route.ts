@@ -1,6 +1,7 @@
-export const runtime = "edge";
-
-import { getDatabase } from "@/lib/cloudflare";
+import {
+  CloudflareBindingsUnavailableError,
+  getDatabase,
+} from "@/lib/cloudflare";
 import {
   loadEventExportEvent,
   loadEventExportSnapshot,
@@ -178,7 +179,33 @@ export async function GET(
     );
   }
 
-  const kv = updateMode === "scheduled" ? getEventExportKv() : null;
+  let db: ReturnType<typeof getDatabase>;
+  let kv: KVNamespace | null;
+  try {
+    db = getDatabase();
+    kv = updateMode === "scheduled" ? getEventExportKv() : null;
+  } catch (error) {
+    if (!(error instanceof CloudflareBindingsUnavailableError)) throw error;
+    console.error("[event-export-api] runtime bindings unavailable", {
+      eventId,
+      missing: error.missing,
+    });
+    return publicJsonResponse(
+      req,
+      { error: "runtime_bindings_unavailable" },
+      "no-store",
+      503,
+    );
+  }
+  if (!db) {
+    return publicJsonResponse(
+      req,
+      { error: "db_unavailable" },
+      "no-store",
+      503,
+    );
+  }
+
   const accessKey = eventExportAccessCacheKey(eventId);
   const payloadCacheKey = eventExportPayloadCacheKey(
     eventId,
@@ -198,39 +225,26 @@ export async function GET(
         );
   };
 
-  let accessState: string | null = null;
-  let prefetchedEvent: EventExportEventRow | null | undefined;
+  // KVのpositive cacheを公開認可の正本にしない。payload HIT前にも必ずD1を確認する。
+  const prefetchedEvent: EventExportEventRow | null =
+    await loadEventExportEvent(db, eventId);
+  const allowed = isPublicExportEvent(prefetchedEvent);
+  if (!allowed) {
+    if (kv) {
+      try {
+        await kv.put(accessKey, "0", {
+          expirationTtl: EVENT_EXPORT_ACCESS_TTL_SECONDS,
+        });
+      } catch {
+        // D1の404判定を優先する。
+      }
+    }
+    return notFoundResponse(req);
+  }
+
   if (kv) {
-    try {
-      accessState = await kv.get(accessKey);
-    } catch (error) {
-      console.warn("[event-export-api] KV access gate read failed", {
-        eventId,
-        error,
-      });
-    }
-    if (accessState === "0") return notFoundResponse(req);
-    if (accessState === "1") {
-      const response = await cachedResponse();
-      if (response) return response;
-    }
-  }
-
-  const db = getDatabase();
-  if (!db) {
-    return publicJsonResponse(
-      req,
-      { error: "db_unavailable" },
-      "no-store",
-      503,
-    );
-  }
-
-  if (kv && accessState !== "1") {
-    prefetchedEvent = await loadEventExportEvent(db, eventId);
-    const allowed = isPublicExportEvent(prefetchedEvent);
     const accessWrite = kv
-      .put(accessKey, allowed ? "1" : "0", {
+      .put(accessKey, "1", {
         expirationTtl: EVENT_EXPORT_ACCESS_TTL_SECONDS,
       })
       .catch((error) => {
@@ -239,12 +253,6 @@ export async function GET(
           error,
         });
       });
-
-    if (!allowed) {
-      await accessWrite;
-      return notFoundResponse(req);
-    }
-
     const [response] = await Promise.all([cachedResponse(), accessWrite]);
     if (response) return response;
   }

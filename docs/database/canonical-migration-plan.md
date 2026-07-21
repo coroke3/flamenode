@@ -10,7 +10,7 @@
 
 FlameNodeは本格運用前のため、旧DB構造、旧API、旧状態値に対する通常ランタイムの後方互換を提供しない。
 
-旧DBからの既存データ変換はD1 migrationで一回限り実施する。加えて、移行後に保管済みの旧JSON / CSV / TSVを取り込む必要がある場合だけ、管理者専用の`/admin/import`と`/api/admin/import/legacy`を使用する。通常ランタイム、公開API、Workerは新正本だけを読み書きし、旧列fallback、旧DTO出力、旧状態の自動補正、dual-read、dual-writeを残さない。
+旧DBからの既存データ変換はD1 migrationで一回限り実施する。加えて、移行後に保管済みの旧JSON / CSV / TSVを取り込む必要がある場合だけ、管理者専用の`/admin/import`と`/api/admin/import/legacy`を旧形式入力アダプターとして使用する。通常ランタイム、公開API、Workerは新正本だけを読み書きし、旧列fallback、旧DTO出力、旧状態の自動補正、dual-read、dual-writeを残さない。
 
 矛盾がある場合は次の順で判断する。
 
@@ -211,6 +211,6 @@ Historical migration、移行fixture、削除確認スクリプトは、移行�
 - `events.max_slots_per_video`の既存値が一致する。
 - チャプター移行件数、時刻、担当者が一致する。
 - YouTube動画IDの正本が`videos.youtube_video_id`だけである。
-- typecheck、lint、unit、worker、integration、Next.js build、Cloudflare Pages buildが成功する。
+- typecheck、lint、unit、worker、integration、OpenNext / Cloudflare Workers buildが成功する。
 - 空DBと旧データ入りDBの両方でmigrationが成功する。
 - バックアップからの復元手順を確認する。

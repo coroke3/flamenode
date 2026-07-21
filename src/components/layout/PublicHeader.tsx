@@ -7,7 +7,6 @@ import styles from "./PublicHeader.module.css";
 import { Logo } from "@/components/ui/Logo";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
-import { XIdSwitcher } from "@/components/user/XIdSwitcher";
 import type { XIdEntry } from "@/lib/xid/entries";
 import { AccountMenu } from "@/components/user/AccountMenu";
 import type { HeaderUser } from "@/lib/auth/headerUser";
@@ -345,10 +344,6 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
               </div>
 
               <div className={styles.mobileIdentityControls}>
-                <XIdSwitcher
-                  entries={user.xIds}
-                  discordName={user.name}
-                />
                 <ThemeToggle variant="segmented" />
               </div>
 

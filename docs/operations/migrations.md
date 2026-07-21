@@ -1,15 +1,15 @@
 # Migration 運用
 
 > Status: Active
-> Last verified: 2026-07-13
-> Verified against commit: `c18c9bb`
+> Last verified: 2026-07-21
+> Verified against commit: `47e6cee`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `docs/database/change-log.md`
 
 ## 正本
 
 - DB schemaの唯一の公開正本は `src/lib/db/schema.ts`。
 - active migrationは `migrations/` 直下の `NNNN_snake_case.sql` を番号順に適用する。
-- 現在のactive pathは `0000`、`0001`、`0002`、`0003`、`0038`、`0039`。
+- 現在のactive pathは `migrations/` 直下のSQLファイル全体であり、番号順に適用する。具体的な適用済み件数・未適用差分は、固定一覧を複製せず `npm run check:db-schema` と `npm run check:db-history` で現行正本から確認する。
 - 旧migration本文は `migrations/historical/` に保存する履歴資料であり、現行の適用対象ではない。
 - DB変更履歴の正本は [`../database/change-log.md`](../database/change-log.md)。migrationごとの詳細は [`../db-history/README.md`](../db-history/README.md) から確認する。
 - D1が整合性の正本であり、R2/KVの静的JSONは公開配信用キャッシュである。
@@ -39,20 +39,7 @@ npm run check:db-history
 
 Remote D1の作成、backup、migration適用、rollbackは運用者がCloudflareの手順に従い、対象D1とmigrationを確認して明示的に行う。CIとCodexはRemote D1を変更しない。
 
-現行の適用順は次のとおり。
-
-1. `0000_flame_node_baseline.sql`
-2. `0001_spreadsheet_import_runs.sql`
-3. `0002_terms_reaccept_manual_cost_guard.sql`
-4. `0003_large_collaboration_support.sql`
-5. `0038_runtime_efficiency_resilience.sql`
-6. `0039_search_relation_indexes.sql`
-
-- `0001`はSpreadsheet preview/applyのone-time nonceを追加する。
-- `0002`は規約再同意検索を整備し、未計測の自動CostGuard状態を整理する。table再構築があるため事前backupが必要。
-- `0003`は大規模合作の完全監査snapshot向けにpayload上限を引き上げる。
-- `0038`はWorker lease実行状態列と公開・認証・アイコン補完用indexを追加する。追加列を読むコードより先に適用する。
-- `0039`は公開検索とrelation検索用indexだけを追加し、既存rowを書き換えない。
+適用対象や差分は、`migrations/` と `src/lib/db/schema.ts` を照合したうえで検査scriptの結果を正本とする。個別migrationの目的と履歴は [`docs/db-history/README.md`](../db-history/README.md) と [`docs/database/change-log.md`](../database/change-log.md) から確認し、この文書へ一覧を重複記載しない。
 
 本番適用前にschemaとmigrationの差分、backup、適用対象、復旧手順を記録する。Remote D1の初期化や自動削除は行わない。
 

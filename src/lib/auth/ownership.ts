@@ -7,6 +7,7 @@ import {
   videoMembers,
   videoEvents,
   xUserAccountLinks,
+  xUsers,
   type videos,
 } from "@/lib/db/schema";
 import type {
@@ -56,7 +57,13 @@ export async function getApprovedXIds(
   const rows = await db
     .select({ x_user_id: xUserAccountLinks.x_user_id })
     .from(xUserAccountLinks)
-    .where(eq(xUserAccountLinks.auth_user_id, authUserId));
+    .innerJoin(xUsers, eq(xUsers.id, xUserAccountLinks.x_user_id))
+    .where(
+      and(
+        eq(xUserAccountLinks.auth_user_id, authUserId),
+        eq(xUsers.approval_status, "approved"),
+      ),
+    );
   return Array.from(new Set(rows.map((row) => row.x_user_id)));
 }
 

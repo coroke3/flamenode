@@ -1,198 +1,301 @@
 # FlameNode デプロイ手順書
 
 > Status: Active
-> Last verified: 2026-07-13
-> Verified against commit: `2fd430c`
-> Source of truth: `.github/workflows/deploy-cloudflare.yml`, `package.json`, `wrangler.toml`, `workers/*/wrangler.toml`
+> Last verified: 2026-07-21
+> Verified against commit: `47e6cee`
+> Source of truth: `package.json`, `scripts/cloudflare-*.mjs`, `wrangler.toml`, `workers/*/wrangler.toml`
 
-FlameNodeの本番デプロイ正本は **GitHub Actionsの`.github/workflows/deploy-cloudflare.yml`だけ**です。Cloudflare PagesのGit連携による自動deployは無効にし、ローカル端末や別workflowから同じproductionを二重deployしません。
+FlameNodeのproductionデプロイ正本はCloudflare Workers Buildsだけです。`main`への1回のpushから1回だけBuildし、同じOpenNext成果物とcommit SHAでWeb Worker、Cron Worker 3本、smoke testまで進めます。GitHub Actions、ローカル端末、Worker別Git連携を日常的なproduction deploy経路にしません。
 
 ## 1. 固定構成
 
 | 領域 | 構成 |
 | --- | --- |
-| Web | Cloudflare Pages + `@cloudflare/next-on-pages` |
-| Database | Cloudflare D1 |
+| Web | `flamenode-web` + `@opennextjs/cloudflare` + Workers Static Assets |
+| Database | Cloudflare D1 `flamenode_db` |
 | Object storage | Cloudflare R2 |
 | Cache / lightweight state | Cloudflare KV |
-| Cron Worker | `flamenode-fast-jobs` |
-| Cron Worker | `flamenode-content-jobs` |
-| Cron Worker | `flamenode-sync-jobs` |
+| Background | `flamenode-fast-jobs` / `flamenode-content-jobs` / `flamenode-sync-jobs` |
+| CI/CD | `flamenode-web`に接続したCloudflare Workers Builds 1件だけ |
 
-OpenNext、Workers Sites、追加常駐Workerへ移行しません。旧Worker directoryは共有・import moduleとしてのみ使用し、直接deployしません。
+productionの固定順は次です。
 
-## 2. 実在する運用script
-
-```sh
-npm run cf:bootstrap
-npm run cf:sync-ids
-npm run check:cloudflare-template
-npm run check:cloudflare-config
-npm run cf:preflight
-npm run pages:build
-npm run pages:deploy
-npm run workers:deploy
+```text
+main push
+  -> npm ci（1回）
+  -> verify:fast
+  -> OpenNext build（1回）
+  -> flamenode-web
+  -> flamenode-fast-jobs
+  -> flamenode-content-jobs
+  -> flamenode-sync-jobs
+  -> production smoke
 ```
 
-- `pages:build`はリポジトリのwrapperを経由する。
-- `pages:deploy`と`workers:deploy`は手動緊急確認用で、通常production releaseには使わない。
-- `db:generate`は使用しない。DB変更はschema、追加migration、change log、詳細履歴を同時更新する。
+Static Assetsは`run_worker_first = false`とし、静的ファイルを通常のWorker invocationより先に配信します。OpenNext buildをDeploy commandで再実行しません。
 
-## 3. GitHub Environment `production`
+## 2. Cloudflare Dashboard設定チェックリスト
 
-### Secrets
+1. Workers BuildsのGit連携は`flamenode-web`だけへ設定する。
+2. Repositoryは`coroke3/flamenode`を選ぶ。
+3. Production branchは`main`にする。
+4. Non-production / Preview branch buildsを無効にする。
+5. Pull Request buildsを無効にする。
+6. Root directoryはリポジトリルート（Dashboardでは空欄）にする。
+7. Build Variable `NODE_VERSION=22`を設定する。
+8. Build commandを`npm ci --no-audit --no-fund && npm run cf:cloud-build`にする。
+9. Deploy commandを`npm run cf:deploy-production && npm run cf:smoke-production`にする。
+10. Build Variablesは「3. Build環境」記載の名前だけを登録する。
+11. Runtime Variablesは「4. Runtime設定」とwrangler群へ一致させる。
+12. Build SecretsとRuntime Secretsを分離し、通常のRuntime Secret値をBuildへ複製しない。deep-health smoke用`WORKER_ADMIN_TOKEN`だけは後述の明示例外とする。
+13. D1 bindingは全4 Workerで既存の論理名へ一致させる。
+14. R2 bindingはWebとcontent-jobsで既存の論理名へ一致させる。
+15. KV bindingは全4 Workerで既存の論理名へ一致させる。
+16. Cron Triggerはfast、content、syncの既存3件だけにする。
+17. 旧Pages Git Integrationを停止し、新しいBuildと二重起動させない。
+18. GitHub Actionsのpush、pull request、schedule、自動deployが存在しないことを確認する。
+19. 初回は4 Worker名、resource、Runtime Secret、D1 schemaを準備してから`main` Buildを実行する。
+20. 最初は各`workers.dev` URLで4 Workerとsmokeを確認する。
+21. 検証後に`flamenode-web`へカスタムドメインを追加し、Auth originとDiscord callbackを同時更新する。
+22. カスタムドメインの疎通後に旧Pagesからトラフィックを切り替える。
+23. Deploy commandのproduction smokeが全項目成功したことを確認する。
+24. 旧Pages projectは削除条件をすべて満たすまで移行時rollback先としてだけ保持する。
+25. rollback時は4 Workerを同じ既知の正常commitへ戻し、再度smokeする。
+26. D1 migrationはbackup・レビュー後に運用者が手動適用し、自動deployへ組み込まない。
+27. 障害時はBuild stage、4 Workerのhealth/commit、binding、remote secret名、D1 schema、Cloudflare Metricsを順に確認する。
+
+## 3. Workers Builds設定
+
+### Build settings
+
+| 設定 | 値 |
+| --- | --- |
+| Worker | `flamenode-web` |
+| Repository | `coroke3/flamenode` |
+| Production branch | `main` |
+| Preview / non-production branches | Disabled |
+| Pull Request builds | Disabled |
+| Root directory | 空欄（repository root） |
+| Build command | `npm ci --no-audit --no-fund && npm run cf:cloud-build` |
+| Deploy command | `npm run cf:deploy-production && npm run cf:smoke-production` |
+
+Cloudflare側の自動dependency installを止め、`npm ci`を1回に固定します。
+
+| Build Variable | 値 / 用途 |
+| --- | --- |
+| `NODE_VERSION` | `22` |
+| `SKIP_DEPENDENCY_INSTALL` | `true` |
+| `CLOUDFLARE_ACCOUNT_ID` | production account ID |
+| `CF_D1_DATABASE_ID` | production D1 UUID |
+| `CF_KV_NAMESPACE_ID` | production KV namespace ID |
+| `CF_R2_BUCKET_NAME` | production R2 bucket name |
+| `FLAMENODE_WEB_URL` | WebのHTTPS origin |
+| `FAST_JOBS_URL` | fast-jobsのHTTPS origin |
+| `CONTENT_JOBS_URL` | content-jobsのHTTPS origin |
+| `SYNC_JOBS_URL` | sync-jobsのHTTPS origin |
+| `NEXT_PUBLIC_SITE_URL` | `FLAMENODE_WEB_URL`と同じorigin |
+| `AUTH_URL` | `FLAMENODE_WEB_URL`と同じorigin |
+| `AUTH_DISCORD_ID` | production Discord OAuth Client ID |
+
+`WORKERS_CI_COMMIT_SHA`はWorkers Buildsが自動提供する40桁SHAを使用し、Dashboardで上書きしません。Git HEADと一致しない、欠落する、形式が不正な場合はproduction deployを停止し、`unknown`で継続しません。
+
+production resource IDはGit、Markdownの実値、artifact、logへ保存しません。Build内で検証後、`.cloudflare/generated/`のGit管理外一時configへ注入し、追跡対象wrangler templateはplaceholderのまま維持します。
+
+### Build Secrets
 
 - `CLOUDFLARE_API_TOKEN`
-- `CLOUDFLARE_ACCOUNT_ID`
-- `CF_IDS_JSON`
-- `AUTH_SECRET`
-- `AUTH_DISCORD_ID`
-- `AUTH_DISCORD_SECRET`
+- `WORKER_ADMIN_TOKEN`
 
-YouTubeや内部Worker endpointを使用する場合は、実装が参照するproduction secretも同EnvironmentまたはCloudflare側へ設定します。値をworkflow log、artifact、Markdownへ記載しません。
+`CLOUDFLARE_API_TOKEN`は4 Workerのdeploy、remote secret名の一覧取得、Remote D1のread-only検査に必要な最小権限だけを与えます。権限不足は迂回せずBuild失敗とします。
 
-### Variables
+`WORKER_ADMIN_TOKEN`は、Deploy commandから保護された`/api/health/deep`を呼びD1/KV/R2/schemaをread-only確認するための唯一の例外です。同値を`flamenode-web`と`flamenode-content-jobs`のRuntime Secretにも登録します。値はartifact scanとlog redactionの対象で、出力・永続化しません。その他のRuntime Secret値はBuild環境へ渡しません。
 
-- `NEXT_PUBLIC_SITE_URL`
-- `FAST_JOBS_URL`
-- `CONTENT_JOBS_URL`
-- `SYNC_JOBS_URL`
+Workers Buildsのsystem変数、Build/Deploy分離、branch設定は次を正本とします。
 
-すべてHTTPSの正式origin / endpointを設定します。
+- https://developers.cloudflare.com/workers/ci-cd/builds/configuration/
+- https://developers.cloudflare.com/workers/ci-cd/builds/build-branches/
+- https://developers.cloudflare.com/workers/ci-cd/builds/build-image/
 
-### `CF_IDS_JSON`
+## 4. Runtime Variables / Secrets / bindings
 
-production resource IDの唯一のGitHub側正本です。例のキー名だけを示します。
+### Runtime Variables
 
-```json
-{
-  "d1_database_id": "<D1 UUID>",
-  "d1_database_name": "flamenode_db",
-  "kv_namespace_id": "<KV ID>",
-  "kv_preview_id": "<Preview KV ID>",
-  "r2_bucket_name": "<R2 bucket name>",
-  "pages_project_name": "flamenode"
-}
-```
+| Worker | Variables |
+| --- | --- |
+| `flamenode-web` | `NEXT_PUBLIC_SITE_URL`、`AUTH_URL`、`AUTH_DISCORD_ID`、公開site metadata、`BUILD_COMMIT_SHA` |
+| `flamenode-fast-jobs` | `BUILD_COMMIT_SHA` |
+| `flamenode-content-jobs` | `BUILD_COMMIT_SHA` |
+| `flamenode-sync-jobs` | `YOUTUBE_DAILY_QUOTA_LIMIT`、`BUILD_COMMIT_SHA` |
 
-- binding構造はwrangler群が正本。
-- local IDはGit管理外の`cloudflare/ids.json`。
-- productionでは`CF_IDS_JSON`を優先し、競合・placeholder・不足をfail-closedにする。
+公開site metadataとYouTube quota既定値はwrangler templateを正本とし、production origin、OAuth Client ID、commitは検証済み一時configへ注入します。Dashboardで同名値を別正本として手動driftさせません。
 
-## 4. 初回リソース準備
+### Runtime Secrets
 
-Cloudflare resource作成は運用者が明示的に行います。
+| Worker | 必須secret名 |
+| --- | --- |
+| `flamenode-web` | `AUTH_SECRET`、`AUTH_DISCORD_SECRET`、`SPREADSHEET_IMPORT_PREVIEW_SECRET`、`WORKER_ADMIN_TOKEN` |
+| `flamenode-fast-jobs` | `DISCORD_BOT_TOKEN`または`DISCORD_WEBHOOK_URL`の少なくとも一方 |
+| `flamenode-content-jobs` | `WORKER_ADMIN_TOKEN` |
+| `flamenode-sync-jobs` | `YOUTUBE_API_KEY`、`YOUTUBE_OAUTH_CLIENT_ID`、`YOUTUBE_OAUTH_CLIENT_SECRET`、`YOUTUBE_OAUTH_REFRESH_TOKEN` |
+
+deploy preflightはremoteに登録されたsecretの**名前だけ**を検査します。Build環境からRuntime Secret値を再投入・比較しません。不足時は対象Worker名と不足名だけを表示して停止します。secret値、token、Webhook URL、cookie、ユーザーデータをlogへ出しません。
+
+### Bindings
+
+| Worker | binding |
+| --- | --- |
+| `flamenode-web` | D1 `DB`、R2 `BUCKET`、R2 incremental cache `NEXT_INC_CACHE_R2_BUCKET`、KV `KV`、Assets `ASSETS`、service `WORKER_SELF_REFERENCE` |
+| `flamenode-fast-jobs` | D1 `DB`、KV `KV` |
+| `flamenode-content-jobs` | D1 `DB`、R2 `R2`、KV `KV` |
+| `flamenode-sync-jobs` | D1 `DB`、KV `KV` |
+
+論理binding名はコードとwrangler群の契約です。production IDやbucket名だけをBuild Variablesから一時configへ注入します。
+
+### Cron Triggers
+
+| Worker | Cron |
+| --- | --- |
+| `flamenode-fast-jobs` | `*/5 * * * *` |
+| `flamenode-content-jobs` | `*/15 * * * *` |
+| `flamenode-sync-jobs` | `7,22,37,52 * * * *` |
+
+Cron WorkerへGit連携を追加せず、この3 Triggerを増やしません。
+
+## 5. 初回resource / Worker準備
+
+resource作成は運用者が明示した場合だけ行います。
 
 ```sh
-npm ci
-npm run cf:bootstrap
+npm ci --no-audit --no-fund
+npm run cf:bootstrap -- --confirm-create
 ```
 
-生成されたIDをGitへcommitせず、`production` Environmentの`CF_IDS_JSON`へ登録します。PreviewとProductionのD1/R2/KV・OAuth設定を分離してください。
+`cf:bootstrap`はD1、R2、KVだけを作成し、IDを表示・保存せず、migration、Worker deploy、secret更新を行いません。Cloudflare Dashboardで実IDを確認し、Build Variablesへ直接登録します。
 
-## 5. release前検証
+初回Build前にDashboardで次を行います。
 
-GitHub Actionsのrelease gateは次を実行し、1件でも失敗したらdeployへ進みません。
+1. exact nameの4 Workerを用意する。Cron WorkerへGitを接続しない。
+2. 各WorkerのRuntime Secretを上表どおり登録する。
+3. D1を手動初期化し、必要なactive migrationを適用する。
+4. 4 Workerの`workers.dev` URLをBuild Variablesへ登録する。
+5. `flamenode-web`だけをGitへ接続し、Build/Deploy commandを保存する。
+6. `main` Buildを実行し、固定順deployとsmokeを確認する。
+
+secret preflightまたはD1 preflightが失敗した場合は不足を直し、同じBuild設定で再試行します。検査をskipする初回専用フラグは設けません。
+
+## 6. D1 migrationとpreflight
+
+production deployはRemote D1へSELECTだけを実行し、次を確認します。
+
+- D1へ接続できる。
+- `flamenode_schema_meta`のversionがコード要求値と一致する。
+- `src/lib/db/schema.ts`がexportする全正本テーブルと`d1_migrations`が存在する。
+- `migrations/`のactive migrationに明らかな未適用がない。
+
+不一致時はWebを含む全deployを開始しません。production deploy、runtime、Codexがmigrationを自動適用することは禁止です。
+
+手動適用はbackup、対象SQL、change log、rollback方針をレビューした運用者だけが、production値を安全なoperator shellへ設定して実行します。
 
 ```sh
-npm ci
-npm run typecheck
-npm run lint
-npm run test:unit
-npm run test:workers
-npm run test:cloudflare-ci
-npm run test:integration
-npm run build
-npm run pages:build
-npm run check:pages-output
-npm run check:cloudflare-template
-npm run check:db-schema
-npm run check:db-legacy
-npm run check:event-owners
-npm run check:ui-acceptance
-npm run check:docs
-npm run check:db-history
-npm run check:project-docs
+export WORKERS_CI_COMMIT_SHA="$(git rev-parse HEAD)"
+node scripts/cloudflare-verify-environment.mjs
+npx wrangler d1 migrations apply flamenode_db --remote --config .cloudflare/generated/web.toml
 ```
 
-`check:cloudflare-config`はproduction secretsを受け取ったjobで実行し、secret不足・placeholder・形式不正を成功扱いにしません。
+PowerShellでは`$env:WORKERS_CI_COMMIT_SHA = (git rev-parse HEAD).Trim()`を使用します。実IDやtokenをコマンド行、shell history、Issueへ貼りません。適用後は停止したWorkers Buildを再試行し、read-only preflightからやり直します。詳細は[`docs/operations/migrations.md`](./docs/operations/migrations.md)を参照してください。
 
-## 6. デプロイ実行
+## 7. Build・deploy・smoke
 
-GitHubのActions画面から **Deploy Cloudflare** を`workflow_dispatch`で実行します。
+`npm run cf:cloud-build`は高速検査後、OpenNext buildを1回実行し、Worker entrypoint、Static Assets、commit manifest、旧形式artifact、機密値混入を検査します。各stepは開始、終了、所要時間だけを安全にlogへ出します。
 
-通常更新:
+Deploy commandは次を行います。
 
-- `deploy_pages=true`
-- `deploy_workers=true`
-- `bootstrap_database=false`
-- `apply_pending_migrations=false`、または承認済みpending migrationがある場合だけ`true`
+1. Build Variables、URL、実resource ID、commit SHAをfail-closedで検査する。
+2. production一時configを生成・検査する。
+3. remote secret名を検査する。
+4. Remote D1をread-only検査する。
+5. Web→fast→content→syncを順次deployする。
+6. 全deploy成功後だけproduction smokeを行う。
 
-空のproduction D1を初期化する初回だけ:
+途中失敗時は後続Workerとsmokeへ進みません。4 Workerを跨ぐ単一transactionではないため、すでにdeploy済みのWorkerがある場合は「10. rollback」に従い同じ正常commitへ戻します。
 
-- `bootstrap_database=true`
-- `apply_pending_migrations=false`
+smokeは有限retryとtimeoutを持ち、URL未設定をskipしません。確認対象は次です。
 
-`bootstrap_database`と`apply_pending_migrations`を同時に有効化できません。
+- 正式トップと同一originの`_next/static` asset
+- 公開`/api/health`のservice、runtime、commit
+- Discord Auth callbackが404/5xxではない
+- Cron Worker 3本の`/health`とcommit
+- content-jobs副作用endpointの未認証拒否
+- 保護されたdeep healthのD1/KV/R2/schema read-only結果
+- 主要公開APIの明示DTOと内部key非露出
+- 404と不正method
 
-workflowは同じcommitに対して次の順で進みます。
+公開healthとerror responseへsecret、resource ID、DB内容、ユーザーデータ、詳細exceptionを含めません。
 
-1. release gate
-2. production設定検査
-3. Pages artifact build・検査・固定
-4. 明示時だけD1 bootstrapまたはpending migration
-5. 固定artifactをPagesへdeploy
-6. Cron Worker 3本を固定順でdeploy
-7. production smoke test
+## 8. `workers.dev`からカスタムドメインへ
 
-concurrencyにより同時production deployを禁止します。migration、Pages、Workersの途中失敗時は後続jobへ進みません。
+初回は4つの`workers.dev` URLを使い、`FLAMENODE_WEB_URL`、各Cron URL、`NEXT_PUBLIC_SITE_URL`、`AUTH_URL`を一致させてsmokeします。Discord Developer PortalにもWebの検証originに対応するcallbackを登録します。
 
-## 7. DB migration
+検証成功後:
 
-- Remote D1へ自動でschemaを推測・補修しない。
-- active migrationのSQL本文を変更しない。
-- backup、change log、rollback、検証を確認してから`apply_pending_migrations=true`を選択する。
-- 空DBの初期構築前に`check-d1-bootstrap-state`がemptyを確認する。
-- 既存DBへの適用前にbaseline markerを確認する。
+1. `flamenode-web`へproduction custom domainを追加する。
+2. `FLAMENODE_WEB_URL`、`NEXT_PUBLIC_SITE_URL`、`AUTH_URL`を同じcustom originへ更新する。
+3. Discord callbackを`https://<custom-domain>/api/auth/callback/discord`へ更新する。
+4. 更新後のWorkers Buildを実行し、custom domainでproduction smokeを成功させる。
+5. 旧Pages側のcustom domain / trafficを停止する。
 
-詳細は [`docs/operations/migrations.md`](./docs/operations/migrations.md) を参照してください。
+Host header fallbackや`trustHost`の無条件有効化でorigin不一致を回避しません。
 
-## 8. smoke test
+## 9. 旧Pages停止・削除条件
 
-release後にworkflowが次を有限回で確認します。
+Pages Git Integrationと自動deployはWorkers Builds接続前に停止します。旧projectは移行期間中だけrollback候補として保持し、現行コード・Active文書・日常deploy正本にはしません。
 
-- top pageが200または想定redirect
-- `/api/health`
-- `_next/static` asset
-- Auth callbackが500ではない
-- 3 Workerの`/health`
-- 副作用endpointへの未認証アクセス拒否
-- PagesとWorkerの`BUILD_COMMIT_SHA`一致
+次をすべて満たした後だけ削除します。
 
-health responseへsecret、Cloudflare ID、DB内容、user情報、詳細exceptionを含めません。
+- custom domainが`flamenode-web`を向く。
+- Web/Auth/3 Cron/deep health/公開DTOのproduction smokeが成功する。
+- 4 Workerのcommitが一致する。
+- Cloudflare Metricsで継続的な5xx、`exceededCpu`、binding errorがない。
+- Discord OAuth callbackとSecure Cookieを実ブラウザで確認する。
+- rollback先の正常Worker commitとD1 backupを記録する。
+- 旧projectを戻す必要がない観測期間を運用者が承認する。
 
-## 9. rollback
+## 10. rollback
 
-### Pages
+### Worker code
 
-Cloudflare Pagesの直前の成功deploymentへ戻します。原因commitを修正せず同じ壊れたartifactを再deployしません。
+Cloudflare Dashboardのversion rollbackまたは正常commitを戻す明示的な`main`更新で、WebとCron 3本を**同じcommit**へ戻します。1本だけ異なる世代に固定しません。rollback後も同じproduction smokeを実行します。
 
-### Workers
-
-直前の成功commitをcheckoutした明示releaseで3本を同じ世代へ戻します。1本だけ異なる世代に固定しません。
+移行観測期間中にWorkers全体を利用できない場合だけ、残してある旧Pages deploymentへtrafficを一時的に戻せます。旧project削除後はこの経路を前提にしません。
 
 ### D1
 
-migrationが安全に逆操作できない場合は、事前backupから運用者が復旧します。コードのrollbackだけで旧schema互換を復活させません。
+code rollbackで旧schema fallback、二重書込み、runtime DDLを復活させません。migrationの逆操作が安全でない場合は事前backupから運用者が復旧します。
 
-## 10. 障害確認
+## 11. 障害時の確認順
 
-1. GitHub Actionsの失敗jobと安全なerror summaryを確認する。
-2. `check:cloudflare-config`で不足した**変数名だけ**を確認する。
-3. Pages / Worker healthとcommit SHAを比較する。
-4. D1 schema version、owner不在、stale lease、queue/outboxをintegrity checkで確認する。
-5. secret、token、cookie、Webhook URLをissueやlogへ貼らない。
+1. Workers Buildの`npm ci`、`verify:fast`、OpenNext build、artifact検査のどこで失敗したか確認する。
+2. production環境検査が示す不足した**変数名、secret名、Worker名だけ**を確認する。
+3. Remote D1 preflightのschema version、必須table、migration名を確認する。
+4. Web→fast→content→syncのどこまで同じcommitでdeployされたか確認する。
+5. 公開health、保護deep health、3 Cron health、smokeの最初の失敗を確認する。
+6. Cloudflare DashboardのInvocation Status、`exceededCpu`、D1 rows read/written、R2/KV、Cron履歴を確認する。
+7. secret、token、実resource ID、cookie、Webhook URL、OAuth情報をlog、Issue、監査snapshotへ貼らない。
 
-## 11. Cloudflare上限
+詳細な一次対応は[`docs/operations/incident-response.md`](./docs/operations/incident-response.md)を参照してください。
 
-無料枠の数値は文書へ固定しません。2026-07-13時点の設計はbounded LIMIT、cursor、lease、retry上限、差分R2生成、3 Cron Workerを前提としています。release前にCloudflare公式の最新Pages、Workers、D1、KV、R2制限を再確認してください。
+## 12. 無料枠と公式正本
+
+mainだけ、Preview/PR buildなし、1 push 1 Build、`npm ci` 1回、OpenNext build 1回、固定検査1回とし、Cron Worker別の再install・再test・artifact uploadを行いません。Static Assetsはasset-firstで配信します。Cronは固定LIMIT、cursor、lease、retry上限、差分R2書込みを維持します。
+
+Workers FreeのHTTP/Cron CPUは各invocation 10msです。Cloudflare公式は認証、SSR、大きなpayload処理が10〜20msになり得ると説明しているため、FlameNodeのAuth/SSRがFreeで常に安定するとは保証しません。実測で`exceededCpu`が継続する場合は、最適化後も無理にFreeへ留めずPaidへ移行します。
+
+変わり得る上限値は次の公式文書を正本とし、この文書へ過度に複製しません。
+
+- Next.js on Workers: https://developers.cloudflare.com/workers/framework-guides/web-apps/nextjs/
+- OpenNext: https://opennext.js.org/cloudflare/get-started
+- Workers Static Assets: https://developers.cloudflare.com/workers/static-assets/
+- Workers limits: https://developers.cloudflare.com/workers/platform/limits/
+- Workers Builds: https://developers.cloudflare.com/workers/ci-cd/builds/configuration/
+- D1 pricing / limits: https://developers.cloudflare.com/d1/platform/pricing/ 、https://developers.cloudflare.com/d1/platform/limits/
+- R2 pricing: https://developers.cloudflare.com/r2/pricing/

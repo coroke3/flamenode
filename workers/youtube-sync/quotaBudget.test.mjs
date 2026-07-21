@@ -21,11 +21,14 @@ function createDb(firstResult = { used_units: 8_000 }) {
         bind(...bindings) {
           calls.push({ sql, bindings });
           return {
-            async first() {
-              return firstResult;
+            async all() {
+              return {
+                results: firstResult ? [firstResult] : [],
+                meta: { changes: firstResult ? 1 : 0 },
+              };
             },
             async run() {
-              return { success: true };
+              return { success: true, meta: { changes: 1 } };
             },
           };
         },
@@ -57,6 +60,7 @@ test("quota予約はD1 UPSERTで上限超過を原子的に拒否する", async 
   );
   assert.equal(reservation?.reservedUnits, 8);
   assert.equal(reservation?.dailyBudgetUnits, 8_000);
+  assert.equal(reservation?.d1Changes, 1);
   assert.equal(db.calls.length, 1);
   assert.match(db.calls[0].sql, /ON CONFLICT\(provider, quota_day\)/);
   assert.match(db.calls[0].sql, /used_units \+ excluded\.used_units <= excluded\.limit_units/);
@@ -83,6 +87,7 @@ test("未使用予約だけを同じquota日へ返却する", async () => {
       reservedUnits: 8,
       usedUnits: 8,
       dailyBudgetUnits: 8_000,
+      d1Changes: 1,
     },
     5,
     1_752_388_800,

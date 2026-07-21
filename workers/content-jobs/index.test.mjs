@@ -5,7 +5,7 @@ import { test } from "node:test";
 const source = await readFile(new URL("./index.ts", import.meta.url), "utf8");
 
 test("content-jobs health は service と commit を返す", () => {
-  assert.match(source, /service:\s*"content-jobs"/);
+  assert.match(source, /service:\s*"flamenode-content-jobs"/);
   assert.match(source, /BUILD_COMMIT_SHA/);
 });
 

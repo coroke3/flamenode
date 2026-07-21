@@ -291,10 +291,10 @@ export default async function SettingsPage({
             </span>
             <span className={pageStyles.tabBody}>
               <span className={pageStyles.tabLabel}>
-                {hasLinkedXIds ? "新規連携" : "X ID連携"}
+                X ID連携
               </span>
               <span className={pageStyles.tabMeta}>
-                {hasLinkedXIds ? "X ID を追加" : "最初の連携"}
+                X IDを連携
               </span>
             </span>
           </Link>
@@ -387,12 +387,10 @@ export default async function SettingsPage({
           ) : null}
           <div className={`${pageStyles.cardHd} ${pageStyles.cardHdBordered}`}>
             <h2 id="settings-link-h" className={pageStyles.cardTitle}>
-              {hasLinkedXIds ? "新しい X ID を連携" : "X ID を連携"}
+              X IDを連携
             </h2>
             <p className={pageStyles.cardDesc}>
-              {hasLinkedXIds
-                ? "追加の X ID を申請できます。運営（管理者）が目視確認して承認します。"
-                : "@ を除いたユーザー名を入力して申請してください。承認後に投稿やプロフィール編集ができます。"}
+              @ を除いたユーザー名を入力して申請してください。初回・2件目以降とも同じ手順で、運営承認後に反映されます。
             </p>
           </div>
           <div className={pageStyles.addBox}>

@@ -16,21 +16,17 @@ export const dynamic = "force-dynamic";
 const RECENT_HISTORY_LIMIT = 30;
 const LINK_REQUEST_TYPES = ["new_link", "existing_link", "alias"] as const;
 
-interface Props {
-  searchParams?: Promise<{ type?: string }>;
+function requestTypeLabel(type: string): string {
+  if (type === "new_link" || type === "existing_link") return "X ID連携";
+  if (type === "alias") return "旧別名申請";
+  return type;
 }
 
-export default async function AdminXLinkRequestsPage({ searchParams }: Props): Promise<React.ReactElement> {
-  const sp = (await searchParams) ?? {};
-  const typeFilter = LINK_REQUEST_TYPES.includes(sp.type as (typeof LINK_REQUEST_TYPES)[number])
-    ? (sp.type as (typeof LINK_REQUEST_TYPES)[number])
-    : null;
+export default async function AdminXLinkRequestsPage(): Promise<React.ReactElement> {
   const db = getDatabase();
   const pendingWhere = and(
     eq(xIdentityRequests.status, "pending"),
-    typeFilter
-      ? eq(xIdentityRequests.request_type, typeFilter)
-      : inArray(xIdentityRequests.request_type, LINK_REQUEST_TYPES),
+    inArray(xIdentityRequests.request_type, LINK_REQUEST_TYPES),
   )!;
 
   const [pending, recentRejected, recentAuditLogs] = db
@@ -109,16 +105,10 @@ export default async function AdminXLinkRequestsPage({ searchParams }: Props): P
     <div>
       <AdminPageHeader
         title="X ID 申請"
-        description="新規・既存連携と別名追加を確認します。統合と差し戻しはX ID統合管理で処理します。"
+        description="X ID連携申請を確認します。統合と差し戻しはX ID統合管理で処理します。"
       />
       <AdminUserManagementTabs active="link-requests" />
-      <nav aria-label="申請種別フィルタ" style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap" }}>
-        <Link href="/admin/x-link-requests" className={`fn-btn fn-btn-sm ${!typeFilter ? "fn-btn-primary" : "fn-btn-ghost"}`}>すべて</Link>
-        {LINK_REQUEST_TYPES.map((type) => (
-          <Link key={type} href={`/admin/x-link-requests?type=${type}`} className={`fn-btn fn-btn-sm ${typeFilter === type ? "fn-btn-primary" : "fn-btn-ghost"}`}>
-            {type}
-          </Link>
-        ))}
+      <nav aria-label="X ID申請管理" style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap" }}>
         <Link href="/admin/x-id-merges" className="fn-btn fn-btn-sm fn-btn-ghost">統合・差し戻し</Link>
       </nav>
 
@@ -130,12 +120,12 @@ export default async function AdminXLinkRequestsPage({ searchParams }: Props): P
             直近の却下申請
           </h2>
           <FnTable>
-            <thead><tr><th>申請 X ID</th><th>種別</th><th>申請者</th><th>申請日時</th></tr></thead>
+            <thead><tr><th>申請 X ID</th><th>種別</th><th>申請者ユーザー ID</th><th>申請日時</th></tr></thead>
             <tbody>
               {recentRejected.map((row) => (
                 <tr key={row.id}>
                   <td>@{row.requested_x_id ?? "—"}</td>
-                  <td><span className="fn-badge fn-badge-soft">{row.request_type}</span></td>
+                  <td><span className="fn-badge fn-badge-soft">{requestTypeLabel(row.request_type)}</span></td>
                   <td style={{ fontFamily: "monospace", fontSize: 11 }}>{row.requested_by_auth_user_id}</td>
                   <td className="fn-muted">{formatRelative(row.requested_at)}</td>
                 </tr>

@@ -99,8 +99,14 @@ test("権限整合性検査は独立読取を並列化し総件数を保持す�
 test("ライブAPIはイベント存在確認を各データ読取へ統合する", () => {
   assert.doesNotMatch(liveApi, /eventExists/);
   assert.ok((liveApi.match(/\.from\(events\)/g) ?? []).length >= 3);
-  assert.ok((liveApi.match(/SELECT COUNT\(\*\)/g) ?? []).length >= 4);
+  assert.ok((liveApi.match(/SELECT COUNT\(\*\)/g) ?? []).length >= 3);
+  assert.doesNotMatch(liveApi, /pending_review/);
   assert.match(liveApi, /\.leftJoin\(slots, eq\(slots\.event_id, events\.id\)\)/);
+  assert.ok(
+    (liveApi.match(/eq\(events\.visibility_status, "public"\)/g) ?? []).length >= 3,
+  );
+  assert.match(liveApi, /projectLiveSlotIdentity/);
+  assert.match(liveApi, /eq\(videos\.visibility_status, "public"\)/);
 });
 
 test("公開静的JSONは同時読取を集約しR2とenqueue障害を分離する", () => {
@@ -130,7 +136,7 @@ test("イベントスタッフプリセットは単一定義から型と検証�
 test("イベント出力APIは404とキャッシュヒット応答を共通化する", () => {
   assert.match(eventExportRoute, /function notFoundResponse/);
   assert.match(eventExportRoute, /const cachedResponse = async/);
-  assert.ok((eventExportRoute.match(/return notFoundResponse\(req\)/g) ?? []).length >= 4);
+  assert.ok((eventExportRoute.match(/return notFoundResponse\(req\)/g) ?? []).length >= 3);
   assert.equal(
     (eventExportRoute.match(/readCachedPayload\(kv, payloadCacheKey, eventId\)/g) ?? []).length,
     1,

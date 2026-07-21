@@ -8,16 +8,11 @@ import {
 } from "./slotGroupingCore.ts";
 
 const baseSlot = {
-  event_id: "ev1",
   slot_label: null,
   status: "available",
   display_name: null,
-  x_user_id: null,
-  reserved_by_user_id: null,
-  reservation_group_id: null,
-  video_id: null,
-  updated_at: 0,
-  version: 0,
+  is_owned_by_viewer: false,
+  group_key: null,
 };
 
 test("sortSlotsChronologically: 時刻、sort_order、idの順で安定化する", () => {
@@ -105,7 +100,7 @@ test("collapseReservationGroups: reservation_group_id単位で集約する", () 
       id: "s1",
       start_time: 100,
       sort_order: 0,
-      reservation_group_id: "g1",
+      group_key: "g1",
       status: "reserved",
       display_name: "Team",
     },
@@ -114,7 +109,7 @@ test("collapseReservationGroups: reservation_group_id単位で集約する", () 
       id: "s2",
       start_time: 200,
       sort_order: 1,
-      reservation_group_id: "g1",
+      group_key: "g1",
       status: "reserved",
       display_name: "Team",
     },

@@ -28,6 +28,19 @@ const requiredPaths = [
 ];
 const localLinkPattern = /\[[^\]]*\]\(([^)]+)\)/g;
 const npmScriptPattern = /`npm run ([a-zA-Z0-9:_-]+)(?:\s+[^`]*)?`/g;
+const requiredOpenNextDocs = [
+  "README.md",
+  "AGENTS.md",
+  "LOCAL.md",
+  "DEPLOY.md",
+  "docs/README.md",
+  "docs/operations/README.md",
+  "docs/operations/workers.md",
+];
+const currentDesignDocs = [
+  "設計/FlameNode-Design.md",
+  "設計/FlameNode-Cloudflare-Free-Tier-Guardrails.md",
+];
 
 // 単語の出現だけでは失敗させない。「使わない」「廃止した」等の禁止・履歴説明は
 // Active文書にも必要である。ここでは現行要件として残ると明確に誤る表現だけを検出する。
@@ -39,8 +52,8 @@ const forbiddenActiveClaims = [
   [/Node\.js\s*20|Node\s*20|v20以上/gi, "旧Node.js 20要件"],
   [/0021_slim_mvp_drop_unused_tables/gi, "旧migration固定参照"],
   [
-    /(?:OpenNext|open-next).{0,40}(?:を採用する|が正式構成|へ移行する)/gi,
-    "OpenNextを現行構成とする記述",
+    /(?:Cloudflare\s+Pages|next-on-pages).{0,60}(?:を採用する|が正式構成|を維持する|でデプロイする)/gi,
+    "Cloudflare Pagesを現行構成とする記述",
   ],
   [
     /(?:permission_mask).{0,40}(?:が権限正本|を使用する|で判定する)/gi,
@@ -155,15 +168,79 @@ for (const full of collectMarkdown(file("docs"))) {
   checkNpmScripts(relative, text);
 }
 
+for (const relative of requiredOpenNextDocs) {
+  if (!fs.existsSync(file(relative))) continue;
+  const text = read(relative);
+  if (!/(?:OpenNext|@opennextjs\/cloudflare)/i.test(text)) {
+    errors.push(`${relative}: 現行OpenNext構成の記載がありません。`);
+  }
+  if (!/Cloudflare\s+Workers/i.test(text)) {
+    errors.push(`${relative}: 現行Cloudflare Workers構成の記載がありません。`);
+  }
+  if (
+    /@cloudflare\/next-on-pages|pages_build_output_dir|\.vercel\/output|wrangler\s+pages|npm run pages:/i.test(
+      text,
+    )
+  ) {
+    errors.push(`${relative}: Active文書に旧Pagesデプロイ手順が残っています。`);
+  }
+}
+
+for (const relative of currentDesignDocs) {
+  if (!fs.existsSync(file(relative))) {
+    errors.push(`${relative} がありません。`);
+    continue;
+  }
+  const text = read(relative);
+  if (!/OpenNext/i.test(text) || !/Cloudflare\s+Workers/i.test(text)) {
+    errors.push(`${relative}: 現行Cloudflare Workers + OpenNext構成の記載がありません。`);
+  }
+  if (!/Workers\s+Static\s+Assets/i.test(text)) {
+    errors.push(`${relative}: 現行Workers Static Assets構成の記載がありません。`);
+  }
+  if (
+    /Cloudflare\s+Pages|Pages\s+Static\s+Assets|Pages\s+Functions|@cloudflare\/next-on-pages|\.vercel\/output|wrangler\s+pages/i.test(
+      text,
+    )
+  ) {
+    errors.push(`${relative}: 現行設計に旧Pages構成が残っています。`);
+  }
+  checkLinks(relative, text);
+  checkNpmScripts(relative, text);
+}
+
+const historicalReadme = "docs/historical/README.md";
+if (!fs.existsSync(file(historicalReadme))) {
+  errors.push(`${historicalReadme} がありません。`);
+} else if (!/Status:\s*Historical/i.test(read(historicalReadme))) {
+  errors.push(`${historicalReadme}: Historical metadataを維持してください。`);
+}
+
 const wrangler = read("wrangler.toml");
-if (!packageJson.devDependencies?.["@cloudflare/next-on-pages"]) {
-  errors.push("package.json: Pages adapter がありません。");
+const allDependencies = {
+  ...(packageJson.dependencies ?? {}),
+  ...(packageJson.devDependencies ?? {}),
+};
+if (!allDependencies["@opennextjs/cloudflare"]) {
+  errors.push("package.json: @opennextjs/cloudflare がありません。");
 }
-if (!/^pages_build_output_dir\s*=\s*"\.vercel\/output\/static"\s*$/m.test(wrangler)) {
-  errors.push("wrangler.toml: Pages output 設定が現行値ではありません。");
+if (allDependencies["@cloudflare/next-on-pages"]) {
+  errors.push("package.json: @cloudflare/next-on-pages を削除してください。");
 }
-if (!/Cloudflare/i.test(read("docs/README.md"))) {
-  errors.push("docs/README.md: 現行Cloudflare構成の記載がありません。");
+if (!/^name\s*=\s*"flamenode-web"\s*$/m.test(wrangler)) {
+  errors.push("wrangler.toml: web Worker名はflamenode-webである必要があります。");
+}
+if (!/^main\s*=\s*"\.open-next\/worker\.js"\s*$/m.test(wrangler)) {
+  errors.push("wrangler.toml: OpenNext Worker entrypointが現行値ではありません。");
+}
+if (!/\[assets\][\s\S]*?directory\s*=\s*"\.open-next\/assets"/m.test(wrangler)) {
+  errors.push("wrangler.toml: OpenNext assets directoryが現行値ではありません。");
+}
+if (/pages_build_output_dir|\.vercel\/output|wrangler\s+pages/i.test(wrangler)) {
+  errors.push("wrangler.toml: 旧Pages構成を削除してください。");
+}
+if (!/Cloudflare\s+Workers/i.test(read("docs/README.md")) || !/OpenNext/i.test(read("docs/README.md"))) {
+  errors.push("docs/README.md: 現行Cloudflare Workers + OpenNext構成の記載がありません。");
 }
 if (packageJson.engines?.node !== ">=22 <23") {
   errors.push(
@@ -194,5 +271,5 @@ if (errors.length > 0) {
   process.exit(1);
 }
 console.log(
-  "[check:docs] OK: active documentation metadata, links, npm scripts, Cloudflare source alignment, and the isolated legacy import boundary are valid.",
+  "[check:docs] OK: Active docs use Cloudflare Workers + OpenNext, Historical docs remain isolated, and links/npm scripts are valid.",
 );

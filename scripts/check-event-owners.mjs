@@ -4,6 +4,8 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
+import { REQUIRED_SCHEMA_VERSION } from "./cloudflare-production.mjs";
 
 const root = process.cwd();
 const sqlPath = path.join(
@@ -20,20 +22,41 @@ function argValue(name) {
   return value?.slice(prefix.length) ?? null;
 }
 
-function findLocalD1Database() {
-  const rootDir = path.join(
-    root,
-    ".wrangler/state/v3/d1/miniflare-D1DatabaseObject",
-  );
+export function findLocalD1Database(rootDir = path.join(
+  root,
+  ".wrangler/state/v3/d1/miniflare-D1DatabaseObject",
+)) {
 
   if (!fs.existsSync(rootDir)) return null;
 
   const files = fs
     .readdirSync(rootDir)
-    .filter((name) => name.endsWith(".sqlite"))
+    .filter((name) => name.endsWith(".sqlite") && name !== "metadata.sqlite")
     .map((name) => path.join(rootDir, name));
 
-  return files.length === 1 ? files[0] : null;
+  const matching = [];
+  for (const databasePath of files) {
+    let db;
+    try {
+      db = new DatabaseSync(databasePath, { readOnly: true });
+      const version = db
+        .prepare(
+          "SELECT version FROM flamenode_schema_meta WHERE id = 'current' LIMIT 1",
+        )
+        .get()?.version;
+      if (version === REQUIRED_SCHEMA_VERSION) matching.push(databasePath);
+    } catch {
+      // Empty, legacy, and invalid SQLite files are not candidates.
+    } finally {
+      db?.close();
+    }
+  }
+
+  return matching.length === 1 ? matching[0] : null;
+}
+
+export function resolveDatabasePath({ explicit, rootDir } = {}) {
+  return explicit ?? findLocalD1Database(rootDir);
 }
 
 function run(databasePath) {
@@ -48,14 +71,14 @@ function run(databasePath) {
   }
 }
 
+function main() {
 try {
   const explicit =
     argValue("--database") ??
     process.env.FLAMENODE_OWNER_CHECK_DB ??
     null;
 
-  const databasePath =
-    explicit ?? findLocalD1Database();
+  const databasePath = resolveDatabasePath({ explicit });
 
   if (!databasePath) {
     console.error(
@@ -105,4 +128,9 @@ try {
     }`,
   );
   process.exit(2);
+}
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+  main();
 }

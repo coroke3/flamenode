@@ -2,9 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
-import { auth } from "@/lib/auth";
 import { canManageXIdLinkRequests } from "@/lib/auth/ownership";
-import { getDatabase } from "@/lib/cloudflare";
+import { writeGuard } from "@/lib/auth/writeGuard";
+import type { DB } from "@/lib/db/client";
 import {
   users,
   xIdentityRequests,
@@ -29,17 +29,13 @@ export interface XIdAdminResult {
   message?: string;
 }
 
-type DB = NonNullable<ReturnType<typeof getDatabase>>;
-
 async function getXIdLinkOperator(): Promise<{ authUserId: string; db: DB } | null> {
-  const session = await auth().catch(() => null);
-  const user = session?.user as { id?: string; role?: string } | undefined;
-  if (!user?.id) return null;
-  const db = getDatabase();
-  if (!db) return null;
+  const guard = await writeGuard({ feature: "xid_links" });
+  if (!guard.ok) return null;
+  const { db, user } = guard;
   const allowed = await canManageXIdLinkRequests(db, {
     id: user.id,
-    role: user.role ?? null,
+    role: user.role,
   });
   return allowed ? { authUserId: user.id, db } : null;
 }

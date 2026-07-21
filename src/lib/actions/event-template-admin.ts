@@ -3,8 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { auth } from "@/lib/auth";
-import { getDatabase } from "@/lib/cloudflare";
 import { snapshotFromEvent } from "@/lib/admin/eventTemplateSettings";
 import { eventCustomQuestions, eventTemplates, events } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
@@ -17,24 +15,6 @@ export interface EventTemplateActionResult {
   ok: boolean;
   message?: string;
   templateId?: string;
-}
-
-async function requireAdmin(): Promise<
-  | { ok: true; userId: string }
-  | { ok: false; result: EventTemplateActionResult }
-> {
-  const session = await auth().catch(() => null);
-  const u = session?.user as { id?: string; role?: string } | undefined;
-  if (!u?.id) {
-    return { ok: false, result: { ok: false, message: "ログインが必要です。" } };
-  }
-  if (u.role !== "admin") {
-    return {
-      ok: false,
-      result: { ok: false, message: "管理者のみ操作できます。" },
-    };
-  }
-  return { ok: true, userId: u.id };
 }
 
 const saveSchema = z.object({
@@ -163,11 +143,10 @@ export async function deleteEventTemplate(
     updated_at: number;
   }>
 > {
-  const guard = await requireAdmin();
+  const guard = await requireAdminWrite("admin_event_templates");
   if (!guard.ok) return [];
 
-  const db = getDatabase();
-  if (!db) return [];
+  const { db } = guard;
 
   return db
     .select({

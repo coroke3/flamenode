@@ -28,6 +28,13 @@ function flameNodeUserUrl(xId: string): string {
   return `/user/${encodeURIComponent(xId)}`;
 }
 
+function requestTypeLabel(type: XLinkRequestRow["request_type"]): string {
+  if (type === "new_link" || type === "existing_link") return "X ID連携";
+  if (type === "alias") return "旧別名申請";
+  if (type === "merge") return "X ID統合";
+  return "統合取消";
+}
+
 function XIdPreview({
   xId,
   name,
@@ -168,7 +175,7 @@ export function XLinkRequestTable({
             <th>申請 ID</th>
             <th>X ID</th>
             <th>種別</th>
-            <th>申請者 Discord</th>
+            <th>申請者</th>
             <th>申請日時</th>
             <th></th>
           </tr>
@@ -194,7 +201,7 @@ export function XLinkRequestTable({
                         : "fn-badge-soft"
                   }`}
                 >
-                  {r.request_type}
+                  {requestTypeLabel(r.request_type)}
                 </span>
                 {r.target_x_user_id ? (
                   <div style={{ marginTop: 8 }}>

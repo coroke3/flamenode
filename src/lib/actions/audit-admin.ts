@@ -1,8 +1,8 @@
 "use server";
 
 import { z } from "zod";
-import { auth } from "@/lib/auth";
-import { getDatabase } from "@/lib/cloudflare";
+import { requireAdminWrite } from "@/lib/auth/writeGuard";
+import type { DB } from "@/lib/db/client";
 import { updateAuditLogSettings } from "@/lib/audit/settings";
 import { restoreAuditLog } from "@/lib/audit/restore";
 import type { AuditLogSettings, RestoreResult } from "@/lib/audit/types";
@@ -17,14 +17,11 @@ interface ActionError {
 }
 
 async function requireAdmin(): Promise<
-  { ok: true; userId: string } | ActionError
+  { ok: true; userId: string; db: DB } | ActionError
 > {
-  const session = await auth().catch(() => null);
-  const u = session?.user as { id?: string; role?: string } | undefined;
-  if (!u?.id) return { ok: false, message: "ログインが必要です。" };
-  if (u.role !== "admin")
-    return { ok: false, message: "管理者のみ操作できます。" };
-  return { ok: true, userId: u.id };
+  const guard = await requireAdminWrite("admin_permissions");
+  if (!guard.ok) return { ok: false, message: guard.message };
+  return { ok: true, userId: guard.user.id, db: guard.db };
 }
 
 // ============================================================
@@ -61,8 +58,7 @@ export async function updateAuditLogSettingsAction(
     };
   }
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "データベース接続に失敗しました。" };
+  const db = guard.db;
 
   try {
     await updateAuditLogSettings(db, guard.userId, parsed.data as Partial<AuditLogSettings>);
@@ -106,8 +102,7 @@ export async function getAuditLogDryRun(
     };
   }
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "データベース接続に失敗しました。" };
+  const db = guard.db;
 
   const result = await restoreAuditLog(db, {
     auditId: parsed.data.audit_id,
@@ -158,8 +153,7 @@ export async function restoreAuditLogAction(
     };
   }
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "データベース接続に失敗しました。" };
+  const db = guard.db;
 
   const result = await restoreAuditLog(db, {
     auditId: parsed.data.audit_id,

@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import {
   deliver,
+  MAX_DISCORD_COOLDOWN_KV_WRITES_PER_RUN,
   MAX_DISCORD_DM_KV_WRITES_PER_RUN,
   MAX_DISCORD_EXTERNAL_REQUESTS_PER_RUN,
   MAX_NOTIFICATION_BATCH,
@@ -37,7 +38,15 @@ test("notification dispatcher uses recipient_user_id and bounded lease-aware sel
     },
   };
   const result = await processNotificationQueue(env, { limit: 999 });
-  assert.deepEqual(result, { processed: 0, failed: 0, skipped: 0 });
+  assert.deepEqual(result, {
+    processed: 0,
+    failed: 0,
+    skipped: 0,
+    external_api_calls: 0,
+    d1_changes: 0,
+    retry_count: 0,
+    quota_stopped: false,
+  });
   const sql = statements.join("\n");
   assert.match(sql, /recipient_user_id/);
   assert.match(sql, /lease_expires_at/);
@@ -48,6 +57,7 @@ test("notification dispatcher uses recipient_user_id and bounded lease-aware sel
   assert.equal(MAX_NOTIFICATION_BATCH, 6);
   assert.equal(MAX_DISCORD_EXTERNAL_REQUESTS_PER_RUN, 12);
   assert.equal(MAX_DISCORD_DM_KV_WRITES_PER_RUN, 2);
+  assert.equal(MAX_DISCORD_COOLDOWN_KV_WRITES_PER_RUN, 2);
 });
 
 test("deliver: generic notification types use Discord DM when bot token exists", async () => {
@@ -76,6 +86,43 @@ test("deliver: generic notification types use Discord DM when bot token exists",
       "123456789012345678",
     );
     assert.match(calls[1].url, /\/channels\/dm_channel\/messages$/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("deliver: 共有cooldownのglobal KV読取は1 invocationで重複しない", async () => {
+  const originalFetch = globalThis.fetch;
+  const kvGets = [];
+  const kv = {
+    async get(key) {
+      kvGets.push(key);
+      return null;
+    },
+    async put() {},
+  };
+  globalThis.fetch = async (url) =>
+    String(url).endsWith("/users/@me/channels")
+      ? okJson({ id: "cooldown_read_channel" })
+      : okJson();
+  try {
+    const ok = await deliver(
+      {
+        type: "announcement_broadcast",
+        payload_json: JSON.stringify({ content: "hello" }),
+        discord_id: "323456789012345678",
+      },
+      { KV: kv, DISCORD_BOT_TOKEN: "bot-token" },
+    );
+    assert.equal(ok, true);
+    const cooldownGets = kvGets.filter((key) =>
+      key.startsWith("external-api:discord:cooldown:"),
+    );
+    assert.equal(cooldownGets.length, 3);
+    assert.equal(
+      cooldownGets.filter((key) => key.endsWith(":global")).length,
+      1,
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -209,4 +256,294 @@ test("Discord 429はinline retryせず次回実行へ繰り越す", async () => 
   assert.match(failureSection, /retryAfterSeconds/);
   assert.doesNotMatch(failureSection, /await delay/);
   assert.doesNotMatch(failureSection, /for \(let attempt/);
+});
+
+test("Discord 429 cooldownは匿名化KV keyで別isolate相当へ共有する", async () => {
+  const originalFetch = globalThis.fetch;
+  const cooldowns = globalThis.__flamenodeDiscordCooldowns;
+  cooldowns?.clear();
+  const values = new Map();
+  const writes = [];
+  const kv = {
+    async get(key) {
+      return values.get(key) ?? null;
+    },
+    async put(key, value, options) {
+      writes.push({ key, value, options });
+      values.set(key, value);
+    },
+  };
+  const webhook = "https://example.test/cross-isolate-rate-limit/secret-token";
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    return new Response(JSON.stringify({ retry_after: 30, global: false }), {
+      status: 429,
+      headers: {
+        "content-type": "application/json",
+        "retry-after": "30",
+      },
+    });
+  };
+  const row = {
+    type: "discord_webhook",
+    payload_json: JSON.stringify({ content: "hello" }),
+    discord_id: "",
+  };
+  try {
+    assert.equal(await deliver(row, { KV: kv, DISCORD_WEBHOOK_URL: webhook }), false);
+    assert.equal(fetchCalls, 1);
+    assert.equal(writes.length, 1);
+    assert.match(writes[0].key, /^external-api:discord:cooldown:route:[0-9a-f]{64}$/);
+    assert.doesNotMatch(writes[0].key, /secret-token|example\.test/);
+
+    // isolate内Mapを失った状態でもKVの期限を読み、外部requestを抑止する。
+    cooldowns?.clear();
+    assert.equal(await deliver(row, { KV: kv, DISCORD_WEBHOOK_URL: webhook }), false);
+    assert.equal(fetchCalls, 1);
+  } finally {
+    cooldowns?.clear();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+function pendingWebhookRow(id) {
+  return {
+    id,
+    recipient_user_id: `user-${id}`,
+    discord_id: `discord-${id}`,
+    type: "discord_webhook",
+    payload_json: JSON.stringify({ content: id }),
+    attempt_count: 0,
+  };
+}
+
+test("開始前abortはD1 read/writeを開始しない", async () => {
+  const controller = new AbortController();
+  const reason = new DOMException("cron deadline", "AbortError");
+  controller.abort(reason);
+  let prepareCalls = 0;
+  const env = {
+    DB: {
+      prepare() {
+        prepareCalls += 1;
+        throw new Error("D1 must not be called after abort");
+      },
+    },
+  };
+
+  await assert.rejects(
+    processNotificationQueue(env, { signal: controller.signal }),
+    (error) => error === reason,
+  );
+  assert.equal(prepareCalls, 0);
+});
+
+test("D1 selection中のabortはitem claimとDiscord送信を開始しない", async () => {
+  const controller = new AbortController();
+  const reason = new DOMException("selection aborted", "AbortError");
+  let claimWrites = 0;
+  let fetchCalls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    return new Response(null, { status: 204 });
+  };
+  const env = {
+    DISCORD_WEBHOOK_URL: "https://example.test/selection-abort",
+    DB: {
+      prepare(sql) {
+        return {
+          bind() {
+            return this;
+          },
+          async run() {
+            if (sql.includes("SET status = 'processing'")) claimWrites += 1;
+            return { meta: { changes: 0 } };
+          },
+          async all() {
+            if (sql.includes("FROM notification_outbox n")) {
+              controller.abort(reason);
+              return { results: [pendingWebhookRow("selection")] };
+            }
+            return { results: [] };
+          },
+        };
+      },
+    },
+  };
+
+  try {
+    await assert.rejects(
+      processNotificationQueue(env, { signal: controller.signal }),
+      (error) => error === reason,
+    );
+    assert.equal(claimWrites, 0);
+    assert.equal(fetchCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("claim D1 write中のabortはDiscord送信とfailure更新へ進まない", async () => {
+  const controller = new AbortController();
+  const reason = new DOMException("claim aborted", "AbortError");
+  let failureWrites = 0;
+  let fetchCalls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    return new Response(null, { status: 204 });
+  };
+  const env = {
+    DISCORD_WEBHOOK_URL: "https://example.test/claim-abort",
+    DB: {
+      prepare(sql) {
+        return {
+          bind() {
+            return this;
+          },
+          async run() {
+            if (sql.includes("SET status = 'processing'")) {
+              controller.abort(reason);
+              return { meta: { changes: 1 } };
+            }
+            if (sql.includes("SET attempt_count")) failureWrites += 1;
+            return { meta: { changes: 0 } };
+          },
+          async all() {
+            return sql.includes("FROM notification_outbox n")
+              ? { results: [pendingWebhookRow("claim")] }
+              : { results: [] };
+          },
+        };
+      },
+    },
+  };
+
+  try {
+    await assert.rejects(
+      processNotificationQueue(env, { signal: controller.signal }),
+      (error) => error === reason,
+    );
+    assert.equal(fetchCalls, 0);
+    assert.equal(failureWrites, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Discord fetch中のAbortErrorを再送出しretry/dead-letterへ変換しない", async () => {
+  const controller = new AbortController();
+  const reason = new DOMException("discord fetch aborted", "AbortError");
+  let failureWrites = 0;
+  let sentWrites = 0;
+  let fetchCalls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    fetchCalls += 1;
+    controller.abort(reason);
+    assert.equal(init.signal.aborted, true);
+    throw new DOMException("fetch cancelled", "AbortError");
+  };
+  const env = {
+    DISCORD_WEBHOOK_URL: "https://example.test/fetch-abort",
+    DB: {
+      prepare(sql) {
+        return {
+          bind() {
+            return this;
+          },
+          async run() {
+            if (sql.includes("SET attempt_count")) failureWrites += 1;
+            if (sql.includes("SET status = 'sent'")) sentWrites += 1;
+            return {
+              meta: {
+                changes: sql.includes("SET status = 'processing'") ? 1 : 0,
+              },
+            };
+          },
+          async all() {
+            return sql.includes("FROM notification_outbox n")
+              ? { results: [pendingWebhookRow("fetch")] }
+              : { results: [] };
+          },
+        };
+      },
+    },
+  };
+
+  try {
+    await assert.rejects(
+      processNotificationQueue(env, { signal: controller.signal }),
+      (error) => error === reason,
+    );
+    assert.equal(fetchCalls, 1);
+    assert.equal(failureWrites, 0);
+    assert.equal(sentWrites, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("item完了D1境界でabortしたら次itemをclaimしない", async () => {
+  const controller = new AbortController();
+  const reason = new DOMException("item boundary aborted", "AbortError");
+  let claimWrites = 0;
+  let sentWrites = 0;
+  let failureWrites = 0;
+  let fetchCalls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    return new Response(null, { status: 204 });
+  };
+  const env = {
+    DISCORD_WEBHOOK_URL: "https://example.test/item-boundary-abort",
+    DB: {
+      prepare(sql) {
+        return {
+          bind() {
+            return this;
+          },
+          async run() {
+            if (sql.includes("SET status = 'processing'")) {
+              claimWrites += 1;
+              return { meta: { changes: 1 } };
+            }
+            if (sql.includes("SET status = 'sent'")) {
+              sentWrites += 1;
+              controller.abort(reason);
+              return { meta: { changes: 1 } };
+            }
+            if (sql.includes("SET attempt_count")) failureWrites += 1;
+            return { meta: { changes: 0 } };
+          },
+          async all() {
+            return sql.includes("FROM notification_outbox n")
+              ? {
+                  results: [
+                    pendingWebhookRow("first"),
+                    pendingWebhookRow("second"),
+                  ],
+                }
+              : { results: [] };
+          },
+        };
+      },
+    },
+  };
+
+  try {
+    await assert.rejects(
+      processNotificationQueue(env, { signal: controller.signal }),
+      (error) => error === reason,
+    );
+    assert.equal(claimWrites, 1);
+    assert.equal(sentWrites, 1);
+    assert.equal(fetchCalls, 1);
+    assert.equal(failureWrites, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

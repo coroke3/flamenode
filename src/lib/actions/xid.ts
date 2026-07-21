@@ -3,8 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { auth } from "@/lib/auth";
-import { getDatabase, getEnv } from "@/lib/cloudflare";
+import { writeGuard } from "@/lib/auth/writeGuard";
+import { getEnv } from "@/lib/cloudflare";
+import type { DB } from "@/lib/db/client";
 import {
   users,
   xIdentityRequests,
@@ -30,26 +31,34 @@ import {
   type XIdentityRequestType,
 } from "@/lib/auth/xIdentityRequestCore";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
+import { buildPendingXIdRequestInsert } from "@/lib/actions/xidPendingInsert";
 
 export interface XIdActionResult {
   ok: boolean;
   message?: string;
 }
 
-type DB = NonNullable<ReturnType<typeof getDatabase>>;
-
 function nowUnix(): number {
   return Math.floor(Date.now() / 1000);
+}
+
+function isConditionalInsertAssertionError(error: unknown): boolean {
+  return error instanceof Error && /malformed json/i.test(error.message);
 }
 
 function xUserIdMatches(xUserId: string) {
   return sql`lower(${xUsers.id}) = ${normalizeXId(xUserId)}`;
 }
 
-async function getSessionAuthUserId(): Promise<string | null> {
-  const session = await auth().catch(() => null);
-  const user = session?.user as { id?: string } | undefined;
-  return user?.id ?? null;
+async function getXIdWriteContext(): Promise<
+  | { ok: true; authUserId: string; db: DB }
+  | { ok: false; result: XIdActionResult }
+> {
+  const guard = await writeGuard({ feature: "xid_links" });
+  if (!guard.ok) {
+    return { ok: false, result: { ok: false, message: guard.message } };
+  }
+  return { ok: true, authUserId: guard.user.id, db: guard.db };
 }
 
 async function getLinkedXUser(db: DB, xUserId: string, authUserId: string) {
@@ -86,14 +95,14 @@ function revalidateXIdentityPaths(xUserId?: string): void {
 }
 
 export async function setActiveXId(formData: FormData): Promise<XIdActionResult> {
-  const authUserId = await getSessionAuthUserId();
-  if (!authUserId) return { ok: false, message: "ログインが必要です。" };
+  const context = await getXIdWriteContext();
+  if (!context.ok) return context.result;
+  const { authUserId } = context;
 
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   if (!xUserId) return { ok: false, message: "X ID が指定されていません。" };
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = context.db;
 
   const xRow = await getLinkedXUser(db, xUserId, authUserId);
   if (!xRow) {
@@ -140,8 +149,9 @@ export async function setActiveXId(formData: FormData): Promise<XIdActionResult>
 const requestKindSchema = z.enum(["link", "merge"]);
 
 export async function requestXIdLink(formData: FormData): Promise<XIdActionResult> {
-  const authUserId = await getSessionAuthUserId();
-  if (!authUserId) return { ok: false, message: "ログインが必要です。" };
+  const context = await getXIdWriteContext();
+  if (!context.ok) return context.result;
+  const { authUserId } = context;
 
   const requestedXUserId = normalizeXId(String(formData.get("x_id") ?? ""));
   if (!requestedXUserId || !/^[a-z0-9_]{1,20}$/.test(requestedXUserId)) {
@@ -157,8 +167,7 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
   if (!parsedKind.success) return { ok: false, message: "不正な申請種別です。" };
 
   const targetXUserId = normalizeXId(String(formData.get("target_x_user_id") ?? ""));
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = context.db;
 
   const existingXUser = (
     await db.select().from(xUsers).where(xUserIdMatches(requestedXUserId)).limit(1)
@@ -196,39 +205,6 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
   });
   if (shapeError) return { ok: false, message: shapeError };
 
-  const duplicateConditions = [
-    eq(xIdentityRequests.requested_by_auth_user_id, authUserId),
-    eq(xIdentityRequests.request_type, requestType),
-    eq(xIdentityRequests.status, "pending"),
-  ];
-  if (requestedXId) duplicateConditions.push(eq(xIdentityRequests.requested_x_id, requestedXId));
-  if (sourceXUserId) duplicateConditions.push(eq(xIdentityRequests.source_x_user_id, sourceXUserId));
-  if (targetXUserId) duplicateConditions.push(eq(xIdentityRequests.target_x_user_id, targetXUserId));
-  const duplicate = (
-    await db
-      .select({ id: xIdentityRequests.id })
-      .from(xIdentityRequests)
-      .where(and(...duplicateConditions)!)
-      .limit(1)
-  )[0];
-  if (duplicate) return { ok: true, message: "同じ内容の申請がすでに承認待ちです。" };
-
-  const pendingCountRows = await db
-    .select({ count: sql<number>`COUNT(*)` })
-    .from(xIdentityRequests)
-    .where(
-      and(
-        eq(xIdentityRequests.requested_by_auth_user_id, authUserId),
-        eq(xIdentityRequests.status, "pending"),
-      )!,
-    );
-  if (Number(pendingCountRows[0]?.count ?? 0) >= 5) {
-    return {
-      ok: false,
-      message: "未処理の X ID 申請が多すぎます。処理を待ってから再申請してください。",
-    };
-  }
-
   const now = nowUnix();
   const id = generateId("xreq");
   const afterRequest = {
@@ -245,34 +221,80 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
     requested_at: now,
     updated_at: now,
   };
-  await mutateWithAudit(db, {
-    mutationStatements: [db.insert(xIdentityRequests).values(afterRequest)],
-    expectedMutationChanges: [1],
-    audits: [
-      {
-        table_name: "x_identity_requests",
-        target_id: id,
-        operation: "CREATE",
-        before: null,
-        after: { ...afterRequest },
-        actor_user_id: authUserId,
-        retention_class: "long_audit",
-      },
-    ],
-  });
+  try {
+    await mutateWithAudit(db, {
+      mutationStatements: [db.run(buildPendingXIdRequestInsert(afterRequest))],
+      expectedMutationChanges: [1],
+      audits: [
+        {
+          table_name: "x_identity_requests",
+          target_id: id,
+          operation: "CREATE",
+          before: null,
+          after: { ...afterRequest },
+          actor_user_id: authUserId,
+          retention_class: "long_audit",
+        },
+      ],
+    });
+  } catch (error) {
+    // 条件付きINSERTの0行はmutateWithAuditのassertionでrollbackされる。
+    // assertion以外の監査・DB障害は競合扱いにせず、そのまま再送出する。
+    if (!isConditionalInsertAssertionError(error)) throw error;
+    const duplicate = (
+      await db
+        .select({ id: xIdentityRequests.id })
+        .from(xIdentityRequests)
+        .where(
+          and(
+            eq(xIdentityRequests.requested_by_auth_user_id, authUserId),
+            eq(xIdentityRequests.request_type, requestType),
+            eq(xIdentityRequests.status, "pending"),
+            requestedXId === null
+              ? sql`${xIdentityRequests.requested_x_id} IS NULL`
+              : eq(xIdentityRequests.requested_x_id, requestedXId),
+            sourceXUserId === null
+              ? sql`${xIdentityRequests.source_x_user_id} IS NULL`
+              : eq(xIdentityRequests.source_x_user_id, sourceXUserId),
+            targetXUserId === null
+              ? sql`${xIdentityRequests.target_x_user_id} IS NULL`
+              : eq(xIdentityRequests.target_x_user_id, targetXUserId),
+          )!,
+        )
+        .limit(1)
+    )[0];
+    if (duplicate) return { ok: true, message: "同じ内容の申請がすでに承認待ちです。" };
+
+    const pendingCountRows = await db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(xIdentityRequests)
+      .where(
+        and(
+          eq(xIdentityRequests.requested_by_auth_user_id, authUserId),
+          eq(xIdentityRequests.status, "pending"),
+        )!,
+      );
+    if (Number(pendingCountRows[0]?.count ?? 0) >= 5) {
+      return {
+        ok: false,
+        message: "未処理の X ID 申請が多すぎます。処理を待ってから再申請してください。",
+      };
+    }
+    throw error;
+  }
 
   revalidateXIdentityPaths(requestedXUserId);
   return { ok: true, message: "X ID 申請を受け付けました。" };
 }
 
 export async function requestXIdMergeRevert(formData: FormData): Promise<XIdActionResult> {
-  const authUserId = await getSessionAuthUserId();
-  if (!authUserId) return { ok: false, message: "ログインが必要です。" };
+  const context = await getXIdWriteContext();
+  if (!context.ok) return context.result;
+  const { authUserId } = context;
   const parentRequestId = String(formData.get("parent_request_id") ?? "").trim();
   if (!parentRequestId) return { ok: false, message: "統合申請 ID が必要です。" };
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = context.db;
   const parent = (
     await db.select().from(xIdentityRequests).where(eq(xIdentityRequests.id, parentRequestId)).limit(1)
   )[0];
@@ -337,8 +359,9 @@ export async function requestXIdMergeRevert(formData: FormData): Promise<XIdActi
 }
 
 export async function updateXIdProfile(formData: FormData): Promise<XIdActionResult> {
-  const authUserId = await getSessionAuthUserId();
-  if (!authUserId) return { ok: false, message: "ログインが必要です。" };
+  const context = await getXIdWriteContext();
+  if (!context.ok) return context.result;
+  const { authUserId } = context;
 
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   const xName = String(formData.get("x_name") ?? "").trim().slice(0, 80);
@@ -361,8 +384,7 @@ export async function updateXIdProfile(formData: FormData): Promise<XIdActionRes
     return { ok: false, message: otherSocialLinks.message ?? "SNS リンクが不正です。" };
   }
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = context.db;
   const linked = await getLinkedXUser(db, xUserId, authUserId);
   if (!linked) return { ok: false, message: "この X ID を編集する権限がありません。" };
   const row = (await db.select().from(xUsers).where(eq(xUsers.id, xUserId)).limit(1))[0];
@@ -399,16 +421,16 @@ export async function updateXIdProfile(formData: FormData): Promise<XIdActionRes
 }
 
 export async function deleteLinkedXId(formData: FormData): Promise<XIdActionResult> {
-  const authUserId = await getSessionAuthUserId();
-  if (!authUserId) return { ok: false, message: "ログインが必要です。" };
+  const context = await getXIdWriteContext();
+  if (!context.ok) return context.result;
+  const { authUserId } = context;
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   const confirm = String(formData.get("confirm") ?? "").trim();
   if (!xUserId || confirm !== `DELETE ${xUserId}`) {
     return { ok: false, message: `確認のため DELETE ${xUserId} と入力してください。` };
   }
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = context.db;
   const link = (
     await db
       .select()
@@ -474,14 +496,14 @@ export async function deleteLinkedXId(formData: FormData): Promise<XIdActionResu
 }
 
 export async function setXIdIcon(formData: FormData): Promise<XIdActionResult> {
-  const authUserId = await getSessionAuthUserId();
-  if (!authUserId) return { ok: false, message: "ログインが必要です。" };
+  const context = await getXIdWriteContext();
+  if (!context.ok) return context.result;
+  const { authUserId } = context;
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   const iconUrl = String(formData.get("icon_url") ?? "").trim();
   if (!xUserId || !iconUrl) return { ok: false, message: "X ID とアイコンが必要です。" };
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = context.db;
   if (!(await getLinkedXUser(db, xUserId, authUserId))) {
     return { ok: false, message: "この X ID を編集する権限がありません。" };
   }
@@ -516,15 +538,15 @@ export async function setXIdIcon(formData: FormData): Promise<XIdActionResult> {
 export async function uploadXIdIcon(
   formData: FormData,
 ): Promise<XIdActionResult & { iconUrl?: string }> {
-  const authUserId = await getSessionAuthUserId();
-  if (!authUserId) return { ok: false, message: "ログインが必要です。" };
+  const context = await getXIdWriteContext();
+  if (!context.ok) return context.result;
+  const { authUserId } = context;
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   const file = formData.get("icon_file");
   if (!xUserId || !(file instanceof File)) return { ok: false, message: "画像ファイルが必要です。" };
   if (file.size > 2 * 1024 * 1024) return { ok: false, message: "2MB 以内の画像を選んでください。" };
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = context.db;
   if (!(await getLinkedXUser(db, xUserId, authUserId))) {
     return { ok: false, message: "この X ID を編集する権限がありません。" };
   }

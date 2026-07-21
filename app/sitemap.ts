@@ -1,4 +1,3 @@
-export const runtime = "edge";
 
 import type { MetadataRoute } from "next";
 import { desc, eq, sql } from "drizzle-orm";

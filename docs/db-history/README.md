@@ -1,7 +1,7 @@
 # DB履歴
 
 > Status: Active
-> Last verified: 2026-07-13
+> Last verified: 2026-07-21
 > Verified against commit: `28bd38d74a991ac9a06070a330e038c5d03ffa03`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/` active path
 
@@ -24,6 +24,6 @@
 
 ## 方針
 
-DBはD1を正本とし、R2/KVの静的JSONはキャッシュとする。現行コードに起動時の自動スキーマ適用、旧列fallback、二重書き込みを残さない。Cloudflare Pages + `@cloudflare/next-on-pages` と、`fast-jobs`、`content-jobs`、`sync-jobs` の3 Cron Worker構成は変更しない。
+DBはD1を正本とし、R2/KVの静的JSONはキャッシュとする。現行コードに起動時の自動スキーマ適用、旧列fallback、二重書き込みを残さない。WebはCloudflare Workers + OpenNext、背景処理は`fast-jobs`、`content-jobs`、`sync-jobs`の3 Cron Workerとする。production deploy前はremote D1をread-only検査し、migrationは運用者が明示的に手動適用する。
 
 旧migrationは内容を改変・削除せずHistoricalとして保存する。履歴資料の記述は当時の記録であり、現行仕様の根拠にはしない。

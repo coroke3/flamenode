@@ -11,7 +11,7 @@ const sharedSource = await readFile(
 
 test("sync-jobs health は共通Cron Workerからserviceとcommitを返す", () => {
   assert.match(source, /createCronWorker/);
-  assert.match(source, /service:\s*"sync-jobs"/);
+  assert.match(source, /service:\s*"flamenode-sync-jobs"/);
   assert.match(source, /BUILD_COMMIT_SHA/);
   assert.match(sharedSource, /async fetch\(/);
   assert.match(sharedSource, /pathname\s*===\s*[\r\n\s]*"\/health"/);
@@ -25,10 +25,21 @@ test("score変更時はtopとlist_popularを重複排除付きで再生成予約
   assert.match(source, /score\.processed\s*>\s*0/);
 });
 
-test("毎時52分台だけを再生リスト同期の専用枠にする", () => {
+test("UTC分が52の時だけを再生リスト同期の専用枠にする", () => {
   assert.equal(isPlaylistSyncSlot(new Date("2026-07-13T00:07:00Z")), false);
   assert.equal(isPlaylistSyncSlot(new Date("2026-07-13T00:22:00Z")), false);
   assert.equal(isPlaylistSyncSlot(new Date("2026-07-13T00:37:00Z")), false);
+  assert.equal(isPlaylistSyncSlot(new Date("2026-07-13T00:50:00Z")), false);
+  assert.equal(isPlaylistSyncSlot(new Date("2026-07-13T00:51:00Z")), false);
   assert.equal(isPlaylistSyncSlot(new Date("2026-07-13T00:52:00Z")), true);
+  assert.equal(isPlaylistSyncSlot(new Date("2026-07-13T00:53:00Z")), false);
+  assert.equal(isPlaylistSyncSlot(new Date("2026-07-13T00:59:00Z")), false);
   assert.match(source, /youtube-playlist-sync/);
+  assert.match(source, /isPlaylistSyncSlot\(new Date\(execution\.scheduledTime\)\)/);
+  assert.doesNotMatch(source, /if \(isPlaylistSyncSlot\(\)\)/);
+});
+
+test("Cron deadline signalをmetadata同期とplaylist同期へ渡す", () => {
+  assert.match(source, /syncEventPlaylists\(env, signal\)/);
+  assert.match(source, /syncBatch\(env, undefined, signal\)/);
 });

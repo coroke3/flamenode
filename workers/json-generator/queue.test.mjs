@@ -140,6 +140,15 @@ test("claim and normal completion use one lease token", async () => {
   assert.equal(row.lease_token, null);
 });
 
+test("claim and completion metrics count only queue mutations", async () => {
+  const row = { id: "srb-metrics", status: "pending" };
+  const env = envFor(row);
+  const metrics = { d1_changes: 0 };
+  const token = await markProcessing(env, row.id, 100, metrics);
+  assert.equal(await markDone(env, row.id, token, 110, metrics), true);
+  assert.equal(metrics.d1_changes, 2);
+});
+
 test("processing中の再enqueueは完了時にpendingへ戻す", async () => {
   const row = { id: "srb-requeued", status: "pending" };
   const env = envFor(row);
@@ -249,6 +258,28 @@ test("retry CAS loss caused by enqueue increments bounded attempts", async () =>
   assert.equal(failedRow.next_retry_at, null);
 });
 
+test("retry and lease recovery metrics count successful mutations", async () => {
+  const retryRow = {
+    id: "srb-metrics-retry",
+    status: "processing",
+    lease_token: "retry-token",
+    attempt_count: 0,
+  };
+  const metrics = { d1_changes: 0 };
+  await markRetryOrFailed(envFor(retryRow), retryRow, "retry-token", new Error("temporary"), 400, metrics);
+  assert.equal(metrics.d1_changes, 1);
+
+  const recoveredRow = {
+    id: "srb-metrics-recover",
+    status: "processing",
+    lease_token: null,
+    attempt_count: 0,
+  };
+  const recoveryMetrics = { d1_changes: 0 };
+  assert.equal(await markDone(envFor(recoveredRow), recoveredRow.id, "stale", 401, recoveryMetrics), false);
+  assert.equal(recoveryMetrics.d1_changes, 1);
+});
+
 test("expired processing leases are recovered with bounded attempts", async () => {
   const row = {
     id: "srb-8",
@@ -284,7 +315,9 @@ test("expired processing leases are recovered with bounded attempts", async () =
       },
     },
   };
-  await reconcileStaleQueue(env, 900);
+  const metrics = { d1_changes: 0 };
+  await reconcileStaleQueue(env, 900, undefined, metrics);
+  assert.equal(metrics.d1_changes, 1);
   assert.equal(row.status, "pending");
   assert.equal(row.attempt_count, 2);
   assert.equal(row.processing_started_at, null);

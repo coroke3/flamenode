@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import { getDatabase, getEnv } from "@/lib/cloudflare";
+import { getEnv } from "@/lib/cloudflare";
+import { CurrentUserUnavailableError } from "@/lib/auth/currentUser";
+import { requireAdminWrite, type WriteGuardResult } from "@/lib/auth/writeGuard";
+import { requireSameOriginWrite } from "@/lib/auth/writeOriginGuard";
 import { parseLegacyImportText, type LegacyParsedFile } from "@/lib/import/legacy/parse";
 import {
   normalizeLegacyFiles,
@@ -15,7 +17,6 @@ import {
   LegacyImportPreviewError,
 } from "@/lib/import/legacy/previewStore";
 
-export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 const MAX_FILES = 20;
@@ -63,11 +64,34 @@ function previewErrorResponse(cause: unknown): NextResponse {
   });
 }
 
+function writeGuardErrorResponse(
+  guard: Exclude<WriteGuardResult, { ok: true }>,
+): NextResponse {
+  const status =
+    guard.reason === "unauthenticated"
+      ? 401
+      : guard.reason === "db_unavailable" ||
+          guard.reason === "maintenance_mode" ||
+          guard.reason === "cost_guard_blocked"
+        ? 503
+        : 403;
+  return error(guard.reason, status);
+}
+
 export async function POST(request: Request): Promise<NextResponse> {
-  const session = await auth().catch(() => null);
-  const user = session?.user as { id?: string; role?: string } | undefined;
-  if (!user?.id) return error("ログインが必要です。", 401);
-  if (user.role !== "admin") return error("管理者のみ利用できます。", 403);
+  const origin = await requireSameOriginWrite(request);
+  if (!origin.ok) return error(origin.error, origin.status);
+  let writeAccess: WriteGuardResult;
+  try {
+    writeAccess = await requireAdminWrite("admin_legacy_import");
+  } catch (cause) {
+    if (cause instanceof CurrentUserUnavailableError) {
+      return error(cause.code, 503);
+    }
+    throw cause;
+  }
+  if (!writeAccess.ok) return writeGuardErrorResponse(writeAccess);
+  const { db, user } = writeAccess;
 
   const formData = await request.formData().catch(() => null);
   if (!formData) return error("multipart/form-data を読み取れませんでした。");
@@ -89,12 +113,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       });
     } catch (cause) {
       return previewErrorResponse(cause);
-    }
-
-    const db = getDatabase();
-    if (!db) {
-      await claimed.release().catch(() => undefined);
-      return error("DBに接続できません。preview planは保持されています。", 503);
     }
 
     try {

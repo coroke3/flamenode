@@ -48,12 +48,13 @@ if (!runningWithTsx) {
     `);
 
     const state = { generatedItems: 0 };
+    const get = async () => undefined;
+    const selectChain = {
+      leftJoin: () => selectChain,
+      where: () => ({ get }),
+    };
     const db = {
-      select: () => ({
-        from: () => ({
-          where: () => ({ get: async () => undefined }),
-        }),
-      }),
+      select: () => ({ from: () => selectChain }),
       run: (query) => ({ kind: "generated", query }),
       batch: async (items) => {
         sqlite.exec("BEGIN IMMEDIATE");

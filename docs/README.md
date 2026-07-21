@@ -1,8 +1,8 @@
 # FlameNode ドキュメント索引
 
 > Status: Active
-> Last verified: 2026-07-20
-> Verified against commit: `89b8889`
+> Last verified: 2026-07-21
+> Verified against commit: `47e6cee`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/`, `wrangler.toml`, `package.json`
 
 ## AIの読取順
@@ -16,7 +16,7 @@ Historical、archive、旧監査資料は現行仕様の根拠にしない。長
 
 ## 現行構成
 
-Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、Cron Worker 3本を使用する。正確な状態はコード、schema、active migration、Cloudflare設定を優先する。
+WebはCloudflare Workers + OpenNext + Workers Static Assets、背景処理はCron Worker 3本を使用する。本番デプロイ正本はCloudflare Workers Buildsだけとし、正確な状態はコード、schema、active migration、Cloudflare設定を優先する。
 
 ## Active文書
 

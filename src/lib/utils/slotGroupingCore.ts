@@ -10,18 +10,13 @@
  */
 export type SlotBase = {
   id: string;
-  event_id: string;
   slot_label: string | null;
   start_time: number | null;
   sort_order?: number | null;
   status: "available" | "reserved" | "submitted";
   display_name: string | null;
-  x_user_id: string | null;
-  reserved_by_user_id: string | null;
-  reservation_group_id: string | null;
-  video_id: string | null;
-  updated_at: number;
-  version?: number;
+  is_owned_by_viewer: boolean;
+  group_key: string | null;
   event_title?: string | null;
   /** @deprecated 旧UI読取境界。DB正本には存在しない。 */
   priority_reclaim_video_id?: string | null;
@@ -129,16 +124,16 @@ export function collapseReservationGroups(rows: SlotBase[]): SlotGroupRow[] {
   const sorted = sortSlotsChronologically(rows);
   const grouped = new Map<string, SlotBase[]>();
   for (const row of sorted) {
-    if (row.reservation_group_id) {
-      const current = grouped.get(row.reservation_group_id) ?? [];
+    if (row.group_key) {
+      const current = grouped.get(row.group_key) ?? [];
       current.push(row);
-      grouped.set(row.reservation_group_id, current);
+      grouped.set(row.group_key, current);
     }
   }
 
   const seen = new Set<string>();
   return sorted.flatMap((row): SlotGroupRow[] => {
-    const groupId = row.reservation_group_id;
+    const groupId = row.group_key;
     if (!groupId) {
       return [{ ...row, slot_ids: [row.id], group_id: null, group_size: 1, is_group: false }];
     }
@@ -165,11 +160,10 @@ export function collapseReservationGroups(rows: SlotBase[]): SlotGroupRow[] {
         status,
         display_name:
           groupRows.find((candidate) => candidate.display_name)?.display_name ?? null,
-        x_user_id: groupRows.find((candidate) => candidate.x_user_id)?.x_user_id ?? null,
-        reserved_by_user_id:
-          groupRows.find((candidate) => candidate.reserved_by_user_id)
-            ?.reserved_by_user_id ?? null,
-        reservation_group_id: groupId,
+        is_owned_by_viewer: groupRows.some(
+          (candidate) => candidate.is_owned_by_viewer,
+        ),
+        group_key: groupId,
         slot_ids: groupRows.map((candidate) => candidate.id),
         group_id: groupId,
         group_size: groupRows.length,

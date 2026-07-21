@@ -1,8 +1,7 @@
 /** Slot deadline reminder enqueue. Delivery is delegated to fast-jobs. */
 export interface ReminderEnv {
   DB: D1Database;
-  APP_ORIGIN?: string;
-  NEXT_PUBLIC_APP_URL?: string;
+  NEXT_PUBLIC_SITE_URL?: string;
 }
 
 const REMINDER_LIMIT = 50;
@@ -27,12 +26,44 @@ function formatDeadlineJa(unixSec: number): string {
   });
 }
 
-function buildReminderContent(env: ReminderEnv, group: ReminderGroup): string {
-  const origin = (env.APP_ORIGIN || env.NEXT_PUBLIC_APP_URL || "").trim().replace(/\/$/, "");
+function requireReminderOrigin(value: string | undefined): string {
+  const raw = value?.trim();
+  if (!raw) throw new Error("NEXT_PUBLIC_SITE_URL is required for reminders");
+
+  let siteUrl: URL;
+  try {
+    siteUrl = new URL(raw);
+  } catch {
+    throw new Error("NEXT_PUBLIC_SITE_URL is invalid for reminders");
+  }
+  const hostname = siteUrl.hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "");
+  const isLocalhost =
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname === "::1" ||
+    hostname === "0.0.0.0" ||
+    /^127(?:\.\d{1,3}){3}$/.test(hostname);
+  if (
+    siteUrl.protocol !== "https:" ||
+    isLocalhost ||
+    siteUrl.username !== "" ||
+    siteUrl.password !== "" ||
+    (siteUrl.pathname !== "" && siteUrl.pathname !== "/") ||
+    siteUrl.search !== "" ||
+    siteUrl.hash !== ""
+  ) {
+    throw new Error("NEXT_PUBLIC_SITE_URL is invalid for reminders");
+  }
+  return siteUrl.origin;
+}
+
+function buildReminderContent(origin: string, group: ReminderGroup): string {
   const submitPath = `/event/${group.event_id}/slots`;
   const eventPath = `/event/${group.event_id}`;
-  const submitUrl = origin ? `${origin}${submitPath}` : submitPath;
-  const eventUrl = origin ? `${origin}${eventPath}` : eventPath;
+  const submitUrl = `${origin}${submitPath}`;
+  const eventUrl = `${origin}${eventPath}`;
   const slots = group.slot_count > 1 ? `予約枠 ${group.slot_count} 件` : "予約枠";
   return [
     "投稿締切が近づいています。",
@@ -52,7 +83,10 @@ function boundedLimit(limit: number): number {
 export async function enqueueSlotDeadlineReminders(
   env: ReminderEnv,
   limit = REMINDER_LIMIT,
+  signal?: AbortSignal,
 ): Promise<number> {
+  signal?.throwIfAborted();
+  const origin = requireReminderOrigin(env.NEXT_PUBLIC_SITE_URL);
   const now = Math.floor(Date.now() / 1000);
   const groupsResult = await env.DB.prepare(
     `SELECT s.event_id,
@@ -78,12 +112,14 @@ export async function enqueueSlotDeadlineReminders(
   )
     .bind(now, now + REMINDER_WINDOW_SEC, boundedLimit(limit))
     .all<ReminderGroup>();
+  signal?.throwIfAborted();
 
   let enqueued = 0;
   for (const group of groupsResult.results ?? []) {
+    signal?.throwIfAborted();
     const dedupeKey = `slot_deadline_reminder:${group.event_id}:${group.recipient_user_id}:24h`;
     const payload = JSON.stringify({
-      content: buildReminderContent(env, group),
+      content: buildReminderContent(origin, group),
       event_id: group.event_id,
       event_title: group.event_title,
       deadline_at: group.entry_end_time,
@@ -109,6 +145,7 @@ export async function enqueueSlotDeadlineReminders(
           now,
         )
         .run();
+      signal?.throwIfAborted();
       enqueued += 1;
     } catch (error) {
       if (!/unique|constraint/i.test(String(error))) throw error;

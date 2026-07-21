@@ -3,8 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { auth } from "@/lib/auth";
 import { assertCanEditEvent } from "@/lib/auth/ownership";
+import { writeGuard } from "@/lib/auth/writeGuard";
 import { canonicalizePermissionKey } from "@/lib/auth/permissions/aliases";
 import {
   isAdminOnlyKey,
@@ -16,7 +16,7 @@ import {
   getPresetPermissions,
   type EventStaffPreset,
 } from "@/lib/auth/permissions/presets";
-import { getDatabase } from "@/lib/cloudflare";
+import type { DB } from "@/lib/db/client";
 import { eventStaff, xUsers } from "@/lib/db/schema";
 import {
   assertActorMayAssignOwner,
@@ -37,25 +37,22 @@ export interface StaffActionResult {
   message?: string;
 }
 
-type DB = NonNullable<ReturnType<typeof getDatabase>>;
-
 async function ensureEventManager(eventId: string): Promise<
   | { ok: true; userId: string; role: string | null; db: DB }
   | { ok: false; result: StaffActionResult }
 > {
-  const session = await auth().catch(() => null);
-  const user = session?.user as { id?: string; role?: string } | undefined;
-  if (!user?.id) {
-    return { ok: false, result: { ok: false, message: "ログインが必要です。" } };
+  const identity = await writeGuard({ feature: "manage_event_staff" });
+  if (!identity.ok) {
+    return {
+      ok: false,
+      result: { ok: false, message: identity.message },
+    };
   }
-  const db = getDatabase();
-  if (!db) {
-    return { ok: false, result: { ok: false, message: "DB に接続できません。" } };
-  }
+  const { db, user } = identity;
   try {
     await assertCanEditEvent(
       db,
-      { id: user.id, role: user.role ?? null },
+      { id: user.id, role: user.role },
       eventId,
       "event.members",
     );
@@ -68,7 +65,7 @@ async function ensureEventManager(eventId: string): Promise<
       },
     };
   }
-  return { ok: true, userId: user.id, role: user.role ?? null, db };
+  return { ok: true, userId: user.id, role: user.role, db };
 }
 
 function revalidateEventStaffPaths(eventId: string): void {

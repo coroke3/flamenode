@@ -91,6 +91,22 @@ forbidMatch(
   "OS設定を明示する選択肢または文言が残っています。",
 );
 
+forbidMatch(
+  "src/components/layout/PublicHeader.tsx",
+  /XIdSwitcher/,
+  "公開ヘッダーにX ID選択ボタンが残っています。",
+);
+forbidMatch(
+  "src/components/user/AccountMenu.tsx",
+  /useActiveXSwitcher|switchTo\(|別の X ID に切り替え/,
+  "公開ヘッダーのアカウントメニューにX ID切替操作が残っています。",
+);
+requireMatch(
+  "src/components/user/AccountMenu.tsx",
+  /href="\/dashboard\/settings"/,
+  "X ID管理を設定画面へ集約する導線がありません。",
+);
+
 requireAll("src/components/layout/ConsoleDrawer.tsx", [
   [/max-width: 760px/, "760px以下のモバイル判定がありません。"],
   [/event\.key === "Escape"/, "Escapeで閉じる処理がありません。"],

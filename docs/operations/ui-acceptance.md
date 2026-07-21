@@ -1,7 +1,7 @@
 # UI受入検査
 
 > Status: Active
-> Last verified: 2026-07-13
+> Last verified: 2026-07-21
 > Verified against commit: `fb0256a`
 > Source of truth: `app/`, `src/components/`, `src/styles/`, `scripts/check-ui-acceptance.mjs`
 
@@ -36,4 +36,4 @@
 
 ## 自動検査
 
-`npm run check:ui-acceptance` は上記機能を支える実装契約と、この幅一覧の欠落を検出します。実ブラウザでの最終確認は、production secretを使わないPreviewまたはローカルPages環境で行います。
+`npm run check:ui-acceptance` は上記機能を支える実装契約と、この幅一覧の欠落を検出します。実ブラウザでの最終確認は、production secretを使わないOpenNext / `wrangler dev`ローカルpreviewで行います。

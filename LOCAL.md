@@ -2,10 +2,10 @@
 
 > Status: Active
 > Last verified: 2026-07-20
-> Verified against commit: `7c5eac3`
+> Verified against commit: `47e6cee`
 > Source of truth: `package.json`, `.dev.vars.example`, `migrations/` active path, `wrangler.toml`, `docs/operations/migrations.md`
 
-この文書は個人PCの実施済み状態を前提にせず、空の作業環境からFlameNodeを再現する手順だけを扱います。本番操作は [`DEPLOY.md`](./DEPLOY.md) を参照してください。
+この文書は個人PCの実施済み状態を前提にせず、空の作業環境からFlameNodeを再現する手順だけを扱います。本番操作は [`DEPLOY.md`](./DEPLOY.md) を参照してください。監査ログの正本テーブル名は `audit_logs` です。
 
 ## 1. 必要環境
 
@@ -93,21 +93,31 @@ http://localhost:3000/api/auth/callback/discord
 
 ローカル用Discord applicationを本番用と分離してください。
 
-## 6. Cloudflare Pages互換確認
+## 6. OpenNext / Cloudflare Workersローカル確認
+
+OpenNext成果物はcommit SHAを埋め込むため、build時は現在のGit HEADを明示します。`preview`は同じHEADを自動取得します。
+
+Windows PowerShell:
+
+```powershell
+$env:WORKERS_CI_COMMIT_SHA = (git rev-parse HEAD).Trim()
+npm run cf:build
+npm run preview
+Remove-Item Env:WORKERS_CI_COMMIT_SHA
+```
+
+macOS / Linux:
 
 ```sh
-npm run pages:build
-npm run check:pages-output
-npm run pages:dev
+export WORKERS_CI_COMMIT_SHA="$(git rev-parse HEAD)"
+npm run cf:build
+npm run preview
+unset WORKERS_CI_COMMIT_SHA
 ```
 
-`pages:build`はリポジトリのwrapperを経由します。生の`next-on-pages` CLIを直接呼びません。`pages:dev`は`.vercel/output/static`をD1/R2/KVのローカルbindingで起動します。
+`cf:build`はNext.jsをOpenNextで1回だけbuildし、`.open-next/worker.js`、Static Assets、commit manifest、機密値混入を検査します。`preview`は同じ成果物を`wrangler dev`でD1/R2/KVのローカルbindingとともに`http://localhost:3000`で起動し、公開health用commit SHAとローカルpreview専用のloopback許可を自動注入します。この許可はproduction環境・生成configでは拒否されます。
 
-Pages devのoriginを`http://localhost:8788`にする場合は、`.dev.vars`の`AUTH_URL`と`NEXT_PUBLIC_SITE_URL`を同じoriginへ変更し、Discord redirectへ次を追加します。
-
-```text
-http://localhost:8788/api/auth/callback/discord
-```
+別ポートを使う場合は`FLAMENODE_PREVIEW_PORT`、`.dev.vars`の`AUTH_URL`と`NEXT_PUBLIC_SITE_URL`、Discord redirectの3箇所を同じportへ変更します。
 
 ## 7. 必須検査
 
@@ -116,10 +126,12 @@ npm run typecheck
 npm run lint
 npm run test:unit
 npm run test:workers
+npm run test:cloudflare-ci
 npm run test:integration
-npm run build
-npm run pages:build
-npm run check:pages-output
+npm run verify:fast
+npm run verify:full
+npm run cf:build
+npm run check:open-next-output
 npm run check:cloudflare-template
 npm run check:db-schema
 npm run check:db-legacy
@@ -131,19 +143,7 @@ npm run check:db-history
 npm run check:project-docs
 ```
 
-`check:cloudflare-config`のproduction modeは本番secretがないローカル環境では失敗するのが正しい挙動です。構造確認は次のfixture modeを使います。
-
-```sh
-CLOUDFLARE_CONFIG_MODE=fixture npm run check:cloudflare-config
-```
-
-PowerShell:
-
-```powershell
-$env:CLOUDFLARE_CONFIG_MODE="fixture"
-npm run check:cloudflare-config
-Remove-Item Env:CLOUDFLARE_CONFIG_MODE
-```
+`check:cloudflare-config`はproductionの実URL・resource ID・commitを要求するため、それらを持たないローカル環境ではfail-closedになるのが正しい挙動です。通常の構造確認は`check:cloudflare-template`と`test:cloudflare-ci`を使用し、fixture modeや追跡対象設定への実ID書込みは行いません。
 
 ## 8. ローカル運用確認
 
@@ -168,14 +168,18 @@ npm run check:db-legacy
 
 active migrationを修正せず、新しいmigrationが必要か確認します。
 
-### Pages成果物が不完全
+### OpenNext成果物が不完全
 
-```sh
+```powershell
 npm run clean:next
 npm ci
-npm run pages:build
-npm run check:pages-output
+$env:WORKERS_CI_COMMIT_SHA = (git rev-parse HEAD).Trim()
+npm run cf:build
+npm run check:open-next-output
+Remove-Item Env:WORKERS_CI_COMMIT_SHA
 ```
+
+macOS / Linuxでは同じSHAを`export WORKERS_CI_COMMIT_SHA="$(git rev-parse HEAD)"`で設定します。古い`.open-next`成果物が疑われる場合は、build processが停止していることを確認してから生成物を削除し、再buildします。
 
 ### OAuth callback不一致
 

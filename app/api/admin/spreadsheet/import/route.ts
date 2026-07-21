@@ -1,4 +1,3 @@
-export const runtime = "edge";
 
 import { NextResponse } from "next/server";
 import type { SpreadsheetDelimiterMode } from "@/lib/admin/spreadsheet/paste";
@@ -8,7 +7,7 @@ import {
 } from "@/lib/admin/spreadsheet/importPrepCore";
 import {
   readSpreadsheetJsonBody,
-  requireSpreadsheetAdmin,
+  requireSpreadsheetAdminWrite,
   spreadsheetErrorResponse,
 } from "@/lib/admin/spreadsheet/routeHandler";
 import {
@@ -30,7 +29,7 @@ import { isWriteBlocked } from "@/lib/operationMode/policy";
 import { resolveOperationMode } from "@/lib/operationMode/resolve";
 
 export async function POST(req: Request): Promise<Response> {
-  const guard = await requireSpreadsheetAdmin();
+  const guard = await requireSpreadsheetAdminWrite(req);
   if (!guard.ok) return guard.response;
 
   let body: {

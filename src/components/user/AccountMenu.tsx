@@ -5,11 +5,7 @@ import Link from "next/link";
 import styles from "./AccountMenu.module.css";
 import { Icon } from "@/components/ui/Icon";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
-import {
-  sortXIdEntries,
-  type XIdEntry,
-} from "@/lib/xid/entries";
-import { useActiveXSwitcher } from "./useActiveXSwitcher";
+import type { XIdEntry } from "@/lib/xid/entries";
 
 export interface AccountMenuUser {
   id: string;
@@ -26,75 +22,36 @@ export interface AccountMenuUser {
 
 interface AccountMenuProps {
   user: AccountMenuUser;
-  onSwitch?: (xUserId: string) => void;
   open?: boolean;
-  onOpenChange?: (
-    open: boolean,
-  ) => void;
+  onOpenChange?: (open: boolean) => void;
 }
 
 export function AccountMenu({
   user,
-  onSwitch,
   open: controlledOpen,
   onOpenChange,
 }: AccountMenuProps): React.ReactElement {
-  const [
-    internalOpen,
-    setInternalOpen,
-  ] = React.useState(false);
-
-  const open =
-    controlledOpen ?? internalOpen;
-
+  const [internalOpen, setInternalOpen] = React.useState(false);
+  const open = controlledOpen ?? internalOpen;
   const setOpen = React.useCallback(
-    (
-      next:
-        | boolean
-        | ((current: boolean) => boolean),
-    ) => {
-      const resolved =
-        typeof next === "function"
-          ? next(open)
-          : next;
-
-      if (controlledOpen === undefined) {
-        setInternalOpen(resolved);
-      }
-
+    (next: boolean | ((current: boolean) => boolean)) => {
+      const resolved = typeof next === "function" ? next(open) : next;
+      if (controlledOpen === undefined) setInternalOpen(resolved);
       onOpenChange?.(resolved);
     },
-    [
-      controlledOpen,
-      onOpenChange,
-      open,
-    ],
+    [controlledOpen, onOpenChange, open],
   );
-
-  const {
-    entries: xIds,
-    activeId,
-    activeEntry,
-    pending,
-    error,
-    clearError,
-    switchTo,
-  } = useActiveXSwitcher({
-    entries: user.xIds,
-    onSwitch,
-  });
-
   const ref = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     if (!open) return;
-    const onMouseDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
+    const onMouseDown = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
         setOpen(false);
       }
     };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
     };
     window.addEventListener("mousedown", onMouseDown);
     window.addEventListener("keydown", onKeyDown);
@@ -104,37 +61,18 @@ export function AccountMenu({
     };
   }, [open, setOpen]);
 
-  // トリガー用のアイコンと名前
+  const activeEntry = user.xIds.find((entry) => entry.is_active) ?? null;
   const triggerIcon = activeEntry?.icon_url ?? user.image;
-  const triggerName = activeEntry ? activeEntry.x_name : user.name?.trim() || "guest";
-
-  const selectableXIds =
-    sortXIdEntries(
-      xIds.filter(
-        (entry) =>
-          entry.approval_status !==
-          "rejected",
-      ),
-    );
-
-  const hasPendingOnly =
-    xIds.length > 0 &&
-    xIds.every((entry) => entry.approval_status === "pending");
-
-  const switchableXIds =
-    sortXIdEntries(
-      xIds.filter(
-        (entry) =>
-          entry.x_user_id !== activeId,
-      ),
-    );
-
+  const triggerName = activeEntry?.x_name ?? (user.name?.trim() || "guest");
   const publicProfileHref =
     activeEntry?.approval_status === "approved"
       ? `/user/${encodeURIComponent(activeEntry.x_user_id)}`
       : null;
+  const hasPendingOnly =
+    user.xIds.length > 0 &&
+    user.xIds.every((entry) => entry.approval_status === "pending");
 
-  const headerInfoContent = (
+  const headerInfo = (
     <>
       {triggerIcon ? (
         /* eslint-disable-next-line @next/next/no-img-element */
@@ -151,7 +89,12 @@ export function AccountMenu({
         </div>
       </div>
       {publicProfileHref ? (
-        <Icon name="external" size={14} className={styles.headerLinkIcon} aria-hidden />
+        <Icon
+          name="external"
+          size={14}
+          className={styles.headerLinkIcon}
+          aria-hidden
+        />
       ) : null}
     </>
   );
@@ -163,10 +106,7 @@ export function AccountMenu({
         aria-haspopup="true"
         aria-expanded={open}
         aria-label="アカウントメニューを開く"
-        onClick={() => {
-          clearError();
-          setOpen((v) => !v);
-        }}
+        onClick={() => setOpen((current) => !current)}
         className={`${styles.trigger} ${open ? styles.triggerActive : ""}`}
       >
         {triggerIcon ? (
@@ -188,134 +128,52 @@ export function AccountMenu({
 
       {open ? (
         <div className={styles.popover} role="menu">
-          {error ? <div className={styles.error}>{error}</div> : null}
-
-          {/* セクション1: 主体ステータス表示 */}
           <div className={styles.section}>
             {publicProfileHref ? (
               <Link
                 href={publicProfileHref}
                 className={`${styles.headerInfo} ${styles.headerInfoLink}`}
                 onClick={() => setOpen(false)}
-                aria-label={`${triggerName} の公開ページを開く`}
               >
-                {headerInfoContent}
+                {headerInfo}
               </Link>
             ) : (
-              <div className={styles.headerInfo}>{headerInfoContent}</div>
+              <div className={styles.headerInfo}>{headerInfo}</div>
             )}
 
             {!activeEntry ? (
-              xIds.length === 0 ? (
-                <div className={`${styles.statusNotice} ${styles.noticeWarning}`}>
-                  <strong>X ID未連携</strong>
-                  <p style={{ marginTop: 4, color: "var(--text-secondary)" }}>
-                    投稿・いいね・セーブにはX IDの連携が必要です。
-                  </p>
-                  <div style={{ marginTop: 8 }}>
-                    <Link
-                      href="/dashboard/settings"
-                      className="fn-btn fn-btn-primary fn-btn-sm"
-                      onClick={() => setOpen(false)}
-                      style={{ width: "100%", justifyContent: "center" }}
-                    >
-                      X IDを連携する
-                    </Link>
-                  </div>
+              <div
+                className={`${styles.statusNotice} ${styles.noticeWarning}`}
+              >
+                <strong>
+                  {user.xIds.length === 0
+                    ? "X ID未連携"
+                    : hasPendingOnly
+                      ? "X ID連携申請中"
+                      : "Active X ID未選択"}
+                </strong>
+                <p style={{ marginTop: 4, color: "var(--text-secondary)" }}>
+                  {user.xIds.length === 0
+                    ? "投稿・いいね・セーブにはX IDの連携が必要です。"
+                    : hasPendingOnly
+                      ? "申請履歴と承認状況は設定から確認できます。"
+                      : "連携済みのX IDは設定から選択できます。"}
+                </p>
+                <div style={{ marginTop: 8 }}>
+                  <Link
+                    href="/dashboard/settings"
+                    className="fn-btn fn-btn-primary fn-btn-sm"
+                    onClick={() => setOpen(false)}
+                    style={{ width: "100%", justifyContent: "center" }}
+                  >
+                    {user.xIds.length === 0 ? "X IDを連携する" : "設定を開く"}
+                  </Link>
                 </div>
-              ) : hasPendingOnly ? (
-                <div className={`${styles.statusNotice} ${styles.noticeWarning}`}>
-                  <strong>X ID連携申請中</strong>
-                  <p style={{ marginTop: 4, color: "var(--text-secondary)" }}>
-                    運営の承認後に投稿・いいね・セーブが利用できます。
-                  </p>
-                  <div className={styles.pickList}>
-                    {selectableXIds.map((entry, index) => (
-                      <div
-                        key={`${entry.x_user_id}-pending-${index}`}
-                        className={styles.xidOption}
-                        style={{ cursor: "default" }}
-                      >
-                        <span className={styles.xidBody}>
-                          <span className={styles.xidName}>{entry.x_name}</span>
-                          <span className={styles.xidId}>@{entry.x_user_id}</span>
-                        </span>
-                        <span
-                          className="fn-badge fn-badge-warning"
-                          style={{ fontSize: 9, padding: "1px 4px" }}
-                        >
-                          承認待ち
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{ marginTop: 8 }}>
-                    <Link
-                      href="/dashboard/settings"
-                      className="fn-btn fn-btn-secondary fn-btn-sm"
-                      onClick={() => setOpen(false)}
-                      style={{ width: "100%", justifyContent: "center" }}
-                    >
-                      設定で確認
-                    </Link>
-                  </div>
-                </div>
-              ) : (
-                <div className={`${styles.statusNotice} ${styles.noticeWarning}`}>
-                  <strong>Active X ID未選択</strong>
-                  <p style={{ marginTop: 4, color: "var(--text-secondary)" }}>
-                    連携済みの X ID からアクティブにするものを選んでください。
-                  </p>
-                  <div className={styles.pickList}>
-                    {selectableXIds.map((entry, index) => (
-                      <button
-                        key={`${entry.x_user_id}-pick-${index}`}
-                        type="button"
-                        disabled={pending}
-                        onClick={() => switchTo(entry)}
-                        className={styles.xidOption}
-                      >
-                        {entry.icon_url ? (
-                          /* eslint-disable-next-line @next/next/no-img-element */
-                          <img
-                            src={entry.icon_url}
-                            alt=""
-                            className={styles.xidAvatar}
-                          />
-                        ) : (
-                          <span className={styles.xidAvatarFallback}>
-                            <Icon name="user" size={12} aria-hidden />
-                          </span>
-                        )}
-                        <span className={styles.xidBody}>
-                          <span className={styles.xidName}>{entry.x_name}</span>
-                          <span className={styles.xidId}>@{entry.x_user_id}</span>
-                        </span>
-                        {entry.approval_status === "pending" ? (
-                          <span
-                            className="fn-badge fn-badge-warning"
-                            style={{ fontSize: 9, padding: "1px 4px" }}
-                          >
-                            承認待ち
-                          </span>
-                        ) : null}
-                      </button>
-                    ))}
-                  </div>
-                  <div style={{ marginTop: 8 }}>
-                    <Link
-                      href="/dashboard/settings"
-                      className="fn-btn fn-btn-secondary fn-btn-sm"
-                      onClick={() => setOpen(false)}
-                      style={{ width: "100%", justifyContent: "center" }}
-                    >
-                      設定で管理
-                    </Link>
-                  </div>
-                </div>
-              )
+              </div>
             ) : activeEntry.approval_status === "pending" ? (
-              <div className={`${styles.statusNotice} ${styles.noticeWarning}`}>
+              <div
+                className={`${styles.statusNotice} ${styles.noticeWarning}`}
+              >
                 <strong>承認待ち</strong>
                 <p style={{ marginTop: 4, color: "var(--text-secondary)" }}>
                   できること: 枠確保
@@ -327,70 +185,19 @@ export function AccountMenu({
               <div className={`${styles.statusNotice} ${styles.noticeDanger}`}>
                 <strong>却下済み</strong>
                 <p style={{ marginTop: 4, color: "var(--text-secondary)" }}>
-                  このX IDは使用できません。再申請または別のX IDを選択してください。
+                  このX IDは使用できません。設定から別のX IDを申請してください。
                 </p>
               </div>
             ) : null}
           </div>
 
-          {switchableXIds.length > 0 ? (
-            <>
-              <div className={styles.divider} />
-
-              {/* セクション2: X ID切替 */}
-              <div className={styles.section}>
-                <div className={styles.sectionTitle}>別の X ID に切り替え</div>
-                {switchableXIds.map((entry, index) => (
-                  <button
-                    key={`${entry.x_user_id}-account-${index}`}
-                    type="button"
-                    role="menuitem"
-                    disabled={pending || entry.approval_status === "rejected"}
-                    onClick={() => switchTo(entry)}
-                    className={styles.xidOption}
-                  >
-                    {entry.icon_url ? (
-                      /* eslint-disable-next-line @next/next/no-img-element */
-                      <img
-                        src={entry.icon_url}
-                        alt=""
-                        className={styles.xidAvatar}
-                      />
-                    ) : (
-                      <span className={styles.xidAvatarFallback}>
-                        <Icon name="user" size={12} aria-hidden />
-                      </span>
-                    )}
-                    <span className={styles.xidBody}>
-                      <span className={styles.xidName}>{entry.x_name}</span>
-                      <span className={styles.xidId}>@{entry.x_user_id}</span>
-                    </span>
-                    {entry.approval_status === "pending" ? (
-                      <span className="fn-badge fn-badge-warning" style={{ fontSize: 9, padding: "1px 4px" }}>
-                        承認待ち
-                      </span>
-                    ) : entry.approval_status === "rejected" ? (
-                      <span className="fn-badge fn-badge-danger" style={{ fontSize: 9, padding: "1px 4px" }}>
-                        却下
-                      </span>
-                    ) : null}
-                  </button>
-                ))}
-              </div>
-            </>
-          ) : null}
-
           <div className={styles.divider} />
-
-          {/* セクション3: テーマ切替 */}
           <div className={styles.section}>
             <div className={styles.sectionTitle}>テーマ</div>
             <ThemeToggle variant="segmented" />
           </div>
 
           <div className={styles.divider} />
-
-          {/* セクション4: ダッシュボード・ナビゲーション */}
           <div className={styles.section}>
             <Link
               href="/dashboard"
@@ -422,7 +229,6 @@ export function AccountMenu({
             </Link>
           </div>
 
-          {/* セクション5: 運営 / 管理 (権限時のみ) */}
           {user.management.canAccessAdmin || user.management.canAccessManage ? (
             <>
               <div className={styles.divider} />
@@ -450,8 +256,6 @@ export function AccountMenu({
           ) : null}
 
           <div className={styles.divider} />
-
-          {/* セクション6: ログアウト */}
           <div className={styles.section}>
             <Link
               href="/api/auth/signout"

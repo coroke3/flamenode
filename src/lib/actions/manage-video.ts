@@ -2,9 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
-import { auth } from "@/lib/auth";
 import { canEditEvent } from "@/lib/auth/ownership";
-import { getDatabase } from "@/lib/cloudflare";
+import { writeGuard } from "@/lib/auth/writeGuard";
 import { videos, videoEvents } from "@/lib/db/schema";
 import {
   D1_RESERVED_CALLER_QUERIES,
@@ -39,13 +38,9 @@ export const MANAGE_VIDEO_STATUS_CALLER_QUERY_COUNT =
 export async function setManageVideoStatus(
   formData: FormData,
 ): Promise<ManageVideoActionResult> {
-  const session = await auth().catch(() => null);
-  const u = session?.user as
-    | { id?: string; role?: string; active_x_user_id?: string | null }
-    | undefined;
-  if (!u?.id) {
-    return { ok: false, message: "ログインが必要です。" };
-  }
+  const identity = await writeGuard({ feature: "admin_video_status" });
+  if (!identity.ok) return { ok: false, message: identity.message };
+  const u = identity.user;
 
   const eventId = String(formData.get("event_id") ?? "").trim();
   const videoId = String(formData.get("video_id") ?? "").trim();
@@ -59,8 +54,7 @@ export async function setManageVideoStatus(
     return { ok: false, message: "このステータスへは変更できません。" };
   }
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = identity.db;
 
   const isAdmin = u.role === "admin";
   const sessionUser = { id: u.id, role: u.role, active_x_user_id: u.active_x_user_id };

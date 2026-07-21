@@ -1,4 +1,3 @@
-export const runtime = "edge";
 
 import { getEnv } from "@/lib/cloudflare";
 import { servePublicMedia } from "@/lib/media/publicMedia";

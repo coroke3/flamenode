@@ -16,6 +16,27 @@ async function sha256Hex(value: string): Promise<string> {
   ).join("");
 }
 
+function meaningfulJsonBody(value: string): string {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const { generated_at: _generatedAt, ...meaningful } = parsed as Record<
+        string,
+        unknown
+      >;
+      return JSON.stringify(meaningful);
+    }
+  } catch {
+    // JSONでない文字列はbytes相当の元文字列をhash対象にする。
+  }
+  return value;
+}
+
+/** 最上位generated_atだけを除外し、公開内容が同一なら同じhashを返す。 */
+export async function staticArtifactContentHash(value: string): Promise<string> {
+  return sha256Hex(meaningfulJsonBody(value));
+}
+
 async function currentArtifactHash(
   db: D1Database,
   objectKey: string,
@@ -45,7 +66,7 @@ export function withDeduplicatingR2<Env extends DedupEnv>(env: Env): Env {
         return async (...args: R2PutArgs): Promise<R2PutResult> => {
           const [key, value] = args;
           if (typeof value === "string") {
-            const nextHash = await sha256Hex(value);
+            const nextHash = await staticArtifactContentHash(value);
             const storedHash = await currentArtifactHash(env.DB, key);
             if (storedHash === nextHash) {
               const existing = await bucket.head(key);

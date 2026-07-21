@@ -12,8 +12,8 @@ FlameNode は「映像（フレーム）の結節点（ノード）」を意味�
 - **権限ロール**: 「管理者」と「イベント編集許可者」の2系統を基本とし、イベント単位の補助権限として「協力者」を扱う。管理者は全作品編集、X ID 承認、イベント承認を含む全操作が可能。イベント編集許可者は、許可されたイベントの作品編集権限、イベント説明、枠設定、運営メンバー設定を操作できる。協力者は、付与されたイベントと編集権限キーに限って操作できる。
 - **公開UIの基調**: トップページと動画詳細ページは、旧 EventArchives の高コントラスト、高密度な横スクロール作品棚、右レール関連動画、モバイル上部固定プレイヤーをデザインベースにする。黒基調そのものへ必ず準拠する必要はなく、ライトモードとダークモードのテーマトークンを正とする。正式表記や機能は FlameNode として再構成し、トップの巨大ヒーロー化は避け、作品とイベント導線がファーストビューに入る密度を保つ。詳細は `FlameNode-Design-System.md`、`設計app/(public)/page.md`、`設計app/(public)/[id]/page.md` を正とする。
 
-【インフラ構成方針】 本プラットフォームは Cloudflare Pages (Next.js), D1 (SQL DB), R2 (Storage), KV (Cache) を基盤とする。Firebase サービス（Firestore, Auth, Storage, Functions）は、コストとスケーリング最適化のため使用しない。
-Cloudflare 無料枠・課金抑制・手動制限の詳細は `FlameNode-Cloudflare-Free-Tier-Guardrails.md` を正とする。無料枠では Workers/Pages Functions requests、Durable Object requests、D1 rows written、KV writes、R2 Class B、Queues operations が特にネックになりやすい。
+【インフラ構成方針】 本プラットフォームは Cloudflare Workers 上の OpenNext (Next.js)、Workers Static Assets、D1 (SQL DB)、R2 (Storage)、KV (Cache) を基盤とする。Firebase サービス（Firestore, Auth, Storage, Functions）は、コストとスケーリング最適化のため使用しない。本番デプロイの正本は Cloudflare Workers Builds とする。
+Cloudflare 無料枠・課金抑制・手動制限の詳細は `FlameNode-Cloudflare-Free-Tier-Guardrails.md` を正とする。無料枠では Workers requests、Durable Object requests、D1 rows written、KV writes、R2 Class B、Queues operations が特にネックになりやすい。
 
 **命名規則**: テーブル名・カラム名は全て **snake_case** で統一する。Drizzle ORM (`src/lib/db/schema.ts`) を Single Source of Truth とする。
 
@@ -886,7 +886,7 @@ Cloudflare 使用量を収集する実装がないため、推定値や使用量
 - **セキュリティ 4 層防御**: TECHNICAL_SPEC §4 参照。
 
 ### 2-28. Cloudflare 無料枠・コストガード
-- **静的ファースト**: トップ、一覧、イベント詳細、関連動画、おすすめは R2 に事前生成した JSON と Pages Static Assets を優先し、Pages Functions / Workers / D1 の呼び出しを抑える。
+- **静的ファースト**: トップ、一覧、イベント詳細、関連動画、おすすめは R2 に事前生成した JSON と Workers Static Assets を優先し、Web Worker / D1 の呼び出しを抑える。
 - **D1節約**: 一覧系はフルスキャン禁止。必ずインデックス、ページング、事前集計を使う。`videos.score` や関連動画は Cron でまとめて生成する。
 - **R2節約**: 動画本体は保存せず YouTube 埋め込みを使う。R2 はアイコン画像、静的 JSON、旧形式エクスポートに限定する。`ListObjects` は高コスト操作として一覧表示に使わない。
 - **画像保存**: 作品サムネイルは Cloudflare/R2 に保存せず、YouTube サムネイル URL を使う。Cloudflare にアップロードする画像はユーザー/作品に紐づくアイコン画像のみとし、元ファイルは1ファイル8MBまでにする。
@@ -901,9 +901,9 @@ Cloudflare 使用量を収集する実装がないため、推定値や使用量
 - **記録**: コストガードとメンテナンスの変更は完全な before / after と理由を監査ログへ記録する。自動遷移や自動通知は行わない。
 - **静的JSON生成**: トップ、一覧、イベント詳細、関連動画、おすすめの静的 JSON は通常1時間ごと、イベント開催中は5〜10分ごとを目安に生成する。
 - **閲覧継続**: 可能な限り公開閲覧は静的ページと静的 JSON で継続し、書き込み・重い動的処理から先に止める。
-- **静的配信退避**: R2 Class B が増えすぎる場合、静的 JSON は Pages Static Assets へ寄せる。`static_only` 中もログインページとセッション検証は最小限残し、`maintenance` 中は事前生成済み静的 HTML/JSON の閲覧だけを可能にする。
+- **静的配信退避**: ビルド時に固定できる公開ファイルは Workers Static Assets へ寄せる。更新される静的 JSON は R2 のままHTTP Cacheと生成頻度で Class B を抑える。`static_only` 中もログインページとセッション検証は最小限残し、`maintenance` 中は事前生成済み静的 HTML/JSON の閲覧だけを可能にする。
 - **画像とJSONの整理**: アイコン画像は新規アップロード時に8MB上限を適用し、古いアイコンは月次ワーカーで最大200KB程度の WebP へ圧縮・上書きする。静的 JSON は直近3世代のみ保持し、古いオブジェクトは自動削除する。
-- **有料化判断**: 月間のD1読み書き、または Pages Functions 要求が無料枠の80%を常に超える状態が2か月続いた場合、有料化または構成見直しの判断ラインにする。
+- **有料化判断**: 月間のD1読み書き、または Workers 要求が無料枠の80%を常に超える状態が2か月続いた場合、有料化または構成見直しの判断ラインにする。
 - **参照設計**: 詳細なモード別制限とルート別軽量化は `FlameNode-Cloudflare-Free-Tier-Guardrails.md` に従う。
 
 ---
@@ -918,7 +918,7 @@ Cloudflare 使用量を収集する実装がないため、推定値や使用量
 ├── drizzle.config.ts          # D1 移行管理 (Drizzle Migrations)
 ├── package.json
 ├── tsconfig.json
-├── wrangler.toml              # Cloudflare Pages / D1 / R2 / KV 設定
+├── wrangler.toml              # OpenNext Web Worker / Static Assets / D1 / R2 / KV 設定
 ├── public/                    # 静的アセット (ロゴ, 共通アイコン等)
 │
 ├── app/                       # Next.js App Router
@@ -1008,5 +1008,5 @@ Cloudflare 使用量を収集する実装がないため、推定値や使用量
 
 **特記事項:**
 - 全てのデータベース操作は `src/lib/db/schema.ts` を正として管理し、`drizzle-orm` を通じて型安全に実行する。
-- Cloudflare Pages の制限を考慮し、大規模な計算や定期ジョブは Next.js 内部ではなく、独立した `workers/` 以下のスクリプトを Cron Triggers で運用する。
+- Cloudflare Workers の実行時間・無料枠を考慮し、大規模な計算や定期ジョブは Next.js Web Worker 内部ではなく、独立した `workers/` 以下の3本を Cron Triggers で運用する。
 - 検索機能は D1 が FTS5 をサポートしないため、`LIKE '%query%'` または KV インデックスで実装する。

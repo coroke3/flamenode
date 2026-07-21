@@ -1,8 +1,8 @@
 # AGENTS.md
 
 > Status: Active
-> Last verified: 2026-07-14
-> Verified against commit: `6dbe07a`
+> Last verified: 2026-07-21
+> Verified against commit: `47e6cee`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/`, `package.json`, `wrangler.toml`
 
 ## 開始手順
@@ -30,7 +30,7 @@
 - DB変更履歴: `docs/database/change-log.md`
 - Cloudflare binding: `wrangler.toml`、`workers/*/wrangler.toml`
 - ローカル手順: `LOCAL.md`
-- デプロイ: `DEPLOY.md`、`.github/workflows/deploy-cloudflare.yml`
+- デプロイ: `DEPLOY.md`、`package.json`の`cf:*`、`scripts/cloudflare-*.mjs`
 - 運用: `docs/operations/README.md`
 - AI読取表: `docs/AI_CONTEXT.md`
 - 未完了事項: `docs/implementation-backlog.md`
@@ -44,7 +44,9 @@
 - `event_staff.permission_preset = 'owner'`を代表者の正本とし、ownerを0人にしない。
 - 権限はUIだけでなくServer ActionまたはRoute Handlerで検証する。
 - 公開APIは明示DTOだけを返す。
-- Cloudflare Pages + `@cloudflare/next-on-pages`、D1、R2、KV、Cron Worker 3本を維持する。
+- Cloudflare Workers + OpenNext + Workers Static Assets、D1、R2、KV、Cron Worker 3本を維持する。
+- productionはCloudflare Workers Buildsの単一Git連携だけを正本とし、Web→fast→content→sync→smokeの順序を変えない。
+- production deploy前のRemote D1検査はread-onlyとし、migrationを自動適用しない。
 - 実Cloudflare deploy、Remote D1、production secret操作は明示依頼時だけ行う。
 
 ## 作業規則
@@ -78,9 +80,12 @@ npm run test:unit
 npm run test:workers
 npm run test:integration
 npm run build
-npm run pages:build
-npm run check:pages-output
+npm run verify:fast
+npm run verify:full
+npm run cf:build
+npm run check:open-next-output
 npm run check:cloudflare-template
+npm run test:cloudflare-ci
 npm run check:db-schema
 npm run check:db-legacy
 npm run check:event-owners

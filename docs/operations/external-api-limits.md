@@ -1,7 +1,7 @@
 # External API Limits
 
 > Status: Active
-> Last verified: 2026-07-14
+> Last verified: 2026-07-21
 > Source of truth: `workers/shared/externalApi.ts`、`workers/youtube-sync/index.ts`、`workers/youtube-playlist-sync/index.ts`、`workers/notification-dispatcher/dispatch.ts`、`src/lib/media/externalImageProxy.ts`
 
 外部サービスのrate limit値をアプリ側で固定推測せず、Providerが返すquota・rate limit・Retry-Afterを優先する。全処理は1回のWorker invocation内で固定予算を持ち、無制限retry、無制限並列、全件再取得を禁止する。
@@ -33,6 +33,7 @@
 - 429は`Retry-After`またはJSONの`retry_after`を使用する。
 - `X-RateLimit-Global`、`X-RateLimit-Scope: global`、JSONの`global`を検出した場合、全Discord routeを停止する。
 - 429をその場でretryせず、通知outboxの次回実行時刻へ反映する。
+- global/route cooldownはWebhook URL等を含まない匿名化キーでKVへ最大2件/runだけ保存し、別isolateにも共有する。KV読取は1 invocation内でキーごとに1回へ集約する。
 - DM channel IDはisolate cacheへ必ず保存する。KVへのput/deleteは1実行最大2件とし、5分Cronで最大576 writes/dayへ抑える。
 - KV予算を使い切った場合も通知配送は継続し、そのisolate内ではchannel IDを再利用する。
 - 401/403/404は同じ認証・宛先のまま繰り返さずdead-letterへ送る。ただしcache済みDM channelの404だけはcacheを削除して次回再作成する。
