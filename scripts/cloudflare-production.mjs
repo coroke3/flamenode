@@ -392,7 +392,10 @@ function validateProductionConfig(content, target, env, commit, relativePath) {
   if (/pages_build_output_dir|\.vercel\/output|wrangler\s+pages/i.test(content)) {
     errors.push("legacy Pages configuration remains");
   }
-  if (target.key === "web" && !/^\s*main\s*=\s*"\.open-next\/worker\.js"\s*$/m.test(content)) {
+  if (
+    target.key === "web" &&
+    !/^\s*main\s*=\s*"(\.\.\/)*\.open-next\/worker\.js"\s*$/m.test(content)
+  ) {
     errors.push("OpenNext worker entrypoint is missing");
   }
   if (target.key === "web") {
@@ -439,15 +442,61 @@ function buildProductionConfig(template, target, env, commit, sourcePath) {
   }
   output = injectCommitVariable(output, commit);
   if (target.key === "web") {
+    output = replaceRequired(
+      output,
+      /^(\s*main\s*=\s*)"[^"]*"\s*$/gm,
+      (_match, prefix) => `${prefix}"../../.open-next/worker.js"`,
+      "OpenNext worker main",
+      sourcePath,
+    );
+    output = replaceRequired(
+      output,
+      /^(\s*directory\s*=\s*)"[^"]*"\s*$/gm,
+      (_match, prefix) => `${prefix}"../../.open-next/assets"`,
+      "OpenNext assets directory",
+      sourcePath,
+    );
+    output = replaceRequired(
+      output,
+      /^(\s*migrations_dir\s*=\s*)"[^"]*"\s*$/gm,
+      (_match, prefix) => `${prefix}"../../migrations"`,
+      "D1 migrations_dir",
+      sourcePath,
+    );
     for (const name of ["NEXT_PUBLIC_SITE_URL", "AUTH_URL", "AUTH_DISCORD_ID"]) {
       output = injectStringVariable(output, name, value(env, name));
     }
   }
   if (target.key === "fast-jobs") {
+    output = replaceRequired(
+      output,
+      /^(\s*main\s*=\s*)"[^"]*"\s*$/gm,
+      (_match, prefix) => `${prefix}"../../workers/fast-jobs/index.ts"`,
+      "fast-jobs main",
+      sourcePath,
+    );
     output = injectStringVariable(
       output,
       "NEXT_PUBLIC_SITE_URL",
       value(env, "NEXT_PUBLIC_SITE_URL"),
+    );
+  }
+  if (target.key === "content-jobs") {
+    output = replaceRequired(
+      output,
+      /^(\s*main\s*=\s*)"[^"]*"\s*$/gm,
+      (_match, prefix) => `${prefix}"../../workers/content-jobs/index.ts"`,
+      "content-jobs main",
+      sourcePath,
+    );
+  }
+  if (target.key === "sync-jobs") {
+    output = replaceRequired(
+      output,
+      /^(\s*main\s*=\s*)"[^"]*"\s*$/gm,
+      (_match, prefix) => `${prefix}"../../workers/sync-jobs/index.ts"`,
+      "sync-jobs main",
+      sourcePath,
     );
   }
   return output;

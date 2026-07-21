@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-22
-> Verified against commit: `f9c6642`
+> Verified against commit: `182d9ab`
 > Source of truth: [`DEPLOY.md`](../../DEPLOY.md)、[`workers.md`](workers.md)、[`LOCAL.md`](../../LOCAL.md)、[`migrations.md`](migrations.md)、[`.dev.vars.example`](../../.dev.vars.example)、`wrangler.toml`、`workers/*/wrangler.toml`、`package.json` の `cf:*`、`scripts/cloudflare-*.mjs`
 
 運用者が Cloudflare へデプロイする一歩手前までを追えるチェックリスト。詳細手順・障害対応・rollback は [`DEPLOY.md`](../../DEPLOY.md) を正本とし、本書は横断確認用にとどめる。secret の実値、production resource ID、token は本書・Issue・log へ書かない。

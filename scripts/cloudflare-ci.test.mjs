@@ -95,7 +95,7 @@ function withTempDirectory(prefix, callback) {
 
 function writeFixtureTemplates(repoRoot) {
   const configs = {
-    "wrangler.toml": `name = "flamenode-web"\nmain = ".open-next/worker.js"\n[assets]\nbinding = "ASSETS"\ndirectory = ".open-next/assets"\nrun_worker_first = false\n[[services]]\nbinding = "WORKER_SELF_REFERENCE"\nservice = "flamenode-web"\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "flamenode_db"\ndatabase_id = "00000000-0000-0000-0000-000000000000"\n[[r2_buckets]]\nbinding = "BUCKET"\nbucket_name = "placeholder"\n[[r2_buckets]]\nbinding = "NEXT_INC_CACHE_R2_BUCKET"\nbucket_name = "placeholder"\n[[kv_namespaces]]\nbinding = "KV"\nid = "00000000000000000000000000000000"\npreview_id = "00000000000000000000000000000000"\n`,
+    "wrangler.toml": `name = "flamenode-web"\nmain = ".open-next/worker.js"\n[assets]\nbinding = "ASSETS"\ndirectory = ".open-next/assets"\nrun_worker_first = false\n[[services]]\nbinding = "WORKER_SELF_REFERENCE"\nservice = "flamenode-web"\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "flamenode_db"\ndatabase_id = "00000000-0000-0000-0000-000000000000"\nmigrations_dir = "migrations"\n[[r2_buckets]]\nbinding = "BUCKET"\nbucket_name = "placeholder"\n[[r2_buckets]]\nbinding = "NEXT_INC_CACHE_R2_BUCKET"\nbucket_name = "placeholder"\n[[kv_namespaces]]\nbinding = "KV"\nid = "00000000000000000000000000000000"\npreview_id = "00000000000000000000000000000000"\n`,
     "workers/fast-jobs/wrangler.toml": `name = "flamenode-fast-jobs"\nmain = "index.ts"\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "flamenode_db"\ndatabase_id = "00000000-0000-0000-0000-000000000000"\n[[kv_namespaces]]\nbinding = "KV"\nid = "00000000000000000000000000000000"\n`,
     "workers/content-jobs/wrangler.toml": `name = "flamenode-content-jobs"\nmain = "index.ts"\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "flamenode_db"\ndatabase_id = "00000000-0000-0000-0000-000000000000"\n[[r2_buckets]]\nbinding = "R2"\nbucket_name = "placeholder"\n[[kv_namespaces]]\nbinding = "KV"\nid = "00000000000000000000000000000000"\n`,
     "workers/sync-jobs/wrangler.toml": `name = "flamenode-sync-jobs"\nmain = "index.ts"\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "flamenode_db"\ndatabase_id = "00000000-0000-0000-0000-000000000000"\n[[kv_namespaces]]\nbinding = "KV"\nid = "00000000000000000000000000000000"\n[vars]\nYOUTUBE_DAILY_QUOTA_LIMIT = "10000"\n`,
@@ -338,9 +338,13 @@ test("tracked placeholder configs produce four private production configs withou
     assert.match(web, /NEXT_PUBLIC_SITE_URL = "https:\/\/flamenode\.example\.com"/);
     assert.match(web, /AUTH_URL = "https:\/\/flamenode\.example\.com"/);
     assert.match(web, /AUTH_DISCORD_ID = "discord-client-production-id"/);
+    assert.match(web, /main = "\.\.\/\.\.\/\.open-next\/worker\.js"/);
+    assert.match(web, /directory = "\.\.\/\.\.\/\.open-next\/assets"/);
+    assert.match(web, /migrations_dir = "\.\.\/\.\.\/migrations"/);
     assert.doesNotMatch(web, new RegExp(env.AUTH_SECRET));
     const fast = fs.readFileSync(configs["fast-jobs"], "utf8");
     assert.match(fast, /NEXT_PUBLIC_SITE_URL = "https:\/\/flamenode\.example\.com"/);
+    assert.match(fast, /main = "\.\.\/\.\.\/workers\/fast-jobs\/index\.ts"/);
   }));
 
 test("fast verification runs the bounded npm script list in order and stops on the first failure", () => {
