@@ -45,15 +45,19 @@ test("枠処理はreservation_group_idとmax_slots_per_videoを維持する", as
 });
 
 test("イベントグループと公開Workerは修正後正本だけを読む", async () => {
-  const [groupQuery, worker, queries] = await Promise.all([
+  const [groupQuery, worker, queries, adminGroupsPage] = await Promise.all([
     source("src/lib/db/eventGroups.ts"),
     source("workers/json-generator/rebuild.ts"),
     source("src/lib/db/queries.ts"),
+    source("app/(admin)/admin/event-groups/page.tsx"),
   ]);
   assert.match(groupQuery, /desc\(events\.start_time\)/);
   assert.match(groupQuery, /desc\(events\.created_at\)/);
+  assert.match(groupQuery, /orderBy\(asc\(eventGroups\.sort_order\), asc\(eventGroups\.name\)\)/);
   assert.doesNotMatch(groupQuery, /eventGroupEvents\.sort_order/);
+  assert.match(worker, /ORDER BY sort_order ASC, name ASC/);
   assert.match(worker, /ORDER BY e\.start_time DESC, e\.created_at DESC/);
+  assert.match(adminGroupsPage, /orderBy\(asc\(eventGroups\.sort_order\), asc\(eventGroups\.name\)\)/);
   assert.doesNotMatch(worker, /max_consecutive_slots_per_entry/);
   assert.doesNotMatch(worker, /es\.role/);
   assert.doesNotMatch(queries, /eventStaff\.role/);

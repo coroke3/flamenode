@@ -133,10 +133,10 @@
   border-top: 1px solid var(--hairline, var(--border-subtle));
 }
 
-.compactGrid {
+:global(.fn-list-compact).compactGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
   margin: clamp(20px, 2.5vw, 28px) 0;
 }
 
@@ -146,43 +146,76 @@
   min-width: 0;
 }
 
-.compactGrid :global(.fn-vcard) {
+:global(.fn-list-compact).compactGrid :global(.fn-vcard) {
   max-width: none;
+  gap: 6px;
 }
 
-.compactGrid :global(.fn-vcard-title) {
-  font-size: 13px;
-  line-height: 1.4;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
+:global(.fn-list-compact).compactGrid :global(.fn-vcard:hover) {
+  transform: translateY(-1px);
 }
 
-.compactGrid :global(.fn-vcard-meta) {
-  font-size: 11px;
+:global(.fn-list-compact).compactGrid :global(.fn-vcard-body) {
+  gap: 3px;
 }
 
-.compactGrid :global(.fn-vcard-meta span:last-child) {
+:global(.fn-list-compact).compactGrid :global(.fn-vcard-title) {
+  font-size: 12px;
+  line-height: 1.35;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+}
+
+:global(.fn-list-compact).compactGrid :global(.fn-vcard-meta) {
+  font-size: 10px;
+  gap: 4px;
+}
+
+:global(.fn-list-compact).compactGrid :global(.fn-vcard-creator) {
+  gap: 4px;
+}
+
+:global(.fn-list-compact).compactGrid :global(.fn-vcard-avatar) {
+  width: 14px;
+  height: 14px;
+  font-size: 8px;
+}
+
+:global(.fn-list-compact).compactGrid :global(.fn-vcard-meta span:last-child) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+:global(.fn-list-compact).compactGrid :global(.fn-vcard .fn-thumb .fn-badge) {
+  top: 4px;
+  font-size: 9px;
+  padding: 1px 5px;
+  letter-spacing: 0;
+}
+
 @media (max-width: 380px) {
-  .compactGrid {
-    grid-template-columns: 1fr;
+  :global(.fn-list-compact).compactGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (min-width: 760px) {
-  .compactGrid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 14px;
+  :global(.fn-list-compact).compactGrid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
   }
 }
 
 @media (min-width: 1120px) {
-  .compactGrid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+  :global(.fn-list-compact).compactGrid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1440px) {
+  :global(.fn-list-compact).compactGrid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 }
 

@@ -10,10 +10,10 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 24px 26px;
-  background: var(--bg-surface);
+  padding: 0;
+  background: transparent;
   border: 0;
-  border-radius: var(--r-block, 10px);
+  border-radius: 0;
   overflow: hidden;
   transition:
     transform 160ms ease,
@@ -41,15 +41,17 @@
 
 .cardTitle {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(22px, 3vw, 30px);
+  font-size: clamp(20px, 2.4vw, 26px);
   font-weight: 800;
-  line-height: 1.12;
+  line-height: 1.25;
   color: var(--text-primary);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  text-wrap: pretty;
+  word-break: keep-all;
 }
 
 .cardTitle svg {
@@ -68,12 +70,26 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  align-items: center;
+}
+
+.choiceCard .btnRow {
   margin-top: auto;
+}
+
+:global(.fn-entry-status-body) .btnRow {
+  margin-top: 8px;
 }
 
 .btnRow > a,
 .btnRow > button {
   justify-content: center;
+}
+
+.btnRow > a :global(svg),
+.btnRow > button :global(svg) {
+  flex-shrink: 0;
+  display: block;
 }
 
 .eventList {
@@ -86,10 +102,10 @@
 .eventCard {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 16px;
-  gap: 4px 14px;
+  gap: 6px 14px;
   align-items: center;
-  padding: 12px 14px;
-  border: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border-subtle);
   border-radius: var(--r-card);
   background: var(--bg-elevated);
   text-decoration: none;
@@ -271,7 +287,6 @@
 @media (max-width: 640px) {
   .choiceCard {
     min-height: 0;
-    padding: 20px 18px;
   }
 
   .cardTitle {
@@ -286,5 +301,24 @@
   .btnRow > a,
   .btnRow > button {
     width: 100%;
+    min-height: 44px;
+    justify-content: center;
+  }
+
+  .btnRow > a :global(svg),
+  .btnRow > button :global(svg) {
+    flex-shrink: 0;
+    display: block;
+  }
+
+  .slotRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .slotRow > :global(.fn-btn) {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
   }
 }

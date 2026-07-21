@@ -1,6 +1,7 @@
 .wrap {
   width: 100%;
   max-width: none;
+  min-width: 0;
   margin: 0;
 }
 
@@ -39,11 +40,14 @@
 
 .tabs {
   margin: 0 0 14px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .tabList {
   display: flex;
   gap: 1px;
+  max-width: 100%;
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scrollbar-width: thin;
@@ -144,7 +148,13 @@
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  align-items: center;
   margin: 0 16px 16px;
+}
+
+.accountActions :global(.fn-btn-sm) {
+  min-height: 38px;
+  box-sizing: border-box;
 }
 
 .accountNote {
@@ -415,6 +425,11 @@
   align-items: center;
 }
 
+.rowOps :global(.fn-btn-sm) {
+  min-height: 38px;
+  box-sizing: border-box;
+}
+
 .rowOps:empty {
   display: none;
 }
@@ -423,7 +438,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  min-height: 34px;
+  min-height: 38px;
   padding: 0 11px;
   border: 0;
   border-radius: var(--radius-md);
@@ -439,7 +454,7 @@
   align-items: center;
   justify-content: center;
   gap: 5px;
-  min-height: 34px;
+  min-height: 38px;
   padding: 0 12px;
   border: 0;
   border-radius: var(--radius-md);

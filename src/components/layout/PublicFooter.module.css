@@ -10,6 +10,16 @@
   max-width: 380px;
 }
 
+.brand :global(.fn-footer-logo-row .fn-logo-name) {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+}
+
 .tagline {
   margin-top: 14px;
   font-size: 13px;

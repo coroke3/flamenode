@@ -175,7 +175,7 @@ test("event groupとjunctionの取得件数を固定する", () => {
   assert.equal(EVENT_GROUP_MAX_ROWS, 50);
   assert.equal(EVENT_GROUP_EVENT_MAX_PER_GROUP, 20);
   assert.equal(EVENT_GROUP_EVENT_MAX_ROWS, 1000);
-  assert.match(source, /FROM event_groups[\s\S]*LIMIT \?/);
+  assert.match(source, /FROM event_groups[\s\S]*ORDER BY sort_order ASC, name ASC[\s\S]*LIMIT \?/);
   assert.match(source, /ROW_NUMBER\(\) OVER \([\s\S]*PARTITION BY ege\.event_group_id/);
   assert.match(source, /WHERE group_rank <= \?[\s\S]*LIMIT \?/);
 });

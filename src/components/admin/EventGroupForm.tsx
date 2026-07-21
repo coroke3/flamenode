@@ -18,6 +18,7 @@ export interface EventGroupInitial {
   img_url?: string | null;
   accent_color?: string | null;
   visibility_status?: "public" | "private" | "archived";
+  sort_order?: number;
 }
 
 interface Props {
@@ -141,6 +142,18 @@ export function EventGroupForm({
             <option value="private">非公開</option>
             <option value="archived">アーカイブ</option>
           </select>
+        </div>
+        <div>
+          <label className="fn-label">表示順</label>
+          <input
+            name="sort_order"
+            type="number"
+            defaultValue={initial.sort_order ?? 0}
+            className="fn-input"
+            min={-9999}
+            max={9999}
+            step={1}
+          />
         </div>
       </div>
       <div

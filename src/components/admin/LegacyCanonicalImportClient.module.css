@@ -1,0 +1,154 @@
+.root {
+  display: grid;
+  gap: 18px;
+}
+
+.form {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.section {
+  display: grid;
+  gap: 8px;
+}
+
+.fileRow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.fileInput {
+  max-width: 100%;
+}
+
+.fileList {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.fileListItem {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.emptyFiles {
+  margin: 0;
+}
+
+.optionGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.optionField {
+  display: grid;
+  gap: 6px;
+}
+
+.mappingSection {
+  display: grid;
+  gap: 12px;
+}
+
+.mappingIntro {
+  display: grid;
+  gap: 4px;
+}
+
+.mappingFieldset {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.mappingLegend {
+  padding-inline: 4px;
+}
+
+.mappingRadios {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.radioLabel {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.questionField {
+  display: grid;
+  gap: 6px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.actions .fn-input,
+.actions .fn-select,
+.actions .fn-btn {
+  min-height: var(--fn-console-control-h, 38px);
+  box-sizing: border-box;
+}
+
+.optionField .fn-input,
+.optionField .fn-select {
+  min-height: var(--fn-console-control-h, 38px);
+  box-sizing: border-box;
+}
+
+.result {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.resultError {
+  border-color: var(--danger);
+}
+
+.resultTitle {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.summaryValue {
+  margin: 0;
+  font-weight: 700;
+}
+
+.resultPre {
+  margin: 0;
+  overflow: auto;
+  font-size: 12px;
+}

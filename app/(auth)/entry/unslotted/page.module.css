@@ -1,0 +1,31 @@
+.eventSearchForm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+}
+
+.eventSearchLabel {
+  margin: 0;
+}
+
+.eventSearchInput {
+  flex: 1 1 220px;
+  max-width: 420px;
+}
+
+.eventSearchMeta {
+  font-size: 11.5px;
+}
+
+@media (max-width: 640px) {
+  .eventSearchForm :global(.fn-btn) {
+    min-height: 44px;
+    justify-content: center;
+  }
+}

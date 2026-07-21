@@ -66,6 +66,7 @@ export default async function AdminEventGroupsPage({
           slug: eventGroups.slug,
           group_type: eventGroups.group_type,
           visibility_status: eventGroups.visibility_status,
+          sort_order: eventGroups.sort_order,
           event_count: sql<number>`count(${eventGroupEvents.event_id})`.as(
             "event_count",
           ),
@@ -77,7 +78,7 @@ export default async function AdminEventGroupsPage({
         )
         .where(where)
         .groupBy(eventGroups.id)
-        .orderBy(asc(eventGroups.name))
+        .orderBy(asc(eventGroups.sort_order), asc(eventGroups.name))
         .limit(100)
     : [];
 
@@ -127,6 +128,7 @@ export default async function AdminEventGroupsPage({
       <FnTable style={{ marginTop: 18 }}>
         <thead>
           <tr>
+            <th>表示順</th>
             <th>名前</th>
             <th>種別</th>
             <th>公開状態</th>
@@ -137,6 +139,7 @@ export default async function AdminEventGroupsPage({
         <tbody>
           {rows.map((g) => (
             <tr key={g.id}>
+              <td className="fn-mono">{g.sort_order ?? 0}</td>
               <td>
                 <strong>{g.name}</strong>
                 <div style={{ fontSize: 11, color: "var(--text-muted)" }}>

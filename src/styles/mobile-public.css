@@ -313,9 +313,9 @@
     gap: 14px;
   }
 
-  [data-manage-shell] .sidebar .topLink,
-  [data-manage-shell] .sidebar .eventLink,
-  [data-admin-shell] .admin-sidebar a {
+  [data-admin-shell] .admin-sidebar a,
+  [data-manage-shell] .admin-sidebar a,
+  [data-manage-shell] .console-manage-nav a {
     min-height: 44px;
     padding-top: 10px;
     padding-bottom: 10px;

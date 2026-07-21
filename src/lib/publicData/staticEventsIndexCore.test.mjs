@@ -3,6 +3,23 @@ import assert from "node:assert/strict";
 
 import { normalizeStaticEventsIndex } from "./staticEventsIndexCore.ts";
 
+test("normalizeStaticEventsIndex sorts group sections by sort_order then name", () => {
+  const index = normalizeStaticEventsIndex({
+    items: [],
+    group_sections: [
+      { id: "g2", slug: "b", name: "Beta", sort_order: 1 },
+      { id: "g1", slug: "a", name: "Alpha", sort_order: 0 },
+      { id: "g3", slug: "c", name: "Charlie", sort_order: 1 },
+    ],
+  });
+
+  assert.ok(index);
+  assert.deepEqual(
+    index.groupSections.map((group) => group.id),
+    ["g1", "g2", "g3"],
+  );
+});
+
 test("normalizeStaticEventsIndex normalizes events and group sections", () => {
   const index = normalizeStaticEventsIndex({
     generated_at: 100,

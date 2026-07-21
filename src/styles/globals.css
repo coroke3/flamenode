@@ -562,6 +562,11 @@ select {
   cursor: pointer;
 }
 
+.fn-btn svg {
+  flex-shrink: 0;
+  display: block;
+}
+
 .fn-btn:disabled,
 .fn-btn[aria-disabled="true"] {
   opacity: 0.5;

@@ -807,6 +807,24 @@ export function VideoForm({
           />
         </div>
 
+        {mode === "free" ? (
+          <div className={cx(styles.field, styles.editableField)}>
+            <label className={styles.label} htmlFor="scheduled_time">
+              投稿日時 / 公開日時
+            </label>
+            <input
+              id="scheduled_time"
+              name="scheduled_time"
+              type="datetime-local"
+              className="fn-input"
+              disabled={fieldDisabled("video.scheduled_time")}
+            />
+            <p className={styles.help}>
+              未入力の場合は提出時刻が使われます。入力値は日本時間 (JST) として扱われます。
+            </p>
+          </div>
+        ) : null}
+
         {!isWizard ? (
         <div className={cx(styles.field, styles.editableField)}>
           <label

@@ -1,6 +1,7 @@
 import * as React from "react";
 import type { Metadata } from "next";
 import { EventGroupForm } from "@/components/admin/EventGroupForm";
+import { AdminSectionTabs } from "@/components/admin/AdminSectionTabs";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { ConsolePanel } from "@/components/layout/ConsolePanel";
 
@@ -15,6 +16,8 @@ export default function AdminEventGroupNewPage(): React.ReactElement {
         backHref="/admin/event-groups"
         backLabel="グループ一覧へ"
       />
+
+      <AdminSectionTabs hub="events" />
 
       <ConsolePanel>
         <EventGroupForm mode="create" />

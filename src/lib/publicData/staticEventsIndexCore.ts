@@ -57,12 +57,21 @@ export function normalizeStaticEventsIndex(
     ? payload.group_sections
         .map(normalizeGroupSection)
         .filter((group): group is StaticEventGroupSection => group !== null)
+        .sort(compareGroupSections)
     : [];
   return {
     events,
     groupSections,
     generatedAt: normalizeUnix(payload.generated_at),
   };
+}
+
+function compareGroupSections(
+  a: StaticEventGroupSection,
+  b: StaticEventGroupSection,
+): number {
+  const sortDiff = a.sort_order - b.sort_order;
+  return sortDiff || a.name.localeCompare(b.name, "ja");
 }
 
 function normalizeGroupSection(value: unknown): StaticEventGroupSection | null {

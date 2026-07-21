@@ -7,6 +7,7 @@ import {
   createAnnouncement,
   updateAnnouncement,
 } from "@/lib/actions/announcement";
+import { formatJstDatetimeLocal } from "@/lib/utils/dateInput";
 
 export interface AnnouncementInitial {
   id?: string;
@@ -22,13 +23,6 @@ export interface AnnouncementInitial {
 interface Props {
   mode: "create" | "edit";
   initial?: AnnouncementInitial;
-}
-
-function unixToInput(ts: number | null | undefined): string {
-  if (!ts) return "";
-  const d = new Date(ts * 1000);
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 export function AnnouncementForm({
@@ -134,7 +128,7 @@ export function AnnouncementForm({
           <input
             name="publish_at"
             type="datetime-local"
-            defaultValue={unixToInput(initial.publish_at)}
+            defaultValue={formatJstDatetimeLocal(initial.publish_at)}
             className="fn-input"
           />
         </div>
@@ -143,7 +137,7 @@ export function AnnouncementForm({
           <input
             name="expire_at"
             type="datetime-local"
-            defaultValue={unixToInput(initial.expire_at)}
+            defaultValue={formatJstDatetimeLocal(initial.expire_at)}
             className="fn-input"
           />
         </div>

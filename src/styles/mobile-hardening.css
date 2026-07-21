@@ -13,6 +13,9 @@
   [data-fn-surface="public"],
   [data-fn-surface="public"] .fn-main,
   [data-fn-surface="public"] .fn-public-container,
+  [data-fn-surface="personal"],
+  [data-fn-surface="personal"] .fn-main,
+  [data-fn-surface="personal"] .fn-public-container,
   [data-admin-shell],
   [data-manage-shell] {
     max-width: 100%;
@@ -22,8 +25,25 @@
   [data-fn-surface="public"] img,
   [data-fn-surface="public"] video,
   [data-fn-surface="public"] iframe,
-  [data-fn-surface="public"] svg {
+  [data-fn-surface="public"] svg,
+  [data-fn-surface="personal"] img,
+  [data-fn-surface="personal"] video,
+  [data-fn-surface="personal"] iframe,
+  [data-fn-surface="personal"] svg {
     max-width: 100%;
+  }
+
+  [data-fn-surface="personal"] input,
+  [data-fn-surface="personal"] textarea,
+  [data-fn-surface="personal"] select,
+  [data-fn-surface="personal"] .fn-select {
+    font-size: max(16px, 1em);
+  }
+
+  [data-fn-surface="personal"] .fn-btn-primary,
+  [data-fn-surface="personal"] .fn-btn-danger,
+  [data-fn-surface="personal"] .fn-btn-warning {
+    min-height: 44px;
   }
 
   [data-fn-surface="public"] .fn-header-inner,
@@ -157,7 +177,7 @@
   }
 
   [data-admin-shell] .admin-sidebar,
-  [data-manage-shell] .sidebar {
+  [data-manage-shell] .admin-sidebar {
     max-width: 100%;
   }
 }

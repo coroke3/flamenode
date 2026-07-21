@@ -8,6 +8,7 @@ import { Icon } from "@/components/ui/Icon";
 import { EventGroupForm } from "@/components/admin/EventGroupForm";
 import { EventGroupMembersEditor } from "@/components/admin/EventGroupMembersEditor";
 import { DeleteEventGroupForm } from "@/components/admin/DeleteEventGroupForm";
+import { AdminSectionTabs } from "@/components/admin/AdminSectionTabs";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { ConsolePanel } from "@/components/layout/ConsolePanel";
 import { eventGroupPublicHref } from "@/lib/eventGroupRoutes";
@@ -73,6 +74,8 @@ export default async function AdminEventGroupEditPage({
         ]}
       />
 
+      <AdminSectionTabs hub="events" />
+
       <ConsolePanel title="基本情報">
         <EventGroupForm
           mode="edit"
@@ -85,6 +88,7 @@ export default async function AdminEventGroupEditPage({
             icon_url: row.icon_url,
             accent_color: row.accent_color,
             visibility_status: row.visibility_status,
+            sort_order: row.sort_order ?? 0,
           }}
         />
       </ConsolePanel>

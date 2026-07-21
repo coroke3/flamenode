@@ -305,7 +305,7 @@ export default async function EntryPage({
           <div className={styles.btnRow}>
             <Link
               href={resolveWriteHref("/entry/unslotted")}
-              className="fn-btn fn-btn-ghost"
+              className="fn-btn"
             >
               <Icon name="edit" size={14} aria-hidden />
               {writeCtaLabel(isLoggedIn ? "枠なし投稿" : "ログインして枠なし投稿")}

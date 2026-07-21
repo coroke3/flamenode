@@ -16,6 +16,7 @@ import { getXIconCandidates } from "@/lib/db/xIconResolution";
 import { getYoutubeChannelCandidates } from "@/lib/db/youtubeChannelCandidates";
 import { AppShell } from "@/components/ui/AppShell";
 import { StatusPanel } from "@/components/ui/StatusPanel";
+import styles from "./page.module.css";
 import { fetchActiveCustomQuestionsForEvents } from "@/lib/video/customQuestionAnswers";
 import { unslottedEventEligibilityWhere } from "@/lib/video/resolveUnslottedEventSyncTarget";
 
@@ -169,22 +170,11 @@ export default async function UnslottedPostPage({
           : submitBlockedReason}
       </StatusPanel>
 
-      <form
-        method="get"
-        role="search"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          flexWrap: "wrap",
-          marginBottom: 16,
-          padding: 12,
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-sm)",
-          background: "var(--bg-surface)",
-        }}
-      >
-        <label className="fn-label" htmlFor="unslotted_event_search" style={{ margin: 0 }}>
+      <form method="get" role="search" className={styles.eventSearchForm}>
+        <label
+          className={`fn-label ${styles.eventSearchLabel}`}
+          htmlFor="unslotted_event_search"
+        >
           所属先イベントを検索
         </label>
         <input
@@ -192,10 +182,9 @@ export default async function UnslottedPostPage({
           name="event_q"
           type="search"
           defaultValue={eventQuery}
-          className="fn-input"
+          className={`fn-input ${styles.eventSearchInput}`}
           placeholder="イベント名またはID"
           maxLength={100}
-          style={{ flex: "1 1 220px", maxWidth: 420 }}
         />
         <button type="submit" className="fn-btn fn-btn-ghost">
           <Icon name="search" size={12} aria-hidden /> 検索
@@ -205,7 +194,7 @@ export default async function UnslottedPostPage({
             解除
           </Link>
         ) : null}
-        <span className="fn-muted" style={{ fontSize: 11.5 }}>
+        <span className={`fn-muted ${styles.eventSearchMeta}`}>
           {eventQuery
             ? `「${eventQuery}」の候補 ${eventOptions.length}件`
             : `直近の候補 ${eventOptions.length}件（過去分は検索）`}
@@ -231,16 +220,7 @@ export default async function UnslottedPostPage({
         eventOptions={enrichedEventOptions}
       />
 
-      <p
-        style={{
-          marginTop: 20,
-          color: "var(--text-muted)",
-          fontSize: 12,
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 6,
-        }}
-      >
+      <p className="fn-page-footnote">
         <Icon name="info" size={12} aria-hidden />
         利用規約への再同意は提出時に確認します。
       </p>

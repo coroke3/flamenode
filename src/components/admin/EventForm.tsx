@@ -17,6 +17,7 @@ import {
   parseVideoFormSettings,
   type StagePermissionFieldSettings,
 } from "@/lib/video/formSettings";
+import { formatJstDatetimeLocal } from "@/lib/utils/dateInput";
 
 export interface EventFormInitial {
   id?: string;
@@ -71,15 +72,6 @@ function partsJsonToText(value: string | null | undefined): string {
   } catch {
     return "";
   }
-}
-
-function unixToInputDateTime(value: number | null | undefined): string {
-  if (!value) return "";
-  const date = new Date(value * 1000);
-  const pad = (number: number) => String(number).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
-    date.getDate(),
-  )}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function resolveInitialVisibility(
@@ -446,7 +438,7 @@ export function EventForm({
             <input
               name="start_time"
               type="datetime-local"
-              defaultValue={unixToInputDateTime(initial.start_time)}
+              defaultValue={formatJstDatetimeLocal(initial.start_time)}
               className="fn-input"
               {...gatedInputProps(canBasic)}
             />
@@ -456,7 +448,7 @@ export function EventForm({
             <input
               name="end_time"
               type="datetime-local"
-              defaultValue={unixToInputDateTime(initial.end_time)}
+              defaultValue={formatJstDatetimeLocal(initial.end_time)}
               className="fn-input"
               {...gatedInputProps(canBasic)}
             />
@@ -471,7 +463,7 @@ export function EventForm({
             <input
               name="entry_start_time"
               type="datetime-local"
-              defaultValue={unixToInputDateTime(initial.entry_start_time)}
+              defaultValue={formatJstDatetimeLocal(initial.entry_start_time)}
               className="fn-input"
               {...gatedInputProps(canPublish)}
             />
@@ -481,7 +473,7 @@ export function EventForm({
             <input
               name="entry_end_time"
               type="datetime-local"
-              defaultValue={unixToInputDateTime(initial.entry_end_time)}
+              defaultValue={formatJstDatetimeLocal(initial.entry_end_time)}
               className="fn-input"
               {...gatedInputProps(canPublish)}
             />

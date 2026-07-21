@@ -9,6 +9,7 @@ import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { buildFreeVideoSubmittedNotification } from "@/lib/notifications/templates/video";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import { generateId } from "@/lib/utils/id";
+import { parseJstDatetimeLocal } from "@/lib/utils/dateInput";
 import { extractYoutubeId } from "@/lib/youtube/id";
 import {
   appendVideoAtomicWritePlan,
@@ -106,6 +107,8 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
 
   const videoId = generateId("v");
   const now = Math.floor(Date.now() / 1000);
+  const scheduledTime =
+    parseJstDatetimeLocal(String(formData.get("scheduled_time") ?? "")) ?? now;
   const videoAfter: typeof videos.$inferSelect = {
     id: videoId,
     primary_event_id: eventId,
@@ -131,7 +134,7 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
     production_story: parsed.data.production_story ?? null,
     visibility_status: "public",
     scheduling_type: "manual",
-    scheduled_time: now,
+    scheduled_time: scheduledTime,
     app_like_count: 0,
     score: 0,
     score_updated_at: null,

@@ -8,6 +8,7 @@ import type { DB } from "@/lib/db/client";
 import { announcements } from "@/lib/db/schema";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { generateId } from "@/lib/utils/id";
+import { parseJstDatetimeLocal } from "@/lib/utils/dateInput";
 
 export interface AnnouncementResult {
   ok: boolean;
@@ -27,10 +28,7 @@ const schema = z.object({
 });
 
 function parseDate(raw: string | null | undefined): number | null {
-  if (!raw) return null;
-  const t = Date.parse(raw);
-  if (Number.isNaN(t)) return null;
-  return Math.floor(t / 1000);
+  return parseJstDatetimeLocal(raw);
 }
 
 async function requireAdmin(): Promise<

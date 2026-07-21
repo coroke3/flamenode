@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import styles from "./LegacyCanonicalImportClient.module.css";
 
 type ApiResponse = {
   ok: boolean;
@@ -276,22 +277,17 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
     : null;
 
   return (
-    <div style={{ display: "grid", gap: 18 }}>
-      <form
-        ref={formRef}
-        onChange={handleFormChange}
-        style={{ display: "grid", gap: 14, padding: 18, border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)", background: "var(--bg-surface)" }}
-      >
-        <div style={{ display: "grid", gap: 8 }}>
+    <div className={styles.root}>
+      <form ref={formRef} onChange={handleFormChange} className={styles.form}>
+        <div className={styles.section}>
           <strong>旧形式ファイル</strong>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <div className={styles.fileRow}>
             <input
               ref={addFilesInputRef}
               type="file"
               accept=".json,.csv,.tsv,application/json,text/csv,text/tab-separated-values"
               multiple
-              className="fn-input"
-              style={{ maxWidth: "100%" }}
+              className={`fn-input ${styles.fileInput}`}
               onChange={(event) => addSelectedFiles(event.currentTarget.files)}
             />
           </div>
@@ -299,14 +295,14 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
             イベント用と動画用など、複数ファイルを順番に追加できます。JSON・CSV・TSV、最大20ファイル、合計12MB、5,000行まで。
           </span>
           {selectedFiles.length ? (
-            <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 4 }}>
+            <ul className={styles.fileList}>
               {selectedFiles.map((file) => {
                 const key = selectedFileKey(file);
                 return (
-                  <li key={key} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <li key={key} className={styles.fileListItem}>
                     <code>{file.name}</code>
                     <span className="fn-muted fn-text-sm">({Math.ceil(file.size / 1024).toLocaleString()} KB)</span>
-                    <button type="button" className="fn-btn" onClick={() => removeSelectedFile(key)}>
+                    <button type="button" className="fn-btn fn-btn-sm" onClick={() => removeSelectedFile(key)}>
                       削除
                     </button>
                   </li>
@@ -314,26 +310,26 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
               })}
             </ul>
           ) : (
-            <p className="fn-muted fn-text-sm" style={{ margin: 0 }}>追加済みファイルはありません。</p>
+            <p className={`fn-muted fn-text-sm ${styles.emptyFiles}`}>追加済みファイルはありません。</p>
           )}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-          <label style={{ display: "grid", gap: 6 }}>
+        <div className={styles.optionGrid}>
+          <label className={styles.optionField}>
             <strong>イベント公開状態</strong>
             <select name="event_visibility" defaultValue="public" className="fn-input">
               <option value="public">公開</option>
               <option value="private">非公開</option>
             </select>
           </label>
-          <label style={{ display: "grid", gap: 6 }}>
+          <label className={styles.optionField}>
             <strong>作品公開状態</strong>
             <select name="video_visibility" defaultValue="public" className="fn-input">
               <option value="public">公開</option>
               <option value="private">非公開</option>
             </select>
           </label>
-          <label style={{ display: "grid", gap: 6 }}>
+          <label className={styles.optionField}>
             <strong>既存IDの扱い</strong>
             <select name="strategy" defaultValue="skip_existing" className="fn-input">
               <option value="skip_existing">既存IDをスキップ</option>
@@ -347,14 +343,14 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
           <section
             aria-labelledby="legacy-video-custom-fields-title"
             data-legacy-field-mapping
-            style={{ display: "grid", gap: 12 }}
+            className={styles.mappingSection}
           >
-            <div style={{ display: "grid", gap: 4 }}>
+            <div className={styles.mappingIntro}>
               <strong id="legacy-video-custom-fields-title">作品の追加列（任意）</strong>
               <span className="fn-muted fn-text-sm">
                 未対応列は既定で無視してプレビューできます。カスタム質問へ保存したい列だけ指定して再プレビューしてください。
               </span>
-              <button type="button" className="fn-btn" onClick={ignoreAllFieldCandidates}>
+              <button type="button" className="fn-btn fn-btn-sm" onClick={ignoreAllFieldCandidates}>
                 表示中の列をすべて無視として再プレビュー
               </button>
             </div>
@@ -363,16 +359,13 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
               const fieldId = `legacy-video-custom-field-${index}`;
               const questionLabel = draft?.action === "custom_question" ? draft.questionLabel : "";
               return (
-                <fieldset
-                  key={candidate.source_key}
-                  style={{ display: "grid", gap: 8, margin: 0, padding: 12, border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)" }}
-                >
-                  <legend style={{ paddingInline: 4 }}><code>{candidate.source_key}</code></legend>
+                <fieldset key={candidate.source_key} className={styles.mappingFieldset}>
+                  <legend className={styles.mappingLegend}><code>{candidate.source_key}</code></legend>
                   <span id={`${fieldId}-description`} className="fn-muted fn-text-sm">
                     値が入っている作品: {candidate.non_empty_rows.toLocaleString()}件
                   </span>
-                  <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }} aria-describedby={`${fieldId}-description`}>
-                    <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <div className={styles.mappingRadios} aria-describedby={`${fieldId}-description`}>
+                    <label className={styles.radioLabel}>
                       <input
                         type="radio"
                         name={`${fieldId}-action`}
@@ -382,7 +375,7 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
                       />
                       カスタム質問にする
                     </label>
-                    <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <label className={styles.radioLabel}>
                       <input
                         type="radio"
                         name={`${fieldId}-action`}
@@ -394,7 +387,7 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
                     </label>
                   </div>
                   {draft?.action === "custom_question" ? (
-                    <label htmlFor={`${fieldId}-question-label`} style={{ display: "grid", gap: 6 }}>
+                    <label htmlFor={`${fieldId}-question-label`} className={styles.questionField}>
                       <strong>質問文Q</strong>
                       <input
                         id={`${fieldId}-question-label`}
@@ -414,7 +407,7 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
           </section>
         ) : null}
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <div className={styles.actions}>
           <button type="button" className="fn-btn fn-btn-primary" disabled={!!pending || selectedFiles.length === 0} onClick={() => void submit("preview")}>
             {pending === "preview" ? "解析・保存中…" : "プレビュー"}
           </button>
@@ -443,8 +436,11 @@ function ImportResult({ result }: { result: ApiResponse }): React.ReactElement {
       : "プレビュー結果"
     : "確認が必要です";
   return (
-    <section aria-live="polite" style={{ display: "grid", gap: 12, padding: 18, border: `1px solid ${result.ok ? "var(--border-subtle)" : "var(--danger)"}`, borderRadius: "var(--radius-md)", background: "var(--bg-surface)" }}>
-      <h2 style={{ fontSize: 16, fontWeight: 700 }}>{heading}</h2>
+    <section
+      aria-live="polite"
+      className={`${styles.result} ${result.ok ? "" : styles.resultError}`}
+    >
+      <h2 className={styles.resultTitle}>{heading}</h2>
       {result.message ? <p>{result.message}</p> : null}
       {result.plan_hash ? <p className="fn-muted fn-text-sm">plan hash: <code>{result.plan_hash}</code></p> : null}
       {result.progress ? (
@@ -454,9 +450,9 @@ function ImportResult({ result }: { result: ApiResponse }): React.ReactElement {
         </p>
       ) : null}
       {result.summary ? (
-        <dl style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
+        <dl className={styles.summaryGrid}>
           {Object.entries(result.summary).map(([key, value]) => (
-            <div key={key}><dt className="fn-muted fn-text-sm">{key}</dt><dd style={{ fontWeight: 700 }}>{value.toLocaleString()}</dd></div>
+            <div key={key}><dt className="fn-muted fn-text-sm">{key}</dt><dd className={styles.summaryValue}>{value.toLocaleString()}</dd></div>
           ))}
         </dl>
       ) : null}
@@ -468,7 +464,7 @@ function ImportResult({ result }: { result: ApiResponse }): React.ReactElement {
       {result.preview?.videos.length ? (
         <details><summary>作品例</summary><ul>{result.preview.videos.map((row) => <li key={row.id}><code>{row.id}</code> {row.title} / {row.creator_display_name} ({row.visibility_status})</li>)}</ul></details>
       ) : null}
-      {result.result ? <pre style={{ margin: 0, overflow: "auto", fontSize: 12 }}>{JSON.stringify(result.result, null, 2)}</pre> : null}
+      {result.result ? <pre className={styles.resultPre}>{JSON.stringify(result.result, null, 2)}</pre> : null}
     </section>
   );
 }

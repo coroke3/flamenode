@@ -26,7 +26,9 @@ import {
   fetchEventListGroupSections,
   type EventListGroupSection,
 } from "@/lib/db/eventGroups";
+import { EventGroupHashScroll } from "@/components/event/EventGroupHashScroll";
 import { eventGroupAnchorId } from "@/lib/eventGroupRoutes";
+import { buildAccentVars } from "@/lib/theme/accent";
 import { loadStaticEventsIndex } from "@/lib/publicData/loader";
 import { canFallbackToDatabase } from "@/lib/publicData/loader";
 import type {
@@ -307,6 +309,7 @@ export default async function EventListPage({
 
   return (
     <div className="fn-public-container fn-page">
+      <EventGroupHashScroll />
       <header className="fn-page-head">
         <div className="fn-page-head-main">
           <span className="fn-eyebrow">EVENTS</span>
@@ -467,13 +470,35 @@ function EventGroupSection({
 }: {
   group: EventGroupSectionView;
 }): React.ReactElement {
+  const sectionStyle = group.accent_color
+    ? ({
+        ...buildAccentVars(group.accent_color, "dark"),
+        borderLeft: "3px solid var(--event-accent, var(--accent-primary))",
+        paddingLeft: 14,
+      } as React.CSSProperties)
+    : undefined;
+
   return (
     <section
       id={eventGroupAnchorId(group.slug)}
       className="fn-evlist-section"
+      style={sectionStyle}
     >
       <div className="fn-section-head">
         <div className="fn-section-head-left">
+          {group.icon_url ? (
+            <img
+              src={group.icon_url}
+              alt=""
+              width={32}
+              height={32}
+              style={{
+                flexShrink: 0,
+                objectFit: "contain",
+                borderRadius: 4,
+              }}
+            />
+          ) : null}
           <div className="fn-section-titles">
             <h2 className="fn-display fn-section-title">{group.name}</h2>
             <span className="fn-section-jp">

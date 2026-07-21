@@ -61,6 +61,11 @@ const ADMIN_NAV_GROUPS_BASE: AdminSidebarGroup[] = [
     title: "イベント",
     items: [
       { href: "/admin/events", label: "イベント管理", icon: <Icon name="calendar" size={14} /> },
+      {
+        href: "/admin/event-groups",
+        label: "イベントグループ",
+        icon: <Icon name="list" size={14} />,
+      },
     ],
   },
   {

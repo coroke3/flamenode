@@ -420,11 +420,11 @@
   }
 
   .section {
-    padding-inline: 14px;
+    padding: 14px;
   }
 
   .sectionTitle {
-    margin: 0 0 14px;
+    margin: -14px -14px 14px;
     padding: 12px 14px;
   }
 
@@ -466,7 +466,7 @@
   }
 
   .mobileSubmitBar .fn-btn {
-    min-height: 40px;
+    min-height: 44px;
     flex-shrink: 0;
   }
 
@@ -779,9 +779,18 @@
   display: none;
 }
 
+.form :global(.fn-btn) :global(svg) {
+  flex-shrink: 0;
+  display: block;
+}
+
 @media (max-width: 640px) {
   .stepProgressList {
     flex-direction: column;
+  }
+
+  .actions :global(.fn-btn) {
+    min-height: 44px;
   }
 
   .mobileWizardBar {
