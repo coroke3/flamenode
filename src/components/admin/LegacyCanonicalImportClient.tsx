@@ -83,13 +83,28 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
     setCredential(null);
   }
 
-  function handleFormChange(event: React.FormEvent<HTMLFormElement>): void {
+  function handleFormChange(): void {
+    // 戦略・公開設定の変更でもカスタム質問の下書きは残す。
+    // decisions は次のプレビューで再送し、古い credential だけ無効化する。
     invalidatePreview();
-    const target = event.target;
-    if (target instanceof HTMLInputElement && target.type === "file") return;
-    if (target instanceof Element && target.closest("[data-legacy-field-mapping]")) return;
-    setFieldCandidates([]);
-    setFieldDecisionDrafts(new Map());
+  }
+
+  function syncFieldCandidatesFromResponse(json: ApiResponse): void {
+    if (!Array.isArray(json.video_custom_field_candidates)) return;
+    const candidates = json.video_custom_field_candidates;
+    setFieldCandidates(candidates);
+    if (candidates.length === 0) {
+      setFieldDecisionDrafts(new Map());
+      return;
+    }
+    setFieldDecisionDrafts((current) => {
+      const next = new Map<string, VideoCustomFieldDecisionDraft>();
+      for (const candidate of candidates) {
+        const existing = current.get(candidate.source_key);
+        if (existing) next.set(candidate.source_key, existing);
+      }
+      return next;
+    });
   }
 
   function addSelectedFiles(fileList: FileList | null): void {
@@ -201,21 +216,9 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
         const json = (await response.json()) as ApiResponse;
         setResult(json);
         const formUnchanged = formRevisionRef.current === submittedFormRevision;
-        if (formUnchanged && json.ok) {
-          const candidates = json.video_custom_field_candidates ?? [];
-          setFieldCandidates(candidates);
-          if (candidates.length === 0) {
-            setFieldDecisionDrafts(new Map());
-          } else {
-            setFieldDecisionDrafts((current) => {
-              const next = new Map<string, VideoCustomFieldDecisionDraft>();
-              for (const candidate of candidates) {
-                const existing = current.get(candidate.source_key);
-                if (existing) next.set(candidate.source_key, existing);
-              }
-              return next;
-            });
-          }
+        if (formUnchanged) {
+          // 422（質問文重複など）でも candidates を同期し、マッピング UI をサーバ状態と揃える。
+          syncFieldCandidatesFromResponse(json);
         }
         setCredential(
           formUnchanged &&

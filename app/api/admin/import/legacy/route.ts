@@ -280,6 +280,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
   }
 
+  const rowCount = parsed.reduce((sum, file) => sum + file.rows.length, 0);
+  if (rowCount > MAX_ROWS) return error(`1回の入力は最大${MAX_ROWS}行です。`);
+
   let fieldDecisions: LegacyVideoFieldDecision[];
   try {
     fieldDecisions = videoFieldDecisions(formData);
@@ -292,8 +295,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     videoVisibility: visibility(formData.get("video_visibility")),
     videoFieldDecisions: fieldDecisions,
   });
-  const rowCount = parsed.reduce((sum, file) => sum + file.rows.length, 0);
-  if (rowCount > MAX_ROWS) return error(`1回の入力は最大${MAX_ROWS}行です。`);
 
   const summary = {
     inputFiles: files.length,

@@ -543,13 +543,18 @@ test("apply時にファイルを再解析せずR2保存planを使用する", () 
   assert.match(client, /plan_hash/);
   assert.match(client, /video_custom_field_decisions/);
   assert.match(client, /data-legacy-field-mapping/);
-  assert.match(client, /formUnchanged && json\.ok[\s\S]*?setFieldCandidates\(candidates\)/);
+  assert.match(client, /syncFieldCandidatesFromResponse/);
+  assert.match(client, /formUnchanged[\s\S]*?syncFieldCandidatesFromResponse\(json\)/);
+  assert.match(client, /戦略・公開設定の変更でもカスタム質問の下書きは残す/);
   assert.match(client, /candidates\.length === 0[\s\S]*?setFieldDecisionDrafts\(new Map\(\)\)/);
   assert.match(client, /customQuestions[\s\S]*?customAnswers[\s\S]*?プレビュー plan に含めました/);
   assert.doesNotMatch(route, /requires_field_mapping.*422/);
   assert.match(route, /video_custom_field_candidates: plan\.unmappedVideoFields/);
   assert.match(route, /LEGACY_IMPORT_PLAN_WARN_BYTES/);
   assert.match(route, /estimateLegacyImportStoredPlanBytes/);
+  const rowCountGuard = route.indexOf("rowCount > MAX_ROWS");
+  const normalizeCall = route.indexOf("normalizeLegacyFiles(parsed");
+  assert.ok(rowCountGuard > 0 && normalizeCall > 0 && rowCountGuard < normalizeCall);
 });
 
 test("カスタム質問・回答applyは手動回答保護とD1予算を維持する", () => {
