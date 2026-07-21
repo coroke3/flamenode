@@ -26,6 +26,7 @@ test("normalizeStaticTop: top payload をトップページ用 DTO に整形す�
         title: "Event",
         visibility_status: "public",
         start_time: 200,
+        end_time: 300,
       },
     ],
     latest_events: [
@@ -81,6 +82,38 @@ test("normalizeStaticTop: legacy items だけでも表示可能にする", () =>
   assert.ok(top);
   assert.equal(top.recommended.length, 1);
   assert.equal(top.latest.length, 1);
+});
+
+test("normalizeStaticTop filters point events from card lists", () => {
+  const top = normalizeStaticTop({
+    active_events: [
+      {
+        id: "point",
+        title: "Point",
+        visibility_status: "public",
+        start_time: 200,
+      },
+      {
+        id: "bounded",
+        title: "Bounded",
+        visibility_status: "public",
+        start_time: 200,
+        end_time: 300,
+      },
+    ],
+    latest_events: [
+      {
+        id: "point-latest",
+        title: "Point Latest",
+        visibility_status: "public",
+        end_time: 400,
+      },
+    ],
+  });
+
+  assert.ok(top);
+  assert.deepEqual(top.activeEvents.map((event) => event.id), ["bounded"]);
+  assert.equal(top.latestEvents.length, 0);
 });
 
 test("normalizeStaticTop: 空 payload は miss 扱いにする", () => {

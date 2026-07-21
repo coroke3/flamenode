@@ -76,6 +76,14 @@ function productionEnv(overrides = {}) {
   };
 }
 
+/** Pin Workers Builds Node 22 so local runtime does not affect the contract. */
+function verifyProduction(options = {}) {
+  return verifyProductionEnvironment({
+    runtimeNodeVersion: "22.13.0",
+    ...options,
+  });
+}
+
 function withTempDirectory(prefix, callback) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   try {
@@ -144,7 +152,7 @@ test("production requires a clean Workers Builds main-branch checkout", () => {
   ]) {
     assert.throws(
       () =>
-        verifyProductionEnvironment({
+        verifyProduction({
           env: productionEnv(overrides),
           requireGitHead: false,
         }),
@@ -164,7 +172,7 @@ test("production rejects path URLs and invalid or missing Workers Builds Node se
     { SKIP_DEPENDENCY_INSTALL: "" },
   ]) {
     assert.throws(
-      () => verifyProductionEnvironment({ env: productionEnv(overrides), requireGitHead: false }),
+      () => verifyProduction({ env: productionEnv(overrides), requireGitHead: false }),
       /Production environment verification failed/,
     );
   }
@@ -174,7 +182,7 @@ test("production environment fails closed without required names and never echoe
   const secret = "DO_NOT_ECHO_THIS_SECRET_VALUE";
   let error;
   try {
-    verifyProductionEnvironment({
+    verifyProduction({
       env: productionEnv({ AUTH_SECRET: secret, AUTH_DISCORD_ID: "" }),
       requireGitHead: false,
     });
@@ -185,11 +193,11 @@ test("production environment fails closed without required names and never echoe
   assert.match(error.message, /AUTH_DISCORD_ID is required/);
   assert.doesNotMatch(error.message, new RegExp(secret));
   assert.throws(
-    () => verifyProductionEnvironment({ env: productionEnv({ CF_D1_DATABASE_ID: "placeholder" }), requireGitHead: false }),
+    () => verifyProduction({ env: productionEnv({ CF_D1_DATABASE_ID: "placeholder" }), requireGitHead: false }),
     /CF_D1_DATABASE_ID/,
   );
   assert.throws(
-    () => verifyProductionEnvironment({ env: productionEnv({ FLAMENODE_LOCAL_PREVIEW: "1" }), requireGitHead: false }),
+    () => verifyProduction({ env: productionEnv({ FLAMENODE_LOCAL_PREVIEW: "1" }), requireGitHead: false }),
     /FLAMENODE_LOCAL_PREVIEW is local-only/,
   );
   const buildOnlyEnv = productionEnv();
@@ -206,7 +214,7 @@ test("production environment fails closed without required names and never echoe
     delete buildOnlyEnv[name];
   }
   assert.doesNotThrow(() =>
-    verifyProductionEnvironment({ env: buildOnlyEnv, requireGitHead: false }),
+    verifyProduction({ env: buildOnlyEnv, requireGitHead: false }),
   );
 });
 

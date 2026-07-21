@@ -2,6 +2,7 @@ import { and, eq, or } from "drizzle-orm";
 import type { DB } from "../db/client";
 import { events, videos, xUsers } from "../db/schema";
 import type { StaticRebuildTargetType } from "../staticRebuild/types";
+import { publicListableXApprovalWhere } from "../utils/publicXUserWhere";
 
 const MAX_PUBLIC_TARGET_ID_LENGTH = 128;
 
@@ -66,7 +67,7 @@ export async function publicStaticTargetExists(
     .where(
       and(
         eq(xUsers.id, canonicalXId),
-        eq(xUsers.approval_status, "approved"),
+        publicListableXApprovalWhere(),
       )!,
     )
     .limit(1);

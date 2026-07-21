@@ -12,8 +12,8 @@ import { mutateWithAudit } from "@/lib/audit/mutate";
 import { parseJstDatetimeLocal } from "@/lib/utils/dateInput";
 import { generateId } from "@/lib/utils/id";
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
-import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
-import { MAX_ATOMIC_SLOT_ROWS } from "@/lib/slots/atomicLimits";
+import { buildStaticRebuildQueueBatch, enqueueStaticRebuild } from "@/lib/staticRebuild/enqueue";
+import { MAX_ATOMIC_SLOT_ROWS, MAX_SLOT_BATCH_GENERATE_COUNT } from "@/lib/slots/atomicLimits";
 
 export interface SlotActionResult {
   ok: boolean;
@@ -30,7 +30,7 @@ const batchSchema = z.object({
   start_at: z.string().optional().nullable(),
   end_at: z.string().optional().nullable(),
   interval_minutes: z.coerce.number().min(1).max(60 * 24).default(5),
-  count: z.coerce.number().min(1).max(MAX_ATOMIC_SLOT_ROWS).default(1),
+  count: z.coerce.number().min(1).max(MAX_SLOT_BATCH_GENERATE_COUNT).default(1),
   label_prefix: z.string().trim().max(40).optional().nullable(),
   start_index: z.coerce.number().min(0).max(9999).default(1),
 });
@@ -167,6 +167,69 @@ async function releaseNotification(
   });
 }
 
+function chunkRows<T>(rows: readonly T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let offset = 0; offset < rows.length; offset += size) {
+    chunks.push(rows.slice(offset, offset + size));
+  }
+  return chunks;
+}
+
+async function insertGeneratedSlotRows(
+  db: DB,
+  eventId: string,
+  mode: "time" | "count",
+  rows: readonly SlotRow[],
+  userId: string,
+  options: { includeQueue: boolean },
+): Promise<void> {
+  if (rows.length === 0) return;
+
+  const slotColumns = sql.raw(
+    "id, event_id, reserved_by_user_id, x_user_id, display_name, slot_label, start_time, sort_order, reservation_group_id, video_id, status, updated_at, version",
+  );
+  const insertCandidates = sql.join(
+    rows.map(
+      (row) => sql`
+        SELECT ${row.id}, ${row.event_id}, ${row.reserved_by_user_id}, ${row.x_user_id},
+               ${row.display_name}, ${row.slot_label}, ${row.start_time}, ${row.sort_order},
+               ${row.reservation_group_id}, ${row.video_id}, ${row.status},
+               ${row.updated_at}, ${row.version}
+        WHERE NOT EXISTS (
+          SELECT 1 FROM slots
+          WHERE event_id = ${row.event_id}
+            AND ${
+              mode === "time"
+                ? sql`start_time = ${row.start_time}`
+                : sql`sort_order = ${row.sort_order}`
+            }
+        )
+      `,
+    ),
+    sql` UNION ALL `,
+  );
+  const insert = db.run(
+    sql`INSERT INTO slots (${slotColumns}) ${insertCandidates}`,
+  );
+  const queue = options.includeQueue
+    ? await eventQueue(db, eventId, "slot_admin_generate", userId)
+    : { statements: [] as BatchItem<"sqlite">[], expectedChanges: [] as number[] };
+
+  await mutateWithAudit(db, {
+    mutationStatements: [insert, ...queue.statements],
+    expectedMutationChanges: [rows.length, ...queue.expectedChanges],
+    audits: rows.map((row) => ({
+      table_name: "slots",
+      target_id: row.id,
+      operation: "CREATE",
+      after: snapshot(row),
+      actor_user_id: userId,
+      retention_class: "normal",
+      strict: true,
+    })),
+  });
+}
+
 export async function generateSlotsBatch(
   formData: FormData,
 ): Promise<SlotActionResult> {
@@ -188,12 +251,6 @@ export async function generateSlotsBatch(
     }
     const interval = data.interval_minutes * 60;
     for (let cursor = start, order = 0; cursor + interval <= end; cursor += interval) {
-      if (newRows.length >= MAX_ATOMIC_SLOT_ROWS) {
-        return {
-          ok: false,
-          message: `一度に作成できる枠は ${MAX_ATOMIC_SLOT_ROWS} 件までです。`,
-        };
-      }
       newRows.push({
         id: generateId("slot"),
         event_id: data.event_id,
@@ -235,6 +292,12 @@ export async function generateSlotsBatch(
   if (newRows.length === 0) {
     return { ok: false, message: "作成対象の枠がありません。" };
   }
+  if (newRows.length > MAX_SLOT_BATCH_GENERATE_COUNT) {
+    return {
+      ok: false,
+      message: `一度に作成できる枠は ${MAX_SLOT_BATCH_GENERATE_COUNT} 件までです。`,
+    };
+  }
 
   const conflicts = await guard.db
     .select({ id: slots.id })
@@ -261,53 +324,35 @@ export async function generateSlotsBatch(
     return { ok: false, message: "同じ時刻または順序の枠が既に存在します。" };
   }
 
-  const slotColumns = sql.raw(
-    "id, event_id, reserved_by_user_id, x_user_id, display_name, slot_label, start_time, sort_order, reservation_group_id, video_id, status, updated_at, version",
-  );
-  const insertCandidates = sql.join(
-    newRows.map(
-      (row) => sql`
-        SELECT ${row.id}, ${row.event_id}, ${row.reserved_by_user_id}, ${row.x_user_id},
-               ${row.display_name}, ${row.slot_label}, ${row.start_time}, ${row.sort_order},
-               ${row.reservation_group_id}, ${row.video_id}, ${row.status},
-               ${row.updated_at}, ${row.version}
-        WHERE NOT EXISTS (
-          SELECT 1 FROM slots
-          WHERE event_id = ${row.event_id}
-            AND ${
-              data.mode === "time"
-                ? sql`start_time = ${row.start_time}`
-                : sql`sort_order = ${row.sort_order}`
-            }
-        )
-      `,
-    ),
-    sql` UNION ALL `,
-  );
-  const insert = guard.db.run(
-    sql`INSERT INTO slots (${slotColumns}) ${insertCandidates}`,
-  );
-  const queue = await eventQueue(
-    guard.db,
-    data.event_id,
-    "slot_admin_generate",
-    guard.userId,
-  );
+  const chunks = chunkRows(newRows, MAX_ATOMIC_SLOT_ROWS);
+  let created = 0;
   try {
-    await mutateWithAudit(guard.db, {
-      mutationStatements: [insert, ...queue.statements],
-      expectedMutationChanges: [newRows.length, ...queue.expectedChanges],
-      audits: newRows.map((row) => ({
-        table_name: "slots",
-        target_id: row.id,
-        operation: "CREATE",
-        after: snapshot(row),
-        actor_user_id: guard.userId,
-        retention_class: "normal",
-        strict: true,
-      })),
-    });
+    for (const [index, chunk] of chunks.entries()) {
+      await insertGeneratedSlotRows(
+        guard.db,
+        data.event_id,
+        data.mode,
+        chunk,
+        guard.userId,
+        { includeQueue: index === chunks.length - 1 },
+      );
+      created += chunk.length;
+    }
   } catch (error) {
+    if (created > 0) {
+      await enqueueStaticRebuild(guard.db, {
+        targetType: "event",
+        targetId: data.event_id,
+        reason: "slot_admin_generate_partial",
+        priority: "high",
+        requestedByUserId: guard.userId,
+      });
+      revalidateEventSlotPaths(data.event_id);
+      return {
+        ok: false,
+        message: `枠の作成中に失敗しました（${created}/${newRows.length} 件まで作成済み）。残りは再実行してください。`,
+      };
+    }
     return mutationError(error);
   }
   revalidateEventSlotPaths(data.event_id);
@@ -321,19 +366,28 @@ export async function deleteAvailableSlots(
   if (!eventId) return { ok: false, message: "event_id が必要です。" };
   const guard = await ensureCanEditSlots(eventId, "manage_slot_delete");
   if (!guard.ok) return guard.result;
-  const rows = await guard.db
-    .select()
-    .from(slots)
-    .where(and(eq(slots.event_id, eventId), eq(slots.status, "available"))!)
-    .limit(MAX_ATOMIC_SLOT_ROWS + 1);
-  if (rows.length === 0) return { ok: true, created: 0 };
-  if (rows.length > MAX_ATOMIC_SLOT_ROWS) {
-    return {
-      ok: false,
-      message: `一度に処理できる枠は ${MAX_ATOMIC_SLOT_ROWS} 件までです。`,
-    };
+
+  let totalDeleted = 0;
+  while (true) {
+    const rows = await guard.db
+      .select()
+      .from(slots)
+      .where(and(eq(slots.event_id, eventId), eq(slots.status, "available"))!)
+      .limit(MAX_ATOMIC_SLOT_ROWS);
+    if (rows.length === 0) break;
+
+    const result = await deleteRows(
+      guard.db,
+      eventId,
+      rows,
+      guard.userId,
+      "slot_admin_delete_available",
+    );
+    if (!result.ok) return result;
+    totalDeleted += rows.length;
   }
-  return deleteRows(guard.db, eventId, rows, guard.userId, "slot_admin_delete_available");
+
+  return { ok: true, created: totalDeleted };
 }
 
 async function deleteRows(

@@ -18,6 +18,7 @@ export default function LegacyImportPage(): React.ReactElement {
         <p className="fn-muted fn-text-sm" style={{ marginTop: 6 }}>
           プレビュー後にだけ実行できます。既存データの置換は、過去にこのインポート機能で作成されたイベント・作品だけに限定されます。
           X名義、イベントowner、作品メンバー、チャプター、YouTube情報、使用ソフトは新正本テーブルへ直接保存します。
+          正規カラムに対応しない動画項目は、既定では無視してプレビューできます。必要な列だけ質問文Qを指定してカスタム質問へ保存するか、意図して無視を選んで再プレビューします。
         </p>
       </section>
       <LegacyCanonicalImportClient />

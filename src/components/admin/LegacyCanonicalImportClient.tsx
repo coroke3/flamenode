@@ -9,6 +9,10 @@ type ApiResponse = {
   preview_token?: string;
   plan_hash?: string;
   expires_at?: number;
+  requires_field_mapping?: boolean;
+  continuation_required?: boolean;
+  progress?: { stage: string; index: number; completed: number; total: number };
+  video_custom_field_candidates?: VideoCustomFieldCandidate[];
   requires_repreview?: boolean;
   retryable?: boolean;
   summary?: Record<string, number>;
@@ -21,25 +25,155 @@ type ApiResponse = {
   result?: unknown;
 };
 
+type VideoCustomFieldCandidate = {
+  source_key: string;
+  non_empty_rows: number;
+};
+
+type VideoCustomFieldDecision =
+  | { source_key: string; action: "custom_question"; question_label: string }
+  | { source_key: string; action: "ignore" };
+
+type VideoCustomFieldDecisionDraft =
+  | { action: "custom_question"; questionLabel: string }
+  | { action: "ignore" };
+
 type PreviewCredential = {
   token: string;
   planHash: string;
   expiresAt: number;
 };
 
+function selectedFileKey(file: File): string {
+  return `${file.name}\u0000${file.size}\u0000${file.lastModified}`;
+}
+
 export function LegacyCanonicalImportClient(): React.ReactElement {
   const formRef = React.useRef<HTMLFormElement>(null);
+  const addFilesInputRef = React.useRef<HTMLInputElement>(null);
+  const formRevisionRef = React.useRef(0);
+  const [selectedFiles, setSelectedFiles] = React.useState<File[]>([]);
   const [result, setResult] = React.useState<ApiResponse | null>(null);
   const [pending, setPending] = React.useState<"preview" | "apply" | null>(null);
   const [credential, setCredential] = React.useState<PreviewCredential | null>(null);
+  const [fieldCandidates, setFieldCandidates] = React.useState<VideoCustomFieldCandidate[]>([]);
+  const [fieldDecisionDrafts, setFieldDecisionDrafts] = React.useState<Map<string, VideoCustomFieldDecisionDraft>>(
+    () => new Map(),
+  );
+
+  const fieldDecisions = React.useMemo<VideoCustomFieldDecision[]>(() => {
+    const decisions: VideoCustomFieldDecision[] = [];
+    for (const candidate of fieldCandidates) {
+      const draft = fieldDecisionDrafts.get(candidate.source_key);
+      if (!draft) continue;
+      if (draft.action === "ignore") {
+        decisions.push({ source_key: candidate.source_key, action: "ignore" });
+        continue;
+      }
+      const questionLabel = draft.questionLabel.trim();
+      if (!questionLabel || questionLabel.length > 120) continue;
+      decisions.push({ source_key: candidate.source_key, action: "custom_question", question_label: questionLabel });
+    }
+    return decisions;
+  }, [fieldCandidates, fieldDecisionDrafts]);
 
   function invalidatePreview(): void {
+    formRevisionRef.current += 1;
     setCredential(null);
+  }
+
+  function handleFormChange(event: React.FormEvent<HTMLFormElement>): void {
+    invalidatePreview();
+    const target = event.target;
+    if (target instanceof HTMLInputElement && target.type === "file") return;
+    if (target instanceof Element && target.closest("[data-legacy-field-mapping]")) return;
+    setFieldCandidates([]);
+    setFieldDecisionDrafts(new Map());
+  }
+
+  function addSelectedFiles(fileList: FileList | null): void {
+    if (!fileList || fileList.length === 0) return;
+    const incoming = [...fileList];
+    setSelectedFiles((current) => {
+      const seen = new Set(current.map(selectedFileKey));
+      const next = [...current];
+      for (const file of incoming) {
+        const key = selectedFileKey(file);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        next.push(file);
+      }
+      return next;
+    });
+    invalidatePreview();
+    setFieldCandidates([]);
+    setFieldDecisionDrafts(new Map());
+    if (addFilesInputRef.current) addFilesInputRef.current.value = "";
+  }
+
+  function removeSelectedFile(key: string): void {
+    setSelectedFiles((current) => current.filter((file) => selectedFileKey(file) !== key));
+    invalidatePreview();
+    setFieldCandidates([]);
+    setFieldDecisionDrafts(new Map());
+  }
+
+  function setFieldAction(sourceKey: string, action: "custom_question" | "ignore"): void {
+    setFieldDecisionDrafts((current) => {
+      const next = new Map(current);
+      const currentDraft = current.get(sourceKey);
+      next.set(
+        sourceKey,
+        action === "custom_question"
+          ? { action, questionLabel: currentDraft?.action === "custom_question" ? currentDraft.questionLabel : "" }
+          : { action },
+      );
+      return next;
+    });
+    invalidatePreview();
+  }
+
+  function setQuestionLabel(sourceKey: string, questionLabel: string): void {
+    setFieldDecisionDrafts((current) => {
+      const next = new Map(current);
+      next.set(sourceKey, { action: "custom_question", questionLabel });
+      return next;
+    });
+    invalidatePreview();
+  }
+
+  function ignoreAllFieldCandidates(): void {
+    setFieldDecisionDrafts((current) => {
+      const next = new Map(current);
+      for (const candidate of fieldCandidates) {
+        next.set(candidate.source_key, { action: "ignore" });
+      }
+      return next;
+    });
+    invalidatePreview();
   }
 
   async function submit(mode: "preview" | "apply"): Promise<void> {
     const form = formRef.current;
     if (!form || pending) return;
+    if (mode === "preview" && selectedFiles.length === 0) {
+      setResult({ ok: false, message: "ファイルを1件以上追加してください。" });
+      return;
+    }
+    if (mode === "preview") {
+      for (const candidate of fieldCandidates) {
+        const draft = fieldDecisionDrafts.get(candidate.source_key);
+        if (draft?.action !== "custom_question") continue;
+        const questionLabel = draft.questionLabel.trim();
+        if (!questionLabel || questionLabel.length > 120) {
+          setResult({
+            ok: false,
+            message: `列「${candidate.source_key}」の質問文Qを1〜120文字で入力するか、無視を選んでください。`,
+          });
+          return;
+        }
+      }
+    }
     if (mode === "apply" && !credential) {
       setResult({ ok: false, message: "先にプレビューを実行してください。" });
       return;
@@ -54,25 +188,78 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
     }
 
     setPending(mode);
-    const body = mode === "preview" ? new FormData(form) : new FormData();
-    body.set("mode", mode);
-    if (mode === "apply" && credential) {
-      body.set("preview_token", credential.token);
-      body.set("plan_hash", credential.planHash);
-    }
-
+    const submittedFormRevision = formRevisionRef.current;
     try {
-      const response = await fetch("/api/admin/import/legacy", { method: "POST", body });
-      const json = (await response.json()) as ApiResponse;
-      setResult(json);
       if (mode === "preview") {
+        const body = new FormData(form);
+        body.set("mode", mode);
+        body.set("video_custom_field_decisions", JSON.stringify(fieldDecisions));
+        body.delete("files");
+        for (const file of selectedFiles) body.append("files", file);
+        const response = await fetch("/api/admin/import/legacy", { method: "POST", body });
+        const json = (await response.json()) as ApiResponse;
+        setResult(json);
+        const formUnchanged = formRevisionRef.current === submittedFormRevision;
+        if (formUnchanged && json.video_custom_field_candidates?.length) {
+          setFieldCandidates(json.video_custom_field_candidates);
+          setFieldDecisionDrafts((current) => {
+            const next = new Map<string, VideoCustomFieldDecisionDraft>();
+            for (const candidate of json.video_custom_field_candidates ?? []) {
+              const existing = current.get(candidate.source_key);
+              if (existing) next.set(candidate.source_key, existing);
+            }
+            return next;
+          });
+        }
         setCredential(
-          json.ok && json.preview_token && json.plan_hash && json.expires_at
+          formUnchanged &&
+            json.ok &&
+            json.preview_token &&
+            json.plan_hash &&
+            json.expires_at
             ? { token: json.preview_token, planHash: json.plan_hash, expiresAt: json.expires_at }
             : null,
         );
-      } else if (json.ok || json.requires_repreview) {
-        setCredential(null);
+      } else if (credential) {
+        let stopped = false;
+        for (let step = 0; step < 10000; step += 1) {
+          if (formRevisionRef.current !== submittedFormRevision) {
+            setResult({ ok: false, message: "入力が変更されたため、プレビューをやり直してください。" });
+            stopped = true;
+            break;
+          }
+          const body = new FormData();
+          body.set("mode", "apply");
+          body.set("preview_token", credential.token);
+          body.set("plan_hash", credential.planHash);
+          const response = await fetch("/api/admin/import/legacy", { method: "POST", body });
+          const json = (await response.json()) as ApiResponse;
+          setResult(json);
+          if (json.expires_at) {
+            setCredential((current) => current && current.token === credential.token
+              ? { ...current, expiresAt: json.expires_at! }
+              : current);
+          }
+
+          if (!response.ok || !json.ok) {
+            if (json.requires_repreview) setCredential(null);
+            stopped = true;
+            break;
+          }
+          const resultComplete =
+            typeof json.result === "object" &&
+            json.result !== null &&
+            "complete" in json.result &&
+            (json.result as { complete?: unknown }).complete === true;
+          if (json.continuation_required !== true || resultComplete) {
+            setCredential(null);
+            stopped = true;
+            break;
+          }
+        }
+        if (!stopped) {
+          setResult({ ok: false, message: "インポートの継続回数が上限に達しました。現在の状態から再試行してください。" });
+        }
       }
     } catch {
       setResult({
@@ -92,14 +279,44 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
     <div style={{ display: "grid", gap: 18 }}>
       <form
         ref={formRef}
-        onChange={invalidatePreview}
+        onChange={handleFormChange}
         style={{ display: "grid", gap: 14, padding: 18, border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)", background: "var(--bg-surface)" }}
       >
-        <label style={{ display: "grid", gap: 6 }}>
+        <div style={{ display: "grid", gap: 8 }}>
           <strong>旧形式ファイル</strong>
-          <input name="files" type="file" accept=".json,.csv,.tsv,application/json,text/csv,text/tab-separated-values" multiple required className="fn-input" />
-          <span className="fn-muted fn-text-sm">JSON・CSV・TSV、最大20ファイル、合計12MB、5,000行まで。</span>
-        </label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <input
+              ref={addFilesInputRef}
+              type="file"
+              accept=".json,.csv,.tsv,application/json,text/csv,text/tab-separated-values"
+              multiple
+              className="fn-input"
+              style={{ maxWidth: "100%" }}
+              onChange={(event) => addSelectedFiles(event.currentTarget.files)}
+            />
+          </div>
+          <span className="fn-muted fn-text-sm">
+            イベント用と動画用など、複数ファイルを順番に追加できます。JSON・CSV・TSV、最大20ファイル、合計12MB、5,000行まで。
+          </span>
+          {selectedFiles.length ? (
+            <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 4 }}>
+              {selectedFiles.map((file) => {
+                const key = selectedFileKey(file);
+                return (
+                  <li key={key} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <code>{file.name}</code>
+                    <span className="fn-muted fn-text-sm">({Math.ceil(file.size / 1024).toLocaleString()} KB)</span>
+                    <button type="button" className="fn-btn" onClick={() => removeSelectedFile(key)}>
+                      削除
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="fn-muted fn-text-sm" style={{ margin: 0 }}>追加済みファイルはありません。</p>
+          )}
+        </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
           <label style={{ display: "grid", gap: 6 }}>
@@ -118,16 +335,87 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
           </label>
           <label style={{ display: "grid", gap: 6 }}>
             <strong>既存IDの扱い</strong>
-            <select name="strategy" defaultValue="create_only" className="fn-input">
-              <option value="create_only">既存IDがあれば停止</option>
+            <select name="strategy" defaultValue="skip_existing" className="fn-input">
               <option value="skip_existing">既存IDをスキップ</option>
+              <option value="create_only">既存IDがあれば停止</option>
               <option value="replace_imported">過去の旧形式インポート行だけ置換</option>
             </select>
           </label>
         </div>
 
+        {fieldCandidates.length ? (
+          <section
+            aria-labelledby="legacy-video-custom-fields-title"
+            data-legacy-field-mapping
+            style={{ display: "grid", gap: 12 }}
+          >
+            <div style={{ display: "grid", gap: 4 }}>
+              <strong id="legacy-video-custom-fields-title">作品の追加列（任意）</strong>
+              <span className="fn-muted fn-text-sm">
+                未対応列は既定で無視してプレビューできます。カスタム質問へ保存したい列だけ指定して再プレビューしてください。
+              </span>
+              <button type="button" className="fn-btn" onClick={ignoreAllFieldCandidates}>
+                表示中の列をすべて無視として再プレビュー
+              </button>
+            </div>
+            {fieldCandidates.map((candidate, index) => {
+              const draft = fieldDecisionDrafts.get(candidate.source_key);
+              const fieldId = `legacy-video-custom-field-${index}`;
+              const questionLabel = draft?.action === "custom_question" ? draft.questionLabel : "";
+              return (
+                <fieldset
+                  key={candidate.source_key}
+                  style={{ display: "grid", gap: 8, margin: 0, padding: 12, border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)" }}
+                >
+                  <legend style={{ paddingInline: 4 }}><code>{candidate.source_key}</code></legend>
+                  <span id={`${fieldId}-description`} className="fn-muted fn-text-sm">
+                    値が入っている作品: {candidate.non_empty_rows.toLocaleString()}件
+                  </span>
+                  <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }} aria-describedby={`${fieldId}-description`}>
+                    <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <input
+                        type="radio"
+                        name={`${fieldId}-action`}
+                        value="custom_question"
+                        checked={draft?.action === "custom_question"}
+                        onChange={() => setFieldAction(candidate.source_key, "custom_question")}
+                      />
+                      カスタム質問にする
+                    </label>
+                    <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <input
+                        type="radio"
+                        name={`${fieldId}-action`}
+                        value="ignore"
+                        checked={draft?.action === "ignore"}
+                        onChange={() => setFieldAction(candidate.source_key, "ignore")}
+                      />
+                      無視する
+                    </label>
+                  </div>
+                  {draft?.action === "custom_question" ? (
+                    <label htmlFor={`${fieldId}-question-label`} style={{ display: "grid", gap: 6 }}>
+                      <strong>質問文Q</strong>
+                      <input
+                        id={`${fieldId}-question-label`}
+                        type="text"
+                        value={questionLabel}
+                        maxLength={120}
+                        aria-invalid={!questionLabel.trim()}
+                        className="fn-input"
+                        onChange={(event) => setQuestionLabel(candidate.source_key, event.currentTarget.value)}
+                      />
+                      <span className="fn-muted fn-text-sm">{questionLabel.length}/120文字</span>
+                    </label>
+                  ) : null}
+                </fieldset>
+              );
+            })}
+          </section>
+        ) : null}
+
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <button type="button" className="fn-btn fn-btn-primary" disabled={!!pending} onClick={() => void submit("preview")}>
+          <button type="button" className="fn-btn fn-btn-primary" disabled={!!pending || selectedFiles.length === 0} onClick={() => void submit("preview")}>
             {pending === "preview" ? "解析・保存中…" : "プレビュー"}
           </button>
           <button type="button" className="fn-btn fn-btn-danger" disabled={!!pending || !credential} onClick={() => void submit("apply")}>
@@ -147,11 +435,24 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
 }
 
 function ImportResult({ result }: { result: ApiResponse }): React.ReactElement {
+  const heading = result.ok
+    ? result.mode === "apply"
+      ? result.continuation_required
+        ? "インポート処理中"
+        : "インポート完了"
+      : "プレビュー結果"
+    : "確認が必要です";
   return (
     <section aria-live="polite" style={{ display: "grid", gap: 12, padding: 18, border: `1px solid ${result.ok ? "var(--border-subtle)" : "var(--danger)"}`, borderRadius: "var(--radius-md)", background: "var(--bg-surface)" }}>
-      <h2 style={{ fontSize: 16, fontWeight: 700 }}>{result.ok ? (result.mode === "apply" ? "インポート完了" : "プレビュー結果") : "確認が必要です"}</h2>
+      <h2 style={{ fontSize: 16, fontWeight: 700 }}>{heading}</h2>
       {result.message ? <p>{result.message}</p> : null}
       {result.plan_hash ? <p className="fn-muted fn-text-sm">plan hash: <code>{result.plan_hash}</code></p> : null}
+      {result.progress ? (
+        <p className="fn-muted fn-text-sm">
+          進捗: {result.progress.completed.toLocaleString()} / {result.progress.total.toLocaleString()}
+          （{result.progress.stage}:{result.progress.index}）
+        </p>
+      ) : null}
       {result.summary ? (
         <dl style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
           {Object.entries(result.summary).map(([key, value]) => (

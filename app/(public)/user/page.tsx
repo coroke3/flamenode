@@ -13,6 +13,7 @@ import {
   excludePvsfSummaryVideos,
   PVSF_SUMMARY_EVENT_ID,
 } from "@/lib/db/queries";
+import { publicListableXApprovalWhere } from "@/lib/utils/publicXUserWhere";
 
 export const metadata: Metadata = {
   title: "クリエイターを見つける",
@@ -39,12 +40,7 @@ export default async function UserListPage({
   const creators =
     (await withDatabase(async (db) => {
       const keyword = q.trim();
-      const filters = [
-        or(
-          eq(xUsers.approval_status, "approved"),
-          eq(xUsers.approval_status, "pending"),
-        )!,
-      ];
+      const filters = [publicListableXApprovalWhere()];
       if (keyword) {
         const term = `%${keyword.replace(/[%_]/g, (m) => `\\${m}`)}%`;
         filters.push(or(like(xUsers.x_name, term), like(xUsers.id, term))!);

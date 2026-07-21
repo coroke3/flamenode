@@ -38,6 +38,14 @@ if (!runningWithTsx) {
     after: { title: `after-${index}` },
   });
 
+  const makeMutation = () => ({
+    kind: "mutation",
+    _prepare: () => ({
+      getQuery: () => ({ sql: "mutation", params: [] }),
+      stmt: { bind: () => ({}) },
+    }),
+  });
+
   const makeDb = ({ failOnAuditAssertion = false, failOnMutationAssertion = false, failGetAt = 0 } = {}) => {
     const state = { committed: false, batches: [], gets: 0 };
     const get = async () => {
@@ -51,7 +59,35 @@ if (!runningWithTsx) {
     };
     const db = {
       select: () => ({ from: () => selectChain }),
-      run: (query) => ({ kind: "query", query }),
+      run: (query) => {
+        const sequel =
+          typeof query === "string"
+            ? { sql: query, params: [] }
+            : typeof query?.getSQL === "function"
+              ? (() => {
+                  const sqlQuery = query.getSQL();
+                  return {
+                    sql: String(sqlQuery),
+                    params: sqlQuery.shouldInlineParams
+                      ? []
+                      : Array.isArray(sqlQuery.params)
+                        ? [...sqlQuery.params]
+                        : [],
+                  };
+                })()
+              : { sql: String(query), params: [] };
+        return {
+          kind: "query",
+          query,
+          config: { action: "run" },
+          getSQL: () => query,
+          getQuery: () => sequel,
+          _prepare: () => ({
+            getQuery: () => sequel,
+            stmt: { bind: () => ({}) },
+          }),
+        };
+      },
       batch: async (items) => {
         state.batches.push(items);
         if (failOnMutationAssertion && items[1]) {
@@ -71,7 +107,7 @@ if (!runningWithTsx) {
     assert.equal(AUDIT_INSERT_CHUNK_SIZE, 4);
     const { db, state } = makeDb();
     const ids = await mutateWithAudit(db, {
-      mutationStatements: [{ kind: "mutation" }],
+      mutationStatements: [makeMutation()],
       expectedMutationChanges: 1,
       audits: Array.from({ length: 5 }, (_, index) => makeAudit(index)),
     });
@@ -84,7 +120,7 @@ if (!runningWithTsx) {
   test("D1 batchへ渡すraw SQLはbind依存を避けるためinline化する", async () => {
     const { db, state } = makeDb();
     await mutateWithAudit(db, {
-      mutationStatements: [{ kind: "mutation" }],
+      mutationStatements: [makeMutation()],
       expectedMutationChanges: 1,
       audits: [makeAudit(0)],
     });
@@ -92,6 +128,62 @@ if (!runningWithTsx) {
     assert.equal(mutationAssertion.query.shouldInlineParams, true);
     assert.equal(auditInsert.query.shouldInlineParams, true);
     assert.equal(auditAssertion.query.shouldInlineParams, true);
+  });
+
+  test("builder は db.run せずそのまま batch へ渡す", async () => {
+    const { db, state } = makeDb();
+    let prepareCalled = false;
+    const builder = {
+      config: { table: "videos" },
+      getSQL: () => sql`UPDATE videos SET title = 'after-0' WHERE id = 'video-0'`.inlineParams(),
+      _prepare: () => {
+        prepareCalled = true;
+        return {
+          getQuery: () => ({ sql: "builder", params: [] }),
+          stmt: { bind: () => ({}) },
+        };
+      },
+    };
+    await mutateWithAudit(db, {
+      mutationStatements: [builder],
+      expectedMutationChanges: 1,
+      audits: [makeAudit(0)],
+    });
+    assert.equal(prepareCalled, false);
+    assert.equal(state.batches[0][0], builder);
+  });
+
+  test("bind パラメータ付き db.run は batch 前に inline 化する", async () => {
+    const { db, state } = makeDb();
+    const parametric = {
+      config: { action: "run" },
+      getSQL: () => sql`SELECT ${"bound-value"} AS value`,
+      getQuery: () => ({ sql: "select ?", params: ["bound-value"] }),
+      _prepare: () => ({
+        getQuery: () => ({ sql: "select ?", params: ["bound-value"] }),
+        stmt: { bind: () => ({}) },
+      }),
+    };
+    await mutateWithAudit(db, {
+      mutationStatements: [parametric],
+      expectedMutationChanges: [null],
+      audits: [makeAudit(0)],
+    });
+    assert.equal(state.batches[0][0]?.getQuery().params.length, 0);
+  });
+
+  test("getSQL だけ持つ statement は db.run で batch 可能な RunnableQuery に正規化する", async () => {
+    const { db, state } = makeDb();
+    const sqlOnly = {
+      getSQL: () => sql`UPDATE videos SET title = 'after-0' WHERE id = 'video-0'`.inlineParams(),
+    };
+    await mutateWithAudit(db, {
+      mutationStatements: [sqlOnly],
+      expectedMutationChanges: 1,
+      audits: [makeAudit(0)],
+    });
+    assert.equal(state.batches.length, 1);
+    assert.equal(state.batches[0][0]?.kind, "query");
   });
 
   test("Drizzle D1のraw batchでinline済みSQLをprepareできる", async () => {
@@ -125,7 +217,7 @@ if (!runningWithTsx) {
       actor_user_id: `actor-${index}`,
     }));
     await mutateWithAudit(db, {
-      mutationStatements: [{ kind: "mutation" }],
+      mutationStatements: [makeMutation()],
       expectedMutationChanges: 1,
       audits,
     });
@@ -140,7 +232,7 @@ if (!runningWithTsx) {
     }));
     await assert.rejects(
       mutateWithAudit(db, {
-        mutationStatements: [{ kind: "mutation" }],
+        mutationStatements: [makeMutation()],
         expectedMutationChanges: 1,
         audits,
       }),
@@ -154,7 +246,7 @@ if (!runningWithTsx) {
     const { db, state } = makeDb();
     await assert.rejects(
       mutateWithAudit(db, {
-        mutationStatements: [{ kind: "mutation" }],
+        mutationStatements: [makeMutation()],
         expectedMutationChanges: 1,
         audits: Array.from({ length: 100 }, (_, index) => makeAudit(index)),
       }),
@@ -167,7 +259,7 @@ if (!runningWithTsx) {
     const { db, state } = makeDb();
     await assert.rejects(
       mutateWithAudit(db, {
-        mutationStatements: [{ kind: "mutation" }],
+        mutationStatements: [makeMutation()],
         expectedMutationChanges: 1,
         audits: Array.from({ length: D1_MAX_BATCH_QUERIES * 4 }, (_, index) => makeAudit(index)),
       }),
@@ -180,7 +272,7 @@ if (!runningWithTsx) {
     const { db, state } = makeDb({ failOnAuditAssertion: true });
     await assert.rejects(
       mutateWithAudit(db, {
-        mutationStatements: [{ kind: "mutation" }],
+        mutationStatements: [makeMutation()],
         expectedMutationChanges: 1,
         audits: Array.from({ length: 5 }, (_, index) => makeAudit(index)),
       }),
@@ -195,7 +287,7 @@ if (!runningWithTsx) {
       const { db, state } = makeDb({ failGetAt });
       await assert.rejects(
         mutateWithAudit(db, {
-          mutationStatements: [{ kind: "mutation" }],
+          mutationStatements: [makeMutation()],
           expectedMutationChanges: 1,
           audits: [makeAudit(0)],
         }),

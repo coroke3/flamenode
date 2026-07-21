@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import styles from "./HomeIntroBand.module.css";
 import { Icon } from "@/components/ui/Icon";
-import { computeEventStatus, isAcceptingEntries } from "@/lib/utils/eventStatus";
+import { computeEventStatus, isAcceptingEntries, isPointEvent } from "@/lib/utils/eventStatus";
 import { compareEventsByUpcomingPriority } from "@/lib/utils/eventOrdering";
 import { EventRecruitCard, type RecruitEvent } from "./EventRecruitCard";
 
@@ -14,6 +14,7 @@ export interface HomeIntroSlotStat {
 const MAX_RECRUIT_CARDS = 3;
 
 export function isHeroCandidate(event: EventRow, now: number): boolean {
+  if (isPointEvent(event)) return false;
   const status = computeEventStatus(event, now);
   return status !== "private" && status !== "ended";
 }

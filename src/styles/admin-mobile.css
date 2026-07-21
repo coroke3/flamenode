@@ -1,10 +1,16 @@
 /* 管理・運営画面のスマホ最適化（admin-manage.css の後段で適用） */
 
 @media (max-width: 760px) {
+  [data-admin-shell],
+  [data-manage-shell] {
+    --fn-console-gutter-inline-start: max(12px, env(safe-area-inset-left));
+    --fn-console-gutter-inline-end: max(12px, env(safe-area-inset-right));
+  }
+
   [data-admin-shell] .admin-frame,
   [data-manage-shell] .manage-shell {
-    padding-left: max(12px, env(safe-area-inset-left));
-    padding-right: max(12px, env(safe-area-inset-right));
+    padding-left: var(--fn-console-gutter-inline-start);
+    padding-right: var(--fn-console-gutter-inline-end);
   }
 
   [data-manage-shell] .manage-shell {
@@ -342,10 +348,16 @@
 }
 
 @media (max-width: 430px) {
+  [data-admin-shell],
+  [data-manage-shell] {
+    --fn-console-gutter-inline-start: max(10px, env(safe-area-inset-left));
+    --fn-console-gutter-inline-end: max(10px, env(safe-area-inset-right));
+  }
+
   [data-admin-shell] .admin-frame,
   [data-manage-shell] .manage-shell {
-    padding-left: max(10px, env(safe-area-inset-left));
-    padding-right: max(10px, env(safe-area-inset-right));
+    padding-left: var(--fn-console-gutter-inline-start);
+    padding-right: var(--fn-console-gutter-inline-end);
   }
 
   .fn-console-trigger-copy strong,

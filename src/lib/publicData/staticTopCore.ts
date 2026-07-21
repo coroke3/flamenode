@@ -11,6 +11,7 @@ import {
   normalizePresentString as normalizeString,
 } from "./normalize.ts";
 import { normalizePublicEventVisibility } from "./visibility.ts";
+import { isPointEvent } from "../utils/eventStatusCore.ts";
 
 export interface StaticTopPayload {
   generated_at?: unknown;
@@ -126,7 +127,10 @@ function normalizeVideo(value: unknown): VideoCardData | null {
 
 function normalizeEventList(value: unknown): StaticTopEvent[] {
   return Array.isArray(value)
-    ? value.map(normalizeEvent).filter((row): row is StaticTopEvent => row !== null)
+    ? value
+        .map(normalizeEvent)
+        .filter((row): row is StaticTopEvent => row !== null)
+        .filter((row) => !isPointEvent(row))
     : [];
 }
 

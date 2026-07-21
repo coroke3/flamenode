@@ -1,7 +1,10 @@
 import { eq, and, desc, asc, inArray } from "drizzle-orm";
 import { eventGroups, eventGroupEvents, events } from "@/lib/db/schema";
 import type { DB } from "@/lib/db/client";
-import { publicListableEventWhere } from "@/lib/utils/eventStatus";
+import {
+  boundedOrOpenEndedEventPeriodWhere,
+  publicListableEventWhere,
+} from "@/lib/utils/eventStatus";
 
 type EventRow = typeof events.$inferSelect;
 
@@ -47,6 +50,7 @@ async function fetchPublicEventsByGroupIds(
       and(
         inArray(eventGroupEvents.event_group_id, [...groupIds]),
         publicListableEventWhere(),
+        boundedOrOpenEndedEventPeriodWhere(),
       ),
     )
     .orderBy(desc(events.start_time), desc(events.created_at));

@@ -1,4 +1,5 @@
 import { normalizePublicEventVisibility } from "./visibility.ts";
+import { isPointEvent } from "../utils/eventStatusCore.ts";
 
 export interface StaticEventsIndexPayload {
   generated_at?: unknown;
@@ -50,7 +51,8 @@ export function normalizeStaticEventsIndex(
   if (!Array.isArray(payload.items)) return null;
   const events = payload.items
     .map(normalizeEvent)
-    .filter((event): event is StaticEventIndexEvent => event !== null);
+    .filter((event): event is StaticEventIndexEvent => event !== null)
+    .filter((event) => !isPointEvent(event));
   const groupSections = Array.isArray(payload.group_sections)
     ? payload.group_sections
         .map(normalizeGroupSection)
@@ -74,6 +76,7 @@ function normalizeGroupSection(value: unknown): StaticEventGroupSection | null {
     ? row.events
         .map(normalizeEvent)
         .filter((event): event is StaticEventIndexEvent => event !== null)
+        .filter((event) => !isPointEvent(event))
     : [];
   return {
     id,

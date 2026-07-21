@@ -22,11 +22,21 @@
 }
 
 [data-fn-surface="admin"] .fn-header-inner,
-[data-fn-surface="manage"] .fn-header-inner,
-[data-fn-surface="personal"] .fn-header-inner {
-  display: grid;
-  grid-template-columns: max-content 1fr max-content;
+[data-fn-surface="manage"] .fn-header-inner {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-width: 0;
+  min-height: var(--header-h, 64px);
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+[data-fn-surface="personal"] .fn-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 24px;
   min-height: var(--header-h, 64px);
   padding-top: 10px;
@@ -34,11 +44,22 @@
 }
 
 [data-fn-surface="admin"] .fn-header-right,
-[data-fn-surface="manage"] .fn-header-right,
+[data-fn-surface="manage"] .fn-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
 [data-fn-surface="personal"] .fn-header-right {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-left: auto;
+  min-width: 0;
+  flex-shrink: 0;
 }
 
 [data-fn-surface="admin"] .fn-footer,
@@ -110,11 +131,24 @@
   [data-fn-surface="admin"] .fn-header-inner,
   [data-fn-surface="manage"] .fn-header-inner,
   [data-fn-surface="personal"] .fn-header-inner {
-    grid-template-columns: 1fr max-content;
+    gap: 12px;
   }
 }
 
 @media (max-width: 760px) {
+  [data-fn-surface="admin"] .fn-header-inner,
+  [data-fn-surface="manage"] .fn-header-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  [data-fn-surface="admin"] .fn-header-right,
+  [data-fn-surface="manage"] .fn-header-right {
+    margin-left: auto;
+  }
+
   [data-fn-surface="admin"] .fn-footer-top,
   [data-fn-surface="manage"] .fn-footer-top,
   [data-fn-surface="personal"] .fn-footer-top {
@@ -697,6 +731,12 @@
   letter-spacing: 0.08em;
 }
 
+[data-admin-shell],
+[data-manage-shell] {
+  --fn-console-gutter-inline-start: var(--fn-page-gutter-inline-start);
+  --fn-console-gutter-inline-end: var(--fn-page-gutter-inline-end);
+}
+
 [data-admin-shell] {
   --admin-bg: #0a0b0d;
   --admin-surface: #12141a;
@@ -721,8 +761,8 @@
   max-width: var(--fn-page-max, 1360px);
   margin-left: auto;
   margin-right: auto;
-  padding-left: var(--fn-page-gutter-inline-start);
-  padding-right: var(--fn-page-gutter-inline-end);
+  padding-left: var(--fn-console-gutter-inline-start);
+  padding-right: var(--fn-console-gutter-inline-end);
 }
 
 [data-admin-shell] .admin-sidebar {
@@ -772,6 +812,11 @@
 [data-admin-shell] .admin-main {
   padding: 22px 28px 52px;
   min-width: 0;
+}
+
+[data-admin-shell] .admin-main code {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 [data-admin-shell] .admin-mode-banner {
@@ -827,11 +872,20 @@
   margin-right: auto;
   padding-top: 16px;
   padding-bottom: 64px;
-  padding-left: var(--fn-page-gutter-inline-start);
-  padding-right: var(--fn-page-gutter-inline-end);
+  padding-left: var(--fn-console-gutter-inline-start);
+  padding-right: var(--fn-console-gutter-inline-end);
   display: flex;
   gap: 20px;
   align-items: flex-start;
+}
+
+[data-admin-shell] .fn-header .fn-public-container,
+[data-admin-shell] .fn-footer .fn-public-container,
+[data-manage-shell] .fn-header .fn-public-container,
+[data-manage-shell] .fn-footer .fn-public-container,
+[data-manage-shell] > [role="status"] .fn-public-container {
+  padding-left: var(--fn-console-gutter-inline-start);
+  padding-right: var(--fn-console-gutter-inline-end);
 }
 
 [data-manage-shell] .manage-main {

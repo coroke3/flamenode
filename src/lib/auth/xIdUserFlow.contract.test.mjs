@@ -19,6 +19,7 @@ test("X ID連携は初回・追加で同じ小文字化フローを使い、統�
   assert.match(component, /export function XIdMergeForm/);
   assert.match(settings, /<XIdMergeForm linkedXIds=\{mergeCandidates\}/);
   assert.match(settings, /eq\(linkReqTable\.requested_by_auth_user_id, user\.id\)/);
+  assert.match(settings, /ne\(linkReqTable\.status, "approved"\)/);
   assert.match(settings, /<XIdentityRequestHistoryList rows=\{requestHistory\}/);
   assert.match(settings, /isOnboarding && requestHistory\.length > 0/);
   assert.match(settings, /申請履歴/);

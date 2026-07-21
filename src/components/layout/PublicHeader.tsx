@@ -19,9 +19,9 @@ const PUBLIC_NAV_ITEMS: {
   label: string;
   iconName: IconName;
 }[] = [
-  { href: "/list", label: "作品", iconName: "grid" },
-  { href: "/event", label: "イベント", iconName: "calendar" },
+  { href: "/list", label: "動画", iconName: "grid" },
   { href: "/user", label: "クリエイター", iconName: "users" },
+  { href: "/event", label: "イベント", iconName: "calendar" },
 ];
 
 function isPathActive(pathname: string | null, href: string): boolean {
@@ -99,6 +99,27 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
         >
           <Logo />
         </Link>
+
+        <nav
+          className={`fn-nav ${styles.desktopNav}`}
+          aria-label="メインナビゲーション"
+        >
+          {PUBLIC_NAV_ITEMS.map((item) => {
+            const active = isPathActive(pathname, item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`fn-nav-item fn-nav-ja ${styles.desktopNavLink} ${
+                  active ? `is-active ${styles.desktopNavLinkActive}` : ""
+                }`}
+                aria-current={active ? "page" : undefined}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
 
         <div className={`fn-header-right ${styles.right}`}>
           <div className={`${styles.themeButton}`}>

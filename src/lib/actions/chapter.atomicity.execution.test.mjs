@@ -24,7 +24,29 @@ if (!runningWithTsx) {
 } else {
   const { mutateWithAudit } = await import("@/lib/audit/mutate.ts");
 
-  const mutation = (label, apply) => ({ label, apply });
+  const makePrepare = () => ({
+    getQuery: () => ({ sql: "mutation", params: [] }),
+    stmt: { bind: () => ({}) },
+  });
+
+  const mutation = (label, apply) => ({
+    label,
+    apply,
+    _prepare: makePrepare,
+  });
+
+  const mockRunnableFromRun = (query) => {
+    const sequel = { sql: String(query), params: [] };
+    return {
+      kind: "generated",
+      query,
+      getQuery: () => sequel,
+      _prepare: () => ({
+        getQuery: () => sequel,
+        stmt: { bind: () => ({}) },
+      }),
+    };
+  };
 
   const scenarios = {
     create: {
@@ -113,7 +135,7 @@ if (!runningWithTsx) {
           return query;
         },
       }),
-      run: (query) => ({ kind: "generated", query }),
+      run: (query) => mockRunnableFromRun(query),
       batch: async (items) => {
         sqlite.exec("BEGIN IMMEDIATE");
         try {

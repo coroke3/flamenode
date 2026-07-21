@@ -15,6 +15,7 @@ if (runTestWithTsx(import.meta.url)) {
       "utf8",
     );
     sqlite.exec(baseline);
+    sqlite.exec("PRAGMA ignore_check_constraints = ON");
     sqlite.exec(`
       INSERT INTO "user" (id) VALUES ('submitter');
       INSERT INTO events (id, title, visibility_status) VALUES
@@ -22,7 +23,9 @@ if (runTestWithTsx(import.meta.url)) {
         ('event-private', 'Private event', 'private');
       INSERT INTO x_users (id, x_name, approval_status) VALUES
         ('alice', 'Alice', 'approved'),
-        ('pending-user', 'Pending', 'pending');
+        ('pending-user', 'Pending', 'pending'),
+        ('imported-user', 'Imported', 'imported'),
+        ('rejected-user', 'Rejected', 'rejected');
       INSERT INTO videos (
         id, submitted_by_user_id, creator_display_name, title,
         youtube_video_id, visibility_status
@@ -102,7 +105,7 @@ if (runTestWithTsx(import.meta.url)) {
     harness.sqlite.close();
   });
 
-  test("X IDは小文字正本で承認済みだけを照合する", async () => {
+  test("X IDは小文字正本で公開一覧対象の承認状態だけを照合する", async () => {
     const harness = createHarness();
     assert.equal(
       await publicStaticTargetExists(harness.db, "user", "ALICE"),
@@ -110,6 +113,14 @@ if (runTestWithTsx(import.meta.url)) {
     );
     assert.equal(
       await publicStaticTargetExists(harness.db, "user", "pending-user"),
+      true,
+    );
+    assert.equal(
+      await publicStaticTargetExists(harness.db, "user", "imported-user"),
+      true,
+    );
+    assert.equal(
+      await publicStaticTargetExists(harness.db, "user", "rejected-user"),
       false,
     );
     assert.equal(

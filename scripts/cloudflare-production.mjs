@@ -206,6 +206,7 @@ export function verifyProductionEnvironment({
   cwd = process.cwd(),
   exec = execFileSync,
   requireGitHead = true,
+  runtimeNodeVersion = process.versions.node,
 } = {}) {
   const errors = [];
   if (value(env, "FLAMENODE_LOCAL_PREVIEW")) {
@@ -217,7 +218,7 @@ export function verifyProductionEnvironment({
   if (value(env, "SKIP_DEPENDENCY_INSTALL") !== "true") {
     errors.push("SKIP_DEPENDENCY_INSTALL must be exactly true for Workers Builds");
   }
-  const nodeMajor = Number.parseInt(process.versions.node.split(".")[0] ?? "", 10);
+  const nodeMajor = Number.parseInt(String(runtimeNodeVersion).split(".")[0] ?? "", 10);
   if (nodeMajor !== 22) {
     errors.push("Node.js runtime must be major version 22 for Workers Builds");
   }

@@ -66,11 +66,22 @@ export function youtubeWatchUrl(id: string): string {
 }
 
 /** YouTube iframe 埋め込み URL。 */
-export function youtubeEmbedUrl(id: string, opts: { autoplay?: boolean; start?: number; mute?: boolean } = {}): string {
+export function youtubeEmbedUrl(
+  id: string,
+  opts: {
+    autoplay?: boolean;
+    start?: number;
+    mute?: boolean;
+    enableJsApi?: boolean;
+    origin?: string;
+  } = {},
+): string {
   const params = new URLSearchParams();
   params.set("rel", "0");
   params.set("modestbranding", "1");
   params.set("playsinline", "1");
+  if (opts.enableJsApi) params.set("enablejsapi", "1");
+  if (opts.origin) params.set("origin", opts.origin);
   if (opts.autoplay) params.set("autoplay", "1");
   if (opts.mute) params.set("mute", "1");
   if (opts.start && opts.start > 0) params.set("start", String(Math.floor(opts.start)));

@@ -287,7 +287,7 @@ export async function approveXIdLinkRequest(formData: FormData): Promise<XIdAdmi
   });
   if (notification) {
     statements.push(notification);
-    expected.push(1);
+    expected.push(null);
   }
 
   await mutateWithAudit(db, {
@@ -339,7 +339,7 @@ export async function rejectXIdLinkRequest(formData: FormData): Promise<XIdAdmin
   const expected: Array<number | null> = [1];
   if (notification) {
     statements.push(notification);
-    expected.push(1);
+    expected.push(null);
   }
   await mutateWithAudit(db, {
     mutationStatements: statements,

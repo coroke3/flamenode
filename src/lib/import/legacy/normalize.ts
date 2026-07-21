@@ -3,6 +3,26 @@ import type { LegacyParsedFile } from "./parse";
 export type LegacyImportStrategy = "create_only" | "skip_existing" | "replace_imported";
 export type CanonicalVisibility = "private" | "public";
 
+export const MAX_LEGACY_VIDEO_FIELD_DECISIONS = 50;
+export const MAX_LEGACY_CUSTOM_QUESTION_MAPPINGS = 18;
+export const MAX_LEGACY_CUSTOM_ANSWERS_PER_VIDEO = 4;
+
+export type LegacyVideoFieldDecision =
+  | {
+      source_key: string;
+      action: "custom_question";
+      question_label: string;
+    }
+  | {
+      source_key: string;
+      action: "ignore";
+    };
+
+export type LegacyUnmappedVideoField = {
+  source_key: string;
+  non_empty_rows: number;
+};
+
 export type CanonicalLegacyPlan = {
   events: Array<{
     id: string;
@@ -74,6 +94,32 @@ export type CanonicalLegacyPlan = {
     visibility: "public";
   }>;
   videoSoftwares: Array<{ video_id: string; label: string }>;
+  eventCustomQuestions: Array<{
+    id: string;
+    event_id: string;
+    source_key: string;
+    question_key: string;
+    label: string;
+    description: string;
+    type: "textarea";
+    required: 0;
+    options_json: null;
+    placeholder: null;
+    max_length: 1000;
+    sort_order: number;
+    is_active: 1;
+    visibility: "review";
+  }>;
+  videoCustomAnswers: Array<{
+    video_id: string;
+    event_id: string;
+    question_id: string;
+    question_key: string;
+    answer_text: string;
+    answer_json: null;
+  }>;
+  videoFieldDecisions: LegacyVideoFieldDecision[];
+  unmappedVideoFields: LegacyUnmappedVideoField[];
   warnings: string[];
   errors: string[];
 };
@@ -81,17 +127,67 @@ export type CanonicalLegacyPlan = {
 type NormalizeOptions = {
   eventVisibility: CanonicalVisibility;
   videoVisibility: CanonicalVisibility;
+  videoFieldDecisions?: readonly LegacyVideoFieldDecision[];
   now?: number;
 };
 
-function stringValue(row: Record<string, unknown>, key: string): string | null {
-  const raw = row[key];
+const MAX_CUSTOM_QUESTION_LABEL_LENGTH = 120;
+const MAX_CUSTOM_ANSWER_LENGTH = 1000;
+
+const CANONICAL_VIDEO_SOURCE_KEYS = new Set([
+  "aftercomment",
+  "beforecomment",
+  "comment",
+  "creator",
+  "credit",
+  "data",
+  "eventid",
+  "hitokoto",
+  "icon",
+  "member",
+  "memberchapter",
+  "memberid",
+  "movieyear",
+  "music",
+  "othersns",
+  "righttype",
+  "soft",
+  "starts",
+  "time",
+  "timestamp",
+  "title",
+  "tlink",
+  "toudan",
+  "type",
+  "type2",
+  "ychlink",
+  "ycomment",
+  "ylink",
+  "ymulink",
+  "yomi",
+]);
+
+function textValue(raw: unknown): string | null {
   if (raw == null) return null;
-  const value = String(raw)
+  let value: string;
+  if (typeof raw === "object") {
+    try {
+      value = JSON.stringify(raw);
+    } catch {
+      return null;
+    }
+  } else {
+    value = String(raw);
+  }
+  const normalized = value
     .replace(/\r\n?/g, "\n")
     .replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, "")
     .trim();
-  return value || null;
+  return normalized || null;
+}
+
+function stringValue(row: Record<string, unknown>, key: string): string | null {
+  return textValue(row[key]);
 }
 
 function normalizeXId(raw: string | null): string | null {
@@ -122,7 +218,8 @@ function normalizeIconUrl(raw: string | null): string | null {
 function splitList(raw: unknown): string[] {
   if (Array.isArray(raw)) return raw.map(String).map((value) => value.trim());
   if (raw == null) return [];
-  return String(raw).split(/[,、\n]/).map((value) => value.trim());
+  const values = String(raw).split(/[,，、\n]/).map((value) => value.trim());
+  return values.length === 1 && values[0] === "" ? [] : values;
 }
 
 function toUnixSec(raw: unknown): number | null {
@@ -186,6 +283,81 @@ function stableId(prefix: string, seed: string): string {
   return `${prefix}_${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
 
+/** 旧形式インポート由来の Discord 未連携 X 名義へ割り当てる認証ユーザー ID。 */
+export function legacyImportAuthUserId(xUserId: string): string {
+  return stableId("usr_imp", xUserId);
+}
+
+function legacyQuestionKey(sourceKey: string): string {
+  return stableId("legacy_import", sourceKey);
+}
+
+function decisionMaps(
+  decisions: readonly LegacyVideoFieldDecision[],
+  errors: string[],
+): {
+  customQuestions: Map<string, { label: string; sortOrder: number }>;
+  ignored: Set<string>;
+} {
+  const customQuestions = new Map<string, { label: string; sortOrder: number }>();
+  const ignored = new Set<string>();
+  const seen = new Set<string>();
+  const labels = new Set<string>();
+
+  if (decisions.length > MAX_LEGACY_VIDEO_FIELD_DECISIONS) {
+    errors.push(`動画の未対応項目の指定は最大${MAX_LEGACY_VIDEO_FIELD_DECISIONS}件です。`);
+  }
+
+  for (const decision of decisions.slice(0, MAX_LEGACY_VIDEO_FIELD_DECISIONS)) {
+    const sourceKey = decision.source_key;
+    if (
+      !sourceKey ||
+      sourceKey !== sourceKey.trim() ||
+      sourceKey.length > 120 ||
+      /[\u0000-\u001F\u007F]/.test(sourceKey)
+    ) {
+      errors.push("動画の未対応項目名は1〜120文字で指定してください。");
+      continue;
+    }
+    if (CANONICAL_VIDEO_SOURCE_KEYS.has(sourceKey)) {
+      errors.push(`動画項目「${sourceKey}」は正規カラムへ変換されるため、カスタム質問へ割り当てられません。`);
+      continue;
+    }
+    if (seen.has(sourceKey)) {
+      errors.push(`動画項目「${sourceKey}」の指定が重複しています。`);
+      continue;
+    }
+    seen.add(sourceKey);
+
+    if (decision.action === "ignore") {
+      ignored.add(sourceKey);
+      continue;
+    }
+
+    const label = decision.question_label.trim();
+    if (!label || label.length > MAX_CUSTOM_QUESTION_LABEL_LENGTH) {
+      errors.push(
+        `動画項目「${sourceKey}」の質問文Qは1〜${MAX_CUSTOM_QUESTION_LABEL_LENGTH}文字で指定してください。`,
+      );
+      continue;
+    }
+    if (labels.has(label)) {
+      errors.push(`カスタム質問の質問文Q「${label}」が重複しています。`);
+      continue;
+    }
+    labels.add(label);
+    customQuestions.set(sourceKey, {
+      label,
+      sortOrder: customQuestions.size,
+    });
+  }
+
+  if (customQuestions.size > MAX_LEGACY_CUSTOM_QUESTION_MAPPINGS) {
+    errors.push(`カスタム質問へ割り当てられる動画項目は最大${MAX_LEGACY_CUSTOM_QUESTION_MAPPINGS}件です。`);
+  }
+  return { customQuestions, ignored };
+}
+
 function eventType(raw: string | null): "event" | "collabo" | "type" | "other" {
   const value = (raw ?? "").toLowerCase();
   if (value === "collabo" || value === "collab" || value === "collaboration") return "collabo";
@@ -202,6 +374,7 @@ function isVideoRow(row: Record<string, unknown>): boolean {
 
 function memberStarts(raw: unknown): Array<number | null> {
   return splitList(raw).map((value) => {
+    if (!value) return null;
     const match = value.match(/^(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)$/);
     if (match) return Number(match[1] ?? 0) * 3600 + Number(match[2]) * 60 + Number(match[3]);
     const number = Number(value);
@@ -222,8 +395,21 @@ export function normalizeLegacyFiles(
   const members = new Map<string, CanonicalLegacyPlan["videoMembers"][number]>();
   const chapters = new Map<string, CanonicalLegacyPlan["videoChapters"][number]>();
   const softwares = new Map<string, CanonicalLegacyPlan["videoSoftwares"][number]>();
+  const eventCustomQuestions = new Map<
+    string,
+    CanonicalLegacyPlan["eventCustomQuestions"][number]
+  >();
+  const videoCustomAnswers = new Map<
+    string,
+    CanonicalLegacyPlan["videoCustomAnswers"][number]
+  >();
+  const autoIgnoredFieldCounts = new Map<string, number>();
+  const seenCustomSourceKeys = new Set<string>();
+  const seenDecisionSourceKeys = new Set<string>();
+  const ignoredFieldCounts = new Map<string, number>();
   const warnings: string[] = [];
   const errors: string[] = [];
+  const fieldDecisions = decisionMaps(options.videoFieldDecisions ?? [], errors);
 
   const putXUser = (id: string, name: string, extra: Partial<CanonicalLegacyPlan["xUsers"][number]> = {}) => {
     const current = xUsers.get(id);
@@ -261,6 +447,11 @@ export function normalizeLegacyFiles(
         const names = splitList(row.member);
         const ids = splitList(row.memberid);
         const roles = splitList(row.memberpost ?? row.menberpost);
+        if (new Set([names.length, ids.length, roles.length]).size > 1) {
+          warnings.push(
+            `${source}: member/memberid/memberpost の件数が一致しないため、同じ位置にある値だけを対応付けます。`,
+          );
+        }
         const count = Math.max(names.length, ids.length, roles.length);
         let ownerAssigned = false;
         for (let index = 0; index < count; index += 1) {
@@ -314,7 +505,6 @@ export function normalizeLegacyFiles(
 
       const memberNames = splitList(row.member);
       const memberIds = splitList(row.memberid);
-      const starts = memberStarts(row.starts);
       const memberCount = Math.max(memberNames.length, memberIds.length);
       for (let index = 0; index < memberCount; index += 1) {
         const xUserId = normalizeXId(memberIds[index] ?? null);
@@ -330,25 +520,41 @@ export function normalizeLegacyFiles(
           order_index: index,
         });
         if (xUserId) putXUser(xUserId, name || `@${xUserId}`);
-        const start = starts[index];
-        if (start != null) {
-          const chapterId = stableId("chapter_imp", `${videoId}:${index}:${start}`);
-          chapters.set(chapterId, {
-            id: chapterId,
-            video_id: videoId,
-            x_user_id: xUserId,
-            chapter_time: start,
-            chapter_label: name || `@${xUserId}`,
-            note: null,
-            visibility: "public",
-          });
-        }
       }
 
+      const chapterSource = row.starts ?? row.memberchapter;
+      const chapterValues = memberStarts(chapterSource);
+      if (chapterValues.length > 0 && chapterValues.length !== memberCount) {
+        warnings.push(
+          `${source}: member/memberid と memberchapter/starts の件数が一致しないため、先頭から順に対応付け、足りない側は空欄として保持します。`,
+        );
+      }
+      chapterValues.forEach((start, index) => {
+        if (start == null) {
+          warnings.push(`${source}: memberchapter/starts の${index + 1}番目を時刻として解釈できませんでした。`);
+          return;
+        }
+        const xUserId = normalizeXId(memberIds[index] ?? null);
+        const name = memberNames[index] || (xUserId ? `@${xUserId}` : "");
+        const chapterId = stableId("chapter_imp", `${videoId}:${index}:${start}`);
+        chapters.set(chapterId, {
+          id: chapterId,
+          video_id: videoId,
+          x_user_id: xUserId,
+          chapter_time: start,
+          chapter_label: name,
+          note: null,
+          visibility: "public",
+        });
+      });
+
+      const generalComment = stringValue(row, "comment");
+      const beforeComment = stringValue(row, "beforecomment");
       const legacyNotes = [
         ["ステージ利用", stringValue(row, "righttype")],
         ["登壇", stringValue(row, "toudan")],
         ["制作経験", stringValue(row, "movieyear")],
+        ["コメント", beforeComment ? generalComment : null],
       ]
         .filter((item): item is [string, string] => !!item[1])
         .map(([label, value]) => `${label}: ${value}`)
@@ -361,7 +567,9 @@ export function normalizeLegacyFiles(
         id: videoId,
         primary_event_id: eventIds[0] ?? null,
         creator_x_user_id: creatorXId,
-        collaboration_type: memberCount > 1 || /collab|合作|複数|団体/i.test(stringValue(row, "type2") ?? stringValue(row, "type") ?? "")
+        collaboration_type: memberCount > 1 || /collab|合作|複数|団体/i.test(
+          [stringValue(row, "type2"), stringValue(row, "type")].filter(Boolean).join(" "),
+        )
           ? "collab"
           : "individual",
         source_type: youtubeId ? "youtube" : "external",
@@ -375,7 +583,7 @@ export function normalizeLegacyFiles(
         music_reference_url: normalizeUrl(stringValue(row, "ymulink")),
         closing_comment: stringValue(row, "aftercomment"),
         youtube_video_id: youtubeId,
-        intro_comment: stringValue(row, "comment") ?? stringValue(row, "beforecomment"),
+        intro_comment: beforeComment ?? generalComment,
         highlights,
         production_story: legacyNotes || null,
         visibility_status: options.videoVisibility,
@@ -386,11 +594,151 @@ export function normalizeLegacyFiles(
       eventIds.forEach((eventId) => {
         videoEvents.set(`${videoId}:${eventId}`, { video_id: videoId, event_id: eventId });
       });
+
+      Object.keys(row).sort().forEach((sourceKey) => {
+        if (CANONICAL_VIDEO_SOURCE_KEYS.has(sourceKey)) return;
+        const rawAnswer = row[sourceKey];
+        if (rawAnswer !== null && typeof rawAnswer === "object") {
+          errors.push(
+            `${source}: 動画の未対応項目「${sourceKey}」は配列またはオブジェクトのため取り込めません。`,
+          );
+          return;
+        }
+        const answerText = textValue(rawAnswer);
+        if (!answerText) return;
+        if (sourceKey.length > 120 || /[\u0000-\u001F\u007F]/.test(sourceKey)) {
+          errors.push(`${source}: 動画の未対応項目名が長すぎるか制御文字を含んでいます。`);
+          return;
+        }
+
+        const customDecision = fieldDecisions.customQuestions.get(sourceKey);
+        if (customDecision) {
+          seenDecisionSourceKeys.add(sourceKey);
+          seenCustomSourceKeys.add(sourceKey);
+          if (answerText.length > MAX_CUSTOM_ANSWER_LENGTH) {
+            errors.push(
+              `${source}: 動画項目「${sourceKey}」の回答は${MAX_CUSTOM_ANSWER_LENGTH}文字以内にしてください。`,
+            );
+            return;
+          }
+          if (eventIds.length === 0) {
+            errors.push(
+              `${source}: 動画項目「${sourceKey}」をカスタム質問へ保存するにはeventidが必要です。`,
+            );
+            return;
+          }
+          const questionKey = legacyQuestionKey(sourceKey);
+          eventIds.forEach((eventId) => {
+            const questionMapKey = `${eventId}:${questionKey}`;
+            const questionId = stableId("ecq_imp", questionMapKey);
+            const currentQuestion = eventCustomQuestions.get(questionMapKey);
+            if (currentQuestion && currentQuestion.source_key !== sourceKey) {
+              errors.push(
+                `動画項目「${sourceKey}」と「${currentQuestion.source_key}」の質問識別子が衝突しました。`,
+              );
+              return;
+            }
+            eventCustomQuestions.set(questionMapKey, {
+              id: questionId,
+              event_id: eventId,
+              source_key: sourceKey,
+              question_key: questionKey,
+              label: customDecision.label,
+              description: `旧形式インポート元項目: ${sourceKey}`,
+              type: "textarea",
+              required: 0,
+              options_json: null,
+              placeholder: null,
+              max_length: 1000,
+              sort_order: 1000 + customDecision.sortOrder,
+              is_active: 1,
+              visibility: "review",
+            });
+            videoCustomAnswers.set(`${videoId}:${eventId}:${questionId}`, {
+              video_id: videoId,
+              event_id: eventId,
+              question_id: questionId,
+              question_key: questionKey,
+              answer_text: answerText,
+              answer_json: null,
+            });
+          });
+          return;
+        }
+
+        if (fieldDecisions.ignored.has(sourceKey)) {
+          seenDecisionSourceKeys.add(sourceKey);
+          ignoredFieldCounts.set(sourceKey, (ignoredFieldCounts.get(sourceKey) ?? 0) + 1);
+          return;
+        }
+        seenDecisionSourceKeys.add(sourceKey);
+        autoIgnoredFieldCounts.set(sourceKey, (autoIgnoredFieldCounts.get(sourceKey) ?? 0) + 1);
+      });
+
       splitList(row.soft)
         .filter(Boolean)
         .forEach((label) => softwares.set(`${videoId}:${label.toLowerCase()}`, { video_id: videoId, label }));
     });
   }
+
+  for (const sourceKey of fieldDecisions.customQuestions.keys()) {
+    if (!seenCustomSourceKeys.has(sourceKey)) {
+      errors.push(`動画項目「${sourceKey}」にはカスタム質問へ保存できる非空値がありません。`);
+    }
+  }
+  for (const sourceKey of fieldDecisions.ignored) {
+    if (!seenDecisionSourceKeys.has(sourceKey)) {
+      errors.push(`動画項目「${sourceKey}」には除外対象の非空値がありません。`);
+    }
+  }
+  if (autoIgnoredFieldCounts.size > MAX_LEGACY_VIDEO_FIELD_DECISIONS) {
+    errors.push(`正規カラムに対応しない動画項目は最大${MAX_LEGACY_VIDEO_FIELD_DECISIONS}件です。`);
+  }
+  for (const [sourceKey, count] of ignoredFieldCounts) {
+    warnings.push(`動画項目「${sourceKey}」の非空値${count}件を指定どおり取り込み対象外にしました。`);
+  }
+  for (const [sourceKey, count] of autoIgnoredFieldCounts) {
+    warnings.push(
+      `動画項目「${sourceKey}」の非空値${count}件は未指定のため取り込み対象外としました。カスタム質問へ保存する場合は再度プレビューしてください。`,
+    );
+  }
+
+  const customAnswerCounts = new Map<string, number>();
+  for (const answer of videoCustomAnswers.values()) {
+    customAnswerCounts.set(answer.video_id, (customAnswerCounts.get(answer.video_id) ?? 0) + 1);
+  }
+  for (const [videoId, count] of customAnswerCounts) {
+    if (count > MAX_LEGACY_CUSTOM_ANSWERS_PER_VIDEO) {
+      errors.push(
+        `作品 ${videoId} のカスタム質問回答はイベント別の複製を含めて最大${MAX_LEGACY_CUSTOM_ANSWERS_PER_VIDEO}件です。`,
+      );
+    }
+  }
+
+  const unmappedVideoFields = [...autoIgnoredFieldCounts]
+    .map(([source_key, non_empty_rows]) => ({ source_key, non_empty_rows }))
+    .sort((left, right) => left.source_key.localeCompare(right.source_key));
+  const sortedCustomQuestions = [...eventCustomQuestions.values()].sort(
+    (left, right) =>
+      left.event_id.localeCompare(right.event_id) || left.source_key.localeCompare(right.source_key),
+  );
+  const sortedCustomAnswers = [...videoCustomAnswers.values()].sort(
+    (left, right) =>
+      left.video_id.localeCompare(right.video_id) ||
+      left.event_id.localeCompare(right.event_id) ||
+      left.question_id.localeCompare(right.question_id),
+  );
+  const normalizedFieldDecisions: LegacyVideoFieldDecision[] = [
+    ...[...fieldDecisions.customQuestions].map(([source_key, value]) => ({
+      source_key,
+      action: "custom_question" as const,
+      question_label: value.label,
+    })),
+    ...[...fieldDecisions.ignored].map((source_key) => ({
+      source_key,
+      action: "ignore" as const,
+    })),
+  ].sort((left, right) => left.source_key.localeCompare(right.source_key));
 
   return {
     events: [...events.values()],
@@ -401,6 +749,10 @@ export function normalizeLegacyFiles(
     videoMembers: [...members.values()],
     videoChapters: [...chapters.values()],
     videoSoftwares: [...softwares.values()],
+    eventCustomQuestions: sortedCustomQuestions,
+    videoCustomAnswers: sortedCustomAnswers,
+    videoFieldDecisions: normalizedFieldDecisions,
+    unmappedVideoFields,
     warnings,
     errors,
   };

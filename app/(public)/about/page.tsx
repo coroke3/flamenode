@@ -13,6 +13,7 @@ import {
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { publicListableEventWhere } from "@/lib/utils/eventStatus";
+import { publicListableXApprovalWhere } from "@/lib/utils/publicXUserWhere";
 
 export const dynamic = "force-dynamic";
 
@@ -135,7 +136,7 @@ async function loadAboutStats(): Promise<AboutStats | null> {
         db
           .select({ count: sql<number>`COUNT(*)` })
           .from(xUsersTable)
-          .where(sql`${xUsersTable.approval_status} IN ('approved', 'pending')`),
+          .where(publicListableXApprovalWhere(xUsersTable.approval_status)),
         db
           .select({ count: sql<number>`COUNT(*)` })
           .from(eventsTable)

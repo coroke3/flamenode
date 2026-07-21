@@ -5,17 +5,27 @@ import { requireAdminWrite, type WriteGuardResult } from "@/lib/auth/writeGuard"
 import { requireSameOriginWrite } from "@/lib/auth/writeOriginGuard";
 import { parseLegacyImportText, type LegacyParsedFile } from "@/lib/import/legacy/parse";
 import {
+  MAX_LEGACY_VIDEO_FIELD_DECISIONS,
   normalizeLegacyFiles,
   type CanonicalVisibility,
   type LegacyImportStrategy,
+  type LegacyVideoFieldDecision,
 } from "@/lib/import/legacy/normalize";
-import { applyLegacyImportPlan } from "@/lib/import/legacy/apply";
+import {
+  applyLegacyImportPlanStep,
+  legacyApplyResultFromProgress,
+  LEGACY_IMPORT_QUESTION_STEP_SIZE,
+  LEGACY_IMPORT_SOFTWARE_STEP_SIZE,
+  LEGACY_IMPORT_X_USER_STEP_SIZE,
+} from "@/lib/import/legacy/apply";
 import { preflightLegacyImportPlan } from "@/lib/import/legacy/preflight";
 import {
   claimLegacyImportPreview,
   createLegacyImportPreview,
   LegacyImportPreviewError,
+  type LegacyImportApplyProgress,
 } from "@/lib/import/legacy/previewStore";
+import type { CanonicalLegacyPlan } from "@/lib/import/legacy/normalize";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +33,7 @@ const MAX_FILES = 20;
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 12 * 1024 * 1024;
 const MAX_ROWS = 5000;
+const MAX_FIELD_DECISIONS_BYTES = 16 * 1024;
 
 function error(
   message: string,
@@ -64,6 +75,54 @@ function previewErrorResponse(cause: unknown): NextResponse {
   });
 }
 
+function videoFieldDecisions(formData: FormData): LegacyVideoFieldDecision[] {
+  const raw = stringField(formData, "video_custom_field_decisions");
+  if (!raw) return [];
+  if (new TextEncoder().encode(raw).byteLength > MAX_FIELD_DECISIONS_BYTES) {
+    throw new Error("動画の未対応項目の指定が大きすぎます。");
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("動画の未対応項目の指定をJSONとして読み取れませんでした。");
+  }
+  if (!Array.isArray(parsed) || parsed.length > MAX_LEGACY_VIDEO_FIELD_DECISIONS) {
+    throw new Error(`動画の未対応項目の指定は最大${MAX_LEGACY_VIDEO_FIELD_DECISIONS}件です。`);
+  }
+
+  return parsed.map((item, index): LegacyVideoFieldDecision => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`動画の未対応項目の指定${index + 1}件目が不正です。`);
+    }
+    const record = item as Record<string, unknown>;
+    const sourceKey = typeof record.source_key === "string" ? record.source_key : "";
+    if (record.action === "ignore") {
+      if (Object.keys(record).some((key) => key !== "source_key" && key !== "action")) {
+        throw new Error(`動画項目「${sourceKey || index + 1}」の除外指定に不明な値があります。`);
+      }
+      return { source_key: sourceKey, action: "ignore" };
+    }
+    if (record.action === "custom_question") {
+      if (
+        Object.keys(record).some(
+          (key) => key !== "source_key" && key !== "action" && key !== "question_label",
+        ) ||
+        typeof record.question_label !== "string"
+      ) {
+        throw new Error(`動画項目「${sourceKey || index + 1}」の質問文Q指定が不正です。`);
+      }
+      return {
+        source_key: sourceKey,
+        action: "custom_question",
+        question_label: record.question_label,
+      };
+    }
+    throw new Error(`動画項目「${sourceKey || index + 1}」の処理方法が不正です。`);
+  });
+}
+
 function writeGuardErrorResponse(
   guard: Exclude<WriteGuardResult, { ok: true }>,
 ): NextResponse {
@@ -76,6 +135,36 @@ function writeGuardErrorResponse(
         ? 503
         : 403;
   return error(guard.reason, status);
+}
+
+function applyProgressSummary(
+  plan: CanonicalLegacyPlan,
+  progress: LegacyImportApplyProgress,
+): { stage: string; index: number; completed: number; total: number } {
+  const softwareCount = new Set(
+    plan.videoSoftwares
+      .map((row) => row.label.trim().replace(/\s+/g, " ").toLowerCase())
+      .filter(Boolean),
+  ).size;
+  const sizes = {
+    system_user: 1,
+    x_users: Math.max(1, Math.ceil(plan.xUsers.length / LEGACY_IMPORT_X_USER_STEP_SIZE)),
+    softwares: Math.max(1, Math.ceil(softwareCount / LEGACY_IMPORT_SOFTWARE_STEP_SIZE)),
+    events: Math.max(1, plan.events.length),
+    custom_questions: Math.max(
+      1,
+      Math.ceil(plan.eventCustomQuestions.length / LEGACY_IMPORT_QUESTION_STEP_SIZE),
+    ),
+    videos: Math.max(1, plan.videos.length),
+  };
+  const stages = ["system_user", "x_users", "softwares", "events", "custom_questions", "videos"] as const;
+  const total = stages.reduce((sum, stage) => sum + sizes[stage], 0);
+  const completed = progress.stage === "complete"
+    ? total
+    : stages
+        .slice(0, stages.indexOf(progress.stage))
+        .reduce((sum, stage) => sum + sizes[stage], 0) + progress.index;
+  return { stage: progress.stage, index: progress.index, completed, total };
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
@@ -116,31 +205,57 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     try {
-      await preflightLegacyImportPlan(db, claimed.plan, claimed.strategy);
-      const result = await applyLegacyImportPlan(db, claimed.plan, {
+      if (claimed.completed || claimed.progress.stage === "complete") {
+        const expiresAt = await claimed.complete();
+        return NextResponse.json({
+          ok: true,
+          mode,
+          plan_hash: claimed.planHash,
+          attempt: claimed.attempt,
+          continuation_required: false,
+          expires_at: expiresAt,
+          progress: applyProgressSummary(claimed.plan, claimed.progress),
+          result: {
+            ...legacyApplyResultFromProgress(claimed.plan, claimed.progress),
+            complete: true,
+          },
+        });
+      }
+
+      const step = await applyLegacyImportPlanStep(db, claimed.plan, {
         actorAuthUserId: user.id,
         strategy: claimed.strategy,
+        previewToken,
+        planHash,
+        progress: claimed.progress,
       });
-      await claimed.complete();
+      const expiresAt = await claimed.advance(step.progress);
       return NextResponse.json({
         ok: true,
         mode,
         plan_hash: claimed.planHash,
         attempt: claimed.attempt,
-        result,
+        continuation_required: !step.complete,
+        expires_at: expiresAt,
+        progress: applyProgressSummary(claimed.plan, step.progress),
+        result: {
+          ...legacyApplyResultFromProgress(claimed.plan, step.progress),
+          complete: step.complete,
+        },
       });
     } catch (cause) {
       await claimed.release().catch(() => undefined);
       const baseMessage = cause instanceof Error ? cause.message : "インポートを確定できませんでした。";
-      const createOnlyRecovery =
-        claimed.strategy === "create_only"
-          ? " 書き込み前検査または適用中に停止しました。部分書き込みが疑われる場合は、同じファイルを再プレビューし、「過去の旧形式インポート行だけ置換」で再開してください。"
-          : " preview planは保持されています。同じ内容で再試行できます。";
-      return error(`${baseMessage}${createOnlyRecovery}`, 409, {
-        retryable: claimed.strategy !== "create_only",
-        requires_repreview: claimed.strategy === "create_only",
+      const requiresRepreview = baseMessage.includes("再プレビューが必要");
+      return error(
+        `${baseMessage} ${requiresRepreview ? "入力とDB状態を再確認してください。" : "preview planは保持されています。同じ内容で再試行できます。"}`,
+        409,
+        {
+        retryable: !requiresRepreview,
+        requires_repreview: requiresRepreview,
         plan_hash: claimed.planHash,
         attempt: claimed.attempt,
+        progress: applyProgressSummary(claimed.plan, claimed.progress),
       });
     }
   }
@@ -163,10 +278,17 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
   }
 
+  let fieldDecisions: LegacyVideoFieldDecision[];
+  try {
+    fieldDecisions = videoFieldDecisions(formData);
+  } catch (cause) {
+    return error(cause instanceof Error ? cause.message : "動画の未対応項目の指定が不正です。");
+  }
   const selectedStrategy = strategy(formData.get("strategy"));
   const plan = normalizeLegacyFiles(parsed, {
     eventVisibility: visibility(formData.get("event_visibility")),
     videoVisibility: visibility(formData.get("video_visibility")),
+    videoFieldDecisions: fieldDecisions,
   });
   const rowCount = parsed.reduce((sum, file) => sum + file.rows.length, 0);
   if (rowCount > MAX_ROWS) return error(`1回の入力は最大${MAX_ROWS}行です。`);
@@ -182,6 +304,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     videoChapters: plan.videoChapters.length,
     xUsers: plan.xUsers.length,
     softwares: plan.videoSoftwares.length,
+    customQuestions: plan.eventCustomQuestions.length,
+    customAnswers: plan.videoCustomAnswers.length,
+    unmappedVideoFields: plan.unmappedVideoFields.length,
     warnings: plan.warnings.length,
     errors: plan.errors.length,
   };
@@ -194,8 +319,25 @@ export async function POST(request: Request): Promise<NextResponse> {
         summary,
         warnings: plan.warnings.slice(0, 100),
         errors: plan.errors.slice(0, 100),
+        video_custom_field_candidates: plan.unmappedVideoFields,
       },
       { status: 422 },
+    );
+  }
+
+  let preflight;
+  try {
+    preflight = await preflightLegacyImportPlan(db, plan, selectedStrategy);
+  } catch (cause) {
+    return error(
+      cause instanceof Error ? cause.message : "現在のDB状態へ適用できないplanです。",
+      409,
+      {
+        mode,
+        summary,
+        warnings: plan.warnings.slice(0, 100),
+        requires_repreview: false,
+      },
     );
   }
 
@@ -205,6 +347,8 @@ export async function POST(request: Request): Promise<NextResponse> {
       authUserId: user.id,
       strategy: selectedStrategy,
       plan,
+      skipExistingEventIds: selectedStrategy === "skip_existing" ? preflight.existingEventIds : [],
+      skipExistingVideoIds: selectedStrategy === "skip_existing" ? preflight.existingVideoIds : [],
     });
   } catch (cause) {
     return previewErrorResponse(cause);
@@ -220,6 +364,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     plan_hash: credential.planHash,
     expires_at: credential.expiresAt,
     strategy: selectedStrategy,
+    video_custom_field_candidates: plan.unmappedVideoFields,
     preview: {
       events: plan.events.slice(0, 20).map(({ id, title, visibility_status }) => ({ id, title, visibility_status })),
       videos: plan.videos.slice(0, 50).map(({ id, title, creator_display_name, visibility_status }) => ({

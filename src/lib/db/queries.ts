@@ -18,12 +18,14 @@ import {
 import { compareEventsByUpcomingPriority } from "@/lib/utils/eventOrdering";
 import {
   activeEventWhere,
+  boundedOrOpenEndedEventPeriodWhere,
   publicListableEventWhere,
 } from "@/lib/utils/eventStatus";
 import {
   isPickupCreatorEligible,
   sortPickupCreators,
 } from "@/lib/utils/pickupCreators";
+import { publicListableXApprovalWhere } from "@/lib/utils/publicXUserWhere";
 
 export const PVSF_SUMMARY_EVENT_ID = "PVSFSummary";
 /**
@@ -146,7 +148,7 @@ export async function fetchLatestEvents(db: DB, limit = 3) {
   const rows = await db
     .select()
     .from(events)
-    .where(publicListableEventWhere())
+    .where(and(publicListableEventWhere(), boundedOrOpenEndedEventPeriodWhere()))
     .orderBy(desc(events.start_time));
   return rows.sort(compareEventsByUpcomingPriority).slice(0, limit);
 }
@@ -249,7 +251,7 @@ export async function fetchPickupCreators(db: DB, limit = 40) {
       collab_count: collabVideoCountSql,
     })
     .from(xUsers)
-    .where(or(eq(xUsers.approval_status, "approved"), eq(xUsers.approval_status, "pending"))!)
+    .where(publicListableXApprovalWhere())
     .orderBy(desc(totalWorkCountSql), desc(personalVideoCountSql), asc(xUsers.x_name))
     .limit(candidateLimit);
 

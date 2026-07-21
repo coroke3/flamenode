@@ -11,6 +11,7 @@ import {
   rebuildTarget,
   removeTrackedArtifacts,
 } from "./rebuild.ts";
+import { PUBLIC_LISTABLE_X_APPROVAL_SQL_IN } from "../../src/lib/utils/publicXUser.ts";
 
 const source = await readFile(new URL("./rebuild.ts", import.meta.url), "utf8");
 
@@ -127,6 +128,22 @@ test("R2 delete失敗時はdeleted_atを更新せず、再試行成功後にだ�
   assert.equal(state.runs.filter((sql) => sql.includes("SET deleted_at")).length, 1);
 });
 
+test("public creator queries include imported legacy X IDs", () => {
+  assert.ok(PUBLIC_LISTABLE_X_APPROVAL_SQL_IN.includes("'imported'"));
+  assert.match(
+    source,
+    /WHERE xu\.approval_status IN \(\$\{PUBLIC_LISTABLE_X_APPROVAL_SQL_IN\}\)/,
+  );
+  assert.match(
+    source,
+    /WHERE approval_status IN \(\$\{PUBLIC_LISTABLE_X_APPROVAL_SQL_IN\}\)/,
+  );
+  assert.match(
+    source,
+    /FROM x_users WHERE id = \? AND approval_status IN \(\$\{PUBLIC_LISTABLE_X_APPROVAL_SQL_IN\}\) LIMIT 1/,
+  );
+});
+
 test("static JSON queryはcanonical列だけを使う", () => {
   assert.doesNotMatch(source, /max_consecutive_slots_per_entry/);
   assert.doesNotMatch(source, /es\.role/);
@@ -161,6 +178,26 @@ test("event groupとjunctionの取得件数を固定する", () => {
   assert.match(source, /FROM event_groups[\s\S]*LIMIT \?/);
   assert.match(source, /ROW_NUMBER\(\) OVER \([\s\S]*PARTITION BY ege\.event_group_id/);
   assert.match(source, /WHERE group_rank <= \?[\s\S]*LIMIT \?/);
+});
+
+test("events index と event group は点イベントを除外する", () => {
+  const nonPointFilters = source.match(/\$\{NON_POINT_EVENT_PERIOD_SQL\}/g) ?? [];
+  assert.equal(nonPointFilters.length, 4);
+
+  const eventsIndexFn = source.match(
+    /async function rebuildEventsIndex[\s\S]*?(?=async function )/,
+  )?.[0];
+  assert.ok(eventsIndexFn);
+  assert.match(eventsIndexFn, /FROM events[\s\S]*NON_POINT_EVENT_PERIOD_SQL/);
+
+  const eventGroupFn = source.match(
+    /async function rebuildEventGroupSections[\s\S]*?(?=\nfunction |\nasync function )/,
+  )?.[0];
+  assert.ok(eventGroupFn);
+  assert.match(
+    eventGroupFn,
+    /INNER JOIN events e[\s\S]*NON_POINT_EVENT_PERIOD_SQL/,
+  );
 });
 
 test("200イベントの公開運営取得はD1 bind上限未満にchunkする", async () => {

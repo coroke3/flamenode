@@ -1,4 +1,4 @@
-import { sql, type SQL } from "drizzle-orm";
+import { sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DB } from "@/lib/db/client";
 import type { WriteAuditLogInput } from "./types";
@@ -121,6 +121,64 @@ function auditInsertSql(
   `.inlineParams();
 }
 
+/** `db.run()` が返す SQLiteRaw。builder とは config 形状で区別する。 */
+function isDbRunBatchItem(statement: unknown): boolean {
+  const config = (statement as { config?: { action?: string; table?: unknown } })
+    ?.config;
+  return typeof config?.action === "string" && config.table === undefined;
+}
+
+function inlineBatchSql(query: SQL): SQL {
+  return query.inlineParams();
+}
+
+function hasPrepare(value: unknown): value is BatchItem<"sqlite"> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { _prepare?: unknown })._prepare === "function"
+  );
+}
+
+function hasGetSQL(value: unknown): value is SQLWrapper {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as SQLWrapper).getSQL === "function"
+  );
+}
+
+function asBatchRunnable(db: DB, statement: BatchItem<"sqlite">): BatchItem<"sqlite"> {
+  const candidate: unknown = statement;
+  if (isDbRunBatchItem(candidate)) {
+    if (
+      typeof candidate === "object" &&
+      candidate !== null &&
+      typeof (candidate as { getQuery?: unknown }).getQuery === "function" &&
+      hasGetSQL(candidate)
+    ) {
+      const raw = candidate as {
+        getSQL: () => SQL;
+        getQuery: () => { params: unknown[] };
+      };
+      if (raw.getQuery().params.length === 0) {
+        return statement;
+      }
+      return db.run(inlineBatchSql(raw.getSQL()));
+    }
+    return statement;
+  }
+  if (hasPrepare(candidate)) {
+    return candidate;
+  }
+  if (hasGetSQL(candidate)) {
+    return db.run(inlineBatchSql(candidate.getSQL()));
+  }
+  throw new AuditMutationError(
+    "D1 batch に渡せない mutation statement です。await 済みの結果を渡していないか確認してください。",
+  );
+}
+
 /**
  * D1 batch を使い、本体変更と監査 INSERT を同じ all-or-nothing 単位で実行する。
  *
@@ -193,15 +251,21 @@ export async function mutateWithAudit(
 
   const condition = sql`1 = 1`;
   const auditChunks = chunkEntries(entries);
+  const mutationStatements = input.mutationStatements.map((statement) =>
+    asBatchRunnable(db, statement),
+  );
+  const postAuditStatements = (input.postAuditStatements ?? []).map((statement) =>
+    asBatchRunnable(db, statement),
+  );
   const mutationBatchItems: BatchItem<"sqlite">[] = perStatementExpectedChanges
-    ? input.mutationStatements.flatMap((statement, index) => [
+    ? mutationStatements.flatMap((statement, index) => [
         statement,
         ...(perStatementExpectedChanges[index] === null
           ? []
           : [db.run(assertChanges(perStatementExpectedChanges[index]!))]),
       ])
     : [
-        input.mutationStatements[0],
+        mutationStatements[0],
         db.run(assertChanges(scalarExpectedChanges!)),
       ];
 
@@ -211,8 +275,16 @@ export async function mutateWithAudit(
       db.run(auditInsertSql(chunk, condition)),
       db.run(assertionSql(chunk)),
     ]),
-    ...(input.postAuditStatements ?? []),
-  ];
+    ...postAuditStatements,
+  ].map((item) => asBatchRunnable(db, item));
+
+  for (const [index, item] of batchItems.entries()) {
+    if (!hasPrepare(item)) {
+      throw new AuditMutationError(
+        `D1 batch の ${index + 1} 件目が RunnableQuery ではありません。`,
+      );
+    }
+  }
 
   await db.batch(batchItems as [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]]);
   return entries.map((entry) => entry.id);

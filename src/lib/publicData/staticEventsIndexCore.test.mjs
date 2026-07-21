@@ -12,6 +12,7 @@ test("normalizeStaticEventsIndex normalizes events and group sections", () => {
         title: "Event 1",
         visibility_status: "public",
         start_time: 200,
+        end_time: 250,
         entry_end_time: 150,
       },
     ],
@@ -24,7 +25,7 @@ test("normalizeStaticEventsIndex normalizes events and group sections", () => {
         sort_order: 2,
         latest_event_start_time: 200,
         events: [
-          { id: "event1", title: "Event 1", start_time: 200, visibility_status: "public" },
+          { id: "event1", title: "Event 1", start_time: 200, end_time: 250, visibility_status: "public" },
           { id: "missing-title" },
         ],
       },
@@ -45,6 +46,18 @@ test("normalizeStaticEventsIndex normalizes events and group sections", () => {
   assert.equal(index.groupSections.length, 1);
   assert.equal(index.groupSections[0].events.length, 1);
   assert.equal(index.groupSections[0].events[0].id, "event1");
+});
+
+test("normalizeStaticEventsIndex drops point events with one-sided periods", () => {
+  const index = normalizeStaticEventsIndex({
+    items: [
+      { id: "bounded", title: "Bounded", visibility_status: "public", start_time: 100, end_time: 200 },
+      { id: "point", title: "Point", visibility_status: "public", start_time: 100 },
+    ],
+  });
+
+  assert.ok(index);
+  assert.deepEqual(index.events.map((event) => event.id), ["bounded"]);
 });
 
 test("normalizeStaticEventsIndex rejects payload without items", () => {

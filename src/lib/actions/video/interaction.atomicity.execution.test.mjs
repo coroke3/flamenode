@@ -24,6 +24,24 @@ if (!runningWithTsx) {
 } else {
   const { mutateWithAudit } = await import("@/lib/audit/mutate.ts");
 
+  const makePrepare = () => ({
+    getQuery: () => ({ sql: "mutation", params: [] }),
+    stmt: { bind: () => ({}) },
+  });
+
+  const mockRunnableFromRun = (query) => {
+    const sequel = { sql: String(query), params: [] };
+    return {
+      kind: "generated",
+      query,
+      getQuery: () => sequel,
+      _prepare: () => ({
+        getQuery: () => sequel,
+        stmt: { bind: () => ({}) },
+      }),
+    };
+  };
+
   function createHarness(failAt) {
     const sqlite = new DatabaseSync(":memory:");
     sqlite.exec(`
@@ -55,7 +73,7 @@ if (!runningWithTsx) {
     };
     const db = {
       select: () => ({ from: () => selectChain }),
-      run: (query) => ({ kind: "generated", query }),
+      run: (query) => mockRunnableFromRun(query),
       batch: async (items) => {
         sqlite.exec("BEGIN IMMEDIATE");
         try {
@@ -85,6 +103,7 @@ if (!runningWithTsx) {
 
   const interactionMutation = {
     label: "interaction",
+    _prepare: makePrepare,
     apply(sqlite) {
       sqlite
         .prepare("INSERT INTO video_interactions VALUES (?, ?, ?, ?)")
@@ -93,6 +112,7 @@ if (!runningWithTsx) {
   };
   const likeCountMutation = {
     label: "like_count",
+    _prepare: makePrepare,
     apply(sqlite) {
       const result = sqlite
         .prepare(
@@ -104,6 +124,7 @@ if (!runningWithTsx) {
   };
   const queueMutation = {
     label: "queue",
+    _prepare: makePrepare,
     apply(sqlite) {
       sqlite
         .prepare("INSERT INTO static_rebuild_queue VALUES (?, ?, ?)")

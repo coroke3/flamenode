@@ -622,10 +622,7 @@ export default async function VideoDetailPage({
           </div>
         </article>
 
-        <aside
-          className={styles.chapterRail}
-          aria-label="チャプターとコメント"
-        >
+        <aside className={styles.chapterRail} aria-label="チャプター">
           {playlist && playlistItems.length > 0 ? (
             <PlaylistRail
               label={playlistLabel}
@@ -635,24 +632,26 @@ export default async function VideoDetailPage({
             />
           ) : null}
 
-          <ChapterTabs
-            chapters={chapters.map((chapter) => ({
-              id: chapter.id,
-              chapter_time: chapter.chapter_time,
-              chapter_label: chapter.chapter_label,
-              visibility: (
-                chapter.visibility ?? "public"
-              ) as "public" | "private",
-              marker_kind: "comment" as
-                | "comment"
-                | "chapter"
-                | "review"
-                | "system",
-              note: chapter.note,
-              author_name: chapter.author_name,
-              author_icon: chapter.author_icon,
-            }))}
-          />
+          <div className={styles.chapterBody}>
+            <ChapterTabs
+              chapters={chapters.map((chapter) => ({
+                id: chapter.id,
+                chapter_time: chapter.chapter_time,
+                chapter_label: chapter.chapter_label,
+                visibility: (
+                  chapter.visibility ?? "public"
+                ) as "public" | "private",
+                marker_kind: "comment" as
+                  | "comment"
+                  | "chapter"
+                  | "review"
+                  | "system",
+                note: chapter.note,
+                author_name: chapter.author_name,
+                author_icon: chapter.author_icon,
+              }))}
+            />
+          </div>
 
           {viewerUser?.id ? (
             <ChapterComposer
@@ -708,10 +707,7 @@ export default async function VideoDetailPage({
           </section>
         ) : null}
 
-        <aside
-          className={styles.relatedRail}
-          aria-label="関連動画"
-        >
+        <aside className={styles.relatedRail} aria-label="関連動画">
           <h3 className={styles.relatedHeading}>
             関連動画
           </h3>
@@ -842,31 +838,9 @@ function StaticVideoDetailView({
               </div>
             </div>
           </div>
-
-          {detail.publicMembers.length > 0 ? (
-            <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>
-                参加メンバー ({detail.publicMembers.length})
-              </h2>
-              <ul className={styles.relatedList}>
-                {detail.publicMembers.map((member) => (
-                  <li key={`${member.x_user_id ?? member.display_name}-${member.order_index ?? ""}`}>
-                    {member.x_user_id ? (
-                      <Link href={`/user/${member.x_user_id}`}>
-                        {member.display_name}
-                      </Link>
-                    ) : (
-                      member.display_name
-                    )}
-                    {member.role_label ? ` / ${member.role_label}` : ""}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
         </article>
 
-        <aside className={styles.chapterRail}>
+        <aside className={styles.chapterRail} aria-label="チャプター">
           <section className="fn-vd-login-panel">
             <span>
               <Icon name="info" size={12} aria-hidden />
@@ -880,6 +854,28 @@ function StaticVideoDetailView({
             </Link>
           </section>
         </aside>
+
+        {detail.publicMembers.length > 0 ? (
+          <section className={`${styles.section} ${styles.membersBlock}`}>
+            <h2 className={styles.sectionTitle}>
+              参加メンバー ({detail.publicMembers.length})
+            </h2>
+            <ul className={styles.relatedList}>
+              {detail.publicMembers.map((member) => (
+                <li key={`${member.x_user_id ?? member.display_name}-${member.order_index ?? ""}`}>
+                  {member.x_user_id ? (
+                    <Link href={`/user/${member.x_user_id}`}>
+                      {member.display_name}
+                    </Link>
+                  ) : (
+                    member.display_name
+                  )}
+                  {member.role_label ? ` / ${member.role_label}` : ""}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
       </div>
     </div>
   );

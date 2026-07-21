@@ -203,10 +203,11 @@ function buildTimeline(
   const entryRightPct = clampPercent(((entryEnd - start) / duration) * 100);
 
   const markerPct = clampPercent(((now - start) / duration) * 100);
+  const markerLabel = compactDate(now);
 
   return {
-    monthLabels: buildMonthLabels(start, mid, safeEnd),
-    markerLabel: compactDate(now),
+    monthLabels: buildMonthLabels(start, mid, safeEnd, markerLabel, markerPct),
+    markerLabel,
     markerPct,
     markerAlign: markerPct <= 8 ? "start" : markerPct >= 92 ? "end" : "center",
     windowLeftPct,
@@ -224,10 +225,14 @@ function compactDate(ts: number): string {
   return dateFormatter.format(new Date(ts * 1000));
 }
 
+const LABEL_OVERLAP_THRESHOLD_PCT = 18;
+
 function buildMonthLabels(
   start: number,
   mid: number,
   end: number,
+  markerLabel: string,
+  markerPct: number,
 ): TimelineModel["monthLabels"] {
   const raw: TimelineModel["monthLabels"] = [
     { key: "start", label: compactDate(start), pct: 0, align: "start" },
@@ -239,7 +244,16 @@ function buildMonthLabels(
     const previousSameLabel = items
       .slice(0, index)
       .find((other) => other.label === item.label);
-    return !previousSameLabel || Math.abs(item.pct - previousSameLabel.pct) >= 18;
+    if (previousSameLabel && Math.abs(item.pct - previousSameLabel.pct) < LABEL_OVERLAP_THRESHOLD_PCT) {
+      return false;
+    }
+    if (
+      item.label === markerLabel &&
+      Math.abs(item.pct - markerPct) < LABEL_OVERLAP_THRESHOLD_PCT
+    ) {
+      return false;
+    }
+    return true;
   });
 }
 

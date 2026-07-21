@@ -1,10 +1,14 @@
 import type { CanonicalLegacyPlan, LegacyImportStrategy } from "./normalize";
 
-const PREVIEW_VERSION = 1 as const;
+const PREVIEW_VERSION = 3 as const;
 const PREVIEW_TTL_SECONDS = 15 * 60;
 const CLAIM_TTL_SECONDS = 10 * 60;
 const MAX_STORED_PLAN_BYTES = 24 * 1024 * 1024;
 const TOKEN_PATTERN = /^[a-f0-9]{32}$/;
+const PLAN_HASH_PATTERN = /^[a-f0-9]{64}$/;
+const X_USER_STEP_SIZE = 40;
+const SOFTWARE_STEP_SIZE = 40;
+const QUESTION_STEP_SIZE = 6;
 
 export type LegacyImportPreviewCredential = {
   previewToken: string;
@@ -12,12 +16,31 @@ export type LegacyImportPreviewCredential = {
   expiresAt: number;
 };
 
+export type LegacyImportApplyStage = "system_user" | "x_users" | "softwares" | "events" | "custom_questions" | "videos" | "complete";
+export type LegacyImportApplyCounts = {
+  createdEvents: number; replacedEvents: number; skippedEvents: number;
+  createdVideos: number; replacedVideos: number; skippedVideos: number;
+  createdXUsers: number; createdAuthUsers: number; createdSoftwares: number;
+  createdCustomQuestions: number; reusedCustomQuestions: number;
+};
+export type LegacyImportApplyProgress = {
+  stage: LegacyImportApplyStage;
+  index: number;
+  counts: LegacyImportApplyCounts;
+  skipExistingEventIds: string[];
+  skipExistingVideoIds: string[];
+};
+const APPLY_STAGES: LegacyImportApplyStage[] = ["system_user", "x_users", "softwares", "events", "custom_questions", "videos", "complete"];
+
 export type ClaimedLegacyImportPreview = {
   plan: CanonicalLegacyPlan;
   strategy: LegacyImportStrategy;
   planHash: string;
   attempt: number;
-  complete: () => Promise<void>;
+  completed: boolean;
+  readonly progress: LegacyImportApplyProgress;
+  advance: (nextProgress: LegacyImportApplyProgress) => Promise<number>;
+  complete: () => Promise<number>;
   release: () => Promise<void>;
 };
 
@@ -30,10 +53,12 @@ type StoredPreview = {
   plan: CanonicalLegacyPlan;
   createdAt: number;
   expiresAt: number;
-  status: "ready" | "claimed";
+  status: "ready" | "claimed" | "completed";
   attempt: number;
   claimId?: string;
   claimExpiresAt?: number;
+  completedAt?: number;
+  progress: LegacyImportApplyProgress;
 };
 
 type CreateOptions = {
@@ -109,6 +134,150 @@ function assertBucket(bucket: R2Bucket | null | undefined): asserts bucket is R2
   }
 }
 
+function isValidApplyProgress(value: unknown): value is LegacyImportApplyProgress {
+  if (!value || typeof value !== "object") return false;
+  const p = value as Partial<LegacyImportApplyProgress>;
+  const c = p.counts as Partial<LegacyImportApplyCounts> | undefined;
+  const keys: (keyof LegacyImportApplyCounts)[] = ["createdEvents", "replacedEvents", "skippedEvents", "createdVideos", "replacedVideos", "skippedVideos", "createdXUsers", "createdAuthUsers", "createdSoftwares", "createdCustomQuestions", "reusedCustomQuestions"];
+  if (
+    !APPLY_STAGES.includes(p.stage as LegacyImportApplyStage) ||
+    !Number.isSafeInteger(p.index) ||
+    (p.index as number) < 0 ||
+    !c ||
+    !keys.every((key) => Number.isSafeInteger(c[key]) && (c[key] as number) >= 0) ||
+    !Array.isArray(p.skipExistingEventIds) ||
+    !p.skipExistingEventIds.every((id) => typeof id === "string" && id.length > 0) ||
+    new Set(p.skipExistingEventIds).size !== p.skipExistingEventIds.length ||
+    !Array.isArray(p.skipExistingVideoIds) ||
+    !p.skipExistingVideoIds.every((id) => typeof id === "string" && id.length > 0) ||
+    new Set(p.skipExistingVideoIds).size !== p.skipExistingVideoIds.length
+  ) {
+    return false;
+  }
+  return JSON.stringify(p.skipExistingEventIds) === JSON.stringify([...p.skipExistingEventIds].sort()) &&
+    JSON.stringify(p.skipExistingVideoIds) === JSON.stringify([...p.skipExistingVideoIds].sort());
+}
+
+function softwareCount(plan: CanonicalLegacyPlan): number {
+  const softwareNames = new Set(
+    plan.videoSoftwares
+      .map((row) => row.label.trim().replace(/\s+/g, " ").toLowerCase())
+      .filter(Boolean),
+  );
+  return softwareNames.size;
+}
+
+function stageLimits(plan: CanonicalLegacyPlan): Record<LegacyImportApplyStage, number> {
+  const softwares = softwareCount(plan);
+  return {
+    system_user: 1,
+    x_users: Math.max(1, Math.ceil(plan.xUsers.length / X_USER_STEP_SIZE)),
+    softwares: Math.max(1, Math.ceil(softwares / SOFTWARE_STEP_SIZE)),
+    events: Math.max(1, plan.events.length),
+    custom_questions: Math.max(1, Math.ceil(plan.eventCustomQuestions.length / QUESTION_STEP_SIZE)),
+    videos: Math.max(1, plan.videos.length),
+    complete: 1,
+  };
+}
+
+function progressWithinPlan(plan: CanonicalLegacyPlan, progress: LegacyImportApplyProgress): boolean {
+  const limits = stageLimits(plan);
+  const eventTotal = progress.counts.createdEvents + progress.counts.replacedEvents + progress.counts.skippedEvents;
+  const videoTotal = progress.counts.createdVideos + progress.counts.replacedVideos + progress.counts.skippedVideos;
+  const questionTotal = progress.counts.createdCustomQuestions + progress.counts.reusedCustomQuestions;
+  const countsWithinPlan =
+    eventTotal <= plan.events.length &&
+    videoTotal <= plan.videos.length &&
+    progress.counts.createdXUsers <= plan.xUsers.length &&
+    progress.counts.createdAuthUsers <= plan.xUsers.length &&
+    progress.counts.createdSoftwares <= softwareCount(plan) &&
+    questionTotal <= plan.eventCustomQuestions.length;
+  const planVideoIds = new Set(plan.videos.map((video) => video.id));
+  const planEventIds = new Set(plan.events.map((event) => event.id));
+  return countsWithinPlan &&
+    progress.index < limits[progress.stage] &&
+    progress.skipExistingEventIds.every((id) => planEventIds.has(id)) &&
+    progress.skipExistingVideoIds.every((id) => planVideoIds.has(id));
+}
+
+function nextPosition(
+  plan: CanonicalLegacyPlan,
+  progress: LegacyImportApplyProgress,
+): Pick<LegacyImportApplyProgress, "stage" | "index"> | null {
+  switch (progress.stage) {
+    case "system_user":
+      return { stage: "x_users", index: 0 };
+    case "x_users":
+      return progress.index + 1 < stageLimits(plan).x_users
+        ? { stage: "x_users", index: progress.index + 1 }
+        : { stage: "softwares", index: 0 };
+    case "softwares":
+      return progress.index + 1 < stageLimits(plan).softwares
+        ? { stage: "softwares", index: progress.index + 1 }
+        : { stage: "events", index: 0 };
+    case "events":
+      return progress.index + 1 < stageLimits(plan).events
+        ? { stage: "events", index: progress.index + 1 }
+        : { stage: "custom_questions", index: 0 };
+    case "custom_questions":
+      return progress.index + 1 < stageLimits(plan).custom_questions
+        ? { stage: "custom_questions", index: progress.index + 1 }
+        : { stage: "videos", index: 0 };
+    case "videos":
+      return progress.index + 1 < stageLimits(plan).videos
+        ? { stage: "videos", index: progress.index + 1 }
+        : { stage: "complete", index: 0 };
+    case "complete":
+      return null;
+  }
+}
+
+function countTransitionValid(
+  plan: CanonicalLegacyPlan,
+  previous: LegacyImportApplyProgress,
+  next: LegacyImportApplyProgress,
+): boolean {
+  const keys = Object.keys(previous.counts) as (keyof LegacyImportApplyCounts)[];
+  const deltas = Object.fromEntries(
+    keys.map((key) => [key, next.counts[key] - previous.counts[key]]),
+  ) as LegacyImportApplyCounts;
+  if (keys.some((key) => deltas[key] < 0)) return false;
+  const only = (allowed: readonly (keyof LegacyImportApplyCounts)[]) =>
+    keys.every((key) => allowed.includes(key) || deltas[key] === 0);
+
+  switch (previous.stage) {
+    case "system_user":
+      return keys.every((key) => deltas[key] === 0);
+    case "x_users": {
+      const remaining = Math.max(0, plan.xUsers.length - previous.index * X_USER_STEP_SIZE);
+      return (
+        only(["createdXUsers", "createdAuthUsers"]) &&
+        deltas.createdXUsers <= Math.min(X_USER_STEP_SIZE, remaining) &&
+        deltas.createdAuthUsers <= Math.min(X_USER_STEP_SIZE, remaining)
+      );
+    }
+    case "softwares": {
+      const remaining = Math.max(0, softwareCount(plan) - previous.index * SOFTWARE_STEP_SIZE);
+      return only(["createdSoftwares"]) && deltas.createdSoftwares <= Math.min(SOFTWARE_STEP_SIZE, remaining);
+    }
+    case "events": {
+      const delta = deltas.createdEvents + deltas.replacedEvents + deltas.skippedEvents;
+      return only(["createdEvents", "replacedEvents", "skippedEvents"]) && delta === (plan.events.length ? 1 : 0);
+    }
+    case "custom_questions": {
+      const remaining = Math.max(0, plan.eventCustomQuestions.length - previous.index * QUESTION_STEP_SIZE);
+      const delta = deltas.createdCustomQuestions + deltas.reusedCustomQuestions;
+      return only(["createdCustomQuestions", "reusedCustomQuestions"]) && delta <= Math.min(QUESTION_STEP_SIZE, remaining);
+    }
+    case "videos": {
+      const delta = deltas.createdVideos + deltas.replacedVideos + deltas.skippedVideos;
+      return only(["createdVideos", "replacedVideos", "skippedVideos"]) && delta === (plan.videos.length ? 1 : 0);
+    }
+    case "complete":
+      return false;
+  }
+}
+
 function parseStoredPreview(raw: string): StoredPreview {
   let value: unknown;
   try {
@@ -120,16 +289,30 @@ function parseStoredPreview(raw: string): StoredPreview {
     throw new LegacyImportPreviewError("保存済みpreview planが不正です。", "invalid_record");
   }
   const record = value as Partial<StoredPreview>;
+  const plan = record.plan as Partial<CanonicalLegacyPlan> | undefined;
+  const planArrays: (keyof CanonicalLegacyPlan)[] = [
+    "events", "eventStaff", "xUsers", "videos", "videoEvents", "videoMembers",
+    "videoChapters", "videoSoftwares", "eventCustomQuestions", "videoCustomAnswers",
+    "videoFieldDecisions", "unmappedVideoFields", "warnings", "errors",
+  ];
   if (
     record.version !== PREVIEW_VERSION ||
     typeof record.previewToken !== "string" ||
     typeof record.authUserId !== "string" ||
     typeof record.planHash !== "string" ||
+    !PLAN_HASH_PATTERN.test(record.planHash) ||
     typeof record.createdAt !== "number" ||
     typeof record.expiresAt !== "number" ||
-    (record.status !== "ready" && record.status !== "claimed") ||
+    (record.status !== "ready" && record.status !== "claimed" && record.status !== "completed") ||
     typeof record.attempt !== "number" ||
-    !record.plan ||
+    !isValidApplyProgress(record.progress) ||
+    !plan ||
+    !planArrays.every((key) => Array.isArray(plan[key])) ||
+    !progressWithinPlan(plan as CanonicalLegacyPlan, record.progress) ||
+    (record.status === "claimed" &&
+      (typeof record.claimId !== "string" || typeof record.claimExpiresAt !== "number")) ||
+    (record.status === "completed" &&
+      (record.progress.stage !== "complete" || typeof record.completedAt !== "number")) ||
     (record.strategy !== "create_only" &&
       record.strategy !== "skip_existing" &&
       record.strategy !== "replace_imported")
@@ -152,6 +335,8 @@ function putOptions(record: StoredPreview, etagMatches?: string): R2PutOptions {
       plan_hash: record.planHash,
       expires_at: String(record.expiresAt),
       status: record.status,
+      stage: record.progress.stage,
+      index: String(record.progress.index),
     },
   };
 }
@@ -162,6 +347,8 @@ export async function createLegacyImportPreview(
     authUserId: string;
     strategy: LegacyImportStrategy;
     plan: CanonicalLegacyPlan;
+    skipExistingEventIds?: readonly string[];
+    skipExistingVideoIds?: readonly string[];
   },
   options: CreateOptions = {},
 ): Promise<LegacyImportPreviewCredential> {
@@ -173,6 +360,20 @@ export async function createLegacyImportPreview(
     throw new LegacyImportPreviewError("preview tokenの形式が不正です。", "invalid_token");
   }
   const planHash = await sha256Hex(planEnvelope(input.authUserId, input.strategy, input.plan));
+  const planEventIds = new Set(input.plan.events.map((event) => event.id));
+  const planVideoIds = new Set(input.plan.videos.map((video) => video.id));
+  const skipExistingEventIds = input.strategy === "skip_existing"
+    ? [...new Set(input.skipExistingEventIds ?? [])].sort()
+    : [];
+  const skipExistingVideoIds = input.strategy === "skip_existing"
+    ? [...new Set(input.skipExistingVideoIds ?? [])].sort()
+    : [];
+  if (
+    skipExistingEventIds.some((id) => !planEventIds.has(id)) ||
+    skipExistingVideoIds.some((id) => !planVideoIds.has(id))
+  ) {
+    throw new LegacyImportPreviewError("既存ID snapshotがplanと一致しません。", "invalid_record");
+  }
   const record: StoredPreview = {
     version: PREVIEW_VERSION,
     previewToken,
@@ -184,6 +385,25 @@ export async function createLegacyImportPreview(
     expiresAt: now + PREVIEW_TTL_SECONDS,
     status: "ready",
     attempt: 0,
+    progress: {
+      stage: "system_user",
+      index: 0,
+      counts: {
+        createdEvents: 0,
+        replacedEvents: 0,
+        skippedEvents: 0,
+        createdVideos: 0,
+        replacedVideos: 0,
+        skippedVideos: 0,
+        createdXUsers: 0,
+        createdAuthUsers: 0,
+        createdSoftwares: 0,
+        createdCustomQuestions: 0,
+        reusedCustomQuestions: 0,
+      },
+      skipExistingEventIds,
+      skipExistingVideoIds,
+    },
   };
   const serialized = JSON.stringify(record);
   if (serializedBytes(serialized) > MAX_STORED_PLAN_BYTES) {
@@ -212,7 +432,7 @@ export async function claimLegacyImportPreview(
   assertBucket(bucket);
   const safeBucket = bucket;
   const previewToken = input.previewToken.toLowerCase();
-  if (!TOKEN_PATTERN.test(previewToken) || !/^[a-f0-9]{64}$/.test(input.planHash)) {
+  if (!TOKEN_PATTERN.test(previewToken) || !PLAN_HASH_PATTERN.test(input.planHash)) {
     throw new LegacyImportPreviewError("preview tokenまたはplan hashが不正です。", "invalid_token");
   }
   const key = await previewKey(input.authUserId, previewToken);
@@ -226,7 +446,6 @@ export async function claimLegacyImportPreview(
   const record = parseStoredPreview(await object.text());
   const now = options.now ?? nowSeconds();
   if (record.expiresAt <= now) {
-    await safeBucket.delete(key);
     throw new LegacyImportPreviewError(
       "previewの有効期限が切れました。再度プレビューしてください。",
       "expired",
@@ -241,6 +460,21 @@ export async function claimLegacyImportPreview(
       "preview後にplanが変更されています。再度プレビューしてください。",
       "hash_mismatch",
     );
+  }
+  if (record.status === "completed") {
+    return {
+      plan: record.plan,
+      strategy: record.strategy,
+      planHash: record.planHash,
+      attempt: record.attempt,
+      completed: true,
+      progress: record.progress,
+      advance: async () => {
+        throw new LegacyImportPreviewError("完了済みpreviewの進捗は変更できません。", "claim_conflict");
+      },
+      complete: async () => record.expiresAt,
+      release: async () => undefined,
+    };
   }
   if (record.status === "claimed" && (record.claimExpiresAt ?? record.expiresAt) > now) {
     throw new LegacyImportPreviewError(
@@ -270,11 +504,17 @@ export async function claimLegacyImportPreview(
   }
 
   let settled = false;
+  let settledExpiresAt = claimed.expiresAt;
+  const claimClock = () => options.now ?? nowSeconds();
   async function currentClaim(): Promise<{ object: R2ObjectBody; record: StoredPreview } | null> {
     const current = await safeBucket.get(key);
     if (!current) return null;
     const currentRecord = parseStoredPreview(await current.text());
     if (currentRecord.claimId !== claimId || currentRecord.status !== "claimed") return null;
+    const currentNow = claimClock();
+    if (currentRecord.expiresAt <= currentNow || (currentRecord.claimExpiresAt ?? 0) <= currentNow) {
+      return null;
+    }
     return { object: current, record: currentRecord };
   }
 
@@ -283,8 +523,70 @@ export async function claimLegacyImportPreview(
     strategy: claimed.strategy,
     planHash: claimed.planHash,
     attempt: claimed.attempt,
+    completed: false,
+    progress: claimed.progress,
+    advance: async (nextProgress: LegacyImportApplyProgress) => {
+      if (settled) {
+        throw new LegacyImportPreviewError("preview claim is already settled", "claim_conflict");
+      }
+      if (!isValidApplyProgress(nextProgress)) {
+        throw new LegacyImportPreviewError("preview progress is invalid", "invalid_record");
+      }
+      const current = await currentClaim();
+      if (!current) {
+        throw new LegacyImportPreviewError("preview claim is no longer valid", "claim_conflict");
+      }
+      const expectedPosition = nextPosition(current.record.plan, current.record.progress);
+      const validStep = !!expectedPosition &&
+        nextProgress.stage === expectedPosition.stage &&
+        nextProgress.index === expectedPosition.index;
+      const skipSnapshotValid =
+        JSON.stringify(nextProgress.skipExistingEventIds) ===
+          JSON.stringify(current.record.progress.skipExistingEventIds) &&
+        JSON.stringify(nextProgress.skipExistingVideoIds) ===
+          JSON.stringify(current.record.progress.skipExistingVideoIds);
+      if (
+        !validStep ||
+        !countTransitionValid(current.record.plan, current.record.progress, nextProgress) ||
+        !skipSnapshotValid ||
+        !progressWithinPlan(current.record.plan, nextProgress)
+      ) {
+        throw new LegacyImportPreviewError("preview progress must advance monotonically", "claim_conflict");
+      }
+      const next: StoredPreview = nextProgress.stage === "complete"
+        ? {
+            ...current.record,
+            status: "completed",
+            progress: nextProgress,
+            claimId: undefined,
+            claimExpiresAt: undefined,
+            completedAt: claimClock(),
+            expiresAt: Math.min(
+              current.record.createdAt + 2 * 60 * 60,
+              claimClock() + PREVIEW_TTL_SECONDS,
+            ),
+          }
+        : {
+            ...current.record,
+            status: "ready",
+            progress: nextProgress,
+            claimId: undefined,
+            claimExpiresAt: undefined,
+            expiresAt: Math.min(
+              current.record.createdAt + 2 * 60 * 60,
+              claimClock() + PREVIEW_TTL_SECONDS,
+            ),
+          };
+      const advanced = await safeBucket.put(key, JSON.stringify(next), putOptions(next, current.object.etag));
+      if (!advanced) {
+        throw new LegacyImportPreviewError("preview progress update conflicted", "claim_conflict");
+      }
+      settled = true;
+      settledExpiresAt = next.expiresAt;
+      return next.expiresAt;
+    },
     complete: async () => {
-      if (settled) return;
+      if (settled) return settledExpiresAt;
       const current = await currentClaim();
       if (!current) {
         throw new LegacyImportPreviewError(
@@ -292,8 +594,29 @@ export async function claimLegacyImportPreview(
           "claim_conflict",
         );
       }
-      await safeBucket.delete(key);
+      if (current.record.progress.stage !== "complete") {
+        throw new LegacyImportPreviewError("未完了のpreview planは完了にできません。", "claim_conflict");
+      }
+      const now = claimClock();
+      const completed: StoredPreview = {
+        ...current.record,
+        status: "completed",
+        claimId: undefined,
+        claimExpiresAt: undefined,
+        completedAt: now,
+        expiresAt: Math.min(current.record.createdAt + 2 * 60 * 60, now + PREVIEW_TTL_SECONDS),
+      };
+      const stored = await safeBucket.put(
+        key,
+        JSON.stringify(completed),
+        putOptions(completed, current.object.etag),
+      );
+      if (!stored) {
+        throw new LegacyImportPreviewError("preview planの完了確定が競合しました。", "claim_conflict");
+      }
       settled = true;
+      settledExpiresAt = completed.expiresAt;
+      return completed.expiresAt;
     },
     release: async () => {
       if (settled) return;

@@ -44,11 +44,18 @@ export function getEffectiveEventStart(ev: EventStatusInput): number | null {
   return ev.start_time ?? null;
 }
 
+/** 開催期間が片方だけ設定されたシリーズ企画（点イベント）。 */
+export function isPointEvent(ev: EventStatusInput): boolean {
+  return (ev.start_time != null) !== (ev.end_time != null);
+}
+
 export function computeEventStatus(
   ev: EventStatusInput,
   now: number = Math.floor(Date.now() / 1000),
 ): EventDisplayStatus {
   if (getEventVisibility(ev) !== "public") return "private";
+
+  if (isPointEvent(ev)) return "published";
 
   const effectiveEnd = getEffectiveEventEnd(ev);
   if (effectiveEnd != null && effectiveEnd <= now) return "ended";

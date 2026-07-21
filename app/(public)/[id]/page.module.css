@@ -30,7 +30,32 @@
   min-width: 0;
 }
 
-.membersBlock {
+.chapterRail > :not(.chapterBody) {
+  flex-shrink: 0;
+}
+
+.chapterBody {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+  max-height: min(52vh, 520px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  padding-right: 2px;
+}
+
+.chapterBody::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chapterBody::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+}
+
+.section.membersBlock {
   grid-area: members;
   min-width: 0;
   margin-top: 0;
@@ -393,6 +418,17 @@
   .chapterRail {
     position: sticky;
     top: calc(var(--header-h, 64px) + 18px);
+    align-self: start;
+    max-height: calc(100svh - var(--header-h, 64px) - 36px);
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .chapterBody {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
   }
 }
 

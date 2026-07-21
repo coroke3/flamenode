@@ -24,6 +24,13 @@ if (process.env.FLAMENODE_SCALAR_EXECUTION !== "1") {
     before: { title: "before" },
     after: { title: `after-${index}` },
   });
+  const makeMutation = () => ({
+    kind: "mutation",
+    _prepare: () => ({
+      getQuery: () => ({ sql: "mutation", params: [] }),
+      stmt: { bind: () => ({}) },
+    }),
+  });
   const dbFor = (failure) => {
     const state = { batches: [], committed: false };
     const selectChain = {
@@ -32,7 +39,34 @@ if (process.env.FLAMENODE_SCALAR_EXECUTION !== "1") {
     };
     const db = {
       select: () => ({ from: () => selectChain }),
-      run: (query) => ({ query }),
+      run: (query) => {
+        const sequel =
+          typeof query === "string"
+            ? { sql: query, params: [] }
+            : typeof query?.getSQL === "function"
+              ? (() => {
+                  const sqlQuery = query.getSQL();
+                  return {
+                    sql: String(sqlQuery),
+                    params: sqlQuery.shouldInlineParams
+                      ? []
+                      : Array.isArray(sqlQuery.params)
+                        ? [...sqlQuery.params]
+                        : [],
+                  };
+                })()
+              : { sql: String(query), params: [] };
+        return {
+          query,
+          config: { action: "run" },
+          getSQL: () => query,
+          getQuery: () => sequel,
+          _prepare: () => ({
+            getQuery: () => sequel,
+            stmt: { bind: () => ({}) },
+          }),
+        };
+      },
       batch: async (items) => {
         state.batches.push(items);
         if (failure) throw new Error("mutation changes assertion failure");
@@ -46,7 +80,7 @@ if (process.env.FLAMENODE_SCALAR_EXECUTION !== "1") {
   test("scalar + 5 audits は本体assertion後に全chunkを成功させる", async () => {
     const { db, state } = dbFor(false);
     const ids = await mutateWithAudit(db, {
-      mutationStatements: [{ kind: "mutation" }],
+      mutationStatements: [makeMutation()],
       expectedMutationChanges: 1,
       audits: Array.from({ length: 5 }, (_, index) => audit(index)),
     });
@@ -59,7 +93,7 @@ if (process.env.FLAMENODE_SCALAR_EXECUTION !== "1") {
     const { db, state } = dbFor(true);
     await assert.rejects(
       mutateWithAudit(db, {
-        mutationStatements: [{ kind: "mutation" }],
+        mutationStatements: [makeMutation()],
         expectedMutationChanges: 1,
         audits: Array.from({ length: 5 }, (_, index) => audit(index)),
       }),
@@ -74,7 +108,7 @@ if (process.env.FLAMENODE_SCALAR_EXECUTION !== "1") {
     const { db, state } = dbFor(false);
     await assert.rejects(
       mutateWithAudit(db, {
-        mutationStatements: [{ kind: "mutation" }, { kind: "mutation" }],
+        mutationStatements: [makeMutation(), makeMutation()],
         expectedMutationChanges: 1,
         audits: [audit(0)],
       }),

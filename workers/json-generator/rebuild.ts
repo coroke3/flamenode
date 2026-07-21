@@ -4,6 +4,7 @@ import {
   resolveEventFreshness,
 } from "./freshness.ts";
 import { staticArtifactContentHash } from "./r2Dedup.ts";
+import { PUBLIC_LISTABLE_X_APPROVAL_SQL_IN } from "../../src/lib/utils/publicXUser.ts";
 
 type Env = { DB: D1Database; R2: R2Bucket; KV: KVNamespace };
 type RebuildSignal = AbortSignal | undefined;
@@ -27,6 +28,12 @@ const EVENT_INDEX_COLUMNS = `
 `;
 
 const PVSF_SUMMARY_EVENT_ID = "PVSFSummary";
+
+/** 点イベント（片方だけ期間設定）を除外する WHERE 句。 */
+const NON_POINT_EVENT_PERIOD_SQL = `(
+  (start_time IS NULL AND end_time IS NULL)
+  OR (start_time IS NOT NULL AND end_time IS NOT NULL)
+)`;
 
 function throwIfAborted(signal: RebuildSignal): void {
   if (!signal?.aborted) return;
@@ -260,6 +267,7 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
       `SELECT ${EVENT_INDEX_COLUMNS}
        FROM events
        WHERE visibility_status = 'public'
+         AND ${NON_POINT_EVENT_PERIOD_SQL}
          AND (
            (CASE
               WHEN end_time IS NOT NULL THEN end_time
@@ -279,6 +287,7 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
       `SELECT ${EVENT_INDEX_COLUMNS}
        FROM events
        WHERE visibility_status = 'public'
+         AND ${NON_POINT_EVENT_PERIOD_SQL}
        ORDER BY start_time DESC
        LIMIT 12`,
     ).all<Record<string, unknown>>(),
@@ -314,7 +323,7 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
                )
            ) AS collab_count
          FROM x_users AS xu
-         WHERE xu.approval_status IN ('approved', 'pending')
+         WHERE xu.approval_status IN (${PUBLIC_LISTABLE_X_APPROVAL_SQL_IN})
        )
        SELECT id, x_name, icon_url, video_count, collab_count
        FROM creator_counts
@@ -364,7 +373,7 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
     env.DB.prepare(
       `SELECT COUNT(*) AS c
        FROM x_users
-       WHERE approval_status IN ('approved', 'pending')`,
+       WHERE approval_status IN (${PUBLIC_LISTABLE_X_APPROVAL_SQL_IN})`,
     ).first<{ c?: number }>(),
   ]);
 
@@ -457,6 +466,7 @@ async function rebuildEventsIndex(env: Env, signal?: RebuildSignal): Promise<voi
       `SELECT ${EVENT_INDEX_COLUMNS}
        FROM events
        WHERE visibility_status = 'public'
+         AND ${NON_POINT_EVENT_PERIOD_SQL}
        ORDER BY start_time DESC
        LIMIT ?`,
     ).bind(EVENTS_INDEX_MAX_ROWS).all<Record<string, unknown>>(),
@@ -525,6 +535,7 @@ async function rebuildEventGroupSections(env: Env, signal?: RebuildSignal): Prom
        INNER JOIN events e ON e.id = ege.event_id
        WHERE ege.event_group_id IN (${placeholders})
          AND e.visibility_status = 'public'
+         AND ${NON_POINT_EVENT_PERIOD_SQL}
      )
      SELECT group_id, ${eventColumns.join(", ")}
      FROM ranked_group_events
@@ -881,7 +892,7 @@ async function rebuildUser(env: Env, xId: string, signal?: RebuildSignal): Promi
   const user = await env.DB.prepare(
     `SELECT id, x_name, icon_url, profile_text, portfolio_contact,
             youtube_channel_url, other_social_links
-     FROM x_users WHERE id = ? AND approval_status = 'approved' LIMIT 1`,
+     FROM x_users WHERE id = ? AND approval_status IN (${PUBLIC_LISTABLE_X_APPROVAL_SQL_IN}) LIMIT 1`,
   )
     .bind(xId)
     .first();

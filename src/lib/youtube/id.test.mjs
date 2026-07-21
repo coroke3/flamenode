@@ -104,6 +104,15 @@ test("youtubeEmbedUrl: rel/modestbranding/playsinline が常に含まれる", ()
   assert.ok(!url.includes("enablejsapi=1"));
 });
 
+test("youtubeEmbedUrl: enableJsApi / origin オプション反映", () => {
+  const url = youtubeEmbedUrl("abc", {
+    enableJsApi: true,
+    origin: "https://flamenode.example",
+  });
+  assert.ok(url.includes("enablejsapi=1"));
+  assert.ok(url.includes("origin=https%3A%2F%2Fflamenode.example"));
+});
+
 test("youtubeEmbedUrl: autoplay/mute/start オプション反映", () => {
   const url = youtubeEmbedUrl("abc", { autoplay: true, mute: true, start: 30 });
   assert.ok(url.includes("autoplay=1"));

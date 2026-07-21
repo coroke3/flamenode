@@ -18,6 +18,7 @@ import { categorizePublicEvent } from "@/lib/utils/categorizePublicEvent";
 import {
   computeEventStatus,
   isAcceptingEntries,
+  isPointEvent,
   publicListableEventWhere,
 } from "@/lib/utils/eventStatus";
 import { compareEventsByUpcomingPriority } from "@/lib/utils/eventOrdering";
@@ -161,10 +162,6 @@ function sortEvents(
     }
     return fallback(a, b);
   });
-}
-
-function isPointEvent(ev: EventListEvent): boolean {
-  return (ev.start_time != null) !== (ev.end_time != null);
 }
 
 export default async function EventListPage({

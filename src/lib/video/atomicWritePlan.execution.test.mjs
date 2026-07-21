@@ -10,6 +10,24 @@ if (runTestWithTsx(import.meta.url)) {
     VideoAtomicPlanBudgetError,
   } = await import("./atomicWritePlan.ts");
 
+  const makePrepare = () => ({
+    getQuery: () => ({ sql: "mutation", params: [] }),
+    stmt: { bind: () => ({}) },
+  });
+
+  const mockRunnableFromRun = (query) => {
+    const sequel = { sql: String(query), params: [] };
+    return {
+      kind: "generated",
+      query,
+      getQuery: () => sequel,
+      _prepare: () => ({
+        getQuery: () => sequel,
+        stmt: { bind: () => ({}) },
+      }),
+    };
+  };
+
   const budgetPlan = (statementCount, auditCount) => ({
     statements: Array.from({ length: statementCount }, () => ({ kind: "mutation" })),
     expectedChanges: Array.from({ length: statementCount }, () => 1),
@@ -101,7 +119,7 @@ if (runTestWithTsx(import.meta.url)) {
     };
     const db = {
       select: () => ({ from: () => selectChain }),
-      run: (query) => ({ kind: "generated", query }),
+      run: (query) => mockRunnableFromRun(query),
       batch: async (items) => {
         sqlite.exec("BEGIN IMMEDIATE");
         try {
@@ -131,6 +149,7 @@ if (runTestWithTsx(import.meta.url)) {
 
   const mutation = (label, sqlText) => ({
     label,
+    _prepare: makePrepare,
     apply(sqlite) {
       sqlite.exec(sqlText);
     },

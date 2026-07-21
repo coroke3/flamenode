@@ -17,6 +17,7 @@ import {
   videos as videosTable,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
+import { publicListableXApprovalWhere } from "@/lib/utils/publicXUserWhere";
 import {
   HomeIntroBand,
   pickHeroEvents,
@@ -74,7 +75,7 @@ async function fetchTopPageFromDatabase(): Promise<StaticTopData | null> {
       db
         .select({ count: sql<number>`COUNT(*)` })
         .from(xUsersTable)
-        .where(sql`${xUsersTable.approval_status} IN ('approved', 'pending')`),
+        .where(publicListableXApprovalWhere(xUsersTable.approval_status)),
     ]);
 
     const eventVideoCounts = Object.fromEntries(

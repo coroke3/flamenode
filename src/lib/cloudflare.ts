@@ -1,6 +1,7 @@
 import "server-only";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getDb, type DB } from "./db/client";
+import { isTransientDbError } from "./db/transientDbErrorCore";
 
 declare global {
   interface CloudflareEnv {
@@ -47,37 +48,6 @@ export class CloudflareBindingsUnavailableError extends Error {
 }
 
 const memoizedDbs = new WeakMap<D1Database, DB>();
-
-/** ローカル Miniflare / リモート D1 接続の瞬断で付きやすいコード・メッセージ */
-const TRANSIENT_DB_MARKERS =
-  /ECONNRESET|ECONNREFUSED|ETIMEDOUT|fetch failed|UND_ERR_SOCKET|socket hang up/i;
-
-function isTransientDbError(err: unknown): boolean {
-  let cur: unknown = err;
-  const seen = new Set<unknown>();
-  for (let depth = 0; depth < 6 && cur != null; depth++) {
-    if (seen.has(cur)) break;
-    seen.add(cur);
-    if (typeof cur === "object") {
-      const o = cur as { code?: string; message?: string; cause?: unknown };
-      if (
-        o.code === "ECONNRESET" ||
-        o.code === "ECONNREFUSED" ||
-        o.code === "ETIMEDOUT"
-      )
-        return true;
-      if (
-        typeof o.message === "string" &&
-        TRANSIENT_DB_MARKERS.test(o.message)
-      )
-        return true;
-      cur = o.cause;
-      continue;
-    }
-    break;
-  }
-  return false;
-}
 
 function clearDatabaseMemo(binding: D1Database): void {
   memoizedDbs.delete(binding);

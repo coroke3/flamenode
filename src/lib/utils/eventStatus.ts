@@ -6,6 +6,7 @@ import {
   eventStatusLabel,
   getEventVisibility,
   isAcceptingEntries,
+  isPointEvent,
   isPublicEventVisible,
   type EventDisplayStatus,
   type EventStatusInput,
@@ -18,13 +19,23 @@ export {
   eventStatusLabel,
   getEventVisibility,
   isAcceptingEntries,
+  isPointEvent,
   isPublicEventVisible,
 };
 export type { EventDisplayStatus, EventStatusInput, EventVisibilityStatus };
 
+/** 点イベント以外（両方未設定、または両方設定済み）。 */
+export function boundedOrOpenEndedEventPeriodWhere() {
+  return sql`(
+    (${events.start_time} IS NULL AND ${events.end_time} IS NULL)
+    OR (${events.start_time} IS NOT NULL AND ${events.end_time} IS NOT NULL)
+  )`;
+}
+
 export function activeEventWhere(now: number = Math.floor(Date.now() / 1000)) {
   return and(
     eq(events.visibility_status, "public"),
+    boundedOrOpenEndedEventPeriodWhere(),
     sql`(${events.end_time} IS NULL OR ${events.end_time} > ${now})`,
   );
 }
