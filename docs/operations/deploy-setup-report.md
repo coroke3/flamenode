@@ -33,7 +33,7 @@ production の固定 deploy 順（1 push = 1 Build）:
 ```text
 main push
   -> npm ci（1回）
-  -> verify:fast
+  -> verify:cloud（deploy契約検査のみ）
   -> OpenNext build（1回）
   -> flamenode-web
   -> flamenode-fast-jobs
@@ -237,11 +237,13 @@ Build Secrets（名前のみ）:
 
 ## 8. ローカルでデプロイ直前まで確認するコマンド
 
-依存関係インストール後、本番 Build と同じ高速検査と OpenNext build をローカルで通す。
+依存関係インストール後、ローカルでは`verify:fast`、Workers Builds と同じ経路を確認するなら`verify:cloud`と OpenNext build を通す。
 
 ```sh
 npm ci --no-audit --no-fund
 npm run verify:fast
+# Workers Builds と同経路だけ確認する場合:
+# npm run verify:cloud
 ```
 
 OpenNext 成果物（commit SHA 埋め込み必須）:

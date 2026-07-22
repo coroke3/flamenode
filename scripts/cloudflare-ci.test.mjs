@@ -16,7 +16,9 @@ import {
   deploymentEnvironment,
 } from "./cloudflare-deploy-production.mjs";
 import {
+  CLOUD_BUILD_VERIFY_STEPS,
   FAST_VERIFY_STEPS,
+  runCloudBuildVerification,
   runFastVerification,
 } from "./cloudflare-verify-fast.mjs";
 import {
@@ -436,6 +438,24 @@ test("fast verification runs the bounded npm script list in order and stops on t
     }),
   );
   assert.deepEqual(failed, ["typecheck", "lint", "test:critical"]);
+});
+
+test("cloud build verification keeps only deploy-contract checks", () => {
+  const calls = [];
+  const completed = runCloudBuildVerification({
+    env: productionEnv(),
+    npmInvocation: { executable: process.execPath, argsPrefix: ["npm-cli.js"] },
+    run: ({ executable, args, label }) => calls.push({ executable, args, label }),
+  });
+  assert.deepEqual(completed, [...CLOUD_BUILD_VERIFY_STEPS]);
+  assert.deepEqual(
+    calls.map((call) => call.args),
+    CLOUD_BUILD_VERIFY_STEPS.map((name) => ["npm-cli.js", "run", name]),
+  );
+  assert.ok(!CLOUD_BUILD_VERIFY_STEPS.includes("typecheck"));
+  assert.ok(!CLOUD_BUILD_VERIFY_STEPS.includes("lint"));
+  assert.ok(!CLOUD_BUILD_VERIFY_STEPS.includes("test:critical"));
+  assert.ok(!CLOUD_BUILD_VERIFY_STEPS.includes("test:workers"));
 });
 
 test("child processes use argv with shell disabled and redact IDs/secrets", () => {

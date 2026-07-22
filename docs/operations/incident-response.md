@@ -14,7 +14,8 @@ binding、remote secret名、commit SHA、schema versionが一致しない場合
 | 失敗stage | 最初に確認するもの |
 | --- | --- |
 | dependency install | Node 22、`SKIP_DEPENDENCY_INSTALL=true`、lockfile、`npm ci`の最初のerror |
-| `verify:fast` | typecheck、lint、critical test、Worker test、Cloudflare契約、公開API漏洩検査の最初の失敗 |
+| `verify:cloud` | Cloudflare CI契約、template検査の最初の失敗（Workers Builds） |
+| `verify:fast` | typecheck、lint、critical test、Worker test、Cloudflare契約、公開API漏洩検査の最初の失敗（ローカル） |
 | OpenNext build | Next.js compile、runtime非互換import、request context、`.open-next/worker.js`生成 |
 | artifact検査 | Static Assets、commit manifest、旧形式artifact、secret/resource値混入 |
 | production環境検査 | 不足した変数名、URL形式、40桁SHAとGit HEAD、placeholder ID |

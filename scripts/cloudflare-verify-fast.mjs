@@ -15,6 +15,12 @@ export const FAST_VERIFY_STEPS = Object.freeze([
   "check:public-api-leaks",
 ]);
 
+/** Workers Builds 向け。重い unit/lint は含めず deploy 契約検査だけにする。 */
+export const CLOUD_BUILD_VERIFY_STEPS = Object.freeze([
+  "test:cloudflare-ci",
+  "check:cloudflare-template",
+]);
+
 export function resolveNpmInvocation({ env = process.env } = {}) {
   const explicitCli = env.CLOUDFLARE_NPM_CLI?.trim();
   if (explicitCli) {
@@ -38,25 +44,43 @@ export function resolveNpmInvocation({ env = process.env } = {}) {
   return { executable: process.execPath, argsPrefix: [cli] };
 }
 
-export function runFastVerification({
+function runVerificationSteps({
+  steps,
+  labelPrefix,
   env = process.env,
   repoRoot = process.cwd(),
   run = runProcess,
   npmInvocation = resolveNpmInvocation({ env }),
-} = {}) {
+}) {
   const completed = [];
-  for (const script of FAST_VERIFY_STEPS) {
+  for (const script of steps) {
     run({
       executable: npmInvocation.executable,
       args: [...npmInvocation.argsPrefix, "run", script],
       cwd: repoRoot,
       env,
-      label: `cloudflare-verify-fast:${script}`,
+      label: `${labelPrefix}:${script}`,
     });
     completed.push(script);
   }
-  console.log(`[cloudflare-verify-fast] OK (${completed.length} steps)`);
+  console.log(`[${labelPrefix}] OK (${completed.length} steps)`);
   return completed;
+}
+
+export function runFastVerification(options = {}) {
+  return runVerificationSteps({
+    ...options,
+    steps: FAST_VERIFY_STEPS,
+    labelPrefix: "cloudflare-verify-fast",
+  });
+}
+
+export function runCloudBuildVerification(options = {}) {
+  return runVerificationSteps({
+    ...options,
+    steps: CLOUD_BUILD_VERIFY_STEPS,
+    labelPrefix: "cloudflare-verify-cloud",
+  });
 }
 
 function isMain() {
@@ -64,10 +88,17 @@ function isMain() {
 }
 
 if (isMain()) {
+  const mode = process.argv[2] === "--cloud" ? "cloud" : "fast";
   try {
-    runFastVerification();
+    if (mode === "cloud") {
+      runCloudBuildVerification();
+    } else {
+      runFastVerification();
+    }
   } catch (error) {
-    console.error(`[cloudflare-verify-fast] FAILED\n${error.message}`);
+    console.error(
+      `[${mode === "cloud" ? "cloudflare-verify-cloud" : "cloudflare-verify-fast"}] FAILED\n${error.message}`,
+    );
     process.exitCode = 1;
   }
 }

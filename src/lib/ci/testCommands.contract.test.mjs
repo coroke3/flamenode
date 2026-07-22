@@ -16,6 +16,10 @@ test("UnitとWorkerテストは重複せず両方実行される", () => {
   assert.match(pkg.scripts["test:workers"], /workers\/\*\*\/\*\.test\.mjs/);
   assert.match(pkg.scripts["verify:full"], /npm run test:unit/);
   assert.match(pkg.scripts["verify:fast"], /cloudflare-verify-fast\.mjs/);
+  assert.match(pkg.scripts["verify:cloud"], /cloudflare-verify-fast\.mjs --cloud/);
+  assert.match(pkg.scripts["cf:cloud-build"], /npm run verify:cloud/);
+  assert.doesNotMatch(pkg.scripts["cf:cloud-build"], /npm run verify:fast/);
   assert.match(verifyFast, /"test:workers"/);
+  assert.match(verifyFast, /CLOUD_BUILD_VERIFY_STEPS/);
   assert.match(pkg.scripts["cf:preflight"], /npm run verify:full/);
 });

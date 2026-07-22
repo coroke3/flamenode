@@ -25,7 +25,7 @@ productionの固定順は次です。
 ```text
 main push
   -> npm ci（1回）
-  -> verify:fast
+  -> verify:cloud（deploy契約検査のみ）
   -> OpenNext build（1回）
   -> flamenode-web
   -> flamenode-fast-jobs
@@ -208,7 +208,7 @@ PowerShellでは`$env:WORKERS_CI_COMMIT_SHA = (git rev-parse HEAD).Trim()`を使
 
 ## 7. Build・deploy・smoke
 
-`npm run cf:cloud-build`は高速検査後、OpenNext buildを1回実行し、Worker entrypoint、Static Assets、commit manifest、旧形式artifact、機密値混入を検査します。各stepは開始、終了、所要時間だけを安全にlogへ出します。
+`npm run cf:cloud-build`は`verify:cloud`（`test:cloudflare-ci`と`check:cloudflare-template`のみ）の後、OpenNext buildを1回実行し、Worker entrypoint、Static Assets、commit manifest、旧形式artifact、機密値混入を検査します。typecheck、lint、critical/Worker unit testはWorkers Buildsでは走らせず、ローカルの`verify:fast` / `cf:preflight`で行う。各stepは開始、終了、所要時間だけを安全にlogへ出します。
 
 Deploy commandは次を行います。
 
@@ -276,7 +276,7 @@ code rollbackで旧schema fallback、二重書込み、runtime DDLを復活さ�
 
 ## 11. 障害時の確認順
 
-1. Workers Buildの`npm ci`、`verify:fast`、OpenNext build、artifact検査のどこで失敗したか確認する。
+1. Workers Buildの`npm ci`、`verify:cloud`、OpenNext build、artifact検査のどこで失敗したか確認する。
 2. production環境検査が示す不足した**変数名、secret名、Worker名だけ**を確認する。
 3. Remote D1 preflightのschema version、必須table、migration名を確認する。
 4. Web→fast→content→syncのどこまで同じcommitでdeployされたか確認する。
