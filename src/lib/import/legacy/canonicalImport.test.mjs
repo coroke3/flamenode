@@ -3,7 +3,7 @@ import test from "node:test";
 import fs from "node:fs";
 import path from "node:path";
 import { parseLegacyImportText } from "./parse.ts";
-import { selectLegacyParsedFileRange } from "./range.ts";
+import { selectLegacyParsedFileRange, suggestLegacyImportRowRanges } from "./range.ts";
 import {
   legacyImportCpuBudgetErrors,
   MAX_LEGACY_IMPORT_SELECTED_ROWS,
@@ -787,6 +787,30 @@ test("不正またはファイル外の読み込み範囲をfail closedで拒否
   );
 });
 
+test("suggestLegacyImportRowRangesは1始まりの非重複範囲へtotalRowsを分割する", () => {
+  assert.deepEqual(suggestLegacyImportRowRanges(0), []);
+  assert.deepEqual(suggestLegacyImportRowRanges(-1), []);
+  assert.deepEqual(suggestLegacyImportRowRanges(10, 0), []);
+  assert.deepEqual(suggestLegacyImportRowRanges(1), [{ startRow: 1, endRow: 1 }]);
+  assert.deepEqual(suggestLegacyImportRowRanges(250), [{ startRow: 1, endRow: 250 }]);
+  assert.deepEqual(suggestLegacyImportRowRanges(251), [
+    { startRow: 1, endRow: 250 },
+    { startRow: 251, endRow: 251 },
+  ]);
+  assert.deepEqual(suggestLegacyImportRowRanges(500), [
+    { startRow: 1, endRow: 250 },
+    { startRow: 251, endRow: 500 },
+  ]);
+  assert.deepEqual(suggestLegacyImportRowRanges(501, 100), [
+    { startRow: 1, endRow: 100 },
+    { startRow: 101, endRow: 200 },
+    { startRow: 201, endRow: 300 },
+    { startRow: 301, endRow: 400 },
+    { startRow: 401, endRow: 500 },
+    { startRow: 501, endRow: 501 },
+  ]);
+});
+
 test("1原子stepの関連件数をCloudflare CPU予算内へ固定する", () => {
   const plan = fixturePlan();
   assert.deepEqual(legacyImportCpuBudgetErrors(plan), []);
@@ -920,6 +944,22 @@ test("preview routeとUIはファイルごとの範囲をplanへ固定する", (
   assert.match(client, /name=\{`range_end_\$\{index\}`\}/);
   assert.match(client, /今回の読み込み範囲/);
   assert.match(client, /同じ大きなファイルを複数回に分ける場合/);
+  assert.match(client, /suggestLegacyImportRowRanges/);
+  assert.match(client, /MAX_LEGACY_IMPORT_SELECTED_ROWS/);
+  assert.match(client, /先頭\{MAX_LEGACY_IMPORT_SELECTED_ROWS\}行を入力/);
+  assert.match(client, /この範囲を入力/);
+});
+
+test("apply routeは各ステップ適用前にCPU予算を再検査する", () => {
+  const root = path.resolve(import.meta.dirname, "../../../..");
+  const route = fs.readFileSync(path.join(root, "app/api/admin/import/legacy/route.ts"), "utf8");
+  const applyIndex = route.indexOf("const step = await applyLegacyImportPlanStep");
+  assert.ok(applyIndex > 0);
+  const applySection = route.slice(0, applyIndex);
+  assert.match(applySection, /legacyImportCpuBudgetErrors\(claimed\.plan\)/);
+  assert.match(applySection, /requires_repreview: true/);
+  assert.match(applySection, /await claimed\.release\(\)\.catch/);
+  assert.ok(applySection.indexOf("legacyImportCpuBudgetErrors(claimed.plan)") < applyIndex);
 });
 
 test("legacy importは1 HTTPのplan・step・連続送信をhard capする", () => {

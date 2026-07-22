@@ -42,6 +42,26 @@
   flex-wrap: wrap;
 }
 
+.rangeSuggestions {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+}
+
+.suggestedRanges {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.suggestedRangeItem {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 .emptyFiles {
   margin: 0;
 }

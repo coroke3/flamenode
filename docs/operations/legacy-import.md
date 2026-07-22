@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-23
-> Verified against commit: `7e942949`
+> Verified against commit: `3f6383c0` (pending re-verify after apply recheck + range suggestions)
 > Source of truth: `app/(admin)/admin/import/`, `app/api/admin/import/legacy/`, `src/lib/import/legacy/`
 
 旧JSON・CSV・TSVは、管理者専用の入力境界で新DB正本へ一方向変換します。通常ランタイム、公開API、Workerは旧形式を解釈しません。
@@ -14,7 +14,7 @@
 3. `normalize` がイベント、X名義、owner、作品、メンバー、チャプター、YouTube情報、使用ソフトを新正本DTOへ変換する。`eventinfo.json` の `menberpost` と、`video_new.json` の `memberchapter` もこの境界で解釈する。動画ファイルのみでも、参照 `eventid` からイベントを自動作成する（owner付き）。
 4. 動画行に正規カラムへ対応しない非空項目があれば、既定では警告付きで無視してプレビューを続行する。カスタム質問へ保存したい列だけ、任意で質問文Qを指定して再プレビューする。
 5. `preflight` が件数上限、参照整合性、owner、重複YouTube ID、質問・回答のevent整合、手動作成データの保護をread-onlyで検査する。
-6. preview内容と項目判断をR2へ署名付きで固定し、同じ計画だけをapplyする。apply時にファイルや項目判断を再解釈しない。
+6. preview内容と項目判断をR2へ署名付きで固定し、同じ計画だけをapplyする。apply時にファイルや項目判断を再解釈しない。各applyステップの直前に `legacyImportCpuBudgetErrors` でplanを再検査し、超過時はclaimを解放して `requires_repreview: true` を返す。
 7. applyはR2の継続カーソルに沿い、system_user → X名義群 → ソフト群 → イベント1件 → カスタム質問群 → 作品1件の原子単位で進める。各ステップは監査付きD1 batchで新正本へ保存し、同一batch内の変更とauditはいずれかが失敗するとまとめてrollbackする。Cloudflare Workersのsubrequest/CPU上限を入力件数に連動して消費しないよう、1 HTTP リクエストでは原子ステップを1件だけ確定する。途中失敗後は同じpreview tokenから再開できる。応答断で残ったR2 claimは1分で失効し、preview plan の最大存続時間は6時間。
 8. 旧形式インポート中はYouTube APIを呼ばない。YouTube IDがある作品には同期状態 `pending` だけを同一D1 batchで保存し、後続のsync-jobs cronが割当quota内で少しずつ取得する。
 
@@ -40,7 +40,7 @@
 
 ## 運用目安
 
-- 1回の選択範囲の合計上限は250行、1ファイル2MB、合計4MBとする。大きなJSONは「1〜250」「251〜500」のように重ならない範囲で複数回preview/applyするか、2MB以下へ物理分割する。物理的に分割した複数ファイルも同じ画面へ追加できる。
+- 1回の選択範囲の合計上限は250行、1ファイル2MB、合計4MBとする。大きなJSONは「1〜250」「251〜500」のように重ならない範囲で複数回preview/applyするか、2MB以下へ物理分割する。物理的に分割した複数ファイルも同じ画面へ追加できる。管理画面はファイル追加時に行数を推定し、250行超の場合は `suggestLegacyImportRowRanges` で提案した範囲をワンクリック入力できる。
 - 分割取込では既定の `skip_existing` を使い、各範囲のapply完了を確認してから次をpreviewする。同じ行を重ねて指定しても動画IDは決定的だが、重複範囲を処理済みと誤認しないよう、運用記録にはファイル名・開始・終了・plan hashを残す。
 - preview は正規化後planをR2へ固定する。applyごとのJSON parse/hash/CASをCloudflare CPU内に収めるため、保存planは512KBをhard capとし、80%超で警告する。イベント・作品1ステップは128KB以内で、作品ごとの所属イベント16、メンバー64、チャプター128、使用ソフト32、イベント運営64件まで。超過時は範囲・ファイルまたは1作品内データを分割する。
 - CPU hard cap導入前に作成した旧preview tokenは再開しない。デプロイ後は範囲を指定して新しいpreviewを作り直す。

@@ -144,6 +144,13 @@ requireAll("src/components/layout/ConsoleDrawer.tsx", [
   [/onClickCapture=\{\(event\) =>/, "リンク選択時にドロワーを閉じる処理がありません。"],
 ]);
 
+requireAll("src/components/video/ChapterTabs.tsx", [
+  [/subscribePlayerTime/, "再生時刻の購読がありません。"],
+  [/scrollIntoView/, "アクティブチャプターへの自動スクロールがありません。"],
+  [/followPlayback|再生に追従/, "再生追従の切替がありません。"],
+  [/findActiveChapterId/, "アクティブチャプター判定がありません。"],
+]);
+
 requireAll("src/components/layout/Shelf.tsx", [
   [/prefers-reduced-motion: reduce/, "reduced motion対応がありません。"],
   [/IntersectionObserver/, "viewport外停止がありません。"],
@@ -178,4 +185,4 @@ if (errors.length > 0) {
   process.exit(1);
 }
 
-console.log("[check:ui-acceptance] OK: entry, posting, lists, theme, console drawer, Shelf, and breakpoint contracts are present.");
+console.log("[check:ui-acceptance] OK: entry, posting, lists, theme, console drawer, ChapterTabs, Shelf, and breakpoint contracts are present.");

@@ -1,3 +1,4 @@
+import { MAX_LEGACY_IMPORT_SELECTED_ROWS } from "./cpuBudget.ts";
 import type { LegacyParsedFile } from "./parse";
 
 export type LegacyImportFileRange = {
@@ -12,6 +13,22 @@ export type RangedLegacyParsedFile = {
   file: LegacyParsedFile;
   range: LegacyImportFileRange;
 };
+
+/** 1始まり・終了を含む非重複範囲へ、totalRows を maxRows 単位で分割する。 */
+export function suggestLegacyImportRowRanges(
+  totalRows: number,
+  maxRows = MAX_LEGACY_IMPORT_SELECTED_ROWS,
+): Array<{ startRow: number; endRow: number }> {
+  if (totalRows < 1 || maxRows < 1) return [];
+  const ranges: Array<{ startRow: number; endRow: number }> = [];
+  let startRow = 1;
+  while (startRow <= totalRows) {
+    const endRow = Math.min(startRow + maxRows - 1, totalRows);
+    ranges.push({ startRow, endRow });
+    startRow = endRow + 1;
+  }
+  return ranges;
+}
 
 function positiveRowNumber(raw: string, label: string, fileName: string): number | null {
   const value = raw.trim();

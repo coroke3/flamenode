@@ -256,6 +256,19 @@ export async function POST(request: Request): Promise<NextResponse> {
         });
       }
 
+      const applyCpuBudgetErrors = legacyImportCpuBudgetErrors(claimed.plan);
+      if (applyCpuBudgetErrors.length > 0) {
+        await claimed.release().catch(() => undefined);
+        return error(
+          "Cloudflare Workerの1リクエスト上限を超える入力です。範囲または1作品内の関連データを分割してください。",
+          409,
+          {
+            requires_repreview: true,
+            errors: applyCpuBudgetErrors,
+          },
+        );
+      }
+
       // 1 HTTP リクエストでは原子ステップを1件だけ確定する。
       // 各ステップは複数のD1呼び出しとR2 CASを使うため、ここでループすると
       // Cloudflare Workersのsubrequest/CPU上限を入力件数に応じて超過しうる。

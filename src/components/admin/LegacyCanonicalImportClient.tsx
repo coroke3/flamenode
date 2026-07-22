@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import { MAX_LEGACY_IMPORT_SELECTED_ROWS } from "@/lib/import/legacy/cpuBudget";
+import { suggestLegacyImportRowRanges } from "@/lib/import/legacy/range";
 import styles from "./LegacyCanonicalImportClient.module.css";
 
 type ApiResponse = {
@@ -55,6 +57,52 @@ type PreviewCredential = {
 function selectedFileKey(file: File): string {
   return `${file.name}\u0000${file.size}\u0000${file.lastModified}`;
 }
+
+function isJsonFileName(name: string): boolean {
+  return /\.json$/i.test(name);
+}
+
+function isDelimitedFileName(name: string): boolean {
+  return /\.(csv|tsv)$/i.test(name);
+}
+
+function estimateJsonSourceRows(text: string): number {
+  const parsed: unknown = JSON.parse(text);
+  if (Array.isArray(parsed)) return parsed.length;
+  if (parsed && typeof parsed === "object") {
+    let largest = 0;
+    for (const value of Object.values(parsed as Record<string, unknown>)) {
+      if (Array.isArray(value) && value.length > largest) largest = value.length;
+    }
+    return largest;
+  }
+  return 0;
+}
+
+function estimateDelimitedSourceRows(text: string): number {
+  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).filter((line) => line.trim() !== "");
+  return Math.max(0, lines.length - 1);
+}
+
+async function estimateFileSourceRows(file: File): Promise<number | null> {
+  try {
+    const text = await file.text();
+    if (isJsonFileName(file.name)) return estimateJsonSourceRows(text);
+    if (isDelimitedFileName(file.name)) return estimateDelimitedSourceRows(text);
+    try {
+      return estimateJsonSourceRows(text);
+    } catch {
+      return estimateDelimitedSourceRows(text);
+    }
+  } catch {
+    return null;
+  }
+}
+
+type FileRangeInput = {
+  start: string;
+  end: string;
+};
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -174,6 +222,8 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
   const formRevisionRef = React.useRef(0);
   const submitInFlightRef = React.useRef(false);
   const [selectedFiles, setSelectedFiles] = React.useState<File[]>([]);
+  const [fileSourceRows, setFileSourceRows] = React.useState<Map<string, number | null>>(() => new Map());
+  const [fileRangeInputs, setFileRangeInputs] = React.useState<Map<string, FileRangeInput>>(() => new Map());
   const [result, setResult] = React.useState<ApiResponse | null>(null);
   const [pending, setPending] = React.useState<"preview" | "apply" | null>(null);
   const [credential, setCredentialState] = React.useState<PreviewCredential | null>(null);
@@ -199,6 +249,38 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
     }
   }, []);
 
+  React.useEffect(() => {
+    let cancelled = false;
+    const keys = selectedFiles.map(selectedFileKey);
+    setFileSourceRows((current) => {
+      const next = new Map<string, number | null>();
+      for (const key of keys) next.set(key, current.get(key) ?? null);
+      return next;
+    });
+    setFileRangeInputs((current) => {
+      const next = new Map<string, FileRangeInput>();
+      for (const key of keys) next.set(key, current.get(key) ?? { start: "", end: "" });
+      return next;
+    });
+
+    void (async () => {
+      for (const file of selectedFiles) {
+        const key = selectedFileKey(file);
+        const rows = await estimateFileSourceRows(file);
+        if (cancelled) return;
+        setFileSourceRows((current) => {
+          const next = new Map(current);
+          next.set(key, rows);
+          return next;
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedFiles]);
+
   const fieldDecisions = React.useMemo<VideoCustomFieldDecision[]>(() => {
     const decisions: VideoCustomFieldDecision[] = [];
     for (const candidate of fieldCandidates) {
@@ -218,6 +300,28 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
   function invalidatePreview(): void {
     formRevisionRef.current += 1;
     setCredential(null);
+  }
+
+  function setFileRangeInput(key: string, field: "start" | "end", value: string): void {
+    setFileRangeInputs((current) => {
+      const next = new Map(current);
+      const existing = current.get(key) ?? { start: "", end: "" };
+      next.set(
+        key,
+        field === "start" ? { ...existing, start: value } : { ...existing, end: value },
+      );
+      return next;
+    });
+    invalidatePreview();
+  }
+
+  function applySuggestedRange(key: string, startRow: number, endRow: number): void {
+    setFileRangeInputs((current) => {
+      const next = new Map(current);
+      next.set(key, { start: String(startRow), end: String(endRow) });
+      return next;
+    });
+    invalidatePreview();
   }
 
   function handleFormChange(): void {
@@ -527,10 +631,21 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
             <ul className={styles.fileList}>
               {selectedFiles.map((file, index) => {
                 const key = selectedFileKey(file);
+                const sourceRows = fileSourceRows.get(key);
+                const rangeInput = fileRangeInputs.get(key) ?? { start: "", end: "" };
+                const suggestedRanges =
+                  typeof sourceRows === "number" && sourceRows > MAX_LEGACY_IMPORT_SELECTED_ROWS
+                    ? suggestLegacyImportRowRanges(sourceRows)
+                    : [];
                 return (
                   <li key={key} className={styles.fileListItem}>
                     <code>{file.name}</code>
                     <span className="fn-muted fn-text-sm">({Math.ceil(file.size / 1024).toLocaleString()} KB)</span>
+                    {typeof sourceRows === "number" ? (
+                      <span className="fn-muted fn-text-sm">推定 {sourceRows.toLocaleString()} 行</span>
+                    ) : sourceRows === null ? (
+                      <span className="fn-muted fn-text-sm">行数を推定中…</span>
+                    ) : null}
                     <div className={styles.fileRow}>
                       <label className={styles.optionField}>
                         <span className="fn-muted fn-text-sm">開始位置（1始まり）</span>
@@ -543,6 +658,8 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
                           placeholder="先頭"
                           className="fn-input"
                           aria-label={`${file.name}の開始位置`}
+                          value={rangeInput.start}
+                          onChange={(event) => setFileRangeInput(key, "start", event.currentTarget.value)}
                         />
                       </label>
                       <label className={styles.optionField}>
@@ -556,9 +673,47 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
                           placeholder="末尾"
                           className="fn-input"
                           aria-label={`${file.name}の終了位置`}
+                          value={rangeInput.end}
+                          onChange={(event) => setFileRangeInput(key, "end", event.currentTarget.value)}
                         />
                       </label>
                     </div>
+                    {suggestedRanges.length > 0 ? (
+                      <div className={styles.rangeSuggestions}>
+                        <span className="fn-muted fn-text-sm">
+                          {MAX_LEGACY_IMPORT_SELECTED_ROWS} 行以下の範囲に分けてください。
+                        </span>
+                        <button
+                          type="button"
+                          className="fn-btn fn-btn-sm"
+                          onClick={() =>
+                            applySuggestedRange(
+                              key,
+                              1,
+                              Math.min(MAX_LEGACY_IMPORT_SELECTED_ROWS, sourceRows ?? MAX_LEGACY_IMPORT_SELECTED_ROWS),
+                            )
+                          }
+                        >
+                          先頭{MAX_LEGACY_IMPORT_SELECTED_ROWS}行を入力
+                        </button>
+                        <ul className={styles.suggestedRanges}>
+                          {suggestedRanges.map((range) => (
+                            <li key={`${range.startRow}-${range.endRow}`} className={styles.suggestedRangeItem}>
+                              <span>
+                                {range.startRow.toLocaleString()}〜{range.endRow.toLocaleString()}行
+                              </span>
+                              <button
+                                type="button"
+                                className="fn-btn fn-btn-sm"
+                                onClick={() => applySuggestedRange(key, range.startRow, range.endRow)}
+                              >
+                                この範囲を入力
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
                     <button type="button" className="fn-btn fn-btn-sm" onClick={() => removeSelectedFile(key)}>
                       削除
                     </button>
