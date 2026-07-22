@@ -37,6 +37,7 @@
 - DM channel IDはisolate cacheへ必ず保存する。KVへのput/deleteは1実行最大2件とし、5分Cronで最大576 writes/dayへ抑える。
 - KV予算を使い切った場合も通知配送は継続し、そのisolate内ではchannel IDを再利用する。
 - 401/403/404は同じ認証・宛先のまま繰り返さずdead-letterへ送る。ただしcache済みDM channelの404だけはcacheを削除して次回再作成する。
+- `welcome_account` DM と X ID 申請/拒否の `discord_webhook` も同一の通知6件・外部fetch予算を共有する。
 
 ### 外部画像
 

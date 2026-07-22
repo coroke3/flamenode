@@ -318,6 +318,8 @@ export async function rejectXIdLinkRequest(formData: FormData): Promise<XIdAdmin
 
   const now = Math.floor(Date.now() / 1000);
   const afterRequest = { ...request, status: "rejected" as const, updated_at: now };
+  const rejectedXIdLabel =
+    request.requested_x_id ?? request.source_x_user_id ?? "不明";
   const notification = await buildNotificationOutboxStatement(db, {
     recipientUserId: request.requested_by_auth_user_id,
     type: "x_id_rejected",
@@ -330,6 +332,17 @@ export async function rejectXIdLinkRequest(formData: FormData): Promise<XIdAdmin
       reason: reason || null,
     },
   });
+  const webhookNotification = await buildNotificationOutboxStatement(db, {
+    recipientUserId: request.requested_by_auth_user_id,
+    type: "discord_webhook",
+    payload: {
+      content: reason
+        ? `X ID拒否: @${rejectedXIdLabel} / request=${request.id} / 理由: ${reason}`
+        : `X ID拒否: @${rejectedXIdLabel} / request=${request.id}`,
+    },
+    dedupeKey: `xid_reject_webhook:${request.id}`,
+    force: true,
+  });
   const statements: BatchItem<"sqlite">[] = [
     db
       .update(xIdentityRequests)
@@ -339,6 +352,10 @@ export async function rejectXIdLinkRequest(formData: FormData): Promise<XIdAdmin
   const expected: Array<number | null> = [1];
   if (notification) {
     statements.push(notification);
+    expected.push(null);
+  }
+  if (webhookNotification) {
+    statements.push(webhookNotification);
     expected.push(null);
   }
   await mutateWithAudit(db, {

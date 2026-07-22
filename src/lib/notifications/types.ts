@@ -44,6 +44,7 @@ const TYPE_LABELS: Record<string, string> = {
   moderation_created: "モデレーション案件が作成されました",
   announcement_broadcast: "お知らせ配信",
   terms_reaccept_required: "利用規約の再同意が必要です",
+  welcome_account: "アカウント作成のお知らせ",
   discord_webhook: "Webhook 配信",
 };
 
@@ -62,6 +63,7 @@ const SEVERITY_BY_TYPE: Record<string, NotificationSeverity> = {
   chapter_comment_added: "info",
   announcement_broadcast: "info",
   terms_reaccept_required: "info",
+  welcome_account: "info",
   video_pending: "silent",
 };
 
@@ -75,7 +77,7 @@ export function categorizeNotificationType(type: string): NotificationCategory {
   if (t.startsWith("moderation_")) return "moderation";
   if (t.startsWith("announcement_")) return "announcement";
   if (t.startsWith("event_")) return "event";
-  if (t === "discord_webhook") return "system";
+  if (t === "discord_webhook" || t === "welcome_account") return "system";
   return "unknown";
 }
 

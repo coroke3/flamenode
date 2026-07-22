@@ -14,15 +14,18 @@ test("categorizeNotificationType", () => {
   assert.equal(categorizeNotificationType("moderation_created"), "moderation");
   assert.equal(categorizeNotificationType("announcement_broadcast"), "announcement");
   assert.equal(categorizeNotificationType("discord_webhook"), "system");
+  assert.equal(categorizeNotificationType("welcome_account"), "system");
   assert.equal(categorizeNotificationType("custom_foo"), "unknown");
 });
 
 test("getNotificationTypeLabel", () => {
   assert.equal(getNotificationTypeLabel("video_approved"), "作品が公開されました");
+  assert.equal(getNotificationTypeLabel("welcome_account"), "アカウント作成のお知らせ");
   assert.equal(getNotificationTypeLabel("unknown_type"), "unknown type");
 });
 
 test("getNotificationSeverity", () => {
   assert.equal(getNotificationSeverity("video_voided"), "critical");
   assert.equal(getNotificationSeverity("video_submitted"), "info");
+  assert.equal(getNotificationSeverity("welcome_account"), "info");
 });

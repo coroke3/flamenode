@@ -32,6 +32,7 @@ import {
 } from "@/lib/auth/xIdentityRequestCore";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
 import { buildPendingXIdRequestInsert } from "@/lib/actions/xidPendingInsert";
+import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 
 export interface XIdActionResult {
   ok: boolean;
@@ -230,10 +231,29 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
     requested_at: now,
     updated_at: now,
   };
+  const xIdLabel = requestedXId ?? sourceXUserId ?? "不明";
+  const webhookNotification = await buildNotificationOutboxStatement(db, {
+    recipientUserId: authUserId,
+    type: "discord_webhook",
+    payload: {
+      content: `X ID申請: @${xIdLabel} / type=${requestType} / by=${authUserId} / request=${id}`,
+    },
+    dedupeKey: `xid_request_webhook:${id}`,
+    force: true,
+  });
+  const mutationStatements: BatchItem<"sqlite">[] = [
+    db.run(buildPendingXIdRequestInsert(afterRequest)),
+  ];
+  const expectedMutationChanges: Array<number | null> = [1];
+  if (webhookNotification) {
+    mutationStatements.push(webhookNotification);
+    expectedMutationChanges.push(null);
+  }
+
   try {
     await mutateWithAudit(db, {
-      mutationStatements: [db.run(buildPendingXIdRequestInsert(afterRequest))],
-      expectedMutationChanges: [1],
+      mutationStatements,
+      expectedMutationChanges,
       audits: [
         {
           table_name: "x_identity_requests",

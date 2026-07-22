@@ -21,7 +21,9 @@ test("Discord auth linkは内部user ID更新・token消去・監査を単一bat
   assert.match(adapter, /await mutate\(db,/);
   assert.match(adapter, /db\.insert\(accounts\)\.values\(accountRow\)/);
   assert.match(adapter, /expectedRowCondition\(\{ expectedCurrent: beforeUser \}\)/);
-  assert.match(adapter, /expectedMutationChanges: \[1, 1\]/);
+  assert.match(adapter, /buildNotificationOutboxStatement/);
+  assert.match(adapter, /welcome_account/);
+  assert.match(adapter, /expectedMutationChanges/);
   assert.match(adapter, /discord_id: account\.providerAccountId/);
   assert.match(adapter, /access_token: null/);
   assert.match(adapter, /refresh_token: null/);
@@ -34,6 +36,8 @@ test("一般X ID lifecycleは逐次audit writeを残さずCAS付きatomic batch�
   assert.match(source, /expectedRowCondition\(\{ expectedCurrent: row \}\)/);
   assert.match(source, /xicons\/staging/);
   assert.match(source, /Promise\.allSettled\(\[env\.BUCKET\.delete\(stagingKey\), env\.BUCKET\.delete\(key\)\]\)/);
+  assert.match(source, /type: "discord_webhook"/);
+  assert.match(source, /xid_request_webhook:/);
 });
 
 test("imported 等の非 approved X ID はプロフィール・アイコン更新を拒否する", () => {
@@ -51,6 +55,7 @@ test("管理X ID lifecycleは通知を含むatomic batch、merge状態はCAS付�
   const mergeCore = read("../xid/merge.ts");
   assert.doesNotMatch(admin, /auditAction\(|enqueueNotification\(/);
   assert.match(admin, /buildNotificationOutboxStatement/);
+  assert.match(admin, /xid_reject_webhook:/);
   assert.ok((admin.match(/await mutateWithAudit\(/g) ?? []).length >= 2);
   assert.doesNotMatch(merge, /auditAction\(/);
   assert.match(merge, /executeApprovedXIdMergeRequest/);

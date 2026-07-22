@@ -50,7 +50,10 @@ function fakeDb(userRow) {
       values: (values) => {
         const statement = { kind: "insert", values };
         state.inserts.push(statement);
-        return statement;
+        return {
+          ...statement,
+          onConflictDoNothing: () => statement,
+        };
       },
     }),
     update: () => ({
@@ -64,6 +67,18 @@ function fakeDb(userRow) {
     }),
   };
   return { db, state };
+}
+
+function mockWelcomeNotificationBuilder() {
+  return async (_db, input) => ({
+    kind: "notification",
+    values: {
+      type: input.type,
+      recipient_user_id: input.recipientUserId,
+      dedupe_key: input.dedupeKey,
+      payload_json: JSON.stringify(input.payload),
+    },
+  });
 }
 
 test("保存accountからaccess/refresh/id tokenを除外する", () => {
@@ -99,22 +114,68 @@ test("account insert・user CAS更新・auditを単一atomic planへ渡す", asy
   const { db } = fakeDb(beforeUser);
   let captured;
 
+  await linkDiscordAccountAtomically(
+    db,
+    account,
+    async (receivedDb, input) => {
+      assert.equal(receivedDb, db);
+      captured = input;
+      return ["audit-1"];
+    },
+    mockWelcomeNotificationBuilder(),
+  );
+
+  assert.equal(captured.mutationStatements.length, 3);
+  assert.deepEqual(captured.expectedMutationChanges, [1, 1, null]);
+  assert.equal(captured.mutationStatements[0].values.access_token, null);
+  assert.equal(captured.mutationStatements[0].values.refresh_token, null);
+  assert.deepEqual(captured.mutationStatements[1].values, {
+    discord_id: "discord-1",
+  });
+  assert.equal(captured.mutationStatements[2].values.type, "welcome_account");
+  assert.equal(
+    captured.mutationStatements[2].values.dedupe_key,
+    "welcome_account:user-1",
+  );
+  assert.match(
+    JSON.parse(captured.mutationStatements[2].values.payload_json).content,
+    /\/onboarding/,
+  );
+  assert.equal(captured.audits.length, 1);
+  assert.equal(captured.audits[0].before.discord_id, null);
+  assert.equal(captured.audits[0].after.discord_id, "discord-1");
+});
+
+test("既に discord_id がある再linkでは welcome 通知を入れない", async () => {
+  const beforeUser = {
+    id: "user-1",
+    name: "User",
+    email: null,
+    emailVerified: null,
+    image: null,
+    discord_id: "discord-existing",
+    role: "user",
+    can_create_events: 0,
+    is_tos_accepted: 0,
+    accepted_terms_version_id: null,
+    terms_reaccept_required: 0,
+    is_banned: 0,
+    is_notification_enabled: 1,
+    active_x_user_id: null,
+    onboarding_completed_at: null,
+    last_guild_check: null,
+    created_at: 1,
+  };
+  const { db } = fakeDb(beforeUser);
+  let captured;
+
   await linkDiscordAccountAtomically(db, account, async (receivedDb, input) => {
-    assert.equal(receivedDb, db);
     captured = input;
     return ["audit-1"];
   });
 
   assert.equal(captured.mutationStatements.length, 2);
   assert.deepEqual(captured.expectedMutationChanges, [1, 1]);
-  assert.equal(captured.mutationStatements[0].values.access_token, null);
-  assert.equal(captured.mutationStatements[0].values.refresh_token, null);
-  assert.deepEqual(captured.mutationStatements[1].values, {
-    discord_id: "discord-1",
-  });
-  assert.equal(captured.audits.length, 1);
-  assert.equal(captured.audits[0].before.discord_id, null);
-  assert.equal(captured.audits[0].after.discord_id, "discord-1");
 });
 
 test("atomic plan失敗を成功扱いせず、user欠落時はplanを作らない", async () => {
@@ -125,9 +186,14 @@ test("atomic plan失敗を成功扱いせず、user欠落時はplanを作らな�
   };
   const { db } = fakeDb(beforeUser);
   await assert.rejects(
-    linkDiscordAccountAtomically(db, account, async () => {
-      throw new Error("simulated batch rollback");
-    }),
+    linkDiscordAccountAtomically(
+      db,
+      account,
+      async () => {
+        throw new Error("simulated batch rollback");
+      },
+      mockWelcomeNotificationBuilder(),
+    ),
     /simulated batch rollback/,
   );
 

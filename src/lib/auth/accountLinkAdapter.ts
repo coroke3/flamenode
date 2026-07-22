@@ -1,4 +1,5 @@
 import type { AdapterAccount } from "next-auth/adapters";
+import type { BatchItem } from "drizzle-orm/batch";
 import { eq } from "drizzle-orm";
 import { expectedRowCondition } from "@/lib/audit/expectedRowCondition";
 import {
@@ -7,11 +8,27 @@ import {
 } from "@/lib/audit/mutate";
 import type { DB } from "@/lib/db/client";
 import { accounts, users } from "@/lib/db/schema";
+import type { EnqueueNotificationInput } from "@/lib/notifications/enqueue";
 
 type AtomicMutator = (
   db: DB,
   input: AtomicAuditMutationInput,
 ) => Promise<readonly string[]>;
+
+type WelcomeNotificationBuilder = (
+  db: DB,
+  input: EnqueueNotificationInput,
+) => Promise<BatchItem<"sqlite"> | null>;
+
+async function defaultBuildWelcomeNotification(
+  db: DB,
+  input: EnqueueNotificationInput,
+): Promise<BatchItem<"sqlite"> | null> {
+  const { buildNotificationOutboxStatement } = await import(
+    "@/lib/notifications/enqueue"
+  );
+  return buildNotificationOutboxStatement(db, input);
+}
 
 function optionalString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
@@ -48,6 +65,7 @@ export async function linkDiscordAccountAtomically(
   db: DB,
   account: AdapterAccount,
   mutate: AtomicMutator = mutateWithAudit,
+  buildWelcomeNotification: WelcomeNotificationBuilder = defaultBuildWelcomeNotification,
 ): Promise<void> {
   if (account.provider !== "discord" || !account.providerAccountId) {
     throw new Error("AUTH_UNSUPPORTED_ACCOUNT_PROVIDER");
@@ -68,15 +86,35 @@ export async function linkDiscordAccountAtomically(
     discord_id: account.providerAccountId,
   };
 
+  const mutationStatements: BatchItem<"sqlite">[] = [
+    db.insert(accounts).values(accountRow),
+    db
+      .update(users)
+      .set({ discord_id: account.providerAccountId })
+      .where(expectedRowCondition({ expectedCurrent: beforeUser })),
+  ];
+  const expectedMutationChanges: Array<number | null> = [1, 1];
+
+  if (!beforeUser.discord_id?.trim()) {
+    const welcomeNotification = await buildWelcomeNotification(db, {
+      recipientUserId: account.userId,
+      type: "welcome_account",
+      payload: {
+        content:
+          "FlameNodeへようこそ。利用規約同意とX ID連携申請を /onboarding から進めてください。",
+      },
+      dedupeKey: `welcome_account:${account.userId}`,
+      force: true,
+    });
+    if (welcomeNotification) {
+      mutationStatements.push(welcomeNotification);
+      expectedMutationChanges.push(null);
+    }
+  }
+
   await mutate(db, {
-    mutationStatements: [
-      db.insert(accounts).values(accountRow),
-      db
-        .update(users)
-        .set({ discord_id: account.providerAccountId })
-        .where(expectedRowCondition({ expectedCurrent: beforeUser })),
-    ],
-    expectedMutationChanges: [1, 1],
+    mutationStatements,
+    expectedMutationChanges,
     audits: [
       {
         table_name: "user",
