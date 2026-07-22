@@ -610,6 +610,30 @@ test("ランタイム側に旧テーブル・dual-writeを導入しない", () =
   }
 });
 
+test("applyクライアントはretryableと423/503で同じpreviewを自動再試行する", () => {
+  const root = path.resolve(import.meta.dirname, "../../../..");
+  const client = fs.readFileSync(path.join(root, "src/components/admin/LegacyCanonicalImportClient.tsx"), "utf8");
+  assert.match(client, /isApplyTransientFailure/);
+  assert.match(client, /json\.retryable === true/);
+  assert.match(client, /response\.status === 423/);
+  assert.match(client, /response\.status === 503/);
+  assert.match(client, /APPLY_TRANSIENT_MAX_RETRIES/);
+  assert.match(client, /applyTransientBackoffMs/);
+  assert.match(client, /自動再試行中/);
+  assert.match(client, /json\.requires_repreview[\s\S]*?setCredential\(null\)/);
+  assert.match(client, /transientFailures = 0/);
+});
+
+test("previewErrorResponseはalready_claimedとbucket_unavailableをretryableにする", () => {
+  const root = path.resolve(import.meta.dirname, "../../../..");
+  const route = fs.readFileSync(path.join(root, "app/api/admin/import/legacy/route.ts"), "utf8");
+  assert.match(route, /function previewErrorResponse/);
+  assert.match(route, /cause\.code === "already_claimed" \? 423/);
+  assert.match(route, /cause\.code === "bucket_unavailable" \? 503/);
+  assert.match(route, /retryable: !requiresRepreview && \(cause\.code === "already_claimed" \|\| cause\.code === "bucket_unavailable"\)/);
+  assert.match(route, /retryable: !requiresRepreview/);
+});
+
 test("X ID統合は承認申請だけを入口にし、直接Actionを残さない", () => {
   const root = path.resolve(import.meta.dirname, "../../../..");
   assert.equal(fs.existsSync(path.join(root, "src/lib/actions/merge-admin.ts")), false);

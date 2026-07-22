@@ -49,6 +49,20 @@ function selectedFileKey(file: File): string {
   return `${file.name}\u0000${file.size}\u0000${file.lastModified}`;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const APPLY_TRANSIENT_MAX_RETRIES = 6;
+
+function applyTransientBackoffMs(attempt: number): number {
+  return Math.min(500 * 2 ** (attempt - 1), 10_000);
+}
+
+function isApplyTransientFailure(response: Response, json: ApiResponse): boolean {
+  return json.retryable === true || response.status === 423 || response.status === 503;
+}
+
 export function LegacyCanonicalImportClient(): React.ReactElement {
   const formRef = React.useRef<HTMLFormElement>(null);
   const addFilesInputRef = React.useRef<HTMLInputElement>(null);
@@ -231,37 +245,74 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
         );
       } else if (credential) {
         let stopped = false;
+        let transientFailures = 0;
         for (let step = 0; step < 10000; step += 1) {
           if (formRevisionRef.current !== submittedFormRevision) {
             setResult({ ok: false, message: "入力が変更されたため、プレビューをやり直してください。" });
             stopped = true;
             break;
           }
-          const body = new FormData();
-          body.set("mode", "apply");
-          body.set("preview_token", credential.token);
-          body.set("plan_hash", credential.planHash);
-          const response = await fetch("/api/admin/import/legacy", { method: "POST", body });
-          const json = (await response.json()) as ApiResponse;
-          setResult(json);
-          if (json.expires_at) {
-            setCredential((current) => current && current.token === credential.token
-              ? { ...current, expiresAt: json.expires_at! }
-              : current);
-          }
+          try {
+            const body = new FormData();
+            body.set("mode", "apply");
+            body.set("preview_token", credential.token);
+            body.set("plan_hash", credential.planHash);
+            const response = await fetch("/api/admin/import/legacy", { method: "POST", body });
+            const json = (await response.json()) as ApiResponse;
+            if (json.expires_at) {
+              setCredential((current) => current && current.token === credential.token
+                ? { ...current, expiresAt: json.expires_at! }
+                : current);
+            }
 
-          if (!response.ok || !json.ok) {
-            if (json.requires_repreview) setCredential(null);
-            stopped = true;
-            break;
-          }
-          const resultComplete =
-            typeof json.result === "object" &&
-            json.result !== null &&
-            "complete" in json.result &&
-            (json.result as { complete?: unknown }).complete === true;
-          if (json.continuation_required !== true || resultComplete) {
-            setCredential(null);
+            if (!response.ok || !json.ok) {
+              if (json.requires_repreview) {
+                setCredential(null);
+                setResult(json);
+                stopped = true;
+                break;
+              }
+              if (isApplyTransientFailure(response, json) && transientFailures < APPLY_TRANSIENT_MAX_RETRIES) {
+                transientFailures += 1;
+                setResult({
+                  ...json,
+                  ok: false,
+                  message: `${json.message ?? "一時的なエラー"}（自動再試行中 ${transientFailures}/${APPLY_TRANSIENT_MAX_RETRIES}）`,
+                });
+                await sleep(applyTransientBackoffMs(transientFailures));
+                continue;
+              }
+              setResult(json);
+              stopped = true;
+              break;
+            }
+
+            transientFailures = 0;
+            setResult(json);
+            const resultComplete =
+              typeof json.result === "object" &&
+              json.result !== null &&
+              "complete" in json.result &&
+              (json.result as { complete?: unknown }).complete === true;
+            if (json.continuation_required !== true || resultComplete) {
+              setCredential(null);
+              stopped = true;
+              break;
+            }
+          } catch {
+            if (transientFailures < APPLY_TRANSIENT_MAX_RETRIES) {
+              transientFailures += 1;
+              setResult({
+                ok: false,
+                message: `通信結果を確認できませんでした。（自動再試行中 ${transientFailures}/${APPLY_TRANSIENT_MAX_RETRIES}）`,
+              });
+              await sleep(applyTransientBackoffMs(transientFailures));
+              continue;
+            }
+            setResult({
+              ok: false,
+              message: "通信結果を確認できませんでした。二重送信を避けるため、少し待ってから同じpreviewで再試行してください。",
+            });
             stopped = true;
             break;
           }

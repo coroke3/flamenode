@@ -64,16 +64,18 @@ function previewErrorResponse(cause: unknown): NextResponse {
     return error("preview planを確認できませんでした。再度プレビューしてください。", 409);
   }
   const status = cause.code === "bucket_unavailable" ? 503 : cause.code === "already_claimed" ? 423 : 409;
+  const requiresRepreview = [
+    "not_found",
+    "expired",
+    "owner_mismatch",
+    "hash_mismatch",
+    "invalid_record",
+    "invalid_token",
+  ].includes(cause.code);
   return error(cause.message, status, {
     preview_error_code: cause.code,
-    requires_repreview: [
-      "not_found",
-      "expired",
-      "owner_mismatch",
-      "hash_mismatch",
-      "invalid_record",
-      "invalid_token",
-    ].includes(cause.code),
+    requires_repreview: requiresRepreview,
+    retryable: !requiresRepreview && (cause.code === "already_claimed" || cause.code === "bucket_unavailable"),
   });
 }
 
