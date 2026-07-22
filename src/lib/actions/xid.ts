@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { getEnv } from "@/lib/cloudflare";
@@ -25,6 +25,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import {
   getLinkedXUserForAuthUser,
   isAuthUserLinkedToXUser,
+  resolveCanonicalXUserId,
 } from "@/lib/auth/xIdentity";
 import {
   validateXIdentityRequestShape,
@@ -182,6 +183,7 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
   const existingXUser = (
     await db.select().from(xUsers).where(xUserIdMatches(requestedXUserId)).limit(1)
   )[0];
+  const canonicalXUserId = await resolveCanonicalXUserId(db, requestedXUserId);
 
   let requestType: XIdentityRequestType;
   let sourceXUserId: string | null = null;
@@ -201,7 +203,8 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
       return { ok: false, message: "自分に紐づく X ID 同士だけを統合申請できます。" };
     }
   } else {
-    requestType = existingXUser ? "existing_link" : "new_link";
+    // import 済み・承認済みを含め、正本名義が存在するなら既存連携申請にする。
+    requestType = canonicalXUserId || existingXUser ? "existing_link" : "new_link";
     if (await isAuthUserLinkedToXUser(db, authUserId, requestedXUserId)) {
       return { ok: false, message: "この X ID はすでに現在のアカウントに紐づいています。" };
     }
@@ -241,10 +244,59 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
     dedupeKey: `xid_request_webhook:${id}`,
     force: true,
   });
-  const mutationStatements: BatchItem<"sqlite">[] = [
-    db.run(buildPendingXIdRequestInsert(afterRequest)),
-  ];
-  const expectedMutationChanges: Array<number | null> = [1];
+  const mutationStatements: BatchItem<"sqlite">[] = [];
+  const expectedMutationChanges: Array<number | null> = [];
+  const audits: WriteAuditLogInput[] = [];
+
+  if (
+    (requestType === "new_link" || requestType === "existing_link") &&
+    requestedXId
+  ) {
+    const siblingPendings = await db
+      .select()
+      .from(xIdentityRequests)
+      .where(
+        and(
+          eq(xIdentityRequests.requested_by_auth_user_id, authUserId),
+          eq(xIdentityRequests.requested_x_id, requestedXId),
+          eq(xIdentityRequests.status, "pending"),
+          inArray(xIdentityRequests.request_type, ["new_link", "existing_link"]),
+        )!,
+      );
+    for (const sibling of siblingPendings) {
+      const afterSibling = { ...sibling, status: "cancelled" as const, updated_at: now };
+      mutationStatements.push(
+        db
+          .update(xIdentityRequests)
+          .set({ status: "cancelled", updated_at: now })
+          .where(expectedRowCondition({ expectedCurrent: sibling })),
+      );
+      expectedMutationChanges.push(1);
+      audits.push({
+        table_name: "x_identity_requests",
+        target_id: sibling.id,
+        operation: "UPDATE",
+        before: { ...sibling },
+        after: afterSibling,
+        actor_user_id: authUserId,
+        reason: "同一X IDの重複pending申請を取り消す",
+        context: "x-identity-request",
+        retention_class: "long_audit",
+      });
+    }
+  }
+
+  mutationStatements.push(db.run(buildPendingXIdRequestInsert(afterRequest)));
+  expectedMutationChanges.push(1);
+  audits.push({
+    table_name: "x_identity_requests",
+    target_id: id,
+    operation: "CREATE",
+    before: null,
+    after: { ...afterRequest },
+    actor_user_id: authUserId,
+    retention_class: "long_audit",
+  });
   if (webhookNotification) {
     mutationStatements.push(webhookNotification);
     expectedMutationChanges.push(null);
@@ -254,17 +306,7 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
     await mutateWithAudit(db, {
       mutationStatements,
       expectedMutationChanges,
-      audits: [
-        {
-          table_name: "x_identity_requests",
-          target_id: id,
-          operation: "CREATE",
-          before: null,
-          after: { ...afterRequest },
-          actor_user_id: authUserId,
-          retention_class: "long_audit",
-        },
-      ],
+      audits,
     });
   } catch (error) {
     // 条件付きINSERTの0行はmutateWithAuditのassertionでrollbackされる。

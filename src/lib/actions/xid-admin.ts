@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { canManageXIdLinkRequests } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import type { DB } from "@/lib/db/client";
@@ -132,12 +132,8 @@ export async function approveXIdLinkRequest(formData: FormData): Promise<XIdAdmi
       ? (await db.select().from(xUsers).where(eq(xUsers.id, canonicalXUserId)).limit(1))[0]
       : null;
 
-    if (request.request_type === "new_link" && canonicalXUserId) {
-      return {
-        ok: false,
-        message: `@${submittedXUserId} は @${canonicalXUserId} として登録済みです。既存連携として再申請してください。`,
-      };
-    }
+    // new_link 申請後に import 等で x_users が先に存在した場合は、
+    // 再申請を要求せず既存連携として承認する（imported / approved を含む）。
     if (request.request_type === "existing_link" && !xUser) {
       return { ok: false, message: "既存連携申請の X ID が見つからないか、統合済みで無効です。" };
     }
@@ -251,6 +247,40 @@ export async function approveXIdLinkRequest(formData: FormData): Promise<XIdAdmi
       });
     }
     notificationXUserId = effectiveXUserId;
+
+    const siblingPendings = await db
+      .select()
+      .from(xIdentityRequests)
+      .where(
+        and(
+          eq(xIdentityRequests.requested_by_auth_user_id, requestedAuthUserId),
+          eq(xIdentityRequests.requested_x_id, submittedXUserId),
+          eq(xIdentityRequests.status, "pending"),
+          ne(xIdentityRequests.id, request.id),
+          inArray(xIdentityRequests.request_type, ["new_link", "existing_link"]),
+        )!,
+      );
+    for (const sibling of siblingPendings) {
+      const afterSibling = { ...sibling, status: "cancelled" as const, updated_at: now };
+      statements.push(
+        db
+          .update(xIdentityRequests)
+          .set({ status: "cancelled", updated_at: now })
+          .where(expectedRowCondition({ expectedCurrent: sibling })),
+      );
+      expected.push(1);
+      audits.push({
+        table_name: "x_identity_requests",
+        target_id: sibling.id,
+        operation: "UPDATE",
+        before: { ...sibling },
+        after: afterSibling,
+        actor_user_id: operatorAuthUserId,
+        reason: "同一X IDの重複pending申請を取り消す",
+        context: "x-identity-request",
+        retention_class: "long_audit",
+      });
+    }
   }
 
   const afterRequest = { ...request, status: "approved" as const, updated_at: now };

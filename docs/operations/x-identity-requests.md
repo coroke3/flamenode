@@ -1,14 +1,16 @@
 # X ID申請とアカウントリンク
 
 > Status: Active
-> Last verified: 2026-07-21
+> Last verified: 2026-07-22
 > Source of truth: `src/lib/actions/xid.ts`, `src/lib/actions/xid-admin.ts`, `src/lib/auth/xIdentity.ts`, `src/lib/utils/xid.ts`
 
 X ID申請は `x_identity_requests`、X名義とAuth.jsユーザーの関係は `x_user_account_links` を唯一の正本とする。
 
 ## 申請種類
 
-一般ユーザーの連携画面は、初回・2件目以降とも「X IDを連携」の1フローだけを提供する。入力されたX IDが登録済みかどうかはサーバー側で判定し、内部の`new_link`または`existing_link`へ変換する。別名申請は新規作成せず、既存データの管理処理だけを維持する。統合申請は設定画面で、承認済みの自分のX ID同士を選択して行う。
+一般ユーザーの連携画面は、初回・2件目以降とも「X IDを連携」の1フローだけを提供する。入力されたX IDが登録済みかどうかはサーバー側で判定し、内部の`new_link`または`existing_link`へ変換する。判定は`resolveCanonicalXUserId`（alias・imported・approvedを含む）と大文字小文字無視の存在確認を用いる。別名申請は新規作成せず、既存データの管理処理だけを維持する。統合申請は設定画面で、承認済みの自分のX ID同士を選択して行う。
+
+`new_link`申請のあとでimport等により同じX名義が先に存在した場合、運営承認は再申請を要求せず**既存連携として承認**する。同一認証ユーザー・同一X IDの他のpending連携申請は、新規申請時および承認時に`cancelled`へ整理する。
 
 | request_type | 用途 | 必須項目 |
 | --- | --- | --- |
