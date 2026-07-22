@@ -15,11 +15,6 @@ import {
 
 export const dynamic = "force-dynamic";
 
-function isPublicOnboardingExemptPath(pathname: string): boolean {
-  if (isXIdOnboardingExemptPath(pathname)) return true;
-  return pathname === "/rules" || pathname.startsWith("/rules/");
-}
-
 export default async function PublicLayout({
   children,
 }: {
@@ -33,7 +28,7 @@ export default async function PublicLayout({
     const hdrs = await headers();
     const pathname = hdrs.get("x-pathname") ?? "";
     const search = hdrs.get("x-search") ?? "";
-    if (pathname && !isPublicOnboardingExemptPath(pathname)) {
+    if (pathname && !isXIdOnboardingExemptPath(pathname)) {
       const needsOnboarding = await userNeedsXIdOnboarding(
         sessionUser.id,
         sessionUser.role,

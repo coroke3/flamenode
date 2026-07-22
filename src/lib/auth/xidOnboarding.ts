@@ -3,27 +3,30 @@ import "server-only";
 import { and, eq } from "drizzle-orm";
 import { withDatabase } from "@/lib/cloudflare";
 import { xIdentityRequests } from "@/lib/db/schema";
-import { sanitizeNextPath } from "#utils/next";
+import { onboardingHref } from "./onboardingUrls";
 import { getLinkedXUserIdsForAuthUser } from "./xIdentity";
 
 const SETTINGS_PATH = "/dashboard/settings";
+const ONBOARDING_PATH = "/onboarding";
+const RULES_PATH = "/rules";
 
 export function isXIdOnboardingExemptPath(pathname: string): boolean {
   const path = pathname.trim() || "/";
-  return path === SETTINGS_PATH || path.startsWith(`${SETTINGS_PATH}/`);
+  if (path === SETTINGS_PATH || path.startsWith(`${SETTINGS_PATH}/`)) {
+    return true;
+  }
+  if (path === ONBOARDING_PATH || path.startsWith(`${ONBOARDING_PATH}/`)) {
+    return true;
+  }
+  if (path === RULES_PATH || path.startsWith(`${RULES_PATH}/`)) {
+    return true;
+  }
+  return false;
 }
 
 export function buildXIdOnboardingHref(next?: string | null): string {
-  const qs = new URLSearchParams({ tab: "link", onboarding: "1" });
   const safeNext = next?.trim();
-  if (
-    safeNext &&
-    safeNext !== SETTINGS_PATH &&
-    !safeNext.startsWith(`${SETTINGS_PATH}?`)
-  ) {
-    qs.set("next", sanitizeNextPath(safeNext, "/dashboard"));
-  }
-  return `${SETTINGS_PATH}?${qs.toString()}`;
+  return onboardingHref(safeNext || undefined);
 }
 
 /**

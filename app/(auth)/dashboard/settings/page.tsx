@@ -1,11 +1,13 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { and, desc, eq, ne } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { xIdentityRequests as linkReqTable } from "@/lib/db/schema";
 import { getLinkedXUsersForAuthUser } from "@/lib/auth/xIdentity";
 import { requireSession } from "@/lib/auth/guard";
+import { onboardingHref, onboardingRulesHref } from "@/lib/auth/onboardingUrls";
 import { Icon } from "@/components/ui/Icon";
 import {
   XIdLinkForm,
@@ -77,6 +79,15 @@ export default async function SettingsPage({
   });
   if (!guard.ok) return guard.element;
   const user = guard.user;
+
+  if (
+    isOnboarding &&
+    (user.is_tos_accepted !== 1 || user.terms_reaccept_required === 1)
+  ) {
+    redirect(
+      onboardingRulesHref(onboardingHref(next ?? "/dashboard")),
+    );
+  }
 
   const db = getDatabase();
   const xIdsRaw = db ? await getLinkedXUsersForAuthUser(db, user.id) : [];
