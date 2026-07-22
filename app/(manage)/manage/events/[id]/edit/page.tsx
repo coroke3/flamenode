@@ -75,6 +75,17 @@ export default async function ManageEventEditPage({
       />
       <ManageEventTabs eventId={event.id} isAdmin={isAdmin} />
 
+      <section className="manage-slot-quicklink" aria-label="枠設定へのショートカット">
+        <div>
+          <strong>イベント枠を設定する</strong>
+          <p>募集枠の生成・整理・予約状況の管理は、枠設定画面から行えます。</p>
+        </div>
+        <Link href={`/manage/events/${event.id}/slots`} className="fn-btn fn-btn-primary">
+          枠設定を開く
+          <Icon name="chevron-right" size={14} aria-hidden />
+        </Link>
+      </section>
+
       <section className="fn-console-section">
         <EventForm
           mode="edit"

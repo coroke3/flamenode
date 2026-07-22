@@ -8,6 +8,7 @@ import {
   updateAnnouncement,
 } from "@/lib/actions/announcement";
 import { formatJstDatetimeLocal } from "@/lib/utils/dateInput";
+import styles from "./AnnouncementForm.module.css";
 
 export interface AnnouncementInitial {
   id?: string;
@@ -58,7 +59,7 @@ export function AnnouncementForm({
   return (
     <form
       onSubmit={onSubmit}
-      style={{ display: "flex", flexDirection: "column", gap: 12 }}
+      className={styles.form}
     >
       {mode === "edit" && initial.id ? (
         <input type="hidden" name="id" value={initial.id} />
@@ -85,7 +86,7 @@ export function AnnouncementForm({
           required
         />
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+      <div className={styles.metaGrid}>
         <div>
           <label className="fn-label">重要度</label>
           <select
@@ -122,7 +123,7 @@ export function AnnouncementForm({
           </select>
         </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div className={styles.scheduleGrid}>
         <div>
           <label className="fn-label">掲載開始</label>
           <input
@@ -156,9 +157,9 @@ export function AnnouncementForm({
 
       <button
         type="submit"
-        className="fn-btn fn-btn-primary"
         disabled={busy}
         aria-busy={busy}
+        className={`fn-btn fn-btn-primary ${styles.submit}`}
       >
         <Icon name="check" size={13} aria-hidden />
         {busy ? "保存中…" : mode === "create" ? "作成" : "保存"}

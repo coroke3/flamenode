@@ -1,0 +1,12 @@
+.form { display: flex; flex-direction: column; gap: 16px; }
+.form :global(.fn-label) { margin-bottom: 6px; }
+.form :global(textarea.fn-input) { min-height: 176px; padding-block: 10px; line-height: 1.55; resize: vertical; }
+.metaGrid, .scheduleGrid { display: grid; gap: 14px; }
+.metaGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.scheduleGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.form :global(.fn-input), .form :global(.fn-select) { min-height: 42px; }
+.submit { width: 100%; min-height: 44px; justify-content: center; }
+@media (max-width: 720px) {
+  .metaGrid, .scheduleGrid { grid-template-columns: 1fr; gap: 12px; }
+  .form { gap: 14px; }
+}

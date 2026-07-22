@@ -1,0 +1,20 @@
+.formShell { display: flex; flex-direction: column; gap: 16px; }
+.modeSwitch { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 4px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-base); width: min(100%, 360px); }
+.modeSwitch button { min-height: 40px; justify-content: center; }
+.batchForm { display: flex; flex-direction: column; gap: 16px; }
+.fieldGrid, .fieldGridCount { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.fieldGridSingle { display: grid; gap: 14px; }
+.batchForm :global(.fn-label) { margin-bottom: 6px; }
+.batchForm :global(.fn-input) { min-height: 42px; }
+.presetRow { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.presetRow button { min-width: 48px; min-height: 36px; justify-content: center; }
+.hint { margin: 8px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.55; }
+.actions { display: grid; grid-template-columns: repeat(2, minmax(0, max-content)); gap: 8px; }
+.actions button { min-height: 44px; justify-content: center; }
+@media (max-width: 640px) {
+  .formShell, .batchForm { gap: 14px; }
+  .modeSwitch { width: 100%; }
+  .fieldGrid, .fieldGridCount { grid-template-columns: 1fr; gap: 12px; }
+  .actions { grid-template-columns: 1fr; }
+  .actions button { width: 100%; }
+}

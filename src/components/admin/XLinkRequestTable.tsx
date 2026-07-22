@@ -169,7 +169,7 @@ export function XLinkRequestTable({
           {msg}
         </p>
       ) : null}
-      <table className="fn-table">
+      <table className="fn-table approval-queue-table approval-queue-table-xid">
         <thead>
           <tr>
             <th>申請 ID</th>

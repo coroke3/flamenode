@@ -9,6 +9,7 @@ import {
   generateSlotsBatch,
 } from "@/lib/actions/slot-admin";
 import { MAX_SLOT_BATCH_GENERATE_COUNT } from "@/lib/slots/atomicLimits";
+import styles from "./SlotBatchForm.module.css";
 
 interface SlotBatchFormProps {
   eventId: string;
@@ -61,19 +62,9 @@ export function SlotBatchForm({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+    <div className={styles.formShell}>
       <div
-        style={{
-          display: "inline-flex",
-          gap: 4,
-          padding: 4,
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-sm)",
-          background: "var(--bg-base)",
-          width: "fit-content",
-          maxWidth: "100%",
-          flexWrap: "wrap",
-        }}
+        className={styles.modeSwitch}
       >
         <button
           type="button"
@@ -94,11 +85,11 @@ export function SlotBatchForm({
       </div>
       <form
         onSubmit={onSubmit}
-        style={{ display: "flex", flexDirection: "column", gap: 10 }}
+        className={styles.batchForm}
       >
         {mode === "time" ? (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+            <div className={styles.fieldGrid}>
               <div>
                 <label className="fn-label">開始日時 *</label>
                 <input
@@ -118,7 +109,7 @@ export function SlotBatchForm({
                 />
               </div>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+            <div className={styles.fieldGridSingle}>
               <div>
                 <label className="fn-label">枠の間隔・長さ (分) *</label>
                 <input
@@ -131,7 +122,7 @@ export function SlotBatchForm({
                   className="fn-input"
                   required
                 />
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                <div className={styles.presetRow}>
                   {intervalOptions.map((n) => (
                     <button
                       key={n}
@@ -143,7 +134,7 @@ export function SlotBatchForm({
                     </button>
                   ))}
                 </div>
-                <p style={{ margin: "6px 0 0", color: "var(--text-muted)", fontSize: 12 }}>
+                <p className={styles.hint}>
                   終了日時までの範囲から、最大 {MAX_SLOT_BATCH_GENERATE_COUNT} 枠まで生成できます。
                   D1 の原子上限のため、内部では 3 件ずつ分割実行されます。
                 </p>
@@ -152,7 +143,7 @@ export function SlotBatchForm({
           </>
         ) : (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
+            <div className={styles.fieldGridCount}>
               <div>
                 <label className="fn-label">作成枠数 *</label>
                 <input
@@ -164,7 +155,7 @@ export function SlotBatchForm({
                   className="fn-input"
                   required
                 />
-                <p style={{ margin: "6px 0 0", color: "var(--text-muted)", fontSize: 12 }}>
+                <p className={styles.hint}>
                   最大 {MAX_SLOT_BATCH_GENERATE_COUNT} 枠まで一度に生成できます。
                   D1 の原子上限のため、内部では 3 件ずつ分割実行されます。
                 </p>
@@ -205,7 +196,7 @@ export function SlotBatchForm({
           </p>
         ) : null}
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div className={styles.actions}>
           <button type="submit" className="fn-btn fn-btn-primary" disabled={busy}>
             <Icon name="plus" size={12} aria-hidden />
             {busy ? "生成中…" : "一括生成"}

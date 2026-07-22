@@ -183,7 +183,7 @@ export default async function AdminVideoDetailPage({
               placeholder="運営内メモ"
             />
           </label>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <div className="admin-video-review-meta-grid" style={{ display: "grid", gap: 8 }}>
             <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
               期限
               <input type="datetime-local" name="due_at" className="fn-input" />

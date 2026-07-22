@@ -42,7 +42,7 @@ interface SortState {
 }
 
 function memberDisplayName(member: MemberSectionMember): string {
-  return member.name ?? member.x_name ?? "anonymous";
+  return member.name?.trim() || member.x_name?.trim() || "anonymous";
 }
 
 function memberHandle(member: MemberSectionMember): string {
@@ -215,7 +215,8 @@ function MemberCard({
 }: {
   member: MemberSectionMember;
 }): React.ReactElement {
-  const displayName = member.x_name ?? member.name ?? "anonymous";
+  // カードは登録済みのX表示名を正本にし、内部用の補完名を表示しない。
+  const displayName = member.x_name?.trim() || member.name?.trim() || "anonymous";
   const internalHref = member.x_user_id ? `/user/${member.x_user_id}` : null;
   const xExternal = member.x_user_id
     ? `https://x.com/${encodeURIComponent(member.x_user_id)}`
@@ -509,9 +510,7 @@ function ChaptersView({
         const list = grouped.get(member.id) ?? [];
         const displayName = memberDisplayName(member);
         const iconUrl = cachedGoogleImageUrl(member.icon_url);
-        const headerLabel = member.x_user_id
-          ? `${displayName}(@${member.x_user_id})`
-          : displayName;
+        const headerLabel = displayName;
 
         return (
           <section key={member.id} className={styles.chapterGroup}>

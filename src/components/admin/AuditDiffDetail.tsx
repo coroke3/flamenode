@@ -57,9 +57,9 @@ export function AuditDiffDetail({
             <div
               role="table"
               aria-label="変更差分"
+              className="admin-audit-diff-grid"
               style={{
                 display: "grid",
-                gridTemplateColumns: "minmax(116px, auto) minmax(70px, auto) 1fr 1fr",
                 gap: 0,
                 border: "1px solid var(--border-subtle)",
                 borderRadius: "var(--radius-sm)",

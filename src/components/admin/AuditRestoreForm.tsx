@@ -112,6 +112,7 @@ export function AuditRestoreForm({
 
           {restoreUnavailableReasonCode ? (
             <code
+              className="admin-audit-diff-grid"
               style={{
                 color: "var(--text-muted)",
                 fontSize: 11,
@@ -319,9 +320,8 @@ function DryRunResult({
             差分詳細を表示
           </summary>
           <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
+              style={{
+                display: "grid",
               gap: 8,
               marginTop: 8,
             }}
