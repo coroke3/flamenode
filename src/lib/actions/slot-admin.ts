@@ -11,7 +11,10 @@ import { slots } from "@/lib/db/schema";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { parseJstDatetimeLocal } from "@/lib/utils/dateInput";
 import { generateId } from "@/lib/utils/id";
-import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
+import {
+  buildNotificationOutboxStatement,
+  type NotificationOutboxStatement,
+} from "@/lib/notifications/enqueue";
 import { buildStaticRebuildQueueBatch, enqueueStaticRebuild } from "@/lib/staticRebuild/enqueue";
 import { MAX_ATOMIC_SLOT_ROWS, MAX_SLOT_BATCH_GENERATE_COUNT } from "@/lib/slots/atomicLimits";
 
@@ -151,7 +154,7 @@ async function releaseNotification(
   row: SlotRow,
   targetIds: readonly string[],
   groupId: string | null,
-): Promise<BatchItem<"sqlite"> | null> {
+): Promise<NotificationOutboxStatement | null> {
   if (!row.reserved_by_user_id) return null;
   return buildNotificationOutboxStatement(db, {
     recipientUserId: row.reserved_by_user_id,
@@ -495,7 +498,7 @@ async function releaseRows(
       groupRows.map((candidate) => candidate.id),
       groupId,
     );
-    if (notification) notifications.push(notification);
+    if (notification) notifications.push(notification.statement);
   }
   const queue = await eventQueue(db, eventId, "slot_admin_release", userId);
   try {

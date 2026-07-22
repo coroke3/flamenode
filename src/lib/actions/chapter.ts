@@ -121,7 +121,7 @@ export async function createChapter(
       dedupeKey: `chapter_comment_added:${id}`,
     });
     if (notification) {
-      mutationStatements.push(notification);
+      mutationStatements.push(notification.statement);
       expectedMutationChanges.push(1);
     }
   }

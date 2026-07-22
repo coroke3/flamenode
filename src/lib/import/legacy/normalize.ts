@@ -430,7 +430,7 @@ export function normalizeLegacyFiles(
 
   for (const file of files) {
     file.rows.forEach((row, rowIndex) => {
-      const source = `${file.name}:${rowIndex + 2}`;
+      const source = `${file.name}:${rowIndex + 2 + (file.rowOffset ?? 0)}`;
       if (!isVideoRow(row)) {
         const id = (stringValue(row, "eventid") ?? "").replace(/^@+/, "");
         if (!id) {

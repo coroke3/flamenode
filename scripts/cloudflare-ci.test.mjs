@@ -120,10 +120,12 @@ test("package.json build invokes Next.js directly and cannot re-enter the Cloudf
   assert.doesNotMatch(pkg.scripts.build, /cf:|cloudflare|workers-ci/i);
 });
 
-test("OpenNext invokes Next.js directly instead of the package build script", () => {
+test("OpenNext invokes Next.js directly and preloads routes outside the response", () => {
   const config = fs.readFileSync(path.join(root, "open-next.config.ts"), "utf8");
   assert.match(config, /buildCommand:\s*["']node node_modules\/next\/dist\/bin\/next build["']/);
   assert.doesNotMatch(config, /buildCommand:\s*["'](?:npm|pnpm|yarn).*build/);
+  assert.match(config, /routePreloadingBehavior:\s*["']withWaitUntil["']/);
+  assert.doesNotMatch(config, /routePreloadingBehavior:\s*["']onStart["']/);
 });
 
 test("bare wrangler deploy of tracked template is blocked in Workers CI", () => {
@@ -475,15 +477,42 @@ test("child processes use argv with shell disabled and redact IDs/secrets", () =
   assert.match(redactOutput(`${env.AUTH_SECRET}`, env), /\[REDACTED\]/);
 });
 
-test("OpenNext output requires worker, assets, matching manifest, no Pages output, and no secret value", () =>
+test("OpenNext output requires route preloading, worker, assets, matching manifest, no Pages output, and no secret value", () =>
   withTempDirectory("flamenode-open-next-output-", (repoRoot) => {
     const outputRoot = path.join(repoRoot, ".open-next");
     fs.mkdirSync(path.join(outputRoot, "assets"), { recursive: true });
+    const serverConfigPath = path.join(
+      outputRoot,
+      "server-functions",
+      "default",
+      "open-next.config.mjs",
+    );
+    fs.mkdirSync(path.dirname(serverConfigPath), { recursive: true });
     fs.writeFileSync(path.join(outputRoot, "worker.js"), "export default {};\n", "utf8");
     fs.writeFileSync(path.join(outputRoot, "assets", "app.js"), "console.log('asset');\n", "utf8");
+    fs.writeFileSync(
+      serverConfigPath,
+      'export default { default: { routePreloadingBehavior: "withWaitUntil" } };\n',
+      "utf8",
+    );
     writeBuildManifest({ outputRoot, commit: COMMIT });
     const env = productionEnv();
     assert.doesNotThrow(() => checkOpenNextOutput({ env, repoRoot, outputRoot, commit: COMMIT }));
+
+    fs.writeFileSync(
+      serverConfigPath,
+      'export default { default: { routePreloadingBehavior: "none" } };\n',
+      "utf8",
+    );
+    assert.throws(
+      () => checkOpenNextOutput({ env, repoRoot, outputRoot, commit: COMMIT }),
+      /withWaitUntil route preloading/,
+    );
+    fs.writeFileSync(
+      serverConfigPath,
+      'export default { default: { routePreloadingBehavior: "withWaitUntil" } };\n',
+      "utf8",
+    );
 
     fs.writeFileSync(path.join(outputRoot, "assets", "leak.txt"), env.AUTH_SECRET, "utf8");
     assert.throws(
@@ -733,16 +762,38 @@ function jsonResponse(value, status = 200) {
   });
 }
 
-function smokeFetch(commit, { mismatchService } = {}) {
+function smokeFetch(commit, { mismatchService, staleCommitResponses = {} } = {}) {
+  const staleRemaining = new Map(Object.entries(staleCommitResponses));
+  const responseCommit = (service) => {
+    if (service === mismatchService) return "f".repeat(40);
+    const remaining = staleRemaining.get(service) ?? 0;
+    if (remaining > 0) {
+      staleRemaining.set(service, remaining - 1);
+      return "e".repeat(40);
+    }
+    return commit;
+  };
   return async (input, init = {}) => {
     const url = new URL(input);
     const method = init.method ?? "GET";
     if (url.hostname === "flamenode.example.com" && url.pathname === "/" && method === "GET") {
       return new Response('<script src="/_next/static/app.js"></script>', { status: 200 });
     }
+    if (url.hostname === "flamenode.example.com" && url.pathname === "/list" && method === "GET") {
+      return new Response("list", { status: 200 });
+    }
     if (url.pathname === "/_next/static/app.js") return new Response("asset", { status: 200 });
+    if (url.pathname === "/api/admin/import/legacy" && method === "POST") {
+      assert.equal(init.headers?.Origin, "https://flamenode.example.com");
+      return new Response(null, { status: 401 });
+    }
     if (url.pathname === "/api/health" && method === "GET") {
-      return jsonResponse({ ok: true, service: "flamenode-web", commit, runtime: "cloudflare-worker" });
+      return jsonResponse({
+        ok: true,
+        service: "flamenode-web",
+        commit: responseCommit("flamenode-web"),
+        runtime: "cloudflare-worker",
+      });
     }
     if (url.pathname === "/api/health" && method === "POST") return new Response(null, { status: 405 });
     if (url.pathname === "/api/auth/callback/discord") return new Response(null, { status: 302 });
@@ -752,7 +803,7 @@ function smokeFetch(commit, { mismatchService } = {}) {
         : url.hostname.startsWith("content-")
           ? "flamenode-content-jobs"
           : "flamenode-sync-jobs";
-      return jsonResponse({ ok: true, service, commit: service === mismatchService ? "f".repeat(40) : commit });
+      return jsonResponse({ ok: true, service, commit: responseCommit(service) });
     }
     if (["/rebuild", "/process-queue"].includes(url.pathname)) return new Response(null, { status: 401 });
     if (url.pathname === "/api/health/deep") {
@@ -761,7 +812,7 @@ function smokeFetch(commit, { mismatchService } = {}) {
       return jsonResponse({
         ok: true,
         service: "flamenode-web",
-        commit,
+        commit: responseCommit("flamenode-web-deep"),
         checks: { d1: "ok", kv: "ok", r2: "ok", schema: "ok" },
       });
     }
@@ -800,5 +851,25 @@ test("smoke requires every URL and verifies web/cron SHA, admin rejection, deep 
       requestOptions: { attempts: 1, retryDelayMs: 0 },
     }),
     /flamenode-sync-jobs health: invalid payload or commit mismatch/,
+  );
+});
+
+test("smoke waits for stale 200 health responses until every deployment commit converges", async () => {
+  const env = productionEnv();
+  await assert.doesNotReject(() =>
+    runSmoke({
+      env,
+      expectedCommit: COMMIT,
+      fetchImpl: smokeFetch(COMMIT, {
+        staleCommitResponses: {
+          "flamenode-web": 1,
+          "flamenode-fast-jobs": 1,
+          "flamenode-content-jobs": 1,
+          "flamenode-sync-jobs": 1,
+          "flamenode-web-deep": 1,
+        },
+      }),
+      requestOptions: { attempts: 2, retryDelayMs: 0 },
+    }),
   );
 });

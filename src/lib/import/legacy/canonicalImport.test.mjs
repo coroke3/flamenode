@@ -3,6 +3,11 @@ import test from "node:test";
 import fs from "node:fs";
 import path from "node:path";
 import { parseLegacyImportText } from "./parse.ts";
+import { selectLegacyParsedFileRange } from "./range.ts";
+import {
+  legacyImportCpuBudgetErrors,
+  MAX_LEGACY_IMPORT_SELECTED_ROWS,
+} from "./cpuBudget.ts";
 import { normalizeLegacyFiles, legacyImportAuthUserId } from "./normalize.ts";
 import { planD1AuditMutationBudget } from "../../audit/mutateBudget.ts";
 import {
@@ -592,6 +597,70 @@ test("R2へ保存した同一planだけを一回限りclaimできる", async () 
   assert.equal(finished.progress.stage, "complete");
 });
 
+test("応答断で残ったclaimは1分後に同じpreviewから再開できる", async () => {
+  const bucket = new FakeR2Bucket();
+  const credential = await createLegacyImportPreview(
+    bucket,
+    {
+      authUserId: "auth-user-recover",
+      strategy: "skip_existing",
+      plan: fixturePlan(),
+    },
+    { now: 2_000, previewToken: "e".repeat(32) },
+  );
+  const abandoned = await claimLegacyImportPreview(
+    bucket,
+    {
+      authUserId: "auth-user-recover",
+      previewToken: credential.previewToken,
+      planHash: credential.planHash,
+    },
+    { now: 2_001, claimId: "f".repeat(32) },
+  );
+  assert.equal(abandoned.attempt, 1);
+
+  await assert.rejects(
+    claimLegacyImportPreview(
+      bucket,
+      {
+        authUserId: "auth-user-recover",
+        previewToken: credential.previewToken,
+        planHash: credential.planHash,
+      },
+      { now: 2_060, claimId: "1".repeat(32) },
+    ),
+    (error) => error instanceof LegacyImportPreviewError && error.code === "already_claimed",
+  );
+
+  const resumed = await claimLegacyImportPreview(
+    bucket,
+    {
+      authUserId: "auth-user-recover",
+      previewToken: credential.previewToken,
+      planHash: credential.planHash,
+    },
+    { now: 2_061, claimId: "2".repeat(32) },
+  );
+  assert.equal(resumed.attempt, 2);
+  assert.deepEqual(resumed.progress, abandoned.progress);
+});
+
+test("512KBを超えるpreview planはR2へ保存せず拒否する", async () => {
+  const plan = fixturePlan();
+  await assert.rejects(
+    createLegacyImportPreview(
+      new FakeR2Bucket(),
+      {
+        authUserId: "auth-user-large-plan",
+        strategy: "skip_existing",
+        plan: { ...plan, warnings: ["x".repeat(600 * 1024)] },
+      },
+      { now: 3_000, previewToken: "3".repeat(32) },
+    ),
+    (error) => error instanceof LegacyImportPreviewError && error.code === "plan_too_large",
+  );
+});
+
 test("期限切れpreview planを削除して拒否する", async () => {
   const bucket = new FakeR2Bucket();
   const credential = await createLegacyImportPreview(
@@ -663,7 +732,7 @@ test("カスタム質問・回答applyは手動回答保護とD1予算を維持�
   assert.match(apply, /ensureImportedAuthUsers/);
   assert.match(apply, /legacyImportAuthUserId/);
   assert.match(apply, /x_user_account_links_import_batch/);
-  assert.match(previewStore, /PREVIEW_VERSION = 3 as const/);
+  assert.match(previewStore, /PREVIEW_VERSION = 4 as const/);
   assert.match(previewStore, /status: "completed"/);
 
   const budget = planD1AuditMutationBudget({
@@ -674,6 +743,65 @@ test("カスタム質問・回答applyは手動回答保護とD1予算を維持�
   });
   assert.equal(budget.totalQueryCount, 45);
   assert.equal(budget.withinLimit, true);
+});
+
+test("ファイルごとの1始まり・終了含む範囲を選択し、元行位置を維持する", () => {
+  const parsed = parseLegacyImportText(
+    "videos.json",
+    JSON.stringify([
+      { title: "A" },
+      { title: "B" },
+      { title: "C" },
+      { title: "D" },
+    ]),
+  );
+  const ranged = selectLegacyParsedFileRange(parsed, { start: "2", end: "3" });
+  assert.deepEqual(ranged.file.rows.map((row) => row.title), ["B", "C"]);
+  assert.equal(ranged.file.rowOffset, 1);
+  assert.deepEqual(ranged.range, {
+    fileName: "videos.json",
+    sourceRows: 4,
+    startRow: 2,
+    endRow: 3,
+    selectedRows: 2,
+  });
+
+  const all = selectLegacyParsedFileRange(parsed, { start: "", end: "" });
+  assert.equal(all.range.selectedRows, 4);
+  assert.equal(all.file.rowOffset, 0);
+});
+
+test("不正またはファイル外の読み込み範囲をfail closedで拒否する", () => {
+  const parsed = parseLegacyImportText("rows.json", JSON.stringify([{ id: 1 }, { id: 2 }]));
+  assert.throws(
+    () => selectLegacyParsedFileRange(parsed, { start: "0", end: "1" }),
+    /開始位置は1以上の整数/,
+  );
+  assert.throws(
+    () => selectLegacyParsedFileRange(parsed, { start: "2", end: "1" }),
+    /終了位置は開始位置以上/,
+  );
+  assert.throws(
+    () => selectLegacyParsedFileRange(parsed, { start: "1", end: "3" }),
+    /データ件数 2 を超えています/,
+  );
+});
+
+test("1原子stepの関連件数をCloudflare CPU予算内へ固定する", () => {
+  const plan = fixturePlan();
+  assert.deepEqual(legacyImportCpuBudgetErrors(plan), []);
+
+  const chapter = plan.videoChapters[0];
+  const oversized = {
+    ...plan,
+    videoChapters: Array.from({ length: 129 }, (_, index) => ({
+      ...chapter,
+      id: `${chapter.id}-${index}`,
+      chapter_time: index,
+    })),
+  };
+  assert.match(legacyImportCpuBudgetErrors(oversized).join("\n"), /チャプターは1回の取込で最大128件/);
+  assert.equal(MAX_LEGACY_IMPORT_SELECTED_ROWS, 250);
 });
 
 test("旧形式applyは公開R2 JSONの全関連targetを原子的に再生成予約する", () => {
@@ -735,7 +863,7 @@ test("ランタイム側に旧テーブル・dual-writeを導入しない", () =
   }
 });
 
-test("applyクライアントはretryableと423/503で同じpreviewを自動再試行する", () => {
+test("applyクライアントは423/503を短時間だけ再試行し、previewを保持して停止する", () => {
   const root = path.resolve(import.meta.dirname, "../../../..");
   const client = fs.readFileSync(path.join(root, "src/components/admin/LegacyCanonicalImportClient.tsx"), "utf8");
   assert.match(client, /readApiResponse/);
@@ -743,19 +871,23 @@ test("applyクライアントはretryableと423/503で同じpreviewを自動再�
   assert.match(client, /json\.retryable === true/);
   assert.match(client, /response\.status === 423/);
   assert.match(client, /response\.status === 503/);
-  assert.match(client, /APPLY_TRANSIENT_MAX_RETRIES = 40/);
-  assert.match(client, /APPLY_MAX_REQUESTS = 20_000/);
+  assert.match(client, /APPLY_TRANSIENT_MAX_RETRIES = 4/);
+  assert.match(client, /APPLY_MAX_REQUESTS_PER_RUN = 500/);
+  assert.match(client, /APPLY_STEP_PAUSE_MS = 150/);
   assert.match(client, /applyTransientBackoffMs/);
-  assert.match(client, /10_000/);
-  assert.match(client, /flamenode:legacy-import:credential/);
+  assert.match(client, /5_000/);
+  assert.match(client, /retryStoppedMessage/);
+  assert.match(client, /自動再試行は.*回で停止しました/);
+  assert.match(client, /flamenode:legacy-import:credential:v4/);
   assert.match(client, /sessionStorage/);
   assert.match(client, /自動再試行中/);
   assert.match(client, /サーバーが一時的に応答できませんでした/);
   assert.match(client, /mode === "preview"[\s\S]*?isApplyTransientFailure/);
   assert.match(client, /json\.requires_repreview[\s\S]*?setCredential\(null\)/);
   assert.match(client, /transientFailures = 0/);
-  assert.match(client, /await sleep\(75\)/);
+  assert.match(client, /await sleep\(APPLY_STEP_PAUSE_MS\)/);
   assert.match(client, /未完了のプレビューがあります/);
+  assert.match(client, /無料枠と連続負荷を守るため一時停止しました/);
 });
 
 test("apply routeはCloudflare上限のため1リクエスト1原子ステップに限定する", () => {
@@ -771,7 +903,62 @@ test("apply routeはCloudflare上限のため1リクエスト1原子ステップ
   assert.match(previewStore, /PREVIEW_MAX_LIFETIME_SECONDS = 6 \* 60 \* 60/);
   assert.match(previewStore, /LEGACY_IMPORT_PREVIEW_MAX_LIFETIME_SECONDS/);
   assert.match(previewStore, /previewExpiresAt/);
+  assert.match(previewStore, /CLAIM_TTL_SECONDS = 60/);
   assert.doesNotMatch(previewStore, /createdAt \+ 2 \* 60 \* 60/);
+});
+
+test("preview routeとUIはファイルごとの範囲をplanへ固定する", () => {
+  const root = path.resolve(import.meta.dirname, "../../../..");
+  const route = fs.readFileSync(path.join(root, "app/api/admin/import/legacy/route.ts"), "utf8");
+  const client = fs.readFileSync(path.join(root, "src/components/admin/LegacyCanonicalImportClient.tsx"), "utf8");
+  assert.match(route, /selectLegacyParsedFileRange/);
+  assert.match(route, /range_start_\$\{fileIndex\}/);
+  assert.match(route, /range_end_\$\{fileIndex\}/);
+  assert.match(route, /file_ranges: fileRanges/);
+  assert.ok(route.indexOf("const ranged = selectLegacyParsedFileRange") < route.indexOf("rowCount > MAX_ROWS"));
+  assert.match(client, /name=\{`range_start_\$\{index\}`\}/);
+  assert.match(client, /name=\{`range_end_\$\{index\}`\}/);
+  assert.match(client, /今回の読み込み範囲/);
+  assert.match(client, /同じ大きなファイルを複数回に分ける場合/);
+});
+
+test("legacy importは1 HTTPのplan・step・連続送信をhard capする", () => {
+  const root = path.resolve(import.meta.dirname, "../../../..");
+  const route = fs.readFileSync(path.join(root, "app/api/admin/import/legacy/route.ts"), "utf8");
+  const client = fs.readFileSync(path.join(root, "src/components/admin/LegacyCanonicalImportClient.tsx"), "utf8");
+  const previewStore = fs.readFileSync(path.join(root, "src/lib/import/legacy/previewStore.ts"), "utf8");
+  const budget = fs.readFileSync(path.join(root, "src/lib/import/legacy/cpuBudget.ts"), "utf8");
+  assert.match(route, /MAX_FILE_BYTES = 2 \* 1024 \* 1024/);
+  assert.match(route, /MAX_TOTAL_BYTES = 4 \* 1024 \* 1024/);
+  assert.match(route, /MAX_ROWS = MAX_LEGACY_IMPORT_SELECTED_ROWS/);
+  assert.match(previewStore, /MAX_STORED_PLAN_BYTES = 512 \* 1024/);
+  assert.match(previewStore, /PREVIEW_VERSION = 4 as const/);
+  assert.match(budget, /MAX_LEGACY_IMPORT_STEP_BYTES = 128 \* 1024/);
+  assert.ok(route.indexOf("storedPlanBytes > MAX_STORED_PLAN_BYTES") < route.indexOf("preflightLegacyImportPlan(db"));
+
+  const submit = client.slice(client.indexOf("async function submit"), client.indexOf("const expiresLabel"));
+  assert.match(client, /const submitInFlightRef = React\.useRef\(false\)/);
+  assert.match(submit, /if \(!form \|\| pending \|\| submitInFlightRef\.current\) return/);
+  assert.match(submit, /submitInFlightRef\.current = true/);
+  assert.match(submit, /finally \{[\s\S]*submitInFlightRef\.current = false/);
+  assert.match(submit, /const response = await fetch\("\/api\/admin\/import\/legacy"/);
+  assert.doesNotMatch(submit, /Promise\.all|void fetch\(/);
+  assert.match(submit, /await sleep\(APPLY_STEP_PAUSE_MS\)/);
+});
+
+test("legacy import中はYouTube APIを呼ばずpendingを後続cronへ渡す", () => {
+  const root = path.resolve(import.meta.dirname, "../../../..");
+  const importSources = [
+    "app/api/admin/import/legacy/route.ts",
+    "src/lib/import/legacy/normalize.ts",
+    "src/lib/import/legacy/preflight.ts",
+    "src/lib/import/legacy/apply.ts",
+  ].map((file) => fs.readFileSync(path.join(root, file), "utf8")).join("\n");
+  const syncWorker = fs.readFileSync(path.join(root, "workers/youtube-sync/index.ts"), "utf8");
+  assert.doesNotMatch(importSources, /\bfetch\s*\(/);
+  assert.match(importSources, /'pending', NULL, \$\{now\}/);
+  assert.match(syncWorker, /sync_status[\s\S]*pending/);
+  assert.match(syncWorker, /fetchWithTimeout/);
 });
 
 test("previewErrorResponseはalready_claimedとbucket_unavailableをretryableにする", () => {

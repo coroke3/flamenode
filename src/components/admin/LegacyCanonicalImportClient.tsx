@@ -17,6 +17,13 @@ type ApiResponse = {
   requires_repreview?: boolean;
   retryable?: boolean;
   summary?: Record<string, number>;
+  file_ranges?: Array<{
+    fileName: string;
+    sourceRows: number;
+    startRow: number;
+    endRow: number;
+    selectedRows: number;
+  }>;
   warnings?: string[];
   errors?: string[];
   preview?: {
@@ -53,12 +60,17 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const APPLY_TRANSIENT_MAX_RETRIES = 40;
-const APPLY_MAX_REQUESTS = 20_000;
-const LEGACY_IMPORT_CREDENTIAL_STORAGE_KEY = "flamenode:legacy-import:credential";
+const APPLY_TRANSIENT_MAX_RETRIES = 4;
+const APPLY_MAX_REQUESTS_PER_RUN = 500;
+const APPLY_STEP_PAUSE_MS = 150;
+const LEGACY_IMPORT_CREDENTIAL_STORAGE_KEY = "flamenode:legacy-import:credential:v4";
 
 function applyTransientBackoffMs(attempt: number): number {
-  return Math.min(500 * 2 ** (attempt - 1), 10_000);
+  return Math.min(750 * 2 ** (attempt - 1), 5_000);
+}
+
+function retryStoppedMessage(message: string): string {
+  return `${message} 自動再試行は${APPLY_TRANSIENT_MAX_RETRIES}回で停止しました。previewは保持されているため、1分ほど待ってから「書き込む／再開」を押してください。`;
 }
 
 type StoredPreviewCredential = {
@@ -160,6 +172,7 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
   const formRef = React.useRef<HTMLFormElement>(null);
   const addFilesInputRef = React.useRef<HTMLInputElement>(null);
   const formRevisionRef = React.useRef(0);
+  const submitInFlightRef = React.useRef(false);
   const [selectedFiles, setSelectedFiles] = React.useState<File[]>([]);
   const [result, setResult] = React.useState<ApiResponse | null>(null);
   const [pending, setPending] = React.useState<"preview" | "apply" | null>(null);
@@ -295,7 +308,8 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
 
   async function submit(mode: "preview" | "apply"): Promise<void> {
     const form = formRef.current;
-    if (!form || pending) return;
+    // Reactの再描画前にダブルクリックされても、同じpreviewのstepを並行送信しない。
+    if (!form || pending || submitInFlightRef.current) return;
     if (mode === "preview" && selectedFiles.length === 0) {
       setResult({ ok: false, message: "ファイルを1件以上追加してください。" });
       return;
@@ -327,6 +341,7 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
       return;
     }
 
+    submitInFlightRef.current = true;
     setPending(mode);
     const submittedFormRevision = formRevisionRef.current;
     try {
@@ -343,7 +358,15 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
           previewJson = json;
           if (response.ok && json.ok) break;
           if (json.requires_repreview) break;
-          if (!isApplyTransientFailure(response, json) || attempt >= APPLY_TRANSIENT_MAX_RETRIES) break;
+          if (!isApplyTransientFailure(response, json)) break;
+          if (attempt >= APPLY_TRANSIENT_MAX_RETRIES) {
+            previewJson = {
+              ...json,
+              message: retryStoppedMessage(json.message ?? "一時的なエラーが続いています。"),
+              retryable: true,
+            };
+            break;
+          }
           setResult({
             ...json,
             ok: false,
@@ -370,7 +393,8 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
       } else if (credential) {
         let stopped = false;
         let transientFailures = 0;
-        for (let requestCount = 0; requestCount < APPLY_MAX_REQUESTS; requestCount += 1) {
+        let latestJson: ApiResponse | null = null;
+        for (let requestCount = 0; requestCount < APPLY_MAX_REQUESTS_PER_RUN; requestCount += 1) {
           if (formRevisionRef.current !== submittedFormRevision) {
             setResult({ ok: false, message: "入力が変更されたため、プレビューをやり直してください。" });
             stopped = true;
@@ -406,12 +430,22 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
                 await sleep(applyTransientBackoffMs(transientFailures));
                 continue;
               }
+              if (isApplyTransientFailure(response, json)) {
+                setResult({
+                  ...json,
+                  message: retryStoppedMessage(json.message ?? "一時的なエラーが続いています。"),
+                  retryable: true,
+                });
+                stopped = true;
+                break;
+              }
               setResult(json);
               stopped = true;
               break;
             }
 
             transientFailures = 0;
+            latestJson = json;
             setResult(json);
             const resultComplete =
               typeof json.result === "object" &&
@@ -423,7 +457,7 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
               stopped = true;
               break;
             }
-            await sleep(75);
+            await sleep(APPLY_STEP_PAUSE_MS);
           } catch {
             if (transientFailures < APPLY_TRANSIENT_MAX_RETRIES) {
               transientFailures += 1;
@@ -437,7 +471,7 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
             }
             setResult({
               ok: false,
-              message: "通信結果を確認できませんでした。二重送信を避けるため、少し待ってから同じpreviewで再試行してください。",
+              message: retryStoppedMessage("通信結果を確認できませんでした。"),
               retryable: true,
             });
             stopped = true;
@@ -445,7 +479,13 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
           }
         }
         if (!stopped) {
-          setResult({ ok: false, message: "インポートの継続回数が上限に達しました。現在の状態から再試行してください。" });
+          setResult({
+            ...(latestJson ?? {}),
+            ok: true,
+            mode: "apply",
+            continuation_required: true,
+            message: `${APPLY_MAX_REQUESTS_PER_RUN.toLocaleString()}ステップ処理したため、無料枠と連続負荷を守るため一時停止しました。「書き込む／再開」で続きから再開できます。`,
+          });
         }
       }
     } catch {
@@ -455,6 +495,7 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
         retryable: true,
       });
     } finally {
+      submitInFlightRef.current = false;
       setPending(null);
     }
   }
@@ -479,16 +520,45 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
             />
           </div>
           <span className="fn-muted fn-text-sm">
-            イベント用と動画用など、複数ファイルを順番に追加できます。JSON・CSV・TSV、最大20ファイル、合計12MB、5,000行まで。
+            イベント用と動画用など、分割した複数ファイルを順番に追加できます。JSON・CSV・TSV、最大20ファイル、1ファイル2MB・合計4MB、今回選択する範囲の合計250行まで。
+            同じ大きなファイルを複数回に分ける場合は、毎回重ならない開始・終了位置を指定してください。
           </span>
           {selectedFiles.length ? (
             <ul className={styles.fileList}>
-              {selectedFiles.map((file) => {
+              {selectedFiles.map((file, index) => {
                 const key = selectedFileKey(file);
                 return (
                   <li key={key} className={styles.fileListItem}>
                     <code>{file.name}</code>
                     <span className="fn-muted fn-text-sm">({Math.ceil(file.size / 1024).toLocaleString()} KB)</span>
+                    <div className={styles.fileRow}>
+                      <label className={styles.optionField}>
+                        <span className="fn-muted fn-text-sm">開始位置（1始まり）</span>
+                        <input
+                          type="number"
+                          name={`range_start_${index}`}
+                          min={1}
+                          step={1}
+                          inputMode="numeric"
+                          placeholder="先頭"
+                          className="fn-input"
+                          aria-label={`${file.name}の開始位置`}
+                        />
+                      </label>
+                      <label className={styles.optionField}>
+                        <span className="fn-muted fn-text-sm">終了位置（この行を含む）</span>
+                        <input
+                          type="number"
+                          name={`range_end_${index}`}
+                          min={1}
+                          step={1}
+                          inputMode="numeric"
+                          placeholder="末尾"
+                          className="fn-input"
+                          aria-label={`${file.name}の終了位置`}
+                        />
+                      </label>
+                    </div>
                     <button type="button" className="fn-btn fn-btn-sm" onClick={() => removeSelectedFile(key)}>
                       削除
                     </button>
@@ -599,7 +669,7 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
             {pending === "preview" ? "解析・保存中…" : "プレビュー"}
           </button>
           <button type="button" className="fn-btn fn-btn-danger" disabled={!!pending || !credential} onClick={() => void submit("apply")}>
-            {pending === "apply" ? "書き込み中…" : "新正本へ書き込む"}
+            {pending === "apply" ? "書き込み中…" : "新正本へ書き込む／再開"}
           </button>
           <span className="fn-muted fn-text-sm">
             {credential
@@ -656,6 +726,19 @@ function ImportResult({ result }: { result: ApiResponse }): React.ReactElement {
             <div key={key}><dt className="fn-muted fn-text-sm">{key}</dt><dd className={styles.summaryValue}>{value.toLocaleString()}</dd></div>
           ))}
         </dl>
+      ) : null}
+      {result.file_ranges?.length ? (
+        <details open>
+          <summary>今回の読み込み範囲 ({result.file_ranges.length}ファイル)</summary>
+          <ul>
+            {result.file_ranges.map((range, index) => (
+              <li key={`${index}:${range.fileName}`}>
+                <code>{range.fileName}</code>: {range.startRow.toLocaleString()}〜{range.endRow.toLocaleString()}行
+                （全{range.sourceRows.toLocaleString()}行中 {range.selectedRows.toLocaleString()}行）
+              </li>
+            ))}
+          </ul>
+        </details>
       ) : null}
       {result.errors?.length ? <MessageList title="エラー" items={result.errors} /> : null}
       {result.warnings?.length ? <MessageList title="警告" items={result.warnings} /> : null}

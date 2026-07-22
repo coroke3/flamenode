@@ -82,7 +82,7 @@ export async function createModerationCase(formData: FormData): Promise<Moderati
     audits.push({ table_name: "videos", target_id: video.id, operation: "UPDATE", after: snapshot(videoAfter), actor_user_id: guard.user.id, retention_class: videoAfter.visibility_status === "voided" ? "long_audit" : "normal", context: "admin_moderation_create", reason: `ケース ${id} 作成に伴う公開状態変更`, strict: true, before: snapshot(video) });
   }
   statements.push(...queue.statements); expected.push(...queue.expectedChanges);
-  if (notification) { statements.push(notification); expected.push(null); }
+  if (notification) { statements.push(notification.statement); expected.push(null); }
   try { await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits }); }
   catch (error) { return mutationError(error); }
   revalidateModeration(video, changed);
@@ -125,7 +125,7 @@ export async function updateModerationCaseStatus(formData: FormData): Promise<Mo
     audits.push({ table_name: "videos", target_id: video.id, operation: "UPDATE", before: snapshot(video), after: snapshot(videoAfter), actor_user_id: guard.user.id, retention_class: videoAfter.visibility_status === "voided" ? "long_audit" : "normal", context: "admin_moderation_update", reason: `ケース ${id} 更新に伴う公開状態変更`, strict: true });
   }
   statements.push(...queue.statements); expected.push(...queue.expectedChanges);
-  if (notification) { statements.push(notification); expected.push(null); }
+  if (notification) { statements.push(notification.statement); expected.push(null); }
   try { await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits }); }
   catch (error) { return mutationError(error); }
   revalidateModeration(video, changed);

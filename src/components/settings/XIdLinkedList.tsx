@@ -32,6 +32,7 @@ export type XIdentityRequestHistoryRow = {
   target_x_user_id: string | null;
   status: XIdentityRequestStatus;
   requested_at: number;
+  updated_at: number;
 };
 
 const REQUEST_TYPE_LABELS: Record<XIdentityRequestType, string> = {
@@ -138,6 +139,9 @@ export function XIdentityRequestHistoryList({
                     {REQUEST_TYPE_LABELS[row.request_type]}・{" "}
                     {formatUnix(row.requested_at, { dateOnly: true })}{" "}
                     {formatUnix(row.requested_at, { timeOnly: true })} 申請
+                    {row.status !== "pending" && row.updated_at !== row.requested_at
+                      ? `・最終更新 ${formatUnix(row.updated_at, { dateOnly: true })} ${formatUnix(row.updated_at, { timeOnly: true })}`
+                      : ""}
                   </span>
                 </div>
                 <div className={pageStyles.rowBadges}>

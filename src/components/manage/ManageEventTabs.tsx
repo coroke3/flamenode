@@ -68,6 +68,16 @@ export function ManageEventTabs({
       searchParams,
       eventId,
     });
+  const contentSubtab = pathname.endsWith("/slots")
+    ? "slots"
+    : pathname.endsWith("/audience")
+      ? "audience"
+      : "videos";
+  const settingsSubtab = pathname.endsWith("/youtube-playlist")
+    ? "youtube-playlist"
+    : pathname.endsWith("/staff")
+      ? "staff"
+      : "edit";
 
   return (
     <div className="fn-console-event-nav">
@@ -112,16 +122,19 @@ export function ManageEventTabs({
         >
           <Link
             href={`/manage/events/${encodedId}/videos?status=all`}
+            aria-current={contentSubtab === "videos" ? "page" : undefined}
           >
             提出状況
           </Link>
           <Link
             href={`/manage/events/${encodedId}/slots`}
+            aria-current={contentSubtab === "slots" ? "page" : undefined}
           >
             枠管理
           </Link>
           <Link
             href={`/manage/events/${encodedId}/audience`}
+            aria-current={contentSubtab === "audience" ? "page" : undefined}
           >
             登録者プレビュー
           </Link>
@@ -135,16 +148,19 @@ export function ManageEventTabs({
         >
           <Link
             href={`/manage/events/${encodedId}/edit`}
+            aria-current={settingsSubtab === "edit" ? "page" : undefined}
           >
             イベント設定
           </Link>
           <Link
             href={`/manage/events/${encodedId}/youtube-playlist`}
+            aria-current={settingsSubtab === "youtube-playlist" ? "page" : undefined}
           >
             YouTube再生リスト
           </Link>
           <Link
             href={`/manage/events/${encodedId}/staff`}
+            aria-current={settingsSubtab === "staff" ? "page" : undefined}
           >
             運営メンバー
           </Link>

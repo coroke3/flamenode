@@ -21,6 +21,14 @@
   background-color: var(--accent-primary-soft);
 }
 
+.active {
+  background-color: var(--accent-primary-soft);
+}
+
+.active .timeBadge {
+  font-weight: 700;
+}
+
 .clickable:focus-visible {
   outline: 2px solid var(--accent-primary);
   outline-offset: -2px;

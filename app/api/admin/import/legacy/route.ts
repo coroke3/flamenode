@@ -6,6 +6,14 @@ import { requireAdminWrite, type WriteGuardResult } from "@/lib/auth/writeGuard"
 import { requireSameOriginWrite } from "@/lib/auth/writeOriginGuard";
 import { parseLegacyImportText, type LegacyParsedFile } from "@/lib/import/legacy/parse";
 import {
+  legacyImportCpuBudgetErrors,
+  MAX_LEGACY_IMPORT_SELECTED_ROWS,
+} from "@/lib/import/legacy/cpuBudget";
+import {
+  selectLegacyParsedFileRange,
+  type LegacyImportFileRange,
+} from "@/lib/import/legacy/range";
+import {
   MAX_LEGACY_VIDEO_FIELD_DECISIONS,
   normalizeLegacyFiles,
   type CanonicalVisibility,
@@ -26,6 +34,7 @@ import {
   estimateLegacyImportStoredPlanBytes,
   LegacyImportPreviewError,
   LEGACY_IMPORT_PLAN_WARN_BYTES,
+  MAX_STORED_PLAN_BYTES,
   type LegacyImportApplyProgress,
 } from "@/lib/import/legacy/previewStore";
 import type { CanonicalLegacyPlan } from "@/lib/import/legacy/normalize";
@@ -33,9 +42,9 @@ import type { CanonicalLegacyPlan } from "@/lib/import/legacy/normalize";
 export const dynamic = "force-dynamic";
 
 const MAX_FILES = 20;
-const MAX_FILE_BYTES = 5 * 1024 * 1024;
-const MAX_TOTAL_BYTES = 12 * 1024 * 1024;
-const MAX_ROWS = 5000;
+const MAX_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 4 * 1024 * 1024;
+const MAX_ROWS = MAX_LEGACY_IMPORT_SELECTED_ROWS;
 const MAX_FIELD_DECISIONS_BYTES = 16 * 1024;
 
 function error(
@@ -300,20 +309,35 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   let totalBytes = 0;
   const parsed: LegacyParsedFile[] = [];
+  const fileRanges: LegacyImportFileRange[] = [];
   for (const file of files) {
-    if (file.size > MAX_FILE_BYTES) return error(`${file.name}: 1ファイル5MBまでです。`);
+    if (file.size > MAX_FILE_BYTES) return error(`${file.name}: 1ファイル2MBまでです。大きいファイルは物理分割してください。`);
     totalBytes += file.size;
-    if (totalBytes > MAX_TOTAL_BYTES) return error("ファイル合計は12MBまでです。");
+    if (totalBytes > MAX_TOTAL_BYTES) return error("ファイル合計は4MBまでです。複数回に分けてください。");
     const content = await file.text();
     try {
-      parsed.push(parseLegacyImportText(file.name, content));
+      const parsedFile = parseLegacyImportText(file.name, content);
+      const fileIndex = parsed.length;
+      const ranged = selectLegacyParsedFileRange(parsedFile, {
+        start: stringField(formData, `range_start_${fileIndex}`),
+        end: stringField(formData, `range_end_${fileIndex}`),
+      });
+      parsed.push(ranged.file);
+      fileRanges.push(ranged.range);
     } catch (cause) {
       return error(cause instanceof Error ? cause.message : `${file.name}: 解析に失敗しました。`);
     }
   }
 
+  const sourceRowCount = fileRanges.reduce((sum, range) => sum + range.sourceRows, 0);
   const rowCount = parsed.reduce((sum, file) => sum + file.rows.length, 0);
-  if (rowCount > MAX_ROWS) return error(`1回の入力は最大${MAX_ROWS}行です。`);
+  if (rowCount > MAX_ROWS) {
+    return error(
+      `今回の選択範囲は${rowCount.toLocaleString()}行です。合計${MAX_ROWS}行以下になるよう、各ファイルの開始・終了位置を狭めてください。`,
+      413,
+      { file_ranges: fileRanges, requires_repreview: false },
+    );
+  }
 
   let fieldDecisions: LegacyVideoFieldDecision[];
   try {
@@ -328,8 +352,25 @@ export async function POST(request: Request): Promise<NextResponse> {
     videoFieldDecisions: fieldDecisions,
   });
 
+  const cpuBudgetErrors = legacyImportCpuBudgetErrors(plan);
+  if (cpuBudgetErrors.length > 0) {
+    return NextResponse.json(
+      {
+        ok: false,
+        mode,
+        message: "Cloudflare Workerの1リクエスト上限を超える入力です。範囲または1作品内の関連データを分割してください。",
+        file_ranges: fileRanges,
+        warnings: plan.warnings.slice(0, 100),
+        errors: cpuBudgetErrors,
+        video_custom_field_candidates: plan.unmappedVideoFields,
+      },
+      { status: 413 },
+    );
+  }
+
   const summary = {
     inputFiles: files.length,
+    sourceRows: sourceRowCount,
     inputRows: rowCount,
     events: plan.events.length,
     eventStaff: plan.eventStaff.length,
@@ -352,11 +393,33 @@ export async function POST(request: Request): Promise<NextResponse> {
         ok: false,
         mode,
         summary,
+        file_ranges: fileRanges,
         warnings: plan.warnings.slice(0, 100),
         errors: plan.errors.slice(0, 100),
         video_custom_field_candidates: plan.unmappedVideoFields,
       },
       { status: 422 },
+    );
+  }
+
+  const storedPlanBytes = estimateLegacyImportStoredPlanBytes({
+    authUserId: user.id,
+    strategy: selectedStrategy,
+    plan,
+  });
+  if (storedPlanBytes > MAX_STORED_PLAN_BYTES) {
+    return NextResponse.json(
+      {
+        ok: false,
+        mode,
+        message: `正規化後planがCloudflare用上限512KBを超えました。開始・終了位置を狭めてください。`,
+        summary,
+        file_ranges: fileRanges,
+        warnings: plan.warnings.slice(0, 100),
+        errors: ["applyは各リクエストでplanを検証するため、巨大planを保存するとWorker CPU上限を超えます。"],
+        video_custom_field_candidates: plan.unmappedVideoFields,
+      },
+      { status: 413 },
     );
   }
 
@@ -370,6 +433,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       {
         mode,
         summary,
+        file_ranges: fileRanges,
         warnings: plan.warnings.slice(0, 100),
         requires_repreview: false,
       },
@@ -390,14 +454,9 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   const previewWarnings = plan.warnings.slice(0, 100);
-  const storedPlanBytes = estimateLegacyImportStoredPlanBytes({
-    authUserId: user.id,
-    strategy: selectedStrategy,
-    plan,
-  });
   if (storedPlanBytes > LEGACY_IMPORT_PLAN_WARN_BYTES) {
     previewWarnings.unshift(
-      `正規化後の plan が大きいです（約 ${Math.ceil(storedPlanBytes / (1024 * 1024)).toLocaleString()} MB / 上限 24 MB）。ファイル分割または作品数の削減を検討してください。`,
+      `正規化後のplanがCloudflare CPU目安の80%を超えています（約${Math.ceil(storedPlanBytes / 1024).toLocaleString()}KB / 上限512KB）。開始・終了位置をさらに狭めると安定します。`,
     );
   }
 
@@ -411,6 +470,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     plan_hash: credential.planHash,
     expires_at: credential.expiresAt,
     strategy: selectedStrategy,
+    file_ranges: fileRanges,
     video_custom_field_candidates: plan.unmappedVideoFields,
     preview: {
       events: plan.events.slice(0, 20).map(({ id, title, visibility_status }) => ({ id, title, visibility_status })),

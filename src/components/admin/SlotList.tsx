@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { TableScroll } from "@/components/ui/TableScroll";
 import {
   batchDeleteAvailableSlots,
   batchReleaseReservedSlots,
@@ -151,8 +152,9 @@ export function SlotList({
         </div>
       ) : null}
 
-      <table className="fn-table">
-        <thead>
+      <TableScroll label="枠一覧は横にスクロールして取得者・状態・操作まで確認できます">
+        <table className="fn-table">
+          <thead>
           <tr>
             <th>
               <input
@@ -175,8 +177,8 @@ export function SlotList({
             <th>作品</th>
             <th>操作</th>
           </tr>
-        </thead>
-        <tbody>
+          </thead>
+          <tbody>
           {slots.map((slot) => (
             <tr key={slot.id}>
               <td>
@@ -236,8 +238,9 @@ export function SlotList({
               </td>
             </tr>
           ))}
-        </tbody>
-      </table>
+          </tbody>
+        </table>
+      </TableScroll>
 
       <ConfirmDialog
         open={confirm !== null}

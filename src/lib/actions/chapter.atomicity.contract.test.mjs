@@ -35,7 +35,7 @@ test("全チャプターwriteは各1回のmutateWithAuditでqueueまで保存す
   assert.equal((action.match(/await buildStaticRebuildQueueBatch\(db,/g) ?? []).length, 4);
   assert.doesNotMatch(action, /enqueueNotification\(/);
   assert.match(action, /buildNotificationOutboxStatement/);
-  assert.match(action, /mutationStatements\.push\(notification\)/);
+  assert.match(action, /mutationStatements\.push\(notification\.statement\)/);
   assert.match(action, /mutationStatements\.push\(\.\.\.queue\.statements\)/);
 });
 

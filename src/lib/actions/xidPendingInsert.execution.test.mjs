@@ -48,7 +48,14 @@ if (runTestWithTsx(import.meta.url)) {
   test("同一user・target・requestの条件付きINSERTは同時重複を1件にする", async () => {
     const sqlite = makeDatabase();
     const first = sqlite.prepare(await compile(row("xreq-1"))).run();
-    const second = sqlite.prepare(await compile(row("xreq-2"))).run();
+    const second = sqlite
+      .prepare(
+        await compile({
+          ...row("xreq-2"),
+          request_type: "existing_link",
+        }),
+      )
+      .run();
     assert.equal(first.changes, 1);
     assert.equal(second.changes, 0);
     assert.equal(

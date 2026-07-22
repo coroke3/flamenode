@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { and, desc, eq, ne } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { xIdentityRequests as linkReqTable } from "@/lib/db/schema";
 import { getLinkedXUsersForAuthUser } from "@/lib/auth/xIdentity";
@@ -102,13 +102,11 @@ export default async function SettingsPage({
           target_x_user_id: linkReqTable.target_x_user_id,
           status: linkReqTable.status,
           requested_at: linkReqTable.requested_at,
+          updated_at: linkReqTable.updated_at,
         })
         .from(linkReqTable)
-        .where(and(
-          eq(linkReqTable.requested_by_auth_user_id, user.id),
-          ne(linkReqTable.status, "approved"),
-        ))
-        .orderBy(desc(linkReqTable.requested_at))
+        .where(eq(linkReqTable.requested_by_auth_user_id, user.id))
+        .orderBy(desc(linkReqTable.requested_at), desc(linkReqTable.id))
         .limit(50)
     : [];
 
@@ -382,7 +380,7 @@ export default async function SettingsPage({
               X ID申請履歴
             </h2>
             <p className={pageStyles.cardDesc}>
-              申請中・却下など、対応が必要な申請を新しいものから最大50件確認できます。承認済みは各 X ID タブへ反映済みのため表示しません。
+              申請中・承認・却下・取り下げを含む全状態を、新しいものから最大50件確認できます。
             </p>
           </div>
           <XIdentityRequestHistoryList rows={requestHistory} />

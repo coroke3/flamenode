@@ -1,15 +1,21 @@
 import type { CanonicalLegacyPlan, LegacyImportStrategy } from "./normalize";
 
-const PREVIEW_VERSION = 3 as const;
+// v4はCloudflare CPU hard cap適用後のplanだけを許可する。
+// v3の巨大planを新コードで再開させず、必ず範囲指定付きで再previewさせる。
+const PREVIEW_VERSION = 4 as const;
 const PREVIEW_TTL_SECONDS = 15 * 60;
 const PREVIEW_MAX_LIFETIME_SECONDS = 6 * 60 * 60;
 export const LEGACY_IMPORT_PREVIEW_MAX_LIFETIME_SECONDS = PREVIEW_MAX_LIFETIME_SECONDS;
-const CLAIM_TTL_SECONDS = 10 * 60;
+// 1 HTTP = 1原子stepのため、応答断後に10分間claimを保持する必要はない。
+// Workerが503で終了した場合も約1分で同じpreviewを手動再開できるようにする。
+const CLAIM_TTL_SECONDS = 60;
 
 function previewExpiresAt(createdAt: number, now: number): number {
   return Math.min(createdAt + PREVIEW_MAX_LIFETIME_SECONDS, now + PREVIEW_TTL_SECONDS);
 }
-export const MAX_STORED_PLAN_BYTES = 24 * 1024 * 1024;
+// claim/advanceごとにplan全体をJSON parse/hash/CASするため、Worker CPUを守るhard cap。
+// 大量取込はファイル別の行範囲を分け、複数previewとして処理する。
+export const MAX_STORED_PLAN_BYTES = 512 * 1024;
 export const LEGACY_IMPORT_PLAN_WARN_BYTES = Math.floor(MAX_STORED_PLAN_BYTES * 0.8);
 const TOKEN_PATTERN = /^[a-f0-9]{32}$/;
 const PLAN_HASH_PATTERN = /^[a-f0-9]{64}$/;

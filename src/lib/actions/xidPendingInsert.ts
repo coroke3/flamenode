@@ -1,4 +1,9 @@
 import { sql, type SQL } from "drizzle-orm";
+import {
+  X_ID_LINK_REQUEST_TYPES,
+  X_ID_PENDING_REQUEST_LIMIT,
+  isXIdLinkRequestType,
+} from "./xidRequestReliabilityCore.ts";
 
 export type PendingXIdRequestRow = {
   id: string;
@@ -25,9 +30,17 @@ function nullableColumnEquals(column: string, value: string | null): SQL {
 function pendingRequestCondition(row: Pick<PendingXIdRequestRow,
   "request_type" | "requested_by_auth_user_id" | "requested_x_id" | "source_x_user_id" | "target_x_user_id"
 >): SQL {
+  // new_link / existing_link は同じユーザー向けフローの内部分類にすぎない。
+  // 申請後にimport等でX名義が作られて分類が変わっても、同じpendingを再利用する。
+  const requestTypeCondition = isXIdLinkRequestType(row.request_type)
+    ? sql`request_type IN (${sql.join(
+        X_ID_LINK_REQUEST_TYPES.map((value) => sql`${value}`),
+        sql`, `,
+      )})`
+    : sql`request_type = ${row.request_type}`;
   return sql`
     requested_by_auth_user_id = ${row.requested_by_auth_user_id}
-    AND request_type = ${row.request_type}
+    AND ${requestTypeCondition}
     AND status = 'pending'
     AND ${nullableColumnEquals("requested_x_id", row.requested_x_id)}
     AND ${nullableColumnEquals("source_x_user_id", row.source_x_user_id)}
@@ -56,6 +69,6 @@ export function buildPendingXIdRequestInsert(row: PendingXIdRequestRow): SQL {
       SELECT COUNT(*) FROM x_identity_requests
       WHERE requested_by_auth_user_id = ${row.requested_by_auth_user_id}
         AND status = 'pending'
-    ) < 5
+    ) < ${X_ID_PENDING_REQUEST_LIMIT}
   `.inlineParams();
 }

@@ -1,6 +1,8 @@
 export type LegacyParsedFile = {
   name: string;
   rows: Record<string, unknown>[];
+  /** 範囲選択後もnormalizeのエラー行番号を元ファイル基準で維持する。 */
+  rowOffset?: number;
 };
 
 function stripBom(value: string): string {

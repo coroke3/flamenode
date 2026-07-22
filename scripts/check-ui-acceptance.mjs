@@ -96,6 +96,31 @@ forbidMatch(
   /XIdSwitcher/,
   "公開ヘッダーにX ID選択ボタンが残っています。",
 );
+requireMatch(
+  "src/components/layout/PublicHeader.module.css",
+  /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+max-content\s+minmax\(0,\s*1fr\)/,
+  "Desktop public navigation must use equal outer grid tracks so it is centered in the viewport.",
+);
+requireMatch(
+  "src/components/layout/PublicHeader.module.css",
+  /@media\s*\(min-width:\s*641px\)\s*and\s*\(max-width:\s*1180px\)[\s\S]*?\.menuToggle\s*\{[^}]*display:\s*inline-flex/s,
+  "Public navigation must stay collapsed until both equal outer header tracks can contain the account actions.",
+);
+requireMatch(
+  "src/components/layout/PublicHeader.module.css",
+  /\.bar\s*\{[^}]*margin-inline:\s*auto/s,
+  "The shared header rail must stay centered on admin and manage surfaces.",
+);
+requireMatch(
+  "src/styles/redesign-public.css",
+  /\[data-fn-surface="public"\]\s+\.fn-header-inner\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+max-content\s+minmax\(0,\s*1fr\)/s,
+  "The public surface override must preserve equal outer header tracks.",
+);
+requireMatch(
+  "src/styles/admin-manage.css",
+  /@media\s*\(min-width:\s*1001px\)[\s\S]*?\[data-fn-surface="admin"\]\s+\.fn-header-inner,[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)\s+max-content\s+minmax\(0,\s*1fr\)/,
+  "Admin and manage desktop headers must preserve equal outer tracks.",
+);
 forbidMatch(
   "src/components/user/AccountMenu.tsx",
   /useActiveXSwitcher|switchTo\(|別の X ID に切り替え/,
@@ -125,7 +150,14 @@ requireAll("src/components/layout/Shelf.tsx", [
   [/visibilitychange/, "非表示tabでの停止がありません。"],
   [/data-mobile-rows=\{mobileRows\}/, "モバイル行数指定がありません。"],
   [/pauseAfterInteraction/, "操作後の自動送り一時停止がありません。"],
+  [/pointerActiveRef/, "棚の外でpointerを離した場合の操作後停止がありません。"],
 ]);
+
+forbidMatch(
+  "src/components/layout/Shelf.tsx",
+  /setPointerCapture/,
+  "Shelf must not capture card pointer events because card links need to receive click completion.",
+);
 
 requireMatch(
   "src/components/layout/ConsoleShell.tsx",

@@ -39,6 +39,7 @@ export function Shelf({
   const resumeTimerRef = React.useRef<number | null>(null);
   const pausedRef = React.useRef(false);
   const directionRef = React.useRef<1 | -1>(1);
+  const pointerActiveRef = React.useRef(false);
   const pauseReasonsRef = React.useRef({
     hover: false,
     focus: false,
@@ -192,18 +193,23 @@ export function Shelf({
             setPauseReason("focus", false);
           }
         }}
-        onPointerDown={(event) => {
+        onPointerDown={() => {
+          pointerActiveRef.current = true;
           setPauseReason("pointer", true);
-          event.currentTarget.setPointerCapture?.(event.pointerId);
         }}
-        onPointerUp={(event) => {
-          if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
-            event.currentTarget.releasePointerCapture(event.pointerId);
-          }
+        onPointerUp={() => {
+          pointerActiveRef.current = false;
+          setPauseReason("pointer", false);
+          pauseAfterInteraction();
+        }}
+        onPointerLeave={() => {
+          if (!pointerActiveRef.current) return;
+          pointerActiveRef.current = false;
           setPauseReason("pointer", false);
           pauseAfterInteraction();
         }}
         onPointerCancel={() => {
+          pointerActiveRef.current = false;
           setPauseReason("pointer", false);
           pauseAfterInteraction();
         }}

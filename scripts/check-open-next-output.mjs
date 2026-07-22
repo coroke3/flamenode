@@ -94,11 +94,26 @@ export function checkOpenNextOutput({
   const workerPath = path.join(outputRoot, "worker.js");
   const assetsPath = path.join(outputRoot, "assets");
   const manifestPath = path.join(outputRoot, MANIFEST_NAME);
+  const serverConfigPath = path.join(
+    outputRoot,
+    "server-functions",
+    "default",
+    "open-next.config.mjs",
+  );
 
   if (!fs.existsSync(workerPath) || !fs.statSync(workerPath).isFile() || fs.statSync(workerPath).size === 0) {
     errors.push("worker.js is missing or empty");
   }
   if (!nonEmptyDirectory(assetsPath)) errors.push("assets directory is missing or empty");
+  if (!fs.existsSync(serverConfigPath) || !fs.statSync(serverConfigPath).isFile()) {
+    errors.push("default server OpenNext config is missing");
+  } else if (
+    !/routePreloadingBehavior\s*:\s*["']withWaitUntil["']/.test(
+      fs.readFileSync(serverConfigPath, "utf8"),
+    )
+  ) {
+    errors.push("default server must use non-blocking withWaitUntil route preloading");
+  }
   if (!fs.existsSync(manifestPath) || !fs.statSync(manifestPath).isFile()) {
     errors.push(`${MANIFEST_NAME} is missing`);
   } else {

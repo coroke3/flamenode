@@ -3,7 +3,14 @@
 import * as React from "react";
 import styles from "./YoutubePlayer.module.css";
 import { youtubeEmbedUrl, youtubeThumbUrl } from "@/lib/youtube/id";
-import { seekYoutubeIframe } from "./playerBridge";
+import {
+  isYoutubePlayerMessageOrigin,
+  parseYoutubePlayerMessage,
+  publishPlayerTime,
+  requestYoutubeCurrentTime,
+  seekYoutubeIframe,
+  startYoutubePlayerListening,
+} from "./playerBridge";
 
 interface YoutubePlayerProps {
   youtubeId: string;
@@ -38,6 +45,49 @@ export function YoutubePlayer({
     return () =>
       window.removeEventListener("flamenode:seek", onSeek as EventListener);
   }, [embedOrigin]);
+
+  React.useEffect(() => {
+    if (!embedOrigin) return;
+
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+
+    const onMessage = (event: MessageEvent) => {
+      if (!isYoutubePlayerMessageOrigin(event.origin)) return;
+      if (event.source !== iframe.contentWindow) return;
+
+      const parsed = parseYoutubePlayerMessage(event.data);
+      if (!parsed) return;
+
+      if (parsed.kind === "ready") {
+        startYoutubePlayerListening(iframe);
+        requestYoutubeCurrentTime(iframe);
+        return;
+      }
+
+      publishPlayerTime(parsed.currentTime);
+    };
+
+    const onLoad = () => {
+      startYoutubePlayerListening(iframe);
+      requestYoutubeCurrentTime(iframe);
+    };
+
+    const poll = () => {
+      if (document.visibilityState !== "visible") return;
+      requestYoutubeCurrentTime(iframe);
+    };
+
+    window.addEventListener("message", onMessage);
+    iframe.addEventListener("load", onLoad);
+    const pollId = window.setInterval(poll, 500);
+
+    return () => {
+      window.removeEventListener("message", onMessage);
+      iframe.removeEventListener("load", onLoad);
+      window.clearInterval(pollId);
+    };
+  }, [embedOrigin, youtubeId]);
 
   const thumbUrl = youtubeThumbUrl(youtubeId, "hqdefault");
 

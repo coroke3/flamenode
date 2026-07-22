@@ -221,9 +221,10 @@ Deploy commandは次を行います。
 
 途中失敗時は後続Workerとsmokeへ進みません。4 Workerを跨ぐ単一transactionではないため、すでにdeploy済みのWorkerがある場合は「10. rollback」に従い同じ正常commitへ戻します。
 
-smokeは有限retryとtimeoutを持ち、URL未設定をskipしません。確認対象は次です。
+smokeは有限retryとtimeoutを持ち、URL未設定をskipしません。deploy直後はCloudflare edgeが一時的に直前の正常commitを返す場合があるため、HTTP 200でもhealthのcommitが一致するまで最大30回・1秒間隔で待機し、収束しない場合だけ失敗します。確認対象は次です。
 
-- 正式トップと同一originの`_next/static` asset
+- 正式トップ、`/list`、同一originの`_next/static` asset
+- 旧形式インポートRoute Moduleの未認証拒否（データ変更なし）
 - 公開`/api/health`のservice、runtime、commit
 - Discord Auth callbackが404/5xxではない
 - Cron Worker 3本の`/health`とcommit

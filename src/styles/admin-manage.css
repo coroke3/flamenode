@@ -139,6 +139,21 @@
   color: var(--text-faint);
 }
 
+@media (min-width: 1001px) {
+  [data-fn-surface="admin"] .fn-header-inner,
+  [data-fn-surface="manage"] .fn-header-inner {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content minmax(0, 1fr);
+    justify-content: normal;
+  }
+
+  [data-fn-surface="admin"] .fn-header-right,
+  [data-fn-surface="manage"] .fn-header-right {
+    justify-self: end;
+    margin-left: 0;
+  }
+}
+
 @media (max-width: 1000px) {
   [data-fn-surface="admin"] .fn-header-inner,
   [data-fn-surface="manage"] .fn-header-inner,
@@ -928,8 +943,8 @@
 }
 
 [data-admin-shell] .admin-sidebar [data-event-link="true"] {
-  border-left: 3px solid var(--event-accent, transparent);
-  padding-left: 8px;
+  border-left: 0;
+  padding-left: 11px;
 }
 
 [data-admin-shell] .admin-sidebar .console-sidebar-empty {
@@ -1071,8 +1086,8 @@
 }
 
 [data-manage-shell] .admin-sidebar [data-event-link="true"] {
-  border-left: 3px solid var(--event-accent, transparent);
-  padding-left: 8px;
+  border-left: 0;
+  padding-left: 11px;
 }
 
 /* モバイルでは横スクロールのナビを使わず、同じナビをドロワーとして表示する。 */
@@ -1099,8 +1114,11 @@
   padding: 12px 14px;
   border-radius: var(--radius-md);
   background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-left: 3px solid var(--manage-event-accent, var(--manage-accent-fallback));
+  border: 1px solid color-mix(
+    in srgb,
+    var(--manage-event-accent, var(--manage-accent-fallback)) 22%,
+    var(--border-subtle)
+  );
 }
 
 [data-manage-shell] .manage-mode-badge {
@@ -1404,6 +1422,53 @@
   box-sizing: border-box;
 }
 
+[data-manage-shell] .fn-console-event-nav {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+[data-manage-shell] .fn-console-event-nav .fn-console-event-tabs {
+  margin-bottom: 0;
+}
+
+[data-manage-shell] .fn-console-event-subtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 5px;
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+}
+
+[data-manage-shell] .fn-console-event-subtabs a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 6px 11px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+[data-manage-shell] .fn-console-event-subtabs a:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+[data-manage-shell] .fn-console-event-subtabs a[aria-current="page"] {
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--text-primary) 10%, transparent);
+}
+
 [data-admin-shell] .fn-console-kv-grid,
 [data-manage-shell] .fn-console-kv-grid {
   display: grid;
@@ -1615,8 +1680,11 @@
     var(--manage-event-accent, var(--manage-accent-fallback)) 10%,
     var(--bg-surface)
   );
-  border: 1px solid var(--border-subtle);
-  border-left: 4px solid var(--manage-event-accent, var(--manage-accent-fallback));
+  border: 1px solid color-mix(
+    in srgb,
+    var(--manage-event-accent, var(--manage-accent-fallback)) 22%,
+    var(--border-subtle)
+  );
   box-shadow: var(--shadow-sm);
 }
 
@@ -1671,9 +1739,12 @@
 [data-manage-shell] .manage-event-card {
   padding: 14px 16px;
   background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid color-mix(
+    in srgb,
+    var(--manage-event-accent, var(--manage-accent-fallback)) 18%,
+    var(--border-subtle)
+  );
   border-radius: var(--radius-md);
-  border-left: 3px solid var(--manage-event-accent, var(--manage-accent-fallback));
   box-shadow: var(--shadow-sm);
   display: flex;
   gap: 12px;

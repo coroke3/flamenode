@@ -27,10 +27,8 @@ test("既存X名義へのnew_link承認は再申請を要求せず既存連携�
     action,
     /canonicalXUserId \|\| existingXUser \? "existing_link" : "new_link"/,
   );
-  assert.match(
-    action,
-    /同一X IDの重複pending申請を取り消す/,
-  );
+  assert.match(action, /findEquivalentPendingRequestId/);
+  assert.match(action, /X_ID_LINK_REQUEST_TYPES/);
 });
 
 test("X ID申請の承認・却下はmutation失敗をerror boundaryへ投げず返す", () => {
@@ -76,18 +74,17 @@ test("X IDの一般・運営ActionはCloudflare binding障害を結果化しnavi
   );
 });
 
-test("X ID申請はsibling cancelを冪等化しmutation失敗を返す", () => {
+test("X ID申請は同条件pendingを再利用し、競合後に正本を照合する", () => {
   const action = read("../actions/xid.ts");
   const admin = read("../actions/xid-admin.ts");
   const settings = read("../../components/settings/XIdSettingsClient.tsx");
 
-  assert.match(
-    action,
-    /eq\(xIdentityRequests\.id, sibling\.id\)[\s\S]*eq\(xIdentityRequests\.status, "pending"\)[\s\S]*expectedMutationChanges\.push\(null\)/,
-  );
+  assert.doesNotMatch(action, /const siblingPendings/);
+  assert.match(action, /findEquivalentPendingRequestId/);
+  assert.match(action, /reconcileRequestPersistence/);
   assert.match(
     admin,
-    /eq\(xIdentityRequests\.id, sibling\.id\)[\s\S]*eq\(xIdentityRequests\.status, "pending"\)[\s\S]*expected\.push\(null\)/,
+    /eq\(xIdentityRequests\.id, sibling\.id\)[\s\S]*eq\(xIdentityRequests\.status, "pending"\)[\s\S]*expected\.push\(1\)/,
   );
   assert.match(
     admin,
@@ -101,7 +98,7 @@ test("X ID申請はsibling cancelを冪等化しmutation失敗を返す", () => 
   );
   assert.match(
     action,
-    /export async function requestXIdLink[\s\S]*申請の保存に失敗しました。時間をおいて再試行してください。/,
+    /export async function requestXIdLink[\s\S]*申請を保存できませんでした。申請履歴を確認してから再試行してください。/,
   );
   assert.doesNotMatch(
     action,

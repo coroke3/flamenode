@@ -8,7 +8,10 @@ import {
 } from "@/lib/audit/mutate";
 import type { DB } from "@/lib/db/client";
 import { accounts, users } from "@/lib/db/schema";
-import type { EnqueueNotificationInput } from "@/lib/notifications/enqueue";
+import type {
+  EnqueueNotificationInput,
+  NotificationOutboxStatement,
+} from "@/lib/notifications/enqueue";
 
 type AtomicMutator = (
   db: DB,
@@ -18,12 +21,12 @@ type AtomicMutator = (
 type WelcomeNotificationBuilder = (
   db: DB,
   input: EnqueueNotificationInput,
-) => Promise<BatchItem<"sqlite"> | null>;
+) => Promise<NotificationOutboxStatement | null>;
 
 async function defaultBuildWelcomeNotification(
   db: DB,
   input: EnqueueNotificationInput,
-): Promise<BatchItem<"sqlite"> | null> {
+): Promise<NotificationOutboxStatement | null> {
   const { buildNotificationOutboxStatement } = await import(
     "@/lib/notifications/enqueue"
   );
@@ -107,7 +110,7 @@ export async function linkDiscordAccountAtomically(
       force: true,
     });
     if (welcomeNotification) {
-      mutationStatements.push(welcomeNotification);
+      mutationStatements.push(welcomeNotification.statement);
       expectedMutationChanges.push(null);
     }
   }

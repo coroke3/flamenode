@@ -5,6 +5,8 @@ import { pathToFileURL } from "node:url";
 import { assertCommitSha, normalizedUrl } from "./cloudflare-production.mjs";
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/i;
+const DEFAULT_PROPAGATION_ATTEMPTS = 30;
+const DEFAULT_PROPAGATION_RETRY_DELAY_MS = 1_000;
 const PUBLIC_FORBIDDEN_KEYS = new Set([
   "access_token",
   "active_x_user_id",
@@ -99,6 +101,46 @@ function assertStatus(response, expected, label) {
   }
 }
 
+async function requestJsonUntilValid(
+  fetchImpl,
+  url,
+  options,
+  label,
+  validate,
+  {
+    attempts = DEFAULT_PROPAGATION_ATTEMPTS,
+    timeoutMs = 10_000,
+    retryDelayMs = DEFAULT_PROPAGATION_RETRY_DELAY_MS,
+  } = {},
+) {
+  let lastError = new Error(`${label}: no response was received.`);
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await requestWithRetry(
+        fetchImpl,
+        url,
+        options,
+        label,
+        { attempts: 1, timeoutMs, retryDelayMs: 0 },
+      );
+      assertStatus(response, [200], label);
+      const body = await parseJson(response, label);
+      validate(body);
+      return body;
+    } catch (error) {
+      lastError = error instanceof Error
+        ? error
+        : new Error(`${label}: response validation failed.`);
+    }
+    if (attempt < attempts) {
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+    }
+  }
+  throw new Error(
+    `${lastError.message} (deployment propagation did not converge after ${attempts} attempts.)`,
+  );
+}
+
 export function smokeEnvironment({
   env = process.env,
   repoRoot = process.cwd(),
@@ -143,18 +185,37 @@ export async function runSmoke({
   const asset = await get(assetUrl.href, {}, "static asset");
   assertStatus(asset, [200], "static asset");
 
-  const health = await get(`${settings.web}/api/health`, {}, "web health");
-  assertStatus(health, [200], "web health");
-  const healthBody = await parseJson(health, "web health");
-  assertKeys(healthBody, ["ok", "service", "commit", "runtime"], "web health");
-  if (
-    healthBody.ok !== true ||
-    healthBody.service !== "flamenode-web" ||
-    healthBody.runtime !== "cloudflare-worker" ||
-    healthBody.commit !== settings.commit
-  ) {
-    throw new Error("web health: invalid payload or commit mismatch.");
-  }
+  const list = await get(`${settings.web}/list`, {}, "list page");
+  assertStatus(list, [200], "list page");
+
+  const legacyImport = await get(
+    `${settings.web}/api/admin/import/legacy`,
+    {
+      method: "POST",
+      headers: { Origin: new URL(settings.web).origin },
+    },
+    "legacy import unauthenticated rejection",
+  );
+  assertStatus(legacyImport, [401, 403], "legacy import unauthenticated rejection");
+
+  await requestJsonUntilValid(
+    fetchImpl,
+    `${settings.web}/api/health`,
+    {},
+    "web health",
+    (healthBody) => {
+      assertKeys(healthBody, ["ok", "service", "commit", "runtime"], "web health");
+      if (
+        healthBody.ok !== true ||
+        healthBody.service !== "flamenode-web" ||
+        healthBody.runtime !== "cloudflare-worker" ||
+        healthBody.commit !== settings.commit
+      ) {
+        throw new Error("web health: invalid payload or commit mismatch.");
+      }
+    },
+    requestOptions,
+  );
 
   const auth = await get(`${settings.web}/api/auth/callback/discord`, {}, "auth callback");
   if (auth.status >= 500 || auth.status === 404) {
@@ -162,13 +223,19 @@ export async function runSmoke({
   }
 
   for (const [service, baseUrl] of settings.workers) {
-    const response = await get(`${baseUrl}/health`, {}, `${service} health`);
-    assertStatus(response, [200], `${service} health`);
-    const body = await parseJson(response, `${service} health`);
-    assertKeys(body, ["ok", "service", "commit"], `${service} health`);
-    if (body.ok !== true || body.service !== service || body.commit !== settings.commit) {
-      throw new Error(`${service} health: invalid payload or commit mismatch.`);
-    }
+    await requestJsonUntilValid(
+      fetchImpl,
+      `${baseUrl}/health`,
+      {},
+      `${service} health`,
+      (body) => {
+        assertKeys(body, ["ok", "service", "commit"], `${service} health`);
+        if (body.ok !== true || body.service !== service || body.commit !== settings.commit) {
+          throw new Error(`${service} health: invalid payload or commit mismatch.`);
+        }
+      },
+      requestOptions,
+    );
   }
 
   const contentUrl = settings.workers.find(([service]) => service === "flamenode-content-jobs")[1];
@@ -184,23 +251,25 @@ export async function runSmoke({
   );
   assertStatus(deepUnauthenticated, [401], "deep health unauthenticated rejection");
 
-  const deep = await get(
+  await requestJsonUntilValid(
+    fetchImpl,
     `${settings.web}/api/health/deep`,
     { headers: { Authorization: `Bearer ${settings.token}` } },
     "deep health",
+    (body) => {
+      assertKeys(body, ["ok", "service", "commit", "checks"], "deep health");
+      assertKeys(body.checks, ["d1", "kv", "r2", "schema"], "deep health checks");
+      if (
+        body.ok !== true ||
+        body.service !== "flamenode-web" ||
+        body.commit !== settings.commit ||
+        ["d1", "kv", "r2", "schema"].some((name) => body.checks[name] !== "ok")
+      ) {
+        throw new Error("deep health: D1/KV/R2/schema read-only check failed or commit mismatched.");
+      }
+    },
+    requestOptions,
   );
-  assertStatus(deep, [200], "deep health");
-  const deepBody = await parseJson(deep, "deep health");
-  assertKeys(deepBody, ["ok", "service", "commit", "checks"], "deep health");
-  assertKeys(deepBody.checks, ["d1", "kv", "r2", "schema"], "deep health checks");
-  if (
-    deepBody.ok !== true ||
-    deepBody.service !== "flamenode-web" ||
-    deepBody.commit !== settings.commit ||
-    ["d1", "kv", "r2", "schema"].some((name) => deepBody.checks[name] !== "ok")
-  ) {
-    throw new Error("deep health: D1/KV/R2/schema read-only check failed or commit mismatched.");
-  }
 
   const publicApi = await get(`${settings.web}/api/videos?limit=1`, {}, "public videos DTO");
   assertStatus(publicApi, [200], "public videos DTO");
@@ -220,7 +289,9 @@ export async function runSmoke({
   const invalidMethod = await get(`${settings.web}/api/health`, { method: "POST" }, "invalid method probe");
   assertStatus(invalidMethod, [405], "invalid method probe");
 
-  console.log("[smoke-cloudflare] OK (web, assets, auth, 3 cron, deep health, DTO, 404, method)");
+  console.log(
+    "[smoke-cloudflare] OK (web, assets, list, legacy import guard, auth, 3 cron, deep health, DTO, 404, method)",
+  );
   return { commit: settings.commit };
 }
 

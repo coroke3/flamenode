@@ -24,6 +24,10 @@ import {
   resolveCanonicalXUserId,
 } from "@/lib/auth/xIdentity";
 import { validateXIdentityRequestShape } from "@/lib/auth/xIdentityRequestCore";
+import {
+  isRetryableXIdMutationError,
+  processedXIdRequestMessage,
+} from "@/lib/actions/xidRequestReliabilityCore";
 
 export interface XIdAdminResult {
   ok: boolean;
@@ -33,6 +37,7 @@ export interface XIdAdminResult {
 type XIdLinkOperatorResult =
   | { ok: true; authUserId: string; db: DB }
   | { ok: false; message: string };
+type XIdLinkOperator = Extract<XIdLinkOperatorResult, { ok: true }>;
 
 async function getXIdLinkOperator(): Promise<XIdLinkOperatorResult> {
   try {
@@ -73,19 +78,18 @@ function mutationError(error: unknown): XIdAdminResult {
   };
 }
 
-export async function approveXIdLinkRequest(formData: FormData): Promise<XIdAdminResult> {
-  const operator = await getXIdLinkOperator();
-  if (!operator.ok) return { ok: false, message: operator.message };
-  const requestId = String(formData.get("request_id") ?? "").trim();
-  if (!requestId) return { ok: false, message: "申請 ID がありません。" };
-
-  try {
+async function approveXIdLinkRequestOnce(
+  operator: XIdLinkOperator,
+  requestId: string,
+): Promise<XIdAdminResult> {
   const { db, authUserId: operatorAuthUserId } = operator;
   const request = (
     await db.select().from(xIdentityRequests).where(eq(xIdentityRequests.id, requestId)).limit(1)
   )[0];
   if (!request) return { ok: false, message: "申請が見つかりません。" };
-  if (request.status !== "pending") return { ok: false, message: "すでに処理済みの申請です。" };
+  if (request.status !== "pending") {
+    return processedXIdRequestMessage(request.status, "approve");
+  }
   if (request.request_type === "merge" || request.request_type === "revert_merge") {
     return { ok: false, message: "統合・差し戻し申請は X ID 統合管理で処理してください。" };
   }
@@ -154,9 +158,11 @@ export async function approveXIdLinkRequest(formData: FormData): Promise<XIdAdmi
     if (!submittedXUserId) return { ok: false, message: "申請 X ID がありません。" };
     const canonicalXUserId = await resolveCanonicalXUserId(db, submittedXUserId);
     const effectiveXUserId = canonicalXUserId ?? submittedXUserId;
-    const xUser = canonicalXUserId
-      ? (await db.select().from(xUsers).where(eq(xUsers.id, canonicalXUserId)).limit(1))[0]
-      : null;
+    // rejected行はcanonical resolverでは無効扱いだが、再申請の承認時には
+    // 同じ主キーをINSERTせず既存行をapprovedへ戻す必要がある。
+    const xUser = (
+      await db.select().from(xUsers).where(eq(xUsers.id, effectiveXUserId)).limit(1)
+    )[0] ?? null;
 
     // new_link 申請後に import 等で x_users が先に存在した場合は、
     // 再申請を要求せず既存連携として承認する（imported / approved を含む）。
@@ -175,10 +181,6 @@ export async function approveXIdLinkRequest(formData: FormData): Promise<XIdAdmi
         )
         .limit(1)
     )[0];
-    if (duplicateLink) {
-      return { ok: false, message: "同一の X名義と認証ユーザーの組合せはすでに登録されています。" };
-    }
-
     if (!xUser) {
       const newXUser = {
         id: effectiveXUserId,
@@ -226,27 +228,29 @@ export async function approveXIdLinkRequest(formData: FormData): Promise<XIdAdmi
       });
     }
 
-    const link = {
-      x_user_id: effectiveXUserId,
-      auth_user_id: requestedAuthUserId,
-      link_role: "owner" as const,
-      created_by_request_id: request.id,
-      created_at: now,
-      updated_at: now,
-    };
-    statements.push(db.insert(xUserAccountLinks).values(link));
-    expected.push(1);
-    audits.push({
-      table_name: "x_user_account_links",
-      target_id: `${effectiveXUserId}:${requestedAuthUserId}`,
-      operation: "CREATE",
-      before: null,
-      after: link,
-      actor_user_id: operatorAuthUserId,
-      reason: "X名義と認証ユーザーを連携",
-      context: "x-identity-request",
-      retention_class: "long_audit",
-    });
+    if (!duplicateLink) {
+      const link = {
+        x_user_id: effectiveXUserId,
+        auth_user_id: requestedAuthUserId,
+        link_role: "owner" as const,
+        created_by_request_id: request.id,
+        created_at: now,
+        updated_at: now,
+      };
+      statements.push(db.insert(xUserAccountLinks).values(link));
+      expected.push(1);
+      audits.push({
+        table_name: "x_user_account_links",
+        target_id: `${effectiveXUserId}:${requestedAuthUserId}`,
+        operation: "CREATE",
+        before: null,
+        after: link,
+        actor_user_id: operatorAuthUserId,
+        reason: "X名義と認証ユーザーを連携",
+        context: "x-identity-request",
+        retention_class: "long_audit",
+      });
+    }
 
     const authUser = (
       await db.select().from(users).where(eq(users.id, requestedAuthUserId)).limit(1)
@@ -299,7 +303,7 @@ export async function approveXIdLinkRequest(formData: FormData): Promise<XIdAdmi
             )!,
           ),
       );
-      expected.push(null);
+      expected.push(1);
       audits.push({
         table_name: "x_identity_requests",
         target_id: sibling.id,
@@ -350,9 +354,10 @@ export async function approveXIdLinkRequest(formData: FormData): Promise<XIdAdmi
       x_user_id: notificationXUserId,
       request_id: request.id,
     },
+    dedupeKey: `xid_approved:${request.id}`,
   });
   if (notification) {
-    statements.push(notification);
+    statements.push(notification.statement);
     expected.push(null);
   }
 
@@ -363,25 +368,55 @@ export async function approveXIdLinkRequest(formData: FormData): Promise<XIdAdmi
   });
   revalidateIdentityAdminPaths();
   return { ok: true, message: request.request_type === "alias" ? "別名を承認しました。" : "連携を承認しました。" };
-  } catch (error) {
-    return mutationError(error);
-  }
 }
 
-export async function rejectXIdLinkRequest(formData: FormData): Promise<XIdAdminResult> {
+export async function approveXIdLinkRequest(formData: FormData): Promise<XIdAdminResult> {
   const operator = await getXIdLinkOperator();
   if (!operator.ok) return { ok: false, message: operator.message };
   const requestId = String(formData.get("request_id") ?? "").trim();
   if (!requestId) return { ok: false, message: "申請 ID がありません。" };
-  const reason = String(formData.get("reason") ?? "").trim().slice(0, 500);
 
-  try {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await approveXIdLinkRequestOnce(operator, requestId);
+    } catch (error) {
+      try {
+        const current = (
+          await operator.db
+            .select({ status: xIdentityRequests.status })
+            .from(xIdentityRequests)
+            .where(eq(xIdentityRequests.id, requestId))
+            .limit(1)
+        )[0];
+        if (!current) return { ok: false, message: "申請が見つかりません。" };
+        if (current.status !== "pending") {
+          const result = processedXIdRequestMessage(current.status, "approve");
+          if (result.ok) revalidateIdentityAdminPaths();
+          return result;
+        }
+      } catch (reconciliationError) {
+        console.error("[xid-admin] approval reconciliation failed", reconciliationError);
+      }
+      if (attempt === 0 && isRetryableXIdMutationError(error)) continue;
+      return mutationError(error);
+    }
+  }
+  return { ok: false, message: "承認を完了できませんでした。再読み込みしてお試しください。" };
+}
+
+async function rejectXIdLinkRequestOnce(
+  operator: XIdLinkOperator,
+  requestId: string,
+  reason: string,
+): Promise<XIdAdminResult> {
   const { db, authUserId: operatorAuthUserId } = operator;
   const request = (
     await db.select().from(xIdentityRequests).where(eq(xIdentityRequests.id, requestId)).limit(1)
   )[0];
   if (!request) return { ok: false, message: "申請が見つかりません。" };
-  if (request.status !== "pending") return { ok: false, message: "すでに処理済みの申請です。" };
+  if (request.status !== "pending") {
+    return processedXIdRequestMessage(request.status, "reject");
+  }
   if (request.request_type === "merge" || request.request_type === "revert_merge") {
     return { ok: false, message: "統合・差し戻し申請は X ID 統合管理で処理してください。" };
   }
@@ -401,6 +436,7 @@ export async function rejectXIdLinkRequest(formData: FormData): Promise<XIdAdmin
       request_id: request.id,
       reason: reason || null,
     },
+    dedupeKey: `xid_rejected:${request.id}`,
   });
   const webhookNotification = await buildNotificationOutboxStatement(db, {
     recipientUserId: request.requested_by_auth_user_id,
@@ -426,11 +462,11 @@ export async function rejectXIdLinkRequest(formData: FormData): Promise<XIdAdmin
   ];
   const expected: Array<number | null> = [1];
   if (notification) {
-    statements.push(notification);
+    statements.push(notification.statement);
     expected.push(null);
   }
   if (webhookNotification) {
-    statements.push(webhookNotification);
+    statements.push(webhookNotification.statement);
     expected.push(null);
   }
   await mutateWithAudit(db, {
@@ -452,7 +488,39 @@ export async function rejectXIdLinkRequest(formData: FormData): Promise<XIdAdmin
   });
   revalidateIdentityAdminPaths();
   return { ok: true, message: "却下しました。" };
-  } catch (error) {
-    return mutationError(error);
+}
+
+export async function rejectXIdLinkRequest(formData: FormData): Promise<XIdAdminResult> {
+  const operator = await getXIdLinkOperator();
+  if (!operator.ok) return { ok: false, message: operator.message };
+  const requestId = String(formData.get("request_id") ?? "").trim();
+  if (!requestId) return { ok: false, message: "申請 ID がありません。" };
+  const reason = String(formData.get("reason") ?? "").trim().slice(0, 500);
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await rejectXIdLinkRequestOnce(operator, requestId, reason);
+    } catch (error) {
+      try {
+        const current = (
+          await operator.db
+            .select({ status: xIdentityRequests.status })
+            .from(xIdentityRequests)
+            .where(eq(xIdentityRequests.id, requestId))
+            .limit(1)
+        )[0];
+        if (!current) return { ok: false, message: "申請が見つかりません。" };
+        if (current.status !== "pending") {
+          const result = processedXIdRequestMessage(current.status, "reject");
+          if (result.ok) revalidateIdentityAdminPaths();
+          return result;
+        }
+      } catch (reconciliationError) {
+        console.error("[xid-admin] rejection reconciliation failed", reconciliationError);
+      }
+      if (attempt === 0 && isRetryableXIdMutationError(error)) continue;
+      return mutationError(error);
+    }
   }
+  return { ok: false, message: "却下を完了できませんでした。再読み込みしてお試しください。" };
 }

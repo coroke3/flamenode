@@ -6,6 +6,7 @@ import styles from "./ChapterCommentItem.module.css";
 import { Icon } from "@/components/ui/Icon";
 import { formatDuration } from "@/lib/utils/format";
 import { cn } from "@/lib/utils/cn";
+import { shouldShowChapterAuthor } from "./chapterPresentation";
 
 /**
  * 動画詳細ページ内で「チャプター = 1 件のコメント」を統一表示するコンポーネント。
@@ -36,6 +37,8 @@ interface ChapterCommentItemProps {
   duration?: number | null;
   /** 投稿者の表示有無。MemberSection ではメンバー側で表示しているので false。 */
   showAuthor?: boolean;
+  /** 再生位置に対応するチャプターを強調表示する。 */
+  active?: boolean;
   /** クリックで動画をシークするコールバック。範囲外のときは発火しない。 */
   onSeek?: (time: number) => void;
   className?: string;
@@ -45,10 +48,14 @@ export function ChapterCommentItem({
   chapter,
   duration,
   showAuthor = false,
+  active = false,
   onSeek,
   className,
 }: ChapterCommentItemProps): React.ReactElement {
   const outOfRange = duration ? chapter.chapter_time > duration : false;
+  const showDistinctAuthor =
+    showAuthor &&
+    shouldShowChapterAuthor(chapter.chapter_label, chapter.author_name);
   const handleClick = React.useCallback(() => {
     if (outOfRange) return;
     onSeek?.(chapter.chapter_time);
@@ -56,10 +63,12 @@ export function ChapterCommentItem({
 
   return (
     <div
+      data-chapter-id={chapter.id}
       className={cn(
         styles.item,
         outOfRange && styles.outOfRange,
         onSeek && !outOfRange && styles.clickable,
+        active && styles.active,
         className,
       )}
       role={onSeek ? "button" : undefined}
@@ -95,7 +104,7 @@ export function ChapterCommentItem({
             <span className="fn-badge fn-badge-neutral">範囲外</span>
           ) : null}
         </div>
-        {showAuthor && chapter.author_name ? (
+        {showDistinctAuthor && chapter.author_name ? (
           <div className={styles.authorRow}>
             {chapter.author_icon ? (
               <Image

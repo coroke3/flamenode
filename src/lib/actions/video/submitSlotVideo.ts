@@ -313,7 +313,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
         eventId: slotRow.event_id,
       });
       if (notification) {
-        plan.statements.push(notification);
+        plan.statements.push(notification.statement);
         plan.expectedChanges.push(1);
       }
     }

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { getEnv } from "@/lib/cloudflare";
@@ -34,7 +34,17 @@ import {
 } from "@/lib/auth/xIdentityRequestCore";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
 import { buildPendingXIdRequestInsert } from "@/lib/actions/xidPendingInsert";
-import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
+import {
+  buildNotificationOutboxStatement,
+  type NotificationOutboxStatement,
+} from "@/lib/notifications/enqueue";
+import {
+  X_ID_LINK_REQUEST_TYPES,
+  isRetryableXIdMutationError,
+  isXIdLinkRequestType,
+  processedXIdRequestMessage,
+  reconcilePendingXIdRequest,
+} from "@/lib/actions/xidRequestReliabilityCore";
 
 export interface XIdActionResult {
   ok: boolean;
@@ -45,12 +55,77 @@ function nowUnix(): number {
   return Math.floor(Date.now() / 1000);
 }
 
-function isConditionalInsertAssertionError(error: unknown): boolean {
-  return error instanceof Error && /malformed json/i.test(error.message);
-}
-
 function xUserIdMatches(xUserId: string) {
   return sql`lower(${xUsers.id}) = ${normalizeXId(xUserId)}`;
+}
+
+type NullableRequestIdColumn =
+  | typeof xIdentityRequests.requested_x_id
+  | typeof xIdentityRequests.source_x_user_id
+  | typeof xIdentityRequests.target_x_user_id;
+
+function nullableRequestColumnEquals(
+  column: NullableRequestIdColumn,
+  value: string | null,
+): SQL {
+  return value === null ? sql`${column} IS NULL` : sql`${column} = ${value}`;
+}
+
+function equivalentPendingRequestCondition(input: {
+  authUserId: string;
+  requestType: XIdentityRequestType;
+  requestedXId: string | null;
+  sourceXUserId: string | null;
+  targetXUserId: string | null;
+}): SQL {
+  const typeCondition = isXIdLinkRequestType(input.requestType)
+    ? inArray(xIdentityRequests.request_type, X_ID_LINK_REQUEST_TYPES)
+    : eq(xIdentityRequests.request_type, input.requestType);
+  return and(
+    eq(xIdentityRequests.requested_by_auth_user_id, input.authUserId),
+    typeCondition,
+    eq(xIdentityRequests.status, "pending"),
+    nullableRequestColumnEquals(xIdentityRequests.requested_x_id, input.requestedXId),
+    nullableRequestColumnEquals(xIdentityRequests.source_x_user_id, input.sourceXUserId),
+    nullableRequestColumnEquals(xIdentityRequests.target_x_user_id, input.targetXUserId),
+  )!;
+}
+
+async function findEquivalentPendingRequestId(
+  db: DB,
+  input: Parameters<typeof equivalentPendingRequestCondition>[0],
+): Promise<string | null> {
+  const row = (
+    await db
+      .select({ id: xIdentityRequests.id })
+      .from(xIdentityRequests)
+      .where(equivalentPendingRequestCondition(input))
+      .limit(1)
+  )[0];
+  return row?.id ?? null;
+}
+
+async function reconcileRequestPersistence(
+  db: DB,
+  input: Parameters<typeof equivalentPendingRequestCondition>[0],
+) {
+  const matchingPendingRequestId = await findEquivalentPendingRequestId(db, input);
+  if (matchingPendingRequestId) {
+    return reconcilePendingXIdRequest({ matchingPendingRequestId, pendingCount: 0 });
+  }
+  const rows = await db
+    .select({ count: sql<number>`COUNT(*)` })
+    .from(xIdentityRequests)
+    .where(
+      and(
+        eq(xIdentityRequests.requested_by_auth_user_id, input.authUserId),
+        eq(xIdentityRequests.status, "pending"),
+      )!,
+    );
+  return reconcilePendingXIdRequest({
+    matchingPendingRequestId: null,
+    pendingCount: Number(rows[0]?.count ?? 0),
+  });
 }
 
 async function getXIdWriteContext(): Promise<
@@ -200,10 +275,20 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
   const targetXUserId = normalizeXId(String(formData.get("target_x_user_id") ?? ""));
   const db = context.db;
 
-  const existingXUser = (
-    await db.select().from(xUsers).where(xUserIdMatches(requestedXUserId)).limit(1)
-  )[0];
-  const canonicalXUserId = await resolveCanonicalXUserId(db, requestedXUserId);
+  let existingXUser: typeof xUsers.$inferSelect | undefined;
+  let canonicalXUserId: string | null;
+  try {
+    existingXUser = (
+      await db.select().from(xUsers).where(xUserIdMatches(requestedXUserId)).limit(1)
+    )[0];
+    canonicalXUserId = await resolveCanonicalXUserId(db, requestedXUserId);
+  } catch (error) {
+    console.error("[requestXIdLink] identity lookup failed", error);
+    return {
+      ok: false,
+      message: "X ID情報を確認できませんでした。時間をおいて再試行してください。",
+    };
+  }
 
   let requestType: XIdentityRequestType;
   let sourceXUserId: string | null = null;
@@ -215,18 +300,36 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
     requestedXId = null;
     if (!targetXUserId) return { ok: false, message: "統合先 X ID が必要です。" };
     if (!existingXUser) return { ok: false, message: "統合元 X ID が見つかりません。" };
-    const [ownsSource, ownsTarget] = await Promise.all([
-      isAuthUserLinkedToXUser(db, authUserId, sourceXUserId),
-      isAuthUserLinkedToXUser(db, authUserId, targetXUserId),
-    ]);
+    let ownsSource: boolean;
+    let ownsTarget: boolean;
+    try {
+      [ownsSource, ownsTarget] = await Promise.all([
+        isAuthUserLinkedToXUser(db, authUserId, sourceXUserId),
+        isAuthUserLinkedToXUser(db, authUserId, targetXUserId),
+      ]);
+    } catch (error) {
+      console.error("[requestXIdLink] merge ownership lookup failed", error);
+      return {
+        ok: false,
+        message: "連携状態を確認できませんでした。時間をおいて再試行してください。",
+      };
+    }
     if (!ownsSource || !ownsTarget) {
       return { ok: false, message: "自分に紐づく X ID 同士だけを統合申請できます。" };
     }
   } else {
     // import 済み・承認済みを含め、正本名義が存在するなら既存連携申請にする。
     requestType = canonicalXUserId || existingXUser ? "existing_link" : "new_link";
-    if (await isAuthUserLinkedToXUser(db, authUserId, requestedXUserId)) {
-      return { ok: false, message: "この X ID はすでに現在のアカウントに紐づいています。" };
+    try {
+      if (await isAuthUserLinkedToXUser(db, authUserId, requestedXUserId)) {
+        return { ok: false, message: "この X ID はすでに現在のアカウントに紐づいています。" };
+      }
+    } catch (error) {
+      console.error("[requestXIdLink] account link lookup failed", error);
+      return {
+        ok: false,
+        message: "連携状態を確認できませんでした。時間をおいて再試行してください。",
+      };
     }
   }
 
@@ -237,6 +340,29 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
     targetXUserId: targetXUserId || null,
   });
   if (shapeError) return { ok: false, message: shapeError };
+
+  const requestIdentity = {
+    authUserId,
+    requestType,
+    requestedXId,
+    sourceXUserId,
+    targetXUserId: targetXUserId || null,
+  };
+  try {
+    const existingPendingId = await findEquivalentPendingRequestId(
+      db,
+      requestIdentity,
+    );
+    if (existingPendingId) {
+      return { ok: true, message: "同じ内容の申請がすでに承認待ちです。" };
+    }
+  } catch (error) {
+    console.error("[requestXIdLink] pending lookup failed", error);
+    return {
+      ok: false,
+      message: "申請状況を確認できませんでした。時間をおいて再試行してください。",
+    };
+  }
 
   const now = nowUnix();
   const id = generateId("xreq");
@@ -255,7 +381,7 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
     updated_at: now,
   };
   const xIdLabel = requestedXId ?? sourceXUserId ?? "不明";
-  let webhookNotification: BatchItem<"sqlite"> | null = null;
+  let webhookNotification: NotificationOutboxStatement | null = null;
   try {
     webhookNotification = await buildNotificationOutboxStatement(db, {
       recipientUserId: authUserId,
@@ -269,56 +395,11 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
   } catch (error) {
     console.error("[requestXIdLink] webhook enqueue failed", error);
   }
-  const mutationStatements: BatchItem<"sqlite">[] = [];
-  const expectedMutationChanges: Array<number | null> = [];
-  const audits: WriteAuditLogInput[] = [];
-
-  if (
-    (requestType === "new_link" || requestType === "existing_link") &&
-    requestedXId
-  ) {
-    const siblingPendings = await db
-      .select()
-      .from(xIdentityRequests)
-      .where(
-        and(
-          eq(xIdentityRequests.requested_by_auth_user_id, authUserId),
-          eq(xIdentityRequests.requested_x_id, requestedXId),
-          eq(xIdentityRequests.status, "pending"),
-          inArray(xIdentityRequests.request_type, ["new_link", "existing_link"]),
-        )!,
-      );
-    for (const sibling of siblingPendings) {
-      const afterSibling = { ...sibling, status: "cancelled" as const, updated_at: now };
-      mutationStatements.push(
-        db
-          .update(xIdentityRequests)
-          .set({ status: "cancelled", updated_at: now })
-          .where(
-            and(
-              eq(xIdentityRequests.id, sibling.id),
-              eq(xIdentityRequests.status, "pending"),
-            )!,
-          ),
-      );
-      expectedMutationChanges.push(null);
-      audits.push({
-        table_name: "x_identity_requests",
-        target_id: sibling.id,
-        operation: "UPDATE",
-        before: { ...sibling },
-        after: afterSibling,
-        actor_user_id: authUserId,
-        reason: "同一X IDの重複pending申請を取り消す",
-        context: "x-identity-request",
-        retention_class: "long_audit",
-      });
-    }
-  }
-
-  mutationStatements.push(db.run(buildPendingXIdRequestInsert(afterRequest)));
-  expectedMutationChanges.push(1);
-  audits.push({
+  const mutationStatements: BatchItem<"sqlite">[] = [
+    db.run(buildPendingXIdRequestInsert(afterRequest)),
+  ];
+  const expectedMutationChanges: Array<number | null> = [1];
+  const audits: WriteAuditLogInput[] = [{
     table_name: "x_identity_requests",
     target_id: id,
     operation: "CREATE",
@@ -326,71 +407,52 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
     after: { ...afterRequest },
     actor_user_id: authUserId,
     retention_class: "long_audit",
-  });
+  }];
   if (webhookNotification) {
-    mutationStatements.push(webhookNotification);
+    mutationStatements.push(webhookNotification.statement);
     expectedMutationChanges.push(null);
   }
 
-  try {
-    await mutateWithAudit(db, {
-      mutationStatements,
-      expectedMutationChanges,
-      audits,
-    });
-  } catch (error) {
-    const saveFailed = {
-      ok: false as const,
-      message: "申請の保存に失敗しました。時間をおいて再試行してください。",
-    };
-    if (isConditionalInsertAssertionError(error)) {
-      const duplicate = (
-        await db
-          .select({ id: xIdentityRequests.id })
-          .from(xIdentityRequests)
-          .where(
-            and(
-              eq(xIdentityRequests.requested_by_auth_user_id, authUserId),
-              eq(xIdentityRequests.request_type, requestType),
-              eq(xIdentityRequests.status, "pending"),
-              requestedXId === null
-                ? sql`${xIdentityRequests.requested_x_id} IS NULL`
-                : eq(xIdentityRequests.requested_x_id, requestedXId),
-              sourceXUserId === null
-                ? sql`${xIdentityRequests.source_x_user_id} IS NULL`
-                : eq(xIdentityRequests.source_x_user_id, sourceXUserId),
-              targetXUserId === null
-                ? sql`${xIdentityRequests.target_x_user_id} IS NULL`
-                : eq(xIdentityRequests.target_x_user_id, targetXUserId),
-            )!,
-          )
-          .limit(1)
-      )[0];
-      if (duplicate) return { ok: true, message: "同じ内容の申請がすでに承認待ちです。" };
-
-      const pendingCountRows = await db
-        .select({ count: sql<number>`COUNT(*)` })
-        .from(xIdentityRequests)
-        .where(
-          and(
-            eq(xIdentityRequests.requested_by_auth_user_id, authUserId),
-            eq(xIdentityRequests.status, "pending"),
-          )!,
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await mutateWithAudit(db, {
+        mutationStatements,
+        expectedMutationChanges,
+        audits,
+      });
+      revalidateXIdRequestPaths();
+      return { ok: true, message: "X ID 申請を受け付けました。" };
+    } catch (error) {
+      try {
+        const reconciliation = await reconcileRequestPersistence(
+          db,
+          requestIdentity,
         );
-      if (Number(pendingCountRows[0]?.count ?? 0) >= 5) {
-        return {
-          ok: false,
-          message: "未処理の X ID 申請が多すぎます。処理を待ってから再申請してください。",
-        };
+        if (reconciliation.outcome === "accepted") {
+          revalidateXIdRequestPaths();
+          return { ok: true, message: "X ID 申請を受け付けました。" };
+        }
+        if (reconciliation.outcome === "limit") {
+          return {
+            ok: false,
+            message: "未処理の X ID 申請が多すぎます。処理を待つか、不要な申請を取り下げてください。",
+          };
+        }
+      } catch (reconciliationError) {
+        console.error("[requestXIdLink] reconciliation failed", reconciliationError);
       }
-      return saveFailed;
-    }
-    console.error("[requestXIdLink] mutation failed", error);
-    return saveFailed;
-  }
 
-  revalidateXIdRequestPaths();
-  return { ok: true, message: "X ID 申請を受け付けました。" };
+      if (attempt === 0 && isRetryableXIdMutationError(error)) {
+        continue;
+      }
+      console.error("[requestXIdLink] mutation failed", error);
+      return {
+        ok: false,
+        message: "申請を保存できませんでした。申請履歴を確認してから再試行してください。",
+      };
+    }
+  }
+  return { ok: false, message: "申請を保存できませんでした。" };
 }
 
 /** 本人の pending 申請を取り消す（連携・統合・別名）。 */
@@ -402,14 +464,23 @@ export async function cancelXIdLinkRequest(formData: FormData): Promise<XIdActio
   const requestId = String(formData.get("request_id") ?? "").trim();
   if (!requestId) return { ok: false, message: "申請 ID がありません。" };
 
-  const request = (
-    await db.select().from(xIdentityRequests).where(eq(xIdentityRequests.id, requestId)).limit(1)
-  )[0];
+  let request: typeof xIdentityRequests.$inferSelect | undefined;
+  try {
+    request = (
+      await db.select().from(xIdentityRequests).where(eq(xIdentityRequests.id, requestId)).limit(1)
+    )[0];
+  } catch (error) {
+    console.error("[cancelXIdLinkRequest] lookup failed", error);
+    return {
+      ok: false,
+      message: "申請状況を確認できませんでした。時間をおいて再試行してください。",
+    };
+  }
   if (!request || request.requested_by_auth_user_id !== authUserId) {
     return { ok: false, message: "申請が見つかりません。" };
   }
   if (request.status !== "pending") {
-    return { ok: false, message: "すでに処理済みの申請です。" };
+    return processedXIdRequestMessage(request.status, "cancel");
   }
   if (
     request.request_type !== "new_link" &&
@@ -422,45 +493,71 @@ export async function cancelXIdLinkRequest(formData: FormData): Promise<XIdActio
 
   const now = nowUnix();
   const afterRequest = { ...request, status: "cancelled" as const, updated_at: now };
-  try {
-    await mutateWithAudit(db, {
-      mutationStatements: [
-        db
-          .update(xIdentityRequests)
-          .set({ status: "cancelled", updated_at: now })
-          .where(
-            and(
-              eq(xIdentityRequests.id, request.id),
-              eq(xIdentityRequests.status, "pending"),
-              eq(xIdentityRequests.requested_by_auth_user_id, authUserId),
-            )!,
-          ),
-      ],
-      expectedMutationChanges: [1],
-      audits: [
-        {
-          table_name: "x_identity_requests",
-          target_id: request.id,
-          operation: "UPDATE",
-          before: { ...request },
-          after: afterRequest,
-          actor_user_id: authUserId,
-          reason: "申請者本人がX ID申請を取り下げ",
-          context: "x-identity-request",
-          retention_class: "long_audit",
-        },
-      ],
-    });
-  } catch (error) {
-    console.error("[cancelXIdLinkRequest] mutation failed", error);
-    return {
-      ok: false,
-      message: "申請の取り下げに失敗しました。再読み込みしてお試しください。",
-    };
+  const mutationInput = {
+    mutationStatements: [
+      db
+        .update(xIdentityRequests)
+        .set({ status: "cancelled" as const, updated_at: now })
+        .where(
+          and(
+            eq(xIdentityRequests.id, request.id),
+            eq(xIdentityRequests.status, "pending"),
+            eq(xIdentityRequests.requested_by_auth_user_id, authUserId),
+          )!,
+        ),
+    ],
+    expectedMutationChanges: [1],
+    audits: [
+      {
+        table_name: "x_identity_requests",
+        target_id: request.id,
+        operation: "UPDATE" as const,
+        before: { ...request },
+        after: afterRequest,
+        actor_user_id: authUserId,
+        reason: "申請者本人がX ID申請を取り下げ",
+        context: "x-identity-request",
+        retention_class: "long_audit" as const,
+      },
+    ],
+  };
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await mutateWithAudit(db, mutationInput);
+      revalidateXIdRequestPaths();
+      return { ok: true, message: "申請を取り下げました。" };
+    } catch (error) {
+      try {
+        const current = (
+          await db
+            .select({
+              status: xIdentityRequests.status,
+              requested_by_auth_user_id: xIdentityRequests.requested_by_auth_user_id,
+            })
+            .from(xIdentityRequests)
+            .where(eq(xIdentityRequests.id, request.id))
+            .limit(1)
+        )[0];
+        if (!current || current.requested_by_auth_user_id !== authUserId) {
+          return { ok: false, message: "申請が見つかりません。" };
+        }
+        if (current.status !== "pending") {
+          const result = processedXIdRequestMessage(current.status, "cancel");
+          if (result.ok) revalidateXIdRequestPaths();
+          return result;
+        }
+      } catch (reconciliationError) {
+        console.error("[cancelXIdLinkRequest] reconciliation failed", reconciliationError);
+      }
+      if (attempt === 0 && isRetryableXIdMutationError(error)) continue;
+      console.error("[cancelXIdLinkRequest] mutation failed", error);
+      return {
+        ok: false,
+        message: "申請の取り下げに失敗しました。申請履歴を更新してから再試行してください。",
+      };
+    }
   }
-
-  revalidateXIdRequestPaths();
-  return { ok: true, message: "申請を取り下げました。" };
+  return { ok: false, message: "申請の取り下げに失敗しました。" };
 }
 
 export async function requestXIdMergeRevert(formData: FormData): Promise<XIdActionResult> {

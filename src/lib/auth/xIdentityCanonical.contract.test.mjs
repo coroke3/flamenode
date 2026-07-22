@@ -75,7 +75,8 @@ test("X名義と認証ユーザーは複合主キーで多対多、承認時に�
   assert.match(admin, /created_by_request_id: request\.id/);
   assert.match(admin, /created_at: now/);
   assert.match(admin, /updated_at: now/);
-  assert.match(admin, /同一の X名義と認証ユーザーの組合せ/);
+  assert.match(admin, /if \(!duplicateLink\)/);
+  assert.doesNotMatch(admin, /同一の X名義と認証ユーザーの組合せ/);
 });
 
 test("一般承認と統合・差し戻しは権限境界を分離する", () => {

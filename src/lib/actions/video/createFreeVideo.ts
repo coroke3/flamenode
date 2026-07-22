@@ -229,7 +229,7 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
       eventId,
     });
     if (notification) {
-      plan.statements.push(notification);
+      plan.statements.push(notification.statement);
       plan.expectedChanges.push(1);
     }
 

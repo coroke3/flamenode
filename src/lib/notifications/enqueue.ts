@@ -36,6 +36,15 @@ type NotificationOutboxBatch = {
   rows: Array<typeof notificationOutbox.$inferSelect>;
 };
 
+/**
+ * Drizzle の query builder は PromiseLike なので、async 関数から直接返すと
+ * Promise resolution によって即時実行される。statement を envelope に入れ、
+ * 呼び出し側が D1 batch へ追加するまで未実行のまま保持する。
+ */
+export type NotificationOutboxStatement = Readonly<{
+  statement: BatchItem<"sqlite">;
+}>;
+
 type PreparedNotification = {
   type: string;
   payloadJson: string;
@@ -233,7 +242,7 @@ async function hasActiveDedupe(
 export async function buildNotificationOutboxStatement(
   db: AnyDb,
   input: EnqueueNotificationInput,
-): Promise<BatchItem<"sqlite"> | null> {
+): Promise<NotificationOutboxStatement | null> {
   const prepared = prepareNotification(input);
   if (
     prepared.dedupeKey &&
@@ -250,12 +259,14 @@ export async function buildNotificationOutboxStatement(
   );
   if (!recipientUserId) return null;
 
-  return insertNotificationStatement(
-    db,
-    buildNotificationRow(
-      prepared,
-      recipientUserId,
-      Math.floor(Date.now() / 1000),
+  return {
+    statement: insertNotificationStatement(
+      db,
+      buildNotificationRow(
+        prepared,
+        recipientUserId,
+        Math.floor(Date.now() / 1000),
+      ),
     ),
-  );
+  };
 }

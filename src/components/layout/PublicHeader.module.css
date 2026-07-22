@@ -19,7 +19,7 @@
   min-height: var(--header-h);
   height: auto;
   padding-block: 10px;
-  margin: 0;
+  margin-inline: auto;
 }
 
 .logoLink {
@@ -419,7 +419,7 @@
   justify-content: center;
 }
 
-@media (min-width: 641px) and (max-width: 1000px) {
+@media (min-width: 641px) and (max-width: 1180px) {
   .bar {
     gap: 10px;
   }
@@ -449,9 +449,22 @@
   }
 }
 
-@media (min-width: 1001px) {
+@media (min-width: 1181px) {
+  .bar {
+    grid-template-columns: minmax(0, 1fr) max-content minmax(0, 1fr);
+  }
+
+  .logoLink {
+    justify-self: start;
+  }
+
   .desktopNav {
     display: flex;
+  }
+
+  .right {
+    justify-self: end;
+    margin-left: 0;
   }
 
   .themeButton {

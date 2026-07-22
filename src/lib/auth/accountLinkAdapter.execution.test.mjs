@@ -71,12 +71,14 @@ function fakeDb(userRow) {
 
 function mockWelcomeNotificationBuilder() {
   return async (_db, input) => ({
-    kind: "notification",
-    values: {
-      type: input.type,
-      recipient_user_id: input.recipientUserId,
-      dedupe_key: input.dedupeKey,
-      payload_json: JSON.stringify(input.payload),
+    statement: {
+      kind: "notification",
+      values: {
+        type: input.type,
+        recipient_user_id: input.recipientUserId,
+        dedupe_key: input.dedupeKey,
+        payload_json: JSON.stringify(input.payload),
+      },
     },
   });
 }

@@ -5,7 +5,8 @@ import styles from "./ChapterTabs.module.css";
 import { Icon } from "@/components/ui/Icon";
 import { cn } from "@/lib/utils/cn";
 import { ChapterCommentItem } from "./ChapterCommentItem";
-import { seekToTime } from "./playerBridge";
+import { findActiveChapterId } from "./chapterPlayback";
+import { seekToTime, subscribePlayerTime } from "./playerBridge";
 
 export interface ChapterEntry {
   id: string;
@@ -24,19 +25,132 @@ interface ChapterTabsProps {
   onSeek?: (time: number) => void;
 }
 
+const FOLLOW_IDLE_MS = 8_000;
+
+function findScrollParent(element: HTMLElement | null): HTMLElement | null {
+  let node = element?.parentElement ?? null;
+  while (node) {
+    const { overflowY } = window.getComputedStyle(node);
+    if (
+      (overflowY === "auto" || overflowY === "scroll") &&
+      node.scrollHeight > node.clientHeight
+    ) {
+      return node;
+    }
+    node = node.parentElement;
+  }
+  return null;
+}
+
 export function ChapterTabs({
   chapters,
   duration,
   onSeek = seekToTime,
 }: ChapterTabsProps): React.ReactElement {
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  const [currentTime, setCurrentTime] = React.useState(0);
+  const [followPlayback, setFollowPlayback] = React.useState(true);
+  const idleTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastScrolledChapterIdRef = React.useRef<string | null>(null);
+  const isAutoScrollingRef = React.useRef(false);
+
+  const activeChapterId = React.useMemo(
+    () => findActiveChapterId(chapters, currentTime),
+    [chapters, currentTime],
+  );
+
+  const clearIdleTimer = React.useCallback(() => {
+    if (idleTimerRef.current) {
+      window.clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
+    }
+  }, []);
+
+  const resumeFollow = React.useCallback(() => {
+    clearIdleTimer();
+    setFollowPlayback(true);
+  }, [clearIdleTimer]);
+
+  const pauseFollow = React.useCallback(() => {
+    setFollowPlayback(false);
+    clearIdleTimer();
+    idleTimerRef.current = window.setTimeout(() => {
+      setFollowPlayback(true);
+      idleTimerRef.current = null;
+    }, FOLLOW_IDLE_MS);
+  }, [clearIdleTimer]);
+
+  const handleSeek = React.useCallback(
+    (time: number) => {
+      resumeFollow();
+      onSeek(time);
+    },
+    [onSeek, resumeFollow],
+  );
+
+  React.useEffect(() => subscribePlayerTime(setCurrentTime), []);
+
+  React.useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+
+    const scrollParent = findScrollParent(root);
+    if (!scrollParent) return;
+
+    const onScroll = () => {
+      if (isAutoScrollingRef.current) return;
+      pauseFollow();
+    };
+
+    scrollParent.addEventListener("scroll", onScroll, { passive: true });
+    return () => scrollParent.removeEventListener("scroll", onScroll);
+  }, [pauseFollow]);
+
+  React.useEffect(() => {
+    if (!followPlayback || !activeChapterId) return;
+    if (lastScrolledChapterIdRef.current === activeChapterId) return;
+
+    const root = rootRef.current;
+    if (!root) return;
+
+    const activeItem = root.querySelector<HTMLElement>(
+      `[data-chapter-id="${CSS.escape(activeChapterId)}"]`,
+    );
+    if (!activeItem) return;
+
+    isAutoScrollingRef.current = true;
+    activeItem.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    lastScrolledChapterIdRef.current = activeChapterId;
+    window.setTimeout(() => {
+      isAutoScrollingRef.current = false;
+    }, 600);
+  }, [activeChapterId, followPlayback]);
+
+  React.useEffect(() => {
+    if (!followPlayback) {
+      lastScrolledChapterIdRef.current = null;
+    }
+  }, [followPlayback]);
+
+  React.useEffect(() => () => clearIdleTimer(), [clearIdleTimer]);
+
   return (
-    <div className={styles.root}>
+    <div ref={rootRef} className={styles.root}>
       <div className={styles.tabs}>
         <TabButton
           icon="chapter"
           label="チャプターコメント"
           count={chapters.length}
         />
+        {!followPlayback ? (
+          <button
+            type="button"
+            className={styles.followButton}
+            onClick={resumeFollow}
+          >
+            再生に追従
+          </button>
+        ) : null}
       </div>
       <div className={styles.list}>
         {chapters.length === 0 ? (
@@ -50,7 +164,8 @@ export function ChapterTabs({
               chapter={c}
               duration={duration}
               showAuthor
-              onSeek={onSeek}
+              active={c.id === activeChapterId}
+              onSeek={handleSeek}
             />
           ))
         )}
