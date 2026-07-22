@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import type { WriteAuditLogInput } from "@/lib/audit/types";
@@ -46,6 +46,9 @@ async function mutateVideoInteraction(
     await db.select().from(videos).where(eq(videos.id, videoId)).limit(1)
   )[0];
   if (!target) return { ok: false, message: "対象作品が見つかりません。" };
+  if (target.visibility_status !== "public") {
+    return { ok: false, message: "公開中の作品だけ操作できます。" };
+  }
 
   const existing = (
     await db
@@ -76,8 +79,27 @@ async function mutateVideoInteraction(
         created_at: now,
       }
     : null;
+  // Preflight 後に公開状態が変わっても interaction だけが残らないよう、
+  // 対象動画の公開状態と snapshot を interaction 自体の D1 batch 条件へ含める。
+  const publicTargetSnapshotExists = sql`
+    EXISTS (
+      SELECT 1
+      FROM videos AS interaction_target
+      WHERE interaction_target.id = ${videoId}
+        AND interaction_target.visibility_status = 'public'
+        AND interaction_target.updated_at = ${target.updated_at}
+    )
+  `;
   const interactionStatement = active
-    ? db.insert(videoInteractions).values(interactionAfter!)
+    ? db.run(sql`
+        INSERT INTO video_interactions (
+          x_user_id, video_id, interaction_type, created_at
+        )
+        SELECT
+          ${interactionAfter!.x_user_id}, ${interactionAfter!.video_id},
+          ${interactionAfter!.interaction_type}, ${interactionAfter!.created_at}
+        WHERE ${publicTargetSnapshotExists}
+      `)
     : db
         .delete(videoInteractions)
         .where(
@@ -86,6 +108,7 @@ async function mutateVideoInteraction(
             eq(videoInteractions.video_id, existing!.video_id),
             eq(videoInteractions.interaction_type, existing!.interaction_type),
             eq(videoInteractions.created_at, existing!.created_at),
+            publicTargetSnapshotExists,
           )!,
         );
 
@@ -122,6 +145,7 @@ async function mutateVideoInteraction(
         .where(
           and(
             eq(videos.id, videoId),
+            eq(videos.visibility_status, "public"),
             eq(videos.app_like_count, target.app_like_count),
             eq(videos.updated_at, target.updated_at),
           )!,

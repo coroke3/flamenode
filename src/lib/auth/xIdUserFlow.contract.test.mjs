@@ -27,6 +27,22 @@ test("X ID連携は初回・追加で同じ小文字化フローを使い、統�
   assert.match(settings, /初回・2件目以降とも同じ手順/);
 });
 
+test("本人はpendingのX ID申請を取り下げできる", () => {
+  const action = read("../actions/xid.ts");
+  const history = read("../../components/settings/XIdLinkedList.tsx");
+
+  assert.match(action, /export async function cancelXIdLinkRequest/);
+  assert.match(action, /申請者本人がX ID申請を取り下げ/);
+  assert.match(action, /eq\(xIdentityRequests\.requested_by_auth_user_id, authUserId\)/);
+  assert.match(action, /eq\(xIdentityRequests\.status, "pending"\)/);
+  assert.match(action, /expectedMutationChanges: \[1\]/);
+  assert.match(action, /catch \(error\)[\s\S]*申請の取り下げに失敗しました/);
+  assert.match(action, /status: "cancelled"/);
+  assert.match(history, /cancelXIdLinkRequest/);
+  assert.match(history, /取り下げる/);
+  assert.match(history, /row\.status === "pending"/);
+});
+
 test("再生リスト同期状況は一般ダッシュボードへ公開せず運営・管理画面に限定する", () => {
   const layout = read("../../../app/(auth)/layout.tsx");
   const dashboard = read("../../../app/(auth)/dashboard/youtube-playlists/page.tsx");

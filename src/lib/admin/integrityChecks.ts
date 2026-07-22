@@ -533,7 +533,6 @@ export async function runIntegrityChecks(
         "同一 event 内に同じ start_time で、reservation_group_id が異なる枠が存在する状態。",
       from: sql`slots`,
       where: sql`start_time IS NOT NULL
-        AND slot_kind = 'time'
         AND EXISTS (
           SELECT 1 FROM slots s2
           WHERE s2.event_id = slots.event_id

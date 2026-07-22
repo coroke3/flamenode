@@ -28,7 +28,7 @@ function runStaticCheck() {
   );
   requirePattern(
     "src/lib/api/publicDto.ts",
-    /MAX_PUBLIC_LIST_LIMIT\s*=\s*\d+[\s\S]*MAX_PUBLIC_EVENT_LIMIT\s*=\s*\d+/,
+    /MAX_PUBLIC_LIST_LIMIT\s*=\s*\d+[\s\S]*MAX_PUBLIC_EVENT_LIMIT\s*=\s*\d+[\s\S]*MAX_PUBLIC_SOFTWARE_SUGGESTION_LIMIT\s*=\s*\d+/,
     "公開一覧の絶対上限がありません。",
     errors,
   );
@@ -48,6 +48,12 @@ function runStaticCheck() {
     "app/api/events/route.ts",
     /pickKeys\(row, PUBLIC_EVENT_KEYS\)[\s\S]*assertNoForbiddenKeys/,
     "event一覧が公開DTO allowlistと禁止key検査を通っていません。",
+    errors,
+  );
+  requirePattern(
+    "app/api/software/suggestions/route.ts",
+    /parseBoundedPositiveInt\([\s\S]*MAX_PUBLIC_SOFTWARE_SUGGESTION_LIMIT[\s\S]*activeSoftware\s*=\s*eq\(softwareCatalog\.is_active,\s*1\)[\s\S]*\.where\(activeSoftware\)[\s\S]*\.where\(and\(activeSoftware,\s*inArray\([\s\S]*\.where\([\s\S]*and\(activeSoftware,[\s\S]*toPublicSoftwareSuggestionDto[\s\S]*assertNoForbiddenKeys\(payload\)/,
+    "software候補が正数上限、active限定、公開DTO、禁止key検査を通っていません。",
     errors,
   );
   requirePattern(
@@ -107,6 +113,7 @@ async function runLiveCheck(baseUrl) {
     `${normalized}/api/videos?limit=5`,
     `${normalized}/api/videos?limit=5&page=1`,
     `${normalized}/api/events?limit=5`,
+    `${normalized}/api/software/suggestions?limit=5`,
   ];
   try {
     const listResponse = await fetchWithTimeout(

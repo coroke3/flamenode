@@ -84,7 +84,8 @@ async function loadCurrentUser(): Promise<CurrentUser | null> {
         ? sessionUser.role
         : "user",
     is_banned: sessionUser.is_banned ?? 0,
-    active_x_user_id: normalizeXId(sessionUser.active_x_user_id) || null,
+    // Active X ID は session の古い値を信用せず、DB の正本リンクからのみ解決する。
+    active_x_user_id: null,
     is_tos_accepted: 0,
     accepted_terms_version_id: null,
     terms_reaccept_required: 0,
@@ -144,8 +145,7 @@ async function loadCurrentUser(): Promise<CurrentUser | null> {
         ? userRow.role
         : "user",
     is_banned: userRow.is_banned ?? 0,
-    active_x_user_id:
-      resolvedActive ?? (normalizeXId(userRow.active_x_user_id) || null),
+    active_x_user_id: resolvedActive,
     is_tos_accepted: userRow.is_tos_accepted ?? 0,
     accepted_terms_version_id: userRow.accepted_terms_version_id ?? null,
     terms_reaccept_required: userRow.terms_reaccept_required === 1 ? 1 : 0,

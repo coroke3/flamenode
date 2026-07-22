@@ -12,6 +12,8 @@ import {
   FORBIDDEN_PUBLIC_KEYS,
   PUBLIC_VIDEO_KEYS,
   PUBLIC_EVENT_KEYS,
+  PUBLIC_SOFTWARE_SUGGESTION_KEYS,
+  toPublicSoftwareSuggestionDto,
 } from "./publicDto.ts";
 
 test("pickKeys: 指定キーだけ残す", () => {
@@ -151,4 +153,37 @@ test("PUBLIC_EVENT_KEYS は canonical visibility と受付期間だけを公開�
     "entry_end_time",
     "max_slots_per_video",
   ]);
+});
+
+test("software suggestion DTOはactive項目だけを明示フィールドへ変換する", () => {
+  const active = {
+    id: "software-1",
+    name: "Example Editor",
+    category: "video",
+    usage_count: 12,
+    is_verified: 1,
+    is_active: 1,
+  };
+  assert.deepEqual(toPublicSoftwareSuggestionDto(active), {
+    id: "software-1",
+    name: "Example Editor",
+    category: "video",
+    usage_count: 12,
+    is_verified: 1,
+  });
+  assert.equal(
+    toPublicSoftwareSuggestionDto({ ...active, id: "inactive", is_active: 0 }),
+    null,
+  );
+});
+
+test("PUBLIC_SOFTWARE_SUGGESTION_KEYS は内部状態を含まない", () => {
+  assert.deepEqual(PUBLIC_SOFTWARE_SUGGESTION_KEYS, [
+    "id",
+    "name",
+    "category",
+    "usage_count",
+    "is_verified",
+  ]);
+  assert.equal(PUBLIC_SOFTWARE_SUGGESTION_KEYS.includes("is_active"), false);
 });

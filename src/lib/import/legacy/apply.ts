@@ -30,9 +30,14 @@ import {
 } from "./normalize";
 import { compositeAuditTargetId } from "@/lib/video/atomicWritePlanCore";
 import type {
+  StaticRebuildPriority,
+  StaticRebuildTargetType,
+} from "@/lib/staticRebuild/types";
+import type {
   LegacyImportApplyProgress,
   LegacyImportApplyStage,
 } from "./previewStore";
+import { legacyImportRebuildQueueId } from "./rebuildQueueCore";
 
 const LEGACY_IMPORT_SYSTEM_USER_ID = "system_legacy_import";
 const MAX_IDS_PER_QUERY = 80;
@@ -49,9 +54,77 @@ const LEGACY_ENTITY_SNAPSHOT_AUDIT_TABLE = "legacy_import_entity_snapshots";
 type ApplyOptions = {
   actorAuthUserId: string;
   strategy: LegacyImportStrategy;
-  runDigest?: string;
+  stepTargetId: string;
   marker?: (outcome: LegacyImportStepOutcome) => LegacyImportStepMarker;
 };
+
+type LegacyRebuildTarget = {
+  targetType: StaticRebuildTargetType;
+  targetId: string;
+  priority: StaticRebuildPriority;
+};
+
+const REBUILD_PRIORITY_RANK: Record<StaticRebuildPriority, number> = {
+  high: 3,
+  normal: 2,
+  low: 1,
+};
+
+/**
+ * 公開R2 JSONの再生成予約を本体mutationと同じD1 batchへ含める。
+ * active targetはUPDATEしてprocessing leaseを無効化せず、updated_atを進めることで
+ * Worker完了時の再queue判定に載せる。1 JSON payload / 1 SQLにまとめ、D1 query予算も固定する。
+ */
+function legacyRebuildQueueMutation(
+  db: DB,
+  targets: readonly LegacyRebuildTarget[],
+  options: Pick<ApplyOptions, "actorAuthUserId" | "stepTargetId">,
+  now: number,
+) {
+  const byTarget = new Map<string, LegacyRebuildTarget>();
+  for (const target of targets) {
+    const key = `${target.targetType}:${target.targetId}`;
+    const current = byTarget.get(key);
+    if (!current || REBUILD_PRIORITY_RANK[target.priority] > REBUILD_PRIORITY_RANK[current.priority]) {
+      byTarget.set(key, target);
+    }
+  }
+  const rows = [...byTarget.values()].map((target, index) => ({
+    id: legacyImportRebuildQueueId(options.stepTargetId, index),
+    target_type: target.targetType,
+    target_id: target.targetId,
+    priority: target.priority,
+  }));
+  const payload = JSON.stringify(rows);
+  return {
+    statement: db.run(sql`
+      INSERT INTO static_rebuild_queue (
+        id, target_type, target_id, reason, priority, status,
+        attempt_count, requested_by_user_id, created_at, updated_at
+      )
+      SELECT
+        json_extract(incoming.value, '$.id'),
+        json_extract(incoming.value, '$.target_type'),
+        json_extract(incoming.value, '$.target_id'),
+        'legacy_import',
+        json_extract(incoming.value, '$.priority'),
+        'pending', 0, ${options.actorAuthUserId}, ${now}, ${now}
+      FROM json_each(${payload}) AS incoming
+      WHERE 1 = 1
+      ON CONFLICT(target_type, target_id) WHERE status IN ('pending', 'processing')
+      DO UPDATE SET
+        reason = excluded.reason,
+        priority = CASE
+          WHEN static_rebuild_queue.priority = 'high' OR excluded.priority = 'high' THEN 'high'
+          WHEN static_rebuild_queue.priority = 'normal' OR excluded.priority = 'normal' THEN 'normal'
+          ELSE 'low'
+        END,
+        requested_by_user_id = excluded.requested_by_user_id,
+        updated_at = MAX(static_rebuild_queue.updated_at + 1, excluded.updated_at)
+    `),
+    expectedChanges: rows.length,
+  };
+}
 
 export type LegacyApplyResult = {
   created: { events: number; videos: number; xUsers: number; authUsers: number; softwares: number };
@@ -1225,6 +1298,16 @@ async function applyEvent(
     snapshotDigest(nextManagedEvent),
     snapshotDigest(nextStaff),
   ]);
+  const rebuildQueue = legacyRebuildQueueMutation(
+    db,
+    [
+      { targetType: "event", targetId: event.id, priority: "high" },
+      { targetType: "events_index", targetId: "global", priority: "low" },
+      { targetType: "search_index", targetId: "global", priority: "low" },
+    ],
+    options,
+    now,
+  );
   const mutationStatements = [
     ...(existing
       ? [db.run(sql`
@@ -1324,12 +1407,14 @@ async function applyEvent(
           FROM json_each(${payload})
         `)]
       : []),
+    rebuildQueue.statement,
   ];
   const expected = [
     ...(existing ? [null] : []),
     1,
     ...(existing && beforeStaff.length > 0 ? [beforeStaff.length] : []),
     ...(nextStaff.length > 0 ? [nextStaff.length] : []),
+    rebuildQueue.expectedChanges,
   ];
   await mutateWithAudit(db, {
     mutationStatements,
@@ -1762,6 +1847,30 @@ async function applyVideo(
         updated_at: now,
       }]
     : [];
+  const rebuildEventIds = [...new Set(
+    [video.primary_event_id, ...nextEvents.map((row) => row.event_id)]
+      .filter((eventId): eventId is string => !!eventId),
+  )];
+  const rebuildQueue = legacyRebuildQueueMutation(
+    db,
+    [
+      { targetType: "video", targetId: video.id, priority: "high" },
+      { targetType: "top", targetId: "global", priority: "normal" },
+      { targetType: "list_recent", targetId: "global", priority: "normal" },
+      { targetType: "list_popular", targetId: "global", priority: "normal" },
+      { targetType: "search_index", targetId: "global", priority: "normal" },
+      ...(video.creator_x_user_id
+        ? [{ targetType: "user" as const, targetId: video.creator_x_user_id, priority: "normal" as const }]
+        : []),
+      ...rebuildEventIds.map((eventId) => ({
+        targetType: "event" as const,
+        targetId: eventId,
+        priority: "high" as const,
+      })),
+    ],
+    options,
+    now,
+  );
   const relationPayload = JSON.stringify(nextEvents);
   const memberPayload = JSON.stringify(nextMembers);
   const chapterPayload = JSON.stringify(nextChapters);
@@ -2170,16 +2279,7 @@ async function applyVideo(
           ) VALUES (${video.id}, NULL, NULL, NULL, 0, NULL, 'pending', NULL, ${now})
         `)]
       : []),
-    db.run(sql`
-      INSERT OR IGNORE INTO static_rebuild_queue (
-        id, target_type, target_id, reason, priority, status,
-        attempt_count, requested_by_user_id, created_at, updated_at
-      ) VALUES (
-        ${`legacy_import_video_${options.runDigest ?? "unscoped"}_${video.id}`},
-        'video', ${video.id}, 'legacy_import',
-        'normal', 'pending', 0, ${options.actorAuthUserId}, ${now}, ${now}
-      )
-    `),
+    rebuildQueue.statement,
   ];
   const expected = [
     1,
@@ -2197,7 +2297,7 @@ async function applyVideo(
     ...(chapters.length ? [chapters.length] : []),
     ...(softwareRows.length ? [softwareRows.length] : []),
     ...(video.youtube_video_id ? [1] : []),
-    null,
+    rebuildQueue.expectedChanges,
   ];
   await mutateWithAudit(db, {
     mutationStatements: statements,
@@ -2381,7 +2481,7 @@ export async function applyLegacyImportPlanStep(
   const options: ApplyOptions = {
     actorAuthUserId: input.actorAuthUserId,
     strategy: input.strategy,
-    runDigest: identity.runDigest,
+    stepTargetId: identity.targetId,
     marker,
   };
   let outcome: LegacyImportStepOutcome;

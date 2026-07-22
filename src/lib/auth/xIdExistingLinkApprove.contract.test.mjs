@@ -52,6 +52,30 @@ test("X ID申請の承認・却下はmutation失敗をerror boundaryへ投げず
   );
 });
 
+test("X IDの一般・運営ActionはCloudflare binding障害を結果化しnavigation例外だけ再送出する", () => {
+  const action = read("../actions/xid.ts");
+  const admin = read("../actions/xid-admin.ts");
+
+  assert.match(action, /import \{ unstable_rethrow \} from "next\/navigation"/);
+  assert.match(
+    action,
+    /async function getXIdWriteContext[\s\S]*try \{[\s\S]*await writeGuard[\s\S]*catch \(error\) \{[\s\S]*unstable_rethrow\(error\)[\s\S]*認証またはDBに接続できません/,
+  );
+  assert.match(admin, /import \{ unstable_rethrow \} from "next\/navigation"/);
+  assert.match(
+    admin,
+    /async function getXIdLinkOperator[\s\S]*try \{[\s\S]*await writeGuard[\s\S]*await canManageXIdLinkRequests[\s\S]*catch \(error\) \{[\s\S]*unstable_rethrow\(error\)[\s\S]*認証またはDBに接続できません/,
+  );
+  assert.match(
+    admin,
+    /export async function approveXIdLinkRequest[\s\S]*if \(!operator\.ok\) return \{ ok: false, message: operator\.message \}/,
+  );
+  assert.match(
+    admin,
+    /export async function rejectXIdLinkRequest[\s\S]*if \(!operator\.ok\) return \{ ok: false, message: operator\.message \}/,
+  );
+});
+
 test("X ID申請はsibling cancelを冪等化しmutation失敗を返す", () => {
   const action = read("../actions/xid.ts");
   const admin = read("../actions/xid-admin.ts");

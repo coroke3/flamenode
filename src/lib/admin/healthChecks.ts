@@ -292,7 +292,7 @@ async function checkSlotDuplicateStartTime(db: AnyDb): Promise<HealthCheckResult
 
   return {
     id: "slot_duplicate_start_time",
-    label: "同一開始時刻の別枠 (slot_kind=time)",
+    label: "同一開始時刻の別枠",
     status: duplicateCount === 0 ? "ok" : "warn",
     count: duplicateCount,
     samples: duplicateSamples,

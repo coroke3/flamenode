@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { canManageXIdLinkRequests } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
@@ -29,15 +30,31 @@ export interface XIdAdminResult {
   message?: string;
 }
 
-async function getXIdLinkOperator(): Promise<{ authUserId: string; db: DB } | null> {
-  const guard = await writeGuard({ feature: "xid_links" });
-  if (!guard.ok) return null;
-  const { db, user } = guard;
-  const allowed = await canManageXIdLinkRequests(db, {
-    id: user.id,
-    role: user.role,
-  });
-  return allowed ? { authUserId: user.id, db } : null;
+type XIdLinkOperatorResult =
+  | { ok: true; authUserId: string; db: DB }
+  | { ok: false; message: string };
+
+async function getXIdLinkOperator(): Promise<XIdLinkOperatorResult> {
+  try {
+    const guard = await writeGuard({ feature: "xid_links" });
+    if (!guard.ok) return { ok: false, message: guard.message };
+    const { db, user } = guard;
+    const allowed = await canManageXIdLinkRequests(db, {
+      id: user.id,
+      role: user.role,
+    });
+    return allowed
+      ? { ok: true, authUserId: user.id, db }
+      : { ok: false, message: "X ID 申請を処理する権限がありません。" };
+  } catch (error) {
+    // redirect/notFound 等のNext.js制御例外はAction結果へ変換しない。
+    unstable_rethrow(error);
+    console.error("[xid-admin] operator context unavailable", error);
+    return {
+      ok: false,
+      message: "認証またはDBに接続できません。時間をおいて再試行してください。",
+    };
+  }
 }
 
 function revalidateIdentityAdminPaths(): void {
@@ -58,7 +75,7 @@ function mutationError(error: unknown): XIdAdminResult {
 
 export async function approveXIdLinkRequest(formData: FormData): Promise<XIdAdminResult> {
   const operator = await getXIdLinkOperator();
-  if (!operator) return { ok: false, message: "X ID 申請を処理する権限がありません。" };
+  if (!operator.ok) return { ok: false, message: operator.message };
   const requestId = String(formData.get("request_id") ?? "").trim();
   if (!requestId) return { ok: false, message: "申請 ID がありません。" };
 
@@ -353,7 +370,7 @@ export async function approveXIdLinkRequest(formData: FormData): Promise<XIdAdmi
 
 export async function rejectXIdLinkRequest(formData: FormData): Promise<XIdAdminResult> {
   const operator = await getXIdLinkOperator();
-  if (!operator) return { ok: false, message: "X ID 申請を処理する権限がありません。" };
+  if (!operator.ok) return { ok: false, message: operator.message };
   const requestId = String(formData.get("request_id") ?? "").trim();
   if (!requestId) return { ok: false, message: "申請 ID がありません。" };
   const reason = String(formData.get("reason") ?? "").trim().slice(0, 500);

@@ -115,6 +115,13 @@ export function checkCloudflareTemplate({ root = process.cwd() } = {}) {
   const rootToml = readFile(root, "wrangler.toml", errors);
   requirePattern(errors, rootToml, "wrangler.toml", /^name\s*=\s*"flamenode-web"\s*$/m, "Worker name must be flamenode-web");
   requirePattern(errors, rootToml, "wrangler.toml", /^main\s*=\s*"\.open-next\/worker\.js"\s*$/m, "main must be .open-next/worker.js");
+  const buildSectionIndex = rootToml.search(/^\[build\]\s*$/m);
+  for (const key of ["main", "compatibility_date", "compatibility_flags", "workers_dev"]) {
+    const keyIndex = rootToml.search(new RegExp(`^${key}\\s*=`, "m"));
+    if (buildSectionIndex >= 0 && keyIndex > buildSectionIndex) {
+      errors.push(`wrangler.toml: ${key} must be a root key before [build]`);
+    }
+  }
   requirePattern(errors, rootToml, "wrangler.toml", /^compatibility_date\s*=\s*"\d{4}-\d{2}-\d{2}"\s*$/m, "compatibility_date is required");
   requirePattern(errors, rootToml, "wrangler.toml", /compatibility_flags\s*=\s*\[[^\]]*"nodejs_compat"/m, "nodejs_compat is required");
   requirePattern(errors, rootToml, "wrangler.toml", /compatibility_flags\s*=\s*\[[^\]]*"global_fetch_strictly_public"/m, "global_fetch_strictly_public is required");

@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { writeGuard } from "@/lib/auth/writeGuard";
@@ -56,11 +57,24 @@ async function getXIdWriteContext(): Promise<
   | { ok: true; authUserId: string; db: DB }
   | { ok: false; result: XIdActionResult }
 > {
-  const guard = await writeGuard({ feature: "xid_links" });
-  if (!guard.ok) {
-    return { ok: false, result: { ok: false, message: guard.message } };
+  try {
+    const guard = await writeGuard({ feature: "xid_links" });
+    if (!guard.ok) {
+      return { ok: false, result: { ok: false, message: guard.message } };
+    }
+    return { ok: true, authUserId: guard.user.id, db: guard.db };
+  } catch (error) {
+    // redirect/notFound 等のNext.js制御例外はAction結果へ変換しない。
+    unstable_rethrow(error);
+    console.error("[xid] write context unavailable", error);
+    return {
+      ok: false,
+      result: {
+        ok: false,
+        message: "認証またはDBに接続できません。時間をおいて再試行してください。",
+      },
+    };
   }
-  return { ok: true, authUserId: guard.user.id, db: guard.db };
 }
 
 async function getLinkedXUser(db: DB, xUserId: string, authUserId: string) {
@@ -377,6 +391,76 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
 
   revalidateXIdRequestPaths();
   return { ok: true, message: "X ID 申請を受け付けました。" };
+}
+
+/** 本人の pending 申請を取り消す（連携・統合・別名）。 */
+export async function cancelXIdLinkRequest(formData: FormData): Promise<XIdActionResult> {
+  const context = await getXIdWriteContext();
+  if (!context.ok) return context.result;
+  const { authUserId, db } = context;
+
+  const requestId = String(formData.get("request_id") ?? "").trim();
+  if (!requestId) return { ok: false, message: "申請 ID がありません。" };
+
+  const request = (
+    await db.select().from(xIdentityRequests).where(eq(xIdentityRequests.id, requestId)).limit(1)
+  )[0];
+  if (!request || request.requested_by_auth_user_id !== authUserId) {
+    return { ok: false, message: "申請が見つかりません。" };
+  }
+  if (request.status !== "pending") {
+    return { ok: false, message: "すでに処理済みの申請です。" };
+  }
+  if (
+    request.request_type !== "new_link" &&
+    request.request_type !== "existing_link" &&
+    request.request_type !== "alias" &&
+    request.request_type !== "merge"
+  ) {
+    return { ok: false, message: "この申請は取り下げできません。" };
+  }
+
+  const now = nowUnix();
+  const afterRequest = { ...request, status: "cancelled" as const, updated_at: now };
+  try {
+    await mutateWithAudit(db, {
+      mutationStatements: [
+        db
+          .update(xIdentityRequests)
+          .set({ status: "cancelled", updated_at: now })
+          .where(
+            and(
+              eq(xIdentityRequests.id, request.id),
+              eq(xIdentityRequests.status, "pending"),
+              eq(xIdentityRequests.requested_by_auth_user_id, authUserId),
+            )!,
+          ),
+      ],
+      expectedMutationChanges: [1],
+      audits: [
+        {
+          table_name: "x_identity_requests",
+          target_id: request.id,
+          operation: "UPDATE",
+          before: { ...request },
+          after: afterRequest,
+          actor_user_id: authUserId,
+          reason: "申請者本人がX ID申請を取り下げ",
+          context: "x-identity-request",
+          retention_class: "long_audit",
+        },
+      ],
+    });
+  } catch (error) {
+    console.error("[cancelXIdLinkRequest] mutation failed", error);
+    return {
+      ok: false,
+      message: "申請の取り下げに失敗しました。再読み込みしてお試しください。",
+    };
+  }
+
+  revalidateXIdRequestPaths();
+  return { ok: true, message: "申請を取り下げました。" };
 }
 
 export async function requestXIdMergeRevert(formData: FormData): Promise<XIdActionResult> {

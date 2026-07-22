@@ -2,7 +2,13 @@ import type { CanonicalLegacyPlan, LegacyImportStrategy } from "./normalize";
 
 const PREVIEW_VERSION = 3 as const;
 const PREVIEW_TTL_SECONDS = 15 * 60;
+const PREVIEW_MAX_LIFETIME_SECONDS = 6 * 60 * 60;
+export const LEGACY_IMPORT_PREVIEW_MAX_LIFETIME_SECONDS = PREVIEW_MAX_LIFETIME_SECONDS;
 const CLAIM_TTL_SECONDS = 10 * 60;
+
+function previewExpiresAt(createdAt: number, now: number): number {
+  return Math.min(createdAt + PREVIEW_MAX_LIFETIME_SECONDS, now + PREVIEW_TTL_SECONDS);
+}
 export const MAX_STORED_PLAN_BYTES = 24 * 1024 * 1024;
 export const LEGACY_IMPORT_PLAN_WARN_BYTES = Math.floor(MAX_STORED_PLAN_BYTES * 0.8);
 const TOKEN_PATTERN = /^[a-f0-9]{32}$/;
@@ -546,6 +552,32 @@ export async function claimLegacyImportPreview(
   let settled = false;
   let settledExpiresAt = claimed.expiresAt;
   const claimClock = () => options.now ?? nowSeconds();
+
+  function validateAdvanceProgress(
+    current: { object: R2ObjectBody; record: StoredPreview },
+    nextProgress: LegacyImportApplyProgress,
+  ): void {
+    if (!isValidApplyProgress(nextProgress)) {
+      throw new LegacyImportPreviewError("preview progress is invalid", "invalid_record");
+    }
+    const expectedPosition = nextPosition(current.record.plan, current.record.progress);
+    const validStep = !!expectedPosition &&
+      nextProgress.stage === expectedPosition.stage &&
+      nextProgress.index === expectedPosition.index;
+    const skipSnapshotValid =
+      JSON.stringify(nextProgress.skipExistingEventIds) ===
+        JSON.stringify(current.record.progress.skipExistingEventIds) &&
+      JSON.stringify(nextProgress.skipExistingVideoIds) ===
+        JSON.stringify(current.record.progress.skipExistingVideoIds);
+    if (
+      !validStep ||
+      !countTransitionValid(current.record.plan, current.record.progress, nextProgress) ||
+      !skipSnapshotValid ||
+      !progressWithinPlan(current.record.plan, nextProgress)
+    ) {
+      throw new LegacyImportPreviewError("preview progress must advance monotonically", "claim_conflict");
+    }
+  }
   async function currentClaim(): Promise<{ object: R2ObjectBody; record: StoredPreview } | null> {
     const current = await safeBucket.get(key);
     if (!current) return null;
@@ -569,30 +601,12 @@ export async function claimLegacyImportPreview(
       if (settled) {
         throw new LegacyImportPreviewError("preview claim is already settled", "claim_conflict");
       }
-      if (!isValidApplyProgress(nextProgress)) {
-        throw new LegacyImportPreviewError("preview progress is invalid", "invalid_record");
-      }
       const current = await currentClaim();
       if (!current) {
         throw new LegacyImportPreviewError("preview claim is no longer valid", "claim_conflict");
       }
-      const expectedPosition = nextPosition(current.record.plan, current.record.progress);
-      const validStep = !!expectedPosition &&
-        nextProgress.stage === expectedPosition.stage &&
-        nextProgress.index === expectedPosition.index;
-      const skipSnapshotValid =
-        JSON.stringify(nextProgress.skipExistingEventIds) ===
-          JSON.stringify(current.record.progress.skipExistingEventIds) &&
-        JSON.stringify(nextProgress.skipExistingVideoIds) ===
-          JSON.stringify(current.record.progress.skipExistingVideoIds);
-      if (
-        !validStep ||
-        !countTransitionValid(current.record.plan, current.record.progress, nextProgress) ||
-        !skipSnapshotValid ||
-        !progressWithinPlan(current.record.plan, nextProgress)
-      ) {
-        throw new LegacyImportPreviewError("preview progress must advance monotonically", "claim_conflict");
-      }
+      validateAdvanceProgress(current, nextProgress);
+      const now = claimClock();
       const next: StoredPreview = nextProgress.stage === "complete"
         ? {
             ...current.record,
@@ -600,11 +614,8 @@ export async function claimLegacyImportPreview(
             progress: nextProgress,
             claimId: undefined,
             claimExpiresAt: undefined,
-            completedAt: claimClock(),
-            expiresAt: Math.min(
-              current.record.createdAt + 2 * 60 * 60,
-              claimClock() + PREVIEW_TTL_SECONDS,
-            ),
+            completedAt: now,
+            expiresAt: previewExpiresAt(current.record.createdAt, now),
           }
         : {
             ...current.record,
@@ -612,10 +623,7 @@ export async function claimLegacyImportPreview(
             progress: nextProgress,
             claimId: undefined,
             claimExpiresAt: undefined,
-            expiresAt: Math.min(
-              current.record.createdAt + 2 * 60 * 60,
-              claimClock() + PREVIEW_TTL_SECONDS,
-            ),
+            expiresAt: previewExpiresAt(current.record.createdAt, now),
           };
       const advanced = await safeBucket.put(key, JSON.stringify(next), putOptions(next, current.object.etag));
       if (!advanced) {
@@ -644,7 +652,7 @@ export async function claimLegacyImportPreview(
         claimId: undefined,
         claimExpiresAt: undefined,
         completedAt: now,
-        expiresAt: Math.min(current.record.createdAt + 2 * 60 * 60, now + PREVIEW_TTL_SECONDS),
+        expiresAt: previewExpiresAt(current.record.createdAt, now),
       };
       const stored = await safeBucket.put(
         key,

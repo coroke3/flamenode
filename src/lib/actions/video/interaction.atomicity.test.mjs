@@ -19,6 +19,10 @@ test("interaction保存はinteraction・like集計・queue・監査を単一batc
 
 test("interactionとvideos更新は読取snapshotをCAS条件に含める", () => {
   assert.match(source, /eq\(videoInteractions\.created_at, existing!\.created_at\)/);
+  assert.match(source, /target\.visibility_status !== "public"/);
+  assert.match(source, /interaction_target\.visibility_status = 'public'/);
+  assert.match(source, /interaction_target\.updated_at = \$\{target\.updated_at\}/);
+  assert.match(source, /eq\(videos\.visibility_status, "public"\)/);
   assert.match(source, /eq\(videos\.app_like_count, target\.app_like_count\)/);
   assert.match(source, /eq\(videos\.updated_at, target\.updated_at\)/);
   assert.match(source, /expectedMutationChanges: expectedChanges/);

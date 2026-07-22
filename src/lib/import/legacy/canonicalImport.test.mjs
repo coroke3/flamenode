@@ -10,6 +10,7 @@ import {
   createLegacyImportPreview,
   LegacyImportPreviewError,
 } from "./previewStore.ts";
+import { legacyImportRebuildQueueId } from "./rebuildQueueCore.ts";
 
 const eventJson = JSON.stringify([
   {
@@ -667,12 +668,50 @@ test("カスタム質問・回答applyは手動回答保護とD1予算を維持�
 
   const budget = planD1AuditMutationBudget({
     mutationStatementCount: 15,
-    mutationAssertionCount: 13,
+    mutationAssertionCount: 14,
     auditEntryCount: 5,
     distinctActorCount: 1,
   });
-  assert.equal(budget.totalQueryCount, 44);
+  assert.equal(budget.totalQueryCount, 45);
   assert.equal(budget.withinLimit, true);
+});
+
+test("旧形式applyは公開R2 JSONの全関連targetを原子的に再生成予約する", () => {
+  const root = path.resolve(import.meta.dirname, "../../../..");
+  const apply = fs.readFileSync(path.join(root, "src/lib/import/legacy/apply.ts"), "utf8");
+  for (const targetType of [
+    "event",
+    "events_index",
+    "video",
+    "top",
+    "list_recent",
+    "list_popular",
+    "search_index",
+    "user",
+  ]) {
+    assert.match(apply, new RegExp(`targetType: "${targetType}"`), targetType);
+  }
+  assert.match(apply, /legacyRebuildQueueMutation/);
+  assert.match(apply, /ON CONFLICT\(target_type, target_id\) WHERE status IN \('pending', 'processing'\)/);
+  assert.match(apply, /updated_at = MAX\(static_rebuild_queue\.updated_at \+ 1, excluded\.updated_at\)/);
+  assert.match(apply, /rebuildQueue\.statement/);
+  assert.match(apply, /rebuildQueue\.expectedChanges/);
+  assert.match(apply, /stepTargetId: identity\.targetId/);
+  assert.match(apply, /legacyImportRebuildQueueId\(options\.stepTargetId, index\)/);
+  assert.doesNotMatch(apply, /legacy_import_video_\$\{options\.runDigest/);
+
+  const plan = "a".repeat(24);
+  const hash = "b".repeat(24);
+  const firstStepIds = new Set([
+    legacyImportRebuildQueueId(`${plan}:${hash}:videos:0`, 0),
+    legacyImportRebuildQueueId(`${plan}:${hash}:videos:0`, 1),
+  ]);
+  const secondStepIds = [
+    legacyImportRebuildQueueId(`${plan}:${hash}:videos:1`, 0),
+    legacyImportRebuildQueueId(`${plan}:${hash}:videos:1`, 1),
+  ];
+  assert.equal(firstStepIds.size, 2);
+  assert.equal(secondStepIds.every((id) => !firstStepIds.has(id)), true);
 });
 
 test("ランタイム側に旧テーブル・dual-writeを導入しない", () => {
@@ -704,23 +743,51 @@ test("applyクライアントはretryableと423/503で同じpreviewを自動再�
   assert.match(client, /json\.retryable === true/);
   assert.match(client, /response\.status === 423/);
   assert.match(client, /response\.status === 503/);
-  assert.match(client, /APPLY_TRANSIENT_MAX_RETRIES/);
+  assert.match(client, /APPLY_TRANSIENT_MAX_RETRIES = 40/);
+  assert.match(client, /APPLY_MAX_REQUESTS = 20_000/);
   assert.match(client, /applyTransientBackoffMs/);
+  assert.match(client, /10_000/);
+  assert.match(client, /flamenode:legacy-import:credential/);
+  assert.match(client, /sessionStorage/);
   assert.match(client, /自動再試行中/);
   assert.match(client, /サーバーが一時的に応答できませんでした/);
   assert.match(client, /mode === "preview"[\s\S]*?isApplyTransientFailure/);
   assert.match(client, /json\.requires_repreview[\s\S]*?setCredential\(null\)/);
   assert.match(client, /transientFailures = 0/);
+  assert.match(client, /await sleep\(75\)/);
+  assert.match(client, /未完了のプレビューがあります/);
+});
+
+test("apply routeはCloudflare上限のため1リクエスト1原子ステップに限定する", () => {
+  const root = path.resolve(import.meta.dirname, "../../../..");
+  const route = fs.readFileSync(path.join(root, "app/api/admin/import/legacy/route.ts"), "utf8");
+  const previewStore = fs.readFileSync(path.join(root, "src/lib/import/legacy/previewStore.ts"), "utf8");
+  assert.match(route, /1 HTTP リクエストでは原子ステップを1件だけ確定する/);
+  assert.match(route, /const step = await applyLegacyImportPlanStep/);
+  assert.match(route, /const expiresAt = await claimed\.advance\(step\.progress\)/);
+  assert.match(route, /continuation_required: !step\.complete/);
+  assert.doesNotMatch(route, /APPLY_MAX_STEPS_PER_REQUEST|claimed\.checkpoint|while \(/);
+  assert.doesNotMatch(previewStore, /checkpoint:/);
+  assert.match(previewStore, /PREVIEW_MAX_LIFETIME_SECONDS = 6 \* 60 \* 60/);
+  assert.match(previewStore, /LEGACY_IMPORT_PREVIEW_MAX_LIFETIME_SECONDS/);
+  assert.match(previewStore, /previewExpiresAt/);
+  assert.doesNotMatch(previewStore, /createdAt \+ 2 \* 60 \* 60/);
 });
 
 test("previewErrorResponseはalready_claimedとbucket_unavailableをretryableにする", () => {
   const root = path.resolve(import.meta.dirname, "../../../..");
   const route = fs.readFileSync(path.join(root, "app/api/admin/import/legacy/route.ts"), "utf8");
   assert.match(route, /function previewErrorResponse/);
+  assert.match(route, /CloudflareまたはR2が一時的に応答できませんでした/);
+  assert.match(route, /\{ retryable, requires_repreview: !retryable \}/);
   assert.match(route, /cause\.code === "already_claimed" \? 423/);
   assert.match(route, /cause\.code === "bucket_unavailable" \? 503/);
-  assert.match(route, /retryable: !requiresRepreview && \(cause\.code === "already_claimed" \|\| cause\.code === "bucket_unavailable"\)/);
-  assert.match(route, /retryable: !requiresRepreview/);
+  assert.match(route, /cause\.code === "claim_conflict"/);
+  assert.match(route, /function isTransientApplyFailure/);
+  assert.match(route, /isTransientDbError\(cause\)/);
+  assert.match(route, /const requiresRepreview = !retryable/);
+  assert.match(route, /retryable \? 503 : 409/);
+  assert.match(route, /retryable,\s*requires_repreview: requiresRepreview/);
 });
 
 test("X ID統合は承認申請だけを入口にし、直接Actionを残さない", () => {

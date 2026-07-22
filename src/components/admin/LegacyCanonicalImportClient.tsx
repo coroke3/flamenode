@@ -53,10 +53,59 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const APPLY_TRANSIENT_MAX_RETRIES = 6;
+const APPLY_TRANSIENT_MAX_RETRIES = 40;
+const APPLY_MAX_REQUESTS = 20_000;
+const LEGACY_IMPORT_CREDENTIAL_STORAGE_KEY = "flamenode:legacy-import:credential";
 
 function applyTransientBackoffMs(attempt: number): number {
   return Math.min(500 * 2 ** (attempt - 1), 10_000);
+}
+
+type StoredPreviewCredential = {
+  token: string;
+  planHash: string;
+  expiresAt: number;
+};
+
+function loadStoredCredential(): PreviewCredential | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(LEGACY_IMPORT_CREDENTIAL_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<StoredPreviewCredential>;
+    if (
+      typeof parsed.token !== "string" ||
+      typeof parsed.planHash !== "string" ||
+      typeof parsed.expiresAt !== "number"
+    ) {
+      return null;
+    }
+    if (parsed.expiresAt <= Math.floor(Date.now() / 1000)) {
+      window.sessionStorage.removeItem(LEGACY_IMPORT_CREDENTIAL_STORAGE_KEY);
+      return null;
+    }
+    return { token: parsed.token, planHash: parsed.planHash, expiresAt: parsed.expiresAt };
+  } catch {
+    return null;
+  }
+}
+
+function persistCredential(credential: PreviewCredential | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (!credential) {
+      window.sessionStorage.removeItem(LEGACY_IMPORT_CREDENTIAL_STORAGE_KEY);
+      return;
+    }
+    const stored: StoredPreviewCredential = {
+      token: credential.token,
+      planHash: credential.planHash,
+      expiresAt: credential.expiresAt,
+    };
+    window.sessionStorage.setItem(LEGACY_IMPORT_CREDENTIAL_STORAGE_KEY, JSON.stringify(stored));
+  } catch {
+    // storageが無効でも、開いている画面内ではReact stateで継続できる。
+  }
 }
 
 function isApplyTransientFailure(response: Response, json: ApiResponse): boolean {
@@ -114,11 +163,28 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
   const [selectedFiles, setSelectedFiles] = React.useState<File[]>([]);
   const [result, setResult] = React.useState<ApiResponse | null>(null);
   const [pending, setPending] = React.useState<"preview" | "apply" | null>(null);
-  const [credential, setCredential] = React.useState<PreviewCredential | null>(null);
+  const [credential, setCredentialState] = React.useState<PreviewCredential | null>(null);
+  const [credentialRestored, setCredentialRestored] = React.useState(false);
   const [fieldCandidates, setFieldCandidates] = React.useState<VideoCustomFieldCandidate[]>([]);
   const [fieldDecisionDrafts, setFieldDecisionDrafts] = React.useState<Map<string, VideoCustomFieldDecisionDraft>>(
     () => new Map(),
   );
+  const setCredential = React.useCallback((value: PreviewCredential | null | ((current: PreviewCredential | null) => PreviewCredential | null)) => {
+    setCredentialState((current) => {
+      const next = typeof value === "function" ? value(current) : value;
+      persistCredential(next);
+      if (!next) setCredentialRestored(false);
+      return next;
+    });
+  }, []);
+
+  React.useEffect(() => {
+    const restored = loadStoredCredential();
+    if (restored) {
+      setCredentialState(restored);
+      setCredentialRestored(true);
+    }
+  }, []);
 
   const fieldDecisions = React.useMemo<VideoCustomFieldDecision[]>(() => {
     const decisions: VideoCustomFieldDecision[] = [];
@@ -304,7 +370,7 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
       } else if (credential) {
         let stopped = false;
         let transientFailures = 0;
-        for (let step = 0; step < 10000; step += 1) {
+        for (let requestCount = 0; requestCount < APPLY_MAX_REQUESTS; requestCount += 1) {
           if (formRevisionRef.current !== submittedFormRevision) {
             setResult({ ok: false, message: "入力が変更されたため、プレビューをやり直してください。" });
             stopped = true;
@@ -357,6 +423,7 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
               stopped = true;
               break;
             }
+            await sleep(75);
           } catch {
             if (transientFailures < APPLY_TRANSIENT_MAX_RETRIES) {
               transientFailures += 1;
@@ -539,6 +606,11 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
               ? `planはR2へ固定済みです。有効期限: ${expiresLabel}`
               : "ファイルまたは設定を変更すると再プレビューが必要です。"}
           </span>
+          {credentialRestored && credential ? (
+            <span className="fn-muted fn-text-sm">
+              未完了のプレビューがあります。書き込むで再開できます。
+            </span>
+          ) : null}
         </div>
       </form>
 

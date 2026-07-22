@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getEnv } from "@/lib/cloudflare";
 import { CurrentUserUnavailableError } from "@/lib/auth/currentUser";
+import { isTransientDbError } from "@/lib/db/transientDbErrorCore";
 import { requireAdminWrite, type WriteGuardResult } from "@/lib/auth/writeGuard";
 import { requireSameOriginWrite } from "@/lib/auth/writeOriginGuard";
 import { parseLegacyImportText, type LegacyParsedFile } from "@/lib/import/legacy/parse";
@@ -61,7 +62,14 @@ function stringField(formData: FormData, key: string): string {
 
 function previewErrorResponse(cause: unknown): NextResponse {
   if (!(cause instanceof LegacyImportPreviewError)) {
-    return error("preview planを確認できませんでした。再度プレビューしてください。", 409);
+    const retryable = isTransientDbError(cause);
+    return error(
+      retryable
+        ? "CloudflareまたはR2が一時的に応答できませんでした。"
+        : "preview planを確認できませんでした。再度プレビューしてください。",
+      retryable ? 503 : 409,
+      { retryable, requires_repreview: !retryable },
+    );
   }
   const status = cause.code === "bucket_unavailable" ? 503 : cause.code === "already_claimed" ? 423 : 409;
   const requiresRepreview = [
@@ -75,8 +83,21 @@ function previewErrorResponse(cause: unknown): NextResponse {
   return error(cause.message, status, {
     preview_error_code: cause.code,
     requires_repreview: requiresRepreview,
-    retryable: !requiresRepreview && (cause.code === "already_claimed" || cause.code === "bucket_unavailable"),
+    retryable: !requiresRepreview && (
+      cause.code === "already_claimed" ||
+      cause.code === "bucket_unavailable" ||
+      cause.code === "claim_conflict"
+    ),
   });
+}
+
+function isTransientApplyFailure(cause: unknown): boolean {
+  return isTransientDbError(cause) || (
+    cause instanceof LegacyImportPreviewError &&
+    (cause.code === "already_claimed" ||
+      cause.code === "bucket_unavailable" ||
+      cause.code === "claim_conflict")
+  );
 }
 
 function videoFieldDecisions(formData: FormData): LegacyVideoFieldDecision[] {
@@ -226,6 +247,9 @@ export async function POST(request: Request): Promise<NextResponse> {
         });
       }
 
+      // 1 HTTP リクエストでは原子ステップを1件だけ確定する。
+      // 各ステップは複数のD1呼び出しとR2 CASを使うため、ここでループすると
+      // Cloudflare Workersのsubrequest/CPU上限を入力件数に応じて超過しうる。
       const step = await applyLegacyImportPlanStep(db, claimed.plan, {
         actorAuthUserId: user.id,
         strategy: claimed.strategy,
@@ -234,6 +258,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         progress: claimed.progress,
       });
       const expiresAt = await claimed.advance(step.progress);
+
       return NextResponse.json({
         ok: true,
         mode,
@@ -249,13 +274,18 @@ export async function POST(request: Request): Promise<NextResponse> {
       });
     } catch (cause) {
       await claimed.release().catch(() => undefined);
-      const baseMessage = cause instanceof Error ? cause.message : "インポートを確定できませんでした。";
-      const requiresRepreview = baseMessage.includes("再プレビューが必要");
+      const retryable = isTransientApplyFailure(cause);
+      const requiresRepreview = !retryable;
+      const baseMessage = retryable
+        ? "CloudflareまたはD1/R2が一時的に応答できませんでした。"
+        : cause instanceof Error
+          ? cause.message
+          : "インポートを確定できませんでした。";
       return error(
         `${baseMessage} ${requiresRepreview ? "入力とDB状態を再確認してください。" : "preview planは保持されています。同じ内容で再試行できます。"}`,
-        409,
+        retryable ? 503 : 409,
         {
-        retryable: !requiresRepreview,
+        retryable,
         requires_repreview: requiresRepreview,
         plan_hash: claimed.planHash,
         attempt: claimed.attempt,

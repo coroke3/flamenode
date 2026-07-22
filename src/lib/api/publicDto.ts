@@ -59,6 +59,38 @@ export interface PublicEventDto {
   max_slots_per_video: number;
 }
 
+/** /api/software/suggestions が返してよい列のキー。 */
+export const PUBLIC_SOFTWARE_SUGGESTION_KEYS = [
+  "id",
+  "name",
+  "category",
+  "usage_count",
+  "is_verified",
+] as const;
+
+export interface PublicSoftwareSuggestionDto {
+  id: string;
+  name: string;
+  category: string | null;
+  usage_count: number;
+  is_verified: number;
+}
+
+export interface PublicSoftwareSuggestionSource
+  extends PublicSoftwareSuggestionDto {
+  is_active: number;
+}
+
+/**
+ * DB条件の退行時にもinactiveな辞書項目を公開しないためのDTO境界。
+ */
+export function toPublicSoftwareSuggestionDto(
+  source: PublicSoftwareSuggestionSource,
+): PublicSoftwareSuggestionDto | null {
+  if (source.is_active !== 1) return null;
+  return pickKeys(source, PUBLIC_SOFTWARE_SUGGESTION_KEYS);
+}
+
 export const FORBIDDEN_PUBLIC_KEYS: ReadonlySet<string> = new Set([
   "submitted_by_user_id",
   "auth_user_id",
@@ -113,6 +145,7 @@ export const FORBIDDEN_PUBLIC_KEYS: ReadonlySet<string> = new Set([
 
 export const MAX_PUBLIC_LIST_LIMIT = 48;
 export const MAX_PUBLIC_EVENT_LIMIT = 60;
+export const MAX_PUBLIC_SOFTWARE_SUGGESTION_LIMIT = 50;
 
 export function pickKeys<T extends object, K extends keyof T>(
   source: T,

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  evaluateActiveXWriteAccess,
   evaluateWriteIdentity,
   isWriteFeatureKey,
 } from "./writeGuardCore.ts";
@@ -21,6 +22,47 @@ test("admin write identity never bypasses BAN or terms checks", () => {
 test("admin write rejects non-admin and accepts a valid admin", () => {
   assert.equal(evaluateWriteIdentity({ ...validAdmin, role: "moderator" }, "admin"), "forbidden");
   assert.equal(evaluateWriteIdentity(validAdmin, "admin"), null);
+});
+
+test("approved Active X は当該 Auth user の承認済みリンクだけ許可する", () => {
+  const base = {
+    requireActiveXId: false,
+    requireApprovedActiveXId: true,
+    approvedXIds: ["owned_x"],
+  };
+
+  assert.equal(
+    evaluateActiveXWriteAccess({
+      ...base,
+      activeXId: null,
+      approvalStatus: null,
+    }),
+    "active_x_required",
+  );
+  assert.equal(
+    evaluateActiveXWriteAccess({
+      ...base,
+      activeXId: "owned_x",
+      approvalStatus: "rejected",
+    }),
+    "active_x_rejected",
+  );
+  assert.equal(
+    evaluateActiveXWriteAccess({
+      ...base,
+      activeXId: "other_x",
+      approvalStatus: "approved",
+    }),
+    "active_x_not_approved",
+  );
+  assert.equal(
+    evaluateActiveXWriteAccess({
+      ...base,
+      activeXId: "owned_x",
+      approvalStatus: "approved",
+    }),
+    null,
+  );
 });
 
 test("spreadsheet and legacy import keep separate CostGuard feature keys", () => {

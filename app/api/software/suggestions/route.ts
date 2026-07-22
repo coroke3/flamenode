@@ -2,25 +2,42 @@
 import { NextResponse } from "next/server";
 import { withDatabase } from "@/lib/cloudflare";
 import { softwareCatalog, softwareAliases } from "@/lib/db/schema";
-import { eq, desc, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import {
+  MAX_PUBLIC_SOFTWARE_SUGGESTION_LIMIT,
+  type PublicSoftwareSuggestionDto,
+  assertNoForbiddenKeys,
+  toPublicSoftwareSuggestionDto,
+} from "@/lib/api/publicDto";
+import { parseBoundedPositiveInt } from "@/lib/api/publicApi";
+
+const DEFAULT_SOFTWARE_SUGGESTION_LIMIT = 20;
+
+const softwareSuggestionSelection = {
+  id: softwareCatalog.id,
+  name: softwareCatalog.name,
+  category: softwareCatalog.category,
+  usage_count: softwareCatalog.usage_count,
+  is_verified: softwareCatalog.is_verified,
+  is_active: softwareCatalog.is_active,
+};
 
 export async function GET(req: Request): Promise<NextResponse> {
   const url = new URL(req.url);
   const q = url.searchParams.get("q")?.trim() ?? "";
-  const limit = Math.min(Number(url.searchParams.get("limit") ?? "20"), 50);
+  const limit = parseBoundedPositiveInt(
+    url.searchParams.get("limit"),
+    DEFAULT_SOFTWARE_SUGGESTION_LIMIT,
+    MAX_PUBLIC_SOFTWARE_SUGGESTION_LIMIT,
+  );
+  const activeSoftware = eq(softwareCatalog.is_active, 1);
 
   const results = await withDatabase(async (db) => {
     if (!q) {
       return db
-        .select({
-          id: softwareCatalog.id,
-          name: softwareCatalog.name,
-          category: softwareCatalog.category,
-          usage_count: softwareCatalog.usage_count,
-          is_verified: softwareCatalog.is_verified,
-        })
+        .select(softwareSuggestionSelection)
         .from(softwareCatalog)
-        .where(eq(softwareCatalog.is_active, 1))
+        .where(activeSoftware)
         .orderBy(desc(softwareCatalog.is_verified), desc(softwareCatalog.usage_count), softwareCatalog.name)
         .limit(limit);
     }
@@ -38,33 +55,21 @@ export async function GET(req: Request): Promise<NextResponse> {
     if (byAlias.length > 0) {
       const ids = byAlias.map((r) => r.software_id);
       return db
-        .select({
-          id: softwareCatalog.id,
-          name: softwareCatalog.name,
-          category: softwareCatalog.category,
-          usage_count: softwareCatalog.usage_count,
-          is_verified: softwareCatalog.is_verified,
-        })
+        .select(softwareSuggestionSelection)
         .from(softwareCatalog)
-        .where(sql`${softwareCatalog.id} IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})`)
+        .where(and(activeSoftware, inArray(softwareCatalog.id, ids)))
         .orderBy(desc(softwareCatalog.is_verified), desc(softwareCatalog.usage_count))
         .limit(limit);
     }
 
     return db
-      .select({
-        id: softwareCatalog.id,
-        name: softwareCatalog.name,
-        category: softwareCatalog.category,
-        usage_count: softwareCatalog.usage_count,
-        is_verified: softwareCatalog.is_verified,
-      })
+      .select(softwareSuggestionSelection)
       .from(softwareCatalog)
       .where(
-        sql`${softwareCatalog.is_active} = 1 AND (
+        and(activeSoftware, sql`(
           ${softwareCatalog.name} LIKE ${"%" + q + "%"} OR
           ${softwareCatalog.normalized_name} LIKE ${"%" + normalized + "%"}
-        )`,
+        )`),
       )
       .orderBy(
         sql`CASE WHEN ${softwareCatalog.normalized_name} LIKE ${normalized + "%"} THEN 0 WHEN ${softwareCatalog.normalized_name} LIKE ${"%" + normalized} THEN 1 ELSE 2 END`,
@@ -75,5 +80,9 @@ export async function GET(req: Request): Promise<NextResponse> {
       .limit(limit);
   });
 
-  return NextResponse.json(results ?? []);
+  const payload: PublicSoftwareSuggestionDto[] = (results ?? [])
+    .map(toPublicSoftwareSuggestionDto)
+    .filter((row): row is PublicSoftwareSuggestionDto => row !== null);
+  assertNoForbiddenKeys(payload);
+  return NextResponse.json(payload);
 }

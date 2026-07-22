@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { rejectBareWorkersCiWranglerDeploy } from "./cloudflare-production.mjs";
 

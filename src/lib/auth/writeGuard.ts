@@ -6,6 +6,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { systemSettings, xUsers } from "@/lib/db/schema";
 import { getApprovedXIds } from "./ownership";
 import {
+  evaluateActiveXWriteAccess,
   evaluateCostGuardCore,
   evaluateWriteIdentity,
   type WriteFeatureKey,
@@ -151,34 +152,37 @@ export async function writeGuard(
     return deny("cost_guard_blocked");
   }
 
-  const needActive =
-    options.requireActiveXId === true ||
+  const requireActiveXId = options.requireActiveXId === true;
+  const requireApprovedActiveXId =
     options.requireApprovedActiveXId === true;
-
+  const needActive = requireActiveXId || requireApprovedActiveXId;
   const activeXId = user.active_x_user_id;
-
-  if (needActive) {
-    if (!activeXId) return deny("active_x_required");
-    const xRow = (
-      await db
-        .select({ approval_status: xUsers.approval_status })
-        .from(xUsers)
-        .where(eq(xUsers.id, activeXId))
-        .limit(1)
-    )[0];
-    if (!xRow) return deny("active_x_required");
-    if (xRow.approval_status === "rejected") {
-      return deny("active_x_rejected");
+  let approvedXIds: string[];
+  let activeXApprovalStatus: string | null = null;
+  try {
+    approvedXIds = await getApprovedXIds(db, user.id);
+    if (needActive && activeXId) {
+      const xRow = (
+        await db
+          .select({ approval_status: xUsers.approval_status })
+          .from(xUsers)
+          .where(eq(xUsers.id, activeXId))
+          .limit(1)
+      )[0];
+      activeXApprovalStatus = xRow?.approval_status ?? null;
     }
-    if (
-      options.requireApprovedActiveXId === true &&
-      xRow.approval_status !== "approved"
-    ) {
-      return deny("active_x_not_approved");
-    }
+  } catch {
+    return deny("db_unavailable");
   }
 
-  const approvedXIds = await getApprovedXIds(db, user.id);
+  const activeXDeny = evaluateActiveXWriteAccess({
+    requireActiveXId,
+    requireApprovedActiveXId,
+    activeXId,
+    approvalStatus: activeXApprovalStatus,
+    approvedXIds,
+  });
+  if (activeXDeny) return deny(activeXDeny);
 
   return { ok: true, db, user, activeXId, approvedXIds };
 }

@@ -46,6 +46,7 @@ import {
 import {
   canFallbackToDatabase,
   isMaintenanceStrategy,
+  shouldUseStaticCollection,
 } from "./loaderPolicy";
 
 async function getOperationMode(db: DB): Promise<OperationMode> {
@@ -251,9 +252,14 @@ export async function loadStaticRecentVideosPage(params: {
     targetId: "global",
     reason: "public_list_miss",
   });
-  const page = result.data
+  const normalizedPage = result.data
     ? normalizeStaticRecentVideoPage(result.data, params.page, params.pageSize)
     : null;
+  const page =
+    normalizedPage &&
+    shouldUseStaticCollection(result.strategy, normalizedPage.videos.length)
+      ? normalizedPage
+      : null;
   return { ...result, data: page, page };
 }
 

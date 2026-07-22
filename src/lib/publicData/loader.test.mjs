@@ -9,6 +9,7 @@ import test from "node:test";
 import {
   canFallbackToDatabase,
   isMaintenanceStrategy,
+  shouldUseStaticCollection,
 } from "./loaderPolicy.ts";
 
 test("canFallbackToDatabase: overlay のみ DB fallback 可", () => {
@@ -20,4 +21,17 @@ test("canFallbackToDatabase: overlay のみ DB fallback 可", () => {
 test("isMaintenanceStrategy", () => {
   assert.equal(isMaintenanceStrategy("maintenance"), true);
   assert.equal(isMaintenanceStrategy("static_json_only"), false);
+});
+
+test("overlay treats an empty static collection as a DB fallback miss", () => {
+  assert.equal(
+    shouldUseStaticCollection("static_json_with_live_overlay", 0),
+    false,
+  );
+  assert.equal(
+    shouldUseStaticCollection("static_json_with_live_overlay", 1),
+    true,
+  );
+  assert.equal(shouldUseStaticCollection("static_json_only", 0), true);
+  assert.equal(shouldUseStaticCollection("maintenance", 0), true);
 });

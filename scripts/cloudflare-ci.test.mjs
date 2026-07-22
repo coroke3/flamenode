@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -40,7 +41,6 @@ import {
   writeBuildManifest,
 } from "./check-open-next-output.mjs";
 import { runSmoke, smokeEnvironment } from "./smoke-cloudflare.mjs";
-import { runWorkersCiBuild } from "./workers-ci-build.mjs";
 import {
   isWorkersCi,
   rejectBareWorkersCiWranglerDeploy,
@@ -114,38 +114,16 @@ function writeFixtureTemplates(repoRoot) {
   }
 }
 
-test("package.json build routes through workers-ci-build", () => {
+test("package.json build invokes Next.js directly and cannot re-enter the Cloudflare build", () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
-  assert.match(pkg.scripts.build, /workers-ci-build\.mjs/);
+  assert.match(pkg.scripts.build, /next\s+build/);
+  assert.doesNotMatch(pkg.scripts.build, /cf:|cloudflare|workers-ci/i);
 });
 
-test("workers-ci-build uses cf:cloud-build when WORKERS_CI is set", () => {
-  const calls = [];
-  const mode = runWorkersCiBuild({
-    env: productionEnv(),
-    repoRoot: root,
-    run: (request) => calls.push(request),
-    npmInvocation: { executable: process.execPath, argsPrefix: ["npm-cli.js"] },
-  });
-  assert.equal(mode, "workers-ci");
-  assert.deepEqual(calls.map((call) => call.args), [
-    ["npm-cli.js", "ci", "--no-audit", "--no-fund"],
-    ["npm-cli.js", "run", "cf:cloud-build"],
-  ]);
-});
-
-test("workers-ci-build uses next build when WORKERS_CI is unset", () => {
-  const calls = [];
-  const mode = runWorkersCiBuild({
-    env: {},
-    repoRoot: root,
-    run: (request) => calls.push(request),
-    exists: () => true,
-  });
-  assert.equal(mode, "next");
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].executable, process.execPath);
-  assert.match(calls[0].args.join(" "), /next.*build/);
+test("OpenNext invokes Next.js directly instead of the package build script", () => {
+  const config = fs.readFileSync(path.join(root, "open-next.config.ts"), "utf8");
+  assert.match(config, /buildCommand:\s*["']node node_modules\/next\/dist\/bin\/next build["']/);
+  assert.doesNotMatch(config, /buildCommand:\s*["'](?:npm|pnpm|yarn).*build/);
 });
 
 test("bare wrangler deploy of tracked template is blocked in Workers CI", () => {
@@ -155,6 +133,23 @@ test("bare wrangler deploy of tracked template is blocked in Workers CI", () => 
     /cf:deploy-production/,
   );
   assert.doesNotThrow(() => rejectBareWorkersCiWranglerDeploy({}));
+});
+
+test("tracked Wrangler build guard loads locally and fails closed in Workers CI", () => {
+  const guard = path.join(root, "scripts", "workers-ci-wrangler-guard.mjs");
+  const local = spawnSync(process.execPath, [guard], {
+    env: { ...process.env, WORKERS_CI: "" },
+    encoding: "utf8",
+  });
+  assert.equal(local.status, 0, local.stderr);
+
+  const workersCi = spawnSync(process.execPath, [guard], {
+    env: { ...process.env, WORKERS_CI: "1" },
+    encoding: "utf8",
+  });
+  assert.equal(workersCi.status, 1);
+  assert.match(workersCi.stderr, /Bare wrangler deploy.*forbidden/);
+  assert.doesNotMatch(workersCi.stderr, /ReferenceError/);
 });
 
 test("generated production configs omit tracked wrangler build guard", () =>
