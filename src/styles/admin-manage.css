@@ -834,13 +834,47 @@
 }
 
 [data-admin-shell] {
-  --admin-bg: #0a0b0d;
-  --admin-surface: #12141a;
-  --admin-elevated: #1a1d26;
-  --admin-border: rgba(244, 246, 238, 0.1);
-  --admin-accent: #9ca3af;
-  --admin-danger: #f87171;
-  --admin-danger-soft: rgba(248, 113, 113, 0.14);
+  --admin-bg: var(--bg-base);
+  --admin-surface: var(--bg-surface);
+  --admin-elevated: var(--bg-elevated);
+  --admin-border: var(--border-subtle);
+  --admin-accent: var(--text-secondary);
+  --admin-danger: var(--accent-danger);
+  --admin-danger-soft: var(--accent-danger-soft);
+}
+
+.manage-slot-quicklink {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 14px 0 18px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 38%, var(--border-subtle));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent-primary-soft) 42%, var(--bg-surface));
+}
+
+.manage-slot-quicklink strong {
+  display: block;
+  font-size: 14px;
+}
+
+.manage-slot-quicklink p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .manage-slot-quicklink {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .manage-slot-quicklink .fn-btn {
+    width: 100%;
+  }
 }
 
 [data-admin-shell] .admin-shell {
@@ -1008,7 +1042,9 @@
   align-self: start;
   padding: 14px 12px 20px;
   border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
   background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
 }
 
 [data-manage-shell] .admin-sidebar .console-sidebar-warn,
@@ -1109,7 +1145,9 @@
 [data-admin-shell] .fn-console-head-main,
 [data-manage-shell] .fn-console-head-main {
   min-width: 0;
-  flex: 1 1 280px;
+  /* 操作ボタンがないページでも見出しが不要な固定高にならないようにする。 */
+  flex: 1 1 auto;
+  text-align: center;
 }
 
 [data-admin-shell] .fn-console-back,
@@ -1154,6 +1192,7 @@
   gap: 8px;
   align-items: center;
   margin-top: 10px;
+  justify-content: center;
 }
 
 [data-admin-shell] .fn-console-head-actions .fn-btn,
@@ -1578,6 +1617,7 @@
   );
   border: 1px solid var(--border-subtle);
   border-left: 4px solid var(--manage-event-accent, var(--manage-accent-fallback));
+  box-shadow: var(--shadow-sm);
 }
 
 @media (max-width: 560px) {
@@ -1634,16 +1674,77 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   border-left: 3px solid var(--manage-event-accent, var(--manage-accent-fallback));
+  box-shadow: var(--shadow-sm);
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
   align-items: center;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+[data-manage-shell] .manage-event-card:hover {
+  border-color: color-mix(
+    in srgb,
+    var(--manage-event-accent, var(--manage-accent-fallback)) 48%,
+    var(--border-subtle)
+  );
+  box-shadow: var(--shadow-1);
 }
 
 [data-manage-shell] .manage-actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* 承認キュー: 重要情報を先に読めるようにし、狭い画面ではカード状に積む */
+.approval-queue-table { border-collapse: separate; border-spacing: 0 8px; }
+.approval-queue-table tbody tr { background: var(--bg-surface); box-shadow: var(--shadow-sm); }
+.approval-queue-table tbody td { vertical-align: top; padding-top: 14px; padding-bottom: 14px; }
+.approval-queue-table tbody td:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.approval-queue-table tbody td:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.approval-queue-table thead th:last-child { min-width: 150px; }
+.approval-queue-table .fn-btn { min-height: 38px; }
+@media (max-width: 760px) {
+  .admin-video-review-meta-grid,
+  .admin-audit-diff-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-permission-result-grid,
+  .manage-youtube-status-grid {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .admin-permission-result-grid dd,
+  .manage-youtube-status-grid dd {
+    margin-bottom: 6px;
+    overflow-wrap: anywhere;
+  }
+
+  .approval-queue-table { min-width: 0; border-spacing: 0 12px; }
+  .approval-queue-table thead { display: none; }
+  .approval-queue-table tbody, .approval-queue-table tr, .approval-queue-table td { display: block; width: 100%; }
+  .approval-queue-table tbody tr { padding: 14px; }
+  .approval-queue-table tbody td { border: 0; border-radius: 0; padding: 6px 0; }
+  .approval-queue-table tbody td:first-child { padding-top: 0; }
+  .approval-queue-table tbody td:last-child { padding-bottom: 0; border-top: 1px solid var(--border-subtle); margin-top: 8px; padding-top: 12px; }
+  .approval-queue-table tbody td::before { display: block; margin-bottom: 4px; color: var(--text-muted); font-size: 10px; font-weight: 800; letter-spacing: .04em; }
+  .approval-queue-table-xid tbody td:nth-child(1)::before { content: "申請ID"; }
+  .approval-queue-table-xid tbody td:nth-child(2)::before { content: "申請されたX ID"; }
+  .approval-queue-table-xid tbody td:nth-child(3)::before { content: "申請種別"; }
+  .approval-queue-table-xid tbody td:nth-child(4)::before { content: "申請者"; }
+  .approval-queue-table-xid tbody td:nth-child(5)::before { content: "申請日時"; }
+  .approval-queue-table-video tbody td:nth-child(2)::before { content: "タイトル"; }
+  .approval-queue-table-video tbody td:nth-child(3)::before { content: "作者"; }
+  .approval-queue-table-video tbody td:nth-child(4)::before { content: "公開状態"; }
+  .approval-queue-table-video tbody td:nth-child(5)::before { content: "登録日時"; }
+  .approval-queue-table-video tbody td:nth-child(6)::before { content: "YouTube"; }
+  .approval-queue-table-video tbody td:nth-child(7)::before { content: "ステージ許可"; }
+  .approval-queue-table-video tbody td:nth-child(8)::before { content: "未回答"; }
+  .approval-queue-table-video tbody td:nth-child(1) { display: inline-block; width: 96px; margin-right: 12px; vertical-align: top; }
+  .approval-queue-table-video tbody td:nth-child(2) { display: inline-block; width: calc(100% - 112px); vertical-align: top; }
 }
 
 [data-manage-shell] .manage-actions .fn-btn {
@@ -1951,3 +2052,40 @@
   }
 }
 
+.admin-video-review-meta-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-audit-diff-grid {
+  grid-template-columns: minmax(116px, auto) minmax(70px, auto) minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.admin-permission-result-grid,
+.manage-youtube-status-grid {
+  grid-template-columns: minmax(120px, auto) 1fr;
+}
+
+.manage-playlist-form { display: grid; gap: 16px; }
+.manage-playlist-steps { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 18px; color: var(--text-secondary); font-size: 12px; }
+.manage-playlist-steps span { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border: 1px solid var(--border-subtle); border-radius: 999px; background: var(--bg-elevated); }
+.manage-playlist-steps b { display: grid; width: 20px; height: 20px; place-items: center; border-radius: 50%; background: var(--accent-primary); color: var(--text-on-accent); font-size: 11px; }
+.manage-playlist-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 640px) { .manage-playlist-options { grid-template-columns: 1fr; } .manage-playlist-steps { display: grid; grid-template-columns: 1fr; } }
+
+.entry-slot-page-head { margin-bottom: 22px; }
+.entry-slot-summary { margin-bottom: 24px; box-shadow: 0 10px 28px color-mix(in srgb, var(--accent-primary) 8%, transparent); }
+.entry-slot-form-shell { min-width: 0; }
+
+.manage-permission-members > .fn-console-card-title { margin: 0 0 2px; }
+.manage-permission-member-head { align-items: flex-start; }
+.manage-permission-member-head strong { display: block; font-size: 14px; }
+.manage-permission-member-head .fn-badge { display: inline-flex; margin-top: 7px; }
+.manage-permission-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.manage-permission-fields > label { display: grid; gap: 6px; align-content: start; }
+.manage-permission-fields > label:nth-child(1),
+.manage-permission-fields > label:nth-child(4) { grid-column: span 2; }
+@media (max-width: 640px) {
+  .manage-permission-fields { grid-template-columns: 1fr !important; }
+  .manage-permission-fields > label:nth-child(1),
+  .manage-permission-fields > label:nth-child(4) { grid-column: auto; }
+}

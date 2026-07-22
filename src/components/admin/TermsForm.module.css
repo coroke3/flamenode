@@ -1,0 +1,10 @@
+.form { display: flex; flex-direction: column; gap: 16px; }
+.form :global(.fn-label) { margin-bottom: 6px; }
+.metaGrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, .6fr); gap: 14px; }
+.markdown { min-height: 360px; padding-block: 10px; font-family: ui-monospace, monospace; font-size: 13px; line-height: 1.55; resize: vertical; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.actions :global(.fn-btn) { min-height: 44px; }
+@media (max-width: 640px) {
+  .metaGrid { grid-template-columns: 1fr; gap: 12px; }
+  .actions :global(.fn-btn) { flex: 1 1 160px; justify-content: center; }
+}

@@ -11,7 +11,6 @@
   grid-template-areas:
     "main"
     "chapters"
-    "members"
     "related";
   gap: var(--fn-space-block, 30px);
   align-items: start;
@@ -56,9 +55,8 @@
 }
 
 .section.membersBlock {
-  grid-area: members;
   min-width: 0;
-  margin-top: 0;
+  margin-top: var(--fn-space-block, 30px);
 }
 
 .relatedRail {
@@ -411,23 +409,22 @@
       clamp(320px, 24vw, 360px);
     grid-template-areas:
       "main chapters"
-      "members related";
+      "main related";
     gap: 28px;
   }
 
   .chapterRail {
-    position: sticky;
-    top: calc(var(--header-h, 64px) + 18px);
+    position: static;
     align-self: start;
-    max-height: calc(100svh - var(--header-h, 64px) - 36px);
     min-height: 0;
-    overflow: hidden;
+    max-height: none;
+    overflow: visible;
   }
 
   .chapterBody {
     flex: 1 1 auto;
     min-height: 0;
-    max-height: none;
+    max-height: min(52vh, 520px);
     overflow-y: auto;
   }
 }

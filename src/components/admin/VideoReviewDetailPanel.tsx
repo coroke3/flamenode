@@ -5,6 +5,7 @@ import { youtubeThumbUrl, youtubeWatchUrl } from "@/lib/youtube/id";
 import { formatUnix } from "@/lib/utils/format";
 import type { VideoReviewDetail } from "@/lib/admin/videoReviewDetail";
 import { videoVisibilityBadgeClass, videoVisibilityLabel } from "@/lib/admin/videoVisibilityLabels";
+import styles from "./VideoReviewDetailPanel.module.css";
 
 interface VideoReviewDetailPanelProps {
   video: VideoReviewDetail;
@@ -36,12 +37,7 @@ export function VideoReviewDetailPanel({
 }: VideoReviewDetailPanelProps): React.ReactElement {
   return (
     <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "minmax(0, 1.4fr) minmax(280px, 0.8fr)",
-        gap: 24,
-        marginTop: 8,
-      }}
+      className={styles.panel}
     >
       <section>
         <div
@@ -75,12 +71,7 @@ export function VideoReviewDetailPanel({
         </div>
 
         <dl
-          style={{
-            marginTop: 16,
-            display: "grid",
-            gridTemplateColumns: "120px 1fr",
-            gap: "8px 12px",
-          }}
+          className={styles.details}
         >
           <Field label="状態" value={
             <span className={`fn-badge ${videoVisibilityBadgeClass(video.visibility_status)}`}>

@@ -261,19 +261,9 @@ function FormSection({
 }): React.ReactElement {
   return (
     <fieldset
-      style={{
-        border: 0,
-        borderTop: "1px solid var(--border-subtle)",
-        margin: "8px 0 0",
-        padding: "16px 0 0",
-        display: "grid",
-        gap: 12,
-        opacity: allowed ? 1 : 0.58,
-      }}
+      className={`${styles.formSection} ${allowed ? "" : styles.formSectionDisabled}`}
     >
-      <legend style={{ fontSize: 14, fontWeight: 800, paddingRight: 10 }}>
-        {title}
-      </legend>
+      <legend className={styles.formSectionLegend}>{title}</legend>
       {children}
     </fieldset>
   );
@@ -340,7 +330,7 @@ export function EventForm({
       onChange={(event) =>
         setPreview(formPreview(new FormData(event.currentTarget), initial))
       }
-      style={{ display: "grid", gap: 14 }}
+      className={styles.eventForm}
     >
       {mode === "edit" && initial.id ? (
         <input type="hidden" name="id" value={initial.id} />

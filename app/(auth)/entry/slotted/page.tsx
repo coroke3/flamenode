@@ -169,7 +169,7 @@ export default async function SlottedPostPage({
 
   return (
     <AppShell size="default">
-      <header className="fn-page-head fn-page-head--split">
+      <header className="fn-page-head fn-page-head--split entry-slot-page-head">
         <div className="fn-page-head-main">
           <p className="fn-eyebrow">Slot Post</p>
           <h1 className="fn-page-title fn-page-title--compact">枠に作品を提出</h1>
@@ -203,7 +203,7 @@ export default async function SlottedPostPage({
           : submitBlockedReason}
       </StatusPanel>
 
-      <section className="fn-card fn-highlight-card fn-card-accent">
+      <section className="fn-card fn-highlight-card fn-card-accent entry-slot-summary">
         <div className="fn-card-body">
           <p className="fn-highlight-card-kicker">確保済み枠</p>
           <h2 className="fn-highlight-card-title">
@@ -232,6 +232,7 @@ export default async function SlottedPostPage({
         </div>
       </section>
 
+      <div className="entry-slot-form-shell">
       <VideoForm
         mode="slot"
         slotId={slot.id}
@@ -253,6 +254,7 @@ export default async function SlottedPostPage({
         channelCandidates={channelCandidates}
         eventOptions={eventOptions}
       />
+      </div>
 
       <p className="fn-page-footnote">
         <Icon name="info" size={12} aria-hidden /> 提出した動画は、イベントの

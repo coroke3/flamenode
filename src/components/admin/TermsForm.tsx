@@ -10,6 +10,7 @@ import {
   updateTermsVersion,
 } from "@/lib/actions/rules";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import styles from "./TermsForm.module.css";
 
 export interface TermsInitial {
   id?: string;
@@ -90,10 +91,10 @@ export function TermsForm({ mode, initial = {} }: Props): React.ReactElement {
     <>
     <form
       onSubmit={onSubmit}
-      style={{ display: "flex", flexDirection: "column", gap: 12 }}
+      className={styles.form}
     >
       {initial.id ? <input type="hidden" name="id" value={initial.id} /> : null}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div className={styles.metaGrid}>
         <div>
           <label className="fn-label">バージョンラベル *</label>
           <input
@@ -124,12 +125,11 @@ export function TermsForm({ mode, initial = {} }: Props): React.ReactElement {
         <textarea
           name="body_markdown"
           defaultValue={initial.body_markdown ?? ""}
-          className="fn-input"
           rows={20}
           maxLength={40000}
           required
           readOnly={readOnly}
-          style={{ fontFamily: "ui-monospace, monospace", fontSize: 13 }}
+          className={`fn-input ${styles.markdown}`}
         />
         <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
           {readOnly
@@ -149,7 +149,7 @@ export function TermsForm({ mode, initial = {} }: Props): React.ReactElement {
         </p>
       ) : null}
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <div className={styles.actions}>
         {!readOnly ? (
           <button
             type="submit"

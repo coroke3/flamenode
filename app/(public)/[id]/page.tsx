@@ -622,6 +622,24 @@ export default async function VideoDetailPage({
               </div>
             </div>
           </div>
+
+          {members.length > 0 ? (
+            <section className={`${styles.section} ${styles.membersBlock}`}>
+              <h2 className={styles.sectionTitle}>
+                参加メンバー ({members.length})
+              </h2>
+              <MemberSection
+                members={members}
+                memberChapters={memberChapters.map((chapter) => ({
+                  id: chapter.id,
+                  chapter_time: chapter.chapter_time,
+                  chapter_label: chapter.chapter_label,
+                  note: chapter.note,
+                  video_member_id: chapter.video_member_id,
+                }))}
+              />
+            </section>
+          ) : null}
         </article>
 
         <aside className={styles.chapterRail} aria-label="チャプター">
@@ -685,29 +703,6 @@ export default async function VideoDetailPage({
             </section>
           )}
         </aside>
-
-        {members.length > 0 ? (
-          <section
-            className={`${styles.section} ${styles.membersBlock}`}
-          >
-            <h2 className={styles.sectionTitle}>
-              参加メンバー ({members.length})
-            </h2>
-            <MemberSection
-              members={members}
-              memberChapters={memberChapters.map(
-                (chapter) => ({
-                  id: chapter.id,
-                  chapter_time: chapter.chapter_time,
-                  chapter_label: chapter.chapter_label,
-                  note: chapter.note,
-                  video_member_id:
-                    chapter.video_member_id,
-                }),
-              )}
-            />
-          </section>
-        ) : null}
 
         <aside className={styles.relatedRail} aria-label="関連動画">
           <h3 className={styles.relatedHeading}>
@@ -840,6 +835,28 @@ function StaticVideoDetailView({
               </div>
             </div>
           </div>
+
+          {detail.publicMembers.length > 0 ? (
+            <section className={`${styles.section} ${styles.membersBlock}`}>
+              <h2 className={styles.sectionTitle}>
+                参加メンバー ({detail.publicMembers.length})
+              </h2>
+              <ul className={styles.relatedList}>
+                {detail.publicMembers.map((member) => (
+                  <li key={`${member.x_user_id ?? member.display_name}-${member.order_index ?? ""}`}>
+                    {member.x_user_id ? (
+                      <Link href={`/user/${member.x_user_id}`}>
+                        {member.display_name}
+                      </Link>
+                    ) : (
+                      member.display_name
+                    )}
+                    {member.role_label ? ` / ${member.role_label}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
         </article>
 
         <aside className={styles.chapterRail} aria-label="チャプター">
@@ -857,27 +874,6 @@ function StaticVideoDetailView({
           </section>
         </aside>
 
-        {detail.publicMembers.length > 0 ? (
-          <section className={`${styles.section} ${styles.membersBlock}`}>
-            <h2 className={styles.sectionTitle}>
-              参加メンバー ({detail.publicMembers.length})
-            </h2>
-            <ul className={styles.relatedList}>
-              {detail.publicMembers.map((member) => (
-                <li key={`${member.x_user_id ?? member.display_name}-${member.order_index ?? ""}`}>
-                  {member.x_user_id ? (
-                    <Link href={`/user/${member.x_user_id}`}>
-                      {member.display_name}
-                    </Link>
-                  ) : (
-                    member.display_name
-                  )}
-                  {member.role_label ? ` / ${member.role_label}` : ""}
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
       </div>
     </div>
   );

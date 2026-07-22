@@ -59,10 +59,10 @@ export function PermissionSimulatorPanel({
             <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>
               スタッフ情報
             </h2>
-            <dl
+            <dl className="admin-permission-result-grid"
               style={{
                 display: "grid",
-                gridTemplateColumns: "140px 1fr",
+                gridTemplateColumns: "minmax(120px, auto) 1fr",
                 gap: "6px 12px",
                 fontSize: 13,
               }}

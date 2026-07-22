@@ -94,14 +94,14 @@ export function EventStaffManager({
   };
 
   return (
-    <div style={{ display: "grid", gap: 22 }}>
+    <div className="manage-permission-panel" style={{ display: "grid", gap: 22 }}>
       {message ? (
         <p role="alert" className="fn-alert fn-alert--danger" style={{ margin: 0 }}>
           <Icon name="warning" size={13} aria-hidden /> {message}
         </p>
       ) : null}
 
-      <section style={{ display: "grid", gap: 10 }}>
+      <section className="manage-permission-members" style={{ display: "grid", gap: 10 }}>
         <h3 className="fn-console-card-title">登録メンバー ({members.length})</h3>
         {members.map((member) => (
           <MemberEditor
@@ -181,7 +181,7 @@ function MemberEditor({
         onRun(() => upsertEventStaffMember(fd));
       }}
     >
-      <header style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+      <header className="manage-permission-member-head" style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
         <div style={{ minWidth: 0 }}>
           <strong>{member.x_name ?? member.display_name}</strong>
           <div className="fn-muted" style={{ fontSize: 11 }}>
@@ -220,13 +220,7 @@ function MemberEditor({
       </header>
 
       <input type="hidden" name="x_user_id" value={member.x_user_id} />
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: 8,
-        }}
-      >
+      <div className="manage-permission-fields">
         <label className="fn-label">
           表示名
           <input

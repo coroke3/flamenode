@@ -111,7 +111,12 @@ export default async function EventYoutubePlaylistPage({
           この画面で同期方式を有効にしたイベントだけが同期されます。
         </p>
 
-        <form action={saveEventYoutubePlaylistSettings} style={{ display: "grid", gap: 12 }}>
+        <div className="manage-playlist-steps" aria-label="設定の手順">
+          <span><b>1</b> 再生リストを指定</span>
+          <span><b>2</b> 同期方法を選択</span>
+          <span><b>3</b> 保存して同期を開始</span>
+        </div>
+        <form action={saveEventYoutubePlaylistSettings} className="manage-playlist-form">
           <input type="hidden" name="event_id" value={ev.id} />
           <div>
             <label className="fn-label">再生リストURL / ID</label>
@@ -124,13 +129,7 @@ export default async function EventYoutubePlaylistPage({
               maxLength={300}
             />
           </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-              gap: 12,
-            }}
-          >
+          <div className="manage-playlist-options">
             <div>
               <label className="fn-label">同期方式</label>
               <select
@@ -188,10 +187,9 @@ export default async function EventYoutubePlaylistPage({
             {STATUS_LABELS[config?.sync_status ?? "disabled"] ?? config?.sync_status}
           </span>
         </div>
-        <dl
+        <dl className="manage-youtube-status-grid"
           style={{
             display: "grid",
-            gridTemplateColumns: "minmax(120px, auto) 1fr",
             gap: "8px 16px",
             fontSize: 13,
           }}

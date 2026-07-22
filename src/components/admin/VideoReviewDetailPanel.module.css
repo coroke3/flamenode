@@ -1,0 +1,11 @@
+.panel { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(280px, .8fr); gap: 24px; margin-top: 8px; }
+.details { margin-top: 16px; display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px 12px; }
+.panel :global(dd) { overflow-wrap: anywhere; }
+@media (max-width: 860px) {
+  .panel { grid-template-columns: 1fr; gap: 18px; }
+}
+@media (max-width: 520px) {
+  .details { grid-template-columns: 1fr; gap: 3px 0; }
+  .details :global(dt) { margin-top: 10px; }
+  .details :global(dd) { min-height: 22px; }
+}

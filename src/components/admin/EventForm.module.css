@@ -4,6 +4,51 @@
   gap: 12px;
 }
 
+.eventForm {
+  display: grid;
+  gap: 24px;
+}
+
+.formSection {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  margin: 0;
+  padding: 20px 0 0;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.formSectionDisabled {
+  opacity: 0.58;
+}
+
+.formSectionLegend {
+  padding: 0 12px 0 0;
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.eventForm :global(.fn-label) {
+  margin-bottom: 6px;
+}
+
+.eventForm :global(textarea.fn-input) {
+  height: auto;
+  min-height: 112px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.eventForm :global(button[type="submit"]) {
+  width: 100%;
+  min-height: 44px;
+  justify-content: center;
+}
+
 .formGrid3 {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
@@ -20,5 +65,14 @@
   .formGrid2,
   .formGrid3 {
     grid-template-columns: 1fr;
+  }
+
+  .eventForm {
+    gap: 20px;
+  }
+
+  .formSection {
+    gap: 14px;
+    padding-top: 16px;
   }
 }

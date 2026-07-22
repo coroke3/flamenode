@@ -34,7 +34,7 @@ export function VideoReviewQueueTable({
   extraActions,
 }: VideoReviewQueueTableProps): React.ReactElement {
   return (
-    <FnTable>
+    <FnTable className="approval-queue-table approval-queue-table-video">
       <thead>
         <tr>
           <th>サムネイル</th>
