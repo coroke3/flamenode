@@ -4,7 +4,7 @@ import { FnTable } from "@/components/ui/FnTable";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { Metadata } from "next";
-import { and, desc, eq, isNull, like, or, sql, inArray } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, like, or, sql, inArray } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   users as usersTable,
@@ -221,10 +221,16 @@ export default async function AdminUsersPage({
                   : status === "no_active_x"
                     ? isNull(usersTable.active_x_user_id)
                     : undefined;
+      // Discordタブは実Discordログイン済みだけ。旧形式インポートの空discord_idプレースホルダーはX IDタブ側。
+      const discordPrincipalFilter = isNotNull(usersTable.discord_id);
       const where =
         queryFilter && statusFilter
-          ? and(queryFilter, statusFilter)
-          : (queryFilter ?? statusFilter);
+          ? and(discordPrincipalFilter, queryFilter, statusFilter)
+          : queryFilter
+            ? and(discordPrincipalFilter, queryFilter)
+            : statusFilter
+              ? and(discordPrincipalFilter, statusFilter)
+              : discordPrincipalFilter;
       const userOffset = activeView === "discord" ? offset : 0;
       const userLimit =
         activeView === "discord" || activeView === "permissions"
@@ -428,7 +434,7 @@ export default async function AdminUsersPage({
         description={
           activeView === "permissions"
             ? "一般作品でユーザーに開放する編集項目を管理します。"
-            : "Discord と X ID の現在の紐付けを確認・管理します。"
+            : "Discordログイン済みユーザーと X ID の現在の紐付けを確認・管理します。"
         }
       />
 

@@ -289,9 +289,14 @@ function placeholderOwnerXId(eventId: string): string {
   return normalizeXId(trimmed) ?? `imp_${trimmed.slice(0, 15)}`;
 }
 
-/** 旧形式インポート由来の Discord 未連携 X 名義へ割り当てる認証ユーザー ID。 */
+/** 旧形式インポート由来の Discord 未連携 X 名義へ割り当てる認証ユーザー ID。現状の import では新規作成しない。 */
 export function legacyImportAuthUserId(xUserId: string): string {
   return stableId("usr_imp", xUserId);
+}
+
+/** 過去の import で作られた空 discord_id プレースホルダー認証ユーザー ID か。 */
+export function isLegacyImportPlaceholderAuthUserId(userId: string): boolean {
+  return /^usr_imp_[0-9a-f]{8}$/.test(userId.trim());
 }
 
 function legacyQuestionKey(sourceKey: string): string {

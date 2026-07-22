@@ -133,6 +133,9 @@ function parseControlledFileRange(
   if (!Number.isSafeInteger(startRow) || !Number.isSafeInteger(endRow) || startRow < 1 || endRow < 1) {
     return null;
   }
+  if (startRow > endRow || startRow > sourceRows || endRow > sourceRows) {
+    return null;
+  }
   return { startRow, endRow };
 }
 
@@ -164,12 +167,23 @@ function sleep(ms: number): Promise<void> {
 }
 
 const APPLY_TRANSIENT_MAX_RETRIES = 4;
-const APPLY_MAX_REQUESTS_PER_RUN = 500;
-const APPLY_STEP_PAUSE_MS = 150;
+/** 1ラン上限の既定。UIで 100/250/500 を選べる。 */
+const APPLY_MAX_REQUESTS_PER_RUN_DEFAULT = 500;
+const APPLY_MAX_REQUESTS_PER_RUN_OPTIONS = [100, 250, 500] as const;
+/** 成功連続時のベース間隔。適応 pause が短縮する。 */
+const APPLY_STEP_PAUSE_HEALTHY_MS = 40;
+const LEGACY_IMPORT_CHUNK_SIZE_OPTIONS = [50, 100, 150, MAX_LEGACY_IMPORT_SELECTED_ROWS] as const;
 const LEGACY_IMPORT_CREDENTIAL_STORAGE_KEY = "flamenode:legacy-import:credential:v4";
 
 function applyTransientBackoffMs(attempt: number): number {
   return Math.min(750 * 2 ** (attempt - 1), 5_000);
+}
+
+/** 連続成功時は間隔を詰め、無料枠の日次 request を無駄に伸ばさない。 */
+function applyStepPauseMs(successStreak: number): number {
+  if (successStreak >= 8) return 0;
+  if (successStreak >= 3) return 15;
+  return APPLY_STEP_PAUSE_HEALTHY_MS;
 }
 
 function retryStoppedMessage(message: string): string {
@@ -283,6 +297,17 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
     () => new Map(),
   );
   const [chunkCompleteBanner, setChunkCompleteBanner] = React.useState<ChunkCompleteBanner | null>(null);
+  const [chunkSize, setChunkSize] = React.useState<number>(MAX_LEGACY_IMPORT_SELECTED_ROWS);
+  const [maxRequestsPerRun, setMaxRequestsPerRun] = React.useState<number>(
+    APPLY_MAX_REQUESTS_PER_RUN_DEFAULT,
+  );
+  const [applyRunProgress, setApplyRunProgress] = React.useState<{
+    requestCount: number;
+    maxRequests: number;
+  } | null>(null);
+  const [lastPreviewFileRanges, setLastPreviewFileRanges] = React.useState<
+    Array<{ fileName: string; startRow: number; endRow: number }>
+  >([]);
   const [result, setResult] = React.useState<ApiResponse | null>(null);
   const [pending, setPending] = React.useState<"preview" | "apply" | null>(null);
   const [credential, setCredentialState] = React.useState<PreviewCredential | null>(null);
@@ -313,7 +338,9 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
     const keys = selectedFiles.map(selectedFileKey);
     setFileSourceRows((current) => {
       const next = new Map<string, number | null>();
-      for (const key of keys) next.set(key, current.get(key) ?? null);
+      for (const key of keys) {
+        if (current.has(key)) next.set(key, current.get(key) as number | null);
+      }
       return next;
     });
     setFileRangeInputs((current) => {
@@ -369,6 +396,7 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
     formRevisionRef.current += 1;
     setCredential(null);
     setChunkCompleteBanner(null);
+    setLastPreviewFileRanges([]);
   }
 
   const markChunkApplyComplete = React.useCallback((json: ApiResponse): void => {
@@ -388,6 +416,14 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
           endRow: range.endRow,
         });
       }
+    } else if (lastPreviewFileRanges.length > 0) {
+      for (const range of lastPreviewFileRanges) {
+        appliedRanges.push({
+          fileName: range.fileName,
+          startRow: range.startRow,
+          endRow: range.endRow,
+        });
+      }
     } else {
       for (const file of selectedFiles) {
         const key = selectedFileKey(file);
@@ -400,30 +436,46 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
       }
     }
 
+    // setState updater内の副作用に頼ると、非同期完了後のflushでバナーが常にnullになる。
+    const nextCompleted = new Map(completedChunkKeysByFile);
     let nextBanner: ChunkCompleteBanner | null = null;
-    setCompletedChunkKeysByFile((current) => {
-      const next = new Map(current);
-      for (const applied of appliedRanges) {
-        const file = selectedFiles.find((candidate) => candidate.name === applied.fileName);
-        if (!file) continue;
-        const fileKey = selectedFileKey(file);
-        const sourceRows = fileSourceRows.get(fileKey);
-        if (typeof sourceRows !== "number" || sourceRows <= MAX_LEGACY_IMPORT_SELECTED_ROWS) continue;
-        const suggestedRanges = suggestLegacyImportRowRanges(sourceRows);
-        if (suggestedRanges.length <= 1) continue;
-        const chunkKey = legacyImportRangeChunkKey(applied.startRow, applied.endRow);
-        const completed = new Set(next.get(fileKey) ?? []);
-        completed.add(chunkKey);
-        next.set(fileKey, completed);
-        const nextRange = findNextIncompleteLegacyImportRange(suggestedRanges, completed, applied);
-        if (nextRange) {
-          nextBanner = { fileKey, fileName: file.name, nextRange };
-        }
+    for (const applied of appliedRanges) {
+      const file = selectedFiles.find((candidate) => candidate.name === applied.fileName);
+      if (!file) continue;
+      const fileKey = selectedFileKey(file);
+      const sourceRows = fileSourceRows.get(fileKey);
+      if (typeof sourceRows !== "number" || sourceRows <= chunkSize) continue;
+      const suggestedRanges = suggestLegacyImportRowRanges(sourceRows, chunkSize);
+      if (suggestedRanges.length <= 1) continue;
+      const chunkKey = legacyImportRangeChunkKey(applied.startRow, applied.endRow);
+      const completed = new Set(nextCompleted.get(fileKey) ?? []);
+      completed.add(chunkKey);
+      nextCompleted.set(fileKey, completed);
+      const nextRange = findNextIncompleteLegacyImportRange(suggestedRanges, completed, applied);
+      if (nextRange) {
+        nextBanner = { fileKey, fileName: file.name, nextRange };
       }
-      return next;
-    });
+    }
+    setCompletedChunkKeysByFile(nextCompleted);
     setChunkCompleteBanner(nextBanner);
-  }, [fileRangeInputs, fileSourceRows, selectedFiles]);
+  }, [
+    chunkSize,
+    completedChunkKeysByFile,
+    fileRangeInputs,
+    fileSourceRows,
+    lastPreviewFileRanges,
+    selectedFiles,
+  ]);
+
+  function setChunkSizeOption(nextSize: number): void {
+    if (!LEGACY_IMPORT_CHUNK_SIZE_OPTIONS.includes(nextSize as (typeof LEGACY_IMPORT_CHUNK_SIZE_OPTIONS)[number])) {
+      return;
+    }
+    setChunkSize(nextSize);
+    setCompletedChunkKeysByFile(new Map());
+    setChunkCompleteBanner(null);
+    invalidatePreview();
+  }
 
   function setFileRangeInput(key: string, field: "start" | "end", value: string): void {
     setFileRangeInputs((current) => {
@@ -635,11 +687,29 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
             ? { token: json.preview_token, planHash: json.plan_hash, expiresAt: json.expires_at }
             : null,
         );
+        if (formUnchanged && json.ok) {
+          setLastPreviewFileRanges(
+            Array.isArray(json.file_ranges)
+              ? json.file_ranges.map((range) => ({
+                  fileName: range.fileName,
+                  startRow: range.startRow,
+                  endRow: range.endRow,
+                }))
+              : [],
+          );
+        } else {
+          setLastPreviewFileRanges([]);
+        }
       } else if (credential) {
         let stopped = false;
         let transientFailures = 0;
+        let successStreak = 0;
         let latestJson: ApiResponse | null = null;
-        for (let requestCount = 0; requestCount < APPLY_MAX_REQUESTS_PER_RUN; requestCount += 1) {
+        const runLimit = maxRequestsPerRun;
+        setApplyRunProgress({ requestCount: 0, maxRequests: runLimit });
+        // 一時エラーの再試行はラン上限に含めない（成功した原子ステップだけ数える）。
+        let completedSteps = 0;
+        while (completedSteps < runLimit) {
           if (formRevisionRef.current !== submittedFormRevision) {
             setResult({ ok: false, message: "入力が変更されたため、プレビューをやり直してください。" });
             stopped = true;
@@ -659,6 +729,7 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
             }
 
             if (!response.ok || !json.ok) {
+              successStreak = 0;
               if (json.requires_repreview) {
                 setCredential(null);
                 setResult(json);
@@ -690,7 +761,10 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
             }
 
             transientFailures = 0;
+            successStreak += 1;
+            completedSteps += 1;
             latestJson = json;
+            setApplyRunProgress({ requestCount: completedSteps, maxRequests: runLimit });
             setResult(json);
             const resultComplete =
               typeof json.result === "object" &&
@@ -705,8 +779,9 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
               stopped = true;
               break;
             }
-            await sleep(APPLY_STEP_PAUSE_MS);
+            await sleep(applyStepPauseMs(successStreak));
           } catch {
+            successStreak = 0;
             if (transientFailures < APPLY_TRANSIENT_MAX_RETRIES) {
               transientFailures += 1;
               setResult({
@@ -732,7 +807,7 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
             ok: true,
             mode: "apply",
             continuation_required: true,
-            message: `${APPLY_MAX_REQUESTS_PER_RUN.toLocaleString()}ステップ処理したため、無料枠と連続負荷を守るため一時停止しました。「書き込む／再開」で続きから再開できます。`,
+            message: `${runLimit.toLocaleString()}ステップ処理したため、無料枠と連続負荷を守るため一時停止しました。「書き込む／再開」で続きから再開できます。`,
           });
         }
       }
@@ -745,6 +820,7 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
     } finally {
       submitInFlightRef.current = false;
       setPending(null);
+      setApplyRunProgress(null);
     }
   }
 
@@ -768,18 +844,39 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
             />
           </div>
           <span className="fn-muted fn-text-sm">
-            イベント用と動画用など、分割した複数ファイルを順番に追加できます。JSON・CSV・TSV、最大20ファイル、1ファイル2MB・合計4MB、今回選択する範囲の合計250行まで。
+            イベント用と動画用など、分割した複数ファイルを順番に追加できます。JSON・CSV・TSV、最大20ファイル、1ファイル2MB・合計4MB、今回選択する範囲の合計{MAX_LEGACY_IMPORT_SELECTED_ROWS}行まで。
             同じ大きなファイルを複数回に分ける場合は、毎回重ならない開始・終了位置を指定してください。
+            チャンクを小さくすると preview plan が軽くなり、Cloudflare 無料枠の CPU に有利です。
           </span>
           {selectedFiles.length ? (
+            <>
+              <label className={styles.optionField}>
+                <strong>提案チャンクサイズ（行）</strong>
+                <select
+                  className="fn-input"
+                  value={chunkSize}
+                  aria-label="提案チャンクサイズ"
+                  onChange={(event) => setChunkSizeOption(Number(event.currentTarget.value))}
+                >
+                  {LEGACY_IMPORT_CHUNK_SIZE_OPTIONS.map((size) => (
+                    <option key={size} value={size}>
+                      {size}行ごと
+                      {size === MAX_LEGACY_IMPORT_SELECTED_ROWS ? "（上限）" : ""}
+                    </option>
+                  ))}
+                </select>
+                <span className="fn-muted fn-text-sm">
+                  提案チップの刻みだけを変えます。開始・終了の手入力はそのまま使えます。サイズ変更時は完了バッジをリセットします。
+                </span>
+              </label>
             <ul className={styles.fileList}>
               {selectedFiles.map((file, index) => {
                 const key = selectedFileKey(file);
                 const sourceRows = fileSourceRows.get(key);
                 const rangeInput = fileRangeInputs.get(key) ?? { start: "", end: "" };
                 const suggestedRanges =
-                  typeof sourceRows === "number" && sourceRows > MAX_LEGACY_IMPORT_SELECTED_ROWS
-                    ? suggestLegacyImportRowRanges(sourceRows)
+                  typeof sourceRows === "number" && sourceRows > chunkSize
+                    ? suggestLegacyImportRowRanges(sourceRows, chunkSize)
                     : [];
                 const multiChunkFile = suggestedRanges.length > 1;
                 const completedChunkKeys = completedChunkKeysByFile.get(key) ?? new Set<string>();
@@ -801,9 +898,11 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
                     <span className="fn-muted fn-text-sm">({Math.ceil(file.size / 1024).toLocaleString()} KB)</span>
                     {typeof sourceRows === "number" ? (
                       <span className="fn-muted fn-text-sm">推定 {sourceRows.toLocaleString()} 行</span>
-                    ) : sourceRows === null ? (
+                    ) : fileSourceRows.has(key) && sourceRows === null ? (
+                      <span className="fn-muted fn-text-sm">行数を推定できませんでした</span>
+                    ) : (
                       <span className="fn-muted fn-text-sm">行数を推定中…</span>
-                    ) : null}
+                    )}
                     <div className={styles.fileRow}>
                       <label className={styles.optionField}>
                         <span className="fn-muted fn-text-sm">開始位置（1始まり）</span>
@@ -836,10 +935,45 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
                         />
                       </label>
                     </div>
+                    {typeof sourceRows === "number" && sourceRows >= 1 ? (
+                      <span className="fn-muted fn-text-sm">
+                        {currentRange
+                          ? (() => {
+                              const selected =
+                                currentRange.endRow - currentRange.startRow + 1;
+                              const remainingAfter = Math.max(
+                                0,
+                                sourceRows - currentRange.endRow,
+                              );
+                              const overCap = selected > MAX_LEGACY_IMPORT_SELECTED_ROWS;
+                              return (
+                                <>
+                                  選択 {selected.toLocaleString()} 行
+                                  （全 {sourceRows.toLocaleString()} 行中・
+                                  {currentRange.startRow.toLocaleString()}〜
+                                  {currentRange.endRow.toLocaleString()}）。
+                                  {remainingAfter > 0
+                                    ? ` このあと残り ${remainingAfter.toLocaleString()} 行（次は ${
+                                        currentRange.endRow + 1
+                                      } 行目〜）。`
+                                    : " 末尾まで選択済みです。"}
+                                  {overCap
+                                    ? ` 1回の上限 ${MAX_LEGACY_IMPORT_SELECTED_ROWS} 行を超えています。範囲を狭めてください。`
+                                    : selected > chunkSize
+                                      ? ` 提案チャンク ${chunkSize} 行より広いです（手入力は可。plan が重い場合は分割推奨）。`
+                                      : null}
+                                </>
+                              );
+                            })()
+                          : rangeInput.start.trim() || rangeInput.end.trim()
+                            ? `範囲が不正です（1〜${sourceRows.toLocaleString()}、開始≤終了）。空欄は先頭または末尾を意味します。`
+                            : `範囲未指定時は全 ${sourceRows.toLocaleString()} 行が対象です。上限は ${MAX_LEGACY_IMPORT_SELECTED_ROWS} 行/回です。`}
+                      </span>
+                    ) : null}
                     {suggestedRanges.length > 0 ? (
                       <div className={styles.rangeSuggestions}>
                         <span className="fn-muted fn-text-sm">
-                          {MAX_LEGACY_IMPORT_SELECTED_ROWS} 行以下の範囲に分けてください。
+                          {chunkSize} 行以下の範囲に分けてください。
                           {multiChunkFile
                             ? " skip_existing では各チャンクの apply 完了を確認してから次の範囲を preview してください（自動連鎖はしません）。"
                             : null}
@@ -851,11 +985,11 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
                             applySuggestedRange(
                               key,
                               1,
-                              Math.min(MAX_LEGACY_IMPORT_SELECTED_ROWS, sourceRows ?? MAX_LEGACY_IMPORT_SELECTED_ROWS),
+                              Math.min(chunkSize, sourceRows ?? chunkSize),
                             )
                           }
                         >
-                          先頭{MAX_LEGACY_IMPORT_SELECTED_ROWS}行を入力
+                          先頭{chunkSize}行を入力
                         </button>
                         {multiChunkFile ? (
                           <button
@@ -909,6 +1043,7 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
                 );
               })}
             </ul>
+            </>
           ) : (
             <p className={`fn-muted fn-text-sm ${styles.emptyFiles}`}>追加済みファイルはありません。</p>
           )}
@@ -936,6 +1071,35 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
               <option value="create_only">既存IDがあれば停止</option>
               <option value="replace_imported">過去の旧形式インポート行だけ置換</option>
             </select>
+          </label>
+          <label className={styles.optionField}>
+            <strong>1ランの最大ステップ数</strong>
+            <select
+              className="fn-input"
+              value={maxRequestsPerRun}
+              aria-label="1ランの最大ステップ数"
+              disabled={pending === "apply"}
+              onChange={(event) => {
+                const next = Number(event.currentTarget.value);
+                if (
+                  APPLY_MAX_REQUESTS_PER_RUN_OPTIONS.includes(
+                    next as (typeof APPLY_MAX_REQUESTS_PER_RUN_OPTIONS)[number],
+                  )
+                ) {
+                  setMaxRequestsPerRun(next);
+                }
+              }}
+            >
+              {APPLY_MAX_REQUESTS_PER_RUN_OPTIONS.map((limit) => (
+                <option key={limit} value={limit}>
+                  {limit}ステップで一時停止
+                  {limit === APPLY_MAX_REQUESTS_PER_RUN_DEFAULT ? "（既定）" : ""}
+                </option>
+              ))}
+            </select>
+            <span className="fn-muted fn-text-sm">
+              1 HTTP = 原子ステップ1件のまま、ブラウザが連続POSTする上限です。日次 request と負荷を抑えるため小さくできます。
+            </span>
           </label>
         </div>
 
@@ -1024,6 +1188,15 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
               未完了のプレビューがあります。書き込むで再開できます。
             </span>
           ) : null}
+          {applyRunProgress ? (
+            <span className={styles.applyRunProgress} role="status">
+              このラン: {applyRunProgress.requestCount.toLocaleString()} /{" "}
+              {applyRunProgress.maxRequests.toLocaleString()} ステップ
+              {result?.progress
+                ? `（全体 ${result.progress.completed.toLocaleString()} / ${result.progress.total.toLocaleString()}・${result.progress.stage}）`
+                : null}
+            </span>
+          ) : null}
         </div>
       </form>
 
@@ -1077,7 +1250,8 @@ function ImportResult({ result }: { result: ApiResponse }): React.ReactElement {
       {result.progress ? (
         <p className="fn-muted fn-text-sm">
           進捗: {result.progress.completed.toLocaleString()} / {result.progress.total.toLocaleString()}
-          （{result.progress.stage}:{result.progress.index}）
+          （stage={result.progress.stage}, index={result.progress.index}）
+          {result.continuation_required ? " — 続きから再開できます" : null}
         </p>
       ) : null}
       {result.ok && result.mode === "preview" && result.summary ? (

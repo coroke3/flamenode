@@ -123,8 +123,28 @@ requireMatch(
 );
 forbidMatch(
   "src/components/user/AccountMenu.tsx",
-  /useActiveXSwitcher|switchTo\(|別の X ID に切り替え/,
-  "公開ヘッダーのアカウントメニューにX ID切替操作が残っています。",
+  /ThemeToggle/,
+  "アカウントメニューにテーマ切替が残っています。テーマはヘッダー側へ集約します。",
+);
+requireMatch(
+  "src/components/user/AccountMenu.tsx",
+  /useActiveXSwitcher/,
+  "アカウントメニューから Active X ID を切り替えられません。",
+);
+requireMatch(
+  "src/components/user/AccountMenu.tsx",
+  /別の X ID に切り替え/,
+  "アカウントメニューに X ID 切替セクションがありません。",
+);
+requireMatch(
+  "src/components/user/AccountMenu.tsx",
+  /approval_status === "approved"/,
+  "アカウントメニューの切替候補が承認済みに限定されていません。",
+);
+requireMatch(
+  "src/components/user/useActiveXSwitcher.ts",
+  /承認済みの X ID だけをアクティブにできます/,
+  "未承認 X ID の切替をクライアント側で拒否していません。",
 );
 requireMatch(
   "src/components/user/AccountMenu.tsx",

@@ -61,11 +61,11 @@ export function useActiveXSwitcher({
         return;
       }
 
-      if (
-        entry.approval_status === "rejected"
-      ) {
+      if (entry.approval_status !== "approved") {
         setError(
-          "却下された X ID はアクティブにできません。",
+          entry.approval_status === "rejected"
+            ? "却下された X ID はアクティブにできません。"
+            : "承認済みの X ID だけをアクティブにできます。",
         );
         return;
       }

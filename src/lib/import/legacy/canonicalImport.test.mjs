@@ -8,7 +8,7 @@ import {
   legacyImportCpuBudgetErrors,
   MAX_LEGACY_IMPORT_SELECTED_ROWS,
 } from "./cpuBudget.ts";
-import { normalizeLegacyFiles, legacyImportAuthUserId } from "./normalize.ts";
+import { normalizeLegacyFiles, legacyImportAuthUserId, isLegacyImportPlaceholderAuthUserId } from "./normalize.ts";
 import { planD1AuditMutationBudget } from "../../audit/mutateBudget.ts";
 import {
   claimLegacyImportPreview,
@@ -445,9 +445,25 @@ test("TSVと引用符付きCSVを解析できる", () => {
   assert.equal(parsedCsv.rows[0].credit, "line1\nline2");
 });
 
-test("Discord未連携X名義向けの認証ユーザーIDは安定する", () => {
+test("Discord未連携X名義向けの決定的auth user idヘルパーは残すがimportでは使わない", () => {
   assert.equal(legacyImportAuthUserId("creator_x"), legacyImportAuthUserId("creator_x"));
   assert.notEqual(legacyImportAuthUserId("creator_x"), legacyImportAuthUserId("member_a"));
+  assert.equal(isLegacyImportPlaceholderAuthUserId(legacyImportAuthUserId("creator_x")), true);
+  assert.equal(isLegacyImportPlaceholderAuthUserId("system_legacy_import"), false);
+  assert.equal(isLegacyImportPlaceholderAuthUserId("usr_imp_deadbeef"), true);
+  assert.equal(isLegacyImportPlaceholderAuthUserId("usr_imp_notahex1"), false);
+  const root = path.resolve(import.meta.dirname, "../../../..");
+  const apply = fs.readFileSync(path.join(root, "src/lib/import/legacy/apply.ts"), "utf8");
+  assert.doesNotMatch(apply, /legacyImportAuthUserId/);
+  assert.doesNotMatch(apply, /ensureImportedAuthUsers/);
+});
+
+test("admin users Discordタブはdiscord_idがある認証ユーザーだけを表示する", () => {
+  const root = path.resolve(import.meta.dirname, "../../../..");
+  const page = fs.readFileSync(path.join(root, "app/(admin)/admin/users/page.tsx"), "utf8");
+  assert.match(page, /isNotNull\(usersTable\.discord_id\)/);
+  assert.match(page, /discordPrincipalFilter/);
+  assert.match(page, /空discord_idプレースホルダーはX IDタブ側/);
 });
 
 test("旧DB列をcanonical planへ残さない", () => {
@@ -729,9 +745,11 @@ test("カスタム質問・回答applyは手動回答保護とD1予算を維持�
   assert.match(preflight, /MAX_EVENT_CUSTOM_QUESTIONS = 18/);
   assert.match(preflight, /MAX_LEGACY_CUSTOM_ANSWERS_PER_VIDEO/);
   assert.match(preflight, /旧形式インポート由来と確認できないため置換できません/);
-  assert.match(apply, /ensureImportedAuthUsers/);
-  assert.match(apply, /legacyImportAuthUserId/);
-  assert.match(apply, /x_user_account_links_import_batch/);
+  assert.match(apply, /ensureXUserGroup/);
+  assert.doesNotMatch(apply, /ensureImportedAuthUsers/);
+  assert.doesNotMatch(apply, /user_import_batch/);
+  assert.doesNotMatch(apply, /x_user_account_links_import_batch/);
+  assert.match(apply, /createdAuthUsers: 0/);
   assert.match(previewStore, /PREVIEW_VERSION = 4 as const/);
   assert.match(previewStore, /status: "completed"/);
 
@@ -844,6 +862,19 @@ test("legacy import UIは順次チャンク入力と完了追跡を持つ", () =
   assert.match(client, /各チャンクの apply 完了を確認してから次の範囲を preview/);
   assert.match(client, /findNextIncompleteLegacyImportRange/);
   assert.match(client, /legacyImportRangeChunkKey/);
+  assert.match(client, /LEGACY_IMPORT_CHUNK_SIZE_OPTIONS/);
+  assert.match(client, /setChunkSizeOption/);
+  assert.match(client, /suggestLegacyImportRowRanges\(sourceRows, chunkSize\)/);
+  assert.match(client, /提案チャンクサイズ/);
+  assert.match(client, /このあと残り/);
+  assert.match(client, /範囲未指定時は全/);
+  assert.match(client, /const nextCompleted = new Map\(completedChunkKeysByFile\)/);
+  const markStart = client.indexOf("const markChunkApplyComplete");
+  const markEnd = client.indexOf("function setChunkSizeOption", markStart);
+  const markBody = client.slice(markStart, markEnd);
+  assert.match(markBody, /setCompletedChunkKeysByFile\(nextCompleted\)/);
+  assert.match(markBody, /setChunkCompleteBanner\(nextBanner\)/);
+  assert.doesNotMatch(markBody, /setCompletedChunkKeysByFile\(\(current\)\s*=>/);
   const submitStart = client.indexOf("async function submit");
   const submitEnd = client.indexOf("  const expiresLabel", submitStart);
   const submitBody = client.slice(submitStart, submitEnd);
@@ -936,8 +967,10 @@ test("applyクライアントは423/503を短時間だけ再試行し、preview�
   assert.match(client, /response\.status === 423/);
   assert.match(client, /response\.status === 503/);
   assert.match(client, /APPLY_TRANSIENT_MAX_RETRIES = 4/);
-  assert.match(client, /APPLY_MAX_REQUESTS_PER_RUN = 500/);
-  assert.match(client, /APPLY_STEP_PAUSE_MS = 150/);
+  assert.match(client, /APPLY_MAX_REQUESTS_PER_RUN_DEFAULT = 500/);
+  assert.match(client, /APPLY_MAX_REQUESTS_PER_RUN_OPTIONS = \[100, 250, 500\]/);
+  assert.match(client, /APPLY_STEP_PAUSE_HEALTHY_MS = 40/);
+  assert.match(client, /function applyStepPauseMs/);
   assert.match(client, /applyTransientBackoffMs/);
   assert.match(client, /5_000/);
   assert.match(client, /retryStoppedMessage/);
@@ -949,7 +982,15 @@ test("applyクライアントは423/503を短時間だけ再試行し、preview�
   assert.match(client, /mode === "preview"[\s\S]*?isApplyTransientFailure/);
   assert.match(client, /json\.requires_repreview[\s\S]*?setCredential\(null\)/);
   assert.match(client, /transientFailures = 0/);
-  assert.match(client, /await sleep\(APPLY_STEP_PAUSE_MS\)/);
+  assert.match(client, /await sleep\(applyStepPauseMs\(successStreak\)\)/);
+  assert.match(client, /1ランの最大ステップ数/);
+  assert.match(client, /applyRunProgress/);
+  assert.match(client, /completedSteps/);
+  assert.match(client, /一時エラーの再試行はラン上限に含めない/);
+  assert.match(client, /lastPreviewFileRanges/);
+  assert.match(client, /startRow > endRow \|\| startRow > sourceRows \|\| endRow > sourceRows/);
+  assert.match(client, /行数を推定できませんでした/);
+  assert.match(client, /範囲が不正です/);
   assert.match(client, /未完了のプレビューがあります/);
   assert.match(client, /無料枠と連続負荷を守るため一時停止しました/);
 });
@@ -986,7 +1027,7 @@ test("preview routeとUIはファイルごとの範囲をplanへ固定する", (
   assert.match(client, /同じ大きなファイルを複数回に分ける場合/);
   assert.match(client, /suggestLegacyImportRowRanges/);
   assert.match(client, /MAX_LEGACY_IMPORT_SELECTED_ROWS/);
-  assert.match(client, /先頭\{MAX_LEGACY_IMPORT_SELECTED_ROWS\}行を入力/);
+  assert.match(client, /先頭\{chunkSize\}行を入力/);
   assert.match(client, /この範囲を入力/);
 });
 
@@ -1023,7 +1064,7 @@ test("legacy importは1 HTTPのplan・step・連続送信をhard capする", () 
   assert.match(submit, /finally \{[\s\S]*submitInFlightRef\.current = false/);
   assert.match(submit, /const response = await fetch\("\/api\/admin\/import\/legacy"/);
   assert.doesNotMatch(submit, /Promise\.all|void fetch\(/);
-  assert.match(submit, /await sleep\(APPLY_STEP_PAUSE_MS\)/);
+  assert.match(submit, /await sleep\(applyStepPauseMs\(successStreak\)\)/);
 });
 
 test("legacy import中はYouTube APIを呼ばずpendingを後続cronへ渡す", () => {

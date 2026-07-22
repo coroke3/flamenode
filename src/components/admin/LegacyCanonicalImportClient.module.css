@@ -158,6 +158,13 @@
   align-items: center;
 }
 
+.applyRunProgress {
+  width: 100%;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
 .actions .fn-input,
 .actions .fn-select,
 .actions .fn-btn {

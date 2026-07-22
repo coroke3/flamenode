@@ -16,7 +16,6 @@ import {
   videoSoftwares,
   videoYoutubeMetadata,
   videos,
-  xUserAccountLinks,
   xUsers,
 } from "@/lib/db/schema";
 import { mutateWithAudit } from "@/lib/audit/mutate";
@@ -24,7 +23,6 @@ import type { WriteAuditLogInput } from "@/lib/audit/types";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import {
   MAX_LEGACY_CUSTOM_ANSWERS_PER_VIDEO,
-  legacyImportAuthUserId,
   type CanonicalLegacyPlan,
   type LegacyImportStrategy,
 } from "./normalize";
@@ -649,124 +647,6 @@ async function ensureXUserGroup(
     });
   }
   return missing.length;
-}
-
-async function ensureImportedAuthUsers(
-  db: DB,
-  rows: CanonicalLegacyPlan["xUsers"],
-  options: ApplyOptions,
-): Promise<number> {
-  if (rows.length === 0) return 0;
-
-  const linked = await db
-    .select({ x_user_id: xUserAccountLinks.x_user_id })
-    .from(xUserAccountLinks)
-    .where(inArray(xUserAccountLinks.x_user_id, rows.map((row) => row.id)));
-  const linkedIds = new Set(linked.map((row) => row.x_user_id));
-
-  const candidates = rows
-    .filter((row) => !linkedIds.has(row.id))
-    .map((row) => ({
-      x_user_id: row.id,
-      auth_user_id: legacyImportAuthUserId(row.id),
-      x_name: row.x_name || `@${row.id}`,
-    }));
-  if (candidates.length === 0) return 0;
-
-  const existingAuth = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(inArray(users.id, candidates.map((row) => row.auth_user_id)));
-  const existingAuthIds = new Set(existingAuth.map((row) => row.id));
-  const usersToCreate = candidates.filter((row) => !existingAuthIds.has(row.auth_user_id));
-  const now = Math.floor(Date.now() / 1000);
-
-  const mutationStatements = [];
-  const expectedMutationChanges: number[] = [];
-  const audits: WriteAuditLogInput[] = [];
-
-  if (usersToCreate.length > 0) {
-    const userPayload = JSON.stringify(
-      usersToCreate.map((row) => ({
-        id: row.auth_user_id,
-        name: row.x_name,
-      })),
-    );
-    mutationStatements.push(
-      db.run(sql`
-        INSERT INTO "user" (
-          id, name, role, can_create_events, is_notification_enabled,
-          is_tos_accepted, is_banned, created_at
-        )
-        SELECT
-          json_extract(value, '$.id'),
-          json_extract(value, '$.name'),
-          'user', 0, 0, 0, 0, ${now}
-        FROM json_each(${userPayload})
-      `),
-    );
-    expectedMutationChanges.push(usersToCreate.length);
-    audits.push({
-      table_name: "user_import_batch",
-      target_id: `legacy:${usersToCreate[0]?.auth_user_id ?? "empty"}`,
-      operation: "CREATE",
-      before: null,
-      after: {
-        ids: usersToCreate.map((row) => row.auth_user_id),
-        x_user_ids: usersToCreate.map((row) => row.x_user_id),
-        placeholder: true,
-      },
-      actor_user_id: options.actorAuthUserId,
-      reason: "旧形式インポート由来のDiscord未連携X名義へ認証ユーザーを作成",
-      context: "legacy_import",
-      retention_class: "long_audit",
-      restore_strategy: "none",
-    });
-  }
-
-  const linkPayload = JSON.stringify(
-    candidates.map((row) => ({
-      x_user_id: row.x_user_id,
-      auth_user_id: row.auth_user_id,
-    })),
-  );
-  mutationStatements.push(
-    db.run(sql`
-      INSERT INTO x_user_account_links (
-        x_user_id, auth_user_id, link_role, created_at, updated_at
-      )
-      SELECT
-        json_extract(value, '$.x_user_id'),
-        json_extract(value, '$.auth_user_id'),
-        'owner', ${now}, ${now}
-      FROM json_each(${linkPayload})
-    `),
-  );
-  expectedMutationChanges.push(candidates.length);
-  audits.push({
-    table_name: "x_user_account_links_import_batch",
-    target_id: `legacy:${candidates[0]?.x_user_id ?? "empty"}`,
-    operation: "CREATE",
-    before: null,
-    after: {
-      links: candidates.map((row) => ({
-        x_user_id: row.x_user_id,
-        auth_user_id: row.auth_user_id,
-      })),
-    },
-    actor_user_id: options.actorAuthUserId,
-    reason: "旧形式インポート由来のX名義を認証ユーザーへ紐付け",
-    context: "legacy_import",
-    retention_class: "long_audit",
-    restore_strategy: "none",
-  });
-
-  await mutateWithAudit(db, {
-    mutationStatements,
-    expectedMutationChanges,
-    audits,
-  });
-  return usersToCreate.length;
 }
 
 function plannedSoftwareCatalogRows(plan: CanonicalLegacyPlan): Array<{
@@ -2507,8 +2387,8 @@ export async function applyLegacyImportPlanStep(
         (input.progress.index + 1) * LEGACY_IMPORT_X_USER_STEP_SIZE,
       );
       const created = await ensureXUserGroup(db, rows, options);
-      const createdAuthUsers = await ensureImportedAuthUsers(db, rows, options);
-      outcome = { kind: "x_users", created, createdAuthUsers };
+      // Discord未ログインの空認証ユーザーは作らない。X名義(x_users)とevent_staff ownerのみ正本。
+      outcome = { kind: "x_users", created, createdAuthUsers: 0 };
       await writeStepMarkerOnly(db, marker(outcome), options.actorAuthUserId);
       break;
     }
