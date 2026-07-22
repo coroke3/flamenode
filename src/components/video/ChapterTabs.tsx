@@ -50,7 +50,7 @@ export function ChapterTabs({
   const rootRef = React.useRef<HTMLDivElement>(null);
   const [currentTime, setCurrentTime] = React.useState(0);
   const [followPlayback, setFollowPlayback] = React.useState(true);
-  const idleTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const idleTimerRef = React.useRef<number | null>(null);
   const lastScrolledChapterIdRef = React.useRef<string | null>(null);
   const isAutoScrollingRef = React.useRef(false);
 
