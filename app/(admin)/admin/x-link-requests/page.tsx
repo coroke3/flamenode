@@ -1,25 +1,86 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
-import { auditLogs, users, videos, xIdentityRequests, xUsers } from "@/lib/db/schema";
-import { XLinkRequestTable } from "@/components/admin/XLinkRequestTable";
+import { auditLogs, users, xIdentityRequests, xUsers } from "@/lib/db/schema";
+import { XLinkRequestTable, type XLinkRequestRow } from "@/components/admin/XLinkRequestTable";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminUserManagementTabs } from "@/components/admin/AdminUserManagementTabs";
 import { parseAuditDiff } from "@/lib/audit/diff";
 import { FnTable } from "@/components/ui/FnTable";
+import { normalizeXId } from "@/lib/utils/xid";
 
 export const metadata: Metadata = { title: "X ID 申請" };
 export const dynamic = "force-dynamic";
 const RECENT_HISTORY_LIMIT = 30;
+const PENDING_LIMIT = 100;
 const LINK_REQUEST_TYPES = ["new_link", "existing_link", "alias"] as const;
 
 function requestTypeLabel(type: string): string {
   if (type === "new_link" || type === "existing_link") return "X ID連携";
   if (type === "alias") return "旧別名申請";
   return type;
+}
+
+type PendingBaseRow = {
+  id: string;
+  requested_x_id: string | null;
+  requested_by_auth_user_id: string;
+  discord_name: string | null;
+  discord_image: string | null;
+  requested_at: number;
+  request_type: string;
+  target_x_user_id: string | null;
+};
+
+async function enrichPendingRows(
+  db: NonNullable<ReturnType<typeof getDatabase>>,
+  pendingBase: PendingBaseRow[],
+): Promise<XLinkRequestRow[]> {
+  const xIds = new Set<string>();
+  for (const row of pendingBase) {
+    const requested = normalizeXId(row.requested_x_id);
+    const target = normalizeXId(row.target_x_user_id);
+    if (requested) xIds.add(requested);
+    if (target) xIds.add(target);
+  }
+
+  const xUserById = new Map<string, { x_name: string; icon_url: string | null }>();
+  if (xIds.size > 0) {
+    const xUserRows = await db
+      .select({
+        id: xUsers.id,
+        x_name: xUsers.x_name,
+        icon_url: xUsers.icon_url,
+      })
+      .from(xUsers)
+      .where(inArray(xUsers.id, Array.from(xIds)));
+    for (const row of xUserRows) {
+      xUserById.set(row.id, { x_name: row.x_name, icon_url: row.icon_url });
+    }
+  }
+
+  return pendingBase.map((row) => {
+    const requestedXId = normalizeXId(row.requested_x_id);
+    const targetXId = normalizeXId(row.target_x_user_id);
+    const requestedXUser = requestedXId ? xUserById.get(requestedXId) : undefined;
+    const targetXUser = targetXId ? xUserById.get(targetXId) : undefined;
+    return {
+      id: row.id,
+      requested_x_id: requestedXId || "",
+      requested_by_auth_user_id: row.requested_by_auth_user_id,
+      discord_name: row.discord_name,
+      discord_image: row.discord_image,
+      requested_at: row.requested_at,
+      request_type: row.request_type as XLinkRequestRow["request_type"],
+      target_x_user_id: row.target_x_user_id,
+      requested_x_name: requestedXUser?.x_name ?? null,
+      requested_icon_url: requestedXUser?.icon_url ?? null,
+      target_icon_url: targetXUser?.icon_url ?? null,
+    };
+  });
 }
 
 export default async function AdminXLinkRequestsPage(): Promise<React.ReactElement> {
@@ -29,43 +90,24 @@ export default async function AdminXLinkRequestsPage(): Promise<React.ReactEleme
     inArray(xIdentityRequests.request_type, LINK_REQUEST_TYPES),
   )!;
 
-  const [pending, recentRejected, recentAuditLogs] = db
+  const [pendingBase, recentRejected, recentAuditLogs] = db
     ? await Promise.all([
         db
           .select({
             id: xIdentityRequests.id,
-            requested_x_id: sql<string>`COALESCE(${xIdentityRequests.requested_x_id}, '')`,
+            requested_x_id: xIdentityRequests.requested_x_id,
             requested_by_auth_user_id: xIdentityRequests.requested_by_auth_user_id,
             discord_name: users.name,
             discord_image: users.image,
             requested_at: xIdentityRequests.requested_at,
             request_type: xIdentityRequests.request_type,
             target_x_user_id: xIdentityRequests.target_x_user_id,
-            requested_x_name: sql<string | null>`(
-              SELECT ${xUsers.x_name} FROM ${xUsers}
-              WHERE lower(${xUsers.id}) = lower(${xIdentityRequests.requested_x_id}) LIMIT 1
-            )`,
-            requested_icon_url: sql<string | null>`COALESCE(
-              (SELECT ${xUsers.icon_url} FROM ${xUsers}
-               WHERE lower(${xUsers.id}) = lower(${xIdentityRequests.requested_x_id}) LIMIT 1),
-              (SELECT ${videos.creator_icon_url} FROM ${videos}
-               WHERE lower(${videos.creator_x_user_id}) = lower(${xIdentityRequests.requested_x_id})
-                 AND ${videos.creator_icon_url} IS NOT NULL
-               ORDER BY ${videos.created_at} DESC LIMIT 1)
-            )`,
-            target_icon_url: sql<string | null>`COALESCE(
-              (SELECT ${xUsers.icon_url} FROM ${xUsers}
-               WHERE lower(${xUsers.id}) = lower(${xIdentityRequests.target_x_user_id}) LIMIT 1),
-              (SELECT ${videos.creator_icon_url} FROM ${videos}
-               WHERE lower(${videos.creator_x_user_id}) = lower(${xIdentityRequests.target_x_user_id})
-                 AND ${videos.creator_icon_url} IS NOT NULL
-               ORDER BY ${videos.created_at} DESC LIMIT 1)
-            )`,
           })
           .from(xIdentityRequests)
           .leftJoin(users, eq(users.id, xIdentityRequests.requested_by_auth_user_id))
           .where(pendingWhere)
-          .orderBy(desc(xIdentityRequests.requested_at)),
+          .orderBy(desc(xIdentityRequests.requested_at))
+          .limit(PENDING_LIMIT),
         db
           .select({
             id: xIdentityRequests.id,
@@ -100,6 +142,8 @@ export default async function AdminXLinkRequestsPage(): Promise<React.ReactEleme
           .limit(RECENT_HISTORY_LIMIT),
       ])
     : [[], [], []];
+
+  const pending = db ? await enrichPendingRows(db, pendingBase) : [];
 
   return (
     <div>

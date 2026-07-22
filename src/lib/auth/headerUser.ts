@@ -8,7 +8,7 @@ import { resolveMissingIcons } from "@/lib/db/iconResolution";
 import { normalizeXId } from "@/lib/utils/xid";
 import { resolveActiveXUserId } from "./resolveActiveXId";
 import { getEditableEventIds } from "./ownership";
-import { getLinkedXUsersForAuthUser } from "./xIdentity";
+import { getLinkedXUsersForAuthUser, type LinkedXUser } from "./xIdentity";
 import {
   normalizeXIdApprovalStatus,
   xIdApprovalRank,
@@ -26,6 +26,10 @@ export type HeaderUser = {
     canAccessManage: boolean;
     manageableEventCount: number;
   };
+};
+
+export type BuildHeaderUserOptions = {
+  includeXIds?: boolean;
 };
 
 type SessionUserLike = {
@@ -57,9 +61,13 @@ function normalizeRole(role: string | null | undefined): HeaderUser["role"] {
   return role === "admin" || role === "moderator" ? role : "user";
 }
 
-async function fetchHeaderXIdEntries(db: DB, authUserId: string): Promise<XIdEntry[]> {
-  const [linkedRows, pendingRequests] = await Promise.all([
-    getLinkedXUsersForAuthUser(db, authUserId),
+async function fetchHeaderXIdEntries(
+  db: DB,
+  authUserId: string,
+  linkedRows?: LinkedXUser[],
+): Promise<XIdEntry[]> {
+  const [resolvedLinkedRows, pendingRequests] = await Promise.all([
+    linkedRows ? Promise.resolve(linkedRows) : getLinkedXUsersForAuthUser(db, authUserId),
     db
       .select({ requested_x_id: xIdentityRequests.requested_x_id })
       .from(xIdentityRequests)
@@ -72,7 +80,7 @@ async function fetchHeaderXIdEntries(db: DB, authUserId: string): Promise<XIdEnt
   ]);
 
   const byNormalizedXId = new Map<string, XIdEntry>();
-  for (const row of linkedRows) {
+  for (const row of resolvedLinkedRows) {
     const normalizedId = normalizeXId(row.x_user_id);
     if (!normalizedId) continue;
     const entry: XIdEntry = {
@@ -113,38 +121,57 @@ async function fetchHeaderXIdEntries(db: DB, authUserId: string): Promise<XIdEnt
 
 export async function buildHeaderUser(
   sessionUser: SessionUserLike | null | undefined,
+  options?: BuildHeaderUserOptions,
 ): Promise<HeaderUser | null> {
   if (!sessionUser?.id) return null;
   const authUserId = sessionUser.id;
   const fallbackRole = normalizeRole(sessionUser.role);
   const fallbackActiveXId = normalizeXId(sessionUser.active_x_user_id) || null;
+  const includeXIds = options?.includeXIds !== false;
 
-  const dbPayload = await withDatabase(async (db) => {
-    const [userRows, entries] = await Promise.all([
-      db
-        .select({ active_x_user_id: users.active_x_user_id, role: users.role })
-        .from(users)
-        .where(eq(users.id, authUserId))
-        .limit(1),
-      fetchHeaderXIdEntries(db, authUserId),
-    ]);
-    const userRow = userRows[0];
-    const role = normalizeRole(userRow?.role ?? sessionUser.role);
-    const resolvedActive = await resolveActiveXUserId(
-      db,
-      authUserId,
-      normalizeXId(userRow?.active_x_user_id) || fallbackActiveXId,
-    );
-    const normalizedActive = normalizeXId(resolvedActive) || null;
-    return {
-      role,
-      xIds: entries.map((entry) => ({
-        ...entry,
-        is_active:
-          entry.approval_status !== "rejected" && entry.x_user_id === normalizedActive,
-      })),
-    };
-  });
+  const dbPayload = includeXIds
+    ? await withDatabase(async (db) => {
+        const linkedRows = await getLinkedXUsersForAuthUser(db, authUserId);
+        const [userRows, entries] = await Promise.all([
+          db
+            .select({ active_x_user_id: users.active_x_user_id, role: users.role })
+            .from(users)
+            .where(eq(users.id, authUserId))
+            .limit(1),
+          fetchHeaderXIdEntries(db, authUserId, linkedRows),
+        ]);
+        const userRow = userRows[0];
+        const role = normalizeRole(userRow?.role ?? sessionUser.role);
+        const approvedLinkedRows = linkedRows.filter(
+          (row) => row.approval_status === "approved",
+        );
+        const resolvedActive = await resolveActiveXUserId(
+          db,
+          authUserId,
+          normalizeXId(userRow?.active_x_user_id) || fallbackActiveXId,
+          approvedLinkedRows,
+        );
+        const normalizedActive = normalizeXId(resolvedActive) || null;
+        return {
+          role,
+          xIds: entries.map((entry) => ({
+            ...entry,
+            is_active:
+              entry.approval_status !== "rejected" && entry.x_user_id === normalizedActive,
+          })),
+        };
+      })
+    : await withDatabase(async (db) => {
+        const userRows = await db
+          .select({ role: users.role })
+          .from(users)
+          .where(eq(users.id, authUserId))
+          .limit(1);
+        return {
+          role: normalizeRole(userRows[0]?.role ?? sessionUser.role),
+          xIds: [] as XIdEntry[],
+        };
+      });
 
   const role = dbPayload?.role ?? fallbackRole;
   const management = await getManagementAccess({ id: authUserId, role });

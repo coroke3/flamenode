@@ -191,6 +191,15 @@ test("第10巡の独立管理読取を並列化する", () => {
   );
   assert.match(
     xLinkRequestsPage,
-    /const \[pending, recentRejected, recentAuditLogs\] = db\s*\? await Promise\.all/,
+    /const \[pendingBase, recentRejected, recentAuditLogs\] = db\s*\? await Promise\.all/,
   );
+});
+
+test("X ID申請一覧は相関サブクエリを使わずpendingを上限付きで取得する", () => {
+  assert.doesNotMatch(xLinkRequestsPage, /SELECT \$\{xUsers\.x_name\} FROM \$\{xUsers\}/);
+  assert.doesNotMatch(xLinkRequestsPage, /SELECT \$\{xUsers\.icon_url\} FROM \$\{xUsers\}/);
+  assert.doesNotMatch(xLinkRequestsPage, /SELECT \$\{videos\.creator_icon_url\} FROM \$\{videos\}/);
+  assert.match(xLinkRequestsPage, /const PENDING_LIMIT = 100/);
+  assert.match(xLinkRequestsPage, /\.limit\(PENDING_LIMIT\)/);
+  assert.match(xLinkRequestsPage, /inArray\(xUsers\.id, Array\.from\(xIds\)\)/);
 });

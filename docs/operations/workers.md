@@ -7,7 +7,7 @@
 
 Webは`flamenode-web`（OpenNext + Workers Static Assets）、背景処理は`flamenode-fast-jobs`、`flamenode-content-jobs`、`flamenode-sync-jobs`の3本とする。Git連携は`flamenode-web`のWorkers Buildsだけに置き、1回のBuildからWeb→fast→content→sync→smokeの順でdeployする。Cron Workerを個別にGit連携しない。
 
-静的アセットは`run_worker_first = false`でWorkerより先に配信し、不要なWeb invocationを発生させない。Workers FreeのHTTP/Cron CPU上限は各invocation 10msで、Cloudflare公式も認証・SSR等を10〜20msになり得る処理としている。FreeでWebの安定動作を保証せず、実測で`exceededCpu`が継続する場合は最適化後も無理にFreeへ留めずPaidへ移行する。Cronは長時間jobを作らず固定batchへ分割する。
+静的アセットは`run_worker_first = false`でWorkerより先に配信し、不要なWeb invocationを発生させない。Workers FreeのHTTP/Cron CPU上限は各invocation 10msで、Cloudflare公式も認証・SSR等を10〜20msになり得る処理としている。admin SSR（一覧クエリの相関サブクエリやヘッダ用X ID読取など）はFree 10msを超えやすいため、一覧は`LIMIT`付きの単純クエリへ寄せ、`public/logo.png`や`favicon.ico`など静的favicon/logoをWorkerへ落とさない。FreeでWebの安定動作を保証せず、実測で`exceededCpu`が継続する場合は最適化後も無理にFreeへ留めずPaidへ移行する。Cronは長時間jobを作らず固定batchへ分割する。
 
 公式制限: https://developers.cloudflare.com/workers/platform/limits/
 

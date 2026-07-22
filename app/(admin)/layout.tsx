@@ -20,7 +20,7 @@ export default async function AdminLayout({
 }): Promise<React.ReactElement> {
   const session = await auth();
   const user: PublicHeaderUser | null = session?.user
-    ? await buildHeaderUser(session.user)
+    ? await buildHeaderUser(session.user, { includeXIds: false })
     : null;
 
   if (!user) redirect("/entry");
